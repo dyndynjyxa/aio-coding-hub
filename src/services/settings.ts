@@ -1,8 +1,20 @@
 import { invokeTauriOrNull } from "./tauriInvoke";
 
+export type GatewayListenMode = "localhost" | "wsl_auto" | "lan" | "custom";
+
+export type WslTargetCli = {
+  claude: boolean;
+  codex: boolean;
+  gemini: boolean;
+};
+
 export type AppSettings = {
   schema_version: number;
   preferred_port: number;
+  gateway_listen_mode: GatewayListenMode;
+  gateway_custom_listen_address: string;
+  wsl_auto_config: boolean;
+  wsl_target_cli: WslTargetCli;
   auto_start: boolean;
   tray_enabled: boolean;
   log_retention_days: number;
@@ -32,6 +44,8 @@ export async function settingsGet() {
 
 export async function settingsSet(input: {
   preferred_port: number;
+  gateway_listen_mode?: GatewayListenMode;
+  gateway_custom_listen_address?: string;
   auto_start: boolean;
   tray_enabled: boolean;
   log_retention_days: number;
@@ -51,6 +65,8 @@ export async function settingsSet(input: {
   failover_max_providers_to_try: number;
   circuit_breaker_failure_threshold: number;
   circuit_breaker_open_duration_minutes: number;
+  wsl_auto_config?: boolean;
+  wsl_target_cli?: WslTargetCli;
 }) {
   const args: Record<string, unknown> = {
     preferredPort: input.preferred_port,
@@ -67,6 +83,13 @@ export async function settingsSet(input: {
     circuitBreakerFailureThreshold: input.circuit_breaker_failure_threshold,
     circuitBreakerOpenDurationMinutes: input.circuit_breaker_open_duration_minutes,
   };
+
+  if (input.gateway_listen_mode !== undefined) {
+    args.gatewayListenMode = input.gateway_listen_mode;
+  }
+  if (input.gateway_custom_listen_address !== undefined) {
+    args.gatewayCustomListenAddress = input.gateway_custom_listen_address;
+  }
 
   if (input.intercept_anthropic_warmup_requests !== undefined) {
     args.interceptAnthropicWarmupRequests = input.intercept_anthropic_warmup_requests;
@@ -89,6 +112,13 @@ export async function settingsSet(input: {
 
   if (input.update_releases_url !== undefined) {
     args.updateReleasesUrl = input.update_releases_url;
+  }
+
+  if (input.wsl_auto_config !== undefined) {
+    args.wslAutoConfig = input.wsl_auto_config;
+  }
+  if (input.wsl_target_cli !== undefined) {
+    args.wslTargetCli = input.wsl_target_cli;
   }
 
   return invokeTauriOrNull<AppSettings>("settings_set", args);

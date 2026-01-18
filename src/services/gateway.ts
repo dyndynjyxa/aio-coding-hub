@@ -2,6 +2,7 @@ export type GatewayStatus = {
   running: boolean;
   port: number | null;
   base_url: string | null;
+  listen_addr: string | null;
 };
 
 export type GatewayActiveSession = {
