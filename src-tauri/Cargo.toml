@@ -41,3 +41,4 @@ tauri-plugin-notification = "2"
 # Patch `tauri-plugin-notification` to ensure macOS debug/dev notifications use this app's identifier
 # (instead of `com.apple.Terminal`), so the notification icon matches the app.
 tauri-plugin-notification = { path = "patches/tauri-plugin-notification" }
+auto-launch = { path = "patches/auto-launch" }

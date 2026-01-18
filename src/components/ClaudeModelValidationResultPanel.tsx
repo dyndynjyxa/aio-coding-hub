@@ -11,6 +11,7 @@ import {
 import { cn } from "../utils/cn";
 import {
   CheckCircle2,
+  ChevronDown,
   XCircle,
   Clock,
   Zap,
@@ -35,6 +36,94 @@ function get<T>(obj: unknown, key: string): T | null {
   if (!obj || typeof obj !== "object") return null;
   const v = (obj as Record<string, unknown>)[key];
   return v as T | null;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeHeaderValues(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string");
+  return [];
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function truncateText(value: string, max = 220) {
+  if (!value) return "";
+  if (value.length <= max) return value;
+  return `${value.slice(0, max)}…`;
+}
+
+function collectWordBoundaryHits(text: string, keywords: string[]) {
+  if (!text || keywords.length === 0) return [];
+  const hits: string[] = [];
+  for (const keyword of keywords) {
+    if (!keyword) continue;
+    try {
+      const re = new RegExp(`\\b${escapeRegExp(keyword)}\\b`, "i");
+      if (re.test(text)) hits.push(keyword);
+    } catch {
+      // ignore
+    }
+  }
+  return [...new Set(hits)];
+}
+
+type KeywordEvidenceLine = {
+  lineNumber: number;
+  lineText: string;
+  matchedKeywords: string[];
+};
+
+function collectKeywordEvidenceLines(
+  text: string,
+  keywords: string[],
+  opts?: { maxLines?: number; maxLineLength?: number }
+): KeywordEvidenceLine[] {
+  const maxLines = typeof opts?.maxLines === "number" ? Math.max(1, Math.floor(opts.maxLines)) : 16;
+  const maxLineLength =
+    typeof opts?.maxLineLength === "number" ? Math.max(40, Math.floor(opts.maxLineLength)) : 220;
+
+  if (!text || !text.trim() || keywords.length === 0) return [];
+
+  const compiled = keywords
+    .filter((k) => Boolean(k))
+    .map((keyword) => {
+      try {
+        return { keyword, re: new RegExp(`\\b${escapeRegExp(keyword)}\\b`, "i") };
+      } catch {
+        return null;
+      }
+    })
+    .filter((v): v is { keyword: string; re: RegExp } => v != null);
+
+  if (compiled.length === 0) return [];
+
+  const lines = text.split(/\r?\n/);
+  const out: KeywordEvidenceLine[] = [];
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const lineText = lines[i] ?? "";
+    const matchedKeywords = compiled
+      .filter(({ re }) => re.test(lineText))
+      .map(({ keyword }) => keyword);
+
+    if (matchedKeywords.length === 0) continue;
+
+    out.push({
+      lineNumber: i + 1,
+      lineText: truncateText(lineText, maxLineLength),
+      matchedKeywords: [...new Set(matchedKeywords)].sort((a, b) => a.localeCompare(b)),
+    });
+
+    if (out.length >= maxLines) break;
+  }
+
+  return out;
 }
 
 // --- Components ---
@@ -244,6 +333,48 @@ export function ClaudeModelValidationResultPanel({ templateKey, result }: Props)
     return stopReason ?? "缺少 stop_reason";
   })();
 
+  const reverseProxyEvidence = (() => {
+    const maxLinesPerSource = 16;
+    const maxLineLength = 220;
+
+    const headerNames = reverseProxy.sources.responseHeaders.headerNames;
+    const headerKeywords = reverseProxy.sources.responseHeaders.hits;
+    const responseHeaders = result.response_headers;
+
+    const headers = headerNames.map((headerName) => {
+      const values = isPlainObject(responseHeaders)
+        ? normalizeHeaderValues((responseHeaders as Record<string, unknown>)[headerName])
+        : [];
+      const headerValue = values.length > 0 ? values.join(", ") : "—";
+      const matchedKeywords = collectWordBoundaryHits(
+        `${headerName}\n${values.join("\n")}`,
+        headerKeywords
+      ).sort((a, b) => a.localeCompare(b));
+
+      return { headerName, headerValue: truncateText(headerValue, maxLineLength), matchedKeywords };
+    });
+
+    const output = collectKeywordEvidenceLines(outputPreview, reverseProxy.sources.outputPreview.hits, {
+      maxLines: maxLinesPerSource,
+      maxLineLength,
+    });
+    const sse = collectKeywordEvidenceLines(result.raw_excerpt ?? "", reverseProxy.sources.rawExcerpt.hits, {
+      maxLines: maxLinesPerSource,
+      maxLineLength,
+    });
+
+    return { headers, output, sse };
+  })();
+
+  const reverseProxyEvidenceCounts = {
+    headers: reverseProxyEvidence.headers.length,
+    output: reverseProxyEvidence.output.length,
+    sse: reverseProxyEvidence.sse.length,
+  };
+  const reverseProxyEvidenceEmpty =
+    reverseProxyEvidenceCounts.headers + reverseProxyEvidenceCounts.output + reverseProxyEvidenceCounts.sse ===
+    0;
+
   return (
     <div className="space-y-6">
       {reverseProxy.anyHit ? (
@@ -285,6 +416,116 @@ export function ClaudeModelValidationResultPanel({ templateKey, result }: Props)
                   </span>
                 </div>
               ) : null}
+
+              <details className="group mt-2 rounded-lg border border-amber-200 bg-white/60 shadow-sm open:ring-2 open:ring-amber-500/20 transition-all">
+                <summary className="flex cursor-pointer items-center justify-between px-3 py-2 select-none">
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium text-amber-900 truncate">
+                      查看证据（仅展示命中项）
+                      <span className="ml-2 font-mono text-[11px] text-amber-700">
+                        headers:{reverseProxyEvidenceCounts.headers} · output:
+                        {reverseProxyEvidenceCounts.output} · sse:{reverseProxyEvidenceCounts.sse}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-amber-800/80">
+                      证据来源：headers（响应头）/ output（输出预览）/ sse（流式原文）
+                    </div>
+                  </div>
+                  <ChevronDown className="h-4 w-4 shrink-0 text-amber-700 transition-transform group-open:rotate-180" />
+                </summary>
+
+                <div className="border-t border-amber-100 px-3 py-2 space-y-3">
+                  {reverseProxyEvidence.headers.length > 0 ? (
+                    <div className="space-y-1.5">
+                      <div className="text-[11px] font-semibold text-amber-900">
+                        headers（响应头）
+                      </div>
+                      <div className="space-y-1">
+                        {reverseProxyEvidence.headers.map((h) => (
+                          <div
+                            key={h.headerName}
+                            className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1"
+                          >
+                            <div className="flex flex-wrap items-baseline justify-between gap-2">
+                              <span className="font-mono text-[11px] text-amber-950">
+                                {h.headerName}
+                              </span>
+                              {h.matchedKeywords.length > 0 ? (
+                                <span className="font-mono text-[10px] text-amber-700">
+                                  hit: {h.matchedKeywords.join(", ")}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="mt-0.5 font-mono text-[10px] text-amber-900/80">
+                              {h.headerValue}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {reverseProxyEvidence.output.length > 0 ? (
+                    <div className="space-y-1.5">
+                      <div className="text-[11px] font-semibold text-amber-900">
+                        output（输出预览）
+                      </div>
+                      <div className="space-y-1">
+                        {reverseProxyEvidence.output.map((line) => (
+                          <div
+                            key={`output_${line.lineNumber}`}
+                            className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1"
+                          >
+                            <div className="flex flex-wrap items-baseline justify-between gap-2">
+                              <span className="font-mono text-[11px] text-amber-950">
+                                L{line.lineNumber}: {line.lineText || "—"}
+                              </span>
+                              {line.matchedKeywords.length > 0 ? (
+                                <span className="font-mono text-[10px] text-amber-700">
+                                  hit: {line.matchedKeywords.join(", ")}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {reverseProxyEvidence.sse.length > 0 ? (
+                    <div className="space-y-1.5">
+                      <div className="text-[11px] font-semibold text-amber-900">
+                        sse（流式原文）
+                      </div>
+                      <div className="space-y-1">
+                        {reverseProxyEvidence.sse.map((line) => (
+                          <div
+                            key={`sse_${line.lineNumber}`}
+                            className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1"
+                          >
+                            <div className="flex flex-wrap items-baseline justify-between gap-2">
+                              <span className="font-mono text-[11px] text-amber-950">
+                                L{line.lineNumber}: {line.lineText || "—"}
+                              </span>
+                              {line.matchedKeywords.length > 0 ? (
+                                <span className="font-mono text-[10px] text-amber-700">
+                                  hit: {line.matchedKeywords.join(", ")}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {reverseProxyEvidenceEmpty ? (
+                    <div className="text-xs text-amber-800">
+                      已命中关键字，但未能定位具体证据（可能是文本为空或响应头结构异常）。
+                    </div>
+                  ) : null}
+                </div>
+              </details>
             </div>
           </div>
         </Card>
