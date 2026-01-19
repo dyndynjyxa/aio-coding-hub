@@ -1,6 +1,6 @@
 //! Usage: Request log persistence (sqlite buffered writer, queries, and cleanup).
 
-use crate::{cost, db, settings};
+use crate::{cost, db, model_price_aliases, settings};
 use rusqlite::{params, params_from_iter, ErrorCode, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -123,6 +123,33 @@ impl InsertBatchCache {
             },
         );
     }
+}
+
+fn fetch_model_price_json(
+    stmt_price_json: &mut rusqlite::Statement<'_>,
+    cache: &mut InsertBatchCache,
+    batch_price_json: &mut HashMap<String, Option<String>>,
+    now_unix: i64,
+    cli_key: &str,
+    model: &str,
+) -> Option<String> {
+    let price_key = format!("{cli_key}\n{model}");
+    if let Some(v) = batch_price_json.get(&price_key) {
+        return v.clone();
+    }
+
+    let cached = cache.get_model_price_json(&price_key, now_unix);
+    let queried = cached.unwrap_or_else(|| {
+        let value = stmt_price_json
+            .query_row(params![cli_key, model], |row| row.get::<_, String>(0))
+            .optional()
+            .unwrap_or(None);
+        cache.put_model_price_json(price_key.clone(), value.clone(), now_unix);
+        value
+    });
+
+    batch_price_json.insert(price_key, queried.clone());
+    queried
 }
 
 #[derive(Debug, Clone)]
@@ -417,6 +444,7 @@ fn insert_batch_once(
     }
 
     let now_unix = now_unix_seconds();
+    let price_aliases = model_price_aliases::read_fail_open(app);
     let mut conn = db::open_connection(app).map_err(DbWriteError::other)?;
     let tx = conn
         .transaction()
@@ -542,28 +570,33 @@ fn insert_batch_once(
                         if !has_any_cost_usage(&usage) {
                             None
                         } else {
-                            let price_key = format!("{}\n{}", item.cli_key, model);
-                            let price_json = if let Some(v) = batch_price_json.get(&price_key) {
-                                v.clone()
-                            } else {
-                                let cached = cache.get_model_price_json(&price_key, now_unix);
-                                let queried = cached.unwrap_or_else(|| {
-                                    let value = stmt_price_json
-                                        .query_row(params![item.cli_key, model], |row| {
-                                            row.get::<_, String>(0)
-                                        })
-                                        .optional()
-                                        .unwrap_or(None);
-                                    cache.put_model_price_json(
-                                        price_key.clone(),
-                                        value.clone(),
-                                        now_unix,
-                                    );
-                                    value
-                                });
-                                batch_price_json.insert(price_key.clone(), queried.clone());
-                                queried
-                            };
+                            let mut priced_model = model;
+                            let mut price_json = fetch_model_price_json(
+                                &mut stmt_price_json,
+                                cache,
+                                &mut batch_price_json,
+                                now_unix,
+                                item.cli_key.as_str(),
+                                model,
+                            );
+
+                            if price_json.is_none() {
+                                if let Some(target_model) =
+                                    price_aliases.resolve_target_model(item.cli_key.as_str(), model)
+                                {
+                                    if target_model != model {
+                                        priced_model = target_model;
+                                        price_json = fetch_model_price_json(
+                                            &mut stmt_price_json,
+                                            cache,
+                                            &mut batch_price_json,
+                                            now_unix,
+                                            item.cli_key.as_str(),
+                                            target_model,
+                                        );
+                                    }
+                                }
+                            }
 
                             match price_json {
                                 Some(price_json) => cost::calculate_cost_usd_femto(
@@ -571,7 +604,7 @@ fn insert_batch_once(
                                     &price_json,
                                     cost_multiplier,
                                     item.cli_key.as_str(),
-                                    model,
+                                    priced_model,
                                 ),
                                 None => None,
                             }

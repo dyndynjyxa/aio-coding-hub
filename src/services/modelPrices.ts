@@ -28,6 +28,21 @@ export type ModelPricesSyncReport = {
   total: number;
 };
 
+export type ModelPriceAliasMatchType = "exact" | "prefix" | "wildcard";
+
+export type ModelPriceAliasRule = {
+  cli_key: CliKey;
+  match_type: ModelPriceAliasMatchType;
+  pattern: string;
+  target_model: string;
+  enabled: boolean;
+};
+
+export type ModelPriceAliases = {
+  version: number;
+  rules: ModelPriceAliasRule[];
+};
+
 export type ModelPriceSummary = {
   id: number;
   cli_key: CliKey;
@@ -45,4 +60,12 @@ export async function modelPricesSyncBasellm(force = false) {
   return invokeTauriOrNull<ModelPricesSyncReport>("model_prices_sync_basellm", {
     force,
   });
+}
+
+export async function modelPriceAliasesGet() {
+  return invokeTauriOrNull<ModelPriceAliases>("model_price_aliases_get");
+}
+
+export async function modelPriceAliasesSet(aliases: ModelPriceAliases) {
+  return invokeTauriOrNull<ModelPriceAliases>("model_price_aliases_set", { aliases });
 }

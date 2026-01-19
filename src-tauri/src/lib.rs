@@ -12,9 +12,9 @@ pub(crate) use domain::{
 };
 pub(crate) use gateway::session_manager;
 pub(crate) use infra::{
-    app_paths, base_url_probe, cli_manager, cli_proxy, data_management, db, mcp_sync, model_prices,
-    model_prices_sync, prompt_sync, provider_circuit_breakers, request_attempt_logs, request_logs,
-    settings, wsl,
+    app_paths, base_url_probe, cli_manager, cli_proxy, data_management, db, mcp_sync,
+    model_price_aliases, model_prices, model_prices_sync, prompt_sync, provider_circuit_breakers,
+    request_attempt_logs, request_logs, settings, wsl,
 };
 pub(crate) use shared::{blocking, circuit_breaker};
 
@@ -176,6 +176,8 @@ pub fn run() {
             model_prices_list,
             model_price_upsert,
             model_prices_sync_basellm,
+            model_price_aliases_get,
+            model_price_aliases_set,
             prompts_list,
             prompts_default_sync_from_files,
             prompt_upsert,

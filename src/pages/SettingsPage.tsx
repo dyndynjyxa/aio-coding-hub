@@ -40,6 +40,7 @@ import {
 import { noticeSend } from "../services/notice";
 import { cn } from "../utils/cn";
 import { formatBytes } from "../utils/formatters";
+import { ModelPriceAliasesDialog } from "../components/settings/ModelPriceAliasesDialog";
 
 type NoticePermissionStatus = "checking" | "granted" | "not_granted" | "denied" | "unknown";
 
@@ -113,6 +114,7 @@ export function SettingsPage() {
   const [lastModelPricesSyncReport, setLastModelPricesSyncReport] =
     useState<ModelPricesSyncReport | null>(null);
   const [lastModelPricesSyncError, setLastModelPricesSyncError] = useState<string | null>(null);
+  const [modelPriceAliasesDialogOpen, setModelPriceAliasesDialogOpen] = useState(false);
   const [modelPricesAvailable, setModelPricesAvailable] = useState<
     "checking" | "available" | "unavailable"
   >("checking");
@@ -1271,6 +1273,17 @@ export function SettingsPage() {
                 </span>
               ) : null}
             </SettingsRow>
+            <SettingsRow label="定价匹配">
+              <span className="text-xs text-slate-500">prefix / wildcard / exact</span>
+              <Button
+                onClick={() => setModelPriceAliasesDialogOpen(true)}
+                variant="secondary"
+                size="sm"
+                disabled={!about}
+              >
+                配置
+              </Button>
+            </SettingsRow>
             <SettingsRow label="今日请求">
               <span className="font-mono text-sm text-slate-900">
                 {todayRequestsAvailable === "checking"
@@ -1303,6 +1316,11 @@ export function SettingsPage() {
           </div>
         </Card>
       </div>
+
+      <ModelPriceAliasesDialog
+        open={modelPriceAliasesDialogOpen}
+        onOpenChange={setModelPriceAliasesDialogOpen}
+      />
 
       <Dialog
         open={clearRequestLogsDialogOpen}

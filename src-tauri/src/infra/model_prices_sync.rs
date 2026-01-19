@@ -102,10 +102,12 @@ fn write_basellm_cache(app: &tauri::AppHandle, cache: &BasellmCacheMeta) -> Resu
 }
 
 fn cli_key_from_basellm_provider(provider: &str) -> Option<&'static str> {
-    match provider {
+    let provider = provider.trim().to_ascii_lowercase();
+    match provider.as_str() {
         "openai" => Some("codex"),
         "anthropic" => Some("claude"),
-        "google" => Some("gemini"),
+        // basellm historically used "google"; future-proof in case it switches to "gemini".
+        "google" | "gemini" => Some("gemini"),
         _ => None,
     }
 }
