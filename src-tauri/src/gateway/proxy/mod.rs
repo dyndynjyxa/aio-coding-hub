@@ -10,7 +10,9 @@ pub(super) use logging::spawn_enqueue_request_log_with_backpressure;
 use logging::{enqueue_attempt_log_with_backpressure, enqueue_request_log_with_backpressure};
 pub(super) use types::ErrorCategory;
 
-use crate::{circuit_breaker, providers, request_logs, session_manager, settings, usage};
+use crate::{
+    circuit_breaker, cli_proxy, providers, request_logs, session_manager, settings, usage,
+};
 use axum::{
     body::{to_bytes, Body, Bytes},
     http::{header, HeaderMap, HeaderValue, Request, StatusCode},
@@ -20,13 +22,14 @@ use axum::{
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use super::codex_session_id;
 use super::events::{
-    emit_attempt_event, emit_circuit_event, emit_circuit_transition, emit_request_event,
-    emit_request_start_event, FailoverAttempt, GatewayAttemptEvent, GatewayCircuitEvent,
+    emit_attempt_event, emit_circuit_event, emit_circuit_transition, emit_gateway_log,
+    emit_request_event, emit_request_start_event, FailoverAttempt, GatewayAttemptEvent,
+    GatewayCircuitEvent,
 };
 use super::manager::GatewayAppState;
 use super::response_fixer;
@@ -57,6 +60,9 @@ const MAX_NON_SSE_BODY_BYTES: usize = 20 * 1024 * 1024;
 
 const DEFAULT_FAILOVER_MAX_ATTEMPTS_PER_PROVIDER: u32 = 5;
 const DEFAULT_FAILOVER_MAX_PROVIDERS_TO_TRY: u32 = 5;
+
+const CLI_PROXY_ENABLED_CACHE_TTL_MS_OK: i64 = 500;
+const CLI_PROXY_ENABLED_CACHE_TTL_MS_ERR: i64 = 5_000;
 
 #[derive(Debug, Clone, Copy)]
 enum FailoverDecision {
@@ -580,6 +586,77 @@ async fn select_provider_base_url_for_request(
     best_base_url
 }
 
+#[derive(Debug, Clone)]
+struct CliProxyEnabledCacheEntry {
+    enabled: bool,
+    error: Option<String>,
+    expires_at_unix_ms: i64,
+}
+
+#[derive(Debug, Clone)]
+struct CliProxyEnabledSnapshot {
+    enabled: bool,
+    error: Option<String>,
+    cache_hit: bool,
+    cache_ttl_ms: i64,
+}
+
+fn cli_proxy_enabled_cached(app: &tauri::AppHandle, cli_key: &str) -> CliProxyEnabledSnapshot {
+    static CLI_PROXY_ENABLED_CACHE: OnceLock<Mutex<HashMap<String, CliProxyEnabledCacheEntry>>> =
+        OnceLock::new();
+
+    let now_unix_ms = now_unix_millis().min(i64::MAX as u64) as i64;
+    let cache = CLI_PROXY_ENABLED_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+
+    {
+        let cache = cache.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = cache.get(cli_key) {
+            if entry.expires_at_unix_ms > now_unix_ms {
+                let cache_ttl_ms = if entry.error.is_some() {
+                    CLI_PROXY_ENABLED_CACHE_TTL_MS_ERR
+                } else {
+                    CLI_PROXY_ENABLED_CACHE_TTL_MS_OK
+                };
+                return CliProxyEnabledSnapshot {
+                    enabled: entry.enabled,
+                    error: entry.error.clone(),
+                    cache_hit: true,
+                    cache_ttl_ms,
+                };
+            }
+        }
+    }
+
+    let (enabled, error) = match cli_proxy::is_enabled(app, cli_key) {
+        Ok(v) => (v, None),
+        Err(err) => (false, Some(err)),
+    };
+    let cache_ttl_ms = if error.is_some() {
+        CLI_PROXY_ENABLED_CACHE_TTL_MS_ERR
+    } else {
+        CLI_PROXY_ENABLED_CACHE_TTL_MS_OK
+    };
+
+    {
+        let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
+        cache.insert(
+            cli_key.to_string(),
+            CliProxyEnabledCacheEntry {
+                enabled,
+                error: error.clone(),
+                expires_at_unix_ms: now_unix_ms.saturating_add(cache_ttl_ms.max(1)),
+            },
+        );
+    }
+
+    CliProxyEnabledSnapshot {
+        enabled,
+        error,
+        cache_hit: false,
+        cache_ttl_ms,
+    }
+}
+
 pub(super) async fn proxy_impl(
     state: GatewayAppState,
     cli_key: String,
@@ -593,6 +670,92 @@ pub(super) async fn proxy_impl(
     let method = req.method().clone();
     let method_hint = method.to_string();
     let query = req.uri().query().map(str::to_string);
+
+    if matches!(cli_key.as_str(), "claude" | "codex" | "gemini") {
+        let enabled_snapshot = cli_proxy_enabled_cached(&state.app, &cli_key);
+        if !enabled_snapshot.enabled {
+            if !enabled_snapshot.cache_hit {
+                if let Some(err) = enabled_snapshot.error.as_deref() {
+                    emit_gateway_log(
+                        &state.app,
+                        "warn",
+                        "GW_CLI_PROXY_GUARD_ERROR",
+                        format!(
+                            "CLI 代理开关状态读取失败（按未开启处理）cli={cli_key} trace_id={trace_id} err={err}"
+                        ),
+                    );
+                }
+            }
+
+            let message = match enabled_snapshot.error.as_deref() {
+                Some(err) => format!(
+                    "CLI 代理状态读取失败（按未开启处理）：{err}；请在首页开启 {cli_key} 的 CLI 代理开关后重试"
+                ),
+                None => format!("CLI 代理未开启：请在首页开启 {cli_key} 的 CLI 代理开关后重试"),
+            };
+            let resp = error_response(
+                StatusCode::FORBIDDEN,
+                trace_id.clone(),
+                "GW_CLI_PROXY_DISABLED",
+                message,
+                vec![],
+            );
+
+            emit_request_event(
+                &state.app,
+                trace_id.clone(),
+                cli_key.clone(),
+                method_hint.clone(),
+                forwarded_path.clone(),
+                query.clone(),
+                Some(StatusCode::FORBIDDEN.as_u16()),
+                Some(ErrorCategory::NonRetryableClientError.as_str()),
+                Some("GW_CLI_PROXY_DISABLED"),
+                started.elapsed().as_millis(),
+                None,
+                vec![],
+                None,
+            );
+
+            let special_settings_json = serde_json::json!([{
+                "type": "cli_proxy_guard",
+                "scope": "request",
+                "hit": true,
+                "enabled": false,
+                "cacheHit": enabled_snapshot.cache_hit,
+                "cacheTtlMs": enabled_snapshot.cache_ttl_ms,
+                "error": enabled_snapshot.error.as_deref(),
+            }])
+            .to_string();
+
+            enqueue_request_log_with_backpressure(
+                &state.app,
+                &state.log_tx,
+                RequestLogEnqueueArgs {
+                    trace_id,
+                    cli_key,
+                    session_id: None,
+                    method: method_hint,
+                    path: forwarded_path,
+                    query,
+                    excluded_from_stats: true,
+                    special_settings_json: Some(special_settings_json),
+                    status: Some(StatusCode::FORBIDDEN.as_u16()),
+                    error_code: Some("GW_CLI_PROXY_DISABLED"),
+                    duration_ms: started.elapsed().as_millis(),
+                    ttfb_ms: None,
+                    attempts_json: "[]".to_string(),
+                    requested_model: None,
+                    created_at_ms,
+                    created_at,
+                    usage: None,
+                },
+            )
+            .await;
+
+            return resp;
+        }
+    }
 
     let (mut headers, body) = {
         let (parts, body) = req.into_parts();
