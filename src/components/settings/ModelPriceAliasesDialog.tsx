@@ -249,13 +249,26 @@ export function ModelPriceAliasesDialog({
         ) : aliases.rules.length === 0 ? (
           <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/50 p-8 text-center">
             <div className="mx-auto mb-2 h-10 w-10 rounded-full bg-slate-100 p-2.5 text-slate-400">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={1.5}
+                stroke="currentColor"
+              >
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
               </svg>
             </div>
             <div className="text-sm font-medium text-slate-700">暂无规则</div>
             <div className="mt-1 text-xs text-slate-500">
-              示例：Gemini 配置 <code className="rounded bg-slate-200 px-1 py-0.5 font-mono text-[11px]">prefix gemini-3-flash</code> → <code className="rounded bg-slate-200 px-1 py-0.5 font-mono text-[11px]">gemini-3-flash-preview</code>
+              示例：Gemini 配置{" "}
+              <code className="rounded bg-slate-200 px-1 py-0.5 font-mono text-[11px]">
+                prefix gemini-3-flash
+              </code>{" "}
+              →{" "}
+              <code className="rounded bg-slate-200 px-1 py-0.5 font-mono text-[11px]">
+                gemini-3-flash-preview
+              </code>
             </div>
           </div>
         ) : (
@@ -319,7 +332,9 @@ export function ModelPriceAliasesDialog({
                     </div>
 
                     <div className="lg:col-span-2">
-                      <label className="mb-1.5 block text-xs font-medium text-slate-700">匹配类型</label>
+                      <label className="mb-1.5 block text-xs font-medium text-slate-700">
+                        匹配类型
+                      </label>
                       <Select
                         value={matchType}
                         onChange={(e) =>
@@ -338,7 +353,9 @@ export function ModelPriceAliasesDialog({
                     </div>
 
                     <div className="lg:col-span-4">
-                      <label className="mb-1.5 block text-xs font-medium text-slate-700">Pattern</label>
+                      <label className="mb-1.5 block text-xs font-medium text-slate-700">
+                        Pattern
+                      </label>
                       <Input
                         mono
                         value={rule.pattern ?? ""}
@@ -362,7 +379,9 @@ export function ModelPriceAliasesDialog({
                     </div>
 
                     <div className="lg:col-span-4">
-                      <label className="mb-1.5 block text-xs font-medium text-slate-700">目标模型</label>
+                      <label className="mb-1.5 block text-xs font-medium text-slate-700">
+                        目标模型
+                      </label>
                       <Input
                         mono
                         list={modelsDatalistId(cliKey)}
