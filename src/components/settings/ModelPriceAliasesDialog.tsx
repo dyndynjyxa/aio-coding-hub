@@ -173,15 +173,21 @@ export function ModelPriceAliasesDialog({
         if (saving) return;
         onOpenChange(next);
       }}
-      title="定价匹配（别名）"
+      title="定价匹配"
       description="用于解决 requested_model 与已同步 model_prices 名称不一致导致的 cost 缺失。仅在精确查价失败时触发。"
       className="max-w-4xl"
     >
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="text-xs text-slate-600">
-            已启用 {enabledRuleCount} 条；可用模型数：Claude {modelCountsByCli.claude} / Codex{" "}
-            {modelCountsByCli.codex} / Gemini {modelCountsByCli.gemini}
+          <div className="flex items-center gap-2 text-xs text-slate-600">
+            <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-1 font-medium">
+              启用 {enabledRuleCount} 条
+            </span>
+            <span className="text-slate-400">|</span>
+            <span>
+              模型数：Claude {modelCountsByCli.claude} · Codex {modelCountsByCli.codex} · Gemini{" "}
+              {modelCountsByCli.gemini}
+            </span>
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -215,12 +221,42 @@ export function ModelPriceAliasesDialog({
         </datalist>
 
         {loading ? (
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-            加载中…
+          <div className="flex items-center justify-center rounded-xl border border-slate-200 bg-slate-50/50 p-8">
+            <div className="flex items-center gap-3 text-sm text-slate-500">
+              <svg
+                className="h-5 w-5 animate-spin text-slate-400"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                />
+              </svg>
+              <span>加载规则中…</span>
+            </div>
           </div>
         ) : aliases.rules.length === 0 ? (
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-            暂无规则。示例：Gemini 可配置 `prefix gemini-3-flash` → `gemini-3-flash-preview`。
+          <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/50 p-8 text-center">
+            <div className="mx-auto mb-2 h-10 w-10 rounded-full bg-slate-100 p-2.5 text-slate-400">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+            </div>
+            <div className="text-sm font-medium text-slate-700">暂无规则</div>
+            <div className="mt-1 text-xs text-slate-500">
+              示例：Gemini 配置 <code className="rounded bg-slate-200 px-1 py-0.5 font-mono text-[11px]">prefix gemini-3-flash</code> → <code className="rounded bg-slate-200 px-1 py-0.5 font-mono text-[11px]">gemini-3-flash-preview</code>
+            </div>
           </div>
         ) : (
           <div className="space-y-3">
@@ -232,13 +268,16 @@ export function ModelPriceAliasesDialog({
                 <div
                   key={`rule-${idx}`}
                   className={cn(
-                    "rounded-xl border border-slate-200 bg-white p-4 shadow-sm",
-                    disabled ? "opacity-70" : null
+                    "group rounded-xl border border-slate-200 bg-white p-4 shadow-sm",
+                    "transition-all duration-200 ease-in-out",
+                    disabled
+                      ? "opacity-60 grayscale-[30%]"
+                      : "hover:border-slate-300 hover:shadow-md"
                   )}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
-                      <div className="text-xs font-semibold text-slate-900">规则 #{idx + 1}</div>
+                      <div className="text-xs font-semibold text-slate-800">规则 #{idx + 1}</div>
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-slate-600">启用</span>
                         <Switch
@@ -261,9 +300,9 @@ export function ModelPriceAliasesDialog({
                     </Button>
                   </div>
 
-                  <div className="mt-3 grid gap-3 lg:grid-cols-12">
+                  <div className="mt-4 grid items-start gap-4 lg:grid-cols-12">
                     <div className="lg:col-span-2">
-                      <div className="mb-1 text-xs font-medium text-slate-600">CLI</div>
+                      <label className="mb-1.5 block text-xs font-medium text-slate-700">CLI</label>
                       <Select
                         value={cliKey}
                         onChange={(e) =>
@@ -279,8 +318,8 @@ export function ModelPriceAliasesDialog({
                       </Select>
                     </div>
 
-                    <div className="lg:col-span-3">
-                      <div className="mb-1 text-xs font-medium text-slate-600">匹配类型</div>
+                    <div className="lg:col-span-2">
+                      <label className="mb-1.5 block text-xs font-medium text-slate-700">匹配类型</label>
                       <Select
                         value={matchType}
                         onChange={(e) =>
@@ -298,10 +337,8 @@ export function ModelPriceAliasesDialog({
                       </Select>
                     </div>
 
-                    <div className="lg:col-span-3">
-                      <div className="mb-1 text-xs font-medium text-slate-600">
-                        Pattern（用于匹配 requested_model）
-                      </div>
+                    <div className="lg:col-span-4">
+                      <label className="mb-1.5 block text-xs font-medium text-slate-700">Pattern</label>
                       <Input
                         mono
                         value={rule.pattern ?? ""}
@@ -315,19 +352,17 @@ export function ModelPriceAliasesDialog({
                         }
                         disabled={saving}
                       />
-                      <div className="mt-1 text-[11px] text-slate-500">
+                      <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
                         {matchType === "wildcard"
                           ? "wildcard：仅支持单个 *"
                           : matchType === "prefix"
-                            ? "prefix：requested_model 以 pattern 开头即命中"
+                            ? "prefix：以 pattern 开头即命中"
                             : "exact：完全相等才命中"}
-                      </div>
+                      </p>
                     </div>
 
                     <div className="lg:col-span-4">
-                      <div className="mb-1 text-xs font-medium text-slate-600">
-                        目标模型（从 model_prices 中取价）
-                      </div>
+                      <label className="mb-1.5 block text-xs font-medium text-slate-700">目标模型</label>
                       <Input
                         mono
                         list={modelsDatalistId(cliKey)}
@@ -336,9 +371,9 @@ export function ModelPriceAliasesDialog({
                         placeholder="输入或从建议中选择…"
                         disabled={saving}
                       />
-                      <div className="mt-1 text-[11px] text-slate-500">
-                        建议从下拉列表选择，避免拼写不一致导致仍然无法计费。
-                      </div>
+                      <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
+                        下拉列表选择具体模型
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -347,12 +382,38 @@ export function ModelPriceAliasesDialog({
           </div>
         )}
 
-        <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-3">
+        <div className="flex items-center justify-end gap-3 border-t border-slate-200 pt-4">
           <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={saving}>
             取消
           </Button>
           <Button variant="primary" onClick={save} disabled={loading || saving}>
-            {saving ? "保存中…" : "保存"}
+            {saving ? (
+              <span className="flex items-center gap-2">
+                <svg
+                  className="h-4 w-4 animate-spin"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  />
+                </svg>
+                保存中…
+              </span>
+            ) : (
+              "保存"
+            )}
           </Button>
         </div>
       </div>
