@@ -1,6 +1,7 @@
 // Usage: Used by ProvidersView to create/edit a Provider with toast-based validation.
 
 import { useEffect, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { CLIS } from "../../constants/clis";
 import { logToConsole } from "../../services/consoleLog";
@@ -236,6 +237,16 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
     }
   }
 
+  const supportedModelCount =
+    cliKey === "claude"
+      ? Object.keys(supportedModels).filter((key) => supportedModels[key]).length
+      : 0;
+  const modelMappingCount =
+    cliKey === "claude"
+      ? Object.entries(modelMapping).filter(([k, v]) => k.trim().length > 0 && v.trim().length > 0)
+          .length
+      : 0;
+
   return (
     <Dialog
       open={open}
@@ -277,29 +288,6 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
           />
         </FormField>
 
-        {cliKey === "claude" ? (
-          <>
-            <FormField label="模型白名单 (supportedModels)" hint="支持 *；为空表示支持所有模型">
-              <ModelWhitelistEditor
-                value={supportedModels}
-                onChange={setSupportedModels}
-                disabled={saving}
-              />
-            </FormField>
-
-            <FormField
-              label="模型映射 (modelMapping)"
-              hint="支持 *；当同时配置白名单时会校验目标模型"
-            >
-              <ModelMappingEditor
-                value={modelMapping}
-                onChange={setModelMapping}
-                disabled={saving}
-              />
-            </FormField>
-          </>
-        ) : null}
-
         <div className="grid gap-3 sm:grid-cols-2">
           <FormField label="API Key" hint={mode === "edit" ? "留空保持不变" : "保存后不回显"}>
             <Input
@@ -322,6 +310,43 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
             />
           </FormField>
         </div>
+
+        {cliKey === "claude" ? (
+          <details className="group rounded-xl border border-slate-200 bg-white shadow-sm open:ring-2 open:ring-[#0052FF]/10 transition-all">
+            <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium text-slate-700 group-open:text-[#0052FF]">
+                  模型映射
+                </span>
+                <span className="text-xs font-mono text-slate-500">
+                  白名单 {supportedModelCount} · 映射 {modelMappingCount}
+                </span>
+              </div>
+              <ChevronDown className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-180" />
+            </summary>
+
+            <div className="space-y-4 border-t border-slate-100 px-4 py-3">
+              <FormField label="模型白名单 (supportedModels)" hint="支持 *；为空表示支持所有模型">
+                <ModelWhitelistEditor
+                  value={supportedModels}
+                  onChange={setSupportedModels}
+                  disabled={saving}
+                />
+              </FormField>
+
+              <FormField
+                label="模型映射 (modelMapping)"
+                hint="支持 *；当同时配置白名单时会校验目标模型"
+              >
+                <ModelMappingEditor
+                  value={modelMapping}
+                  onChange={setModelMapping}
+                  disabled={saving}
+                />
+              </FormField>
+            </div>
+          </details>
+        ) : null}
 
         <div className="flex items-center justify-between border-t border-slate-100 pt-3">
           <div className="flex items-center gap-2">
