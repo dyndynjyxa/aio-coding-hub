@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { logToConsole } from "../services/consoleLog";
@@ -29,6 +29,7 @@ import {
   rotateClaudeCliUserIdSession,
 } from "../constants/claudeValidation";
 import { ClaudeModelValidationResultPanel } from "./ClaudeModelValidationResultPanel";
+import { ClaudeModelValidationHistoryStepCard } from "./ClaudeModelValidationHistoryStepCard";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Dialog } from "../ui/Dialog";
@@ -48,10 +49,11 @@ import {
   Cpu,
   CheckCircle2,
   XCircle,
-  Copy,
   ChevronRight,
   ChevronDown,
   Activity,
+  Copy,
+  FileJson,
 } from "lucide-react";
 
 type ClaudeModelValidationDialogProps = {
@@ -147,6 +149,7 @@ type ClaudeValidationSuiteStep = {
   label: string;
   status: "pending" | "running" | "done" | "error";
   request_json: string;
+  result_json: string;
   result: ClaudeModelValidationResult | null;
   error: string | null;
 };
@@ -171,6 +174,11 @@ function prettyJsonOrFallback(text: string): string {
   } catch {
     return raw;
   }
+}
+
+function stopDetailsToggle(e: MouseEvent) {
+  e.preventDefault();
+  e.stopPropagation();
 }
 
 function OutcomePill({ pass }: { pass: boolean | null }) {
@@ -545,6 +553,7 @@ export function ClaudeModelValidationDialog({
           label: t.label,
           status: "pending",
           request_json: "",
+          result_json: "",
           result: null,
           error: null,
         };
@@ -647,7 +656,9 @@ export function ClaudeModelValidationDialog({
           });
           setSuiteSteps((prev) =>
             prev.map((s) =>
-              s.index === idx + 1 ? { ...s, status: "error", error: String(err) } : s
+              s.index === idx + 1
+                ? { ...s, status: "error", error: String(err), result_json: "" }
+                : s
             )
           );
           continue;
@@ -671,9 +682,19 @@ export function ClaudeModelValidationDialog({
         setSelectedHistoryKey(null);
         setResult(resp);
 
+        const suiteResultJson = (() => {
+          try {
+            return JSON.stringify(resp, null, 2);
+          } catch {
+            return "";
+          }
+        })();
+
         setSuiteSteps((prev) =>
           prev.map((s) =>
-            s.index === idx + 1 ? { ...s, status: "done", result: resp, error: null } : s
+            s.index === idx + 1
+              ? { ...s, status: "done", result: resp, result_json: suiteResultJson, error: null }
+              : s
           )
         );
       }
@@ -1150,121 +1171,6 @@ export function ClaudeModelValidationDialog({
                           : "等待验证..."}
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    onClick={() => {
-                      if (selectedHistoryGroup?.isSuite) {
-                        const suiteText = selectedHistoryGroup.runs
-                          .map((r) => {
-                            const title = `// ${r.meta.suiteStepIndex ?? "?"}/${selectedHistoryGroup.expectedTotal}: ${r.evaluation.template.label}`;
-                            return `${title}\n${r.run.request_json ?? ""}`.trim();
-                          })
-                          .filter(Boolean)
-                          .join("\n\n");
-                        return void copyTextOrToast(suiteText, "已复制 Suite Request JSON");
-                      }
-
-                      const text = selectedHistoryLatest?.run.request_json ?? requestJson ?? "";
-                      return void copyTextOrToast(text, "已复制 Request JSON");
-                    }}
-                    variant="secondary"
-                    size="sm"
-                    className="!p-2"
-                    disabled={
-                      selectedHistoryGroup?.isSuite
-                        ? selectedHistoryGroup.runs.length === 0
-                        : !(selectedHistoryLatest?.run.request_json ?? requestJson ?? "").trim()
-                    }
-                    title="复制 Request JSON（明文）"
-                  >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M16 3H8a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2z"
-                      />
-                    </svg>
-                  </Button>
-
-                  <Button
-                    onClick={() => {
-                      if (selectedHistoryGroup?.isSuite) {
-                        const suiteText = selectedHistoryGroup.runs
-                          .map((r) => {
-                            const title = `// ${r.meta.suiteStepIndex ?? "?"}/${selectedHistoryGroup.expectedTotal}: ${r.evaluation.template.label}`;
-                            const body = prettyJsonOrFallback(r.run.result_json ?? "");
-                            return `${title}\n${body}`.trim();
-                          })
-                          .filter(Boolean)
-                          .join("\n\n");
-                        return void copyTextOrToast(suiteText, "已复制 Suite Result JSON");
-                      }
-
-                      const raw =
-                        selectedHistoryLatest?.run.result_json ??
-                        (activeResult ? JSON.stringify(activeResult) : "");
-                      return void copyTextOrToast(prettyJsonOrFallback(raw), "已复制 Result JSON");
-                    }}
-                    variant="secondary"
-                    size="sm"
-                    className="!p-2"
-                    disabled={
-                      selectedHistoryGroup?.isSuite
-                        ? selectedHistoryGroup.runs.length === 0
-                        : !selectedHistoryLatest?.run.result_json && !activeResult
-                    }
-                    title="复制 Result JSON"
-                  >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                      />
-                    </svg>
-                  </Button>
-
-                  <Button
-                    onClick={() =>
-                      selectedHistoryGroup?.isSuite
-                        ? void copyTextOrToast(
-                            selectedHistoryGroup.runs
-                              .map((r) => {
-                                const excerpt = r.run.parsed_result?.raw_excerpt ?? "";
-                                if (!excerpt.trim()) return "";
-                                const title = `// ${r.meta.suiteStepIndex ?? "?"}/${selectedHistoryGroup.expectedTotal}: ${r.evaluation.template.label}`;
-                                return `${title}\n${excerpt}`.trim();
-                              })
-                              .filter(Boolean)
-                              .join("\n\n"),
-                            "已复制 Suite SSE 原文"
-                          )
-                        : void copyTextOrToast(activeResult?.raw_excerpt ?? "", "已复制 SSE 原文")
-                    }
-                    variant="secondary"
-                    size="sm"
-                    className="!p-2"
-                    disabled={
-                      selectedHistoryGroup?.isSuite
-                        ? selectedHistoryGroup.runs.every(
-                            (r) => !(r.run.parsed_result?.raw_excerpt ?? "").trim()
-                          )
-                        : !activeResult?.raw_excerpt
-                    }
-                    title="复制 SSE 原文"
-                  >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M8 16h8M8 12h8m-7 8h6a2 2 0 002-2V6a2 2 0 00-2-2H9a2 2 0 00-2 2v12a2 2 0 002 2z"
-                      />
-                    </svg>
-                  </Button>
-                </div>
               </div>
 
               {suiteSteps.length > 0 && !selectedHistoryGroup ? (
@@ -1288,11 +1194,10 @@ export function ClaudeModelValidationDialog({
                             : "bg-slate-100 text-slate-600";
 
                     return (
-                      <div key={`${step.templateKey}_${step.index}`} className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="text-xs font-medium text-slate-700">
-                            验证 {step.index}/{suiteSteps.length}：{step.label}
-                          </div>
+                      <ClaudeModelValidationHistoryStepCard
+                        key={`${step.templateKey}_${step.index}`}
+                        title={`验证 ${step.index}/${suiteSteps.length}：${step.label}`}
+                        rightBadge={
                           <span
                             className={cn(
                               "rounded px-1.5 py-0.5 text-[10px] font-semibold",
@@ -1301,19 +1206,15 @@ export function ClaudeModelValidationDialog({
                           >
                             {statusLabel}
                           </span>
-                        </div>
-
-                        {step.error ? (
-                          <div className="rounded bg-rose-50 px-2 py-1 text-xs text-rose-700">
-                            {step.error}
-                          </div>
-                        ) : null}
-
-                        <ClaudeModelValidationResultPanel
-                          templateKey={step.templateKey}
-                          result={step.result}
-                        />
-                      </div>
+                        }
+                        templateKey={step.templateKey}
+                        result={step.result}
+                        requestJsonText={step.request_json ?? ""}
+                        resultJsonText={step.result_json ?? ""}
+                        sseRawText={step.result?.raw_excerpt ?? ""}
+                        errorText={step.error}
+                        copyText={copyTextOrToast}
+                      />
                     );
                   })}
                 </div>
@@ -1326,22 +1227,39 @@ export function ClaudeModelValidationDialog({
                         ? `${idx}/${selectedHistoryGroup.expectedTotal}`
                         : `?/${selectedHistoryGroup.expectedTotal}`;
                     return (
-                      <div key={`${selectedHistoryGroup.key}_${step.run.id}`} className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="text-xs font-medium text-slate-700">
-                            验证 {title}：{step.evaluation.template.label}
-                          </div>
-                          <OutcomePill pass={step.evaluation.overallPass} />
-                        </div>
-
-                        <ClaudeModelValidationResultPanel
-                          templateKey={step.evaluation.templateKey}
-                          result={step.run.parsed_result}
-                        />
-                      </div>
+                      <ClaudeModelValidationHistoryStepCard
+                        key={`${selectedHistoryGroup.key}_${step.run.id}`}
+                        title={`验证 ${title}：${step.evaluation.template.label}`}
+                        rightBadge={<OutcomePill pass={step.evaluation.overallPass} />}
+                        templateKey={step.evaluation.templateKey}
+                        result={step.run.parsed_result}
+                        requestJsonText={step.run.request_json ?? ""}
+                        resultJsonText={prettyJsonOrFallback(step.run.result_json ?? "")}
+                        sseRawText={step.run.parsed_result?.raw_excerpt ?? ""}
+                        copyText={copyTextOrToast}
+                      />
                     );
                   })}
                 </div>
+              ) : selectedHistoryGroup ? (
+                selectedHistoryLatest ? (
+                  <ClaudeModelValidationHistoryStepCard
+                    title={`验证：${selectedHistoryLatest.evaluation.template.label}`}
+                    rightBadge={<OutcomePill pass={selectedHistoryLatest.evaluation.overallPass} />}
+                    templateKey={selectedHistoryLatest.evaluation.templateKey}
+                    result={selectedHistoryLatest.run.parsed_result}
+                    requestJsonText={selectedHistoryLatest.run.request_json ?? ""}
+                    resultJsonText={prettyJsonOrFallback(
+                      selectedHistoryLatest.run.result_json ?? ""
+                    )}
+                    sseRawText={selectedHistoryLatest.run.parsed_result?.raw_excerpt ?? ""}
+                    copyText={copyTextOrToast}
+                  />
+                ) : (
+                  <div className="flex h-40 items-center justify-center text-xs text-slate-400">
+                    暂无历史数据
+                  </div>
+                )
               ) : (
                 <ClaudeModelValidationResultPanel
                   templateKey={activeResultTemplateKey}
@@ -1349,99 +1267,33 @@ export function ClaudeModelValidationDialog({
                 />
               )}
 
-              <details className="group rounded-xl border border-slate-200 bg-white shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
-                <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
-                  <div className="flex items-center gap-2 text-sm font-medium text-slate-700 group-open:text-indigo-600">
-                    <Settings2 className="h-4 w-4" />
-                    <span>
-                      {suiteSteps.length > 0 && !selectedHistoryGroup
-                        ? `请求报文 JSON (${suiteSteps.length} 步)`
-                        : selectedHistoryGroup?.isSuite
-                          ? `套件请求 (${selectedHistoryGroup.passCount}/${selectedHistoryGroup.expectedTotal})`
-                          : "高级请求配置"}
-                    </span>
-                  </div>
-                  <ChevronDown className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-180" />
-                </summary>
+              {!selectedHistoryGroup && suiteSteps.length === 0 ? (
+                <details className="group rounded-xl border border-slate-200 bg-white shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
+                  <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
+                    <div className="flex items-center gap-2 text-sm font-medium text-slate-700 group-open:text-indigo-600">
+                      <Settings2 className="h-4 w-4" />
+                      <span>高级请求配置</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        onClick={(e) => {
+                          stopDetailsToggle(e);
+                          return void copyTextOrToast(requestJson ?? "", "已复制请求 JSON");
+                        }}
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0"
+                        disabled={!(requestJson ?? "").trim()}
+                        title="复制请求 JSON"
+                        aria-label="复制请求 JSON"
+                      >
+                        <FileJson className="h-4 w-4" />
+                      </Button>
+                      <ChevronDown className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-180" />
+                    </div>
+                  </summary>
 
-                <div className="border-t border-slate-100 px-4 py-3 space-y-3">
-                  {suiteSteps.length > 0 && !selectedHistoryGroup ? (
-                    <div className="space-y-3">
-                      {suiteSteps.map((step) => (
-                        <div
-                          key={`${step.templateKey}_${step.index}`}
-                          className="rounded-lg border border-slate-200 bg-slate-50/50 p-2"
-                        >
-                          <div className="flex items-center justify-between gap-2 mb-2">
-                            <div className="text-xs font-semibold text-slate-700">
-                              Step {step.index}/{suiteSteps.length}: {step.label}
-                            </div>
-                            <Button
-                              onClick={() =>
-                                void copyTextOrToast(step.request_json ?? "", "已复制请求 JSON")
-                              }
-                              variant="secondary"
-                              size="sm"
-                              className="!h-6 !px-2 text-xs"
-                              disabled={!step.request_json.trim()}
-                              title="Copy JSON"
-                            >
-                              <Copy className="h-3 w-3" />
-                            </Button>
-                          </div>
-                          <Textarea
-                            mono
-                            readOnly
-                            className="h-[120px] resize-none text-[10px] leading-relaxed bg-white"
-                            value={step.request_json}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  ) : selectedHistoryGroup?.isSuite ? (
-                    <div className="space-y-3">
-                      {selectedHistoryGroup.runs.map((step) => {
-                        const idx = step.meta.suiteStepIndex ?? 0;
-                        const title =
-                          idx > 0
-                            ? `${idx}/${selectedHistoryGroup.expectedTotal}`
-                            : `?/${selectedHistoryGroup.expectedTotal}`;
-                        return (
-                          <div
-                            key={`${selectedHistoryGroup.key}_${step.run.id}_request`}
-                            className="rounded-lg border border-slate-200 bg-slate-50/50 p-2"
-                          >
-                            <div className="flex items-center justify-between gap-2 mb-2">
-                              <div className="text-xs font-semibold text-slate-700">
-                                {title}: {step.evaluation.template.label}
-                              </div>
-                              <Button
-                                onClick={() =>
-                                  void copyTextOrToast(
-                                    step.run.request_json ?? "",
-                                    "已复制请求 JSON"
-                                  )
-                                }
-                                variant="secondary"
-                                size="sm"
-                                className="!h-6 !px-2 text-xs"
-                                disabled={!(step.run.request_json ?? "").trim()}
-                                title="Copy JSON"
-                              >
-                                <Copy className="h-3 w-3" />
-                              </Button>
-                            </div>
-                            <Textarea
-                              mono
-                              readOnly
-                              className="h-[120px] resize-none text-[10px] leading-relaxed bg-white"
-                              value={step.run.request_json ?? ""}
-                            />
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
+                  <div className="border-t border-slate-100 px-4 py-3">
                     <Textarea
                       mono
                       className="h-[220px] resize-none text-xs leading-5 bg-white shadow-sm focus:ring-indigo-500"
@@ -1452,54 +1304,54 @@ export function ClaudeModelValidationDialog({
                       }}
                       placeholder='{"template_key":"official_max_tokens_5","headers":{...},"body":{...},"expect":{...}}'
                     />
-                  )}
-                </div>
-              </details>
-
-              <details className="group rounded-xl border border-slate-200 bg-white shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
-                <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
-                  <div className="flex items-center gap-2 text-sm font-medium text-slate-700 group-open:text-indigo-600">
-                    <Activity className="h-4 w-4" />
-                    <span>SSE 流式响应预览</span>
                   </div>
-                  <ChevronDown className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-180" />
-                </summary>
-                <div className="border-t border-slate-100 p-0">
-                  <pre className="custom-scrollbar max-h-60 overflow-auto bg-slate-950 p-4 font-mono text-[10px] leading-relaxed text-slate-300">
-                    <span className="text-slate-500">
-                      {(() => {
-                        const t = getClaudeValidationTemplate(activeResultTemplateKey);
+                </details>
+              ) : null}
 
-                        if (selectedHistoryGroup?.isSuite) {
-                          const idx = selectedHistoryLatest?.meta.suiteStepIndex ?? null;
-                          const total = selectedHistoryGroup.expectedTotal;
-                          const prefix = idx ? `${idx}/${total}` : `?/${total}`;
-                          return `// SSE: ${prefix}: ${t.label} (${t.key})`;
-                        }
-
-                        if (suiteSteps.length > 0 && !selectedHistoryGroup) {
-                          const currentStep =
-                            suiteSteps.find((s) => s.status === "running") ??
-                            [...suiteSteps]
-                              .reverse()
-                              .find((s) => s.status === "done" || s.status === "error") ??
-                            null;
-                          const idx = currentStep?.index ?? null;
-                          const total = suiteSteps.length;
-                          const prefix = idx ? `${idx}/${total}` : `?/${total}`;
-                          return `// SSE: ${prefix}: ${t.label} (${t.key})`;
-                        }
-
-                        return `// SSE: ${t.label} (${t.key})`;
-                      })()}
-                      {"\n"}
-                    </span>
-                    {activeResult?.raw_excerpt || (
-                      <span className="text-slate-600 italic">// 暂无 SSE 数据</span>
-                    )}
-                  </pre>
-                </div>
-              </details>
+              {!selectedHistoryGroup && suiteSteps.length === 0 ? (
+                <details className="group rounded-xl border border-slate-200 bg-white shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
+                  <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
+                    <div className="flex items-center gap-2 text-sm font-medium text-slate-700 group-open:text-indigo-600">
+                      <Activity className="h-4 w-4" />
+                      <span>SSE 流式响应预览</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        onClick={(e) => {
+                          stopDetailsToggle(e);
+                          return void copyTextOrToast(
+                            activeResult?.raw_excerpt ?? "",
+                            "已复制 SSE 原文"
+                          );
+                        }}
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0"
+                        disabled={!(activeResult?.raw_excerpt ?? "").trim()}
+                        title="复制 SSE 原文"
+                        aria-label="复制 SSE 原文"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                      <ChevronDown className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-180" />
+                    </div>
+                  </summary>
+                  <div className="border-t border-slate-100 p-0">
+                    <pre className="custom-scrollbar max-h-60 overflow-auto bg-slate-950 p-4 font-mono text-[10px] leading-relaxed text-slate-300">
+                      <span className="text-slate-500">
+                        {(() => {
+                          const t = getClaudeValidationTemplate(activeResultTemplateKey);
+                          return `// SSE: ${t.label} (${t.key})`;
+                        })()}
+                        {"\n"}
+                      </span>
+                      {activeResult?.raw_excerpt || (
+                        <span className="text-slate-600 italic">// 暂无 SSE 数据</span>
+                      )}
+                    </pre>
+                  </div>
+                </details>
+              ) : null}
             </div>
           </div>
         </div>
