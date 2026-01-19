@@ -35,7 +35,7 @@ export function HomeUsageSection({
 
       <Card className="flex flex-col md:col-span-4" padding="sm">
         <div className="text-sm font-medium text-slate-600 mb-2">用量统计</div>
-        {usageHeatmapLoading ? (
+        {usageHeatmapLoading && usageHeatmapRows.length === 0 ? (
           <div className="text-sm text-slate-400">加载中…</div>
         ) : (
           <div className="min-h-0 flex-1">

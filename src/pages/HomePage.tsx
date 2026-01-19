@@ -32,12 +32,14 @@ import {
   type SortModeSummary,
 } from "../services/sortModes";
 import { useCliProxy } from "../hooks/useCliProxy";
+import { useWindowForeground } from "../hooks/useWindowForeground";
 import { Card } from "../ui/Card";
 import { TabList } from "../ui/TabList";
 import { hasTauriRuntime } from "../services/tauriInvoke";
 import { useTraceStore } from "../services/traceStore";
 
 type HomeTabKey = "overview" | "cost" | "more";
+type UsageHeatmapRefreshReason = "initial" | "manual" | "foreground" | "tab";
 
 const HOME_TABS: Array<{ key: HomeTabKey; label: string }> = [
   { key: "overview", label: "概览" },
@@ -64,11 +66,14 @@ function openCircuitRowsEqual(a: OpenCircuitRow[], b: OpenCircuitRow[]) {
 
 export function HomePage() {
   const { traces } = useTraceStore();
-  const showCustomTooltip = hasTauriRuntime();
+  const tauriRuntime = hasTauriRuntime();
+  const showCustomTooltip = tauriRuntime;
 
   const cliProxy = useCliProxy();
 
   const [tab, setTab] = useState<HomeTabKey>("overview");
+  const tabRef = useRef(tab);
+  const isMountedRef = useRef(true);
 
   const [sortModes, setSortModes] = useState<SortModeSummary[]>([]);
   const [sortModesLoading, setSortModesLoading] = useState(false);
@@ -97,6 +102,7 @@ export function HomePage() {
   const [usageHeatmapRows, setUsageHeatmapRows] = useState<UsageHourlyRow[]>([]);
   const [usageHeatmapLoading, setUsageHeatmapLoading] = useState(false);
   const [, setUsageHeatmapAvailable] = useState<boolean | null>(null);
+  const usageHeatmapRefreshInFlightRef = useRef(false);
 
   const [activeSessions, setActiveSessions] = useState<GatewayActiveSession[]>([]);
   const [activeSessionsLoading, setActiveSessionsLoading] = useState(false);
@@ -120,6 +126,7 @@ export function HomePage() {
 
   useEffect(() => {
     return () => {
+      isMountedRef.current = false;
       if (realtimeExitHoldTimerRef.current != null) {
         window.clearTimeout(realtimeExitHoldTimerRef.current);
         realtimeExitHoldTimerRef.current = null;
@@ -411,57 +418,76 @@ export function HomePage() {
       });
   }
 
-  useEffect(() => {
-    let cancelled = false;
-    setUsageHeatmapLoading(true);
-    usageHourlySeries(15)
-      .then((rows) => {
-        if (cancelled) return;
-        if (!rows) {
-          setUsageHeatmapAvailable(false);
-          setUsageHeatmapRows([]);
-          return;
-        }
-        setUsageHeatmapAvailable(true);
-        setUsageHeatmapRows(rows);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setUsageHeatmapAvailable(true);
-        setUsageHeatmapRows([]);
-        logToConsole("error", "加载用量热力图失败", { error: String(err) });
-        toast("加载用量失败：请查看控制台日志");
-      })
-      .finally(() => {
-        if (!cancelled) setUsageHeatmapLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const refreshUsageHeatmap = useCallback(
+    (input?: { silent?: boolean; reason?: UsageHeatmapRefreshReason }) => {
+      if (usageHeatmapRefreshInFlightRef.current) return;
+      if (!isMountedRef.current) return;
+      usageHeatmapRefreshInFlightRef.current = true;
 
-  const refreshUsageHeatmap = useCallback(() => {
-    setUsageHeatmapLoading(true);
-    usageHourlySeries(15)
-      .then((rows) => {
-        if (!rows) {
-          setUsageHeatmapAvailable(false);
-          setUsageHeatmapRows([]);
-          return;
-        }
-        setUsageHeatmapAvailable(true);
-        setUsageHeatmapRows(rows);
-      })
-      .catch((err) => {
-        setUsageHeatmapAvailable(true);
-        setUsageHeatmapRows([]);
-        logToConsole("error", "刷新用量热力图失败", { error: String(err) });
-        toast("刷新用量失败：请查看控制台日志");
-      })
-      .finally(() => {
-        setUsageHeatmapLoading(false);
-      });
-  }, []);
+      const reason: UsageHeatmapRefreshReason = input?.reason ?? "manual";
+      const silent = Boolean(input?.silent);
+      const logTitle =
+        reason === "initial"
+          ? "加载用量热力图失败"
+          : reason === "foreground"
+            ? "前台自动刷新用量失败"
+            : reason === "tab"
+              ? "切回概览自动刷新用量失败"
+              : "刷新用量热力图失败";
+      const toastText =
+        reason === "initial" ? "加载用量失败：请查看控制台日志" : "刷新用量失败：请查看控制台日志";
+
+      setUsageHeatmapLoading(true);
+      usageHourlySeries(15)
+        .then((rows) => {
+          if (!isMountedRef.current) return;
+          if (!rows) {
+            setUsageHeatmapAvailable(false);
+            if (!silent) {
+              setUsageHeatmapRows([]);
+            }
+            return;
+          }
+          setUsageHeatmapAvailable(true);
+          setUsageHeatmapRows(rows);
+        })
+        .catch((err) => {
+          logToConsole(reason === "foreground" || reason === "tab" ? "warn" : "error", logTitle, {
+            error: String(err),
+            reason,
+          });
+          if (!isMountedRef.current) return;
+          setUsageHeatmapAvailable(true);
+          if (!silent) setUsageHeatmapRows([]);
+          if (!silent) toast(toastText);
+        })
+        .finally(() => {
+          usageHeatmapRefreshInFlightRef.current = false;
+          if (!isMountedRef.current) return;
+          setUsageHeatmapLoading(false);
+        });
+    },
+    []
+  );
+
+  useEffect(() => {
+    refreshUsageHeatmap({ reason: "initial" });
+  }, [refreshUsageHeatmap]);
+
+  useEffect(() => {
+    const prev = tabRef.current;
+    tabRef.current = tab;
+    if (!tauriRuntime) return;
+    if (prev !== "overview" && tab === "overview") {
+      refreshUsageHeatmap({ silent: true, reason: "tab" });
+    }
+  }, [tab, tauriRuntime, refreshUsageHeatmap]);
+
+  useWindowForeground({
+    enabled: tauriRuntime && tab === "overview",
+    throttleMs: 1000,
+    onForeground: () => refreshUsageHeatmap({ silent: true, reason: "foreground" }),
+  });
 
   useEffect(() => {
     let cancelled = false;
