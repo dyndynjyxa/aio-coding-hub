@@ -678,6 +678,14 @@ pub fn status_all(app: &tauri::AppHandle) -> Result<Vec<CliProxyStatus>, String>
     Ok(out)
 }
 
+pub fn is_enabled(app: &tauri::AppHandle, cli_key: &str) -> Result<bool, String> {
+    validate_cli_key(cli_key)?;
+    let Some(manifest) = read_manifest(app, cli_key)? else {
+        return Ok(false);
+    };
+    Ok(manifest.enabled)
+}
+
 pub fn set_enabled(
     app: &tauri::AppHandle,
     cli_key: &str,
