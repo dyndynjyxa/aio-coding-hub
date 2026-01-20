@@ -28,7 +28,6 @@ export type GatewayRequestEvent = {
   cache_read_input_tokens?: number | null;
   cache_creation_input_tokens?: number | null;
   cache_creation_5m_input_tokens?: number | null;
-  cache_creation_1h_input_tokens?: number | null;
 };
 
 export type GatewayRequestStartEvent = {
@@ -229,7 +228,6 @@ export async function listenGatewayEvents(): Promise<() => void> {
       cache_read_input_tokens: payload.cache_read_input_tokens,
       cache_creation_input_tokens: payload.cache_creation_input_tokens,
       cache_creation_5m_input_tokens: payload.cache_creation_5m_input_tokens,
-      cache_creation_1h_input_tokens: payload.cache_creation_1h_input_tokens,
       attempts,
     });
   });

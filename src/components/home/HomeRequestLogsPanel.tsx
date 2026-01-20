@@ -177,12 +177,6 @@ export function HomeRequestLogsPanel({
                     ttl: "5m" as const,
                   };
                 }
-                if (log.cache_creation_1h_input_tokens != null) {
-                  return {
-                    tokens: log.cache_creation_1h_input_tokens,
-                    ttl: "1h" as const,
-                  };
-                }
                 if (log.cache_creation_input_tokens != null) {
                   return {
                     tokens: log.cache_creation_input_tokens,

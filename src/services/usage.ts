@@ -20,7 +20,6 @@ export type UsageSummary = {
   cache_read_input_tokens: number;
   cache_creation_input_tokens: number;
   cache_creation_5m_input_tokens: number;
-  cache_creation_1h_input_tokens: number;
 };
 
 export type UsageProviderRow = {
@@ -39,7 +38,6 @@ export type UsageProviderRow = {
   cache_read_input_tokens: number;
   cache_creation_input_tokens: number;
   cache_creation_5m_input_tokens: number;
-  cache_creation_1h_input_tokens: number;
 };
 
 export type UsageDayRow = {
@@ -51,7 +49,6 @@ export type UsageDayRow = {
   cache_read_input_tokens: number;
   cache_creation_input_tokens: number;
   cache_creation_5m_input_tokens: number;
-  cache_creation_1h_input_tokens: number;
 };
 
 export type UsageHourlyRow = {
