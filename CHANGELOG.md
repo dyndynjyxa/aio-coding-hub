@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.0.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.11.0...aio-coding-hub-v1.0.0) (2026-01-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* **gateway:** gateway now rejects forwarding for claude/codex/gemini unless the corresponding CLI proxy toggle is enabled in AIO.
+
+### Features
+
+* add TextEvidenceSection component for improved output display in ClaudeModelValidationResultPanel ([47be119](https://github.com/dyndynjyxa/aio-coding-hub/commit/47be119a83c365b3e7b41f22308be7550ecaede5))
+* **claude-validation:** add signature and caching roundtrip probes ([f0919fc](https://github.com/dyndynjyxa/aio-coding-hub/commit/f0919fc3919e751e2668c24d471ebf2f8c9a9b46))
+* enhance provider model configuration with support for model whitelisting and mapping ([4f44510](https://github.com/dyndynjyxa/aio-coding-hub/commit/4f445106fefa10badae230de52c9fee09bd2486f))
+* **home:** implement window foreground detection for usage heatmap refresh ([7d9c6a6](https://github.com/dyndynjyxa/aio-coding-hub/commit/7d9c6a60df8877d8a3ec36beaca9bf6192c36b3a))
+* **model-prices:** add model price alias rules ([ffda7a2](https://github.com/dyndynjyxa/aio-coding-hub/commit/ffda7a221134dbc7b0a97475d117ee7c1ced20f2))
+* **providers:** collapse model mapping editors ([f7d19b2](https://github.com/dyndynjyxa/aio-coding-hub/commit/f7d19b2480e4c657632b4f594a655cc91317cc9a))
+* **tauri:** add WSL support and listen modes ([a357007](https://github.com/dyndynjyxa/aio-coding-hub/commit/a35700753e9633493f6e939d1700ce979d635c93))
+* **ui:** align CLI manager with network and WSL settings ([ae5b5fc](https://github.com/dyndynjyxa/aio-coding-hub/commit/ae5b5fc99330b55872e1c30da6e653d7433b7d48))
+
+
+### Bug Fixes
+
+* **gateway:** reject forwarding when CLI proxy disabled ([df734b6](https://github.com/dyndynjyxa/aio-coding-hub/commit/df734b67a22a7b827fcc0d3001f40faaa495d500))
+* **usage:** align cache creation ttl to 5m only ([1ba7bc8](https://github.com/dyndynjyxa/aio-coding-hub/commit/1ba7bc805428d39604d856ee567fbab03c2f09af))
+
 ## [0.11.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.10.0...aio-coding-hub-v0.11.0) (2026-01-18)
 
 
