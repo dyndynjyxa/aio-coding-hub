@@ -100,7 +100,6 @@ export function HomePage() {
 
   const [usageHeatmapRows, setUsageHeatmapRows] = useState<UsageHourlyRow[]>([]);
   const [usageHeatmapLoading, setUsageHeatmapLoading] = useState(false);
-  const [, setUsageHeatmapAvailable] = useState<boolean | null>(null);
   const usageHeatmapRequestSeqRef = useRef(0);
   const usageHeatmapInFlightSeqRef = useRef<number | null>(null);
 
@@ -436,40 +435,37 @@ export function HomePage() {
       const toastText =
         reason === "initial" ? "加载用量失败：请查看控制台日志" : "刷新用量失败：请查看控制台日志";
 
-      const seq = (usageHeatmapRequestSeqRef.current += 1);
+      usageHeatmapRequestSeqRef.current += 1;
+      const seq = usageHeatmapRequestSeqRef.current;
       usageHeatmapInFlightSeqRef.current = seq;
 
       setUsageHeatmapLoading(true);
-      usageHourlySeries(15)
-        .then((rows) => {
+
+      void (async () => {
+        try {
+          const rows = await usageHourlySeries(15);
           if (seq !== usageHeatmapRequestSeqRef.current) return;
           if (!rows) {
-            setUsageHeatmapAvailable(false);
-            if (!silent) {
-              setUsageHeatmapRows([]);
-            }
+            if (!silent) setUsageHeatmapRows([]);
             return;
           }
-          setUsageHeatmapAvailable(true);
           setUsageHeatmapRows(rows);
-        })
-        .catch((err) => {
+        } catch (err) {
           if (seq !== usageHeatmapRequestSeqRef.current) return;
           logToConsole(reason === "foreground" || reason === "tab" ? "warn" : "error", logTitle, {
             error: String(err),
             reason,
           });
-          setUsageHeatmapAvailable(true);
           if (!silent) setUsageHeatmapRows([]);
           if (!silent) toast(toastText);
-        })
-        .finally(() => {
+        } finally {
           if (usageHeatmapInFlightSeqRef.current === seq) {
             usageHeatmapInFlightSeqRef.current = null;
           }
           if (seq !== usageHeatmapRequestSeqRef.current) return;
           setUsageHeatmapLoading(false);
-        });
+        }
+      })();
     },
     []
   );
