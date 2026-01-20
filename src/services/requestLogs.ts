@@ -26,7 +26,6 @@ export type RequestLogSummary = {
   cache_read_input_tokens: number | null;
   cache_creation_input_tokens: number | null;
   cache_creation_5m_input_tokens: number | null;
-  cache_creation_1h_input_tokens: number | null;
   cost_usd: number | null;
   cost_multiplier: number;
   created_at_ms: number | null;
@@ -59,7 +58,6 @@ export type RequestLogDetail = {
   cache_read_input_tokens: number | null;
   cache_creation_input_tokens: number | null;
   cache_creation_5m_input_tokens: number | null;
-  cache_creation_1h_input_tokens: number | null;
   usage_json: string | null;
   requested_model: string | null;
   cost_usd: number | null;

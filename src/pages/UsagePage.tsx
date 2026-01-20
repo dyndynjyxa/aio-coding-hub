@@ -238,10 +238,8 @@ export function UsagePage() {
         hint: "上游返回",
       },
       {
-        title: "缓存创建（5m / 1h）",
-        value: `${formatInteger(summary.cache_creation_5m_input_tokens)} / ${formatInteger(
-          summary.cache_creation_1h_input_tokens
-        )}`,
+        title: "缓存创建（5m）",
+        value: formatInteger(summary.cache_creation_5m_input_tokens),
         hint: "上游返回",
       },
     ];
