@@ -176,6 +176,34 @@ fn should_reuse_provider(body_json: Option<&serde_json::Value>) -> bool {
     len > 1
 }
 
+fn select_next_provider_id_from_order(
+    bound_provider_id: i64,
+    provider_order: &[i64],
+    current_provider_ids: &HashSet<i64>,
+) -> Option<i64> {
+    if provider_order.is_empty() || current_provider_ids.is_empty() {
+        return None;
+    }
+
+    let start = match provider_order
+        .iter()
+        .position(|provider_id| *provider_id == bound_provider_id)
+    {
+        Some(idx) => idx.saturating_add(1),
+        None => 0,
+    };
+
+    for offset in 0..provider_order.len() {
+        let idx = (start + offset) % provider_order.len();
+        let candidate = provider_order[idx];
+        if current_provider_ids.contains(&candidate) {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
 fn error_response(
     status: StatusCode,
     trace_id: String,
@@ -1067,6 +1095,7 @@ pub(super) async fn proxy_impl(
         }
     };
 
+    let mut bound_provider_order: Option<Vec<i64>> = None;
     if let Some(sid) = session_id.as_deref() {
         let provider_order: Vec<i64> = providers.iter().map(|p| p.id).collect();
         state.session.bind_sort_mode(
@@ -1077,10 +1106,11 @@ pub(super) async fn proxy_impl(
             created_at,
         );
 
-        if let Some(order) = state
+        bound_provider_order = state
             .session
-            .get_bound_provider_order(&cli_key, sid, created_at)
-        {
+            .get_bound_provider_order(&cli_key, sid, created_at);
+
+        if let Some(order) = bound_provider_order.as_ref() {
             if !order.is_empty() && providers.len() > 1 {
                 let mut by_id: HashMap<i64, providers::ProviderForGateway> =
                     HashMap::with_capacity(providers.len());
@@ -1092,7 +1122,7 @@ pub(super) async fn proxy_impl(
 
                 let mut reordered: Vec<providers::ProviderForGateway> =
                     Vec::with_capacity(original_ids.len());
-                for provider_id in order {
+                for provider_id in order.iter().copied() {
                     if let Some(item) = by_id.remove(&provider_id) {
                         reordered.push(item);
                     }
@@ -1263,6 +1293,22 @@ pub(super) async fn proxy_impl(
                 if idx > 0 {
                     let chosen = providers.remove(idx);
                     providers.insert(0, chosen);
+                }
+            } else if let Some(order) = bound_provider_order.as_deref() {
+                if !order.is_empty() && providers.len() > 1 {
+                    let current_provider_ids: HashSet<i64> =
+                        providers.iter().map(|p| p.id).collect();
+                    if let Some(next_provider_id) = select_next_provider_id_from_order(
+                        bound_provider_id,
+                        order,
+                        &current_provider_ids,
+                    ) {
+                        if let Some(idx) = providers.iter().position(|p| p.id == next_provider_id) {
+                            if idx > 0 {
+                                providers.rotate_left(idx);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -3730,4 +3776,52 @@ pub(super) async fn proxy_impl(
 
     abort_guard.disarm();
     resp
+}
+
+#[cfg(test)]
+mod tests {
+    use super::select_next_provider_id_from_order;
+    use std::collections::HashSet;
+
+    fn set(ids: &[i64]) -> HashSet<i64> {
+        ids.iter().copied().collect()
+    }
+
+    #[test]
+    fn select_next_provider_id_wraps_and_skips_missing() {
+        let order = vec![1, 2, 3, 4];
+        let current = set(&[2, 4]);
+
+        assert_eq!(
+            select_next_provider_id_from_order(4, &order, &current),
+            Some(2)
+        );
+        assert_eq!(
+            select_next_provider_id_from_order(2, &order, &current),
+            Some(4)
+        );
+    }
+
+    #[test]
+    fn select_next_provider_id_returns_none_when_no_candidate() {
+        let order = vec![1, 2, 3];
+        assert_eq!(
+            select_next_provider_id_from_order(2, &order, &set(&[])),
+            None
+        );
+        assert_eq!(
+            select_next_provider_id_from_order(2, &order, &set(&[99])),
+            None
+        );
+    }
+
+    #[test]
+    fn select_next_provider_id_starts_from_head_when_bound_missing() {
+        let order = vec![10, 20, 30];
+        let current = set(&[30]);
+        assert_eq!(
+            select_next_provider_id_from_order(999, &order, &current),
+            Some(30)
+        );
+    }
 }

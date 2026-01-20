@@ -209,6 +209,8 @@ export function buildClaudeValidationRequestJson(
 
   const expect = template.request.expect as ClaudeValidationExpect | undefined;
   const headerOverrides = template.request.headers as unknown;
+  const roundtrip = (template.request as any)?.roundtrip as unknown;
+  const constraints = (template.request as any)?.constraints as unknown;
 
   const wrapper: Record<string, unknown> = {
     template_key: template.key,
@@ -219,6 +221,13 @@ export function buildClaudeValidationRequestJson(
     },
     body: nextBody,
   };
+
+  if (isPlainObject(roundtrip)) {
+    wrapper.roundtrip = { ...(roundtrip as Record<string, unknown>) };
+  }
+  if (isPlainObject(constraints)) {
+    wrapper.constraints = { ...(constraints as Record<string, unknown>) };
+  }
 
   if (typeof template.request.query === "string" && template.request.query.trim()) {
     wrapper.query = template.request.query.trim();
@@ -232,6 +241,35 @@ export function buildClaudeValidationRequestJson(
   }
 
   return JSON.stringify(wrapper, null, 2);
+}
+
+export function getClaudeTemplateApplicability(
+  template: ClaudeValidationTemplate,
+  model: string
+): { applicable: boolean; reason: string | null } {
+  const normalizedModel = model.trim();
+  if (!normalizedModel) return { applicable: true, reason: null };
+
+  const constraints = (template.request as any)?.constraints as unknown;
+  if (!isPlainObject(constraints)) return { applicable: true, reason: null };
+
+  const onlyModelIncludes = (constraints as any).onlyModelIncludes as unknown;
+  if (Array.isArray(onlyModelIncludes) && onlyModelIncludes.length > 0) {
+    const m = normalizedModel.toLowerCase();
+    const needles = onlyModelIncludes
+      .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+      .map((v) => v.trim().toLowerCase());
+
+    if (needles.length > 0 && !needles.some((needle) => m.includes(needle))) {
+      return { applicable: false, reason: `仅适用于模型包含：${needles.join(" / ")}` };
+    }
+  }
+
+  return { applicable: true, reason: null };
+}
+
+export function isClaudeTemplateApplicable(template: ClaudeValidationTemplate, model: string) {
+  return getClaudeTemplateApplicability(template, model).applicable;
 }
 
 export function extractTemplateKeyFromRequestJson(requestJson: string): string | null {
@@ -273,6 +311,11 @@ export type ClaudeValidationEvaluation = {
   template: ClaudeValidationTemplate;
   templateKey: ClaudeValidationTemplateKey;
   overallPass: boolean | null;
+  grade: {
+    level: "A" | "B" | "C" | "D";
+    label: string;
+    title: string;
+  } | null;
   checks: {
     cacheDetail?: { ok: boolean; label: string; title: string };
     outputChars?: { ok: boolean; label: string; title: string };
@@ -280,6 +323,9 @@ export type ClaudeValidationEvaluation = {
     modelConsistency?: { ok: boolean; label: string; title: string };
     thinkingOutput?: { ok: boolean; label: string; title: string };
     signature?: { ok: boolean; label: string; title: string };
+    signatureRoundtrip?: { ok: boolean; label: string; title: string };
+    signatureTamper?: { ok: boolean; label: string; title: string };
+    cacheReadHit?: { ok: boolean; label: string; title: string };
     responseId?: { ok: boolean; label: string; title: string };
     serviceTier?: { ok: boolean; label: string; title: string };
     outputConfig?: { ok: boolean; label: string; title: string };
@@ -378,9 +424,11 @@ export function evaluateClaudeValidation(
   const checksOut: ClaudeValidationEvaluation["checks"] = {};
 
   const requireCacheDetail = template.evaluation.requireCacheDetail;
+  const requireCacheReadHit = Boolean((template.evaluation as any).requireCacheReadHit);
   const requireModelConsistency = template.evaluation.requireModelConsistency;
   const requireThinkingOutput = template.evaluation.requireThinkingOutput;
   const requireSignature = template.evaluation.requireSignature;
+  const requireSignatureRoundtrip = Boolean((template.evaluation as any).requireSignatureRoundtrip);
   const signatureMinChars = (() => {
     const v = template.evaluation.signatureMinChars;
     return typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
@@ -397,7 +445,14 @@ export function evaluateClaudeValidation(
       ? multiTurnSecretRaw.trim()
       : "";
 
-  const capabilityHaystack = `${outputPreview}\n${thinkingPreview}`.trim();
+  const roundtripStep2OutputPreview = (() => {
+    const raw = get<string>(signalsRaw, "roundtrip_step2_output_preview");
+    if (typeof raw !== "string") return "";
+    return raw.trim() ? raw : "";
+  })();
+  const outputPreviewForChecks = roundtripStep2OutputPreview || outputPreview;
+
+  const capabilityHaystack = `${outputPreviewForChecks}\n${thinkingPreview}`.trim();
 
   const reverseProxy = detectReverseProxyKeywords(result);
   if (result) {
@@ -434,7 +489,8 @@ export function evaluateClaudeValidation(
         ? sseStopReasonRaw.trim()
         : null;
     const sseStopReasonIsMaxTokens =
-      get<boolean>(checksRaw, "sse_message_delta_stop_reason_is_max_tokens") === true;
+      get<boolean>(checksRaw, "sse_message_delta_stop_reason_is_max_tokens") === true ||
+      sseStopReason === "max_tokens";
 
     const ok = parsedAsSse && sseMessageDeltaSeen && sseStopReasonIsMaxTokens;
     const title = (() => {
@@ -454,42 +510,34 @@ export function evaluateClaudeValidation(
   if (requireCacheDetail) {
     const usage = result?.usage as unknown;
     const cache5m = get<number>(usage, "cache_creation_5m_input_tokens");
-    const cache1h = get<number>(usage, "cache_creation_1h_input_tokens");
-    const ok = typeof cache5m === "number" && typeof cache1h === "number";
+    const ok = typeof cache5m === "number" && Number.isFinite(cache5m);
     checksOut.cacheDetail = {
       ok,
       label: "Cache 细分",
-      title: `cache_creation_5m_input_tokens / 1h: ${typeof cache5m === "number" ? cache5m : "—"} / ${
-        typeof cache1h === "number" ? cache1h : "—"
-      }`,
+      title: `cache_creation_5m_input_tokens: ${typeof cache5m === "number" ? cache5m : "—"}`,
     };
   }
 
   const outputConfigOk = (() => {
     const usage = result?.usage as unknown;
-    const hasCacheDetail = get<boolean>(signalsRaw, "has_cache_creation_detail") === true;
     const cache5m = get<number>(usage, "cache_creation_5m_input_tokens");
-    const cache1h = get<number>(usage, "cache_creation_1h_input_tokens");
     const cacheCreation = get<number>(usage, "cache_creation_input_tokens");
     const hasAnyCache =
-      hasCacheDetail ||
       (typeof cache5m === "number" && Number.isFinite(cache5m)) ||
-      (typeof cache1h === "number" && Number.isFinite(cache1h)) ||
       (typeof cacheCreation === "number" && Number.isFinite(cacheCreation));
     return Boolean(serviceTier) || hasAnyCache;
   })();
 
   if (requireOutputConfig) {
     const usage = result?.usage as unknown;
-    const hasCacheDetail = get<boolean>(signalsRaw, "has_cache_creation_detail") === true;
     const cache5m = get<number>(usage, "cache_creation_5m_input_tokens");
     const cache1h = get<number>(usage, "cache_creation_1h_input_tokens");
     const cacheCreation = get<number>(usage, "cache_creation_input_tokens");
     const fields: string[] = [];
     if (serviceTier) fields.push("service_tier");
-    if (hasCacheDetail) fields.push("cache_creation_detail");
     if (typeof cache5m === "number" && Number.isFinite(cache5m)) fields.push("cache_creation_5m");
-    if (typeof cache1h === "number" && Number.isFinite(cache1h)) fields.push("cache_creation_1h");
+    if (typeof cache1h === "number" && Number.isFinite(cache1h))
+      fields.push("cache_creation_1h(ignored)");
     if (typeof cacheCreation === "number" && Number.isFinite(cacheCreation))
       fields.push("cache_creation_input_tokens");
     checksOut.outputConfig = {
@@ -543,12 +591,14 @@ export function evaluateClaudeValidation(
     }
   })();
 
-  const outputFirstLine = firstNonEmptyLine(outputPreview);
+  const outputFirstLine = firstNonEmptyLine(outputPreviewForChecks);
   const multiTurnSecretOnFirstLine = Boolean(
     multiTurnSecretPattern && outputFirstLine && multiTurnSecretPattern.test(outputFirstLine)
   );
   const multiTurnSecretInOutput = Boolean(
-    multiTurnSecretPattern && outputPreview && multiTurnSecretPattern.test(outputPreview)
+    multiTurnSecretPattern &&
+      outputPreviewForChecks &&
+      multiTurnSecretPattern.test(outputPreviewForChecks)
   );
   const multiTurnSecretInThinking = Boolean(
     multiTurnSecretPattern && thinkingPreview && multiTurnSecretPattern.test(thinkingPreview)
@@ -558,7 +608,7 @@ export function evaluateClaudeValidation(
 
   const multiTurnTitle = (() => {
     if (!multiTurnSecretPattern) return "暗号未配置/无效";
-    if (!outputPreview.trim()) return "输出为空（无法判断第一行暗号）";
+    if (!outputPreviewForChecks.trim()) return "输出为空（无法判断第一行暗号）";
     if (multiTurnSecretOnFirstLine) return `第一行命中暗号：${multiTurnSecret}`;
     const firstLinePreview = outputFirstLine ? truncateText(outputFirstLine, 60) : "—";
     if (multiTurnSecretInOutput || multiTurnSecretInThinking) {
@@ -595,17 +645,32 @@ export function evaluateClaudeValidation(
     if (outputExpectation.kind === "max") {
       const fromServer = get<boolean>(checks, "output_text_chars_le_max");
       ok = typeof fromServer === "boolean" ? fromServer : outputChars <= outputExpectation.maxChars;
-      title = `expect.max_output_chars=${outputExpectation.maxChars}`;
+      title = [
+        `expect.max_output_chars=${outputExpectation.maxChars}`,
+        "旧口径说明：拼接所有 text 内容块（不 trim，空格/换行计入），按字符数近似验证 max_tokens 行为。",
+        `观测：output_text_chars=${outputChars}; from_server=${
+          typeof fromServer === "boolean" ? (fromServer ? "true" : "false") : "—"
+        }`,
+      ].join("\n");
       checksOut.outputChars = {
         ok,
-        label: `输出≤${outputExpectation.maxChars} (${outputChars})`,
+        label:
+          outputExpectation.maxChars === 5
+            ? `max_tokens=5（输出字符≤${outputExpectation.maxChars}；实际=${outputChars}）`
+            : `输出字符≤${outputExpectation.maxChars}（实际=${outputChars}）`,
         title,
       };
     } else {
       const fromServer = get<boolean>(checks, "output_text_chars_eq_expected");
       ok =
         typeof fromServer === "boolean" ? fromServer : outputChars === outputExpectation.exactChars;
-      title = `expect.exact_output_chars=${outputExpectation.exactChars}`;
+      title = [
+        `expect.exact_output_chars=${outputExpectation.exactChars}`,
+        "说明：拼接所有 text 内容块（不 trim），按字符数进行精确匹配。",
+        `观测：output_text_chars=${outputChars}; from_server=${
+          typeof fromServer === "boolean" ? (fromServer ? "true" : "false") : "—"
+        }`,
+      ].join("\n");
       checksOut.outputChars = {
         ok,
         label: `输出=${outputExpectation.exactChars} (${outputChars})`,
@@ -665,6 +730,162 @@ export function evaluateClaudeValidation(
     };
   }
 
+  const roundtripStep2Ok = (() => {
+    const explicit = get<boolean>(signalsRaw, "roundtrip_step2_ok");
+    if (typeof explicit === "boolean") return explicit;
+    const status = get<number>(signalsRaw, "roundtrip_step2_status");
+    if (typeof status === "number" && Number.isFinite(status)) {
+      const s = Math.floor(status);
+      return s >= 200 && s < 300;
+    }
+    return null;
+  })();
+
+  const roundtripStep2Status = (() => {
+    const status = get<number>(signalsRaw, "roundtrip_step2_status");
+    if (typeof status === "number" && Number.isFinite(status)) return Math.floor(status);
+    return null;
+  })();
+  const roundtripStep2Error = (() => {
+    const raw = get<string>(signalsRaw, "roundtrip_step2_error");
+    if (typeof raw !== "string") return null;
+    const trimmed = raw.trim();
+    return trimmed ? trimmed : null;
+  })();
+
+  if (requireSignatureRoundtrip) {
+    checksOut.signatureRoundtrip = {
+      ok: roundtripStep2Ok === true,
+      label: "Signature 回传 (Step2)",
+      title:
+        roundtripStep2Ok == null
+          ? [
+              "Step2（回传验证）：将 Step1 的 assistant thinking block（含 signature）原样回传。",
+              "预期：第一方链路应接受并继续生成；若拒绝/报错，常见于兼容层不支持 thinking/signature 结构。",
+              `观测：status=${roundtripStep2Status ?? "—"}; ok=—${
+                roundtripStep2Error ? `; error=${truncateText(roundtripStep2Error, 180)}` : ""
+              }`,
+            ].join("\n")
+          : roundtripStep2Ok
+            ? [
+                "Step2（回传验证）：将 Step1 的 assistant thinking block（含 signature）原样回传。",
+                "结论：Step2 通过（支持回传结构）。",
+                `观测：status=${roundtripStep2Status ?? "—"}; ok=true`,
+              ].join("\n")
+            : [
+                "Step2（回传验证）：将 Step1 的 assistant thinking block（含 signature）原样回传。",
+                "结论：Step2 失败（疑似不支持/剥离 thinking signature 回传）。",
+                `观测：status=${roundtripStep2Status ?? "—"}; ok=false${
+                  roundtripStep2Error ? `; error=${truncateText(roundtripStep2Error, 180)}` : ""
+                }`,
+              ].join("\n"),
+    };
+  } else if (result && roundtripStep2Ok != null) {
+    checksOut.signatureRoundtrip = {
+      ok: roundtripStep2Ok,
+      label: "Signature 回传 (Step2)",
+      title: roundtripStep2Ok
+        ? [
+            "Step2（回传验证）：将 Step1 的 assistant thinking block（含 signature）原样回传。",
+            "结论：Step2 通过。",
+            `观测：status=${roundtripStep2Status ?? "—"}; ok=true`,
+          ].join("\n")
+        : [
+            "Step2（回传验证）：将 Step1 的 assistant thinking block（含 signature）原样回传。",
+            "结论：Step2 失败。",
+            `观测：status=${roundtripStep2Status ?? "—"}; ok=false${
+              roundtripStep2Error ? `; error=${truncateText(roundtripStep2Error, 180)}` : ""
+            }`,
+          ].join("\n"),
+    };
+  }
+
+  const roundtripStep3Enabled = get<boolean>(signalsRaw, "roundtrip_step3_enabled") === true;
+  const roundtripStep3Status = (() => {
+    const status = get<number>(signalsRaw, "roundtrip_step3_status");
+    if (typeof status === "number" && Number.isFinite(status)) return Math.floor(status);
+    return null;
+  })();
+  const roundtripStep3MentionsInvalidSignature =
+    get<boolean>(signalsRaw, "roundtrip_step3_mentions_invalid_signature") === true;
+  const roundtripStep3Error = (() => {
+    const raw = get<string>(signalsRaw, "roundtrip_step3_error");
+    if (typeof raw !== "string") return null;
+    const trimmed = raw.trim();
+    return trimmed ? trimmed : null;
+  })();
+  const roundtripStep3Rejected = (() => {
+    const explicit = get<boolean>(signalsRaw, "roundtrip_step3_rejected");
+    if (typeof explicit === "boolean") return explicit;
+    const status = get<number>(signalsRaw, "roundtrip_step3_status");
+    if (typeof status === "number" && Number.isFinite(status)) {
+      const s = Math.floor(status);
+      if (s === 400) return true;
+      if (s >= 200 && s < 300) return false;
+    }
+    return null;
+  })();
+
+  if (result && (roundtripStep3Enabled || roundtripStep3Rejected != null)) {
+    checksOut.signatureTamper = {
+      ok: roundtripStep3Rejected === true,
+      label: "Signature 篡改/验签 (Step3)",
+      title: !roundtripStep3Enabled
+        ? [
+            "Step3（篡改验证/负向对照）：未启用。",
+            "说明：启用后会将 Step1 signature 篡改 1 个字符再回传，用于验证上游是否真实验签。",
+          ].join("\n")
+        : roundtripStep3Rejected == null
+          ? [
+              "Step3（篡改验证/负向对照）：将 Step1 signature 篡改 1 个字符再回传。",
+              "预期：第一方链路应在验签阶段拒绝（常见 HTTP 400 或提示 invalid signature）。",
+              "若仍返回 2xx：可能未验签/签名被代理剥离（高风险）。",
+              `观测：status=${roundtripStep3Status ?? "—"}; rejected=—; mentions_invalid_signature=${
+                roundtripStep3MentionsInvalidSignature ? "true" : "false"
+              }${roundtripStep3Error ? `; error=${truncateText(roundtripStep3Error, 180)}` : ""}`,
+            ].join("\n")
+          : roundtripStep3Rejected
+            ? [
+                "Step3（篡改验证/负向对照）：将 Step1 signature 篡改 1 个字符再回传。",
+                "结论：篡改被拒（强信号，支持真实验签）。",
+                `观测：status=${roundtripStep3Status ?? "—"}; rejected=true; mentions_invalid_signature=${
+                  roundtripStep3MentionsInvalidSignature ? "true" : "false"
+                }`,
+              ].join("\n")
+            : [
+                "Step3（篡改验证/负向对照）：将 Step1 signature 篡改 1 个字符再回传。",
+                "结论：篡改未被拒（高风险：可能未验签/签名被代理剥离）。",
+                `观测：status=${roundtripStep3Status ?? "—"}; rejected=false; mentions_invalid_signature=${
+                  roundtripStep3MentionsInvalidSignature ? "true" : "false"
+                }${roundtripStep3Error ? `; error=${truncateText(roundtripStep3Error, 180)}` : ""}`,
+              ].join("\n"),
+    };
+  }
+
+  const roundtripStep2CacheRead = (() => {
+    const v = get<number>(signalsRaw, "roundtrip_step2_cache_read_input_tokens");
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+    return null;
+  })();
+  const cacheReadHitOk = typeof roundtripStep2CacheRead === "number" && roundtripStep2CacheRead > 0;
+
+  if (requireCacheReadHit) {
+    checksOut.cacheReadHit = {
+      ok: cacheReadHitOk,
+      label: "Cache Read Hit",
+      title:
+        roundtripStep2CacheRead == null
+          ? "无 Step2 cache_read_input_tokens"
+          : `cache_read_input_tokens=${roundtripStep2CacheRead}`,
+    };
+  } else if (result && roundtripStep2CacheRead != null) {
+    checksOut.cacheReadHit = {
+      ok: cacheReadHitOk,
+      label: "Cache Read Hit",
+      title: `cache_read_input_tokens=${roundtripStep2CacheRead}`,
+    };
+  }
+
   if (requireResponseId) {
     checksOut.responseId = {
       ok: Boolean(responseId),
@@ -711,19 +932,87 @@ export function evaluateClaudeValidation(
     if (requireThinkingOutput && checksOut.thinkingOutput && !checksOut.thinkingOutput.ok)
       return false;
     if (requireSignature && checksOut.signature && !checksOut.signature.ok) return false;
+    if (
+      requireSignatureRoundtrip &&
+      checksOut.signatureRoundtrip &&
+      !checksOut.signatureRoundtrip.ok
+    )
+      return false;
     if (requireResponseId && checksOut.responseId && !checksOut.responseId.ok) return false;
     if (requireServiceTier && checksOut.serviceTier && !checksOut.serviceTier.ok) return false;
     if (requireOutputConfig && checksOut.outputConfig && !checksOut.outputConfig.ok) return false;
     if (requireToolSupport && checksOut.toolSupport && !checksOut.toolSupport.ok) return false;
     if (requireMultiTurn && checksOut.multiTurn && !checksOut.multiTurn.ok) return false;
+    if (requireCacheReadHit && checksOut.cacheReadHit && !checksOut.cacheReadHit.ok) return false;
 
     return true;
+  })();
+
+  const grade = (() => {
+    if (!result) return null;
+    if (!result.ok || hasError) {
+      return { level: "D" as const, label: "高风险", title: "请求失败/异常" };
+    }
+    if (checksOut.reverseProxy && checksOut.reverseProxy.ok === false) {
+      return {
+        level: "D" as const,
+        label: "高风险",
+        title: "命中逆向/反代关键词（强烈怀疑非第一方链路）",
+      };
+    }
+
+    if (requireSignatureRoundtrip) {
+      const step2Ok = checksOut.signatureRoundtrip?.ok === true;
+      const tamperRejected = checksOut.signatureTamper?.ok === true;
+      const baselineOk =
+        step2Ok &&
+        signatureOk &&
+        thinkingOk &&
+        (modelConsistency == null || modelConsistency === true) &&
+        toolSupportOk &&
+        multiTurnOk;
+
+      if (baselineOk && tamperRejected) {
+        return { level: "A" as const, label: "第一方（强）", title: "roundtrip + tamper 通过（强证据）" };
+      }
+      if (baselineOk) {
+        return { level: "B" as const, label: "第一方（中）", title: "roundtrip 通过；tamper 不确定/未通过" };
+      }
+      if (signatureOk && thinkingOk) {
+        return { level: "C" as const, label: "弱证据", title: "thinking/signature 存在但 roundtrip/一致性不足" };
+      }
+      return { level: "D" as const, label: "高风险", title: "缺少 thinking/signature（疑似兼容层/非第一方）" };
+    }
+
+    if (requireCacheReadHit) {
+      const creationOk = checksOut.cacheDetail?.ok === true;
+      const hitOk = checksOut.cacheReadHit?.ok === true;
+      if (creationOk && hitOk) {
+        return { level: "A" as const, label: "第一方（强）", title: "prompt caching create+hit 成立" };
+      }
+      if (creationOk) {
+        return { level: "B" as const, label: "第一方（中）", title: "prompt caching 已创建，但未命中 read-hit" };
+      }
+      return { level: "C" as const, label: "弱证据", title: "未观察到 cache_creation 明细（可能不支持或被代理剥离）" };
+    }
+
+    if (overallPass === true) {
+      return { level: "A" as const, label: "通过", title: "模板检查通过" };
+    }
+    if (overallPass === false) {
+      if (modelConsistency === false) {
+        return { level: "D" as const, label: "高风险", title: "模型不一致（疑似非目标模型）" };
+      }
+      return { level: "C" as const, label: "未通过", title: "模板检查未通过（弱/中风险）" };
+    }
+    return null;
   })();
 
   return {
     template,
     templateKey: template.key,
     overallPass,
+    grade,
     checks: checksOut,
     derived: {
       requestedModel,

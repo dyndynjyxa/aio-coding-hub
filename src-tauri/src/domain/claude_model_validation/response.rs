@@ -48,11 +48,14 @@ pub(super) fn signals_from_text(text: &str) -> serde_json::Value {
 
     let mentions_max_tokens = lower.contains("max_tokens");
     let mentions_tokens_greater = lower.contains("must be greater") && lower.contains("_tokens");
+    let mentions_invalid_signature =
+        lower.contains("invalid") && lower.contains("signature");
 
     serde_json::json!({
         "mentions_amazon_bedrock": mentions_bedrock,
         "mentions_max_tokens": mentions_max_tokens,
         "mentions_max_tokens_must_be_greater_than_tokens": mentions_tokens_greater,
+        "mentions_invalid_signature": mentions_invalid_signature,
     })
 }
 
@@ -71,6 +74,9 @@ fn take_first_n_chars(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
 }
 
+const MAX_ROUNDTRIP_THINKING_CHARS: usize = 120_000;
+const MAX_ROUNDTRIP_SIGNATURE_CHARS: usize = 24_000;
+
 #[derive(Default)]
 pub(super) struct SseTextAccumulator {
     buffer: Vec<u8>,
@@ -82,11 +88,20 @@ pub(super) struct SseTextAccumulator {
     pub(super) thinking_preview: String,
     pub(super) thinking_block_seen: bool,
     pub(super) signature_chars: usize,
+    pub(super) thinking_full: String,
+    pub(super) signature_full: String,
+    pub(super) signature_from_delta: bool,
     pub(super) message_delta_seen: bool,
     pub(super) message_delta_stop_reason: Option<String>,
     pub(super) message_delta_stop_reason_is_max_tokens: bool,
     pub(super) response_id: String,
     pub(super) service_tier: String,
+
+    current_thinking_block_index: Option<i64>,
+    capturing_thinking_block: bool,
+    current_thinking_full: String,
+    current_signature_full: String,
+    current_signature_from_delta: bool,
 }
 
 impl SseTextAccumulator {
@@ -122,6 +137,7 @@ impl SseTextAccumulator {
             self.ingest_line(&tail);
         }
         self.flush_event();
+        self.finalize_thinking_capture_best_effort();
     }
 
     fn ingest_line(&mut self, line: &[u8]) {
@@ -190,6 +206,14 @@ impl SseTextAccumulator {
     fn append_thinking(&mut self, text: &str) {
         self.thinking_block_seen = true;
         self.thinking_chars = self.thinking_chars.saturating_add(text.chars().count());
+        if self.capturing_thinking_block && !text.is_empty() {
+            if self.current_thinking_full.chars().count() < MAX_ROUNDTRIP_THINKING_CHARS {
+                let remaining = MAX_ROUNDTRIP_THINKING_CHARS
+                    .saturating_sub(self.current_thinking_full.chars().count());
+                self.current_thinking_full
+                    .push_str(&take_first_n_chars(text, remaining));
+            }
+        }
         if self.thinking_preview.chars().count() >= MAX_TEXT_PREVIEW_CHARS {
             return;
         }
@@ -209,6 +233,59 @@ impl SseTextAccumulator {
         if chars > self.signature_chars {
             self.signature_chars = chars;
         }
+        if self.capturing_thinking_block && !self.current_signature_from_delta {
+            if trimmed.chars().count() > self.current_signature_full.chars().count() {
+                self.current_signature_full =
+                    take_first_n_chars(trimmed, MAX_ROUNDTRIP_SIGNATURE_CHARS);
+            }
+        }
+    }
+
+    fn begin_thinking_capture(&mut self, index: Option<i64>) {
+        if self.capturing_thinking_block {
+            if self.current_thinking_block_index == index {
+                return;
+            }
+        }
+        self.capturing_thinking_block = true;
+        self.current_thinking_block_index = index;
+        self.current_thinking_full.clear();
+        self.current_signature_full.clear();
+        self.current_signature_from_delta = false;
+    }
+
+    fn append_signature_delta(&mut self, signature_part: &str) {
+        let part = signature_part.trim();
+        if part.is_empty() {
+            return;
+        }
+        self.thinking_block_seen = true;
+        self.current_signature_from_delta = true;
+
+        if self.current_signature_full.chars().count() < MAX_ROUNDTRIP_SIGNATURE_CHARS {
+            let remaining = MAX_ROUNDTRIP_SIGNATURE_CHARS
+                .saturating_sub(self.current_signature_full.chars().count());
+            self.current_signature_full
+                .push_str(&take_first_n_chars(part, remaining));
+        }
+
+        let chars = self.current_signature_full.trim().chars().count();
+        if chars > self.signature_chars {
+            self.signature_chars = chars;
+        }
+    }
+
+    fn finalize_thinking_capture_best_effort(&mut self) {
+        if !self.capturing_thinking_block {
+            return;
+        }
+        if !self.current_signature_full.trim().is_empty() {
+            self.thinking_full = self.current_thinking_full.clone();
+            self.signature_full = self.current_signature_full.clone();
+            self.signature_from_delta = self.current_signature_from_delta;
+        }
+        self.capturing_thinking_block = false;
+        self.current_thinking_block_index = None;
     }
 
     fn ingest_response_meta(&mut self, value: &serde_json::Value) {
@@ -232,6 +309,38 @@ impl SseTextAccumulator {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .trim();
+        let block_index = data.get("index").and_then(|v| v.as_i64());
+
+        if data_type == "content_block_start" {
+            if let Some(block) = data.get("content_block").and_then(|v| v.as_object()) {
+                let block_type = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                if block_type == "thinking" || block_type == "redacted_thinking" {
+                    self.begin_thinking_capture(block_index);
+                    if let Some(thinking) = block
+                        .get("thinking")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| block.get("text").and_then(|v| v.as_str()))
+                    {
+                        if !thinking.is_empty() {
+                            self.append_thinking(thinking);
+                        }
+                    }
+                    if let Some(signature) = block.get("signature").and_then(|v| v.as_str()) {
+                        self.ingest_signature(signature);
+                    }
+                }
+            }
+        }
+        if data_type == "content_block_stop" {
+            if self.capturing_thinking_block {
+                if self.current_thinking_block_index.is_none()
+                    || self.current_thinking_block_index == block_index
+                {
+                    self.finalize_thinking_capture_best_effort();
+                }
+            }
+        }
+
         if event_name == "message_delta" || data_type == "message_delta" {
             self.message_delta_seen = true;
             if let Some(stop_reason) = data
@@ -273,6 +382,7 @@ impl SseTextAccumulator {
             if delta_type == "thinking_delta" || delta_type == "thinking" {
                 if let Some(text) = delta.get("thinking").and_then(|v| v.as_str()) {
                     if !text.is_empty() {
+                        self.begin_thinking_capture(block_index);
                         self.append_thinking(text);
                         return;
                     }
@@ -280,14 +390,25 @@ impl SseTextAccumulator {
                 // Best-effort fallback: some variants might use `text` for thinking.
                 if let Some(text) = delta.get("text").and_then(|v| v.as_str()) {
                     if !text.is_empty() {
+                        self.begin_thinking_capture(block_index);
                         self.append_thinking(text);
                         return;
                     }
                 }
             }
 
+            // signature_delta: { delta: { type:"signature_delta", signature:"..." } }
+            if delta_type == "signature_delta" {
+                if let Some(sig) = delta.get("signature").and_then(|v| v.as_str()) {
+                    self.begin_thinking_capture(block_index);
+                    self.append_signature_delta(sig);
+                    return;
+                }
+            }
+
             // Best-effort: signature might appear on delta/message shapes.
             if let Some(signature) = delta.get("signature").and_then(|v| v.as_str()) {
+                self.begin_thinking_capture(block_index);
                 self.ingest_signature(signature);
             }
             if let Some(thinking) = delta.get("thinking").and_then(|v| v.as_str()) {
@@ -349,30 +470,33 @@ impl SseTextAccumulator {
             }
         }
 
-        // content_block_start: { content_block: { type:"text", text:"..." } }
-        if let Some(block) = data.get("content_block").and_then(|v| v.as_object()) {
-            if block.get("type").and_then(|v| v.as_str()) == Some("text") {
-                if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
-                    if !text.is_empty() {
-                        self.append_text(text);
-                        return;
-                    }
-                }
-            }
-            if let Some(block_type) = block.get("type").and_then(|v| v.as_str()) {
-                if block_type == "thinking" || block_type == "redacted_thinking" {
-                    self.thinking_block_seen = true;
-                    if let Some(thinking) = block
-                        .get("thinking")
-                        .and_then(|v| v.as_str())
-                        .or_else(|| block.get("text").and_then(|v| v.as_str()))
-                    {
-                        if !thinking.is_empty() {
-                            self.append_thinking(thinking);
+        // content_block_start fallback: { content_block: { type:"text"/"thinking", ... } }
+        // If we already handled a canonical content_block_start above, avoid double counting.
+        if data_type != "content_block_start" {
+            if let Some(block) = data.get("content_block").and_then(|v| v.as_object()) {
+                if block.get("type").and_then(|v| v.as_str()) == Some("text") {
+                    if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                        if !text.is_empty() {
+                            self.append_text(text);
+                            return;
                         }
                     }
-                    if let Some(signature) = block.get("signature").and_then(|v| v.as_str()) {
-                        self.ingest_signature(signature);
+                }
+                if let Some(block_type) = block.get("type").and_then(|v| v.as_str()) {
+                    if block_type == "thinking" || block_type == "redacted_thinking" {
+                        self.thinking_block_seen = true;
+                        if let Some(thinking) = block
+                            .get("thinking")
+                            .and_then(|v| v.as_str())
+                            .or_else(|| block.get("text").and_then(|v| v.as_str()))
+                        {
+                            if !thinking.is_empty() {
+                                self.append_thinking(thinking);
+                            }
+                        }
+                        if let Some(signature) = block.get("signature").and_then(|v| v.as_str()) {
+                            self.ingest_signature(signature);
+                        }
                     }
                 }
             }
@@ -596,4 +720,112 @@ pub(super) fn extract_thinking_from_message_json(
     }
 
     (has_block, total, preview, signature_chars)
+}
+
+pub(super) fn extract_thinking_full_and_signature_from_message_json(
+    value: &serde_json::Value,
+) -> (bool, String, String) {
+    // Returns:
+    // - has_thinking_block: whether "thinking"/"redacted_thinking" blocks were observed
+    // - thinking_full: best-effort concatenated thinking text (truncated)
+    // - signature_full: best-effort signature text (truncated; prefers the longest found)
+
+    // Support SSE wrapper: { message: { ... } }
+    if let Some(message) = value.get("message") {
+        return extract_thinking_full_and_signature_from_message_json(message);
+    }
+
+    let mut has_block = false;
+    let mut thinking_full = String::new();
+    let mut signature_full = String::new();
+
+    // Some variants may flatten thinking to a top-level field.
+    if let Some(t) = value.get("thinking").and_then(|v| v.as_str()) {
+        let text = t.trim();
+        if !text.is_empty() {
+            has_block = true;
+            thinking_full = take_first_n_chars(text, MAX_ROUNDTRIP_THINKING_CHARS);
+        }
+    }
+
+    let Some(content) = value.get("content") else {
+        return (has_block, thinking_full, signature_full);
+    };
+    let Some(arr) = content.as_array() else {
+        return (has_block, thinking_full, signature_full);
+    };
+
+    for block in arr {
+        let Some(obj) = block.as_object() else {
+            continue;
+        };
+        let block_type = obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        if block_type == "thinking" || block_type == "redacted_thinking" {
+            has_block = true;
+
+            if let Some(sig) = obj.get("signature").and_then(|v| v.as_str()) {
+                let trimmed = sig.trim();
+                if !trimmed.is_empty() && trimmed.chars().count() > signature_full.chars().count()
+                {
+                    signature_full = take_first_n_chars(trimmed, MAX_ROUNDTRIP_SIGNATURE_CHARS);
+                }
+            }
+
+            if let Some(t) = obj
+                .get("thinking")
+                .and_then(|v| v.as_str())
+                .or_else(|| obj.get("text").and_then(|v| v.as_str()))
+            {
+                let text = t.trim();
+                if !text.is_empty()
+                    && thinking_full.chars().count() < MAX_ROUNDTRIP_THINKING_CHARS
+                {
+                    if !thinking_full.is_empty() {
+                        thinking_full.push('\n');
+                    }
+                    let remaining = MAX_ROUNDTRIP_THINKING_CHARS
+                        .saturating_sub(thinking_full.chars().count());
+                    thinking_full.push_str(&take_first_n_chars(text, remaining));
+                }
+            }
+        }
+    }
+
+    (has_block, thinking_full, signature_full)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SseTextAccumulator;
+
+    #[test]
+    fn sse_signature_delta_is_accumulated() {
+        let mut acc = SseTextAccumulator::default();
+        let sse = concat!(
+            "event: message\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"THINK1\",\"signature\":\"\"}}\n",
+            "\n",
+            "event: message\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"THINK2\"}}\n",
+            "\n",
+            "event: message\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"SIG_PART_1\"}}\n",
+            "\n",
+            "event: message\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"SIG_PART_2\"}}\n",
+            "\n",
+            "event: message\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n",
+            "\n",
+        );
+
+        acc.ingest_chunk(sse.as_bytes());
+        acc.finalize();
+
+        assert!(acc.thinking_block_seen);
+        assert_eq!(acc.thinking_full, "THINK1THINK2");
+        assert_eq!(acc.signature_full, "SIG_PART_1SIG_PART_2");
+        assert!(acc.signature_from_delta);
+        assert_eq!(acc.signature_chars, "SIG_PART_1SIG_PART_2".chars().count());
+    }
 }

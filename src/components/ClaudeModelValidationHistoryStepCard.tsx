@@ -162,7 +162,23 @@ export function ClaudeModelValidationHistoryStepCard({
           </div>
 
           <div className="space-y-2">
-            <div className="text-[11px] font-semibold text-slate-700">SSE 原文</div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[11px] font-semibold text-slate-700">SSE 原文</div>
+              <Button
+                onClick={(e) => {
+                  stopDetailsToggle(e);
+                  return void Promise.resolve(copyText(sseText, "已复制 SSE 原文"));
+                }}
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0"
+                disabled={!canCopySse}
+                title="复制 SSE 原文"
+                aria-label="复制 SSE 原文"
+              >
+                <Copy className="h-4 w-4" />
+              </Button>
+            </div>
             <pre className="custom-scrollbar max-h-60 overflow-auto rounded-lg bg-slate-950 p-4 font-mono text-[10px] leading-relaxed text-slate-300">
               {sseText ? sseText : <span className="text-slate-600 italic">// 暂无 SSE 数据</span>}
             </pre>

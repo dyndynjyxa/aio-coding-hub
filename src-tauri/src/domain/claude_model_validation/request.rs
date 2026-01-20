@@ -11,7 +11,7 @@ pub(super) fn parse_request_json(request_json: &str) -> Result<super::ParsedRequ
     // Accept either:
     // - Wrapper: { headers, body, expect }
     // - Raw body: { model, messages, ... }
-    let (headers_value, body_value, expect_value, path_value, query_value) =
+    let (headers_value, body_value, expect_value, path_value, query_value, roundtrip_value) =
         if obj.contains_key("body") {
             (
                 obj.get("headers").cloned(),
@@ -19,9 +19,10 @@ pub(super) fn parse_request_json(request_json: &str) -> Result<super::ParsedRequ
                 obj.get("expect").cloned(),
                 obj.get("path").cloned(),
                 obj.get("query").cloned(),
+                obj.get("roundtrip").cloned(),
             )
         } else {
-            (None, Some(value.clone()), None, None, None)
+            (None, Some(value.clone()), None, None, None, None)
         };
 
     let headers_map = headers_value
@@ -88,6 +89,11 @@ pub(super) fn parse_request_json(request_json: &str) -> Result<super::ParsedRequ
         .filter(|s| !s.is_empty())
         .or(forwarded_query_from_path);
 
+    let roundtrip = roundtrip_value
+        .as_ref()
+        .and_then(|v| v.as_object())
+        .and_then(parse_roundtrip_config);
+
     Ok(super::ParsedRequest {
         request_value: value,
         headers: headers_map,
@@ -96,7 +102,43 @@ pub(super) fn parse_request_json(request_json: &str) -> Result<super::ParsedRequ
         expect_exact_output_chars,
         forwarded_path,
         forwarded_query,
+        roundtrip,
     })
+}
+
+fn parse_roundtrip_config(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Option<super::RoundtripConfig> {
+    let kind = obj
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_lowercase())
+        .unwrap_or_default();
+
+    let step2_user_prompt = obj
+        .get("step2_user_prompt")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    match kind.as_str() {
+        "signature" => {
+            let enable_tamper = obj
+                .get("enable_tamper")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            Some(super::RoundtripConfig::Signature(
+                super::SignatureRoundtripConfig {
+                    enable_tamper,
+                    step2_user_prompt,
+                },
+            ))
+        }
+        "cache" => Some(super::RoundtripConfig::Cache(super::CacheRoundtripConfig {
+            step2_user_prompt,
+        })),
+        _ => None,
+    }
 }
 
 pub(super) fn build_target_url(

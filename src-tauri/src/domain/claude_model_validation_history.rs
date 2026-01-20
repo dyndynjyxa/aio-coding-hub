@@ -1,7 +1,6 @@
 use crate::db;
 use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
-use serde_json::Value;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_KEEP_PER_PROVIDER: usize = 50;
@@ -49,39 +48,6 @@ fn ensure_provider_is_claude(conn: &rusqlite::Connection, provider_id: i64) -> R
     }
 
     Ok(())
-}
-
-fn is_http_success_result_json(result_json: &str) -> bool {
-    let Ok(value) = serde_json::from_str::<Value>(result_json) else {
-        return false;
-    };
-
-    let ok = value.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
-    if !ok {
-        return false;
-    }
-
-    // 过滤早期误插入的“看似 ok 但无响应数据/读流出错”的记录。
-    //
-    // 新口径：HTTP 2xx + 有响应数据 + 无 stream 读取错误 才算“请求成功”，才应出现在历史列表。
-    if let Some(raw_excerpt) = value.get("raw_excerpt").and_then(|v| v.as_str()) {
-        if raw_excerpt.trim().is_empty() {
-            return false;
-        }
-    }
-
-    if let Some(stream_read_error) = value
-        .get("signals")
-        .and_then(|v| v.as_object())
-        .and_then(|m| m.get("stream_read_error"))
-        .and_then(|v| v.as_bool())
-    {
-        if stream_read_error {
-            return false;
-        }
-    }
-
-    true
 }
 
 pub fn insert_run_and_prune(
@@ -150,7 +116,7 @@ pub fn list_runs(
     limit: Option<usize>,
 ) -> Result<Vec<ClaudeModelValidationRunRow>, String> {
     let limit = limit.unwrap_or(DEFAULT_KEEP_PER_PROVIDER).clamp(1, 500);
-    let fetch_limit = limit.saturating_mul(3).clamp(limit, 500);
+    let fetch_limit = limit;
 
     let conn = db::open_connection(app)?;
     ensure_provider_is_claude(&conn, provider_id)?;
@@ -187,14 +153,8 @@ LIMIT ?2
     let mut items = Vec::new();
     for row in rows {
         let item = row.map_err(|e| format!("DB_ERROR: failed to read history row: {e}"))?;
-        // 历史只返回“请求成功”的结果（ok=true 且有响应数据且无 stream 读取错误），
-        // 早期误插入的异常记录（例如 4xx/5xx、空响应、读流错误）在此过滤掉。
-        if is_http_success_result_json(&item.result_json) {
-            items.push(item);
-        }
-        if items.len() >= limit {
-            break;
-        }
+        // 用户要求：历史需要保留失败步骤用于诊断与回溯（suite 每一步都可查看）。
+        items.push(item);
     }
     Ok(items)
 }

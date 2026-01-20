@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactElement } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { logToConsole } from "../services/consoleLog";
@@ -19,6 +19,7 @@ import {
   buildClaudeValidationRequestJson,
   evaluateClaudeValidation,
   extractTemplateKeyFromRequestJson,
+  getClaudeTemplateApplicability,
   getClaudeValidationTemplate,
   listClaudeValidationTemplates,
   type ClaudeValidationTemplateKey,
@@ -303,7 +304,10 @@ export function ClaudeModelValidationDialog({
     onOpenChange(nextOpen);
   }
 
-  async function refreshHistory(options?: { selectLatest?: boolean }) {
+  async function refreshHistory(options?: {
+    selectLatest?: boolean;
+    allowAutoSelectWhenNone?: boolean;
+  }) {
     const curProvider = providerRef.current;
     if (!open || !curProvider) return;
     const providerId = curProvider.id;
@@ -330,9 +334,14 @@ export function ClaudeModelValidationDialog({
       const nextSelected = (() => {
         const keys = mapped.map((it) => getHistoryGroupKey(it));
         const uniqueKeys = new Set(keys);
+        const allowAutoSelectWhenNone =
+          typeof options?.allowAutoSelectWhenNone === "boolean"
+            ? options.allowAutoSelectWhenNone
+            : true;
 
         if (options?.selectLatest) return keys[0] ?? null;
         if (selectedHistoryKey && uniqueKeys.has(selectedHistoryKey)) return selectedHistoryKey;
+        if (!selectedHistoryKey && !allowAutoSelectWhenNone) return null;
         return keys[0] ?? null;
       })();
       setSelectedHistoryKey(nextSelected);
@@ -534,11 +543,34 @@ export function ClaudeModelValidationDialog({
       }
     }
 
-    const suiteTemplateKeys = templates.map((t) => t.key);
+    const templateApplicability = templates.map((t) => ({
+      template: t,
+      applicability: getClaudeTemplateApplicability(t, normalizedModel),
+    }));
+    const skippedTemplates = templateApplicability.filter((t) => !t.applicability.applicable);
+    const suiteTemplateKeys = templateApplicability
+      .filter((t) => t.applicability.applicable)
+      .map((t) => t.template.key);
+
+    if (skippedTemplates.length > 0) {
+      const shown = skippedTemplates
+        .slice(0, 3)
+        .map((t) => `${t.template.label}${t.applicability.reason ? `（${t.applicability.reason}）` : ""}`)
+        .join("；");
+      const rest = skippedTemplates.length - Math.min(3, skippedTemplates.length);
+      toast(`已跳过 ${skippedTemplates.length} 个不适用模板：${shown}${rest > 0 ? `；+${rest}` : ""}`);
+    }
+
     if (suiteTemplateKeys.length === 0) {
-      toast("暂无可用验证模板");
+      toast("暂无适用验证模板");
       return;
     }
+
+    // Cancel any in-flight history refresh (dialog open / manual refresh). Otherwise a late
+    // refreshHistory({selectLatest:true}) can switch the right pane into “历史记录详情” mid-suite,
+    // making it look like only部分卡片/步骤执行了。
+    historyReqSeqRef.current += 1;
+    setHistoryLoading(false);
 
     setValidating(true);
     const suiteRunId = newUuidV4();
@@ -560,8 +592,6 @@ export function ClaudeModelValidationDialog({
       })
     );
     try {
-      let anyOk = false;
-
       for (let idx = 0; idx < suiteTemplateKeys.length; idx += 1) {
         const stepKey = suiteTemplateKeys[idx];
         const stepTemplate = getClaudeValidationTemplate(stepKey);
@@ -676,8 +706,6 @@ export function ClaudeModelValidationDialog({
           return;
         }
 
-        anyOk = anyOk || resp.ok;
-
         setResultTemplateKey(stepTemplate.key);
         setSelectedHistoryKey(null);
         setResult(resp);
@@ -699,9 +727,10 @@ export function ClaudeModelValidationDialog({
         );
       }
 
-      if (anyOk) {
-        await refreshHistory({ selectLatest: true });
-      }
+      // 刷新历史用于左侧列表更新，但不要自动切到“历史详情”，避免用户误以为本次 suite
+      // 只执行了部分步骤（右侧需保持“当前运行”视图，历史仅用于回溯）。
+      await refreshHistory({ selectLatest: false, allowAutoSelectWhenNone: false });
+      setSelectedHistoryKey(null);
     } catch (err) {
       logToConsole("error", "Claude Provider 模型验证失败", {
         error: String(err),
@@ -1220,26 +1249,66 @@ export function ClaudeModelValidationDialog({
                 </div>
               ) : selectedHistoryGroup?.isSuite ? (
                 <div className="space-y-4">
-                  {selectedHistoryGroup.runs.map((step) => {
-                    const idx = step.meta.suiteStepIndex ?? 0;
-                    const title =
-                      idx > 0
-                        ? `${idx}/${selectedHistoryGroup.expectedTotal}`
-                        : `?/${selectedHistoryGroup.expectedTotal}`;
-                    return (
-                      <ClaudeModelValidationHistoryStepCard
-                        key={`${selectedHistoryGroup.key}_${step.run.id}`}
-                        title={`验证 ${title}：${step.evaluation.template.label}`}
-                        rightBadge={<OutcomePill pass={step.evaluation.overallPass} />}
-                        templateKey={step.evaluation.templateKey}
-                        result={step.run.parsed_result}
-                        requestJsonText={step.run.request_json ?? ""}
-                        resultJsonText={prettyJsonOrFallback(step.run.result_json ?? "")}
-                        sseRawText={step.run.parsed_result?.raw_excerpt ?? ""}
-                        copyText={copyTextOrToast}
-                      />
-                    );
-                  })}
+                  {(() => {
+                    const expectedTotal = selectedHistoryGroup.expectedTotal;
+                    const expectedKeys = templates
+                      .filter(
+                        (t) =>
+                          getClaudeTemplateApplicability(t, selectedHistoryGroup.modelName)
+                            .applicable
+                      )
+                      .map((t) => t.key);
+
+                    const byIndex = new Map<number, (typeof selectedHistoryGroup.runs)[number]>();
+                    for (const r of selectedHistoryGroup.runs) {
+                      const idx = r.meta.suiteStepIndex ?? 0;
+                      if (!Number.isFinite(idx) || idx <= 0) continue;
+                      const prev = byIndex.get(idx);
+                      if (!prev || r.run.id > prev.run.id) byIndex.set(idx, r);
+                    }
+
+                    const out: ReactElement[] = [];
+                    for (let idx = 1; idx <= expectedTotal; idx += 1) {
+                      const step = byIndex.get(idx) ?? null;
+                      const expectedKey = expectedKeys[idx - 1] ?? step?.evaluation.templateKey;
+                      const templateKeyForUi = (expectedKey ??
+                        DEFAULT_CLAUDE_VALIDATION_TEMPLATE_KEY) as ClaudeValidationTemplateKey;
+                      const template = getClaudeValidationTemplate(templateKeyForUi);
+
+                      const title = `${idx}/${expectedTotal}`;
+                      out.push(
+                        <ClaudeModelValidationHistoryStepCard
+                          key={
+                            step
+                              ? `${selectedHistoryGroup.key}_${step.run.id}`
+                              : `${selectedHistoryGroup.key}_missing_${idx}`
+                          }
+                          title={`验证 ${title}：${template.label}`}
+                          rightBadge={
+                            step ? (
+                              <OutcomePill pass={step.evaluation.overallPass} />
+                            ) : (
+                              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
+                                未记录
+                              </span>
+                            )
+                          }
+                          templateKey={templateKeyForUi}
+                          result={step?.run.parsed_result ?? null}
+                          requestJsonText={step?.run.request_json ?? ""}
+                          resultJsonText={prettyJsonOrFallback(step?.run.result_json ?? "")}
+                          sseRawText={step?.run.parsed_result?.raw_excerpt ?? ""}
+                          errorText={
+                            step
+                              ? null
+                              : "该步骤未出现在历史中：可能是历史写入失败、被清空，或被保留数量上限淘汰。请在“当前运行”查看完整诊断。"
+                          }
+                          copyText={copyTextOrToast}
+                        />
+                      );
+                    }
+                    return out;
+                  })()}
                 </div>
               ) : selectedHistoryGroup ? (
                 selectedHistoryLatest ? (

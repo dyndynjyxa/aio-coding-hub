@@ -1,6 +1,7 @@
 import { toast } from "sonner";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
+import { Tooltip } from "../ui/Tooltip";
 import type { ClaudeModelValidationResult } from "../services/claudeModelValidation";
 import type { ClaudeValidationTemplateKey } from "../services/claudeValidationTemplates";
 import {
@@ -206,25 +207,53 @@ function CheckRow({
   ok,
   value,
   required = true,
+  helpText,
 }: {
   label: string;
   ok?: boolean;
   value?: React.ReactNode;
   required?: boolean;
+  helpText?: string | null;
 }) {
+  const help = typeof helpText === "string" ? helpText.trim() : "";
   return (
     <div className="flex items-center justify-between py-1.5 text-sm">
       <div className="flex items-center gap-2">
-        {ok != null && required ? (
+        {ok != null ? (
           ok ? (
-            <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+            <CheckCircle2
+              className={cn(
+                "h-4 w-4 shrink-0",
+                "text-emerald-500"
+              )}
+            />
           ) : (
-            <XCircle className="h-4 w-4 text-rose-500 shrink-0" />
+            <XCircle
+              className={cn(
+                "h-4 w-4 shrink-0",
+                required ? "text-rose-500" : "text-slate-400"
+              )}
+            />
           )
         ) : (
           <div className="h-4 w-4 shrink-0 rounded-full border border-slate-300 bg-slate-100" />
         )}
         <span className={cn("text-slate-700", !required && "text-slate-400")}>{label}</span>
+        {help ? (
+          <Tooltip
+            content={help}
+            placement="top"
+            contentClassName="whitespace-pre-line max-w-[420px]"
+          >
+            <span
+              className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-300 bg-slate-100 text-[10px] font-bold leading-none text-slate-600 cursor-help"
+              aria-label={`${label} 说明`}
+              title="查看说明"
+            >
+              ?
+            </span>
+          </Tooltip>
+        ) : null}
       </div>
       {value && <span className="font-mono text-xs text-slate-600">{value}</span>}
     </div>
@@ -310,10 +339,16 @@ export function ClaudeModelValidationResultPanel({ templateKey, result }: Props)
   const reverseProxy = detectReverseProxyKeywords(result);
   const signals = result.signals as unknown;
   const usage = result.usage as unknown;
+  const grade = evaluation.grade;
 
   const mentionsBedrock = get<boolean>(signals, "mentions_amazon_bedrock");
   const outputChars = result.output_text_chars ?? 0;
   const outputPreview = result.output_text_preview ?? "";
+  const roundtripStep2OutputPreview = get<string>(signals, "roundtrip_step2_output_preview");
+  const outputPreviewForDisplay =
+    typeof roundtripStep2OutputPreview === "string" && roundtripStep2OutputPreview.trim()
+      ? roundtripStep2OutputPreview
+      : outputPreview;
 
   const requestedModel = result.requested_model?.trim() || null;
   const respondedModel = result.responded_model?.trim() || null;
@@ -321,13 +356,13 @@ export function ClaudeModelValidationResultPanel({ templateKey, result }: Props)
     requestedModel && respondedModel ? requestedModel === respondedModel : null;
 
   const cache5m = get<number>(usage, "cache_creation_5m_input_tokens");
-  const cache1h = get<number>(usage, "cache_creation_1h_input_tokens");
-  const cacheDetailPass = cache5m != null && cache1h != null;
+  const cacheDetailPass = cache5m != null;
 
   const inputTokens = get<number>(usage, "input_tokens");
   const outputTokens = get<number>(usage, "output_tokens");
-  const cacheCreate = cache5m ?? cache1h ?? get<number>(usage, "cache_creation_input_tokens");
+  const cacheCreate = cache5m ?? get<number>(usage, "cache_creation_input_tokens");
   const cacheRead = get<number>(usage, "cache_read_input_tokens");
+  const cacheReadStep2 = get<number>(signals, "roundtrip_step2_cache_read_input_tokens");
 
   const {
     requireModelConsistency,
@@ -346,23 +381,48 @@ export function ClaudeModelValidationResultPanel({ templateKey, result }: Props)
     outputChars: outputCheck,
     cacheDetail: cacheDetailCheck,
     sseStopReasonMaxTokens: sseStopReasonMaxTokensCheck,
+    modelConsistency: modelConsistencyCheck,
     thinkingOutput: thinkingCheck,
     signature: signatureCheck,
+    signatureRoundtrip: signatureRoundtripCheck,
+    signatureTamper: signatureTamperCheck,
     responseId: responseIdCheck,
     serviceTier: serviceTierCheck,
     outputConfig: outputConfigCheck,
     toolSupport: toolSupportCheck,
     multiTurn: multiTurnCheck,
+    cacheReadHit: cacheReadHitCheck,
     reverseProxy: reverseProxyCheck,
   } = evaluation.checks;
 
   const outputExpectation = getClaudeValidationOutputExpectation(evaluation.template);
 
-  const responseParseMode = get<string>(signals, "response_parse_mode");
-  const parsedAsSse = responseParseMode === "sse" || responseParseMode === "sse_fallback";
-  const sseMessageDeltaSeen =
-    get<boolean>(result.checks as unknown, "sse_message_delta_seen") === true;
+  const expectedMaxTokens = (() => {
+    const v = get<number>(evaluation.template.request.body as unknown, "max_tokens");
+    return typeof v === "number" && Number.isFinite(v) ? v : null;
+  })();
+  const requestedMaxTokens = (() => {
+    const req = (result as any)?.request as unknown;
+    const body = get<unknown>(req, "body") ?? req;
+    const v = get<number>(body, "max_tokens");
+    return typeof v === "number" && Number.isFinite(v) ? v : null;
+  })();
+  const maxTokensConfigOk =
+    expectedMaxTokens != null && requestedMaxTokens != null
+      ? requestedMaxTokens === expectedMaxTokens
+      : null;
+
+  const shouldShowSseStopReasonRow =
+    evaluation.template.key === "official_max_tokens_5" || requireSseStopReasonMaxTokens;
+
   const sseStopReasonValue = (() => {
+    if (!shouldShowSseStopReasonRow) return null;
+
+    const responseParseMode = get<string>(signals, "response_parse_mode");
+    const parsedAsSse = responseParseMode === "sse" || responseParseMode === "sse_fallback";
+    const sseMessageDeltaSeen =
+      get<boolean>(result.checks as unknown, "sse_message_delta_seen") === true;
+
     const raw = get<string>(result.checks as unknown, "sse_message_delta_stop_reason");
     const stopReason = typeof raw === "string" && raw.trim() ? raw.trim() : null;
     if (!parsedAsSse) return `parse_mode=${responseParseMode ?? "—"}`;
@@ -541,6 +601,23 @@ export function ClaudeModelValidationResultPanel({ templateKey, result }: Props)
           <div className="flex items-center gap-2 text-emerald-800">
             <CheckCircle2 className="h-5 w-5" />
             <span className="font-semibold">请求成功</span>
+            {grade ? (
+              <span
+                className={cn(
+                  "ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset",
+                  grade.level === "A"
+                    ? "bg-emerald-100 text-emerald-800 ring-emerald-200"
+                    : grade.level === "B"
+                      ? "bg-sky-100 text-sky-800 ring-sky-200"
+                      : grade.level === "C"
+                        ? "bg-amber-100 text-amber-900 ring-amber-200"
+                        : "bg-rose-100 text-rose-800 ring-rose-200"
+                )}
+                title={grade.title}
+              >
+                {grade.level} · {grade.label}
+              </span>
+            ) : null}
           </div>
           <div className="flex items-center gap-2">
             {mentionsBedrock && (
@@ -587,6 +664,12 @@ export function ClaudeModelValidationResultPanel({ templateKey, result }: Props)
               {cacheRead ?? 0} <span className="text-xs text-slate-400">读取</span> ·{" "}
               {cacheCreate ?? 0} <span className="text-xs text-slate-400">写入</span>
             </div>
+            {typeof cacheReadStep2 === "number" && Number.isFinite(cacheReadStep2) ? (
+              <div className="mt-1 text-[11px] text-slate-500">
+                step2 read-hit:{" "}
+                <span className="font-mono text-slate-700">{cacheReadStep2}</span>
+              </div>
+            ) : null}
           </div>
         </div>
       </Card>
@@ -603,20 +686,35 @@ export function ClaudeModelValidationResultPanel({ templateKey, result }: Props)
                   label="疑似逆向/反代痕迹"
                   ok={reverseProxyCheck.ok}
                   value={reverseProxy.anyHit ? reverseProxy.hits.join(", ") : "—"}
+                  helpText={reverseProxyCheck.title}
                 />
               ) : null}
               {requireModelConsistency ? (
                 <CheckRow
                   label="模型一致性"
-                  ok={modelConsistency ?? false}
+                  ok={modelConsistencyCheck?.ok ?? (modelConsistency ?? false)}
                   value={respondedModel}
+                  helpText={
+                    modelConsistencyCheck?.title ??
+                    `requested: ${requestedModel ?? "—"}; responded: ${respondedModel ?? "—"}`
+                  }
                 />
               ) : null}
               {requireResponseId ? (
-                <CheckRow label="响应 ID (ID)" ok={responseIdCheck?.ok} value="present" />
+                <CheckRow
+                  label="响应 ID (ID)"
+                  ok={responseIdCheck?.ok}
+                  value="present"
+                  helpText={responseIdCheck?.title ?? null}
+                />
               ) : null}
               {requireServiceTier ? (
-                <CheckRow label="服务层级 (Tier)" ok={serviceTierCheck?.ok} value="present" />
+                <CheckRow
+                  label="服务层级 (Tier)"
+                  ok={serviceTierCheck?.ok}
+                  value="present"
+                  helpText={serviceTierCheck?.title ?? null}
+                />
               ) : null}
             </div>
           </section>
@@ -630,6 +728,7 @@ export function ClaudeModelValidationResultPanel({ templateKey, result }: Props)
                     label="思考输出"
                     ok={thinkingCheck.ok}
                     value={`${evaluation.derived.thinkingChars ?? 0} 字符`}
+                    helpText={thinkingCheck.title}
                   />
                 ) : null}
                 {requireSignature && signatureCheck ? (
@@ -637,6 +736,21 @@ export function ClaudeModelValidationResultPanel({ templateKey, result }: Props)
                     label="思考签名"
                     ok={signatureCheck.ok}
                     value={`${evaluation.derived.signatureChars ?? 0} 字符`}
+                    helpText={signatureCheck.title}
+                  />
+                ) : null}
+                {signatureRoundtripCheck ? (
+                  <CheckRow
+                    label={signatureRoundtripCheck.label}
+                    ok={signatureRoundtripCheck.ok}
+                    helpText={signatureRoundtripCheck.title}
+                  />
+                ) : null}
+                {signatureTamperCheck ? (
+                  <CheckRow
+                    label={signatureTamperCheck.label}
+                    ok={signatureTamperCheck.ok}
+                    helpText={signatureTamperCheck.title}
                   />
                 ) : null}
               </div>
@@ -650,19 +764,39 @@ export function ClaudeModelValidationResultPanel({ templateKey, result }: Props)
             <SectionHeader title="功能支持" icon={Terminal} />
             <div className="space-y-1">
               {requireOutputConfig ? (
-                <CheckRow label="输出配置 (Output Config)" ok={outputConfigCheck?.ok} />
+                <CheckRow
+                  label="输出配置 (Output Config)"
+                  ok={outputConfigCheck?.ok}
+                  helpText={outputConfigCheck?.title ?? null}
+                />
               ) : null}
               {requireToolSupport ? (
-                <CheckRow label="工具调用 (Tool Use)" ok={toolSupportCheck?.ok} />
+                <CheckRow
+                  label="工具调用 (Tool Use)"
+                  ok={toolSupportCheck?.ok}
+                  helpText={toolSupportCheck?.title ?? null}
+                />
               ) : null}
               {requireMultiTurn ? (
-                <CheckRow label="多轮对话 (Multi-turn)" ok={multiTurnCheck?.ok} />
+                <CheckRow
+                  label="多轮对话 (Multi-turn)"
+                  ok={multiTurnCheck?.ok}
+                  helpText={multiTurnCheck?.title ?? null}
+                />
               ) : null}
               {requireCacheDetail ? (
                 <CheckRow
                   label="缓存明细 (Cache Breakdown)"
                   ok={cacheDetailCheck?.ok ?? cacheDetailPass}
-                  value={`${cache5m ?? "-"} / ${cache1h ?? "-"}`}
+                  value={`${cache5m ?? "-"}`}
+                  helpText={cacheDetailCheck?.title ?? null}
+                />
+              ) : null}
+              {cacheReadHitCheck ? (
+                <CheckRow
+                  label={cacheReadHitCheck.label}
+                  ok={cacheReadHitCheck.ok}
+                  helpText={cacheReadHitCheck.title}
                 />
               ) : null}
             </div>
@@ -671,11 +805,43 @@ export function ClaudeModelValidationResultPanel({ templateKey, result }: Props)
           <section>
             <SectionHeader title="输出期望" icon={FileJson} />
             <div className="space-y-1">
-              {requireSseStopReasonMaxTokens && sseStopReasonMaxTokensCheck ? (
+              {evaluation.template.key === "official_max_tokens_5" ? (
+                <>
+                  <CheckRow
+                    label={`请求 max_tokens=${expectedMaxTokens ?? "—"}`}
+                    ok={maxTokensConfigOk === true}
+                    required={true}
+                    value={requestedMaxTokens ?? "—"}
+                    helpText={[
+                      "验证点：请求体 max_tokens 是否按模板配置发送。",
+                      "说明：部分兼容层会忽略/重写 max_tokens；该项用于诊断“模板未生效 vs 上游未按 max_tokens 截断”。",
+                      `观测：request.body.max_tokens=${requestedMaxTokens ?? "—"}; expected=${expectedMaxTokens ?? "—"}`,
+                    ].join("\n")}
+                  />
+                  <CheckRow
+                    label={`输出 tokens≤${expectedMaxTokens ?? "—"}`}
+                    ok={
+                      typeof outputTokens === "number" && expectedMaxTokens != null
+                        ? outputTokens <= expectedMaxTokens
+                        : undefined
+                    }
+                    required={typeof outputTokens === "number"}
+                    value={typeof outputTokens === "number" ? outputTokens : "—"}
+                    helpText={[
+                      "验证点：usage.output_tokens 是否不超过 max_tokens。",
+                      "说明：output_tokens 是更直接的 token 口径；若缺失则仅作为可选诊断项展示。",
+                      `观测：output_tokens=${typeof outputTokens === "number" ? outputTokens : "—"}; max_tokens=${expectedMaxTokens ?? "—"}`,
+                    ].join("\n")}
+                  />
+                </>
+              ) : null}
+              {shouldShowSseStopReasonRow && sseStopReasonMaxTokensCheck ? (
                 <CheckRow
                   label={sseStopReasonMaxTokensCheck.label}
                   ok={sseStopReasonMaxTokensCheck.ok}
-                  value={sseStopReasonValue}
+                  required={requireSseStopReasonMaxTokens}
+                  value={sseStopReasonValue ?? "—"}
+                  helpText={sseStopReasonMaxTokensCheck.title}
                 />
               ) : null}
               {outputCheck && outputExpectation && (
@@ -683,6 +849,7 @@ export function ClaudeModelValidationResultPanel({ templateKey, result }: Props)
                   label={outputCheck.label}
                   ok={outputCheck.ok}
                   value={`${outputChars} 字符`}
+                  helpText={outputCheck.title}
                 />
               )}
             </div>
@@ -691,7 +858,7 @@ export function ClaudeModelValidationResultPanel({ templateKey, result }: Props)
       </div>
 
       {/* 3. Output Preview */}
-      {outputPreview && (
+      {outputPreviewForDisplay && (
         <section>
           <div className="mb-3 flex items-center justify-between">
             <SectionHeader title="输出预览" icon={Braces} />
@@ -701,7 +868,7 @@ export function ClaudeModelValidationResultPanel({ templateKey, result }: Props)
               className="!h-7 !px-2 text-xs"
               onClick={async () => {
                 try {
-                  await navigator.clipboard.writeText(outputPreview);
+                  await navigator.clipboard.writeText(outputPreviewForDisplay);
                   toast("已复制");
                 } catch {
                   toast.error("复制失败");
@@ -712,7 +879,7 @@ export function ClaudeModelValidationResultPanel({ templateKey, result }: Props)
             </Button>
           </div>
           <div className="group relative rounded-lg border border-slate-200 bg-slate-900 p-4 font-mono text-xs leading-relaxed text-slate-300 shadow-sm transition-all hover:border-slate-300">
-            <span className="block whitespace-pre-wrap">{outputPreview}</span>
+            <span className="block whitespace-pre-wrap">{outputPreviewForDisplay}</span>
             <div className="pointer-events-none absolute inset-0 rounded-lg ring-1 ring-inset ring-slate-400/10" />
           </div>
         </section>
