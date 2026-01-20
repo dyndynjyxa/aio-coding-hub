@@ -5,7 +5,12 @@ import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { CLIS } from "../../constants/clis";
 import { logToConsole } from "../../services/consoleLog";
-import { providerUpsert, type CliKey, type ProviderSummary } from "../../services/providers";
+import {
+  providerUpsert,
+  type ClaudeModels,
+  type CliKey,
+  type ProviderSummary,
+} from "../../services/providers";
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
 import { FormField } from "../../ui/FormField";
@@ -14,12 +19,10 @@ import { Switch } from "../../ui/Switch";
 import { cn } from "../../utils/cn";
 import { normalizeBaseUrlRows } from "./baseUrl";
 import { BaseUrlEditor } from "./BaseUrlEditor";
-import { ModelMappingEditor } from "./ModelMappingEditor";
-import { ModelWhitelistEditor } from "./ModelWhitelistEditor";
 import type { BaseUrlRow, ProviderBaseUrlMode } from "./types";
 import {
   parseAndValidateCostMultiplier,
-  validateProviderModelConfig,
+  validateProviderClaudeModels,
   validateProviderApiKeyForCreate,
   validateProviderName,
 } from "./validators";
@@ -111,8 +114,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
   const [pingingAll, setPingingAll] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [costMultiplier, setCostMultiplier] = useState("1.0");
-  const [supportedModels, setSupportedModels] = useState<Record<string, boolean>>({});
-  const [modelMapping, setModelMapping] = useState<Record<string, string>>({});
+  const [claudeModels, setClaudeModels] = useState<ClaudeModels>({});
   const [enabled, setEnabled] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -134,8 +136,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
       setPingingAll(false);
       setApiKey("");
       setCostMultiplier("1.0");
-      setSupportedModels({});
-      setModelMapping({});
+      setClaudeModels({});
       setEnabled(true);
       return;
     }
@@ -147,8 +148,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
     setApiKey("");
     setEnabled(props.provider.enabled);
     setCostMultiplier(String(props.provider.cost_multiplier ?? 1.0));
-    setSupportedModels(props.provider.supported_models ?? {});
-    setModelMapping(props.provider.model_mapping ?? {});
+    setClaudeModels(props.provider.claude_models ?? {});
   }, [cliKey, editingProviderId, mode, open]);
 
   async function save() {
@@ -181,7 +181,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
     }
 
     if (cliKey === "claude") {
-      const modelError = validateProviderModelConfig({ supportedModels, modelMapping });
+      const modelError = validateProviderClaudeModels(claudeModels);
       if (modelError) {
         toast(modelError);
         return;
@@ -199,9 +199,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
         api_key: apiKey,
         enabled,
         cost_multiplier: parsedCost.value,
-        ...(cliKey === "claude"
-          ? { supported_models: supportedModels, model_mapping: modelMapping }
-          : {}),
+        ...(cliKey === "claude" ? { claude_models: claudeModels } : {}),
       });
 
       if (!saved) {
@@ -218,8 +216,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
         base_url_mode: saved.base_url_mode,
         enabled: saved.enabled,
         cost_multiplier: saved.cost_multiplier,
-        supported_models: saved.supported_models,
-        model_mapping: saved.model_mapping,
+        claude_models: saved.claude_models,
       });
       toast(mode === "create" ? "Provider 已保存" : "Provider 已更新");
 
@@ -237,14 +234,12 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
     }
   }
 
-  const supportedModelCount =
+  const claudeModelCount =
     cliKey === "claude"
-      ? Object.keys(supportedModels).filter((key) => supportedModels[key]).length
-      : 0;
-  const modelMappingCount =
-    cliKey === "claude"
-      ? Object.entries(modelMapping).filter(([k, v]) => k.trim().length > 0 && v.trim().length > 0)
-          .length
+      ? Object.values(claudeModels).filter((value) => {
+          if (typeof value !== "string") return false;
+          return Boolean(value.trim());
+        }).length
       : 0;
 
   return (
@@ -316,31 +311,81 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
             <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
               <div className="flex items-center gap-3">
                 <span className="text-sm font-medium text-slate-700 group-open:text-[#0052FF]">
-                  模型映射
+                  Claude 模型映射
                 </span>
                 <span className="text-xs font-mono text-slate-500">
-                  白名单 {supportedModelCount} · 映射 {modelMappingCount}
+                  已配置 {claudeModelCount}/5
                 </span>
               </div>
               <ChevronDown className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-180" />
             </summary>
 
             <div className="space-y-4 border-t border-slate-100 px-4 py-3">
-              <FormField label="模型白名单 (supportedModels)" hint="支持 *；为空表示支持所有模型">
-                <ModelWhitelistEditor
-                  value={supportedModels}
-                  onChange={setSupportedModels}
+              <FormField
+                label="主模型"
+                hint="默认兜底模型；未命中 haiku/sonnet/opus 且未启用 Thinking 时使用"
+              >
+                <Input
+                  value={claudeModels.main_model ?? ""}
+                  onChange={(e) => {
+                    const value = e.currentTarget.value;
+                    setClaudeModels((prev) => ({ ...prev, main_model: value }));
+                  }}
+                  placeholder="例如: glm-4-plus / minimax-text-01 / kimi-k2"
                   disabled={saving}
                 />
               </FormField>
 
               <FormField
-                label="模型映射 (modelMapping)"
-                hint="支持 *；当同时配置白名单时会校验目标模型"
+                label="推理模型 (Thinking)"
+                hint="当请求中 thinking.type=enabled 时优先使用"
               >
-                <ModelMappingEditor
-                  value={modelMapping}
-                  onChange={setModelMapping}
+                <Input
+                  value={claudeModels.reasoning_model ?? ""}
+                  onChange={(e) => {
+                    const value = e.currentTarget.value;
+                    setClaudeModels((prev) => ({
+                      ...prev,
+                      reasoning_model: value,
+                    }));
+                  }}
+                  placeholder="例如: kimi-k2-thinking / glm-4-plus-thinking"
+                  disabled={saving}
+                />
+              </FormField>
+
+              <FormField label="Haiku 默认模型" hint="当请求模型名包含 haiku 时使用（子串匹配）">
+                <Input
+                  value={claudeModels.haiku_model ?? ""}
+                  onChange={(e) => {
+                    const value = e.currentTarget.value;
+                    setClaudeModels((prev) => ({ ...prev, haiku_model: value }));
+                  }}
+                  placeholder="例如: glm-4-plus-haiku"
+                  disabled={saving}
+                />
+              </FormField>
+
+              <FormField label="Sonnet 默认模型" hint="当请求模型名包含 sonnet 时使用（子串匹配）">
+                <Input
+                  value={claudeModels.sonnet_model ?? ""}
+                  onChange={(e) => {
+                    const value = e.currentTarget.value;
+                    setClaudeModels((prev) => ({ ...prev, sonnet_model: value }));
+                  }}
+                  placeholder="例如: glm-4-plus-sonnet"
+                  disabled={saving}
+                />
+              </FormField>
+
+              <FormField label="Opus 默认模型" hint="当请求模型名包含 opus 时使用（子串匹配）">
+                <Input
+                  value={claudeModels.opus_model ?? ""}
+                  onChange={(e) => {
+                    const value = e.currentTarget.value;
+                    setClaudeModels((prev) => ({ ...prev, opus_model: value }));
+                  }}
+                  placeholder="例如: glm-4-plus-opus"
                   disabled={saving}
                 />
               </FormField>

@@ -196,8 +196,7 @@ export const CLAUDE_VALIDATION_TEMPLATES = [
         messages: [
           {
             role: "user",
-            content:
-              "用 3 句话解释 microservices 与 monolith 的权衡，并在最后一行输出 OK。",
+            content: "用 3 句话解释 microservices 与 monolith 的权衡，并在最后一行输出 OK。",
           },
         ],
         temperature: 0,

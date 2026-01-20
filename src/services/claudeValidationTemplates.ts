@@ -597,8 +597,8 @@ export function evaluateClaudeValidation(
   );
   const multiTurnSecretInOutput = Boolean(
     multiTurnSecretPattern &&
-      outputPreviewForChecks &&
-      multiTurnSecretPattern.test(outputPreviewForChecks)
+    outputPreviewForChecks &&
+    multiTurnSecretPattern.test(outputPreviewForChecks)
   );
   const multiTurnSecretInThinking = Boolean(
     multiTurnSecretPattern && thinkingPreview && multiTurnSecretPattern.test(thinkingPreview)
@@ -973,27 +973,55 @@ export function evaluateClaudeValidation(
         multiTurnOk;
 
       if (baselineOk && tamperRejected) {
-        return { level: "A" as const, label: "第一方（强）", title: "roundtrip + tamper 通过（强证据）" };
+        return {
+          level: "A" as const,
+          label: "第一方（强）",
+          title: "roundtrip + tamper 通过（强证据）",
+        };
       }
       if (baselineOk) {
-        return { level: "B" as const, label: "第一方（中）", title: "roundtrip 通过；tamper 不确定/未通过" };
+        return {
+          level: "B" as const,
+          label: "第一方（中）",
+          title: "roundtrip 通过；tamper 不确定/未通过",
+        };
       }
       if (signatureOk && thinkingOk) {
-        return { level: "C" as const, label: "弱证据", title: "thinking/signature 存在但 roundtrip/一致性不足" };
+        return {
+          level: "C" as const,
+          label: "弱证据",
+          title: "thinking/signature 存在但 roundtrip/一致性不足",
+        };
       }
-      return { level: "D" as const, label: "高风险", title: "缺少 thinking/signature（疑似兼容层/非第一方）" };
+      return {
+        level: "D" as const,
+        label: "高风险",
+        title: "缺少 thinking/signature（疑似兼容层/非第一方）",
+      };
     }
 
     if (requireCacheReadHit) {
       const creationOk = checksOut.cacheDetail?.ok === true;
       const hitOk = checksOut.cacheReadHit?.ok === true;
       if (creationOk && hitOk) {
-        return { level: "A" as const, label: "第一方（强）", title: "prompt caching create+hit 成立" };
+        return {
+          level: "A" as const,
+          label: "第一方（强）",
+          title: "prompt caching create+hit 成立",
+        };
       }
       if (creationOk) {
-        return { level: "B" as const, label: "第一方（中）", title: "prompt caching 已创建，但未命中 read-hit" };
+        return {
+          level: "B" as const,
+          label: "第一方（中）",
+          title: "prompt caching 已创建，但未命中 read-hit",
+        };
       }
-      return { level: "C" as const, label: "弱证据", title: "未观察到 cache_creation 明细（可能不支持或被代理剥离）" };
+      return {
+        level: "C" as const,
+        label: "弱证据",
+        title: "未观察到 cache_creation 明细（可能不支持或被代理剥离）",
+      };
     }
 
     if (overallPass === true) {

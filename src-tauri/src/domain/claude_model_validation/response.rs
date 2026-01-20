@@ -205,13 +205,14 @@ impl SseTextAccumulator {
     fn append_thinking(&mut self, text: &str) {
         self.thinking_block_seen = true;
         self.thinking_chars = self.thinking_chars.saturating_add(text.chars().count());
-        if self.capturing_thinking_block && !text.is_empty() {
-            if self.current_thinking_full.chars().count() < MAX_ROUNDTRIP_THINKING_CHARS {
-                let remaining = MAX_ROUNDTRIP_THINKING_CHARS
-                    .saturating_sub(self.current_thinking_full.chars().count());
-                self.current_thinking_full
-                    .push_str(&take_first_n_chars(text, remaining));
-            }
+        if self.capturing_thinking_block
+            && !text.is_empty()
+            && self.current_thinking_full.chars().count() < MAX_ROUNDTRIP_THINKING_CHARS
+        {
+            let remaining = MAX_ROUNDTRIP_THINKING_CHARS
+                .saturating_sub(self.current_thinking_full.chars().count());
+            self.current_thinking_full
+                .push_str(&take_first_n_chars(text, remaining));
         }
         if self.thinking_preview.chars().count() >= MAX_TEXT_PREVIEW_CHARS {
             return;
@@ -232,19 +233,18 @@ impl SseTextAccumulator {
         if chars > self.signature_chars {
             self.signature_chars = chars;
         }
-        if self.capturing_thinking_block && !self.current_signature_from_delta {
-            if trimmed.chars().count() > self.current_signature_full.chars().count() {
-                self.current_signature_full =
-                    take_first_n_chars(trimmed, MAX_ROUNDTRIP_SIGNATURE_CHARS);
-            }
+        if self.capturing_thinking_block
+            && !self.current_signature_from_delta
+            && trimmed.chars().count() > self.current_signature_full.chars().count()
+        {
+            self.current_signature_full =
+                take_first_n_chars(trimmed, MAX_ROUNDTRIP_SIGNATURE_CHARS);
         }
     }
 
     fn begin_thinking_capture(&mut self, index: Option<i64>) {
-        if self.capturing_thinking_block {
-            if self.current_thinking_block_index == index {
-                return;
-            }
+        if self.capturing_thinking_block && self.current_thinking_block_index == index {
+            return;
         }
         self.capturing_thinking_block = true;
         self.current_thinking_block_index = index;
@@ -330,14 +330,12 @@ impl SseTextAccumulator {
                 }
             }
         }
-        if data_type == "content_block_stop" {
-            if self.capturing_thinking_block {
-                if self.current_thinking_block_index.is_none()
-                    || self.current_thinking_block_index == block_index
-                {
-                    self.finalize_thinking_capture_best_effort();
-                }
-            }
+        if data_type == "content_block_stop"
+            && self.capturing_thinking_block
+            && (self.current_thinking_block_index.is_none()
+                || self.current_thinking_block_index == block_index)
+        {
+            self.finalize_thinking_capture_best_effort();
         }
 
         if event_name == "message_delta" || data_type == "message_delta" {

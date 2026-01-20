@@ -172,14 +172,14 @@ export function RequestLogDetailDialog({
             />
           </Card>
 
-	          {(() => {
-	            const hasTokens =
-	              selectedLog.input_tokens != null ||
-	              selectedLog.output_tokens != null ||
-	              selectedLog.total_tokens != null ||
-	              selectedLog.cache_read_input_tokens != null ||
-	              selectedLog.cache_creation_input_tokens != null ||
-	              selectedLog.cache_creation_5m_input_tokens != null;
+          {(() => {
+            const hasTokens =
+              selectedLog.input_tokens != null ||
+              selectedLog.output_tokens != null ||
+              selectedLog.total_tokens != null ||
+              selectedLog.cache_read_input_tokens != null ||
+              selectedLog.cache_creation_input_tokens != null ||
+              selectedLog.cache_creation_5m_input_tokens != null;
 
             if (!hasTokens && !selectedLog.usage_json) return null;
 
@@ -232,28 +232,28 @@ export function RequestLogDetailDialog({
                       {selectedLog.cache_creation_input_tokens ?? "—"}
                     </span>
                   </div>
-	                  <div className="flex items-center justify-between">
-	                    <span className="text-slate-500">cache_creation_5m_input_tokens</span>
-	                    <span className="font-mono">
-	                      {selectedLog.cache_creation_5m_input_tokens ?? "—"}
-	                    </span>
-	                  </div>
-	                </div>
-	
-	                {selectedLog.usage_json ? (
-	                  <pre className="mt-3 max-h-[240px] overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-100">
-	                    {(() => {
-	                      try {
-	                        const parsed = JSON.parse(selectedLog.usage_json ?? "");
-	                        if (parsed && typeof parsed === "object") {
-	                          delete (parsed as any).cache_creation_1h_input_tokens;
-	                        }
-	                        return JSON.stringify(parsed, null, 2);
-	                      } catch {
-	                        return selectedLog.usage_json;
-	                      }
-	                    })()}
-	                  </pre>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">cache_creation_5m_input_tokens</span>
+                    <span className="font-mono">
+                      {selectedLog.cache_creation_5m_input_tokens ?? "—"}
+                    </span>
+                  </div>
+                </div>
+
+                {selectedLog.usage_json ? (
+                  <pre className="mt-3 max-h-[240px] overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-100">
+                    {(() => {
+                      try {
+                        const parsed = JSON.parse(selectedLog.usage_json ?? "");
+                        if (parsed && typeof parsed === "object") {
+                          delete (parsed as any).cache_creation_1h_input_tokens;
+                        }
+                        return JSON.stringify(parsed, null, 2);
+                      } catch {
+                        return selectedLog.usage_json;
+                      }
+                    })()}
+                  </pre>
                 ) : null}
               </Card>
             );

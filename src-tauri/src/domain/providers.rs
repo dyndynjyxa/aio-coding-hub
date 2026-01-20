@@ -2,12 +2,106 @@
 
 use crate::db;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_PRIORITY: i64 = 100;
 const MAX_MODEL_NAME_LEN: usize = 200;
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ClaudeModels {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub main_model: Option<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_model: Option<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub haiku_model: Option<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sonnet_model: Option<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opus_model: Option<String>,
+}
+
+fn normalize_model_slot(raw: Option<String>) -> Option<String> {
+    let value = raw.map(|v| v.trim().to_string());
+    let value = value.as_deref().unwrap_or("");
+    if value.is_empty() {
+        return None;
+    }
+    if value.len() > MAX_MODEL_NAME_LEN {
+        return Some(value[..MAX_MODEL_NAME_LEN].to_string());
+    }
+    Some(value.to_string())
+}
+
+impl ClaudeModels {
+    fn normalized(self) -> Self {
+        Self {
+            main_model: normalize_model_slot(self.main_model),
+            reasoning_model: normalize_model_slot(self.reasoning_model),
+            haiku_model: normalize_model_slot(self.haiku_model),
+            sonnet_model: normalize_model_slot(self.sonnet_model),
+            opus_model: normalize_model_slot(self.opus_model),
+        }
+    }
+
+    pub(crate) fn has_any(&self) -> bool {
+        self.main_model.is_some()
+            || self.reasoning_model.is_some()
+            || self.haiku_model.is_some()
+            || self.sonnet_model.is_some()
+            || self.opus_model.is_some()
+    }
+
+    pub(crate) fn map_model(&self, original_model: &str, has_thinking: bool) -> String {
+        let model_lower = original_model.to_ascii_lowercase();
+
+        // 1) thinking 模式优先使用推理模型
+        if has_thinking {
+            if let Some(model) = self.reasoning_model.as_deref() {
+                return model.to_string();
+            }
+        }
+
+        // 2) 按模型类型匹配（子串）
+        if model_lower.contains("haiku") {
+            if let Some(model) = self.haiku_model.as_deref() {
+                return model.to_string();
+            }
+        }
+        if model_lower.contains("opus") {
+            if let Some(model) = self.opus_model.as_deref() {
+                return model.to_string();
+            }
+        }
+        if model_lower.contains("sonnet") {
+            if let Some(model) = self.sonnet_model.as_deref() {
+                return model.to_string();
+            }
+        }
+
+        // 3) 主模型兜底
+        if let Some(model) = self.main_model.as_deref() {
+            return model.to_string();
+        }
+
+        // 4) 无映射：保持原样
+        original_model.to_string()
+    }
+}
+
+fn claude_models_from_json(raw: &str) -> ClaudeModels {
+    serde_json::from_str::<ClaudeModels>(raw)
+        .ok()
+        .unwrap_or_default()
+        .normalized()
+}
 
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -40,8 +134,7 @@ pub struct ProviderSummary {
     pub name: String,
     pub base_urls: Vec<String>,
     pub base_url_mode: ProviderBaseUrlMode,
-    pub supported_models: HashMap<String, bool>,
-    pub model_mapping: HashMap<String, String>,
+    pub claude_models: ClaudeModels,
     pub enabled: bool,
     pub priority: i64,
     pub cost_multiplier: f64,
@@ -56,8 +149,7 @@ pub(crate) struct ProviderForGateway {
     pub base_urls: Vec<String>,
     pub base_url_mode: ProviderBaseUrlMode,
     pub api_key_plaintext: String,
-    pub supported_models: HashMap<String, bool>,
-    pub model_mapping: HashMap<String, String>,
+    pub claude_models: ClaudeModels,
 }
 
 #[derive(Debug, Clone)]
@@ -140,65 +232,26 @@ fn base_urls_from_row(base_url_fallback: &str, base_urls_json: &str) -> Vec<Stri
     parsed
 }
 
-fn supported_models_from_json(raw: &str) -> HashMap<String, bool> {
-    let parsed = serde_json::from_str::<HashMap<String, bool>>(raw)
-        .ok()
-        .unwrap_or_default();
-
-    let mut out: HashMap<String, bool> = HashMap::new();
-    for (raw_key, enabled) in parsed {
-        if !enabled {
-            continue;
-        }
-        let key = raw_key.trim();
-        if key.is_empty() || key.len() > MAX_MODEL_NAME_LEN {
-            continue;
-        }
-        out.insert(key.to_string(), true);
-    }
-
-    out
-}
-
-fn model_mapping_from_json(raw: &str) -> HashMap<String, String> {
-    let parsed = serde_json::from_str::<HashMap<String, String>>(raw)
-        .ok()
-        .unwrap_or_default();
-
-    let mut out: HashMap<String, String> = HashMap::new();
-    for (raw_key, raw_value) in parsed {
-        let key = raw_key.trim();
-        let value = raw_value.trim();
-        if key.is_empty()
-            || value.is_empty()
-            || key.len() > MAX_MODEL_NAME_LEN
-            || value.len() > MAX_MODEL_NAME_LEN
-        {
-            continue;
-        }
-        out.insert(key.to_string(), value.to_string());
-    }
-
-    out
-}
-
 fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<ProviderSummary, rusqlite::Error> {
+    let cli_key: String = row.get("cli_key")?;
     let base_url_fallback: String = row.get("base_url")?;
     let base_urls_json: String = row.get("base_urls_json")?;
-    let supported_models_json: String = row.get("supported_models_json")?;
-    let model_mapping_json: String = row.get("model_mapping_json")?;
+    let claude_models_json: String = row.get("claude_models_json")?;
     let base_url_mode_raw: String = row.get("base_url_mode")?;
     let base_url_mode =
         ProviderBaseUrlMode::parse(&base_url_mode_raw).unwrap_or(ProviderBaseUrlMode::Order);
 
     Ok(ProviderSummary {
         id: row.get("id")?,
-        cli_key: row.get("cli_key")?,
+        cli_key: cli_key.clone(),
         name: row.get("name")?,
         base_urls: base_urls_from_row(&base_url_fallback, &base_urls_json),
         base_url_mode,
-        supported_models: supported_models_from_json(&supported_models_json),
-        model_mapping: model_mapping_from_json(&model_mapping_json),
+        claude_models: if cli_key == "claude" {
+            claude_models_from_json(&claude_models_json)
+        } else {
+            ClaudeModels::default()
+        },
         enabled: row.get::<_, i64>("enabled")? != 0,
         priority: row.get("priority")?,
         cost_multiplier: row.get("cost_multiplier")?,
@@ -207,151 +260,13 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<ProviderSummary, rusqlite::
     })
 }
 
-// matchWildcard: supports a single '*' wildcard, matching prefix and suffix.
-// Multiple '*' wildcards are treated as unsupported and return false (alignment with code-switch-R).
-fn match_wildcard(pattern: &str, text: &str) -> bool {
-    if !pattern.contains('*') {
-        return pattern == text;
-    }
-
-    let parts: Vec<&str> = pattern.split('*').collect();
-    if parts.len() != 2 {
-        return false;
-    }
-
-    let prefix = parts[0];
-    let suffix = parts[1];
-    text.starts_with(prefix) && text.ends_with(suffix)
-}
-
-fn apply_wildcard_mapping(pattern: &str, replacement: &str, input: &str) -> String {
-    if !pattern.contains('*') || !replacement.contains('*') {
-        return replacement.to_string();
-    }
-
-    let parts: Vec<&str> = pattern.split('*').collect();
-    if parts.len() != 2 {
-        return replacement.to_string();
-    }
-
-    let prefix = parts[0];
-    let suffix = parts[1];
-
-    if !input.starts_with(prefix) || !input.ends_with(suffix) {
-        return replacement.to_string();
-    }
-
-    let start = prefix.len();
-    let end = input.len().saturating_sub(suffix.len());
-    let wildcard_part = if start <= end { &input[start..end] } else { "" };
-
-    replacement.replacen('*', wildcard_part, 1)
-}
-
-fn is_model_supported(
-    supported_models: &HashMap<String, bool>,
-    model_mapping: &HashMap<String, String>,
-    model_name: &str,
-) -> bool {
-    if supported_models.is_empty() && model_mapping.is_empty() {
-        return true;
-    }
-
-    if supported_models.get(model_name).copied().unwrap_or(false) {
-        return true;
-    }
-
-    for pattern in supported_models.keys() {
-        if match_wildcard(pattern, model_name) {
-            return true;
-        }
-    }
-
-    if model_mapping.contains_key(model_name) {
-        return true;
-    }
-
-    for pattern in model_mapping.keys() {
-        if match_wildcard(pattern, model_name) {
-            return true;
-        }
-    }
-
-    false
-}
-
-fn get_effective_model(model_mapping: &HashMap<String, String>, requested_model: &str) -> String {
-    if model_mapping.is_empty() {
-        return requested_model.to_string();
-    }
-
-    if let Some(mapped) = model_mapping.get(requested_model) {
-        return mapped.to_string();
-    }
-
-    let mut matches: Vec<(&str, &str)> = Vec::new();
-    for (pattern, replacement) in model_mapping.iter() {
-        if match_wildcard(pattern, requested_model) {
-            matches.push((pattern.as_str(), replacement.as_str()));
-        }
-    }
-
-    if matches.is_empty() {
-        return requested_model.to_string();
-    }
-
-    // Deterministic selection: longest pattern first, then lexicographic.
-    matches.sort_by(|(pa, _), (pb, _)| pb.len().cmp(&pa.len()).then_with(|| pa.cmp(pb)));
-    let (pattern, replacement) = matches[0];
-    apply_wildcard_mapping(pattern, replacement, requested_model)
-}
-
-fn validate_model_config(
-    supported_models: &HashMap<String, bool>,
-    model_mapping: &HashMap<String, String>,
-) -> Result<(), String> {
-    if supported_models.is_empty() || model_mapping.is_empty() {
-        return Ok(());
-    }
-
-    for (external_model, internal_model) in model_mapping {
-        if internal_model.contains('*') {
-            continue;
-        }
-
-        if supported_models
-            .get(internal_model)
-            .copied()
-            .unwrap_or(false)
-        {
-            continue;
-        }
-
-        let mut supported = false;
-        for supported_pattern in supported_models.keys() {
-            if match_wildcard(supported_pattern, internal_model) {
-                supported = true;
-                break;
-            }
-        }
-
-        if !supported {
-            return Err(format!(
-                "SEC_INVALID_INPUT: 模型映射无效：'{external_model}' -> '{internal_model}'，目标模型 '{internal_model}' 不在 supportedModels 中"
-            ));
-        }
-    }
-
-    Ok(())
-}
-
 impl ProviderForGateway {
-    pub(crate) fn is_model_supported(&self, model_name: &str) -> bool {
-        is_model_supported(&self.supported_models, &self.model_mapping, model_name)
-    }
-
-    pub(crate) fn get_effective_model(&self, requested_model: &str) -> String {
-        get_effective_model(&self.model_mapping, requested_model)
+    pub(crate) fn get_effective_claude_model(
+        &self,
+        requested_model: &str,
+        has_thinking: bool,
+    ) -> String {
+        self.claude_models.map_model(requested_model, has_thinking)
     }
 }
 
@@ -365,8 +280,7 @@ SELECT
   base_url,
   base_urls_json,
   base_url_mode,
-  supported_models_json,
-  model_mapping_json,
+  claude_models_json,
   enabled,
   priority,
   cost_multiplier,
@@ -443,8 +357,7 @@ SELECT
   base_url,
   base_urls_json,
   base_url_mode,
-  supported_models_json,
-  model_mapping_json,
+  claude_models_json,
   enabled,
   priority,
   cost_multiplier,
@@ -484,8 +397,7 @@ SELECT
   p.base_urls_json,
   p.base_url_mode,
   p.api_key_plaintext,
-  p.supported_models_json,
-  p.model_mapping_json
+  p.claude_models_json
 FROM sort_mode_providers mp
 JOIN providers p ON p.id = mp.provider_id
 WHERE mp.mode_id = ?1
@@ -502,8 +414,7 @@ ORDER BY mp.sort_order ASC
             let base_url_fallback: String = row.get("base_url")?;
             let base_urls_json: String = row.get("base_urls_json")?;
             let base_url_mode_raw: String = row.get("base_url_mode")?;
-            let supported_models_json: String = row.get("supported_models_json")?;
-            let model_mapping_json: String = row.get("model_mapping_json")?;
+            let claude_models_json: String = row.get("claude_models_json")?;
             let base_url_mode = ProviderBaseUrlMode::parse(&base_url_mode_raw)
                 .unwrap_or(ProviderBaseUrlMode::Order);
             Ok(ProviderForGateway {
@@ -512,8 +423,11 @@ ORDER BY mp.sort_order ASC
                 base_urls: base_urls_from_row(&base_url_fallback, &base_urls_json),
                 base_url_mode,
                 api_key_plaintext: row.get("api_key_plaintext")?,
-                supported_models: supported_models_from_json(&supported_models_json),
-                model_mapping: model_mapping_from_json(&model_mapping_json),
+                claude_models: if cli_key == "claude" {
+                    claude_models_from_json(&claude_models_json)
+                } else {
+                    ClaudeModels::default()
+                },
             })
         })
         .map_err(|e| format!("DB_ERROR: failed to list gateway sort_mode providers: {e}"))?;
@@ -539,8 +453,7 @@ SELECT
   base_urls_json,
   base_url_mode,
   api_key_plaintext,
-  supported_models_json,
-  model_mapping_json
+  claude_models_json
 FROM providers
 WHERE cli_key = ?1
   AND enabled = 1
@@ -554,8 +467,7 @@ ORDER BY sort_order ASC, id DESC
             let base_url_fallback: String = row.get("base_url")?;
             let base_urls_json: String = row.get("base_urls_json")?;
             let base_url_mode_raw: String = row.get("base_url_mode")?;
-            let supported_models_json: String = row.get("supported_models_json")?;
-            let model_mapping_json: String = row.get("model_mapping_json")?;
+            let claude_models_json: String = row.get("claude_models_json")?;
             let base_url_mode = ProviderBaseUrlMode::parse(&base_url_mode_raw)
                 .unwrap_or(ProviderBaseUrlMode::Order);
             Ok(ProviderForGateway {
@@ -564,8 +476,11 @@ ORDER BY sort_order ASC, id DESC
                 base_urls: base_urls_from_row(&base_url_fallback, &base_urls_json),
                 base_url_mode,
                 api_key_plaintext: row.get("api_key_plaintext")?,
-                supported_models: supported_models_from_json(&supported_models_json),
-                model_mapping: model_mapping_from_json(&model_mapping_json),
+                claude_models: if cli_key == "claude" {
+                    claude_models_from_json(&claude_models_json)
+                } else {
+                    ClaudeModels::default()
+                },
             })
         })
         .map_err(|e| format!("DB_ERROR: failed to list gateway providers: {e}"))?;
@@ -644,8 +559,7 @@ pub fn upsert(
     enabled: bool,
     cost_multiplier: f64,
     priority: Option<i64>,
-    supported_models: Option<HashMap<String, bool>>,
-    model_mapping: Option<HashMap<String, String>>,
+    claude_models: Option<ClaudeModels>,
 ) -> Result<ProviderSummary, String> {
     let cli_key = cli_key.trim();
     validate_cli_key(cli_key)?;
@@ -675,51 +589,6 @@ pub fn upsert(
         }
     }
 
-    let normalize_supported_models =
-        |input: HashMap<String, bool>| -> Result<HashMap<String, bool>, String> {
-            let mut out: HashMap<String, bool> = HashMap::new();
-            for (raw_key, enabled) in input {
-                if !enabled {
-                    continue;
-                }
-                let key = raw_key.trim();
-                if key.is_empty() {
-                    continue;
-                }
-                if key.len() > MAX_MODEL_NAME_LEN {
-                    return Err(format!(
-                    "SEC_INVALID_INPUT: supportedModels entry is too long (max={MAX_MODEL_NAME_LEN}): {key}"
-                ));
-                }
-                out.insert(key.to_string(), true);
-            }
-            Ok(out)
-        };
-
-    let normalize_model_mapping =
-        |input: HashMap<String, String>| -> Result<HashMap<String, String>, String> {
-            let mut out: HashMap<String, String> = HashMap::new();
-            for (raw_key, raw_value) in input {
-                let key = raw_key.trim();
-                let value = raw_value.trim();
-                if key.is_empty() || value.is_empty() {
-                    continue;
-                }
-                if key.len() > MAX_MODEL_NAME_LEN {
-                    return Err(format!(
-                        "SEC_INVALID_INPUT: modelMapping key is too long (max={MAX_MODEL_NAME_LEN}): {key}"
-                    ));
-                }
-                if value.len() > MAX_MODEL_NAME_LEN {
-                    return Err(format!(
-                        "SEC_INVALID_INPUT: modelMapping value is too long (max={MAX_MODEL_NAME_LEN}): {value}"
-                    ));
-                }
-                out.insert(key.to_string(), value.to_string());
-            }
-            Ok(out)
-        };
-
     let mut conn = db::open_connection(app)?;
     let now = now_unix_seconds();
 
@@ -730,14 +599,13 @@ pub fn upsert(
                 api_key.ok_or_else(|| "SEC_INVALID_INPUT: api_key is required".to_string())?;
             let sort_order = next_sort_order(&conn, cli_key)?;
 
-            let supported_models =
-                normalize_supported_models(supported_models.unwrap_or_default())?;
-            let model_mapping = normalize_model_mapping(model_mapping.unwrap_or_default())?;
-            validate_model_config(&supported_models, &model_mapping)?;
-            let supported_models_json = serde_json::to_string(&supported_models)
-                .map_err(|e| format!("SYSTEM_ERROR: {e}"))?;
-            let model_mapping_json =
-                serde_json::to_string(&model_mapping).map_err(|e| format!("SYSTEM_ERROR: {e}"))?;
+            let claude_models = if cli_key == "claude" {
+                claude_models.unwrap_or_default().normalized()
+            } else {
+                ClaudeModels::default()
+            };
+            let claude_models_json =
+                serde_json::to_string(&claude_models).map_err(|e| format!("SYSTEM_ERROR: {e}"))?;
 
             conn.execute(
                 r#"
@@ -747,6 +615,7 @@ INSERT INTO providers(
   base_url,
   base_urls_json,
   base_url_mode,
+  claude_models_json,
   supported_models_json,
   model_mapping_json,
   api_key_plaintext,
@@ -756,7 +625,7 @@ INSERT INTO providers(
   cost_multiplier,
   created_at,
   updated_at
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '{}', '{}', ?7, ?8, ?9, ?10, ?11, ?12, ?13)
 "#,
                 params![
                     cli_key,
@@ -764,8 +633,7 @@ INSERT INTO providers(
                     base_url_primary,
                     base_urls_json,
                     base_url_mode.as_str(),
-                    supported_models_json,
-                    model_mapping_json,
+                    claude_models_json,
                     api_key,
                     sort_order,
                     enabled_to_int(enabled),
@@ -794,11 +662,11 @@ INSERT INTO providers(
                 .transaction()
                 .map_err(|e| format!("DB_ERROR: failed to start transaction: {e}"))?;
 
-            let existing: Option<(String, String, i64, String, String)> = tx
+            let existing: Option<(String, String, i64, String)> = tx
                 .query_row(
-                    "SELECT cli_key, api_key_plaintext, priority, supported_models_json, model_mapping_json FROM providers WHERE id = ?1",
+                    "SELECT cli_key, api_key_plaintext, priority, claude_models_json FROM providers WHERE id = ?1",
                     params![id],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
                 )
                 .optional()
                 .map_err(|e| format!("DB_ERROR: failed to query provider: {e}"))?;
@@ -807,8 +675,7 @@ INSERT INTO providers(
                 existing_cli_key,
                 existing_api_key,
                 existing_priority,
-                existing_supported_models_json,
-                existing_model_mapping_json,
+                existing_claude_models_json,
             )) = existing
             else {
                 return Err("DB_NOT_FOUND: provider not found".to_string());
@@ -821,34 +688,25 @@ INSERT INTO providers(
             let next_api_key = api_key.unwrap_or(existing_api_key.as_str());
             let next_priority = priority.unwrap_or(existing_priority);
 
-            let existing_supported_models =
-                supported_models_from_json(&existing_supported_models_json);
-            let existing_model_mapping = model_mapping_from_json(&existing_model_mapping_json);
-
-            let next_supported_models = match supported_models {
-                Some(v) => Some(normalize_supported_models(v)?),
-                None => None,
-            };
-            let next_model_mapping = match model_mapping {
-                Some(v) => Some(normalize_model_mapping(v)?),
-                None => None,
+            let existing_claude_models = if cli_key == "claude" {
+                claude_models_from_json(&existing_claude_models_json)
+            } else {
+                ClaudeModels::default()
             };
 
-            let final_supported_models = next_supported_models
+            let next_claude_models = match claude_models {
+                Some(v) if cli_key == "claude" => Some(v.normalized()),
+                _ => None,
+            };
+
+            let final_claude_models = next_claude_models
                 .as_ref()
-                .unwrap_or(&existing_supported_models);
-            let final_model_mapping = next_model_mapping
-                .as_ref()
-                .unwrap_or(&existing_model_mapping);
-            validate_model_config(final_supported_models, final_model_mapping)?;
-
-            let next_supported_models_json = match next_supported_models.as_ref() {
-                Some(v) => serde_json::to_string(v).map_err(|e| format!("SYSTEM_ERROR: {e}"))?,
-                None => existing_supported_models_json,
-            };
-            let next_model_mapping_json = match next_model_mapping.as_ref() {
-                Some(v) => serde_json::to_string(v).map_err(|e| format!("SYSTEM_ERROR: {e}"))?,
-                None => existing_model_mapping_json,
+                .unwrap_or(&existing_claude_models);
+            let next_claude_models_json = if cli_key == "claude" {
+                serde_json::to_string(final_claude_models)
+                    .map_err(|e| format!("SYSTEM_ERROR: {e}"))?
+            } else {
+                "{}".to_string()
             };
 
             tx.execute(
@@ -859,22 +717,22 @@ SET
   base_url = ?2,
   base_urls_json = ?3,
   base_url_mode = ?4,
-  supported_models_json = ?5,
-  model_mapping_json = ?6,
-  api_key_plaintext = ?7,
-  enabled = ?8,
-  cost_multiplier = ?9,
-  priority = ?10,
-  updated_at = ?11
-WHERE id = ?12
+  claude_models_json = ?5,
+  supported_models_json = '{}',
+  model_mapping_json = '{}',
+  api_key_plaintext = ?6,
+  enabled = ?7,
+  cost_multiplier = ?8,
+  priority = ?9,
+  updated_at = ?10
+WHERE id = ?11
 "#,
                 params![
                     name,
                     base_url_primary,
                     base_urls_json,
                     base_url_mode.as_str(),
-                    next_supported_models_json,
-                    next_model_mapping_json,
+                    next_claude_models_json,
                     next_api_key,
                     enabled_to_int(enabled),
                     cost_multiplier,
@@ -1003,146 +861,52 @@ mod tests {
     use super::*;
 
     #[test]
-    fn match_wildcard_exact_match() {
-        assert!(match_wildcard("claude-sonnet-4", "claude-sonnet-4"));
-        assert!(!match_wildcard("claude-sonnet-4", "claude-opus-4"));
-    }
-
-    #[test]
-    fn match_wildcard_single_star() {
-        assert!(match_wildcard("claude-*", "claude-sonnet-4"));
-        assert!(match_wildcard("*-4", "claude-sonnet-4"));
-        assert!(!match_wildcard("claude-*sonnet-*", "claude-sonnet-4")); // multiple '*': unsupported
-    }
-
-    #[test]
-    fn apply_wildcard_mapping_basic() {
-        let out = apply_wildcard_mapping("claude-*", "anthropic/claude-*", "claude-sonnet-4");
-        assert_eq!(out, "anthropic/claude-sonnet-4");
-    }
-
-    #[test]
-    fn apply_wildcard_mapping_no_star_in_replacement() {
-        let out = apply_wildcard_mapping("claude-*", "anthropic/claude", "claude-sonnet-4");
-        assert_eq!(out, "anthropic/claude");
-    }
-
-    #[test]
-    fn is_model_supported_empty_config_supports_all() {
-        assert!(is_model_supported(
-            &HashMap::new(),
-            &HashMap::new(),
-            "anything"
-        ));
-    }
-
-    #[test]
-    fn is_model_supported_supported_models_exact_and_wildcard() {
-        let mut supported = HashMap::new();
-        supported.insert("claude-sonnet-4".to_string(), true);
-        supported.insert("claude-*".to_string(), true);
-
-        assert!(is_model_supported(
-            &supported,
-            &HashMap::new(),
-            "claude-sonnet-4"
-        ));
-        assert!(is_model_supported(
-            &supported,
-            &HashMap::new(),
-            "claude-opus-4"
-        ));
-        assert!(!is_model_supported(&supported, &HashMap::new(), "gpt-4"));
-    }
-
-    #[test]
-    fn is_model_supported_model_mapping_exact_and_wildcard_keys() {
-        let mut mapping = HashMap::new();
-        mapping.insert(
-            "claude-sonnet-4".to_string(),
-            "anthropic/claude-sonnet-4".to_string(),
-        );
-        mapping.insert("claude-*".to_string(), "anthropic/claude-*".to_string());
-
-        assert!(is_model_supported(
-            &HashMap::new(),
-            &mapping,
-            "claude-sonnet-4"
-        ));
-        assert!(is_model_supported(
-            &HashMap::new(),
-            &mapping,
-            "claude-opus-4"
-        ));
-        assert!(!is_model_supported(&HashMap::new(), &mapping, "gpt-4"));
-    }
-
-    #[test]
-    fn get_effective_model_exact_beats_wildcard() {
-        let mut mapping = HashMap::new();
-        mapping.insert("claude-*".to_string(), "anthropic/claude-*".to_string());
-        mapping.insert(
-            "claude-sonnet-4".to_string(),
-            "anthropic/claude-sonnet-4@exact".to_string(),
-        );
-
+    fn claude_models_no_config_keeps_original() {
+        let models = ClaudeModels::default();
         assert_eq!(
-            get_effective_model(&mapping, "claude-sonnet-4"),
-            "anthropic/claude-sonnet-4@exact"
+            models.map_model("claude-sonnet-4", false),
+            "claude-sonnet-4"
         );
     }
 
     #[test]
-    fn get_effective_model_wildcard_longest_match_wins() {
-        let mut mapping = HashMap::new();
-        mapping.insert("claude-*".to_string(), "A-*".to_string());
-        mapping.insert("claude-sonnet-*".to_string(), "B-*".to_string());
+    fn claude_models_thinking_prefers_reasoning_model() {
+        let models = ClaudeModels {
+            main_model: Some("glm-main".to_string()),
+            reasoning_model: Some("glm-thinking".to_string()),
+            haiku_model: Some("glm-haiku".to_string()),
+            sonnet_model: Some("glm-sonnet".to_string()),
+            opus_model: Some("glm-opus".to_string()),
+        }
+        .normalized();
 
-        assert_eq!(get_effective_model(&mapping, "claude-sonnet-4"), "B-4");
+        assert_eq!(models.map_model("claude-sonnet-4", true), "glm-thinking");
     }
 
     #[test]
-    fn get_effective_model_wildcard_tie_break_is_lexicographic() {
-        let mut mapping = HashMap::new();
-        mapping.insert("*b".to_string(), "X*".to_string());
-        mapping.insert("a*".to_string(), "Y*".to_string());
+    fn claude_models_type_slot_selected_by_substring() {
+        let models = ClaudeModels {
+            main_model: Some("glm-main".to_string()),
+            haiku_model: Some("glm-haiku".to_string()),
+            sonnet_model: Some("glm-sonnet".to_string()),
+            opus_model: Some("glm-opus".to_string()),
+            ..Default::default()
+        }
+        .normalized();
 
-        // both patterns match "ab"; lengths equal; "*b" sorts before "a*"
-        assert_eq!(get_effective_model(&mapping, "ab"), "Xa");
+        assert_eq!(models.map_model("claude-haiku-4", false), "glm-haiku");
+        assert_eq!(models.map_model("claude-sonnet-4", false), "glm-sonnet");
+        assert_eq!(models.map_model("claude-opus-4", false), "glm-opus");
     }
 
     #[test]
-    fn validate_model_config_allows_mapping_only() {
-        let mut mapping = HashMap::new();
-        mapping.insert(
-            "claude-sonnet-4".to_string(),
-            "anthropic/claude-sonnet-4".to_string(),
-        );
-        assert!(validate_model_config(&HashMap::new(), &mapping).is_ok());
-    }
+    fn claude_models_falls_back_to_main_model() {
+        let models = ClaudeModels {
+            main_model: Some("glm-main".to_string()),
+            ..Default::default()
+        }
+        .normalized();
 
-    #[test]
-    fn validate_model_config_rejects_unknown_target_when_supported_models_present() {
-        let mut supported = HashMap::new();
-        supported.insert("anthropic/claude-sonnet-4".to_string(), true);
-
-        let mut mapping = HashMap::new();
-        mapping.insert(
-            "claude-sonnet-4".to_string(),
-            "anthropic/claude-opus-4".to_string(),
-        );
-
-        assert!(validate_model_config(&supported, &mapping).is_err());
-    }
-
-    #[test]
-    fn validate_model_config_allows_wildcard_target_without_supported_models_coverage() {
-        let mut supported = HashMap::new();
-        supported.insert("anthropic/claude-*".to_string(), true);
-
-        let mut mapping = HashMap::new();
-        mapping.insert("claude-*".to_string(), "anthropic/claude-*".to_string());
-
-        assert!(validate_model_config(&supported, &mapping).is_ok());
+        assert_eq!(models.map_model("some-unknown-model", false), "glm-main");
     }
 }

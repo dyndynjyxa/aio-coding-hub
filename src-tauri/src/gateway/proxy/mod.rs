@@ -1122,8 +1122,8 @@ pub(super) async fn proxy_impl(
 
                 let mut reordered: Vec<providers::ProviderForGateway> =
                     Vec::with_capacity(original_ids.len());
-                for provider_id in order.iter().copied() {
-                    if let Some(item) = by_id.remove(&provider_id) {
+                for provider_id in order {
+                    if let Some(item) = by_id.remove(provider_id) {
                         reordered.push(item);
                     }
                 }
@@ -1189,98 +1189,7 @@ pub(super) async fn proxy_impl(
         return resp;
     }
 
-    if let Some(model) = requested_model.as_deref() {
-        let candidates_before = providers.len();
-        let mut filtered_total = 0usize;
-        let mut filtered_preview: Vec<serde_json::Value> = Vec::new();
-        providers.retain(|p| {
-            let ok = p.is_model_supported(model);
-            if !ok {
-                filtered_total = filtered_total.saturating_add(1);
-                if filtered_preview.len() < 50 {
-                    filtered_preview.push(serde_json::json!({
-                        "id": p.id,
-                        "name": p.name.clone(),
-                    }));
-                }
-            }
-            ok
-        });
-
-        if providers.is_empty() {
-            let message =
-                format!("no provider supports requested_model={model} (candidates={candidates_before}, filtered={filtered_total})");
-
-            let location = requested_model_location.unwrap_or(RequestedModelLocation::BodyJson);
-            if let Ok(mut settings) = special_settings.lock() {
-                settings.push(serde_json::json!({
-                    "type": "model_filter",
-                    "scope": "request",
-                    "hit": true,
-                    "requestedModel": model,
-                    "location": match location {
-                        RequestedModelLocation::BodyJson => "body",
-                        RequestedModelLocation::Query => "query",
-                        RequestedModelLocation::Path => "path",
-                    },
-                    "candidatesCount": candidates_before,
-                    "filteredCount": filtered_total,
-                    "filteredProvidersPreview": filtered_preview,
-                }));
-            }
-            let special_settings_json = response_fixer::special_settings_json(&special_settings);
-            let resp = error_response(
-                StatusCode::NOT_FOUND,
-                trace_id.clone(),
-                "GW_NO_PROVIDER_FOR_MODEL",
-                message,
-                vec![],
-            );
-
-            emit_request_event(
-                &state.app,
-                trace_id.clone(),
-                cli_key.clone(),
-                method_hint.clone(),
-                forwarded_path.clone(),
-                query.clone(),
-                Some(StatusCode::NOT_FOUND.as_u16()),
-                None,
-                Some("GW_NO_PROVIDER_FOR_MODEL"),
-                started.elapsed().as_millis(),
-                None,
-                vec![],
-                None,
-            );
-
-            enqueue_request_log_with_backpressure(
-                &state.app,
-                &state.log_tx,
-                RequestLogEnqueueArgs {
-                    trace_id,
-                    cli_key,
-                    session_id: session_id.clone(),
-                    method: method_hint,
-                    path: forwarded_path,
-                    query,
-                    excluded_from_stats: false,
-                    special_settings_json,
-                    status: Some(StatusCode::NOT_FOUND.as_u16()),
-                    error_code: Some("GW_NO_PROVIDER_FOR_MODEL"),
-                    duration_ms: started.elapsed().as_millis(),
-                    ttfb_ms: None,
-                    attempts_json: "[]".to_string(),
-                    requested_model,
-                    created_at_ms,
-                    created_at,
-                    usage: None,
-                },
-            )
-            .await;
-
-            return resp;
-        }
-    }
+    // NOTE: model whitelist filtering removed (Claude uses slot-based model mapping).
 
     let mut session_bound_provider_id: Option<i64> = None;
     if allow_session_reuse {
@@ -1547,6 +1456,8 @@ pub(super) async fn proxy_impl(
             continue;
         }
 
+        // NOTE: model whitelist filtering removed (Claude uses slot-based model mapping).
+
         let provider_base_url_base = select_provider_base_url_for_request(
             &state,
             provider,
@@ -1569,52 +1480,110 @@ pub(super) async fn proxy_impl(
         let mut strip_request_content_encoding = strip_request_content_encoding_seed;
         let mut thinking_signature_rectifier_retried = false;
 
-        if let Some(requested_model) = requested_model.as_deref() {
-            let effective_model = provider.get_effective_model(requested_model);
-            if effective_model != requested_model {
-                let location = requested_model_location.unwrap_or(RequestedModelLocation::BodyJson);
-                match location {
-                    RequestedModelLocation::BodyJson => {
-                        if let Some(root) = introspection_json.as_ref() {
-                            let mut next = root.clone();
-                            let replaced = replace_model_in_body_json(&mut next, &effective_model);
-                            if replaced {
-                                if let Ok(bytes) = serde_json::to_vec(&next) {
-                                    upstream_body_bytes = Bytes::from(bytes);
-                                    strip_request_content_encoding = true;
+        if cli_key == "claude" && provider.claude_models.has_any() {
+            if let Some(requested_model) = requested_model.as_deref() {
+                let has_thinking = introspection_json
+                    .as_ref()
+                    .and_then(|v| v.get("thinking"))
+                    .and_then(|v| v.as_object())
+                    .and_then(|v| v.get("type"))
+                    .and_then(|v| v.as_str())
+                    == Some("enabled");
+
+                let effective_model =
+                    provider.get_effective_claude_model(requested_model, has_thinking);
+                if effective_model != requested_model {
+                    let location =
+                        requested_model_location.unwrap_or(RequestedModelLocation::BodyJson);
+                    let mut applied = false;
+                    match location {
+                        RequestedModelLocation::BodyJson => {
+                            if let Some(root) = introspection_json.as_ref() {
+                                let mut next = root.clone();
+                                let replaced =
+                                    replace_model_in_body_json(&mut next, &effective_model);
+                                if replaced {
+                                    if let Ok(bytes) = serde_json::to_vec(&next) {
+                                        upstream_body_bytes = Bytes::from(bytes);
+                                        strip_request_content_encoding = true;
+                                        applied = true;
+                                    }
                                 }
                             }
                         }
-                    }
-                    RequestedModelLocation::Query => {
-                        if let Some(q) = upstream_query.as_deref() {
-                            upstream_query = Some(replace_model_in_query(q, &effective_model));
+                        RequestedModelLocation::Query => {
+                            if let Some(q) = upstream_query.as_deref() {
+                                let next = replace_model_in_query(q, &effective_model);
+                                applied = next != q;
+                                upstream_query = Some(next);
+                            }
+                        }
+                        RequestedModelLocation::Path => {
+                            if let Some(next_path) =
+                                replace_model_in_path(&upstream_forwarded_path, &effective_model)
+                            {
+                                applied = next_path != upstream_forwarded_path;
+                                upstream_forwarded_path = next_path;
+                            }
                         }
                     }
-                    RequestedModelLocation::Path => {
-                        if let Some(next_path) =
-                            replace_model_in_path(&upstream_forwarded_path, &effective_model)
-                        {
-                            upstream_forwarded_path = next_path;
-                        }
-                    }
-                }
 
-                if let Ok(mut settings) = special_settings.lock() {
-                    settings.push(serde_json::json!({
-                        "type": "model_mapping",
-                        "scope": "attempt",
-                        "hit": true,
-                        "providerId": provider_id,
-                        "providerName": provider_name_base.clone(),
-                        "requestedModel": requested_model,
-                        "effectiveModel": effective_model,
-                        "location": match location {
-                            RequestedModelLocation::BodyJson => "body",
-                            RequestedModelLocation::Query => "query",
-                            RequestedModelLocation::Path => "path",
-                        },
-                    }));
+                    let model_lower = requested_model.to_ascii_lowercase();
+                    let kind = if has_thinking
+                        && provider
+                            .claude_models
+                            .reasoning_model
+                            .as_deref()
+                            .is_some_and(|v| v == effective_model.as_str())
+                    {
+                        "reasoning"
+                    } else if model_lower.contains("haiku")
+                        && provider
+                            .claude_models
+                            .haiku_model
+                            .as_deref()
+                            .is_some_and(|v| v == effective_model.as_str())
+                    {
+                        "haiku"
+                    } else if model_lower.contains("sonnet")
+                        && provider
+                            .claude_models
+                            .sonnet_model
+                            .as_deref()
+                            .is_some_and(|v| v == effective_model.as_str())
+                    {
+                        "sonnet"
+                    } else if model_lower.contains("opus")
+                        && provider
+                            .claude_models
+                            .opus_model
+                            .as_deref()
+                            .is_some_and(|v| v == effective_model.as_str())
+                    {
+                        "opus"
+                    } else {
+                        "main"
+                    };
+
+                    if let Ok(mut settings) = special_settings.lock() {
+                        settings.push(serde_json::json!({
+                            "type": "claude_model_mapping",
+                            "scope": "attempt",
+                            "hit": true,
+                            "applied": applied,
+                            "providerId": provider_id,
+                            "providerName": provider_name_base.clone(),
+                            "requestedModel": requested_model,
+                            "effectiveModel": effective_model,
+                            "mappingKind": kind,
+                            "hasThinking": has_thinking,
+                            "location": match location {
+                                RequestedModelLocation::BodyJson => "body",
+                                RequestedModelLocation::Query => "query",
+                                RequestedModelLocation::Path => "path",
+                            },
+                        }));
+                    }
                 }
             }
         }

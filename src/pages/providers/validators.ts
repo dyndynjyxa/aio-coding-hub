@@ -26,63 +26,26 @@ export function parseAndValidateCostMultiplier(raw: string) {
 
 const MAX_MODEL_NAME_LEN = 200;
 
-function matchWildcard(pattern: string, text: string) {
-  if (!pattern.includes("*")) return pattern === text;
-
-  const parts = pattern.split("*");
-  if (parts.length !== 2) return false;
-
-  const [prefix, suffix] = parts;
-  return text.startsWith(prefix) && text.endsWith(suffix);
-}
-
-function normalizeNonEmptyString(value: string) {
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
-
-function supportedModelsHasCoverage(supportedModels: Record<string, boolean>, model: string) {
-  if (supportedModels[model]) return true;
-  return Object.keys(supportedModels).some(
-    (pattern) => supportedModels[pattern] && matchWildcard(pattern, model)
-  );
-}
-
-export function validateProviderModelConfig(input: {
-  supportedModels: Record<string, boolean>;
-  modelMapping: Record<string, string>;
+export function validateProviderClaudeModels(input: {
+  main_model?: string | null;
+  reasoning_model?: string | null;
+  haiku_model?: string | null;
+  sonnet_model?: string | null;
+  opus_model?: string | null;
 }) {
-  const supportedModels = input.supportedModels;
-  const modelMapping = input.modelMapping;
+  const fields: Array<[label: string, value: string | null | undefined]> = [
+    ["主模型", input.main_model],
+    ["推理模型(Thinking)", input.reasoning_model],
+    ["Haiku 默认模型", input.haiku_model],
+    ["Sonnet 默认模型", input.sonnet_model],
+    ["Opus 默认模型", input.opus_model],
+  ];
 
-  const supportedKeys = Object.keys(supportedModels).filter((k) => supportedModels[k]);
-  const mappingEntries = Object.entries(modelMapping)
-    .map(([k, v]) => [normalizeNonEmptyString(k), normalizeNonEmptyString(v)] as const)
-    .filter(([k, v]) => k != null && v != null) as Array<[string, string]>;
-
-  for (const key of supportedKeys) {
-    if (key.length > MAX_MODEL_NAME_LEN) {
-      return `模型白名单条目过长（最多 ${MAX_MODEL_NAME_LEN} 字符）：${key}`;
-    }
-  }
-
-  for (const [k, v] of mappingEntries) {
-    if (k.length > MAX_MODEL_NAME_LEN) {
-      return `模型映射 key 过长（最多 ${MAX_MODEL_NAME_LEN} 字符）：${k}`;
-    }
-    if (v.length > MAX_MODEL_NAME_LEN) {
-      return `模型映射 value 过长（最多 ${MAX_MODEL_NAME_LEN} 字符）：${v}`;
-    }
-  }
-
-  // Align code-switch-R:
-  // only validate mapping targets when BOTH supportedModels and modelMapping are configured.
-  if (supportedKeys.length === 0 || mappingEntries.length === 0) return null;
-
-  for (const [externalModel, internalModel] of mappingEntries) {
-    if (internalModel.includes("*")) continue;
-    if (!supportedModelsHasCoverage(supportedModels, internalModel)) {
-      return `模型映射无效：'${externalModel}' -> '${internalModel}'，目标模型 '${internalModel}' 不在 supportedModels 中`;
+  for (const [label, value] of fields) {
+    const trimmed = (value ?? "").trim();
+    if (!trimmed) continue;
+    if (trimmed.length > MAX_MODEL_NAME_LEN) {
+      return `${label} 过长（最多 ${MAX_MODEL_NAME_LEN} 字符）`;
     }
   }
 

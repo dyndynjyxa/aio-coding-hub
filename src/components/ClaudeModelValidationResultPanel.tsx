@@ -221,18 +221,10 @@ function CheckRow({
       <div className="flex items-center gap-2">
         {ok != null ? (
           ok ? (
-            <CheckCircle2
-              className={cn(
-                "h-4 w-4 shrink-0",
-                "text-emerald-500"
-              )}
-            />
+            <CheckCircle2 className={cn("h-4 w-4 shrink-0", "text-emerald-500")} />
           ) : (
             <XCircle
-              className={cn(
-                "h-4 w-4 shrink-0",
-                required ? "text-rose-500" : "text-slate-400"
-              )}
+              className={cn("h-4 w-4 shrink-0", required ? "text-rose-500" : "text-slate-400")}
             />
           )
         ) : (
@@ -666,8 +658,7 @@ export function ClaudeModelValidationResultPanel({ templateKey, result }: Props)
             </div>
             {typeof cacheReadStep2 === "number" && Number.isFinite(cacheReadStep2) ? (
               <div className="mt-1 text-[11px] text-slate-500">
-                step2 read-hit:{" "}
-                <span className="font-mono text-slate-700">{cacheReadStep2}</span>
+                step2 read-hit: <span className="font-mono text-slate-700">{cacheReadStep2}</span>
               </div>
             ) : null}
           </div>
@@ -692,7 +683,7 @@ export function ClaudeModelValidationResultPanel({ templateKey, result }: Props)
               {requireModelConsistency ? (
                 <CheckRow
                   label="模型一致性"
-                  ok={modelConsistencyCheck?.ok ?? (modelConsistency ?? false)}
+                  ok={modelConsistencyCheck?.ok ?? modelConsistency ?? false}
                   value={respondedModel}
                   helpText={
                     modelConsistencyCheck?.title ??

@@ -30,8 +30,7 @@ pub(crate) async fn provider_upsert(
     enabled: bool,
     cost_multiplier: f64,
     priority: Option<i64>,
-    supported_models: Option<std::collections::HashMap<String, bool>>,
-    model_mapping: Option<std::collections::HashMap<String, String>>,
+    claude_models: Option<providers::ClaudeModels>,
 ) -> Result<providers::ProviderSummary, String> {
     ensure_db_ready(app.clone(), db_state.inner()).await?;
     blocking::run("provider_upsert", move || {
@@ -46,8 +45,7 @@ pub(crate) async fn provider_upsert(
             enabled,
             cost_multiplier,
             priority,
-            supported_models,
-            model_mapping,
+            claude_models,
         )
     })
     .await

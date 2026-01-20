@@ -555,10 +555,15 @@ export function ClaudeModelValidationDialog({
     if (skippedTemplates.length > 0) {
       const shown = skippedTemplates
         .slice(0, 3)
-        .map((t) => `${t.template.label}${t.applicability.reason ? `（${t.applicability.reason}）` : ""}`)
+        .map(
+          (t) =>
+            `${t.template.label}${t.applicability.reason ? `（${t.applicability.reason}）` : ""}`
+        )
         .join("；");
       const rest = skippedTemplates.length - Math.min(3, skippedTemplates.length);
-      toast(`已跳过 ${skippedTemplates.length} 个不适用模板：${shown}${rest > 0 ? `；+${rest}` : ""}`);
+      toast(
+        `已跳过 ${skippedTemplates.length} 个不适用模板：${shown}${rest > 0 ? `；+${rest}` : ""}`
+      );
     }
 
     if (suiteTemplateKeys.length === 0) {

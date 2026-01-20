@@ -2,14 +2,21 @@ import { invokeTauriOrNull } from "./tauriInvoke";
 
 export type CliKey = "claude" | "codex" | "gemini";
 
+export type ClaudeModels = {
+  main_model?: string | null;
+  reasoning_model?: string | null;
+  haiku_model?: string | null;
+  sonnet_model?: string | null;
+  opus_model?: string | null;
+};
+
 export type ProviderSummary = {
   id: number;
   cli_key: CliKey;
   name: string;
   base_urls: string[];
   base_url_mode: "order" | "ping";
-  supported_models: Record<string, boolean>;
-  model_mapping: Record<string, string>;
+  claude_models: ClaudeModels;
   enabled: boolean;
   priority: number;
   cost_multiplier: number;
@@ -31,8 +38,7 @@ export async function providerUpsert(input: {
   enabled: boolean;
   cost_multiplier: number;
   priority?: number | null;
-  supported_models?: Record<string, boolean> | null;
-  model_mapping?: Record<string, string> | null;
+  claude_models?: ClaudeModels | null;
 }) {
   return invokeTauriOrNull<ProviderSummary>("provider_upsert", {
     providerId: input.provider_id ?? null,
@@ -44,8 +50,7 @@ export async function providerUpsert(input: {
     enabled: input.enabled,
     costMultiplier: input.cost_multiplier,
     priority: input.priority ?? null,
-    supportedModels: input.supported_models ?? null,
-    modelMapping: input.model_mapping ?? null,
+    claudeModels: input.claude_models ?? null,
   });
 }
 

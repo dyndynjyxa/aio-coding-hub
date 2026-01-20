@@ -288,23 +288,23 @@ export function ConsolePage() {
                       requestLog?.cache_read_input_tokens ??
                       t.summary?.cache_read_input_tokens ??
                       null;
-	                    const cacheCreation5mInputTokens =
-	                      requestLog?.cache_creation_5m_input_tokens ??
-	                      t.summary?.cache_creation_5m_input_tokens ??
-	                      null;
-	                    const cacheCreationInputTokens =
-	                      requestLog?.cache_creation_input_tokens ??
-	                      t.summary?.cache_creation_input_tokens ??
-	                      null;
-	                    const cacheWrite = (() => {
-	                      if (cacheCreation5mInputTokens != null) {
-	                        return { tokens: cacheCreation5mInputTokens, ttl: "5m" as const };
-	                      }
-	                      if (cacheCreationInputTokens != null) {
-	                        return { tokens: cacheCreationInputTokens, ttl: null };
-	                      }
-	                      return { tokens: null, ttl: null };
-	                    })();
+                    const cacheCreation5mInputTokens =
+                      requestLog?.cache_creation_5m_input_tokens ??
+                      t.summary?.cache_creation_5m_input_tokens ??
+                      null;
+                    const cacheCreationInputTokens =
+                      requestLog?.cache_creation_input_tokens ??
+                      t.summary?.cache_creation_input_tokens ??
+                      null;
+                    const cacheWrite = (() => {
+                      if (cacheCreation5mInputTokens != null) {
+                        return { tokens: cacheCreation5mInputTokens, ttl: "5m" as const };
+                      }
+                      if (cacheCreationInputTokens != null) {
+                        return { tokens: cacheCreationInputTokens, ttl: null };
+                      }
+                      return { tokens: null, ttl: null };
+                    })();
 
                     const durationMs = requestLog?.duration_ms ?? t.summary?.duration_ms ?? null;
                     const ttfbMs = sanitizeTtfbMs(

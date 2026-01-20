@@ -178,24 +178,24 @@ export function RealtimeTraceCards({
             ? trace.requested_model.trim()
             : "未知";
 
-          const cacheWrite = (() => {
-            const s = trace.summary;
-            if (!s)
-              return {
-                tokens: null as number | null,
-                ttl: null as "5m" | null,
-              };
-            if (s.cache_creation_5m_input_tokens != null) {
-              return {
-                tokens: s.cache_creation_5m_input_tokens,
-                ttl: "5m" as const,
-              };
-            }
-            if (s.cache_creation_input_tokens != null) {
-              return { tokens: s.cache_creation_input_tokens, ttl: null };
-            }
-            return { tokens: null, ttl: null };
-          })();
+        const cacheWrite = (() => {
+          const s = trace.summary;
+          if (!s)
+            return {
+              tokens: null as number | null,
+              ttl: null as "5m" | null,
+            };
+          if (s.cache_creation_5m_input_tokens != null) {
+            return {
+              tokens: s.cache_creation_5m_input_tokens,
+              ttl: "5m" as const,
+            };
+          }
+          if (s.cache_creation_input_tokens != null) {
+            return { tokens: s.cache_creation_input_tokens, ttl: null };
+          }
+          return { tokens: null, ttl: null };
+        })();
 
         const ttfbMs = trace.summary
           ? sanitizeTtfbMs(trace.summary.ttfb_ms ?? null, trace.summary.duration_ms)

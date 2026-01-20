@@ -75,15 +75,11 @@ function SortableProviderCard({
     transition,
   };
 
-  const supportedModelCount = Object.keys(provider.supported_models ?? {}).filter((key) =>
-    Boolean(provider.supported_models?.[key])
-  ).length;
-  const modelMappingCount = Object.entries(provider.model_mapping ?? {}).filter(([k, v]) => {
-    if (!k.trim()) return false;
-    if (typeof v !== "string") return false;
-    return Boolean(v.trim());
+  const claudeModelsCount = Object.values(provider.claude_models ?? {}).filter((value) => {
+    if (typeof value !== "string") return false;
+    return Boolean(value.trim());
   }).length;
-  const hasCustomModels = supportedModelCount > 0 || modelMappingCount > 0;
+  const hasClaudeModels = claudeModelsCount > 0;
 
   const isOpen = circuit?.state === "OPEN";
   const cooldownUntil = circuit?.cooldown_until ?? null;
@@ -149,25 +145,13 @@ function SortableProviderCard({
               <span className="shrink-0 rounded-full bg-slate-50 px-2 py-0.5 font-mono text-[10px] text-slate-700">
                 倍率 {provider.cost_multiplier}x
               </span>
-              {provider.cli_key === "claude" && hasCustomModels ? (
-                <>
-                  {supportedModelCount > 0 ? (
-                    <span
-                      className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 font-mono text-[10px] text-emerald-700"
-                      title={`已配置模型白名单（${supportedModelCount} 条）`}
-                    >
-                      Models
-                    </span>
-                  ) : null}
-                  {modelMappingCount > 0 ? (
-                    <span
-                      className="shrink-0 rounded-full bg-sky-50 px-2 py-0.5 font-mono text-[10px] text-sky-700"
-                      title={`已配置模型映射（${modelMappingCount} 条）`}
-                    >
-                      Mapping
-                    </span>
-                  ) : null}
-                </>
+              {provider.cli_key === "claude" && hasClaudeModels ? (
+                <span
+                  className="shrink-0 rounded-full bg-sky-50 px-2 py-0.5 font-mono text-[10px] text-sky-700"
+                  title={`已配置 Claude 模型映射（${claudeModelsCount}/5）`}
+                >
+                  Claude Models
+                </span>
               ) : null}
             </div>
             <div
