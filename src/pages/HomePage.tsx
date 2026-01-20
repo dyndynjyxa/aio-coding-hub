@@ -73,7 +73,6 @@ export function HomePage() {
 
   const [tab, setTab] = useState<HomeTabKey>("overview");
   const tabRef = useRef(tab);
-  const isMountedRef = useRef(true);
 
   const [sortModes, setSortModes] = useState<SortModeSummary[]>([]);
   const [sortModesLoading, setSortModesLoading] = useState(false);
@@ -102,7 +101,8 @@ export function HomePage() {
   const [usageHeatmapRows, setUsageHeatmapRows] = useState<UsageHourlyRow[]>([]);
   const [usageHeatmapLoading, setUsageHeatmapLoading] = useState(false);
   const [, setUsageHeatmapAvailable] = useState<boolean | null>(null);
-  const usageHeatmapRefreshInFlightRef = useRef(false);
+  const usageHeatmapRequestSeqRef = useRef(0);
+  const usageHeatmapInFlightSeqRef = useRef<number | null>(null);
 
   const [activeSessions, setActiveSessions] = useState<GatewayActiveSession[]>([]);
   const [activeSessionsLoading, setActiveSessionsLoading] = useState(false);
@@ -126,7 +126,8 @@ export function HomePage() {
 
   useEffect(() => {
     return () => {
-      isMountedRef.current = false;
+      usageHeatmapRequestSeqRef.current += 1;
+      usageHeatmapInFlightSeqRef.current = null;
       if (realtimeExitHoldTimerRef.current != null) {
         window.clearTimeout(realtimeExitHoldTimerRef.current);
         realtimeExitHoldTimerRef.current = null;
@@ -420,9 +421,7 @@ export function HomePage() {
 
   const refreshUsageHeatmap = useCallback(
     (input?: { silent?: boolean; reason?: UsageHeatmapRefreshReason }) => {
-      if (usageHeatmapRefreshInFlightRef.current) return;
-      if (!isMountedRef.current) return;
-      usageHeatmapRefreshInFlightRef.current = true;
+      if (usageHeatmapInFlightSeqRef.current != null) return;
 
       const reason: UsageHeatmapRefreshReason = input?.reason ?? "manual";
       const silent = Boolean(input?.silent);
@@ -437,10 +436,13 @@ export function HomePage() {
       const toastText =
         reason === "initial" ? "加载用量失败：请查看控制台日志" : "刷新用量失败：请查看控制台日志";
 
+      const seq = (usageHeatmapRequestSeqRef.current += 1);
+      usageHeatmapInFlightSeqRef.current = seq;
+
       setUsageHeatmapLoading(true);
       usageHourlySeries(15)
         .then((rows) => {
-          if (!isMountedRef.current) return;
+          if (seq !== usageHeatmapRequestSeqRef.current) return;
           if (!rows) {
             setUsageHeatmapAvailable(false);
             if (!silent) {
@@ -452,18 +454,20 @@ export function HomePage() {
           setUsageHeatmapRows(rows);
         })
         .catch((err) => {
+          if (seq !== usageHeatmapRequestSeqRef.current) return;
           logToConsole(reason === "foreground" || reason === "tab" ? "warn" : "error", logTitle, {
             error: String(err),
             reason,
           });
-          if (!isMountedRef.current) return;
           setUsageHeatmapAvailable(true);
           if (!silent) setUsageHeatmapRows([]);
           if (!silent) toast(toastText);
         })
         .finally(() => {
-          usageHeatmapRefreshInFlightRef.current = false;
-          if (!isMountedRef.current) return;
+          if (usageHeatmapInFlightSeqRef.current === seq) {
+            usageHeatmapInFlightSeqRef.current = null;
+          }
+          if (seq !== usageHeatmapRequestSeqRef.current) return;
           setUsageHeatmapLoading(false);
         });
     },
