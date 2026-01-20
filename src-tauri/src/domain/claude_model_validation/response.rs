@@ -48,8 +48,7 @@ pub(super) fn signals_from_text(text: &str) -> serde_json::Value {
 
     let mentions_max_tokens = lower.contains("max_tokens");
     let mentions_tokens_greater = lower.contains("must be greater") && lower.contains("_tokens");
-    let mentions_invalid_signature =
-        lower.contains("invalid") && lower.contains("signature");
+    let mentions_invalid_signature = lower.contains("invalid") && lower.contains("signature");
 
     serde_json::json!({
         "mentions_amazon_bedrock": mentions_bedrock,
@@ -765,8 +764,7 @@ pub(super) fn extract_thinking_full_and_signature_from_message_json(
 
             if let Some(sig) = obj.get("signature").and_then(|v| v.as_str()) {
                 let trimmed = sig.trim();
-                if !trimmed.is_empty() && trimmed.chars().count() > signature_full.chars().count()
-                {
+                if !trimmed.is_empty() && trimmed.chars().count() > signature_full.chars().count() {
                     signature_full = take_first_n_chars(trimmed, MAX_ROUNDTRIP_SIGNATURE_CHARS);
                 }
             }
@@ -777,14 +775,13 @@ pub(super) fn extract_thinking_full_and_signature_from_message_json(
                 .or_else(|| obj.get("text").and_then(|v| v.as_str()))
             {
                 let text = t.trim();
-                if !text.is_empty()
-                    && thinking_full.chars().count() < MAX_ROUNDTRIP_THINKING_CHARS
+                if !text.is_empty() && thinking_full.chars().count() < MAX_ROUNDTRIP_THINKING_CHARS
                 {
                     if !thinking_full.is_empty() {
                         thinking_full.push('\n');
                     }
-                    let remaining = MAX_ROUNDTRIP_THINKING_CHARS
-                        .saturating_sub(thinking_full.chars().count());
+                    let remaining =
+                        MAX_ROUNDTRIP_THINKING_CHARS.saturating_sub(thinking_full.chars().count());
                     thinking_full.push_str(&take_first_n_chars(text, remaining));
                 }
             }

@@ -142,7 +142,9 @@ fn apply_prompt_cache_padding(body: &mut serde_json::Value, min_tokens: usize) -
         return (false, word_count);
     };
 
-    let system = obj.entry("system").or_insert_with(|| serde_json::Value::Array(vec![]));
+    let system = obj
+        .entry("system")
+        .or_insert_with(|| serde_json::Value::Array(vec![]));
     if !system.is_array() {
         *system = serde_json::Value::Array(vec![]);
     }
@@ -215,7 +217,11 @@ fn apply_prompt_cache_padding(body: &mut serde_json::Value, min_tokens: usize) -
     (applied, word_count)
 }
 
-fn build_preserved_assistant_message(thinking: &str, signature: &str, text_fallback: &str) -> serde_json::Value {
+fn build_preserved_assistant_message(
+    thinking: &str,
+    signature: &str,
+    text_fallback: &str,
+) -> serde_json::Value {
     let thinking_trimmed = thinking.trim();
     let signature_trimmed = signature.trim();
     let text = text_fallback.trim();
@@ -710,7 +716,13 @@ pub async fn validate_provider_model(
         }
     }
 
-    let step1 = perform_request(&client, &target_url, headers.clone(), step1_body.clone(), stream);
+    let step1 = perform_request(
+        &client,
+        &target_url,
+        headers.clone(),
+        step1_body.clone(),
+        stream,
+    );
     let step1 = step1.await;
 
     let raw_excerpt_text = step1.raw_excerpt.clone();
@@ -858,7 +870,8 @@ pub async fn validate_provider_model(
                         obj.insert(
                             "roundtrip_step2_error".to_string(),
                             serde_json::Value::String(
-                                "MISSING_STEP1_THINKING_SIGNATURE: cannot run roundtrip".to_string(),
+                                "MISSING_STEP1_THINKING_SIGNATURE: cannot run roundtrip"
+                                    .to_string(),
                             ),
                         );
                     } else {
@@ -866,8 +879,11 @@ pub async fn validate_provider_model(
                             "第一行原样输出暗号：AIO_MULTI_TURN_OK（不要解释）。\n第二行输出 OK。"
                                 .to_string()
                         });
-                        let assistant_message =
-                            build_preserved_assistant_message(thinking, signature, &step1.output_text_preview);
+                        let assistant_message = build_preserved_assistant_message(
+                            thinking,
+                            signature,
+                            &step1.output_text_preview,
+                        );
 
                         let mut step2_body = step1_body.clone();
                         force_stream_true(&mut step2_body);
@@ -1031,14 +1047,9 @@ pub async fn validate_provider_model(
                         );
                     }
 
-                    let step2 = perform_request(
-                        &client,
-                        &target_url,
-                        headers.clone(),
-                        step2_body,
-                        true,
-                    )
-                    .await;
+                    let step2 =
+                        perform_request(&client, &target_url, headers.clone(), step2_body, true)
+                            .await;
 
                     obj.insert(
                         "roundtrip_step2_status".to_string(),
@@ -1063,8 +1074,13 @@ pub async fn validate_provider_model(
                             serde_json::Value::String(err.clone()),
                         );
                     }
-                    if let Some(usage_obj) = step2.usage_json_value.as_ref().and_then(|v| v.as_object()) {
-                        if let Some(v) = usage_obj.get("cache_read_input_tokens").and_then(|v| v.as_i64()) {
+                    if let Some(usage_obj) =
+                        step2.usage_json_value.as_ref().and_then(|v| v.as_object())
+                    {
+                        if let Some(v) = usage_obj
+                            .get("cache_read_input_tokens")
+                            .and_then(|v| v.as_i64())
+                        {
                             obj.insert(
                                 "roundtrip_step2_cache_read_input_tokens".to_string(),
                                 serde_json::Value::Number(v.into()),
@@ -1147,7 +1163,10 @@ mod tests {
         assert_eq!(content.len(), 2);
 
         let thinking = content[0].as_object().unwrap();
-        assert_eq!(thinking.get("type").and_then(|v| v.as_str()), Some("thinking"));
+        assert_eq!(
+            thinking.get("type").and_then(|v| v.as_str()),
+            Some("thinking")
+        );
         assert_eq!(
             thinking.get("thinking").and_then(|v| v.as_str()),
             Some("THINK")
