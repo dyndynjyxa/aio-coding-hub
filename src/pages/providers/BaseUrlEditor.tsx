@@ -15,6 +15,7 @@ export type BaseUrlEditorProps = {
   setPingingAll: Dispatch<SetStateAction<boolean>>;
   newRow: (url?: string) => BaseUrlRow;
   disabled?: boolean;
+  placeholder?: string;
 };
 
 async function pingBaseUrlRow(
@@ -88,6 +89,7 @@ export function BaseUrlEditor({
   setPingingAll,
   newRow,
   disabled,
+  placeholder,
 }: BaseUrlEditorProps) {
   return (
     <div className="space-y-2">
@@ -120,7 +122,7 @@ export function BaseUrlEditor({
                     )
                   );
                 }}
-                placeholder="https://api.openai.com"
+                placeholder={placeholder ?? "https://api.openai.com"}
                 className={cn("w-full font-mono text-sm h-8 py-1", pingBadge ? "pr-14" : null)}
               />
               {pingBadge ? (

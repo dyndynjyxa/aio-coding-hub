@@ -1,14 +1,16 @@
 // Usage: Used by ProvidersView to create/edit a Provider with toast-based validation.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
-import { CLIS } from "../../constants/clis";
+import { cliLongLabel } from "../../constants/clis";
 import { logToConsole } from "../../services/consoleLog";
 import {
+  providerGuessCliToken,
   providerUpsert,
   type ClaudeModels,
   type CliKey,
+  type ProviderMode,
   type ProviderSummary,
 } from "../../services/providers";
 import { Button } from "../../ui/Button";
@@ -75,6 +77,54 @@ function BaseUrlModeRadioGroup({ value, onChange, disabled }: BaseUrlModeRadioGr
   );
 }
 
+type ProviderModeRadioGroupProps = {
+  value: ProviderMode;
+  onChange: (mode: ProviderMode) => void;
+  disabled?: boolean;
+};
+
+function ProviderModeRadioGroup({ value, onChange, disabled }: ProviderModeRadioGroupProps) {
+  const items = [
+    { value: "relay" as const, label: "中转" },
+    { value: "official" as const, label: "官方 Official" },
+  ];
+
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Provider 模式"
+      className={cn(
+        "inline-flex w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm",
+        disabled ? "opacity-60" : null
+      )}
+    >
+      {items.map((item, index) => {
+        const active = value === item.value;
+        return (
+          <button
+            key={item.value}
+            type="button"
+            onClick={() => onChange(item.value)}
+            role="radio"
+            aria-checked={active}
+            disabled={disabled}
+            className={cn(
+              "flex-1 px-3 py-2 text-sm font-medium transition",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0052FF]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-[#FAFAFA]",
+              index < items.length - 1 ? "border-r border-slate-200" : null,
+              active ? "bg-gradient-to-br from-[#0052FF] to-[#4D7CFF] text-white" : null,
+              !active ? "bg-white text-slate-700 hover:bg-slate-50" : null,
+              disabled ? "cursor-not-allowed" : null
+            )}
+          >
+            {item.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 type ProviderEditorDialogBaseProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -92,7 +142,46 @@ export type ProviderEditorDialogProps =
     });
 
 function cliNameFromKey(cliKey: CliKey) {
-  return CLIS.find((cli) => cli.key === cliKey)?.name ?? cliKey;
+  return cliLongLabel(cliKey);
+}
+
+function defaultOfficialBaseUrl(cliKey: CliKey) {
+  switch (cliKey) {
+    case "claude":
+      return "https://api.anthropic.com";
+    case "codex":
+      return "https://api.openai.com/v1";
+    case "gemini":
+      return "https://generativelanguage.googleapis.com";
+  }
+}
+
+function validateOfficialBaseUrls(cliKey: CliKey, baseUrls: string[]) {
+  const allowedHosts: Record<CliKey, string[]> = {
+    claude: ["api.anthropic.com"],
+    codex: ["api.openai.com"],
+    gemini: ["generativelanguage.googleapis.com"],
+  };
+  const allowed = allowedHosts[cliKey];
+
+  for (const url of baseUrls) {
+    let host = "";
+    try {
+      host = new URL(url).hostname.toLowerCase();
+    } catch {
+      return { ok: false as const, message: `Base URL 格式不合法：${url}` };
+    }
+
+    const ok = allowed.some((allowedHost) => host === allowedHost || host.endsWith(`.${allowedHost}`));
+    if (!ok) {
+      return {
+        ok: false as const,
+        message: `官方 Provider 仅允许使用官方域名（${allowed.join(", ")}），当前：${host}`,
+      };
+    }
+  }
+
+  return { ok: true as const };
 }
 
 export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
@@ -109,10 +198,13 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
   };
 
   const [name, setName] = useState("");
+  const [providerMode, setProviderMode] = useState<ProviderMode>("relay");
   const [baseUrlMode, setBaseUrlMode] = useState<ProviderBaseUrlMode>("order");
   const [baseUrlRows, setBaseUrlRows] = useState<BaseUrlRow[]>(() => [newBaseUrlRow()]);
+  const [baseUrlsAutofilled, setBaseUrlsAutofilled] = useState(false);
   const [pingingAll, setPingingAll] = useState(false);
   const [apiKey, setApiKey] = useState("");
+  const [importingToken, setImportingToken] = useState(false);
   const [costMultiplier, setCostMultiplier] = useState("1.0");
   const [claudeModels, setClaudeModels] = useState<ClaudeModels>({});
   const [enabled, setEnabled] = useState(true);
@@ -131,10 +223,13 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
 
     if (mode === "create") {
       setName("");
+      setProviderMode("relay");
       setBaseUrlMode("order");
       setBaseUrlRows([newBaseUrlRow()]);
+      setBaseUrlsAutofilled(false);
       setPingingAll(false);
       setApiKey("");
+      setImportingToken(false);
       setCostMultiplier("1.0");
       setClaudeModels({});
       setEnabled(true);
@@ -142,14 +237,34 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
     }
 
     setName(props.provider.name);
+    setProviderMode(props.provider.provider_mode);
     setBaseUrlMode(props.provider.base_url_mode);
     setBaseUrlRows(props.provider.base_urls.map((url) => newBaseUrlRow(url)));
+    setBaseUrlsAutofilled(false);
     setPingingAll(false);
     setApiKey("");
+    setImportingToken(false);
     setEnabled(props.provider.enabled);
     setCostMultiplier(String(props.provider.cost_multiplier ?? 1.0));
     setClaudeModels(props.provider.claude_models ?? {});
   }, [cliKey, editingProviderId, mode, open]);
+
+  const setBaseUrlRowsFromUser: Dispatch<SetStateAction<BaseUrlRow[]>> = (action) => {
+    setBaseUrlRows((prev) => {
+      const next = typeof action === "function" ? action(prev) : action;
+
+      const prevUrls = prev.map((row) => row.url);
+      const nextUrls = next.map((row) => row.url);
+      const urlsChanged =
+        prevUrls.length !== nextUrls.length || prevUrls.some((url, index) => url !== nextUrls[index]);
+
+      if (urlsChanged) {
+        setBaseUrlsAutofilled(false);
+      }
+
+      return next;
+    });
+  };
 
   async function save() {
     if (saving) return;
@@ -160,7 +275,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
       return;
     }
 
-    if (mode === "create") {
+    if (mode === "create" && providerMode === "relay") {
       const apiKeyError = validateProviderApiKeyForCreate(apiKey);
       if (apiKeyError) {
         toast(apiKeyError);
@@ -180,6 +295,14 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
       return;
     }
 
+    if (providerMode === "official") {
+      const officialCheck = validateOfficialBaseUrls(cliKey, normalized.baseUrls);
+      if (!officialCheck.ok) {
+        toast(officialCheck.message);
+        return;
+      }
+    }
+
     if (cliKey === "claude") {
       const modelError = validateProviderClaudeModels(claudeModels);
       if (modelError) {
@@ -193,6 +316,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
       const saved = await providerUpsert({
         ...(mode === "edit" ? { provider_id: props.provider.id } : {}),
         cli_key: cliKey,
+        provider_mode: providerMode,
         name,
         base_urls: normalized.baseUrls,
         base_url_mode: baseUrlMode,
@@ -212,6 +336,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
         cli: saved.cli_key,
         provider_id: saved.id,
         name: saved.name,
+        provider_mode: saved.provider_mode,
         base_urls: saved.base_urls,
         base_url_mode: saved.base_url_mode,
         enabled: saved.enabled,
@@ -254,6 +379,33 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
       className="max-w-xl"
     >
       <div className="space-y-4">
+        <FormField label="模式" hint={mode === "create" ? "第 1 步：先选中转/官方" : null}>
+          <ProviderModeRadioGroup
+            value={providerMode}
+            onChange={(nextMode) => {
+              setProviderMode(nextMode);
+
+              if (mode === "create" && nextMode === "official") {
+                const onlyEmpty = baseUrlRows.length === 1 && !baseUrlRows[0]?.url?.trim();
+                if (onlyEmpty) {
+                  setBaseUrlRows([newBaseUrlRow(defaultOfficialBaseUrl(cliKey))]);
+                  setBaseUrlsAutofilled(true);
+                }
+                setBaseUrlMode("order");
+                return;
+              }
+
+              if (mode === "create" && nextMode === "relay") {
+                if (baseUrlsAutofilled) {
+                  setBaseUrlRows([newBaseUrlRow()]);
+                  setBaseUrlsAutofilled(false);
+                }
+              }
+            }}
+            disabled={saving || mode === "edit"}
+          />
+        </FormField>
+
         <div className="grid gap-3 sm:grid-cols-2">
           <FormField label="名称">
             <Input
@@ -275,23 +427,64 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
         <FormField label="Base URLs">
           <BaseUrlEditor
             rows={baseUrlRows}
-            setRows={setBaseUrlRows}
+            setRows={setBaseUrlRowsFromUser}
             pingingAll={pingingAll}
             setPingingAll={setPingingAll}
             newRow={newBaseUrlRow}
+            placeholder={
+              providerMode === "relay" ? "中转endpoint" : defaultOfficialBaseUrl(cliKey)
+            }
             disabled={saving}
           />
         </FormField>
 
         <div className="grid gap-3 sm:grid-cols-2">
-          <FormField label="API Key" hint={mode === "edit" ? "留空保持不变" : "保存后不回显"}>
-            <Input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.currentTarget.value)}
-              placeholder="sk-…"
-              autoComplete="off"
-            />
+          <FormField
+            label="API Key / Token"
+            hint={
+              mode === "edit"
+                ? "留空保持不变"
+                : providerMode === "official"
+                  ? "官方模式可留空（推荐走本机官方登录 / OAuth）；如需网关注入 Token 也可填写"
+                  : "保存后不回显"
+            }
+          >
+            <div className="flex items-center gap-2">
+              <Input
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.currentTarget.value)}
+                placeholder={providerMode === "official" ? "可留空" : "sk-…"}
+                autoComplete="off"
+              />
+              {providerMode === "official" ? (
+                <Button
+                  variant="secondary"
+                  disabled={saving || importingToken}
+                  onClick={async () => {
+                    if (importingToken) return;
+                    setImportingToken(true);
+                    try {
+                      const token = await providerGuessCliToken(cliKey);
+                      if (!token) {
+                        toast(
+                          "未检测到可用的本机 Token（可能尚未登录官方，或已开启代理并写入占位符）"
+                        );
+                        return;
+                      }
+                      setApiKey(token);
+                      toast("已从本机配置导入 Token（仅本地使用）");
+                    } catch (err) {
+                      toast(`导入失败：${String(err)}`);
+                    } finally {
+                      setImportingToken(false);
+                    }
+                  }}
+                >
+                  {importingToken ? "导入中…" : "导入"}
+                </Button>
+              ) : null}
+            </div>
           </FormField>
 
           <FormField label="价格倍率">

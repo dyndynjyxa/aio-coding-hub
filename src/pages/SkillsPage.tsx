@@ -4,6 +4,7 @@ import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { CLIS, cliFromKeyOrDefault, enabledFlagForCli, isCliKey } from "../constants/clis";
 import { logToConsole } from "../services/consoleLog";
 import type { CliKey } from "../services/providers";
 import {
@@ -22,14 +23,6 @@ import { Switch } from "../ui/Switch";
 import { cn } from "../utils/cn";
 import { formatActionFailureToast } from "../utils/errors";
 
-type CliItem = { key: CliKey; name: string };
-
-const CLIS: CliItem[] = [
-  { key: "claude", name: "Claude Code" },
-  { key: "codex", name: "Codex" },
-  { key: "gemini", name: "Gemini" },
-];
-
 function formatUnixSeconds(ts: number) {
   try {
     return new Date(ts * 1000).toLocaleString();
@@ -39,9 +32,7 @@ function formatUnixSeconds(ts: number) {
 }
 
 function enabledForCli(skill: InstalledSkillSummary, cliKey: CliKey) {
-  if (cliKey === "claude") return skill.enabled_claude;
-  if (cliKey === "codex") return skill.enabled_codex;
-  return skill.enabled_gemini;
+  return enabledFlagForCli(skill, cliKey);
 }
 
 function enabledLabel(skill: InstalledSkillSummary) {
@@ -61,7 +52,7 @@ function sourceHint(
 function readCliFromStorage(): CliKey {
   try {
     const raw = localStorage.getItem("skills.activeCli");
-    if (raw === "claude" || raw === "codex" || raw === "gemini") return raw;
+    if (isCliKey(raw)) return raw;
   } catch {}
   return "claude";
 }
@@ -88,10 +79,7 @@ async function openPathOrReveal(path: string) {
 export function SkillsPage() {
   const navigate = useNavigate();
   const [activeCli, setActiveCli] = useState<CliKey>(() => readCliFromStorage());
-  const currentCli = useMemo(
-    () => CLIS.find((cli) => cli.key === activeCli) ?? CLIS[0],
-    [activeCli]
-  );
+  const currentCli = useMemo(() => cliFromKeyOrDefault(activeCli), [activeCli]);
 
   const [installed, setInstalled] = useState<InstalledSkillSummary[]>([]);
   const [localSkills, setLocalSkills] = useState<LocalSkillSummary[]>([]);

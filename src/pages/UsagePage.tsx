@@ -10,7 +10,7 @@ import {
   type UsageScope,
   type UsageSummary,
 } from "../services/usage";
-import type { CliKey } from "../services/providers";
+import { CLI_FILTER_ITEMS, type CliFilterKey } from "../constants/clis";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { cn } from "../utils/cn";
@@ -32,16 +32,6 @@ const PERIOD_ITEMS: PeriodItem[] = [
   { key: "monthly", label: "本月" },
   { key: "allTime", label: "全部" },
   { key: "custom", label: "自定义" },
-];
-
-type CliFilter = "all" | CliKey;
-type CliItem = { key: CliFilter; label: string };
-
-const CLI_ITEMS: CliItem[] = [
-  { key: "all", label: "全部" },
-  { key: "claude", label: "Claude" },
-  { key: "codex", label: "Codex" },
-  { key: "gemini", label: "Gemini" },
 ];
 
 const FILTER_LABEL_CLASS = "w-16 shrink-0 pt-1 text-right text-xs font-medium text-slate-500";
@@ -178,7 +168,7 @@ function CacheBreakdown({
 export function UsagePage() {
   const [scope, setScope] = useState<UsageScope>("provider");
   const [period, setPeriod] = useState<UsagePeriod>("daily");
-  const [cliKey, setCliKey] = useState<CliFilter>("all");
+  const [cliKey, setCliKey] = useState<CliFilterKey>("all");
   const [reloadSeq, setReloadSeq] = useState(0);
 
   const [customStartDate, setCustomStartDate] = useState<string>("");
@@ -356,7 +346,7 @@ export function UsagePage() {
         <div className="flex items-start gap-2">
           <span className={FILTER_LABEL_CLASS}>CLI：</span>
           <div className={FILTER_OPTIONS_CLASS}>
-            {CLI_ITEMS.map((item) => (
+            {CLI_FILTER_ITEMS.map((item) => (
               <Button
                 key={item.key}
                 size="sm"

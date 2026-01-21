@@ -41,8 +41,9 @@ use super::thinking_signature_rectifier;
 use super::util::{
     body_for_introspection, build_target_url, compute_all_providers_unavailable_fingerprint,
     compute_request_fingerprint, encode_url_component, extract_idempotency_key_hash,
-    infer_requested_model_info, inject_provider_auth, new_trace_id, now_unix_millis,
-    now_unix_seconds, strip_hop_headers, RequestedModelLocation, MAX_REQUEST_BODY_BYTES,
+    ensure_cli_required_headers, infer_requested_model_info, inject_provider_auth, new_trace_id,
+    now_unix_millis, now_unix_seconds, strip_hop_headers, RequestedModelLocation,
+    MAX_REQUEST_BODY_BYTES,
 };
 use super::warmup;
 
@@ -1699,7 +1700,22 @@ pub(super) async fn proxy_impl(
             );
 
             let mut headers = base_headers.clone();
-            inject_provider_auth(&cli_key, &provider.api_key_plaintext, &mut headers);
+            ensure_cli_required_headers(&cli_key, &mut headers);
+
+            match provider.provider_mode {
+                crate::providers::ProviderMode::Official => {
+                    // Official: allow passthrough when api_key is empty (e.g. OAuth login on the CLI side).
+                    let api_key = provider.api_key_plaintext.trim();
+                    if !api_key.is_empty() {
+                        inject_provider_auth(&cli_key, api_key, &mut headers);
+                    }
+                }
+                crate::providers::ProviderMode::Relay => {
+                    // Relay: ALWAYS override auth headers to avoid leaking any official OAuth tokens
+                    // to a third-party relay base_url.
+                    inject_provider_auth(&cli_key, provider.api_key_plaintext.trim(), &mut headers);
+                }
+            }
             if strip_request_content_encoding {
                 headers.remove(header::CONTENT_ENCODING);
             }

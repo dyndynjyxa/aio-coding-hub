@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { CLIS } from "../../constants/clis";
+import { cliLongLabel, enabledFlagForCli } from "../../constants/clis";
 import { logToConsole } from "../../services/consoleLog";
 import {
   mcpServerDelete,
@@ -48,12 +48,7 @@ export function McpServersView() {
 
   async function toggleEnabled(server: McpServerSummary, cliKey: CliKey) {
     if (toggling) return;
-    const current =
-      cliKey === "claude"
-        ? server.enabled_claude
-        : cliKey === "codex"
-          ? server.enabled_codex
-          : server.enabled_gemini;
+    const current = enabledFlagForCli(server, cliKey);
     const nextEnabled = !current;
 
     setToggling(true);
@@ -70,7 +65,7 @@ export function McpServersView() {
 
       setItems((prev) => prev.map((s) => (s.id === next.id ? next : s)));
 
-      const cliLabel = CLIS.find((c) => c.key === cliKey)?.name ?? cliKey;
+      const cliLabel = cliLongLabel(cliKey);
       logToConsole("info", "切换 MCP Server 生效范围", {
         id: next.id,
         server_key: next.server_key,

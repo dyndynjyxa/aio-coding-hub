@@ -1,7 +1,7 @@
 //! Usage: Provider configuration related Tauri commands.
 
 use crate::app_state::{ensure_db_ready, DbInitState};
-use crate::{base_url_probe, blocking, providers};
+use crate::{base_url_probe, blocking, cli_proxy, providers};
 
 #[tauri::command]
 pub(crate) async fn providers_list(
@@ -23,6 +23,7 @@ pub(crate) async fn provider_upsert(
     db_state: tauri::State<'_, DbInitState>,
     provider_id: Option<i64>,
     cli_key: String,
+    provider_mode: String,
     name: String,
     base_urls: Vec<String>,
     base_url_mode: String,
@@ -38,6 +39,7 @@ pub(crate) async fn provider_upsert(
             &app,
             provider_id,
             &cli_key,
+            &provider_mode,
             &name,
             base_urls,
             &base_url_mode,
@@ -100,4 +102,15 @@ pub(crate) async fn base_url_ping_ms(base_url: String) -> Result<u64, String> {
         .build()
         .map_err(|e| format!("PING_HTTP_CLIENT_INIT: {e}"))?;
     base_url_probe::probe_base_url_ms(&client, &base_url, std::time::Duration::from_secs(3)).await
+}
+
+#[tauri::command]
+pub(crate) async fn provider_guess_cli_token(
+    app: tauri::AppHandle,
+    cli_key: String,
+) -> Result<Option<String>, String> {
+    blocking::run("provider_guess_cli_token", move || {
+        cli_proxy::guess_cli_auth_token(&app, &cli_key)
+    })
+    .await
 }

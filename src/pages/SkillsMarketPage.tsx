@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { CLIS, cliFromKeyOrDefault, enabledFlagForCli, isCliKey } from "../constants/clis";
 import { logToConsole } from "../services/consoleLog";
 import type { CliKey } from "../services/providers";
 import {
@@ -21,14 +22,6 @@ import { Card } from "../ui/Card";
 import { Dialog } from "../ui/Dialog";
 import { Switch } from "../ui/Switch";
 import { formatActionFailureToast } from "../utils/errors";
-
-type CliItem = { key: CliKey; name: string };
-
-const CLIS: CliItem[] = [
-  { key: "claude", name: "Claude Code" },
-  { key: "codex", name: "Codex" },
-  { key: "gemini", name: "Gemini" },
-];
 
 function formatUnixSeconds(ts: number) {
   try {
@@ -51,7 +44,7 @@ function sourceKey(skill: SkillSource) {
 function readCliFromStorage(): CliKey {
   try {
     const raw = localStorage.getItem("skills.activeCli");
-    if (raw === "claude" || raw === "codex" || raw === "gemini") return raw;
+    if (isCliKey(raw)) return raw;
   } catch {}
   return "claude";
 }
@@ -84,9 +77,7 @@ function repoKey(skill: Pick<SkillSource, "source_git_url" | "source_branch">) {
 }
 
 function enabledForCli(skill: InstalledSkillSummary, cli: CliKey) {
-  if (cli === "claude") return skill.enabled_claude;
-  if (cli === "codex") return skill.enabled_codex;
-  return skill.enabled_gemini;
+  return enabledFlagForCli(skill, cli);
 }
 
 type MarketStatus = "not_installed" | "needs_enable" | "enabled";
@@ -100,10 +91,7 @@ function statusLabel(status: MarketStatus) {
 export function SkillsMarketPage() {
   const navigate = useNavigate();
   const [activeCli, setActiveCli] = useState<CliKey>(() => readCliFromStorage());
-  const currentCli = useMemo(
-    () => CLIS.find((cli) => cli.key === activeCli) ?? CLIS[0],
-    [activeCli]
-  );
+  const currentCli = useMemo(() => cliFromKeyOrDefault(activeCli), [activeCli]);
 
   const [repos, setRepos] = useState<SkillRepoSummary[]>([]);
   const [installed, setInstalled] = useState<InstalledSkillSummary[]>([]);

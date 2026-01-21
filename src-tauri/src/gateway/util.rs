@@ -341,6 +341,12 @@ pub(super) fn build_target_url(
         && (forwarded_path == "/v1" || forwarded_path.starts_with("/v1/"))
     {
         forwarded_path.strip_prefix("/v1").unwrap_or(forwarded_path)
+    } else if base_path.ends_with("/v1beta")
+        && (forwarded_path == "/v1beta" || forwarded_path.starts_with("/v1beta/"))
+    {
+        forwarded_path
+            .strip_prefix("/v1beta")
+            .unwrap_or(forwarded_path)
     } else {
         forwarded_path
     };
@@ -364,6 +370,7 @@ pub(super) fn inject_provider_auth(cli_key: &str, api_key: &str, headers: &mut H
     headers.remove(header::AUTHORIZATION);
     headers.remove("x-api-key");
     headers.remove("x-goog-api-key");
+    headers.remove("x-goog-api-client");
 
     match cli_key {
         "codex" => {
@@ -373,6 +380,10 @@ pub(super) fn inject_provider_auth(cli_key: &str, api_key: &str, headers: &mut H
             }
         }
         "claude" => {
+            let value = format!("Bearer {api_key}");
+            if let Ok(header_value) = HeaderValue::from_str(&value) {
+                headers.insert(header::AUTHORIZATION, header_value);
+            }
             if let Ok(header_value) = HeaderValue::from_str(api_key) {
                 headers.insert("x-api-key", header_value);
             }
@@ -381,10 +392,35 @@ pub(super) fn inject_provider_auth(cli_key: &str, api_key: &str, headers: &mut H
             }
         }
         "gemini" => {
-            if let Ok(header_value) = HeaderValue::from_str(api_key) {
+            let trimmed = api_key.trim();
+            let oauth_access_token = if trimmed.starts_with("ya29.") {
+                Some(trimmed.to_string())
+            } else if trimmed.starts_with('{') {
+                serde_json::from_str::<serde_json::Value>(trimmed)
+                    .ok()
+                    .and_then(|v| v.get("access_token").and_then(|v| v.as_str()).map(str::to_string))
+            } else {
+                None
+            };
+
+            if let Some(token) = oauth_access_token {
+                let value = format!("Bearer {token}");
+                if let Ok(header_value) = HeaderValue::from_str(&value) {
+                    headers.insert(header::AUTHORIZATION, header_value);
+                }
+                if !headers.contains_key("x-goog-api-client") {
+                    headers.insert("x-goog-api-client", HeaderValue::from_static("GeminiCLI/1.0"));
+                }
+            } else if let Ok(header_value) = HeaderValue::from_str(trimmed) {
                 headers.insert("x-goog-api-key", header_value);
             }
         }
         _ => {}
+    }
+}
+
+pub(super) fn ensure_cli_required_headers(cli_key: &str, headers: &mut HeaderMap) {
+    if cli_key == "claude" && !headers.contains_key("anthropic-version") {
+        headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
     }
 }

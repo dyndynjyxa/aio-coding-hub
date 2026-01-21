@@ -17,7 +17,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { CLIS } from "../../constants/clis";
+import { CLIS, cliFromKeyOrDefault } from "../../constants/clis";
 import { logToConsole } from "../../services/consoleLog";
 import type { CliKey, ProviderSummary } from "../../services/providers";
 import {
@@ -131,10 +131,7 @@ export function SortModesView({
     activeCliRef.current = activeCli;
   }, [activeCli]);
 
-  const currentCli = useMemo(
-    () => CLIS.find((cli) => cli.key === activeCli) ?? CLIS[0],
-    [activeCli]
-  );
+  const currentCli = useMemo(() => cliFromKeyOrDefault(activeCli), [activeCli]);
 
   const [sortModes, setSortModes] = useState<SortModeSummary[]>([]);
   const [sortModesLoading, setSortModesLoading] = useState(false);

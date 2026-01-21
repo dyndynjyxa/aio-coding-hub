@@ -139,6 +139,16 @@ function SortableProviderCard({
               ) : null}
             </div>
             <div className="mt-1 flex items-center gap-2">
+              <span
+                className={cn(
+                  "shrink-0 rounded-full px-2 py-0.5 font-mono text-[10px]",
+                  provider.provider_mode === "official"
+                    ? "bg-emerald-50 text-emerald-700"
+                    : "bg-slate-50 text-slate-700"
+                )}
+              >
+                {provider.provider_mode === "official" ? "官方" : "中转"}
+              </span>
               <span className="shrink-0 rounded-full bg-slate-50 px-2 py-0.5 font-mono text-[10px] text-slate-700">
                 {provider.base_url_mode === "ping" ? "Ping" : "顺序"}
               </span>

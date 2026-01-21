@@ -1,5 +1,5 @@
 import { Command, Edit2, Globe, Link, Terminal, Trash2 } from "lucide-react";
-import { CLIS } from "../../../constants/clis";
+import { CLIS, enabledFlagForCli } from "../../../constants/clis";
 import type { McpServerSummary } from "../../../services/mcp";
 import type { CliKey } from "../../../services/providers";
 import { Button } from "../../../ui/Button";
@@ -69,12 +69,7 @@ export function McpServerCard({
         <div className="flex items-center justify-between gap-4 sm:justify-end">
           <div className="flex items-center gap-2">
             {CLIS.map((cli) => {
-              const checked =
-                cli.key === "claude"
-                  ? server.enabled_claude
-                  : cli.key === "codex"
-                    ? server.enabled_codex
-                    : server.enabled_gemini;
+              const checked = enabledFlagForCli(server, cli.key);
               return (
                 <div
                   key={cli.key}

@@ -556,6 +556,106 @@ fn env_var_value(input: &str, key: &str) -> Option<String> {
     None
 }
 
+fn is_placeholder_token(value: &str) -> bool {
+    let trimmed = value.trim();
+    trimmed.is_empty() || trimmed == PLACEHOLDER_KEY
+}
+
+fn extract_claude_token_from_settings(bytes: &[u8]) -> Option<String> {
+    let root = serde_json::from_slice::<serde_json::Value>(bytes).ok()?;
+    let env = root.get("env")?.as_object()?;
+
+    for key in ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"] {
+        let value = env.get(key)?.as_str()?.trim().to_string();
+        if !is_placeholder_token(&value) {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn extract_codex_token_from_auth(bytes: &[u8]) -> Option<String> {
+    let root = serde_json::from_slice::<serde_json::Value>(bytes).ok()?;
+    let value = root.get("OPENAI_API_KEY")?.as_str()?.trim().to_string();
+    if is_placeholder_token(&value) {
+        return None;
+    }
+    Some(value)
+}
+
+fn extract_gemini_token_from_env(content: &str) -> Option<String> {
+    let value = env_var_value(content, "GEMINI_API_KEY")?.trim().to_string();
+    if is_placeholder_token(&value) {
+        return None;
+    }
+    Some(value)
+}
+
+pub fn guess_cli_auth_token(app: &tauri::AppHandle, cli_key: &str) -> Result<Option<String>, String> {
+    validate_cli_key(cli_key)?;
+
+    // Prefer cli-proxy backup snapshot if present (it may contain the user's real token before
+    // we wrote placeholder values).
+    let root = cli_proxy_root_dir(app, cli_key)?;
+    let backup_dir = cli_proxy_files_dir(&root);
+
+    let backup_bytes = match cli_key {
+        "claude" => read_optional_file(&backup_dir.join("settings.json"))?,
+        "codex" => read_optional_file(&backup_dir.join("auth.json"))?,
+        "gemini" => read_optional_file(&backup_dir.join(".env"))?,
+        _ => None,
+    };
+
+    if let Some(bytes) = backup_bytes {
+        match cli_key {
+            "claude" => {
+                if let Some(token) = extract_claude_token_from_settings(&bytes) {
+                    return Ok(Some(token));
+                }
+            }
+            "codex" => {
+                if let Some(token) = extract_codex_token_from_auth(&bytes) {
+                    return Ok(Some(token));
+                }
+            }
+            "gemini" => {
+                let text = String::from_utf8_lossy(&bytes).to_string();
+                if let Some(token) = extract_gemini_token_from_env(&text) {
+                    return Ok(Some(token));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Fall back to current live config under user's home dir.
+    match cli_key {
+        "claude" => {
+            let path = claude_settings_path(app)?;
+            let Some(bytes) = read_optional_file(&path)? else {
+                return Ok(None);
+            };
+            Ok(extract_claude_token_from_settings(&bytes))
+        }
+        "codex" => {
+            let path = codex_auth_path(app)?;
+            let Some(bytes) = read_optional_file(&path)? else {
+                return Ok(None);
+            };
+            Ok(extract_codex_token_from_auth(&bytes))
+        }
+        "gemini" => {
+            let path = gemini_env_path(app)?;
+            let Some(bytes) = read_optional_file(&path)? else {
+                return Ok(None);
+            };
+            let text = String::from_utf8_lossy(&bytes).to_string();
+            Ok(extract_gemini_token_from_env(&text))
+        }
+        _ => Ok(None),
+    }
+}
+
 fn is_proxy_config_applied(app: &tauri::AppHandle, cli_key: &str, base_origin: &str) -> bool {
     match cli_key {
         "claude" => {

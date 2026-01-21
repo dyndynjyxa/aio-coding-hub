@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const DB_FILE_NAME: &str = "aio-coding-hub.db";
-const LATEST_SCHEMA_VERSION: i64 = 26;
+const LATEST_SCHEMA_VERSION: i64 = 27;
 const BUSY_TIMEOUT: Duration = Duration::from_millis(2000);
 
 fn now_unix_seconds() -> i64 {
@@ -116,6 +116,7 @@ fn apply_migrations(conn: &mut Connection) -> Result<(), String> {
             23 => migrate_v23_to_v24(conn)?,
             24 => migrate_v24_to_v25(conn)?,
             25 => migrate_v25_to_v26(conn)?,
+            26 => migrate_v26_to_v27(conn)?,
             v => {
                 return Err(format!(
                     "unsupported sqlite schema version: user_version={v} (expected 0..={LATEST_SCHEMA_VERSION})"
@@ -1930,6 +1931,60 @@ WHERE cli_key = 'claude';
 "#,
     )
     .map_err(|e| format!("failed to clear legacy provider model config: {e}"))?;
+
+    let applied_at = now_unix_seconds();
+    tx.execute(
+        "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?1, ?2)",
+        (VERSION, applied_at),
+    )
+    .map_err(|e| format!("failed to record migration: {e}"))?;
+
+    set_user_version(&tx, VERSION)?;
+
+    tx.commit()
+        .map_err(|e| format!("failed to commit migration: {e}"))?;
+
+    Ok(())
+}
+
+fn migrate_v26_to_v27(conn: &mut Connection) -> Result<(), String> {
+    const VERSION: i64 = 27;
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("failed to start sqlite transaction: {e}"))?;
+
+    let mut has_provider_mode = false;
+    {
+        let mut stmt = tx
+            .prepare("PRAGMA table_info(providers)")
+            .map_err(|e| format!("failed to prepare providers table_info query: {e}"))?;
+        let mut rows = stmt
+            .query([])
+            .map_err(|e| format!("failed to query providers table_info: {e}"))?;
+
+        while let Some(row) = rows
+            .next()
+            .map_err(|e| format!("failed to read providers table_info row: {e}"))?
+        {
+            let name: String = row
+                .get(1)
+                .map_err(|e| format!("failed to read providers column name: {e}"))?;
+            if name == "provider_mode" {
+                has_provider_mode = true;
+                break;
+            }
+        }
+    }
+
+    if !has_provider_mode {
+        tx.execute_batch(
+            r#"
+ALTER TABLE providers
+ADD COLUMN provider_mode TEXT NOT NULL DEFAULT 'relay';
+"#,
+        )
+        .map_err(|e| format!("failed to migrate v26->v27: {e}"))?;
+    }
 
     let applied_at = now_unix_seconds();
     tx.execute(

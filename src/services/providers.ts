@@ -2,6 +2,8 @@ import { invokeTauriOrNull } from "./tauriInvoke";
 
 export type CliKey = "claude" | "codex" | "gemini";
 
+export type ProviderMode = "relay" | "official";
+
 export type ClaudeModels = {
   main_model?: string | null;
   reasoning_model?: string | null;
@@ -13,6 +15,7 @@ export type ClaudeModels = {
 export type ProviderSummary = {
   id: number;
   cli_key: CliKey;
+  provider_mode: ProviderMode;
   name: string;
   base_urls: string[];
   base_url_mode: "order" | "ping";
@@ -28,9 +31,14 @@ export async function providersList(cliKey: CliKey) {
   return invokeTauriOrNull<ProviderSummary[]>("providers_list", { cliKey });
 }
 
+export async function providerGuessCliToken(cliKey: CliKey) {
+  return invokeTauriOrNull<string | null>("provider_guess_cli_token", { cliKey });
+}
+
 export async function providerUpsert(input: {
   provider_id?: number | null;
   cli_key: CliKey;
+  provider_mode: ProviderMode;
   name: string;
   base_urls: string[];
   base_url_mode: "order" | "ping";
@@ -43,6 +51,7 @@ export async function providerUpsert(input: {
   return invokeTauriOrNull<ProviderSummary>("provider_upsert", {
     providerId: input.provider_id ?? null,
     cliKey: input.cli_key,
+    providerMode: input.provider_mode,
     name: input.name,
     baseUrls: input.base_urls,
     baseUrlMode: input.base_url_mode,

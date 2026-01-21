@@ -127,10 +127,35 @@ impl ProviderBaseUrlMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProviderMode {
+    Relay,
+    Official,
+}
+
+impl ProviderMode {
+    fn parse(input: &str) -> Option<Self> {
+        match input.trim() {
+            "relay" => Some(Self::Relay),
+            "official" => Some(Self::Official),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Relay => "relay",
+            Self::Official => "official",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ProviderSummary {
     pub id: i64,
     pub cli_key: String,
+    pub provider_mode: ProviderMode,
     pub name: String,
     pub base_urls: Vec<String>,
     pub base_url_mode: ProviderBaseUrlMode,
@@ -146,6 +171,7 @@ pub struct ProviderSummary {
 pub(crate) struct ProviderForGateway {
     pub id: i64,
     pub name: String,
+    pub provider_mode: ProviderMode,
     pub base_urls: Vec<String>,
     pub base_url_mode: ProviderBaseUrlMode,
     pub api_key_plaintext: String,
@@ -170,6 +196,49 @@ fn validate_cli_key(cli_key: &str) -> Result<(), String> {
         "claude" | "codex" | "gemini" => Ok(()),
         _ => Err(format!("SEC_INVALID_INPUT: unknown cli_key={cli_key}")),
     }
+}
+
+fn validate_official_base_urls(cli_key: &str, base_urls: &[String]) -> Result<(), String> {
+    fn allowed_hosts_for_cli(cli_key: &str) -> &'static [&'static str] {
+        match cli_key {
+            "claude" => &["api.anthropic.com"],
+            "codex" => &["api.openai.com"],
+            "gemini" => &["generativelanguage.googleapis.com"],
+            _ => &[],
+        }
+    }
+
+    let allowed = allowed_hosts_for_cli(cli_key);
+    if allowed.is_empty() {
+        return Err(format!(
+            "SEC_INVALID_INPUT: unknown cli_key={cli_key} for official provider"
+        ));
+    }
+
+    for base_url in base_urls {
+        let parsed = reqwest::Url::parse(base_url).map_err(|e| {
+            format!("SEC_INVALID_INPUT: invalid base_url={base_url} for official provider: {e}")
+        })?;
+        let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
+        if host.is_empty() {
+            return Err(format!(
+                "SEC_INVALID_INPUT: base_url missing host for official provider: {base_url}"
+            ));
+        }
+
+        let ok = allowed
+            .iter()
+            .any(|allowed_host| host == *allowed_host || host.ends_with(&format!(".{allowed_host}")));
+
+        if !ok {
+            return Err(format!(
+                "SEC_INVALID_INPUT: official provider base_url host not allowed: {host} (expected one of: {})",
+                allowed.join(", ")
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 fn enabled_to_int(enabled: bool) -> i64 {
@@ -234,6 +303,8 @@ fn base_urls_from_row(base_url_fallback: &str, base_urls_json: &str) -> Vec<Stri
 
 fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<ProviderSummary, rusqlite::Error> {
     let cli_key: String = row.get("cli_key")?;
+    let provider_mode_raw: String = row.get("provider_mode")?;
+    let provider_mode = ProviderMode::parse(&provider_mode_raw).unwrap_or(ProviderMode::Relay);
     let base_url_fallback: String = row.get("base_url")?;
     let base_urls_json: String = row.get("base_urls_json")?;
     let claude_models_json: String = row.get("claude_models_json")?;
@@ -244,6 +315,7 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<ProviderSummary, rusqlite::
     Ok(ProviderSummary {
         id: row.get("id")?,
         cli_key: cli_key.clone(),
+        provider_mode,
         name: row.get("name")?,
         base_urls: base_urls_from_row(&base_url_fallback, &base_urls_json),
         base_url_mode,
@@ -276,6 +348,7 @@ fn get_by_id(conn: &Connection, provider_id: i64) -> Result<ProviderSummary, Str
 SELECT
   id,
   cli_key,
+  provider_mode,
   name,
   base_url,
   base_urls_json,
@@ -353,6 +426,7 @@ pub fn list_by_cli(app: &tauri::AppHandle, cli_key: &str) -> Result<Vec<Provider
 SELECT
   id,
   cli_key,
+  provider_mode,
   name,
   base_url,
   base_urls_json,
@@ -393,6 +467,7 @@ fn list_enabled_for_gateway_in_sort_mode(
 SELECT
   p.id,
   p.name,
+  p.provider_mode,
   p.base_url,
   p.base_urls_json,
   p.base_url_mode,
@@ -411,15 +486,19 @@ ORDER BY mp.sort_order ASC
 
     let rows = stmt
         .query_map(params![mode_id, cli_key], |row| {
+            let provider_mode_raw: String = row.get("provider_mode")?;
             let base_url_fallback: String = row.get("base_url")?;
             let base_urls_json: String = row.get("base_urls_json")?;
             let base_url_mode_raw: String = row.get("base_url_mode")?;
             let claude_models_json: String = row.get("claude_models_json")?;
             let base_url_mode = ProviderBaseUrlMode::parse(&base_url_mode_raw)
                 .unwrap_or(ProviderBaseUrlMode::Order);
+            let provider_mode =
+                ProviderMode::parse(&provider_mode_raw).unwrap_or(ProviderMode::Relay);
             Ok(ProviderForGateway {
                 id: row.get("id")?,
                 name: row.get("name")?,
+                provider_mode,
                 base_urls: base_urls_from_row(&base_url_fallback, &base_urls_json),
                 base_url_mode,
                 api_key_plaintext: row.get("api_key_plaintext")?,
@@ -449,6 +528,7 @@ fn list_enabled_for_gateway_default(
 SELECT
   id,
   name,
+  provider_mode,
   base_url,
   base_urls_json,
   base_url_mode,
@@ -464,15 +544,19 @@ ORDER BY sort_order ASC, id DESC
 
     let rows = stmt
         .query_map(params![cli_key], |row| {
+            let provider_mode_raw: String = row.get("provider_mode")?;
             let base_url_fallback: String = row.get("base_url")?;
             let base_urls_json: String = row.get("base_urls_json")?;
             let base_url_mode_raw: String = row.get("base_url_mode")?;
             let claude_models_json: String = row.get("claude_models_json")?;
             let base_url_mode = ProviderBaseUrlMode::parse(&base_url_mode_raw)
                 .unwrap_or(ProviderBaseUrlMode::Order);
+            let provider_mode =
+                ProviderMode::parse(&provider_mode_raw).unwrap_or(ProviderMode::Relay);
             Ok(ProviderForGateway {
                 id: row.get("id")?,
                 name: row.get("name")?,
+                provider_mode,
                 base_urls: base_urls_from_row(&base_url_fallback, &base_urls_json),
                 base_url_mode,
                 api_key_plaintext: row.get("api_key_plaintext")?,
@@ -552,6 +636,7 @@ pub fn upsert(
     app: &tauri::AppHandle,
     provider_id: Option<i64>,
     cli_key: &str,
+    provider_mode: &str,
     name: &str,
     base_urls: Vec<String>,
     base_url_mode: &str,
@@ -564,12 +649,18 @@ pub fn upsert(
     let cli_key = cli_key.trim();
     validate_cli_key(cli_key)?;
 
+    let provider_mode = ProviderMode::parse(provider_mode)
+        .ok_or_else(|| "SEC_INVALID_INPUT: provider_mode must be 'relay' or 'official'".to_string())?;
+
     let name = name.trim();
     if name.is_empty() {
         return Err("SEC_INVALID_INPUT: provider name is required".to_string());
     }
 
     let base_urls = normalize_base_urls(base_urls)?;
+    if matches!(provider_mode, ProviderMode::Official) {
+        validate_official_base_urls(cli_key, &base_urls)?;
+    }
     let base_url_primary = base_urls.first().cloned().unwrap_or_default();
 
     let base_url_mode = ProviderBaseUrlMode::parse(base_url_mode)
@@ -595,8 +686,12 @@ pub fn upsert(
     match provider_id {
         None => {
             let priority = priority.unwrap_or(DEFAULT_PRIORITY);
-            let api_key =
-                api_key.ok_or_else(|| "SEC_INVALID_INPUT: api_key is required".to_string())?;
+            let api_key = match provider_mode {
+                ProviderMode::Relay => {
+                    api_key.ok_or_else(|| "SEC_INVALID_INPUT: api_key is required".to_string())?
+                }
+                ProviderMode::Official => api_key.unwrap_or(""),
+            };
             let sort_order = next_sort_order(&conn, cli_key)?;
 
             let claude_models = if cli_key == "claude" {
@@ -611,6 +706,7 @@ pub fn upsert(
                 r#"
 INSERT INTO providers(
   cli_key,
+  provider_mode,
   name,
   base_url,
   base_urls_json,
@@ -625,10 +721,11 @@ INSERT INTO providers(
   cost_multiplier,
   created_at,
   updated_at
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '{}', '{}', ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '{}', '{}', ?8, ?9, ?10, ?11, ?12, ?13, ?14)
 "#,
                 params![
                     cli_key,
+                    provider_mode.as_str(),
                     name,
                     base_url_primary,
                     base_urls_json,
@@ -714,21 +811,23 @@ INSERT INTO providers(
 UPDATE providers
 SET
   name = ?1,
-  base_url = ?2,
-  base_urls_json = ?3,
-  base_url_mode = ?4,
-  claude_models_json = ?5,
+  provider_mode = ?2,
+  base_url = ?3,
+  base_urls_json = ?4,
+  base_url_mode = ?5,
+  claude_models_json = ?6,
   supported_models_json = '{}',
   model_mapping_json = '{}',
-  api_key_plaintext = ?6,
-  enabled = ?7,
-  cost_multiplier = ?8,
-  priority = ?9,
-  updated_at = ?10
-WHERE id = ?11
+  api_key_plaintext = ?7,
+  enabled = ?8,
+  cost_multiplier = ?9,
+  priority = ?10,
+  updated_at = ?11
+WHERE id = ?12
 "#,
                 params![
                     name,
+                    provider_mode.as_str(),
                     base_url_primary,
                     base_urls_json,
                     base_url_mode.as_str(),

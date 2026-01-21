@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Pencil, Trash2 } from "lucide-react";
+import { CLIS, cliLongLabel } from "../constants/clis";
 import { logToConsole } from "../services/consoleLog";
 import {
   promptDelete,
@@ -22,14 +23,6 @@ import { Textarea } from "../ui/Textarea";
 import { Switch } from "../ui/Switch";
 import { cn } from "../utils/cn";
 import { formatUnknownError } from "../utils/errors";
-
-type CliItem = { key: CliKey; name: string };
-
-const CLIS: CliItem[] = [
-  { key: "claude", name: "Claude Code" },
-  { key: "codex", name: "Codex" },
-  { key: "gemini", name: "Gemini" },
-];
 
 function promptFileHint(cliKey: CliKey) {
   switch (cliKey) {
@@ -83,7 +76,7 @@ export function PromptsPage() {
   const [content, setContent] = useState("");
 
   const cliLabel = useMemo(() => {
-    return CLIS.find((c) => c.key === activeCli)?.name ?? activeCli;
+    return cliLongLabel(activeCli);
   }, [activeCli]);
 
   async function refresh(cliKey: CliKey) {
