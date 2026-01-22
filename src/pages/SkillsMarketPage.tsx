@@ -1,5 +1,6 @@
 // Usage: Discover and install skills from repos. Backend commands: `skills_discover_available`, `skill_install`, `skill_repos_*`, `skills_installed_list`.
 
+import { ExternalLink } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -20,6 +21,7 @@ import {
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Dialog } from "../ui/Dialog";
+import { TabList } from "../ui/TabList";
 import { Switch } from "../ui/Switch";
 import { formatActionFailureToast } from "../utils/errors";
 
@@ -87,6 +89,11 @@ function statusLabel(status: MarketStatus) {
   if (status === "needs_enable") return "未启用";
   return "未安装";
 }
+
+const CLI_TABS: Array<{ key: CliKey; label: string }> = CLIS.map((cli) => ({
+  key: cli.key,
+  label: cli.name,
+}));
 
 export function SkillsMarketPage() {
   const navigate = useNavigate();
@@ -397,12 +404,9 @@ export function SkillsMarketPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
           <h1 className="text-2xl font-semibold tracking-tight">Skill 市场</h1>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
           <Button onClick={() => navigate("/skills")} variant="secondary">
             返回 Skill
           </Button>
@@ -417,21 +421,17 @@ export function SkillsMarketPage() {
             {discovering ? "刷新中…" : "刷新发现"}
           </Button>
         </div>
+
+        <TabList
+          ariaLabel="CLI 选择"
+          items={CLI_TABS}
+          value={activeCli}
+          onChange={setActiveCli}
+        />
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        {CLIS.map((cli) => (
-          <Button
-            key={cli.key}
-            onClick={() => setActiveCli(cli.key)}
-            variant={activeCli === cli.key ? "primary" : "secondary"}
-          >
-            {cli.name}
-          </Button>
-        ))}
-        <span className="text-xs text-slate-500">
-          已启用仓库：{enabledRepoCount} / {repos.length}
-        </span>
+      <div className="text-xs text-slate-500">
+        已启用仓库：{enabledRepoCount} / {repos.length}
       </div>
 
       <Card className="min-h-[260px]" padding="md">
@@ -523,45 +523,46 @@ export function SkillsMarketPage() {
 
               return (
                 <div key={key} className="rounded-xl border border-slate-200 bg-white p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <div className="truncate text-sm font-semibold">{skill.name}</div>
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${statusTone}`}
+                  <div className="flex items-center gap-2">
+                    <span className="min-w-0 truncate text-sm font-semibold">{skill.name}</span>
+                    <a
+                      href={`${skill.source_git_url}${skill.source_branch ? `#` + skill.source_branch : ""}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="shrink-0 text-slate-400 hover:text-slate-600"
+                      title={`${shortGitUrl(skill.source_git_url)}#${skill.source_branch}:${skill.source_subdir}`}
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                    <span
+                      className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${statusTone}`}
+                    >
+                      {statusLabel(status)}
+                    </span>
+                    <div className="ms-auto">
+                      {status === "not_installed" ? (
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          disabled={installing}
+                          onClick={() => void installToCurrentCli(skill)}
                         >
-                          {statusLabel(status)}
-                        </span>
-                      </div>
-
-                      {skill.description ? (
-                        <div className="mt-1 text-xs text-slate-500">{skill.description}</div>
-                      ) : null}
-
-                      <div className="mt-2 truncate font-mono text-xs text-slate-500">
-                        {shortGitUrl(skill.source_git_url)}:{skill.source_subdir}
-                      </div>
+                          {installing ? "安装中…" : `安装到 ${currentCli.name}`}
+                        </Button>
+                      ) : status === "needs_enable" ? (
+                        <Button size="sm" variant="primary" onClick={() => navigate("/skills")}>
+                          去启用
+                        </Button>
+                      ) : (
+                        <Button size="sm" variant="secondary" disabled>
+                          已启用
+                        </Button>
+                      )}
                     </div>
-
-                    {status === "not_installed" ? (
-                      <Button
-                        size="sm"
-                        variant="primary"
-                        disabled={installing}
-                        onClick={() => void installToCurrentCli(skill)}
-                      >
-                        {installing ? "安装中…" : `安装到 ${currentCli.name}`}
-                      </Button>
-                    ) : status === "needs_enable" ? (
-                      <Button size="sm" variant="primary" onClick={() => navigate("/skills")}>
-                        去 Skill 启用
-                      </Button>
-                    ) : (
-                      <Button size="sm" variant="secondary" disabled>
-                        已启用
-                      </Button>
-                    )}
                   </div>
+                  {skill.description ? (
+                    <div className="mt-1.5 text-xs text-slate-500">{skill.description}</div>
+                  ) : null}
                 </div>
               );
             })
@@ -621,18 +622,18 @@ export function SkillsMarketPage() {
             ) : (
               repos.map((repo) => (
                 <div key={repo.id} className="rounded-xl border border-slate-200 bg-white p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="break-all text-sm font-medium">{repo.git_url}</div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        branch: <span className="font-mono">{repo.branch}</span>
-                      </div>
-                      <div className="mt-1 text-xs text-slate-400">
-                        更新 {formatUnixSeconds(repo.updated_at)}
-                      </div>
-                    </div>
-
-                    <div className="flex shrink-0 items-center gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="min-w-0 truncate text-sm font-medium">{repo.git_url}</span>
+                    <a
+                      href={repo.git_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="shrink-0 text-slate-400 hover:text-slate-600"
+                      title={repo.git_url}
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                    <div className="ms-auto flex items-center gap-2">
                       <span className="text-xs text-slate-600">启用</span>
                       <Switch
                         checked={repo.enabled}
@@ -648,6 +649,10 @@ export function SkillsMarketPage() {
                         删除
                       </Button>
                     </div>
+                  </div>
+                  <div className="mt-1.5 flex items-center gap-3 text-xs text-slate-500">
+                    <span>branch: <span className="font-mono">{repo.branch}</span></span>
+                    <span>更新 {formatUnixSeconds(repo.updated_at)}</span>
                   </div>
                 </div>
               ))
