@@ -11,7 +11,7 @@ export function PageHeader({ title, subtitle, actions }: PageHeaderProps) {
 
   return (
     <div
-      className={`flex min-h-10 flex-wrap justify-between gap-4 ${hasSubtitle ? "items-start" : "items-center"}`}
+      className={`flex min-h-12 flex-wrap justify-between gap-4 ${hasSubtitle ? "items-start" : "items-center"}`}
     >
       <div className="flex items-center gap-3">
         <div className="h-8 w-1 shrink-0 rounded-full bg-gradient-to-b from-accent to-accent-secondary" />
@@ -21,7 +21,7 @@ export function PageHeader({ title, subtitle, actions }: PageHeaderProps) {
         </div>
       </div>
       {actions ? (
-        <div className="flex min-h-10 flex-wrap items-center gap-2">{actions}</div>
+        <div className="flex min-h-12 flex-wrap items-center gap-2">{actions}</div>
       ) : null}
     </div>
   );
