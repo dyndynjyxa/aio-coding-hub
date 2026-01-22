@@ -9,6 +9,7 @@ import { ProviderChainView } from "../components/ProviderChainView";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Input } from "../ui/Input";
+import { PageHeader } from "../ui/PageHeader";
 import { Select } from "../ui/Select";
 import { cn } from "../utils/cn";
 import {
@@ -181,36 +182,34 @@ export function ConsolePage() {
   }, [logs, logCli, logLevel, logProvider, logTraceId]);
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">控制台</h1>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            onClick={() => setTab("timeline")}
-            variant={tab === "timeline" ? "primary" : "secondary"}
-          >
-            Trace Timeline
-          </Button>
-          <Button onClick={() => setTab("logs")} variant={tab === "logs" ? "primary" : "secondary"}>
-            Logs
-          </Button>
-
-          {tab === "logs" ? (
+    <div className="space-y-6">
+      <PageHeader
+        title="控制台"
+        actions={
+          <>
             <Button
-              onClick={() => {
-                clearConsoleLogs();
-                toast("已清空控制台日志");
-              }}
-              variant="secondary"
+              onClick={() => setTab("timeline")}
+              variant={tab === "timeline" ? "primary" : "secondary"}
             >
-              清空
+              Trace Timeline
             </Button>
-          ) : null}
-        </div>
-      </div>
+            <Button onClick={() => setTab("logs")} variant={tab === "logs" ? "primary" : "secondary"}>
+              Logs
+            </Button>
+            {tab === "logs" ? (
+              <Button
+                onClick={() => {
+                  clearConsoleLogs();
+                  toast("已清空控制台日志");
+                }}
+                variant="secondary"
+              >
+                清空
+              </Button>
+            ) : null}
+          </>
+        }
+      />
 
       {tab === "timeline" ? (
         <Card padding="none">

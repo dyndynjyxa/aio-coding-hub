@@ -13,6 +13,7 @@ import {
 import { CLI_FILTER_ITEMS, type CliFilterKey } from "../constants/clis";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
+import { PageHeader } from "../ui/PageHeader";
 import { cn } from "../utils/cn";
 import { formatUnknownError } from "../utils/errors";
 import { formatDurationMs, formatInteger, formatTokensPerSecond } from "../utils/formatters";
@@ -335,12 +336,8 @@ export function UsagePage() {
   }, [scope]);
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">用量</h1>
-        </div>
-      </div>
+    <div className="space-y-6">
+      <PageHeader title="用量" />
 
       <div className="flex flex-col gap-3">
         <div className="flex items-start gap-2">

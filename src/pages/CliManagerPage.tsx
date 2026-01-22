@@ -22,6 +22,7 @@ import {
 import { CliManagerGeneralTab } from "../components/cli-manager/tabs/GeneralTab";
 import { CliManagerClaudeTab } from "../components/cli-manager/tabs/ClaudeTab";
 import { SimpleCliTab } from "../components/cli-manager/tabs/SimpleCliTab";
+import { PageHeader } from "../ui/PageHeader";
 import { TabList } from "../ui/TabList";
 import { Terminal, Cpu } from "lucide-react";
 
@@ -464,19 +465,13 @@ export function CliManagerPage() {
   }
 
   return (
-    <div className="space-y-4 pb-10">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight">CLI 管理</h1>
-          <p className="mt-1 text-sm text-slate-600">
-            统一管理 CLI 工具的配置与状态（支持 Claude / Codex / Gemini）。
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
+    <div className="space-y-6 pb-10">
+      <PageHeader
+        title="CLI 管理"
+        actions={
           <TabList ariaLabel="CLI 管理视图切换" items={TABS} value={tab} onChange={setTab} />
-        </div>
-      </div>
+        }
+      />
 
       <div className="min-h-[400px]">
         {tab === "general" ? (

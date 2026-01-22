@@ -34,6 +34,7 @@ import {
 import { useCliProxy } from "../hooks/useCliProxy";
 import { useWindowForeground } from "../hooks/useWindowForeground";
 import { Card } from "../ui/Card";
+import { PageHeader } from "../ui/PageHeader";
 import { TabList } from "../ui/TabList";
 import { hasTauriRuntime } from "../services/tauriInvoke";
 import { useTraceStore } from "../services/traceStore";
@@ -768,20 +769,19 @@ export function HomePage() {
 
   return (
     <div className="flex flex-col gap-6 pb-10">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="h-8 w-1 rounded-full bg-gradient-to-b from-accent to-accent-secondary" />
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">首页</h1>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <ProviderCircuitBadge
-            rows={openCircuits}
-            onResetProvider={handleResetProvider}
-            resettingProviderIds={resettingProviderIds}
-          />
-          <TabList ariaLabel="首页视图切换" items={HOME_TABS} value={tab} onChange={setTab} />
-        </div>
-      </div>
+      <PageHeader
+        title="首页"
+        actions={
+          <>
+            <ProviderCircuitBadge
+              rows={openCircuits}
+              onResetProvider={handleResetProvider}
+              resettingProviderIds={resettingProviderIds}
+            />
+            <TabList ariaLabel="首页视图切换" items={HOME_TABS} value={tab} onChange={setTab} />
+          </>
+        }
+      />
 
       {tab === "overview" ? (
         <HomeOverviewPanel

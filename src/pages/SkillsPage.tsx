@@ -20,6 +20,7 @@ import {
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Dialog } from "../ui/Dialog";
+import { PageHeader } from "../ui/PageHeader";
 import { Switch } from "../ui/Switch";
 import { TabList } from "../ui/TabList";
 import { cn } from "../utils/cn";
@@ -254,22 +255,23 @@ export function SkillsPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight">Skill</h1>
-          <Button onClick={() => navigate("/skills/market")} variant="primary">
-            Skill 市场
-          </Button>
-        </div>
-
-        <TabList
-          ariaLabel="CLI 选择"
-          items={CLI_TABS}
-          value={activeCli}
-          onChange={setActiveCli}
-        />
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Skill"
+        actions={
+          <>
+            <Button onClick={() => navigate("/skills/market")} variant="primary">
+              Skill 市场
+            </Button>
+            <TabList
+              ariaLabel="CLI 选择"
+              items={CLI_TABS}
+              value={activeCli}
+              onChange={setActiveCli}
+            />
+          </>
+        }
+      />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="min-h-[240px]" padding="md">

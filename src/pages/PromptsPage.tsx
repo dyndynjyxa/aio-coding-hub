@@ -19,6 +19,7 @@ import { Card } from "../ui/Card";
 import { Dialog } from "../ui/Dialog";
 import { FormField } from "../ui/FormField";
 import { Input } from "../ui/Input";
+import { PageHeader } from "../ui/PageHeader";
 import { Textarea } from "../ui/Textarea";
 import { Switch } from "../ui/Switch";
 import { cn } from "../utils/cn";
@@ -216,38 +217,40 @@ export function PromptsPage() {
   }
 
   return (
-    <div className="space-y-3">
-      <h1 className="text-2xl font-semibold tracking-tight">提示词</h1>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="space-y-6">
+      <PageHeader
+        title="提示词"
+        actions={
+          <>
+            <Button
+              onClick={() => {
+                setEditTarget(null);
+                setDialogOpen(true);
+              }}
+              variant="primary"
+            >
+              添加提示词
+            </Button>
+          </>
+        }
+      />
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           {CLIS.map((cli) => (
             <Button
               key={cli.key}
               onClick={() => setActiveCli(cli.key)}
               variant={activeCli === cli.key ? "primary" : "secondary"}
+              size="sm"
             >
               {cli.name}
             </Button>
           ))}
-          <span className="text-xs text-slate-500">
-            {loading ? "加载中…" : `共 ${items.length} 条`}
-          </span>
         </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <Button onClick={() => void refresh(activeCli)} variant="secondary" disabled={loading}>
-            刷新
-          </Button>
-          <Button
-            onClick={() => {
-              setEditTarget(null);
-              setDialogOpen(true);
-            }}
-            variant="primary"
-          >
-            添加提示词
-          </Button>
-        </div>
+        <span className="text-xs text-slate-500">
+          {loading ? "加载中…" : `共 ${items.length} 条`}
+        </span>
       </div>
 
       {loading ? (
