@@ -400,9 +400,6 @@ export function SkillsMarketPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Skill 市场</h1>
-          <p className="mt-1 text-sm text-slate-600">
-            从仓库扫描 `SKILL.md` 并安装到指定 CLI（Claude/Codex/Gemini）。
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">

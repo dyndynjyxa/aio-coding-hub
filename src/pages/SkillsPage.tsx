@@ -1,6 +1,7 @@
 // Usage: Manage installed/local skills. Backend commands: `skills_installed_list`, `skills_local_list`, `skill_set_enabled`, `skill_uninstall`, `skill_import_local`.
 
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { ExternalLink } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -20,6 +21,7 @@ import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Dialog } from "../ui/Dialog";
 import { Switch } from "../ui/Switch";
+import { TabList } from "../ui/TabList";
 import { cn } from "../utils/cn";
 import { formatActionFailureToast } from "../utils/errors";
 
@@ -62,6 +64,11 @@ function writeCliToStorage(cli: CliKey) {
     localStorage.setItem("skills.activeCli", cli);
   } catch {}
 }
+
+const CLI_TABS: Array<{ key: CliKey; label: string }> = CLIS.map((cli) => ({
+  key: cli.key,
+  label: cli.name,
+}));
 
 async function openPathOrReveal(path: string) {
   try {
@@ -248,98 +255,61 @@ export function SkillsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
           <h1 className="text-2xl font-semibold tracking-tight">Skill</h1>
-          <p className="mt-1 text-sm text-slate-600">
-            这里负责“已安装 / 本机已安装 / 导入管理”。“可安装”已拆到 Skill 市场。
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
           <Button onClick={() => navigate("/skills/market")} variant="primary">
-            去 Skill 市场
+            Skill 市场
           </Button>
         </div>
+
+        <TabList
+          ariaLabel="CLI 选择"
+          items={CLI_TABS}
+          value={activeCli}
+          onChange={setActiveCli}
+        />
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        {CLIS.map((cli) => (
-          <Button
-            key={cli.key}
-            onClick={() => setActiveCli(cli.key)}
-            variant={activeCli === cli.key ? "primary" : "secondary"}
-          >
-            {cli.name}
-          </Button>
-        ))}
-      </div>
-
-      <Card className="min-h-[240px]" padding="md">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-sm font-semibold">已安装</div>
-            <div className="mt-1 text-xs text-slate-500">
-              AIO 已安装：可对不同 CLI 启用/卸载；本机已安装：仅扫描展示，点“导入到技能库”后才会被
-              AIO 管理。
-            </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card className="min-h-[240px]" padding="md">
+          <div className="flex items-start justify-between gap-3">
+            <div className="text-sm font-semibold">通用技能</div>
+            <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
+              {installed.length}
+            </span>
           </div>
-          <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
-            {installed.length}
-          </span>
-        </div>
 
-        <div className="mt-4 space-y-2">
-          {loading ? (
-            <div className="text-sm text-slate-600">加载中…</div>
-          ) : installed.length === 0 && localSkills.length === 0 ? (
-            <div className="text-sm text-slate-600">
-              暂无已安装 Skill。你可以去「Skill 市场」安装，或在下方导入本机已安装的 Skill。
-            </div>
-          ) : (
-            <>
-              {installed.length > 0 ? (
-                <div className="pb-1 text-xs font-medium text-slate-500">AIO 已安装</div>
-              ) : null}
-
-              {installed.map((skill) => (
+          <div className="mt-4 space-y-2">
+            {loading ? (
+              <div className="text-sm text-slate-600">加载中…</div>
+            ) : installed.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                暂无已安装 Skill。
+              </div>
+            ) : (
+              installed.map((skill) => (
                 <div key={skill.id} className="rounded-xl border border-slate-200 bg-white p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold">{skill.name}</div>
-                      {skill.description ? (
-                        <div className="mt-1 text-xs text-slate-500">{skill.description}</div>
-                      ) : null}
-                      <div className="mt-2 truncate font-mono text-xs text-slate-500">
-                        {sourceHint(skill)}
-                      </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                        <span
-                          className={cn(
-                            "rounded-full px-2 py-1 font-medium",
-                            enabledForCli(skill, activeCli)
-                              ? "bg-emerald-50 text-emerald-700"
-                              : "bg-slate-100 text-slate-600"
-                          )}
-                        >
-                          {enabledLabel(skill)}
-                        </span>
-                        <span>更新 {formatUnixSeconds(skill.updated_at)}</span>
-                      </div>
-                    </div>
-
-                    <div className="flex shrink-0 flex-col items-end gap-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-600">对 {currentCli.name} 启用</span>
-                        <Switch
-                          checked={enabledForCli(skill, activeCli)}
-                          disabled={
-                            togglingSkillId === skill.id || uninstallingSkillId === skill.id
-                          }
-                          onCheckedChange={(next) => void toggleSkillEnabled(skill, next)}
-                        />
-                      </div>
-
+                  <div className="flex items-center gap-2">
+                    <span className="min-w-0 truncate text-sm font-semibold">{skill.name}</span>
+                    <a
+                      href={`${skill.source_git_url}${skill.source_branch ? `#` + skill.source_branch : ""}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="shrink-0 text-slate-400 hover:text-slate-600"
+                      title={sourceHint(skill)}
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                    <div className="ms-auto flex items-center gap-2">
+                      <span className="text-xs text-slate-600">启用</span>
+                      <Switch
+                        checked={enabledForCli(skill, activeCli)}
+                        disabled={
+                          togglingSkillId === skill.id || uninstallingSkillId === skill.id
+                        }
+                        onCheckedChange={(next) => void toggleSkillEnabled(skill, next)}
+                      />
                       <Button
                         size="sm"
                         variant="secondary"
@@ -350,72 +320,78 @@ export function SkillsPage() {
                       </Button>
                     </div>
                   </div>
+                  {skill.description ? (
+                    <div className="mt-1.5 text-xs text-slate-500">{skill.description}</div>
+                  ) : null}
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                    <span
+                      className={cn(
+                        "rounded-full px-2 py-1 font-medium",
+                        enabledForCli(skill, activeCli)
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-slate-100 text-slate-600"
+                      )}
+                    >
+                      {enabledLabel(skill)}
+                    </span>
+                    <span>更新 {formatUnixSeconds(skill.updated_at)}</span>
+                  </div>
                 </div>
-              ))}
+              ))
+            )}
+          </div>
+        </Card>
 
-              <div className="pt-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-xs font-medium text-slate-500">本机已安装</div>
-                  <span className="text-xs text-slate-400">
-                    {localLoading ? "扫描中…" : `${localSkills.length} 个`}
-                  </span>
-                </div>
-                <div className="mt-1 text-xs text-slate-500">
-                  仅扫描 “{currentCli.name}” 的 skills 目录（要求存在 `SKILL.md`）。
-                </div>
-                <div className="mt-2 space-y-2">
-                  {localLoading ? (
-                    <div className="text-sm text-slate-600">扫描中…</div>
-                  ) : localSkills.length === 0 ? (
-                    <div className="text-sm text-slate-600">未发现本机 Skill。</div>
-                  ) : (
-                    localSkills.map((skill) => (
-                      <div
-                        key={skill.path}
-                        className="rounded-xl border border-slate-200 bg-slate-50 p-3"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold">
-                              {skill.name || skill.dir_name}
-                            </div>
-                            {skill.description ? (
-                              <div className="mt-1 text-xs text-slate-500">{skill.description}</div>
-                            ) : null}
-                            <div className="mt-2 truncate font-mono text-xs text-slate-500">
-                              {skill.path}
-                            </div>
-                          </div>
+        <Card className="min-h-[240px]" padding="md">
+          <div className="flex items-start justify-between gap-3">
+            <div className="text-sm font-semibold">本机已安装</div>
+            <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
+              {localLoading ? "扫描中…" : `${localSkills.length}`}
+            </span>
+          </div>
 
-                          <div className="flex shrink-0 flex-col items-end gap-2">
-                            <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">
-                              本机安装
-                            </span>
-                            <Button
-                              size="sm"
-                              variant="primary"
-                              onClick={() => setImportTarget(skill)}
-                            >
-                              导入到技能库
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              onClick={() => void openLocalSkillDir(skill)}
-                            >
-                              打开目录
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
+          <div className="mt-4 space-y-2">
+            {localLoading ? (
+              <div className="text-sm text-slate-600">扫描中…</div>
+            ) : localSkills.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                未发现本机 Skill。
               </div>
-            </>
-          )}
-        </div>
-      </Card>
+            ) : (
+              localSkills.map((skill) => (
+                <div
+                  key={skill.path}
+                  className="rounded-xl border border-slate-200 bg-slate-50 p-3"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="min-w-0 truncate text-sm font-semibold">
+                      {skill.name || skill.dir_name}
+                    </span>
+                    <div className="ms-auto flex items-center gap-2">
+                      <Button size="sm" variant="primary" onClick={() => setImportTarget(skill)}>
+                        导入技能库
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void openLocalSkillDir(skill)}
+                      >
+                        打开目录
+                      </Button>
+                    </div>
+                  </div>
+                  {skill.description ? (
+                    <div className="mt-1.5 text-xs text-slate-500">{skill.description}</div>
+                  ) : null}
+                  <div className="mt-2 truncate font-mono text-xs text-slate-500">
+                    {skill.path}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </Card>
+      </div>
 
       <Dialog
         open={importTarget != null}
