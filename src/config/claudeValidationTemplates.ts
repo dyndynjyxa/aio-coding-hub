@@ -209,9 +209,9 @@ Claude Code 是 Anthropic 官方的 CLI 工具，提供以下核心能力：
   {
     key: "official_cross_provider_signature",
     label: "官方渠道（跨供应商 signature 验证）",
-    hint: "Step1 获取 signature，Step2 向另一官方供应商回传验证，Step3 篡改负向对照",
+    hint: "Step1 获取 signature，Step2 当前供应商正向回传验证（非篡改），Step3 另一官方供应商正向回传验证（跨供应商，非篡改）",
     channelLabel: "官方渠道",
-    summary: "验证 signature 跨供应商有效性",
+    summary: "验证 signature 跨供应商有效性（非篡改）",
     requiresCrossProvider: true,
     request: {
       path: "/v1/messages",
@@ -277,8 +277,8 @@ Claude Code 是 Anthropic 官方的 CLI 工具，提供以下核心能力：
 
 本次验证将执行以下步骤：
 1. Step1：从当前供应商获取 thinking block 和 signature
-2. Step2：将 thinking block（含 signature）回传给另一官方供应商验证
-3. Step3：篡改 signature 进行负向验证，确认上游真实验签
+2. Step2：将 thinking block（含 signature）回传给当前供应商进行正向验证（非篡改）
+3. Step3：将 thinking block（含 signature）回传给另一官方供应商进行正向验证（跨供应商，非篡改）
 
 请严格按照上述要求执行。`,
           },
@@ -297,8 +297,7 @@ Claude Code 是 Anthropic 官方的 CLI 工具，提供以下核心能力：
       },
       roundtrip: {
         kind: "signature",
-        enable_tamper: true,
-        cross_provider: true,
+        enable_tamper: false,
         step2_user_prompt:
           "第一行原样输出暗号：AIO_MULTI_TURN_OK（不要解释）。\n第二行用一句话确认你是 Claude Code CLI，并简要说明你具备的工具能力（至少包含以下英文关键词中的 2 个：bash, file, read, write, execute）。",
       },

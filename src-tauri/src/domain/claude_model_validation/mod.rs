@@ -63,7 +63,7 @@ struct ParsedRequest {
 struct SignatureRoundtripConfig {
     enable_tamper: bool,
     step2_user_prompt: Option<String>,
-    /// If set, Step2 will be sent to this provider instead of the original provider.
+    /// If set, Step3 will be sent to this provider (Step2 remains on the original provider).
     /// This enables cross-provider signature validation.
     cross_provider_id: Option<i64>,
 }
@@ -989,7 +989,7 @@ pub async fn validate_provider_model(
                                         "role": "user",
                                         "content": "Continue.",
                                     }),
-                                    assistant_message,
+                                    assistant_message.clone(),
                                     serde_json::json!({
                                         "role": "user",
                                         "content": step2_prompt.clone(),
@@ -998,67 +998,12 @@ pub async fn validate_provider_model(
                             );
                         }
 
-                        // Determine Step2 target: cross-provider or original provider
-                        let (step2_target_url, step2_headers) = if let Some(cross_id) =
-                            cfg.cross_provider_id
-                        {
-                            match provider::load_provider(db.clone(), cross_id).await {
-                                Ok(cross_provider) => {
-                                    obj.insert(
-                                        "roundtrip_cross_provider_name".to_string(),
-                                        serde_json::Value::String(cross_provider.name.clone()),
-                                    );
-                                    // Use first base_url from cross provider
-                                    let cross_base_url =
-                                        cross_provider.base_urls.first().cloned().unwrap_or_else(
-                                            || "https://api.anthropic.com".to_string(),
-                                        );
-                                    obj.insert(
-                                        "roundtrip_cross_provider_base_url".to_string(),
-                                        serde_json::Value::String(cross_base_url.clone()),
-                                    );
-                                    match request::build_target_url(
-                                        &cross_base_url,
-                                        &parsed.forwarded_path,
-                                        parsed.forwarded_query.as_deref(),
-                                    ) {
-                                        Ok(url) => {
-                                            let hdrs = request::header_map_from_json(
-                                                &parsed.headers,
-                                                &cross_provider.api_key_plaintext,
-                                            );
-                                            (url, hdrs)
-                                        }
-                                        Err(e) => {
-                                            obj.insert(
-                                                "roundtrip_step2_error".to_string(),
-                                                serde_json::Value::String(format!(
-                                                    "CROSS_PROVIDER_URL_ERROR: {e}"
-                                                )),
-                                            );
-                                            (target_url.clone(), headers.clone())
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    obj.insert(
-                                        "roundtrip_step2_error".to_string(),
-                                        serde_json::Value::String(format!(
-                                            "CROSS_PROVIDER_LOAD_ERROR: {e}"
-                                        )),
-                                    );
-                                    (target_url.clone(), headers.clone())
-                                }
-                            }
-                        } else {
-                            (target_url.clone(), headers.clone())
-                        };
-
+                        // Step2: always validate on the original provider (non-tampered).
                         let step2 = perform_request(
                             &client,
-                            &step2_target_url,
-                            step2_headers,
-                            step2_body.clone(),
+                            &target_url,
+                            headers.clone(),
+                            step2_body,
                             true,
                         )
                         .await;
@@ -1104,24 +1049,57 @@ pub async fn validate_provider_model(
                             );
                         }
 
-                        obj.insert(
-                            "roundtrip_step3_enabled".to_string(),
-                            serde_json::Value::Bool(cfg.enable_tamper),
-                        );
+                        if let Some(cross_id) = cfg.cross_provider_id {
+                            // Step3: cross-provider positive verification (non-tampered signature).
+                            let mut step3_cross_error: Option<String> = None;
+                            let (step3_target_url, step3_headers) =
+                                match provider::load_provider(db.clone(), cross_id).await {
+                                    Ok(cross_provider) => {
+                                        obj.insert(
+                                            "roundtrip_cross_provider_name".to_string(),
+                                            serde_json::Value::String(cross_provider.name.clone()),
+                                        );
+                                        let cross_base_url = cross_provider
+                                            .base_urls
+                                            .first()
+                                            .cloned()
+                                            .unwrap_or_else(|| {
+                                                "https://api.anthropic.com".to_string()
+                                            });
+                                        obj.insert(
+                                            "roundtrip_cross_provider_base_url".to_string(),
+                                            serde_json::Value::String(cross_base_url.clone()),
+                                        );
 
-                        if cfg.enable_tamper {
-                            let tampered = tamper_signature(signature);
-                            if tampered.is_none() {
-                                obj.insert(
-                                    "roundtrip_step3_error".to_string(),
-                                    serde_json::Value::String("TAMPER_NOT_POSSIBLE".to_string()),
-                                );
-                            } else {
-                                let tampered_assistant = build_preserved_assistant_message(
-                                    thinking,
-                                    tampered.as_deref().unwrap_or(signature),
-                                    &step1.output_text_preview,
-                                );
+                                        match request::build_target_url(
+                                            &cross_base_url,
+                                            &parsed.forwarded_path,
+                                            parsed.forwarded_query.as_deref(),
+                                        ) {
+                                            Ok(url) => {
+                                                let hdrs = request::header_map_from_json(
+                                                    &parsed.headers,
+                                                    &cross_provider.api_key_plaintext,
+                                                );
+                                                (Some(url), Some(hdrs))
+                                            }
+                                            Err(e) => {
+                                                step3_cross_error =
+                                                    Some(format!("CROSS_PROVIDER_URL_ERROR: {e}"));
+                                                (None, None)
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        step3_cross_error =
+                                            Some(format!("CROSS_PROVIDER_LOAD_ERROR: {e}"));
+                                        (None, None)
+                                    }
+                                };
+
+                            if let (Some(step3_target_url), Some(step3_headers)) =
+                                (step3_target_url, step3_headers)
+                            {
                                 let mut step3_body = step1_body.clone();
                                 force_stream_true(&mut step3_body);
                                 if let Some(body_obj) = step3_body.as_object_mut() {
@@ -1132,56 +1110,164 @@ pub async fn validate_provider_model(
                                                 "role": "user",
                                                 "content": "Continue.",
                                             }),
-                                            tampered_assistant,
+                                            assistant_message,
                                             serde_json::json!({
                                                 "role": "user",
-                                                "content": step2_prompt,
+                                                "content": step2_prompt.clone(),
                                             }),
                                         ]),
                                     );
                                 }
 
-                                // Step3 (tamper verification) always goes to original provider
                                 let step3 = perform_request(
                                     &client,
-                                    &target_url,
-                                    headers.clone(),
+                                    &step3_target_url,
+                                    step3_headers,
                                     step3_body,
                                     true,
                                 )
                                 .await;
 
-                                let step3_signals = response::signals_from_text(&step3.raw_excerpt);
-                                let mentions_invalid_signature = step3_signals
-                                    .get("mentions_invalid_signature")
-                                    .and_then(|v| v.as_bool())
-                                    .unwrap_or(false);
-                                let rejected = match step3.status {
-                                    Some(400) => true,
-                                    Some(s) if (200..300).contains(&s) => false,
-                                    _ => mentions_invalid_signature,
-                                };
-
                                 obj.insert(
-                                    "roundtrip_step3_status".to_string(),
+                                    "roundtrip_step3_cross_status".to_string(),
                                     step3
                                         .status
                                         .map(|s| serde_json::Value::Number((s as i64).into()))
                                         .unwrap_or(serde_json::Value::Null),
                                 );
                                 obj.insert(
-                                    "roundtrip_step3_mentions_invalid_signature".to_string(),
-                                    serde_json::Value::Bool(mentions_invalid_signature),
+                                    "roundtrip_step3_cross_ok".to_string(),
+                                    serde_json::Value::Bool(step3.ok),
                                 );
+                                if !step3.output_text_preview.trim().is_empty() {
+                                    obj.insert(
+                                        "roundtrip_step3_cross_output_preview".to_string(),
+                                        serde_json::Value::String(
+                                            step3.output_text_preview.clone(),
+                                        ),
+                                    );
+                                }
+                                if step3.thinking_chars > 0 {
+                                    obj.insert(
+                                        "roundtrip_step3_cross_thinking_chars".to_string(),
+                                        serde_json::Value::Number(
+                                            (step3.thinking_chars as i64).into(),
+                                        ),
+                                    );
+                                }
+                                if !step3.thinking_preview.trim().is_empty() {
+                                    obj.insert(
+                                        "roundtrip_step3_cross_thinking_preview".to_string(),
+                                        serde_json::Value::String(step3.thinking_preview.clone()),
+                                    );
+                                }
                                 obj.insert(
-                                    "roundtrip_step3_rejected".to_string(),
-                                    serde_json::Value::Bool(rejected),
+                                    "roundtrip_step3_cross_response_parse_mode".to_string(),
+                                    serde_json::Value::String(step3.response_parse_mode.clone()),
                                 );
                                 if let Some(err) = step3.error.as_ref() {
                                     obj.insert(
-                                        "roundtrip_step3_error".to_string(),
+                                        "roundtrip_step3_cross_error".to_string(),
                                         serde_json::Value::String(err.clone()),
                                     );
+                                }
+                            } else {
+                                obj.insert(
+                                    "roundtrip_step3_cross_ok".to_string(),
+                                    serde_json::Value::Bool(false),
+                                );
+                            }
+
+                            if let Some(err) = step3_cross_error {
+                                obj.insert(
+                                    "roundtrip_step3_cross_error".to_string(),
+                                    serde_json::Value::String(err),
+                                );
+                            }
+                        } else {
+                            // Step3: optional tamper negative verification (same provider).
+                            obj.insert(
+                                "roundtrip_step3_enabled".to_string(),
+                                serde_json::Value::Bool(cfg.enable_tamper),
+                            );
+
+                            if cfg.enable_tamper {
+                                let tampered = tamper_signature(signature);
+                                if tampered.is_none() {
+                                    obj.insert(
+                                        "roundtrip_step3_error".to_string(),
+                                        serde_json::Value::String(
+                                            "TAMPER_NOT_POSSIBLE".to_string(),
+                                        ),
+                                    );
+                                } else {
+                                    let tampered_assistant = build_preserved_assistant_message(
+                                        thinking,
+                                        tampered.as_deref().unwrap_or(signature),
+                                        &step1.output_text_preview,
+                                    );
+                                    let mut step3_body = step1_body.clone();
+                                    force_stream_true(&mut step3_body);
+                                    if let Some(body_obj) = step3_body.as_object_mut() {
+                                        body_obj.insert(
+                                            "messages".to_string(),
+                                            serde_json::Value::Array(vec![
+                                                serde_json::json!({
+                                                    "role": "user",
+                                                    "content": "Continue.",
+                                                }),
+                                                tampered_assistant,
+                                                serde_json::json!({
+                                                    "role": "user",
+                                                    "content": step2_prompt,
+                                                }),
+                                            ]),
+                                        );
+                                    }
+
+                                    // Step3 (tamper verification) always goes to original provider
+                                    let step3 = perform_request(
+                                        &client,
+                                        &target_url,
+                                        headers.clone(),
+                                        step3_body,
+                                        true,
+                                    )
+                                    .await;
+
+                                    let step3_signals =
+                                        response::signals_from_text(&step3.raw_excerpt);
+                                    let mentions_invalid_signature = step3_signals
+                                        .get("mentions_invalid_signature")
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(false);
+                                    let rejected = match step3.status {
+                                        Some(400) => true,
+                                        Some(s) if (200..300).contains(&s) => false,
+                                        _ => mentions_invalid_signature,
+                                    };
+
+                                    obj.insert(
+                                        "roundtrip_step3_status".to_string(),
+                                        step3
+                                            .status
+                                            .map(|s| serde_json::Value::Number((s as i64).into()))
+                                            .unwrap_or(serde_json::Value::Null),
+                                    );
+                                    obj.insert(
+                                        "roundtrip_step3_mentions_invalid_signature".to_string(),
+                                        serde_json::Value::Bool(mentions_invalid_signature),
+                                    );
+                                    obj.insert(
+                                        "roundtrip_step3_rejected".to_string(),
+                                        serde_json::Value::Bool(rejected),
+                                    );
+                                    if let Some(err) = step3.error.as_ref() {
+                                        obj.insert(
+                                            "roundtrip_step3_error".to_string(),
+                                            serde_json::Value::String(err.clone()),
+                                        );
+                                    }
                                 }
                             }
                         }

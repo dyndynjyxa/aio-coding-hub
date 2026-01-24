@@ -535,6 +535,9 @@ export function ClaudeModelValidationDialog({
     const suiteTemplateKeys = templateApplicability
       .filter((t) => t.applicability.applicable)
       .map((t) => t.template.key);
+    const suiteRequiresCrossProvider = templateApplicability.some(
+      (t) => t.applicability.applicable && (t.template as any).requiresCrossProvider === true
+    );
 
     if (skippedTemplates.length > 0) {
       const shown = skippedTemplates
@@ -553,6 +556,28 @@ export function ClaudeModelValidationDialog({
     if (suiteTemplateKeys.length === 0) {
       toast("暂无适用验证模板");
       return;
+    }
+
+    if (suiteRequiresCrossProvider) {
+      const availableCrossProviders = allClaudeProviders.filter((p) => p.id !== curProvider.id);
+      if (availableCrossProviders.length === 0) {
+        toast("跨供应商验证需要至少配置 2 个官方供应商");
+        return;
+      }
+      if (!crossProviderId) {
+        toast("请先选择跨供应商验证的官方供应商（用于 Step3）");
+        return;
+      }
+      if (crossProviderId === curProvider.id) {
+        toast("跨供应商验证必须选择不同于当前服务商的供应商");
+        setCrossProviderId(null);
+        return;
+      }
+      if (!availableCrossProviders.some((p) => p.id === crossProviderId)) {
+        toast("所选跨供应商无效，请重新选择");
+        setCrossProviderId(null);
+        return;
+      }
     }
 
     // Cancel any in-flight history refresh (dialog open / manual refresh). Otherwise a late
@@ -1048,7 +1073,7 @@ export function ClaudeModelValidationDialog({
               <div className="sm:col-span-12">
                 <FormField
                   label="跨供应商验证（官方供应商）"
-                  hint="用于跨供应商 signature 验证：Step2 将发送到此供应商进行签名验证"
+                  hint="用于跨供应商 signature 验证：Step3 将发送到此供应商进行签名验证"
                 >
                   <Select
                     value={crossProviderId?.toString() ?? ""}

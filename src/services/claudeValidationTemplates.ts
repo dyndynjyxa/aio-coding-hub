@@ -794,6 +794,28 @@ export function evaluateClaudeValidation(
     return trimmed ? trimmed : null;
   })();
 
+  const roundtripStep3CrossOk = (() => {
+    const explicit = get<boolean>(signalsRaw, "roundtrip_step3_cross_ok");
+    if (typeof explicit === "boolean") return explicit;
+    const status = get<number>(signalsRaw, "roundtrip_step3_cross_status");
+    if (typeof status === "number" && Number.isFinite(status)) {
+      const s = Math.floor(status);
+      return s >= 200 && s < 300;
+    }
+    return null;
+  })();
+  const roundtripStep3CrossStatus = (() => {
+    const status = get<number>(signalsRaw, "roundtrip_step3_cross_status");
+    if (typeof status === "number" && Number.isFinite(status)) return Math.floor(status);
+    return null;
+  })();
+  const roundtripStep3CrossError = (() => {
+    const raw = get<string>(signalsRaw, "roundtrip_step3_cross_error");
+    if (typeof raw !== "string") return null;
+    const trimmed = raw.trim();
+    return trimmed ? trimmed : null;
+  })();
+
   if (requireSignatureRoundtrip) {
     checksOut.signatureRoundtrip = {
       ok: roundtripStep2Ok === true,
@@ -851,63 +873,76 @@ export function evaluateClaudeValidation(
   const crossProviderBaseUrl = get<string>(signalsRaw, "roundtrip_cross_provider_base_url") ?? null;
 
   if (requireCrossProviderSignatureRoundtrip || crossProviderEnabled) {
-    const crossProviderOk = crossProviderEnabled && roundtripStep2Ok === true;
+    const crossProviderOk = crossProviderEnabled && roundtripStep3CrossOk === true;
     checksOut.crossProviderSignatureRoundtrip = {
       ok: crossProviderOk,
-      label: "跨供应商 Signature (Step2)",
+      label: "跨供应商 Signature (Step3)",
       title: !crossProviderEnabled
         ? "跨供应商验证未启用（未选择官方供应商）"
-        : roundtripStep2Ok === true
+        : roundtripStep3CrossOk == null
           ? [
-              `跨供应商验证：Step2 发送到官方供应商 "${crossProviderName ?? "—"}"`,
+              `跨供应商验证：Step3 发送到官方供应商 "${crossProviderName ?? "—"}"`,
               `目标 URL：${crossProviderBaseUrl ?? "—"}`,
-              "结论：跨供应商签名验证通过（签名跨渠道有效）",
+              "预期：应返回 2xx 并接受 Step1 的 thinking+signature（非篡改）。",
+              `观测：status=${roundtripStep3CrossStatus ?? "—"}; ok=—${
+                roundtripStep3CrossError
+                  ? `; error=${truncateText(roundtripStep3CrossError, 180)}`
+                  : ""
+              }`,
             ].join("\n")
-          : [
-              `跨供应商验证：Step2 发送到官方供应商 "${crossProviderName ?? "—"}"`,
-              `目标 URL：${crossProviderBaseUrl ?? "—"}`,
-              `结论：跨供应商签名验证失败（status=${roundtripStep2Status ?? "—"}）`,
-              roundtripStep2Error ? `error=${truncateText(roundtripStep2Error, 180)}` : "",
-            ]
-              .filter(Boolean)
-              .join("\n"),
+          : roundtripStep3CrossOk
+            ? [
+                `跨供应商验证：Step3 发送到官方供应商 "${crossProviderName ?? "—"}"`,
+                `目标 URL：${crossProviderBaseUrl ?? "—"}`,
+                "结论：跨供应商签名验证通过（签名跨渠道有效）",
+              ].join("\n")
+            : [
+                `跨供应商验证：Step3 发送到官方供应商 "${crossProviderName ?? "—"}"`,
+                `目标 URL：${crossProviderBaseUrl ?? "—"}`,
+                `结论：跨供应商签名验证失败（status=${roundtripStep3CrossStatus ?? "—"}）`,
+                roundtripStep3CrossError
+                  ? `error=${truncateText(roundtripStep3CrossError, 180)}`
+                  : "",
+              ]
+                .filter(Boolean)
+                .join("\n"),
     };
   }
 
   // Thinking preserved check (cross-step thinking consistency)
   const requireThinkingPreserved = Boolean((template.evaluation as any).requireThinkingPreserved);
-  const roundtripStep2ThinkingChars = (() => {
-    const v = get<number>(signalsRaw, "roundtrip_step2_thinking_chars");
+  const roundtripStep3CrossThinkingChars = (() => {
+    const v = get<number>(signalsRaw, "roundtrip_step3_cross_thinking_chars");
     if (typeof v === "number" && Number.isFinite(v)) return v;
     return 0;
   })();
-  const roundtripStep2ThinkingPreview = (() => {
-    const raw = get<string>(signalsRaw, "roundtrip_step2_thinking_preview");
+  const roundtripStep3CrossThinkingPreview = (() => {
+    const raw = get<string>(signalsRaw, "roundtrip_step3_cross_thinking_preview");
     if (typeof raw !== "string") return "";
     return raw.trim();
   })();
 
-  if (requireThinkingPreserved || (crossProviderEnabled && roundtripStep2Ok === true)) {
-    const thinkingPreservedOk = roundtripStep2ThinkingChars > 0;
+  if (requireThinkingPreserved || (crossProviderEnabled && roundtripStep3CrossOk === true)) {
+    const thinkingPreservedOk = roundtripStep3CrossThinkingChars > 0;
     checksOut.thinkingPreserved = {
       ok: thinkingPreservedOk,
       label: "Thinking 跨步骤保留",
       title: !crossProviderEnabled
         ? "跨供应商验证未启用"
-        : roundtripStep2Ok !== true
-          ? "Step2 未成功，无法验证 thinking 保留"
+        : roundtripStep3CrossOk !== true
+          ? "Step3 未成功，无法验证 thinking 保留"
           : thinkingPreservedOk
             ? [
-                "Step2 返回包含 thinking 输出（跨步骤/跨供应商 thinking 保留成功）",
-                `step2_thinking_chars=${roundtripStep2ThinkingChars}`,
-                roundtripStep2ThinkingPreview
-                  ? `preview=${truncateText(roundtripStep2ThinkingPreview, 100)}`
+                "Step3 返回包含 thinking 输出（跨步骤/跨供应商 thinking 保留成功）",
+                `step3_thinking_chars=${roundtripStep3CrossThinkingChars}`,
+                roundtripStep3CrossThinkingPreview
+                  ? `preview=${truncateText(roundtripStep3CrossThinkingPreview, 100)}`
                   : "",
               ]
                 .filter(Boolean)
                 .join("\n")
             : [
-                "Step2 返回不包含 thinking 输出（thinking 未跨步骤保留）",
+                "Step3 返回不包含 thinking 输出（thinking 未跨步骤保留）",
                 "可能原因：供应商未返回 thinking block，或被代理层剥离",
               ].join("\n"),
     };
@@ -1128,7 +1163,6 @@ export function evaluateClaudeValidation(
     if (requireCrossProviderSignatureRoundtrip) {
       const crossOk = checksOut.crossProviderSignatureRoundtrip?.ok === true;
       const step2Ok = checksOut.signatureRoundtrip?.ok === true;
-      const tamperRejected = checksOut.signatureTamper?.ok === true;
       const thinkingPreservedOkForGrade = checksOut.thinkingPreserved?.ok === true;
       const baselineOk =
         crossOk &&
@@ -1139,28 +1173,21 @@ export function evaluateClaudeValidation(
         toolSupportOk &&
         multiTurnOk;
 
-      if (baselineOk && tamperRejected && thinkingPreservedOkForGrade) {
+      if (baselineOk && thinkingPreservedOkForGrade) {
         return {
           level: "A" as const,
           label: "第一方（强）",
-          title: "跨供应商验证 + tamper + thinking 保留通过（签名跨渠道有效，强证据）",
-        };
-      }
-      if (baselineOk && tamperRejected) {
-        return {
-          level: "A" as const,
-          label: "第一方（强）",
-          title: "跨供应商验证 + tamper 通过（签名跨渠道有效，强证据）",
+          title: "跨供应商验证（Step2+Step3）+ thinking 保留通过（签名跨渠道有效，强证据）",
         };
       }
       if (baselineOk) {
         return {
           level: "B" as const,
           label: "第一方（中）",
-          title: "跨供应商验证通过；tamper 不确定/未通过",
+          title: "跨供应商验证（Step2+Step3）通过；thinking 保留不确定/未通过",
         };
       }
-      if (crossOk && signatureOk && thinkingOk) {
+      if (crossOk && step2Ok && signatureOk && thinkingOk) {
         return {
           level: "C" as const,
           label: "弱证据",

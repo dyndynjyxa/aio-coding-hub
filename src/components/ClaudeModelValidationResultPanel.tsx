@@ -378,6 +378,8 @@ export function ClaudeModelValidationResultPanel({ templateKey, result }: Props)
     thinkingOutput: thinkingCheck,
     signature: signatureCheck,
     signatureRoundtrip: signatureRoundtripCheck,
+    crossProviderSignatureRoundtrip: crossProviderSignatureRoundtripCheck,
+    thinkingPreserved: thinkingPreservedCheck,
     signatureTamper: signatureTamperCheck,
     responseId: responseIdCheck,
     serviceTier: serviceTierCheck,
@@ -721,6 +723,20 @@ export function ClaudeModelValidationResultPanel({ templateKey, result }: Props)
                     label={signatureRoundtripCheck.label}
                     ok={signatureRoundtripCheck.ok}
                     helpText={signatureRoundtripCheck.title}
+                  />
+                ) : null}
+                {crossProviderSignatureRoundtripCheck ? (
+                  <CheckRow
+                    label={crossProviderSignatureRoundtripCheck.label}
+                    ok={crossProviderSignatureRoundtripCheck.ok}
+                    helpText={crossProviderSignatureRoundtripCheck.title}
+                  />
+                ) : null}
+                {thinkingPreservedCheck ? (
+                  <CheckRow
+                    label={thinkingPreservedCheck.label}
+                    ok={thinkingPreservedCheck.ok}
+                    helpText={thinkingPreservedCheck.title}
                   />
                 ) : null}
                 {signatureTamperCheck ? (
