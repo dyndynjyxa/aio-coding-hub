@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.14.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.13.0...aio-coding-hub-v0.14.0) (2026-01-25)
+
+
+### Features
+
+* **ClaudeModelValidation:** enhance cross-provider validation and UI feedback ([bf83c7e](https://github.com/dyndynjyxa/aio-coding-hub/commit/bf83c7e03c7edf78795cd51a943c01a88e0b17d7))
+* **ClaudeModelValidation:** enhance output token validation and error handling ([d245288](https://github.com/dyndynjyxa/aio-coding-hub/commit/d245288d7a4937ca7b0213ebd79d9c0d5e3c76b4))
+* **ClaudeModelValidation:** implement cross-provider signature validation and enhance request handling ([2e102d4](https://github.com/dyndynjyxa/aio-coding-hub/commit/2e102d4f3fd2745e4480a5884272baeafe66b6d0))
+* **CliManager:** add response fixer configuration limits and UI inputs ([0023ad6](https://github.com/dyndynjyxa/aio-coding-hub/commit/0023ad69abf91f48a5144250e20b53ea0b2e24bf))
+* **ConsolePage:** revamp console log display and functionality ([1d28397](https://github.com/dyndynjyxa/aio-coding-hub/commit/1d28397e88c0b6d43a4d73b348c49c93cb18efde))
+* integrate PageHeader component across multiple pages for consistent UI ([330da27](https://github.com/dyndynjyxa/aio-coding-hub/commit/330da276f9ef8e91744a9534d59590a3a6fec5ff))
+* **SkillsMarketPage:** enhance UI with tab selection and external links ([2849017](https://github.com/dyndynjyxa/aio-coding-hub/commit/2849017554128279822fef9b667d8ec166a08432))
+
 ## [0.13.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.12.0...aio-coding-hub-v0.13.0) (2026-01-20)
 
 
