@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.15.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.14.0...aio-coding-hub-v0.15.0) (2026-01-27)
+
+
+### Features
+
+* **cli-manager:** add Codex and Gemini tabs for CLI management ([6f1ee01](https://github.com/dyndynjyxa/aio-coding-hub/commit/6f1ee011fdef3aa323e35dfe537e6ea3fc03e087))
+* **cli-manager:** enhance Claude and WSL settings management ([3aacb6a](https://github.com/dyndynjyxa/aio-coding-hub/commit/3aacb6ad4a05b238a80064529445de398b1978b5))
+* **cli-manager:** enhance Claude settings management and UI ([cbc1160](https://github.com/dyndynjyxa/aio-coding-hub/commit/cbc11605ee2cc64b9b08c51e4b33b70b72d168fa))
+* **cli-manager:** enhance CodexTab with sandbox mode management ([759c19d](https://github.com/dyndynjyxa/aio-coding-hub/commit/759c19d02553f929f5a91c6051a0134e198e298e))
+* **tests:** add comprehensive unit tests for various components ([98fb022](https://github.com/dyndynjyxa/aio-coding-hub/commit/98fb022d1487e593e1fe50a1e9d02592671a4944))
+* **usage:** add cost tracking to usage statistics ([765ea8a](https://github.com/dyndynjyxa/aio-coding-hub/commit/765ea8ae06efe2cc39c6eac7e95dccfbba4de541))
+
 ## [0.14.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.13.0...aio-coding-hub-v0.14.0) (2026-01-25)
 
 
