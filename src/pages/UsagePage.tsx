@@ -93,12 +93,17 @@ function StatCard({
   className?: string;
 }) {
   return (
-    <Card padding="md" className={cn("flex h-full flex-col transition-shadow hover:shadow-lg", className)}>
+    <Card
+      padding="md"
+      className={cn("flex h-full flex-col transition-shadow hover:shadow-lg", className)}
+    >
       <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{title}</div>
       <div className="mt-3 text-xl font-semibold tracking-tight text-slate-900 xl:text-2xl">
         {value}
       </div>
-      {hint ? <div className="mt-auto pt-3 text-xs leading-relaxed text-slate-500">{hint}</div> : null}
+      {hint ? (
+        <div className="mt-auto pt-3 text-xs leading-relaxed text-slate-500">{hint}</div>
+      ) : null}
     </Card>
   );
 }
@@ -516,12 +521,24 @@ export function UsagePage() {
                     <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5">名称</th>
                     <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5">请求数</th>
                     <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5">成功率</th>
-                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5">总 Token</th>
-                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5">缓存 / 缓存率</th>
-                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5">平均耗时</th>
-                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5">平均首字</th>
-                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5">平均速率</th>
-                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5">花费金额</th>
+                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5">
+                      总 Token
+                    </th>
+                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5">
+                      缓存 / 缓存率
+                    </th>
+                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5">
+                      平均耗时
+                    </th>
+                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5">
+                      平均首字
+                    </th>
+                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5">
+                      平均速率
+                    </th>
+                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5">
+                      花费金额
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="animate-pulse">
@@ -576,16 +593,36 @@ export function UsagePage() {
               <table className="w-full border-separate border-spacing-0 text-left text-sm">
                 <thead className="sticky top-0 z-10">
                   <tr className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5 backdrop-blur-sm">#</th>
-                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5 backdrop-blur-sm">名称</th>
-                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5 backdrop-blur-sm">请求数</th>
-                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5 backdrop-blur-sm">成功率</th>
-                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5 backdrop-blur-sm">总 Token</th>
-                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5 backdrop-blur-sm">缓存 / 缓存率</th>
-                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5 backdrop-blur-sm">平均耗时</th>
-                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5 backdrop-blur-sm">平均首字</th>
-                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5 backdrop-blur-sm">平均速率</th>
-                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5 backdrop-blur-sm">花费金额</th>
+                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5 backdrop-blur-sm">
+                      #
+                    </th>
+                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5 backdrop-blur-sm">
+                      名称
+                    </th>
+                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5 backdrop-blur-sm">
+                      请求数
+                    </th>
+                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5 backdrop-blur-sm">
+                      成功率
+                    </th>
+                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5 backdrop-blur-sm">
+                      总 Token
+                    </th>
+                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5 backdrop-blur-sm">
+                      缓存 / 缓存率
+                    </th>
+                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5 backdrop-blur-sm">
+                      平均耗时
+                    </th>
+                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5 backdrop-blur-sm">
+                      平均首字
+                    </th>
+                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5 backdrop-blur-sm">
+                      平均速率
+                    </th>
+                    <th className="border-b border-slate-200 bg-slate-50/60 px-3 py-2.5 backdrop-blur-sm">
+                      花费金额
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -604,7 +641,10 @@ export function UsagePage() {
                     </tr>
                   ) : (
                     rows.map((row, index) => (
-                      <tr key={row.key} className="align-top transition-colors hover:bg-slate-50/50">
+                      <tr
+                        key={row.key}
+                        className="align-top transition-colors hover:bg-slate-50/50"
+                      >
                         <td className="border-b border-slate-100 px-3 py-3 text-xs tabular-nums text-slate-400">
                           {index + 1}
                         </td>

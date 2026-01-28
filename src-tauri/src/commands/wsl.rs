@@ -6,22 +6,45 @@ use crate::{blocking, gateway, settings, wsl};
 use tauri::Manager;
 
 #[tauri::command]
-pub(crate) fn wsl_detect() -> wsl::WslDetection {
-    wsl::detect()
+pub(crate) async fn wsl_detect() -> wsl::WslDetection {
+    blocking::run("wsl_detect", move || Ok(wsl::detect()))
+        .await
+        .unwrap_or(wsl::WslDetection {
+            detected: false,
+            distros: Vec::new(),
+        })
 }
 
 #[tauri::command]
-pub(crate) fn wsl_host_address_get() -> Option<String> {
-    wsl::host_ipv4_best_effort()
+pub(crate) async fn wsl_host_address_get() -> Option<String> {
+    blocking::run("wsl_host_address_get", move || {
+        Ok(wsl::host_ipv4_best_effort())
+    })
+    .await
+    .unwrap_or(None)
 }
 
 #[tauri::command]
-pub(crate) fn wsl_config_status_get() -> Vec<wsl::WslDistroConfigStatus> {
-    let detection = wsl::detect();
-    if !detection.detected || detection.distros.is_empty() {
-        return Vec::new();
-    }
-    wsl::get_config_status(&detection.distros)
+pub(crate) async fn wsl_config_status_get(
+    distros: Option<Vec<String>>,
+) -> Vec<wsl::WslDistroConfigStatus> {
+    blocking::run("wsl_config_status_get", move || {
+        let distros = match distros {
+            Some(v) if v.is_empty() => return Ok(Vec::new()),
+            Some(v) if !v.is_empty() => v,
+            _ => {
+                let detection = wsl::detect();
+                if !detection.detected || detection.distros.is_empty() {
+                    return Ok(Vec::new());
+                }
+                detection.distros
+            }
+        };
+
+        Ok(wsl::get_config_status(&distros))
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[tauri::command]

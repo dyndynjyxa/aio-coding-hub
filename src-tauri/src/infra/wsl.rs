@@ -757,35 +757,52 @@ pub fn get_config_status(distros: &[String]) -> Vec<WslDistroConfigStatus> {
         return Vec::new();
     }
 
+    const STATUS_SCRIPT: &str = r#"
+claude=0
+codex=0
+gemini=0
+
+[ -f "$HOME/.claude/settings.json" ] && claude=1
+
+CODEX_HOME_RAW="${CODEX_HOME:-$HOME/.codex}"
+p="$CODEX_HOME_RAW"
+if [ "$CODEX_HOME_RAW" = "~" ]; then
+  p="$HOME"
+elif [ "${CODEX_HOME_RAW#~/}" != "$CODEX_HOME_RAW" ]; then
+  p="$HOME/${CODEX_HOME_RAW#~/}"
+elif [ "${CODEX_HOME_RAW#~\\}" != "$CODEX_HOME_RAW" ]; then
+  p="$HOME/${CODEX_HOME_RAW#~\\}"
+elif [ "${CODEX_HOME_RAW#/}" = "$CODEX_HOME_RAW" ]; then
+  p="$HOME/$CODEX_HOME_RAW"
+fi
+
+[ -f "$p/config.toml" ] && codex=1
+[ -f "$HOME/.gemini/.env" ] && gemini=1
+
+printf '%s%s%s\n' "$claude" "$codex" "$gemini"
+"#;
+
+    fn parse_status_triplet(text: &str) -> Option<(bool, bool, bool)> {
+        let mut bits = text.chars().filter(|c| *c == '0' || *c == '1');
+        let claude = bits.next()?;
+        let codex = bits.next()?;
+        let gemini = bits.next()?;
+        Some((claude == '1', codex == '1', gemini == '1'))
+    }
+
     let mut out = Vec::new();
     for distro in distros {
-        let claude = hide_window_cmd("wsl")
-            .args([
-                "-d",
-                distro,
-                "bash",
-                "-lc",
-                "test -f ~/.claude/settings.json",
-            ])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        let codex = hide_window_cmd("wsl")
-            .args([
-                "-d",
-                distro,
-                "bash",
-                "-lc",
-                r#"CODEX_HOME_RAW="${CODEX_HOME:-$HOME/.codex}"; p="$CODEX_HOME_RAW"; if [ "$CODEX_HOME_RAW" = "~" ]; then p="$HOME"; elif [ "${CODEX_HOME_RAW#~/}" != "$CODEX_HOME_RAW" ]; then p="$HOME/${CODEX_HOME_RAW#~/}"; elif [ "${CODEX_HOME_RAW#~\\}" != "$CODEX_HOME_RAW" ]; then p="$HOME/${CODEX_HOME_RAW#~\\}"; elif [ "${CODEX_HOME_RAW#/}" = "$CODEX_HOME_RAW" ]; then p="$HOME/$CODEX_HOME_RAW"; fi; test -f "$p/config.toml""#,
-            ])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        let gemini = hide_window_cmd("wsl")
-            .args(["-d", distro, "bash", "-lc", "test -f ~/.gemini/.env"])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
+        let (claude, codex, gemini) = hide_window_cmd("wsl")
+            .args(["-d", distro, "bash", "-lc", STATUS_SCRIPT])
+            .output()
+            .ok()
+            .and_then(|output| {
+                if !output.status.success() {
+                    return None;
+                }
+                parse_status_triplet(&String::from_utf8_lossy(&output.stdout))
+            })
+            .unwrap_or((false, false, false));
 
         out.push(WslDistroConfigStatus {
             distro: distro.clone(),

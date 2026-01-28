@@ -2,11 +2,16 @@
 
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 use tauri::Manager;
 
 const ENV_KEY_MCP_TIMEOUT: &str = "MCP_TIMEOUT";
 const ENV_KEY_DISABLE_ERROR_REPORTING: &str = "DISABLE_ERROR_REPORTING";
+
+const LOGIN_SHELL_TIMEOUT: Duration = Duration::from_secs(2);
+const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
+const CMD_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ClaudeCliInfo {
@@ -38,6 +43,54 @@ pub struct ClaudeEnvState {
     pub settings_path: String,
     pub mcp_timeout_ms: Option<u64>,
     pub disable_error_reporting: bool,
+}
+
+#[derive(Debug)]
+struct CliProbeResult {
+    found: bool,
+    executable_path: Option<String>,
+    version: Option<String>,
+    error: Option<String>,
+    shell: Option<String>,
+    resolved_via: String,
+}
+
+fn command_output_with_timeout(
+    mut cmd: Command,
+    timeout: Duration,
+    label: String,
+) -> Result<std::process::Output, String> {
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("failed to execute {label}: {e}"))?;
+
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                return child
+                    .wait_with_output()
+                    .map_err(|e| format!("failed to collect output {label}: {e}"));
+            }
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!("{label} timed out after {}ms", timeout.as_millis()));
+                }
+                std::thread::sleep(CMD_POLL_INTERVAL);
+            }
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("failed to wait for {label}: {e}"));
+            }
+        }
+    }
 }
 
 fn home_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -296,17 +349,20 @@ fn scan_executable(app: &tauri::AppHandle, cmd: &str) -> Result<Option<PathBuf>,
         }
     }
 
-    // Best-effort: scan nvm bins (~/.nvm/versions/node/*/bin)
-    let nvm_root = home.join(".nvm").join("versions").join("node");
-    if nvm_root.exists() {
-        if let Ok(entries) = std::fs::read_dir(&nvm_root) {
-            for (idx, entry) in entries.flatten().enumerate() {
-                if idx > 30 {
-                    break;
-                }
-                let p = entry.path().join("bin");
-                if let Some(exe) = find_exe_in_dir(&p, &names) {
-                    return Ok(Some(exe));
+    #[cfg(not(windows))]
+    {
+        // Best-effort: scan nvm bins (~/.nvm/versions/node/*/bin)
+        let nvm_root = home.join(".nvm").join("versions").join("node");
+        if nvm_root.exists() {
+            if let Ok(entries) = std::fs::read_dir(&nvm_root) {
+                for (idx, entry) in entries.flatten().enumerate() {
+                    if idx > 30 {
+                        break;
+                    }
+                    let p = entry.path().join("bin");
+                    if let Some(exe) = find_exe_in_dir(&p, &names) {
+                        return Ok(Some(exe));
+                    }
                 }
             }
         }
@@ -347,9 +403,11 @@ fn run_in_login_shell(shell: &Path, script: &str) -> Result<String, String> {
         ));
     }
 
-    let out = cmd
-        .output()
-        .map_err(|e| format!("failed to execute {}: {e}", shell.display()))?;
+    let out = command_output_with_timeout(
+        cmd,
+        LOGIN_SHELL_TIMEOUT,
+        format!("login shell {}", shell.display()),
+    )?;
     if !out.status.success() {
         let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
         let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
@@ -398,9 +456,8 @@ fn run_version(exe: &Path) -> Result<String, String> {
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let out = cmd
-        .output()
-        .map_err(|e| format!("failed to execute {}: {e}", exe.display()))?;
+    let out =
+        command_output_with_timeout(cmd, VERSION_TIMEOUT, format!("{} --version", exe.display()))?;
 
     let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
@@ -423,21 +480,19 @@ fn run_version(exe: &Path) -> Result<String, String> {
     })
 }
 
-pub fn claude_info_get(app: &tauri::AppHandle) -> Result<ClaudeCliInfo, String> {
-    let config_dir = claude_config_dir(app)?;
-    let settings_path = claude_settings_path(app)?;
-    let (mcp_timeout_ms, disable_error_reporting) = read_claude_env(&settings_path)?;
+fn cli_probe(app: &tauri::AppHandle, cmd: &str) -> Result<CliProbeResult, String> {
+    let shell = std::env::var("SHELL").ok();
+
+    let (exe, resolved_via) = match resolve_executable_via_login_shell(cmd) {
+        Ok(Some(p)) => (Some(p), "login_shell".to_string()),
+        Ok(None) => (scan_executable(app, cmd)?, "path_scan".to_string()),
+        Err(_) => (scan_executable(app, cmd)?, "path_scan".to_string()),
+    };
 
     let mut found = false;
     let mut executable_path: Option<String> = None;
     let mut version: Option<String> = None;
     let mut error: Option<String> = None;
-    let shell = std::env::var("SHELL").ok();
-    let (exe, resolved_via) = match resolve_executable_via_login_shell("claude") {
-        Ok(Some(p)) => (Some(p), "login_shell".to_string()),
-        Ok(None) => (scan_executable(app, "claude")?, "path_scan".to_string()),
-        Err(_) => (scan_executable(app, "claude")?, "path_scan".to_string()),
-    };
 
     if let Some(exe) = exe {
         found = true;
@@ -448,13 +503,30 @@ pub fn claude_info_get(app: &tauri::AppHandle) -> Result<ClaudeCliInfo, String> 
         }
     }
 
-    Ok(ClaudeCliInfo {
+    Ok(CliProbeResult {
         found,
         executable_path,
         version,
         error,
         shell,
         resolved_via,
+    })
+}
+
+pub fn claude_info_get(app: &tauri::AppHandle) -> Result<ClaudeCliInfo, String> {
+    let config_dir = claude_config_dir(app)?;
+    let settings_path = claude_settings_path(app)?;
+    let (mcp_timeout_ms, disable_error_reporting) = read_claude_env(&settings_path)?;
+
+    let probe = cli_probe(app, "claude")?;
+
+    Ok(ClaudeCliInfo {
+        found: probe.found,
+        executable_path: probe.executable_path,
+        version: probe.version,
+        error: probe.error,
+        shell: probe.shell,
+        resolved_via: probe.resolved_via,
         config_dir: config_dir.to_string_lossy().to_string(),
         settings_path: settings_path.to_string_lossy().to_string(),
         mcp_timeout_ms,
@@ -463,66 +535,26 @@ pub fn claude_info_get(app: &tauri::AppHandle) -> Result<ClaudeCliInfo, String> 
 }
 
 pub fn codex_info_get(app: &tauri::AppHandle) -> Result<SimpleCliInfo, String> {
-    let shell = std::env::var("SHELL").ok();
-    let mut found = false;
-    let mut executable_path: Option<String> = None;
-    let mut version: Option<String> = None;
-    let mut error: Option<String> = None;
-
-    let (exe, resolved_via) = match resolve_executable_via_login_shell("codex") {
-        Ok(Some(p)) => (Some(p), "login_shell".to_string()),
-        Ok(None) => (scan_executable(app, "codex")?, "path_scan".to_string()),
-        Err(_) => (scan_executable(app, "codex")?, "path_scan".to_string()),
-    };
-
-    if let Some(exe) = exe {
-        found = true;
-        executable_path = Some(exe.to_string_lossy().to_string());
-        match run_version(&exe) {
-            Ok(v) => version = Some(v),
-            Err(err) => error = Some(err),
-        }
-    }
-
+    let probe = cli_probe(app, "codex")?;
     Ok(SimpleCliInfo {
-        found,
-        executable_path,
-        version,
-        error,
-        shell,
-        resolved_via,
+        found: probe.found,
+        executable_path: probe.executable_path,
+        version: probe.version,
+        error: probe.error,
+        shell: probe.shell,
+        resolved_via: probe.resolved_via,
     })
 }
 
 pub fn gemini_info_get(app: &tauri::AppHandle) -> Result<SimpleCliInfo, String> {
-    let shell = std::env::var("SHELL").ok();
-    let mut found = false;
-    let mut executable_path: Option<String> = None;
-    let mut version: Option<String> = None;
-    let mut error: Option<String> = None;
-
-    let (exe, resolved_via) = match resolve_executable_via_login_shell("gemini") {
-        Ok(Some(p)) => (Some(p), "login_shell".to_string()),
-        Ok(None) => (scan_executable(app, "gemini")?, "path_scan".to_string()),
-        Err(_) => (scan_executable(app, "gemini")?, "path_scan".to_string()),
-    };
-
-    if let Some(exe) = exe {
-        found = true;
-        executable_path = Some(exe.to_string_lossy().to_string());
-        match run_version(&exe) {
-            Ok(v) => version = Some(v),
-            Err(err) => error = Some(err),
-        }
-    }
-
+    let probe = cli_probe(app, "gemini")?;
     Ok(SimpleCliInfo {
-        found,
-        executable_path,
-        version,
-        error,
-        shell,
-        resolved_via,
+        found: probe.found,
+        executable_path: probe.executable_path,
+        version: probe.version,
+        error: probe.error,
+        shell: probe.shell,
+        resolved_via: probe.resolved_via,
     })
 }
 

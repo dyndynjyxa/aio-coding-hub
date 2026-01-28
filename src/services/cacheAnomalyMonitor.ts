@@ -1,7 +1,11 @@
 import { useSyncExternalStore } from "react";
 import { logToConsole } from "./consoleLog";
 import { noticeSend, type NoticeSendParams } from "./notice";
-import type { GatewayAttempt, GatewayRequestEvent, GatewayRequestStartEvent } from "./gatewayEvents";
+import type {
+  GatewayAttempt,
+  GatewayRequestEvent,
+  GatewayRequestStartEvent,
+} from "./gatewayEvents";
 
 const STORAGE_KEY_ENABLED = "aio.cacheAnomalyMonitor.enabled";
 
@@ -9,9 +13,11 @@ const MINUTE_MS = 60_000;
 const WINDOW_MINUTES = 60;
 const BASELINE_MINUTES = 45;
 const RECENT_MINUTES = 15;
+const COLD_START_MINUTES = 10;
 
 const EVAL_INTERVAL_MS = 60_000;
 const ALERT_DEDUP_MS = 15 * MINUTE_MS;
+const COLD_START_WINDOW_MS = COLD_START_MINUTES * MINUTE_MS;
 
 const SAMPLE_RETENTION_MINUTES = 75;
 const TRACE_MODEL_TTL_MS = 10 * MINUTE_MS;
@@ -21,9 +27,13 @@ const THRESHOLDS = {
   recentDenomTokensMin: 3_000,
   baselineSuccessRequestsMin: 30,
   recentSuccessRequestsMin: 10,
+  coldRecentDenomTokensMin: 2_000,
+  coldRecentSuccessRequestsMin: 5,
   baselineHitRateMin: 0.05,
   dropRatioMin: 0.25,
   dropAbsMin: 0.05,
+  createShareMin: 0.9,
+  createReadImbalanceMin: 3,
 } as const;
 
 type SupportedCliKey = "claude" | "codex";
@@ -72,6 +82,7 @@ export function setCacheAnomalyMonitorEnabled(next: boolean) {
   }
 
   resetState();
+  state.enabledAtMs = normalized ? Date.now() : 0;
   setEnabledInternal(normalized);
 }
 
@@ -181,6 +192,7 @@ type TraceModelEntry = {
 };
 
 const state = {
+  enabledAtMs: enabled ? Date.now() : 0,
   traceModels: new Map<string, TraceModelEntry>(),
   groups: new Map<string, GroupState>(),
   lastEvalMs: 0,
@@ -191,6 +203,7 @@ function resetState() {
   state.traceModels.clear();
   state.groups.clear();
   state.lastEvalMs = 0;
+  state.enabledAtMs = 0;
 }
 
 function mod(value: number, base: number): number {
@@ -228,6 +241,22 @@ function formatPct(value: number): string {
   return `${Math.round(value * 10000) / 100}%`;
 }
 
+function formatRatio(value: number): string {
+  if (!Number.isFinite(value)) return "—";
+  return `${Math.round(value * 100) / 100}x`;
+}
+
+function computeObserveMetrics(observe: WindowSums): {
+  createShare: number;
+  createReadRatio: number;
+} {
+  const createShare =
+    observe.denomTokens > 0 ? observe.cacheCreateTokens / observe.denomTokens : NaN;
+  const createReadRatio =
+    observe.cacheReadTokens > 0 ? observe.cacheCreateTokens / observe.cacheReadTokens : NaN;
+  return { createShare, createReadRatio };
+}
+
 async function safeNoticeSend(params: NoticeSendParams): Promise<boolean> {
   try {
     return await noticeSend(params);
@@ -250,7 +279,11 @@ function pickFinalProvider(attempts: GatewayAttempt[] | null | undefined): Gatew
   return list[list.length - 1] ?? null;
 }
 
-function effectiveInputTokens(cliKey: SupportedCliKey, inputTokens: number, cacheReadTokens: number) {
+function effectiveInputTokens(
+  cliKey: SupportedCliKey,
+  inputTokens: number,
+  cacheReadTokens: number
+) {
   if (cliKey === "codex") return Math.max(inputTokens - cacheReadTokens, 0);
   return inputTokens;
 }
@@ -328,12 +361,38 @@ type GroupEval = {
   recent: WindowSums;
   baselineHitRate: number;
   recentHitRate: number;
+  observe: WindowSums;
+  observeHitRate: number;
+  observeMinutes: number;
+  coldStart: boolean;
   totalDenomTokens: number;
 };
 
 function shouldAlert(evalRow: GroupEval): { ok: true; reason: string } | { ok: false } {
-  const { baseline, recent, baselineHitRate, recentHitRate } = evalRow;
+  const { baseline, recent, baselineHitRate, recentHitRate, observe, coldStart } = evalRow;
 
+  const observeDenomMin = coldStart
+    ? THRESHOLDS.coldRecentDenomTokensMin
+    : THRESHOLDS.recentDenomTokensMin;
+  const observeSuccessMin = coldStart
+    ? THRESHOLDS.coldRecentSuccessRequestsMin
+    : THRESHOLDS.recentSuccessRequestsMin;
+
+  if (observe.denomTokens >= observeDenomMin && observe.successRequests >= observeSuccessMin) {
+    const creationButNoRead = observe.cacheReadTokens === 0 && observe.cacheCreateTokens > 0;
+    if (creationButNoRead) return { ok: true, reason: "缓存创建但读取为 0" };
+
+    const { createShare, createReadRatio } = computeObserveMetrics(observe);
+    if (Number.isFinite(createShare) && createShare >= THRESHOLDS.createShareMin) {
+      return { ok: true, reason: "缓存创建占比异常高" };
+    }
+
+    if (Number.isFinite(createReadRatio) && createReadRatio >= THRESHOLDS.createReadImbalanceMin) {
+      return { ok: true, reason: "缓存创建显著高于读取" };
+    }
+  }
+
+  // Relative drop check: only meaningful with stable baseline.
   if (baseline.denomTokens < THRESHOLDS.baselineDenomTokensMin) return { ok: false };
   if (recent.denomTokens < THRESHOLDS.recentDenomTokensMin) return { ok: false };
   if (baseline.successRequests < THRESHOLDS.baselineSuccessRequestsMin) return { ok: false };
@@ -341,10 +400,6 @@ function shouldAlert(evalRow: GroupEval): { ok: true; reason: string } | { ok: f
   if (!Number.isFinite(baselineHitRate) || baselineHitRate < THRESHOLDS.baselineHitRateMin) {
     return { ok: false };
   }
-
-  const creationButNoRead = recent.cacheReadTokens === 0 && recent.cacheCreateTokens > 0;
-  if (creationButNoRead) return { ok: true, reason: "缓存创建但读取为 0" };
-
   if (!Number.isFinite(recentHitRate)) return { ok: false };
 
   const absDrop = baselineHitRate - recentHitRate;
@@ -357,28 +412,49 @@ function shouldAlert(evalRow: GroupEval): { ok: true; reason: string } | { ok: f
 }
 
 async function emitAlert(evalRow: GroupEval, reason: string) {
-  const { group, baseline, recent, baselineHitRate, recentHitRate } = evalRow;
+  const {
+    group,
+    baseline,
+    recent,
+    baselineHitRate,
+    recentHitRate,
+    observe,
+    observeHitRate,
+    observeMinutes,
+    coldStart,
+  } = evalRow;
   const { cliKey, providerId, providerName, model } = group.parts;
 
   const title = `缓存异常（${reason}）`;
+  const { createShare: observeCreateShare, createReadRatio: observeCreateReadRatio } =
+    computeObserveMetrics(observe);
+  const windowLabel = coldStart ? `冷启动(${observeMinutes}m)` : `最近(${observeMinutes}m)`;
+
   const body = [
     `CLI：${cliKey}`,
     `Provider：${providerName} (#${providerId})`,
     `Model：${model}`,
+    `${windowLabel}：命中率 ${formatPct(observeHitRate)} · 读取token ${observe.cacheReadTokens} · 创建token ${observe.cacheCreateTokens} · 分母token ${observe.denomTokens} · 成功请求 ${observe.successRequests}`,
+    `创建占比 ${formatPct(observeCreateShare)} · 创建/读取 ${formatRatio(observeCreateReadRatio)}`,
     `基线(45m)：命中率 ${formatPct(baselineHitRate)} · 分母token ${baseline.denomTokens} · 成功请求 ${baseline.successRequests}`,
-    `最近(15m)：命中率 ${formatPct(recentHitRate)} · 分母token ${recent.denomTokens} · 成功请求 ${recent.successRequests}`,
   ].join("\n");
 
   logToConsole("warn", title, {
     reason,
+    cold_start: coldStart,
+    observe_minutes: observeMinutes,
     cli_key: cliKey,
     provider_id: providerId,
     provider_name: providerName,
     requested_model: model,
     baseline,
     recent,
+    observe,
     baseline_hit_rate: baselineHitRate,
     recent_hit_rate: recentHitRate,
+    observe_hit_rate: observeHitRate,
+    observe_create_share: observeCreateShare,
+    observe_create_read_ratio: observeCreateReadRatio,
   });
 
   await safeNoticeSend({ level: "warning", title, body });
@@ -409,6 +485,14 @@ function maybeEvaluate(nowMs: number) {
   const recentStart = minuteNow - (RECENT_MINUTES - 1);
   const recentEnd = minuteNow;
 
+  const coldStartActive = state.enabledAtMs > 0 && nowMs - state.enabledAtMs < COLD_START_WINDOW_MS;
+  const coldRecentMinutes = coldStartActive
+    ? Math.min(COLD_START_MINUTES, Math.floor((nowMs - state.enabledAtMs) / MINUTE_MS) + 1)
+    : 0;
+  const observeMinutes = coldStartActive ? coldRecentMinutes : RECENT_MINUTES;
+  const observeStart = minuteNow - (observeMinutes - 1);
+  const observeEnd = minuteNow;
+
   const evalRows: GroupEval[] = [];
 
   for (const [key, group] of state.groups) {
@@ -419,10 +503,14 @@ function maybeEvaluate(nowMs: number) {
 
     const baseline = group.ring.sumRange(baselineStart, baselineEnd);
     const recent = group.ring.sumRange(recentStart, recentEnd);
+    const observe = coldStartActive ? group.ring.sumRange(observeStart, observeEnd) : recent;
 
     const baselineHitRate =
       baseline.denomTokens > 0 ? baseline.cacheReadTokens / baseline.denomTokens : NaN;
-    const recentHitRate = recent.denomTokens > 0 ? recent.cacheReadTokens / recent.denomTokens : NaN;
+    const recentHitRate =
+      recent.denomTokens > 0 ? recent.cacheReadTokens / recent.denomTokens : NaN;
+    const observeHitRate =
+      observe.denomTokens > 0 ? observe.cacheReadTokens / observe.denomTokens : NaN;
 
     evalRows.push({
       group,
@@ -430,6 +518,10 @@ function maybeEvaluate(nowMs: number) {
       recent,
       baselineHitRate,
       recentHitRate,
+      observe,
+      observeHitRate,
+      observeMinutes,
+      coldStart: coldStartActive,
       totalDenomTokens: baseline.denomTokens + recent.denomTokens,
     });
   }
@@ -447,12 +539,22 @@ function maybeEvaluate(nowMs: number) {
     const slowBaseline = slowSumSamples(row.group.samples, baselineStart, baselineEnd);
     const slowRecent = slowSumSamples(row.group.samples, recentStart, recentEnd);
 
-    if (!sumsEqual(row.baseline, slowBaseline) || !sumsEqual(row.recent, slowRecent)) {
+    const slowObserve = coldStartActive
+      ? slowSumSamples(row.group.samples, observeStart, observeEnd)
+      : slowRecent;
+
+    if (
+      !sumsEqual(row.baseline, slowBaseline) ||
+      !sumsEqual(row.recent, slowRecent) ||
+      !sumsEqual(row.observe, slowObserve)
+    ) {
       disableDueToSelfCheckFailure(nowMs, {
         key: row.group.key,
         parts: row.group.parts,
-        ring: { baseline: row.baseline, recent: row.recent },
-        slow: { baseline: slowBaseline, recent: slowRecent },
+        ring: { baseline: row.baseline, recent: row.recent, observe: row.observe },
+        slow: { baseline: slowBaseline, recent: slowRecent, observe: slowObserve },
+        cold_start: coldStartActive,
+        observe_minutes: observeMinutes,
       });
       return;
     }

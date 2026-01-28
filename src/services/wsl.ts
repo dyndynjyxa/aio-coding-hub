@@ -39,8 +39,11 @@ export async function wslHostAddressGet() {
   return invokeTauriOrNull<string | null>("wsl_host_address_get");
 }
 
-export async function wslConfigStatusGet() {
-  return invokeTauriOrNull<WslDistroConfigStatus[]>("wsl_config_status_get");
+export async function wslConfigStatusGet(distros?: string[]) {
+  return invokeTauriOrNull<WslDistroConfigStatus[]>(
+    "wsl_config_status_get",
+    distros !== undefined ? { distros } : undefined
+  );
 }
 
 export async function wslConfigureClients(input: { targets: WslTargetCli }) {

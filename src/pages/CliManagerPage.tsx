@@ -1,6 +1,12 @@
 // Usage: UI for configuring local CLI integrations and related app settings. Backend commands: `cli_manager_*`, `settings_*`, `cli_proxy_*`, `gateway_*`.
 
-import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
 import {
@@ -28,9 +34,6 @@ import {
 } from "../services/settingsGatewayRectifier";
 import { formatActionFailureToast } from "../utils/errors";
 import { CliManagerGeneralTab } from "../components/cli-manager/tabs/GeneralTab";
-import { CliManagerClaudeTab } from "../components/cli-manager/tabs/ClaudeTab";
-import { CliManagerCodexTab } from "../components/cli-manager/tabs/CodexTab";
-import { CliManagerGeminiTab } from "../components/cli-manager/tabs/GeminiTab";
 import { PageHeader } from "../ui/PageHeader";
 import { TabList } from "../ui/TabList";
 
@@ -53,6 +56,26 @@ const DEFAULT_RECTIFIER: GatewayRectifierSettingsPatch = {
   response_fixer_max_json_depth: 200,
   response_fixer_max_fix_size: 1024 * 1024,
 };
+
+const LazyClaudeTab = lazy(() =>
+  import("../components/cli-manager/tabs/ClaudeTab").then((m) => ({
+    default: m.CliManagerClaudeTab,
+  }))
+);
+
+const LazyCodexTab = lazy(() =>
+  import("../components/cli-manager/tabs/CodexTab").then((m) => ({
+    default: m.CliManagerCodexTab,
+  }))
+);
+
+const LazyGeminiTab = lazy(() =>
+  import("../components/cli-manager/tabs/GeminiTab").then((m) => ({
+    default: m.CliManagerGeminiTab,
+  }))
+);
+
+const TAB_FALLBACK = <div className="p-6 text-sm text-slate-500">加载中…</div>;
 
 export function CliManagerPage() {
   const [tab, setTab] = useState<TabKey>("general");
@@ -88,6 +111,7 @@ export function CliManagerPage() {
   const [claudeSettingsLoading, setClaudeSettingsLoading] = useState(false);
   const [claudeSettingsSaving, setClaudeSettingsSaving] = useState(false);
   const [claudeSettings, setClaudeSettings] = useState<ClaudeSettingsState | null>(null);
+  const [claudeSettingsAttempted, setClaudeSettingsAttempted] = useState(false);
 
   const [codexAvailable, setCodexAvailable] = useState<"checking" | "available" | "unavailable">(
     "checking"
@@ -97,6 +121,7 @@ export function CliManagerPage() {
   const [codexConfigLoading, setCodexConfigLoading] = useState(false);
   const [codexConfigSaving, setCodexConfigSaving] = useState(false);
   const [codexConfig, setCodexConfig] = useState<CodexConfigState | null>(null);
+  const [codexConfigAttempted, setCodexConfigAttempted] = useState(false);
 
   const [geminiAvailable, setGeminiAvailable] = useState<"checking" | "available" | "unavailable">(
     "checking"
@@ -154,15 +179,23 @@ export function CliManagerPage() {
 
   useEffect(() => {
     if (tab !== "claude") return;
+    if (!claudeSettings && !claudeSettingsAttempted && !claudeSettingsLoading) {
+      void refreshClaudeSettings();
+      return;
+    }
+    if (claudeSettingsLoading) return;
     if (claudeAvailable === "checking") void refreshClaudeInfo();
-    if (!claudeSettings && !claudeSettingsLoading) void refreshClaudeSettings();
-  }, [tab, claudeAvailable, claudeSettings, claudeSettingsLoading]);
+  }, [tab, claudeAvailable, claudeSettings, claudeSettingsAttempted, claudeSettingsLoading]);
 
   useEffect(() => {
     if (tab !== "codex") return;
+    if (!codexConfig && !codexConfigAttempted && !codexConfigLoading) {
+      void refreshCodexConfig();
+      return;
+    }
+    if (codexConfigLoading) return;
     if (codexAvailable === "checking") void refreshCodexInfo();
-    if (!codexConfig && !codexConfigLoading) void refreshCodexConfig();
-  }, [tab, codexAvailable, codexConfig, codexConfigLoading]);
+  }, [tab, codexAvailable, codexConfig, codexConfigAttempted, codexConfigLoading]);
 
   useEffect(() => {
     if (tab !== "gemini") return;
@@ -356,6 +389,7 @@ export function CliManagerPage() {
 
   async function refreshClaudeSettings() {
     if (claudeSettingsLoading) return;
+    setClaudeSettingsAttempted(true);
     setClaudeSettingsLoading(true);
     try {
       const settings = await cliManagerClaudeSettingsGet();
@@ -373,7 +407,8 @@ export function CliManagerPage() {
   }
 
   async function refreshClaude() {
-    await Promise.all([refreshClaudeInfo(), refreshClaudeSettings()]);
+    await refreshClaudeSettings();
+    await refreshClaudeInfo();
   }
 
   async function refreshCodexInfo() {
@@ -400,6 +435,7 @@ export function CliManagerPage() {
 
   async function refreshCodexConfig() {
     if (codexConfigLoading) return;
+    setCodexConfigAttempted(true);
     setCodexConfigLoading(true);
     try {
       const cfg = await cliManagerCodexConfigGet();
@@ -417,7 +453,8 @@ export function CliManagerPage() {
   }
 
   async function refreshCodex() {
-    await Promise.all([refreshCodexInfo(), refreshCodexConfig()]);
+    await refreshCodexConfig();
+    await refreshCodexInfo();
   }
 
   async function refreshGeminiInfo() {
@@ -570,40 +607,46 @@ export function CliManagerPage() {
         ) : null}
 
         {tab === "claude" ? (
-          <CliManagerClaudeTab
-            claudeAvailable={claudeAvailable}
-            claudeLoading={claudeLoading}
-            claudeInfo={claudeInfo}
-            claudeSettingsLoading={claudeSettingsLoading}
-            claudeSettingsSaving={claudeSettingsSaving}
-            claudeSettings={claudeSettings}
-            refreshClaude={refreshClaude}
-            openClaudeConfigDir={openClaudeConfigDir}
-            persistClaudeSettings={persistClaudeSettings}
-          />
+          <Suspense fallback={TAB_FALLBACK}>
+            <LazyClaudeTab
+              claudeAvailable={claudeAvailable}
+              claudeLoading={claudeLoading}
+              claudeInfo={claudeInfo}
+              claudeSettingsLoading={claudeSettingsLoading}
+              claudeSettingsSaving={claudeSettingsSaving}
+              claudeSettings={claudeSettings}
+              refreshClaude={refreshClaude}
+              openClaudeConfigDir={openClaudeConfigDir}
+              persistClaudeSettings={persistClaudeSettings}
+            />
+          </Suspense>
         ) : null}
 
         {tab === "codex" ? (
-          <CliManagerCodexTab
-            codexAvailable={codexAvailable}
-            codexLoading={codexLoading}
-            codexConfigLoading={codexConfigLoading}
-            codexConfigSaving={codexConfigSaving}
-            codexInfo={codexInfo}
-            codexConfig={codexConfig}
-            refreshCodex={refreshCodex}
-            openCodexConfigDir={openCodexConfigDir}
-            persistCodexConfig={persistCodexConfig}
-          />
+          <Suspense fallback={TAB_FALLBACK}>
+            <LazyCodexTab
+              codexAvailable={codexAvailable}
+              codexLoading={codexLoading}
+              codexConfigLoading={codexConfigLoading}
+              codexConfigSaving={codexConfigSaving}
+              codexInfo={codexInfo}
+              codexConfig={codexConfig}
+              refreshCodex={refreshCodex}
+              openCodexConfigDir={openCodexConfigDir}
+              persistCodexConfig={persistCodexConfig}
+            />
+          </Suspense>
         ) : null}
 
         {tab === "gemini" ? (
-          <CliManagerGeminiTab
-            geminiAvailable={geminiAvailable}
-            geminiLoading={geminiLoading}
-            geminiInfo={geminiInfo}
-            refreshGeminiInfo={refreshGeminiInfo}
-          />
+          <Suspense fallback={TAB_FALLBACK}>
+            <LazyGeminiTab
+              geminiAvailable={geminiAvailable}
+              geminiLoading={geminiLoading}
+              geminiInfo={geminiInfo}
+              refreshGeminiInfo={refreshGeminiInfo}
+            />
+          </Suspense>
         ) : null}
       </div>
     </div>

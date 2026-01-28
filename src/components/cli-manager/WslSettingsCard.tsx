@@ -40,6 +40,7 @@ export function WslSettingsCard({
   const [hostIp, setHostIp] = useState<string | null>(null);
   const [detection, setDetection] = useState<WslDetection | null>(null);
   const [statusRows, setStatusRows] = useState<WslDistroConfigStatus[] | null>(null);
+  const [checkedOnce, setCheckedOnce] = useState(false);
   const [loading, setLoading] = useState(false);
   const [configuring, setConfiguring] = useState(false);
   const [lastReport, setLastReport] = useState<WslConfigureReport | null>(null);
@@ -73,11 +74,8 @@ export function WslSettingsCard({
     setLastReport(null);
 
     try {
-      const [det, ip, statuses] = await Promise.all([
-        wslDetect(),
-        wslHostAddressGet(),
-        wslConfigStatusGet(),
-      ]);
+      const det = await wslDetect();
+      setCheckedOnce(true);
       if (!det) {
         setDetection(null);
         setHostIp(null);
@@ -85,6 +83,17 @@ export function WslSettingsCard({
         return;
       }
       setDetection(det);
+
+      if (!det.detected || det.distros.length === 0) {
+        setHostIp(null);
+        setStatusRows(null);
+        return;
+      }
+
+      const [ip, statuses] = await Promise.all([
+        wslHostAddressGet(),
+        wslConfigStatusGet(det.distros),
+      ]);
       setHostIp(ip ?? null);
       setStatusRows(statuses ?? null);
     } catch (err) {
@@ -96,9 +105,11 @@ export function WslSettingsCard({
   }
 
   useEffect(() => {
+    if (!available) return;
+    if (!settings.wsl_auto_config) return;
     void refreshAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [available]);
+  }, [available, settings.wsl_auto_config]);
 
   async function commitAutoConfig(next: boolean) {
     if (!available) return;
@@ -216,13 +227,19 @@ export function WslSettingsCard({
               <span
                 className={cn(
                   "inline-block h-2.5 w-2.5 rounded-full",
-                  wslDetected ? "bg-emerald-500" : "bg-slate-300"
+                  wslDetected ? "bg-emerald-500" : checkedOnce ? "bg-slate-300" : "bg-slate-200"
                 )}
               />
               <span className="text-sm text-slate-700">
-                {wslDetected ? "已检测到 WSL" : "未检测到 WSL"}
+                {!checkedOnce
+                  ? loading
+                    ? "检测中..."
+                    : "未检测（默认关闭）"
+                  : wslDetected
+                    ? "已检测到 WSL"
+                    : "未检测到 WSL"}
               </span>
-              {detection ? (
+              {checkedOnce && detection ? (
                 <span className="text-xs text-slate-500">({distros.length} 个发行版)</span>
               ) : null}
             </div>

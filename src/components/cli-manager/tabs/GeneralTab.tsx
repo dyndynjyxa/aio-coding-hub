@@ -1,6 +1,9 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { toast } from "sonner";
-import { setCacheAnomalyMonitorEnabled, useCacheAnomalyMonitorEnabled } from "../../../services/cacheAnomalyMonitor";
+import {
+  setCacheAnomalyMonitorEnabled,
+  useCacheAnomalyMonitorEnabled,
+} from "../../../services/cacheAnomalyMonitor";
 import type { AppSettings } from "../../../services/settings";
 import type { GatewayRectifierSettingsPatch } from "../../../services/settingsGatewayRectifier";
 import { Card } from "../../../ui/Card";
@@ -227,10 +230,15 @@ export function CliManagerGeneralTab({
                 命中后写入控制台并发送系统通知。
               </p>
               <div className="mt-2 space-y-1 text-xs text-slate-500">
-                <p>触发条件：最近 15 分钟命中率相对前 45 分钟显著下降，或“有创建但读取为 0”。</p>
                 <p>
-                  门槛（默认）：基线 token≥10000 且成功请求≥30；最近 token≥3000 且成功请求≥10；
-                  基线命中率≥5%。* token 不是请求数
+                  触发条件：命中率断崖式下降（最近 15m vs 前 45m）；或创建异常（创建但读取为 0 /
+                  创建占比过高 / 创建显著高于读取）。
+                </p>
+                <p>冷启动：开启后前 10 分钟也会评估创建异常（不依赖 45m 基线）。</p>
+                <p>
+                  门槛（默认）：冷启动 token≥2000 且成功请求≥5；稳定期：基线 token≥10000
+                  且成功请求≥30； 最近 token≥3000 且成功请求≥10；基线命中率≥5%；创建占比≥90% 或
+                  创建/读取≥3。* token 不是请求数
                 </p>
               </div>
             </div>
