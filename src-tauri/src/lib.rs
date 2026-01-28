@@ -247,15 +247,32 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|_app_handle, _event| {
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::ExitRequested { api, code, .. } = &event {
+            // Note: `prevent_exit` is ignored for restart requests.
+            // For app_restart we run cleanup explicitly before requesting restart.
+            if *code != Some(tauri::RESTART_EXIT_CODE) {
+                tracing::info!("收到退出请求，开始清理...");
+                api.prevent_exit();
+
+                let app_handle = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    crate::app::cleanup::cleanup_before_exit(&app_handle).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    std::process::exit(0);
+                });
+            }
+            return;
+        }
+
         #[cfg(target_os = "macos")]
         if let tauri::RunEvent::Reopen {
             has_visible_windows,
             ..
-        } = _event
+        } = event
         {
             if !has_visible_windows {
-                resident::show_main_window(_app_handle);
+                resident::show_main_window(app_handle);
             }
         }
     });

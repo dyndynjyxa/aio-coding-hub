@@ -53,7 +53,7 @@ pub(in crate::gateway) async fn proxy_impl(
     let method_hint = method.to_string();
     let query = req.uri().query().map(str::to_string);
 
-    if matches!(cli_key.as_str(), "claude" | "codex" | "gemini") {
+    if crate::shared::cli_key::is_supported_cli_key(cli_key.as_str()) {
         let enabled_snapshot = cli_proxy_enabled_cached(&state.app, &cli_key);
         if !enabled_snapshot.enabled {
             if !enabled_snapshot.cache_hit {

@@ -50,6 +50,7 @@ pub(crate) fn app_exit(app: tauri::AppHandle) -> Result<bool, String> {
 pub(crate) fn app_restart(app: tauri::AppHandle) -> Result<bool, String> {
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(200));
+        tauri::async_runtime::block_on(crate::app::cleanup::cleanup_before_exit(&app));
         app.request_restart();
     });
     Ok(true)

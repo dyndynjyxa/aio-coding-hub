@@ -11,7 +11,7 @@ fn attempt_log_insert_from_event(
     attempt: &GatewayAttemptEvent,
     created_at: i64,
 ) -> Option<request_attempt_logs::RequestAttemptLogInsert> {
-    if !matches!(attempt.cli_key.as_str(), "claude" | "codex" | "gemini") {
+    if !crate::shared::cli_key::is_supported_cli_key(attempt.cli_key.as_str()) {
         return None;
     }
 
@@ -115,7 +115,7 @@ fn request_log_insert_from_args(
         usage,
     } = args;
 
-    if !matches!(cli_key.as_str(), "claude" | "codex" | "gemini") {
+    if !crate::shared::cli_key::is_supported_cli_key(cli_key.as_str()) {
         return None;
     }
 

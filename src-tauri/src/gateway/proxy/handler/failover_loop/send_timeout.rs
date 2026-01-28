@@ -9,12 +9,6 @@ pub(super) async fn handle_timeout(
     loop_state: LoopState<'_>,
 ) -> LoopControl {
     let state = ctx.state;
-    let cli_key = ctx.cli_key.to_string();
-    let method_hint = ctx.method_hint.to_string();
-    let forwarded_path = ctx.forwarded_path.to_string();
-    let query = ctx.query.clone();
-    let trace_id = ctx.trace_id.to_string();
-    let created_at = ctx.created_at;
     let provider_cooldown_secs = ctx.provider_cooldown_secs;
     let upstream_first_byte_timeout_secs = ctx.upstream_first_byte_timeout_secs;
     let max_attempts_per_provider = ctx.max_attempts_per_provider;
@@ -30,7 +24,7 @@ pub(super) async fn handle_timeout(
     let provider_base_url_base = provider_base_url_base.to_string();
 
     let AttemptCtx {
-        attempt_index,
+        attempt_index: _,
         retry_index,
         attempt_started_ms,
         attempt_started,
@@ -83,35 +77,8 @@ pub(super) async fn handle_timeout(
         circuit_failure_threshold: Some(circuit_before.failure_threshold),
     });
 
-    let attempt_event = GatewayAttemptEvent {
-        trace_id: trace_id.clone(),
-        cli_key: cli_key.clone(),
-        method: method_hint.clone(),
-        path: forwarded_path.clone(),
-        query: query.clone(),
-        attempt_index,
-        provider_id,
-        session_reuse,
-        provider_name: provider_name_base.clone(),
-        base_url: provider_base_url_base.clone(),
-        outcome,
-        status: None,
-        attempt_started_ms,
-        attempt_duration_ms: attempt_started.elapsed().as_millis(),
-        circuit_state_before: Some(circuit_before.state.as_str()),
-        circuit_state_after: None,
-        circuit_failure_count: Some(circuit_before.failure_count),
-        circuit_failure_threshold: Some(circuit_before.failure_threshold),
-    };
-    emit_attempt_event(&state.app, attempt_event.clone());
-    enqueue_attempt_log_with_backpressure(
-        &state.app,
-        &state.db,
-        &state.attempt_log_tx,
-        &attempt_event,
-        created_at,
-    )
-    .await;
+    emit_attempt_event_and_log_with_circuit_before(ctx, provider_ctx, attempt_ctx, outcome, None)
+        .await;
 
     *last_error_category = Some(category.as_str());
     *last_error_code = Some(error_code);

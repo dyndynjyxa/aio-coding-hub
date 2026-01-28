@@ -3,14 +3,15 @@
 use super::super::super::errors::{classify_reqwest_error, classify_upstream_status};
 use super::super::super::failover::{retry_backoff_delay, FailoverDecision};
 use super::super::super::http_util::{build_response, has_gzip_content_encoding};
-use super::super::super::logging::enqueue_attempt_log_with_backpressure;
 use super::super::super::ErrorCategory;
 use super::context::{AttemptCtx, CommonCtx, LoopControl, LoopState, ProviderCtx};
 use super::thinking_signature_rectifier_400;
-use crate::circuit_breaker;
-use crate::gateway::events::{
-    emit_attempt_event, emit_circuit_transition, FailoverAttempt, GatewayAttemptEvent,
+use super::{
+    emit_attempt_event_and_log, emit_attempt_event_and_log_with_circuit_before,
+    AttemptCircuitFields,
 };
+use crate::circuit_breaker;
+use crate::gateway::events::{emit_circuit_transition, FailoverAttempt};
 use crate::gateway::streams::{GunzipStream, StreamFinalizeCtx, TimingOnlyTeeStream};
 use crate::gateway::util::{now_unix_seconds, strip_hop_headers};
 use axum::body::{Body, Bytes};
@@ -66,7 +67,7 @@ pub(super) async fn handle_non_success_response(
     } = provider_ctx;
 
     let AttemptCtx {
-        attempt_index,
+        attempt_index: _,
         retry_index,
         attempt_started_ms,
         attempt_started,
@@ -164,33 +165,18 @@ pub(super) async fn handle_non_success_response(
         circuit_failure_threshold,
     });
 
-    let attempt_event = GatewayAttemptEvent {
-        trace_id: ctx.trace_id.clone(),
-        cli_key: ctx.cli_key.clone(),
-        method: ctx.method_hint.clone(),
-        path: ctx.forwarded_path.clone(),
-        query: ctx.query.clone(),
-        attempt_index,
-        provider_id,
-        session_reuse,
-        provider_name: provider_name_base.clone(),
-        base_url: provider_base_url_base.clone(),
-        outcome: outcome.clone(),
-        status: Some(status.as_u16()),
-        attempt_started_ms,
-        attempt_duration_ms: attempt_started.elapsed().as_millis(),
-        circuit_state_before,
-        circuit_state_after,
-        circuit_failure_count,
-        circuit_failure_threshold,
-    };
-    emit_attempt_event(&state.app, attempt_event.clone());
-    enqueue_attempt_log_with_backpressure(
-        &state.app,
-        &state.db,
-        &state.attempt_log_tx,
-        &attempt_event,
-        ctx.created_at,
+    emit_attempt_event_and_log(
+        ctx,
+        provider_ctx,
+        attempt_ctx,
+        outcome,
+        Some(status.as_u16()),
+        AttemptCircuitFields {
+            state_before: circuit_state_before,
+            state_after: circuit_state_after,
+            failure_count: circuit_failure_count,
+            failure_threshold: circuit_failure_threshold,
+        },
     )
     .await;
 
@@ -296,7 +282,7 @@ pub(super) async fn handle_reqwest_error(
     } = provider_ctx;
 
     let AttemptCtx {
-        attempt_index,
+        attempt_index: _,
         retry_index,
         attempt_started_ms,
         attempt_started,
@@ -347,35 +333,8 @@ pub(super) async fn handle_reqwest_error(
         circuit_failure_threshold: Some(circuit_before.failure_threshold),
     });
 
-    let attempt_event = GatewayAttemptEvent {
-        trace_id: ctx.trace_id.clone(),
-        cli_key: ctx.cli_key.clone(),
-        method: ctx.method_hint.clone(),
-        path: ctx.forwarded_path.clone(),
-        query: ctx.query.clone(),
-        attempt_index,
-        provider_id,
-        session_reuse,
-        provider_name: provider_name_base.clone(),
-        base_url: provider_base_url_base.clone(),
-        outcome,
-        status: None,
-        attempt_started_ms,
-        attempt_duration_ms: attempt_started.elapsed().as_millis(),
-        circuit_state_before: Some(circuit_before.state.as_str()),
-        circuit_state_after: None,
-        circuit_failure_count: Some(circuit_before.failure_count),
-        circuit_failure_threshold: Some(circuit_before.failure_threshold),
-    };
-    emit_attempt_event(&state.app, attempt_event.clone());
-    enqueue_attempt_log_with_backpressure(
-        &state.app,
-        &state.db,
-        &state.attempt_log_tx,
-        &attempt_event,
-        ctx.created_at,
-    )
-    .await;
+    emit_attempt_event_and_log_with_circuit_before(ctx, provider_ctx, attempt_ctx, outcome, None)
+        .await;
 
     *last_error_category = Some(category.as_str());
     *last_error_code = Some(error_code);

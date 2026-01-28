@@ -5,10 +5,7 @@ use std::path::PathBuf;
 use tauri::Manager;
 
 pub(super) fn validate_cli_key(cli_key: &str) -> Result<(), String> {
-    match cli_key {
-        "claude" | "codex" | "gemini" => Ok(()),
-        _ => Err(format!("SEC_INVALID_INPUT: unknown cli_key={cli_key}")),
-    }
+    crate::shared::cli_key::validate_cli_key(cli_key)
 }
 
 fn home_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {

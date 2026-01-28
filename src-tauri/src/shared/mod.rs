@@ -2,5 +2,7 @@
 
 pub(crate) mod blocking;
 pub(crate) mod circuit_breaker;
+pub(crate) mod cli_key;
+pub(crate) mod fs;
 pub(crate) mod mutex_ext;
 pub(crate) mod time;

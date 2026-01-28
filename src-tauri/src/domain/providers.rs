@@ -159,10 +159,7 @@ pub(crate) struct GatewayProvidersSelection {
 }
 
 fn validate_cli_key(cli_key: &str) -> Result<(), String> {
-    match cli_key {
-        "claude" | "codex" | "gemini" => Ok(()),
-        _ => Err(format!("SEC_INVALID_INPUT: unknown cli_key={cli_key}")),
-    }
+    crate::shared::cli_key::validate_cli_key(cli_key)
 }
 
 fn enabled_to_int(enabled: bool) -> i64 {

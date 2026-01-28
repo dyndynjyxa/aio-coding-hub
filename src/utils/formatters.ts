@@ -43,6 +43,15 @@ export function formatInteger(value: number | null | undefined) {
   }
 }
 
+export function formatPercent(value: number | null | undefined, digits = 1) {
+  if (value == null || !Number.isFinite(value)) return "—";
+  const pct = value * 100;
+  const d = Number.isFinite(digits) ? Math.min(6, Math.max(0, Math.round(digits))) : 0;
+  const factor = 10 ** d;
+  const rounded = Math.round(pct * factor) / factor;
+  return `${rounded.toFixed(d)}%`;
+}
+
 export function computeOutputTokensPerSecond(
   outputTokens: number | null | undefined,
   durationMs: number | null | undefined,

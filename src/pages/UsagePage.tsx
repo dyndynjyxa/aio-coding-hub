@@ -11,6 +11,8 @@ import {
   type UsageSummary,
 } from "../services/usage";
 import { CLI_FILTER_ITEMS, type CliFilterKey } from "../constants/clis";
+import { PERIOD_ITEMS } from "../constants/periods";
+import { useCustomDateRange } from "../hooks/useCustomDateRange";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { PageHeader } from "../ui/PageHeader";
@@ -19,12 +21,12 @@ import { formatUnknownError } from "../utils/errors";
 import {
   formatDurationMs,
   formatInteger,
+  formatPercent,
   formatTokensPerSecond,
   formatUsd,
 } from "../utils/formatters";
 
 type ScopeItem = { key: UsageScope; label: string };
-type PeriodItem = { key: UsagePeriod; label: string };
 
 const SCOPE_ITEMS: ScopeItem[] = [
   { key: "provider", label: "供应商" },
@@ -32,54 +34,9 @@ const SCOPE_ITEMS: ScopeItem[] = [
   { key: "model", label: "模型" },
 ];
 
-const PERIOD_ITEMS: PeriodItem[] = [
-  { key: "daily", label: "今天" },
-  { key: "weekly", label: "近 7 天" },
-  { key: "monthly", label: "本月" },
-  { key: "allTime", label: "全部" },
-  { key: "custom", label: "自定义" },
-];
-
 const FILTER_LABEL_CLASS = "w-16 shrink-0 pt-1.5 text-right text-xs font-medium text-slate-600";
 const FILTER_OPTIONS_CLASS = "min-w-0 flex flex-1 flex-wrap items-center gap-2";
 const FILTER_OPTION_BUTTON_CLASS = "w-24 whitespace-nowrap";
-
-function formatPercent(value: number, digits = 1) {
-  if (!Number.isFinite(value)) return "—";
-  const pct = value * 100;
-  const d = Number.isFinite(digits) ? Math.min(6, Math.max(0, Math.round(digits))) : 0;
-  const factor = 10 ** d;
-  const rounded = Math.round(pct * factor) / factor;
-  return `${rounded.toFixed(d)}%`;
-}
-
-function parseDateParts(date: string) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-  if (!m) return null;
-  const year = Number(m[1]);
-  const month = Number(m[2]);
-  const day = Number(m[3]);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
-  if (month < 1 || month > 12) return null;
-  if (day < 1 || day > 31) return null;
-  return { year, month, day };
-}
-
-function unixSecondsAtLocalStartOfDay(date: string): number | null {
-  const parts = parseDateParts(date);
-  if (!parts) return null;
-  const tsMs = new Date(parts.year, parts.month - 1, parts.day, 0, 0, 0, 0).getTime();
-  if (!Number.isFinite(tsMs)) return null;
-  return Math.floor(tsMs / 1000);
-}
-
-function unixSecondsAtLocalStartOfNextDay(date: string): number | null {
-  const parts = parseDateParts(date);
-  if (!parts) return null;
-  const tsMs = new Date(parts.year, parts.month - 1, parts.day + 1, 0, 0, 0, 0).getTime();
-  if (!Number.isFinite(tsMs)) return null;
-  return Math.floor(tsMs / 1000);
-}
 
 function StatCard({
   title,
@@ -182,14 +139,17 @@ export function UsagePage() {
   const [cliKey, setCliKey] = useState<CliFilterKey>("all");
   const [reloadSeq, setReloadSeq] = useState(0);
 
-  const [customStartDate, setCustomStartDate] = useState<string>("");
-  const [customEndDate, setCustomEndDate] = useState<string>("");
-  const [customApplied, setCustomApplied] = useState<{
-    startDate: string;
-    endDate: string;
-    startTs: number;
-    endTs: number;
-  } | null>(null);
+  const {
+    customStartDate,
+    setCustomStartDate,
+    customEndDate,
+    setCustomEndDate,
+    customApplied,
+    bounds,
+    showCustomForm,
+    applyCustomRange,
+    clearCustomRange,
+  } = useCustomDateRange(period, { onInvalid: (message) => toast(message) });
 
   const [tauriAvailable, setTauriAvailable] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
@@ -197,13 +157,6 @@ export function UsagePage() {
 
   const [summary, setSummary] = useState<UsageSummary | null>(null);
   const [rows, setRows] = useState<UsageLeaderboardRow[]>([]);
-
-  const bounds = useMemo(() => {
-    if (period !== "custom")
-      return { startTs: null as number | null, endTs: null as number | null };
-    if (!customApplied) return { startTs: null as number | null, endTs: null as number | null };
-    return { startTs: customApplied.startTs, endTs: customApplied.endTs };
-  }, [customApplied, period]);
 
   const summaryCards = useMemo(() => {
     if (!summary) return [];
@@ -245,33 +198,6 @@ export function UsagePage() {
       },
     ];
   }, [summary]);
-
-  const showCustomForm = period === "custom";
-
-  function applyCustomRange() {
-    const startTs = unixSecondsAtLocalStartOfDay(customStartDate);
-    const endTs = unixSecondsAtLocalStartOfNextDay(customEndDate);
-    if (startTs == null || endTs == null) {
-      toast("请选择有效的开始/结束日期");
-      return;
-    }
-    if (startTs >= endTs) {
-      toast("日期范围无效：结束日期必须不早于开始日期");
-      return;
-    }
-    setCustomApplied({
-      startDate: customStartDate,
-      endDate: customEndDate,
-      startTs,
-      endTs,
-    });
-  }
-
-  function clearCustomRange() {
-    setCustomApplied(null);
-    setCustomStartDate("");
-    setCustomEndDate("");
-  }
 
   useEffect(() => {
     let cancelled = false;

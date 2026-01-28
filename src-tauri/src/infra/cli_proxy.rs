@@ -2,6 +2,7 @@
 
 use crate::app_paths;
 use crate::codex_paths;
+use crate::shared::fs::{read_optional_file, write_file_atomic, write_file_atomic_if_changed};
 use crate::shared::time::now_unix_seconds;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -67,9 +68,10 @@ fn new_trace_id(prefix: &str) -> String {
 }
 
 fn validate_cli_key(cli_key: &str) -> Result<(), String> {
-    match cli_key {
-        "claude" | "codex" | "gemini" => Ok(()),
-        _ => Err(format!("unsupported cli_key: {cli_key}")),
+    if crate::shared::cli_key::is_supported_cli_key(cli_key) {
+        Ok(())
+    } else {
+        Err(format!("unsupported cli_key: {cli_key}"))
     }
 }
 
@@ -111,48 +113,6 @@ fn cli_proxy_safety_dir(root: &Path) -> PathBuf {
 
 fn cli_proxy_manifest_path(root: &Path) -> PathBuf {
     root.join("manifest.json")
-}
-
-fn read_optional_file(path: &Path) -> Result<Option<Vec<u8>>, String> {
-    if !path.exists() {
-        return Ok(None);
-    }
-    std::fs::read(path)
-        .map(Some)
-        .map_err(|e| format!("failed to read {}: {e}", path.display()))
-}
-
-fn write_file_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("failed to create dir {}: {e}", parent.display()))?;
-    }
-
-    let file_name = path.file_name().and_then(|v| v.to_str()).unwrap_or("file");
-    let tmp_path = path.with_file_name(format!("{file_name}.aio-tmp"));
-
-    std::fs::write(&tmp_path, bytes)
-        .map_err(|e| format!("failed to write temp file {}: {e}", tmp_path.display()))?;
-
-    if path.exists() {
-        let _ = std::fs::remove_file(path);
-    }
-
-    std::fs::rename(&tmp_path, path)
-        .map_err(|e| format!("failed to finalize file {}: {e}", path.display()))?;
-
-    Ok(())
-}
-
-fn write_file_atomic_if_changed(path: &Path, bytes: &[u8]) -> Result<bool, String> {
-    if let Ok(existing) = std::fs::read(path) {
-        if existing == bytes {
-            return Ok(false);
-        }
-    }
-
-    write_file_atomic(path, bytes)?;
-    Ok(true)
 }
 
 fn read_manifest(
@@ -661,7 +621,7 @@ fn apply_proxy_config(
 
 pub fn status_all(app: &tauri::AppHandle) -> Result<Vec<CliProxyStatus>, String> {
     let mut out = Vec::new();
-    for cli_key in ["claude", "codex", "gemini"] {
+    for cli_key in crate::shared::cli_key::SUPPORTED_CLI_KEYS {
         let manifest = read_manifest(app, cli_key)?;
         out.push(CliProxyStatus {
             cli_key: cli_key.to_string(),
@@ -831,7 +791,7 @@ pub fn sync_enabled(
     }
 
     let mut out = Vec::new();
-    for cli_key in ["claude", "codex", "gemini"] {
+    for cli_key in crate::shared::cli_key::SUPPORTED_CLI_KEYS {
         let Some(mut manifest) = read_manifest(app, cli_key)? else {
             continue;
         };
@@ -882,6 +842,42 @@ pub fn sync_enabled(
                     base_origin: Some(base_origin.to_string()),
                 });
             }
+        }
+    }
+    Ok(out)
+}
+
+pub fn restore_enabled_keep_state(app: &tauri::AppHandle) -> Result<Vec<CliProxyResult>, String> {
+    let mut out = Vec::new();
+    for cli_key in crate::shared::cli_key::SUPPORTED_CLI_KEYS {
+        let Some(manifest) = read_manifest(app, cli_key)? else {
+            continue;
+        };
+        if !manifest.enabled {
+            continue;
+        }
+
+        let trace_id = new_trace_id("cli-proxy-restore");
+
+        match restore_from_manifest(app, &manifest) {
+            Ok(()) => out.push(CliProxyResult {
+                trace_id,
+                cli_key: cli_key.to_string(),
+                enabled: true,
+                ok: true,
+                error_code: None,
+                message: "已恢复备份直连配置（保留启用状态）".to_string(),
+                base_origin: manifest.base_origin.clone(),
+            }),
+            Err(err) => out.push(CliProxyResult {
+                trace_id,
+                cli_key: cli_key.to_string(),
+                enabled: true,
+                ok: false,
+                error_code: Some("CLI_PROXY_RESTORE_FAILED".to_string()),
+                message: err,
+                base_origin: manifest.base_origin.clone(),
+            }),
         }
     }
     Ok(out)

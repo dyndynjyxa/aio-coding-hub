@@ -43,7 +43,7 @@ pub(super) async fn handle_success_event_stream(
     let provider_base_url_base = provider_base_url_base.to_string();
 
     let AttemptCtx {
-        attempt_index,
+        attempt_index: _,
         retry_index,
         attempt_started_ms,
         attempt_started,
@@ -138,33 +138,12 @@ pub(super) async fn handle_success_event_stream(
                     circuit_failure_threshold: Some(circuit_before.failure_threshold),
                 });
 
-                let attempt_event = GatewayAttemptEvent {
-                    trace_id: trace_id.clone(),
-                    cli_key: cli_key.clone(),
-                    method: method_hint.clone(),
-                    path: forwarded_path.clone(),
-                    query: query.clone(),
-                    attempt_index,
-                    provider_id,
-                    session_reuse,
-                    provider_name: provider_name_base.clone(),
-                    base_url: provider_base_url_base.clone(),
+                emit_attempt_event_and_log_with_circuit_before(
+                    ctx,
+                    provider_ctx,
+                    attempt_ctx,
                     outcome,
-                    status: Some(status.as_u16()),
-                    attempt_started_ms,
-                    attempt_duration_ms: attempt_started.elapsed().as_millis(),
-                    circuit_state_before: Some(circuit_before.state.as_str()),
-                    circuit_state_after: None,
-                    circuit_failure_count: Some(circuit_before.failure_count),
-                    circuit_failure_threshold: Some(circuit_before.failure_threshold),
-                };
-                emit_attempt_event(&state.app, attempt_event.clone());
-                enqueue_attempt_log_with_backpressure(
-                    &state.app,
-                    &state.db,
-                    &state.attempt_log_tx,
-                    &attempt_event,
-                    created_at,
+                    Some(status.as_u16()),
                 )
                 .await;
 
@@ -235,33 +214,12 @@ pub(super) async fn handle_success_event_stream(
                     circuit_failure_threshold: Some(circuit_before.failure_threshold),
                 });
 
-                let attempt_event = GatewayAttemptEvent {
-                    trace_id: trace_id.clone(),
-                    cli_key: cli_key.clone(),
-                    method: method_hint.clone(),
-                    path: forwarded_path.clone(),
-                    query: query.clone(),
-                    attempt_index,
-                    provider_id,
-                    session_reuse,
-                    provider_name: provider_name_base.clone(),
-                    base_url: provider_base_url_base.clone(),
+                emit_attempt_event_and_log_with_circuit_before(
+                    ctx,
+                    provider_ctx,
+                    attempt_ctx,
                     outcome,
-                    status: Some(status.as_u16()),
-                    attempt_started_ms,
-                    attempt_duration_ms: attempt_started.elapsed().as_millis(),
-                    circuit_state_before: Some(circuit_before.state.as_str()),
-                    circuit_state_after: None,
-                    circuit_failure_count: Some(circuit_before.failure_count),
-                    circuit_failure_threshold: Some(circuit_before.failure_threshold),
-                };
-                emit_attempt_event(&state.app, attempt_event.clone());
-                enqueue_attempt_log_with_backpressure(
-                    &state.app,
-                    &state.db,
-                    &state.attempt_log_tx,
-                    &attempt_event,
-                    created_at,
+                    Some(status.as_u16()),
                 )
                 .await;
 
@@ -339,33 +297,12 @@ pub(super) async fn handle_success_event_stream(
                 circuit_failure_threshold: Some(circuit_before.failure_threshold),
             });
 
-            let attempt_event = GatewayAttemptEvent {
-                trace_id: trace_id.clone(),
-                cli_key: cli_key.clone(),
-                method: method_hint.clone(),
-                path: forwarded_path.clone(),
-                query: query.clone(),
-                attempt_index,
-                provider_id,
-                session_reuse,
-                provider_name: provider_name_base.clone(),
-                base_url: provider_base_url_base.clone(),
+            emit_attempt_event_and_log_with_circuit_before(
+                ctx,
+                provider_ctx,
+                attempt_ctx,
                 outcome,
-                status: Some(status.as_u16()),
-                attempt_started_ms,
-                attempt_duration_ms: attempt_started.elapsed().as_millis(),
-                circuit_state_before: Some(circuit_before.state.as_str()),
-                circuit_state_after: None,
-                circuit_failure_count: Some(circuit_before.failure_count),
-                circuit_failure_threshold: Some(circuit_before.failure_threshold),
-            };
-            emit_attempt_event(&state.app, attempt_event.clone());
-            enqueue_attempt_log_with_backpressure(
-                &state.app,
-                &state.db,
-                &state.attempt_log_tx,
-                &attempt_event,
-                created_at,
+                Some(status.as_u16()),
             )
             .await;
 
@@ -421,33 +358,12 @@ pub(super) async fn handle_success_event_stream(
             circuit_failure_threshold: Some(circuit_before.failure_threshold),
         });
 
-        let attempt_event = GatewayAttemptEvent {
-            trace_id: trace_id.clone(),
-            cli_key: cli_key.clone(),
-            method: method_hint.clone(),
-            path: forwarded_path.clone(),
-            query: query.clone(),
-            attempt_index,
-            provider_id,
-            session_reuse,
-            provider_name: provider_name_base.clone(),
-            base_url: provider_base_url_base.clone(),
+        emit_attempt_event_and_log_with_circuit_before(
+            ctx,
+            provider_ctx,
+            attempt_ctx,
             outcome,
-            status: Some(status.as_u16()),
-            attempt_started_ms,
-            attempt_duration_ms: attempt_started.elapsed().as_millis(),
-            circuit_state_before: Some(circuit_before.state.as_str()),
-            circuit_state_after: None,
-            circuit_failure_count: Some(circuit_before.failure_count),
-            circuit_failure_threshold: Some(circuit_before.failure_threshold),
-        };
-        emit_attempt_event(&state.app, attempt_event.clone());
-        enqueue_attempt_log_with_backpressure(
-            &state.app,
-            &state.db,
-            &state.attempt_log_tx,
-            &attempt_event,
-            created_at,
+            Some(status.as_u16()),
         )
         .await;
 

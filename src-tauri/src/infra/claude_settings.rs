@@ -1,5 +1,6 @@
 //! Usage: Read / patch Claude Code global `settings.json` (~/.claude/settings.json).
 
+use crate::shared::fs::{read_optional_file, write_file_atomic_if_changed};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tauri::Manager;
@@ -114,48 +115,6 @@ fn is_symlink(path: &Path) -> Result<bool, String> {
     std::fs::symlink_metadata(path)
         .map(|m| m.file_type().is_symlink())
         .map_err(|e| format!("failed to read metadata {}: {e}", path.display()))
-}
-
-fn read_optional_file(path: &Path) -> Result<Option<Vec<u8>>, String> {
-    if !path.exists() {
-        return Ok(None);
-    }
-    std::fs::read(path)
-        .map(Some)
-        .map_err(|e| format!("failed to read {}: {e}", path.display()))
-}
-
-fn write_file_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("failed to create dir {}: {e}", parent.display()))?;
-    }
-
-    let file_name = path.file_name().and_then(|v| v.to_str()).unwrap_or("file");
-    let tmp_path = path.with_file_name(format!("{file_name}.aio-tmp"));
-
-    std::fs::write(&tmp_path, bytes)
-        .map_err(|e| format!("failed to write temp file {}: {e}", tmp_path.display()))?;
-
-    if path.exists() {
-        let _ = std::fs::remove_file(path);
-    }
-
-    std::fs::rename(&tmp_path, path)
-        .map_err(|e| format!("failed to finalize file {}: {e}", path.display()))?;
-
-    Ok(())
-}
-
-fn write_file_atomic_if_changed(path: &Path, bytes: &[u8]) -> Result<bool, String> {
-    if let Ok(existing) = std::fs::read(path) {
-        if existing == bytes {
-            return Ok(false);
-        }
-    }
-
-    write_file_atomic(path, bytes)?;
-    Ok(true)
 }
 
 fn json_root_from_bytes(bytes: Option<Vec<u8>>) -> serde_json::Value {

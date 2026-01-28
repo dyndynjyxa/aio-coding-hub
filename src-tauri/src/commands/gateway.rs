@@ -207,44 +207,34 @@ pub(crate) async fn gateway_stop(
     app: tauri::AppHandle,
     state: tauri::State<'_, GatewayState>,
 ) -> Result<gateway::GatewayStatus, String> {
-    let running = {
-        let mut manager = state.0.lock_or_recover();
-        manager.take_running()
-    };
-
-    if let Some((shutdown, mut task, mut log_task, mut attempt_log_task, mut circuit_task)) =
-        running
-    {
-        let _ = shutdown.send(());
-
-        let stop_timeout = std::time::Duration::from_secs(3);
-        let join_all = async {
-            let _ = tokio::join!(
-                &mut task,
-                &mut log_task,
-                &mut attempt_log_task,
-                &mut circuit_task
-            );
-        };
-
-        if tokio::time::timeout(stop_timeout, join_all).await.is_err() {
-            tracing::warn!("网关停止超时，正在中止服务器任务");
-            task.abort();
-
-            let abort_grace = std::time::Duration::from_secs(1);
-            let _ = tokio::time::timeout(abort_grace, async {
-                let _ = tokio::join!(
-                    &mut task,
-                    &mut log_task,
-                    &mut attempt_log_task,
-                    &mut circuit_task
-                );
-            })
-            .await;
-        }
-    }
+    crate::app::cleanup::stop_gateway_best_effort(&app).await;
 
     let status = gateway_status(state);
     let _ = app.emit("gateway:status", status.clone());
+
+    // Best-effort: if any CLI proxy is enabled, restore its live config when the gateway is stopped,
+    // so CLI tools won't keep pointing at a dead localhost gateway. Keep `enabled` state for auto re-takeover.
+    let app_for_restore = app.clone();
+    match blocking::run("gateway_stop_cli_proxy_restore_keep_state", move || {
+        cli_proxy::restore_enabled_keep_state(&app_for_restore)
+    })
+    .await
+    {
+        Ok(results) => {
+            for result in results {
+                if !result.ok {
+                    tracing::warn!(
+                        cli_key = %result.cli_key,
+                        trace_id = %result.trace_id,
+                        error_code = %result.error_code.unwrap_or_default(),
+                        "网关停止后恢复 cli_proxy 直连配置失败: {}",
+                        result.message
+                    );
+                }
+            }
+        }
+        Err(err) => tracing::warn!("网关停止后恢复 cli_proxy 直连配置任务失败: {}", err),
+    }
+
     Ok(status)
 }

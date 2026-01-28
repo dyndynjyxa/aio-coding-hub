@@ -2,6 +2,10 @@
 
 use crate::app_paths;
 use crate::codex_paths;
+use crate::shared::fs::{
+    copy_dir_recursive_if_missing, copy_file_if_missing, read_optional_file, write_file_atomic,
+    write_file_atomic_if_changed,
+};
 use crate::shared::time::now_unix_seconds;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -31,10 +35,7 @@ struct PromptSyncManifest {
 }
 
 fn validate_cli_key(cli_key: &str) -> Result<(), String> {
-    match cli_key {
-        "claude" | "codex" | "gemini" => Ok(()),
-        _ => Err(format!("SEC_INVALID_INPUT: unknown cli_key={cli_key}")),
-    }
+    crate::shared::cli_key::validate_cli_key(cli_key)
 }
 
 fn home_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -81,54 +82,6 @@ fn legacy_prompt_sync_roots(app: &tauri::AppHandle, cli_key: &str) -> Result<Vec
         .collect())
 }
 
-fn copy_dir_recursive_if_missing(src: &Path, dst: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(dst).map_err(|e| format!("failed to create {}: {e}", dst.display()))?;
-
-    let entries =
-        std::fs::read_dir(src).map_err(|e| format!("failed to read dir {}: {e}", src.display()))?;
-    for entry in entries {
-        let entry =
-            entry.map_err(|e| format!("failed to read dir entry {}: {e}", src.display()))?;
-        let path = entry.path();
-        let file_name = entry.file_name();
-        let dst_path = dst.join(&file_name);
-
-        if path.is_dir() {
-            copy_dir_recursive_if_missing(&path, &dst_path)?;
-            continue;
-        }
-
-        if dst_path.exists() {
-            continue;
-        }
-
-        std::fs::copy(&path, &dst_path).map_err(|e| {
-            format!(
-                "failed to copy {} -> {}: {e}",
-                path.display(),
-                dst_path.display()
-            )
-        })?;
-    }
-
-    Ok(())
-}
-
-fn copy_file_if_missing(src: &Path, dst: &Path) -> Result<bool, String> {
-    if dst.exists() {
-        return Ok(false);
-    }
-
-    if let Some(parent) = dst.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
-    }
-
-    std::fs::copy(src, dst)
-        .map_err(|e| format!("failed to copy {} -> {}: {e}", src.display(), dst.display()))?;
-    Ok(true)
-}
-
 fn try_migrate_legacy_prompt_sync_dir(
     app: &tauri::AppHandle,
     cli_key: &str,
@@ -160,48 +113,6 @@ fn try_migrate_legacy_prompt_sync_dir(
     }
 
     Ok(false)
-}
-
-fn read_optional_file(path: &Path) -> Result<Option<Vec<u8>>, String> {
-    if !path.exists() {
-        return Ok(None);
-    }
-    std::fs::read(path)
-        .map(Some)
-        .map_err(|e| format!("failed to read {}: {e}", path.display()))
-}
-
-fn write_file_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("failed to create dir {}: {e}", parent.display()))?;
-    }
-
-    let file_name = path.file_name().and_then(|v| v.to_str()).unwrap_or("file");
-    let tmp_path = path.with_file_name(format!("{file_name}.aio-tmp"));
-
-    std::fs::write(&tmp_path, bytes)
-        .map_err(|e| format!("failed to write temp file {}: {e}", tmp_path.display()))?;
-
-    // Windows rename requires target not to exist.
-    if path.exists() {
-        let _ = std::fs::remove_file(path);
-    }
-
-    std::fs::rename(&tmp_path, path)
-        .map_err(|e| format!("failed to finalize file {}: {e}", path.display()))?;
-
-    Ok(())
-}
-
-fn write_file_atomic_if_changed(path: &Path, bytes: &[u8]) -> Result<bool, String> {
-    if let Ok(existing) = std::fs::read(path) {
-        if existing == bytes {
-            return Ok(false);
-        }
-    }
-    write_file_atomic(path, bytes)?;
-    Ok(true)
 }
 
 pub fn read_target_bytes(app: &tauri::AppHandle, cli_key: &str) -> Result<Option<Vec<u8>>, String> {

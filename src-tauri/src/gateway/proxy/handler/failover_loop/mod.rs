@@ -2,6 +2,7 @@
 
 mod claude_model_mapping;
 mod context;
+mod event_helpers;
 mod finalize;
 mod provider_gate;
 mod send;
@@ -12,10 +13,12 @@ mod thinking_signature_rectifier_400;
 mod upstream_error;
 
 pub(super) use context::FailoverLoopInput;
-
-use super::super::logging::{
-    enqueue_attempt_log_with_backpressure, enqueue_request_log_with_backpressure,
+use event_helpers::{
+    emit_attempt_event_and_log, emit_attempt_event_and_log_with_circuit_before,
+    AttemptCircuitFields,
 };
+
+use super::super::logging::enqueue_request_log_with_backpressure;
 use super::super::{
     errors::{classify_upstream_status, error_response},
     failover::{retry_backoff_delay, select_provider_base_url_for_request, FailoverDecision},
@@ -262,33 +265,12 @@ pub(super) async fn run(input: FailoverLoopInput) -> Response {
                         circuit_failure_threshold: Some(circuit_before.failure_threshold),
                     });
 
-                    let attempt_event = GatewayAttemptEvent {
-                        trace_id: trace_id.clone(),
-                        cli_key: cli_key.clone(),
-                        method: method_hint.clone(),
-                        path: forwarded_path.clone(),
-                        query: query.clone(),
-                        attempt_index,
-                        provider_id,
-                        session_reuse,
-                        provider_name: provider_name_base.clone(),
-                        base_url: provider_base_url_base.clone(),
+                    emit_attempt_event_and_log_with_circuit_before(
+                        ctx,
+                        provider_ctx,
+                        attempt_ctx,
                         outcome,
-                        status: None,
-                        attempt_started_ms,
-                        attempt_duration_ms: attempt_started.elapsed().as_millis(),
-                        circuit_state_before: Some(circuit_before.state.as_str()),
-                        circuit_state_after: None,
-                        circuit_failure_count: Some(circuit_before.failure_count),
-                        circuit_failure_threshold: Some(circuit_before.failure_threshold),
-                    };
-                    emit_attempt_event(&state.app, attempt_event.clone());
-                    enqueue_attempt_log_with_backpressure(
-                        &state.app,
-                        &state.db,
-                        &state.attempt_log_tx,
-                        &attempt_event,
-                        created_at,
+                        None,
                     )
                     .await;
 

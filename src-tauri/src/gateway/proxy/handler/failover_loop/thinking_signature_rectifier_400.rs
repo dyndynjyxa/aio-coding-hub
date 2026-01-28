@@ -43,7 +43,7 @@ pub(super) async fn handle_thinking_signature_rectifier_400(
     let provider_base_url_base = provider_base_url_base.to_string();
 
     let AttemptCtx {
-        attempt_index,
+        attempt_index: _,
         retry_index,
         attempt_started_ms,
         attempt_started,
@@ -203,33 +203,18 @@ pub(super) async fn handle_thinking_signature_rectifier_400(
             circuit_failure_threshold,
         });
 
-        let attempt_event = GatewayAttemptEvent {
-            trace_id: trace_id.clone(),
-            cli_key: cli_key.clone(),
-            method: method_hint.clone(),
-            path: forwarded_path.clone(),
-            query: query.clone(),
-            attempt_index,
-            provider_id,
-            session_reuse,
-            provider_name: provider_name_base.clone(),
-            base_url: provider_base_url_base.clone(),
+        emit_attempt_event_and_log(
+            ctx,
+            provider_ctx,
+            attempt_ctx,
             outcome,
-            status: Some(status.as_u16()),
-            attempt_started_ms,
-            attempt_duration_ms: attempt_started.elapsed().as_millis(),
-            circuit_state_before,
-            circuit_state_after,
-            circuit_failure_count,
-            circuit_failure_threshold,
-        };
-        emit_attempt_event(&state.app, attempt_event.clone());
-        enqueue_attempt_log_with_backpressure(
-            &state.app,
-            &state.db,
-            &state.attempt_log_tx,
-            &attempt_event,
-            created_at,
+            Some(status.as_u16()),
+            AttemptCircuitFields {
+                state_before: circuit_state_before,
+                state_after: circuit_state_after,
+                failure_count: circuit_failure_count,
+                failure_threshold: circuit_failure_threshold,
+            },
         )
         .await;
 

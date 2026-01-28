@@ -55,10 +55,7 @@ pub(super) fn parse_period_v2(input: &str) -> Result<UsagePeriodV2, String> {
 }
 
 fn validate_cli_key(cli_key: &str) -> Result<(), String> {
-    match cli_key {
-        "claude" | "codex" | "gemini" => Ok(()),
-        _ => Err(format!("SEC_INVALID_INPUT: unknown cli_key={cli_key}")),
-    }
+    crate::shared::cli_key::validate_cli_key(cli_key)
 }
 
 pub(super) fn normalize_cli_filter(cli_key: Option<&str>) -> Result<Option<&str>, String> {
