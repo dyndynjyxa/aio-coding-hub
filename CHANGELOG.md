@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.16.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.15.0...aio-coding-hub-v0.16.0) (2026-01-29)
+
+
+### Features
+
+* **cache-anomaly-monitor:** implement cache anomaly monitoring feature ([59d69d1](https://github.com/dyndynjyxa/aio-coding-hub/commit/59d69d1528d888a84d71038873321f3273d4ded1))
+* **cli-manager:** add collaboration features to CodexTab ([f6ab4e4](https://github.com/dyndynjyxa/aio-coding-hub/commit/f6ab4e48ebdc5cdafa132e1513c25be01964b81d))
+* **cli-manager:** add experimental MCP CLI features and max output tokens management ([84ac464](https://github.com/dyndynjyxa/aio-coding-hub/commit/84ac4645e7f4eb1e6235b85d7ca63f16b04c8ee6))
+* **cli-manager:** enhance WSL settings and improve CLI manager performance ([be50456](https://github.com/dyndynjyxa/aio-coding-hub/commit/be50456432ef1f00cf1567c664a168779a23fc58))
+* **cli-manager:** update GeneralTab and cache anomaly monitoring logic ([c84a1eb](https://github.com/dyndynjyxa/aio-coding-hub/commit/c84a1eb6c312c938ba067551e7b3303bba761edf))
+* **date-range:** refactor custom date range handling in HomeCostPanel and UsagePage ([95b1ad1](https://github.com/dyndynjyxa/aio-coding-hub/commit/95b1ad11b16a0f3e9b187b4883ef85a367d712e0))
+* **failover-loop:** refactor context management for improved clarity and usability ([b96df01](https://github.com/dyndynjyxa/aio-coding-hub/commit/b96df013317c77ca610bb640a43b2d60058e6847))
+
 ## [0.15.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.14.0...aio-coding-hub-v0.15.0) (2026-01-27)
 
 
