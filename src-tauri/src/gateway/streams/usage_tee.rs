@@ -221,9 +221,9 @@ where
                 }));
             }
 
-            // 对齐 claude-code-hub：client abort 不等价于 request failed。
-            // 这里按“已开始处理但客户端提前断开”收敛，不写入 GW_STREAM_ABORTED。
-            tee.finalize(None);
+            // 对齐 claude-code-hub：client abort 记为 499（不计入熔断/统计）。
+            // 这里使用 GW_STREAM_ABORTED 标记，并在 request_end 层做 status override + excluded_from_stats。
+            tee.finalize(Some("GW_STREAM_ABORTED"));
         }
     });
 

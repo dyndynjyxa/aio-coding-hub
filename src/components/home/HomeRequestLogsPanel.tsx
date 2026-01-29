@@ -3,11 +3,13 @@
 // - Selection state is controlled by parent; the detail dialog is rendered outside the grid layout.
 
 import { useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { cliBadgeTone, cliShortLabel } from "../../constants/clis";
 import type { RequestLogSummary } from "../../services/requestLogs";
 import type { TraceSession } from "../../services/traceStore";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
+import { Tooltip } from "../../ui/Tooltip";
 import { cn } from "../../utils/cn";
 import {
   computeOutputTokensPerSecond,
@@ -24,11 +26,22 @@ import {
   getErrorCodeLabel,
   SessionReuseBadge,
 } from "./HomeLogShared";
-import { Clock, CheckCircle2, XCircle, Server, Terminal, Cpu, RefreshCw } from "lucide-react";
+import {
+  Clock,
+  CheckCircle2,
+  XCircle,
+  Server,
+  Terminal,
+  Cpu,
+  RefreshCw,
+  ArrowUpRight,
+} from "lucide-react";
 import { RealtimeTraceCards } from "./RealtimeTraceCards";
 
 export type HomeRequestLogsPanelProps = {
   showCustomTooltip: boolean;
+  title?: string;
+  showOpenLogsPageButton?: boolean;
 
   traces: TraceSession[];
 
@@ -44,6 +57,8 @@ export type HomeRequestLogsPanelProps = {
 
 export function HomeRequestLogsPanel({
   showCustomTooltip,
+  title,
+  showOpenLogsPageButton = true,
   traces,
   requestLogs,
   requestLogsLoading,
@@ -53,6 +68,7 @@ export function HomeRequestLogsPanel({
   selectedLogId,
   onSelectLogId,
 }: HomeRequestLogsPanelProps) {
+  const navigate = useNavigate();
   const realtimeTraceCandidates = useMemo(() => {
     const nowMs = Date.now();
     return traces
@@ -69,7 +85,7 @@ export function HomeRequestLogsPanel({
     <Card padding="sm" className="flex flex-col gap-3 lg:col-span-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="text-sm font-semibold">使用记录（最近 50 条）</div>
+          <div className="text-sm font-semibold">{title ?? "使用记录（最近 50 条）"}</div>
         </div>
 
         <div className="flex items-center gap-2">
@@ -82,6 +98,19 @@ export function HomeRequestLogsPanel({
                   ? `更新中… · 共 ${requestLogs.length} 条`
                   : `共 ${requestLogs.length} 条`}
           </div>
+          {showOpenLogsPageButton && (
+            <Button
+              onClick={() => navigate("/logs")}
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-slate-500 hover:text-indigo-600"
+              disabled={requestLogsAvailable === false}
+              title="打开日志页"
+            >
+              <ArrowUpRight className="h-4 w-4 mr-1.5" />
+              日志
+            </Button>
+          )}
           <Button
             onClick={onRefreshRequestLogs}
             variant="ghost"
@@ -129,25 +158,24 @@ export function HomeRequestLogsPanel({
                   ? "未知"
                   : log.final_provider_name;
 
-              const routeLabel = (() => {
+              const providerChainText = (() => {
                 const hops = log.route ?? [];
+                if (hops.length === 0) return null;
                 const parts = hops.map((hop, idx) => {
                   const raw = hop.provider_name?.trim();
                   const name = !raw || raw === "Unknown" ? "未知" : raw;
-                  const isLast = idx === hops.length - 1;
-                  if (hop.ok) {
-                    return isLast ? name : `${name}[✅]`;
-                  }
-                  return `${name}[❌]`;
+                  const status =
+                    hop.status ?? (idx === hops.length - 1 ? log.status : null) ?? null;
+                  const statusText = status == null ? "—" : String(status);
+                  if (hop.ok) return `${name}(${statusText})`;
+                  const code = hop.error_code ?? null;
+                  const label = code ? getErrorCodeLabel(code) : "失败";
+                  return `${name}(${statusText} ${label})`;
                 });
-                if (parts.length === 0) return null;
-                const shouldShow =
-                  parts.length > 1 ||
-                  parts.some((part) => part.includes("[❌]") || part.includes("[✅]"));
-                if (!shouldShow) return null;
-                return `(${parts.join("->")})`;
+                return parts.join("→");
               })();
-              const providerTitle = routeLabel ? `${providerText} ${routeLabel}` : providerText;
+
+              const providerTitle = providerText;
 
               const modelText =
                 log.requested_model && log.requested_model.trim()
@@ -225,7 +253,7 @@ export function HomeRequestLogsPanel({
                           )}
                           title={statusBadge.title}
                         >
-                          {statusBadge.isErrorOverride || log.status! >= 400 ? (
+                          {statusBadge.isError ? (
                             <XCircle className="h-3 w-3" />
                           ) : (
                             <CheckCircle2 className="h-3 w-3" />
@@ -258,7 +286,7 @@ export function HomeRequestLogsPanel({
                           <SessionReuseBadge showCustomTooltip={showCustomTooltip} />
                         )}
 
-                        {log.error_code && !statusBadge.isErrorOverride && (
+                        {log.error_code && (
                           <span className="rounded bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-700 shrink-0">
                             {getErrorCodeLabel(log.error_code)}
                           </span>
@@ -284,11 +312,34 @@ export function HomeRequestLogsPanel({
                             </span>
                           </div>
                           <div className="flex items-center h-4">
-                            {showCostMultiplier ? (
-                              <span className="inline-flex items-center rounded bg-indigo-50 px-1 text-[10px] font-medium text-indigo-600">
-                                x{costMultiplier.toFixed(2)}
-                              </span>
-                            ) : null}
+                            <div className="flex items-center gap-1 min-w-0 w-full">
+                              {providerChainText ? (
+                                showCustomTooltip ? (
+                                  <Tooltip
+                                    content={providerChainText}
+                                    contentClassName="max-w-[520px] break-words font-mono"
+                                    placement="top"
+                                  >
+                                    <span className="text-[10px] text-slate-400 hover:text-indigo-600 cursor-help">
+                                      链路
+                                    </span>
+                                  </Tooltip>
+                                ) : (
+                                  <span
+                                    className="text-[10px] text-slate-400 cursor-help"
+                                    title={providerChainText}
+                                  >
+                                    链路
+                                  </span>
+                                )
+                              ) : null}
+
+                              {showCostMultiplier ? (
+                                <span className="inline-flex items-center rounded bg-indigo-50 px-1 text-[10px] font-medium text-indigo-600 shrink-0">
+                                  x{costMultiplier.toFixed(2)}
+                                </span>
+                              ) : null}
+                            </div>
                           </div>
                         </div>
 

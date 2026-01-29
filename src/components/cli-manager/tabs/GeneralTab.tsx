@@ -1,11 +1,13 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { toast } from "sonner";
+import { useNavigate } from "react-router-dom";
 import {
   setCacheAnomalyMonitorEnabled,
   useCacheAnomalyMonitorEnabled,
 } from "../../../services/cacheAnomalyMonitor";
 import type { AppSettings } from "../../../services/settings";
 import type { GatewayRectifierSettingsPatch } from "../../../services/settingsGatewayRectifier";
+import { Button } from "../../../ui/Button";
 import { Card } from "../../../ui/Card";
 import { Input } from "../../../ui/Input";
 import { SettingsRow } from "../../../ui/SettingsRow";
@@ -84,6 +86,7 @@ export function CliManagerGeneralTab({
   blurOnEnter,
 }: CliManagerGeneralTabProps) {
   const cacheMonitorEnabled = useCacheAnomalyMonitorEnabled();
+  const navigate = useNavigate();
 
   return (
     <div className="space-y-6">
@@ -241,6 +244,15 @@ export function CliManagerGeneralTab({
                   且成功请求≥30； 最近 token≥3000 且成功请求≥10；基线命中率≥5%；创建占比≥90% 或
                   创建/读取≥3。* token 不是请求数
                 </p>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                <span>
+                  提示：告警会以 <span className="font-mono">WARN</span>{" "}
+                  写入「控制台」页（无需开启调试日志）。
+                </span>
+                <Button size="sm" variant="secondary" onClick={() => navigate("/console")}>
+                  打开控制台
+                </Button>
               </div>
             </div>
             <div className="pt-1">

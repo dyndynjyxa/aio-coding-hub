@@ -6,6 +6,7 @@ import { AppLayout } from "./layout/AppLayout";
 import { CliManagerPage } from "./pages/CliManagerPage";
 import { ConsolePage } from "./pages/ConsolePage";
 import { HomePage } from "./pages/HomePage";
+import { LogsPage } from "./pages/LogsPage";
 import { McpPage } from "./pages/McpPage";
 import { PromptsPage } from "./pages/PromptsPage";
 import { ProvidersPage } from "./pages/ProvidersPage";
@@ -91,6 +92,7 @@ export default function App() {
             <Route path="/skills/market" element={<SkillsMarketPage />} />
             <Route path="/usage" element={<UsagePage />} />
             <Route path="/console" element={<ConsolePage />} />
+            <Route path="/logs" element={<LogsPage />} />
             <Route path="/cli-manager" element={<CliManagerPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />

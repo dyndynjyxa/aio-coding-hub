@@ -44,8 +44,6 @@ export type ClaudeSettingsState = {
   terminal_progress_bar_enabled: boolean | null;
   respect_gitignore: boolean | null;
 
-  disable_all_hooks: boolean | null;
-
   permissions_allow: string[];
   permissions_ask: string[];
   permissions_deny: string[];
@@ -59,11 +57,13 @@ export type ClaudeSettingsState = {
   env_claude_bash_no_login: boolean;
   env_claude_code_attribution_header_disabled: boolean;
   env_claude_code_blocking_limit_override: number | null;
-  env_claude_autocompact_pct_override: number | null;
   env_claude_code_max_output_tokens: number | null;
   env_enable_experimental_mcp_cli: boolean;
   env_enable_tool_search: boolean;
   env_max_mcp_output_tokens: number | null;
+  env_claude_code_disable_nonessential_traffic: boolean;
+  env_claude_code_proxy_resolves_hosts: boolean;
+  env_claude_code_skip_prompt_history: boolean;
 };
 
 export type ClaudeSettingsPatch = Partial<{
@@ -76,8 +76,6 @@ export type ClaudeSettingsPatch = Partial<{
   spinner_tips_enabled: boolean;
   terminal_progress_bar_enabled: boolean;
   respect_gitignore: boolean;
-
-  disable_all_hooks: boolean;
 
   permissions_allow: string[];
   permissions_ask: string[];
@@ -92,11 +90,13 @@ export type ClaudeSettingsPatch = Partial<{
   env_claude_bash_no_login: boolean;
   env_claude_code_attribution_header_disabled: boolean;
   env_claude_code_blocking_limit_override: number;
-  env_claude_autocompact_pct_override: number;
   env_claude_code_max_output_tokens: number;
   env_enable_experimental_mcp_cli: boolean;
   env_enable_tool_search: boolean;
   env_max_mcp_output_tokens: number;
+  env_claude_code_disable_nonessential_traffic: boolean;
+  env_claude_code_proxy_resolves_hosts: boolean;
+  env_claude_code_skip_prompt_history: boolean;
 }>;
 
 export type CodexConfigState = {
@@ -109,19 +109,8 @@ export type CodexConfigState = {
   approval_policy: string | null;
   sandbox_mode: string | null;
   model_reasoning_effort: string | null;
-  file_opener: string | null;
-  hide_agent_reasoning: boolean | null;
-  show_raw_agent_reasoning: boolean | null;
-
-  history_persistence: string | null;
-  history_max_bytes: number | null;
 
   sandbox_workspace_write_network_access: boolean | null;
-
-  tui_animations: boolean | null;
-  tui_alternate_screen: string | null;
-  tui_show_tooltips: boolean | null;
-  tui_scroll_invert: boolean | null;
 
   features_unified_exec: boolean | null;
   features_shell_snapshot: boolean | null;
@@ -129,12 +118,8 @@ export type CodexConfigState = {
   features_web_search_request: boolean | null;
   features_shell_tool: boolean | null;
   features_exec_policy: boolean | null;
-  features_experimental_windows_sandbox: boolean | null;
-  features_elevated_windows_sandbox: boolean | null;
   features_remote_compaction: boolean | null;
   features_remote_models: boolean | null;
-  features_powershell_utf8: boolean | null;
-  features_child_agents_md: boolean | null;
   features_collab: boolean | null;
   features_collaboration_modes: boolean | null;
 };
@@ -144,19 +129,8 @@ export type CodexConfigPatch = Partial<{
   approval_policy: string;
   sandbox_mode: string;
   model_reasoning_effort: string;
-  file_opener: string;
-  hide_agent_reasoning: boolean;
-  show_raw_agent_reasoning: boolean;
-
-  history_persistence: string;
-  history_max_bytes: number;
 
   sandbox_workspace_write_network_access: boolean;
-
-  tui_animations: boolean;
-  tui_alternate_screen: string;
-  tui_show_tooltips: boolean;
-  tui_scroll_invert: boolean;
 
   features_unified_exec: boolean;
   features_shell_snapshot: boolean;
@@ -164,12 +138,8 @@ export type CodexConfigPatch = Partial<{
   features_web_search_request: boolean;
   features_shell_tool: boolean;
   features_exec_policy: boolean;
-  features_experimental_windows_sandbox: boolean;
-  features_elevated_windows_sandbox: boolean;
   features_remote_compaction: boolean;
   features_remote_models: boolean;
-  features_powershell_utf8: boolean;
-  features_child_agents_md: boolean;
   features_collab: boolean;
   features_collaboration_modes: boolean;
 }>;

@@ -255,7 +255,6 @@ export function CliManagerClaudeTab({
   const [mcpTimeoutMsText, setMcpTimeoutMsText] = useState("");
   const [mcpToolTimeoutMsText, setMcpToolTimeoutMsText] = useState("");
   const [blockingLimitOverrideText, setBlockingLimitOverrideText] = useState("");
-  const [autocompactPctOverrideText, setAutocompactPctOverrideText] = useState("");
   const [maxOutputTokensText, setMaxOutputTokensText] = useState("");
   const [maxMcpOutputTokensText, setMaxMcpOutputTokensText] = useState("");
   const [permissionsAllowText, setPermissionsAllowText] = useState("");
@@ -279,11 +278,6 @@ export function CliManagerClaudeTab({
       claudeSettings.env_claude_code_blocking_limit_override == null
         ? ""
         : String(claudeSettings.env_claude_code_blocking_limit_override)
-    );
-    setAutocompactPctOverrideText(
-      claudeSettings.env_claude_autocompact_pct_override == null
-        ? ""
-        : String(claudeSettings.env_claude_autocompact_pct_override)
     );
     setMaxOutputTokensText(
       claudeSettings.env_claude_code_max_output_tokens == null
@@ -334,15 +328,6 @@ export function CliManagerClaudeTab({
       claudeSettings.env_claude_code_blocking_limit_override == null
         ? ""
         : String(claudeSettings.env_claude_code_blocking_limit_override)
-    );
-  }
-
-  function revertAutocompactPctOverrideInput() {
-    if (!claudeSettings) return;
-    setAutocompactPctOverrideText(
-      claudeSettings.env_claude_autocompact_pct_override == null
-        ? ""
-        : String(claudeSettings.env_claude_autocompact_pct_override)
     );
   }
 
@@ -616,27 +601,6 @@ export function CliManagerClaudeTab({
 
             <div className="rounded-lg border border-slate-200 bg-white p-5">
               <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2 mb-3">
-                <Settings className="h-4 w-4 text-slate-400" />
-                Hooks
-              </h3>
-              <div className="divide-y divide-slate-100">
-                <SettingItem
-                  label="禁用全部 hooks (disableAllHooks)"
-                  subtitle="开启会禁用所有 hooks；关闭会删除该项（不写 false）。"
-                >
-                  <Switch
-                    checked={boolOrDefault(claudeSettings.disable_all_hooks, false)}
-                    onCheckedChange={(checked) =>
-                      void persistClaudeSettings({ disable_all_hooks: checked })
-                    }
-                    disabled={saving}
-                  />
-                </SettingItem>
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-slate-200 bg-white p-5">
-              <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2 mb-3">
                 <Shield className="h-4 w-4 text-slate-400" />
                 Permissions
               </h3>
@@ -684,26 +648,40 @@ export function CliManagerClaudeTab({
               <div className="divide-y divide-amber-100">
                 <SettingItem
                   label="ENABLE_EXPERIMENTAL_MCP_CLI"
-                  subtitle="启用 MCP-CLI 模式，按需加载工具以节省上下文（可节省约 95% 上下文）。"
+                  subtitle="启用 MCP-CLI 模式，按需加载工具以节省上下文（可节省约 95% 上下文）。⚠️ 与 ENABLE_TOOL_SEARCH 互斥。"
                 >
                   <Switch
                     checked={claudeSettings.env_enable_experimental_mcp_cli}
-                    onCheckedChange={(checked) =>
-                      void persistClaudeSettings({ env_enable_experimental_mcp_cli: checked })
-                    }
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        void persistClaudeSettings({
+                          env_enable_experimental_mcp_cli: true,
+                          env_enable_tool_search: false,
+                        });
+                      } else {
+                        void persistClaudeSettings({ env_enable_experimental_mcp_cli: false });
+                      }
+                    }}
                     disabled={saving}
                   />
                 </SettingItem>
 
                 <SettingItem
                   label="ENABLE_TOOL_SEARCH"
-                  subtitle="启用工具搜索，当 MCP 工具超过 10% 上下文时自动懒加载。两者同时启用时，此选项优先。"
+                  subtitle="启用工具搜索，当 MCP 工具超过 10% 上下文时自动懒加载。⚠️ 与 ENABLE_EXPERIMENTAL_MCP_CLI 互斥。"
                 >
                   <Switch
                     checked={claudeSettings.env_enable_tool_search}
-                    onCheckedChange={(checked) =>
-                      void persistClaudeSettings({ env_enable_tool_search: checked })
-                    }
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        void persistClaudeSettings({
+                          env_enable_tool_search: true,
+                          env_enable_experimental_mcp_cli: false,
+                        });
+                      } else {
+                        void persistClaudeSettings({ env_enable_tool_search: false });
+                      }
+                    }}
                     disabled={saving}
                   />
                 </SettingItem>
@@ -768,26 +746,6 @@ export function CliManagerClaudeTab({
                   revert={revertBlockingLimitOverrideInput}
                   persist={persistClaudeSettings}
                   placeholder="例如：193000"
-                />
-
-                <EnvU64Item
-                  label="CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"
-                  envVarName="CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"
-                  subtitle="自动压缩阈值（百分比）。留空或 0 表示不设置该项（使用默认）。"
-                  value={autocompactPctOverrideText}
-                  onValueChange={setAutocompactPctOverrideText}
-                  patchKey="env_claude_autocompact_pct_override"
-                  inputMax={100}
-                  disabled={saving}
-                  validate={(n) => {
-                    if (n !== 0 && (n < 1 || n > 100)) {
-                      return "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE 必须为 1-100（或留空/0 删除）";
-                    }
-                    return null;
-                  }}
-                  revert={revertAutocompactPctOverrideInput}
-                  persist={persistClaudeSettings}
-                  placeholder="例如：88"
                 />
 
                 <EnvU64Item
@@ -869,6 +827,47 @@ export function CliManagerClaudeTab({
                     checked={claudeSettings.env_claude_bash_no_login}
                     onCheckedChange={(checked) =>
                       void persistClaudeSettings({ env_claude_bash_no_login: checked })
+                    }
+                    disabled={saving}
+                  />
+                </SettingItem>
+
+                <SettingItem
+                  label="CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"
+                  subtitle="等同于设置 DISABLE_AUTOUPDATER、DISABLE_BUG_COMMAND、DISABLE_ERROR_REPORTING、DISABLE_TELEMETRY。"
+                >
+                  <Switch
+                    checked={claudeSettings.env_claude_code_disable_nonessential_traffic}
+                    onCheckedChange={(checked) =>
+                      void persistClaudeSettings({
+                        env_claude_code_disable_nonessential_traffic: checked,
+                      })
+                    }
+                    disabled={saving}
+                  />
+                </SettingItem>
+
+                <SettingItem
+                  label="CLAUDE_CODE_PROXY_RESOLVES_HOSTS"
+                  subtitle="如果 WEB_SEARCH 或 FETCH 经常获取不到结果可以打开试试。"
+                >
+                  <Switch
+                    checked={claudeSettings.env_claude_code_proxy_resolves_hosts}
+                    onCheckedChange={(checked) =>
+                      void persistClaudeSettings({ env_claude_code_proxy_resolves_hosts: checked })
+                    }
+                    disabled={saving}
+                  />
+                </SettingItem>
+
+                <SettingItem
+                  label="CLAUDE_CODE_SKIP_PROMPT_HISTORY"
+                  subtitle="多开 Claude Code 可能产生竞态冲突，打开此选项屏蔽相关日志。"
+                >
+                  <Switch
+                    checked={claudeSettings.env_claude_code_skip_prompt_history}
+                    onCheckedChange={(checked) =>
+                      void persistClaudeSettings({ env_claude_code_skip_prompt_history: checked })
                     }
                     disabled={saving}
                   />

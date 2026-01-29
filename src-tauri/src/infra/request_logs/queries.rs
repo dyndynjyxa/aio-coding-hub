@@ -72,6 +72,10 @@ pub(super) struct AttemptRow {
     provider_id: i64,
     provider_name: String,
     outcome: String,
+    status: Option<i64>,
+    error_code: Option<String>,
+    decision: Option<String>,
+    reason: Option<String>,
     session_reuse: Option<bool>,
 }
 
@@ -115,10 +119,41 @@ pub(super) fn route_from_attempts(attempts: &[AttemptRow]) -> Vec<RequestLogRout
             .iter()
             .any(|row| row.provider_id == attempt.provider_id && row.outcome == "success");
 
+        let picked = if ok {
+            attempts
+                .iter()
+                .find(|row| row.provider_id == attempt.provider_id && row.outcome == "success")
+                .or_else(|| {
+                    attempts
+                        .iter()
+                        .rev()
+                        .find(|row| row.provider_id == attempt.provider_id)
+                })
+        } else {
+            attempts
+                .iter()
+                .rev()
+                .find(|row| row.provider_id == attempt.provider_id)
+        };
+
+        let (status, error_code, decision, reason) = match picked {
+            Some(row) => (
+                row.status,
+                row.error_code.clone(),
+                row.decision.clone(),
+                row.reason.clone(),
+            ),
+            None => (None, None, None, None),
+        };
+
         out.push(RequestLogRouteHop {
             provider_id: attempt.provider_id,
             provider_name: attempt.provider_name.clone(),
             ok,
+            status,
+            error_code,
+            decision,
+            reason,
         });
     }
     out

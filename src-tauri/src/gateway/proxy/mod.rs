@@ -13,6 +13,7 @@ mod model_rewrite;
 pub(in crate::gateway) mod provider_router;
 mod request_context;
 mod request_end;
+pub(in crate::gateway) mod status_override;
 mod types;
 mod upstream_client_error_rules;
 
@@ -21,6 +22,12 @@ pub(in crate::gateway) use logging::spawn_enqueue_request_log_with_backpressure;
 pub(super) use types::ErrorCategory;
 
 pub(super) use handler::proxy_impl;
+
+const CLAUDE_COUNT_TOKENS_PATH: &str = "/v1/messages/count_tokens";
+
+fn is_claude_count_tokens_request(cli_key: &str, forwarded_path: &str) -> bool {
+    cli_key == "claude" && forwarded_path == CLAUDE_COUNT_TOKENS_PATH
+}
 
 pub(super) struct RequestLogEnqueueArgs {
     pub(super) trace_id: String,
@@ -42,3 +49,6 @@ pub(super) struct RequestLogEnqueueArgs {
     pub(super) usage_metrics: Option<crate::usage::UsageMetrics>,
     pub(super) usage: Option<crate::usage::UsageExtract>,
 }
+
+#[cfg(test)]
+mod tests;

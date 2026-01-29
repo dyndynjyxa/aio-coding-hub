@@ -1,11 +1,29 @@
 //! Usage: Best-effort enqueue to DB log tasks with backpressure and fallbacks.
 
 use crate::{db, request_attempt_logs, request_logs};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 
 use super::super::events::{emit_gateway_log, GatewayAttemptEvent};
+use super::super::util::now_unix_seconds;
 
 const LOG_ENQUEUE_MAX_WAIT: Duration = Duration::from_millis(100);
+
+const REQUEST_LOG_WRITE_THROUGH_MAX_PER_SEC: u32 = 50;
+static REQUEST_LOG_WRITE_THROUGH_WINDOW_UNIX: AtomicU64 = AtomicU64::new(0);
+static REQUEST_LOG_WRITE_THROUGH_COUNT: AtomicU32 = AtomicU32::new(0);
+
+fn next_request_log_write_through_count(now_unix: u64) -> u32 {
+    let prev = REQUEST_LOG_WRITE_THROUGH_WINDOW_UNIX.load(Ordering::Relaxed);
+    if prev != now_unix
+        && REQUEST_LOG_WRITE_THROUGH_WINDOW_UNIX
+            .compare_exchange(prev, now_unix, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+    {
+        REQUEST_LOG_WRITE_THROUGH_COUNT.store(0, Ordering::Relaxed);
+    }
+    REQUEST_LOG_WRITE_THROUGH_COUNT.fetch_add(1, Ordering::Relaxed) + 1
+}
 
 fn attempt_log_insert_from_event(
     attempt: &GatewayAttemptEvent,
@@ -173,6 +191,9 @@ pub(super) async fn enqueue_request_log_with_backpressure(
         return;
     };
 
+    let status = insert.status.unwrap_or(0);
+    let is_important = insert.error_code.is_some() || status >= 400;
+
     let reserve = tokio::time::timeout(LOG_ENQUEUE_MAX_WAIT, log_tx.reserve()).await;
     match reserve {
         Ok(Ok(permit)) => {
@@ -191,19 +212,56 @@ pub(super) async fn enqueue_request_log_with_backpressure(
             request_logs::spawn_write_through(app.clone(), db.clone(), insert);
         }
         Err(_) => {
-            if log_tx.try_send(insert).is_ok() {
-                emit_gateway_log(
-                    app,
-                    "warn",
-                    "GW_REQUEST_LOG_ENQUEUE_TIMEOUT",
-                    format!(
-                        "request log enqueue timed out ({}ms); used try_send fallback trace_id={} cli={}",
-                        LOG_ENQUEUE_MAX_WAIT.as_millis(),
-                        trace_id,
-                        cli_key
-                    ),
-                );
-                return;
+            match log_tx.try_send(insert) {
+                Ok(()) => {
+                    emit_gateway_log(
+                        app,
+                        "warn",
+                        "GW_REQUEST_LOG_ENQUEUE_TIMEOUT",
+                        format!(
+                            "request log enqueue timed out ({}ms); used try_send fallback trace_id={} cli={}",
+                            LOG_ENQUEUE_MAX_WAIT.as_millis(),
+                            trace_id,
+                            cli_key
+                        ),
+                    );
+                    return;
+                }
+                Err(err) => {
+                    let insert = err.into_inner();
+                    if is_important {
+                        let count = next_request_log_write_through_count(now_unix_seconds());
+                        if count <= REQUEST_LOG_WRITE_THROUGH_MAX_PER_SEC {
+                            emit_gateway_log(
+                                app,
+                                "warn",
+                                "GW_REQUEST_LOG_WRITE_THROUGH_ON_BACKPRESSURE",
+                                format!(
+                                    "request log enqueue timed out ({}ms) and channel full; using write-through fallback trace_id={} cli={} status={}",
+                                    LOG_ENQUEUE_MAX_WAIT.as_millis(),
+                                    trace_id,
+                                    cli_key,
+                                    status
+                                ),
+                            );
+                            request_logs::spawn_write_through(app.clone(), db.clone(), insert);
+                        } else if count == REQUEST_LOG_WRITE_THROUGH_MAX_PER_SEC + 1 {
+                            emit_gateway_log(
+                                app,
+                                "error",
+                                "GW_REQUEST_LOG_WRITE_THROUGH_RATE_LIMITED",
+                                format!(
+                                    "request log write-through rate limited: max_per_sec={} (dropping important logs) trace_id={} cli={} status={}",
+                                    REQUEST_LOG_WRITE_THROUGH_MAX_PER_SEC,
+                                    trace_id,
+                                    cli_key,
+                                    status
+                                ),
+                            );
+                        }
+                        return;
+                    }
+                }
             }
 
             emit_gateway_log(

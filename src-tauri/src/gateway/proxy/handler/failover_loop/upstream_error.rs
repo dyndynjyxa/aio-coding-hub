@@ -8,10 +8,14 @@ use super::super::super::http_util::{
     build_response, has_gzip_content_encoding, has_non_identity_content_encoding,
     maybe_gunzip_response_body_bytes_with_limit,
 };
+use super::super::super::is_claude_count_tokens_request;
 use super::super::super::provider_router;
 use super::super::super::upstream_client_error_rules;
 use super::super::super::ErrorCategory;
-use super::attempt_record::{record_system_failure_and_decide, RecordSystemFailureArgs};
+use super::attempt_record::{
+    record_system_failure_and_decide, record_system_failure_and_decide_no_cooldown,
+    RecordSystemFailureArgs,
+};
 use super::context::{
     AttemptCtx, CommonCtx, CommonCtxOwned, LoopControl, LoopState, ProviderCtx,
     MAX_NON_SSE_BODY_BYTES,
@@ -44,8 +48,14 @@ pub(super) async fn handle_non_success_response(
 ) -> LoopControl {
     let status = resp.status();
     let response_headers = resp.headers().clone();
+    let is_count_tokens =
+        is_claude_count_tokens_request(ctx.cli_key.as_str(), ctx.forwarded_path.as_str());
 
-    if ctx.cli_key == "claude" && enable_thinking_signature_rectifier && status.as_u16() == 400 {
+    if !is_count_tokens
+        && ctx.cli_key == "claude"
+        && enable_thinking_signature_rectifier
+        && status.as_u16() == 400
+    {
         return thinking_signature_rectifier_400::handle_thinking_signature_rectifier_400(
             ctx,
             provider_ctx,
@@ -95,7 +105,11 @@ pub(super) async fn handle_non_success_response(
 
     let (base_category, error_code, base_decision) = classify_upstream_status(status);
     let mut category = base_category;
-    let mut decision = base_decision;
+    let mut decision = if is_count_tokens {
+        FailoverDecision::Abort
+    } else {
+        base_decision
+    };
     if matches!(decision, FailoverDecision::RetrySameProvider)
         && retry_index >= max_attempts_per_provider
     {
@@ -105,10 +119,12 @@ pub(super) async fn handle_non_success_response(
     let mut abort_body_bytes: Option<Bytes> = None;
     let mut abort_response_headers: Option<axum::http::HeaderMap> = None;
     let mut matched_rule_id: Option<&'static str> = None;
-    if upstream_client_error_rules::should_attempt_non_retryable_match(
-        status,
-        resp.as_ref().and_then(|r| r.content_length()),
-    ) {
+    if !is_count_tokens
+        && upstream_client_error_rules::should_attempt_non_retryable_match(
+            status,
+            resp.as_ref().and_then(|r| r.content_length()),
+        )
+    {
         if let Some(resp) = resp.take() {
             if let Ok(bytes) = resp.bytes().await {
                 let mut headers_for_scan = response_headers.clone();
@@ -139,7 +155,7 @@ pub(super) async fn handle_non_success_response(
     let circuit_failure_threshold = Some(circuit_before.failure_threshold);
 
     let now_unix = now_unix_seconds() as i64;
-    if matches!(category, ErrorCategory::ProviderError) {
+    if !is_count_tokens && matches!(category, ErrorCategory::ProviderError) {
         let change = provider_router::record_failure_and_emit_transition(
             provider_router::RecordCircuitArgs::from_state(
                 state,
@@ -161,7 +177,8 @@ pub(super) async fn handle_non_success_response(
         }
     }
 
-    if provider_cooldown_secs > 0
+    if !is_count_tokens
+        && provider_cooldown_secs > 0
         && matches!(category, ErrorCategory::ProviderError)
         && matches!(
             decision,
@@ -396,6 +413,29 @@ pub(super) async fn handle_reqwest_error(
     loop_state: LoopState<'_>,
     err: reqwest::Error,
 ) -> LoopControl {
+    if is_claude_count_tokens_request(ctx.cli_key.as_str(), ctx.forwarded_path.as_str()) {
+        let (_, error_code) = classify_reqwest_error(&err);
+        let decision = FailoverDecision::Abort;
+        let outcome = format!(
+            "request_error: category={} code={} decision={} err={err}",
+            ErrorCategory::SystemError.as_str(),
+            error_code,
+            decision.as_str(),
+        );
+        return record_system_failure_and_decide_no_cooldown(RecordSystemFailureArgs {
+            ctx,
+            provider_ctx,
+            attempt_ctx,
+            loop_state,
+            status: None,
+            error_code,
+            decision,
+            outcome,
+            reason: "reqwest error".to_string(),
+        })
+        .await;
+    }
+
     let max_attempts_per_provider = ctx.max_attempts_per_provider;
 
     let (_, error_code) = classify_reqwest_error(&err);

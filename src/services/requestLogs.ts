@@ -36,6 +36,10 @@ export type RequestLogRouteHop = {
   provider_id: number;
   provider_name: string;
   ok: boolean;
+  status?: number | null;
+  error_code?: string | null;
+  decision?: string | null;
+  reason?: string | null;
 };
 
 export type RequestLogDetail = {

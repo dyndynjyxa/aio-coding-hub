@@ -1,6 +1,7 @@
 //! Usage: Shared helpers to record SystemError attempts and apply failover decisions.
 
 use super::super::super::provider_router;
+use super::super::super::status_override;
 use super::*;
 
 pub(super) struct RecordSystemFailureArgs<'a> {
@@ -74,13 +75,14 @@ async fn record_system_failure_and_decide_impl(
     } = loop_state;
 
     let category = ErrorCategory::SystemError;
+    let effective_status = status_override::effective_status(status, Some(error_code));
 
     attempts.push(FailoverAttempt {
         provider_id,
         provider_name: provider_name_base.clone(),
         base_url: provider_base_url_base.clone(),
         outcome: outcome.clone(),
-        status,
+        status: effective_status,
         provider_index: Some(provider_index),
         retry_index: Some(retry_index),
         session_reuse,
@@ -96,8 +98,14 @@ async fn record_system_failure_and_decide_impl(
         circuit_failure_threshold: Some(circuit_before.failure_threshold),
     });
 
-    emit_attempt_event_and_log_with_circuit_before(ctx, provider_ctx, attempt_ctx, outcome, status)
-        .await;
+    emit_attempt_event_and_log_with_circuit_before(
+        ctx,
+        provider_ctx,
+        attempt_ctx,
+        outcome,
+        effective_status,
+    )
+    .await;
 
     *last_error_category = Some(category.as_str());
     *last_error_code = Some(error_code);

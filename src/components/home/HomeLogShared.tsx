@@ -26,7 +26,7 @@ const ERROR_CODE_LABELS: Record<string, string> = {
   GW_RESPONSE_BUILD_ERROR: "响应构建错误",
 };
 
-const STATUS_OVERRIDE_ERROR_CODES = new Set(["GW_STREAM_ABORTED", "GW_REQUEST_ABORTED"]);
+const CLIENT_ABORT_ERROR_CODES = new Set(["GW_STREAM_ABORTED", "GW_REQUEST_ABORTED"]);
 
 const SESSION_REUSE_TOOLTIP =
   "同一 session_id 在 5 分钟 TTL 内优先复用上一次成功 provider，减少抖动/提升缓存命中";
@@ -53,7 +53,8 @@ export type StatusBadge = {
   text: string;
   tone: string;
   title?: string;
-  isErrorOverride: boolean;
+  isError: boolean;
+  isClientAbort: boolean;
 };
 
 export function computeStatusBadge(input: {
@@ -65,27 +66,28 @@ export function computeStatusBadge(input: {
     return {
       text: "进行中",
       tone: "bg-accent/10 text-accent",
-      isErrorOverride: false,
+      isError: false,
+      isClientAbort: false,
     };
   }
 
-  if (input.errorCode && STATUS_OVERRIDE_ERROR_CODES.has(input.errorCode)) {
-    return {
-      text: getErrorCodeLabel(input.errorCode),
-      tone: "bg-amber-50 text-amber-600 border border-amber-200/60",
-      title: input.errorCode,
-      isErrorOverride: true,
-    };
-  }
+  const isClientAbort = !!(input.errorCode && CLIENT_ABORT_ERROR_CODES.has(input.errorCode));
+  const isError = input.status != null ? input.status >= 400 : input.errorCode != null;
 
   const text = input.status == null ? "—" : String(input.status);
-  const tone =
-    input.status != null && input.status >= 200 && input.status < 400
+  const tone = isClientAbort
+    ? "bg-amber-50 text-amber-600 border border-amber-200/60"
+    : input.status != null && input.status >= 200 && input.status < 400
       ? "text-emerald-600 bg-emerald-50/50"
-      : input.status != null && input.status >= 400
+      : isError
         ? "text-rose-600 bg-rose-50/50"
         : "text-slate-500 bg-slate-100";
-  return { text, tone, isErrorOverride: false };
+
+  const title = input.errorCode
+    ? `${getErrorCodeLabel(input.errorCode)} (${input.errorCode})`
+    : undefined;
+
+  return { text, tone, title, isError, isClientAbort };
 }
 
 export function computeEffectiveInputTokens(

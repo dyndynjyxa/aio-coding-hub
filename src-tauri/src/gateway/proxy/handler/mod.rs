@@ -13,6 +13,7 @@ use super::{
     cli_proxy_guard::cli_proxy_enabled_cached,
     errors::{error_response, error_response_with_retry_after},
     failover::{select_next_provider_id_from_order, should_reuse_provider},
+    is_claude_count_tokens_request,
 };
 
 use crate::{providers, session_manager, settings, usage};
@@ -53,6 +54,7 @@ pub(in crate::gateway) async fn proxy_impl(
     let method = req.method().clone();
     let method_hint = method.to_string();
     let query = req.uri().query().map(str::to_string);
+    let is_claude_count_tokens = is_claude_count_tokens_request(&cli_key, &forwarded_path);
 
     if crate::shared::cli_key::is_supported_cli_key(cli_key.as_str()) {
         let enabled_snapshot = cli_proxy_enabled_cached(&state.app, &cli_key);
@@ -193,6 +195,8 @@ pub(in crate::gateway) async fn proxy_impl(
         .as_ref()
         .map(|cfg| cfg.enable_thinking_signature_rectifier)
         .unwrap_or(true);
+    let enable_thinking_signature_rectifier =
+        enable_thinking_signature_rectifier && !is_claude_count_tokens;
     let enable_response_fixer = settings_cfg
         .as_ref()
         .map(|cfg| cfg.enable_response_fixer)
@@ -390,7 +394,16 @@ pub(in crate::gateway) async fn proxy_impl(
         &headers,
         introspection_json.as_ref(),
     );
-    let allow_session_reuse = should_reuse_provider(introspection_json.as_ref());
+    let session_id = if is_claude_count_tokens {
+        None
+    } else {
+        session_id
+    };
+    let allow_session_reuse = if is_claude_count_tokens {
+        false
+    } else {
+        should_reuse_provider(introspection_json.as_ref())
+    };
 
     let respond_invalid_cli_key = |err: String| -> Response {
         let resp = error_response(
@@ -658,8 +671,8 @@ pub(in crate::gateway) async fn proxy_impl(
     );
 
     let (
-        max_attempts_per_provider,
-        max_providers_to_try,
+        mut max_attempts_per_provider,
+        mut max_providers_to_try,
         provider_cooldown_secs,
         upstream_first_byte_timeout_secs,
         upstream_stream_idle_timeout_secs,
@@ -682,6 +695,11 @@ pub(in crate::gateway) async fn proxy_impl(
             settings::DEFAULT_UPSTREAM_REQUEST_TIMEOUT_NON_STREAMING_SECONDS,
         ),
     };
+
+    if is_claude_count_tokens {
+        max_attempts_per_provider = 1;
+        max_providers_to_try = 1;
+    }
 
     super::forwarder::forward(RequestContext::from_handler_parts(RequestContextParts {
         state,

@@ -17,19 +17,8 @@ pub struct CodexConfigState {
     pub approval_policy: Option<String>,
     pub sandbox_mode: Option<String>,
     pub model_reasoning_effort: Option<String>,
-    pub file_opener: Option<String>,
-    pub hide_agent_reasoning: Option<bool>,
-    pub show_raw_agent_reasoning: Option<bool>,
-
-    pub history_persistence: Option<String>,
-    pub history_max_bytes: Option<u64>,
 
     pub sandbox_workspace_write_network_access: Option<bool>,
-
-    pub tui_animations: Option<bool>,
-    pub tui_alternate_screen: Option<String>,
-    pub tui_show_tooltips: Option<bool>,
-    pub tui_scroll_invert: Option<bool>,
 
     pub features_unified_exec: Option<bool>,
     pub features_shell_snapshot: Option<bool>,
@@ -37,12 +26,8 @@ pub struct CodexConfigState {
     pub features_web_search_request: Option<bool>,
     pub features_shell_tool: Option<bool>,
     pub features_exec_policy: Option<bool>,
-    pub features_experimental_windows_sandbox: Option<bool>,
-    pub features_elevated_windows_sandbox: Option<bool>,
     pub features_remote_compaction: Option<bool>,
     pub features_remote_models: Option<bool>,
-    pub features_powershell_utf8: Option<bool>,
-    pub features_child_agents_md: Option<bool>,
     pub features_collab: Option<bool>,
     pub features_collaboration_modes: Option<bool>,
 }
@@ -53,19 +38,8 @@ pub struct CodexConfigPatch {
     pub approval_policy: Option<String>,
     pub sandbox_mode: Option<String>,
     pub model_reasoning_effort: Option<String>,
-    pub file_opener: Option<String>,
-    pub hide_agent_reasoning: Option<bool>,
-    pub show_raw_agent_reasoning: Option<bool>,
-
-    pub history_persistence: Option<String>,
-    pub history_max_bytes: Option<u64>,
 
     pub sandbox_workspace_write_network_access: Option<bool>,
-
-    pub tui_animations: Option<bool>,
-    pub tui_alternate_screen: Option<String>,
-    pub tui_show_tooltips: Option<bool>,
-    pub tui_scroll_invert: Option<bool>,
 
     pub features_unified_exec: Option<bool>,
     pub features_shell_snapshot: Option<bool>,
@@ -73,12 +47,8 @@ pub struct CodexConfigPatch {
     pub features_web_search_request: Option<bool>,
     pub features_shell_tool: Option<bool>,
     pub features_exec_policy: Option<bool>,
-    pub features_experimental_windows_sandbox: Option<bool>,
-    pub features_elevated_windows_sandbox: Option<bool>,
     pub features_remote_compaction: Option<bool>,
     pub features_remote_models: Option<bool>,
-    pub features_powershell_utf8: Option<bool>,
-    pub features_child_agents_md: Option<bool>,
     pub features_collab: Option<bool>,
     pub features_collaboration_modes: Option<bool>,
 }
@@ -173,14 +143,6 @@ fn parse_bool(value: &str) -> Option<bool> {
         "false" => Some(false),
         _ => None,
     }
-}
-
-fn parse_u64(value: &str) -> Option<u64> {
-    let raw = value.trim();
-    if raw.is_empty() {
-        return None;
-    }
-    raw.parse::<u64>().ok()
 }
 
 fn parse_string(value: &str) -> Option<String> {
@@ -542,7 +504,7 @@ enum TableStyle {
     Dotted,
 }
 
-const FEATURES_KEY_ORDER: [&str; 14] = [
+const FEATURES_KEY_ORDER: [&str; 10] = [
     // Keep in sync with the UI order (CliManagerCodexTab / Features section).
     "shell_snapshot",
     "web_search_request",
@@ -552,10 +514,6 @@ const FEATURES_KEY_ORDER: [&str; 14] = [
     "apply_patch_freeform",
     "remote_compaction",
     "remote_models",
-    "powershell_utf8",
-    "child_agents_md",
-    "experimental_windows_sandbox",
-    "elevated_windows_sandbox",
     "collab",
     "collaboration_modes",
 ];
@@ -847,20 +805,6 @@ fn normalize_toml_layout(lines: &mut Vec<String>) {
     *lines = out;
 }
 
-/// Helper to build optional string value from Option<String>, trimming and filtering empty.
-fn opt_string_value(raw: Option<&str>) -> Option<String> {
-    raw.map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .map(toml_string_literal)
-}
-
-/// Helper to build optional u64 value, treating 0 as None (remove from config).
-fn opt_u64_value(value: Option<u64>) -> Option<String> {
-    value
-        .and_then(|n| if n == 0 { None } else { Some(n) })
-        .map(|n| n.to_string())
-}
-
 fn make_state_from_bytes(
     config_dir: String,
     config_path: String,
@@ -878,19 +822,8 @@ fn make_state_from_bytes(
         approval_policy: None,
         sandbox_mode: None,
         model_reasoning_effort: None,
-        file_opener: None,
-        hide_agent_reasoning: None,
-        show_raw_agent_reasoning: None,
-
-        history_persistence: None,
-        history_max_bytes: None,
 
         sandbox_workspace_write_network_access: None,
-
-        tui_animations: None,
-        tui_alternate_screen: None,
-        tui_show_tooltips: None,
-        tui_scroll_invert: None,
 
         features_unified_exec: None,
         features_shell_snapshot: None,
@@ -898,12 +831,8 @@ fn make_state_from_bytes(
         features_web_search_request: None,
         features_shell_tool: None,
         features_exec_policy: None,
-        features_experimental_windows_sandbox: None,
-        features_elevated_windows_sandbox: None,
         features_remote_compaction: None,
         features_remote_models: None,
-        features_powershell_utf8: None,
-        features_child_agents_md: None,
         features_collab: None,
         features_collaboration_modes: None,
     };
@@ -973,23 +902,10 @@ fn make_state_from_bytes(
             ("", "model_reasoning_effort") => {
                 state.model_reasoning_effort = parse_string(&raw_value)
             }
-            ("", "file_opener") => state.file_opener = parse_string(&raw_value),
-            ("", "hide_agent_reasoning") => state.hide_agent_reasoning = parse_bool(&raw_value),
-            ("", "show_raw_agent_reasoning") => {
-                state.show_raw_agent_reasoning = parse_bool(&raw_value)
-            }
-
-            ("history", "persistence") => state.history_persistence = parse_string(&raw_value),
-            ("history", "max_bytes") => state.history_max_bytes = parse_u64(&raw_value),
 
             ("sandbox_workspace_write", "network_access") => {
                 state.sandbox_workspace_write_network_access = parse_bool(&raw_value)
             }
-
-            ("tui", "animations") => state.tui_animations = parse_bool(&raw_value),
-            ("tui", "alternate_screen") => state.tui_alternate_screen = parse_string(&raw_value),
-            ("tui", "show_tooltips") => state.tui_show_tooltips = parse_bool(&raw_value),
-            ("tui", "scroll_invert") => state.tui_scroll_invert = parse_bool(&raw_value),
 
             ("features", "unified_exec") => state.features_unified_exec = parse_bool(&raw_value),
             ("features", "shell_snapshot") => {
@@ -1003,22 +919,10 @@ fn make_state_from_bytes(
             }
             ("features", "shell_tool") => state.features_shell_tool = parse_bool(&raw_value),
             ("features", "exec_policy") => state.features_exec_policy = parse_bool(&raw_value),
-            ("features", "experimental_windows_sandbox") => {
-                state.features_experimental_windows_sandbox = parse_bool(&raw_value)
-            }
-            ("features", "elevated_windows_sandbox") => {
-                state.features_elevated_windows_sandbox = parse_bool(&raw_value)
-            }
             ("features", "remote_compaction") => {
                 state.features_remote_compaction = parse_bool(&raw_value)
             }
             ("features", "remote_models") => state.features_remote_models = parse_bool(&raw_value),
-            ("features", "powershell_utf8") => {
-                state.features_powershell_utf8 = parse_bool(&raw_value)
-            }
-            ("features", "child_agents_md") => {
-                state.features_child_agents_md = parse_bool(&raw_value)
-            }
             ("features", "collab") => state.features_collab = parse_bool(&raw_value),
             ("features", "collaboration_modes") => {
                 state.features_collaboration_modes = parse_bool(&raw_value)
@@ -1092,21 +996,6 @@ fn patch_config_toml(current: Option<Vec<u8>>, patch: CodexConfigPatch) -> Resul
         patch.model_reasoning_effort.as_deref().unwrap_or(""),
         &["minimal", "low", "medium", "high", "xhigh"],
     )?;
-    validate_enum_or_empty(
-        "file_opener",
-        patch.file_opener.as_deref().unwrap_or(""),
-        &["vscode", "vscode-insiders", "windsurf", "cursor", "none"],
-    )?;
-    validate_enum_or_empty(
-        "history.persistence",
-        patch.history_persistence.as_deref().unwrap_or(""),
-        &["save-all", "none"],
-    )?;
-    validate_enum_or_empty(
-        "tui.alternate_screen",
-        patch.tui_alternate_screen.as_deref().unwrap_or(""),
-        &["auto", "always", "never"],
-    )?;
 
     let input = match current {
         Some(bytes) => String::from_utf8(bytes)
@@ -1156,44 +1045,6 @@ fn patch_config_toml(current: Option<Vec<u8>>, patch: CodexConfigPatch) -> Resul
             (!trimmed.is_empty()).then(|| toml_string_literal(trimmed)),
         );
     }
-    if let Some(raw) = patch.file_opener.as_deref() {
-        let trimmed = raw.trim();
-        upsert_root_key(
-            &mut lines,
-            "file_opener",
-            (!trimmed.is_empty()).then(|| toml_string_literal(trimmed)),
-        );
-    }
-    if let Some(v) = patch.hide_agent_reasoning {
-        upsert_root_key(
-            &mut lines,
-            "hide_agent_reasoning",
-            v.then(|| "true".to_string()),
-        );
-    }
-    if let Some(v) = patch.show_raw_agent_reasoning {
-        upsert_root_key(
-            &mut lines,
-            "show_raw_agent_reasoning",
-            v.then(|| "true".to_string()),
-        );
-    }
-
-    // history.*
-    if patch.history_persistence.is_some() || patch.history_max_bytes.is_some() {
-        let mut items: Vec<(&str, Option<String>)> = Vec::new();
-        if patch.history_persistence.is_some() {
-            items.push((
-                "persistence",
-                opt_string_value(patch.history_persistence.as_deref()),
-            ));
-        }
-        if patch.history_max_bytes.is_some() {
-            items.push(("max_bytes", opt_u64_value(patch.history_max_bytes)));
-        }
-
-        upsert_keys_auto_style(&mut lines, "history", &["persistence", "max_bytes"], items);
-    }
 
     // sandbox_workspace_write.*
     if let Some(v) = patch.sandbox_workspace_write_network_access {
@@ -1205,39 +1056,6 @@ fn patch_config_toml(current: Option<Vec<u8>>, patch: CodexConfigPatch) -> Resul
         );
     }
 
-    // tui.*
-    let has_any_tui_patch = patch.tui_animations.is_some()
-        || patch.tui_alternate_screen.is_some()
-        || patch.tui_show_tooltips.is_some()
-        || patch.tui_scroll_invert.is_some();
-    if has_any_tui_patch {
-        let tui_keys = [
-            "animations",
-            "alternate_screen",
-            "show_tooltips",
-            "scroll_invert",
-        ];
-
-        let mut items: Vec<(&str, Option<String>)> = Vec::new();
-        if let Some(v) = patch.tui_animations {
-            items.push(("animations", v.then(|| "true".to_string())));
-        }
-        if patch.tui_alternate_screen.is_some() {
-            items.push((
-                "alternate_screen",
-                opt_string_value(patch.tui_alternate_screen.as_deref()),
-            ));
-        }
-        if let Some(v) = patch.tui_show_tooltips {
-            items.push(("show_tooltips", v.then(|| "true".to_string())));
-        }
-        if let Some(v) = patch.tui_scroll_invert {
-            items.push(("scroll_invert", v.then(|| "true".to_string())));
-        }
-
-        upsert_keys_auto_style(&mut lines, "tui", &tui_keys, items);
-    }
-
     // features.*
     let has_any_feature_patch = patch.features_unified_exec.is_some()
         || patch.features_shell_snapshot.is_some()
@@ -1245,12 +1063,8 @@ fn patch_config_toml(current: Option<Vec<u8>>, patch: CodexConfigPatch) -> Resul
         || patch.features_web_search_request.is_some()
         || patch.features_shell_tool.is_some()
         || patch.features_exec_policy.is_some()
-        || patch.features_experimental_windows_sandbox.is_some()
-        || patch.features_elevated_windows_sandbox.is_some()
         || patch.features_remote_compaction.is_some()
         || patch.features_remote_models.is_some()
-        || patch.features_powershell_utf8.is_some()
-        || patch.features_child_agents_md.is_some()
         || patch.features_collab.is_some()
         || patch.features_collaboration_modes.is_some();
 
@@ -1276,26 +1090,11 @@ fn patch_config_toml(current: Option<Vec<u8>>, patch: CodexConfigPatch) -> Resul
         if let Some(v) = patch.features_exec_policy {
             items.push(("exec_policy", v.then(|| "true".to_string())));
         }
-        if let Some(v) = patch.features_experimental_windows_sandbox {
-            items.push((
-                "experimental_windows_sandbox",
-                v.then(|| "true".to_string()),
-            ));
-        }
-        if let Some(v) = patch.features_elevated_windows_sandbox {
-            items.push(("elevated_windows_sandbox", v.then(|| "true".to_string())));
-        }
         if let Some(v) = patch.features_remote_compaction {
             items.push(("remote_compaction", v.then(|| "true".to_string())));
         }
         if let Some(v) = patch.features_remote_models {
             items.push(("remote_models", v.then(|| "true".to_string())));
-        }
-        if let Some(v) = patch.features_powershell_utf8 {
-            items.push(("powershell_utf8", v.then(|| "true".to_string())));
-        }
-        if let Some(v) = patch.features_child_agents_md {
-            items.push(("child_agents_md", v.then(|| "true".to_string())));
         }
         if let Some(v) = patch.features_collab {
             items.push(("collab", v.then(|| "true".to_string())));

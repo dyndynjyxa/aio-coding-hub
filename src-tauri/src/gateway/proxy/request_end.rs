@@ -1,6 +1,7 @@
 //! Usage: Shared helpers to emit request-end events and enqueue request logs consistently.
 
 use super::logging::enqueue_request_log_with_backpressure;
+use super::status_override;
 use super::{spawn_enqueue_request_log_with_backpressure, RequestLogEnqueueArgs};
 use crate::gateway::events::{emit_request_event, FailoverAttempt};
 use crate::{db, request_logs};
@@ -57,6 +58,10 @@ struct PreparedRequestEnd<'a> {
 
 fn prepare_request_end(args: RequestEndArgs<'_>) -> PreparedRequestEnd<'_> {
     let query = args.query.map(str::to_string);
+    let status = status_override::effective_status(args.status, args.error_code);
+    let excluded_from_stats = args.excluded_from_stats
+        || super::is_claude_count_tokens_request(args.cli_key, args.path)
+        || status_override::is_client_abort(args.error_code);
     let (attempts, attempts_json) = if args.attempts.is_empty() {
         (Vec::new(), "[]".to_string())
     } else {
@@ -72,9 +77,9 @@ fn prepare_request_end(args: RequestEndArgs<'_>) -> PreparedRequestEnd<'_> {
         method: args.method.to_string(),
         path: args.path.to_string(),
         query,
-        excluded_from_stats: args.excluded_from_stats,
+        excluded_from_stats,
         special_settings_json: args.special_settings_json,
-        status: args.status,
+        status,
         error_code: args.error_code,
         duration_ms: args.duration_ms,
         ttfb_ms: args.log_ttfb_ms,

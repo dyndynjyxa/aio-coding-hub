@@ -3,7 +3,9 @@
 use super::finalize::finalize_circuit_and_session;
 use super::StreamFinalizeCtx;
 use crate::gateway::events::emit_request_event;
-use crate::gateway::proxy::{spawn_enqueue_request_log_with_backpressure, RequestLogEnqueueArgs};
+use crate::gateway::proxy::{
+    spawn_enqueue_request_log_with_backpressure, status_override, RequestLogEnqueueArgs,
+};
 use crate::gateway::response_fixer;
 
 pub(super) fn emit_request_event_and_spawn_request_log(
@@ -16,6 +18,9 @@ pub(super) fn emit_request_event_and_spawn_request_log(
 ) {
     let duration_ms = ctx.started.elapsed().as_millis();
     let effective_error_category = finalize_circuit_and_session(ctx, error_code);
+    let effective_status = status_override::effective_status(Some(ctx.status), error_code);
+    let effective_excluded_from_stats =
+        ctx.excluded_from_stats || status_override::is_client_abort(error_code);
 
     let trace_id = ctx.trace_id.clone();
     let cli_key = ctx.cli_key.clone();
@@ -30,7 +35,7 @@ pub(super) fn emit_request_event_and_spawn_request_log(
         method.clone(),
         path.clone(),
         query.clone(),
-        Some(ctx.status),
+        effective_status,
         effective_error_category,
         error_code,
         duration_ms,
@@ -50,9 +55,9 @@ pub(super) fn emit_request_event_and_spawn_request_log(
             method,
             path,
             query,
-            excluded_from_stats: ctx.excluded_from_stats,
+            excluded_from_stats: effective_excluded_from_stats,
             special_settings_json: response_fixer::special_settings_json(&ctx.special_settings),
-            status: Some(ctx.status),
+            status: effective_status,
             error_code,
             duration_ms,
             ttfb_ms,

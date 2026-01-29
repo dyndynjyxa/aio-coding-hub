@@ -14,11 +14,14 @@ const ENV_KEY_DISABLE_TERMINAL_TITLE: &str = "CLAUDE_CODE_DISABLE_TERMINAL_TITLE
 const ENV_KEY_CLAUDE_BASH_NO_LOGIN: &str = "CLAUDE_BASH_NO_LOGIN";
 const ENV_KEY_CLAUDE_CODE_ATTRIBUTION_HEADER: &str = "CLAUDE_CODE_ATTRIBUTION_HEADER";
 const ENV_KEY_CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE: &str = "CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE";
-const ENV_KEY_CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: &str = "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE";
 const ENV_KEY_CLAUDE_CODE_MAX_OUTPUT_TOKENS: &str = "CLAUDE_CODE_MAX_OUTPUT_TOKENS";
 const ENV_KEY_ENABLE_EXPERIMENTAL_MCP_CLI: &str = "ENABLE_EXPERIMENTAL_MCP_CLI";
 const ENV_KEY_ENABLE_TOOL_SEARCH: &str = "ENABLE_TOOL_SEARCH";
 const ENV_KEY_MAX_MCP_OUTPUT_TOKENS: &str = "MAX_MCP_OUTPUT_TOKENS";
+const ENV_KEY_CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: &str =
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC";
+const ENV_KEY_CLAUDE_CODE_PROXY_RESOLVES_HOSTS: &str = "CLAUDE_CODE_PROXY_RESOLVES_HOSTS";
+const ENV_KEY_CLAUDE_CODE_SKIP_PROMPT_HISTORY: &str = "CLAUDE_CODE_SKIP_PROMPT_HISTORY";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ClaudeSettingsState {
@@ -36,8 +39,6 @@ pub struct ClaudeSettingsState {
     pub terminal_progress_bar_enabled: Option<bool>,
     pub respect_gitignore: Option<bool>,
 
-    pub disable_all_hooks: Option<bool>,
-
     pub permissions_allow: Vec<String>,
     pub permissions_ask: Vec<String>,
     pub permissions_deny: Vec<String>,
@@ -51,11 +52,13 @@ pub struct ClaudeSettingsState {
     pub env_claude_bash_no_login: bool,
     pub env_claude_code_attribution_header_disabled: bool,
     pub env_claude_code_blocking_limit_override: Option<u64>,
-    pub env_claude_autocompact_pct_override: Option<u64>,
     pub env_claude_code_max_output_tokens: Option<u64>,
     pub env_enable_experimental_mcp_cli: bool,
     pub env_enable_tool_search: bool,
     pub env_max_mcp_output_tokens: Option<u64>,
+    pub env_claude_code_disable_nonessential_traffic: bool,
+    pub env_claude_code_proxy_resolves_hosts: bool,
+    pub env_claude_code_skip_prompt_history: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -69,9 +72,6 @@ pub struct ClaudeSettingsPatch {
     pub spinner_tips_enabled: Option<bool>,
     pub terminal_progress_bar_enabled: Option<bool>,
     pub respect_gitignore: Option<bool>,
-
-    // UI semantics: `true` => write `disableAllHooks=true`, `false` => delete the key (do not write `false`).
-    pub disable_all_hooks: Option<bool>,
 
     pub permissions_allow: Option<Vec<String>>,
     pub permissions_ask: Option<Vec<String>>,
@@ -90,11 +90,13 @@ pub struct ClaudeSettingsPatch {
     pub env_claude_bash_no_login: Option<bool>,
     pub env_claude_code_attribution_header_disabled: Option<bool>,
     pub env_claude_code_blocking_limit_override: Option<u64>,
-    pub env_claude_autocompact_pct_override: Option<u64>,
     pub env_claude_code_max_output_tokens: Option<u64>,
     pub env_enable_experimental_mcp_cli: Option<bool>,
     pub env_enable_tool_search: Option<bool>,
     pub env_max_mcp_output_tokens: Option<u64>,
+    pub env_claude_code_disable_nonessential_traffic: Option<bool>,
+    pub env_claude_code_proxy_resolves_hosts: Option<bool>,
+    pub env_claude_code_skip_prompt_history: Option<bool>,
 }
 
 fn home_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -252,9 +254,6 @@ pub fn claude_settings_get(app: &tauri::AppHandle) -> Result<ClaudeSettingsState
     let env_claude_code_blocking_limit_override = env
         .and_then(|e| e.get(ENV_KEY_CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE))
         .and_then(env_u64_value);
-    let env_claude_autocompact_pct_override = env
-        .and_then(|e| e.get(ENV_KEY_CLAUDE_AUTOCOMPACT_PCT_OVERRIDE))
-        .and_then(env_u64_value);
     let env_claude_code_max_output_tokens = env
         .and_then(|e| e.get(ENV_KEY_CLAUDE_CODE_MAX_OUTPUT_TOKENS))
         .and_then(env_u64_value);
@@ -267,6 +266,15 @@ pub fn claude_settings_get(app: &tauri::AppHandle) -> Result<ClaudeSettingsState
     let env_max_mcp_output_tokens = env
         .and_then(|e| e.get(ENV_KEY_MAX_MCP_OUTPUT_TOKENS))
         .and_then(env_u64_value);
+    let env_claude_code_disable_nonessential_traffic = env
+        .map(|e| env_is_enabled(e, ENV_KEY_CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC))
+        .unwrap_or(false);
+    let env_claude_code_proxy_resolves_hosts = env
+        .map(|e| env_is_enabled(e, ENV_KEY_CLAUDE_CODE_PROXY_RESOLVES_HOSTS))
+        .unwrap_or(false);
+    let env_claude_code_skip_prompt_history = env
+        .map(|e| env_is_enabled(e, ENV_KEY_CLAUDE_CODE_SKIP_PROMPT_HISTORY))
+        .unwrap_or(false);
 
     Ok(ClaudeSettingsState {
         config_dir: config_dir.to_string_lossy().to_string(),
@@ -285,8 +293,6 @@ pub fn claude_settings_get(app: &tauri::AppHandle) -> Result<ClaudeSettingsState
             .and_then(|v| v.as_bool()),
         respect_gitignore: obj.get("respectGitignore").and_then(|v| v.as_bool()),
 
-        disable_all_hooks: obj.get("disableAllHooks").and_then(|v| v.as_bool()),
-
         permissions_allow,
         permissions_ask,
         permissions_deny,
@@ -300,11 +306,13 @@ pub fn claude_settings_get(app: &tauri::AppHandle) -> Result<ClaudeSettingsState
         env_claude_bash_no_login,
         env_claude_code_attribution_header_disabled,
         env_claude_code_blocking_limit_override,
-        env_claude_autocompact_pct_override,
         env_claude_code_max_output_tokens,
         env_enable_experimental_mcp_cli,
         env_enable_tool_search,
         env_max_mcp_output_tokens,
+        env_claude_code_disable_nonessential_traffic,
+        env_claude_code_proxy_resolves_hosts,
+        env_claude_code_skip_prompt_history,
     })
 }
 
@@ -416,14 +424,6 @@ fn patch_claude_settings(
         obj.insert("respectGitignore".to_string(), serde_json::Value::Bool(v));
     }
 
-    if let Some(v) = patch.disable_all_hooks {
-        if v {
-            obj.insert("disableAllHooks".to_string(), serde_json::Value::Bool(true));
-        } else {
-            obj.remove("disableAllHooks");
-        }
-    }
-
     let has_permission_patch = patch.permissions_allow.is_some()
         || patch.permissions_ask.is_some()
         || patch.permissions_deny.is_some();
@@ -497,11 +497,13 @@ fn patch_claude_settings(
         || patch.env_claude_bash_no_login.is_some()
         || patch.env_claude_code_attribution_header_disabled.is_some()
         || patch.env_claude_code_blocking_limit_override.is_some()
-        || patch.env_claude_autocompact_pct_override.is_some()
         || patch.env_claude_code_max_output_tokens.is_some()
         || patch.env_enable_experimental_mcp_cli.is_some()
         || patch.env_enable_tool_search.is_some()
-        || patch.env_max_mcp_output_tokens.is_some();
+        || patch.env_max_mcp_output_tokens.is_some()
+        || patch.env_claude_code_disable_nonessential_traffic.is_some()
+        || patch.env_claude_code_proxy_resolves_hosts.is_some()
+        || patch.env_claude_code_skip_prompt_history.is_some();
     if has_env_patch {
         let entry = obj
             .entry("env".to_string())
@@ -542,9 +544,6 @@ fn patch_claude_settings(
             if let Some(v) = patch.env_claude_code_blocking_limit_override {
                 patch_env_u64(env, ENV_KEY_CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE, v);
             }
-            if let Some(v) = patch.env_claude_autocompact_pct_override {
-                patch_env_u64(env, ENV_KEY_CLAUDE_AUTOCOMPACT_PCT_OVERRIDE, v);
-            }
             if let Some(v) = patch.env_claude_code_max_output_tokens {
                 patch_env_u64(env, ENV_KEY_CLAUDE_CODE_MAX_OUTPUT_TOKENS, v);
             }
@@ -556,6 +555,15 @@ fn patch_claude_settings(
             }
             if let Some(v) = patch.env_max_mcp_output_tokens {
                 patch_env_u64(env, ENV_KEY_MAX_MCP_OUTPUT_TOKENS, v);
+            }
+            if let Some(v) = patch.env_claude_code_disable_nonessential_traffic {
+                patch_env_toggle(env, ENV_KEY_CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, v);
+            }
+            if let Some(v) = patch.env_claude_code_proxy_resolves_hosts {
+                patch_env_toggle(env, ENV_KEY_CLAUDE_CODE_PROXY_RESOLVES_HOSTS, v);
+            }
+            if let Some(v) = patch.env_claude_code_skip_prompt_history {
+                patch_env_toggle(env, ENV_KEY_CLAUDE_CODE_SKIP_PROMPT_HISTORY, v);
             }
 
             env.is_empty()

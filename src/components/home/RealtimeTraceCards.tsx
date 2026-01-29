@@ -258,7 +258,7 @@ export function RealtimeTraceCards({
                   >
                     {isInProgress ? (
                       <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : summaryStatus && summaryStatus >= 400 ? (
+                    ) : statusBadge.isError ? (
                       <XCircle className="h-3 w-3" />
                     ) : (
                       <CheckCircle2 className="h-3 w-3" />
@@ -284,7 +284,7 @@ export function RealtimeTraceCards({
                     {modelText}
                   </span>
 
-                  {summaryErrorCode && !statusBadge.isErrorOverride && (
+                  {summaryErrorCode && (
                     <span className="rounded bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-700 shrink-0">
                       {getErrorCodeLabel(summaryErrorCode)}
                     </span>

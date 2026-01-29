@@ -10,7 +10,6 @@ fn empty_patch() -> ClaudeSettingsPatch {
         spinner_tips_enabled: None,
         terminal_progress_bar_enabled: None,
         respect_gitignore: None,
-        disable_all_hooks: None,
         permissions_allow: None,
         permissions_ask: None,
         permissions_deny: None,
@@ -23,11 +22,13 @@ fn empty_patch() -> ClaudeSettingsPatch {
         env_claude_bash_no_login: None,
         env_claude_code_attribution_header_disabled: None,
         env_claude_code_blocking_limit_override: None,
-        env_claude_autocompact_pct_override: None,
         env_claude_code_max_output_tokens: None,
         env_enable_experimental_mcp_cli: None,
         env_enable_tool_search: None,
         env_max_mcp_output_tokens: None,
+        env_claude_code_disable_nonessential_traffic: None,
+        env_claude_code_proxy_resolves_hosts: None,
+        env_claude_code_skip_prompt_history: None,
     }
 }
 
@@ -140,7 +141,6 @@ fn patch_env_numeric_overrides_can_write_and_remove_keys() {
         input,
         ClaudeSettingsPatch {
             env_claude_code_blocking_limit_override: Some(0),
-            env_claude_autocompact_pct_override: Some(88),
             env_claude_code_max_output_tokens: Some(0),
             ..empty_patch()
         },
@@ -160,7 +160,7 @@ fn patch_env_numeric_overrides_can_write_and_remove_keys() {
     assert_eq!(
         env.get("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE")
             .and_then(|v| v.as_str()),
-        Some("88")
+        Some("95")
     );
     assert!(
         env.get("CLAUDE_CODE_MAX_OUTPUT_TOKENS").is_none(),
@@ -189,26 +189,6 @@ fn patch_permissions_can_remove_empty_object() {
 
     assert!(patched.get("permissions").is_none(), "{patched}");
     assert_eq!(patched.get("other").and_then(|v| v.as_bool()), Some(true));
-}
-
-#[test]
-fn patch_disable_all_hooks_false_removes_key() {
-    let input = serde_json::json!({
-        "disableAllHooks": true,
-        "other": 1
-    });
-
-    let patched = patch_claude_settings(
-        input,
-        ClaudeSettingsPatch {
-            disable_all_hooks: Some(false),
-            ..empty_patch()
-        },
-    )
-    .expect("patch");
-
-    assert!(patched.get("disableAllHooks").is_none(), "{patched}");
-    assert_eq!(patched.get("other").and_then(|v| v.as_i64()), Some(1));
 }
 
 #[test]

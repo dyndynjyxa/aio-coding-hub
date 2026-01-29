@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { toast } from "sonner";
 import type {
   CodexConfigPatch,
   CodexConfigState,
@@ -83,15 +82,11 @@ export function CliManagerCodexTab({
   persistCodexConfig,
 }: CliManagerCodexTabProps) {
   const [modelText, setModelText] = useState("");
-  const [historyMaxBytesText, setHistoryMaxBytesText] = useState("");
   const [sandboxModeText, setSandboxModeText] = useState("");
 
   useEffect(() => {
     if (!codexConfig) return;
     setModelText(codexConfig.model ?? "");
-    setHistoryMaxBytesText(
-      codexConfig.history_max_bytes == null ? "" : String(codexConfig.history_max_bytes)
-    );
     setSandboxModeText(codexConfig.sandbox_mode ?? "");
   }, [codexConfig]);
 
@@ -350,112 +345,6 @@ export function CliManagerCodexTab({
             <div className="rounded-lg border border-slate-200 bg-white p-5">
               <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2 mb-3">
                 <Settings className="h-4 w-4 text-slate-400" />
-                交互与显示
-              </h3>
-              <div className="divide-y divide-slate-100">
-                <SettingItem
-                  label="文件打开方式 (file_opener)"
-                  subtitle="控制点击 citations 时使用的编辑器/URI scheme（默认 vscode）。"
-                >
-                  <Select
-                    value={codexConfig.file_opener ?? ""}
-                    onChange={(e) =>
-                      void persistCodexConfig({ file_opener: e.currentTarget.value })
-                    }
-                    disabled={saving}
-                    className="w-[220px] max-w-full font-mono"
-                  >
-                    <option value="">默认（不设置）</option>
-                    <option value="vscode">vscode</option>
-                    <option value="vscode-insiders">vscode-insiders</option>
-                    <option value="windsurf">windsurf</option>
-                    <option value="cursor">cursor</option>
-                    <option value="none">无（none）</option>
-                  </Select>
-                </SettingItem>
-
-                <SettingItem
-                  label="隐藏推理事件 (hide_agent_reasoning)"
-                  subtitle="开启写入 hide_agent_reasoning=true；关闭删除该项（不写 false）。"
-                >
-                  <Switch
-                    checked={boolOrDefault(codexConfig.hide_agent_reasoning, false)}
-                    onCheckedChange={(checked) =>
-                      void persistCodexConfig({ hide_agent_reasoning: checked })
-                    }
-                    disabled={saving}
-                  />
-                </SettingItem>
-
-                <SettingItem
-                  label="显示原始推理 (show_raw_agent_reasoning)"
-                  subtitle="开启写入 show_raw_agent_reasoning=true；关闭删除该项（不写 false）。"
-                >
-                  <Switch
-                    checked={boolOrDefault(codexConfig.show_raw_agent_reasoning, false)}
-                    onCheckedChange={(checked) =>
-                      void persistCodexConfig({ show_raw_agent_reasoning: checked })
-                    }
-                    disabled={saving}
-                  />
-                </SettingItem>
-
-                <SettingItem
-                  label="历史记录持久化 (history.persistence)"
-                  subtitle="控制是否将会话记录写入 history.jsonl（默认 save-all）。"
-                >
-                  <Select
-                    value={codexConfig.history_persistence ?? ""}
-                    onChange={(e) =>
-                      void persistCodexConfig({ history_persistence: e.currentTarget.value })
-                    }
-                    disabled={saving}
-                    className="w-[220px] max-w-full font-mono"
-                  >
-                    <option value="">默认（不设置）</option>
-                    <option value="save-all">全部保存（save-all）</option>
-                    <option value="none">不保存（none）</option>
-                  </Select>
-                </SettingItem>
-
-                <SettingItem
-                  label="历史大小上限 (history.max_bytes)"
-                  subtitle="限制 history.jsonl 最大大小（字节）。留空或 0 表示不设置该项。"
-                >
-                  <Input
-                    type="number"
-                    value={historyMaxBytesText}
-                    onChange={(e) => setHistoryMaxBytesText(e.currentTarget.value)}
-                    onBlur={() => {
-                      const trimmed = historyMaxBytesText.trim();
-                      if (!trimmed) {
-                        void persistCodexConfig({ history_max_bytes: 0 });
-                        return;
-                      }
-                      const n = Math.floor(Number(trimmed));
-                      if (!Number.isFinite(n) || n < 0) {
-                        toast("history.max_bytes 必须为非负整数");
-                        setHistoryMaxBytesText(
-                          codexConfig.history_max_bytes == null
-                            ? ""
-                            : String(codexConfig.history_max_bytes)
-                        );
-                        return;
-                      }
-                      void persistCodexConfig({ history_max_bytes: n });
-                    }}
-                    className="font-mono w-[220px] max-w-full"
-                    min={0}
-                    disabled={saving}
-                    placeholder="默认"
-                  />
-                </SettingItem>
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-slate-200 bg-white p-5">
-              <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2 mb-3">
-                <Settings className="h-4 w-4 text-slate-400" />
                 Sandbox（workspace-write）
               </h3>
               <div className="divide-y divide-slate-100">
@@ -484,72 +373,6 @@ export function CliManagerCodexTab({
                   </div>
                 </div>
               ) : null}
-            </div>
-
-            <div className="rounded-lg border border-slate-200 bg-white p-5">
-              <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2 mb-3">
-                <Settings className="h-4 w-4 text-slate-400" />
-                TUI（布局与样式）
-              </h3>
-              <div className="divide-y divide-slate-100">
-                <SettingItem
-                  label="动画效果 (tui.animations)"
-                  subtitle="开启写入 tui.animations=true；关闭删除该项（不写 false）。"
-                >
-                  <Switch
-                    checked={boolOrDefault(codexConfig.tui_animations, false)}
-                    onCheckedChange={(checked) =>
-                      void persistCodexConfig({ tui_animations: checked })
-                    }
-                    disabled={saving}
-                  />
-                </SettingItem>
-
-                <SettingItem
-                  label="备用屏幕 (tui.alternate_screen)"
-                  subtitle="控制是否使用 alternate screen（never 可保留终端滚动回溯；默认 auto）。"
-                >
-                  <Select
-                    value={codexConfig.tui_alternate_screen ?? ""}
-                    onChange={(e) =>
-                      void persistCodexConfig({ tui_alternate_screen: e.currentTarget.value })
-                    }
-                    disabled={saving}
-                    className="w-[220px] max-w-full font-mono"
-                  >
-                    <option value="">默认（不设置）</option>
-                    <option value="auto">自动（auto）</option>
-                    <option value="always">始终（always）</option>
-                    <option value="never">从不（never）</option>
-                  </Select>
-                </SettingItem>
-
-                <SettingItem
-                  label="显示新手提示 (tui.show_tooltips)"
-                  subtitle="开启写入 tui.show_tooltips=true；关闭删除该项（不写 false）。"
-                >
-                  <Switch
-                    checked={boolOrDefault(codexConfig.tui_show_tooltips, false)}
-                    onCheckedChange={(checked) =>
-                      void persistCodexConfig({ tui_show_tooltips: checked })
-                    }
-                    disabled={saving}
-                  />
-                </SettingItem>
-
-                <SettingItem
-                  label="滚轮方向反转 (tui.scroll_invert)"
-                  subtitle="开启写入 tui.scroll_invert=true；关闭删除该项（不写 false）。"
-                >
-                  <Switch
-                    checked={boolOrDefault(codexConfig.tui_scroll_invert, false)}
-                    onCheckedChange={(checked) =>
-                      void persistCodexConfig({ tui_scroll_invert: checked })
-                    }
-                    disabled={saving}
-                  />
-                </SettingItem>
-              </div>
             </div>
 
             <div className="rounded-lg border border-slate-200 bg-white p-5">
@@ -657,61 +480,6 @@ export function CliManagerCodexTab({
                     checked={boolOrDefault(codexConfig.features_remote_models, false)}
                     onCheckedChange={(checked) =>
                       void persistCodexConfig({ features_remote_models: checked })
-                    }
-                    disabled={saving}
-                  />
-                </SettingItem>
-
-                <SettingItem
-                  label="powershell_utf8"
-                  subtitle="Windows：强制 PowerShell 使用 UTF-8 输出。开启写入 powershell_utf8=true；"
-                >
-                  <Switch
-                    checked={boolOrDefault(codexConfig.features_powershell_utf8, false)}
-                    onCheckedChange={(checked) =>
-                      void persistCodexConfig({ features_powershell_utf8: checked })
-                    }
-                    disabled={saving}
-                  />
-                </SettingItem>
-
-                <SettingItem
-                  label="child_agents_md"
-                  subtitle="实验性：即使没有 AGENTS.md 也附加其作用域/优先级说明。开启写入 child_agents_md=true；"
-                >
-                  <Switch
-                    checked={boolOrDefault(codexConfig.features_child_agents_md, false)}
-                    onCheckedChange={(checked) =>
-                      void persistCodexConfig({ features_child_agents_md: checked })
-                    }
-                    disabled={saving}
-                  />
-                </SettingItem>
-
-                <SettingItem
-                  label="experimental_windows_sandbox"
-                  subtitle="实验性：Windows 受限令牌 sandbox。开启写入 experimental_windows_sandbox=true；"
-                >
-                  <Switch
-                    checked={boolOrDefault(
-                      codexConfig.features_experimental_windows_sandbox,
-                      false
-                    )}
-                    onCheckedChange={(checked) =>
-                      void persistCodexConfig({ features_experimental_windows_sandbox: checked })
-                    }
-                    disabled={saving}
-                  />
-                </SettingItem>
-
-                <SettingItem
-                  label="elevated_windows_sandbox"
-                  subtitle="实验性：Windows 提权 sandbox 流程。开启写入 elevated_windows_sandbox=true；"
-                >
-                  <Switch
-                    checked={boolOrDefault(codexConfig.features_elevated_windows_sandbox, false)}
-                    onCheckedChange={(checked) =>
-                      void persistCodexConfig({ features_elevated_windows_sandbox: checked })
                     }
                     disabled={saving}
                   />
