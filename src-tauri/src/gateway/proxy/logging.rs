@@ -1,6 +1,6 @@
 //! Usage: Best-effort enqueue to DB log tasks with backpressure and fallbacks.
 
-use crate::{db, request_attempt_logs, request_logs, usage};
+use crate::{db, request_attempt_logs, request_logs};
 use std::time::Duration;
 
 use super::super::events::{emit_gateway_log, GatewayAttemptEvent};
@@ -112,6 +112,7 @@ fn request_log_insert_from_args(
         requested_model,
         created_at_ms,
         created_at,
+        usage_metrics,
         usage,
     } = args;
 
@@ -121,7 +122,7 @@ fn request_log_insert_from_args(
 
     let (metrics, usage_json) = match usage {
         Some(extract) => (extract.metrics, Some(extract.usage_json)),
-        None => (usage::UsageMetrics::default(), None),
+        None => (usage_metrics.unwrap_or_default(), None),
     };
 
     let duration_ms = duration_ms.min(i64::MAX as u128) as i64;
@@ -229,4 +230,93 @@ pub(in crate::gateway) fn spawn_enqueue_request_log_with_backpressure(
     tauri::async_runtime::spawn(async move {
         enqueue_request_log_with_backpressure(&app, &db, &log_tx, args).await;
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::usage::{UsageExtract, UsageMetrics};
+
+    fn base_args() -> super::super::RequestLogEnqueueArgs {
+        super::super::RequestLogEnqueueArgs {
+            trace_id: "t".to_string(),
+            cli_key: "claude".to_string(),
+            session_id: None,
+            method: "POST".to_string(),
+            path: "/v1/messages".to_string(),
+            query: None,
+            excluded_from_stats: false,
+            special_settings_json: None,
+            status: Some(200),
+            error_code: None,
+            duration_ms: 10,
+            ttfb_ms: None,
+            attempts_json: "[]".to_string(),
+            requested_model: None,
+            created_at_ms: 0,
+            created_at: 0,
+            usage_metrics: None,
+            usage: None,
+        }
+    }
+
+    #[test]
+    fn request_log_insert_uses_usage_metrics_when_usage_missing() {
+        let mut args = base_args();
+        args.usage_metrics = Some(UsageMetrics {
+            input_tokens: Some(1),
+            output_tokens: Some(2),
+            total_tokens: Some(3),
+            cache_read_input_tokens: Some(4),
+            cache_creation_input_tokens: Some(5),
+            cache_creation_5m_input_tokens: Some(6),
+            cache_creation_1h_input_tokens: Some(7),
+        });
+
+        let insert = request_log_insert_from_args(args).expect("insert");
+        assert_eq!(insert.input_tokens, Some(1));
+        assert_eq!(insert.output_tokens, Some(2));
+        assert_eq!(insert.total_tokens, Some(3));
+        assert_eq!(insert.cache_read_input_tokens, Some(4));
+        assert_eq!(insert.cache_creation_input_tokens, Some(5));
+        assert_eq!(insert.cache_creation_5m_input_tokens, Some(6));
+        assert_eq!(insert.cache_creation_1h_input_tokens, Some(7));
+        assert_eq!(insert.usage_json, None);
+    }
+
+    #[test]
+    fn request_log_insert_prefers_usage_extract_over_usage_metrics() {
+        let mut args = base_args();
+        args.usage_metrics = Some(UsageMetrics {
+            input_tokens: Some(99),
+            output_tokens: Some(99),
+            total_tokens: Some(99),
+            cache_read_input_tokens: Some(99),
+            cache_creation_input_tokens: Some(99),
+            cache_creation_5m_input_tokens: Some(99),
+            cache_creation_1h_input_tokens: Some(99),
+        });
+        args.usage = Some(UsageExtract {
+            metrics: UsageMetrics {
+                input_tokens: Some(1),
+                output_tokens: Some(2),
+                total_tokens: Some(3),
+                cache_read_input_tokens: Some(4),
+                cache_creation_input_tokens: Some(5),
+                cache_creation_5m_input_tokens: Some(6),
+                cache_creation_1h_input_tokens: Some(7),
+            },
+            usage_json: "{\"input_tokens\":1}".to_string(),
+        });
+
+        let insert = request_log_insert_from_args(args).expect("insert");
+        assert_eq!(insert.input_tokens, Some(1));
+        assert_eq!(insert.output_tokens, Some(2));
+        assert_eq!(insert.total_tokens, Some(3));
+        assert_eq!(insert.cache_read_input_tokens, Some(4));
+        assert_eq!(insert.cache_creation_input_tokens, Some(5));
+        assert_eq!(insert.cache_creation_5m_input_tokens, Some(6));
+        assert_eq!(insert.cache_creation_1h_input_tokens, Some(7));
+        assert_eq!(insert.usage_json, Some("{\"input_tokens\":1}".to_string()));
+    }
 }

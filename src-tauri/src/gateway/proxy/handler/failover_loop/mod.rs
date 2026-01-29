@@ -20,7 +20,9 @@ use event_helpers::{
     emit_attempt_event_and_log, emit_attempt_event_and_log_with_circuit_before,
     AttemptCircuitFields,
 };
-use request_end_helpers::{emit_request_event_and_enqueue_request_log, RequestEndArgs};
+use request_end_helpers::{
+    emit_request_event_and_enqueue_request_log, RequestEndArgs, RequestEndDeps,
+};
 
 use super::super::{
     errors::{classify_upstream_status, error_response},

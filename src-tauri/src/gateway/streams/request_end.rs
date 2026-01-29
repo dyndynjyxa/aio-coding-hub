@@ -60,6 +60,7 @@ pub(super) fn emit_request_event_and_spawn_request_log(
             requested_model,
             created_at_ms: ctx.created_at_ms,
             created_at: ctx.created_at,
+            usage_metrics: None,
             usage,
         },
     );

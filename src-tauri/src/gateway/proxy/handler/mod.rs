@@ -4,7 +4,10 @@
 
 use super::caches::RECENT_TRACE_DEDUP_TTL_SECS;
 use super::request_context::{RequestContext, RequestContextParts};
-use super::request_end::{emit_request_event_and_enqueue_request_log, RequestEndArgs};
+use super::request_end::{
+    emit_request_event_and_enqueue_request_log, emit_request_event_and_spawn_request_log,
+    RequestEndArgs, RequestEndDeps,
+};
 use super::ErrorCategory;
 use super::{
     cli_proxy_guard::cli_proxy_enabled_cached,
@@ -12,7 +15,7 @@ use super::{
     failover::{select_next_provider_id_from_order, should_reuse_provider},
 };
 
-use crate::{providers, request_logs, session_manager, settings, usage};
+use crate::{providers, session_manager, settings, usage};
 use axum::{
     body::{to_bytes, Body, Bytes},
     http::{header, HeaderValue, Request, StatusCode},
@@ -24,7 +27,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use super::super::codex_session_id;
-use super::super::events::{emit_gateway_log, emit_request_event, emit_request_start_event};
+use super::super::events::{emit_gateway_log, emit_request_start_event};
 use super::super::manager::GatewayAppState;
 use super::super::response_fixer;
 use super::super::util::{
@@ -94,7 +97,7 @@ pub(in crate::gateway) async fn proxy_impl(
 
             let duration_ms = started.elapsed().as_millis();
             emit_request_event_and_enqueue_request_log(RequestEndArgs {
-                state: &state,
+                deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx),
                 trace_id: trace_id.as_str(),
                 cli_key: cli_key.as_str(),
                 method: method_hint.as_str(),
@@ -114,6 +117,7 @@ pub(in crate::gateway) async fn proxy_impl(
                 created_at_ms,
                 created_at,
                 usage_metrics: None,
+                log_usage_metrics: None,
                 usage: None,
             })
             .await;
@@ -140,7 +144,7 @@ pub(in crate::gateway) async fn proxy_impl(
 
             let duration_ms = started.elapsed().as_millis();
             emit_request_event_and_enqueue_request_log(RequestEndArgs {
-                state: &state,
+                deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx),
                 trace_id: trace_id.as_str(),
                 cli_key: cli_key.as_str(),
                 method: method_hint.as_str(),
@@ -160,6 +164,7 @@ pub(in crate::gateway) async fn proxy_impl(
                 created_at_ms,
                 created_at,
                 usage_metrics: None,
+                log_usage_metrics: None,
                 usage: None,
             })
             .await;
@@ -267,58 +272,59 @@ pub(in crate::gateway) async fn proxy_impl(
             requested_model.clone(),
             created_at,
         );
-        emit_request_event(
-            &state.app,
-            trace_id.clone(),
-            cli_key.clone(),
-            method_hint.clone(),
-            forwarded_path.clone(),
-            query.clone(),
-            Some(StatusCode::OK.as_u16()),
-            None,
-            None,
-            duration_ms,
-            Some(duration_ms),
-            vec![],
-            Some(usage::UsageMetrics::default()),
-        );
-
-        let attempts_json = serde_json::json!([{
-            "provider_id": 0,
-            "provider_name": "Warmup",
-            "outcome": "success",
-            "session_reuse": false,
-        }])
-        .to_string();
-
-        let insert = request_logs::RequestLogInsert {
-            trace_id: trace_id.clone(),
-            cli_key: cli_key.clone(),
-            session_id: None,
-            method: method_hint.clone(),
-            path: forwarded_path.clone(),
-            query: query.clone(),
-            excluded_from_stats: true,
-            special_settings_json: Some(special_settings_json),
-            status: Some(StatusCode::OK.as_u16() as i64),
+        let warmup_attempts = [super::super::events::FailoverAttempt {
+            provider_id: 0,
+            provider_name: "Warmup".to_string(),
+            base_url: "/__aio__/warmup".to_string(),
+            outcome: "success".to_string(),
+            status: Some(StatusCode::OK.as_u16()),
+            provider_index: None,
+            retry_index: None,
+            session_reuse: Some(false),
+            error_category: None,
             error_code: None,
-            duration_ms: duration_ms.min(i64::MAX as u128) as i64,
-            ttfb_ms: Some(duration_ms.min(i64::MAX as u128) as i64),
-            attempts_json,
-            input_tokens: Some(0),
-            output_tokens: Some(0),
-            total_tokens: Some(0),
-            cache_read_input_tokens: Some(0),
-            cache_creation_input_tokens: Some(0),
-            cache_creation_5m_input_tokens: Some(0),
-            cache_creation_1h_input_tokens: Some(0),
-            usage_json: None,
+            decision: None,
+            reason: None,
+            attempt_started_ms: None,
+            attempt_duration_ms: None,
+            circuit_state_before: None,
+            circuit_state_after: None,
+            circuit_failure_count: None,
+            circuit_failure_threshold: None,
+        }];
+
+        emit_request_event_and_spawn_request_log(RequestEndArgs {
+            deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx),
+            trace_id: trace_id.as_str(),
+            cli_key: cli_key.as_str(),
+            method: method_hint.as_str(),
+            path: forwarded_path.as_str(),
+            query: query.as_deref(),
+            excluded_from_stats: true,
+            status: Some(StatusCode::OK.as_u16()),
+            error_category: None,
+            error_code: None,
+            duration_ms,
+            event_ttfb_ms: Some(duration_ms),
+            log_ttfb_ms: Some(duration_ms),
+            attempts: &warmup_attempts,
+            special_settings_json: Some(special_settings_json),
+            session_id: None,
             requested_model: requested_model.clone(),
             created_at_ms,
             created_at,
-        };
-
-        let _ = state.log_tx.try_send(insert);
+            usage_metrics: Some(usage::UsageMetrics::default()),
+            log_usage_metrics: Some(usage::UsageMetrics {
+                input_tokens: Some(0),
+                output_tokens: Some(0),
+                total_tokens: Some(0),
+                cache_read_input_tokens: Some(0),
+                cache_creation_input_tokens: Some(0),
+                cache_creation_5m_input_tokens: Some(0),
+                cache_creation_1h_input_tokens: Some(0),
+            }),
+            usage: None,
+        });
 
         let mut resp = (StatusCode::OK, Json(response_body)).into_response();
         resp.headers_mut().insert(
@@ -395,21 +401,31 @@ pub(in crate::gateway) async fn proxy_impl(
             vec![],
         );
 
-        emit_request_event(
-            &state.app,
-            trace_id.clone(),
-            cli_key.clone(),
-            method_hint.clone(),
-            forwarded_path.clone(),
-            query.clone(),
-            Some(StatusCode::BAD_REQUEST.as_u16()),
-            None,
-            Some("GW_INVALID_CLI_KEY"),
-            started.elapsed().as_millis(),
-            None,
-            vec![],
-            None,
-        );
+        let duration_ms = started.elapsed().as_millis();
+        emit_request_event_and_spawn_request_log(RequestEndArgs {
+            deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx),
+            trace_id: trace_id.as_str(),
+            cli_key: cli_key.as_str(),
+            method: method_hint.as_str(),
+            path: forwarded_path.as_str(),
+            query: query.as_deref(),
+            excluded_from_stats: false,
+            status: Some(StatusCode::BAD_REQUEST.as_u16()),
+            error_category: None,
+            error_code: Some("GW_INVALID_CLI_KEY"),
+            duration_ms,
+            event_ttfb_ms: None,
+            log_ttfb_ms: None,
+            attempts: &[],
+            special_settings_json: None,
+            session_id: session_id.clone(),
+            requested_model: requested_model.clone(),
+            created_at_ms,
+            created_at,
+            usage_metrics: None,
+            log_usage_metrics: None,
+            usage: None,
+        });
 
         resp
     };
@@ -495,7 +511,7 @@ pub(in crate::gateway) async fn proxy_impl(
         );
         let duration_ms = started.elapsed().as_millis();
         emit_request_event_and_enqueue_request_log(RequestEndArgs {
-            state: &state,
+            deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx),
             trace_id: trace_id.as_str(),
             cli_key: cli_key.as_str(),
             method: method_hint.as_str(),
@@ -515,6 +531,7 @@ pub(in crate::gateway) async fn proxy_impl(
             created_at_ms,
             created_at,
             usage_metrics: None,
+            log_usage_metrics: None,
             usage: None,
         })
         .await;

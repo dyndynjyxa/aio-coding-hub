@@ -406,7 +406,7 @@ pub(super) async fn handle_success_non_stream(
 
     let duration_ms = started.elapsed().as_millis();
     emit_request_event_and_enqueue_request_log(RequestEndArgs {
-        state,
+        deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx),
         trace_id: common.trace_id.as_str(),
         cli_key: common.cli_key.as_str(),
         method: common.method_hint.as_str(),
@@ -426,6 +426,7 @@ pub(super) async fn handle_success_non_stream(
         created_at_ms,
         created_at,
         usage_metrics,
+        log_usage_metrics: None,
         usage,
     })
     .await;

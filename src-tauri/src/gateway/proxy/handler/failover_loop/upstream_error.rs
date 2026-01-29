@@ -18,7 +18,7 @@ use super::context::{
 };
 use super::thinking_signature_rectifier_400;
 use super::{emit_attempt_event_and_log, AttemptCircuitFields};
-use super::{emit_request_event_and_enqueue_request_log, RequestEndArgs};
+use super::{emit_request_event_and_enqueue_request_log, RequestEndArgs, RequestEndDeps};
 use crate::circuit_breaker;
 use crate::gateway::events::FailoverAttempt;
 use crate::gateway::response_fixer;
@@ -288,7 +288,7 @@ pub(super) async fn handle_non_success_response(
                 let duration_ms = started.elapsed().as_millis();
 
                 emit_request_event_and_enqueue_request_log(RequestEndArgs {
-                    state,
+                    deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx),
                     trace_id: trace_id.as_str(),
                     cli_key: cli_key.as_str(),
                     method: method_hint.as_str(),
@@ -308,6 +308,7 @@ pub(super) async fn handle_non_success_response(
                     created_at_ms,
                     created_at,
                     usage_metrics: None,
+                    log_usage_metrics: None,
                     usage: None,
                 })
                 .await;
@@ -326,7 +327,7 @@ pub(super) async fn handle_non_success_response(
             let duration_ms = started.elapsed().as_millis();
 
             emit_request_event_and_enqueue_request_log(RequestEndArgs {
-                state,
+                deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx),
                 trace_id: trace_id.as_str(),
                 cli_key: cli_key.as_str(),
                 method: method_hint.as_str(),
@@ -346,6 +347,7 @@ pub(super) async fn handle_non_success_response(
                 created_at_ms,
                 created_at,
                 usage_metrics: None,
+                log_usage_metrics: None,
                 usage: None,
             })
             .await;

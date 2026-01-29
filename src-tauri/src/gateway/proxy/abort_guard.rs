@@ -3,8 +3,10 @@
 use crate::{db, request_logs};
 use std::time::Instant;
 
-use super::{spawn_enqueue_request_log_with_backpressure, ErrorCategory, RequestLogEnqueueArgs};
-use crate::gateway::events::emit_request_event;
+use super::request_end::{
+    emit_request_event_and_spawn_request_log, RequestEndArgs, RequestEndDeps,
+};
+use super::ErrorCategory;
 
 pub(super) struct RequestAbortGuard {
     app: tauri::AppHandle,
@@ -64,45 +66,29 @@ impl Drop for RequestAbortGuard {
         }
 
         let duration_ms = self.started.elapsed().as_millis();
-        emit_request_event(
-            &self.app,
-            self.trace_id.clone(),
-            self.cli_key.clone(),
-            self.method.clone(),
-            self.path.clone(),
-            self.query.clone(),
-            None,
-            Some(ErrorCategory::ClientAbort.as_str()),
-            Some("GW_REQUEST_ABORTED"),
+        emit_request_event_and_spawn_request_log(RequestEndArgs {
+            deps: RequestEndDeps::new(&self.app, &self.db, &self.log_tx),
+            trace_id: self.trace_id.as_str(),
+            cli_key: self.cli_key.as_str(),
+            method: self.method.as_str(),
+            path: self.path.as_str(),
+            query: self.query.as_deref(),
+            excluded_from_stats: false,
+            status: None,
+            error_category: Some(ErrorCategory::ClientAbort.as_str()),
+            error_code: Some("GW_REQUEST_ABORTED"),
             duration_ms,
-            None,
-            vec![],
-            None,
-        );
-
-        spawn_enqueue_request_log_with_backpressure(
-            self.app.clone(),
-            self.db.clone(),
-            self.log_tx.clone(),
-            RequestLogEnqueueArgs {
-                trace_id: self.trace_id.clone(),
-                cli_key: self.cli_key.clone(),
-                session_id: None,
-                method: self.method.clone(),
-                path: self.path.clone(),
-                query: self.query.clone(),
-                excluded_from_stats: false,
-                special_settings_json: None,
-                status: None,
-                error_code: Some("GW_REQUEST_ABORTED"),
-                duration_ms,
-                ttfb_ms: None,
-                attempts_json: "[]".to_string(),
-                requested_model: None,
-                created_at_ms: self.created_at_ms,
-                created_at: self.created_at,
-                usage: None,
-            },
-        );
+            event_ttfb_ms: None,
+            log_ttfb_ms: None,
+            attempts: &[],
+            special_settings_json: None,
+            session_id: None,
+            requested_model: None,
+            created_at_ms: self.created_at_ms,
+            created_at: self.created_at,
+            usage_metrics: None,
+            log_usage_metrics: None,
+            usage: None,
+        });
     }
 }

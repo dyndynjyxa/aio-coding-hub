@@ -75,7 +75,7 @@ pub(super) async fn handle_thinking_signature_rectifier_400(
                     attempts.clone(),
                 );
                 emit_request_event_and_enqueue_request_log(RequestEndArgs {
-                    state,
+                    deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx),
                     trace_id: trace_id.as_str(),
                     cli_key: cli_key.as_str(),
                     method: method_hint.as_str(),
@@ -95,6 +95,7 @@ pub(super) async fn handle_thinking_signature_rectifier_400(
                     created_at_ms,
                     created_at,
                     usage_metrics: None,
+                    log_usage_metrics: None,
                     usage: None,
                 })
                 .await;
@@ -279,7 +280,7 @@ pub(super) async fn handle_thinking_signature_rectifier_400(
                 let duration_ms = started.elapsed().as_millis();
 
                 emit_request_event_and_enqueue_request_log(RequestEndArgs {
-                    state,
+                    deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx),
                     trace_id: trace_id.as_str(),
                     cli_key: cli_key.as_str(),
                     method: method_hint.as_str(),
@@ -299,6 +300,7 @@ pub(super) async fn handle_thinking_signature_rectifier_400(
                     created_at_ms,
                     created_at,
                     usage_metrics: None,
+                    log_usage_metrics: None,
                     usage: None,
                 })
                 .await;

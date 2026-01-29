@@ -3,7 +3,7 @@
 use super::super::super::abort_guard::RequestAbortGuard;
 use super::super::super::caches::CachedGatewayError;
 use super::super::super::errors::{error_response, error_response_with_retry_after};
-use super::{emit_request_event_and_enqueue_request_log, RequestEndArgs};
+use super::{emit_request_event_and_enqueue_request_log, RequestEndArgs, RequestEndDeps};
 use crate::gateway::events::FailoverAttempt;
 use crate::gateway::manager::GatewayAppState;
 use crate::gateway::response_fixer;
@@ -81,7 +81,7 @@ pub(super) async fn all_providers_unavailable(input: AllUnavailableInput<'_>) ->
 
     let duration_ms = started.elapsed().as_millis();
     emit_request_event_and_enqueue_request_log(RequestEndArgs {
-        state,
+        deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx),
         trace_id: trace_id.as_str(),
         cli_key: cli_key.as_str(),
         method: method_hint.as_str(),
@@ -101,6 +101,7 @@ pub(super) async fn all_providers_unavailable(input: AllUnavailableInput<'_>) ->
         created_at_ms,
         created_at,
         usage_metrics: None,
+        log_usage_metrics: None,
         usage: None,
     })
     .await;
@@ -191,7 +192,7 @@ pub(super) async fn all_providers_failed(input: AllFailedInput<'_>) -> Response 
 
     let duration_ms = started.elapsed().as_millis();
     emit_request_event_and_enqueue_request_log(RequestEndArgs {
-        state,
+        deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx),
         trace_id: trace_id.as_str(),
         cli_key: cli_key.as_str(),
         method: method_hint.as_str(),
@@ -211,6 +212,7 @@ pub(super) async fn all_providers_failed(input: AllFailedInput<'_>) -> Response 
         created_at_ms,
         created_at,
         usage_metrics: None,
+        log_usage_metrics: None,
         usage: None,
     })
     .await;
