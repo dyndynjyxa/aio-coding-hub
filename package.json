@@ -1,7 +1,7 @@
 {
   "name": "aio-coding-hub",
   "private": true,
-  "version": "0.30.3",
+  "version": "0.30.4",
   "type": "module",
   "scripts": {
     "dev": "vite",

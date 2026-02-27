@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.4](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.30.3...aio-coding-hub-v0.30.4) (2026-02-27)
+
+
+### Bug Fixes
+
+* **heartbeat_watchdog:** 优化窗口重载的错误处理逻辑 ([6188e6c](https://github.com/dyndynjyxa/aio-coding-hub/commit/6188e6c29135c0126490882ceb54302d112ec79c))
+
 ## [0.30.3](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.30.2...aio-coding-hub-v0.30.3) (2026-02-25)
 
 
