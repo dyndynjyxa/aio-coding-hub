@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.30.5](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.30.4...aio-coding-hub-v0.30.5) (2026-02-28)
+
+
+### Features
+
+* **cli-manager:** 对齐 CCH 基础配置开关 ([55779ef](https://github.com/dyndynjyxa/aio-coding-hub/commit/55779efce6964a17b423869af77f3ebff567d62c))
+* **config:** 新增计划模式推理强度配置项 ([6f5da87](https://github.com/dyndynjyxa/aio-coding-hub/commit/6f5da87696af5c90054d6ca5be0f25e0a91eba40))
+* **gateway:** 对齐 CCH 基础配置整流 ([a1c1b5c](https://github.com/dyndynjyxa/aio-coding-hub/commit/a1c1b5c2b730b89184d59fac207d252e9d415c93))
+
 ## [0.30.4](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.30.3...aio-coding-hub-v0.30.4) (2026-02-27)
 
 
