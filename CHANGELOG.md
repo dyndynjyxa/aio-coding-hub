@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.30.7](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.30.6...aio-coding-hub-v0.30.7) (2026-03-01)
+
+
+### Features
+
+* **gateway:** 添加决策链以丰富失败重试事件细节 ([262e98c](https://github.com/dyndynjyxa/aio-coding-hub/commit/262e98cb0ac974c5452e037ac51d5730625d1ef2))
+* **mcp:** 添加 env 和 header 键值对格式校验 ([7d698ca](https://github.com/dyndynjyxa/aio-coding-hub/commit/7d698ca04f1cc9f9c0d420f6d7fec2a53f2d643a))
+
+
+### Bug Fixes
+
+* **gateway:** 修正 provider 重新排序时清除会话绑定逻辑 ([f03c02e](https://github.com/dyndynjyxa/aio-coding-hub/commit/f03c02e5332fe84496a029b2e5d130b558cfad31))
+
 ## [0.30.6](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.30.5...aio-coding-hub-v0.30.6) (2026-03-01)
 
 
