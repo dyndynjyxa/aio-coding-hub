@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.6](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.30.5...aio-coding-hub-v0.30.6) (2026-03-01)
+
+
+### Features
+
+* **claudeModelValidation:** 优化模型验证对话框和多轮验证流程支持 ([3f6c031](https://github.com/dyndynjyxa/aio-coding-hub/commit/3f6c03102db7aaeaa2d8399ebdac1cc4787c2a84))
+
 ## [0.30.5](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.30.4...aio-coding-hub-v0.30.5) (2026-02-28)
 
 
