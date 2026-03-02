@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.30.9](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.30.8...aio-coding-hub-v0.30.9) (2026-03-02)
+
+
+### Features
+
+* **mcp:** 优化服务器键生成与导入逻辑，支持保留大小写 ([f61a5c6](https://github.com/dyndynjyxa/aio-coding-hub/commit/f61a5c6be09795efaf9c4aafe7fee5f86329c0ea))
+* **skills:** 支持从本地源恢复缺失的ssot技能目录 ([4414f7d](https://github.com/dyndynjyxa/aio-coding-hub/commit/4414f7d38a44e4aff7de0730fe591b93146d7468))
+
+
+### Bug Fixes
+
+* **mcp:** 修复导入服务器时基于 server_key 的重复处理 ([f6e6458](https://github.com/dyndynjyxa/aio-coding-hub/commit/f6e64582e1e4c478ec014e61258611d971f8b3b4))
+
 ## [0.30.8](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.30.7...aio-coding-hub-v0.30.8) (2026-03-02)
 
 
