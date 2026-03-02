@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.30.8](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.30.7...aio-coding-hub-v0.30.8) (2026-03-02)
+
+
+### Features
+
+* **skills:** 添加 Skill 返回本机已安装功能 ([84cfd0b](https://github.com/dyndynjyxa/aio-coding-hub/commit/84cfd0be09c5c38dbd9613533062a3daef6c57df))
+
+
+### Bug Fixes
+
+* **skills:** 优化符号链接目录的移除逻辑 ([2ef9928](https://github.com/dyndynjyxa/aio-coding-hub/commit/2ef9928eb3d1d4fa23cb22e2035384e7be2a01f6))
+
 ## [0.30.7](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.30.6...aio-coding-hub-v0.30.7) (2026-03-01)
 
 
