@@ -8,6 +8,8 @@ import {
   CalendarDays,
   CalendarRange,
   Gauge,
+  LogIn,
+  LogOut,
   RotateCcw,
   X,
 } from "lucide-react";
@@ -15,9 +17,15 @@ import { toast } from "sonner";
 import { cliLongLabel } from "../../constants/clis";
 import { logToConsole } from "../../services/consoleLog";
 import {
+  oauthStartLogin,
+  oauthProviderLogout,
+  oauthProviderStatus,
   providerUpsert,
+  type AuthType,
   type ClaudeModels,
   type CliKey,
+  type OAuthProviderStatus,
+  type OAuthProviderType,
   type ProviderSummary,
 } from "../../services/providers";
 import {
@@ -80,11 +88,15 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
   const [saving, setSaving] = useState(false);
+  const [oauthStatus, setOauthStatus] = useState<OAuthProviderStatus | null>(null);
+  const [oauthLoggingIn, setOauthLoggingIn] = useState(false);
 
   const schema = useMemo(() => createProviderEditorDialogSchema({ mode }), [mode]);
   const form = useForm<ProviderEditorDialogFormInput>({
     defaultValues: {
       name: "",
+      auth_type: "api_key",
+      oauth_provider_type: "",
       api_key: "",
       cost_multiplier: "1.0",
       limit_5h_usd: "",
@@ -100,6 +112,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
 
   const { register, reset, setValue, watch } = form;
   const enabled = watch("enabled");
+  const authType = watch("auth_type") as AuthType;
   const dailyResetMode = watch("daily_reset_mode");
   const limit5hUsd = watch("limit_5h_usd");
   const limitDailyUsd = watch("limit_daily_usd");
@@ -125,8 +138,12 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
       setClaudeModels({});
       setTags([]);
       setTagInput("");
+      setOauthStatus(null);
+      setOauthLoggingIn(false);
       reset({
         name: "",
+        auth_type: "api_key",
+        oauth_provider_type: "",
         api_key: "",
         cost_multiplier: "1.0",
         limit_5h_usd: "",
@@ -147,8 +164,11 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
     setClaudeModels(props.provider.claude_models ?? {});
     setTags(props.provider.tags ?? []);
     setTagInput("");
+    setOauthLoggingIn(false);
     reset({
       name: props.provider.name,
+      auth_type: props.provider.auth_type ?? "api_key",
+      oauth_provider_type: props.provider.oauth_provider_type ?? "",
       api_key: "",
       cost_multiplier: String(props.provider.cost_multiplier ?? 1.0),
       limit_5h_usd: props.provider.limit_5h_usd != null ? String(props.provider.limit_5h_usd) : "",
@@ -164,6 +184,15 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
       daily_reset_time: props.provider.daily_reset_time ?? "00:00:00",
       enabled: props.provider.enabled,
     });
+
+    // Load OAuth status for edit mode OAuth providers.
+    if (props.provider.auth_type === "oauth") {
+      oauthProviderStatus(props.provider.id).then((status) => {
+        if (status) setOauthStatus(status);
+      });
+    } else {
+      setOauthStatus(null);
+    }
     // Only reset form when dialog opens or provider identity changes.
     // Intentionally omitting props.provider fields to avoid resetting user edits
     // when the provider object reference changes from a background query refetch.
@@ -243,7 +272,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
         name: values.name,
         base_urls: normalized.baseUrls,
         base_url_mode: baseUrlMode,
-        api_key: values.api_key,
+        api_key: values.auth_type === "oauth" ? undefined : values.api_key,
         enabled: values.enabled,
         cost_multiplier: values.cost_multiplier,
         limit_5h_usd: values.limit_5h_usd,
@@ -254,6 +283,8 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
         limit_monthly_usd: values.limit_monthly_usd,
         limit_total_usd: values.limit_total_usd,
         tags,
+        auth_type: values.auth_type as AuthType,
+        oauth_provider_type: values.oauth_provider_type as OAuthProviderType | undefined,
         ...(cliKey === "claude" ? { claude_models: claudeModels } : {}),
       });
 
@@ -391,6 +422,37 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
         </FormField>
 
         <div className="grid gap-3 sm:grid-cols-2">
+          <FormField label="认证方式">
+            {mode === "create" ? (
+              <RadioButtonGroup<AuthType>
+                items={[
+                  { value: "api_key", label: "API Key" },
+                  { value: "oauth", label: "OAuth" },
+                ]}
+                ariaLabel="认证方式"
+                value={authType}
+                onChange={(value) => setValue("auth_type", value, { shouldDirty: true })}
+                disabled={saving}
+              />
+            ) : (
+              <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-300">
+                {authType === "oauth" ? "OAuth" : "API Key"}
+              </span>
+            )}
+          </FormField>
+
+          <FormField label="价格倍率">
+            <Input
+              type="number"
+              min="0.0001"
+              step="0.01"
+              placeholder="1.0"
+              {...register("cost_multiplier")}
+            />
+          </FormField>
+        </div>
+
+        {authType === "api_key" ? (
           <FormField
             label="API Key / Token"
             hint={mode === "edit" ? "留空保持不变" : "保存后不回显"}
@@ -404,17 +466,96 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
               />
             </div>
           </FormField>
+        ) : (
+          <>
+            {mode === "create" ? (
+              <FormField label="OAuth 类型" hint="选择 OAuth 提供商">
+                <select
+                  className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
+                  {...register("oauth_provider_type")}
+                  disabled={saving}
+                >
+                  <option value="">-- 请选择 --</option>
+                  <option value="claude_oauth">Claude</option>
+                  <option value="codex_oauth">Codex</option>
+                  <option value="gemini_oauth">Gemini</option>
+                </select>
+              </FormField>
+            ) : null}
 
-          <FormField label="价格倍率">
-            <Input
-              type="number"
-              min="0.0001"
-              step="0.01"
-              placeholder="1.0"
-              {...register("cost_multiplier")}
-            />
-          </FormField>
-        </div>
+            {mode === "edit" && editingProviderId != null ? (
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                      OAuth 状态
+                    </div>
+                    {oauthStatus?.has_token ? (
+                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+                        已认证
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-slate-700 dark:text-slate-400">
+                        未登录
+                      </span>
+                    )}
+                    {oauthStatus?.quota_exceeded ? (
+                      <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                        配额超限
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="flex gap-2">
+                    {oauthStatus?.has_token ? (
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        disabled={saving || oauthLoggingIn}
+                        onClick={async () => {
+                          const result = await oauthProviderLogout(editingProviderId);
+                          if (result) setOauthStatus(result);
+                        }}
+                      >
+                        <LogOut className="h-4 w-4" />
+                        登出
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        disabled={saving || oauthLoggingIn}
+                        onClick={async () => {
+                          setOauthLoggingIn(true);
+                          try {
+                            const result = await oauthStartLogin(editingProviderId);
+                            if (result) setOauthStatus(result);
+                          } catch (err) {
+                            toast(`OAuth 登录失败: ${String(err)}`);
+                          } finally {
+                            setOauthLoggingIn(false);
+                          }
+                        }}
+                      >
+                        <LogIn className="h-4 w-4" />
+                        {oauthLoggingIn ? "登录中…" : "浏览器登录"}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                {oauthStatus?.last_error ? (
+                  <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">
+                    {oauthStatus.last_error}
+                  </p>
+                ) : null}
+                {oauthStatus?.expires_at ? (
+                  <p className="mt-1 text-xs text-slate-400">
+                    Token 过期时间: {new Date(oauthStatus.expires_at * 1000).toLocaleString()}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </>
+        )}
 
         <details className="group rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50/80 to-white shadow-sm open:ring-2 open:ring-accent/10 transition-all dark:border-slate-700 dark:from-slate-800/80 dark:to-slate-900">
           <summary className="flex cursor-pointer items-center justify-between px-5 py-4 select-none">

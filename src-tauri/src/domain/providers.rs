@@ -36,6 +36,30 @@ impl DailyResetMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthType {
+    ApiKey,
+    Oauth,
+}
+
+impl AuthType {
+    fn parse(input: &str) -> Option<Self> {
+        match input.trim() {
+            "api_key" => Some(Self::ApiKey),
+            "oauth" => Some(Self::Oauth),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::ApiKey => "api_key",
+            Self::Oauth => "oauth",
+        }
+    }
+}
+
 fn parse_reset_time_hms(input: &str) -> Option<(u8, u8, u8)> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -265,6 +289,12 @@ pub struct ProviderSummary {
     pub limit_monthly_usd: Option<f64>,
     pub limit_total_usd: Option<f64>,
     pub tags: Vec<String>,
+    pub auth_type: AuthType,
+    pub oauth_provider_type: Option<String>,
+    pub oauth_expires_at: Option<i64>,
+    pub oauth_last_error: Option<String>,
+    pub oauth_quota_exceeded: bool,
+    pub oauth_quota_recover_at: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -284,6 +314,20 @@ pub(crate) struct ProviderForGateway {
     pub limit_weekly_usd: Option<f64>,
     pub limit_monthly_usd: Option<f64>,
     pub limit_total_usd: Option<f64>,
+    pub auth_type: AuthType,
+    pub oauth_access_token: Option<String>,
+    pub oauth_id_token: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ProviderOAuthRefreshInfo {
+    pub id: i64,
+    pub oauth_provider_type: String,
+    pub oauth_refresh_token: Option<String>,
+    pub oauth_token_uri: Option<String>,
+    pub oauth_client_id: Option<String>,
+    pub oauth_client_secret: Option<String>,
+    pub oauth_last_refreshed_at: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -359,6 +403,8 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<ProviderSummary, rusqlite::
     let base_urls_json: String = row.get("base_urls_json")?;
     let claude_models_json: String = row.get("claude_models_json")?;
     let tags_json: String = row.get("tags_json")?;
+    let auth_type_raw: String = row.get("auth_type")?;
+    let auth_type = AuthType::parse(&auth_type_raw).unwrap_or(AuthType::ApiKey);
     let base_url_mode_raw: String = row.get("base_url_mode")?;
     let daily_reset_mode_raw: String = row.get("daily_reset_mode")?;
     let daily_reset_time_raw: String = row.get("daily_reset_time")?;
@@ -390,6 +436,12 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<ProviderSummary, rusqlite::
         limit_monthly_usd: row.get("limit_monthly_usd")?,
         limit_total_usd: row.get("limit_total_usd")?,
         tags: tags_from_json(&tags_json),
+        auth_type,
+        oauth_provider_type: row.get("oauth_provider_type")?,
+        oauth_expires_at: row.get("oauth_expires_at")?,
+        oauth_last_error: row.get("oauth_last_error")?,
+        oauth_quota_exceeded: row.get::<_, i64>("oauth_quota_exceeded").unwrap_or(0) != 0,
+        oauth_quota_recover_at: row.get("oauth_quota_recover_at")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
     })
@@ -430,6 +482,12 @@ SELECT
   limit_weekly_usd,
   limit_monthly_usd,
   limit_total_usd,
+  auth_type,
+  oauth_provider_type,
+  oauth_expires_at,
+  oauth_last_error,
+  oauth_quota_exceeded,
+  oauth_quota_recover_at,
   created_at,
   updated_at
 FROM providers
@@ -452,24 +510,26 @@ pub(crate) fn claude_terminal_launch_context(
     }
 
     let conn = db.open_connection()?;
-    let row: Option<(String, String, String, String)> = conn
+    let row: Option<(String, String, String, String, String, Option<String>)> = conn
         .query_row(
             r#"
-SELECT
-  cli_key,
-  base_url,
-  base_urls_json,
-  api_key_plaintext
-FROM providers
-WHERE id = ?1
+SELECT cli_key, base_url, base_urls_json, api_key_plaintext, auth_type, oauth_access_token FROM providers WHERE id = ?1
 "#,
             params![provider_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
         )
         .optional()
         .map_err(|e| db_err!("failed to query provider for launch context: {e}"))?;
 
-    let Some((cli_key, base_url_fallback, base_urls_json, api_key_plaintext)) = row else {
+    let Some((
+        cli_key,
+        base_url_fallback,
+        base_urls_json,
+        api_key_plaintext,
+        auth_type_raw,
+        oauth_access_token,
+    )) = row
+    else {
         return Err("DB_NOT_FOUND: provider not found".to_string().into());
     };
 
@@ -485,14 +545,27 @@ WHERE id = ?1
     reqwest::Url::parse(&base_url)
         .map_err(|e| format!("SEC_INVALID_INPUT: invalid base_url={base_url}: {e}"))?;
 
-    let api_key_plaintext = api_key_plaintext.trim().to_string();
-    if api_key_plaintext.is_empty() {
-        return Err("SEC_INVALID_INPUT: provider api_key is empty"
-            .to_string()
-            .into());
-    }
+    let effective_api_key = match auth_type_raw.as_str() {
+        "oauth" => oauth_access_token
+            .filter(|t| !t.trim().is_empty())
+            .ok_or_else(|| {
+                "SEC_INVALID_INPUT: oauth provider has no access token (please login first)"
+                    .to_string()
+            })?,
+        _ => {
+            let key = api_key_plaintext.trim().to_string();
+            if key.is_empty() {
+                return Err("SEC_INVALID_INPUT: provider api_key is empty"
+                    .to_string()
+                    .into());
+            }
+            key
+        }
+    };
 
-    Ok(ClaudeTerminalLaunchContext { api_key_plaintext })
+    Ok(ClaudeTerminalLaunchContext {
+        api_key_plaintext: effective_api_key,
+    })
 }
 
 pub fn names_by_id(
@@ -570,6 +643,12 @@ SELECT
 	  limit_weekly_usd,
 	  limit_monthly_usd,
 	  limit_total_usd,
+	  auth_type,
+	  oauth_provider_type,
+	  oauth_expires_at,
+	  oauth_last_error,
+	  oauth_quota_exceeded,
+	  oauth_quota_recover_at,
 	  created_at,
 	  updated_at
 	FROM providers
@@ -608,6 +687,8 @@ fn map_gateway_provider_row(
     let daily_reset_mode =
         DailyResetMode::parse(&daily_reset_mode_raw).unwrap_or(DailyResetMode::Fixed);
     let daily_reset_time = normalize_reset_time_hms_lossy(&daily_reset_time_raw);
+    let auth_type_raw: String = row.get("auth_type")?;
+    let auth_type = AuthType::parse(&auth_type_raw).unwrap_or(AuthType::ApiKey);
     Ok(ProviderForGateway {
         id: row.get("id")?,
         name: row.get("name")?,
@@ -626,6 +707,9 @@ fn map_gateway_provider_row(
         limit_weekly_usd: row.get("limit_weekly_usd")?,
         limit_monthly_usd: row.get("limit_monthly_usd")?,
         limit_total_usd: row.get("limit_total_usd")?,
+        auth_type,
+        oauth_access_token: row.get("oauth_access_token")?,
+        oauth_id_token: row.get("oauth_id_token")?,
     })
 }
 
@@ -652,7 +736,10 @@ SELECT
   p.daily_reset_time,
   p.limit_weekly_usd,
   p.limit_monthly_usd,
-  p.limit_total_usd
+  p.limit_total_usd,
+  p.auth_type,
+  p.oauth_access_token,
+  p.oauth_id_token
 FROM sort_mode_providers mp
 JOIN providers p ON p.id = mp.provider_id
 WHERE mp.mode_id = ?1
@@ -699,7 +786,10 @@ SELECT
   daily_reset_time,
   limit_weekly_usd,
   limit_monthly_usd,
-  limit_total_usd
+  limit_total_usd,
+  auth_type,
+  oauth_access_token,
+  oauth_id_token
 FROM providers
 WHERE cli_key = ?1
   AND enabled = 1
@@ -799,6 +889,8 @@ pub fn upsert(
     limit_monthly_usd: Option<f64>,
     limit_total_usd: Option<f64>,
     tags: Option<Vec<String>>,
+    auth_type: Option<&str>,
+    oauth_provider_type: Option<&str>,
 ) -> crate::shared::error::AppResult<ProviderSummary> {
     let cli_key = cli_key.trim();
     validate_cli_key(cli_key)?;
@@ -842,9 +934,18 @@ pub fn upsert(
     match provider_id {
         None => {
             let priority = priority.unwrap_or(DEFAULT_PRIORITY);
-            let api_key =
-                api_key.ok_or_else(|| "SEC_INVALID_INPUT: api_key is required".to_string())?;
             let sort_order = next_sort_order(&conn, cli_key)?;
+
+            let auth_type = AuthType::parse(auth_type.unwrap_or("api_key")).ok_or_else(|| {
+                "SEC_INVALID_INPUT: auth_type must be 'api_key' or 'oauth'".to_string()
+            })?;
+
+            let api_key = if auth_type == AuthType::ApiKey {
+                Some(api_key.ok_or_else(|| "SEC_INVALID_INPUT: api_key is required".to_string())?)
+            } else {
+                api_key
+            };
+            let api_key = api_key.unwrap_or("");
 
             let claude_models = if cli_key == "claude" {
                 claude_models.unwrap_or_default().normalized()
@@ -897,9 +998,11 @@ INSERT INTO providers(
   limit_monthly_usd,
   limit_total_usd,
   tags_json,
+  auth_type,
+  oauth_provider_type,
   created_at,
   updated_at
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '{}', '{}', ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '{}', '{}', ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
 "#,
                 params![
                     cli_key,
@@ -921,6 +1024,8 @@ INSERT INTO providers(
                     limit_monthly_usd,
                     limit_total_usd,
                     tags_json_value,
+                    auth_type.as_str(),
+                    oauth_provider_type,
                     now,
                     now
                 ],
@@ -944,11 +1049,11 @@ INSERT INTO providers(
                 .transaction()
                 .map_err(|e| db_err!("failed to start transaction: {e}"))?;
 
-            let existing: Option<(String, String, i64, String, String, String, String)> = tx
+            let existing: Option<(String, String, i64, String, String, String, String, String)> = tx
                 .query_row(
-                    "SELECT cli_key, api_key_plaintext, priority, claude_models_json, daily_reset_mode, daily_reset_time, tags_json FROM providers WHERE id = ?1",
+                    "SELECT cli_key, api_key_plaintext, priority, claude_models_json, daily_reset_mode, daily_reset_time, tags_json, auth_type FROM providers WHERE id = ?1",
                     params![id],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?)),
                 )
                 .optional()
                 .map_err(|e| db_err!("failed to query provider: {e}"))?;
@@ -961,6 +1066,7 @@ INSERT INTO providers(
                 existing_daily_reset_mode_raw,
                 existing_daily_reset_time_raw,
                 existing_tags_json,
+                existing_auth_type_raw,
             )) = existing
             else {
                 return Err("DB_NOT_FOUND: provider not found".to_string().into());
@@ -970,7 +1076,14 @@ INSERT INTO providers(
                 return Err("SEC_INVALID_INPUT: cli_key mismatch".to_string().into());
             }
 
-            let next_api_key = api_key.unwrap_or(existing_api_key.as_str());
+            let existing_auth_type =
+                AuthType::parse(&existing_auth_type_raw).unwrap_or(AuthType::ApiKey);
+
+            let next_api_key = if existing_auth_type == AuthType::Oauth {
+                api_key.unwrap_or(existing_api_key.as_str())
+            } else {
+                api_key.unwrap_or(existing_api_key.as_str())
+            };
             let next_priority = priority.unwrap_or(existing_priority);
 
             let existing_claude_models = if cli_key == "claude" {
@@ -1192,6 +1305,249 @@ pub fn reorder(
         .map_err(|e| db_err!("failed to commit transaction: {e}"))?;
 
     list_by_cli(db, cli_key)
+}
+
+pub fn store_oauth_tokens(
+    conn: &Connection,
+    provider_id: i64,
+    access_token: &str,
+    refresh_token: Option<&str>,
+    id_token: Option<&str>,
+    expires_at: Option<i64>,
+) -> crate::shared::error::AppResult<()> {
+    let now = now_unix_seconds();
+    conn.execute(
+        r#"
+UPDATE providers SET
+  oauth_access_token = ?1,
+  oauth_refresh_token = COALESCE(?2, oauth_refresh_token),
+  oauth_id_token = ?3,
+  oauth_expires_at = ?4,
+  oauth_last_refreshed_at = ?5,
+  oauth_last_error = NULL,
+  updated_at = ?5
+WHERE id = ?6
+"#,
+        params![
+            access_token,
+            refresh_token,
+            id_token,
+            expires_at,
+            now,
+            provider_id
+        ],
+    )
+    .map_err(|e| db_err!("failed to store oauth tokens: {e}"))?;
+    Ok(())
+}
+
+pub fn update_oauth_tokens(
+    conn: &Connection,
+    provider_id: i64,
+    access_token: &str,
+    id_token: Option<&str>,
+    expires_at: Option<i64>,
+    refresh_token: Option<&str>,
+) -> crate::shared::error::AppResult<()> {
+    let now = now_unix_seconds();
+    conn.execute(
+        r#"
+UPDATE providers SET
+  oauth_access_token = ?1,
+  oauth_id_token = ?2,
+  oauth_expires_at = ?3,
+  oauth_refresh_token = COALESCE(?4, oauth_refresh_token),
+  oauth_last_refreshed_at = ?5,
+  oauth_last_error = NULL,
+  updated_at = ?5
+WHERE id = ?6
+"#,
+        params![
+            access_token,
+            id_token,
+            expires_at,
+            refresh_token,
+            now,
+            provider_id
+        ],
+    )
+    .map_err(|e| db_err!("failed to update oauth tokens: {e}"))?;
+    Ok(())
+}
+
+pub fn record_oauth_refresh_failure(
+    conn: &Connection,
+    provider_id: i64,
+    error: Option<&str>,
+) -> crate::shared::error::AppResult<()> {
+    let now = now_unix_seconds();
+    conn.execute(
+        "UPDATE providers SET oauth_last_error = ?1, updated_at = ?2 WHERE id = ?3",
+        params![error, now, provider_id],
+    )
+    .map_err(|e| db_err!("failed to record oauth refresh failure: {e}"))?;
+    Ok(())
+}
+
+pub fn clear_oauth_tokens(
+    conn: &Connection,
+    provider_id: i64,
+) -> crate::shared::error::AppResult<()> {
+    let now = now_unix_seconds();
+    conn.execute(
+        r#"
+UPDATE providers SET
+  oauth_access_token = NULL,
+  oauth_refresh_token = NULL,
+  oauth_id_token = NULL,
+  oauth_expires_at = NULL,
+  oauth_last_refreshed_at = NULL,
+  oauth_last_error = NULL,
+  oauth_quota_exceeded = 0,
+  oauth_quota_recover_at = NULL,
+  updated_at = ?1
+WHERE id = ?2
+"#,
+        params![now, provider_id],
+    )
+    .map_err(|e| db_err!("failed to clear oauth tokens: {e}"))?;
+    Ok(())
+}
+
+pub(crate) fn list_oauth_providers_needing_refresh(
+    conn: &Connection,
+    now_unix: i64,
+    limit: usize,
+) -> crate::shared::error::AppResult<Vec<ProviderOAuthRefreshInfo>> {
+    let refresh_lead_s: i64 = 3600; // refresh 1 hour before expiry
+    let threshold = now_unix + refresh_lead_s;
+    let mut stmt = conn
+        .prepare_cached(
+            r#"
+SELECT
+  id,
+  oauth_provider_type,
+  oauth_refresh_token,
+  oauth_token_uri,
+  oauth_client_id,
+  oauth_client_secret,
+  oauth_last_refreshed_at
+FROM providers
+WHERE auth_type = 'oauth'
+  AND enabled = 1
+  AND oauth_refresh_token IS NOT NULL
+  AND oauth_expires_at IS NOT NULL
+  AND oauth_expires_at <= ?1
+  AND oauth_quota_exceeded = 0
+ORDER BY oauth_expires_at ASC
+LIMIT ?2
+"#,
+        )
+        .map_err(|e| db_err!("failed to prepare oauth refresh query: {e}"))?;
+
+    let rows = stmt
+        .query_map(params![threshold, limit as i64], |row| {
+            Ok(ProviderOAuthRefreshInfo {
+                id: row.get("id")?,
+                oauth_provider_type: row.get("oauth_provider_type")?,
+                oauth_refresh_token: row.get("oauth_refresh_token")?,
+                oauth_token_uri: row.get("oauth_token_uri")?,
+                oauth_client_id: row.get("oauth_client_id")?,
+                oauth_client_secret: row.get("oauth_client_secret")?,
+                oauth_last_refreshed_at: row.get("oauth_last_refreshed_at")?,
+            })
+        })
+        .map_err(|e| db_err!("failed to list oauth providers needing refresh: {e}"))?;
+
+    let mut items = Vec::new();
+    for row in rows {
+        items.push(row.map_err(|e| db_err!("failed to read oauth refresh row: {e}"))?);
+    }
+    Ok(items)
+}
+
+pub fn set_oauth_quota(
+    conn: &Connection,
+    provider_id: i64,
+    exceeded: bool,
+    recover_at: Option<i64>,
+) -> crate::shared::error::AppResult<bool> {
+    let now = now_unix_seconds();
+    let changed = conn
+        .execute(
+            r#"
+UPDATE providers SET
+  oauth_quota_exceeded = ?1,
+  oauth_quota_recover_at = ?2,
+  updated_at = ?3
+WHERE id = ?4
+"#,
+            params![
+                if exceeded { 1i64 } else { 0i64 },
+                recover_at,
+                now,
+                provider_id
+            ],
+        )
+        .map_err(|e| db_err!("failed to set oauth quota: {e}"))?;
+    Ok(changed > 0)
+}
+
+pub fn list_expired_oauth_quotas(
+    conn: &Connection,
+    now_unix: i64,
+    limit: usize,
+) -> crate::shared::error::AppResult<Vec<i64>> {
+    let mut stmt = conn
+        .prepare_cached(
+            r#"
+SELECT id FROM providers
+WHERE auth_type = 'oauth'
+  AND oauth_quota_exceeded = 1
+  AND oauth_quota_recover_at IS NOT NULL
+  AND oauth_quota_recover_at <= ?1
+LIMIT ?2
+"#,
+        )
+        .map_err(|e| db_err!("failed to prepare expired oauth quotas query: {e}"))?;
+
+    let rows = stmt
+        .query_map(params![now_unix, limit as i64], |row| row.get::<_, i64>(0))
+        .map_err(|e| db_err!("failed to list expired oauth quotas: {e}"))?;
+
+    let mut ids = Vec::new();
+    for row in rows {
+        ids.push(row.map_err(|e| db_err!("failed to read expired oauth quota row: {e}"))?);
+    }
+    Ok(ids)
+}
+
+pub fn list_oauth_quota_exceeded_provider_ids(
+    conn: &Connection,
+    cli_key: &str,
+    now_unix: i64,
+) -> crate::shared::error::AppResult<std::collections::HashSet<i64>> {
+    let mut stmt = conn
+        .prepare_cached(
+            r#"
+SELECT id FROM providers
+WHERE auth_type = 'oauth'
+  AND cli_key = ?1
+  AND oauth_quota_exceeded = 1
+  AND (oauth_quota_recover_at IS NULL OR oauth_quota_recover_at > ?2)
+"#,
+        )
+        .map_err(|e| db_err!("failed to prepare quota exceeded query: {e}"))?;
+
+    let rows = stmt
+        .query_map(params![cli_key, now_unix], |row| row.get::<_, i64>(0))
+        .map_err(|e| db_err!("failed to list quota exceeded providers: {e}"))?;
+
+    let mut ids = std::collections::HashSet::new();
+    for row in rows {
+        ids.insert(row.map_err(|e| db_err!("failed to read quota exceeded row: {e}"))?);
+    }
+    Ok(ids)
 }
 
 #[cfg(test)]

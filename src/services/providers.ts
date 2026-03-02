@@ -10,6 +10,9 @@ export type ClaudeModels = {
   opus_model?: string | null;
 };
 
+export type AuthType = "api_key" | "oauth";
+export type OAuthProviderType = "claude_oauth" | "codex_oauth" | "gemini_oauth";
+
 export type ProviderSummary = {
   id: number;
   cli_key: CliKey;
@@ -28,6 +31,12 @@ export type ProviderSummary = {
   limit_monthly_usd: number | null;
   limit_total_usd: number | null;
   tags: string[];
+  auth_type: AuthType;
+  oauth_provider_type: OAuthProviderType | null;
+  oauth_expires_at: number | null;
+  oauth_last_error: string | null;
+  oauth_quota_exceeded: boolean;
+  oauth_quota_recover_at: number | null;
   created_at: number;
   updated_at: number;
 };
@@ -55,6 +64,8 @@ export async function providerUpsert(input: {
   limit_monthly_usd: number | null;
   limit_total_usd: number | null;
   tags?: string[];
+  auth_type?: AuthType;
+  oauth_provider_type?: OAuthProviderType | null;
 }) {
   return invokeService<ProviderSummary>("保存供应商失败", "provider_upsert", {
     providerId: input.provider_id ?? null,
@@ -75,6 +86,8 @@ export async function providerUpsert(input: {
     limitMonthlyUsd: input.limit_monthly_usd,
     limitTotalUsd: input.limit_total_usd,
     tags: input.tags ?? null,
+    authType: input.auth_type ?? null,
+    oauthProviderType: input.oauth_provider_type ?? null,
   });
 }
 
@@ -106,4 +119,28 @@ export async function providerClaudeTerminalLaunchCommand(providerId: number) {
     "provider_claude_terminal_launch_command",
     { providerId }
   );
+}
+
+export type OAuthProviderStatus = {
+  has_token: boolean;
+  expires_at: number | null;
+  last_error: string | null;
+  quota_exceeded: boolean;
+  quota_recover_at: number | null;
+};
+
+export async function oauthStartLogin(providerId: number) {
+  return invokeService<OAuthProviderStatus>("OAuth 登录失败", "oauth_start_login", { providerId });
+}
+
+export async function oauthProviderStatus(providerId: number) {
+  return invokeService<OAuthProviderStatus>("读取 OAuth 状态失败", "oauth_provider_status", {
+    providerId,
+  });
+}
+
+export async function oauthProviderLogout(providerId: number) {
+  return invokeService<OAuthProviderStatus>("OAuth 登出失败", "oauth_provider_logout", {
+    providerId,
+  });
 }

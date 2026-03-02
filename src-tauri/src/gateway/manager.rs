@@ -26,10 +26,12 @@ struct RunningGateway {
     task: tauri::async_runtime::JoinHandle<()>,
     log_task: tauri::async_runtime::JoinHandle<()>,
     circuit_task: tauri::async_runtime::JoinHandle<()>,
+    refresh_task: tauri::async_runtime::JoinHandle<()>,
 }
 
 type RunningGatewayHandles = (
     oneshot::Sender<()>,
+    tauri::async_runtime::JoinHandle<()>,
     tauri::async_runtime::JoinHandle<()>,
     tauri::async_runtime::JoinHandle<()>,
     tauri::async_runtime::JoinHandle<()>,
@@ -241,6 +243,11 @@ impl GatewayManager {
         let recent_errors = Arc::new(Mutex::new(RecentErrorCache::default()));
         let latency_cache = Arc::new(Mutex::new(ProviderBaseUrlPingCache::default()));
 
+        // Clone for OAuth background refresh loop before state consumes them.
+        let refresh_app = app.clone();
+        let refresh_db = db.clone();
+        let refresh_client = client.clone();
+
         let state = GatewayAppState {
             app: app.clone(),
             db,
@@ -274,6 +281,16 @@ impl GatewayManager {
             }
         });
 
+        // Start OAuth background token refresh loop.
+        let refresh_task = tauri::async_runtime::spawn(async move {
+            super::oauth::refresh::run_background_refresh_loop(
+                refresh_app,
+                refresh_db,
+                refresh_client,
+            )
+            .await;
+        });
+
         self.running = Some(RunningGateway {
             port,
             base_url,
@@ -284,6 +301,7 @@ impl GatewayManager {
             task,
             log_task,
             circuit_task,
+            refresh_task,
         });
 
         Ok(self.status())
@@ -412,9 +430,15 @@ impl GatewayManager {
     }
 
     pub fn take_running(&mut self) -> Option<RunningGatewayHandles> {
-        self.running
-            .take()
-            .map(|r| (r.shutdown, r.task, r.log_task, r.circuit_task))
+        self.running.take().map(|r| {
+            (
+                r.shutdown,
+                r.task,
+                r.log_task,
+                r.circuit_task,
+                r.refresh_task,
+            )
+        })
     }
 }
 
@@ -447,6 +471,7 @@ mod tests {
             task: tauri::async_runtime::JoinHandle::Tokio(rt.spawn(async {})),
             log_task: tauri::async_runtime::JoinHandle::Tokio(rt.spawn(async {})),
             circuit_task: tauri::async_runtime::JoinHandle::Tokio(rt.spawn(async {})),
+            refresh_task: tauri::async_runtime::JoinHandle::Tokio(rt.spawn(async {})),
         }
     }
 

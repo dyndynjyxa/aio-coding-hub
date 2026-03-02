@@ -130,6 +130,27 @@ export function SortableProviderCard({
               <span className="shrink-0 rounded-full bg-slate-50 px-2 py-0.5 font-mono text-[10px] text-slate-700 dark:bg-slate-700 dark:text-slate-300">
                 倍率 {provider.cost_multiplier}x
               </span>
+              {provider.auth_type === "oauth" ? (
+                <span
+                  className={cn(
+                    "shrink-0 rounded-full px-2 py-0.5 font-mono text-[10px]",
+                    provider.oauth_last_error
+                      ? "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400"
+                      : provider.oauth_quota_exceeded
+                        ? "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                        : "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+                  )}
+                  title={
+                    provider.oauth_last_error
+                      ? `OAuth 错误: ${provider.oauth_last_error}`
+                      : provider.oauth_quota_exceeded
+                        ? "OAuth 配额超限"
+                        : "OAuth 已认证"
+                  }
+                >
+                  OAuth
+                </span>
+              ) : null}
               {provider.cli_key === "claude" && hasClaudeModels ? (
                 <span
                   className="shrink-0 rounded-full bg-sky-50 px-2 py-0.5 font-mono text-[10px] text-sky-700 dark:bg-sky-900/30 dark:text-sky-400"

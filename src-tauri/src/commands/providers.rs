@@ -52,6 +52,8 @@ pub(crate) async fn provider_upsert(
     limit_monthly_usd: Option<f64>,
     limit_total_usd: Option<f64>,
     tags: Option<Vec<String>>,
+    auth_type: Option<String>,
+    oauth_provider_type: Option<String>,
 ) -> Result<providers::ProviderSummary, String> {
     let is_create = provider_id.is_none();
     let name_for_log = name.clone();
@@ -78,6 +80,8 @@ pub(crate) async fn provider_upsert(
             limit_monthly_usd,
             limit_total_usd,
             tags,
+            auth_type.as_deref(),
+            oauth_provider_type.as_deref(),
         )
     })
     .await
@@ -377,6 +381,203 @@ pub(crate) async fn base_url_ping_ms(base_url: String) -> Result<u64, String> {
         .build()
         .map_err(|e| format!("PING_HTTP_CLIENT_INIT: {e}"))?;
     base_url_probe::probe_base_url_ms(&client, &base_url, std::time::Duration::from_secs(3)).await
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct OAuthProviderStatus {
+    pub has_token: bool,
+    pub expires_at: Option<i64>,
+    pub last_error: Option<String>,
+    pub quota_exceeded: bool,
+    pub quota_recover_at: Option<i64>,
+}
+
+#[tauri::command]
+pub(crate) async fn oauth_start_login(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    provider_id: i64,
+) -> Result<OAuthProviderStatus, String> {
+    use crate::gateway::oauth::{
+        callback_server, pkce, providers as oauth_providers,
+        token_exchange::{exchange_authorization_code, TokenExchangeRequest},
+    };
+
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+
+    // 1. Read provider's oauth_provider_type from DB.
+    let provider = blocking::run("oauth_start_login_read", {
+        let db = db.clone();
+        move || -> crate::shared::error::AppResult<(String, String)> {
+            let conn = db.open_connection()?;
+            conn.query_row(
+                "SELECT auth_type, COALESCE(oauth_provider_type, '') FROM providers WHERE id = ?1",
+                rusqlite::params![provider_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .map_err(|e| crate::shared::error::db_err!("failed to query provider: {e}"))
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let (auth_type, oauth_provider_type) = provider;
+    if auth_type != "oauth" {
+        return Err("SEC_INVALID_INPUT: provider is not an OAuth provider".into());
+    }
+
+    let config = oauth_providers::config_for_provider_type(&oauth_provider_type)
+        .ok_or_else(|| format!("unknown oauth_provider_type: {oauth_provider_type}"))?;
+
+    // 2. Generate PKCE pair.
+    let pkce_pair = pkce::generate_pkce_pair();
+
+    // 3. Bind callback server.
+    let listener = callback_server::bind_callback_listener(config.default_callback_port)
+        .await
+        .map_err(|e| format!("failed to bind callback server: {e}"))?;
+    let port = listener.port();
+    let redirect_uri = oauth_providers::make_redirect_uri(config, port);
+
+    // 4. Build auth URL and open browser.
+    let state = pkce::generate_pkce_pair().code_verifier; // reuse PKCE generator for state
+    let scopes = config.scopes.join(" ");
+    let auth_url = format!(
+        "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}&code_challenge={}&code_challenge_method=S256",
+        config.auth_url,
+        urlencoding::encode(config.client_id),
+        urlencoding::encode(&redirect_uri),
+        urlencoding::encode(&scopes),
+        urlencoding::encode(&state),
+        urlencoding::encode(&pkce_pair.code_challenge),
+    );
+
+    tauri_plugin_opener::open_url(&auth_url, None::<&str>)
+        .map_err(|e| format!("failed to open browser: {e}"))?;
+
+    // 5. Wait for callback.
+    let callback =
+        callback_server::wait_for_callback(listener, &state, std::time::Duration::from_secs(120))
+            .await
+            .map_err(|e| format!("OAuth callback failed: {e}"))?;
+
+    let code = callback.code.ok_or_else(|| {
+        let desc = callback.error_description.unwrap_or_default();
+        let err = callback.error.unwrap_or_default();
+        format!("OAuth error: {err} {desc}")
+    })?;
+
+    // 6. Exchange authorization code for tokens.
+    let client = reqwest::Client::new();
+    let exchange_req = TokenExchangeRequest {
+        token_uri: config.token_url.to_string(),
+        client_id: config.client_id.to_string(),
+        client_secret: config.client_secret.map(str::to_string),
+        code,
+        redirect_uri,
+        code_verifier: pkce_pair.code_verifier,
+    };
+
+    let tokens = exchange_authorization_code(&client, &exchange_req)
+        .await
+        .map_err(|e| format!("token exchange failed: {e}"))?;
+
+    // 7. Store tokens on the provider.
+    let expires_at = tokens.expires_at;
+    blocking::run("oauth_start_login_store", {
+        let db = db.clone();
+        let access_token = tokens.access_token.clone();
+        let refresh_token = tokens.refresh_token.clone();
+        let id_token = tokens.id_token.clone();
+        move || {
+            let conn = db.open_connection()?;
+            providers::store_oauth_tokens(
+                &conn,
+                provider_id,
+                &access_token,
+                refresh_token.as_deref(),
+                id_token.as_deref(),
+                expires_at,
+            )
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    // 8. Emit event.
+    let _ = tauri::Emitter::emit(
+        &app,
+        "provider-oauth-login-complete",
+        serde_json::json!({
+            "provider_id": provider_id,
+            "expires_at": expires_at,
+        }),
+    );
+
+    Ok(OAuthProviderStatus {
+        has_token: true,
+        expires_at,
+        last_error: None,
+        quota_exceeded: false,
+        quota_recover_at: None,
+    })
+}
+
+#[tauri::command]
+pub(crate) async fn oauth_provider_status(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    provider_id: i64,
+) -> Result<OAuthProviderStatus, String> {
+    let db = ensure_db_ready(app, db_state.inner()).await?;
+    blocking::run("oauth_provider_status", move || -> crate::shared::error::AppResult<OAuthProviderStatus> {
+        let conn = db.open_connection()?;
+        let row: (Option<String>, Option<i64>, Option<String>, i64, Option<i64>) = conn
+            .query_row(
+                r#"
+SELECT oauth_access_token, oauth_expires_at, oauth_last_error, oauth_quota_exceeded, oauth_quota_recover_at
+FROM providers WHERE id = ?1
+"#,
+                rusqlite::params![provider_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            )
+            .map_err(|e| crate::shared::error::db_err!("failed to query provider: {e}"))?;
+
+        Ok(OAuthProviderStatus {
+            has_token: row.0.as_ref().is_some_and(|t| !t.trim().is_empty()),
+            expires_at: row.1,
+            last_error: row.2,
+            quota_exceeded: row.3 != 0,
+            quota_recover_at: row.4,
+        })
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+pub(crate) async fn oauth_provider_logout(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    provider_id: i64,
+) -> Result<OAuthProviderStatus, String> {
+    let db = ensure_db_ready(app, db_state.inner()).await?;
+    blocking::run(
+        "oauth_provider_logout",
+        move || -> crate::shared::error::AppResult<OAuthProviderStatus> {
+            let conn = db.open_connection()?;
+            providers::clear_oauth_tokens(&conn, provider_id)?;
+            Ok(OAuthProviderStatus {
+                has_token: false,
+                expires_at: None,
+                last_error: None,
+                quota_exceeded: false,
+                quota_recover_at: None,
+            })
+        },
+    )
+    .await
+    .map_err(Into::into)
 }
 
 #[cfg(test)]

@@ -385,11 +385,15 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
             ensure_cli_required_headers(&input.cli_key, &mut headers);
 
             // Always override auth headers to avoid leaking any official OAuth tokens to a third-party relay base_url.
-            inject_provider_auth(
-                &input.cli_key,
-                provider.api_key_plaintext.trim(),
-                &mut headers,
-            );
+            let effective_auth_key = match provider.auth_type {
+                crate::providers::AuthType::Oauth => provider
+                    .oauth_access_token
+                    .as_deref()
+                    .unwrap_or("")
+                    .to_string(),
+                crate::providers::AuthType::ApiKey => provider.api_key_plaintext.clone(),
+            };
+            inject_provider_auth(&input.cli_key, effective_auth_key.trim(), &mut headers);
             if strip_request_content_encoding {
                 headers.remove(header::CONTENT_ENCODING);
             }

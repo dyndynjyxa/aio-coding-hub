@@ -54,6 +54,12 @@ function makeProvider(
     limit_monthly_usd: partial.limit_monthly_usd ?? null,
     limit_total_usd: partial.limit_total_usd ?? null,
     tags: partial.tags ?? [],
+    auth_type: partial.auth_type ?? "api_key",
+    oauth_provider_type: partial.oauth_provider_type ?? null,
+    oauth_expires_at: partial.oauth_expires_at ?? null,
+    oauth_last_error: partial.oauth_last_error ?? null,
+    oauth_quota_exceeded: partial.oauth_quota_exceeded ?? false,
+    oauth_quota_recover_at: partial.oauth_quota_recover_at ?? null,
     created_at: partial.created_at ?? 0,
     updated_at: partial.updated_at ?? 0,
   };

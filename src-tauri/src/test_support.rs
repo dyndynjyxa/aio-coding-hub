@@ -203,6 +203,8 @@ pub fn provider_upsert_json<R: tauri::Runtime>(
         limit_monthly_usd,
         limit_total_usd,
         None,
+        None,
+        None,
     )?;
     serialize_json(provider)
 }
