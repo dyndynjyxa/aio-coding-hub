@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.30.10](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.30.9...aio-coding-hub-v0.30.10) (2026-03-03)
+
+
+### Features
+
+* **providers:** 增加供应商备注字段并支持读取API Key ([fec7057](https://github.com/dyndynjyxa/aio-coding-hub/commit/fec7057d137a7c0b38b46b5591a9e19e624b679a))
+
+
+### Bug Fixes
+
+* **db:** 修复providers表note字段迁移及数据处理问题 ([fa8ecda](https://github.com/dyndynjyxa/aio-coding-hub/commit/fa8ecda9bad231ed424c812c1c7cd3d0850b8565))
+
 ## [0.30.9](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.30.8...aio-coding-hub-v0.30.9) (2026-03-02)
 
 
