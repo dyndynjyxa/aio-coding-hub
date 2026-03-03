@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.11](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.30.10...aio-coding-hub-v0.30.11) (2026-03-03)
+
+
+### Bug Fixes
+
+* **cost:** 修正成本乘数比较逻辑为包含零值 ([db69776](https://github.com/dyndynjyxa/aio-coding-hub/commit/db6977635f96fc55fa1b4d84d1d71e67dd8dd0b1))
+
 ## [0.30.10](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.30.9...aio-coding-hub-v0.30.10) (2026-03-03)
 
 
