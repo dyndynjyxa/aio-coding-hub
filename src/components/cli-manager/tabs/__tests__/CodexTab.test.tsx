@@ -27,12 +27,16 @@ function createCodexConfig(overrides: Partial<any> = {}) {
     model_reasoning_effort: "medium",
     plan_mode_reasoning_effort: null,
     web_search: "cached",
+    model_context_window: null,
+    model_auto_compact_token_limit: null,
+    service_tier: null,
     features_shell_snapshot: false,
     features_unified_exec: false,
     features_shell_tool: false,
     features_exec_policy: false,
     features_apply_patch_freeform: false,
     features_remote_compaction: false,
+    features_fast_mode: false,
     features_remote_models: false,
     features_multi_agent: false,
     ...overrides,
@@ -89,7 +93,16 @@ describe("components/cli-manager/tabs/CodexTab", () => {
     fireEvent.change(sandboxSelect, { target: { value: "danger-full-access" } });
     expect(persistCodexConfig).toHaveBeenCalledWith({ sandbox_mode: "danger-full-access" });
 
-    // Toggle a feature switch.
+    // Toggle the linked fast mode switch.
+    const fastModeItem = screen.getByText("fast_mode").parentElement?.parentElement;
+    expect(fastModeItem).toBeTruthy();
+    fireEvent.click(within(fastModeItem as HTMLElement).getByRole("switch"));
+    expect(persistCodexConfig).toHaveBeenCalledWith({
+      features_fast_mode: true,
+      service_tier: "fast",
+    });
+
+    // Toggle a normal feature switch.
     const remoteModelsItem = screen.getByText("remote_models").parentElement?.parentElement;
     expect(remoteModelsItem).toBeTruthy();
     fireEvent.click(within(remoteModelsItem as HTMLElement).getByRole("switch"));
@@ -99,13 +112,17 @@ describe("components/cli-manager/tabs/CodexTab", () => {
     fireEvent.click(screen.getByRole("radio", { name: "禁用 (disabled)" }));
     expect(persistCodexConfig).toHaveBeenCalledWith({ web_search: "disabled" });
 
-    // Model input blur persists trimmed value.
+    // Model input blur persists trimmed value and clears gpt-5.4-only linked keys.
     const modelItem = screen.getByText("默认模型 (model)").parentElement?.parentElement;
     expect(modelItem).toBeTruthy();
     const modelInput = within(modelItem as HTMLElement).getByRole("textbox");
     fireEvent.change(modelInput, { target: { value: "  gpt-5-codex  " } });
     fireEvent.blur(modelInput);
-    expect(persistCodexConfig).toHaveBeenCalledWith({ model: "gpt-5-codex" });
+    expect(persistCodexConfig).toHaveBeenCalledWith({
+      model: "gpt-5-codex",
+      model_context_window: null,
+      model_auto_compact_token_limit: null,
+    });
 
     // Approval policy select persists.
     const approvalItem =
@@ -140,5 +157,68 @@ describe("components/cli-manager/tabs/CodexTab", () => {
       />
     );
     expect(screen.getByText("仅在 Tauri Desktop 环境可用")).toBeInTheDocument();
+  });
+
+  it("treats service_tier=fast as enabled fast mode", () => {
+    render(
+      <CliManagerCodexTab
+        codexAvailable="available"
+        codexLoading={false}
+        codexConfigLoading={false}
+        codexConfigSaving={false}
+        codexConfigTomlLoading={false}
+        codexConfigTomlSaving={false}
+        codexInfo={createCodexInfo()}
+        codexConfig={createCodexConfig({ service_tier: "fast", features_fast_mode: false })}
+        codexConfigToml={null}
+        refreshCodex={vi.fn()}
+        openCodexConfigDir={vi.fn()}
+        persistCodexConfig={vi.fn()}
+        persistCodexConfigToml={vi.fn().mockResolvedValue(false)}
+      />
+    );
+
+    const fastModeItem = screen.getByText("fast_mode").parentElement?.parentElement;
+    expect(fastModeItem).toBeTruthy();
+    expect(within(fastModeItem as HTMLElement).getByRole("switch")).toHaveAttribute(
+      "data-state",
+      "checked"
+    );
+  });
+
+  it("shows gpt-5.4 linked settings and persists their defaults", () => {
+    const persistCodexConfig = vi.fn();
+
+    render(
+      <CliManagerCodexTab
+        codexAvailable="available"
+        codexLoading={false}
+        codexConfigLoading={false}
+        codexConfigSaving={false}
+        codexConfigTomlLoading={false}
+        codexConfigTomlSaving={false}
+        codexInfo={createCodexInfo()}
+        codexConfig={createCodexConfig({ model: "gpt-5.4" })}
+        codexConfigToml={null}
+        refreshCodex={vi.fn()}
+        openCodexConfigDir={vi.fn()}
+        persistCodexConfig={persistCodexConfig}
+        persistCodexConfigToml={vi.fn().mockResolvedValue(false)}
+      />
+    );
+
+    expect(screen.getByText("model_context_window")).toBeInTheDocument();
+    expect(screen.getByText("model_auto_compact_token_limit")).toBeInTheDocument();
+
+    const modelItem = screen.getByText("默认模型 (model)").parentElement?.parentElement;
+    expect(modelItem).toBeTruthy();
+    const modelInput = within(modelItem as HTMLElement).getByRole("textbox");
+    fireEvent.blur(modelInput);
+
+    expect(persistCodexConfig).toHaveBeenCalledWith({
+      model: "gpt-5.4",
+      model_context_window: 1000000,
+      model_auto_compact_token_limit: 900000,
+    });
   });
 });

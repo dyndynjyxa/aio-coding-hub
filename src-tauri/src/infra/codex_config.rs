@@ -19,6 +19,9 @@ pub struct CodexConfigState {
     pub model_reasoning_effort: Option<String>,
     pub plan_mode_reasoning_effort: Option<String>,
     pub web_search: Option<String>,
+    pub model_context_window: Option<u64>,
+    pub model_auto_compact_token_limit: Option<u64>,
+    pub service_tier: Option<String>,
 
     pub sandbox_workspace_write_network_access: Option<bool>,
 
@@ -28,6 +31,7 @@ pub struct CodexConfigState {
     pub features_shell_tool: Option<bool>,
     pub features_exec_policy: Option<bool>,
     pub features_remote_compaction: Option<bool>,
+    pub features_fast_mode: Option<bool>,
     pub features_remote_models: Option<bool>,
     pub features_multi_agent: Option<bool>,
 }
@@ -40,6 +44,9 @@ pub struct CodexConfigPatch {
     pub model_reasoning_effort: Option<String>,
     pub plan_mode_reasoning_effort: Option<String>,
     pub web_search: Option<String>,
+    pub model_context_window: Option<Option<u64>>,
+    pub model_auto_compact_token_limit: Option<Option<u64>>,
+    pub service_tier: Option<String>,
 
     pub sandbox_workspace_write_network_access: Option<bool>,
 
@@ -49,6 +56,7 @@ pub struct CodexConfigPatch {
     pub features_shell_tool: Option<bool>,
     pub features_exec_policy: Option<bool>,
     pub features_remote_compaction: Option<bool>,
+    pub features_fast_mode: Option<bool>,
     pub features_remote_models: Option<bool>,
     pub features_multi_agent: Option<bool>,
 }
@@ -188,6 +196,10 @@ fn parse_string(value: &str) -> Option<String> {
             Some(trimmed.to_string())
         }
     })
+}
+
+fn parse_u64(value: &str) -> Option<u64> {
+    value.trim().replace('_', "").parse().ok()
 }
 
 fn normalize_key(raw: &str) -> String {
@@ -543,7 +555,7 @@ enum TableStyle {
     Dotted,
 }
 
-const FEATURES_KEY_ORDER: [&str; 8] = [
+const FEATURES_KEY_ORDER: [&str; 9] = [
     // Keep in sync with the UI order (CliManagerCodexTab / Features section).
     "shell_snapshot",
     "unified_exec",
@@ -551,6 +563,7 @@ const FEATURES_KEY_ORDER: [&str; 8] = [
     "exec_policy",
     "apply_patch_freeform",
     "remote_compaction",
+    "fast_mode",
     "remote_models",
     "multi_agent",
 ];
@@ -861,6 +874,9 @@ fn make_state_from_bytes(
         model_reasoning_effort: None,
         plan_mode_reasoning_effort: None,
         web_search: None,
+        model_context_window: None,
+        model_auto_compact_token_limit: None,
+        service_tier: None,
 
         sandbox_workspace_write_network_access: None,
 
@@ -870,6 +886,7 @@ fn make_state_from_bytes(
         features_shell_tool: None,
         features_exec_policy: None,
         features_remote_compaction: None,
+        features_fast_mode: None,
         features_remote_models: None,
         features_multi_agent: None,
     };
@@ -943,6 +960,11 @@ fn make_state_from_bytes(
                 state.plan_mode_reasoning_effort = parse_string(&raw_value)
             }
             ("", "web_search") => state.web_search = parse_string(&raw_value),
+            ("", "model_context_window") => state.model_context_window = parse_u64(&raw_value),
+            ("", "model_auto_compact_token_limit") => {
+                state.model_auto_compact_token_limit = parse_u64(&raw_value)
+            }
+            ("", "service_tier") => state.service_tier = parse_string(&raw_value),
 
             ("sandbox_workspace_write", "network_access") => {
                 state.sandbox_workspace_write_network_access = parse_bool(&raw_value)
@@ -960,6 +982,7 @@ fn make_state_from_bytes(
             ("features", "remote_compaction") => {
                 state.features_remote_compaction = parse_bool(&raw_value)
             }
+            ("features", "fast_mode") => state.features_fast_mode = parse_bool(&raw_value),
             ("features", "remote_models") => state.features_remote_models = parse_bool(&raw_value),
             ("features", "multi_agent") => state.features_multi_agent = parse_bool(&raw_value),
 
@@ -1334,6 +1357,28 @@ fn patch_config_toml(
             (!trimmed.is_empty()).then(|| toml_string_literal(trimmed)),
         );
     }
+    if let Some(value) = patch.model_context_window {
+        upsert_root_key(
+            &mut lines,
+            "model_context_window",
+            value.map(|next| next.to_string()),
+        );
+    }
+    if let Some(value) = patch.model_auto_compact_token_limit {
+        upsert_root_key(
+            &mut lines,
+            "model_auto_compact_token_limit",
+            value.map(|next| next.to_string()),
+        );
+    }
+    if let Some(raw) = patch.service_tier.as_deref() {
+        let trimmed = raw.trim();
+        upsert_root_key(
+            &mut lines,
+            "service_tier",
+            (!trimmed.is_empty()).then(|| toml_string_literal(trimmed)),
+        );
+    }
 
     // sandbox_workspace_write.*
     if let Some(v) = patch.sandbox_workspace_write_network_access {
@@ -1352,6 +1397,7 @@ fn patch_config_toml(
         || patch.features_shell_tool.is_some()
         || patch.features_exec_policy.is_some()
         || patch.features_remote_compaction.is_some()
+        || patch.features_fast_mode.is_some()
         || patch.features_remote_models.is_some()
         || patch.features_multi_agent.is_some();
 
@@ -1376,6 +1422,9 @@ fn patch_config_toml(
         }
         if let Some(v) = patch.features_remote_compaction {
             items.push(("remote_compaction", v.then(|| "true".to_string())));
+        }
+        if let Some(v) = patch.features_fast_mode {
+            items.push(("fast_mode", v.then(|| "true".to_string())));
         }
         if let Some(v) = patch.features_remote_models {
             items.push(("remote_models", v.then(|| "true".to_string())));

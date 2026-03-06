@@ -109,6 +109,9 @@ export type CodexConfigState = {
   model_reasoning_effort: string | null;
   plan_mode_reasoning_effort: string | null;
   web_search: string | null;
+  model_context_window: number | null;
+  model_auto_compact_token_limit: number | null;
+  service_tier: string | null;
 
   sandbox_workspace_write_network_access: boolean | null;
 
@@ -118,6 +121,7 @@ export type CodexConfigState = {
   features_shell_tool: boolean | null;
   features_exec_policy: boolean | null;
   features_remote_compaction: boolean | null;
+  features_fast_mode: boolean | null;
   features_remote_models: boolean | null;
   features_multi_agent: boolean | null;
 };
@@ -129,6 +133,9 @@ export type CodexConfigPatch = Partial<{
   model_reasoning_effort: string;
   plan_mode_reasoning_effort: string;
   web_search: string;
+  model_context_window: number | null;
+  model_auto_compact_token_limit: number | null;
+  service_tier: string;
 
   sandbox_workspace_write_network_access: boolean;
 
@@ -138,6 +145,7 @@ export type CodexConfigPatch = Partial<{
   features_shell_tool: boolean;
   features_exec_policy: boolean;
   features_remote_compaction: boolean;
+  features_fast_mode: boolean;
   features_remote_models: boolean;
   features_multi_agent: boolean;
 }>;

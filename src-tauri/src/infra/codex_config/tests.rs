@@ -8,6 +8,9 @@ fn empty_patch() -> CodexConfigPatch {
         model_reasoning_effort: None,
         plan_mode_reasoning_effort: None,
         web_search: None,
+        model_context_window: None,
+        model_auto_compact_token_limit: None,
+        service_tier: None,
         sandbox_workspace_write_network_access: None,
         features_unified_exec: None,
         features_shell_snapshot: None,
@@ -15,6 +18,7 @@ fn empty_patch() -> CodexConfigPatch {
         features_shell_tool: None,
         features_exec_policy: None,
         features_remote_compaction: None,
+        features_fast_mode: None,
         features_remote_models: None,
         features_multi_agent: None,
     }
@@ -143,6 +147,91 @@ shell_tool = false
     let s = String::from_utf8(out).expect("utf8");
     assert!(!s.contains("shell_tool = false"), "{s}");
     assert!(s.contains("shell_tool = true"), "{s}");
+}
+
+#[test]
+fn patch_writes_fast_mode_and_service_tier_when_enabled() {
+    let input = r#"model = "gpt-5"
+
+[features]
+shell_tool = true
+"#;
+
+    let out = patch_config_toml(
+        Some(input.as_bytes().to_vec()),
+        CodexConfigPatch {
+            service_tier: Some("fast".to_string()),
+            features_fast_mode: Some(true),
+            ..empty_patch()
+        },
+    )
+    .expect("patch_config_toml");
+
+    let s = String::from_utf8(out).expect("utf8");
+    assert!(s.contains("service_tier = \"fast\""), "{s}");
+    assert!(s.contains("shell_tool = true"), "{s}");
+    assert!(s.contains("fast_mode = true"), "{s}");
+}
+
+#[test]
+fn patch_writes_model_linked_limits() {
+    let out = patch_config_toml(
+        None,
+        CodexConfigPatch {
+            model_context_window: Some(Some(1_000_000)),
+            model_auto_compact_token_limit: Some(Some(900_000)),
+            ..empty_patch()
+        },
+    )
+    .expect("patch_config_toml");
+
+    let s = String::from_utf8(out).expect("utf8");
+    assert!(s.contains("model_context_window = 1000000"), "{s}");
+    assert!(s.contains("model_auto_compact_token_limit = 900000"), "{s}");
+}
+
+#[test]
+fn patch_deletes_model_linked_limits_when_null() {
+    let input = r#"model_context_window = 1000000
+model_auto_compact_token_limit = 900000
+"#;
+
+    let out = patch_config_toml(
+        Some(input.as_bytes().to_vec()),
+        CodexConfigPatch {
+            model_context_window: Some(None),
+            model_auto_compact_token_limit: Some(None),
+            ..empty_patch()
+        },
+    )
+    .expect("patch_config_toml");
+
+    let s = String::from_utf8(out).expect("utf8");
+    assert!(!s.contains("model_context_window ="), "{s}");
+    assert!(!s.contains("model_auto_compact_token_limit ="), "{s}");
+}
+
+#[test]
+fn patch_deletes_fast_mode_and_service_tier_when_disabled() {
+    let input = r#"service_tier = "fast"
+
+[features]
+fast_mode = true
+"#;
+
+    let out = patch_config_toml(
+        Some(input.as_bytes().to_vec()),
+        CodexConfigPatch {
+            service_tier: Some(String::new()),
+            features_fast_mode: Some(false),
+            ..empty_patch()
+        },
+    )
+    .expect("patch_config_toml");
+
+    let s = String::from_utf8(out).expect("utf8");
+    assert!(!s.contains("service_tier ="), "{s}");
+    assert!(!s.contains("fast_mode ="), "{s}");
 }
 
 #[test]
@@ -315,6 +404,44 @@ mode = "read-only"
     .expect("make_state_from_bytes");
 
     assert_eq!(state.sandbox_mode.as_deref(), Some("workspace-write"));
+}
+
+#[test]
+fn parse_reads_service_tier_and_fast_mode() {
+    let input = r#"service_tier = "fast"
+
+[features]
+fast_mode = true
+"#;
+
+    let state = make_state_from_bytes(
+        "dir".to_string(),
+        "path".to_string(),
+        true,
+        Some(input.as_bytes().to_vec()),
+    )
+    .expect("make_state_from_bytes");
+
+    assert_eq!(state.service_tier.as_deref(), Some("fast"));
+    assert_eq!(state.features_fast_mode, Some(true));
+}
+
+#[test]
+fn parse_reads_model_linked_limits() {
+    let input = r#"model_context_window = 1_000_000
+model_auto_compact_token_limit = 900000
+"#;
+
+    let state = make_state_from_bytes(
+        "dir".to_string(),
+        "path".to_string(),
+        true,
+        Some(input.as_bytes().to_vec()),
+    )
+    .expect("make_state_from_bytes");
+
+    assert_eq!(state.model_context_window, Some(1_000_000));
+    assert_eq!(state.model_auto_compact_token_limit, Some(900_000));
 }
 
 #[test]

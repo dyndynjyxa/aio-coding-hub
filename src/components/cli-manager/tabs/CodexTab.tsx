@@ -38,6 +38,33 @@ const LazyCodeEditor = lazy(() =>
   import("../../../ui/CodeEditor").then((m) => ({ default: m.CodeEditor }))
 );
 
+const GPT_54_MODEL = "gpt-5.4";
+const GPT_54_CONTEXT_WINDOW = 1_000_000;
+const GPT_54_AUTO_COMPACT_TOKEN_LIMIT = 900_000;
+const FAST_SERVICE_TIER = "fast";
+
+function buildModelPatch(model: string): CodexConfigPatch {
+  const trimmed = model.trim();
+  const isGpt54Model = trimmed === GPT_54_MODEL;
+
+  return {
+    model: trimmed,
+    model_context_window: isGpt54Model ? GPT_54_CONTEXT_WINDOW : null,
+    model_auto_compact_token_limit: isGpt54Model ? GPT_54_AUTO_COMPACT_TOKEN_LIMIT : null,
+  };
+}
+
+function buildFastModePatch(enabled: boolean): CodexConfigPatch {
+  return {
+    features_fast_mode: enabled,
+    service_tier: enabled ? FAST_SERVICE_TIER : "",
+  };
+}
+
+function isGpt54Model(model: string | null | undefined) {
+  return (model ?? "").trim() === GPT_54_MODEL;
+}
+
 export type CliManagerAvailability = "checking" | "available" | "unavailable";
 
 export type CliManagerCodexTabProps = {
@@ -173,6 +200,18 @@ export function CliManagerCodexTab({
   const effectiveSandboxMode = useMemo(() => {
     return enumOrDefault(sandboxModeText.trim() || null, defaults.sandbox_mode);
   }, [sandboxModeText, defaults.sandbox_mode]);
+
+  const effectiveFastModeEnabled = useMemo(() => {
+    if (!codexConfig) return false;
+    return (
+      boolOrDefault(codexConfig.features_fast_mode, false) ||
+      codexConfig.service_tier === FAST_SERVICE_TIER
+    );
+  }, [codexConfig]);
+
+  const showsGpt54LinkedSettings = useMemo(() => {
+    return isGpt54Model(modelText);
+  }, [modelText]);
 
   useEffect(() => {
     if (!codexConfigToml) return;
@@ -371,12 +410,34 @@ export function CliManagerCodexTab({
                   <Input
                     value={modelText}
                     onChange={(e) => setModelText(e.currentTarget.value)}
-                    onBlur={() => void persistCodexConfig({ model: modelText.trim() })}
+                    onBlur={() => void persistCodexConfig(buildModelPatch(modelText))}
                     placeholder="例如：gpt-5-codex"
                     className="font-mono w-[280px] max-w-full"
                     disabled={saving}
                   />
                 </SettingItem>
+
+                {showsGpt54LinkedSettings ? (
+                  <>
+                    <SettingItem
+                      label="model_context_window"
+                      subtitle="仅当 model=gpt-5.4 时自动写入；切换到其他模型时自动删除。"
+                    >
+                      <div className="rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-2 font-mono text-sm text-slate-700 dark:text-slate-300">
+                        {GPT_54_CONTEXT_WINDOW}
+                      </div>
+                    </SettingItem>
+
+                    <SettingItem
+                      label="model_auto_compact_token_limit"
+                      subtitle="仅当 model=gpt-5.4 时自动写入；切换到其他模型时自动删除。"
+                    >
+                      <div className="rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-2 font-mono text-sm text-slate-700 dark:text-slate-300">
+                        {GPT_54_AUTO_COMPACT_TOKEN_LIMIT}
+                      </div>
+                    </SettingItem>
+                  </>
+                ) : null}
 
                 <SettingItem
                   label="审批策略 (approval_policy)"
@@ -607,6 +668,21 @@ export function CliManagerCodexTab({
                     checked={boolOrDefault(codexConfig.features_remote_compaction, false)}
                     onCheckedChange={(checked) =>
                       void persistCodexConfig({ features_remote_compaction: checked })
+                    }
+                    disabled={saving}
+                  />
+                </SettingItem>
+
+                <SettingItem
+                  label="fast_mode"
+                  subtitle={
+                    '实验性：启用快速模式。开启同时写入 fast_mode=true 与 service_tier="fast"；关闭删除这两项。'
+                  }
+                >
+                  <Switch
+                    checked={effectiveFastModeEnabled}
+                    onCheckedChange={(checked) =>
+                      void persistCodexConfig(buildFastModePatch(checked))
                     }
                     disabled={saving}
                   />
