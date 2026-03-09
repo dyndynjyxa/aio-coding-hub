@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.30.12](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.30.11...aio-coding-hub-v0.30.12) (2026-03-09)
+
+
+### Features
+
+* **cli-manager:** 支持自定义GPT-5.4模型上下文窗口和自动压缩限制 ([024dca7](https://github.com/dyndynjyxa/aio-coding-hub/commit/024dca78798022fef014a6a4c5b7a63eb6ecd663))
+* **config:** 添加 GPT-5.4 关联配置及快速模式支持 ([38a11cb](https://github.com/dyndynjyxa/aio-coding-hub/commit/38a11cb4c33300a2a7edb19848d97e25e966688b))
+* **gateway,providers,oauth:** codex-oauth-with-proxy ([#76](https://github.com/dyndynjyxa/aio-coding-hub/issues/76)) ([f37e59a](https://github.com/dyndynjyxa/aio-coding-hub/commit/f37e59a3dbfdc8a95d18e592f1931c775f19c2ab))
+* **settings:** 新增静默启动配置支持 ([fcc436b](https://github.com/dyndynjyxa/aio-coding-hub/commit/fcc436b5dc5baf3b57e7160bd7e3562275535072))
+
+
+### Bug Fixes
+
+* **cli-manager:** 修正模型参数解析逻辑以避免默认值覆盖 ([ae2b7fe](https://github.com/dyndynjyxa/aio-coding-hub/commit/ae2b7feecfd6e06462b8b0990204fc55d6ad3ccf))
+* **utils:** 修正computeOutputTokensPerSecond回退逻辑 ([7c59559](https://github.com/dyndynjyxa/aio-coding-hub/commit/7c59559ad0b525e478577d74518173753530a980))
+
 ## [0.30.11](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.30.10...aio-coding-hub-v0.30.11) (2026-03-03)
 
 
