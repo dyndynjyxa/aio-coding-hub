@@ -3,6 +3,8 @@
 use super::app_state::GatewayState;
 use crate::blocking;
 use crate::cli_proxy;
+#[cfg(windows)]
+use crate::infra::wsl;
 use crate::shared::mutex_ext::MutexExt;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::OnceLock;
@@ -16,6 +18,8 @@ const CLEANUP_STATE_DONE: u8 = 2;
 
 const CLEANUP_WAIT_TIMEOUT: Duration = Duration::from_secs(15);
 const CLI_PROXY_RESTORE_TIMEOUT: Duration = Duration::from_secs(3);
+#[cfg(windows)]
+const WSL_RESTORE_TIMEOUT: Duration = Duration::from_secs(5);
 
 static CLEANUP_STATE: AtomicU8 = AtomicU8::new(CLEANUP_STATE_IDLE);
 static CLEANUP_NOTIFY: OnceLock<Notify> = OnceLock::new();
@@ -41,6 +45,22 @@ pub(crate) async fn cleanup_before_exit(app: &tauri::AppHandle) {
                 true,
             )
             .await;
+
+            #[cfg(windows)]
+            {
+                let wsl_restore_app = app.clone();
+                let wsl_fut = blocking::run("cleanup_wsl_restore", move || {
+                    wsl::restore_wsl_clients(&wsl_restore_app)
+                });
+                match tokio::time::timeout(WSL_RESTORE_TIMEOUT, wsl_fut).await {
+                    Ok(Ok(())) => tracing::info!("WSL config restore completed"),
+                    Ok(Err(e)) => tracing::warn!("WSL config restore failed: {e}"),
+                    Err(_) => tracing::warn!(
+                        "WSL config restore timed out ({}s)",
+                        WSL_RESTORE_TIMEOUT.as_secs()
+                    ),
+                }
+            }
 
             CLEANUP_STATE.store(CLEANUP_STATE_DONE, Ordering::Release);
             notify.notify_waiters();

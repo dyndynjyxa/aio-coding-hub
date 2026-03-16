@@ -215,6 +215,20 @@ pub fn run() {
 
                 // WSL auto-detect and auto-configure (Windows only, gated by wsl_auto_config)
                 #[cfg(windows)]
+                {
+                    // Check for stale WSL manifests from a previous crash/unclean exit
+                    let repair_app = app_handle.clone();
+                    if let Err(err) =
+                        blocking::run("startup_wsl_manifest_repair", move || {
+                            infra::wsl::startup_repair_wsl_manifests(&repair_app)
+                        })
+                        .await
+                    {
+                        tracing::warn!("WSL manifest startup repair failed: {}", err);
+                    }
+                }
+
+                #[cfg(windows)]
                 if settings.wsl_auto_config {
                     let auto_cfg_app = app_handle.clone();
                     let auto_cfg_db = db.clone();

@@ -5,7 +5,7 @@ use crate::prompt_sync;
 use crate::settings;
 use crate::shared::error::{AppError, AppResult};
 use rusqlite::OptionalExtension;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -141,6 +141,548 @@ pub fn validate_distro(distro: &str) -> AppResult<()> {
             "SEC_INVALID_INPUT",
             format!("unknown WSL distro: {trimmed}"),
         ));
+    }
+    Ok(())
+}
+
+// ── WSL manifest (config lifecycle) ────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WslCliBackup {
+    pub cli_key: String,
+    /// Keys injected by AIO and the values written.
+    pub injected_keys: std::collections::HashMap<String, String>,
+    /// Original values before injection. `None` means key did not exist.
+    pub original_values: std::collections::HashMap<String, Option<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WslDistroManifest {
+    pub schema_version: u32,
+    pub distro: String,
+    pub configured: bool,
+    pub proxy_origin: String,
+    pub configured_at: i64,
+    /// Cached UNC path to WSL home dir, so restore doesn't need to spawn wsl.exe.
+    #[serde(default)]
+    pub wsl_home_unc: Option<String>,
+    pub cli_backups: Vec<WslCliBackup>,
+}
+
+fn wsl_manifests_dir(app: &tauri::AppHandle) -> AppResult<std::path::PathBuf> {
+    Ok(crate::infra::app_paths::app_data_dir(app)?.join("wsl-manifests"))
+}
+
+fn wsl_manifest_path(app: &tauri::AppHandle, distro: &str) -> AppResult<std::path::PathBuf> {
+    Ok(wsl_manifests_dir(app)?.join(format!("{distro}.json")))
+}
+
+fn read_wsl_manifest(app: &tauri::AppHandle, distro: &str) -> AppResult<Option<WslDistroManifest>> {
+    let path = wsl_manifest_path(app, distro)?;
+    let Some(content) = crate::shared::fs::read_optional_file(&path)? else {
+        return Ok(None);
+    };
+    let manifest: WslDistroManifest = serde_json::from_slice(&content)
+        .map_err(|e| format!("failed to parse WSL manifest for {distro}: {e}"))?;
+    Ok(Some(manifest))
+}
+
+fn write_wsl_manifest(
+    app: &tauri::AppHandle,
+    distro: &str,
+    manifest: &WslDistroManifest,
+) -> AppResult<()> {
+    let path = wsl_manifest_path(app, distro)?;
+    let json = serde_json::to_string_pretty(manifest)
+        .map_err(|e| format!("failed to serialize WSL manifest: {e}"))?;
+    crate::shared::fs::write_file_atomic(&path, json.as_bytes())
+}
+
+fn delete_wsl_manifest(app: &tauri::AppHandle, distro: &str) -> AppResult<()> {
+    let path = wsl_manifest_path(app, distro)?;
+    if path.exists() {
+        std::fs::remove_file(&path)
+            .map_err(|e| format!("failed to delete WSL manifest for {distro}: {e}"))?;
+    }
+    Ok(())
+}
+
+fn read_all_wsl_manifests(app: &tauri::AppHandle) -> AppResult<Vec<WslDistroManifest>> {
+    let dir = wsl_manifests_dir(app)?;
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut manifests = Vec::new();
+    let entries =
+        std::fs::read_dir(&dir).map_err(|e| format!("failed to read wsl-manifests dir: {e}"))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("failed to read dir entry: {e}"))?;
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        match serde_json::from_slice::<WslDistroManifest>(&bytes) {
+            Ok(m) => manifests.push(m),
+            Err(e) => {
+                tracing::warn!("failed to parse WSL manifest {}: {e}", path.display());
+            }
+        }
+    }
+    Ok(manifests)
+}
+
+// ── Capture original values (pure Rust via UNC paths) ──
+
+fn read_wsl_current_values(
+    distro: &str,
+    cli_key: &str,
+) -> AppResult<std::collections::HashMap<String, Option<String>>> {
+    let home = resolve_wsl_home_unc(distro)?;
+    let mut map = std::collections::HashMap::new();
+
+    match cli_key {
+        "claude" => {
+            let path = home.join(".claude").join("settings.json");
+            let env = read_json_nested_str_map(&path, "env");
+            map.insert(
+                "ANTHROPIC_BASE_URL".to_string(),
+                env.get("ANTHROPIC_BASE_URL").cloned(),
+            );
+            map.insert(
+                "ANTHROPIC_AUTH_TOKEN".to_string(),
+                env.get("ANTHROPIC_AUTH_TOKEN").cloned(),
+            );
+        }
+        "codex" => {
+            let codex_home = home.join(".codex");
+            // config.toml
+            let toml_path = codex_home.join("config.toml");
+            let toml_content = std::fs::read_to_string(&toml_path).unwrap_or_default();
+            map.insert(
+                "preferred_auth_method".to_string(),
+                extract_toml_value(&toml_content, "preferred_auth_method"),
+            );
+            map.insert(
+                "model_provider".to_string(),
+                extract_toml_value(&toml_content, "model_provider"),
+            );
+            // auth.json
+            let auth_path = codex_home.join("auth.json");
+            let auth = read_json_top_level_str(&auth_path, "OPENAI_API_KEY");
+            map.insert("OPENAI_API_KEY".to_string(), auth);
+        }
+        "gemini" => {
+            let env_path = home.join(".gemini").join(".env");
+            let env_content = std::fs::read_to_string(&env_path).unwrap_or_default();
+            map.insert(
+                "GOOGLE_GEMINI_BASE_URL".to_string(),
+                extract_env_value(&env_content, "GOOGLE_GEMINI_BASE_URL"),
+            );
+            map.insert(
+                "GEMINI_API_KEY".to_string(),
+                extract_env_value(&env_content, "GEMINI_API_KEY"),
+            );
+        }
+        _ => {}
+    }
+
+    Ok(map)
+}
+
+/// Read a JSON file, return a map of string values from a nested object key.
+fn read_json_nested_str_map(
+    path: &std::path::Path,
+    key: &str,
+) -> std::collections::HashMap<String, String> {
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(_) => return std::collections::HashMap::new(),
+    };
+    let val: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(_) => return std::collections::HashMap::new(),
+    };
+    let Some(obj) = val.get(key).and_then(|v| v.as_object()) else {
+        return std::collections::HashMap::new();
+    };
+    obj.iter()
+        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+        .collect()
+}
+
+/// Read a top-level string value from a JSON file.
+fn read_json_top_level_str(path: &std::path::Path, key: &str) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    let val: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    val.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
+}
+
+/// Extract a value from TOML like `key = "value"`.
+fn extract_toml_value(content: &str, key: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix(key) {
+            let rest = rest.trim();
+            if let Some(rest) = rest.strip_prefix('=') {
+                let rest = rest.trim().trim_matches('"');
+                if !rest.is_empty() {
+                    return Some(rest.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Extract a value from .env like `KEY=value`.
+fn extract_env_value(content: &str, key: &str) -> Option<String> {
+    let prefix = format!("{key}=");
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') {
+            continue;
+        }
+        let check = trimmed.strip_prefix("export ").unwrap_or(trimmed);
+        if let Some(val) = check.strip_prefix(&prefix) {
+            let val = val.trim();
+            if !val.is_empty() {
+                return Some(val.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Write file and force sync to disk (critical for UNC/9P paths during exit).
+fn write_file_synced(path: &std::path::Path, data: &[u8]) -> AppResult<()> {
+    use std::io::Write;
+    let mut file = std::fs::File::create(path)
+        .map_err(|e| format!("failed to create {}: {e}", path.display()))?;
+    file.write_all(data)
+        .map_err(|e| format!("failed to write {}: {e}", path.display()))?;
+    file.sync_all()
+        .map_err(|e| format!("failed to sync {}: {e}", path.display()))?;
+    Ok(())
+}
+
+// ── Restore WSL clients (pure Rust via UNC paths) ──
+
+/// Restore a single CLI's config for a distro using the saved backup.
+fn restore_wsl_cli_backup(home: &std::path::Path, backup: &WslCliBackup) -> AppResult<()> {
+    match backup.cli_key.as_str() {
+        "claude" => {
+            let path = home.join(".claude").join("settings.json");
+            if !path.exists() {
+                return Ok(());
+            }
+            let bytes = std::fs::read(&path)
+                .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+            let mut data: serde_json::Value = serde_json::from_slice(&bytes)
+                .map_err(|e| format!("failed to parse {}: {e}", path.display()))?;
+
+            if let Some(env) = data.get_mut("env").and_then(|v| v.as_object_mut()) {
+                for key in ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"] {
+                    match backup.original_values.get(key) {
+                        Some(Some(val)) => {
+                            env.insert(key.to_string(), serde_json::Value::String(val.clone()));
+                        }
+                        Some(None) | None => {
+                            env.remove(key);
+                        }
+                    }
+                }
+            }
+
+            let out = serde_json::to_string_pretty(&data)
+                .map_err(|e| format!("failed to serialize: {e}"))?;
+            write_file_synced(&path, format!("{out}\n").as_bytes())?;
+        }
+        "codex" => {
+            let codex_home = home.join(".codex");
+
+            // config.toml
+            let toml_path = codex_home.join("config.toml");
+            if toml_path.exists() {
+                let content = std::fs::read_to_string(&toml_path)
+                    .map_err(|e| format!("failed to read {}: {e}", toml_path.display()))?;
+                let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+
+                for key in ["preferred_auth_method", "model_provider"] {
+                    let prefix = format!("{key}");
+                    // Remove existing lines for this key
+                    lines.retain(|l| {
+                        let trimmed = l.trim();
+                        !(trimmed.starts_with(&prefix)
+                            && trimmed[prefix.len()..].trim_start().starts_with('='))
+                    });
+                    // Re-insert if original had a value
+                    if let Some(Some(val)) = backup.original_values.get(key) {
+                        lines.push(format!("{key} = \"{val}\""));
+                    }
+                }
+
+                let out = lines.join("\n");
+                let toml_out = if out.ends_with('\n') { out } else { out + "\n" };
+                write_file_synced(&toml_path, toml_out.as_bytes())?;
+            }
+
+            // auth.json
+            let auth_path = codex_home.join("auth.json");
+            if auth_path.exists() {
+                let bytes = std::fs::read(&auth_path)
+                    .map_err(|e| format!("failed to read {}: {e}", auth_path.display()))?;
+                let mut data: serde_json::Value = serde_json::from_slice(&bytes)
+                    .map_err(|e| format!("failed to parse {}: {e}", auth_path.display()))?;
+
+                if let Some(obj) = data.as_object_mut() {
+                    match backup.original_values.get("OPENAI_API_KEY") {
+                        Some(Some(val)) => {
+                            obj.insert(
+                                "OPENAI_API_KEY".to_string(),
+                                serde_json::Value::String(val.clone()),
+                            );
+                        }
+                        Some(None) | None => {
+                            obj.remove("OPENAI_API_KEY");
+                        }
+                    }
+                }
+
+                let out = serde_json::to_string_pretty(&data)
+                    .map_err(|e| format!("failed to serialize: {e}"))?;
+                write_file_synced(&auth_path, format!("{out}\n").as_bytes())?;
+            }
+        }
+        "gemini" => {
+            let env_path = home.join(".gemini").join(".env");
+            if !env_path.exists() {
+                return Ok(());
+            }
+            let content = std::fs::read_to_string(&env_path)
+                .map_err(|e| format!("failed to read {}: {e}", env_path.display()))?;
+            let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+
+            for key in ["GOOGLE_GEMINI_BASE_URL", "GEMINI_API_KEY"] {
+                let prefix = format!("{key}=");
+                // Remove existing lines for this key
+                lines.retain(|l| {
+                    let trimmed = l.trim();
+                    if trimmed.starts_with('#') {
+                        return true;
+                    }
+                    let check = trimmed.strip_prefix("export ").unwrap_or(trimmed);
+                    !check.starts_with(&prefix)
+                });
+                // Re-insert if original had a value
+                if let Some(Some(val)) = backup.original_values.get(key) {
+                    lines.push(format!("{key}={val}"));
+                }
+            }
+
+            let out = lines.join("\n");
+            let env_out = if out.ends_with('\n') { out } else { out + "\n" };
+            write_file_synced(&env_path, env_out.as_bytes())?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Restore WSL client configurations using saved manifests.
+pub fn restore_wsl_clients(app: &tauri::AppHandle) -> AppResult<()> {
+    let manifests = read_all_wsl_manifests(app)?;
+    if manifests.is_empty() {
+        return Ok(());
+    }
+
+    for manifest in &manifests {
+        let distro = &manifest.distro;
+
+        // Use cached UNC path; fall back to resolving (which needs wsl.exe)
+        let home = match &manifest.wsl_home_unc {
+            Some(p) => std::path::PathBuf::from(p),
+            None => match resolve_wsl_home_unc(distro) {
+                Ok(h) => h,
+                Err(e) => {
+                    tracing::warn!(
+                        "WSL restore skipped for {distro}: no cached home and resolve failed: {e}"
+                    );
+                    continue; // Don't delete manifest — retry next startup
+                }
+            },
+        };
+
+        let mut all_ok = true;
+        for backup in &manifest.cli_backups {
+            if let Err(e) = restore_wsl_cli_backup(&home, backup) {
+                tracing::warn!("WSL restore failed for {} in {distro}: {e}", backup.cli_key);
+                all_ok = false;
+            } else {
+                tracing::info!("WSL restore succeeded for {} in {distro}", backup.cli_key);
+            }
+        }
+
+        // Only delete manifest if all restores succeeded
+        if all_ok {
+            if let Err(e) = delete_wsl_manifest(app, distro) {
+                tracing::warn!("failed to delete WSL manifest for {distro}: {e}");
+            }
+        } else {
+            tracing::warn!("WSL manifest for {distro} kept — some restores failed, will retry");
+        }
+    }
+    Ok(())
+}
+
+/// Fallback restore: remove known injected keys without relying on manifest.
+#[allow(dead_code)]
+pub fn restore_wsl_clients_fallback(_app: &tauri::AppHandle, distros: &[String]) -> AppResult<()> {
+    for distro in distros {
+        let home = match resolve_wsl_home_unc(distro) {
+            Ok(h) => h,
+            Err(e) => {
+                tracing::warn!("WSL fallback restore: cannot resolve home for {distro}: {e}");
+                continue;
+            }
+        };
+
+        // Claude: remove injected keys from settings.json
+        let claude_path = home.join(".claude").join("settings.json");
+        if claude_path.exists() {
+            if let Ok(bytes) = std::fs::read(&claude_path) {
+                if let Ok(mut data) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                    if let Some(env) = data.get_mut("env").and_then(|v| v.as_object_mut()) {
+                        env.remove("ANTHROPIC_BASE_URL");
+                        env.remove("ANTHROPIC_AUTH_TOKEN");
+                    }
+                    if let Ok(out) = serde_json::to_string_pretty(&data) {
+                        let _ = std::fs::write(&claude_path, format!("{out}\n"));
+                    }
+                }
+            }
+        }
+
+        // Codex: remove injected keys
+        let codex_home = home.join(".codex");
+        let toml_path = codex_home.join("config.toml");
+        if toml_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&toml_path) {
+                let lines: Vec<&str> = content
+                    .lines()
+                    .filter(|l| {
+                        let t = l.trim();
+                        !t.starts_with("preferred_auth_method") && !t.starts_with("model_provider")
+                    })
+                    .collect();
+                let _ = std::fs::write(&toml_path, lines.join("\n") + "\n");
+            }
+        }
+        let auth_path = codex_home.join("auth.json");
+        if auth_path.exists() {
+            if let Ok(bytes) = std::fs::read(&auth_path) {
+                if let Ok(mut data) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                    if let Some(obj) = data.as_object_mut() {
+                        obj.remove("OPENAI_API_KEY");
+                    }
+                    if let Ok(out) = serde_json::to_string_pretty(&data) {
+                        let _ = std::fs::write(&auth_path, format!("{out}\n"));
+                    }
+                }
+            }
+        }
+
+        // Gemini: remove injected keys from .env
+        let gemini_env = home.join(".gemini").join(".env");
+        if gemini_env.exists() {
+            if let Ok(content) = std::fs::read_to_string(&gemini_env) {
+                let lines: Vec<&str> = content
+                    .lines()
+                    .filter(|l| {
+                        let t = l.trim();
+                        let check = t.strip_prefix("export ").unwrap_or(t);
+                        !check.starts_with("GOOGLE_GEMINI_BASE_URL=")
+                            && !check.starts_with("GEMINI_API_KEY=")
+                    })
+                    .collect();
+                let _ = std::fs::write(&gemini_env, lines.join("\n") + "\n");
+            }
+        }
+    }
+    Ok(())
+}
+
+// ── Startup repair ──
+
+/// Check for stale manifests at startup and restore if the gateway is dead.
+pub fn startup_repair_wsl_manifests(app: &tauri::AppHandle) -> AppResult<()> {
+    let manifests = read_all_wsl_manifests(app)?;
+    if manifests.is_empty() {
+        return Ok(());
+    }
+
+    for manifest in &manifests {
+        let origin = &manifest.proxy_origin;
+        // Extract port from proxy_origin (e.g. "http://172.x.x.x:12345")
+        let port_alive = origin
+            .rsplit(':')
+            .next()
+            .and_then(|p| p.trim_end_matches('/').parse::<u16>().ok())
+            .map(|port| {
+                // Quick check: try connecting to the port
+                std::net::TcpStream::connect_timeout(
+                    &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+                    std::time::Duration::from_millis(500),
+                )
+                .is_ok()
+            })
+            .unwrap_or(false);
+
+        if port_alive {
+            tracing::debug!(
+                "WSL manifest for {} still alive (proxy_origin={origin}), keeping",
+                manifest.distro
+            );
+            continue;
+        }
+
+        tracing::info!(
+            "WSL manifest for {} has dead gateway (proxy_origin={origin}), restoring",
+            manifest.distro
+        );
+
+        let home = match &manifest.wsl_home_unc {
+            Some(p) => std::path::PathBuf::from(p),
+            None => match resolve_wsl_home_unc(&manifest.distro) {
+                Ok(h) => h,
+                Err(e) => {
+                    tracing::warn!(
+                        "startup WSL restore skipped for {}: no cached home and resolve failed: {e}",
+                        manifest.distro
+                    );
+                    continue;
+                }
+            },
+        };
+
+        for backup in &manifest.cli_backups {
+            if let Err(e) = restore_wsl_cli_backup(&home, backup) {
+                tracing::warn!(
+                    "startup WSL restore failed for {} in {}: {e}",
+                    backup.cli_key,
+                    manifest.distro
+                );
+            }
+        }
+        if let Err(e) = delete_wsl_manifest(app, &manifest.distro) {
+            tracing::warn!(
+                "failed to delete stale WSL manifest for {}: {e}",
+                manifest.distro
+            );
+        }
     }
     Ok(())
 }
@@ -1812,50 +2354,101 @@ pub fn configure_clients(
 
     for distro in distros {
         let mut results = Vec::new();
+        let mut cli_backups = Vec::new();
 
-        // ── Auth configuration ──
-        if targets.claude {
-            match configure_wsl_claude(distro, proxy_origin) {
-                Ok(()) => results.push(WslConfigureCliReport {
-                    cli_key: "claude".to_string(),
-                    ok: true,
-                    message: "ok".to_string(),
-                }),
-                Err(err) => results.push(WslConfigureCliReport {
-                    cli_key: "claude".to_string(),
-                    ok: false,
-                    message: err.to_string(),
-                }),
+        // Load existing manifest so we don't overwrite original_values on repeated calls
+        let existing_manifest = read_wsl_manifest(app, distro).unwrap_or(None);
+        let existing_backups: std::collections::HashMap<&str, &WslCliBackup> = existing_manifest
+            .as_ref()
+            .map(|m| {
+                m.cli_backups
+                    .iter()
+                    .map(|b| (b.cli_key.as_str(), b))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // ── Auth configuration (with original-value capture) ──
+        for (cli_key, enabled, configure_fn) in [
+            (
+                "claude",
+                targets.claude,
+                configure_wsl_claude as fn(&str, &str) -> AppResult<()>,
+            ),
+            (
+                "codex",
+                targets.codex,
+                configure_wsl_codex as fn(&str, &str) -> AppResult<()>,
+            ),
+            (
+                "gemini",
+                targets.gemini,
+                configure_wsl_gemini as fn(&str, &str) -> AppResult<()>,
+            ),
+        ] {
+            if !enabled {
+                continue;
             }
-        }
+            // If we already have a backup for this CLI (from a prior call), preserve
+            // the original_values; otherwise capture fresh ones now.
+            let original_values = if let Some(prev) = existing_backups.get(cli_key) {
+                prev.original_values.clone()
+            } else {
+                read_wsl_current_values(distro, cli_key).unwrap_or_default()
+            };
 
-        if targets.codex {
-            match configure_wsl_codex(distro, proxy_origin) {
-                Ok(()) => results.push(WslConfigureCliReport {
-                    cli_key: "codex".to_string(),
-                    ok: true,
-                    message: "ok".to_string(),
-                }),
-                Err(err) => results.push(WslConfigureCliReport {
-                    cli_key: "codex".to_string(),
-                    ok: false,
-                    message: err.to_string(),
-                }),
-            }
-        }
-
-        if targets.gemini {
-            match configure_wsl_gemini(distro, proxy_origin) {
-                Ok(()) => results.push(WslConfigureCliReport {
-                    cli_key: "gemini".to_string(),
-                    ok: true,
-                    message: "ok".to_string(),
-                }),
-                Err(err) => results.push(WslConfigureCliReport {
-                    cli_key: "gemini".to_string(),
-                    ok: false,
-                    message: err.to_string(),
-                }),
+            match configure_fn(distro, proxy_origin) {
+                Ok(()) => {
+                    // Record what we injected
+                    let injected_keys = match cli_key {
+                        "claude" => {
+                            let mut m = std::collections::HashMap::new();
+                            m.insert(
+                                "ANTHROPIC_BASE_URL".to_string(),
+                                format!("{proxy_origin}/claude"),
+                            );
+                            m.insert(
+                                "ANTHROPIC_AUTH_TOKEN".to_string(),
+                                "aio-coding-hub".to_string(),
+                            );
+                            m
+                        }
+                        "codex" => {
+                            let mut m = std::collections::HashMap::new();
+                            m.insert("preferred_auth_method".to_string(), "api-key".to_string());
+                            m.insert("model_provider".to_string(), "openai".to_string());
+                            m.insert("OPENAI_API_KEY".to_string(), "aio-coding-hub".to_string());
+                            m
+                        }
+                        "gemini" => {
+                            let mut m = std::collections::HashMap::new();
+                            m.insert(
+                                "GOOGLE_GEMINI_BASE_URL".to_string(),
+                                format!("{proxy_origin}/gemini"),
+                            );
+                            m.insert("GEMINI_API_KEY".to_string(), "aio-coding-hub".to_string());
+                            m
+                        }
+                        _ => std::collections::HashMap::new(),
+                    };
+                    cli_backups.push(WslCliBackup {
+                        cli_key: cli_key.to_string(),
+                        injected_keys,
+                        original_values,
+                    });
+                    results.push(WslConfigureCliReport {
+                        cli_key: cli_key.to_string(),
+                        ok: true,
+                        message: "ok".to_string(),
+                    });
+                }
+                Err(err) => {
+                    results.push(WslConfigureCliReport {
+                        cli_key: cli_key.to_string(),
+                        ok: false,
+                        message: err.to_string(),
+                    });
+                }
             }
         }
 
@@ -1925,6 +2518,25 @@ pub fn configure_clients(
                         });
                     }
                 }
+            }
+        }
+
+        // ── Write manifest for this distro ──
+        if !cli_backups.is_empty() {
+            let wsl_home_unc = resolve_wsl_home_unc(distro)
+                .ok()
+                .map(|p| p.to_string_lossy().to_string());
+            let manifest = WslDistroManifest {
+                schema_version: 1,
+                distro: distro.clone(),
+                configured: true,
+                proxy_origin: proxy_origin.to_string(),
+                configured_at: crate::shared::time::now_unix_seconds(),
+                wsl_home_unc,
+                cli_backups,
+            };
+            if let Err(e) = write_wsl_manifest(app, distro, &manifest) {
+                tracing::warn!("failed to write WSL manifest for {distro}: {e}");
             }
         }
 
@@ -2071,5 +2683,170 @@ mod tests {
         let adapted = adapt_mcp_servers_for_wsl(&servers);
 
         assert_eq!(adapted[0].command.as_deref(), Some("server"));
+    }
+
+    #[test]
+    fn test_wsl_manifest_roundtrip() {
+        let manifest = WslDistroManifest {
+            schema_version: 1,
+            distro: "Ubuntu".to_string(),
+            configured: true,
+            proxy_origin: "http://172.20.0.1:12345".to_string(),
+            configured_at: 1700000000,
+            wsl_home_unc: Some(r"\\wsl$\Ubuntu\home\testuser".to_string()),
+            cli_backups: vec![
+                WslCliBackup {
+                    cli_key: "claude".to_string(),
+                    injected_keys: [
+                        (
+                            "ANTHROPIC_BASE_URL".to_string(),
+                            "http://172.20.0.1:12345/claude".to_string(),
+                        ),
+                        (
+                            "ANTHROPIC_AUTH_TOKEN".to_string(),
+                            "aio-coding-hub".to_string(),
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
+                    original_values: [
+                        (
+                            "ANTHROPIC_BASE_URL".to_string(),
+                            Some("https://api.anthropic.com".to_string()),
+                        ),
+                        (
+                            "ANTHROPIC_AUTH_TOKEN".to_string(),
+                            Some("sk-old-token".to_string()),
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
+                },
+                WslCliBackup {
+                    cli_key: "gemini".to_string(),
+                    injected_keys: [("GEMINI_API_KEY".to_string(), "aio-coding-hub".to_string())]
+                        .into_iter()
+                        .collect(),
+                    original_values: [("GEMINI_API_KEY".to_string(), Some("old-key".to_string()))]
+                        .into_iter()
+                        .collect(),
+                },
+            ],
+        };
+
+        let json = serde_json::to_string_pretty(&manifest).expect("serialize");
+        let deserialized: WslDistroManifest = serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(deserialized.schema_version, 1);
+        assert_eq!(deserialized.distro, "Ubuntu");
+        assert_eq!(deserialized.proxy_origin, "http://172.20.0.1:12345");
+        assert_eq!(deserialized.cli_backups.len(), 2);
+        assert_eq!(deserialized.cli_backups[0].cli_key, "claude");
+        assert_eq!(
+            deserialized.cli_backups[0]
+                .original_values
+                .get("ANTHROPIC_BASE_URL"),
+            Some(&Some("https://api.anthropic.com".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_wsl_manifest_with_null_originals() {
+        let manifest = WslDistroManifest {
+            schema_version: 1,
+            distro: "Debian".to_string(),
+            configured: true,
+            proxy_origin: "http://172.20.0.1:9999".to_string(),
+            configured_at: 1700000000,
+            wsl_home_unc: None,
+            cli_backups: vec![WslCliBackup {
+                cli_key: "claude".to_string(),
+                injected_keys: [
+                    (
+                        "ANTHROPIC_BASE_URL".to_string(),
+                        "http://172.20.0.1:9999/claude".to_string(),
+                    ),
+                    (
+                        "ANTHROPIC_AUTH_TOKEN".to_string(),
+                        "aio-coding-hub".to_string(),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+                original_values: [
+                    ("ANTHROPIC_BASE_URL".to_string(), None),
+                    ("ANTHROPIC_AUTH_TOKEN".to_string(), None),
+                ]
+                .into_iter()
+                .collect(),
+            }],
+        };
+
+        let json = serde_json::to_string_pretty(&manifest).expect("serialize");
+        // Verify null is present in JSON
+        assert!(
+            json.contains("null"),
+            "JSON should contain null for missing original values"
+        );
+
+        let deserialized: WslDistroManifest = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(
+            deserialized.cli_backups[0]
+                .original_values
+                .get("ANTHROPIC_BASE_URL"),
+            Some(&None)
+        );
+        assert_eq!(
+            deserialized.cli_backups[0]
+                .original_values
+                .get("ANTHROPIC_AUTH_TOKEN"),
+            Some(&None)
+        );
+    }
+
+    #[test]
+    fn test_extract_toml_value() {
+        let content = r#"
+preferred_auth_method = "api-key"
+model_provider = "openai"
+model = "o3"
+"#;
+        assert_eq!(
+            extract_toml_value(content, "preferred_auth_method"),
+            Some("api-key".to_string())
+        );
+        assert_eq!(
+            extract_toml_value(content, "model_provider"),
+            Some("openai".to_string())
+        );
+        assert_eq!(extract_toml_value(content, "nonexistent"), None);
+    }
+
+    #[test]
+    fn test_extract_env_value() {
+        let content = r#"
+# comment line
+GOOGLE_GEMINI_BASE_URL=http://localhost:1234/gemini
+GEMINI_API_KEY=aio-coding-hub
+OTHER_VAR=keep
+"#;
+        assert_eq!(
+            extract_env_value(content, "GOOGLE_GEMINI_BASE_URL"),
+            Some("http://localhost:1234/gemini".to_string())
+        );
+        assert_eq!(
+            extract_env_value(content, "GEMINI_API_KEY"),
+            Some("aio-coding-hub".to_string())
+        );
+        assert_eq!(extract_env_value(content, "MISSING"), None);
+    }
+
+    #[test]
+    fn test_extract_env_value_with_export() {
+        let content = "export GEMINI_API_KEY=my-key\n";
+        assert_eq!(
+            extract_env_value(content, "GEMINI_API_KEY"),
+            Some("my-key".to_string())
+        );
     }
 }
