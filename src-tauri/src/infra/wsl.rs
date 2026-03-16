@@ -146,6 +146,8 @@ pub fn validate_distro(distro: &str) -> AppResult<()> {
 }
 
 // ── WSL manifest (config lifecycle) ────────────────────────────────
+// These types and functions are only called from `#[cfg(windows)]` blocks
+// (cleanup.rs, lib.rs, configure_clients), so they appear unused on Linux CI.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WslCliBackup {
@@ -412,7 +414,7 @@ fn restore_wsl_cli_backup(home: &std::path::Path, backup: &WslCliBackup) -> AppR
                 let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
 
                 for key in ["preferred_auth_method", "model_provider"] {
-                    let prefix = format!("{key}");
+                    let prefix = key.to_string();
                     // Remove existing lines for this key
                     lines.retain(|l| {
                         let trimmed = l.trim();
