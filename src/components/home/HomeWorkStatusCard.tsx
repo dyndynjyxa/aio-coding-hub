@@ -9,6 +9,7 @@ import { Switch } from "../../ui/Switch";
 import { CliBrandIcon } from "./CliBrandIcon";
 
 export type HomeWorkStatusCardProps = {
+  layout?: "vertical" | "horizontal";
   sortModes: SortModeSummary[];
   sortModesLoading: boolean;
   sortModesAvailable: boolean | null;
@@ -21,6 +22,7 @@ export type HomeWorkStatusCardProps = {
 };
 
 export function HomeWorkStatusCard({
+  layout = "vertical",
   sortModes,
   sortModesLoading,
   sortModesAvailable,
@@ -30,6 +32,8 @@ export function HomeWorkStatusCard({
   cliProxyToggling,
   onSetCliProxyEnabled,
 }: HomeWorkStatusCardProps) {
+  const horizontal = layout === "horizontal";
+
   return (
     <Card padding="sm" className="flex h-full flex-1 flex-col">
       <div className="flex items-center justify-between gap-2">
@@ -41,7 +45,11 @@ export function HomeWorkStatusCard({
       ) : sortModesAvailable === false ? (
         <div className="mt-2 text-sm text-slate-600 dark:text-slate-400">数据不可用</div>
       ) : (
-        <div className="mt-3 space-y-2.5">
+        <div
+          className={
+            horizontal ? "mt-3 grid grid-cols-1 gap-2.5 md:grid-cols-3" : "mt-3 space-y-2.5"
+          }
+        >
           {CLIS.map((cli) => {
             const cliKey = cli.key as CliKey;
             const activeModeId = activeModeByCli[cliKey] ?? null;
@@ -59,7 +67,13 @@ export function HomeWorkStatusCard({
                 className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-sm transition-all duration-200 hover:bg-slate-50 hover:border-indigo-200 hover:shadow-md dark:border-slate-700 dark:bg-slate-800 dark:shadow-none dark:hover:bg-slate-700 dark:hover:border-indigo-700"
               >
                 <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0 flex flex-1 items-center gap-2 text-left text-xs font-medium text-slate-700 dark:text-slate-300">
+                  <div
+                    className={
+                      horizontal
+                        ? "flex min-w-0 items-center gap-2 text-left text-xs font-medium text-slate-700 dark:text-slate-300"
+                        : "min-w-0 flex flex-1 items-center gap-2 text-left text-xs font-medium text-slate-700 dark:text-slate-300"
+                    }
+                  >
                     <CliBrandIcon
                       cliKey={cliKey}
                       className="h-4 w-4 shrink-0 rounded-[4px] object-contain"
@@ -67,9 +81,15 @@ export function HomeWorkStatusCard({
                     <span className="truncate">{cli.name}</span>
                   </div>
 
-                  <div className="flex shrink-0 items-center justify-end gap-2">
+                  <div
+                    className={
+                      horizontal
+                        ? "flex shrink-0 items-center justify-end gap-2"
+                        : "flex shrink-0 items-center justify-end gap-2"
+                    }
+                  >
                     <span
-                      className="max-w-[120px] rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300"
+                      className="max-w-[140px] rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300"
                       title={`当前工作区：${workspaceLabel}`}
                     >
                       <span className="block truncate">{workspaceLabel}</span>

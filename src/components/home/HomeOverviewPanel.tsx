@@ -153,29 +153,57 @@ export function HomeOverviewPanel({
   return (
     <div className="flex flex-col h-full gap-4">
       <div className="shrink-0">
-        <div className="grid gap-4 lg:grid-cols-12 lg:items-stretch">
-          <div className={cn("flex", showHomeHeatmap ? "lg:col-span-3" : "lg:col-span-4")}>
-            <HomeWorkStatusCard
-              sortModes={sortModes}
-              sortModesLoading={sortModesLoading}
-              sortModesAvailable={sortModesAvailable}
-              activeModeByCli={activeModeByCli}
-              activeModeToggling={activeModeToggling}
-              cliProxyEnabled={cliProxyEnabled}
-              cliProxyToggling={cliProxyToggling}
-              onSetCliProxyEnabled={onSetCliProxyEnabled}
-            />
-          </div>
+        {showHomeHeatmap ? (
+          <div className="space-y-4">
+            <div className="flex">
+              <HomeUsageSection
+                showHeatmap={true}
+                usageHeatmapRows={usageHeatmapRows}
+                usageHeatmapLoading={usageHeatmapLoading}
+                onRefreshUsageHeatmap={onRefreshUsageHeatmap}
+              />
+            </div>
 
-          <div className={cn("flex", showHomeHeatmap ? "lg:col-span-9" : "lg:col-span-8")}>
-            <HomeUsageSection
-              showHeatmap={showHomeHeatmap}
-              usageHeatmapRows={usageHeatmapRows}
-              usageHeatmapLoading={usageHeatmapLoading}
-              onRefreshUsageHeatmap={onRefreshUsageHeatmap}
-            />
+            <div className="flex">
+              <HomeWorkStatusCard
+                layout="horizontal"
+                sortModes={sortModes}
+                sortModesLoading={sortModesLoading}
+                sortModesAvailable={sortModesAvailable}
+                activeModeByCli={activeModeByCli}
+                activeModeToggling={activeModeToggling}
+                cliProxyEnabled={cliProxyEnabled}
+                cliProxyToggling={cliProxyToggling}
+                onSetCliProxyEnabled={onSetCliProxyEnabled}
+              />
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-12 lg:items-stretch">
+            <div className="flex lg:col-span-4">
+              <HomeWorkStatusCard
+                layout="vertical"
+                sortModes={sortModes}
+                sortModesLoading={sortModesLoading}
+                sortModesAvailable={sortModesAvailable}
+                activeModeByCli={activeModeByCli}
+                activeModeToggling={activeModeToggling}
+                cliProxyEnabled={cliProxyEnabled}
+                cliProxyToggling={cliProxyToggling}
+                onSetCliProxyEnabled={onSetCliProxyEnabled}
+              />
+            </div>
+
+            <div className="flex lg:col-span-8">
+              <HomeUsageSection
+                showHeatmap={false}
+                usageHeatmapRows={usageHeatmapRows}
+                usageHeatmapLoading={usageHeatmapLoading}
+                onRefreshUsageHeatmap={onRefreshUsageHeatmap}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-12 flex-1 min-h-0">

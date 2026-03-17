@@ -57,4 +57,23 @@ describe("components/home/HomeWorkStatusCard", () => {
     expect(screen.getByText("加载中…")).toBeInTheDocument();
     expect(screen.getAllByTitle("当前工作区：Default").length).toBeGreaterThan(0);
   });
+
+  it("supports horizontal layout for the second overview row", () => {
+    render(
+      <HomeWorkStatusCard
+        layout="horizontal"
+        sortModes={[{ id: 1, name: "M1", created_at: 0, updated_at: 0 } as any]}
+        sortModesLoading={false}
+        sortModesAvailable={true}
+        activeModeByCli={{ claude: 1, codex: null, gemini: null } as any}
+        activeModeToggling={{ claude: false, codex: false, gemini: false } as any}
+        cliProxyEnabled={{ claude: true, codex: false, gemini: false } as any}
+        cliProxyToggling={{ claude: false, codex: false, gemini: false } as any}
+        onSetCliProxyEnabled={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("代理状态")).toBeInTheDocument();
+    expect(screen.getByTitle("当前工作区：M1")).toBeInTheDocument();
+  });
 });
