@@ -100,7 +100,9 @@ describe("components/home/HomeRequestLogsPanel", () => {
     );
 
     expect(screen.getByText("使用记录（最近 50 条）")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /claude-3-opus.*P1/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("switch", { name: "最近使用记录简洁模式" }));
+    expect(screen.getByRole("button", { name: /claude-3-opus.*P1/ })).toBeInTheDocument();
     expect(screen.getByText("$0.123456")).toBeInTheDocument();
     expect(screen.getByText("$0.123456").closest("div")?.getAttribute("title")).toBe("$0.123456");
 
@@ -583,15 +585,15 @@ describe("components/home/HomeRequestLogsPanel", () => {
     );
 
     expect(screen.getByText("gpt-5.4")).toBeInTheDocument();
+    expect(screen.getAllByText("P1").length).toBeGreaterThan(0);
     expect(screen.getByText("流中断")).toBeInTheDocument();
     expect(screen.queryByText("3.20s")).not.toBeInTheDocument();
     expect(screen.queryByText("输入")).not.toBeInTheDocument();
-    expect(screen.queryByText("P1")).not.toBeInTheDocument();
     expect(screen.getByText("会话复用")).toBeInTheDocument();
 
     await user.click(screen.getByRole("switch", { name: "最近使用记录简洁模式" }));
 
     expect(screen.getByText("输入")).toBeInTheDocument();
-    expect(screen.getByText("P1")).toBeInTheDocument();
+    expect(screen.getAllByText("P1").length).toBeGreaterThan(0);
   });
 });

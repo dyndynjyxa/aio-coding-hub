@@ -634,7 +634,7 @@ const RequestLogCard = memo(function RequestLogCard({
             >
               <CliBrandIcon
                 cliKey={log.cli_key}
-                className="h-3.5 w-3.5 shrink-0 rounded-[3px] object-contain"
+                className="h-2.5 w-2.5 shrink-0 rounded-[3px] object-contain"
               />
               {cliLabel}
             </span>
@@ -644,6 +644,13 @@ const RequestLogCard = memo(function RequestLogCard({
               title={modelText}
             >
               <span className="truncate">{modelText}</span>
+            </span>
+
+            <span
+              className="inline-flex min-w-0 items-center rounded-md bg-slate-100/75 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-700/55 dark:text-slate-200"
+              title={providerTitle}
+            >
+              <span className="truncate">{providerText}</span>
             </span>
 
             {log.session_reuse && <SessionReuseBadge showCustomTooltip={showCustomTooltip} />}
