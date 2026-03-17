@@ -78,7 +78,8 @@ fn provider_runtime_reset_decision(
     let sensitive_config_changed = previous.base_urls != next.base_urls
         || previous.base_url_mode != next.base_url_mode
         || previous.auth_mode != next.auth_mode
-        || submitted_api_key_changed(previous_api_key, submitted_api_key);
+        || submitted_api_key_changed(previous_api_key, submitted_api_key)
+        || previous.source_provider_id != next.source_provider_id;
 
     ProviderRuntimeResetDecision {
         clear_session_bindings: sensitive_config_changed,

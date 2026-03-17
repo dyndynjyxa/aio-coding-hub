@@ -390,9 +390,10 @@ export function ProvidersView({ activeCli, setActiveCli }: ProvidersViewProps) {
       setDuplicatingByProviderId((cur) => ({ ...cur, [provider.id]: true }));
 
       try {
-        const apiKey =
-          provider.auth_mode === "api_key" ? await providerGetApiKey(provider.id) : null;
-        if (provider.auth_mode === "api_key" && (!apiKey || !apiKey.trim())) {
+        const needsApiKeyCopy =
+          provider.auth_mode === "api_key" && provider.source_provider_id == null;
+        const apiKey = needsApiKeyCopy ? await providerGetApiKey(provider.id) : null;
+        if (needsApiKeyCopy && (!apiKey || !apiKey.trim())) {
           toast("复制失败：原 Provider 未保存 API Key");
           return;
         }

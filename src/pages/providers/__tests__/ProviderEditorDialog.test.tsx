@@ -87,6 +87,7 @@ function makeInitialValues(
     limit_total_usd: 25,
     tags: ["prod"],
     note: "copied",
+    source_provider_id: null,
     ...partial,
   };
 }
