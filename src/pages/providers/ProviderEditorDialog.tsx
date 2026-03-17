@@ -213,6 +213,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
     apiKeyFetchedRef.current = false;
 
     if (mode === "create") {
+      const initialSourceProviderId = createInitialValues?.source_provider_id ?? null;
       setBaseUrlMode(createInitialValues?.base_url_mode ?? "order");
       setBaseUrlRows(buildBaseUrlRows(createInitialValues, newBaseUrlRow));
       setPingingAll(false);
@@ -220,7 +221,10 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
       setTags(createInitialValues?.tags ?? []);
       setTagInput("");
       setShowApiKey(false);
-      setAuthMode(createInitialValues?.auth_mode ?? "api_key");
+      setSourceProviderId(initialSourceProviderId);
+      setAuthMode(
+        initialSourceProviderId != null ? "cx2cc" : (createInitialValues?.auth_mode ?? "api_key")
+      );
       setOauthStatus(null);
       reset(buildFormValues(createInitialValues));
       return;
@@ -844,12 +848,13 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
                 disabled={saving}
               >
                 <option value="">请选择 Codex 供应商…</option>
-                {codexProviders.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.auth_mode === "oauth" ? "OAuth" : "API Key"})
-                    {!p.enabled ? " [已禁用]" : ""}
-                  </option>
-                ))}
+                {codexProviders
+                  .filter((p) => p.enabled && p.source_provider_id == null)
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.auth_mode === "oauth" ? "OAuth" : "API Key"})
+                    </option>
+                  ))}
               </select>
               {(() => {
                 const selected = sourceProviderId

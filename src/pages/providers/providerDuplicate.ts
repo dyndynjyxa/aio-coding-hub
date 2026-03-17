@@ -20,6 +20,7 @@ export type ProviderEditorInitialValues = {
   limit_total_usd: number | null;
   tags: string[];
   note: string;
+  source_provider_id: number | null;
 };
 
 function normalizeProviderName(name: string) {
@@ -54,9 +55,10 @@ export function buildDuplicatedProviderInitialValues(
   existingProviders: ProviderSummary[],
   apiKey: string | null
 ): ProviderEditorInitialValues {
+  const isBridge = provider.source_provider_id != null;
   return {
     name: buildDuplicatedProviderName(provider.name, existingProviders),
-    api_key: provider.auth_mode === "api_key" ? (apiKey ?? "") : "",
+    api_key: !isBridge && provider.auth_mode === "api_key" ? (apiKey ?? "") : "",
     auth_mode: provider.auth_mode,
     base_urls: [...provider.base_urls],
     base_url_mode: provider.base_url_mode,
@@ -72,5 +74,6 @@ export function buildDuplicatedProviderInitialValues(
     limit_total_usd: provider.limit_total_usd,
     tags: [...(provider.tags ?? [])],
     note: provider.note ?? "",
+    source_provider_id: provider.source_provider_id ?? null,
   };
 }

@@ -984,7 +984,7 @@ SELECT
   oauth_provider_type,
   source_provider_id
 FROM providers
-WHERE id = ?1
+WHERE id = ?1 AND enabled = 1 AND source_provider_id IS NULL AND cli_key = 'codex'
 "#,
             params![source_provider_id],
             |row| map_gateway_provider_row(row, &cli_key_owned),
@@ -1047,6 +1047,59 @@ pub fn upsert(
     let is_oauth = requested_auth_mode == ProviderAuthMode::Oauth;
 
     let is_cx2cc = source_provider_id.is_some();
+
+    // Validate source_provider_id constraints for CX2CC bridging.
+    if let Some(source_id) = source_provider_id {
+        if let Some(pid) = provider_id {
+            if pid == source_id {
+                return Err(
+                    "SEC_INVALID_INPUT: source_provider_id cannot reference itself"
+                        .to_string()
+                        .into(),
+                );
+            }
+        }
+        let source_conn = db.open_connection()?;
+        let source_row: Option<(String, i64, Option<i64>)> = source_conn
+            .query_row(
+                "SELECT cli_key, enabled, source_provider_id FROM providers WHERE id = ?1",
+                params![source_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(|e| db_err!("failed to validate source provider: {e}"))?;
+
+        match source_row {
+            None => {
+                return Err(
+                    "SEC_INVALID_INPUT: source_provider_id references a non-existent provider"
+                        .to_string()
+                        .into(),
+                );
+            }
+            Some((ref src_cli, enabled, nested_source)) => {
+                if src_cli != "codex" {
+                    return Err(
+                        "SEC_INVALID_INPUT: source provider must belong to codex CLI"
+                            .to_string()
+                            .into(),
+                    );
+                }
+                if enabled == 0 {
+                    return Err("SEC_INVALID_INPUT: source provider must be enabled"
+                        .to_string()
+                        .into());
+                }
+                if nested_source.is_some() {
+                    return Err(
+                        "SEC_INVALID_INPUT: source provider cannot itself be a bridge provider"
+                            .to_string()
+                            .into(),
+                    );
+                }
+            }
+        }
+    }
 
     let base_urls = if is_oauth || is_cx2cc {
         // OAuth and CX2CC providers don't need base URLs — inherited from source/adapter.
