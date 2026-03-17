@@ -18,22 +18,24 @@ export function HomeUsageSection({
   onRefreshUsageHeatmap,
 }: HomeUsageSectionProps) {
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-12 md:items-stretch md:gap-5">
-      <Card className="min-w-0 md:col-span-7" padding="sm">
+    <div className="grid h-full flex-1 grid-cols-1 gap-4 md:grid-cols-12 md:items-stretch md:gap-5">
+      <Card className="min-w-0 h-full md:col-span-7 flex flex-col" padding="sm">
         <div className="text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">热力图</div>
         {usageHeatmapLoading && usageHeatmapRows.length === 0 ? (
           <div className="text-sm text-slate-400">加载中…</div>
         ) : (
-          <UsageHeatmap15d
-            rows={usageHeatmapRows}
-            days={15}
-            onRefresh={onRefreshUsageHeatmap}
-            refreshing={usageHeatmapLoading}
-          />
+          <div className="flex-1">
+            <UsageHeatmap15d
+              rows={usageHeatmapRows}
+              days={15}
+              onRefresh={onRefreshUsageHeatmap}
+              refreshing={usageHeatmapLoading}
+            />
+          </div>
         )}
       </Card>
 
-      <Card className="flex flex-col md:col-span-5 min-h-[200px]" padding="sm">
+      <Card className="flex h-full min-h-[200px] flex-col md:col-span-5" padding="sm">
         <div className="text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">用量统计</div>
         {usageHeatmapLoading && usageHeatmapRows.length === 0 ? (
           <div className="text-sm text-slate-400">加载中…</div>

@@ -1,12 +1,12 @@
 // Usage:
-// - Render in `HomeOverviewPanel` left column to show CLI proxy toggle and active sort mode selector.
+// - Render in `HomeOverviewPanel` left column to show each CLI's current workspace and proxy state.
 
 import { CLIS } from "../../constants/clis";
 import type { CliKey } from "../../services/providers";
 import type { SortModeSummary } from "../../services/sortModes";
-import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Switch } from "../../ui/Switch";
+import { CliBrandIcon } from "./CliBrandIcon";
 
 export type HomeWorkStatusCardProps = {
   sortModes: SortModeSummary[];
@@ -14,7 +14,6 @@ export type HomeWorkStatusCardProps = {
   sortModesAvailable: boolean | null;
   activeModeByCli: Record<CliKey, number | null>;
   activeModeToggling: Record<CliKey, boolean>;
-  onSetCliActiveMode: (cliKey: CliKey, modeId: number | null) => void;
 
   cliProxyEnabled: Record<CliKey, boolean>;
   cliProxyToggling: Record<CliKey, boolean>;
@@ -27,15 +26,14 @@ export function HomeWorkStatusCard({
   sortModesAvailable,
   activeModeByCli,
   activeModeToggling,
-  onSetCliActiveMode,
   cliProxyEnabled,
   cliProxyToggling,
   onSetCliProxyEnabled,
 }: HomeWorkStatusCardProps) {
   return (
-    <Card padding="sm" className="flex flex-col">
+    <Card padding="sm" className="flex h-full flex-1 flex-col">
       <div className="flex items-center justify-between gap-2">
-        <div className="text-sm font-semibold">工作状态</div>
+        <div className="text-sm font-semibold">代理状态</div>
       </div>
 
       {sortModesLoading ? (
@@ -47,59 +45,42 @@ export function HomeWorkStatusCard({
           {CLIS.map((cli) => {
             const cliKey = cli.key as CliKey;
             const activeModeId = activeModeByCli[cliKey] ?? null;
-            const options = [
-              { id: null as number | null, label: "Default" },
-              ...sortModes.map((m) => ({ id: m.id, label: m.name })),
-            ];
+            const workspaceLabel =
+              activeModeToggling[cliKey] || sortModesLoading
+                ? "加载中…"
+                : activeModeId == null
+                  ? "Default"
+                  : (sortModes.find((mode) => mode.id === activeModeId)?.name ??
+                    `#${activeModeId}`);
 
             return (
               <div
                 key={cli.key}
                 className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-sm transition-all duration-200 hover:bg-slate-50 hover:border-indigo-200 hover:shadow-md dark:border-slate-700 dark:bg-slate-800 dark:shadow-none dark:hover:bg-slate-700 dark:hover:border-indigo-700"
               >
-                <div className="grid grid-cols-[6.5rem_1fr] items-center gap-x-3 gap-y-2.5 sm:grid-cols-[8rem_1fr]">
-                  <div className="text-xs font-medium text-slate-700 dark:text-slate-300">
-                    {cli.name}
-                  </div>
-                  <div className="flex justify-end">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-500 dark:text-slate-400">代理</span>
-                      <Switch
-                        checked={cliProxyEnabled[cliKey]}
-                        disabled={cliProxyToggling[cliKey]}
-                        onCheckedChange={(next) => onSetCliProxyEnabled(cliKey, next)}
-                        size="sm"
-                      />
-                      <span className="text-xs text-slate-600 dark:text-slate-400 font-medium min-w-[1rem]">
-                        {cliProxyEnabled[cliKey] ? "开" : "关"}
-                      </span>
-                    </div>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0 flex flex-1 items-center gap-2 text-left text-xs font-medium text-slate-700 dark:text-slate-300">
+                    <CliBrandIcon
+                      cliKey={cliKey}
+                      className="h-4 w-4 shrink-0 rounded-[4px] object-contain"
+                    />
+                    <span className="truncate">{cli.name}</span>
                   </div>
 
-                  <div className="col-span-2 flex items-center justify-between">
-                    <div className="text-xs text-slate-500 dark:text-slate-400">当前模板</div>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {options.map((opt, idx) => {
-                        const active = activeModeId === opt.id;
-                        const disabled = activeModeToggling[cliKey] || sortModesLoading;
-                        const key = opt.id == null ? "default" : String(opt.id);
-                        return (
-                          <div key={key} className="flex items-center gap-1.5">
-                            {idx > 0 ? (
-                              <span className="text-slate-200 dark:text-slate-600">|</span>
-                            ) : null}
-                            <Button
-                              onClick={() => onSetCliActiveMode(cliKey, opt.id)}
-                              variant={active ? "primary" : "secondary"}
-                              size="sm"
-                              disabled={disabled}
-                            >
-                              {opt.label}
-                            </Button>
-                          </div>
-                        );
-                      })}
-                    </div>
+                  <div className="flex shrink-0 items-center justify-end gap-2">
+                    <span
+                      className="max-w-[120px] rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300"
+                      title={`当前工作区：${workspaceLabel}`}
+                    >
+                      <span className="block truncate">{workspaceLabel}</span>
+                    </span>
+                    <Switch
+                      checked={cliProxyEnabled[cliKey]}
+                      disabled={cliProxyToggling[cliKey]}
+                      onCheckedChange={(next) => onSetCliProxyEnabled(cliKey, next)}
+                      size="sm"
+                      aria-label={`${cli.name} 代理开关`}
+                    />
                   </div>
                 </div>
               </div>

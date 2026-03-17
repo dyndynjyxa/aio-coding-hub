@@ -37,23 +37,6 @@ vi.mock("sonner", () => ({
 }));
 vi.mock("../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
 
-vi.mock("../../components/ProviderCircuitBadge", () => ({
-  ProviderCircuitBadge: ({ rows, onResetProvider }: any) => (
-    <div>
-      <div>open-circuits:{rows.length}</div>
-      <button type="button" onClick={() => onResetProvider(1)}>
-        reset-1
-      </button>
-      <button type="button" onClick={() => onResetProvider(2)}>
-        reset-2
-      </button>
-      <button type="button" onClick={() => onResetProvider(3)}>
-        reset-3
-      </button>
-    </div>
-  ),
-}));
-
 vi.mock("../../components/home/HomeOverviewPanel", () => ({
   HomeOverviewPanel: ({
     sortModesLoading,
@@ -62,9 +45,21 @@ vi.mock("../../components/home/HomeOverviewPanel", () => ({
     onRefreshUsageHeatmap,
     onRefreshRequestLogs,
     onSelectLogId,
+    openCircuits,
+    onResetCircuitProvider,
   }: any) => (
     <div>
       <div>sort-loading:{String(sortModesLoading)}</div>
+      <div>open-circuits:{openCircuits.length}</div>
+      <button type="button" onClick={() => onResetCircuitProvider(1)}>
+        reset-1
+      </button>
+      <button type="button" onClick={() => onResetCircuitProvider(2)}>
+        reset-2
+      </button>
+      <button type="button" onClick={() => onResetCircuitProvider(3)}>
+        reset-3
+      </button>
       <button type="button" onClick={() => onSetCliActiveMode("claude", 1)}>
         request-switch-same
       </button>

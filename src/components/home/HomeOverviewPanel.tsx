@@ -4,6 +4,9 @@
 
 import { useState } from "react";
 import { RefreshCw } from "lucide-react";
+import { cliBadgeTone, cliShortLabel } from "../../constants/clis";
+import { useNowUnix } from "../../hooks/useNowUnix";
+import type { OpenCircuitRow } from "../ProviderCircuitBadge";
 import type { GatewayActiveSession } from "../../services/gateway";
 import type { CliKey } from "../../services/providers";
 import type { ProviderLimitUsageRow } from "../../services/providerLimitUsage";
@@ -11,24 +14,50 @@ import type { RequestLogSummary } from "../../services/requestLogs";
 import type { SortModeSummary } from "../../services/sortModes";
 import type { TraceSession } from "../../services/traceStore";
 import type { UsageHourlyRow } from "../../services/usage";
+import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
+import { EmptyState } from "../../ui/EmptyState";
 import { TabList } from "../../ui/TabList";
 import { cn } from "../../utils/cn";
+import { formatCountdownSeconds } from "../../utils/formatters";
 import { HomeActiveSessionsCardContent } from "./HomeActiveSessionsCard";
 import { HomeProviderLimitPanelContent } from "./HomeProviderLimitPanel";
 import { HomeRequestLogsPanel } from "./HomeRequestLogsPanel";
 import { HomeUsageSection } from "./HomeUsageSection";
 import { HomeWorkStatusCard } from "./HomeWorkStatusCard";
 
-type SessionsTabKey = "sessions" | "providerLimit";
+type SessionsTabKey = "sessions" | "providerLimit" | "circuit";
 
 const SESSIONS_TABS: Array<{ key: SessionsTabKey; label: string }> = [
   { key: "sessions", label: "活跃 Session" },
   { key: "providerLimit", label: "供应商限额" },
+  { key: "circuit", label: "熔断信息" },
+];
+
+const PREVIEW_CIRCUITS: OpenCircuitRow[] = [
+  {
+    cli_key: "claude",
+    provider_id: 10001,
+    provider_name: "Claude Main",
+    open_until: Math.floor(Date.now() / 1000) + 12 * 60,
+  },
+  {
+    cli_key: "codex",
+    provider_id: 10002,
+    provider_name: "Codex Fallback",
+    open_until: Math.floor(Date.now() / 1000) + 5 * 60,
+  },
+  {
+    cli_key: "gemini",
+    provider_id: 10003,
+    provider_name: "Gemini Mirror",
+    open_until: null,
+  },
 ];
 
 export type HomeOverviewPanelProps = {
   showCustomTooltip: boolean;
+  circuitPreviewEnabled?: boolean;
 
   usageHeatmapRows: UsageHourlyRow[];
   usageHeatmapLoading: boolean;
@@ -55,6 +84,10 @@ export type HomeOverviewPanelProps = {
   providerLimitRefreshing: boolean;
   onRefreshProviderLimit: () => void;
 
+  openCircuits: OpenCircuitRow[];
+  onResetCircuitProvider: (providerId: number) => void;
+  resettingCircuitProviderIds: Set<number>;
+
   traces: TraceSession[];
 
   requestLogs: RequestLogSummary[];
@@ -69,6 +102,7 @@ export type HomeOverviewPanelProps = {
 
 export function HomeOverviewPanel({
   showCustomTooltip,
+  circuitPreviewEnabled = import.meta.env.DEV,
   usageHeatmapRows,
   usageHeatmapLoading,
   onRefreshUsageHeatmap,
@@ -77,7 +111,6 @@ export function HomeOverviewPanel({
   sortModesAvailable,
   activeModeByCli,
   activeModeToggling,
-  onSetCliActiveMode,
   cliProxyEnabled,
   cliProxyToggling,
   onSetCliProxyEnabled,
@@ -89,6 +122,9 @@ export function HomeOverviewPanel({
   providerLimitAvailable,
   providerLimitRefreshing,
   onRefreshProviderLimit,
+  openCircuits,
+  onResetCircuitProvider,
+  resettingCircuitProviderIds,
   traces,
   requestLogs,
   requestLogsLoading,
@@ -99,37 +135,52 @@ export function HomeOverviewPanel({
   onSelectLogId,
 }: HomeOverviewPanelProps) {
   const [sessionsTab, setSessionsTab] = useState<SessionsTabKey>("sessions");
+  const [previewCircuits, setPreviewCircuits] = useState<OpenCircuitRow[]>([]);
+  const displayedCircuits = openCircuits.length > 0 ? openCircuits : previewCircuits;
+  const circuitPreviewActive = openCircuits.length === 0 && previewCircuits.length > 0;
+  const circuitNowUnix = useNowUnix(sessionsTab === "circuit" && displayedCircuits.length > 0);
+
+  const groupedCircuits = displayedCircuits.reduce<Record<CliKey, OpenCircuitRow[]>>(
+    (acc, row) => {
+      acc[row.cli_key].push(row);
+      return acc;
+    },
+    { claude: [], codex: [], gemini: [] }
+  );
 
   return (
     <div className="flex flex-col h-full gap-4">
       <div className="shrink-0">
-        <HomeUsageSection
-          usageHeatmapRows={usageHeatmapRows}
-          usageHeatmapLoading={usageHeatmapLoading}
-          onRefreshUsageHeatmap={onRefreshUsageHeatmap}
-        />
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-12 flex-1 min-h-0">
-        <div className="flex flex-col gap-3 lg:col-span-5 min-h-0">
-          <div className="shrink-0">
+        <div className="grid gap-4 lg:grid-cols-12 lg:items-stretch">
+          <div className="flex lg:col-span-3">
             <HomeWorkStatusCard
               sortModes={sortModes}
               sortModesLoading={sortModesLoading}
               sortModesAvailable={sortModesAvailable}
               activeModeByCli={activeModeByCli}
               activeModeToggling={activeModeToggling}
-              onSetCliActiveMode={onSetCliActiveMode}
               cliProxyEnabled={cliProxyEnabled}
               cliProxyToggling={cliProxyToggling}
               onSetCliProxyEnabled={onSetCliProxyEnabled}
             />
           </div>
 
-          <Card padding="sm" className="flex flex-col flex-1 min-h-0">
+          <div className="flex lg:col-span-9">
+            <HomeUsageSection
+              usageHeatmapRows={usageHeatmapRows}
+              usageHeatmapLoading={usageHeatmapLoading}
+              onRefreshUsageHeatmap={onRefreshUsageHeatmap}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-12 flex-1 min-h-0">
+        <div className="flex min-h-0 lg:col-span-5">
+          <Card padding="sm" className="flex h-full min-h-0 flex-1 flex-col">
             <div className="flex items-center justify-between gap-2 shrink-0">
               <TabList
-                ariaLabel="Session/供应商限额切换"
+                ariaLabel="概览状态切换"
                 items={SESSIONS_TABS}
                 value={sessionsTab}
                 onChange={setSessionsTab}
@@ -139,7 +190,9 @@ export function HomeOverviewPanel({
                 <span>
                   {sessionsTab === "sessions"
                     ? activeSessions.length
-                    : `${providerLimitRows.length} 个供应商`}
+                    : sessionsTab === "providerLimit"
+                      ? `${providerLimitRows.length} 个供应商`
+                      : `${displayedCircuits.length} 个熔断`}
                 </span>
                 {sessionsTab === "providerLimit" && (
                   <button
@@ -159,6 +212,15 @@ export function HomeOverviewPanel({
                     刷新
                   </button>
                 )}
+                {sessionsTab === "circuit" && circuitPreviewActive && (
+                  <button
+                    type="button"
+                    onClick={() => setPreviewCircuits([])}
+                    className="flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
+                  >
+                    关闭预览
+                  </button>
+                )}
               </div>
             </div>
 
@@ -169,12 +231,97 @@ export function HomeOverviewPanel({
                   activeSessionsLoading={activeSessionsLoading}
                   activeSessionsAvailable={activeSessionsAvailable}
                 />
-              ) : (
+              ) : sessionsTab === "providerLimit" ? (
                 <HomeProviderLimitPanelContent
                   rows={providerLimitRows}
                   loading={providerLimitLoading}
                   available={providerLimitAvailable}
                 />
+              ) : displayedCircuits.length === 0 ? (
+                <EmptyState
+                  title="当前没有熔断中的 Provider"
+                  action={
+                    circuitPreviewEnabled ? (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setPreviewCircuits(PREVIEW_CIRCUITS)}
+                      >
+                        预览熔断样式
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              ) : (
+                <div className="h-full overflow-y-auto pr-1">
+                  <div className="space-y-3">
+                    {(Object.keys(groupedCircuits) as CliKey[])
+                      .filter((cliKey) => groupedCircuits[cliKey].length > 0)
+                      .map((cliKey) => (
+                        <div key={cliKey} className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={cn(
+                                "rounded px-1.5 py-0.5 text-xs font-bold uppercase tracking-wider",
+                                cliBadgeTone(cliKey)
+                              )}
+                            >
+                              {cliShortLabel(cliKey)}
+                            </span>
+                            <span className="text-xs text-slate-500 dark:text-slate-400">
+                              {groupedCircuits[cliKey].length} 个熔断
+                            </span>
+                          </div>
+                          <div className="space-y-2">
+                            {groupedCircuits[cliKey].map((row) => {
+                              const remaining =
+                                row.open_until != null && Number.isFinite(row.open_until)
+                                  ? formatCountdownSeconds(row.open_until - circuitNowUnix)
+                                  : "—";
+                              const isResetting = resettingCircuitProviderIds.has(row.provider_id);
+
+                              return (
+                                <div
+                                  key={`${row.cli_key}:${row.provider_id}`}
+                                  className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/50"
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <div
+                                      className="truncate text-sm font-medium text-slate-700 dark:text-slate-300"
+                                      title={row.provider_name}
+                                    >
+                                      {row.provider_name || "未知"}
+                                    </div>
+                                  </div>
+                                  <div className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400">
+                                    {remaining}
+                                  </div>
+                                  <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    disabled={isResetting}
+                                    onClick={() => {
+                                      if (circuitPreviewActive) {
+                                        setPreviewCircuits((prev) =>
+                                          prev.filter(
+                                            (item) => item.provider_id !== row.provider_id
+                                          )
+                                        );
+                                        return;
+                                      }
+                                      onResetCircuitProvider(row.provider_id);
+                                    }}
+                                  >
+                                    {isResetting ? "解除中..." : "解除熔断"}
+                                  </Button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
               )}
             </div>
           </Card>

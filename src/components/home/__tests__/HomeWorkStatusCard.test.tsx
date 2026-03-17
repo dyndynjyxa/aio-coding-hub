@@ -11,7 +11,6 @@ describe("components/home/HomeWorkStatusCard", () => {
         sortModesAvailable={null}
         activeModeByCli={{ claude: null, codex: null, gemini: null } as any}
         activeModeToggling={{ claude: false, codex: false, gemini: false } as any}
-        onSetCliActiveMode={vi.fn()}
         cliProxyEnabled={{ claude: true, codex: false, gemini: false } as any}
         cliProxyToggling={{ claude: false, codex: false, gemini: false } as any}
         onSetCliProxyEnabled={vi.fn()}
@@ -26,7 +25,6 @@ describe("components/home/HomeWorkStatusCard", () => {
         sortModesAvailable={false}
         activeModeByCli={{ claude: null, codex: null, gemini: null } as any}
         activeModeToggling={{ claude: false, codex: false, gemini: false } as any}
-        onSetCliActiveMode={vi.fn()}
         cliProxyEnabled={{ claude: true, codex: false, gemini: false } as any}
         cliProxyToggling={{ claude: false, codex: false, gemini: false } as any}
         onSetCliProxyEnabled={vi.fn()}
@@ -35,9 +33,8 @@ describe("components/home/HomeWorkStatusCard", () => {
     expect(screen.getByText("数据不可用")).toBeInTheDocument();
   });
 
-  it("drives proxy toggles and active mode selection", () => {
+  it("drives proxy toggles and renders workspace as read-only pill info", () => {
     const onSetCliProxyEnabled = vi.fn();
-    const onSetCliActiveMode = vi.fn();
 
     render(
       <HomeWorkStatusCard
@@ -46,7 +43,6 @@ describe("components/home/HomeWorkStatusCard", () => {
         sortModesAvailable={true}
         activeModeByCli={{ claude: null, codex: 1, gemini: null } as any}
         activeModeToggling={{ claude: false, codex: true, gemini: false } as any}
-        onSetCliActiveMode={onSetCliActiveMode}
         cliProxyEnabled={{ claude: true, codex: false, gemini: false } as any}
         cliProxyToggling={{ claude: false, codex: false, gemini: false } as any}
         onSetCliProxyEnabled={onSetCliProxyEnabled}
@@ -57,10 +53,8 @@ describe("components/home/HomeWorkStatusCard", () => {
     fireEvent.click(switches[0]);
     expect(onSetCliProxyEnabled).toHaveBeenCalledWith("claude", false);
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Default" })[0]);
-    expect(onSetCliActiveMode).toHaveBeenCalledWith("claude", null);
-
-    fireEvent.click(screen.getAllByRole("button", { name: "M1" })[0]);
-    expect(onSetCliActiveMode).toHaveBeenCalledWith("claude", 1);
+    expect(screen.getAllByText("Default").length).toBeGreaterThan(0);
+    expect(screen.getByText("加载中…")).toBeInTheDocument();
+    expect(screen.getAllByTitle("当前工作区：Default").length).toBeGreaterThan(0);
   });
 });

@@ -6,7 +6,6 @@ import { CLIS } from "../constants/clis";
 import { HomeCostPanel } from "../components/home/HomeCostPanel";
 import { HomeOverviewPanel } from "../components/home/HomeOverviewPanel";
 import { RequestLogDetailDialog } from "../components/home/RequestLogDetailDialog";
-import { ProviderCircuitBadge } from "../components/ProviderCircuitBadge";
 import { useDocumentVisibility } from "../hooks/useDocumentVisibility";
 import { useWindowForeground } from "../hooks/useWindowForeground";
 import { useGatewaySessionsListQuery } from "../query/gateway";
@@ -150,14 +149,7 @@ export function HomePage() {
         <PageHeader
           title="首页"
           actions={
-            <>
-              <ProviderCircuitBadge
-                rows={circuit.openCircuits}
-                onResetProvider={circuit.handleResetProvider}
-                resettingProviderIds={circuit.resettingProviderIds}
-              />
-              <TabList ariaLabel="首页视图切换" items={HOME_TABS} value={tab} onChange={setTab} />
-            </>
+            <TabList ariaLabel="首页视图切换" items={HOME_TABS} value={tab} onChange={setTab} />
           }
         />
       </div>
@@ -186,6 +178,9 @@ export function HomePage() {
             providerLimitAvailable={providerLimitAvailable}
             providerLimitRefreshing={providerLimitRefreshing}
             onRefreshProviderLimit={refreshProviderLimit}
+            openCircuits={circuit.openCircuits}
+            onResetCircuitProvider={circuit.handleResetProvider}
+            resettingCircuitProviderIds={circuit.resettingProviderIds}
             traces={traces}
             requestLogs={requestLogs}
             requestLogsLoading={requestLogsLoading}
