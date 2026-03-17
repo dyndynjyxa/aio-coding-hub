@@ -204,7 +204,9 @@ describe("pages/providers/ProvidersView", () => {
 
     renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
 
-    expect(screen.getByText("source: OpenAI Primary")).toBeInTheDocument();
+    expect(
+      screen.getByText((_, el) => el?.textContent === "源: OpenAI Primary")
+    ).toBeInTheDocument();
   });
 
   it("supports toggling, circuit reset, create/edit/delete, and drag reorder", async () => {

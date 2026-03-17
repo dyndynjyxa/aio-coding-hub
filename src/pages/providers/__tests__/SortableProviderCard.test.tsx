@@ -237,7 +237,7 @@ describe("pages/providers/SortableProviderCard", () => {
       }
     );
 
-    expect(screen.getByText("source: Lisa")).toBeInTheDocument();
+    expect(screen.getByText((_, el) => el?.textContent === "源: Lisa")).toBeInTheDocument();
     expect(screen.queryByText("CX2CC 转译")).not.toBeInTheDocument();
     expect(screen.getByText("CX2CC")).toBeInTheDocument();
   });

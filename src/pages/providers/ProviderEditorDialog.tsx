@@ -129,7 +129,9 @@ function buildBaseUrlRows(
   return [newBaseUrlRow()];
 }
 
-function deriveAuthMode(provider: ProviderSummary | null | undefined): "api_key" | "oauth" | "cx2cc" {
+function deriveAuthMode(
+  provider: ProviderSummary | null | undefined
+): "api_key" | "oauth" | "cx2cc" {
   if (!provider) return "api_key";
   if (provider.source_provider_id) return "cx2cc";
   if (provider.auth_mode === "oauth") return "oauth";
@@ -357,6 +359,28 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
       // OAuth providers don't use base URLs — the gateway routes to the
       // provider's official API endpoint based on the OAuth adapter.
       finalBaseUrls = [];
+
+      // Avoid stale UI race: refresh OAuth status once before enforcing save-time gate.
+      let effectiveOauthStatus = oauthStatus;
+      if (!effectiveOauthStatus?.connected && editingProviderId) {
+        try {
+          const latestStatus = await providerOAuthStatus(editingProviderId);
+          setOauthStatus(latestStatus);
+          effectiveOauthStatus = latestStatus;
+        } catch (err) {
+          logToConsole("warn", "保存前刷新 OAuth 状态失败", {
+            cli_key: cliKey,
+            provider_id: editingProviderId,
+            error: String(err),
+          });
+        }
+      }
+
+      // Validate OAuth is actually connected before saving.
+      if (!effectiveOauthStatus?.connected) {
+        toast("请先完成 OAuth 登录");
+        return;
+      }
     } else if (isCx2cc) {
       // CX2CC providers don't need base URLs — inherited from source provider.
       finalBaseUrls = [];
@@ -829,11 +853,12 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
               </select>
               {(() => {
                 const selected = sourceProviderId
-                  ? codexProviders.find((p) => p.id === sourceProviderId) ?? null
+                  ? (codexProviders.find((p) => p.id === sourceProviderId) ?? null)
                   : null;
                 return selected ? (
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    已选择：{selected.name} — {selected.auth_mode === "oauth" ? "OAuth 认证" : "API Key 认证"}
+                    已选择：{selected.name} —{" "}
+                    {selected.auth_mode === "oauth" ? "OAuth 认证" : "API Key 认证"}
                     {selected.base_urls.length > 0 ? ` — ${selected.base_urls[0]}` : ""}
                   </p>
                 ) : null;
