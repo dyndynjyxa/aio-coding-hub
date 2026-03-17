@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
+import { useTheme } from "../../../hooks/useTheme";
 import { logToConsole } from "../../../services/consoleLog";
 import { gatewayStart, gatewayStop } from "../../../services/gateway";
 import { SettingsMainColumn } from "../SettingsMainColumn";
@@ -8,6 +9,7 @@ import type { ComponentProps } from "react";
 
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
+vi.mock("../../../hooks/useTheme", () => ({ useTheme: vi.fn() }));
 vi.mock("../../../services/gateway", async () => {
   const actual = await vi.importActual<typeof import("../../../services/gateway")>(
     "../../../services/gateway"
@@ -45,6 +47,26 @@ function renderSettingsMainColumn(
 }
 
 describe("pages/settings/SettingsMainColumn", () => {
+  it("switches theme from settings", () => {
+    const setTheme = vi.fn();
+    vi.mocked(useTheme).mockReturnValue({
+      theme: "system",
+      resolvedTheme: "light",
+      setTheme,
+    } as any);
+
+    renderSettingsMainColumn();
+
+    fireEvent.click(screen.getByRole("button", { name: "Light" }));
+    expect(setTheme).toHaveBeenCalledWith("light");
+
+    fireEvent.click(screen.getByRole("button", { name: "Dark" }));
+    expect(setTheme).toHaveBeenCalledWith("dark");
+
+    fireEvent.click(screen.getByRole("button", { name: "System" }));
+    expect(setTheme).toHaveBeenCalledWith("system");
+  });
+
   it.each([
     ["checking", "检查中"],
     ["granted", "已授权"],
@@ -52,11 +74,21 @@ describe("pages/settings/SettingsMainColumn", () => {
     ["not_granted", "未授权"],
     ["unknown", "未知"],
   ] as const)("renders notice permission status %s", (status, expected) => {
+    vi.mocked(useTheme).mockReturnValue({
+      theme: "system",
+      resolvedTheme: "light",
+      setTheme: vi.fn(),
+    } as any);
     renderSettingsMainColumn({ noticePermissionStatus: status });
     expect(screen.getByText(expected)).toBeInTheDocument();
   });
 
   it("validates port before restarting gateway", () => {
+    vi.mocked(useTheme).mockReturnValue({
+      theme: "system",
+      resolvedTheme: "light",
+      setTheme: vi.fn(),
+    } as any);
     renderSettingsMainColumn({
       gateway: { running: true, port: 37123, base_url: null, listen_addr: null } as any,
       port: 80,
@@ -69,6 +101,11 @@ describe("pages/settings/SettingsMainColumn", () => {
   });
 
   it("toasts when gateway stop fails during restart", async () => {
+    vi.mocked(useTheme).mockReturnValue({
+      theme: "system",
+      resolvedTheme: "light",
+      setTheme: vi.fn(),
+    } as any);
     vi.mocked(gatewayStop).mockResolvedValueOnce(null as any);
     vi.mocked(gatewayStart).mockResolvedValue({
       running: true,
@@ -87,6 +124,11 @@ describe("pages/settings/SettingsMainColumn", () => {
   });
 
   it("restarts gateway and persists toggles", async () => {
+    vi.mocked(useTheme).mockReturnValue({
+      theme: "system",
+      resolvedTheme: "light",
+      setTheme: vi.fn(),
+    } as any);
     vi.mocked(gatewayStop).mockResolvedValue({
       running: false,
       port: null,
@@ -153,6 +195,11 @@ describe("pages/settings/SettingsMainColumn", () => {
   });
 
   it("stops gateway and triggers system notification actions", async () => {
+    vi.mocked(useTheme).mockReturnValue({
+      theme: "system",
+      resolvedTheme: "light",
+      setTheme: vi.fn(),
+    } as any);
     vi.mocked(gatewayStop).mockResolvedValue({
       running: false,
       port: null,

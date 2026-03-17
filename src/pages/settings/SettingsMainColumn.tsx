@@ -1,6 +1,7 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { toast } from "sonner";
 import type { GatewayAvailability } from "../../hooks/useGatewayMeta";
+import { useTheme } from "../../hooks/useTheme";
 import { logToConsole } from "../../services/consoleLog";
 import { gatewayStart, gatewayStop, type GatewayStatus } from "../../services/gateway";
 import { Button } from "../../ui/Button";
@@ -73,6 +74,8 @@ export function SettingsMainColumn({
   requestSystemNotificationPermission,
   sendSystemNotificationTest,
 }: SettingsMainColumnProps) {
+  const { theme, setTheme } = useTheme();
+
   return (
     <div className="space-y-6 lg:col-span-8">
       {/* 网关服务 */}
@@ -194,6 +197,46 @@ export function SettingsMainColumn({
               系统偏好
             </h3>
             <div className="space-y-1">
+              <SettingsRow label="主题">
+                <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800">
+                  <button
+                    type="button"
+                    className={cn(
+                      "flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition",
+                      theme === "light"
+                        ? "bg-white text-slate-900 shadow-sm dark:bg-slate-600 dark:text-slate-100"
+                        : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                    )}
+                    onClick={() => setTheme("light")}
+                  >
+                    Light
+                  </button>
+                  <button
+                    type="button"
+                    className={cn(
+                      "flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition",
+                      theme === "dark"
+                        ? "bg-white text-slate-900 shadow-sm dark:bg-slate-600 dark:text-slate-100"
+                        : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                    )}
+                    onClick={() => setTheme("dark")}
+                  >
+                    Dark
+                  </button>
+                  <button
+                    type="button"
+                    className={cn(
+                      "flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition",
+                      theme === "system"
+                        ? "bg-white text-slate-900 shadow-sm dark:bg-slate-600 dark:text-slate-100"
+                        : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                    )}
+                    onClick={() => setTheme("system")}
+                  >
+                    System
+                  </button>
+                </div>
+              </SettingsRow>
               {(
                 [
                   {
