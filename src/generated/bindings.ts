@@ -48,7 +48,7 @@ export const commands = {
 export type AppSettings = {
   schema_version: number;
   preferred_port: number;
-  show_home_heatmap: boolean;
+  show_home_heatmap?: boolean;
   gateway_listen_mode: GatewayListenMode;
   gateway_custom_listen_address: string;
   wsl_auto_config: boolean;
