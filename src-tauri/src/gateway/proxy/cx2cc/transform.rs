@@ -47,7 +47,11 @@ pub fn anthropic_to_responses(body: Value) -> Result<Value, String> {
     }
 
     // stop_sequences dropped — Responses API does not support it
-    if body.get("stop_sequences").and_then(|v| v.as_array()).map_or(false, |a| !a.is_empty()) {
+    if body
+        .get("stop_sequences")
+        .and_then(|v| v.as_array())
+        .map_or(false, |a| !a.is_empty())
+    {
         tracing::debug!("cx2cc: dropping stop_sequences (not supported by Responses API)");
     }
 

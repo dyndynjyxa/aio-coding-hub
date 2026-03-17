@@ -57,6 +57,11 @@ struct TranslationState {
 }
 
 impl TranslationState {
+    #[cfg(test)]
+    fn new() -> Self {
+        Self::with_requested_model(None)
+    }
+
     fn with_requested_model(requested_model: Option<String>) -> Self {
         Self {
             block_index: 0,

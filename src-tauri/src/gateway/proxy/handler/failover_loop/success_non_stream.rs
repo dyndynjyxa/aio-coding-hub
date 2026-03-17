@@ -15,9 +15,7 @@ fn buffer_cx2cc_event_stream_as_json(
         return Ok(body_bytes);
     }
 
-    let response = cx2cc::streaming::aggregate_responses_event_stream(
-        body_bytes.as_ref(),
-    )?;
+    let response = cx2cc::streaming::aggregate_responses_event_stream(body_bytes.as_ref())?;
     let encoded = serde_json::to_vec(&response)
         .map_err(|err| format!("failed to serialize aggregated response: {err}"))?;
 
@@ -182,11 +180,11 @@ fn translate_cx2cc_non_stream_body(
 
     if anthropic_stream_requested {
         let sse_body = match requested_model.filter(|model| !model.is_empty()) {
-            Some(model) => cx2cc::streaming::
-                responses_json_to_anthropic_sse_with_model_override(&openai_body, Some(model))?,
-            None => cx2cc::streaming::responses_json_to_anthropic_sse(
+            Some(model) => cx2cc::streaming::responses_json_to_anthropic_sse_with_model_override(
                 &openai_body,
+                Some(model),
             )?,
+            None => cx2cc::streaming::responses_json_to_anthropic_sse(&openai_body)?,
         };
         response_headers.remove(header::CONTENT_LENGTH);
         response_headers.remove(header::CONTENT_ENCODING);
@@ -199,10 +197,7 @@ fn translate_cx2cc_non_stream_body(
 
     let anthropic_body = match requested_model.filter(|model| !model.is_empty()) {
         Some(model) => {
-            cx2cc::transform::responses_to_anthropic_with_model_override(
-                openai_body,
-                Some(model),
-            )?
+            cx2cc::transform::responses_to_anthropic_with_model_override(openai_body, Some(model))?
         }
         None => cx2cc::transform::responses_to_anthropic(openai_body)?,
     };
