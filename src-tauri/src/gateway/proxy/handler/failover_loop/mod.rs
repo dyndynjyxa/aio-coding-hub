@@ -1464,8 +1464,8 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
                     }
 
                     if status.is_success() {
-                        if is_event_stream(&response_headers)
-                            && !(cx2cc_active && !anthropic_stream_requested)
+                        if (anthropic_stream_requested || !cx2cc_active)
+                            && is_event_stream(&response_headers)
                         {
                             let loop_state = LoopState::new(
                                 &mut attempts,

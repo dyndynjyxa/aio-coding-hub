@@ -1171,15 +1171,9 @@ mod tests {
         let mut translated = Vec::new();
 
         for raw in [
-            concat!(
-                "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_123\",\"model\":\"gpt-5\",\"status\":\"in_progress\",\"output\":[],\"usage\":{\"input_tokens\":11,\"output_tokens\":0}}}\n\n"
-            ),
-            concat!(
-                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello from data-only event\"}\n\n"
-            ),
-            concat!(
-                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_123\",\"model\":\"gpt-5\",\"status\":\"completed\",\"usage\":{\"input_tokens\":11,\"output_tokens\":7}}}\n\n"
-            ),
+            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_123\",\"model\":\"gpt-5\",\"status\":\"in_progress\",\"output\":[],\"usage\":{\"input_tokens\":11,\"output_tokens\":0}}}\n\n",
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello from data-only event\"}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_123\",\"model\":\"gpt-5\",\"status\":\"completed\",\"usage\":{\"input_tokens\":11,\"output_tokens\":7}}}\n\n",
         ] {
             translated.extend(translate_event(&mut state, raw.as_bytes()));
         }
