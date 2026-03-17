@@ -100,6 +100,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
     );
 
     expect(screen.getByText("使用记录（最近 50 条）")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("switch", { name: "最近使用记录简洁模式" }));
     expect(screen.getByText("$0.123456")).toBeInTheDocument();
     expect(screen.getByText("$0.123456").closest("div")?.getAttribute("title")).toBe("$0.123456");
 
@@ -239,6 +240,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
     );
 
     expect(screen.getByText("共 2 条")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("switch", { name: "最近使用记录简洁模式" }));
 
     fireEvent.click(screen.getByRole("button", { name: "刷新" }));
     expect(onRefreshRequestLogs).toHaveBeenCalled();
@@ -251,9 +253,62 @@ describe("components/home/HomeRequestLogsPanel", () => {
     expect(screen.getAllByText("未知").length).toBeGreaterThan(0);
     expect(screen.getByText("链路[降级*2]")).toBeInTheDocument();
     expect(screen.getByText("会话复用")).toBeInTheDocument();
+    expect(screen.getByText("x1.50")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "日志" }));
     expect(screen.getByText("LOGS_PAGE")).toBeInTheDocument();
+  });
+
+  it("shows free when cost multiplier is zero", () => {
+    render(
+      <MemoryRouter>
+        <HomeRequestLogsPanel
+          showCustomTooltip={true}
+          traces={[]}
+          requestLogs={[
+            {
+              id: 9,
+              trace_id: "t-free",
+              cli_key: "gemini",
+              method: "POST",
+              path: "/v1/chat/completions",
+              requested_model: "gemini-2.5-pro",
+              status: 200,
+              error_code: null,
+              duration_ms: 800,
+              ttfb_ms: 200,
+              attempt_count: 1,
+              has_failover: false,
+              start_provider_id: 1,
+              start_provider_name: "P1",
+              final_provider_id: 1,
+              final_provider_name: "P1",
+              route: [],
+              session_reuse: false,
+              input_tokens: 10,
+              output_tokens: 20,
+              total_tokens: 30,
+              cache_read_input_tokens: 0,
+              cache_creation_input_tokens: 0,
+              cache_creation_5m_input_tokens: 0,
+              cache_creation_1h_input_tokens: 0,
+              cost_usd: 0,
+              cost_multiplier: 0,
+              created_at_ms: null,
+              created_at: Math.floor(Date.now() / 1000),
+            },
+          ]}
+          requestLogsLoading={false}
+          requestLogsRefreshing={false}
+          requestLogsAvailable={true}
+          onRefreshRequestLogs={vi.fn()}
+          selectedLogId={null}
+          onSelectLogId={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    expect(screen.getAllByText("免费").length).toBeGreaterThan(0);
   });
 
   it("handles requestLogsAvailable=false (tauri-only) states", () => {
@@ -331,6 +386,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
       </MemoryRouter>
     );
 
+    fireEvent.click(screen.getByRole("switch", { name: "最近使用记录简洁模式" }));
     expect(screen.getByText("链路")).toBeInTheDocument();
     expect(screen.queryByText(/链路\[降级\*/)).not.toBeInTheDocument();
   });
@@ -353,6 +409,35 @@ describe("components/home/HomeRequestLogsPanel", () => {
     );
 
     expect(screen.getAllByText("加载中…").length).toBeGreaterThan(0);
+  });
+
+  it("supports local preview rows in dev-like empty state", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter>
+        <HomeRequestLogsPanel
+          showCustomTooltip={false}
+          requestLogsPreviewEnabled={true}
+          traces={[]}
+          requestLogs={[]}
+          requestLogsLoading={false}
+          requestLogsRefreshing={false}
+          requestLogsAvailable={true}
+          onRefreshRequestLogs={vi.fn()}
+          selectedLogId={null}
+          onSelectLogId={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("当前没有最近使用记录")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "预览记录样式" }));
+
+    expect(screen.getAllByText("gpt-5.4").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("免费").length).toBeGreaterThan(0);
+    expect(screen.getByText("进行中")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "关闭预览" })).toBeInTheDocument();
   });
 
   it("renders rich tooltip with attempt counts for failover routes", async () => {
@@ -426,6 +511,8 @@ describe("components/home/HomeRequestLogsPanel", () => {
       </MemoryRouter>
     );
 
+    fireEvent.click(screen.getByRole("switch", { name: "最近使用记录简洁模式" }));
+
     // 标签文本应包含降级计数
     expect(screen.getByText("链路[降级*4]")).toBeInTheDocument();
 
@@ -442,5 +529,69 @@ describe("components/home/HomeRequestLogsPanel", () => {
     await waitFor(() => expect(screen.getAllByText("失败3次").length).toBeGreaterThan(0));
     // 成功的标签
     await waitFor(() => expect(screen.getAllByText("成功").length).toBeGreaterThan(0));
+  });
+
+  it("supports compact mode to show only the first-row fields", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter>
+        <HomeRequestLogsPanel
+          showCustomTooltip={false}
+          traces={[]}
+          requestLogs={[
+            {
+              id: 31,
+              trace_id: "t31",
+              cli_key: "codex",
+              method: "POST",
+              path: "/v1/responses",
+              requested_model: "gpt-5.4",
+              status: 200,
+              error_code: "GW_STREAM_ABORTED",
+              duration_ms: 3200,
+              ttfb_ms: 600,
+              attempt_count: 1,
+              has_failover: false,
+              start_provider_id: 1,
+              start_provider_name: "P1",
+              final_provider_id: 1,
+              final_provider_name: "P1",
+              route: [{ provider_id: 1, provider_name: "P1", ok: true, status: 200 }],
+              session_reuse: true,
+              input_tokens: 100,
+              output_tokens: 200,
+              total_tokens: 300,
+              cache_read_input_tokens: 50,
+              cache_creation_input_tokens: 25,
+              cache_creation_5m_input_tokens: 0,
+              cache_creation_1h_input_tokens: 0,
+              cost_usd: 0.01,
+              cost_multiplier: 1.5,
+              created_at_ms: null,
+              created_at: Math.floor(Date.now() / 1000),
+            },
+          ]}
+          requestLogsLoading={false}
+          requestLogsRefreshing={false}
+          requestLogsAvailable={true}
+          onRefreshRequestLogs={vi.fn()}
+          selectedLogId={null}
+          onSelectLogId={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("gpt-5.4")).toBeInTheDocument();
+    expect(screen.getByText("流中断")).toBeInTheDocument();
+    expect(screen.queryByText("3.20s")).not.toBeInTheDocument();
+    expect(screen.queryByText("输入")).not.toBeInTheDocument();
+    expect(screen.queryByText("P1")).not.toBeInTheDocument();
+    expect(screen.getByText("会话复用")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("switch", { name: "最近使用记录简洁模式" }));
+
+    expect(screen.getByText("输入")).toBeInTheDocument();
+    expect(screen.getByText("P1")).toBeInTheDocument();
   });
 });

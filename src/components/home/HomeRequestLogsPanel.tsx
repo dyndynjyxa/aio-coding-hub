@@ -2,7 +2,7 @@
 // - Render as the right side column in `HomeOverviewPanel` to show realtime traces + request logs list.
 // - Selection state is controlled by parent; the detail dialog is rendered outside the grid layout.
 
-import { memo, useRef, useMemo } from "react";
+import { memo, useRef, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cliBadgeTone, cliShortLabel } from "../../constants/clis";
@@ -10,7 +10,9 @@ import type { RequestLogSummary } from "../../services/requestLogs";
 import type { TraceSession } from "../../services/traceStore";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
+import { EmptyState } from "../../ui/EmptyState";
 import { Spinner } from "../../ui/Spinner";
+import { Switch } from "../../ui/Switch";
 import { Tooltip } from "../../ui/Tooltip";
 import { cn } from "../../utils/cn";
 import {
@@ -27,20 +29,13 @@ import {
   buildRequestRouteMeta,
   computeEffectiveInputTokens,
   computeStatusBadge,
+  FreeBadge,
   getErrorCodeLabel,
   SessionReuseBadge,
 } from "./HomeLogShared";
-import {
-  Clock,
-  CheckCircle2,
-  XCircle,
-  Server,
-  Terminal,
-  Cpu,
-  RefreshCw,
-  ArrowUpRight,
-} from "lucide-react";
+import { Clock, CheckCircle2, XCircle, Server, RefreshCw, ArrowUpRight } from "lucide-react";
 import { RealtimeTraceCards } from "./RealtimeTraceCards";
+import { CliBrandIcon } from "./CliBrandIcon";
 
 // Estimated height for each request log card (px): padding + 2 rows of content + margin
 const ESTIMATED_LOG_CARD_HEIGHT = 90;
@@ -51,6 +46,407 @@ const VIRTUALIZATION_THRESHOLD = 30;
 
 // Module-level stable reference: pure function, no need to recreate per render.
 const formatUnixSecondsStable = (ts: number) => formatRelativeTimeFromUnixSeconds(ts);
+
+function buildPreviewRequestLogs(nowSec = Math.floor(Date.now() / 1000)): RequestLogSummary[] {
+  return [
+    {
+      id: 900010,
+      trace_id: "preview-claude-fast",
+      cli_key: "claude",
+      method: "POST",
+      path: "/v1/messages",
+      requested_model: "claude-sonnet-4",
+      status: 200,
+      error_code: null,
+      duration_ms: 980,
+      ttfb_ms: 180,
+      attempt_count: 1,
+      has_failover: false,
+      start_provider_id: 18,
+      start_provider_name: "Claude Fast",
+      final_provider_id: 18,
+      final_provider_name: "Claude Fast",
+      route: [{ provider_id: 18, provider_name: "Claude Fast", ok: true, status: 200 }],
+      session_reuse: true,
+      input_tokens: 86,
+      output_tokens: 214,
+      total_tokens: 300,
+      cache_read_input_tokens: 2048,
+      cache_creation_input_tokens: 0,
+      cache_creation_5m_input_tokens: 0,
+      cache_creation_1h_input_tokens: 0,
+      cost_usd: 0.00618,
+      cost_multiplier: 1,
+      created_at_ms: null,
+      created_at: nowSec - 45,
+    },
+    {
+      id: 900009,
+      trace_id: "preview-gemini-flash",
+      cli_key: "gemini",
+      method: "POST",
+      path: "/v1/chat/completions",
+      requested_model: "gemini-2.5-flash",
+      status: 200,
+      error_code: null,
+      duration_ms: 1380,
+      ttfb_ms: 260,
+      attempt_count: 1,
+      has_failover: false,
+      start_provider_id: 17,
+      start_provider_name: "Gemini Flash",
+      final_provider_id: 17,
+      final_provider_name: "Gemini Flash",
+      route: [{ provider_id: 17, provider_name: "Gemini Flash", ok: true, status: 200 }],
+      session_reuse: false,
+      input_tokens: 124,
+      output_tokens: 328,
+      total_tokens: 452,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_creation_5m_input_tokens: 0,
+      cache_creation_1h_input_tokens: 0,
+      cost_usd: 0.00392,
+      cost_multiplier: 0.85,
+      created_at_ms: null,
+      created_at: nowSec - 70,
+    },
+    {
+      id: 900008,
+      trace_id: "preview-codex-failover",
+      cli_key: "codex",
+      method: "POST",
+      path: "/v1/responses",
+      requested_model: "gpt-5.4",
+      status: 200,
+      error_code: null,
+      duration_ms: 5220,
+      ttfb_ms: 1260,
+      attempt_count: 2,
+      has_failover: true,
+      start_provider_id: 15,
+      start_provider_name: "Codex Pool A",
+      final_provider_id: 16,
+      final_provider_name: "Codex Pool B",
+      route: [
+        {
+          provider_id: 15,
+          provider_name: "Codex Pool A",
+          ok: false,
+          attempts: 1,
+          status: 500,
+          error_code: "GW_UPSTREAM_5XX",
+        },
+        { provider_id: 16, provider_name: "Codex Pool B", ok: true, attempts: 1, status: 200 },
+      ],
+      session_reuse: false,
+      input_tokens: 312,
+      output_tokens: 462,
+      total_tokens: 774,
+      cache_read_input_tokens: 65536,
+      cache_creation_input_tokens: 4096,
+      cache_creation_5m_input_tokens: 4096,
+      cache_creation_1h_input_tokens: 0,
+      cost_usd: 0.0,
+      cost_multiplier: 1.15,
+      created_at_ms: null,
+      created_at: nowSec - 95,
+    },
+    {
+      id: 900001,
+      trace_id: "preview-claude",
+      cli_key: "claude",
+      method: "POST",
+      path: "/v1/messages",
+      requested_model: "claude-sonnet-4",
+      status: 200,
+      error_code: null,
+      duration_ms: 1640,
+      ttfb_ms: 320,
+      attempt_count: 1,
+      has_failover: false,
+      start_provider_id: 11,
+      start_provider_name: "[F]Claude Main",
+      final_provider_id: 11,
+      final_provider_name: "[F]Claude Main",
+      route: [],
+      session_reuse: true,
+      input_tokens: 138,
+      output_tokens: 462,
+      total_tokens: 600,
+      cache_read_input_tokens: 4096,
+      cache_creation_input_tokens: 0,
+      cache_creation_5m_input_tokens: 0,
+      cache_creation_1h_input_tokens: 0,
+      cost_usd: 0.018245,
+      cost_multiplier: 1,
+      created_at_ms: null,
+      created_at: nowSec - 120,
+    },
+    {
+      id: 900002,
+      trace_id: "preview-codex",
+      cli_key: "codex",
+      method: "POST",
+      path: "/v1/responses",
+      requested_model: "gpt-5.4",
+      status: 200,
+      error_code: null,
+      duration_ms: 6420,
+      ttfb_ms: 1920,
+      attempt_count: 1,
+      has_failover: false,
+      start_provider_id: 12,
+      start_provider_name: "[F]CPA-Codex",
+      final_provider_id: 12,
+      final_provider_name: "[F]CPA-Codex",
+      route: [{ provider_id: 12, provider_name: "[F]CPA-Codex", ok: true, status: 200 }],
+      session_reuse: true,
+      input_tokens: 179,
+      output_tokens: 183,
+      total_tokens: 362,
+      cache_read_input_tokens: 157952,
+      cache_creation_input_tokens: null,
+      cache_creation_5m_input_tokens: null,
+      cache_creation_1h_input_tokens: null,
+      cost_usd: null,
+      cost_multiplier: 0,
+      created_at_ms: null,
+      created_at: nowSec - 180,
+    },
+    {
+      id: 900007,
+      trace_id: "preview-claude-opus",
+      cli_key: "claude",
+      method: "POST",
+      path: "/v1/messages",
+      requested_model: "claude-opus-4",
+      status: 200,
+      error_code: null,
+      duration_ms: 8440,
+      ttfb_ms: 2200,
+      attempt_count: 1,
+      has_failover: false,
+      start_provider_id: 19,
+      start_provider_name: "Claude Opus",
+      final_provider_id: 19,
+      final_provider_name: "Claude Opus",
+      route: [{ provider_id: 19, provider_name: "Claude Opus", ok: true, status: 200 }],
+      session_reuse: true,
+      input_tokens: 420,
+      output_tokens: 910,
+      total_tokens: 1330,
+      cache_read_input_tokens: 32768,
+      cache_creation_input_tokens: 8192,
+      cache_creation_5m_input_tokens: 0,
+      cache_creation_1h_input_tokens: 8192,
+      cost_usd: 0.04462,
+      cost_multiplier: 1.4,
+      created_at_ms: null,
+      created_at: nowSec - 255,
+    },
+    {
+      id: 900006,
+      trace_id: "preview-codex-timeout",
+      cli_key: "codex",
+      method: "POST",
+      path: "/v1/responses",
+      requested_model: "gpt-5.4-mini",
+      status: 504,
+      error_code: "GW_UPSTREAM_TIMEOUT",
+      duration_ms: 12040,
+      ttfb_ms: 0,
+      attempt_count: 1,
+      has_failover: false,
+      start_provider_id: 20,
+      start_provider_name: "Codex Timeout",
+      final_provider_id: 20,
+      final_provider_name: "Codex Timeout",
+      route: [{ provider_id: 20, provider_name: "Codex Timeout", ok: false, status: 504 }],
+      session_reuse: false,
+      input_tokens: 144,
+      output_tokens: 0,
+      total_tokens: 144,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_creation_5m_input_tokens: 0,
+      cache_creation_1h_input_tokens: 0,
+      cost_usd: 0.0,
+      cost_multiplier: 1,
+      created_at_ms: null,
+      created_at: nowSec - 330,
+    },
+    {
+      id: 900003,
+      trace_id: "preview-gemini",
+      cli_key: "gemini",
+      method: "POST",
+      path: "/v1/chat/completions",
+      requested_model: "gemini-2.5-pro",
+      status: 429,
+      error_code: "GW_UPSTREAM_429",
+      duration_ms: 2480,
+      ttfb_ms: 1100,
+      attempt_count: 2,
+      has_failover: true,
+      start_provider_id: 13,
+      start_provider_name: "Gemini Pool",
+      final_provider_id: 14,
+      final_provider_name: "Gemini Mirror",
+      route: [
+        {
+          provider_id: 13,
+          provider_name: "Gemini Pool",
+          ok: false,
+          attempts: 1,
+          status: 429,
+          error_code: "GW_UPSTREAM_429",
+        },
+        { provider_id: 14, provider_name: "Gemini Mirror", ok: false, attempts: 1, status: 429 },
+      ],
+      session_reuse: false,
+      input_tokens: 88,
+      output_tokens: 0,
+      total_tokens: 88,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_creation_5m_input_tokens: 0,
+      cache_creation_1h_input_tokens: 0,
+      cost_usd: 0.0,
+      cost_multiplier: 1.2,
+      created_at_ms: null,
+      created_at: nowSec - 420,
+    },
+    {
+      id: 900005,
+      trace_id: "preview-claude-abort",
+      cli_key: "claude",
+      method: "POST",
+      path: "/v1/messages",
+      requested_model: "claude-sonnet-4",
+      status: 499,
+      error_code: "GW_STREAM_ABORTED",
+      duration_ms: 2120,
+      ttfb_ms: 540,
+      attempt_count: 1,
+      has_failover: false,
+      start_provider_id: 21,
+      start_provider_name: "Claude Abort",
+      final_provider_id: 21,
+      final_provider_name: "Claude Abort",
+      route: [{ provider_id: 21, provider_name: "Claude Abort", ok: false, status: 499 }],
+      session_reuse: true,
+      input_tokens: 0,
+      output_tokens: 0,
+      total_tokens: 0,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_creation_5m_input_tokens: 0,
+      cache_creation_1h_input_tokens: 0,
+      cost_usd: 0.0,
+      cost_multiplier: 1,
+      created_at_ms: null,
+      created_at: nowSec - 560,
+    },
+    {
+      id: 900004,
+      trace_id: "preview-gemini-free",
+      cli_key: "gemini",
+      method: "POST",
+      path: "/v1/chat/completions",
+      requested_model: "gemini-2.0-flash-exp",
+      status: 200,
+      error_code: null,
+      duration_ms: 1720,
+      ttfb_ms: 240,
+      attempt_count: 1,
+      has_failover: false,
+      start_provider_id: 22,
+      start_provider_name: "Gemini Free",
+      final_provider_id: 22,
+      final_provider_name: "Gemini Free",
+      route: [{ provider_id: 22, provider_name: "Gemini Free", ok: true, status: 200 }],
+      session_reuse: false,
+      input_tokens: 102,
+      output_tokens: 260,
+      total_tokens: 362,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_creation_5m_input_tokens: 0,
+      cache_creation_1h_input_tokens: 0,
+      cost_usd: null,
+      cost_multiplier: 0,
+      created_at_ms: null,
+      created_at: nowSec - 780,
+    },
+    {
+      id: 900011,
+      trace_id: "preview-codex-retry",
+      cli_key: "codex",
+      method: "POST",
+      path: "/v1/responses",
+      requested_model: "gpt-5.4",
+      status: 200,
+      error_code: null,
+      duration_ms: 3880,
+      ttfb_ms: 920,
+      attempt_count: 3,
+      has_failover: false,
+      start_provider_id: 23,
+      start_provider_name: "Codex Retry",
+      final_provider_id: 23,
+      final_provider_name: "Codex Retry",
+      route: [
+        { provider_id: 23, provider_name: "Codex Retry", ok: true, attempts: 3, status: 200 },
+      ],
+      session_reuse: true,
+      input_tokens: 248,
+      output_tokens: 540,
+      total_tokens: 788,
+      cache_read_input_tokens: 16384,
+      cache_creation_input_tokens: 2048,
+      cache_creation_5m_input_tokens: 2048,
+      cache_creation_1h_input_tokens: 0,
+      cost_usd: 0.01134,
+      cost_multiplier: 1,
+      created_at_ms: null,
+      created_at: nowSec - 960,
+    },
+  ];
+}
+
+function buildPreviewTraces(nowMs = Date.now()): TraceSession[] {
+  return [
+    {
+      trace_id: "preview-running-codex",
+      cli_key: "codex",
+      method: "POST",
+      path: "/v1/responses",
+      query: null,
+      requested_model: "gpt-5.4",
+      first_seen_ms: nowMs - 18_000,
+      last_seen_ms: nowMs,
+      attempts: [
+        {
+          trace_id: "preview-running-codex",
+          cli_key: "codex",
+          method: "POST",
+          path: "/v1/responses",
+          query: null,
+          attempt_index: 0,
+          provider_id: 21,
+          provider_name: "[F]CPA-Codex",
+          base_url: "https://preview.local",
+          outcome: "started",
+          status: null,
+          attempt_started_ms: nowMs - 18_000,
+          attempt_duration_ms: 18_000,
+          session_reuse: true,
+        } as any,
+      ],
+    },
+  ];
+}
 
 function requestLogCreatedAtMs(log: RequestLogSummary) {
   const ms = log.created_at_ms ?? 0;
@@ -101,6 +497,7 @@ function mergeTraceWithRequestLog(
 }
 
 type RequestLogCardProps = {
+  compactMode: boolean;
   log: RequestLogSummary;
   isSelected: boolean;
   showCustomTooltip: boolean;
@@ -109,6 +506,7 @@ type RequestLogCardProps = {
 };
 
 const RequestLogCard = memo(function RequestLogCard({
+  compactMode,
   log,
   isSelected,
   showCustomTooltip,
@@ -142,7 +540,11 @@ const RequestLogCard = memo(function RequestLogCard({
     log.requested_model && log.requested_model.trim() ? log.requested_model.trim() : "未知";
 
   const cliLabel = cliShortLabel(log.cli_key);
-  const cliTone = cliBadgeTone(log.cli_key);
+  const cliTone = cliBadgeTone(log.cli_key)
+    .replace(/group-hover:bg-white/g, "")
+    .replace(/dark:group-hover:bg-slate-800/g, "")
+    .replace(/group-hover:border-slate-200/g, "")
+    .replace(/dark:group-hover:border-slate-700/g, "");
 
   const ttfbMs = sanitizeTtfbMs(log.ttfb_ms, log.duration_ms);
   const outputTokensPerSecond = computeOutputTokensPerSecond(
@@ -152,8 +554,10 @@ const RequestLogCard = memo(function RequestLogCard({
   );
 
   const costMultiplier = log.cost_multiplier;
+  const isFree = Number.isFinite(costMultiplier) && costMultiplier === 0;
   const showCostMultiplier =
     Number.isFinite(costMultiplier) && costMultiplier >= 0 && Math.abs(costMultiplier - 1) > 0.0001;
+  const costMultiplierText = isFree ? "免费" : `x${costMultiplier.toFixed(2)}`;
   const rawCostUsdText = formatUsdRaw(log.cost_usd);
 
   const cacheWrite = (() => {
@@ -205,12 +609,11 @@ const RequestLogCard = memo(function RequestLogCard({
           )}
         />
 
-        <div className="flex flex-col gap-1.5 px-3 py-2.5">
-          {/* Row 1: Status + CLI + Model + Time + Badges */}
-          <div className="flex items-center gap-2 min-w-0">
+        <div className={cn("px-3", compactMode ? "py-2" : "py-2.5")}>
+          <div className={cn("flex items-center gap-2 min-w-0", compactMode ? "" : "mb-1.5")}>
             <span
               className={cn(
-                "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium shrink-0",
+                "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium shrink-0",
                 statusBadge.tone
               )}
               title={statusBadge.title}
@@ -225,164 +628,162 @@ const RequestLogCard = memo(function RequestLogCard({
 
             <span
               className={cn(
-                "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium shrink-0",
+                "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium shrink-0",
                 cliTone
               )}
             >
-              {log.cli_key === "claude" ? (
-                <Terminal className="h-3 w-3" />
-              ) : (
-                <Cpu className="h-3 w-3" />
-              )}
+              <CliBrandIcon
+                cliKey={log.cli_key}
+                className="h-3.5 w-3.5 shrink-0 rounded-[3px] object-contain"
+              />
               {cliLabel}
             </span>
 
             <span
-              className="text-xs font-medium text-slate-800 dark:text-slate-200 truncate"
+              className="inline-flex min-w-0 items-center rounded-md bg-slate-100/75 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-700/55 dark:text-slate-200"
               title={modelText}
             >
-              {modelText}
+              <span className="truncate">{modelText}</span>
             </span>
 
+            {log.session_reuse && <SessionReuseBadge showCustomTooltip={showCustomTooltip} />}
+            {isFree && <FreeBadge />}
+
             {log.error_code && (
-              <span className="rounded bg-amber-50 dark:bg-amber-900/30 px-1 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400 shrink-0">
+              <span className="shrink-0 rounded-md bg-amber-50/70 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:bg-amber-900/20 dark:text-amber-300">
                 {getErrorCodeLabel(log.error_code)}
               </span>
             )}
 
-            <span className="flex items-center gap-1.5 text-[11px] text-slate-400 dark:text-slate-500 ml-auto shrink-0">
-              {log.session_reuse && <SessionReuseBadge showCustomTooltip={showCustomTooltip} />}
+            <span className="ml-auto flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500 shrink-0">
               <Clock className="h-3 w-3" />
               {formatUnixSeconds(log.created_at)}
             </span>
           </div>
 
-          {/* Row 2: Provider + Stats Grid (2 rows x 4 cols for alignment) */}
-          <div className="flex items-start gap-3 text-[11px]">
-            {/* Provider - left side (2 rows: name + multiplier) */}
-            <div className="flex flex-col gap-y-0.5 w-[110px] shrink-0" title={providerTitle}>
-              <div className="flex items-center gap-1 h-4">
-                <Server className="h-3 w-3 text-slate-400 dark:text-slate-500 shrink-0" />
-                <span className="truncate font-medium text-slate-600 dark:text-slate-400">
-                  {providerText}
-                </span>
-              </div>
-              <div className="flex items-center h-4">
-                <div className="flex items-center gap-1 min-w-0 w-full">
-                  {routeMeta.hasRoute && routeMeta.tooltipText ? (
-                    showCustomTooltip ? (
-                      <Tooltip
-                        content={routeMeta.tooltipContent}
-                        contentClassName="max-w-[400px] break-words"
-                        placement="top"
-                      >
-                        <span className="text-[10px] text-slate-400 dark:text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 cursor-help">
+          {!compactMode && (
+            <div className="flex items-start gap-3 text-[11px]">
+              <div className="flex flex-col gap-y-0.5 w-[110px] shrink-0" title={providerTitle}>
+                <div className="flex items-center gap-1 h-4">
+                  <Server className="h-3 w-3 text-slate-400 dark:text-slate-500 shrink-0" />
+                  <span className="truncate font-medium text-slate-600 dark:text-slate-400">
+                    {providerText}
+                  </span>
+                </div>
+                <div className="flex items-center h-4">
+                  <div className="flex items-center gap-1 min-w-0 w-full">
+                    {routeMeta.hasRoute && routeMeta.tooltipText ? (
+                      showCustomTooltip ? (
+                        <Tooltip
+                          content={routeMeta.tooltipContent}
+                          contentClassName="max-w-[400px] break-words"
+                          placement="top"
+                        >
+                          <span className="text-[11px] text-slate-400 dark:text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 cursor-help">
+                            {routeMeta.label}
+                          </span>
+                        </Tooltip>
+                      ) : (
+                        <span
+                          className="text-[11px] text-slate-400 dark:text-slate-500 cursor-help"
+                          title={routeMeta.tooltipText}
+                        >
                           {routeMeta.label}
                         </span>
-                      </Tooltip>
-                    ) : (
-                      <span
-                        className="text-[10px] text-slate-400 dark:text-slate-500 cursor-help"
-                        title={routeMeta.tooltipText}
-                      >
-                        {routeMeta.label}
-                      </span>
-                    )
-                  ) : null}
+                      )
+                    ) : null}
 
-                  {showCostMultiplier ? (
-                    <span className="inline-flex items-center rounded bg-indigo-50 dark:bg-indigo-900/30 px-1 text-[10px] font-medium text-indigo-600 dark:text-indigo-400 shrink-0">
-                      x{costMultiplier.toFixed(2)}
+                    {showCostMultiplier ? (
+                      <span className="inline-flex items-center text-[11px] font-medium text-slate-500 dark:text-slate-400 shrink-0">
+                        {costMultiplierText}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-4 gap-x-3 gap-y-0.5 flex-1 text-slate-500 dark:text-slate-400">
+                <div className="flex items-center gap-1 h-4" title="Input Tokens">
+                  <span className="text-slate-400 dark:text-slate-500 shrink-0">输入</span>
+                  <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                    {formatInteger(effectiveInputTokens)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 h-4" title="Cache Write">
+                  <span className="text-slate-400 dark:text-slate-500 shrink-0">缓存创建</span>
+                  {cacheWrite.tokens != null ? (
+                    <>
+                      <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                        {formatInteger(cacheWrite.tokens)}
+                      </span>
+                      {cacheWrite.ttl && cacheWrite.tokens > 0 && (
+                        <span className="text-slate-400 dark:text-slate-500 text-[10px]">
+                          ({cacheWrite.ttl})
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-slate-300 dark:text-slate-600">—</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 h-4" title="TTFB">
+                  <span className="text-slate-400 dark:text-slate-500 shrink-0">首字</span>
+                  <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                    {ttfbMs != null ? formatDurationMs(ttfbMs) : "—"}
+                  </span>
+                </div>
+                <div
+                  className="flex items-center gap-1 h-4"
+                  title={rawCostUsdText === "—" ? undefined : rawCostUsdText}
+                >
+                  <span className="text-slate-400 dark:text-slate-500 shrink-0">花费</span>
+                  <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                    {rawCostUsdText}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1 h-4" title="Output Tokens">
+                  <span className="text-slate-400 dark:text-slate-500 shrink-0">输出</span>
+                  <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                    {formatInteger(log.output_tokens)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 h-4" title="Cache Read">
+                  <span className="text-slate-400 dark:text-slate-500 shrink-0">缓存读取</span>
+                  {log.cache_read_input_tokens != null ? (
+                    <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                      {formatInteger(log.cache_read_input_tokens)}
                     </span>
-                  ) : null}
+                  ) : (
+                    <span className="text-slate-300 dark:text-slate-600">—</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 h-4" title="Duration">
+                  <span className="text-slate-400 dark:text-slate-500 shrink-0">耗时</span>
+                  <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                    {formatDurationMs(log.duration_ms)}
+                  </span>
+                </div>
+                <div
+                  className="flex items-center gap-1 h-4"
+                  title={
+                    outputTokensPerSecond != null
+                      ? formatTokensPerSecond(outputTokensPerSecond)
+                      : undefined
+                  }
+                >
+                  <span className="text-slate-400 dark:text-slate-500 shrink-0">速率</span>
+                  {outputTokensPerSecond != null ? (
+                    <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                      {formatTokensPerSecondShort(outputTokensPerSecond)}
+                    </span>
+                  ) : (
+                    <span className="text-slate-300 dark:text-slate-600">—</span>
+                  )}
                 </div>
               </div>
             </div>
-
-            {/* Stats Grid: 2 rows x 4 cols */}
-            <div className="grid grid-cols-4 gap-x-3 gap-y-0.5 flex-1 text-slate-500 dark:text-slate-400">
-              {/* Row 1 */}
-              <div className="flex items-center gap-1 h-4" title="Input Tokens">
-                <span className="text-slate-400 dark:text-slate-500 shrink-0">输入</span>
-                <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
-                  {formatInteger(effectiveInputTokens)}
-                </span>
-              </div>
-              <div className="flex items-center gap-1 h-4" title="Cache Write">
-                <span className="text-slate-400 dark:text-slate-500 shrink-0">缓存创建</span>
-                {cacheWrite.tokens != null ? (
-                  <>
-                    <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
-                      {formatInteger(cacheWrite.tokens)}
-                    </span>
-                    {cacheWrite.ttl && cacheWrite.tokens > 0 && (
-                      <span className="text-slate-400 dark:text-slate-500 text-[10px]">
-                        ({cacheWrite.ttl})
-                      </span>
-                    )}
-                  </>
-                ) : (
-                  <span className="text-slate-300 dark:text-slate-600">—</span>
-                )}
-              </div>
-              <div className="flex items-center gap-1 h-4" title="TTFB">
-                <span className="text-slate-400 dark:text-slate-500 shrink-0">首字</span>
-                <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
-                  {ttfbMs != null ? formatDurationMs(ttfbMs) : "—"}
-                </span>
-              </div>
-              <div
-                className="flex items-center gap-1 h-4"
-                title={rawCostUsdText === "—" ? undefined : rawCostUsdText}
-              >
-                <span className="text-slate-400 dark:text-slate-500 shrink-0">花费</span>
-                <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
-                  {rawCostUsdText}
-                </span>
-              </div>
-
-              {/* Row 2 */}
-              <div className="flex items-center gap-1 h-4" title="Output Tokens">
-                <span className="text-slate-400 dark:text-slate-500 shrink-0">输出</span>
-                <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
-                  {formatInteger(log.output_tokens)}
-                </span>
-              </div>
-              <div className="flex items-center gap-1 h-4" title="Cache Read">
-                <span className="text-slate-400 dark:text-slate-500 shrink-0">缓存读取</span>
-                {log.cache_read_input_tokens != null ? (
-                  <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
-                    {formatInteger(log.cache_read_input_tokens)}
-                  </span>
-                ) : (
-                  <span className="text-slate-300 dark:text-slate-600">—</span>
-                )}
-              </div>
-              <div className="flex items-center gap-1 h-4" title="Duration">
-                <span className="text-slate-400 dark:text-slate-500 shrink-0">耗时</span>
-                <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
-                  {formatDurationMs(log.duration_ms)}
-                </span>
-              </div>
-              <div
-                className="flex items-center gap-1 h-4"
-                title={
-                  outputTokensPerSecond != null
-                    ? formatTokensPerSecond(outputTokensPerSecond)
-                    : undefined
-                }
-              >
-                <span className="text-slate-400 dark:text-slate-500 shrink-0">速率</span>
-                {outputTokensPerSecond != null ? (
-                  <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
-                    {formatTokensPerSecondShort(outputTokensPerSecond)}
-                  </span>
-                ) : (
-                  <span className="text-slate-300 dark:text-slate-600">—</span>
-                )}
-              </div>
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </button>
@@ -393,6 +794,7 @@ export type HomeRequestLogsPanelProps = {
   showCustomTooltip: boolean;
   title?: string;
   showOpenLogsPageButton?: boolean;
+  requestLogsPreviewEnabled?: boolean;
 
   traces: TraceSession[];
 
@@ -410,6 +812,7 @@ export function HomeRequestLogsPanel({
   showCustomTooltip,
   title,
   showOpenLogsPageButton = true,
+  requestLogsPreviewEnabled = import.meta.env.DEV,
   traces,
   requestLogs,
   requestLogsLoading,
@@ -420,21 +823,29 @@ export function HomeRequestLogsPanel({
   onSelectLogId,
 }: HomeRequestLogsPanelProps) {
   const navigate = useNavigate();
+  const [compactMode, setCompactMode] = useState(true);
+  const [previewTraces, setPreviewTraces] = useState<TraceSession[]>([]);
+  const [previewRequestLogs, setPreviewRequestLogs] = useState<RequestLogSummary[]>([]);
+  const displayedTraces = traces.length > 0 ? traces : previewTraces;
+  const displayedRequestLogs = requestLogs.length > 0 ? requestLogs : previewRequestLogs;
+  const previewActive =
+    (traces.length === 0 && previewTraces.length > 0) ||
+    (requestLogs.length === 0 && previewRequestLogs.length > 0);
   const realtimeTraceCandidates = useMemo(() => {
     const logsByTraceId = new Map<string, RequestLogSummary>();
-    for (const log of requestLogs) {
+    for (const log of displayedRequestLogs) {
       const traceId = log.trace_id?.trim();
       if (!traceId || logsByTraceId.has(traceId)) continue;
       logsByTraceId.set(traceId, log);
     }
 
     const nowMs = Date.now();
-    return traces
+    return displayedTraces
       .map((trace) => mergeTraceWithRequestLog(trace, logsByTraceId.get(trace.trace_id)))
       .filter((t) => nowMs - t.first_seen_ms < 15 * 60 * 1000)
       .sort((a, b) => b.first_seen_ms - a.first_seen_ms)
       .slice(0, 20);
-  }, [requestLogs, traces]);
+  }, [displayedRequestLogs, displayedTraces]);
 
   return (
     <Card padding="sm" className="flex flex-col gap-3 lg:col-span-7 h-full">
@@ -447,53 +858,81 @@ export function HomeRequestLogsPanel({
           <div className="text-xs text-slate-500 dark:text-slate-400">
             {requestLogsAvailable === false
               ? "数据不可用"
-              : requestLogs.length === 0 && requestLogsLoading
+              : displayedRequestLogs.length === 0 && requestLogsLoading
                 ? "加载中…"
                 : requestLogsLoading || requestLogsRefreshing
-                  ? `更新中… · 共 ${requestLogs.length} 条`
-                  : `共 ${requestLogs.length} 条`}
+                  ? `更新中… · 共 ${displayedRequestLogs.length} 条`
+                  : `共 ${displayedRequestLogs.length} 条`}
           </div>
+          {previewActive && (
+            <Button
+              onClick={() => {
+                setPreviewTraces([]);
+                setPreviewRequestLogs([]);
+              }}
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400"
+            >
+              关闭预览
+            </Button>
+          )}
           {showOpenLogsPageButton && (
             <Button
               onClick={() => navigate("/logs")}
               variant="ghost"
               size="sm"
-              className="h-8 px-2 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400"
+              className="h-8 gap-1 px-2 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400"
               disabled={requestLogsAvailable === false}
               title="打开日志页"
             >
-              <ArrowUpRight className="h-4 w-4 mr-1.5" />
               日志
+              <ArrowUpRight className="h-3.5 w-3.5" />
             </Button>
           )}
           <Button
             onClick={onRefreshRequestLogs}
             variant="ghost"
             size="sm"
-            className="h-8 px-2 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400"
+            className="h-8 gap-1 px-2 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400"
             disabled={requestLogsAvailable === false || requestLogsLoading || requestLogsRefreshing}
           >
+            刷新
             <RefreshCw
               className={cn(
-                "h-4 w-4 mr-1.5",
+                "h-3.5 w-3.5",
                 (requestLogsLoading || requestLogsRefreshing) && "animate-spin"
               )}
             />
-            刷新
           </Button>
+          <div className="flex items-center gap-1.5 pl-1">
+            <span className="text-xs text-slate-500 dark:text-slate-400">简洁模式</span>
+            <Switch
+              checked={compactMode}
+              onCheckedChange={setCompactMode}
+              size="sm"
+              aria-label="最近使用记录简洁模式"
+            />
+          </div>
         </div>
       </div>
 
-      <div className="border rounded-lg border-slate-200 dark:border-slate-700 bg-slate-50/30 dark:bg-slate-800/30 shadow-sm overflow-hidden flex-1 min-h-0 flex flex-col">
+      <div className="overflow-hidden flex-1 min-h-0 flex flex-col">
         <RequestLogsList
           realtimeTraceCandidates={realtimeTraceCandidates}
           formatUnixSeconds={formatUnixSecondsStable}
           showCustomTooltip={showCustomTooltip}
+          compactMode={compactMode}
+          requestLogsPreviewEnabled={requestLogsPreviewEnabled}
           requestLogsAvailable={requestLogsAvailable}
-          requestLogs={requestLogs}
+          requestLogs={displayedRequestLogs}
           requestLogsLoading={requestLogsLoading}
           selectedLogId={selectedLogId}
           onSelectLogId={onSelectLogId}
+          onEnablePreview={() => {
+            setPreviewTraces(buildPreviewTraces());
+            setPreviewRequestLogs(buildPreviewRequestLogs());
+          }}
         />
       </div>
     </Card>
@@ -505,22 +944,28 @@ type RequestLogsListProps = {
   realtimeTraceCandidates: TraceSession[];
   formatUnixSeconds: (ts: number) => string;
   showCustomTooltip: boolean;
+  compactMode: boolean;
+  requestLogsPreviewEnabled: boolean;
   requestLogsAvailable: boolean | null;
   requestLogs: RequestLogSummary[];
   requestLogsLoading: boolean;
   selectedLogId: number | null;
   onSelectLogId: (id: number | null) => void;
+  onEnablePreview: () => void;
 };
 
 const RequestLogsList = memo(function RequestLogsList({
   realtimeTraceCandidates,
   formatUnixSeconds,
   showCustomTooltip,
+  compactMode,
+  requestLogsPreviewEnabled,
   requestLogsAvailable,
   requestLogs,
   requestLogsLoading,
   selectedLogId,
   onSelectLogId,
+  onEnablePreview,
 }: RequestLogsListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const useVirtual = requestLogs.length >= VIRTUALIZATION_THRESHOLD;
@@ -540,6 +985,7 @@ const RequestLogsList = memo(function RequestLogsList({
     <>
       {requestLogs.map((log) => (
         <RequestLogCard
+          compactMode={compactMode}
           key={log.id}
           log={log}
           isSelected={selectedLogId === log.id}
@@ -567,7 +1013,18 @@ const RequestLogsList = memo(function RequestLogsList({
             <Spinner size="sm" />
             加载中…
           </div>
-        ) : null
+        ) : (
+          <EmptyState
+            title="当前没有最近使用记录"
+            action={
+              requestLogsPreviewEnabled ? (
+                <Button variant="secondary" size="sm" onClick={onEnablePreview}>
+                  预览记录样式
+                </Button>
+              ) : undefined
+            }
+          />
+        )
       ) : useVirtual ? (
         <div
           style={{
@@ -592,6 +1049,7 @@ const RequestLogsList = memo(function RequestLogsList({
                 ref={virtualizer.measureElement}
               >
                 <RequestLogCard
+                  compactMode={compactMode}
                   log={requestLogs[virtualRow.index]}
                   isSelected={selectedLogId === requestLogs[virtualRow.index].id}
                   showCustomTooltip={showCustomTooltip}

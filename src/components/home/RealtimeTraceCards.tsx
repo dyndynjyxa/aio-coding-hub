@@ -5,6 +5,7 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { cliBadgeTone, cliShortLabel } from "../../constants/clis";
 import { GatewayErrorCodes } from "../../constants/gatewayErrorCodes";
+import type { CliKey } from "../../services/providers";
 import type { TraceSession } from "../../services/traceStore";
 import { cn } from "../../utils/cn";
 import {
@@ -16,13 +17,15 @@ import {
   formatUsdRaw,
   sanitizeTtfbMs,
 } from "../../utils/formatters";
-import { Clock, Server, Loader2, Cpu, Terminal, CheckCircle2, XCircle } from "lucide-react";
+import { Clock, Server, Loader2, CheckCircle2, XCircle } from "lucide-react";
 import {
   computeEffectiveInputTokens,
   computeStatusBadge,
+  FreeBadge,
   getErrorCodeLabel,
   SessionReuseBadge,
 } from "./HomeLogShared";
+import { CliBrandIcon } from "./CliBrandIcon";
 
 export type RealtimeTraceCardsProps = {
   traces: TraceSession[];
@@ -147,22 +150,7 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
           const endProvider = segs[segs.length - 1]?.provider ?? null;
           const providerText = endProvider ?? "未知";
 
-          const routeLabel = (() => {
-            if (segs.length === 0) return null;
-
-            const text = segs
-              .map((seg) => {
-                const badge =
-                  seg.status === "success" ? "✅" : seg.status === "started" ? "⏳" : "❌";
-                return `${seg.provider}[${badge}]`;
-              })
-              .join("->");
-
-            const shouldShow = segs.length > 1 || segs.some((s) => s.status !== "success");
-            return shouldShow ? `(${text})` : null;
-          })();
-
-          return { providerText, startProvider, endProvider, routeLabel, segments: segs };
+          return { providerText, startProvider, endProvider, segments: segs };
         })();
 
         const hasFailover =
@@ -201,6 +189,12 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
           trace.requested_model && trace.requested_model.trim()
             ? trace.requested_model.trim()
             : "未知";
+        const cliLabel = cliShortLabel(trace.cli_key);
+        const cliTone = cliBadgeTone(trace.cli_key)
+          .replace(/group-hover:bg-white/g, "")
+          .replace(/dark:group-hover:bg-slate-800/g, "")
+          .replace(/group-hover:border-slate-200/g, "")
+          .replace(/dark:group-hover:border-slate-700/g, "");
 
         const cacheWrite = (() => {
           const s = trace.summary;
@@ -247,12 +241,35 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
         const displayCacheWriteTokens = cacheWrite.tokens ?? (isClientAbort ? 0 : null);
         const displayCostUsd = trace.summary?.cost_usd ?? (isClientAbort ? 0 : null);
         const displayCostText = displayCostUsd == null ? "—" : formatUsdRaw(displayCostUsd);
+        const costMultiplier =
+          typeof trace.summary?.cost_multiplier === "number" ? trace.summary.cost_multiplier : null;
+        const isFree = costMultiplier === 0;
+        const showCostMultiplier =
+          costMultiplier != null && costMultiplier >= 0 && Math.abs(costMultiplier - 1) > 0.0001;
+        const costMultiplierText = isFree
+          ? "免费"
+          : costMultiplier != null
+            ? `x${costMultiplier.toFixed(2)}`
+            : null;
 
         const outputTokensPerSecond = trace.summary
           ? computeOutputTokensPerSecond(displayOutputTokens, trace.summary.duration_ms, ttfbMs)
           : null;
         const displayOutputTokensPerSecond =
           outputTokensPerSecond ?? (isClientAbort && displayOutputTokens === 0 ? 0 : null);
+        const routeLabel = (() => {
+          if (attemptRoute.segments.length === 0) return null;
+          if (isInProgress) return "链路[进行中]";
+          if (hasFailover) return `链路[降级*${attemptRoute.segments.length}]`;
+          return "链路";
+        })();
+        const routeTooltipText =
+          routeSummary !== "—"
+            ? routeSummary
+            : attemptRoute.segments.length > 0
+              ? attemptRoute.segments.map((seg) => seg.provider).join(" → ")
+              : null;
+        const providerTitle = providerText;
 
         return (
           <div
@@ -266,32 +283,30 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
           >
             <div
               className={cn(
-                "relative rounded-lg border transition-[background-image,border-color] duration-500 ease-out",
+                "group/item relative rounded-lg border shadow-sm transition-colors duration-300 ease-out",
                 isInProgress
-                  ? "bg-gradient-to-r from-indigo-50/60 to-white dark:from-indigo-900/30 dark:to-slate-800 border-indigo-200/80 dark:border-indigo-700/60 animate-[glow-pulse_2.5s_ease-in-out_infinite] glow-pulse-active"
-                  : hasFailover && !statusBadge.isError
-                    ? "bg-gradient-to-r from-amber-50/60 to-white dark:from-amber-900/30 dark:to-slate-800 border-amber-200 dark:border-amber-700 shadow-sm"
-                    : "bg-gradient-to-r from-emerald-50/60 to-white dark:from-emerald-900/30 dark:to-slate-800 border-emerald-200 dark:border-emerald-700 shadow-sm"
+                  ? "bg-white border-indigo-200/80 dark:bg-slate-800 dark:border-indigo-700/60"
+                  : "bg-white border-slate-100 dark:bg-slate-800 dark:border-slate-700"
               )}
             >
-              {/* Left accent bar */}
               <div
                 className={cn(
                   "absolute left-0 top-2 bottom-2 w-1 rounded-r-full transition-colors duration-500",
                   isInProgress
                     ? "bg-indigo-500"
-                    : hasFailover && !statusBadge.isError
-                      ? "bg-amber-400"
-                      : "bg-emerald-500"
+                    : statusBadge.isError
+                      ? "bg-rose-400 opacity-70"
+                      : hasFailover
+                        ? "bg-amber-400 opacity-70"
+                        : "bg-slate-300 opacity-40"
                 )}
               />
 
-              <div className="flex flex-col gap-1.5 px-3 py-2.5">
-                {/* Row 1: Status + CLI + Model + Time + Badges */}
-                <div className="flex items-center gap-2 min-w-0">
+              <div className="px-3 py-2.5">
+                <div className="mb-1.5 flex min-w-0 items-center gap-2">
                   <span
                     className={cn(
-                      "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium shrink-0",
+                      "inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
                       statusBadge.tone
                     )}
                     title={statusBadge.title}
@@ -308,42 +323,41 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
 
                   <span
                     className={cn(
-                      "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium shrink-0",
-                      cliBadgeTone(trace.cli_key)
+                      "inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
+                      cliTone
                     )}
                   >
-                    {trace.cli_key === "claude" ? (
-                      <Terminal className="h-3 w-3" />
-                    ) : (
-                      <Cpu className="h-3 w-3" />
-                    )}
-                    {cliShortLabel(trace.cli_key)}
+                    <CliBrandIcon
+                      cliKey={trace.cli_key as CliKey}
+                      className="h-3.5 w-3.5 shrink-0 rounded-[3px] object-contain"
+                    />
+                    {cliLabel}
                   </span>
 
                   <span
-                    className="text-xs font-medium text-slate-800 dark:text-slate-200 truncate"
+                    className="inline-flex min-w-0 items-center rounded-md bg-slate-100/75 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-700/55 dark:text-slate-200"
                     title={modelText}
                   >
-                    {modelText}
+                    <span className="truncate">{modelText}</span>
                   </span>
 
+                  {hasSessionReuse && <SessionReuseBadge showCustomTooltip={showCustomTooltip} />}
+                  {isFree && <FreeBadge />}
+
                   {summaryErrorCode && (
-                    <span className="rounded bg-amber-50 dark:bg-amber-900/30 px-1 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400 shrink-0">
+                    <span className="shrink-0 rounded-md bg-amber-50/70 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:bg-amber-900/20 dark:text-amber-300">
                       {getErrorCodeLabel(summaryErrorCode)}
                     </span>
                   )}
 
-                  <span className="flex items-center gap-1.5 text-[11px] text-slate-400 dark:text-slate-500 ml-auto shrink-0">
-                    {hasSessionReuse && <SessionReuseBadge showCustomTooltip={showCustomTooltip} />}
+                  <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500">
                     <Clock className="h-3 w-3" />
                     {formatUnixSeconds(Math.floor(trace.first_seen_ms / 1000))}
                   </span>
                 </div>
 
-                {/* Row 2: Provider + Stats Grid (2 rows x 4 cols for alignment) */}
                 <div className="flex items-start gap-3 text-[11px]">
-                  {/* Provider - left side (2 rows: name + placeholder) */}
-                  <div className="flex flex-col gap-y-0.5 w-[110px] shrink-0" title={routeSummary}>
+                  <div className="flex w-[110px] shrink-0 flex-col gap-y-0.5" title={providerTitle}>
                     <div className="flex items-center gap-1 h-4">
                       <Server className="h-3 w-3 text-slate-400 dark:text-slate-500 shrink-0" />
                       <span className="truncate font-medium text-slate-600 dark:text-slate-400">
@@ -351,34 +365,25 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                       </span>
                     </div>
                     <div className="flex items-center h-4">
-                      {attemptRoute.routeLabel && !isInProgress ? (
-                        <span className="inline-flex items-center gap-0.5 text-[10px] truncate">
-                          {attemptRoute.segments.map((seg, idx) => (
-                            <span key={idx} className="inline-flex items-center gap-0.5">
-                              {idx > 0 && (
-                                <span className="text-slate-300 dark:text-slate-600">→</span>
-                              )}
-                              <span
-                                className={
-                                  seg.status === "success"
-                                    ? "text-emerald-600 dark:text-emerald-400"
-                                    : seg.status === "started"
-                                      ? "text-indigo-500 dark:text-indigo-400"
-                                      : "text-rose-500 dark:text-rose-400"
-                                }
-                              >
-                                {seg.provider}
-                              </span>
-                            </span>
-                          ))}
-                        </span>
-                      ) : null}
+                      <div className="flex min-w-0 w-full items-center gap-1">
+                        {routeLabel && routeTooltipText ? (
+                          <span
+                            className="cursor-help text-[11px] text-slate-400 dark:text-slate-500"
+                            title={routeTooltipText}
+                          >
+                            {routeLabel}
+                          </span>
+                        ) : null}
+                        {showCostMultiplier ? (
+                          <span className="inline-flex shrink-0 items-center text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                            {costMultiplierText}
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
 
-                  {/* Stats Grid: 2 rows x 4 cols */}
-                  <div className="grid grid-cols-4 gap-x-3 gap-y-0.5 flex-1 text-slate-500 dark:text-slate-400">
-                    {/* Row 1: 输入 | 缓存创建 | 首字 | 花费 */}
+                  <div className="grid flex-1 grid-cols-4 gap-x-3 gap-y-0.5 text-slate-500 dark:text-slate-400">
                     <div className="flex items-center gap-1 h-4" title="Input Tokens">
                       <span className="text-slate-400 dark:text-slate-500 shrink-0">输入</span>
                       <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
@@ -415,7 +420,6 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                       </span>
                     </div>
 
-                    {/* Row 2: 输出 | 缓存读取 | 耗时 | 速率 */}
                     <div className="flex items-center gap-1 h-4" title="Output Tokens">
                       <span className="text-slate-400 dark:text-slate-500 shrink-0">输出</span>
                       <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">

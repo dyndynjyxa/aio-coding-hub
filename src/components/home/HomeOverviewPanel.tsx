@@ -2,9 +2,8 @@
 // - Used by `src/pages/HomePage.tsx` to render the "概览" tab content.
 // - This module is intentionally kept thin: it composes smaller, cohesive sub-components.
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { cliBadgeTone, cliShortLabel } from "../../constants/clis";
 import { useNowUnix } from "../../hooks/useNowUnix";
 import type { OpenCircuitRow } from "../ProviderCircuitBadge";
 import type { GatewayActiveSession } from "../../services/gateway";
@@ -21,6 +20,7 @@ import { TabList } from "../../ui/TabList";
 import { cn } from "../../utils/cn";
 import { formatCountdownSeconds } from "../../utils/formatters";
 import { HomeActiveSessionsCardContent } from "./HomeActiveSessionsCard";
+import { CliBrandIcon } from "./CliBrandIcon";
 import { HomeProviderLimitPanelContent } from "./HomeProviderLimitPanel";
 import { HomeRequestLogsPanel } from "./HomeRequestLogsPanel";
 import { HomeUsageSection } from "./HomeUsageSection";
@@ -30,8 +30,8 @@ type SessionsTabKey = "sessions" | "providerLimit" | "circuit";
 
 const SESSIONS_TABS: Array<{ key: SessionsTabKey; label: string }> = [
   { key: "sessions", label: "活跃 Session" },
-  { key: "providerLimit", label: "供应商限额" },
   { key: "circuit", label: "熔断信息" },
+  { key: "providerLimit", label: "供应商限额" },
 ];
 
 const PREVIEW_CIRCUITS: OpenCircuitRow[] = [
@@ -138,17 +138,54 @@ export function HomeOverviewPanel({
 }: HomeOverviewPanelProps) {
   const [sessionsTab, setSessionsTab] = useState<SessionsTabKey>("sessions");
   const [previewCircuits, setPreviewCircuits] = useState<OpenCircuitRow[]>([]);
+  const previousActiveSessionKeysRef = useRef<string[] | null>(null);
+  const previousOpenCircuitKeysRef = useRef<string[] | null>(null);
   const displayedCircuits = openCircuits.length > 0 ? openCircuits : previewCircuits;
   const circuitPreviewActive = openCircuits.length === 0 && previewCircuits.length > 0;
   const circuitNowUnix = useNowUnix(sessionsTab === "circuit" && displayedCircuits.length > 0);
 
-  const groupedCircuits = displayedCircuits.reduce<Record<CliKey, OpenCircuitRow[]>>(
-    (acc, row) => {
-      acc[row.cli_key].push(row);
-      return acc;
-    },
-    { claude: [], codex: [], gemini: [] }
+  const activeSessionKeys = useMemo(
+    () =>
+      activeSessions
+        .map((row) => `${row.cli_key}:${row.session_id}`)
+        .sort((a, b) => a.localeCompare(b)),
+    [activeSessions]
   );
+
+  const openCircuitKeys = useMemo(
+    () =>
+      openCircuits
+        .map((row) => `${row.cli_key}:${row.provider_id}`)
+        .sort((a, b) => a.localeCompare(b)),
+    [openCircuits]
+  );
+
+  useEffect(() => {
+    const previousActiveSessionKeys = previousActiveSessionKeysRef.current;
+    const previousOpenCircuitKeys = previousOpenCircuitKeysRef.current;
+
+    if (previousActiveSessionKeys == null || previousOpenCircuitKeys == null) {
+      previousActiveSessionKeysRef.current = activeSessionKeys;
+      previousOpenCircuitKeysRef.current = openCircuitKeys;
+      return;
+    }
+
+    const hasNewOpenCircuit = openCircuitKeys.some((key) => !previousOpenCircuitKeys.includes(key));
+    const hasNewActiveSession = activeSessionKeys.some(
+      (key) => !previousActiveSessionKeys.includes(key)
+    );
+
+    previousActiveSessionKeysRef.current = activeSessionKeys;
+    previousOpenCircuitKeysRef.current = openCircuitKeys;
+
+    if (hasNewOpenCircuit) {
+      setSessionsTab("circuit");
+      return;
+    }
+    if (hasNewActiveSession) {
+      setSessionsTab("sessions");
+    }
+  }, [activeSessionKeys, openCircuitKeys]);
 
   return (
     <div className="flex flex-col h-full gap-4">
@@ -218,13 +255,6 @@ export function HomeOverviewPanel({
                 size="sm"
               />
               <div className="flex items-center gap-2 text-xs text-slate-400">
-                <span>
-                  {sessionsTab === "sessions"
-                    ? activeSessions.length
-                    : sessionsTab === "providerLimit"
-                      ? `${providerLimitRows.length} 个供应商`
-                      : `${displayedCircuits.length} 个熔断`}
-                </span>
                 {sessionsTab === "providerLimit" && (
                   <button
                     type="button"
@@ -286,71 +316,52 @@ export function HomeOverviewPanel({
               ) : (
                 <div className="h-full overflow-y-auto pr-1">
                   <div className="space-y-3">
-                    {(Object.keys(groupedCircuits) as CliKey[])
-                      .filter((cliKey) => groupedCircuits[cliKey].length > 0)
-                      .map((cliKey) => (
-                        <div key={cliKey} className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <span
-                              className={cn(
-                                "rounded px-1.5 py-0.5 text-xs font-bold uppercase tracking-wider",
-                                cliBadgeTone(cliKey)
-                              )}
-                            >
-                              {cliShortLabel(cliKey)}
-                            </span>
-                            <span className="text-xs text-slate-500 dark:text-slate-400">
-                              {groupedCircuits[cliKey].length} 个熔断
-                            </span>
-                          </div>
-                          <div className="space-y-2">
-                            {groupedCircuits[cliKey].map((row) => {
-                              const remaining =
-                                row.open_until != null && Number.isFinite(row.open_until)
-                                  ? formatCountdownSeconds(row.open_until - circuitNowUnix)
-                                  : "—";
-                              const isResetting = resettingCircuitProviderIds.has(row.provider_id);
+                    {displayedCircuits.map((row) => {
+                      const remaining =
+                        row.open_until != null && Number.isFinite(row.open_until)
+                          ? formatCountdownSeconds(row.open_until - circuitNowUnix)
+                          : "—";
+                      const isResetting = resettingCircuitProviderIds.has(row.provider_id);
 
-                              return (
-                                <div
-                                  key={`${row.cli_key}:${row.provider_id}`}
-                                  className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/50"
-                                >
-                                  <div className="min-w-0 flex-1">
-                                    <div
-                                      className="truncate text-sm font-medium text-slate-700 dark:text-slate-300"
-                                      title={row.provider_name}
-                                    >
-                                      {row.provider_name || "未知"}
-                                    </div>
-                                  </div>
-                                  <div className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400">
-                                    {remaining}
-                                  </div>
-                                  <Button
-                                    variant="secondary"
-                                    size="sm"
-                                    disabled={isResetting}
-                                    onClick={() => {
-                                      if (circuitPreviewActive) {
-                                        setPreviewCircuits((prev) =>
-                                          prev.filter(
-                                            (item) => item.provider_id !== row.provider_id
-                                          )
-                                        );
-                                        return;
-                                      }
-                                      onResetCircuitProvider(row.provider_id);
-                                    }}
-                                  >
-                                    {isResetting ? "解除中..." : "解除熔断"}
-                                  </Button>
-                                </div>
-                              );
-                            })}
+                      return (
+                        <div
+                          key={`${row.cli_key}:${row.provider_id}`}
+                          className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/50"
+                        >
+                          <div className="min-w-0 flex flex-1 items-center gap-2.5">
+                            <CliBrandIcon
+                              cliKey={row.cli_key as CliKey}
+                              className="h-4 w-4 shrink-0 rounded-[4px] object-contain"
+                            />
+                            <div
+                              className="truncate text-sm font-medium text-slate-700 dark:text-slate-300"
+                              title={row.provider_name}
+                            >
+                              {row.provider_name || "未知"}
+                            </div>
                           </div>
+                          <div className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400">
+                            {remaining}
+                          </div>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            disabled={isResetting}
+                            onClick={() => {
+                              if (circuitPreviewActive) {
+                                setPreviewCircuits((prev) =>
+                                  prev.filter((item) => item.provider_id !== row.provider_id)
+                                );
+                                return;
+                              }
+                              onResetCircuitProvider(row.provider_id);
+                            }}
+                          >
+                            {isResetting ? "解除中..." : "解除熔断"}
+                          </Button>
                         </div>
-                      ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
