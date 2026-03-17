@@ -584,7 +584,7 @@ describe("pages/providers/ProvidersView", () => {
       </QueryClientProvider>
     );
 
-    fireEvent.pointerDown(screen.getByText("启用"));
+    fireEvent.pointerDown(screen.getByText("已启用"));
     fireEvent.click(screen.getByTitle("模型验证"));
     expect(screen.getByText("validate")).toBeInTheDocument();
 
