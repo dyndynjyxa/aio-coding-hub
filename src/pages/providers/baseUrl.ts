@@ -11,8 +11,14 @@ export function providerBaseUrlSummary(provider: ProviderSummary | null | undefi
   if (!provider) return "—";
   const primary = providerPrimaryBaseUrl(provider);
   if (primary === "—" && provider.auth_mode === "oauth") return "OAuth (自动)";
-  const extraCount = Math.max(0, (provider.base_urls?.length ?? 0) - 1);
-  return extraCount > 0 ? `${primary} (+${extraCount})` : primary;
+
+  const urls = provider.base_urls ?? [];
+  if (urls.length <= 1) return primary;
+
+  const visibleUrls = urls.slice(0, 2);
+  const extraCount = Math.max(0, urls.length - visibleUrls.length);
+  const summary = visibleUrls.join(" · ");
+  return extraCount > 0 ? `${summary} (+${extraCount})` : summary;
 }
 
 export function normalizeBaseUrlRows(rows: BaseUrlRow[]) {

@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { ProviderEditorDialog } from "../ProviderEditorDialog";
+import { copyText } from "../../../services/clipboard";
 import {
   providerGetApiKey,
   providerOAuthDisconnect,
@@ -16,6 +17,7 @@ import type { ProviderEditorInitialValues } from "../providerDuplicate";
 
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
+vi.mock("../../../services/clipboard", () => ({ copyText: vi.fn() }));
 
 vi.mock("../../../services/providers", async () => {
   const actual = await vi.importActual<typeof import("../../../services/providers")>(
@@ -260,6 +262,62 @@ describe("pages/providers/ProviderEditorDialog", () => {
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
 
+  it("syncs haiku sonnet opus with main model by default", () => {
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="claude"
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByText("Claude 模型映射"));
+    const mainInput = dialog.getByPlaceholderText(/minimax-text-01/);
+    const haikuInput = dialog.getByPlaceholderText(/glm-4-plus-haiku/);
+    const sonnetInput = dialog.getByPlaceholderText(/glm-4-plus-sonnet/);
+    const opusInput = dialog.getByPlaceholderText(/glm-4-plus-opus/);
+
+    fireEvent.change(dialog.getByPlaceholderText(/minimax-text-01/), {
+      target: { value: "glm-main" },
+    });
+
+    expect(mainInput).toHaveValue("glm-main");
+    expect(haikuInput).toHaveValue("glm-main");
+    expect(sonnetInput).toHaveValue("glm-main");
+    expect(opusInput).toHaveValue("glm-main");
+  });
+
+  it("always overwrites haiku sonnet opus when main model changes", () => {
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="claude"
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByText("Claude 模型映射"));
+
+    const mainInput = dialog.getByPlaceholderText(/minimax-text-01/);
+    const haikuInput = dialog.getByPlaceholderText(/glm-4-plus-haiku/);
+    const sonnetInput = dialog.getByPlaceholderText(/glm-4-plus-sonnet/);
+    const opusInput = dialog.getByPlaceholderText(/glm-4-plus-opus/);
+
+    fireEvent.change(mainInput, { target: { value: "glm-main-a" } });
+    fireEvent.change(haikuInput, { target: { value: "glm-haiku-custom" } });
+    fireEvent.change(mainInput, { target: { value: "glm-main-b" } });
+
+    expect(haikuInput).toHaveValue("glm-main-b");
+    expect(sonnetInput).toHaveValue("glm-main-b");
+    expect(opusInput).toHaveValue("glm-main-b");
+  });
+
   it("supports edit mode, drives UI handlers, and blocks close while saving", async () => {
     let resolveUpsert: (value: any) => void;
     const upsertPromise = new Promise((resolve) => {
@@ -285,8 +343,8 @@ describe("pages/providers/ProviderEditorDialog", () => {
     const dialog = within(dialogEl);
 
     // Toggle base url mode (covers BaseUrlModeRadioGroup button handlers)
-    fireEvent.click(dialog.getByRole("radio", { name: "Ping" }));
-    fireEvent.click(dialog.getByRole("radio", { name: "顺序" }));
+    fireEvent.click(dialog.getByRole("radio", { name: "按 Ping" }));
+    fireEvent.click(dialog.getByRole("radio", { name: "按顺序" }));
 
     // Open limits details and toggle daily reset modes (covers DailyResetModeRadioGroup handlers)
     fireEvent.click(dialog.getByText("限流配置"));
@@ -338,7 +396,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
 
-  it("toggles API key visibility and fetches key in edit mode", async () => {
+  it("loads full API key into the input in edit mode", async () => {
     vi.mocked(providerGetApiKey).mockResolvedValueOnce("sk-secret-123");
 
     const provider = makeProvider();
@@ -353,14 +411,12 @@ describe("pages/providers/ProviderEditorDialog", () => {
     );
 
     const dialog = within(screen.getByRole("dialog"));
-    const showKeyButton = dialog.getByRole("button", { name: "显示 API Key" });
-    fireEvent.click(showKeyButton);
-
     await waitFor(() => expect(vi.mocked(providerGetApiKey)).toHaveBeenCalledWith(1));
+    await waitFor(() => expect(dialog.getByDisplayValue("sk-secret-123")).toBeInTheDocument());
   });
 
-  it("handles toggleApiKeyVisibility fetch failure gracefully", async () => {
-    vi.mocked(providerGetApiKey).mockRejectedValueOnce(new Error("fetch failed"));
+  it("shows full API key inside the input when a saved key exists", async () => {
+    vi.mocked(providerGetApiKey).mockResolvedValueOnce("1234567890abcdef");
 
     const provider = makeProvider();
     render(
@@ -374,7 +430,101 @@ describe("pages/providers/ProviderEditorDialog", () => {
     );
 
     const dialog = within(screen.getByRole("dialog"));
-    fireEvent.click(dialog.getByRole("button", { name: "显示 API Key" }));
+    await waitFor(() => expect(dialog.getByDisplayValue("1234567890abcdef")).toBeInTheDocument());
+  });
+
+  it("keeps unchanged API key out of edit save payload after revealing it", async () => {
+    vi.mocked(providerGetApiKey).mockResolvedValueOnce("1234567890abcdef");
+    vi.mocked(providerUpsert).mockResolvedValue(makeProvider() as any);
+
+    const provider = makeProvider();
+    render(
+      <ProviderEditorDialog
+        mode="edit"
+        open={true}
+        provider={provider}
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    await waitFor(() => expect(dialog.getByDisplayValue("1234567890abcdef")).toBeInTheDocument());
+
+    fireEvent.click(dialog.getByRole("button", { name: "保存" }));
+
+    await waitFor(() =>
+      expect(vi.mocked(providerUpsert)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider_id: 1,
+          api_key: "",
+        })
+      )
+    );
+  });
+
+  it("copies API key in edit mode", async () => {
+    vi.mocked(providerGetApiKey).mockResolvedValueOnce("1234567890abcdef");
+
+    const provider = makeProvider();
+    render(
+      <ProviderEditorDialog
+        mode="edit"
+        open={true}
+        provider={provider}
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    await waitFor(() => expect(dialog.getByDisplayValue("1234567890abcdef")).toBeInTheDocument());
+    fireEvent.click(dialog.getByRole("button", { name: "复制" }));
+
+    await waitFor(() => expect(vi.mocked(copyText)).toHaveBeenCalledWith("1234567890abcdef"));
+    await waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalledWith("已复制 API Key"));
+  });
+
+  it("sets cost multiplier to zero when clicking 免费", () => {
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="claude"
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    const freeButton = dialog.getByRole("button", { name: "免费" });
+    expect(freeButton.className).not.toContain("emerald");
+
+    fireEvent.change(dialog.getByPlaceholderText("1.0"), { target: { value: "1.5" } });
+    fireEvent.click(freeButton);
+
+    expect(dialog.getByDisplayValue("0")).toBeInTheDocument();
+    expect(freeButton.className).toContain("emerald");
+  });
+
+  it("handles API key copy fetch failure gracefully", async () => {
+    vi.mocked(providerGetApiKey).mockRejectedValue(new Error("fetch failed"));
+
+    const provider = makeProvider();
+    render(
+      <ProviderEditorDialog
+        mode="edit"
+        open={true}
+        provider={provider}
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    const copyButton = dialog.getByRole("button", { name: "复制" });
+    await waitFor(() => expect(copyButton).not.toBeDisabled());
+    fireEvent.click(copyButton);
 
     await waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalledWith("读取 API Key 失败"));
   });

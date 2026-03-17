@@ -901,7 +901,7 @@ describe("pages/providers/ProvidersView", () => {
 
     renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
 
-    expect(screen.getByText("Claude Models")).toBeInTheDocument();
+    expect(screen.getByText("模型映射 1/5")).toBeInTheDocument();
     expect(screen.getByText(/^熔断\s*00:10$/)).toBeInTheDocument();
     expect(screen.getByText("P1").closest(".shadow-lg")).toBeTruthy();
   });

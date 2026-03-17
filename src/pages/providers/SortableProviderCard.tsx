@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -7,6 +8,7 @@ import { logToConsole } from "../../services/consoleLog";
 import type { GatewayProviderCircuitStatus } from "../../services/gateway";
 import {
   providerOAuthFetchLimits,
+  type ClaudeModels,
   type OAuthLimitsResult,
   type ProviderSummary,
 } from "../../services/providers";
@@ -20,6 +22,7 @@ import { providerBaseUrlSummary } from "./baseUrl";
 
 /** Module-level cache so OAuth limits survive tab switches / re-renders. */
 const oauthLimitsCache = new Map<number, OAuthLimitsResult>();
+const NOTE_URL_RE = /https?:\/\/[^\s]+/g;
 
 function getOAuthShortWindowLabel(
   provider: ProviderSummary,
@@ -27,6 +30,65 @@ function getOAuthShortWindowLabel(
 ) {
   if (provider.cli_key === "gemini") return "短窗";
   return oauthLimits?.limit_short_label ?? "5h";
+}
+
+function getConfiguredClaudeModelMappings(claudeModels: ClaudeModels | null | undefined) {
+  const fields: Array<[label: string, value: string | null | undefined]> = [
+    ["主模型", claudeModels?.main_model],
+    ["推理模型(Thinking)", claudeModels?.reasoning_model],
+    ["Haiku 默认模型", claudeModels?.haiku_model],
+    ["Sonnet 默认模型", claudeModels?.sonnet_model],
+    ["Opus 默认模型", claudeModels?.opus_model],
+  ];
+
+  return fields.flatMap(([label, value]) => {
+    const trimmed = typeof value === "string" ? value.trim() : "";
+    return trimmed ? [`${label}: ${trimmed}`] : [];
+  });
+}
+
+function trimTrailingUrlPunctuation(url: string) {
+  return url.replace(/[.,!?;:，。；：]+$/u, "");
+}
+
+function renderProviderNote(note: string) {
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+
+  for (const match of note.matchAll(NOTE_URL_RE)) {
+    const rawUrl = match[0];
+    const start = match.index ?? 0;
+    const normalizedUrl = trimTrailingUrlPunctuation(rawUrl);
+    const trailingText = rawUrl.slice(normalizedUrl.length);
+
+    if (start > lastIndex) {
+      nodes.push(note.slice(lastIndex, start));
+    }
+
+    nodes.push(
+      <a
+        key={`${normalizedUrl}-${start}`}
+        href={normalizedUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-sky-600 underline underline-offset-2 transition hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300"
+      >
+        {normalizedUrl}
+      </a>
+    );
+
+    if (trailingText) {
+      nodes.push(trailingText);
+    }
+
+    lastIndex = start + rawUrl.length;
+  }
+
+  if (lastIndex < note.length) {
+    nodes.push(note.slice(lastIndex));
+  }
+
+  return nodes.length > 0 ? nodes : [note];
 }
 
 export type SortableProviderCardProps = {
@@ -67,10 +129,8 @@ export function SortableProviderCard({
     transition,
   };
 
-  const claudeModelsCount = Object.values(provider.claude_models ?? {}).filter((value) => {
-    if (typeof value !== "string") return false;
-    return Boolean(value.trim());
-  }).length;
+  const claudeModelMappings = getConfiguredClaudeModelMappings(provider.claude_models);
+  const claudeModelsCount = claudeModelMappings.length;
   const hasClaudeModels = claudeModelsCount > 0;
 
   const limitChips = [
@@ -107,6 +167,7 @@ export function SortableProviderCard({
     unavailableRemaining != null ? formatCountdownSeconds(unavailableRemaining) : null;
 
   const isOAuth = provider.auth_mode === "oauth";
+  const [apiKeyDetailsVisible, setApiKeyDetailsVisible] = useState(false);
   const [oauthLimits, setOauthLimits] = useState<OAuthLimitsResult | null>(
     () => oauthLimitsCache.get(provider.id) ?? null
   );
@@ -115,7 +176,10 @@ export function SortableProviderCard({
 
   useEffect(() => {
     // Disconnect switches auth_mode back to api_key; drop stale OAuth limits cache.
-    if (isOAuth) return;
+    if (isOAuth) {
+      setApiKeyDetailsVisible(false);
+      return;
+    }
     oauthLimitsCache.delete(provider.id);
     setOauthLimits(null);
   }, [isOAuth, provider.id]);
@@ -159,7 +223,7 @@ export function SortableProviderCard({
       <Card
         padding="sm"
         className={cn(
-          "flex cursor-grab flex-col gap-2 transition-shadow duration-200 active:cursor-grabbing sm:flex-row sm:items-center sm:justify-between",
+          "rounded-lg sm:rounded-xl flex cursor-grab flex-col gap-2 transition-shadow duration-200 active:cursor-grabbing sm:flex-row sm:items-center sm:justify-between",
           isDragging && "z-10 scale-[1.02] shadow-lg ring-2 ring-accent/30"
         )}
         {...attributes}
@@ -185,32 +249,7 @@ export function SortableProviderCard({
                 </span>
               ) : null}
             </div>
-            <div className="mt-1 flex items-center gap-2">
-              <span className="shrink-0 rounded-full bg-slate-50 px-2 py-0.5 font-mono text-[10px] text-slate-700 dark:bg-slate-700 dark:text-slate-300">
-                {provider.base_url_mode === "ping" ? "Ping" : "顺序"}
-              </span>
-              <span className="shrink-0 rounded-full bg-slate-50 px-2 py-0.5 font-mono text-[10px] text-slate-700 dark:bg-slate-700 dark:text-slate-300">
-                倍率 {provider.cost_multiplier}x
-              </span>
-              {provider.cli_key === "claude" && hasClaudeModels ? (
-                <span
-                  className="shrink-0 rounded-full bg-sky-50 px-2 py-0.5 font-mono text-[10px] text-sky-700 dark:bg-sky-900/30 dark:text-sky-400"
-                  title={`已配置 Claude 模型映射（${claudeModelsCount}/5）`}
-                >
-                  Claude Models
-                </span>
-              ) : null}
-              {hasLimits ? (
-                <span
-                  className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 font-mono text-[10px] text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                  title={limitChips.join("\n")}
-                >
-                  限额
-                </span>
-              ) : null}
-            </div>
-            <div className="mt-1 flex min-w-0 items-center gap-2">
-              {/* Auth mode chip — fixed width for alignment */}
+            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
               {isOAuth ? (
                 <button
                   type="button"
@@ -237,14 +276,63 @@ export function SortableProviderCard({
                   OAuth
                 </button>
               ) : (
-                <span
-                  className="inline-flex w-16 shrink-0 items-center justify-center rounded-full px-2 py-0.5 font-mono text-[10px] bg-sky-50 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400"
-                  title="API Key 认证"
-                >
-                  API Key
-                </span>
+                <>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setApiKeyDetailsVisible((current) => !current);
+                    }}
+                    className="inline-flex w-16 shrink-0 cursor-pointer items-center justify-center rounded-full px-2 py-0.5 font-mono text-[10px] transition-opacity hover:opacity-80 bg-sky-50 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400"
+                    title="API Key 认证"
+                  >
+                    API Key
+                  </button>
+                  <span className="shrink-0 rounded-full bg-cyan-50 px-2 py-0.5 font-mono text-[10px] text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300">
+                    {provider.base_url_mode === "ping" ? "Ping" : "顺序"}
+                  </span>
+                </>
               )}
-              {/* Detail: OAuth shows email + limits; API Key shows base_url summary */}
+              <span
+                className={cn(
+                  "shrink-0 rounded-full px-2 py-0.5 font-mono text-[10px]",
+                  provider.cost_multiplier === 0
+                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                    : "bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
+                )}
+              >
+                {provider.cost_multiplier === 0 ? "免费" : `倍率 ${provider.cost_multiplier}x`}
+              </span>
+              {provider.cli_key === "claude" && hasClaudeModels ? (
+                <span
+                  className="shrink-0 rounded-full bg-sky-50 px-2 py-0.5 font-mono text-[10px] text-sky-700 dark:bg-sky-900/30 dark:text-sky-400"
+                  title={[
+                    `已配置 Claude 模型映射（${claudeModelsCount}/5）`,
+                    ...claudeModelMappings,
+                  ].join("\n")}
+                >
+                  模型映射 {claudeModelsCount}/5
+                </span>
+              ) : null}
+              {hasLimits ? (
+                <span
+                  className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 font-mono text-[10px] text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                  title={limitChips.join("\n")}
+                >
+                  限额
+                </span>
+              ) : null}
+              {(provider.tags ?? []).map((tag) => (
+                <span
+                  key={tag}
+                  className="shrink-0 rounded-full bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                  title={`标签: ${tag}`}
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
               {isOAuth ? (
                 <>
                   {provider.oauth_email ? (
@@ -257,7 +345,7 @@ export function SortableProviderCard({
                   ) : null}
                   {oauthLimits?.limit_5h_text ? (
                     <span
-                      className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 font-mono text-[10px] text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                      className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
                       title={`${oauthShortLabel} 用量: ${oauthLimits.limit_5h_text}`}
                     >
                       {oauthShortLabel}: {oauthLimits.limit_5h_text}
@@ -265,100 +353,114 @@ export function SortableProviderCard({
                   ) : null}
                   {oauthLimits?.limit_weekly_text ? (
                     <span
-                      className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 font-mono text-[10px] text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                      className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
                       title={`周用量: ${oauthLimits.limit_weekly_text}`}
                     >
                       周: {oauthLimits.limit_weekly_text}
                     </span>
                   ) : null}
                 </>
-              ) : (
+              ) : apiKeyDetailsVisible ? (
                 <span
                   className="truncate font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
                   title={provider.base_urls.join("\n")}
                 >
                   {providerBaseUrlSummary(provider)}
                 </span>
-              )}
-              {provider.note ? (
-                <span
-                  className="truncate text-xs text-slate-400 dark:text-slate-500 cursor-default"
-                  title={provider.note}
-                >
-                  · {provider.note}
-                </span>
               ) : null}
             </div>
+            {provider.note ? (
+              <div
+                className="mt-1 break-words text-xs text-slate-400 dark:text-slate-500 cursor-default"
+                title={provider.note}
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                {renderProviderNote(provider.note)}
+              </div>
+            ) : null}
           </div>
         </div>
 
-        <div
-          className="flex flex-wrap items-center gap-3"
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-600 dark:text-slate-400">启用</span>
-            <Switch checked={provider.enabled} onCheckedChange={() => onToggleEnabled(provider)} />
+        <div className="flex flex-col items-end gap-2" onPointerDown={(e) => e.stopPropagation()}>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {isUnavailable ? (
+              <Button
+                onClick={() => onResetCircuit(provider)}
+                variant="secondary"
+                size="md"
+                disabled={circuitResetting}
+              >
+                {circuitResetting ? "处理中…" : "解除熔断"}
+              </Button>
+            ) : null}
+
+            <Button onClick={() => onEdit(provider)} variant="secondary" size="md" title="编辑">
+              <Pencil className="h-4 w-4" />
+              编辑
+            </Button>
+
+            <div className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm dark:border-slate-600 dark:bg-slate-800">
+              <span className="text-sm text-slate-700 dark:text-slate-300">启用</span>
+              <Switch
+                checked={provider.enabled}
+                onCheckedChange={() => onToggleEnabled(provider)}
+              />
+            </div>
           </div>
 
-          {isUnavailable ? (
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {onCopyTerminalLaunchCommand ? (
+              <Button
+                onClick={() => onCopyTerminalLaunchCommand(provider)}
+                variant="secondary"
+                size="sm"
+                className="px-2 py-1 text-[11px] gap-1.5"
+                disabled={terminalLaunchCopying}
+                title="复制终端启动命令"
+              >
+                <Terminal className="h-3.5 w-3.5" />
+                {terminalLaunchCopying ? "复制中…" : "终端启动"}
+              </Button>
+            ) : null}
+
+            {onValidateModel ? (
+              <Button
+                onClick={() => onValidateModel(provider)}
+                variant="secondary"
+                size="sm"
+                className="px-2 py-1 text-[11px] gap-1.5"
+                title="模型验证"
+              >
+                <FlaskConical className="h-3.5 w-3.5" />
+                模型验证
+              </Button>
+            ) : null}
+
+            {onDuplicate ? (
+              <Button
+                onClick={() => onDuplicate(provider)}
+                variant="secondary"
+                size="sm"
+                className="px-2 py-1 text-[11px] gap-1.5"
+                disabled={duplicateLoading}
+                title="复制"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                {duplicateLoading ? "复制中…" : "复制"}
+              </Button>
+            ) : null}
+
             <Button
-              onClick={() => onResetCircuit(provider)}
-              variant="secondary"
+              onClick={() => onDelete(provider)}
+              variant="danger"
               size="sm"
-              disabled={circuitResetting}
+              className="px-2 py-1 text-[11px] gap-1.5"
+              title="删除"
             >
-              {circuitResetting ? "处理中…" : "解除熔断"}
+              <Trash2 className="h-3.5 w-3.5" />
+              删除
             </Button>
-          ) : null}
-
-          {onCopyTerminalLaunchCommand ? (
-            <Button
-              onClick={() => onCopyTerminalLaunchCommand(provider)}
-              variant="secondary"
-              size="sm"
-              disabled={terminalLaunchCopying}
-              title="复制终端启动命令"
-            >
-              <Terminal className="h-4 w-4" />
-              {terminalLaunchCopying ? "复制中…" : "终端启动"}
-            </Button>
-          ) : null}
-
-          {onValidateModel ? (
-            <Button
-              onClick={() => onValidateModel(provider)}
-              variant="secondary"
-              size="sm"
-              title="模型验证"
-            >
-              <FlaskConical className="h-4 w-4" />
-              模型验证
-            </Button>
-          ) : null}
-
-          {onDuplicate ? (
-            <Button
-              onClick={() => onDuplicate(provider)}
-              variant="secondary"
-              size="sm"
-              disabled={duplicateLoading}
-              title="复制"
-            >
-              <Copy className="h-4 w-4" />
-              {duplicateLoading ? "复制中…" : "复制"}
-            </Button>
-          ) : null}
-
-          <Button onClick={() => onEdit(provider)} variant="secondary" size="sm" title="编辑">
-            <Pencil className="h-4 w-4" />
-            编辑
-          </Button>
-
-          <Button onClick={() => onDelete(provider)} variant="danger" size="sm" title="删除">
-            <Trash2 className="h-4 w-4" />
-            删除
-          </Button>
+          </div>
         </div>
       </Card>
     </div>
