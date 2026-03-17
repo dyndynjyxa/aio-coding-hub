@@ -235,7 +235,7 @@ export function SortableProviderCard({
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-2">
-              <div className="truncate text-sm font-semibold">{provider.name}</div>
+              <div className="truncate text-base font-semibold">{provider.name}</div>
               {isUnavailable ? (
                 <span
                   className="shrink-0 rounded-full bg-rose-50 px-2 py-0.5 font-mono text-[10px] text-rose-700 dark:bg-rose-900/30 dark:text-rose-400"
@@ -388,19 +388,28 @@ export function SortableProviderCard({
                 onClick={() => onResetCircuit(provider)}
                 variant="secondary"
                 size="md"
+                className="h-9"
                 disabled={circuitResetting}
               >
                 {circuitResetting ? "处理中…" : "解除熔断"}
               </Button>
             ) : null}
 
-            <Button onClick={() => onEdit(provider)} variant="secondary" size="md" title="编辑">
+            <Button
+              onClick={() => onEdit(provider)}
+              variant="secondary"
+              size="md"
+              className="h-9"
+              title="编辑"
+            >
               <Pencil className="h-4 w-4" />
               编辑
             </Button>
 
-            <div className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm dark:border-slate-600 dark:bg-slate-800">
-              <span className="text-sm text-slate-700 dark:text-slate-300">启用</span>
+            <div className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm shadow-sm dark:border-slate-600 dark:bg-slate-800">
+              <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                {provider.enabled ? "已启用" : "已关闭"}
+              </span>
               <Switch
                 checked={provider.enabled}
                 onCheckedChange={() => onToggleEnabled(provider)}
