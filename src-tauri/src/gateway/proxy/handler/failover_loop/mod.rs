@@ -30,7 +30,6 @@ use request_end_helpers::{
 };
 
 use super::super::{
-    cx2cc,
     errors::{classify_upstream_status, error_response},
     failover::{retry_backoff_delay, select_provider_base_url_for_request, FailoverDecision},
     gemini_oauth,
@@ -424,44 +423,15 @@ fn maybe_inject_codex_chatgpt_headers(headers: &mut HeaderMap, account_id: Optio
     }
 }
 
-const CODEX_CHATGPT_RESPONSES_ALLOWED_KEYS: &[&str] = &[
-    "model",
-    "instructions",
-    "input",
-    "tools",
-    "tool_choice",
-    "parallel_tool_calls",
-    "store",
-    "stream",
-    "include",
-    "reasoning",
-    "service_tier",
-    "prompt_cache_key",
-    "text",
-    "previous_response_id",
-];
+// Delegate to protocol_bridge::cx2cc module.
+use super::super::protocol_bridge::cx2cc as bridge_cx2cc;
 
 fn codex_chatgpt_request_compat_value(root: &serde_json::Value) -> serde_json::Value {
-    let Some(obj) = root.as_object() else {
-        return root.clone();
-    };
-
-    let mut next = serde_json::Map::new();
-    for key in CODEX_CHATGPT_RESPONSES_ALLOWED_KEYS {
-        if let Some(value) = obj.get(*key).cloned() {
-            next.insert((*key).to_string(), value);
-        }
-    }
-    next.insert("stream".to_string(), serde_json::Value::Bool(true));
-    next.insert("store".to_string(), serde_json::Value::Bool(false));
-    serde_json::Value::Object(next)
+    bridge_cx2cc::codex_chatgpt_request_compat_value(root)
 }
 
 fn original_anthropic_stream_requested(introspection_json: Option<&serde_json::Value>) -> bool {
-    introspection_json
-        .and_then(|body| body.get("stream"))
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
+    bridge_cx2cc::original_anthropic_stream_requested(introspection_json)
 }
 
 fn maybe_apply_codex_chatgpt_request_compat(
@@ -910,25 +880,36 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
                     match resolve_effective_credential(&input.state, &source_cli_key, &source).await
                     {
                         Ok(source_cred) => {
-                            // Map Claude model → OpenAI model.
+                            // Translate request via protocol bridge (IR path).
                             let body_val: serde_json::Value =
                                 serde_json::from_slice(&upstream_body_bytes).unwrap_or_default();
                             let requested_model =
                                 body_val.get("model").and_then(|m| m.as_str()).unwrap_or("");
-                            let openai_model = cx2cc::models::map_claude_to_openai(
-                                requested_model,
-                                &provider.claude_models,
-                            );
-
-                            // Translate request body.
-                            let mut translated_body = body_val.clone();
-                            translated_body["model"] = serde_json::json!(openai_model);
-                            match cx2cc::transform::anthropic_to_responses(translated_body) {
-                                Ok(responses_body) => {
-                                    upstream_body_bytes = serde_json::to_vec(&responses_body)
+                            let bridge_ctx = super::super::protocol_bridge::BridgeContext {
+                                claude_models: provider.claude_models.clone(),
+                                requested_model: Some(requested_model.to_string()),
+                                mapped_model: None,
+                                stream_requested: anthropic_stream_requested,
+                                is_chatgpt_backend: false,
+                            };
+                            match super::super::protocol_bridge::get_bridge("cx2cc")
+                                .ok_or_else(|| "cx2cc bridge not registered".to_string())
+                                .and_then(|bridge| {
+                                    bridge
+                                        .translate_request(body_val, &bridge_ctx)
+                                        .map_err(|e| e.to_string())
+                                }) {
+                                Ok(translated) => {
+                                    let openai_model = translated
+                                        .body
+                                        .get("model")
+                                        .and_then(|m| m.as_str())
+                                        .unwrap_or("")
+                                        .to_string();
+                                    upstream_body_bytes = serde_json::to_vec(&translated.body)
                                         .unwrap_or_default()
                                         .into();
-                                    upstream_forwarded_path = "/v1/responses".to_string();
+                                    upstream_forwarded_path = translated.target_path;
                                     upstream_query = None;
                                     strip_request_content_encoding = true;
 

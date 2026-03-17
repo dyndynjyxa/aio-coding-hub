@@ -75,6 +75,7 @@ pub struct ProviderUpsertParams {
     pub tags: Option<Vec<String>>,
     pub note: Option<String>,
     pub source_provider_id: Option<i64>,
+    pub bridge_type: Option<String>,
 }
 
 fn parse_reset_time_hms(input: &str) -> Option<(u8, u8, u8)> {
@@ -315,6 +316,7 @@ pub struct ProviderSummary {
     pub oauth_expires_at: Option<i64>,
     pub oauth_last_error: Option<String>,
     pub source_provider_id: Option<i64>,
+    pub bridge_type: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -335,6 +337,8 @@ pub(crate) struct ProviderForGateway {
     pub auth_mode: String,
     pub oauth_provider_type: Option<String>,
     pub source_provider_id: Option<i64>,
+    #[allow(dead_code)] // Will be read when failover_loop uses bridge_type for dispatch.
+    pub bridge_type: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -465,6 +469,7 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<ProviderSummary, rusqlite::
         oauth_expires_at: row.get("oauth_expires_at")?,
         oauth_last_error: row.get("oauth_last_error")?,
         source_provider_id: row.get("source_provider_id")?,
+        bridge_type: row.get("bridge_type").unwrap_or(None),
     })
 }
 
@@ -511,7 +516,8 @@ SELECT
   oauth_email,
   oauth_expires_at,
   oauth_last_error,
-  source_provider_id
+  source_provider_id,
+  bridge_type
 FROM providers
 WHERE id = ?1
 "#,
@@ -735,7 +741,8 @@ SELECT
   oauth_email,
   oauth_expires_at,
   oauth_last_error,
-  source_provider_id
+  source_provider_id,
+  bridge_type
 FROM providers
 WHERE cli_key = ?1
 ORDER BY sort_order ASC, id DESC
@@ -795,6 +802,7 @@ fn map_gateway_provider_row(
             .unwrap_or_else(|| "api_key".to_string()),
         oauth_provider_type: row.get("oauth_provider_type")?,
         source_provider_id: row.get("source_provider_id")?,
+        bridge_type: row.get("bridge_type").unwrap_or(None),
     })
 }
 
@@ -824,7 +832,8 @@ SELECT
   p.limit_total_usd,
   p.auth_mode,
   p.oauth_provider_type,
-  p.source_provider_id
+  p.source_provider_id,
+  p.bridge_type
 FROM sort_mode_providers mp
 JOIN providers p ON p.id = mp.provider_id
 WHERE mp.mode_id = ?1
@@ -874,7 +883,8 @@ SELECT
   limit_total_usd,
   auth_mode,
   oauth_provider_type,
-  source_provider_id
+  source_provider_id,
+  bridge_type
 FROM providers
 WHERE cli_key = ?1
   AND enabled = 1
@@ -982,7 +992,8 @@ SELECT
   limit_total_usd,
   auth_mode,
   oauth_provider_type,
-  source_provider_id
+  source_provider_id,
+  bridge_type
 FROM providers
 WHERE id = ?1 AND enabled = 1 AND source_provider_id IS NULL AND cli_key = 'codex'
 "#,
@@ -1032,6 +1043,7 @@ pub fn upsert(
         tags,
         note,
         source_provider_id,
+        bridge_type,
     } = input;
     let cli_key = cli_key.trim();
     validate_cli_key(cli_key)?;
@@ -1205,9 +1217,10 @@ INSERT INTO providers(
   tags_json,
   note,
   source_provider_id,
+  bridge_type,
   created_at,
   updated_at
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '{}', '{}', ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '{}', '{}', ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)
 "#,
                 params![
                     cli_key,
@@ -1232,6 +1245,7 @@ INSERT INTO providers(
                     tags_json_value,
                     note_value,
                     source_provider_id,
+                    bridge_type,
                     now,
                     now
                 ],
@@ -1392,8 +1406,9 @@ SET
   tags_json = ?18,
   note = ?19,
   source_provider_id = ?20,
-  updated_at = ?21
-WHERE id = ?22
+  bridge_type = ?21,
+  updated_at = ?22
+WHERE id = ?23
 "#,
                 params![
                     name,
@@ -1416,6 +1431,7 @@ WHERE id = ?22
                     next_tags_json,
                     next_note,
                     source_provider_id,
+                    bridge_type,
                     now,
                     id
                 ],

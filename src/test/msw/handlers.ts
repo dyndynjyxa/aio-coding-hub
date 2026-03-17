@@ -174,7 +174,9 @@ export const handlers = [
       oauth_email: existing?.oauth_email ?? null,
       oauth_expires_at: existing?.oauth_expires_at ?? null,
       oauth_last_error: existing?.oauth_last_error ?? null,
-      source_provider_id: typeof input.sourceProviderId === "number" ? input.sourceProviderId : null,
+      source_provider_id:
+        typeof input.sourceProviderId === "number" ? input.sourceProviderId : null,
+      bridge_type: typeof input.bridgeType === "string" ? input.bridgeType : null,
     };
 
     setProvidersState(

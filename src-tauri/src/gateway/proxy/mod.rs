@@ -3,7 +3,6 @@
 mod abort_guard;
 mod caches;
 mod cli_proxy_guard;
-pub(in crate::gateway) mod cx2cc;
 mod error_code;
 mod errors;
 mod failover;
@@ -13,6 +12,7 @@ mod handler;
 mod http_util;
 mod logging;
 mod model_rewrite;
+pub(in crate::gateway) mod protocol_bridge;
 pub(in crate::gateway) mod provider_router;
 mod request_context;
 mod request_end;

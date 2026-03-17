@@ -122,6 +122,8 @@ export type ProviderSummary = {
   oauth_email: string | null;
   oauth_expires_at: number | null;
   oauth_last_error: string | null;
+  source_provider_id: number | null;
+  bridge_type: string | null;
 };
 export type ProviderUpsertInput = {
   providerId: number | null;
@@ -144,6 +146,8 @@ export type ProviderUpsertInput = {
   limitTotalUsd: number | null;
   tags: string[] | null;
   note: string | null;
+  sourceProviderId: number | null;
+  bridgeType: string | null;
 };
 /**
  * Encapsulates all fields for the `settings_set` command.

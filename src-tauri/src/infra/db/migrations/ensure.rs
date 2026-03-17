@@ -17,6 +17,7 @@ pub(super) fn apply_ensure_patches(conn: &mut Connection) -> crate::shared::erro
     ensure_provider_tags(conn)?;
     ensure_provider_note(conn)?;
     ensure_provider_source_provider_id(conn)?;
+    ensure_provider_bridge_type(conn)?;
     Ok(())
 }
 
@@ -733,6 +734,36 @@ fn ensure_provider_source_provider_id(conn: &mut Connection) -> Result<(), Strin
             "ALTER TABLE providers ADD COLUMN source_provider_id INTEGER DEFAULT NULL REFERENCES providers(id) ON DELETE SET NULL;",
         )
         .map_err(|e| format!("failed to ensure providers source_provider_id column: {e}"))?;
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// ensure_provider_bridge_type (protocol bridge type identifier)
+// ---------------------------------------------------------------------------
+
+fn ensure_provider_bridge_type(conn: &mut Connection) -> Result<(), String> {
+    let has_providers_table: bool = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'providers' LIMIT 1",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+
+    if !has_providers_table {
+        return Ok(());
+    }
+
+    if !column_exists(conn, "providers", "bridge_type")? {
+        conn.execute_batch("ALTER TABLE providers ADD COLUMN bridge_type TEXT DEFAULT NULL;")
+            .map_err(|e| format!("failed to ensure providers bridge_type column: {e}"))?;
+
+        // Back-fill existing CX2CC providers.
+        conn.execute_batch(
+            "UPDATE providers SET bridge_type = 'cx2cc' WHERE source_provider_id IS NOT NULL AND bridge_type IS NULL;",
+        )
+        .map_err(|e| format!("failed to back-fill bridge_type for cx2cc providers: {e}"))?;
     }
     Ok(())
 }

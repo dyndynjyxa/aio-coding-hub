@@ -32,6 +32,7 @@ fn provider_for_base_url_test(
         auth_mode: auth_mode.to_string(),
         oauth_provider_type: oauth_provider_type.map(str::to_string),
         source_provider_id: None,
+        bridge_type: None,
     }
 }
 

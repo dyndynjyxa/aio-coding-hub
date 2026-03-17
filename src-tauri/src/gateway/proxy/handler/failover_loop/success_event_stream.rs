@@ -1,7 +1,7 @@
 //! Usage: Handle successful event-stream upstream responses inside `failover_loop::run`.
 
-use super::super::super::cx2cc;
 use super::super::super::gemini_oauth;
+use super::super::super::protocol_bridge;
 use super::*;
 
 #[allow(clippy::too_many_arguments)]
@@ -298,7 +298,7 @@ pub(super) async fn handle_success_event_stream(
                     GunzipStream::new(FirstChunkStream::new(first_chunk, resp.bytes_stream()));
                 let upstream =
                     gemini_oauth::GeminiOAuthSseStream::new(upstream, gemini_oauth_response_mode);
-                let upstream = cx2cc::streaming::CX2CCSseStream::new(
+                let upstream = protocol_bridge::stream::BridgeStream::for_cx2cc(
                     upstream,
                     cx2cc_active,
                     common.requested_model.clone(),
@@ -329,7 +329,7 @@ pub(super) async fn handle_success_event_stream(
                 let upstream = FirstChunkStream::new(first_chunk, resp.bytes_stream());
                 let upstream =
                     gemini_oauth::GeminiOAuthSseStream::new(upstream, gemini_oauth_response_mode);
-                let upstream = cx2cc::streaming::CX2CCSseStream::new(
+                let upstream = protocol_bridge::stream::BridgeStream::for_cx2cc(
                     upstream,
                     cx2cc_active,
                     common.requested_model.clone(),
@@ -361,7 +361,7 @@ pub(super) async fn handle_success_event_stream(
                     GunzipStream::new(FirstChunkStream::new(first_chunk, resp.bytes_stream()));
                 let upstream =
                     gemini_oauth::GeminiOAuthSseStream::new(upstream, gemini_oauth_response_mode);
-                let upstream = cx2cc::streaming::CX2CCSseStream::new(
+                let upstream = protocol_bridge::stream::BridgeStream::for_cx2cc(
                     upstream,
                     cx2cc_active,
                     common.requested_model.clone(),
@@ -387,7 +387,7 @@ pub(super) async fn handle_success_event_stream(
                 let upstream = FirstChunkStream::new(first_chunk, resp.bytes_stream());
                 let upstream =
                     gemini_oauth::GeminiOAuthSseStream::new(upstream, gemini_oauth_response_mode);
-                let upstream = cx2cc::streaming::CX2CCSseStream::new(
+                let upstream = protocol_bridge::stream::BridgeStream::for_cx2cc(
                     upstream,
                     cx2cc_active,
                     common.requested_model.clone(),

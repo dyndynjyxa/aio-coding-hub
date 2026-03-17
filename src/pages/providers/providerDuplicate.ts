@@ -21,6 +21,7 @@ export type ProviderEditorInitialValues = {
   tags: string[];
   note: string;
   source_provider_id: number | null;
+  bridge_type: string | null;
 };
 
 function normalizeProviderName(name: string) {
@@ -75,5 +76,6 @@ export function buildDuplicatedProviderInitialValues(
     tags: [...(provider.tags ?? [])],
     note: provider.note ?? "",
     source_provider_id: provider.source_provider_id ?? null,
+    bridge_type: provider.bridge_type ?? null,
   };
 }

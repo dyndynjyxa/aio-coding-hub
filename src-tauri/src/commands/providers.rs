@@ -41,6 +41,7 @@ pub(crate) struct ProviderUpsertInput {
     pub tags: Option<Vec<String>>,
     pub note: Option<String>,
     pub source_provider_id: Option<i64>,
+    pub bridge_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -131,6 +132,7 @@ pub(crate) async fn provider_upsert(
         tags,
         note,
         source_provider_id,
+        bridge_type,
     } = input;
 
     let is_create = provider_id.is_none();
@@ -175,6 +177,7 @@ pub(crate) async fn provider_upsert(
                 tags,
                 note,
                 source_provider_id,
+                bridge_type,
             },
         )?;
 
@@ -1187,6 +1190,7 @@ mod tests {
             oauth_expires_at: None,
             oauth_last_error: None,
             source_provider_id: None,
+            bridge_type: None,
         };
 
         assert_eq!(
@@ -1249,6 +1253,7 @@ mod tests {
             oauth_expires_at: None,
             oauth_last_error: None,
             source_provider_id: None,
+            bridge_type: None,
         };
 
         let mut next = previous.clone();

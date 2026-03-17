@@ -434,6 +434,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
         note: values.note,
         ...(cliKey === "claude" && authMode !== "oauth" ? { claude_models: claudeModels } : {}),
         source_provider_id: isCx2cc ? sourceProviderId : null,
+        bridge_type: isCx2cc ? "cx2cc" : null,
       });
 
       if (!saved) {

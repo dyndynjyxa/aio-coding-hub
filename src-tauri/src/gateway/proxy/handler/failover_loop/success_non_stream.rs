@@ -1,6 +1,6 @@
 //! Usage: Handle successful non-SSE upstream responses inside `failover_loop::run`.
 
-use super::super::super::{cx2cc, gemini_oauth, provider_router, GatewayErrorCode};
+use super::super::super::{gemini_oauth, protocol_bridge, provider_router, GatewayErrorCode};
 use super::*;
 use crate::shared::mutex_ext::MutexExt;
 
@@ -15,7 +15,7 @@ fn buffer_cx2cc_event_stream_as_json(
         return Ok(body_bytes);
     }
 
-    let response = cx2cc::streaming::aggregate_responses_event_stream(body_bytes.as_ref())?;
+    let response = protocol_bridge::stream::aggregate_responses_event_stream(body_bytes.as_ref())?;
     let encoded = serde_json::to_vec(&response)
         .map_err(|err| format!("failed to serialize aggregated response: {err}"))?;
 
@@ -178,14 +178,20 @@ fn translate_cx2cc_non_stream_body(
     let openai_body: serde_json::Value = serde_json::from_slice(body_bytes.as_ref())
         .map_err(|err| format!("failed to parse cx2cc response JSON: {err}"))?;
 
+    let bridge = protocol_bridge::get_bridge("cx2cc")
+        .ok_or_else(|| "cx2cc bridge not registered".to_string())?;
+    let bridge_ctx = protocol_bridge::BridgeContext {
+        claude_models: crate::domain::providers::ClaudeModels::default(),
+        requested_model: requested_model.filter(|m| !m.is_empty()).map(String::from),
+        mapped_model: None,
+        stream_requested: anthropic_stream_requested,
+        is_chatgpt_backend: false,
+    };
+
     if anthropic_stream_requested {
-        let sse_body = match requested_model.filter(|model| !model.is_empty()) {
-            Some(model) => cx2cc::streaming::responses_json_to_anthropic_sse_with_model_override(
-                &openai_body,
-                Some(model),
-            )?,
-            None => cx2cc::streaming::responses_json_to_anthropic_sse(&openai_body)?,
-        };
+        let sse_body = bridge
+            .translate_response_to_sse(openai_body, &bridge_ctx)
+            .map_err(|e| e.to_string())?;
         response_headers.remove(header::CONTENT_LENGTH);
         response_headers.remove(header::CONTENT_ENCODING);
         response_headers.insert(
@@ -195,12 +201,9 @@ fn translate_cx2cc_non_stream_body(
         return Ok(sse_body);
     }
 
-    let anthropic_body = match requested_model.filter(|model| !model.is_empty()) {
-        Some(model) => {
-            cx2cc::transform::responses_to_anthropic_with_model_override(openai_body, Some(model))?
-        }
-        None => cx2cc::transform::responses_to_anthropic(openai_body)?,
-    };
+    let anthropic_body = bridge
+        .translate_response(openai_body, &bridge_ctx)
+        .map_err(|e| e.to_string())?;
     let encoded = serde_json::to_vec(&anthropic_body)
         .map_err(|err| format!("failed to serialize anthropic response JSON: {err}"))?;
     response_headers.remove(header::CONTENT_LENGTH);
