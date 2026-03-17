@@ -1,5 +1,6 @@
 //! Usage: Handle successful event-stream upstream responses inside `failover_loop::run`.
 
+use super::super::super::cx2cc;
 use super::super::super::gemini_oauth;
 use super::*;
 
@@ -35,6 +36,8 @@ pub(super) async fn handle_success_event_stream(
         attempt_started,
         circuit_before,
         gemini_oauth_response_mode,
+        cx2cc_active,
+        anthropic_stream_requested: _,
     } = attempt_ctx;
     let selection_method = dc::selection_method(provider_index, retry_index, session_reuse);
     let reason_code = dc::success_reason_code(provider_index, retry_index);
@@ -50,6 +53,23 @@ pub(super) async fn handle_success_event_stream(
 
     if is_event_stream(&response_headers) {
         strip_hop_headers(&mut response_headers);
+        tracing::info!(
+            trace_id = %common.trace_id,
+            provider_id,
+            cx2cc_active,
+            "handling successful upstream event-stream response"
+        );
+        if cx2cc_active {
+            emit_gateway_log(
+                &common.state.app,
+                "info",
+                "CX2CC_SUCCESS_EVENT_STREAM",
+                format!(
+                    "[CX2CC] handling successful upstream event-stream response trace_id={} provider_id={}",
+                    common.trace_id, provider_id
+                ),
+            );
+        }
 
         let mut resp = resp;
 
@@ -278,6 +298,11 @@ pub(super) async fn handle_success_event_stream(
                     GunzipStream::new(FirstChunkStream::new(first_chunk, resp.bytes_stream()));
                 let upstream =
                     gemini_oauth::GeminiOAuthSseStream::new(upstream, gemini_oauth_response_mode);
+                let upstream = cx2cc::streaming::CX2CCSseStream::new(
+                    upstream,
+                    cx2cc_active,
+                    common.requested_model.clone(),
+                );
                 let upstream = response_fixer::ResponseFixerStream::new(
                     upstream,
                     response_fixer_stream_config,
@@ -304,6 +329,11 @@ pub(super) async fn handle_success_event_stream(
                 let upstream = FirstChunkStream::new(first_chunk, resp.bytes_stream());
                 let upstream =
                     gemini_oauth::GeminiOAuthSseStream::new(upstream, gemini_oauth_response_mode);
+                let upstream = cx2cc::streaming::CX2CCSseStream::new(
+                    upstream,
+                    cx2cc_active,
+                    common.requested_model.clone(),
+                );
                 let upstream = response_fixer::ResponseFixerStream::new(
                     upstream,
                     response_fixer_stream_config,
@@ -331,6 +361,11 @@ pub(super) async fn handle_success_event_stream(
                     GunzipStream::new(FirstChunkStream::new(first_chunk, resp.bytes_stream()));
                 let upstream =
                     gemini_oauth::GeminiOAuthSseStream::new(upstream, gemini_oauth_response_mode);
+                let upstream = cx2cc::streaming::CX2CCSseStream::new(
+                    upstream,
+                    cx2cc_active,
+                    common.requested_model.clone(),
+                );
                 if use_sse_relay {
                     spawn_usage_sse_relay_body(
                         upstream,
@@ -352,6 +387,11 @@ pub(super) async fn handle_success_event_stream(
                 let upstream = FirstChunkStream::new(first_chunk, resp.bytes_stream());
                 let upstream =
                     gemini_oauth::GeminiOAuthSseStream::new(upstream, gemini_oauth_response_mode);
+                let upstream = cx2cc::streaming::CX2CCSseStream::new(
+                    upstream,
+                    cx2cc_active,
+                    common.requested_model.clone(),
+                );
                 if use_sse_relay {
                     spawn_usage_sse_relay_body(
                         upstream,

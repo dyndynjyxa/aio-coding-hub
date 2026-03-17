@@ -22,7 +22,9 @@ use super::context::{
 };
 use super::thinking_signature_rectifier_400;
 use super::{emit_attempt_event_and_log, AttemptCircuitFields};
-use super::{emit_request_event_and_enqueue_request_log, RequestEndArgs, RequestEndDeps};
+use super::{
+    emit_gateway_log, emit_request_event_and_enqueue_request_log, RequestEndArgs, RequestEndDeps,
+};
 use crate::circuit_breaker;
 use crate::gateway::events::decision_chain as dc;
 use crate::gateway::events::FailoverAttempt;
@@ -127,6 +129,7 @@ pub(super) async fn handle_non_success_response(
     if !is_count_tokens
         && ctx.cli_key == "claude"
         && status.as_u16() == 400
+        && !attempt_ctx.cx2cc_active
         && (enable_thinking_signature_rectifier || enable_thinking_budget_rectifier)
     {
         return thinking_signature_rectifier_400::handle_thinking_rectifiers_400(
@@ -167,6 +170,7 @@ pub(super) async fn handle_non_success_response(
         attempt_started_ms,
         attempt_started,
         circuit_before,
+        cx2cc_active,
         ..
     } = attempt_ctx;
 
@@ -216,6 +220,22 @@ pub(super) async fn handle_non_success_response(
                     &mut headers_for_scan,
                     MAX_NON_SSE_BODY_BYTES,
                 );
+                // CX2CC: log upstream error body to console for debugging.
+                if cx2cc_active && retry_index == 1 {
+                    let preview = String::from_utf8_lossy(&body_for_scan);
+                    let truncated: String = preview.chars().take(500).collect();
+                    emit_gateway_log(
+                        &state.app,
+                        "warn",
+                        "CX2CC_UPSTREAM_ERROR",
+                        format!(
+                            "[CX2CC] upstream {}: {} (provider={})",
+                            status.as_u16(),
+                            truncated,
+                            provider_name_base,
+                        ),
+                    );
+                }
                 if status.as_u16() == 429 {
                     matched_429_concurrency_limit =
                         upstream_client_error_rules::match_429_concurrency_limit(

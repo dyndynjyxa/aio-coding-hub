@@ -40,6 +40,7 @@ pub(crate) struct ProviderUpsertInput {
     pub limit_total_usd: Option<f64>,
     pub tags: Option<Vec<String>>,
     pub note: Option<String>,
+    pub source_provider_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -128,6 +129,7 @@ pub(crate) async fn provider_upsert(
         limit_total_usd,
         tags,
         note,
+        source_provider_id,
     } = input;
 
     let is_create = provider_id.is_none();
@@ -171,6 +173,7 @@ pub(crate) async fn provider_upsert(
                 limit_total_usd,
                 tags,
                 note,
+                source_provider_id,
             },
         )?;
 
@@ -1182,6 +1185,7 @@ mod tests {
             oauth_email: None,
             oauth_expires_at: None,
             oauth_last_error: None,
+            source_provider_id: None,
         };
 
         assert_eq!(
@@ -1243,6 +1247,7 @@ mod tests {
             oauth_email: None,
             oauth_expires_at: None,
             oauth_last_error: None,
+            source_provider_id: None,
         };
 
         let mut next = previous.clone();

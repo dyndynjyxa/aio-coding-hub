@@ -68,7 +68,7 @@ export type GatewayAttemptEvent = {
 };
 
 export type GatewayLogEvent = {
-  level: "info" | "warn" | "error";
+  level: "debug" | "info" | "warn" | "error";
   error_code: string;
   message: string;
   requested_port: number;
@@ -92,8 +92,8 @@ export type GatewayCircuitEvent = {
   ts: number;
 };
 
-function normalizeLogLevel(level: unknown): "info" | "warn" | "error" {
-  if (level === "warn" || level === "error" || level === "info") return level;
+function normalizeLogLevel(level: unknown): "debug" | "info" | "warn" | "error" {
+  if (level === "debug" || level === "info" || level === "warn" || level === "error") return level;
   return "info";
 }
 
@@ -259,6 +259,8 @@ export async function listenGatewayEvents(): Promise<() => void> {
 
   const logSub = subscribeGatewayEvent<GatewayLogEvent>(gatewayEventNames.log, (payload) => {
     if (!payload) return;
+    const level = normalizeLogLevel(payload.level);
+    if (!shouldLogToConsole(level)) return;
 
     const title =
       payload.error_code === GatewayErrorCodes.PORT_IN_USE
@@ -266,7 +268,7 @@ export async function listenGatewayEvents(): Promise<() => void> {
         : `网关日志：${payload.error_code}`;
 
     logToConsole(
-      normalizeLogLevel(payload.level),
+      level,
       title,
       {
         error_code: payload.error_code,

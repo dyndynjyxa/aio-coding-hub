@@ -74,6 +74,7 @@ pub struct ProviderUpsertParams {
     pub limit_total_usd: Option<f64>,
     pub tags: Option<Vec<String>>,
     pub note: Option<String>,
+    pub source_provider_id: Option<i64>,
 }
 
 fn parse_reset_time_hms(input: &str) -> Option<(u8, u8, u8)> {
@@ -313,6 +314,7 @@ pub struct ProviderSummary {
     pub oauth_email: Option<String>,
     pub oauth_expires_at: Option<i64>,
     pub oauth_last_error: Option<String>,
+    pub source_provider_id: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -332,6 +334,7 @@ pub(crate) struct ProviderForGateway {
     pub limit_total_usd: Option<f64>,
     pub auth_mode: String,
     pub oauth_provider_type: Option<String>,
+    pub source_provider_id: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -461,6 +464,7 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<ProviderSummary, rusqlite::
         oauth_email: row.get("oauth_email")?,
         oauth_expires_at: row.get("oauth_expires_at")?,
         oauth_last_error: row.get("oauth_last_error")?,
+        source_provider_id: row.get("source_provider_id")?,
     })
 }
 
@@ -506,7 +510,8 @@ SELECT
   oauth_provider_type,
   oauth_email,
   oauth_expires_at,
-  oauth_last_error
+  oauth_last_error,
+  source_provider_id
 FROM providers
 WHERE id = ?1
 "#,
@@ -729,7 +734,8 @@ SELECT
   oauth_provider_type,
   oauth_email,
   oauth_expires_at,
-  oauth_last_error
+  oauth_last_error,
+  source_provider_id
 FROM providers
 WHERE cli_key = ?1
 ORDER BY sort_order ASC, id DESC
@@ -788,6 +794,7 @@ fn map_gateway_provider_row(
             .get::<_, Option<String>>("auth_mode")?
             .unwrap_or_else(|| "api_key".to_string()),
         oauth_provider_type: row.get("oauth_provider_type")?,
+        source_provider_id: row.get("source_provider_id")?,
     })
 }
 
@@ -816,7 +823,8 @@ SELECT
   p.limit_monthly_usd,
   p.limit_total_usd,
   p.auth_mode,
-  p.oauth_provider_type
+  p.oauth_provider_type,
+  p.source_provider_id
 FROM sort_mode_providers mp
 JOIN providers p ON p.id = mp.provider_id
 WHERE mp.mode_id = ?1
@@ -865,7 +873,8 @@ SELECT
   limit_monthly_usd,
   limit_total_usd,
   auth_mode,
-  oauth_provider_type
+  oauth_provider_type,
+  source_provider_id
 FROM providers
 WHERE cli_key = ?1
   AND enabled = 1
@@ -935,6 +944,59 @@ pub(crate) fn list_enabled_for_gateway_in_mode(
     }
 }
 
+/// Resolve a source provider by ID for CX2CC chaining.
+pub(crate) fn get_source_provider_for_gateway(
+    db: &db::Db,
+    source_provider_id: i64,
+) -> crate::shared::error::AppResult<(ProviderForGateway, String)> {
+    let conn = db.open_connection()?;
+    let cli_key_owned = conn
+        .query_row(
+            "SELECT cli_key FROM providers WHERE id = ?1",
+            params![source_provider_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| db_err!("failed to query source provider cli_key: {e}"))?
+        .ok_or_else(|| {
+            crate::shared::error::AppError::from("DB_NOT_FOUND: source provider not found")
+        })?;
+
+    let provider = conn
+        .query_row(
+            r#"
+SELECT
+  id,
+  name,
+  base_url,
+  base_urls_json,
+  base_url_mode,
+  api_key_plaintext,
+  claude_models_json,
+  limit_5h_usd,
+  limit_daily_usd,
+  daily_reset_mode,
+  daily_reset_time,
+  limit_weekly_usd,
+  limit_monthly_usd,
+  limit_total_usd,
+  auth_mode,
+  oauth_provider_type,
+  source_provider_id
+FROM providers
+WHERE id = ?1
+"#,
+            params![source_provider_id],
+            |row| map_gateway_provider_row(row, &cli_key_owned),
+        )
+        .optional()
+        .map_err(|e| db_err!("failed to query source provider: {e}"))?
+        .ok_or_else(|| {
+            crate::shared::error::AppError::from("DB_NOT_FOUND: source provider not found")
+        })?;
+    Ok((provider, cli_key_owned))
+}
+
 fn next_sort_order(conn: &Connection, cli_key: &str) -> crate::shared::error::AppResult<i64> {
     conn.query_row(
         "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM providers WHERE cli_key = ?1",
@@ -969,6 +1031,7 @@ pub fn upsert(
         limit_total_usd,
         tags,
         note,
+        source_provider_id,
     } = input;
     let cli_key = cli_key.trim();
     validate_cli_key(cli_key)?;
@@ -983,8 +1046,10 @@ pub fn upsert(
     let requested_auth_mode = auth_mode.unwrap_or(ProviderAuthMode::ApiKey);
     let is_oauth = requested_auth_mode == ProviderAuthMode::Oauth;
 
-    let base_urls = if is_oauth {
-        // OAuth providers don't need base URLs — the adapter knows the endpoint.
+    let is_cx2cc = source_provider_id.is_some();
+
+    let base_urls = if is_oauth || is_cx2cc {
+        // OAuth and CX2CC providers don't need base URLs — inherited from source/adapter.
         let filtered: Vec<String> = base_urls
             .into_iter()
             .map(|s| s.trim().to_string())
@@ -1023,7 +1088,7 @@ pub fn upsert(
     match provider_id {
         None => {
             let priority = priority.unwrap_or(DEFAULT_PRIORITY);
-            let api_key = match is_oauth {
+            let api_key = match is_oauth || is_cx2cc {
                 true => api_key.unwrap_or(""),
                 false => {
                     api_key.ok_or_else(|| "SEC_INVALID_INPUT: api_key is required".to_string())?
@@ -1086,9 +1151,10 @@ INSERT INTO providers(
   limit_total_usd,
   tags_json,
   note,
+  source_provider_id,
   created_at,
   updated_at
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '{}', '{}', ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '{}', '{}', ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
 "#,
                 params![
                     cli_key,
@@ -1112,6 +1178,7 @@ INSERT INTO providers(
                     limit_total_usd,
                     tags_json_value,
                     note_value,
+                    source_provider_id,
                     now,
                     now
                 ],
@@ -1181,7 +1248,7 @@ INSERT INTO providers(
             let next_is_oauth = next_auth_mode == ProviderAuthMode::Oauth.as_str();
 
             let next_api_key = api_key.unwrap_or(existing_api_key.as_str());
-            if !next_is_oauth && next_api_key.trim().is_empty() {
+            if !next_is_oauth && !is_cx2cc && next_api_key.trim().is_empty() {
                 return Err("SEC_INVALID_INPUT: api_key is required".to_string().into());
             }
             let next_priority = priority.unwrap_or(existing_priority);
@@ -1271,8 +1338,9 @@ SET
   limit_total_usd = ?17,
   tags_json = ?18,
   note = ?19,
-  updated_at = ?20
-WHERE id = ?21
+  source_provider_id = ?20,
+  updated_at = ?21
+WHERE id = ?22
 "#,
                 params![
                     name,
@@ -1294,6 +1362,7 @@ WHERE id = ?21
                     next_limit_total_usd,
                     next_tags_json,
                     next_note,
+                    source_provider_id,
                     now,
                     id
                 ],

@@ -34,6 +34,10 @@ function createSelectedLog(overrides: Partial<RequestLogDetail> = {}): RequestLo
     cache_creation_1h_input_tokens: null,
     usage_json: JSON.stringify({ input_tokens: 10, cache_creation_1h_input_tokens: 999 }),
     requested_model: "claude-3",
+    final_provider_id: 12,
+    final_provider_name: "Claude Bridge",
+    final_provider_source_id: 7,
+    final_provider_source_name: "OpenAI Primary",
     cost_usd: 0.12,
     cost_multiplier: 1.25,
     created_at_ms: null,
@@ -84,6 +88,8 @@ describe("home/RequestLogDetailDialog", () => {
     expect(screen.getByText("/v1/messages")).toBeInTheDocument();
     expect(screen.getByText("GW_STREAM_ABORTED")).toBeInTheDocument();
     expect(screen.getByText(/成本 \$0.12/)).toBeInTheDocument();
+    expect(screen.getByText("Provider Claude Bridge")).toBeInTheDocument();
+    expect(screen.getByText("source: OpenAI Primary")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "复制 trace_id" }));
     await waitFor(() => {

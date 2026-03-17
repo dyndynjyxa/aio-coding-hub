@@ -148,6 +148,65 @@ afterEach(() => {
 });
 
 describe("pages/providers/ProvidersView", () => {
+  it("shows cx2cc source provider name on claude cards", () => {
+    vi.mocked(useProvidersListQuery).mockImplementation((cliKey: any) => {
+      if (cliKey === "codex") {
+        return {
+          data: [
+            {
+              id: 7,
+              cli_key: "codex",
+              name: "OpenAI Primary",
+              enabled: true,
+              base_urls: ["https://codex.example.com"],
+              base_url_mode: "order",
+              cost_multiplier: 1,
+              claude_models: {},
+            },
+          ],
+          isFetching: false,
+          error: null,
+        } as any;
+      }
+
+      return {
+        data: [
+          {
+            id: 2,
+            cli_key: "claude",
+            name: "Claude Bridge",
+            enabled: true,
+            base_urls: [],
+            base_url_mode: "order",
+            cost_multiplier: 1,
+            claude_models: { main_model: "claude-sonnet-4-5" },
+            source_provider_id: 7,
+          },
+        ],
+        isFetching: false,
+        error: null,
+      } as any;
+    });
+
+    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      error: null,
+      refetch: vi.fn().mockResolvedValue({ data: [] }),
+    } as any);
+    vi.mocked(useProviderSetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProviderDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProvidersReorderMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+    } as any);
+    vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+
+    renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
+
+    expect(screen.getByText("source: OpenAI Primary")).toBeInTheDocument();
+  });
+
   it("supports toggling, circuit reset, create/edit/delete, and drag reorder", async () => {
     const providers = [
       {

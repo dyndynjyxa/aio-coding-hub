@@ -2,8 +2,9 @@
 
 use crate::db;
 use crate::shared::error::db_err;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use serde::Deserialize;
+use std::collections::HashMap;
 
 use super::costing::cost_usd_from_femto;
 use super::{RequestLogDetail, RequestLogRouteHop, RequestLogSummary};
@@ -179,6 +180,101 @@ pub(super) fn route_from_attempts(attempts: &[AttemptRow]) -> Vec<RequestLogRout
     out
 }
 
+#[derive(Debug, Clone, Default)]
+struct SourceProviderInfo {
+    source_provider_id: Option<i64>,
+    source_provider_name: Option<String>,
+}
+
+fn normalize_source_provider_name(name: Option<String>) -> Option<String> {
+    name.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+fn load_source_provider_info_map(
+    conn: &Connection,
+    bridge_provider_ids: &[i64],
+) -> crate::shared::error::AppResult<HashMap<i64, SourceProviderInfo>> {
+    let ids: Vec<i64> = bridge_provider_ids
+        .iter()
+        .copied()
+        .filter(|id| *id > 0)
+        .collect();
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let placeholders = crate::db::sql_placeholders(ids.len());
+    let sql = format!(
+        r#"
+SELECT
+  bridge.id,
+  bridge.source_provider_id,
+  source.name
+FROM providers bridge
+LEFT JOIN providers source ON source.id = bridge.source_provider_id
+WHERE bridge.id IN ({placeholders})
+  AND bridge.source_provider_id IS NOT NULL
+"#
+    );
+
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| db_err!("failed to prepare provider source query: {e}"))?;
+    let mut rows = stmt
+        .query(params_from_iter(ids.iter()))
+        .map_err(|e| db_err!("failed to query provider sources: {e}"))?;
+
+    let mut out = HashMap::new();
+    while let Some(row) = rows
+        .next()
+        .map_err(|e| db_err!("failed to read provider source row: {e}"))?
+    {
+        let bridge_id: i64 = row
+            .get(0)
+            .map_err(|e| db_err!("invalid provider source bridge id: {e}"))?;
+        let source_provider_id: Option<i64> = row
+            .get(1)
+            .map_err(|e| db_err!("invalid provider source id: {e}"))?;
+        let source_provider_name: Option<String> = row
+            .get(2)
+            .map_err(|e| db_err!("invalid provider source name: {e}"))?;
+
+        out.insert(
+            bridge_id,
+            SourceProviderInfo {
+                source_provider_id,
+                source_provider_name: normalize_source_provider_name(source_provider_name),
+            },
+        );
+    }
+
+    Ok(out)
+}
+
+fn attach_source_provider_info(
+    conn: &Connection,
+    items: &mut [RequestLogSummary],
+) -> crate::shared::error::AppResult<()> {
+    let ids: Vec<i64> = items.iter().map(|item| item.final_provider_id).collect();
+    let info_by_bridge_id = load_source_provider_info_map(conn, &ids)?;
+
+    for item in items.iter_mut() {
+        if let Some(info) = info_by_bridge_id.get(&item.final_provider_id) {
+            item.final_provider_source_id = info.source_provider_id;
+            item.final_provider_source_name = info.source_provider_name.clone();
+        }
+    }
+
+    Ok(())
+}
+
 fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<RequestLogSummary, rusqlite::Error> {
     let attempts_json: String = row.get("attempts_json")?;
     let attempts = parse_attempts(&attempts_json);
@@ -210,6 +306,8 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<RequestLogSummary, rusqlite
         start_provider_name,
         final_provider_id,
         final_provider_name,
+        final_provider_source_id: None,
+        final_provider_source_name: None,
         route,
         session_reuse,
         input_tokens: row.get("input_tokens")?,
@@ -224,6 +322,58 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<RequestLogSummary, rusqlite
         created_at_ms: row.get("created_at_ms")?,
         created_at: row.get("created_at")?,
     })
+}
+
+fn row_to_detail(row: &rusqlite::Row<'_>) -> Result<RequestLogDetail, rusqlite::Error> {
+    let attempts_json: String = row.get("attempts_json")?;
+    let attempts = parse_attempts(&attempts_json);
+    let (final_provider_id, final_provider_name) = final_provider_from_attempts(&attempts);
+    let cost_usd = cost_usd_from_femto(row.get("cost_usd_femto")?);
+
+    Ok(RequestLogDetail {
+        id: row.get("id")?,
+        trace_id: row.get("trace_id")?,
+        cli_key: row.get("cli_key")?,
+        method: row.get("method")?,
+        path: row.get("path")?,
+        query: row.get("query")?,
+        excluded_from_stats: row.get::<_, i64>("excluded_from_stats").unwrap_or(0) != 0,
+        special_settings_json: row.get("special_settings_json")?,
+        status: row.get("status")?,
+        error_code: row.get("error_code")?,
+        duration_ms: row.get("duration_ms")?,
+        ttfb_ms: row.get("ttfb_ms")?,
+        attempts_json,
+        input_tokens: row.get("input_tokens")?,
+        output_tokens: row.get("output_tokens")?,
+        total_tokens: row.get("total_tokens")?,
+        cache_read_input_tokens: row.get("cache_read_input_tokens")?,
+        cache_creation_input_tokens: row.get("cache_creation_input_tokens")?,
+        cache_creation_5m_input_tokens: row.get("cache_creation_5m_input_tokens")?,
+        cache_creation_1h_input_tokens: row.get("cache_creation_1h_input_tokens")?,
+        usage_json: row.get("usage_json")?,
+        requested_model: row.get("requested_model")?,
+        final_provider_id,
+        final_provider_name,
+        final_provider_source_id: None,
+        final_provider_source_name: None,
+        cost_usd,
+        cost_multiplier: row.get("cost_multiplier")?,
+        created_at_ms: row.get("created_at_ms")?,
+        created_at: row.get("created_at")?,
+    })
+}
+
+fn attach_source_provider_info_to_detail(
+    conn: &Connection,
+    item: &mut RequestLogDetail,
+) -> crate::shared::error::AppResult<()> {
+    let info_by_bridge_id = load_source_provider_info_map(conn, &[item.final_provider_id])?;
+    if let Some(info) = info_by_bridge_id.get(&item.final_provider_id) {
+        item.final_provider_source_id = info.source_provider_id;
+        item.final_provider_source_name = info.source_provider_name.clone();
+    }
+    Ok(())
 }
 
 pub fn list_recent(
@@ -247,6 +397,7 @@ pub fn list_recent(
     for row in rows {
         items.push(row.map_err(|e| db_err!("failed to read request_log row: {e}"))?);
     }
+    attach_source_provider_info(&conn, &mut items)?;
     Ok(items)
 }
 
@@ -272,6 +423,7 @@ pub fn list_recent_all(
     for row in rows {
         items.push(row.map_err(|e| db_err!("failed to read request_log row: {e}"))?);
     }
+    attach_source_provider_info(&conn, &mut items)?;
     Ok(items)
 }
 
@@ -301,6 +453,7 @@ pub fn list_after_id(
     for row in rows {
         items.push(row.map_err(|e| db_err!("failed to read request_log row: {e}"))?);
     }
+    attach_source_provider_info(&conn, &mut items)?;
     Ok(items)
 }
 
@@ -328,6 +481,7 @@ pub fn list_after_id_all(
     for row in rows {
         items.push(row.map_err(|e| db_err!("failed to read request_log row: {e}"))?);
     }
+    attach_source_provider_info(&conn, &mut items)?;
     Ok(items)
 }
 
@@ -337,41 +491,15 @@ pub fn get_by_id(db: &db::Db, log_id: i64) -> crate::shared::error::AppResult<Re
         "SELECT{}FROM request_logs WHERE id = ?1",
         REQUEST_LOG_DETAIL_FIELDS
     );
-    conn.query_row(&sql, params![log_id], |row| {
-        let cost_usd = cost_usd_from_femto(row.get("cost_usd_femto")?);
-
-        Ok(RequestLogDetail {
-            id: row.get("id")?,
-            trace_id: row.get("trace_id")?,
-            cli_key: row.get("cli_key")?,
-            method: row.get("method")?,
-            path: row.get("path")?,
-            query: row.get("query")?,
-            excluded_from_stats: row.get::<_, i64>("excluded_from_stats").unwrap_or(0) != 0,
-            special_settings_json: row.get("special_settings_json")?,
-            status: row.get("status")?,
-            error_code: row.get("error_code")?,
-            duration_ms: row.get("duration_ms")?,
-            ttfb_ms: row.get("ttfb_ms")?,
-            attempts_json: row.get("attempts_json")?,
-            input_tokens: row.get("input_tokens")?,
-            output_tokens: row.get("output_tokens")?,
-            total_tokens: row.get("total_tokens")?,
-            cache_read_input_tokens: row.get("cache_read_input_tokens")?,
-            cache_creation_input_tokens: row.get("cache_creation_input_tokens")?,
-            cache_creation_5m_input_tokens: row.get("cache_creation_5m_input_tokens")?,
-            cache_creation_1h_input_tokens: row.get("cache_creation_1h_input_tokens")?,
-            usage_json: row.get("usage_json")?,
-            requested_model: row.get("requested_model")?,
-            cost_usd,
-            cost_multiplier: row.get("cost_multiplier")?,
-            created_at_ms: row.get("created_at_ms")?,
-            created_at: row.get("created_at")?,
-        })
-    })
-    .optional()
-    .map_err(|e| db_err!("failed to query request_log: {e}"))?
-    .ok_or_else(|| "DB_NOT_FOUND: request_log not found".to_string().into())
+    let mut item = conn
+        .query_row(&sql, params![log_id], row_to_detail)
+        .optional()
+        .map_err(|e| db_err!("failed to query request_log: {e}"))?
+        .ok_or_else(|| {
+            crate::shared::error::AppError::from("DB_NOT_FOUND: request_log not found".to_string())
+        })?;
+    attach_source_provider_info_to_detail(&conn, &mut item)?;
+    Ok(item)
 }
 
 pub fn get_by_trace_id(
@@ -387,48 +515,23 @@ pub fn get_by_trace_id(
         "SELECT{}FROM request_logs WHERE trace_id = ?1",
         REQUEST_LOG_DETAIL_FIELDS
     );
-    conn.query_row(&sql, params![trace_id], |row| {
-        let cost_usd = cost_usd_from_femto(row.get("cost_usd_femto")?);
-
-        Ok(RequestLogDetail {
-            id: row.get("id")?,
-            trace_id: row.get("trace_id")?,
-            cli_key: row.get("cli_key")?,
-            method: row.get("method")?,
-            path: row.get("path")?,
-            query: row.get("query")?,
-            excluded_from_stats: row.get::<_, i64>("excluded_from_stats").unwrap_or(0) != 0,
-            special_settings_json: row.get("special_settings_json")?,
-            status: row.get("status")?,
-            error_code: row.get("error_code")?,
-            duration_ms: row.get("duration_ms")?,
-            ttfb_ms: row.get("ttfb_ms")?,
-            attempts_json: row.get("attempts_json")?,
-            input_tokens: row.get("input_tokens")?,
-            output_tokens: row.get("output_tokens")?,
-            total_tokens: row.get("total_tokens")?,
-            cache_read_input_tokens: row.get("cache_read_input_tokens")?,
-            cache_creation_input_tokens: row.get("cache_creation_input_tokens")?,
-            cache_creation_5m_input_tokens: row.get("cache_creation_5m_input_tokens")?,
-            cache_creation_1h_input_tokens: row.get("cache_creation_1h_input_tokens")?,
-            usage_json: row.get("usage_json")?,
-            requested_model: row.get("requested_model")?,
-            cost_usd,
-            cost_multiplier: row.get("cost_multiplier")?,
-            created_at_ms: row.get("created_at_ms")?,
-            created_at: row.get("created_at")?,
-        })
-    })
-    .optional()
-    .map_err(|e| db_err!("failed to query request_log: {e}"))
+    let mut item = conn
+        .query_row(&sql, params![trace_id], row_to_detail)
+        .optional()
+        .map_err(|e| db_err!("failed to query request_log: {e}"))?;
+    if let Some(detail) = item.as_mut() {
+        attach_source_provider_info_to_detail(&conn, detail)?;
+    }
+    Ok(item)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        final_provider_from_attempts, parse_attempts, route_from_attempts,
-        start_provider_from_attempts,
+        final_provider_from_attempts, load_source_provider_info_map, parse_attempts,
+        route_from_attempts, start_provider_from_attempts,
     };
+    use rusqlite::Connection;
 
     #[test]
     fn route_excludes_skipped_attempts() {
@@ -499,5 +602,32 @@ mod tests {
         assert_eq!(route[0].provider_id, 1);
         assert_eq!(route[0].attempts, 1);
         assert!(route[0].ok);
+    }
+
+    #[test]
+    fn loads_source_provider_names_for_bridge_providers() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+CREATE TABLE providers (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  source_provider_id INTEGER
+);
+INSERT INTO providers (id, name, source_provider_id) VALUES (7, 'OpenAI Primary', NULL);
+INSERT INTO providers (id, name, source_provider_id) VALUES (12, 'Claude Bridge', 7);
+"#,
+        )
+        .unwrap();
+
+        let info = load_source_provider_info_map(&conn, &[12, 99]).unwrap();
+        let bridge = info.get(&12).expect("bridge provider source info");
+
+        assert_eq!(bridge.source_provider_id, Some(7));
+        assert_eq!(
+            bridge.source_provider_name.as_deref(),
+            Some("OpenAI Primary")
+        );
+        assert!(!info.contains_key(&99));
     }
 }

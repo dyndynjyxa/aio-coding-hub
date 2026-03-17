@@ -57,6 +57,8 @@ describe("components/home/HomeRequestLogsPanel", () => {
         start_provider_name: "P1",
         final_provider_id: 1,
         final_provider_name: "P1",
+        final_provider_source_id: 7,
+        final_provider_source_name: "OpenAI Primary",
         route: [
           {
             provider_id: 1,
@@ -102,6 +104,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
     expect(screen.getByText("使用记录（最近 50 条）")).toBeInTheDocument();
     expect(screen.getByText("$0.123456")).toBeInTheDocument();
     expect(screen.getByText("$0.123456").closest("div")?.getAttribute("title")).toBe("$0.123456");
+    expect(screen.queryByText("source: OpenAI Primary")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "刷新" }));
     expect(onRefreshRequestLogs).toHaveBeenCalled();

@@ -30,6 +30,7 @@ use request_end_helpers::{
 };
 
 use super::super::{
+    cx2cc,
     errors::{classify_upstream_status, error_response},
     failover::{retry_backoff_delay, select_provider_base_url_for_request, FailoverDecision},
     gemini_oauth,
@@ -53,7 +54,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::gateway::events::{
-    decision_chain as dc, emit_attempt_event, FailoverAttempt, GatewayAttemptEvent,
+    decision_chain as dc, emit_attempt_event, emit_gateway_log, FailoverAttempt,
+    GatewayAttemptEvent,
 };
 use crate::gateway::response_fixer;
 use crate::gateway::streams::{
@@ -422,30 +424,77 @@ fn maybe_inject_codex_chatgpt_headers(headers: &mut HeaderMap, account_id: Optio
     }
 }
 
-fn maybe_enforce_codex_chatgpt_store_false(
-    forwarded_path: &str,
+const CODEX_CHATGPT_RESPONSES_ALLOWED_KEYS: &[&str] = &[
+    "model",
+    "instructions",
+    "input",
+    "tools",
+    "tool_choice",
+    "parallel_tool_calls",
+    "store",
+    "stream",
+    "include",
+    "reasoning",
+    "service_tier",
+    "prompt_cache_key",
+    "text",
+    "previous_response_id",
+];
+
+fn codex_chatgpt_request_compat_value(root: &serde_json::Value) -> serde_json::Value {
+    let Some(obj) = root.as_object() else {
+        return root.clone();
+    };
+
+    let mut next = serde_json::Map::new();
+    for key in CODEX_CHATGPT_RESPONSES_ALLOWED_KEYS {
+        if let Some(value) = obj.get(*key).cloned() {
+            next.insert((*key).to_string(), value);
+        }
+    }
+    next.insert("stream".to_string(), serde_json::Value::Bool(true));
+    next.insert("store".to_string(), serde_json::Value::Bool(false));
+    serde_json::Value::Object(next)
+}
+
+fn original_anthropic_stream_requested(introspection_json: Option<&serde_json::Value>) -> bool {
+    introspection_json
+        .and_then(|body| body.get("stream"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn maybe_apply_codex_chatgpt_request_compat(
+    forwarded_path: &mut String,
     upstream_body_bytes: &mut Bytes,
     strip_request_content_encoding: &mut bool,
 ) {
-    if forwarded_path != "/responses" {
+    *forwarded_path = normalize_codex_chatgpt_forwarded_path(forwarded_path);
+    if forwarded_path.as_str() != "/responses" {
         return;
     }
-    let Ok(mut root) = serde_json::from_slice::<serde_json::Value>(upstream_body_bytes.as_ref())
-    else {
+    let Ok(root) = serde_json::from_slice::<serde_json::Value>(upstream_body_bytes.as_ref()) else {
         return;
     };
-    let Some(obj) = root.as_object_mut() else {
-        return;
-    };
-    let needs_update = !matches!(obj.get("store"), Some(serde_json::Value::Bool(false)));
-    if !needs_update {
+    let next = codex_chatgpt_request_compat_value(&root);
+    if next == root {
         return;
     }
-    obj.insert("store".to_string(), serde_json::Value::Bool(false));
-    if let Ok(encoded) = serde_json::to_vec(&root) {
+    if let Ok(encoded) = serde_json::to_vec(&next) {
         *upstream_body_bytes = Bytes::from(encoded);
         *strip_request_content_encoding = true;
     }
+}
+
+fn should_apply_claude_model_mapping(cx2cc_active: bool, forwarded_path: &str) -> bool {
+    if !cx2cc_active {
+        return true;
+    }
+
+    !matches!(
+        forwarded_path.trim_end_matches('/'),
+        "/v1/responses" | "/responses"
+    )
 }
 
 pub(super) async fn run(mut input: RequestContext) -> Response {
@@ -492,6 +541,8 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
     let mut skipped_open: usize = 0;
     let mut skipped_cooldown: usize = 0;
     let mut skipped_limits: usize = 0;
+    let anthropic_stream_requested =
+        original_anthropic_stream_requested(input.introspection_json.as_ref());
 
     for provider in input.providers.iter() {
         if providers_tried >= max_providers_to_try {
@@ -596,7 +647,11 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
         // NOTE: model whitelist filtering removed (Claude uses slot-based model mapping).
 
         // Resolve effective credential (API key or OAuth token with inline refresh).
-        let mut effective_credential =
+        // CX2CC providers have no own credential — it will be overridden by the
+        // source provider's credential in the CX2CC branch below.
+        let mut effective_credential = if provider.source_provider_id.is_some() {
+            String::new()
+        } else {
             match resolve_effective_credential(&input.state, &input.cli_key, provider).await {
                 Ok(value) => value,
                 Err(err) => {
@@ -635,7 +690,8 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
                     });
                     continue;
                 }
-            };
+            }
+        };
 
         // OAuth providers get at least 2 retry attempts (to handle 401 reactive refresh).
         let provider_max_attempts = if provider.auth_mode == "oauth" {
@@ -701,9 +757,9 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
         );
 
         // Detect Codex ChatGPT backend for special handling.
-        let use_codex_chatgpt_backend =
+        let mut use_codex_chatgpt_backend =
             is_codex_chatgpt_backend(&input.cli_key, provider, &provider_base_url_base);
-        let codex_chatgpt_account_id = if use_codex_chatgpt_backend {
+        let mut codex_chatgpt_account_id = if use_codex_chatgpt_backend {
             // Extract ChatGPT account ID from id_token JWT.
             // The official Codex CLI requires this header for API calls.
             let details = crate::providers::get_oauth_details(&input.state.db, provider.id).ok();
@@ -844,6 +900,293 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
             }
         }
 
+        // CX2CC: translate Anthropic → OpenAI Responses API via source provider.
+        let mut cx2cc_active = false;
+        let mut cx2cc_source: Option<(crate::providers::ProviderForGateway, String)> = None;
+        if let Some(source_id) = provider.source_provider_id {
+            match crate::providers::get_source_provider_for_gateway(&input.state.db, source_id) {
+                Ok((source, source_cli_key)) => {
+                    // Resolve source provider credential.
+                    match resolve_effective_credential(&input.state, &source_cli_key, &source).await
+                    {
+                        Ok(source_cred) => {
+                            // Map Claude model → OpenAI model.
+                            let body_val: serde_json::Value =
+                                serde_json::from_slice(&upstream_body_bytes).unwrap_or_default();
+                            let requested_model =
+                                body_val.get("model").and_then(|m| m.as_str()).unwrap_or("");
+                            let openai_model = cx2cc::models::map_claude_to_openai(
+                                requested_model,
+                                &provider.claude_models,
+                            );
+
+                            // Translate request body.
+                            let mut translated_body = body_val.clone();
+                            translated_body["model"] = serde_json::json!(openai_model);
+                            match cx2cc::transform::anthropic_to_responses(translated_body) {
+                                Ok(responses_body) => {
+                                    upstream_body_bytes = serde_json::to_vec(&responses_body)
+                                        .unwrap_or_default()
+                                        .into();
+                                    upstream_forwarded_path = "/v1/responses".to_string();
+                                    upstream_query = None;
+                                    strip_request_content_encoding = true;
+
+                                    // Override base URL and credential with source provider.
+                                    match select_provider_base_url_for_request(
+                                        &input.state,
+                                        &source,
+                                        &source_cli_key,
+                                        input.provider_base_url_ping_cache_ttl_seconds,
+                                    )
+                                    .await
+                                    {
+                                        Ok(url) => provider_base_url_base = url,
+                                        Err(err) => {
+                                            let msg = format!(
+                                                "[CX2CC] source base_url resolution failed: {err} (provider={provider_name_base}, source_id={source_id})"
+                                            );
+                                            tracing::warn!(
+                                                trace_id = %input.trace_id,
+                                                provider_id = provider_id,
+                                                source_provider_id = source_id,
+                                                "cx2cc: source provider base_url resolution failed: {err}"
+                                            );
+                                            emit_gateway_log(
+                                                &input.state.app,
+                                                "warn",
+                                                "CX2CC_BASE_URL_FAILED",
+                                                msg,
+                                            );
+                                            attempts.push(FailoverAttempt {
+                                                provider_id,
+                                                provider_name: provider_name_base.clone(),
+                                                base_url: provider_base_url_display.clone(),
+                                                outcome: "skipped".to_string(),
+                                                status: None,
+                                                provider_index: None,
+                                                retry_index: None,
+                                                session_reuse: None,
+                                                error_category: Some("translation"),
+                                                error_code: Some(
+                                                    GatewayErrorCode::InternalError.as_str(),
+                                                ),
+                                                decision: Some("skip"),
+                                                reason: Some(format!(
+                                                    "cx2cc source base_url failed: {err}"
+                                                )),
+                                                selection_method: Some(
+                                                    dc::SELECTION_METHOD_FILTERED,
+                                                ),
+                                                reason_code: None,
+                                                attempt_started_ms: Some(
+                                                    started.elapsed().as_millis(),
+                                                ),
+                                                attempt_duration_ms: Some(0),
+                                                circuit_state_before: None,
+                                                circuit_state_after: None,
+                                                circuit_failure_count: None,
+                                                circuit_failure_threshold: None,
+                                            });
+                                            continue;
+                                        }
+                                    }
+                                    effective_credential = source_cred;
+                                    cx2cc_active = true;
+                                    cx2cc_source = Some((source.clone(), source_cli_key.clone()));
+
+                                    // Re-detect Codex ChatGPT backend using source provider.
+                                    let cx2cc_is_chatgpt = is_codex_chatgpt_backend(
+                                        &source_cli_key,
+                                        &source,
+                                        &provider_base_url_base,
+                                    );
+                                    if cx2cc_is_chatgpt {
+                                        let details = crate::providers::get_oauth_details(
+                                            &input.state.db,
+                                            source.id,
+                                        )
+                                        .ok();
+                                        codex_chatgpt_account_id =
+                                            details.and_then(|d| {
+                                                parse_codex_chatgpt_account_id(
+                                                    d.oauth_id_token.as_deref(),
+                                                )
+                                                .or_else(|| {
+                                                    parse_codex_chatgpt_account_id(Some(
+                                                        &d.oauth_access_token,
+                                                    ))
+                                                })
+                                            });
+                                        use_codex_chatgpt_backend = true;
+                                    }
+
+                                    tracing::info!(
+                                        trace_id = %input.trace_id,
+                                        provider_id = provider_id,
+                                        source_provider_id = source_id,
+                                        openai_model = %openai_model,
+                                        "cx2cc: request translated Anthropic → OpenAI Responses API"
+                                    );
+                                    emit_gateway_log(
+                                        &input.state.app,
+                                        "info",
+                                        "CX2CC_TRANSLATED",
+                                        format!("[CX2CC] translated → model={openai_model}, provider={provider_name_base}"),
+                                    );
+                                    // DEBUG: dump translated body for troubleshooting.
+                                    {
+                                        let debug_body: serde_json::Value =
+                                            serde_json::from_slice(&upstream_body_bytes)
+                                                .unwrap_or_default();
+                                        let has_instructions =
+                                            debug_body.get("instructions").is_some();
+                                        let instructions_val = debug_body
+                                            .get("instructions")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("<MISSING>");
+                                        let model_val = debug_body
+                                            .get("model")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("<MISSING>");
+                                        let keys: Vec<&str> = debug_body
+                                            .as_object()
+                                            .map(|m| m.keys().map(|k| k.as_str()).collect())
+                                            .unwrap_or_default();
+                                        emit_gateway_log(
+                                            &input.state.app,
+                                            "debug",
+                                            "CX2CC_REQUEST_BODY",
+                                            format!(
+                                                "[CX2CC] keys={keys:?} has_instructions={has_instructions} instructions_len={} model={model_val}",
+                                                instructions_val.len(),
+                                            ),
+                                        );
+                                    }
+                                }
+                                Err(err) => {
+                                    let msg = format!(
+                                        "[CX2CC] request translation failed: {err} (provider={provider_name_base})"
+                                    );
+                                    tracing::warn!(
+                                        trace_id = %input.trace_id,
+                                        provider_id = provider_id,
+                                        "cx2cc: request translation failed: {err}"
+                                    );
+                                    emit_gateway_log(
+                                        &input.state.app,
+                                        "warn",
+                                        "CX2CC_TRANSLATE_FAILED",
+                                        msg,
+                                    );
+                                    attempts.push(FailoverAttempt {
+                                        provider_id,
+                                        provider_name: provider_name_base.clone(),
+                                        base_url: provider_base_url_display.clone(),
+                                        outcome: "skipped".to_string(),
+                                        status: None,
+                                        provider_index: None,
+                                        retry_index: None,
+                                        session_reuse: None,
+                                        error_category: Some("translation"),
+                                        error_code: Some(GatewayErrorCode::InternalError.as_str()),
+                                        decision: Some("skip"),
+                                        reason: Some(format!("cx2cc translation failed: {err}")),
+                                        selection_method: Some(dc::SELECTION_METHOD_FILTERED),
+                                        reason_code: None,
+                                        attempt_started_ms: Some(started.elapsed().as_millis()),
+                                        attempt_duration_ms: Some(0),
+                                        circuit_state_before: None,
+                                        circuit_state_after: None,
+                                        circuit_failure_count: None,
+                                        circuit_failure_threshold: None,
+                                    });
+                                    continue;
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            let msg = format!(
+                                "[CX2CC] source credential resolution failed: {err} (provider={provider_name_base}, source_id={source_id})"
+                            );
+                            tracing::warn!(
+                                trace_id = %input.trace_id,
+                                provider_id = provider_id,
+                                source_provider_id = source_id,
+                                "cx2cc: source provider credential resolution failed: {err}"
+                            );
+                            emit_gateway_log(
+                                &input.state.app,
+                                "warn",
+                                "CX2CC_CREDENTIAL_FAILED",
+                                msg,
+                            );
+                            attempts.push(FailoverAttempt {
+                                provider_id,
+                                provider_name: provider_name_base.clone(),
+                                base_url: provider_base_url_display.clone(),
+                                outcome: "skipped".to_string(),
+                                status: None,
+                                provider_index: None,
+                                retry_index: None,
+                                session_reuse: None,
+                                error_category: Some("auth"),
+                                error_code: Some(GatewayErrorCode::InternalError.as_str()),
+                                decision: Some("skip"),
+                                reason: Some(format!(
+                                    "cx2cc source provider credential failed: {err}"
+                                )),
+                                selection_method: Some(dc::SELECTION_METHOD_FILTERED),
+                                reason_code: None,
+                                attempt_started_ms: Some(started.elapsed().as_millis()),
+                                attempt_duration_ms: Some(0),
+                                circuit_state_before: None,
+                                circuit_state_after: None,
+                                circuit_failure_count: None,
+                                circuit_failure_threshold: None,
+                            });
+                            continue;
+                        }
+                    }
+                }
+                Err(err) => {
+                    let msg = format!(
+                        "[CX2CC] source provider not found: {err} (provider={provider_name_base}, source_id={source_id})"
+                    );
+                    tracing::warn!(
+                        trace_id = %input.trace_id,
+                        provider_id = provider_id,
+                        source_provider_id = source_id,
+                        "cx2cc: source provider not found: {err}"
+                    );
+                    emit_gateway_log(&input.state.app, "warn", "CX2CC_SOURCE_NOT_FOUND", msg);
+                    attempts.push(FailoverAttempt {
+                        provider_id,
+                        provider_name: provider_name_base.clone(),
+                        base_url: provider_base_url_display.clone(),
+                        outcome: "skipped".to_string(),
+                        status: None,
+                        provider_index: None,
+                        retry_index: None,
+                        session_reuse: None,
+                        error_category: Some("config"),
+                        error_code: Some(GatewayErrorCode::InternalError.as_str()),
+                        decision: Some("skip"),
+                        reason: Some(format!("cx2cc source provider not found: {err}")),
+                        selection_method: Some(dc::SELECTION_METHOD_FILTERED),
+                        reason_code: None,
+                        attempt_started_ms: Some(started.elapsed().as_millis()),
+                        attempt_duration_ms: Some(0),
+                        circuit_state_before: None,
+                        circuit_state_after: None,
+                        circuit_failure_count: None,
+                        circuit_failure_threshold: None,
+                    });
+                    continue;
+                }
+            }
+        }
+
         let mut circuit_snapshot = gate_allow.circuit_after;
 
         providers_tried = providers_tried.saturating_add(1);
@@ -860,19 +1203,21 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
             session_reuse,
         };
 
-        claude_model_mapping::apply_if_needed(
-            ctx,
-            provider,
-            provider_ctx,
-            input.requested_model_location,
-            input.introspection_json.as_ref(),
-            claude_model_mapping::UpstreamRequestMut {
-                forwarded_path: &mut upstream_forwarded_path,
-                query: &mut upstream_query,
-                body_bytes: &mut upstream_body_bytes,
-                strip_request_content_encoding: &mut strip_request_content_encoding,
-            },
-        );
+        if should_apply_claude_model_mapping(cx2cc_active, &upstream_forwarded_path) {
+            claude_model_mapping::apply_if_needed(
+                ctx,
+                provider,
+                provider_ctx,
+                input.requested_model_location,
+                input.introspection_json.as_ref(),
+                claude_model_mapping::UpstreamRequestMut {
+                    forwarded_path: &mut upstream_forwarded_path,
+                    query: &mut upstream_query,
+                    body_bytes: &mut upstream_body_bytes,
+                    strip_request_content_encoding: &mut strip_request_content_encoding,
+                },
+            );
+        }
 
         claude_metadata_user_id_injection::apply_if_needed(
             claude_metadata_user_id_injection::ApplyClaudeMetadataUserIdInjectionInput {
@@ -889,10 +1234,8 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
 
         // Codex ChatGPT backend: normalize path and enforce store=false.
         if use_codex_chatgpt_backend {
-            upstream_forwarded_path =
-                normalize_codex_chatgpt_forwarded_path(&upstream_forwarded_path);
-            maybe_enforce_codex_chatgpt_store_false(
-                &upstream_forwarded_path,
+            maybe_apply_codex_chatgpt_request_compat(
+                &mut upstream_forwarded_path,
                 &mut upstream_body_bytes,
                 &mut strip_request_content_encoding,
             );
@@ -910,6 +1253,8 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
                 attempt_started,
                 circuit_before: &circuit_before,
                 gemini_oauth_response_mode,
+                cx2cc_active,
+                anthropic_stream_requested,
             };
 
             let url = match build_target_url(
@@ -1087,9 +1432,41 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
                 send::SendResult::Ok(resp) => {
                     let status = resp.status();
                     let response_headers = resp.headers().clone();
+                    let response_content_type = response_headers
+                        .get(header::CONTENT_TYPE)
+                        .and_then(|value| value.to_str().ok())
+                        .unwrap_or("");
+                    tracing::info!(
+                        trace_id = %input.trace_id,
+                        provider_id = provider_id,
+                        status = status.as_u16(),
+                        content_type = response_content_type,
+                        event_stream = is_event_stream(&response_headers),
+                        cx2cc_active,
+                        anthropic_stream_requested,
+                        "upstream response received"
+                    );
+                    if cx2cc_active {
+                        emit_gateway_log(
+                            &input.state.app,
+                            "info",
+                            "CX2CC_UPSTREAM_RESPONSE",
+                            format!(
+                                "[CX2CC] upstream response received trace_id={} provider_id={} status={} content_type={:?} event_stream={} anthropic_stream_requested={}",
+                                input.trace_id,
+                                provider_id,
+                                status.as_u16(),
+                                response_content_type,
+                                is_event_stream(&response_headers),
+                                anthropic_stream_requested
+                            ),
+                        );
+                    }
 
                     if status.is_success() {
-                        if is_event_stream(&response_headers) {
+                        if is_event_stream(&response_headers)
+                            && !(cx2cc_active && !anthropic_stream_requested)
+                        {
                             let loop_state = LoopState::new(
                                 &mut attempts,
                                 &mut failed_provider_ids,
@@ -1142,39 +1519,60 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
 
                     // OAuth 401 reactive refresh: if we get a 401 on an OAuth provider,
                     // try refreshing the token once and retry.
-                    if status.as_u16() == 401
-                        && provider.auth_mode == "oauth"
-                        && !oauth_reactive_refreshed_once
-                    {
-                        oauth_reactive_refreshed_once = true;
-                        tracing::info!(
-                            provider_id = provider.id,
-                            cli_key = %input.cli_key,
-                            "oauth 401 detected, attempting reactive token refresh"
-                        );
-                        match refresh_oauth_credential_after_401(
-                            &input.state,
-                            &input.cli_key,
-                            provider,
-                        )
-                        .await
-                        {
-                            Ok(refreshed_credential) => {
-                                effective_credential = refreshed_credential;
-                                tracing::info!(
-                                    provider_id = provider.id,
-                                    cli_key = %input.cli_key,
-                                    "oauth 401 reactive refresh succeeded, retrying"
-                                );
-                                continue;
-                            }
-                            Err(err) => {
-                                tracing::warn!(
-                                    provider_id = provider.id,
-                                    cli_key = %input.cli_key,
-                                    "oauth reactive refresh failed: {}",
-                                    err
-                                );
+                    // For CX2CC providers, refresh the source provider's OAuth token instead.
+                    if status.as_u16() == 401 && !oauth_reactive_refreshed_once {
+                        let refresh_target: Option<(&crate::providers::ProviderForGateway, &str)> =
+                            if provider.auth_mode == "oauth" {
+                                Some((provider, &input.cli_key))
+                            } else if cx2cc_active {
+                                cx2cc_source.as_ref().and_then(|(src, src_key)| {
+                                    if src.auth_mode == "oauth" {
+                                        Some((src, src_key.as_str()))
+                                    } else {
+                                        None
+                                    }
+                                })
+                            } else {
+                                None
+                            };
+
+                        if let Some((target_provider, target_cli_key)) = refresh_target {
+                            oauth_reactive_refreshed_once = true;
+                            tracing::info!(
+                                provider_id = provider.id,
+                                target_provider_id = target_provider.id,
+                                cx2cc_active,
+                                cli_key = %target_cli_key,
+                                "oauth 401 detected, attempting reactive token refresh"
+                            );
+                            match refresh_oauth_credential_after_401(
+                                &input.state,
+                                target_cli_key,
+                                target_provider,
+                            )
+                            .await
+                            {
+                                Ok(refreshed_credential) => {
+                                    effective_credential = refreshed_credential;
+                                    tracing::info!(
+                                        provider_id = provider.id,
+                                        target_provider_id = target_provider.id,
+                                        cx2cc_active,
+                                        cli_key = %target_cli_key,
+                                        "oauth 401 reactive refresh succeeded, retrying"
+                                    );
+                                    continue;
+                                }
+                                Err(err) => {
+                                    tracing::warn!(
+                                        provider_id = provider.id,
+                                        target_provider_id = target_provider.id,
+                                        cx2cc_active,
+                                        cli_key = %target_cli_key,
+                                        "oauth reactive refresh failed: {}",
+                                        err
+                                    );
+                                }
                             }
                         }
                     }
@@ -1309,4 +1707,82 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
         verbose_provider_error: input.verbose_provider_error,
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        codex_chatgpt_request_compat_value, maybe_apply_codex_chatgpt_request_compat,
+        should_apply_claude_model_mapping,
+    };
+    use axum::body::Bytes;
+    use serde_json::json;
+
+    #[test]
+    fn skips_claude_model_mapping_for_cx2cc_responses_requests() {
+        assert!(!should_apply_claude_model_mapping(true, "/v1/responses"));
+        assert!(!should_apply_claude_model_mapping(true, "/responses"));
+    }
+
+    #[test]
+    fn keeps_claude_model_mapping_for_non_cx2cc_requests() {
+        assert!(should_apply_claude_model_mapping(false, "/v1/messages"));
+        assert!(should_apply_claude_model_mapping(true, "/v1/messages"));
+    }
+
+    #[test]
+    fn codex_chatgpt_request_compat_filters_unsupported_responses_fields() {
+        let root = json!({
+            "model": "gpt-5",
+            "instructions": "system prompt",
+            "input": [{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}],
+            "stream": true,
+            "max_output_tokens": 1024,
+            "temperature": 0.2,
+            "top_p": 0.9,
+            "store": true,
+        });
+
+        let next = codex_chatgpt_request_compat_value(&root);
+
+        assert_eq!(next["model"], "gpt-5");
+        assert_eq!(next["instructions"], "system prompt");
+        assert_eq!(next["stream"], true);
+        assert_eq!(next["store"], false);
+        assert!(next.get("max_output_tokens").is_none());
+        assert!(next.get("temperature").is_none());
+        assert!(next.get("top_p").is_none());
+    }
+
+    #[test]
+    fn codex_chatgpt_request_compat_rewrites_path_and_body_for_responses() {
+        let mut forwarded_path = "/v1/responses".to_string();
+        let mut upstream_body_bytes = Bytes::from(
+            serde_json::to_vec(&json!({
+                "model": "gpt-5",
+                "instructions": "system prompt",
+                "input": [],
+                "stream": false,
+                "max_output_tokens": 2048,
+                "temperature": 0.3,
+                "store": true,
+            }))
+            .unwrap(),
+        );
+        let mut strip_request_content_encoding = false;
+
+        maybe_apply_codex_chatgpt_request_compat(
+            &mut forwarded_path,
+            &mut upstream_body_bytes,
+            &mut strip_request_content_encoding,
+        );
+
+        let next: serde_json::Value = serde_json::from_slice(&upstream_body_bytes).unwrap();
+        assert_eq!(forwarded_path, "/responses");
+        assert_eq!(next["stream"], true);
+        assert_eq!(next["store"], false);
+        assert!(next.get("max_output_tokens").is_none());
+        assert!(next.get("temperature").is_none());
+        assert!(strip_request_content_encoding);
+    }
 }

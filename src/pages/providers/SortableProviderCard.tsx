@@ -31,6 +31,7 @@ function getOAuthShortWindowLabel(
 
 export type SortableProviderCardProps = {
   provider: ProviderSummary;
+  sourceProviderName?: string | null;
   circuit: GatewayProviderCircuitStatus | null;
   circuitResetting: boolean;
   onToggleEnabled: (provider: ProviderSummary) => void;
@@ -46,6 +47,7 @@ export type SortableProviderCardProps = {
 
 export function SortableProviderCard({
   provider,
+  sourceProviderName = null,
   circuit,
   circuitResetting,
   onToggleEnabled,
@@ -236,6 +238,13 @@ export function SortableProviderCard({
                   <RefreshCw className={cn("h-2.5 w-2.5", limitsLoading && "animate-spin")} />
                   OAuth
                 </button>
+              ) : provider.source_provider_id != null ? (
+                <span
+                  className="inline-flex w-16 shrink-0 items-center justify-center rounded-full px-2 py-0.5 font-mono text-[10px] bg-violet-50 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400"
+                  title="CX2CC 转译模式"
+                >
+                  CX2CC
+                </span>
               ) : (
                 <span
                   className="inline-flex w-16 shrink-0 items-center justify-center rounded-full px-2 py-0.5 font-mono text-[10px] bg-sky-50 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400"
@@ -272,6 +281,13 @@ export function SortableProviderCard({
                     </span>
                   ) : null}
                 </>
+              ) : provider.source_provider_id != null ? (
+                <span
+                  className="truncate font-mono text-xs text-violet-500 dark:text-violet-400 cursor-default"
+                  title={`源 Codex 供应商: ${sourceProviderName ?? `#${provider.source_provider_id}`}`}
+                >
+                  源: {sourceProviderName ?? `#${provider.source_provider_id}`}
+                </span>
               ) : (
                 <span
                   className="truncate font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"

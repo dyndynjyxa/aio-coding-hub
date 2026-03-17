@@ -18,6 +18,8 @@ export type RequestLogSummary = {
   start_provider_name: string;
   final_provider_id: number;
   final_provider_name: string;
+  final_provider_source_id?: number | null;
+  final_provider_source_name?: string | null;
   route: RequestLogRouteHop[];
   session_reuse: boolean;
   input_tokens: number | null;
@@ -69,6 +71,10 @@ export type RequestLogDetail = {
   cache_creation_1h_input_tokens: number | null;
   usage_json: string | null;
   requested_model: string | null;
+  final_provider_id?: number | null;
+  final_provider_name?: string | null;
+  final_provider_source_id?: number | null;
+  final_provider_source_name?: string | null;
   cost_usd: number | null;
   cost_multiplier: number;
   created_at_ms: number | null;

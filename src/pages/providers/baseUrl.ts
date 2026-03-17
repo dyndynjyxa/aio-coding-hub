@@ -15,6 +15,16 @@ export function providerBaseUrlSummary(provider: ProviderSummary | null | undefi
   return extraCount > 0 ? `${primary} (+${extraCount})` : primary;
 }
 
+export function resolveProviderLabel(
+  name: string | null | undefined,
+  id: number | null | undefined
+): string | null {
+  const trimmed = name?.trim();
+  if (trimmed) return trimmed;
+  if (typeof id === "number") return `#${id}`;
+  return null;
+}
+
 export function normalizeBaseUrlRows(rows: BaseUrlRow[]) {
   const baseUrls: string[] = [];
   const seen = new Set<string>();

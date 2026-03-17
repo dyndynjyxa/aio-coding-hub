@@ -1007,6 +1007,7 @@ mod tests {
             limit_total_usd: None,
             auth_mode: "api_key".to_string(),
             oauth_provider_type: None,
+            source_provider_id: None,
         }
     }
 

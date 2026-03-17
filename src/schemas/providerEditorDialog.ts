@@ -88,7 +88,7 @@ function parseResetTimeHms() {
   });
 }
 
-export function createProviderEditorDialogSchema(options: { mode: "create" | "edit" }) {
+export function createProviderEditorDialogSchema(options: { mode: "create" | "edit"; skipApiKeyCheck?: boolean }) {
   return z
     .object({
       name: z.string().trim().min(1, { message: "名称不能为空" }),
@@ -107,6 +107,7 @@ export function createProviderEditorDialogSchema(options: { mode: "create" | "ed
     })
     .superRefine((values, ctx) => {
       if (options.mode !== "create") return;
+      if (options.skipApiKeyCheck) return;
       if (values.auth_mode === "oauth") return;
       if (values.api_key.trim()) return;
       ctx.addIssue({

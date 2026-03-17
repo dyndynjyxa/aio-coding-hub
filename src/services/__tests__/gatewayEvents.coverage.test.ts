@@ -210,6 +210,70 @@ describe("services/gatewayEvents (coverage)", () => {
     vi.useRealTimers();
   });
 
+  it("forwards gateway log events according to console min-level", async () => {
+    setTauriRuntime();
+    vi.resetModules();
+
+    shouldLogToConsole.mockImplementation((level: string) => level !== "debug");
+    vi.mocked(tauriListen).mockResolvedValue(tauriUnlisten);
+
+    const { listenGatewayEvents } = await import("../gatewayEvents");
+    const unlisten = await listenGatewayEvents();
+
+    const logHandler = vi
+      .mocked(tauriListen)
+      .mock.calls.find((call) => call[0] === "gateway:log")?.[1];
+
+    logHandler?.({
+      payload: {
+        level: "info",
+        error_code: "GW_INFO",
+        message: "info",
+        requested_port: 1,
+        bound_port: 2,
+        base_url: "http://x",
+      },
+    } as any);
+    logHandler?.({
+      payload: {
+        level: "debug",
+        error_code: "GW_DEBUG",
+        message: "debug",
+        requested_port: 1,
+        bound_port: 2,
+        base_url: "http://x",
+      },
+    } as any);
+    logHandler?.({
+      payload: {
+        level: "warn",
+        error_code: "GW_WARN",
+        message: "warn",
+        requested_port: 1,
+        bound_port: 2,
+        base_url: "http://x",
+      },
+    } as any);
+    logHandler?.({
+      payload: {
+        level: "error",
+        error_code: "GW_ERROR",
+        message: "error",
+        requested_port: 1,
+        bound_port: 2,
+        base_url: "http://x",
+      },
+    } as any);
+
+    const gatewayLogCalls = logToConsole.mock.calls.filter(
+      (call) => call[3] === "gateway:log"
+    );
+    expect(gatewayLogCalls).toHaveLength(3);
+    expect(gatewayLogCalls.map((call) => call[0])).toEqual(["info", "warn", "error"]);
+
+    unlisten();
+  });
+
   it("covers request output tokens/sec edge cases", async () => {
     setTauriRuntime();
     vi.resetModules();

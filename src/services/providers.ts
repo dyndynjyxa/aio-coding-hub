@@ -37,6 +37,7 @@ export type ProviderSummary = {
   oauth_email: string | null;
   oauth_expires_at: number | null;
   oauth_last_error: string | null;
+  source_provider_id: number | null;
 };
 
 export async function providersList(cliKey: CliKey) {
@@ -64,6 +65,7 @@ export async function providerUpsert(input: {
   limit_total_usd: number | null;
   tags?: string[];
   note?: string;
+  source_provider_id?: number | null;
 }) {
   return invokeService<ProviderSummary>("保存供应商失败", "provider_upsert", {
     input: {
@@ -87,6 +89,7 @@ export async function providerUpsert(input: {
       limitTotalUsd: input.limit_total_usd,
       tags: input.tags ?? null,
       note: input.note ?? null,
+      sourceProviderId: input.source_provider_id ?? null,
     },
   });
 }

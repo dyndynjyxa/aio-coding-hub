@@ -20,6 +20,7 @@ import {
   sanitizeTtfbMs,
 } from "../../utils/formatters";
 import { ProviderChainView } from "../ProviderChainView";
+import { resolveProviderLabel } from "../../pages/providers/baseUrl";
 import { computeStatusBadge } from "./HomeLogShared";
 
 export type RequestLogDetailDialogProps = {
@@ -44,6 +45,16 @@ export function RequestLogDetailDialog({
   function formatUnixSeconds(ts: number) {
     return formatRelativeTimeFromUnixSeconds(ts);
   }
+
+  const finalProviderText = resolveProviderLabel(
+    selectedLog?.final_provider_name,
+    selectedLog?.final_provider_id
+  );
+
+  const sourceProviderText = resolveProviderLabel(
+    selectedLog?.final_provider_source_name,
+    selectedLog?.final_provider_source_id
+  );
 
   return (
     <Dialog
@@ -98,6 +109,16 @@ export function RequestLogDetailDialog({
                   {selectedLog.error_code ? (
                     <span className="rounded-full bg-amber-50 dark:bg-amber-900/30 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-400">
                       {selectedLog.error_code}
+                    </span>
+                  ) : null}
+                  {finalProviderText ? (
+                    <span className="rounded-full bg-slate-100 dark:bg-slate-700 px-2 py-0.5">
+                      Provider {finalProviderText}
+                    </span>
+                  ) : null}
+                  {sourceProviderText ? (
+                    <span className="rounded-full bg-violet-50 dark:bg-violet-900/30 px-2 py-0.5 font-mono text-violet-700 dark:text-violet-300">
+                      source: {sourceProviderText}
                     </span>
                   ) : null}
                   <span className="rounded-full bg-slate-100 dark:bg-slate-700 px-2 py-0.5">

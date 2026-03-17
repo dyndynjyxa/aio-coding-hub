@@ -1,6 +1,6 @@
 // Usage: Used by ProvidersView to create/edit a Provider with toast-based validation.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
   Clock,
@@ -55,6 +55,7 @@ type ProviderEditorDialogBaseProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: (cliKey: CliKey) => void;
+  codexProviders?: ProviderSummary[];
 };
 
 export type ProviderEditorDialogProps =
@@ -128,8 +129,15 @@ function buildBaseUrlRows(
   return [newBaseUrlRow()];
 }
 
+function deriveAuthMode(provider: ProviderSummary | null | undefined): "api_key" | "oauth" | "cx2cc" {
+  if (!provider) return "api_key";
+  if (provider.source_provider_id) return "cx2cc";
+  if (provider.auth_mode === "oauth") return "oauth";
+  return "api_key";
+}
+
 export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
-  const { open, onOpenChange, onSaved } = props;
+  const { open, onOpenChange, onSaved, codexProviders = [] } = props;
 
   const mode = props.mode;
   const cliKey = mode === "create" ? props.cliKey : props.provider.cli_key;
@@ -155,8 +163,12 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
   const [fetchingApiKey, setFetchingApiKey] = useState(false);
   const apiKeyFetchedRef = useRef(false);
 
-  const [authMode, setAuthMode] = useState<"api_key" | "oauth">(
-    editProvider?.auth_mode === "oauth" ? "oauth" : "api_key"
+  const [authMode, setAuthMode] = useState<"api_key" | "oauth" | "cx2cc">(
+    deriveAuthMode(editProvider)
+  );
+
+  const [sourceProviderId, setSourceProviderId] = useState<number | null>(
+    editProvider?.source_provider_id ?? null
   );
 
   const [oauthStatus, setOauthStatus] = useState<{
@@ -168,7 +180,6 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
   } | null>(null);
   const [oauthLoading, setOauthLoading] = useState(false);
 
-  const schema = useMemo(() => createProviderEditorDialogSchema({ mode }), [mode]);
   const form = useForm<ProviderEditorDialogFormInput>({
     defaultValues: DEFAULT_FORM_VALUES,
   });
@@ -213,8 +224,9 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
       return;
     }
 
-    const initialAuthMode = props.provider.auth_mode === "oauth" ? "oauth" : "api_key";
+    const initialAuthMode = deriveAuthMode(props.provider);
     setAuthMode(initialAuthMode);
+    setSourceProviderId(props.provider.source_provider_id ?? null);
     setOauthStatus(null);
     setBaseUrlMode(props.provider.base_url_mode);
     setBaseUrlRows(props.provider.base_urls.map((url) => newBaseUrlRow(url)));
@@ -226,7 +238,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
     reset({
       name: props.provider.name,
       api_key: "",
-      auth_mode: initialAuthMode,
+      auth_mode: initialAuthMode === "cx2cc" ? "api_key" : initialAuthMode,
       cost_multiplier: String(props.provider.cost_multiplier ?? 1.0),
       limit_5h_usd: props.provider.limit_5h_usd != null ? String(props.provider.limit_5h_usd) : "",
       limit_daily_usd:
@@ -321,9 +333,16 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
 
   async function save() {
     if (saving) return;
+    const isCx2cc = authMode === "cx2cc";
 
     const formValues = form.getValues();
-    const parsed = schema.safeParse({ ...formValues, auth_mode: authMode });
+    const parsed = createProviderEditorDialogSchema({
+      mode,
+      skipApiKeyCheck: isCx2cc,
+    }).safeParse({
+      ...formValues,
+      auth_mode: isCx2cc ? "api_key" : authMode,
+    });
     if (!parsed.success) {
       toastFirstSchemaIssue(parsed.error.issues);
       return;
@@ -333,32 +352,18 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
 
     let finalBaseUrls: string[] = [];
     let finalBaseUrlMode = baseUrlMode;
-    let effectiveOauthStatus = oauthStatus;
 
     if (authMode === "oauth") {
       // OAuth providers don't use base URLs — the gateway routes to the
       // provider's official API endpoint based on the OAuth adapter.
       finalBaseUrls = [];
+    } else if (isCx2cc) {
+      // CX2CC providers don't need base URLs — inherited from source provider.
+      finalBaseUrls = [];
       finalBaseUrlMode = "order";
 
-      // Avoid stale UI race: refresh OAuth status once before enforcing save-time gate.
-      if (!effectiveOauthStatus?.connected && editingProviderId) {
-        try {
-          const latestStatus = await providerOAuthStatus(editingProviderId);
-          setOauthStatus(latestStatus);
-          effectiveOauthStatus = latestStatus;
-        } catch (err) {
-          logToConsole("warn", "保存前刷新 OAuth 状态失败", {
-            cli_key: cliKey,
-            provider_id: editingProviderId,
-            error: String(err),
-          });
-        }
-      }
-
-      // Validate OAuth is actually connected before saving.
-      if (!effectiveOauthStatus?.connected) {
-        toast("请先完成 OAuth 登录");
+      if (!sourceProviderId) {
+        toast("请选择源 Codex 供应商");
         return;
       }
     } else {
@@ -386,8 +391,8 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
         name: values.name,
         base_urls: finalBaseUrls,
         base_url_mode: finalBaseUrlMode,
-        auth_mode: authMode,
-        api_key: authMode === "oauth" ? null : values.api_key,
+        auth_mode: isCx2cc ? "api_key" : authMode,
+        api_key: authMode === "oauth" || isCx2cc ? null : values.api_key,
         enabled: values.enabled,
         cost_multiplier: values.cost_multiplier,
         limit_5h_usd: values.limit_5h_usd,
@@ -400,6 +405,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
         tags,
         note: values.note,
         ...(cliKey === "claude" && authMode !== "oauth" ? { claude_models: claudeModels } : {}),
+        source_provider_id: isCx2cc ? sourceProviderId : null,
       });
 
       if (!saved) {
@@ -450,6 +456,57 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
         }).length
       : 0;
   const supportsOAuth = cliKey === "codex" || cliKey === "gemini";
+  const supportsCx2cc = cliKey === "claude";
+
+  const tagsAndNoteSection = (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <FormField label="标签" hint="按 Enter 添加标签">
+        <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 shadow-sm dark:border-slate-600 dark:bg-slate-800 dark:shadow-none">
+          {tags.map((tag) => (
+            <span
+              key={tag}
+              className="inline-flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent"
+            >
+              {tag}
+              <button
+                type="button"
+                onClick={() => setTags((prev) => prev.filter((t) => t !== tag))}
+                className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full hover:bg-accent/20"
+                disabled={saving}
+                aria-label={`移除标签 ${tag}`}
+              >
+                <X className="h-2.5 w-2.5" />
+              </button>
+            </span>
+          ))}
+          <input
+            type="text"
+            value={tagInput}
+            onChange={(e) => setTagInput(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter") return;
+              e.preventDefault();
+              const trimmed = tagInput.trim();
+              if (!trimmed) return;
+              if (tags.includes(trimmed)) {
+                setTagInput("");
+                return;
+              }
+              setTags((prev) => [...prev, trimmed]);
+              setTagInput("");
+            }}
+            placeholder={tags.length === 0 ? "输入标签后按 Enter" : ""}
+            className="min-w-[80px] flex-1 border-none bg-transparent text-sm outline-none placeholder:text-slate-400"
+            disabled={saving}
+          />
+        </div>
+      </FormField>
+
+      <FormField label="备注" hint="供应商列表中显示">
+        <Input placeholder="可选备注信息" disabled={saving} {...register("note")} />
+      </FormField>
+    </div>
+  );
 
   async function handleOAuthLogin() {
     setOauthLoading(true);
@@ -630,7 +687,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
       className="max-w-4xl"
     >
       <div className="space-y-4">
-        {/* ── Auth mode selector (currently enabled for Codex and Gemini) ── */}
+        {/* ── Auth mode selector (Codex/Gemini: api_key/oauth; Claude: api_key/cx2cc) ── */}
         {supportsOAuth ? (
           <FormField label="认证方式" hint="选择后下方表单会相应变化">
             <TabList<"api_key" | "oauth">
@@ -639,10 +696,25 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
                 { key: "api_key", label: "API 密钥" },
                 { key: "oauth", label: "OAuth 登录" },
               ]}
-              value={authMode}
+              value={authMode as "api_key" | "oauth"}
               onChange={(next) => {
                 setAuthMode(next);
                 setValue("auth_mode", next, { shouldDirty: true });
+              }}
+            />
+          </FormField>
+        ) : supportsCx2cc ? (
+          <FormField label="认证方式" hint="选择后下方表单会相应变化">
+            <TabList<"api_key" | "cx2cc">
+              ariaLabel="认证方式"
+              items={[
+                { key: "api_key", label: "API 密钥" },
+                { key: "cx2cc", label: "CX2CC 转译" },
+              ]}
+              value={authMode as "api_key" | "cx2cc"}
+              onChange={(next) => {
+                setAuthMode(next);
+                setValue("auth_mode", next === "cx2cc" ? "api_key" : next, { shouldDirty: true });
               }}
             />
           </FormField>
@@ -718,6 +790,58 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
               />
             </FormField>
           </>
+        ) : authMode === "cx2cc" ? (
+          /* ── CX2CC mode: source codex provider selector ── */
+          <>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <FormField label="名称">
+                <Input placeholder="default" {...register("name")} />
+              </FormField>
+
+              <FormField label="价格倍率">
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="1.0"
+                  {...register("cost_multiplier")}
+                />
+              </FormField>
+            </div>
+
+            <FormField label="源 Codex 供应商" hint="CX2CC 将复用此供应商的凭证和 Base URL">
+              <select
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                value={sourceProviderId ?? ""}
+                onChange={(e) => {
+                  const val = e.target.value ? Number(e.target.value) : null;
+                  setSourceProviderId(val);
+                }}
+                disabled={saving}
+              >
+                <option value="">请选择 Codex 供应商…</option>
+                {codexProviders.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({p.auth_mode === "oauth" ? "OAuth" : "API Key"})
+                    {!p.enabled ? " [已禁用]" : ""}
+                  </option>
+                ))}
+              </select>
+              {(() => {
+                const selected = sourceProviderId
+                  ? codexProviders.find((p) => p.id === sourceProviderId) ?? null
+                  : null;
+                return selected ? (
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    已选择：{selected.name} — {selected.auth_mode === "oauth" ? "OAuth 认证" : "API Key 认证"}
+                    {selected.base_urls.length > 0 ? ` — ${selected.base_urls[0]}` : ""}
+                  </p>
+                ) : null;
+              })()}
+            </FormField>
+
+            {tagsAndNoteSection}
+          </>
         ) : (
           /* ── API Key mode: full form ── */
           <>
@@ -740,53 +864,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
               </FormField>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              <FormField label="标签" hint="按 Enter 添加标签">
-                <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 shadow-sm dark:border-slate-600 dark:bg-slate-800 dark:shadow-none">
-                  {tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="inline-flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent"
-                    >
-                      {tag}
-                      <button
-                        type="button"
-                        onClick={() => setTags((prev) => prev.filter((t) => t !== tag))}
-                        className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full hover:bg-accent/20"
-                        disabled={saving}
-                        aria-label={`移除标签 ${tag}`}
-                      >
-                        <X className="h-2.5 w-2.5" />
-                      </button>
-                    </span>
-                  ))}
-                  <input
-                    type="text"
-                    value={tagInput}
-                    onChange={(e) => setTagInput(e.currentTarget.value)}
-                    onKeyDown={(e) => {
-                      if (e.key !== "Enter") return;
-                      e.preventDefault();
-                      const trimmed = tagInput.trim();
-                      if (!trimmed) return;
-                      if (tags.includes(trimmed)) {
-                        setTagInput("");
-                        return;
-                      }
-                      setTags((prev) => [...prev, trimmed]);
-                      setTagInput("");
-                    }}
-                    placeholder={tags.length === 0 ? "输入标签后按 Enter" : ""}
-                    className="min-w-[80px] flex-1 border-none bg-transparent text-sm outline-none placeholder:text-slate-400"
-                    disabled={saving}
-                  />
-                </div>
-              </FormField>
-
-              <FormField label="备注" hint="供应商列表中显示">
-                <Input placeholder="可选备注信息" disabled={saving} {...register("note")} />
-              </FormField>
-            </div>
+            {tagsAndNoteSection}
 
             <FormField label="Base URLs">
               <BaseUrlEditor
