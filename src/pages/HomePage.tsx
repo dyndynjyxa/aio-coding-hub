@@ -6,7 +6,6 @@ import { CLIS } from "../constants/clis";
 import { HomeCostPanel } from "../components/home/HomeCostPanel";
 import { HomeOverviewPanel } from "../components/home/HomeOverviewPanel";
 import { RequestLogDetailDialog } from "../components/home/RequestLogDetailDialog";
-import { ProviderCircuitBadge } from "../components/ProviderCircuitBadge";
 import { useDocumentVisibility } from "../hooks/useDocumentVisibility";
 import { useWindowForeground } from "../hooks/useWindowForeground";
 import { useGatewaySessionsListQuery } from "../query/gateway";
@@ -17,6 +16,7 @@ import {
   useRequestLogsIncrementalPollQuery,
   useRequestLogsListAllQuery,
 } from "../query/requestLogs";
+import { useSettingsQuery } from "../query/settings";
 import { useUsageHourlySeriesQuery } from "../query/usage";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
@@ -40,6 +40,8 @@ export function HomePage() {
   const { traces } = useTraceStore();
   const showCustomTooltip = true;
   const foregroundActive = useDocumentVisibility();
+  const settingsQuery = useSettingsQuery();
+  const showHomeHeatmap = settingsQuery.data?.show_home_heatmap ?? true;
 
   const [tab, setTab] = useState<HomeTabKey>("overview");
   const tabRef = useRef(tab);
@@ -150,14 +152,7 @@ export function HomePage() {
         <PageHeader
           title="首页"
           actions={
-            <>
-              <ProviderCircuitBadge
-                rows={circuit.openCircuits}
-                onResetProvider={circuit.handleResetProvider}
-                resettingProviderIds={circuit.resettingProviderIds}
-              />
-              <TabList ariaLabel="首页视图切换" items={HOME_TABS} value={tab} onChange={setTab} />
-            </>
+            <TabList ariaLabel="首页视图切换" items={HOME_TABS} value={tab} onChange={setTab} />
           }
         />
       </div>
@@ -166,6 +161,7 @@ export function HomePage() {
         {tab === "overview" ? (
           <HomeOverviewPanel
             showCustomTooltip={showCustomTooltip}
+            showHomeHeatmap={showHomeHeatmap}
             usageHeatmapRows={usageHeatmapRows}
             usageHeatmapLoading={usageHeatmapLoading}
             onRefreshUsageHeatmap={refreshUsageHeatmap}
@@ -186,6 +182,9 @@ export function HomePage() {
             providerLimitAvailable={providerLimitAvailable}
             providerLimitRefreshing={providerLimitRefreshing}
             onRefreshProviderLimit={refreshProviderLimit}
+            openCircuits={circuit.openCircuits}
+            onResetCircuitProvider={circuit.handleResetProvider}
+            resettingCircuitProviderIds={circuit.resettingProviderIds}
             traces={traces}
             requestLogs={requestLogs}
             requestLogsLoading={requestLogsLoading}

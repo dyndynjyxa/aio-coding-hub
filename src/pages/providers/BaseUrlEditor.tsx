@@ -1,6 +1,6 @@
 // Usage: Used by ProviderEditorDialog to edit and ping multiple Base URLs.
 
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { toast } from "sonner";
 import { baseUrlPingMs } from "../../services/providers";
 import { Button } from "../../ui/Button";
@@ -16,6 +16,7 @@ export type BaseUrlEditorProps = {
   newRow: (url?: string) => BaseUrlRow;
   disabled?: boolean;
   placeholder?: string;
+  footerStart?: ReactNode;
 };
 
 async function pingBaseUrlRow(
@@ -89,6 +90,7 @@ export function BaseUrlEditor({
   newRow,
   disabled,
   placeholder,
+  footerStart,
 }: BaseUrlEditorProps) {
   return (
     <div className="space-y-2">
@@ -197,25 +199,28 @@ export function BaseUrlEditor({
         );
       })}
 
-      <div className="flex items-center gap-2 pt-1">
-        <Button
-          onClick={() => setRows((prev) => [...prev, newRow()])}
-          variant="secondary"
-          size="sm"
-          disabled={pingingAll || disabled}
-          className="h-8"
-        >
-          + 添加
-        </Button>
-        <Button
-          onClick={() => void pingAllBaseUrlRows(rows, setRows, setPingingAll)}
-          variant="secondary"
-          size="sm"
-          disabled={pingingAll || rows.length === 0 || disabled}
-          className="h-8"
-        >
-          {pingingAll ? "检测中…" : "全部 Ping"}
-        </Button>
+      <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">{footerStart}</div>
+        <div className="flex items-center justify-end gap-2">
+          <Button
+            onClick={() => setRows((prev) => [...prev, newRow()])}
+            variant="secondary"
+            size="sm"
+            disabled={pingingAll || disabled}
+            className="h-8"
+          >
+            + 添加
+          </Button>
+          <Button
+            onClick={() => void pingAllBaseUrlRows(rows, setRows, setPingingAll)}
+            variant="secondary"
+            size="sm"
+            disabled={pingingAll || rows.length === 0 || disabled}
+            className="h-8"
+          >
+            {pingingAll ? "检测中…" : "全部 Ping"}
+          </Button>
+        </div>
       </div>
     </div>
   );

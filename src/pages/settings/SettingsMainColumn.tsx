@@ -1,6 +1,9 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { GatewayAvailability } from "../../hooks/useGatewayMeta";
+import { gatewayKeys } from "../../query/keys";
+import { useTheme } from "../../hooks/useTheme";
 import { logToConsole } from "../../services/consoleLog";
 import { gatewayStart, gatewayStop, type GatewayStatus } from "../../services/gateway";
 import { Button } from "../../ui/Button";
@@ -12,7 +15,7 @@ import { cn } from "../../utils/cn";
 import type { NoticePermissionStatus } from "./useSystemNotification";
 
 type PersistKey = "preferred_port" | "log_retention_days";
-type BooleanPersistKey = "auto_start" | "start_minimized" | "tray_enabled";
+type BooleanPersistKey = "show_home_heatmap" | "auto_start" | "start_minimized" | "tray_enabled";
 
 export type SettingsMainColumnProps = {
   gateway: GatewayStatus | null;
@@ -30,6 +33,8 @@ export type SettingsMainColumnProps = {
     invalidMessage: string;
   }) => void;
 
+  showHomeHeatmap: boolean;
+  setShowHomeHeatmap: (next: boolean) => void;
   autoStart: boolean;
   setAutoStart: (next: boolean) => void;
   startMinimized: boolean;
@@ -57,6 +62,8 @@ export function SettingsMainColumn({
   settingsReady,
   port,
   setPort,
+  showHomeHeatmap,
+  setShowHomeHeatmap,
   commitNumberField,
   autoStart,
   setAutoStart,
@@ -73,6 +80,9 @@ export function SettingsMainColumn({
   requestSystemNotificationPermission,
   sendSystemNotificationTest,
 }: SettingsMainColumnProps) {
+  const { theme, setTheme } = useTheme();
+  const queryClient = useQueryClient();
+
   return (
     <div className="space-y-6 lg:col-span-8">
       {/* 网关服务 */}
@@ -116,6 +126,7 @@ export function SettingsMainColumn({
                       toast("重启失败：无法停止网关");
                       return;
                     }
+                    queryClient.setQueryData(gatewayKeys.status(), stopped);
                   }
 
                   const status = await gatewayStart(desiredPort);
@@ -123,6 +134,7 @@ export function SettingsMainColumn({
                     toast("启动失败：当前环境不可用或 command 未注册");
                     return;
                   }
+                  queryClient.setQueryData(gatewayKeys.status(), status);
                   logToConsole("info", "启动本地网关", {
                     port: status.port,
                     base_url: status.base_url,
@@ -142,6 +154,7 @@ export function SettingsMainColumn({
                     toast("停止失败：当前环境不可用或 command 未注册");
                     return;
                   }
+                  queryClient.setQueryData(gatewayKeys.status(), status);
                   logToConsole("info", "停止本地网关");
                   toast("本地网关已停止");
                 }}
@@ -194,8 +207,55 @@ export function SettingsMainColumn({
               系统偏好
             </h3>
             <div className="space-y-1">
+              <SettingsRow label="主题">
+                <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800">
+                  <button
+                    type="button"
+                    className={cn(
+                      "flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition",
+                      theme === "light"
+                        ? "bg-white text-slate-900 shadow-sm dark:bg-slate-600 dark:text-slate-100"
+                        : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                    )}
+                    onClick={() => setTheme("light")}
+                  >
+                    Light
+                  </button>
+                  <button
+                    type="button"
+                    className={cn(
+                      "flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition",
+                      theme === "dark"
+                        ? "bg-white text-slate-900 shadow-sm dark:bg-slate-600 dark:text-slate-100"
+                        : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                    )}
+                    onClick={() => setTheme("dark")}
+                  >
+                    Dark
+                  </button>
+                  <button
+                    type="button"
+                    className={cn(
+                      "flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition",
+                      theme === "system"
+                        ? "bg-white text-slate-900 shadow-sm dark:bg-slate-600 dark:text-slate-100"
+                        : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                    )}
+                    onClick={() => setTheme("system")}
+                  >
+                    System
+                  </button>
+                </div>
+              </SettingsRow>
               {(
                 [
+                  {
+                    label: "显示首页热力图",
+                    key: "show_home_heatmap" as const,
+                    checked: showHomeHeatmap,
+                    setter: setShowHomeHeatmap,
+                    disabled: !settingsReady,
+                  },
                   {
                     label: "开机自启",
                     key: "auto_start" as const,

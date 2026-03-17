@@ -43,17 +43,25 @@ describe("hooks/useCliProxy", () => {
 
     const { result } = renderHook(() => useCliProxy());
 
+    // Call 1: resolves to null → no toast, toggling resets
     act(() => result.current.setCliProxyEnabled("codex" as any, true));
     await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
+    // Wait for toggling to reset before next call
+    await waitFor(() => expect(result.current.toggling.codex).toBe(false));
 
+    // Call 2: resolves to { ok: true, message: "OK" } → toasts "OK"
     act(() => result.current.setCliProxyEnabled("codex" as any, true));
     await waitFor(() => expect(toast).toHaveBeenCalledWith("OK"));
     expect(logToConsole).toHaveBeenCalledWith("info", "开启 CLI 代理", expect.anything());
 
+    // Call 3: resolves to { ok: false, message: "bad" } → toasts error
+    await waitFor(() => expect(result.current.toggling.codex).toBe(false));
     act(() => result.current.setCliProxyEnabled("codex" as any, true));
     await waitFor(() => expect(toast).toHaveBeenCalledWith("操作失败：bad"));
     expect(logToConsole).toHaveBeenCalledWith("error", "开启 CLI 代理失败", expect.anything());
 
+    // Call 4: rejects → toasts error, refetches
+    await waitFor(() => expect(result.current.toggling.codex).toBe(false));
     act(() => result.current.setCliProxyEnabled("codex" as any, true));
     await waitFor(() => expect(toast).toHaveBeenCalledWith("操作失败：Error: boom"));
     await waitFor(() => expect(refetch).toHaveBeenCalled());

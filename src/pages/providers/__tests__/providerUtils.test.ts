@@ -15,8 +15,11 @@ describe("pages/providers/baseUrl helpers", () => {
     expect(providerPrimaryBaseUrl({ base_urls: ["https://a"] } as any)).toBe("https://a");
     expect(providerBaseUrlSummary({ base_urls: ["https://a"] } as any)).toBe("https://a");
     expect(providerBaseUrlSummary({ base_urls: ["https://a", "https://b"] } as any)).toBe(
-      "https://a (+1)"
+      "https://a · https://b"
     );
+    expect(
+      providerBaseUrlSummary({ base_urls: ["https://a", "https://b", "https://c"] } as any)
+    ).toBe("https://a · https://b (+1)");
   });
 
   it("normalizes base url rows with validation", () => {

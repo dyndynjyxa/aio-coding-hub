@@ -203,7 +203,17 @@ describe("pages/providers/SortableProviderCard", () => {
   it("renders note when present", () => {
     renderCard({ note: "My custom note" });
 
-    expect(screen.getByText("· My custom note")).toBeInTheDocument();
+    const note = screen.getByTitle("My custom note");
+    expect(note).toBeInTheDocument();
+    expect(note).toHaveTextContent("My custom note");
+  });
+
+  it("renders http links in note as clickable anchors", () => {
+    renderCard({ note: "文档 https://example.com/docs?q=1, 备用说明" });
+
+    const link = screen.getByRole("link", { name: "https://example.com/docs?q=1" });
+    expect(link).toBeInTheDocument();
+    expect(link).toHaveAttribute("href", "https://example.com/docs?q=1");
   });
 
   it("renders limit chips", () => {
@@ -222,10 +232,26 @@ describe("pages/providers/SortableProviderCard", () => {
   it("renders Claude models badge", () => {
     renderCard({
       cli_key: "claude",
-      claude_models: { main_model: "claude-3", haiku_model: null as any },
+      claude_models: {
+        main_model: " claude-3 ",
+        reasoning_model: "claude-thinking",
+        haiku_model: null as any,
+      },
     });
 
-    expect(screen.getByText("Claude Models")).toBeInTheDocument();
+    const badge = screen.getByText("模型映射 2/5");
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveAttribute(
+      "title",
+      "已配置 Claude 模型映射（2/5）\n主模型: claude-3\n推理模型(Thinking): claude-thinking"
+    );
+  });
+
+  it("renders tags at the end of the second row", () => {
+    renderCard({ tags: ["prod", "cn"] });
+
+    expect(screen.getByText("prod")).toBeInTheDocument();
+    expect(screen.getByText("cn")).toBeInTheDocument();
   });
 
   it("keeps cx2cc source label without the top translation badge", () => {
@@ -238,7 +264,9 @@ describe("pages/providers/SortableProviderCard", () => {
       }
     );
 
-    expect(screen.getByText((_, el) => el?.textContent === "源: Lisa")).toBeInTheDocument();
+    expect(screen.getAllByText((_, el) => el?.textContent === "源: Lisa").length).toBeGreaterThan(
+      0
+    );
     expect(screen.queryByText("CX2CC 转译")).not.toBeInTheDocument();
     expect(screen.getByText("CX2CC")).toBeInTheDocument();
   });
@@ -247,6 +275,29 @@ describe("pages/providers/SortableProviderCard", () => {
     renderCard({ base_url_mode: "ping" });
 
     expect(screen.getByText("Ping")).toBeInTheDocument();
+  });
+
+  it("shows api key base url summary only after clicking the api key badge", () => {
+    renderCard({ auth_mode: "api_key" });
+
+    expect(screen.queryByText("https://example.com/v1")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "API Key" }));
+
+    expect(screen.getByText("https://example.com/v1")).toBeInTheDocument();
+  });
+
+  it("hides base url mode label for oauth providers", () => {
+    renderCard({ auth_mode: "oauth", base_url_mode: "ping" });
+
+    expect(screen.queryByText("Ping")).not.toBeInTheDocument();
+    expect(screen.queryByText("顺序")).not.toBeInTheDocument();
+  });
+
+  it("renders free label when cost multiplier is zero", () => {
+    renderCard({ cost_multiplier: 0 });
+
+    expect(screen.getByText("免费")).toBeInTheDocument();
   });
 
   it("renders circuit breaker state", () => {

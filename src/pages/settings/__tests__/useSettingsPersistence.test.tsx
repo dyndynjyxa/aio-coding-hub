@@ -37,6 +37,7 @@ function createSettings(overrides: Partial<any> = {}) {
   return {
     schema_version: 1,
     preferred_port: 37123,
+    show_home_heatmap: true,
     auto_start: false,
     tray_enabled: true,
     log_retention_days: 7,

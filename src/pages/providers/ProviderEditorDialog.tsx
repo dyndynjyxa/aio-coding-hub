@@ -7,14 +7,13 @@ import {
   DollarSign,
   CalendarDays,
   CalendarRange,
-  Eye,
-  EyeOff,
   Gauge,
   RotateCcw,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cliLongLabel } from "../../constants/clis";
+import { copyText } from "../../services/clipboard";
 import { logToConsole } from "../../services/consoleLog";
 import {
   providerGetApiKey,
@@ -50,7 +49,6 @@ import { validateProviderClaudeModels } from "./validators";
 import { useForm } from "react-hook-form";
 
 type DailyResetMode = "fixed" | "rolling";
-
 type ProviderEditorDialogBaseProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -91,6 +89,12 @@ const DEFAULT_FORM_VALUES: ProviderEditorDialogFormInput = {
 
 function valueOrEmpty(value: number | null | undefined) {
   return value != null ? String(value) : "";
+}
+
+function isZeroMultiplier(value: string | null | undefined) {
+  if (!value?.trim()) return false;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed === 0;
 }
 
 function buildFormValues(initialValues: ProviderEditorInitialValues | null) {
@@ -161,9 +165,11 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
   const [saving, setSaving] = useState(false);
-  const [showApiKey, setShowApiKey] = useState(false);
   const [fetchingApiKey, setFetchingApiKey] = useState(false);
+  const [savedApiKey, setSavedApiKey] = useState<string | null>(null);
   const apiKeyFetchedRef = useRef(false);
+  const apiKeyFetchPromiseRef = useRef<Promise<string | null> | null>(null);
+  const apiKeyFetchErrorRef = useRef(false);
 
   const [authMode, setAuthMode] = useState<"api_key" | "oauth" | "cx2cc">(
     deriveAuthMode(editProvider)
@@ -186,7 +192,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
     defaultValues: DEFAULT_FORM_VALUES,
   });
 
-  const { register, reset, setValue, watch } = form;
+  const { register, reset, setValue, watch, formState } = form;
   const enabled = watch("enabled");
   const dailyResetMode = watch("daily_reset_mode");
   const limit5hUsd = watch("limit_5h_usd");
@@ -194,6 +200,9 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
   const limitWeeklyUsd = watch("limit_weekly_usd");
   const limitMonthlyUsd = watch("limit_monthly_usd");
   const limitTotalUsd = watch("limit_total_usd");
+  const apiKeyValue = watch("api_key");
+  const costMultiplierValue = watch("cost_multiplier");
+  const apiKeyDirty = Boolean(formState.dirtyFields.api_key);
 
   const title =
     mode === "create"
@@ -211,6 +220,9 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
 
     baseUrlRowSeqRef.current = 1;
     apiKeyFetchedRef.current = false;
+    apiKeyFetchPromiseRef.current = null;
+    apiKeyFetchErrorRef.current = false;
+    setSavedApiKey(null);
 
     if (mode === "create") {
       const initialSourceProviderId = createInitialValues?.source_provider_id ?? null;
@@ -220,7 +232,6 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
       setClaudeModels(createInitialValues?.claude_models ?? {});
       setTags(createInitialValues?.tags ?? []);
       setTagInput("");
-      setShowApiKey(false);
       setSourceProviderId(initialSourceProviderId);
       setAuthMode(
         initialSourceProviderId != null ? "cx2cc" : (createInitialValues?.auth_mode ?? "api_key")
@@ -240,7 +251,6 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
     setClaudeModels(props.provider.claude_models ?? {});
     setTags(props.provider.tags ?? []);
     setTagInput("");
-    setShowApiKey(false);
     reset({
       name: props.provider.name,
       api_key: "",
@@ -265,6 +275,36 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
     // when the provider object reference changes from a background query refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cliKey, createInitialValues, editingProviderId, mode, open, reset]);
+
+  useEffect(() => {
+    if (!open || mode !== "edit" || !editingProviderId || authMode !== "api_key") return;
+    if (apiKeyFetchedRef.current || apiKeyFetchPromiseRef.current) return;
+
+    setFetchingApiKey(true);
+    const request = Promise.resolve(providerGetApiKey(editingProviderId))
+      .then((key) => {
+        const normalized = key?.trim() ? key : null;
+        apiKeyFetchedRef.current = true;
+        apiKeyFetchErrorRef.current = false;
+        setSavedApiKey(normalized);
+        setValue("api_key", normalized ?? "", {
+          shouldDirty: false,
+          shouldTouch: false,
+          shouldValidate: false,
+        });
+        return normalized;
+      })
+      .catch(() => {
+        apiKeyFetchErrorRef.current = true;
+        return null;
+      })
+      .finally(() => {
+        apiKeyFetchPromiseRef.current = null;
+        setFetchingApiKey(false);
+      });
+
+    apiKeyFetchPromiseRef.current = request;
+  }, [authMode, editingProviderId, mode, open]);
 
   useEffect(() => {
     if (editProvider?.id && editProvider.auth_mode === "oauth") {
@@ -319,22 +359,56 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
     }
   }
 
-  async function toggleApiKeyVisibility() {
-    if (!showApiKey && mode === "edit" && !apiKeyFetchedRef.current) {
-      setFetchingApiKey(true);
-      try {
-        const key = await providerGetApiKey(props.provider.id);
-        if (key) {
-          setValue("api_key", key, { shouldDirty: false });
-          apiKeyFetchedRef.current = true;
-        }
-      } catch {
-        toast("读取 API Key 失败");
-      } finally {
-        setFetchingApiKey(false);
-      }
+  async function ensureSavedApiKey(silent = false) {
+    if (savedApiKey?.trim()) {
+      return savedApiKey;
     }
-    setShowApiKey((prev) => !prev);
+    if (mode !== "edit") {
+      return null;
+    }
+
+    try {
+      if (apiKeyFetchPromiseRef.current) {
+        const key = await apiKeyFetchPromiseRef.current;
+        if (!key && !silent && apiKeyFetchErrorRef.current) {
+          toast("读取 API Key 失败");
+        }
+        return key;
+      }
+
+      setFetchingApiKey(true);
+      const request = Promise.resolve(providerGetApiKey(props.provider.id))
+        .then((nextKey) => {
+          const normalized = nextKey?.trim() ? nextKey : null;
+          apiKeyFetchedRef.current = true;
+          apiKeyFetchErrorRef.current = false;
+          setSavedApiKey(normalized);
+          setValue("api_key", normalized ?? "", {
+            shouldDirty: false,
+            shouldTouch: false,
+            shouldValidate: false,
+          });
+          return normalized;
+        })
+        .catch(() => {
+          apiKeyFetchErrorRef.current = true;
+          if (!silent) {
+            toast("读取 API Key 失败");
+          }
+          return null;
+        })
+        .finally(() => {
+          apiKeyFetchPromiseRef.current = null;
+          setFetchingApiKey(false);
+        });
+      apiKeyFetchPromiseRef.current = request;
+      return await request;
+    } catch {
+      if (!silent) {
+        toast("读取 API Key 失败");
+      }
+      return null;
+    }
   }
 
   async function save() {
@@ -413,6 +487,9 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
 
     setSaving(true);
     try {
+      const apiKeyToSave =
+        authMode === "oauth" ? null : mode === "edit" && !apiKeyDirty ? "" : values.api_key;
+
       const saved = await providerUpsert({
         ...(mode === "edit" ? { provider_id: props.provider.id } : {}),
         cli_key: cliKey,
@@ -420,7 +497,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
         base_urls: finalBaseUrls,
         base_url_mode: finalBaseUrlMode,
         auth_mode: isCx2cc ? "api_key" : authMode,
-        api_key: authMode === "oauth" || isCx2cc ? null : values.api_key,
+        api_key: authMode === "oauth" || isCx2cc ? null : apiKeyToSave,
         enabled: values.enabled,
         cost_multiplier: values.cost_multiplier,
         limit_5h_usd: values.limit_5h_usd,
@@ -474,6 +551,22 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
       toast(`${mode === "create" ? "保存" : "更新"}失败：${String(err)}`);
     } finally {
       setSaving(false);
+    }
+  }
+
+  const apiKeyField = register("api_key");
+
+  async function copyApiKey() {
+    const actualValue = apiKeyValue || (await ensureSavedApiKey(false)) || "";
+    if (!actualValue.trim()) {
+      toast("暂无可复制的 API Key");
+      return;
+    }
+    try {
+      await copyText(actualValue);
+      toast("已复制 API Key");
+    } catch {
+      toast("复制 API Key 失败");
     }
   }
 
@@ -881,21 +974,52 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
                 <Input placeholder="default" {...register("name")} />
               </FormField>
 
-              <FormField label="Base URL 模式">
-                <RadioButtonGroup<ProviderBaseUrlMode>
-                  items={[
-                    { value: "order", label: "顺序" },
-                    { value: "ping", label: "Ping" },
-                  ]}
-                  ariaLabel="Base URL 模式"
-                  value={baseUrlMode}
-                  onChange={setBaseUrlMode}
-                  disabled={saving}
-                />
+              <FormField label="标签" hint="按 Enter 添加标签">
+                <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 shadow-sm dark:border-slate-600 dark:bg-slate-800 dark:shadow-none">
+                  {tags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="inline-flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent"
+                    >
+                      {tag}
+                      <button
+                        type="button"
+                        onClick={() => setTags((prev) => prev.filter((t) => t !== tag))}
+                        className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full hover:bg-accent/20"
+                        disabled={saving}
+                        aria-label={`移除标签 ${tag}`}
+                      >
+                        <X className="h-2.5 w-2.5" />
+                      </button>
+                    </span>
+                  ))}
+                  <input
+                    type="text"
+                    value={tagInput}
+                    onChange={(e) => setTagInput(e.currentTarget.value)}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter") return;
+                      e.preventDefault();
+                      const trimmed = tagInput.trim();
+                      if (!trimmed) return;
+                      if (tags.includes(trimmed)) {
+                        setTagInput("");
+                        return;
+                      }
+                      setTags((prev) => [...prev, trimmed]);
+                      setTagInput("");
+                    }}
+                    placeholder={tags.length === 0 ? "输入标签后按 Enter" : ""}
+                    className="min-w-[80px] flex-1 border-none bg-transparent text-sm outline-none placeholder:text-slate-400"
+                    disabled={saving}
+                  />
+                </div>
               </FormField>
             </div>
 
-            {tagsAndNoteSection}
+            <FormField label="备注">
+              <Input placeholder="可选备注信息" disabled={saving} {...register("note")} />
+            </FormField>
 
             <FormField label="Base URLs">
               <BaseUrlEditor
@@ -906,42 +1030,75 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
                 newRow={newBaseUrlRow}
                 placeholder="中转 endpoint（例如：https://example.com/v1）"
                 disabled={saving}
+                footerStart={
+                  <div className="flex items-center gap-2">
+                    <span className="shrink-0 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                      URL 选择策略
+                    </span>
+                    <RadioButtonGroup<ProviderBaseUrlMode>
+                      items={[
+                        { value: "order", label: "按顺序" },
+                        { value: "ping", label: "按 Ping" },
+                      ]}
+                      ariaLabel="Base URL 选择策略"
+                      value={baseUrlMode}
+                      onChange={setBaseUrlMode}
+                      disabled={saving}
+                      size="compact"
+                      fullWidth={false}
+                    />
+                  </div>
+                }
               />
             </FormField>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              <FormField
-                label="API Key / Token"
-                hint={mode === "edit" ? "留空保持不变" : "保存后不回显"}
-              >
+              <FormField label="API Key / Token">
                 <div className="flex items-center gap-2">
-                  <Input
-                    type={showApiKey ? "text" : "password"}
-                    placeholder="sk-…"
-                    autoComplete="off"
-                    {...register("api_key")}
-                  />
-                  <button
+                  <Input {...apiKeyField} type="text" placeholder="sk-…" autoComplete="off" />
+                  <Button
                     type="button"
-                    onClick={toggleApiKeyVisibility}
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
-                    tabIndex={-1}
+                    onClick={() => void copyApiKey()}
+                    variant="secondary"
+                    size="sm"
+                    className="h-9 shrink-0"
                     disabled={fetchingApiKey}
-                    aria-label={showApiKey ? "隐藏 API Key" : "显示 API Key"}
                   >
-                    {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
+                    复制
+                  </Button>
                 </div>
               </FormField>
 
               <FormField label="价格倍率">
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  placeholder="1.0"
-                  {...register("cost_multiplier")}
-                />
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="1.0"
+                    {...register("cost_multiplier")}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className={
+                      isZeroMultiplier(costMultiplierValue)
+                        ? "h-9 shrink-0 border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300 dark:hover:bg-emerald-900/40"
+                        : "h-9 shrink-0"
+                    }
+                    disabled={saving}
+                    onClick={() =>
+                      setValue("cost_multiplier", "0", {
+                        shouldDirty: true,
+                        shouldTouch: true,
+                        shouldValidate: true,
+                      })
+                    }
+                  >
+                    免费
+                  </Button>
+                </div>
               </FormField>
             </div>
           </>
@@ -1113,7 +1270,20 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
                   value={claudeModels.main_model ?? ""}
                   onChange={(e) => {
                     const value = e.currentTarget.value;
-                    setClaudeModels((prev) => ({ ...prev, main_model: value }));
+                    setClaudeModels((prev) => {
+                      const oldMain = (prev.main_model ?? "").trim();
+                      const syncIfMatch = (field: string | null | undefined) => {
+                        const trimmed = (field ?? "").trim();
+                        return !trimmed || trimmed === oldMain ? value : field;
+                      };
+                      return {
+                        ...prev,
+                        main_model: value,
+                        haiku_model: syncIfMatch(prev.haiku_model),
+                        sonnet_model: syncIfMatch(prev.sonnet_model),
+                        opus_model: syncIfMatch(prev.opus_model),
+                      };
+                    });
                   }}
                   placeholder="例如: glm-4-plus / minimax-text-01 / kimi-k2"
                   disabled={saving}

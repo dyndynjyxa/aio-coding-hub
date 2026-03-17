@@ -48,6 +48,7 @@ export const commands = {
 export type AppSettings = {
   schema_version: number;
   preferred_port: number;
+  show_home_heatmap?: boolean;
   gateway_listen_mode: GatewayListenMode;
   gateway_custom_listen_address: string;
   wsl_auto_config: boolean;
@@ -154,6 +155,7 @@ export type ProviderUpsertInput = {
  */
 export type SettingsUpdate = {
   preferredPort: number;
+  showHomeHeatmap: boolean | null;
   gatewayListenMode: GatewayListenMode | null;
   gatewayCustomListenAddress: string | null;
   autoStart: boolean;

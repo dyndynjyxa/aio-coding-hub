@@ -45,7 +45,7 @@ export function getErrorCodeLabel(errorCode: string) {
 
 export function SessionReuseBadge({ showCustomTooltip }: { showCustomTooltip: boolean }) {
   const className =
-    "inline-flex items-center rounded-full bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-600 dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-400 cursor-help";
+    "inline-flex items-center rounded-md bg-indigo-50/75 px-2 py-0.5 text-[11px] font-medium text-indigo-600 dark:bg-indigo-900/25 dark:text-indigo-200 cursor-help";
   return showCustomTooltip ? (
     <Tooltip content={SESSION_REUSE_TOOLTIP}>
       <span className={className}>会话复用</span>
@@ -53,6 +53,14 @@ export function SessionReuseBadge({ showCustomTooltip }: { showCustomTooltip: bo
   ) : (
     <span className={className} title={SESSION_REUSE_TOOLTIP}>
       会话复用
+    </span>
+  );
+}
+
+export function FreeBadge() {
+  return (
+    <span className="inline-flex items-center rounded-md bg-emerald-50/75 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:bg-emerald-900/25 dark:text-emerald-200">
+      免费
     </span>
   );
 }

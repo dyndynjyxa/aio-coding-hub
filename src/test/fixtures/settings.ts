@@ -8,6 +8,7 @@ export function createTestAppSettings(overrides?: Partial<AppSettings>): AppSett
   return {
     schema_version: 1,
     preferred_port: 37123,
+    show_home_heatmap: true,
     gateway_listen_mode: "localhost",
     gateway_custom_listen_address: "",
     wsl_auto_config: false,

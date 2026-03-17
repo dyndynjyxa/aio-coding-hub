@@ -46,13 +46,13 @@ function levelText(level: ConsoleLogEntry["level"]) {
 function getLevelBadgeStyles(level: ConsoleLogEntry["level"]) {
   switch (level) {
     case "error":
-      return "bg-red-500/10 text-red-400 border-red-500/20";
+      return "bg-red-50 text-red-700 border-red-200 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/20";
     case "warn":
-      return "bg-amber-500/10 text-amber-400 border-amber-500/20";
+      return "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20";
     case "debug":
-      return "bg-slate-500/10 text-slate-400 border-slate-500/20";
+      return "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-500/10 dark:text-slate-400 dark:border-slate-500/20";
     default:
-      return "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+      return "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20";
   }
 }
 /** Left color bar indicator class based on event type and level */
@@ -61,7 +61,7 @@ function getRowIndicatorClass(entry: ConsoleLogEntry): string | null {
     if (entry.level === "warn") return "border-l-2 border-red-500";
     if (entry.level === "info") return "border-l-2 border-green-500";
   }
-  if (entry.level === "error") return "border-l-2 border-red-500 bg-red-500/5";
+  if (entry.level === "error") return "border-l-2 border-red-500 bg-red-50/80 dark:bg-red-500/5";
   return null;
 }
 
@@ -153,7 +153,7 @@ const ConsoleLogRow = memo(function ConsoleLogRow({
     <div
       className={cn(
         ROW_GRID_CLASS,
-        "items-start px-4 py-3 group-hover:bg-slate-800/40 transition-colors duration-200"
+        "items-start px-4 py-3 group-hover:bg-slate-100/80 dark:group-hover:bg-slate-800/40 transition-colors duration-200"
       )}
     >
       <span className="shrink-0 text-slate-500 dark:text-slate-400 font-mono text-[11px] pt-0.5">
@@ -170,7 +170,7 @@ const ConsoleLogRow = memo(function ConsoleLogRow({
         </span>
       </div>
       <div className="min-w-0">
-        <span className="whitespace-pre-wrap break-words text-slate-300 text-[13px] leading-relaxed font-normal">
+        <span className="whitespace-pre-wrap break-words text-slate-700 dark:text-slate-300 text-[13px] leading-relaxed font-normal">
           {entry.title}
         </span>
         <MetaTags meta={entry.meta} />
@@ -227,14 +227,14 @@ const ConsoleLogRow = memo(function ConsoleLogRow({
       {isOpen ? (
         <div className={cn(ROW_GRID_CLASS, "px-4 pb-4 pt-0")}>
           <div className="col-start-3 col-span-2 space-y-2">
-            <pre className="custom-scrollbar max-h-60 overflow-auto rounded-md bg-slate-950 p-3 text-[11px] leading-relaxed text-slate-400 font-mono border border-white/5 mx-1 whitespace-pre-wrap">
+            <pre className="custom-scrollbar max-h-60 overflow-auto rounded-md bg-slate-100 dark:bg-slate-950 p-3 text-[11px] leading-relaxed text-slate-700 dark:text-slate-400 font-mono border border-slate-200 dark:border-white/5 mx-1 whitespace-pre-wrap">
               {smartText == null ? "加载中…" : smartText ? smartText : "// 无可显示的详情"}
             </pre>
             <details className="group/raw">
-              <summary className="text-[10px] text-slate-500 cursor-pointer hover:text-slate-400 select-none mx-1">
+              <summary className="text-[10px] text-slate-500 cursor-pointer hover:text-slate-700 dark:hover:text-slate-400 select-none mx-1">
                 原始数据
               </summary>
-              <pre className="custom-scrollbar max-h-40 overflow-auto rounded-md bg-slate-950 p-3 text-[11px] leading-relaxed text-slate-500 font-mono border border-white/5 mx-1 mt-1">
+              <pre className="custom-scrollbar max-h-40 overflow-auto rounded-md bg-slate-100 dark:bg-slate-950 p-3 text-[11px] leading-relaxed text-slate-600 dark:text-slate-500 font-mono border border-slate-200 dark:border-white/5 mx-1 mt-1">
                 {rawText == null ? "加载中…" : rawText ? rawText : "// 无原始数据"}
               </pre>
             </details>
@@ -371,7 +371,7 @@ export function ConsolePage() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="搜索标题、trace_id、错误码..."
-                className="h-8 w-full rounded-md border border-slate-600 bg-slate-800 pl-8 pr-3 text-xs text-slate-200 placeholder:text-slate-500 outline-none focus:border-accent focus:ring-1 focus:ring-accent/30"
+                className="h-8 w-full rounded-md border border-slate-200 bg-white pl-8 pr-3 text-xs text-slate-700 placeholder:text-slate-400 outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:placeholder:text-slate-500"
               />
             </div>
             <div className="flex items-center gap-1.5">
@@ -384,7 +384,7 @@ export function ConsolePage() {
                     "px-2 py-1 rounded text-[10px] font-medium border transition-colors cursor-pointer",
                     levelFilter.has(level)
                       ? getLevelBadgeStyles(level)
-                      : "bg-slate-800 text-slate-500 border-slate-700 opacity-50"
+                      : "bg-slate-50 text-slate-500 border-slate-200 opacity-70 dark:bg-slate-800 dark:text-slate-500 dark:border-slate-700 dark:opacity-50"
                   )}
                 >
                   {levelText(level)}
@@ -436,13 +436,13 @@ export function ConsolePage() {
           onScroll={handleScroll}
           className={cn(
             "custom-scrollbar min-h-0 flex-1 overflow-auto",
-            "bg-gradient-to-b from-slate-950 to-slate-900 font-mono text-[12px] leading-relaxed text-slate-200",
+            "bg-gradient-to-b from-slate-50 to-white dark:from-slate-950 dark:to-slate-900 font-mono text-[12px] leading-relaxed text-slate-700 dark:text-slate-200",
             "shadow-inner"
           )}
         >
           {visibleLogs.length === 0 ? (
             <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
-              <div className="mb-3 rounded-full bg-slate-800/50 p-4 border border-slate-700/50">
+              <div className="mb-3 rounded-full bg-slate-100 p-4 border border-slate-200 dark:bg-slate-800/50 dark:border-slate-700/50">
                 <svg
                   className="h-8 w-8 text-slate-600 dark:text-slate-400"
                   fill="none"

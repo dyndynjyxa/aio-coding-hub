@@ -45,7 +45,7 @@ describe("components/home/HomeWorkStatusCard", () => {
         sortModesLoading={false}
         sortModesAvailable={true}
         activeModeByCli={{ claude: null, codex: 1, gemini: null } as any}
-        activeModeToggling={{ claude: false, codex: true, gemini: false } as any}
+        activeModeToggling={{ claude: false, codex: false, gemini: false } as any}
         onSetCliActiveMode={onSetCliActiveMode}
         cliProxyEnabled={{ claude: true, codex: false, gemini: false } as any}
         cliProxyToggling={{ claude: false, codex: false, gemini: false } as any}
@@ -62,5 +62,25 @@ describe("components/home/HomeWorkStatusCard", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: "M1" })[0]);
     expect(onSetCliActiveMode).toHaveBeenCalledWith("claude", 1);
+  });
+
+  it("supports horizontal layout for the second overview row", () => {
+    render(
+      <HomeWorkStatusCard
+        layout="horizontal"
+        sortModes={[{ id: 1, name: "M1", created_at: 0, updated_at: 0 } as any]}
+        sortModesLoading={false}
+        sortModesAvailable={true}
+        activeModeByCli={{ claude: 1, codex: null, gemini: null } as any}
+        activeModeToggling={{ claude: false, codex: false, gemini: false } as any}
+        onSetCliActiveMode={vi.fn()}
+        cliProxyEnabled={{ claude: true, codex: false, gemini: false } as any}
+        cliProxyToggling={{ claude: false, codex: false, gemini: false } as any}
+        onSetCliProxyEnabled={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("代理状态")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "M1" }).length).toBeGreaterThan(0);
   });
 });

@@ -56,12 +56,18 @@ export function cliShortLabel(cliKey: string) {
   return cliKey;
 }
 
+const CLI_BADGE_BASE =
+  "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 border border-transparent";
+
+const CLI_BADGE_HOVER =
+  "group-hover:bg-white dark:group-hover:bg-slate-800 group-hover:border-slate-200 dark:group-hover:border-slate-700";
+
 export function cliBadgeTone(cliKey: string) {
-  if (cliKey === "claude")
-    return "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 group-hover:bg-white dark:group-hover:bg-slate-800 group-hover:border-slate-200 dark:group-hover:border-slate-700 border border-transparent";
-  if (cliKey === "codex")
-    return "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 group-hover:bg-white dark:group-hover:bg-slate-800 group-hover:border-slate-200 dark:group-hover:border-slate-700 border border-transparent";
-  if (cliKey === "gemini")
-    return "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 group-hover:bg-white dark:group-hover:bg-slate-800 group-hover:border-slate-200 dark:group-hover:border-slate-700 border border-transparent";
-  return "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 border border-transparent";
+  if (cliKey === "claude" || cliKey === "codex" || cliKey === "gemini")
+    return `${CLI_BADGE_BASE} ${CLI_BADGE_HOVER}`;
+  return CLI_BADGE_BASE;
+}
+
+export function cliBadgeToneStatic(_cliKey: string) {
+  return CLI_BADGE_BASE;
 }

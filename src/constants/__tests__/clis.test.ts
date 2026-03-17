@@ -3,6 +3,7 @@ import {
   CLIS,
   CLI_FILTER_ITEMS,
   cliBadgeTone,
+  cliBadgeToneStatic,
   cliFromKeyOrDefault,
   cliLongLabel,
   cliShortLabel,
@@ -39,8 +40,14 @@ describe("constants/clis", () => {
     expect(cliShortLabel("other")).toBe("other");
 
     expect(cliBadgeTone("claude")).toContain("bg-slate-100");
+    expect(cliBadgeTone("claude")).toContain("group-hover:bg-white");
     expect(cliBadgeTone("codex")).toContain("bg-slate-100");
     expect(cliBadgeTone("gemini")).toContain("bg-slate-100");
     expect(cliBadgeTone("unknown")).toContain("bg-slate-100");
+    expect(cliBadgeTone("unknown")).not.toContain("group-hover");
+
+    expect(cliBadgeToneStatic("claude")).toContain("bg-slate-100");
+    expect(cliBadgeToneStatic("claude")).not.toContain("group-hover");
+    expect(cliBadgeToneStatic("unknown")).toContain("bg-slate-100");
   });
 });

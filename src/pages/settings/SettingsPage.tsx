@@ -27,6 +27,8 @@ export function SettingsPage() {
             settingsReady={persistence.settingsReady}
             port={persistence.port}
             setPort={persistence.setPort}
+            showHomeHeatmap={persistence.showHomeHeatmap}
+            setShowHomeHeatmap={persistence.setShowHomeHeatmap}
             commitNumberField={persistence.commitNumberField}
             autoStart={persistence.autoStart}
             setAutoStart={persistence.setAutoStart}

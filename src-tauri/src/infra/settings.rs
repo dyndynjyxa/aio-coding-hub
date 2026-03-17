@@ -9,7 +9,7 @@ use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, Instant};
 use tauri::Manager;
 
-pub const SCHEMA_VERSION: u32 = 19;
+pub const SCHEMA_VERSION: u32 = 20;
 const SCHEMA_VERSION_DISABLE_UPSTREAM_TIMEOUTS: u32 = 7;
 const SCHEMA_VERSION_ADD_GATEWAY_RECTIFIERS: u32 = 8;
 const SCHEMA_VERSION_ADD_CIRCUIT_BREAKER_NOTICE: u32 = 9;
@@ -23,6 +23,7 @@ const SCHEMA_VERSION_ADD_WSL_HOST_ADDRESS_MODE: u32 = 16;
 const SCHEMA_VERSION_ADD_TASK_COMPLETE_NOTIFY: u32 = 17;
 const SCHEMA_VERSION_ADD_CCH_BASE_CONFIG: u32 = 18;
 const SCHEMA_VERSION_ADD_START_MINIMIZED: u32 = 19;
+const SCHEMA_VERSION_ADD_SHOW_HOME_HEATMAP: u32 = 20;
 pub const DEFAULT_GATEWAY_PORT: u16 = 37123;
 pub const MAX_GATEWAY_PORT: u16 = 37199;
 const DEFAULT_LOG_RETENTION_DAYS: u32 = 7;
@@ -46,6 +47,7 @@ const DEFAULT_ENABLE_CACHE_ANOMALY_MONITOR: bool = false;
 const DEFAULT_ENABLE_TASK_COMPLETE_NOTIFY: bool = true;
 const DEFAULT_ENABLE_RESPONSE_FIXER: bool = true;
 const DEFAULT_ENABLE_CLI_PROXY_STARTUP_RECOVERY: bool = true;
+const DEFAULT_SHOW_HOME_HEATMAP: bool = true;
 const DEFAULT_RESPONSE_FIXER_FIX_ENCODING: bool = true;
 const DEFAULT_RESPONSE_FIXER_FIX_SSE_FORMAT: bool = true;
 const DEFAULT_RESPONSE_FIXER_FIX_TRUNCATED_JSON: bool = true;
@@ -128,6 +130,8 @@ impl Default for WslTargetCli {
 pub struct AppSettings {
     pub schema_version: u32,
     pub preferred_port: u16,
+    #[serde(default = "default_show_home_heatmap")]
+    pub show_home_heatmap: bool,
     // Gateway listen mode (aligned with code-switch-r): localhost / wsl_auto / lan / custom.
     pub gateway_listen_mode: GatewayListenMode,
     // Custom listen address input (host or host:port).
@@ -184,6 +188,7 @@ impl Default for AppSettings {
         Self {
             schema_version: SCHEMA_VERSION,
             preferred_port: DEFAULT_GATEWAY_PORT,
+            show_home_heatmap: DEFAULT_SHOW_HOME_HEATMAP,
             gateway_listen_mode: GatewayListenMode::Localhost,
             gateway_custom_listen_address: String::new(),
             wsl_auto_config: false,
@@ -225,6 +230,10 @@ impl Default for AppSettings {
             response_fixer_max_fix_size: DEFAULT_RESPONSE_FIXER_MAX_FIX_SIZE,
         }
     }
+}
+
+fn default_show_home_heatmap() -> bool {
+    DEFAULT_SHOW_HOME_HEATMAP
 }
 
 fn sanitize_failover_settings(settings: &mut AppSettings) -> bool {
@@ -564,6 +573,15 @@ fn migrate_add_start_minimized(settings: &mut AppSettings, schema_version_presen
     )
 }
 
+fn migrate_add_show_home_heatmap(settings: &mut AppSettings, schema_version_present: bool) -> bool {
+    // v20: Add homepage heatmap visibility toggle (default enabled).
+    migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_SHOW_HOME_HEATMAP,
+    )
+}
+
 fn settings_path(app: &tauri::AppHandle) -> AppResult<PathBuf> {
     Ok(app_paths::app_data_dir(app)?.join("settings.json"))
 }
@@ -683,6 +701,7 @@ pub fn read(app: &tauri::AppHandle) -> AppResult<AppSettings> {
             repaired |= migrate_add_task_complete_notify(&mut settings, schema_version_present);
             repaired |= migrate_add_cch_base_config(&mut settings, schema_version_present);
             repaired |= migrate_add_start_minimized(&mut settings, schema_version_present);
+            repaired |= migrate_add_show_home_heatmap(&mut settings, schema_version_present);
             repaired |= sanitize_failover_settings(&mut settings);
             repaired |= sanitize_circuit_breaker_settings(&mut settings);
             repaired |= sanitize_provider_cooldown_seconds(&mut settings);
@@ -751,6 +770,7 @@ pub fn read(app: &tauri::AppHandle) -> AppResult<AppSettings> {
     repaired |= migrate_add_task_complete_notify(&mut settings, schema_version_present);
     repaired |= migrate_add_cch_base_config(&mut settings, schema_version_present);
     repaired |= migrate_add_start_minimized(&mut settings, schema_version_present);
+    repaired |= migrate_add_show_home_heatmap(&mut settings, schema_version_present);
     repaired |= sanitize_failover_settings(&mut settings);
     repaired |= sanitize_circuit_breaker_settings(&mut settings);
     repaired |= sanitize_provider_cooldown_seconds(&mut settings);
@@ -1343,6 +1363,12 @@ mod tests {
     }
 
     #[test]
+    fn app_settings_default_shows_home_heatmap() {
+        let s = AppSettings::default();
+        assert!(s.show_home_heatmap);
+    }
+
+    #[test]
     fn app_settings_default_cache_anomaly_monitor_disabled() {
         let s = AppSettings::default();
         assert!(!s.enable_cache_anomaly_monitor);
@@ -1366,5 +1392,15 @@ mod tests {
         };
         assert!(migrate_add_wsl_host_address_mode(&mut s, true));
         assert_eq!(s.schema_version, SCHEMA_VERSION_ADD_WSL_HOST_ADDRESS_MODE);
+    }
+
+    #[test]
+    fn migrate_add_show_home_heatmap_bumps_schema_version() {
+        let mut s = AppSettings {
+            schema_version: 19,
+            ..Default::default()
+        };
+        assert!(migrate_add_show_home_heatmap(&mut s, true));
+        assert_eq!(s.schema_version, SCHEMA_VERSION_ADD_SHOW_HOME_HEATMAP);
     }
 }
