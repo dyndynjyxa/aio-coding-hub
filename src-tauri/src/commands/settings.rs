@@ -8,6 +8,7 @@ use tauri::Manager;
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SettingsUpdate {
     pub preferred_port: u16,
+    pub show_home_heatmap: Option<bool>,
     pub gateway_listen_mode: Option<settings::GatewayListenMode>,
     pub gateway_custom_listen_address: Option<String>,
     pub auto_start: bool,
@@ -58,6 +59,7 @@ pub(crate) async fn settings_set(
 ) -> Result<settings::AppSettings, String> {
     let SettingsUpdate {
         preferred_port,
+        show_home_heatmap,
         gateway_listen_mode,
         gateway_custom_listen_address,
         auto_start,
@@ -115,6 +117,7 @@ pub(crate) async fn settings_set(
             let provider_cooldown_seconds =
                 provider_cooldown_seconds.unwrap_or(previous.provider_cooldown_seconds);
             let gateway_listen_mode = gateway_listen_mode.unwrap_or(previous.gateway_listen_mode);
+            let show_home_heatmap = show_home_heatmap.unwrap_or(previous.show_home_heatmap);
             let gateway_custom_listen_address = gateway_custom_listen_address
                 .unwrap_or(previous.gateway_custom_listen_address)
                 .trim()
@@ -191,6 +194,7 @@ pub(crate) async fn settings_set(
             let settings = settings::AppSettings {
                 schema_version: settings::SCHEMA_VERSION,
                 preferred_port,
+                show_home_heatmap,
                 gateway_listen_mode,
                 gateway_custom_listen_address,
                 wsl_auto_config,

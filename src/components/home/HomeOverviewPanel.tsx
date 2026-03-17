@@ -58,6 +58,7 @@ const PREVIEW_CIRCUITS: OpenCircuitRow[] = [
 export type HomeOverviewPanelProps = {
   showCustomTooltip: boolean;
   circuitPreviewEnabled?: boolean;
+  showHomeHeatmap: boolean;
 
   usageHeatmapRows: UsageHourlyRow[];
   usageHeatmapLoading: boolean;
@@ -103,6 +104,7 @@ export type HomeOverviewPanelProps = {
 export function HomeOverviewPanel({
   showCustomTooltip,
   circuitPreviewEnabled = import.meta.env.DEV,
+  showHomeHeatmap,
   usageHeatmapRows,
   usageHeatmapLoading,
   onRefreshUsageHeatmap,
@@ -152,7 +154,7 @@ export function HomeOverviewPanel({
     <div className="flex flex-col h-full gap-4">
       <div className="shrink-0">
         <div className="grid gap-4 lg:grid-cols-12 lg:items-stretch">
-          <div className="flex lg:col-span-3">
+          <div className={cn("flex", showHomeHeatmap ? "lg:col-span-3" : "lg:col-span-4")}>
             <HomeWorkStatusCard
               sortModes={sortModes}
               sortModesLoading={sortModesLoading}
@@ -165,8 +167,9 @@ export function HomeOverviewPanel({
             />
           </div>
 
-          <div className="flex lg:col-span-9">
+          <div className={cn("flex", showHomeHeatmap ? "lg:col-span-9" : "lg:col-span-8")}>
             <HomeUsageSection
+              showHeatmap={showHomeHeatmap}
               usageHeatmapRows={usageHeatmapRows}
               usageHeatmapLoading={usageHeatmapLoading}
               onRefreshUsageHeatmap={onRefreshUsageHeatmap}

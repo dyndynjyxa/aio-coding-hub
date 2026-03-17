@@ -16,6 +16,7 @@ import {
   useRequestLogsIncrementalPollQuery,
   useRequestLogsListAllQuery,
 } from "../query/requestLogs";
+import { useSettingsQuery } from "../query/settings";
 import { useUsageHourlySeriesQuery } from "../query/usage";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
@@ -39,6 +40,8 @@ export function HomePage() {
   const { traces } = useTraceStore();
   const showCustomTooltip = true;
   const foregroundActive = useDocumentVisibility();
+  const settingsQuery = useSettingsQuery();
+  const showHomeHeatmap = settingsQuery.data?.show_home_heatmap ?? true;
 
   const [tab, setTab] = useState<HomeTabKey>("overview");
   const tabRef = useRef(tab);
@@ -158,6 +161,7 @@ export function HomePage() {
         {tab === "overview" ? (
           <HomeOverviewPanel
             showCustomTooltip={showCustomTooltip}
+            showHomeHeatmap={showHomeHeatmap}
             usageHeatmapRows={usageHeatmapRows}
             usageHeatmapLoading={usageHeatmapLoading}
             onRefreshUsageHeatmap={refreshUsageHeatmap}

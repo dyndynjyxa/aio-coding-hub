@@ -30,6 +30,8 @@ function renderSettingsMainColumn(
     settingsReady: true,
     port: 37123,
     setPort: vi.fn(),
+    showHomeHeatmap: true,
+    setShowHomeHeatmap: vi.fn(),
     commitNumberField: vi.fn(),
     autoStart: false,
     setAutoStart: vi.fn(),
@@ -76,6 +78,28 @@ describe("pages/settings/SettingsMainColumn", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "System" }));
     expect(setTheme).toHaveBeenCalledWith("system");
+  });
+
+  it("toggles homepage heatmap visibility setting", () => {
+    const setShowHomeHeatmap = vi.fn();
+    const requestPersist = vi.fn();
+    vi.mocked(useTheme).mockReturnValue({
+      theme: "system",
+      resolvedTheme: "light",
+      setTheme: vi.fn(),
+    } as any);
+
+    renderSettingsMainColumn({
+      showHomeHeatmap: true,
+      setShowHomeHeatmap,
+      requestPersist,
+    });
+
+    const row = screen.getByText("显示首页热力图").parentElement;
+    expect(row).toBeTruthy();
+    fireEvent.click(within(row as HTMLElement).getByRole("switch"));
+    expect(setShowHomeHeatmap).toHaveBeenCalledWith(false);
+    expect(requestPersist).toHaveBeenCalledWith({ show_home_heatmap: false });
   });
 
   it.each([

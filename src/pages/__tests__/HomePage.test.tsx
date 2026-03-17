@@ -4,12 +4,11 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactElement } from "react";
 import { toast } from "sonner";
-import { setEnvConflictsState } from "../../test/msw/state";
 import { createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
-import { tauriInvoke } from "../../test/mocks/tauri";
 import { HomePage } from "../HomePage";
 import { logToConsole } from "../../services/consoleLog";
+import { envConflictsCheck } from "../../services/envConflicts";
 import { gatewayKeys } from "../../query/keys";
 import {
   useGatewayCircuitResetProviderMutation,
@@ -111,6 +110,13 @@ vi.mock("../../hooks/useCliProxy", async () => {
   const actual =
     await vi.importActual<typeof import("../../hooks/useCliProxy")>("../../hooks/useCliProxy");
   return { ...actual, useCliProxy: vi.fn() };
+});
+
+vi.mock("../../services/envConflicts", async () => {
+  const actual = await vi.importActual<typeof import("../../services/envConflicts")>(
+    "../../services/envConflicts"
+  );
+  return { ...actual, envConflictsCheck: vi.fn() };
 });
 
 vi.mock("../../query/gateway", async () => {
@@ -397,7 +403,7 @@ describe("pages/HomePage", () => {
 
     const client = createTestQueryClient();
     mockHomePageBaseQueries();
-    setEnvConflictsState([
+    vi.mocked(envConflictsCheck).mockResolvedValue([
       { var_name: "OPENAI_API_KEY", source_type: "system", source_path: "Process Environment" },
     ]);
 
@@ -412,11 +418,7 @@ describe("pages/HomePage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "enable-cli-proxy-codex" }));
 
-    await waitFor(() =>
-      expect(vi.mocked(tauriInvoke)).toHaveBeenCalledWith("env_conflicts_check", {
-        cliKey: "codex",
-      })
-    );
+    await waitFor(() => expect(envConflictsCheck).toHaveBeenCalledWith("codex"));
 
     const dialog = await screen.findByRole("dialog");
     expect(setCliProxyEnabled).not.toHaveBeenCalled();
@@ -431,7 +433,7 @@ describe("pages/HomePage", () => {
 
     const client = createTestQueryClient();
     mockHomePageBaseQueries();
-    setEnvConflictsState([]);
+    vi.mocked(envConflictsCheck).mockResolvedValue([]);
 
     const setCliProxyEnabled = vi.fn();
     vi.mocked(useCliProxy).mockReturnValue({

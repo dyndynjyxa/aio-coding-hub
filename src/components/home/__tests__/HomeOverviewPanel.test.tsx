@@ -29,6 +29,7 @@ function renderPanel(overrides: Partial<ComponentProps<typeof HomeOverviewPanel>
   render(
     <HomeOverviewPanel
       showCustomTooltip={false}
+      showHomeHeatmap={true}
       usageHeatmapRows={[]}
       usageHeatmapLoading={false}
       onRefreshUsageHeatmap={vi.fn()}

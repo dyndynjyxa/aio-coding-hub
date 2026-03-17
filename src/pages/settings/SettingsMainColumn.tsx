@@ -15,7 +15,7 @@ import { cn } from "../../utils/cn";
 import type { NoticePermissionStatus } from "./useSystemNotification";
 
 type PersistKey = "preferred_port" | "log_retention_days";
-type BooleanPersistKey = "auto_start" | "start_minimized" | "tray_enabled";
+type BooleanPersistKey = "show_home_heatmap" | "auto_start" | "start_minimized" | "tray_enabled";
 
 export type SettingsMainColumnProps = {
   gateway: GatewayStatus | null;
@@ -33,6 +33,8 @@ export type SettingsMainColumnProps = {
     invalidMessage: string;
   }) => void;
 
+  showHomeHeatmap: boolean;
+  setShowHomeHeatmap: (next: boolean) => void;
   autoStart: boolean;
   setAutoStart: (next: boolean) => void;
   startMinimized: boolean;
@@ -60,6 +62,8 @@ export function SettingsMainColumn({
   settingsReady,
   port,
   setPort,
+  showHomeHeatmap,
+  setShowHomeHeatmap,
   commitNumberField,
   autoStart,
   setAutoStart,
@@ -245,6 +249,13 @@ export function SettingsMainColumn({
               </SettingsRow>
               {(
                 [
+                  {
+                    label: "显示首页热力图",
+                    key: "show_home_heatmap" as const,
+                    checked: showHomeHeatmap,
+                    setter: setShowHomeHeatmap,
+                    disabled: !settingsReady,
+                  },
                   {
                     label: "开机自启",
                     key: "auto_start" as const,
