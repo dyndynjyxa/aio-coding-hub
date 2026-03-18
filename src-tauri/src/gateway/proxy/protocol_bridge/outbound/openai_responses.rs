@@ -1125,9 +1125,11 @@ mod tests {
 
     #[test]
     fn sse_text_delta_emits_content_block_delta() {
-        let mut state = StreamState::default();
-        state.block_index = 1;
-        state.block_open = true;
+        let mut state = StreamState {
+            block_index: 1,
+            block_open: true,
+            ..StreamState::default()
+        };
 
         let data = json!({"delta": "Hello"});
         let chunks = sse_event_to_ir("response.output_text.delta", &data, &mut state).unwrap();
@@ -1146,9 +1148,11 @@ mod tests {
 
     #[test]
     fn sse_empty_text_delta_is_ignored() {
-        let mut state = StreamState::default();
-        state.block_index = 1;
-        state.block_open = true;
+        let mut state = StreamState {
+            block_index: 1,
+            block_open: true,
+            ..StreamState::default()
+        };
 
         let data = json!({"delta": ""});
         let chunks = sse_event_to_ir("response.output_text.delta", &data, &mut state).unwrap();
@@ -1157,10 +1161,12 @@ mod tests {
 
     #[test]
     fn sse_function_call_flow() {
-        let mut state = StreamState::default();
+        let mut state = StreamState {
+            block_index: 1,
+            block_open: true,
+            ..StreamState::default()
+        };
         // Simulate response.created already happened
-        state.block_index = 1;
-        state.block_open = true;
 
         // output_item.added for function_call
         let added_data = json!({
@@ -1225,11 +1231,13 @@ mod tests {
 
     #[test]
     fn sse_response_completed_with_tool_use() {
-        let mut state = StreamState::default();
-        state.block_index = 2;
-        state.block_open = false;
-        state.saw_tool_use = true;
-        state.saw_visible_text = true;
+        let mut state = StreamState {
+            block_index: 2,
+            block_open: false,
+            saw_tool_use: true,
+            saw_visible_text: true,
+            ..StreamState::default()
+        };
 
         let data = json!({
             "response": {
@@ -1253,10 +1261,12 @@ mod tests {
 
     #[test]
     fn sse_response_completed_closes_open_block() {
-        let mut state = StreamState::default();
-        state.block_index = 1;
-        state.block_open = true;
-        state.saw_visible_text = true;
+        let mut state = StreamState {
+            block_index: 1,
+            block_open: true,
+            saw_visible_text: true,
+            ..StreamState::default()
+        };
 
         let data = json!({
             "response": {
@@ -1283,12 +1293,14 @@ mod tests {
 
     #[test]
     fn sse_response_completed_fallback_text_extraction() {
-        let mut state = StreamState::default();
-        state.block_index = 1;
-        state.block_open = true;
+        let mut state = StreamState {
+            block_index: 1,
+            block_open: true,
+            saw_visible_text: false,
+            text_emitted: false,
+            ..StreamState::default()
+        };
         // No text was emitted via deltas
-        state.saw_visible_text = false;
-        state.text_emitted = false;
 
         let data = json!({
             "response": {
@@ -1316,10 +1328,12 @@ mod tests {
 
     #[test]
     fn sse_output_item_done_message_fallback_text() {
-        let mut state = StreamState::default();
-        state.block_index = 1;
-        state.block_open = true;
-        state.text_emitted = false;
+        let mut state = StreamState {
+            block_index: 1,
+            block_open: true,
+            text_emitted: false,
+            ..StreamState::default()
+        };
 
         let data = json!({
             "item": {
@@ -1351,10 +1365,12 @@ mod tests {
 
     #[test]
     fn sse_incomplete_status_maps_to_max_tokens() {
-        let mut state = StreamState::default();
-        state.block_index = 1;
-        state.block_open = true;
-        state.saw_visible_text = true;
+        let mut state = StreamState {
+            block_index: 1,
+            block_open: true,
+            saw_visible_text: true,
+            ..StreamState::default()
+        };
 
         let data = json!({
             "response": {
