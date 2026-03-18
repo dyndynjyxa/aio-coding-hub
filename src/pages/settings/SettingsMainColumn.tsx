@@ -16,9 +16,15 @@ import { cn } from "../../utils/cn";
 import type { NoticePermissionStatus } from "./useSystemNotification";
 
 type PersistKey = "preferred_port" | "log_retention_days";
-type BooleanPersistKey = "show_home_heatmap" | "auto_start" | "start_minimized" | "tray_enabled";
+type BooleanPersistKey =
+  | "show_home_heatmap"
+  | "show_home_usage"
+  | "auto_start"
+  | "start_minimized"
+  | "tray_enabled";
 type SettingsPersistPatch = Partial<{
   show_home_heatmap: boolean;
+  show_home_usage: boolean;
   home_usage_period: HomeUsagePeriod;
   auto_start: boolean;
   start_minimized: boolean;
@@ -50,6 +56,8 @@ export type SettingsMainColumnProps = {
 
   showHomeHeatmap: boolean;
   setShowHomeHeatmap: (next: boolean) => void;
+  showHomeUsage: boolean;
+  setShowHomeUsage: (next: boolean) => void;
   homeUsagePeriod: HomeUsagePeriod;
   setHomeUsagePeriod: (next: HomeUsagePeriod) => void;
   autoStart: boolean;
@@ -81,6 +89,8 @@ export function SettingsMainColumn({
   setPort,
   showHomeHeatmap,
   setShowHomeHeatmap,
+  showHomeUsage,
+  setShowHomeUsage,
   homeUsagePeriod,
   setHomeUsagePeriod,
   commitNumberField,
@@ -296,6 +306,13 @@ export function SettingsMainColumn({
                     key: "show_home_heatmap" as const,
                     checked: showHomeHeatmap,
                     setter: setShowHomeHeatmap,
+                    disabled: !settingsReady,
+                  },
+                  {
+                    label: "显示首页用量统计",
+                    key: "show_home_usage" as const,
+                    checked: showHomeUsage,
+                    setter: setShowHomeUsage,
                     disabled: !settingsReady,
                   },
                   {

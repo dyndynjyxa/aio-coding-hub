@@ -58,6 +58,117 @@ const PREVIEW_CIRCUITS: OpenCircuitRow[] = [
   },
 ];
 
+const PREVIEW_ACTIVE_SESSIONS: GatewayActiveSession[] = [
+  {
+    cli_key: "claude",
+    session_id: "preview-claude-1",
+    session_suffix: "a1f4",
+    provider_id: 101,
+    provider_name: "Claude Main",
+    expires_at: Math.floor(Date.now() / 1000) + 18 * 60,
+    request_count: 12,
+    total_input_tokens: 18240,
+    total_output_tokens: 9132,
+    total_cost_usd: 1.284,
+    total_duration_ms: 48200,
+  },
+  {
+    cli_key: "codex",
+    session_id: "preview-codex-1",
+    session_suffix: "c9d2",
+    provider_id: 102,
+    provider_name: "OpenAI Primary",
+    expires_at: Math.floor(Date.now() / 1000) + 11 * 60,
+    request_count: 7,
+    total_input_tokens: 9640,
+    total_output_tokens: 4408,
+    total_cost_usd: 0.632,
+    total_duration_ms: 27500,
+  },
+  {
+    cli_key: "gemini",
+    session_id: "preview-gemini-1",
+    session_suffix: "g7b8",
+    provider_id: 103,
+    provider_name: "Gemini Mirror",
+    expires_at: Math.floor(Date.now() / 1000) + 25 * 60,
+    request_count: 15,
+    total_input_tokens: 20512,
+    total_output_tokens: 11032,
+    total_cost_usd: 0.948,
+    total_duration_ms: 53400,
+  },
+];
+
+const PREVIEW_PROVIDER_LIMIT_ROWS: ProviderLimitUsageRow[] = [
+  {
+    cli_key: "claude",
+    provider_id: 201,
+    provider_name: "Claude Main",
+    enabled: true,
+    limit_5h_usd: 12,
+    limit_daily_usd: 40,
+    daily_reset_mode: "rolling",
+    daily_reset_time: null,
+    limit_weekly_usd: 180,
+    limit_monthly_usd: null,
+    limit_total_usd: null,
+    usage_5h_usd: 8.6,
+    usage_daily_usd: 19.4,
+    usage_weekly_usd: 84.2,
+    usage_monthly_usd: 0,
+    usage_total_usd: 0,
+    window_5h_start_ts: 1_710_000_000,
+    window_daily_start_ts: 1_710_018_000,
+    window_weekly_start_ts: 1_709_481_600,
+    window_monthly_start_ts: 1_709_395_200,
+  },
+  {
+    cli_key: "codex",
+    provider_id: 202,
+    provider_name: "OpenAI Primary",
+    enabled: true,
+    limit_5h_usd: null,
+    limit_daily_usd: 25,
+    daily_reset_mode: "fixed",
+    daily_reset_time: "00:00:00",
+    limit_weekly_usd: null,
+    limit_monthly_usd: 300,
+    limit_total_usd: 900,
+    usage_5h_usd: 0,
+    usage_daily_usd: 21.8,
+    usage_weekly_usd: 0,
+    usage_monthly_usd: 126.4,
+    usage_total_usd: 402.6,
+    window_5h_start_ts: 1_710_000_000,
+    window_daily_start_ts: 1_710_028_800,
+    window_weekly_start_ts: 1_709_481_600,
+    window_monthly_start_ts: 1_709_395_200,
+  },
+  {
+    cli_key: "gemini",
+    provider_id: 203,
+    provider_name: "Gemini Mirror",
+    enabled: false,
+    limit_5h_usd: null,
+    limit_daily_usd: 18,
+    daily_reset_mode: "rolling",
+    daily_reset_time: null,
+    limit_weekly_usd: null,
+    limit_monthly_usd: null,
+    limit_total_usd: null,
+    usage_5h_usd: 0,
+    usage_daily_usd: 4.1,
+    usage_weekly_usd: 0,
+    usage_monthly_usd: 0,
+    usage_total_usd: 0,
+    window_5h_start_ts: 1_710_000_000,
+    window_daily_start_ts: 1_710_018_000,
+    window_weekly_start_ts: 1_709_481_600,
+    window_monthly_start_ts: 1_709_395_200,
+  },
+];
+
 function didKeysChange(current: string[], previous: string[]) {
   return (
     current.length !== previous.length || current.some((key, index) => key !== previous[index])
@@ -68,6 +179,7 @@ export type HomeOverviewPanelProps = {
   showCustomTooltip: boolean;
   devPreviewEnabled?: boolean;
   showHomeHeatmap: boolean;
+  showHomeUsage?: boolean;
 
   usageWindowDays: number;
   usageHeatmapRows: UsageHourlyRow[];
@@ -161,6 +273,7 @@ export function HomeOverviewPanel({
   showCustomTooltip,
   devPreviewEnabled = false,
   showHomeHeatmap,
+  showHomeUsage = true,
   usageWindowDays,
   usageHeatmapRows,
   usageHeatmapLoading,
@@ -201,6 +314,12 @@ export function HomeOverviewPanel({
   const previousOpenCircuitKeysRef = useRef<string[] | null>(null);
   const circuitPreviewActive = openCircuits.length === 0 && devPreviewEnabled;
   const displayedCircuits = circuitPreviewActive ? PREVIEW_CIRCUITS : openCircuits;
+  const displayedActiveSessions =
+    devPreviewEnabled && activeSessions.length === 0 ? PREVIEW_ACTIVE_SESSIONS : activeSessions;
+  const displayedProviderLimitRows =
+    devPreviewEnabled && providerLimitRows.length === 0
+      ? PREVIEW_PROVIDER_LIMIT_ROWS
+      : providerLimitRows;
   const displayedWorkspaceConfigs = useMemo(() => {
     if (workspaceConfigs.length === 0) {
       return devPreviewEnabled ? PREVIEW_WORKSPACE_CONFIGS : [];
@@ -229,6 +348,7 @@ export function HomeOverviewPanel({
     });
   }, [devPreviewEnabled, workspaceConfigs]);
   const circuitNowUnix = useNowUnix(sessionsTab === "circuit" && displayedCircuits.length > 0);
+  const showUsageRow = showHomeHeatmap || showHomeUsage;
 
   const openCircuitKeys = useMemo(
     () =>
@@ -278,12 +398,13 @@ export function HomeOverviewPanel({
   return (
     <div className="flex flex-col h-full gap-4">
       <div className="shrink-0">
-        {showHomeHeatmap ? (
+        {showHomeHeatmap && showHomeUsage ? (
           <div className="space-y-4">
             <div className="flex">
               <HomeUsageSection
                 devPreviewEnabled={devPreviewEnabled}
                 showHeatmap={true}
+                showUsageChart={true}
                 usageWindowDays={usageWindowDays}
                 usageHeatmapRows={usageHeatmapRows}
                 usageHeatmapLoading={usageHeatmapLoading}
@@ -302,7 +423,7 @@ export function HomeOverviewPanel({
               />
             </div>
           </div>
-        ) : (
+        ) : showUsageRow ? (
           <div className="grid gap-4 lg:grid-cols-12 lg:items-stretch">
             <div className="flex lg:col-span-4">
               <HomeWorkStatusCard
@@ -318,13 +439,25 @@ export function HomeOverviewPanel({
             <div className="flex lg:col-span-8">
               <HomeUsageSection
                 devPreviewEnabled={devPreviewEnabled}
-                showHeatmap={false}
+                showHeatmap={showHomeHeatmap}
+                showUsageChart={showHomeUsage}
                 usageWindowDays={usageWindowDays}
                 usageHeatmapRows={usageHeatmapRows}
                 usageHeatmapLoading={usageHeatmapLoading}
                 onRefreshUsageHeatmap={onRefreshUsageHeatmap}
               />
             </div>
+          </div>
+        ) : (
+          <div className="flex">
+            <HomeWorkStatusCard
+              layout="horizontal"
+              sortModesLoading={sortModesLoading}
+              sortModesAvailable={sortModesAvailable}
+              cliProxyEnabled={cliProxyEnabled}
+              cliProxyToggling={cliProxyToggling}
+              onSetCliProxyEnabled={onSetCliProxyEnabled}
+            />
           </div>
         )}
       </div>
@@ -365,7 +498,7 @@ export function HomeOverviewPanel({
             <div className="flex-1 min-h-0 mt-3">
               {sessionsTab === "sessions" ? (
                 <HomeActiveSessionsCardContent
-                  activeSessions={activeSessions}
+                  activeSessions={displayedActiveSessions}
                   activeSessionsLoading={activeSessionsLoading}
                   activeSessionsAvailable={activeSessionsAvailable}
                 />
@@ -378,7 +511,7 @@ export function HomeOverviewPanel({
                 />
               ) : sessionsTab === "providerLimit" ? (
                 <HomeProviderLimitPanelContent
-                  rows={providerLimitRows}
+                  rows={displayedProviderLimitRows}
                   loading={providerLimitLoading}
                   available={providerLimitAvailable}
                 />

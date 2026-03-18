@@ -69,6 +69,8 @@ describe("pages/settings/SettingsPage", () => {
       setPort: vi.fn(),
       showHomeHeatmap: true,
       setShowHomeHeatmap: vi.fn(),
+      showHomeUsage: true,
+      setShowHomeUsage: vi.fn(),
       homeUsagePeriod: "last15",
       setHomeUsagePeriod: vi.fn(),
       commitNumberField: vi.fn(),

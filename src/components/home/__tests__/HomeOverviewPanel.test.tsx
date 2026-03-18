@@ -4,19 +4,31 @@ import { describe, expect, it, vi } from "vitest";
 import { HomeOverviewPanel } from "../HomeOverviewPanel";
 
 vi.mock("../HomeUsageSection", () => ({
-  HomeUsageSection: () => <div>usage-section</div>,
+  HomeUsageSection: ({
+    showHeatmap,
+    showUsageChart = true,
+  }: {
+    showHeatmap: boolean;
+    showUsageChart?: boolean;
+  }) => <div>{`usage-section:${String(showHeatmap)}:${String(showUsageChart)}`}</div>,
 }));
 
 vi.mock("../HomeWorkStatusCard", () => ({
-  HomeWorkStatusCard: () => <div>work-status-card</div>,
+  HomeWorkStatusCard: ({ layout }: { layout: string }) => <div>{`work-status-card:${layout}`}</div>,
 }));
 
 vi.mock("../HomeActiveSessionsCard", () => ({
-  HomeActiveSessionsCardContent: () => <div>active-sessions</div>,
+  HomeActiveSessionsCardContent: ({
+    activeSessions,
+  }: {
+    activeSessions: Array<{ session_id: string }>;
+  }) => <div>active-sessions:{activeSessions.length}</div>,
 }));
 
 vi.mock("../HomeProviderLimitPanel", () => ({
-  HomeProviderLimitPanelContent: () => <div>provider-limit</div>,
+  HomeProviderLimitPanelContent: ({ rows }: { rows: Array<{ provider_id: number }> }) => (
+    <div>provider-limit:{rows.length}</div>
+  ),
 }));
 
 vi.mock("../HomeRequestLogsPanel", () => ({
@@ -235,11 +247,46 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(screen.getByText("code-review")).toBeInTheDocument();
   });
 
+  it("renders only the horizontal proxy status card when both heatmap and usage are hidden", () => {
+    renderPanel({ showHomeHeatmap: false, showHomeUsage: false });
+
+    expect(screen.queryByText(/usage-section:/)).not.toBeInTheDocument();
+    expect(screen.getByText("work-status-card:horizontal")).toBeInTheDocument();
+  });
+
+  it("uses the split layout with usage statistics when heatmap is hidden", () => {
+    renderPanel({ showHomeHeatmap: false, showHomeUsage: true });
+
+    expect(screen.getByText("usage-section:false:true")).toBeInTheDocument();
+    expect(screen.getByText("work-status-card:vertical")).toBeInTheDocument();
+  });
+
+  it("uses the split layout with heatmap when usage statistics are hidden", () => {
+    renderPanel({ showHomeHeatmap: true, showHomeUsage: false });
+
+    expect(screen.getByText("usage-section:true:false")).toBeInTheDocument();
+    expect(screen.getByText("work-status-card:vertical")).toBeInTheDocument();
+  });
+
+  it("renders preview active sessions when dev preview is enabled and there are no real sessions", () => {
+    renderPanel({ devPreviewEnabled: true, activeSessions: [] });
+
+    fireEvent.click(screen.getByRole("tab", { name: "活跃 Session" }));
+    expect(screen.getByText("active-sessions:3")).toBeInTheDocument();
+  });
+
+  it("renders preview provider limits when dev preview is enabled and there are no real rows", () => {
+    renderPanel({ devPreviewEnabled: true, providerLimitRows: [] });
+
+    fireEvent.click(screen.getByRole("tab", { name: "供应商限额" }));
+    expect(screen.getByText("provider-limit:3")).toBeInTheDocument();
+  });
+
   it("auto-switches to 熔断信息 when new open circuits arrive", () => {
     const { rerender } = renderPanel();
 
     fireEvent.click(screen.getByRole("tab", { name: "供应商限额" }));
-    expect(screen.getByText("provider-limit")).toBeInTheDocument();
+    expect(screen.getByText("provider-limit:0")).toBeInTheDocument();
 
     rerender(
       <HomeOverviewPanel
@@ -304,7 +351,7 @@ describe("components/home/HomeOverviewPanel", () => {
     });
 
     fireEvent.click(screen.getByRole("tab", { name: "供应商限额" }));
-    expect(screen.getByText("provider-limit")).toBeInTheDocument();
+    expect(screen.getByText("provider-limit:0")).toBeInTheDocument();
 
     rerender(
       <HomeOverviewPanel

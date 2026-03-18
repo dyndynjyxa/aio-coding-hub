@@ -45,6 +45,8 @@ export function HomePage() {
   const foregroundActive = useDocumentVisibility();
   const settingsQuery = useSettingsQuery();
   const showHomeHeatmap = settingsQuery.data?.show_home_heatmap ?? true;
+  const showHomeUsage = settingsQuery.data?.show_home_usage ?? true;
+  const showOverviewUsageSection = showHomeHeatmap || showHomeUsage;
   const homeUsagePeriod = settingsQuery.data?.home_usage_period ?? DEFAULT_HOME_USAGE_PERIOD;
   const homeUsageWindowDays = resolveHomeUsageWindowDays(homeUsagePeriod);
   const isDevMode = import.meta.env.DEV;
@@ -75,7 +77,7 @@ export function HomePage() {
 
   // --- Overview data queries ---
   const usageHeatmapQuery = useUsageHourlySeriesQuery(homeUsageWindowDays, {
-    enabled: tab === "overview",
+    enabled: tab === "overview" && showOverviewUsageSection,
   });
   const usageHeatmapRows = usageHeatmapQuery.data ?? [];
   const usageHeatmapLoading = usageHeatmapQuery.isFetching;
@@ -128,17 +130,21 @@ export function HomePage() {
     const prev = tabRef.current;
     tabRef.current = tab;
     if (prev !== "overview" && tab === "overview") {
-      void usageHeatmapQuery.refetch();
+      if (showOverviewUsageSection) {
+        void usageHeatmapQuery.refetch();
+      }
       void requestLogsQuery.refetch();
       void providerLimitQuery.refetch();
     }
-  }, [providerLimitQuery, requestLogsQuery, tab, usageHeatmapQuery]);
+  }, [providerLimitQuery, requestLogsQuery, showOverviewUsageSection, tab, usageHeatmapQuery]);
 
   useWindowForeground({
     enabled: tab === "overview",
     throttleMs: 1000,
     onForeground: () => {
-      void usageHeatmapQuery.refetch();
+      if (showOverviewUsageSection) {
+        void usageHeatmapQuery.refetch();
+      }
       void requestLogsQuery.refetch();
       void providerLimitQuery.refetch();
     },
@@ -184,6 +190,7 @@ export function HomePage() {
             showCustomTooltip={showCustomTooltip}
             devPreviewEnabled={devPreviewEnabled}
             showHomeHeatmap={showHomeHeatmap}
+            showHomeUsage={showHomeUsage}
             usageWindowDays={homeUsageWindowDays}
             usageHeatmapRows={usageHeatmapRows}
             usageHeatmapLoading={usageHeatmapLoading}

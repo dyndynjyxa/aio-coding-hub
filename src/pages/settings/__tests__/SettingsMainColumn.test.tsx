@@ -32,6 +32,8 @@ function renderSettingsMainColumn(
     setPort: vi.fn(),
     showHomeHeatmap: true,
     setShowHomeHeatmap: vi.fn(),
+    showHomeUsage: true,
+    setShowHomeUsage: vi.fn(),
     homeUsagePeriod: "last15",
     setHomeUsagePeriod: vi.fn(),
     commitNumberField: vi.fn(),
@@ -102,6 +104,28 @@ describe("pages/settings/SettingsMainColumn", () => {
     fireEvent.click(within(row as HTMLElement).getByRole("switch"));
     expect(setShowHomeHeatmap).toHaveBeenCalledWith(false);
     expect(requestPersist).toHaveBeenCalledWith({ show_home_heatmap: false });
+  });
+
+  it("toggles homepage usage visibility setting", () => {
+    const setShowHomeUsage = vi.fn();
+    const requestPersist = vi.fn();
+    vi.mocked(useTheme).mockReturnValue({
+      theme: "system",
+      resolvedTheme: "light",
+      setTheme: vi.fn(),
+    } as any);
+
+    renderSettingsMainColumn({
+      showHomeUsage: true,
+      setShowHomeUsage,
+      requestPersist,
+    });
+
+    const row = screen.getByText("显示首页用量统计").parentElement;
+    expect(row).toBeTruthy();
+    fireEvent.click(within(row as HTMLElement).getByRole("switch"));
+    expect(setShowHomeUsage).toHaveBeenCalledWith(false);
+    expect(requestPersist).toHaveBeenCalledWith({ show_home_usage: false });
   });
 
   it("persists homepage usage period setting", () => {

@@ -15,6 +15,7 @@ export type AppSettings = {
   schema_version: number;
   preferred_port: number;
   show_home_heatmap: boolean;
+  show_home_usage: boolean;
   home_usage_period: HomeUsagePeriod;
   gateway_listen_mode: GatewayListenMode;
   gateway_custom_listen_address: string;
@@ -57,6 +58,7 @@ export type AppSettings = {
 export type SettingsSetInput = {
   preferredPort: number;
   showHomeHeatmap?: boolean;
+  showHomeUsage?: boolean;
   homeUsagePeriod?: HomeUsagePeriod;
   gatewayListenMode?: GatewayListenMode;
   gatewayCustomListenAddress?: string;

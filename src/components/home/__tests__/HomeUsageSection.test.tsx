@@ -97,6 +97,22 @@ describe("components/home/HomeUsageSection", () => {
     expect(screen.getByText("2.4K")).toBeInTheDocument();
   });
 
+  it("supports rendering only the heatmap card", () => {
+    render(
+      <HomeUsageSection
+        showHeatmap={true}
+        showUsageChart={false}
+        usageHeatmapRows={[]}
+        usageHeatmapLoading={false}
+        onRefreshUsageHeatmap={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("heatmap")).toBeInTheDocument();
+    expect(screen.queryByText("tokens-chart")).not.toBeInTheDocument();
+    expect(screen.queryByText("今日用量")).not.toBeInTheDocument();
+  });
+
   it("renders preview usage data when dev preview is enabled and rows are empty", () => {
     render(
       <HomeUsageSection

@@ -21,9 +21,10 @@ const DEFAULT_CLI_PROXY_STATUS: CliProxyStatus[] = [
 
 // Default settings matching the Rust backend defaults.
 const DEFAULT_SETTINGS: AppSettings = {
-  schema_version: 21,
+  schema_version: 22,
   preferred_port: 37123,
   show_home_heatmap: true,
+  show_home_usage: true,
   home_usage_period: "last15",
   gateway_listen_mode: "localhost",
   gateway_custom_listen_address: "",

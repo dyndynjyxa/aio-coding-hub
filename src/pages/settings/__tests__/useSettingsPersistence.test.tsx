@@ -38,6 +38,7 @@ function createSettings(overrides: Partial<any> = {}) {
     schema_version: 1,
     preferred_port: 37123,
     show_home_heatmap: true,
+    show_home_usage: true,
     home_usage_period: "last15",
     auto_start: false,
     tray_enabled: true,
@@ -124,6 +125,7 @@ describe("settings/useSettingsPersistence", () => {
     vi.mocked(useSettingsQuery).mockReturnValue({
       data: createSettings({
         tray_enabled: undefined,
+        show_home_usage: undefined,
         home_usage_period: undefined,
         provider_cooldown_seconds: undefined,
         provider_base_url_ping_cache_ttl_seconds: undefined,
@@ -152,6 +154,7 @@ describe("settings/useSettingsPersistence", () => {
     const { result } = renderHook(() => useSettingsPersistence({ gateway: null, about: null }));
     await waitFor(() => expect(result.current.settingsReady).toBe(true));
     expect(result.current.trayEnabled).toBe(true);
+    expect(result.current.showHomeUsage).toBe(true);
     expect(result.current.homeUsagePeriod).toBe("last15");
   });
 

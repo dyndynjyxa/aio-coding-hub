@@ -9,7 +9,7 @@ use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, Instant};
 use tauri::Manager;
 
-pub const SCHEMA_VERSION: u32 = 21;
+pub const SCHEMA_VERSION: u32 = 22;
 const SCHEMA_VERSION_DISABLE_UPSTREAM_TIMEOUTS: u32 = 7;
 const SCHEMA_VERSION_ADD_GATEWAY_RECTIFIERS: u32 = 8;
 const SCHEMA_VERSION_ADD_CIRCUIT_BREAKER_NOTICE: u32 = 9;
@@ -25,6 +25,7 @@ const SCHEMA_VERSION_ADD_CCH_BASE_CONFIG: u32 = 18;
 const SCHEMA_VERSION_ADD_START_MINIMIZED: u32 = 19;
 const SCHEMA_VERSION_ADD_SHOW_HOME_HEATMAP: u32 = 20;
 const SCHEMA_VERSION_ADD_HOME_USAGE_PERIOD: u32 = 21;
+const SCHEMA_VERSION_ADD_SHOW_HOME_USAGE: u32 = 22;
 pub const DEFAULT_GATEWAY_PORT: u16 = 37123;
 pub const MAX_GATEWAY_PORT: u16 = 37199;
 const DEFAULT_LOG_RETENTION_DAYS: u32 = 7;
@@ -49,6 +50,7 @@ const DEFAULT_ENABLE_TASK_COMPLETE_NOTIFY: bool = true;
 const DEFAULT_ENABLE_RESPONSE_FIXER: bool = true;
 const DEFAULT_ENABLE_CLI_PROXY_STARTUP_RECOVERY: bool = true;
 const DEFAULT_SHOW_HOME_HEATMAP: bool = true;
+const DEFAULT_SHOW_HOME_USAGE: bool = true;
 const DEFAULT_RESPONSE_FIXER_FIX_ENCODING: bool = true;
 const DEFAULT_RESPONSE_FIXER_FIX_SSE_FORMAT: bool = true;
 const DEFAULT_RESPONSE_FIXER_FIX_TRUNCATED_JSON: bool = true;
@@ -148,6 +150,8 @@ pub struct AppSettings {
     pub preferred_port: u16,
     #[serde(default = "default_show_home_heatmap")]
     pub show_home_heatmap: bool,
+    #[serde(default = "default_show_home_usage")]
+    pub show_home_usage: bool,
     #[serde(default)]
     pub home_usage_period: HomeUsagePeriod,
     // Gateway listen mode (aligned with code-switch-r): localhost / wsl_auto / lan / custom.
@@ -207,6 +211,7 @@ impl Default for AppSettings {
             schema_version: SCHEMA_VERSION,
             preferred_port: DEFAULT_GATEWAY_PORT,
             show_home_heatmap: DEFAULT_SHOW_HOME_HEATMAP,
+            show_home_usage: DEFAULT_SHOW_HOME_USAGE,
             home_usage_period: HomeUsagePeriod::default(),
             gateway_listen_mode: GatewayListenMode::Localhost,
             gateway_custom_listen_address: String::new(),
@@ -253,6 +258,10 @@ impl Default for AppSettings {
 
 fn default_show_home_heatmap() -> bool {
     DEFAULT_SHOW_HOME_HEATMAP
+}
+
+fn default_show_home_usage() -> bool {
+    DEFAULT_SHOW_HOME_USAGE
 }
 
 fn sanitize_failover_settings(settings: &mut AppSettings) -> bool {
@@ -610,6 +619,15 @@ fn migrate_add_home_usage_period(settings: &mut AppSettings, schema_version_pres
     )
 }
 
+fn migrate_add_show_home_usage(settings: &mut AppSettings, schema_version_present: bool) -> bool {
+    // v22: Add homepage usage visibility toggle (default enabled).
+    migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_SHOW_HOME_USAGE,
+    )
+}
+
 fn settings_path(app: &tauri::AppHandle) -> AppResult<PathBuf> {
     Ok(app_paths::app_data_dir(app)?.join("settings.json"))
 }
@@ -731,6 +749,7 @@ pub fn read(app: &tauri::AppHandle) -> AppResult<AppSettings> {
             repaired |= migrate_add_start_minimized(&mut settings, schema_version_present);
             repaired |= migrate_add_show_home_heatmap(&mut settings, schema_version_present);
             repaired |= migrate_add_home_usage_period(&mut settings, schema_version_present);
+            repaired |= migrate_add_show_home_usage(&mut settings, schema_version_present);
             repaired |= sanitize_failover_settings(&mut settings);
             repaired |= sanitize_circuit_breaker_settings(&mut settings);
             repaired |= sanitize_provider_cooldown_seconds(&mut settings);
@@ -801,6 +820,7 @@ pub fn read(app: &tauri::AppHandle) -> AppResult<AppSettings> {
     repaired |= migrate_add_start_minimized(&mut settings, schema_version_present);
     repaired |= migrate_add_show_home_heatmap(&mut settings, schema_version_present);
     repaired |= migrate_add_home_usage_period(&mut settings, schema_version_present);
+    repaired |= migrate_add_show_home_usage(&mut settings, schema_version_present);
     repaired |= sanitize_failover_settings(&mut settings);
     repaired |= sanitize_circuit_breaker_settings(&mut settings);
     repaired |= sanitize_provider_cooldown_seconds(&mut settings);
@@ -1399,6 +1419,12 @@ mod tests {
     }
 
     #[test]
+    fn app_settings_default_shows_home_usage() {
+        let s = AppSettings::default();
+        assert!(s.show_home_usage);
+    }
+
+    #[test]
     fn app_settings_default_uses_last15_home_usage_period() {
         let s = AppSettings::default();
         assert_eq!(s.home_usage_period, HomeUsagePeriod::Last15);
@@ -1448,5 +1474,15 @@ mod tests {
         };
         assert!(migrate_add_home_usage_period(&mut s, true));
         assert_eq!(s.schema_version, SCHEMA_VERSION_ADD_HOME_USAGE_PERIOD);
+    }
+
+    #[test]
+    fn migrate_add_show_home_usage_bumps_schema_version() {
+        let mut s = AppSettings {
+            schema_version: 21,
+            ..Default::default()
+        };
+        assert!(migrate_add_show_home_usage(&mut s, true));
+        assert_eq!(s.schema_version, SCHEMA_VERSION_ADD_SHOW_HOME_USAGE);
     }
 }

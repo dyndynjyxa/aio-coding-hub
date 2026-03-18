@@ -6,6 +6,7 @@ import type { ReactElement } from "react";
 import { toast } from "sonner";
 import { createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
+import { mergeSettingsState, resetMswState } from "../../test/msw/state";
 import { HomePage } from "../HomePage";
 import { logToConsole } from "../../services/consoleLog";
 import { envConflictsCheck } from "../../services/envConflicts";
@@ -46,12 +47,16 @@ vi.mock("../../components/home/HomeOverviewPanel", () => ({
     onRefreshRequestLogs,
     onSelectLogId,
     devPreviewEnabled,
+    showHomeHeatmap,
+    showHomeUsage,
     openCircuits,
     onResetCircuitProvider,
   }: any) => (
     <div>
       <div>sort-loading:{String(sortModesLoading)}</div>
       <div>dev-preview:{String(devPreviewEnabled)}</div>
+      <div>show-heatmap:{String(showHomeHeatmap)}</div>
+      <div>show-usage:{String(showHomeUsage)}</div>
       <div>open-circuits:{openCircuits.length}</div>
       <button type="button" onClick={() => onResetCircuitProvider(1)}>
         reset-1
@@ -258,6 +263,7 @@ function mockHomePageBaseQueries() {
 
 describe("pages/HomePage", () => {
   beforeEach(() => {
+    resetMswState();
     vi.mocked(useProviderLimitUsageV1Query).mockReturnValue({
       data: null,
       isLoading: false,
@@ -583,6 +589,27 @@ describe("pages/HomePage", () => {
 
     expect(screen.getByRole("button", { name: "Dev关闭预览数据" })).toBeInTheDocument();
     expect(screen.getByText("dev-preview:true")).toBeInTheDocument();
+  });
+
+  it("passes homepage heatmap and usage switches to overview", async () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    mockHomePageBaseQueries();
+    vi.mocked(useCliProxy).mockReturnValue({
+      enabled: { claude: false, codex: false, gemini: false },
+      toggling: { claude: false, codex: false, gemini: false },
+      setCliProxyEnabled: vi.fn(),
+    } as any);
+
+    mergeSettingsState({ show_home_heatmap: false, show_home_usage: true });
+
+    renderWithProviders(client, <HomePage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("show-heatmap:false")).toBeInTheDocument();
+      expect(screen.getByText("show-usage:true")).toBeInTheDocument();
+    });
   });
 
   it("covers pending switch dialog cancel/onOpenChange and auto refresh when open_until is null", async () => {

@@ -19,7 +19,7 @@ export type MobileNavProps = {
  * Slides in from the left on small screens
  */
 export function MobileNav({ isOpen, onClose }: MobileNavProps) {
-  const { statusText, statusTone, portText, hasUpdate, isPortable } = useGatewayStatus();
+  const { statusText, statusTone, portTone, portText, hasUpdate, isPortable } = useGatewayStatus();
 
   // Close on escape key
   useEffect(() => {
@@ -158,7 +158,12 @@ export function MobileNav({ isOpen, onClose }: MobileNavProps) {
                 >
                   {statusText}
                 </span>
-                <span className="rounded-full bg-emerald-50 px-2 py-0.5 font-mono text-[12px] font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                <span
+                  className={cn(
+                    "rounded-full px-2 py-0.5 font-mono text-[12px] font-medium",
+                    portTone
+                  )}
+                >
                   {portText}
                 </span>
               </div>
