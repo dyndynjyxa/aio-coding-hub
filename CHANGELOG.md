@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.32.5](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.32.4...aio-coding-hub-v0.32.5) (2026-03-18)
+
+
+### Features
+
+* **cx2cc:** add Codex-to-Claude-Code translation bridge ([#100](https://github.com/dyndynjyxa/aio-coding-hub/issues/100)) ([44d9c41](https://github.com/dyndynjyxa/aio-coding-hub/commit/44d9c416e434b72699e95984dbc156d413fc78dc))
+* **domain:** 支持 cx2cc 提供者及缓存令牌追踪 ([3662c26](https://github.com/dyndynjyxa/aio-coding-hub/commit/3662c26c2ea72c25ef7e330a52a414a708164cd1))
+* **home:** 添加工作区模式切换按钮并持久化请求日志简洁模式 ([d73bedd](https://github.com/dyndynjyxa/aio-coding-hub/commit/d73bedd3bc27d82375969d09fa94336a268bd075))
+* **ui:** 优化首页概览、供应商管理与设置页主题入口 ([#102](https://github.com/dyndynjyxa/aio-coding-hub/issues/102)) ([0adec0a](https://github.com/dyndynjyxa/aio-coding-hub/commit/0adec0af676842e9c5aee3e08e3a46d890d31c11))
+
+
+### Bug Fixes
+
+* **domain:** 修正 claude_terminal_launch_context 函数中 provider_id 验证和查询逻辑 ([316d375](https://github.com/dyndynjyxa/aio-coding-hub/commit/316d3754fc628d0a1e435aabf469ca992cb63efa))
+
 ## [0.32.4](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.32.3...aio-coding-hub-v0.32.4) (2026-03-16)
 
 
