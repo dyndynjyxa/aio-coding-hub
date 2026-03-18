@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { Sidebar } from "../Sidebar";
-import { AIO_RELEASES_URL } from "../../constants/urls";
+import { AIO_RELEASES_URL, AIO_REPO_URL } from "../../constants/urls";
 
 const gatewayMetaRef = vi.hoisted(() => ({
   current: { gatewayAvailable: "checking", gateway: null, preferredPort: 37123 } as any,
@@ -64,6 +64,20 @@ describe("ui/Sidebar", () => {
     expect(screen.getByText("—")).toBeInTheDocument();
   });
 
+  it("renders the GitHub link before the app name when no update candidate exists", () => {
+    render(
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>
+    );
+
+    const repoLink = screen.getByRole("link", { name: "AIO Coding Hub GitHub 仓库" });
+    const title = screen.getByText("AIO Coding Hub");
+
+    expect(repoLink).toHaveAttribute("href", AIO_REPO_URL);
+    expect(repoLink.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("opens update dialog when update candidate exists (non-portable)", () => {
     gatewayMetaRef.current = {
       gatewayAvailable: "available",
@@ -82,6 +96,10 @@ describe("ui/Sidebar", () => {
       </MemoryRouter>
     );
 
+    expect(screen.getByRole("link", { name: "AIO Coding Hub GitHub 仓库" })).toHaveAttribute(
+      "href",
+      AIO_REPO_URL
+    );
     fireEvent.click(screen.getByRole("button", { name: "NEW" }));
     expect(updateDialogSetOpenMock).toHaveBeenCalledWith(true);
   });
@@ -128,5 +146,23 @@ describe("ui/Sidebar", () => {
 
     fireEvent.click(screen.getByText("首页"));
     expect(onNavClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses stopped tone for the port pill when gateway is stopped", () => {
+    gatewayMetaRef.current = {
+      gatewayAvailable: "available",
+      gateway: { running: false, port: null },
+      preferredPort: 37123,
+    };
+
+    render(
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>
+    );
+
+    const portPill = screen.getByText("37123");
+    expect(portPill.className).toContain("bg-slate-100");
+    expect(portPill.className).not.toContain("bg-emerald-50");
   });
 });

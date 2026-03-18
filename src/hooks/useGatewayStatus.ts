@@ -29,6 +29,11 @@ export function useGatewayStatus() {
       ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
       : "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300";
 
+  const portTone =
+    gatewayAvailable === "available" && gateway?.running
+      ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+      : "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300";
+
   const portText = gatewayAvailable === "available" ? String(gateway?.port ?? preferredPort) : "—";
 
   const isGatewayRunning = gatewayAvailable === "available" && gateway?.running;
@@ -36,6 +41,7 @@ export function useGatewayStatus() {
   return {
     statusText,
     statusTone,
+    portTone,
     portText,
     isGatewayRunning,
     hasUpdate,

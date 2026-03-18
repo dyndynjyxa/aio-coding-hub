@@ -48,7 +48,7 @@ export type SidebarProps = {
 };
 
 export function Sidebar({ isOpen = true, onNavClick, className }: SidebarProps) {
-  const { statusText, statusTone, portText, hasUpdate, isPortable } = useGatewayStatus();
+  const { statusText, statusTone, portTone, portText, hasUpdate, isPortable } = useGatewayStatus();
 
   function handleNavClick() {
     onNavClick?.();
@@ -75,7 +75,20 @@ export function Sidebar({ isOpen = true, onNavClick, className }: SidebarProps) 
         {/* macOS traffic lights safe area (titleBarStyle: overlay) + drag region */}
         <div data-tauri-drag-region className="px-4 pb-5 pt-9">
           <div className="flex items-center justify-between">
-            <div className="text-sm font-semibold dark:text-slate-100">AIO Coding Hub</div>
+            <div className="flex items-center gap-2">
+              <a
+                href={AIO_REPO_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="AIO Coding Hub GitHub 仓库"
+                className="text-slate-500 transition hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
+              >
+                <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
+                </svg>
+              </a>
+              <div className="text-sm font-semibold dark:text-slate-100">AIO Coding Hub</div>
+            </div>
             {hasUpdate ? (
               <button
                 type="button"
@@ -93,23 +106,9 @@ export function Sidebar({ isOpen = true, onNavClick, className }: SidebarProps) 
                   updateDialogSetOpen(true);
                 }}
               >
-                <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
-                </svg>
                 <span className="text-[10px] font-bold leading-none tracking-wide">NEW</span>
               </button>
-            ) : (
-              <a
-                href={AIO_REPO_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-slate-500 transition hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
-              >
-                <svg className="h-6 w-6" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
-                </svg>
-              </a>
-            )}
+            ) : null}
           </div>
         </div>
 
@@ -151,7 +150,12 @@ export function Sidebar({ isOpen = true, onNavClick, className }: SidebarProps) 
               <span className={cn("rounded-full px-2 py-0.5 text-[12px] font-medium", statusTone)}>
                 {statusText}
               </span>
-              <span className="rounded-full bg-emerald-50 px-2 py-0.5 font-mono text-[12px] font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+              <span
+                className={cn(
+                  "rounded-full px-2 py-0.5 font-mono text-[12px] font-medium",
+                  portTone
+                )}
+              >
                 {portText}
               </span>
             </div>
