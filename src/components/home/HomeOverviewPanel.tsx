@@ -282,8 +282,8 @@ export function HomeOverviewPanel({
   sortModesLoading,
   sortModesAvailable,
   activeModeByCli,
-  activeModeToggling: _activeModeToggling,
-  onSetCliActiveMode: _onSetCliActiveMode,
+  activeModeToggling,
+  onSetCliActiveMode,
   cliProxyEnabled,
   cliProxyToggling,
   onSetCliProxyEnabled,
@@ -357,19 +357,6 @@ export function HomeOverviewPanel({
         .sort((a, b) => a.localeCompare(b)),
     [openCircuits]
   );
-
-  const routeStrategyByCli = useMemo<Record<CliKey, string>>(() => {
-    const resolveLabel = (modeId: number | null) => {
-      if (modeId == null) return "Default";
-      return sortModes.find((mode) => mode.id === modeId)?.name ?? `#${modeId}`;
-    };
-
-    return {
-      claude: resolveLabel(activeModeByCli.claude ?? null),
-      codex: resolveLabel(activeModeByCli.codex ?? null),
-      gemini: resolveLabel(activeModeByCli.gemini ?? null),
-    };
-  }, [activeModeByCli.claude, activeModeByCli.codex, activeModeByCli.gemini, sortModes]);
 
   useEffect(() => {
     if (displayedWorkspaceConfigs.some((config) => config.cliKey === selectedWorkspaceConfigCliKey))
@@ -507,7 +494,12 @@ export function HomeOverviewPanel({
                   configs={displayedWorkspaceConfigs}
                   selectedCliKey={selectedWorkspaceConfigCliKey}
                   onSelectCliKey={setSelectedWorkspaceConfigCliKey}
-                  routeStrategyByCli={routeStrategyByCli}
+                  sortModes={sortModes}
+                  sortModesLoading={sortModesLoading}
+                  sortModesAvailable={sortModesAvailable}
+                  activeModeByCli={activeModeByCli}
+                  activeModeToggling={activeModeToggling}
+                  onSetCliActiveMode={onSetCliActiveMode}
                 />
               ) : sessionsTab === "providerLimit" ? (
                 <HomeProviderLimitPanelContent

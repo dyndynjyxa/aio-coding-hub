@@ -37,6 +37,7 @@ vi.mock("../HomeRequestLogsPanel", () => ({
 
 function renderPanel(overrides: Partial<ComponentProps<typeof HomeOverviewPanel>> = {}) {
   const onResetCircuitProvider = vi.fn();
+  const onSetCliActiveMode = vi.fn();
   const view = render(
     <HomeOverviewPanel
       showCustomTooltip={false}
@@ -50,7 +51,7 @@ function renderPanel(overrides: Partial<ComponentProps<typeof HomeOverviewPanel>
       sortModesAvailable={true}
       activeModeByCli={{ claude: null, codex: null, gemini: null }}
       activeModeToggling={{ claude: false, codex: false, gemini: false }}
-      onSetCliActiveMode={vi.fn()}
+      onSetCliActiveMode={onSetCliActiveMode}
       cliProxyEnabled={{ claude: false, codex: false, gemini: false }}
       cliProxyToggling={{ claude: false, codex: false, gemini: false }}
       onSetCliProxyEnabled={vi.fn()}
@@ -103,7 +104,7 @@ function renderPanel(overrides: Partial<ComponentProps<typeof HomeOverviewPanel>
     />
   );
 
-  return { ...view, onResetCircuitProvider };
+  return { ...view, onResetCircuitProvider, onSetCliActiveMode };
 }
 
 describe("components/home/HomeOverviewPanel", () => {
@@ -150,8 +151,8 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(screen.queryByRole("button", { name: "预览熔断样式" })).not.toBeInTheDocument();
   });
 
-  it("shows workspace config pills and items for the selected cli", () => {
-    renderPanel({
+  it("shows workspace config pills and allows switching sort mode for the selected cli", () => {
+    const { onSetCliActiveMode } = renderPanel({
       sortModes: [{ id: 1, name: "工作策略", created_at: 1, updated_at: 1 }],
       activeModeByCli: { claude: 1, codex: null, gemini: null },
       workspaceConfigs: [
@@ -188,14 +189,20 @@ describe("components/home/HomeOverviewPanel", () => {
     fireEvent.click(screen.getByRole("tab", { name: "配置信息" }));
     expect(screen.getByRole("button", { name: "Claude Code" })).toBeInTheDocument();
     expect(screen.getByText("工作区 A")).toBeInTheDocument();
-    expect(screen.getByText("路由策略模板")).toBeInTheDocument();
-    expect(screen.getByText("工作策略")).toBeInTheDocument();
+    expect(screen.getByText("路由策略：")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Claude Code 路由策略" })).toHaveValue("1");
+    expect(screen.getByRole("option", { name: "工作策略" })).toBeInTheDocument();
     expect(screen.getByText("默认提示词")).toBeInTheDocument();
     expect(screen.getByText("filesystem")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Codex" }));
-    expect(screen.getAllByText("Default")).toHaveLength(2);
+    expect(screen.getByRole("combobox", { name: "Codex 路由策略" })).toHaveValue("");
     expect(screen.getByText("code-review")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Codex 路由策略" }), {
+      target: { value: "1" },
+    });
+    expect(onSetCliActiveMode).toHaveBeenCalledWith("codex", 1);
   });
 
   it("renders preview workspace config rows when dev preview is enabled and there is no real config data", () => {
