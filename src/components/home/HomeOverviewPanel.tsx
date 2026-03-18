@@ -69,6 +69,7 @@ export type HomeOverviewPanelProps = {
   devPreviewEnabled?: boolean;
   showHomeHeatmap: boolean;
 
+  usageWindowDays: number;
   usageHeatmapRows: UsageHourlyRow[];
   usageHeatmapLoading: boolean;
   onRefreshUsageHeatmap: () => void;
@@ -120,11 +121,11 @@ const PREVIEW_WORKSPACE_CONFIGS: HomeCliWorkspaceConfig[] = [
     workspaceName: "工作区 Alpha",
     loading: false,
     items: [
-      { id: "prompt:1001", type: "prompts", label: "Prompts", name: "PR Review" },
+      { id: "prompt:1001", type: "prompts", label: "Prompt", name: "PR Review" },
       { id: "mcp:1001", type: "mcp", label: "MCP", name: "filesystem" },
       { id: "mcp:1002", type: "mcp", label: "MCP", name: "browser-tools" },
-      { id: "skill:1001", type: "skills", label: "Skills", name: "repo-auditor" },
-      { id: "skill:1002", type: "skills", label: "Skills", name: "incident-helper" },
+      { id: "skill:1001", type: "skills", label: "Skill", name: "repo-auditor" },
+      { id: "skill:1002", type: "skills", label: "Skill", name: "incident-helper" },
     ],
   },
   {
@@ -134,11 +135,11 @@ const PREVIEW_WORKSPACE_CONFIGS: HomeCliWorkspaceConfig[] = [
     workspaceName: "Default",
     loading: false,
     items: [
-      { id: "prompt:1002", type: "prompts", label: "Prompts", name: "Fix First" },
+      { id: "prompt:1002", type: "prompts", label: "Prompt", name: "Fix First" },
       { id: "mcp:1003", type: "mcp", label: "MCP", name: "filesystem" },
       { id: "mcp:1004", type: "mcp", label: "MCP", name: "github" },
-      { id: "skill:1002", type: "skills", label: "Skills", name: "code-review" },
-      { id: "skill:1003", type: "skills", label: "Skills", name: "test-writer" },
+      { id: "skill:1002", type: "skills", label: "Skill", name: "code-review" },
+      { id: "skill:1003", type: "skills", label: "Skill", name: "test-writer" },
     ],
   },
   {
@@ -150,8 +151,8 @@ const PREVIEW_WORKSPACE_CONFIGS: HomeCliWorkspaceConfig[] = [
     items: [
       { id: "mcp:1005", type: "mcp", label: "MCP", name: "browser-tools" },
       { id: "mcp:1006", type: "mcp", label: "MCP", name: "figma" },
-      { id: "skill:1004", type: "skills", label: "Skills", name: "ux-auditor" },
-      { id: "skill:1005", type: "skills", label: "Skills", name: "spec-writer" },
+      { id: "skill:1004", type: "skills", label: "Skill", name: "ux-auditor" },
+      { id: "skill:1005", type: "skills", label: "Skill", name: "spec-writer" },
     ],
   },
 ];
@@ -160,6 +161,7 @@ export function HomeOverviewPanel({
   showCustomTooltip,
   devPreviewEnabled = false,
   showHomeHeatmap,
+  usageWindowDays,
   usageHeatmapRows,
   usageHeatmapLoading,
   onRefreshUsageHeatmap,
@@ -282,6 +284,7 @@ export function HomeOverviewPanel({
               <HomeUsageSection
                 devPreviewEnabled={devPreviewEnabled}
                 showHeatmap={true}
+                usageWindowDays={usageWindowDays}
                 usageHeatmapRows={usageHeatmapRows}
                 usageHeatmapLoading={usageHeatmapLoading}
                 onRefreshUsageHeatmap={onRefreshUsageHeatmap}
@@ -316,6 +319,7 @@ export function HomeOverviewPanel({
               <HomeUsageSection
                 devPreviewEnabled={devPreviewEnabled}
                 showHeatmap={false}
+                usageWindowDays={usageWindowDays}
                 usageHeatmapRows={usageHeatmapRows}
                 usageHeatmapLoading={usageHeatmapLoading}
                 onRefreshUsageHeatmap={onRefreshUsageHeatmap}

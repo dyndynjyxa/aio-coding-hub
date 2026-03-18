@@ -28,6 +28,20 @@ type ChartDataPoint = {
   tokens: number;
 };
 
+export function buildUsageTokensXAxisTicks(labels: string[]) {
+  if (labels.length <= 7) return labels;
+
+  const interval = Math.max(1, Math.ceil((labels.length - 1) / 6));
+  const ticks = labels.filter((_, i) => i % interval === 0);
+  const last = labels[labels.length - 1];
+
+  if (last && ticks[ticks.length - 1] !== last) {
+    ticks.push(last);
+  }
+
+  return ticks;
+}
+
 export function UsageTokensChart({
   rows,
   days = 15,
@@ -80,9 +94,8 @@ export function UsageTokensChart({
     return ticks;
   }, [yAxisConfig]);
 
-  // Generate ticks for x-axis (every 3rd item for readability)
   const xAxisTicks = useMemo(() => {
-    return chartData.filter((_, i) => i % 3 === 0).map((d) => d.label);
+    return buildUsageTokensXAxisTicks(chartData.map((d) => d.label));
   }, [chartData]);
 
   return (

@@ -134,10 +134,10 @@ export function MobileNav({ isOpen, onClose }: MobileNavProps) {
                 >
                   {({ isActive }) => (
                     <>
-                      <span
+                      <item.icon
                         className={cn(
-                          "h-2 w-2 rounded-full bg-current transition-opacity",
-                          isActive ? "opacity-100" : "opacity-40 group-hover:opacity-60"
+                          "h-4.5 w-4.5 shrink-0 transition-opacity",
+                          isActive ? "opacity-100" : "opacity-70 group-hover:opacity-100"
                         )}
                       />
                       <span>{item.label}</span>
@@ -150,15 +150,18 @@ export function MobileNav({ isOpen, onClose }: MobileNavProps) {
 
           {/* Footer - Gateway status */}
           <div className="border-t border-slate-200 px-4 py-4 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-            <div className="flex items-center justify-between">
-              <span>网关</span>
-              <span className={cn("rounded-full px-2 py-1 font-medium", statusTone)}>
-                {statusText}
-              </span>
-            </div>
-            <div className="mt-2 flex items-center justify-between">
-              <span>端口</span>
-              <span className="font-mono text-slate-700 dark:text-slate-300">{portText}</span>
+            <div className="rounded-xl bg-slate-100/90 px-3 py-2.5 dark:bg-slate-800">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-medium text-slate-600 dark:text-slate-300">网关</span>
+                <span
+                  className={cn("rounded-full px-2 py-0.5 text-[12px] font-medium", statusTone)}
+                >
+                  {statusText}
+                </span>
+                <span className="rounded-full bg-emerald-50 px-2 py-0.5 font-mono text-[12px] font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                  {portText}
+                </span>
+              </div>
             </div>
 
             {/* GitHub link */}

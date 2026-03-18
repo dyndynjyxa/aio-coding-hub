@@ -9,6 +9,7 @@ use tauri::Manager;
 pub(crate) struct SettingsUpdate {
     pub preferred_port: u16,
     pub show_home_heatmap: Option<bool>,
+    pub home_usage_period: Option<settings::HomeUsagePeriod>,
     pub gateway_listen_mode: Option<settings::GatewayListenMode>,
     pub gateway_custom_listen_address: Option<String>,
     pub auto_start: bool,
@@ -60,6 +61,7 @@ pub(crate) async fn settings_set(
     let SettingsUpdate {
         preferred_port,
         show_home_heatmap,
+        home_usage_period,
         gateway_listen_mode,
         gateway_custom_listen_address,
         auto_start,
@@ -118,6 +120,7 @@ pub(crate) async fn settings_set(
                 provider_cooldown_seconds.unwrap_or(previous.provider_cooldown_seconds);
             let gateway_listen_mode = gateway_listen_mode.unwrap_or(previous.gateway_listen_mode);
             let show_home_heatmap = show_home_heatmap.unwrap_or(previous.show_home_heatmap);
+            let home_usage_period = home_usage_period.unwrap_or(previous.home_usage_period);
             let gateway_custom_listen_address = gateway_custom_listen_address
                 .unwrap_or(previous.gateway_custom_listen_address)
                 .trim()
@@ -195,6 +198,7 @@ pub(crate) async fn settings_set(
                 schema_version: settings::SCHEMA_VERSION,
                 preferred_port,
                 show_home_heatmap,
+                home_usage_period,
                 gateway_listen_mode,
                 gateway_custom_listen_address,
                 wsl_auto_config,

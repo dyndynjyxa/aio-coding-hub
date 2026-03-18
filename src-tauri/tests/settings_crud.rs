@@ -14,6 +14,7 @@ fn settings_read_defaults() {
     assert_eq!(json_i64(&settings, "preferred_port"), 37123);
     assert!(!json_bool(&settings, "auto_start"));
     assert!(json_bool(&settings, "tray_enabled"));
+    assert_eq!(settings["home_usage_period"], serde_json::json!("last15"));
     assert_eq!(json_i64(&settings, "log_retention_days"), 7);
     assert_eq!(json_i64(&settings, "failover_max_attempts_per_provider"), 5);
     assert_eq!(json_i64(&settings, "failover_max_providers_to_try"), 5);

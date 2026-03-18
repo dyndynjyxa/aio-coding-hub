@@ -1,4 +1,18 @@
 import { NavLink } from "react-router-dom";
+import type { LucideIcon } from "lucide-react";
+import {
+  Activity,
+  Boxes,
+  Command,
+  Cpu,
+  Layers,
+  MessageSquare,
+  Pencil,
+  Settings2,
+  Terminal,
+  TrendingDown,
+  Wrench,
+} from "lucide-react";
 import { AIO_REPO_URL } from "../constants/urls";
 import { useGatewayStatus, openReleasesUrl } from "../hooks/useGatewayStatus";
 import { updateDialogSetOpen } from "../hooks/useUpdateMeta";
@@ -7,20 +21,21 @@ import { cn } from "../utils/cn";
 type NavItem = {
   to: string;
   label: string;
+  icon: LucideIcon;
 };
 
 const NAV: NavItem[] = [
-  { to: "/", label: "首页" },
-  { to: "/providers", label: "供应商" },
-  { to: "/sessions", label: "Session 会话" },
-  { to: "/workspaces", label: "工作区" },
-  { to: "/prompts", label: "提示词" },
-  { to: "/mcp", label: "MCP" },
-  { to: "/skills", label: "Skill" },
-  { to: "/usage", label: "用量" },
-  { to: "/console", label: "控制台" },
-  { to: "/cli-manager", label: "CLI 管理" },
-  { to: "/settings", label: "设置" },
+  { to: "/", label: "首页", icon: Activity },
+  { to: "/providers", label: "供应商", icon: Boxes },
+  { to: "/sessions", label: "Session 会话", icon: MessageSquare },
+  { to: "/workspaces", label: "工作区", icon: Layers },
+  { to: "/prompts", label: "提示词", icon: Pencil },
+  { to: "/mcp", label: "MCP", icon: Command },
+  { to: "/skills", label: "Skill", icon: Cpu },
+  { to: "/usage", label: "用量", icon: TrendingDown },
+  { to: "/console", label: "控制台", icon: Terminal },
+  { to: "/cli-manager", label: "CLI 管理", icon: Wrench },
+  { to: "/settings", label: "设置", icon: Settings2 },
 ];
 
 export type SidebarProps = {
@@ -116,10 +131,10 @@ export function Sidebar({ isOpen = true, onNavClick, className }: SidebarProps) 
             >
               {({ isActive }) => (
                 <>
-                  <span
+                  <item.icon
                     className={cn(
-                      "h-1.5 w-1.5 rounded-full bg-current transition-opacity",
-                      isActive ? "opacity-100" : "opacity-40 group-hover:opacity-60"
+                      "h-4 w-4 shrink-0 transition-opacity",
+                      isActive ? "opacity-100" : "opacity-70 group-hover:opacity-100"
                     )}
                   />
                   <span className="truncate">{item.label}</span>
@@ -129,18 +144,16 @@ export function Sidebar({ isOpen = true, onNavClick, className }: SidebarProps) 
           ))}
         </nav>
 
-        <div className="border-t border-slate-200 px-4 py-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-          <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-2 dark:bg-slate-800">
-            <div className="flex flex-1 items-center justify-between">
-              <span>网关</span>
-              <span className={cn("rounded-full px-2 py-0.5 font-medium", statusTone)}>
+        <div className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
+          <div className="rounded-xl bg-slate-100/90 px-3 py-2.5 dark:bg-slate-800">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium text-slate-600 dark:text-slate-300">网关</span>
+              <span className={cn("rounded-full px-2 py-0.5 text-[12px] font-medium", statusTone)}>
                 {statusText}
               </span>
-            </div>
-            <div className="mx-1.5 h-4 w-px bg-slate-200 dark:bg-slate-700" />
-            <div className="flex items-center gap-1.5">
-              <span>端口</span>
-              <span className="font-mono text-slate-700 dark:text-slate-300">{portText}</span>
+              <span className="rounded-full bg-emerald-50 px-2 py-0.5 font-mono text-[12px] font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                {portText}
+              </span>
             </div>
           </div>
         </div>

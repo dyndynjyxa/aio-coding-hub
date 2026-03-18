@@ -6,9 +6,10 @@ describe("MSW defaults", () => {
     resetMswState();
 
     expect(getSettingsState()).toEqual({
-      schema_version: 20,
+      schema_version: 21,
       preferred_port: 37123,
       show_home_heatmap: true,
+      home_usage_period: "last15",
       gateway_listen_mode: "localhost",
       gateway_custom_listen_address: "",
       wsl_auto_config: false,

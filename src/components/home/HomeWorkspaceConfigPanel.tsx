@@ -1,9 +1,14 @@
 import { useMemo } from "react";
+import type { LucideIcon } from "lucide-react";
+import { Command, Cpu, Pencil } from "lucide-react";
 import type { CliKey } from "../../services/providers";
 import { EmptyState } from "../../ui/EmptyState";
 import { cn } from "../../utils/cn";
 import { CliBrandIcon } from "./CliBrandIcon";
-import type { HomeCliWorkspaceConfig } from "./homeWorkspaceConfigTypes";
+import type {
+  HomeCliWorkspaceConfig,
+  HomeWorkspaceConfigItemType,
+} from "./homeWorkspaceConfigTypes";
 
 export type HomeWorkspaceConfigPanelProps = {
   configs: HomeCliWorkspaceConfig[];
@@ -18,6 +23,14 @@ export function HomeWorkspaceConfigPanel({
   onSelectCliKey,
   routeStrategyByCli,
 }: HomeWorkspaceConfigPanelProps) {
+  const iconByType = useMemo<Record<HomeWorkspaceConfigItemType, LucideIcon>>(
+    () => ({
+      prompts: Pencil,
+      mcp: Command,
+      skills: Cpu,
+    }),
+    []
+  );
   const selectedConfig = useMemo(() => {
     return configs.find((row) => row.cliKey === selectedCliKey) ?? configs[0] ?? null;
   }, [configs, selectedCliKey]);
@@ -81,22 +94,27 @@ export function HomeWorkspaceConfigPanel({
           <EmptyState title="当前工作区暂无配置信息" />
         ) : (
           <div className="space-y-2">
-            {selectedConfig.items.map((item) => (
-              <div
-                key={item.id}
-                className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/50"
-              >
-                <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-slate-500 dark:bg-slate-700 dark:text-slate-300">
-                  {item.label}
-                </span>
+            {selectedConfig.items.map((item) => {
+              const Icon = iconByType[item.type];
+
+              return (
                 <div
-                  className="min-w-0 truncate text-sm text-slate-700 dark:text-slate-200"
-                  title={item.name}
+                  key={item.id}
+                  className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/50"
                 >
-                  {item.name}
+                  <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-slate-500 dark:bg-slate-700 dark:text-slate-300">
+                    <Icon className="h-3 w-3" />
+                    {item.label}
+                  </span>
+                  <div
+                    className="min-w-0 truncate text-sm text-slate-700 dark:text-slate-200"
+                    title={item.name}
+                  >
+                    {item.name}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

@@ -6,6 +6,7 @@ import { gatewayKeys } from "../../query/keys";
 import { useTheme } from "../../hooks/useTheme";
 import { logToConsole } from "../../services/consoleLog";
 import { gatewayStart, gatewayStop, type GatewayStatus } from "../../services/gateway";
+import type { HomeUsagePeriod } from "../../services/settings";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Input } from "../../ui/Input";
@@ -16,6 +17,20 @@ import type { NoticePermissionStatus } from "./useSystemNotification";
 
 type PersistKey = "preferred_port" | "log_retention_days";
 type BooleanPersistKey = "show_home_heatmap" | "auto_start" | "start_minimized" | "tray_enabled";
+type SettingsPersistPatch = Partial<{
+  show_home_heatmap: boolean;
+  home_usage_period: HomeUsagePeriod;
+  auto_start: boolean;
+  start_minimized: boolean;
+  tray_enabled: boolean;
+}>;
+
+const HOME_USAGE_PERIOD_OPTIONS: Array<{ value: HomeUsagePeriod; label: string }> = [
+  { value: "last7", label: "最近7天" },
+  { value: "last15", label: "最近15天" },
+  { value: "last30", label: "最近30天" },
+  { value: "month", label: "当月" },
+];
 
 export type SettingsMainColumnProps = {
   gateway: GatewayStatus | null;
@@ -35,6 +50,8 @@ export type SettingsMainColumnProps = {
 
   showHomeHeatmap: boolean;
   setShowHomeHeatmap: (next: boolean) => void;
+  homeUsagePeriod: HomeUsagePeriod;
+  setHomeUsagePeriod: (next: HomeUsagePeriod) => void;
   autoStart: boolean;
   setAutoStart: (next: boolean) => void;
   startMinimized: boolean;
@@ -43,7 +60,7 @@ export type SettingsMainColumnProps = {
   setTrayEnabled: (next: boolean) => void;
   logRetentionDays: number;
   setLogRetentionDays: (next: number) => void;
-  requestPersist: (patch: Partial<Record<BooleanPersistKey, boolean>>) => void;
+  requestPersist: (patch: SettingsPersistPatch) => void;
 
   noticePermissionStatus: NoticePermissionStatus;
   requestingNoticePermission: boolean;
@@ -64,6 +81,8 @@ export function SettingsMainColumn({
   setPort,
   showHomeHeatmap,
   setShowHomeHeatmap,
+  homeUsagePeriod,
+  setHomeUsagePeriod,
   commitNumberField,
   autoStart,
   setAutoStart,
@@ -247,6 +266,29 @@ export function SettingsMainColumn({
                   </button>
                 </div>
               </SettingsRow>
+              <SettingsRow label="首页用量范围">
+                <div className="flex flex-wrap items-center gap-1 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800">
+                  {HOME_USAGE_PERIOD_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={cn(
+                        "flex items-center justify-center rounded-md px-2.5 py-1.5 text-xs transition",
+                        homeUsagePeriod === option.value
+                          ? "bg-white text-slate-900 shadow-sm dark:bg-slate-600 dark:text-slate-100"
+                          : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                      )}
+                      onClick={() => {
+                        setHomeUsagePeriod(option.value);
+                        requestPersist({ home_usage_period: option.value });
+                      }}
+                      disabled={!settingsReady}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </SettingsRow>
               {(
                 [
                   {
@@ -290,9 +332,7 @@ export function SettingsMainColumn({
                     checked={checked}
                     onCheckedChange={(next) => {
                       setter(next);
-                      const patch: Partial<Record<BooleanPersistKey, boolean>> = {};
-                      patch[key] = next;
-                      requestPersist(patch);
+                      requestPersist({ [key]: next } as SettingsPersistPatch);
                     }}
                     disabled={disabled}
                   />

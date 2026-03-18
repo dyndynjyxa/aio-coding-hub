@@ -9,7 +9,7 @@ use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, Instant};
 use tauri::Manager;
 
-pub const SCHEMA_VERSION: u32 = 20;
+pub const SCHEMA_VERSION: u32 = 21;
 const SCHEMA_VERSION_DISABLE_UPSTREAM_TIMEOUTS: u32 = 7;
 const SCHEMA_VERSION_ADD_GATEWAY_RECTIFIERS: u32 = 8;
 const SCHEMA_VERSION_ADD_CIRCUIT_BREAKER_NOTICE: u32 = 9;
@@ -24,6 +24,7 @@ const SCHEMA_VERSION_ADD_TASK_COMPLETE_NOTIFY: u32 = 17;
 const SCHEMA_VERSION_ADD_CCH_BASE_CONFIG: u32 = 18;
 const SCHEMA_VERSION_ADD_START_MINIMIZED: u32 = 19;
 const SCHEMA_VERSION_ADD_SHOW_HOME_HEATMAP: u32 = 20;
+const SCHEMA_VERSION_ADD_HOME_USAGE_PERIOD: u32 = 21;
 pub const DEFAULT_GATEWAY_PORT: u16 = 37123;
 pub const MAX_GATEWAY_PORT: u16 = 37199;
 const DEFAULT_LOG_RETENTION_DAYS: u32 = 7;
@@ -107,6 +108,21 @@ impl Default for WslHostAddressMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum HomeUsagePeriod {
+    Last7,
+    Last15,
+    Last30,
+    Month,
+}
+
+impl Default for HomeUsagePeriod {
+    fn default() -> Self {
+        Self::Last15
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type)]
 #[serde(default)]
 pub struct WslTargetCli {
@@ -132,6 +148,8 @@ pub struct AppSettings {
     pub preferred_port: u16,
     #[serde(default = "default_show_home_heatmap")]
     pub show_home_heatmap: bool,
+    #[serde(default)]
+    pub home_usage_period: HomeUsagePeriod,
     // Gateway listen mode (aligned with code-switch-r): localhost / wsl_auto / lan / custom.
     pub gateway_listen_mode: GatewayListenMode,
     // Custom listen address input (host or host:port).
@@ -189,6 +207,7 @@ impl Default for AppSettings {
             schema_version: SCHEMA_VERSION,
             preferred_port: DEFAULT_GATEWAY_PORT,
             show_home_heatmap: DEFAULT_SHOW_HOME_HEATMAP,
+            home_usage_period: HomeUsagePeriod::default(),
             gateway_listen_mode: GatewayListenMode::Localhost,
             gateway_custom_listen_address: String::new(),
             wsl_auto_config: false,
@@ -582,6 +601,15 @@ fn migrate_add_show_home_heatmap(settings: &mut AppSettings, schema_version_pres
     )
 }
 
+fn migrate_add_home_usage_period(settings: &mut AppSettings, schema_version_present: bool) -> bool {
+    // v21: Add homepage usage window selector (default last15).
+    migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_HOME_USAGE_PERIOD,
+    )
+}
+
 fn settings_path(app: &tauri::AppHandle) -> AppResult<PathBuf> {
     Ok(app_paths::app_data_dir(app)?.join("settings.json"))
 }
@@ -702,6 +730,7 @@ pub fn read(app: &tauri::AppHandle) -> AppResult<AppSettings> {
             repaired |= migrate_add_cch_base_config(&mut settings, schema_version_present);
             repaired |= migrate_add_start_minimized(&mut settings, schema_version_present);
             repaired |= migrate_add_show_home_heatmap(&mut settings, schema_version_present);
+            repaired |= migrate_add_home_usage_period(&mut settings, schema_version_present);
             repaired |= sanitize_failover_settings(&mut settings);
             repaired |= sanitize_circuit_breaker_settings(&mut settings);
             repaired |= sanitize_provider_cooldown_seconds(&mut settings);
@@ -771,6 +800,7 @@ pub fn read(app: &tauri::AppHandle) -> AppResult<AppSettings> {
     repaired |= migrate_add_cch_base_config(&mut settings, schema_version_present);
     repaired |= migrate_add_start_minimized(&mut settings, schema_version_present);
     repaired |= migrate_add_show_home_heatmap(&mut settings, schema_version_present);
+    repaired |= migrate_add_home_usage_period(&mut settings, schema_version_present);
     repaired |= sanitize_failover_settings(&mut settings);
     repaired |= sanitize_circuit_breaker_settings(&mut settings);
     repaired |= sanitize_provider_cooldown_seconds(&mut settings);
@@ -1369,6 +1399,12 @@ mod tests {
     }
 
     #[test]
+    fn app_settings_default_uses_last15_home_usage_period() {
+        let s = AppSettings::default();
+        assert_eq!(s.home_usage_period, HomeUsagePeriod::Last15);
+    }
+
+    #[test]
     fn app_settings_default_cache_anomaly_monitor_disabled() {
         let s = AppSettings::default();
         assert!(!s.enable_cache_anomaly_monitor);
@@ -1402,5 +1438,15 @@ mod tests {
         };
         assert!(migrate_add_show_home_heatmap(&mut s, true));
         assert_eq!(s.schema_version, SCHEMA_VERSION_ADD_SHOW_HOME_HEATMAP);
+    }
+
+    #[test]
+    fn migrate_add_home_usage_period_bumps_schema_version() {
+        let mut s = AppSettings {
+            schema_version: 20,
+            ..Default::default()
+        };
+        assert!(migrate_add_home_usage_period(&mut s, true));
+        assert_eq!(s.schema_version, SCHEMA_VERSION_ADD_HOME_USAGE_PERIOD);
     }
 }

@@ -29,7 +29,7 @@ function buildWorkspaceConfigItems(input: {
     items.push({
       id: `prompt:${row.id}`,
       type: "prompts",
-      label: "Prompts",
+      label: "Prompt",
       name: row.name,
     });
   }
@@ -47,7 +47,7 @@ function buildWorkspaceConfigItems(input: {
     items.push({
       id: `skill:${row.id}`,
       type: "skills",
-      label: "Skills",
+      label: "Skill",
       name: row.name,
     });
   }

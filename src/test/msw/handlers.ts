@@ -57,8 +57,13 @@ export const handlers = [
   http.post(`${TAURI_ENDPOINT}/settings_set`, async ({ request }) => {
     const payload = await withJson<{ update?: Partial<Record<string, unknown>> }>(request);
     if (payload.update) {
-      // Apply camelCase update fields to snake_case state (simplified merge).
-      mergeSettingsState(payload.update as any);
+      const normalizedUpdate = Object.fromEntries(
+        Object.entries(payload.update).map(([key, value]) => [
+          key.replace(/[A-Z]/g, (char) => `_${char.toLowerCase()}`),
+          value,
+        ])
+      );
+      mergeSettingsState(normalizedUpdate as any);
     }
     return HttpResponse.json(getSettingsState());
   }),

@@ -29,6 +29,8 @@ export function SettingsPage() {
             setPort={persistence.setPort}
             showHomeHeatmap={persistence.showHomeHeatmap}
             setShowHomeHeatmap={persistence.setShowHomeHeatmap}
+            homeUsagePeriod={persistence.homeUsagePeriod}
+            setHomeUsagePeriod={persistence.setHomeUsagePeriod}
             commitNumberField={persistence.commitNumberField}
             autoStart={persistence.autoStart}
             setAutoStart={persistence.setAutoStart}

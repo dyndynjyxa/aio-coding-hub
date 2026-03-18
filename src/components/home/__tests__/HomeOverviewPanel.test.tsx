@@ -29,6 +29,7 @@ function renderPanel(overrides: Partial<ComponentProps<typeof HomeOverviewPanel>
     <HomeOverviewPanel
       showCustomTooltip={false}
       showHomeHeatmap={true}
+      usageWindowDays={15}
       usageHeatmapRows={[]}
       usageHeatmapLoading={false}
       onRefreshUsageHeatmap={vi.fn()}
@@ -149,7 +150,7 @@ describe("components/home/HomeOverviewPanel", () => {
           workspaceName: "工作区 A",
           loading: false,
           items: [
-            { id: "prompt:1", type: "prompts", label: "Prompts", name: "默认提示词" },
+            { id: "prompt:1", type: "prompts", label: "Prompt", name: "默认提示词" },
             { id: "mcp:1", type: "mcp", label: "MCP", name: "filesystem" },
           ],
         },
@@ -159,7 +160,7 @@ describe("components/home/HomeOverviewPanel", () => {
           workspaceId: 2,
           workspaceName: "Default",
           loading: false,
-          items: [{ id: "skill:1", type: "skills", label: "Skills", name: "code-review" }],
+          items: [{ id: "skill:1", type: "skills", label: "Skill", name: "code-review" }],
         },
         {
           cliKey: "gemini",
@@ -205,7 +206,7 @@ describe("components/home/HomeOverviewPanel", () => {
           workspaceId: 1,
           workspaceName: "工作区 A",
           loading: false,
-          items: [{ id: "prompt:1", type: "prompts", label: "Prompts", name: "默认提示词" }],
+          items: [{ id: "prompt:1", type: "prompts", label: "Prompt", name: "默认提示词" }],
         },
         {
           cliKey: "codex",
@@ -244,6 +245,7 @@ describe("components/home/HomeOverviewPanel", () => {
       <HomeOverviewPanel
         showCustomTooltip={false}
         showHomeHeatmap={true}
+        usageWindowDays={15}
         usageHeatmapRows={[]}
         usageHeatmapLoading={false}
         onRefreshUsageHeatmap={vi.fn()}
@@ -308,6 +310,7 @@ describe("components/home/HomeOverviewPanel", () => {
       <HomeOverviewPanel
         showCustomTooltip={false}
         showHomeHeatmap={true}
+        usageWindowDays={15}
         usageHeatmapRows={[]}
         usageHeatmapLoading={false}
         onRefreshUsageHeatmap={vi.fn()}

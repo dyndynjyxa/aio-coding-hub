@@ -38,6 +38,7 @@ function createSettings(overrides: Partial<any> = {}) {
     schema_version: 1,
     preferred_port: 37123,
     show_home_heatmap: true,
+    home_usage_period: "last15",
     auto_start: false,
     tray_enabled: true,
     log_retention_days: 7,
@@ -123,6 +124,7 @@ describe("settings/useSettingsPersistence", () => {
     vi.mocked(useSettingsQuery).mockReturnValue({
       data: createSettings({
         tray_enabled: undefined,
+        home_usage_period: undefined,
         provider_cooldown_seconds: undefined,
         provider_base_url_ping_cache_ttl_seconds: undefined,
         upstream_first_byte_timeout_seconds: undefined,
@@ -150,6 +152,7 @@ describe("settings/useSettingsPersistence", () => {
     const { result } = renderHook(() => useSettingsPersistence({ gateway: null, about: null }));
     await waitFor(() => expect(result.current.settingsReady).toBe(true));
     expect(result.current.trayEnabled).toBe(true);
+    expect(result.current.homeUsagePeriod).toBe("last15");
   });
 
   it("marks ready and toasts when settings query errors", async () => {
@@ -318,6 +321,34 @@ describe("settings/useSettingsPersistence", () => {
       expect(toast).toHaveBeenCalledWith("Ping 选择缓存 TTL 必须为 1-3600 秒");
     });
     expect(mutation.mutateAsync).toHaveBeenCalledTimes(2);
+  });
+
+  it("persists homepage usage period changes", async () => {
+    vi.mocked(useSettingsQuery).mockReturnValue({
+      data: createSettings(),
+      isLoading: false,
+      isError: false,
+      error: null,
+    } as any);
+
+    const mutation = { mutateAsync: vi.fn() };
+    mutation.mutateAsync.mockResolvedValue(createSettings({ home_usage_period: "month" }));
+    vi.mocked(useSettingsSetMutation).mockReturnValue(mutation as any);
+
+    const { result } = renderHook(() => useSettingsPersistence({ gateway: null, about: null }));
+    await waitFor(() => expect(result.current.settingsReady).toBe(true));
+
+    act(() => {
+      result.current.setHomeUsagePeriod("month");
+      result.current.requestPersist({ home_usage_period: "month" });
+    });
+
+    await waitFor(() =>
+      expect(mutation.mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ homeUsagePeriod: "month" })
+      )
+    );
+    expect(result.current.homeUsagePeriod).toBe("month");
   });
 
   it("no-ops when requestPersist does not change any keys", async () => {

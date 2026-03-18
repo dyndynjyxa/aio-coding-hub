@@ -49,6 +49,7 @@ export type AppSettings = {
   schema_version: number;
   preferred_port: number;
   show_home_heatmap?: boolean;
+  home_usage_period: HomeUsagePeriod;
   gateway_listen_mode: GatewayListenMode;
   gateway_custom_listen_address: string;
   wsl_auto_config: boolean;
@@ -95,6 +96,7 @@ export type ClaudeModels = {
 };
 export type DailyResetMode = "fixed" | "rolling";
 export type GatewayListenMode = "localhost" | "wsl_auto" | "lan" | "custom";
+export type HomeUsagePeriod = "last7" | "last15" | "last30" | "month";
 export type ProviderAuthMode = "api_key" | "oauth";
 export type ProviderBaseUrlMode = "order" | "ping";
 export type ProviderSummary = {
@@ -156,6 +158,7 @@ export type ProviderUpsertInput = {
 export type SettingsUpdate = {
   preferredPort: number;
   showHomeHeatmap: boolean | null;
+  homeUsagePeriod: HomeUsagePeriod | null;
   gatewayListenMode: GatewayListenMode | null;
   gatewayCustomListenAddress: string | null;
   autoStart: boolean;

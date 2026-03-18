@@ -32,6 +32,8 @@ function renderSettingsMainColumn(
     setPort: vi.fn(),
     showHomeHeatmap: true,
     setShowHomeHeatmap: vi.fn(),
+    homeUsagePeriod: "last15",
+    setHomeUsagePeriod: vi.fn(),
     commitNumberField: vi.fn(),
     autoStart: false,
     setAutoStart: vi.fn(),
@@ -100,6 +102,26 @@ describe("pages/settings/SettingsMainColumn", () => {
     fireEvent.click(within(row as HTMLElement).getByRole("switch"));
     expect(setShowHomeHeatmap).toHaveBeenCalledWith(false);
     expect(requestPersist).toHaveBeenCalledWith({ show_home_heatmap: false });
+  });
+
+  it("persists homepage usage period setting", () => {
+    const setHomeUsagePeriod = vi.fn();
+    const requestPersist = vi.fn();
+    vi.mocked(useTheme).mockReturnValue({
+      theme: "system",
+      resolvedTheme: "light",
+      setTheme: vi.fn(),
+    } as any);
+
+    renderSettingsMainColumn({
+      homeUsagePeriod: "last15",
+      setHomeUsagePeriod,
+      requestPersist,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "最近30天" }));
+    expect(setHomeUsagePeriod).toHaveBeenCalledWith("last30");
+    expect(requestPersist).toHaveBeenCalledWith({ home_usage_period: "last30" });
   });
 
   it.each([

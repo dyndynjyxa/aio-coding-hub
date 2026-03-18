@@ -3,6 +3,7 @@ import { invokeService } from "./invokeServiceCommand";
 export type GatewayListenMode = "localhost" | "wsl_auto" | "lan" | "custom";
 
 export type WslHostAddressMode = "auto" | "custom";
+export type HomeUsagePeriod = "last7" | "last15" | "last30" | "month";
 
 export type WslTargetCli = {
   claude: boolean;
@@ -14,6 +15,7 @@ export type AppSettings = {
   schema_version: number;
   preferred_port: number;
   show_home_heatmap: boolean;
+  home_usage_period: HomeUsagePeriod;
   gateway_listen_mode: GatewayListenMode;
   gateway_custom_listen_address: string;
   wsl_auto_config: boolean;
@@ -55,6 +57,7 @@ export type AppSettings = {
 export type SettingsSetInput = {
   preferredPort: number;
   showHomeHeatmap?: boolean;
+  homeUsagePeriod?: HomeUsagePeriod;
   gatewayListenMode?: GatewayListenMode;
   gatewayCustomListenAddress?: string;
   autoStart: boolean;

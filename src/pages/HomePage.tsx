@@ -24,6 +24,8 @@ import { Dialog } from "../ui/Dialog";
 import { PageHeader } from "../ui/PageHeader";
 import { TabList } from "../ui/TabList";
 import { useTraceStore } from "../services/traceStore";
+import { DEFAULT_HOME_USAGE_PERIOD } from "../utils/homeUsagePeriod";
+import { resolveHomeUsageWindowDays } from "../utils/homeUsagePeriod";
 import { useHomeCircuitState } from "./home/hooks/useHomeCircuitState";
 import { useHomeSortMode } from "./home/hooks/useHomeSortMode";
 import { useHomeCliProxy } from "./home/hooks/useHomeCliProxy";
@@ -43,6 +45,8 @@ export function HomePage() {
   const foregroundActive = useDocumentVisibility();
   const settingsQuery = useSettingsQuery();
   const showHomeHeatmap = settingsQuery.data?.show_home_heatmap ?? true;
+  const homeUsagePeriod = settingsQuery.data?.home_usage_period ?? DEFAULT_HOME_USAGE_PERIOD;
+  const homeUsageWindowDays = resolveHomeUsageWindowDays(homeUsagePeriod);
   const isDevMode = import.meta.env.DEV;
 
   const [tab, setTab] = useState<HomeTabKey>("overview");
@@ -70,7 +74,9 @@ export function HomePage() {
   const workspaceConfigs = useHomeWorkspaceConfigs({ enabled: tab === "overview" });
 
   // --- Overview data queries ---
-  const usageHeatmapQuery = useUsageHourlySeriesQuery(15, { enabled: tab === "overview" });
+  const usageHeatmapQuery = useUsageHourlySeriesQuery(homeUsageWindowDays, {
+    enabled: tab === "overview",
+  });
   const usageHeatmapRows = usageHeatmapQuery.data ?? [];
   const usageHeatmapLoading = usageHeatmapQuery.isFetching;
 
@@ -178,6 +184,7 @@ export function HomePage() {
             showCustomTooltip={showCustomTooltip}
             devPreviewEnabled={devPreviewEnabled}
             showHomeHeatmap={showHomeHeatmap}
+            usageWindowDays={homeUsageWindowDays}
             usageHeatmapRows={usageHeatmapRows}
             usageHeatmapLoading={usageHeatmapLoading}
             onRefreshUsageHeatmap={refreshUsageHeatmap}

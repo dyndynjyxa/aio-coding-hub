@@ -67,14 +67,20 @@ describe("pages/settings/SettingsPage", () => {
       settingsReady: true,
       port: "1234",
       setPort: vi.fn(),
+      showHomeHeatmap: true,
+      setShowHomeHeatmap: vi.fn(),
+      homeUsagePeriod: "last15",
+      setHomeUsagePeriod: vi.fn(),
       commitNumberField: vi.fn(),
       autoStart: false,
       setAutoStart: vi.fn(),
+      startMinimized: false,
+      setStartMinimized: vi.fn(),
       trayEnabled: true,
       setTrayEnabled: vi.fn(),
       logRetentionDays: 7,
       setLogRetentionDays: vi.fn(),
-      requestPersist: { enabled: true, setEnabled: vi.fn() },
+      requestPersist: vi.fn(),
     } as any);
 
     vi.mocked(useSystemNotification).mockReturnValue({

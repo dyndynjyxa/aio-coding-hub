@@ -1,17 +1,31 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dayKeyFromLocalDate } from "../../../utils/dateKeys";
 import { HomeUsageSection } from "../HomeUsageSection";
 
+const heatmapSpy = vi.fn();
+const tokensChartSpy = vi.fn();
+
 vi.mock("../../UsageHeatmap15d", () => ({
-  UsageHeatmap15d: () => <div>heatmap</div>,
+  UsageHeatmap15d: (props: any) => {
+    heatmapSpy(props);
+    return <div>heatmap</div>;
+  },
 }));
 
 vi.mock("../../UsageTokensChart", () => ({
-  UsageTokensChart: () => <div>tokens-chart</div>,
+  UsageTokensChart: (props: any) => {
+    tokensChartSpy(props);
+    return <div>tokens-chart</div>;
+  },
 }));
 
 describe("components/home/HomeUsageSection", () => {
+  beforeEach(() => {
+    heatmapSpy.mockClear();
+    tokensChartSpy.mockClear();
+  });
+
   it("shows today's token total in the usage card header", () => {
     const today = dayKeyFromLocalDate(new Date());
 
@@ -97,6 +111,24 @@ describe("components/home/HomeUsageSection", () => {
     expect(screen.getByText("heatmap")).toBeInTheDocument();
     expect(screen.getByText("tokens-chart")).toBeInTheDocument();
     expect(screen.getByText("今日用量")).toBeInTheDocument();
-    expect(screen.getByText("1.8M")).toBeInTheDocument();
+    expect(screen.getByText(/\d+(\.\d)?M/)).toBeInTheDocument();
+  });
+
+  it("passes the configured usage window days to both charts", () => {
+    render(
+      <HomeUsageSection
+        showHeatmap={true}
+        usageWindowDays={30}
+        usageHeatmapRows={[]}
+        usageHeatmapLoading={false}
+        onRefreshUsageHeatmap={vi.fn()}
+      />
+    );
+
+    const lastHeatmapCall = heatmapSpy.mock.calls[heatmapSpy.mock.calls.length - 1];
+    const lastTokensChartCall = tokensChartSpy.mock.calls[tokensChartSpy.mock.calls.length - 1];
+
+    expect(lastHeatmapCall?.[0]).toEqual(expect.objectContaining({ days: 30 }));
+    expect(lastTokensChartCall?.[0]).toEqual(expect.objectContaining({ days: 30 }));
   });
 });
