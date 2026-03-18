@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.6](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.32.5...aio-coding-hub-v0.32.6) (2026-03-18)
+
+
+### Features
+
+* **provider-chain:** 优化供应商链路视图及日志详情显示 ([72d4bc4](https://github.com/dyndynjyxa/aio-coding-hub/commit/72d4bc49dfd1380ce503ec23a98eb81b55a1d488))
+
 ## [0.32.5](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.32.4...aio-coding-hub-v0.32.5) (2026-03-18)
 
 
