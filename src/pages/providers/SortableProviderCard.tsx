@@ -51,6 +51,13 @@ function trimTrailingUrlPunctuation(url: string) {
   return url.replace(/[.,!?;:，。；：]+$/u, "");
 }
 
+function providerTagClassName(tag: string) {
+  if (tag === "免费") {
+    return "shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300";
+  }
+  return "shrink-0 rounded-full bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-300";
+}
+
 function renderProviderNote(note: string) {
   const nodes: ReactNode[] = [];
   let lastIndex = 0;
@@ -302,16 +309,6 @@ export function SortableProviderCard({
                   </span>
                 </>
               )}
-              <span
-                className={cn(
-                  "shrink-0 rounded-full px-2 py-0.5 font-mono text-[10px]",
-                  provider.cost_multiplier === 0
-                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
-                    : "bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
-                )}
-              >
-                {provider.cost_multiplier === 0 ? "免费" : `倍率 ${provider.cost_multiplier}x`}
-              </span>
               {provider.cli_key === "claude" && hasClaudeModels ? (
                 <span
                   className="shrink-0 rounded-full bg-sky-50 px-2 py-0.5 font-mono text-[10px] text-sky-700 dark:bg-sky-900/30 dark:text-sky-400"
@@ -332,11 +329,7 @@ export function SortableProviderCard({
                 </span>
               ) : null}
               {(provider.tags ?? []).map((tag) => (
-                <span
-                  key={tag}
-                  className="shrink-0 rounded-full bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-                  title={`标签: ${tag}`}
-                >
+                <span key={tag} className={providerTagClassName(tag)} title={`标签: ${tag}`}>
                   {tag}
                 </span>
               ))}

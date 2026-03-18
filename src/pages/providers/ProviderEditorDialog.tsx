@@ -87,6 +87,8 @@ const DEFAULT_FORM_VALUES: ProviderEditorDialogFormInput = {
   note: "",
 };
 
+const FREE_TAG = "免费";
+
 function valueOrEmpty(value: number | null | undefined) {
   return value != null ? String(value) : "";
 }
@@ -95,6 +97,36 @@ function isZeroMultiplier(value: string | null | undefined) {
   if (!value?.trim()) return false;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed === 0;
+}
+
+function isNonZeroMultiplier(value: string | null | undefined) {
+  if (!value?.trim()) return false;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed !== 0;
+}
+
+function moveFreeTagToFront(tags: string[]) {
+  const withoutFreeTag = tags.filter((tag) => tag !== FREE_TAG);
+  return [FREE_TAG, ...withoutFreeTag];
+}
+
+function areTagsEqual(left: string[], right: string[]) {
+  if (left.length !== right.length) return false;
+  return left.every((tag, index) => tag === right[index]);
+}
+
+function tagBadgeClassName(tag: string) {
+  if (tag === FREE_TAG) {
+    return "inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300";
+  }
+  return "inline-flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent";
+}
+
+function tagRemoveButtonClassName(tag: string) {
+  if (tag === FREE_TAG) {
+    return "inline-flex h-3.5 w-3.5 items-center justify-center rounded-full hover:bg-emerald-200/70 dark:hover:bg-emerald-800/60";
+  }
+  return "inline-flex h-3.5 w-3.5 items-center justify-center rounded-full hover:bg-accent/20";
 }
 
 function buildFormValues(initialValues: ProviderEditorInitialValues | null) {
@@ -305,6 +337,25 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
 
     apiKeyFetchPromiseRef.current = request;
   }, [authMode, editingProviderId, mode, open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    setTags((prev) => {
+      const hasFreeTag = prev.includes(FREE_TAG);
+
+      if (isZeroMultiplier(costMultiplierValue)) {
+        const next = hasFreeTag ? moveFreeTagToFront(prev) : [FREE_TAG, ...prev];
+        return areTagsEqual(prev, next) ? prev : next;
+      }
+
+      if (isNonZeroMultiplier(costMultiplierValue) && hasFreeTag) {
+        return prev.filter((tag) => tag !== FREE_TAG);
+      }
+
+      return prev;
+    });
+  }, [costMultiplierValue, open, tags]);
 
   useEffect(() => {
     if (editProvider?.id && editProvider.auth_mode === "oauth") {
@@ -585,15 +636,12 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
       <FormField label="标签" hint="按 Enter 添加标签">
         <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 shadow-sm dark:border-slate-600 dark:bg-slate-800 dark:shadow-none">
           {tags.map((tag) => (
-            <span
-              key={tag}
-              className="inline-flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent"
-            >
+            <span key={tag} className={tagBadgeClassName(tag)}>
               {tag}
               <button
                 type="button"
                 onClick={() => setTags((prev) => prev.filter((t) => t !== tag))}
-                className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full hover:bg-accent/20"
+                className={tagRemoveButtonClassName(tag)}
                 disabled={saving}
                 aria-label={`移除标签 ${tag}`}
               >
@@ -977,15 +1025,12 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
               <FormField label="标签" hint="按 Enter 添加标签">
                 <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 shadow-sm dark:border-slate-600 dark:bg-slate-800 dark:shadow-none">
                   {tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="inline-flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent"
-                    >
+                    <span key={tag} className={tagBadgeClassName(tag)}>
                       {tag}
                       <button
                         type="button"
                         onClick={() => setTags((prev) => prev.filter((t) => t !== tag))}
-                        className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full hover:bg-accent/20"
+                        className={tagRemoveButtonClassName(tag)}
                         disabled={saving}
                         aria-label={`移除标签 ${tag}`}
                       >

@@ -511,6 +511,85 @@ describe("pages/providers/ProviderEditorDialog", () => {
 
     expect(dialog.getByDisplayValue("0")).toBeInTheDocument();
     expect(freeButton.className).toContain("emerald");
+    const removeFreeTagButton = dialog.getByRole("button", { name: "移除标签 免费" });
+    expect(removeFreeTagButton).toBeInTheDocument();
+    expect(removeFreeTagButton.closest("span")?.className).toContain("bg-emerald-100");
+  });
+
+  it("removes 免费 tag when cost multiplier becomes non-zero", async () => {
+    const provider = makeProvider({
+      cost_multiplier: 0,
+      tags: ["免费", "existing"],
+    });
+
+    render(
+      <ProviderEditorDialog
+        mode="edit"
+        open={true}
+        provider={provider}
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByRole("button", { name: "移除标签 免费" })).toBeInTheDocument();
+    expect(dialog.getByText("existing")).toBeInTheDocument();
+
+    fireEvent.change(dialog.getByDisplayValue("0"), { target: { value: "1.5" } });
+
+    await waitFor(() =>
+      expect(dialog.queryByRole("button", { name: "移除标签 免费" })).not.toBeInTheDocument()
+    );
+    expect(dialog.getByText("existing")).toBeInTheDocument();
+  });
+
+  it("adds 免费 tag when edit mode loads a zero multiplier provider", async () => {
+    const provider = makeProvider({
+      cost_multiplier: 0,
+      tags: ["existing"],
+    });
+
+    render(
+      <ProviderEditorDialog
+        mode="edit"
+        open={true}
+        provider={provider}
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+
+    await waitFor(() =>
+      expect(dialog.getByRole("button", { name: "移除标签 免费" })).toBeInTheDocument()
+    );
+    expect(dialog.getByText("existing")).toBeInTheDocument();
+  });
+
+  it("keeps 免费 as the first tag when multiplier is zero", async () => {
+    const provider = makeProvider({
+      cost_multiplier: 0,
+      tags: ["existing", "免费", "other"],
+    });
+
+    render(
+      <ProviderEditorDialog
+        mode="edit"
+        open={true}
+        provider={provider}
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+
+    await waitFor(() => {
+      const tagRemoveButtons = dialog.getAllByRole("button", { name: /移除标签 / });
+      expect(tagRemoveButtons[0]).toHaveAccessibleName("移除标签 免费");
+    });
   });
 
   it("handles API key copy fetch failure gracefully", async () => {

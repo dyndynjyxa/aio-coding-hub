@@ -254,6 +254,14 @@ describe("pages/providers/SortableProviderCard", () => {
     expect(screen.getByText("cn")).toBeInTheDocument();
   });
 
+  it("renders 免费 tag with emerald styling", () => {
+    renderCard({ tags: ["免费"] });
+
+    const freeTag = screen.getByText("免费");
+    expect(freeTag.className).toContain("bg-emerald-100");
+    expect(freeTag.className).toContain("text-emerald-700");
+  });
+
   it("keeps cx2cc source label without the top translation badge", () => {
     renderCard(
       {
@@ -294,10 +302,10 @@ describe("pages/providers/SortableProviderCard", () => {
     expect(screen.queryByText("顺序")).not.toBeInTheDocument();
   });
 
-  it("renders free label when cost multiplier is zero", () => {
+  it("does not render cost multiplier label when cost multiplier is zero", () => {
     renderCard({ cost_multiplier: 0 });
 
-    expect(screen.getByText("免费")).toBeInTheDocument();
+    expect(screen.queryByText("免费")).not.toBeInTheDocument();
   });
 
   it("renders circuit breaker state", () => {
