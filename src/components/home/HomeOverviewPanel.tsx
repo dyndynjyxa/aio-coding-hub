@@ -55,6 +55,12 @@ const PREVIEW_CIRCUITS: OpenCircuitRow[] = [
   },
 ];
 
+function didKeysChange(current: string[], previous: string[]) {
+  return (
+    current.length !== previous.length || current.some((key, index) => key !== previous[index])
+  );
+}
+
 export type HomeOverviewPanelProps = {
   showCustomTooltip: boolean;
   circuitPreviewEnabled?: boolean;
@@ -171,19 +177,17 @@ export function HomeOverviewPanel({
       return;
     }
 
-    const hasNewOpenCircuit = openCircuitKeys.some((key) => !previousOpenCircuitKeys.includes(key));
-    const hasNewActiveSession = activeSessionKeys.some(
-      (key) => !previousActiveSessionKeys.includes(key)
-    );
+    const openCircuitChanged = didKeysChange(openCircuitKeys, previousOpenCircuitKeys);
+    const activeSessionChanged = didKeysChange(activeSessionKeys, previousActiveSessionKeys);
 
     previousActiveSessionKeysRef.current = activeSessionKeys;
     previousOpenCircuitKeysRef.current = openCircuitKeys;
 
-    if (hasNewOpenCircuit) {
+    if (openCircuitChanged) {
       setSessionsTab("circuit");
       return;
     }
-    if (hasNewActiveSession) {
+    if (activeSessionChanged) {
       setSessionsTab("sessions");
     }
   }, [activeSessionKeys, openCircuitKeys]);
@@ -276,15 +280,24 @@ export function HomeOverviewPanel({
                     刷新
                   </button>
                 )}
-                {sessionsTab === "circuit" && circuitPreviewActive && (
-                  <button
-                    type="button"
-                    onClick={() => setPreviewCircuits([])}
-                    className="flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
-                  >
-                    关闭预览
-                  </button>
-                )}
+                {sessionsTab === "circuit" &&
+                  (circuitPreviewActive ? (
+                    <button
+                      type="button"
+                      onClick={() => setPreviewCircuits([])}
+                      className="flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
+                    >
+                      关闭预览
+                    </button>
+                  ) : displayedCircuits.length === 0 && circuitPreviewEnabled ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setPreviewCircuits(PREVIEW_CIRCUITS)}
+                    >
+                      预览熔断样式
+                    </Button>
+                  ) : null)}
               </div>
             </div>
 
@@ -302,20 +315,7 @@ export function HomeOverviewPanel({
                   available={providerLimitAvailable}
                 />
               ) : displayedCircuits.length === 0 ? (
-                <EmptyState
-                  title="当前没有熔断中的 Provider"
-                  action={
-                    circuitPreviewEnabled ? (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => setPreviewCircuits(PREVIEW_CIRCUITS)}
-                      >
-                        预览熔断样式
-                      </Button>
-                    ) : undefined
-                  }
-                />
+                <EmptyState title="当前没有熔断中的 Provider" />
               ) : (
                 <div className="h-full overflow-y-auto pr-1">
                   <div className="space-y-3">
