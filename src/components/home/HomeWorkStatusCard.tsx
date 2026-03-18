@@ -1,11 +1,8 @@
 // Usage:
-// - Render in `HomeOverviewPanel` left column to show each CLI's current workspace and proxy state.
+// - Render in `HomeOverviewPanel` left column to show each CLI's proxy state.
 
-import { Fragment } from "react";
 import { CLIS } from "../../constants/clis";
 import type { CliKey } from "../../services/providers";
-import type { SortModeSummary } from "../../services/sortModes";
-import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Switch } from "../../ui/Switch";
 import { cn } from "../../utils/cn";
@@ -13,12 +10,8 @@ import { CliBrandIcon } from "./CliBrandIcon";
 
 export type HomeWorkStatusCardProps = {
   layout?: "vertical" | "horizontal";
-  sortModes: SortModeSummary[];
   sortModesLoading: boolean;
   sortModesAvailable: boolean | null;
-  activeModeByCli: Record<CliKey, number | null>;
-  activeModeToggling: Record<CliKey, boolean>;
-  onSetCliActiveMode: (cliKey: CliKey, modeId: number | null) => void;
 
   cliProxyEnabled: Record<CliKey, boolean>;
   cliProxyToggling: Record<CliKey, boolean>;
@@ -27,22 +20,13 @@ export type HomeWorkStatusCardProps = {
 
 export function HomeWorkStatusCard({
   layout = "vertical",
-  sortModes,
   sortModesLoading,
   sortModesAvailable,
-  activeModeByCli,
-  activeModeToggling,
-  onSetCliActiveMode,
   cliProxyEnabled,
   cliProxyToggling,
   onSetCliProxyEnabled,
 }: HomeWorkStatusCardProps) {
   const horizontal = layout === "horizontal";
-
-  const options: Array<{ id: number | null; label: string }> = [
-    { id: null, label: "Default" },
-    ...sortModes.map((m) => ({ id: m.id, label: m.name })),
-  ];
 
   return (
     <Card padding="sm" className="flex h-full flex-1 flex-col">
@@ -62,8 +46,6 @@ export function HomeWorkStatusCard({
         >
           {CLIS.map((cli) => {
             const cliKey = cli.key as CliKey;
-            const activeModeId = activeModeByCli[cliKey] ?? null;
-            const modeDisabled = activeModeToggling[cliKey] || sortModesLoading;
 
             return (
               <div
@@ -92,31 +74,6 @@ export function HomeWorkStatusCard({
                       size="sm"
                       aria-label={`${cli.name} 代理开关`}
                     />
-                  </div>
-                </div>
-
-                <div className="mt-2 flex items-center gap-1.5">
-                  <span className="shrink-0 text-xs text-slate-500 dark:text-slate-400">
-                    当前模板:
-                  </span>
-                  <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
-                    {options.map((opt, idx) => {
-                      const active = activeModeId === opt.id;
-                      const key = opt.id == null ? "default" : String(opt.id);
-                      return (
-                        <Fragment key={key}>
-                          {idx > 0 && <span className="text-slate-200 dark:text-slate-600">|</span>}
-                          <Button
-                            onClick={() => onSetCliActiveMode(cliKey, opt.id)}
-                            variant={active ? "primary" : "secondary"}
-                            size="sm"
-                            disabled={modeDisabled}
-                          >
-                            {opt.label}
-                          </Button>
-                        </Fragment>
-                      );
-                    })}
                   </div>
                 </div>
               </div>

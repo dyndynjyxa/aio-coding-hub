@@ -319,28 +319,25 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
 
                   <span
                     className={cn(
-                      "inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
+                      "inline-flex min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
                       cliTone
                     )}
+                    title={`${cliLabel} / ${modelText}`}
                   >
                     <CliBrandIcon
                       cliKey={trace.cli_key as CliKey}
                       className="h-2.5 w-2.5 shrink-0 rounded-[3px] object-contain"
                     />
-                    {cliLabel}
+                    <span className="truncate">
+                      {cliLabel} / {modelText}
+                    </span>
                   </span>
 
                   <span
-                    className="inline-flex min-w-0 items-center rounded-md bg-slate-100/75 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-700/55 dark:text-slate-200"
-                    title={modelText}
-                  >
-                    <span className="truncate">{modelText}</span>
-                  </span>
-
-                  <span
-                    className="inline-flex min-w-0 items-center rounded-md bg-slate-100/75 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-700/55 dark:text-slate-200"
+                    className="inline-flex min-w-0 items-center gap-1 rounded-md bg-slate-100/75 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-700/55 dark:text-slate-200"
                     title={providerTitle}
                   >
+                    <Server className="h-3 w-3 shrink-0 text-slate-400 dark:text-slate-500" />
                     <span className="truncate">{providerText}</span>
                   </span>
 

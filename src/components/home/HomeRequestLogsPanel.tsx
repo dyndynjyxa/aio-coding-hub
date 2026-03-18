@@ -224,29 +224,26 @@ const RequestLogCard = memo(function RequestLogCard({
 
             <span
               className={cn(
-                "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium shrink-0",
+                "inline-flex min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
                 cliTone
               )}
+              title={`${cliLabel} / ${modelText}`}
             >
               <CliBrandIcon
                 cliKey={log.cli_key}
                 className="h-2.5 w-2.5 shrink-0 rounded-[3px] object-contain"
               />
-              {cliLabel}
-            </span>
-
-            <span
-              className="inline-flex min-w-0 items-center rounded-md bg-slate-100/75 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-700/55 dark:text-slate-200"
-              title={modelText}
-            >
-              <span className="truncate">{modelText}</span>
+              <span className="truncate">
+                {cliLabel} / {modelText}
+              </span>
             </span>
 
             {compactMode && (
               <span
-                className="inline-flex min-w-0 items-center rounded-md bg-slate-100/75 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-700/55 dark:text-slate-200"
+                className="inline-flex min-w-0 items-center gap-1 rounded-md bg-slate-100/75 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-700/55 dark:text-slate-200"
                 title={providerTitle}
               >
+                <Server className="h-3 w-3 shrink-0 text-slate-400 dark:text-slate-500" />
                 <span className="truncate">{providerText}</span>
               </span>
             )}
@@ -399,7 +396,7 @@ export type HomeRequestLogsPanelProps = {
   showCustomTooltip: boolean;
   title?: string;
   showOpenLogsPageButton?: boolean;
-  requestLogsPreviewEnabled?: boolean;
+  devPreviewEnabled?: boolean;
 
   traces: TraceSession[];
 
@@ -417,7 +414,7 @@ export function HomeRequestLogsPanel({
   showCustomTooltip,
   title,
   showOpenLogsPageButton = true,
-  requestLogsPreviewEnabled = import.meta.env.DEV,
+  devPreviewEnabled = false,
   traces,
   requestLogs,
   requestLogsLoading,
@@ -444,13 +441,16 @@ export function HomeRequestLogsPanel({
       // ignore
     }
   };
-  const [previewTraces, setPreviewTraces] = useState<TraceSession[]>([]);
-  const [previewRequestLogs, setPreviewRequestLogs] = useState<RequestLogSummary[]>([]);
+  const previewTraces = useMemo(
+    () => (devPreviewEnabled && traces.length === 0 ? buildPreviewTraces() : []),
+    [devPreviewEnabled, traces.length]
+  );
+  const previewRequestLogs = useMemo(
+    () => (devPreviewEnabled && requestLogs.length === 0 ? buildPreviewRequestLogs() : []),
+    [devPreviewEnabled, requestLogs.length]
+  );
   const displayedTraces = traces.length > 0 ? traces : previewTraces;
   const displayedRequestLogs = requestLogs.length > 0 ? requestLogs : previewRequestLogs;
-  const previewActive =
-    (traces.length === 0 && previewTraces.length > 0) ||
-    (requestLogs.length === 0 && previewRequestLogs.length > 0);
   const realtimeTraceCandidates = useMemo(() => {
     const logsByTraceId = new Map<string, RequestLogSummary>();
     for (const log of displayedRequestLogs) {
@@ -484,19 +484,6 @@ export function HomeRequestLogsPanel({
                   ? `更新中… · 共 ${displayedRequestLogs.length} 条`
                   : `共 ${displayedRequestLogs.length} 条`}
           </div>
-          {previewActive && (
-            <Button
-              onClick={() => {
-                setPreviewTraces([]);
-                setPreviewRequestLogs([]);
-              }}
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400"
-            >
-              关闭预览
-            </Button>
-          )}
           {showOpenLogsPageButton && (
             <Button
               onClick={() => navigate("/logs")}
@@ -543,16 +530,11 @@ export function HomeRequestLogsPanel({
           formatUnixSeconds={formatUnixSecondsStable}
           showCustomTooltip={showCustomTooltip}
           compactMode={compactMode}
-          requestLogsPreviewEnabled={requestLogsPreviewEnabled}
           requestLogsAvailable={requestLogsAvailable}
           requestLogs={displayedRequestLogs}
           requestLogsLoading={requestLogsLoading}
           selectedLogId={selectedLogId}
           onSelectLogId={onSelectLogId}
-          onEnablePreview={() => {
-            setPreviewTraces(buildPreviewTraces());
-            setPreviewRequestLogs(buildPreviewRequestLogs());
-          }}
         />
       </div>
     </Card>
@@ -565,13 +547,11 @@ type RequestLogsListProps = {
   formatUnixSeconds: (ts: number) => string;
   showCustomTooltip: boolean;
   compactMode: boolean;
-  requestLogsPreviewEnabled: boolean;
   requestLogsAvailable: boolean | null;
   requestLogs: RequestLogSummary[];
   requestLogsLoading: boolean;
   selectedLogId: number | null;
   onSelectLogId: (id: number | null) => void;
-  onEnablePreview: () => void;
 };
 
 const RequestLogsList = memo(function RequestLogsList({
@@ -579,13 +559,11 @@ const RequestLogsList = memo(function RequestLogsList({
   formatUnixSeconds,
   showCustomTooltip,
   compactMode,
-  requestLogsPreviewEnabled,
   requestLogsAvailable,
   requestLogs,
   requestLogsLoading,
   selectedLogId,
   onSelectLogId,
-  onEnablePreview,
 }: RequestLogsListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const useVirtual = requestLogs.length >= VIRTUALIZATION_THRESHOLD;
@@ -634,16 +612,7 @@ const RequestLogsList = memo(function RequestLogsList({
             加载中…
           </div>
         ) : (
-          <EmptyState
-            title="当前没有最近使用记录"
-            action={
-              requestLogsPreviewEnabled ? (
-                <Button variant="secondary" size="sm" onClick={onEnablePreview}>
-                  预览记录样式
-                </Button>
-              ) : undefined
-            }
-          />
+          <EmptyState title="当前没有最近使用记录" />
         )
       ) : useVirtual ? (
         <div

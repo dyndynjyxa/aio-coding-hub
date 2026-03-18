@@ -420,14 +420,12 @@ describe("components/home/HomeRequestLogsPanel", () => {
     expect(screen.getAllByText("加载中…").length).toBeGreaterThan(0);
   });
 
-  it("supports local preview rows in dev-like empty state", async () => {
-    const user = userEvent.setup();
-
+  it("renders preview rows when dev preview is enabled in empty state", () => {
     render(
       <MemoryRouter>
         <HomeRequestLogsPanel
           showCustomTooltip={false}
-          requestLogsPreviewEnabled={true}
+          devPreviewEnabled={true}
           traces={[]}
           requestLogs={[]}
           requestLogsLoading={false}
@@ -440,13 +438,11 @@ describe("components/home/HomeRequestLogsPanel", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText("当前没有最近使用记录")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "预览记录样式" }));
-
-    expect(screen.getAllByText("gpt-5.4").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Codex\s*\/\s*gpt-5.4/).length).toBeGreaterThan(0);
     expect(screen.getAllByText("免费").length).toBeGreaterThan(0);
     expect(screen.getByText("进行中")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "关闭预览" })).toBeInTheDocument();
+    expect(screen.queryByText("当前没有最近使用记录")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "关闭预览" })).not.toBeInTheDocument();
   });
 
   it("renders rich tooltip with attempt counts for failover routes", async () => {
@@ -591,7 +587,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText("gpt-5.4")).toBeInTheDocument();
+    expect(screen.getByText(/Codex\s*\/\s*gpt-5.4/)).toBeInTheDocument();
     expect(screen.getAllByText("P1").length).toBeGreaterThan(0);
     expect(screen.getByText("流中断")).toBeInTheDocument();
     expect(screen.queryByText("3.20s")).not.toBeInTheDocument();

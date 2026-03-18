@@ -27,6 +27,7 @@ import { useTraceStore } from "../services/traceStore";
 import { useHomeCircuitState } from "./home/hooks/useHomeCircuitState";
 import { useHomeSortMode } from "./home/hooks/useHomeSortMode";
 import { useHomeCliProxy } from "./home/hooks/useHomeCliProxy";
+import { useHomeWorkspaceConfigs } from "./home/hooks/useHomeWorkspaceConfigs";
 
 type HomeTabKey = "overview" | "cost" | "more";
 
@@ -42,10 +43,12 @@ export function HomePage() {
   const foregroundActive = useDocumentVisibility();
   const settingsQuery = useSettingsQuery();
   const showHomeHeatmap = settingsQuery.data?.show_home_heatmap ?? true;
+  const isDevMode = import.meta.env.DEV;
 
   const [tab, setTab] = useState<HomeTabKey>("overview");
   const tabRef = useRef(tab);
   const [selectedLogId, setSelectedLogId] = useState<number | null>(null);
+  const [devPreviewEnabled, setDevPreviewEnabled] = useState(false);
 
   // --- Delegated state hooks ---
   const circuit = useHomeCircuitState();
@@ -64,6 +67,7 @@ export function HomePage() {
 
   const sortMode = useHomeSortMode(activeSessions);
   const cliProxyState = useHomeCliProxy();
+  const workspaceConfigs = useHomeWorkspaceConfigs({ enabled: tab === "overview" });
 
   // --- Overview data queries ---
   const usageHeatmapQuery = useUsageHourlySeriesQuery(15, { enabled: tab === "overview" });
@@ -152,7 +156,18 @@ export function HomePage() {
         <PageHeader
           title="首页"
           actions={
-            <TabList ariaLabel="首页视图切换" items={HOME_TABS} value={tab} onChange={setTab} />
+            <>
+              {isDevMode ? (
+                <Button
+                  variant={devPreviewEnabled ? "primary" : "secondary"}
+                  size="md"
+                  onClick={() => setDevPreviewEnabled((prev) => !prev)}
+                >
+                  {devPreviewEnabled ? "Dev关闭预览数据" : "Dev开启预览数据"}
+                </Button>
+              ) : null}
+              <TabList ariaLabel="首页视图切换" items={HOME_TABS} value={tab} onChange={setTab} />
+            </>
           }
         />
       </div>
@@ -161,6 +176,7 @@ export function HomePage() {
         {tab === "overview" ? (
           <HomeOverviewPanel
             showCustomTooltip={showCustomTooltip}
+            devPreviewEnabled={devPreviewEnabled}
             showHomeHeatmap={showHomeHeatmap}
             usageHeatmapRows={usageHeatmapRows}
             usageHeatmapLoading={usageHeatmapLoading}
@@ -177,6 +193,7 @@ export function HomePage() {
             activeSessions={activeSessions}
             activeSessionsLoading={activeSessionsLoading}
             activeSessionsAvailable={activeSessionsAvailable}
+            workspaceConfigs={workspaceConfigs}
             providerLimitRows={providerLimitRows}
             providerLimitLoading={providerLimitLoading}
             providerLimitAvailable={providerLimitAvailable}

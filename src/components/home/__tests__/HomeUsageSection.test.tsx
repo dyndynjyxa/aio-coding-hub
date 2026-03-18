@@ -82,4 +82,21 @@ describe("components/home/HomeUsageSection", () => {
     expect(screen.getByText("今日用量")).toBeInTheDocument();
     expect(screen.getByText("2.4K")).toBeInTheDocument();
   });
+
+  it("renders preview usage data when dev preview is enabled and rows are empty", () => {
+    render(
+      <HomeUsageSection
+        devPreviewEnabled={true}
+        showHeatmap={true}
+        usageHeatmapRows={[]}
+        usageHeatmapLoading={false}
+        onRefreshUsageHeatmap={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("heatmap")).toBeInTheDocument();
+    expect(screen.getByText("tokens-chart")).toBeInTheDocument();
+    expect(screen.getByText("今日用量")).toBeInTheDocument();
+    expect(screen.getByText("1.8M")).toBeInTheDocument();
+  });
 });
