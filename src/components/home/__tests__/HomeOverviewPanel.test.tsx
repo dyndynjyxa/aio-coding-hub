@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeOverviewPanel } from "../HomeOverviewPanel";
 
 vi.mock("../HomeUsageSection", () => ({
@@ -111,6 +111,10 @@ function renderPanel(overrides: Partial<ComponentProps<typeof HomeOverviewPanel>
 }
 
 describe("components/home/HomeOverviewPanel", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
   it("renders preview circuit rows when dev preview is enabled and there are no real open circuits", () => {
     const { onResetCircuitProvider } = renderPanel({ devPreviewEnabled: true });
 
@@ -289,6 +293,33 @@ describe("components/home/HomeOverviewPanel", () => {
     renderPanel({ devPreviewEnabled: true, providerLimitRows: [] });
 
     fireEvent.click(screen.getByRole("tab", { name: "供应商限额" }));
+    expect(screen.getByText("provider-limit:3")).toBeInTheDocument();
+  });
+
+  it("restores a persisted tab order from localStorage", () => {
+    window.localStorage.setItem(
+      "aio-home-overview-tab-order",
+      JSON.stringify(["providerLimit", "sessions", "circuit", "workspaceConfig"])
+    );
+
+    renderPanel();
+
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "供应商限额",
+      "活跃 Session",
+      "熔断信息",
+      "配置信息",
+    ]);
+  });
+
+  it("uses the first sorted tab as the default selection", () => {
+    window.localStorage.setItem(
+      "aio-home-overview-tab-order",
+      JSON.stringify(["providerLimit", "sessions", "circuit", "workspaceConfig"])
+    );
+
+    renderPanel({ devPreviewEnabled: true, providerLimitRows: [] });
+
     expect(screen.getByText("provider-limit:3")).toBeInTheDocument();
   });
 

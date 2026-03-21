@@ -1,6 +1,6 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { useTheme } from "../../../hooks/useTheme";
 import { gatewayKeys } from "../../../query/keys";
@@ -9,6 +9,43 @@ import { gatewayStart, gatewayStop } from "../../../services/gateway";
 import { createTestQueryClient } from "../../../test/utils/reactQuery";
 import { SettingsMainColumn } from "../SettingsMainColumn";
 import type { ComponentProps } from "react";
+
+let latestOnDragEnd: ((event: any) => void) | null = null;
+let sortableIsDragging = false;
+
+vi.mock("@dnd-kit/core", () => ({
+  DndContext: ({ children, onDragEnd }: any) => {
+    latestOnDragEnd = onDragEnd ?? null;
+    return <div data-testid="dnd">{children}</div>;
+  },
+  PointerSensor: function PointerSensor() {},
+  closestCenter: () => null,
+  useSensor: () => null,
+  useSensors: () => [],
+}));
+
+vi.mock("@dnd-kit/sortable", () => ({
+  SortableContext: ({ children }: any) => <div data-testid="sortable">{children}</div>,
+  arrayMove: (array: any[], from: number, to: number) => {
+    const next = array.slice();
+    const [item] = next.splice(from, 1);
+    next.splice(to, 0, item);
+    return next;
+  },
+  useSortable: () => ({
+    attributes: {},
+    listeners: {},
+    setNodeRef: () => {},
+    transform: null,
+    transition: undefined,
+    isDragging: sortableIsDragging,
+  }),
+  horizontalListSortingStrategy: {},
+}));
+
+vi.mock("@dnd-kit/utilities", () => ({
+  CSS: { Transform: { toString: () => "" } },
+}));
 
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
@@ -64,6 +101,12 @@ function renderSettingsMainColumn(
 }
 
 describe("pages/settings/SettingsMainColumn", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    latestOnDragEnd = null;
+    sortableIsDragging = false;
+  });
+
   it("switches theme from settings", () => {
     const setTheme = vi.fn();
     vi.mocked(useTheme).mockReturnValue({
@@ -146,6 +189,28 @@ describe("pages/settings/SettingsMainColumn", () => {
     fireEvent.click(screen.getByRole("button", { name: "最近30天" }));
     expect(setHomeUsagePeriod).toHaveBeenCalledWith("last30");
     expect(requestPersist).toHaveBeenCalledWith({ home_usage_period: "last30" });
+  });
+
+  it("reorders homepage overview tabs from settings", () => {
+    vi.mocked(useTheme).mockReturnValue({
+      theme: "system",
+      resolvedTheme: "light",
+      setTheme: vi.fn(),
+    } as any);
+
+    renderSettingsMainColumn();
+
+    act(() => {
+      latestOnDragEnd?.({
+        active: { id: "providerLimit" },
+        over: { id: "workspaceConfig" },
+      });
+    });
+
+    expect(screen.getByRole("button", { name: "供应商限额" })).toBeInTheDocument();
+    expect(window.localStorage.getItem("aio-home-overview-tab-order")).toBe(
+      JSON.stringify(["providerLimit", "workspaceConfig", "circuit", "sessions"])
+    );
   });
 
   it.each([

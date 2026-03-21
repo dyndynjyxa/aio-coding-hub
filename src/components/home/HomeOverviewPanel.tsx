@@ -7,6 +7,11 @@ import { RefreshCw } from "lucide-react";
 import { useNowUnix } from "../../hooks/useNowUnix";
 import type { OpenCircuitRow } from "../ProviderCircuitBadge";
 import type { GatewayActiveSession } from "../../services/gateway";
+import {
+  HOME_OVERVIEW_TABS,
+  readHomeOverviewTabOrderFromStorage,
+  type HomeOverviewTabKey,
+} from "../../services/homeOverviewTabOrder";
 import type { CliKey } from "../../services/providers";
 import type { ProviderLimitUsageRow } from "../../services/providerLimitUsage";
 import type { RequestLogSummary } from "../../services/requestLogs";
@@ -27,15 +32,6 @@ import { HomeUsageSection } from "./HomeUsageSection";
 import { HomeWorkspaceConfigPanel } from "./HomeWorkspaceConfigPanel";
 import { HomeWorkStatusCard } from "./HomeWorkStatusCard";
 import type { HomeCliWorkspaceConfig } from "./homeWorkspaceConfigTypes";
-
-type SessionsTabKey = "sessions" | "circuit" | "workspaceConfig" | "providerLimit";
-
-const SESSIONS_TABS: Array<{ key: SessionsTabKey; label: string }> = [
-  { key: "workspaceConfig", label: "配置信息" },
-  { key: "circuit", label: "熔断信息" },
-  { key: "sessions", label: "活跃 Session" },
-  { key: "providerLimit", label: "供应商限额" },
-];
 
 const PREVIEW_CIRCUITS: OpenCircuitRow[] = [
   {
@@ -314,7 +310,12 @@ export function HomeOverviewPanel({
   selectedLogId,
   onSelectLogId,
 }: HomeOverviewPanelProps) {
-  const [sessionsTab, setSessionsTab] = useState<SessionsTabKey>("workspaceConfig");
+  const [sessionsTabsOrder] = useState<HomeOverviewTabKey[]>(() =>
+    readHomeOverviewTabOrderFromStorage()
+  );
+  const [sessionsTab, setSessionsTab] = useState<HomeOverviewTabKey>(
+    () => sessionsTabsOrder[0] ?? "workspaceConfig"
+  );
   const [selectedWorkspaceConfigCliKey, setSelectedWorkspaceConfigCliKey] =
     useState<CliKey>("claude");
   const previousOpenCircuitKeysRef = useRef<string[] | null>(null);
@@ -355,6 +356,10 @@ export function HomeOverviewPanel({
   }, [devPreviewEnabled, workspaceConfigs]);
   const circuitNowUnix = useNowUnix(sessionsTab === "circuit" && displayedCircuits.length > 0);
   const showUsageRow = showHomeHeatmap || showHomeUsage;
+  const sessionsTabs = useMemo(() => {
+    const labelByKey = new Map(HOME_OVERVIEW_TABS.map((item) => [item.key, item.label]));
+    return sessionsTabsOrder.map((key) => ({ key, label: labelByKey.get(key) ?? key }));
+  }, [sessionsTabsOrder]);
 
   const openCircuitKeys = useMemo(
     () =>
@@ -464,10 +469,12 @@ export function HomeOverviewPanel({
             <div className="flex items-center justify-between gap-2 shrink-0">
               <TabList
                 ariaLabel="概览状态切换"
-                items={SESSIONS_TABS}
+                items={sessionsTabs}
                 value={sessionsTab}
                 onChange={setSessionsTab}
                 size="sm"
+                className="overflow-x-auto"
+                buttonClassName="whitespace-nowrap"
               />
               <div className="flex items-center gap-2 text-xs text-slate-400">
                 {sessionsTab === "providerLimit" && (
