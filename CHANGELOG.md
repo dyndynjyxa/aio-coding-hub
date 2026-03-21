@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.32.7](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.32.6...aio-coding-hub-v0.32.7) (2026-03-21)
+
+
+### Features
+
+* **home:** 添加供应商限额面板刷新按钮 ([18f4f91](https://github.com/dyndynjyxa/aio-coding-hub/commit/18f4f91d375f860312a126354a65efad6244e7ae))
+* **proxy:** 支持 Codex 会话 ID 补全功能 ([25f8321](https://github.com/dyndynjyxa/aio-coding-hub/commit/25f8321536ccdfe9a68de1866bb9762794ac97b7))
+* **ui:** 优化首页概览、CLI 代理状态与供应商页交互 ([#106](https://github.com/dyndynjyxa/aio-coding-hub/issues/106)) ([358e73f](https://github.com/dyndynjyxa/aio-coding-hub/commit/358e73f598fd48c7bbf131a3117e4801cec03ced))
+
 ## [0.32.6](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.32.5...aio-coding-hub-v0.32.6) (2026-03-18)
 
 
