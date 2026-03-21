@@ -50,9 +50,9 @@ describe("query/cliProxy", () => {
     setTauriRuntime();
 
     const initial: CliProxyStatus[] = [
-      { cli_key: "claude", enabled: true, base_origin: null },
-      { cli_key: "codex", enabled: false, base_origin: null },
-      { cli_key: "gemini", enabled: false, base_origin: null },
+      { cli_key: "claude", enabled: true, base_origin: null, applied_to_current_gateway: true },
+      { cli_key: "codex", enabled: false, base_origin: null, applied_to_current_gateway: null },
+      { cli_key: "gemini", enabled: false, base_origin: null, applied_to_current_gateway: null },
     ];
     vi.mocked(cliProxySetEnabled).mockResolvedValue({
       trace_id: "t1",
@@ -75,6 +75,7 @@ describe("query/cliProxy", () => {
 
       const optimistic = client.getQueryData<CliProxyStatus[] | null>(cliProxyKeys.statusAll());
       expect(optimistic?.find((r) => r.cli_key === "codex")?.enabled).toBe(true);
+      expect(optimistic?.find((r) => r.cli_key === "codex")?.applied_to_current_gateway).toBe(true);
 
       await promise;
     });
@@ -85,7 +86,9 @@ describe("query/cliProxy", () => {
   it("rolls back cache when setEnabled fails", async () => {
     setTauriRuntime();
 
-    const initial: CliProxyStatus[] = [{ cli_key: "codex", enabled: false, base_origin: null }];
+    const initial: CliProxyStatus[] = [
+      { cli_key: "codex", enabled: false, base_origin: null, applied_to_current_gateway: null },
+    ];
     vi.mocked(cliProxySetEnabled).mockRejectedValue(new Error("boom"));
 
     const client = createTestQueryClient();

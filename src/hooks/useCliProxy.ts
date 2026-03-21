@@ -16,6 +16,12 @@ const DEFAULT_TOGGLING: Record<CliKey, boolean> = {
   gemini: false,
 };
 
+const DEFAULT_APPLIED_TO_CURRENT_GATEWAY: Record<CliKey, boolean | null> = {
+  claude: null,
+  codex: null,
+  gemini: null,
+};
+
 export function useCliProxy() {
   const [toggling, setToggling] = useState<Record<CliKey, boolean>>(DEFAULT_TOGGLING);
   const togglingRef = useRef(toggling);
@@ -23,6 +29,8 @@ export function useCliProxy() {
 
   const statusQuery = useCliProxyStatusAllQuery();
   const setEnabledMutation = useCliProxySetEnabledMutation();
+  const loading = Boolean(statusQuery.isLoading);
+  const available = loading ? null : statusQuery.data != null;
 
   const enabled = useMemo<Record<CliKey, boolean>>(() => {
     const next: Record<CliKey, boolean> = { ...DEFAULT_ENABLED };
@@ -31,6 +39,18 @@ export function useCliProxy() {
     for (const row of statuses) {
       if (row.cli_key in next) {
         next[row.cli_key as CliKey] = Boolean(row.enabled);
+      }
+    }
+    return next;
+  }, [statusQuery.data]);
+
+  const appliedToCurrentGateway = useMemo<Record<CliKey, boolean | null>>(() => {
+    const next: Record<CliKey, boolean | null> = { ...DEFAULT_APPLIED_TO_CURRENT_GATEWAY };
+    const statuses = statusQuery.data ?? null;
+    if (!statuses) return next;
+    for (const row of statuses) {
+      if (row.cli_key in next) {
+        next[row.cli_key as CliKey] = row.applied_to_current_gateway ?? null;
       }
     }
     return next;
@@ -81,7 +101,10 @@ export function useCliProxy() {
   );
 
   return {
+    loading,
+    available,
     enabled,
+    appliedToCurrentGateway,
     toggling,
     refresh,
     setCliProxyEnabled,

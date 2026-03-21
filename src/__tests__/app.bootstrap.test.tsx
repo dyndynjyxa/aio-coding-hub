@@ -24,6 +24,26 @@ vi.mock("../services/startup", () => ({
   startupSyncDefaultPromptsFromFilesOncePerSession: vi.fn().mockResolvedValue(undefined),
   startupSyncModelPricesOnce: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("../app/AppRoutes", () => ({
+  AppRoutes: () => <div data-testid="app-routes" />,
+}));
+vi.mock("../services/backgroundTasks", () => ({
+  registerBackgroundTask: vi.fn(() => vi.fn()),
+  startBackgroundTaskScheduler: vi.fn(),
+  setBackgroundTaskSchedulerForeground: vi.fn(),
+  emitBackgroundTaskVisibilityTrigger: vi.fn(),
+}));
+vi.mock("../services/cliProxy", () => ({
+  cliProxyStatusAll: vi.fn().mockResolvedValue([]),
+}));
+vi.mock("../hooks/useUpdateMeta", async () => {
+  const actual =
+    await vi.importActual<typeof import("../hooks/useUpdateMeta")>("../hooks/useUpdateMeta");
+  return {
+    ...actual,
+    updateCheckNow: vi.fn().mockResolvedValue(null),
+  };
+});
 vi.mock("../services/settings", async () => {
   const actual =
     await vi.importActual<typeof import("../services/settings")>("../services/settings");
@@ -35,6 +55,11 @@ vi.mock("../services/settings", async () => {
 
 import { listenAppHeartbeat } from "../services/appHeartbeat";
 import { setCacheAnomalyMonitorEnabled } from "../services/cacheAnomalyMonitor";
+import {
+  registerBackgroundTask,
+  setBackgroundTaskSchedulerForeground,
+  startBackgroundTaskScheduler,
+} from "../services/backgroundTasks";
 import { listenGatewayEvents } from "../services/gatewayEvents";
 import { listenNoticeEvents } from "../services/noticeEvents";
 import { settingsGet } from "../services/settings";
@@ -46,6 +71,8 @@ import {
   listenTaskCompleteNotifyEvents,
   setTaskCompleteNotifyEnabled,
 } from "../services/taskCompleteNotifyEvents";
+import { updateCheckNow } from "../hooks/useUpdateMeta";
+import { cliProxyStatusAll } from "../services/cliProxy";
 
 async function renderApp() {
   const { default: App } = await import("../App");
@@ -85,6 +112,11 @@ describe("App bootstrap", () => {
       expect(startupSyncDefaultPromptsFromFilesOncePerSession).toHaveBeenCalledTimes(1);
       expect(setCacheAnomalyMonitorEnabled).toHaveBeenCalledWith(true);
       expect(setTaskCompleteNotifyEnabled).toHaveBeenCalledWith(false);
+      expect(registerBackgroundTask).toHaveBeenCalledTimes(2);
+      expect(startBackgroundTaskScheduler).toHaveBeenCalledTimes(1);
+      expect(setBackgroundTaskSchedulerForeground).toHaveBeenCalledWith(true);
+      expect(updateCheckNow).not.toHaveBeenCalled();
+      expect(cliProxyStatusAll).not.toHaveBeenCalled();
     });
   });
 });

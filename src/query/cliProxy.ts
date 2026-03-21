@@ -26,10 +26,24 @@ export function useCliProxySetEnabledMutation() {
         if (!cur) return cur;
         const exists = cur.some((row) => row.cli_key === input.cliKey);
         if (!exists) {
-          return [{ cli_key: input.cliKey, enabled: input.enabled, base_origin: null }, ...cur];
+          return [
+            {
+              cli_key: input.cliKey,
+              enabled: input.enabled,
+              base_origin: null,
+              applied_to_current_gateway: input.enabled ? true : null,
+            },
+            ...cur,
+          ];
         }
         return cur.map((row) =>
-          row.cli_key === input.cliKey ? { ...row, enabled: input.enabled } : row
+          row.cli_key === input.cliKey
+            ? {
+                ...row,
+                enabled: input.enabled,
+                applied_to_current_gateway: input.enabled ? true : null,
+              }
+            : row
         );
       });
 

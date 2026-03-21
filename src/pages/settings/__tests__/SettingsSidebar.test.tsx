@@ -13,15 +13,23 @@ import {
 import { useUsageSummaryQuery } from "../../../query/usage";
 import { useDbDiskUsageQuery, useRequestLogsClearAllMutation } from "../../../query/dataManagement";
 import { appDataDirGet, appDataReset, appExit } from "../../../services/dataManagement";
+import { runBackgroundTask } from "../../../services/backgroundTasks";
 import { logToConsole } from "../../../services/consoleLog";
-import { updateCheckNow } from "../../../hooks/useUpdateMeta";
 import { tauriOpenPath, tauriOpenUrl } from "../../../test/mocks/tauri";
 import { notifyModelPricesUpdated } from "../../../services/modelPrices";
 import { modelPricesKeys } from "../../../query/keys";
 
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
-vi.mock("../../../hooks/useUpdateMeta", () => ({ updateCheckNow: vi.fn() }));
+vi.mock("../../../services/backgroundTasks", async () => {
+  const actual = await vi.importActual<typeof import("../../../services/backgroundTasks")>(
+    "../../../services/backgroundTasks"
+  );
+  return {
+    ...actual,
+    runBackgroundTask: vi.fn(),
+  };
+});
 
 vi.mock("../../../services/dataManagement", async () => {
   const actual = await vi.importActual<typeof import("../../../services/dataManagement")>(
@@ -210,7 +218,7 @@ describe("pages/settings/SettingsSidebar", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "check-update" }));
-    expect(updateCheckNow).toHaveBeenCalledWith({ silent: false, openDialogIfUpdate: true });
+    expect(runBackgroundTask).toHaveBeenCalledWith("app-update-check", { trigger: "manual" });
   });
 
   it("handles data management, model price sync, and subscription invalidation", async () => {

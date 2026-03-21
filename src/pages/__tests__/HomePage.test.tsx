@@ -32,11 +32,15 @@ import { useUsageHourlySeriesQuery } from "../../query/usage";
 import { useProviderLimitUsageV1Query } from "../../query/providerLimitUsage";
 import { useCliProxy } from "../../hooks/useCliProxy";
 import { useHomeWorkspaceConfigs } from "../home/hooks/useHomeWorkspaceConfigs";
+import { emitBackgroundTaskVisibilityTrigger } from "../../services/backgroundTasks";
 
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
 }));
 vi.mock("../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
+vi.mock("../../services/backgroundTasks", () => ({
+  emitBackgroundTaskVisibilityTrigger: vi.fn(),
+}));
 
 vi.mock("../../components/home/HomeOverviewPanel", () => ({
   HomeOverviewPanel: ({
@@ -84,6 +88,9 @@ vi.mock("../../components/home/HomeOverviewPanel", () => ({
       </button>
       <button type="button" onClick={() => onSetCliProxyEnabled("codex", true)}>
         enable-cli-proxy-codex
+      </button>
+      <button type="button" onClick={() => onSetCliProxyEnabled("codex", true)}>
+        repair-cli-proxy-codex
       </button>
       <button type="button" onClick={() => onSelectLogId(123)}>
         select-log
@@ -398,6 +405,7 @@ describe("pages/HomePage", () => {
 
     vi.mocked(useCliProxy).mockReturnValue({
       enabled: false,
+      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
       toggling: false,
       setCliProxyEnabled: vi.fn(),
     } as any);
@@ -476,6 +484,7 @@ describe("pages/HomePage", () => {
     const setCliProxyEnabled = vi.fn();
     vi.mocked(useCliProxy).mockReturnValue({
       enabled: { claude: false, codex: false, gemini: false },
+      appliedToCurrentGateway: { claude: null, codex: false, gemini: null },
       toggling: { claude: false, codex: false, gemini: false },
       setCliProxyEnabled,
     } as any);
@@ -494,6 +503,33 @@ describe("pages/HomePage", () => {
     expect(setCliProxyEnabled).toHaveBeenCalledWith("codex", true);
   });
 
+  it("emits home overview visible trigger on mount and when returning to overview tab", async () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    mockHomePageBaseQueries();
+    vi.mocked(useCliProxy).mockReturnValue({
+      enabled: { claude: false, codex: false, gemini: false },
+      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
+      toggling: { claude: false, codex: false, gemini: false },
+      setCliProxyEnabled: vi.fn(),
+    } as any);
+
+    renderWithProviders(client, <HomePage />);
+
+    await waitFor(() =>
+      expect(emitBackgroundTaskVisibilityTrigger).toHaveBeenCalledWith("home-overview-visible")
+    );
+
+    vi.mocked(emitBackgroundTaskVisibilityTrigger).mockClear();
+    fireEvent.click(screen.getByRole("tab", { name: "花费" }));
+    fireEvent.click(screen.getByRole("tab", { name: "概览" }));
+
+    await waitFor(() =>
+      expect(emitBackgroundTaskVisibilityTrigger).toHaveBeenCalledWith("home-overview-visible")
+    );
+  });
+
   it("enables CLI proxy directly when no env conflicts are found", async () => {
     setTauriRuntime();
 
@@ -504,6 +540,7 @@ describe("pages/HomePage", () => {
     const setCliProxyEnabled = vi.fn();
     vi.mocked(useCliProxy).mockReturnValue({
       enabled: { claude: false, codex: false, gemini: false },
+      appliedToCurrentGateway: { claude: null, codex: false, gemini: null },
       toggling: { claude: false, codex: false, gemini: false },
       setCliProxyEnabled,
     } as any);
@@ -557,6 +594,7 @@ describe("pages/HomePage", () => {
 
     vi.mocked(useCliProxy).mockReturnValue({
       enabled: false,
+      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
       toggling: false,
       setCliProxyEnabled: vi.fn(),
     } as any);
@@ -576,6 +614,7 @@ describe("pages/HomePage", () => {
     mockHomePageBaseQueries();
     vi.mocked(useCliProxy).mockReturnValue({
       enabled: { claude: false, codex: false, gemini: false },
+      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
       toggling: { claude: false, codex: false, gemini: false },
       setCliProxyEnabled: vi.fn(),
     } as any);
@@ -598,6 +637,7 @@ describe("pages/HomePage", () => {
     mockHomePageBaseQueries();
     vi.mocked(useCliProxy).mockReturnValue({
       enabled: { claude: false, codex: false, gemini: false },
+      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
       toggling: { claude: false, codex: false, gemini: false },
       setCliProxyEnabled: vi.fn(),
     } as any);
@@ -674,6 +714,7 @@ describe("pages/HomePage", () => {
 
     vi.mocked(useCliProxy).mockReturnValue({
       enabled: false,
+      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
       toggling: false,
       setCliProxyEnabled: vi.fn(),
     } as any);
@@ -766,6 +807,7 @@ describe("pages/HomePage", () => {
 
     vi.mocked(useCliProxy).mockReturnValue({
       enabled: false,
+      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
       toggling: false,
       setCliProxyEnabled: vi.fn(),
     } as any);
@@ -843,6 +885,7 @@ describe("pages/HomePage", () => {
 
     vi.mocked(useCliProxy).mockReturnValue({
       enabled: false,
+      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
       toggling: false,
       setCliProxyEnabled: vi.fn(),
     } as any);

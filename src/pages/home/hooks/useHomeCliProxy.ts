@@ -2,7 +2,7 @@
 // - Wraps useCliProxy with env-conflict checking logic before enabling a CLI proxy.
 // - Manages the pending confirmation dialog state for environment variable conflicts.
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { logToConsole } from "../../../services/consoleLog";
 import type { CliKey } from "../../../services/providers";
 import { envConflictsCheck, type EnvConflict } from "../../../services/envConflicts";
@@ -14,7 +14,10 @@ export type PendingCliProxyEnablePrompt = {
 };
 
 export type HomeCliProxyState = {
+  cliProxyLoading: boolean;
+  cliProxyAvailable: boolean | null;
   cliProxyEnabled: Record<CliKey, boolean>;
+  cliProxyAppliedToCurrentGateway: Record<CliKey, boolean | null>;
   cliProxyToggling: Record<CliKey, boolean>;
   pendingCliProxyEnablePrompt: PendingCliProxyEnablePrompt | null;
   setPendingCliProxyEnablePrompt: (v: PendingCliProxyEnablePrompt | null) => void;
@@ -30,6 +33,10 @@ export function useHomeCliProxy(): HomeCliProxyState {
   const [checkingCliProxyCliKey, setCheckingCliProxyCliKey] = useState<CliKey | null>(null);
 
   const { setCliProxyEnabled } = cliProxy;
+  const cliProxyToggling = useMemo<Record<CliKey, boolean>>(() => {
+    if (!checkingCliProxyCliKey) return cliProxy.toggling;
+    return { ...cliProxy.toggling, [checkingCliProxyCliKey]: true };
+  }, [checkingCliProxyCliKey, cliProxy.toggling]);
 
   const requestCliProxyEnabledSwitch = useCallback(
     (cliKey: CliKey, next: boolean) => {
@@ -71,8 +78,11 @@ export function useHomeCliProxy(): HomeCliProxyState {
   }, [pendingCliProxyEnablePrompt, setCliProxyEnabled]);
 
   return {
+    cliProxyLoading: cliProxy.loading,
+    cliProxyAvailable: cliProxy.available,
     cliProxyEnabled: cliProxy.enabled,
-    cliProxyToggling: cliProxy.toggling,
+    cliProxyAppliedToCurrentGateway: cliProxy.appliedToCurrentGateway,
+    cliProxyToggling,
     pendingCliProxyEnablePrompt,
     setPendingCliProxyEnablePrompt,
     requestCliProxyEnabledSwitch,

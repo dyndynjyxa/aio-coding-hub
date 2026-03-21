@@ -17,6 +17,7 @@ function Harness() {
   return (
     <div>
       <div data-testid="codex-enabled">{String(cliProxy.enabled.codex)}</div>
+      <div data-testid="codex-applied">{String(cliProxy.appliedToCurrentGateway.codex)}</div>
       <button onClick={() => cliProxy.setCliProxyEnabled("codex", !cliProxy.enabled.codex)}>
         toggle-codex
       </button>
@@ -28,9 +29,9 @@ describe("hooks/useCliProxy (msw integration)", () => {
   it("runs through invoke->fetch->msw handlers and toggles state via user-event", async () => {
     setTauriRuntime();
     setCliProxyStatusAllState([
-      { cli_key: "claude", enabled: false, base_origin: null },
-      { cli_key: "codex", enabled: false, base_origin: null },
-      { cli_key: "gemini", enabled: false, base_origin: null },
+      { cli_key: "claude", enabled: false, base_origin: null, applied_to_current_gateway: null },
+      { cli_key: "codex", enabled: false, base_origin: null, applied_to_current_gateway: null },
+      { cli_key: "gemini", enabled: false, base_origin: null, applied_to_current_gateway: null },
     ]);
 
     const client = createTestQueryClient();
@@ -48,6 +49,7 @@ describe("hooks/useCliProxy (msw integration)", () => {
     );
 
     expect(screen.getByTestId("codex-enabled").textContent).toBe("false");
+    expect(screen.getByTestId("codex-applied").textContent).toBe("null");
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "toggle-codex" }));
@@ -60,5 +62,6 @@ describe("hooks/useCliProxy (msw integration)", () => {
     );
     await waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalledWith("已开启代理"));
     await waitFor(() => expect(screen.getByTestId("codex-enabled").textContent).toBe("true"));
+    await waitFor(() => expect(screen.getByTestId("codex-applied").textContent).toBe("true"));
   });
 });

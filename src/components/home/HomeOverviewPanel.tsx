@@ -193,7 +193,10 @@ export type HomeOverviewPanelProps = {
   activeModeToggling: Record<CliKey, boolean>;
   onSetCliActiveMode: (cliKey: CliKey, modeId: number | null) => void;
 
+  cliProxyLoading: boolean;
+  cliProxyAvailable: boolean | null;
   cliProxyEnabled: Record<CliKey, boolean>;
+  cliProxyAppliedToCurrentGateway: Record<CliKey, boolean | null>;
   cliProxyToggling: Record<CliKey, boolean>;
   onSetCliProxyEnabled: (cliKey: CliKey, enabled: boolean) => void;
 
@@ -284,7 +287,10 @@ export function HomeOverviewPanel({
   activeModeByCli,
   activeModeToggling,
   onSetCliActiveMode,
+  cliProxyLoading,
+  cliProxyAvailable,
   cliProxyEnabled,
+  cliProxyAppliedToCurrentGateway,
   cliProxyToggling,
   onSetCliProxyEnabled,
   activeSessions,
@@ -402,9 +408,10 @@ export function HomeOverviewPanel({
             <div className="flex">
               <HomeWorkStatusCard
                 layout="horizontal"
-                sortModesLoading={sortModesLoading}
-                sortModesAvailable={sortModesAvailable}
+                cliProxyLoading={cliProxyLoading}
+                cliProxyAvailable={cliProxyAvailable}
                 cliProxyEnabled={cliProxyEnabled}
+                cliProxyAppliedToCurrentGateway={cliProxyAppliedToCurrentGateway}
                 cliProxyToggling={cliProxyToggling}
                 onSetCliProxyEnabled={onSetCliProxyEnabled}
               />
@@ -415,9 +422,10 @@ export function HomeOverviewPanel({
             <div className="flex lg:col-span-4">
               <HomeWorkStatusCard
                 layout="vertical"
-                sortModesLoading={sortModesLoading}
-                sortModesAvailable={sortModesAvailable}
+                cliProxyLoading={cliProxyLoading}
+                cliProxyAvailable={cliProxyAvailable}
                 cliProxyEnabled={cliProxyEnabled}
+                cliProxyAppliedToCurrentGateway={cliProxyAppliedToCurrentGateway}
                 cliProxyToggling={cliProxyToggling}
                 onSetCliProxyEnabled={onSetCliProxyEnabled}
               />
@@ -439,9 +447,10 @@ export function HomeOverviewPanel({
           <div className="flex">
             <HomeWorkStatusCard
               layout="horizontal"
-              sortModesLoading={sortModesLoading}
-              sortModesAvailable={sortModesAvailable}
+              cliProxyLoading={cliProxyLoading}
+              cliProxyAvailable={cliProxyAvailable}
               cliProxyEnabled={cliProxyEnabled}
+              cliProxyAppliedToCurrentGateway={cliProxyAppliedToCurrentGateway}
               cliProxyToggling={cliProxyToggling}
               onSetCliProxyEnabled={onSetCliProxyEnabled}
             />

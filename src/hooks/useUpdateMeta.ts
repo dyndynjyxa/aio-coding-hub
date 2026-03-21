@@ -14,9 +14,6 @@ import {
 import type { AppAboutInfo } from "../services/appAbout";
 
 const STORAGE_KEY_LAST_CHECKED_AT_MS = "updater.lastCheckedAtMs";
-const AUTO_CHECK_DELAY_MS = 2000;
-const AUTO_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const AUTO_CHECK_TICK_MS = 60 * 60 * 1000;
 
 export type UpdateMeta = {
   about: AppAboutInfo | null;
@@ -53,9 +50,6 @@ const listeners = new Set<Listener>();
 
 let started = false;
 let starting: Promise<void> | null = null;
-let autoCheckScheduled = false;
-let sessionChecked = false;
-let lastCheckError: string | null = null;
 let checkingPromise: Promise<UpdaterCheckUpdate | null> | null = null;
 let installingPromise: Promise<boolean | null> | null = null;
 
@@ -66,17 +60,6 @@ function emit() {
 function setUiSnapshot(patch: Partial<UpdateUiState>) {
   uiSnapshot = { ...uiSnapshot, ...patch };
   emit();
-}
-
-function readLastCheckedAtMs() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_LAST_CHECKED_AT_MS);
-    if (!raw) return null;
-    const v = Number(raw);
-    return Number.isFinite(v) ? v : null;
-  } catch {
-    return null;
-  }
 }
 
 function writeLastCheckedAtMs(ms: number) {
@@ -90,70 +73,11 @@ async function ensureStarted() {
   if (starting) return starting;
 
   starting = (async () => {
-    scheduleAutoCheck();
     started = true;
     starting = null;
   })();
 
   return starting;
-}
-
-async function autoCheckIfDue() {
-  const last = readLastCheckedAtMs();
-  const now = Date.now();
-  if (last != null && now - last < AUTO_CHECK_INTERVAL_MS) return;
-  await updateCheckNow({ silent: true, openDialogIfUpdate: false });
-}
-
-async function autoCheckOnStartup() {
-  if (sessionChecked) {
-    logToConsole("info", "初始化：跳过自动检查更新", { reason: "already_checked_this_session" });
-    return;
-  }
-
-  logToConsole("info", "初始化：自动检查更新", { delay_ms: AUTO_CHECK_DELAY_MS });
-
-  const update = await updateCheckNow({ silent: true, openDialogIfUpdate: false });
-
-  if (lastCheckError) {
-    logToConsole("warn", "初始化：自动检查更新失败", { error: lastCheckError });
-    return;
-  }
-
-  if (update) {
-    logToConsole("info", "初始化：发现新版本", {
-      version: update.version,
-      current_version: update.currentVersion,
-      date: update.date,
-      rid: update.rid,
-    });
-    return;
-  }
-
-  logToConsole("info", "初始化：已是最新版本");
-}
-
-/** Stored for potential cleanup in test environments. */
-const autoCheckTimers: {
-  timeout: ReturnType<typeof setTimeout> | null;
-  interval: ReturnType<typeof setInterval> | null;
-} = {
-  timeout: null,
-  interval: null,
-};
-
-function scheduleAutoCheck() {
-  if (autoCheckScheduled) return;
-  autoCheckScheduled = true;
-
-  autoCheckTimers.timeout = setTimeout(() => {
-    autoCheckTimers.timeout = null;
-    autoCheckOnStartup().catch(() => {});
-  }, AUTO_CHECK_DELAY_MS);
-
-  autoCheckTimers.interval = setInterval(() => {
-    autoCheckIfDue().catch(() => {});
-  }, AUTO_CHECK_TICK_MS);
 }
 
 export async function updateCheckNow(options: {
@@ -162,12 +86,9 @@ export async function updateCheckNow(options: {
 }): Promise<UpdaterCheckUpdate | null> {
   await ensureStarted();
 
-  sessionChecked = true;
-
   if (checkingPromise) return checkingPromise;
 
   checkingPromise = (async () => {
-    lastCheckError = null;
     try {
       const update = await queryClient.fetchQuery({
         queryKey: updaterKeys.check(),
@@ -194,7 +115,6 @@ export async function updateCheckNow(options: {
       return update;
     } catch (err) {
       const message = String(err);
-      lastCheckError = message;
       logToConsole("error", "检查更新失败", { error: message });
       writeLastCheckedAtMs(Date.now());
       if (!options.silent) toast(`检查更新失败：${message}`);

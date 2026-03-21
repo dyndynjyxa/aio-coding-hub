@@ -5,6 +5,7 @@ export type CliProxyStatus = {
   cli_key: CliKey;
   enabled: boolean;
   base_origin: string | null;
+  applied_to_current_gateway: boolean | null;
 };
 
 export type CliProxyResult = {

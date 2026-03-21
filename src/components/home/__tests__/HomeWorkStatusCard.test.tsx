@@ -6,9 +6,10 @@ describe("components/home/HomeWorkStatusCard", () => {
   it("renders loading and unavailable states", () => {
     render(
       <HomeWorkStatusCard
-        sortModesLoading={true}
-        sortModesAvailable={null}
+        cliProxyLoading={true}
+        cliProxyAvailable={null}
         cliProxyEnabled={{ claude: true, codex: false, gemini: false } as any}
+        cliProxyAppliedToCurrentGateway={{ claude: true, codex: null, gemini: null } as any}
         cliProxyToggling={{ claude: false, codex: false, gemini: false } as any}
         onSetCliProxyEnabled={vi.fn()}
       />
@@ -17,9 +18,10 @@ describe("components/home/HomeWorkStatusCard", () => {
 
     render(
       <HomeWorkStatusCard
-        sortModesLoading={false}
-        sortModesAvailable={false}
+        cliProxyLoading={false}
+        cliProxyAvailable={false}
         cliProxyEnabled={{ claude: true, codex: false, gemini: false } as any}
+        cliProxyAppliedToCurrentGateway={{ claude: true, codex: null, gemini: null } as any}
         cliProxyToggling={{ claude: false, codex: false, gemini: false } as any}
         onSetCliProxyEnabled={vi.fn()}
       />
@@ -32,9 +34,10 @@ describe("components/home/HomeWorkStatusCard", () => {
 
     render(
       <HomeWorkStatusCard
-        sortModesLoading={false}
-        sortModesAvailable={true}
+        cliProxyLoading={false}
+        cliProxyAvailable={true}
         cliProxyEnabled={{ claude: true, codex: false, gemini: false } as any}
+        cliProxyAppliedToCurrentGateway={{ claude: true, codex: null, gemini: null } as any}
         cliProxyToggling={{ claude: false, codex: false, gemini: false } as any}
         onSetCliProxyEnabled={onSetCliProxyEnabled}
       />
@@ -49,9 +52,10 @@ describe("components/home/HomeWorkStatusCard", () => {
     render(
       <HomeWorkStatusCard
         layout="horizontal"
-        sortModesLoading={false}
-        sortModesAvailable={true}
+        cliProxyLoading={false}
+        cliProxyAvailable={true}
         cliProxyEnabled={{ claude: true, codex: false, gemini: false } as any}
+        cliProxyAppliedToCurrentGateway={{ claude: true, codex: null, gemini: null } as any}
         cliProxyToggling={{ claude: false, codex: false, gemini: false } as any}
         onSetCliProxyEnabled={vi.fn()}
       />
@@ -59,5 +63,40 @@ describe("components/home/HomeWorkStatusCard", () => {
 
     expect(screen.getByText("代理状态")).toBeInTheDocument();
     expect(screen.getAllByRole("switch").length).toBe(3);
+  });
+
+  it("shows drift warning and repair button for enabled rows not pointing to current gateway", () => {
+    const onSetCliProxyEnabled = vi.fn();
+
+    render(
+      <HomeWorkStatusCard
+        cliProxyLoading={false}
+        cliProxyAvailable={true}
+        cliProxyEnabled={{ claude: false, codex: true, gemini: false } as any}
+        cliProxyAppliedToCurrentGateway={{ claude: null, codex: false, gemini: null } as any}
+        cliProxyToggling={{ claude: false, codex: false, gemini: false } as any}
+        onSetCliProxyEnabled={onSetCliProxyEnabled}
+      />
+    );
+
+    expect(screen.getByText("当前未指向本网关")).toBeInTheDocument();
+    expect(screen.getAllByRole("switch")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "修复 Codex 代理" }));
+    expect(onSetCliProxyEnabled).toHaveBeenCalledWith("codex", true);
+  });
+
+  it("disables the repair button while proxy status is toggling", () => {
+    render(
+      <HomeWorkStatusCard
+        cliProxyLoading={false}
+        cliProxyAvailable={true}
+        cliProxyEnabled={{ claude: false, codex: true, gemini: false } as any}
+        cliProxyAppliedToCurrentGateway={{ claude: null, codex: false, gemini: null } as any}
+        cliProxyToggling={{ claude: false, codex: true, gemini: false } as any}
+        onSetCliProxyEnabled={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "修复 Codex 代理" })).toBeDisabled();
   });
 });

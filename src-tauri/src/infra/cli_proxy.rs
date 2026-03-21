@@ -21,6 +21,7 @@ pub struct CliProxyStatus {
     pub cli_key: String,
     pub enabled: bool,
     pub base_origin: Option<String>,
+    pub applied_to_current_gateway: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1004,9 +1005,26 @@ fn upsert_windows_sandbox(lines: &mut Vec<String>) {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CodexConfigPlatform {
+    Windows,
+    Other,
+}
+
+impl CodexConfigPlatform {
+    fn current() -> Self {
+        if std::env::consts::OS == "windows" {
+            Self::Windows
+        } else {
+            Self::Other
+        }
+    }
+}
+
 fn build_codex_config_toml(
     current: Option<Vec<u8>>,
     base_url: &str,
+    platform: CodexConfigPlatform,
 ) -> crate::shared::error::AppResult<Vec<u8>> {
     let input = current
         .as_deref()
@@ -1022,7 +1040,9 @@ fn build_codex_config_toml(
     upsert_root_model_provider(&mut lines, CODEX_PROVIDER_KEY);
     upsert_root_preferred_auth_method(&mut lines, "apikey");
     upsert_model_provider_base_table(&mut lines, CODEX_PROVIDER_KEY, base_url);
-    upsert_windows_sandbox(&mut lines);
+    if platform == CodexConfigPlatform::Windows {
+        upsert_windows_sandbox(&mut lines);
+    }
 
     let mut out = lines.join("\n");
     out.push('\n');
@@ -1229,7 +1249,11 @@ fn apply_proxy_config<R: tauri::Runtime>(
             "claude" => build_claude_settings_json(current, &format!("{base_origin}/claude"))?,
             "codex" => {
                 if t.kind == "codex_config_toml" {
-                    build_codex_config_toml(current, &format!("{base_origin}/v1"))?
+                    build_codex_config_toml(
+                        current,
+                        &format!("{base_origin}/v1"),
+                        CodexConfigPlatform::current(),
+                    )?
                 } else {
                     build_codex_auth_json(current)?
                 }
@@ -1250,10 +1274,23 @@ pub fn status_all<R: tauri::Runtime>(
     let mut out = Vec::new();
     for cli_key in crate::shared::cli_key::SUPPORTED_CLI_KEYS {
         let manifest = read_manifest(app, cli_key)?;
+        let enabled = manifest.as_ref().map(|m| m.enabled).unwrap_or(false);
+        let base_origin = manifest.as_ref().and_then(|m| m.base_origin.clone());
+        let applied_to_current_gateway = if enabled {
+            Some(
+                base_origin
+                    .as_deref()
+                    .map(|base_origin| is_proxy_config_applied(app, cli_key, base_origin))
+                    .unwrap_or(false),
+            )
+        } else {
+            None
+        };
         out.push(CliProxyStatus {
             cli_key: cli_key.to_string(),
-            enabled: manifest.as_ref().map(|m| m.enabled).unwrap_or(false),
-            base_origin: manifest.and_then(|m| m.base_origin),
+            enabled,
+            base_origin,
+            applied_to_current_gateway,
         });
     }
     Ok(out)

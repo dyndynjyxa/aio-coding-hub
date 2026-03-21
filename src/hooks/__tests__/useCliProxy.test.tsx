@@ -17,16 +17,23 @@ describe("hooks/useCliProxy", () => {
   it("derives enabled flags from query status", () => {
     vi.mocked(useCliProxyStatusAllQuery).mockReturnValue({
       data: [
-        { cli_key: "claude", enabled: false },
-        { cli_key: "codex", enabled: true },
-        { cli_key: "unknown", enabled: true },
+        { cli_key: "claude", enabled: false, applied_to_current_gateway: null },
+        { cli_key: "codex", enabled: true, applied_to_current_gateway: false },
+        { cli_key: "unknown", enabled: true, applied_to_current_gateway: true },
       ],
       refetch: vi.fn(),
     } as any);
     vi.mocked(useCliProxySetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
 
     const { result } = renderHook(() => useCliProxy());
+    expect(result.current.loading).toBe(false);
+    expect(result.current.available).toBe(true);
     expect(result.current.enabled).toEqual({ claude: false, codex: true, gemini: false });
+    expect(result.current.appliedToCurrentGateway).toEqual({
+      claude: null,
+      codex: false,
+      gemini: null,
+    });
   });
 
   it("handles toggle success/failure flows", async () => {

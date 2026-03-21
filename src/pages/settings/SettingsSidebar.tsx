@@ -3,8 +3,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { UpdateMeta } from "../../hooks/useUpdateMeta";
-import { updateCheckNow } from "../../hooks/useUpdateMeta";
 import { AIO_RELEASES_URL } from "../../constants/urls";
+import { runBackgroundTask } from "../../services/backgroundTasks";
 import { logToConsole } from "../../services/consoleLog";
 import {
   getLastModelPricesSync,
@@ -106,9 +106,11 @@ export function SettingsSidebar({ updateMeta }: SettingsSidebarProps) {
         return;
       }
 
-      await updateCheckNow({ silent: false, openDialogIfUpdate: true });
+      await runBackgroundTask("app-update-check", {
+        trigger: "manual",
+      });
     } catch {
-      // noop: errors/toasts are handled in updateCheckNow
+      // noop: errors/toasts are handled in the registered update task
     }
   }
 

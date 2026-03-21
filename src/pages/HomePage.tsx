@@ -24,6 +24,7 @@ import { Dialog } from "../ui/Dialog";
 import { PageHeader } from "../ui/PageHeader";
 import { TabList } from "../ui/TabList";
 import { useTraceStore } from "../services/traceStore";
+import { emitBackgroundTaskVisibilityTrigger } from "../services/backgroundTasks";
 import { DEFAULT_HOME_USAGE_PERIOD } from "../utils/homeUsagePeriod";
 import { resolveHomeUsageWindowDays } from "../utils/homeUsagePeriod";
 import { useHomeCircuitState } from "./home/hooks/useHomeCircuitState";
@@ -130,6 +131,7 @@ export function HomePage() {
     const prev = tabRef.current;
     tabRef.current = tab;
     if (prev !== "overview" && tab === "overview") {
+      emitBackgroundTaskVisibilityTrigger("home-overview-visible");
       if (showOverviewUsageSection) {
         void usageHeatmapQuery.refetch();
       }
@@ -142,6 +144,7 @@ export function HomePage() {
     enabled: tab === "overview",
     throttleMs: 1000,
     onForeground: () => {
+      emitBackgroundTaskVisibilityTrigger("home-overview-visible");
       if (showOverviewUsageSection) {
         void usageHeatmapQuery.refetch();
       }
@@ -161,6 +164,12 @@ export function HomePage() {
 
   const { pendingSortModeSwitch } = sortMode;
   const { pendingCliProxyEnablePrompt } = cliProxyState;
+
+  useEffect(() => {
+    if (tab === "overview") {
+      emitBackgroundTaskVisibilityTrigger("home-overview-visible");
+    }
+  }, [tab]);
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -201,7 +210,10 @@ export function HomePage() {
             activeModeByCli={sortMode.activeModeByCli}
             activeModeToggling={sortMode.activeModeToggling}
             onSetCliActiveMode={sortMode.requestCliActiveModeSwitch}
+            cliProxyLoading={cliProxyState.cliProxyLoading}
+            cliProxyAvailable={cliProxyState.cliProxyAvailable}
             cliProxyEnabled={cliProxyState.cliProxyEnabled}
+            cliProxyAppliedToCurrentGateway={cliProxyState.cliProxyAppliedToCurrentGateway}
             cliProxyToggling={cliProxyState.cliProxyToggling}
             onSetCliProxyEnabled={cliProxyState.requestCliProxyEnabledSwitch}
             activeSessions={activeSessions}

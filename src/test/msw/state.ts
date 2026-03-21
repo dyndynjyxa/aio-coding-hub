@@ -14,9 +14,9 @@ import type { WorkspacesListResult } from "../../services/workspaces";
 const DEFAULT_BASE_ORIGIN = "http://127.0.0.1:37123";
 
 const DEFAULT_CLI_PROXY_STATUS: CliProxyStatus[] = [
-  { cli_key: "claude", enabled: false, base_origin: null },
-  { cli_key: "codex", enabled: false, base_origin: null },
-  { cli_key: "gemini", enabled: false, base_origin: null },
+  { cli_key: "claude", enabled: false, base_origin: null, applied_to_current_gateway: null },
+  { cli_key: "codex", enabled: false, base_origin: null, applied_to_current_gateway: null },
+  { cli_key: "gemini", enabled: false, base_origin: null, applied_to_current_gateway: null },
 ];
 
 // Default settings matching the Rust backend defaults.
@@ -255,14 +255,24 @@ export function setCliProxyEnabledState(cliKey: CliKey, enabled: boolean): CliPr
   const baseOrigin = enabled ? DEFAULT_BASE_ORIGIN : null;
   if (rowIndex < 0) {
     cliProxyStatusAllState = [
-      { cli_key: cliKey, enabled, base_origin: baseOrigin },
+      {
+        cli_key: cliKey,
+        enabled,
+        base_origin: baseOrigin,
+        applied_to_current_gateway: enabled ? true : null,
+      },
       ...cliProxyStatusAllState,
     ];
     return getCliProxyStatusAllState();
   }
 
   const next = clone(cliProxyStatusAllState);
-  next[rowIndex] = { ...next[rowIndex], enabled, base_origin: baseOrigin };
+  next[rowIndex] = {
+    ...next[rowIndex],
+    enabled,
+    base_origin: baseOrigin,
+    applied_to_current_gateway: enabled ? true : null,
+  };
   cliProxyStatusAllState = next;
   return getCliProxyStatusAllState();
 }

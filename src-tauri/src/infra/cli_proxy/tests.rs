@@ -1,4 +1,131 @@
 use super::*;
+use std::ffi::OsString;
+use std::sync::{Mutex, MutexGuard, OnceLock};
+
+static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn env_lock() -> MutexGuard<'static, ()> {
+    ENV_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("lock test env")
+}
+
+#[derive(Default)]
+struct EnvRestore {
+    saved: Vec<(&'static str, Option<OsString>)>,
+}
+
+impl EnvRestore {
+    fn save_once(&mut self, key: &'static str) {
+        if self.saved.iter().any(|(k, _)| *k == key) {
+            return;
+        }
+        self.saved.push((key, std::env::var_os(key)));
+    }
+
+    fn set_var(&mut self, key: &'static str, value: impl Into<OsString>) {
+        self.save_once(key);
+        std::env::set_var(key, value.into());
+    }
+
+    fn remove_var(&mut self, key: &'static str) {
+        self.save_once(key);
+        std::env::remove_var(key);
+    }
+}
+
+impl Drop for EnvRestore {
+    fn drop(&mut self) {
+        for (key, value) in self.saved.drain(..).rev() {
+            match value {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+}
+
+struct CliProxyTestApp {
+    _lock: MutexGuard<'static, ()>,
+    _env: EnvRestore,
+    #[allow(dead_code)]
+    home: tempfile::TempDir,
+    app: tauri::App<tauri::test::MockRuntime>,
+}
+
+impl CliProxyTestApp {
+    fn new() -> Self {
+        let lock = env_lock();
+        let home = tempfile::tempdir().expect("tempdir");
+
+        let mut env = EnvRestore::default();
+        let home_os = home.path().as_os_str().to_os_string();
+        env.set_var("HOME", home_os.clone());
+        env.set_var("USERPROFILE", home_os);
+        env.set_var(
+            "AIO_CODING_HUB_DOTDIR_NAME",
+            ".aio-coding-hub-cli-proxy-test",
+        );
+        env.remove_var("CODEX_HOME");
+
+        Self {
+            _lock: lock,
+            _env: env,
+            home,
+            app: tauri::test::mock_app(),
+        }
+    }
+
+    fn handle(&self) -> tauri::AppHandle<tauri::test::MockRuntime> {
+        self.app.handle().clone()
+    }
+}
+
+fn write_cli_proxy_manifest<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    cli_key: &str,
+    enabled: bool,
+    base_origin: Option<&str>,
+) {
+    write_manifest(
+        app,
+        cli_key,
+        &CliProxyManifest {
+            schema_version: MANIFEST_SCHEMA_VERSION,
+            managed_by: MANAGED_BY.to_string(),
+            cli_key: cli_key.to_string(),
+            enabled,
+            base_origin: base_origin.map(str::to_string),
+            created_at: 1,
+            updated_at: 1,
+            files: Vec::new(),
+        },
+    )
+    .expect("write manifest");
+}
+
+fn codex_platform_for_tests() -> CodexConfigPlatform {
+    CodexConfigPlatform::current()
+}
+
+fn write_codex_proxy_files<R: tauri::Runtime>(app: &tauri::AppHandle<R>, base_origin: &str) {
+    let config_path = codex_config_path(app).expect("codex config path");
+    let auth_path = codex_auth_path(app).expect("codex auth path");
+    std::fs::create_dir_all(config_path.parent().expect("config parent"))
+        .expect("create config dir");
+
+    let config = build_codex_config_toml(
+        None,
+        &format!("{base_origin}/v1"),
+        codex_platform_for_tests(),
+    )
+    .expect("build codex config");
+    std::fs::write(&config_path, config).expect("write config");
+
+    let auth = build_codex_auth_json(None).expect("build codex auth");
+    std::fs::write(&auth_path, auth).expect("write auth");
+}
 
 #[test]
 fn codex_proxy_preserves_nested_model_provider_tables_and_order() {
@@ -19,8 +146,12 @@ trust_level = "trusted"
 foo = "bar"
 "#;
 
-    let out =
-        build_codex_config_toml(Some(input.as_bytes().to_vec()), "http://new/v1").expect("build");
+    let out = build_codex_config_toml(
+        Some(input.as_bytes().to_vec()),
+        "http://new/v1",
+        CodexConfigPlatform::Other,
+    )
+    .expect("build");
     let s = String::from_utf8(out).expect("utf8");
 
     assert!(s.contains("base_url = \"http://new/v1\""), "{s}");
@@ -48,8 +179,12 @@ requires_openai_auth = true
 trusted_roots = ["C:\\work"]
 "#;
 
-    let out =
-        build_codex_config_toml(Some(input.as_bytes().to_vec()), "http://new/v1").expect("build");
+    let out = build_codex_config_toml(
+        Some(input.as_bytes().to_vec()),
+        "http://new/v1",
+        CodexConfigPlatform::Other,
+    )
+    .expect("build");
     let s = String::from_utf8(out).expect("utf8");
 
     assert!(s.contains("base_url = \"http://new/v1\""), "{s}");
@@ -69,8 +204,12 @@ base_url = "http://old-2/v1"
 trust_level = "trusted"
 "#;
 
-    let out =
-        build_codex_config_toml(Some(input.as_bytes().to_vec()), "http://new/v1").expect("build");
+    let out = build_codex_config_toml(
+        Some(input.as_bytes().to_vec()),
+        "http://new/v1",
+        CodexConfigPlatform::Other,
+    )
+    .expect("build");
     let s = String::from_utf8(out).expect("utf8");
 
     let count = s.matches("[model_providers.aio]").count()
@@ -91,8 +230,12 @@ fn codex_proxy_inserts_base_table_before_nested_when_missing() {
 trust_level = "trusted"
 "#;
 
-    let out =
-        build_codex_config_toml(Some(input.as_bytes().to_vec()), "http://new/v1").expect("build");
+    let out = build_codex_config_toml(
+        Some(input.as_bytes().to_vec()),
+        "http://new/v1",
+        CodexConfigPlatform::Other,
+    )
+    .expect("build");
     let s = String::from_utf8(out).expect("utf8");
 
     let base_idx = s
@@ -117,8 +260,12 @@ wire_api = "responses"
 requires_openai_auth = true
 "#;
 
-    let out =
-        build_codex_config_toml(Some(input.as_bytes().to_vec()), "http://new/v1").expect("build");
+    let out = build_codex_config_toml(
+        Some(input.as_bytes().to_vec()),
+        "http://new/v1",
+        CodexConfigPlatform::Other,
+    )
+    .expect("build");
     let s = String::from_utf8(out).expect("utf8");
 
     let base_idx = s.find("[model_providers.aio]").expect("base table exists");
@@ -126,6 +273,50 @@ requires_openai_auth = true
         .find("[model_providers.aio.projects.\"C:\\\\work\"]")
         .expect("nested table exists");
     assert!(base_idx < nested_idx, "base must appear before nested: {s}");
+}
+
+#[test]
+fn codex_proxy_adds_windows_sandbox_only_on_windows() {
+    let out = build_codex_config_toml(None, "http://new/v1", CodexConfigPlatform::Windows)
+        .expect("build");
+    let s = String::from_utf8(out).expect("utf8");
+
+    assert!(s.contains("[windows]"), "{s}");
+    assert!(s.contains("sandbox = \"elevated\""), "{s}");
+}
+
+#[test]
+fn codex_proxy_does_not_add_windows_sandbox_on_non_windows() {
+    let out =
+        build_codex_config_toml(None, "http://new/v1", CodexConfigPlatform::Other).expect("build");
+    let s = String::from_utf8(out).expect("utf8");
+
+    assert!(!s.contains("[windows]"), "{s}");
+    assert!(!s.contains("sandbox = \"elevated\""), "{s}");
+}
+
+#[test]
+fn codex_proxy_preserves_existing_windows_block_on_non_windows() {
+    let input = r#"
+[windows]
+sandbox = "elevated"
+
+[existing]
+foo = "bar"
+"#;
+
+    let out = build_codex_config_toml(
+        Some(input.as_bytes().to_vec()),
+        "http://new/v1",
+        CodexConfigPlatform::Other,
+    )
+    .expect("build");
+    let s = String::from_utf8(out).expect("utf8");
+
+    assert!(s.contains("[windows]"), "{s}");
+    assert!(s.contains("sandbox = \"elevated\""), "{s}");
+    assert!(s.contains("[existing]"), "{s}");
+    assert!(s.contains("foo = \"bar\""), "{s}");
 }
 
 #[test]
@@ -160,6 +351,66 @@ fn codex_proxy_auth_json_rejects_non_object_root() {
     assert!(err
         .to_string()
         .contains("auth.json root must be a JSON object"));
+}
+
+#[test]
+fn status_all_reports_applied_to_current_gateway_for_enabled_codex() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+
+    write_cli_proxy_manifest(&handle, "codex", true, Some(base_origin));
+    write_codex_proxy_files(&handle, base_origin);
+
+    let rows = status_all(&handle).expect("status_all");
+    let codex = rows
+        .into_iter()
+        .find(|row| row.cli_key == "codex")
+        .expect("codex row");
+
+    assert!(codex.enabled);
+    assert_eq!(codex.base_origin.as_deref(), Some(base_origin));
+    assert_eq!(codex.applied_to_current_gateway, Some(true));
+}
+
+#[test]
+fn status_all_reports_drift_when_enabled_codex_no_longer_points_to_gateway() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+
+    write_cli_proxy_manifest(&handle, "codex", true, Some(base_origin));
+    write_codex_proxy_files(&handle, "http://127.0.0.1:9999");
+
+    let rows = status_all(&handle).expect("status_all");
+    let codex = rows
+        .into_iter()
+        .find(|row| row.cli_key == "codex")
+        .expect("codex row");
+
+    assert!(codex.enabled);
+    assert_eq!(codex.base_origin.as_deref(), Some(base_origin));
+    assert_eq!(codex.applied_to_current_gateway, Some(false));
+}
+
+#[test]
+fn status_all_skips_gateway_application_check_for_disabled_codex() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+
+    write_cli_proxy_manifest(&handle, "codex", false, Some(base_origin));
+    write_codex_proxy_files(&handle, base_origin);
+
+    let rows = status_all(&handle).expect("status_all");
+    let codex = rows
+        .into_iter()
+        .find(|row| row.cli_key == "codex")
+        .expect("codex row");
+
+    assert!(!codex.enabled);
+    assert_eq!(codex.base_origin.as_deref(), Some(base_origin));
+    assert_eq!(codex.applied_to_current_gateway, None);
 }
 
 #[test]
