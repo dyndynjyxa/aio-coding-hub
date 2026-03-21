@@ -84,6 +84,27 @@ function renderWithQueryClient(ui: ReactElement) {
 }
 
 describe("pages/providers/SortModesView", () => {
+  it("keeps the internal cli switcher available in sort modes view", () => {
+    const setActiveCli = vi.fn();
+
+    vi.mocked(sortModesList).mockResolvedValue([] as any);
+    vi.mocked(sortModeActiveList).mockResolvedValue([] as any);
+    vi.mocked(sortModeProvidersList).mockResolvedValue([] as any);
+
+    renderWithQueryClient(
+      <SortModesView
+        activeCli="claude"
+        setActiveCli={setActiveCli}
+        providers={[] as any}
+        providersLoading={false}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
+    expect(setActiveCli).toHaveBeenCalledWith("codex");
+    expect(screen.getByText("选择要配置的 CLI")).toBeInTheDocument();
+  });
+
   it("covers providers list cancelled + ids null branches and active auto-selection edge cases", async () => {
     vi.mocked(toast).mockClear();
     sortableIsDragging = false;

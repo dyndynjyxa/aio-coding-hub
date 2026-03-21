@@ -13,7 +13,6 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import { SortableContext, arrayMove, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { CLIS } from "../../constants/clis";
 import { ClaudeModelValidationDialog } from "../../components/ClaudeModelValidationDialog";
 import { logToConsole } from "../../services/consoleLog";
 import { copyText } from "../../services/clipboard";
@@ -54,7 +53,7 @@ type CreateDialogState = {
   initialValues: ProviderEditorInitialValues | null;
 };
 
-export function ProvidersView({ activeCli, setActiveCli }: ProvidersViewProps) {
+export function ProvidersView({ activeCli }: ProvidersViewProps) {
   const queryClient = useQueryClient();
 
   const activeCliRef = useRef(activeCli);
@@ -153,6 +152,18 @@ export function ProvidersView({ activeCli, setActiveCli }: ProvidersViewProps) {
       return provider.name.toLowerCase().includes(normalizedSearch);
     });
   }, [providerSearch, providers, selectedTags]);
+
+  const refreshProviders = useCallback(async () => {
+    const refreshes: Array<Promise<{ error: unknown | null }>> = [providersQuery.refetch()];
+    if (activeCli === "claude") {
+      refreshes.push(codexProvidersQuery.refetch());
+    }
+
+    const results = await Promise.all(refreshes);
+    if (results.some((result) => result.error != null)) {
+      toast("刷新供应商列表失败：请查看控制台日志");
+    }
+  }, [activeCli, codexProvidersQuery, providersQuery]);
 
   // Reset selected tags when switching CLI or when tags no longer exist
   useEffect(() => {
@@ -472,36 +483,21 @@ export function ProvidersView({ activeCli, setActiveCli }: ProvidersViewProps) {
   return (
     <>
       <div className="flex flex-col gap-3 lg:min-h-0 lg:flex-1">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            {CLIS.map((cli) => (
-              <Button
-                key={cli.key}
-                onClick={() => setActiveCli(cli.key)}
-                variant={activeCli === cli.key ? "primary" : "secondary"}
-                size="sm"
-              >
-                {cli.name}
-              </Button>
-            ))}
-          </div>
-        </div>
-
         <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setSelectedTags(new Set())}
+              className={`inline-flex h-9 items-center rounded-full border px-3.5 text-xs font-medium transition-colors ${
+                selectedTags.size === 0
+                  ? "border-accent bg-accent text-white shadow-sm"
+                  : "border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-500 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-slate-400 dark:hover:bg-slate-700"
+              }`}
+            >
+              全部({providers.length})
+            </button>
             {tagCounts.size > 0 && (
               <>
-                <button
-                  type="button"
-                  onClick={() => setSelectedTags(new Set())}
-                  className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
-                    selectedTags.size === 0
-                      ? "border-accent bg-accent text-white shadow-sm"
-                      : "border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-500 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-slate-400 dark:hover:bg-slate-700"
-                  }`}
-                >
-                  全部({providers.length})
-                </button>
                 {Array.from(tagCounts.entries()).map(([tag, count]) => {
                   const isSelected = selectedTags.has(tag);
                   return (
@@ -519,7 +515,7 @@ export function ProvidersView({ activeCli, setActiveCli }: ProvidersViewProps) {
                           return next;
                         });
                       }}
-                      className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                      className={`inline-flex h-9 items-center rounded-full border px-3.5 text-xs font-medium transition-colors ${
                         isSelected
                           ? "border-accent bg-accent text-white shadow-sm"
                           : "border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-500 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-slate-400 dark:hover:bg-slate-700"
@@ -544,6 +540,7 @@ export function ProvidersView({ activeCli, setActiveCli }: ProvidersViewProps) {
                 onClick={() => void resetCircuitAll(activeCli)}
                 variant="secondary"
                 size="sm"
+                className="h-9"
                 disabled={circuitResettingAll || circuitLoading || providers.length === 0}
               >
                 {circuitResettingAll
@@ -555,15 +552,24 @@ export function ProvidersView({ activeCli, setActiveCli }: ProvidersViewProps) {
             ) : null}
 
             <div className="relative w-full sm:w-72">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
               <Input
                 value={providerSearch}
                 onChange={(e) => setProviderSearch(e.currentTarget.value)}
                 placeholder="搜索当前 CLI 下的供应商名称"
-                className="pl-9"
+                className="h-9 pl-8 text-sm"
                 aria-label="搜索供应商名称"
               />
             </div>
+
+            <Button
+              onClick={() => void refreshProviders()}
+              variant="secondary"
+              size="sm"
+              className="h-9"
+            >
+              刷新
+            </Button>
 
             <Button
               onClick={() => {
@@ -571,6 +577,7 @@ export function ProvidersView({ activeCli, setActiveCli }: ProvidersViewProps) {
               }}
               variant="secondary"
               size="sm"
+              className="h-9"
             >
               添加
             </Button>

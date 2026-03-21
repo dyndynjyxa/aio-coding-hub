@@ -606,6 +606,80 @@ describe("pages/providers/ProvidersView", () => {
     expect(screen.getByText("共 2 / 2 条")).toBeInTheDocument();
   });
 
+  it("always shows the 全部 tag even when providers have no custom tags", () => {
+    const providers = [
+      {
+        id: 1,
+        cli_key: "claude",
+        name: "Alpha Relay",
+        enabled: true,
+        base_urls: ["https://a"],
+        base_url_mode: "order",
+        cost_multiplier: 1,
+        claude_models: {},
+        tags: [],
+      },
+    ] as any[];
+
+    vi.mocked(useProvidersListQuery).mockReturnValue({ data: providers, isFetching: false } as any);
+    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useProviderSetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProviderDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProvidersReorderMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+    } as any);
+    vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+
+    renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "全部(1)" })).toBeInTheDocument();
+  });
+
+  it("refreshes the current providers list from the toolbar", async () => {
+    const refetchClaudeProviders = vi.fn().mockResolvedValue({ data: [], error: null });
+    const refetchCodexProviders = vi.fn().mockResolvedValue({ data: [], error: null });
+
+    vi.mocked(useProvidersListQuery).mockImplementation((cliKey: any) => {
+      if (cliKey === "codex") {
+        return {
+          data: [],
+          isFetching: false,
+          refetch: refetchCodexProviders,
+        } as any;
+      }
+
+      return {
+        data: [],
+        isFetching: false,
+        refetch: refetchClaudeProviders,
+      } as any;
+    });
+    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useProviderSetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProviderDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProvidersReorderMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+    } as any);
+    vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+
+    renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+
+    await waitFor(() => expect(refetchClaudeProviders).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(refetchCodexProviders).toHaveBeenCalledTimes(1));
+  });
+
   it("opens validate dialog and closes it when switching activeCli", async () => {
     vi.mocked(toast).mockClear();
     vi.mocked(logToConsole).mockClear();
@@ -719,10 +793,7 @@ describe("pages/providers/ProvidersView", () => {
         <ProvidersView activeCli="claude" setActiveCli={setActiveCli} />
       </QueryClientProvider>
     );
-
-    // cover activeCli switch buttons
-    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
-    expect(setActiveCli).toHaveBeenCalledWith("codex");
+    expect(setActiveCli).not.toHaveBeenCalled();
 
     // create dialog onSaved + onOpenChange
     fireEvent.click(screen.getByRole("button", { name: "添加" }));
