@@ -12,6 +12,12 @@ import type {
   HomeWorkspaceConfigItemType,
 } from "./homeWorkspaceConfigTypes";
 
+const ICON_BY_TYPE: Record<HomeWorkspaceConfigItemType, LucideIcon> = {
+  prompts: Pencil,
+  mcp: Command,
+  skills: Cpu,
+};
+
 export type HomeWorkspaceConfigPanelProps = {
   configs: HomeCliWorkspaceConfig[];
   selectedCliKey: CliKey;
@@ -35,14 +41,6 @@ export function HomeWorkspaceConfigPanel({
   activeModeToggling,
   onSetCliActiveMode,
 }: HomeWorkspaceConfigPanelProps) {
-  const iconByType = useMemo<Record<HomeWorkspaceConfigItemType, LucideIcon>>(
-    () => ({
-      prompts: Pencil,
-      mcp: Command,
-      skills: Cpu,
-    }),
-    []
-  );
   const selectedConfig = useMemo(() => {
     return configs.find((row) => row.cliKey === selectedCliKey) ?? configs[0] ?? null;
   }, [configs, selectedCliKey]);
@@ -130,7 +128,7 @@ export function HomeWorkspaceConfigPanel({
         ) : (
           <div className="space-y-2">
             {selectedConfig.items.map((item) => {
-              const Icon = iconByType[item.type];
+              const Icon = ICON_BY_TYPE[item.type];
 
               return (
                 <div

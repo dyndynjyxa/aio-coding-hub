@@ -97,7 +97,7 @@ export type ClaudeModels = {
 };
 export type DailyResetMode = "fixed" | "rolling";
 export type GatewayListenMode = "localhost" | "wsl_auto" | "lan" | "custom";
-export type HomeUsagePeriod = "last_7" | "last_15" | "last_30" | "month";
+export type HomeUsagePeriod = "last7" | "last15" | "last30" | "month";
 export type ProviderAuthMode = "api_key" | "oauth";
 export type ProviderBaseUrlMode = "order" | "ping";
 export type ProviderSummary = {

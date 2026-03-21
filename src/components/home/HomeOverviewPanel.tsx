@@ -473,8 +473,8 @@ export function HomeOverviewPanel({
                 value={sessionsTab}
                 onChange={setSessionsTab}
                 size="sm"
-                className="overflow-x-auto"
-                buttonClassName="whitespace-nowrap"
+                className="w-full overflow-x-auto"
+                buttonClassName="whitespace-nowrap flex-1"
               />
               <div className="flex items-center gap-2 text-xs text-slate-400">
                 {sessionsTab === "providerLimit" && (

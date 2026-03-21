@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cliLongLabel } from "../../constants/clis";
+import { FREE_TAG } from "../../constants/providers";
 import { copyText } from "../../services/clipboard";
 import { logToConsole } from "../../services/consoleLog";
 import {
@@ -86,8 +87,6 @@ const DEFAULT_FORM_VALUES: ProviderEditorDialogFormInput = {
   enabled: true,
   note: "",
 };
-
-const FREE_TAG = "免费";
 
 function valueOrEmpty(value: number | null | undefined) {
   return value != null ? String(value) : "";
@@ -355,7 +354,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
 
       return prev;
     });
-  }, [costMultiplierValue, open, tags]);
+  }, [costMultiplierValue, open]);
 
   useEffect(() => {
     if (editProvider?.id && editProvider.auth_mode === "oauth") {

@@ -5,6 +5,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { Copy, FlaskConical, Pencil, RefreshCw, Terminal, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { logToConsole } from "../../services/consoleLog";
+import { FREE_TAG } from "../../constants/providers";
 import type { GatewayProviderCircuitStatus } from "../../services/gateway";
 import {
   providerOAuthFetchLimits,
@@ -52,7 +53,7 @@ function trimTrailingUrlPunctuation(url: string) {
 }
 
 function providerTagClassName(tag: string) {
-  if (tag === "免费") {
+  if (tag === FREE_TAG) {
     return "shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300";
   }
   return "shrink-0 rounded-full bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-300";
