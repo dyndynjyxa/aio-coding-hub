@@ -80,9 +80,28 @@ describe("components/home/HomeWorkStatusCard", () => {
     );
 
     expect(screen.getByText("当前未指向本网关")).toBeInTheDocument();
-    expect(screen.getAllByRole("switch")).toHaveLength(2);
+    expect(screen.getAllByRole("switch")).toHaveLength(3);
     fireEvent.click(screen.getByRole("button", { name: "修复 Codex 代理" }));
     expect(onSetCliProxyEnabled).toHaveBeenCalledWith("codex", true);
+  });
+
+  it("keeps the switch available for drifted rows so users can still disable proxy", () => {
+    const onSetCliProxyEnabled = vi.fn();
+
+    render(
+      <HomeWorkStatusCard
+        cliProxyLoading={false}
+        cliProxyAvailable={true}
+        cliProxyEnabled={{ claude: false, codex: true, gemini: false } as any}
+        cliProxyAppliedToCurrentGateway={{ claude: null, codex: false, gemini: null } as any}
+        cliProxyToggling={{ claude: false, codex: false, gemini: false } as any}
+        onSetCliProxyEnabled={onSetCliProxyEnabled}
+      />
+    );
+
+    const codexSwitch = screen.getByRole("switch", { name: "Codex 代理开关" });
+    fireEvent.click(codexSwitch);
+    expect(onSetCliProxyEnabled).toHaveBeenCalledWith("codex", false);
   });
 
   it("disables the repair button while proxy status is toggling", () => {

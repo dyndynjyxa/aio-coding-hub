@@ -71,16 +71,25 @@ export function HomeWorkStatusCard({
                   <div className="flex shrink-0 flex-col items-end justify-center gap-1 text-right">
                     {drifted ? (
                       <>
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          className="h-6 px-2 py-0 text-[11px]"
-                          disabled={cliProxyToggling[cliKey]}
-                          onClick={() => onSetCliProxyEnabled(cliKey, true)}
-                          aria-label={`修复 ${cli.name} 代理`}
-                        >
-                          修复
-                        </Button>
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            className="h-6 px-2 py-0 text-[11px]"
+                            disabled={cliProxyToggling[cliKey]}
+                            onClick={() => onSetCliProxyEnabled(cliKey, true)}
+                            aria-label={`修复 ${cli.name} 代理`}
+                          >
+                            修复
+                          </Button>
+                          <Switch
+                            checked={cliProxyEnabled[cliKey]}
+                            disabled={cliProxyToggling[cliKey]}
+                            onCheckedChange={(next) => onSetCliProxyEnabled(cliKey, next)}
+                            size="sm"
+                            aria-label={`${cli.name} 代理开关`}
+                          />
+                        </div>
                         <span className="text-[11px] font-medium leading-none text-rose-600 dark:text-rose-400">
                           当前未指向本网关
                         </span>
