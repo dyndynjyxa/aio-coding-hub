@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.8](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.32.7...aio-coding-hub-v0.32.8) (2026-03-22)
+
+
+### Features
+
+* **ui:** 本次主要优化了首页概览、设置页和代理记录页，同时顺手处理了首页包体和 Tauri 构建告警。 ([#111](https://github.com/dyndynjyxa/aio-coding-hub/issues/111)) ([4e6dbad](https://github.com/dyndynjyxa/aio-coding-hub/commit/4e6dbad14cab8334d47a3a30ebfcf70485ad2e0d))
+
 ## [0.32.7](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.32.6...aio-coding-hub-v0.32.7) (2026-03-21)
 
 
