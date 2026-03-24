@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.33.2](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.33.1...aio-coding-hub-v0.33.2) (2026-03-24)
+
+
+### Bug Fixes
+
+* **codex:** resolve oauth login failure and stale provider names ([#116](https://github.com/dyndynjyxa/aio-coding-hub/issues/116)) ([48d647e](https://github.com/dyndynjyxa/aio-coding-hub/commit/48d647ef429232562c9b56e88d8a37f57960604a))
+* **release:** keep Cargo.lock synced for release PRs ([c5bd423](https://github.com/dyndynjyxa/aio-coding-hub/commit/c5bd42355641cb8dcef13a1fa04d41795aeb5c82))
+
 ## [0.33.1](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.33.0...aio-coding-hub-v0.33.1) (2026-03-24)
 
 
