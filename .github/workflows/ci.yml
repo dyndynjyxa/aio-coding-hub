@@ -93,6 +93,20 @@ jobs:
         working-directory: src-tauri
         run: cargo update --workspace
 
+      - name: Verify Cargo.lock is committed
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet -- src-tauri/Cargo.lock; then
+            exit 0
+          fi
+
+          echo "src-tauri/Cargo.lock is out of date." >&2
+          echo "Run 'cd src-tauri && cargo update --workspace' and commit the result." >&2
+          git diff -- src-tauri/Cargo.lock
+          exit 1
+
       - name: Rust clippy
         working-directory: src-tauri
         run: cargo clippy --all-targets --locked -- -D warnings

@@ -1,0 +1,49 @@
+name: sync-release-pr-cargo-lock
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-pr-cargo-lock-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  sync-cargo-lock:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.head_ref, 'release-please--')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Install Rust 1.90.0
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.90.0
+
+      - name: Sync Cargo.lock
+        working-directory: src-tauri
+        run: cargo update --workspace
+
+      - name: Commit updated Cargo.lock
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet -- src-tauri/Cargo.lock; then
+            echo "Cargo.lock already in sync."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src-tauri/Cargo.lock
+          git commit -m "chore(release): sync Cargo.lock"
+          git push origin "HEAD:${GITHUB_HEAD_REF}"
