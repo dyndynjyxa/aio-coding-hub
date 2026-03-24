@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.33.3](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.33.2...aio-coding-hub-v0.33.3) (2026-03-24)
+
+
+### Features
+
+* **gateway:** 优化协议兼容性处理与请求头管理 ([6be9161](https://github.com/dyndynjyxa/aio-coding-hub/commit/6be91613fbc0bfcd9b87fe419a8f9ad08178a1f7))
+
+
+### Bug Fixes
+
+* **app:** 修复并增强数据库重置和WSL配置功能 ([caf135a](https://github.com/dyndynjyxa/aio-coding-hub/commit/caf135a98905bcc4594f9f6c3729297e3c6dcf1c))
+* **ci:** 优化 pre-push 钩子和测试命令的标准输入配置 ([d14abe2](https://github.com/dyndynjyxa/aio-coding-hub/commit/d14abe2ce2f35e53ea0ab750e8598aafb65f33ed))
+* **tauri:** 修复可执行文件查找时的权限判断问题 ([e3815ce](https://github.com/dyndynjyxa/aio-coding-hub/commit/e3815cec86d2f3bd8635fd7f95de8e30b5f36fa9))
+
 ## [0.33.2](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.33.1...aio-coding-hub-v0.33.2) (2026-03-24)
 
 
