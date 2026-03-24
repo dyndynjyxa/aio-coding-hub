@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.33.1](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.33.0...aio-coding-hub-v0.33.1) (2026-03-24)
+
+
+### Features
+
+* **codex:** support configurable Windows .codex locations ([#114](https://github.com/dyndynjyxa/aio-coding-hub/issues/114)) ([a8c77cd](https://github.com/dyndynjyxa/aio-coding-hub/commit/a8c77cdebdca52f7bb5ca758837c2b04bac14e3f))
+* **skills:** support repo market and local CLI workflows ([3a0a24f](https://github.com/dyndynjyxa/aio-coding-hub/commit/3a0a24f13405d493237402dace175807b42de462))
+
 ## [0.33.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.32.8...aio-coding-hub-v0.33.0) (2026-03-22)
 
 
