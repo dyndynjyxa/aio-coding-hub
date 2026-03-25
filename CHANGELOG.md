@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.33.4](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.33.3...aio-coding-hub-v0.33.4) (2026-03-25)
+
+
+### Features
+
+* **bindings:** 添加 HomeUsagePeriod 类型契约断言 ([a540d52](https://github.com/dyndynjyxa/aio-coding-hub/commit/a540d52012652075deee18c58d3e4b5611f4d547))
+
+
+### Bug Fixes
+
+* **commands:** 修复构建Claude启动命令时路径参数传递 ([9e714f4](https://github.com/dyndynjyxa/aio-coding-hub/commit/9e714f48bdbf7dff2d729131774518845303290a))
+* **gateway:** 修正 Heartbeat 事件变量可见性及用法 ([a540d52](https://github.com/dyndynjyxa/aio-coding-hub/commit/a540d52012652075deee18c58d3e4b5611f4d547))
+
 ## [0.33.3](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.33.2...aio-coding-hub-v0.33.3) (2026-03-24)
 
 
