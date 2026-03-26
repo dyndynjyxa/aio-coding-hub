@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.33.5](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.33.4...aio-coding-hub-v0.33.5) (2026-03-26)
+
+
+### Bug Fixes
+
+* **codex:** 修复切换 Codex Home 后代理状态与实际配置不一致 ([#125](https://github.com/dyndynjyxa/aio-coding-hub/issues/125)) ([e8f80b2](https://github.com/dyndynjyxa/aio-coding-hub/commit/e8f80b2838509b748d38ed6411219218b4077bf5))
+* **macOS:** 修复macOS 在 CLI 管理页面读取不到工具 version 并提示 INTERNAL_ERROR ([#126](https://github.com/dyndynjyxa/aio-coding-hub/issues/126)) ([ce35a94](https://github.com/dyndynjyxa/aio-coding-hub/commit/ce35a945dd278b453a1ddebbe8e95fd5f4f12ee6))
+* **skills:** unify card layout between general and local skill sections ([7f3b7bb](https://github.com/dyndynjyxa/aio-coding-hub/commit/7f3b7bba9efe0818b11ae6ddbfa0dc1c1576f0fa))
+* **skills:** 优化目录复制以正确处理符号链接 ([8b21265](https://github.com/dyndynjyxa/aio-coding-hub/commit/8b21265d116a184f82008b13792d472d68f13356))
+
 ## [0.33.4](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.33.3...aio-coding-hub-v0.33.4) (2026-03-25)
 
 
