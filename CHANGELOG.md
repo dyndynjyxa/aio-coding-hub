@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.33.6](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.33.5...aio-coding-hub-v0.33.6) (2026-03-27)
+
+
+### Features
+
+* **proxy:** 增加请求中断日志中尝试信息的捕获与展示 ([0ad0955](https://github.com/dyndynjyxa/aio-coding-hub/commit/0ad0955730da9ee46e1904838412fe546794e0f5))
+* **settings:** 添加通知声音开关配置项 ([d13ee18](https://github.com/dyndynjyxa/aio-coding-hub/commit/d13ee18228cde971e7490468c6831aa679a636ab))
+* **settings:** 添加通知音效开关及完善通用配置界面 ([e8d285a](https://github.com/dyndynjyxa/aio-coding-hub/commit/e8d285a704ba3f1a82fda9b16f9c2dbba393a57d))
+
 ## [0.33.5](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.33.4...aio-coding-hub-v0.33.5) (2026-03-26)
 
 
