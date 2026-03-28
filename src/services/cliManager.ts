@@ -175,6 +175,53 @@ export type CodexConfigTomlValidationResult = {
   error: CodexConfigTomlValidationError | null;
 };
 
+export type GeminiConfigState = {
+  configDir: string;
+  configPath: string;
+  exists: boolean;
+  modelName: string | null;
+  modelMaxSessionTurns: number | null;
+  modelCompressionThreshold: number | null;
+  defaultApprovalMode: string | null;
+  enableAutoUpdate: boolean | null;
+  enableNotifications: boolean | null;
+  vimMode: boolean | null;
+  retryFetchErrors: boolean | null;
+  maxAttempts: number | null;
+  uiTheme: string | null;
+  uiHideBanner: boolean | null;
+  uiHideTips: boolean | null;
+  uiShowLineNumbers: boolean | null;
+  uiInlineThinkingMode: string | null;
+  usageStatisticsEnabled: boolean | null;
+  sessionRetentionEnabled: boolean | null;
+  sessionRetentionMaxAge: string | null;
+  planModelRouting: boolean | null;
+  securityAuthSelectedType: string | null;
+};
+
+export type GeminiConfigPatch = Partial<{
+  modelName: string;
+  modelMaxSessionTurns: number;
+  modelCompressionThreshold: number;
+  defaultApprovalMode: string;
+  enableAutoUpdate: boolean;
+  enableNotifications: boolean;
+  vimMode: boolean;
+  retryFetchErrors: boolean;
+  maxAttempts: number;
+  uiTheme: string;
+  uiHideBanner: boolean;
+  uiHideTips: boolean;
+  uiShowLineNumbers: boolean;
+  uiInlineThinkingMode: string;
+  usageStatisticsEnabled: boolean;
+  sessionRetentionEnabled: boolean;
+  sessionRetentionMaxAge: string;
+  planModelRouting: boolean;
+  securityAuthSelectedType: string;
+}>;
+
 export async function cliManagerClaudeInfoGet() {
   return invokeService<ClaudeCliInfo>("获取 Claude CLI 信息失败", "cli_manager_claude_info_get");
 }
@@ -220,6 +267,16 @@ export async function cliManagerCodexConfigTomlSet(toml: string) {
 
 export async function cliManagerGeminiInfoGet() {
   return invokeService<SimpleCliInfo>("获取 Gemini CLI 信息失败", "cli_manager_gemini_info_get");
+}
+
+export async function cliManagerGeminiConfigGet() {
+  return invokeService<GeminiConfigState>("读取 Gemini 配置失败", "cli_manager_gemini_config_get");
+}
+
+export async function cliManagerGeminiConfigSet(patch: GeminiConfigPatch) {
+  return invokeService<GeminiConfigState>("保存 Gemini 配置失败", "cli_manager_gemini_config_set", {
+    patch,
+  });
 }
 
 export async function cliManagerClaudeEnvSet(input: {

@@ -7,7 +7,10 @@ import type {
   ClaudeSettingsPatch,
   ClaudeSettingsState,
 } from "../../../services/cliManager";
+import type { ProviderSummary } from "../../../services/providers";
 import { cn } from "../../../utils/cn";
+import { CliVersionBadge } from "../CliVersionBadge";
+import { ClaudeOAuthCard } from "./ClaudeOAuthCard";
 import { Button } from "../../../ui/Button";
 import { Card } from "../../../ui/Card";
 import { Input } from "../../../ui/Input";
@@ -35,6 +38,7 @@ export type CliManagerClaudeTabProps = {
   claudeSettingsLoading: boolean;
   claudeSettingsSaving: boolean;
   claudeSettings: ClaudeSettingsState | null;
+  providers: ProviderSummary[] | null;
   refreshClaude: () => Promise<void> | void;
   openClaudeConfigDir: () => Promise<void> | void;
   persistClaudeSettings: (patch: ClaudeSettingsPatch) => Promise<void> | void;
@@ -247,6 +251,7 @@ export function CliManagerClaudeTab({
   claudeSettingsLoading,
   claudeSettingsSaving,
   claudeSettings,
+  providers,
   refreshClaude,
   openClaudeConfigDir,
   persistClaudeSettings,
@@ -366,10 +371,17 @@ export function CliManagerClaudeTab({
                   </h2>
                   <div className="flex items-center gap-2 mt-1">
                     {claudeAvailable === "available" && claudeInfo?.found ? (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 dark:bg-green-900/30 px-2.5 py-0.5 text-xs font-medium text-green-700 dark:text-green-400 ring-1 ring-inset ring-green-600/20">
-                        <CheckCircle2 className="h-3 w-3" />
-                        已安装 {claudeInfo.version}
-                      </span>
+                      <>
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 dark:bg-green-900/30 px-2.5 py-0.5 text-xs font-medium text-green-700 dark:text-green-400 ring-1 ring-inset ring-green-600/20">
+                          <CheckCircle2 className="h-3 w-3" />
+                          已安装 {claudeInfo.version}
+                        </span>
+                        <CliVersionBadge
+                          cliKey="claude"
+                          installedVersion={claudeInfo.version}
+                          onUpdateComplete={refreshClaude}
+                        />
+                      </>
                     ) : claudeAvailable === "checking" || loading ? (
                       <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 dark:bg-blue-900/30 px-2.5 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-400 ring-1 ring-inset ring-blue-600/20">
                         <RefreshCw className="h-3 w-3 animate-spin" />
@@ -479,8 +491,11 @@ export function CliManagerClaudeTab({
             数据不可用
           </div>
         ) : !claudeSettings ? (
-          <div className="text-sm text-slate-500 dark:text-slate-400 text-center py-8">
-            暂无配置，请尝试刷新
+          <div className="p-6 space-y-6">
+            <div className="text-sm text-slate-500 dark:text-slate-400 text-center py-8">
+              暂无配置，请尝试刷新
+            </div>
+            <ClaudeOAuthCard providers={providers} />
           </div>
         ) : (
           <div className="p-6 space-y-6">
@@ -887,6 +902,8 @@ export function CliManagerClaudeTab({
                 </SettingItem>
               </div>
             </div>
+
+            <ClaudeOAuthCard providers={providers} />
           </div>
         )}
 

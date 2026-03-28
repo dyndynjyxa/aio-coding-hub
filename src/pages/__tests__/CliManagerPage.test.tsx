@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactElement } from "react";
 import { toast } from "sonner";
 import { tauriDialogOpen, tauriOpenPath } from "../../test/mocks/tauri";
@@ -24,8 +24,11 @@ import {
   useCliManagerCodexConfigTomlQuery,
   useCliManagerCodexConfigTomlSetMutation,
   useCliManagerCodexInfoQuery,
+  useCliManagerGeminiConfigQuery,
+  useCliManagerGeminiConfigSetMutation,
   useCliManagerGeminiInfoQuery,
 } from "../../query/cliManager";
+import { useProvidersListQuery } from "../../query/providers";
 import { cliProxyKeys } from "../../query/keys";
 import { cliProxyRebindCodexHome, cliProxyStatusAll } from "../../services/cliProxy";
 
@@ -135,11 +138,14 @@ vi.mock("../../components/cli-manager/tabs/CodexTab", () => ({
 }));
 
 vi.mock("../../components/cli-manager/tabs/GeminiTab", () => ({
-  CliManagerGeminiTab: ({ refreshGeminiInfo }: any) => (
+  CliManagerGeminiTab: ({ refreshGeminiInfo, persistGeminiConfig }: any) => (
     <div>
       <div>gemini-tab</div>
       <button type="button" onClick={() => refreshGeminiInfo()}>
         refresh-gemini
+      </button>
+      <button type="button" onClick={() => persistGeminiConfig?.({ modelName: "gemini-2.5-pro" })}>
+        save-gemini
       </button>
     </div>
   ),
@@ -171,7 +177,18 @@ vi.mock("../../query/cliManager", async () => {
     useCliManagerCodexConfigSetMutation: vi.fn(),
     useCliManagerCodexConfigTomlQuery: vi.fn(),
     useCliManagerCodexConfigTomlSetMutation: vi.fn(),
+    useCliManagerGeminiConfigQuery: vi.fn(),
+    useCliManagerGeminiConfigSetMutation: vi.fn(),
     useCliManagerGeminiInfoQuery: vi.fn(),
+  };
+});
+
+vi.mock("../../query/providers", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../query/providers")>("../../query/providers");
+  return {
+    ...actual,
+    useProvidersListQuery: vi.fn(),
   };
 });
 
@@ -220,6 +237,27 @@ function createAppSettings(overrides: Partial<any> = {}) {
     ...overrides,
   };
 }
+
+beforeEach(() => {
+  vi.clearAllMocks();
+
+  vi.mocked(useCliManagerGeminiConfigQuery).mockReturnValue({
+    data: null,
+    isFetching: false,
+    refetch: vi.fn(),
+  } as any);
+
+  vi.mocked(useCliManagerGeminiConfigSetMutation).mockReturnValue({
+    isPending: false,
+    mutateAsync: vi.fn(),
+  } as any);
+
+  vi.mocked(useProvidersListQuery).mockReturnValue({
+    data: null,
+    isFetching: false,
+    refetch: vi.fn(),
+  } as any);
+});
 
 describe("pages/CliManagerPage", () => {
   it("drives general tab persistence and handles tauri unavailable/errors", async () => {

@@ -302,6 +302,7 @@ pub(super) async fn handle_success_event_stream(
                     upstream,
                     cx2cc_active,
                     common.requested_model.clone(),
+                    common.cx2cc_settings.clone(),
                 );
                 let upstream = response_fixer::ResponseFixerStream::new(
                     upstream,
@@ -333,6 +334,7 @@ pub(super) async fn handle_success_event_stream(
                     upstream,
                     cx2cc_active,
                     common.requested_model.clone(),
+                    common.cx2cc_settings.clone(),
                 );
                 let upstream = response_fixer::ResponseFixerStream::new(
                     upstream,
@@ -365,6 +367,7 @@ pub(super) async fn handle_success_event_stream(
                     upstream,
                     cx2cc_active,
                     common.requested_model.clone(),
+                    common.cx2cc_settings.clone(),
                 );
                 if use_sse_relay {
                     spawn_usage_sse_relay_body(
@@ -391,6 +394,7 @@ pub(super) async fn handle_success_event_stream(
                     upstream,
                     cx2cc_active,
                     common.requested_model.clone(),
+                    common.cx2cc_settings.clone(),
                 );
                 if use_sse_relay {
                     spawn_usage_sse_relay_body(

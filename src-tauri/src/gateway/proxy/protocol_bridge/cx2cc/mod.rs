@@ -6,6 +6,8 @@
 //!   conform to the ChatGPT Responses API field whitelist.
 
 use super::traits::{BridgeContext, ModelMapper};
+use crate::domain::providers::ClaudeModels;
+use crate::gateway::proxy::cx2cc::settings::Cx2ccSettings;
 use serde_json::Value;
 
 // ─── Model Mapper ──────────────────────────────────────────────────────────
@@ -19,34 +21,36 @@ pub(crate) struct CX2CCModelMapper;
 
 impl ModelMapper for CX2CCModelMapper {
     fn map(&self, source_model: &str, ctx: &BridgeContext) -> String {
-        let cm = &ctx.claude_models;
+        map_claude_to_openai(source_model, &ctx.claude_models, &ctx.cx2cc_settings)
+    }
+}
 
-        if source_model.contains("opus") {
-            if let Some(ref m) = cm.opus_model {
-                return m.clone();
-            }
-            return "o3".to_string();
-        }
-
-        if source_model.contains("haiku") {
-            if let Some(ref m) = cm.haiku_model {
-                return m.clone();
-            }
-            return "gpt-4.1-mini".to_string();
-        }
-
-        if source_model.contains("sonnet") {
-            if let Some(ref m) = cm.sonnet_model {
-                return m.clone();
-            }
-            return "gpt-4.1".to_string();
-        }
-
-        if let Some(ref m) = cm.main_model {
+fn map_claude_to_openai(source_model: &str, cm: &ClaudeModels, settings: &Cx2ccSettings) -> String {
+    if source_model.contains("opus") {
+        if let Some(ref m) = cm.opus_model {
             return m.clone();
         }
-        "gpt-4.1".to_string()
+        return settings.fallback_model_opus.clone();
     }
+
+    if source_model.contains("haiku") {
+        if let Some(ref m) = cm.haiku_model {
+            return m.clone();
+        }
+        return settings.fallback_model_haiku.clone();
+    }
+
+    if source_model.contains("sonnet") {
+        if let Some(ref m) = cm.sonnet_model {
+            return m.clone();
+        }
+        return settings.fallback_model_sonnet.clone();
+    }
+
+    if let Some(ref m) = cm.main_model {
+        return m.clone();
+    }
+    settings.fallback_model_main.clone()
 }
 
 // ─── ChatGPT Backend Compat ────────────────────────────────────────────────
@@ -116,6 +120,7 @@ mod tests {
     fn default_ctx() -> BridgeContext {
         BridgeContext {
             claude_models: ClaudeModels::default(),
+            cx2cc_settings: Cx2ccSettings::default(),
             requested_model: None,
             mapped_model: None,
             stream_requested: false,
@@ -135,7 +140,10 @@ mod tests {
     #[test]
     fn maps_opus_to_default_o3() {
         let mapper = CX2CCModelMapper;
-        assert_eq!(mapper.map("claude-3-opus-20240229", &default_ctx()), "o3");
+        assert_eq!(
+            mapper.map("claude-3-opus-20240229", &default_ctx()),
+            "gpt-5.4"
+        );
     }
 
     #[test]
@@ -143,7 +151,7 @@ mod tests {
         let mapper = CX2CCModelMapper;
         assert_eq!(
             mapper.map("claude-3-haiku-20240307", &default_ctx()),
-            "gpt-4.1-mini"
+            "gpt-5.4"
         );
     }
 
@@ -152,14 +160,14 @@ mod tests {
         let mapper = CX2CCModelMapper;
         assert_eq!(
             mapper.map("claude-3-5-sonnet-20241022", &default_ctx()),
-            "gpt-4.1"
+            "gpt-5.4"
         );
     }
 
     #[test]
     fn maps_unknown_model_to_default_gpt41() {
         let mapper = CX2CCModelMapper;
-        assert_eq!(mapper.map("some-unknown-model", &default_ctx()), "gpt-4.1");
+        assert_eq!(mapper.map("some-unknown-model", &default_ctx()), "gpt-5.4");
     }
 
     // ── Model mapping: custom overrides ────────────────────────────────────
@@ -214,6 +222,27 @@ mod tests {
             mapper.map("some-unknown-model", &ctx_with_models(cm)),
             "my-main"
         );
+    }
+
+    #[test]
+    fn runtime_settings_override_fallbacks() {
+        let mut ctx = default_ctx();
+        ctx.cx2cc_settings = Cx2ccSettings {
+            fallback_model_opus: "custom-opus".into(),
+            fallback_model_sonnet: "custom-sonnet".into(),
+            fallback_model_haiku: "custom-haiku".into(),
+            fallback_model_main: "custom-main".into(),
+            ..Cx2ccSettings::default()
+        };
+
+        let mapper = CX2CCModelMapper;
+        assert_eq!(mapper.map("claude-3-opus-20240229", &ctx), "custom-opus");
+        assert_eq!(mapper.map("claude-3-haiku-20240307", &ctx), "custom-haiku");
+        assert_eq!(
+            mapper.map("claude-3-5-sonnet-20241022", &ctx),
+            "custom-sonnet"
+        );
+        assert_eq!(mapper.map("some-unknown-model", &ctx), "custom-main");
     }
 
     // ── ChatGPT compat filter ──────────────────────────────────────────────

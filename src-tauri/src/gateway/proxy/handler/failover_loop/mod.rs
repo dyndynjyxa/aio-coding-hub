@@ -146,6 +146,21 @@ fn push_skipped_provider_attempt(
     });
 }
 
+fn apply_cx2cc_request_settings(
+    responses_body: &mut serde_json::Value,
+    cx2cc_settings: &crate::gateway::proxy::cx2cc::settings::Cx2ccSettings,
+) {
+    if let Some(ref effort) = cx2cc_settings.model_reasoning_effort {
+        responses_body["reasoning"] = serde_json::json!({ "effort": effort });
+    }
+    if let Some(ref tier) = cx2cc_settings.service_tier {
+        responses_body["service_tier"] = serde_json::json!(tier);
+    }
+    if cx2cc_settings.disable_response_storage {
+        responses_body["store"] = serde_json::json!(false);
+    }
+}
+
 pub(super) async fn run(mut input: RequestContext) -> Response {
     let method = input.req_method.clone();
     let started = input.started;
@@ -165,6 +180,7 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
         created_at,
         session_id: &input.session_id,
         requested_model: &input.requested_model,
+        cx2cc_settings: &input.cx2cc_settings,
         effective_sort_mode_id: input.effective_sort_mode_id,
         special_settings: &input.special_settings,
         provider_cooldown_secs: input.provider_cooldown_secs,
@@ -511,6 +527,7 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
                                 body_val.get("model").and_then(|m| m.as_str()).unwrap_or("");
                             let bridge_ctx = super::super::protocol_bridge::BridgeContext {
                                 claude_models: provider.claude_models.clone(),
+                                cx2cc_settings: input.cx2cc_settings.clone(),
                                 requested_model: Some(requested_model.to_string()),
                                 mapped_model: None,
                                 stream_requested: anthropic_stream_requested,
@@ -524,13 +541,17 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
                                         .map_err(|e| e.to_string())
                                 }) {
                                 Ok(translated) => {
-                                    let openai_model = translated
-                                        .body
+                                    let mut responses_body = translated.body;
+                                    apply_cx2cc_request_settings(
+                                        &mut responses_body,
+                                        &input.cx2cc_settings,
+                                    );
+                                    let openai_model = responses_body
                                         .get("model")
                                         .and_then(|m| m.as_str())
                                         .unwrap_or("")
                                         .to_string();
-                                    upstream_body_bytes = serde_json::to_vec(&translated.body)
+                                    upstream_body_bytes = serde_json::to_vec(&responses_body)
                                         .unwrap_or_default()
                                         .into();
                                     upstream_forwarded_path = translated.target_path;

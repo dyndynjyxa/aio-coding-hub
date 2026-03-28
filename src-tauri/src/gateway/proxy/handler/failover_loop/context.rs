@@ -5,6 +5,7 @@ use super::super::super::gemini_oauth;
 use crate::circuit_breaker;
 use crate::gateway::events::FailoverAttempt;
 use crate::gateway::manager::GatewayAppState;
+use crate::gateway::proxy::cx2cc::settings::Cx2ccSettings;
 use crate::gateway::response_fixer;
 use crate::gateway::streams::StreamFinalizeCtx;
 use axum::response::Response;
@@ -26,6 +27,7 @@ pub(super) struct CommonCtxArgs<'a> {
     pub(super) created_at: i64,
     pub(super) session_id: &'a Option<String>,
     pub(super) requested_model: &'a Option<String>,
+    pub(super) cx2cc_settings: &'a Cx2ccSettings,
     pub(super) effective_sort_mode_id: Option<i64>,
     pub(super) special_settings: &'a Arc<Mutex<Vec<serde_json::Value>>>,
     pub(super) provider_cooldown_secs: i64,
@@ -54,6 +56,7 @@ pub(super) struct CommonCtx<'a> {
     pub(super) created_at: i64,
     pub(super) session_id: &'a Option<String>,
     pub(super) requested_model: &'a Option<String>,
+    pub(super) cx2cc_settings: &'a Cx2ccSettings,
     pub(super) effective_sort_mode_id: Option<i64>,
     pub(super) special_settings: &'a Arc<Mutex<Vec<serde_json::Value>>>,
     pub(super) provider_cooldown_secs: i64,
@@ -83,6 +86,7 @@ impl<'a> CommonCtx<'a> {
             created_at: args.created_at,
             session_id: args.session_id,
             requested_model: args.requested_model,
+            cx2cc_settings: args.cx2cc_settings,
             effective_sort_mode_id: args.effective_sort_mode_id,
             special_settings: args.special_settings,
             provider_cooldown_secs: args.provider_cooldown_secs,
@@ -118,6 +122,7 @@ pub(super) struct CommonCtxOwned<'a> {
     pub(super) created_at: i64,
     pub(super) session_id: Option<String>,
     pub(super) requested_model: Option<String>,
+    pub(super) cx2cc_settings: Cx2ccSettings,
     pub(super) effective_sort_mode_id: Option<i64>,
     pub(super) special_settings: Arc<Mutex<Vec<serde_json::Value>>>,
     pub(super) provider_cooldown_secs: i64,
@@ -145,6 +150,7 @@ impl<'a> From<CommonCtx<'a>> for CommonCtxOwned<'a> {
             created_at: ctx.created_at,
             session_id: ctx.session_id.clone(),
             requested_model: ctx.requested_model.clone(),
+            cx2cc_settings: ctx.cx2cc_settings.clone(),
             effective_sort_mode_id: ctx.effective_sort_mode_id,
             special_settings: Arc::clone(ctx.special_settings),
             provider_cooldown_secs: ctx.provider_cooldown_secs,

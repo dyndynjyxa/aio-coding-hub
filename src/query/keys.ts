@@ -193,6 +193,7 @@ export const cliManagerKeys = {
   codexConfig: () => [...cliManagerAllKey, "codex", "config"] as const,
   codexConfigToml: () => [...cliManagerAllKey, "codex", "configToml"] as const,
   geminiInfo: () => [...cliManagerAllKey, "gemini", "info"] as const,
+  geminiConfig: () => [...cliManagerAllKey, "gemini", "config"] as const,
 };
 
 const modelPricesAllKey = ["modelPrices"] as const;

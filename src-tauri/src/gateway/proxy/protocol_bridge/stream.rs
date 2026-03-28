@@ -45,6 +45,7 @@ impl StreamTranslatorOwned {
         data: &Value,
         ctx: &BridgeContext,
     ) -> Result<Vec<Bytes>, BridgeError> {
+        self.state.enable_reasoning_to_thinking = ctx.cx2cc_settings.enable_reasoning_to_thinking;
         let ir_chunks = self
             .outbound
             .sse_event_to_ir(event_type, data, &mut self.state)?;
@@ -65,10 +66,16 @@ where
     ///
     /// When `active` is false the stream is a zero-cost passthrough.
     /// When `active` is true a fresh CX2CC bridge translator is created.
-    pub fn for_cx2cc(upstream: S, active: bool, requested_model: Option<String>) -> Self {
+    pub fn for_cx2cc(
+        upstream: S,
+        active: bool,
+        requested_model: Option<String>,
+        cx2cc_settings: crate::gateway::proxy::cx2cc::settings::Cx2ccSettings,
+    ) -> Self {
         if !active {
             let dummy_ctx = BridgeContext {
                 claude_models: crate::domain::providers::ClaudeModels::default(),
+                cx2cc_settings: crate::gateway::proxy::cx2cc::settings::Cx2ccSettings::default(),
                 requested_model: None,
                 mapped_model: None,
                 stream_requested: false,
@@ -85,6 +92,7 @@ where
         };
         let ctx = BridgeContext {
             claude_models: crate::domain::providers::ClaudeModels::default(),
+            cx2cc_settings,
             requested_model,
             mapped_model: None,
             stream_requested: true,

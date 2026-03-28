@@ -9,7 +9,7 @@ use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, Instant};
 use tauri::Manager;
 
-pub const SCHEMA_VERSION: u32 = 25;
+pub const SCHEMA_VERSION: u32 = 26;
 const SCHEMA_VERSION_DISABLE_UPSTREAM_TIMEOUTS: u32 = 7;
 const SCHEMA_VERSION_ADD_GATEWAY_RECTIFIERS: u32 = 8;
 const SCHEMA_VERSION_ADD_CIRCUIT_BREAKER_NOTICE: u32 = 9;
@@ -29,6 +29,7 @@ const SCHEMA_VERSION_ADD_SHOW_HOME_USAGE: u32 = 22;
 const SCHEMA_VERSION_ADD_CODEX_HOME_OVERRIDE: u32 = 23;
 const SCHEMA_VERSION_ADD_CODEX_HOME_MODE: u32 = 24;
 const SCHEMA_VERSION_ADD_NOTIFICATION_SOUND: u32 = 25;
+const SCHEMA_VERSION_ADD_CX2CC_SETTINGS: u32 = 26;
 pub const DEFAULT_GATEWAY_PORT: u16 = 37123;
 pub const MAX_GATEWAY_PORT: u16 = 37199;
 const DEFAULT_LOG_RETENTION_DAYS: u32 = 7;
@@ -60,6 +61,7 @@ const DEFAULT_RESPONSE_FIXER_FIX_SSE_FORMAT: bool = true;
 const DEFAULT_RESPONSE_FIXER_FIX_TRUNCATED_JSON: bool = true;
 const DEFAULT_RESPONSE_FIXER_MAX_JSON_DEPTH: u32 = 200;
 const DEFAULT_RESPONSE_FIXER_MAX_FIX_SIZE: u32 = 1024 * 1024;
+pub const DEFAULT_CX2CC_FALLBACK_MODEL: &str = "gpt-5.4";
 const MAX_PROVIDER_COOLDOWN_SECONDS: u32 = 60 * 60;
 const MAX_PROVIDER_BASE_URL_PING_CACHE_TTL_SECONDS: u32 = 60 * 60;
 const MAX_UPSTREAM_FIRST_BYTE_TIMEOUT_SECONDS: u32 = 60 * 60;
@@ -246,6 +248,18 @@ pub struct AppSettings {
     pub response_fixer_fix_truncated_json: bool,
     pub response_fixer_max_json_depth: u32,
     pub response_fixer_max_fix_size: u32,
+    // CX2CC bridge settings.
+    pub cx2cc_fallback_model_opus: String,
+    pub cx2cc_fallback_model_sonnet: String,
+    pub cx2cc_fallback_model_haiku: String,
+    pub cx2cc_fallback_model_main: String,
+    pub cx2cc_model_reasoning_effort: String,
+    pub cx2cc_service_tier: String,
+    pub cx2cc_disable_response_storage: bool,
+    pub cx2cc_enable_reasoning_to_thinking: bool,
+    pub cx2cc_drop_stop_sequences: bool,
+    pub cx2cc_clean_schema: bool,
+    pub cx2cc_filter_batch_tool: bool,
 }
 
 impl Default for AppSettings {
@@ -298,6 +312,17 @@ impl Default for AppSettings {
             response_fixer_fix_truncated_json: DEFAULT_RESPONSE_FIXER_FIX_TRUNCATED_JSON,
             response_fixer_max_json_depth: DEFAULT_RESPONSE_FIXER_MAX_JSON_DEPTH,
             response_fixer_max_fix_size: DEFAULT_RESPONSE_FIXER_MAX_FIX_SIZE,
+            cx2cc_fallback_model_opus: DEFAULT_CX2CC_FALLBACK_MODEL.to_string(),
+            cx2cc_fallback_model_sonnet: DEFAULT_CX2CC_FALLBACK_MODEL.to_string(),
+            cx2cc_fallback_model_haiku: DEFAULT_CX2CC_FALLBACK_MODEL.to_string(),
+            cx2cc_fallback_model_main: DEFAULT_CX2CC_FALLBACK_MODEL.to_string(),
+            cx2cc_model_reasoning_effort: String::new(),
+            cx2cc_service_tier: String::new(),
+            cx2cc_disable_response_storage: true,
+            cx2cc_enable_reasoning_to_thinking: true,
+            cx2cc_drop_stop_sequences: true,
+            cx2cc_clean_schema: true,
+            cx2cc_filter_batch_tool: true,
         }
     }
 }
@@ -762,9 +787,37 @@ fn migrate_add_notification_sound(
     )
 }
 
+fn migrate_add_cx2cc_settings(settings: &mut AppSettings, schema_version_present: bool) -> bool {
+    if !migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_CX2CC_SETTINGS,
+    ) {
+        return false;
+    }
+    if settings.cx2cc_fallback_model_opus.is_empty() {
+        settings.cx2cc_fallback_model_opus = DEFAULT_CX2CC_FALLBACK_MODEL.to_string();
+    }
+    if settings.cx2cc_fallback_model_sonnet.is_empty() {
+        settings.cx2cc_fallback_model_sonnet = DEFAULT_CX2CC_FALLBACK_MODEL.to_string();
+    }
+    if settings.cx2cc_fallback_model_haiku.is_empty() {
+        settings.cx2cc_fallback_model_haiku = DEFAULT_CX2CC_FALLBACK_MODEL.to_string();
+    }
+    if settings.cx2cc_fallback_model_main.is_empty() {
+        settings.cx2cc_fallback_model_main = DEFAULT_CX2CC_FALLBACK_MODEL.to_string();
+    }
+    settings.cx2cc_disable_response_storage = true;
+    settings.cx2cc_enable_reasoning_to_thinking = true;
+    settings.cx2cc_drop_stop_sequences = true;
+    settings.cx2cc_clean_schema = true;
+    settings.cx2cc_filter_batch_tool = true;
+    true
+}
+
 type SettingsMigration = fn(&mut AppSettings, bool) -> bool;
 
-const SETTINGS_MIGRATIONS: [SettingsMigration; 19] = [
+const SETTINGS_MIGRATIONS: [SettingsMigration; 20] = [
     migrate_disable_upstream_timeouts,
     migrate_add_gateway_rectifiers,
     migrate_add_circuit_breaker_notice,
@@ -784,6 +837,7 @@ const SETTINGS_MIGRATIONS: [SettingsMigration; 19] = [
     migrate_add_codex_home_override,
     migrate_add_codex_home_mode,
     migrate_add_notification_sound,
+    migrate_add_cx2cc_settings,
 ];
 
 fn apply_settings_migrations(settings: &mut AppSettings, schema_version_present: bool) -> bool {

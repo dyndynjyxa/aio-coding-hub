@@ -7,6 +7,7 @@
 
 use super::super::ir::*;
 use super::super::traits::*;
+use crate::gateway::proxy::cx2cc::settings::Cx2ccSettings;
 use axum::body::Bytes;
 use serde_json::{json, Value};
 
@@ -18,8 +19,12 @@ impl Inbound for AnthropicMessagesInbound {
         "anthropic_messages"
     }
 
-    fn request_to_ir(&self, body: Value) -> Result<InternalRequest, BridgeError> {
-        parse_request(body)
+    fn request_to_ir(
+        &self,
+        body: Value,
+        ctx: &BridgeContext,
+    ) -> Result<InternalRequest, BridgeError> {
+        parse_request(body, &ctx.cx2cc_settings)
     }
 
     fn ir_to_response(
@@ -43,7 +48,7 @@ impl Inbound for AnthropicMessagesInbound {
 // request_to_ir
 // ---------------------------------------------------------------------------
 
-fn parse_request(body: Value) -> Result<InternalRequest, BridgeError> {
+fn parse_request(body: Value, settings: &Cx2ccSettings) -> Result<InternalRequest, BridgeError> {
     let model = body
         .get("model")
         .and_then(|m| m.as_str())
@@ -52,7 +57,7 @@ fn parse_request(body: Value) -> Result<InternalRequest, BridgeError> {
 
     let system = parse_system(&body);
     let messages = parse_messages(&body)?;
-    let tools = parse_tools(&body);
+    let tools = parse_tools(&body, settings.filter_batch_tool);
     let tool_choice = parse_tool_choice(&body);
 
     let max_tokens = body.get("max_tokens").and_then(|v| v.as_u64());
@@ -229,14 +234,16 @@ fn parse_single_block(block: &Value) -> Result<Option<IRContentBlock>, BridgeErr
     }
 }
 
-fn parse_tools(body: &Value) -> Vec<IRToolDefinition> {
+fn parse_tools(body: &Value, filter_batch_tool: bool) -> Vec<IRToolDefinition> {
     let Some(tools) = body.get("tools").and_then(|t| t.as_array()) else {
         return Vec::new();
     };
 
     tools
         .iter()
-        .filter(|t| t.get("type").and_then(|v| v.as_str()) != Some("BatchTool"))
+        .filter(|t| {
+            !filter_batch_tool || t.get("type").and_then(|v| v.as_str()) != Some("BatchTool")
+        })
         .map(|t| IRToolDefinition {
             name: t
                 .get("name")
@@ -530,9 +537,14 @@ mod tests {
 
     // ── Helper ──────────────────────────────────────────────────────────
 
+    fn default_settings() -> Cx2ccSettings {
+        Cx2ccSettings::default()
+    }
+
     fn default_ctx() -> BridgeContext {
         BridgeContext {
             claude_models: Default::default(),
+            cx2cc_settings: default_settings(),
             requested_model: None,
             mapped_model: None,
             stream_requested: false,
@@ -575,7 +587,7 @@ mod tests {
             "max_tokens": 1024,
             "messages": [{"role": "user", "content": "Hello"}]
         });
-        let ir = parse_request(body).unwrap();
+        let ir = parse_request(body, &default_settings()).unwrap();
         assert_eq!(ir.model, "claude-sonnet-4-20250514");
         assert_eq!(ir.max_tokens, Some(1024));
         assert_eq!(ir.messages.len(), 1);
@@ -593,7 +605,7 @@ mod tests {
             "system": "Be helpful.",
             "messages": [{"role": "user", "content": "Hi"}]
         });
-        let ir = parse_request(body).unwrap();
+        let ir = parse_request(body, &default_settings()).unwrap();
         assert_eq!(ir.system.as_deref(), Some("Be helpful."));
     }
 
@@ -608,7 +620,7 @@ mod tests {
             ],
             "messages": [{"role": "user", "content": "Hi"}]
         });
-        let ir = parse_request(body).unwrap();
+        let ir = parse_request(body, &default_settings()).unwrap();
         assert_eq!(ir.system.as_deref(), Some("Part 1\n\nPart 2"));
     }
 
@@ -625,7 +637,7 @@ mod tests {
                 ]
             }]
         });
-        let ir = parse_request(body).unwrap();
+        let ir = parse_request(body, &default_settings()).unwrap();
         assert_eq!(ir.messages[0].content.len(), 2);
         assert!(
             matches!(&ir.messages[0].content[0], IRContentBlock::Text { text } if text == "Look at this")
@@ -652,7 +664,7 @@ mod tests {
                 }
             ]
         });
-        let ir = parse_request(body).unwrap();
+        let ir = parse_request(body, &default_settings()).unwrap();
         assert!(
             matches!(&ir.messages[0].content[0], IRContentBlock::ToolUse { id, name, input }
             if id == "call_1" && name == "get_weather" && input["city"] == "Tokyo")
@@ -676,7 +688,7 @@ mod tests {
                 ]
             }]
         });
-        let ir = parse_request(body).unwrap();
+        let ir = parse_request(body, &default_settings()).unwrap();
         assert!(
             matches!(&ir.messages[0].content[0], IRContentBlock::Thinking { thinking } if thinking == "Let me think...")
         );
@@ -700,10 +712,34 @@ mod tests {
                 }
             ]
         });
-        let ir = parse_request(body).unwrap();
+        let ir = parse_request(body, &default_settings()).unwrap();
         assert_eq!(ir.tools.len(), 1);
         assert_eq!(ir.tools[0].name, "get_weather");
         assert_eq!(ir.tools[0].description.as_deref(), Some("Get weather"));
+    }
+
+    #[test]
+    fn request_tools_preserve_batch_tool_when_filter_disabled() {
+        let body = json!({
+            "model": "claude-sonnet-4-20250514",
+            "max_tokens": 1024,
+            "messages": [{"role": "user", "content": "Hi"}],
+            "tools": [
+                {"type": "BatchTool", "name": "batch", "input_schema": {}},
+                {
+                    "name": "get_weather",
+                    "description": "Get weather",
+                    "input_schema": {"type": "object", "properties": {"city": {"type": "string"}}}
+                }
+            ]
+        });
+        let mut settings = default_settings();
+        settings.filter_batch_tool = false;
+
+        let ir = parse_request(body, &settings).unwrap();
+        assert_eq!(ir.tools.len(), 2);
+        assert_eq!(ir.tools[0].name, "batch");
+        assert_eq!(ir.tools[1].name, "get_weather");
     }
 
     #[test]
@@ -714,7 +750,7 @@ mod tests {
             "messages": [{"role": "user", "content": "Hi"}],
             "tool_choice": "auto"
         });
-        let ir = parse_request(body).unwrap();
+        let ir = parse_request(body, &default_settings()).unwrap();
         assert!(matches!(ir.tool_choice, Some(IRToolChoice::Auto)));
     }
 
@@ -726,7 +762,7 @@ mod tests {
             "messages": [{"role": "user", "content": "Hi"}],
             "tool_choice": {"type": "any"}
         });
-        let ir = parse_request(body).unwrap();
+        let ir = parse_request(body, &default_settings()).unwrap();
         assert!(matches!(ir.tool_choice, Some(IRToolChoice::Required)));
     }
 
@@ -738,7 +774,7 @@ mod tests {
             "messages": [{"role": "user", "content": "Hi"}],
             "tool_choice": {"type": "tool", "name": "get_weather"}
         });
-        let ir = parse_request(body).unwrap();
+        let ir = parse_request(body, &default_settings()).unwrap();
         assert!(
             matches!(&ir.tool_choice, Some(IRToolChoice::Specific { name }) if name == "get_weather")
         );
@@ -752,7 +788,7 @@ mod tests {
             "messages": [{"role": "user", "content": "Hi"}],
             "tool_choice": "none"
         });
-        let ir = parse_request(body).unwrap();
+        let ir = parse_request(body, &default_settings()).unwrap();
         assert!(matches!(ir.tool_choice, Some(IRToolChoice::None)));
     }
 
@@ -764,7 +800,7 @@ mod tests {
             "messages": [{"role": "user", "content": "Hi"}],
             "stop_sequences": ["STOP", "END"]
         });
-        let ir = parse_request(body).unwrap();
+        let ir = parse_request(body, &default_settings()).unwrap();
         assert_eq!(ir.stop_sequences, vec!["STOP", "END"]);
     }
 
@@ -776,14 +812,14 @@ mod tests {
             "stream": true,
             "messages": [{"role": "user", "content": "Hi"}]
         });
-        let ir = parse_request(body).unwrap();
+        let ir = parse_request(body, &default_settings()).unwrap();
         assert!(ir.stream);
     }
 
     #[test]
     fn request_missing_messages_is_error() {
         let body = json!({"model": "m", "max_tokens": 1});
-        assert!(parse_request(body).is_err());
+        assert!(parse_request(body, &default_settings()).is_err());
     }
 
     #[test]
@@ -799,7 +835,7 @@ mod tests {
             }]
         });
         // Should parse without error; cache_control is not part of IRContentBlock.
-        let ir = parse_request(body).unwrap();
+        let ir = parse_request(body, &default_settings()).unwrap();
         assert!(
             matches!(&ir.messages[0].content[0], IRContentBlock::Text { text } if text == "Hello")
         );
@@ -1109,7 +1145,7 @@ mod tests {
             "max_tokens": 1024,
             "messages": [{"role": "user", "content": "Hello"}]
         });
-        let ir = adapter.request_to_ir(body).unwrap();
+        let ir = adapter.request_to_ir(body, &default_ctx()).unwrap();
         assert_eq!(ir.model, "claude-sonnet-4-20250514");
     }
 

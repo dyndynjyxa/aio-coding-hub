@@ -57,6 +57,17 @@ pub(crate) struct SettingsUpdate {
     pub wsl_custom_host_address: Option<String>,
     pub codex_home_mode: Option<settings::CodexHomeMode>,
     pub codex_home_override: Option<String>,
+    pub cx2cc_fallback_model_opus: Option<String>,
+    pub cx2cc_fallback_model_sonnet: Option<String>,
+    pub cx2cc_fallback_model_haiku: Option<String>,
+    pub cx2cc_fallback_model_main: Option<String>,
+    pub cx2cc_model_reasoning_effort: Option<String>,
+    pub cx2cc_service_tier: Option<String>,
+    pub cx2cc_disable_response_storage: Option<bool>,
+    pub cx2cc_enable_reasoning_to_thinking: Option<bool>,
+    pub cx2cc_drop_stop_sequences: Option<bool>,
+    pub cx2cc_clean_schema: Option<bool>,
+    pub cx2cc_filter_batch_tool: Option<bool>,
 }
 
 #[tauri::command]
@@ -73,7 +84,35 @@ pub(crate) async fn settings_set(
     app: tauri::AppHandle,
     update: SettingsUpdate,
 ) -> Result<settings::AppSettings, String> {
-    settings_set_impl(app, update).await
+    #[cfg(windows)]
+    let wsl_auto_config = update.wsl_auto_config;
+    #[cfg(windows)]
+    let has_wsl_field_update = update.gateway_listen_mode.is_some()
+        || update.gateway_custom_listen_address.is_some()
+        || update.wsl_target_cli.is_some()
+        || update.wsl_host_address_mode.is_some()
+        || update.wsl_custom_host_address.is_some()
+        || update.codex_home_mode.is_some()
+        || update.codex_home_override.is_some();
+
+    let result = settings_set_impl(app.clone(), update).await?;
+
+    #[cfg(windows)]
+    {
+        let should_sync = result.wsl_auto_config
+            && result.gateway_listen_mode != settings::GatewayListenMode::Localhost
+            && (wsl_auto_config == Some(true) || has_wsl_field_update);
+
+        if should_sync {
+            tauri::async_runtime::spawn(async move {
+                if let Err(err) = wsl_auto_sync_after_settings(&app).await {
+                    tracing::warn!("WSL auto-sync after settings change failed: {}", err);
+                }
+            });
+        }
+    }
+
+    Ok(result)
 }
 
 pub(crate) async fn settings_set_impl<R: tauri::Runtime>(
@@ -120,19 +159,18 @@ pub(crate) async fn settings_set_impl<R: tauri::Runtime>(
         wsl_custom_host_address,
         codex_home_mode,
         codex_home_override,
+        cx2cc_fallback_model_opus,
+        cx2cc_fallback_model_sonnet,
+        cx2cc_fallback_model_haiku,
+        cx2cc_fallback_model_main,
+        cx2cc_model_reasoning_effort,
+        cx2cc_service_tier,
+        cx2cc_disable_response_storage,
+        cx2cc_enable_reasoning_to_thinking,
+        cx2cc_drop_stop_sequences,
+        cx2cc_clean_schema,
+        cx2cc_filter_batch_tool,
     } = update;
-
-    // Capture WSL-related update flags before values are moved into the closure
-    #[cfg(windows)]
-    let wsl_auto_config_update = wsl_auto_config;
-    #[cfg(windows)]
-    let has_wsl_field_update = gateway_listen_mode.is_some()
-        || gateway_custom_listen_address.is_some()
-        || wsl_target_cli.is_some()
-        || wsl_host_address_mode.is_some()
-        || wsl_custom_host_address.is_some()
-        || codex_home_mode.is_some()
-        || codex_home_override.is_some();
 
     let app_for_work = app.clone();
     let next_settings = blocking::run(
@@ -167,6 +205,46 @@ pub(crate) async fn settings_set_impl<R: tauri::Runtime>(
                 .unwrap_or(previous.codex_home_override)
                 .trim()
                 .to_string();
+            let cx2cc_fallback_model_opus = cx2cc_fallback_model_opus
+                .unwrap_or(previous.cx2cc_fallback_model_opus)
+                .trim()
+                .to_string();
+            if cx2cc_fallback_model_opus.is_empty() {
+                return Err("cx2cc_fallback_model_opus cannot be empty".into());
+            }
+            let cx2cc_fallback_model_sonnet = cx2cc_fallback_model_sonnet
+                .unwrap_or(previous.cx2cc_fallback_model_sonnet)
+                .trim()
+                .to_string();
+            if cx2cc_fallback_model_sonnet.is_empty() {
+                return Err("cx2cc_fallback_model_sonnet cannot be empty".into());
+            }
+            let cx2cc_fallback_model_haiku = cx2cc_fallback_model_haiku
+                .unwrap_or(previous.cx2cc_fallback_model_haiku)
+                .trim()
+                .to_string();
+            if cx2cc_fallback_model_haiku.is_empty() {
+                return Err("cx2cc_fallback_model_haiku cannot be empty".into());
+            }
+            let cx2cc_fallback_model_main = cx2cc_fallback_model_main
+                .unwrap_or(previous.cx2cc_fallback_model_main)
+                .trim()
+                .to_string();
+            if cx2cc_fallback_model_main.is_empty() {
+                return Err("cx2cc_fallback_model_main cannot be empty".into());
+            }
+            let cx2cc_model_reasoning_effort =
+                cx2cc_model_reasoning_effort.unwrap_or(previous.cx2cc_model_reasoning_effort);
+            let cx2cc_service_tier = cx2cc_service_tier.unwrap_or(previous.cx2cc_service_tier);
+            let cx2cc_disable_response_storage =
+                cx2cc_disable_response_storage.unwrap_or(previous.cx2cc_disable_response_storage);
+            let cx2cc_enable_reasoning_to_thinking = cx2cc_enable_reasoning_to_thinking
+                .unwrap_or(previous.cx2cc_enable_reasoning_to_thinking);
+            let cx2cc_drop_stop_sequences =
+                cx2cc_drop_stop_sequences.unwrap_or(previous.cx2cc_drop_stop_sequences);
+            let cx2cc_clean_schema = cx2cc_clean_schema.unwrap_or(previous.cx2cc_clean_schema);
+            let cx2cc_filter_batch_tool =
+                cx2cc_filter_batch_tool.unwrap_or(previous.cx2cc_filter_batch_tool);
             let provider_base_url_ping_cache_ttl_seconds = provider_base_url_ping_cache_ttl_seconds
                 .unwrap_or(previous.provider_base_url_ping_cache_ttl_seconds);
             let upstream_first_byte_timeout_seconds = upstream_first_byte_timeout_seconds
@@ -275,6 +353,17 @@ pub(crate) async fn settings_set_impl<R: tauri::Runtime>(
                 response_fixer_fix_truncated_json,
                 response_fixer_max_json_depth: previous.response_fixer_max_json_depth,
                 response_fixer_max_fix_size: previous.response_fixer_max_fix_size,
+                cx2cc_fallback_model_opus,
+                cx2cc_fallback_model_sonnet,
+                cx2cc_fallback_model_haiku,
+                cx2cc_fallback_model_main,
+                cx2cc_model_reasoning_effort,
+                cx2cc_service_tier,
+                cx2cc_disable_response_storage,
+                cx2cc_enable_reasoning_to_thinking,
+                cx2cc_drop_stop_sequences,
+                cx2cc_clean_schema,
+                cx2cc_filter_batch_tool,
             };
 
             let next_settings = settings::write(&app_for_work, &settings)?;
@@ -285,23 +374,6 @@ pub(crate) async fn settings_set_impl<R: tauri::Runtime>(
 
     app.state::<resident::ResidentState>()
         .set_tray_enabled(next_settings.tray_enabled);
-
-    // Trigger WSL auto-sync when wsl_auto_config is enabled and relevant fields changed
-    #[cfg(windows)]
-    {
-        let should_sync = next_settings.wsl_auto_config
-            && next_settings.gateway_listen_mode != settings::GatewayListenMode::Localhost
-            && (wsl_auto_config_update == Some(true) || has_wsl_field_update);
-
-        if should_sync {
-            let sync_app = app.clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(err) = wsl_auto_sync_after_settings(&sync_app).await {
-                    tracing::warn!("WSL auto-sync after settings change failed: {}", err);
-                }
-            });
-        }
-    }
 
     tracing::info!(
         preferred_port = next_settings.preferred_port,

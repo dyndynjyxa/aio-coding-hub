@@ -12,6 +12,7 @@ mod tests {
     fn cx2cc_ctx() -> BridgeContext {
         BridgeContext {
             claude_models: crate::domain::providers::ClaudeModels::default(),
+            cx2cc_settings: crate::gateway::proxy::cx2cc::settings::Cx2ccSettings::default(),
             requested_model: Some("claude-sonnet-4-20250514".into()),
             mapped_model: None,
             stream_requested: false,
@@ -57,10 +58,10 @@ mod tests {
 
         let translated = bridge.translate_request(anthropic_req, &ctx).unwrap();
 
-        // Model should be mapped from claude-sonnet to gpt-4.1
+        // Model should be mapped from claude-sonnet to the runtime fallback.
         assert_eq!(
             translated.body.get("model").unwrap().as_str().unwrap(),
-            "gpt-4.1"
+            "gpt-5.4"
         );
         // Path should be /v1/responses
         assert_eq!(translated.target_path, "/v1/responses");
@@ -555,7 +556,7 @@ mod tests {
         });
 
         let translated = bridge.translate_request(req, &ctx).unwrap();
-        assert_eq!(translated.body["model"], "o3");
+        assert_eq!(translated.body["model"], "gpt-5.4");
     }
 
     #[test]
@@ -573,7 +574,7 @@ mod tests {
         });
 
         let translated = bridge.translate_request(req, &ctx).unwrap();
-        assert_eq!(translated.body["model"], "gpt-4.1-mini");
+        assert_eq!(translated.body["model"], "gpt-5.4");
     }
 
     // ── BridgeStream integration ────────────────────────────────────────
@@ -603,7 +604,12 @@ mod tests {
         impl Unpin for MockStream {}
 
         let data = Bytes::from("event: response.created\ndata: {}\n\n");
-        let stream = BridgeStream::for_cx2cc(MockStream(vec![data.clone()]), false, None);
+        let stream = BridgeStream::for_cx2cc(
+            MockStream(vec![data.clone()]),
+            false,
+            None,
+            crate::gateway::proxy::cx2cc::settings::Cx2ccSettings::default(),
+        );
 
         // When inactive, should pass through unchanged — verify via direct poll
         let waker = std::task::Waker::from(std::sync::Arc::new(NoopWaker));

@@ -11,7 +11,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
-import { type ClaudeSettingsPatch, type CodexConfigPatch } from "../services/cliManager";
+import {
+  type ClaudeSettingsPatch,
+  type CodexConfigPatch,
+  type GeminiConfigPatch,
+} from "../services/cliManager";
 import { cliProxyRebindCodexHome, cliProxyStatusAll } from "../services/cliProxy";
 import { logToConsole } from "../services/consoleLog";
 import { type GatewayRectifierSettingsPatch } from "../services/settingsGatewayRectifier";
@@ -37,6 +41,7 @@ import {
   useSettingsQuery,
   useSettingsSetMutation,
 } from "../query/settings";
+import { useProvidersListQuery } from "../query/providers";
 import {
   useCliManagerClaudeInfoQuery,
   useCliManagerClaudeSettingsQuery,
@@ -46,6 +51,8 @@ import {
   useCliManagerCodexConfigTomlQuery,
   useCliManagerCodexConfigTomlSetMutation,
   useCliManagerCodexInfoQuery,
+  useCliManagerGeminiConfigQuery,
+  useCliManagerGeminiConfigSetMutation,
   useCliManagerGeminiInfoQuery,
 } from "../query/cliManager";
 import { cliProxyKeys } from "../query/keys";
@@ -54,12 +61,13 @@ import { CliManagerGeneralTab } from "../components/cli-manager/tabs/GeneralTab"
 import { PageHeader } from "../ui/PageHeader";
 import { TabList } from "../ui/TabList";
 
-type TabKey = "general" | "claude" | "codex" | "gemini";
+type TabKey = "general" | "claude" | "codex" | "cx2cc" | "gemini";
 
 const TABS: Array<{ key: TabKey; label: string }> = [
   { key: "general", label: "通用" },
   { key: "claude", label: "Claude Code" },
   { key: "codex", label: "Codex" },
+  { key: "cx2cc", label: "CX2CC" },
   { key: "gemini", label: "Gemini" },
 ];
 
@@ -86,6 +94,12 @@ const LazyClaudeTab = lazy(() =>
 const LazyCodexTab = lazy(() =>
   import("../components/cli-manager/tabs/CodexTab").then((m) => ({
     default: m.CliManagerCodexTab,
+  }))
+);
+
+const LazyCx2ccTab = lazy(() =>
+  import("../components/cli-manager/tabs/Cx2ccTab").then((m) => ({
+    default: m.CliManagerCx2ccTab,
   }))
 );
 
@@ -147,9 +161,11 @@ export function CliManagerPage() {
   const claudeInfoQuery = useCliManagerClaudeInfoQuery({ enabled: tab === "claude" });
   const claudeSettingsQuery = useCliManagerClaudeSettingsQuery({ enabled: tab === "claude" });
   const claudeSettingsSetMutation = useCliManagerClaudeSettingsSetMutation();
+  const claudeProvidersQuery = useProvidersListQuery("claude", { enabled: tab === "claude" });
 
   const claudeInfo = claudeInfoQuery.data ?? null;
   const claudeSettings = claudeSettingsQuery.data ?? null;
+  const claudeProviders = claudeProvidersQuery.data ?? null;
   const claudeAvailable: "checking" | "available" | "unavailable" =
     claudeInfoQuery.isFetching && !claudeInfo
       ? "checking"
@@ -178,7 +194,10 @@ export function CliManagerPage() {
   const codexConfigTomlSaving = codexConfigTomlSetMutation.isPending;
 
   const geminiInfoQuery = useCliManagerGeminiInfoQuery({ enabled: tab === "gemini" });
+  const geminiConfigQuery = useCliManagerGeminiConfigQuery({ enabled: tab === "gemini" });
+  const geminiConfigSetMutation = useCliManagerGeminiConfigSetMutation();
   const geminiInfo = geminiInfoQuery.data ?? null;
+  const geminiConfig = geminiConfigQuery.data ?? null;
   const geminiAvailable: "checking" | "available" | "unavailable" =
     geminiInfoQuery.isFetching && !geminiInfo
       ? "checking"
@@ -186,6 +205,8 @@ export function CliManagerPage() {
         ? "available"
         : "unavailable";
   const geminiLoading = geminiInfoQuery.isFetching;
+  const geminiConfigLoading = geminiConfigQuery.isFetching;
+  const geminiConfigSaving = geminiConfigSetMutation.isPending;
 
   useEffect(() => {
     if (!appSettings) return;
@@ -421,6 +442,17 @@ export function CliManagerPage() {
         wslTargetCli: next.wsl_target_cli,
         codexHomeMode: next.codex_home_mode,
         codexHomeOverride: next.codex_home_override,
+        cx2ccFallbackModelOpus: next.cx2cc_fallback_model_opus,
+        cx2ccFallbackModelSonnet: next.cx2cc_fallback_model_sonnet,
+        cx2ccFallbackModelHaiku: next.cx2cc_fallback_model_haiku,
+        cx2ccFallbackModelMain: next.cx2cc_fallback_model_main,
+        cx2ccModelReasoningEffort: next.cx2cc_model_reasoning_effort,
+        cx2ccServiceTier: next.cx2cc_service_tier,
+        cx2ccDisableResponseStorage: next.cx2cc_disable_response_storage,
+        cx2ccEnableReasoningToThinking: next.cx2cc_enable_reasoning_to_thinking,
+        cx2ccDropStopSequences: next.cx2cc_drop_stop_sequences,
+        cx2ccCleanSchema: next.cx2cc_clean_schema,
+        cx2ccFilterBatchTool: next.cx2cc_filter_batch_tool,
       });
 
       if (!updated) {
@@ -467,7 +499,28 @@ export function CliManagerPage() {
   }
 
   async function refreshGeminiInfo() {
-    await geminiInfoQuery.refetch();
+    await Promise.all([geminiInfoQuery.refetch(), geminiConfigQuery.refetch()]);
+  }
+
+  async function persistGeminiConfig(patch: GeminiConfigPatch) {
+    if (geminiConfigSaving) return;
+    if (geminiAvailable !== "available") return;
+
+    try {
+      const updated = await geminiConfigSetMutation.mutateAsync(patch);
+      if (!updated) {
+        return;
+      }
+      toast("已更新 Gemini 配置");
+    } catch (err) {
+      const formatted = formatActionFailureToast("更新 Gemini 配置", err);
+      logToConsole("error", "更新 Gemini 配置失败", {
+        error: formatted.raw,
+        error_code: formatted.error_code ?? undefined,
+        patch,
+      });
+      toast(formatted.toast);
+    }
   }
 
   async function repairCodexProxyAfterCodexHomeChange() {
@@ -718,6 +771,7 @@ export function CliManagerPage() {
               claudeSettingsLoading={claudeSettingsLoading}
               claudeSettingsSaving={claudeSettingsSaving}
               claudeSettings={claudeSettings}
+              providers={claudeProviders}
               refreshClaude={refreshClaude}
               openClaudeConfigDir={openClaudeConfigDir}
               persistClaudeSettings={persistClaudeSettings}
@@ -749,13 +803,27 @@ export function CliManagerPage() {
           </Suspense>
         ) : null}
 
+        {tab === "cx2cc" ? (
+          <Suspense fallback={TAB_FALLBACK}>
+            <LazyCx2ccTab
+              appSettings={appSettings}
+              commonSettingsSaving={commonSettingsSaving}
+              onPersistCommonSettings={persistCommonSettings}
+            />
+          </Suspense>
+        ) : null}
+
         {tab === "gemini" ? (
           <Suspense fallback={TAB_FALLBACK}>
             <LazyGeminiTab
               geminiAvailable={geminiAvailable}
               geminiLoading={geminiLoading}
               geminiInfo={geminiInfo}
+              geminiConfigLoading={geminiConfigLoading}
+              geminiConfigSaving={geminiConfigSaving}
+              geminiConfig={geminiConfig}
               refreshGeminiInfo={refreshGeminiInfo}
+              persistGeminiConfig={persistGeminiConfig}
             />
           </Suspense>
         ) : null}

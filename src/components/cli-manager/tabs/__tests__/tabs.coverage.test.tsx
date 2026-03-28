@@ -4,6 +4,14 @@ import { CliManagerClaudeTab } from "../ClaudeTab";
 import { CliManagerCodexTab } from "../CodexTab";
 import { CliManagerGeminiTab } from "../GeminiTab";
 
+vi.mock("../../CliVersionBadge", () => ({
+  CliVersionBadge: ({ cliKey }: { cliKey: string }) => <div>version-badge-{cliKey}</div>,
+}));
+
+vi.mock("../ClaudeOAuthCard", () => ({
+  ClaudeOAuthCard: () => <div>claude-oauth-card</div>,
+}));
+
 describe("cli-manager tabs (coverage)", () => {
   it("renders ClaudeTab (available)", () => {
     render(
@@ -56,6 +64,7 @@ describe("cli-manager tabs (coverage)", () => {
           env_claude_code_proxy_resolves_hosts: false,
           env_claude_code_skip_prompt_history: false,
         }}
+        providers={null}
         refreshClaude={vi.fn()}
         openClaudeConfigDir={vi.fn()}
         persistClaudeSettings={vi.fn()}
@@ -132,8 +141,12 @@ describe("cli-manager tabs (coverage)", () => {
       <CliManagerGeminiTab
         geminiAvailable="unavailable"
         geminiLoading={false}
+        geminiConfigLoading={false}
+        geminiConfigSaving={false}
         geminiInfo={null}
+        geminiConfig={null}
         refreshGeminiInfo={vi.fn()}
+        persistGeminiConfig={vi.fn()}
       />
     );
 

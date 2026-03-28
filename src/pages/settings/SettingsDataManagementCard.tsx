@@ -15,6 +15,9 @@ export function SettingsDataManagementCard({
   openAppDataDir,
   openClearRequestLogsDialog,
   openResetAllDialog,
+  onExportConfig,
+  onImportConfig,
+  exportingConfig,
 }: {
   about: AppAboutInfo | null;
   dbDiskUsageAvailable: AvailableStatus;
@@ -23,6 +26,9 @@ export function SettingsDataManagementCard({
   openAppDataDir: () => Promise<void>;
   openClearRequestLogsDialog: () => void;
   openResetAllDialog: () => void;
+  onExportConfig: () => Promise<void>;
+  onImportConfig: () => void;
+  exportingConfig: boolean;
 }) {
   return (
     <Card>
@@ -70,6 +76,24 @@ export function SettingsDataManagementCard({
           <span className="text-xs text-rose-700">不可撤销</span>
           <Button onClick={openResetAllDialog} variant="danger" size="sm" disabled={!about}>
             清理
+          </Button>
+        </SettingsRow>
+        <SettingsRow label="导出配置" subtitle="导出所有供应商、工作区、提示词、MCP 服务器等配置">
+          <span className="text-xs text-amber-700 dark:text-amber-400">
+            ⚠️ 导出文件包含 API Key 等敏感信息，请妥善保管
+          </span>
+          <Button
+            onClick={() => void onExportConfig()}
+            variant="secondary"
+            size="sm"
+            disabled={!about || exportingConfig}
+          >
+            {exportingConfig ? "导出中…" : "导出配置"}
+          </Button>
+        </SettingsRow>
+        <SettingsRow label="导入配置" subtitle="从导出文件恢复所有配置（将覆盖当前配置）">
+          <Button onClick={onImportConfig} variant="warning" size="sm" disabled={!about}>
+            导入配置
           </Button>
         </SettingsRow>
       </div>

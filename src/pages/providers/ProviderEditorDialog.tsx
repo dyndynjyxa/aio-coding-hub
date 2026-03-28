@@ -954,13 +954,14 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
           </FormField>
         ) : supportsCx2cc ? (
           <FormField label="认证方式" hint="选择后下方表单会相应变化">
-            <TabList<"api_key" | "cx2cc">
+            <TabList<"api_key" | "oauth" | "cx2cc">
               ariaLabel="认证方式"
               items={[
                 { key: "api_key", label: "API 密钥" },
+                { key: "oauth", label: "OAuth" },
                 { key: "cx2cc", label: "CX2CC 转译" },
               ]}
-              value={authMode as "api_key" | "cx2cc"}
+              value={authMode as "api_key" | "oauth" | "cx2cc"}
               onChange={(next) => {
                 setAuthMode(next);
                 setValue("auth_mode", next === "cx2cc" ? "api_key" : next, { shouldDirty: true });

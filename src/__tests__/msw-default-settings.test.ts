@@ -6,7 +6,7 @@ describe("MSW defaults", () => {
     resetMswState();
 
     expect(getSettingsState()).toEqual({
-      schema_version: 25,
+      schema_version: 26,
       preferred_port: 37123,
       show_home_heatmap: true,
       show_home_usage: true,
@@ -50,6 +50,17 @@ describe("MSW defaults", () => {
       response_fixer_fix_truncated_json: true,
       response_fixer_max_json_depth: 200,
       response_fixer_max_fix_size: 1048576,
+      cx2cc_fallback_model_opus: "gpt-5.4",
+      cx2cc_fallback_model_sonnet: "gpt-5.4",
+      cx2cc_fallback_model_haiku: "gpt-5.4",
+      cx2cc_fallback_model_main: "gpt-5.4",
+      cx2cc_model_reasoning_effort: "",
+      cx2cc_service_tier: "",
+      cx2cc_disable_response_storage: true,
+      cx2cc_enable_reasoning_to_thinking: true,
+      cx2cc_drop_stop_sequences: true,
+      cx2cc_clean_schema: true,
+      cx2cc_filter_batch_tool: true,
     });
   });
 });

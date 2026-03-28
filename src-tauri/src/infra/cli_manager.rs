@@ -567,19 +567,18 @@ pub fn claude_info_get(app: &tauri::AppHandle) -> crate::shared::error::AppResul
 }
 
 pub fn codex_info_get(app: &tauri::AppHandle) -> crate::shared::error::AppResult<SimpleCliInfo> {
-    let probe = cli_probe(app, "codex")?;
-    Ok(SimpleCliInfo {
-        found: probe.found,
-        executable_path: probe.executable_path,
-        version: probe.version,
-        error: probe.error,
-        shell: probe.shell,
-        resolved_via: probe.resolved_via,
-    })
+    simple_cli_info_get(app, "codex")
 }
 
 pub fn gemini_info_get(app: &tauri::AppHandle) -> crate::shared::error::AppResult<SimpleCliInfo> {
-    let probe = cli_probe(app, "gemini")?;
+    simple_cli_info_get(app, "gemini")
+}
+
+pub fn simple_cli_info_get(
+    app: &tauri::AppHandle,
+    cmd: &str,
+) -> crate::shared::error::AppResult<SimpleCliInfo> {
+    let probe = cli_probe(app, cmd)?;
     Ok(SimpleCliInfo {
         found: probe.found,
         executable_path: probe.executable_path,

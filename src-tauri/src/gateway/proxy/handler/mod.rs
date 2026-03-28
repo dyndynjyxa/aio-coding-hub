@@ -332,12 +332,13 @@ fn respond_invalid_cli_key_with_spawn(
     respond_early_error_with_spawn(ctx, contract, err, None, session_id, requested_model)
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct HandlerRuntimeSettings {
     verbose_provider_error: bool,
     intercept_warmup: bool,
     enable_thinking_signature_rectifier: bool,
     enable_thinking_budget_rectifier: bool,
+    cx2cc_settings: super::cx2cc::settings::Cx2ccSettings,
     enable_response_fixer: bool,
     response_fixer_stream_config: response_fixer::ResponseFixerConfig,
     response_fixer_non_stream_config: response_fixer::ResponseFixerConfig,
@@ -369,6 +370,9 @@ fn handler_runtime_settings(
         .map(|cfg| cfg.enable_thinking_budget_rectifier)
         .unwrap_or(true)
         && !is_claude_count_tokens;
+    let cx2cc_settings = settings_cfg
+        .map(super::cx2cc::settings::Cx2ccSettings::from_app_settings)
+        .unwrap_or_default();
 
     let enable_response_fixer = settings_cfg
         .map(|cfg| cfg.enable_response_fixer)
@@ -408,6 +412,7 @@ fn handler_runtime_settings(
             .unwrap_or(false),
         enable_thinking_signature_rectifier,
         enable_thinking_budget_rectifier,
+        cx2cc_settings,
         enable_response_fixer,
         response_fixer_stream_config: response_fixer::ResponseFixerConfig {
             fix_encoding: response_fixer_fix_encoding,
@@ -980,6 +985,7 @@ pub(in crate::gateway) async fn proxy_impl(
         enable_thinking_budget_rectifier: runtime_settings.enable_thinking_budget_rectifier,
         enable_claude_metadata_user_id_injection: runtime_settings
             .enable_claude_metadata_user_id_injection,
+        cx2cc_settings: runtime_settings.cx2cc_settings.clone(),
         enable_response_fixer: runtime_settings.enable_response_fixer,
         response_fixer_stream_config: runtime_settings.response_fixer_stream_config,
         response_fixer_non_stream_config: runtime_settings.response_fixer_non_stream_config,
@@ -1128,6 +1134,8 @@ mod tests {
         assert!(runtime.verbose_provider_error);
         assert!(!runtime.intercept_warmup);
         assert!(runtime.enable_thinking_signature_rectifier);
+        assert_eq!(runtime.cx2cc_settings.fallback_model_main, "gpt-5.4");
+        assert!(runtime.cx2cc_settings.disable_response_storage);
         assert!(runtime.enable_response_fixer);
         assert_eq!(
             runtime.provider_base_url_ping_cache_ttl_seconds,
@@ -1149,6 +1157,8 @@ mod tests {
             enable_thinking_signature_rectifier: true,
             failover_max_attempts_per_provider: 9,
             failover_max_providers_to_try: 7,
+            cx2cc_fallback_model_main: "custom-main".to_string(),
+            cx2cc_service_tier: "priority".to_string(),
             ..Default::default()
         };
 
@@ -1157,6 +1167,11 @@ mod tests {
         assert!(!runtime.enable_thinking_signature_rectifier);
         assert_eq!(runtime.max_attempts_per_provider, 1);
         assert_eq!(runtime.max_providers_to_try, 1);
+        assert_eq!(runtime.cx2cc_settings.fallback_model_main, "custom-main");
+        assert_eq!(
+            runtime.cx2cc_settings.service_tier.as_deref(),
+            Some("priority")
+        );
     }
 
     #[test]

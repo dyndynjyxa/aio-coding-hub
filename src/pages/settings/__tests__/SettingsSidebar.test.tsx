@@ -15,7 +15,12 @@ import { useDbDiskUsageQuery, useRequestLogsClearAllMutation } from "../../../qu
 import { appDataDirGet, appDataReset, appExit } from "../../../services/dataManagement";
 import { runBackgroundTask } from "../../../services/backgroundTasks";
 import { logToConsole } from "../../../services/consoleLog";
-import { tauriOpenPath, tauriOpenUrl } from "../../../test/mocks/tauri";
+import {
+  tauriDialogOpen,
+  tauriOpenPath,
+  tauriOpenUrl,
+  tauriReadTextFile,
+} from "../../../test/mocks/tauri";
 import { notifyModelPricesUpdated } from "../../../services/modelPrices";
 import { modelPricesKeys } from "../../../query/keys";
 
@@ -92,6 +97,7 @@ vi.mock("../SettingsDataManagementCard", () => ({
     refreshDbDiskUsage,
     openClearRequestLogsDialog,
     openResetAllDialog,
+    onImportConfig,
   }: any) => (
     <div>
       <button type="button" onClick={() => openAppDataDir()}>
@@ -105,6 +111,9 @@ vi.mock("../SettingsDataManagementCard", () => ({
       </button>
       <button type="button" onClick={() => openResetAllDialog()}>
         open-reset-all
+      </button>
+      <button type="button" onClick={() => onImportConfig()}>
+        import-config
       </button>
     </div>
   ),
@@ -382,5 +391,44 @@ describe("pages/settings/SettingsSidebar", () => {
     notifyModelPricesUpdated();
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: modelPricesKeys.all });
     vi.useRealTimers();
+  });
+
+  it("rejects invalid config import JSON before opening confirm dialog", async () => {
+    vi.mocked(useModelPricesTotalCountQuery).mockReturnValue({ data: 1, isLoading: false } as any);
+    vi.mocked(useModelPricesSyncBasellmMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+    } as any);
+    vi.mocked(useUsageSummaryQuery).mockReturnValue({
+      data: { requests_total: 1 },
+      isLoading: false,
+    } as any);
+    vi.mocked(useDbDiskUsageQuery).mockReturnValue({
+      data: null,
+      isLoading: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useRequestLogsClearAllMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+
+    vi.mocked(tauriDialogOpen).mockResolvedValueOnce("/tmp/invalid-config.json");
+    vi.mocked(tauriReadTextFile).mockResolvedValueOnce(
+      JSON.stringify({
+        schema_version: 1,
+        providers: {},
+        sort_modes: [],
+        workspaces: [],
+        mcp_servers: [],
+        skill_repos: [],
+      }) as any
+    );
+
+    renderWithProviders(<SettingsSidebar updateMeta={createUpdateMeta()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "import-config" }));
+
+    await waitFor(() => expect(tauriReadTextFile).toHaveBeenCalled());
+    expect(toast).toHaveBeenCalledWith("无效的配置文件格式");
+    expect(screen.getByText("clearOpen:false")).toBeInTheDocument();
+    expect(screen.getByText("resetOpen:false")).toBeInTheDocument();
   });
 });

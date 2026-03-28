@@ -91,6 +91,17 @@ export type AppSettings = {
   response_fixer_fix_truncated_json: boolean;
   response_fixer_max_json_depth: number;
   response_fixer_max_fix_size: number;
+  cx2cc_fallback_model_opus: string;
+  cx2cc_fallback_model_sonnet: string;
+  cx2cc_fallback_model_haiku: string;
+  cx2cc_fallback_model_main: string;
+  cx2cc_model_reasoning_effort: string;
+  cx2cc_service_tier: string;
+  cx2cc_disable_response_storage: boolean;
+  cx2cc_enable_reasoning_to_thinking: boolean;
+  cx2cc_drop_stop_sequences: boolean;
+  cx2cc_clean_schema: boolean;
+  cx2cc_filter_batch_tool: boolean;
 };
 export type ClaudeModels = {
   main_model?: string | null;
@@ -201,6 +212,17 @@ export type SettingsUpdate = {
   wslCustomHostAddress: string | null;
   codexHomeMode: CodexHomeMode | null;
   codexHomeOverride: string | null;
+  cx2CcFallbackModelOpus: string | null;
+  cx2CcFallbackModelSonnet: string | null;
+  cx2CcFallbackModelHaiku: string | null;
+  cx2CcFallbackModelMain: string | null;
+  cx2CcModelReasoningEffort: string | null;
+  cx2CcServiceTier: string | null;
+  cx2CcDisableResponseStorage: boolean | null;
+  cx2CcEnableReasoningToThinking: boolean | null;
+  cx2CcDropStopSequences: boolean | null;
+  cx2CcCleanSchema: boolean | null;
+  cx2CcFilterBatchTool: boolean | null;
 };
 export type WslHostAddressMode = "auto" | "custom";
 export type WslTargetCli = { claude: boolean; codex: boolean; gemini: boolean };

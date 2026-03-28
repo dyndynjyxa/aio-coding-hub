@@ -20,6 +20,7 @@ import type { AppSettings, CodexHomeMode } from "../../../services/settings";
 import { normalizeCustomCodexHome, buildConfigTomlPath } from "../../../utils/codexPaths";
 import { isWindowsRuntime } from "../../../utils/platform";
 import { cn } from "../../../utils/cn";
+import { CliVersionBadge } from "../CliVersionBadge";
 import { Button } from "../../../ui/Button";
 import { Card } from "../../../ui/Card";
 import { Input } from "../../../ui/Input";
@@ -593,10 +594,17 @@ export function CliManagerCodexTab({
                   <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">Codex</h2>
                   <div className="flex items-center gap-2 mt-1">
                     {codexAvailable === "available" && codexInfo?.found ? (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 dark:bg-green-900/30 px-2.5 py-0.5 text-xs font-medium text-green-700 dark:text-green-400 ring-1 ring-inset ring-green-600/20">
-                        <CheckCircle2 className="h-3 w-3" />
-                        已安装 {codexInfo.version}
-                      </span>
+                      <>
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 dark:bg-green-900/30 px-2.5 py-0.5 text-xs font-medium text-green-700 dark:text-green-400 ring-1 ring-inset ring-green-600/20">
+                          <CheckCircle2 className="h-3 w-3" />
+                          已安装 {codexInfo.version}
+                        </span>
+                        <CliVersionBadge
+                          cliKey="codex"
+                          installedVersion={codexInfo.version}
+                          onUpdateComplete={refreshCodex}
+                        />
+                      </>
                     ) : codexAvailable === "checking" || loading ? (
                       <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 dark:bg-blue-900/30 px-2.5 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-400 ring-1 ring-inset ring-blue-600/20">
                         <RefreshCw className="h-3 w-3 animate-spin" />

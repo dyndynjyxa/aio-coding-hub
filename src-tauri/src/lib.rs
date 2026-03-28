@@ -14,10 +14,10 @@ pub(crate) use domain::{
 };
 pub(crate) use gateway::session_manager;
 pub(crate) use infra::{
-    app_paths, base_url_probe, claude_settings, cli_manager, cli_proxy, codex_config, codex_paths,
-    data_management, db, env_conflicts, mcp_sync, model_price_aliases, model_prices,
-    model_prices_sync, prompt_sync, provider_circuit_breakers, request_attempt_logs, request_logs,
-    settings, wsl,
+    app_paths, base_url_probe, claude_settings, cli_manager, cli_proxy, cli_update, codex_config,
+    codex_paths, data_management, db, env_conflicts, gemini_config, mcp_sync, model_price_aliases,
+    model_prices, model_prices_sync, prompt_sync, provider_circuit_breakers, request_attempt_logs,
+    request_logs, settings, wsl,
 };
 pub(crate) use shared::{blocking, circuit_breaker};
 
@@ -43,7 +43,8 @@ pub fn run() {
         .manage(crate::app::heartbeat_watchdog::HeartbeatWatchdogState::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_clipboard_manager::init());
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_fs::init());
 
     #[cfg(desktop)]
     let builder = builder
@@ -272,6 +273,8 @@ pub fn run() {
             settings_gateway_rectifier_set,
             settings_circuit_breaker_notice_set,
             settings_codex_session_id_completion_set,
+            config_export,
+            config_import,
             // ── app ──
             app_about_get,
             app_data_dir_get,
@@ -290,9 +293,13 @@ pub fn run() {
             cli_manager_codex_config_toml_validate,
             cli_manager_codex_config_toml_set,
             cli_manager_gemini_info_get,
+            cli_manager_gemini_config_get,
+            cli_manager_gemini_config_set,
             cli_manager_claude_env_set,
             cli_manager_claude_settings_get,
             cli_manager_claude_settings_set,
+            cli_check_latest_version,
+            cli_update,
             // ── gateway ──
             gateway_start,
             gateway_stop,

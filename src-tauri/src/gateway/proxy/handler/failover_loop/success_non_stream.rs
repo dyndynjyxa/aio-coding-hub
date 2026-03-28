@@ -168,6 +168,7 @@ fn translate_cx2cc_non_stream_body(
     cx2cc_active: bool,
     anthropic_stream_requested: bool,
     requested_model: Option<&str>,
+    cx2cc_settings: &crate::gateway::proxy::cx2cc::settings::Cx2ccSettings,
     response_headers: &mut HeaderMap,
     body_bytes: Bytes,
 ) -> Result<Bytes, String> {
@@ -182,6 +183,7 @@ fn translate_cx2cc_non_stream_body(
         .ok_or_else(|| "cx2cc bridge not registered".to_string())?;
     let bridge_ctx = protocol_bridge::BridgeContext {
         claude_models: crate::domain::providers::ClaudeModels::default(),
+        cx2cc_settings: cx2cc_settings.clone(),
         requested_model: requested_model.filter(|m| !m.is_empty()).map(String::from),
         mapped_model: None,
         stream_requested: anthropic_stream_requested,
@@ -675,6 +677,7 @@ pub(super) async fn handle_success_non_stream(
         cx2cc_active,
         anthropic_stream_requested,
         common.requested_model.as_deref(),
+        &common.cx2cc_settings,
         &mut response_headers,
         body_bytes,
     ) {
@@ -985,6 +988,7 @@ mod tests {
             true,
             true,
             None,
+            &crate::gateway::proxy::cx2cc::settings::Cx2ccSettings::default(),
             &mut headers,
             Bytes::from(serde_json::to_vec(&openai_body).unwrap()),
         )
@@ -1036,6 +1040,7 @@ mod tests {
             true,
             true,
             Some("claude-sonnet-4-5"),
+            &crate::gateway::proxy::cx2cc::settings::Cx2ccSettings::default(),
             &mut headers,
             Bytes::from(serde_json::to_vec(&openai_body).unwrap()),
         )
@@ -1080,6 +1085,7 @@ mod tests {
             true,
             true,
             Some("claude-opus-4-6"),
+            &crate::gateway::proxy::cx2cc::settings::Cx2ccSettings::default(),
             &mut headers,
             Bytes::from(serde_json::to_vec(&openai_body).unwrap()),
         )

@@ -19,7 +19,11 @@ pub(crate) trait Inbound: Send + Sync {
     fn protocol(&self) -> &'static str;
 
     /// Parse a client request JSON body into the IR.
-    fn request_to_ir(&self, body: Value) -> Result<InternalRequest, BridgeError>;
+    fn request_to_ir(
+        &self,
+        body: Value,
+        ctx: &BridgeContext,
+    ) -> Result<InternalRequest, BridgeError>;
 
     /// Render an IR response as client-facing JSON (non-stream path).
     fn ir_to_response(
@@ -54,7 +58,11 @@ pub(crate) trait Outbound: Send + Sync {
     ) -> Result<Value, BridgeError>;
 
     /// Parse a provider non-stream JSON response into the IR.
-    fn response_to_ir(&self, body: Value) -> Result<InternalResponse, BridgeError>;
+    fn response_to_ir(
+        &self,
+        body: Value,
+        ctx: &BridgeContext,
+    ) -> Result<InternalResponse, BridgeError>;
 
     /// Parse a single upstream SSE event into zero or more IR stream chunks.
     ///
@@ -89,6 +97,8 @@ pub(crate) trait ModelMapper: Send + Sync {
 pub(crate) struct BridgeContext {
     /// Provider-level model mapping configuration.
     pub claude_models: crate::domain::providers::ClaudeModels,
+    /// CX2CC runtime settings for request/response translation.
+    pub cx2cc_settings: crate::gateway::proxy::cx2cc::settings::Cx2ccSettings,
     /// Original model name from the client request (before mapping).
     pub requested_model: Option<String>,
     /// Model name after mapping (set after `translate_request`).
@@ -100,7 +110,7 @@ pub(crate) struct BridgeContext {
 }
 
 /// Mutable state maintained across SSE events during a single streaming response.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct StreamState {
     /// Monotonically increasing content-block index.
     pub block_index: u32,
@@ -114,8 +124,25 @@ pub(crate) struct StreamState {
     pub text_emitted: bool,
     /// Whether *any* visible text has been emitted in this stream.
     pub saw_visible_text: bool,
+    /// Whether reasoning should be converted into Anthropic thinking blocks.
+    pub enable_reasoning_to_thinking: bool,
     /// Provider-specific extension state.
     pub extra: HashMap<String, Value>,
+}
+
+impl Default for StreamState {
+    fn default() -> Self {
+        Self {
+            block_index: 0,
+            block_open: false,
+            saw_tool_use: false,
+            active_tool: None,
+            text_emitted: false,
+            saw_visible_text: false,
+            enable_reasoning_to_thinking: true,
+            extra: HashMap::new(),
+        }
+    }
 }
 
 /// Identity of the currently active tool-use block during streaming.

@@ -7,6 +7,14 @@ vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
 }));
 
+vi.mock("../../CliVersionBadge", () => ({
+  CliVersionBadge: ({ cliKey }: { cliKey: string }) => <div>version-badge-{cliKey}</div>,
+}));
+
+vi.mock("../ClaudeOAuthCard", () => ({
+  ClaudeOAuthCard: () => <div>claude-oauth-card</div>,
+}));
+
 function createClaudeInfo(overrides: Partial<any> = {}) {
   return {
     found: true,
@@ -69,6 +77,7 @@ describe("components/cli-manager/tabs/ClaudeTab", () => {
         claudeSettingsLoading={false}
         claudeSettingsSaving={false}
         claudeSettings={null}
+        providers={null}
         refreshClaude={vi.fn()}
         openClaudeConfigDir={vi.fn()}
         persistClaudeSettings={vi.fn()}
@@ -90,6 +99,7 @@ describe("components/cli-manager/tabs/ClaudeTab", () => {
         claudeSettingsLoading={false}
         claudeSettingsSaving={false}
         claudeSettings={createClaudeSettings()}
+        providers={null}
         refreshClaude={refreshClaude}
         openClaudeConfigDir={openClaudeConfigDir}
         persistClaudeSettings={persistClaudeSettings}
@@ -176,6 +186,7 @@ describe("components/cli-manager/tabs/ClaudeTab", () => {
         claudeSettingsLoading={false}
         claudeSettingsSaving={false}
         claudeSettings={createClaudeSettings({ env_enable_experimental_mcp_cli: true })}
+        providers={null}
         refreshClaude={refreshClaude}
         openClaudeConfigDir={openClaudeConfigDir}
         persistClaudeSettings={persistClaudeSettings}
@@ -195,6 +206,7 @@ describe("components/cli-manager/tabs/ClaudeTab", () => {
         claudeSettingsLoading={false}
         claudeSettingsSaving={false}
         claudeSettings={createClaudeSettings({ env_enable_tool_search: true })}
+        providers={null}
         refreshClaude={refreshClaude}
         openClaudeConfigDir={openClaudeConfigDir}
         persistClaudeSettings={persistClaudeSettings}
@@ -227,6 +239,7 @@ describe("components/cli-manager/tabs/ClaudeTab", () => {
           permissions_ask: [],
           permissions_deny: [],
         })}
+        providers={null}
         refreshClaude={vi.fn()}
         openClaudeConfigDir={vi.fn()}
         persistClaudeSettings={persistClaudeSettings}
@@ -322,6 +335,7 @@ describe("components/cli-manager/tabs/ClaudeTab", () => {
           env_claude_code_max_output_tokens: null,
           env_max_mcp_output_tokens: null,
         })}
+        providers={null}
         refreshClaude={refreshClaude}
         openClaudeConfigDir={openClaudeConfigDir}
         persistClaudeSettings={vi.fn()}
@@ -350,6 +364,7 @@ describe("components/cli-manager/tabs/ClaudeTab", () => {
         claudeSettingsLoading={false}
         claudeSettingsSaving={false}
         claudeSettings={null}
+        providers={null}
         refreshClaude={vi.fn()}
         openClaudeConfigDir={vi.fn()}
         persistClaudeSettings={vi.fn()}

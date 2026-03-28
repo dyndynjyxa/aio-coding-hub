@@ -9,6 +9,8 @@
     "core:window:allow-start-dragging",
     "clipboard-manager:allow-write-text",
     "dialog:default",
+    "fs:allow-read-text-file",
+    "fs:allow-write-text-file",
     "opener:default",
     "updater:default",
     "autostart:default",

@@ -25,6 +25,12 @@ describe("pages/settings/SettingsDialogs", () => {
         resettingAll={false}
         setResettingAll={vi.fn()}
         resetAllData={vi.fn().mockResolvedValue(undefined)}
+        configImportDialogOpen={false}
+        setConfigImportDialogOpen={vi.fn()}
+        importingConfig={false}
+        setImportingConfig={vi.fn()}
+        pendingConfigBundle={null}
+        confirmConfigImport={vi.fn().mockResolvedValue(undefined)}
       />
     );
 
@@ -52,6 +58,12 @@ describe("pages/settings/SettingsDialogs", () => {
         resettingAll={false}
         setResettingAll={vi.fn()}
         resetAllData={vi.fn().mockResolvedValue(undefined)}
+        configImportDialogOpen={false}
+        setConfigImportDialogOpen={vi.fn()}
+        importingConfig={false}
+        setImportingConfig={vi.fn()}
+        pendingConfigBundle={null}
+        confirmConfigImport={vi.fn().mockResolvedValue(undefined)}
       />
     );
 
@@ -79,6 +91,12 @@ describe("pages/settings/SettingsDialogs", () => {
         resettingAll={true}
         setResettingAll={setResetting}
         resetAllData={vi.fn().mockResolvedValue(undefined)}
+        configImportDialogOpen={false}
+        setConfigImportDialogOpen={vi.fn()}
+        importingConfig={false}
+        setImportingConfig={vi.fn()}
+        pendingConfigBundle={null}
+        confirmConfigImport={vi.fn().mockResolvedValue(undefined)}
       />
     );
 
@@ -106,6 +124,12 @@ describe("pages/settings/SettingsDialogs", () => {
         resettingAll={false}
         setResettingAll={setResetting}
         resetAllData={vi.fn().mockResolvedValue(undefined)}
+        configImportDialogOpen={false}
+        setConfigImportDialogOpen={vi.fn()}
+        importingConfig={false}
+        setImportingConfig={vi.fn()}
+        pendingConfigBundle={null}
+        confirmConfigImport={vi.fn().mockResolvedValue(undefined)}
       />
     );
 

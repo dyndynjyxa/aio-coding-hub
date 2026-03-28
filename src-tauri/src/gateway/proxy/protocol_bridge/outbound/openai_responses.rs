@@ -4,6 +4,7 @@
 //! OpenAI Responses API responses (both non-streaming and SSE) back
 //! into IR types.
 
+use crate::gateway::proxy::cx2cc::settings::Cx2ccSettings;
 use crate::gateway::proxy::protocol_bridge::ir::*;
 use crate::gateway::proxy::protocol_bridge::traits::*;
 use serde_json::{json, Value};
@@ -23,13 +24,17 @@ impl Outbound for OpenAIResponsesOutbound {
     fn ir_to_request(
         &self,
         ir: &InternalRequest,
-        _ctx: &BridgeContext,
+        ctx: &BridgeContext,
     ) -> Result<Value, BridgeError> {
-        ir_to_request(ir)
+        ir_to_request(ir, &ctx.cx2cc_settings)
     }
 
-    fn response_to_ir(&self, body: Value) -> Result<InternalResponse, BridgeError> {
-        response_to_ir(body)
+    fn response_to_ir(
+        &self,
+        body: Value,
+        ctx: &BridgeContext,
+    ) -> Result<InternalResponse, BridgeError> {
+        response_to_ir(body, &ctx.cx2cc_settings)
     }
 
     fn sse_event_to_ir(
@@ -46,7 +51,7 @@ impl Outbound for OpenAIResponsesOutbound {
 // ir_to_request
 // ---------------------------------------------------------------------------
 
-fn ir_to_request(ir: &InternalRequest) -> Result<Value, BridgeError> {
+fn ir_to_request(ir: &InternalRequest, settings: &Cx2ccSettings) -> Result<Value, BridgeError> {
     let mut result = json!({});
 
     result["model"] = json!(ir.model);
@@ -138,11 +143,14 @@ fn ir_to_request(ir: &InternalRequest) -> Result<Value, BridgeError> {
     }
     result["stream"] = json!(ir.stream);
 
-    // stop_sequences dropped -- Responses API does not support it
     if !ir.stop_sequences.is_empty() {
-        tracing::debug!(
-            "openai_responses outbound: dropping stop_sequences (not supported by Responses API)"
-        );
+        if settings.drop_stop_sequences {
+            tracing::debug!(
+                "openai_responses outbound: dropping stop_sequences (not supported by Responses API)"
+            );
+        } else {
+            result["stop"] = json!(ir.stop_sequences);
+        }
     }
 
     // tools
@@ -152,7 +160,9 @@ fn ir_to_request(ir: &InternalRequest) -> Result<Value, BridgeError> {
             .iter()
             .map(|t| {
                 let mut params = t.parameters.clone();
-                clean_schema(&mut params);
+                if settings.clean_schema {
+                    clean_schema(&mut params);
+                }
                 json!({
                     "type": "function",
                     "name": t.name,
@@ -194,7 +204,7 @@ fn input_items_push(input: &mut Vec<Value>, role: &str, content: &mut Vec<Value>
 // response_to_ir
 // ---------------------------------------------------------------------------
 
-fn response_to_ir(body: Value) -> Result<InternalResponse, BridgeError> {
+fn response_to_ir(body: Value, settings: &Cx2ccSettings) -> Result<InternalResponse, BridgeError> {
     let output = body
         .get("output")
         .and_then(|o| o.as_array())
@@ -270,19 +280,8 @@ fn response_to_ir(body: Value) -> Result<InternalResponse, BridgeError> {
             }
 
             "reasoning" => {
-                if let Some(summary) = item.get("summary").and_then(|s| s.as_array()) {
-                    let text: String = summary
-                        .iter()
-                        .filter_map(|s| {
-                            if s.get("type").and_then(|t| t.as_str()) == Some("summary_text") {
-                                s.get("text").and_then(|t| t.as_str())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    if !text.is_empty() {
+                if settings.enable_reasoning_to_thinking {
+                    if let Some(text) = reasoning_text_from_item(item) {
                         content.push(IRContentBlock::Thinking { thinking: text });
                     }
                 }
@@ -393,6 +392,41 @@ fn parse_usage(usage: Option<&Value>) -> IRUsage {
         cache_creation_1h_input_tokens,
         cache_read_input_tokens,
     }
+}
+
+fn reasoning_text_from_item(item: &Value) -> Option<String> {
+    let summary = item.get("summary").and_then(Value::as_array)?;
+    let text = summary
+        .iter()
+        .filter_map(|entry| {
+            if entry.get("type").and_then(Value::as_str) == Some("summary_text") {
+                entry.get("text").and_then(Value::as_str)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+fn reasoning_emitted(state: &StreamState) -> bool {
+    state
+        .extra
+        .get("reasoning_emitted")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn mark_reasoning_emitted(state: &mut StreamState) {
+    state
+        .extra
+        .insert("reasoning_emitted".to_string(), Value::Bool(true));
 }
 
 // ---------------------------------------------------------------------------
@@ -521,10 +555,13 @@ fn handle_text_delta(
     state.text_emitted = true;
     state.saw_visible_text = true;
 
-    Ok(vec![IRStreamChunk::ContentBlockDelta {
+    let mut chunks = open_text_block_if_needed(state);
+    chunks.push(IRStreamChunk::ContentBlockDelta {
         index: state.block_index.saturating_sub(1),
         delta: IRDelta::TextDelta { text },
-    }])
+    });
+
+    Ok(chunks)
 }
 
 fn handle_function_args_delta(
@@ -543,6 +580,71 @@ fn handle_function_args_delta(
         index: idx,
         delta: IRDelta::InputJsonDelta { partial_json },
     }])
+}
+
+fn emit_reasoning_chunks(
+    state: &mut StreamState,
+    thinking: &str,
+    reopen_text_block: bool,
+) -> Vec<IRStreamChunk> {
+    if !state.enable_reasoning_to_thinking || thinking.trim().is_empty() {
+        return Vec::new();
+    }
+
+    let mut chunks = Vec::new();
+
+    if state.block_open {
+        chunks.push(IRStreamChunk::ContentBlockStop {
+            index: state.block_index.saturating_sub(1),
+        });
+        state.block_open = false;
+        state.text_emitted = false;
+    }
+
+    let reasoning_index = state.block_index;
+    state.block_index += 1;
+    chunks.push(IRStreamChunk::ContentBlockStart {
+        index: reasoning_index,
+        block_type: IRBlockType::Thinking,
+    });
+    chunks.push(IRStreamChunk::ContentBlockDelta {
+        index: reasoning_index,
+        delta: IRDelta::ThinkingDelta {
+            thinking: thinking.to_string(),
+        },
+    });
+    chunks.push(IRStreamChunk::ContentBlockStop {
+        index: reasoning_index,
+    });
+    mark_reasoning_emitted(state);
+
+    if reopen_text_block {
+        let text_index = state.block_index;
+        state.block_index += 1;
+        state.block_open = true;
+        chunks.push(IRStreamChunk::ContentBlockStart {
+            index: text_index,
+            block_type: IRBlockType::Text,
+        });
+    }
+
+    chunks
+}
+
+fn open_text_block_if_needed(state: &mut StreamState) -> Vec<IRStreamChunk> {
+    if state.block_open {
+        return Vec::new();
+    }
+
+    let index = state.block_index;
+    state.block_index += 1;
+    state.block_open = true;
+    state.text_emitted = false;
+
+    vec![IRStreamChunk::ContentBlockStart {
+        index,
+        block_type: IRBlockType::Text,
+    }]
 }
 
 fn handle_output_item_done(
@@ -575,6 +677,13 @@ fn handle_output_item_done(
         }
     }
 
+    if item_type == "reasoning" {
+        if let Some(thinking) = reasoning_text_from_item(item) {
+            chunks.extend(emit_reasoning_chunks(state, &thinking, true));
+        }
+        return Ok(chunks);
+    }
+
     // For message type: emit fallback text if not already emitted
     if item_type == "message" && !state.text_emitted {
         if let Some(blocks) = item.get("content").and_then(|c| c.as_array()) {
@@ -584,6 +693,7 @@ fn handle_output_item_done(
                         if let Some(text) = block.get("text").and_then(Value::as_str) {
                             let text = text.trim();
                             if !text.is_empty() {
+                                chunks.extend(open_text_block_if_needed(state));
                                 state.text_emitted = true;
                                 state.saw_visible_text = true;
                                 chunks.push(IRStreamChunk::ContentBlockDelta {
@@ -599,6 +709,7 @@ fn handle_output_item_done(
                         if let Some(text) = block.get("refusal").and_then(Value::as_str) {
                             let text = text.trim();
                             if !text.is_empty() {
+                                chunks.extend(open_text_block_if_needed(state));
                                 state.text_emitted = true;
                                 state.saw_visible_text = true;
                                 chunks.push(IRStreamChunk::ContentBlockDelta {
@@ -627,6 +738,19 @@ fn handle_response_completed(
 
     let mut chunks = Vec::new();
 
+    if state.enable_reasoning_to_thinking && !reasoning_emitted(state) {
+        if let Some(items) = response.get("output").and_then(Value::as_array) {
+            for item in items {
+                if item.get("type").and_then(Value::as_str) != Some("reasoning") {
+                    continue;
+                }
+                if let Some(thinking) = reasoning_text_from_item(item) {
+                    chunks.extend(emit_reasoning_chunks(state, &thinking, false));
+                }
+            }
+        }
+    }
+
     // Three-layer dedup: emit unemitted text from the completed response
     if !state.saw_visible_text {
         if let Some(items) = response.get("output").and_then(Value::as_array) {
@@ -644,6 +768,7 @@ fn handle_response_completed(
                         if let Some(text) = text {
                             let text = text.trim();
                             if !text.is_empty() {
+                                chunks.extend(open_text_block_if_needed(state));
                                 state.saw_visible_text = true;
                                 state.text_emitted = true;
                                 chunks.push(IRStreamChunk::ContentBlockDelta {
@@ -858,9 +983,14 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn default_settings() -> Cx2ccSettings {
+        Cx2ccSettings::default()
+    }
+
     fn make_ctx() -> BridgeContext {
         BridgeContext {
             claude_models: Default::default(),
+            cx2cc_settings: default_settings(),
             requested_model: None,
             mapped_model: None,
             stream_requested: false,
@@ -925,7 +1055,7 @@ mod tests {
             metadata: IRMetadata::default(),
         };
 
-        let result = ir_to_request(&ir).unwrap();
+        let result = ir_to_request(&ir, &default_settings()).unwrap();
         assert_eq!(result["input"][0]["content"][0]["type"], "output_text");
     }
 
@@ -951,7 +1081,7 @@ mod tests {
             metadata: IRMetadata::default(),
         };
 
-        let result = ir_to_request(&ir).unwrap();
+        let result = ir_to_request(&ir, &default_settings()).unwrap();
         assert_eq!(result["input"][0]["content"][0]["type"], "input_image");
         assert_eq!(
             result["input"][0]["content"][0]["image_url"],
@@ -987,7 +1117,7 @@ mod tests {
             metadata: IRMetadata::default(),
         };
 
-        let result = ir_to_request(&ir).unwrap();
+        let result = ir_to_request(&ir, &default_settings()).unwrap();
         let input = result["input"].as_array().unwrap();
         assert_eq!(input.len(), 2);
         assert_eq!(input[0]["content"][0]["type"], "output_text");
@@ -1019,7 +1149,7 @@ mod tests {
             metadata: IRMetadata::default(),
         };
 
-        let result = ir_to_request(&ir).unwrap();
+        let result = ir_to_request(&ir, &default_settings()).unwrap();
         let input = result["input"].as_array().unwrap();
         assert_eq!(input.len(), 1);
         assert_eq!(input[0]["type"], "function_call_output");
@@ -1053,11 +1183,36 @@ mod tests {
             metadata: IRMetadata::default(),
         };
 
-        let result = ir_to_request(&ir).unwrap();
+        let result = ir_to_request(&ir, &default_settings()).unwrap();
         let input = result["input"].as_array().unwrap();
         // Only the text block should remain (thinking is skipped)
         assert_eq!(input.len(), 1);
         assert_eq!(input[0]["content"][0]["type"], "output_text");
+    }
+
+    #[test]
+    fn ir_to_request_preserves_stop_sequences_when_enabled() {
+        let ir = InternalRequest {
+            model: "gpt-4o".into(),
+            messages: vec![IRMessage {
+                role: IRRole::User,
+                content: vec![IRContentBlock::Text { text: "Hi".into() }],
+            }],
+            system: None,
+            tools: vec![],
+            tool_choice: None,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            stop_sequences: vec!["STOP".into(), "END".into()],
+            stream: false,
+            metadata: IRMetadata::default(),
+        };
+        let mut settings = default_settings();
+        settings.drop_stop_sequences = false;
+
+        let result = ir_to_request(&ir, &settings).unwrap();
+        assert_eq!(result["stop"], json!(["STOP", "END"]));
     }
 
     #[test]
@@ -1088,7 +1243,7 @@ mod tests {
             metadata: IRMetadata::default(),
         };
 
-        let result = ir_to_request(&ir).unwrap();
+        let result = ir_to_request(&ir, &default_settings()).unwrap();
         assert_eq!(result["tools"][0]["type"], "function");
         assert_eq!(result["tools"][0]["name"], "fetch_url");
         assert_eq!(result["tools"][0]["strict"], false);
@@ -1097,6 +1252,43 @@ mod tests {
             .get("format")
             .is_none());
         assert_eq!(result["tool_choice"], "auto");
+    }
+
+    #[test]
+    fn ir_to_request_preserves_schema_when_cleaning_disabled() {
+        let ir = InternalRequest {
+            model: "gpt-4o".into(),
+            messages: vec![IRMessage {
+                role: IRRole::User,
+                content: vec![IRContentBlock::Text { text: "Hi".into() }],
+            }],
+            system: None,
+            tools: vec![IRToolDefinition {
+                name: "fetch_url".into(),
+                description: Some("Fetch a URL".into()),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string", "format": "uri"}
+                    }
+                }),
+            }],
+            tool_choice: None,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            stop_sequences: vec![],
+            stream: false,
+            metadata: IRMetadata::default(),
+        };
+        let mut settings = default_settings();
+        settings.clean_schema = false;
+
+        let result = ir_to_request(&ir, &settings).unwrap();
+        assert_eq!(
+            result["tools"][0]["parameters"]["properties"]["url"]["format"],
+            "uri"
+        );
     }
 
     #[test]
@@ -1115,7 +1307,7 @@ mod tests {
                 stream: false,
                 metadata: IRMetadata::default(),
             };
-            let result = ir_to_request(&ir).unwrap();
+            let result = ir_to_request(&ir, &default_settings()).unwrap();
             assert_eq!(result["tool_choice"], expected);
         };
 
@@ -1142,7 +1334,7 @@ mod tests {
             "usage": {"input_tokens": 10, "output_tokens": 5}
         });
 
-        let ir = response_to_ir(body).unwrap();
+        let ir = response_to_ir(body, &default_settings()).unwrap();
         assert_eq!(ir.id, "resp_1");
         assert_eq!(ir.model, "gpt-4o");
         assert_eq!(ir.stop_reason, IRStopReason::EndTurn);
@@ -1166,7 +1358,7 @@ mod tests {
             "usage": {"input_tokens": 10, "output_tokens": 15}
         });
 
-        let ir = response_to_ir(body).unwrap();
+        let ir = response_to_ir(body, &default_settings()).unwrap();
         assert_eq!(ir.stop_reason, IRStopReason::ToolUse);
         assert!(matches!(
             &ir.content[0],
@@ -1185,7 +1377,7 @@ mod tests {
             "usage": {"input_tokens": 5, "output_tokens": 2}
         });
 
-        let ir = response_to_ir(body).unwrap();
+        let ir = response_to_ir(body, &default_settings()).unwrap();
         assert!(
             matches!(&ir.content[0], IRContentBlock::Text { text } if text == "[Refusal] I cannot do that.")
         );
@@ -1204,11 +1396,31 @@ mod tests {
             "usage": {"input_tokens": 10, "output_tokens": 20}
         });
 
-        let ir = response_to_ir(body).unwrap();
+        let ir = response_to_ir(body, &default_settings()).unwrap();
         assert!(
             matches!(&ir.content[0], IRContentBlock::Thinking { thinking } if thinking == "Thinking...")
         );
         assert!(matches!(&ir.content[1], IRContentBlock::Text { text } if text == "42"));
+    }
+
+    #[test]
+    fn response_to_ir_skips_reasoning_when_disabled() {
+        let body = json!({
+            "id": "resp_1",
+            "status": "completed",
+            "model": "gpt-4o",
+            "output": [
+                {"type": "reasoning", "summary": [{"type": "summary_text", "text": "Thinking..."}]},
+                {"type": "message", "content": [{"type": "output_text", "text": "42"}]}
+            ],
+            "usage": {"input_tokens": 10, "output_tokens": 20}
+        });
+        let mut settings = default_settings();
+        settings.enable_reasoning_to_thinking = false;
+
+        let ir = response_to_ir(body, &settings).unwrap();
+        assert_eq!(ir.content.len(), 1);
+        assert!(matches!(&ir.content[0], IRContentBlock::Text { text } if text == "42"));
     }
 
     #[test]
@@ -1221,7 +1433,7 @@ mod tests {
             "usage": {"input_tokens": 10, "output_tokens": 4096}
         });
 
-        let ir = response_to_ir(body).unwrap();
+        let ir = response_to_ir(body, &default_settings()).unwrap();
         assert_eq!(ir.stop_reason, IRStopReason::MaxTokens);
     }
 
@@ -1236,7 +1448,7 @@ mod tests {
             "usage": {"input_tokens": 10, "output_tokens": 1}
         });
 
-        let ir = response_to_ir(body).unwrap();
+        let ir = response_to_ir(body, &default_settings()).unwrap();
         assert_eq!(ir.stop_reason, IRStopReason::EndTurn);
     }
 
@@ -1254,7 +1466,7 @@ mod tests {
             }
         });
 
-        let ir = response_to_ir(body).unwrap();
+        let ir = response_to_ir(body, &default_settings()).unwrap();
         assert_eq!(ir.usage.cache_read_input_tokens, Some(80));
     }
 
@@ -1275,14 +1487,14 @@ mod tests {
             }
         });
 
-        let ir = response_to_ir(body).unwrap();
+        let ir = response_to_ir(body, &default_settings()).unwrap();
         assert_eq!(ir.usage.cache_creation_input_tokens, Some(25));
     }
 
     #[test]
     fn response_to_ir_no_output_returns_error() {
         let body = json!({"id": "resp_1", "status": "completed"});
-        assert!(response_to_ir(body).is_err());
+        assert!(response_to_ir(body, &default_settings()).is_err());
     }
 
     #[test]
@@ -1300,7 +1512,7 @@ mod tests {
             "usage": {"input_tokens": 1, "output_tokens": 1}
         });
 
-        let ir = response_to_ir(body).unwrap();
+        let ir = response_to_ir(body, &default_settings()).unwrap();
         assert!(
             matches!(&ir.content[0], IRContentBlock::ToolUse { input, .. } if input == &json!("not valid json"))
         );
@@ -1567,6 +1779,55 @@ mod tests {
                 ..
             } if text == "Hello from done"
         )));
+    }
+
+    #[test]
+    fn sse_output_item_done_reasoning_emits_thinking_when_enabled() {
+        let mut state = StreamState {
+            block_index: 1,
+            block_open: true,
+            ..StreamState::default()
+        };
+
+        let data = json!({
+            "item": {
+                "id": "reason_1",
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": "Think first"}]
+            }
+        });
+
+        let chunks = sse_event_to_ir("response.output_item.done", &data, &mut state).unwrap();
+        assert!(chunks.iter().any(|c| matches!(
+            c,
+            IRStreamChunk::ContentBlockDelta {
+                delta: IRDelta::ThinkingDelta { thinking },
+                ..
+            } if thinking == "Think first"
+        )));
+        assert!(state.block_open, "text block should reopen after thinking");
+    }
+
+    #[test]
+    fn sse_output_item_done_reasoning_is_skipped_when_disabled() {
+        let mut state = StreamState {
+            block_index: 1,
+            block_open: true,
+            enable_reasoning_to_thinking: false,
+            ..StreamState::default()
+        };
+
+        let data = json!({
+            "item": {
+                "id": "reason_1",
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": "Think first"}]
+            }
+        });
+
+        let chunks = sse_event_to_ir("response.output_item.done", &data, &mut state).unwrap();
+        assert!(chunks.is_empty());
+        assert!(state.block_open);
     }
 
     #[test]

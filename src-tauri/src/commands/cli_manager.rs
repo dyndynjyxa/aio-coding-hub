@@ -1,6 +1,6 @@
 //! Usage: CLI environment / integration related Tauri commands.
 
-use crate::{blocking, claude_settings, cli_manager, codex_config};
+use crate::{blocking, claude_settings, cli_manager, codex_config, gemini_config};
 
 #[tauri::command]
 pub(crate) async fn cli_manager_claude_info_get(
@@ -87,6 +87,29 @@ pub(crate) async fn cli_manager_gemini_info_get(
 ) -> Result<cli_manager::SimpleCliInfo, String> {
     blocking::run("cli_manager_gemini_info_get", move || {
         cli_manager::gemini_info_get(&app)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+pub(crate) async fn cli_manager_gemini_config_get(
+    app: tauri::AppHandle,
+) -> Result<gemini_config::GeminiConfigState, String> {
+    blocking::run("cli_manager_gemini_config_get", move || {
+        gemini_config::gemini_config_get(&app)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+pub(crate) async fn cli_manager_gemini_config_set(
+    app: tauri::AppHandle,
+    patch: gemini_config::GeminiConfigPatch,
+) -> Result<gemini_config::GeminiConfigState, String> {
+    blocking::run("cli_manager_gemini_config_set", move || {
+        gemini_config::gemini_config_set(&app, patch)
     })
     .await
     .map_err(Into::into)

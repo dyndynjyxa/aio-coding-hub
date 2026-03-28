@@ -59,6 +59,17 @@ export type AppSettings = {
   response_fixer_fix_truncated_json: boolean;
   response_fixer_max_json_depth: number;
   response_fixer_max_fix_size: number;
+  cx2cc_fallback_model_opus: string;
+  cx2cc_fallback_model_sonnet: string;
+  cx2cc_fallback_model_haiku: string;
+  cx2cc_fallback_model_main: string;
+  cx2cc_model_reasoning_effort: string;
+  cx2cc_service_tier: string;
+  cx2cc_disable_response_storage: boolean;
+  cx2cc_enable_reasoning_to_thinking: boolean;
+  cx2cc_drop_stop_sequences: boolean;
+  cx2cc_clean_schema: boolean;
+  cx2cc_filter_batch_tool: boolean;
 };
 
 export type SettingsSetInput = {
@@ -101,6 +112,17 @@ export type SettingsSetInput = {
   wslCustomHostAddress?: string;
   codexHomeMode?: CodexHomeMode;
   codexHomeOverride?: string;
+  cx2ccFallbackModelOpus?: string;
+  cx2ccFallbackModelSonnet?: string;
+  cx2ccFallbackModelHaiku?: string;
+  cx2ccFallbackModelMain?: string;
+  cx2ccModelReasoningEffort?: string;
+  cx2ccServiceTier?: string;
+  cx2ccDisableResponseStorage?: boolean;
+  cx2ccEnableReasoningToThinking?: boolean;
+  cx2ccDropStopSequences?: boolean;
+  cx2ccCleanSchema?: boolean;
+  cx2ccFilterBatchTool?: boolean;
 };
 
 export async function settingsGet() {

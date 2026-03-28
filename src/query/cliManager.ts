@@ -8,12 +8,16 @@ import {
   cliManagerCodexConfigTomlGet,
   cliManagerCodexConfigTomlSet,
   cliManagerCodexInfoGet,
+  cliManagerGeminiConfigGet,
+  cliManagerGeminiConfigSet,
   cliManagerGeminiInfoGet,
   type ClaudeCliInfo,
   type ClaudeSettingsPatch,
   type ClaudeSettingsState,
   type CodexConfigPatch,
   type CodexConfigState,
+  type GeminiConfigPatch,
+  type GeminiConfigState,
   type SimpleCliInfo,
 } from "../services/cliManager";
 import { cliManagerKeys } from "./keys";
@@ -72,6 +76,15 @@ export function useCliManagerGeminiInfoQuery(options?: { enabled?: boolean }) {
   });
 }
 
+export function useCliManagerGeminiConfigQuery(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: cliManagerKeys.geminiConfig(),
+    queryFn: () => cliManagerGeminiConfigGet(),
+    enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
+  });
+}
+
 export function useCliManagerClaudeSettingsSetMutation() {
   const queryClient = useQueryClient();
 
@@ -115,6 +128,21 @@ export function useCliManagerCodexConfigTomlSetMutation() {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: cliManagerKeys.codexConfig() });
       queryClient.invalidateQueries({ queryKey: cliManagerKeys.codexConfigToml() });
+    },
+  });
+}
+
+export function useCliManagerGeminiConfigSetMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (patch: GeminiConfigPatch) => cliManagerGeminiConfigSet(patch),
+    onSuccess: (next) => {
+      if (!next) return;
+      queryClient.setQueryData<GeminiConfigState | null>(cliManagerKeys.geminiConfig(), next);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: cliManagerKeys.geminiConfig() });
     },
   });
 }

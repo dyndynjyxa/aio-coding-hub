@@ -1,6 +1,8 @@
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { toast } from "sonner";
 import type { UpdateMeta } from "../../hooks/useUpdateMeta";
 import { AIO_RELEASES_URL } from "../../constants/urls";
@@ -12,6 +14,7 @@ import {
   subscribeModelPricesUpdated,
   type ModelPricesSyncReport,
 } from "../../services/modelPrices";
+import { configExport, configImport, type ConfigBundle } from "../../services/configMigrate";
 import {
   useModelPricesSyncBasellmMutation,
   useModelPricesTotalCountQuery,
@@ -32,6 +35,22 @@ type AvailableStatus = "checking" | "available" | "unavailable";
 export type SettingsSidebarProps = {
   updateMeta: UpdateMeta;
 };
+
+function isConfigBundleShape(value: unknown): value is ConfigBundle {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const bundle = value as Record<string, unknown>;
+  return (
+    typeof bundle.settings === "string" &&
+    Array.isArray(bundle.providers) &&
+    Array.isArray(bundle.sort_modes) &&
+    Array.isArray(bundle.workspaces) &&
+    Array.isArray(bundle.mcp_servers) &&
+    Array.isArray(bundle.skill_repos)
+  );
+}
 
 export function SettingsSidebar({ updateMeta }: SettingsSidebarProps) {
   const about = updateMeta.about;
@@ -82,6 +101,10 @@ export function SettingsSidebar({ updateMeta }: SettingsSidebarProps) {
   const [clearingRequestLogs, setClearingRequestLogs] = useState(false);
   const [resetAllDialogOpen, setResetAllDialogOpen] = useState(false);
   const [resettingAll, setResettingAll] = useState(false);
+  const [exportingConfig, setExportingConfig] = useState(false);
+  const [configImportDialogOpen, setConfigImportDialogOpen] = useState(false);
+  const [importingConfig, setImportingConfig] = useState(false);
+  const [pendingConfigBundle, setPendingConfigBundle] = useState<ConfigBundle | null>(null);
 
   async function openUpdateLog() {
     const url = AIO_RELEASES_URL;
@@ -179,6 +202,97 @@ export function SettingsSidebar({ updateMeta }: SettingsSidebarProps) {
     }
   }
 
+  async function exportConfig() {
+    if (exportingConfig) return;
+    setExportingConfig(true);
+
+    try {
+      const bundle = await configExport();
+      if (!bundle) {
+        return;
+      }
+
+      const target = await saveDialog({
+        title: "导出配置",
+        defaultPath: "aio-coding-hub-config-export.json",
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+
+      if (!target) {
+        return;
+      }
+
+      const filePath = Array.isArray(target) ? (target[0] ?? null) : target;
+      if (!filePath) {
+        return;
+      }
+
+      await writeTextFile(filePath, JSON.stringify(bundle, null, 2));
+      toast("配置已导出");
+    } catch (err) {
+      logToConsole("error", "导出配置失败", { error: String(err) });
+      toast(`导出配置失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setExportingConfig(false);
+    }
+  }
+
+  async function openConfigImport() {
+    try {
+      const selected = await openDialog({
+        multiple: false,
+        title: "选择配置文件",
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+
+      if (!selected) {
+        return;
+      }
+
+      const filePath = Array.isArray(selected) ? (selected[0] ?? null) : selected;
+      if (!filePath) {
+        return;
+      }
+
+      const raw = await readTextFile(filePath);
+      const parsed = JSON.parse(raw);
+      if (!isConfigBundleShape(parsed)) {
+        toast("无效的配置文件格式");
+        return;
+      }
+
+      setPendingConfigBundle(parsed);
+      setConfigImportDialogOpen(true);
+    } catch (err) {
+      logToConsole("error", "读取配置导入文件失败", { error: String(err) });
+      toast("读取配置导入文件失败：请检查 JSON 文件格式");
+    }
+  }
+
+  async function confirmConfigImport() {
+    if (importingConfig || !pendingConfigBundle) return;
+    setImportingConfig(true);
+
+    try {
+      const result = await configImport(pendingConfigBundle);
+      if (!result) {
+        return;
+      }
+
+      await queryClient.invalidateQueries();
+      setConfigImportDialogOpen(false);
+      setPendingConfigBundle(null);
+      toast(
+        `配置导入完成：供应商 ${result.providers_imported}，排序模式 ${result.sort_modes_imported}，工作区 ${result.workspaces_imported}，MCP ${result.mcp_servers_imported}，技能仓库 ${result.skill_repos_imported}`
+      );
+    } catch (err) {
+      logToConsole("error", "导入配置失败", { error: String(err) });
+      toast("导入配置失败：请稍后重试");
+    } finally {
+      setImportingConfig(false);
+    }
+  }
+
   useEffect(() => {
     return subscribeModelPricesUpdated(() => {
       queryClient.invalidateQueries({ queryKey: modelPricesKeys.all });
@@ -234,6 +348,9 @@ export function SettingsSidebar({ updateMeta }: SettingsSidebarProps) {
           openAppDataDir={openAppDataDir}
           openClearRequestLogsDialog={() => setClearRequestLogsDialogOpen(true)}
           openResetAllDialog={() => setResetAllDialogOpen(true)}
+          onExportConfig={exportConfig}
+          onImportConfig={() => void openConfigImport()}
+          exportingConfig={exportingConfig}
         />
 
         <SettingsDataSyncCard
@@ -264,6 +381,17 @@ export function SettingsSidebar({ updateMeta }: SettingsSidebarProps) {
         resettingAll={resettingAll}
         setResettingAll={setResettingAll}
         resetAllData={resetAllData}
+        configImportDialogOpen={configImportDialogOpen}
+        setConfigImportDialogOpen={(open) => {
+          setConfigImportDialogOpen(open);
+          if (!open) {
+            setPendingConfigBundle(null);
+          }
+        }}
+        importingConfig={importingConfig}
+        setImportingConfig={setImportingConfig}
+        pendingConfigBundle={pendingConfigBundle}
+        confirmConfigImport={confirmConfigImport}
       />
     </>
   );

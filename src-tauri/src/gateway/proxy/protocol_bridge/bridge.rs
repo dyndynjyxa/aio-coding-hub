@@ -34,7 +34,7 @@ impl Bridge {
         ctx: &BridgeContext,
     ) -> Result<TranslatedRequest, BridgeError> {
         // 1. Client body → IR
-        let mut ir = self.inbound.request_to_ir(body)?;
+        let mut ir = self.inbound.request_to_ir(body, ctx)?;
 
         // 2. Model mapping
         let original_model = ir.model.clone();
@@ -58,7 +58,7 @@ impl Bridge {
         body: Value,
         ctx: &BridgeContext,
     ) -> Result<Value, BridgeError> {
-        let ir = self.outbound.response_to_ir(body)?;
+        let ir = self.outbound.response_to_ir(body, ctx)?;
         self.inbound.ir_to_response(&ir, ctx)
     }
 
@@ -72,7 +72,7 @@ impl Bridge {
     ) -> Result<axum::body::Bytes, BridgeError> {
         use super::ir::*;
 
-        let ir = self.outbound.response_to_ir(body)?;
+        let ir = self.outbound.response_to_ir(body, ctx)?;
         let mut frames: Vec<u8> = Vec::new();
 
         // message_start (with initial usage so input_tokens is preserved)
@@ -194,6 +194,7 @@ impl<'b> StreamTranslator<'b> {
         data: &Value,
         ctx: &BridgeContext,
     ) -> Result<Vec<axum::body::Bytes>, BridgeError> {
+        self.state.enable_reasoning_to_thinking = ctx.cx2cc_settings.enable_reasoning_to_thinking;
         // Upstream SSE → IR chunks
         let ir_chunks = self
             .outbound
@@ -225,7 +226,11 @@ mod tests {
         fn protocol(&self) -> &'static str {
             "stub_in"
         }
-        fn request_to_ir(&self, body: Value) -> Result<InternalRequest, BridgeError> {
+        fn request_to_ir(
+            &self,
+            body: Value,
+            _ctx: &BridgeContext,
+        ) -> Result<InternalRequest, BridgeError> {
             Ok(InternalRequest {
                 model: body
                     .get("model")
@@ -278,7 +283,11 @@ mod tests {
         ) -> Result<Value, BridgeError> {
             Ok(json!({ "model": ir.model, "type": "stub_request" }))
         }
-        fn response_to_ir(&self, body: Value) -> Result<InternalResponse, BridgeError> {
+        fn response_to_ir(
+            &self,
+            body: Value,
+            _ctx: &BridgeContext,
+        ) -> Result<InternalResponse, BridgeError> {
             Ok(InternalResponse {
                 id: body
                     .get("id")
@@ -326,6 +335,7 @@ mod tests {
     fn stub_ctx() -> BridgeContext {
         BridgeContext {
             claude_models: crate::domain::providers::ClaudeModels::default(),
+            cx2cc_settings: crate::gateway::proxy::cx2cc::settings::Cx2ccSettings::default(),
             requested_model: Some("claude-sonnet".into()),
             mapped_model: None,
             stream_requested: false,
