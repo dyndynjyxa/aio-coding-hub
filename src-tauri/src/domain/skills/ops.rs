@@ -513,7 +513,7 @@ fn sync_enabled_skill_keys_for_cli<R: tauri::Runtime>(
         if !ssot_dir.exists() {
             return Err(format!("SKILL_SSOT_MISSING: {}", ssot_dir.display()).into());
         }
-        sync_to_cli(app, &cli_key, &skill_key, &ssot_dir)?;
+        sync_to_cli(app, cli_key, &skill_key, &ssot_dir)?;
     }
 
     Ok(())
