@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.33.7](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.33.6...aio-coding-hub-v0.33.7) (2026-03-29)
+
+
+### Features
+
+* add CX2CC tab, config export/import, Gemini config enhance, CLI… ([#138](https://github.com/dyndynjyxa/aio-coding-hub/issues/138)) ([7aba381](https://github.com/dyndynjyxa/aio-coding-hub/commit/7aba381a462812e6c6ea505de3650397d23b48b4))
+
+
+### Bug Fixes
+
+* **cli_proxy:** 修复数据库初始化错误处理逻辑 ([9230475](https://github.com/dyndynjyxa/aio-coding-hub/commit/9230475e4401e93e3dc34ad285ace4a03186cd16))
+* **settings:** 增强设置读取错误处理和写入保护 ([6759e60](https://github.com/dyndynjyxa/aio-coding-hub/commit/6759e60edf1cb93e63f8c05787ed4f0a320a175b))
+
 ## [0.33.6](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.33.5...aio-coding-hub-v0.33.6) (2026-03-27)
 
 
