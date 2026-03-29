@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.8](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.33.7...aio-coding-hub-v0.33.8) (2026-03-29)
+
+
+### Bug Fixes
+
+* **tauri:** 修复 Windows 下 WSL 同步触发引用错误 ([696453d](https://github.com/dyndynjyxa/aio-coding-hub/commit/696453d0ab794902c20166d0ee2c5c5356911738))
+
 ## [0.33.7](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.33.6...aio-coding-hub-v0.33.7) (2026-03-29)
 
 
