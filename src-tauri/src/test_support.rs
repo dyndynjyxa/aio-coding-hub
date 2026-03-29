@@ -2,8 +2,21 @@
 
 use std::path::PathBuf;
 
+#[cfg(test)]
+use crate::shared::mutex_ext::MutexExt;
+#[cfg(test)]
+use std::sync::{Mutex, MutexGuard, OnceLock};
+
 pub fn clear_settings_cache() {
     crate::settings::clear_cache();
+}
+
+#[cfg(test)]
+pub fn test_env_lock() -> MutexGuard<'static, ()> {
+    static TEST_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    TEST_ENV_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock_or_recover()
 }
 
 fn serialize_json(

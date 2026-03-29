@@ -7,17 +7,9 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::MutexGuard;
 
-static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 static TEST_ENV_SEQ: AtomicU64 = AtomicU64::new(1);
-
-fn env_lock() -> MutexGuard<'static, ()> {
-    ENV_LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
 
 #[derive(Default)]
 struct EnvRestore {
@@ -60,19 +52,17 @@ struct ConfigMigrateTestApp {
 
 impl ConfigMigrateTestApp {
     fn new() -> Self {
-        let lock = env_lock();
+        let lock = crate::test_support::test_env_lock();
         let home = tempfile::tempdir().expect("tempdir");
         let seq = TEST_ENV_SEQ.fetch_add(1, Ordering::Relaxed);
         let mut env = EnvRestore::default();
         let home_os = home.path().as_os_str().to_os_string();
-        env.set_var("HOME", home_os.clone());
         env.set_var("AIO_CODING_HUB_HOME_DIR", home_os.clone());
-        env.set_var("USERPROFILE", home_os.clone());
-        env.set_var("CODEX_HOME", home.path().join(".codex").into_os_string());
         env.set_var(
             "AIO_CODING_HUB_DOTDIR_NAME",
             format!(".aio-coding-hub-config-migrate-test-{seq}"),
         );
+        crate::test_support::clear_settings_cache();
 
         let app = tauri::test::mock_app();
         app.manage(crate::resident::ResidentState::default());
