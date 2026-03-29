@@ -12,12 +12,14 @@ import { cn } from "../../utils/cn";
 type CliVersionBadgeProps = {
   cliKey: string;
   installedVersion: string | null;
+  refreshToken?: number;
   onUpdateComplete?: () => void;
 };
 
 export function CliVersionBadge({
   cliKey,
   installedVersion,
+  refreshToken = 0,
   onUpdateComplete,
 }: CliVersionBadgeProps) {
   const [checking, setChecking] = useState(true);
@@ -56,7 +58,7 @@ export function CliVersionBadge({
     return () => {
       cancelled = true;
     };
-  }, [cliKey, installedVersion]);
+  }, [cliKey, installedVersion, refreshToken]);
 
   if (checking) {
     return (

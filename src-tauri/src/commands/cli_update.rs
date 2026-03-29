@@ -14,7 +14,8 @@ pub(crate) async fn cli_check_latest_version(
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn cli_update(
+    app: tauri::AppHandle,
     cli_key: String,
 ) -> Result<cli_update_infra::CliUpdateResult, String> {
-    Ok(cli_update_infra::cli_update(cli_key).await)
+    Ok(cli_update_infra::cli_update(&app, cli_key).await)
 }

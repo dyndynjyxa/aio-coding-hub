@@ -86,6 +86,7 @@ export function CliManagerGeminiTab({
   refreshGeminiInfo,
   persistGeminiConfig,
 }: CliManagerGeminiTabProps) {
+  const [versionRefreshToken, setVersionRefreshToken] = useState(0);
   const [modelNameText, setModelNameText] = useState("");
   const [defaultApprovalModeText, setDefaultApprovalModeText] = useState("default");
   const [maxAttemptsText, setMaxAttemptsText] = useState("");
@@ -113,6 +114,14 @@ export function CliManagerGeminiTab({
   const saving = geminiConfigSaving;
   const configDir = geminiConfig?.configDir ?? "—";
   const configPath = geminiConfig?.configPath ?? "—";
+
+  async function refreshGeminiStatus() {
+    try {
+      await refreshGeminiInfo();
+    } finally {
+      setVersionRefreshToken((value) => value + 1);
+    }
+  }
 
   function revertNumberField(
     setter: (value: string) => void,
@@ -159,7 +168,8 @@ export function CliManagerGeminiTab({
                         <CliVersionBadge
                           cliKey="gemini"
                           installedVersion={geminiInfo.version}
-                          onUpdateComplete={refreshGeminiInfo}
+                          refreshToken={versionRefreshToken}
+                          onUpdateComplete={refreshGeminiStatus}
                         />
                       </>
                     ) : geminiAvailable === "checking" || loading ? (
@@ -177,7 +187,7 @@ export function CliManagerGeminiTab({
               </div>
 
               <Button
-                onClick={() => void refreshGeminiInfo()}
+                onClick={() => void refreshGeminiStatus()}
                 variant="secondary"
                 size="sm"
                 disabled={loading}

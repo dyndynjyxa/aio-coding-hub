@@ -1,7 +1,16 @@
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
 import { ModelPriceAliasesDialog } from "../../components/settings/ModelPriceAliasesDialog";
-import type { ConfigBundle } from "../../services/configMigrate";
+import type { ConfigBundle, ConfigBundleWorkspace } from "../../services/configMigrate";
+
+function countWorkspacePrompts(workspaces: ConfigBundleWorkspace[]) {
+  return workspaces.reduce((total, workspace) => {
+    if (Array.isArray(workspace.prompts) && workspace.prompts.length > 0) {
+      return total + workspace.prompts.length;
+    }
+    return total + (workspace.prompt ? 1 : 0);
+  }, 0);
+}
 
 export function SettingsDialogs({
   modelPriceAliasesDialogOpen,
@@ -51,8 +60,13 @@ export function SettingsDialogs({
   const providersCount = pendingConfigBundle?.providers.length ?? 0;
   const sortModesCount = pendingConfigBundle?.sort_modes.length ?? 0;
   const workspacesCount = pendingConfigBundle?.workspaces.length ?? 0;
+  const promptsCount = pendingConfigBundle
+    ? countWorkspacePrompts(pendingConfigBundle.workspaces)
+    : 0;
   const mcpServersCount = pendingConfigBundle?.mcp_servers.length ?? 0;
   const skillReposCount = pendingConfigBundle?.skill_repos.length ?? 0;
+  const installedSkillsCount = pendingConfigBundle?.installed_skills?.length ?? 0;
+  const localSkillsCount = pendingConfigBundle?.local_skills?.length ?? 0;
 
   return (
     <>
@@ -148,8 +162,11 @@ export function SettingsDialogs({
               <div>{`Providers：${providersCount}`}</div>
               <div>{`Sort Modes：${sortModesCount}`}</div>
               <div>{`Workspaces：${workspacesCount}`}</div>
+              <div>{`Prompts：${promptsCount}`}</div>
               <div>{`MCP Servers：${mcpServersCount}`}</div>
               <div>{`Skill Repos：${skillReposCount}`}</div>
+              <div>{`Installed Skills：${installedSkillsCount}`}</div>
+              <div>{`Local Skills：${localSkillsCount}`}</div>
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-700">

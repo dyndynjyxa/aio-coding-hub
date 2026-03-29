@@ -256,6 +256,7 @@ export function CliManagerClaudeTab({
   openClaudeConfigDir,
   persistClaudeSettings,
 }: CliManagerClaudeTabProps) {
+  const [versionRefreshToken, setVersionRefreshToken] = useState(0);
   const [modelText, setModelText] = useState("");
   const [outputStyleText, setOutputStyleText] = useState("");
   const [languageText, setLanguageText] = useState("");
@@ -305,6 +306,14 @@ export function CliManagerClaudeTab({
 
   const configDir = claudeSettings?.config_dir ?? claudeInfo?.config_dir;
   const settingsPath = claudeSettings?.settings_path ?? claudeInfo?.settings_path;
+
+  async function refreshClaudeStatus() {
+    try {
+      await refreshClaude();
+    } finally {
+      setVersionRefreshToken((value) => value + 1);
+    }
+  }
 
   const MAX_TIMEOUT_MS = 24 * 60 * 60 * 1000;
   function normalizeTimeoutMsOrZero(raw: string): number {
@@ -379,7 +388,8 @@ export function CliManagerClaudeTab({
                         <CliVersionBadge
                           cliKey="claude"
                           installedVersion={claudeInfo.version}
-                          onUpdateComplete={refreshClaude}
+                          refreshToken={versionRefreshToken}
+                          onUpdateComplete={refreshClaudeStatus}
                         />
                       </>
                     ) : claudeAvailable === "checking" || loading ? (
@@ -397,7 +407,7 @@ export function CliManagerClaudeTab({
               </div>
 
               <Button
-                onClick={() => void refreshClaude()}
+                onClick={() => void refreshClaudeStatus()}
                 variant="secondary"
                 size="sm"
                 disabled={loading}

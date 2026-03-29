@@ -466,44 +466,18 @@ pub fn return_to_local<R: tauri::Runtime>(
     delete_skill_row(&conn, skill_id)
 }
 
-pub fn sync_cli_for_workspace(
-    app: &tauri::AppHandle,
-    conn: &Connection,
-    workspace_id: i64,
+fn sync_enabled_skill_keys_for_cli<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    _conn: &Connection,
+    cli_key: &str,
+    enabled_list: Vec<String>,
 ) -> crate::shared::error::AppResult<()> {
     ensure_skills_roots(app)?;
+    validate_cli_key(cli_key)?;
 
-    let cli_key = workspaces::get_cli_key_by_id(conn, workspace_id)?;
-    validate_cli_key(&cli_key)?;
+    let enabled_set: HashSet<String> = enabled_list.iter().cloned().collect();
 
-    let mut stmt = conn
-        .prepare_cached(
-            r#"
-    SELECT s.skill_key
-    FROM skills s
-    JOIN workspace_skill_enabled e
-      ON e.skill_id = s.id
-    WHERE e.workspace_id = ?1
-    ORDER BY s.skill_key ASC
-    "#,
-        )
-        .map_err(|e| db_err!("failed to prepare enabled skills query: {e}"))?;
-
-    let rows = stmt
-        .query_map([workspace_id], |row| row.get::<_, String>(0))
-        .map_err(|e| db_err!("failed to query enabled skills: {e}"))?;
-
-    let mut enabled_set = HashSet::new();
-    let mut enabled_list: Vec<String> = Vec::new();
-    for row in rows {
-        let key = row.map_err(|e| db_err!("failed to read enabled skill row: {e}"))?;
-        if enabled_set.insert(key.clone()) {
-            enabled_list.push(key);
-        }
-    }
-    enabled_list.sort();
-
-    let cli_root = cli_skills_root(app, &cli_key)?;
+    let cli_root = cli_skills_root(app, cli_key)?;
     std::fs::create_dir_all(&cli_root)
         .map_err(|e| format!("failed to create {}: {e}", cli_root.display()))?;
 
@@ -543,4 +517,59 @@ pub fn sync_cli_for_workspace(
     }
 
     Ok(())
+}
+
+pub(crate) fn sync_one_cli<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    conn: &Connection,
+    cli_key: &str,
+) -> crate::shared::error::AppResult<()> {
+    ensure_skills_roots(app)?;
+    validate_cli_key(cli_key)?;
+
+    let Some(workspace_id) = workspaces::active_id_by_cli(conn, cli_key)? else {
+        return sync_enabled_skill_keys_for_cli(app, conn, cli_key, Vec::new());
+    };
+
+    sync_cli_for_workspace(app, conn, workspace_id)
+}
+
+pub fn sync_cli_for_workspace<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    conn: &Connection,
+    workspace_id: i64,
+) -> crate::shared::error::AppResult<()> {
+    ensure_skills_roots(app)?;
+
+    let cli_key = workspaces::get_cli_key_by_id(conn, workspace_id)?;
+    validate_cli_key(&cli_key)?;
+
+    let mut stmt = conn
+        .prepare_cached(
+            r#"
+    SELECT s.skill_key
+    FROM skills s
+    JOIN workspace_skill_enabled e
+      ON e.skill_id = s.id
+    WHERE e.workspace_id = ?1
+    ORDER BY s.skill_key ASC
+    "#,
+        )
+        .map_err(|e| db_err!("failed to prepare enabled skills query: {e}"))?;
+
+    let rows = stmt
+        .query_map([workspace_id], |row| row.get::<_, String>(0))
+        .map_err(|e| db_err!("failed to query enabled skills: {e}"))?;
+
+    let mut enabled_set = HashSet::new();
+    let mut enabled_list: Vec<String> = Vec::new();
+    for row in rows {
+        let key = row.map_err(|e| db_err!("failed to read enabled skill row: {e}"))?;
+        if enabled_set.insert(key.clone()) {
+            enabled_list.push(key);
+        }
+    }
+    enabled_list.sort();
+
+    sync_enabled_skill_keys_for_cli(app, conn, &cli_key, enabled_list)
 }

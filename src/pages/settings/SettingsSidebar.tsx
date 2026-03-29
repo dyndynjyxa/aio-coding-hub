@@ -36,19 +36,42 @@ export type SettingsSidebarProps = {
   updateMeta: UpdateMeta;
 };
 
+function isStringRecord(value: unknown): value is Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  return Object.values(value).every((entry) => typeof entry === "string");
+}
+
 function isConfigBundleShape(value: unknown): value is ConfigBundle {
   if (!value || typeof value !== "object") {
     return false;
   }
 
   const bundle = value as Record<string, unknown>;
+  if (
+    typeof bundle.schema_version !== "number" ||
+    typeof bundle.exported_at !== "string" ||
+    typeof bundle.app_version !== "string" ||
+    typeof bundle.settings !== "string" ||
+    !Array.isArray(bundle.providers) ||
+    !Array.isArray(bundle.sort_modes) ||
+    !isStringRecord(bundle.sort_mode_active) ||
+    !Array.isArray(bundle.workspaces) ||
+    !Array.isArray(bundle.mcp_servers) ||
+    !Array.isArray(bundle.skill_repos)
+  ) {
+    return false;
+  }
+
+  if (bundle.schema_version >= 2) {
+    return Array.isArray(bundle.installed_skills) && Array.isArray(bundle.local_skills);
+  }
+
   return (
-    typeof bundle.settings === "string" &&
-    Array.isArray(bundle.providers) &&
-    Array.isArray(bundle.sort_modes) &&
-    Array.isArray(bundle.workspaces) &&
-    Array.isArray(bundle.mcp_servers) &&
-    Array.isArray(bundle.skill_repos)
+    (bundle.installed_skills === undefined || Array.isArray(bundle.installed_skills)) &&
+    (bundle.local_skills === undefined || Array.isArray(bundle.local_skills))
   );
 }
 
@@ -283,7 +306,7 @@ export function SettingsSidebar({ updateMeta }: SettingsSidebarProps) {
       setConfigImportDialogOpen(false);
       setPendingConfigBundle(null);
       toast(
-        `配置导入完成：供应商 ${result.providers_imported}，排序模式 ${result.sort_modes_imported}，工作区 ${result.workspaces_imported}，MCP ${result.mcp_servers_imported}，技能仓库 ${result.skill_repos_imported}`
+        `配置导入完成：供应商 ${result.providers_imported}，排序模式 ${result.sort_modes_imported}，工作区 ${result.workspaces_imported}，提示词 ${result.prompts_imported}，MCP ${result.mcp_servers_imported}，技能仓库 ${result.skill_repos_imported}，通用技能 ${result.installed_skills_imported}，本机技能 ${result.local_skills_imported}`
       );
     } catch (err) {
       logToConsole("error", "导入配置失败", { error: String(err) });

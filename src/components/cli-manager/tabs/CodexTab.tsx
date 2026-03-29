@@ -196,6 +196,7 @@ export function CliManagerCodexTab({
   persistCodexHomeSettings,
   pickCodexHomeDirectory,
 }: CliManagerCodexTabProps) {
+  const [versionRefreshToken, setVersionRefreshToken] = useState(0);
   const [modelText, setModelText] = useState("");
   const [contextWindowText, setContextWindowText] = useState("");
   const [autoCompactLimitText, setAutoCompactLimitText] = useState("");
@@ -288,6 +289,14 @@ export function CliManagerCodexTab({
   const tomlBusy = codexConfigTomlLoading || codexConfigTomlSaving;
   const configLocationBusy = saving || codexHomeSettingsSaving;
   const configLocationControlsDisabled = configLocationBusy || selectingCodexHomeDir;
+
+  async function refreshCodexStatus() {
+    try {
+      await refreshCodex();
+    } finally {
+      setVersionRefreshToken((value) => value + 1);
+    }
+  }
 
   // sandbox_mode 的本地 text 已由上方 codexConfig 整体同步 effect 更新，
   // 此处不再需要额外的 saving 守卫同步——之前的实现会在 saving 从
@@ -602,7 +611,8 @@ export function CliManagerCodexTab({
                         <CliVersionBadge
                           cliKey="codex"
                           installedVersion={codexInfo.version}
-                          onUpdateComplete={refreshCodex}
+                          refreshToken={versionRefreshToken}
+                          onUpdateComplete={refreshCodexStatus}
                         />
                       </>
                     ) : codexAvailable === "checking" || loading ? (
@@ -620,7 +630,7 @@ export function CliManagerCodexTab({
               </div>
 
               <Button
-                onClick={() => void refreshCodex()}
+                onClick={() => void refreshCodexStatus()}
                 variant="secondary"
                 size="sm"
                 disabled={loading}

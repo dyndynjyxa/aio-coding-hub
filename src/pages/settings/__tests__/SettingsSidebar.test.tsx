@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactElement } from "react";
 import { toast } from "sonner";
 import { createTestQueryClient } from "../../../test/utils/reactQuery";
@@ -139,12 +139,14 @@ vi.mock("../SettingsDialogs", () => ({
   SettingsDialogs: ({
     clearRequestLogsDialogOpen,
     resetAllDialogOpen,
+    configImportDialogOpen,
     clearRequestLogs,
     resetAllData,
   }: any) => (
     <div>
       <div>clearOpen:{String(clearRequestLogsDialogOpen)}</div>
       <div>resetOpen:{String(resetAllDialogOpen)}</div>
+      <div>configImportOpen:{String(configImportDialogOpen)}</div>
       <button type="button" onClick={() => clearRequestLogs()}>
         confirm-clear-logs
       </button>
@@ -183,7 +185,47 @@ function createUpdateMeta(overrides: Partial<any> = {}) {
   };
 }
 
+function createConfigImportBundle(overrides: Record<string, unknown> = {}) {
+  return {
+    schema_version: 2,
+    exported_at: "2026-03-29T00:00:00.000Z",
+    app_version: "0.0.0-test",
+    settings: "{}",
+    providers: [],
+    sort_modes: [],
+    sort_mode_active: {},
+    workspaces: [],
+    mcp_servers: [],
+    skill_repos: [],
+    installed_skills: [],
+    local_skills: [],
+    ...overrides,
+  };
+}
+
+function mockSidebarQueries() {
+  vi.mocked(useModelPricesTotalCountQuery).mockReturnValue({ data: 1, isLoading: false } as any);
+  vi.mocked(useModelPricesSyncBasellmMutation).mockReturnValue({
+    isPending: false,
+    mutateAsync: vi.fn(),
+  } as any);
+  vi.mocked(useUsageSummaryQuery).mockReturnValue({
+    data: { requests_total: 1 },
+    isLoading: false,
+  } as any);
+  vi.mocked(useDbDiskUsageQuery).mockReturnValue({
+    data: null,
+    isLoading: false,
+    refetch: vi.fn(),
+  } as any);
+  vi.mocked(useRequestLogsClearAllMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+}
+
 describe("pages/settings/SettingsSidebar", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("handles update checks (no about, portable, normal)", async () => {
     vi.mocked(useModelPricesTotalCountQuery).mockReturnValue({ data: 3, isLoading: false } as any);
     vi.mocked(useModelPricesSyncBasellmMutation).mockReturnValue({
@@ -394,21 +436,7 @@ describe("pages/settings/SettingsSidebar", () => {
   });
 
   it("rejects invalid config import JSON before opening confirm dialog", async () => {
-    vi.mocked(useModelPricesTotalCountQuery).mockReturnValue({ data: 1, isLoading: false } as any);
-    vi.mocked(useModelPricesSyncBasellmMutation).mockReturnValue({
-      isPending: false,
-      mutateAsync: vi.fn(),
-    } as any);
-    vi.mocked(useUsageSummaryQuery).mockReturnValue({
-      data: { requests_total: 1 },
-      isLoading: false,
-    } as any);
-    vi.mocked(useDbDiskUsageQuery).mockReturnValue({
-      data: null,
-      isLoading: false,
-      refetch: vi.fn(),
-    } as any);
-    vi.mocked(useRequestLogsClearAllMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    mockSidebarQueries();
 
     vi.mocked(tauriDialogOpen).mockResolvedValueOnce("/tmp/invalid-config.json");
     vi.mocked(tauriReadTextFile).mockResolvedValueOnce(
@@ -430,5 +458,68 @@ describe("pages/settings/SettingsSidebar", () => {
     expect(toast).toHaveBeenCalledWith("无效的配置文件格式");
     expect(screen.getByText("clearOpen:false")).toBeInTheDocument();
     expect(screen.getByText("resetOpen:false")).toBeInTheDocument();
+    expect(screen.getByText("configImportOpen:false")).toBeInTheDocument();
+  });
+
+  it("accepts legacy v1 config import without skill payload arrays", async () => {
+    mockSidebarQueries();
+
+    vi.mocked(tauriDialogOpen).mockResolvedValueOnce("/tmp/legacy-config.json");
+    vi.mocked(tauriReadTextFile).mockResolvedValueOnce(
+      JSON.stringify(
+        createConfigImportBundle({
+          schema_version: 1,
+          installed_skills: undefined,
+          local_skills: undefined,
+        })
+      ) as any
+    );
+
+    renderWithProviders(<SettingsSidebar updateMeta={createUpdateMeta()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "import-config" }));
+
+    await waitFor(() => expect(tauriReadTextFile).toHaveBeenCalled());
+    expect(toast).not.toHaveBeenCalledWith("无效的配置文件格式");
+    expect(screen.getByText("configImportOpen:true")).toBeInTheDocument();
+  });
+
+  it("rejects v2 config import missing skill payload arrays", async () => {
+    mockSidebarQueries();
+
+    vi.mocked(tauriDialogOpen).mockResolvedValueOnce("/tmp/v2-missing-skills.json");
+    vi.mocked(tauriReadTextFile).mockResolvedValueOnce(
+      JSON.stringify(
+        createConfigImportBundle({
+          installed_skills: undefined,
+          local_skills: undefined,
+        })
+      ) as any
+    );
+
+    renderWithProviders(<SettingsSidebar updateMeta={createUpdateMeta()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "import-config" }));
+
+    await waitFor(() => expect(tauriReadTextFile).toHaveBeenCalled());
+    expect(toast).toHaveBeenCalledWith("无效的配置文件格式");
+    expect(screen.getByText("configImportOpen:false")).toBeInTheDocument();
+  });
+
+  it("rejects config import missing sort_mode_active", async () => {
+    mockSidebarQueries();
+
+    vi.mocked(tauriDialogOpen).mockResolvedValueOnce("/tmp/missing-sort-mode-active.json");
+    vi.mocked(tauriReadTextFile).mockResolvedValueOnce(
+      JSON.stringify(createConfigImportBundle({ sort_mode_active: undefined })) as any
+    );
+
+    renderWithProviders(<SettingsSidebar updateMeta={createUpdateMeta()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "import-config" }));
+
+    await waitFor(() => expect(tauriReadTextFile).toHaveBeenCalled());
+    expect(toast).toHaveBeenCalledWith("无效的配置文件格式");
+    expect(screen.getByText("configImportOpen:false")).toBeInTheDocument();
   });
 });

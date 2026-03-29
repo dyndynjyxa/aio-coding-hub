@@ -37,12 +37,14 @@ fn validate_cli_key(cli_key: &str) -> Result<(), String> {
     crate::shared::cli_key::validate_cli_key(cli_key).map_err(Into::into)
 }
 
-fn home_dir(app: &tauri::AppHandle) -> crate::shared::error::AppResult<PathBuf> {
+fn home_dir<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<PathBuf> {
     crate::app_paths::home_dir(app)
 }
 
-fn prompt_target_path(
-    app: &tauri::AppHandle,
+fn prompt_target_path<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     cli_key: &str,
 ) -> crate::shared::error::AppResult<PathBuf> {
     validate_cli_key(cli_key)?;
@@ -56,8 +58,8 @@ fn prompt_target_path(
     }
 }
 
-fn prompt_sync_root_dir(
-    app: &tauri::AppHandle,
+fn prompt_sync_root_dir<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     cli_key: &str,
 ) -> crate::shared::error::AppResult<PathBuf> {
     Ok(app_paths::app_data_dir(app)?
@@ -77,8 +79,8 @@ fn prompt_sync_manifest_path(root: &Path) -> PathBuf {
     root.join("manifest.json")
 }
 
-fn legacy_prompt_sync_roots(
-    app: &tauri::AppHandle,
+fn legacy_prompt_sync_roots<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     cli_key: &str,
 ) -> crate::shared::error::AppResult<Vec<PathBuf>> {
     let home = home_dir(app)?;
@@ -88,8 +90,8 @@ fn legacy_prompt_sync_roots(
         .collect())
 }
 
-fn try_migrate_legacy_prompt_sync_dir(
-    app: &tauri::AppHandle,
+fn try_migrate_legacy_prompt_sync_dir<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     cli_key: &str,
 ) -> crate::shared::error::AppResult<bool> {
     let new_root = prompt_sync_root_dir(app, cli_key)?;
@@ -121,16 +123,16 @@ fn try_migrate_legacy_prompt_sync_dir(
     Ok(false)
 }
 
-pub fn read_target_bytes(
-    app: &tauri::AppHandle,
+pub fn read_target_bytes<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     cli_key: &str,
 ) -> crate::shared::error::AppResult<Option<Vec<u8>>> {
     let path = prompt_target_path(app, cli_key)?;
     read_optional_file(&path)
 }
 
-pub fn restore_target_bytes(
-    app: &tauri::AppHandle,
+pub fn restore_target_bytes<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     cli_key: &str,
     bytes: Option<Vec<u8>>,
 ) -> crate::shared::error::AppResult<()> {
@@ -147,8 +149,8 @@ pub fn restore_target_bytes(
     }
 }
 
-pub fn read_manifest_bytes(
-    app: &tauri::AppHandle,
+pub fn read_manifest_bytes<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     cli_key: &str,
 ) -> crate::shared::error::AppResult<Option<Vec<u8>>> {
     let root = prompt_sync_root_dir(app, cli_key)?;
@@ -156,8 +158,8 @@ pub fn read_manifest_bytes(
     read_optional_file(&path)
 }
 
-pub fn restore_manifest_bytes(
-    app: &tauri::AppHandle,
+pub fn restore_manifest_bytes<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     cli_key: &str,
     bytes: Option<Vec<u8>>,
 ) -> crate::shared::error::AppResult<()> {
@@ -175,8 +177,8 @@ pub fn restore_manifest_bytes(
     }
 }
 
-fn read_manifest(
-    app: &tauri::AppHandle,
+fn read_manifest<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     cli_key: &str,
 ) -> crate::shared::error::AppResult<Option<PromptSyncManifest>> {
     let root = prompt_sync_root_dir(app, cli_key)?;
@@ -206,8 +208,8 @@ fn read_manifest(
     Ok(Some(manifest))
 }
 
-fn write_manifest(
-    app: &tauri::AppHandle,
+fn write_manifest<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     cli_key: &str,
     manifest: &PromptSyncManifest,
 ) -> crate::shared::error::AppResult<()> {
@@ -222,8 +224,8 @@ fn write_manifest(
     Ok(())
 }
 
-fn backup_for_enable(
-    app: &tauri::AppHandle,
+fn backup_for_enable<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     cli_key: &str,
     existing: Option<PromptSyncManifest>,
 ) -> crate::shared::error::AppResult<PromptSyncManifest> {
@@ -278,8 +280,8 @@ pub(crate) fn prompt_content_to_bytes(content: &str) -> Vec<u8> {
     out
 }
 
-fn restore_from_manifest(
-    app: &tauri::AppHandle,
+fn restore_from_manifest<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     manifest: &PromptSyncManifest,
 ) -> crate::shared::error::AppResult<()> {
     let cli_key = manifest.cli_key.as_str();
@@ -350,8 +352,8 @@ fn restore_from_manifest(
     Ok(())
 }
 
-pub fn apply_enabled_prompt(
-    app: &tauri::AppHandle,
+pub fn apply_enabled_prompt<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     cli_key: &str,
     prompt_id: i64,
     content: &str,
@@ -392,8 +394,8 @@ pub fn apply_enabled_prompt(
     Ok(())
 }
 
-pub fn restore_disabled_prompt(
-    app: &tauri::AppHandle,
+pub fn restore_disabled_prompt<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     cli_key: &str,
 ) -> crate::shared::error::AppResult<()> {
     validate_cli_key(cli_key)?;

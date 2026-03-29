@@ -18,6 +18,7 @@ pub use discover::discover_available;
 pub use installed::installed_list_for_workspace;
 pub use local::{delete_local, import_local, import_local_batch, install_to_local, local_list};
 pub(crate) use local_swap::swap_local_skills_for_workspace_switch;
+pub(crate) use ops::sync_one_cli;
 pub use ops::{install, return_to_local, set_enabled, sync_cli_for_workspace, uninstall};
 pub use paths::paths_get;
 pub use repos::{repo_delete, repo_upsert, repos_list};

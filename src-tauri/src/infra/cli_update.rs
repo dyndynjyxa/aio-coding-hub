@@ -1,6 +1,7 @@
 //! Usage: Check installed CLI versions against npm and run CLI updates.
 
 use serde::Serialize;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
@@ -140,7 +141,88 @@ fn join_command_output(stdout: &[u8], stderr: &[u8]) -> String {
     }
 }
 
-pub async fn cli_update(cli_key: String) -> CliUpdateResult {
+fn npm_executable_names() -> Vec<&'static str> {
+    #[cfg(windows)]
+    {
+        vec!["npm.cmd", "npm.bat", "npm.exe", "npm"]
+    }
+    #[cfg(not(windows))]
+    {
+        vec!["npm"]
+    }
+}
+
+fn prefer_sibling_npm_path(cli_executable: &Path) -> Option<PathBuf> {
+    let parent = cli_executable.parent()?;
+    for candidate in npm_executable_names() {
+        let path = parent.join(candidate);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn resolve_npm_executable(app: &tauri::AppHandle, cli_key: &str) -> Result<PathBuf, String> {
+    let cli_info = crate::cli_manager::simple_cli_info_get(app, cli_key)
+        .map_err(|e| format!("failed to resolve {cli_key} executable: {e}"))?;
+    if let Some(cli_executable_path) = cli_info.executable_path.as_deref() {
+        if let Some(npm_path) = prefer_sibling_npm_path(Path::new(cli_executable_path)) {
+            return Ok(npm_path);
+        }
+    }
+
+    let npm_info = crate::cli_manager::simple_cli_info_get(app, "npm")
+        .map_err(|e| format!("failed to resolve npm executable: {e}"))?;
+    npm_info
+        .executable_path
+        .map(PathBuf::from)
+        .ok_or_else(|| "failed to locate npm executable".to_string())
+}
+
+fn prepend_command_path(command: &mut Command, dir: &Path) {
+    let key = "PATH";
+    let separator = if cfg!(windows) { ";" } else { ":" };
+    let current = std::env::var(key).unwrap_or_default();
+    let prefix = dir.to_string_lossy();
+    if current.is_empty() {
+        command.env(key, prefix.as_ref());
+    } else {
+        command.env(key, format!("{prefix}{separator}{current}"));
+    }
+}
+
+fn build_cli_update_command(
+    app: &tauri::AppHandle,
+    cli_key: &str,
+    npm_package: &str,
+) -> Result<Command, String> {
+    let npm_path = resolve_npm_executable(app, cli_key)?;
+    let package_spec = format!("{npm_package}@latest");
+
+    #[cfg(windows)]
+    let mut command = {
+        let mut cmd = Command::new("cmd");
+        cmd.arg("/C").arg(&npm_path);
+        cmd.args(["install", "-g", &package_spec]);
+        cmd
+    };
+
+    #[cfg(not(windows))]
+    let mut command = {
+        let mut cmd = Command::new(&npm_path);
+        cmd.args(["install", "-g", &package_spec]);
+        cmd
+    };
+
+    if let Some(parent) = npm_path.parent() {
+        prepend_command_path(&mut command, parent);
+    }
+
+    Ok(command)
+}
+
+pub async fn cli_update(app: &tauri::AppHandle, cli_key: String) -> CliUpdateResult {
     let normalized_cli_key = cli_key.trim().to_ascii_lowercase();
     let Some(npm_package) = npm_package_for_cli_key(&normalized_cli_key) else {
         return CliUpdateResult {
@@ -151,25 +233,16 @@ pub async fn cli_update(cli_key: String) -> CliUpdateResult {
         };
     };
 
-    // On Windows, `npm` is actually `npm.cmd` and may not be in the Tauri app's
-    // PATH. Use the shell to resolve it, matching how cli_probe finds executables.
-    #[cfg(windows)]
-    let mut command = {
-        let mut cmd = Command::new("cmd");
-        cmd.args([
-            "/C",
-            "npm",
-            "install",
-            "-g",
-            &format!("{npm_package}@latest"),
-        ]);
-        cmd
-    };
-    #[cfg(not(windows))]
-    let mut command = {
-        let mut cmd = Command::new("npm");
-        cmd.args(["install", "-g", &format!("{npm_package}@latest")]);
-        cmd
+    let mut command = match build_cli_update_command(app, &normalized_cli_key, npm_package) {
+        Ok(command) => command,
+        Err(error) => {
+            return CliUpdateResult {
+                cli_key: normalized_cli_key,
+                success: false,
+                output: String::new(),
+                error: Some(error),
+            };
+        }
     };
     command.stdin(Stdio::null());
     command.stdout(Stdio::piped());
@@ -259,5 +332,19 @@ mod tests {
         assert_eq!(join_command_output(b"done\n", b"warn\n"), "done\nwarn");
         assert_eq!(join_command_output(b"done\n", b""), "done");
         assert_eq!(join_command_output(b"", b"warn\n"), "warn");
+    }
+
+    #[test]
+    fn prefer_sibling_npm_path_uses_same_bin_dir_as_cli() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cli_path = dir.path().join("codex");
+        let npm_path = dir
+            .path()
+            .join(if cfg!(windows) { "npm.cmd" } else { "npm" });
+
+        std::fs::write(&cli_path, "").expect("write cli");
+        std::fs::write(&npm_path, "").expect("write npm");
+
+        assert_eq!(prefer_sibling_npm_path(&cli_path), Some(npm_path));
     }
 }

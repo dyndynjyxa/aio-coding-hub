@@ -76,4 +76,29 @@ describe("components/cli-manager/CliVersionBadge", () => {
     expect(toast.success).toHaveBeenCalled();
     confirmSpy.mockRestore();
   });
+
+  it("reruns latest-version check when refresh token changes", async () => {
+    vi.mocked(cliCheckLatestVersion).mockResolvedValue({
+      cliKey: "gemini",
+      npmPackage: "@google/gemini-cli",
+      installedVersion: "1.0.0",
+      latestVersion: "1.0.0",
+      updateAvailable: false,
+      error: null,
+    });
+
+    const { rerender } = render(
+      <CliVersionBadge cliKey="gemini" installedVersion="1.0.0" refreshToken={0} />
+    );
+
+    await waitFor(() => {
+      expect(cliCheckLatestVersion).toHaveBeenCalledTimes(1);
+    });
+
+    rerender(<CliVersionBadge cliKey="gemini" installedVersion="1.0.0" refreshToken={1} />);
+
+    await waitFor(() => {
+      expect(cliCheckLatestVersion).toHaveBeenCalledTimes(2);
+    });
+  });
 });

@@ -282,31 +282,12 @@ pub(crate) async fn settings_set_impl<R: tauri::Runtime>(
                 .unwrap_or(previous.circuit_breaker_failure_threshold);
             let circuit_breaker_open_duration_minutes = circuit_breaker_open_duration_minutes
                 .unwrap_or(previous.circuit_breaker_open_duration_minutes);
-            let mut next_auto_start = auto_start;
-
-            #[cfg(desktop)]
-            {
-                if auto_start != previous.auto_start {
-                    use tauri_plugin_autostart::ManagerExt;
-
-                    let result = if auto_start {
-                        app_for_work
-                            .autolaunch()
-                            .enable()
-                            .map_err(|e| format!("failed to enable autostart: {e}"))
-                    } else {
-                        app_for_work
-                            .autolaunch()
-                            .disable()
-                            .map_err(|e| format!("failed to disable autostart: {e}"))
-                    };
-
-                    if let Err(err) = result {
-                        tracing::warn!("auto-start sync failed: {}", err);
-                        next_auto_start = previous.auto_start;
-                    }
-                }
-            }
+            let next_auto_start = crate::app::autostart::reconcile_auto_start(
+                &app_for_work,
+                previous.auto_start,
+                auto_start,
+                false,
+            );
 
             let settings = settings::AppSettings {
                 schema_version: settings::SCHEMA_VERSION,

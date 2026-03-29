@@ -31,9 +31,14 @@ pub(crate) async fn config_import(
     bundle: config_migrate::ConfigBundle,
 ) -> Result<config_migrate::ConfigImportResult, String> {
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    blocking::run("config_import", move || {
+    let result = blocking::run("config_import", move || {
         config_migrate::config_import(&app, &db, bundle)
     })
     .await
-    .map_err(Into::into)
+    .map_err(|err| -> String { err.into() })?;
+
+    #[cfg(windows)]
+    super::wsl::wsl_sync_trigger::trigger(app.clone());
+
+    Ok(result)
 }

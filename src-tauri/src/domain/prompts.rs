@@ -651,8 +651,22 @@ pub fn delete(
     Ok(())
 }
 
-pub fn sync_cli_for_workspace(
-    app: &tauri::AppHandle,
+pub(crate) fn sync_one_cli<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    conn: &Connection,
+    cli_key: &str,
+) -> crate::shared::error::AppResult<()> {
+    validate_cli_key(cli_key)?;
+
+    let Some(workspace_id) = workspaces::active_id_by_cli(conn, cli_key)? else {
+        return prompt_sync::restore_disabled_prompt(app, cli_key);
+    };
+
+    sync_cli_for_workspace(app, conn, workspace_id)
+}
+
+pub fn sync_cli_for_workspace<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     conn: &Connection,
     workspace_id: i64,
 ) -> crate::shared::error::AppResult<()> {
