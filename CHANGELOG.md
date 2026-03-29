@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.9](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.33.8...aio-coding-hub-v0.33.9) (2026-03-29)
+
+
+### Features
+
+* **proxy:** 实现对 Claude 请求的观察与请求日志生命周期管理 ([107d892](https://github.com/dyndynjyxa/aio-coding-hub/commit/107d89202defcd4bbb8727b15ec88bcf6bfe49e0))
+
 ## [0.33.8](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.33.7...aio-coding-hub-v0.33.8) (2026-03-29)
 
 
