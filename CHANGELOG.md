@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.33.10](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.33.9...aio-coding-hub-v0.33.10) (2026-03-31)
+
+
+### Features
+
+* **gateway:** 实现熔断器半开状态与相关逻辑 ([9bd8146](https://github.com/dyndynjyxa/aio-coding-hub/commit/9bd81467541ceb40009dce68e052aeee44e82e36))
+* **gateway:** 新增计费头修正功能及提供流空闲超时配置能力 ([bbf3d29](https://github.com/dyndynjyxa/aio-coding-hub/commit/bbf3d2910d6e5c7cda76b3a11032eb117b709376))
+
 ## [0.33.9](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.33.8...aio-coding-hub-v0.33.9) (2026-03-29)
 
 
