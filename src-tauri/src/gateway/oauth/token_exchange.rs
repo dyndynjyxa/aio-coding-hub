@@ -10,6 +10,7 @@ pub(crate) struct TokenExchangeRequest {
     pub client_id: String,
     pub client_secret: Option<String>,
     pub code: String,
+    pub state: Option<String>,
     pub redirect_uri: String,
     pub code_verifier: String,
 }
@@ -34,10 +35,12 @@ pub(crate) async fn exchange_authorization_code(
         ("code_verifier", &req.code_verifier),
     ];
 
-    let secret_ref;
+    if let Some(ref state) = req.state {
+        form.push(("state", state));
+    }
+
     if let Some(ref secret) = req.client_secret {
-        secret_ref = secret.clone();
-        form.push(("client_secret", &secret_ref));
+        form.push(("client_secret", secret));
     }
 
     tracing::info!(
@@ -66,10 +69,8 @@ pub(crate) async fn refresh_access_token(
         ("client_id", &req.client_id),
     ];
 
-    let secret_ref;
     if let Some(ref secret) = req.client_secret {
-        secret_ref = secret.clone();
-        form.push(("client_secret", &secret_ref));
+        form.push(("client_secret", secret));
     }
 
     tracing::debug!(

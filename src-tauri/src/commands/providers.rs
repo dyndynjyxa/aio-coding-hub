@@ -723,6 +723,7 @@ pub(crate) async fn provider_oauth_start_flow(
             client_id: endpoints.client_id.clone(),
             client_secret: endpoints.client_secret.clone(),
             code,
+            state: callback.state,
             redirect_uri,
             code_verifier: pkce.code_verifier,
         },
