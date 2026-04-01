@@ -725,6 +725,7 @@ pub(crate) async fn provider_oauth_start_flow(
             code,
             redirect_uri,
             code_verifier: pkce.code_verifier,
+            state: Some(oauth_state),
         },
     )
     .await

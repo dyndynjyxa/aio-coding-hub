@@ -12,6 +12,7 @@ pub(crate) struct TokenExchangeRequest {
     pub code: String,
     pub redirect_uri: String,
     pub code_verifier: String,
+    pub state: Option<String>,
 }
 
 #[derive(Debug)]
@@ -26,66 +27,151 @@ pub(crate) async fn exchange_authorization_code(
     client: &reqwest::Client,
     req: &TokenExchangeRequest,
 ) -> Result<OAuthTokenSet, String> {
-    let mut form = vec![
-        ("grant_type", "authorization_code"),
-        ("code", &req.code),
-        ("redirect_uri", &req.redirect_uri),
-        ("client_id", &req.client_id),
-        ("code_verifier", &req.code_verifier),
-    ];
-
-    let secret_ref;
-    if let Some(ref secret) = req.client_secret {
-        secret_ref = secret.clone();
-        form.push(("client_secret", &secret_ref));
-    }
-
     tracing::info!(
         token_uri = %req.token_uri,
         client_id = %req.client_id,
+        redirect_uri = %req.redirect_uri,
+        code_len = req.code.len(),
+        code_verifier_len = req.code_verifier.len(),
         "exchanging authorization code for tokens"
     );
 
-    let resp = client
-        .post(&req.token_uri)
-        .form(&form)
-        .send()
-        .await
-        .map_err(|e| format!("token exchange request failed: {e}"))?;
+    // Anthropic requires JSON body, others use form-encoded
+    let is_anthropic = is_anthropic_oauth_token_uri(&req.token_uri);
+
+    let resp = if is_anthropic {
+        let missing_state = req
+            .state
+            .as_ref()
+            .map(|state| state.trim().is_empty())
+            .unwrap_or(true);
+        if missing_state {
+            return Err(
+                "SEC_INVALID_INPUT: Anthropic token exchange requires non-empty OAuth state"
+                    .to_string(),
+            );
+        }
+
+        let body = build_anthropic_exchange_json(req);
+
+        client
+            .post(&req.token_uri)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("token exchange request failed: {e}"))?
+    } else {
+        let mut form = vec![
+            ("grant_type", "authorization_code"),
+            ("code", &req.code),
+            ("redirect_uri", &req.redirect_uri),
+            ("client_id", &req.client_id),
+            ("code_verifier", &req.code_verifier),
+        ];
+
+        let secret_ref;
+        if let Some(ref secret) = req.client_secret {
+            secret_ref = secret.clone();
+            form.push(("client_secret", &secret_ref));
+        }
+
+        client
+            .post(&req.token_uri)
+            .form(&form)
+            .send()
+            .await
+            .map_err(|e| format!("token exchange request failed: {e}"))?
+    };
 
     parse_token_response(resp).await
+}
+
+fn build_anthropic_exchange_json(req: &TokenExchangeRequest) -> serde_json::Value {
+    let mut body = serde_json::json!({
+        "grant_type": "authorization_code",
+        "code": req.code,
+        "redirect_uri": req.redirect_uri,
+        "client_id": req.client_id,
+        "code_verifier": req.code_verifier,
+    });
+
+    if let Some(ref state) = req.state {
+        body["state"] = serde_json::json!(state);
+    }
+
+    if let Some(ref secret) = req.client_secret {
+        body["client_secret"] = serde_json::json!(secret);
+    }
+
+    body
 }
 
 pub(crate) async fn refresh_access_token(
     client: &reqwest::Client,
     req: &TokenRefreshRequest,
 ) -> Result<OAuthTokenSet, String> {
-    let mut form = vec![
-        ("grant_type", "refresh_token"),
-        ("refresh_token", &req.refresh_token),
-        ("client_id", &req.client_id),
-    ];
-
-    let secret_ref;
-    if let Some(ref secret) = req.client_secret {
-        secret_ref = secret.clone();
-        form.push(("client_secret", &secret_ref));
-    }
-
     tracing::debug!(
         token_uri = %req.token_uri,
         refresh_token = %mask_token(&req.refresh_token),
         "refreshing access token"
     );
 
-    let resp = client
-        .post(&req.token_uri)
-        .form(&form)
-        .send()
-        .await
-        .map_err(|e| format!("token refresh request failed: {e}"))?;
+    // Anthropic requires JSON body, others use form-encoded
+    let is_anthropic = is_anthropic_oauth_token_uri(&req.token_uri);
+
+    let resp = if is_anthropic {
+        let body = build_anthropic_refresh_json(req);
+
+        client
+            .post(&req.token_uri)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("token refresh request failed: {e}"))?
+    } else {
+        let mut form = vec![
+            ("grant_type", "refresh_token"),
+            ("refresh_token", &req.refresh_token),
+            ("client_id", &req.client_id),
+        ];
+
+        let secret_ref;
+        if let Some(ref secret) = req.client_secret {
+            secret_ref = secret.clone();
+            form.push(("client_secret", &secret_ref));
+        }
+
+        client
+            .post(&req.token_uri)
+            .form(&form)
+            .send()
+            .await
+            .map_err(|e| format!("token refresh request failed: {e}"))?
+    };
 
     parse_token_response(resp).await
+}
+
+fn build_anthropic_refresh_json(req: &TokenRefreshRequest) -> serde_json::Value {
+    let mut body = serde_json::json!({
+        "grant_type": "refresh_token",
+        "refresh_token": req.refresh_token,
+        "client_id": req.client_id,
+    });
+
+    if let Some(ref secret) = req.client_secret {
+        body["client_secret"] = serde_json::json!(secret);
+    }
+
+    body
+}
+
+fn is_anthropic_oauth_token_uri(token_uri: &str) -> bool {
+    let uri = token_uri.trim().to_ascii_lowercase();
+    uri.contains("api.anthropic.com/v1/oauth/token")
+        || uri.contains("platform.claude.com/v1/oauth/token")
+        || (uri.contains("/v1/oauth/token")
+            && (uri.contains("anthropic.com") || uri.contains("claude.com")))
 }
 
 async fn parse_token_response(resp: reqwest::Response) -> Result<OAuthTokenSet, String> {
@@ -98,14 +184,31 @@ async fn parse_token_response(resp: reqwest::Response) -> Result<OAuthTokenSet, 
     if !status.is_success() {
         // Try to parse error details
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
-            let error = json
-                .get("error")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown");
-            let desc = json
-                .get("error_description")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            // Anthropic uses nested error structure: {"type":"error","error":{"type":"...","message":"..."}}
+            let (error, desc) =
+                if let Some(error_obj) = json.get("error").and_then(|v| v.as_object()) {
+                    // Nested structure (Anthropic format)
+                    let error_type = error_obj
+                        .get("type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    let error_msg = error_obj
+                        .get("message")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    (error_type, error_msg)
+                } else {
+                    // Flat structure (standard OAuth format)
+                    let error = json
+                        .get("error")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    let desc = json
+                        .get("error_description")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    (error, desc)
+                };
 
             if error == "invalid_grant" && desc.contains("refresh_token") {
                 return Err(
