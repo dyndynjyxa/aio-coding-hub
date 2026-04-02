@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.11](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.33.10...aio-coding-hub-v0.33.11) (2026-04-02)
+
+
+### Features
+
+* add Claude OAuth support with multi-account switching ([#149](https://github.com/dyndynjyxa/aio-coding-hub/issues/149)) ([ef787b1](https://github.com/dyndynjyxa/aio-coding-hub/commit/ef787b1ddf309ffcf9ffcb923d92bf2af3f557b6))
+
 ## [0.33.10](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.33.9...aio-coding-hub-v0.33.10) (2026-03-31)
 
 
