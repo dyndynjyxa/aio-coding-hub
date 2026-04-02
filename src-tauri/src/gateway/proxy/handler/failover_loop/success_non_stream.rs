@@ -38,6 +38,37 @@ fn looks_like_sse_payload(body_bytes: &[u8]) -> bool {
     trimmed.starts_with(b"event:") || trimmed.starts_with(b"data:") || trimmed.starts_with(b":")
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Cx2ccSuccessPayloadKind {
+    NonStreamJson,
+    HeaderlessEventStream,
+}
+
+struct ClassifiedCx2ccSuccessPayload {
+    kind: Cx2ccSuccessPayloadKind,
+    body_bytes: Bytes,
+}
+
+fn classify_cx2cc_success_payload(
+    cx2cc_active: bool,
+    response_headers: &mut HeaderMap,
+    body_bytes: Bytes,
+) -> Result<ClassifiedCx2ccSuccessPayload, String> {
+    let headerless_event_stream = cx2cc_active
+        && !is_event_stream(response_headers)
+        && looks_like_sse_payload(body_bytes.as_ref());
+    let body_bytes = buffer_cx2cc_event_stream_as_json(cx2cc_active, response_headers, body_bytes)?;
+
+    Ok(ClassifiedCx2ccSuccessPayload {
+        kind: if headerless_event_stream {
+            Cx2ccSuccessPayloadKind::HeaderlessEventStream
+        } else {
+            Cx2ccSuccessPayloadKind::NonStreamJson
+        },
+        body_bytes,
+    })
+}
+
 fn summarize_openai_response_json(body: &serde_json::Value) -> String {
     let model = body
         .get("model")
@@ -229,26 +260,13 @@ pub(super) async fn handle_success_non_stream(
 ) -> LoopControl {
     let common = CommonCtxOwned::from(ctx);
     let provider_ctx_owned = ProviderCtxOwned::from(provider_ctx);
-    tracing::info!(
+    tracing::debug!(
         trace_id = %common.trace_id,
         provider_id = provider_ctx_owned.provider_id,
         cx2cc_active = attempt_ctx.cx2cc_active,
         anthropic_stream_requested = attempt_ctx.anthropic_stream_requested,
-        "handling successful upstream non-stream response"
+        "handling successful upstream response, awaiting body classification"
     );
-    if attempt_ctx.cx2cc_active {
-        emit_gateway_log(
-            &common.state.app,
-            "info",
-            "CX2CC_SUCCESS_NON_STREAM",
-            format!(
-                "[CX2CC] handling successful upstream non-stream response trace_id={} provider_id={} anthropic_stream_requested={}",
-                common.trace_id,
-                provider_ctx_owned.provider_id,
-                attempt_ctx.anthropic_stream_requested
-            ),
-        );
-    }
 
     let state = common.state;
     let started = common.started;
@@ -576,29 +594,9 @@ pub(super) async fn handle_success_non_stream(
         MAX_NON_SSE_BODY_BYTES,
     );
 
-    if cx2cc_active
-        && !is_event_stream(&response_headers)
-        && looks_like_sse_payload(body_bytes.as_ref())
-    {
-        tracing::info!(
-            trace_id = %common.trace_id,
-            provider_id,
-            "cx2cc: detected SSE payload without event-stream content-type"
-        );
-        emit_gateway_log(
-            &state.app,
-            "info",
-            "CX2CC_SSE_HEADER_MISSING",
-            format!(
-                "[CX2CC] detected SSE payload without event-stream content-type trace_id={} provider_id={}",
-                common.trace_id, provider_id
-            ),
-        );
-    }
-
-    body_bytes =
-        match buffer_cx2cc_event_stream_as_json(cx2cc_active, &mut response_headers, body_bytes) {
-            Ok(bytes) => bytes,
+    let classified_payload =
+        match classify_cx2cc_success_payload(cx2cc_active, &mut response_headers, body_bytes) {
+            Ok(classified) => classified,
             Err(err) => {
                 tracing::warn!("cx2cc: non-stream event-stream aggregation failed: {err}");
                 emit_gateway_log(
@@ -638,6 +636,52 @@ pub(super) async fn handle_success_non_stream(
                 .await;
             }
         };
+
+    body_bytes = classified_payload.body_bytes;
+
+    match classified_payload.kind {
+        Cx2ccSuccessPayloadKind::NonStreamJson => {
+            tracing::info!(
+                trace_id = %common.trace_id,
+                provider_id,
+                cx2cc_active,
+                anthropic_stream_requested,
+                "handling successful upstream non-stream response"
+            );
+            if cx2cc_active {
+                emit_gateway_log(
+                    &state.app,
+                    "info",
+                    "CX2CC_SUCCESS_NON_STREAM",
+                    format!(
+                        "[CX2CC] handling successful upstream non-stream response trace_id={} provider_id={} anthropic_stream_requested={}",
+                        common.trace_id,
+                        provider_id,
+                        anthropic_stream_requested
+                    ),
+                );
+            }
+        }
+        Cx2ccSuccessPayloadKind::HeaderlessEventStream => {
+            tracing::info!(
+                trace_id = %common.trace_id,
+                provider_id,
+                anthropic_stream_requested,
+                "cx2cc: recovered headerless SSE payload on successful upstream response"
+            );
+            emit_gateway_log(
+                &state.app,
+                "info",
+                "CX2CC_SSE_HEADER_MISSING",
+                format!(
+                    "[CX2CC] recovered headerless SSE payload trace_id={} provider_id={} anthropic_stream_requested={}",
+                    common.trace_id,
+                    provider_id,
+                    anthropic_stream_requested
+                ),
+            );
+        }
+    }
 
     if cx2cc_active {
         match serde_json::from_slice::<serde_json::Value>(&body_bytes) {
@@ -866,8 +910,9 @@ pub(super) async fn handle_success_non_stream(
 #[cfg(test)]
 mod tests {
     use super::{
-        buffer_cx2cc_event_stream_as_json, should_passthrough_non_stream_success,
-        translate_cx2cc_non_stream_body,
+        buffer_cx2cc_event_stream_as_json, classify_cx2cc_success_payload,
+        should_passthrough_non_stream_success, translate_cx2cc_non_stream_body,
+        Cx2ccSuccessPayloadKind,
     };
     use crate::domain::usage;
     use axum::body::Bytes;
@@ -952,6 +997,51 @@ mod tests {
             false,
             false,
         ));
+    }
+
+    #[test]
+    fn classifies_headerless_cx2cc_sse_payload_before_logging_non_stream_success() {
+        let raw = concat!(
+            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_123\",\"model\":\"gpt-5\",\"status\":\"in_progress\",\"output\":[],\"usage\":{\"input_tokens\":11,\"output_tokens\":0}}}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_123\",\"model\":\"gpt-5\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":11,\"output_tokens\":7}}}\n\n"
+        );
+        let mut headers = HeaderMap::new();
+
+        let classified =
+            classify_cx2cc_success_payload(true, &mut headers, Bytes::from_static(raw.as_bytes()))
+                .unwrap();
+
+        assert_eq!(
+            classified.kind,
+            Cx2ccSuccessPayloadKind::HeaderlessEventStream
+        );
+        assert_eq!(
+            headers.get(header::CONTENT_TYPE).unwrap(),
+            "application/json"
+        );
+        let json: serde_json::Value =
+            serde_json::from_slice(classified.body_bytes.as_ref()).unwrap();
+        assert_eq!(json["id"], "resp_123");
+        assert_eq!(json["status"], "completed");
+    }
+
+    #[test]
+    fn classifies_plain_cx2cc_json_as_non_stream_success() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        let body = Bytes::from_static(br#"{"id":"resp_123","status":"completed"}"#);
+
+        let classified = classify_cx2cc_success_payload(true, &mut headers, body.clone()).unwrap();
+
+        assert_eq!(classified.kind, Cx2ccSuccessPayloadKind::NonStreamJson);
+        assert_eq!(classified.body_bytes, body);
+        assert_eq!(
+            headers.get(header::CONTENT_TYPE).unwrap(),
+            "application/json"
+        );
     }
 
     #[test]
