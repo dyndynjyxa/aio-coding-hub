@@ -10,7 +10,8 @@ fn setup_conn() -> Connection {
         r#"
 	CREATE TABLE providers (
 	  id INTEGER PRIMARY KEY,
-	  name TEXT NOT NULL
+	  name TEXT NOT NULL,
+	  source_provider_id INTEGER
 	);
 
 	CREATE TABLE request_logs (
@@ -278,6 +279,88 @@ INSERT INTO request_logs (
             .cost_usd,
         None
     );
+}
+
+#[test]
+fn v2_cache_rate_denominator_treats_cx2cc_like_cached_input_subtract() {
+    let conn = setup_conn();
+
+    conn.execute(
+        r#"INSERT INTO providers (id, name, source_provider_id) VALUES (?1, ?2, ?3);"#,
+        params![900, "Bridge CX2CC", 42],
+    )
+    .expect("insert provider");
+
+    conn.execute(
+        r#"
+INSERT INTO request_logs (
+  cli_key,
+  attempts_json,
+  final_provider_id,
+  requested_model,
+  status,
+  error_code,
+  duration_ms,
+  ttfb_ms,
+  input_tokens,
+  output_tokens,
+  total_tokens,
+  cache_read_input_tokens,
+  cache_creation_input_tokens,
+  cache_creation_5m_input_tokens,
+  cache_creation_1h_input_tokens,
+  cost_usd_femto,
+  usage_json,
+  excluded_from_stats,
+  created_at
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19);
+        "#,
+        params![
+            "claude",
+            r#"[{"provider_id":900,"provider_name":"Bridge CX2CC","outcome":"success"}]"#,
+            900,
+            "claude-through-cx2cc",
+            200,
+            Option::<String>::None,
+            1000,
+            100,
+            100,
+            10,
+            Option::<i64>::None,
+            30,
+            0,
+            0,
+            0,
+            Option::<i64>::None,
+            Option::<String>::None,
+            0,
+            1000
+        ],
+    )
+    .expect("insert cx2cc request");
+
+    let summary = summary_query(&conn, None, None, None, None).expect("summary_query");
+    assert_eq!(summary.input_tokens, 70);
+    assert_eq!(summary.cache_read_input_tokens, 30);
+    assert_eq!(summary.total_tokens, 110);
+
+    let rows = leaderboard_v2_with_conn(
+        &conn,
+        UsageScopeV2::Provider,
+        None,
+        None,
+        None,
+        None,
+        Some(50),
+    )
+    .expect("leaderboard_v2_with_conn");
+    let row = rows
+        .iter()
+        .find(|row| row.key == "claude:900")
+        .expect("cx2cc provider row");
+    assert_eq!(row.input_tokens, 70);
+    assert_eq!(row.cache_read_input_tokens, 30);
+    assert_eq!(row.total_tokens, 110);
 }
 
 #[test]
