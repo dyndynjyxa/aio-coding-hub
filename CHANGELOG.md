@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.35.1](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.35.0...aio-coding-hub-v0.35.1) (2026-04-03)
+
+
+### Features
+
+* **circuit-breaker:** 支持运行时动态更新断路器配置 ([3cb8722](https://github.com/dyndynjyxa/aio-coding-hub/commit/3cb87220345020ea8916f192ac6c84281d2736f2))
+* **gateway:** 增强上游错误处理与界面错误详情展示 ([85f67c4](https://github.com/dyndynjyxa/aio-coding-hub/commit/85f67c4c1ffe08d102883458a2d9d29e0b2b98cf))
+
+
+### Bug Fixes
+
+* **ci:** 修复Rust测试线程数为单线程运行 ([87ec1fe](https://github.com/dyndynjyxa/aio-coding-hub/commit/87ec1fe962d7b2913841e739e3ee7026f7145c36))
+* **cli_update:** 修复提取语义版本字符串的字符截取逻辑 ([782fb95](https://github.com/dyndynjyxa/aio-coding-hub/commit/782fb95d05236afbbfdf80b4bfb15921b9c34b88))
+* **gateway:** claude api-key auth fallback ([ac68780](https://github.com/dyndynjyxa/aio-coding-hub/commit/ac687808a15cc8d412714d623e4a32ef10ece310))
+* **gateway:** 修复 CX2CC 无 SSE 响应头成功响应的分类时机 ([#160](https://github.com/dyndynjyxa/aio-coding-hub/issues/160)) ([9edcd5b](https://github.com/dyndynjyxa/aio-coding-hub/commit/9edcd5bf8396a0a2a84e5b368d984717b4d7c81f))
+* **usage:** 修复 Usage 统计中的 CX2CC 缓存命中率计算 ([#159](https://github.com/dyndynjyxa/aio-coding-hub/issues/159)) ([3472560](https://github.com/dyndynjyxa/aio-coding-hub/commit/3472560f62f88e4eae4b4d53e920c290869a2c7d))
+* WebView2 不可恢复状态检测与分级恢复 ([#156](https://github.com/dyndynjyxa/aio-coding-hub/issues/156)) ([4869745](https://github.com/dyndynjyxa/aio-coding-hub/commit/4869745cb352279829317f18b5e1956c381b5b38))
+
 ## [0.35.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.34.0...aio-coding-hub-v0.35.0) (2026-04-02)
 
 
