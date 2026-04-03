@@ -33,7 +33,6 @@ const RECOVERY_BACKOFF_BASE: Duration = Duration::from_secs(30);
 const RECOVERY_BACKOFF_MAX: Duration = Duration::from_secs(5 * 60);
 
 const RECOVERY_CIRCUIT_THRESHOLD: u32 = 5;
-const RECOVERY_CIRCUIT_DURATION: Duration = Duration::from_secs(10 * 60);
 
 /// Maximum number of window rebuild attempts within `REBUILD_COOLDOWN` before
 /// escalating to a full app restart.
@@ -215,17 +214,6 @@ impl HeartbeatWatchdogState {
         delay
     }
 
-    fn trip_circuit(&self, now_unix_ms: u64) {
-        let until = now_unix_ms.saturating_add(RECOVERY_CIRCUIT_DURATION.as_millis() as u64);
-        let mut inner = self
-            .inner
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        inner.circuit_open_until_unix_ms = until;
-        inner.recovery_streak = 0;
-        inner.next_recovery_allowed_unix_ms = until;
-    }
-
     fn bump_recovery_streak(&self) -> u32 {
         let mut inner = self
             .inner
@@ -363,12 +351,18 @@ async fn check_and_recover_if_needed(app: &tauri::AppHandle) {
     let streak = state.bump_recovery_streak();
 
     if should_trip_circuit(streak) {
-        state.trip_circuit(now);
+        // Page-level reload has been attempted RECOVERY_CIRCUIT_THRESHOLD times
+        // without receiving a pong. This strongly suggests the WebView is in an
+        // unrecoverable state (e.g. reload() returns Ok but the operation fails
+        // asynchronously in the wry event loop with HRESULT 0x8007139F).
+        // Escalate to window rebuild instead of waiting passively.
         tracing::warn!(
             streak,
-            open_for_s = RECOVERY_CIRCUIT_DURATION.as_secs(),
-            "blank screen recovery circuit tripped, pausing auto-recovery"
+            "page reload exhausted without pong, escalating to window rebuild"
         );
+        state.mark_webview_broken();
+        state.set_webview_alive(false);
+        attempt_escalated_recovery(app).await;
         return;
     }
 
