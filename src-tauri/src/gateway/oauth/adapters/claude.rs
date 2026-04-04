@@ -152,26 +152,23 @@ impl OAuthProvider for ClaudeOAuthProvider {
                 .json()
                 .await
                 .map_err(|e| format!("claude limits parse failed: {e}"))?;
-            // 解析 resets_at ISO 8601 字符串
-            if let Some(five_hour) = json.get_mut("five_hour") {
-                if let Some(resets_at) = five_hour.get("resets_at").and_then(|v| v.as_str()) {
-                    if let Ok(dt) = DateTime::parse_from_rfc3339(resets_at) {
-                        if let Some(obj) = five_hour.as_object_mut() {
-                            obj.insert("reset_at".to_string(), serde_json::json!(dt.timestamp()));
+            // Convert ISO 8601 resets_at to Unix seconds for frontend countdown
+            fn inject_reset_at_unix(json: &mut serde_json::Value, key: &str) {
+                if let Some(window) = json.get_mut(key) {
+                    if let Some(resets_at) = window.get("resets_at").and_then(|v| v.as_str()) {
+                        if let Ok(dt) = DateTime::parse_from_rfc3339(resets_at) {
+                            if let Some(obj) = window.as_object_mut() {
+                                obj.insert(
+                                    "reset_at".to_string(),
+                                    serde_json::json!(dt.timestamp()),
+                                );
+                            }
                         }
                     }
                 }
             }
-
-            if let Some(seven_day) = json.get_mut("seven_day") {
-                if let Some(resets_at) = seven_day.get("resets_at").and_then(|v| v.as_str()) {
-                    if let Ok(dt) = DateTime::parse_from_rfc3339(resets_at) {
-                        if let Some(obj) = seven_day.as_object_mut() {
-                            obj.insert("reset_at".to_string(), serde_json::json!(dt.timestamp()));
-                        }
-                    }
-                }
-            }
+            inject_reset_at_unix(&mut json, "five_hour");
+            inject_reset_at_unix(&mut json, "seven_day");
 
             Ok(OAuthLimitsResult {
                 raw_json: Some(json),

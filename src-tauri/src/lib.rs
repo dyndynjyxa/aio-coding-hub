@@ -28,7 +28,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
-static EXIT_CLEANUP_SPAWNED: AtomicBool = AtomicBool::new(false);
+pub(crate) static EXIT_CLEANUP_SPAWNED: AtomicBool = AtomicBool::new(false);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

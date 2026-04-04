@@ -162,14 +162,20 @@ pub(crate) async fn wsl_configure_clients(
     let distros = detection.distros;
     let targets = cfg.wsl_target_cli;
 
-    // Gather MCP and Prompt sync data from DB
-    let (mcp_data, prompt_data) = blocking::run("wsl_configure_gather_sync_data", {
+    // Gather MCP, Prompt, and Skills sync data from DB/SSOT
+    let (mcp_data, prompt_data, skills_data) = blocking::run("wsl_configure_gather_sync_data", {
+        let app = app.clone();
         let db = db.clone();
-        move || -> crate::shared::error::AppResult<(wsl::WslMcpSyncData, wsl::WslPromptSyncData)> {
+        move || -> crate::shared::error::AppResult<(
+            wsl::WslMcpSyncData,
+            wsl::WslPromptSyncData,
+            wsl::WslSkillsSyncData,
+        )> {
             let conn = db.open_connection()?;
             let mcp = wsl::gather_mcp_sync_data(&conn)?;
             let prompts = wsl::gather_prompt_sync_data(&conn)?;
-            Ok((mcp, prompts))
+            let skills = wsl::gather_skills_sync_data(&app, &conn)?;
+            Ok((mcp, prompts, skills))
         }
     })
     .await?;
@@ -185,6 +191,7 @@ pub(crate) async fn wsl_configure_clients(
                 &proxy_origin,
                 Some(&mcp_data),
                 Some(&prompt_data),
+                Some(&skills_data),
             ))
         },
     )
@@ -193,7 +200,7 @@ pub(crate) async fn wsl_configure_clients(
     Ok(report)
 }
 
-/// Core WSL auto-sync logic shared by settings-change sync and MCP/Prompt-change sync.
+/// Core WSL auto-sync logic shared by settings-change sync and MCP/Prompt/Skills-change sync.
 /// Checks preconditions (wsl_auto_config enabled, listen mode != Localhost),
 /// detects WSL, resolves host, gathers sync data, and configures CLI clients.
 #[cfg(windows)]
@@ -248,17 +255,23 @@ pub(crate) async fn wsl_auto_sync_core(app: &tauri::AppHandle) -> Result<(), Str
     let targets = cfg.wsl_target_cli;
     let distros = detection.distros;
 
-    // 5. Gather MCP and Prompt sync data
+    // 5. Gather MCP, Prompt, and Skills sync data
     let db_state = app.state::<DbInitState>();
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
 
-    let (mcp_data, prompt_data) = blocking::run("wsl_core_gather_sync_data", {
+    let (mcp_data, prompt_data, skills_data) = blocking::run("wsl_core_gather_sync_data", {
+        let app = app.clone();
         let db = db.clone();
-        move || -> crate::shared::error::AppResult<(wsl::WslMcpSyncData, wsl::WslPromptSyncData)> {
+        move || -> crate::shared::error::AppResult<(
+            wsl::WslMcpSyncData,
+            wsl::WslPromptSyncData,
+            wsl::WslSkillsSyncData,
+        )> {
             let conn = db.open_connection()?;
             let mcp = wsl::gather_mcp_sync_data(&conn)?;
             let prompts = wsl::gather_prompt_sync_data(&conn)?;
-            Ok((mcp, prompts))
+            let skills = wsl::gather_skills_sync_data(&app, &conn)?;
+            Ok((mcp, prompts, skills))
         }
     })
     .await
@@ -276,6 +289,7 @@ pub(crate) async fn wsl_auto_sync_core(app: &tauri::AppHandle) -> Result<(), Str
                 &proxy_origin,
                 Some(&mcp_data),
                 Some(&prompt_data),
+                Some(&skills_data),
             ))
         },
     )
@@ -293,7 +307,7 @@ pub(crate) async fn wsl_auto_sync_core(app: &tauri::AppHandle) -> Result<(), Str
     Ok(())
 }
 
-/// Debounced WSL sync trigger for MCP/Prompt changes.
+/// Debounced WSL sync trigger for MCP/Prompt/Skills changes.
 /// Uses a background task with 500ms debounce window to coalesce rapid changes.
 #[cfg(windows)]
 pub(crate) mod wsl_sync_trigger {
@@ -413,14 +427,20 @@ async fn do_wsl_auto_configure(
 
     let targets = cfg.wsl_target_cli;
 
-    // Gather MCP and Prompt sync data
-    let (mcp_data, prompt_data) = blocking::run("wsl_startup_gather_sync_data", {
+    // Gather MCP, Prompt, and Skills sync data
+    let (mcp_data, prompt_data, skills_data) = blocking::run("wsl_startup_gather_sync_data", {
+        let app = app.clone();
         let db = db.clone();
-        move || -> crate::shared::error::AppResult<(wsl::WslMcpSyncData, wsl::WslPromptSyncData)> {
+        move || -> crate::shared::error::AppResult<(
+            wsl::WslMcpSyncData,
+            wsl::WslPromptSyncData,
+            wsl::WslSkillsSyncData,
+        )> {
             let conn = db.open_connection()?;
             let mcp = wsl::gather_mcp_sync_data(&conn)?;
             let prompts = wsl::gather_prompt_sync_data(&conn)?;
-            Ok((mcp, prompts))
+            let skills = wsl::gather_skills_sync_data(&app, &conn)?;
+            Ok((mcp, prompts, skills))
         }
     })
     .await
@@ -438,6 +458,7 @@ async fn do_wsl_auto_configure(
                 &proxy_origin,
                 Some(&mcp_data),
                 Some(&prompt_data),
+                Some(&skills_data),
             ))
         },
     )

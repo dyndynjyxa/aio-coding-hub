@@ -296,6 +296,10 @@ pub(crate) fn install(app: &tauri::AppHandle) {
 }
 
 async fn check_and_recover_if_needed(app: &tauri::AppHandle) {
+    // Skip recovery if app is shutting down — prevents watchdog from restarting the process
+    if crate::EXIT_CLEANUP_SPAWNED.load(std::sync::atomic::Ordering::Acquire) {
+        return;
+    }
     let now = now_unix_millis();
     let state = app.state::<HeartbeatWatchdogState>();
     let snapshot = state.snapshot();
