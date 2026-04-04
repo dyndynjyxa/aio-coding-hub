@@ -969,10 +969,23 @@ pub(crate) async fn provider_oauth_fetch_limits(
             (None, None)
         };
 
+    // Extract reset timestamps from raw_json
+    let (limit_5h_reset_at, limit_weekly_reset_at) = if let Some(ref raw) = limits.raw_json {
+        let cli_key = adapter.cli_key();
+        match cli_key {
+            "codex" | "claude" | "gemini" => extract_reset_timestamps(raw),
+            _ => (None, None),
+        }
+    } else {
+        (None, None)
+    };
+
     Ok(serde_json::json!({
         "limit_short_label": limit_short_label,
         "limit_5h_text": limit_5h_text,
         "limit_weekly_text": limit_weekly_text,
+        "limit_5h_reset_at": limit_5h_reset_at,
+        "limit_weekly_reset_at": limit_weekly_reset_at,
         "raw_json": limits.raw_json,
     }))
 }
@@ -1082,6 +1095,34 @@ fn parse_claude_limits(body: &serde_json::Value) -> (Option<String>, Option<Stri
         .and_then(extract_utilization)
         .map(|used| format_percent_label(100.0 - used));
     (limit_5h, limit_weekly)
+}
+fn extract_reset_timestamp(window: &serde_json::Value) -> Option<i64> {
+    window
+        .get("reset_at")
+        .or_else(|| window.get("resetAt"))
+        .or_else(|| window.get("resets_at"))
+        .or_else(|| window.get("resetsAt"))
+        .and_then(serde_json::Value::as_i64)
+}
+
+fn extract_reset_timestamps(body: &serde_json::Value) -> (Option<i64>, Option<i64>) {
+    let rate_limit = body.get("rate_limit").unwrap_or(body);
+    let primary = rate_limit
+        .get("primary_window")
+        .or_else(|| rate_limit.get("primaryWindow"))
+        .or_else(|| body.get("five_hour"))
+        .or_else(|| body.get("5_hour_window"))
+        .or_else(|| body.get("fiveHourWindow"));
+    let secondary = rate_limit
+        .get("secondary_window")
+        .or_else(|| rate_limit.get("secondaryWindow"))
+        .or_else(|| body.get("seven_day"))
+        .or_else(|| body.get("weekly_window"))
+        .or_else(|| body.get("weeklyWindow"));
+
+    let reset_5h = primary.and_then(extract_reset_timestamp);
+    let reset_weekly = secondary.and_then(extract_reset_timestamp);
+    (reset_5h, reset_weekly)
 }
 
 #[cfg(test)]

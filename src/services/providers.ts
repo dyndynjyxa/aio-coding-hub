@@ -203,6 +203,8 @@ export type OAuthLimitsResult = {
   limit_short_label?: string | null;
   limit_5h_text?: string | null;
   limit_weekly_text?: string | null;
+  limit_5h_reset_at?: number | null;
+  limit_weekly_reset_at?: number | null;
   raw_json?: Record<string, unknown> | null;
 };
 

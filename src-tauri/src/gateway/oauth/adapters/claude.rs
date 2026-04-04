@@ -2,6 +2,7 @@
 
 use crate::gateway::oauth::provider_trait::*;
 use axum::http::{HeaderMap, HeaderValue};
+use chrono::DateTime;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -147,10 +148,30 @@ impl OAuthProvider for ClaudeOAuthProvider {
                 return Err(format!("claude limits fetch status: {}", resp.status()));
             }
 
-            let json: serde_json::Value = resp
+            let mut json: serde_json::Value = resp
                 .json()
                 .await
                 .map_err(|e| format!("claude limits parse failed: {e}"))?;
+            // 解析 resets_at ISO 8601 字符串
+            if let Some(five_hour) = json.get_mut("five_hour") {
+                if let Some(resets_at) = five_hour.get("resets_at").and_then(|v| v.as_str()) {
+                    if let Ok(dt) = DateTime::parse_from_rfc3339(resets_at) {
+                        if let Some(obj) = five_hour.as_object_mut() {
+                            obj.insert("reset_at".to_string(), serde_json::json!(dt.timestamp()));
+                        }
+                    }
+                }
+            }
+
+            if let Some(seven_day) = json.get_mut("seven_day") {
+                if let Some(resets_at) = seven_day.get("resets_at").and_then(|v| v.as_str()) {
+                    if let Ok(dt) = DateTime::parse_from_rfc3339(resets_at) {
+                        if let Some(obj) = seven_day.as_object_mut() {
+                            obj.insert("reset_at".to_string(), serde_json::json!(dt.timestamp()));
+                        }
+                    }
+                }
+            }
 
             Ok(OAuthLimitsResult {
                 raw_json: Some(json),
