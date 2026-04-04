@@ -161,12 +161,6 @@ export function SortableProviderCard({
 
   const circuitState = useMemo(() => getGatewayCircuitDerivedState(circuit), [circuit]);
   const { isUnavailable, unavailableUntil } = circuitState;
-  const nowUnix = useNowUnix(isUnavailable);
-  const unavailableRemaining =
-    unavailableUntil != null ? Math.max(0, unavailableUntil - nowUnix) : null;
-  const unavailableCountdown =
-    unavailableRemaining != null ? formatCountdownSeconds(unavailableRemaining) : null;
-
   const isOAuth = provider.auth_mode === "oauth";
   const [apiKeyDetailsVisible, setApiKeyDetailsVisible] = useState(false);
   const [oauthLimits, setOauthLimits] = useState<OAuthLimitsResult | null>(
@@ -174,6 +168,16 @@ export function SortableProviderCard({
   );
   const [limitsLoading, setLimitsLoading] = useState(false);
   const oauthShortLabel = getOAuthShortWindowLabel(provider, oauthLimits);
+  const shouldTrackNowUnix =
+    isUnavailable ||
+    (isOAuth &&
+      oauthLimits != null &&
+      (oauthLimits.limit_5h_reset_at != null || oauthLimits.limit_weekly_reset_at != null));
+  const nowUnix = useNowUnix(shouldTrackNowUnix);
+  const unavailableRemaining =
+    unavailableUntil != null ? Math.max(0, unavailableUntil - nowUnix) : null;
+  const unavailableCountdown =
+    unavailableRemaining != null ? formatCountdownSeconds(unavailableRemaining) : null;
 
   // OAuth 限制重置倒计时
   const limitsResetCountdown = useMemo(() => {
@@ -220,14 +224,7 @@ export function SortableProviderCard({
     } else {
       fetchLimits();
     }
-  }, [isOAuth, provider.id]);
-
-  // 每 60 秒自动刷新 OAuth limits
-  useEffect(() => {
-    if (!isOAuth) return;
-    const interval = setInterval(() => {
-      fetchLimits();
-    }, 60000);
+    const interval = setInterval(fetchLimits, 60000);
     return () => clearInterval(interval);
   }, [isOAuth, provider.id]);
 
