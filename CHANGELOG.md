@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.35.2](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.35.1...aio-coding-hub-v0.35.2) (2026-04-04)
+
+
+### Features
+
+* **providers:** 添加 OAuth 限制重置倒计时 & 修复托盘退出重启问题 ([#168](https://github.com/dyndynjyxa/aio-coding-hub/issues/168)) ([4ca1248](https://github.com/dyndynjyxa/aio-coding-hub/commit/4ca124860c48fd3764ecf1da861adef072267ba7))
+* **ui:** 设置与首页展示优化，并修复 Node 24 下 pre-push 单测问题 ([#169](https://github.com/dyndynjyxa/aio-coding-hub/issues/169)) ([165db18](https://github.com/dyndynjyxa/aio-coding-hub/commit/165db18dce650cee175a8df07f9bc80168575aab))
+
+
+### Bug Fixes
+
+* **gateway:** 修复 HALF_OPEN 状态下熔断未及时解除的前端展示问题 ([#166](https://github.com/dyndynjyxa/aio-coding-hub/issues/166)) ([4c809f9](https://github.com/dyndynjyxa/aio-coding-hub/commit/4c809f9b0b6aee4e426d8f3a6d2aa53699fd7b35))
+
 ## [0.35.1](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.35.0...aio-coding-hub-v0.35.1) (2026-04-03)
 
 
