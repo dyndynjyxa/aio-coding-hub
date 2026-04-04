@@ -327,7 +327,7 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                 <div className="mb-1.5 flex min-w-0 items-center gap-2">
                   <span
                     className={cn(
-                      "inline-flex w-[100px] shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
+                      "inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
                       statusBadge.tone
                     )}
                     title={statusBadge.title}
@@ -344,7 +344,7 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
 
                   <span
                     className={cn(
-                      "inline-flex w-[180px] min-w-0 shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
+                      "inline-flex min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
                       cliTone
                     )}
                     title={`${cliLabel} / ${modelText}`}
@@ -354,7 +354,16 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                       className="h-2.5 w-2.5 shrink-0 rounded-[3px] object-contain"
                     />
                     <span className="shrink-0">{cliLabel} /</span>
-                    <span className="flex-1 text-center truncate">{modelText}</span>
+                    <span className="truncate">{modelText}</span>
+                  </span>
+
+                  <span
+                    aria-label={`服务提供商 ${providerText}`}
+                    className="inline-flex min-w-0 items-center gap-1 rounded-md bg-slate-100/75 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-700/55 dark:text-slate-200"
+                    title={providerTitle}
+                  >
+                    <Server className="h-3 w-3 shrink-0 text-slate-400 dark:text-slate-500" />
+                    <span className="truncate">{providerText}</span>
                   </span>
 
                   {isFree && <FreeBadge />}

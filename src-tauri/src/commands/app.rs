@@ -62,6 +62,8 @@ pub(crate) fn app_about_get() -> AppAboutInfo {
 pub(crate) fn app_exit(app: tauri::AppHandle) -> Result<bool, String> {
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(200));
+        app.state::<crate::app::resident::ResidentState>()
+            .begin_exit();
         app.exit(0);
     });
     Ok(true)
@@ -71,6 +73,8 @@ pub(crate) fn app_exit(app: tauri::AppHandle) -> Result<bool, String> {
 pub(crate) fn app_restart(app: tauri::AppHandle) -> Result<bool, String> {
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(200));
+        app.state::<crate::app::resident::ResidentState>()
+            .begin_restart();
         tauri::async_runtime::block_on(crate::app::cleanup::cleanup_before_exit(&app));
         app.request_restart();
     });

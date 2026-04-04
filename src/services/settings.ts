@@ -1,5 +1,6 @@
 import type { HomeUsagePeriod } from "../constants/homeUsagePeriods";
 import { commands } from "../generated/bindings";
+import type { CliKey } from "./providers";
 import { invokeGeneratedIpc, type GeneratedCommandResult } from "./generatedIpc";
 
 export type GatewayListenMode = "localhost" | "wsl_auto" | "lan" | "custom";
@@ -24,6 +25,7 @@ export type AppSettings = {
   gateway_custom_listen_address: string;
   wsl_auto_config: boolean;
   wsl_target_cli: WslTargetCli;
+  cli_priority_order: CliKey[];
   wsl_host_address_mode: WslHostAddressMode;
   wsl_custom_host_address: string;
   codex_home_mode: CodexHomeMode;
@@ -110,6 +112,7 @@ export type SettingsSetInput = {
   circuitBreakerOpenDurationMinutes?: number;
   wslAutoConfig?: boolean;
   wslTargetCli?: WslTargetCli;
+  cliPriorityOrder?: CliKey[];
   wslHostAddressMode?: WslHostAddressMode;
   wslCustomHostAddress?: string;
   codexHomeMode?: CodexHomeMode;

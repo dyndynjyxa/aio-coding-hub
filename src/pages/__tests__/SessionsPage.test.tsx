@@ -30,8 +30,15 @@ vi.mock("../../query/wsl", async () => {
   const actual = await vi.importActual<typeof import("../../query/wsl")>("../../query/wsl");
   return { ...actual, useWslDetectionQuery: vi.fn() };
 });
+vi.mock("../../query/settings", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../query/settings")>("../../query/settings");
+  return { ...actual, useSettingsQuery: vi.fn() };
+});
 import { cliSessionsProjectsList } from "../../services/cliSessions";
+import { useSettingsQuery } from "../../query/settings";
 import { useWslDetectionQuery } from "../../query/wsl";
+import { createTestAppSettings } from "../../test/fixtures/settings";
 import { SessionsPage } from "../SessionsPage";
 
 function LocationDisplay() {
@@ -64,6 +71,9 @@ describe("pages/SessionsPage", () => {
   beforeEach(() => {
     setTauriRuntime();
     vi.mocked(cliSessionsProjectsList).mockResolvedValue([]);
+    vi.mocked(useSettingsQuery).mockReturnValue({
+      data: createTestAppSettings(),
+    } as any);
     vi.mocked(useWslDetectionQuery).mockReturnValue({
       data: null,
       isFetched: false,
@@ -143,6 +153,28 @@ describe("pages/SessionsPage", () => {
     const codexTab = screen.getByText("Codex");
     fireEvent.click(codexTab);
     // After switching, projects query re-fetches
+    expect(cliSessionsProjectsList).toHaveBeenCalledWith("codex", undefined);
+  });
+
+  it("uses the global CLI priority when source is missing from the URL", async () => {
+    vi.mocked(useSettingsQuery).mockReturnValue({
+      data: createTestAppSettings({ cli_priority_order: ["codex", "claude", "gemini"] }),
+    } as any);
+    vi.mocked(cliSessionsProjectsList).mockResolvedValue([
+      {
+        source: "codex",
+        id: "proj-1",
+        display_path: "/home/user/proj",
+        short_name: "Codex Project",
+        session_count: 1,
+        last_modified: 1740000000,
+        model_provider: null,
+        wsl_distro: null,
+      },
+    ]);
+
+    renderWithProviders(<SessionsPage />, { route: "/" });
+    expect(await screen.findByText("Codex Project")).toBeInTheDocument();
     expect(cliSessionsProjectsList).toHaveBeenCalledWith("codex", undefined);
   });
 

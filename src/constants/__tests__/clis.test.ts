@@ -19,7 +19,7 @@ describe("constants/clis", () => {
     expect(CLI_FILTER_ITEMS[0]).toEqual({ key: "all", label: "全部" });
     expect(CLI_FILTER_ITEMS.map((item) => item.key)).toContain("claude");
     expect(CLI_SHORT_ITEMS).toEqual([
-      { key: "claude", label: "Claude" },
+      { key: "claude", label: "Claude Code" },
       { key: "codex", label: "Codex" },
       { key: "gemini", label: "Gemini" },
     ]);
@@ -43,7 +43,7 @@ describe("constants/clis", () => {
     expect(enabledFlagForCli(row, "claude" as any)).toBe(true);
     expect(enabledFlagForCli(row, "codex" as any)).toBe(false);
 
-    expect(cliShortLabel("claude")).toBe("Claude");
+    expect(cliShortLabel("claude")).toBe("Claude Code");
     expect(cliShortLabel("codex")).toBe("Codex");
     expect(cliShortLabel("gemini")).toBe("Gemini");
     expect(cliShortLabel("other")).toBe("other");

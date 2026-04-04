@@ -16,9 +16,11 @@ import {
   useSkillsLocalListQuery,
 } from "../../query/skills";
 import { useWorkspacesListQuery } from "../../query/workspaces";
+import { useSettingsQuery } from "../../query/settings";
 import { logToConsole } from "../../services/consoleLog";
 import { createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
+import { createTestAppSettings } from "../../test/fixtures/settings";
 
 const navigateMock = vi.fn();
 
@@ -34,6 +36,12 @@ vi.mock("../../query/workspaces", async () => {
   const actual =
     await vi.importActual<typeof import("../../query/workspaces")>("../../query/workspaces");
   return { ...actual, useWorkspacesListQuery: vi.fn() };
+});
+
+vi.mock("../../query/settings", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../query/settings")>("../../query/settings");
+  return { ...actual, useSettingsQuery: vi.fn() };
 });
 
 vi.mock("../../query/skills", async () => {
@@ -61,6 +69,10 @@ function renderWithProviders(element: ReactElement) {
 }
 
 function mockCommonState() {
+  localStorage.clear();
+  vi.mocked(useSettingsQuery).mockReturnValue({
+    data: createTestAppSettings(),
+  } as any);
   vi.mocked(useSkillReposListQuery).mockReturnValue({
     data: [
       {
@@ -204,6 +216,22 @@ describe("pages/SkillsMarketPage", () => {
       });
     });
     expect(toast).toHaveBeenCalledWith("已安装到 Claude Code");
+  });
+
+  it("falls back to the global CLI priority when localStorage is missing", () => {
+    setTauriRuntime();
+    navigateMock.mockClear();
+    mockCommonState();
+    vi.mocked(useSettingsQuery).mockReturnValue({
+      data: createTestAppSettings({ cli_priority_order: ["gemini", "codex", "claude"] }),
+    } as any);
+    vi.mocked(useSkillsDiscoverAvailableQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+    } as any);
+
+    renderWithProviders(<SkillsMarketPage />);
+    expect(useWorkspacesListQuery).toHaveBeenCalledWith("gemini");
   });
 
   it("keeps the market list area as a flex scroll region for expanded repo content", () => {

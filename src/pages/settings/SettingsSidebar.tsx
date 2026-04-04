@@ -28,7 +28,6 @@ import { SettingsAboutCard } from "./SettingsAboutCard";
 import { SettingsDataManagementCard } from "./SettingsDataManagementCard";
 import { SettingsDataSyncCard } from "./SettingsDataSyncCard";
 import { SettingsDialogs } from "./SettingsDialogs";
-import { SettingsUpdateCard } from "./SettingsUpdateCard";
 
 type AvailableStatus = "checking" | "available" | "unavailable";
 
@@ -355,9 +354,7 @@ export function SettingsSidebar({ updateMeta }: SettingsSidebarProps) {
   return (
     <>
       <div className="space-y-6 lg:col-span-4">
-        <SettingsAboutCard about={about} />
-
-        <SettingsUpdateCard
+        <SettingsAboutCard
           about={about}
           checkingUpdate={updateMeta.checkingUpdate}
           checkUpdate={checkUpdate}

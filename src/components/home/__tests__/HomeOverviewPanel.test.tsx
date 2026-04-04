@@ -117,6 +117,7 @@ function renderPanel(overrides: Partial<ComponentProps<typeof HomeOverviewPanel>
     <HomeOverviewPanel
       showCustomTooltip={false}
       showHomeHeatmap={true}
+      cliPriorityOrder={["claude", "codex", "gemini"]}
       usageWindowDays={15}
       usageHeatmapRows={[]}
       usageHeatmapLoading={false}
@@ -287,6 +288,47 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(onSetCliActiveMode).toHaveBeenCalledWith("codex", 1);
   });
 
+  it("uses CLI priority order for workspace config button order and default selection", async () => {
+    renderPanel({
+      cliPriorityOrder: ["gemini", "codex", "claude"],
+      workspaceConfigs: [
+        {
+          cliKey: "claude",
+          cliLabel: "Claude Code",
+          workspaceId: 1,
+          workspaceName: "工作区 A",
+          loading: false,
+          items: [{ id: "prompt:1", type: "prompts", label: "Prompt", name: "Claude Prompt" }],
+        },
+        {
+          cliKey: "codex",
+          cliLabel: "Codex",
+          workspaceId: 2,
+          workspaceName: "工作区 B",
+          loading: false,
+          items: [{ id: "prompt:2", type: "prompts", label: "Prompt", name: "Codex Prompt" }],
+        },
+        {
+          cliKey: "gemini",
+          cliLabel: "Gemini",
+          workspaceId: 3,
+          workspaceName: "工作区 C",
+          loading: false,
+          items: [{ id: "prompt:3", type: "prompts", label: "Prompt", name: "Gemini Prompt" }],
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "配置信息" }));
+    expect(
+      screen
+        .getAllByRole("button", { name: /Claude Code|Codex|Gemini/ })
+        .map((button) => button.textContent)
+    ).toEqual(["Gemini", "Codex", "Claude Code"]);
+    expect(await screen.findByText("工作区 C")).toBeInTheDocument();
+    expect(screen.getByText("Gemini Prompt")).toBeInTheDocument();
+  });
+
   it("renders preview workspace config rows when dev preview is enabled and there is no real config data", async () => {
     renderPanel({ workspaceConfigs: [], devPreviewEnabled: true });
 
@@ -408,6 +450,7 @@ describe("components/home/HomeOverviewPanel", () => {
       <HomeOverviewPanel
         showCustomTooltip={false}
         showHomeHeatmap={true}
+        cliPriorityOrder={["claude", "codex", "gemini"]}
         usageWindowDays={15}
         usageHeatmapRows={[]}
         usageHeatmapLoading={false}
@@ -476,6 +519,7 @@ describe("components/home/HomeOverviewPanel", () => {
       <HomeOverviewPanel
         showCustomTooltip={false}
         showHomeHeatmap={true}
+        cliPriorityOrder={["claude", "codex", "gemini"]}
         usageWindowDays={15}
         usageHeatmapRows={[]}
         usageHeatmapLoading={false}

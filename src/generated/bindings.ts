@@ -56,6 +56,7 @@ export type AppSettings = {
   gateway_custom_listen_address: string;
   wsl_auto_config: boolean;
   wsl_target_cli: WslTargetCli;
+  cli_priority_order?: string[];
   wsl_host_address_mode: WslHostAddressMode;
   wsl_custom_host_address: string;
   codex_home_mode: CodexHomeMode;
@@ -212,6 +213,7 @@ export type SettingsUpdate = {
   updateReleasesUrl: string | null;
   wslAutoConfig: boolean | null;
   wslTargetCli: WslTargetCli | null;
+  cliPriorityOrder: string[] | null;
   wslHostAddressMode: WslHostAddressMode | null;
   wslCustomHostAddress: string | null;
   codexHomeMode: CodexHomeMode | null;

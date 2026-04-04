@@ -241,11 +241,15 @@ describe("components/home/HomeCostPanel", () => {
     // Chart filter buttons are separate handlers.
     const trendHeader = screen.getByText("总花费趋势").parentElement?.parentElement;
     expect(trendHeader).toBeTruthy();
-    fireEvent.click(within(trendHeader as HTMLElement).getByRole("button", { name: "Claude" }));
+    fireEvent.click(
+      within(trendHeader as HTMLElement).getByRole("button", { name: "Claude Code" })
+    );
 
     const scatterHeader = screen.getByText("总成本 × 总耗时").parentElement?.parentElement;
     expect(scatterHeader).toBeTruthy();
-    fireEvent.click(within(scatterHeader as HTMLElement).getByRole("button", { name: "Claude" }));
+    fireEvent.click(
+      within(scatterHeader as HTMLElement).getByRole("button", { name: "Claude Code" })
+    );
 
     // Query hook should have been called with multiple periods/filters across rerenders.
     const calls = vi.mocked(useCostAnalyticsV1Query).mock.calls;

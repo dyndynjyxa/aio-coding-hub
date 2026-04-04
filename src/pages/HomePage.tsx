@@ -198,6 +198,7 @@ export function HomePage() {
             devPreviewEnabled={devPreviewEnabled}
             showHomeHeatmap={showHomeHeatmap}
             showHomeUsage={showHomeUsage}
+            cliPriorityOrder={settingsQuery.data?.cli_priority_order}
             usageWindowDays={homeUsageWindowDays}
             usageHeatmapRows={usageHeatmapRows}
             usageHeatmapLoading={usageHeatmapLoading}

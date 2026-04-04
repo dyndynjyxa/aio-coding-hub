@@ -77,12 +77,9 @@ vi.mock("../../../query/dataManagement", async () => {
 });
 
 vi.mock("../SettingsAboutCard", () => ({
-  SettingsAboutCard: ({ about }: any) => <div>about:{about?.run_mode ?? "none"}</div>,
-}));
-
-vi.mock("../SettingsUpdateCard", () => ({
-  SettingsUpdateCard: ({ checkUpdate, checkingUpdate }: any) => (
+  SettingsAboutCard: ({ about, checkUpdate, checkingUpdate }: any) => (
     <div>
+      <div>about:{about?.run_mode ?? "none"}</div>
       <div>checking:{String(checkingUpdate)}</div>
       <button type="button" onClick={() => checkUpdate()}>
         check-update

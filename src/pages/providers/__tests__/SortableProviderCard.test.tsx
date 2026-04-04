@@ -326,6 +326,23 @@ describe("pages/providers/SortableProviderCard", () => {
     expect(screen.getByText("解除熔断")).toBeInTheDocument();
   });
 
+  it("does not render circuit breaker controls for HALF_OPEN probe state", () => {
+    renderCard(
+      {},
+      {
+        circuit: {
+          provider_id: 1,
+          state: "HALF_OPEN",
+          open_until: null,
+          cooldown_until: null,
+        } as any,
+      }
+    );
+
+    expect(screen.queryByTitle("熔断")).not.toBeInTheDocument();
+    expect(screen.queryByText("解除熔断")).not.toBeInTheDocument();
+  });
+
   it("computes unavailableUntil as max of open_until and cooldown_until", () => {
     const futureTs = Math.floor(Date.now() / 1000) + 600;
     renderCard(

@@ -383,7 +383,7 @@ export function WslSettingsCard({ available, saving, settings }: WslSettingsCard
                   <thead>
                     <tr className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
                       <th className="text-left px-3 py-2 font-medium">发行版</th>
-                      <th className="text-center px-3 py-2 font-medium">Claude</th>
+                      <th className="text-center px-3 py-2 font-medium">Claude Code</th>
                       <th className="text-center px-3 py-2 font-medium">Codex</th>
                       <th className="text-center px-3 py-2 font-medium">Gemini</th>
                     </tr>

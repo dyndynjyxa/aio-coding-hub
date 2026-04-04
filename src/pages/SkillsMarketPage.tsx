@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { CLIS, cliFromKeyOrDefault, isCliKey } from "../constants/clis";
+import { useSettingsQuery } from "../query/settings";
 import {
   useSkillInstallToLocalMutation,
   useSkillRepoDeleteMutation,
@@ -17,6 +18,7 @@ import {
 } from "../query/skills";
 import { useWorkspacesListQuery } from "../query/workspaces";
 import { logToConsole } from "../services/consoleLog";
+import { getOrderedClis, pickDefaultCliByPriority } from "../services/cliPriorityOrder";
 import type { CliKey } from "../services/providers";
 import type {
   AvailableSkillSummary,
@@ -48,12 +50,12 @@ function formatUnixSeconds(ts: number) {
   }
 }
 
-function readCliFromStorage(): CliKey {
+function readCliFromStorage(): CliKey | null {
   try {
     const raw = localStorage.getItem("skills.activeCli");
     if (isCliKey(raw)) return raw;
   } catch {}
-  return "claude";
+  return null;
 }
 
 function writeCliToStorage(cli: CliKey) {
@@ -104,21 +106,22 @@ function statusRank(status: MarketStatus) {
   return 3;
 }
 
-const CLI_TABS: Array<{ key: CliKey; label: string }> = CLIS.map((cli) => ({
-  key: cli.key,
-  label: cli.name,
-}));
-
 export function SkillsMarketPage() {
   const navigate = useNavigate();
-  const [activeCli, setActiveCli] = useState<CliKey>(() => readCliFromStorage());
-  const currentCli = useMemo(() => cliFromKeyOrDefault(activeCli), [activeCli]);
+  const settingsQuery = useSettingsQuery();
+  const orderedCliTabs = getOrderedClis(settingsQuery.data?.cli_priority_order);
+  const orderedCliKeys = orderedCliTabs.map((cli) => cli.key);
+  const defaultCli =
+    pickDefaultCliByPriority(settingsQuery.data?.cli_priority_order, orderedCliKeys) ?? CLIS[0].key;
+  const [activeCli, setActiveCli] = useState<CliKey | null>(() => readCliFromStorage());
+  const effectiveCli = activeCli ?? defaultCli;
+  const currentCli = useMemo(() => cliFromKeyOrDefault(effectiveCli), [effectiveCli]);
 
   const reposQuery = useSkillReposListQuery();
   const repos = useMemo(() => reposQuery.data ?? [], [reposQuery.data]);
   const enabledRepoCount = useMemo(() => repos.filter((repo) => repo.enabled).length, [repos]);
 
-  const workspacesQuery = useWorkspacesListQuery(activeCli);
+  const workspacesQuery = useWorkspacesListQuery(effectiveCli);
   const activeWorkspaceId = workspacesQuery.data?.active_id ?? null;
 
   const installedQuery = useSkillsInstalledListQuery(activeWorkspaceId);
@@ -168,8 +171,8 @@ export function SkillsMarketPage() {
   const [repoDeleting, setRepoDeleting] = useState(false);
 
   useEffect(() => {
-    writeCliToStorage(activeCli);
-  }, [activeCli]);
+    writeCliToStorage(effectiveCli);
+  }, [effectiveCli]);
 
   const installedBySource = useMemo(() => {
     const map = new Map<string, InstalledSkillSummary>();
@@ -424,7 +427,7 @@ export function SkillsMarketPage() {
     if (!next) return null;
 
     logToConsole("info", "安装 Skill 到当前 CLI", {
-      cli: activeCli,
+      cli: effectiveCli,
       workspace_id: activeWorkspaceId,
       source: sourceHint(skill),
       local_skill: next,
@@ -447,7 +450,7 @@ export function SkillsMarketPage() {
       logToConsole("error", "安装 Skill 到当前 CLI 失败", {
         error: formatted.raw,
         error_code: formatted.error_code ?? undefined,
-        cli: activeCli,
+        cli: effectiveCli,
         skill,
       });
       toast(formatted.toast);
@@ -482,7 +485,7 @@ export function SkillsMarketPage() {
           logToConsole("error", "批量安装 Skill 到当前 CLI 失败", {
             error: formatted.raw,
             error_code: formatted.error_code ?? undefined,
-            cli: activeCli,
+            cli: effectiveCli,
             repo: group.repoPath,
             skill,
           });
@@ -537,7 +540,12 @@ export function SkillsMarketPage() {
           </Button>
         </div>
 
-        <TabList ariaLabel="CLI 选择" items={CLI_TABS} value={activeCli} onChange={setActiveCli} />
+        <TabList
+          ariaLabel="CLI 选择"
+          items={orderedCliTabs.map((cli) => ({ key: cli.key, label: cli.name }))}
+          value={effectiveCli}
+          onChange={setActiveCli}
+        />
       </div>
 
       <Card

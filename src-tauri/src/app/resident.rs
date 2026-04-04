@@ -1,22 +1,35 @@
 //! Usage: Desktop resident mode (tray icon + window lifecycle hooks).
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_ID: &str = "main-tray";
 const TRAY_MENU_TOGGLE_ID: &str = "tray.toggle";
 const TRAY_MENU_QUIT_ID: &str = "tray.quit";
+const LIFECYCLE_INTENT_IDLE: u8 = 0;
+const LIFECYCLE_INTENT_EXIT: u8 = 1;
+const LIFECYCLE_INTENT_RESTART: u8 = 2;
 
 pub struct ResidentState {
     tray_enabled: AtomicBool,
+    lifecycle_intent: AtomicU8,
 }
 
 impl Default for ResidentState {
     fn default() -> Self {
         Self {
             tray_enabled: AtomicBool::new(true),
+            lifecycle_intent: AtomicU8::new(LIFECYCLE_INTENT_IDLE),
         }
     }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CloseRequestAction {
+    AllowClose,
+    HideToTray,
+    Minimize,
 }
 
 impl ResidentState {
@@ -26,6 +39,32 @@ impl ResidentState {
 
     pub fn tray_enabled(&self) -> bool {
         self.tray_enabled.load(Ordering::Relaxed)
+    }
+
+    pub fn begin_exit(&self) {
+        self.lifecycle_intent
+            .store(LIFECYCLE_INTENT_EXIT, Ordering::Release);
+    }
+
+    pub fn begin_restart(&self) {
+        self.lifecycle_intent
+            .store(LIFECYCLE_INTENT_RESTART, Ordering::Release);
+    }
+
+    pub fn is_terminating(&self) -> bool {
+        self.lifecycle_intent.load(Ordering::Acquire) != LIFECYCLE_INTENT_IDLE
+    }
+
+    fn close_request_action(&self) -> CloseRequestAction {
+        if self.is_terminating() {
+            return CloseRequestAction::AllowClose;
+        }
+
+        if self.tray_enabled() {
+            CloseRequestAction::HideToTray
+        } else {
+            CloseRequestAction::Minimize
+        }
     }
 }
 
@@ -82,6 +121,7 @@ pub fn setup_tray(app: &tauri::AppHandle) -> crate::shared::error::AppResult<()>
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| {
             if event.id == quit_id {
+                app.state::<ResidentState>().begin_exit();
                 app.exit(0);
                 return;
             }
@@ -179,15 +219,58 @@ pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
         return;
     };
 
-    api.prevent_close();
-
     let resident = window.state::<ResidentState>();
-    if resident.tray_enabled() {
-        let _ = window.hide();
+    match resident.close_request_action() {
+        CloseRequestAction::AllowClose => {}
+        CloseRequestAction::HideToTray => {
+            api.prevent_close();
+            let _ = window.hide();
 
-        #[cfg(target_os = "macos")]
-        set_dock_visibility(window.app_handle(), false);
-    } else {
-        let _ = window.minimize();
+            #[cfg(target_os = "macos")]
+            set_dock_visibility(window.app_handle(), false);
+        }
+        CloseRequestAction::Minimize => {
+            api.prevent_close();
+            let _ = window.minimize();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn close_request_hides_to_tray_when_resident_mode_enabled() {
+        let state = ResidentState::default();
+        state.set_tray_enabled(true);
+
+        assert_eq!(state.close_request_action(), CloseRequestAction::HideToTray);
+    }
+
+    #[test]
+    fn close_request_minimizes_when_resident_mode_disabled() {
+        let state = ResidentState::default();
+        state.set_tray_enabled(false);
+
+        assert_eq!(state.close_request_action(), CloseRequestAction::Minimize);
+    }
+
+    #[test]
+    fn explicit_exit_allows_close() {
+        let state = ResidentState::default();
+        state.begin_exit();
+
+        assert!(state.is_terminating());
+        assert_eq!(state.close_request_action(), CloseRequestAction::AllowClose);
+    }
+
+    #[test]
+    fn explicit_restart_allows_close() {
+        let state = ResidentState::default();
+        state.begin_restart();
+
+        assert!(state.is_terminating());
+        assert_eq!(state.close_request_action(), CloseRequestAction::AllowClose);
     }
 }

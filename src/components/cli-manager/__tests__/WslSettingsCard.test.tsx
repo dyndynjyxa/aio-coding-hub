@@ -350,7 +350,7 @@ describe("components/cli-manager/WslSettingsCard", () => {
     expect(screen.getAllByText("Debian").length).toBeGreaterThan(0);
 
     // Table headers
-    expect(screen.getByText("Claude")).toBeInTheDocument();
+    expect(screen.getByText("Claude Code")).toBeInTheDocument();
     expect(screen.getByText("Codex")).toBeInTheDocument();
     expect(screen.getByText("Gemini")).toBeInTheDocument();
     expect(screen.getAllByTitle("Auth: yes, MCP: yes, Prompt: yes").length).toBeGreaterThan(0);

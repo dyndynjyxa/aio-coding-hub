@@ -13,8 +13,10 @@ import { Input } from "../../ui/Input";
 import { SettingsRow } from "../../ui/SettingsRow";
 import { Switch } from "../../ui/Switch";
 import { cn } from "../../utils/cn";
+import { CliPriorityOrderEditor } from "./CliPriorityOrderEditor";
 import { HomeOverviewTabOrderEditor } from "./HomeOverviewTabOrderEditor";
 import type { NoticePermissionStatus } from "./useSystemNotification";
+import type { CliKey } from "../../services/providers";
 
 type PersistKey = "preferred_port" | "log_retention_days";
 type BooleanPersistKey =
@@ -27,6 +29,7 @@ type SettingsPersistPatch = Partial<{
   show_home_heatmap: boolean;
   show_home_usage: boolean;
   home_usage_period: HomeUsagePeriod;
+  cli_priority_order: CliKey[];
   auto_start: boolean;
   start_minimized: boolean;
   tray_enabled: boolean;
@@ -64,6 +67,8 @@ export type SettingsMainColumnProps = {
   setShowHomeUsage: (next: boolean) => void;
   homeUsagePeriod: HomeUsagePeriod;
   setHomeUsagePeriod: (next: HomeUsagePeriod) => void;
+  cliPriorityOrder: CliKey[];
+  setCliPriorityOrder: (next: CliKey[]) => void;
   autoStart: boolean;
   setAutoStart: (next: boolean) => void;
   startMinimized: boolean;
@@ -100,6 +105,8 @@ export function SettingsMainColumn({
   setShowHomeUsage,
   homeUsagePeriod,
   setHomeUsagePeriod,
+  cliPriorityOrder,
+  setCliPriorityOrder,
   commitNumberField,
   autoStart,
   setAutoStart,
@@ -454,6 +461,17 @@ export function SettingsMainColumn({
               <SettingsRow label="首页概览排序">
                 <div className="w-full max-w-md">
                   <HomeOverviewTabOrderEditor />
+                </div>
+              </SettingsRow>
+              <SettingsRow label="CLI 优先顺序">
+                <div className="w-full max-w-md">
+                  <CliPriorityOrderEditor
+                    order={cliPriorityOrder}
+                    onChange={(nextOrder) => {
+                      setCliPriorityOrder(nextOrder);
+                      requestPersist({ cli_priority_order: nextOrder });
+                    }}
+                  />
                 </div>
               </SettingsRow>
               {(

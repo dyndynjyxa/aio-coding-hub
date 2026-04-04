@@ -36,6 +36,8 @@ export function SettingsPage() {
             setShowHomeUsage={persistence.setShowHomeUsage}
             homeUsagePeriod={persistence.homeUsagePeriod}
             setHomeUsagePeriod={persistence.setHomeUsagePeriod}
+            cliPriorityOrder={persistence.cliPriorityOrder}
+            setCliPriorityOrder={persistence.setCliPriorityOrder}
             commitNumberField={persistence.commitNumberField}
             autoStart={persistence.autoStart}
             setAutoStart={persistence.setAutoStart}

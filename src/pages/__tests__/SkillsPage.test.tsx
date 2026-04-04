@@ -2,13 +2,15 @@ import { render, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { SkillsPage } from "../SkillsPage";
 import { createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { logToConsole } from "../../services/consoleLog";
+import { useSettingsQuery } from "../../query/settings";
 import { useWorkspacesListQuery } from "../../query/workspaces";
+import { createTestAppSettings } from "../../test/fixtures/settings";
 
 vi.mock("sonner", () => {
   const toast = Object.assign(vi.fn(), {
@@ -38,6 +40,12 @@ vi.mock("../../query/workspaces", async () => {
   return { ...actual, useWorkspacesListQuery: vi.fn() };
 });
 
+vi.mock("../../query/settings", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../query/settings")>("../../query/settings");
+  return { ...actual, useSettingsQuery: vi.fn() };
+});
+
 function renderWithProviders(element: ReactElement) {
   const client = createTestQueryClient();
   return render(
@@ -48,8 +56,15 @@ function renderWithProviders(element: ReactElement) {
 }
 
 describe("pages/SkillsPage", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
   it("renders SkillsView with local import enabled for active workspace", () => {
     setTauriRuntime();
+    vi.mocked(useSettingsQuery).mockReturnValue({
+      data: createTestAppSettings(),
+    } as any);
 
     vi.mocked(useWorkspacesListQuery).mockReturnValue({
       data: { active_id: 42, items: [] },
@@ -72,6 +87,9 @@ describe("pages/SkillsPage", () => {
   it("reads active cli from localStorage", () => {
     setTauriRuntime();
     localStorage.setItem("skills.activeCli", "codex");
+    vi.mocked(useSettingsQuery).mockReturnValue({
+      data: createTestAppSettings({ cli_priority_order: ["gemini", "claude", "codex"] }),
+    } as any);
 
     vi.mocked(useWorkspacesListQuery).mockReturnValue({
       data: { active_id: null, items: [] },
@@ -85,6 +103,9 @@ describe("pages/SkillsPage", () => {
 
   it("logs and toasts when workspaces query errors", async () => {
     setTauriRuntime();
+    vi.mocked(useSettingsQuery).mockReturnValue({
+      data: createTestAppSettings(),
+    } as any);
 
     vi.mocked(useWorkspacesListQuery).mockReturnValue({
       data: { active_id: null, items: [] },
@@ -98,5 +119,20 @@ describe("pages/SkillsPage", () => {
       expect(logToConsole).toHaveBeenCalled();
       expect(toast).toHaveBeenCalledWith("加载失败：请查看控制台日志");
     });
+  });
+
+  it("falls back to the global CLI priority when localStorage is missing", () => {
+    setTauriRuntime();
+    vi.mocked(useSettingsQuery).mockReturnValue({
+      data: createTestAppSettings({ cli_priority_order: ["gemini", "codex", "claude"] }),
+    } as any);
+    vi.mocked(useWorkspacesListQuery).mockReturnValue({
+      data: { active_id: null, items: [] },
+      isFetching: false,
+      error: null,
+    } as any);
+
+    renderWithProviders(<SkillsPage />);
+    expect(useWorkspacesListQuery).toHaveBeenCalledWith("gemini");
   });
 });

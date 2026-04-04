@@ -36,7 +36,8 @@ function normalizeGatewayCircuitUnix(value: number | null | undefined) {
 export function getGatewayCircuitDerivedState(
   row: GatewayProviderCircuitStatus | null | undefined
 ): GatewayCircuitDerivedState {
-  const isOpen = row?.state === "OPEN" || row?.state === "HALF_OPEN";
+  // HALF_OPEN 表示已允许试探请求，不应继续作为“当前熔断/不可用”展示。
+  const isOpen = row?.state === "OPEN";
   const cooldownUntil = normalizeGatewayCircuitUnix(row?.cooldown_until);
   const openUntil = row?.state === "OPEN" ? normalizeGatewayCircuitUnix(row?.open_until) : null;
   const unavailableUntil =

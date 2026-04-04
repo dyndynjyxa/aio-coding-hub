@@ -27,7 +27,7 @@ export const CLI_FILTER_ITEMS: CliFilterItem[] = [
 ];
 
 const CLI_SHORT_LABELS: Record<CliKey, string> = {
-  claude: "Claude",
+  claude: "Claude Code",
   codex: "Codex",
   gemini: "Gemini",
 };

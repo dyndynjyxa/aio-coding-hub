@@ -17,15 +17,13 @@ import { ErrorState } from "../ui/ErrorState";
 import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
 import { useCliSessionsProjectsListQuery } from "../query/cliSessions";
+import { useSettingsQuery } from "../query/settings";
 import { useWslDetectionQuery } from "../query/wsl";
+import { getOrderedClis, pickDefaultCliByPriority } from "../services/cliPriorityOrder";
+import { cliShortLabel } from "../constants/clis";
 import { cn } from "../utils/cn";
 import { isWindowsRuntime } from "../utils/platform";
 import { formatRelativeTimeFromUnixSeconds, formatUnixSeconds } from "../utils/formatters";
-
-const SOURCE_TABS: Array<{ key: CliSessionsSource; label: string }> = [
-  { key: "claude", label: "Claude" },
-  { key: "codex", label: "Codex" },
-];
 
 type ProjectSortKey = "recent" | "sessions" | "name";
 
@@ -80,7 +78,22 @@ export function SessionsPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const isWindows = isWindowsRuntime();
-  const source = normalizeSource(searchParams.get("source")) ?? "claude";
+  const settingsQuery = useSettingsQuery();
+  const orderedSourceTabs = getOrderedClis(settingsQuery.data?.cli_priority_order, [
+    "claude",
+    "codex",
+  ])
+    .map((cli) => normalizeSource(cli.key))
+    .filter((cliKey): cliKey is CliSessionsSource => cliKey != null)
+    .map((cliKey) => ({
+      key: cliKey,
+      label: cliShortLabel(cliKey),
+    }));
+  const defaultSource =
+    normalizeSource(
+      pickDefaultCliByPriority(settingsQuery.data?.cli_priority_order, ["claude", "codex"])
+    ) ?? "claude";
+  const source = normalizeSource(searchParams.get("source")) ?? defaultSource;
   const distroParam = searchParams.get("distro")?.trim() ?? "";
   const [filterText, setFilterText] = useState("");
   const [sortKey, setSortKey] = useState<ProjectSortKey>("recent");
@@ -173,7 +186,7 @@ export function SessionsPage() {
             ) : null}
             <TabList
               ariaLabel="来源切换"
-              items={SOURCE_TABS}
+              items={orderedSourceTabs}
               value={source}
               onChange={handleSourceChange}
             />

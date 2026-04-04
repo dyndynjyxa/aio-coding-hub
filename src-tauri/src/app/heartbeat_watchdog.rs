@@ -254,6 +254,12 @@ pub(crate) fn gated_emit<S: serde::Serialize + Clone>(
     let _ = app.emit(event, payload);
 }
 
+fn app_is_terminating(app: &tauri::AppHandle) -> bool {
+    app.try_state::<crate::resident::ResidentState>()
+        .map(|state| state.is_terminating())
+        .unwrap_or(false)
+}
+
 pub(crate) fn install(app: &tauri::AppHandle) {
     tracing::info!(
         interval_s = HEARTBEAT_INTERVAL.as_secs(),
@@ -296,10 +302,10 @@ pub(crate) fn install(app: &tauri::AppHandle) {
 }
 
 async fn check_and_recover_if_needed(app: &tauri::AppHandle) {
-    // Skip recovery if app is shutting down — prevents watchdog from restarting the process
-    if crate::EXIT_CLEANUP_SPAWNED.load(std::sync::atomic::Ordering::Acquire) {
+    if app_is_terminating(app) {
         return;
     }
+
     let now = now_unix_millis();
     let state = app.state::<HeartbeatWatchdogState>();
     let snapshot = state.snapshot();
@@ -416,6 +422,11 @@ async fn check_and_recover_if_needed(app: &tauri::AppHandle) {
 /// Escalated recovery: try to rebuild the main window first; if that fails or
 /// attempts are exhausted, fall back to a full app restart.
 async fn attempt_escalated_recovery(app: &tauri::AppHandle) {
+    if app_is_terminating(app) {
+        tracing::debug!("explicit exit/restart in progress, skipping escalated recovery");
+        return;
+    }
+
     let state = app.state::<HeartbeatWatchdogState>();
 
     // Prevent concurrent recovery.
@@ -492,6 +503,11 @@ fn rebuild_main_window(app: &tauri::AppHandle) -> Result<(), AppError> {
 
 /// Write a restart marker, then request a full app restart.
 async fn escalate_to_app_restart(app: &tauri::AppHandle) {
+    if app_is_terminating(app) {
+        tracing::debug!("explicit exit/restart in progress, skipping watchdog restart");
+        return;
+    }
+
     // Check for restart storm before proceeding.
     if is_restart_storm(app) {
         tracing::error!(

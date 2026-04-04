@@ -67,6 +67,23 @@ describe("query/gateway", () => {
     });
   });
 
+  it("getGatewayCircuitDerivedState treats HALF_OPEN as probe-available instead of unavailable", () => {
+    expect(
+      getGatewayCircuitDerivedState({
+        provider_id: 11,
+        state: "HALF_OPEN",
+        failure_count: 5,
+        failure_threshold: 5,
+        open_until: null,
+        cooldown_until: null,
+      })
+    ).toEqual({
+      isOpen: false,
+      isUnavailable: false,
+      unavailableUntil: null,
+    });
+  });
+
   it("summarizeGatewayCircuitRows builds provider lookup and refresh summary", () => {
     const summary = summarizeGatewayCircuitRows([
       {
@@ -93,10 +110,19 @@ describe("query/gateway", () => {
         open_until: null,
         cooldown_until: null,
       },
+      {
+        provider_id: 4,
+        state: "HALF_OPEN",
+        failure_count: 5,
+        failure_threshold: 5,
+        open_until: null,
+        cooldown_until: null,
+      },
     ]);
 
     expect(summary.byProviderId[1]?.provider_id).toBe(1);
     expect(summary.byProviderId[2]?.provider_id).toBe(2);
+    expect(summary.byProviderId[4]?.provider_id).toBe(4);
     expect(summary.unavailableRows.map(({ row }) => row.provider_id)).toEqual([1, 2]);
     expect(summary.hasUnavailable).toBe(true);
     expect(summary.hasUnavailableWithoutUntil).toBe(true);

@@ -172,7 +172,7 @@ describe("pages/SessionsMessagesPage", () => {
 
     // Sender labels
     expect(screen.getByText("你")).toBeInTheDocument();
-    expect(screen.getByText("Claude")).toBeInTheDocument();
+    expect(screen.getByText("Claude Code")).toBeInTheDocument();
     expect(screen.getByText("System")).toBeInTheDocument();
     expect(screen.getByText("Tool")).toBeInTheDocument();
 

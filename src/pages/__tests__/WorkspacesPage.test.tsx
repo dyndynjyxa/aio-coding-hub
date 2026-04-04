@@ -16,8 +16,10 @@ import {
 } from "../../query/workspaces";
 import { useMcpServersListQuery } from "../../query/mcp";
 import { usePromptsListQuery } from "../../query/prompts";
+import { useSettingsQuery } from "../../query/settings";
 import { useSkillsInstalledListQuery } from "../../query/skills";
 import { logToConsole } from "../../services/consoleLog";
+import { createTestAppSettings } from "../../test/fixtures/settings";
 
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
@@ -45,6 +47,12 @@ vi.mock("../../query/prompts", async () => {
   return { ...actual, usePromptsListQuery: vi.fn() };
 });
 
+vi.mock("../../query/settings", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../query/settings")>("../../query/settings");
+  return { ...actual, useSettingsQuery: vi.fn() };
+});
+
 vi.mock("../../query/mcp", async () => {
   const actual = await vi.importActual<typeof import("../../query/mcp")>("../../query/mcp");
   return { ...actual, useMcpServersListQuery: vi.fn() };
@@ -68,6 +76,9 @@ describe("pages/WorkspacesPage", () => {
   it("renders empty state and toasts when workspaces query fails", async () => {
     vi.mocked(toast).mockClear();
     vi.mocked(logToConsole).mockClear();
+    vi.mocked(useSettingsQuery).mockReturnValue({
+      data: createTestAppSettings({ cli_priority_order: ["codex", "claude", "gemini"] }),
+    } as any);
 
     vi.mocked(useWorkspacesListQuery).mockReturnValue({
       data: { items: [], active_id: null },
@@ -108,11 +119,14 @@ describe("pages/WorkspacesPage", () => {
     expect(logToConsole).toHaveBeenCalledWith(
       "error",
       "加载工作区失败",
-      expect.objectContaining({ cli: "claude" })
+      expect.objectContaining({ cli: "codex" })
     );
   });
 
   it("supports filtering, create/rename/delete, preview and apply flows", async () => {
+    vi.mocked(useSettingsQuery).mockReturnValue({
+      data: createTestAppSettings(),
+    } as any);
     const closeDialogByOverlay = async () => {
       fireEvent.click(document.querySelector(".bg-black\\/30") as HTMLElement);
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
@@ -255,6 +269,9 @@ describe("pages/WorkspacesPage", () => {
   });
 
   it("covers switch dialog and preview branches across CLIs", async () => {
+    vi.mocked(useSettingsQuery).mockReturnValue({
+      data: createTestAppSettings(),
+    } as any);
     const items = [
       { id: 1, cli_key: "claude", name: "W1", created_at: 1, updated_at: 1 },
       { id: 2, cli_key: "codex", name: "CodexW", created_at: 2, updated_at: 2 },
@@ -373,6 +390,9 @@ describe("pages/WorkspacesPage", () => {
   });
 
   it("covers workspace card selection keyboard handlers, overview quick links, preview refresh, and dialog cancel controls", async () => {
+    vi.mocked(useSettingsQuery).mockReturnValue({
+      data: createTestAppSettings(),
+    } as any);
     const createMutation = { isPending: false, mutateAsync: vi.fn() };
     const renameMutation = { isPending: false, mutateAsync: vi.fn() };
     const deleteMutation = { isPending: false, mutateAsync: vi.fn() };

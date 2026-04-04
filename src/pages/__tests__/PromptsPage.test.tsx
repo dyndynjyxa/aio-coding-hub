@@ -8,7 +8,9 @@ import { PromptsPage } from "../PromptsPage";
 import { createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { logToConsole } from "../../services/consoleLog";
+import { useSettingsQuery } from "../../query/settings";
 import { useWorkspacesListQuery } from "../../query/workspaces";
+import { createTestAppSettings } from "../../test/fixtures/settings";
 
 vi.mock("sonner", () => {
   const toast = Object.assign(vi.fn(), {
@@ -36,6 +38,12 @@ vi.mock("../../query/workspaces", async () => {
   return { ...actual, useWorkspacesListQuery: vi.fn() };
 });
 
+vi.mock("../../query/settings", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../query/settings")>("../../query/settings");
+  return { ...actual, useSettingsQuery: vi.fn() };
+});
+
 function renderWithProviders(element: ReactElement) {
   const client = createTestQueryClient();
   return render(
@@ -48,6 +56,9 @@ function renderWithProviders(element: ReactElement) {
 describe("pages/PromptsPage", () => {
   it("shows missing workspace hint when active workspace is null", () => {
     setTauriRuntime();
+    vi.mocked(useSettingsQuery).mockReturnValue({
+      data: createTestAppSettings({ cli_priority_order: ["codex", "claude", "gemini"] }),
+    } as any);
 
     vi.mocked(useWorkspacesListQuery).mockReturnValue({
       data: { active_id: null, items: [] },
@@ -56,11 +67,14 @@ describe("pages/PromptsPage", () => {
     } as any);
 
     renderWithProviders(<PromptsPage />);
-    expect(screen.getByText(/未找到 Claude Code 的当前工作区/)).toBeInTheDocument();
+    expect(screen.getByText(/未找到 Codex 的当前工作区/)).toBeInTheDocument();
   });
 
   it("logs and toasts when workspaces query errors", async () => {
     setTauriRuntime();
+    vi.mocked(useSettingsQuery).mockReturnValue({
+      data: createTestAppSettings({ cli_priority_order: ["gemini", "claude", "codex"] }),
+    } as any);
 
     vi.mocked(useWorkspacesListQuery).mockReturnValue({
       data: { active_id: null, items: [] },

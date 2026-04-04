@@ -147,7 +147,7 @@ function messageSide(roleRaw: string): MessageSide {
 function senderLabel(source: CliSessionsSource, roleRaw: string) {
   const role = roleRaw.trim().toLowerCase();
   if (role === "user") return "你";
-  if (role === "assistant") return source === "claude" ? "Claude" : "Codex";
+  if (role === "assistant") return source === "claude" ? "Claude Code" : "Codex";
   if (role === "system") return "System";
   if (role.startsWith("tool")) return "Tool";
   return roleRaw || "unknown";

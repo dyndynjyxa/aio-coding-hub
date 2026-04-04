@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { CLIS, cliLongLabel } from "../constants/clis";
 import { useMcpServersListQuery } from "../query/mcp";
 import { usePromptsListQuery } from "../query/prompts";
+import { useSettingsQuery } from "../query/settings";
 import { useSkillsInstalledListQuery } from "../query/skills";
 import {
   pickWorkspaceById,
@@ -17,6 +18,7 @@ import {
   useWorkspacesListQuery,
 } from "../query/workspaces";
 import { logToConsole } from "../services/consoleLog";
+import { getOrderedClis, pickDefaultCliByPriority } from "../services/cliPriorityOrder";
 import type { CliKey } from "../services/providers";
 import { type WorkspaceApplyReport, type WorkspaceSummary } from "../services/workspaces";
 import { Button } from "../ui/Button";
@@ -40,11 +42,6 @@ type OverviewStats = {
   mcp: { total: number; enabled: number };
   skills: { total: number; enabled: number };
 };
-
-const CLI_TABS: Array<{ key: CliKey; label: string }> = CLIS.map((cli) => ({
-  key: cli.key,
-  label: cli.name,
-}));
 
 const RIGHT_TABS: Array<{ key: RightTab; label: string }> = [
   { key: "overview", label: "总览" },
@@ -97,8 +94,14 @@ function Badge({
 type CreateMode = "clone_active" | "blank";
 
 export function WorkspacesPage() {
-  const [activeCli, setActiveCli] = useState<CliKey>("claude");
-  const workspacesQuery = useWorkspacesListQuery(activeCli);
+  const settingsQuery = useSettingsQuery();
+  const orderedCliTabs = getOrderedClis(settingsQuery.data?.cli_priority_order);
+  const orderedCliKeys = orderedCliTabs.map((cli) => cli.key);
+  const defaultCli =
+    pickDefaultCliByPriority(settingsQuery.data?.cli_priority_order, orderedCliKeys) ?? CLIS[0].key;
+  const [activeCli, setActiveCli] = useState<CliKey | null>(null);
+  const effectiveCli = activeCli ?? defaultCli;
+  const workspacesQuery = useWorkspacesListQuery(effectiveCli);
   const createMutation = useWorkspaceCreateMutation();
   const renameMutation = useWorkspaceRenameMutation();
   const deleteMutation = useWorkspaceDeleteMutation();
@@ -136,10 +139,10 @@ export function WorkspacesPage() {
     if (!workspacesQuery.error) return;
     logToConsole("error", "加载工作区失败", {
       error: String(workspacesQuery.error),
-      cli: activeCli,
+      cli: effectiveCli,
     });
     toast("加载失败：请查看控制台日志");
-  }, [activeCli, workspacesQuery.error]);
+  }, [effectiveCli, workspacesQuery.error]);
 
   useEffect(() => {
     const result = workspacesQuery.data;
@@ -257,7 +260,7 @@ export function WorkspacesPage() {
 
     try {
       const created = await createMutation.mutateAsync({
-        cliKey: activeCli,
+        cliKey: effectiveCli,
         name,
         cloneFromActive: createMode === "clone_active",
       });
@@ -270,7 +273,7 @@ export function WorkspacesPage() {
       setSelectedWorkspaceId(created.id);
       setRightTab("overview");
     } catch (err) {
-      logToConsole("error", "创建工作区失败", { error: String(err), cli: activeCli });
+      logToConsole("error", "创建工作区失败", { error: String(err), cli: effectiveCli });
       toast(`创建失败：${String(err)}`);
     }
   }
@@ -289,7 +292,7 @@ export function WorkspacesPage() {
 
     try {
       const next = await renameMutation.mutateAsync({
-        cliKey: activeCli,
+        cliKey: effectiveCli,
         workspaceId: renameTarget.id,
         name,
       });
@@ -314,7 +317,7 @@ export function WorkspacesPage() {
     if (!deleteTarget) return;
     try {
       const ok = await deleteMutation.mutateAsync({
-        cliKey: activeCli,
+        cliKey: effectiveCli,
         workspaceId: deleteTarget.id,
       });
       if (!ok) {
@@ -342,7 +345,7 @@ export function WorkspacesPage() {
     if (applying) return;
     try {
       const next = await applyMutation.mutateAsync({
-        cliKey: activeCli,
+        cliKey: effectiveCli,
         workspaceId: switchTarget.id,
       });
       if (!next) {
@@ -367,7 +370,7 @@ export function WorkspacesPage() {
     if (applying) return;
     const workspaceId = applyReport.from_workspace_id;
     try {
-      const next = await applyMutation.mutateAsync({ cliKey: activeCli, workspaceId });
+      const next = await applyMutation.mutateAsync({ cliKey: effectiveCli, workspaceId });
       if (!next) {
         return;
       }
@@ -391,8 +394,8 @@ export function WorkspacesPage() {
           <>
             <TabList
               ariaLabel="目标 CLI"
-              items={CLI_TABS}
-              value={activeCli}
+              items={orderedCliTabs.map((cli) => ({ key: cli.key, label: cli.name }))}
+              value={effectiveCli}
               onChange={setActiveCli}
             />
           </>
@@ -946,7 +949,7 @@ export function WorkspacesPage() {
       <Dialog
         open={createOpen}
         onOpenChange={(open) => setCreateOpen(open)}
-        title={`新建工作区（${cliLongLabel(activeCli)}）`}
+        title={`新建工作区（${cliLongLabel(effectiveCli)}）`}
         description="默认空白创建：Prompt/MCP/Skills 均为未启用状态。"
         className="max-w-lg"
       >

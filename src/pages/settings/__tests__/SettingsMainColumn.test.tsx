@@ -10,12 +10,12 @@ import { createTestQueryClient } from "../../../test/utils/reactQuery";
 import { SettingsMainColumn } from "../SettingsMainColumn";
 import type { ComponentProps } from "react";
 
-let latestOnDragEnd: ((event: any) => void) | null = null;
+let latestOnDragEnds: Array<(event: any) => void> = [];
 let sortableIsDragging = false;
 
 vi.mock("@dnd-kit/core", () => ({
   DndContext: ({ children, onDragEnd }: any) => {
-    latestOnDragEnd = onDragEnd ?? null;
+    if (onDragEnd) latestOnDragEnds.push(onDragEnd);
     return <div data-testid="dnd">{children}</div>;
   },
   PointerSensor: function PointerSensor() {},
@@ -76,6 +76,8 @@ function renderSettingsMainColumn(
     setShowHomeUsage: vi.fn(),
     homeUsagePeriod: "last15",
     setHomeUsagePeriod: vi.fn(),
+    cliPriorityOrder: ["claude", "codex", "gemini"],
+    setCliPriorityOrder: vi.fn(),
     commitNumberField: vi.fn(),
     autoStart: false,
     setAutoStart: vi.fn(),
@@ -106,7 +108,7 @@ function renderSettingsMainColumn(
 describe("pages/settings/SettingsMainColumn", () => {
   beforeEach(() => {
     window.localStorage.clear();
-    latestOnDragEnd = null;
+    latestOnDragEnds = [];
     sortableIsDragging = false;
   });
 
@@ -249,16 +251,48 @@ describe("pages/settings/SettingsMainColumn", () => {
     renderSettingsMainColumn();
 
     act(() => {
-      latestOnDragEnd?.({
-        active: { id: "providerLimit" },
-        over: { id: "workspaceConfig" },
-      });
+      latestOnDragEnds.forEach((onDragEnd) =>
+        onDragEnd({
+          active: { id: "providerLimit" },
+          over: { id: "workspaceConfig" },
+        })
+      );
     });
 
     expect(screen.getByRole("button", { name: "供应商限额" })).toBeInTheDocument();
     expect(window.localStorage.getItem("aio-home-overview-tab-order")).toBe(
       JSON.stringify(["providerLimit", "workspaceConfig", "circuit", "sessions"])
     );
+  });
+
+  it("reorders CLI priority from settings", () => {
+    const setCliPriorityOrder = vi.fn();
+    const requestPersist = vi.fn();
+    vi.mocked(useTheme).mockReturnValue({
+      theme: "system",
+      resolvedTheme: "light",
+      setTheme: vi.fn(),
+    } as any);
+
+    renderSettingsMainColumn({
+      cliPriorityOrder: ["claude", "codex", "gemini"],
+      setCliPriorityOrder,
+      requestPersist,
+    });
+
+    act(() => {
+      latestOnDragEnds.forEach((onDragEnd) =>
+        onDragEnd({
+          active: { id: "gemini" },
+          over: { id: "claude" },
+        })
+      );
+    });
+
+    expect(setCliPriorityOrder).toHaveBeenCalledWith(["gemini", "claude", "codex"]);
+    expect(requestPersist).toHaveBeenCalledWith({
+      cli_priority_order: ["gemini", "claude", "codex"],
+    });
   });
 
   it.each([

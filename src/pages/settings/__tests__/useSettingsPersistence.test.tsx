@@ -40,6 +40,7 @@ function createSettings(overrides: Partial<any> = {}) {
     show_home_heatmap: true,
     show_home_usage: true,
     home_usage_period: "last15",
+    cli_priority_order: ["claude", "codex", "gemini"],
     auto_start: false,
     tray_enabled: true,
     log_retention_days: 7,
@@ -156,6 +157,7 @@ describe("settings/useSettingsPersistence", () => {
     expect(result.current.trayEnabled).toBe(true);
     expect(result.current.showHomeUsage).toBe(true);
     expect(result.current.homeUsagePeriod).toBe("last15");
+    expect(result.current.cliPriorityOrder).toEqual(["claude", "codex", "gemini"]);
   });
 
   it("marks ready and toasts when settings query errors", async () => {

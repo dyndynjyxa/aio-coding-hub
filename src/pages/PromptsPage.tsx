@@ -5,31 +5,39 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { CLIS, cliLongLabel } from "../constants/clis";
 import { logToConsole } from "../services/consoleLog";
+import { getOrderedClis, pickDefaultCliByPriority } from "../services/cliPriorityOrder";
 import type { CliKey } from "../services/providers";
 import { Button } from "../ui/Button";
 import { PageHeader } from "../ui/PageHeader";
 import { TabList } from "../ui/TabList";
 import { PromptsView } from "./prompts/PromptsView";
+import { useSettingsQuery } from "../query/settings";
 import { useWorkspacesListQuery } from "../query/workspaces";
 
 export function PromptsPage() {
   const navigate = useNavigate();
-  const [activeCli, setActiveCli] = useState<CliKey>("claude");
+  const settingsQuery = useSettingsQuery();
+  const orderedCliTabs = getOrderedClis(settingsQuery.data?.cli_priority_order);
+  const orderedCliKeys = orderedCliTabs.map((cli) => cli.key);
+  const defaultCli =
+    pickDefaultCliByPriority(settingsQuery.data?.cli_priority_order, orderedCliKeys) ?? CLIS[0].key;
+  const [activeCli, setActiveCli] = useState<CliKey | null>(null);
+  const effectiveCli = activeCli ?? defaultCli;
 
-  const workspacesQuery = useWorkspacesListQuery(activeCli);
+  const workspacesQuery = useWorkspacesListQuery(effectiveCli);
   const activeWorkspaceId = workspacesQuery.data?.active_id ?? null;
   const loading = workspacesQuery.isFetching;
 
-  const cliLabel = useMemo(() => cliLongLabel(activeCli), [activeCli]);
+  const cliLabel = useMemo(() => cliLongLabel(effectiveCli), [effectiveCli]);
 
   useEffect(() => {
     if (!workspacesQuery.error) return;
     logToConsole("error", "加载工作区失败", {
       error: String(workspacesQuery.error),
-      cli: activeCli,
+      cli: effectiveCli,
     });
     toast("加载失败：请查看控制台日志");
-  }, [activeCli, workspacesQuery.error]);
+  }, [effectiveCli, workspacesQuery.error]);
 
   return (
     <div className="flex h-full flex-col gap-6 overflow-hidden">
@@ -38,8 +46,8 @@ export function PromptsPage() {
         actions={
           <TabList
             ariaLabel="目标 CLI"
-            items={CLIS.map((cli) => ({ key: cli.key, label: cli.name }))}
-            value={activeCli}
+            items={orderedCliTabs.map((cli) => ({ key: cli.key, label: cli.name }))}
+            value={effectiveCli}
             onChange={setActiveCli}
           />
         }
@@ -62,7 +70,7 @@ export function PromptsPage() {
             未找到 {cliLabel} 的当前工作区（workspace）。请先在 Workspaces 页面创建并设为当前。
           </div>
         ) : (
-          <PromptsView workspaceId={activeWorkspaceId} cliKey={activeCli} isActiveWorkspace />
+          <PromptsView workspaceId={activeWorkspaceId} cliKey={effectiveCli} isActiveWorkspace />
         )}
       </div>
     </div>

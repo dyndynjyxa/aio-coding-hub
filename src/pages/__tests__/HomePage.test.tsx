@@ -478,6 +478,45 @@ describe("pages/HomePage", () => {
     }
   });
 
+  it("does not count HALF_OPEN rows as open circuits", () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    mockHomePageBaseQueries();
+
+    vi.mocked(useGatewayCircuitStatusQuery).mockImplementation((cliKey: any) => {
+      if (cliKey === "claude") {
+        return {
+          data: [
+            {
+              provider_id: 1,
+              state: "HALF_OPEN",
+              open_until: null,
+              cooldown_until: null,
+            },
+          ],
+        } as any;
+      }
+      return { data: [] } as any;
+    });
+
+    vi.mocked(useProvidersListQuery).mockImplementation((cliKey: any) => {
+      if (cliKey === "claude") return { data: [{ id: 1, name: "P1" }] } as any;
+      return { data: [] } as any;
+    });
+
+    vi.mocked(useCliProxy).mockReturnValue({
+      enabled: { claude: false, codex: false, gemini: false },
+      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
+      toggling: { claude: false, codex: false, gemini: false },
+      setCliProxyEnabled: vi.fn(),
+    } as any);
+
+    renderWithProviders(client, <HomePage />);
+
+    expect(screen.getByText("open-circuits:0")).toBeInTheDocument();
+  });
+
   it("prompts env conflicts before enabling CLI proxy", async () => {
     setTauriRuntime();
 

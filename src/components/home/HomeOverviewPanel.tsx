@@ -11,6 +11,7 @@ import {
   readHomeOverviewTabOrderFromStorage,
   type HomeOverviewTabKey,
 } from "../../services/homeOverviewTabOrder";
+import { getOrderedClis } from "../../services/cliPriorityOrder";
 import type { CliKey } from "../../services/providers";
 import type { ProviderLimitUsageRow } from "../../services/providerLimitUsage";
 import type { RequestLogSummary } from "../../services/requestLogs";
@@ -194,6 +195,7 @@ export type HomeOverviewPanelProps = {
   devPreviewEnabled?: boolean;
   showHomeHeatmap: boolean;
   showHomeUsage?: boolean;
+  cliPriorityOrder?: CliKey[];
 
   usageWindowDays: number;
   usageHeatmapRows: UsageHourlyRow[];
@@ -291,6 +293,7 @@ export function HomeOverviewPanel({
   devPreviewEnabled = false,
   showHomeHeatmap,
   showHomeUsage = true,
+  cliPriorityOrder,
   usageWindowDays,
   usageHeatmapRows,
   usageHeatmapLoading,
@@ -334,8 +337,9 @@ export function HomeOverviewPanel({
   const [sessionsTab, setSessionsTab] = useState<HomeOverviewTabKey>(
     () => sessionsTabsOrder[0] ?? "workspaceConfig"
   );
-  const [selectedWorkspaceConfigCliKey, setSelectedWorkspaceConfigCliKey] =
-    useState<CliKey>("claude");
+  const [selectedWorkspaceConfigCliKey, setSelectedWorkspaceConfigCliKey] = useState<CliKey | null>(
+    null
+  );
   const previousOpenCircuitKeysRef = useRef<string[] | null>(null);
   const circuitPreviewActive = openCircuits.length === 0 && devPreviewEnabled;
   const displayedCircuits = circuitPreviewActive ? PREVIEW_CIRCUITS : openCircuits;
@@ -346,32 +350,43 @@ export function HomeOverviewPanel({
       ? PREVIEW_PROVIDER_LIMIT_ROWS
       : providerLimitRows;
   const displayedWorkspaceConfigs = useMemo(() => {
+    let nextConfigs: HomeCliWorkspaceConfig[];
     if (workspaceConfigs.length === 0) {
-      return devPreviewEnabled ? PREVIEW_WORKSPACE_CONFIGS : [];
+      nextConfigs = devPreviewEnabled ? PREVIEW_WORKSPACE_CONFIGS : [];
+    } else if (!devPreviewEnabled) {
+      nextConfigs = workspaceConfigs;
+    } else {
+      const previewConfigByCli = new Map(
+        PREVIEW_WORKSPACE_CONFIGS.map((config) => [config.cliKey, config])
+      );
+
+      nextConfigs = workspaceConfigs.map((config) => {
+        if (config.loading || config.items.length > 0) return config;
+
+        const previewConfig = previewConfigByCli.get(config.cliKey);
+        if (!previewConfig) return config;
+
+        return {
+          ...config,
+          workspaceId: config.workspaceId ?? previewConfig.workspaceId,
+          workspaceName: config.workspaceName?.trim()
+            ? config.workspaceName
+            : previewConfig.workspaceName,
+          items: previewConfig.items,
+        };
+      });
     }
 
-    if (!devPreviewEnabled) return workspaceConfigs;
+    const orderedCliKeys = getOrderedClis(
+      cliPriorityOrder,
+      nextConfigs.map((config) => config.cliKey)
+    ).map((cli) => cli.key);
+    const configByCli = new Map(nextConfigs.map((config) => [config.cliKey, config]));
 
-    const previewConfigByCli = new Map(
-      PREVIEW_WORKSPACE_CONFIGS.map((config) => [config.cliKey, config])
-    );
-
-    return workspaceConfigs.map((config) => {
-      if (config.loading || config.items.length > 0) return config;
-
-      const previewConfig = previewConfigByCli.get(config.cliKey);
-      if (!previewConfig) return config;
-
-      return {
-        ...config,
-        workspaceId: config.workspaceId ?? previewConfig.workspaceId,
-        workspaceName: config.workspaceName?.trim()
-          ? config.workspaceName
-          : previewConfig.workspaceName,
-        items: previewConfig.items,
-      };
-    });
-  }, [devPreviewEnabled, workspaceConfigs]);
+    return orderedCliKeys
+      .map((cliKey) => configByCli.get(cliKey))
+      .filter((config): config is HomeCliWorkspaceConfig => config != null);
+  }, [cliPriorityOrder, devPreviewEnabled, workspaceConfigs]);
   const circuitNowUnix = useNowUnix(sessionsTab === "circuit" && displayedCircuits.length > 0);
   const showUsageRow = showHomeHeatmap || showHomeUsage;
   const sessionsTabs = useMemo(() => {
@@ -393,6 +408,8 @@ export function HomeOverviewPanel({
     const fallbackCliKey = displayedWorkspaceConfigs[0]?.cliKey;
     if (fallbackCliKey) setSelectedWorkspaceConfigCliKey(fallbackCliKey);
   }, [displayedWorkspaceConfigs, selectedWorkspaceConfigCliKey]);
+  const effectiveSelectedWorkspaceConfigCliKey =
+    selectedWorkspaceConfigCliKey ?? displayedWorkspaceConfigs[0]?.cliKey ?? "claude";
 
   useEffect(() => {
     const previousOpenCircuitKeys = previousOpenCircuitKeysRef.current;
@@ -509,7 +526,7 @@ export function HomeOverviewPanel({
                 <Suspense fallback={<OverviewPanelFallback />}>
                   <LazyHomeWorkspaceConfigPanel
                     configs={displayedWorkspaceConfigs}
-                    selectedCliKey={selectedWorkspaceConfigCliKey}
+                    selectedCliKey={effectiveSelectedWorkspaceConfigCliKey}
                     onSelectCliKey={setSelectedWorkspaceConfigCliKey}
                     sortModes={sortModes}
                     sortModesLoading={sortModesLoading}

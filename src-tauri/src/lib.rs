@@ -451,6 +451,7 @@ pub fn run() {
             // Note: `prevent_exit` is ignored for restart requests.
             // For app_restart we run cleanup explicitly before requesting restart.
             if *code != Some(tauri::RESTART_EXIT_CODE) {
+                app_handle.state::<resident::ResidentState>().begin_exit();
                 api.prevent_exit();
 
                 if EXIT_CLEANUP_SPAWNED.swap(true, Ordering::SeqCst) {

@@ -9,7 +9,7 @@ use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, Instant};
 use tauri::Manager;
 
-pub const SCHEMA_VERSION: u32 = 28;
+pub const SCHEMA_VERSION: u32 = 29;
 const SCHEMA_VERSION_DISABLE_UPSTREAM_TIMEOUTS: u32 = 7;
 const SCHEMA_VERSION_ADD_GATEWAY_RECTIFIERS: u32 = 8;
 const SCHEMA_VERSION_ADD_CIRCUIT_BREAKER_NOTICE: u32 = 9;
@@ -32,6 +32,7 @@ const SCHEMA_VERSION_ADD_NOTIFICATION_SOUND: u32 = 25;
 const SCHEMA_VERSION_ADD_CX2CC_SETTINGS: u32 = 26;
 const SCHEMA_VERSION_ENABLE_DEFAULT_UPSTREAM_TIMEOUTS: u32 = 27;
 const SCHEMA_VERSION_ADD_BILLING_HEADER_RECTIFIER: u32 = 28;
+const SCHEMA_VERSION_ADD_CLI_PRIORITY_ORDER: u32 = 29;
 pub const DEFAULT_GATEWAY_PORT: u16 = 37123;
 pub const MAX_GATEWAY_PORT: u16 = 37199;
 const DEFAULT_LOG_RETENTION_DAYS: u32 = 7;
@@ -203,6 +204,8 @@ pub struct AppSettings {
     // WSL auto-config enable switch and target CLI selection.
     pub wsl_auto_config: bool,
     pub wsl_target_cli: WslTargetCli,
+    #[serde(default = "default_cli_priority_order")]
+    pub cli_priority_order: Vec<String>,
     // WSL host address mode (auto-detect or custom) and custom address.
     pub wsl_host_address_mode: WslHostAddressMode,
     pub wsl_custom_host_address: String,
@@ -279,6 +282,7 @@ impl Default for AppSettings {
             gateway_custom_listen_address: String::new(),
             wsl_auto_config: false,
             wsl_target_cli: WslTargetCli::default(),
+            cli_priority_order: default_cli_priority_order(),
             wsl_host_address_mode: WslHostAddressMode::Auto,
             wsl_custom_host_address: "127.0.0.1".to_string(),
             codex_home_mode: CodexHomeMode::default(),
@@ -341,6 +345,36 @@ fn default_show_home_usage() -> bool {
     DEFAULT_SHOW_HOME_USAGE
 }
 
+fn default_cli_priority_order() -> Vec<String> {
+    crate::shared::cli_key::SUPPORTED_CLI_KEYS
+        .iter()
+        .map(|cli_key| (*cli_key).to_string())
+        .collect()
+}
+
+fn normalize_cli_priority_order(input: &[String]) -> Vec<String> {
+    let mut order = Vec::with_capacity(crate::shared::cli_key::SUPPORTED_CLI_KEYS.len());
+
+    for cli_key in input {
+        if !crate::shared::cli_key::is_supported_cli_key(cli_key) {
+            continue;
+        }
+        if order.iter().any(|item| item == cli_key) {
+            continue;
+        }
+        order.push(cli_key.clone());
+    }
+
+    for cli_key in crate::shared::cli_key::SUPPORTED_CLI_KEYS {
+        if order.iter().any(|item| item == cli_key) {
+            continue;
+        }
+        order.push(cli_key.to_string());
+    }
+
+    order
+}
+
 fn normalize_codex_home_override(raw: &str) -> String {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -381,6 +415,13 @@ fn sanitize_codex_home_override(settings: &mut AppSettings) -> bool {
         changed = true;
     }
 
+    changed
+}
+
+fn sanitize_cli_priority_order(settings: &mut AppSettings) -> bool {
+    let normalized = normalize_cli_priority_order(&settings.cli_priority_order);
+    let changed = settings.cli_priority_order != normalized;
+    settings.cli_priority_order = normalized;
     changed
 }
 
@@ -846,9 +887,26 @@ fn migrate_add_billing_header_rectifier(
     )
 }
 
+fn migrate_add_cli_priority_order(
+    settings: &mut AppSettings,
+    schema_version_present: bool,
+) -> bool {
+    // v29: Add global CLI priority order for tab rendering and default selection.
+    if !migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_CLI_PRIORITY_ORDER,
+    ) {
+        return false;
+    }
+
+    settings.cli_priority_order = normalize_cli_priority_order(&settings.cli_priority_order);
+    true
+}
+
 type SettingsMigration = fn(&mut AppSettings, bool) -> bool;
 
-const SETTINGS_MIGRATIONS: [SettingsMigration; 22] = [
+const SETTINGS_MIGRATIONS: [SettingsMigration; 23] = [
     migrate_disable_upstream_timeouts,
     migrate_add_gateway_rectifiers,
     migrate_add_circuit_breaker_notice,
@@ -871,6 +929,7 @@ const SETTINGS_MIGRATIONS: [SettingsMigration; 22] = [
     migrate_add_cx2cc_settings,
     migrate_enable_default_upstream_timeouts,
     migrate_add_billing_header_rectifier,
+    migrate_add_cli_priority_order,
 ];
 
 fn apply_settings_migrations(settings: &mut AppSettings, schema_version_present: bool) -> bool {
@@ -894,6 +953,7 @@ fn repair_settings(
     repaired |= sanitize_upstream_timeouts(settings);
     repaired |= sanitize_response_fixer_limits(settings);
     repaired |= sanitize_codex_home_override(settings);
+    repaired |= sanitize_cli_priority_order(settings);
     let canonical = canonical_settings_json(settings)?;
     repaired |= raw_settings_json != &canonical;
     Ok(repaired)
@@ -1070,6 +1130,7 @@ pub fn write<R: tauri::Runtime>(
     settings: &AppSettings,
 ) -> AppResult<AppSettings> {
     let mut settings = settings.clone();
+    settings.cli_priority_order = normalize_cli_priority_order(&settings.cli_priority_order);
     settings.codex_home_override = normalize_codex_home_override(&settings.codex_home_override);
     if settings.codex_home_mode != CodexHomeMode::Custom {
         settings.codex_home_override.clear();
@@ -1700,6 +1761,12 @@ mod tests {
     }
 
     #[test]
+    fn app_settings_default_sets_cli_priority_order() {
+        let s = AppSettings::default();
+        assert_eq!(s.cli_priority_order, default_cli_priority_order());
+    }
+
+    #[test]
     fn app_settings_default_cache_anomaly_monitor_disabled() {
         let s = AppSettings::default();
         assert!(!s.enable_cache_anomaly_monitor);
@@ -1785,6 +1852,40 @@ mod tests {
         };
         assert!(migrate_add_codex_home_mode(&mut s, true));
         assert_eq!(s.codex_home_mode, CodexHomeMode::Custom);
+    }
+
+    #[test]
+    fn sanitize_cli_priority_order_normalizes_invalid_duplicates_and_missing() {
+        let mut s = AppSettings {
+            cli_priority_order: vec![
+                "codex".to_string(),
+                "unknown".to_string(),
+                "codex".to_string(),
+                "claude".to_string(),
+            ],
+            ..Default::default()
+        };
+        assert!(sanitize_cli_priority_order(&mut s));
+        assert_eq!(
+            s.cli_priority_order,
+            vec![
+                "codex".to_string(),
+                "claude".to_string(),
+                "gemini".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn migrate_add_cli_priority_order_bumps_schema_and_fills_default_order() {
+        let mut s = AppSettings {
+            schema_version: 28,
+            cli_priority_order: Vec::new(),
+            ..Default::default()
+        };
+        assert!(migrate_add_cli_priority_order(&mut s, true));
+        assert_eq!(s.schema_version, SCHEMA_VERSION_ADD_CLI_PRIORITY_ORDER);
+        assert_eq!(s.cli_priority_order, default_cli_priority_order());
     }
 
     #[test]

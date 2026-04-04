@@ -5,6 +5,8 @@ import { useNavigate } from "react-router-dom";
 import { PageHeader } from "../ui/PageHeader";
 import { TabList } from "../ui/TabList";
 import { CLIS, cliLongLabel } from "../constants/clis";
+import { useSettingsQuery } from "../query/settings";
+import { getOrderedClis, pickDefaultCliByPriority } from "../services/cliPriorityOrder";
 import type { CliKey } from "../services/providers";
 import { Button } from "../ui/Button";
 import { McpServersView } from "./mcp/McpServersView";
@@ -12,13 +14,19 @@ import { useWorkspacesListQuery } from "../query/workspaces";
 
 export function McpPage() {
   const navigate = useNavigate();
-  const [activeCli, setActiveCli] = useState<CliKey>("claude");
+  const settingsQuery = useSettingsQuery();
+  const orderedCliTabs = getOrderedClis(settingsQuery.data?.cli_priority_order);
+  const orderedCliKeys = orderedCliTabs.map((cli) => cli.key);
+  const defaultCli =
+    pickDefaultCliByPriority(settingsQuery.data?.cli_priority_order, orderedCliKeys) ?? CLIS[0].key;
+  const [activeCli, setActiveCli] = useState<CliKey | null>(null);
+  const effectiveCli = activeCli ?? defaultCli;
 
-  const workspacesQuery = useWorkspacesListQuery(activeCli);
+  const workspacesQuery = useWorkspacesListQuery(effectiveCli);
   const activeWorkspaceId = workspacesQuery.data?.active_id ?? null;
   const loading = workspacesQuery.isFetching;
 
-  const cliLabel = useMemo(() => cliLongLabel(activeCli), [activeCli]);
+  const cliLabel = useMemo(() => cliLongLabel(effectiveCli), [effectiveCli]);
 
   return (
     <div className="flex h-full flex-col gap-6 overflow-hidden">
@@ -27,8 +35,8 @@ export function McpPage() {
         actions={
           <TabList
             ariaLabel="目标 CLI"
-            items={CLIS.map((cli) => ({ key: cli.key, label: cli.name }))}
-            value={activeCli}
+            items={orderedCliTabs.map((cli) => ({ key: cli.key, label: cli.name }))}
+            value={effectiveCli}
             onChange={setActiveCli}
           />
         }

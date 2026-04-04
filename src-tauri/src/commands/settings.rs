@@ -56,6 +56,7 @@ pub(crate) struct SettingsUpdate {
     pub update_releases_url: Option<String>,
     pub wsl_auto_config: Option<bool>,
     pub wsl_target_cli: Option<settings::WslTargetCli>,
+    pub cli_priority_order: Option<Vec<String>>,
     pub wsl_host_address_mode: Option<settings::WslHostAddressMode>,
     pub wsl_custom_host_address: Option<String>,
     pub codex_home_mode: Option<settings::CodexHomeMode>,
@@ -159,6 +160,7 @@ pub(crate) async fn settings_set_impl<R: tauri::Runtime>(
         update_releases_url,
         wsl_auto_config,
         wsl_target_cli,
+        cli_priority_order,
         wsl_host_address_mode,
         wsl_custom_host_address,
         codex_home_mode,
@@ -198,6 +200,7 @@ pub(crate) async fn settings_set_impl<R: tauri::Runtime>(
                 .to_string();
             let wsl_auto_config = wsl_auto_config.unwrap_or(previous.wsl_auto_config);
             let wsl_target_cli = wsl_target_cli.unwrap_or(previous.wsl_target_cli);
+            let cli_priority_order = cli_priority_order.unwrap_or(previous.cli_priority_order);
             let wsl_host_address_mode =
                 wsl_host_address_mode.unwrap_or(previous.wsl_host_address_mode);
             let wsl_custom_host_address = wsl_custom_host_address
@@ -305,6 +308,7 @@ pub(crate) async fn settings_set_impl<R: tauri::Runtime>(
                 gateway_custom_listen_address,
                 wsl_auto_config,
                 wsl_target_cli,
+                cli_priority_order,
                 wsl_host_address_mode,
                 wsl_custom_host_address,
                 codex_home_mode,

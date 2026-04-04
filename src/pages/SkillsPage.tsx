@@ -5,19 +5,21 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { CLIS, cliFromKeyOrDefault, isCliKey } from "../constants/clis";
 import { logToConsole } from "../services/consoleLog";
+import { getOrderedClis, pickDefaultCliByPriority } from "../services/cliPriorityOrder";
 import type { CliKey } from "../services/providers";
 import { Button } from "../ui/Button";
 import { PageHeader } from "../ui/PageHeader";
 import { TabList } from "../ui/TabList";
 import { SkillsView } from "./skills/SkillsView";
+import { useSettingsQuery } from "../query/settings";
 import { useWorkspacesListQuery } from "../query/workspaces";
 
-function readCliFromStorage(): CliKey {
+function readCliFromStorage(): CliKey | null {
   try {
     const raw = localStorage.getItem("skills.activeCli");
     if (isCliKey(raw)) return raw;
   } catch {}
-  return "claude";
+  return null;
 }
 
 function writeCliToStorage(cli: CliKey) {
@@ -28,25 +30,31 @@ function writeCliToStorage(cli: CliKey) {
 
 export function SkillsPage() {
   const navigate = useNavigate();
-  const [activeCli, setActiveCli] = useState<CliKey>(() => readCliFromStorage());
-  const currentCli = useMemo(() => cliFromKeyOrDefault(activeCli), [activeCli]);
+  const settingsQuery = useSettingsQuery();
+  const orderedCliTabs = getOrderedClis(settingsQuery.data?.cli_priority_order);
+  const orderedCliKeys = orderedCliTabs.map((cli) => cli.key);
+  const defaultCli =
+    pickDefaultCliByPriority(settingsQuery.data?.cli_priority_order, orderedCliKeys) ?? CLIS[0].key;
+  const [activeCli, setActiveCli] = useState<CliKey | null>(() => readCliFromStorage());
+  const effectiveCli = activeCli ?? defaultCli;
+  const currentCli = useMemo(() => cliFromKeyOrDefault(effectiveCli), [effectiveCli]);
 
-  const workspacesQuery = useWorkspacesListQuery(activeCli);
+  const workspacesQuery = useWorkspacesListQuery(effectiveCli);
   const activeWorkspaceId = workspacesQuery.data?.active_id ?? null;
   const loading = workspacesQuery.isFetching;
 
   useEffect(() => {
-    writeCliToStorage(activeCli);
-  }, [activeCli]);
+    writeCliToStorage(effectiveCli);
+  }, [effectiveCli]);
 
   useEffect(() => {
     if (!workspacesQuery.error) return;
     logToConsole("error", "加载工作区失败", {
       error: String(workspacesQuery.error),
-      cli: activeCli,
+      cli: effectiveCli,
     });
     toast("加载失败：请查看控制台日志");
-  }, [activeCli, workspacesQuery.error]);
+  }, [effectiveCli, workspacesQuery.error]);
 
   return (
     <div className="flex flex-col gap-6 h-full overflow-hidden">
@@ -60,8 +68,8 @@ export function SkillsPage() {
               </Button>
               <TabList
                 ariaLabel="CLI 选择"
-                items={CLIS.map((cli) => ({ key: cli.key, label: cli.name }))}
-                value={activeCli}
+                items={orderedCliTabs.map((cli) => ({ key: cli.key, label: cli.name }))}
+                value={effectiveCli}
                 onChange={setActiveCli}
               />
             </>
@@ -87,7 +95,7 @@ export function SkillsPage() {
             页面创建并设为当前。
           </div>
         ) : (
-          <SkillsView workspaceId={activeWorkspaceId} cliKey={activeCli} isActiveWorkspace />
+          <SkillsView workspaceId={activeWorkspaceId} cliKey={effectiveCli} isActiveWorkspace />
         )}
       </div>
     </div>

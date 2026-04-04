@@ -99,7 +99,7 @@ describe("services/taskCompleteNotifyEvents", () => {
     expect(noticeSend).toHaveBeenCalledWith({
       level: "info",
       title: "任务完成",
-      body: expect.stringContaining("Claude 请求已完成"),
+      body: expect.stringContaining("Claude Code 请求已完成"),
     });
 
     cleanup();
