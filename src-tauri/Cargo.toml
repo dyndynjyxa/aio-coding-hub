@@ -48,7 +48,7 @@ flate2 = "1.1.5"
 zip = { version = "4.6", default-features = false, features = ["deflate"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-chrono = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 tracing-appender = "0.2"
 tracing-log = "0.2"
 thiserror = "2"
