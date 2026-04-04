@@ -957,7 +957,7 @@ pub(crate) async fn provider_oauth_fetch_limits(
             let resets = limits
                 .raw_json
                 .as_ref()
-                .map(|raw| extract_reset_timestamps(raw))
+                .map(extract_reset_timestamps)
                 .unwrap_or((None, None));
             (
                 limits.limit_5h_text.clone(),
