@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.35.3](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.35.2...aio-coding-hub-v0.35.3) (2026-04-04)
+
+
+### Features
+
+* **update:** 更新对话框展示更新日志 ([#171](https://github.com/dyndynjyxa/aio-coding-hub/issues/171)) ([c55ccb2](https://github.com/dyndynjyxa/aio-coding-hub/commit/c55ccb2cb1fc18b1e109f41192a4362f3a4ff8af))
+
+
+### Bug Fixes
+
+* **heartbeat_watchdog:** reload 返回 Ok 但实际异步失败时升级到窗口重建 ([#172](https://github.com/dyndynjyxa/aio-coding-hub/issues/172)) ([e4f77b0](https://github.com/dyndynjyxa/aio-coding-hub/commit/e4f77b01c7204767b61d8bb787a374b270383736))
+
 ## [0.35.2](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.35.1...aio-coding-hub-v0.35.2) (2026-04-04)
 
 
