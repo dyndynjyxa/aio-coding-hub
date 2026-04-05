@@ -45,25 +45,29 @@ pub(crate) async fn model_prices_sync_basellm(
         .map_err(|e| e.to_string())?;
 
     let db_for_backfill = db.clone();
-    if let Err(err) = blocking::run(
+    let backfill_result = blocking::run(
         "model_prices_sync_basellm_backfill_missing_cost",
         move || {
-            cost_stats::backfill_missing_v1(
-                &db_for_backfill,
-                &cost_stats::CostQueryParams {
-                    period: "allTime".to_string(),
-                    start_ts: None,
-                    end_ts: None,
-                    cli_key: Some("claude".to_string()),
-                    provider_id: None,
-                    model: None,
-                },
-                5000,
-            )
+            for cli_key in ["claude", "codex"] {
+                cost_stats::backfill_missing_v1(
+                    &db_for_backfill,
+                    &cost_stats::CostQueryParams {
+                        period: "allTime".to_string(),
+                        start_ts: None,
+                        end_ts: None,
+                        cli_key: Some(cli_key.to_string()),
+                        provider_id: None,
+                        model: None,
+                    },
+                    5000,
+                )?;
+            }
+            Ok::<_, crate::shared::error::AppError>(())
         },
     )
-    .await
-    {
+    .await;
+
+    if let Err(err) = backfill_result {
         tracing::warn!("cost backfill after model price sync failed: {}", err);
     }
 

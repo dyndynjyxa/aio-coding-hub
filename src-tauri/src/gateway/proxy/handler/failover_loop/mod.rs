@@ -670,6 +670,17 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
                                             "[CX2CC] translated → model={openai_model}, bridge={provider_name_base}, source={source_provider_name}"
                                         ),
                                     );
+                                    {
+                                        let mut settings = input.special_settings.lock_or_recover();
+                                        settings.push(serde_json::json!({
+                                            "type": "cx2cc_cost_basis",
+                                            "scope": "request",
+                                            "source_cli_key": source_cli_key,
+                                            "source_provider_id": source_id,
+                                            "source_provider_name": source_provider_name,
+                                            "priced_model": openai_model,
+                                        }));
+                                    }
                                     // DEBUG: dump translated body for troubleshooting.
                                     {
                                         let debug_body: serde_json::Value =

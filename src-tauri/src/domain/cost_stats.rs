@@ -2,6 +2,7 @@
 
 use crate::cost;
 use crate::db;
+use crate::request_logs;
 use crate::shared::error::db_err;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -755,6 +756,7 @@ SELECT
   id,
   cli_key,
   requested_model,
+  special_settings_json,
   cost_multiplier,
   input_tokens,
   output_tokens,
@@ -807,6 +809,7 @@ LIMIT ?6
                             .unwrap_or(0),
                         row.get::<_, Option<i64>>("cache_creation_1h_input_tokens")?
                             .unwrap_or(0),
+                        row.get::<_, Option<String>>("special_settings_json")?,
                     ))
                 },
             )
@@ -824,19 +827,28 @@ LIMIT ?6
                 cache_creation_input_tokens,
                 cache_creation_5m_input_tokens,
                 cache_creation_1h_input_tokens,
+                special_settings_json,
             ) = row.map_err(|e| db_err!("failed to read backfill candidate row: {e}"))?;
 
             report.scanned = report.scanned.saturating_add(1);
 
-            let model = requested_model
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .map(|v| if v.len() > 200 { &v[..200] } else { v });
+            let (effective_cli_key, model) = if let Some((basis_cli_key, basis_model)) =
+                request_logs::parse_cx2cc_cost_basis(special_settings_json.as_deref())
+            {
+                (basis_cli_key, basis_model)
+            } else {
+                let model = requested_model
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(|v| if v.len() > 200 { &v[..200] } else { v });
 
-            let Some(model) = model else {
-                report.skipped_no_model = report.skipped_no_model.saturating_add(1);
-                continue;
+                let Some(model) = model else {
+                    report.skipped_no_model = report.skipped_no_model.saturating_add(1);
+                    continue;
+                };
+
+                (cli_key.clone(), model.to_string())
             };
 
             let usage = cost::CostUsage {
@@ -854,7 +866,9 @@ LIMIT ?6
             }
 
             let price_json: Option<String> = stmt_price
-                .query_row(params![cli_key, model], |row| row.get::<_, String>(0))
+                .query_row(params![effective_cli_key, model], |row| {
+                    row.get::<_, String>(0)
+                })
                 .optional()
                 .unwrap_or(None);
 
@@ -869,8 +883,13 @@ LIMIT ?6
                 1.0
             };
 
-            let cost_usd_femto =
-                cost::calculate_cost_usd_femto(&usage, &price_json, multiplier, &cli_key, model);
+            let cost_usd_femto = cost::calculate_cost_usd_femto(
+                &usage,
+                &price_json,
+                multiplier,
+                &effective_cli_key,
+                &model,
+            );
             let Some(cost_usd_femto) = cost_usd_femto else {
                 report.skipped_other = report.skipped_other.saturating_add(1);
                 continue;

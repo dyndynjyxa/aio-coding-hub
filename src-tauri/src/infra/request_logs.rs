@@ -4,6 +4,7 @@ use crate::shared::error::db_err;
 use crate::shared::time::now_unix_seconds;
 use crate::{cost, db, model_price_aliases};
 use rusqlite::{params, params_from_iter, ErrorCode, OptionalExtension, TransactionBehavior};
+use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -169,6 +170,70 @@ fn fetch_model_price_json(
 
     batch_price_json.insert(price_key, queried.clone());
     queried
+}
+
+#[derive(Debug, Clone)]
+struct EffectiveCostBasis {
+    cli_key: String,
+    model: String,
+}
+
+pub(crate) fn parse_cx2cc_cost_basis(
+    special_settings_json: Option<&str>,
+) -> Option<(String, String)> {
+    let raw = special_settings_json?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+
+    let settings: Vec<Value> = serde_json::from_str(raw).ok()?;
+    for setting in settings.iter().rev() {
+        let Some(obj) = setting.as_object() else {
+            continue;
+        };
+        if obj.get("type").and_then(Value::as_str) != Some("cx2cc_cost_basis") {
+            continue;
+        }
+
+        let Some(cli_key) = obj
+            .get("source_cli_key")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let Some(model) = obj
+            .get("priced_model")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+
+        return Some((cli_key.to_string(), model.to_string()));
+    }
+
+    None
+}
+
+fn effective_cost_basis(item: &RequestLogInsert) -> Option<EffectiveCostBasis> {
+    if let Some((cli_key, model)) = parse_cx2cc_cost_basis(item.special_settings_json.as_deref()) {
+        return Some(EffectiveCostBasis { cli_key, model });
+    }
+
+    let model = item
+        .requested_model
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())?
+        .to_string();
+
+    Some(EffectiveCostBasis {
+        cli_key: item.cli_key.clone(),
+        model,
+    })
 }
 
 pub fn start_buffered_writer(
@@ -381,41 +446,36 @@ fn insert_batch_once(
                 1.0
             };
 
-            let model = item
-                .requested_model
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty());
-
             let cost_usd_femto = if is_success_status(item.status, item.error_code.as_deref()) {
-                match model {
-                    Some(model) => {
+                match effective_cost_basis(item) {
+                    Some(cost_basis) => {
                         let usage = usage_for_cost(item);
                         if !has_any_cost_usage(&usage) {
                             None
                         } else {
-                            let mut priced_model = model;
+                            let mut priced_model = cost_basis.model.as_str();
+                            let priced_cli_key = cost_basis.cli_key.as_str();
                             let mut price_json = fetch_model_price_json(
                                 &mut stmt_price_json,
                                 cache,
                                 &mut batch_price_json,
                                 now_unix,
-                                item.cli_key.as_str(),
-                                model,
+                                priced_cli_key,
+                                priced_model,
                             );
 
                             if price_json.is_none() {
                                 if let Some(target_model) =
-                                    price_aliases.resolve_target_model(item.cli_key.as_str(), model)
+                                    price_aliases.resolve_target_model(priced_cli_key, priced_model)
                                 {
-                                    if target_model != model {
+                                    if target_model != priced_model {
                                         priced_model = target_model;
                                         price_json = fetch_model_price_json(
                                             &mut stmt_price_json,
                                             cache,
                                             &mut batch_price_json,
                                             now_unix,
-                                            item.cli_key.as_str(),
+                                            priced_cli_key,
                                             target_model,
                                         );
                                     }
@@ -427,7 +487,7 @@ fn insert_batch_once(
                                     &usage,
                                     &price_json,
                                     cost_multiplier,
-                                    item.cli_key.as_str(),
+                                    priced_cli_key,
                                     priced_model,
                                 ),
                                 None => None,
@@ -570,7 +630,31 @@ GROUP BY cli_key, session_id
 
 #[cfg(test)]
 mod tests {
-    use super::InsertBatchCache;
+    use super::{parse_cx2cc_cost_basis, InsertBatchCache};
+
+    #[test]
+    fn parses_cx2cc_cost_basis_from_special_settings() {
+        let special_settings_json = serde_json::json!([
+            {
+                "type": "provider_lock",
+                "scope": "request",
+                "providerId": 1
+            },
+            {
+                "type": "cx2cc_cost_basis",
+                "scope": "request",
+                "source_cli_key": "codex",
+                "source_provider_id": 42,
+                "priced_model": "gpt-5.4"
+            }
+        ])
+        .to_string();
+
+        assert_eq!(
+            parse_cx2cc_cost_basis(Some(&special_settings_json)),
+            Some(("codex".to_string(), "gpt-5.4".to_string()))
+        );
+    }
 
     #[test]
     fn model_price_cache_does_not_store_none_miss() {
