@@ -22,6 +22,9 @@ const updateMetaRef = vi.hoisted(() => ({
 }));
 
 const updateDialogSetOpenMock = vi.hoisted(() => vi.fn());
+const devPreviewRef = vi.hoisted(() => ({
+  current: { enabled: false, setEnabled: vi.fn(), toggle: vi.fn() } as any,
+}));
 
 vi.mock("../../hooks/useGatewayMeta", () => ({
   useGatewayMeta: () => gatewayMetaRef.current,
@@ -31,6 +34,9 @@ vi.mock("../../hooks/useUpdateMeta", () => ({
   useUpdateMeta: () => updateMetaRef.current,
   updateDialogSetOpen: updateDialogSetOpenMock,
 }));
+vi.mock("../../hooks/useDevPreviewData", () => ({
+  useDevPreviewData: () => devPreviewRef.current,
+}));
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: vi.fn(),
@@ -39,6 +45,7 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
 describe("ui/Sidebar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    devPreviewRef.current = { enabled: false, setEnabled: vi.fn(), toggle: vi.fn() };
     gatewayMetaRef.current = { gatewayAvailable: "checking", gateway: null, preferredPort: 37123 };
     updateMetaRef.current = {
       about: null,
@@ -134,6 +141,29 @@ describe("ui/Sidebar", () => {
       expect(windowOpen).toHaveBeenCalledWith(AIO_RELEASES_URL, "_blank", "noopener,noreferrer");
     });
     windowOpen.mockRestore();
+  });
+
+  it("opens update dialog when portable app has dev preview enabled", () => {
+    gatewayMetaRef.current = {
+      gatewayAvailable: "available",
+      gateway: { running: true, port: 37123 },
+      preferredPort: 37123,
+    };
+    updateMetaRef.current = {
+      ...updateMetaRef.current,
+      about: { run_mode: "portable" },
+      updateCandidate: { version: "0.0.0" },
+    };
+    devPreviewRef.current = { enabled: true, setEnabled: vi.fn(), toggle: vi.fn() };
+
+    render(
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "NEW" }));
+    expect(updateDialogSetOpenMock).toHaveBeenCalledWith(true);
   });
 
   it("calls onNavClick when a nav item is clicked", () => {
