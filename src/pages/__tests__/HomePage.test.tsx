@@ -270,6 +270,7 @@ function mockHomePageBaseQueries() {
 
 describe("pages/HomePage", () => {
   beforeEach(() => {
+    localStorage.removeItem("devPreview.enabled");
     resetMswState();
     vi.mocked(useProviderLimitUsageV1Query).mockReturnValue({
       data: null,

@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { tauriInvoke } from "../../test/mocks/tauri";
 import { clearTauriRuntime, setTauriRuntime } from "../../test/utils/tauriRuntime";
@@ -13,6 +13,46 @@ vi.mock("sonner", () => ({
 vi.mock("../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
 
 describe("hooks/useUpdateMeta", () => {
+  beforeEach(() => {
+    localStorage.removeItem("devPreview.enabled");
+  });
+
+  it("uses the shared dev preview toggle to return a mock update and block install", async () => {
+    vi.resetModules();
+    clearTauriRuntime();
+    localStorage.setItem("devPreview.enabled", "1");
+
+    const { queryClient } = await import("../../query/queryClient");
+    queryClient.clear();
+
+    const mod = await import("../useUpdateMeta");
+    const { updateCheckNow, updateDownloadAndInstall, updateDialogSetOpen, useUpdateMeta } = mod;
+
+    const update = await updateCheckNow({ silent: true, openDialogIfUpdate: true });
+    expect(update?.rid).toBe(9_999_001);
+    expect(update?.body).toContain("Dev 预览更新日志");
+
+    const wrapper = ({ children }: any) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(() => useUpdateMeta(), { wrapper });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(result.current.dialogOpen).toBe(true);
+    expect(result.current.updateCandidate?.rid).toBe(9_999_001);
+    expect(result.current.updateCandidate?.body).toContain("不会参与真实安装");
+
+    queryClient.setQueryData(updaterKeys.check(), update);
+    updateDialogSetOpen(true);
+    await expect(updateDownloadAndInstall()).resolves.toBe(false);
+    expect(toast).toHaveBeenCalledWith("Dev 预览更新仅用于展示，不能安装");
+
+    localStorage.removeItem("devPreview.enabled");
+  });
+
   it("covers update check, dialog state, and download/install flows", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-02-01T00:00:00Z"));

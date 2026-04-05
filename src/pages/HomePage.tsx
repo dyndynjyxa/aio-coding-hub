@@ -4,6 +4,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { toast } from "sonner";
 import { CLIS } from "../constants/clis";
 import { HomeOverviewPanel } from "../components/home/HomeOverviewPanel";
+import { useDevPreviewData } from "../hooks/useDevPreviewData";
 import { useDocumentVisibility } from "../hooks/useDocumentVisibility";
 import { useWindowForeground } from "../hooks/useWindowForeground";
 import { useGatewaySessionsListQuery } from "../query/gateway";
@@ -58,11 +59,11 @@ export function HomePage() {
   const homeUsagePeriod = settingsQuery.data?.home_usage_period ?? DEFAULT_HOME_USAGE_PERIOD;
   const homeUsageWindowDays = resolveHomeUsageWindowDays(homeUsagePeriod);
   const isDevMode = import.meta.env.DEV;
+  const devPreview = useDevPreviewData();
 
   const [tab, setTab] = useState<HomeTabKey>("overview");
   const tabRef = useRef(tab);
   const [selectedLogId, setSelectedLogId] = useState<number | null>(null);
-  const [devPreviewEnabled, setDevPreviewEnabled] = useState(false);
 
   // --- Delegated state hooks ---
   const circuit = useHomeCircuitState();
@@ -178,11 +179,11 @@ export function HomePage() {
             <>
               {isDevMode ? (
                 <Button
-                  variant={devPreviewEnabled ? "primary" : "secondary"}
+                  variant={devPreview.enabled ? "primary" : "secondary"}
                   size="md"
-                  onClick={() => setDevPreviewEnabled((prev) => !prev)}
+                  onClick={() => devPreview.toggle()}
                 >
-                  {devPreviewEnabled ? "Dev关闭预览数据" : "Dev开启预览数据"}
+                  {devPreview.enabled ? "Dev关闭预览数据" : "Dev开启预览数据"}
                 </Button>
               ) : null}
               <TabList ariaLabel="首页视图切换" items={HOME_TABS} value={tab} onChange={setTab} />
@@ -195,7 +196,7 @@ export function HomePage() {
         {tab === "overview" ? (
           <HomeOverviewPanel
             showCustomTooltip={showCustomTooltip}
-            devPreviewEnabled={devPreviewEnabled}
+            devPreviewEnabled={devPreview.enabled}
             showHomeHeatmap={showHomeHeatmap}
             showHomeUsage={showHomeUsage}
             cliPriorityOrder={settingsQuery.data?.cli_priority_order}
