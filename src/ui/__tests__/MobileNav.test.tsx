@@ -22,6 +22,9 @@ const updateMetaRef = vi.hoisted(() => ({
 }));
 
 const updateDialogSetOpenMock = vi.hoisted(() => vi.fn());
+const devPreviewRef = vi.hoisted(() => ({
+  current: { enabled: false, setEnabled: vi.fn(), toggle: vi.fn() } as any,
+}));
 
 vi.mock("../../hooks/useGatewayMeta", () => ({
   useGatewayMeta: () => gatewayMetaRef.current,
@@ -31,6 +34,9 @@ vi.mock("../../hooks/useUpdateMeta", () => ({
   useUpdateMeta: () => updateMetaRef.current,
   updateDialogSetOpen: updateDialogSetOpenMock,
 }));
+vi.mock("../../hooks/useDevPreviewData", () => ({
+  useDevPreviewData: () => devPreviewRef.current,
+}));
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: vi.fn(),
@@ -39,6 +45,7 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
 describe("ui/MobileNav", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    devPreviewRef.current = { enabled: false, setEnabled: vi.fn(), toggle: vi.fn() };
     gatewayMetaRef.current = { gatewayAvailable: "checking", gateway: null, preferredPort: 37123 };
     updateMetaRef.current = {
       about: null,
@@ -195,6 +202,31 @@ describe("ui/MobileNav", () => {
     // portable path does NOT call updateDialogSetOpen
     expect(updateDialogSetOpenMock).not.toHaveBeenCalled();
     windowOpen.mockRestore();
+  });
+
+  it("shows NEW button and opens dialog when portable dev preview is enabled", () => {
+    gatewayMetaRef.current = {
+      gatewayAvailable: "available",
+      gateway: { running: true, port: 37123 },
+      preferredPort: 37123,
+    };
+    updateMetaRef.current = {
+      ...updateMetaRef.current,
+      about: { run_mode: "portable" },
+      updateCandidate: { version: "0.0.0" },
+    };
+    devPreviewRef.current = { enabled: true, setEnabled: vi.fn(), toggle: vi.fn() };
+
+    const onClose = vi.fn();
+    render(
+      <MemoryRouter>
+        <MobileNav isOpen={true} onClose={onClose} />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "NEW" }));
+    expect(updateDialogSetOpenMock).toHaveBeenCalledWith(true);
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it("does not show NEW button when hasUpdate is false", () => {

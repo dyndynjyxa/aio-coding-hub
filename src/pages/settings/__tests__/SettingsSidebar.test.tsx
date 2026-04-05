@@ -24,8 +24,15 @@ import {
 import { notifyModelPricesUpdated } from "../../../services/modelPrices";
 import { modelPricesKeys } from "../../../query/keys";
 
+const devPreviewRef = vi.hoisted(() => ({
+  current: { enabled: false, setEnabled: vi.fn(), toggle: vi.fn() } as any,
+}));
+
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
+vi.mock("../../../hooks/useDevPreviewData", () => ({
+  useDevPreviewData: () => devPreviewRef.current,
+}));
 vi.mock("../../../services/backgroundTasks", async () => {
   const actual = await vi.importActual<typeof import("../../../services/backgroundTasks")>(
     "../../../services/backgroundTasks"
@@ -221,6 +228,7 @@ function mockSidebarQueries() {
 describe("pages/settings/SettingsSidebar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    devPreviewRef.current = { enabled: false, setEnabled: vi.fn(), toggle: vi.fn() };
   });
 
   it("handles update checks (no about, portable, normal)", async () => {
@@ -267,6 +275,22 @@ describe("pages/settings/SettingsSidebar", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "check-update" }));
     expect(runBackgroundTask).toHaveBeenCalledWith("app-update-check", { trigger: "manual" });
+  });
+
+  it("runs local update preview even when about.run_mode is portable", async () => {
+    mockSidebarQueries();
+    devPreviewRef.current = { enabled: true, setEnabled: vi.fn(), toggle: vi.fn() };
+
+    renderWithProviders(
+      <SettingsSidebar updateMeta={createUpdateMeta({ about: { run_mode: "portable" } })} />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "check-update" }));
+
+    await waitFor(() => {
+      expect(runBackgroundTask).toHaveBeenCalledWith("app-update-check", { trigger: "manual" });
+    });
+    expect(toast).not.toHaveBeenCalledWith("portable 模式请手动下载");
   });
 
   it("handles data management, model price sync, and subscription invalidation", async () => {

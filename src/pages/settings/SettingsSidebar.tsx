@@ -6,6 +6,7 @@ import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { toast } from "sonner";
 import type { UpdateMeta } from "../../hooks/useUpdateMeta";
 import { AIO_RELEASES_URL } from "../../constants/urls";
+import { useDevPreviewData } from "../../hooks/useDevPreviewData";
 import { runBackgroundTask } from "../../services/backgroundTasks";
 import { logToConsole } from "../../services/consoleLog";
 import {
@@ -76,6 +77,7 @@ function isConfigBundleShape(value: unknown): value is ConfigBundle {
 
 export function SettingsSidebar({ updateMeta }: SettingsSidebarProps) {
   const about = updateMeta.about;
+  const devPreview = useDevPreviewData();
 
   const queryClient = useQueryClient();
 
@@ -145,7 +147,7 @@ export function SettingsSidebar({ updateMeta }: SettingsSidebarProps) {
         return;
       }
 
-      if (about.run_mode === "portable") {
+      if (about.run_mode === "portable" && !devPreview.enabled) {
         toast("portable 模式请手动下载");
         await openUpdateLog();
         return;

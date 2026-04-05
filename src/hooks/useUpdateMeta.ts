@@ -4,6 +4,7 @@ import { queryClient } from "../query/queryClient";
 import { updaterKeys } from "../query/keys";
 import { useAppAboutQuery } from "../query/appAbout";
 import { useUpdaterCheckQuery } from "../query/updater";
+import { getDevPreviewEnabled, useDevPreviewData } from "./useDevPreviewData";
 import { logToConsole } from "../services/consoleLog";
 import {
   updaterCheck,
@@ -14,6 +15,7 @@ import {
 import type { AppAboutInfo } from "../services/appAbout";
 
 const STORAGE_KEY_LAST_CHECKED_AT_MS = "updater.lastCheckedAtMs";
+const DEV_PREVIEW_UPDATE_RID = 9_999_001;
 
 export type UpdateMeta = {
   about: AppAboutInfo | null;
@@ -53,6 +55,26 @@ let starting: Promise<void> | null = null;
 let checkingPromise: Promise<UpdaterCheckUpdate | null> | null = null;
 let installingPromise: Promise<boolean | null> | null = null;
 
+function buildDevPreviewUpdateCandidate(currentVersion?: string): UpdaterCheckUpdate {
+  return {
+    rid: DEV_PREVIEW_UPDATE_RID,
+    version: "0.37.1-dev-preview",
+    currentVersion,
+    date: "2026-04-05T11:12:44Z",
+    body: [
+      "## Dev 预览更新日志",
+      "",
+      "- 更新弹窗现在会展示 release 正文，而不只是 GitHub 链接。",
+      "- 更新日志内容支持多行文本和长内容滚动。",
+      "- 这是一条仅开发环境可见的预览数据，不会参与真实安装。",
+    ].join("\n"),
+  };
+}
+
+function isDevPreviewUpdateCandidate(value: UpdaterCheckUpdate | null) {
+  return value?.rid === DEV_PREVIEW_UPDATE_RID;
+}
+
 function emit() {
   for (const listener of listeners) listener();
 }
@@ -90,11 +112,17 @@ export async function updateCheckNow(options: {
 
   checkingPromise = (async () => {
     try {
-      const update = await queryClient.fetchQuery({
-        queryKey: updaterKeys.check(),
-        queryFn: () => updaterCheck(),
-        staleTime: 0,
-      });
+      const update = getDevPreviewEnabled()
+        ? buildDevPreviewUpdateCandidate()
+        : await queryClient.fetchQuery({
+            queryKey: updaterKeys.check(),
+            queryFn: () => updaterCheck(),
+            staleTime: 0,
+          });
+
+      if (isDevPreviewUpdateCandidate(update)) {
+        queryClient.setQueryData(updaterKeys.check(), update);
+      }
 
       writeLastCheckedAtMs(Date.now());
 
@@ -147,6 +175,10 @@ export async function updateDownloadAndInstall(): Promise<boolean | null> {
   const updateCandidate =
     queryClient.getQueryData<UpdaterCheckUpdate | null>(updaterKeys.check()) ?? null;
   if (!updateCandidate) return null;
+  if (isDevPreviewUpdateCandidate(updateCandidate)) {
+    toast("Dev 预览更新仅用于展示，不能安装");
+    return false;
+  }
 
   if (uiSnapshot.installingUpdate) return installingPromise ?? true;
 
@@ -196,6 +228,7 @@ export function updateDialogSetOpen(open: boolean) {
 export function useUpdateMeta(): UpdateMeta {
   const aboutQuery = useAppAboutQuery();
   const updaterCheckQuery = useUpdaterCheckQuery();
+  const devPreview = useDevPreviewData();
 
   const ui = useSyncExternalStore(
     (listener) => {
@@ -207,10 +240,17 @@ export function useUpdateMeta(): UpdateMeta {
     () => uiSnapshot
   );
 
-  return useMemo(
-    () => ({
+  return useMemo(() => {
+    const cachedCandidate = updaterCheckQuery.data ?? null;
+    const updateCandidate = devPreview.enabled
+      ? buildDevPreviewUpdateCandidate(aboutQuery.data?.app_version)
+      : isDevPreviewUpdateCandidate(cachedCandidate)
+        ? null
+        : cachedCandidate;
+
+    return {
       about: aboutQuery.data ?? null,
-      updateCandidate: updaterCheckQuery.data ?? null,
+      updateCandidate,
       checkingUpdate: updaterCheckQuery.isFetching,
       dialogOpen: ui.dialogOpen,
 
@@ -218,16 +258,16 @@ export function useUpdateMeta(): UpdateMeta {
       installError: ui.installError,
       installTotalBytes: ui.installTotalBytes,
       installDownloadedBytes: ui.installDownloadedBytes,
-    }),
-    [
-      aboutQuery.data,
-      ui.dialogOpen,
-      ui.installDownloadedBytes,
-      ui.installError,
-      ui.installTotalBytes,
-      ui.installingUpdate,
-      updaterCheckQuery.data,
-      updaterCheckQuery.isFetching,
-    ]
-  );
+    };
+  }, [
+    aboutQuery.data,
+    devPreview.enabled,
+    ui.dialogOpen,
+    ui.installDownloadedBytes,
+    ui.installError,
+    ui.installTotalBytes,
+    ui.installingUpdate,
+    updaterCheckQuery.data,
+    updaterCheckQuery.isFetching,
+  ]);
 }
