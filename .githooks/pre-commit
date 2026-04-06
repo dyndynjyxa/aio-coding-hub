@@ -4,6 +4,83 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+rust_bridge_dir=""
+
+cleanup() {
+  if [ -n "$rust_bridge_dir" ] && [ -d "$rust_bridge_dir" ]; then
+    rm -rf "$rust_bridge_dir"
+  fi
+}
+
+trap cleanup EXIT
+
+ensure_rust_toolchain_on_path() {
+  if command -v cargo >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [ -f "$HOME/.cargo/env" ]; then
+    # rustup installs here for normal Linux shells, but GUI-launched hooks may
+    # skip login/profile startup and miss it.
+    # shellcheck disable=SC1090
+    . "$HOME/.cargo/env"
+  fi
+
+  if command -v cargo >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local cargo_exe=""
+  local candidate=""
+  for candidate in \
+    "/mnt/c/Users/$USER/.cargo/bin/cargo.exe" \
+    "/mnt/c/Users/nainf/.cargo/bin/cargo.exe" \
+    /mnt/c/Users/*/.cargo/bin/cargo.exe
+  do
+    if [ -x "$candidate" ]; then
+      cargo_exe="$candidate"
+      break
+    fi
+  done
+
+  if [ -z "$cargo_exe" ]; then
+    return 1
+  fi
+
+  local rust_bin_dir
+  rust_bin_dir="$(dirname "$cargo_exe")"
+  rust_bridge_dir="$(mktemp -d -t aio-rust-bin.XXXXXX)"
+
+  cat >"$rust_bridge_dir/cargo" <<EOF
+#!/usr/bin/env bash
+exec "$rust_bin_dir/cargo.exe" "\$@"
+EOF
+
+  cat >"$rust_bridge_dir/rustc" <<EOF
+#!/usr/bin/env bash
+exec "$rust_bin_dir/rustc.exe" "\$@"
+EOF
+
+  cat >"$rust_bridge_dir/rustfmt" <<EOF
+#!/usr/bin/env bash
+exec "$rust_bin_dir/rustfmt.exe" "\$@"
+EOF
+
+  cat >"$rust_bridge_dir/cargo-fmt" <<EOF
+#!/usr/bin/env bash
+exec "$rust_bin_dir/cargo-fmt.exe" "\$@"
+EOF
+
+  chmod +x \
+    "$rust_bridge_dir/cargo" \
+    "$rust_bridge_dir/rustc" \
+    "$rust_bridge_dir/rustfmt" \
+    "$rust_bridge_dir/cargo-fmt"
+
+  export PATH="$rust_bridge_dir:$PATH"
+  command -v cargo >/dev/null 2>&1
+}
+
 prettier_targets=()
 rust_tauri_targets=()
 has_src_changes=false
@@ -70,6 +147,11 @@ fi
 # `cargo fmt` formats the crate/workspace; we only run it when staged Rust files exist.
 # After formatting, stage any changes under src-tauri so the commit matches what was checked.
 if [ "${#rust_tauri_targets[@]}" -gt 0 ]; then
+  if ! ensure_rust_toolchain_on_path; then
+    echo "[pre-commit] Rust toolchain not found in PATH."
+    echo "[pre-commit] Install Rust in WSL or make cargo available to non-login shells, then retry."
+    exit 1
+  fi
   (cd "src-tauri" && cargo fmt)
   git add -u -- "src-tauri"
 fi

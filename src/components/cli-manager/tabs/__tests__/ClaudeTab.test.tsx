@@ -86,6 +86,42 @@ describe("components/cli-manager/tabs/ClaudeTab", () => {
     expect(screen.getByText("数据不可用")).toBeInTheDocument();
   });
 
+  it("does not render Claude OAuth card in the empty or loaded tab", () => {
+    const { rerender } = render(
+      <CliManagerClaudeTab
+        claudeAvailable="available"
+        claudeLoading={false}
+        claudeInfo={createClaudeInfo()}
+        claudeSettingsLoading={false}
+        claudeSettingsSaving={false}
+        claudeSettings={null}
+        providers={[]}
+        refreshClaude={vi.fn()}
+        openClaudeConfigDir={vi.fn()}
+        persistClaudeSettings={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText("claude-oauth-card")).not.toBeInTheDocument();
+
+    rerender(
+      <CliManagerClaudeTab
+        claudeAvailable="available"
+        claudeLoading={false}
+        claudeInfo={createClaudeInfo()}
+        claudeSettingsLoading={false}
+        claudeSettingsSaving={false}
+        claudeSettings={createClaudeSettings()}
+        providers={[]}
+        refreshClaude={vi.fn()}
+        openClaudeConfigDir={vi.fn()}
+        persistClaudeSettings={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText("claude-oauth-card")).not.toBeInTheDocument();
+  });
+
   it("drives key form interactions and validations", () => {
     const refreshClaude = vi.fn();
     const openClaudeConfigDir = vi.fn();

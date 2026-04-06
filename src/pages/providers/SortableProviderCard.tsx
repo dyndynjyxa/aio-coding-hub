@@ -224,7 +224,7 @@ export const SortableProviderCard = memo(function SortableProviderCard({
     } else {
       fetchLimits();
     }
-    const interval = setInterval(fetchLimits, 60000);
+    const interval = setInterval(fetchLimits, 180000);
     return () => clearInterval(interval);
   }, [isOAuth, provider.id]);
 

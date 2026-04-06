@@ -10,7 +10,6 @@ import type {
 import type { ProviderSummary } from "../../../services/providers";
 import { cn } from "../../../utils/cn";
 import { CliVersionBadge } from "../CliVersionBadge";
-import { ClaudeOAuthCard } from "./ClaudeOAuthCard";
 import { Button } from "../../../ui/Button";
 import { Card } from "../../../ui/Card";
 import { Input } from "../../../ui/Input";
@@ -251,7 +250,6 @@ export function CliManagerClaudeTab({
   claudeSettingsLoading,
   claudeSettingsSaving,
   claudeSettings,
-  providers,
   refreshClaude,
   openClaudeConfigDir,
   persistClaudeSettings,
@@ -505,7 +503,6 @@ export function CliManagerClaudeTab({
             <div className="text-sm text-slate-500 dark:text-slate-400 text-center py-8">
               暂无配置，请尝试刷新
             </div>
-            <ClaudeOAuthCard providers={providers} />
           </div>
         ) : (
           <div className="p-6 space-y-6">
@@ -912,8 +909,6 @@ export function CliManagerClaudeTab({
                 </SettingItem>
               </div>
             </div>
-
-            <ClaudeOAuthCard providers={providers} />
           </div>
         )}
 

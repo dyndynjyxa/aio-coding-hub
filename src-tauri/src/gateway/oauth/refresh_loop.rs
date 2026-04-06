@@ -9,7 +9,7 @@ use crate::providers;
 use tokio::sync::watch;
 
 /// How often the loop polls for providers needing refresh.
-const POLL_INTERVAL_SECS: u64 = 60;
+const POLL_INTERVAL_SECS: u64 = 180;
 
 /// Spawns the background OAuth refresh loop.
 ///

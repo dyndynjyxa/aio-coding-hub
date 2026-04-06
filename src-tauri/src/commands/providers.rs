@@ -923,29 +923,66 @@ pub(crate) async fn provider_oauth_fetch_limits(
     provider_id: i64,
 ) -> Result<serde_json::Value, String> {
     let db = ensure_db_ready(app, db_state.inner()).await?;
-    let details = blocking::run("provider_oauth_fetch_limits_load", {
+    let mut details = blocking::run("provider_oauth_fetch_limits_load", {
         let db = db.clone();
         move || crate::providers::get_oauth_details(&db, provider_id)
     })
     .await
     .map_err(Into::<String>::into)?;
-
-    let token = details.oauth_access_token.trim().to_string();
-    if token.is_empty() {
-        return Err("OAuth access token is empty".to_string());
-    }
-
     let adapter = crate::gateway::oauth::registry::resolve_oauth_adapter_for_details(&details)?;
-
     let client = crate::gateway::oauth::build_oauth_http_client(
         &format!("aio-coding-hub-oauth-command/{}", env!("CARGO_PKG_VERSION")),
         15,
         10,
     )?;
-    let limits = adapter
-        .fetch_limits(&client, &token)
-        .await
-        .map_err(|e| format!("fetch_limits failed: {e}"))?;
+
+    if oauth_details_can_refresh(&details)
+        && crate::gateway::oauth::refresh::should_refresh_now(
+            details.oauth_expires_at,
+            details.oauth_refresh_lead_s,
+        )
+    {
+        match refresh_oauth_details_for_limits(&db, &client, &details, adapter).await {
+            Ok(refreshed) => details = refreshed,
+            Err(err) => {
+                let now_unix = crate::shared::time::now_unix_seconds() as i64;
+                let still_valid = details
+                    .oauth_expires_at
+                    .map(|expires_at| expires_at > now_unix)
+                    .unwrap_or(false);
+                if still_valid {
+                    tracing::warn!(
+                        provider_id = details.id,
+                        cli_key = %details.cli_key,
+                        "provider_oauth_fetch_limits: proactive refresh failed, using existing token: {err}"
+                    );
+                } else {
+                    return Err(err);
+                }
+            }
+        }
+    }
+
+    let token = effective_oauth_access_token(&details, adapter)?;
+    let limits = match adapter.fetch_limits(&client, &token).await {
+        Ok(limits) => limits,
+        Err(err) => {
+            let err_str = format!("fetch_limits failed: {err}");
+            if should_retry_oauth_limits_after_refresh(&err_str)
+                && oauth_details_can_refresh(&details)
+            {
+                let refreshed =
+                    refresh_oauth_details_for_limits(&db, &client, &details, adapter).await?;
+                let refreshed_token = effective_oauth_access_token(&refreshed, adapter)?;
+                adapter
+                    .fetch_limits(&client, &refreshed_token)
+                    .await
+                    .map_err(|retry_err| format!("fetch_limits failed: {retry_err}"))?
+            } else {
+                return Err(err_str);
+            }
+        }
+    };
 
     let limit_short_label =
         normalize_oauth_short_window_label(adapter.cli_key(), limits.limit_short_label.as_deref());
@@ -986,6 +1023,155 @@ pub(crate) async fn provider_oauth_fetch_limits(
         "limit_weekly_reset_at": limit_weekly_reset_at,
         "raw_json": limits.raw_json,
     }))
+}
+
+fn oauth_details_can_refresh(details: &crate::providers::ProviderOAuthDetails) -> bool {
+    details
+        .oauth_refresh_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some()
+        && details
+            .oauth_token_uri
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_some()
+        && details
+            .oauth_client_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_some()
+}
+
+fn effective_oauth_access_token(
+    details: &crate::providers::ProviderOAuthDetails,
+    adapter: &'static dyn crate::gateway::oauth::provider_trait::OAuthProvider,
+) -> Result<String, String> {
+    let token_set = crate::gateway::oauth::provider_trait::OAuthTokenSet {
+        access_token: details.oauth_access_token.clone(),
+        refresh_token: details.oauth_refresh_token.clone(),
+        expires_at: details.oauth_expires_at,
+        id_token: details.oauth_id_token.clone(),
+    };
+    let (token, _) = adapter.resolve_effective_token(&token_set, details.oauth_id_token.as_deref());
+    let token = token.trim().to_string();
+    if token.is_empty() {
+        return Err("OAuth access token is empty".to_string());
+    }
+    Ok(token)
+}
+
+async fn refresh_oauth_details_for_limits(
+    db: &crate::db::Db,
+    client: &reqwest::Client,
+    details: &crate::providers::ProviderOAuthDetails,
+    adapter: &'static dyn crate::gateway::oauth::provider_trait::OAuthProvider,
+) -> Result<crate::providers::ProviderOAuthDetails, String> {
+    let provider_id = details.id;
+    let token_uri = details
+        .oauth_token_uri
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or("provider missing token_uri")?
+        .to_string();
+    let client_id = details
+        .oauth_client_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or("provider missing client_id")?
+        .to_string();
+    let refresh_token = details
+        .oauth_refresh_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or("provider missing refresh_token")?
+        .to_string();
+
+    let token_set = crate::gateway::oauth::refresh::refresh_provider_token_with_retry(
+        client,
+        &token_uri,
+        &client_id,
+        details.oauth_client_secret.as_deref(),
+        &refresh_token,
+    )
+    .await
+    .map_err(|e| format!("token refresh failed: {e}"))?;
+
+    let (effective_token, id_token) =
+        adapter.resolve_effective_token(&token_set, details.oauth_id_token.as_deref());
+    if effective_token.trim().is_empty() {
+        return Err("token refresh failed: refreshed access_token is empty".to_string());
+    }
+
+    let oauth_provider_type = if details.oauth_provider_type.trim().is_empty() {
+        adapter.provider_type().to_string()
+    } else {
+        details.oauth_provider_type.clone()
+    };
+    let oauth_client_secret = details.oauth_client_secret.clone();
+    let oauth_email = details.oauth_email.clone();
+    let new_refresh_token = token_set
+        .refresh_token
+        .as_deref()
+        .or(Some(refresh_token.as_str()))
+        .map(str::to_string);
+    let expires_at = token_set.expires_at;
+    let expected_last_refreshed_at = details.oauth_last_refreshed_at;
+
+    let persisted = blocking::run("provider_oauth_fetch_limits_refresh_save", {
+        let db = db.clone();
+        let oauth_provider_type = oauth_provider_type.clone();
+        let effective_token = effective_token.clone();
+        let id_token = id_token.clone();
+        let token_uri = token_uri.clone();
+        let client_id = client_id.clone();
+        let oauth_client_secret = oauth_client_secret.clone();
+        let oauth_email = oauth_email.clone();
+        let new_refresh_token = new_refresh_token.clone();
+        move || {
+            crate::providers::update_oauth_tokens_if_last_refreshed_matches(
+                &db,
+                provider_id,
+                "oauth",
+                &oauth_provider_type,
+                &effective_token,
+                new_refresh_token.as_deref(),
+                id_token.as_deref(),
+                &token_uri,
+                &client_id,
+                oauth_client_secret.as_deref(),
+                expires_at,
+                oauth_email.as_deref(),
+                expected_last_refreshed_at,
+            )
+        }
+    })
+    .await
+    .map_err(Into::<String>::into)?;
+
+    if !persisted {
+        tracing::info!(
+            provider_id,
+            "provider_oauth_fetch_limits: refresh CAS conflict, reloading latest tokens"
+        );
+    }
+
+    blocking::run("provider_oauth_fetch_limits_reload", {
+        let db = db.clone();
+        move || crate::providers::get_oauth_details(&db, provider_id)
+    })
+    .await
+    .map_err(Into::<String>::into)
+}
+
+fn should_retry_oauth_limits_after_refresh(err: &str) -> bool {
+    err.contains("401 Unauthorized") || err.contains("403 Forbidden")
 }
 
 fn default_oauth_short_window_label(cli_key: &str) -> Option<String> {
@@ -1418,6 +1604,26 @@ mod tests {
 
         assert_eq!(limit_5h.as_deref(), Some("50%"));
         assert_eq!(limit_weekly.as_deref(), Some("75%"));
+    }
+
+    #[test]
+    fn oauth_limits_fetch_error_requires_refresh_on_auth_failures() {
+        assert!(should_retry_oauth_limits_after_refresh(
+            "fetch_limits failed: claude limits fetch status: 401 Unauthorized"
+        ));
+        assert!(should_retry_oauth_limits_after_refresh(
+            "fetch_limits failed: codex limits fetch status: 403 Forbidden"
+        ));
+    }
+
+    #[test]
+    fn oauth_limits_fetch_error_ignores_non_auth_failures() {
+        assert!(!should_retry_oauth_limits_after_refresh(
+            "fetch_limits failed: claude limits fetch status: 500 Internal Server Error"
+        ));
+        assert!(!should_retry_oauth_limits_after_refresh(
+            "fetch_limits failed: gemini limits fetch could not resolve a quota project"
+        ));
     }
 
     #[test]

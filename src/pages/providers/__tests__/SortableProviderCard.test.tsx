@@ -139,6 +139,16 @@ describe("pages/providers/SortableProviderCard", () => {
     await waitFor(() => expect(vi.mocked(providerOAuthFetchLimits)).toHaveBeenCalledWith(1));
   });
 
+  it("polls OAuth limits every 3 minutes", () => {
+    const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+
+    renderCard({
+      auth_mode: "oauth",
+    });
+
+    expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 180000);
+  });
+
   it("renders provider-specific short-window labels for Gemini OAuth limits", async () => {
     vi.mocked(providerOAuthFetchLimits).mockResolvedValueOnce({
       limit_short_label: "短窗",
