@@ -54,6 +54,14 @@ fn upstream_error_decision(
     base_decision
 }
 
+fn should_abort_unmatched_bad_request(
+    cli_key: &str,
+    status: reqwest::StatusCode,
+    matched_rule_id: Option<&'static str>,
+) -> bool {
+    cli_key == "codex" && status == reqwest::StatusCode::BAD_REQUEST && matched_rule_id.is_none()
+}
+
 fn reqwest_error_decision(
     is_count_tokens: bool,
     is_connect: bool,
@@ -218,7 +226,7 @@ pub(super) async fn handle_non_success_response(
     let mut abort_response_headers: Option<axum::http::HeaderMap> = None;
     let mut matched_rule_id: Option<&'static str> = None;
     let mut matched_429_concurrency_limit = false;
-    // Body preview for 5xx errors (used in reason field for diagnostics).
+    // Body preview for errors where preserving the upstream diagnostic text matters.
     let mut upstream_body_preview: Option<String> = None;
     let need_client_error_scan = !is_count_tokens
         && (upstream_client_error_rules::should_attempt_non_retryable_match(
@@ -262,8 +270,11 @@ pub(super) async fn handle_non_success_response(
                         ),
                     );
                 }
-                // Extract body preview for 5xx errors (for diagnostics in reason field).
-                if status.is_server_error() {
+                // Extract body preview for diagnostics on 5xx and codex 400 pass-throughs.
+                if status.is_server_error()
+                    || (ctx.cli_key.as_str() == "codex"
+                        && status == reqwest::StatusCode::BAD_REQUEST)
+                {
                     let preview = String::from_utf8_lossy(&body_for_scan);
                     let truncated: String = preview.chars().take(500).collect();
                     if !truncated.is_empty() {
@@ -295,6 +306,13 @@ pub(super) async fn handle_non_success_response(
                 }
             }
         }
+    }
+
+    if !is_count_tokens
+        && should_abort_unmatched_bad_request(ctx.cli_key.as_str(), status, matched_rule_id)
+    {
+        category = ErrorCategory::NonRetryableClientError;
+        decision = FailoverDecision::Abort;
     }
 
     let mut circuit_state_before = Some(circuit_before.state.as_str());
@@ -642,7 +660,10 @@ pub(super) async fn handle_reqwest_error(
 
 #[cfg(test)]
 mod tests {
-    use super::{reqwest_error_decision, upstream_error_decision, FailoverDecision};
+    use super::{
+        reqwest_error_decision, should_abort_unmatched_bad_request, upstream_error_decision,
+        FailoverDecision,
+    };
 
     #[test]
     fn upstream_error_decision_aborts_for_count_tokens() {
@@ -688,5 +709,32 @@ mod tests {
     fn reqwest_error_decision_retries_non_connect_errors_before_limit() {
         let decision = reqwest_error_decision(false, false, 1, 5);
         assert!(matches!(decision, FailoverDecision::RetrySameProvider));
+    }
+
+    #[test]
+    fn unmatched_codex_bad_request_aborts() {
+        assert!(should_abort_unmatched_bad_request(
+            "codex",
+            reqwest::StatusCode::BAD_REQUEST,
+            None,
+        ));
+    }
+
+    #[test]
+    fn matched_codex_bad_request_still_uses_rule_path() {
+        assert!(!should_abort_unmatched_bad_request(
+            "codex",
+            reqwest::StatusCode::BAD_REQUEST,
+            Some("prompt_limit"),
+        ));
+    }
+
+    #[test]
+    fn non_codex_bad_request_keeps_existing_behavior() {
+        assert!(!should_abort_unmatched_bad_request(
+            "claude",
+            reqwest::StatusCode::BAD_REQUEST,
+            None,
+        ));
     }
 }
