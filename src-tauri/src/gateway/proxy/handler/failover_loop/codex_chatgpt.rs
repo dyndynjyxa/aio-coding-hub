@@ -25,8 +25,7 @@ pub(super) fn is_codex_chatgpt_backend(
 
 fn normalize_codex_chatgpt_forwarded_path(forwarded_path: &str) -> String {
     match forwarded_path.trim_end_matches('/') {
-        "/v1" | "/v1/codex" => return "/".to_string(),
-        "/codex" => return "/".to_string(),
+        "/v1" | "/v1/codex" | "/codex" => return "/".to_string(),
         _ => {}
     }
 

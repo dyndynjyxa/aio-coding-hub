@@ -860,27 +860,6 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
                 &mut upstream_body_bytes,
                 &mut strip_request_content_encoding,
             );
-            if let Ok(body) = serde_json::from_slice::<serde_json::Value>(&upstream_body_bytes) {
-                let stream = body.get("stream").and_then(|v| v.as_bool());
-                let store = body.get("store").and_then(|v| v.as_bool());
-                tracing::debug!(
-                    trace_id = %input.trace_id,
-                    provider_id = provider_id,
-                    forwarded_path = %upstream_forwarded_path,
-                    stream = ?stream,
-                    store = ?store,
-                    "codex chatgpt compat applied"
-                );
-                emit_gateway_log(
-                    &input.state.app,
-                    "debug",
-                    "CODEX_CHATGPT_COMPAT",
-                    format!(
-                        "[CODEX_CHATGPT_COMPAT] path={} stream={:?} store={:?}",
-                        upstream_forwarded_path, stream, store
-                    ),
-                );
-            }
         }
 
         // Claude API key providers: some relays only accept one auth scheme.
