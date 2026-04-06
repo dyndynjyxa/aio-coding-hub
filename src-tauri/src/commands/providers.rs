@@ -945,7 +945,7 @@ pub(crate) async fn provider_oauth_fetch_limits(
         match refresh_oauth_details_for_limits(&db, &client, &details, adapter).await {
             Ok(refreshed) => details = refreshed,
             Err(err) => {
-                let now_unix = crate::shared::time::now_unix_seconds() as i64;
+                let now_unix = crate::shared::time::now_unix_seconds();
                 let still_valid = details
                     .oauth_expires_at
                     .map(|expires_at| expires_at > now_unix)

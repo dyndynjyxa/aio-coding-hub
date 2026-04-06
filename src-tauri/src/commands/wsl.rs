@@ -302,7 +302,7 @@ pub(crate) async fn wsl_auto_sync_core(app: &tauri::AppHandle) -> Result<(), Str
         "WSL auto-sync core completed"
     );
 
-    crate::app::heartbeat_watchdog::gated_emit(&app, "wsl:auto_config_result", &report);
+    crate::app::heartbeat_watchdog::gated_emit(app, "wsl:auto_config_result", &report);
 
     Ok(())
 }
@@ -382,7 +382,7 @@ pub(crate) async fn wsl_auto_configure_on_startup(
         tracing::info!(
             "WSL startup auto-configure: listen mode is localhost, prompting user to switch"
         );
-        crate::app::heartbeat_watchdog::gated_emit(&app, "wsl:localhost_switch_prompt", ());
+        crate::app::heartbeat_watchdog::gated_emit(app, "wsl:localhost_switch_prompt", ());
         return Ok(());
     }
 
@@ -406,7 +406,7 @@ async fn do_wsl_auto_configure(
                 message: "gateway port unknown".to_string(),
                 distros: Vec::new(),
             };
-            crate::app::heartbeat_watchdog::gated_emit(&app, "wsl:auto_config_result", &report);
+            crate::app::heartbeat_watchdog::gated_emit(app, "wsl:auto_config_result", &report);
             return Err(report.message);
         }
     };
@@ -471,7 +471,7 @@ async fn do_wsl_auto_configure(
         "WSL startup auto-configure completed"
     );
 
-    crate::app::heartbeat_watchdog::gated_emit(&app, "wsl:auto_config_result", &report);
+    crate::app::heartbeat_watchdog::gated_emit(app, "wsl:auto_config_result", &report);
 
     Ok(())
 }
