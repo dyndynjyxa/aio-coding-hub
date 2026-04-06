@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.37.1](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.37.0...aio-coding-hub-v0.37.1) (2026-04-06)
+
+
+### Features
+
+* **ui:** 优化首页最近代理记录卡片展示与预览数据 ([#181](https://github.com/dyndynjyxa/aio-coding-hub/issues/181)) ([c5a0068](https://github.com/dyndynjyxa/aio-coding-hub/commit/c5a0068ac81e6d97fd9a021c346ee7f0024da42d))
+
+
+### Bug Fixes
+
+* **codex:** 修复 Pi 本地 endpoint 与 Responses 兼容约束 ([#180](https://github.com/dyndynjyxa/aio-coding-hub/issues/180)) ([8e7085e](https://github.com/dyndynjyxa/aio-coding-hub/commit/8e7085e69d1aabca28d398190239e99bcab4fe03))
+* **update:** restore changelog and local preview flow ([#178](https://github.com/dyndynjyxa/aio-coding-hub/issues/178)) ([36a564d](https://github.com/dyndynjyxa/aio-coding-hub/commit/36a564dcaa33a6bd9c76a9bda30599a1d3f92c52))
+
 ## [0.37.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.36.0...aio-coding-hub-v0.37.0) (2026-04-05)
 
 
