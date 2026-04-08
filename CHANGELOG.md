@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.37.3](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.37.2...aio-coding-hub-v0.37.3) (2026-04-08)
+
+
+### Features
+
+* **cli_sessions:** 优化 Claude-CLI 项目路径解析和工作目录提取 ([a0024ac](https://github.com/dyndynjyxa/aio-coding-hub/commit/a0024acf6c2e3bc1615d304d6ae681fbb4550371))
+
+
+### Bug Fixes
+
+* **failover:** 区分网关过滤与上游请求失败 ([441b6f0](https://github.com/dyndynjyxa/aio-coding-hub/commit/441b6f0d84565bdd21b8d52334aaedd60425ebef))
+* **settings:** 限制上游流式空闲超时最小值为60秒 ([e7284c2](https://github.com/dyndynjyxa/aio-coding-hub/commit/e7284c251950bcfa27db72385603756472329646))
+
 ## [0.37.2](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.37.1...aio-coding-hub-v0.37.2) (2026-04-07)
 
 
