@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.4](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.37.3...aio-coding-hub-v0.37.4) (2026-04-08)
+
+
+### Bug Fixes
+
+* **proxy:** 优化未匹配客户端错误的中止逻辑 ([05eb435](https://github.com/dyndynjyxa/aio-coding-hub/commit/05eb435e499786d8308f548d5115adf378adc7f6))
+
 ## [0.37.3](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.37.2...aio-coding-hub-v0.37.3) (2026-04-08)
 
 
