@@ -106,6 +106,16 @@ function mergeTraceWithRequestLog(
   if (!requestLog) return trace;
 
   const summary = trace.summary;
+  const requestLogInProgress = isPersistedRequestLogInProgress(requestLog);
+  if (!summary && requestLogInProgress) {
+    return {
+      ...trace,
+      session_id: trace.session_id ?? requestLog.session_id ?? null,
+      requested_model: trace.requested_model ?? requestLog.requested_model ?? null,
+      last_seen_ms: Math.max(trace.last_seen_ms, requestLogCreatedAtMs(requestLog)),
+    };
+  }
+
   const mergedSummary = {
     trace_id: trace.trace_id,
     cli_key: trace.cli_key,
@@ -139,6 +149,22 @@ function mergeTraceWithRequestLog(
     requested_model: trace.requested_model ?? requestLog.requested_model ?? null,
     summary: mergedSummary,
     last_seen_ms: Math.max(trace.last_seen_ms, requestLogCreatedAtMs(requestLog)),
+  };
+}
+
+function createRealtimeTraceFromInProgressLog(log: RequestLogSummary): TraceSession {
+  const createdAtMs = requestLogCreatedAtMs(log);
+  return {
+    trace_id: log.trace_id,
+    cli_key: log.cli_key,
+    session_id: log.session_id ?? null,
+    method: log.method,
+    path: log.path,
+    query: null,
+    requested_model: log.requested_model ?? null,
+    first_seen_ms: createdAtMs,
+    last_seen_ms: createdAtMs,
+    attempts: [],
   };
 }
 
@@ -599,24 +625,29 @@ export function HomeRequestLogsPanel({
           : `共 ${sortedRequestLogs.length} 条`);
   const realtimeTraceCandidates = useMemo(() => {
     const logsByTraceId = new Map<string, RequestLogSummary>();
-    const claudePersistedTraceIds = new Set<string>();
     for (const log of sortedRequestLogs) {
       const traceId = log.trace_id?.trim();
       if (!traceId) continue;
       if (!logsByTraceId.has(traceId)) {
         logsByTraceId.set(traceId, log);
       }
-      if (log.cli_key === "claude") {
-        claudePersistedTraceIds.add(traceId);
-      }
+    }
+
+    const mergedTraceMap = new Map<string, TraceSession>();
+    for (const trace of displayedTraces) {
+      const traceId = trace.trace_id?.trim();
+      if (!traceId || mergedTraceMap.has(traceId)) continue;
+      mergedTraceMap.set(traceId, mergeTraceWithRequestLog(trace, logsByTraceId.get(traceId)));
+    }
+    for (const log of sortedRequestLogs) {
+      if (!isPersistedRequestLogInProgress(log)) continue;
+      const traceId = log.trace_id?.trim();
+      if (!traceId || mergedTraceMap.has(traceId)) continue;
+      mergedTraceMap.set(traceId, createRealtimeTraceFromInProgressLog(log));
     }
 
     const nowMs = Date.now();
-    return displayedTraces
-      .filter(
-        (trace) => !(trace.cli_key === "claude" && claudePersistedTraceIds.has(trace.trace_id))
-      )
-      .map((trace) => mergeTraceWithRequestLog(trace, logsByTraceId.get(trace.trace_id)))
+    return Array.from(mergedTraceMap.values())
       .filter((t) => nowMs - t.first_seen_ms < 15 * 60 * 1000)
       .sort((a, b) => b.first_seen_ms - a.first_seen_ms)
       .slice(0, 20);
@@ -659,22 +690,22 @@ export function HomeRequestLogsPanel({
     }
     return map;
   }, [previewSessionFolderLookups, sessionFolderLookupQuery.data]);
-  const tracesByTraceId = useMemo(() => {
+  const liveTracesByTraceId = useMemo(() => {
     const map = new Map<string, TraceSession>();
-    for (const trace of displayedTraces) {
+    for (const trace of realtimeTraceCandidates) {
       const traceId = trace.trace_id?.trim();
       if (!traceId || map.has(traceId)) continue;
       map.set(traceId, trace);
     }
     return map;
-  }, [displayedTraces]);
+  }, [realtimeTraceCandidates]);
   const hasLiveInProgressRequestLogs = useMemo(
     () =>
       sortedRequestLogs.some((log) => {
         if (!isPersistedRequestLogInProgress(log)) return false;
-        return tracesByTraceId.has(log.trace_id);
+        return liveTracesByTraceId.has(log.trace_id);
       }),
-    [sortedRequestLogs, tracesByTraceId]
+    [liveTracesByTraceId, sortedRequestLogs]
   );
   const nowMs = useNowMs(hasLiveInProgressRequestLogs, 250);
 
@@ -742,7 +773,7 @@ export function HomeRequestLogsPanel({
           showCustomTooltip={showCustomTooltip}
           compactMode={effectiveCompactMode}
           folderLookupBySessionKey={sessionFolderLookupBySessionKey}
-          tracesByTraceId={tracesByTraceId}
+          tracesByTraceId={liveTracesByTraceId}
           nowMs={nowMs}
           requestLogsAvailable={requestLogsAvailable}
           requestLogs={sortedRequestLogs}
@@ -789,10 +820,22 @@ const RequestLogsList = memo(function RequestLogsList({
   onSelectLogId,
 }: RequestLogsListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const useVirtual = requestLogs.length >= VIRTUALIZATION_THRESHOLD;
+  const renderedRequestLogs = useMemo(() => {
+    if (realtimeTraceCandidates.length === 0) return requestLogs;
+    const realtimeTraceIds = new Set(
+      realtimeTraceCandidates.map((trace) => trace.trace_id?.trim()).filter(Boolean)
+    );
+    return requestLogs.filter((log) => {
+      if (!isPersistedRequestLogInProgress(log)) return true;
+      const traceId = log.trace_id?.trim();
+      if (!traceId) return true;
+      return !realtimeTraceIds.has(traceId);
+    });
+  }, [realtimeTraceCandidates, requestLogs]);
+  const useVirtual = renderedRequestLogs.length >= VIRTUALIZATION_THRESHOLD;
 
   const virtualizer = useVirtualizer({
-    count: requestLogs.length,
+    count: renderedRequestLogs.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ESTIMATED_LOG_CARD_HEIGHT,
     overscan: 8,
@@ -802,9 +845,9 @@ const RequestLogsList = memo(function RequestLogsList({
   const virtualItems = virtualizer.getVirtualItems();
 
   // Non-virtualized fallback for small lists
-  const plainList = !useVirtual && requestLogs.length > 0 && (
+  const plainList = !useVirtual && renderedRequestLogs.length > 0 && (
     <>
-      {requestLogs.map((log) => {
+      {renderedRequestLogs.map((log) => {
         const trace = tracesByTraceId.get(log.trace_id);
         const liveNow = trace && isPersistedRequestLogInProgress(log) ? nowMs : 0;
         const sessionFolder = (() => {
@@ -844,7 +887,7 @@ const RequestLogsList = memo(function RequestLogsList({
 
       {requestLogsAvailable === false ? (
         <div className="p-4 text-sm text-slate-600 dark:text-slate-400">数据不可用</div>
-      ) : requestLogs.length === 0 ? (
+      ) : renderedRequestLogs.length === 0 ? (
         requestLogsLoading ? (
           <div className="flex items-center justify-center gap-2 p-4 text-sm text-slate-600 dark:text-slate-400">
             <Spinner size="sm" />
@@ -871,7 +914,7 @@ const RequestLogsList = memo(function RequestLogsList({
             }}
           >
             {virtualItems.map((virtualRow) => {
-              const vLog = requestLogs[virtualRow.index];
+              const vLog = renderedRequestLogs[virtualRow.index];
               const vTrace = tracesByTraceId.get(vLog.trace_id);
               const vNow = vTrace && isPersistedRequestLogInProgress(vLog) ? nowMs : 0;
               const sessionFolder = (() => {

@@ -246,6 +246,83 @@ describe("home/RequestLogDetailDialog", () => {
     expectMetricValue("缓存创建", "8 (1h)");
   });
 
+  it("hides error observation for 200 success even when error_details_json exists", () => {
+    setRequestLogQueryState({
+      selectedLog: createSelectedLog({
+        status: 200,
+        error_code: null,
+        error_details_json: JSON.stringify({
+          error_code: "GW_UPSTREAM_5XX",
+          error_category: "PROVIDER_ERROR",
+          upstream_status: 502,
+          decision: "switch",
+        }),
+      }),
+    });
+
+    render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
+
+    expect(screen.queryByText("错误详情")).not.toBeInTheDocument();
+  });
+
+  it("renders structured error observation fields from error_details_json", () => {
+    setRequestLogQueryState({
+      selectedLog: createSelectedLog({
+        status: 502,
+        error_code: "GW_UPSTREAM_ALL_FAILED",
+        error_details_json: JSON.stringify({
+          gateway_error_code: "GW_UPSTREAM_ALL_FAILED",
+          error_code: "GW_UPSTREAM_5XX",
+          error_category: "PROVIDER_ERROR",
+          upstream_status: 502,
+          provider_id: 12,
+          provider_name: "Alpha",
+          decision: "switch",
+          selection_method: "ordered",
+          provider_index: 2,
+          retry_index: 3,
+          reason_code: "retry_failed",
+          matched_rule: "bad_gateway",
+          reason: "status=502, rule=bad_gateway",
+          upstream_body_preview: '{"error":"boom"}',
+          attempt_duration_ms: 88,
+          circuit_state_before: "closed",
+          circuit_state_after: "open",
+          circuit_failure_count: 3,
+          circuit_failure_threshold: 3,
+        }),
+      }),
+    });
+
+    render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
+
+    expect(screen.getByText("错误详情")).toBeInTheDocument();
+    expect(screen.getByText("尝试错误码")).toBeInTheDocument();
+    expect(screen.getByText("网关错误码")).toBeInTheDocument();
+    expect(screen.getByText("GW_UPSTREAM_5XX")).toBeInTheDocument();
+    expect(screen.getByText("GW_UPSTREAM_ALL_FAILED")).toBeInTheDocument();
+    expect(screen.getByText("命中供应商")).toBeInTheDocument();
+    expect(screen.getByText("Alpha")).toBeInTheDocument();
+    expect(screen.getByText("调度决策")).toBeInTheDocument();
+    expect(screen.getByText("切换供应商")).toBeInTheDocument();
+    expect(screen.getByText("选择方式")).toBeInTheDocument();
+    expect(screen.getByText("顺序选择")).toBeInTheDocument();
+    expect(screen.getByText("尝试位置")).toBeInTheDocument();
+    expect(screen.getByText("供应商 2 / 重试 3")).toBeInTheDocument();
+    expect(screen.getByText("原因标签")).toBeInTheDocument();
+    expect(screen.getByText("retry_failed")).toBeInTheDocument();
+    expect(screen.getByText("匹配规则")).toBeInTheDocument();
+    expect(screen.getByText("bad_gateway")).toBeInTheDocument();
+    expect(screen.getByText("原因")).toBeInTheDocument();
+    expect(screen.getByText("status=502, rule=bad_gateway")).toBeInTheDocument();
+    expect(screen.getByText("上游返回")).toBeInTheDocument();
+    expect(screen.getByText('{"error":"boom"}')).toBeInTheDocument();
+    expect(screen.getByText("熔断状态")).toBeInTheDocument();
+    expect(screen.getByText("closed → open")).toBeInTheDocument();
+    expect(screen.getByText("失败计数")).toBeInTheDocument();
+    expect(screen.getByText("3 / 3")).toBeInTheDocument();
+  });
+
   it("uses live trace provider and elapsed duration for in-progress logs", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-29T12:00:00.000Z"));

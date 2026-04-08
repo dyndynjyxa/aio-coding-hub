@@ -441,7 +441,7 @@ export function CliManagerGeneralTab({
                 </SettingsRow>
 
                 <SettingsRow
-                  label="流式空闲超时（0=禁用）"
+                  label="流式空闲超时（0=禁用，启用时最小60秒）"
                   subtitle="流式响应中两次数据之间的最大静默时间。"
                 >
                   <div className="flex items-center gap-2">
@@ -455,8 +455,13 @@ export function CliManagerGeneralTab({
                       onBlur={(e) => {
                         if (!appSettings) return;
                         const next = e.currentTarget.valueAsNumber;
-                        if (!Number.isFinite(next) || next < 0 || next > 3600) {
-                          toast("上游流式空闲超时必须为 0-3600 秒");
+                        if (
+                          !Number.isFinite(next) ||
+                          next < 0 ||
+                          next > 3600 ||
+                          (next > 0 && next < 60)
+                        ) {
+                          toast("上游流式空闲超时必须为 0（禁用）或 60-3600 秒");
                           setUpstreamStreamIdleTimeoutSeconds(
                             appSettings.upstream_stream_idle_timeout_seconds
                           );

@@ -1,7 +1,7 @@
 {
   "name": "aio-coding-hub",
   "private": true,
-  "version": "0.37.1",
+  "version": "0.37.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -78,6 +78,7 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-hook-form": "^7.65.0",
+    "react-markdown": "^10.1.0",
     "react-router-dom": "^7.13.0",
     "recharts": "^2.15.4",
     "sonner": "^2.0.7",
@@ -85,6 +86,7 @@
     "zod": "^4.1.12"
   },
   "devDependencies": {
+    "@tailwindcss/typography": "^0.5.19",
     "@tauri-apps/cli": "^2",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.0.1",

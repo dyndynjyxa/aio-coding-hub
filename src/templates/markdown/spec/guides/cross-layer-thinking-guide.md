@@ -258,6 +258,30 @@ Extension-matrix checklist:
 - If adding one CLI key requires touching frontend constants, backend
   validation, migration schema, and tests separately, stop and re-evaluate the
   design before shipping.
+
+### Mistake 13: Treating Gate-Filtered Providers as Real Upstream Failures
+
+**Bad**: The failover loop records circuit-open / cooldown / rate-limit skips in
+`attempts`, then terminal classification checks only `attempts.is_empty()`.
+Skip-only requests are finalized as `GW_UPSTREAM_ALL_FAILED`, bypass the recent
+error cache, and flood Home request history with repeated failures while the
+provider is still unavailable.
+
+**Good**: Distinguish "provider filtered before send" from "upstream request
+actually failed". Preserve filtered attempts in `attempts_json` for diagnostics,
+but finalize skip-only loops as `GW_ALL_PROVIDERS_UNAVAILABLE` so retry-after
+cache and UI dedupe continue to work.
+
+Failover observability checklist:
+- Terminal classification must answer: "did any upstream request actually get
+  sent?" instead of "is the attempts array non-empty?".
+- Circuit-open / cooldown / rate-limit skips are diagnostic breadcrumbs, not
+  proof of upstream failure.
+- If every candidate was filtered before send, keep `attempts_json` detail but
+  use the unavailable error family and retry-after semantics.
+- When terminal state changes from `upstream_failed` to `unavailable`, verify
+  recent-error cache keys and Home/log polling behavior still align with that
+  state.
 - Prefer data-driven enablement tables over one boolean column per CLI when the
   set is expected to evolve.
 - Keep one authoritative definition for supported identities and generate or

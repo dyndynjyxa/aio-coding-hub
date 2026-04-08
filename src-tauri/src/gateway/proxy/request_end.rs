@@ -118,25 +118,157 @@ fn build_provider_chain_json(attempts: &[FailoverAttempt]) -> Option<String> {
     serde_json::to_string(&chain).ok()
 }
 
+fn non_empty_text(value: &str) -> Option<&str> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then_some(trimmed)
+}
+
+fn select_error_observation_attempt(attempts: &[FailoverAttempt]) -> Option<&FailoverAttempt> {
+    attempts
+        .iter()
+        .rev()
+        .find(|attempt| {
+            attempt.error_code.is_some()
+                || attempt.error_category.is_some()
+                || attempt.reason.as_deref().and_then(non_empty_text).is_some()
+                || attempt.decision.is_some()
+                || attempt.reason_code.is_some()
+                || attempt.status.is_some()
+        })
+        .or_else(|| attempts.last())
+}
+
+fn split_attempt_reason(reason: &str) -> (Option<&str>, Option<&str>, Option<&str>) {
+    let Some(reason) = non_empty_text(reason) else {
+        return (None, None, None);
+    };
+
+    let marker = "upstream_body=";
+    let (base_reason, upstream_body_preview) = match reason.find(marker) {
+        Some(index) => {
+            let base = reason[..index].trim().trim_end_matches(',').trim();
+            let preview = reason[index + marker.len()..].trim();
+            (base, non_empty_text(preview))
+        }
+        None => (reason, None),
+    };
+
+    let matched_rule = base_reason
+        .split(',')
+        .map(str::trim)
+        .find_map(|part| part.strip_prefix("rule="))
+        .and_then(non_empty_text);
+
+    (
+        non_empty_text(base_reason),
+        upstream_body_preview,
+        matched_rule,
+    )
+}
+
 fn build_error_details_json(
     error_code: Option<&str>,
     attempts: &[FailoverAttempt],
 ) -> Option<String> {
-    error_code?;
-    let last_attempt = attempts.last()?;
     let mut obj = serde_json::Map::new();
-    if let Some(error_code) = last_attempt.error_code {
-        obj.insert("error_code".into(), serde_json::json!(error_code));
+
+    if let Some(gateway_error_code) = error_code {
+        obj.insert(
+            "gateway_error_code".into(),
+            serde_json::json!(gateway_error_code),
+        );
     }
-    if let Some(ref reason) = last_attempt.reason {
-        obj.insert("reason".into(), serde_json::json!(reason));
+
+    if let Some(last_attempt) = select_error_observation_attempt(attempts) {
+        if let Some(display_error_code) = last_attempt.error_code.or(error_code) {
+            obj.insert("error_code".into(), serde_json::json!(display_error_code));
+        }
+        if let Some(error_category) = last_attempt.error_category {
+            obj.insert("error_category".into(), serde_json::json!(error_category));
+        }
+        if let Some(status) = last_attempt.status {
+            obj.insert("upstream_status".into(), serde_json::json!(status));
+        }
+        if let Some(outcome) = non_empty_text(last_attempt.outcome.as_str()) {
+            obj.insert("outcome".into(), serde_json::json!(outcome));
+        }
+        if let Some(decision) = last_attempt.decision {
+            obj.insert("decision".into(), serde_json::json!(decision));
+        }
+        if let Some(reason_code) = last_attempt.reason_code {
+            obj.insert("reason_code".into(), serde_json::json!(reason_code));
+        }
+        if let Some(selection_method) = last_attempt.selection_method {
+            obj.insert(
+                "selection_method".into(),
+                serde_json::json!(selection_method),
+            );
+        }
+        if let Some(provider_index) = last_attempt.provider_index {
+            obj.insert("provider_index".into(), serde_json::json!(provider_index));
+        }
+        if let Some(retry_index) = last_attempt.retry_index {
+            obj.insert("retry_index".into(), serde_json::json!(retry_index));
+        }
+        if last_attempt.provider_id > 0 {
+            obj.insert(
+                "provider_id".into(),
+                serde_json::json!(last_attempt.provider_id),
+            );
+        }
+        if let Some(provider_name) = non_empty_text(last_attempt.provider_name.as_str()) {
+            obj.insert("provider_name".into(), serde_json::json!(provider_name));
+        }
+        if let Some(attempt_duration_ms) = last_attempt.attempt_duration_ms {
+            obj.insert(
+                "attempt_duration_ms".into(),
+                serde_json::json!(attempt_duration_ms),
+            );
+        }
+        if let Some(circuit_state_before) = last_attempt.circuit_state_before {
+            obj.insert(
+                "circuit_state_before".into(),
+                serde_json::json!(circuit_state_before),
+            );
+        }
+        if let Some(circuit_state_after) = last_attempt.circuit_state_after {
+            obj.insert(
+                "circuit_state_after".into(),
+                serde_json::json!(circuit_state_after),
+            );
+        }
+        if let Some(circuit_failure_count) = last_attempt.circuit_failure_count {
+            obj.insert(
+                "circuit_failure_count".into(),
+                serde_json::json!(circuit_failure_count),
+            );
+        }
+        if let Some(circuit_failure_threshold) = last_attempt.circuit_failure_threshold {
+            obj.insert(
+                "circuit_failure_threshold".into(),
+                serde_json::json!(circuit_failure_threshold),
+            );
+        }
+        if let Some(ref reason) = last_attempt.reason {
+            let (reason_summary, upstream_body_preview, matched_rule) =
+                split_attempt_reason(reason.as_str());
+            if let Some(reason_summary) = reason_summary {
+                obj.insert("reason".into(), serde_json::json!(reason_summary));
+            }
+            if let Some(upstream_body_preview) = upstream_body_preview {
+                obj.insert(
+                    "upstream_body_preview".into(),
+                    serde_json::json!(upstream_body_preview),
+                );
+            }
+            if let Some(matched_rule) = matched_rule {
+                obj.insert("matched_rule".into(), serde_json::json!(matched_rule));
+            }
+        }
+    } else if let Some(gateway_error_code) = error_code {
+        obj.insert("error_code".into(), serde_json::json!(gateway_error_code));
     }
-    if let Some(error_category) = last_attempt.error_category {
-        obj.insert("error_category".into(), serde_json::json!(error_category));
-    }
-    if let Some(status) = last_attempt.status {
-        obj.insert("upstream_status".into(), serde_json::json!(status));
-    }
+
     if obj.is_empty() {
         return None;
     }
@@ -441,7 +573,8 @@ pub(super) fn emit_request_event_and_spawn_request_log(args: RequestEndArgs<'_>)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gateway::proxy::GatewayErrorCode;
+    use crate::gateway::proxy::{ErrorCategory, GatewayErrorCode};
+    use serde_json::json;
 
     fn sample_attempt() -> FailoverAttempt {
         FailoverAttempt {
@@ -554,5 +687,96 @@ mod tests {
             "codex",
             "/v1/messages/count_tokens"
         ));
+    }
+
+    #[test]
+    fn build_error_details_json_includes_rich_attempt_context() {
+        let mut attempt = sample_attempt();
+        attempt.provider_name = "Alpha".to_string();
+        attempt.outcome = "upstream_error: status=502 category=PROVIDER_ERROR".to_string();
+        attempt.status = Some(502);
+        attempt.provider_index = Some(2);
+        attempt.retry_index = Some(3);
+        attempt.error_category = Some(ErrorCategory::ProviderError.as_str());
+        attempt.error_code = Some(GatewayErrorCode::Upstream5xx.as_str());
+        attempt.decision = Some("switch");
+        attempt.reason =
+            Some("status=502, rule=bad_gateway, upstream_body={\"error\":\"boom\"}".to_string());
+        attempt.selection_method = Some("ordered");
+        attempt.reason_code = Some(ErrorCategory::ProviderError.reason_code());
+        attempt.attempt_duration_ms = Some(88);
+        attempt.circuit_state_before = Some("closed");
+        attempt.circuit_state_after = Some("open");
+        attempt.circuit_failure_count = Some(3);
+        attempt.circuit_failure_threshold = Some(3);
+
+        let encoded = build_error_details_json(
+            Some(GatewayErrorCode::UpstreamAllFailed.as_str()),
+            &[attempt],
+        )
+        .expect("error details json");
+        let value: serde_json::Value =
+            serde_json::from_str(encoded.as_str()).expect("valid error details json");
+
+        assert_eq!(
+            value.get("gateway_error_code"),
+            Some(&json!(GatewayErrorCode::UpstreamAllFailed.as_str()))
+        );
+        assert_eq!(
+            value.get("error_code"),
+            Some(&json!(GatewayErrorCode::Upstream5xx.as_str()))
+        );
+        assert_eq!(value.get("provider_name"), Some(&json!("Alpha")));
+        assert_eq!(value.get("provider_index"), Some(&json!(2)));
+        assert_eq!(value.get("retry_index"), Some(&json!(3)));
+        assert_eq!(value.get("decision"), Some(&json!("switch")));
+        assert_eq!(
+            value.get("reason_code"),
+            Some(&json!(ErrorCategory::ProviderError.reason_code()))
+        );
+        assert_eq!(
+            value.get("reason"),
+            Some(&json!("status=502, rule=bad_gateway"))
+        );
+        assert_eq!(value.get("matched_rule"), Some(&json!("bad_gateway")));
+        assert_eq!(
+            value.get("upstream_body_preview"),
+            Some(&json!("{\"error\":\"boom\"}"))
+        );
+        assert_eq!(value.get("circuit_state_before"), Some(&json!("closed")));
+        assert_eq!(value.get("circuit_state_after"), Some(&json!("open")));
+        assert_eq!(value.get("circuit_failure_count"), Some(&json!(3)));
+        assert_eq!(value.get("circuit_failure_threshold"), Some(&json!(3)));
+    }
+
+    #[test]
+    fn build_error_details_json_does_not_require_top_level_error_code() {
+        let mut attempt = sample_attempt();
+        attempt.outcome = "system_error".to_string();
+        attempt.status = None;
+        attempt.error_category = Some(ErrorCategory::SystemError.as_str());
+        attempt.error_code = None;
+        attempt.decision = Some("abort");
+        attempt.reason = Some("network timeout".to_string());
+        attempt.selection_method = Some("ordered");
+        attempt.reason_code = Some(ErrorCategory::SystemError.reason_code());
+
+        let encoded = build_error_details_json(None, &[attempt])
+            .expect("error details without top-level code");
+        let value: serde_json::Value =
+            serde_json::from_str(encoded.as_str()).expect("valid error details json");
+
+        assert!(value.get("gateway_error_code").is_none());
+        assert!(value.get("error_code").is_none());
+        assert_eq!(
+            value.get("error_category"),
+            Some(&json!(ErrorCategory::SystemError.as_str()))
+        );
+        assert_eq!(value.get("reason"), Some(&json!("network timeout")));
+        assert_eq!(
+            value.get("reason_code"),
+            Some(&json!(ErrorCategory::SystemError.reason_code()))
+        );
+        assert_eq!(value.get("decision"), Some(&json!("abort")));
     }
 }

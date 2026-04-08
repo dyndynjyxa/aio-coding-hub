@@ -400,9 +400,11 @@ export function useSettingsPersistence(options: {
       if (
         !Number.isFinite(desired.upstream_stream_idle_timeout_seconds) ||
         desired.upstream_stream_idle_timeout_seconds < 0 ||
-        desired.upstream_stream_idle_timeout_seconds > 3600
+        desired.upstream_stream_idle_timeout_seconds > 3600 ||
+        (desired.upstream_stream_idle_timeout_seconds > 0 &&
+          desired.upstream_stream_idle_timeout_seconds < 60)
       ) {
-        return "上游流式空闲超时必须为 0-3600 秒";
+        return "上游流式空闲超时必须为 0（禁用）或 60-3600 秒";
       }
     }
 

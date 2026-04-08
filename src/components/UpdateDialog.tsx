@@ -1,3 +1,4 @@
+import Markdown from "react-markdown";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
 import { AIO_RELEASES_URL } from "../constants/urls";
@@ -105,8 +106,8 @@ export function UpdateDialog() {
         {updateCandidate?.body ? (
           <div className="space-y-1">
             <span className="text-xs font-medium text-slate-500 dark:text-slate-400">更新日志</span>
-            <div className="max-h-60 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-3 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">
-              {updateCandidate.body}
+            <div className="prose prose-sm dark:prose-invert max-h-60 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-3 text-sm text-slate-700 dark:text-slate-300">
+              <Markdown>{updateCandidate.body}</Markdown>
             </div>
           </div>
         ) : null}

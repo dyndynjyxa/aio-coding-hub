@@ -570,7 +570,9 @@ describe("settings/useSettingsPersistence", () => {
     act(() => {
       result.current.requestPersist({ upstream_stream_idle_timeout_seconds: 3601 } as any);
     });
-    await waitFor(() => expect(toast).toHaveBeenCalledWith("上游流式空闲超时必须为 0-3600 秒"));
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith("上游流式空闲超时必须为 0（禁用）或 60-3600 秒")
+    );
 
     // upstream non-streaming timeout invalid
     act(() => {
@@ -626,7 +628,9 @@ describe("settings/useSettingsPersistence", () => {
     act(() => {
       result.current.requestPersist({ upstream_stream_idle_timeout_seconds: -1 } as any);
     });
-    await waitFor(() => expect(toast).toHaveBeenCalledWith("上游流式空闲超时必须为 0-3600 秒"));
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith("上游流式空闲超时必须为 0（禁用）或 60-3600 秒")
+    );
 
     act(() => {
       result.current.requestPersist({ upstream_request_timeout_non_streaming_seconds: -1 } as any);

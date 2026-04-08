@@ -156,7 +156,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
     expect(onSelectLogId).toHaveBeenCalledWith(1);
   });
 
-  it("dedupes Claude realtime traces when the persisted request log already exists", () => {
+  it("keeps Claude realtime traces visible when the persisted request log already exists", () => {
     const traces: TraceSession[] = [
       {
         trace_id: "t-log-claude",
@@ -338,12 +338,25 @@ describe("components/home/HomeRequestLogsPanel", () => {
     expect(screen.queryByText("gemini-session-1")).not.toBeInTheDocument();
   });
 
-  it("renders persisted in-progress request logs as ongoing rows", () => {
+  it("promotes persisted in-progress request logs into realtime cards when live events are missing", () => {
+    useCliSessionsFolderLookupByIdsQueryMock.mockReturnValue({
+      data: [
+        {
+          source: "claude",
+          session_id: "claude-session-missing-live-event",
+          folder_name: "workspace-live-fallback",
+          folder_path: "/Users/demo/workspace-live-fallback",
+        },
+      ],
+      isLoading: false,
+    });
+
     const requestLogs: RequestLogSummary[] = [
       {
         id: 11,
         trace_id: "t-pending-claude",
         cli_key: "claude",
+        session_id: "claude-session-missing-live-event",
         method: "POST",
         path: "/v1/messages",
         requested_model: "claude-3-opus",
@@ -390,7 +403,10 @@ describe("components/home/HomeRequestLogsPanel", () => {
     );
 
     expect(screen.getAllByText("进行中").length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: /claude-3-opus/ })).toBeInTheDocument();
+    expect(screen.getByText("当前阶段")).toBeInTheDocument();
+    expect(screen.getByText("等待首个尝试")).toBeInTheDocument();
+    expect(screen.getAllByText("workspace-live-fallback")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /claude-3-opus/ })).not.toBeInTheDocument();
   });
 
   it("keeps in-progress request logs at the top while preserving time order for the rest", () => {
@@ -507,13 +523,12 @@ describe("components/home/HomeRequestLogsPanel", () => {
       </MemoryRouter>
     );
 
-    const pendingButton = screen.getByRole("button", { name: /pending-model/ });
+    expect(screen.getByText("pending-model")).toBeInTheDocument();
+    expect(screen.getByText("当前阶段")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /pending-model/ })).not.toBeInTheDocument();
     const completedNewerButton = screen.getByRole("button", { name: /done-newer-model/ });
     const completedOlderButton = screen.getByRole("button", { name: /done-older-model/ });
 
-    expect(pendingButton.compareDocumentPosition(completedNewerButton)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING
-    );
     expect(completedNewerButton.compareDocumentPosition(completedOlderButton)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING
     );
@@ -606,7 +621,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText("Provider Live")).toBeInTheDocument();
+    expect(screen.getAllByText("Provider Live").length).toBeGreaterThan(0);
     expect(screen.getByText("6.50s")).toBeInTheDocument();
 
     act(() => {

@@ -19,6 +19,7 @@ pub(super) struct AllUnavailableInput<'a> {
     pub(super) state: &'a GatewayAppState,
     pub(super) abort_guard: &'a mut RequestAbortGuard,
     pub(super) observe: bool,
+    pub(super) attempts: Vec<FailoverAttempt>,
     pub(super) cli_key: String,
     pub(super) method_hint: String,
     pub(super) forwarded_path: String,
@@ -46,6 +47,7 @@ pub(super) async fn all_providers_unavailable(input: AllUnavailableInput<'_>) ->
         state,
         abort_guard,
         observe,
+        attempts,
         cli_key,
         method_hint,
         forwarded_path,
@@ -99,7 +101,11 @@ pub(super) async fn all_providers_unavailable(input: AllUnavailableInput<'_>) ->
         trace_id.clone(),
         GatewayErrorCode::AllProvidersUnavailable.as_str(),
         message.clone(),
-        vec![],
+        if verbose_provider_error {
+            attempts.clone()
+        } else {
+            vec![]
+        },
         retry_after_seconds,
     );
 
@@ -119,7 +125,7 @@ pub(super) async fn all_providers_unavailable(input: AllUnavailableInput<'_>) ->
         duration_ms,
         event_ttfb_ms: None,
         log_ttfb_ms: None,
-        attempts: &[],
+        attempts: attempts.as_slice(),
         special_settings_json: response_fixer::special_settings_json(&special_settings),
         session_id,
         requested_model,

@@ -7,6 +7,7 @@ use super::{
 };
 use crate::shared::error::{AppError, AppResult};
 use serde::Deserialize;
+use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -115,6 +116,13 @@ fn claude_projects_dir(app: &tauri::AppHandle) -> AppResult<PathBuf> {
     Ok(home_dir(app)?.join(".claude").join("projects"))
 }
 
+/// Decode a Claude-CLI encoded project directory name back to the original filesystem path.
+///
+/// Claude CLI encodes project paths by replacing `/` (or `\` on Windows) with `-`.
+/// This encoding is **lossy**: a literal hyphen in a directory name becomes
+/// indistinguishable from a path separator. We therefore try a filesystem-validated
+/// greedy decode first and fall back to the naive replacement only when validation
+/// is impossible (e.g. the path no longer exists on disk).
 fn decode_project_path(encoded: &str) -> String {
     if cfg!(windows) {
         if encoded.len() >= 2 && encoded.chars().nth(1) == Some('-') {
@@ -126,8 +134,93 @@ fn decode_project_path(encoded: &str) -> String {
             encoded.replace('-', "\\")
         }
     } else {
-        encoded.replace('-', "/")
+        decode_unix_path_validated(encoded).unwrap_or_else(|| encoded.replace('-', "/"))
     }
+}
+
+/// Greedily reconstruct a Unix path from a `-`-encoded directory name by checking
+/// the filesystem at each step to decide whether a `-` was originally a `/` or a
+/// literal hyphen.
+fn decode_unix_path_validated(encoded: &str) -> Option<String> {
+    let stripped = encoded.strip_prefix('-').unwrap_or(encoded);
+    let segments: Vec<&str> = stripped.split('-').collect();
+    if segments.is_empty() {
+        return None;
+    }
+
+    let mut resolved = String::new();
+    let mut buf = String::new();
+
+    for (i, seg) in segments.iter().enumerate() {
+        if buf.is_empty() {
+            buf.push_str(seg);
+        } else {
+            buf.push('-');
+            buf.push_str(seg);
+        }
+
+        let is_last = i == segments.len() - 1;
+        if is_last {
+            resolved.push('/');
+            resolved.push_str(&buf);
+        } else {
+            let candidate = format!("{}/{}", resolved, buf);
+            if Path::new(&candidate).is_dir() {
+                resolved = candidate;
+                buf.clear();
+            }
+        }
+    }
+
+    if Path::new(&resolved).exists() {
+        Some(resolved)
+    } else {
+        None
+    }
+}
+
+/// Extract the project working directory from the first `user`-type message in any
+/// JSONL session file within the given project directory.
+fn extract_cwd_from_sessions(project_dir: &Path) -> Option<String> {
+    let rd = fs::read_dir(project_dir).ok()?;
+    for entry in rd.flatten() {
+        let path = entry.path();
+        if path.extension().map(|e| e == "jsonl").unwrap_or(false) {
+            if let Some(cwd) = extract_cwd_from_jsonl(&path) {
+                return Some(cwd);
+            }
+        }
+    }
+    None
+}
+
+fn extract_cwd_from_jsonl(path: &Path) -> Option<String> {
+    let file = fs::File::open(path).ok()?;
+    let reader = BufReader::new(file);
+    for line in reader.lines().take(30) {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let v: Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if v.get("type").and_then(|t| t.as_str()) != Some("user") {
+            continue;
+        }
+        if let Some(cwd) = v.get("cwd").and_then(|c| c.as_str()) {
+            let cwd = cwd.trim();
+            if !cwd.is_empty() {
+                return Some(cwd.to_string());
+            }
+        }
+    }
+    None
 }
 
 fn short_name_from_path(path: &str) -> String {
@@ -452,6 +545,7 @@ pub fn projects_list(app: &tauri::AppHandle) -> AppResult<Vec<CliSessionsProject
 
         let original_path = read_sessions_index(&path)
             .and_then(|idx| idx.original_path)
+            .or_else(|| extract_cwd_from_sessions(&path))
             .unwrap_or_else(|| decode_project_path(&encoded_name));
 
         let short_name = short_name_from_path(&original_path);
@@ -644,6 +738,7 @@ fn folder_lookup_in_projects_dir(
         let original_path = index
             .as_ref()
             .and_then(|idx| idx.original_path.clone())
+            .or_else(|| extract_cwd_from_sessions(&project_dir))
             .unwrap_or_else(|| decode_project_path(&encoded_name));
 
         let default_project_path = if original_path.trim().is_empty() {

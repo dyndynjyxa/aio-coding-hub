@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.37.3](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.37.2...aio-coding-hub-v0.37.3) (2026-04-08)
+
+
+### Features
+
+* **cli_sessions:** 优化 Claude-CLI 项目路径解析和工作目录提取 ([a0024ac](https://github.com/dyndynjyxa/aio-coding-hub/commit/a0024acf6c2e3bc1615d304d6ae681fbb4550371))
+
+
+### Bug Fixes
+
+* **failover:** 区分网关过滤与上游请求失败 ([441b6f0](https://github.com/dyndynjyxa/aio-coding-hub/commit/441b6f0d84565bdd21b8d52334aaedd60425ebef))
+* **settings:** 限制上游流式空闲超时最小值为60秒 ([e7284c2](https://github.com/dyndynjyxa/aio-coding-hub/commit/e7284c251950bcfa27db72385603756472329646))
+
+## [0.37.2](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.37.1...aio-coding-hub-v0.37.2) (2026-04-07)
+
+
+### Features
+
+* **deps:** 新增 react-markdown 和 tailwindcss 排版插件依赖 ([a58f747](https://github.com/dyndynjyxa/aio-coding-hub/commit/a58f7477ba4c35f4f0c5b4812d985c8294cf8cf3))
+* **domain:** 优化按小时统计总 token 计算方式 ([8f3df70](https://github.com/dyndynjyxa/aio-coding-hub/commit/8f3df7039eb5b66d1780359e0ecbface88d3bec9))
+* **proxy:** 丰富错误详情上下文并优化请求记录错误展示 ([1ac8eef](https://github.com/dyndynjyxa/aio-coding-hub/commit/1ac8eefbf6107de383ee349abb5ee0e89c774a6f))
+* **ui:** 首页最近代理记录与配置信息展示优化 ([#185](https://github.com/dyndynjyxa/aio-coding-hub/issues/185)) ([84d98ef](https://github.com/dyndynjyxa/aio-coding-hub/commit/84d98ef1b0489bb64e83f577c355a4780fe07227))
+
+
+### Bug Fixes
+
+* **claude-model-validation:** 优化界面中文提示文本 ([57651b8](https://github.com/dyndynjyxa/aio-coding-hub/commit/57651b8bafc32c782733c938b44c95a423216b79))
+* **oauth:** 调整 OAuth 刷新周期并移除 CLI 管理页 Claude OAuth 卡片 ([#184](https://github.com/dyndynjyxa/aio-coding-hub/issues/184)) ([3640ec7](https://github.com/dyndynjyxa/aio-coding-hub/commit/3640ec7853d81ba9dce8d8e4a049f0319f4827af))
+
 ## [0.37.1](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.37.0...aio-coding-hub-v0.37.1) (2026-04-06)
 
 

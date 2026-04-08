@@ -4,6 +4,7 @@ use super::abort_guard::RequestAbortGuard;
 use crate::gateway::manager::GatewayAppState;
 use crate::gateway::response_fixer;
 use crate::gateway::util::{strip_hop_headers, RequestedModelLocation};
+use crate::infra::settings::MIN_UPSTREAM_STREAM_IDLE_TIMEOUT_SECONDS;
 use crate::providers;
 use axum::body::Bytes;
 use axum::http::{header, HeaderMap, HeaderValue, Method};
@@ -208,9 +209,15 @@ impl RequestContext {
         upstream_stream_idle_timeout_secs: u32,
         upstream_request_timeout_non_streaming_secs: u32,
     ) -> (Option<Duration>, Option<Duration>, Option<Duration>) {
+        // Values below 60s cause premature stream disconnects during long AI thinking phases.
+        let clamped_idle = if upstream_stream_idle_timeout_secs > 0 {
+            upstream_stream_idle_timeout_secs.max(MIN_UPSTREAM_STREAM_IDLE_TIMEOUT_SECONDS)
+        } else {
+            0
+        };
         (
             duration_from_secs(upstream_first_byte_timeout_secs),
-            duration_from_secs(upstream_stream_idle_timeout_secs),
+            duration_from_secs(clamped_idle),
             duration_from_secs(upstream_request_timeout_non_streaming_secs),
         )
     }

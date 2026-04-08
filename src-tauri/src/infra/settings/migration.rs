@@ -175,6 +175,12 @@ pub(super) fn sanitize_upstream_timeouts(settings: &mut AppSettings) -> bool {
         settings.upstream_stream_idle_timeout_seconds = MAX_UPSTREAM_STREAM_IDLE_TIMEOUT_SECONDS;
         changed = true;
     }
+    if settings.upstream_stream_idle_timeout_seconds > 0
+        && settings.upstream_stream_idle_timeout_seconds < MIN_UPSTREAM_STREAM_IDLE_TIMEOUT_SECONDS
+    {
+        settings.upstream_stream_idle_timeout_seconds = MIN_UPSTREAM_STREAM_IDLE_TIMEOUT_SECONDS;
+        changed = true;
+    }
     if settings.upstream_request_timeout_non_streaming_seconds
         > MAX_UPSTREAM_REQUEST_TIMEOUT_NON_STREAMING_SECONDS
     {
@@ -560,9 +566,30 @@ fn migrate_add_cli_priority_order(
     true
 }
 
+fn migrate_raise_stream_idle_timeout_default(
+    settings: &mut AppSettings,
+    schema_version_present: bool,
+) -> bool {
+    if !migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_RAISE_STREAM_IDLE_TIMEOUT_DEFAULT,
+    ) {
+        return false;
+    }
+
+    // Users who got the old 120s default should be bumped to 300s.
+    // Users who explicitly set other values (including 0 = disabled) keep their choice.
+    if settings.upstream_stream_idle_timeout_seconds == 120 {
+        settings.upstream_stream_idle_timeout_seconds =
+            DEFAULT_UPSTREAM_STREAM_IDLE_TIMEOUT_SECONDS;
+    }
+    true
+}
+
 type SettingsMigration = fn(&mut AppSettings, bool) -> bool;
 
-const SETTINGS_MIGRATIONS: [SettingsMigration; 23] = [
+const SETTINGS_MIGRATIONS: [SettingsMigration; 24] = [
     migrate_disable_upstream_timeouts,
     migrate_add_gateway_rectifiers,
     migrate_add_circuit_breaker_notice,
@@ -586,6 +613,7 @@ const SETTINGS_MIGRATIONS: [SettingsMigration; 23] = [
     migrate_enable_default_upstream_timeouts,
     migrate_add_billing_header_rectifier,
     migrate_add_cli_priority_order,
+    migrate_raise_stream_idle_timeout_default,
 ];
 
 fn apply_settings_migrations(settings: &mut AppSettings, schema_version_present: bool) -> bool {

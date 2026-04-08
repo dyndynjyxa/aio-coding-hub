@@ -85,14 +85,14 @@ export function HomeWorkspaceConfigPanel({
         })}
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_fit-content(240px)]">
         <div className="flex min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800/50">
           <span className="shrink-0 font-medium text-slate-500 dark:text-slate-400">工作区：</span>
           <span className="min-w-0 truncate font-medium text-slate-700 dark:text-slate-200">
             {selectedConfig.workspaceName?.trim() || "默认"}
           </span>
         </div>
-        <div className="flex min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800/50">
+        <div className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800/50">
           <span className="shrink-0 font-medium text-slate-500 dark:text-slate-400">
             路由策略：
           </span>
@@ -106,7 +106,7 @@ export function HomeWorkspaceConfigPanel({
               );
             }}
             disabled={sortModeSelectDisabled}
-            className="h-7 min-w-0 flex-1 border-slate-200 bg-white px-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+            className="h-7 min-w-[112px] w-auto flex-none border-slate-200 bg-white px-2 pr-7 text-sm dark:border-slate-600 dark:bg-slate-900"
             aria-label={`${selectedConfig.cliLabel} 路由策略`}
           >
             <option value="">Default</option>

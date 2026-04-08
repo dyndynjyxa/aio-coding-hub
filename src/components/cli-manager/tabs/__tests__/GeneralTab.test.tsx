@@ -196,7 +196,7 @@ describe("cli-manager/GeneralTab", () => {
 
     fireEvent.change(inputs[1], { target: { value: "-1" } });
     fireEvent.blur(inputs[1], { target: { value: "-1" } });
-    expect(toast).toHaveBeenCalledWith("上游流式空闲超时必须为 0-3600 秒");
+    expect(toast).toHaveBeenCalledWith("上游流式空闲超时必须为 0（禁用）或 60-3600 秒");
     expect(setUpstreamStreamIdleTimeoutSeconds).toHaveBeenCalled();
 
     fireEvent.change(inputs[2], { target: { value: "10" } });
