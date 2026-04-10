@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.37.5](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.37.4...aio-coding-hub-v0.37.5) (2026-04-10)
+
+
+### Features
+
+* **cli-manager:** 支持 Claude Code 环境变量配置并修复网关重置缓存 ([#192](https://github.com/dyndynjyxa/aio-coding-hub/issues/192)) ([b41a2cf](https://github.com/dyndynjyxa/aio-coding-hub/commit/b41a2cfad6a964fe3f7dd9bd97a3db523bcc59b4))
+* **gateway:** Circuit Breaker 引入 5 分钟滑动窗口衰减与 HalfOpen 渐进恢复 ([f90e59e](https://github.com/dyndynjyxa/aio-coding-hub/commit/f90e59e3e72b5ff889ce37c1e8e9a225f15e7de3))
+* **gateway:** Session TTL 改为滑动窗口，每次使用自动续期 ([3a6cb5c](https://github.com/dyndynjyxa/aio-coding-hub/commit/3a6cb5c631c733133c96aa172be7e445d85444dd))
+
 ## [0.37.4](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.37.3...aio-coding-hub-v0.37.4) (2026-04-08)
 
 
