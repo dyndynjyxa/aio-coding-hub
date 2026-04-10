@@ -5,7 +5,7 @@ import {
   wslConfigureClients,
   wslDetect,
   wslHostAddressGet,
-} from "../../services/wsl";
+} from "../../services/app/wsl";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { wslKeys } from "../keys";
@@ -17,8 +17,9 @@ import {
   useWslOverviewQuery,
 } from "../wsl";
 
-vi.mock("../../services/wsl", async () => {
-  const actual = await vi.importActual<typeof import("../../services/wsl")>("../../services/wsl");
+vi.mock("../../services/app/wsl", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../services/app/wsl")>("../../services/app/wsl");
   return {
     ...actual,
     wslDetect: vi.fn(),

@@ -31,7 +31,7 @@ import {
   getAxisLineStroke,
   CHART_ANIMATION,
 } from "../charts/chartTheme";
-import type { CliKey } from "../../services/providers";
+import type { CliKey } from "../../services/providers/providers";
 import { CLI_ITEMS, type CliFilter, type ScatterPoint } from "./useCostFilters";
 
 // Scatter chart colors by CLI

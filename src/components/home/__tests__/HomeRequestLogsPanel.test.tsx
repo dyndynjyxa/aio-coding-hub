@@ -2,9 +2,9 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import type { CliSessionsFolderLookupEntry } from "../../../services/cliSessions";
-import type { RequestLogSummary } from "../../../services/requestLogs";
-import type { TraceSession } from "../../../services/traceStore";
+import type { CliSessionsFolderLookupEntry } from "../../../services/cli/cliSessions";
+import type { RequestLogSummary } from "../../../services/gateway/requestLogs";
+import type { TraceSession } from "../../../services/gateway/traceStore";
 import { HomeRequestLogsPanel } from "../HomeRequestLogsPanel";
 
 const { useCliSessionsFolderLookupByIdsQueryMock } = vi.hoisted(() => ({
@@ -338,7 +338,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
     expect(screen.queryByText("gemini-session-1")).not.toBeInTheDocument();
   });
 
-  it("promotes persisted in-progress request logs into realtime cards when live events are missing", () => {
+  it("shows status-null logs without active trace as abandoned, not in-progress", () => {
     useCliSessionsFolderLookupByIdsQueryMock.mockReturnValue({
       data: [
         {
@@ -402,11 +402,12 @@ describe("components/home/HomeRequestLogsPanel", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getAllByText("进行中").length).toBeGreaterThan(0);
-    expect(screen.getByText("当前阶段")).toBeInTheDocument();
-    expect(screen.getByText("等待首个尝试")).toBeInTheDocument();
+    // Without a live trace, log appears as a regular card, not as a realtime card.
+    expect(screen.queryByText("进行中")).not.toBeInTheDocument();
+    expect(screen.queryByText("当前阶段")).not.toBeInTheDocument();
+    // The log renders as a clickable card in the list.
+    expect(screen.getByRole("button", { name: /claude-3-opus/ })).toBeInTheDocument();
     expect(screen.getAllByText("workspace-live-fallback")).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: /claude-3-opus/ })).not.toBeInTheDocument();
   });
 
   it("keeps in-progress request logs at the top while preserving time order for the rest", () => {
@@ -523,9 +524,11 @@ describe("components/home/HomeRequestLogsPanel", () => {
       </MemoryRouter>
     );
 
+    // Without a live trace the status-null log is NOT promoted to realtime cards.
+    // It stays in the regular list as an abandoned entry.
     expect(screen.getByText("pending-model")).toBeInTheDocument();
-    expect(screen.getByText("当前阶段")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /pending-model/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("当前阶段")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /pending-model/ })).toBeInTheDocument();
     const completedNewerButton = screen.getByRole("button", { name: /done-newer-model/ });
     const completedOlderButton = screen.getByRole("button", { name: /done-older-model/ });
 

@@ -15,23 +15,23 @@ import {
   type ClaudeSettingsPatch,
   type CodexConfigPatch,
   type GeminiConfigPatch,
-} from "../services/cliManager";
-import { cliProxyRebindCodexHome, cliProxyStatusAll } from "../services/cliProxy";
+} from "../services/cli/cliManager";
+import { cliProxyRebindCodexHome, cliProxyStatusAll } from "../services/cli/cliProxy";
 import { logToConsole } from "../services/consoleLog";
-import { type GatewayRectifierSettingsPatch } from "../services/settingsGatewayRectifier";
-import type { AppSettings } from "../services/settings";
+import { type GatewayRectifierSettingsPatch } from "../services/settings/settingsGatewayRectifier";
+import type { AppSettings } from "../services/settings/settings";
 import {
   setCacheAnomalyMonitorEnabled,
   useCacheAnomalyMonitorEnabled,
-} from "../services/cacheAnomalyMonitor";
+} from "../services/gateway/cacheAnomalyMonitor";
 import {
   setTaskCompleteNotifyEnabled,
   useTaskCompleteNotifyEnabled,
-} from "../services/taskCompleteNotifyEvents";
+} from "../services/notification/taskCompleteNotifyEvents";
 import {
   setNotificationSoundEnabled,
   useNotificationSoundEnabled,
-} from "../services/notificationSound";
+} from "../services/notification/notificationSound";
 import {
   getSettingsReadProtection,
   SETTINGS_READONLY_MESSAGE,

@@ -1,20 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import type { AppAboutInfo } from "../../services/appAbout";
-import type { CliKey } from "../../services/providers";
+import type { AppAboutInfo } from "../../services/app/appAbout";
+import type { CliKey } from "../../services/providers/providers";
 import {
   DEFAULT_CLI_PRIORITY_ORDER,
   normalizeCliPriorityOrder,
-} from "../../services/cliPriorityOrder";
-import { cliProxySyncEnabled } from "../../services/cliProxy";
+} from "../../services/cli/cliPriorityOrder";
+import { cliProxySyncEnabled } from "../../services/cli/cliProxy";
 import { logToConsole } from "../../services/consoleLog";
 import {
   gatewayCheckPortAvailable,
   gatewayStart,
   gatewayStop,
   type GatewayStatus,
-} from "../../services/gateway";
-import type { HomeUsagePeriod } from "../../services/settings";
+} from "../../services/gateway/gateway";
+import type { HomeUsagePeriod } from "../../services/settings/settings";
 import {
   getSettingsReadProtection,
   SETTINGS_READONLY_MESSAGE,

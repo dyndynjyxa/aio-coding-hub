@@ -2,7 +2,7 @@ import {
   GatewayErrorDescriptions,
   type GatewayErrorDescription,
 } from "../../constants/gatewayErrorCodes";
-import type { RequestLogDetail } from "../../services/requestLogs";
+import type { RequestLogDetail } from "../../services/gateway/requestLogs";
 
 type ParsedReasonFields = {
   reason: string | null;

@@ -14,8 +14,8 @@ import {
   setLastModelPricesSync,
   subscribeModelPricesUpdated,
   type ModelPricesSyncReport,
-} from "../../services/modelPrices";
-import { configExport, configImport, type ConfigBundle } from "../../services/configMigrate";
+} from "../../services/usage/modelPrices";
+import { configExport, configImport, type ConfigBundle } from "../../services/app/configMigrate";
 import {
   useModelPricesSyncBasellmMutation,
   useModelPricesTotalCountQuery,
@@ -23,7 +23,7 @@ import {
 } from "../../query/modelPrices";
 import { modelPricesKeys } from "../../query/keys";
 import { useUsageSummaryQuery } from "../../query/usage";
-import { appDataDirGet, appDataReset, appExit } from "../../services/dataManagement";
+import { appDataDirGet, appDataReset, appExit } from "../../services/app/dataManagement";
 import { useDbDiskUsageQuery, useRequestLogsClearAllMutation } from "../../query/dataManagement";
 import { SettingsAboutCard } from "./SettingsAboutCard";
 import { SettingsDataManagementCard } from "./SettingsDataManagementCard";

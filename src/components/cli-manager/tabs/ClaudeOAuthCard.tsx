@@ -8,7 +8,7 @@ import {
   providerOAuthStartFlow,
   providerOAuthStatus,
   type ProviderSummary,
-} from "../../../services/providers";
+} from "../../../services/providers/providers";
 import { Button } from "../../../ui/Button";
 import { Card } from "../../../ui/Card";
 

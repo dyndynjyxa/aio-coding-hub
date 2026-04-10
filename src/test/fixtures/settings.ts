@@ -2,7 +2,7 @@
 // NOTE: These are TEST defaults (schema_version:1, empty URLs, etc.).
 // For MSW defaults matching the Rust backend, see `src/test/msw/state.ts`.
 
-import type { AppSettings } from "../../services/settings";
+import type { AppSettings } from "../../services/settings/settings";
 
 export function createTestAppSettings(overrides?: Partial<AppSettings>): AppSettings {
   return {

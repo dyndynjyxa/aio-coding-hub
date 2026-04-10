@@ -4,8 +4,8 @@ import {
   getClaudeValidationTemplate,
   type ClaudeValidationTemplateKey,
   DEFAULT_CLAUDE_VALIDATION_TEMPLATE_KEY,
-} from "../../services/claudeValidationTemplates";
-import { buildClaudeModelValidationRequestSnapshotTextFromResult } from "../../services/claudeModelValidationRequestSnapshot";
+} from "../../services/claude/claudeValidationTemplates";
+import { buildClaudeModelValidationRequestSnapshotTextFromResult } from "../../services/claude/claudeModelValidationRequestSnapshot";
 import { ClaudeModelValidationResultPanel } from "../ClaudeModelValidationResultPanel";
 import { ClaudeModelValidationHistoryStepCard } from "../ClaudeModelValidationHistoryStepCard";
 import { Button } from "../../ui/Button";
@@ -16,7 +16,7 @@ import { cn } from "../../utils/cn";
 import { formatUnixSeconds } from "../../utils/formatters";
 import { Settings2, History, ChevronDown, Activity, Copy, FileJson } from "lucide-react";
 
-import type { ClaudeModelValidationResult } from "../../services/claudeModelValidation";
+import type { ClaudeModelValidationResult } from "../../services/claude/claudeModelValidation";
 import type {
   ClaudeValidationSuiteStep,
   ClaudeModelValidationHistoryGroup,
@@ -57,7 +57,7 @@ export type DetailsPaneProps = {
   setRequestJson: (v: string) => void;
   apiKeyPlaintext: string | null;
   templates: ReturnType<
-    typeof import("../../services/claudeValidationTemplates").listClaudeValidationTemplates
+    typeof import("../../services/claude/claudeValidationTemplates").listClaudeValidationTemplates
   >;
   copyTextOrToast: (text: string, okMessage: string) => Promise<void>;
 };

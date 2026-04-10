@@ -5,7 +5,7 @@ import { formatUnixSeconds } from "../../utils/formatters";
 import { History, Trash2, RefreshCw, Cpu, ChevronRight } from "lucide-react";
 
 import type { ClaudeModelValidationHistoryGroup } from "./types";
-import type { ProviderSummary } from "../../services/providers";
+import type { ProviderSummary } from "../../services/providers/providers";
 import { getTemplateDisplayLabel, gradeColorClass } from "./helpers";
 
 export function HistoryListPanel({

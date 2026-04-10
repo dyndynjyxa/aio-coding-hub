@@ -15,8 +15,8 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
 import { useMemo } from "react";
-import { getOrderedClis } from "../../services/cliPriorityOrder";
-import type { CliKey } from "../../services/providers";
+import { getOrderedClis } from "../../services/cli/cliPriorityOrder";
+import type { CliKey } from "../../services/providers/providers";
 import { Button } from "../../ui/Button";
 import { cn } from "../../utils/cn";
 

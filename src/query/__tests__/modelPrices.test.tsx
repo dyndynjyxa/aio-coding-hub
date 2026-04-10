@@ -1,12 +1,12 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { ModelPriceAliases, ModelPricesSyncReport } from "../../services/modelPrices";
+import type { ModelPriceAliases, ModelPricesSyncReport } from "../../services/usage/modelPrices";
 import {
   modelPriceAliasesGet,
   modelPriceAliasesSet,
   modelPricesList,
   modelPricesSyncBasellm,
-} from "../../services/modelPrices";
+} from "../../services/usage/modelPrices";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { modelPricesKeys } from "../keys";
@@ -19,9 +19,9 @@ import {
   useModelPricesTotalCountQuery,
 } from "../modelPrices";
 
-vi.mock("../../services/modelPrices", async () => {
-  const actual = await vi.importActual<typeof import("../../services/modelPrices")>(
-    "../../services/modelPrices"
+vi.mock("../../services/usage/modelPrices", async () => {
+  const actual = await vi.importActual<typeof import("../../services/usage/modelPrices")>(
+    "../../services/usage/modelPrices"
   );
   return {
     ...actual,

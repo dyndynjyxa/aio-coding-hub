@@ -1,5 +1,5 @@
-import type { AppAboutInfo } from "../../services/appAbout";
-import type { DbDiskUsage } from "../../services/dataManagement";
+import type { AppAboutInfo } from "../../services/app/appAbout";
+import type { DbDiskUsage } from "../../services/app/dataManagement";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { SettingsRow } from "../../ui/SettingsRow";

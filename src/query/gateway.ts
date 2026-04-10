@@ -7,8 +7,8 @@ import {
   gatewaySessionsList,
   gatewayStatus,
   type GatewayProviderCircuitStatus,
-} from "../services/gateway";
-import type { CliKey } from "../services/providers";
+} from "../services/gateway/gateway";
+import type { CliKey } from "../services/providers/providers";
 import { gatewayKeys } from "./keys";
 
 export type GatewayCircuitDerivedState = {

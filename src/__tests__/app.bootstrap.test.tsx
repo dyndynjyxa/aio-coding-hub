@@ -4,23 +4,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestQueryClient } from "../test/utils/reactQuery";
 import { createTestAppSettings } from "../test/fixtures/settings";
 
-vi.mock("../services/appHeartbeat", () => ({
+vi.mock("../services/app/appHeartbeat", () => ({
   listenAppHeartbeat: vi.fn().mockResolvedValue(() => {}),
 }));
-vi.mock("../services/gatewayEvents", () => ({
+vi.mock("../services/gateway/gatewayEvents", () => ({
   listenGatewayEvents: vi.fn().mockResolvedValue(() => {}),
 }));
-vi.mock("../services/noticeEvents", () => ({
+vi.mock("../services/notification/noticeEvents", () => ({
   listenNoticeEvents: vi.fn().mockResolvedValue(() => {}),
 }));
-vi.mock("../services/taskCompleteNotifyEvents", () => ({
+vi.mock("../services/notification/taskCompleteNotifyEvents", () => ({
   listenTaskCompleteNotifyEvents: vi.fn().mockResolvedValue(() => {}),
   setTaskCompleteNotifyEnabled: vi.fn(),
 }));
-vi.mock("../services/cacheAnomalyMonitor", () => ({
+vi.mock("../services/gateway/cacheAnomalyMonitor", () => ({
   setCacheAnomalyMonitorEnabled: vi.fn(),
 }));
-vi.mock("../services/startup", () => ({
+vi.mock("../services/app/startup", () => ({
   startupSyncDefaultPromptsFromFilesOncePerSession: vi.fn().mockResolvedValue(undefined),
   startupSyncModelPricesOnce: vi.fn().mockResolvedValue(undefined),
 }));
@@ -33,7 +33,7 @@ vi.mock("../services/backgroundTasks", () => ({
   setBackgroundTaskSchedulerForeground: vi.fn(),
   emitBackgroundTaskVisibilityTrigger: vi.fn(),
 }));
-vi.mock("../services/cliProxy", () => ({
+vi.mock("../services/cli/cliProxy", () => ({
   cliProxyStatusAll: vi.fn().mockResolvedValue([]),
 }));
 vi.mock("../hooks/useUpdateMeta", async () => {
@@ -44,35 +44,36 @@ vi.mock("../hooks/useUpdateMeta", async () => {
     updateCheckNow: vi.fn().mockResolvedValue(null),
   };
 });
-vi.mock("../services/settings", async () => {
-  const actual =
-    await vi.importActual<typeof import("../services/settings")>("../services/settings");
+vi.mock("../services/settings/settings", async () => {
+  const actual = await vi.importActual<typeof import("../services/settings/settings")>(
+    "../services/settings/settings"
+  );
   return {
     ...actual,
     settingsGet: vi.fn(),
   };
 });
 
-import { listenAppHeartbeat } from "../services/appHeartbeat";
-import { setCacheAnomalyMonitorEnabled } from "../services/cacheAnomalyMonitor";
+import { listenAppHeartbeat } from "../services/app/appHeartbeat";
+import { setCacheAnomalyMonitorEnabled } from "../services/gateway/cacheAnomalyMonitor";
 import {
   registerBackgroundTask,
   setBackgroundTaskSchedulerForeground,
   startBackgroundTaskScheduler,
 } from "../services/backgroundTasks";
-import { listenGatewayEvents } from "../services/gatewayEvents";
-import { listenNoticeEvents } from "../services/noticeEvents";
-import { settingsGet } from "../services/settings";
+import { listenGatewayEvents } from "../services/gateway/gatewayEvents";
+import { listenNoticeEvents } from "../services/notification/noticeEvents";
+import { settingsGet } from "../services/settings/settings";
 import {
   startupSyncDefaultPromptsFromFilesOncePerSession,
   startupSyncModelPricesOnce,
-} from "../services/startup";
+} from "../services/app/startup";
 import {
   listenTaskCompleteNotifyEvents,
   setTaskCompleteNotifyEnabled,
-} from "../services/taskCompleteNotifyEvents";
+} from "../services/notification/taskCompleteNotifyEvents";
 import { updateCheckNow } from "../hooks/useUpdateMeta";
-import { cliProxyStatusAll } from "../services/cliProxy";
+import { cliProxyStatusAll } from "../services/cli/cliProxy";
 
 async function renderApp() {
   const { default: App } = await import("../App");

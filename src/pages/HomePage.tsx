@@ -21,7 +21,7 @@ import { Dialog } from "../ui/Dialog";
 import { PageHeader } from "../ui/PageHeader";
 import { Spinner } from "../ui/Spinner";
 import { TabList } from "../ui/TabList";
-import { useTraceStore } from "../services/traceStore";
+import { useTraceStore } from "../services/gateway/traceStore";
 import { emitBackgroundTaskVisibilityTrigger } from "../services/backgroundTasks";
 import { DEFAULT_HOME_USAGE_PERIOD } from "../utils/homeUsagePeriod";
 import { resolveHomeUsageWindowDays } from "../utils/homeUsagePeriod";

@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { RouteTooltipContent } from "../RouteTooltipContent";
-import type { RequestLogRouteHop } from "../../../services/requestLogs";
+import type { RequestLogRouteHop } from "../../../services/gateway/requestLogs";
 
 function makeHop(overrides: Partial<RequestLogRouteHop> = {}): RequestLogRouteHop {
   return {

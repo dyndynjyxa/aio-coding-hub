@@ -1,6 +1,6 @@
 // Usage: Shared CLI definitions and derived UI filter helpers.
 
-import type { CliKey } from "../services/providers";
+import type { CliKey } from "../services/providers/providers";
 
 export type CliItem = {
   key: CliKey;

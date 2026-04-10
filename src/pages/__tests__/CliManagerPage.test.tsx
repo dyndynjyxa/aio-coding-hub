@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactElement } from "react";
 import { toast } from "sonner";
 import { tauriDialogOpen, tauriOpenPath } from "../../test/mocks/tauri";
-import type { AppSettings } from "../../services/settings";
+import type { AppSettings } from "../../services/settings/settings";
 import { createTestAppSettings } from "../../test/fixtures/settings";
 import { createTestQueryClient } from "../../test/utils/reactQuery";
 import { CliManagerPage } from "../CliManagerPage";
@@ -32,15 +32,16 @@ import {
 } from "../../query/cliManager";
 import { useProvidersListQuery } from "../../query/providers";
 import { cliProxyKeys } from "../../query/keys";
-import { cliProxyRebindCodexHome, cliProxyStatusAll } from "../../services/cliProxy";
+import { cliProxyRebindCodexHome, cliProxyStatusAll } from "../../services/cli/cliProxy";
 
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
 }));
 vi.mock("../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
-vi.mock("../../services/cliProxy", async () => {
-  const actual =
-    await vi.importActual<typeof import("../../services/cliProxy")>("../../services/cliProxy");
+vi.mock("../../services/cli/cliProxy", async () => {
+  const actual = await vi.importActual<typeof import("../../services/cli/cliProxy")>(
+    "../../services/cli/cliProxy"
+  );
   return {
     ...actual,
     cliProxyStatusAll: vi.fn(),

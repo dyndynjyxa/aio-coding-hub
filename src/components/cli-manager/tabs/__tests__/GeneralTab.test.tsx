@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import type { ReactElement } from "react";
 import { toast } from "sonner";
-import { CACHE_ANOMALY_MONITOR_GUIDE_COPY } from "../../../../services/cacheAnomalyMonitorConfig";
-import type { GatewayRectifierSettingsPatch } from "../../../../services/settingsGatewayRectifier";
+import { CACHE_ANOMALY_MONITOR_GUIDE_COPY } from "../../../../services/gateway/cacheAnomalyMonitorConfig";
+import type { GatewayRectifierSettingsPatch } from "../../../../services/settings/settingsGatewayRectifier";
 import { createTestAppSettings } from "../../../../test/fixtures/settings";
 import { CliManagerGeneralTab } from "../GeneralTab";
 

@@ -2,22 +2,26 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { logToConsole } from "../../../services/consoleLog";
-import { cliProxySyncEnabled } from "../../../services/cliProxy";
-import { gatewayCheckPortAvailable, gatewayStart, gatewayStop } from "../../../services/gateway";
+import { cliProxySyncEnabled } from "../../../services/cli/cliProxy";
+import {
+  gatewayCheckPortAvailable,
+  gatewayStart,
+  gatewayStop,
+} from "../../../services/gateway/gateway";
 import { useSettingsQuery, useSettingsSetMutation } from "../../../query/settings";
 import { useSettingsPersistence } from "../useSettingsPersistence";
 
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
-vi.mock("../../../services/cliProxy", async () => {
-  const actual = await vi.importActual<typeof import("../../../services/cliProxy")>(
-    "../../../services/cliProxy"
+vi.mock("../../../services/cli/cliProxy", async () => {
+  const actual = await vi.importActual<typeof import("../../../services/cli/cliProxy")>(
+    "../../../services/cli/cliProxy"
   );
   return { ...actual, cliProxySyncEnabled: vi.fn() };
 });
-vi.mock("../../../services/gateway", async () => {
-  const actual = await vi.importActual<typeof import("../../../services/gateway")>(
-    "../../../services/gateway"
+vi.mock("../../../services/gateway/gateway", async () => {
+  const actual = await vi.importActual<typeof import("../../../services/gateway/gateway")>(
+    "../../../services/gateway/gateway"
   );
   return {
     ...actual,

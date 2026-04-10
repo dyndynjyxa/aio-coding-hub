@@ -1,7 +1,7 @@
 import claudeFavicon from "../../assets/brand/claude-favicon.png";
 import codexLogo from "../../assets/brand/codex-logo.svg";
 import geminiSparkleAurora from "../../assets/brand/gemini-sparkle-aurora.svg";
-import type { CliKey } from "../../services/providers";
+import type { CliKey } from "../../services/providers/providers";
 
 type CliBrandIconProps = {
   cliKey: CliKey;

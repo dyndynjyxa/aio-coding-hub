@@ -8,7 +8,7 @@ import {
   type CliSessionsSource,
   type CliSessionsSessionSummary,
   escapeShellArg,
-} from "../services/cliSessions";
+} from "../services/cli/cliSessions";
 import { copyText } from "../services/clipboard";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {

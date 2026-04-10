@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { UsageLeaderboardRow, UsageSummary } from "../../../services/usage";
+import type { UsageLeaderboardRow, UsageSummary } from "../../../services/usage/usage";
 import { UsageLeaderboardTable } from "../UsageLeaderboardTable";
 
 const SUMMARY: UsageSummary = {

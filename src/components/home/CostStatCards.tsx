@@ -4,7 +4,7 @@
 import { Card } from "../../ui/Card";
 import { cn } from "../../utils/cn";
 import type { SummaryCard } from "./useCostFilters";
-import type { CostPeriod } from "../../services/cost";
+import type { CostPeriod } from "../../services/usage/cost";
 import type { CustomDateRangeApplied } from "../../hooks/useCustomDateRange";
 
 function StatCard({

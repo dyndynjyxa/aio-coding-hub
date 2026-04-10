@@ -1,7 +1,7 @@
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
 import { ModelPriceAliasesDialog } from "../../components/settings/ModelPriceAliasesDialog";
-import type { ConfigBundle, ConfigBundleWorkspace } from "../../services/configMigrate";
+import type { ConfigBundle, ConfigBundleWorkspace } from "../../services/app/configMigrate";
 
 function countWorkspacePrompts(workspaces: ConfigBundleWorkspace[]) {
   return workspaces.reduce((total, workspace) => {

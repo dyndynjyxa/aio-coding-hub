@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { RequestAttemptLog, RequestLogDetail } from "../../../services/requestLogs";
-import type { TraceSession } from "../../../services/traceStore";
+import type { RequestAttemptLog, RequestLogDetail } from "../../../services/gateway/requestLogs";
+import type { TraceSession } from "../../../services/gateway/traceStore";
 import { RequestLogDetailDialog } from "../RequestLogDetailDialog";
 
 const requestLogQueryState = vi.hoisted(() => ({
@@ -26,7 +26,7 @@ vi.mock("../../../query/requestLogs", () => ({
   }),
 }));
 
-vi.mock("../../../services/traceStore", () => ({
+vi.mock("../../../services/gateway/traceStore", () => ({
   useTraceStore: () => ({
     traces: traceStoreState.traces,
   }),
@@ -175,6 +175,7 @@ describe("home/RequestLogDetailDialog", () => {
       selectedLog: createSelectedLog({
         status: null,
         error_code: null,
+        created_at: Math.floor(Date.now() / 1000),
         duration_ms: undefined,
         ttfb_ms: null,
         input_tokens: null,
@@ -194,7 +195,8 @@ describe("home/RequestLogDetailDialog", () => {
     render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
 
     expect(screen.queryByText("关键指标")).not.toBeInTheDocument();
-    expect(screen.getByText("当前供应商：未知")).toBeInTheDocument();
+    // Without a live trace, a status-null log is treated as abandoned (not in-progress).
+    expect(screen.getByText("最终供应商：未知")).toBeInTheDocument();
     expect(screen.getByText("决策链")).toBeInTheDocument();
   });
 
@@ -331,6 +333,7 @@ describe("home/RequestLogDetailDialog", () => {
       selectedLog: createSelectedLog({
         status: null,
         error_code: null,
+        created_at: Math.floor(Date.now() / 1000),
         duration_ms: 0,
         final_provider_id: 0,
         final_provider_name: "Unknown",

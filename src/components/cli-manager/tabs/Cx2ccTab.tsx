@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Settings } from "lucide-react";
-import type { AppSettings } from "../../../services/settings";
+import type { AppSettings } from "../../../services/settings/settings";
 import { cn } from "../../../utils/cn";
 import { Card } from "../../../ui/Card";
 import { Input } from "../../../ui/Input";

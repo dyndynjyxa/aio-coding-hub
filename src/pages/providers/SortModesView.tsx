@@ -3,7 +3,7 @@
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CLIS } from "../../constants/clis";
-import type { CliKey, ProviderSummary } from "../../services/providers";
+import type { CliKey, ProviderSummary } from "../../services/providers/providers";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Dialog } from "../../ui/Dialog";

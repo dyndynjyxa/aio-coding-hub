@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { CliKey } from "../services/providers";
+import type { CliKey } from "../services/providers/providers";
 import {
   modelPriceAliasesGet,
   modelPriceAliasesSet,
@@ -7,7 +7,7 @@ import {
   modelPricesSyncBasellm,
   type ModelPriceAliases,
   type ModelPricesSyncReport,
-} from "../services/modelPrices";
+} from "../services/usage/modelPrices";
 import { modelPricesKeys } from "./keys";
 
 export function useModelPricesListQuery(cliKey: CliKey, options?: { enabled?: boolean }) {

@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { appAboutGet, type AppAboutInfo } from "../services/appAbout";
+import { appAboutGet, type AppAboutInfo } from "../services/app/appAbout";
 import { appAboutKeys } from "./keys";
 
 export function useAppAboutQuery(options?: { enabled?: boolean }) {

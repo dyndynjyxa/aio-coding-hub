@@ -4,19 +4,19 @@ import { logToConsole } from "../../services/consoleLog";
 import {
   claudeProviderGetApiKeyPlaintext,
   claudeProviderValidateModel,
-} from "../../services/claudeModelValidation";
-import type { ClaudeModelValidationResult } from "../../services/claudeModelValidation";
-import type { ProviderSummary } from "../../services/providers";
+} from "../../services/claude/claudeModelValidation";
+import type { ClaudeModelValidationResult } from "../../services/claude/claudeModelValidation";
+import type { ProviderSummary } from "../../services/providers/providers";
 import {
   buildClaudeValidationRequestJson,
   getClaudeTemplateApplicability,
   getClaudeValidationTemplate,
   type ClaudeValidationTemplateKey,
-} from "../../services/claudeValidationTemplates";
+} from "../../services/claude/claudeValidationTemplates";
 import {
   buildClaudeModelValidationRequestSnapshotTextFromResult,
   buildClaudeModelValidationRequestSnapshotTextFromWrapper,
-} from "../../services/claudeModelValidationRequestSnapshot";
+} from "../../services/claude/claudeModelValidationRequestSnapshot";
 import {
   buildClaudeCliMetadataUserId,
   newUuidV4,
@@ -34,7 +34,7 @@ export type RunValidationSuiteContext = {
   model: string;
   apiKeyPlaintext: string | null;
   templates: ReturnType<
-    typeof import("../../services/claudeValidationTemplates").listClaudeValidationTemplates
+    typeof import("../../services/claude/claudeValidationTemplates").listClaudeValidationTemplates
   >;
   crossProviderId: number | null;
   allClaudeProviders: ProviderSummary[];

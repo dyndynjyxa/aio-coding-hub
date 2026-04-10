@@ -11,12 +11,12 @@ import { Input } from "../../ui/Input";
 import { Select } from "../../ui/Select";
 import { Switch } from "../../ui/Switch";
 import { cn } from "../../utils/cn";
-import type { CliKey } from "../../services/providers";
+import type { CliKey } from "../../services/providers/providers";
 import {
   type ModelPriceAliasMatchType,
   type ModelPriceAliasRule,
   type ModelPriceAliases,
-} from "../../services/modelPrices";
+} from "../../services/usage/modelPrices";
 import {
   useModelPriceAliasesQuery,
   useModelPriceAliasesSetMutation,

@@ -1,4 +1,4 @@
-import type { ClaudeModels, ProviderSummary } from "../../services/providers";
+import type { ClaudeModels, ProviderSummary } from "../../services/providers/providers";
 
 const DUPLICATE_SUFFIX = " 副本";
 

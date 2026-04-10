@@ -1,13 +1,13 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { ProviderSummary } from "../../services/providers";
+import type { ProviderSummary } from "../../services/providers/providers";
 import {
   providerClaudeTerminalLaunchCommand,
   providerDelete,
   providerSetEnabled,
   providersList,
   providersReorder,
-} from "../../services/providers";
+} from "../../services/providers/providers";
 import {
   useProviderClaudeTerminalLaunchCommandMutation,
   useProviderDeleteMutation,
@@ -19,9 +19,9 @@ import { providersKeys } from "../keys";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 
-vi.mock("../../services/providers", async () => {
-  const actual = await vi.importActual<typeof import("../../services/providers")>(
-    "../../services/providers"
+vi.mock("../../services/providers/providers", async () => {
+  const actual = await vi.importActual<typeof import("../../services/providers/providers")>(
+    "../../services/providers/providers"
   );
   return {
     ...actual,

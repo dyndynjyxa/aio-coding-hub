@@ -2,7 +2,7 @@
 
 import { http, HttpResponse } from "msw";
 import { TAURI_ENDPOINT } from "../tauriEndpoint";
-import type { CliKey, ClaudeModels, ProviderSummary } from "../../services/providers";
+import type { CliKey, ClaudeModels, ProviderSummary } from "../../services/providers/providers";
 import {
   buildCliProxySetEnabledResult,
   getAppAboutState,

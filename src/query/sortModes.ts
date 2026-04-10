@@ -5,7 +5,7 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import type { CliKey } from "../services/providers";
+import type { CliKey } from "../services/providers/providers";
 import {
   sortModeActiveList,
   sortModeActiveSet,
@@ -18,7 +18,7 @@ import {
   sortModesList,
   type SortModeActiveRow,
   type SortModeProviderRow,
-} from "../services/sortModes";
+} from "../services/providers/sortModes";
 import { sortModesKeys } from "./keys";
 
 function invalidateSortModesQueries(

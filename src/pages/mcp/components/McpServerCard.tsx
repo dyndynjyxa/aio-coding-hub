@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { Command, Edit2, Globe, Link, Terminal, Trash2 } from "lucide-react";
-import type { McpServerSummary } from "../../../services/mcp";
+import type { McpServerSummary } from "../../../services/workspace/mcp";
 import { Button } from "../../../ui/Button";
 import { Card } from "../../../ui/Card";
 import { Switch } from "../../../ui/Switch";

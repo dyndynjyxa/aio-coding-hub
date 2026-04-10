@@ -6,14 +6,14 @@ import { Copy, FlaskConical, Pencil, RefreshCw, Terminal, Trash2 } from "lucide-
 import { toast } from "sonner";
 import { logToConsole } from "../../services/consoleLog";
 import { FREE_TAG } from "../../constants/providers";
-import type { GatewayProviderCircuitStatus } from "../../services/gateway";
+import type { GatewayProviderCircuitStatus } from "../../services/gateway/gateway";
 import { getGatewayCircuitDerivedState } from "../../query/gateway";
 import {
   providerOAuthFetchLimits,
   type ClaudeModels,
   type OAuthLimitsResult,
   type ProviderSummary,
-} from "../../services/providers";
+} from "../../services/providers/providers";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Switch } from "../../ui/Switch";

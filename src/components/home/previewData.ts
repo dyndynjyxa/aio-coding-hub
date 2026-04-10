@@ -2,10 +2,10 @@
 // Extracted from HomeRequestLogsPanel to keep the component file lean.
 
 import { GatewayErrorCodes } from "../../constants/gatewayErrorCodes";
-import type { GatewayAttemptEvent } from "../../services/gatewayEvents";
-import type { CliSessionsFolderLookupEntry } from "../../services/cliSessions";
-import type { RequestLogSummary } from "../../services/requestLogs";
-import type { TraceSession } from "../../services/traceStore";
+import type { GatewayAttemptEvent } from "../../services/gateway/gatewayEvents";
+import type { CliSessionsFolderLookupEntry } from "../../services/cli/cliSessions";
+import type { RequestLogSummary } from "../../services/gateway/requestLogs";
+import type { TraceSession } from "../../services/gateway/traceStore";
 
 export function buildPreviewRequestLogs(
   nowSec = Math.floor(Date.now() / 1000)

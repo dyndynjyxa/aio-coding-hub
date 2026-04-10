@@ -14,8 +14,11 @@ import {
   useSkillsLocalListQuery,
 } from "../../query/skills";
 import { logToConsole } from "../../services/consoleLog";
-import type { CliKey } from "../../services/providers";
-import { type InstalledSkillSummary, type LocalSkillSummary } from "../../services/skills";
+import type { CliKey } from "../../services/providers/providers";
+import {
+  type InstalledSkillSummary,
+  type LocalSkillSummary,
+} from "../../services/workspace/skills";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { ConfirmDialog } from "../../ui/ConfirmDialog";

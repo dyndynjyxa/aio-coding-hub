@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { logToConsole } from "../../services/consoleLog";
-import { noticeSend } from "../../services/notice";
+import { noticeSend } from "../../services/notification/notice";
 
 export type NoticePermissionStatus = "checking" | "granted" | "not_granted" | "denied" | "unknown";
 

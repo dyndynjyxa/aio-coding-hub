@@ -1,15 +1,15 @@
 // Usage: Shared MSW in-memory state for tests that run through `invoke` -> fetch -> MSW handlers.
 
-import type { AppAboutInfo } from "../../services/appAbout";
-import type { CliProxyResult, CliProxyStatus } from "../../services/cliProxy";
-import type { DbDiskUsage } from "../../services/dataManagement";
-import type { EnvConflict } from "../../services/envConflicts";
-import type { GatewayStatus } from "../../services/gateway";
-import type { CliKey, ProviderSummary } from "../../services/providers";
-import type { AppSettings } from "../../services/settings";
-import type { SortModeActiveRow, SortModeSummary } from "../../services/sortModes";
-import type { UsageSummary } from "../../services/usage";
-import type { WorkspacesListResult } from "../../services/workspaces";
+import type { AppAboutInfo } from "../../services/app/appAbout";
+import type { CliProxyResult, CliProxyStatus } from "../../services/cli/cliProxy";
+import type { DbDiskUsage } from "../../services/app/dataManagement";
+import type { EnvConflict } from "../../services/cli/envConflicts";
+import type { GatewayStatus } from "../../services/gateway/gateway";
+import type { CliKey, ProviderSummary } from "../../services/providers/providers";
+import type { AppSettings } from "../../services/settings/settings";
+import type { SortModeActiveRow, SortModeSummary } from "../../services/providers/sortModes";
+import type { UsageSummary } from "../../services/usage/usage";
+import type { WorkspacesListResult } from "../../services/workspace/workspaces";
 
 const DEFAULT_BASE_ORIGIN = "http://127.0.0.1:37123";
 

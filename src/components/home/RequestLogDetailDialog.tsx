@@ -4,13 +4,13 @@
 
 import type { ReactNode } from "react";
 import { useNowMs } from "../../hooks/useNowMs";
-import { useTraceStore } from "../../services/traceStore";
+import { useTraceStore } from "../../services/gateway/traceStore";
 import { cliBadgeTone, cliShortLabel } from "../../constants/clis";
 import {
   useRequestAttemptLogsByTraceIdQuery,
   useRequestLogDetailQuery,
 } from "../../query/requestLogs";
-import type { RequestLogDetail } from "../../services/requestLogs";
+import type { RequestLogDetail } from "../../services/gateway/requestLogs";
 import { Card } from "../../ui/Card";
 import { Dialog } from "../../ui/Dialog";
 import { cn } from "../../utils/cn";
@@ -51,11 +51,13 @@ export function RequestLogDetailDialog({
   const attemptLogs = attemptLogsQuery.data ?? [];
   const attemptLogsLoading = attemptLogsQuery.isFetching;
 
-  const isInProgress = selectedLog ? isPersistedRequestLogInProgress(selectedLog) : false;
-  const liveTrace =
-    selectedLog && isInProgress
-      ? (traces.find((trace) => trace.trace_id === selectedLog.trace_id) ?? null)
-      : null;
+  // Trace store is the authority on whether the request is still alive.
+  const matchingTrace = selectedLog
+    ? (traces.find((trace) => trace.trace_id === selectedLog.trace_id) ?? null)
+    : null;
+  const isInProgress =
+    selectedLog != null && isPersistedRequestLogInProgress(selectedLog) && matchingTrace != null;
+  const liveTrace = isInProgress ? matchingTrace : null;
   const nowMs = useNowMs(isInProgress && liveTrace != null, 250);
   const liveProvider = resolveLiveTraceProvider(liveTrace);
   const providerName = isInProgress

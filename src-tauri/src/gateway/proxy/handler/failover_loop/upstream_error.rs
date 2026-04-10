@@ -54,12 +54,19 @@ fn upstream_error_decision(
     base_decision
 }
 
-fn should_abort_unmatched_bad_request(
-    cli_key: &str,
+/// Abort unmatched catch-all 4xx to prevent pointless retries and circuit breaker pollution.
+///
+/// Catch-all 4xx (anything outside 401–404, 408, 429) that was not matched by the body-scanning
+/// non-retryable rules is almost certainly a deterministic client error.  Retrying the identical
+/// request will produce the identical result, wasting attempts and inflating the provider failure
+/// count until the circuit breaker opens — a single bad request can trip a 30-minute outage.
+fn should_abort_unmatched_client_error(
     status: reqwest::StatusCode,
     matched_rule_id: Option<&'static str>,
 ) -> bool {
-    cli_key == "codex" && status == reqwest::StatusCode::BAD_REQUEST && matched_rule_id.is_none()
+    status.is_client_error()
+        && !matches!(status.as_u16(), 401 | 402 | 403 | 404 | 408 | 429)
+        && matched_rule_id.is_none()
 }
 
 fn reqwest_error_decision(
@@ -270,11 +277,8 @@ pub(super) async fn handle_non_success_response(
                         ),
                     );
                 }
-                // Extract body preview for diagnostics on 5xx and codex 400 pass-throughs.
-                if status.is_server_error()
-                    || (ctx.cli_key.as_str() == "codex"
-                        && status == reqwest::StatusCode::BAD_REQUEST)
-                {
+                // Extract body preview for diagnostics on 5xx and catch-all 4xx.
+                if status.is_server_error() || status.is_client_error() {
                     let preview = String::from_utf8_lossy(&body_for_scan);
                     let truncated: String = preview.chars().take(500).collect();
                     if !truncated.is_empty() {
@@ -308,11 +312,19 @@ pub(super) async fn handle_non_success_response(
         }
     }
 
-    if !is_count_tokens
-        && should_abort_unmatched_bad_request(ctx.cli_key.as_str(), status, matched_rule_id)
-    {
+    if !is_count_tokens && should_abort_unmatched_client_error(status, matched_rule_id) {
         category = ErrorCategory::NonRetryableClientError;
         decision = FailoverDecision::Abort;
+        // Extract body preview for diagnostic logging when aborting unmatched 4xx.
+        if upstream_body_preview.is_none() {
+            if let Some(ref bytes) = abort_body_bytes {
+                let preview = String::from_utf8_lossy(bytes);
+                let truncated: String = preview.chars().take(500).collect();
+                if !truncated.is_empty() {
+                    upstream_body_preview = Some(truncated);
+                }
+            }
+        }
     }
 
     let mut circuit_state_before = Some(circuit_before.state.as_str());
@@ -661,7 +673,7 @@ pub(super) async fn handle_reqwest_error(
 #[cfg(test)]
 mod tests {
     use super::{
-        reqwest_error_decision, should_abort_unmatched_bad_request, upstream_error_decision,
+        reqwest_error_decision, should_abort_unmatched_client_error, upstream_error_decision,
         FailoverDecision,
     };
 
@@ -711,29 +723,66 @@ mod tests {
         assert!(matches!(decision, FailoverDecision::RetrySameProvider));
     }
 
+    // --- should_abort_unmatched_client_error ---
+
     #[test]
-    fn unmatched_codex_bad_request_aborts() {
-        assert!(should_abort_unmatched_bad_request(
-            "codex",
+    fn unmatched_400_aborts_for_any_cli() {
+        assert!(should_abort_unmatched_client_error(
             reqwest::StatusCode::BAD_REQUEST,
             None,
         ));
     }
 
     #[test]
-    fn matched_codex_bad_request_still_uses_rule_path() {
-        assert!(!should_abort_unmatched_bad_request(
-            "codex",
+    fn unmatched_422_aborts() {
+        assert!(should_abort_unmatched_client_error(
+            reqwest::StatusCode::UNPROCESSABLE_ENTITY,
+            None,
+        ));
+    }
+
+    #[test]
+    fn unmatched_409_aborts() {
+        assert!(should_abort_unmatched_client_error(
+            reqwest::StatusCode::CONFLICT,
+            None,
+        ));
+    }
+
+    #[test]
+    fn matched_rule_does_not_abort() {
+        assert!(!should_abort_unmatched_client_error(
             reqwest::StatusCode::BAD_REQUEST,
             Some("prompt_limit"),
         ));
     }
 
     #[test]
-    fn non_codex_bad_request_keeps_existing_behavior() {
-        assert!(!should_abort_unmatched_bad_request(
-            "claude",
-            reqwest::StatusCode::BAD_REQUEST,
+    fn excluded_4xx_codes_do_not_abort() {
+        for status in [
+            reqwest::StatusCode::UNAUTHORIZED,      // 401
+            reqwest::StatusCode::PAYMENT_REQUIRED,  // 402
+            reqwest::StatusCode::FORBIDDEN,         // 403
+            reqwest::StatusCode::NOT_FOUND,         // 404
+            reqwest::StatusCode::REQUEST_TIMEOUT,   // 408
+            reqwest::StatusCode::TOO_MANY_REQUESTS, // 429
+        ] {
+            assert!(
+                !should_abort_unmatched_client_error(status, None),
+                "status {} should not abort",
+                status.as_u16()
+            );
+        }
+    }
+
+    #[test]
+    fn non_4xx_does_not_abort() {
+        assert!(!should_abort_unmatched_client_error(
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            None,
+        ));
+        assert!(!should_abort_unmatched_client_error(
+            reqwest::StatusCode::OK,
             None,
         ));
     }

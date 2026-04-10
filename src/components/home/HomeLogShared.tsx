@@ -3,9 +3,9 @@
 // - Designed to keep status badge / error_code label / session reuse tooltip consistent across the Home page.
 
 import { GatewayErrorCodes, getGatewayErrorShortLabel } from "../../constants/gatewayErrorCodes";
-import type { CliKey } from "../../services/providers";
-import type { RequestLogRouteHop } from "../../services/requestLogs";
-import type { TraceSession } from "../../services/traceStore";
+import type { CliKey } from "../../services/providers/providers";
+import type { RequestLogRouteHop } from "../../services/gateway/requestLogs";
+import type { TraceSession } from "../../services/gateway/traceStore";
 import { Tooltip } from "../../ui/Tooltip";
 import { FolderOpen } from "lucide-react";
 import { RouteTooltipContent } from "./RouteTooltipContent";
@@ -31,6 +31,8 @@ type RequestLogAuditInput = {
 type RequestLogProgressInput = {
   status: number | null;
   error_code?: string | null;
+  created_at?: number;
+  created_at_ms?: number | null;
 };
 
 export type RequestLogAuditTag = {
@@ -146,8 +148,21 @@ export function buildRequestLogAuditMeta(log: RequestLogAuditInput): RequestLogA
   };
 }
 
+/** Max age (ms) before a request log with no final status is treated as abandoned. */
+const STALE_IN_PROGRESS_THRESHOLD_MS = 10 * 60 * 1000;
+
 export function isPersistedRequestLogInProgress(log: RequestLogProgressInput) {
-  return log.status == null && (log.error_code ?? null) == null;
+  if (log.status != null || (log.error_code ?? null) != null) return false;
+
+  // Staleness guard: orphaned logs (crash / disconnect) stay status-null forever.
+  // After the threshold they are no longer considered "in progress".
+  const ms = log.created_at_ms && log.created_at_ms > 0 ? log.created_at_ms : 0;
+  const createdAtMs = ms > 0 ? ms : log.created_at ? log.created_at * 1000 : 0;
+  if (createdAtMs > 0 && Date.now() - createdAtMs > STALE_IN_PROGRESS_THRESHOLD_MS) {
+    return false;
+  }
+
+  return true;
 }
 
 export type LiveTraceProvider = {

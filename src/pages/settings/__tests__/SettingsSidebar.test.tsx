@@ -12,7 +12,7 @@ import {
 } from "../../../query/modelPrices";
 import { useUsageSummaryQuery } from "../../../query/usage";
 import { useDbDiskUsageQuery, useRequestLogsClearAllMutation } from "../../../query/dataManagement";
-import { appDataDirGet, appDataReset, appExit } from "../../../services/dataManagement";
+import { appDataDirGet, appDataReset, appExit } from "../../../services/app/dataManagement";
 import { runBackgroundTask } from "../../../services/backgroundTasks";
 import { logToConsole } from "../../../services/consoleLog";
 import {
@@ -21,7 +21,7 @@ import {
   tauriOpenUrl,
   tauriReadTextFile,
 } from "../../../test/mocks/tauri";
-import { notifyModelPricesUpdated } from "../../../services/modelPrices";
+import { notifyModelPricesUpdated } from "../../../services/usage/modelPrices";
 import { modelPricesKeys } from "../../../query/keys";
 
 const devPreviewRef = vi.hoisted(() => ({
@@ -43,9 +43,9 @@ vi.mock("../../../services/backgroundTasks", async () => {
   };
 });
 
-vi.mock("../../../services/dataManagement", async () => {
-  const actual = await vi.importActual<typeof import("../../../services/dataManagement")>(
-    "../../../services/dataManagement"
+vi.mock("../../../services/app/dataManagement", async () => {
+  const actual = await vi.importActual<typeof import("../../../services/app/dataManagement")>(
+    "../../../services/app/dataManagement"
   );
   return {
     ...actual,

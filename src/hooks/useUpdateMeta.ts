@@ -11,8 +11,8 @@ import {
   updaterDownloadAndInstall,
   type UpdaterCheckUpdate,
   type UpdaterDownloadEvent,
-} from "../services/updater";
-import type { AppAboutInfo } from "../services/appAbout";
+} from "../services/app/updater";
+import type { AppAboutInfo } from "../services/app/appAbout";
 
 const STORAGE_KEY_LAST_CHECKED_AT_MS = "updater.lastCheckedAtMs";
 const DEV_PREVIEW_UPDATE_RID = 9_999_001;

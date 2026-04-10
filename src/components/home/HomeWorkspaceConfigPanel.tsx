@@ -1,8 +1,8 @@
 import { useMemo } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Command, Cpu, Pencil } from "lucide-react";
-import type { CliKey } from "../../services/providers";
-import type { SortModeSummary } from "../../services/sortModes";
+import type { CliKey } from "../../services/providers/providers";
+import type { SortModeSummary } from "../../services/providers/sortModes";
 import { EmptyState } from "../../ui/EmptyState";
 import { Select } from "../../ui/Select";
 import { cn } from "../../utils/cn";

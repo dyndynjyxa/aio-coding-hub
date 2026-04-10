@@ -19,7 +19,7 @@ import {
   useRequestLogsListAllQuery,
 } from "../query/requestLogs";
 import { useWindowForeground } from "../hooks/useWindowForeground";
-import { useTraceStore } from "../services/traceStore";
+import { useTraceStore } from "../services/gateway/traceStore";
 
 const LOGS_PAGE_LIMIT = 200;
 const AUTO_REFRESH_INTERVAL_MS = 2000;

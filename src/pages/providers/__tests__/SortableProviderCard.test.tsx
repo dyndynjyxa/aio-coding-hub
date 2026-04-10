@@ -2,13 +2,16 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { SortableProviderCard, type SortableProviderCardProps } from "../SortableProviderCard";
-import { providerOAuthFetchLimits, type ProviderSummary } from "../../../services/providers";
+import {
+  providerOAuthFetchLimits,
+  type ProviderSummary,
+} from "../../../services/providers/providers";
 
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
-vi.mock("../../../services/providers", async () => {
-  const actual = await vi.importActual<typeof import("../../../services/providers")>(
-    "../../../services/providers"
+vi.mock("../../../services/providers/providers", async () => {
+  const actual = await vi.importActual<typeof import("../../../services/providers/providers")>(
+    "../../../services/providers/providers"
   );
   return { ...actual, providerOAuthFetchLimits: vi.fn() };
 });

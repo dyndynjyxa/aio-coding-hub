@@ -2,14 +2,14 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { logToConsole } from "../../../services/consoleLog";
-import { noticeSend } from "../../../services/notice";
+import { noticeSend } from "../../../services/notification/notice";
 import { tauriInvoke } from "../../../test/mocks/tauri";
 
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
-vi.mock("../../../services/notice", async () => {
-  const actual = await vi.importActual<typeof import("../../../services/notice")>(
-    "../../../services/notice"
+vi.mock("../../../services/notification/notice", async () => {
+  const actual = await vi.importActual<typeof import("../../../services/notification/notice")>(
+    "../../../services/notification/notice"
   );
   return { ...actual, noticeSend: vi.fn() };
 });

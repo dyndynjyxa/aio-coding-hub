@@ -7,13 +7,15 @@ import {
   costSummaryV1,
   costTopRequestsV1,
   costTrendV1,
-} from "../../services/cost";
+} from "../../services/usage/cost";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { useCostAnalyticsV1Query } from "../cost";
 
-vi.mock("../../services/cost", async () => {
-  const actual = await vi.importActual<typeof import("../../services/cost")>("../../services/cost");
+vi.mock("../../services/usage/cost", async () => {
+  const actual = await vi.importActual<typeof import("../../services/usage/cost")>(
+    "../../services/usage/cost"
+  );
   return {
     ...actual,
     costSummaryV1: vi.fn(),

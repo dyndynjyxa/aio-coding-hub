@@ -1,9 +1,9 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
-import { CACHE_ANOMALY_MONITOR_GUIDE_COPY } from "../../../services/cacheAnomalyMonitorConfig";
-import type { AppSettings } from "../../../services/settings";
-import type { GatewayRectifierSettingsPatch } from "../../../services/settingsGatewayRectifier";
+import { CACHE_ANOMALY_MONITOR_GUIDE_COPY } from "../../../services/gateway/cacheAnomalyMonitorConfig";
+import type { AppSettings } from "../../../services/settings/settings";
+import type { GatewayRectifierSettingsPatch } from "../../../services/settings/settingsGatewayRectifier";
 import { Button } from "../../../ui/Button";
 import { Card } from "../../../ui/Card";
 import { Input } from "../../../ui/Input";

@@ -4,7 +4,7 @@ import {
   requestLogsClearAll,
   type ClearRequestLogsResult,
   type DbDiskUsage,
-} from "../services/dataManagement";
+} from "../services/app/dataManagement";
 import { dataManagementKeys, requestLogsKeys } from "./keys";
 
 export function useDbDiskUsageQuery(options?: { enabled?: boolean }) {

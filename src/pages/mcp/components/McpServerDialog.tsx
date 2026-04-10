@@ -2,7 +2,11 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useMcpServerUpsertMutation } from "../../../query/mcp";
 import { logToConsole } from "../../../services/consoleLog";
-import { mcpParseJson, type McpServerSummary, type McpTransport } from "../../../services/mcp";
+import {
+  mcpParseJson,
+  type McpServerSummary,
+  type McpTransport,
+} from "../../../services/workspace/mcp";
 import { Button } from "../../../ui/Button";
 import { Dialog } from "../../../ui/Dialog";
 import { cn } from "../../../utils/cn";

@@ -1,6 +1,6 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { UsageProviderCacheRateTrendRowV1 } from "../../services/usage";
+import type { UsageProviderCacheRateTrendRowV1 } from "../../services/usage/usage";
 
 vi.mock("../../hooks/useTheme", () => ({
   useTheme: () => ({ theme: "light", resolvedTheme: "light", setTheme: vi.fn() }),

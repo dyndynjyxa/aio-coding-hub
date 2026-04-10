@@ -3,13 +3,13 @@ import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Tooltip } from "../ui/Tooltip";
 import { copyText } from "../services/clipboard";
-import type { ClaudeModelValidationResult } from "../services/claudeModelValidation";
-import type { ClaudeValidationTemplateKey } from "../services/claudeValidationTemplates";
+import type { ClaudeModelValidationResult } from "../services/claude/claudeModelValidation";
+import type { ClaudeValidationTemplateKey } from "../services/claude/claudeValidationTemplates";
 import {
   detectReverseProxyKeywords,
   evaluateClaudeValidation,
   getClaudeValidationOutputExpectation,
-} from "../services/claudeValidationTemplates";
+} from "../services/claude/claudeValidationTemplates";
 import { cn } from "../utils/cn";
 import type { LucideIcon } from "lucide-react";
 import {

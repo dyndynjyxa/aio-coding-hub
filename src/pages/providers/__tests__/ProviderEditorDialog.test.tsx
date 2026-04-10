@@ -14,16 +14,16 @@ import {
   providerOAuthStatus,
   providerUpsert,
   type ProviderSummary,
-} from "../../../services/providers";
+} from "../../../services/providers/providers";
 import type { ProviderEditorInitialValues } from "../providerDuplicate";
 
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
 vi.mock("../../../services/clipboard", () => ({ copyText: vi.fn() }));
 
-vi.mock("../../../services/providers", async () => {
-  const actual = await vi.importActual<typeof import("../../../services/providers")>(
-    "../../../services/providers"
+vi.mock("../../../services/providers/providers", async () => {
+  const actual = await vi.importActual<typeof import("../../../services/providers/providers")>(
+    "../../../services/providers/providers"
   );
   return {
     ...actual,

@@ -20,7 +20,7 @@ import {
   readHomeOverviewTabOrderFromStorage,
   writeHomeOverviewTabOrderToStorage,
   type HomeOverviewTabKey,
-} from "../../services/homeOverviewTabOrder";
+} from "../../services/home/homeOverviewTabOrder";
 import { Button } from "../../ui/Button";
 import { cn } from "../../utils/cn";
 

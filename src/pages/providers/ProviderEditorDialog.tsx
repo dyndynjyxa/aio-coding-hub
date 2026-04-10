@@ -28,7 +28,7 @@ import {
   type ClaudeModels,
   type CliKey,
   type ProviderSummary,
-} from "../../services/providers";
+} from "../../services/providers/providers";
 import {
   createProviderEditorDialogSchema,
   type ProviderEditorDialogFormInput,

@@ -6,8 +6,8 @@ import type {
   ClaudeCliInfo,
   ClaudeSettingsPatch,
   ClaudeSettingsState,
-} from "../../../services/cliManager";
-import type { ProviderSummary } from "../../../services/providers";
+} from "../../../services/cli/cliManager";
+import type { ProviderSummary } from "../../../services/providers/providers";
 import { cn } from "../../../utils/cn";
 import { CliVersionBadge } from "../CliVersionBadge";
 import { Button } from "../../../ui/Button";

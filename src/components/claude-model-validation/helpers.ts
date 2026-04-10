@@ -1,6 +1,6 @@
 import type { MouseEvent } from "react";
-import type { ClaudeModelValidationResult } from "../../services/claudeModelValidation";
-import { getClaudeValidationTemplate } from "../../services/claudeValidationTemplates";
+import type { ClaudeModelValidationResult } from "../../services/claude/claudeModelValidation";
+import { getClaudeValidationTemplate } from "../../services/claude/claudeValidationTemplates";
 import type { SuiteMeta, ClaudeValidationGrade } from "./types";
 
 // ---------------------------------------------------------------------------

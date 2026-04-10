@@ -13,7 +13,7 @@ import {
   mcpServersList,
   type McpServerSummary,
   type McpTransport,
-} from "../services/mcp";
+} from "../services/workspace/mcp";
 import { mcpKeys } from "./keys";
 
 export function useMcpServersListQuery(

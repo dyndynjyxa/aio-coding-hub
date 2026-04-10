@@ -1,4 +1,4 @@
-import type { McpServerSummary } from "../../../services/mcp";
+import type { McpServerSummary } from "../../../services/workspace/mcp";
 import { Button } from "../../../ui/Button";
 import { Dialog } from "../../../ui/Dialog";
 

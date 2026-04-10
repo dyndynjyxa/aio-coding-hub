@@ -21,9 +21,9 @@ vi.mock("@tanstack/react-virtual", () => ({
     };
   },
 }));
-vi.mock("../../services/cliSessions", async () => {
-  const actual = await vi.importActual<typeof import("../../services/cliSessions")>(
-    "../../services/cliSessions"
+vi.mock("../../services/cli/cliSessions", async () => {
+  const actual = await vi.importActual<typeof import("../../services/cli/cliSessions")>(
+    "../../services/cli/cliSessions"
   );
   return {
     ...actual,
@@ -36,7 +36,7 @@ import {
   cliSessionsSessionDelete,
   cliSessionsSessionsList,
   cliSessionsProjectsList,
-} from "../../services/cliSessions";
+} from "../../services/cli/cliSessions";
 import { SessionsProjectPage } from "../SessionsProjectPage";
 function renderWithRoute(route: string) {
   const client = createTestQueryClient();

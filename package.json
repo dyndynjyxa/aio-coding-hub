@@ -1,7 +1,7 @@
 {
   "name": "aio-coding-hub",
   "private": true,
-  "version": "0.37.3",
+  "version": "0.37.4",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -107,5 +107,15 @@
     "typescript-eslint": "^8.54.0",
     "vite": "^7.0.4",
     "vitest": "^3.2.4"
+  },
+  "prettier": {
+    "printWidth": 100,
+    "tabWidth": 2,
+    "useTabs": false,
+    "semi": true,
+    "singleQuote": false,
+    "trailingComma": "es5",
+    "arrowParens": "always",
+    "endOfLine": "auto"
   }
 }

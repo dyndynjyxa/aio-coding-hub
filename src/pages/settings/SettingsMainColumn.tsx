@@ -5,12 +5,12 @@ import type { GatewayAvailability } from "../../hooks/useGatewayMeta";
 import { gatewayKeys } from "../../query/keys";
 import { useTheme } from "../../hooks/useTheme";
 import { logToConsole } from "../../services/consoleLog";
-import { gatewayStart, gatewayStop, type GatewayStatus } from "../../services/gateway";
+import { gatewayStart, gatewayStop, type GatewayStatus } from "../../services/gateway/gateway";
 import {
   readHomeOverviewLogsPrimaryLayoutFromStorage,
   writeHomeOverviewLogsPrimaryLayoutToStorage,
-} from "../../services/homeOverviewLayout";
-import type { HomeUsagePeriod } from "../../services/settings";
+} from "../../services/home/homeOverviewLayout";
+import type { HomeUsagePeriod } from "../../services/settings/settings";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Input } from "../../ui/Input";
@@ -20,7 +20,7 @@ import { cn } from "../../utils/cn";
 import { CliPriorityOrderEditor } from "./CliPriorityOrderEditor";
 import { HomeOverviewTabOrderEditor } from "./HomeOverviewTabOrderEditor";
 import type { NoticePermissionStatus } from "./useSystemNotification";
-import type { CliKey } from "../../services/providers";
+import type { CliKey } from "../../services/providers/providers";
 
 type PersistKey = "preferred_port" | "log_retention_days";
 type BooleanPersistKey =

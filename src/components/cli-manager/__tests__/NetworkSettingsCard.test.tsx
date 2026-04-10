@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { useWslHostAddressQuery } from "../../../query/wsl";
-import { gatewayStart, gatewayStop } from "../../../services/gateway";
+import { gatewayStart, gatewayStop } from "../../../services/gateway/gateway";
 import { NetworkSettingsCard } from "../NetworkSettingsCard";
 
 let gatewayMetaMock: any = { gatewayAvailable: "available", gateway: null, preferredPort: 37123 };
@@ -13,9 +13,9 @@ vi.mock("../../../hooks/useGatewayMeta", () => ({
   useGatewayMeta: () => gatewayMetaMock,
 }));
 
-vi.mock("../../../services/gateway", async () => {
-  const actual = await vi.importActual<typeof import("../../../services/gateway")>(
-    "../../../services/gateway"
+vi.mock("../../../services/gateway/gateway", async () => {
+  const actual = await vi.importActual<typeof import("../../../services/gateway/gateway")>(
+    "../../../services/gateway/gateway"
   );
   return { ...actual, gatewayStart: vi.fn(), gatewayStop: vi.fn() };
 });

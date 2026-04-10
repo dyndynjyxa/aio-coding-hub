@@ -12,9 +12,9 @@ import type {
   CliSessionsFolderLookupEntry,
   CliSessionsFolderLookupInput,
   CliSessionsSource,
-} from "../../services/cliSessions";
-import type { RequestLogSummary } from "../../services/requestLogs";
-import type { TraceSession } from "../../services/traceStore";
+} from "../../services/cli/cliSessions";
+import type { RequestLogSummary } from "../../services/gateway/requestLogs";
+import type { TraceSession } from "../../services/gateway/traceStore";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";
@@ -152,22 +152,6 @@ function mergeTraceWithRequestLog(
   };
 }
 
-function createRealtimeTraceFromInProgressLog(log: RequestLogSummary): TraceSession {
-  const createdAtMs = requestLogCreatedAtMs(log);
-  return {
-    trace_id: log.trace_id,
-    cli_key: log.cli_key,
-    session_id: log.session_id ?? null,
-    method: log.method,
-    path: log.path,
-    query: null,
-    requested_model: log.requested_model ?? null,
-    first_seen_ms: createdAtMs,
-    last_seen_ms: createdAtMs,
-    attempts: [],
-  };
-}
-
 type RequestLogCardProps = {
   compactMode: boolean;
   log: RequestLogSummary;
@@ -192,7 +176,9 @@ const RequestLogCard = memo(function RequestLogCard({
   formatUnixSeconds,
 }: RequestLogCardProps) {
   const auditMeta = buildRequestLogAuditMeta(log);
-  const isInProgress = isPersistedRequestLogInProgress(log);
+  // A log is only "in progress" if the trace store still has an active trace.
+  // Without a live trace the request is completed or orphaned.
+  const isInProgress = isPersistedRequestLogInProgress(log) && liveTrace != null;
   const liveProvider = resolveLiveTraceProvider(liveTrace);
   const displayDurationMs =
     isInProgress && liveTrace
@@ -639,12 +625,10 @@ export function HomeRequestLogsPanel({
       if (!traceId || mergedTraceMap.has(traceId)) continue;
       mergedTraceMap.set(traceId, mergeTraceWithRequestLog(trace, logsByTraceId.get(traceId)));
     }
-    for (const log of sortedRequestLogs) {
-      if (!isPersistedRequestLogInProgress(log)) continue;
-      const traceId = log.trace_id?.trim();
-      if (!traceId || mergedTraceMap.has(traceId)) continue;
-      mergedTraceMap.set(traceId, createRealtimeTraceFromInProgressLog(log));
-    }
+    // NOTE: We intentionally do NOT create synthetic traces from in-progress
+    // logs that lack a real trace.  The trace store is the authority on whether
+    // a request is still alive.  Without a real trace the request is either
+    // completed or orphaned – synthesizing a fake trace would mask that.
 
     const nowMs = Date.now();
     return Array.from(mergedTraceMap.values())

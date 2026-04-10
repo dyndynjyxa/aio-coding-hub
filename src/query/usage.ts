@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import type { CliKey } from "../services/providers";
+import type { CliKey } from "../services/providers/providers";
 import {
   usageHourlySeries,
   usageLeaderboardV2,
@@ -9,7 +9,7 @@ import {
   type UsagePeriod,
   type UsageRange,
   type UsageScope,
-} from "../services/usage";
+} from "../services/usage/usage";
 import { usageKeys } from "./keys";
 
 export function useUsageSummaryQuery(

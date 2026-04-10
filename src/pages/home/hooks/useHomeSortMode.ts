@@ -5,9 +5,9 @@
 import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { logToConsole } from "../../../services/consoleLog";
-import type { CliKey } from "../../../services/providers";
-import type { GatewayActiveSession } from "../../../services/gateway";
-import type { SortModeSummary } from "../../../services/sortModes";
+import type { CliKey } from "../../../services/providers/providers";
+import type { GatewayActiveSession } from "../../../services/gateway/gateway";
+import type { SortModeSummary } from "../../../services/providers/sortModes";
 import {
   useSortModeActiveListQuery,
   useSortModeActiveSetMutation,

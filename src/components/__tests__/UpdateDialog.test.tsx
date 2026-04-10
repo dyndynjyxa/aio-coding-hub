@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { AIO_RELEASES_URL } from "../../constants/urls";
 import { logToConsole } from "../../services/consoleLog";
-import { appRestart } from "../../services/dataManagement";
+import { appRestart } from "../../services/app/dataManagement";
 import {
   updateDialogSetOpen,
   updateDownloadAndInstall,
@@ -17,9 +17,9 @@ vi.mock("sonner", () => ({
 }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 vi.mock("../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
-vi.mock("../../services/dataManagement", async () => {
-  const actual = await vi.importActual<typeof import("../../services/dataManagement")>(
-    "../../services/dataManagement"
+vi.mock("../../services/app/dataManagement", async () => {
+  const actual = await vi.importActual<typeof import("../../services/app/dataManagement")>(
+    "../../services/app/dataManagement"
   );
   return { ...actual, appRestart: vi.fn() };
 });

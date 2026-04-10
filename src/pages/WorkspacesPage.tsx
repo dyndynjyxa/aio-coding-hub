@@ -18,9 +18,9 @@ import {
   useWorkspacesListQuery,
 } from "../query/workspaces";
 import { logToConsole } from "../services/consoleLog";
-import { getOrderedClis, pickDefaultCliByPriority } from "../services/cliPriorityOrder";
-import type { CliKey } from "../services/providers";
-import { type WorkspaceApplyReport, type WorkspaceSummary } from "../services/workspaces";
+import { getOrderedClis, pickDefaultCliByPriority } from "../services/cli/cliPriorityOrder";
+import type { CliKey } from "../services/providers/providers";
+import { type WorkspaceApplyReport, type WorkspaceSummary } from "../services/workspace/workspaces";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Dialog } from "../ui/Dialog";

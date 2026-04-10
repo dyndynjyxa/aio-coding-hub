@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { ProviderLimitUsageRow } from "../../../services/providerLimitUsage";
+import type { ProviderLimitUsageRow } from "../../../services/providers/providerLimitUsage";
 import { HomeProviderLimitPanel, HomeProviderLimitPanelContent } from "../HomeProviderLimitPanel";
 
 function makeRow(partial: Partial<ProviderLimitUsageRow>): ProviderLimitUsageRow {

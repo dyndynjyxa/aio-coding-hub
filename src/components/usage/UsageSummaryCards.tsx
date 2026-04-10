@@ -1,6 +1,6 @@
 // Usage: 用量页面 KPI 汇总卡片区域 — 5 张卡片。
 
-import type { UsageSummary } from "../../services/usage";
+import type { UsageSummary } from "../../services/usage/usage";
 import { computeCacheHitRate } from "../../utils/cacheRateMetrics";
 import { formatInteger, formatPercent, formatUsd, formatDurationMs } from "../../utils/formatters";
 import { StatCard, StatCardSkeleton } from "./StatCard";

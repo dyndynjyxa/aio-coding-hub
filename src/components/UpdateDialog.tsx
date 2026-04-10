@@ -3,7 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
 import { AIO_RELEASES_URL } from "../constants/urls";
 import { logToConsole } from "../services/consoleLog";
-import { appRestart } from "../services/dataManagement";
+import { appRestart } from "../services/app/dataManagement";
 import {
   updateDialogSetOpen,
   updateDownloadAndInstall,

@@ -1,7 +1,12 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { PromptSummary } from "../../services/prompts";
-import { promptDelete, promptSetEnabled, promptUpsert, promptsList } from "../../services/prompts";
+import type { PromptSummary } from "../../services/workspace/prompts";
+import {
+  promptDelete,
+  promptSetEnabled,
+  promptUpsert,
+  promptsList,
+} from "../../services/workspace/prompts";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { promptsKeys } from "../keys";
@@ -12,9 +17,10 @@ import {
   usePromptsListQuery,
 } from "../prompts";
 
-vi.mock("../../services/prompts", async () => {
-  const actual =
-    await vi.importActual<typeof import("../../services/prompts")>("../../services/prompts");
+vi.mock("../../services/workspace/prompts", async () => {
+  const actual = await vi.importActual<typeof import("../../services/workspace/prompts")>(
+    "../../services/workspace/prompts"
+  );
   return {
     ...actual,
     promptsList: vi.fn(),

@@ -1,9 +1,9 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import type { AppSettings, WslHostAddressMode } from "../../services/settings";
+import type { AppSettings, WslHostAddressMode } from "../../services/settings/settings";
 import { logToConsole } from "../../services/consoleLog";
-import type { WslConfigureReport } from "../../services/wsl";
+import type { WslConfigureReport } from "../../services/app/wsl";
 import { useAppAboutQuery } from "../../query/appAbout";
 import { useSettingsSetMutation } from "../../query/settings";
 import { useWslConfigureClientsMutation, useWslOverviewQuery } from "../../query/wsl";

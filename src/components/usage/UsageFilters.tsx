@@ -3,7 +3,7 @@
 import { Button } from "../../ui/Button";
 import { CLI_FILTER_ITEMS, type CliFilterKey } from "../../constants/clis";
 import { PERIOD_ITEMS } from "../../constants/periods";
-import type { UsagePeriod } from "../../services/usage";
+import type { UsagePeriod } from "../../services/usage/usage";
 import type { CustomDateRangeApplied } from "../../hooks/useCustomDateRange";
 
 type UsageFiltersProps = {

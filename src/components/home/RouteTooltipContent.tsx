@@ -3,7 +3,7 @@
 // - 由 `buildRequestRouteMeta` 在 HomeLogShared.tsx 中调用。
 // - skipped 的 provider 不在 hops 中，仅通过标签 [跳过*N] 提示。
 
-import type { RequestLogRouteHop } from "../../services/requestLogs";
+import type { RequestLogRouteHop } from "../../services/gateway/requestLogs";
 import { cn } from "../../utils/cn";
 import { getErrorCodeLabel } from "./HomeLogShared";
 

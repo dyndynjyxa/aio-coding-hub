@@ -2,7 +2,7 @@
 // - Render in `HomeOverviewPanel` as the top row showing usage heatmap + token chart.
 
 import { useMemo } from "react";
-import type { UsageHourlyRow } from "../../services/usage";
+import type { UsageHourlyRow } from "../../services/usage/usage";
 import { Card } from "../../ui/Card";
 import { formatTokensMillions } from "../../utils/chartHelpers";
 import { buildRecentDayKeys, dayKeyFromLocalDate } from "../../utils/dateKeys";

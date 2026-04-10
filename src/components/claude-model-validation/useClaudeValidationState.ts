@@ -3,13 +3,13 @@ import { toast } from "sonner";
 import { logToConsole } from "../../services/consoleLog";
 import { copyText } from "../../services/clipboard";
 import { useProvidersListQuery } from "../../query/providers";
-import { claudeProviderGetApiKeyPlaintext } from "../../services/claudeModelValidation";
-import type { ClaudeModelValidationResult } from "../../services/claudeModelValidation";
+import { claudeProviderGetApiKeyPlaintext } from "../../services/claude/claudeModelValidation";
+import type { ClaudeModelValidationResult } from "../../services/claude/claudeModelValidation";
 import {
   claudeValidationHistoryClearProvider,
   claudeValidationHistoryList,
-} from "../../services/claudeModelValidationHistory";
-import { baseUrlPingMs, type ProviderSummary } from "../../services/providers";
+} from "../../services/claude/claudeModelValidationHistory";
+import { baseUrlPingMs, type ProviderSummary } from "../../services/providers/providers";
 import {
   DEFAULT_CLAUDE_VALIDATION_TEMPLATE_KEY,
   evaluateClaudeValidation,
@@ -18,7 +18,7 @@ import {
   getClaudeValidationTemplate,
   listClaudeValidationTemplates,
   type ClaudeValidationTemplateKey,
-} from "../../services/claudeValidationTemplates";
+} from "../../services/claude/claudeValidationTemplates";
 import { runValidationSuite as runValidationSuiteImpl } from "./runValidationSuite";
 
 import type {

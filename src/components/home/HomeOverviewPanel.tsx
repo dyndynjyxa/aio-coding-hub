@@ -5,20 +5,20 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useNowUnix } from "../../hooks/useNowUnix";
 import type { OpenCircuitRow } from "../ProviderCircuitBadge";
-import type { GatewayActiveSession } from "../../services/gateway";
-import { readHomeOverviewLogsPrimaryLayoutFromStorage } from "../../services/homeOverviewLayout";
+import type { GatewayActiveSession } from "../../services/gateway/gateway";
+import { readHomeOverviewLogsPrimaryLayoutFromStorage } from "../../services/home/homeOverviewLayout";
 import {
   HOME_OVERVIEW_TABS,
   readHomeOverviewTabOrderFromStorage,
   type HomeOverviewTabKey,
-} from "../../services/homeOverviewTabOrder";
-import { getOrderedClis } from "../../services/cliPriorityOrder";
-import type { CliKey } from "../../services/providers";
-import type { ProviderLimitUsageRow } from "../../services/providerLimitUsage";
-import type { RequestLogSummary } from "../../services/requestLogs";
-import type { SortModeSummary } from "../../services/sortModes";
-import type { TraceSession } from "../../services/traceStore";
-import type { UsageHourlyRow } from "../../services/usage";
+} from "../../services/home/homeOverviewTabOrder";
+import { getOrderedClis } from "../../services/cli/cliPriorityOrder";
+import type { CliKey } from "../../services/providers/providers";
+import type { ProviderLimitUsageRow } from "../../services/providers/providerLimitUsage";
+import type { RequestLogSummary } from "../../services/gateway/requestLogs";
+import type { SortModeSummary } from "../../services/providers/sortModes";
+import type { TraceSession } from "../../services/gateway/traceStore";
+import type { UsageHourlyRow } from "../../services/usage/usage";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";

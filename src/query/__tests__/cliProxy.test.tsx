@@ -1,15 +1,16 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { CliProxyStatus } from "../../services/cliProxy";
-import { cliProxySetEnabled, cliProxyStatusAll } from "../../services/cliProxy";
+import type { CliProxyStatus } from "../../services/cli/cliProxy";
+import { cliProxySetEnabled, cliProxyStatusAll } from "../../services/cli/cliProxy";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { cliProxyKeys } from "../keys";
 import { useCliProxySetEnabledMutation, useCliProxyStatusAllQuery } from "../cliProxy";
 
-vi.mock("../../services/cliProxy", async () => {
-  const actual =
-    await vi.importActual<typeof import("../../services/cliProxy")>("../../services/cliProxy");
+vi.mock("../../services/cli/cliProxy", async () => {
+  const actual = await vi.importActual<typeof import("../../services/cli/cliProxy")>(
+    "../../services/cli/cliProxy"
+  );
   return {
     ...actual,
     cliProxyStatusAll: vi.fn(),

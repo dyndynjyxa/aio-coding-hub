@@ -4,7 +4,7 @@ import type {
   UsagePeriod,
   UsageProviderCacheRateTrendRowV1,
   UsageSummary,
-} from "../../services/usage";
+} from "../../services/usage/usage";
 import { UsageProviderCacheRateTrendChart } from "../../components/UsageProviderCacheRateTrendChart";
 import { UsageLeaderboardTable } from "../../components/usage/UsageLeaderboardTable";
 import { UsageTableSkeleton } from "../../components/usage/UsageTableSkeleton";

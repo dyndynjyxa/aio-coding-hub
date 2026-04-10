@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { CliKey } from "../services/providers";
+import type { CliKey } from "../services/providers/providers";
 import {
   workspaceApply,
   workspaceCreate,
@@ -10,7 +10,7 @@ import {
   type WorkspacePreview,
   type WorkspaceSummary,
   type WorkspacesListResult,
-} from "../services/workspaces";
+} from "../services/workspace/workspaces";
 import { workspacesKeys } from "./keys";
 
 export function useWorkspacesListQuery(cliKey: CliKey, options?: { enabled?: boolean }) {

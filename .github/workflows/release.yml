@@ -344,40 +344,11 @@ jobs:
 
           label="${{ matrix.stable_label }}"
           src="stable-assets/aio-coding-hub-${label}.AppImage"
-
-          if [[ ! -f "$src" ]]; then
-            echo "Source AppImage not found: $src" >&2
-            exit 1
-          fi
-
-          src="$(realpath "$src")"
-
-          # Ensure the AppImage is executable before running --appimage-extract.
-          chmod +x "$src"
-
-          # Extract without FUSE (--appimage-extract writes to ./squashfs-root).
-          EXTRACT_DIR="$(mktemp -d)"
-          (cd "$EXTRACT_DIR" && "$src" --appimage-extract >/dev/null)
-
-          # Strip bundled EGL/Mesa/DRM libraries that conflict with system Mesa.
-          LIB_DIR="$EXTRACT_DIR/squashfs-root/usr/lib"
-          for lib in \
-              libEGL.so libEGL.so.1 libEGL.so.1.1.0 \
-              libGLESv2.so libGLESv2.so.2 libGLESv2.so.2.0.0 \
-              libgbm.so libgbm.so.1 \
-              libdrm.so libdrm.so.2 libdrm.so.2.4.0 \
-              libdrm_amdgpu.so.1 libdrm_intel.so.1 libdrm_nouveau.so.2 libdrm_radeon.so.1; do
-            target="$LIB_DIR/$lib"
-            [[ -f "$target" || -L "$target" ]] && { echo "  removing: $lib"; rm -f "$target"; }
-          done
-
-          # Repack. Fail explicitly if appimagetool does not produce the output file.
           out="stable-assets/aio-coding-hub-${label}-wayland.AppImage"
-          ARCH=x86_64 "$TOOL_BIN" --no-appstream "$EXTRACT_DIR/squashfs-root" "$out"
-          chmod +x "$out"
+
+          APPIMAGETOOL="$TOOL_BIN" ./scripts/repack-linux-appimage-wayland.sh "$src" "$out"
 
           rm -f "$TOOL_BIN"
-          rm -rf "$EXTRACT_DIR"
 
           echo "Wayland AppImage: $out"
           ls -lh "$out"

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestQueryClient, createQueryWrapper } from "../../test/utils/reactQuery";
 import { setTauriRuntime, clearTauriRuntime } from "../../test/utils/tauriRuntime";
 
-vi.mock("../../services/cliSessions", () => ({
+vi.mock("../../services/cli/cliSessions", () => ({
   cliSessionsProjectsList: vi.fn(),
   cliSessionsSessionsList: vi.fn(),
   cliSessionsMessagesGet: vi.fn(),
@@ -18,7 +18,7 @@ import {
   cliSessionsMessagesGet,
   cliSessionsProjectsList,
   cliSessionsSessionsList,
-} from "../../services/cliSessions";
+} from "../../services/cli/cliSessions";
 
 describe("query/cliSessions", () => {
   beforeEach(() => {

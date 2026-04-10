@@ -5,7 +5,7 @@ import {
   requestLogsListAfterIdAll,
   requestLogsListAll,
   type RequestLogSummary,
-} from "../services/requestLogs";
+} from "../services/gateway/requestLogs";
 import { isPersistedRequestLogInProgress } from "../components/home/HomeLogShared";
 import { requestLogsKeys } from "./keys";
 

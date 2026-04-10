@@ -1,4 +1,4 @@
-import type { CliKey } from "../../services/providers";
+import type { CliKey } from "../../services/providers/providers";
 
 export type HomeWorkspaceConfigItemType = "prompts" | "mcp" | "skills";
 

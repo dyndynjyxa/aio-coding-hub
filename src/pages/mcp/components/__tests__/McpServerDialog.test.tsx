@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { McpServerDialog } from "../McpServerDialog";
 import { useMcpServerUpsertMutation } from "../../../../query/mcp";
-import { mcpParseJson } from "../../../../services/mcp";
+import { mcpParseJson } from "../../../../services/workspace/mcp";
 
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
@@ -13,9 +13,9 @@ vi.mock("../../../../query/mcp", async () => {
   return { ...actual, useMcpServerUpsertMutation: vi.fn() };
 });
 
-vi.mock("../../../../services/mcp", async () => {
-  const actual = await vi.importActual<typeof import("../../../../services/mcp")>(
-    "../../../../services/mcp"
+vi.mock("../../../../services/workspace/mcp", async () => {
+  const actual = await vi.importActual<typeof import("../../../../services/workspace/mcp")>(
+    "../../../../services/workspace/mcp"
   );
   return { ...actual, mcpParseJson: vi.fn() };
 });

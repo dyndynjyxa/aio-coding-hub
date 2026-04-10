@@ -8,7 +8,7 @@ import {
   Tooltip,
   CartesianGrid,
 } from "recharts";
-import type { UsageHourlyRow } from "../services/usage";
+import type { UsageHourlyRow } from "../services/usage/usage";
 import { useTheme } from "../hooks/useTheme";
 import { cn } from "../utils/cn";
 import { buildRecentDayKeys } from "../utils/dateKeys";

@@ -2,7 +2,7 @@
 // - Query adapters for `src/services/skills.ts`, used by skills pages/views.
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { CliKey } from "../services/providers";
+import type { CliKey } from "../services/providers/providers";
 import {
   skillInstall,
   skillRepoDelete,
@@ -26,7 +26,7 @@ import {
   type SkillImportLocalBatchReport,
   type SkillRepoSummary,
   type SkillsPaths,
-} from "../services/skills";
+} from "../services/workspace/skills";
 import { skillsKeys } from "./keys";
 
 export function useSkillReposListQuery(options?: { enabled?: boolean }) {

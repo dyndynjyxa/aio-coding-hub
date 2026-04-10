@@ -18,13 +18,13 @@ import {
 } from "../query/skills";
 import { useWorkspacesListQuery } from "../query/workspaces";
 import { logToConsole } from "../services/consoleLog";
-import { getOrderedClis, pickDefaultCliByPriority } from "../services/cliPriorityOrder";
-import type { CliKey } from "../services/providers";
+import { getOrderedClis, pickDefaultCliByPriority } from "../services/cli/cliPriorityOrder";
+import type { CliKey } from "../services/providers/providers";
 import type {
   AvailableSkillSummary,
   InstalledSkillSummary,
   SkillRepoSummary,
-} from "../services/skills";
+} from "../services/workspace/skills";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Dialog } from "../ui/Dialog";

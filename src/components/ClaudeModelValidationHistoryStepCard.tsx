@@ -14,12 +14,12 @@
  */
 
 import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
-import type { ClaudeModelValidationResult } from "../services/claudeModelValidation";
-import { buildClaudeModelValidationRequestSnapshotTextFromResult } from "../services/claudeModelValidationRequestSnapshot";
+import type { ClaudeModelValidationResult } from "../services/claude/claudeModelValidation";
+import { buildClaudeModelValidationRequestSnapshotTextFromResult } from "../services/claude/claudeModelValidationRequestSnapshot";
 import {
   evaluateClaudeValidation,
   type ClaudeValidationTemplateKey,
-} from "../services/claudeValidationTemplates";
+} from "../services/claude/claudeValidationTemplates";
 import { cn } from "../utils/cn";
 import { Button } from "../ui/Button";
 import { Textarea } from "../ui/Textarea";

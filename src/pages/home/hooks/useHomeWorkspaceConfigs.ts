@@ -8,7 +8,7 @@ import type {
   HomeCliWorkspaceConfig,
   HomeWorkspaceConfigItem,
 } from "../../../components/home/homeWorkspaceConfigTypes";
-import type { CliKey } from "../../../services/providers";
+import type { CliKey } from "../../../services/providers/providers";
 
 function buildWorkspaceConfigItems(input: {
   prompts: Array<{ id: number; name: string }>;

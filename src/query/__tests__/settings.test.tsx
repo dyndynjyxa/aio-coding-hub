@@ -1,9 +1,9 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { settingsGet, settingsSet } from "../../services/settings";
-import { settingsCircuitBreakerNoticeSet } from "../../services/settingsCircuitBreakerNotice";
-import { settingsCodexSessionIdCompletionSet } from "../../services/settingsCodexSessionIdCompletion";
-import { settingsGatewayRectifierSet } from "../../services/settingsGatewayRectifier";
+import { settingsGet, settingsSet } from "../../services/settings/settings";
+import { settingsCircuitBreakerNoticeSet } from "../../services/settings/settingsCircuitBreakerNotice";
+import { settingsCodexSessionIdCompletionSet } from "../../services/settings/settingsCodexSessionIdCompletion";
+import { settingsGatewayRectifierSet } from "../../services/settings/settingsGatewayRectifier";
 import { createTestAppSettings } from "../../test/fixtures/settings";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
@@ -18,27 +18,28 @@ import {
   useSettingsSetMutation,
 } from "../settings";
 
-vi.mock("../../services/settings", async () => {
-  const actual =
-    await vi.importActual<typeof import("../../services/settings")>("../../services/settings");
+vi.mock("../../services/settings/settings", async () => {
+  const actual = await vi.importActual<typeof import("../../services/settings/settings")>(
+    "../../services/settings/settings"
+  );
   return { ...actual, settingsGet: vi.fn(), settingsSet: vi.fn() };
 });
-vi.mock("../../services/settingsGatewayRectifier", async () => {
-  const actual = await vi.importActual<typeof import("../../services/settingsGatewayRectifier")>(
-    "../../services/settingsGatewayRectifier"
-  );
+vi.mock("../../services/settings/settingsGatewayRectifier", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../services/settings/settingsGatewayRectifier")
+  >("../../services/settings/settingsGatewayRectifier");
   return { ...actual, settingsGatewayRectifierSet: vi.fn() };
 });
-vi.mock("../../services/settingsCircuitBreakerNotice", async () => {
+vi.mock("../../services/settings/settingsCircuitBreakerNotice", async () => {
   const actual = await vi.importActual<
-    typeof import("../../services/settingsCircuitBreakerNotice")
-  >("../../services/settingsCircuitBreakerNotice");
+    typeof import("../../services/settings/settingsCircuitBreakerNotice")
+  >("../../services/settings/settingsCircuitBreakerNotice");
   return { ...actual, settingsCircuitBreakerNoticeSet: vi.fn() };
 });
-vi.mock("../../services/settingsCodexSessionIdCompletion", async () => {
+vi.mock("../../services/settings/settingsCodexSessionIdCompletion", async () => {
   const actual = await vi.importActual<
-    typeof import("../../services/settingsCodexSessionIdCompletion")
-  >("../../services/settingsCodexSessionIdCompletion");
+    typeof import("../../services/settings/settingsCodexSessionIdCompletion")
+  >("../../services/settings/settingsCodexSessionIdCompletion");
   return { ...actual, settingsCodexSessionIdCompletionSet: vi.fn() };
 });
 

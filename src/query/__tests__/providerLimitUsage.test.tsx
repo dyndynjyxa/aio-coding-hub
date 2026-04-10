@@ -1,14 +1,14 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { providerLimitUsageV1 } from "../../services/providerLimitUsage";
+import { providerLimitUsageV1 } from "../../services/providers/providerLimitUsage";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { useProviderLimitUsageV1Query } from "../providerLimitUsage";
 
-vi.mock("../../services/providerLimitUsage", async () => {
-  const actual = await vi.importActual<typeof import("../../services/providerLimitUsage")>(
-    "../../services/providerLimitUsage"
-  );
+vi.mock("../../services/providers/providerLimitUsage", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../services/providers/providerLimitUsage")
+  >("../../services/providers/providerLimitUsage");
   return {
     ...actual,
     providerLimitUsageV1: vi.fn(),

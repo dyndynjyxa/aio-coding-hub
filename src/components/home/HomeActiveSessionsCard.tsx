@@ -4,7 +4,7 @@
 
 import { useMemo } from "react";
 import { cliBadgeTone, cliShortLabel } from "../../constants/clis";
-import type { GatewayActiveSession } from "../../services/gateway";
+import type { GatewayActiveSession } from "../../services/gateway/gateway";
 import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";
 import { Spinner } from "../../ui/Spinner";

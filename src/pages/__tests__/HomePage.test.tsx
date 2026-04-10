@@ -9,7 +9,7 @@ import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { mergeSettingsState, resetMswState } from "../../test/msw/state";
 import { HomePage } from "../HomePage";
 import { logToConsole } from "../../services/consoleLog";
-import { envConflictsCheck } from "../../services/envConflicts";
+import { envConflictsCheck } from "../../services/cli/envConflicts";
 import { gatewayKeys } from "../../query/keys";
 import {
   useGatewayCircuitResetProviderMutation,
@@ -119,7 +119,7 @@ vi.mock("../../hooks/useWindowForeground", () => ({
   },
 }));
 
-vi.mock("../../services/traceStore", () => ({ useTraceStore: () => ({ traces: [] }) }));
+vi.mock("../../services/gateway/traceStore", () => ({ useTraceStore: () => ({ traces: [] }) }));
 
 vi.mock("../../hooks/useCliProxy", async () => {
   const actual =
@@ -131,9 +131,9 @@ vi.mock("../home/hooks/useHomeWorkspaceConfigs", () => ({
   useHomeWorkspaceConfigs: vi.fn(),
 }));
 
-vi.mock("../../services/envConflicts", async () => {
-  const actual = await vi.importActual<typeof import("../../services/envConflicts")>(
-    "../../services/envConflicts"
+vi.mock("../../services/cli/envConflicts", async () => {
+  const actual = await vi.importActual<typeof import("../../services/cli/envConflicts")>(
+    "../../services/cli/envConflicts"
   );
   return { ...actual, envConflictsCheck: vi.fn() };
 });

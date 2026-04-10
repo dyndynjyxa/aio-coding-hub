@@ -10,8 +10,8 @@ import {
   usePromptsListQuery,
 } from "../../query/prompts";
 import { logToConsole } from "../../services/consoleLog";
-import type { PromptSummary } from "../../services/prompts";
-import type { CliKey } from "../../services/providers";
+import type { PromptSummary } from "../../services/workspace/prompts";
+import type { CliKey } from "../../services/providers/providers";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Dialog } from "../../ui/Dialog";

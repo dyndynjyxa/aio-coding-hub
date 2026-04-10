@@ -4,7 +4,7 @@ import { useMcpServersListQuery } from "../../../../query/mcp";
 import { usePromptsListQuery } from "../../../../query/prompts";
 import { useSkillsInstalledListQuery } from "../../../../query/skills";
 import { useWorkspacesListQuery } from "../../../../query/workspaces";
-import type { CliKey } from "../../../../services/providers";
+import type { CliKey } from "../../../../services/providers/providers";
 import { useHomeWorkspaceConfigs } from "../useHomeWorkspaceConfigs";
 
 vi.mock("../../../../query/mcp", async () => {

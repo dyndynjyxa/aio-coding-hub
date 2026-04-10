@@ -3,26 +3,26 @@ import { useAsyncListener } from "../hooks/useAsyncListener";
 import { useDocumentVisibility } from "../hooks/useDocumentVisibility";
 import { useGatewayQuerySync } from "../hooks/useGatewayQuerySync";
 import { useStartupTask } from "../hooks/useStartupTask";
-import { cliProxyStatusAll } from "../services/cliProxy";
+import { cliProxyStatusAll } from "../services/cli/cliProxy";
 import { logToConsole } from "../services/consoleLog";
 import {
   registerBackgroundTask,
   setBackgroundTaskSchedulerForeground,
   startBackgroundTaskScheduler,
 } from "../services/backgroundTasks";
-import { listenAppHeartbeat } from "../services/appHeartbeat";
-import { setCacheAnomalyMonitorEnabled } from "../services/cacheAnomalyMonitor";
-import { listenGatewayEvents } from "../services/gatewayEvents";
-import { listenNoticeEvents } from "../services/noticeEvents";
-import { settingsGet } from "../services/settings";
+import { listenAppHeartbeat } from "../services/app/appHeartbeat";
+import { setCacheAnomalyMonitorEnabled } from "../services/gateway/cacheAnomalyMonitor";
+import { listenGatewayEvents } from "../services/gateway/gatewayEvents";
+import { listenNoticeEvents } from "../services/notification/noticeEvents";
+import { settingsGet } from "../services/settings/settings";
 import {
   startupSyncDefaultPromptsFromFilesOncePerSession,
   startupSyncModelPricesOnce,
-} from "../services/startup";
+} from "../services/app/startup";
 import {
   listenTaskCompleteNotifyEvents,
   setTaskCompleteNotifyEnabled,
-} from "../services/taskCompleteNotifyEvents";
+} from "../services/notification/taskCompleteNotifyEvents";
 import { queryClient } from "../query/queryClient";
 import { cliProxyKeys, updaterKeys } from "../query/keys";
 import { updateCheckNow } from "../hooks/useUpdateMeta";

@@ -6,7 +6,7 @@ import type {
   LocalSkillSummary,
   SkillRepoSummary,
   SkillsPaths,
-} from "../../services/skills";
+} from "../../services/workspace/skills";
 import {
   skillImportLocal,
   skillInstallToLocal,
@@ -23,7 +23,7 @@ import {
   skillsInstalledList,
   skillsLocalList,
   skillsPathsGet,
-} from "../../services/skills";
+} from "../../services/workspace/skills";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { skillsKeys } from "../keys";
@@ -46,9 +46,10 @@ import {
   useSkillsPathsQuery,
 } from "../skills";
 
-vi.mock("../../services/skills", async () => {
-  const actual =
-    await vi.importActual<typeof import("../../services/skills")>("../../services/skills");
+vi.mock("../../services/workspace/skills", async () => {
+  const actual = await vi.importActual<typeof import("../../services/workspace/skills")>(
+    "../../services/workspace/skills"
+  );
   return {
     ...actual,
     skillReposList: vi.fn(),

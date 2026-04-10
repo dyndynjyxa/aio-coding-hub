@@ -1,6 +1,6 @@
 // Usage: Usage analytics page. Backend commands: `usage_summary_v2`, `usage_leaderboard_v2` (and related `usage_*`).
 
-import type { UsageScope } from "../services/usage";
+import type { UsageScope } from "../services/usage/usage";
 import { UsageFilters } from "../components/usage/UsageFilters";
 import { UsageSummaryCards } from "../components/usage/UsageSummaryCards";
 import { Button } from "../ui/Button";

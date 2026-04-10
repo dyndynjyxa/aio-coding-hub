@@ -16,8 +16,12 @@ import { SortableContext, arrayMove, verticalListSortingStrategy } from "@dnd-ki
 import { ClaudeModelValidationDialog } from "../../components/ClaudeModelValidationDialog";
 import { logToConsole } from "../../services/consoleLog";
 import { copyText } from "../../services/clipboard";
-import type { GatewayProviderCircuitStatus } from "../../services/gateway";
-import { providerGetApiKey, type CliKey, type ProviderSummary } from "../../services/providers";
+import type { GatewayProviderCircuitStatus } from "../../services/gateway/gateway";
+import {
+  providerGetApiKey,
+  type CliKey,
+  type ProviderSummary,
+} from "../../services/providers/providers";
 import { gatewayKeys, providersKeys } from "../../query/keys";
 import {
   summarizeGatewayCircuitRows,

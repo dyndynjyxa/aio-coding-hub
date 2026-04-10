@@ -7,7 +7,7 @@ import {
   providersReorder,
   type CliKey,
   type ProviderSummary,
-} from "../services/providers";
+} from "../services/providers/providers";
 import { providersKeys } from "./keys";
 
 export function useProvidersListQuery(cliKey: CliKey, options?: { enabled?: boolean }) {

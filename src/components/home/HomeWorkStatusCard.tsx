@@ -2,7 +2,7 @@
 // - Render in `HomeOverviewPanel` left column to show each CLI's proxy state.
 
 import { CLIS } from "../../constants/clis";
-import type { CliKey } from "../../services/providers";
+import type { CliKey } from "../../services/providers/providers";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Switch } from "../../ui/Switch";

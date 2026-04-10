@@ -41,4 +41,5 @@ coverage*/
 src/templates/
 .codex/
 .codex-temp/
+.opencode/
 src-tauri/target*/

@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { McpServerSummary } from "../../services/mcp";
+import type { McpServerSummary } from "../../services/workspace/mcp";
 import {
   mcpImportFromWorkspaceCli,
   mcpImportServers,
@@ -9,7 +9,7 @@ import {
   mcpServerSetEnabled,
   mcpServerUpsert,
   mcpServersList,
-} from "../../services/mcp";
+} from "../../services/workspace/mcp";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { mcpKeys } from "../keys";
@@ -22,8 +22,10 @@ import {
   useMcpServersListQuery,
 } from "../mcp";
 
-vi.mock("../../services/mcp", async () => {
-  const actual = await vi.importActual<typeof import("../../services/mcp")>("../../services/mcp");
+vi.mock("../../services/workspace/mcp", async () => {
+  const actual = await vi.importActual<typeof import("../../services/workspace/mcp")>(
+    "../../services/workspace/mcp"
+  );
   return {
     ...actual,
     mcpServersList: vi.fn(),

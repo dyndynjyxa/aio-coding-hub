@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { CliFilterKey } from "../../constants/clis";
 import { useCustomDateRange } from "../../hooks/useCustomDateRange";
-import type { UsagePeriod } from "../../services/usage";
+import type { UsagePeriod } from "../../services/usage/usage";
 
 export function useUsagePageFiltersState() {
   const [period, setPeriod] = useState<UsagePeriod>("daily");

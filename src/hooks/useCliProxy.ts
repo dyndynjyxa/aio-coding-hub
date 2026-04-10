@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { logToConsole } from "../services/consoleLog";
-import type { CliKey } from "../services/providers";
+import type { CliKey } from "../services/providers/providers";
 import { useCliProxySetEnabledMutation, useCliProxyStatusAllQuery } from "../query/cliProxy";
 
 const DEFAULT_ENABLED: Record<CliKey, boolean> = {

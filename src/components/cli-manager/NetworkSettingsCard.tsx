@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import type { AppSettings, GatewayListenMode } from "../../services/settings";
-import { gatewayStart, gatewayStop } from "../../services/gateway";
+import type { AppSettings, GatewayListenMode } from "../../services/settings/settings";
+import { gatewayStart, gatewayStop } from "../../services/gateway/gateway";
 import { logToConsole } from "../../services/consoleLog";
 import { useGatewayMeta } from "../../hooks/useGatewayMeta";
 import { useWslHostAddressQuery } from "../../query/wsl";

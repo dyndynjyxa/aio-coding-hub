@@ -4,13 +4,13 @@ import {
   settingsSet,
   type AppSettings,
   type SettingsSetInput,
-} from "../services/settings";
-import { settingsCircuitBreakerNoticeSet } from "../services/settingsCircuitBreakerNotice";
-import { settingsCodexSessionIdCompletionSet } from "../services/settingsCodexSessionIdCompletion";
+} from "../services/settings/settings";
+import { settingsCircuitBreakerNoticeSet } from "../services/settings/settingsCircuitBreakerNotice";
+import { settingsCodexSessionIdCompletionSet } from "../services/settings/settingsCodexSessionIdCompletion";
 import {
   settingsGatewayRectifierSet,
   type GatewayRectifierSettingsPatch,
-} from "../services/settingsGatewayRectifier";
+} from "../services/settings/settingsGatewayRectifier";
 import { settingsKeys } from "./keys";
 
 export const SETTINGS_READONLY_MESSAGE =
@@ -54,7 +54,7 @@ export function useSettingsQuery(options?: { enabled?: boolean }) {
   });
 }
 
-export { type SettingsSetInput } from "../services/settings";
+export { type SettingsSetInput } from "../services/settings/settings";
 
 export function useSettingsSetMutation() {
   const queryClient = useQueryClient();

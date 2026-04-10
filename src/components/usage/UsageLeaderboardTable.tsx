@@ -1,7 +1,7 @@
 // Usage: 用量排行表格 — 支持费用占比、$/1K Token 列。
 
 import { memo } from "react";
-import type { UsageSummary, UsageLeaderboardRow } from "../../services/usage";
+import type { UsageSummary, UsageLeaderboardRow } from "../../services/usage/usage";
 import {
   formatDurationMs,
   formatInteger,

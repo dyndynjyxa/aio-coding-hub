@@ -5,9 +5,9 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { cliBadgeToneStatic, cliShortLabel } from "../../constants/clis";
 import { GatewayErrorCodes } from "../../constants/gatewayErrorCodes";
-import type { CliSessionsFolderLookupEntry } from "../../services/cliSessions";
-import type { CliKey } from "../../services/providers";
-import type { TraceSession } from "../../services/traceStore";
+import type { CliSessionsFolderLookupEntry } from "../../services/cli/cliSessions";
+import type { CliKey } from "../../services/providers/providers";
+import type { TraceSession } from "../../services/gateway/traceStore";
 import { cn } from "../../utils/cn";
 import {
   computeOutputTokensPerSecond,

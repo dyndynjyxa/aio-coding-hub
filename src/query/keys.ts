@@ -1,7 +1,7 @@
-import type { CliKey } from "../services/providers";
-import type { CostPeriod } from "../services/cost";
-import type { UsagePeriod, UsageRange, UsageScope } from "../services/usage";
-import type { CliSessionsSource } from "../services/cliSessions";
+import type { CliKey } from "../services/providers/providers";
+import type { CostPeriod } from "../services/usage/cost";
+import type { UsagePeriod, UsageRange, UsageScope } from "../services/usage/usage";
+import type { CliSessionsSource } from "../services/cli/cliSessions";
 
 function normalizeKeyParts(values: readonly string[]): string[] {
   const unique: string[] = [];

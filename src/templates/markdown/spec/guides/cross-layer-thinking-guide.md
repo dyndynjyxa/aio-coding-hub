@@ -289,6 +289,32 @@ Failover observability checklist:
 - When schema constraints force duplication, document every mirrored ownership
   point in the same PR.
 
+### Mistake 14: Two-Phase Writes Without Orphan Recovery
+
+**Bad**: Backend writes a placeholder row (`status=NULL`) at request start and
+relies on a second upsert to finalize it. If the second write is lost (crash,
+backpressure drop, channel disconnect), the placeholder persists indefinitely.
+Frontend treats `status==null` as "in progress" with no time bound, causing
+permanent UI artifacts and polling degradation.
+
+**Good**: Any two-phase write pattern must account for the second phase never
+arriving. Define an explicit staleness contract across layers.
+
+Two-phase write checklist:
+- If backend writes a placeholder that expects a later update, define the
+  maximum expected lifetime of the placeholder state.
+- Frontend must enforce a staleness guard: after the threshold, treat the row
+  as abandoned rather than in-progress.
+- Backend should periodically scan for orphaned placeholders (e.g. on startup
+  or via a background sweep) and finalize them with a dedicated error code
+  such as `GW_ORPHANED`.
+- The second-phase write must have equal or higher delivery priority than the
+  first phase. If backpressure drops the completion but keeps the placeholder,
+  the system state is worse than if neither was written.
+- When `shouldUseFullRefresh` or similar polling-mode decisions depend on
+  in-progress detection, verify that a stuck placeholder does not permanently
+  degrade polling performance.
+
 ---
 
 ## Checklist for Cross-Layer Features
@@ -324,6 +350,8 @@ After implementation:
 - [ ] Confirm that provider auth/bridge modes do not silently affect each other
       (e.g. API key vs OAuth vs protocol bridge should have clear boundaries)
 - [ ] Reviewed root bootstrap / command registry blast radius after the change
+- [ ] If any write uses a two-phase pattern (placeholder + update), verified
+      that orphan recovery exists and frontend enforces a staleness guard
 
 ---
 

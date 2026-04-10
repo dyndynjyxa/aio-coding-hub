@@ -10,7 +10,7 @@ import {
   type CliSessionsSource,
   type CliSessionsSessionSummary,
   escapeShellArg,
-} from "../services/cliSessions";
+} from "../services/cli/cliSessions";
 import { copyText } from "../services/clipboard";
 import { useCliSessionsMessagesInfiniteQuery } from "../query/cliSessions";
 import { Button } from "../ui/Button";

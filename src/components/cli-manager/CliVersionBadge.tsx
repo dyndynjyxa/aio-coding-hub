@@ -6,7 +6,7 @@ import {
   cliCheckLatestVersion,
   cliUpdateCli,
   type CliVersionCheck,
-} from "../../services/cliUpdate";
+} from "../../services/cli/cliUpdate";
 import { cn } from "../../utils/cn";
 
 type CliVersionBadgeProps = {

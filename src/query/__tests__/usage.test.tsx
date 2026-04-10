@@ -6,7 +6,7 @@ import {
   usageProviderCacheRateTrendV1,
   usageSummary,
   usageSummaryV2,
-} from "../../services/usage";
+} from "../../services/usage/usage";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import {
@@ -17,9 +17,10 @@ import {
   useUsageSummaryV2Query,
 } from "../usage";
 
-vi.mock("../../services/usage", async () => {
-  const actual =
-    await vi.importActual<typeof import("../../services/usage")>("../../services/usage");
+vi.mock("../../services/usage/usage", async () => {
+  const actual = await vi.importActual<typeof import("../../services/usage/usage")>(
+    "../../services/usage/usage"
+  );
   return {
     ...actual,
     usageHourlySeries: vi.fn(),

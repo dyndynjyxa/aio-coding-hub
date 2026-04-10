@@ -1,13 +1,14 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { appAboutGet } from "../../services/appAbout";
+import { appAboutGet } from "../../services/app/appAbout";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { isAppAboutAvailable, useAppAboutQuery } from "../appAbout";
 
-vi.mock("../../services/appAbout", async () => {
-  const actual =
-    await vi.importActual<typeof import("../../services/appAbout")>("../../services/appAbout");
+vi.mock("../../services/app/appAbout", async () => {
+  const actual = await vi.importActual<typeof import("../../services/app/appAbout")>(
+    "../../services/app/appAbout"
+  );
   return {
     ...actual,
     appAboutGet: vi.fn(),

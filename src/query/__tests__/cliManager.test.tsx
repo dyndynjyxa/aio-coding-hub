@@ -10,7 +10,7 @@ import {
   cliManagerCodexConfigTomlSet,
   cliManagerCodexInfoGet,
   cliManagerGeminiInfoGet,
-} from "../../services/cliManager";
+} from "../../services/cli/cliManager";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { cliManagerKeys } from "../keys";
@@ -27,9 +27,9 @@ import {
   useCliManagerGeminiInfoQuery,
 } from "../cliManager";
 
-vi.mock("../../services/cliManager", async () => {
-  const actual = await vi.importActual<typeof import("../../services/cliManager")>(
-    "../../services/cliManager"
+vi.mock("../../services/cli/cliManager", async () => {
+  const actual = await vi.importActual<typeof import("../../services/cli/cliManager")>(
+    "../../services/cli/cliManager"
   );
   return {
     ...actual,

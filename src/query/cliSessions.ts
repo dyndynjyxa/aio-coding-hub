@@ -15,7 +15,7 @@ import {
   type CliSessionsFolderLookupInput,
   type CliSessionsSessionSummary,
   type CliSessionsSource,
-} from "../services/cliSessions";
+} from "../services/cli/cliSessions";
 import { cliSessionsKeys } from "./keys";
 
 export function useCliSessionsProjectsListQuery(source: CliSessionsSource, wslDistro?: string) {

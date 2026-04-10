@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { useTheme } from "../../../hooks/useTheme";
 import { gatewayKeys } from "../../../query/keys";
 import { logToConsole } from "../../../services/consoleLog";
-import { gatewayStart, gatewayStop } from "../../../services/gateway";
+import { gatewayStart, gatewayStop } from "../../../services/gateway/gateway";
 import { createTestQueryClient } from "../../../test/utils/reactQuery";
 import { SettingsMainColumn } from "../SettingsMainColumn";
 import type { ComponentProps } from "react";
@@ -50,9 +50,9 @@ vi.mock("@dnd-kit/utilities", () => ({
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
 vi.mock("../../../hooks/useTheme", () => ({ useTheme: vi.fn() }));
-vi.mock("../../../services/gateway", async () => {
-  const actual = await vi.importActual<typeof import("../../../services/gateway")>(
-    "../../../services/gateway"
+vi.mock("../../../services/gateway/gateway", async () => {
+  const actual = await vi.importActual<typeof import("../../../services/gateway/gateway")>(
+    "../../../services/gateway/gateway"
   );
   return { ...actual, gatewayStart: vi.fn(), gatewayStop: vi.fn() };
 });

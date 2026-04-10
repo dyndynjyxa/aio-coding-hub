@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { CliKey } from "../../services/providers";
+import type { CliKey } from "../../services/providers/providers";
 import type { CliFilterKey } from "../../constants/clis";
 import type {
   UsageLeaderboardRow,
@@ -7,7 +7,7 @@ import type {
   UsageProviderCacheRateTrendRowV1,
   UsageScope,
   UsageSummary,
-} from "../../services/usage";
+} from "../../services/usage/usage";
 import type { CustomDateRangeApplied, CustomDateRangeBounds } from "../../hooks/useCustomDateRange";
 import {
   useUsageLeaderboardV2Query,
