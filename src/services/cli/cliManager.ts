@@ -52,6 +52,7 @@ export type ClaudeSettingsState = {
   env_mcp_timeout_ms: number | null;
   env_mcp_tool_timeout_ms: number | null;
   env_experimental_agent_teams: boolean;
+  env_claude_code_auto_compact_window: number | null;
   env_disable_background_tasks: boolean;
   env_disable_terminal_title: boolean;
   env_claude_bash_no_login: boolean;
@@ -62,6 +63,7 @@ export type ClaudeSettingsState = {
   env_enable_tool_search: boolean;
   env_max_mcp_output_tokens: number | null;
   env_claude_code_disable_nonessential_traffic: boolean;
+  env_claude_code_disable_1m_context: boolean;
   env_claude_code_proxy_resolves_hosts: boolean;
   env_claude_code_skip_prompt_history: boolean;
 };
@@ -85,6 +87,7 @@ export type ClaudeSettingsPatch = Partial<{
   env_mcp_timeout_ms: number;
   env_mcp_tool_timeout_ms: number;
   env_experimental_agent_teams: boolean;
+  env_claude_code_auto_compact_window: number;
   env_disable_background_tasks: boolean;
   env_disable_terminal_title: boolean;
   env_claude_bash_no_login: boolean;
@@ -95,6 +98,7 @@ export type ClaudeSettingsPatch = Partial<{
   env_enable_tool_search: boolean;
   env_max_mcp_output_tokens: number;
   env_claude_code_disable_nonessential_traffic: boolean;
+  env_claude_code_disable_1m_context: boolean;
   env_claude_code_proxy_resolves_hosts: boolean;
   env_claude_code_skip_prompt_history: boolean;
 }>;

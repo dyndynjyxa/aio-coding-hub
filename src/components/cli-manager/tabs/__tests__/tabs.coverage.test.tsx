@@ -51,6 +51,7 @@ describe("cli-manager tabs (coverage)", () => {
           env_mcp_timeout_ms: null,
           env_mcp_tool_timeout_ms: null,
           env_experimental_agent_teams: false,
+          env_claude_code_auto_compact_window: null,
           env_disable_background_tasks: false,
           env_disable_terminal_title: false,
           env_claude_bash_no_login: false,
@@ -61,6 +62,7 @@ describe("cli-manager tabs (coverage)", () => {
           env_enable_tool_search: false,
           env_max_mcp_output_tokens: null,
           env_claude_code_disable_nonessential_traffic: false,
+          env_claude_code_disable_1m_context: false,
           env_claude_code_proxy_resolves_hosts: false,
           env_claude_code_skip_prompt_history: false,
         }}
