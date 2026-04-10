@@ -7,6 +7,7 @@ use std::path::PathBuf;
 const ENV_KEY_MCP_TIMEOUT: &str = "MCP_TIMEOUT";
 const ENV_KEY_MCP_TOOL_TIMEOUT: &str = "MCP_TOOL_TIMEOUT";
 const ENV_KEY_EXPERIMENTAL_AGENT_TEAMS: &str = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS";
+const ENV_KEY_CLAUDE_CODE_AUTO_COMPACT_WINDOW: &str = "CLAUDE_CODE_AUTO_COMPACT_WINDOW";
 const ENV_KEY_DISABLE_BACKGROUND_TASKS: &str = "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS";
 const ENV_KEY_DISABLE_TERMINAL_TITLE: &str = "CLAUDE_CODE_DISABLE_TERMINAL_TITLE";
 const ENV_KEY_CLAUDE_BASH_NO_LOGIN: &str = "CLAUDE_BASH_NO_LOGIN";
@@ -18,6 +19,7 @@ const ENV_KEY_ENABLE_TOOL_SEARCH: &str = "ENABLE_TOOL_SEARCH";
 const ENV_KEY_MAX_MCP_OUTPUT_TOKENS: &str = "MAX_MCP_OUTPUT_TOKENS";
 const ENV_KEY_CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: &str =
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC";
+const ENV_KEY_CLAUDE_CODE_DISABLE_1M_CONTEXT: &str = "CLAUDE_CODE_DISABLE_1M_CONTEXT";
 const ENV_KEY_CLAUDE_CODE_PROXY_RESOLVES_HOSTS: &str = "CLAUDE_CODE_PROXY_RESOLVES_HOSTS";
 const ENV_KEY_CLAUDE_CODE_SKIP_PROMPT_HISTORY: &str = "CLAUDE_CODE_SKIP_PROMPT_HISTORY";
 
@@ -45,6 +47,7 @@ pub struct ClaudeSettingsState {
     pub env_mcp_timeout_ms: Option<u64>,
     pub env_mcp_tool_timeout_ms: Option<u64>,
     pub env_experimental_agent_teams: bool,
+    pub env_claude_code_auto_compact_window: Option<u64>,
     pub env_disable_background_tasks: bool,
     pub env_disable_terminal_title: bool,
     pub env_claude_bash_no_login: bool,
@@ -55,6 +58,7 @@ pub struct ClaudeSettingsState {
     pub env_enable_tool_search: bool,
     pub env_max_mcp_output_tokens: Option<u64>,
     pub env_claude_code_disable_nonessential_traffic: bool,
+    pub env_claude_code_disable_1m_context: bool,
     pub env_claude_code_proxy_resolves_hosts: bool,
     pub env_claude_code_skip_prompt_history: bool,
 }
@@ -83,6 +87,7 @@ pub struct ClaudeSettingsPatch {
     pub env_mcp_timeout_ms: Option<u64>,
     pub env_mcp_tool_timeout_ms: Option<u64>,
     pub env_experimental_agent_teams: Option<bool>,
+    pub env_claude_code_auto_compact_window: Option<u64>,
     pub env_disable_background_tasks: Option<bool>,
     pub env_disable_terminal_title: Option<bool>,
     pub env_claude_bash_no_login: Option<bool>,
@@ -93,6 +98,7 @@ pub struct ClaudeSettingsPatch {
     pub env_enable_tool_search: Option<bool>,
     pub env_max_mcp_output_tokens: Option<u64>,
     pub env_claude_code_disable_nonessential_traffic: Option<bool>,
+    pub env_claude_code_disable_1m_context: Option<bool>,
     pub env_claude_code_proxy_resolves_hosts: Option<bool>,
     pub env_claude_code_skip_prompt_history: Option<bool>,
 }
@@ -274,6 +280,9 @@ pub fn claude_settings_get<R: tauri::Runtime>(
     let env_experimental_agent_teams = env
         .map(|e| env_is_enabled(e, ENV_KEY_EXPERIMENTAL_AGENT_TEAMS))
         .unwrap_or(false);
+    let env_claude_code_auto_compact_window = env
+        .and_then(|e| e.get(ENV_KEY_CLAUDE_CODE_AUTO_COMPACT_WINDOW))
+        .and_then(env_u64_value);
     let env_disable_background_tasks = env
         .map(|e| env_is_enabled(e, ENV_KEY_DISABLE_BACKGROUND_TASKS))
         .unwrap_or(false);
@@ -303,6 +312,9 @@ pub fn claude_settings_get<R: tauri::Runtime>(
         .and_then(env_u64_value);
     let env_claude_code_disable_nonessential_traffic = env
         .map(|e| env_is_enabled(e, ENV_KEY_CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC))
+        .unwrap_or(false);
+    let env_claude_code_disable_1m_context = env
+        .map(|e| env_is_enabled(e, ENV_KEY_CLAUDE_CODE_DISABLE_1M_CONTEXT))
         .unwrap_or(false);
     let env_claude_code_proxy_resolves_hosts = env
         .map(|e| env_is_enabled(e, ENV_KEY_CLAUDE_CODE_PROXY_RESOLVES_HOSTS))
@@ -336,6 +348,7 @@ pub fn claude_settings_get<R: tauri::Runtime>(
         env_mcp_timeout_ms,
         env_mcp_tool_timeout_ms,
         env_experimental_agent_teams,
+        env_claude_code_auto_compact_window,
         env_disable_background_tasks,
         env_disable_terminal_title,
         env_claude_bash_no_login,
@@ -346,6 +359,7 @@ pub fn claude_settings_get<R: tauri::Runtime>(
         env_enable_tool_search,
         env_max_mcp_output_tokens,
         env_claude_code_disable_nonessential_traffic,
+        env_claude_code_disable_1m_context,
         env_claude_code_proxy_resolves_hosts,
         env_claude_code_skip_prompt_history,
     })
@@ -560,6 +574,7 @@ fn patch_claude_settings(
     let has_env_patch = patch.env_mcp_timeout_ms.is_some()
         || patch.env_mcp_tool_timeout_ms.is_some()
         || patch.env_experimental_agent_teams.is_some()
+        || patch.env_claude_code_auto_compact_window.is_some()
         || patch.env_disable_background_tasks.is_some()
         || patch.env_disable_terminal_title.is_some()
         || patch.env_claude_bash_no_login.is_some()
@@ -570,6 +585,7 @@ fn patch_claude_settings(
         || patch.env_enable_tool_search.is_some()
         || patch.env_max_mcp_output_tokens.is_some()
         || patch.env_claude_code_disable_nonessential_traffic.is_some()
+        || patch.env_claude_code_disable_1m_context.is_some()
         || patch.env_claude_code_proxy_resolves_hosts.is_some()
         || patch.env_claude_code_skip_prompt_history.is_some();
     if has_env_patch {
@@ -593,6 +609,9 @@ fn patch_claude_settings(
             }
             if let Some(v) = patch.env_experimental_agent_teams {
                 patch_env_toggle(env, ENV_KEY_EXPERIMENTAL_AGENT_TEAMS, v);
+            }
+            if let Some(v) = patch.env_claude_code_auto_compact_window {
+                patch_env_u64(env, ENV_KEY_CLAUDE_CODE_AUTO_COMPACT_WINDOW, v);
             }
             if let Some(v) = patch.env_disable_background_tasks {
                 patch_env_toggle(env, ENV_KEY_DISABLE_BACKGROUND_TASKS, v);
@@ -632,6 +651,9 @@ fn patch_claude_settings(
             if let Some(v) = patch.env_claude_code_disable_nonessential_traffic {
                 patch_env_toggle(env, ENV_KEY_CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, v);
             }
+            if let Some(v) = patch.env_claude_code_disable_1m_context {
+                patch_env_toggle(env, ENV_KEY_CLAUDE_CODE_DISABLE_1M_CONTEXT, v);
+            }
             if let Some(v) = patch.env_claude_code_proxy_resolves_hosts {
                 patch_env_toggle(env, ENV_KEY_CLAUDE_CODE_PROXY_RESOLVES_HOSTS, v);
             }
@@ -666,6 +688,7 @@ fn patch_has_updates(patch: &ClaudeSettingsPatch) -> bool {
         || patch.env_mcp_timeout_ms.is_some()
         || patch.env_mcp_tool_timeout_ms.is_some()
         || patch.env_experimental_agent_teams.is_some()
+        || patch.env_claude_code_auto_compact_window.is_some()
         || patch.env_disable_background_tasks.is_some()
         || patch.env_disable_terminal_title.is_some()
         || patch.env_claude_bash_no_login.is_some()
@@ -676,6 +699,7 @@ fn patch_has_updates(patch: &ClaudeSettingsPatch) -> bool {
         || patch.env_enable_tool_search.is_some()
         || patch.env_max_mcp_output_tokens.is_some()
         || patch.env_claude_code_disable_nonessential_traffic.is_some()
+        || patch.env_claude_code_disable_1m_context.is_some()
         || patch.env_claude_code_proxy_resolves_hosts.is_some()
         || patch.env_claude_code_skip_prompt_history.is_some()
 }

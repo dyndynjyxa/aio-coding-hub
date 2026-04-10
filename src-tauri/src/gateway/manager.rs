@@ -1,3 +1,4 @@
+use crate::shared::mutex_ext::MutexExt;
 use crate::{
     circuit_breaker, db, provider_circuit_breakers, providers, request_logs, session_manager,
     settings, wsl,
@@ -21,6 +22,7 @@ struct RunningGateway {
     listen_addr: String,
     circuit: Arc<circuit_breaker::CircuitBreaker>,
     session: Arc<session_manager::SessionManager>,
+    recent_errors: Arc<Mutex<RecentErrorCache>>,
     shutdown: oneshot::Sender<()>,
     task: tauri::async_runtime::JoinHandle<()>,
     log_task: tauri::async_runtime::JoinHandle<()>,
@@ -251,7 +253,7 @@ impl GatewayManager {
             circuit,
             session: session.clone(),
             codex_session_cache,
-            recent_errors,
+            recent_errors: recent_errors.clone(),
             latency_cache,
         };
 
@@ -287,6 +289,7 @@ impl GatewayManager {
             listen_addr,
             circuit: circuit_for_manager,
             session,
+            recent_errors: recent_errors.clone(),
             shutdown: shutdown_tx,
             task,
             log_task,
@@ -391,6 +394,7 @@ impl GatewayManager {
         if let Some(r) = &self.running {
             let now_unix = now_unix_seconds() as i64;
             r.circuit.reset(provider_id, now_unix);
+            r.recent_errors.lock_or_recover().clear();
         }
 
         let _ = provider_circuit_breakers::delete_by_provider_id(db, provider_id)?;
@@ -416,6 +420,7 @@ impl GatewayManager {
             for provider_id in &provider_ids {
                 r.circuit.reset(*provider_id, now_unix);
             }
+            r.recent_errors.lock_or_recover().clear();
         }
 
         let _ = provider_circuit_breakers::delete_by_provider_ids(db, &provider_ids)?;
@@ -451,14 +456,16 @@ impl GatewayManager {
 #[cfg(test)]
 mod tests {
     use super::{GatewayManager, RunningGateway};
-    use crate::{circuit_breaker, session_manager};
+    use crate::{circuit_breaker, providers, session_manager};
     use std::collections::HashMap;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
+    use tempfile::tempdir;
     use tokio::sync::oneshot;
 
     fn build_running_gateway(
         rt: &tokio::runtime::Runtime,
         session: Arc<session_manager::SessionManager>,
+        recent_errors: Arc<Mutex<crate::gateway::proxy::RecentErrorCache>>,
     ) -> RunningGateway {
         let circuit = Arc::new(circuit_breaker::CircuitBreaker::new(
             circuit_breaker::CircuitBreakerConfig::default(),
@@ -475,6 +482,7 @@ mod tests {
             listen_addr: "127.0.0.1:1".to_string(),
             circuit,
             session,
+            recent_errors,
             shutdown: shutdown_tx,
             task: tauri::async_runtime::JoinHandle::Tokio(rt.spawn(async {})),
             log_task: tauri::async_runtime::JoinHandle::Tokio(rt.spawn(async {})),
@@ -488,6 +496,9 @@ mod tests {
     fn clear_cli_session_bindings_removes_only_target_cli_when_running() {
         let rt = tokio::runtime::Runtime::new().expect("runtime");
         let session = Arc::new(session_manager::SessionManager::new());
+        let recent_errors = Arc::new(Mutex::new(
+            crate::gateway::proxy::RecentErrorCache::default(),
+        ));
         let now_unix = 100;
 
         session.bind_sort_mode(
@@ -506,7 +517,7 @@ mod tests {
         );
 
         let manager = GatewayManager {
-            running: Some(build_running_gateway(&rt, session.clone())),
+            running: Some(build_running_gateway(&rt, session.clone(), recent_errors)),
         };
 
         let removed = manager.clear_cli_session_bindings("claude");
@@ -524,5 +535,105 @@ mod tests {
             session.get_bound_sort_mode_id("codex", "session_c", now_unix),
             Some(Some(2))
         );
+    }
+
+    fn insert_provider(db: &crate::db::Db, cli_key: &str, name: &str) -> i64 {
+        providers::upsert(
+            db,
+            providers::ProviderUpsertParams {
+                provider_id: None,
+                cli_key: cli_key.to_string(),
+                name: name.to_string(),
+                base_urls: vec!["https://example.com".to_string()],
+                base_url_mode: providers::ProviderBaseUrlMode::Order,
+                auth_mode: None,
+                api_key: Some("k".to_string()),
+                enabled: true,
+                cost_multiplier: 1.0,
+                priority: Some(100),
+                claude_models: None,
+                limit_5h_usd: None,
+                limit_daily_usd: None,
+                daily_reset_mode: Some(providers::DailyResetMode::Fixed),
+                daily_reset_time: Some("00:00:00".to_string()),
+                limit_weekly_usd: None,
+                limit_monthly_usd: None,
+                limit_total_usd: None,
+                tags: None,
+                note: None,
+                source_provider_id: None,
+                bridge_type: None,
+                stream_idle_timeout_seconds: None,
+            },
+        )
+        .expect("insert provider")
+        .id
+    }
+
+    #[test]
+    fn circuit_reset_provider_clears_recent_error_cache() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("gateway_manager_reset_provider.db");
+        let db = crate::db::init_for_tests(&db_path).expect("init db");
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let session = Arc::new(session_manager::SessionManager::new());
+        let recent_errors = Arc::new(Mutex::new(
+            crate::gateway::proxy::RecentErrorCache::default(),
+        ));
+        let now_unix = 100;
+
+        {
+            let mut cache = recent_errors.lock().expect("lock recent_errors");
+            cache.insert_unavailable_for_tests(now_unix, 77, "fp-provider-reset", 30);
+        }
+
+        let provider_id = insert_provider(&db, "claude", "Claude Reset");
+        let manager = GatewayManager {
+            running: Some(build_running_gateway(&rt, session, recent_errors.clone())),
+        };
+
+        manager
+            .circuit_reset_provider(&db, provider_id)
+            .expect("reset provider");
+
+        let cached = recent_errors
+            .lock()
+            .expect("lock recent_errors")
+            .has_active_error_for_tests(now_unix, 77, "fp-provider-reset");
+        assert!(!cached);
+    }
+
+    #[test]
+    fn circuit_reset_cli_clears_recent_error_cache() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("gateway_manager_reset_cli.db");
+        let db = crate::db::init_for_tests(&db_path).expect("init db");
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let session = Arc::new(session_manager::SessionManager::new());
+        let recent_errors = Arc::new(Mutex::new(
+            crate::gateway::proxy::RecentErrorCache::default(),
+        ));
+        let now_unix = 100;
+
+        {
+            let mut cache = recent_errors.lock().expect("lock recent_errors");
+            cache.insert_unavailable_for_tests(now_unix, 88, "fp-cli-reset", 30);
+        }
+
+        insert_provider(&db, "claude", "Claude Reset A");
+        insert_provider(&db, "claude", "Claude Reset B");
+
+        let manager = GatewayManager {
+            running: Some(build_running_gateway(&rt, session, recent_errors.clone())),
+        };
+
+        let reset_count = manager.circuit_reset_cli(&db, "claude").expect("reset cli");
+
+        assert_eq!(reset_count, 2);
+        let cached = recent_errors
+            .lock()
+            .expect("lock recent_errors")
+            .has_active_error_for_tests(now_unix, 88, "fp-cli-reset");
+        assert!(!cached);
     }
 }
