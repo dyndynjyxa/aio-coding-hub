@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.37.6](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.37.5...aio-coding-hub-v0.37.6) (2026-04-11)
+
+
+### Features
+
+* **providers:** 实现供应商编辑器和多功能配置组件 ([e9f2a45](https://github.com/dyndynjyxa/aio-coding-hub/commit/e9f2a45f64b30c12b66ddad13cf378cccfd4d3a7))
+* 支持 CX2CC 使用当前 AIO 服务 Codex 网关作为来源 ([#194](https://github.com/dyndynjyxa/aio-coding-hub/issues/194)) ([2bf7117](https://github.com/dyndynjyxa/aio-coding-hub/commit/2bf7117585f20e03971831a04bd721fb6f620d67))
+
 ## [0.37.5](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.37.4...aio-coding-hub-v0.37.5) (2026-04-10)
 
 
