@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.7](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.37.6...aio-coding-hub-v0.37.7) (2026-04-11)
+
+
+### Features
+
+* **deps:** 添加 @mdxeditor/editor 依赖 ([8da488a](https://github.com/dyndynjyxa/aio-coding-hub/commit/8da488a5c0296b793eb184d0a081f09eda14af2e))
+
 ## [0.37.6](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.37.5...aio-coding-hub-v0.37.6) (2026-04-11)
 
 
