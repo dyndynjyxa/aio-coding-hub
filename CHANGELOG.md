@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.1](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.38.0...aio-coding-hub-v0.38.1) (2026-04-12)
+
+
+### Features
+
+* **provider-chain:** 优化展示故障切换尝试详情和错误结构化信息 ([e2d530f](https://github.com/dyndynjyxa/aio-coding-hub/commit/e2d530fceb3fcf52e9a7745847b13963e854994c))
+
 ## [0.38.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.37.7...aio-coding-hub-v0.38.0) (2026-04-12)
 
 
