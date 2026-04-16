@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.38.3](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.38.2...aio-coding-hub-v0.38.3) (2026-04-16)
+
+
+### Features
+
+* 首页新增 Token 用量面板 ([#204](https://github.com/dyndynjyxa/aio-coding-hub/issues/204)) ([4513106](https://github.com/dyndynjyxa/aio-coding-hub/commit/45131069f2d67a0c909c1558102305f1cfe41028))
+
+
+### Bug Fixes
+
+* **util:** 增加请求体大小限制至100MB并更新体积错误消息 ([b12c1ba](https://github.com/dyndynjyxa/aio-coding-hub/commit/b12c1baeccbfd29b8bcc4a055e1b6d7764d6d3dd))
+
 ## [0.38.2](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.38.1...aio-coding-hub-v0.38.2) (2026-04-16)
 
 
