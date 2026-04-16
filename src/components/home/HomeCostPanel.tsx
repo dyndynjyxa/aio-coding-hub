@@ -12,8 +12,12 @@ import { CostTrendChart } from "./CostTrendChart";
 import { CostScatterChartCard } from "./CostScatterChart";
 import { CostErrorCard } from "./CostErrorCard";
 
-export function HomeCostPanel() {
-  const f = useCostFilters();
+type HomeCostPanelProps = {
+  devPreviewEnabled?: boolean;
+};
+
+export function HomeCostPanel({ devPreviewEnabled = false }: HomeCostPanelProps) {
+  const f = useCostFilters({ devPreviewEnabled });
 
   const { setProviderId, setModel, costQuery } = f;
 

@@ -1,6 +1,15 @@
 // Usage: Dashboard / overview page. Backend commands: `request_logs_*`, `request_attempt_logs_*`, `usage_*`, `gateway_*`, `providers_*`, `sort_modes_*`, `provider_limit_usage_*`.
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { toast } from "sonner";
 import { CLIS } from "../constants/clis";
 import { HomeOverviewPanel } from "../components/home/HomeOverviewPanel";
@@ -23,6 +32,10 @@ import { Spinner } from "../ui/Spinner";
 import { TabList } from "../ui/TabList";
 import { useTraceStore } from "../services/gateway/traceStore";
 import { emitBackgroundTaskVisibilityTrigger } from "../services/backgroundTasks";
+import {
+  readHomeOverviewLogsPrimaryLayoutFromStorage,
+  subscribeHomeOverviewLogsPrimaryLayout,
+} from "../services/home/homeOverviewLayout";
 import { DEFAULT_HOME_USAGE_PERIOD } from "../utils/homeUsagePeriod";
 import { resolveHomeUsageWindowDays } from "../utils/homeUsagePeriod";
 import { useHomeCircuitState } from "./home/hooks/useHomeCircuitState";
@@ -30,16 +43,31 @@ import { useHomeSortMode } from "./home/hooks/useHomeSortMode";
 import { useHomeCliProxy } from "./home/hooks/useHomeCliProxy";
 import { useHomeWorkspaceConfigs } from "./home/hooks/useHomeWorkspaceConfigs";
 
-type HomeTabKey = "overview" | "cost" | "more";
+type HomeTabKey = "overview" | "cost" | "tokenCost" | "more";
 
-const HOME_TABS: Array<{ key: HomeTabKey; label: string }> = [
-  { key: "overview", label: "概览" },
-  { key: "cost", label: "花费" },
-  { key: "more", label: "更多" },
-];
+function buildHomeTabs(
+  personalizedLayoutEnabled: boolean
+): Array<{ key: HomeTabKey; label: string }> {
+  return personalizedLayoutEnabled
+    ? [
+        { key: "overview", label: "概览" },
+        { key: "tokenCost", label: "Token 花费" },
+      ]
+    : [
+        { key: "overview", label: "概览" },
+        { key: "cost", label: "花费" },
+        { key: "more", label: "更多" },
+      ];
+}
 
 const LazyHomeCostPanel = lazy(() =>
   import("../components/home/HomeCostPanel").then((m) => ({ default: m.HomeCostPanel }))
+);
+
+const LazyHomeTokenCostPanel = lazy(() =>
+  import("../components/home/HomeTokenCostPanel").then((m) => ({
+    default: m.HomeTokenCostPanel,
+  }))
 );
 
 const LazyRequestLogDetailDialog = lazy(() =>
@@ -60,6 +88,15 @@ export function HomePage() {
   const homeUsageWindowDays = resolveHomeUsageWindowDays(homeUsagePeriod);
   const isDevMode = import.meta.env.DEV;
   const devPreview = useDevPreviewData();
+  const personalizedLayoutEnabled = useSyncExternalStore(
+    subscribeHomeOverviewLogsPrimaryLayout,
+    readHomeOverviewLogsPrimaryLayoutFromStorage,
+    () => false
+  );
+  const homeTabs = useMemo(
+    () => buildHomeTabs(personalizedLayoutEnabled),
+    [personalizedLayoutEnabled]
+  );
 
   const [tab, setTab] = useState<HomeTabKey>("overview");
   const tabRef = useRef(tab);
@@ -170,6 +207,12 @@ export function HomePage() {
     }
   }, [tab]);
 
+  useEffect(() => {
+    if (personalizedLayoutEnabled && tab === "cost") setTab("tokenCost");
+    if (personalizedLayoutEnabled && tab === "more") setTab("overview");
+    if (!personalizedLayoutEnabled && tab === "tokenCost") setTab("cost");
+  }, [personalizedLayoutEnabled, tab]);
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="shrink-0 mb-5">
@@ -186,7 +229,7 @@ export function HomePage() {
                   {devPreview.enabled ? "Dev关闭预览数据" : "Dev开启预览数据"}
                 </Button>
               ) : null}
-              <TabList ariaLabel="首页视图切换" items={HOME_TABS} value={tab} onChange={setTab} />
+              <TabList ariaLabel="首页视图切换" items={homeTabs} value={tab} onChange={setTab} />
             </>
           }
         />
@@ -248,7 +291,20 @@ export function HomePage() {
               </Card>
             }
           >
-            <LazyHomeCostPanel />
+            <LazyHomeCostPanel devPreviewEnabled={devPreview.enabled} />
+          </Suspense>
+        ) : tab === "tokenCost" ? (
+          <Suspense
+            fallback={
+              <Card padding="md" className="flex h-full items-center justify-center">
+                <div className="flex items-center gap-3 text-sm text-slate-600 dark:text-slate-400">
+                  <Spinner />
+                  <span>加载 Token 花费面板中…</span>
+                </div>
+              </Card>
+            }
+          >
+            <LazyHomeTokenCostPanel devPreviewEnabled={devPreview.enabled} />
           </Suspense>
         ) : (
           <Card padding="md">

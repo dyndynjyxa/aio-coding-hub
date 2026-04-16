@@ -33,6 +33,7 @@ import { useProviderLimitUsageV1Query } from "../../query/providerLimitUsage";
 import { useCliProxy } from "../../hooks/useCliProxy";
 import { useHomeWorkspaceConfigs } from "../home/hooks/useHomeWorkspaceConfigs";
 import { emitBackgroundTaskVisibilityTrigger } from "../../services/backgroundTasks";
+import { writeHomeOverviewLogsPrimaryLayoutToStorage } from "../../services/home/homeOverviewLayout";
 
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
@@ -100,7 +101,21 @@ vi.mock("../../components/home/HomeOverviewPanel", () => ({
 }));
 
 vi.mock("../../components/home/HomeCostPanel", () => ({
-  HomeCostPanel: () => <div>cost-panel</div>,
+  HomeCostPanel: ({ devPreviewEnabled }: any) => (
+    <div>
+      <div>cost-panel</div>
+      <div>cost-preview:{String(devPreviewEnabled)}</div>
+    </div>
+  ),
+}));
+
+vi.mock("../../components/home/HomeTokenCostPanel", () => ({
+  HomeTokenCostPanel: ({ devPreviewEnabled }: any) => (
+    <div>
+      <div>token-cost-panel</div>
+      <div>token-preview:{String(devPreviewEnabled)}</div>
+    </div>
+  ),
 }));
 
 vi.mock("../../components/home/RequestLogDetailDialog", () => ({
@@ -271,6 +286,7 @@ function mockHomePageBaseQueries() {
 describe("pages/HomePage", () => {
   beforeEach(() => {
     localStorage.removeItem("devPreview.enabled");
+    localStorage.removeItem("aio-home-overview-logs-primary-layout");
     resetMswState();
     vi.mocked(useProviderLimitUsageV1Query).mockReturnValue({
       data: null,
@@ -576,6 +592,45 @@ describe("pages/HomePage", () => {
     );
   });
 
+  it("shows the old cost tab by default and hides token cost", () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    mockHomePageBaseQueries();
+    vi.mocked(useCliProxy).mockReturnValue({
+      enabled: { claude: false, codex: false, gemini: false },
+      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
+      toggling: { claude: false, codex: false, gemini: false },
+      setCliProxyEnabled: vi.fn(),
+    } as any);
+
+    renderWithProviders(client, <HomePage />);
+
+    expect(screen.getByRole("tab", { name: "花费" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Token 花费" })).not.toBeInTheDocument();
+  });
+
+  it("shows token cost tab and hides old cost and more when personalized layout is enabled", () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    mockHomePageBaseQueries();
+    vi.mocked(useCliProxy).mockReturnValue({
+      enabled: { claude: false, codex: false, gemini: false },
+      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
+      toggling: { claude: false, codex: false, gemini: false },
+      setCliProxyEnabled: vi.fn(),
+    } as any);
+
+    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
+
+    renderWithProviders(client, <HomePage />);
+
+    expect(screen.queryByRole("tab", { name: "花费" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Token 花费" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "更多" })).not.toBeInTheDocument();
+  });
+
   it("enables CLI proxy directly when no env conflicts are found", async () => {
     setTauriRuntime();
 
@@ -653,7 +708,7 @@ describe("pages/HomePage", () => {
     expect(screen.getByText("更多功能开发中…")).toBeInTheDocument();
   });
 
-  it("toggles the unified dev preview entry and passes it to overview", () => {
+  it("toggles the unified dev preview entry and switches cost tabs with personalized layout", async () => {
     setTauriRuntime();
 
     const client = createTestQueryClient();
@@ -674,6 +729,45 @@ describe("pages/HomePage", () => {
 
     expect(screen.getByRole("button", { name: "Dev关闭预览数据" })).toBeInTheDocument();
     expect(screen.getByText("dev-preview:true")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "花费" }));
+    expect(screen.getByText("cost-preview:true")).toBeInTheDocument();
+
+    writeHomeOverviewLogsPrimaryLayoutToStorage(true);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("tab", { name: "花费" })).not.toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Token 花费" })).toBeInTheDocument();
+      expect(screen.queryByRole("tab", { name: "更多" })).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "Token 花费" }));
+    expect(screen.getByText("token-preview:true")).toBeInTheDocument();
+  });
+
+  it("returns to overview when personalized layout is enabled from the more tab", async () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    mockHomePageBaseQueries();
+    vi.mocked(useCliProxy).mockReturnValue({
+      enabled: { claude: false, codex: false, gemini: false },
+      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
+      toggling: { claude: false, codex: false, gemini: false },
+      setCliProxyEnabled: vi.fn(),
+    } as any);
+
+    renderWithProviders(client, <HomePage />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "更多" }));
+    expect(screen.getByText("更多功能开发中…")).toBeInTheDocument();
+
+    writeHomeOverviewLogsPrimaryLayoutToStorage(true);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("tab", { name: "更多" })).not.toBeInTheDocument();
+      expect(screen.getByText("dev-preview:false")).toBeInTheDocument();
+    });
   });
 
   it("passes homepage heatmap and usage switches to overview", async () => {
