@@ -29,6 +29,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         requests_with_usage: 24,
         requests_success: 21,
         requests_failed: 3,
+        cost_covered_success: 17,
         avg_duration_ms: 1200,
         avg_ttfb_ms: 320,
         avg_output_tokens_per_second: 88.4,
@@ -101,6 +102,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     const cachedTotalCard = screen.getByText("含缓存总 Token");
     const totalCard = screen.getByText("总 Token");
     const totalCostCard = screen.getAllByText("总花费")[0];
+    const costCoverageCard = screen.getByText("成本覆盖率");
     const successCard = screen.getByText("成功请求");
     const cacheHitRateCard = screen.getByText("缓存命中率");
     const providerCountCard = screen.getByText("供应商数");
@@ -110,6 +112,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(screen.getByText("18.0K")).toBeInTheDocument();
     expect(screen.getAllByText("$1.20")).toHaveLength(2);
     expect(screen.getByText("12K / 2K / 16.7%")).toBeInTheDocument();
+    expect(screen.getByText("81.0%")).toBeInTheDocument();
     expect(screen.getByText("18.2%")).toBeInTheDocument();
     expect(screen.getByText("含缓存总量 / 缓存量 / 缓存占比")).toBeInTheDocument();
     expect(screen.queryByText("平均耗时")).not.toBeInTheDocument();
@@ -120,7 +123,10 @@ describe("components/home/HomeTokenCostPanel", () => {
       totalCard.compareDocumentPosition(totalCostCard) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
     expect(
-      totalCostCard.compareDocumentPosition(successCard) & Node.DOCUMENT_POSITION_FOLLOWING
+      totalCostCard.compareDocumentPosition(costCoverageCard) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      costCoverageCard.compareDocumentPosition(successCard) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
     expect(
       successCard.compareDocumentPosition(cacheHitRateCard) & Node.DOCUMENT_POSITION_FOLLOWING
@@ -238,6 +244,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(screen.getByText("99.0K")).toBeInTheDocument();
     expect(screen.getByText("$3.36")).toBeInTheDocument();
     expect(screen.getByText("49.2K / 7.2K / 14.6%")).toBeInTheDocument();
+    expect(screen.getByText("100.0%")).toBeInTheDocument();
     expect(screen.getByText("17.0%")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "模型" }));

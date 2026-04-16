@@ -41,7 +41,7 @@ const TABLE_MONO_TD_CLASS =
   "border-b border-slate-100 dark:border-slate-700 px-3 py-3 font-mono text-xs tabular-nums text-slate-700 dark:text-slate-300";
 
 const EMPTY_ROWS: UsageLeaderboardRow[] = [];
-const SUMMARY_SKELETON_KEYS = [0, 1, 2, 3, 4, 5];
+const SUMMARY_SKELETON_KEYS = [0, 1, 2, 3, 4, 5, 6];
 
 const PREVIEW_TOKEN_PROVIDER_ROWS: UsageLeaderboardRow[] = [
   {
@@ -233,6 +233,11 @@ function buildPreviewTokenSummary(rows: UsageLeaderboardRow[]): UsageSummary {
     requests_with_usage: requestsTotal,
     requests_success: requestsSuccess,
     requests_failed: requestsFailed,
+    cost_covered_success: rows.reduce(
+      (sum, row) =>
+        sum + (row.cost_usd != null && Number.isFinite(row.cost_usd) ? row.requests_success : 0),
+      0
+    ),
     avg_duration_ms: weightedAverage(
       rows,
       (row) => row.avg_duration_ms,
@@ -442,6 +447,15 @@ function summaryCacheHitRate(summary: UsageSummary | null) {
   );
 }
 
+function summaryCostCoverage(summary: UsageSummary | null) {
+  if (!summary) return null;
+  const denom = summary.requests_success;
+  if (!Number.isFinite(denom) || denom <= 0) return null;
+  const covered = summary.cost_covered_success ?? 0;
+  if (!Number.isFinite(covered) || covered < 0) return null;
+  return covered / denom;
+}
+
 function TokenShareBar({ percent }: { percent: number }) {
   const pct = Number.isFinite(percent) ? Math.max(0, Math.min(1, percent)) : 0;
   const displayPct = (pct * 100).toFixed(1);
@@ -483,7 +497,7 @@ function TokenSummaryCards({
 }) {
   if (loading && !summary) {
     return (
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-7">
         {SUMMARY_SKELETON_KEYS.map((key) => (
           <StatCardSkeleton key={key} />
         ))}
@@ -492,7 +506,7 @@ function TokenSummaryCards({
   }
 
   return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-7">
       <StatCard
         title="含缓存总 Token"
         value={formatTokenValue(summary?.total_tokens)}
@@ -500,6 +514,11 @@ function TokenSummaryCards({
       />
       <StatCard title="总 Token" value={formatTokenValue(summary?.io_total_tokens)} accent="blue" />
       <StatCard title="总花费" value={formatCostValue(totalCostUsd)} accent="orange" />
+      <StatCard
+        title="成本覆盖率"
+        value={formatPercent(summaryCostCoverage(summary))}
+        accent="orange"
+      />
       <StatCard title="成功请求" value={formatInteger(summary?.requests_success)} accent="green" />
       <StatCard
         title="缓存命中率"

@@ -6,6 +6,7 @@ pub struct UsageSummary {
     pub requests_with_usage: i64,
     pub requests_success: i64,
     pub requests_failed: i64,
+    pub cost_covered_success: i64,
     pub avg_duration_ms: Option<i64>,
     pub avg_ttfb_ms: Option<i64>,
     pub avg_output_tokens_per_second: Option<f64>,
