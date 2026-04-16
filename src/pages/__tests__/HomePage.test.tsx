@@ -607,7 +607,7 @@ describe("pages/HomePage", () => {
     renderWithProviders(client, <HomePage />);
 
     expect(screen.getByRole("tab", { name: "花费" })).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Token 花费" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "用量" })).not.toBeInTheDocument();
   });
 
   it("shows token cost tab and hides old cost and more when personalized layout is enabled", () => {
@@ -627,7 +627,7 @@ describe("pages/HomePage", () => {
     renderWithProviders(client, <HomePage />);
 
     expect(screen.queryByRole("tab", { name: "花费" })).not.toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Token 花费" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "用量" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "更多" })).not.toBeInTheDocument();
   });
 
@@ -737,11 +737,11 @@ describe("pages/HomePage", () => {
 
     await waitFor(() => {
       expect(screen.queryByRole("tab", { name: "花费" })).not.toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "Token 花费" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "用量" })).toBeInTheDocument();
       expect(screen.queryByRole("tab", { name: "更多" })).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("tab", { name: "Token 花费" }));
+    fireEvent.click(screen.getByRole("tab", { name: "用量" }));
     expect(screen.getByText("token-preview:true")).toBeInTheDocument();
   });
 

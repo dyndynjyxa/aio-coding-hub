@@ -8,7 +8,6 @@ import { TabList, type TabListItem } from "../../ui/TabList";
 import { formatTokensMillions } from "../../utils/chartHelpers";
 import { formatUnknownError } from "../../utils/errors";
 import {
-  formatDurationMs,
   formatInteger,
   formatPercent,
   formatTokensPerSecond,
@@ -484,13 +483,13 @@ function TokenSummaryCards({
 
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-      <StatCard title="总 Token" value={formatTokenValue(summary?.io_total_tokens)} accent="blue" />
-      <StatCard title="总花费" value={formatCostValue(totalCostUsd)} accent="orange" />
       <StatCard
         title="含缓存总 Token"
         value={formatTokenValue(summary?.total_tokens)}
         accent="purple"
       />
+      <StatCard title="总 Token" value={formatTokenValue(summary?.io_total_tokens)} accent="blue" />
+      <StatCard title="总花费" value={formatCostValue(totalCostUsd)} accent="orange" />
       <StatCard title="成功请求" value={formatInteger(summary?.requests_success)} accent="green" />
       <StatCard
         title={`${scopeLabel(scope)}数`}
@@ -521,7 +520,7 @@ function TokenErrorCard({
         <div>
           <div className="text-sm font-semibold text-rose-900 dark:text-rose-300">加载失败</div>
           <div className="mt-1 text-sm text-rose-800 dark:text-rose-200">
-            Token 花费刷新失败，请重试；必要时查看 Console 日志。
+            用量刷新失败，请重试；必要时查看 Console 日志。
           </div>
         </div>
         <Button
@@ -556,7 +555,7 @@ function TokenLeaderboardTable({
     return (
       <div className="flex items-center justify-center gap-3 px-6 py-14 text-sm text-slate-600 dark:text-slate-400">
         <Spinner />
-        <span>加载 Token 花费中…</span>
+        <span>加载用量中…</span>
       </div>
     );
   }
@@ -564,7 +563,7 @@ function TokenLeaderboardTable({
   if (rows.length === 0) {
     return (
       <div className="px-6 py-14 text-center text-sm text-slate-600 dark:text-slate-400">
-        当前时间范围暂无 Token 花费数据。
+        当前时间范围暂无用量数据。
       </div>
     );
   }
@@ -572,7 +571,7 @@ function TokenLeaderboardTable({
   return (
     <div className="overflow-x-auto">
       <table className="w-full border-separate border-spacing-0 text-left text-sm">
-        <caption className="sr-only">Token 花费排行榜</caption>
+        <caption className="sr-only">用量排行榜</caption>
         <thead className="sticky top-0 z-10">
           <tr>
             <th scope="col" className={TABLE_TH_CLASS}>
@@ -598,9 +597,6 @@ function TokenLeaderboardTable({
             </th>
             <th scope="col" className={TABLE_TH_CLASS}>
               平均输出速度
-            </th>
-            <th scope="col" className={TABLE_TH_CLASS}>
-              平均耗时
             </th>
           </tr>
         </thead>
@@ -637,7 +633,6 @@ function TokenLeaderboardTable({
               <td className={TABLE_MONO_TD_CLASS}>
                 {formatTokensPerSecond(row.avg_output_tokens_per_second)}
               </td>
-              <td className={TABLE_MONO_TD_CLASS}>{formatDurationMs(row.avg_duration_ms)}</td>
             </tr>
           ))}
         </tbody>
@@ -700,11 +695,7 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
   return (
     <div className="flex h-full flex-col gap-5 overflow-auto">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div
-          className="flex flex-wrap items-center gap-1.5"
-          role="group"
-          aria-label="Token 花费时间范围"
-        >
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="用量时间范围">
           {TOKEN_COST_RANGE_ITEMS.map((item) => {
             const active = range === item.key;
             return (
@@ -723,7 +714,7 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
         </div>
         <div className="flex flex-wrap items-center gap-3 lg:justify-end">
           <TabList
-            ariaLabel="Token 花费维度切换"
+            ariaLabel="用量维度切换"
             items={TOKEN_COST_SCOPE_ITEMS}
             value={scope}
             onChange={setScope}

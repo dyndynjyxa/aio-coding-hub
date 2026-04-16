@@ -98,12 +98,31 @@ describe("components/home/HomeTokenCostPanel", () => {
 
     render(<HomeTokenCostPanel devPreviewEnabled={true} />);
 
+    const cachedTotalCard = screen.getByText("含缓存总 Token");
+    const totalCard = screen.getByText("总 Token");
+    const totalCostCard = screen.getAllByText("总花费")[0];
+    const successCard = screen.getByText("成功请求");
+    const providerCountCard = screen.getByText("供应商数");
+
     expect(screen.getAllByText("总花费")).toHaveLength(2);
     expect(screen.getByText("OpenAI 主供应商")).toBeInTheDocument();
     expect(screen.getByText("18.0K")).toBeInTheDocument();
     expect(screen.getAllByText("$1.20")).toHaveLength(2);
+    expect(screen.getByText("12K · 2K · 16.7%")).toBeInTheDocument();
+    expect(screen.queryByText("平均耗时")).not.toBeInTheDocument();
+    expect(
+      cachedTotalCard.compareDocumentPosition(totalCard) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      totalCard.compareDocumentPosition(totalCostCard) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      totalCostCard.compareDocumentPosition(successCard) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      successCard.compareDocumentPosition(providerCountCard) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
     expect(screen.queryByText("OpenAI Primary")).not.toBeInTheDocument();
-    expect(screen.getByText("16.7%")).toBeInTheDocument();
     expect(screen.queryByText("总请求 24 / 失败 3")).not.toBeInTheDocument();
     expect(screen.queryByText("总 Token、缓存占比、总花费。")).not.toBeInTheDocument();
     expect(screen.queryByText("今天 · 1 个供应商")).not.toBeInTheDocument();
@@ -212,7 +231,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(screen.getByText("Gemini Mirror")).toBeInTheDocument();
     expect(screen.getByText("99.0K")).toBeInTheDocument();
     expect(screen.getByText("$3.36")).toBeInTheDocument();
-    expect(screen.getByText("14.6%")).toBeInTheDocument();
+    expect(screen.getByText("49.2K · 7.2K · 14.6%")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "模型" }));
 

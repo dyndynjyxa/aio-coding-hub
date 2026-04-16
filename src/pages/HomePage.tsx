@@ -51,7 +51,7 @@ function buildHomeTabs(
   return personalizedLayoutEnabled
     ? [
         { key: "overview", label: "概览" },
-        { key: "tokenCost", label: "Token 花费" },
+        { key: "tokenCost", label: "用量" },
       ]
     : [
         { key: "overview", label: "概览" },
@@ -299,7 +299,7 @@ export function HomePage() {
               <Card padding="md" className="flex h-full items-center justify-center">
                 <div className="flex items-center gap-3 text-sm text-slate-600 dark:text-slate-400">
                   <Spinner />
-                  <span>加载 Token 花费面板中…</span>
+                  <span>加载用量面板中…</span>
                 </div>
               </Card>
             }

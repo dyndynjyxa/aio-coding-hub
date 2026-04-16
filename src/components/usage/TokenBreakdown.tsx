@@ -4,12 +4,17 @@ import { formatTokensMillions } from "../../utils/chartHelpers";
 import { formatPercent, formatInteger } from "../../utils/formatters";
 
 type TokenBreakdownDisplayMode = "full" | "compactRatio";
+const COMPACT_SEPARATOR = " · ";
 
 function formatTokenValue(value: number, compact: boolean) {
   return compact ? formatTokensMillions(value) : formatInteger(value);
 }
 
-function computeCacheRatio(totalTokens: number, totalTokensWithCache?: number) {
+function trimCompactSuffix(value: string) {
+  return value.replace(/\.0([KM])$/, "$1").replace(/\.0%$/, "%");
+}
+
+function computeCacheTokens(totalTokens: number, totalTokensWithCache?: number) {
   if (
     totalTokensWithCache == null ||
     !Number.isFinite(totalTokensWithCache) ||
@@ -17,7 +22,12 @@ function computeCacheRatio(totalTokens: number, totalTokensWithCache?: number) {
   ) {
     return null;
   }
-  const cacheTokens = Math.max(0, totalTokensWithCache - Math.max(0, totalTokens));
+  return Math.max(0, totalTokensWithCache - Math.max(0, totalTokens));
+}
+
+function computeCacheRatio(totalTokens: number, totalTokensWithCache?: number) {
+  const cacheTokens = computeCacheTokens(totalTokens, totalTokensWithCache);
+  if (cacheTokens == null || totalTokensWithCache == null || totalTokensWithCache <= 0) return null;
   return cacheTokens / totalTokensWithCache;
 }
 
@@ -36,20 +46,20 @@ export function TokenBreakdown({
   displayMode?: TokenBreakdownDisplayMode;
   useCompactUnits?: boolean;
 }) {
+  const totalTokensDisplay =
+    totalTokensWithCache != null && Number.isFinite(totalTokensWithCache)
+      ? totalTokensWithCache
+      : totalTokens;
+  const cacheTokens = computeCacheTokens(totalTokens, totalTokensWithCache);
   const cacheRatio = computeCacheRatio(totalTokens, totalTokensWithCache);
 
   if (displayMode === "compactRatio") {
-    return (
-      <div className="space-y-0.5">
-        <div>{formatTokenValue(totalTokens, useCompactUnits)}</div>
-        <div className="text-[10px] leading-4 text-slate-500 dark:text-slate-400">
-          含缓存{" "}
-          <span className="text-slate-700 dark:text-slate-300">
-            {cacheRatio == null ? "—" : formatPercent(cacheRatio)}
-          </span>
-        </div>
-      </div>
-    );
+    const parts = [
+      trimCompactSuffix(formatTokenValue(totalTokensDisplay, useCompactUnits)),
+      cacheTokens == null ? "—" : trimCompactSuffix(formatTokenValue(cacheTokens, useCompactUnits)),
+      cacheRatio == null ? "—" : trimCompactSuffix(formatPercent(cacheRatio)),
+    ];
+    return <div className="whitespace-nowrap">{parts.join(COMPACT_SEPARATOR)}</div>;
   }
 
   return (
