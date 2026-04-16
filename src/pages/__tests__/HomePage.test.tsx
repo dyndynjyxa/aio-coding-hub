@@ -592,7 +592,7 @@ describe("pages/HomePage", () => {
     );
   });
 
-  it("shows the old cost tab by default and hides token cost", () => {
+  it("shows cost and token cost tabs by default", () => {
     setTauriRuntime();
 
     const client = createTestQueryClient();
@@ -607,10 +607,11 @@ describe("pages/HomePage", () => {
     renderWithProviders(client, <HomePage />);
 
     expect(screen.getByRole("tab", { name: "花费" })).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "用量" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "用量" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "更多" })).not.toBeInTheDocument();
   });
 
-  it("shows token cost tab and hides old cost and more when personalized layout is enabled", () => {
+  it("shows only overview and token cost tabs when personalized layout is enabled", () => {
     setTauriRuntime();
 
     const client = createTestQueryClient();
@@ -654,7 +655,7 @@ describe("pages/HomePage", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("covers null-data branches and the 'more' tab", () => {
+  it("covers null-data branches with the default home tabs", () => {
     setTauriRuntime();
 
     const client = createTestQueryClient();
@@ -703,9 +704,8 @@ describe("pages/HomePage", () => {
     renderWithProviders(client, <HomePage />);
 
     expect(screen.getByText("open-circuits:0")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("tab", { name: "更多" }));
-    expect(screen.getByText("更多功能开发中…")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "花费" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "用量" })).toBeInTheDocument();
   });
 
   it("toggles the unified dev preview entry and switches cost tabs with personalized layout", async () => {
@@ -745,7 +745,7 @@ describe("pages/HomePage", () => {
     expect(screen.getByText("token-preview:true")).toBeInTheDocument();
   });
 
-  it("returns to overview when personalized layout is enabled from the more tab", async () => {
+  it("keeps token cost tab available after personalized layout is disabled again", async () => {
     setTauriRuntime();
 
     const client = createTestQueryClient();
@@ -759,15 +759,25 @@ describe("pages/HomePage", () => {
 
     renderWithProviders(client, <HomePage />);
 
-    fireEvent.click(screen.getByRole("tab", { name: "更多" }));
-    expect(screen.getByText("更多功能开发中…")).toBeInTheDocument();
-
     writeHomeOverviewLogsPrimaryLayoutToStorage(true);
 
     await waitFor(() => {
-      expect(screen.queryByRole("tab", { name: "更多" })).not.toBeInTheDocument();
-      expect(screen.getByText("dev-preview:false")).toBeInTheDocument();
+      expect(screen.queryByRole("tab", { name: "花费" })).not.toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "用量" })).toBeInTheDocument();
     });
+
+    fireEvent.click(screen.getByRole("tab", { name: "用量" }));
+    expect(screen.getByText("token-cost-panel")).toBeInTheDocument();
+
+    writeHomeOverviewLogsPrimaryLayoutToStorage(false);
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "花费" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "用量" })).toBeInTheDocument();
+      expect(screen.queryByRole("tab", { name: "更多" })).not.toBeInTheDocument();
+    });
+
+    expect(screen.getByText("token-cost-panel")).toBeInTheDocument();
   });
 
   it("passes homepage heatmap and usage switches to overview", async () => {

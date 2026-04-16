@@ -43,7 +43,7 @@ import { useHomeSortMode } from "./home/hooks/useHomeSortMode";
 import { useHomeCliProxy } from "./home/hooks/useHomeCliProxy";
 import { useHomeWorkspaceConfigs } from "./home/hooks/useHomeWorkspaceConfigs";
 
-type HomeTabKey = "overview" | "cost" | "tokenCost" | "more";
+type HomeTabKey = "overview" | "cost" | "tokenCost";
 
 function buildHomeTabs(
   personalizedLayoutEnabled: boolean
@@ -56,7 +56,7 @@ function buildHomeTabs(
     : [
         { key: "overview", label: "概览" },
         { key: "cost", label: "花费" },
-        { key: "more", label: "更多" },
+        { key: "tokenCost", label: "用量" },
       ];
 }
 
@@ -209,8 +209,6 @@ export function HomePage() {
 
   useEffect(() => {
     if (personalizedLayoutEnabled && tab === "cost") setTab("tokenCost");
-    if (personalizedLayoutEnabled && tab === "more") setTab("overview");
-    if (!personalizedLayoutEnabled && tab === "tokenCost") setTab("cost");
   }, [personalizedLayoutEnabled, tab]);
 
   return (
@@ -307,9 +305,7 @@ export function HomePage() {
             <LazyHomeTokenCostPanel devPreviewEnabled={devPreview.enabled} />
           </Suspense>
         ) : (
-          <Card padding="md">
-            <div className="text-sm text-slate-600 dark:text-slate-400">更多功能开发中…</div>
-          </Card>
+          <div />
         )}
       </div>
 
