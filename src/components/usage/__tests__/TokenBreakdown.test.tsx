@@ -15,6 +15,6 @@ describe("components/usage/TokenBreakdown", () => {
       />
     );
 
-    expect(screen.getByText("100K · 15K · 15%")).toBeInTheDocument();
+    expect(screen.getByText("100K / 15K / 15%")).toBeInTheDocument();
   });
 });

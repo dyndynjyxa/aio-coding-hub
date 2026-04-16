@@ -6,6 +6,7 @@ import { Card } from "../../ui/Card";
 import { Spinner } from "../../ui/Spinner";
 import { TabList, type TabListItem } from "../../ui/TabList";
 import { formatTokensMillions } from "../../utils/chartHelpers";
+import { computeCacheHitRate } from "../../utils/cacheRateMetrics";
 import { formatUnknownError } from "../../utils/errors";
 import {
   formatInteger,
@@ -40,7 +41,7 @@ const TABLE_MONO_TD_CLASS =
   "border-b border-slate-100 dark:border-slate-700 px-3 py-3 font-mono text-xs tabular-nums text-slate-700 dark:text-slate-300";
 
 const EMPTY_ROWS: UsageLeaderboardRow[] = [];
-const SUMMARY_SKELETON_KEYS = [0, 1, 2, 3, 4];
+const SUMMARY_SKELETON_KEYS = [0, 1, 2, 3, 4, 5];
 
 const PREVIEW_TOKEN_PROVIDER_ROWS: UsageLeaderboardRow[] = [
   {
@@ -432,6 +433,15 @@ function totalCostUsdFromRows(rows: UsageLeaderboardRow[]) {
   return hasFiniteCost ? total : null;
 }
 
+function summaryCacheHitRate(summary: UsageSummary | null) {
+  if (!summary) return null;
+  return computeCacheHitRate(
+    summary.input_tokens,
+    summary.cache_creation_input_tokens,
+    summary.cache_read_input_tokens
+  );
+}
+
 function TokenShareBar({ percent }: { percent: number }) {
   const pct = Number.isFinite(percent) ? Math.max(0, Math.min(1, percent)) : 0;
   const displayPct = (pct * 100).toFixed(1);
@@ -473,7 +483,7 @@ function TokenSummaryCards({
 }) {
   if (loading && !summary) {
     return (
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
         {SUMMARY_SKELETON_KEYS.map((key) => (
           <StatCardSkeleton key={key} />
         ))}
@@ -482,7 +492,7 @@ function TokenSummaryCards({
   }
 
   return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
       <StatCard
         title="含缓存总 Token"
         value={formatTokenValue(summary?.total_tokens)}
@@ -491,6 +501,11 @@ function TokenSummaryCards({
       <StatCard title="总 Token" value={formatTokenValue(summary?.io_total_tokens)} accent="blue" />
       <StatCard title="总花费" value={formatCostValue(totalCostUsd)} accent="orange" />
       <StatCard title="成功请求" value={formatInteger(summary?.requests_success)} accent="green" />
+      <StatCard
+        title="缓存命中率"
+        value={formatPercent(summaryCacheHitRate(summary))}
+        accent="purple"
+      />
       <StatCard
         title={`${scopeLabel(scope)}数`}
         value={formatInteger(rows.length)}
@@ -581,7 +596,10 @@ function TokenLeaderboardTable({
               {scopeLabel(scope)}
             </th>
             <th scope="col" className={TABLE_TH_CLASS}>
-              Token 明细
+              <div>Token 明细</div>
+              <div className="mt-0.5 normal-case text-[10px] font-normal tracking-normal text-slate-400 dark:text-slate-500">
+                含缓存总量 / 缓存量 / 缓存占比
+              </div>
             </th>
             <th scope="col" className={TABLE_TH_CLASS}>
               总花费

@@ -4,7 +4,7 @@ import { formatTokensMillions } from "../../utils/chartHelpers";
 import { formatPercent, formatInteger } from "../../utils/formatters";
 
 type TokenBreakdownDisplayMode = "full" | "compactRatio";
-const COMPACT_SEPARATOR = " · ";
+const COMPACT_SEPARATOR = " / ";
 
 function formatTokenValue(value: number, compact: boolean) {
   return compact ? formatTokensMillions(value) : formatInteger(value);
