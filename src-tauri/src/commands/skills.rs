@@ -240,3 +240,34 @@ pub(crate) async fn skills_paths_get(
     .await
     .map_err(Into::into)
 }
+
+#[tauri::command]
+pub(crate) async fn skill_check_updates(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    workspace_id: i64,
+) -> Result<Vec<skills::SkillUpdateInfo>, String> {
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    tauri::async_runtime::spawn_blocking(move || {
+        skills::check_updates_for_workspace(&app, &db, workspace_id)
+    })
+    .await
+    .map_err(|e| format!("SKILL_TASK_JOIN: {e}"))?
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+pub(crate) async fn skill_update(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    workspace_id: i64,
+    skill_id: i64,
+) -> Result<skills::InstalledSkillSummary, String> {
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    tauri::async_runtime::spawn_blocking(move || {
+        skills::update_skill(&app, &db, workspace_id, skill_id)
+    })
+    .await
+    .map_err(|e| format!("SKILL_TASK_JOIN: {e}"))?
+    .map_err(Into::into)
+}

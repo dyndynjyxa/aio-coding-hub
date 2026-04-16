@@ -19,6 +19,7 @@ pub struct InstalledSkillSummary {
     pub source_git_url: String,
     pub source_branch: String,
     pub source_subdir: String,
+    pub installed_commit: Option<String>,
     pub enabled: bool,
     pub created_at: i64,
     pub updated_at: i64,
@@ -64,4 +65,12 @@ pub struct SkillImportLocalBatchReport {
     pub imported: Vec<InstalledSkillSummary>,
     pub skipped: Vec<SkillImportIssue>,
     pub failed: Vec<SkillImportIssue>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillUpdateInfo {
+    pub skill_id: i64,
+    pub has_update: bool,
+    pub installed_commit: Option<String>,
+    pub latest_commit: Option<String>,
 }

@@ -234,6 +234,10 @@ LIMIT 1
             .into());
     }
 
+    // Try to capture the installed commit hash (best effort).
+    // For GitHub snapshot mode this may fail, which is acceptable.
+    let installed_commit = super::repo_cache::get_repo_head_commit(&repo_dir).ok();
+
     let (name, description) = parse_skill_md(&skill_md)?;
     let normalized_name = normalize_name(&name);
 
@@ -258,9 +262,10 @@ INSERT INTO skills(
   source_git_url,
   source_branch,
   source_subdir,
+  installed_commit,
   created_at,
   updated_at
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
 "#,
         params![
             skill_key,
@@ -270,6 +275,7 @@ INSERT INTO skills(
             git_url.trim(),
             branch.trim(),
             source_subdir.trim(),
+            installed_commit,
             now,
             now
         ],

@@ -411,6 +411,8 @@ pub fn run() {
             skill_import_local,
             skills_import_local_batch,
             skills_paths_get,
+            skill_check_updates,
+            skill_update,
             // ── request_logs ──
             request_logs_list,
             request_logs_list_all,

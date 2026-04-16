@@ -15,6 +15,7 @@ fn row_to_installed(row: &rusqlite::Row<'_>) -> Result<InstalledSkillSummary, ru
         source_git_url: row.get("source_git_url")?,
         source_branch: row.get("source_branch")?,
         source_subdir: row.get("source_subdir")?,
+        installed_commit: row.get("installed_commit")?,
         enabled: row.get::<_, i64>("enabled")? != 0,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
@@ -38,6 +39,7 @@ pub fn installed_list_for_workspace(
       s.source_git_url,
       s.source_branch,
       s.source_subdir,
+      s.installed_commit,
       CASE WHEN e.skill_id IS NULL THEN 0 ELSE 1 END AS enabled,
       s.created_at,
       s.updated_at
@@ -101,6 +103,7 @@ SELECT
   source_git_url,
   source_branch,
   source_subdir,
+  installed_commit,
   0 AS enabled,
   created_at,
   updated_at
@@ -130,6 +133,7 @@ SELECT
   s.source_git_url,
   s.source_branch,
   s.source_subdir,
+  s.installed_commit,
   CASE WHEN e.skill_id IS NULL THEN 0 ELSE 1 END AS enabled,
   s.created_at,
   s.updated_at

@@ -5,13 +5,16 @@ import { ExternalLink } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
+  useSkillCheckUpdatesMutation,
   useSkillImportLocalMutation,
   useSkillLocalDeleteMutation,
   useSkillReturnToLocalMutation,
   useSkillSetEnabledMutation,
   useSkillUninstallMutation,
+  useSkillUpdateMutation,
   useSkillsInstalledListQuery,
   useSkillsLocalListQuery,
+  type SkillUpdateInfo,
 } from "../../query/skills";
 import { logToConsole } from "../../services/consoleLog";
 import type { CliKey } from "../../services/providers/providers";
@@ -44,6 +47,11 @@ function formatUnixSeconds(ts: number) {
   } catch {
     return String(ts);
   }
+}
+
+function isMarketSkill(sourceGitUrl: string): boolean {
+  const url = sourceGitUrl.trim().toLowerCase();
+  return url.startsWith("http://") || url.startsWith("https://");
 }
 
 function pruneSelectionSet<T>(prev: Set<T>, allowed: Set<T>) {
@@ -96,6 +104,8 @@ export function SkillsView({
   const returnToLocalMutation = useSkillReturnToLocalMutation(workspaceId);
   const localDeleteMutation = useSkillLocalDeleteMutation(workspaceId);
   const importMutation = useSkillImportLocalMutation(workspaceId);
+  const checkUpdatesMutation = useSkillCheckUpdatesMutation(workspaceId);
+  const updateSkillMutation = useSkillUpdateMutation(workspaceId);
 
   const installed: InstalledSkillSummary[] = installedQuery.data ?? [];
   const localSkills: LocalSkillSummary[] = canOperateLocal ? (localQuery.data ?? []) : [];
@@ -110,7 +120,6 @@ export function SkillsView({
     : null;
   const importingLocal = importMutation.isPending;
 
-  const [importTarget, setImportTarget] = useState<LocalSkillSummary | null>(null);
   const [selectedInstalledIds, setSelectedInstalledIds] = useState<Set<number>>(new Set());
   const [selectedLocalDirNames, setSelectedLocalDirNames] = useState<Set<string>>(new Set());
   const [deleteInstalledDialogOpen, setDeleteInstalledDialogOpen] = useState(false);
@@ -118,6 +127,8 @@ export function SkillsView({
   const [localDeleteTargets, setLocalDeleteTargets] = useState<LocalSkillSummary[]>([]);
   const [deletingInstalled, setDeletingInstalled] = useState(false);
   const [deletingLocal, setDeletingLocal] = useState(false);
+  const [updateInfoMap, setUpdateInfoMap] = useState<Map<number, SkillUpdateInfo>>(new Map());
+  const [updatingSkillId, setUpdatingSkillId] = useState<number | null>(null);
 
   const selectedInstalledSkills = installed.filter((skill) => selectedInstalledIds.has(skill.id));
   const selectedLocalSkills = localSkills.filter((skill) =>
@@ -152,10 +163,11 @@ export function SkillsView({
     setSelectedLocalDirNames(new Set());
     setDeleteInstalledDialogOpen(false);
     setDeleteLocalDialogOpen(false);
-    setImportTarget(null);
     setLocalDeleteTargets([]);
     setDeletingInstalled(false);
     setDeletingLocal(false);
+    setUpdateInfoMap(new Map());
+    setUpdatingSkillId(null);
   }, [cliKey, workspaceId]);
 
   useEffect(() => {
@@ -216,7 +228,6 @@ export function SkillsView({
   }
 
   function openLocalDeleteDialog(dirNames: string[]) {
-    setImportTarget(null);
     setSelectedLocalDirNames(new Set(dirNames));
     setLocalDeleteTargets(localSkills.filter((skill) => dirNames.includes(skill.dir_name)));
     setDeleteLocalDialogOpen(true);
@@ -400,16 +411,14 @@ export function SkillsView({
     setDeleteLocalDialogOpen(false);
   }
 
-  async function confirmImportLocalSkill() {
-    if (!importTarget) return;
+  async function importLocalSkill(skill: LocalSkillSummary) {
     if (importMutation.isPending || deletingLocal) return;
     if (!canOperateLocal) {
       toast(TOAST_LOCAL_IMPORT_REQUIRES_ACTIVE);
       return;
     }
-    const target = importTarget;
     try {
-      const next = await importMutation.mutateAsync(target.dir_name);
+      const next = await importMutation.mutateAsync(skill.dir_name);
       if (!next) {
         return;
       }
@@ -421,12 +430,11 @@ export function SkillsView({
         imported: next,
       });
       setSelectedLocalDirNames((prev) => {
-        if (!prev.has(target.dir_name)) return prev;
+        if (!prev.has(skill.dir_name)) return prev;
         const nextSelected = new Set(prev);
-        nextSelected.delete(target.dir_name);
+        nextSelected.delete(skill.dir_name);
         return nextSelected;
       });
-      setImportTarget(null);
     } catch (err) {
       const formatted = formatActionFailureToast("导入", err);
       logToConsole("error", "导入本机 Skill 失败", {
@@ -434,7 +442,7 @@ export function SkillsView({
         error_code: formatted.error_code ?? undefined,
         cli: cliKey,
         workspace_id: workspaceId,
-        skill: target,
+        skill,
       });
       toast(formatted.toast);
     }
@@ -443,6 +451,77 @@ export function SkillsView({
   async function refreshLocalSkills() {
     if (!canOperateLocal || localLoading || deletingLocal) return;
     await localQuery.refetch();
+  }
+
+  async function checkForUpdates() {
+    if (checkUpdatesMutation.isPending || deletingInstalled) return;
+    try {
+      const results = await checkUpdatesMutation.mutateAsync();
+      if (!results || results.length === 0) {
+        toast("没有发现可更新的技能");
+        setUpdateInfoMap(new Map());
+        return;
+      }
+      const newMap = new Map<number, SkillUpdateInfo>();
+      let updatesCount = 0;
+      for (const info of results) {
+        newMap.set(info.skill_id, info);
+        if (info.has_update) {
+          updatesCount += 1;
+        }
+      }
+      setUpdateInfoMap(newMap);
+      if (updatesCount > 0) {
+        toast(`发现 ${updatesCount} 个技能有更新`);
+      } else {
+        toast("所有技能已是最新版本");
+      }
+    } catch (err) {
+      const formatted = formatActionFailureToast("检查更新", err);
+      logToConsole("error", "检查技能更新失败", {
+        error: formatted.raw,
+        error_code: formatted.error_code ?? undefined,
+        cli: cliKey,
+        workspace_id: workspaceId,
+      });
+      toast(formatted.toast);
+    }
+  }
+
+  async function updateSkill(skill: InstalledSkillSummary) {
+    if (updatingSkillId || deletingInstalled) return;
+    setUpdatingSkillId(skill.id);
+    try {
+      const next = await updateSkillMutation.mutateAsync(skill.id);
+      if (!next) {
+        return;
+      }
+      toast("技能已更新");
+      logToConsole("info", "技能已更新", {
+        cli: cliKey,
+        workspace_id: workspaceId,
+        old_skill_id: skill.id,
+        new_skill: next,
+      });
+      setUpdateInfoMap((prev) => {
+        const newMap = new Map(prev);
+        newMap.delete(skill.id);
+        return newMap;
+      });
+      await installedQuery.refetch();
+    } catch (err) {
+      const formatted = formatActionFailureToast("更新技能", err);
+      logToConsole("error", "更新技能失败", {
+        error: formatted.raw,
+        error_code: formatted.error_code ?? undefined,
+        cli: cliKey,
+        workspace_id: workspaceId,
+        skill_id: skill.id,
+      });
+      toast(formatted.toast);
+    } finally {
+      setUpdatingSkillId(null);
+    }
   }
 
   async function openLocalSkillDir(skill: LocalSkillSummary) {
@@ -495,6 +574,15 @@ export function SkillsView({
                   删除通用技能 ({selectedInstalledIds.size})
                 </Button>
               ) : null}
+              <Button
+                size="sm"
+                variant="secondary"
+                aria-label="检查更新"
+                onClick={() => void checkForUpdates()}
+                disabled={loading || deletingInstalled || checkUpdatesMutation.isPending || updatingSkillId !== null}
+              >
+                {checkUpdatesMutation.isPending ? "检查中…" : "检查更新"}
+              </Button>
               <Button
                 size="sm"
                 variant="secondary"
@@ -551,6 +639,11 @@ export function SkillsView({
                           <span className="min-w-0 truncate text-sm font-semibold">
                             {displaySkillName(skill.name, skill.source_git_url)}
                           </span>
+                          {updateInfoMap.get(skill.id)?.has_update ? (
+                            <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                              有更新
+                            </span>
+                          ) : null}
                           {repoUrl ? (
                             <a
                               href={repoUrl}
@@ -569,10 +662,27 @@ export function SkillsView({
                               disabled={
                                 deletingInstalled ||
                                 togglingSkillId === skill.id ||
-                                returningLocalSkillId === skill.id
+                                returningLocalSkillId === skill.id ||
+                                updatingSkillId === skill.id
                               }
                               onCheckedChange={(next) => void toggleSkillEnabled(skill, next)}
                             />
+                            {isMarketSkill(skill.source_git_url) && updateInfoMap.get(skill.id)?.has_update ? (
+                              <Button
+                                size="sm"
+                                variant="primary"
+                                title="更新该技能到最新版本"
+                                disabled={
+                                  deletingInstalled ||
+                                  updatingSkillId !== null ||
+                                  togglingSkillId === skill.id ||
+                                  returningLocalSkillId === skill.id
+                                }
+                                onClick={() => void updateSkill(skill)}
+                              >
+                                {updatingSkillId === skill.id ? "更新中…" : "更新"}
+                              </Button>
+                            ) : null}
                             <Button
                               size="sm"
                               variant="secondary"
@@ -584,7 +694,8 @@ export function SkillsView({
                               disabled={
                                 !canOperateLocal ||
                                 deletingInstalled ||
-                                returningLocalSkillId === skill.id
+                                returningLocalSkillId === skill.id ||
+                                updatingSkillId === skill.id
                               }
                               onClick={() => void returnToLocalSkill(skill)}
                             >
@@ -597,7 +708,8 @@ export function SkillsView({
                               disabled={
                                 deletingInstalled ||
                                 togglingSkillId === skill.id ||
-                                returningLocalSkillId === skill.id
+                                returningLocalSkillId === skill.id ||
+                                updatingSkillId === skill.id
                               }
                               onClick={() => openInstalledDeleteDialog([skill.id])}
                             >
@@ -738,7 +850,7 @@ export function SkillsView({
                                 size="sm"
                                 variant="primary"
                                 disabled={deletingLocal || importingLocal}
-                                onClick={() => setImportTarget(skill)}
+                                onClick={() => void importLocalSkill(skill)}
                               >
                                 导入技能库
                               </Button>
@@ -837,27 +949,6 @@ export function SkillsView({
           ) : null}
         </div>
       </ConfirmDialog>
-
-      {batchInitMode ? null : (
-        <ConfirmDialog
-          open={importTarget != null}
-          title="导入到技能库"
-          description="导入后该 Skill 会被 AIO 记录并管理，可在其他工作区中启用/禁用。"
-          onClose={() => setImportTarget(null)}
-          onConfirm={() => void confirmImportLocalSkill()}
-          confirmLabel="确认导入"
-          confirmingLabel="导入中…"
-          confirming={importingLocal}
-          disabled={!importTarget}
-        >
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
-            <div className="font-medium text-slate-800 dark:text-slate-200">
-              {importTarget?.name || importTarget?.dir_name}
-            </div>
-            <div className="mt-1 break-all font-mono">{importTarget?.path}</div>
-          </div>
-        </ConfirmDialog>
-      )}
     </>
   );
 }

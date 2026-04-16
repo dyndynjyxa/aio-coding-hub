@@ -18,6 +18,7 @@ export type InstalledSkillSummary = {
   source_git_url: string;
   source_branch: string;
   source_subdir: string;
+  installed_commit?: string | null;
   enabled: boolean;
   created_at: number;
   updated_at: number;
@@ -58,6 +59,13 @@ export type SkillImportLocalBatchReport = {
   imported: InstalledSkillSummary[];
   skipped: SkillImportIssue[];
   failed: SkillImportIssue[];
+};
+
+export type SkillUpdateInfo = {
+  skill_id: number;
+  has_update: boolean;
+  installed_commit?: string | null;
+  latest_commit?: string | null;
 };
 
 export async function skillReposList() {
@@ -180,4 +188,17 @@ export async function skillsImportLocalBatch(input: { workspace_id: number; dir_
 
 export async function skillsPathsGet(cliKey: CliKey) {
   return invokeService<SkillsPaths>("读取技能路径失败", "skills_paths_get", { cliKey });
+}
+
+export async function skillCheckUpdates(workspaceId: number) {
+  return invokeService<SkillUpdateInfo[]>("检查技能更新失败", "skill_check_updates", {
+    workspaceId,
+  });
+}
+
+export async function skillUpdate(input: { workspace_id: number; skill_id: number }) {
+  return invokeService<InstalledSkillSummary>("更新技能失败", "skill_update", {
+    workspaceId: input.workspace_id,
+    skillId: input.skill_id,
+  });
 }

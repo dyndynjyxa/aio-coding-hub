@@ -19,6 +19,8 @@ import {
   skillImportLocal,
   skillsImportLocalBatch,
   skillReturnToLocal,
+  skillCheckUpdates,
+  skillUpdate,
   type AvailableSkillSummary,
   type InstalledSkillSummary,
   type LocalSkillSummary,
@@ -26,6 +28,7 @@ import {
   type SkillImportLocalBatchReport,
   type SkillRepoSummary,
   type SkillsPaths,
+  type SkillUpdateInfo,
 } from "../services/workspace/skills";
 import { skillsKeys } from "./keys";
 
@@ -326,6 +329,48 @@ export function useSkillsImportLocalBatchMutation(workspaceId: number) {
   });
 }
 
+export function useSkillCheckUpdatesMutation(workspaceId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => skillCheckUpdates(workspaceId),
+    onSuccess: () => {
+      // Invalidate installed list to refresh any stale data
+      queryClient.invalidateQueries({ queryKey: skillsKeys.installedList(workspaceId) });
+    },
+  });
+}
+
+export function useSkillUpdateMutation(workspaceId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (skillId: number) =>
+      skillUpdate({ workspace_id: workspaceId, skill_id: skillId }),
+    onSuccess: (next) => {
+      if (!next) return;
+      queryClient.setQueryData<InstalledSkillSummary[]>(
+        skillsKeys.installedList(workspaceId),
+        (cur) => {
+          const prev = cur ?? [];
+          // The skill was uninstalled and reinstalled, so it has a new ID.
+          // We need to replace by matching source info or just add the new one.
+          const filtered = prev.filter(
+            (s) =>
+              !(
+                s.source_git_url === next.source_git_url &&
+                s.source_branch === next.source_branch &&
+                s.source_subdir === next.source_subdir
+              )
+          );
+          return [next, ...filtered];
+        }
+      );
+      queryClient.invalidateQueries({ queryKey: skillsKeys.discoverAvailable(false) });
+    },
+  });
+}
+
 export type {
   AvailableSkillSummary,
   InstalledSkillSummary,
@@ -334,4 +379,5 @@ export type {
   SkillImportLocalBatchReport,
   SkillRepoSummary,
   SkillsPaths,
+  SkillUpdateInfo,
 };

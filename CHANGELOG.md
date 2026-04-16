@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.2](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.38.1...aio-coding-hub-v0.38.2) (2026-04-16)
+
+
+### Features
+
+* **skills:** 支持推理强度新增等级xhigh ([36dbb77](https://github.com/dyndynjyxa/aio-coding-hub/commit/36dbb773c94f7acaa9d1a9e6ed68d8df02d6c950))
+
 ## [0.38.1](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.38.0...aio-coding-hub-v0.38.1) (2026-04-12)
 
 

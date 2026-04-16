@@ -12,6 +12,7 @@ mod repo_cache;
 mod repos;
 mod skill_md;
 mod types;
+mod update;
 mod util;
 
 pub use discover::discover_available;
@@ -24,8 +25,9 @@ pub use paths::paths_get;
 pub use repos::{repo_delete, repo_upsert, repos_list};
 pub use types::{
     AvailableSkillSummary, InstalledSkillSummary, LocalSkillSummary, SkillImportLocalBatchReport,
-    SkillRepoSummary, SkillsPaths,
+    SkillRepoSummary, SkillUpdateInfo, SkillsPaths,
 };
+pub use update::{check_updates_for_workspace, update_skill};
 
 #[cfg(test)]
 mod tests;
