@@ -10,7 +10,7 @@ export type UsageSummary = {
   requests_with_usage: number;
   requests_success: number;
   requests_failed: number;
-  cost_covered_success?: number;
+  cost_covered_success: number;
   avg_duration_ms: number | null;
   avg_ttfb_ms: number | null;
   avg_output_tokens_per_second: number | null;
