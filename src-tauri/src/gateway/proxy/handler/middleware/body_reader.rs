@@ -54,7 +54,10 @@ impl BodyReaderMiddleware {
 }
 
 pub(in crate::gateway::proxy::handler) fn body_too_large_message(err: &str) -> String {
-    format!("failed to read request body: {err}")
+    let limit_mb = MAX_REQUEST_BODY_BYTES / (1024 * 1024);
+    format!(
+        "failed to read request body: {err} (gateway limit: {limit_mb} MB)"
+    )
 }
 
 #[cfg(test)]

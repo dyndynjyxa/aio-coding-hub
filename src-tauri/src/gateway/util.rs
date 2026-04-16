@@ -8,7 +8,7 @@ use std::io::Read;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub(super) const MAX_REQUEST_BODY_BYTES: usize = 10 * 1024 * 1024;
+pub(super) const MAX_REQUEST_BODY_BYTES: usize = 100 * 1024 * 1024;
 pub(super) const MAX_INTROSPECTION_BODY_BYTES: usize = 2 * 1024 * 1024;
 
 static TRACE_COUNTER: AtomicU64 = AtomicU64::new(1);
