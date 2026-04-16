@@ -114,7 +114,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(screen.getByText("12K / 2K / 16.7%")).toBeInTheDocument();
     expect(screen.getByText("81.0%")).toBeInTheDocument();
     expect(screen.getByText("18.2%")).toBeInTheDocument();
-    expect(screen.getByText("含缓存总量 / 缓存量 / 缓存占比")).toBeInTheDocument();
+    expect(screen.getByText("含缓存总量 / 缓存量 / 缓存命中率")).toBeInTheDocument();
     expect(screen.queryByText("平均耗时")).not.toBeInTheDocument();
     expect(
       cachedTotalCard.compareDocumentPosition(totalCard) & Node.DOCUMENT_POSITION_FOLLOWING
@@ -243,7 +243,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(screen.getByText("Gemini Mirror")).toBeInTheDocument();
     expect(screen.getByText("99.0K")).toBeInTheDocument();
     expect(screen.getByText("$3.36")).toBeInTheDocument();
-    expect(screen.getByText("49.2K / 7.2K / 14.6%")).toBeInTheDocument();
+    expect(screen.getByText("49.2K / 7.2K / 13.1%")).toBeInTheDocument();
     expect(screen.getByText("100.0%")).toBeInTheDocument();
     expect(screen.getByText("17.0%")).toBeInTheDocument();
 
@@ -256,6 +256,126 @@ describe("components/home/HomeTokenCostPanel", () => {
 
     expect(screen.getByText("3.0M")).toBeInTheDocument();
     expect(screen.getByText("$100.80")).toBeInTheDocument();
+  });
+
+  it("renders cache hit-rate per row (not the old token-share ratio)", () => {
+    // Row picked so the two formulas diverge sharply:
+    //   old 占比 = (creation + read) / total_with_cache = 9000 / 16000 = 56.3%
+    //   new 命中率 = read / (input + creation + read) = 9000 / 10000 = 90.0%
+    vi.mocked(useUsageSummaryV2Query).mockReturnValue({
+      data: {
+        requests_total: 5,
+        requests_with_usage: 5,
+        requests_success: 5,
+        requests_failed: 0,
+        cost_covered_success: 5,
+        avg_duration_ms: 1000,
+        avg_ttfb_ms: 200,
+        avg_output_tokens_per_second: 100,
+        input_tokens: 1000,
+        output_tokens: 6000,
+        io_total_tokens: 7000,
+        total_tokens: 16000,
+        cache_read_input_tokens: 9000,
+        cache_creation_input_tokens: 0,
+        cache_creation_5m_input_tokens: 0,
+      },
+      isLoading: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any);
+
+    vi.mocked(useUsageLeaderboardV2Query).mockReturnValue({
+      data: [
+        {
+          key: "provider-cache",
+          name: "Cache Hit Provider",
+          requests_total: 5,
+          requests_success: 5,
+          requests_failed: 0,
+          total_tokens: 16000,
+          io_total_tokens: 7000,
+          input_tokens: 1000,
+          output_tokens: 6000,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 9000,
+          avg_duration_ms: 1000,
+          avg_ttfb_ms: 200,
+          avg_output_tokens_per_second: 100,
+          cost_usd: 0.5,
+        },
+      ],
+      isLoading: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any);
+
+    render(<HomeTokenCostPanel />);
+
+    // Row cell renders trimmed compact form: "16K / 9K / 90%"
+    expect(screen.getByText("16K / 9K / 90%")).toBeInTheDocument();
+    // Old "占比" 56.3% must NOT be rendered for this row
+    expect(screen.queryByText(/56\.3%/)).not.toBeInTheDocument();
+    // KPI card uses the same hit-rate formula → also 90.0% (untrimmed)
+    expect(screen.getByText("90.0%")).toBeInTheDocument();
+  });
+
+  it("falls back to dashes when a row has no cache data", () => {
+    vi.mocked(useUsageSummaryV2Query).mockReturnValue({
+      data: {
+        requests_total: 1,
+        requests_with_usage: 1,
+        requests_success: 1,
+        requests_failed: 0,
+        cost_covered_success: 1,
+        avg_duration_ms: 100,
+        avg_ttfb_ms: 50,
+        avg_output_tokens_per_second: 80,
+        input_tokens: 0,
+        output_tokens: 0,
+        io_total_tokens: 0,
+        total_tokens: 0,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+        cache_creation_5m_input_tokens: 0,
+      },
+      isLoading: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any);
+
+    vi.mocked(useUsageLeaderboardV2Query).mockReturnValue({
+      data: [
+        {
+          key: "provider-empty",
+          name: "Empty Provider",
+          requests_total: 1,
+          requests_success: 1,
+          requests_failed: 0,
+          total_tokens: 0,
+          io_total_tokens: 0,
+          input_tokens: 0,
+          output_tokens: 0,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+          avg_duration_ms: 100,
+          avg_ttfb_ms: 50,
+          avg_output_tokens_per_second: 80,
+          cost_usd: 0,
+        },
+      ],
+      isLoading: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any);
+
+    render(<HomeTokenCostPanel />);
+
+    expect(screen.getByText("0 / — / —")).toBeInTheDocument();
   });
 
   it("retries summary and leaderboard queries from the error card", () => {

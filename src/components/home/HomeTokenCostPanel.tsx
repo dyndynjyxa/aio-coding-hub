@@ -13,7 +13,6 @@ import {
   formatUsdCompact,
 } from "../../utils/formatters";
 import { StatCard, StatCardSkeleton } from "../usage/StatCard";
-import { TokenBreakdown } from "../usage/TokenBreakdown";
 import { QueryErrorCard } from "../shared/QueryErrorCard";
 import { useHomeTokenCostDataModel } from "./useHomeTokenCostDataModel";
 
@@ -185,6 +184,34 @@ function summaryCostCoverage(summary: UsageSummary | null) {
   return covered / denom;
 }
 
+const CACHE_BREAKDOWN_SEPARATOR = " / ";
+
+function trimCompactZero(value: string) {
+  return value.replace(/\.0([KM])$/, "$1").replace(/\.0%$/, "%");
+}
+
+function CacheHitRateBreakdown({ row }: { row: UsageLeaderboardRow }) {
+  const totalWithCache = row.total_tokens;
+  const hasValidTotal = Number.isFinite(totalWithCache) && totalWithCache > 0;
+  const cacheTokens = row.cache_creation_input_tokens + row.cache_read_input_tokens;
+  const hitRate = computeCacheHitRate(
+    row.input_tokens,
+    row.cache_creation_input_tokens,
+    row.cache_read_input_tokens
+  );
+
+  const totalText = trimCompactZero(formatTokensMillions(hasValidTotal ? totalWithCache : 0));
+  const cacheText = hasValidTotal ? trimCompactZero(formatTokensMillions(cacheTokens)) : "—";
+  const hitRateText =
+    hasValidTotal && Number.isFinite(hitRate) ? trimCompactZero(formatPercent(hitRate)) : "—";
+
+  return (
+    <div className="whitespace-nowrap">
+      {[totalText, cacheText, hitRateText].join(CACHE_BREAKDOWN_SEPARATOR)}
+    </div>
+  );
+}
+
 function TokenShareBar({ percent }: { percent: number }) {
   const pct = Number.isFinite(percent) ? Math.max(0, Math.min(1, percent)) : 0;
   const displayPct = (pct * 100).toFixed(1);
@@ -306,7 +333,7 @@ function TokenLeaderboardTable({
             <th scope="col" className={TABLE_TH_CLASS}>
               <div>Token 明细</div>
               <div className="mt-0.5 normal-case text-[10px] font-normal tracking-normal text-slate-400 dark:text-slate-500">
-                含缓存总量 / 缓存量 / 缓存占比
+                含缓存总量 / 缓存量 / 缓存命中率
               </div>
             </th>
             <th scope="col" className={TABLE_TH_CLASS}>
@@ -341,14 +368,7 @@ function TokenLeaderboardTable({
                 <div className="font-medium text-slate-900 dark:text-slate-100">{row.name}</div>
               </td>
               <td className={TABLE_MONO_TD_CLASS}>
-                <TokenBreakdown
-                  totalTokens={row.io_total_tokens}
-                  inputTokens={row.input_tokens}
-                  outputTokens={row.output_tokens}
-                  totalTokensWithCache={row.total_tokens}
-                  displayMode="compactRatio"
-                  useCompactUnits={true}
-                />
+                <CacheHitRateBreakdown row={row} />
               </td>
               <td className={TABLE_MONO_TD_CLASS}>{formatCostValue(row.cost_usd)}</td>
               <td className={TABLE_MONO_TD_CLASS}>{formatInteger(row.requests_total)}</td>
