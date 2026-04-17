@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.38.4](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.38.3...aio-coding-hub-v0.38.4) (2026-04-17)
+
+
+### Features
+
+* **cli-manager:** 在通用配置页新增上游代理相关设置支持 ([0b2489f](https://github.com/dyndynjyxa/aio-coding-hub/commit/0b2489f4c201af5daba697b4f272ca6de5767e54))
+
+
+### Bug Fixes
+
+* **mcp:** 修复 MCP Server Dialog 支持 SSE 类型和保存逻辑 ([a219783](https://github.com/dyndynjyxa/aio-coding-hub/commit/a2197836c2aa9a431be0e2c8bc8b243dad2072fd))
+* **ui:** 修复 Sidebar 组件状态文字显示异常问题 ([ff0b1ae](https://github.com/dyndynjyxa/aio-coding-hub/commit/ff0b1ae74e8c08fa5c73044fa924e7c78e24284d))
+
 ## [0.38.3](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.38.2...aio-coding-hub-v0.38.3) (2026-04-16)
 
 
