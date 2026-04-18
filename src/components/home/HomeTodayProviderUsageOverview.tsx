@@ -592,18 +592,20 @@ export function HomeTodayProviderUsageOverview({
                   >
                     <td className={TABLE_TD_CLASS}>
                       <div className="flex items-center gap-2">
-                        {isRunning ? (
-                          <span
-                            aria-label={IN_PROGRESS_BADGE.text}
-                            title={IN_PROGRESS_BADGE.text}
-                            className={`inline-flex shrink-0 items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium ${IN_PROGRESS_BADGE.tone}`}
-                          >
-                            <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
-                          </span>
-                        ) : null}
-                        <div className="font-medium text-slate-900 dark:text-slate-100">
+                        <div className="min-w-0 font-medium text-slate-900 dark:text-slate-100">
                           {row.name}
                         </div>
+                        <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
+                          {isRunning ? (
+                            <span
+                              aria-label={IN_PROGRESS_BADGE.text}
+                              title={IN_PROGRESS_BADGE.text}
+                              className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium ${IN_PROGRESS_BADGE.tone}`}
+                            >
+                              <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+                            </span>
+                          ) : null}
+                        </span>
                       </div>
                     </td>
                     <td className={TABLE_MONO_TD_CLASS}>
