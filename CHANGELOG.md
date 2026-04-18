@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.1](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.39.0...aio-coding-hub-v0.39.1) (2026-04-18)
+
+
+### Bug Fixes
+
+* **gateway:** 修复代理初始化时未启用代理配置的问题 ([934aee9](https://github.com/dyndynjyxa/aio-coding-hub/commit/934aee94964226860ff40e885763685227af2535))
+
 ## [0.39.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.38.4...aio-coding-hub-v0.39.0) (2026-04-17)
 
 
