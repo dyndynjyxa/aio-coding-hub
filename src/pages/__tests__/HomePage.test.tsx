@@ -54,6 +54,7 @@ vi.mock("../../components/home/HomeOverviewPanel", () => ({
     devPreviewEnabled,
     showHomeHeatmap,
     showHomeUsage,
+    personalizedUsageView,
     openCircuits,
     onResetCircuitProvider,
   }: any) => (
@@ -62,6 +63,7 @@ vi.mock("../../components/home/HomeOverviewPanel", () => ({
       <div>dev-preview:{String(devPreviewEnabled)}</div>
       <div>show-heatmap:{String(showHomeHeatmap)}</div>
       <div>show-usage:{String(showHomeUsage)}</div>
+      <div>personalized-usage-view:{String(personalizedUsageView)}</div>
       <div>open-circuits:{openCircuits.length}</div>
       <button type="button" onClick={() => onResetCircuitProvider(1)}>
         reset-1
@@ -631,6 +633,46 @@ describe("pages/HomePage", () => {
     expect(screen.queryByRole("tab", { name: "花费" })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "用量" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "更多" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "查看曲线" })).toBeInTheDocument();
+    expect(vi.mocked(useUsageHourlySeriesQuery)).toHaveBeenLastCalledWith(
+      15,
+      expect.objectContaining({ enabled: false })
+    );
+  });
+
+  it("places the personalized usage toggle in the page header and enables the chart query after switching", async () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    mockHomePageBaseQueries();
+    vi.mocked(useCliProxy).mockReturnValue({
+      enabled: { claude: false, codex: false, gemini: false },
+      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
+      toggling: { claude: false, codex: false, gemini: false },
+      setCliProxyEnabled: vi.fn(),
+    } as any);
+
+    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
+
+    renderWithProviders(client, <HomePage />);
+
+    expect(screen.getByText("personalized-usage-view:summary")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "查看曲线" })).toBeInTheDocument();
+    expect(vi.mocked(useUsageHourlySeriesQuery)).toHaveBeenLastCalledWith(
+      15,
+      expect.objectContaining({ enabled: false })
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "查看曲线" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("personalized-usage-view:usageChart")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "查看总览" })).toBeInTheDocument();
+    });
+    expect(vi.mocked(useUsageHourlySeriesQuery)).toHaveBeenLastCalledWith(
+      15,
+      expect.objectContaining({ enabled: true })
+    );
   });
 
   it("enables CLI proxy directly when no env conflicts are found", async () => {

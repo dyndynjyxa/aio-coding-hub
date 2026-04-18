@@ -11,24 +11,28 @@ import { useHomeFreshnessOwner } from "./useHomeFreshnessOwner";
 type UseHomeOverviewFeedOptions = {
   overviewActive: boolean;
   foregroundActive: boolean;
-  showOverviewUsageSection: boolean;
+  overviewUsageSeriesEnabled: boolean;
+  shouldRefetchOverviewUsageSeries: boolean;
   homeUsageWindowDays: number;
+  providerLimitEnabled?: boolean;
 };
 
 export function useHomeOverviewFeed({
   overviewActive,
   foregroundActive,
-  showOverviewUsageSection,
+  overviewUsageSeriesEnabled,
+  shouldRefetchOverviewUsageSeries,
   homeUsageWindowDays,
+  providerLimitEnabled = true,
 }: UseHomeOverviewFeedOptions) {
   const previousOverviewActiveRef = useRef(false);
   const overviewForegroundActive = overviewActive && foregroundActive;
 
   const usageHeatmapQuery = useUsageHourlySeriesQuery(homeUsageWindowDays, {
-    enabled: overviewActive && showOverviewUsageSection,
+    enabled: overviewActive && overviewUsageSeriesEnabled,
   });
   const providerLimitQuery = useProviderLimitUsageV1Query(null, {
-    enabled: overviewForegroundActive,
+    enabled: providerLimitEnabled && overviewForegroundActive,
   });
   const requestLogsFeed = useRequestLogsFeed({
     limit: 50,
@@ -36,14 +40,14 @@ export function useHomeOverviewFeed({
   });
 
   const refetchUsageHeatmapSilently = useCallback(async () => {
-    if (!showOverviewUsageSection) return null;
+    if (!shouldRefetchOverviewUsageSeries) return null;
     return usageHeatmapQuery.refetch();
-  }, [showOverviewUsageSection, usageHeatmapQuery]);
+  }, [shouldRefetchOverviewUsageSeries, usageHeatmapQuery]);
 
   const refetchProviderLimitSilently = useCallback(async () => {
-    if (!overviewForegroundActive) return null;
+    if (!providerLimitEnabled || !overviewForegroundActive) return null;
     return providerLimitQuery.refetch();
-  }, [overviewForegroundActive, providerLimitQuery]);
+  }, [overviewForegroundActive, providerLimitEnabled, providerLimitQuery]);
 
   const refetchRequestLogsSilently = useCallback(async () => {
     return requestLogsFeed.refreshRequestLogs();
@@ -98,12 +102,17 @@ export function useHomeOverviewFeed({
   });
 
   return {
-    usageHeatmapRows: usageHeatmapQuery.data ?? [],
-    usageHeatmapLoading: usageHeatmapQuery.isFetching,
-    providerLimitRows: providerLimitQuery.data ?? [],
-    providerLimitLoading: providerLimitQuery.isLoading,
-    providerLimitRefreshing: providerLimitQuery.isFetching && !providerLimitQuery.isLoading,
-    providerLimitAvailable: providerLimitQuery.isLoading ? null : providerLimitQuery.data != null,
+    usageHeatmapRows: overviewUsageSeriesEnabled ? (usageHeatmapQuery.data ?? []) : [],
+    usageHeatmapLoading: overviewUsageSeriesEnabled && usageHeatmapQuery.isFetching,
+    providerLimitRows: providerLimitEnabled ? (providerLimitQuery.data ?? []) : [],
+    providerLimitLoading: providerLimitEnabled && providerLimitQuery.isLoading,
+    providerLimitRefreshing:
+      providerLimitEnabled && providerLimitQuery.isFetching && !providerLimitQuery.isLoading,
+    providerLimitAvailable: providerLimitEnabled
+      ? providerLimitQuery.isLoading
+        ? null
+        : providerLimitQuery.data != null
+      : null,
     requestLogs: requestLogsFeed.requestLogs,
     requestLogsLoading: requestLogsFeed.requestLogsLoading,
     requestLogsRefreshing: requestLogsFeed.requestLogsRefreshing,

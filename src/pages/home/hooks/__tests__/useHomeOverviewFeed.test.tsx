@@ -87,14 +87,16 @@ describe("pages/home/hooks/useHomeOverviewFeed", () => {
       (props: {
         overviewActive: boolean;
         foregroundActive: boolean;
-        showOverviewUsageSection: boolean;
+        overviewUsageSeriesEnabled: boolean;
+        shouldRefetchOverviewUsageSeries: boolean;
         homeUsageWindowDays: number;
       }) => useHomeOverviewFeed(props),
       {
         initialProps: {
           overviewActive: false,
           foregroundActive: true,
-          showOverviewUsageSection: true,
+          overviewUsageSeriesEnabled: true,
+          shouldRefetchOverviewUsageSeries: true,
           homeUsageWindowDays: 7,
         },
       }
@@ -103,7 +105,8 @@ describe("pages/home/hooks/useHomeOverviewFeed", () => {
     view.rerender({
       overviewActive: true,
       foregroundActive: true,
-      showOverviewUsageSection: true,
+      overviewUsageSeriesEnabled: true,
+      shouldRefetchOverviewUsageSeries: true,
       homeUsageWindowDays: 7,
     });
 
@@ -147,7 +150,8 @@ describe("pages/home/hooks/useHomeOverviewFeed", () => {
       useHomeOverviewFeed({
         overviewActive: true,
         foregroundActive: true,
-        showOverviewUsageSection: true,
+        overviewUsageSeriesEnabled: true,
+        shouldRefetchOverviewUsageSeries: true,
         homeUsageWindowDays: 7,
       })
     );
@@ -185,7 +189,8 @@ describe("pages/home/hooks/useHomeOverviewFeed", () => {
       useHomeOverviewFeed({
         overviewActive: true,
         foregroundActive: true,
-        showOverviewUsageSection: true,
+        overviewUsageSeriesEnabled: true,
+        shouldRefetchOverviewUsageSeries: true,
         homeUsageWindowDays: 7,
       })
     );

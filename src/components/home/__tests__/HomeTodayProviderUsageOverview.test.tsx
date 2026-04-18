@@ -1,0 +1,326 @@
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { HomeTodayProviderUsageOverview } from "../HomeTodayProviderUsageOverview";
+import { useHomeTokenCostDataModel } from "../useHomeTokenCostDataModel";
+
+vi.mock("../useHomeTokenCostDataModel", () => ({
+  useHomeTokenCostDataModel: vi.fn(),
+}));
+
+function createActiveSession(providerName: string) {
+  return {
+    cli_key: "claude",
+    session_id: `session-${providerName}`,
+    session_suffix: "abcd",
+    provider_id: 1,
+    provider_name: providerName,
+    expires_at: Date.now(),
+    request_count: 1,
+    total_input_tokens: 100,
+    total_output_tokens: 50,
+    total_cost_usd: 0.1,
+    total_duration_ms: 1000,
+  };
+}
+
+function mockDataModel(overrides: Partial<ReturnType<typeof useHomeTokenCostDataModel>> = {}) {
+  vi.mocked(useHomeTokenCostDataModel).mockReturnValue({
+    summary: {
+      requests_total: 20,
+      requests_with_usage: 20,
+      requests_success: 18,
+      requests_failed: 2,
+      cost_covered_success: 18,
+      avg_duration_ms: 1100,
+      avg_ttfb_ms: 260,
+      avg_output_tokens_per_second: 95.2,
+      input_tokens: 12_000,
+      output_tokens: 8_000,
+      io_total_tokens: 20_000,
+      total_tokens: 25_000,
+      cache_read_input_tokens: 3_000,
+      cache_creation_input_tokens: 1_000,
+      cache_creation_5m_input_tokens: 0,
+      cache_creation_1h_input_tokens: 0,
+    },
+    rows: [
+      {
+        key: "provider-2",
+        name: "Claude Main",
+        requests_total: 5,
+        requests_success: 5,
+        requests_failed: 0,
+        total_tokens: 6_200,
+        io_total_tokens: 5_000,
+        input_tokens: 3_000,
+        output_tokens: 2_000,
+        cache_creation_input_tokens: 500,
+        cache_read_input_tokens: 700,
+        avg_duration_ms: 900,
+        avg_ttfb_ms: 220,
+        avg_output_tokens_per_second: 90,
+        cost_usd: 0.5,
+      },
+      {
+        key: "provider-4",
+        name: "Gemini Mirror",
+        requests_total: 7,
+        requests_success: 6,
+        requests_failed: 1,
+        total_tokens: 10_200,
+        io_total_tokens: 8_000,
+        input_tokens: 4_500,
+        output_tokens: 3_500,
+        cache_creation_input_tokens: 800,
+        cache_read_input_tokens: 1_400,
+        avg_duration_ms: 1200,
+        avg_ttfb_ms: 320,
+        avg_output_tokens_per_second: 86,
+        cost_usd: 0.9,
+      },
+      {
+        key: "provider-1",
+        name: "OpenAI Primary",
+        requests_total: 3,
+        requests_success: 3,
+        requests_failed: 0,
+        total_tokens: 5_800,
+        io_total_tokens: 4_000,
+        input_tokens: 2_000,
+        output_tokens: 2_000,
+        cache_creation_input_tokens: 600,
+        cache_read_input_tokens: 1_200,
+        avg_duration_ms: 880,
+        avg_ttfb_ms: 210,
+        avg_output_tokens_per_second: 110,
+        cost_usd: 0.7,
+      },
+      {
+        key: "provider-5",
+        name: "DeepSeek Relay",
+        requests_total: 2,
+        requests_success: 2,
+        requests_failed: 0,
+        total_tokens: 3_500,
+        io_total_tokens: 2_000,
+        input_tokens: 1_400,
+        output_tokens: 600,
+        cache_creation_input_tokens: 700,
+        cache_read_input_tokens: 800,
+        avg_duration_ms: 760,
+        avg_ttfb_ms: 180,
+        avg_output_tokens_per_second: 120,
+        cost_usd: null,
+      },
+      {
+        key: "provider-3",
+        name: "Mistral Edge",
+        requests_total: 2,
+        requests_success: 1,
+        requests_failed: 1,
+        total_tokens: 1_600,
+        io_total_tokens: 800,
+        input_tokens: 500,
+        output_tokens: 300,
+        cache_creation_input_tokens: 200,
+        cache_read_input_tokens: 600,
+        avg_duration_ms: 1500,
+        avg_ttfb_ms: 400,
+        avg_output_tokens_per_second: 40,
+        cost_usd: 0.1,
+      },
+      {
+        key: "provider-6",
+        name: "Local Sandbox",
+        requests_total: 1,
+        requests_success: 1,
+        requests_failed: 0,
+        total_tokens: 300,
+        io_total_tokens: 200,
+        input_tokens: 120,
+        output_tokens: 80,
+        cache_creation_input_tokens: 20,
+        cache_read_input_tokens: 80,
+        avg_duration_ms: 600,
+        avg_ttfb_ms: 150,
+        avg_output_tokens_per_second: 60,
+        cost_usd: 0.01,
+      },
+    ],
+    totalCostUsd: 2.21,
+    loading: false,
+    fetching: false,
+    errorText: null,
+    previewActive: false,
+    refresh: vi.fn(),
+    ...overrides,
+  } as ReturnType<typeof useHomeTokenCostDataModel>);
+}
+
+describe("components/home/HomeTodayProviderUsageOverview", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("uses the fixed today provider query config and renders summary plus top providers", () => {
+    mockDataModel();
+
+    render(<HomeTodayProviderUsageOverview devPreviewEnabled={true} activeSessions={[]} />);
+
+    expect(vi.mocked(useHomeTokenCostDataModel)).toHaveBeenCalledWith({
+      scope: "provider",
+      queryConfig: {
+        period: "daily",
+        input: {
+          startTs: null,
+          endTs: null,
+          cliKey: null,
+          providerId: null,
+        },
+        previewFactor: 1,
+      },
+      devPreviewEnabled: true,
+    });
+
+    const totalWithCacheCard = screen.getByText("含缓存总 Token").parentElement;
+    const totalTokenCard = screen.getByText("总 Token").parentElement;
+    const cacheHitRateCard = screen.getByText("缓存命中率").parentElement;
+    expect(totalWithCacheCard).toBeTruthy();
+    expect(totalTokenCard).toBeTruthy();
+    expect(cacheHitRateCard).toBeTruthy();
+    expect(within(totalWithCacheCard as HTMLElement).getByText("25.0K")).toBeInTheDocument();
+    expect(within(totalTokenCard as HTMLElement).getByText("20.0K")).toBeInTheDocument();
+    expect(within(cacheHitRateCard as HTMLElement).getByText("18.8%")).toBeInTheDocument();
+    expect(screen.getByText("今日请求数")).toBeInTheDocument();
+    expect(screen.getByText("20")).toBeInTheDocument();
+    expect(screen.getByText("今日花费")).toBeInTheDocument();
+    expect(screen.getByText("$2.21")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "供应商（前 3 个）" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "成功率" })).toBeInTheDocument();
+    expect(screen.getByText("含缓存 / 缓存 / 命中率")).toBeInTheDocument();
+
+    const geminiRow = screen.getByText("Gemini Mirror").closest("tr");
+    const claudeRow = screen.getByText("Claude Main").closest("tr");
+    const openaiRow = screen.getByText("OpenAI Primary").closest("tr");
+    expect(geminiRow).toBeTruthy();
+    expect(claudeRow).toBeTruthy();
+    expect(openaiRow).toBeTruthy();
+    expect(screen.queryByText("DeepSeek Relay")).not.toBeInTheDocument();
+    expect(screen.queryByText("Mistral Edge")).not.toBeInTheDocument();
+    expect(screen.queryByText("Local Sandbox")).not.toBeInTheDocument();
+
+    expect(within(geminiRow as HTMLElement).getByText("10.2K / 2.2K / 20.9%")).toBeInTheDocument();
+    expect(within(geminiRow as HTMLElement).getByText("$0.90")).toBeInTheDocument();
+    expect(within(geminiRow as HTMLElement).getByText("85.7%")).toBeInTheDocument();
+    expect(within(geminiRow as HTMLElement).getByText("40.0%")).toBeInTheDocument();
+    expect(within(claudeRow as HTMLElement).getByText("100.0%")).toBeInTheDocument();
+    expect(within(claudeRow as HTMLElement).getByText("6.2K / 1.2K / 16.7%")).toBeInTheDocument();
+    expect(within(openaiRow as HTMLElement).getByText("5.8K / 1.8K / 31.6%")).toBeInTheDocument();
+  });
+
+  it("marks running providers that are already inside the default top three", () => {
+    mockDataModel();
+
+    render(
+      <HomeTodayProviderUsageOverview activeSessions={[createActiveSession("Claude Main")]} />
+    );
+
+    const claudeRow = screen.getByText("Claude Main").closest("tr");
+    expect(claudeRow).toBeTruthy();
+    expect(within(claudeRow as HTMLElement).getByLabelText("进行中")).toBeInTheDocument();
+    expect(screen.getByText("OpenAI Primary")).toBeInTheDocument();
+  });
+
+  it("replaces lower-ranked rows when a running provider is outside the default top three", () => {
+    mockDataModel();
+
+    render(
+      <HomeTodayProviderUsageOverview activeSessions={[createActiveSession("DeepSeek Relay")]} />
+    );
+
+    const deepseekRow = screen.getByText("DeepSeek Relay").closest("tr");
+    expect(deepseekRow).toBeTruthy();
+    expect(screen.queryByText("OpenAI Primary")).not.toBeInTheDocument();
+    expect(within(deepseekRow as HTMLElement).getByLabelText("进行中")).toBeInTheDocument();
+    expect(within(deepseekRow as HTMLElement).getByText("3.5K / 1.5K / 27.6%")).toBeInTheDocument();
+  });
+
+  it("renders a synthetic running row when the provider has no usage row today", () => {
+    mockDataModel();
+
+    render(
+      <HomeTodayProviderUsageOverview activeSessions={[createActiveSession("Runtime Fresh")]} />
+    );
+
+    const runtimeRow = screen.getByText("Runtime Fresh").closest("tr");
+    expect(runtimeRow).toBeTruthy();
+    expect(screen.queryByText("OpenAI Primary")).not.toBeInTheDocument();
+    expect(within(runtimeRow as HTMLElement).getByLabelText("进行中")).toBeInTheDocument();
+    expect(within(runtimeRow as HTMLElement).getByText("— / — / —")).toBeInTheDocument();
+    expect(within(runtimeRow as HTMLElement).getAllByText("—").length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("shows a dash for cache hit rate when the summary has no denominator", () => {
+    mockDataModel({
+      summary: {
+        requests_total: 0,
+        requests_with_usage: 0,
+        requests_success: 0,
+        requests_failed: 0,
+        cost_covered_success: 0,
+        avg_duration_ms: null,
+        avg_ttfb_ms: null,
+        avg_output_tokens_per_second: null,
+        input_tokens: 0,
+        output_tokens: 0,
+        io_total_tokens: 0,
+        total_tokens: 0,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+        cache_creation_5m_input_tokens: 0,
+        cache_creation_1h_input_tokens: 0,
+      },
+      rows: [],
+    });
+
+    render(<HomeTodayProviderUsageOverview />);
+
+    expect(screen.getByText("缓存命中率")).toBeInTheDocument();
+    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(screen.getByText("今日花费")).toBeInTheDocument();
+  });
+
+  it("renders the error card and retries refresh when loading failed", () => {
+    const refresh = vi.fn();
+    mockDataModel({
+      summary: null,
+      rows: [],
+      errorText: "boom",
+      refresh,
+    });
+
+    render(<HomeTodayProviderUsageOverview />);
+
+    expect(screen.getByText("加载失败")).toBeInTheDocument();
+    expect(
+      screen.getByText("读取今日供应商用量失败，请重试；必要时查看 Console 日志。")
+    ).toBeInTheDocument();
+    expect(screen.getByText("今日暂无供应商用量数据。")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders loading skeletons before data arrives", () => {
+    mockDataModel({
+      summary: null,
+      rows: [],
+      loading: true,
+    });
+
+    const { container } = render(<HomeTodayProviderUsageOverview />);
+
+    expect(container.querySelectorAll(".animate-pulse").length).toBeGreaterThan(0);
+    expect(screen.queryByText("今日暂无供应商用量数据。")).not.toBeInTheDocument();
+  });
+});

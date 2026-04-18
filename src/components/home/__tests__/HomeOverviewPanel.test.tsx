@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import type { ComponentProps } from "react";
+import { useState, type ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeOverviewPanel } from "../HomeOverviewPanel";
 
@@ -15,6 +15,12 @@ vi.mock("../HomeUsageSection", () => ({
     showHeatmap: boolean;
     showUsageChart?: boolean;
   }) => <div>{`usage-section:${String(showHeatmap)}:${String(showUsageChart)}`}</div>,
+}));
+
+vi.mock("../HomeTodayProviderUsageOverview", () => ({
+  HomeTodayProviderUsageOverview: ({ devPreviewEnabled }: { devPreviewEnabled?: boolean }) => (
+    <div>{`today-provider-usage:${String(Boolean(devPreviewEnabled))}`}</div>
+  ),
 }));
 
 vi.mock("../HomeWorkStatusCard", () => ({
@@ -183,6 +189,7 @@ function renderPanel(overrides: Partial<ComponentProps<typeof HomeOverviewPanel>
       onRefreshRequestLogs={vi.fn()}
       selectedLogId={null}
       onSelectLogId={vi.fn()}
+      personalizedUsageView="summary"
       {...overrides}
     />
   );
@@ -421,7 +428,7 @@ describe("components/home/HomeOverviewPanel", () => {
     renderPanel();
 
     const requestLogs = screen.getByText("request-logs");
-    const usageSection = screen.getByText("usage-section:false:true");
+    const usageSection = screen.getByText("today-provider-usage:false");
 
     expect(
       usageSection.compareDocumentPosition(requestLogs) & Node.DOCUMENT_POSITION_FOLLOWING
@@ -444,11 +451,104 @@ describe("components/home/HomeOverviewPanel", () => {
 
     renderPanel({ showHomeHeatmap: true, showHomeUsage: false });
 
-    expect(screen.getByText("usage-section:false:true")).toBeInTheDocument();
+    expect(screen.getByText("today-provider-usage:false")).toBeInTheDocument();
     expect(screen.getAllByText("work-status-card:vertical")).toHaveLength(1);
     expect(screen.queryByText("work-status-card:horizontal")).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "配置信息" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "熔断信息" })).toBeInTheDocument();
+  });
+
+  it("renders the usage chart branch when the personalized usage view switches", () => {
+    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
+
+    function Wrapper() {
+      const [view, setView] = useState<"summary" | "usageChart">("summary");
+
+      return (
+        <>
+          <button type="button" onClick={() => setView("usageChart")}>
+            switch-to-usage-chart
+          </button>
+          <HomeOverviewPanel
+            showCustomTooltip={false}
+            showHomeHeatmap={true}
+            cliPriorityOrder={["claude", "codex", "gemini"]}
+            usageWindowDays={15}
+            usageHeatmapRows={[]}
+            usageHeatmapLoading={false}
+            onRefreshUsageHeatmap={vi.fn()}
+            sortModes={[]}
+            sortModesLoading={false}
+            sortModesAvailable={true}
+            activeModeByCli={{ claude: null, codex: null, gemini: null }}
+            activeModeToggling={{ claude: false, codex: false, gemini: false }}
+            onSetCliActiveMode={vi.fn()}
+            cliProxyLoading={false}
+            cliProxyAvailable={true}
+            cliProxyEnabled={{ claude: false, codex: false, gemini: false }}
+            cliProxyAppliedToCurrentGateway={{ claude: null, codex: null, gemini: null }}
+            cliProxyToggling={{ claude: false, codex: false, gemini: false }}
+            onSetCliProxyEnabled={vi.fn()}
+            activeSessions={[]}
+            activeSessionsLoading={false}
+            activeSessionsAvailable={true}
+            workspaceConfigs={[
+              {
+                cliKey: "claude",
+                cliLabel: "Claude Code",
+                workspaceId: 1,
+                workspaceName: "默认",
+                loading: false,
+                items: [],
+              },
+              {
+                cliKey: "codex",
+                cliLabel: "Codex",
+                workspaceId: 2,
+                workspaceName: "Default",
+                loading: false,
+                items: [],
+              },
+              {
+                cliKey: "gemini",
+                cliLabel: "Gemini",
+                workspaceId: 3,
+                workspaceName: "工作区 2",
+                loading: false,
+                items: [],
+              },
+            ]}
+            providerLimitRows={[]}
+            providerLimitLoading={false}
+            providerLimitAvailable={true}
+            providerLimitRefreshing={false}
+            onRefreshProviderLimit={vi.fn()}
+            openCircuits={[]}
+            onResetCircuitProvider={vi.fn()}
+            resettingCircuitProviderIds={new Set()}
+            traces={[]}
+            requestLogs={[]}
+            requestLogsLoading={false}
+            requestLogsRefreshing={false}
+            requestLogsAvailable={true}
+            onRefreshRequestLogs={vi.fn()}
+            selectedLogId={null}
+            onSelectLogId={vi.fn()}
+            personalizedUsageView={view}
+          />
+        </>
+      );
+    }
+
+    render(<Wrapper />);
+
+    expect(screen.getByText("today-provider-usage:false")).toBeInTheDocument();
+    expect(screen.queryByText("usage-section:false:true")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "switch-to-usage-chart" }));
+
+    expect(screen.getByText("usage-section:false:true")).toBeInTheDocument();
+    expect(screen.queryByText("today-provider-usage:false")).not.toBeInTheDocument();
   });
 
   it("renders preview active sessions when dev preview is enabled and there are no real sessions", async () => {
@@ -546,6 +646,7 @@ describe("components/home/HomeOverviewPanel", () => {
         onRefreshRequestLogs={vi.fn()}
         selectedLogId={null}
         onSelectLogId={vi.fn()}
+        personalizedUsageView="summary"
       />
     );
 
@@ -608,6 +709,7 @@ describe("components/home/HomeOverviewPanel", () => {
         onRefreshRequestLogs={vi.fn()}
         selectedLogId={null}
         onSelectLogId={vi.fn()}
+        personalizedUsageView="summary"
       />
     );
 
@@ -691,6 +793,7 @@ describe("components/home/HomeOverviewPanel", () => {
         onRefreshRequestLogs={vi.fn()}
         selectedLogId={null}
         onSelectLogId={vi.fn()}
+        personalizedUsageView="summary"
       />
     );
 

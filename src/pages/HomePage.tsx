@@ -2,7 +2,10 @@
 
 import { lazy, Suspense, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { CLIS } from "../constants/clis";
-import { HomeOverviewPanel } from "../components/home/HomeOverviewPanel";
+import {
+  HomeOverviewPanel,
+  type HomeOverviewUsageView,
+} from "../components/home/HomeOverviewPanel";
 import { useDevPreviewData } from "../hooks/useDevPreviewData";
 import { useDocumentVisibility } from "../hooks/useDocumentVisibility";
 import { useGatewaySessionsListQuery } from "../query/gateway";
@@ -84,6 +87,15 @@ export function HomePage() {
 
   const [tab, setTab] = useState<HomeTabKey>("overview");
   const [selectedLogId, setSelectedLogId] = useState<number | null>(null);
+  const [personalizedUsageView, setPersonalizedUsageView] =
+    useState<HomeOverviewUsageView>("summary");
+  const personalizedUsageChartVisible =
+    personalizedLayoutEnabled && personalizedUsageView === "usageChart";
+  const overviewUsageSeriesEnabled =
+    tab === "overview" &&
+    (personalizedUsageChartVisible || (!personalizedLayoutEnabled && showOverviewUsageSection));
+  const shouldRefetchOverviewUsageSeries =
+    personalizedUsageChartVisible || (!personalizedLayoutEnabled && showOverviewUsageSection);
 
   // --- Delegated state hooks ---
   const circuit = useHomeCircuitState();
@@ -121,8 +133,10 @@ export function HomePage() {
   } = useHomeOverviewFeed({
     overviewActive: tab === "overview",
     foregroundActive,
-    showOverviewUsageSection,
+    overviewUsageSeriesEnabled,
+    shouldRefetchOverviewUsageSeries,
     homeUsageWindowDays,
+    providerLimitEnabled: !personalizedLayoutEnabled,
   });
   const { pendingSortModeSwitch } = sortMode;
   const { pendingCliProxyEnablePrompt } = cliProxyState;
@@ -145,6 +159,19 @@ export function HomePage() {
                   onClick={() => devPreview.toggle()}
                 >
                   {devPreview.enabled ? "Dev关闭预览数据" : "Dev开启预览数据"}
+                </Button>
+              ) : null}
+              {personalizedLayoutEnabled && tab === "overview" ? (
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={() =>
+                    setPersonalizedUsageView((current) =>
+                      current === "summary" ? "usageChart" : "summary"
+                    )
+                  }
+                >
+                  {personalizedUsageView === "summary" ? "查看曲线" : "查看总览"}
                 </Button>
               ) : null}
               <TabList ariaLabel="首页视图切换" items={homeTabs} value={tab} onChange={setTab} />
@@ -197,6 +224,7 @@ export function HomePage() {
             onRefreshRequestLogs={refreshRequestLogs}
             selectedLogId={selectedLogId}
             onSelectLogId={setSelectedLogId}
+            personalizedUsageView={personalizedUsageView}
           />
         ) : tab === "cost" ? (
           <Suspense

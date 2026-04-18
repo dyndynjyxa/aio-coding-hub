@@ -1,4 +1,10 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  QueryClient,
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import {
   providerClaudeTerminalLaunchCommand,
   providerUpsert,
@@ -49,6 +55,38 @@ export async function fetchProviderOAuthStatus(
     queryKey: providersKeys.oauthStatus(providerId),
     queryFn: () => providerOAuthStatus(providerId),
   });
+}
+
+const EMPTY_OAUTH_LIMITS_RESULT: OAuthLimitsResult = {
+  limit_short_label: null,
+  limit_5h_text: null,
+  limit_weekly_text: null,
+  limit_5h_reset_at: null,
+  limit_weekly_reset_at: null,
+};
+
+export function normalizeProviderOAuthLimitsResult(
+  result: OAuthLimitsResult | null | undefined
+): OAuthLimitsResult {
+  if (!result) return EMPTY_OAUTH_LIMITS_RESULT;
+  return result;
+}
+
+export function readProviderOAuthLimitsCache(
+  queryClient: QueryClient,
+  providerId: number
+): OAuthLimitsResult | null {
+  const state = queryClient.getQueryState<OAuthLimitsResult>(oauthLimitsKeys.detail(providerId));
+  return state?.data ?? null;
+}
+
+export async function refreshProviderOAuthLimits(
+  queryClient: QueryClient,
+  providerId: number
+): Promise<OAuthLimitsResult> {
+  const next = normalizeProviderOAuthLimitsResult(await providerOAuthFetchLimits(providerId));
+  queryClient.setQueryData(oauthLimitsKeys.detail(providerId), next);
+  return next;
 }
 
 export function useProviderSetEnabledMutation() {
@@ -189,17 +227,7 @@ export function useOAuthLimitsQuery(providerId: number, enabled: boolean) {
   return useQuery({
     queryKey: oauthLimitsKeys.detail(providerId),
     queryFn: async (): Promise<OAuthLimitsResult> => {
-      const result = await providerOAuthFetchLimits(providerId);
-      if (!result) {
-        return {
-          limit_short_label: null,
-          limit_5h_text: null,
-          limit_weekly_text: null,
-          limit_5h_reset_at: null,
-          limit_weekly_reset_at: null,
-        };
-      }
-      return result;
+      return normalizeProviderOAuthLimitsResult(await providerOAuthFetchLimits(providerId));
     },
     enabled,
     staleTime: 180_000,
