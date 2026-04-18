@@ -12,7 +12,10 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { CLIS } from "../constants/clis";
-import { HomeOverviewPanel } from "../components/home/HomeOverviewPanel";
+import {
+  HomeOverviewPanel,
+  type HomeOverviewUsageView,
+} from "../components/home/HomeOverviewPanel";
 import { useDevPreviewData } from "../hooks/useDevPreviewData";
 import { useDocumentVisibility } from "../hooks/useDocumentVisibility";
 import { useWindowForeground } from "../hooks/useWindowForeground";
@@ -101,6 +104,15 @@ export function HomePage() {
   const [tab, setTab] = useState<HomeTabKey>("overview");
   const tabRef = useRef(tab);
   const [selectedLogId, setSelectedLogId] = useState<number | null>(null);
+  const [personalizedUsageView, setPersonalizedUsageView] =
+    useState<HomeOverviewUsageView>("summary");
+  const personalizedUsageChartVisible =
+    personalizedLayoutEnabled && personalizedUsageView === "usageChart";
+  const overviewUsageSeriesEnabled =
+    tab === "overview" &&
+    (personalizedUsageChartVisible || (!personalizedLayoutEnabled && showOverviewUsageSection));
+  const shouldRefetchOverviewUsageSeries =
+    personalizedUsageChartVisible || (!personalizedLayoutEnabled && showOverviewUsageSection);
 
   // --- Delegated state hooks ---
   const circuit = useHomeCircuitState();
@@ -123,10 +135,10 @@ export function HomePage() {
 
   // --- Overview data queries ---
   const usageHeatmapQuery = useUsageHourlySeriesQuery(homeUsageWindowDays, {
-    enabled: tab === "overview" && showOverviewUsageSection,
+    enabled: overviewUsageSeriesEnabled,
   });
-  const usageHeatmapRows = usageHeatmapQuery.data ?? [];
-  const usageHeatmapLoading = usageHeatmapQuery.isFetching;
+  const usageHeatmapRows = overviewUsageSeriesEnabled ? (usageHeatmapQuery.data ?? []) : [];
+  const usageHeatmapLoading = overviewUsageSeriesEnabled && usageHeatmapQuery.isFetching;
 
   const providerLimitQuery = useProviderLimitUsageV1Query(null, {
     enabled: overviewForegroundPollingEnabled,
@@ -154,10 +166,11 @@ export function HomePage() {
 
   // --- Refresh callbacks ---
   const refreshUsageHeatmap = useCallback(() => {
+    if (!shouldRefetchOverviewUsageSeries) return;
     void usageHeatmapQuery.refetch().then((res) => {
       if (res.error) toast("刷新用量失败：请查看控制台日志");
     });
-  }, [usageHeatmapQuery]);
+  }, [shouldRefetchOverviewUsageSeries, usageHeatmapQuery]);
 
   const refreshRequestLogs = useCallback(() => {
     void requestLogsQuery.refetch().then((res) => {
@@ -177,20 +190,26 @@ export function HomePage() {
     tabRef.current = tab;
     if (prev !== "overview" && tab === "overview") {
       emitBackgroundTaskVisibilityTrigger("home-overview-visible");
-      if (showOverviewUsageSection) {
+      if (shouldRefetchOverviewUsageSeries) {
         void usageHeatmapQuery.refetch();
       }
       void requestLogsQuery.refetch();
       void providerLimitQuery.refetch();
     }
-  }, [providerLimitQuery, requestLogsQuery, showOverviewUsageSection, tab, usageHeatmapQuery]);
+  }, [
+    providerLimitQuery,
+    requestLogsQuery,
+    shouldRefetchOverviewUsageSeries,
+    tab,
+    usageHeatmapQuery,
+  ]);
 
   useWindowForeground({
     enabled: tab === "overview",
     throttleMs: 1000,
     onForeground: () => {
       emitBackgroundTaskVisibilityTrigger("home-overview-visible");
-      if (showOverviewUsageSection) {
+      if (shouldRefetchOverviewUsageSeries) {
         void usageHeatmapQuery.refetch();
       }
       void requestLogsQuery.refetch();
@@ -225,6 +244,19 @@ export function HomePage() {
                   onClick={() => devPreview.toggle()}
                 >
                   {devPreview.enabled ? "Dev关闭预览数据" : "Dev开启预览数据"}
+                </Button>
+              ) : null}
+              {personalizedLayoutEnabled && tab === "overview" ? (
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={() =>
+                    setPersonalizedUsageView((current) =>
+                      current === "summary" ? "usageChart" : "summary"
+                    )
+                  }
+                >
+                  {personalizedUsageView === "summary" ? "查看曲线" : "查看总览"}
                 </Button>
               ) : null}
               <TabList ariaLabel="首页视图切换" items={homeTabs} value={tab} onChange={setTab} />
@@ -277,6 +309,7 @@ export function HomePage() {
             onRefreshRequestLogs={refreshRequestLogs}
             selectedLogId={selectedLogId}
             onSelectLogId={setSelectedLogId}
+            personalizedUsageView={personalizedUsageView}
           />
         ) : tab === "cost" ? (
           <Suspense

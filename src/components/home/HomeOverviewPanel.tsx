@@ -27,9 +27,12 @@ import { TabList } from "../../ui/TabList";
 import { formatCountdownSeconds } from "../../utils/formatters";
 import { CliBrandIcon } from "./CliBrandIcon";
 import { HomeRequestLogsPanel } from "./HomeRequestLogsPanel";
+import { HomeTodayProviderUsageOverview } from "./HomeTodayProviderUsageOverview";
 import { HomeUsageSection } from "./HomeUsageSection";
 import { HomeWorkStatusCard } from "./HomeWorkStatusCard";
 import type { HomeCliWorkspaceConfig } from "./homeWorkspaceConfigTypes";
+
+export type HomeOverviewUsageView = "summary" | "usageChart";
 
 const LazyHomeActiveSessionsCardContent = lazy(() =>
   import("./HomeActiveSessionsCard").then((m) => ({ default: m.HomeActiveSessionsCardContent }))
@@ -243,6 +246,7 @@ export type HomeOverviewPanelProps = {
 
   selectedLogId: number | null;
   onSelectLogId: (id: number | null) => void;
+  personalizedUsageView: HomeOverviewUsageView;
 };
 
 const PREVIEW_WORKSPACE_CONFIGS: HomeCliWorkspaceConfig[] = [
@@ -331,6 +335,7 @@ export function HomeOverviewPanel({
   onRefreshRequestLogs,
   selectedLogId,
   onSelectLogId,
+  personalizedUsageView,
 }: HomeOverviewPanelProps) {
   const [sessionsTabsOrder] = useState<HomeOverviewTabKey[]>(() =>
     readHomeOverviewTabOrderFromStorage()
@@ -738,15 +743,22 @@ export function HomeOverviewPanel({
           <div className="flex min-h-0 lg:col-span-4">{logsPrimaryInfoPanel}</div>
           <div className="flex min-h-0 flex-col gap-4 lg:col-span-8">
             <div className="shrink-0">
-              <HomeUsageSection
-                devPreviewEnabled={devPreviewEnabled}
-                showHeatmap={false}
-                showUsageChart={true}
-                usageWindowDays={usageWindowDays}
-                usageHeatmapRows={usageHeatmapRows}
-                usageHeatmapLoading={usageHeatmapLoading}
-                onRefreshUsageHeatmap={onRefreshUsageHeatmap}
-              />
+              {personalizedUsageView === "summary" ? (
+                <HomeTodayProviderUsageOverview
+                  devPreviewEnabled={devPreviewEnabled}
+                  activeSessions={displayedActiveSessions}
+                />
+              ) : (
+                <HomeUsageSection
+                  devPreviewEnabled={devPreviewEnabled}
+                  showHeatmap={false}
+                  showUsageChart={true}
+                  usageWindowDays={usageWindowDays}
+                  usageHeatmapRows={usageHeatmapRows}
+                  usageHeatmapLoading={usageHeatmapLoading}
+                  onRefreshUsageHeatmap={onRefreshUsageHeatmap}
+                />
+              )}
             </div>
             <div className="min-h-0 flex-1">{requestLogsPanel}</div>
           </div>
