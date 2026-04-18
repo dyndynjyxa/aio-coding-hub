@@ -3,7 +3,11 @@
 
 import { useCallback, useMemo } from "react";
 import type { UsageLeaderboardRow, UsagePeriod, UsageSummary } from "../../services/usage/usage";
-import { useUsageLeaderboardV2Query, useUsageSummaryV2Query } from "../../query/usage";
+import {
+  useUsageLeaderboardV2Query,
+  useUsageSummaryV2Query,
+  type UsageV2QueryOptions,
+} from "../../query/usage";
 import { formatUnknownError } from "../../utils/errors";
 import {
   buildPreviewTokenSummary,
@@ -25,6 +29,11 @@ type TokenCostQueryConfig = {
   period: UsagePeriod;
   input: TokenCostQueryInput;
   previewFactor: number;
+};
+
+export type HomeTokenCostDataModelQueryRefreshConfig = {
+  summary?: UsageV2QueryOptions;
+  leaderboard?: UsageV2QueryOptions;
 };
 
 const EMPTY_ROWS: UsageLeaderboardRow[] = [];
@@ -64,10 +73,12 @@ export function useHomeTokenCostDataModel({
   scope,
   queryConfig,
   devPreviewEnabled,
+  queryRefreshConfig,
 }: {
   scope: TokenCostScope;
   queryConfig: TokenCostQueryConfig;
   devPreviewEnabled: boolean;
+  queryRefreshConfig?: HomeTokenCostDataModelQueryRefreshConfig;
 }): HomeTokenCostDataModel {
   const queryInput = useMemo(
     () => ({
@@ -89,8 +100,17 @@ export function useHomeTokenCostDataModel({
     [previewRowsByScope.provider]
   );
 
-  const summaryQuery = useUsageSummaryV2Query(queryConfig.period, queryConfig.input);
-  const leaderboardQuery = useUsageLeaderboardV2Query(scope, queryConfig.period, queryInput);
+  const summaryQuery = useUsageSummaryV2Query(
+    queryConfig.period,
+    queryConfig.input,
+    queryRefreshConfig?.summary
+  );
+  const leaderboardQuery = useUsageLeaderboardV2Query(
+    scope,
+    queryConfig.period,
+    queryInput,
+    queryRefreshConfig?.leaderboard
+  );
 
   const summaryRaw = summaryQuery.data ?? null;
   const rowsRaw = leaderboardQuery.data ?? EMPTY_ROWS;

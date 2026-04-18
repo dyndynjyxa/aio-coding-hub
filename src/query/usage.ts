@@ -12,10 +12,19 @@ import {
 } from "../services/usage/usage";
 import { usageKeys } from "./keys";
 
+type UsageQueryOptions = {
+  enabled?: boolean;
+  refetchIntervalMs?: number | false;
+};
+
+export type UsageV2QueryOptions = UsageQueryOptions & {
+  refetchOnMount?: boolean | "always";
+};
+
 export function useUsageSummaryQuery(
   range: UsageRange,
   input: { cliKey: CliKey | null },
-  options?: { enabled?: boolean; refetchIntervalMs?: number | false }
+  options?: UsageQueryOptions
 ) {
   return useQuery({
     queryKey: usageKeys.summary(range, input),
@@ -26,10 +35,7 @@ export function useUsageSummaryQuery(
   });
 }
 
-export function useUsageHourlySeriesQuery(
-  days: number,
-  options?: { enabled?: boolean; refetchIntervalMs?: number | false }
-) {
+export function useUsageHourlySeriesQuery(days: number, options?: UsageQueryOptions) {
   return useQuery({
     queryKey: usageKeys.hourlySeries(days),
     queryFn: () => usageHourlySeries(days),
@@ -47,13 +53,15 @@ export function useUsageSummaryV2Query(
     cliKey: CliKey | null;
     providerId: number | null;
   },
-  options?: { enabled?: boolean }
+  options?: UsageV2QueryOptions
 ) {
   return useQuery({
     queryKey: usageKeys.summaryV2(period, input),
     queryFn: () => usageSummaryV2(period, input),
     enabled: options?.enabled ?? true,
     placeholderData: keepPreviousData,
+    refetchInterval: options?.refetchIntervalMs ?? false,
+    refetchOnMount: options?.refetchOnMount,
   });
 }
 
@@ -67,13 +75,15 @@ export function useUsageLeaderboardV2Query(
     providerId: number | null;
     limit: number | null;
   },
-  options?: { enabled?: boolean }
+  options?: UsageV2QueryOptions
 ) {
   return useQuery({
     queryKey: usageKeys.leaderboardV2(scope, period, input),
     queryFn: () => usageLeaderboardV2(scope, period, input),
     enabled: options?.enabled ?? true,
     placeholderData: keepPreviousData,
+    refetchInterval: options?.refetchIntervalMs ?? false,
+    refetchOnMount: options?.refetchOnMount,
   });
 }
 

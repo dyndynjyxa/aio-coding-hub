@@ -1,6 +1,8 @@
 import { useMemo } from "react";
 import { Loader2 } from "lucide-react";
+import { useDocumentVisibility } from "../../hooks/useDocumentVisibility";
 import { useNowMs } from "../../hooks/useNowMs";
+import { useWindowForeground } from "../../hooks/useWindowForeground";
 import type { GatewayActiveSession } from "../../services/gateway/gateway";
 import type { TraceSession } from "../../services/gateway/traceStore";
 import type { UsageLeaderboardRow, UsageSummary } from "../../services/usage/usage";
@@ -10,7 +12,10 @@ import { formatTokensMillions } from "../../utils/chartHelpers";
 import { formatInteger, formatPercent, formatUsdCompact } from "../../utils/formatters";
 import { computeStatusBadge } from "./HomeLogShared";
 import { QueryErrorCard } from "../shared/QueryErrorCard";
-import { useHomeTokenCostDataModel } from "./useHomeTokenCostDataModel";
+import {
+  useHomeTokenCostDataModel,
+  type HomeTokenCostDataModelQueryRefreshConfig,
+} from "./useHomeTokenCostDataModel";
 
 const SUMMARY_SKELETON_KEYS = [0, 1, 2, 3, 4];
 const PROVIDER_SKELETON_KEYS = [0, 1, 2];
@@ -18,6 +23,7 @@ const MAX_PROVIDER_ROWS = 3;
 const PROVIDER_HEADER_LABEL = "供应商（前 3 个）";
 const LIVE_TRACE_MAX_AGE_MS = 15 * 60 * 1000;
 const STALE_TRACE_TIMEOUT_MS = 5 * 60 * 1000;
+const OVERVIEW_REFRESH_INTERVAL_MS = 60 * 1000;
 const TABLE_TH_CLASS =
   "border-b border-slate-200 bg-slate-50/70 px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-400";
 const TABLE_TD_CLASS = "border-b border-slate-100 px-3 py-3 dark:border-slate-800";
@@ -474,11 +480,36 @@ export function HomeTodayProviderUsageOverview({
   activeSessions?: GatewayActiveSession[];
   traces?: TraceSession[];
 }) {
+  const documentVisible = useDocumentVisibility();
+  const queryRefreshConfig = useMemo<HomeTokenCostDataModelQueryRefreshConfig>(() => {
+    const refetchIntervalMs: number | false = documentVisible
+      ? OVERVIEW_REFRESH_INTERVAL_MS
+      : false;
+
+    return {
+      summary: {
+        refetchIntervalMs,
+        refetchOnMount: "always" as const,
+      },
+      leaderboard: {
+        refetchIntervalMs,
+        refetchOnMount: "always" as const,
+      },
+    };
+  }, [documentVisible]);
   const model = useHomeTokenCostDataModel({
     scope: "provider",
     queryConfig: TODAY_PROVIDER_QUERY_CONFIG,
     devPreviewEnabled,
+    queryRefreshConfig,
   });
+
+  useWindowForeground({
+    enabled: true,
+    onForeground: model.refresh,
+    throttleMs: 1000,
+  });
+
   const nowMs = useNowMs(Boolean(traces && traces.length > 0), 250);
   const activeProviders = useMemo(
     () =>

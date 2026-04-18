@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeTodayProviderUsageOverview } from "../HomeTodayProviderUsageOverview";
 import { useHomeTokenCostDataModel } from "../useHomeTokenCostDataModel";
@@ -203,6 +203,7 @@ function mockDataModel(overrides: Partial<ReturnType<typeof useHomeTokenCostData
 describe("components/home/HomeTodayProviderUsageOverview", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
   });
 
   it("uses the fixed today provider query config and renders summary plus top providers", () => {
@@ -223,6 +224,16 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
         previewFactor: 1,
       },
       devPreviewEnabled: true,
+      queryRefreshConfig: {
+        summary: {
+          refetchIntervalMs: 60_000,
+          refetchOnMount: "always",
+        },
+        leaderboard: {
+          refetchIntervalMs: 60_000,
+          refetchOnMount: "always",
+        },
+      },
     });
 
     const totalWithCacheCard = screen.getByText("含缓存总 Token").parentElement;
@@ -259,6 +270,51 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(within(claudeRow as HTMLElement).getByText("100.0%")).toBeInTheDocument();
     expect(within(claudeRow as HTMLElement).getByText("6.2K / 1.2K / 16.7%")).toBeInTheDocument();
     expect(within(openaiRow as HTMLElement).getByText("5.8K / 1.8K / 31.6%")).toBeInTheDocument();
+  });
+
+  it("disables polling while the page is hidden", () => {
+    mockDataModel();
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+
+    render(<HomeTodayProviderUsageOverview />);
+
+    expect(vi.mocked(useHomeTokenCostDataModel)).toHaveBeenCalledWith({
+      scope: "provider",
+      queryConfig: {
+        period: "daily",
+        input: {
+          startTs: null,
+          endTs: null,
+          cliKey: null,
+          providerId: null,
+        },
+        previewFactor: 1,
+      },
+      devPreviewEnabled: false,
+      queryRefreshConfig: {
+        summary: {
+          refetchIntervalMs: false,
+          refetchOnMount: "always",
+        },
+        leaderboard: {
+          refetchIntervalMs: false,
+          refetchOnMount: "always",
+        },
+      },
+    });
+  });
+
+  it("refreshes once when the window returns to the foreground", () => {
+    const refresh = vi.fn();
+    mockDataModel({ refresh });
+
+    render(<HomeTodayProviderUsageOverview />);
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it("marks running providers that are already inside the default top three", () => {
