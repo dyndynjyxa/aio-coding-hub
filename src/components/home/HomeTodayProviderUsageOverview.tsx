@@ -1,6 +1,8 @@
 import { useMemo } from "react";
 import { Loader2 } from "lucide-react";
+import { useNowMs } from "../../hooks/useNowMs";
 import type { GatewayActiveSession } from "../../services/gateway/gateway";
+import type { TraceSession } from "../../services/gateway/traceStore";
 import type { UsageLeaderboardRow, UsageSummary } from "../../services/usage/usage";
 import { Card } from "../../ui/Card";
 import { computeCacheHitRate } from "../../utils/cacheRateMetrics";
@@ -14,6 +16,8 @@ const SUMMARY_SKELETON_KEYS = [0, 1, 2, 3, 4];
 const PROVIDER_SKELETON_KEYS = [0, 1, 2];
 const MAX_PROVIDER_ROWS = 3;
 const PROVIDER_HEADER_LABEL = "供应商（前 3 个）";
+const LIVE_TRACE_MAX_AGE_MS = 15 * 60 * 1000;
+const STALE_TRACE_TIMEOUT_MS = 5 * 60 * 1000;
 const TABLE_TH_CLASS =
   "border-b border-slate-200 bg-slate-50/70 px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-400";
 const TABLE_TD_CLASS = "border-b border-slate-100 px-3 py-3 dark:border-slate-800";
@@ -55,6 +59,14 @@ type DisplayProviderRow = {
   isRunning: boolean;
   isSynthetic: boolean;
 };
+type ProviderIdentity = {
+  providerId: number | null;
+  cliKey: string | null;
+  normalizedName: string;
+};
+type ActiveProviderEntry = ProviderIdentity & {
+  displayName: string;
+};
 
 const SUMMARY_METRIC_ACCENT_CLASS: Record<SummaryMetricAccent, string> = {
   blue: "bg-blue-500",
@@ -74,8 +86,66 @@ function successRate(row: UsageLeaderboardRow) {
   return row.requests_success / row.requests_total;
 }
 
-function normalizeProviderName(name: string | null | undefined) {
-  return name?.trim().toLocaleLowerCase() ?? "";
+function normalizeCliKey(value: string | null | undefined) {
+  const normalized = value?.trim().toLocaleLowerCase() ?? "";
+  return normalized || null;
+}
+
+function normalizeProviderName(name: string | null | undefined, cliKey?: string | null) {
+  const normalized = name?.trim().toLocaleLowerCase() ?? "";
+  if (!normalized) return "";
+  const normalizedCliKey = normalizeCliKey(cliKey);
+  const prefix = normalizedCliKey ? `${normalizedCliKey}/` : null;
+  if (prefix && normalized.startsWith(prefix)) {
+    return normalized.slice(prefix.length).trim();
+  }
+  return normalized;
+}
+
+function parseProviderRowIdentity(row: UsageLeaderboardRow): ProviderIdentity {
+  const match = row.key.match(/^([^:]+):(\d+)$/);
+  const cliKey = normalizeCliKey(match?.[1] ?? null);
+  const providerId = match ? Number(match[2]) : NaN;
+
+  return {
+    providerId: Number.isSafeInteger(providerId) && providerId > 0 ? providerId : null,
+    cliKey,
+    normalizedName: normalizeProviderName(row.name, cliKey),
+  };
+}
+
+function activeProviderIdentity(session: GatewayActiveSession): ActiveProviderEntry {
+  const cliKey = normalizeCliKey(session.cli_key);
+  const providerId =
+    Number.isSafeInteger(session.provider_id) && session.provider_id > 0
+      ? session.provider_id
+      : null;
+
+  return {
+    providerId,
+    cliKey,
+    normalizedName: normalizeProviderName(session.provider_name, cliKey),
+    displayName: session.provider_name?.trim() || "未知",
+  };
+}
+
+function providerIdentityKey(identity: ProviderIdentity) {
+  if (identity.providerId != null) return `id:${identity.providerId}`;
+  if (identity.cliKey && identity.normalizedName) {
+    return `name:${identity.cliKey}:${identity.normalizedName}`;
+  }
+  return `name:${identity.normalizedName}`;
+}
+
+function formatSyntheticProviderName(
+  entry: ActiveProviderEntry,
+  options: { preferCliPrefix: boolean }
+) {
+  const rawName = entry.displayName.trim();
+  if (!rawName) return "未知";
+  if (!options.preferCliPrefix || !entry.cliKey) return rawName;
+  const prefix = `${entry.cliKey}/`;
+  return rawName.toLocaleLowerCase().startsWith(prefix) ? rawName : `${prefix}${rawName}`;
 }
 
 function sortProviderRows(rows: UsageLeaderboardRow[]) {
@@ -90,26 +160,80 @@ function sortProviderRows(rows: UsageLeaderboardRow[]) {
   });
 }
 
-function buildActiveProviderNames(activeSessions: GatewayActiveSession[]) {
+function buildActiveProviders(
+  activeSessions: GatewayActiveSession[],
+  options: { preferCliPrefix: boolean }
+) {
   const seen = new Set<string>();
-  const names: string[] = [];
+  const entries: ActiveProviderEntry[] = [];
 
   for (const session of activeSessions) {
-    const name = session.provider_name?.trim();
-    const normalized = normalizeProviderName(name);
-    if (!name || !normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    names.push(name);
+    const identity = activeProviderIdentity(session);
+    const key = providerIdentityKey(identity);
+    if (!identity.normalizedName || seen.has(key)) continue;
+    seen.add(key);
+    entries.push({
+      ...identity,
+      displayName: formatSyntheticProviderName(identity, options),
+    });
   }
 
-  return names;
+  return entries;
 }
 
-function createSyntheticProviderRow(name: string): UsageLeaderboardRow {
-  const normalized = normalizeProviderName(name).replace(/\s+/g, "-");
+function buildRunningProvidersFromTraces(
+  traces: TraceSession[],
+  nowMs: number,
+  options: { preferCliPrefix: boolean }
+) {
+  const seen = new Set<string>();
+  const entries: ActiveProviderEntry[] = [];
+
+  for (const trace of traces) {
+    if (trace.summary) continue;
+    if (nowMs - trace.first_seen_ms >= LIVE_TRACE_MAX_AGE_MS) continue;
+    if (nowMs - trace.last_seen_ms >= STALE_TRACE_TIMEOUT_MS) continue;
+
+    const latestAttempt = (trace.attempts ?? [])
+      .slice()
+      .sort((left, right) => right.attempt_index - left.attempt_index)[0];
+    const providerName = latestAttempt?.provider_name?.trim();
+    if (!providerName || providerName === "Unknown") continue;
+
+    const cliKey = normalizeCliKey(trace.cli_key);
+    const providerId =
+      latestAttempt &&
+      Number.isSafeInteger(latestAttempt.provider_id) &&
+      latestAttempt.provider_id > 0
+        ? latestAttempt.provider_id
+        : null;
+    const entry: ActiveProviderEntry = {
+      providerId,
+      cliKey,
+      normalizedName: normalizeProviderName(providerName, cliKey),
+      displayName: providerName,
+    };
+    const key = providerIdentityKey(entry);
+    if (!entry.normalizedName || seen.has(key)) continue;
+
+    seen.add(key);
+    entries.push({
+      ...entry,
+      displayName: formatSyntheticProviderName(entry, options),
+    });
+  }
+
+  return entries;
+}
+
+function createSyntheticProviderRow(entry: ActiveProviderEntry): UsageLeaderboardRow {
+  const normalized = entry.normalizedName.replace(/\s+/g, "-");
   return {
-    key: `running:${normalized || "unknown"}`,
-    name,
+    key:
+      entry.providerId != null
+        ? `running:${entry.cliKey ?? "provider"}:${entry.providerId}`
+        : `running:${normalized || "unknown"}`,
+    name: entry.displayName,
     requests_total: 0,
     requests_success: 0,
     requests_failed: 0,
@@ -128,34 +252,69 @@ function createSyntheticProviderRow(name: string): UsageLeaderboardRow {
 
 function selectProviderRows(
   rows: UsageLeaderboardRow[],
-  activeSessions: GatewayActiveSession[]
+  activeProviders: ActiveProviderEntry[]
 ): DisplayProviderRow[] {
   const sortedRows = sortProviderRows(rows);
-  const activeProviderNames = buildActiveProviderNames(activeSessions);
-  const activeProviderSet = new Set(activeProviderNames.map((name) => normalizeProviderName(name)));
-  const rowByName = new Map(
-    sortedRows.map((row) => [normalizeProviderName(row.name), row] as const)
+  const rowIdentityByKey = new Map(
+    sortedRows.map((row) => [row.key, parseProviderRowIdentity(row)] as const)
   );
-  const rankByName = new Map(
-    sortedRows.map((row, index) => [normalizeProviderName(row.name), index] as const)
+  const activeProviderIdSet = new Set(
+    activeProviders
+      .map((entry) => entry.providerId)
+      .filter((providerId): providerId is number => providerId != null)
   );
+  const activeProviderNameSet = new Set(activeProviders.map((entry) => entry.normalizedName));
+  const activeProviderById = new Map(
+    activeProviders
+      .filter(
+        (entry): entry is ActiveProviderEntry & { providerId: number } => entry.providerId != null
+      )
+      .map((entry) => [entry.providerId, entry] as const)
+  );
+  const activeProviderByName = new Map(
+    activeProviders.map((entry) => [entry.normalizedName, entry] as const)
+  );
+  const rowById = new Map<number, UsageLeaderboardRow>();
+  const rowByName = new Map<string, UsageLeaderboardRow>();
+  const rankById = new Map<number, number>();
+  const rankByName = new Map<string, number>();
+
+  sortedRows.forEach((row, index) => {
+    const identity = rowIdentityByKey.get(row.key);
+    if (!identity) return;
+    if (identity.providerId != null && !rowById.has(identity.providerId)) {
+      rowById.set(identity.providerId, row);
+      rankById.set(identity.providerId, index);
+    }
+    if (identity.normalizedName && !rowByName.has(identity.normalizedName)) {
+      rowByName.set(identity.normalizedName, row);
+      rankByName.set(identity.normalizedName, index);
+    }
+  });
   const selected = new Map<string, DisplayProviderRow>();
 
   for (const row of sortedRows) {
-    const normalized = normalizeProviderName(row.name);
-    if (!activeProviderSet.has(normalized)) continue;
-    selected.set(normalized, { row, isRunning: true, isSynthetic: false });
+    const identity = rowIdentityByKey.get(row.key);
+    if (!identity) continue;
+    const matchedActive =
+      (identity.providerId != null ? activeProviderById.get(identity.providerId) : null) ??
+      activeProviderByName.get(identity.normalizedName);
+    if (!matchedActive) continue;
+    selected.set(providerIdentityKey(matchedActive), { row, isRunning: true, isSynthetic: false });
     if (selected.size >= MAX_PROVIDER_ROWS) break;
   }
 
   if (selected.size < MAX_PROVIDER_ROWS) {
-    for (const name of activeProviderNames) {
-      const normalized = normalizeProviderName(name);
-      if (!normalized || selected.has(normalized)) continue;
-      selected.set(normalized, {
-        row: rowByName.get(normalized) ?? createSyntheticProviderRow(name),
+    for (const entry of activeProviders) {
+      const key = providerIdentityKey(entry);
+      if (!entry.normalizedName || selected.has(key)) continue;
+      const matchedRow =
+        (entry.providerId != null ? rowById.get(entry.providerId) : null) ??
+        rowByName.get(entry.normalizedName);
+      selected.set(key, {
+        row: matchedRow ?? createSyntheticProviderRow(entry),
         isRunning: true,
-        isSynthetic: !rowByName.has(normalized),
+        isSynthetic: matchedRow == null,
       });
       if (selected.size >= MAX_PROVIDER_ROWS) break;
     }
@@ -163,18 +322,33 @@ function selectProviderRows(
 
   if (selected.size < MAX_PROVIDER_ROWS) {
     for (const row of sortedRows) {
-      const normalized = normalizeProviderName(row.name);
-      if (selected.has(normalized)) continue;
-      selected.set(normalized, { row, isRunning: false, isSynthetic: false });
+      const identity = rowIdentityByKey.get(row.key);
+      if (!identity) continue;
+      const key = providerIdentityKey(identity);
+      if (selected.has(key)) continue;
+      if (
+        (identity.providerId != null && activeProviderIdSet.has(identity.providerId)) ||
+        activeProviderNameSet.has(identity.normalizedName)
+      ) {
+        continue;
+      }
+      selected.set(key, { row, isRunning: false, isSynthetic: false });
       if (selected.size >= MAX_PROVIDER_ROWS) break;
     }
   }
 
   return Array.from(selected.values()).sort((left, right) => {
+    const leftIdentity = rowIdentityByKey.get(left.row.key) ?? parseProviderRowIdentity(left.row);
+    const rightIdentity =
+      rowIdentityByKey.get(right.row.key) ?? parseProviderRowIdentity(right.row);
     const leftRank =
-      rankByName.get(normalizeProviderName(left.row.name)) ?? Number.MAX_SAFE_INTEGER;
+      (leftIdentity.providerId != null ? rankById.get(leftIdentity.providerId) : undefined) ??
+      rankByName.get(leftIdentity.normalizedName) ??
+      Number.MAX_SAFE_INTEGER;
     const rightRank =
-      rankByName.get(normalizeProviderName(right.row.name)) ?? Number.MAX_SAFE_INTEGER;
+      (rightIdentity.providerId != null ? rankById.get(rightIdentity.providerId) : undefined) ??
+      rankByName.get(rightIdentity.normalizedName) ??
+      Number.MAX_SAFE_INTEGER;
     if (leftRank !== rightRank) return leftRank - rightRank;
     return left.row.name.localeCompare(right.row.name);
   });
@@ -294,19 +468,33 @@ function ProviderUsageSkeleton() {
 export function HomeTodayProviderUsageOverview({
   devPreviewEnabled = false,
   activeSessions = [],
+  traces,
 }: {
   devPreviewEnabled?: boolean;
   activeSessions?: GatewayActiveSession[];
+  traces?: TraceSession[];
 }) {
   const model = useHomeTokenCostDataModel({
     scope: "provider",
     queryConfig: TODAY_PROVIDER_QUERY_CONFIG,
     devPreviewEnabled,
   });
+  const nowMs = useNowMs(Boolean(traces && traces.length > 0), 250);
+  const activeProviders = useMemo(
+    () =>
+      traces != null
+        ? buildRunningProvidersFromTraces(traces, nowMs, {
+            preferCliPrefix: !model.previewActive,
+          })
+        : buildActiveProviders(activeSessions, {
+            preferCliPrefix: !model.previewActive,
+          }),
+    [activeSessions, model.previewActive, nowMs, traces]
+  );
 
   const topRows = useMemo(
-    () => selectProviderRows(model.rows, activeSessions),
-    [activeSessions, model.rows]
+    () => selectProviderRows(model.rows, activeProviders),
+    [activeProviders, model.rows]
   );
 
   return (

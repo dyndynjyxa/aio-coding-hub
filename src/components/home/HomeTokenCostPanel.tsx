@@ -17,7 +17,7 @@ import { QueryErrorCard } from "../shared/QueryErrorCard";
 import { useHomeTokenCostDataModel } from "./useHomeTokenCostDataModel";
 
 type TokenCostScope = "provider" | "model";
-type TokenCostRange = "today" | "last3" | "last7" | "last15" | "last30" | "month";
+type TokenCostRange = "today" | "yesterday" | "last3" | "last7" | "last15" | "last30" | "month";
 
 const TOKEN_COST_SCOPE_ITEMS = [
   { key: "provider", label: "供应商" },
@@ -26,6 +26,7 @@ const TOKEN_COST_SCOPE_ITEMS = [
 
 const TOKEN_COST_RANGE_ITEMS = [
   { key: "today", label: "今天" },
+  { key: "yesterday", label: "昨天" },
   { key: "last3", label: "最近3天" },
   { key: "last7", label: "最近7天" },
   { key: "last15", label: "最近15天" },
@@ -108,6 +109,17 @@ function buildTokenCostQueryConfig(range: TokenCostRange, now = new Date()): Tok
   const tomorrowStart = addLocalDays(todayStart, 1);
 
   switch (range) {
+    case "yesterday":
+      return {
+        label: rangeLabel(range),
+        period: "custom",
+        input: {
+          ...emptyTokenCostQueryInput(),
+          startTs: unixSecondsFromDate(addLocalDays(todayStart, -1)),
+          endTs: unixSecondsFromDate(todayStart),
+        },
+        previewFactor: 1,
+      };
     case "last3":
       return {
         label: rangeLabel(range),

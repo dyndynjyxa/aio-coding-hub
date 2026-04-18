@@ -2,17 +2,21 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeTodayProviderUsageOverview } from "../HomeTodayProviderUsageOverview";
 import { useHomeTokenCostDataModel } from "../useHomeTokenCostDataModel";
+import type { TraceSession } from "../../../services/gateway/traceStore";
 
 vi.mock("../useHomeTokenCostDataModel", () => ({
   useHomeTokenCostDataModel: vi.fn(),
 }));
 
-function createActiveSession(providerName: string) {
+function createActiveSession(
+  providerName: string,
+  options?: { providerId?: number; cliKey?: string }
+) {
   return {
-    cli_key: "claude",
+    cli_key: options?.cliKey ?? "claude",
     session_id: `session-${providerName}`,
     session_suffix: "abcd",
-    provider_id: 1,
+    provider_id: options?.providerId ?? 1,
     provider_name: providerName,
     expires_at: Date.now(),
     request_count: 1,
@@ -20,6 +24,46 @@ function createActiveSession(providerName: string) {
     total_output_tokens: 50,
     total_cost_usd: 0.1,
     total_duration_ms: 1000,
+  };
+}
+
+function createRunningTrace(
+  providerName: string,
+  options?: { providerId?: number; cliKey?: string; traceId?: string }
+): TraceSession {
+  const cliKey = options?.cliKey ?? "claude";
+  const providerId = options?.providerId ?? 1;
+  const now = Date.now();
+
+  return {
+    trace_id: options?.traceId ?? `trace-${providerName}`,
+    cli_key: cliKey,
+    session_id: `session-${providerName}`,
+    method: "POST",
+    path: "/v1/messages",
+    query: null,
+    requested_model: null,
+    first_seen_ms: now - 5_000,
+    last_seen_ms: now,
+    attempts: [
+      {
+        trace_id: options?.traceId ?? `trace-${providerName}`,
+        cli_key: cliKey,
+        session_id: `session-${providerName}`,
+        method: "POST",
+        path: "/v1/messages",
+        query: null,
+        requested_model: null,
+        attempt_index: 1,
+        provider_id: providerId,
+        provider_name: providerName,
+        base_url: "https://example.com",
+        outcome: "started",
+        status: null,
+        attempt_started_ms: now - 3_000,
+        attempt_duration_ms: 3_000,
+      },
+    ],
   };
 }
 
@@ -252,12 +296,112 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
       <HomeTodayProviderUsageOverview activeSessions={[createActiveSession("Runtime Fresh")]} />
     );
 
-    const runtimeRow = screen.getByText("Runtime Fresh").closest("tr");
+    const runtimeRow = screen.getByText("claude/Runtime Fresh").closest("tr");
     expect(runtimeRow).toBeTruthy();
     expect(screen.queryByText("OpenAI Primary")).not.toBeInTheDocument();
     expect(within(runtimeRow as HTMLElement).getByLabelText("进行中")).toBeInTheDocument();
     expect(within(runtimeRow as HTMLElement).getByText("— / — / —")).toBeInTheDocument();
     expect(within(runtimeRow as HTMLElement).getAllByText("—").length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("matches a running provider to the prefixed usage row by provider id", () => {
+    mockDataModel({
+      rows: [
+        {
+          key: "codex:88",
+          name: "codex/鹿森",
+          requests_total: 9,
+          requests_success: 9,
+          requests_failed: 0,
+          total_tokens: 12_000,
+          io_total_tokens: 10_000,
+          input_tokens: 6_000,
+          output_tokens: 4_000,
+          cache_creation_input_tokens: 700,
+          cache_read_input_tokens: 1_300,
+          avg_duration_ms: 820,
+          avg_ttfb_ms: 210,
+          avg_output_tokens_per_second: 108,
+          cost_usd: 0.88,
+        },
+      ],
+    });
+
+    render(
+      <HomeTodayProviderUsageOverview
+        activeSessions={[createActiveSession("鹿森", { providerId: 88, cliKey: "codex" })]}
+      />
+    );
+
+    const providerRow = screen.getByText("codex/鹿森").closest("tr");
+    expect(providerRow).toBeTruthy();
+    expect(within(providerRow as HTMLElement).getByLabelText("进行中")).toBeInTheDocument();
+    expect(screen.queryByText("codex/codex/鹿森")).not.toBeInTheDocument();
+  });
+
+  it("does not keep showing a running badge when traces are gone", () => {
+    mockDataModel({
+      rows: [
+        {
+          key: "claude:1",
+          name: "Claude Main",
+          requests_total: 5,
+          requests_success: 5,
+          requests_failed: 0,
+          total_tokens: 6_200,
+          io_total_tokens: 5_000,
+          input_tokens: 3_000,
+          output_tokens: 2_000,
+          cache_creation_input_tokens: 500,
+          cache_read_input_tokens: 700,
+          avg_duration_ms: 900,
+          avg_ttfb_ms: 220,
+          avg_output_tokens_per_second: 90,
+          cost_usd: 0.5,
+        },
+      ],
+    });
+
+    render(
+      <HomeTodayProviderUsageOverview
+        activeSessions={[createActiveSession("Claude Main", { providerId: 1, cliKey: "claude" })]}
+        traces={[]}
+      />
+    );
+
+    const providerRow = screen.getByText("Claude Main").closest("tr");
+    expect(providerRow).toBeTruthy();
+    expect(within(providerRow as HTMLElement).queryByLabelText("进行中")).not.toBeInTheDocument();
+  });
+
+  it("marks running providers from live traces when traces are present", () => {
+    mockDataModel({
+      rows: [
+        {
+          key: "claude:1",
+          name: "Claude Main",
+          requests_total: 5,
+          requests_success: 5,
+          requests_failed: 0,
+          total_tokens: 6_200,
+          io_total_tokens: 5_000,
+          input_tokens: 3_000,
+          output_tokens: 2_000,
+          cache_creation_input_tokens: 500,
+          cache_read_input_tokens: 700,
+          avg_duration_ms: 900,
+          avg_ttfb_ms: 220,
+          avg_output_tokens_per_second: 90,
+          cost_usd: 0.5,
+        },
+      ],
+    });
+
+    render(<HomeTodayProviderUsageOverview traces={[createRunningTrace("Claude Main")]} />);
+
+    const providerRow = screen.getByText("Claude Main").closest("tr");
+    expect(providerRow).toBeTruthy();
+    expect(within(providerRow as HTMLElement).getByLabelText("进行中")).toBeInTheDocument();
   });
 
   it("shows a dash for cache hit rate when the summary has no denominator", () => {

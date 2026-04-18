@@ -178,6 +178,29 @@ describe("components/home/HomeTokenCostPanel", () => {
 
     render(<HomeTokenCostPanel />);
 
+    fireEvent.click(screen.getByRole("button", { name: "昨天" }));
+
+    expect(vi.mocked(useUsageSummaryV2Query)).toHaveBeenLastCalledWith(
+      "custom",
+      expect.objectContaining({
+        startTs: Math.floor(new Date(2026, 3, 15, 0, 0, 0).getTime() / 1000),
+        endTs: Math.floor(new Date(2026, 3, 16, 0, 0, 0).getTime() / 1000),
+        cliKey: null,
+        providerId: null,
+      })
+    );
+    expect(vi.mocked(useUsageLeaderboardV2Query)).toHaveBeenLastCalledWith(
+      "provider",
+      "custom",
+      expect.objectContaining({
+        startTs: Math.floor(new Date(2026, 3, 15, 0, 0, 0).getTime() / 1000),
+        endTs: Math.floor(new Date(2026, 3, 16, 0, 0, 0).getTime() / 1000),
+        cliKey: null,
+        providerId: null,
+        limit: null,
+      })
+    );
+
     fireEvent.click(screen.getByRole("button", { name: "最近3天" }));
 
     expect(vi.mocked(useUsageSummaryV2Query)).toHaveBeenLastCalledWith(
