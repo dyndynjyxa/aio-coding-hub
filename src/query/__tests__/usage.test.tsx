@@ -1,5 +1,5 @@
 import { renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { UsageSummary } from "../../services/usage/usage";
 import {
   usageHourlySeries,
@@ -10,6 +10,7 @@ import {
 } from "../../services/usage/usage";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
+import { usageKeys } from "../keys";
 import {
   useUsageHourlySeriesQuery,
   useUsageLeaderboardV2Query,
@@ -17,6 +18,13 @@ import {
   useUsageSummaryQuery,
   useUsageSummaryV2Query,
 } from "../usage";
+
+function queryRefreshOptions(query: { options?: unknown } | undefined) {
+  return (query?.options ?? {}) as {
+    refetchInterval?: number | false;
+    refetchOnMount?: boolean | "always";
+  };
+}
 
 vi.mock("../../services/usage/usage", async () => {
   const actual = await vi.importActual<typeof import("../../services/usage/usage")>(
@@ -55,6 +63,10 @@ function makeUsageSummary(overrides: Partial<UsageSummary> = {}): UsageSummary {
 }
 
 describe("query/usage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("calls usageHourlySeries with tauri runtime", async () => {
     setTauriRuntime();
 
@@ -132,33 +144,37 @@ describe("query/usage", () => {
     expect(usageSummary).not.toHaveBeenCalled();
   });
 
-  it("calls usageSummaryV2 with tauri runtime", async () => {
+  it("calls usageSummaryV2 with tauri runtime and forwards refresh options", async () => {
     setTauriRuntime();
 
     vi.mocked(usageSummaryV2).mockResolvedValue(makeUsageSummary());
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
+    const input = {
+      startTs: 1,
+      endTs: 2,
+      cliKey: "claude" as const,
+      providerId: 7,
+    };
 
     renderHook(
       () =>
-        useUsageSummaryV2Query("daily", {
-          startTs: 1,
-          endTs: 2,
-          cliKey: "claude",
-          providerId: 7,
+        useUsageSummaryV2Query("daily", input, {
+          refetchIntervalMs: 60_000,
+          refetchOnMount: "always",
         }),
       { wrapper }
     );
 
     await waitFor(() => {
-      expect(usageSummaryV2).toHaveBeenCalledWith("daily", {
-        startTs: 1,
-        endTs: 2,
-        cliKey: "claude",
-        providerId: 7,
-      });
+      expect(usageSummaryV2).toHaveBeenCalledWith("daily", input);
     });
+
+    const query = client.getQueryCache().find({ queryKey: usageKeys.summaryV2("daily", input) });
+    const options = queryRefreshOptions(query);
+    expect(options.refetchInterval).toBe(60_000);
+    expect(options.refetchOnMount).toBe("always");
   });
 
   it("does not call usageSummaryV2 when disabled", async () => {
@@ -172,7 +188,7 @@ describe("query/usage", () => {
         useUsageSummaryV2Query(
           "daily",
           { startTs: 1, endTs: 2, cliKey: "claude", providerId: null },
-          { enabled: false }
+          { enabled: false, refetchIntervalMs: 60_000, refetchOnMount: "always" }
         ),
       { wrapper }
     );
@@ -181,35 +197,40 @@ describe("query/usage", () => {
     expect(usageSummaryV2).not.toHaveBeenCalled();
   });
 
-  it("calls usageLeaderboardV2 with tauri runtime", async () => {
+  it("calls usageLeaderboardV2 with tauri runtime and forwards refresh options", async () => {
     setTauriRuntime();
 
     vi.mocked(usageLeaderboardV2).mockResolvedValue([]);
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
+    const input = {
+      startTs: 1,
+      endTs: 2,
+      cliKey: "claude" as const,
+      providerId: 9,
+      limit: null,
+    };
 
     renderHook(
       () =>
-        useUsageLeaderboardV2Query("provider", "weekly", {
-          startTs: 1,
-          endTs: 2,
-          cliKey: "claude",
-          providerId: 9,
-          limit: null,
+        useUsageLeaderboardV2Query("provider", "weekly", input, {
+          refetchIntervalMs: 60_000,
+          refetchOnMount: "always",
         }),
       { wrapper }
     );
 
     await waitFor(() => {
-      expect(usageLeaderboardV2).toHaveBeenCalledWith("provider", "weekly", {
-        startTs: 1,
-        endTs: 2,
-        cliKey: "claude",
-        providerId: 9,
-        limit: null,
-      });
+      expect(usageLeaderboardV2).toHaveBeenCalledWith("provider", "weekly", input);
     });
+
+    const query = client
+      .getQueryCache()
+      .find({ queryKey: usageKeys.leaderboardV2("provider", "weekly", input) });
+    const options = queryRefreshOptions(query);
+    expect(options.refetchInterval).toBe(60_000);
+    expect(options.refetchOnMount).toBe("always");
   });
 
   it("does not call usageLeaderboardV2 when disabled", async () => {
@@ -230,7 +251,7 @@ describe("query/usage", () => {
             providerId: null,
             limit: null,
           },
-          { enabled: false }
+          { enabled: false, refetchIntervalMs: 60_000, refetchOnMount: "always" }
         ),
       { wrapper }
     );

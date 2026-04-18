@@ -152,7 +152,8 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         limit: null,
-      })
+      }),
+      undefined
     );
   });
 
@@ -187,7 +188,8 @@ describe("components/home/HomeTokenCostPanel", () => {
         endTs: Math.floor(new Date(2026, 3, 16, 0, 0, 0).getTime() / 1000),
         cliKey: null,
         providerId: null,
-      })
+      }),
+      undefined
     );
     expect(vi.mocked(useUsageLeaderboardV2Query)).toHaveBeenLastCalledWith(
       "provider",
@@ -198,7 +200,8 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         limit: null,
-      })
+      }),
+      undefined
     );
 
     fireEvent.click(screen.getByRole("button", { name: "最近3天" }));
@@ -210,7 +213,8 @@ describe("components/home/HomeTokenCostPanel", () => {
         endTs: Math.floor(new Date(2026, 3, 17, 0, 0, 0).getTime() / 1000),
         cliKey: null,
         providerId: null,
-      })
+      }),
+      undefined
     );
     expect(vi.mocked(useUsageLeaderboardV2Query)).toHaveBeenLastCalledWith(
       "provider",
@@ -221,26 +225,35 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         limit: null,
-      })
+      }),
+      undefined
     );
 
     fireEvent.click(screen.getByRole("button", { name: "最近7天" }));
 
-    expect(vi.mocked(useUsageSummaryV2Query)).toHaveBeenLastCalledWith("weekly", {
-      startTs: null,
-      endTs: null,
-      cliKey: null,
-      providerId: null,
-    });
+    expect(vi.mocked(useUsageSummaryV2Query)).toHaveBeenLastCalledWith(
+      "weekly",
+      {
+        startTs: null,
+        endTs: null,
+        cliKey: null,
+        providerId: null,
+      },
+      undefined
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "当月" }));
 
-    expect(vi.mocked(useUsageSummaryV2Query)).toHaveBeenLastCalledWith("monthly", {
-      startTs: null,
-      endTs: null,
-      cliKey: null,
-      providerId: null,
-    });
+    expect(vi.mocked(useUsageSummaryV2Query)).toHaveBeenLastCalledWith(
+      "monthly",
+      {
+        startTs: null,
+        endTs: null,
+        cliKey: null,
+        providerId: null,
+      },
+      undefined
+    );
   });
 
   it("renders preview rows when dev preview is enabled and queries are empty", () => {
