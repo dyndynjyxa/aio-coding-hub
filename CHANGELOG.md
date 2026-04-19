@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.2](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.39.1...aio-coding-hub-v0.39.2) (2026-04-19)
+
+
+### Bug Fixes
+
+* **rust:** resolve clippy warnings for needless lifetimes and useless conversion ([b5f204f](https://github.com/dyndynjyxa/aio-coding-hub/commit/b5f204f1d309cc3e21f56427760f5969d1972e95))
+
 ## [0.39.1](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.39.0...aio-coding-hub-v0.39.1) (2026-04-18)
 
 
