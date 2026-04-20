@@ -5,6 +5,7 @@ use crate::{base_url_probe, blocking, providers};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use tauri::Manager;
+use tauri_plugin_clipboard_manager::ClipboardExt;
 
 const ENV_CLAUDE_DISABLE_NONESSENTIAL_TRAFFIC: &str = "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC";
 const ENV_DISABLE_ERROR_REPORTING: &str = "DISABLE_ERROR_REPORTING";
@@ -16,6 +17,7 @@ const CLAUDE_LAUNCHER_DIR_NAME: &str = "claude-launchers";
 const CLAUDE_LAUNCHER_ARTIFACT_TTL_SECS: u64 = 60 * 60;
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn provider_claude_terminal_launch_command(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -278,20 +280,45 @@ fn windows_double_quote(value: &str) -> String {
 }
 
 #[tauri::command]
-pub(crate) async fn provider_get_api_key(
+#[specta::specta]
+pub(crate) async fn provider_copy_api_key_to_clipboard(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
     provider_id: i64,
-) -> Result<String, String> {
-    let db = ensure_db_ready(app, db_state.inner()).await?;
-    blocking::run("provider_get_api_key", move || {
-        providers::get_api_key_plaintext(&db, provider_id)
-    })
-    .await
-    .map_err(Into::into)
+) -> Result<bool, String> {
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    let api_key = blocking::run(
+        "provider_copy_api_key_to_clipboard",
+        move || -> crate::shared::error::AppResult<String> {
+            let conn = db.open_connection()?;
+            let provider = providers::get_by_id(&conn, provider_id)?;
+            if provider.auth_mode != "api_key" || provider.source_provider_id.is_some() {
+                return Err("SEC_INVALID_INPUT: provider does not own a direct api_key"
+                    .to_string()
+                    .into());
+            }
+
+            let api_key = providers::get_api_key_plaintext(&db, provider_id)?;
+            if api_key.trim().is_empty() {
+                return Err("SEC_INVALID_INPUT: provider api_key is not configured"
+                    .to_string()
+                    .into());
+            }
+
+            Ok(api_key)
+        },
+    )
+    .await?;
+
+    app.clipboard().write_text(api_key).map_err(|err| {
+        format!("SYSTEM_ERROR: failed to write provider api_key to clipboard: {err}")
+    })?;
+    tracing::info!(provider_id, "provider api_key copied to clipboard");
+    Ok(true)
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn base_url_ping_ms(base_url: String) -> Result<u64, String> {
     let client = reqwest::Client::builder()
         .user_agent(format!("aio-coding-hub-ping/{}", env!("CARGO_PKG_VERSION")))

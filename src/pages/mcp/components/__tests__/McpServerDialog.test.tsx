@@ -73,11 +73,21 @@ describe("pages/mcp/components/McpServerDialog", () => {
       expect(mutateAsync).toHaveBeenCalledWith(
         expect.objectContaining({
           serverId: null,
+          serverKey: "",
           name: "Fetch Tool",
           transport: "stdio",
           command: "node",
           args: ["-y", "@foo/bar"],
-          env: { FOO: "bar" },
+          env: {
+            preserve_keys: [],
+            replace: { FOO: "bar" },
+          },
+          cwd: null,
+          url: null,
+          headers: {
+            preserve_keys: [],
+            replace: {},
+          },
         })
       )
     );
@@ -140,10 +150,21 @@ describe("pages/mcp/components/McpServerDialog", () => {
     await waitFor(() =>
       expect(mutateAsync).toHaveBeenCalledWith(
         expect.objectContaining({
+          serverId: null,
+          serverKey: "",
+          name: "Demo",
           transport: "stdio",
           command: "node",
           cwd: "/tmp",
-          env: { FOO: "bar" },
+          env: {
+            preserve_keys: [],
+            replace: { FOO: "bar" },
+          },
+          url: null,
+          headers: {
+            preserve_keys: [],
+            replace: {},
+          },
         })
       )
     );
@@ -200,9 +221,21 @@ describe("pages/mcp/components/McpServerDialog", () => {
       expect(mutateAsync).toHaveBeenCalledWith(
         expect.objectContaining({
           serverId: 7,
+          serverKey: "remote",
+          name: "Remote",
           transport: "http",
+          command: null,
+          args: [],
+          env: {
+            preserve_keys: [],
+            replace: {},
+          },
+          cwd: null,
           url: "https://example.com/mcp",
-          headers: { Authorization: "Bearer y" },
+          headers: {
+            preserve_keys: [],
+            replace: { Authorization: "Bearer y" },
+          },
         })
       )
     );
@@ -264,9 +297,22 @@ describe("pages/mcp/components/McpServerDialog", () => {
     await waitFor(() =>
       expect(mutateAsync).toHaveBeenCalledWith(
         expect.objectContaining({
+          serverId: null,
+          serverKey: "",
+          name: "remote",
           transport: "sse",
+          command: null,
+          args: [],
+          env: {
+            preserve_keys: [],
+            replace: {},
+          },
+          cwd: null,
           url: "https://example.com/mcp",
-          headers: { Authorization: "Bearer x" },
+          headers: {
+            preserve_keys: [],
+            replace: { Authorization: "Bearer x" },
+          },
         })
       )
     );
@@ -360,10 +406,21 @@ describe("pages/mcp/components/McpServerDialog", () => {
       expect(mutateAsync).toHaveBeenCalledWith(
         expect.objectContaining({
           name: "Fetch",
+          serverId: null,
+          serverKey: "",
           transport: "stdio",
           command: "uvx",
           args: ["mcp-server-fetch"],
-          env: { FOO: "bar" },
+          env: {
+            preserve_keys: [],
+            replace: { FOO: "bar" },
+          },
+          cwd: null,
+          url: null,
+          headers: {
+            preserve_keys: [],
+            replace: {},
+          },
         })
       )
     );

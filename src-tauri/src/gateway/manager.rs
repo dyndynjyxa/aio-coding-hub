@@ -30,6 +30,12 @@ struct RunningGateway {
     oauth_refresh_task: tauri::async_runtime::JoinHandle<()>,
 }
 
+struct ResolvedGatewayBinding {
+    bind_host: String,
+    base_host: String,
+    fixed_port: Option<u16>,
+}
+
 type RunningGatewayHandles = (
     oneshot::Sender<()>,
     tauri::async_runtime::JoinHandle<()>,
@@ -38,6 +44,11 @@ type RunningGatewayHandles = (
     tokio::sync::watch::Sender<bool>,
     tauri::async_runtime::JoinHandle<()>,
 );
+
+pub(crate) struct GatewayStartResult {
+    pub(crate) status: GatewayStatus,
+    pub(crate) effective_preferred_port: u16,
+}
 
 #[derive(Default)]
 pub struct GatewayManager {
@@ -112,97 +123,107 @@ fn bind_first_available(
     .into())
 }
 
+fn resolve_gateway_binding(
+    cfg: &settings::AppSettings,
+) -> crate::shared::error::AppResult<ResolvedGatewayBinding> {
+    let (bind_host, fixed_port) = match cfg.gateway_listen_mode {
+        settings::GatewayListenMode::Localhost => ("127.0.0.1".to_string(), None),
+        settings::GatewayListenMode::Lan => ("0.0.0.0".to_string(), None),
+        settings::GatewayListenMode::WslAuto => (wsl::resolve_wsl_host(cfg), None),
+        settings::GatewayListenMode::Custom => {
+            let parsed = listen::parse_custom_listen_address(&cfg.gateway_custom_listen_address)?;
+            (parsed.host, parsed.port)
+        }
+    };
+
+    let base_host = match cfg.gateway_listen_mode {
+        settings::GatewayListenMode::Lan => "127.0.0.1".to_string(),
+        settings::GatewayListenMode::Custom if listen::is_wildcard_host(&bind_host) => {
+            "127.0.0.1".to_string()
+        }
+        _ => bind_host.clone(),
+    };
+
+    Ok(ResolvedGatewayBinding {
+        bind_host,
+        base_host,
+        fixed_port,
+    })
+}
+
+pub(crate) fn planned_base_url(
+    cfg: &settings::AppSettings,
+) -> crate::shared::error::AppResult<String> {
+    let binding = resolve_gateway_binding(cfg)?;
+    let port = binding.fixed_port.unwrap_or(cfg.preferred_port);
+    Ok(format!(
+        "http://{}",
+        listen::format_host_port(&binding.base_host, port)
+    ))
+}
+
+pub(crate) fn listen_rebind_required(
+    previous: &settings::AppSettings,
+    next: &settings::AppSettings,
+) -> bool {
+    if previous.preferred_port != next.preferred_port
+        || previous.gateway_listen_mode != next.gateway_listen_mode
+        || previous.gateway_custom_listen_address != next.gateway_custom_listen_address
+    {
+        return true;
+    }
+
+    if next.gateway_listen_mode == settings::GatewayListenMode::WslAuto
+        && (previous.wsl_host_address_mode != next.wsl_host_address_mode
+            || previous.wsl_custom_host_address != next.wsl_custom_host_address)
+    {
+        return true;
+    }
+
+    false
+}
+
 impl GatewayManager {
-    pub fn status(&self) -> GatewayStatus {
-        match &self.running {
-            Some(r) => GatewayStatus {
-                running: true,
-                port: Some(r.port),
-                base_url: Some(r.base_url.clone()),
-                listen_addr: Some(r.listen_addr.clone()),
-            },
-            None => GatewayStatus {
-                running: false,
-                port: None,
-                base_url: None,
-                listen_addr: None,
-            },
-        }
-    }
-
-    pub fn active_sessions(
-        &self,
-        now_unix: i64,
-        limit: usize,
-    ) -> Vec<session_manager::ActiveSessionSnapshot> {
-        match &self.running {
-            Some(r) => r.session.list_active(now_unix, limit),
-            None => Vec::new(),
-        }
-    }
-
-    pub fn clear_cli_session_bindings(&self, cli_key: &str) -> usize {
-        match &self.running {
-            Some(r) => r.session.clear_cli_bindings(cli_key),
-            None => 0,
-        }
-    }
-
-    pub fn start(
+    fn start_with_config_inner(
         &mut self,
         app: &tauri::AppHandle,
         db: db::Db,
+        cfg: &settings::AppSettings,
         preferred_port: Option<u16>,
-    ) -> crate::shared::error::AppResult<GatewayStatus> {
+    ) -> crate::shared::error::AppResult<GatewayStartResult> {
         if self.running.is_some() {
-            return Ok(self.status());
+            let status = self.status();
+            let effective_preferred_port = status.port.unwrap_or(cfg.preferred_port);
+            return Ok(GatewayStartResult {
+                status,
+                effective_preferred_port,
+            });
         }
 
         let requested_port = preferred_port
             .filter(|p| *p > 0)
-            .unwrap_or(settings::DEFAULT_GATEWAY_PORT);
+            .unwrap_or(cfg.preferred_port.max(settings::DEFAULT_GATEWAY_PORT));
 
-        let cfg = settings::read(app)?;
-        let (bind_host, fixed_port) = match cfg.gateway_listen_mode {
-            settings::GatewayListenMode::Localhost => ("127.0.0.1".to_string(), None),
-            settings::GatewayListenMode::Lan => ("0.0.0.0".to_string(), None),
-            settings::GatewayListenMode::WslAuto => (wsl::resolve_wsl_host(&cfg), None),
-            settings::GatewayListenMode::Custom => {
-                let parsed =
-                    listen::parse_custom_listen_address(&cfg.gateway_custom_listen_address)?;
-                (parsed.host, parsed.port)
-            }
-        };
+        let binding = resolve_gateway_binding(cfg)?;
+        let bind_host = binding.bind_host;
+        let fixed_port = binding.fixed_port;
 
         let (port, std_listener) = if let Some(port) = fixed_port {
             let listener = bind_host_port(&bind_host, port)
                 .ok_or_else(|| format!("failed to bind {bind_host}:{port}"))?;
             (port, listener)
         } else {
-            bind_first_available(&bind_host, preferred_port)?
+            bind_first_available(&bind_host, Some(requested_port))?
         };
 
         let listen_addr = listen::format_host_port(&bind_host, port);
-        let base_host = match cfg.gateway_listen_mode {
-            settings::GatewayListenMode::Lan => "127.0.0.1".to_string(),
-            settings::GatewayListenMode::Custom if listen::is_wildcard_host(&bind_host) => {
-                "127.0.0.1".to_string()
-            }
-            _ => bind_host.clone(),
-        };
+        let base_host = binding.base_host;
         let base_url = format!("http://{}", listen::format_host_port(&base_host, port));
         let bind_addr = std_listener
             .local_addr()
             .unwrap_or_else(|_| SocketAddr::from(([127, 0, 0, 1], port)));
 
         if fixed_port.is_none() && port != requested_port {
-            if let Ok(mut current) = settings::read(app) {
-                if current.preferred_port != port {
-                    current.preferred_port = port;
-                    let _ = settings::write(app, &current);
-                }
-            }
-
             let payload = GatewayLogEvent {
                 level: "warn",
                 error_code: GatewayErrorCode::PortInUse.as_str(),
@@ -216,12 +237,16 @@ impl GatewayManager {
 
         // Initialize the global HTTP client with proxy settings from config.
         super::http_client::sync_runtime_context(port, &bind_host, &base_host);
-        let proxy_url = super::http_client::build_effective_proxy_url(
-            Some(cfg.upstream_proxy_url.as_str()),
-            Some(cfg.upstream_proxy_username.as_str()),
-            Some(cfg.upstream_proxy_password.as_str()),
-        )
-        .map_err(|e| format!("{}: {e}", GatewayErrorCode::HttpClientInit.as_str()))?;
+        let proxy_url = if cfg.upstream_proxy_enabled {
+            super::http_client::build_effective_proxy_url(
+                Some(cfg.upstream_proxy_url.as_str()),
+                Some(cfg.upstream_proxy_username.as_str()),
+                Some(cfg.upstream_proxy_password.as_str()),
+            )
+            .map_err(|e| format!("{}: {e}", GatewayErrorCode::HttpClientInit.as_str()))?
+        } else {
+            None
+        };
         super::http_client::init(proxy_url.as_deref())
             .map_err(|e| format!("{}: {e}", GatewayErrorCode::HttpClientInit.as_str()))?;
 
@@ -309,7 +334,81 @@ impl GatewayManager {
 
         let status = self.status();
         crate::app::heartbeat_watchdog::gated_emit(&state_app, GATEWAY_STATUS_EVENT_NAME, &status);
-        Ok(status)
+        Ok(GatewayStartResult {
+            status,
+            effective_preferred_port: port,
+        })
+    }
+
+    pub fn status(&self) -> GatewayStatus {
+        match &self.running {
+            Some(r) => GatewayStatus {
+                running: true,
+                port: Some(r.port),
+                base_url: Some(r.base_url.clone()),
+                listen_addr: Some(r.listen_addr.clone()),
+            },
+            None => GatewayStatus {
+                running: false,
+                port: None,
+                base_url: None,
+                listen_addr: None,
+            },
+        }
+    }
+
+    pub fn active_sessions(
+        &self,
+        now_unix: i64,
+        limit: usize,
+    ) -> Vec<session_manager::ActiveSessionSnapshot> {
+        match &self.running {
+            Some(r) => r.session.list_active(now_unix, limit),
+            None => Vec::new(),
+        }
+    }
+
+    pub fn clear_cli_session_bindings(&self, cli_key: &str) -> usize {
+        match &self.running {
+            Some(r) => r.session.clear_cli_bindings(cli_key),
+            None => 0,
+        }
+    }
+
+    pub fn start(
+        &mut self,
+        app: &tauri::AppHandle,
+        db: db::Db,
+        preferred_port: Option<u16>,
+    ) -> crate::shared::error::AppResult<GatewayStatus> {
+        let cfg = settings::read(app)?;
+        let requested_port = preferred_port
+            .filter(|p| *p > 0)
+            .unwrap_or(cfg.preferred_port.max(settings::DEFAULT_GATEWAY_PORT));
+        let start_result = self.start_with_config_inner(app, db, &cfg, preferred_port)?;
+
+        if start_result.effective_preferred_port != requested_port
+            && requested_port == cfg.preferred_port
+        {
+            if let Ok(mut current) = settings::read(app) {
+                if current.preferred_port != start_result.effective_preferred_port {
+                    current.preferred_port = start_result.effective_preferred_port;
+                    let _ = settings::write(app, &current);
+                }
+            }
+        }
+
+        Ok(start_result.status)
+    }
+
+    pub fn start_with_config(
+        &mut self,
+        app: &tauri::AppHandle,
+        db: db::Db,
+        cfg: &settings::AppSettings,
+        preferred_port: Option<u16>,
+    ) -> crate::shared::error::AppResult<GatewayStartResult> {
+        self.start_with_config_inner(app, db, cfg, preferred_port)
     }
 
     pub fn circuit_status(
@@ -465,7 +564,7 @@ impl GatewayManager {
 
 #[cfg(test)]
 mod tests {
-    use super::{GatewayAppState, GatewayManager, RunningGateway};
+    use super::{listen_rebind_required, GatewayAppState, GatewayManager, RunningGateway};
     use crate::{circuit_breaker, providers, session_manager};
     use std::collections::HashMap;
     use std::io::{Read, Write};
@@ -524,6 +623,52 @@ mod tests {
         });
 
         (format!("http://127.0.0.1:{}", addr.port()), rx)
+    }
+
+    fn default_settings() -> crate::settings::AppSettings {
+        crate::settings::AppSettings::default()
+    }
+
+    #[test]
+    fn listen_rebind_required_when_listen_mode_changes() {
+        let previous = default_settings();
+        let mut next = previous.clone();
+        next.gateway_listen_mode = crate::settings::GatewayListenMode::Lan;
+
+        assert!(listen_rebind_required(&previous, &next));
+    }
+
+    #[test]
+    fn listen_rebind_required_when_custom_listen_address_changes() {
+        let mut previous = default_settings();
+        previous.gateway_listen_mode = crate::settings::GatewayListenMode::Custom;
+        previous.gateway_custom_listen_address = "127.0.0.1:37123".to_string();
+        let mut next = previous.clone();
+        next.gateway_custom_listen_address = "0.0.0.0:37123".to_string();
+
+        assert!(listen_rebind_required(&previous, &next));
+    }
+
+    #[test]
+    fn listen_rebind_required_when_wsl_host_binding_changes_under_wsl_auto() {
+        let mut previous = default_settings();
+        previous.gateway_listen_mode = crate::settings::GatewayListenMode::WslAuto;
+        let mut next = previous.clone();
+        next.wsl_host_address_mode = crate::settings::WslHostAddressMode::Custom;
+        next.wsl_custom_host_address = "172.20.80.1".to_string();
+
+        assert!(listen_rebind_required(&previous, &next));
+    }
+
+    #[test]
+    fn listen_rebind_not_required_for_non_listener_settings_only() {
+        let previous = default_settings();
+        let mut next = previous.clone();
+        next.upstream_proxy_enabled = true;
+        next.upstream_proxy_url = "http://127.0.0.1:7890".to_string();
+        next.enable_cache_anomaly_monitor = !previous.enable_cache_anomaly_monitor;
+
+        assert!(!listen_rebind_required(&previous, &next));
     }
 
     #[test]

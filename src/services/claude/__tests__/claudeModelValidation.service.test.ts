@@ -1,16 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
+import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
-import { invokeTauriOrNull } from "../../tauriInvoke";
-import {
-  claudeProviderGetApiKeyPlaintext,
-  claudeProviderValidateModel,
-} from "../claudeModelValidation";
+import { claudeProviderValidateModel } from "../claudeModelValidation";
 
-vi.mock("../../tauriInvoke", async () => {
-  const actual = await vi.importActual<typeof import("../../tauriInvoke")>("../../tauriInvoke");
+vi.mock("../../../generated/bindings", async () => {
+  const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
+    "../../../generated/bindings"
+  );
   return {
     ...actual,
-    invokeTauriOrNull: vi.fn(),
+    commands: {
+      ...actual.commands,
+      claudeProviderValidateModel: vi.fn(),
+    },
   };
 });
 
@@ -24,7 +26,9 @@ vi.mock("../../consoleLog", async () => {
 
 describe("services/claude/claudeModelValidation", () => {
   it("rethrows invoke errors and logs", async () => {
-    vi.mocked(invokeTauriOrNull).mockRejectedValueOnce(new Error("claude validation boom"));
+    vi.mocked(commands.claudeProviderValidateModel).mockRejectedValueOnce(
+      new Error("claude validation boom")
+    );
 
     await expect(
       claudeProviderValidateModel({ provider_id: 1, base_url: "https://x", request_json: "{}" })
@@ -41,7 +45,7 @@ describe("services/claude/claudeModelValidation", () => {
   });
 
   it("treats null invoke result as error with runtime", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce(null);
+    vi.mocked(commands.claudeProviderValidateModel).mockResolvedValueOnce(null as any);
 
     await expect(
       claudeProviderValidateModel({ provider_id: 1, base_url: "https://x", request_json: "{}" })
@@ -49,22 +53,16 @@ describe("services/claude/claudeModelValidation", () => {
   });
 
   it("keeps argument mapping unchanged", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValue({ ok: true } as any);
+    vi.mocked(commands.claudeProviderValidateModel).mockResolvedValue({
+      status: "ok",
+      data: { ok: true } as any,
+    });
 
     await claudeProviderValidateModel({
       provider_id: 9,
       base_url: "https://api",
       request_json: "{}",
     });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("claude_provider_validate_model", {
-      providerId: 9,
-      baseUrl: "https://api",
-      requestJson: "{}",
-    });
-
-    await claudeProviderGetApiKeyPlaintext(9);
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("claude_provider_get_api_key_plaintext", {
-      providerId: 9,
-    });
+    expect(commands.claudeProviderValidateModel).toHaveBeenCalledWith(9, "https://api", "{}");
   });
 });

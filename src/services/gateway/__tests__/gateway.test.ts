@@ -1,26 +1,43 @@
 import { describe, expect, it, vi } from "vitest";
+import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
 import {
   gatewayCheckPortAvailable,
-  gatewayStart,
-  gatewayStop,
+  gatewayCircuitResetCli,
+  gatewayCircuitResetProvider,
   gatewayCircuitStatus,
-  gatewayUpstreamProxyDetectIp,
   gatewaySessionsList,
+  gatewayStart,
   gatewayStatus,
+  gatewayStop,
+  gatewayUpstreamProxyDetectIp,
   gatewayUpstreamProxyTest,
   gatewayUpstreamProxyValidate,
   type GatewayActiveSession,
   type GatewayProviderCircuitStatus,
   type GatewayStatus,
 } from "../gateway";
-import { invokeTauriOrNull } from "../../tauriInvoke";
 
-vi.mock("../../tauriInvoke", async () => {
-  const actual = await vi.importActual<typeof import("../../tauriInvoke")>("../../tauriInvoke");
+vi.mock("../../../generated/bindings", async () => {
+  const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
+    "../../../generated/bindings"
+  );
   return {
     ...actual,
-    invokeTauriOrNull: vi.fn(),
+    commands: {
+      ...actual.commands,
+      gatewayStatus: vi.fn(),
+      gatewayStart: vi.fn(),
+      gatewayStop: vi.fn(),
+      gatewayCheckPortAvailable: vi.fn(),
+      gatewaySessionsList: vi.fn(),
+      gatewayCircuitStatus: vi.fn(),
+      gatewayCircuitResetProvider: vi.fn(),
+      gatewayCircuitResetCli: vi.fn(),
+      gatewayUpstreamProxyValidate: vi.fn(),
+      gatewayUpstreamProxyTest: vi.fn(),
+      gatewayUpstreamProxyDetectIp: vi.fn(),
+    },
   };
 });
 
@@ -33,7 +50,7 @@ vi.mock("../../consoleLog", async () => {
 });
 
 describe("services/gateway/gateway", () => {
-  it("returns invoke result with tauri runtime", async () => {
+  it("returns invoke result with generated ipc", async () => {
     const status: GatewayStatus = {
       running: true,
       port: 37123,
@@ -66,10 +83,12 @@ describe("services/gateway/gateway", () => {
       },
     ];
 
-    vi.mocked(invokeTauriOrNull)
-      .mockResolvedValueOnce(status)
-      .mockResolvedValueOnce(sessions)
-      .mockResolvedValueOnce(circuits);
+    vi.mocked(commands.gatewayStatus).mockResolvedValueOnce(status as any);
+    vi.mocked(commands.gatewaySessionsList).mockResolvedValueOnce({ status: "ok", data: sessions });
+    vi.mocked(commands.gatewayCircuitStatus).mockResolvedValueOnce({
+      status: "ok",
+      data: circuits,
+    });
 
     await expect(gatewayStatus()).resolves.toEqual(status);
     await expect(gatewaySessionsList(20)).resolves.toEqual(sessions);
@@ -77,17 +96,46 @@ describe("services/gateway/gateway", () => {
   });
 
   it("passes gateway command args with stable contract fields", async () => {
-    vi.mocked(invokeTauriOrNull)
-      .mockResolvedValueOnce({ running: true } as any)
-      .mockResolvedValueOnce({ running: false } as any)
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce([] as any)
-      .mockResolvedValueOnce([] as any)
-      .mockResolvedValueOnce(1 as any)
-      .mockResolvedValueOnce(true as any)
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce("203.0.113.42");
+    vi.mocked(commands.gatewayStart).mockResolvedValueOnce({
+      status: "ok",
+      data: { running: true } as any,
+    });
+    vi.mocked(commands.gatewayStop).mockResolvedValueOnce({
+      status: "ok",
+      data: { running: false } as any,
+    });
+    vi.mocked(commands.gatewayCheckPortAvailable).mockResolvedValueOnce({
+      status: "ok",
+      data: true,
+    });
+    vi.mocked(commands.gatewaySessionsList).mockResolvedValueOnce({
+      status: "ok",
+      data: [] as any,
+    });
+    vi.mocked(commands.gatewayCircuitStatus)
+      .mockResolvedValueOnce({ status: "ok", data: [] as any })
+      .mockResolvedValueOnce({ status: "ok", data: [] as any })
+      .mockResolvedValueOnce({ status: "ok", data: [] as any });
+    vi.mocked(commands.gatewayCircuitResetProvider).mockResolvedValueOnce({
+      status: "ok",
+      data: true,
+    });
+    vi.mocked(commands.gatewayCircuitResetCli).mockResolvedValueOnce({
+      status: "ok",
+      data: 1,
+    });
+    vi.mocked(commands.gatewayUpstreamProxyValidate).mockResolvedValueOnce({
+      status: "ok",
+      data: null,
+    });
+    vi.mocked(commands.gatewayUpstreamProxyTest).mockResolvedValueOnce({
+      status: "ok",
+      data: null,
+    });
+    vi.mocked(commands.gatewayUpstreamProxyDetectIp).mockResolvedValueOnce({
+      status: "ok",
+      data: "203.0.113.42",
+    });
 
     await gatewayStart(37123);
     await gatewayStop();
@@ -96,6 +144,8 @@ describe("services/gateway/gateway", () => {
     await gatewayCircuitStatus("claude");
     await gatewayCircuitStatus("codex");
     await gatewayCircuitStatus("gemini");
+    await gatewayCircuitResetProvider(42);
+    await gatewayCircuitResetCli("gemini");
     await gatewayUpstreamProxyValidate({
       proxyUrl: "http://127.0.0.1:7890",
       proxyUsername: "proxy-user",
@@ -112,36 +162,26 @@ describe("services/gateway/gateway", () => {
       proxyPassword: "secret",
     });
 
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("gateway_start", {
-      preferredPort: 37123,
-    });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("gateway_stop");
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("gateway_check_port_available", {
-      port: 37123,
-    });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("gateway_sessions_list", {
-      limit: null,
-    });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("gateway_circuit_status", {
-      cliKey: "claude",
-    });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("gateway_circuit_status", {
-      cliKey: "codex",
-    });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("gateway_circuit_status", {
-      cliKey: "gemini",
-    });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("gateway_upstream_proxy_validate", {
+    expect(commands.gatewayStart).toHaveBeenCalledWith(37123);
+    expect(commands.gatewayStop).toHaveBeenCalledWith();
+    expect(commands.gatewayCheckPortAvailable).toHaveBeenCalledWith(37123);
+    expect(commands.gatewaySessionsList).toHaveBeenCalledWith(null);
+    expect(commands.gatewayCircuitStatus).toHaveBeenCalledWith("claude");
+    expect(commands.gatewayCircuitStatus).toHaveBeenCalledWith("codex");
+    expect(commands.gatewayCircuitStatus).toHaveBeenCalledWith("gemini");
+    expect(commands.gatewayCircuitResetProvider).toHaveBeenCalledWith(42);
+    expect(commands.gatewayCircuitResetCli).toHaveBeenCalledWith("gemini");
+    expect(commands.gatewayUpstreamProxyValidate).toHaveBeenCalledWith({
       proxyUrl: "http://127.0.0.1:7890",
       proxyUsername: "proxy-user",
       proxyPassword: "secret",
     });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("gateway_upstream_proxy_test", {
+    expect(commands.gatewayUpstreamProxyTest).toHaveBeenCalledWith({
       proxyUrl: "http://127.0.0.1:7890",
       proxyUsername: "proxy-user",
       proxyPassword: "secret",
     });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("gateway_upstream_proxy_detect_ip", {
+    expect(commands.gatewayUpstreamProxyDetectIp).toHaveBeenCalledWith({
       proxyUrl: "http://127.0.0.1:7890",
       proxyUsername: "proxy-user",
       proxyPassword: "secret",
@@ -149,7 +189,14 @@ describe("services/gateway/gateway", () => {
   });
 
   it("treats null results as success for void proxy commands", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+    vi.mocked(commands.gatewayUpstreamProxyValidate).mockResolvedValueOnce({
+      status: "ok",
+      data: null,
+    });
+    vi.mocked(commands.gatewayUpstreamProxyTest).mockResolvedValueOnce({
+      status: "ok",
+      data: null,
+    });
 
     await expect(
       gatewayUpstreamProxyValidate({
@@ -167,8 +214,11 @@ describe("services/gateway/gateway", () => {
     ).resolves.toBeNull();
   });
 
-  it("returns proxy exit ip from tauri command", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce("203.0.113.42");
+  it("returns proxy exit ip from generated command", async () => {
+    vi.mocked(commands.gatewayUpstreamProxyDetectIp).mockResolvedValueOnce({
+      status: "ok",
+      data: "203.0.113.42",
+    });
 
     await expect(
       gatewayUpstreamProxyDetectIp({
@@ -180,7 +230,7 @@ describe("services/gateway/gateway", () => {
   });
 
   it("rethrows invoke errors and logs details", async () => {
-    vi.mocked(invokeTauriOrNull).mockRejectedValueOnce(new Error("boom"));
+    vi.mocked(commands.gatewayStatus).mockRejectedValueOnce(new Error("boom"));
 
     await expect(gatewayStatus()).rejects.toThrow("boom");
     expect(logToConsole).toHaveBeenCalledWith(
@@ -194,7 +244,7 @@ describe("services/gateway/gateway", () => {
   });
 
   it("treats null invoke result as error and logs", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce(null);
+    vi.mocked(commands.gatewayStatus).mockResolvedValueOnce(null as any);
 
     await expect(gatewayStatus()).rejects.toThrow("IPC_NULL_RESULT: gateway_status");
     expect(logToConsole).toHaveBeenCalledWith(

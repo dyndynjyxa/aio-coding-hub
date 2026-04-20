@@ -1,10 +1,7 @@
 import type { RefObject } from "react";
 import { toast } from "sonner";
 import { logToConsole } from "../../services/consoleLog";
-import {
-  claudeProviderGetApiKeyPlaintext,
-  claudeProviderValidateModel,
-} from "../../services/claude/claudeModelValidation";
+import { claudeProviderValidateModel } from "../../services/claude/claudeModelValidation";
 import type { ClaudeModelValidationResult } from "../../services/claude/claudeModelValidation";
 import type { ProviderSummary } from "../../services/providers/providers";
 import {
@@ -32,7 +29,6 @@ export type RunValidationSuiteContext = {
   abortRef: RefObject<boolean>;
   baseUrl: string;
   model: string;
-  apiKeyPlaintext: string | null;
   templates: ReturnType<
     typeof import("../../services/claude/claudeValidationTemplates").listClaudeValidationTemplates
   >;
@@ -42,7 +38,6 @@ export type RunValidationSuiteContext = {
   historyReqSeqRef: RefObject<number>;
 
   setValidating: (v: boolean) => void;
-  setApiKeyPlaintext: (v: string | null) => void;
   setCrossProviderId: (v: number | null) => void;
   setSelectedHistoryKey: (v: string | null) => void;
   setSuiteActiveStepIndex: (v: number | null) => void;
@@ -78,7 +73,6 @@ export async function runValidationSuite(ctx: RunValidationSuiteContext) {
     suiteRounds,
     historyReqSeqRef,
     setValidating,
-    setApiKeyPlaintext,
     setCrossProviderId,
     setSelectedHistoryKey,
     setSuiteActiveStepIndex,
@@ -90,7 +84,6 @@ export async function runValidationSuite(ctx: RunValidationSuiteContext) {
     setHistoryLoading,
     refreshHistory,
   } = ctx;
-  let { apiKeyPlaintext } = ctx;
 
   // Reset abort flag at the start of each run.
   abortRef.current = false;
@@ -107,20 +100,6 @@ export async function runValidationSuite(ctx: RunValidationSuiteContext) {
   if (!normalizedModel) {
     toast("\u8bf7\u5148\u586b\u5199/\u9009\u62e9\u6a21\u578b");
     return;
-  }
-
-  let apiKeyPlaintextForSnapshot = apiKeyPlaintext;
-  if (!apiKeyPlaintextForSnapshot) {
-    try {
-      const fetched = await claudeProviderGetApiKeyPlaintext(curProvider.id);
-      apiKeyPlaintextForSnapshot = typeof fetched === "string" && fetched.trim() ? fetched : null;
-      if (apiKeyPlaintextForSnapshot) {
-        setApiKeyPlaintext(apiKeyPlaintextForSnapshot);
-        apiKeyPlaintext = apiKeyPlaintextForSnapshot;
-      }
-    } catch (err) {
-      logToConsole("warn", "获取 API Key 失败（非关键）", { error: String(err) });
-    }
   }
 
   const templateApplicability = templates.map((t) => ({
@@ -304,7 +283,6 @@ export async function runValidationSuite(ctx: RunValidationSuiteContext) {
           buildClaudeModelValidationRequestSnapshotTextFromWrapper({
             baseUrl: baseUrl.trim(),
             wrapperJsonText: reqTextToSendWrapper,
-            apiKeyPlaintext: apiKeyPlaintextForSnapshot,
           }) || reqTextToSendWrapper;
 
         setRequestJson(preSendRequestSnapshotText);
@@ -359,7 +337,7 @@ export async function runValidationSuite(ctx: RunValidationSuiteContext) {
         setResult(resp);
 
         const executedRequestSnapshotCandidate =
-          buildClaudeModelValidationRequestSnapshotTextFromResult(resp, apiKeyPlaintextForSnapshot);
+          buildClaudeModelValidationRequestSnapshotTextFromResult(resp);
         const executedRequestSnapshotText = executedRequestSnapshotCandidate.trim()
           ? executedRequestSnapshotCandidate
           : preSendRequestSnapshotText;

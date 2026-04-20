@@ -7,39 +7,25 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { openPath } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
 import {
   type ClaudeSettingsPatch,
   type CodexConfigPatch,
   type GeminiConfigPatch,
 } from "../services/cli/cliManager";
-import { cliProxyRebindCodexHome, cliProxyStatusAll } from "../services/cli/cliProxy";
 import { logToConsole } from "../services/consoleLog";
+import { openDesktopSinglePath } from "../services/desktop/dialog";
+import { openDesktopPath } from "../services/desktop/opener";
 import { type GatewayRectifierSettingsPatch } from "../services/settings/settingsGatewayRectifier";
-import type { AppSettings } from "../services/settings/settings";
-import {
-  setCacheAnomalyMonitorEnabled,
-  useCacheAnomalyMonitorEnabled,
-} from "../services/gateway/cacheAnomalyMonitor";
-import {
-  setTaskCompleteNotifyEnabled,
-  useTaskCompleteNotifyEnabled,
-} from "../services/notification/taskCompleteNotifyEvents";
-import {
-  setNotificationSoundEnabled,
-  useNotificationSoundEnabled,
-} from "../services/notification/notificationSound";
+import type { AppSettings, SensitiveStringUpdate } from "../services/settings/settings";
 import {
   getSettingsReadProtection,
   SETTINGS_READONLY_MESSAGE,
   useSettingsCircuitBreakerNoticeSetMutation,
   useSettingsCodexSessionIdCompletionSetMutation,
   useSettingsGatewayRectifierSetMutation,
+  useSettingsPatchMutation,
   useSettingsQuery,
-  useSettingsSetMutation,
 } from "../query/settings";
 import { useProvidersListQuery } from "../query/providers";
 import {
@@ -55,7 +41,6 @@ import {
   useCliManagerGeminiConfigSetMutation,
   useCliManagerGeminiInfoQuery,
 } from "../query/cliManager";
-import { cliProxyKeys } from "../query/keys";
 import { formatActionFailureToast } from "../utils/errors";
 import { CliManagerGeneralTab } from "../components/cli-manager/tabs/GeneralTab";
 import { PageHeader } from "../ui/PageHeader";
@@ -114,7 +99,6 @@ const TAB_FALLBACK = <div className="p-6 text-sm text-slate-500 dark:text-slate-
 
 export function CliManagerPage() {
   const [tab, setTab] = useState<TabKey>("general");
-  const queryClient = useQueryClient();
 
   const settingsQuery = useSettingsQuery();
   const appSettings = settingsQuery.data ?? null;
@@ -130,7 +114,7 @@ export function CliManagerPage() {
   const rectifierMutation = useSettingsGatewayRectifierSetMutation();
   const circuitBreakerNoticeMutation = useSettingsCircuitBreakerNoticeSetMutation();
   const codexSessionIdCompletionMutation = useSettingsCodexSessionIdCompletionSetMutation();
-  const commonSettingsMutation = useSettingsSetMutation();
+  const commonSettingsMutation = useSettingsPatchMutation();
 
   const rectifierSaving = rectifierMutation.isPending;
   const circuitBreakerNoticeSaving = circuitBreakerNoticeMutation.isPending;
@@ -140,9 +124,6 @@ export function CliManagerPage() {
   const [rectifier, setRectifier] = useState<GatewayRectifierSettingsPatch>(DEFAULT_RECTIFIER);
   const [circuitBreakerNoticeEnabled, setCircuitBreakerNoticeEnabled] = useState(false);
   const [codexSessionIdCompletionEnabled, setCodexSessionIdCompletionEnabled] = useState(true);
-  const cacheAnomalyMonitorEnabled = useCacheAnomalyMonitorEnabled();
-  const taskCompleteNotifyEnabled = useTaskCompleteNotifyEnabled();
-  const notificationSoundEnabled = useNotificationSoundEnabled();
   const [upstreamFirstByteTimeoutSeconds, setUpstreamFirstByteTimeoutSeconds] = useState<number>(0);
   const [upstreamStreamIdleTimeoutSeconds, setUpstreamStreamIdleTimeoutSeconds] =
     useState<number>(0);
@@ -154,6 +135,9 @@ export function CliManagerPage() {
   const [circuitBreakerFailureThreshold, setCircuitBreakerFailureThreshold] = useState<number>(5);
   const [circuitBreakerOpenDurationMinutes, setCircuitBreakerOpenDurationMinutes] =
     useState<number>(30);
+  const cacheAnomalyMonitorEnabled = appSettings?.enable_cache_anomaly_monitor ?? false;
+  const taskCompleteNotifyEnabled = appSettings?.enable_task_complete_notify ?? true;
+  const notificationSoundEnabled = appSettings?.enable_notification_sound ?? true;
 
   function blockSettingsWrite() {
     toast(settingsReadErrorMessage ?? SETTINGS_READONLY_MESSAGE);
@@ -228,9 +212,6 @@ export function CliManagerPage() {
     });
     setCircuitBreakerNoticeEnabled(appSettings.enable_circuit_breaker_notice ?? false);
     setCodexSessionIdCompletionEnabled(appSettings.enable_codex_session_id_completion ?? true);
-    setCacheAnomalyMonitorEnabled(appSettings.enable_cache_anomaly_monitor ?? false);
-    setTaskCompleteNotifyEnabled(appSettings.enable_task_complete_notify ?? true);
-    setNotificationSoundEnabled(appSettings.enable_notification_sound ?? true);
     setUpstreamFirstByteTimeoutSeconds(appSettings.upstream_first_byte_timeout_seconds);
     setUpstreamStreamIdleTimeoutSeconds(appSettings.upstream_stream_idle_timeout_seconds);
     setUpstreamRequestTimeoutNonStreamingSeconds(
@@ -341,21 +322,12 @@ export function CliManagerPage() {
     if (commonSettingsSaving) return;
     if (rectifierAvailable !== "available") return;
 
-    const prev = cacheAnomalyMonitorEnabled;
-    setCacheAnomalyMonitorEnabled(enable);
     try {
       const updated = await persistCommonSettings({ enable_cache_anomaly_monitor: enable });
-      if (!updated) {
-        setCacheAnomalyMonitorEnabled(prev);
-        return;
-      }
-
+      if (!updated) return;
       const next = updated.enable_cache_anomaly_monitor ?? enable;
-      setCacheAnomalyMonitorEnabled(next);
       toast(next ? "已开启缓存异常监测（实验）" : "已关闭缓存异常监测（实验）");
-    } catch {
-      setCacheAnomalyMonitorEnabled(prev);
-    }
+    } catch {}
   }
 
   async function persistTaskCompleteNotify(enable: boolean) {
@@ -366,21 +338,12 @@ export function CliManagerPage() {
     if (commonSettingsSaving) return;
     if (rectifierAvailable !== "available") return;
 
-    const prev = taskCompleteNotifyEnabled;
-    setTaskCompleteNotifyEnabled(enable);
     try {
       const updated = await persistCommonSettings({ enable_task_complete_notify: enable });
-      if (!updated) {
-        setTaskCompleteNotifyEnabled(prev);
-        return;
-      }
-
+      if (!updated) return;
       const next = updated.enable_task_complete_notify ?? enable;
-      setTaskCompleteNotifyEnabled(next);
       toast(next ? "已开启任务结束提醒" : "已关闭任务结束提醒");
-    } catch {
-      setTaskCompleteNotifyEnabled(prev);
-    }
+    } catch {}
   }
 
   async function persistNotificationSound(enable: boolean) {
@@ -391,24 +354,17 @@ export function CliManagerPage() {
     if (commonSettingsSaving) return;
     if (rectifierAvailable !== "available") return;
 
-    const prev = notificationSoundEnabled;
-    setNotificationSoundEnabled(enable);
     try {
       const updated = await persistCommonSettings({ enable_notification_sound: enable });
-      if (!updated) {
-        setNotificationSoundEnabled(prev);
-        return;
-      }
-
+      if (!updated) return;
       const next = updated.enable_notification_sound ?? enable;
-      setNotificationSoundEnabled(next);
       toast(next ? "已开启通知音效" : "已关闭通知音效");
-    } catch {
-      setNotificationSoundEnabled(prev);
-    }
+    } catch {}
   }
 
-  async function persistCommonSettings(patch: Partial<AppSettings>): Promise<AppSettings | null> {
+  async function persistCommonSettings(
+    patch: Partial<AppSettings> & { upstream_proxy_password?: SensitiveStringUpdate }
+  ): Promise<AppSettings | null> {
     if (settingsWriteBlocked) {
       blockSettingsWrite();
       return null;
@@ -418,65 +374,30 @@ export function CliManagerPage() {
     if (!appSettings) return null;
 
     const prev = appSettings;
-    const next: AppSettings = { ...prev, ...patch };
     try {
       const updated = await commonSettingsMutation.mutateAsync({
-        preferredPort: next.preferred_port,
-        gatewayListenMode: next.gateway_listen_mode,
-        gatewayCustomListenAddress: next.gateway_custom_listen_address,
-        autoStart: next.auto_start,
-        trayEnabled: next.tray_enabled,
-        enableCliProxyStartupRecovery: next.enable_cli_proxy_startup_recovery,
-        logRetentionDays: next.log_retention_days,
-        providerCooldownSeconds: next.provider_cooldown_seconds,
-        providerBaseUrlPingCacheTtlSeconds: next.provider_base_url_ping_cache_ttl_seconds,
-        upstreamFirstByteTimeoutSeconds: next.upstream_first_byte_timeout_seconds,
-        upstreamStreamIdleTimeoutSeconds: next.upstream_stream_idle_timeout_seconds,
-        upstreamRequestTimeoutNonStreamingSeconds:
-          next.upstream_request_timeout_non_streaming_seconds,
-        enableCacheAnomalyMonitor: next.enable_cache_anomaly_monitor,
-        enableTaskCompleteNotify: next.enable_task_complete_notify,
-        enableNotificationSound: next.enable_notification_sound,
-        failoverMaxAttemptsPerProvider: next.failover_max_attempts_per_provider,
-        failoverMaxProvidersToTry: next.failover_max_providers_to_try,
-        circuitBreakerFailureThreshold: next.circuit_breaker_failure_threshold,
-        circuitBreakerOpenDurationMinutes: next.circuit_breaker_open_duration_minutes,
-        wslAutoConfig: next.wsl_auto_config,
-        wslTargetCli: next.wsl_target_cli,
-        codexHomeMode: next.codex_home_mode,
-        codexHomeOverride: next.codex_home_override,
-        cx2ccFallbackModelOpus: next.cx2cc_fallback_model_opus,
-        cx2ccFallbackModelSonnet: next.cx2cc_fallback_model_sonnet,
-        cx2ccFallbackModelHaiku: next.cx2cc_fallback_model_haiku,
-        cx2ccFallbackModelMain: next.cx2cc_fallback_model_main,
-        cx2ccModelReasoningEffort: next.cx2cc_model_reasoning_effort,
-        cx2ccServiceTier: next.cx2cc_service_tier,
-        cx2ccDisableResponseStorage: next.cx2cc_disable_response_storage,
-        cx2ccEnableReasoningToThinking: next.cx2cc_enable_reasoning_to_thinking,
-        cx2ccDropStopSequences: next.cx2cc_drop_stop_sequences,
-        cx2ccCleanSchema: next.cx2cc_clean_schema,
-        cx2ccFilterBatchTool: next.cx2cc_filter_batch_tool,
-        upstreamProxyEnabled: next.upstream_proxy_enabled,
-        upstreamProxyUrl: next.upstream_proxy_url,
-        upstreamProxyUsername: next.upstream_proxy_username,
-        upstreamProxyPassword: next.upstream_proxy_password,
+        ...patch,
+        upstream_proxy_password: patch.upstream_proxy_password ?? { mode: "preserve" },
       });
 
       if (!updated) {
         return null;
       }
+      const updatedSettings = updated.settings;
 
-      setUpstreamFirstByteTimeoutSeconds(updated.upstream_first_byte_timeout_seconds);
-      setUpstreamStreamIdleTimeoutSeconds(updated.upstream_stream_idle_timeout_seconds);
+      setUpstreamFirstByteTimeoutSeconds(updatedSettings.upstream_first_byte_timeout_seconds);
+      setUpstreamStreamIdleTimeoutSeconds(updatedSettings.upstream_stream_idle_timeout_seconds);
       setUpstreamRequestTimeoutNonStreamingSeconds(
-        updated.upstream_request_timeout_non_streaming_seconds
+        updatedSettings.upstream_request_timeout_non_streaming_seconds
       );
-      setProviderCooldownSeconds(updated.provider_cooldown_seconds);
-      setProviderBaseUrlPingCacheTtlSeconds(updated.provider_base_url_ping_cache_ttl_seconds);
-      setCircuitBreakerFailureThreshold(updated.circuit_breaker_failure_threshold);
-      setCircuitBreakerOpenDurationMinutes(updated.circuit_breaker_open_duration_minutes);
+      setProviderCooldownSeconds(updatedSettings.provider_cooldown_seconds);
+      setProviderBaseUrlPingCacheTtlSeconds(
+        updatedSettings.provider_base_url_ping_cache_ttl_seconds
+      );
+      setCircuitBreakerFailureThreshold(updatedSettings.circuit_breaker_failure_threshold);
+      setCircuitBreakerOpenDurationMinutes(updatedSettings.circuit_breaker_open_duration_minutes);
       toast("已保存");
-      return updated;
+      return updatedSettings;
     } catch (err) {
       const formatted = formatActionFailureToast("更新通用网关参数", err);
       logToConsole("error", "更新通用网关参数失败", {
@@ -534,55 +455,6 @@ export function CliManagerPage() {
     }
   }
 
-  async function repairCodexProxyAfterCodexHomeChange() {
-    const codexProxyEnabled = await cliProxyStatusAll()
-      .then((rows) => rows?.some((row) => row.cli_key === "codex" && row.enabled) ?? false)
-      .catch((err) => {
-        logToConsole("warn", "读取 CLI 代理状态失败，将直接尝试重绑 Codex 代理", {
-          error: String(err),
-        });
-        return null;
-      });
-
-    try {
-      if (codexProxyEnabled === false) {
-        return false;
-      }
-
-      const codexResult = await cliProxyRebindCodexHome();
-
-      if (!codexResult) {
-        logToConsole("warn", "Codex Home 已切换，但 Codex 代理重绑未返回结果", {});
-        toast("Codex 目录已切换，但代理重绑未返回结果；可稍后在首页点击“修复”重试");
-        return false;
-      }
-
-      if (!codexResult.ok) {
-        logToConsole("warn", "Codex Home 已切换，但 Codex 代理重绑失败", {
-          error_code: codexResult.error_code ?? undefined,
-          message: codexResult.message,
-        });
-        toast("Codex 目录已切换，但代理重绑失败；可稍后在首页点击“修复”重试");
-        return false;
-      }
-
-      logToConsole("info", "Codex Home 已切换，已触发 Codex 代理重绑", {
-        base_origin: codexResult.base_origin ?? undefined,
-        trace_id: codexResult.trace_id,
-        message: codexResult.message,
-      });
-      return true;
-    } catch (err) {
-      logToConsole("warn", "Codex Home 已切换，但 Codex 代理重绑失败", {
-        error: String(err),
-      });
-      toast("Codex 目录已切换，但代理重绑失败；可稍后在首页点击“修复”重试");
-      return false;
-    } finally {
-      void queryClient.invalidateQueries({ queryKey: cliProxyKeys.statusAll() });
-    }
-  }
-
   async function persistCodexHomeSettings(
     codexHomeMode: AppSettings["codex_home_mode"],
     codexHomeOverride: string
@@ -596,16 +468,13 @@ export function CliManagerPage() {
     }
 
     await refreshCodex();
-    const rebound = await repairCodexProxyAfterCodexHomeChange();
-    if (rebound) {
-      await refreshCodex();
-    }
+    toast("Codex 目录已切换");
     return true;
   }
 
   async function pickCodexHomeDirectory(initialPath?: string): Promise<string | null> {
     try {
-      const selected = await openDialog({
+      return await openDesktopSinglePath({
         directory: true,
         multiple: false,
         title: "选择 Codex .codex 目录",
@@ -616,12 +485,6 @@ export function CliManagerPage() {
           codexConfig?.config_dir ||
           undefined,
       });
-
-      if (!selected) {
-        return null;
-      }
-
-      return Array.isArray(selected) ? (selected[0] ?? null) : selected;
     } catch (err) {
       logToConsole("error", "打开 Codex 目录选择器失败", { error: String(err) });
       toast("打开目录选择器失败：请稍后重试");
@@ -692,7 +555,7 @@ export function CliManagerPage() {
     const dir = claudeInfo?.config_dir ?? claudeSettings?.config_dir;
     if (!dir) return;
     try {
-      await openPath(dir);
+      await openDesktopPath(dir);
     } catch (err) {
       logToConsole("error", "打开 Claude 配置目录失败", { error: String(err) });
       toast("打开目录失败：请查看控制台日志");
@@ -706,7 +569,7 @@ export function CliManagerPage() {
       return;
     }
     try {
-      await openPath(codexConfig.config_dir);
+      await openDesktopPath(codexConfig.config_dir);
     } catch (err) {
       logToConsole("error", "打开 Codex 配置目录失败", { error: String(err) });
       toast("打开目录失败：请查看控制台日志");

@@ -1,13 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
+import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
-import { invokeTauriOrNull } from "../../tauriInvoke";
 import { promptDelete, promptSetEnabled, promptUpsert, promptsList } from "../prompts";
 
-vi.mock("../../tauriInvoke", async () => {
-  const actual = await vi.importActual<typeof import("../../tauriInvoke")>("../../tauriInvoke");
+vi.mock("../../../generated/bindings", async () => {
+  const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
+    "../../../generated/bindings"
+  );
   return {
     ...actual,
-    invokeTauriOrNull: vi.fn(),
+    commands: {
+      ...actual.commands,
+      promptsList: vi.fn(),
+      promptUpsert: vi.fn(),
+      promptSetEnabled: vi.fn(),
+      promptDelete: vi.fn(),
+    },
   };
 });
 
@@ -21,7 +29,7 @@ vi.mock("../../consoleLog", async () => {
 
 describe("services/workspace/prompts", () => {
   it("rethrows invoke errors and logs", async () => {
-    vi.mocked(invokeTauriOrNull).mockRejectedValueOnce(new Error("prompts boom"));
+    vi.mocked(commands.promptsList).mockRejectedValueOnce(new Error("prompts boom"));
 
     await expect(promptsList(1)).rejects.toThrow("prompts boom");
     expect(logToConsole).toHaveBeenCalledWith(
@@ -35,13 +43,18 @@ describe("services/workspace/prompts", () => {
   });
 
   it("treats null invoke result as error with runtime", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce(null);
+    vi.mocked(commands.promptsList).mockResolvedValueOnce(null as any);
 
     await expect(promptsList(1)).rejects.toThrow("IPC_NULL_RESULT: prompts_list");
   });
 
   it("keeps argument mapping unchanged", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValue({ id: 1 } as any);
+    vi.mocked(commands.promptUpsert).mockResolvedValue({ status: "ok", data: { id: 1 } as any });
+    vi.mocked(commands.promptSetEnabled).mockResolvedValue({
+      status: "ok",
+      data: { id: 1 } as any,
+    });
+    vi.mocked(commands.promptDelete).mockResolvedValue({ status: "ok", data: true });
 
     await promptUpsert({
       prompt_id: null,
@@ -50,21 +63,12 @@ describe("services/workspace/prompts", () => {
       content: "hello",
       enabled: true,
     });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("prompt_upsert", {
-      promptId: null,
-      workspaceId: 1,
-      name: "P1",
-      content: "hello",
-      enabled: true,
-    });
+    expect(commands.promptUpsert).toHaveBeenCalledWith(null, 1, "P1", "hello", true);
 
     await promptSetEnabled(10, true);
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("prompt_set_enabled", {
-      promptId: 10,
-      enabled: true,
-    });
+    expect(commands.promptSetEnabled).toHaveBeenCalledWith(10, true);
 
     await promptDelete(10);
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("prompt_delete", { promptId: 10 });
+    expect(commands.promptDelete).toHaveBeenCalledWith(10);
   });
 });

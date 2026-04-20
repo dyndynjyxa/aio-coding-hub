@@ -8,7 +8,7 @@ import {
   gatewayUpstreamProxyTest,
 } from "../../../services/gateway/gateway";
 import { logToConsole } from "../../../services/consoleLog";
-import type { AppSettings } from "../../../services/settings/settings";
+import type { AppSettings, SensitiveStringUpdate } from "../../../services/settings/settings";
 import type { GatewayRectifierSettingsPatch } from "../../../services/settings/settingsGatewayRectifier";
 import { Button } from "../../../ui/Button";
 import { Card } from "../../../ui/Card";
@@ -51,7 +51,9 @@ export type CliManagerGeneralTabProps = {
 
   appSettings: AppSettings | null;
   commonSettingsSaving: boolean;
-  onPersistCommonSettings: (patch: Partial<AppSettings>) => Promise<AppSettings | null>;
+  onPersistCommonSettings: (
+    patch: Partial<AppSettings> & { upstream_proxy_password?: SensitiveStringUpdate }
+  ) => Promise<AppSettings | null>;
 
   upstreamFirstByteTimeoutSeconds: number;
   setUpstreamFirstByteTimeoutSeconds: (value: number) => void;
@@ -679,7 +681,9 @@ type UpstreamProxySettingsCardProps = {
   available: boolean;
   saving: boolean;
   settings: AppSettings;
-  onPersistSettings: (patch: Partial<AppSettings>) => Promise<AppSettings | null>;
+  onPersistSettings: (
+    patch: Partial<AppSettings> & { upstream_proxy_password?: SensitiveStringUpdate }
+  ) => Promise<AppSettings | null>;
 };
 
 function UpstreamProxySettingsCard({
@@ -690,7 +694,8 @@ function UpstreamProxySettingsCard({
 }: UpstreamProxySettingsCardProps) {
   const [proxyUrl, setProxyUrl] = useState(settings.upstream_proxy_url ?? "");
   const [proxyUsername, setProxyUsername] = useState(settings.upstream_proxy_username ?? "");
-  const [proxyPassword, setProxyPassword] = useState(settings.upstream_proxy_password ?? "");
+  const [proxyPassword, setProxyPassword] = useState("");
+  const [clearSavedPassword, setClearSavedPassword] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
   const [detectingExitIp, setDetectingExitIp] = useState(false);
   const [hasPendingEdits, setHasPendingEdits] = useState(false);
@@ -700,13 +705,24 @@ function UpstreamProxySettingsCard({
     if (hasPendingEdits) return;
     setProxyUrl(settings.upstream_proxy_url ?? "");
     setProxyUsername(settings.upstream_proxy_username ?? "");
-    setProxyPassword(settings.upstream_proxy_password ?? "");
+    setProxyPassword("");
+    setClearSavedPassword(false);
   }, [
     hasPendingEdits,
-    settings.upstream_proxy_password,
+    settings.upstream_proxy_password_configured,
     settings.upstream_proxy_url,
     settings.upstream_proxy_username,
   ]);
+
+  function resolveProxyPasswordPatch(): SensitiveStringUpdate {
+    if (clearSavedPassword) {
+      return { mode: "clear" };
+    }
+    if (proxyPassword.trim()) {
+      return { mode: "replace", value: proxyPassword };
+    }
+    return { mode: "preserve" };
+  }
 
   async function handleProxyEnabledChange(enabled: boolean) {
     if (disabled) return;
@@ -718,9 +734,11 @@ function UpstreamProxySettingsCard({
       upstream_proxy_enabled: enabled,
       upstream_proxy_url: proxyUrl.trim(),
       upstream_proxy_username: proxyUsername.trim(),
-      upstream_proxy_password: proxyPassword,
+      upstream_proxy_password: resolveProxyPasswordPatch(),
     });
     if (updated) {
+      setProxyPassword("");
+      setClearSavedPassword(false);
       toast.success(enabled ? "代理已启用" : "代理已禁用");
     }
   }
@@ -729,10 +747,11 @@ function UpstreamProxySettingsCard({
     if (disabled) return;
     const trimmedUrl = proxyUrl.trim();
     const trimmedUsername = proxyUsername.trim();
+    const sensitiveChanged = clearSavedPassword || proxyPassword.trim().length > 0;
     const fieldsChanged =
       trimmedUrl !== settings.upstream_proxy_url ||
       trimmedUsername !== settings.upstream_proxy_username ||
-      proxyPassword !== settings.upstream_proxy_password;
+      sensitiveChanged;
 
     if (!fieldsChanged) {
       setHasPendingEdits(false);
@@ -742,22 +761,26 @@ function UpstreamProxySettingsCard({
       toast("代理已启用时地址不能为空");
       setProxyUrl(settings.upstream_proxy_url);
       setProxyUsername(settings.upstream_proxy_username);
-      setProxyPassword(settings.upstream_proxy_password);
+      setProxyPassword("");
+      setClearSavedPassword(false);
       setHasPendingEdits(false);
       return;
     }
     const updated = await onPersistSettings({
       upstream_proxy_url: trimmedUrl,
       upstream_proxy_username: trimmedUsername,
-      upstream_proxy_password: proxyPassword,
+      upstream_proxy_password: resolveProxyPasswordPatch(),
     });
     setHasPendingEdits(false);
     if (!updated) {
       setProxyUrl(settings.upstream_proxy_url);
       setProxyUsername(settings.upstream_proxy_username);
-      setProxyPassword(settings.upstream_proxy_password);
+      setProxyPassword("");
+      setClearSavedPassword(false);
       return;
     }
+    setProxyPassword("");
+    setClearSavedPassword(false);
     if (options?.successMessage) {
       toast.success(options.successMessage);
     }
@@ -866,10 +889,7 @@ function UpstreamProxySettingsCard({
             </Button>
           </div>
         </SettingsRow>
-        <SettingsRow
-          label="用户名"
-          subtitle="可选。建议在此填写，而不是把用户名写进 URL。"
-        >
+        <SettingsRow label="用户名" subtitle="可选。建议在此填写，而不是把用户名写进 URL。">
           <Input
             type="text"
             value={proxyUsername}
@@ -887,26 +907,45 @@ function UpstreamProxySettingsCard({
             disabled={disabled}
           />
         </SettingsRow>
-        <SettingsRow
-          label="密码"
-          subtitle="可选。密码会单独保存，不需要手动写进代理 URL。"
-        >
+        <SettingsRow label="密码" subtitle="可选。密码会单独保存，不需要手动写进代理 URL。">
           <Input
             type="password"
             value={proxyPassword}
             onChange={(e) => {
               setHasPendingEdits(true);
               setProxyPassword(e.currentTarget.value);
+              setClearSavedPassword(false);
             }}
             onBlur={() =>
               void persistProxyFields({
                 successMessage: settings.upstream_proxy_enabled ? "代理认证信息已更新" : undefined,
               })
             }
-            placeholder="proxy-password"
+            placeholder={
+              settings.upstream_proxy_password_configured
+                ? "留空表示保留已保存密码"
+                : "proxy-password"
+            }
             style={{ width: "16rem" }}
             disabled={disabled}
           />
+          {settings.upstream_proxy_password_configured ? (
+            <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
+              <span>{clearSavedPassword ? "保存后会删除已保存密码" : "已保存代理密码"}</span>
+              <button
+                type="button"
+                className="text-accent hover:text-accent/80"
+                disabled={disabled}
+                onClick={() => {
+                  setHasPendingEdits(true);
+                  setProxyPassword("");
+                  setClearSavedPassword((prev) => !prev);
+                }}
+              >
+                {clearSavedPassword ? "取消清空" : "清空已保存密码"}
+              </button>
+            </div>
+          ) : null}
         </SettingsRow>
       </div>
     </div>

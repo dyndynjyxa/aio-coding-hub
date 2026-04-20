@@ -3,20 +3,25 @@ import { appEventNames } from "../../../constants/appEvents";
 import { setTauriRuntime, clearTauriRuntime } from "../../../test/utils/tauriRuntime";
 import { tauriListen, emitTauriEvent } from "../../../test/mocks/tauri";
 
-vi.mock("../../tauriInvoke", async () => {
-  const actual = await vi.importActual<typeof import("../../tauriInvoke")>("../../tauriInvoke");
+vi.mock("../../../generated/bindings", async () => {
+  const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
+    "../../../generated/bindings"
+  );
   return {
     ...actual,
-    invokeTauriOrNull: vi.fn().mockResolvedValue(true),
+    commands: {
+      ...actual.commands,
+      appHeartbeatPong: vi.fn().mockResolvedValue({ status: "ok", data: true }),
+    },
   };
 });
 
-import { invokeTauriOrNull } from "../../tauriInvoke";
+import { commands } from "../../../generated/bindings";
 
 describe("services/app/appHeartbeat", () => {
   beforeEach(() => {
     clearTauriRuntime();
-    vi.mocked(invokeTauriOrNull).mockResolvedValue(true);
+    vi.mocked(commands.appHeartbeatPong).mockResolvedValue({ status: "ok", data: true } as any);
   });
 
   async function importFresh() {
@@ -34,7 +39,7 @@ describe("services/app/appHeartbeat", () => {
     unlisten();
   });
 
-  it("heartbeat event triggers invokeTauriOrNull", async () => {
+  it("heartbeat event triggers appHeartbeatPong", async () => {
     setTauriRuntime();
     const { listenAppHeartbeat } = await importFresh();
     await listenAppHeartbeat();
@@ -42,15 +47,13 @@ describe("services/app/appHeartbeat", () => {
     emitTauriEvent(appEventNames.heartbeat, {});
 
     await vi.waitFor(() => {
-      expect(invokeTauriOrNull).toHaveBeenCalledWith("app_heartbeat_pong", undefined, {
-        timeoutMs: 3_000,
-      });
+      expect(commands.appHeartbeatPong).toHaveBeenCalledWith();
     });
   });
 
-  it("invokeTauriOrNull rejection is caught gracefully", async () => {
+  it("appHeartbeatPong rejection is caught gracefully", async () => {
     setTauriRuntime();
-    vi.mocked(invokeTauriOrNull).mockRejectedValueOnce(new Error("timeout"));
+    vi.mocked(commands.appHeartbeatPong).mockRejectedValueOnce(new Error("timeout"));
     const { listenAppHeartbeat } = await importFresh();
     await listenAppHeartbeat();
 
@@ -58,7 +61,7 @@ describe("services/app/appHeartbeat", () => {
 
     // Should not throw
     await vi.waitFor(() => {
-      expect(invokeTauriOrNull).toHaveBeenCalled();
+      expect(commands.appHeartbeatPong).toHaveBeenCalled();
     });
   });
 });

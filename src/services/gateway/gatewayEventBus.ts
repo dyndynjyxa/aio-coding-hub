@@ -1,7 +1,6 @@
-import { listen } from "@tauri-apps/api/event";
-
 import type { GatewayEventName } from "../../constants/gatewayEvents";
 import { logToConsole } from "../consoleLog";
+import { listenDesktopEvent } from "../desktop/event";
 
 export type GatewayEventSubscription = {
   ready: Promise<void>;
@@ -47,8 +46,8 @@ function disposeEntry(event: GatewayEventName, entry: Entry) {
 function ensureListening(event: GatewayEventName, entry: Entry): Promise<void> {
   if (entry.init) return entry.init;
 
-  entry.init = listen(event, (evt) => {
-    dispatchHandlers(entry.handlers, evt.payload);
+  entry.init = listenDesktopEvent(event, (payload) => {
+    dispatchHandlers(entry.handlers, payload);
   })
     .then((unlisten) => {
       entry.unlisten = unlisten;

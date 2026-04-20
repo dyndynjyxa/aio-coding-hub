@@ -2,14 +2,13 @@
 // - Manages circuit breaker queries, open-circuit derivation, auto-refresh timer,
 //   and provider reset logic for the HomePage.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { useQueryClient } from "@tanstack/react-query";
 import { logToConsole } from "../../../services/consoleLog";
 import type { OpenCircuitRow } from "../../../components/ProviderCircuitBadge";
-import { gatewayKeys } from "../../../query/keys";
 import {
   summarizeGatewayCircuitRows,
+  useGatewayCircuitAutoRefresh,
   useGatewayCircuitResetProviderMutation,
   useGatewayCircuitStatusQuery,
 } from "../../../query/gateway";
@@ -22,12 +21,9 @@ export type HomeCircuitState = {
 };
 
 export function useHomeCircuitState(): HomeCircuitState {
-  const queryClient = useQueryClient();
-
   const [resettingProviderIds, setResettingProviderIds] = useState<Set<number>>(new Set());
   const resettingProviderIdsRef = useRef(resettingProviderIds);
   resettingProviderIdsRef.current = resettingProviderIds;
-  const openCircuitsAutoRefreshTimerRef = useRef<number | null>(null);
 
   const resetCircuitProviderMutation = useGatewayCircuitResetProviderMutation();
   const claudeCircuitsQuery = useGatewayCircuitStatusQuery("claude");
@@ -48,6 +44,10 @@ export function useHomeCircuitState(): HomeCircuitState {
     () => summarizeGatewayCircuitRows(geminiCircuitsQuery.data),
     [geminiCircuitsQuery.data]
   );
+
+  useGatewayCircuitAutoRefresh("claude", claudeCircuitSummary);
+  useGatewayCircuitAutoRefresh("codex", codexCircuitSummary);
+  useGatewayCircuitAutoRefresh("gemini", geminiCircuitSummary);
 
   const openCircuits = useMemo<OpenCircuitRow[]>(() => {
     const specs = [
@@ -107,25 +107,6 @@ export function useHomeCircuitState(): HomeCircuitState {
     geminiProvidersQuery.data,
   ]);
 
-  const hasUnavailableCircuit =
-    claudeCircuitSummary.hasUnavailable ||
-    codexCircuitSummary.hasUnavailable ||
-    geminiCircuitSummary.hasUnavailable;
-  const earliestUnavailableUntil = useMemo(() => {
-    const untils = [
-      claudeCircuitSummary.earliestUnavailableUntil,
-      codexCircuitSummary.earliestUnavailableUntil,
-      geminiCircuitSummary.earliestUnavailableUntil,
-    ].filter((value): value is number => value != null);
-
-    if (untils.length === 0) return null;
-    return Math.min(...untils);
-  }, [
-    claudeCircuitSummary.earliestUnavailableUntil,
-    codexCircuitSummary.earliestUnavailableUntil,
-    geminiCircuitSummary.earliestUnavailableUntil,
-  ]);
-
   const handleResetProvider = useCallback(
     async (providerId: number) => {
       if (resettingProviderIdsRef.current.has(providerId)) return;
@@ -151,34 +132,6 @@ export function useHomeCircuitState(): HomeCircuitState {
     },
     [resetCircuitProviderMutation]
   );
-
-  // Auto-refresh circuits when the earliest open_until expires
-  useEffect(() => {
-    if (openCircuitsAutoRefreshTimerRef.current != null) {
-      window.clearTimeout(openCircuitsAutoRefreshTimerRef.current);
-      openCircuitsAutoRefreshTimerRef.current = null;
-    }
-
-    if (!hasUnavailableCircuit) return;
-
-    const nowUnix = Math.floor(Date.now() / 1000);
-    const delayMs =
-      earliestUnavailableUntil != null
-        ? Math.max(200, (earliestUnavailableUntil - nowUnix) * 1000 + 250)
-        : 30_000;
-
-    openCircuitsAutoRefreshTimerRef.current = window.setTimeout(() => {
-      openCircuitsAutoRefreshTimerRef.current = null;
-      queryClient.invalidateQueries({ queryKey: gatewayKeys.circuits() });
-    }, delayMs);
-
-    return () => {
-      if (openCircuitsAutoRefreshTimerRef.current != null) {
-        window.clearTimeout(openCircuitsAutoRefreshTimerRef.current);
-        openCircuitsAutoRefreshTimerRef.current = null;
-      }
-    };
-  }, [earliestUnavailableUntil, hasUnavailableCircuit, queryClient]);
 
   return {
     openCircuits,

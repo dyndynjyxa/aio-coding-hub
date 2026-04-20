@@ -1,7 +1,8 @@
 // Usage:
 // - Used by `src/components/home/HomeProviderLimitPanel.tsx` to load provider limit usage data.
 
-import { invokeService } from "../invokeServiceCommand";
+import { commands } from "../../generated/bindings";
+import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
 import type { CliKey } from "./providers";
 
 export type ProviderLimitUsageRow = {
@@ -31,11 +32,15 @@ export type ProviderLimitUsageRow = {
 };
 
 export async function providerLimitUsageV1(cliKey?: CliKey | null) {
-  return invokeService<ProviderLimitUsageRow[]>(
-    "读取 Provider 限额用量失败",
-    "provider_limit_usage_v1",
-    {
+  return invokeGeneratedIpc<ProviderLimitUsageRow[]>({
+    title: "读取 Provider 限额用量失败",
+    cmd: "provider_limit_usage_v1",
+    args: {
       cliKey: cliKey ?? null,
-    }
-  );
+    },
+    invoke: () =>
+      commands.providerLimitUsageV1(cliKey ?? null) as Promise<
+        GeneratedCommandResult<ProviderLimitUsageRow[]>
+      >,
+  });
 }

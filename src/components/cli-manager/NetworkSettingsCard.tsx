@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { AppSettings, GatewayListenMode } from "../../services/settings/settings";
-import { gatewayStart, gatewayStop } from "../../services/gateway/gateway";
 import { logToConsole } from "../../services/consoleLog";
 import { useGatewayMeta } from "../../hooks/useGatewayMeta";
 import { useWslHostAddressQuery } from "../../query/wsl";
@@ -60,7 +59,9 @@ export type NetworkSettingsCardProps = {
   available: boolean;
   saving: boolean;
   settings: AppSettings;
-  onPersistSettings: (patch: Partial<AppSettings>) => Promise<AppSettings | null>;
+  onPersistSettings: (
+    patch: Partial<AppSettings> & { upstream_proxy_password?: never }
+  ) => Promise<AppSettings | null>;
 };
 
 export function NetworkSettingsCard({
@@ -108,28 +109,6 @@ export function NetworkSettingsCard({
     wslHost,
   ]);
 
-  async function restartGatewayIfRunning(preferredPort: number) {
-    if (!gateway?.running) return;
-
-    const stopped = await gatewayStop();
-    if (!stopped) {
-      toast("自动重启失败：无法停止网关");
-      return;
-    }
-
-    const started = await gatewayStart(preferredPort);
-    if (!started) {
-      toast("自动重启失败：无法启动网关");
-      return;
-    }
-
-    if (started.port && started.port !== preferredPort) {
-      toast(`端口被占用，已切换到 ${started.port}`);
-    } else {
-      toast("网关已重启");
-    }
-  }
-
   async function commitListenMode(next: GatewayListenMode) {
     if (!available) return;
     setListenMode(next);
@@ -141,7 +120,7 @@ export function NetworkSettingsCard({
       }
 
       logToConsole("info", "更新监听模式", { next, running: gateway?.running ?? false });
-      await restartGatewayIfRunning(updated.preferred_port);
+      toast("监听模式已保存");
     } catch (err) {
       logToConsole("error", "更新监听模式失败", { error: String(err), next });
       toast("更新监听模式失败：请稍后重试");
@@ -169,7 +148,7 @@ export function NetworkSettingsCard({
         address: customAddress,
         running: gateway?.running ?? false,
       });
-      await restartGatewayIfRunning(updated.preferred_port);
+      toast("自定义监听地址已保存");
     } catch (err) {
       logToConsole("error", "更新自定义监听地址失败", {
         error: String(err),

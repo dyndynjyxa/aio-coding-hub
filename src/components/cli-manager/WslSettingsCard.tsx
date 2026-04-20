@@ -1,11 +1,11 @@
-import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { AppSettings, WslHostAddressMode } from "../../services/settings/settings";
 import { logToConsole } from "../../services/consoleLog";
 import type { WslConfigureReport } from "../../services/app/wsl";
+import { listenDesktopEvent } from "../../services/desktop/event";
 import { useAppAboutQuery } from "../../query/appAbout";
-import { useSettingsSetMutation } from "../../query/settings";
+import { useSettingsPatchMutation } from "../../query/settings";
 import { useWslConfigureClientsMutation, useWslOverviewQuery } from "../../query/wsl";
 import { Card } from "../../ui/Card";
 import { ConfirmDialog } from "../../ui/ConfirmDialog";
@@ -29,8 +29,8 @@ export function WslSettingsCard({ available, saving, settings }: WslSettingsCard
 
   const wslSupported = useMemo(() => aboutOs === "windows", [aboutOs]);
 
-  const settingsSetMutation = useSettingsSetMutation();
-  const settingsMutating = settingsSetMutation.isPending;
+  const settingsPatchMutation = useSettingsPatchMutation();
+  const settingsMutating = settingsPatchMutation.isPending;
 
   const wslOverviewQuery = useWslOverviewQuery({
     enabled: available && wslSupported,
@@ -82,11 +82,11 @@ export function WslSettingsCard({ available, saving, settings }: WslSettingsCard
     const cleanupFns: (() => void)[] = [];
 
     void Promise.allSettled([
-      listen<WslConfigureReport>("wsl:auto_config_result", (event) => {
-        setLastReport(event.payload);
+      listenDesktopEvent<WslConfigureReport>("wsl:auto_config_result", (payload) => {
+        setLastReport(payload);
         void wslOverviewQuery.refetch();
       }),
-      listen("wsl:localhost_switch_prompt", () => {
+      listenDesktopEvent("wsl:localhost_switch_prompt", () => {
         setShowListenModeDialog(true);
       }),
     ]).then(([autoConfigResult, localhostSwitchPromptResult]) => {
@@ -190,13 +190,8 @@ export function WslSettingsCard({ available, saving, settings }: WslSettingsCard
     setHostAddressMode(next);
 
     try {
-      const updated = await settingsSetMutation.mutateAsync({
-        preferredPort: settings.preferred_port,
-        autoStart: settings.auto_start,
-        logRetentionDays: settings.log_retention_days,
-        failoverMaxAttemptsPerProvider: settings.failover_max_attempts_per_provider,
-        failoverMaxProvidersToTry: settings.failover_max_providers_to_try,
-        wslHostAddressMode: next,
+      const updated = await settingsPatchMutation.mutateAsync({
+        wsl_host_address_mode: next,
       });
       if (!updated) {
         setHostAddressMode(settings.wsl_host_address_mode);
@@ -227,14 +222,9 @@ export function WslSettingsCard({ available, saving, settings }: WslSettingsCard
     }
 
     try {
-      const updated = await settingsSetMutation.mutateAsync({
-        preferredPort: settings.preferred_port,
-        autoStart: settings.auto_start,
-        logRetentionDays: settings.log_retention_days,
-        failoverMaxAttemptsPerProvider: settings.failover_max_attempts_per_provider,
-        failoverMaxProvidersToTry: settings.failover_max_providers_to_try,
-        wslHostAddressMode: "custom",
-        wslCustomHostAddress: trimmed,
+      const updated = await settingsPatchMutation.mutateAsync({
+        wsl_host_address_mode: "custom",
+        wsl_custom_host_address: trimmed,
       });
       if (!updated) {
         setCustomHostAddress(settings.wsl_custom_host_address);
@@ -256,13 +246,8 @@ export function WslSettingsCard({ available, saving, settings }: WslSettingsCard
     if (saving || settingsMutating || switchingListenMode) return;
     setSwitchingListenMode(true);
     try {
-      const updated = await settingsSetMutation.mutateAsync({
-        preferredPort: settings.preferred_port,
-        autoStart: settings.auto_start,
-        logRetentionDays: settings.log_retention_days,
-        failoverMaxAttemptsPerProvider: settings.failover_max_attempts_per_provider,
-        failoverMaxProvidersToTry: settings.failover_max_providers_to_try,
-        gatewayListenMode: "wsl_auto",
+      const updated = await settingsPatchMutation.mutateAsync({
+        gateway_listen_mode: "wsl_auto",
       });
       if (updated) {
         toast('已切换到"WSL 自动检测"模式');
@@ -280,13 +265,8 @@ export function WslSettingsCard({ available, saving, settings }: WslSettingsCard
     if (!available) return;
     if (saving || settingsMutating) return;
     try {
-      const updated = await settingsSetMutation.mutateAsync({
-        preferredPort: settings.preferred_port,
-        autoStart: settings.auto_start,
-        logRetentionDays: settings.log_retention_days,
-        failoverMaxAttemptsPerProvider: settings.failover_max_attempts_per_provider,
-        failoverMaxProvidersToTry: settings.failover_max_providers_to_try,
-        wslAutoConfig: value,
+      const updated = await settingsPatchMutation.mutateAsync({
+        wsl_auto_config: value,
       });
       if (!updated) return;
       toast("已保存");

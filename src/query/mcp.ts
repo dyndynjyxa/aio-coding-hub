@@ -7,6 +7,7 @@ import {
   mcpImportServers,
   type McpImportServer,
   type McpImportReport,
+  type McpSecretPatchInput,
   mcpServerDelete,
   mcpServerSetEnabled,
   mcpServerUpsert,
@@ -42,10 +43,10 @@ export function useMcpServerUpsertMutation(workspaceId: number) {
       transport: McpTransport;
       command: string | null;
       args: string[];
-      env: Record<string, string>;
+      env?: McpSecretPatchInput;
       cwd: string | null;
       url: string | null;
-      headers: Record<string, string>;
+      headers?: McpSecretPatchInput;
     }) =>
       mcpServerUpsert({
         server_id: input.serverId,

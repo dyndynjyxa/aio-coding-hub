@@ -13,7 +13,7 @@ use std::time::Duration;
 
 const BASELLM_ALL_JSON_URL: &str = "https://basellm.github.io/llm-metadata/api/all.json";
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct ModelPricesSyncReport {
     pub status: String,
     pub inserted: u32,

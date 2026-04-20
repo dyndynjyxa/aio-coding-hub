@@ -8,7 +8,7 @@ pub const NOTICE_EVENT_NAME: &str = "notice:notify";
 
 const NOTICE_PREFIX: &str = "AIO Coding Hub";
 
-#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum NoticeLevel {
     Info,

@@ -1,11 +1,13 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { ProviderEditorDialog } from "../ProviderEditorDialog";
 import { copyText } from "../../../services/clipboard";
 import { logToConsole } from "../../../services/consoleLog";
 import {
-  providerGetApiKey,
+  providerCopyApiKeyToClipboard,
   providerDelete,
   providerOAuthDisconnect,
   providerOAuthFetchLimits,
@@ -13,8 +15,12 @@ import {
   providerOAuthStartFlow,
   providerOAuthStatus,
   providerUpsert,
+  type ProviderOAuthRefreshResult,
+  type ProviderOAuthStartFlowResult,
+  type ProviderOAuthStatusResult,
   type ProviderSummary,
 } from "../../../services/providers/providers";
+import { createTestQueryClient } from "../../../test/utils/reactQuery";
 import type { ProviderEditorInitialValues } from "../providerDuplicate";
 
 vi.mock("sonner", () => ({ toast: vi.fn() }));
@@ -30,7 +36,7 @@ vi.mock("../../../services/providers/providers", async () => {
     providerUpsert: vi.fn(),
     providerDelete: vi.fn(),
     baseUrlPingMs: vi.fn(),
-    providerGetApiKey: vi.fn(),
+    providerCopyApiKeyToClipboard: vi.fn(),
     providerOAuthStartFlow: vi.fn(),
     providerOAuthRefresh: vi.fn(),
     providerOAuthDisconnect: vi.fn(),
@@ -68,6 +74,7 @@ function makeProvider(partial: Partial<ProviderSummary> = {}): ProviderSummary {
     oauth_last_error: null,
     source_provider_id: null,
     bridge_type: null,
+    api_key_configured: partial.api_key_configured ?? false,
     ...partial,
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,
   };
@@ -100,6 +107,50 @@ function makeInitialValues(
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,
   };
 }
+
+function makeOAuthStartFlowResult(
+  partial: Partial<ProviderOAuthStartFlowResult> = {}
+): ProviderOAuthStartFlowResult {
+  return {
+    success: partial.success ?? true,
+    provider_id: partial.provider_id ?? 1,
+    provider_type: partial.provider_type ?? "google",
+    expires_at: partial.expires_at ?? null,
+  };
+}
+
+function makeOAuthStatus(
+  partial: Partial<ProviderOAuthStatusResult> = {}
+): ProviderOAuthStatusResult {
+  return {
+    connected: partial.connected ?? false,
+    provider_type: partial.provider_type ?? null,
+    email: partial.email ?? null,
+    expires_at: partial.expires_at ?? null,
+    has_refresh_token: partial.has_refresh_token ?? null,
+  };
+}
+
+function makeOAuthRefreshResult(
+  partial: Partial<ProviderOAuthRefreshResult> = {}
+): ProviderOAuthRefreshResult {
+  return {
+    success: partial.success ?? true,
+    expires_at: partial.expires_at ?? null,
+  };
+}
+
+function renderDialog(ui: ReactElement) {
+  const client = createTestQueryClient();
+  const view = rtlRender(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  return {
+    ...view,
+    rerender: (nextUi: ReactElement) =>
+      view.rerender(<QueryClientProvider client={client}>{nextUi}</QueryClientProvider>),
+  };
+}
+
+const render = renderDialog;
 
 describe("pages/providers/ProviderEditorDialog", () => {
   it("validates create form and saves provider", async () => {
@@ -267,7 +318,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
       <ProviderEditorDialog
         mode="edit"
         open={true}
-        provider={makeProvider({ stream_idle_timeout_seconds: 90 })}
+        provider={makeProvider({ api_key_configured: true, stream_idle_timeout_seconds: 90 })}
         onSaved={vi.fn()}
         onOpenChange={vi.fn()}
       />
@@ -551,9 +602,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
 
     fireEvent.click(dialog.getByRole("button", { name: "保存" }));
 
-    await waitFor(() =>
-      expect(vi.mocked(toast)).toHaveBeenCalledWith("请选择源 Codex 来源")
-    );
+    await waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalledWith("请选择源 Codex 来源"));
     expect(vi.mocked(providerUpsert)).not.toHaveBeenCalled();
   });
 
@@ -630,7 +679,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
       <ProviderEditorDialog
         mode="edit"
         open={true}
-        provider={provider}
+        provider={makeProvider({ ...provider, api_key_configured: true })}
         onSaved={onSaved}
         onOpenChange={onOpenChange}
       />
@@ -693,99 +742,27 @@ describe("pages/providers/ProviderEditorDialog", () => {
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
 
-  it("loads full API key into the input in edit mode", async () => {
-    vi.mocked(providerGetApiKey).mockResolvedValueOnce("sk-secret-123");
-
-    const provider = makeProvider();
+  it("keeps edit mode API key input empty and shows preserve hint when key is configured", async () => {
     render(
       <ProviderEditorDialog
         mode="edit"
         open={true}
-        provider={provider}
+        provider={makeProvider({ api_key_configured: true })}
         onSaved={vi.fn()}
         onOpenChange={vi.fn()}
       />
     );
 
     const dialog = within(screen.getByRole("dialog"));
-    await waitFor(() => expect(vi.mocked(providerGetApiKey)).toHaveBeenCalledWith(1));
-    await waitFor(() => expect(dialog.getByDisplayValue("sk-secret-123")).toBeInTheDocument());
+    expect(dialog.queryByDisplayValue(/sk-|1234567890abcdef/)).not.toBeInTheDocument();
+    expect(dialog.getByPlaceholderText("留空表示不改；输入新值表示替换")).toBeInTheDocument();
+    expect(dialog.getByText("已配置。留空表示不改，输入新值表示替换。")).toBeInTheDocument();
   });
 
-  it("ignores stale API key responses after switching providers", async () => {
-    let resolveFirst!: (value: string) => void;
-    let resolveSecond!: (value: string) => void;
-    vi.mocked(providerGetApiKey)
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            resolveFirst = resolve;
-          })
-      )
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            resolveSecond = resolve;
-          })
-      );
-
-    const { rerender } = render(
-      <ProviderEditorDialog
-        mode="edit"
-        open={true}
-        provider={makeProvider({ id: 1, name: "First Provider" })}
-        onSaved={vi.fn()}
-        onOpenChange={vi.fn()}
-      />
-    );
-
-    await waitFor(() => expect(vi.mocked(providerGetApiKey)).toHaveBeenCalledWith(1));
-
-    rerender(
-      <ProviderEditorDialog
-        mode="edit"
-        open={true}
-        provider={makeProvider({ id: 2, name: "Second Provider" })}
-        onSaved={vi.fn()}
-        onOpenChange={vi.fn()}
-      />
-    );
-
-    await waitFor(() => expect(vi.mocked(providerGetApiKey)).toHaveBeenCalledWith(2));
-
-    resolveSecond("sk-second-provider");
-    await waitFor(() => expect(screen.getByDisplayValue("sk-second-provider")).toBeInTheDocument());
-
-    resolveFirst("sk-first-provider");
-    await waitFor(() =>
-      expect(screen.queryByDisplayValue("sk-first-provider")).not.toBeInTheDocument()
-    );
-    expect(screen.getByDisplayValue("sk-second-provider")).toBeInTheDocument();
-  });
-
-  it("shows full API key inside the input when a saved key exists", async () => {
-    vi.mocked(providerGetApiKey).mockResolvedValueOnce("1234567890abcdef");
-
-    const provider = makeProvider();
-    render(
-      <ProviderEditorDialog
-        mode="edit"
-        open={true}
-        provider={provider}
-        onSaved={vi.fn()}
-        onOpenChange={vi.fn()}
-      />
-    );
-
-    const dialog = within(screen.getByRole("dialog"));
-    await waitFor(() => expect(dialog.getByDisplayValue("1234567890abcdef")).toBeInTheDocument());
-  });
-
-  it("keeps unchanged API key out of edit save payload after revealing it", async () => {
-    vi.mocked(providerGetApiKey).mockResolvedValueOnce("1234567890abcdef");
+  it("keeps unchanged API key out of edit save payload", async () => {
     vi.mocked(providerUpsert).mockResolvedValue(makeProvider() as any);
 
-    const provider = makeProvider();
+    const provider = makeProvider({ api_key_configured: true });
     render(
       <ProviderEditorDialog
         mode="edit"
@@ -797,40 +774,56 @@ describe("pages/providers/ProviderEditorDialog", () => {
     );
 
     const dialog = within(screen.getByRole("dialog"));
-    await waitFor(() => expect(dialog.getByDisplayValue("1234567890abcdef")).toBeInTheDocument());
-
     fireEvent.click(dialog.getByRole("button", { name: "保存" }));
 
     await waitFor(() =>
       expect(vi.mocked(providerUpsert)).toHaveBeenCalledWith(
         expect.objectContaining({
           provider_id: 1,
-          api_key: "",
+          api_key: null,
         })
       )
     );
   });
 
-  it("copies API key in edit mode", async () => {
-    vi.mocked(providerGetApiKey).mockResolvedValueOnce("1234567890abcdef");
-
-    const provider = makeProvider();
+  it("copies draft API key before save", async () => {
     render(
       <ProviderEditorDialog
-        mode="edit"
+        mode="create"
         open={true}
-        provider={provider}
+        cliKey="claude"
         onSaved={vi.fn()}
         onOpenChange={vi.fn()}
       />
     );
 
     const dialog = within(screen.getByRole("dialog"));
-    await waitFor(() => expect(dialog.getByDisplayValue("1234567890abcdef")).toBeInTheDocument());
+    fireEvent.change(dialog.getByPlaceholderText("sk-…"), { target: { value: "sk-draft-123" } });
     fireEvent.click(dialog.getByRole("button", { name: "复制" }));
 
-    await waitFor(() => expect(vi.mocked(copyText)).toHaveBeenCalledWith("1234567890abcdef"));
-    await waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalledWith("已复制 API Key"));
+    await waitFor(() => expect(vi.mocked(copyText)).toHaveBeenCalledWith("sk-draft-123"));
+    await waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalledWith("已复制草稿 API Key"));
+    expect(vi.mocked(providerCopyApiKeyToClipboard)).not.toHaveBeenCalled();
+  });
+
+  it("copies saved API key in edit mode without loading plaintext into the form", async () => {
+    vi.mocked(providerCopyApiKeyToClipboard).mockResolvedValueOnce(true as any);
+
+    render(
+      <ProviderEditorDialog
+        mode="edit"
+        open={true}
+        provider={makeProvider({ api_key_configured: true })}
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByRole("button", { name: "复制" }));
+
+    await waitFor(() => expect(vi.mocked(providerCopyApiKeyToClipboard)).toHaveBeenCalledWith(1));
+    await waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalledWith("已复制已保存的 API Key"));
   });
 
   it("sets cost multiplier to zero when clicking 免费", () => {
@@ -934,15 +927,14 @@ describe("pages/providers/ProviderEditorDialog", () => {
     });
   });
 
-  it("handles API key copy fetch failure gracefully", async () => {
-    vi.mocked(providerGetApiKey).mockRejectedValue(new Error("fetch failed"));
+  it("handles saved API key copy failure gracefully", async () => {
+    vi.mocked(providerCopyApiKeyToClipboard).mockRejectedValue(new Error("copy failed"));
 
-    const provider = makeProvider();
     render(
       <ProviderEditorDialog
         mode="edit"
         open={true}
-        provider={provider}
+        provider={makeProvider({ api_key_configured: true })}
         onSaved={vi.fn()}
         onOpenChange={vi.fn()}
       />
@@ -953,7 +945,9 @@ describe("pages/providers/ProviderEditorDialog", () => {
     await waitFor(() => expect(copyButton).not.toBeDisabled());
     fireEvent.click(copyButton);
 
-    await waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalledWith("读取 API Key 失败"));
+    await waitFor(() =>
+      expect(vi.mocked(toast)).toHaveBeenCalledWith("复制 API Key 失败：Error: copy failed")
+    );
   });
 
   it("switches to OAuth mode and performs OAuth login in create mode", async () => {
@@ -962,21 +956,24 @@ describe("pages/providers/ProviderEditorDialog", () => {
       cli_key: "codex",
       name: "OAuth Provider",
     } as any);
-    vi.mocked(providerOAuthStartFlow).mockResolvedValueOnce({
-      success: true,
-      provider_type: "google",
-      expires_at: 1700000000,
-    });
-    vi.mocked(providerOAuthStatus).mockResolvedValueOnce({
-      connected: true,
-      provider_type: "google",
-      email: "test@example.com",
-      expires_at: 1700000000,
-      has_refresh_token: true,
-    });
+    vi.mocked(providerOAuthStartFlow).mockResolvedValueOnce(
+      makeOAuthStartFlowResult({ provider_id: 99, provider_type: "google", expires_at: 1700000000 })
+    );
+    vi.mocked(providerOAuthStatus).mockResolvedValueOnce(
+      makeOAuthStatus({
+        connected: true,
+        provider_type: "google",
+        email: "test@example.com",
+        expires_at: 1700000000,
+        has_refresh_token: true,
+      })
+    );
     vi.mocked(providerOAuthFetchLimits).mockResolvedValueOnce({
+      limit_short_label: null,
       limit_5h_text: "100 req",
       limit_weekly_text: "1000 req",
+      limit_5h_reset_at: null,
+      limit_weekly_reset_at: null,
     });
 
     const onSaved = vi.fn();
@@ -1039,15 +1036,20 @@ describe("pages/providers/ProviderEditorDialog", () => {
       cli_key: "codex",
       name: "OAuth Provider",
     } as any);
-    vi.mocked(providerOAuthStartFlow).mockResolvedValueOnce({
-      success: true,
-      provider_type: "google",
-      expires_at: 1700000000,
-    });
+    vi.mocked(providerOAuthStartFlow).mockResolvedValueOnce(
+      makeOAuthStartFlowResult({
+        provider_id: 109,
+        provider_type: "google",
+        expires_at: 1700000000,
+      })
+    );
     vi.mocked(providerOAuthStatus).mockRejectedValueOnce(new Error("status sync failed"));
     vi.mocked(providerOAuthFetchLimits).mockResolvedValueOnce({
+      limit_short_label: null,
       limit_5h_text: "100 req",
       limit_weekly_text: "1000 req",
+      limit_5h_reset_at: null,
+      limit_weekly_reset_at: null,
     });
 
     const onSaved = vi.fn();
@@ -1111,22 +1113,28 @@ describe("pages/providers/ProviderEditorDialog", () => {
       cli_key: "gemini",
       name: "Gemini OAuth",
     } as any);
-    vi.mocked(providerOAuthStartFlow).mockResolvedValueOnce({
-      success: true,
-      provider_type: "gemini_oauth",
-      expires_at: 1700000000,
-    });
-    vi.mocked(providerOAuthStatus).mockResolvedValueOnce({
-      connected: true,
-      provider_type: "gemini_oauth",
-      email: "gemini@example.com",
-      expires_at: 1700000000,
-      has_refresh_token: true,
-    });
+    vi.mocked(providerOAuthStartFlow).mockResolvedValueOnce(
+      makeOAuthStartFlowResult({
+        provider_id: 199,
+        provider_type: "gemini_oauth",
+        expires_at: 1700000000,
+      })
+    );
+    vi.mocked(providerOAuthStatus).mockResolvedValueOnce(
+      makeOAuthStatus({
+        connected: true,
+        provider_type: "gemini_oauth",
+        email: "gemini@example.com",
+        expires_at: 1700000000,
+        has_refresh_token: true,
+      })
+    );
     vi.mocked(providerOAuthFetchLimits).mockResolvedValueOnce({
       limit_short_label: "1h",
       limit_5h_text: "60",
       limit_weekly_text: "300",
+      limit_5h_reset_at: null,
+      limit_weekly_reset_at: null,
     });
 
     const onSaved = vi.fn();
@@ -1177,8 +1185,10 @@ describe("pages/providers/ProviderEditorDialog", () => {
   });
 
   it("handles OAuth login failure in edit mode", async () => {
-    vi.mocked(providerOAuthStatus).mockResolvedValueOnce(null);
-    vi.mocked(providerOAuthStartFlow).mockResolvedValueOnce({ success: false });
+    vi.mocked(providerOAuthStatus).mockResolvedValueOnce(makeOAuthStatus());
+    vi.mocked(providerOAuthStartFlow).mockResolvedValueOnce(
+      makeOAuthStartFlowResult({ success: false })
+    );
 
     const provider = makeProvider({ auth_mode: "oauth" });
     const onSaved = vi.fn();
@@ -1214,7 +1224,9 @@ describe("pages/providers/ProviderEditorDialog", () => {
       cli_key: "codex",
       name: "OAuth Provider",
     } as any);
-    vi.mocked(providerOAuthStartFlow).mockResolvedValueOnce({ success: false });
+    vi.mocked(providerOAuthStartFlow).mockResolvedValueOnce(
+      makeOAuthStartFlowResult({ success: false, provider_id: 99 })
+    );
     vi.mocked(providerDelete).mockResolvedValueOnce(true as any);
 
     render(
@@ -1255,7 +1267,9 @@ describe("pages/providers/ProviderEditorDialog", () => {
       cli_key: "codex",
       name: "OAuth Provider",
     } as any);
-    vi.mocked(providerOAuthStartFlow).mockResolvedValueOnce({ success: false });
+    vi.mocked(providerOAuthStartFlow).mockResolvedValueOnce(
+      makeOAuthStartFlowResult({ success: false, provider_id: 102 })
+    );
     vi.mocked(providerDelete).mockResolvedValueOnce(false as any);
 
     render(
@@ -1303,7 +1317,9 @@ describe("pages/providers/ProviderEditorDialog", () => {
       cli_key: "codex",
       name: "OAuth Provider",
     } as any);
-    vi.mocked(providerOAuthStartFlow).mockResolvedValueOnce({ success: false });
+    vi.mocked(providerOAuthStartFlow).mockResolvedValueOnce(
+      makeOAuthStartFlowResult({ success: false, provider_id: 103 })
+    );
     vi.mocked(providerDelete).mockRejectedValueOnce(new Error("delete boom"));
 
     render(
@@ -1418,7 +1434,9 @@ describe("pages/providers/ProviderEditorDialog", () => {
   });
 
   it("validates OAuth connection before save in OAuth mode", async () => {
-    vi.mocked(providerOAuthStatus).mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+    vi.mocked(providerOAuthStatus)
+      .mockResolvedValueOnce(makeOAuthStatus())
+      .mockResolvedValueOnce(makeOAuthStatus());
 
     const provider = makeProvider({ auth_mode: "oauth" });
     render(
@@ -1478,7 +1496,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
 
   it("handles OAuth login error", async () => {
     vi.mocked(providerOAuthStartFlow).mockRejectedValueOnce(new Error("OAuth boom"));
-    vi.mocked(providerOAuthStatus).mockResolvedValueOnce(null);
+    vi.mocked(providerOAuthStatus).mockResolvedValueOnce(makeOAuthStatus());
 
     const provider = makeProvider({ auth_mode: "oauth" });
     render(
@@ -1548,7 +1566,9 @@ describe("pages/providers/ProviderEditorDialog", () => {
       expires_at: 1700000000,
       has_refresh_token: true,
     });
-    vi.mocked(providerOAuthRefresh).mockResolvedValueOnce({ success: false });
+    vi.mocked(providerOAuthRefresh).mockResolvedValueOnce(
+      makeOAuthRefreshResult({ success: false })
+    );
 
     const provider = makeProvider({ auth_mode: "oauth" });
     render(
@@ -1670,16 +1690,16 @@ describe("pages/providers/ProviderEditorDialog", () => {
       cli_key: "codex",
       name: "OAuth Provider",
     } as any);
-    vi.mocked(providerOAuthStartFlow).mockResolvedValueOnce({
-      success: true,
-      provider_type: "google",
-      expires_at: 1700000000,
-    });
-    vi.mocked(providerOAuthStatus).mockResolvedValueOnce({
-      connected: true,
-      provider_type: "google",
-      email: "test@example.com",
-    });
+    vi.mocked(providerOAuthStartFlow).mockResolvedValueOnce(
+      makeOAuthStartFlowResult({ provider_id: 99, provider_type: "google", expires_at: 1700000000 })
+    );
+    vi.mocked(providerOAuthStatus).mockResolvedValueOnce(
+      makeOAuthStatus({
+        connected: true,
+        provider_type: "google",
+        email: "test@example.com",
+      })
+    );
     vi.mocked(providerOAuthFetchLimits).mockResolvedValueOnce(null);
 
     render(
@@ -1711,16 +1731,16 @@ describe("pages/providers/ProviderEditorDialog", () => {
       cli_key: "codex",
       name: "OAuth Provider",
     } as any);
-    vi.mocked(providerOAuthStartFlow).mockResolvedValueOnce({
-      success: true,
-      provider_type: "google",
-      expires_at: 1700000000,
-    });
-    vi.mocked(providerOAuthStatus).mockResolvedValueOnce({
-      connected: true,
-      provider_type: "google",
-      email: "test@example.com",
-    });
+    vi.mocked(providerOAuthStartFlow).mockResolvedValueOnce(
+      makeOAuthStartFlowResult({ provider_id: 99, provider_type: "google", expires_at: 1700000000 })
+    );
+    vi.mocked(providerOAuthStatus).mockResolvedValueOnce(
+      makeOAuthStatus({
+        connected: true,
+        provider_type: "google",
+        email: "test@example.com",
+      })
+    );
     vi.mocked(providerOAuthFetchLimits).mockRejectedValueOnce(new Error("limits error"));
 
     render(
@@ -1919,11 +1939,13 @@ describe("pages/providers/ProviderEditorDialog", () => {
   });
 
   it("saves OAuth provider in edit mode with connected status", async () => {
-    vi.mocked(providerOAuthStatus).mockResolvedValueOnce({
-      connected: true,
-      provider_type: "google",
-      email: "user@example.com",
-    });
+    vi.mocked(providerOAuthStatus).mockResolvedValueOnce(
+      makeOAuthStatus({
+        connected: true,
+        provider_type: "google",
+        email: "user@example.com",
+      })
+    );
 
     vi.mocked(providerUpsert).mockResolvedValueOnce({
       id: 1,
@@ -2064,7 +2086,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
       <ProviderEditorDialog
         mode="edit"
         open={true}
-        provider={makeProvider()}
+        provider={makeProvider({ api_key_configured: true })}
         onSaved={vi.fn()}
         onOpenChange={vi.fn()}
       />

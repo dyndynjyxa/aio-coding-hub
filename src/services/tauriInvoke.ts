@@ -6,15 +6,6 @@ export type InvokeTauriOptions = {
   timeoutMs?: number | null;
 };
 
-/**
- * Always returns true — the app runs exclusively inside Tauri Desktop.
- * Kept as a function for backward compatibility; callers will be cleaned up incrementally.
- * @deprecated No longer needed; Tauri runtime is always present.
- */
-export function hasTauriRuntime() {
-  return true;
-}
-
 function normalizeTimeoutMs(value: number | null | undefined) {
   if (value == null) return DEFAULT_TAURI_INVOKE_TIMEOUT_MS;
   if (!Number.isFinite(value) || value <= 0) return null;

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
-import { invokeTauriOrNull } from "../../tauriInvoke";
 import {
   mcpImportFromWorkspaceCli,
   mcpImportServers,
@@ -11,11 +11,22 @@ import {
   mcpServersList,
 } from "../mcp";
 
-vi.mock("../../tauriInvoke", async () => {
-  const actual = await vi.importActual<typeof import("../../tauriInvoke")>("../../tauriInvoke");
+vi.mock("../../../generated/bindings", async () => {
+  const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
+    "../../../generated/bindings"
+  );
   return {
     ...actual,
-    invokeTauriOrNull: vi.fn(),
+    commands: {
+      ...actual.commands,
+      mcpServersList: vi.fn(),
+      mcpServerUpsert: vi.fn(),
+      mcpServerSetEnabled: vi.fn(),
+      mcpServerDelete: vi.fn(),
+      mcpParseJson: vi.fn(),
+      mcpImportServers: vi.fn(),
+      mcpImportFromWorkspaceCli: vi.fn(),
+    },
   };
 });
 
@@ -29,7 +40,7 @@ vi.mock("../../consoleLog", async () => {
 
 describe("services/workspace/mcp", () => {
   it("rethrows invoke errors and logs", async () => {
-    vi.mocked(invokeTauriOrNull).mockRejectedValueOnce(new Error("mcp boom"));
+    vi.mocked(commands.mcpServersList).mockRejectedValueOnce(new Error("mcp boom"));
 
     await expect(mcpServersList(1)).rejects.toThrow("mcp boom");
     expect(logToConsole).toHaveBeenCalledWith(
@@ -43,52 +54,107 @@ describe("services/workspace/mcp", () => {
   });
 
   it("treats null invoke result as error with runtime", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce(null);
+    vi.mocked(commands.mcpServersList).mockResolvedValueOnce(null as any);
 
     await expect(mcpServersList(1)).rejects.toThrow("IPC_NULL_RESULT: mcp_servers_list");
   });
 
-  it("invokes tauri commands with normalized args", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValue({ inserted: 0, updated: 1, skipped: [] } as any);
+  it("invokes generated commands with normalized args", async () => {
+    vi.mocked(commands.mcpServersList).mockResolvedValueOnce({ status: "ok", data: [] as any });
+    vi.mocked(commands.mcpServerUpsert).mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        id: 1,
+        server_key: "fetch",
+        name: "Fetch",
+        transport: "stdio",
+        command: null,
+        args: [],
+        env_keys: [],
+        cwd: null,
+        url: null,
+        header_keys: [],
+        enabled: true,
+        created_at: 1,
+        updated_at: 1,
+      } as any,
+    });
+    vi.mocked(commands.mcpServerSetEnabled).mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        id: 2,
+        server_key: "fetch",
+        name: "Fetch",
+        transport: "stdio",
+        command: null,
+        args: [],
+        env_keys: [],
+        cwd: null,
+        url: null,
+        header_keys: [],
+        enabled: false,
+        created_at: 1,
+        updated_at: 2,
+      } as any,
+    });
+    vi.mocked(commands.mcpServerDelete).mockResolvedValueOnce({ status: "ok", data: true });
+    vi.mocked(commands.mcpParseJson).mockResolvedValueOnce({
+      status: "ok",
+      data: { servers: [] } as any,
+    });
+    vi.mocked(commands.mcpImportFromWorkspaceCli).mockResolvedValueOnce({
+      status: "ok",
+      data: { inserted: 0, updated: 0, skipped: [] } as any,
+    });
+    vi.mocked(commands.mcpImportServers).mockResolvedValueOnce({
+      status: "ok",
+      data: { inserted: 0, updated: 1, skipped: [] } as any,
+    });
 
     await mcpServersList(7);
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("mcp_servers_list", { workspaceId: 7 });
+    expect(commands.mcpServersList).toHaveBeenNthCalledWith(1, { workspaceId: 7 });
 
     await mcpServerUpsert({
       server_key: "fetch",
       name: "Fetch",
       transport: "stdio",
     });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("mcp_server_upsert", {
+    expect(commands.mcpServerUpsert).toHaveBeenNthCalledWith(1, {
       serverId: null,
       serverKey: "fetch",
       name: "Fetch",
       transport: "stdio",
       command: null,
       args: [],
-      env: {},
+      env: {
+        preserveKeys: [],
+        replace: {},
+      },
       cwd: null,
       url: null,
-      headers: {},
+      headers: {
+        preserveKeys: [],
+        replace: {},
+      },
     });
 
     await mcpServerSetEnabled({ workspace_id: 9, server_id: 2, enabled: false });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("mcp_server_set_enabled", {
+    expect(commands.mcpServerSetEnabled).toHaveBeenCalledWith({
       workspaceId: 9,
       serverId: 2,
       enabled: false,
     });
 
     await mcpServerDelete(123);
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("mcp_server_delete", { serverId: 123 });
+    expect(commands.mcpServerDelete).toHaveBeenCalledWith({ serverId: 123 });
 
     await mcpParseJson('{"mcpServers":[]}');
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("mcp_parse_json", {
+    expect(commands.mcpParseJson).toHaveBeenCalledWith({
       jsonText: '{"mcpServers":[]}',
     });
 
     await mcpImportFromWorkspaceCli(3);
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("mcp_import_from_workspace_cli", {
+    expect(commands.mcpImportFromWorkspaceCli).toHaveBeenCalledWith({
       workspaceId: 3,
     });
 
@@ -109,7 +175,7 @@ describe("services/workspace/mcp", () => {
         },
       ],
     });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("mcp_import_servers", {
+    expect(commands.mcpImportServers).toHaveBeenCalledWith({
       workspaceId: 1,
       servers: [
         expect.objectContaining({

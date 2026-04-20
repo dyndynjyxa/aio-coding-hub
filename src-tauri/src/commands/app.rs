@@ -12,7 +12,7 @@ fn sanitize_text(input: Option<String>, max_len: usize) -> Option<String> {
     Some(trimmed.chars().take(max_len).collect())
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
 pub(crate) struct AppAboutInfo {
     os: String,
     arch: String,
@@ -22,7 +22,19 @@ pub(crate) struct AppAboutInfo {
     run_mode: String,
 }
 
+#[derive(Debug, Clone, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FrontendErrorReportInput {
+    source: String,
+    message: String,
+    stack: Option<String>,
+    details_json: Option<String>,
+    href: Option<String>,
+    user_agent: Option<String>,
+}
+
 #[tauri::command]
+#[specta::specta]
 pub(crate) fn app_about_get() -> AppAboutInfo {
     let bundle_type = tauri::utils::platform::bundle_type();
     let run_mode = match bundle_type {
@@ -59,6 +71,7 @@ pub(crate) fn app_about_get() -> AppAboutInfo {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) fn app_exit(app: tauri::AppHandle) -> Result<bool, String> {
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(200));
@@ -70,6 +83,7 @@ pub(crate) fn app_exit(app: tauri::AppHandle) -> Result<bool, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) fn app_restart(app: tauri::AppHandle) -> Result<bool, String> {
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(200));
@@ -82,6 +96,7 @@ pub(crate) fn app_restart(app: tauri::AppHandle) -> Result<bool, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) fn app_heartbeat_pong(app: tauri::AppHandle) -> Result<bool, String> {
     let watchdog = app.state::<crate::app::heartbeat_watchdog::HeartbeatWatchdogState>();
     watchdog.record_pong();
@@ -89,20 +104,14 @@ pub(crate) fn app_heartbeat_pong(app: tauri::AppHandle) -> Result<bool, String> 
 }
 
 #[tauri::command]
-pub(crate) fn app_frontend_error_report(
-    source: String,
-    message: String,
-    stack: Option<String>,
-    details_json: Option<String>,
-    href: Option<String>,
-    user_agent: Option<String>,
-) -> Result<bool, String> {
-    let source = sanitize_text(Some(source), 128).unwrap_or_else(|| "unknown".to_string());
-    let message = sanitize_text(Some(message), 4096).unwrap_or_else(|| "unknown".to_string());
-    let stack = sanitize_text(stack, 16_384);
-    let details_json = sanitize_text(details_json, 16_384);
-    let href = sanitize_text(href, 2_048);
-    let user_agent = sanitize_text(user_agent, 1_024);
+#[specta::specta]
+pub(crate) fn app_frontend_error_report(input: FrontendErrorReportInput) -> Result<bool, String> {
+    let source = sanitize_text(Some(input.source), 128).unwrap_or_else(|| "unknown".to_string());
+    let message = sanitize_text(Some(input.message), 4096).unwrap_or_else(|| "unknown".to_string());
+    let stack = sanitize_text(input.stack, 16_384);
+    let details_json = sanitize_text(input.details_json, 16_384);
+    let href = sanitize_text(input.href, 2_048);
+    let user_agent = sanitize_text(input.user_agent, 1_024);
 
     tracing::error!(
         target: "frontend",

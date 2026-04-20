@@ -6,7 +6,7 @@ use crate::shared::time::now_unix_seconds;
 use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct ModelPriceSummary {
     pub id: i64,
     pub cli_key: String,

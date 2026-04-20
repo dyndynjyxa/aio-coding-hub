@@ -6,7 +6,7 @@ use serde::Serialize;
 
 const DEFAULT_KEEP_PER_PROVIDER: usize = 50;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct ClaudeModelValidationRunRow {
     pub id: i64,
     pub provider_id: i64,

@@ -1,9 +1,16 @@
-import { MDXEditor, headingsPlugin, linkPlugin, listsPlugin, quotePlugin, thematicBreakPlugin } from "@mdxeditor/editor";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import {
+  MDXEditor,
+  headingsPlugin,
+  linkPlugin,
+  listsPlugin,
+  quotePlugin,
+  thematicBreakPlugin,
+} from "@mdxeditor/editor";
 import { toast } from "sonner";
 import { AIO_RELEASES_URL } from "../constants/urls";
 import { logToConsole } from "../services/consoleLog";
 import { appRestart } from "../services/app/dataManagement";
+import { openDesktopUrl } from "../services/desktop/opener";
 import {
   updateDialogSetOpen,
   updateDownloadAndInstall,
@@ -29,7 +36,7 @@ export function UpdateDialog() {
 
   async function openReleases() {
     try {
-      await openUrl(AIO_RELEASES_URL);
+      await openDesktopUrl(AIO_RELEASES_URL);
     } catch (err) {
       logToConsole("error", "打开 Releases 失败", { error: String(err), url: AIO_RELEASES_URL });
       try {

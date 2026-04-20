@@ -6,7 +6,10 @@ import {
   requestLogsListAll,
   type RequestLogSummary,
 } from "../services/gateway/requestLogs";
-import { isPersistedRequestLogInProgress } from "../components/home/HomeLogShared";
+import {
+  isPersistedRequestLogInProgress,
+  requestLogCreatedAtMs,
+} from "../services/gateway/requestLogState";
 import { requestLogsKeys } from "./keys";
 
 type RequestLogsListQueryResult = RequestLogSummary[] | null;
@@ -18,12 +21,6 @@ type RequestLogsIncrementalRefreshResult = {
 
 function isRequestLogsQueryEnabled(enabled: boolean | undefined) {
   return enabled ?? true;
-}
-
-function requestLogCreatedAtMs(log: Pick<RequestLogSummary, "created_at" | "created_at_ms">) {
-  const ms = log.created_at_ms ?? 0;
-  if (Number.isFinite(ms) && ms > 0) return ms;
-  return log.created_at * 1000;
 }
 
 function sortRequestLogsDesc(a: RequestLogSummary, b: RequestLogSummary) {

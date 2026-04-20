@@ -6,7 +6,7 @@
 use serde::Serialize;
 use std::collections::HashSet;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct EnvConflict {
     pub var_name: String,
     pub source_type: String, // "system" | "file"

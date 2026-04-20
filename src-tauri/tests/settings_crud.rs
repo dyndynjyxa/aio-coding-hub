@@ -12,6 +12,10 @@ fn settings_command_update_json(preferred_port: u16) -> serde_json::Value {
     })
 }
 
+fn command_settings(value: &serde_json::Value) -> &serde_json::Value {
+    &value["settings"]
+}
+
 #[test]
 fn settings_read_defaults() {
     let app = support::TestApp::new();
@@ -194,9 +198,12 @@ fn settings_set_via_command_syncs_runtime_upstream_proxy_state() {
         aio_coding_hub_lib::test_support::settings_set_via_command_json(&handle, enable_update)
             .expect("enable upstream proxy");
 
-    assert!(json_bool(&enabled, "upstream_proxy_enabled"));
+    assert!(json_bool(
+        command_settings(&enabled),
+        "upstream_proxy_enabled"
+    ));
     assert_eq!(
-        enabled["upstream_proxy_url"],
+        command_settings(&enabled)["upstream_proxy_url"],
         serde_json::json!("http://127.0.0.1:7890")
     );
     assert_eq!(
@@ -213,7 +220,10 @@ fn settings_set_via_command_syncs_runtime_upstream_proxy_state() {
         aio_coding_hub_lib::test_support::settings_set_via_command_json(&handle, disable_update)
             .expect("disable upstream proxy");
 
-    assert!(!json_bool(&disabled, "upstream_proxy_enabled"));
+    assert!(!json_bool(
+        command_settings(&disabled),
+        "upstream_proxy_enabled"
+    ));
     assert_eq!(
         aio_coding_hub_lib::test_support::gateway_upstream_proxy_url_json(&handle)
             .expect("runtime proxy disabled"),
@@ -230,23 +240,29 @@ fn settings_set_via_command_syncs_runtime_upstream_proxy_state_with_separate_cre
     update["upstreamProxyEnabled"] = serde_json::json!(true);
     update["upstreamProxyUrl"] = serde_json::json!("http://127.0.0.1:7890");
     update["upstreamProxyUsername"] = serde_json::json!("proxy-user");
-    update["upstreamProxyPassword"] = serde_json::json!("secret");
+    update["upstreamProxyPassword"] = serde_json::json!({
+        "mode": "replace",
+        "value": "secret"
+    });
 
     let enabled = aio_coding_hub_lib::test_support::settings_set_via_command_json(&handle, update)
         .expect("enable upstream proxy with credentials");
 
-    assert!(json_bool(&enabled, "upstream_proxy_enabled"));
+    assert!(json_bool(
+        command_settings(&enabled),
+        "upstream_proxy_enabled"
+    ));
     assert_eq!(
-        enabled["upstream_proxy_url"],
+        command_settings(&enabled)["upstream_proxy_url"],
         serde_json::json!("http://127.0.0.1:7890")
     );
     assert_eq!(
-        enabled["upstream_proxy_username"],
+        command_settings(&enabled)["upstream_proxy_username"],
         serde_json::json!("proxy-user")
     );
     assert_eq!(
-        enabled["upstream_proxy_password"],
-        serde_json::json!("secret")
+        command_settings(&enabled)["upstream_proxy_password_configured"],
+        serde_json::json!(true)
     );
     assert_eq!(
         aio_coding_hub_lib::test_support::gateway_upstream_proxy_url_json(&handle)
@@ -281,7 +297,10 @@ fn settings_set_via_command_rejects_proxy_password_without_username() {
     let mut update = settings_command_update_json(38000);
     update["upstreamProxyEnabled"] = serde_json::json!(true);
     update["upstreamProxyUrl"] = serde_json::json!("http://127.0.0.1:7890");
-    update["upstreamProxyPassword"] = serde_json::json!("secret");
+    update["upstreamProxyPassword"] = serde_json::json!({
+        "mode": "replace",
+        "value": "secret"
+    });
 
     let err = aio_coding_hub_lib::test_support::settings_set_via_command_json(&handle, update)
         .expect_err("password without username should fail");
@@ -301,7 +320,10 @@ fn settings_set_via_command_rejects_mixed_proxy_credentials() {
     update["upstreamProxyEnabled"] = serde_json::json!(true);
     update["upstreamProxyUrl"] = serde_json::json!("http://inline:secret@127.0.0.1:7890");
     update["upstreamProxyUsername"] = serde_json::json!("proxy-user");
-    update["upstreamProxyPassword"] = serde_json::json!("override");
+    update["upstreamProxyPassword"] = serde_json::json!({
+        "mode": "replace",
+        "value": "override"
+    });
 
     let err = aio_coding_hub_lib::test_support::settings_set_via_command_json(&handle, update)
         .expect_err("mixed proxy credentials should fail");

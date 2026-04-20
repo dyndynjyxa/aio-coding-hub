@@ -37,6 +37,34 @@ struct ProviderRuntimeResetDecision {
     clear_session_bindings: bool,
 }
 
+fn normalize_provider_name(name: &str) -> String {
+    name.trim().to_lowercase()
+}
+
+fn build_duplicated_provider_name(
+    source_name: &str,
+    existing_providers: &[providers::ProviderSummary],
+) -> String {
+    let base_name = format!("{} 副本", source_name.trim());
+    let used_names: std::collections::HashSet<String> = existing_providers
+        .iter()
+        .map(|provider| normalize_provider_name(&provider.name))
+        .collect();
+
+    if !used_names.contains(&normalize_provider_name(&base_name)) {
+        return base_name;
+    }
+
+    let mut index = 2;
+    loop {
+        let candidate = format!("{base_name} {index}");
+        if !used_names.contains(&normalize_provider_name(&candidate)) {
+            return candidate;
+        }
+        index += 1;
+    }
+}
+
 fn submitted_api_key_changed(
     previous_api_key: Option<&str>,
     submitted_api_key: Option<&str>,
@@ -219,6 +247,72 @@ pub(crate) async fn provider_upsert(
 }
 
 #[tauri::command]
+#[specta::specta]
+pub(crate) async fn provider_duplicate(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    provider_id: i64,
+) -> Result<providers::ProviderSummary, String> {
+    let db = ensure_db_ready(app, db_state.inner()).await?;
+    let result = blocking::run("provider_duplicate", move || {
+        let conn = db.open_connection()?;
+        let source = providers::get_by_id(&conn, provider_id)?;
+        let siblings = providers::list_by_cli(&db, &source.cli_key)?;
+        let api_key = if source.auth_mode == "api_key" && source.source_provider_id.is_none() {
+            Some(providers::get_api_key_plaintext(&db, provider_id)?)
+        } else {
+            None
+        };
+
+        providers::upsert(
+            &db,
+            providers::ProviderUpsertParams {
+                provider_id: None,
+                cli_key: source.cli_key.clone(),
+                name: build_duplicated_provider_name(&source.name, &siblings),
+                base_urls: source.base_urls.clone(),
+                base_url_mode: source.base_url_mode,
+                auth_mode: match source.auth_mode.as_str() {
+                    "oauth" => Some(providers::ProviderAuthMode::Oauth),
+                    _ => Some(providers::ProviderAuthMode::ApiKey),
+                },
+                api_key,
+                enabled: source.enabled,
+                cost_multiplier: source.cost_multiplier,
+                priority: None,
+                claude_models: Some(source.claude_models.clone()),
+                limit_5h_usd: source.limit_5h_usd,
+                limit_daily_usd: source.limit_daily_usd,
+                daily_reset_mode: Some(source.daily_reset_mode),
+                daily_reset_time: Some(source.daily_reset_time.clone()),
+                limit_weekly_usd: source.limit_weekly_usd,
+                limit_monthly_usd: source.limit_monthly_usd,
+                limit_total_usd: source.limit_total_usd,
+                tags: Some(source.tags.clone()),
+                note: Some(source.note.clone()),
+                source_provider_id: source.source_provider_id,
+                bridge_type: source.bridge_type.clone(),
+                stream_idle_timeout_seconds: source.stream_idle_timeout_seconds,
+            },
+        )
+    })
+    .await
+    .map_err(Into::into);
+
+    if let Ok(ref provider) = result {
+        tracing::info!(
+            provider_id = provider.id,
+            cli_key = %provider.cli_key,
+            provider_name = %provider.name,
+            "provider duplicated"
+        );
+    }
+
+    result
+}
+
+#[tauri::command]
+#[specta::specta]
 pub(crate) async fn provider_set_enabled(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -244,6 +338,7 @@ pub(crate) async fn provider_set_enabled(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn provider_delete(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -268,6 +363,7 @@ pub(crate) async fn provider_delete(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn providers_reorder(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -400,6 +496,7 @@ mod tests {
             source_provider_id: None,
             bridge_type: None,
             stream_idle_timeout_seconds: None,
+            api_key_configured: true,
         };
 
         assert_eq!(
@@ -464,6 +561,7 @@ mod tests {
             source_provider_id: None,
             bridge_type: None,
             stream_idle_timeout_seconds: None,
+            api_key_configured: true,
         };
 
         let mut next = previous.clone();

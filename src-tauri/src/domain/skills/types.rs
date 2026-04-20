@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct SkillRepoSummary {
     pub id: i64,
     pub git_url: String,
@@ -10,7 +10,7 @@ pub struct SkillRepoSummary {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct InstalledSkillSummary {
     pub id: i64,
     pub skill_key: String,
@@ -25,7 +25,7 @@ pub struct InstalledSkillSummary {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct AvailableSkillSummary {
     pub name: String,
     pub description: String,
@@ -35,14 +35,14 @@ pub struct AvailableSkillSummary {
     pub installed: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct SkillsPaths {
     pub ssot_dir: String,
     pub repos_dir: String,
     pub cli_dir: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct LocalSkillSummary {
     pub dir_name: String,
     pub path: String,
@@ -53,21 +53,21 @@ pub struct LocalSkillSummary {
     pub source_subdir: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct SkillImportIssue {
     pub dir_name: String,
     pub error_code: Option<String>,
     pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct SkillImportLocalBatchReport {
     pub imported: Vec<InstalledSkillSummary>,
     pub skipped: Vec<SkillImportIssue>,
     pub failed: Vec<SkillImportIssue>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct SkillUpdateInfo {
     pub skill_id: i64,
     pub has_update: bool,

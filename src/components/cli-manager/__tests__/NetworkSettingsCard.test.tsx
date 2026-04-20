@@ -2,7 +2,6 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { useWslHostAddressQuery } from "../../../query/wsl";
-import { gatewayStart, gatewayStop } from "../../../services/gateway/gateway";
 import { NetworkSettingsCard } from "../NetworkSettingsCard";
 
 let gatewayMetaMock: any = { gatewayAvailable: "available", gateway: null, preferredPort: 37123 };
@@ -12,13 +11,6 @@ vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../../hooks/useGatewayMeta", () => ({
   useGatewayMeta: () => gatewayMetaMock,
 }));
-
-vi.mock("../../../services/gateway/gateway", async () => {
-  const actual = await vi.importActual<typeof import("../../../services/gateway/gateway")>(
-    "../../../services/gateway/gateway"
-  );
-  return { ...actual, gatewayStart: vi.fn(), gatewayStop: vi.fn() };
-});
 
 vi.mock("../../../query/wsl", async () => {
   const actual = await vi.importActual<typeof import("../../../query/wsl")>("../../../query/wsl");
@@ -95,7 +87,7 @@ describe("components/cli-manager/NetworkSettingsCard", () => {
     expect(screen.getByText("1.2.3.4:9999")).toBeInTheDocument();
   });
 
-  it("restarts gateway when changing listen mode and handles restart results", async () => {
+  it("persists listen mode changes and reverts local state when save fails", async () => {
     vi.mocked(useWslHostAddressQuery).mockReturnValue({ data: "172.20.0.1" } as any);
     gatewayMetaMock = {
       gatewayAvailable: "available",
@@ -103,15 +95,15 @@ describe("components/cli-manager/NetworkSettingsCard", () => {
       preferredPort: 37123,
     };
 
-    vi.mocked(gatewayStop).mockResolvedValue({ running: false } as any);
-    vi.mocked(gatewayStart).mockResolvedValue({ running: true, port: 40001 } as any);
-
     const settings = {
       preferred_port: 40000,
       gateway_listen_mode: "localhost",
       gateway_custom_listen_address: "",
     } as any;
-    const onPersistSettings = vi.fn(async (patch: any) => ({ ...settings, ...patch }));
+    const onPersistSettings = vi
+      .fn()
+      .mockResolvedValueOnce({ ...settings, gateway_listen_mode: "lan" })
+      .mockRejectedValueOnce(new Error("save boom"));
 
     render(
       <NetworkSettingsCard
@@ -122,23 +114,22 @@ describe("components/cli-manager/NetworkSettingsCard", () => {
       />
     );
 
-    // Switch to LAN triggers restart and port-in-use toast branch.
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "lan" } });
-    await waitFor(() => expect(gatewayStop).toHaveBeenCalled());
-    await waitFor(() => expect(gatewayStart).toHaveBeenCalledWith(40000));
-    expect(toast).toHaveBeenCalledWith("端口被占用，已切换到 40001");
+    await waitFor(() =>
+      expect(onPersistSettings).toHaveBeenCalledWith({ gateway_listen_mode: "lan" })
+    );
+    expect(toast).toHaveBeenCalledWith("监听模式已保存");
+    expect(screen.getByText("0.0.0.0:40000")).toBeInTheDocument();
 
-    vi.mocked(gatewayStop).mockClear();
-    vi.mocked(gatewayStart).mockClear();
     vi.mocked(toast).mockClear();
-
-    vi.mocked(gatewayStop).mockResolvedValue({ running: false } as any);
-    vi.mocked(gatewayStart).mockResolvedValue({ running: true, port: 40000 } as any);
-
-    // Switch to WSL auto triggers restart and "网关已重启" branch.
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "wsl_auto" } });
-    await waitFor(() => expect(gatewayStart).toHaveBeenCalledWith(40000));
-    expect(toast).toHaveBeenCalledWith("网关已重启");
+    await waitFor(() =>
+      expect(onPersistSettings).toHaveBeenCalledWith({ gateway_listen_mode: "wsl_auto" })
+    );
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("更新监听模式失败：请稍后重试"));
+    await waitFor(() =>
+      expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("localhost")
+    );
   });
 
   it("validates IPv6 custom address and handles non-tauri persist failure", async () => {

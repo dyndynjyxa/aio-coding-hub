@@ -60,13 +60,7 @@ export function CliManagerCx2ccTab({
     setFallbackModelHaikuText(appSettings.cx2cc_fallback_model_haiku);
     setFallbackModelMainText(appSettings.cx2cc_fallback_model_main);
     setServiceTierText(appSettings.cx2cc_service_tier);
-  }, [
-    appSettings?.cx2cc_fallback_model_opus,
-    appSettings?.cx2cc_fallback_model_sonnet,
-    appSettings?.cx2cc_fallback_model_haiku,
-    appSettings?.cx2cc_fallback_model_main,
-    appSettings?.cx2cc_service_tier,
-  ]);
+  }, [appSettings]);
 
   const controlsDisabled = commonSettingsSaving || !appSettings;
 

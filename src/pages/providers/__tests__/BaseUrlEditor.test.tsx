@@ -38,7 +38,7 @@ function TestWrapper({ initial }: { initial: BaseUrlRow[] }) {
 describe("pages/providers/BaseUrlEditor", () => {
   it("pings base urls and handles empty/tauri-only/error cases", async () => {
     vi.mocked(baseUrlPingMs).mockResolvedValueOnce(123);
-    vi.mocked(baseUrlPingMs).mockResolvedValueOnce(null);
+    vi.mocked(baseUrlPingMs).mockResolvedValueOnce(88);
     vi.mocked(baseUrlPingMs).mockRejectedValueOnce(new Error("boom"));
 
     render(<TestWrapper initial={[{ id: "1", url: "", ping: { status: "idle" } }]} />);

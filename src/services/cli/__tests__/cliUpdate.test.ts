@@ -1,13 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
+import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
-import { invokeTauriOrNull } from "../../tauriInvoke";
 import { cliCheckLatestVersion, cliUpdateCli } from "../cliUpdate";
 
-vi.mock("../../tauriInvoke", async () => {
-  const actual = await vi.importActual<typeof import("../../tauriInvoke")>("../../tauriInvoke");
+vi.mock("../../../generated/bindings", async () => {
+  const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
+    "../../../generated/bindings"
+  );
   return {
     ...actual,
-    invokeTauriOrNull: vi.fn(),
+    commands: {
+      ...actual.commands,
+      cliCheckLatestVersion: vi.fn(),
+      cliUpdate: vi.fn(),
+    },
   };
 });
 
@@ -21,7 +27,9 @@ vi.mock("../../consoleLog", async () => {
 
 describe("services/cli/cliUpdate", () => {
   it("rethrows invoke errors and logs", async () => {
-    vi.mocked(invokeTauriOrNull).mockRejectedValueOnce(new Error("version check boom"));
+    vi.mocked(commands.cliCheckLatestVersion).mockRejectedValueOnce(
+      new Error("version check boom")
+    );
 
     await expect(cliCheckLatestVersion("claude")).rejects.toThrow("version check boom");
     expect(logToConsole).toHaveBeenCalledWith(
@@ -35,7 +43,10 @@ describe("services/cli/cliUpdate", () => {
   });
 
   it("treats null invoke result as error with runtime", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce(null);
+    vi.mocked(commands.cliCheckLatestVersion).mockResolvedValueOnce({
+      status: "ok",
+      data: null as any,
+    });
 
     await expect(cliCheckLatestVersion("codex")).rejects.toThrow(
       "IPC_NULL_RESULT: cli_check_latest_version"
@@ -43,14 +54,31 @@ describe("services/cli/cliUpdate", () => {
   });
 
   it("invokes cli update commands with expected parameters", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValue({} as any);
-
-    await cliCheckLatestVersion("claude");
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("cli_check_latest_version", {
-      cliKey: "claude",
+    vi.mocked(commands.cliCheckLatestVersion).mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        cliKey: "claude",
+        npmPackage: "@anthropic-ai/claude-code",
+        installedVersion: "1.0.0",
+        latestVersion: "1.1.0",
+        updateAvailable: true,
+        error: null,
+      },
+    });
+    vi.mocked(commands.cliUpdate).mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        cliKey: "codex",
+        success: true,
+        output: "ok",
+        error: null,
+      },
     });
 
+    await cliCheckLatestVersion("claude");
+    expect(commands.cliCheckLatestVersion).toHaveBeenCalledWith("claude");
+
     await cliUpdateCli("codex");
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("cli_update", { cliKey: "codex" });
+    expect(commands.cliUpdate).toHaveBeenCalledWith("codex");
   });
 });

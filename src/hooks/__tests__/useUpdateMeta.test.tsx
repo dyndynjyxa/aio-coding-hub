@@ -76,10 +76,10 @@ describe("hooks/useUpdateMeta", () => {
     const installDeferred = createDeferred<unknown>();
 
     vi.mocked(tauriInvoke).mockImplementation(async (cmd: string, args?: any) => {
-      if (cmd === "plugin:updater|check") {
+      if (cmd === "desktop_updater_check") {
         return checkResults.shift() ?? false;
       }
-      if (cmd === "plugin:updater|download_and_install") {
+      if (cmd === "desktop_updater_download_and_install") {
         args?.onEvent?.__emit?.({ event: "started", data: { contentLength: 100 } });
         args?.onEvent?.__emit?.({ event: "progress", data: { chunkLength: 10 } });
         args?.onEvent?.__emit?.({ event: "progress", data: { chunkLength: 5 } });
@@ -155,7 +155,7 @@ describe("hooks/useUpdateMeta", () => {
     queryClient.setQueryData(updaterKeys.check(), { rid: 2 } as any);
 
     vi.mocked(tauriInvoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "plugin:updater|download_and_install") throw new Error("boom");
+      if (cmd === "desktop_updater_download_and_install") throw new Error("boom");
       return null as any;
     });
 
@@ -196,7 +196,7 @@ describe("hooks/useUpdateMeta", () => {
     const { updateCheckNow } = await import("../useUpdateMeta");
 
     vi.mocked(tauriInvoke).mockImplementation(async (cmd: string) => {
-      if (cmd === "plugin:updater|check") throw new Error("check boom");
+      if (cmd === "desktop_updater_check") throw new Error("check boom");
       return null as any;
     });
 
@@ -228,7 +228,7 @@ describe("hooks/useUpdateMeta", () => {
     queryClient.setQueryData(updaterKeys.check(), { rid: 3 } as any);
 
     vi.mocked(tauriInvoke).mockImplementation(async (cmd: string, args?: any) => {
-      if (cmd === "plugin:updater|download_and_install") {
+      if (cmd === "desktop_updater_download_and_install") {
         downloadCalls += 1;
         args?.onEvent?.__emit?.({ event: "started", data: {} });
         args?.onEvent?.__emit?.({ event: "progress", data: { chunkLength: 0 } });

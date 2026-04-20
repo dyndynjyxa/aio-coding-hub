@@ -1,15 +1,15 @@
 import { logToConsole } from "./consoleLog";
-import { invokeTauriOrNull } from "./tauriInvoke";
+import { appFrontendErrorReport, type FrontendErrorReportInput } from "./app/frontendErrorReport";
 
 type FrontendErrorSource = "error" | "unhandledrejection" | "render";
 
-type FrontendErrorPayload = {
+type FrontendErrorPayload = Omit<FrontendErrorReportInput, "source"> & {
   source: FrontendErrorSource;
   message: string;
   stack?: string | null;
-  details_json?: string | null;
+  detailsJson?: string | null;
   href?: string | null;
-  user_agent?: string | null;
+  userAgent?: string | null;
 };
 
 const DEDUP_WINDOW_MS = 3_000;
@@ -65,7 +65,7 @@ function makeDedupKey(payload: FrontendErrorPayload): string {
     payload.message,
     payload.stack ?? "",
     payload.href ?? "",
-    payload.details_json ?? "",
+    payload.detailsJson ?? "",
   ].join("|");
 }
 
@@ -89,14 +89,12 @@ async function send(payload: FrontendErrorPayload): Promise<void> {
   logToConsole("error", `前端异常（${payload.source}）`, {
     message: payload.message,
     stack: payload.stack ?? null,
-    details: payload.details_json ?? null,
+    details: payload.detailsJson ?? null,
     href: payload.href ?? null,
   });
 
   try {
-    await invokeTauriOrNull<boolean>("app_frontend_error_report", payload, {
-      timeoutMs: 3_000,
-    });
+    await appFrontendErrorReport(payload);
   } catch {
     // swallow: avoid recursive crash loops in reporter itself
   }
@@ -111,7 +109,7 @@ function normalizeMessage(value: unknown): string {
 function buildSharedMeta() {
   return {
     href: typeof location !== "undefined" ? location.href : null,
-    user_agent: typeof navigator !== "undefined" ? navigator.userAgent : null,
+    userAgent: typeof navigator !== "undefined" ? navigator.userAgent : null,
   };
 }
 
@@ -128,7 +126,7 @@ function reportWindowError(event: ErrorEvent) {
     source: "error",
     message,
     stack,
-    details_json: details,
+    detailsJson: details,
     ...buildSharedMeta(),
   });
 }
@@ -146,7 +144,7 @@ function reportUnhandledRejection(event: PromiseRejectionEvent) {
     source: "unhandledrejection",
     message,
     stack,
-    details_json: details,
+    detailsJson: details,
     ...buildSharedMeta(),
   });
 }
@@ -162,7 +160,7 @@ export function reportRenderError(error: unknown, errorInfo?: { componentStack?:
     source: "render",
     message,
     stack,
-    details_json: details,
+    detailsJson: details,
     ...buildSharedMeta(),
   });
 }

@@ -19,7 +19,7 @@ static TRACE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 // -- Public types -----------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct CliProxyStatus {
     pub cli_key: String,
     pub enabled: bool,
@@ -28,7 +28,7 @@ pub struct CliProxyStatus {
     pub applied_to_current_gateway: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct CliProxyResult {
     pub trace_id: String,
     pub cli_key: String,

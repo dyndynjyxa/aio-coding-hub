@@ -1,78 +1,172 @@
-import { invokeService } from "../invokeServiceCommand";
+import {
+  commands,
+  type McpImportReport as GeneratedMcpImportReport,
+  type McpImportServer as GeneratedMcpImportServer,
+  type McpParseResult as GeneratedMcpParseResult,
+  type McpServerSummaryView,
+} from "../../generated/bindings";
+import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
 
 export type McpTransport = "stdio" | "http" | "sse";
 
-export type McpServerSummary = {
-  id: number;
-  server_key: string;
-  name: string;
+export type McpServerSummary = Omit<McpServerSummaryView, "transport"> & {
   transport: McpTransport;
-  command: string | null;
-  args: string[];
-  env: Record<string, string>;
-  cwd: string | null;
-  url: string | null;
-  headers: Record<string, string>;
-  enabled: boolean;
-  created_at: number;
-  updated_at: number;
 };
 
-export type McpImportServer = {
-  server_key: string;
-  name: string;
-  transport: McpTransport;
-  command: string | null;
-  args: string[];
-  env: Record<string, string>;
-  cwd: string | null;
-  url: string | null;
-  headers: Record<string, string>;
-  enabled: boolean;
-};
+export type McpSecretPatchInput =
+  | {
+      preserve_keys?: string[];
+      replace?: Record<string, string>;
+    }
+  | Record<string, string>;
 
-export type McpParseResult = {
-  servers: McpImportServer[];
-};
-
-export type McpImportReport = {
-  inserted: number;
-  updated: number;
-  skipped?: Array<{
-    name: string;
-    reason: string;
-  }>;
-};
-
-export async function mcpServersList(workspaceId: number) {
-  return invokeService<McpServerSummary[]>("读取 MCP 服务列表失败", "mcp_servers_list", {
-    workspaceId,
-  });
-}
-
-export async function mcpServerUpsert(input: {
+export type McpServerUpsertInput = {
   server_id?: number | null;
   server_key: string;
   name: string;
   transport: McpTransport;
   command?: string | null;
   args?: string[];
-  env?: Record<string, string>;
+  env?: McpSecretPatchInput;
   cwd?: string | null;
   url?: string | null;
-  headers?: Record<string, string>;
-}) {
-  return invokeService<McpServerSummary>("保存 MCP 服务失败", "mcp_server_upsert", {
+  headers?: McpSecretPatchInput;
+};
+
+export type McpImportServer = Omit<GeneratedMcpImportServer, "transport"> & {
+  transport: McpTransport;
+};
+
+export type McpParseResult = {
+  servers: McpImportServer[];
+};
+
+export type McpImportReport = GeneratedMcpImportReport;
+
+type NormalizedMcpSecretPatch = {
+  preserveKeys: string[];
+  replace: Record<string, string>;
+};
+
+function normalizeSecretPatchInput(
+  input: McpSecretPatchInput | undefined
+): NormalizedMcpSecretPatch {
+  if (!input) {
+    return {
+      preserveKeys: [],
+      replace: {},
+    };
+  }
+
+  const maybePatch = input as {
+    preserve_keys?: unknown;
+    replace?: unknown;
+  };
+  const hasPatchShape =
+    Array.isArray(maybePatch.preserve_keys) ||
+    (maybePatch.replace != null &&
+      typeof maybePatch.replace === "object" &&
+      !Array.isArray(maybePatch.replace));
+
+  if (hasPatchShape) {
+    const patch = input as {
+      preserve_keys?: string[];
+      replace?: Record<string, string>;
+    };
+    return {
+      preserveKeys: patch.preserve_keys ?? [],
+      replace: patch.replace ?? {},
+    };
+  }
+
+  return {
+    preserveKeys: [],
+    replace: input as Record<string, string>,
+  };
+}
+
+function buildSafeSecretPatchLog(patch: NormalizedMcpSecretPatch) {
+  return {
+    preserveKeys: patch.preserveKeys,
+    replaceKeys: Object.keys(patch.replace),
+  };
+}
+
+function asMcpServerSummary(value: McpServerSummaryView): McpServerSummary {
+  return value as McpServerSummary;
+}
+
+function asMcpParseResult(value: GeneratedMcpParseResult): McpParseResult {
+  return value as McpParseResult;
+}
+
+export async function mcpServersList(workspaceId: number) {
+  return invokeGeneratedIpc<McpServerSummary[]>({
+    title: "读取 MCP 服务列表失败",
+    cmd: "mcp_servers_list",
+    args: { input: { workspaceId } },
+    invoke: async () => {
+      const result = await commands.mcpServersList({ workspaceId });
+      if (result == null) {
+        return result as any;
+      }
+      if (result.status === "ok") {
+        return {
+          status: "ok" as const,
+          data: result.data.map(asMcpServerSummary),
+        };
+      }
+      return result;
+    },
+  });
+}
+
+export async function mcpServerUpsert(input: McpServerUpsertInput) {
+  const normalizedEnv = normalizeSecretPatchInput(input.env);
+  const normalizedHeaders = normalizeSecretPatchInput(input.headers);
+  const payload = {
     serverId: input.server_id ?? null,
     serverKey: input.server_key,
     name: input.name,
     transport: input.transport,
     command: input.command ?? null,
     args: input.args ?? [],
-    env: input.env ?? {},
+    env: normalizedEnv,
     cwd: input.cwd ?? null,
     url: input.url ?? null,
-    headers: input.headers ?? {},
+    headers: normalizedHeaders,
+  };
+
+  return invokeGeneratedIpc<McpServerSummary>({
+    title: "保存 MCP 服务失败",
+    cmd: "mcp_server_upsert",
+    args: {
+      input: {
+        serverId: payload.serverId,
+        serverKey: payload.serverKey,
+        name: payload.name,
+        transport: payload.transport,
+        command: payload.command,
+        args: payload.args,
+        cwd: payload.cwd,
+        url: payload.url,
+        env: buildSafeSecretPatchLog(normalizedEnv),
+        headers: buildSafeSecretPatchLog(normalizedHeaders),
+      },
+    },
+    invoke: async () => {
+      const result = await commands.mcpServerUpsert(payload);
+      if (result == null) {
+        return result as any;
+      }
+      if (result.status === "ok") {
+        return {
+          status: "ok" as const,
+          data: asMcpServerSummary(result.data),
+        };
+      }
+      return result;
+    },
   });
 }
 
@@ -81,37 +175,89 @@ export async function mcpServerSetEnabled(input: {
   server_id: number;
   enabled: boolean;
 }) {
-  return invokeService<McpServerSummary>("更新 MCP 服务启用状态失败", "mcp_server_set_enabled", {
+  const payload = {
     workspaceId: input.workspace_id,
     serverId: input.server_id,
     enabled: input.enabled,
+  };
+
+  return invokeGeneratedIpc<McpServerSummary>({
+    title: "更新 MCP 服务启用状态失败",
+    cmd: "mcp_server_set_enabled",
+    args: { input: payload },
+    invoke: async () => {
+      const result = await commands.mcpServerSetEnabled(payload);
+      if (result == null) {
+        return result as any;
+      }
+      if (result.status === "ok") {
+        return {
+          status: "ok" as const,
+          data: asMcpServerSummary(result.data),
+        };
+      }
+      return result;
+    },
   });
 }
 
 export async function mcpServerDelete(serverId: number) {
-  return invokeService<boolean>("删除 MCP 服务失败", "mcp_server_delete", { serverId });
+  return invokeGeneratedIpc<boolean>({
+    title: "删除 MCP 服务失败",
+    cmd: "mcp_server_delete",
+    args: { input: { serverId } },
+    invoke: () =>
+      commands.mcpServerDelete({ serverId }) as Promise<GeneratedCommandResult<boolean>>,
+  });
 }
 
 export async function mcpParseJson(jsonText: string) {
-  return invokeService<McpParseResult>("解析 MCP JSON 失败", "mcp_parse_json", { jsonText });
+  return invokeGeneratedIpc<McpParseResult>({
+    title: "解析 MCP JSON 失败",
+    cmd: "mcp_parse_json",
+    args: { input: { jsonText } },
+    invoke: async () => {
+      const result = await commands.mcpParseJson({ jsonText });
+      if (result == null) {
+        return result as any;
+      }
+      if (result.status === "ok") {
+        return {
+          status: "ok" as const,
+          data: asMcpParseResult(result.data),
+        };
+      }
+      return result;
+    },
+  });
 }
 
 export async function mcpImportServers(input: {
   workspace_id: number;
   servers: McpImportServer[];
 }) {
-  return invokeService<McpImportReport>("导入 MCP 服务失败", "mcp_import_servers", {
+  const payload = {
     workspaceId: input.workspace_id,
     servers: input.servers,
+  };
+
+  return invokeGeneratedIpc<McpImportReport>({
+    title: "导入 MCP 服务失败",
+    cmd: "mcp_import_servers",
+    args: { input: payload },
+    invoke: () =>
+      commands.mcpImportServers(payload) as Promise<GeneratedCommandResult<McpImportReport>>,
   });
 }
 
 export async function mcpImportFromWorkspaceCli(workspace_id: number) {
-  return invokeService<McpImportReport>(
-    "从工作区 CLI 导入 MCP 服务失败",
-    "mcp_import_from_workspace_cli",
-    {
-      workspaceId: workspace_id,
-    }
-  );
+  return invokeGeneratedIpc<McpImportReport>({
+    title: "从工作区 CLI 导入 MCP 服务失败",
+    cmd: "mcp_import_from_workspace_cli",
+    args: { input: { workspaceId: workspace_id } },
+    invoke: () =>
+      commands.mcpImportFromWorkspaceCli({
+        workspaceId: workspace_id,
+      }) as Promise<GeneratedCommandResult<McpImportReport>>,
+  });
 }

@@ -468,7 +468,7 @@ describe("cli-manager/GeneralTab", () => {
       expect(onPersistCommonSettings).toHaveBeenCalledWith({
         upstream_proxy_url: "http://127.0.0.1:7890",
         upstream_proxy_username: "",
-        upstream_proxy_password: "",
+        upstream_proxy_password: { mode: "preserve" },
       });
     });
     expect(toast.success).toHaveBeenCalledWith("代理地址已更新");
@@ -480,7 +480,7 @@ describe("cli-manager/GeneralTab", () => {
         upstream_proxy_enabled: true,
         upstream_proxy_url: "http://127.0.0.1:7890",
         upstream_proxy_username: "proxy-user",
-        upstream_proxy_password: "secret",
+        upstream_proxy_password_configured: true,
       })
     );
 
@@ -491,7 +491,7 @@ describe("cli-manager/GeneralTab", () => {
             upstream_proxy_enabled: true,
             upstream_proxy_url: "http://127.0.0.1:7890",
             upstream_proxy_username: "",
-            upstream_proxy_password: "",
+            upstream_proxy_password_configured: true,
           }),
           onPersistCommonSettings,
         })}
@@ -501,16 +501,16 @@ describe("cli-manager/GeneralTab", () => {
     fireEvent.change(screen.getByPlaceholderText("proxy-user"), {
       target: { value: " proxy-user " },
     });
-    fireEvent.change(screen.getByPlaceholderText("proxy-password"), {
+    fireEvent.change(screen.getByPlaceholderText("留空表示保留已保存密码"), {
       target: { value: "secret" },
     });
-    fireEvent.blur(screen.getByPlaceholderText("proxy-password"));
+    fireEvent.blur(screen.getByPlaceholderText("留空表示保留已保存密码"));
 
     await waitFor(() => {
       expect(onPersistCommonSettings).toHaveBeenCalledWith({
         upstream_proxy_url: "http://127.0.0.1:7890",
         upstream_proxy_username: "proxy-user",
-        upstream_proxy_password: "secret",
+        upstream_proxy_password: { mode: "replace", value: "secret" },
       });
     });
     expect(toast.success).toHaveBeenCalledWith("代理认证信息已更新");
@@ -566,7 +566,7 @@ describe("cli-manager/GeneralTab", () => {
         upstream_proxy_enabled: true,
         upstream_proxy_url: "http://127.0.0.1:7890",
         upstream_proxy_username: "",
-        upstream_proxy_password: "",
+        upstream_proxy_password: { mode: "preserve" },
       });
     });
     expect(toast.success).toHaveBeenCalledWith("代理已启用");
@@ -601,7 +601,7 @@ describe("cli-manager/GeneralTab", () => {
         upstream_proxy_enabled: false,
         upstream_proxy_url: "http://127.0.0.1:7890",
         upstream_proxy_username: "",
-        upstream_proxy_password: "",
+        upstream_proxy_password: { mode: "preserve" },
       });
     });
     expect(toast.success).toHaveBeenCalledWith("代理已禁用");

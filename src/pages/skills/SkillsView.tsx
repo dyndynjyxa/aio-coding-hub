@@ -1,6 +1,5 @@
 // Usage: Installed/local skills view for a specific workspace.
 
-import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { ExternalLink } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -17,6 +16,7 @@ import {
   type SkillUpdateInfo,
 } from "../../query/skills";
 import { logToConsole } from "../../services/consoleLog";
+import { openDesktopPath, revealDesktopItem } from "../../services/desktop/opener";
 import type { CliKey } from "../../services/providers/providers";
 import {
   type InstalledSkillSummary,
@@ -69,7 +69,7 @@ function pruneSelectionSet<T>(prev: Set<T>, allowed: Set<T>) {
 
 async function openPathOrReveal(path: string) {
   try {
-    await openPath(path);
+    await openDesktopPath(path);
     return;
   } catch (err) {
     logToConsole("warn", "openPath 失败，尝试 revealItemInDir", {
@@ -77,7 +77,7 @@ async function openPathOrReveal(path: string) {
       path,
     });
   }
-  await revealItemInDir(path);
+  await revealDesktopItem(path);
 }
 
 export type SkillsViewProps = {
@@ -579,7 +579,12 @@ export function SkillsView({
                 variant="secondary"
                 aria-label="检查更新"
                 onClick={() => void checkForUpdates()}
-                disabled={loading || deletingInstalled || checkUpdatesMutation.isPending || updatingSkillId !== null}
+                disabled={
+                  loading ||
+                  deletingInstalled ||
+                  checkUpdatesMutation.isPending ||
+                  updatingSkillId !== null
+                }
               >
                 {checkUpdatesMutation.isPending ? "检查中…" : "检查更新"}
               </Button>
@@ -667,7 +672,8 @@ export function SkillsView({
                               }
                               onCheckedChange={(next) => void toggleSkillEnabled(skill, next)}
                             />
-                            {isMarketSkill(skill.source_git_url) && updateInfoMap.get(skill.id)?.has_update ? (
+                            {isMarketSkill(skill.source_git_url) &&
+                            updateInfoMap.get(skill.id)?.has_update ? (
                               <Button
                                 size="sm"
                                 variant="primary"

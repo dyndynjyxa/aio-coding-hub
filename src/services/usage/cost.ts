@@ -1,7 +1,8 @@
 // Usage:
 // - Used by `src/components/home/HomeCostPanel.tsx` to load cost analytics for the Home "花费" tab.
 
-import { invokeService } from "../invokeServiceCommand";
+import { commands } from "../../generated/bindings";
+import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
 import type { CliKey } from "../providers/providers";
 
 export type CostPeriod = "daily" | "weekly" | "monthly" | "allTime" | "custom";
@@ -94,13 +95,23 @@ function buildParams(period: CostPeriod, input?: CostQueryInput) {
 }
 
 export async function costSummaryV1(period: CostPeriod, input?: CostQueryInput) {
-  return invokeService<CostSummaryV1>("读取花费汇总失败", "cost_summary_v1", {
-    params: buildParams(period, input),
+  const params = buildParams(period, input);
+  return invokeGeneratedIpc<CostSummaryV1>({
+    title: "读取花费汇总失败",
+    cmd: "cost_summary_v1",
+    args: { params },
+    invoke: () =>
+      commands.costSummaryV1(params as any) as Promise<GeneratedCommandResult<CostSummaryV1>>,
   });
 }
 export async function costTrendV1(period: CostPeriod, input?: CostQueryInput) {
-  return invokeService<CostTrendRowV1[]>("读取花费趋势失败", "cost_trend_v1", {
-    params: buildParams(period, input),
+  const params = buildParams(period, input);
+  return invokeGeneratedIpc<CostTrendRowV1[]>({
+    title: "读取花费趋势失败",
+    cmd: "cost_trend_v1",
+    args: { params },
+    invoke: () =>
+      commands.costTrendV1(params as any) as Promise<GeneratedCommandResult<CostTrendRowV1[]>>,
   });
 }
 
@@ -108,37 +119,56 @@ export async function costBreakdownProviderV1(
   period: CostPeriod,
   input?: CostQueryInput & { limit?: number | null }
 ) {
-  return invokeService<CostProviderBreakdownRowV1[]>(
-    "读取按供应商花费分布失败",
-    "cost_breakdown_provider_v1",
-    {
-      params: buildParams(period, input),
+  const params = buildParams(period, input);
+  return invokeGeneratedIpc<CostProviderBreakdownRowV1[]>({
+    title: "读取按供应商花费分布失败",
+    cmd: "cost_breakdown_provider_v1",
+    args: {
+      params,
       limit: input?.limit ?? null,
-    }
-  );
+    },
+    invoke: () =>
+      commands.costBreakdownProviderV1(params as any, input?.limit ?? null) as Promise<
+        GeneratedCommandResult<CostProviderBreakdownRowV1[]>
+      >,
+  });
 }
 
 export async function costBreakdownModelV1(
   period: CostPeriod,
   input?: CostQueryInput & { limit?: number | null }
 ) {
-  return invokeService<CostModelBreakdownRowV1[]>(
-    "读取按模型花费分布失败",
-    "cost_breakdown_model_v1",
-    {
-      params: buildParams(period, input),
+  const params = buildParams(period, input);
+  return invokeGeneratedIpc<CostModelBreakdownRowV1[]>({
+    title: "读取按模型花费分布失败",
+    cmd: "cost_breakdown_model_v1",
+    args: {
+      params,
       limit: input?.limit ?? null,
-    }
-  );
+    },
+    invoke: () =>
+      commands.costBreakdownModelV1(params as any, input?.limit ?? null) as Promise<
+        GeneratedCommandResult<CostModelBreakdownRowV1[]>
+      >,
+  });
 }
 
 export async function costTopRequestsV1(
   period: CostPeriod,
   input?: CostQueryInput & { limit?: number | null }
 ) {
-  return invokeService<CostTopRequestRowV1[]>("读取高花费请求失败", "cost_top_requests_v1", {
-    params: buildParams(period, input),
-    limit: input?.limit ?? null,
+  const params = buildParams(period, input);
+  return invokeGeneratedIpc<CostTopRequestRowV1[]>({
+    title: "读取高花费请求失败",
+    cmd: "cost_top_requests_v1",
+    args: {
+      params,
+      limit: input?.limit ?? null,
+    },
+    invoke: () =>
+      commands.costTopRequestsV1(params as any, input?.limit ?? null) as Promise<
+        GeneratedCommandResult<CostTopRequestRowV1[]>
+      >,
   });
 }
 
@@ -146,22 +176,36 @@ export async function costScatterCliProviderModelV1(
   period: CostPeriod,
   input?: CostQueryInput & { limit?: number | null }
 ) {
-  return invokeService<CostScatterCliProviderModelRowV1[]>(
-    "读取花费散点数据失败",
-    "cost_scatter_cli_provider_model_v1",
-    {
-      params: buildParams(period, input),
+  const params = buildParams(period, input);
+  return invokeGeneratedIpc<CostScatterCliProviderModelRowV1[]>({
+    title: "读取花费散点数据失败",
+    cmd: "cost_scatter_cli_provider_model_v1",
+    args: {
+      params,
       limit: input?.limit ?? null,
-    }
-  );
+    },
+    invoke: () =>
+      commands.costScatterCliProviderModelV1(params as any, input?.limit ?? null) as Promise<
+        GeneratedCommandResult<CostScatterCliProviderModelRowV1[]>
+      >,
+  });
 }
 
 export async function costBackfillMissingV1(
   period: CostPeriod,
   input?: CostQueryInput & { maxRows?: number | null }
 ) {
-  return invokeService<CostBackfillReportV1>("回填花费数据失败", "cost_backfill_missing_v1", {
-    params: buildParams(period, input),
-    maxRows: input?.maxRows ?? null,
+  const params = buildParams(period, input);
+  return invokeGeneratedIpc<CostBackfillReportV1>({
+    title: "回填花费数据失败",
+    cmd: "cost_backfill_missing_v1",
+    args: {
+      params,
+      maxRows: input?.maxRows ?? null,
+    },
+    invoke: () =>
+      commands.costBackfillMissingV1(params as any, input?.maxRows ?? null) as Promise<
+        GeneratedCommandResult<CostBackfillReportV1>
+      >,
   });
 }

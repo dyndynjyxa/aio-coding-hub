@@ -7,10 +7,10 @@ let invokeImpl: (...args: unknown[]) => Promise<unknown> = (...args) => {
   return Promise.resolve(true);
 };
 
-vi.mock("../tauriInvoke", () => ({
-  invokeTauriOrNull: ((...args: unknown[]) => {
+vi.mock("../app/frontendErrorReport", () => ({
+  appFrontendErrorReport: ((...args: unknown[]) => {
     return invokeImpl(...args);
-  }) as typeof import("../tauriInvoke").invokeTauriOrNull,
+  }) as typeof import("../app/frontendErrorReport").appFrontendErrorReport,
 }));
 
 vi.mock("../consoleLog", () => ({
@@ -82,12 +82,10 @@ describe("services/frontendErrorReporter", () => {
     expect(logToConsoleCalls).toHaveLength(1);
     expect(invokeCalls).toHaveLength(1);
     expect(invokeCalls[0]).toEqual([
-      "app_frontend_error_report",
       expect.objectContaining({
         source: "error",
         message: "boom",
       }),
-      { timeoutMs: 3_000 },
     ]);
   });
 
@@ -100,12 +98,10 @@ describe("services/frontendErrorReporter", () => {
 
     expect(invokeCalls).toHaveLength(1);
     expect(invokeCalls[0]).toEqual([
-      "app_frontend_error_report",
       expect.objectContaining({
         source: "render",
         message: "render failed",
       }),
-      { timeoutMs: 3_000 },
     ]);
   });
 
@@ -139,16 +135,14 @@ describe("services/frontendErrorReporter", () => {
 
     expect(invokeCalls).toHaveLength(1);
     expect(invokeCalls[0]).toEqual([
-      "app_frontend_error_report",
       expect.objectContaining({
         source: "unhandledrejection",
         message: "promise failed",
       }),
-      { timeoutMs: 3_000 },
     ]);
     // details_json should contain reason_type and reason
-    const payload = invokeCalls[0][1] as Record<string, unknown>;
-    const details = JSON.parse(payload.details_json as string);
+    const payload = invokeCalls[0][0] as Record<string, unknown>;
+    const details = JSON.parse(payload.detailsJson as string);
     expect(details.reason_type).toBe("object");
     expect(details.reason).toBe("promise failed");
   });
@@ -182,17 +176,15 @@ describe("services/frontendErrorReporter", () => {
 
     expect(invokeCalls).toHaveLength(1);
     expect(invokeCalls[0]).toEqual([
-      "app_frontend_error_report",
       expect.objectContaining({
         source: "unhandledrejection",
         message: "string rejection reason",
       }),
-      { timeoutMs: 3_000 },
     ]);
-    const payload = invokeCalls[0][1] as Record<string, unknown>;
+    const payload = invokeCalls[0][0] as Record<string, unknown>;
     // stack should be null for non-Error reasons
     expect(payload.stack).toBeNull();
-    const details = JSON.parse(payload.details_json as string);
+    const details = JSON.parse(payload.detailsJson as string);
     expect(details.reason_type).toBe("string");
     expect(details.reason).toBe("string rejection reason");
   });
@@ -218,16 +210,14 @@ describe("services/frontendErrorReporter", () => {
 
     expect(invokeCalls).toHaveLength(1);
     expect(invokeCalls[0]).toEqual([
-      "app_frontend_error_report",
       expect.objectContaining({
         source: "render",
         message: "unique-error-0",
       }),
-      { timeoutMs: 3_000 },
     ]);
   });
 
-  it("swallows error when invokeTauriOrNull rejects", async () => {
+  it("swallows error when frontend error report service rejects", async () => {
     invokeImpl = (...args) => {
       invokeCalls.push(args);
       return Promise.reject(new Error("invoke failed"));
@@ -236,7 +226,7 @@ describe("services/frontendErrorReporter", () => {
     const mod = await import("../frontendErrorReporter");
     mod.__testResetFrontendErrorReporterState();
 
-    // This should not throw even though invokeTauriOrNull rejects
+    // This should not throw even though the service rejects
     mod.reportRenderError(new Error("some error"));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -255,12 +245,10 @@ describe("services/frontendErrorReporter", () => {
 
     expect(invokeCalls).toHaveLength(1);
     expect(invokeCalls[0]).toEqual([
-      "app_frontend_error_report",
       expect.objectContaining({
         source: "render",
         message: "Unknown frontend error",
       }),
-      { timeoutMs: 3_000 },
     ]);
   });
 
@@ -274,12 +262,10 @@ describe("services/frontendErrorReporter", () => {
 
     expect(invokeCalls).toHaveLength(1);
     expect(invokeCalls[0]).toEqual([
-      "app_frontend_error_report",
       expect.objectContaining({
         source: "render",
         message: "42",
       }),
-      { timeoutMs: 3_000 },
     ]);
   });
 
@@ -300,12 +286,10 @@ describe("services/frontendErrorReporter", () => {
     expect(invokeCalls).toHaveLength(1);
     // safeToString catches the throw and returns "[unstringifiable]"
     expect(invokeCalls[0]).toEqual([
-      "app_frontend_error_report",
       expect.objectContaining({
         source: "render",
         message: "[unstringifiable]",
       }),
-      { timeoutMs: 3_000 },
     ]);
   });
 
@@ -318,7 +302,7 @@ describe("services/frontendErrorReporter", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(invokeCalls).toHaveLength(1);
-    const payload = invokeCalls[0][1] as Record<string, unknown>;
+    const payload = invokeCalls[0][0] as Record<string, unknown>;
     // stack should be null because "some string error" is not an Error (no .stack)
     expect(payload.stack).toBeNull();
   });
@@ -332,8 +316,8 @@ describe("services/frontendErrorReporter", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(invokeCalls).toHaveLength(1);
-    const payload = invokeCalls[0][1] as Record<string, unknown>;
+    const payload = invokeCalls[0][0] as Record<string, unknown>;
     expect(payload.href).toBe("http://localhost/#/");
-    expect(payload.user_agent).toBe("test-agent");
+    expect(payload.userAgent).toBe("test-agent");
   });
 });

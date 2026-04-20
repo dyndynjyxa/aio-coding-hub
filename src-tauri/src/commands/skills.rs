@@ -4,6 +4,7 @@ use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::{blocking, skills};
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn skill_repos_list(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -15,6 +16,7 @@ pub(crate) async fn skill_repos_list(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn skill_repo_upsert(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -32,6 +34,7 @@ pub(crate) async fn skill_repo_upsert(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn skill_repo_delete(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -50,6 +53,7 @@ pub(crate) async fn skill_repo_delete(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn skills_installed_list(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -64,6 +68,7 @@ pub(crate) async fn skills_installed_list(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn skills_discover_available(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -77,6 +82,7 @@ pub(crate) async fn skills_discover_available(
 }
 
 #[tauri::command]
+#[specta::specta]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn skill_install(
     app: tauri::AppHandle,
@@ -105,6 +111,7 @@ pub(crate) async fn skill_install(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn skill_install_to_local(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -123,6 +130,7 @@ pub(crate) async fn skill_install_to_local(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn skill_set_enabled(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -140,6 +148,7 @@ pub(crate) async fn skill_set_enabled(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn skill_uninstall(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -153,6 +162,7 @@ pub(crate) async fn skill_uninstall(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn skill_return_to_local(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -169,6 +179,7 @@ pub(crate) async fn skill_return_to_local(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn skills_local_list(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -182,6 +193,7 @@ pub(crate) async fn skills_local_list(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn skill_local_delete(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -198,6 +210,7 @@ pub(crate) async fn skill_local_delete(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn skill_import_local(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -214,6 +227,7 @@ pub(crate) async fn skill_import_local(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn skills_import_local_batch(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -230,6 +244,7 @@ pub(crate) async fn skills_import_local_batch(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn skills_paths_get(
     app: tauri::AppHandle,
     cli_key: String,
@@ -242,6 +257,7 @@ pub(crate) async fn skills_paths_get(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn skill_check_updates(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -257,6 +273,7 @@ pub(crate) async fn skill_check_updates(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn skill_update(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,

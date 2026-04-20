@@ -1,17 +1,12 @@
-import { invokeServiceCommand } from "../invokeServiceCommand";
+import { commands, type AppAboutInfo } from "../../generated/bindings";
+import { invokeGeneratedIpc } from "../generatedIpc";
 
-export type AppAboutInfo = {
-  os: string;
-  arch: string;
-  profile: string;
-  app_version: string;
-  bundle_type: string | null;
-  run_mode: string;
-};
+export type { AppAboutInfo };
 
 export async function appAboutGet() {
-  return invokeServiceCommand<AppAboutInfo>({
+  return invokeGeneratedIpc<AppAboutInfo>({
     title: "读取应用信息失败",
     cmd: "app_about_get",
+    invoke: () => commands.appAboutGet(),
   });
 }

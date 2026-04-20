@@ -1,7 +1,7 @@
 /**
  * 任务结束提醒模块
  *
- * 监听 gateway:request / gateway:request_start 事件，使用去抖机制检测 AI CLI 任务完成。
+ * 监听 gateway:request_signal 事件，使用去抖机制检测 AI CLI 任务完成。
  * 当某个 cli_key 在静默期（QUIET_PERIOD_MS_DEFAULT）内无新请求时，判定任务完成并发送系统通知。
  *
  * 参考：https://github.com/ZekerTop/ai-cli-complete-notify
@@ -13,7 +13,7 @@ import { gatewayEventNames } from "../../constants/gatewayEvents";
 import { logToConsole } from "../consoleLog";
 import { subscribeGatewayEvent } from "../gateway/gatewayEventBus";
 import { noticeSend } from "./notice";
-import type { GatewayRequestEvent, GatewayRequestStartEvent } from "../gateway/gatewayEvents";
+import type { GatewayRequestSignalEvent } from "../gateway/gatewayEvents";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -122,7 +122,7 @@ function resetSessions() {
 // Core logic
 // ---------------------------------------------------------------------------
 
-function handleRequestStart(payload: GatewayRequestStartEvent) {
+function handleRequestStart(payload: GatewayRequestSignalEvent) {
   if (!enabled) return;
 
   const { cli_key, requested_model, trace_id } = payload;
@@ -161,7 +161,7 @@ function handleRequestStart(payload: GatewayRequestStartEvent) {
   if (model) session.lastRequestedModel = model;
 }
 
-function handleRequestComplete(payload: GatewayRequestEvent) {
+function handleRequestComplete(payload: GatewayRequestSignalEvent) {
   if (!enabled) return;
 
   const { cli_key, trace_id } = payload;
@@ -241,32 +241,27 @@ async function maybeNotify(cliKey: string) {
 // ---------------------------------------------------------------------------
 
 export async function listenTaskCompleteNotifyEvents(): Promise<() => void> {
-  const requestStartSub = subscribeGatewayEvent<GatewayRequestStartEvent>(
-    gatewayEventNames.requestStart,
+  const requestSignalSub = subscribeGatewayEvent<GatewayRequestSignalEvent>(
+    gatewayEventNames.requestSignal,
     (payload) => {
       if (!payload) return;
-      handleRequestStart(payload);
-    }
-  );
-  const requestSub = subscribeGatewayEvent<GatewayRequestEvent>(
-    gatewayEventNames.request,
-    (payload) => {
-      if (!payload) return;
+      if (payload.phase === "start") {
+        handleRequestStart(payload);
+        return;
+      }
       handleRequestComplete(payload);
     }
   );
-  const readyResults = await Promise.allSettled([requestStartSub.ready, requestSub.ready]);
+  const readyResults = await Promise.allSettled([requestSignalSub.ready]);
   const subscribeFailed = readyResults.some((result) => result.status === "rejected");
   if (subscribeFailed) {
-    requestStartSub.unsubscribe();
-    requestSub.unsubscribe();
+    requestSignalSub.unsubscribe();
     const failedResult = readyResults.find((result) => result.status === "rejected");
     throw failedResult?.reason ?? new Error("task complete notify subscriptions failed");
   }
 
   return () => {
-    requestStartSub.unsubscribe();
-    requestSub.unsubscribe();
+    requestSignalSub.unsubscribe();
     resetSessions();
   };
 }

@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { GatewayStatus } from "../../services/gateway/gateway";
 import { settingsGet, settingsSet } from "../../services/settings/settings";
 import { settingsCircuitBreakerNoticeSet } from "../../services/settings/settingsCircuitBreakerNotice";
 import { settingsCodexSessionIdCompletionSet } from "../../services/settings/settingsCodexSessionIdCompletion";
@@ -111,7 +112,21 @@ describe("query/settings", () => {
     setTauriRuntime();
 
     const updated = createTestAppSettings({ preferred_port: 40000 });
-    vi.mocked(settingsSet).mockResolvedValue(updated);
+    const gatewayStatus: GatewayStatus = {
+      running: false,
+      port: 40000,
+      base_url: "http://127.0.0.1:40000",
+      listen_addr: "127.0.0.1:40000",
+    };
+    vi.mocked(settingsSet).mockResolvedValue({
+      settings: updated,
+      runtime: {
+        gateway_rebound: false,
+        cli_proxy_synced: false,
+        wsl_auto_sync_triggered: false,
+        gateway_status: gatewayStatus,
+      },
+    });
 
     const client = createTestQueryClient();
     client.setQueryData(settingsKeys.get(), createTestAppSettings());

@@ -1,4 +1,5 @@
-import { invokeService, invokeServiceCommand } from "../invokeServiceCommand";
+import { commands } from "../../generated/bindings";
+import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
 
 export type WslDetection = {
   detected: boolean;
@@ -37,26 +38,37 @@ export type WslConfigureReport = {
 };
 
 export async function wslDetect() {
-  return invokeService<WslDetection>("检测 WSL 失败", "wsl_detect");
+  return invokeGeneratedIpc<WslDetection>({
+    title: "检测 WSL 失败",
+    cmd: "wsl_detect",
+    invoke: () => commands.wslDetect(),
+  });
 }
 
 export async function wslHostAddressGet() {
-  return invokeServiceCommand<string | null, null>({
+  return invokeGeneratedIpc<string | null, null>({
     title: "读取 WSL 主机地址失败",
     cmd: "wsl_host_address_get",
+    invoke: () => commands.wslHostAddressGet(),
     fallback: null,
     nullResultBehavior: "return_fallback",
   });
 }
 
 export async function wslConfigStatusGet(distros?: string[]) {
-  return invokeService<WslDistroConfigStatus[]>(
-    "读取 WSL 配置状态失败",
-    "wsl_config_status_get",
-    distros !== undefined ? { distros } : undefined
-  );
+  return invokeGeneratedIpc<WslDistroConfigStatus[]>({
+    title: "读取 WSL 配置状态失败",
+    cmd: "wsl_config_status_get",
+    args: distros !== undefined ? { distros } : undefined,
+    invoke: () => commands.wslConfigStatusGet(distros ?? null),
+  });
 }
 
 export async function wslConfigureClients() {
-  return invokeService<WslConfigureReport>("配置 WSL 客户端失败", "wsl_configure_clients");
+  return invokeGeneratedIpc<WslConfigureReport>({
+    title: "配置 WSL 客户端失败",
+    cmd: "wsl_configure_clients",
+    invoke: () =>
+      commands.wslConfigureClients() as Promise<GeneratedCommandResult<WslConfigureReport>>,
+  });
 }

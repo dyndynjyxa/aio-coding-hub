@@ -20,11 +20,27 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
       release_id: ${{ steps.release.outputs.id }}
+      build_matrix: ${{ steps.support_matrix.outputs.build_matrix }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Validate support matrix contract
+        run: node scripts/support-matrix.mjs check
+
+      - id: support_matrix
+        name: Load release support matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "build_matrix=$(node scripts/support-matrix.mjs build-matrix)" >> "$GITHUB_OUTPUT"
 
       - id: release
-        uses: googleapis/release-please-action@v4
+        uses: googleapis/release-please-action@8b8fd2cc23b2e18957157a9d923d75aa0c6f6ad5 # v4
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
@@ -37,52 +53,32 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: windows-latest
-            target: x86_64-pc-windows-msvc
-            bundles: "msi"
-            updater_platform: windows-x86_64
-            stable_label: win64
-          - platform: macos-latest
-            target: x86_64-apple-darwin
-            bundles: "app"
-            updater_platform: darwin-x86_64
-            stable_label: macos-intel
-          - platform: macos-latest
-            target: aarch64-apple-darwin
-            bundles: "app"
-            updater_platform: darwin-aarch64
-            stable_label: macos-arm
-          - platform: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            bundles: "deb,appimage"
-            updater_platform: linux-x86_64
-            stable_label: linux-amd64
+        include: ${{ fromJson(needs.release-please.outputs.build_matrix) }}
 
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4.2.0
         with:
           version: 10
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
 
       - name: Install Rust 1.90.0
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: 1.90.0
           components: rustfmt, clippy
           targets: ${{ matrix.target }}
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           workspaces: src-tauri
 
@@ -137,7 +133,7 @@ jobs:
 
       - id: tauri
         name: Build & upload (Tauri)
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
         with:
@@ -150,116 +146,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p stable-assets
-
-          node <<'NODE'
-          const fs = require('fs');
-          const path = require('path');
-
-          const outDir = 'stable-assets';
-          const raw = process.env.ARTIFACT_PATHS || '[]';
-          const updaterPlatform = String(process.env.UPDATER_PLATFORM || '').trim();
-          const stableLabel = String(process.env.STABLE_LABEL || '').trim();
-
-          let artifactPaths;
-          try {
-            artifactPaths = JSON.parse(raw);
-          } catch (err) {
-            console.error('Failed to parse ARTIFACT_PATHS as JSON.');
-            console.error(raw);
-            process.exit(1);
-          }
-
-          if (!Array.isArray(artifactPaths) || artifactPaths.length === 0) {
-            console.error('No artifacts found (artifactPaths output is empty).');
-            process.exit(1);
-          }
-          if (!updaterPlatform) {
-            console.error('UPDATER_PLATFORM is empty.');
-            process.exit(1);
-          }
-          if (!stableLabel) {
-            console.error('STABLE_LABEL is empty.');
-            process.exit(1);
-          }
-
-          function pick(predicate, label) {
-            const picked = artifactPaths.find((p) => typeof p === 'string' && predicate(p));
-            if (!picked) {
-              console.error(`Missing required artifact: ${label}`);
-              console.error('Available artifacts:');
-              for (const p of artifactPaths) console.error(`- ${p}`);
-              process.exit(1);
-            }
-            return picked;
-          }
-
-          function copy(src, name) {
-            const dest = path.join(outDir, name);
-            fs.copyFileSync(src, dest);
-            console.log(`Copied: ${src} -> ${dest}`);
-          }
-
-          if (updaterPlatform.startsWith('windows-')) {
-            const msi = pick(
-              (p) => p.toLowerCase().endsWith('.msi') && !p.toLowerCase().endsWith('.msi.sig'),
-              '*.msi',
-            );
-            const msiSig = pick((p) => p.toLowerCase().endsWith('.msi.sig'), '*.msi.sig');
-            copy(msi, `aio-coding-hub-${stableLabel}.msi`);
-            copy(msiSig, `aio-coding-hub-${stableLabel}.msi.sig`);
-            process.exit(0);
-          }
-
-          if (updaterPlatform.startsWith('linux-')) {
-            const appimage = pick(
-              (p) => p.toLowerCase().endsWith('.appimage') && !p.toLowerCase().endsWith('.appimage.sig'),
-              '*.AppImage',
-            );
-            const appimageSig = pick((p) => p.toLowerCase().endsWith('.appimage.sig'), '*.AppImage.sig');
-            copy(appimage, `aio-coding-hub-${stableLabel}.AppImage`);
-            copy(appimageSig, `aio-coding-hub-${stableLabel}.AppImage.sig`);
-
-            // Also copy .deb if available
-            const deb = artifactPaths.find((p) => typeof p === 'string' && p.toLowerCase().endsWith('.deb'));
-            if (deb) {
-              copy(deb, `aio-coding-hub-${stableLabel}.deb`);
-            }
-            process.exit(0);
-          }
-
-          if (!updaterPlatform.startsWith('darwin-')) {
-            console.error(`Unsupported UPDATER_PLATFORM: ${updaterPlatform}`);
-            process.exit(1);
-          }
-
-          const tgz =
-            artifactPaths.find((p) => typeof p === 'string' && p.toLowerCase().endsWith('.app.tar.gz')) ||
-            artifactPaths.find((p) => typeof p === 'string' && p.toLowerCase().endsWith('.tar.gz'));
-          if (!tgz) {
-            console.error('Missing required artifact: macOS updater tarball (*.app.tar.gz / *.tar.gz)');
-            console.error('Available artifacts:');
-            for (const p of artifactPaths) console.error(`- ${p}`);
-            process.exit(1);
-          }
-
-          const tgzSig =
-            artifactPaths.find((p) => typeof p === 'string' && p.toLowerCase().endsWith('.app.tar.gz.sig')) ||
-            artifactPaths.find((p) => typeof p === 'string' && p.toLowerCase().endsWith('.tar.gz.sig'));
-          if (!tgzSig) {
-            console.error('Missing required artifact: macOS updater signature (*.tar.gz.sig)');
-            console.error('Available artifacts:');
-            for (const p of artifactPaths) console.error(`- ${p}`);
-            process.exit(1);
-          }
-
-          copy(tgz, `aio-coding-hub-${stableLabel}.tar.gz`);
-          copy(tgzSig, `aio-coding-hub-${stableLabel}.tar.gz.sig`);
-          NODE
+          node scripts/support-matrix.mjs prepare-stable-assets \
+            --artifact-paths "$ARTIFACT_PATHS_JSON" \
+            --updater-platform "${{ matrix.updater_platform }}" \
+            --stable-label "${{ matrix.stable_label }}" \
+            --output-dir stable-assets
         env:
-          ARTIFACT_PATHS: ${{ steps.tauri.outputs.artifactPaths }}
-          UPDATER_PLATFORM: ${{ matrix.updater_platform }}
-          STABLE_LABEL: ${{ matrix.stable_label }}
+          ARTIFACT_PATHS_JSON: ${{ steps.tauri.outputs.artifactPaths }}
 
       - name: Build macOS zip (portable)
         if: startsWith(matrix.updater_platform, 'darwin-')
@@ -354,14 +247,14 @@ jobs:
           ls -lh "$out"
 
       - name: Upload stable assets (workflow artifact)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: stable-assets-${{ matrix.updater_platform }}
           path: stable-assets/*
           if-no-files-found: error
 
       - name: Upload stable assets (GitHub Release)
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
         with:
@@ -374,8 +267,15 @@ jobs:
     if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
       - name: Download stable assets (workflow artifacts)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: stable-assets-*
           merge-multiple: true
@@ -383,7 +283,7 @@ jobs:
 
       - name: Fetch release body
         id: release_body
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           github-token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           script: |
@@ -405,108 +305,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
-          tag="${{ needs.release-please.outputs.tag_name }}"
-          repo="${{ github.repository }}"
-
-          version="$tag"
-          repo_name="${repo#*/}"
-          if [[ "$version" == "${repo_name}-v"* ]]; then
-            version="${version#${repo_name}-v}"
-          elif [[ "$version" == v* ]]; then
-            version="${version#v}"
-          fi
-
-          pub_date="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-
-          win_asset="aio-coding-hub-win64.msi"
-          win_sig_file="stable-assets/aio-coding-hub-win64.msi.sig"
-          mac_intel_asset="aio-coding-hub-macos-intel.tar.gz"
-          mac_intel_sig_file="stable-assets/aio-coding-hub-macos-intel.tar.gz.sig"
-          mac_arm_asset="aio-coding-hub-macos-arm.tar.gz"
-          mac_arm_sig_file="stable-assets/aio-coding-hub-macos-arm.tar.gz.sig"
-          linux_asset="aio-coding-hub-linux-amd64.AppImage"
-          linux_sig_file="stable-assets/aio-coding-hub-linux-amd64.AppImage.sig"
-
-          for f in "$win_sig_file" "$mac_intel_sig_file" "$mac_arm_sig_file" "$linux_sig_file"; do
-            if [[ ! -f "$f" ]]; then
-              echo "Missing signature file: $f"
-              ls -la stable-assets || true
-              exit 1
-            fi
-          done
-
-          win_sig="$(tr -d '\n' < "$win_sig_file")"
-          mac_intel_sig="$(tr -d '\n' < "$mac_intel_sig_file")"
-          mac_arm_sig="$(tr -d '\n' < "$mac_arm_sig_file")"
-          linux_sig="$(tr -d '\n' < "$linux_sig_file")"
-
-          win_url="https://github.com/${repo}/releases/download/${tag}/${win_asset}"
-          mac_intel_url="https://github.com/${repo}/releases/download/${tag}/${mac_intel_asset}"
-          mac_arm_url="https://github.com/${repo}/releases/download/${tag}/${mac_arm_asset}"
-          linux_url="https://github.com/${repo}/releases/download/${tag}/${linux_asset}"
-
-          export VERSION="$version"
-          export PUB_DATE="$pub_date"
-          export WIN_SIG="$win_sig"
-          export WIN_URL="$win_url"
-          export MAC_INTEL_SIG="$mac_intel_sig"
-          export MAC_INTEL_URL="$mac_intel_url"
-          export MAC_ARM_SIG="$mac_arm_sig"
-          export MAC_ARM_URL="$mac_arm_url"
-          export LINUX_SIG="$linux_sig"
-          export LINUX_URL="$linux_url"
-
-          node <<'NODE'
-          const fs = require('fs');
-
-          const version = process.env.VERSION;
-          const pubDate = process.env.PUB_DATE;
-          const releaseBody = process.env.RELEASE_BODY;
-          const fallbackNotes = process.env.FALLBACK_NOTES;
-          const winSig = process.env.WIN_SIG;
-          const winUrl = process.env.WIN_URL;
-          const macIntelSig = process.env.MAC_INTEL_SIG;
-          const macIntelUrl = process.env.MAC_INTEL_URL;
-          const macArmSig = process.env.MAC_ARM_SIG;
-          const macArmUrl = process.env.MAC_ARM_URL;
-          const linuxSig = process.env.LINUX_SIG;
-          const linuxUrl = process.env.LINUX_URL;
-
-          const latestJson = {
-            version,
-            notes: releaseBody || fallbackNotes,
-            pub_date: pubDate,
-            platforms: {
-              'windows-x86_64': {
-                signature: winSig,
-                url: winUrl,
-              },
-              'darwin-x86_64': {
-                signature: macIntelSig,
-                url: macIntelUrl,
-              },
-              'darwin-aarch64': {
-                signature: macArmSig,
-                url: macArmUrl,
-              },
-              'linux-x86_64': {
-                signature: linuxSig,
-                url: linuxUrl,
-              },
-            },
-          };
-
-          fs.writeFileSync('latest.json', JSON.stringify(latestJson, null, 2));
-          JSON.parse(fs.readFileSync('latest.json', 'utf8'));
-          console.log('latest.json OK');
-          NODE
+          node scripts/support-matrix.mjs generate-latest-json \
+            --tag "${{ needs.release-please.outputs.tag_name }}" \
+            --repo "${{ github.repository }}" \
+            --pub-date "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            --stable-assets-dir stable-assets \
+            --output latest.json
         env:
           RELEASE_BODY: ${{ steps.release_body.outputs.body }}
           FALLBACK_NOTES: "See release: https://github.com/${{ github.repository }}/releases/tag/${{ needs.release-please.outputs.tag_name }}"
 
       - name: Delete existing latest.json (best-effort)
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           github-token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           script: |
@@ -540,7 +350,7 @@ jobs:
             });
 
       - name: Upload latest.json (GitHub Release)
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
         with:
@@ -554,7 +364,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Publish GitHub Release (unset draft)
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           github-token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           script: |

@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   baseUrlPingMs,
   providerClaudeTerminalLaunchCommand,
+  providerCopyApiKeyToClipboard,
   providerDelete,
-  providerGetApiKey,
+  providerDuplicate,
   providerOAuthDisconnect,
   providerOAuthFetchLimits,
   providerOAuthRefresh,
@@ -16,7 +17,6 @@ import {
 } from "../providers";
 import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
-import { invokeTauriOrNull } from "../../tauriInvoke";
 
 vi.mock("../../../generated/bindings", async () => {
   const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
@@ -28,15 +28,19 @@ vi.mock("../../../generated/bindings", async () => {
       ...actual.commands,
       providersList: vi.fn(),
       providerUpsert: vi.fn(),
+      providerDuplicate: vi.fn(),
+      providerSetEnabled: vi.fn(),
+      providerDelete: vi.fn(),
+      providersReorder: vi.fn(),
+      providerClaudeTerminalLaunchCommand: vi.fn(),
+      providerCopyApiKeyToClipboard: vi.fn(),
+      baseUrlPingMs: vi.fn(),
+      providerOauthStartFlow: vi.fn(),
+      providerOauthRefresh: vi.fn(),
+      providerOauthDisconnect: vi.fn(),
+      providerOauthStatus: vi.fn(),
+      providerOauthFetchLimits: vi.fn(),
     },
-  };
-});
-
-vi.mock("../../tauriInvoke", async () => {
-  const actual = await vi.importActual<typeof import("../../tauriInvoke")>("../../tauriInvoke");
-  return {
-    ...actual,
-    invokeTauriOrNull: vi.fn(),
   };
 });
 
@@ -150,13 +154,23 @@ describe("services/providers/providers", () => {
 
   it("passes providers command args with stable contract fields", async () => {
     vi.mocked(commands.providersList).mockResolvedValueOnce({ status: "ok", data: [] as any });
-    vi.mocked(invokeTauriOrNull)
-      .mockResolvedValueOnce(120 as any)
-      .mockResolvedValueOnce({ id: 1 } as any)
-      .mockResolvedValueOnce({ id: 1 } as any)
-      .mockResolvedValueOnce(true as any)
-      .mockResolvedValueOnce([] as any)
-      .mockResolvedValueOnce("bash '/tmp/aio.sh'" as any);
+    vi.mocked(commands.baseUrlPingMs).mockResolvedValueOnce({ status: "ok", data: 120 as any });
+    vi.mocked(commands.providerSetEnabled).mockResolvedValueOnce({
+      status: "ok",
+      data: { id: 1, cli_key: "claude" } as any,
+    });
+    vi.mocked(commands.providerDelete).mockResolvedValueOnce({
+      status: "ok",
+      data: true,
+    });
+    vi.mocked(commands.providersReorder).mockResolvedValueOnce({
+      status: "ok",
+      data: [] as any,
+    });
+    vi.mocked(commands.providerClaudeTerminalLaunchCommand).mockResolvedValueOnce({
+      status: "ok",
+      data: "bash '/tmp/aio.sh'" as any,
+    });
 
     await providersList("claude");
     await baseUrlPingMs("https://api.example.com");
@@ -166,38 +180,41 @@ describe("services/providers/providers", () => {
     await providerClaudeTerminalLaunchCommand(5);
 
     expect(commands.providersList).toHaveBeenCalledWith("claude");
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("base_url_ping_ms", {
-      baseUrl: "https://api.example.com",
-    });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("provider_set_enabled", {
-      providerId: 1,
-      enabled: true,
-    });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("provider_delete", {
-      providerId: 1,
-    });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("providers_reorder", {
-      cliKey: "claude",
-      orderedProviderIds: [2, 1],
-    });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("provider_claude_terminal_launch_command", {
-      providerId: 5,
-    });
+    expect(commands.baseUrlPingMs).toHaveBeenCalledWith("https://api.example.com");
+    expect(commands.providerSetEnabled).toHaveBeenCalledWith(1, true);
+    expect(commands.providerDelete).toHaveBeenCalledWith(1);
+    expect(commands.providersReorder).toHaveBeenCalledWith("claude", [2, 1]);
+    expect(commands.providerClaudeTerminalLaunchCommand).toHaveBeenCalledWith(5);
   });
 
-  it("providerGetApiKey delegates to invokeService", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce("sk-test-key" as any);
+  it("provider duplicate and clipboard copy both use generated ipc", async () => {
+    vi.mocked(commands.providerDuplicate).mockResolvedValueOnce({
+      status: "ok",
+      data: { id: 42 } as any,
+    });
+    vi.mocked(commands.providerCopyApiKeyToClipboard).mockResolvedValueOnce({
+      status: "ok",
+      data: true as any,
+    });
 
-    const result = await providerGetApiKey(42);
-    expect(result).toBe("sk-test-key");
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("provider_get_api_key", { providerId: 42 });
+    const duplicated = await providerDuplicate(42);
+    const copied = await providerCopyApiKeyToClipboard(42);
+
+    expect(duplicated).toEqual({ id: 42 });
+    expect(copied).toBe(true);
+    expect(commands.providerDuplicate).toHaveBeenCalledWith(42);
+    expect(commands.providerCopyApiKeyToClipboard).toHaveBeenCalledWith(42);
   });
 
-  it("providerOAuthStartFlow calls invokeTauriOrNull directly", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce({
-      success: true,
-      provider_type: "google",
-      expires_at: 1700000000,
+  it("providerOAuthStartFlow uses generated ipc", async () => {
+    vi.mocked(commands.providerOauthStartFlow).mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        success: true,
+        provider_type: "google",
+        expires_at: 1700000000,
+        provider_id: 10,
+      } as any,
     });
 
     const result = await providerOAuthStartFlow("claude", 10);
@@ -205,54 +222,43 @@ describe("services/providers/providers", () => {
       success: true,
       provider_type: "google",
       expires_at: 1700000000,
+      provider_id: 10,
     });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith(
-      "provider_oauth_start_flow",
-      {
-        cliKey: "claude",
-        providerId: 10,
-      },
-      {
-        timeoutMs: 0,
-      }
-    );
+    expect(commands.providerOauthStartFlow).toHaveBeenCalledWith("claude", 10);
   });
 
-  it("providerOAuthStartFlow returns null when tauri is absent", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce(null);
-
-    const result = await providerOAuthStartFlow("codex", 1);
-    expect(result).toBeNull();
-  });
-
-  it("providerOAuthRefresh calls invokeTauriOrNull directly", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce({
-      success: true,
-      expires_at: 1700001000,
+  it("providerOAuthRefresh uses generated ipc", async () => {
+    vi.mocked(commands.providerOauthRefresh).mockResolvedValueOnce({
+      status: "ok",
+      data: { success: true, expires_at: 1700001000 } as any,
     });
 
     const result = await providerOAuthRefresh(20);
     expect(result).toEqual({ success: true, expires_at: 1700001000 });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("provider_oauth_refresh", { providerId: 20 });
+    expect(commands.providerOauthRefresh).toHaveBeenCalledWith(20);
   });
 
-  it("providerOAuthDisconnect calls invokeTauriOrNull directly", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce({ success: true });
+  it("providerOAuthDisconnect uses generated ipc", async () => {
+    vi.mocked(commands.providerOauthDisconnect).mockResolvedValueOnce({
+      status: "ok",
+      data: { success: true } as any,
+    });
 
     const result = await providerOAuthDisconnect(30);
     expect(result).toEqual({ success: true });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("provider_oauth_disconnect", {
-      providerId: 30,
-    });
+    expect(commands.providerOauthDisconnect).toHaveBeenCalledWith(30);
   });
 
-  it("providerOAuthStatus calls invokeTauriOrNull directly", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce({
-      connected: true,
-      provider_type: "google",
-      email: "test@example.com",
-      expires_at: 1700002000,
-      has_refresh_token: true,
+  it("providerOAuthStatus uses generated ipc", async () => {
+    vi.mocked(commands.providerOauthStatus).mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        connected: true,
+        provider_type: "google",
+        email: "test@example.com",
+        expires_at: 1700002000,
+        has_refresh_token: true,
+      } as any,
     });
 
     const result = await providerOAuthStatus(40);
@@ -263,15 +269,17 @@ describe("services/providers/providers", () => {
       expires_at: 1700002000,
       has_refresh_token: true,
     });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("provider_oauth_status", { providerId: 40 });
+    expect(commands.providerOauthStatus).toHaveBeenCalledWith(40);
   });
 
-  it("providerOAuthFetchLimits calls invokeTauriOrNull directly", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce({
-      limit_short_label: "1h",
-      limit_5h_text: "100 requests",
-      limit_weekly_text: "1000 requests",
-      raw_json: { key: "value" },
+  it("providerOAuthFetchLimits uses generated ipc", async () => {
+    vi.mocked(commands.providerOauthFetchLimits).mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        limit_short_label: "1h",
+        limit_5h_text: "100 requests",
+        limit_weekly_text: "1000 requests",
+      } as any,
     });
 
     const result = await providerOAuthFetchLimits(50);
@@ -279,10 +287,7 @@ describe("services/providers/providers", () => {
       limit_short_label: "1h",
       limit_5h_text: "100 requests",
       limit_weekly_text: "1000 requests",
-      raw_json: { key: "value" },
     });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("provider_oauth_fetch_limits", {
-      providerId: 50,
-    });
+    expect(commands.providerOauthFetchLimits).toHaveBeenCalledWith(50);
   });
 });

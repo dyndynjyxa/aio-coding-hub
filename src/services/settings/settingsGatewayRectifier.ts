@@ -1,5 +1,6 @@
-import { invokeService } from "../invokeServiceCommand";
+import { commands } from "../../generated/bindings";
 import type { AppSettings } from "./settings";
+import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
 
 export type GatewayRectifierSettingsPatch = {
   verbose_provider_error: boolean;
@@ -17,7 +18,7 @@ export type GatewayRectifierSettingsPatch = {
 };
 
 export async function settingsGatewayRectifierSet(input: GatewayRectifierSettingsPatch) {
-  return invokeService<AppSettings>("保存网关修复配置失败", "settings_gateway_rectifier_set", {
+  const update = {
     verboseProviderError: input.verbose_provider_error,
     interceptAnthropicWarmupRequests: input.intercept_anthropic_warmup_requests,
     enableThinkingSignatureRectifier: input.enable_thinking_signature_rectifier,
@@ -30,5 +31,13 @@ export async function settingsGatewayRectifierSet(input: GatewayRectifierSetting
     responseFixerFixTruncatedJson: input.response_fixer_fix_truncated_json,
     responseFixerMaxJsonDepth: input.response_fixer_max_json_depth,
     responseFixerMaxFixSize: input.response_fixer_max_fix_size,
+  };
+
+  return invokeGeneratedIpc<AppSettings>({
+    title: "保存网关修复配置失败",
+    cmd: "settings_gateway_rectifier_set",
+    args: { update },
+    invoke: () =>
+      commands.settingsGatewayRectifierSet(update) as Promise<GeneratedCommandResult<AppSettings>>,
   });
 }

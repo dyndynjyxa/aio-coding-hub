@@ -156,7 +156,7 @@ describe("query/cost", () => {
   it("returns null when any underlying call returns null", async () => {
     setTauriRuntime();
 
-    vi.mocked(costSummaryV1).mockResolvedValue(null);
+    vi.mocked(costSummaryV1).mockResolvedValue(null as never);
     vi.mocked(costTrendV1).mockResolvedValue([]);
     vi.mocked(costBreakdownProviderV1).mockResolvedValue([]);
     vi.mocked(costBreakdownModelV1).mockResolvedValue([]);

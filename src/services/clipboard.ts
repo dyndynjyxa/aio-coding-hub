@@ -1,4 +1,4 @@
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { writeDesktopClipboardText } from "./desktop/clipboard";
 
 async function copyTextFallback(text: string) {
   const textarea = document.createElement("textarea");
@@ -21,7 +21,7 @@ async function copyTextFallback(text: string) {
 
 export async function copyText(text: string) {
   try {
-    await writeText(text);
+    await writeDesktopClipboardText(text);
     return;
   } catch {
     // fallback below

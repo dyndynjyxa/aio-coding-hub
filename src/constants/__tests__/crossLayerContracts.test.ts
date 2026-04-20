@@ -52,6 +52,9 @@ describe("cross-layer contracts", () => {
     expect(extractRustStringConst(gatewayEventsSource, "GATEWAY_REQUEST_EVENT_NAME")).toBe(
       gatewayEventNames.request
     );
+    expect(extractRustStringConst(gatewayEventsSource, "GATEWAY_REQUEST_SIGNAL_EVENT_NAME")).toBe(
+      gatewayEventNames.requestSignal
+    );
     expect(extractRustStringConst(gatewayEventsSource, "GATEWAY_LOG_EVENT_NAME")).toBe(
       gatewayEventNames.log
     );
@@ -72,14 +75,23 @@ describe("cross-layer contracts", () => {
     ]);
   });
 
-  it("keeps upstream proxy fields in the generated settings contract", () => {
+  it("keeps request detail events gated behind the summary signal path", () => {
+    expect(gatewayEventsSource).toContain("emit_request_signal(");
+    expect(gatewayEventsSource).toContain("if !should_emit_gateway_detail_event(app) {");
+    expect(gatewayEventsSource).toMatch(
+      /emit_request_signal\([\s\S]+?if !should_emit_gateway_detail_event\(app\) \{\s+return;\s+\}/
+    );
+  });
+
+  it("keeps secret-safe upstream proxy fields in the generated settings contract", () => {
     expect(bindingsSource).toContain("upstream_proxy_enabled");
     expect(bindingsSource).toContain("upstream_proxy_url");
     expect(bindingsSource).toContain("upstream_proxy_username");
-    expect(bindingsSource).toContain("upstream_proxy_password");
+    expect(bindingsSource).toContain("upstream_proxy_password_configured");
     expect(bindingsSource).toContain("upstreamProxyEnabled");
     expect(bindingsSource).toContain("upstreamProxyUrl");
     expect(bindingsSource).toContain("upstreamProxyUsername");
-    expect(bindingsSource).toContain("upstreamProxyPassword");
+    expect(bindingsSource).toContain("upstreamProxyPassword: SensitiveStringUpdate | null");
+    expect(bindingsSource).toContain("export type SettingsMutationResult");
   });
 });

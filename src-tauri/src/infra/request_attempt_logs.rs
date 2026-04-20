@@ -5,7 +5,7 @@ use crate::shared::error::db_err;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct RequestAttemptLog {
     pub id: i64,
     pub trace_id: String,

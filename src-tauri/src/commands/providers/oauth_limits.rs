@@ -6,12 +6,22 @@ use super::oauth::{
     should_retry_oauth_limits_after_refresh,
 };
 
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
+pub(crate) struct ProviderOAuthLimitsResult {
+    pub limit_short_label: Option<String>,
+    pub limit_5h_text: Option<String>,
+    pub limit_weekly_text: Option<String>,
+    pub limit_5h_reset_at: Option<i64>,
+    pub limit_weekly_reset_at: Option<i64>,
+}
+
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn provider_oauth_fetch_limits(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
     provider_id: i64,
-) -> Result<serde_json::Value, String> {
+) -> Result<ProviderOAuthLimitsResult, String> {
     let db = ensure_db_ready(app, db_state.inner()).await?;
     let mut details = blocking::run("provider_oauth_fetch_limits_load", {
         let db = db.clone();
@@ -105,14 +115,13 @@ pub(crate) async fn provider_oauth_fetch_limits(
             (None, None, None, None)
         };
 
-    Ok(serde_json::json!({
-        "limit_short_label": limit_short_label,
-        "limit_5h_text": limit_5h_text,
-        "limit_weekly_text": limit_weekly_text,
-        "limit_5h_reset_at": limit_5h_reset_at,
-        "limit_weekly_reset_at": limit_weekly_reset_at,
-        "raw_json": limits.raw_json,
-    }))
+    Ok(ProviderOAuthLimitsResult {
+        limit_short_label,
+        limit_5h_text,
+        limit_weekly_text,
+        limit_5h_reset_at,
+        limit_weekly_reset_at,
+    })
 }
 
 fn default_oauth_short_window_label(cli_key: &str) -> Option<String> {

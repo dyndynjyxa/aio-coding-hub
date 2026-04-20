@@ -10,9 +10,11 @@ import type { UseProviderEditorFormReturn } from "./useProviderEditorForm";
 
 export function ApiKeySection(props: { form: UseProviderEditorFormReturn }) {
   const {
+    mode,
     register,
     setValue,
     saving,
+    copyingApiKey,
     tags,
     setTags,
     tagInput,
@@ -25,10 +27,21 @@ export function ApiKeySection(props: { form: UseProviderEditorFormReturn }) {
     setPingingAll,
     newBaseUrlRow,
     apiKeyField,
-    fetchingApiKey,
+    apiKeyConfigured,
+    apiKeyValue,
     costMultiplierValue,
     copyApiKey,
   } = props.form;
+
+  const canCopyApiKey = Boolean(apiKeyValue.trim()) || (mode === "edit" && apiKeyConfigured);
+  const apiKeyHint =
+    mode === "edit"
+      ? apiKeyConfigured
+        ? "已配置。留空表示不改，输入新值表示替换。"
+        : "当前未配置。请输入新 API Key 后保存。"
+      : undefined;
+  const apiKeyPlaceholder =
+    mode === "edit" && apiKeyConfigured ? "留空表示不改；输入新值表示替换" : "sk-…";
 
   return (
     <>
@@ -82,18 +95,23 @@ export function ApiKeySection(props: { form: UseProviderEditorFormReturn }) {
       </FormField>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <FormField label="API Key / Token">
+        <FormField label="API Key / Token" hint={apiKeyHint}>
           <div className="flex items-center gap-2">
-            <Input {...apiKeyField} type="text" placeholder="sk-…" autoComplete="off" />
+            <Input
+              {...apiKeyField}
+              type="text"
+              placeholder={apiKeyPlaceholder}
+              autoComplete="off"
+            />
             <Button
               type="button"
               onClick={() => void copyApiKey()}
               variant="secondary"
               size="sm"
               className="h-9 shrink-0"
-              disabled={fetchingApiKey}
+              disabled={saving || copyingApiKey || !canCopyApiKey}
             >
-              复制
+              {copyingApiKey ? "复制中…" : "复制"}
             </Button>
           </div>
         </FormField>

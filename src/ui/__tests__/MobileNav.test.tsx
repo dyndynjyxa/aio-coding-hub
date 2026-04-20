@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { MobileNav, MobileHeader } from "../MobileNav";
 import { AIO_RELEASES_URL } from "../../constants/urls";
+import { tauriOpenUrl } from "../../test/mocks/tauri";
 
 const gatewayMetaRef = vi.hoisted(() => ({
   current: { gatewayAvailable: "checking", gateway: null, preferredPort: 37123 } as any,
@@ -36,10 +37,6 @@ vi.mock("../../hooks/useUpdateMeta", () => ({
 }));
 vi.mock("../../hooks/useDevPreviewData", () => ({
   useDevPreviewData: () => devPreviewRef.current,
-}));
-
-vi.mock("@tauri-apps/plugin-opener", () => ({
-  openUrl: vi.fn(),
 }));
 
 describe("ui/MobileNav", () => {
@@ -170,8 +167,6 @@ describe("ui/MobileNav", () => {
   });
 
   it("shows NEW button and calls openReleasesUrl when hasUpdate and portable", async () => {
-    const { openUrl } = await import("@tauri-apps/plugin-opener");
-
     gatewayMetaRef.current = {
       gatewayAvailable: "available",
       gateway: { running: false, port: null },
@@ -183,7 +178,7 @@ describe("ui/MobileNav", () => {
       updateCandidate: { version: "0.0.0" },
     };
 
-    vi.mocked(openUrl).mockRejectedValue(new Error("boom"));
+    vi.mocked(tauriOpenUrl).mockRejectedValue(new Error("boom"));
     const windowOpen = vi.spyOn(window, "open").mockImplementation(() => null as any);
 
     const onClose = vi.fn();
@@ -196,7 +191,7 @@ describe("ui/MobileNav", () => {
     fireEvent.click(screen.getByRole("button", { name: "NEW" }));
 
     await waitFor(() => {
-      expect(openUrl).toHaveBeenCalledWith(AIO_RELEASES_URL);
+      expect(tauriOpenUrl).toHaveBeenCalledWith(AIO_RELEASES_URL);
       expect(windowOpen).toHaveBeenCalledWith(AIO_RELEASES_URL, "_blank", "noopener,noreferrer");
     });
     // portable path does NOT call updateDialogSetOpen

@@ -1,14 +1,18 @@
 use crate::{circuit_breaker, notice, settings, usage};
 use serde::Serialize;
+use tauri::Manager;
 
 pub(crate) const GATEWAY_STATUS_EVENT_NAME: &str = "gateway:status";
 pub(crate) const GATEWAY_REQUEST_START_EVENT_NAME: &str = "gateway:request_start";
 pub(crate) const GATEWAY_ATTEMPT_EVENT_NAME: &str = "gateway:attempt";
 pub(crate) const GATEWAY_REQUEST_EVENT_NAME: &str = "gateway:request";
+pub(crate) const GATEWAY_REQUEST_SIGNAL_EVENT_NAME: &str = "gateway:request_signal";
 pub(crate) const GATEWAY_LOG_EVENT_NAME: &str = "gateway:log";
 pub(crate) const GATEWAY_CIRCUIT_EVENT_NAME: &str = "gateway:circuit";
 
 use crate::app::heartbeat_watchdog::gated_emit;
+
+const MAIN_WINDOW_LABEL: &str = "main";
 
 pub(in crate::gateway) mod decision_chain {
     pub(in crate::gateway) const SELECTION_METHOD_SESSION_REUSE: &str = "session_reuse";
@@ -119,6 +123,16 @@ struct GatewayRequestStartEvent {
 }
 
 #[derive(Debug, Serialize, Clone)]
+struct GatewayRequestSignalEvent {
+    trace_id: String,
+    cli_key: String,
+    session_id: Option<String>,
+    requested_model: Option<String>,
+    phase: &'static str,
+    ts: i64,
+}
+
+#[derive(Debug, Serialize, Clone)]
 pub(super) struct GatewayAttemptEvent {
     pub(super) trace_id: String,
     pub(super) cli_key: String,
@@ -186,6 +200,36 @@ pub(crate) fn emit_gateway_log(
     gated_emit(app, GATEWAY_LOG_EVENT_NAME, payload);
 }
 
+fn should_emit_gateway_detail_event(app: &tauri::AppHandle) -> bool {
+    let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
+        return true;
+    };
+
+    let visible = window.is_visible().unwrap_or(true);
+    let minimized = window.is_minimized().unwrap_or(false);
+    visible && !minimized
+}
+
+fn emit_request_signal(
+    app: &tauri::AppHandle,
+    trace_id: String,
+    cli_key: String,
+    session_id: Option<String>,
+    requested_model: Option<String>,
+    phase: &'static str,
+    ts: i64,
+) {
+    let payload = GatewayRequestSignalEvent {
+        trace_id,
+        cli_key,
+        session_id,
+        requested_model,
+        phase,
+        ts,
+    };
+    gated_emit(app, GATEWAY_REQUEST_SIGNAL_EVENT_NAME, payload);
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn emit_request_event(
     app: &tauri::AppHandle,
@@ -204,6 +248,20 @@ pub(super) fn emit_request_event(
     attempts: Vec<FailoverAttempt>,
     usage: Option<usage::UsageMetrics>,
 ) {
+    emit_request_signal(
+        app,
+        trace_id.clone(),
+        cli_key.clone(),
+        session_id.clone(),
+        requested_model.clone(),
+        "complete",
+        crate::gateway::util::now_unix_seconds() as i64,
+    );
+
+    if !should_emit_gateway_detail_event(app) {
+        return;
+    }
+
     let usage = usage.unwrap_or_default();
     let payload = GatewayRequestEvent {
         trace_id,
@@ -243,6 +301,20 @@ pub(super) fn emit_request_start_event(
     requested_model: Option<String>,
     ts: i64,
 ) {
+    emit_request_signal(
+        app,
+        trace_id.clone(),
+        cli_key.clone(),
+        session_id.clone(),
+        requested_model.clone(),
+        "start",
+        ts,
+    );
+
+    if !should_emit_gateway_detail_event(app) {
+        return;
+    }
+
     let payload = GatewayRequestStartEvent {
         trace_id,
         cli_key,
@@ -257,6 +329,9 @@ pub(super) fn emit_request_start_event(
 }
 
 pub(super) fn emit_attempt_event(app: &tauri::AppHandle, payload: GatewayAttemptEvent) {
+    if !should_emit_gateway_detail_event(app) {
+        return;
+    }
     gated_emit(app, GATEWAY_ATTEMPT_EVENT_NAME, payload);
 }
 

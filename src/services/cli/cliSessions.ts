@@ -1,4 +1,5 @@
-import { invokeService } from "../invokeServiceCommand";
+import { commands } from "../../generated/bindings";
+import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
 
 export type CliSessionsSource = "claude" | "codex";
 
@@ -68,14 +69,18 @@ export type CliSessionsPaginatedMessages = {
 };
 
 export async function cliSessionsProjectsList(source: CliSessionsSource, wslDistro?: string) {
-  return invokeService<CliSessionsProjectSummary[]>(
-    "读取会话项目列表失败",
-    "cli_sessions_projects_list",
-    {
+  return invokeGeneratedIpc<CliSessionsProjectSummary[]>({
+    title: "读取会话项目列表失败",
+    cmd: "cli_sessions_projects_list",
+    args: {
       source,
       wslDistro: wslDistro ?? null,
-    }
-  );
+    },
+    invoke: () =>
+      commands.cliSessionsProjectsList(source, wslDistro ?? null) as Promise<
+        GeneratedCommandResult<CliSessionsProjectSummary[]>
+      >,
+  });
 }
 
 export async function cliSessionsSessionsList(
@@ -83,15 +88,19 @@ export async function cliSessionsSessionsList(
   projectId: string,
   wslDistro?: string
 ) {
-  return invokeService<CliSessionsSessionSummary[]>(
-    "读取会话列表失败",
-    "cli_sessions_sessions_list",
-    {
+  return invokeGeneratedIpc<CliSessionsSessionSummary[]>({
+    title: "读取会话列表失败",
+    cmd: "cli_sessions_sessions_list",
+    args: {
       source,
       projectId,
       wslDistro: wslDistro ?? null,
-    }
-  );
+    },
+    invoke: () =>
+      commands.cliSessionsSessionsList(source, projectId, wslDistro ?? null) as Promise<
+        GeneratedCommandResult<CliSessionsSessionSummary[]>
+      >,
+  });
 }
 
 export async function cliSessionsMessagesGet(input: {
@@ -102,18 +111,27 @@ export async function cliSessionsMessagesGet(input: {
   from_end: boolean;
   wsl_distro?: string;
 }) {
-  return invokeService<CliSessionsPaginatedMessages>(
-    "读取会话消息失败",
-    "cli_sessions_messages_get",
-    {
+  return invokeGeneratedIpc<CliSessionsPaginatedMessages>({
+    title: "读取会话消息失败",
+    cmd: "cli_sessions_messages_get",
+    args: {
       source: input.source,
       filePath: input.file_path,
       page: input.page,
       pageSize: input.page_size,
       fromEnd: input.from_end,
       wslDistro: input.wsl_distro ?? null,
-    }
-  );
+    },
+    invoke: () =>
+      commands.cliSessionsMessagesGet(
+        input.source,
+        input.file_path,
+        input.page,
+        input.page_size,
+        input.from_end,
+        input.wsl_distro ?? null
+      ) as Promise<GeneratedCommandResult<CliSessionsPaginatedMessages>>,
+  });
 }
 
 export async function cliSessionsSessionDelete(input: {
@@ -121,10 +139,20 @@ export async function cliSessionsSessionDelete(input: {
   file_paths: string[];
   wsl_distro?: string;
 }) {
-  return invokeService<string[]>("删除会话失败", "cli_sessions_session_delete", {
-    source: input.source,
-    filePaths: input.file_paths,
-    wslDistro: input.wsl_distro ?? null,
+  return invokeGeneratedIpc<string[]>({
+    title: "删除会话失败",
+    cmd: "cli_sessions_session_delete",
+    args: {
+      source: input.source,
+      filePaths: input.file_paths,
+      wslDistro: input.wsl_distro ?? null,
+    },
+    invoke: () =>
+      commands.cliSessionsSessionDelete(
+        input.source,
+        input.file_paths,
+        input.wsl_distro ?? null
+      ) as Promise<GeneratedCommandResult<string[]>>,
   });
 }
 
@@ -132,14 +160,18 @@ export async function cliSessionsFolderLookupByIds(
   items: CliSessionsFolderLookupInput[],
   wslDistro?: string
 ) {
-  return invokeService<CliSessionsFolderLookupEntry[]>(
-    "读取会话文件夹信息失败",
-    "cli_sessions_folder_lookup_by_ids",
-    {
+  return invokeGeneratedIpc<CliSessionsFolderLookupEntry[]>({
+    title: "读取会话文件夹信息失败",
+    cmd: "cli_sessions_folder_lookup_by_ids",
+    args: {
       items,
       wslDistro: wslDistro ?? null,
-    }
-  );
+    },
+    invoke: () =>
+      commands.cliSessionsFolderLookupByIds(items as any, wslDistro ?? null) as Promise<
+        GeneratedCommandResult<CliSessionsFolderLookupEntry[]>
+      >,
+  });
 }
 
 /**

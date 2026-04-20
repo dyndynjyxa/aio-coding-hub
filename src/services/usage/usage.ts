@@ -1,4 +1,5 @@
-import { invokeService } from "../invokeServiceCommand";
+import { commands } from "../../generated/bindings";
+import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
 import type { CliKey } from "../providers/providers";
 
 export type UsageRange = "today" | "last7" | "last30" | "month" | "all";
@@ -108,9 +109,17 @@ function buildQueryParamsV2(period: UsagePeriod, input?: UsageQueryInputV2) {
 }
 
 export async function usageSummary(range: UsageRange, input?: { cliKey?: CliKey | null }) {
-  return invokeService<UsageSummary>("读取用量汇总失败", "usage_summary", {
-    range,
-    cliKey: input?.cliKey ?? null,
+  return invokeGeneratedIpc<UsageSummary>({
+    title: "读取用量汇总失败",
+    cmd: "usage_summary",
+    args: {
+      range,
+      cliKey: input?.cliKey ?? null,
+    },
+    invoke: () =>
+      commands.usageSummary(range, input?.cliKey ?? null) as Promise<
+        GeneratedCommandResult<UsageSummary>
+      >,
   });
 }
 
@@ -118,35 +127,62 @@ export async function usageLeaderboardProvider(
   range: UsageRange,
   input?: { cliKey?: CliKey | null; limit?: number }
 ) {
-  return invokeService<UsageProviderRow[]>(
-    "读取按供应商用量排行失败",
-    "usage_leaderboard_provider",
-    {
+  return invokeGeneratedIpc<UsageProviderRow[]>({
+    title: "读取按供应商用量排行失败",
+    cmd: "usage_leaderboard_provider",
+    args: {
       range,
       cliKey: input?.cliKey ?? null,
       limit: input?.limit,
-    }
-  );
+    },
+    invoke: () =>
+      commands.usageLeaderboardProvider(
+        range,
+        input?.cliKey ?? null,
+        input?.limit ?? null
+      ) as Promise<GeneratedCommandResult<UsageProviderRow[]>>,
+  });
 }
 
 export async function usageLeaderboardDay(
   range: UsageRange,
   input?: { cliKey?: CliKey | null; limit?: number }
 ) {
-  return invokeService<UsageDayRow[]>("读取按日期用量排行失败", "usage_leaderboard_day", {
-    range,
-    cliKey: input?.cliKey ?? null,
-    limit: input?.limit,
+  return invokeGeneratedIpc<UsageDayRow[]>({
+    title: "读取按日期用量排行失败",
+    cmd: "usage_leaderboard_day",
+    args: {
+      range,
+      cliKey: input?.cliKey ?? null,
+      limit: input?.limit,
+    },
+    invoke: () =>
+      commands.usageLeaderboardDay(range, input?.cliKey ?? null, input?.limit ?? null) as Promise<
+        GeneratedCommandResult<UsageDayRow[]>
+      >,
   });
 }
 
 export async function usageHourlySeries(days: number) {
-  return invokeService<UsageHourlyRow[]>("读取小时用量序列失败", "usage_hourly_series", { days });
+  return invokeGeneratedIpc<UsageHourlyRow[]>({
+    title: "读取小时用量序列失败",
+    cmd: "usage_hourly_series",
+    args: { days },
+    invoke: () =>
+      commands.usageHourlySeries(days) as Promise<GeneratedCommandResult<UsageHourlyRow[]>>,
+  });
 }
 
 export async function usageSummaryV2(period: UsagePeriod, input?: UsageQueryInputV2) {
-  return invokeService<UsageSummary>("读取用量汇总失败", "usage_summary_v2", {
-    params: buildQueryParamsV2(period, input),
+  const params = buildQueryParamsV2(period, input);
+  return invokeGeneratedIpc<UsageSummary>({
+    title: "读取用量汇总失败",
+    cmd: "usage_summary_v2",
+    args: {
+      params,
+    },
+    invoke: () =>
+      commands.usageSummaryV2(params as any) as Promise<GeneratedCommandResult<UsageSummary>>,
   });
 }
 
@@ -155,10 +191,19 @@ export async function usageLeaderboardV2(
   period: UsagePeriod,
   input?: UsageQueryInputV2 & { limit?: number | null }
 ) {
-  return invokeService<UsageLeaderboardRow[]>("读取用量排行榜失败", "usage_leaderboard_v2", {
-    scope,
-    params: buildQueryParamsV2(period, input),
-    limit: input?.limit,
+  const params = buildQueryParamsV2(period, input);
+  return invokeGeneratedIpc<UsageLeaderboardRow[]>({
+    title: "读取用量排行榜失败",
+    cmd: "usage_leaderboard_v2",
+    args: {
+      scope,
+      params,
+      limit: input?.limit,
+    },
+    invoke: () =>
+      commands.usageLeaderboardV2(scope, params as any, input?.limit ?? null) as Promise<
+        GeneratedCommandResult<UsageLeaderboardRow[]>
+      >,
   });
 }
 
@@ -166,12 +211,17 @@ export async function usageProviderCacheRateTrendV1(
   period: UsagePeriod,
   input?: UsageQueryInputV2 & { limit?: number | null }
 ) {
-  return invokeService<UsageProviderCacheRateTrendRowV1[]>(
-    "读取供应商缓存命中趋势失败",
-    "usage_provider_cache_rate_trend_v1",
-    {
-      params: buildQueryParamsV2(period, input),
+  const params = buildQueryParamsV2(period, input);
+  return invokeGeneratedIpc<UsageProviderCacheRateTrendRowV1[]>({
+    title: "读取供应商缓存命中趋势失败",
+    cmd: "usage_provider_cache_rate_trend_v1",
+    args: {
+      params,
       limit: input?.limit,
-    }
-  );
+    },
+    invoke: () =>
+      commands.usageProviderCacheRateTrendV1(params as any, input?.limit ?? null) as Promise<
+        GeneratedCommandResult<UsageProviderCacheRateTrendRowV1[]>
+      >,
+  });
 }

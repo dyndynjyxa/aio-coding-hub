@@ -7,18 +7,13 @@ import { HomeRequestLogsPanel } from "../components/home/HomeRequestLogsPanel";
 import { RequestLogDetailDialog } from "../components/home/RequestLogDetailDialog";
 import { CLI_FILTER_ITEMS, type CliFilterKey } from "../constants/clis";
 import { GatewayErrorCodes } from "../constants/gatewayErrorCodes";
-import { useDocumentVisibility } from "../hooks/useDocumentVisibility";
+import { useRequestLogsFeed } from "../hooks/useRequestLogsFeed";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Input } from "../ui/Input";
 import { PageHeader } from "../ui/PageHeader";
 import { Switch } from "../ui/Switch";
 import { TabList } from "../ui/TabList";
-import {
-  useRequestLogsIncrementalPollQuery,
-  useRequestLogsListAllQuery,
-} from "../query/requestLogs";
-import { useWindowForeground } from "../hooks/useWindowForeground";
 import { useTraceStore } from "../services/gateway/traceStore";
 
 const LOGS_PAGE_LIMIT = 200;
@@ -60,7 +55,6 @@ function buildStatusPredicate(query: string): StatusPredicate | null {
 export function LogsPage() {
   const { traces } = useTraceStore();
   const showCustomTooltip = true;
-  const foregroundActive = useDocumentVisibility();
 
   const [cliKey, setCliKey] = useState<CliFilterKey>("all");
   const [statusFilter, setStatusFilter] = useState("");
@@ -69,30 +63,18 @@ export function LogsPage() {
   const [autoRefresh, setAutoRefresh] = useState(true);
 
   const [selectedLogId, setSelectedLogId] = useState<number | null>(null);
-  const incrementalPollingEnabled = autoRefresh && foregroundActive;
-  const requestLogsQuery = useRequestLogsListAllQuery(LOGS_PAGE_LIMIT);
-  const incrementalPollQuery = useRequestLogsIncrementalPollQuery(LOGS_PAGE_LIMIT, {
-    enabled: incrementalPollingEnabled,
-    refetchIntervalMs: incrementalPollingEnabled ? AUTO_REFRESH_INTERVAL_MS : false,
+  const {
+    requestLogs,
+    requestLogsLoading,
+    requestLogsRefreshing,
+    requestLogsAvailable,
+    refreshRequestLogs,
+  } = useRequestLogsFeed({
+    limit: LOGS_PAGE_LIMIT,
+    liveUpdatesEnabled: autoRefresh,
+    liveUpdateIntervalMs: AUTO_REFRESH_INTERVAL_MS,
+    refreshOnForeground: autoRefresh,
   });
-
-  useWindowForeground({
-    enabled: true,
-    throttleMs: 1000,
-    onForeground: () => {
-      if (autoRefresh) {
-        void incrementalPollQuery.refetch();
-      }
-    },
-  });
-
-  const requestLogs = useMemo(() => requestLogsQuery.data ?? [], [requestLogsQuery.data]);
-  const requestLogsLoading = requestLogsQuery.isLoading;
-  const requestLogsRefreshing =
-    (requestLogsQuery.isFetching && !requestLogsQuery.isLoading) || incrementalPollQuery.isFetching;
-  const requestLogsAvailable: boolean | null = requestLogsQuery.isLoading
-    ? null
-    : requestLogsQuery.data != null;
 
   const statusPredicate = useMemo(() => buildStatusPredicate(statusFilter), [statusFilter]);
   const statusFilterValid = statusFilter.trim().length === 0 || statusPredicate != null;
@@ -250,7 +232,7 @@ export function LogsPage() {
         requestLogsLoading={requestLogsLoading}
         requestLogsRefreshing={requestLogsRefreshing}
         requestLogsAvailable={requestLogsAvailable}
-        onRefreshRequestLogs={() => void requestLogsQuery.refetch()}
+        onRefreshRequestLogs={() => void refreshRequestLogs()}
         selectedLogId={selectedLogId}
         onSelectLogId={setSelectedLogId}
       />

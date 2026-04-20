@@ -178,9 +178,9 @@ describe("query/cliManager", () => {
   it("mutation hooks keep cache unchanged when service returns null", async () => {
     setTauriRuntime();
 
-    vi.mocked(cliManagerClaudeSettingsSet).mockResolvedValue(null);
-    vi.mocked(cliManagerCodexConfigSet).mockResolvedValue(null);
-    vi.mocked(cliManagerCodexConfigTomlSet).mockResolvedValue(null);
+    vi.mocked(cliManagerClaudeSettingsSet).mockResolvedValue(null as never);
+    vi.mocked(cliManagerCodexConfigSet).mockResolvedValue(null as never);
+    vi.mocked(cliManagerCodexConfigTomlSet).mockResolvedValue(null as never);
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);

@@ -84,6 +84,11 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<ProviderSummary, rusqlite::
         stream_idle_timeout_seconds: parse_positive_optional_u32(
             row.get("stream_idle_timeout_seconds").unwrap_or(None),
         ),
+        api_key_configured: row
+            .get::<_, Option<i64>>("api_key_configured")
+            .unwrap_or(None)
+            .unwrap_or(0)
+            != 0,
     })
 }
 
@@ -122,7 +127,8 @@ SELECT
   oauth_last_error,
   source_provider_id,
   bridge_type,
-  stream_idle_timeout_seconds
+  stream_idle_timeout_seconds,
+  CASE WHEN COALESCE(api_key_plaintext, '') = '' THEN 0 ELSE 1 END AS api_key_configured
 FROM providers
 WHERE id = ?1
 "#,
@@ -378,7 +384,8 @@ SELECT
   oauth_last_error,
   source_provider_id,
   bridge_type,
-  stream_idle_timeout_seconds
+  stream_idle_timeout_seconds,
+  CASE WHEN COALESCE(api_key_plaintext, '') = '' THEN 0 ELSE 1 END AS api_key_configured
 FROM providers
 WHERE cli_key = ?1
 ORDER BY sort_order ASC, id DESC

@@ -4,6 +4,7 @@ use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::{blocking, workspace_switch, workspaces};
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn workspaces_list(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -18,6 +19,7 @@ pub(crate) async fn workspaces_list(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn workspace_create(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -34,6 +36,7 @@ pub(crate) async fn workspace_create(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn workspace_rename(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -49,6 +52,7 @@ pub(crate) async fn workspace_rename(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn workspace_delete(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -63,6 +67,7 @@ pub(crate) async fn workspace_delete(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn workspace_preview(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -77,6 +82,7 @@ pub(crate) async fn workspace_preview(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn workspace_apply(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,

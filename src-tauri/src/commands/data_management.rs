@@ -4,6 +4,7 @@ use crate::app_state::{ensure_db_ready, prepare_db_reset, DbInitState, GatewaySt
 use crate::{app_paths, blocking, data_management};
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn app_data_dir_get(app: tauri::AppHandle) -> Result<String, String> {
     blocking::run(
         "app_data_dir_get",
@@ -17,6 +18,7 @@ pub(crate) async fn app_data_dir_get(app: tauri::AppHandle) -> Result<String, St
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn db_disk_usage_get(
     app: tauri::AppHandle,
 ) -> Result<data_management::DbDiskUsage, String> {
@@ -28,6 +30,7 @@ pub(crate) async fn db_disk_usage_get(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn request_logs_clear_all(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -41,6 +44,7 @@ pub(crate) async fn request_logs_clear_all(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn app_data_reset(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,

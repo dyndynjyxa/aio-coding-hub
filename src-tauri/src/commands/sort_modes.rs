@@ -5,6 +5,7 @@ use crate::shared::mutex_ext::MutexExt;
 use crate::{blocking, sort_modes};
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn sort_modes_list(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -16,6 +17,7 @@ pub(crate) async fn sort_modes_list(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn sort_mode_create(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -30,6 +32,7 @@ pub(crate) async fn sort_mode_create(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn sort_mode_rename(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -45,6 +48,7 @@ pub(crate) async fn sort_mode_rename(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn sort_mode_delete(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -63,6 +67,7 @@ pub(crate) async fn sort_mode_delete(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn sort_mode_active_list(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -76,6 +81,7 @@ pub(crate) async fn sort_mode_active_list(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn sort_mode_active_set(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -99,6 +105,7 @@ pub(crate) async fn sort_mode_active_set(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn sort_mode_providers_list(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -114,6 +121,7 @@ pub(crate) async fn sort_mode_providers_list(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn sort_mode_providers_set_order(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -130,6 +138,7 @@ pub(crate) async fn sort_mode_providers_set_order(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn sort_mode_provider_set_enabled(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,

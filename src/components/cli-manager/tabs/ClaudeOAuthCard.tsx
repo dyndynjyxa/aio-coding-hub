@@ -21,14 +21,14 @@ type OAuthStatus = NonNullable<Awaited<ReturnType<typeof providerOAuthStatus>>>;
 function buildInitialStatus(provider: ProviderSummary): OAuthStatus {
   return {
     connected: Boolean(provider.oauth_email),
-    provider_type: provider.oauth_provider_type ?? undefined,
-    email: provider.oauth_email ?? undefined,
-    expires_at: provider.oauth_expires_at ?? undefined,
-    has_refresh_token: undefined,
+    provider_type: provider.oauth_provider_type ?? null,
+    email: provider.oauth_email ?? null,
+    expires_at: provider.oauth_expires_at ?? null,
+    has_refresh_token: null,
   };
 }
 
-function formatExpiresAt(expiresAt: number | undefined) {
+function formatExpiresAt(expiresAt: number | null | undefined) {
   if (!expiresAt) return "—";
   const ts = expiresAt > 1_000_000_000_000 ? expiresAt : expiresAt * 1000;
   return new Date(ts).toLocaleString("zh-CN", { hour12: false });
@@ -64,7 +64,7 @@ export function ClaudeOAuthCard({ providers }: ClaudeOAuthCardProps) {
     setStatusError(null);
     setStatusLoading(true);
 
-    void providerOAuthStatus(provider.id)
+    void providerOAuthStatus(oauthProvider.id)
       .then((next) => {
         if (cancelled || !next) return;
         setStatus(next);
@@ -82,12 +82,7 @@ export function ClaudeOAuthCard({ providers }: ClaudeOAuthCardProps) {
     return () => {
       cancelled = true;
     };
-  }, [
-    oauthProvider?.id,
-    oauthProvider?.oauth_email,
-    oauthProvider?.oauth_expires_at,
-    oauthProvider?.oauth_provider_type,
-  ]);
+  }, [oauthProvider]);
 
   async function reloadStatus(providerId: number) {
     const next = await providerOAuthStatus(providerId);
@@ -168,10 +163,10 @@ export function ClaudeOAuthCard({ providers }: ClaudeOAuthCardProps) {
       }
       setStatus({
         connected: false,
-        provider_type: status?.provider_type ?? provider.oauth_provider_type ?? undefined,
-        email: undefined,
-        expires_at: undefined,
-        has_refresh_token: undefined,
+        provider_type: status?.provider_type ?? provider.oauth_provider_type ?? null,
+        email: null,
+        expires_at: null,
+        has_refresh_token: null,
       });
       setStatusError(null);
       toast.success("已断开 Claude OAuth 连接");

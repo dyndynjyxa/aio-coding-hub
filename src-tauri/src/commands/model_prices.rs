@@ -4,6 +4,7 @@ use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::{blocking, cost_stats, model_price_aliases, model_prices, model_prices_sync};
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn model_prices_list(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -34,6 +35,7 @@ pub(crate) async fn model_price_upsert(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn model_prices_sync_basellm(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -75,6 +77,7 @@ pub(crate) async fn model_prices_sync_basellm(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn model_price_aliases_get(
     app: tauri::AppHandle,
 ) -> Result<model_price_aliases::ModelPriceAliasesV1, String> {
@@ -89,6 +92,7 @@ pub(crate) async fn model_price_aliases_get(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn model_price_aliases_set(
     app: tauri::AppHandle,
     aliases: model_price_aliases::ModelPriceAliasesV1,

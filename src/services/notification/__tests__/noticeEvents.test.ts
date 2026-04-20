@@ -21,7 +21,7 @@ describe("services/notification/noticeEvents", () => {
 
     vi.mocked(tauriListen).mockResolvedValue(tauriUnlisten);
     vi.mocked(tauriInvoke).mockImplementation(async (command: string) => {
-      if (command === "plugin:notification|is_permission_granted") return true;
+      if (command === "desktop_notification_is_permission_granted") return true;
       return undefined;
     });
     getNotificationSoundEnabledMock.mockReturnValue(true);
@@ -38,8 +38,9 @@ describe("services/notification/noticeEvents", () => {
 
     await handler?.({ payload: { level: "info", title: "T", body: "B" } } as any);
     expect(playNotificationSoundMock).toHaveBeenCalledTimes(1);
-    expect(tauriInvoke).toHaveBeenCalledWith("plugin:notification|notify", {
-      options: { title: "T", body: "B" },
+    expect(tauriInvoke).toHaveBeenCalledWith("desktop_notification_is_permission_granted");
+    expect(tauriInvoke).toHaveBeenCalledWith("desktop_notification_notify", {
+      options: { title: "T", body: "B", sound: null },
     });
 
     unlisten();
@@ -51,7 +52,7 @@ describe("services/notification/noticeEvents", () => {
 
     vi.mocked(tauriListen).mockResolvedValue(tauriUnlisten);
     vi.mocked(tauriInvoke).mockImplementation(async (command: string) => {
-      if (command === "plugin:notification|is_permission_granted") return false;
+      if (command === "desktop_notification_is_permission_granted") return false;
       return undefined;
     });
     getNotificationSoundEnabledMock.mockReturnValue(true);
@@ -65,7 +66,7 @@ describe("services/notification/noticeEvents", () => {
     await handler?.({ payload: { level: "info", title: "T", body: "B" } } as any);
 
     expect(playNotificationSoundMock).not.toHaveBeenCalled();
-    expect(tauriInvoke).not.toHaveBeenCalledWith("plugin:notification|notify", expect.anything());
+    expect(tauriInvoke).not.toHaveBeenCalledWith("desktop_notification_notify", expect.anything());
   });
 
   it("logs error when sendNotification throws", async () => {
@@ -73,8 +74,8 @@ describe("services/notification/noticeEvents", () => {
 
     vi.mocked(tauriListen).mockResolvedValue(tauriUnlisten);
     vi.mocked(tauriInvoke).mockImplementation(async (command: string) => {
-      if (command === "plugin:notification|is_permission_granted") return true;
-      if (command === "plugin:notification|notify") throw new Error("notification failed");
+      if (command === "desktop_notification_is_permission_granted") return true;
+      if (command === "desktop_notification_notify") throw new Error("notification failed");
       return undefined;
     });
     getNotificationSoundEnabledMock.mockReturnValue(true);

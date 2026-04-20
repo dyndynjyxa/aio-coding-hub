@@ -1,4 +1,5 @@
-import { invokeService } from "../invokeServiceCommand";
+import { commands } from "../../generated/bindings";
+import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
 import type { CliKey } from "../providers/providers";
 
 type Listener = () => void;
@@ -69,23 +70,44 @@ export type ModelPriceSummary = {
 };
 
 export async function modelPricesList(cliKey: CliKey) {
-  return invokeService<ModelPriceSummary[]>("读取模型价格列表失败", "model_prices_list", {
-    cliKey,
+  return invokeGeneratedIpc<ModelPriceSummary[]>({
+    title: "读取模型价格列表失败",
+    cmd: "model_prices_list",
+    args: { cliKey },
+    invoke: () =>
+      commands.modelPricesList(cliKey) as Promise<GeneratedCommandResult<ModelPriceSummary[]>>,
   });
 }
 
 export async function modelPricesSyncBasellm(force = false) {
-  return invokeService<ModelPricesSyncReport>("同步模型价格失败", "model_prices_sync_basellm", {
-    force,
+  return invokeGeneratedIpc<ModelPricesSyncReport>({
+    title: "同步模型价格失败",
+    cmd: "model_prices_sync_basellm",
+    args: { force },
+    invoke: () =>
+      commands.modelPricesSyncBasellm(force) as Promise<
+        GeneratedCommandResult<ModelPricesSyncReport>
+      >,
   });
 }
 
 export async function modelPriceAliasesGet() {
-  return invokeService<ModelPriceAliases>("读取模型别名规则失败", "model_price_aliases_get");
+  return invokeGeneratedIpc<ModelPriceAliases>({
+    title: "读取模型别名规则失败",
+    cmd: "model_price_aliases_get",
+    invoke: () =>
+      commands.modelPriceAliasesGet() as Promise<GeneratedCommandResult<ModelPriceAliases>>,
+  });
 }
 
 export async function modelPriceAliasesSet(aliases: ModelPriceAliases) {
-  return invokeService<ModelPriceAliases>("保存模型别名规则失败", "model_price_aliases_set", {
-    aliases,
+  return invokeGeneratedIpc<ModelPriceAliases>({
+    title: "保存模型别名规则失败",
+    cmd: "model_price_aliases_set",
+    args: { aliases },
+    invoke: () =>
+      commands.modelPriceAliasesSet(aliases as any) as Promise<
+        GeneratedCommandResult<ModelPriceAliases>
+      >,
   });
 }

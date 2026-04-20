@@ -2,7 +2,7 @@
 
 use serde::Serialize;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct CliSessionsProjectSummary {
     pub source: String,
     pub id: String,
@@ -14,7 +14,7 @@ pub struct CliSessionsProjectSummary {
     pub wsl_distro: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct CliSessionsSessionSummary {
     pub source: String,
     pub session_id: String,
@@ -32,7 +32,7 @@ pub struct CliSessionsSessionSummary {
     pub wsl_distro: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct CliSessionsFolderLookupEntry {
     pub source: String,
     pub session_id: String,
@@ -40,7 +40,7 @@ pub struct CliSessionsFolderLookupEntry {
     pub folder_path: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct CliSessionsPaginatedMessages {
     pub messages: Vec<CliSessionsDisplayMessage>,
     pub total: usize,
@@ -49,7 +49,7 @@ pub struct CliSessionsPaginatedMessages {
     pub has_more: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct CliSessionsDisplayMessage {
     pub uuid: Option<String>,
     pub role: String,
@@ -58,7 +58,7 @@ pub struct CliSessionsDisplayMessage {
     pub content: Vec<CliSessionsDisplayContentBlock>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CliSessionsDisplayContentBlock {
     Text {

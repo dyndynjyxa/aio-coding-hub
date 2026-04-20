@@ -10,6 +10,14 @@ use tauri::Manager;
 const GATEWAY_SESSIONS_DEFAULT_LIMIT: u32 = 50;
 const GATEWAY_SESSIONS_MAX_LIMIT: u32 = 200;
 
+#[derive(Debug, Clone, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GatewayUpstreamProxyInput {
+    proxy_url: String,
+    proxy_username: Option<String>,
+    proxy_password: Option<String>,
+}
+
 fn gateway_sessions_limit(limit: Option<u32>) -> usize {
     normalize_limit(
         limit,
@@ -19,7 +27,28 @@ fn gateway_sessions_limit(limit: Option<u32>) -> usize {
     )
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+fn resolve_gateway_upstream_proxy_context(
+    app: &tauri::AppHandle,
+    input: &GatewayUpstreamProxyInput,
+) -> Result<
+    (
+        Option<String>,
+        crate::gateway::http_client::GatewaySelfCheckContext,
+    ),
+    String,
+> {
+    let cfg = settings::read(app).map_err(|err| err.to_string())?;
+    let proxy_url = gateway::http_client::build_effective_proxy_url(
+        Some(input.proxy_url.as_str()),
+        input.proxy_username.as_deref(),
+        input.proxy_password.as_deref(),
+    )?;
+    let context = gateway::http_client::self_check_context_from_settings(&cfg)
+        .map_err(|err| err.to_string())?;
+    Ok((proxy_url, context))
+}
+
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
 pub(crate) struct GatewayActiveSessionSummary {
     cli_key: String,
     session_id: String,
@@ -35,12 +64,14 @@ pub(crate) struct GatewayActiveSessionSummary {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) fn gateway_status(state: tauri::State<'_, GatewayState>) -> gateway::GatewayStatus {
     let manager = state.0.lock_or_recover();
     manager.status()
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn gateway_check_port_available(
     app: tauri::AppHandle,
     port: u16,
@@ -82,6 +113,7 @@ pub(crate) async fn gateway_check_port_available_impl<R: tauri::Runtime>(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn gateway_sessions_list(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -157,6 +189,7 @@ pub(crate) async fn gateway_sessions_list(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn gateway_circuit_status(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -173,6 +206,7 @@ pub(crate) async fn gateway_circuit_status(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn gateway_circuit_reset_provider(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -193,6 +227,7 @@ pub(crate) async fn gateway_circuit_reset_provider(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn gateway_circuit_reset_cli(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -209,6 +244,7 @@ pub(crate) async fn gateway_circuit_reset_cli(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn gateway_start(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -253,6 +289,7 @@ mod tests {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn gateway_stop(
     app: tauri::AppHandle,
     state: tauri::State<'_, GatewayState>,
@@ -276,55 +313,31 @@ pub(crate) async fn gateway_stop(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) fn gateway_upstream_proxy_validate(
     app: tauri::AppHandle,
-    proxy_url: String,
-    proxy_username: Option<String>,
-    proxy_password: Option<String>,
+    input: GatewayUpstreamProxyInput,
 ) -> Result<(), String> {
-    let cfg = settings::read(&app).map_err(|err| err.to_string())?;
-    let proxy_url = gateway::http_client::build_effective_proxy_url(
-        Some(&proxy_url),
-        proxy_username.as_deref(),
-        proxy_password.as_deref(),
-    )?;
-    let context = gateway::http_client::self_check_context_from_settings(&cfg)
-        .map_err(|err| err.to_string())?;
+    let (proxy_url, context) = resolve_gateway_upstream_proxy_context(&app, &input)?;
     gateway::http_client::validate_proxy_with_context(proxy_url.as_deref(), &context)
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn gateway_upstream_proxy_test(
     app: tauri::AppHandle,
-    proxy_url: String,
-    proxy_username: Option<String>,
-    proxy_password: Option<String>,
+    input: GatewayUpstreamProxyInput,
 ) -> Result<(), String> {
-    let cfg = settings::read(&app).map_err(|err| err.to_string())?;
-    let proxy_url = gateway::http_client::build_effective_proxy_url(
-        Some(&proxy_url),
-        proxy_username.as_deref(),
-        proxy_password.as_deref(),
-    )?;
-    let context = gateway::http_client::self_check_context_from_settings(&cfg)
-        .map_err(|err| err.to_string())?;
+    let (proxy_url, context) = resolve_gateway_upstream_proxy_context(&app, &input)?;
     gateway::http_client::test_proxy_with_context(proxy_url.as_deref(), &context).await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn gateway_upstream_proxy_detect_ip(
     app: tauri::AppHandle,
-    proxy_url: String,
-    proxy_username: Option<String>,
-    proxy_password: Option<String>,
+    input: GatewayUpstreamProxyInput,
 ) -> Result<String, String> {
-    let cfg = settings::read(&app).map_err(|err| err.to_string())?;
-    let proxy_url = gateway::http_client::build_effective_proxy_url(
-        Some(&proxy_url),
-        proxy_username.as_deref(),
-        proxy_password.as_deref(),
-    )?;
-    let context = gateway::http_client::self_check_context_from_settings(&cfg)
-        .map_err(|err| err.to_string())?;
+    let (proxy_url, context) = resolve_gateway_upstream_proxy_context(&app, &input)?;
     gateway::http_client::detect_proxy_exit_ip_with_context(proxy_url.as_deref(), &context).await
 }

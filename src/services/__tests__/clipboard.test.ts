@@ -1,9 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { copyText } from "../clipboard";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { writeDesktopClipboardText } from "../desktop/clipboard";
 
-vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({
-  writeText: vi.fn(),
+vi.mock("../desktop/clipboard", () => ({
+  writeDesktopClipboardText: vi.fn(),
 }));
 
 describe("services/clipboard", () => {
@@ -12,15 +12,15 @@ describe("services/clipboard", () => {
   });
 
   it("uses tauri clipboard when runtime is available", async () => {
-    vi.mocked(writeText).mockResolvedValue(undefined);
+    vi.mocked(writeDesktopClipboardText).mockResolvedValue(true as any);
 
     await copyText("hello");
 
-    expect(writeText).toHaveBeenCalledWith("hello");
+    expect(writeDesktopClipboardText).toHaveBeenCalledWith("hello");
   });
 
   it("falls back to navigator clipboard when tauri write fails", async () => {
-    vi.mocked(writeText).mockRejectedValue(new Error("denied"));
+    vi.mocked(writeDesktopClipboardText).mockRejectedValue(new Error("denied"));
 
     const navWrite = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
@@ -34,7 +34,7 @@ describe("services/clipboard", () => {
   });
 
   it("falls back to execCommand when tauri and navigator clipboard unavailable", async () => {
-    vi.mocked(writeText).mockRejectedValue(new Error("tauri denied"));
+    vi.mocked(writeDesktopClipboardText).mockRejectedValue(new Error("tauri denied"));
     Object.defineProperty(navigator, "clipboard", {
       value: undefined,
       configurable: true,

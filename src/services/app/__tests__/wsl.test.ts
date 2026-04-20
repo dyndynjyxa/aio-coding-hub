@@ -1,13 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
+import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
-import { invokeTauriOrNull } from "../../tauriInvoke";
 import { wslConfigStatusGet, wslConfigureClients, wslDetect, wslHostAddressGet } from "../wsl";
 
-vi.mock("../../tauriInvoke", async () => {
-  const actual = await vi.importActual<typeof import("../../tauriInvoke")>("../../tauriInvoke");
+vi.mock("../../../generated/bindings", async () => {
+  const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
+    "../../../generated/bindings"
+  );
   return {
     ...actual,
-    invokeTauriOrNull: vi.fn(),
+    commands: {
+      ...actual.commands,
+      wslDetect: vi.fn(),
+      wslHostAddressGet: vi.fn(),
+      wslConfigStatusGet: vi.fn(),
+      wslConfigureClients: vi.fn(),
+    },
   };
 });
 
@@ -21,7 +29,7 @@ vi.mock("../../consoleLog", async () => {
 
 describe("services/app/wsl", () => {
   it("rethrows invoke errors and logs", async () => {
-    vi.mocked(invokeTauriOrNull).mockRejectedValueOnce(new Error("wsl boom"));
+    vi.mocked(commands.wslDetect).mockRejectedValueOnce(new Error("wsl boom"));
 
     await expect(wslDetect()).rejects.toThrow("wsl boom");
     expect(logToConsole).toHaveBeenCalledWith(
@@ -35,29 +43,35 @@ describe("services/app/wsl", () => {
   });
 
   it("treats null invoke result as error with runtime", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce(null);
+    vi.mocked(commands.wslDetect).mockResolvedValueOnce(null as any);
 
     await expect(wslDetect()).rejects.toThrow("IPC_NULL_RESULT: wsl_detect");
   });
 
   it("invokes wsl commands with expected parameters", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValue({} as any);
-
-    await wslDetect();
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("wsl_detect");
-
-    await wslHostAddressGet();
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("wsl_host_address_get");
-
-    await wslConfigStatusGet();
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("wsl_config_status_get");
-
-    await wslConfigStatusGet(["Ubuntu"]);
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("wsl_config_status_get", {
-      distros: ["Ubuntu"],
+    vi.mocked(commands.wslDetect).mockResolvedValueOnce({ detected: true, distros: [] } as any);
+    vi.mocked(commands.wslHostAddressGet).mockResolvedValueOnce("172.20.0.1" as any);
+    vi.mocked(commands.wslConfigStatusGet)
+      .mockResolvedValueOnce([] as any)
+      .mockResolvedValueOnce([] as any);
+    vi.mocked(commands.wslConfigureClients).mockResolvedValueOnce({
+      status: "ok",
+      data: {} as any,
     });
 
+    await wslDetect();
+    expect(commands.wslDetect).toHaveBeenCalledWith();
+
+    await wslHostAddressGet();
+    expect(commands.wslHostAddressGet).toHaveBeenCalledWith();
+
+    await wslConfigStatusGet();
+    expect(commands.wslConfigStatusGet).toHaveBeenCalledWith(null);
+
+    await wslConfigStatusGet(["Ubuntu"]);
+    expect(commands.wslConfigStatusGet).toHaveBeenCalledWith(["Ubuntu"]);
+
     await wslConfigureClients();
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("wsl_configure_clients");
+    expect(commands.wslConfigureClients).toHaveBeenCalledWith();
   });
 });

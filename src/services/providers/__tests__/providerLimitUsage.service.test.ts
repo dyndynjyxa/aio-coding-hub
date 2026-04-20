@@ -1,13 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
+import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
-import { invokeTauriOrNull } from "../../tauriInvoke";
 import { providerLimitUsageV1 } from "../providerLimitUsage";
 
-vi.mock("../../tauriInvoke", async () => {
-  const actual = await vi.importActual<typeof import("../../tauriInvoke")>("../../tauriInvoke");
+vi.mock("../../../generated/bindings", async () => {
+  const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
+    "../../../generated/bindings"
+  );
   return {
     ...actual,
-    invokeTauriOrNull: vi.fn(),
+    commands: {
+      ...actual.commands,
+      providerLimitUsageV1: vi.fn(),
+    },
   };
 });
 
@@ -21,7 +26,9 @@ vi.mock("../../consoleLog", async () => {
 
 describe("services/providers/providerLimitUsage", () => {
   it("rethrows invoke errors and logs", async () => {
-    vi.mocked(invokeTauriOrNull).mockRejectedValueOnce(new Error("provider limit usage boom"));
+    vi.mocked(commands.providerLimitUsageV1).mockRejectedValueOnce(
+      new Error("provider limit usage boom")
+    );
 
     await expect(providerLimitUsageV1("claude")).rejects.toThrow("provider limit usage boom");
     expect(logToConsole).toHaveBeenCalledWith(
@@ -35,7 +42,7 @@ describe("services/providers/providerLimitUsage", () => {
   });
 
   it("treats null invoke result as error with runtime", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce(null);
+    vi.mocked(commands.providerLimitUsageV1).mockResolvedValueOnce(null as any);
 
     await expect(providerLimitUsageV1("claude")).rejects.toThrow(
       "IPC_NULL_RESULT: provider_limit_usage_v1"
@@ -43,16 +50,15 @@ describe("services/providers/providerLimitUsage", () => {
   });
 
   it("keeps argument mapping unchanged", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValue([] as any);
+    vi.mocked(commands.providerLimitUsageV1).mockResolvedValue({
+      status: "ok",
+      data: [] as any,
+    });
 
     await providerLimitUsageV1("claude");
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("provider_limit_usage_v1", {
-      cliKey: "claude",
-    });
+    expect(commands.providerLimitUsageV1).toHaveBeenCalledWith("claude");
 
     await providerLimitUsageV1(null);
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("provider_limit_usage_v1", {
-      cliKey: null,
-    });
+    expect(commands.providerLimitUsageV1).toHaveBeenCalledWith(null);
   });
 });

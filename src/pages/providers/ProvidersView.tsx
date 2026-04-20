@@ -3,7 +3,6 @@
 import { Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { useQueryClient } from "@tanstack/react-query";
 import {
   DndContext,
   PointerSensor,
@@ -17,14 +16,10 @@ import { ClaudeModelValidationDialog } from "../../components/ClaudeModelValidat
 import { logToConsole } from "../../services/consoleLog";
 import { copyText } from "../../services/clipboard";
 import type { GatewayProviderCircuitStatus } from "../../services/gateway/gateway";
-import {
-  providerGetApiKey,
-  type CliKey,
-  type ProviderSummary,
-} from "../../services/providers/providers";
-import { gatewayKeys, providersKeys } from "../../query/keys";
+import { type CliKey, type ProviderSummary } from "../../services/providers/providers";
 import {
   summarizeGatewayCircuitRows,
+  useGatewayCircuitAutoRefresh,
   useGatewayCircuitResetCliMutation,
   useGatewayCircuitResetProviderMutation,
   useGatewayCircuitStatusQuery,
@@ -32,6 +27,7 @@ import {
 import {
   useProviderClaudeTerminalLaunchCommandMutation,
   useProviderDeleteMutation,
+  useProviderDuplicateMutation,
   useProviderSetEnabledMutation,
   useProvidersListQuery,
   useProvidersReorderMutation,
@@ -43,10 +39,7 @@ import { Input } from "../../ui/Input";
 import { Spinner } from "../../ui/Spinner";
 import { ProviderEditorDialog } from "./ProviderEditorDialog";
 import { SortableProviderCard } from "./SortableProviderCard";
-import {
-  buildDuplicatedProviderInitialValues,
-  type ProviderEditorInitialValues,
-} from "./providerDuplicate";
+import type { ProviderEditorInitialValues } from "./providerDuplicate";
 
 export type ProvidersViewProps = {
   activeCli: CliKey;
@@ -59,8 +52,6 @@ type CreateDialogState = {
 };
 
 export function ProvidersView({ activeCli }: ProvidersViewProps) {
-  const queryClient = useQueryClient();
-
   const activeCliRef = useRef(activeCli);
   useEffect(() => {
     activeCliRef.current = activeCli;
@@ -95,17 +86,16 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
   const circuitLoading = circuitQuery.isFetching;
   const circuitSummary = useMemo(() => summarizeGatewayCircuitRows(circuitRows), [circuitRows]);
   const circuitByProviderId = circuitSummary.byProviderId;
+  useGatewayCircuitAutoRefresh(activeCli, circuitSummary);
 
   const [circuitResetting, setCircuitResetting] = useState<Record<number, boolean>>({});
   const [circuitResettingAll, setCircuitResettingAll] = useState(false);
-  const circuitAutoRefreshTimerRef = useRef<number | null>(null);
-
-  const hasUnavailableCircuit = circuitSummary.hasUnavailable;
 
   const resetCircuitProviderMutation = useGatewayCircuitResetProviderMutation();
   const resetCircuitCliMutation = useGatewayCircuitResetCliMutation();
   const providerSetEnabledMutation = useProviderSetEnabledMutation();
   const providerDeleteMutation = useProviderDeleteMutation();
+  const providerDuplicateMutation = useProviderDuplicateMutation();
   const providersReorderMutation = useProvidersReorderMutation();
   const terminalLaunchCommandMutation = useProviderClaudeTerminalLaunchCommandMutation();
 
@@ -192,39 +182,6 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
   ) {
     setCreateDialogState({ cliKey, initialValues });
   }
-
-  useEffect(() => {
-    if (circuitAutoRefreshTimerRef.current != null) {
-      window.clearTimeout(circuitAutoRefreshTimerRef.current);
-      circuitAutoRefreshTimerRef.current = null;
-    }
-
-    if (!hasUnavailableCircuit) return;
-
-    const nowUnix = Math.floor(Date.now() / 1000);
-    const nextAvailableUntil = circuitSummary.hasUnavailableWithoutUntil
-      ? nowUnix
-      : circuitSummary.earliestUnavailableUntil;
-    if (nextAvailableUntil == null) return;
-
-    const delayMs = Math.max(200, (nextAvailableUntil - nowUnix) * 1000 + 250);
-    circuitAutoRefreshTimerRef.current = window.setTimeout(() => {
-      circuitAutoRefreshTimerRef.current = null;
-      void circuitQuery.refetch();
-    }, delayMs);
-
-    return () => {
-      if (circuitAutoRefreshTimerRef.current != null) {
-        window.clearTimeout(circuitAutoRefreshTimerRef.current);
-        circuitAutoRefreshTimerRef.current = null;
-      }
-    };
-  }, [
-    circuitQuery,
-    circuitSummary.earliestUnavailableUntil,
-    circuitSummary.hasUnavailableWithoutUntil,
-    hasUnavailableCircuit,
-  ]);
 
   const toggleProviderEnabled = useCallback(
     async (provider: ProviderSummary) => {
@@ -384,24 +341,22 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
       setDuplicatingByProviderId((cur) => ({ ...cur, [provider.id]: true }));
 
       try {
-        const needsApiKeyCopy =
-          provider.auth_mode === "api_key" && provider.source_provider_id == null;
-        const apiKey = needsApiKeyCopy ? await providerGetApiKey(provider.id) : null;
-        if (needsApiKeyCopy && (!apiKey || !apiKey.trim())) {
-          toast("复制失败：原 Provider 未保存 API Key");
+        const duplicated = await providerDuplicateMutation.mutateAsync({
+          providerId: provider.id,
+        });
+        if (!duplicated) {
           return;
         }
 
-        openCreateDialog(
-          provider.cli_key,
-          buildDuplicatedProviderInitialValues(provider, providersRef.current, apiKey)
-        );
-        logToConsole("info", "复制 Provider 配置", {
-          provider_id: provider.id,
-          cli_key: provider.cli_key,
+        logToConsole("info", "复制 Provider", {
+          source_provider_id: provider.id,
+          provider_id: duplicated.id,
+          cli_key: duplicated.cli_key,
+          name: duplicated.name,
         });
+        toast(`已复制 Provider：${duplicated.name}`);
       } catch (err) {
-        logToConsole("error", "复制 Provider 配置失败", {
+        logToConsole("error", "复制 Provider 失败", {
           provider_id: provider.id,
           cli_key: provider.cli_key,
           error: String(err),
@@ -411,18 +366,15 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
         setDuplicatingByProviderId((cur) => ({ ...cur, [provider.id]: false }));
       }
     },
-    [duplicatingByProviderId]
+    [duplicatingByProviderId, providerDuplicateMutation]
   );
 
-  async function persistProvidersOrder(
-    cliKey: CliKey,
-    nextProviders: ProviderSummary[],
-    prevProviders: ProviderSummary[]
-  ) {
+  async function persistProvidersOrder(cliKey: CliKey, nextProviders: ProviderSummary[]) {
     try {
       const saved = await providersReorderMutation.mutateAsync({
         cliKey,
         orderedProviderIds: nextProviders.map((p) => p.id),
+        optimisticProviders: nextProviders,
       });
       if (!saved) return;
 
@@ -436,9 +388,6 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
       });
       toast("顺序已更新");
     } catch (err) {
-      if (activeCliRef.current === cliKey) {
-        queryClient.setQueryData(providersKeys.list(cliKey), prevProviders);
-      }
       logToConsole("error", "更新 Provider 顺序失败", {
         cli: cliKey,
         error: String(err),
@@ -459,8 +408,7 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
     if (oldIndex === -1 || newIndex === -1) return;
 
     const nextProviders = arrayMove(prevProviders, oldIndex, newIndex);
-    queryClient.setQueryData(providersKeys.list(cliKey), nextProviders);
-    void persistProvidersOrder(cliKey, nextProviders, prevProviders);
+    void persistProvidersOrder(cliKey, nextProviders);
   }
 
   return (
@@ -518,7 +466,7 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
             </span>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
-            {hasUnavailableCircuit ? (
+            {circuitSummary.hasUnavailable ? (
               <Button
                 onClick={() => void resetCircuitAll(activeCli)}
                 variant="secondary"
@@ -654,10 +602,7 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
           cliKey={createDialogState.cliKey}
           initialValues={createDialogState.initialValues}
           codexProviders={codexProvidersQuery.data ?? []}
-          onSaved={(cliKey) => {
-            queryClient.invalidateQueries({ queryKey: providersKeys.list(cliKey) });
-            queryClient.invalidateQueries({ queryKey: gatewayKeys.circuitStatus(cliKey) });
-          }}
+          onSaved={() => {}}
         />
       ) : null}
 
@@ -670,10 +615,7 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
           }}
           provider={editTarget}
           codexProviders={codexProvidersQuery.data ?? []}
-          onSaved={(cliKey) => {
-            queryClient.invalidateQueries({ queryKey: providersKeys.list(cliKey) });
-            queryClient.invalidateQueries({ queryKey: gatewayKeys.circuitStatus(cliKey) });
-          }}
+          onSaved={() => {}}
         />
       ) : null}
 

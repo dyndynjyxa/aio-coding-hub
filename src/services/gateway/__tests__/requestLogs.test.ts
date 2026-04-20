@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
-import { invokeTauriOrNull } from "../../tauriInvoke";
 import {
   requestAttemptLogsByTraceId,
   requestLogGet,
@@ -11,11 +11,22 @@ import {
   requestLogsListAll,
 } from "../requestLogs";
 
-vi.mock("../../tauriInvoke", async () => {
-  const actual = await vi.importActual<typeof import("../../tauriInvoke")>("../../tauriInvoke");
+vi.mock("../../../generated/bindings", async () => {
+  const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
+    "../../../generated/bindings"
+  );
   return {
     ...actual,
-    invokeTauriOrNull: vi.fn(),
+    commands: {
+      ...actual.commands,
+      requestLogsList: vi.fn(),
+      requestLogsListAll: vi.fn(),
+      requestLogsListAfterId: vi.fn(),
+      requestLogsListAfterIdAll: vi.fn(),
+      requestLogGet: vi.fn(),
+      requestLogGetByTraceId: vi.fn(),
+      requestAttemptLogsByTraceId: vi.fn(),
+    },
   };
 });
 
@@ -29,7 +40,7 @@ vi.mock("../../consoleLog", async () => {
 
 describe("services/gateway/requestLogs", () => {
   it("rethrows invoke errors and logs", async () => {
-    vi.mocked(invokeTauriOrNull).mockRejectedValueOnce(new Error("request logs boom"));
+    vi.mocked(commands.requestLogsList).mockRejectedValueOnce(new Error("request logs boom"));
 
     await expect(requestLogsList("claude", 10)).rejects.toThrow("request logs boom");
     expect(logToConsole).toHaveBeenCalledWith(
@@ -43,7 +54,7 @@ describe("services/gateway/requestLogs", () => {
   });
 
   it("treats null invoke result as error with runtime", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce(null);
+    vi.mocked(commands.requestLogsList).mockResolvedValueOnce({ status: "ok", data: null as any });
 
     await expect(requestLogsList("claude", 10)).rejects.toThrow(
       "IPC_NULL_RESULT: request_logs_list"
@@ -51,7 +62,28 @@ describe("services/gateway/requestLogs", () => {
   });
 
   it("passes request logs command args with stable contract fields", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValue([] as any);
+    vi.mocked(commands.requestLogsList).mockResolvedValueOnce({ status: "ok", data: [] as any });
+    vi.mocked(commands.requestLogsListAll).mockResolvedValueOnce({ status: "ok", data: [] as any });
+    vi.mocked(commands.requestLogsListAfterId).mockResolvedValueOnce({
+      status: "ok",
+      data: [] as any,
+    });
+    vi.mocked(commands.requestLogsListAfterIdAll).mockResolvedValueOnce({
+      status: "ok",
+      data: [] as any,
+    });
+    vi.mocked(commands.requestLogGet).mockResolvedValueOnce({
+      status: "ok",
+      data: { id: 1 } as any,
+    });
+    vi.mocked(commands.requestLogGetByTraceId).mockResolvedValueOnce({
+      status: "ok",
+      data: null as any,
+    });
+    vi.mocked(commands.requestAttemptLogsByTraceId).mockResolvedValueOnce({
+      status: "ok",
+      data: [] as any,
+    });
 
     await requestLogsList("claude", 10);
     await requestLogsListAll(20);
@@ -61,27 +93,12 @@ describe("services/gateway/requestLogs", () => {
     await requestLogGetByTraceId("t1");
     await requestAttemptLogsByTraceId("t1", 99);
 
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("request_logs_list", {
-      cliKey: "claude",
-      limit: 10,
-    });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("request_logs_list_all", { limit: 20 });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("request_logs_list_after_id", {
-      cliKey: "codex",
-      afterId: 5,
-      limit: 30,
-    });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("request_logs_list_after_id_all", {
-      afterId: 6,
-      limit: 40,
-    });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("request_log_get", { logId: 1 });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("request_log_get_by_trace_id", {
-      traceId: "t1",
-    });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("request_attempt_logs_by_trace_id", {
-      traceId: "t1",
-      limit: 99,
-    });
+    expect(commands.requestLogsList).toHaveBeenCalledWith("claude", 10);
+    expect(commands.requestLogsListAll).toHaveBeenCalledWith(20);
+    expect(commands.requestLogsListAfterId).toHaveBeenCalledWith("codex", 5, 30);
+    expect(commands.requestLogsListAfterIdAll).toHaveBeenCalledWith(6, 40);
+    expect(commands.requestLogGet).toHaveBeenCalledWith(1);
+    expect(commands.requestLogGetByTraceId).toHaveBeenCalledWith("t1");
+    expect(commands.requestAttemptLogsByTraceId).toHaveBeenCalledWith("t1", 99);
   });
 });

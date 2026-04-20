@@ -8,7 +8,7 @@ use serde::Serialize;
 use std::io;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct DbDiskUsage {
     pub db_bytes: u64,
     pub wal_bytes: u64,
@@ -16,7 +16,7 @@ pub struct DbDiskUsage {
     pub total_bytes: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct ClearRequestLogsResult {
     pub request_logs_deleted: u64,
     pub request_attempt_logs_deleted: u64,

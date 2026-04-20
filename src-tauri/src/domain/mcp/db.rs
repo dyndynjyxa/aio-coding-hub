@@ -5,7 +5,7 @@ use crate::shared::error::db_err;
 use crate::shared::time::now_unix_seconds;
 use crate::workspaces;
 use rusqlite::{params, Connection, ErrorCode, OptionalExtension};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::backups::{CliBackupSnapshots, SingleCliBackup};
 use super::sync::{sync_all_cli, sync_one_cli};
@@ -75,6 +75,63 @@ fn map_to_json(
 ) -> crate::shared::error::AppResult<String> {
     serde_json::to_string(map)
         .map_err(|e| format!("SEC_INVALID_INPUT: failed to serialize {hint}: {e}").into())
+}
+
+fn normalize_patch_preserve_keys(keys: Vec<String>) -> Vec<String> {
+    let mut deduped = BTreeSet::new();
+    for key in keys {
+        let normalized = key.trim();
+        if normalized.is_empty() {
+            continue;
+        }
+        deduped.insert(normalized.to_string());
+    }
+    deduped.into_iter().collect()
+}
+
+fn normalize_patch_replace(
+    replace: BTreeMap<String, String>,
+    hint: &str,
+) -> crate::shared::error::AppResult<BTreeMap<String, String>> {
+    let mut normalized = BTreeMap::new();
+    for (raw_key, value) in replace {
+        let key = raw_key.trim();
+        if key.is_empty() {
+            return Err(format!("SEC_INVALID_INPUT: {hint} key is required").into());
+        }
+        if value.trim().is_empty() {
+            return Err(
+                format!("SEC_INVALID_INPUT: {hint} value is required for key '{key}'").into(),
+            );
+        }
+        normalized.insert(key.to_string(), value);
+    }
+    Ok(normalized)
+}
+
+fn merge_secret_patch(
+    existing: Option<&BTreeMap<String, String>>,
+    preserve_keys: Vec<String>,
+    replace: BTreeMap<String, String>,
+    hint: &str,
+) -> crate::shared::error::AppResult<BTreeMap<String, String>> {
+    let normalized_preserve_keys = normalize_patch_preserve_keys(preserve_keys);
+    let normalized_replace = normalize_patch_replace(replace, hint)?;
+    let mut merged = BTreeMap::new();
+
+    if let Some(existing_map) = existing {
+        for key in normalized_preserve_keys {
+            if let Some(value) = existing_map.get(&key) {
+                merged.insert(key, value.clone());
+            }
+        }
+    }
+
+    for (key, value) in normalized_replace {
+        merged.insert(key, value);
+    }
+
+    Ok(merged)
 }
 
 fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<McpServerSummary, rusqlite::Error> {
@@ -222,10 +279,12 @@ pub fn upsert(
     transport: &str,
     command: Option<&str>,
     args: Vec<String>,
-    env: BTreeMap<String, String>,
+    env_preserve_keys: Vec<String>,
+    env_replace: BTreeMap<String, String>,
     cwd: Option<&str>,
     url: Option<&str>,
-    headers: BTreeMap<String, String>,
+    header_preserve_keys: Vec<String>,
+    header_replace: BTreeMap<String, String>,
 ) -> crate::shared::error::AppResult<McpServerSummary> {
     let name = name.trim();
     if name.is_empty() {
@@ -256,10 +315,6 @@ pub fn upsert(
         .filter(|s| !s.is_empty())
         .collect();
 
-    let args_json = args_to_json(&args)?;
-    let env_json = map_to_json(&env, "env")?;
-    let headers_json = map_to_json(&headers, "headers")?;
-
     let mut conn = db.open_connection()?;
     let now = now_unix_seconds();
 
@@ -267,7 +322,12 @@ pub fn upsert(
         .transaction()
         .map_err(|e| db_err!("failed to start transaction: {e}"))?;
 
-    let resolved_key = match server_id {
+    let existing_server = match server_id {
+        Some(id) => Some(get_by_id(&tx, id)?),
+        None => None,
+    };
+
+    let resolved_key = match existing_server.as_ref() {
         None => {
             if provided_key.is_empty() {
                 generate_unique_server_key(&tx, name)?
@@ -276,21 +336,8 @@ pub fn upsert(
                 provided_key.to_string()
             }
         }
-        Some(id) => {
-            let existing_key: Option<String> = tx
-                .query_row(
-                    "SELECT server_key FROM mcp_servers WHERE id = ?1",
-                    params![id],
-                    |row| row.get(0),
-                )
-                .optional()
-                .map_err(|e| db_err!("failed to query mcp server: {e}"))?;
-
-            let Some(existing_key) = existing_key else {
-                return Err("DB_NOT_FOUND: mcp server not found".to_string().into());
-            };
-
-            if !provided_key.is_empty() && existing_key != provided_key {
+        Some(existing_server) => {
+            if !provided_key.is_empty() && existing_server.server_key != provided_key {
                 return Err(
                     "SEC_INVALID_INPUT: server_key cannot be changed for existing server"
                         .to_string()
@@ -298,12 +345,37 @@ pub fn upsert(
                 );
             }
 
-            existing_key
+            existing_server.server_key.clone()
         }
+    };
+
+    let env = if transport == "stdio" {
+        merge_secret_patch(
+            existing_server.as_ref().map(|server| &server.env),
+            env_preserve_keys,
+            env_replace,
+            "env",
+        )?
+    } else {
+        BTreeMap::new()
+    };
+
+    let headers = if transport == "stdio" {
+        BTreeMap::new()
+    } else {
+        merge_secret_patch(
+            existing_server.as_ref().map(|server| &server.headers),
+            header_preserve_keys,
+            header_replace,
+            "headers",
+        )?
     };
 
     let normalized_name = normalize_name(name);
     let snapshots = CliBackupSnapshots::capture_all(app)?;
+    let args_json = args_to_json(&args)?;
+    let env_json = map_to_json(&env, "env")?;
+    let headers_json = map_to_json(&headers, "headers")?;
 
     let id = match server_id {
         None => {

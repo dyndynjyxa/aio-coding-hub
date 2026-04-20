@@ -4,6 +4,7 @@ import type { ProviderSummary } from "../../services/providers/providers";
 import {
   providerClaudeTerminalLaunchCommand,
   providerDelete,
+  providerUpsert,
   providerSetEnabled,
   providersList,
   providersReorder,
@@ -12,10 +13,11 @@ import {
   useProviderClaudeTerminalLaunchCommandMutation,
   useProviderDeleteMutation,
   useProviderSetEnabledMutation,
+  useProviderUpsertMutation,
   useProvidersListQuery,
   useProvidersReorderMutation,
 } from "../providers";
-import { providersKeys } from "../keys";
+import { gatewayKeys, providersKeys } from "../keys";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 
@@ -26,6 +28,7 @@ vi.mock("../../services/providers/providers", async () => {
   return {
     ...actual,
     providersList: vi.fn(),
+    providerUpsert: vi.fn(),
     providerSetEnabled: vi.fn(),
     providerDelete: vi.fn(),
     providersReorder: vi.fn(),
@@ -135,6 +138,53 @@ describe("query/providers", () => {
 
     expect(providerSetEnabled).toHaveBeenCalledWith(1, true);
     expect(client.getQueryData(providersKeys.list("claude"))).toEqual([updated]);
+  });
+
+  it("useProviderUpsertMutation updates the cached providers list and invalidates related queries", async () => {
+    setTauriRuntime();
+
+    const existing = makeProvider({
+      id: 1,
+      cli_key: "claude",
+      name: "Existing",
+      enabled: true,
+    });
+    const saved = { ...existing, name: "Updated" };
+
+    vi.mocked(providerUpsert).mockResolvedValue(saved);
+
+    const client = createTestQueryClient();
+    client.setQueryData(providersKeys.list("claude"), [existing]);
+    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useProviderUpsertMutation(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({
+        input: {
+          provider_id: 1,
+          cli_key: "claude",
+          name: "Updated",
+          base_urls: [],
+          base_url_mode: "order",
+          enabled: true,
+          cost_multiplier: 1,
+          limit_5h_usd: null,
+          limit_daily_usd: null,
+          daily_reset_mode: "fixed",
+          daily_reset_time: "00:00:00",
+          limit_weekly_usd: null,
+          limit_monthly_usd: null,
+          limit_total_usd: null,
+        },
+      });
+    });
+
+    expect(client.getQueryData(providersKeys.list("claude"))).toEqual([saved]);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: providersKeys.list("claude") });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: gatewayKeys.circuitStatus("claude"),
+    });
   });
 
   it("useProviderSetEnabledMutation is a no-op when service returns null", async () => {

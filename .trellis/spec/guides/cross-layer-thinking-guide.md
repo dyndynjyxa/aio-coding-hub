@@ -315,6 +315,86 @@ Two-phase write checklist:
   in-progress detection, verify that a stuck placeholder does not permanently
   degrade polling performance.
 
+### Mistake 15: Exposing Runtime Settings That Never Reach the Real Runtime Boundary
+
+**Bad**: A setting is persisted in `settings.json` and rendered in the UI, but
+the real consumer reads only static plugin config or startup-time state. Users
+think they changed live behavior, yet the effective endpoint or plugin state
+never moves.
+
+**Good**: For every user-facing setting, identify the real runtime owner and
+wire the final side effect in the same change. If the boundary is build-time or
+startup-only, either make that explicit in the product or stop exposing it as a
+normal live setting.
+
+Runtime-setting checklist:
+- If a setting controls a Tauri plugin, confirm whether that plugin reads
+  `tauri.conf.json`, startup-time builder state, or live command input.
+- Do not keep a UI toggle or text field once the actual runtime consumer is
+  known to ignore it.
+- Add one test that changes the setting and verifies the real side effect, not
+  just the stored JSON.
+- When a value is display-only, document that ownership next to the setting type
+  instead of implying runtime control.
+
+### Mistake 16: Mixing Generated and Handwritten IPC Contracts Without an Ownership Map
+
+**Bad**: Some command families use Specta-generated bindings, others still use
+handwritten `invoke` wrappers, and pages/components import both styles directly.
+Maintainers then talk about a "stable IPC contract" as if one generated file
+protected the whole desktop boundary.
+
+**Good**: Keep one explicit ownership map for the desktop contract. Decide which
+command families are generated-first, which remain handwritten, and which must
+stay behind service adapters. Pages should consume service functions, not pick
+their own IPC style.
+
+IPC-ownership checklist:
+- Group command families under one of: generated binding, handwritten wrapper,
+  plugin API wrapper, or event-only contract.
+- If Specta coverage is partial, document that boundary in code and docs next to
+  the generated file.
+- Keep one targeted contract test for every handwritten command family that
+  names the Rust command and the TypeScript wrapper together.
+- Do not let pages/components import both generated IPC and raw `invoke` for
+  the same feature area.
+
+### Mistake 17: Driving Downstream Side Effects from Persisted Settings Instead of the Active Runtime Snapshot
+
+**Bad**: Persist new host/port settings and immediately push those values into
+WSL, CLI proxy, updater, or other downstream sync flows while the active
+gateway/runtime listener is still bound to the old address.
+
+**Good**: Separate "next persisted config" from "current active runtime
+snapshot". If a setting needs rebind/restart to take effect, downstream sync
+must either use the active snapshot or wait until the rebind succeeds.
+
+Runtime-rebind checklist:
+- Model persisted config and active runtime state as separate concepts.
+- Use the active runtime snapshot for downstream sync until rebind completes.
+- Add one integration test that edits host/port while the runtime is already
+  running and verifies which value external sync receives.
+- If live rebind is unsupported, surface that as explicit UX instead of
+  pretending the new persisted value is already in effect.
+
+### Mistake 18: Broadcasting High-Frequency Events Without Visibility or Payload Ownership
+
+**Bad**: Backend emits large realtime payloads to every window even when the
+window is hidden, no page is subscribed, or the UI only needs a small summary.
+
+**Good**: Classify events by freshness and payload cost. Use push only for the
+small state users must see immediately, and let heavier views re-fetch by ID or
+cursor when visible.
+
+Realtime-event checklist:
+- Decide which events are summary signals and which are detail payloads.
+- If a window is hidden or no subscriber is active, skip or coalesce expensive
+  events.
+- Prefer push-summary + pull-detail for traces, logs, and other high-volume
+  streams.
+- Add simple event-rate instrumentation so regression shows up before UI jank
+  becomes a user report.
+
 ---
 
 ## Checklist for Cross-Layer Features
@@ -352,6 +432,15 @@ After implementation:
 - [ ] Reviewed root bootstrap / command registry blast radius after the change
 - [ ] If any write uses a two-phase pattern (placeholder + update), verified
       that orphan recovery exists and frontend enforces a staleness guard
+- [ ] Confirmed each user-facing setting reaches the real runtime owner
+      (startup builder, plugin config, live command path, or documented
+      display-only field)
+- [ ] Documented IPC ownership for the touched command family
+      (generated, handwritten, plugin wrapper, or event-only)
+- [ ] Verified downstream sync reads the active runtime snapshot instead of
+      assuming persisted settings are already applied
+- [ ] Verified high-frequency events have an explicit payload owner and
+      visibility/backpressure rule
 
 ---
 

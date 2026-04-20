@@ -4,6 +4,7 @@ use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::{blocking, cost_stats};
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cost_summary_v1(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -18,6 +19,7 @@ pub(crate) async fn cost_summary_v1(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cost_trend_v1(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -30,6 +32,7 @@ pub(crate) async fn cost_trend_v1(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cost_breakdown_provider_v1(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -46,6 +49,7 @@ pub(crate) async fn cost_breakdown_provider_v1(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cost_breakdown_model_v1(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -62,6 +66,7 @@ pub(crate) async fn cost_breakdown_model_v1(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cost_scatter_cli_provider_model_v1(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -78,6 +83,7 @@ pub(crate) async fn cost_scatter_cli_provider_model_v1(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cost_top_requests_v1(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -94,6 +100,7 @@ pub(crate) async fn cost_top_requests_v1(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cost_backfill_missing_v1(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,

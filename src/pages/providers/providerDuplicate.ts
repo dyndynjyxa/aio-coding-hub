@@ -1,4 +1,4 @@
-import { getProviderTypeInfo, type ClaudeModels, type ProviderSummary } from "../../services/providers/providers";
+import type { ClaudeModels, ProviderSummary } from "../../services/providers/providers";
 
 const DUPLICATE_SUFFIX = " 副本";
 
@@ -55,12 +55,11 @@ export function buildDuplicatedProviderName(
 export function buildDuplicatedProviderInitialValues(
   provider: ProviderSummary,
   existingProviders: ProviderSummary[],
-  apiKey: string | null
+  _apiKey: string | null
 ): ProviderEditorInitialValues {
-  const isBridge = getProviderTypeInfo(provider).isCx2cc;
   return {
     name: buildDuplicatedProviderName(provider.name, existingProviders),
-    api_key: !isBridge && provider.auth_mode === "api_key" ? (apiKey ?? "") : "",
+    api_key: "",
     auth_mode: provider.auth_mode,
     base_urls: [...provider.base_urls],
     base_url_mode: provider.base_url_mode,

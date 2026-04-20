@@ -1,13 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
+import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
 import { settingsCircuitBreakerNoticeSet } from "../settingsCircuitBreakerNotice";
-import { invokeTauriOrNull } from "../../tauriInvoke";
 
-vi.mock("../../tauriInvoke", async () => {
-  const actual = await vi.importActual<typeof import("../../tauriInvoke")>("../../tauriInvoke");
+vi.mock("../../../generated/bindings", async () => {
+  const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
+    "../../../generated/bindings"
+  );
   return {
     ...actual,
-    invokeTauriOrNull: vi.fn(),
+    commands: {
+      ...actual.commands,
+      settingsCircuitBreakerNoticeSet: vi.fn(),
+    },
   };
 });
 
@@ -21,10 +26,11 @@ vi.mock("../../consoleLog", async () => {
 
 describe("services/settings/settingsCircuitBreakerNotice", () => {
   it("rethrows invoke errors and logs", async () => {
-    vi.mocked(invokeTauriOrNull).mockRejectedValueOnce(new Error("circuit notice boom"));
+    vi.mocked(commands.settingsCircuitBreakerNoticeSet).mockRejectedValueOnce(
+      new Error("circuit notice boom")
+    );
 
     await expect(settingsCircuitBreakerNoticeSet(true)).rejects.toThrow("circuit notice boom");
-
     expect(logToConsole).toHaveBeenCalledWith(
       "error",
       "保存熔断提示设置失败",
@@ -35,11 +41,20 @@ describe("services/settings/settingsCircuitBreakerNotice", () => {
     );
   });
 
-  it("treats null invoke result as error with runtime", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce(null);
-
+  it("maps generated args and treats null as runtime error", async () => {
+    vi.mocked(commands.settingsCircuitBreakerNoticeSet).mockResolvedValueOnce(null as any);
     await expect(settingsCircuitBreakerNoticeSet(true)).rejects.toThrow(
       "IPC_NULL_RESULT: settings_circuit_breaker_notice_set"
     );
+
+    vi.mocked(commands.settingsCircuitBreakerNoticeSet).mockResolvedValueOnce({
+      status: "ok",
+      data: { schema_version: 1 } as any,
+    });
+    await settingsCircuitBreakerNoticeSet(true);
+
+    expect(commands.settingsCircuitBreakerNoticeSet).toHaveBeenCalledWith({
+      enableCircuitBreakerNotice: true,
+    });
   });
 });

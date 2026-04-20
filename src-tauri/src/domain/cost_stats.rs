@@ -11,7 +11,7 @@ const USD_FEMTO_DENOM: f64 = 1_000_000_000_000_000.0;
 const SQL_MODEL_KEY_EXPR: &str = "COALESCE(NULLIF(TRIM(requested_model), ''), 'Unknown')";
 
 /// Common query parameters shared by all cost analytics endpoints.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CostQueryParams {
     pub period: String,
@@ -22,7 +22,7 @@ pub struct CostQueryParams {
     pub model: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct CostSummaryV1 {
     pub requests_total: i64,
     pub requests_success: i64,
@@ -32,7 +32,7 @@ pub struct CostSummaryV1 {
     pub avg_cost_usd_per_covered_success: Option<f64>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct CostTrendRowV1 {
     pub day: String,
     pub hour: Option<i64>,
@@ -41,7 +41,7 @@ pub struct CostTrendRowV1 {
     pub cost_covered_success: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct CostProviderBreakdownRowV1 {
     pub cli_key: String,
     pub provider_id: i64,
@@ -51,7 +51,7 @@ pub struct CostProviderBreakdownRowV1 {
     pub cost_usd: f64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct CostModelBreakdownRowV1 {
     pub model: String,
     pub requests_success: i64,
@@ -59,7 +59,7 @@ pub struct CostModelBreakdownRowV1 {
     pub cost_usd: f64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct CostTopRequestRowV1 {
     pub log_id: i64,
     pub trace_id: String,
@@ -76,7 +76,7 @@ pub struct CostTopRequestRowV1 {
     pub created_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct CostScatterCliProviderModelRowV1 {
     pub cli_key: String,
     pub provider_name: String,
@@ -86,7 +86,7 @@ pub struct CostScatterCliProviderModelRowV1 {
     pub total_duration_ms: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct CostBackfillReportV1 {
     pub scanned: i64,
     pub updated: i64,

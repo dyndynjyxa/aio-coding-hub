@@ -8,7 +8,7 @@ use serde::Serialize;
 
 const USD_FEMTO_DENOM: f64 = 1_000_000_000_000_000.0;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct ProviderLimitUsageRow {
     pub cli_key: String,
     pub provider_id: i64,

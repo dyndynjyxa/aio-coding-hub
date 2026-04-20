@@ -219,6 +219,7 @@ pub struct ProviderSummary {
     pub source_provider_id: Option<i64>,
     pub bridge_type: Option<String>,
     pub stream_idle_timeout_seconds: Option<u32>,
+    pub api_key_configured: bool,
 }
 
 #[derive(Debug, Clone)]

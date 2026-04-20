@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { tauriInvoke } from "../../../test/mocks/tauri";
+import { createTestAppSettings } from "../../../test/fixtures/settings";
 import { setTauriRuntime } from "../../../test/utils/tauriRuntime";
 
 describe("services/settings/settings", () => {
@@ -101,5 +102,22 @@ describe("services/settings/settings", () => {
         }),
       })
     );
+  });
+
+  it("maps cached settings back into the generated update contract", async () => {
+    const { createSettingsSetInput } = await import("../settings");
+
+    const input = createSettingsSetInput(createTestAppSettings(), {
+      upstream_proxy_password: { mode: "clear" },
+    });
+
+    expect(input).toMatchObject({
+      preferredPort: 37123,
+      gatewayListenMode: "localhost",
+      wslTargetCli: { claude: true, codex: true, gemini: true },
+      cx2CcFallbackModelMain: "gpt-5.4",
+      upstreamProxyPassword: { mode: "clear" },
+    });
+    expect(input).not.toHaveProperty("cx2ccFallbackModelMain");
   });
 });

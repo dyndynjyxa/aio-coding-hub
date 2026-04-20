@@ -1,13 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
+import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
 import { noticeSend } from "../notice";
-import { invokeTauriOrNull } from "../../tauriInvoke";
 
-vi.mock("../../tauriInvoke", async () => {
-  const actual = await vi.importActual<typeof import("../../tauriInvoke")>("../../tauriInvoke");
+vi.mock("../../../generated/bindings", async () => {
+  const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
+    "../../../generated/bindings"
+  );
   return {
     ...actual,
-    invokeTauriOrNull: vi.fn(),
+    commands: {
+      ...actual.commands,
+      noticeSend: vi.fn(),
+    },
   };
 });
 
@@ -21,15 +26,16 @@ vi.mock("../../consoleLog", async () => {
 
 describe("services/notification/notice", () => {
   it("maps true/false results as before", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce(true as any);
-    await expect(noticeSend({ level: "info", body: "ok" })).resolves.toBe(true);
+    vi.mocked(commands.noticeSend)
+      .mockResolvedValueOnce({ status: "ok", data: true })
+      .mockResolvedValueOnce({ status: "ok", data: false });
 
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce(false as any);
+    await expect(noticeSend({ level: "info", body: "ok" })).resolves.toBe(true);
     await expect(noticeSend({ level: "warning", body: "no" })).resolves.toBe(false);
   });
 
   it("rethrows invoke errors and logs", async () => {
-    vi.mocked(invokeTauriOrNull).mockRejectedValueOnce(new Error("notice boom"));
+    vi.mocked(commands.noticeSend).mockRejectedValueOnce(new Error("notice boom"));
 
     await expect(noticeSend({ level: "error", body: "x" })).rejects.toThrow("notice boom");
 
@@ -44,7 +50,7 @@ describe("services/notification/notice", () => {
   });
 
   it("treats null invoke result as error with runtime", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce(null as any);
+    vi.mocked(commands.noticeSend).mockResolvedValueOnce(null as any);
 
     await expect(noticeSend({ level: "info", body: "x" })).rejects.toThrow(
       "IPC_NULL_RESULT: notice_send"

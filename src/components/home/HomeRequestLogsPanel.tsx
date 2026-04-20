@@ -13,6 +13,10 @@ import type {
   CliSessionsFolderLookupInput,
   CliSessionsSource,
 } from "../../services/cli/cliSessions";
+import {
+  isPersistedRequestLogInProgress,
+  requestLogCreatedAtMs,
+} from "../../services/gateway/requestLogState";
 import type { RequestLogSummary } from "../../services/gateway/requestLogs";
 import type { TraceSession } from "../../services/gateway/traceStore";
 import { Button } from "../../ui/Button";
@@ -40,7 +44,6 @@ import {
   FolderBadge,
   FreeBadge,
   getErrorCodeLabel,
-  isPersistedRequestLogInProgress,
   resolveLiveTraceDurationMs,
   resolveLiveTraceProvider,
   SessionReuseBadge,
@@ -80,12 +83,6 @@ function sessionFolderLookupKey(cliKey: string, sessionId: string | null | undef
   const normalized = sessionId?.trim();
   if (!normalized) return null;
   return `${cliKey}:${normalized}`;
-}
-
-function requestLogCreatedAtMs(log: RequestLogSummary) {
-  const ms = log.created_at_ms ?? 0;
-  if (Number.isFinite(ms) && ms > 0) return ms;
-  return log.created_at * 1000;
 }
 
 function makeSortRequestLogsForDisplay(liveTraceIds: ReadonlySet<string>) {

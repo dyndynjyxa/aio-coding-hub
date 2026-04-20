@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -33,6 +33,7 @@ import { useProviderLimitUsageV1Query } from "../../query/providerLimitUsage";
 import { useCliProxy } from "../../hooks/useCliProxy";
 import { useHomeWorkspaceConfigs } from "../home/hooks/useHomeWorkspaceConfigs";
 import { emitBackgroundTaskVisibilityTrigger } from "../../services/backgroundTasks";
+import { backgroundTaskVisibilityTriggers } from "../../constants/backgroundTaskContracts";
 import { writeHomeOverviewLogsPrimaryLayoutToStorage } from "../../services/home/homeOverviewLayout";
 
 vi.mock("sonner", () => ({
@@ -438,8 +439,12 @@ describe("pages/HomePage", () => {
       expect(screen.getByText("open-circuits:3")).toBeInTheDocument();
 
       // auto refresh timer should invalidate circuits after earliest open_until
-      vi.advanceTimersByTime(2250);
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: gatewayKeys.circuits() });
+      act(() => {
+        vi.advanceTimersByTime(2250);
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: gatewayKeys.circuitStatus("gemini"),
+      });
 
       // reset provider success / fail / error
       fireEvent.click(screen.getByRole("button", { name: "reset-1" }));
@@ -461,11 +466,17 @@ describe("pages/HomePage", () => {
       });
 
       // refresh callbacks (toasts on error)
-      fireEvent.click(screen.getByRole("button", { name: "refresh-heatmap" }));
-      await Promise.resolve();
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "refresh-heatmap" }));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
       expect(toast).toHaveBeenCalledWith("刷新用量失败：请查看控制台日志");
-      fireEvent.click(screen.getByRole("button", { name: "refresh-logs" }));
-      await Promise.resolve();
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "refresh-logs" }));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
       expect(toast).toHaveBeenCalledWith("读取使用记录失败：请查看控制台日志");
 
       // same switch is ignored
@@ -582,7 +593,9 @@ describe("pages/HomePage", () => {
     renderWithProviders(client, <HomePage />);
 
     await waitFor(() =>
-      expect(emitBackgroundTaskVisibilityTrigger).toHaveBeenCalledWith("home-overview-visible")
+      expect(emitBackgroundTaskVisibilityTrigger).toHaveBeenCalledWith(
+        backgroundTaskVisibilityTriggers.homeOverviewVisible
+      )
     );
 
     vi.mocked(emitBackgroundTaskVisibilityTrigger).mockClear();
@@ -590,7 +603,9 @@ describe("pages/HomePage", () => {
     fireEvent.click(screen.getByRole("tab", { name: "概览" }));
 
     await waitFor(() =>
-      expect(emitBackgroundTaskVisibilityTrigger).toHaveBeenCalledWith("home-overview-visible")
+      expect(emitBackgroundTaskVisibilityTrigger).toHaveBeenCalledWith(
+        backgroundTaskVisibilityTriggers.homeOverviewVisible
+      )
     );
   });
 
@@ -915,8 +930,12 @@ describe("pages/HomePage", () => {
 
     // rows with open_until=null should fall back to 30s auto refresh
     expect(screen.getByText("open-circuits:1")).toBeInTheDocument();
-    vi.advanceTimersByTime(30_000);
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: gatewayKeys.circuits() });
+    act(() => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: gatewayKeys.circuitStatus("codex"),
+    });
 
     vi.useRealTimers();
 
@@ -1008,13 +1027,16 @@ describe("pages/HomePage", () => {
 
     // start switching codex and keep promise pending
     fireEvent.click(screen.getByRole("button", { name: "request-switch-codex-1" }));
-    await Promise.resolve();
+    await waitFor(() => expect(activeSetMutation.mutateAsync).toHaveBeenCalledTimes(1));
 
     // switchingCliKey != null => setCliActiveMode early returns for other cli
     fireEvent.click(screen.getByRole("button", { name: "request-switch-claude-2" }));
     expect(activeSetMutation.mutateAsync).toHaveBeenCalledTimes(1);
 
-    resolveActiveSet({ cli_key: "codex", mode_id: null });
+    await act(async () => {
+      resolveActiveSet({ cli_key: "codex", mode_id: null });
+      await Promise.resolve();
+    });
     await waitFor(() => expect(toast).toHaveBeenCalledWith("已切回：Default"));
   });
 
@@ -1085,9 +1107,13 @@ describe("pages/HomePage", () => {
     renderWithProviders(client, <HomePage />);
 
     fireEvent.click(screen.getByRole("button", { name: "request-switch-codex-1" }));
+    await waitFor(() =>
+      expect(activeSetMutation.mutateAsync).toHaveBeenCalledWith({ cliKey: "codex", modeId: 1 })
+    );
     await waitFor(() => expect(toast).toHaveBeenCalledWith("已激活：#999"));
 
     fireEvent.click(screen.getByRole("button", { name: "request-switch-codex-1" }));
+    await waitFor(() => expect(activeSetMutation.mutateAsync).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(toast).toHaveBeenCalledWith("切换排序模板失败：Error: boom"));
     expect(logToConsole).toHaveBeenCalledWith(
       "error",

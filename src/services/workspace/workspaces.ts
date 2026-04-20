@@ -1,4 +1,5 @@
-import { invokeService } from "../invokeServiceCommand";
+import { commands } from "../../generated/bindings";
+import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
 import type { CliKey } from "../providers/providers";
 
 export type WorkspaceSummary = {
@@ -15,7 +16,13 @@ export type WorkspacesListResult = {
 };
 
 export async function workspacesList(cliKey: CliKey) {
-  return invokeService<WorkspacesListResult>("读取工作区列表失败", "workspaces_list", { cliKey });
+  return invokeGeneratedIpc<WorkspacesListResult>({
+    title: "读取工作区列表失败",
+    cmd: "workspaces_list",
+    args: { cliKey },
+    invoke: () =>
+      commands.workspacesList(cliKey) as Promise<GeneratedCommandResult<WorkspacesListResult>>,
+  });
 }
 
 export async function workspaceCreate(input: {
@@ -23,22 +30,45 @@ export async function workspaceCreate(input: {
   name: string;
   clone_from_active?: boolean;
 }) {
-  return invokeService<WorkspaceSummary>("创建工作区失败", "workspace_create", {
-    cliKey: input.cli_key,
-    name: input.name,
-    cloneFromActive: input.clone_from_active ?? false,
+  return invokeGeneratedIpc<WorkspaceSummary>({
+    title: "创建工作区失败",
+    cmd: "workspace_create",
+    args: {
+      cliKey: input.cli_key,
+      name: input.name,
+      cloneFromActive: input.clone_from_active ?? false,
+    },
+    invoke: () =>
+      commands.workspaceCreate(
+        input.cli_key,
+        input.name,
+        input.clone_from_active ?? false
+      ) as Promise<GeneratedCommandResult<WorkspaceSummary>>,
   });
 }
 
 export async function workspaceRename(input: { workspace_id: number; name: string }) {
-  return invokeService<WorkspaceSummary>("重命名工作区失败", "workspace_rename", {
-    workspaceId: input.workspace_id,
-    name: input.name,
+  return invokeGeneratedIpc<WorkspaceSummary>({
+    title: "重命名工作区失败",
+    cmd: "workspace_rename",
+    args: {
+      workspaceId: input.workspace_id,
+      name: input.name,
+    },
+    invoke: () =>
+      commands.workspaceRename(input.workspace_id, input.name) as Promise<
+        GeneratedCommandResult<WorkspaceSummary>
+      >,
   });
 }
 
 export async function workspaceDelete(workspaceId: number) {
-  return invokeService<boolean>("删除工作区失败", "workspace_delete", { workspaceId });
+  return invokeGeneratedIpc<boolean>({
+    title: "删除工作区失败",
+    cmd: "workspace_delete",
+    args: { workspaceId },
+    invoke: () => commands.workspaceDelete(workspaceId) as Promise<GeneratedCommandResult<boolean>>,
+  });
 }
 
 export type WorkspacePreview = {
@@ -72,13 +102,21 @@ export type WorkspaceApplyReport = {
 };
 
 export async function workspacePreview(workspaceId: number) {
-  return invokeService<WorkspacePreview>("读取工作区预览失败", "workspace_preview", {
-    workspaceId,
+  return invokeGeneratedIpc<WorkspacePreview>({
+    title: "读取工作区预览失败",
+    cmd: "workspace_preview",
+    args: { workspaceId },
+    invoke: () =>
+      commands.workspacePreview(workspaceId) as Promise<GeneratedCommandResult<WorkspacePreview>>,
   });
 }
 
 export async function workspaceApply(workspaceId: number) {
-  return invokeService<WorkspaceApplyReport>("应用工作区失败", "workspace_apply", {
-    workspaceId,
+  return invokeGeneratedIpc<WorkspaceApplyReport>({
+    title: "应用工作区失败",
+    cmd: "workspace_apply",
+    args: { workspaceId },
+    invoke: () =>
+      commands.workspaceApply(workspaceId) as Promise<GeneratedCommandResult<WorkspaceApplyReport>>,
   });
 }

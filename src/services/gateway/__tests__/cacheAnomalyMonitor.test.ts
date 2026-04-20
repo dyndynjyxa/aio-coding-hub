@@ -360,7 +360,9 @@ describe("services/gateway/cacheAnomalyMonitor", () => {
     expect(getCacheAnomalyMonitorEnabled()).toBe(false);
     expect(tauriInvoke).toHaveBeenCalledWith(
       "notice_send",
-      expect.objectContaining({ level: "error", title: "缓存异常监测已关闭" })
+      expect.objectContaining({
+        input: expect.objectContaining({ level: "error", title: "缓存异常监测已关闭" }),
+      })
     );
 
     vi.useRealTimers();
@@ -480,7 +482,7 @@ describe("services/gateway/cacheAnomalyMonitor", () => {
 
     expect(tauriInvoke).toHaveBeenCalledWith(
       "notice_send",
-      expect.objectContaining({ level: "warning" })
+      expect.objectContaining({ input: expect.objectContaining({ level: "warning" }) })
     );
 
     vi.useRealTimers();
@@ -557,7 +559,7 @@ describe("services/gateway/cacheAnomalyMonitor", () => {
 
     expect(tauriInvoke).toHaveBeenCalledWith(
       "notice_send",
-      expect.objectContaining({ level: "warning" })
+      expect.objectContaining({ input: expect.objectContaining({ level: "warning" }) })
     );
 
     vi.useRealTimers();
@@ -604,7 +606,7 @@ describe("services/gateway/cacheAnomalyMonitor", () => {
 
     expect(tauriInvoke).toHaveBeenCalledWith(
       "notice_send",
-      expect.objectContaining({ level: "warning" })
+      expect.objectContaining({ input: expect.objectContaining({ level: "warning" }) })
     );
 
     vi.useRealTimers();
@@ -642,7 +644,7 @@ describe("services/gateway/cacheAnomalyMonitor", () => {
 
     expect(tauriInvoke).toHaveBeenCalledWith(
       "notice_send",
-      expect.objectContaining({ level: "warning" })
+      expect.objectContaining({ input: expect.objectContaining({ level: "warning" }) })
     );
 
     vi.useRealTimers();

@@ -43,3 +43,4 @@ src/templates/
 .codex-temp/
 .opencode/
 src-tauri/target*/
+.pnpm-store/

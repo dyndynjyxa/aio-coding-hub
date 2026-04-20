@@ -1,13 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
+import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
 import { envConflictsCheck } from "../envConflicts";
-import { invokeTauriOrNull } from "../../tauriInvoke";
 
-vi.mock("../../tauriInvoke", async () => {
-  const actual = await vi.importActual<typeof import("../../tauriInvoke")>("../../tauriInvoke");
+vi.mock("../../../generated/bindings", async () => {
+  const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
+    "../../../generated/bindings"
+  );
   return {
     ...actual,
-    invokeTauriOrNull: vi.fn(),
+    commands: {
+      ...actual.commands,
+      envConflictsCheck: vi.fn(),
+    },
   };
 });
 
@@ -21,7 +26,7 @@ vi.mock("../../consoleLog", async () => {
 
 describe("services/cli/envConflicts", () => {
   it("rethrows invoke errors and logs", async () => {
-    vi.mocked(invokeTauriOrNull).mockRejectedValueOnce(new Error("env conflicts boom"));
+    vi.mocked(commands.envConflictsCheck).mockRejectedValueOnce(new Error("env conflicts boom"));
 
     await expect(envConflictsCheck("codex")).rejects.toThrow("env conflicts boom");
     expect(logToConsole).toHaveBeenCalledWith(
@@ -34,20 +39,19 @@ describe("services/cli/envConflicts", () => {
     );
   });
 
-  it("treats null invoke result as error with runtime", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce(null);
+  it("returns null fallback when generated command returns null", async () => {
+    vi.mocked(commands.envConflictsCheck).mockResolvedValueOnce(null as any);
 
-    await expect(envConflictsCheck("codex")).rejects.toThrow(
-      "IPC_NULL_RESULT: env_conflicts_check"
-    );
+    await expect(envConflictsCheck("codex")).resolves.toBeNull();
   });
 
   it("keeps argument mapping unchanged", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValue([] as any);
+    vi.mocked(commands.envConflictsCheck).mockResolvedValue({
+      status: "ok",
+      data: [] as any,
+    });
 
     await envConflictsCheck("codex");
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("env_conflicts_check", {
-      cliKey: "codex",
-    });
+    expect(commands.envConflictsCheck).toHaveBeenCalledWith("codex");
   });
 });

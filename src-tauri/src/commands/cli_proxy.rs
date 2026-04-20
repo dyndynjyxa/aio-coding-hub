@@ -7,6 +7,7 @@ use crate::{blocking, cli_proxy, mcp, settings};
 use tauri::Manager;
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_proxy_status_all(
     app: tauri::AppHandle,
 ) -> Result<Vec<cli_proxy::CliProxyStatus>, String> {
@@ -34,6 +35,7 @@ pub(crate) async fn cli_proxy_status_all(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_proxy_set_enabled(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -202,6 +204,7 @@ pub(crate) async fn cli_proxy_set_disabled_impl<R: tauri::Runtime>(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_proxy_sync_enabled(
     app: tauri::AppHandle,
     base_origin: String,
@@ -215,6 +218,7 @@ pub(crate) async fn cli_proxy_sync_enabled(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_proxy_rebind_codex_home(
     app: tauri::AppHandle,
 ) -> Result<cli_proxy::CliProxyResult, String> {

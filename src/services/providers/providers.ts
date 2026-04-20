@@ -1,48 +1,66 @@
-import { commands } from "../../generated/bindings";
+import {
+  commands,
+  type ClaudeModels as GeneratedClaudeModels,
+  type DailyResetMode as GeneratedDailyResetMode,
+  type ProviderAuthMode as GeneratedProviderAuthMode,
+  type ProviderBaseUrlMode as GeneratedProviderBaseUrlMode,
+  type ProviderOAuthDisconnectResult,
+  type ProviderOAuthLimitsResult,
+  type ProviderOAuthRefreshResult,
+  type ProviderOAuthStartFlowResult,
+  type ProviderOAuthStatusResult,
+  type ProviderSummary as GeneratedProviderSummary,
+  type ProviderUpsertInput as GeneratedProviderUpsertInput,
+} from "../../generated/bindings";
 import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
-import { invokeService } from "../invokeServiceCommand";
-import { invokeTauriOrNull } from "../tauriInvoke";
+
+type Override<TValue, TOverrides> = Omit<TValue, keyof TOverrides> & TOverrides;
+
+type NullableGeneratedKeys<TValue extends object> = {
+  [TKey in keyof TValue]-?: null extends TValue[TKey] ? TKey : never;
+}[keyof TValue];
+
+type NonNullableGeneratedKeys<TValue extends object> = Exclude<
+  keyof TValue,
+  NullableGeneratedKeys<TValue>
+>;
+
+type OptionalNullableGeneratedFields<TValue extends object> = Pick<
+  TValue,
+  NonNullableGeneratedKeys<TValue>
+> &
+  Partial<Pick<TValue, NullableGeneratedKeys<TValue>>>;
+
+type RemapGeneratedKeys<
+  TValue extends object,
+  TMap extends Partial<Record<keyof TValue, PropertyKey>>,
+> = {
+  [TKey in keyof TValue as TKey extends keyof TMap ? TMap[TKey] & PropertyKey : TKey]: TValue[TKey];
+};
+
+export type {
+  ProviderOAuthDisconnectResult,
+  ProviderOAuthLimitsResult,
+  ProviderOAuthRefreshResult,
+  ProviderOAuthStartFlowResult,
+  ProviderOAuthStatusResult,
+};
 
 export type CliKey = "claude" | "codex" | "gemini";
 
-export type ClaudeModels = {
-  main_model?: string | null;
-  reasoning_model?: string | null;
-  haiku_model?: string | null;
-  sonnet_model?: string | null;
-  opus_model?: string | null;
-};
+export type ClaudeModels = GeneratedClaudeModels;
+export type DailyResetMode = GeneratedDailyResetMode;
+export type ProviderAuthMode = GeneratedProviderAuthMode;
+export type ProviderBaseUrlMode = GeneratedProviderBaseUrlMode;
 
-export type ProviderSummary = {
-  id: number;
-  cli_key: CliKey;
-  name: string;
-  base_urls: string[];
-  base_url_mode: "order" | "ping";
-  claude_models: ClaudeModels;
-  enabled: boolean;
-  priority: number;
-  cost_multiplier: number;
-  limit_5h_usd: number | null;
-  limit_daily_usd: number | null;
-  daily_reset_mode: "fixed" | "rolling";
-  daily_reset_time: string;
-  limit_weekly_usd: number | null;
-  limit_monthly_usd: number | null;
-  limit_total_usd: number | null;
-  tags: string[];
-  note: string;
-  created_at: number;
-  updated_at: number;
-  auth_mode: "api_key" | "oauth";
-  oauth_provider_type: string | null;
-  oauth_email: string | null;
-  oauth_expires_at: number | null;
-  oauth_last_error: string | null;
-  source_provider_id: number | null;
-  bridge_type: string | null;
-  stream_idle_timeout_seconds: number | null;
-};
+export type ProviderSummary = Override<
+  GeneratedProviderSummary,
+  {
+    cli_key: CliKey;
+    auth_mode: ProviderAuthMode;
+    api_key_configured?: GeneratedProviderSummary["api_key_configured"];
+  }
+>;
 
 export async function providersList(cliKey: CliKey) {
   return invokeGeneratedIpc<ProviderSummary[]>({
@@ -54,31 +72,52 @@ export async function providersList(cliKey: CliKey) {
   });
 }
 
-export async function providerUpsert(input: {
-  provider_id?: number | null;
-  cli_key: CliKey;
-  name: string;
-  base_urls: string[];
-  base_url_mode: "order" | "ping";
-  auth_mode?: "api_key" | "oauth" | null;
-  api_key?: string | null;
-  enabled: boolean;
-  cost_multiplier: number;
-  priority?: number | null;
-  claude_models?: ClaudeModels | null;
-  limit_5h_usd: number | null;
-  limit_daily_usd: number | null;
-  daily_reset_mode: "fixed" | "rolling";
-  daily_reset_time: string;
-  limit_weekly_usd: number | null;
-  limit_monthly_usd: number | null;
-  limit_total_usd: number | null;
-  tags?: string[];
-  note?: string;
-  source_provider_id?: number | null;
-  bridge_type?: string | null;
-  stream_idle_timeout_seconds?: number | null;
-}) {
+const providerUpsertFieldMap = {
+  providerId: "provider_id",
+  cliKey: "cli_key",
+  name: "name",
+  baseUrls: "base_urls",
+  baseUrlMode: "base_url_mode",
+  authMode: "auth_mode",
+  apiKey: "api_key",
+  enabled: "enabled",
+  costMultiplier: "cost_multiplier",
+  priority: "priority",
+  claudeModels: "claude_models",
+  limit5hUsd: "limit_5h_usd",
+  limitDailyUsd: "limit_daily_usd",
+  dailyResetMode: "daily_reset_mode",
+  dailyResetTime: "daily_reset_time",
+  limitWeeklyUsd: "limit_weekly_usd",
+  limitMonthlyUsd: "limit_monthly_usd",
+  limitTotalUsd: "limit_total_usd",
+  tags: "tags",
+  note: "note",
+  sourceProviderId: "source_provider_id",
+  bridgeType: "bridge_type",
+  streamIdleTimeoutSeconds: "stream_idle_timeout_seconds",
+} as const satisfies Record<keyof GeneratedProviderUpsertInput, string>;
+
+type ProviderUpsertTransportInput = OptionalNullableGeneratedFields<GeneratedProviderUpsertInput>;
+
+export type ProviderUpsertInput = Override<
+  RemapGeneratedKeys<ProviderUpsertTransportInput, typeof providerUpsertFieldMap>,
+  {
+    cli_key: CliKey;
+    auth_mode?: ProviderAuthMode | null;
+    base_url_mode: ProviderBaseUrlMode;
+    claude_models?: ClaudeModels | null;
+    limit_5h_usd: number | null;
+    limit_daily_usd: number | null;
+    daily_reset_mode: DailyResetMode;
+    daily_reset_time: string;
+    limit_weekly_usd: number | null;
+    limit_monthly_usd: number | null;
+    limit_total_usd: number | null;
+  }
+>;
+
+export async function providerUpsert(input: ProviderUpsertInput) {
   const streamIdleTimeoutSeconds = Object.prototype.hasOwnProperty.call(
     input,
     "stream_idle_timeout_seconds"
@@ -125,93 +164,156 @@ export async function providerUpsert(input: {
 }
 
 export async function baseUrlPingMs(baseUrl: string) {
-  return invokeService<number>("测试 Base URL 延迟失败", "base_url_ping_ms", { baseUrl });
+  return invokeGeneratedIpc<number>({
+    title: "测试 Base URL 延迟失败",
+    cmd: "base_url_ping_ms",
+    args: { baseUrl },
+    invoke: () => commands.baseUrlPingMs(baseUrl) as Promise<GeneratedCommandResult<number>>,
+  });
 }
 
-export async function providerSetEnabled(providerId: number, enabled: boolean) {
-  return invokeService<ProviderSummary>("更新供应商启用状态失败", "provider_set_enabled", {
-    providerId,
-    enabled,
+export async function providerSetEnabled(
+  providerId: number,
+  enabled: boolean
+): Promise<ProviderSummary | null> {
+  return invokeGeneratedIpc<ProviderSummary>({
+    title: "更新供应商启用状态失败",
+    cmd: "provider_set_enabled",
+    args: { providerId, enabled },
+    invoke: () =>
+      commands.providerSetEnabled(providerId, enabled) as Promise<
+        GeneratedCommandResult<ProviderSummary>
+      >,
   });
 }
 
 export async function providerDelete(providerId: number) {
-  return invokeService<boolean>("删除供应商失败", "provider_delete", { providerId });
-}
-
-export async function providersReorder(cliKey: CliKey, orderedProviderIds: number[]) {
-  return invokeService<ProviderSummary[]>("调整供应商顺序失败", "providers_reorder", {
-    cliKey,
-    orderedProviderIds,
+  return invokeGeneratedIpc<boolean>({
+    title: "删除供应商失败",
+    cmd: "provider_delete",
+    args: { providerId },
+    invoke: () => commands.providerDelete(providerId) as Promise<GeneratedCommandResult<boolean>>,
   });
 }
 
-export async function providerGetApiKey(providerId: number) {
-  return invokeService<string>("读取 API Key 失败", "provider_get_api_key", { providerId });
+export async function providersReorder(
+  cliKey: CliKey,
+  orderedProviderIds: number[]
+): Promise<ProviderSummary[] | null> {
+  return invokeGeneratedIpc<ProviderSummary[]>({
+    title: "调整供应商顺序失败",
+    cmd: "providers_reorder",
+    args: { cliKey, orderedProviderIds },
+    invoke: () =>
+      commands.providersReorder(cliKey, orderedProviderIds) as Promise<
+        GeneratedCommandResult<ProviderSummary[]>
+      >,
+  });
+}
+
+export async function providerDuplicate(providerId: number): Promise<ProviderSummary | null> {
+  return invokeGeneratedIpc<ProviderSummary>({
+    title: "复制供应商失败",
+    cmd: "provider_duplicate",
+    args: { providerId },
+    invoke: () =>
+      commands.providerDuplicate(providerId) as Promise<GeneratedCommandResult<ProviderSummary>>,
+  });
+}
+
+export async function providerCopyApiKeyToClipboard(providerId: number) {
+  return invokeGeneratedIpc<boolean>({
+    title: "复制 API Key 失败",
+    cmd: "provider_copy_api_key_to_clipboard",
+    args: { providerId },
+    invoke: () =>
+      commands.providerCopyApiKeyToClipboard(providerId) as Promise<
+        GeneratedCommandResult<boolean>
+      >,
+  });
 }
 
 export async function providerClaudeTerminalLaunchCommand(providerId: number) {
-  return invokeService<string>(
-    "生成 Claude 终端启动命令失败",
-    "provider_claude_terminal_launch_command",
-    { providerId }
-  );
+  return invokeGeneratedIpc<string>({
+    title: "生成 Claude 终端启动命令失败",
+    cmd: "provider_claude_terminal_launch_command",
+    args: { providerId },
+    invoke: () =>
+      commands.providerClaudeTerminalLaunchCommand(providerId) as Promise<
+        GeneratedCommandResult<string>
+      >,
+  });
 }
 
 export async function providerOAuthStartFlow(
   cliKey: string,
   providerId: number
-): Promise<{ success: boolean; provider_type?: string; expires_at?: number } | null> {
-  return invokeTauriOrNull<{ success: boolean; provider_type?: string; expires_at?: number }>(
-    "provider_oauth_start_flow",
-    { cliKey, providerId },
-    { timeoutMs: 0 }
-  );
+): Promise<ProviderOAuthStartFlowResult> {
+  return invokeGeneratedIpc<ProviderOAuthStartFlowResult>({
+    title: "启动 OAuth 登录失败",
+    cmd: "provider_oauth_start_flow",
+    args: { cliKey, providerId },
+    invoke: () =>
+      commands.providerOauthStartFlow(cliKey, providerId) as Promise<
+        GeneratedCommandResult<ProviderOAuthStartFlowResult>
+      >,
+  });
 }
 
 export async function providerOAuthRefresh(
   providerId: number
-): Promise<{ success: boolean; expires_at?: number } | null> {
-  return invokeTauriOrNull<{ success: boolean; expires_at?: number }>("provider_oauth_refresh", {
-    providerId,
+): Promise<ProviderOAuthRefreshResult> {
+  return invokeGeneratedIpc<ProviderOAuthRefreshResult>({
+    title: "刷新 OAuth 登录失败",
+    cmd: "provider_oauth_refresh",
+    args: { providerId },
+    invoke: () =>
+      commands.providerOauthRefresh(providerId) as Promise<
+        GeneratedCommandResult<ProviderOAuthRefreshResult>
+      >,
   });
 }
 
 export async function providerOAuthDisconnect(
   providerId: number
-): Promise<{ success: boolean } | null> {
-  return invokeTauriOrNull<{ success: boolean }>("provider_oauth_disconnect", { providerId });
+): Promise<ProviderOAuthDisconnectResult> {
+  return invokeGeneratedIpc<ProviderOAuthDisconnectResult>({
+    title: "断开 OAuth 登录失败",
+    cmd: "provider_oauth_disconnect",
+    args: { providerId },
+    invoke: () =>
+      commands.providerOauthDisconnect(providerId) as Promise<
+        GeneratedCommandResult<ProviderOAuthDisconnectResult>
+      >,
+  });
 }
 
-export async function providerOAuthStatus(providerId: number): Promise<{
-  connected: boolean;
-  provider_type?: string;
-  email?: string;
-  expires_at?: number;
-  has_refresh_token?: boolean;
-} | null> {
-  return invokeTauriOrNull<{
-    connected: boolean;
-    provider_type?: string;
-    email?: string;
-    expires_at?: number;
-    has_refresh_token?: boolean;
-  }>("provider_oauth_status", { providerId });
+export async function providerOAuthStatus(providerId: number): Promise<ProviderOAuthStatusResult> {
+  return invokeGeneratedIpc<ProviderOAuthStatusResult>({
+    title: "读取 OAuth 状态失败",
+    cmd: "provider_oauth_status",
+    args: { providerId },
+    invoke: () =>
+      commands.providerOauthStatus(providerId) as Promise<
+        GeneratedCommandResult<ProviderOAuthStatusResult>
+      >,
+  });
 }
 
-export type OAuthLimitsResult = {
-  limit_short_label?: string | null;
-  limit_5h_text?: string | null;
-  limit_weekly_text?: string | null;
-  limit_5h_reset_at?: number | null;
-  limit_weekly_reset_at?: number | null;
-  raw_json?: Record<string, unknown> | null;
-};
+export type OAuthLimitsResult = ProviderOAuthLimitsResult;
 
 export async function providerOAuthFetchLimits(
   providerId: number
 ): Promise<OAuthLimitsResult | null> {
-  return invokeTauriOrNull<OAuthLimitsResult>("provider_oauth_fetch_limits", { providerId });
+  return invokeGeneratedIpc<OAuthLimitsResult>({
+    title: "读取 OAuth 限额失败",
+    cmd: "provider_oauth_fetch_limits",
+    args: { providerId },
+    invoke: () =>
+      commands.providerOauthFetchLimits(providerId) as Promise<
+        GeneratedCommandResult<OAuthLimitsResult>
+      >,
+  });
 }
 
 // ---------------------------------------------------------------------------

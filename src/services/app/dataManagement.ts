@@ -1,37 +1,53 @@
-import { invokeService } from "../invokeServiceCommand";
+import { commands, type ClearRequestLogsResult, type DbDiskUsage } from "../../generated/bindings";
+import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
 
-export type DbDiskUsage = {
-  db_bytes: number;
-  wal_bytes: number;
-  shm_bytes: number;
-  total_bytes: number;
-};
-
-export type ClearRequestLogsResult = {
-  request_logs_deleted: number;
-  request_attempt_logs_deleted: number;
-};
+export type { ClearRequestLogsResult, DbDiskUsage };
 
 export async function dbDiskUsageGet() {
-  return invokeService<DbDiskUsage>("读取数据库磁盘用量失败", "db_disk_usage_get");
+  return invokeGeneratedIpc<DbDiskUsage>({
+    title: "读取数据库磁盘用量失败",
+    cmd: "db_disk_usage_get",
+    invoke: () => commands.dbDiskUsageGet() as Promise<GeneratedCommandResult<DbDiskUsage>>,
+  });
 }
 
 export async function requestLogsClearAll() {
-  return invokeService<ClearRequestLogsResult>("清空请求日志失败", "request_logs_clear_all");
+  return invokeGeneratedIpc<ClearRequestLogsResult>({
+    title: "清空请求日志失败",
+    cmd: "request_logs_clear_all",
+    invoke: () =>
+      commands.requestLogsClearAll() as Promise<GeneratedCommandResult<ClearRequestLogsResult>>,
+  });
 }
 
 export async function appDataReset() {
-  return invokeService<boolean>("重置应用数据失败", "app_data_reset");
+  return invokeGeneratedIpc<boolean>({
+    title: "重置应用数据失败",
+    cmd: "app_data_reset",
+    invoke: () => commands.appDataReset() as Promise<GeneratedCommandResult<boolean>>,
+  });
 }
 
 export async function appDataDirGet() {
-  return invokeService<string>("读取应用数据目录失败", "app_data_dir_get");
+  return invokeGeneratedIpc<string>({
+    title: "读取应用数据目录失败",
+    cmd: "app_data_dir_get",
+    invoke: () => commands.appDataDirGet() as Promise<GeneratedCommandResult<string>>,
+  });
 }
 
 export async function appExit() {
-  return invokeService<boolean>("退出应用失败", "app_exit");
+  return invokeGeneratedIpc<boolean>({
+    title: "退出应用失败",
+    cmd: "app_exit",
+    invoke: () => commands.appExit() as Promise<GeneratedCommandResult<boolean>>,
+  });
 }
 
 export async function appRestart() {
-  return invokeService<boolean>("重启应用失败", "app_restart");
+  return invokeGeneratedIpc<boolean>({
+    title: "重启应用失败",
+    cmd: "app_restart",
+    invoke: () => commands.appRestart() as Promise<GeneratedCommandResult<boolean>>,
+  });
 }

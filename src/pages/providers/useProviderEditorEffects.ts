@@ -1,15 +1,14 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { FREE_TAG } from "../../constants/providers";
 import { logToConsole } from "../../services/consoleLog";
 import {
-  providerGetApiKey,
-  providerOAuthStatus,
+  type ProviderOAuthStatusResult,
   type ClaudeModels,
   type ProviderSummary,
 } from "../../services/providers/providers";
-import { gatewayStatus } from "../../services/gateway/gateway";
-import { settingsGet } from "../../services/settings/settings";
+import type { GatewayStatus } from "../../services/gateway/gateway";
+import type { AppSettings } from "../../services/settings/settings";
 import type { ProviderEditorDialogFormInput } from "../../schemas/providerEditorDialog";
 import type { BaseUrlRow, ProviderBaseUrlMode } from "./types";
 import type { ProviderEditorInitialValues } from "./providerDuplicate";
@@ -41,10 +40,6 @@ export type EffectDeps = {
   setValue: UseFormSetValue<ProviderEditorDialogFormInput>;
   editProviderSnapshotRef: React.MutableRefObject<ProviderSummary | null>;
   baseUrlRowSeqRef: React.MutableRefObject<number>;
-  apiKeyFetchedRef: React.MutableRefObject<boolean>;
-  apiKeyFetchPromiseRef: React.MutableRefObject<Promise<string | null> | null>;
-  apiKeyFetchErrorRef: React.MutableRefObject<boolean>;
-  apiKeyRequestSeqRef: React.MutableRefObject<number>;
   oauthStatusRequestSeqRef: React.MutableRefObject<number>;
   newBaseUrlRow: (url?: string) => BaseUrlRow;
   setBaseUrlMode: (v: ProviderBaseUrlMode) => void;
@@ -56,33 +51,60 @@ export type EffectDeps = {
   setStreamIdleTimeoutSeconds: (v: string) => void;
   setAuthMode: (v: "api_key" | "oauth" | "cx2cc") => void;
   setCx2ccSourceValue: (v: string) => void;
-  setOauthStatus: (v: {
-    connected: boolean;
-    provider_type?: string;
-    email?: string;
-    expires_at?: number;
-    has_refresh_token?: boolean;
-  } | null) => void;
+  setOauthStatus: (v: ProviderOAuthStatusResult | null) => void;
   setOauthLoading: (v: boolean) => void;
-  setFetchingApiKey: (v: boolean) => void;
-  setSavedApiKey: (v: string | null) => void;
-  setCx2ccFallbackModels: (v: { main: string; haiku: string; sonnet: string; opus: string } | null) => void;
+  setCx2ccFallbackModels: (
+    v: {
+      main: string;
+      haiku: string;
+      sonnet: string;
+      opus: string;
+    } | null
+  ) => void;
   setCodexGatewayBaseOrigin: (v: string | null) => void;
+  settingsSnapshot: AppSettings | null;
+  gatewayStatusSnapshot: GatewayStatus | null;
+  oauthStatusSnapshot: ProviderOAuthStatusResult | null | undefined;
+  oauthStatusError: unknown;
 };
 
 export function useProviderEditorEffects(d: EffectDeps) {
   const {
-    open, mode, cliKey, editProvider, editingProviderId, createInitialValues,
-    authMode, costMultiplierValue, isCodexGatewaySource, selectedCx2ccSourceProvider,
-    reset, setValue,
-    editProviderSnapshotRef, baseUrlRowSeqRef, apiKeyFetchedRef, apiKeyFetchPromiseRef,
-    apiKeyFetchErrorRef, apiKeyRequestSeqRef, oauthStatusRequestSeqRef,
+    open,
+    mode,
+    cliKey,
+    editProvider,
+    editingProviderId,
+    createInitialValues,
+    authMode,
+    costMultiplierValue,
+    isCodexGatewaySource,
+    selectedCx2ccSourceProvider,
+    reset,
+    setValue,
+    editProviderSnapshotRef,
+    baseUrlRowSeqRef,
+    oauthStatusRequestSeqRef,
     newBaseUrlRow,
-    setBaseUrlMode, setBaseUrlRows, setPingingAll, setClaudeModels, setTags, setTagInput,
-    setStreamIdleTimeoutSeconds, setAuthMode, setCx2ccSourceValue, setOauthStatus,
-    setOauthLoading, setFetchingApiKey, setSavedApiKey, setCx2ccFallbackModels,
+    setBaseUrlMode,
+    setBaseUrlRows,
+    setPingingAll,
+    setClaudeModels,
+    setTags,
+    setTagInput,
+    setStreamIdleTimeoutSeconds,
+    setAuthMode,
+    setCx2ccSourceValue,
+    setOauthStatus,
+    setOauthLoading,
+    setCx2ccFallbackModels,
     setCodexGatewayBaseOrigin,
+    settingsSnapshot,
+    gatewayStatusSnapshot,
+    oauthStatusSnapshot,
+    oauthStatusError,
   } = d;
+  const oauthStatusErrorRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (mode !== "edit" || !open || !editProvider) return;
@@ -90,25 +112,16 @@ export function useProviderEditorEffects(d: EffectDeps) {
   }, [editProvider, editProviderSnapshotRef, mode, open]);
 
   useEffect(() => {
-    setFetchingApiKey(false);
     setOauthLoading(false);
-    apiKeyFetchPromiseRef.current = null;
 
     if (!open) {
-      setSavedApiKey(null);
       setOauthStatus(null);
       return () => {
-        apiKeyRequestSeqRef.current += 1;
         oauthStatusRequestSeqRef.current += 1;
-        apiKeyFetchPromiseRef.current = null;
       };
     }
 
     baseUrlRowSeqRef.current = 1;
-    apiKeyFetchedRef.current = false;
-    apiKeyFetchPromiseRef.current = null;
-    apiKeyFetchErrorRef.current = false;
-    setSavedApiKey(null);
 
     if (mode === "create") {
       setBaseUrlMode(createInitialValues?.base_url_mode ?? "order");
@@ -160,11 +173,31 @@ export function useProviderEditorEffects(d: EffectDeps) {
       note: snapshot.note ?? "",
     });
     return () => {
-      apiKeyRequestSeqRef.current += 1;
       oauthStatusRequestSeqRef.current += 1;
-      apiKeyFetchPromiseRef.current = null;
     };
-  }, [cliKey, createInitialValues, editingProviderId, mode, open, reset]);
+  }, [
+    baseUrlRowSeqRef,
+    cliKey,
+    createInitialValues,
+    editProviderSnapshotRef,
+    editingProviderId,
+    mode,
+    newBaseUrlRow,
+    oauthStatusRequestSeqRef,
+    open,
+    reset,
+    setAuthMode,
+    setBaseUrlMode,
+    setBaseUrlRows,
+    setClaudeModels,
+    setCx2ccSourceValue,
+    setOauthLoading,
+    setOauthStatus,
+    setPingingAll,
+    setStreamIdleTimeoutSeconds,
+    setTagInput,
+    setTags,
+  ]);
 
   useEffect(() => {
     if (authMode !== "cx2cc") return;
@@ -181,68 +214,31 @@ export function useProviderEditorEffects(d: EffectDeps) {
 
   useEffect(() => {
     if (!open || cliKey !== "claude") return;
-    let cancelled = false;
 
-    void Promise.all([settingsGet(), gatewayStatus()])
-      .then(([settings, status]) => {
-        if (cancelled) return;
-        if (settings) {
-          setCx2ccFallbackModels({
-            main: settings.cx2cc_fallback_model_main.trim(),
-            haiku: settings.cx2cc_fallback_model_haiku.trim(),
-            sonnet: settings.cx2cc_fallback_model_sonnet.trim(),
-            opus: settings.cx2cc_fallback_model_opus.trim(),
-          });
-          setCodexGatewayBaseOrigin(
-            status?.base_url?.trim() || `http://127.0.0.1:${settings.preferred_port}`
-          );
-          return;
-        }
-        setCx2ccFallbackModels(null);
-        setCodexGatewayBaseOrigin(status?.base_url?.trim() || null);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setCx2ccFallbackModels(null);
-        setCodexGatewayBaseOrigin(null);
+    if (settingsSnapshot) {
+      setCx2ccFallbackModels({
+        main: settingsSnapshot.cx2cc_fallback_model_main.trim(),
+        haiku: settingsSnapshot.cx2cc_fallback_model_haiku.trim(),
+        sonnet: settingsSnapshot.cx2cc_fallback_model_sonnet.trim(),
+        opus: settingsSnapshot.cx2cc_fallback_model_opus.trim(),
       });
+      setCodexGatewayBaseOrigin(
+        gatewayStatusSnapshot?.base_url?.trim() ||
+          `http://127.0.0.1:${settingsSnapshot.preferred_port}`
+      );
+      return;
+    }
 
-    return () => { cancelled = true; };
-  }, [cliKey, open, setCx2ccFallbackModels, setCodexGatewayBaseOrigin]);
-
-  useEffect(() => {
-    if (!open || mode !== "edit" || !editingProviderId || authMode !== "api_key") return;
-    if (apiKeyFetchedRef.current || apiKeyFetchPromiseRef.current) return;
-
-    const requestSeq = ++apiKeyRequestSeqRef.current;
-    setFetchingApiKey(true);
-    const request = Promise.resolve(providerGetApiKey(editingProviderId))
-      .then((key) => {
-        if (apiKeyRequestSeqRef.current !== requestSeq) return null;
-        const normalized = key?.trim() ? key : null;
-        apiKeyFetchedRef.current = true;
-        apiKeyFetchErrorRef.current = false;
-        setSavedApiKey(normalized);
-        setValue("api_key", normalized ?? "", {
-          shouldDirty: false,
-          shouldTouch: false,
-          shouldValidate: false,
-        });
-        return normalized;
-      })
-      .catch(() => {
-        if (apiKeyRequestSeqRef.current !== requestSeq) return null;
-        apiKeyFetchErrorRef.current = true;
-        return null;
-      })
-      .finally(() => {
-        if (apiKeyRequestSeqRef.current !== requestSeq) return;
-        apiKeyFetchPromiseRef.current = null;
-        setFetchingApiKey(false);
-      });
-
-    apiKeyFetchPromiseRef.current = request;
-  }, [authMode, editingProviderId, mode, open, setValue]);
+    setCx2ccFallbackModels(null);
+    setCodexGatewayBaseOrigin(gatewayStatusSnapshot?.base_url?.trim() || null);
+  }, [
+    cliKey,
+    gatewayStatusSnapshot?.base_url,
+    open,
+    setCodexGatewayBaseOrigin,
+    setCx2ccFallbackModels,
+    settingsSnapshot,
+  ]);
 
   useEffect(() => {
     if (!open) return;
@@ -264,22 +260,22 @@ export function useProviderEditorEffects(d: EffectDeps) {
   }, [costMultiplierValue, open, setTags]);
 
   useEffect(() => {
-    if (editProvider?.id && editProvider.auth_mode === "oauth") {
-      const requestSeq = ++oauthStatusRequestSeqRef.current;
-      providerOAuthStatus(editProvider.id)
-        .then((status) => {
-          if (oauthStatusRequestSeqRef.current !== requestSeq) return;
-          setOauthStatus(status);
-        })
-        .catch((err) => {
-          if (oauthStatusRequestSeqRef.current !== requestSeq) return;
-          logToConsole("error", "加载 OAuth 状态失败", {
-            provider_id: editProvider.id,
-            cli_key: editProvider.cli_key,
-            error: String(err),
-          });
-          toast(`加载 OAuth 状态失败：${String(err)}`);
-        });
-    }
-  }, [editProvider?.auth_mode, editProvider?.cli_key, editProvider?.id, oauthStatusRequestSeqRef, setOauthStatus]);
+    if (!open || editProvider?.auth_mode !== "oauth") return;
+    if (oauthStatusSnapshot === undefined) return;
+    oauthStatusErrorRef.current = null;
+    setOauthStatus(oauthStatusSnapshot);
+  }, [editProvider?.auth_mode, oauthStatusSnapshot, open, setOauthStatus]);
+
+  useEffect(() => {
+    if (!open || editProvider?.auth_mode !== "oauth" || !oauthStatusError) return;
+    const errorText = String(oauthStatusError);
+    if (oauthStatusErrorRef.current === errorText) return;
+    oauthStatusErrorRef.current = errorText;
+    logToConsole("error", "加载 OAuth 状态失败", {
+      provider_id: editProvider.id,
+      cli_key: editProvider.cli_key,
+      error: errorText,
+    });
+    toast(`加载 OAuth 状态失败：${errorText}`);
+  }, [editProvider?.auth_mode, editProvider?.cli_key, editProvider?.id, oauthStatusError, open]);
 }

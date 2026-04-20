@@ -300,7 +300,7 @@ describe("query/skills", () => {
 
   it("useSkillsDiscoverAvailableMutation handles null rows", async () => {
     setTauriRuntime();
-    vi.mocked(skillsDiscoverAvailable).mockResolvedValue(null);
+    vi.mocked(skillsDiscoverAvailable).mockResolvedValue(null as never);
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
@@ -349,7 +349,7 @@ describe("query/skills", () => {
 
   it("useSkillRepoUpsertMutation no-ops on null response", async () => {
     setTauriRuntime();
-    vi.mocked(skillRepoUpsert).mockResolvedValue(null);
+    vi.mocked(skillRepoUpsert).mockResolvedValue(null as never);
 
     const client = createTestQueryClient();
     client.setQueryData(skillsKeys.reposList(), []);
@@ -509,7 +509,7 @@ describe("query/skills", () => {
 
   it("useSkillInstallMutation no-ops on null response", async () => {
     setTauriRuntime();
-    vi.mocked(skillInstall).mockResolvedValue(null);
+    vi.mocked(skillInstall).mockResolvedValue(null as never);
 
     const client = createTestQueryClient();
     client.setQueryData(skillsKeys.installedList(1), []);
@@ -602,7 +602,7 @@ describe("query/skills", () => {
 
   it("useSkillInstallToLocalMutation no-ops on null response", async () => {
     setTauriRuntime();
-    vi.mocked(skillInstallToLocal).mockResolvedValue(null);
+    vi.mocked(skillInstallToLocal).mockResolvedValue(null as never);
 
     const client = createTestQueryClient();
     client.setQueryData(skillsKeys.localList(1), []);
@@ -666,7 +666,7 @@ describe("query/skills", () => {
 
   it("useSkillSetEnabledMutation no-ops on null response", async () => {
     setTauriRuntime();
-    vi.mocked(skillSetEnabled).mockResolvedValue(null);
+    vi.mocked(skillSetEnabled).mockResolvedValue(null as never);
 
     const prev: InstalledSkillSummary = {
       id: 10,
@@ -914,7 +914,7 @@ describe("query/skills", () => {
 
   it("useSkillImportLocalMutation no-ops on null response", async () => {
     setTauriRuntime();
-    vi.mocked(skillImportLocal).mockResolvedValue(null);
+    vi.mocked(skillImportLocal).mockResolvedValue(null as never);
 
     const locals: LocalSkillSummary[] = [
       { dir_name: "s2", path: "/tmp/s2", name: "S2", description: "d2" },
@@ -1009,7 +1009,7 @@ describe("query/skills", () => {
 
   it("useSkillsImportLocalBatchMutation no-ops on null response", async () => {
     setTauriRuntime();
-    vi.mocked(skillsImportLocalBatch).mockResolvedValue(null);
+    vi.mocked(skillsImportLocalBatch).mockResolvedValue(null as never);
 
     const prev: InstalledSkillSummary[] = [
       {

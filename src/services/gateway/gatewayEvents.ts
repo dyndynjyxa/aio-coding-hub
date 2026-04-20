@@ -48,6 +48,15 @@ export type GatewayRequestStartEvent = {
   ts: number;
 };
 
+export type GatewayRequestSignalEvent = {
+  trace_id: string;
+  cli_key: string;
+  session_id?: string | null;
+  requested_model?: string | null;
+  phase: "start" | "complete";
+  ts: number;
+};
+
 export type GatewayAttemptEvent = {
   trace_id: string;
   cli_key: string;

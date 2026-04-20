@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
-import { invokeTauriOrNull } from "../../tauriInvoke";
 import {
   usageHourlySeries,
   usageLeaderboardDay,
@@ -11,11 +11,22 @@ import {
   usageSummaryV2,
 } from "../usage";
 
-vi.mock("../../tauriInvoke", async () => {
-  const actual = await vi.importActual<typeof import("../../tauriInvoke")>("../../tauriInvoke");
+vi.mock("../../../generated/bindings", async () => {
+  const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
+    "../../../generated/bindings"
+  );
   return {
     ...actual,
-    invokeTauriOrNull: vi.fn(),
+    commands: {
+      ...actual.commands,
+      usageSummary: vi.fn(),
+      usageLeaderboardProvider: vi.fn(),
+      usageLeaderboardDay: vi.fn(),
+      usageHourlySeries: vi.fn(),
+      usageSummaryV2: vi.fn(),
+      usageLeaderboardV2: vi.fn(),
+      usageProviderCacheRateTrendV1: vi.fn(),
+    },
   };
 });
 
@@ -29,7 +40,7 @@ vi.mock("../../consoleLog", async () => {
 
 describe("services/usage/usage", () => {
   it("rethrows invoke errors and logs", async () => {
-    vi.mocked(invokeTauriOrNull).mockRejectedValueOnce(new Error("usage boom"));
+    vi.mocked(commands.usageSummary).mockRejectedValueOnce(new Error("usage boom"));
 
     await expect(usageSummary("today")).rejects.toThrow("usage boom");
     expect(logToConsole).toHaveBeenCalledWith(
@@ -43,13 +54,25 @@ describe("services/usage/usage", () => {
   });
 
   it("treats null invoke result as error with runtime", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce(null);
+    vi.mocked(commands.usageSummary).mockResolvedValueOnce(null as any);
 
     await expect(usageSummary("today")).rejects.toThrow("IPC_NULL_RESULT: usage_summary");
   });
 
-  it("passes normalized args to invokeTauriOrNull", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValue({} as any);
+  it("passes normalized args to generated commands", async () => {
+    vi.mocked(commands.usageSummary).mockResolvedValue({ status: "ok", data: {} as any });
+    vi.mocked(commands.usageLeaderboardProvider).mockResolvedValue({
+      status: "ok",
+      data: [] as any,
+    });
+    vi.mocked(commands.usageLeaderboardDay).mockResolvedValue({ status: "ok", data: [] as any });
+    vi.mocked(commands.usageHourlySeries).mockResolvedValue({ status: "ok", data: [] as any });
+    vi.mocked(commands.usageSummaryV2).mockResolvedValue({ status: "ok", data: {} as any });
+    vi.mocked(commands.usageLeaderboardV2).mockResolvedValue({ status: "ok", data: [] as any });
+    vi.mocked(commands.usageProviderCacheRateTrendV1).mockResolvedValue({
+      status: "ok",
+      data: [] as any,
+    });
 
     await usageSummary("today");
     await usageSummary("last7", { cliKey: "claude" });
@@ -82,81 +105,60 @@ describe("services/usage/usage", () => {
       limit: 20,
     });
 
-    expect(vi.mocked(invokeTauriOrNull).mock.calls).toEqual(
-      expect.arrayContaining([
-        ["usage_summary", { range: "today", cliKey: null }],
-        ["usage_summary", { range: "last7", cliKey: "claude" }],
-        ["usage_leaderboard_provider", { range: "today", cliKey: null, limit: undefined }],
-        ["usage_leaderboard_provider", { range: "today", cliKey: "codex", limit: 10 }],
-        ["usage_leaderboard_day", { range: "today", cliKey: null, limit: undefined }],
-        ["usage_leaderboard_day", { range: "today", cliKey: "gemini", limit: 20 }],
-        ["usage_hourly_series", { days: 15 }],
-        [
-          "usage_summary_v2",
-          {
-            params: {
-              period: "custom",
-              startTs: null,
-              endTs: null,
-              cliKey: null,
-              providerId: null,
-            },
-          },
-        ],
-        [
-          "usage_summary_v2",
-          {
-            params: {
-              period: "custom",
-              startTs: 1,
-              endTs: 2,
-              cliKey: "gemini",
-              providerId: 7,
-            },
-          },
-        ],
-        [
-          "usage_leaderboard_v2",
-          {
-            scope: "provider",
-            params: {
-              period: "custom",
-              startTs: null,
-              endTs: null,
-              cliKey: null,
-              providerId: null,
-            },
-            limit: undefined,
-          },
-        ],
-        [
-          "usage_leaderboard_v2",
-          {
-            scope: "provider",
-            params: {
-              period: "custom",
-              startTs: 1,
-              endTs: 2,
-              cliKey: "claude",
-              providerId: 9,
-            },
-            limit: null,
-          },
-        ],
-        [
-          "usage_provider_cache_rate_trend_v1",
-          {
-            params: {
-              period: "daily",
-              startTs: 1,
-              endTs: 2,
-              cliKey: "claude",
-              providerId: 11,
-            },
-            limit: 20,
-          },
-        ],
-      ])
+    expect(commands.usageSummary).toHaveBeenNthCalledWith(1, "today", null);
+    expect(commands.usageSummary).toHaveBeenNthCalledWith(2, "last7", "claude");
+    expect(commands.usageLeaderboardProvider).toHaveBeenNthCalledWith(1, "today", null, null);
+    expect(commands.usageLeaderboardProvider).toHaveBeenNthCalledWith(2, "today", "codex", 10);
+    expect(commands.usageLeaderboardDay).toHaveBeenNthCalledWith(1, "today", null, null);
+    expect(commands.usageLeaderboardDay).toHaveBeenNthCalledWith(2, "today", "gemini", 20);
+    expect(commands.usageHourlySeries).toHaveBeenCalledWith(15);
+    expect(commands.usageSummaryV2).toHaveBeenNthCalledWith(1, {
+      period: "custom",
+      startTs: null,
+      endTs: null,
+      cliKey: null,
+      providerId: null,
+    });
+    expect(commands.usageSummaryV2).toHaveBeenNthCalledWith(2, {
+      period: "custom",
+      startTs: 1,
+      endTs: 2,
+      cliKey: "gemini",
+      providerId: 7,
+    });
+    expect(commands.usageLeaderboardV2).toHaveBeenNthCalledWith(
+      1,
+      "provider",
+      {
+        period: "custom",
+        startTs: null,
+        endTs: null,
+        cliKey: null,
+        providerId: null,
+      },
+      null
+    );
+    expect(commands.usageLeaderboardV2).toHaveBeenNthCalledWith(
+      2,
+      "provider",
+      {
+        period: "custom",
+        startTs: 1,
+        endTs: 2,
+        cliKey: "claude",
+        providerId: 9,
+      },
+      null
+    );
+    expect(commands.usageProviderCacheRateTrendV1).toHaveBeenCalledWith(
+      {
+        period: "daily",
+        startTs: 1,
+        endTs: 2,
+        cliKey: "claude",
+        providerId: 11,
+      },
+      20
     );
   });
 });

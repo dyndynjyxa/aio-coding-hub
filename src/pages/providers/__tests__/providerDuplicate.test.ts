@@ -50,7 +50,7 @@ describe("pages/providers/providerDuplicate", () => {
     );
   });
 
-  it("duplicates editable values for api-key providers and clones nested data", () => {
+  it("duplicates editable values for api-key providers and still clears sensitive api key", () => {
     const provider = createProvider({
       name: "Alpha",
       base_urls: ["https://a.example.com", "https://b.example.com"],
@@ -66,13 +66,14 @@ describe("pages/providers/providerDuplicate", () => {
 
     expect(duplicated).toMatchObject({
       name: "Alpha 副本 2",
-      api_key: "sk-live",
+      api_key: "",
       auth_mode: "api_key",
       base_url_mode: "order",
       enabled: true,
       note: "provider note",
       source_provider_id: null,
       bridge_type: null,
+      stream_idle_timeout_seconds: null,
     });
     expect(duplicated.base_urls).toEqual(["https://a.example.com", "https://b.example.com"]);
     expect(duplicated.tags).toEqual(["tag-a", "tag-b"]);

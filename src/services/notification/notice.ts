@@ -6,7 +6,8 @@
  * - `title` 为空时，Rust 会按 level 生成默认标题并追加固定前缀
  */
 
-import { invokeServiceCommand } from "../invokeServiceCommand";
+import { commands } from "../../generated/bindings";
+import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
 
 export type NoticeLevel = "info" | "success" | "warning" | "error";
 
@@ -17,10 +18,16 @@ export type NoticeSendParams = {
 };
 
 export async function noticeSend(params: NoticeSendParams): Promise<boolean> {
-  return invokeServiceCommand<boolean, false>({
+  const input = {
+    level: params.level,
+    title: params.title ?? null,
+    body: params.body,
+  };
+
+  return invokeGeneratedIpc<boolean>({
     title: "发送系统通知失败",
     cmd: "notice_send",
-    args: params,
-    fallback: false,
+    args: { input },
+    invoke: () => commands.noticeSend(input) as Promise<GeneratedCommandResult<boolean>>,
   });
 }

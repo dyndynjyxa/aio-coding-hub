@@ -18,10 +18,12 @@ pub(crate) mod util;
 mod warmup;
 
 pub use manager::GatewayManager;
+pub(crate) use manager::GatewayStartResult;
 
+use crate::settings;
 use serde::Serialize;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct GatewayStatus {
     pub running: bool,
     pub port: Option<u16>,
@@ -29,7 +31,7 @@ pub struct GatewayStatus {
     pub listen_addr: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct GatewayProviderCircuitStatus {
     pub provider_id: i64,
     pub state: String,
@@ -37,4 +39,17 @@ pub struct GatewayProviderCircuitStatus {
     pub failure_threshold: u32,
     pub open_until: Option<i64>,
     pub cooldown_until: Option<i64>,
+}
+
+pub(crate) fn planned_base_url(
+    cfg: &settings::AppSettings,
+) -> crate::shared::error::AppResult<String> {
+    manager::planned_base_url(cfg)
+}
+
+pub(crate) fn listen_rebind_required(
+    previous: &settings::AppSettings,
+    next: &settings::AppSettings,
+) -> bool {
+    manager::listen_rebind_required(previous, next)
 }

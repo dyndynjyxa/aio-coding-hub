@@ -66,7 +66,7 @@ describe("MSW defaults", () => {
       upstream_proxy_enabled: false,
       upstream_proxy_url: "",
       upstream_proxy_username: "",
-      upstream_proxy_password: "",
+      upstream_proxy_password_configured: false,
     });
   });
 });

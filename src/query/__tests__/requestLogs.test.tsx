@@ -150,7 +150,7 @@ describe("query/requestLogs", () => {
   it("calls requestLogGet when logId is provided", async () => {
     setTauriRuntime();
 
-    vi.mocked(requestLogGet).mockResolvedValue(null);
+    vi.mocked(requestLogGet).mockResolvedValue(null as any);
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);

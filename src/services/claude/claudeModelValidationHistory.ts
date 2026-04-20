@@ -1,4 +1,5 @@
-import { invokeService } from "../invokeServiceCommand";
+import { commands } from "../../generated/bindings";
+import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
 
 export type ClaudeModelValidationRunRow = {
   id: number;
@@ -9,22 +10,30 @@ export type ClaudeModelValidationRunRow = {
 };
 
 export async function claudeValidationHistoryList(input: { provider_id: number; limit?: number }) {
-  return invokeService<ClaudeModelValidationRunRow[]>(
-    "读取 Claude 模型验证历史失败",
-    "claude_validation_history_list",
-    {
+  return invokeGeneratedIpc<ClaudeModelValidationRunRow[]>({
+    title: "读取 Claude 模型验证历史失败",
+    cmd: "claude_validation_history_list",
+    args: {
       providerId: input.provider_id,
       limit: input.limit,
-    }
-  );
+    },
+    invoke: () =>
+      commands.claudeValidationHistoryList(input.provider_id, input.limit ?? null) as Promise<
+        GeneratedCommandResult<ClaudeModelValidationRunRow[]>
+      >,
+  });
 }
 
 export async function claudeValidationHistoryClearProvider(input: { provider_id: number }) {
-  return invokeService<boolean>(
-    "清空 Claude 模型验证历史失败",
-    "claude_validation_history_clear_provider",
-    {
+  return invokeGeneratedIpc<boolean>({
+    title: "清空 Claude 模型验证历史失败",
+    cmd: "claude_validation_history_clear_provider",
+    args: {
       providerId: input.provider_id,
-    }
-  );
+    },
+    invoke: () =>
+      commands.claudeValidationHistoryClearProvider(input.provider_id) as Promise<
+        GeneratedCommandResult<boolean>
+      >,
+  });
 }

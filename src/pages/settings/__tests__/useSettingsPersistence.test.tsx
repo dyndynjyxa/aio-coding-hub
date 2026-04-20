@@ -2,23 +2,15 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { logToConsole } from "../../../services/consoleLog";
-import { cliProxySyncEnabled } from "../../../services/cli/cliProxy";
-import {
-  gatewayCheckPortAvailable,
-  gatewayStart,
-  gatewayStop,
-} from "../../../services/gateway/gateway";
+import type { GatewayStatus } from "../../../services/gateway/gateway";
+import { gatewayCheckPortAvailable } from "../../../services/gateway/gateway";
+import type { AppSettings, SettingsMutationResult } from "../../../services/settings/settings";
+import { createTestAppSettings } from "../../../test/fixtures/settings";
 import { useSettingsQuery, useSettingsSetMutation } from "../../../query/settings";
 import { useSettingsPersistence } from "../useSettingsPersistence";
 
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
-vi.mock("../../../services/cli/cliProxy", async () => {
-  const actual = await vi.importActual<typeof import("../../../services/cli/cliProxy")>(
-    "../../../services/cli/cliProxy"
-  );
-  return { ...actual, cliProxySyncEnabled: vi.fn() };
-});
 vi.mock("../../../services/gateway/gateway", async () => {
   const actual = await vi.importActual<typeof import("../../../services/gateway/gateway")>(
     "../../../services/gateway/gateway"
@@ -26,8 +18,6 @@ vi.mock("../../../services/gateway/gateway", async () => {
   return {
     ...actual,
     gatewayCheckPortAvailable: vi.fn(),
-    gatewayStart: vi.fn(),
-    gatewayStop: vi.fn(),
   };
 });
 
@@ -37,34 +27,34 @@ vi.mock("../../../query/settings", async () => {
   return { ...actual, useSettingsQuery: vi.fn(), useSettingsSetMutation: vi.fn() };
 });
 
-function createSettings(overrides: Partial<any> = {}) {
+function createSettings(overrides: Partial<AppSettings> = {}) {
+  return createTestAppSettings(overrides);
+}
+
+function createGatewayStatus(overrides: Partial<GatewayStatus> = {}): GatewayStatus {
   return {
-    schema_version: 1,
-    preferred_port: 37123,
-    show_home_heatmap: true,
-    show_home_usage: true,
-    home_usage_period: "last15",
-    cli_priority_order: ["claude", "codex", "gemini"],
-    auto_start: false,
-    tray_enabled: true,
-    log_retention_days: 7,
-    provider_cooldown_seconds: 30,
-    provider_base_url_ping_cache_ttl_seconds: 60,
-    upstream_first_byte_timeout_seconds: 0,
-    upstream_stream_idle_timeout_seconds: 0,
-    upstream_request_timeout_non_streaming_seconds: 0,
-    intercept_anthropic_warmup_requests: false,
-    enable_thinking_signature_rectifier: true,
-    enable_cache_anomaly_monitor: false,
-    enable_response_fixer: true,
-    response_fixer_fix_encoding: true,
-    response_fixer_fix_sse_format: true,
-    response_fixer_fix_truncated_json: true,
-    failover_max_attempts_per_provider: 5,
-    failover_max_providers_to_try: 5,
-    circuit_breaker_failure_threshold: 5,
-    circuit_breaker_open_duration_minutes: 30,
+    running: false,
+    port: null,
+    base_url: null,
+    listen_addr: null,
     ...overrides,
+  };
+}
+
+function createSettingsMutationResult(
+  settingsOverrides: Partial<AppSettings> = {},
+  runtimeOverrides: Partial<SettingsMutationResult["runtime"]> = {}
+): SettingsMutationResult {
+  const { gateway_status: gatewayStatusOverrides, ...restRuntime } = runtimeOverrides;
+  return {
+    settings: createSettings(settingsOverrides),
+    runtime: {
+      gateway_rebound: false,
+      cli_proxy_synced: false,
+      wsl_auto_sync_triggered: false,
+      gateway_status: createGatewayStatus(gatewayStatusOverrides),
+      ...restRuntime,
+    },
   };
 }
 
@@ -447,7 +437,9 @@ describe("settings/useSettingsPersistence", () => {
     const mutation = { mutateAsync: vi.fn() };
     mutation.mutateAsync
       .mockReturnValueOnce(firstPromise)
-      .mockResolvedValueOnce(createSettings({ provider_base_url_ping_cache_ttl_seconds: 120 }));
+      .mockResolvedValueOnce(
+        createSettingsMutationResult({ provider_base_url_ping_cache_ttl_seconds: 120 })
+      );
     vi.mocked(useSettingsSetMutation).mockReturnValue(mutation as any);
 
     const { result } = renderHook(() => useSettingsPersistence({ gateway: null, about: null }));
@@ -462,7 +454,7 @@ describe("settings/useSettingsPersistence", () => {
       expect(mutation.mutateAsync).toHaveBeenCalledTimes(1);
     });
 
-    resolveFirst.fn?.(createSettings({ provider_cooldown_seconds: 12 }));
+    resolveFirst.fn?.(createSettingsMutationResult({ provider_cooldown_seconds: 12 }));
 
     await waitFor(() => {
       expect(mutation.mutateAsync).toHaveBeenCalledTimes(2);
@@ -487,7 +479,9 @@ describe("settings/useSettingsPersistence", () => {
     } as any);
 
     const mutation = { mutateAsync: vi.fn() };
-    mutation.mutateAsync.mockResolvedValue(createSettings({ home_usage_period: "month" }));
+    mutation.mutateAsync.mockResolvedValue(
+      createSettingsMutationResult({ home_usage_period: "month" })
+    );
     vi.mocked(useSettingsSetMutation).mockReturnValue(mutation as any);
 
     const { result } = renderHook(() => useSettingsPersistence({ gateway: null, about: null }));
@@ -546,7 +540,9 @@ describe("settings/useSettingsPersistence", () => {
     vi.mocked(gatewayCheckPortAvailable).mockResolvedValue(true);
 
     const mutation = { mutateAsync: vi.fn() };
-    mutation.mutateAsync.mockResolvedValue(createSettings({ log_retention_days: 10 }));
+    mutation.mutateAsync.mockResolvedValue(
+      createSettingsMutationResult({ log_retention_days: 10 })
+    );
     vi.mocked(useSettingsSetMutation).mockReturnValue(mutation as any);
 
     const { result } = renderHook(() => useSettingsPersistence({ gateway: null, about: null }));
@@ -661,24 +657,27 @@ describe("settings/useSettingsPersistence", () => {
 
     const mutation = { mutateAsync: vi.fn() };
     mutation.mutateAsync.mockResolvedValue({
-      ...createSettings({ preferred_port: 37123 }),
-      tray_enabled: undefined,
-      provider_cooldown_seconds: undefined,
-      provider_base_url_ping_cache_ttl_seconds: undefined,
-      upstream_first_byte_timeout_seconds: undefined,
-      upstream_stream_idle_timeout_seconds: undefined,
-      upstream_request_timeout_non_streaming_seconds: undefined,
-      intercept_anthropic_warmup_requests: undefined,
-      enable_thinking_signature_rectifier: undefined,
-      enable_cache_anomaly_monitor: undefined,
-      enable_response_fixer: undefined,
-      response_fixer_fix_encoding: undefined,
-      response_fixer_fix_sse_format: undefined,
-      response_fixer_fix_truncated_json: undefined,
-      failover_max_attempts_per_provider: undefined,
-      failover_max_providers_to_try: undefined,
-      circuit_breaker_failure_threshold: undefined,
-      circuit_breaker_open_duration_minutes: undefined,
+      ...createSettingsMutationResult(),
+      settings: {
+        ...createSettings({ preferred_port: 37123 }),
+        tray_enabled: undefined,
+        provider_cooldown_seconds: undefined,
+        provider_base_url_ping_cache_ttl_seconds: undefined,
+        upstream_first_byte_timeout_seconds: undefined,
+        upstream_stream_idle_timeout_seconds: undefined,
+        upstream_request_timeout_non_streaming_seconds: undefined,
+        intercept_anthropic_warmup_requests: undefined,
+        enable_thinking_signature_rectifier: undefined,
+        enable_cache_anomaly_monitor: undefined,
+        enable_response_fixer: undefined,
+        response_fixer_fix_encoding: undefined,
+        response_fixer_fix_sse_format: undefined,
+        response_fixer_fix_truncated_json: undefined,
+        failover_max_attempts_per_provider: undefined,
+        failover_max_providers_to_try: undefined,
+        circuit_breaker_failure_threshold: undefined,
+        circuit_breaker_open_duration_minutes: undefined,
+      } as unknown as AppSettings,
     });
     vi.mocked(useSettingsSetMutation).mockReturnValue(mutation as any);
 
@@ -750,7 +749,7 @@ describe("settings/useSettingsPersistence", () => {
       .mockResolvedValueOnce(true);
 
     const mutation = { mutateAsync: vi.fn() };
-    mutation.mutateAsync.mockResolvedValue(createSettings({ preferred_port: 40001 }));
+    mutation.mutateAsync.mockResolvedValue(createSettingsMutationResult({ preferred_port: 40001 }));
     vi.mocked(useSettingsSetMutation).mockReturnValue(mutation as any);
 
     const { result } = renderHook(() =>
@@ -805,7 +804,9 @@ describe("settings/useSettingsPersistence", () => {
     vi.mocked(gatewayCheckPortAvailable).mockReturnValue(portPromise as any);
 
     const mutation = { mutateAsync: vi.fn() };
-    mutation.mutateAsync.mockResolvedValue(createSettings({ provider_cooldown_seconds: 12 }));
+    mutation.mutateAsync.mockResolvedValue(
+      createSettingsMutationResult({ provider_cooldown_seconds: 12 })
+    );
     vi.mocked(useSettingsSetMutation).mockReturnValue(mutation as any);
 
     const { result } = renderHook(() =>
@@ -850,7 +851,7 @@ describe("settings/useSettingsPersistence", () => {
 
     const mutation = { mutateAsync: vi.fn() };
     mutation.mutateAsync.mockResolvedValue(
-      createSettings({ circuit_breaker_failure_threshold: 6 })
+      createSettingsMutationResult({ circuit_breaker_failure_threshold: 6 })
     );
     vi.mocked(useSettingsSetMutation).mockReturnValue(mutation as any);
 
@@ -867,7 +868,7 @@ describe("settings/useSettingsPersistence", () => {
     });
 
     await waitFor(() => expect(mutation.mutateAsync).toHaveBeenCalled());
-    expect(toast).toHaveBeenCalledWith("熔断参数已保存：重启网关后生效");
+    expect(toast).toHaveBeenCalledWith("熔断参数已即时生效");
   });
 
   it("toasts when auto start save fails and is reverted", async () => {
@@ -879,7 +880,7 @@ describe("settings/useSettingsPersistence", () => {
     } as any);
 
     const mutation = { mutateAsync: vi.fn() };
-    mutation.mutateAsync.mockResolvedValue(createSettings({ auto_start: false }));
+    mutation.mutateAsync.mockResolvedValue(createSettingsMutationResult({ auto_start: false }));
     vi.mocked(useSettingsSetMutation).mockReturnValue(mutation as any);
 
     const { result } = renderHook(() =>
@@ -899,7 +900,7 @@ describe("settings/useSettingsPersistence", () => {
     expect(toast).toHaveBeenCalledWith("开机自启设置失败，已回退");
   });
 
-  it("syncs cli proxy when port changes while gateway not running", async () => {
+  it("toasts runtime sync result when port changes while gateway not running", async () => {
     vi.mocked(useSettingsQuery).mockReturnValue({
       data: createSettings({ preferred_port: 37123 }),
       isLoading: false,
@@ -908,10 +909,16 @@ describe("settings/useSettingsPersistence", () => {
     } as any);
 
     vi.mocked(gatewayCheckPortAvailable).mockResolvedValue(true);
-    vi.mocked(cliProxySyncEnabled).mockResolvedValue([{ ok: true }] as any);
 
     const mutation = { mutateAsync: vi.fn() };
-    mutation.mutateAsync.mockResolvedValue(createSettings({ preferred_port: 40000 }));
+    mutation.mutateAsync.mockResolvedValue(
+      createSettingsMutationResult(
+        { preferred_port: 40000 },
+        {
+          cli_proxy_synced: true,
+        }
+      )
+    );
     vi.mocked(useSettingsSetMutation).mockReturnValue(mutation as any);
 
     const { result } = renderHook(() =>
@@ -934,15 +941,20 @@ describe("settings/useSettingsPersistence", () => {
     });
 
     await waitFor(() => expect(mutation.mutateAsync).toHaveBeenCalled());
-    await waitFor(() =>
-      expect(cliProxySyncEnabled).toHaveBeenCalledWith("http://127.0.0.1:40000", {
-        apply_live: false,
+    expect(logToConsole).toHaveBeenCalledWith(
+      "info",
+      "端口变更，运行态已由后端接管",
+      expect.objectContaining({
+        from: 37123,
+        to: 40000,
+        gateway_rebound: false,
+        cli_proxy_synced: true,
       })
     );
-    expect(toast).toHaveBeenCalledWith("已同步 1/1 个 CLI 代理配置");
+    expect(toast).toHaveBeenCalledWith("CLI 代理配置已同步");
   });
 
-  it("restarts gateway and syncs cli proxy when port changes while running", async () => {
+  it("toasts rebind and cli sync when backend reports a running gateway rebind", async () => {
     const base = createSettings({ preferred_port: 37123 });
     vi.mocked(useSettingsQuery).mockReturnValue({
       data: base,
@@ -952,23 +964,23 @@ describe("settings/useSettingsPersistence", () => {
     } as any);
 
     vi.mocked(gatewayCheckPortAvailable).mockResolvedValue(true);
-    vi.mocked(gatewayStop).mockResolvedValue({
-      running: false,
-      port: null,
-      base_url: null,
-      listen_addr: null,
-    } as any);
-    vi.mocked(gatewayStart).mockResolvedValue({
-      running: true,
-      port: 40001,
-      base_url: null,
-      listen_addr: null,
-    } as any);
-
-    vi.mocked(cliProxySyncEnabled).mockResolvedValue([{ ok: true }, { ok: false }] as any);
 
     const mutation = { mutateAsync: vi.fn() };
-    mutation.mutateAsync.mockResolvedValue(createSettings({ preferred_port: 40000 }));
+    mutation.mutateAsync.mockResolvedValue(
+      createSettingsMutationResult(
+        { preferred_port: 40001 },
+        {
+          gateway_rebound: true,
+          cli_proxy_synced: true,
+          gateway_status: createGatewayStatus({
+            running: true,
+            port: 40001,
+            base_url: "http://127.0.0.1:40001",
+            listen_addr: "127.0.0.1:40001",
+          }),
+        }
+      )
+    );
     vi.mocked(useSettingsSetMutation).mockReturnValue(mutation as any);
 
     const { result } = renderHook(() =>
@@ -998,17 +1010,13 @@ describe("settings/useSettingsPersistence", () => {
     });
 
     await waitFor(() => expect(mutation.mutateAsync).toHaveBeenCalled());
-    await waitFor(() => expect(gatewayStop).toHaveBeenCalled());
-    await waitFor(() => expect(gatewayStart).toHaveBeenCalled());
-
-    expect(cliProxySyncEnabled).toHaveBeenCalledWith("http://127.0.0.1:40001", {
-      apply_live: true,
-    });
-    expect(toast).toHaveBeenCalledWith("端口被占用，已切换到 40001");
-    expect(toast).toHaveBeenCalledWith("已同步 1/2 个 CLI 代理配置");
+    expect(result.current.port).toBe(40001);
+    expect(toast).toHaveBeenCalledWith("网关已按新配置重绑");
+    expect(toast).toHaveBeenCalledWith("CLI 代理配置已同步");
+    expect(toast).not.toHaveBeenCalledWith("端口被占用，已切换到 40001");
   });
 
-  it("toasts when gateway restart stop/start fails and uses base_url fallback when present", async () => {
+  it("prefers occupied-port toast when runtime gateway status differs from saved port", async () => {
     vi.mocked(useSettingsQuery).mockReturnValue({
       data: createSettings({ preferred_port: 37123 }),
       isLoading: false,
@@ -1019,121 +1027,21 @@ describe("settings/useSettingsPersistence", () => {
     vi.mocked(gatewayCheckPortAvailable).mockResolvedValue(true);
 
     const mutation = { mutateAsync: vi.fn() };
-    mutation.mutateAsync.mockImplementation(async (payload: any) => {
-      return createSettings({ preferred_port: payload?.preferredPort ?? 37123 });
-    });
-    vi.mocked(useSettingsSetMutation).mockReturnValue(mutation as any);
-
-    // 1) stop fails
-    vi.mocked(gatewayStop).mockResolvedValue(null as any);
-    vi.mocked(gatewayStart).mockResolvedValue(null as any);
-
-    const { result } = renderHook(() =>
-      useSettingsPersistence({
-        gateway: { running: true, port: 37123, base_url: null, listen_addr: null },
-        about: {
-          os: "mac",
-          arch: "arm64",
-          profile: "dev",
-          app_version: "0.0.0",
-          bundle_type: null,
-          run_mode: "desktop",
-        },
-      })
+    mutation.mutateAsync.mockResolvedValue(
+      createSettingsMutationResult(
+        { preferred_port: 40000 },
+        {
+          gateway_rebound: true,
+          cli_proxy_synced: true,
+          gateway_status: createGatewayStatus({
+            running: true,
+            port: 40002,
+            base_url: "http://127.0.0.1:40002",
+            listen_addr: "127.0.0.1:40002",
+          }),
+        }
+      )
     );
-    await waitFor(() => expect(result.current.settingsReady).toBe(true));
-
-    act(() => {
-      result.current.commitNumberField({
-        key: "preferred_port",
-        next: 40000,
-        min: 1024,
-        max: 65535,
-        invalidMessage: "bad",
-      });
-    });
-
-    await waitFor(() => expect(toast).toHaveBeenCalledWith("自动重启失败：无法停止网关"));
-
-    // 2) start fails
-    vi.mocked(gatewayStop).mockResolvedValue({
-      running: false,
-      port: null,
-      base_url: null,
-      listen_addr: null,
-    } as any);
-    vi.mocked(gatewayStart).mockResolvedValue(null as any);
-
-    act(() => {
-      result.current.commitNumberField({
-        key: "preferred_port",
-        next: 40001,
-        min: 1024,
-        max: 65535,
-        invalidMessage: "bad",
-      });
-    });
-
-    await waitFor(() => expect(toast).toHaveBeenCalledWith("自动重启失败：无法启动网关"));
-
-    // 3) happy path toast when started.port matches desired and base_url is provided
-    vi.mocked(gatewayStop).mockResolvedValue({
-      running: false,
-      port: null,
-      base_url: null,
-      listen_addr: null,
-    } as any);
-    vi.mocked(gatewayStart).mockResolvedValue({
-      running: true,
-      port: 40002,
-      base_url: "http://127.0.0.1:40002",
-      listen_addr: null,
-    } as any);
-    vi.mocked(cliProxySyncEnabled).mockResolvedValue([{ ok: true }] as any);
-
-    act(() => {
-      result.current.commitNumberField({
-        key: "preferred_port",
-        next: 40002,
-        min: 1024,
-        max: 65535,
-        invalidMessage: "bad",
-      });
-    });
-
-    await waitFor(() =>
-      expect(cliProxySyncEnabled).toHaveBeenCalledWith("http://127.0.0.1:40002", {
-        apply_live: true,
-      })
-    );
-    expect(toast).toHaveBeenCalledWith("网关已按新端口重启");
-  });
-
-  it("uses preferred_port fallback when restarted gateway returns null port/base_url", async () => {
-    vi.mocked(useSettingsQuery).mockReturnValue({
-      data: createSettings({ preferred_port: 37123 }),
-      isLoading: false,
-      isError: false,
-      error: null,
-    } as any);
-
-    vi.mocked(gatewayCheckPortAvailable).mockResolvedValue(true);
-    vi.mocked(gatewayStop).mockResolvedValue({
-      running: false,
-      port: null,
-      base_url: null,
-      listen_addr: null,
-    } as any);
-    vi.mocked(gatewayStart).mockResolvedValue({
-      running: true,
-      port: null,
-      base_url: null,
-      listen_addr: null,
-    } as any);
-    vi.mocked(cliProxySyncEnabled).mockResolvedValue([{ ok: true }] as any);
-
-    const mutation = { mutateAsync: vi.fn() };
-    mutation.mutateAsync.mockResolvedValue(createSettings({ preferred_port: 40000 }));
     vi.mocked(useSettingsSetMutation).mockReturnValue(mutation as any);
 
     const { result } = renderHook(() =>
@@ -1161,15 +1069,13 @@ describe("settings/useSettingsPersistence", () => {
       });
     });
 
-    await waitFor(() => expect(gatewayStart).toHaveBeenCalled());
-    await waitFor(() =>
-      expect(cliProxySyncEnabled).toHaveBeenCalledWith("http://127.0.0.1:40000", {
-        apply_live: true,
-      })
-    );
+    await waitFor(() => expect(mutation.mutateAsync).toHaveBeenCalled());
+    expect(toast).toHaveBeenCalledWith("端口被占用，已切换到 40002");
+    expect(toast).toHaveBeenCalledWith("CLI 代理配置已同步");
+    expect(toast).not.toHaveBeenCalledWith("网关已按新配置重绑");
   });
 
-  it("keeps saved state when post-save sync throws", async () => {
+  it("falls back to rebind toast when runtime gateway status omits bound port", async () => {
     vi.mocked(useSettingsQuery).mockReturnValue({
       data: createSettings({ preferred_port: 37123 }),
       isLoading: false,
@@ -1178,10 +1084,61 @@ describe("settings/useSettingsPersistence", () => {
     } as any);
 
     vi.mocked(gatewayCheckPortAvailable).mockResolvedValue(true);
-    vi.mocked(cliProxySyncEnabled).mockRejectedValue(new Error("sync boom"));
 
     const mutation = { mutateAsync: vi.fn() };
-    mutation.mutateAsync.mockResolvedValue(createSettings({ preferred_port: 40000 }));
+    mutation.mutateAsync.mockResolvedValue(
+      createSettingsMutationResult(
+        { preferred_port: 40000 },
+        {
+          gateway_rebound: true,
+          gateway_status: createGatewayStatus({ running: true }),
+        }
+      )
+    );
+    vi.mocked(useSettingsSetMutation).mockReturnValue(mutation as any);
+
+    const { result } = renderHook(() =>
+      useSettingsPersistence({
+        gateway: { running: true, port: 37123, base_url: null, listen_addr: null },
+        about: {
+          os: "mac",
+          arch: "arm64",
+          profile: "dev",
+          app_version: "0.0.0",
+          bundle_type: null,
+          run_mode: "desktop",
+        },
+      })
+    );
+    await waitFor(() => expect(result.current.settingsReady).toBe(true));
+
+    act(() => {
+      result.current.commitNumberField({
+        key: "preferred_port",
+        next: 40000,
+        min: 1024,
+        max: 65535,
+        invalidMessage: "bad",
+      });
+    });
+
+    await waitFor(() => expect(mutation.mutateAsync).toHaveBeenCalled());
+    expect(toast).toHaveBeenCalledWith("网关已按新配置重绑");
+    expect(toast).not.toHaveBeenCalledWith("端口被占用，已切换到 40000");
+  });
+
+  it("keeps saved state when runtime plan does not require follow-up toasts", async () => {
+    vi.mocked(useSettingsQuery).mockReturnValue({
+      data: createSettings({ preferred_port: 37123 }),
+      isLoading: false,
+      isError: false,
+      error: null,
+    } as any);
+
+    vi.mocked(gatewayCheckPortAvailable).mockResolvedValue(true);
+
+    const mutation = { mutateAsync: vi.fn() };
+    mutation.mutateAsync.mockResolvedValue(createSettingsMutationResult({ preferred_port: 40000 }));
     vi.mocked(useSettingsSetMutation).mockReturnValue(mutation as any);
 
     const { result } = renderHook(() =>
@@ -1203,10 +1160,9 @@ describe("settings/useSettingsPersistence", () => {
     });
 
     await waitFor(() => expect(mutation.mutateAsync).toHaveBeenCalled());
-    await waitFor(() =>
-      expect(toast).toHaveBeenCalledWith("设置已保存，但后续动作失败：请检查网关和 CLI 代理状态")
-    );
     expect(result.current.port).toBe(40000);
+    expect(toast).not.toHaveBeenCalledWith("网关已按新配置重绑");
+    expect(toast).not.toHaveBeenCalledWith("CLI 代理配置已同步");
     expect(toast).not.toHaveBeenCalledWith("更新设置失败：请稍后重试");
   });
 
@@ -1249,7 +1205,7 @@ describe("settings/useSettingsPersistence", () => {
     } as any);
 
     const mutation = { mutateAsync: vi.fn() };
-    mutation.mutateAsync.mockResolvedValue(createSettings({ auto_start: true }));
+    mutation.mutateAsync.mockResolvedValue(createSettingsMutationResult({ auto_start: true }));
     vi.mocked(useSettingsSetMutation).mockReturnValue(mutation as any);
 
     const { result } = renderHook(() =>

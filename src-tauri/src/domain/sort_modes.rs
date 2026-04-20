@@ -7,7 +7,7 @@ use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct SortModeSummary {
     pub id: i64,
     pub name: String,
@@ -15,14 +15,14 @@ pub struct SortModeSummary {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct SortModeActiveRow {
     pub cli_key: String,
     pub mode_id: Option<i64>,
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct SortModeProviderRow {
     pub provider_id: i64,
     pub enabled: bool,

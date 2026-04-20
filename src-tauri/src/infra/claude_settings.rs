@@ -23,7 +23,7 @@ const ENV_KEY_CLAUDE_CODE_DISABLE_1M_CONTEXT: &str = "CLAUDE_CODE_DISABLE_1M_CON
 const ENV_KEY_CLAUDE_CODE_PROXY_RESOLVES_HOSTS: &str = "CLAUDE_CODE_PROXY_RESOLVES_HOSTS";
 const ENV_KEY_CLAUDE_CODE_SKIP_PROMPT_HISTORY: &str = "CLAUDE_CODE_SKIP_PROMPT_HISTORY";
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct ClaudeSettingsState {
     pub config_dir: String,
     pub settings_path: String,
@@ -63,7 +63,7 @@ pub struct ClaudeSettingsState {
     pub env_claude_code_skip_prompt_history: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct ClaudeSettingsPatch {
     pub model: Option<String>,
     pub output_style: Option<String>,

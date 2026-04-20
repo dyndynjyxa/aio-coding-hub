@@ -19,11 +19,11 @@ function mockInvoke(overrides: {
   requestPermission?: string;
 }) {
   vi.mocked(tauriInvoke).mockImplementation(async (command: string) => {
-    if (command === "plugin:notification|is_permission_granted") {
+    if (command === "desktop_notification_is_permission_granted") {
       if (overrides.isPermissionGranted instanceof Error) throw overrides.isPermissionGranted;
       return overrides.isPermissionGranted ?? false;
     }
-    if (command === "plugin:notification|request_permission") {
+    if (command === "desktop_notification_request_permission") {
       return overrides.requestPermission ?? "denied";
     }
     return undefined;

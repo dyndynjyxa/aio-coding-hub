@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct CodexConfigState {
     pub config_dir: String,
     pub config_path: String,
@@ -48,7 +48,7 @@ pub(super) struct CodexConfigStateMeta {
     pub can_open_config_dir: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct CodexConfigPatch {
     pub model: Option<String>,
     pub approval_policy: Option<String>,
@@ -85,21 +85,21 @@ where
     Option::<u64>::deserialize(deserializer).map(Some)
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct CodexConfigTomlState {
     pub config_path: String,
     pub exists: bool,
     pub toml: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct CodexConfigTomlValidationError {
     pub message: String,
     pub line: Option<u32>,
     pub column: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct CodexConfigTomlValidationResult {
     pub ok: bool,
     pub error: Option<CodexConfigTomlValidationError>,

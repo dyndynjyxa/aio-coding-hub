@@ -1,6 +1,34 @@
 use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::{blocking, providers};
 
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
+pub(crate) struct ProviderOAuthStartFlowResult {
+    pub success: bool,
+    pub provider_id: i64,
+    pub provider_type: String,
+    pub expires_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
+pub(crate) struct ProviderOAuthRefreshResult {
+    pub success: bool,
+    pub expires_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
+pub(crate) struct ProviderOAuthDisconnectResult {
+    pub success: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
+pub(crate) struct ProviderOAuthStatusResult {
+    pub connected: bool,
+    pub provider_type: Option<String>,
+    pub email: Option<String>,
+    pub expires_at: Option<i64>,
+    pub has_refresh_token: Option<bool>,
+}
+
 fn build_oauth_authorize_url(
     endpoints: &crate::gateway::oauth::provider_trait::OAuthEndpoints,
     redirect_uri: &str,
@@ -30,12 +58,13 @@ fn build_oauth_authorize_url(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn provider_oauth_start_flow(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
     cli_key: String,
     provider_id: i64,
-) -> Result<serde_json::Value, String> {
+) -> Result<ProviderOAuthStartFlowResult, String> {
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
     let provider_cli_key = blocking::run("provider_oauth_start_flow_load_provider_cli_key", {
         let db = db.clone();
@@ -165,20 +194,21 @@ pub(crate) async fn provider_oauth_start_flow(
         format!("OAuth 登录成功：provider_id={provider_id} type={provider_type}"),
     );
 
-    Ok(serde_json::json!({
-        "success": true,
-        "provider_id": provider_id,
-        "provider_type": provider_type,
-        "expires_at": token_expires_at,
-    }))
+    Ok(ProviderOAuthStartFlowResult {
+        success: true,
+        provider_id,
+        provider_type: provider_type.to_string(),
+        expires_at: token_expires_at,
+    })
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn provider_oauth_refresh(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
     provider_id: i64,
-) -> Result<serde_json::Value, String> {
+) -> Result<ProviderOAuthRefreshResult, String> {
     let db = ensure_db_ready(app, db_state.inner()).await?;
 
     let details = blocking::run("provider_oauth_refresh_load", {
@@ -260,33 +290,35 @@ pub(crate) async fn provider_oauth_refresh(
         ));
     }
 
-    Ok(serde_json::json!({
-        "success": true,
-        "expires_at": token_set.expires_at,
-    }))
+    Ok(ProviderOAuthRefreshResult {
+        success: true,
+        expires_at: token_set.expires_at,
+    })
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn provider_oauth_disconnect(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
     provider_id: i64,
-) -> Result<serde_json::Value, String> {
+) -> Result<ProviderOAuthDisconnectResult, String> {
     let db = ensure_db_ready(app, db_state.inner()).await?;
     blocking::run("provider_oauth_disconnect", move || {
         crate::providers::clear_oauth(&db, provider_id)
     })
     .await
     .map_err(Into::<String>::into)?;
-    Ok(serde_json::json!({ "success": true }))
+    Ok(ProviderOAuthDisconnectResult { success: true })
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn provider_oauth_status(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
     provider_id: i64,
-) -> Result<serde_json::Value, String> {
+) -> Result<ProviderOAuthStatusResult, String> {
     let db = ensure_db_ready(app, db_state.inner()).await?;
     let result = blocking::run("provider_oauth_status", move || {
         crate::providers::get_oauth_details(&db, provider_id)
@@ -294,19 +326,25 @@ pub(crate) async fn provider_oauth_status(
     .await;
 
     match result {
-        Ok(details) => Ok(serde_json::json!({
-            "connected": true,
-            "provider_type": details.oauth_provider_type,
-            "email": details.oauth_email,
-            "expires_at": details.oauth_expires_at,
-            "has_refresh_token": details.oauth_refresh_token.is_some(),
-        })),
+        Ok(details) => Ok(ProviderOAuthStatusResult {
+            connected: true,
+            provider_type: Some(details.oauth_provider_type),
+            email: details.oauth_email,
+            expires_at: details.oauth_expires_at,
+            has_refresh_token: Some(details.oauth_refresh_token.is_some()),
+        }),
         Err(e) => {
             let err_str = e.to_string();
             // DB_NOT_FOUND = provider exists but has no OAuth tokens → expected disconnected state.
             // Any other error (DB_ERROR, INTERNAL_ERROR) is a real failure that must surface.
             if err_str.starts_with("DB_NOT_FOUND") {
-                Ok(serde_json::json!({ "connected": false }))
+                Ok(ProviderOAuthStatusResult {
+                    connected: false,
+                    provider_type: None,
+                    email: None,
+                    expires_at: None,
+                    has_refresh_token: None,
+                })
             } else {
                 tracing::warn!(
                     provider_id,

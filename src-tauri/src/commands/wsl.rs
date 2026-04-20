@@ -44,6 +44,7 @@ async fn resolve_wsl_host_blocking(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn wsl_detect() -> wsl::WslDetection {
     detect_wsl_blocking("wsl_detect")
         .await
@@ -54,6 +55,7 @@ pub(crate) async fn wsl_detect() -> wsl::WslDetection {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn wsl_host_address_get() -> Option<String> {
     blocking::run(
         "wsl_host_address_get",
@@ -66,6 +68,7 @@ pub(crate) async fn wsl_host_address_get() -> Option<String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn wsl_config_status_get(
     distros: Option<Vec<String>>,
 ) -> Vec<wsl::WslDistroConfigStatus> {
@@ -92,6 +95,7 @@ pub(crate) async fn wsl_config_status_get(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn wsl_configure_clients(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,

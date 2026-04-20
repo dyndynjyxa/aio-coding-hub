@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
-import { invokeTauriOrNull } from "../../tauriInvoke";
 import {
   appDataDirGet,
   appDataReset,
@@ -10,11 +10,21 @@ import {
   requestLogsClearAll,
 } from "../dataManagement";
 
-vi.mock("../../tauriInvoke", async () => {
-  const actual = await vi.importActual<typeof import("../../tauriInvoke")>("../../tauriInvoke");
+vi.mock("../../../generated/bindings", async () => {
+  const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
+    "../../../generated/bindings"
+  );
   return {
     ...actual,
-    invokeTauriOrNull: vi.fn(),
+    commands: {
+      ...actual.commands,
+      dbDiskUsageGet: vi.fn(),
+      requestLogsClearAll: vi.fn(),
+      appDataReset: vi.fn(),
+      appDataDirGet: vi.fn(),
+      appExit: vi.fn(),
+      appRestart: vi.fn(),
+    },
   };
 });
 
@@ -28,7 +38,7 @@ vi.mock("../../consoleLog", async () => {
 
 describe("services/app/dataManagement", () => {
   it("rethrows invoke errors and logs", async () => {
-    vi.mocked(invokeTauriOrNull).mockRejectedValueOnce(new Error("data management boom"));
+    vi.mocked(commands.dbDiskUsageGet).mockRejectedValueOnce(new Error("data management boom"));
 
     await expect(dbDiskUsageGet()).rejects.toThrow("data management boom");
     expect(logToConsole).toHaveBeenCalledWith(
@@ -42,30 +52,41 @@ describe("services/app/dataManagement", () => {
   });
 
   it("treats null invoke result as error with runtime", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce(null);
+    vi.mocked(commands.dbDiskUsageGet).mockResolvedValueOnce({ status: "ok", data: null as any });
 
     await expect(dbDiskUsageGet()).rejects.toThrow("IPC_NULL_RESULT: db_disk_usage_get");
   });
 
   it("invokes data management commands with expected parameters", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValue({} as any);
+    vi.mocked(commands.dbDiskUsageGet).mockResolvedValueOnce({
+      status: "ok",
+      data: { total_bytes: 0 } as any,
+    });
+    vi.mocked(commands.requestLogsClearAll).mockResolvedValueOnce({
+      status: "ok",
+      data: { request_logs_deleted: 0, request_attempt_logs_deleted: 0 } as any,
+    });
+    vi.mocked(commands.appDataReset).mockResolvedValueOnce({ status: "ok", data: true });
+    vi.mocked(commands.appDataDirGet).mockResolvedValueOnce({ status: "ok", data: "/tmp" as any });
+    vi.mocked(commands.appExit).mockResolvedValueOnce({ status: "ok", data: true });
+    vi.mocked(commands.appRestart).mockResolvedValueOnce({ status: "ok", data: true });
 
     await dbDiskUsageGet();
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("db_disk_usage_get");
+    expect(commands.dbDiskUsageGet).toHaveBeenCalledWith();
 
     await requestLogsClearAll();
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("request_logs_clear_all");
+    expect(commands.requestLogsClearAll).toHaveBeenCalledWith();
 
     await appDataReset();
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("app_data_reset");
+    expect(commands.appDataReset).toHaveBeenCalledWith();
 
     await appDataDirGet();
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("app_data_dir_get");
+    expect(commands.appDataDirGet).toHaveBeenCalledWith();
 
     await appExit();
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("app_exit");
+    expect(commands.appExit).toHaveBeenCalledWith();
 
     await appRestart();
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("app_restart");
+    expect(commands.appRestart).toHaveBeenCalledWith();
   });
 });

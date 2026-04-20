@@ -1,20 +1,22 @@
 import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { gatewayEventNames } from "../constants/gatewayEvents";
-import { gatewayKeys, requestLogsKeys, usageKeys } from "../query/keys";
+import { gatewayKeys, usageKeys } from "../query/keys";
 import { logToConsole } from "../services/consoleLog";
 import { subscribeGatewayEvent } from "../services/gateway/gatewayEventBus";
+import type { GatewayRequestSignalEvent } from "../services/gateway/gatewayEvents";
+import { isRequestSignalComplete } from "../services/gateway/requestLogState";
 
 const CIRCUIT_INVALIDATE_THROTTLE_MS = 500;
 const STATUS_INVALIDATE_THROTTLE_MS = 300;
-const REQUEST_INVALIDATE_THROTTLE_MS = 1000;
+const USAGE_INVALIDATE_THROTTLE_MS = 1000;
 
 export function useGatewayQuerySync() {
   const queryClient = useQueryClient();
 
   const circuitTimerRef = useRef<number | null>(null);
   const statusTimerRef = useRef<number | null>(null);
-  const requestTimerRef = useRef<number | null>(null);
+  const usageTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -27,8 +29,7 @@ export function useGatewayQuerySync() {
       queryClient.invalidateQueries({ queryKey: gatewayKeys.status() });
     };
 
-    const invalidateRequestDerived = () => {
-      queryClient.invalidateQueries({ queryKey: requestLogsKeys.lists() });
+    const invalidateUsageDerived = () => {
       queryClient.invalidateQueries({ queryKey: usageKeys.all });
     };
 
@@ -50,13 +51,13 @@ export function useGatewayQuerySync() {
       }, STATUS_INVALIDATE_THROTTLE_MS);
     };
 
-    const scheduleInvalidateRequestDerived = () => {
-      if (requestTimerRef.current != null) return;
-      requestTimerRef.current = window.setTimeout(() => {
-        requestTimerRef.current = null;
+    const scheduleInvalidateUsageDerived = () => {
+      if (usageTimerRef.current != null) return;
+      usageTimerRef.current = window.setTimeout(() => {
+        usageTimerRef.current = null;
         if (cancelled) return;
-        invalidateRequestDerived();
-      }, REQUEST_INVALIDATE_THROTTLE_MS);
+        invalidateUsageDerived();
+      }, USAGE_INVALIDATE_THROTTLE_MS);
     };
 
     const circuitSub = subscribeGatewayEvent(gatewayEventNames.circuit, () => {
@@ -67,12 +68,18 @@ export function useGatewayQuerySync() {
       if (cancelled) return;
       scheduleInvalidateStatus();
     });
-    const requestSub = subscribeGatewayEvent(gatewayEventNames.request, () => {
-      if (cancelled) return;
-      scheduleInvalidateRequestDerived();
-    });
+    const requestSignalSub = subscribeGatewayEvent<GatewayRequestSignalEvent>(
+      gatewayEventNames.requestSignal,
+      (payload) => {
+        if (!payload || !isRequestSignalComplete(payload)) {
+          return;
+        }
+        if (cancelled) return;
+        scheduleInvalidateUsageDerived();
+      }
+    );
 
-    void Promise.allSettled([circuitSub.ready, statusSub.ready, requestSub.ready]).then(
+    void Promise.allSettled([circuitSub.ready, statusSub.ready, requestSignalSub.ready]).then(
       (results) => {
         if (cancelled) return;
 
@@ -81,7 +88,7 @@ export function useGatewayQuerySync() {
 
         circuitSub.unsubscribe();
         statusSub.unsubscribe();
-        requestSub.unsubscribe();
+        requestSignalSub.unsubscribe();
 
         const failedResult = results.find((result) => result.status === "rejected");
         logToConsole("warn", "网关查询同步监听初始化失败", {
@@ -95,7 +102,7 @@ export function useGatewayQuerySync() {
       cancelled = true;
       circuitSub.unsubscribe();
       statusSub.unsubscribe();
-      requestSub.unsubscribe();
+      requestSignalSub.unsubscribe();
 
       if (circuitTimerRef.current != null) {
         window.clearTimeout(circuitTimerRef.current);
@@ -105,9 +112,9 @@ export function useGatewayQuerySync() {
         window.clearTimeout(statusTimerRef.current);
         statusTimerRef.current = null;
       }
-      if (requestTimerRef.current != null) {
-        window.clearTimeout(requestTimerRef.current);
-        requestTimerRef.current = null;
+      if (usageTimerRef.current != null) {
+        window.clearTimeout(usageTimerRef.current);
+        usageTimerRef.current = null;
       }
     };
   }, [queryClient]);

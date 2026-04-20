@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
-import { invokeTauriOrNull } from "../../tauriInvoke";
 import {
   cliManagerClaudeEnvSet,
   cliManagerClaudeInfoGet,
@@ -13,11 +13,24 @@ import {
   cliManagerCodexInfoGet,
 } from "../cliManager";
 
-vi.mock("../../tauriInvoke", async () => {
-  const actual = await vi.importActual<typeof import("../../tauriInvoke")>("../../tauriInvoke");
+vi.mock("../../../generated/bindings", async () => {
+  const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
+    "../../../generated/bindings"
+  );
   return {
     ...actual,
-    invokeTauriOrNull: vi.fn(),
+    commands: {
+      ...actual.commands,
+      cliManagerClaudeInfoGet: vi.fn(),
+      cliManagerCodexInfoGet: vi.fn(),
+      cliManagerCodexConfigSet: vi.fn(),
+      cliManagerCodexConfigTomlGet: vi.fn(),
+      cliManagerCodexConfigTomlValidate: vi.fn(),
+      cliManagerCodexConfigTomlSet: vi.fn(),
+      cliManagerClaudeEnvSet: vi.fn(),
+      cliManagerClaudeSettingsGet: vi.fn(),
+      cliManagerClaudeSettingsSet: vi.fn(),
+    },
   };
 });
 
@@ -31,7 +44,9 @@ vi.mock("../../consoleLog", async () => {
 
 describe("services/cli/cliManager", () => {
   it("rethrows invoke errors and logs", async () => {
-    vi.mocked(invokeTauriOrNull).mockRejectedValueOnce(new Error("cli manager boom"));
+    vi.mocked(commands.cliManagerClaudeInfoGet).mockRejectedValueOnce(
+      new Error("cli manager boom")
+    );
 
     await expect(cliManagerClaudeInfoGet()).rejects.toThrow("cli manager boom");
     expect(logToConsole).toHaveBeenCalledWith(
@@ -45,7 +60,7 @@ describe("services/cli/cliManager", () => {
   });
 
   it("treats null invoke result as error with runtime", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce(null);
+    vi.mocked(commands.cliManagerClaudeInfoGet).mockResolvedValueOnce(null as any);
 
     await expect(cliManagerClaudeInfoGet()).rejects.toThrow(
       "IPC_NULL_RESULT: cli_manager_claude_info_get"
@@ -53,41 +68,65 @@ describe("services/cli/cliManager", () => {
   });
 
   it("keeps argument mapping unchanged", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValue({} as any);
+    vi.mocked(commands.cliManagerCodexInfoGet).mockResolvedValue({
+      status: "ok",
+      data: {} as any,
+    });
+    vi.mocked(commands.cliManagerCodexConfigSet).mockResolvedValue({
+      status: "ok",
+      data: {} as any,
+    });
+    vi.mocked(commands.cliManagerCodexConfigTomlGet).mockResolvedValue({
+      status: "ok",
+      data: {} as any,
+    });
+    vi.mocked(commands.cliManagerCodexConfigTomlValidate).mockResolvedValue({
+      status: "ok",
+      data: {} as any,
+    });
+    vi.mocked(commands.cliManagerCodexConfigTomlSet).mockResolvedValue({
+      status: "ok",
+      data: {} as any,
+    });
+    vi.mocked(commands.cliManagerClaudeEnvSet).mockResolvedValue({
+      status: "ok",
+      data: {} as any,
+    });
+    vi.mocked(commands.cliManagerClaudeSettingsGet).mockResolvedValue({
+      status: "ok",
+      data: {} as any,
+    });
+    vi.mocked(commands.cliManagerClaudeSettingsSet).mockResolvedValue({
+      status: "ok",
+      data: {} as any,
+    });
 
     await cliManagerCodexInfoGet();
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("cli_manager_codex_info_get");
+    expect(commands.cliManagerCodexInfoGet).toHaveBeenCalledWith();
 
     await cliManagerCodexConfigSet({ model: "gpt-5" });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("cli_manager_codex_config_set", {
-      patch: { model: "gpt-5" },
-    });
+    expect(commands.cliManagerCodexConfigSet).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "gpt-5" })
+    );
 
     await cliManagerCodexConfigTomlGet();
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("cli_manager_codex_config_toml_get");
+    expect(commands.cliManagerCodexConfigTomlGet).toHaveBeenCalledWith();
 
     await cliManagerCodexConfigTomlValidate('model = "gpt-5"');
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("cli_manager_codex_config_toml_validate", {
-      toml: 'model = "gpt-5"',
-    });
+    expect(commands.cliManagerCodexConfigTomlValidate).toHaveBeenCalledWith('model = "gpt-5"');
 
     await cliManagerCodexConfigTomlSet('model = "gpt-5"');
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("cli_manager_codex_config_toml_set", {
-      toml: 'model = "gpt-5"',
-    });
+    expect(commands.cliManagerCodexConfigTomlSet).toHaveBeenCalledWith('model = "gpt-5"');
 
     await cliManagerClaudeEnvSet({ mcp_timeout_ms: 30_000, disable_error_reporting: true });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("cli_manager_claude_env_set", {
-      mcpTimeoutMs: 30_000,
-      disableErrorReporting: true,
-    });
+    expect(commands.cliManagerClaudeEnvSet).toHaveBeenCalledWith(30_000, true);
 
     await cliManagerClaudeSettingsGet();
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("cli_manager_claude_settings_get");
+    expect(commands.cliManagerClaudeSettingsGet).toHaveBeenCalledWith();
 
     await cliManagerClaudeSettingsSet({ model: "claude-3" });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("cli_manager_claude_settings_set", {
-      patch: { model: "claude-3" },
-    });
+    expect(commands.cliManagerClaudeSettingsSet).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "claude-3" })
+    );
   });
 });

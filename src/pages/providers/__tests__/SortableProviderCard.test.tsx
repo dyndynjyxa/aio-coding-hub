@@ -131,8 +131,11 @@ describe("pages/providers/SortableProviderCard", () => {
 
   it("fetches OAuth limits on button click", async () => {
     vi.mocked(providerOAuthFetchLimits).mockResolvedValue({
+      limit_short_label: null,
       limit_5h_text: "100 requests",
       limit_weekly_text: "1000 requests",
+      limit_5h_reset_at: null,
+      limit_weekly_reset_at: null,
     });
 
     renderCard({
@@ -146,8 +149,11 @@ describe("pages/providers/SortableProviderCard", () => {
 
   it("auto-fetches OAuth limits on mount for oauth providers", async () => {
     vi.mocked(providerOAuthFetchLimits).mockResolvedValue({
+      limit_short_label: null,
       limit_5h_text: "auto",
       limit_weekly_text: "200",
+      limit_5h_reset_at: null,
+      limit_weekly_reset_at: null,
     });
 
     renderCard({
@@ -163,6 +169,8 @@ describe("pages/providers/SortableProviderCard", () => {
       limit_short_label: "短窗",
       limit_5h_text: "88",
       limit_weekly_text: "300",
+      limit_5h_reset_at: null,
+      limit_weekly_reset_at: null,
     });
 
     renderCard({
@@ -181,6 +189,8 @@ describe("pages/providers/SortableProviderCard", () => {
       limit_short_label: "1h",
       limit_5h_text: "88",
       limit_weekly_text: "300",
+      limit_5h_reset_at: null,
+      limit_weekly_reset_at: null,
     });
 
     renderCard({

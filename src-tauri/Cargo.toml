@@ -1,6 +1,6 @@
 [package]
 name = "aio-coding-hub"
-version = "0.39.0"
+version = "0.39.2"
 description = "AIO Coding Hub"
 authors = ["dyndynjyxa"]
 edition = "2021"
@@ -54,7 +54,7 @@ chrono = { version = "0.4", default-features = false, features = ["std"] }
 tracing-appender = "0.2"
 tracing-log = "0.2"
 thiserror = "2"
-specta = { version = "=2.0.0-rc.22", features = ["derive"] }
+specta = { version = "=2.0.0-rc.22", features = ["derive", "serde_json"] }
 regex = "1"
 specta-typescript = "0.0.9"
 tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
@@ -65,6 +65,7 @@ tauri-plugin-updater = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-notification = "2"
+tauri-plugin-window-state = "2"
 
 [target."cfg(windows)".dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_Registry", "Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }

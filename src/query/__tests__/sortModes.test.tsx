@@ -140,7 +140,7 @@ describe("query/sortModes", () => {
 
     const previous: SortModeActiveRow[] = [{ cli_key: "claude", mode_id: 1, updated_at: 0 }];
 
-    vi.mocked(sortModeActiveSet).mockResolvedValue(null);
+    vi.mocked(sortModeActiveSet).mockResolvedValue(null as never);
 
     const client = createTestQueryClient();
     client.setQueryData(sortModesKeys.activeList(), previous);
@@ -157,7 +157,7 @@ describe("query/sortModes", () => {
   it("invalidates even when service returns null and cache is missing", async () => {
     setTauriRuntime();
 
-    vi.mocked(sortModeActiveSet).mockResolvedValue(null);
+    vi.mocked(sortModeActiveSet).mockResolvedValue(null as never);
 
     const client = createTestQueryClient();
     const invalidateSpy = vi.spyOn(client, "invalidateQueries");

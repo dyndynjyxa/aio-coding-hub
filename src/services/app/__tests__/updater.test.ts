@@ -54,7 +54,7 @@ describe("services/app/updater", () => {
 
     const events: any[] = [];
     vi.mocked(tauriInvoke).mockImplementation(async (cmd: string, args?: any) => {
-      if (cmd !== "plugin:updater|download_and_install") return null as any;
+      if (cmd !== "desktop_updater_download_and_install") return null as any;
 
       const ch = args?.onEvent;
       ch?.__emit?.({ foo: 1 }); // ignored
@@ -62,7 +62,7 @@ describe("services/app/updater", () => {
       ch?.__emit?.({ event: "progress", data: { chunkLength: 10 } });
       ch?.__emit?.({ event: "progress", data: { chunkLength: "bad" } }); // ignored chunkLength
       ch?.__emit?.({ event: "finished", data: { ok: true } });
-      return null as any;
+      return true as any;
     });
 
     const ok = await updaterDownloadAndInstall({
@@ -73,7 +73,7 @@ describe("services/app/updater", () => {
 
     expect(ok).toBe(true);
     expect(tauriInvoke).toHaveBeenCalledWith(
-      "plugin:updater|download_and_install",
+      "desktop_updater_download_and_install",
       expect.objectContaining({
         rid: 99,
         timeout: 1234,
@@ -87,5 +87,35 @@ describe("services/app/updater", () => {
       { event: "progress", data: { chunkLength: undefined } },
       { event: "finished", data: { ok: true } },
     ]);
+  });
+
+  it("updaterDownloadAndInstall tolerates missing callback and default timeout branches", async () => {
+    const { updaterDownloadAndInstall } = await import("../updater");
+
+    setTauriRuntime();
+
+    vi.mocked(tauriInvoke).mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd !== "desktop_updater_download_and_install") return null as any;
+
+      const ch = args?.onEvent;
+      ch?.__emit?.({ event: "started", data: "invalid" });
+      ch?.__emit?.({ event: "progress", data: null });
+      ch?.__emit?.({ event: "finished" });
+      return true as any;
+    });
+
+    const ok = await updaterDownloadAndInstall({
+      rid: 7,
+    });
+
+    expect(ok).toBe(true);
+    expect(tauriInvoke).toHaveBeenCalledWith(
+      "desktop_updater_download_and_install",
+      expect.objectContaining({
+        rid: 7,
+        timeout: null,
+        onEvent: expect.anything(),
+      })
+    );
   });
 });

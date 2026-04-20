@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { WslSettingsCard } from "../WslSettingsCard";
 import { useAppAboutQuery } from "../../../query/appAbout";
-import { useSettingsSetMutation } from "../../../query/settings";
+import { useSettingsPatchMutation } from "../../../query/settings";
 import { useWslConfigureClientsMutation, useWslOverviewQuery } from "../../../query/wsl";
 import { toast } from "sonner";
 import { emitTauriEvent, tauriListen } from "../../../test/mocks/tauri";
@@ -18,7 +18,7 @@ vi.mock("../../../query/appAbout", async () => {
 vi.mock("../../../query/settings", async () => {
   const actual =
     await vi.importActual<typeof import("../../../query/settings")>("../../../query/settings");
-  return { ...actual, useSettingsSetMutation: vi.fn() };
+  return { ...actual, useSettingsPatchMutation: vi.fn() };
 });
 
 vi.mock("../../../query/wsl", async () => {
@@ -28,7 +28,7 @@ vi.mock("../../../query/wsl", async () => {
 
 describe("components/cli-manager/WslSettingsCard", () => {
   it("renders unavailable state when not available", () => {
-    vi.mocked(useSettingsSetMutation).mockReturnValue({
+    vi.mocked(useSettingsPatchMutation).mockReturnValue({
       isPending: false,
       mutateAsync: vi.fn(),
     } as any);
@@ -52,7 +52,7 @@ describe("components/cli-manager/WslSettingsCard", () => {
 
   it("refreshes overview and runs configure flow", async () => {
     const overviewRefetch = vi.fn().mockResolvedValue({ data: {} });
-    vi.mocked(useSettingsSetMutation).mockReturnValue({
+    vi.mocked(useSettingsPatchMutation).mockReturnValue({
       isPending: false,
       mutateAsync: vi.fn(),
     } as any);
@@ -114,7 +114,7 @@ describe("components/cli-manager/WslSettingsCard", () => {
   });
 
   it("shows configure guard toasts (unsupported OS / not detected)", async () => {
-    vi.mocked(useSettingsSetMutation).mockReturnValue({
+    vi.mocked(useSettingsPatchMutation).mockReturnValue({
       isPending: false,
       mutateAsync: vi.fn(),
     } as any);
@@ -165,7 +165,7 @@ describe("components/cli-manager/WslSettingsCard", () => {
   });
 
   it("handles listener setup failures without leaking unhandled rejections", async () => {
-    vi.mocked(useSettingsSetMutation).mockReturnValue({
+    vi.mocked(useSettingsPatchMutation).mockReturnValue({
       isPending: false,
       mutateAsync: vi.fn(),
     } as any);
@@ -208,7 +208,7 @@ describe("components/cli-manager/WslSettingsCard", () => {
   });
 
   it("handles configure report null + failure fallback + errors", async () => {
-    vi.mocked(useSettingsSetMutation).mockReturnValue({
+    vi.mocked(useSettingsPatchMutation).mockReturnValue({
       isPending: false,
       mutateAsync: vi.fn(),
     } as any);
@@ -281,7 +281,7 @@ describe("components/cli-manager/WslSettingsCard", () => {
   });
 
   it("renders config status table when statusRows available", () => {
-    vi.mocked(useSettingsSetMutation).mockReturnValue({
+    vi.mocked(useSettingsPatchMutation).mockReturnValue({
       isPending: false,
       mutateAsync: vi.fn(),
     } as any);
@@ -357,7 +357,7 @@ describe("components/cli-manager/WslSettingsCard", () => {
   });
 
   it("shows localhost listen mode warning", () => {
-    vi.mocked(useSettingsSetMutation).mockReturnValue({
+    vi.mocked(useSettingsPatchMutation).mockReturnValue({
       isPending: false,
       mutateAsync: vi.fn(),
     } as any);
@@ -399,7 +399,7 @@ describe("components/cli-manager/WslSettingsCard", () => {
   });
 
   it("does not show localhost warning when listen mode is not localhost", () => {
-    vi.mocked(useSettingsSetMutation).mockReturnValue({
+    vi.mocked(useSettingsPatchMutation).mockReturnValue({
       isPending: false,
       mutateAsync: vi.fn(),
     } as any);
@@ -438,7 +438,7 @@ describe("components/cli-manager/WslSettingsCard", () => {
   });
 
   it("shows auto-config hint", () => {
-    vi.mocked(useSettingsSetMutation).mockReturnValue({
+    vi.mocked(useSettingsPatchMutation).mockReturnValue({
       isPending: false,
       mutateAsync: vi.fn(),
     } as any);
@@ -481,7 +481,7 @@ describe("components/cli-manager/WslSettingsCard", () => {
 
   it("listens for wsl:auto_config_result event and updates state", async () => {
     const overviewRefetch = vi.fn().mockResolvedValue({ data: {} });
-    vi.mocked(useSettingsSetMutation).mockReturnValue({
+    vi.mocked(useSettingsPatchMutation).mockReturnValue({
       isPending: false,
       mutateAsync: vi.fn(),
     } as any);
@@ -535,7 +535,7 @@ describe("components/cli-manager/WslSettingsCard", () => {
   });
 
   it("shows distro config summary count", () => {
-    vi.mocked(useSettingsSetMutation).mockReturnValue({
+    vi.mocked(useSettingsPatchMutation).mockReturnValue({
       isPending: false,
       mutateAsync: vi.fn(),
     } as any);
@@ -606,7 +606,7 @@ describe("components/cli-manager/WslSettingsCard", () => {
   it("persists custom host address via advanced options", async () => {
     const settingsSetMutation = { isPending: false, mutateAsync: vi.fn() };
     settingsSetMutation.mutateAsync.mockResolvedValue({});
-    vi.mocked(useSettingsSetMutation).mockReturnValue(settingsSetMutation as any);
+    vi.mocked(useSettingsPatchMutation).mockReturnValue(settingsSetMutation as any);
 
     vi.mocked(useAppAboutQuery).mockReturnValue({ data: { os: "windows" } } as any);
     vi.mocked(useWslOverviewQuery).mockReturnValue({
@@ -648,12 +648,7 @@ describe("components/cli-manager/WslSettingsCard", () => {
 
     await waitFor(() => {
       expect(settingsSetMutation.mutateAsync).toHaveBeenCalledWith({
-        preferredPort: 37123,
-        autoStart: false,
-        logRetentionDays: 7,
-        failoverMaxAttemptsPerProvider: 5,
-        failoverMaxProvidersToTry: 5,
-        wslHostAddressMode: "custom",
+        wsl_host_address_mode: "custom",
       });
     });
     expect(toast).toHaveBeenCalledWith("已保存");
@@ -665,13 +660,8 @@ describe("components/cli-manager/WslSettingsCard", () => {
 
     await waitFor(() => {
       expect(settingsSetMutation.mutateAsync).toHaveBeenCalledWith({
-        preferredPort: 37123,
-        autoStart: false,
-        logRetentionDays: 7,
-        failoverMaxAttemptsPerProvider: 5,
-        failoverMaxProvidersToTry: 5,
-        wslHostAddressMode: "custom",
-        wslCustomHostAddress: "172.20.0.99",
+        wsl_host_address_mode: "custom",
+        wsl_custom_host_address: "172.20.0.99",
       });
     });
   });
@@ -679,7 +669,7 @@ describe("components/cli-manager/WslSettingsCard", () => {
   it("toasts when custom host address is invalid and does not persist", async () => {
     const settingsSetMutation = { isPending: false, mutateAsync: vi.fn() };
     settingsSetMutation.mutateAsync.mockResolvedValue({});
-    vi.mocked(useSettingsSetMutation).mockReturnValue(settingsSetMutation as any);
+    vi.mocked(useSettingsPatchMutation).mockReturnValue(settingsSetMutation as any);
 
     vi.mocked(useAppAboutQuery).mockReturnValue({ data: { os: "windows" } } as any);
     vi.mocked(useWslOverviewQuery).mockReturnValue({
@@ -718,7 +708,7 @@ describe("components/cli-manager/WslSettingsCard", () => {
     fireEvent.click(switches[1]);
     await waitFor(() => {
       expect(settingsSetMutation.mutateAsync).toHaveBeenCalledWith(
-        expect.objectContaining({ wslHostAddressMode: "custom" })
+        expect.objectContaining({ wsl_host_address_mode: "custom" })
       );
     });
 
@@ -732,13 +722,13 @@ describe("components/cli-manager/WslSettingsCard", () => {
       expect(toast).toHaveBeenCalledWith("宿主机地址不支持端口；请只填写 IP（例如 172.20.0.1）");
     });
     expect(settingsSetMutation.mutateAsync).not.toHaveBeenCalledWith(
-      expect.objectContaining({ wslCustomHostAddress: "172.20.0.1:123" })
+      expect.objectContaining({ wsl_custom_host_address: "172.20.0.1:123" })
     );
   });
 
   it("disables listen-mode confirmation while settings are saving", async () => {
     const settingsSetMutation = { isPending: false, mutateAsync: vi.fn() };
-    vi.mocked(useSettingsSetMutation).mockReturnValue(settingsSetMutation as any);
+    vi.mocked(useSettingsPatchMutation).mockReturnValue(settingsSetMutation as any);
     vi.mocked(useAppAboutQuery).mockReturnValue({ data: { os: "windows" } } as any);
     vi.mocked(useWslOverviewQuery).mockReturnValue({
       data: { detection: { detected: true, distros: ["Ubuntu"] }, hostIp: null, statusRows: [] },

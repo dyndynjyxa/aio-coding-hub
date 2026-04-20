@@ -1,5 +1,6 @@
-import { invokeService } from "../invokeServiceCommand";
+import { commands } from "../../generated/bindings";
 import type { CliKey } from "../providers/providers";
+import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
 
 export type RequestLogSummary = {
   id: number;
@@ -102,58 +103,85 @@ export type RequestAttemptLog = {
 };
 
 export async function requestLogsList(cliKey: CliKey, limit?: number) {
-  return invokeService<RequestLogSummary[]>("读取请求日志失败", "request_logs_list", {
-    cliKey,
-    limit,
+  return invokeGeneratedIpc<RequestLogSummary[]>({
+    title: "读取请求日志失败",
+    cmd: "request_logs_list",
+    args: { cliKey, limit: limit ?? null },
+    invoke: () =>
+      commands.requestLogsList(cliKey, limit ?? null) as Promise<
+        GeneratedCommandResult<RequestLogSummary[]>
+      >,
   });
 }
 
 export async function requestLogsListAll(limit?: number) {
-  return invokeService<RequestLogSummary[]>("读取全局请求日志失败", "request_logs_list_all", {
-    limit,
+  return invokeGeneratedIpc<RequestLogSummary[]>({
+    title: "读取全局请求日志失败",
+    cmd: "request_logs_list_all",
+    args: { limit: limit ?? null },
+    invoke: () =>
+      commands.requestLogsListAll(limit ?? null) as Promise<
+        GeneratedCommandResult<RequestLogSummary[]>
+      >,
   });
 }
 
 export async function requestLogsListAfterId(cliKey: CliKey, afterId: number, limit?: number) {
-  return invokeService<RequestLogSummary[]>("读取增量请求日志失败", "request_logs_list_after_id", {
-    cliKey,
-    afterId,
-    limit,
+  return invokeGeneratedIpc<RequestLogSummary[]>({
+    title: "读取增量请求日志失败",
+    cmd: "request_logs_list_after_id",
+    args: { cliKey, afterId, limit: limit ?? null },
+    invoke: () =>
+      commands.requestLogsListAfterId(cliKey, afterId, limit ?? null) as Promise<
+        GeneratedCommandResult<RequestLogSummary[]>
+      >,
   });
 }
 
 export async function requestLogsListAfterIdAll(afterId: number, limit?: number) {
-  return invokeService<RequestLogSummary[]>(
-    "读取全局增量请求日志失败",
-    "request_logs_list_after_id_all",
-    {
-      afterId,
-      limit,
-    }
-  );
+  return invokeGeneratedIpc<RequestLogSummary[]>({
+    title: "读取全局增量请求日志失败",
+    cmd: "request_logs_list_after_id_all",
+    args: { afterId, limit: limit ?? null },
+    invoke: () =>
+      commands.requestLogsListAfterIdAll(afterId, limit ?? null) as Promise<
+        GeneratedCommandResult<RequestLogSummary[]>
+      >,
+  });
 }
 
 export async function requestLogGet(logId: number) {
-  return invokeService<RequestLogDetail>("读取请求日志详情失败", "request_log_get", { logId });
+  return invokeGeneratedIpc<RequestLogDetail>({
+    title: "读取请求日志详情失败",
+    cmd: "request_log_get",
+    args: { logId },
+    invoke: () =>
+      commands.requestLogGet(logId) as Promise<GeneratedCommandResult<RequestLogDetail>>,
+  });
 }
 
 export async function requestLogGetByTraceId(traceId: string) {
-  return invokeService<RequestLogDetail | null>(
-    "按追踪 ID 读取请求日志失败",
-    "request_log_get_by_trace_id",
-    {
-      traceId,
-    }
-  );
+  return invokeGeneratedIpc<RequestLogDetail | null, null>({
+    title: "按追踪 ID 读取请求日志失败",
+    cmd: "request_log_get_by_trace_id",
+    args: { traceId },
+    invoke: () =>
+      commands.requestLogGetByTraceId(traceId) as Promise<
+        GeneratedCommandResult<RequestLogDetail | null>
+      >,
+    nullResultBehavior: "return_fallback",
+    fallback: null,
+  });
 }
 
 export async function requestAttemptLogsByTraceId(traceId: string, limit?: number) {
-  return invokeService<RequestAttemptLog[]>(
-    "读取请求尝试日志失败",
-    "request_attempt_logs_by_trace_id",
-    {
-      traceId,
-      limit,
-    }
-  );
+  return invokeGeneratedIpc<RequestAttemptLog[]>({
+    title: "读取请求尝试日志失败",
+    cmd: "request_attempt_logs_by_trace_id",
+    args: { traceId, limit: limit ?? null },
+    invoke: () =>
+      commands.requestAttemptLogsByTraceId(traceId, limit ?? null) as Promise<
+        GeneratedCommandResult<RequestAttemptLog[]>
+      >,
+  });
 }

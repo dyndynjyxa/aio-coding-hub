@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.39.2](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.39.1...aio-coding-hub-v0.39.2) (2026-04-19)
+
+
+### Bug Fixes
+
+* **rust:** resolve clippy warnings for needless lifetimes and useless conversion ([b5f204f](https://github.com/dyndynjyxa/aio-coding-hub/commit/b5f204f1d309cc3e21f56427760f5969d1972e95))
+
+## [0.39.1](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.39.0...aio-coding-hub-v0.39.1) (2026-04-18)
+
+
+### Bug Fixes
+
+* **gateway:** 修复代理初始化时未启用代理配置的问题 ([934aee9](https://github.com/dyndynjyxa/aio-coding-hub/commit/934aee94964226860ff40e885763685227af2535))
+
 ## [0.39.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.38.4...aio-coding-hub-v0.39.0) (2026-04-17)
 
 

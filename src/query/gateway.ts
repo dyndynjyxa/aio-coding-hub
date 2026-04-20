@@ -1,6 +1,8 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  gatewayStart,
+  gatewayStop,
   gatewayCircuitResetCli,
   gatewayCircuitResetProvider,
   gatewayCircuitStatus,
@@ -103,6 +105,31 @@ export function useGatewayStatusQuery(options?: {
   });
 }
 
+export function useGatewayStartMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: { preferredPort?: number | null }) =>
+      gatewayStart(input.preferredPort ?? undefined),
+    onSuccess: (status) => {
+      if (!status) return;
+      queryClient.setQueryData(gatewayKeys.status(), status);
+    },
+  });
+}
+
+export function useGatewayStopMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => gatewayStop(),
+    onSuccess: (status) => {
+      if (!status) return;
+      queryClient.setQueryData(gatewayKeys.status(), status);
+    },
+  });
+}
+
 export function useGatewayCircuitStatusQuery(cliKey: CliKey) {
   return useQuery({
     queryKey: gatewayKeys.circuitStatus(cliKey),
@@ -158,4 +185,53 @@ export function useGatewayCircuitResetCliMutation() {
       queryClient.invalidateQueries({ queryKey: gatewayKeys.circuitStatus(input.cliKey) });
     },
   });
+}
+
+export function useGatewayCircuitAutoRefresh(
+  cliKey: CliKey,
+  summary: GatewayCircuitRowsSummary,
+  options?: { enabled?: boolean }
+) {
+  const queryClient = useQueryClient();
+  const timerRef = useRef<number | null>(null);
+  const enabled = options?.enabled ?? true;
+
+  useEffect(() => {
+    if (timerRef.current != null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+
+    if (!enabled || !summary.hasUnavailable) {
+      return;
+    }
+
+    const nowUnix = Math.floor(Date.now() / 1000);
+    const nextAvailableUntil = summary.hasUnavailableWithoutUntil
+      ? nowUnix
+      : summary.earliestUnavailableUntil;
+    if (nextAvailableUntil == null) {
+      return;
+    }
+
+    const delayMs = Math.max(200, (nextAvailableUntil - nowUnix) * 1000 + 250);
+    timerRef.current = window.setTimeout(() => {
+      timerRef.current = null;
+      void queryClient.invalidateQueries({ queryKey: gatewayKeys.circuitStatus(cliKey) });
+    }, delayMs);
+
+    return () => {
+      if (timerRef.current != null) {
+        window.clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [
+    cliKey,
+    enabled,
+    queryClient,
+    summary.earliestUnavailableUntil,
+    summary.hasUnavailable,
+    summary.hasUnavailableWithoutUntil,
+  ]);
 }

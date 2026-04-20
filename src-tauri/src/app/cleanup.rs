@@ -148,7 +148,7 @@ pub(crate) async fn restore_cli_proxy_keep_state_best_effort(
     }
 }
 
-pub(crate) async fn stop_gateway_best_effort(app: &tauri::AppHandle) {
+pub(crate) async fn stop_gateway_best_effort<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let running = {
         let state = app.state::<GatewayState>();
         let mut manager = state.0.lock_or_recover();

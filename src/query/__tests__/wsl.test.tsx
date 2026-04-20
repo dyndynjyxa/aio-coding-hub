@@ -135,7 +135,7 @@ describe("query/wsl", () => {
   it("overview returns null payload when wslDetect returns null", async () => {
     setTauriRuntime();
 
-    vi.mocked(wslDetect).mockResolvedValue(null);
+    vi.mocked(wslDetect).mockResolvedValue(null as never);
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
@@ -225,8 +225,8 @@ describe("query/wsl", () => {
     setTauriRuntime();
 
     vi.mocked(wslDetect).mockResolvedValue({ detected: true, distros: ["Ubuntu"] });
-    vi.mocked(wslHostAddressGet).mockResolvedValue(null);
-    vi.mocked(wslConfigStatusGet).mockResolvedValue(null);
+    vi.mocked(wslHostAddressGet).mockResolvedValue(null as never);
+    vi.mocked(wslConfigStatusGet).mockResolvedValue(null as never);
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);

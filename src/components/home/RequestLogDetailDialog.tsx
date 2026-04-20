@@ -4,6 +4,7 @@
 
 import { useState } from "react";
 import { useNowMs } from "../../hooks/useNowMs";
+import { isPersistedRequestLogInProgress } from "../../services/gateway/requestLogState";
 import { useTraceStore } from "../../services/gateway/traceStore";
 import {
   useRequestAttemptLogsByTraceIdQuery,
@@ -15,7 +16,6 @@ import { resolveProviderLabel } from "../../pages/providers/baseUrl";
 import { resolveRequestLogErrorObservation } from "./requestLogErrorDetails";
 import {
   computeStatusBadge,
-  isPersistedRequestLogInProgress,
   resolveLiveTraceDurationMs,
   resolveLiveTraceProvider,
 } from "./HomeLogShared";
@@ -147,9 +147,7 @@ export function RequestLogDetailDialog({
             />
           )}
 
-          {activeTab === "raw" && (
-            <RequestLogDetailRawTab selectedLog={selectedLog} />
-          )}
+          {activeTab === "raw" && <RequestLogDetailRawTab selectedLog={selectedLog} />}
         </div>
       )}
     </Dialog>

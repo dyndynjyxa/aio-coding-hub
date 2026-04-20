@@ -1,97 +1,95 @@
-import { invokeServiceCommand, invokeServiceWithDetails } from "../invokeServiceCommand";
+import {
+  commands,
+  type GatewayActiveSessionSummary,
+  type GatewayUpstreamProxyInput,
+  type GatewayProviderCircuitStatus,
+  type GatewayStatus,
+} from "../../generated/bindings";
+import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
 
-export type GatewayStatus = {
-  running: boolean;
-  port: number | null;
-  base_url: string | null;
-  listen_addr: string | null;
-};
-
-export type GatewayActiveSession = {
-  cli_key: string;
-  session_id: string;
-  session_suffix: string;
-  provider_id: number;
-  provider_name: string;
-  expires_at: number;
-  request_count: number | null;
-  total_input_tokens: number | null;
-  total_output_tokens: number | null;
-  total_cost_usd: number | null;
-  total_duration_ms: number | null;
-};
-
-export type GatewayProviderCircuitStatus = {
-  provider_id: number;
-  state: string;
-  failure_count: number;
-  failure_threshold: number;
-  open_until: number | null;
-  cooldown_until: number | null;
-};
+export type { GatewayProviderCircuitStatus, GatewayStatus };
+export type GatewayActiveSession = GatewayActiveSessionSummary;
 
 export async function gatewayStatus() {
-  return invokeServiceWithDetails<GatewayStatus>("获取网关状态失败", "gateway_status");
+  return invokeGeneratedIpc<GatewayStatus>({
+    title: "获取网关状态失败",
+    cmd: "gateway_status",
+    invoke: () => commands.gatewayStatus(),
+  });
 }
 
 export async function gatewayStart(preferredPort?: number) {
-  return invokeServiceWithDetails<GatewayStatus>(
-    "启动网关失败",
-    "gateway_start",
-    {
-      preferredPort: preferredPort ?? null,
-    },
-    { preferredPort }
-  );
+  return invokeGeneratedIpc<GatewayStatus>({
+    title: "启动网关失败",
+    cmd: "gateway_start",
+    args: { preferredPort: preferredPort ?? null },
+    invoke: () =>
+      commands.gatewayStart(preferredPort ?? null) as Promise<
+        GeneratedCommandResult<GatewayStatus>
+      >,
+  });
 }
 
 export async function gatewayStop() {
-  return invokeServiceWithDetails<GatewayStatus>("停止网关失败", "gateway_stop");
+  return invokeGeneratedIpc<GatewayStatus>({
+    title: "停止网关失败",
+    cmd: "gateway_stop",
+    invoke: () => commands.gatewayStop() as Promise<GeneratedCommandResult<GatewayStatus>>,
+  });
 }
 
 export async function gatewayCheckPortAvailable(port: number) {
-  return invokeServiceWithDetails<boolean>(
-    "检查端口可用性失败",
-    "gateway_check_port_available",
-    { port },
-    { port }
-  );
+  return invokeGeneratedIpc<boolean>({
+    title: "检查端口可用性失败",
+    cmd: "gateway_check_port_available",
+    args: { port },
+    invoke: () =>
+      commands.gatewayCheckPortAvailable(port) as Promise<GeneratedCommandResult<boolean>>,
+  });
 }
 
 export async function gatewaySessionsList(limit?: number) {
-  return invokeServiceWithDetails<GatewayActiveSession[]>(
-    "获取会话列表失败",
-    "gateway_sessions_list",
-    { limit: limit ?? null },
-    { limit }
-  );
+  return invokeGeneratedIpc<GatewayActiveSession[]>({
+    title: "获取会话列表失败",
+    cmd: "gateway_sessions_list",
+    args: { limit: limit ?? null },
+    invoke: () =>
+      commands.gatewaySessionsList(limit ?? null) as Promise<
+        GeneratedCommandResult<GatewayActiveSession[]>
+      >,
+  });
 }
 
 export async function gatewayCircuitStatus(cliKey: string) {
-  return invokeServiceWithDetails<GatewayProviderCircuitStatus[]>(
-    "获取熔断器状态失败",
-    "gateway_circuit_status",
-    { cliKey },
-    { cliKey }
-  );
+  return invokeGeneratedIpc<GatewayProviderCircuitStatus[]>({
+    title: "获取熔断器状态失败",
+    cmd: "gateway_circuit_status",
+    args: { cliKey },
+    invoke: () =>
+      commands.gatewayCircuitStatus(cliKey) as Promise<
+        GeneratedCommandResult<GatewayProviderCircuitStatus[]>
+      >,
+  });
 }
 
 export async function gatewayCircuitResetProvider(providerId: number) {
-  return invokeServiceWithDetails<boolean>(
-    "重置 Provider 熔断器失败",
-    "gateway_circuit_reset_provider",
-    { providerId },
-    { providerId }
-  );
+  return invokeGeneratedIpc<boolean>({
+    title: "重置 Provider 熔断器失败",
+    cmd: "gateway_circuit_reset_provider",
+    args: { providerId },
+    invoke: () =>
+      commands.gatewayCircuitResetProvider(providerId) as Promise<GeneratedCommandResult<boolean>>,
+  });
 }
 
 export async function gatewayCircuitResetCli(cliKey: string) {
-  return invokeServiceWithDetails<number>(
-    "重置 CLI 熔断器失败",
-    "gateway_circuit_reset_cli",
-    { cliKey },
-    { cliKey }
-  );
+  return invokeGeneratedIpc<number>({
+    title: "重置 CLI 熔断器失败",
+    cmd: "gateway_circuit_reset_cli",
+    args: { cliKey },
+    invoke: () =>
+      commands.gatewayCircuitResetCli(cliKey) as Promise<GeneratedCommandResult<number>>,
+  });
 }
 
 type GatewayUpstreamProxyAuthInput = {
@@ -100,17 +98,32 @@ type GatewayUpstreamProxyAuthInput = {
   proxyPassword?: string;
 };
 
+function buildGatewayUpstreamProxyInput({
+  proxyUrl,
+  proxyUsername,
+  proxyPassword,
+}: GatewayUpstreamProxyAuthInput): GatewayUpstreamProxyInput {
+  return {
+    proxyUrl,
+    proxyUsername: proxyUsername ?? null,
+    proxyPassword: proxyPassword ?? null,
+  };
+}
+
 export async function gatewayUpstreamProxyValidate({
   proxyUrl,
   proxyUsername,
   proxyPassword,
 }: GatewayUpstreamProxyAuthInput) {
-  return invokeServiceCommand<void>({
+  const input = buildGatewayUpstreamProxyInput({ proxyUrl, proxyUsername, proxyPassword });
+  return invokeGeneratedIpc<null, null>({
     title: "代理配置验证失败",
     cmd: "gateway_upstream_proxy_validate",
-    args: { proxyUrl, proxyUsername, proxyPassword },
-    details: { proxyUrl },
+    args: { input },
+    invoke: () =>
+      commands.gatewayUpstreamProxyValidate(input) as Promise<GeneratedCommandResult<null>>,
     nullResultBehavior: "return_fallback",
+    fallback: null,
   });
 }
 
@@ -119,12 +132,14 @@ export async function gatewayUpstreamProxyTest({
   proxyUsername,
   proxyPassword,
 }: GatewayUpstreamProxyAuthInput) {
-  return invokeServiceCommand<void>({
+  const input = buildGatewayUpstreamProxyInput({ proxyUrl, proxyUsername, proxyPassword });
+  return invokeGeneratedIpc<null, null>({
     title: "代理连接测试失败",
     cmd: "gateway_upstream_proxy_test",
-    args: { proxyUrl, proxyUsername, proxyPassword },
-    details: { proxyUrl },
+    args: { input },
+    invoke: () => commands.gatewayUpstreamProxyTest(input) as Promise<GeneratedCommandResult<null>>,
     nullResultBehavior: "return_fallback",
+    fallback: null,
   });
 }
 
@@ -133,10 +148,12 @@ export async function gatewayUpstreamProxyDetectIp({
   proxyUsername,
   proxyPassword,
 }: GatewayUpstreamProxyAuthInput) {
-  return invokeServiceCommand<string>({
+  const input = buildGatewayUpstreamProxyInput({ proxyUrl, proxyUsername, proxyPassword });
+  return invokeGeneratedIpc<string>({
     title: "代理出口 IP 检测失败",
     cmd: "gateway_upstream_proxy_detect_ip",
-    args: { proxyUrl, proxyUsername, proxyPassword },
-    details: { proxyUrl },
+    args: { input },
+    invoke: () =>
+      commands.gatewayUpstreamProxyDetectIp(input) as Promise<GeneratedCommandResult<string>>,
   });
 }

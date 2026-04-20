@@ -1,16 +1,15 @@
 import { useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { GatewayAvailability } from "../../hooks/useGatewayMeta";
-import { gatewayKeys } from "../../query/keys";
 import { useTheme } from "../../hooks/useTheme";
 import { logToConsole } from "../../services/consoleLog";
-import { gatewayStart, gatewayStop, type GatewayStatus } from "../../services/gateway/gateway";
+import type { GatewayStatus } from "../../services/gateway/gateway";
 import {
   readHomeOverviewLogsPrimaryLayoutFromStorage,
   writeHomeOverviewLogsPrimaryLayoutToStorage,
 } from "../../services/home/homeOverviewLayout";
 import type { HomeUsagePeriod } from "../../services/settings/settings";
+import { useGatewayStartMutation, useGatewayStopMutation } from "../../query/gateway";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Input } from "../../ui/Input";
@@ -128,7 +127,8 @@ export function SettingsMainColumn({
   sendSystemNotificationTest,
 }: SettingsMainColumnProps) {
   const { theme, setTheme } = useTheme();
-  const queryClient = useQueryClient();
+  const gatewayStartMutation = useGatewayStartMutation();
+  const gatewayStopMutation = useGatewayStopMutation();
   const [homeOverviewLogsPrimaryLayout, setHomeOverviewLogsPrimaryLayout] = useState(() =>
     readHomeOverviewLogsPrimaryLayoutFromStorage()
   );
@@ -184,20 +184,20 @@ export function SettingsMainColumn({
                   }
 
                   if (gateway?.running) {
-                    const stopped = await gatewayStop();
+                    const stopped = await gatewayStopMutation.mutateAsync();
                     if (!stopped) {
                       toast("重启失败：无法停止网关");
                       return;
                     }
-                    queryClient.setQueryData(gatewayKeys.status(), stopped);
                   }
 
-                  const status = await gatewayStart(desiredPort);
+                  const status = await gatewayStartMutation.mutateAsync({
+                    preferredPort: desiredPort,
+                  });
                   if (!status) {
                     toast("启动失败：当前环境不可用或 command 未注册");
                     return;
                   }
-                  queryClient.setQueryData(gatewayKeys.status(), status);
                   logToConsole("info", "启动本地网关", {
                     port: status.port,
                     base_url: status.base_url,
@@ -212,12 +212,11 @@ export function SettingsMainColumn({
               </Button>
               <Button
                 onClick={async () => {
-                  const status = await gatewayStop();
+                  const status = await gatewayStopMutation.mutateAsync();
                   if (!status) {
                     toast("停止失败：当前环境不可用或 command 未注册");
                     return;
                   }
-                  queryClient.setQueryData(gatewayKeys.status(), status);
                   logToConsole("info", "停止本地网关");
                   toast("本地网关已停止");
                 }}

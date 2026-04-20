@@ -104,11 +104,16 @@
 
 Go to [Releases](https://github.com/dyndynjyxa/aio-coding-hub/releases) and download for your platform:
 
-| Platform | Package |
-|----------|---------|
-| **Windows** | `.exe` (NSIS) or `.msi` |
-| **macOS** | `.dmg` |
-| **Linux** | `.deb` / `.AppImage` / `-wayland.AppImage` |
+<!-- SUPPORT_MATRIX_RELEASE_DOWNLOAD:START -->
+| Platform | Official release packages |
+| --- | --- |
+| Windows x64 | `.msi` / `-portable.zip` |
+| macOS Intel | `.zip` |
+| macOS Apple Silicon | `.zip` |
+| Linux x64 | `.deb` / `.AppImage` / `-wayland.AppImage` |
+<!-- SUPPORT_MATRIX_RELEASE_DOWNLOAD:END -->
+
+The official support matrix only covers those four targets. `mac:universal` and `win:arm64` remain local build scripts and do not ship in Release assets or `latest.json`.
 
 <details>
 <summary>Linux Arch / Wayland users</summary>
@@ -177,13 +182,20 @@ pnpm tauri:dev
 pnpm tauri:build
 
 # Platform-specific
-pnpm tauri:build:mac:arm64       # macOS Apple Silicon
-pnpm tauri:build:mac:x64         # macOS Intel
-pnpm tauri:build:mac:universal   # macOS Universal
-pnpm tauri:build:win:x64         # Windows x64
-pnpm tauri:build:win:arm64       # Windows ARM64
-pnpm tauri:build:linux:x64       # Linux x64
 ```
+
+<!-- SUPPORT_MATRIX_SOURCE_BUILD:START -->
+| Scope | Command | Notes |
+| --- | --- | --- |
+| Official | `pnpm tauri:build:win:x64` | Windows x64; Official; included in Release / updater matrix |
+| Official | `pnpm tauri:build:mac:x64` | macOS Intel; Official; included in Release / updater matrix |
+| Official | `pnpm tauri:build:mac:arm64` | macOS Apple Silicon; Official; included in Release / updater matrix |
+| Official | `pnpm tauri:build:linux:x64` | Linux x64; Official; included in Release / updater matrix |
+| Local only | `pnpm tauri:build:mac:universal` | macOS Universal; Local build only; excluded from the official release / updater matrix |
+| Local only | `pnpm tauri:build:win:arm64` | Windows ARM64; Local build only; excluded from the official release / updater matrix |
+<!-- SUPPORT_MATRIX_SOURCE_BUILD:END -->
+
+Only the "Official" rows above feed GitHub Releases and auto-update. The "Local only" rows keep local build flexibility without claiming shipped support.
 
 ---
 

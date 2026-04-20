@@ -1,7 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { AIO_RELEASES_URL } from "../../constants/urls";
 import { logToConsole } from "../../services/consoleLog";
 import { appRestart } from "../../services/app/dataManagement";
@@ -10,12 +9,12 @@ import {
   updateDownloadAndInstall,
   useUpdateMeta,
 } from "../../hooks/useUpdateMeta";
+import { tauriOpenUrl } from "../../test/mocks/tauri";
 import { UpdateDialog } from "../UpdateDialog";
 
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { loading: vi.fn().mockReturnValue("toast-id") }),
 }));
-vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 vi.mock("../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
 vi.mock("../../services/app/dataManagement", async () => {
   const actual = await vi.importActual<typeof import("../../services/app/dataManagement")>(
@@ -246,14 +245,14 @@ describe("components/UpdateDialog", () => {
       installDownloadedBytes: 0,
     } as any);
 
-    vi.mocked(openUrl).mockResolvedValue(undefined as never);
+    vi.mocked(tauriOpenUrl).mockResolvedValue(undefined as never);
 
     render(<UpdateDialog />);
 
     fireEvent.click(screen.getByRole("button", { name: "打开下载页" }));
 
     await waitFor(() => {
-      expect(openUrl).toHaveBeenCalledWith(AIO_RELEASES_URL);
+      expect(tauriOpenUrl).toHaveBeenCalledWith(AIO_RELEASES_URL);
     });
     expect(logToConsole).not.toHaveBeenCalled();
   });
@@ -270,7 +269,7 @@ describe("components/UpdateDialog", () => {
       installDownloadedBytes: 0,
     } as any);
 
-    vi.mocked(openUrl).mockRejectedValue(new Error("blocked"));
+    vi.mocked(tauriOpenUrl).mockRejectedValue(new Error("blocked"));
     vi.spyOn(window, "open").mockImplementation(() => null);
 
     render(<UpdateDialog />);

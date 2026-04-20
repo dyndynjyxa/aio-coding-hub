@@ -1,13 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
+import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
 import { settingsGatewayRectifierSet } from "../settingsGatewayRectifier";
-import { invokeTauriOrNull } from "../../tauriInvoke";
 
-vi.mock("../../tauriInvoke", async () => {
-  const actual = await vi.importActual<typeof import("../../tauriInvoke")>("../../tauriInvoke");
+vi.mock("../../../generated/bindings", async () => {
+  const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
+    "../../../generated/bindings"
+  );
   return {
     ...actual,
-    invokeTauriOrNull: vi.fn(),
+    commands: {
+      ...actual.commands,
+      settingsGatewayRectifierSet: vi.fn(),
+    },
   };
 });
 
@@ -20,26 +25,27 @@ vi.mock("../../consoleLog", async () => {
 });
 
 describe("services/settings/settingsGatewayRectifier", () => {
+  const input = {
+    verbose_provider_error: true,
+    intercept_anthropic_warmup_requests: false,
+    enable_thinking_signature_rectifier: true,
+    enable_thinking_budget_rectifier: false,
+    enable_billing_header_rectifier: true,
+    enable_claude_metadata_user_id_injection: true,
+    enable_response_fixer: true,
+    response_fixer_fix_encoding: true,
+    response_fixer_fix_sse_format: false,
+    response_fixer_fix_truncated_json: true,
+    response_fixer_max_json_depth: 8,
+    response_fixer_max_fix_size: 4096,
+  };
+
   it("rethrows invoke errors and logs", async () => {
-    vi.mocked(invokeTauriOrNull).mockRejectedValueOnce(new Error("rectifier boom"));
+    vi.mocked(commands.settingsGatewayRectifierSet).mockRejectedValueOnce(
+      new Error("rectifier boom")
+    );
 
-    await expect(
-      settingsGatewayRectifierSet({
-        verbose_provider_error: true,
-        intercept_anthropic_warmup_requests: false,
-        enable_thinking_signature_rectifier: true,
-        enable_thinking_budget_rectifier: true,
-        enable_billing_header_rectifier: true,
-        enable_claude_metadata_user_id_injection: true,
-        enable_response_fixer: true,
-        response_fixer_fix_encoding: true,
-        response_fixer_fix_sse_format: true,
-        response_fixer_fix_truncated_json: true,
-        response_fixer_max_json_depth: 200,
-        response_fixer_max_fix_size: 1024,
-      })
-    ).rejects.toThrow("rectifier boom");
-
+    await expect(settingsGatewayRectifierSet(input)).rejects.toThrow("rectifier boom");
     expect(logToConsole).toHaveBeenCalledWith(
       "error",
       "保存网关修复配置失败",
@@ -50,24 +56,32 @@ describe("services/settings/settingsGatewayRectifier", () => {
     );
   });
 
-  it("treats null invoke result as error with runtime", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce(null);
+  it("maps generated args and treats null as runtime error", async () => {
+    vi.mocked(commands.settingsGatewayRectifierSet).mockResolvedValueOnce(null as any);
 
-    await expect(
-      settingsGatewayRectifierSet({
-        verbose_provider_error: true,
-        intercept_anthropic_warmup_requests: false,
-        enable_thinking_signature_rectifier: true,
-        enable_thinking_budget_rectifier: true,
-        enable_billing_header_rectifier: true,
-        enable_claude_metadata_user_id_injection: true,
-        enable_response_fixer: true,
-        response_fixer_fix_encoding: true,
-        response_fixer_fix_sse_format: true,
-        response_fixer_fix_truncated_json: true,
-        response_fixer_max_json_depth: 200,
-        response_fixer_max_fix_size: 1024,
-      })
-    ).rejects.toThrow("IPC_NULL_RESULT: settings_gateway_rectifier_set");
+    await expect(settingsGatewayRectifierSet(input)).rejects.toThrow(
+      "IPC_NULL_RESULT: settings_gateway_rectifier_set"
+    );
+
+    vi.mocked(commands.settingsGatewayRectifierSet).mockResolvedValueOnce({
+      status: "ok",
+      data: { schema_version: 1 } as any,
+    });
+
+    await settingsGatewayRectifierSet(input);
+    expect(commands.settingsGatewayRectifierSet).toHaveBeenCalledWith({
+      verboseProviderError: true,
+      interceptAnthropicWarmupRequests: false,
+      enableThinkingSignatureRectifier: true,
+      enableThinkingBudgetRectifier: false,
+      enableBillingHeaderRectifier: true,
+      enableClaudeMetadataUserIdInjection: true,
+      enableResponseFixer: true,
+      responseFixerFixEncoding: true,
+      responseFixerFixSseFormat: false,
+      responseFixerFixTruncatedJson: true,
+      responseFixerMaxJsonDepth: 8,
+      responseFixerMaxFixSize: 4096,
+    });
   });
 });

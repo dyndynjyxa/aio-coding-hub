@@ -1,10 +1,13 @@
+import { useEffect } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CliKey } from "../services/providers/providers";
 import {
+  getLastModelPricesSync,
   modelPriceAliasesGet,
   modelPriceAliasesSet,
   modelPricesList,
   modelPricesSyncBasellm,
+  subscribeModelPricesUpdated,
   type ModelPriceAliases,
   type ModelPricesSyncReport,
 } from "../services/usage/modelPrices";
@@ -70,6 +73,23 @@ export function useModelPricesSyncBasellmMutation() {
       queryClient.invalidateQueries({ queryKey: modelPricesKeys.all });
     },
   });
+}
+
+export function useModelPricesUpdatedSubscription(
+  onUpdated: (snapshot: { report: ModelPricesSyncReport | null; syncedAt: number | null }) => void
+) {
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    return subscribeModelPricesUpdated(() => {
+      void queryClient.invalidateQueries({ queryKey: modelPricesKeys.all });
+      const latest = getLastModelPricesSync();
+      onUpdated({
+        report: latest.report,
+        syncedAt: latest.syncedAt,
+      });
+    });
+  }, [onUpdated, queryClient]);
 }
 
 export function isModelPricesSyncNotModified(report: ModelPricesSyncReport | null) {

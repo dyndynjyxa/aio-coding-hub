@@ -4,13 +4,14 @@ use crate::shared::error::AppError;
 use crate::{blocking, cli_sessions};
 use serde::Deserialize;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub(crate) struct CliSessionsFolderLookupInput {
     source: String,
     session_id: String,
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_sessions_projects_list(
     app: tauri::AppHandle,
     source: String,
@@ -25,6 +26,7 @@ pub(crate) async fn cli_sessions_projects_list(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_sessions_sessions_list(
     app: tauri::AppHandle,
     source: String,
@@ -45,6 +47,7 @@ pub(crate) async fn cli_sessions_sessions_list(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_sessions_messages_get(
     app: tauri::AppHandle,
     source: String,
@@ -80,6 +83,7 @@ pub(crate) async fn cli_sessions_messages_get(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_sessions_session_delete(
     app: tauri::AppHandle,
     source: String,
@@ -109,6 +113,7 @@ pub(crate) async fn cli_sessions_session_delete(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_sessions_folder_lookup_by_ids(
     app: tauri::AppHandle,
     items: Vec<CliSessionsFolderLookupInput>,

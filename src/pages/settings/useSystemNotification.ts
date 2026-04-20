@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { logToConsole } from "../../services/consoleLog";
+import {
+  desktopNotificationIsPermissionGranted,
+  desktopNotificationRequestPermission,
+} from "../../services/desktop/notification";
 import { noticeSend } from "../../services/notification/notice";
 
 export type NoticePermissionStatus = "checking" | "granted" | "not_granted" | "denied" | "unknown";
@@ -13,19 +16,6 @@ export type NoticePermissionStatus = "checking" | "granted" | "not_granted" | "d
  *
  * The Rust desktop plugin always returns `Some(true)` (Granted).
  */
-async function isPermissionGrantedNative(): Promise<boolean> {
-  const result = await invoke<boolean | null>("plugin:notification|is_permission_granted");
-  return result === true;
-}
-
-/**
- * Request notification permission via Tauri IPC (native).
- * On desktop, this always returns "granted".
- */
-async function requestPermissionNative(): Promise<string> {
-  return await invoke<string>("plugin:notification|request_permission");
-}
-
 export function useSystemNotification() {
   const [noticePermissionStatus, setNoticePermissionStatus] =
     useState<NoticePermissionStatus>("checking");
@@ -34,7 +24,7 @@ export function useSystemNotification() {
 
   useEffect(() => {
     let cancelled = false;
-    isPermissionGrantedNative()
+    desktopNotificationIsPermissionGranted()
       .then((granted) => {
         if (cancelled) return;
         setNoticePermissionStatus(granted ? "granted" : "not_granted");
@@ -55,7 +45,7 @@ export function useSystemNotification() {
     setRequestingNoticePermission(true);
 
     try {
-      const permission = await requestPermissionNative();
+      const permission = await desktopNotificationRequestPermission();
       const granted = permission === "granted";
       setNoticePermissionStatus(granted ? "granted" : "denied");
       toast(granted ? "系统通知权限已授权" : "系统通知权限已拒绝");
@@ -73,7 +63,7 @@ export function useSystemNotification() {
     setSendingNoticeTest(true);
 
     try {
-      const granted = await isPermissionGrantedNative();
+      const granted = await desktopNotificationIsPermissionGranted();
       if (!granted) {
         setNoticePermissionStatus("not_granted");
         toast("请先在「系统通知」中授权通知权限");

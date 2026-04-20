@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
-import { invokeTauriOrNull } from "../../tauriInvoke";
 import {
   modelPriceAliasesGet,
   modelPriceAliasesSet,
@@ -10,11 +10,19 @@ import {
   subscribeModelPricesUpdated,
 } from "../modelPrices";
 
-vi.mock("../../tauriInvoke", async () => {
-  const actual = await vi.importActual<typeof import("../../tauriInvoke")>("../../tauriInvoke");
+vi.mock("../../../generated/bindings", async () => {
+  const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
+    "../../../generated/bindings"
+  );
   return {
     ...actual,
-    invokeTauriOrNull: vi.fn(),
+    commands: {
+      ...actual.commands,
+      modelPricesList: vi.fn(),
+      modelPricesSyncBasellm: vi.fn(),
+      modelPriceAliasesGet: vi.fn(),
+      modelPriceAliasesSet: vi.fn(),
+    },
   };
 });
 
@@ -28,7 +36,7 @@ vi.mock("../../consoleLog", async () => {
 
 describe("services/usage/modelPrices", () => {
   it("rethrows invoke errors and logs", async () => {
-    vi.mocked(invokeTauriOrNull).mockRejectedValueOnce(new Error("model prices boom"));
+    vi.mocked(commands.modelPricesList).mockRejectedValueOnce(new Error("model prices boom"));
 
     await expect(modelPricesList("claude")).rejects.toThrow("model prices boom");
     expect(logToConsole).toHaveBeenCalledWith(
@@ -42,27 +50,37 @@ describe("services/usage/modelPrices", () => {
   });
 
   it("treats null invoke result as error with runtime", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValueOnce(null);
+    vi.mocked(commands.modelPricesList).mockResolvedValueOnce(null as any);
 
     await expect(modelPricesList("claude")).rejects.toThrow("IPC_NULL_RESULT: model_prices_list");
   });
 
   it("keeps argument mapping unchanged", async () => {
-    vi.mocked(invokeTauriOrNull).mockResolvedValue({ version: 1, rules: [] } as any);
+    vi.mocked(commands.modelPricesList).mockResolvedValue({ status: "ok", data: [] as any });
+    vi.mocked(commands.modelPricesSyncBasellm).mockResolvedValue({
+      status: "ok",
+      data: { status: "updated", inserted: 0, updated: 0, skipped: 0, total: 0 } as any,
+    });
+    vi.mocked(commands.modelPriceAliasesGet).mockResolvedValue({
+      status: "ok",
+      data: { version: 1, rules: [] } as any,
+    });
+    vi.mocked(commands.modelPriceAliasesSet).mockResolvedValue({
+      status: "ok",
+      data: { version: 2, rules: [] } as any,
+    });
 
     await modelPricesList("claude");
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("model_prices_list", { cliKey: "claude" });
+    expect(commands.modelPricesList).toHaveBeenCalledWith("claude");
 
     await modelPricesSyncBasellm(true);
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("model_prices_sync_basellm", { force: true });
+    expect(commands.modelPricesSyncBasellm).toHaveBeenCalledWith(true);
 
     await modelPriceAliasesGet();
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("model_price_aliases_get");
+    expect(commands.modelPriceAliasesGet).toHaveBeenCalledWith();
 
     await modelPriceAliasesSet({ version: 2, rules: [] });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("model_price_aliases_set", {
-      aliases: { version: 2, rules: [] },
-    });
+    expect(commands.modelPriceAliasesSet).toHaveBeenCalledWith({ version: 2, rules: [] });
   });
 
   it("subscribes/unsubscribes update listeners", () => {
