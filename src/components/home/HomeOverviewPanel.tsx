@@ -26,6 +26,7 @@ import { Spinner } from "../../ui/Spinner";
 import { TabList } from "../../ui/TabList";
 import { formatCountdownSeconds } from "../../utils/formatters";
 import { CliBrandIcon } from "./CliBrandIcon";
+import { HomeCliRouteStrategyControl } from "./HomeCliRouteStrategyControl";
 import { HomeRequestLogsPanel } from "./HomeRequestLogsPanel";
 import { HomeTodayProviderUsageOverview } from "./HomeTodayProviderUsageOverview";
 import { HomeUsageSection } from "./HomeUsageSection";
@@ -400,9 +401,19 @@ export function HomeOverviewPanel({
     const labelByKey = new Map(HOME_OVERVIEW_TABS.map((item) => [item.key, item.label]));
     return sessionsTabsOrder.map((key) => ({ key, label: labelByKey.get(key) ?? key }));
   }, [sessionsTabsOrder]);
+  const showLogsPrimaryProviderLimitTab =
+    providerLimitLoading ||
+    providerLimitAvailable === false ||
+    displayedProviderLimitRows.length > 0;
   const logsPrimaryTabs = useMemo(
-    () => sessionsTabs.filter((item) => item.key === "workspaceConfig" || item.key === "circuit"),
-    [sessionsTabs]
+    () =>
+      sessionsTabs.filter(
+        (item) =>
+          item.key === "workspaceConfig" ||
+          item.key === "circuit" ||
+          (item.key === "providerLimit" && showLogsPrimaryProviderLimitTab)
+      ),
+    [sessionsTabs, showLogsPrimaryProviderLimitTab]
   );
 
   const openCircuitKeys = useMemo(
@@ -421,6 +432,28 @@ export function HomeOverviewPanel({
   }, [displayedWorkspaceConfigs, selectedWorkspaceConfigCliKey]);
   const effectiveSelectedWorkspaceConfigCliKey =
     selectedWorkspaceConfigCliKey ?? displayedWorkspaceConfigs[0]?.cliKey ?? null;
+  const effectiveSelectedWorkspaceConfig = useMemo(
+    () =>
+      displayedWorkspaceConfigs.find(
+        (config) => config.cliKey === effectiveSelectedWorkspaceConfigCliKey
+      ) ??
+      displayedWorkspaceConfigs[0] ??
+      null,
+    [displayedWorkspaceConfigs, effectiveSelectedWorkspaceConfigCliKey]
+  );
+  const legacyWorkspaceRouteStrategyControl = effectiveSelectedWorkspaceConfig ? (
+    <HomeCliRouteStrategyControl
+      cliKey={effectiveSelectedWorkspaceConfig.cliKey}
+      cliLabel={effectiveSelectedWorkspaceConfig.cliLabel}
+      sortModes={sortModes}
+      sortModesLoading={sortModesLoading}
+      sortModesAvailable={sortModesAvailable}
+      activeModeByCli={activeModeByCli}
+      activeModeToggling={activeModeToggling}
+      onSetCliActiveMode={onSetCliActiveMode}
+      orientation="horizontal"
+    />
+  ) : null;
 
   useEffect(() => {
     const previousOpenCircuitKeys = previousOpenCircuitKeysRef.current;
@@ -435,19 +468,28 @@ export function HomeOverviewPanel({
     previousOpenCircuitKeysRef.current = openCircuitKeys;
 
     if (openCircuitChanged) {
-      if (logsPrimaryLayout && openCircuitKeys.length === 0) {
+      if (openCircuitKeys.length === 0) {
         setSessionsTab("workspaceConfig");
       } else {
         setSessionsTab("circuit");
       }
     }
-  }, [logsPrimaryLayout, openCircuitKeys]);
+  }, [openCircuitKeys]);
 
   useEffect(() => {
     if (!logsPrimaryLayout) return;
-    if (sessionsTab === "workspaceConfig" || sessionsTab === "circuit") return;
+    if (sessionsTab === "providerLimit" && !showLogsPrimaryProviderLimitTab) {
+      setSessionsTab("workspaceConfig");
+      return;
+    }
+    if (
+      sessionsTab === "workspaceConfig" ||
+      sessionsTab === "circuit" ||
+      (sessionsTab === "providerLimit" && showLogsPrimaryProviderLimitTab)
+    )
+      return;
     setSessionsTab("workspaceConfig");
-  }, [logsPrimaryLayout, sessionsTab]);
+  }, [logsPrimaryLayout, sessionsTab, showLogsPrimaryProviderLimitTab]);
 
   const requestLogsPanel = (
     <HomeRequestLogsPanel
@@ -498,12 +540,7 @@ export function HomeOverviewPanel({
               configs={displayedWorkspaceConfigs}
               selectedCliKey={effectiveSelectedWorkspaceConfigCliKey}
               onSelectCliKey={setSelectedWorkspaceConfigCliKey}
-              sortModes={sortModes}
-              sortModesLoading={sortModesLoading}
-              sortModesAvailable={sortModesAvailable}
-              activeModeByCli={activeModeByCli}
-              activeModeToggling={activeModeToggling}
-              onSetCliActiveMode={onSetCliActiveMode}
+              headerAddon={legacyWorkspaceRouteStrategyControl}
             />
           </Suspense>
         ) : sessionsTab === "providerLimit" ? (
@@ -581,6 +618,12 @@ export function HomeOverviewPanel({
           cliProxyAppliedToCurrentGateway={cliProxyAppliedToCurrentGateway}
           cliProxyToggling={cliProxyToggling}
           onSetCliProxyEnabled={onSetCliProxyEnabled}
+          sortModes={sortModes}
+          sortModesLoading={sortModesLoading}
+          sortModesAvailable={sortModesAvailable}
+          activeModeByCli={activeModeByCli}
+          activeModeToggling={activeModeToggling}
+          onSetCliActiveMode={onSetCliActiveMode}
         />
       </div>
 
@@ -588,7 +631,12 @@ export function HomeOverviewPanel({
         <TabList
           ariaLabel="新布局信息切换"
           items={logsPrimaryTabs}
-          value={sessionsTab === "circuit" ? "circuit" : "workspaceConfig"}
+          value={
+            sessionsTab === "circuit" ||
+            (sessionsTab === "providerLimit" && showLogsPrimaryProviderLimitTab)
+              ? sessionsTab
+              : "workspaceConfig"
+          }
           onChange={(next) => setSessionsTab(next as HomeOverviewTabKey)}
           size="sm"
           className="w-full overflow-x-auto"
@@ -647,18 +695,22 @@ export function HomeOverviewPanel({
               </div>
             </div>
           )
+        ) : sessionsTab === "providerLimit" ? (
+          <Suspense fallback={<OverviewPanelFallback />}>
+            <LazyHomeProviderLimitPanelContent
+              rows={displayedProviderLimitRows}
+              loading={providerLimitLoading}
+              available={providerLimitAvailable}
+              onRefresh={onRefreshProviderLimit}
+              refreshing={providerLimitRefreshing}
+            />
+          </Suspense>
         ) : (
           <Suspense fallback={<OverviewPanelFallback />}>
             <LazyHomeWorkspaceConfigPanel
               configs={displayedWorkspaceConfigs}
               selectedCliKey={effectiveSelectedWorkspaceConfigCliKey}
               onSelectCliKey={setSelectedWorkspaceConfigCliKey}
-              sortModes={sortModes}
-              sortModesLoading={sortModesLoading}
-              sortModesAvailable={sortModesAvailable}
-              activeModeByCli={activeModeByCli}
-              activeModeToggling={activeModeToggling}
-              onSetCliActiveMode={onSetCliActiveMode}
             />
           </Suspense>
         )}
