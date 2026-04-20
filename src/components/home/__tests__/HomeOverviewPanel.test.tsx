@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { useState, type ComponentProps } from "react";
+import { useState, type ComponentProps, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeOverviewPanel } from "../HomeOverviewPanel";
 
@@ -24,7 +24,13 @@ vi.mock("../HomeTodayProviderUsageOverview", () => ({
 }));
 
 vi.mock("../HomeWorkStatusCard", () => ({
-  HomeWorkStatusCard: ({ layout }: { layout: string }) => <div>{`work-status-card:${layout}`}</div>,
+  HomeWorkStatusCard: ({
+    layout,
+    sortModes,
+  }: {
+    layout: string;
+    sortModes?: Array<{ id: number; name: string }>;
+  }) => <div>{`work-status-card:${layout}:${String(sortModes != null)}`}</div>,
 }));
 
 vi.mock("../HomeActiveSessionsCard", () => ({
@@ -46,9 +52,7 @@ vi.mock("../HomeWorkspaceConfigPanel", () => ({
     configs,
     selectedCliKey,
     onSelectCliKey,
-    sortModes,
-    activeModeByCli,
-    onSetCliActiveMode,
+    headerAddon,
   }: {
     configs: Array<{
       cliKey: "claude" | "codex" | "gemini";
@@ -58,15 +62,10 @@ vi.mock("../HomeWorkspaceConfigPanel", () => ({
     }>;
     selectedCliKey: "claude" | "codex" | "gemini" | null;
     onSelectCliKey: (cliKey: "claude" | "codex" | "gemini") => void;
-    sortModes: Array<{ id: number; name: string }>;
-    activeModeByCli: Record<"claude" | "codex" | "gemini", number | null>;
-    onSetCliActiveMode: (cliKey: "claude" | "codex" | "gemini", modeId: number | null) => void;
+    headerAddon?: ReactNode;
   }) => {
     const selectedConfig =
       configs.find((config) => config.cliKey === selectedCliKey) ?? configs[0] ?? null;
-    const selectedModeValue = selectedConfig
-      ? String(activeModeByCli[selectedConfig.cliKey] ?? "")
-      : "";
 
     if (!selectedConfig) {
       return <div>workspace-config:empty</div>;
@@ -85,27 +84,7 @@ vi.mock("../HomeWorkspaceConfigPanel", () => ({
           <span>工作区：</span>
           <span>{selectedConfig.workspaceName?.trim() || "默认"}</span>
         </div>
-        <label>
-          路由策略：
-          <select
-            aria-label={`${selectedConfig.cliLabel} 路由策略`}
-            value={selectedModeValue}
-            onChange={(event) => {
-              const nextValue = event.currentTarget.value;
-              onSetCliActiveMode(
-                selectedConfig.cliKey,
-                nextValue === "" ? null : Number(nextValue)
-              );
-            }}
-          >
-            <option value="">Default</option>
-            {sortModes.map((mode) => (
-              <option key={mode.id} value={String(mode.id)}>
-                {mode.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        {headerAddon}
         <div>
           {selectedConfig.items.map((item) => (
             <div key={item.id}>{item.name}</div>
@@ -284,7 +263,6 @@ describe("components/home/HomeOverviewPanel", () => {
     fireEvent.click(screen.getByRole("tab", { name: "配置信息" }));
     expect(await screen.findByRole("button", { name: "Claude Code" })).toBeInTheDocument();
     expect(screen.getByText("工作区 A")).toBeInTheDocument();
-    expect(screen.getByText("路由策略：")).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Claude Code 路由策略" })).toHaveValue("1");
     expect(screen.getByRole("option", { name: "工作策略" })).toBeInTheDocument();
     expect(screen.getByText("默认提示词")).toBeInTheDocument();
@@ -298,6 +276,24 @@ describe("components/home/HomeOverviewPanel", () => {
       target: { value: "1" },
     });
     expect(onSetCliActiveMode).toHaveBeenCalledWith("codex", 1);
+  });
+
+  it("moves the route strategy entry into the work status card in logs-primary layout", async () => {
+    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
+
+    renderPanel({
+      sortModes: [{ id: 1, name: "工作策略", created_at: 1, updated_at: 1 }],
+      activeModeByCli: { claude: 1, codex: null, gemini: null },
+    });
+
+    expect(screen.getByText("work-status-card:vertical:true")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "配置信息" }));
+    expect(await screen.findByText("工作区：")).toBeInTheDocument();
+    expect(screen.queryByText("路由策略：")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: "Claude Code 路由策略" })
+    ).not.toBeInTheDocument();
   });
 
   it("uses CLI priority order for workspace config button order and default selection", async () => {
@@ -394,21 +390,21 @@ describe("components/home/HomeOverviewPanel", () => {
     renderPanel({ showHomeHeatmap: false, showHomeUsage: false });
 
     expect(screen.queryByText(/usage-section:/)).not.toBeInTheDocument();
-    expect(screen.getByText("work-status-card:horizontal")).toBeInTheDocument();
+    expect(screen.getByText("work-status-card:horizontal:false")).toBeInTheDocument();
   });
 
   it("uses the split layout with usage statistics when heatmap is hidden", () => {
     renderPanel({ showHomeHeatmap: false, showHomeUsage: true });
 
     expect(screen.getByText("usage-section:false:true")).toBeInTheDocument();
-    expect(screen.getByText("work-status-card:vertical")).toBeInTheDocument();
+    expect(screen.getByText("work-status-card:vertical:false")).toBeInTheDocument();
   });
 
   it("uses the split layout with heatmap when usage statistics are hidden", () => {
     renderPanel({ showHomeHeatmap: true, showHomeUsage: false });
 
     expect(screen.getByText("usage-section:true:false")).toBeInTheDocument();
-    expect(screen.getByText("work-status-card:vertical")).toBeInTheDocument();
+    expect(screen.getByText("work-status-card:vertical:false")).toBeInTheDocument();
   });
 
   it("uses the legacy overview layout by default", () => {
@@ -433,9 +429,10 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(
       usageSection.compareDocumentPosition(requestLogs) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
-    expect(screen.getAllByText("work-status-card:vertical")).toHaveLength(1);
+    expect(screen.getAllByText("work-status-card:vertical:true")).toHaveLength(1);
     expect(screen.getByRole("tab", { name: "配置信息" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "熔断信息" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "供应商限额" })).not.toBeInTheDocument();
     expect(homeRequestLogsPanelMock).toHaveBeenCalled();
     const latestCall = (homeRequestLogsPanelMock as any).mock.calls[
       (homeRequestLogsPanelMock as any).mock.calls.length - 1
@@ -452,10 +449,111 @@ describe("components/home/HomeOverviewPanel", () => {
     renderPanel({ showHomeHeatmap: true, showHomeUsage: false });
 
     expect(screen.getByText("today-provider-usage:false")).toBeInTheDocument();
-    expect(screen.getAllByText("work-status-card:vertical")).toHaveLength(1);
-    expect(screen.queryByText("work-status-card:horizontal")).not.toBeInTheDocument();
+    expect(screen.getAllByText("work-status-card:vertical:true")).toHaveLength(1);
+    expect(screen.queryByText("work-status-card:horizontal:false")).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "配置信息" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "熔断信息" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "供应商限额" })).not.toBeInTheDocument();
+  });
+
+  it("hides the provider limit tab in logs-primary layout when there is no data", () => {
+    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
+
+    renderPanel({
+      providerLimitRows: [],
+      providerLimitAvailable: true,
+      providerLimitLoading: false,
+    });
+
+    expect(screen.queryByRole("tab", { name: "供应商限额" })).not.toBeInTheDocument();
+  });
+
+  it("renders provider limits inside the info panel in logs-primary layout", async () => {
+    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
+
+    renderPanel({ devPreviewEnabled: true, providerLimitRows: [] });
+
+    fireEvent.click(screen.getByRole("tab", { name: "供应商限额" }));
+    expect(await screen.findByText("provider-limit:3")).toBeInTheDocument();
+  });
+
+  it("switches back to 配置信息 when provider limit data becomes empty in logs-primary layout", async () => {
+    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
+
+    const { rerender } = renderPanel({
+      providerLimitRows: [{ provider_id: 1 } as any],
+      providerLimitAvailable: true,
+      workspaceConfigs: [
+        {
+          cliKey: "claude",
+          cliLabel: "Claude Code",
+          workspaceId: 1,
+          workspaceName: "工作区 A",
+          loading: false,
+          items: [{ id: "prompt:1", type: "prompts", label: "Prompt", name: "Claude Prompt" }],
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "供应商限额" }));
+    expect(screen.getByText("provider-limit:1")).toBeInTheDocument();
+
+    rerender(
+      <HomeOverviewPanel
+        showCustomTooltip={false}
+        showHomeHeatmap={true}
+        cliPriorityOrder={["claude", "codex", "gemini"]}
+        usageWindowDays={15}
+        usageHeatmapRows={[]}
+        usageHeatmapLoading={false}
+        onRefreshUsageHeatmap={vi.fn()}
+        sortModes={[]}
+        sortModesLoading={false}
+        sortModesAvailable={true}
+        activeModeByCli={{ claude: null, codex: null, gemini: null }}
+        activeModeToggling={{ claude: false, codex: false, gemini: false }}
+        onSetCliActiveMode={vi.fn()}
+        cliProxyLoading={false}
+        cliProxyAvailable={true}
+        cliProxyEnabled={{ claude: false, codex: false, gemini: false }}
+        cliProxyAppliedToCurrentGateway={{ claude: null, codex: null, gemini: null }}
+        cliProxyToggling={{ claude: false, codex: false, gemini: false }}
+        onSetCliProxyEnabled={vi.fn()}
+        activeSessions={[]}
+        activeSessionsLoading={false}
+        activeSessionsAvailable={true}
+        workspaceConfigs={[
+          {
+            cliKey: "claude",
+            cliLabel: "Claude Code",
+            workspaceId: 1,
+            workspaceName: "工作区 A",
+            loading: false,
+            items: [{ id: "prompt:1", type: "prompts", label: "Prompt", name: "Claude Prompt" }],
+          },
+        ]}
+        providerLimitRows={[]}
+        providerLimitLoading={false}
+        providerLimitAvailable={true}
+        providerLimitRefreshing={false}
+        onRefreshProviderLimit={vi.fn()}
+        openCircuits={[]}
+        onResetCircuitProvider={vi.fn()}
+        resettingCircuitProviderIds={new Set()}
+        traces={[]}
+        requestLogs={[]}
+        requestLogsLoading={false}
+        requestLogsRefreshing={false}
+        requestLogsAvailable={true}
+        onRefreshRequestLogs={vi.fn()}
+        selectedLogId={null}
+        onSelectLogId={vi.fn()}
+        personalizedUsageView="summary"
+      />
+    );
+
+    expect(await screen.findByText("工作区：")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "供应商限额" })).not.toBeInTheDocument();
   });
 
   it("renders the usage chart branch when the personalized usage view switches", () => {
@@ -653,7 +751,7 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(screen.getByText("Claude New Circuit")).toBeInTheDocument();
   });
 
-  it("auto-switches to 熔断信息 when open circuits are removed", () => {
+  it("auto-switches to 配置信息 when open circuits are removed", () => {
     const { rerender } = renderPanel({
       openCircuits: [
         {
@@ -713,7 +811,7 @@ describe("components/home/HomeOverviewPanel", () => {
       />
     );
 
-    expect(screen.getByText("当前没有熔断中的 Provider")).toBeInTheDocument();
+    expect(screen.getByText("workspace-config:empty")).toBeInTheDocument();
   });
 
   it("switches back to 配置信息 when circuits become empty in logs-primary layout", async () => {

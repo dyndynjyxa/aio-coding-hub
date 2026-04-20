@@ -3,11 +3,13 @@
 
 import { CLIS } from "../../constants/clis";
 import type { CliKey } from "../../services/providers/providers";
+import type { SortModeSummary } from "../../services/providers/sortModes";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Switch } from "../../ui/Switch";
 import { cn } from "../../utils/cn";
 import { CliBrandIcon } from "./CliBrandIcon";
+import { HomeCliRouteStrategyControl } from "./HomeCliRouteStrategyControl";
 
 export type HomeWorkStatusCardProps = {
   layout?: "vertical" | "horizontal";
@@ -19,6 +21,13 @@ export type HomeWorkStatusCardProps = {
   cliProxyAppliedToCurrentGateway: Record<CliKey, boolean | null>;
   cliProxyToggling: Record<CliKey, boolean>;
   onSetCliProxyEnabled: (cliKey: CliKey, enabled: boolean) => void;
+
+  sortModes?: SortModeSummary[];
+  sortModesLoading?: boolean;
+  sortModesAvailable?: boolean | null;
+  activeModeByCli?: Record<CliKey, number | null>;
+  activeModeToggling?: Record<CliKey, boolean>;
+  onSetCliActiveMode?: (cliKey: CliKey, modeId: number | null) => void;
 };
 
 export function HomeWorkStatusCard({
@@ -30,9 +39,23 @@ export function HomeWorkStatusCard({
   cliProxyAppliedToCurrentGateway,
   cliProxyToggling,
   onSetCliProxyEnabled,
+  sortModes,
+  sortModesLoading,
+  sortModesAvailable,
+  activeModeByCli,
+  activeModeToggling,
+  onSetCliActiveMode,
 }: HomeWorkStatusCardProps) {
   const horizontal = layout === "horizontal";
   const plain = chrome === "plain";
+  const showRouteStrategy =
+    !horizontal &&
+    sortModes != null &&
+    typeof sortModesLoading === "boolean" &&
+    sortModesAvailable !== undefined &&
+    activeModeByCli != null &&
+    activeModeToggling != null &&
+    onSetCliActiveMode != null;
 
   const content = (
     <>
@@ -51,7 +74,7 @@ export function HomeWorkStatusCard({
           }
         >
           {CLIS.map((cli) => {
-            const cliKey = cli.key as CliKey;
+            const cliKey = cli.key;
             const drifted =
               cliProxyEnabled[cliKey] && cliProxyAppliedToCurrentGateway[cliKey] === false;
 
@@ -60,44 +83,31 @@ export function HomeWorkStatusCard({
                 key={cli.key}
                 className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-sm transition-all duration-200 hover:bg-slate-50 hover:border-indigo-200 hover:shadow-md dark:border-slate-700 dark:bg-slate-800 dark:shadow-none dark:hover:bg-slate-700 dark:hover:border-indigo-700"
               >
-                <div className="flex items-center justify-between gap-3">
-                  <div className={cn("min-w-0", !horizontal && "flex-1")}>
-                    <div className="flex items-center gap-2 text-left text-xs font-medium text-slate-700 dark:text-slate-300">
-                      <CliBrandIcon
-                        cliKey={cliKey}
-                        className="h-4 w-4 shrink-0 rounded-[4px] object-contain"
-                      />
-                      <span className="truncate">{cli.name}</span>
+                <div className="min-w-0 space-y-1.5">
+                  <div className="flex items-center gap-3">
+                    <div className={cn("min-w-0", !horizontal && "flex-1")}>
+                      <div className="flex items-center gap-2 text-left text-xs font-medium text-slate-700 dark:text-slate-300">
+                        <CliBrandIcon
+                          cliKey={cliKey}
+                          className="h-4 w-4 shrink-0 rounded-[4px] object-contain"
+                        />
+                        <span className="truncate">{cli.name}</span>
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="flex shrink-0 flex-col items-end justify-center gap-1 text-right">
-                    {drifted ? (
-                      <>
-                        <div className="flex items-center justify-end gap-2">
-                          <Button
-                            variant="danger"
-                            size="sm"
-                            className="h-6 px-2 py-0 text-[11px]"
-                            disabled={cliProxyToggling[cliKey]}
-                            onClick={() => onSetCliProxyEnabled(cliKey, true)}
-                            aria-label={`修复 ${cli.name} 代理`}
-                          >
-                            修复
-                          </Button>
-                          <Switch
-                            checked={cliProxyEnabled[cliKey]}
-                            disabled={cliProxyToggling[cliKey]}
-                            onCheckedChange={(next) => onSetCliProxyEnabled(cliKey, next)}
-                            size="sm"
-                            aria-label={`${cli.name} 代理开关`}
-                          />
-                        </div>
-                        <span className="text-[11px] font-medium leading-none text-rose-600 dark:text-rose-400">
-                          当前未指向本网关
-                        </span>
-                      </>
-                    ) : (
+                    <div className="ml-auto flex shrink-0 items-center gap-2">
+                      {drifted ? (
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          className="h-6 px-2 py-0 text-[11px]"
+                          disabled={cliProxyToggling[cliKey]}
+                          onClick={() => onSetCliProxyEnabled(cliKey, true)}
+                          aria-label={`修复 ${cli.name} 代理`}
+                        >
+                          修复
+                        </Button>
+                      ) : null}
                       <Switch
                         checked={cliProxyEnabled[cliKey]}
                         disabled={cliProxyToggling[cliKey]}
@@ -105,8 +115,28 @@ export function HomeWorkStatusCard({
                         size="sm"
                         aria-label={`${cli.name} 代理开关`}
                       />
-                    )}
+                      {showRouteStrategy ? (
+                        <HomeCliRouteStrategyControl
+                          cliKey={cliKey}
+                          cliLabel={cli.name}
+                          sortModes={sortModes}
+                          sortModesLoading={sortModesLoading}
+                          sortModesAvailable={sortModesAvailable}
+                          activeModeByCli={activeModeByCli}
+                          activeModeToggling={activeModeToggling}
+                          onSetCliActiveMode={onSetCliActiveMode}
+                          orientation="vertical"
+                          className="max-w-full"
+                        />
+                      ) : null}
+                    </div>
                   </div>
+
+                  {drifted ? (
+                    <div className="text-[11px] font-medium leading-none text-rose-600 dark:text-rose-400">
+                      当前未指向本网关
+                    </div>
+                  ) : null}
                 </div>
               </div>
             );

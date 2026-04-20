@@ -1,10 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Command, Cpu, Pencil } from "lucide-react";
 import type { CliKey } from "../../services/providers/providers";
-import type { SortModeSummary } from "../../services/providers/sortModes";
 import { EmptyState } from "../../ui/EmptyState";
-import { Select } from "../../ui/Select";
 import { cn } from "../../utils/cn";
 import { CliBrandIcon } from "./CliBrandIcon";
 import type {
@@ -21,36 +19,18 @@ export type HomeWorkspaceConfigPanelProps = {
   configs: HomeCliWorkspaceConfig[];
   selectedCliKey: CliKey | null;
   onSelectCliKey: (cliKey: CliKey) => void;
-  sortModes: SortModeSummary[];
-  sortModesLoading: boolean;
-  sortModesAvailable: boolean | null;
-  activeModeByCli: Record<CliKey, number | null>;
-  activeModeToggling: Record<CliKey, boolean>;
-  onSetCliActiveMode: (cliKey: CliKey, modeId: number | null) => void;
+  headerAddon?: ReactNode;
 };
 
 export function HomeWorkspaceConfigPanel({
   configs,
   selectedCliKey,
   onSelectCliKey,
-  sortModes,
-  sortModesLoading,
-  sortModesAvailable,
-  activeModeByCli,
-  activeModeToggling,
-  onSetCliActiveMode,
+  headerAddon,
 }: HomeWorkspaceConfigPanelProps) {
   const selectedConfig = useMemo(() => {
     return configs.find((row) => row.cliKey === selectedCliKey) ?? configs[0] ?? null;
   }, [configs, selectedCliKey]);
-  const selectedModeValue = selectedConfig
-    ? String(activeModeByCli[selectedConfig.cliKey] ?? "")
-    : "";
-  const sortModeSelectDisabled =
-    selectedConfig == null ||
-    sortModesLoading ||
-    sortModesAvailable === false ||
-    activeModeToggling[selectedConfig.cliKey];
 
   if (!selectedConfig) {
     return <EmptyState title="暂无工作区配置信息" />;
@@ -85,38 +65,19 @@ export function HomeWorkspaceConfigPanel({
         })}
       </div>
 
-      <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_fit-content(240px)]">
+      <div
+        className={cn(
+          "grid grid-cols-1 gap-2",
+          headerAddon != null && "md:grid-cols-[minmax(0,1fr)_fit-content(240px)]"
+        )}
+      >
         <div className="flex min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800/50">
           <span className="shrink-0 font-medium text-slate-500 dark:text-slate-400">工作区：</span>
           <span className="min-w-0 truncate font-medium text-slate-700 dark:text-slate-200">
             {selectedConfig.workspaceName?.trim() || "默认"}
           </span>
         </div>
-        <div className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800/50">
-          <span className="shrink-0 font-medium text-slate-500 dark:text-slate-400">
-            路由策略：
-          </span>
-          <Select
-            value={selectedModeValue}
-            onChange={(e) => {
-              const nextValue = e.currentTarget.value;
-              onSetCliActiveMode(
-                selectedConfig.cliKey,
-                nextValue === "" ? null : Number(nextValue)
-              );
-            }}
-            disabled={sortModeSelectDisabled}
-            className="h-7 min-w-[112px] w-auto flex-none border-slate-200 bg-white px-2 pr-7 text-sm dark:border-slate-600 dark:bg-slate-900"
-            aria-label={`${selectedConfig.cliLabel} 路由策略`}
-          >
-            <option value="">Default</option>
-            {sortModes.map((mode) => (
-              <option key={mode.id} value={String(mode.id)}>
-                {mode.name}
-              </option>
-            ))}
-          </Select>
-        </div>
+        {headerAddon}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
