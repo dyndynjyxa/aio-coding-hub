@@ -27,6 +27,7 @@ import { TabList } from "../../ui/TabList";
 import { formatCountdownSeconds } from "../../utils/formatters";
 import { CliBrandIcon } from "./CliBrandIcon";
 import { HomeCliRouteStrategyControl } from "./HomeCliRouteStrategyControl";
+import type { HomeOAuthQuotaRow } from "./homeOAuthQuotaTypes";
 import { HomeRequestLogsPanel } from "./HomeRequestLogsPanel";
 import { HomeTodayProviderUsageOverview } from "./HomeTodayProviderUsageOverview";
 import { HomeUsageSection } from "./HomeUsageSection";
@@ -41,6 +42,10 @@ const LazyHomeActiveSessionsCardContent = lazy(() =>
 
 const LazyHomeProviderLimitPanelContent = lazy(() =>
   import("./HomeProviderLimitPanel").then((m) => ({ default: m.HomeProviderLimitPanelContent }))
+);
+
+const LazyHomeOAuthQuotaPanelContent = lazy(() =>
+  import("./HomeOAuthQuotaPanel").then((m) => ({ default: m.HomeOAuthQuotaPanelContent }))
 );
 
 const LazyHomeWorkspaceConfigPanel = lazy(() =>
@@ -179,6 +184,66 @@ const PREVIEW_PROVIDER_LIMIT_ROWS: ProviderLimitUsageRow[] = [
   },
 ];
 
+const PREVIEW_OAUTH_QUOTA_ROWS: HomeOAuthQuotaRow[] = [
+  {
+    providerId: 301,
+    cliKey: "claude",
+    providerName: "Claude OAuth 主账号",
+    enabled: true,
+    state: "success",
+    limits: {
+      limit_short_label: "5h",
+      limit_5h_text: "29%",
+      limit_weekly_text: "83%",
+      limit_5h_reset_at: Math.floor(Date.now() / 1000) + 2 * 3600 + 34 * 60,
+      limit_weekly_reset_at: Math.floor(Date.now() / 1000) + 3 * 86400 + 2 * 3600 + 29 * 60,
+    },
+    error: null,
+  },
+  {
+    providerId: 302,
+    cliKey: "codex",
+    providerName: "Codex OAuth 空数据",
+    enabled: true,
+    state: "success",
+    limits: {
+      limit_short_label: "5h",
+      limit_5h_text: null,
+      limit_weekly_text: null,
+      limit_5h_reset_at: null,
+      limit_weekly_reset_at: null,
+    },
+    error: null,
+  },
+  {
+    providerId: 303,
+    cliKey: "gemini",
+    providerName: "Gemini OAuth 未刷新",
+    enabled: true,
+    state: "idle",
+    limits: null,
+    error: null,
+  },
+  {
+    providerId: 304,
+    cliKey: "codex",
+    providerName: "Codex OAuth 刷新失败",
+    enabled: true,
+    state: "error",
+    limits: null,
+    error: "preview error",
+  },
+  {
+    providerId: 305,
+    cliKey: "gemini",
+    providerName: "Gemini OAuth 已禁用",
+    enabled: false,
+    state: "loading",
+    limits: null,
+    error: null,
+  },
+];
+
 function didKeysChange(current: string[], previous: string[]) {
   return (
     current.length !== previous.length || current.some((key, index) => key !== previous[index])
@@ -232,6 +297,12 @@ export type HomeOverviewPanelProps = {
   providerLimitAvailable: boolean | null;
   providerLimitRefreshing: boolean;
   onRefreshProviderLimit: () => void;
+  oauthQuotaRows: HomeOAuthQuotaRow[];
+  oauthQuotaVisible: boolean;
+  oauthQuotaRefreshing: boolean;
+  oauthQuotaHasRefreshed: boolean;
+  onRefreshOAuthQuota: () => Promise<void>;
+  onRefreshOAuthQuotaRow: (providerId: number) => Promise<void>;
 
   openCircuits: OpenCircuitRow[];
   onResetCircuitProvider: (providerId: number) => void;
@@ -325,6 +396,12 @@ export function HomeOverviewPanel({
   providerLimitAvailable,
   providerLimitRefreshing,
   onRefreshProviderLimit,
+  oauthQuotaRows,
+  oauthQuotaVisible,
+  oauthQuotaRefreshing,
+  oauthQuotaHasRefreshed,
+  onRefreshOAuthQuota,
+  onRefreshOAuthQuotaRow,
   openCircuits,
   onResetCircuitProvider,
   resettingCircuitProviderIds,
@@ -357,6 +434,13 @@ export function HomeOverviewPanel({
     devPreviewEnabled && providerLimitRows.length === 0
       ? PREVIEW_PROVIDER_LIMIT_ROWS
       : providerLimitRows;
+  const oauthQuotaPreviewActive = devPreviewEnabled;
+  const displayedOAuthQuotaRows = oauthQuotaPreviewActive
+    ? PREVIEW_OAUTH_QUOTA_ROWS
+    : oauthQuotaRows;
+  const displayedOAuthQuotaVisible = oauthQuotaPreviewActive || oauthQuotaVisible;
+  const displayedOAuthQuotaHasRefreshed = oauthQuotaPreviewActive ? true : oauthQuotaHasRefreshed;
+  const displayedOAuthQuotaRefreshing = oauthQuotaPreviewActive ? false : oauthQuotaRefreshing;
   const displayedWorkspaceConfigs = useMemo(() => {
     let nextConfigs: HomeCliWorkspaceConfig[];
     if (workspaceConfigs.length === 0) {
@@ -401,19 +485,19 @@ export function HomeOverviewPanel({
     const labelByKey = new Map(HOME_OVERVIEW_TABS.map((item) => [item.key, item.label]));
     return sessionsTabsOrder.map((key) => ({ key, label: labelByKey.get(key) ?? key }));
   }, [sessionsTabsOrder]);
-  const showLogsPrimaryProviderLimitTab =
-    providerLimitLoading ||
-    providerLimitAvailable === false ||
-    displayedProviderLimitRows.length > 0;
+  const legacySessionsTabs = useMemo(
+    () => sessionsTabs.filter((item) => item.key !== "oauthQuota"),
+    [sessionsTabs]
+  );
   const logsPrimaryTabs = useMemo(
     () =>
       sessionsTabs.filter(
         (item) =>
           item.key === "workspaceConfig" ||
           item.key === "circuit" ||
-          (item.key === "providerLimit" && showLogsPrimaryProviderLimitTab)
+          (item.key === "oauthQuota" && displayedOAuthQuotaVisible)
       ),
-    [sessionsTabs, showLogsPrimaryProviderLimitTab]
+    [displayedOAuthQuotaVisible, sessionsTabs]
   );
 
   const openCircuitKeys = useMemo(
@@ -477,19 +561,10 @@ export function HomeOverviewPanel({
   }, [openCircuitKeys]);
 
   useEffect(() => {
-    if (!logsPrimaryLayout) return;
-    if (sessionsTab === "providerLimit" && !showLogsPrimaryProviderLimitTab) {
-      setSessionsTab("workspaceConfig");
-      return;
-    }
-    if (
-      sessionsTab === "workspaceConfig" ||
-      sessionsTab === "circuit" ||
-      (sessionsTab === "providerLimit" && showLogsPrimaryProviderLimitTab)
-    )
-      return;
+    const visibleTabs = logsPrimaryLayout ? logsPrimaryTabs : legacySessionsTabs;
+    if (visibleTabs.some((tab) => tab.key === sessionsTab)) return;
     setSessionsTab("workspaceConfig");
-  }, [logsPrimaryLayout, sessionsTab, showLogsPrimaryProviderLimitTab]);
+  }, [legacySessionsTabs, logsPrimaryLayout, logsPrimaryTabs, sessionsTab]);
 
   const requestLogsPanel = (
     <HomeRequestLogsPanel
@@ -516,8 +591,12 @@ export function HomeOverviewPanel({
       <div className="shrink-0">
         <TabList
           ariaLabel="概览状态切换"
-          items={sessionsTabs}
-          value={sessionsTab}
+          items={legacySessionsTabs}
+          value={
+            legacySessionsTabs.some((item) => item.key === sessionsTab)
+              ? sessionsTab
+              : "workspaceConfig"
+          }
           onChange={setSessionsTab}
           size="sm"
           className="w-full overflow-x-auto"
@@ -553,6 +632,8 @@ export function HomeOverviewPanel({
               refreshing={providerLimitRefreshing}
             />
           </Suspense>
+        ) : sessionsTab === "oauthQuota" ? (
+          <div />
         ) : displayedCircuits.length === 0 ? (
           <EmptyState title="当前没有熔断中的 Provider" />
         ) : (
@@ -632,8 +713,7 @@ export function HomeOverviewPanel({
           ariaLabel="新布局信息切换"
           items={logsPrimaryTabs}
           value={
-            sessionsTab === "circuit" ||
-            (sessionsTab === "providerLimit" && showLogsPrimaryProviderLimitTab)
+            logsPrimaryTabs.some((item) => item.key === sessionsTab)
               ? sessionsTab
               : "workspaceConfig"
           }
@@ -695,14 +775,21 @@ export function HomeOverviewPanel({
               </div>
             </div>
           )
-        ) : sessionsTab === "providerLimit" ? (
+        ) : sessionsTab === "oauthQuota" ? (
           <Suspense fallback={<OverviewPanelFallback />}>
-            <LazyHomeProviderLimitPanelContent
-              rows={displayedProviderLimitRows}
-              loading={providerLimitLoading}
-              available={providerLimitAvailable}
-              onRefresh={onRefreshProviderLimit}
-              refreshing={providerLimitRefreshing}
+            <LazyHomeOAuthQuotaPanelContent
+              rows={displayedOAuthQuotaRows}
+              hasProviders={displayedOAuthQuotaVisible}
+              hasRefreshed={displayedOAuthQuotaHasRefreshed}
+              refreshing={displayedOAuthQuotaRefreshing}
+              onRefresh={() => {
+                if (oauthQuotaPreviewActive) return;
+                void onRefreshOAuthQuota();
+              }}
+              onRefreshRow={(providerId) => {
+                if (oauthQuotaPreviewActive) return;
+                void onRefreshOAuthQuotaRow(providerId);
+              }}
             />
           </Suspense>
         ) : (

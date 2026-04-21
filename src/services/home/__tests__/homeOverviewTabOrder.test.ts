@@ -26,7 +26,7 @@ describe("services/home/homeOverviewTabOrder", () => {
         "bad-key",
         "providerLimit",
       ])
-    ).toEqual(["sessions", "workspaceConfig", "providerLimit", "circuit"]);
+    ).toEqual(["sessions", "workspaceConfig", "providerLimit", "circuit", "oauthQuota"]);
   });
 
   it("reads tab order from storage and falls back for empty or malformed values", () => {
@@ -41,6 +41,7 @@ describe("services/home/homeOverviewTabOrder", () => {
       "workspaceConfig",
       "circuit",
       "sessions",
+      "oauthQuota",
     ]);
 
     window.localStorage.setItem(HOME_OVERVIEW_TAB_ORDER_STORAGE_KEY, "{bad json");
@@ -80,7 +81,7 @@ describe("services/home/homeOverviewTabOrder", () => {
 
     expect(setItemSpy).toHaveBeenCalledWith(
       HOME_OVERVIEW_TAB_ORDER_STORAGE_KEY,
-      JSON.stringify(["sessions", "providerLimit", "workspaceConfig", "circuit"])
+      JSON.stringify(["sessions", "providerLimit", "workspaceConfig", "circuit", "oauthQuota"])
     );
 
     setItemSpy.mockImplementation(() => {

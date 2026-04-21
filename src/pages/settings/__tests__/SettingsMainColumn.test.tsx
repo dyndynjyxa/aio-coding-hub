@@ -261,7 +261,7 @@ describe("pages/settings/SettingsMainColumn", () => {
 
     expect(screen.getByRole("button", { name: "供应商限额" })).toBeInTheDocument();
     expect(window.localStorage.getItem("aio-home-overview-tab-order")).toBe(
-      JSON.stringify(["providerLimit", "workspaceConfig", "circuit", "sessions"])
+      JSON.stringify(["providerLimit", "workspaceConfig", "circuit", "sessions", "oauthQuota"])
     );
   });
 

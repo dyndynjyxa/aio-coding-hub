@@ -13,6 +13,7 @@ type UseHomeOverviewFeedOptions = {
   overviewUsageSeriesEnabled: boolean;
   shouldRefetchOverviewUsageSeries: boolean;
   homeUsageWindowDays: number;
+  providerLimitEnabled?: boolean;
 };
 
 export function useHomeOverviewFeed({
@@ -21,6 +22,7 @@ export function useHomeOverviewFeed({
   overviewUsageSeriesEnabled,
   shouldRefetchOverviewUsageSeries,
   homeUsageWindowDays,
+  providerLimitEnabled = true,
 }: UseHomeOverviewFeedOptions) {
   const previousOverviewActiveRef = useRef(false);
   const overviewForegroundPollingEnabled = overviewActive && foregroundActive;
@@ -29,8 +31,8 @@ export function useHomeOverviewFeed({
     enabled: overviewActive && overviewUsageSeriesEnabled,
   });
   const providerLimitQuery = useProviderLimitUsageV1Query(null, {
-    enabled: overviewForegroundPollingEnabled,
-    refetchIntervalMs: overviewForegroundPollingEnabled ? 30000 : false,
+    enabled: providerLimitEnabled && overviewForegroundPollingEnabled,
+    refetchIntervalMs: providerLimitEnabled && overviewForegroundPollingEnabled ? 30000 : false,
   });
   const requestLogsFeed = useRequestLogsFeed({
     limit: 50,
@@ -46,9 +48,9 @@ export function useHomeOverviewFeed({
   }, [shouldRefetchOverviewUsageSeries, usageHeatmapQuery]);
 
   const refetchProviderLimitSilently = useCallback(async () => {
-    if (!overviewForegroundPollingEnabled) return null;
+    if (!providerLimitEnabled || !overviewForegroundPollingEnabled) return null;
     return providerLimitQuery.refetch();
-  }, [overviewForegroundPollingEnabled, providerLimitQuery]);
+  }, [overviewForegroundPollingEnabled, providerLimitEnabled, providerLimitQuery]);
 
   const refetchRequestLogsSilently = useCallback(async () => {
     return requestLogsFeed.refreshRequestLogs();
@@ -98,10 +100,15 @@ export function useHomeOverviewFeed({
   return {
     usageHeatmapRows: overviewUsageSeriesEnabled ? (usageHeatmapQuery.data ?? []) : [],
     usageHeatmapLoading: overviewUsageSeriesEnabled && usageHeatmapQuery.isFetching,
-    providerLimitRows: providerLimitQuery.data ?? [],
-    providerLimitLoading: providerLimitQuery.isLoading,
-    providerLimitRefreshing: providerLimitQuery.isFetching && !providerLimitQuery.isLoading,
-    providerLimitAvailable: providerLimitQuery.isLoading ? null : providerLimitQuery.data != null,
+    providerLimitRows: providerLimitEnabled ? (providerLimitQuery.data ?? []) : [],
+    providerLimitLoading: providerLimitEnabled && providerLimitQuery.isLoading,
+    providerLimitRefreshing:
+      providerLimitEnabled && providerLimitQuery.isFetching && !providerLimitQuery.isLoading,
+    providerLimitAvailable: providerLimitEnabled
+      ? providerLimitQuery.isLoading
+        ? null
+        : providerLimitQuery.data != null
+      : null,
     requestLogs: requestLogsFeed.requestLogs,
     requestLogsLoading: requestLogsFeed.requestLogsLoading,
     requestLogsRefreshing: requestLogsFeed.requestLogsRefreshing,
