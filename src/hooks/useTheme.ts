@@ -1,5 +1,6 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { setDesktopWindowTheme } from "../services/desktop/window";
+import { listenThemeChanged } from "../services/desktop/themeEvent";
 
 type Theme = "light" | "dark" | "system";
 
@@ -112,29 +113,53 @@ function setThemeInternal(next: Theme) {
 // System theme media query listener (singleton, always active)
 // ---------------------------------------------------------------------------
 
+function handleSystemThemeChange() {
+  if (currentSnapshot.theme !== "system") return;
+  applyTheme("system");
+  const newResolved = getSystemTheme();
+  if (currentSnapshot.resolvedTheme !== newResolved) {
+    currentSnapshot = { ...currentSnapshot, resolvedTheme: newResolved };
+    emitChange();
+  }
+}
+
 if (canUseWindow() && typeof window.matchMedia === "function") {
   try {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const handleThemeChange = () => {
-      // Only react when the user preference is "system"
-      if (currentSnapshot.theme !== "system") return;
-      applyTheme("system");
-      const newResolved = getSystemTheme();
-      if (currentSnapshot.resolvedTheme !== newResolved) {
-        currentSnapshot = { ...currentSnapshot, resolvedTheme: newResolved };
-        emitChange();
-      }
-    };
-
     if (typeof mq.addEventListener === "function") {
-      mq.addEventListener("change", handleThemeChange);
+      mq.addEventListener("change", handleSystemThemeChange);
     } else if (typeof mq.addListener === "function") {
-      mq.addListener(handleThemeChange);
+      mq.addListener(handleSystemThemeChange);
     }
   } catch {}
 }
 
+// ---------------------------------------------------------------------------
+// Tauri native theme change listener (Windows WebView2 fix)
+// ---------------------------------------------------------------------------
+
+/**
+ * Listen for Tauri native theme change events.
+ * This is more reliable than matchMedia on Windows (WebView2).
+ */
+function setupTauriThemeListener() {
+  listenThemeChanged((theme) => {
+    if (currentSnapshot.theme !== "system") return;
+    if (currentSnapshot.resolvedTheme !== theme) {
+      currentSnapshot = { ...currentSnapshot, resolvedTheme: theme };
+      emitChange();
+      // Sync DOM class for the new resolved theme
+      if (typeof document !== "undefined") {
+        document.documentElement.classList.toggle("dark", theme === "dark");
+      }
+    }
+  }).catch(() => {
+    // Tauri event listener is best-effort; ignore failures
+  });
+}
+
 if (canUseWindow()) {
+  setupTauriThemeListener();
   // Apply theme on module load to ensure DOM is in sync
   applyTheme(currentSnapshot.theme);
 }

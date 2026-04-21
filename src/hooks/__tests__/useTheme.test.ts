@@ -6,10 +6,17 @@ vi.mock("../../services/desktop/window", () => ({
   setDesktopWindowTheme: vi.fn().mockResolvedValue(true),
 }));
 
+const mockTauriListen = vi.fn();
+vi.mock("../../services/desktop/themeEvent", () => ({
+  listenThemeChanged: mockTauriListen,
+}));
+
 describe("hooks/useTheme", () => {
   beforeEach(() => {
     localStorage.clear();
     document.documentElement.classList.remove("dark");
+    mockTauriListen.mockReset();
+    mockTauriListen.mockImplementation(() => Promise.resolve(() => {}));
   });
 
   afterEach(() => {
@@ -53,6 +60,23 @@ describe("hooks/useTheme", () => {
       },
       restore() {
         Object.defineProperty(window, "matchMedia", { writable: true, value: original });
+      },
+    };
+  }
+
+  function mockTauriThemeListener() {
+    let tauriHandler: ((theme: "light" | "dark") => void) | null = null;
+    mockTauriListen.mockImplementation((handler: (theme: "light" | "dark") => void) => {
+      tauriHandler = handler;
+      return Promise.resolve(() => {});
+    });
+
+    return {
+      fireTauriThemeChange(theme: "light" | "dark") {
+        tauriHandler?.(theme);
+      },
+      get handler() {
+        return tauriHandler;
       },
     };
   }
@@ -280,5 +304,63 @@ describe("hooks/useTheme", () => {
     expect(result.current.theme).toBe("dark");
     expect(result.current.resolvedTheme).toBe("dark");
     expect(document.documentElement.classList.contains("dark")).toBe(true);
+  });
+
+  it("reacts to Tauri theme change events while in system mode", async () => {
+    const media = mockMatchMediaWithChangeListener(false);
+    const tauri = mockTauriThemeListener();
+    const { useTheme } = await importFreshUseTheme();
+    const { result } = renderHook(() => useTheme());
+
+    expect(result.current.theme).toBe("system");
+    expect(result.current.resolvedTheme).toBe("light");
+
+    // Check that the listener was registered
+    expect(mockTauriListen).toHaveBeenCalled();
+
+    // Fire Tauri theme change event
+    act(() => {
+      tauri.handler?.("dark");
+    });
+
+    expect(result.current.theme).toBe("system");
+    expect(result.current.resolvedTheme).toBe("dark");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+
+    media.restore();
+  });
+
+  it("ignores Tauri theme change events after switching to an explicit theme", async () => {
+    mockTauriListen.mockClear();
+    const media = mockMatchMediaWithChangeListener(false);
+    const tauri = mockTauriThemeListener();
+    const { useTheme } = await importFreshUseTheme();
+    const { result } = renderHook(() => useTheme());
+
+    act(() => {
+      result.current.setTheme("dark");
+    });
+
+    expect(result.current.theme).toBe("dark");
+    expect(result.current.resolvedTheme).toBe("dark");
+
+    act(() => {
+      tauri.fireTauriThemeChange("light");
+    });
+
+    expect(result.current.theme).toBe("dark");
+    expect(result.current.resolvedTheme).toBe("dark");
+
+    media.restore();
+  });
+
+  it("handles Tauri listen failure gracefully", async () => {
+    mockTauriListen.mockRejectedValueOnce(new Error("Tauri not available"));
+
+    const { useTheme } = await importFreshUseTheme();
+    const { result } = renderHook(() => useTheme());
+
+    expect(result.current.theme).toBe("system");
+    expect(result.current.resolvedTheme).toBe("light");
   });
 });
