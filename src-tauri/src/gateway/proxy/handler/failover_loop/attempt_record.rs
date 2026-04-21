@@ -1,9 +1,10 @@
 //! Usage: Shared helpers to record SystemError attempts and apply failover decisions.
 
-use super::super::super::status_override;
-use super::super::super::{is_claude_count_tokens_request, provider_router};
 use super::*;
+use crate::circuit_breaker;
 use crate::gateway::events::decision_chain as dc;
+use crate::gateway::proxy::status_override;
+use crate::gateway::proxy::{is_claude_count_tokens_request, provider_router};
 
 pub(super) struct RecordSystemFailureArgs<'a> {
     pub(super) ctx: CommonCtx<'a>,
@@ -80,6 +81,38 @@ async fn record_system_failure_and_decide_impl(
     let category = ErrorCategory::SystemError;
     let effective_status = status_override::effective_status(status, Some(error_code));
 
+    let is_count_tokens =
+        is_claude_count_tokens_request(ctx.cli_key.as_str(), ctx.forwarded_path.as_str());
+    let now_unix = now_unix_seconds() as i64;
+
+    let mut circuit_state_before = Some(circuit_before.state.as_str());
+    let mut circuit_state_after: Option<&'static str> = None;
+    let mut circuit_failure_count = Some(circuit_before.failure_count);
+    let circuit_failure_threshold = Some(circuit_before.failure_threshold);
+
+    if !is_count_tokens {
+        let change = provider_router::record_failure_and_emit_transition(
+            provider_router::RecordCircuitArgs::from_state(
+                ctx.state,
+                ctx.trace_id.as_str(),
+                ctx.cli_key.as_str(),
+                provider_id,
+                provider_name_base.as_str(),
+                provider_base_url_base.as_str(),
+                now_unix,
+            ),
+        );
+        *circuit_snapshot = change.after.clone();
+        circuit_state_before = Some(change.before.state.as_str());
+        circuit_state_after = Some(change.after.state.as_str());
+        circuit_failure_count = Some(change.after.failure_count);
+
+        if change.after.state == circuit_breaker::CircuitState::Open {
+            // Override decision to switch if circuit just opened.
+            // (The original decision may have been RetrySameProvider.)
+        }
+    }
+
     attempts.push(FailoverAttempt {
         provider_id,
         provider_name: provider_name_base.clone(),
@@ -97,10 +130,10 @@ async fn record_system_failure_and_decide_impl(
         reason_code: Some(category.reason_code()),
         attempt_started_ms: Some(attempt_started_ms),
         attempt_duration_ms: Some(attempt_started.elapsed().as_millis()),
-        circuit_state_before: Some(circuit_before.state.as_str()),
-        circuit_state_after: None,
-        circuit_failure_count: Some(circuit_before.failure_count),
-        circuit_failure_threshold: Some(circuit_before.failure_threshold),
+        circuit_state_before,
+        circuit_state_after,
+        circuit_failure_count,
+        circuit_failure_threshold,
     });
 
     emit_attempt_event_and_log_with_circuit_before(

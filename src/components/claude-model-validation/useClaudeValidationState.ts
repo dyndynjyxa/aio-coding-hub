@@ -3,13 +3,12 @@ import { toast } from "sonner";
 import { logToConsole } from "../../services/consoleLog";
 import { copyText } from "../../services/clipboard";
 import { useProvidersListQuery } from "../../query/providers";
-import { claudeProviderGetApiKeyPlaintext } from "../../services/claudeModelValidation";
-import type { ClaudeModelValidationResult } from "../../services/claudeModelValidation";
+import type { ClaudeModelValidationResult } from "../../services/claude/claudeModelValidation";
 import {
   claudeValidationHistoryClearProvider,
   claudeValidationHistoryList,
-} from "../../services/claudeModelValidationHistory";
-import { baseUrlPingMs, type ProviderSummary } from "../../services/providers";
+} from "../../services/claude/claudeModelValidationHistory";
+import { baseUrlPingMs, type ProviderSummary } from "../../services/providers/providers";
 import {
   DEFAULT_CLAUDE_VALIDATION_TEMPLATE_KEY,
   evaluateClaudeValidation,
@@ -18,7 +17,7 @@ import {
   getClaudeValidationTemplate,
   listClaudeValidationTemplates,
   type ClaudeValidationTemplateKey,
-} from "../../services/claudeValidationTemplates";
+} from "../../services/claude/claudeValidationTemplates";
 import { runValidationSuite as runValidationSuiteImpl } from "./runValidationSuite";
 
 import type {
@@ -62,7 +61,7 @@ export function useClaudeValidationState(
   const [model, setModel] = useState("claude-sonnet-4-5-20250929");
 
   const [requestJson, setRequestJson] = useState("");
-  const [apiKeyPlaintext, setApiKeyPlaintext] = useState<string | null>(null);
+  const apiKeyPlaintext: string | null = null;
 
   const [result, setResult] = useState<ClaudeModelValidationResult | null>(null);
 
@@ -122,7 +121,6 @@ export function useClaudeValidationState(
       setResultTemplateKey(DEFAULT_CLAUDE_VALIDATION_TEMPLATE_KEY);
       setModel(DEFAULT_MODEL);
       setRequestJson("");
-      setApiKeyPlaintext(null);
       setResult(null);
       setValidating(false);
       setSuiteSteps([]);
@@ -146,7 +144,6 @@ export function useClaudeValidationState(
     setResultTemplateKey(DEFAULT_CLAUDE_VALIDATION_TEMPLATE_KEY);
     setModel(DEFAULT_MODEL);
     setRequestJson("");
-    setApiKeyPlaintext(null);
     setResult(null);
     setSuiteSteps([]);
     setSuiteProgress(null);
@@ -156,25 +153,6 @@ export function useClaudeValidationState(
   }, [open]);
 
   const providerId = provider?.id ?? null;
-
-  useEffect(() => {
-    if (!open || providerId == null) return;
-    let cancelled = false;
-
-    claudeProviderGetApiKeyPlaintext(providerId)
-      .then((key) => {
-        if (cancelled) return;
-        setApiKeyPlaintext(typeof key === "string" && key.trim() ? key : null);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setApiKeyPlaintext(null);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [open, providerId]);
 
   // ---------------------------------------------------------------------------
   // Handlers
@@ -313,14 +291,12 @@ export function useClaudeValidationState(
         abortRef,
         baseUrl,
         model,
-        apiKeyPlaintext,
         templates,
         crossProviderId,
         allClaudeProviders,
         suiteRounds,
         historyReqSeqRef,
         setValidating,
-        setApiKeyPlaintext,
         setCrossProviderId,
         setSelectedHistoryKey,
         setSuiteActiveStepIndex,
@@ -338,7 +314,6 @@ export function useClaudeValidationState(
       open,
       baseUrl,
       model,
-      apiKeyPlaintext,
       templates,
       crossProviderId,
       allClaudeProviders,

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { GatewayStatus } from "../services/gateway";
+import type { GatewayStatus } from "../services/gateway/gateway";
 import { useGatewayStatusQuery } from "../query/gateway";
 import { useSettingsQuery } from "../query/settings";
 

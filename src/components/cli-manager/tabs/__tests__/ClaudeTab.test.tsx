@@ -51,6 +51,7 @@ function createClaudeSettings(overrides: Partial<any> = {}) {
     env_mcp_timeout_ms: 1000,
     env_mcp_tool_timeout_ms: 2000,
     env_experimental_agent_teams: false,
+    env_claude_code_auto_compact_window: 200000,
     env_claude_code_blocking_limit_override: 0,
     env_claude_code_max_output_tokens: 0,
     env_max_mcp_output_tokens: 25000,
@@ -61,6 +62,7 @@ function createClaudeSettings(overrides: Partial<any> = {}) {
     env_disable_terminal_title: false,
     env_claude_bash_no_login: false,
     env_claude_code_disable_nonessential_traffic: false,
+    env_claude_code_disable_1m_context: false,
     env_claude_code_proxy_resolves_hosts: false,
     env_claude_code_skip_prompt_history: false,
     ...overrides,
@@ -84,6 +86,42 @@ describe("components/cli-manager/tabs/ClaudeTab", () => {
       />
     );
     expect(screen.getByText("数据不可用")).toBeInTheDocument();
+  });
+
+  it("does not render Claude OAuth card in the empty or loaded tab", () => {
+    const { rerender } = render(
+      <CliManagerClaudeTab
+        claudeAvailable="available"
+        claudeLoading={false}
+        claudeInfo={createClaudeInfo()}
+        claudeSettingsLoading={false}
+        claudeSettingsSaving={false}
+        claudeSettings={null}
+        providers={[]}
+        refreshClaude={vi.fn()}
+        openClaudeConfigDir={vi.fn()}
+        persistClaudeSettings={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText("claude-oauth-card")).not.toBeInTheDocument();
+
+    rerender(
+      <CliManagerClaudeTab
+        claudeAvailable="available"
+        claudeLoading={false}
+        claudeInfo={createClaudeInfo()}
+        claudeSettingsLoading={false}
+        claudeSettingsSaving={false}
+        claudeSettings={createClaudeSettings()}
+        providers={[]}
+        refreshClaude={vi.fn()}
+        openClaudeConfigDir={vi.fn()}
+        persistClaudeSettings={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText("claude-oauth-card")).not.toBeInTheDocument();
   });
 
   it("drives key form interactions and validations", () => {
@@ -283,6 +321,24 @@ describe("components/cli-manager/tabs/ClaudeTab", () => {
       expect.stringContaining("CLAUDE_CODE_MAX_OUTPUT_TOKENS 必须为非负整数")
     );
 
+    // CLAUDE_CODE_AUTO_COMPACT_WINDOW: empty -> persist 0
+    const autoCompactItem = screen.getByText("CLAUDE_CODE_AUTO_COMPACT_WINDOW").parentElement
+      ?.parentElement;
+    expect(autoCompactItem).toBeTruthy();
+    const autoCompactInput = within(autoCompactItem as HTMLElement).getByRole("spinbutton");
+    fireEvent.change(autoCompactInput, { target: { value: "" } });
+    fireEvent.blur(autoCompactInput);
+    expect(persistClaudeSettings).toHaveBeenCalledWith({ env_claude_code_auto_compact_window: 0 });
+
+    // CLAUDE_CODE_DISABLE_1M_CONTEXT toggle
+    const disable1mItem = screen.getByText("CLAUDE_CODE_DISABLE_1M_CONTEXT").parentElement
+      ?.parentElement;
+    expect(disable1mItem).toBeTruthy();
+    fireEvent.click(within(disable1mItem as HTMLElement).getByRole("switch"));
+    expect(persistClaudeSettings).toHaveBeenCalledWith({
+      env_claude_code_disable_1m_context: true,
+    });
+
     // permissions.ask
     const askItem = screen.getByText("permissions.ask").parentElement?.parentElement;
     expect(askItem).toBeTruthy();
@@ -331,9 +387,11 @@ describe("components/cli-manager/tabs/ClaudeTab", () => {
           permissions_deny: null,
           env_mcp_timeout_ms: null,
           env_mcp_tool_timeout_ms: null,
+          env_claude_code_auto_compact_window: null,
           env_claude_code_blocking_limit_override: null,
           env_claude_code_max_output_tokens: null,
           env_max_mcp_output_tokens: null,
+          env_claude_code_disable_1m_context: false,
         })}
         providers={null}
         refreshClaude={refreshClaude}

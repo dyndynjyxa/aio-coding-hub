@@ -1,10 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { CliVersionBadge } from "../CliVersionBadge";
-import { cliCheckLatestVersion, cliUpdateCli } from "../../../services/cliUpdate";
+import { cliCheckLatestVersion, cliUpdateCli } from "../../../services/cli/cliUpdate";
 import { toast } from "sonner";
 
-vi.mock("../../../services/cliUpdate", () => ({
+vi.mock("../../../services/cli/cliUpdate", () => ({
   cliCheckLatestVersion: vi.fn(),
   cliUpdateCli: vi.fn(),
 }));

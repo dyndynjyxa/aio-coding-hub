@@ -5,19 +5,20 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useNowUnix } from "../../hooks/useNowUnix";
 import type { OpenCircuitRow } from "../ProviderCircuitBadge";
-import type { GatewayActiveSession } from "../../services/gateway";
+import type { GatewayActiveSession } from "../../services/gateway/gateway";
+import { readHomeOverviewLogsPrimaryLayoutFromStorage } from "../../services/home/homeOverviewLayout";
 import {
   HOME_OVERVIEW_TABS,
   readHomeOverviewTabOrderFromStorage,
   type HomeOverviewTabKey,
-} from "../../services/homeOverviewTabOrder";
-import { getOrderedClis } from "../../services/cliPriorityOrder";
-import type { CliKey } from "../../services/providers";
-import type { ProviderLimitUsageRow } from "../../services/providerLimitUsage";
-import type { RequestLogSummary } from "../../services/requestLogs";
-import type { SortModeSummary } from "../../services/sortModes";
-import type { TraceSession } from "../../services/traceStore";
-import type { UsageHourlyRow } from "../../services/usage";
+} from "../../services/home/homeOverviewTabOrder";
+import { getOrderedClis } from "../../services/cli/cliPriorityOrder";
+import type { CliKey } from "../../services/providers/providers";
+import type { ProviderLimitUsageRow } from "../../services/providers/providerLimitUsage";
+import type { RequestLogSummary } from "../../services/gateway/requestLogs";
+import type { SortModeSummary } from "../../services/providers/sortModes";
+import type { TraceSession } from "../../services/gateway/traceStore";
+import type { UsageHourlyRow } from "../../services/usage/usage";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";
@@ -334,6 +335,7 @@ export function HomeOverviewPanel({
   const [sessionsTabsOrder] = useState<HomeOverviewTabKey[]>(() =>
     readHomeOverviewTabOrderFromStorage()
   );
+  const [logsPrimaryLayout] = useState(() => readHomeOverviewLogsPrimaryLayoutFromStorage());
   const [sessionsTab, setSessionsTab] = useState<HomeOverviewTabKey>(
     () => sessionsTabsOrder[0] ?? "workspaceConfig"
   );
@@ -393,6 +395,10 @@ export function HomeOverviewPanel({
     const labelByKey = new Map(HOME_OVERVIEW_TABS.map((item) => [item.key, item.label]));
     return sessionsTabsOrder.map((key) => ({ key, label: labelByKey.get(key) ?? key }));
   }, [sessionsTabsOrder]);
+  const logsPrimaryTabs = useMemo(
+    () => sessionsTabs.filter((item) => item.key === "workspaceConfig" || item.key === "circuit"),
+    [sessionsTabs]
+  );
 
   const openCircuitKeys = useMemo(
     () =>
@@ -409,7 +415,7 @@ export function HomeOverviewPanel({
     if (fallbackCliKey) setSelectedWorkspaceConfigCliKey(fallbackCliKey);
   }, [displayedWorkspaceConfigs, selectedWorkspaceConfigCliKey]);
   const effectiveSelectedWorkspaceConfigCliKey =
-    selectedWorkspaceConfigCliKey ?? displayedWorkspaceConfigs[0]?.cliKey ?? "claude";
+    selectedWorkspaceConfigCliKey ?? displayedWorkspaceConfigs[0]?.cliKey ?? null;
 
   useEffect(() => {
     const previousOpenCircuitKeys = previousOpenCircuitKeysRef.current;
@@ -424,27 +430,294 @@ export function HomeOverviewPanel({
     previousOpenCircuitKeysRef.current = openCircuitKeys;
 
     if (openCircuitChanged) {
-      setSessionsTab("circuit");
+      if (logsPrimaryLayout && openCircuitKeys.length === 0) {
+        setSessionsTab("workspaceConfig");
+      } else {
+        setSessionsTab("circuit");
+      }
     }
-  }, [openCircuitKeys]);
+  }, [logsPrimaryLayout, openCircuitKeys]);
+
+  useEffect(() => {
+    if (!logsPrimaryLayout) return;
+    if (sessionsTab === "workspaceConfig" || sessionsTab === "circuit") return;
+    setSessionsTab("workspaceConfig");
+  }, [logsPrimaryLayout, sessionsTab]);
+
+  const requestLogsPanel = (
+    <HomeRequestLogsPanel
+      showCustomTooltip={showCustomTooltip}
+      devPreviewEnabled={devPreviewEnabled}
+      showSummaryText={false}
+      showOpenLogsPageButton={false}
+      showRefreshButton={!logsPrimaryLayout}
+      showCompactModeToggle={!logsPrimaryLayout}
+      compactModeOverride={logsPrimaryLayout ? true : undefined}
+      traces={traces}
+      requestLogs={requestLogs}
+      requestLogsLoading={requestLogsLoading}
+      requestLogsRefreshing={requestLogsRefreshing}
+      requestLogsAvailable={requestLogsAvailable}
+      onRefreshRequestLogs={onRefreshRequestLogs}
+      selectedLogId={selectedLogId}
+      onSelectLogId={onSelectLogId}
+    />
+  );
+
+  const overviewInfoPanel = (
+    <Card padding="sm" className="flex h-full min-h-0 flex-1 flex-col">
+      <div className="shrink-0">
+        <TabList
+          ariaLabel="概览状态切换"
+          items={sessionsTabs}
+          value={sessionsTab}
+          onChange={setSessionsTab}
+          size="sm"
+          className="w-full overflow-x-auto"
+          buttonClassName="whitespace-nowrap flex-1"
+        />
+      </div>
+
+      <div className="flex-1 min-h-0 mt-3">
+        {sessionsTab === "sessions" ? (
+          <Suspense fallback={<OverviewPanelFallback />}>
+            <LazyHomeActiveSessionsCardContent
+              activeSessions={displayedActiveSessions}
+              activeSessionsLoading={activeSessionsLoading}
+              activeSessionsAvailable={activeSessionsAvailable}
+            />
+          </Suspense>
+        ) : sessionsTab === "workspaceConfig" ? (
+          <Suspense fallback={<OverviewPanelFallback />}>
+            <LazyHomeWorkspaceConfigPanel
+              configs={displayedWorkspaceConfigs}
+              selectedCliKey={effectiveSelectedWorkspaceConfigCliKey}
+              onSelectCliKey={setSelectedWorkspaceConfigCliKey}
+              sortModes={sortModes}
+              sortModesLoading={sortModesLoading}
+              sortModesAvailable={sortModesAvailable}
+              activeModeByCli={activeModeByCli}
+              activeModeToggling={activeModeToggling}
+              onSetCliActiveMode={onSetCliActiveMode}
+            />
+          </Suspense>
+        ) : sessionsTab === "providerLimit" ? (
+          <Suspense fallback={<OverviewPanelFallback />}>
+            <LazyHomeProviderLimitPanelContent
+              rows={displayedProviderLimitRows}
+              loading={providerLimitLoading}
+              available={providerLimitAvailable}
+              onRefresh={onRefreshProviderLimit}
+              refreshing={providerLimitRefreshing}
+            />
+          </Suspense>
+        ) : displayedCircuits.length === 0 ? (
+          <EmptyState title="当前没有熔断中的 Provider" />
+        ) : (
+          <div className="h-full overflow-y-auto pr-1">
+            <div className="space-y-3">
+              {displayedCircuits.map((row) => {
+                const remaining =
+                  row.open_until != null && Number.isFinite(row.open_until)
+                    ? formatCountdownSeconds(row.open_until - circuitNowUnix)
+                    : "—";
+                const isResetting = resettingCircuitProviderIds.has(row.provider_id);
+
+                return (
+                  <div
+                    key={`${row.cli_key}:${row.provider_id}`}
+                    className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/50"
+                  >
+                    <div className="min-w-0 flex flex-1 items-center gap-2.5">
+                      <CliBrandIcon
+                        cliKey={row.cli_key as CliKey}
+                        className="h-4 w-4 shrink-0 rounded-[4px] object-contain"
+                      />
+                      <div
+                        className="truncate text-sm font-medium text-slate-700 dark:text-slate-300"
+                        title={row.provider_name}
+                      >
+                        {row.provider_name || "未知"}
+                      </div>
+                    </div>
+                    <div className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400">
+                      {remaining}
+                    </div>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={isResetting || circuitPreviewActive}
+                      onClick={() => {
+                        if (circuitPreviewActive) return;
+                        onResetCircuitProvider(row.provider_id);
+                      }}
+                    >
+                      {isResetting ? "解除中..." : "解除熔断"}
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+
+  const logsPrimaryInfoPanel = (
+    <Card padding="sm" className="flex h-full min-h-0 flex-1 flex-col">
+      <div className="shrink-0 pb-3">
+        <HomeWorkStatusCard
+          layout="vertical"
+          chrome="plain"
+          cliProxyLoading={cliProxyLoading}
+          cliProxyAvailable={cliProxyAvailable}
+          cliProxyEnabled={cliProxyEnabled}
+          cliProxyAppliedToCurrentGateway={cliProxyAppliedToCurrentGateway}
+          cliProxyToggling={cliProxyToggling}
+          onSetCliProxyEnabled={onSetCliProxyEnabled}
+        />
+      </div>
+
+      <div className="mt-3 shrink-0">
+        <TabList
+          ariaLabel="新布局信息切换"
+          items={logsPrimaryTabs}
+          value={sessionsTab === "circuit" ? "circuit" : "workspaceConfig"}
+          onChange={(next) => setSessionsTab(next as HomeOverviewTabKey)}
+          size="sm"
+          className="w-full overflow-x-auto"
+          buttonClassName="whitespace-nowrap flex-1"
+        />
+      </div>
+
+      <div className="mt-3 min-h-0 flex-1">
+        {sessionsTab === "circuit" ? (
+          displayedCircuits.length === 0 ? (
+            <EmptyState title="当前没有熔断中的 Provider" />
+          ) : (
+            <div className="h-full overflow-y-auto pr-1">
+              <div className="space-y-3">
+                {displayedCircuits.map((row) => {
+                  const remaining =
+                    row.open_until != null && Number.isFinite(row.open_until)
+                      ? formatCountdownSeconds(row.open_until - circuitNowUnix)
+                      : "—";
+                  const isResetting = resettingCircuitProviderIds.has(row.provider_id);
+
+                  return (
+                    <div
+                      key={`${row.cli_key}:${row.provider_id}`}
+                      className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/50"
+                    >
+                      <div className="min-w-0 flex flex-1 items-center gap-2.5">
+                        <CliBrandIcon
+                          cliKey={row.cli_key as CliKey}
+                          className="h-4 w-4 shrink-0 rounded-[4px] object-contain"
+                        />
+                        <div
+                          className="truncate text-sm font-medium text-slate-700 dark:text-slate-300"
+                          title={row.provider_name}
+                        >
+                          {row.provider_name || "未知"}
+                        </div>
+                      </div>
+                      <div className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400">
+                        {remaining}
+                      </div>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={isResetting || circuitPreviewActive}
+                        onClick={() => {
+                          if (circuitPreviewActive) return;
+                          onResetCircuitProvider(row.provider_id);
+                        }}
+                      >
+                        {isResetting ? "解除中..." : "解除熔断"}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )
+        ) : (
+          <Suspense fallback={<OverviewPanelFallback />}>
+            <LazyHomeWorkspaceConfigPanel
+              configs={displayedWorkspaceConfigs}
+              selectedCliKey={effectiveSelectedWorkspaceConfigCliKey}
+              onSelectCliKey={setSelectedWorkspaceConfigCliKey}
+              sortModes={sortModes}
+              sortModesLoading={sortModesLoading}
+              sortModesAvailable={sortModesAvailable}
+              activeModeByCli={activeModeByCli}
+              activeModeToggling={activeModeToggling}
+              onSetCliActiveMode={onSetCliActiveMode}
+            />
+          </Suspense>
+        )}
+      </div>
+    </Card>
+  );
 
   return (
     <div className="flex flex-col h-full gap-4">
-      <div className="shrink-0">
-        {showHomeHeatmap && showHomeUsage ? (
-          <div className="space-y-4">
-            <div className="flex">
-              <HomeUsageSection
-                devPreviewEnabled={devPreviewEnabled}
-                showHeatmap={true}
-                showUsageChart={true}
-                usageWindowDays={usageWindowDays}
-                usageHeatmapRows={usageHeatmapRows}
-                usageHeatmapLoading={usageHeatmapLoading}
-                onRefreshUsageHeatmap={onRefreshUsageHeatmap}
-              />
-            </div>
+      {!logsPrimaryLayout ? (
+        <div className="shrink-0">
+          {showHomeHeatmap && showHomeUsage ? (
+            <div className="space-y-4">
+              <div className="flex">
+                <HomeUsageSection
+                  devPreviewEnabled={devPreviewEnabled}
+                  showHeatmap={true}
+                  showUsageChart={true}
+                  usageWindowDays={usageWindowDays}
+                  usageHeatmapRows={usageHeatmapRows}
+                  usageHeatmapLoading={usageHeatmapLoading}
+                  onRefreshUsageHeatmap={onRefreshUsageHeatmap}
+                />
+              </div>
 
+              <div className="flex">
+                <HomeWorkStatusCard
+                  layout="horizontal"
+                  cliProxyLoading={cliProxyLoading}
+                  cliProxyAvailable={cliProxyAvailable}
+                  cliProxyEnabled={cliProxyEnabled}
+                  cliProxyAppliedToCurrentGateway={cliProxyAppliedToCurrentGateway}
+                  cliProxyToggling={cliProxyToggling}
+                  onSetCliProxyEnabled={onSetCliProxyEnabled}
+                />
+              </div>
+            </div>
+          ) : showUsageRow ? (
+            <div className="grid gap-4 lg:grid-cols-12 lg:items-stretch">
+              <div className="flex lg:col-span-4">
+                <HomeWorkStatusCard
+                  layout="vertical"
+                  cliProxyLoading={cliProxyLoading}
+                  cliProxyAvailable={cliProxyAvailable}
+                  cliProxyEnabled={cliProxyEnabled}
+                  cliProxyAppliedToCurrentGateway={cliProxyAppliedToCurrentGateway}
+                  cliProxyToggling={cliProxyToggling}
+                  onSetCliProxyEnabled={onSetCliProxyEnabled}
+                />
+              </div>
+
+              <div className="flex lg:col-span-8">
+                <HomeUsageSection
+                  devPreviewEnabled={devPreviewEnabled}
+                  showHeatmap={showHomeHeatmap}
+                  showUsageChart={showHomeUsage}
+                  usageWindowDays={usageWindowDays}
+                  usageHeatmapRows={usageHeatmapRows}
+                  usageHeatmapLoading={usageHeatmapLoading}
+                  onRefreshUsageHeatmap={onRefreshUsageHeatmap}
+                />
+              </div>
+            </div>
+          ) : (
             <div className="flex">
               <HomeWorkStatusCard
                 layout="horizontal"
@@ -456,166 +729,34 @@ export function HomeOverviewPanel({
                 onSetCliProxyEnabled={onSetCliProxyEnabled}
               />
             </div>
-          </div>
-        ) : showUsageRow ? (
-          <div className="grid gap-4 lg:grid-cols-12 lg:items-stretch">
-            <div className="flex lg:col-span-4">
-              <HomeWorkStatusCard
-                layout="vertical"
-                cliProxyLoading={cliProxyLoading}
-                cliProxyAvailable={cliProxyAvailable}
-                cliProxyEnabled={cliProxyEnabled}
-                cliProxyAppliedToCurrentGateway={cliProxyAppliedToCurrentGateway}
-                cliProxyToggling={cliProxyToggling}
-                onSetCliProxyEnabled={onSetCliProxyEnabled}
-              />
-            </div>
+          )}
+        </div>
+      ) : null}
 
-            <div className="flex lg:col-span-8">
+      {logsPrimaryLayout ? (
+        <div className="grid flex-1 min-h-0 gap-4 lg:grid-cols-12">
+          <div className="flex min-h-0 lg:col-span-4">{logsPrimaryInfoPanel}</div>
+          <div className="flex min-h-0 flex-col gap-4 lg:col-span-8">
+            <div className="shrink-0">
               <HomeUsageSection
                 devPreviewEnabled={devPreviewEnabled}
-                showHeatmap={showHomeHeatmap}
-                showUsageChart={showHomeUsage}
+                showHeatmap={false}
+                showUsageChart={true}
                 usageWindowDays={usageWindowDays}
                 usageHeatmapRows={usageHeatmapRows}
                 usageHeatmapLoading={usageHeatmapLoading}
                 onRefreshUsageHeatmap={onRefreshUsageHeatmap}
               />
             </div>
+            <div className="min-h-0 flex-1">{requestLogsPanel}</div>
           </div>
-        ) : (
-          <div className="flex">
-            <HomeWorkStatusCard
-              layout="horizontal"
-              cliProxyLoading={cliProxyLoading}
-              cliProxyAvailable={cliProxyAvailable}
-              cliProxyEnabled={cliProxyEnabled}
-              cliProxyAppliedToCurrentGateway={cliProxyAppliedToCurrentGateway}
-              cliProxyToggling={cliProxyToggling}
-              onSetCliProxyEnabled={onSetCliProxyEnabled}
-            />
-          </div>
-        )}
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-12 flex-1 min-h-0">
-        <div className="flex min-h-0 lg:col-span-5">
-          <Card padding="sm" className="flex h-full min-h-0 flex-1 flex-col">
-            <div className="flex items-center justify-between gap-2 shrink-0">
-              <TabList
-                ariaLabel="概览状态切换"
-                items={sessionsTabs}
-                value={sessionsTab}
-                onChange={setSessionsTab}
-                size="sm"
-                className="w-full overflow-x-auto"
-                buttonClassName="whitespace-nowrap flex-1"
-              />
-            </div>
-
-            <div className="flex-1 min-h-0 mt-3">
-              {sessionsTab === "sessions" ? (
-                <Suspense fallback={<OverviewPanelFallback />}>
-                  <LazyHomeActiveSessionsCardContent
-                    activeSessions={displayedActiveSessions}
-                    activeSessionsLoading={activeSessionsLoading}
-                    activeSessionsAvailable={activeSessionsAvailable}
-                  />
-                </Suspense>
-              ) : sessionsTab === "workspaceConfig" ? (
-                <Suspense fallback={<OverviewPanelFallback />}>
-                  <LazyHomeWorkspaceConfigPanel
-                    configs={displayedWorkspaceConfigs}
-                    selectedCliKey={effectiveSelectedWorkspaceConfigCliKey}
-                    onSelectCliKey={setSelectedWorkspaceConfigCliKey}
-                    sortModes={sortModes}
-                    sortModesLoading={sortModesLoading}
-                    sortModesAvailable={sortModesAvailable}
-                    activeModeByCli={activeModeByCli}
-                    activeModeToggling={activeModeToggling}
-                    onSetCliActiveMode={onSetCliActiveMode}
-                  />
-                </Suspense>
-              ) : sessionsTab === "providerLimit" ? (
-                <Suspense fallback={<OverviewPanelFallback />}>
-                  <LazyHomeProviderLimitPanelContent
-                    rows={displayedProviderLimitRows}
-                    loading={providerLimitLoading}
-                    available={providerLimitAvailable}
-                    onRefresh={onRefreshProviderLimit}
-                    refreshing={providerLimitRefreshing}
-                  />
-                </Suspense>
-              ) : displayedCircuits.length === 0 ? (
-                <EmptyState title="当前没有熔断中的 Provider" />
-              ) : (
-                <div className="h-full overflow-y-auto pr-1">
-                  <div className="space-y-3">
-                    {displayedCircuits.map((row) => {
-                      const remaining =
-                        row.open_until != null && Number.isFinite(row.open_until)
-                          ? formatCountdownSeconds(row.open_until - circuitNowUnix)
-                          : "—";
-                      const isResetting = resettingCircuitProviderIds.has(row.provider_id);
-
-                      return (
-                        <div
-                          key={`${row.cli_key}:${row.provider_id}`}
-                          className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/50"
-                        >
-                          <div className="min-w-0 flex flex-1 items-center gap-2.5">
-                            <CliBrandIcon
-                              cliKey={row.cli_key as CliKey}
-                              className="h-4 w-4 shrink-0 rounded-[4px] object-contain"
-                            />
-                            <div
-                              className="truncate text-sm font-medium text-slate-700 dark:text-slate-300"
-                              title={row.provider_name}
-                            >
-                              {row.provider_name || "未知"}
-                            </div>
-                          </div>
-                          <div className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400">
-                            {remaining}
-                          </div>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            disabled={isResetting || circuitPreviewActive}
-                            onClick={() => {
-                              if (circuitPreviewActive) return;
-                              onResetCircuitProvider(row.provider_id);
-                            }}
-                          >
-                            {isResetting ? "解除中..." : "解除熔断"}
-                          </Button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          </Card>
         </div>
-
-        <div className="lg:col-span-7 min-h-0">
-          <HomeRequestLogsPanel
-            showCustomTooltip={showCustomTooltip}
-            devPreviewEnabled={devPreviewEnabled}
-            showSummaryText={false}
-            showOpenLogsPageButton={false}
-            traces={traces}
-            requestLogs={requestLogs}
-            requestLogsLoading={requestLogsLoading}
-            requestLogsRefreshing={requestLogsRefreshing}
-            requestLogsAvailable={requestLogsAvailable}
-            onRefreshRequestLogs={onRefreshRequestLogs}
-            selectedLogId={selectedLogId}
-            onSelectLogId={onSelectLogId}
-          />
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-12 flex-1 min-h-0">
+          <div className="flex min-h-0 lg:col-span-5">{overviewInfoPanel}</div>
+          <div className="lg:col-span-7 min-h-0">{requestLogsPanel}</div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

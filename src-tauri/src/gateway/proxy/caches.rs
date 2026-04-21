@@ -74,8 +74,47 @@ impl RecentErrorCache {
         self.errors.insert(fingerprint_key, entry);
     }
 
+    pub(in crate::gateway) fn clear(&mut self) {
+        self.errors.clear();
+    }
+
     fn prune_expired(&mut self, now_unix: i64) {
         self.errors.retain(|_, v| v.expires_at_unix > now_unix);
+    }
+
+    #[cfg(test)]
+    pub(in crate::gateway) fn has_active_error_for_tests(
+        &self,
+        now_unix: i64,
+        fingerprint_key: u64,
+        fingerprint_debug: &str,
+    ) -> bool {
+        self.errors.get(&fingerprint_key).is_some_and(|entry| {
+            entry.expires_at_unix > now_unix && entry.fingerprint_debug == fingerprint_debug
+        })
+    }
+
+    #[cfg(test)]
+    pub(in crate::gateway) fn insert_unavailable_for_tests(
+        &mut self,
+        now_unix: i64,
+        fingerprint_key: u64,
+        fingerprint_debug: &str,
+        retry_after_seconds: u64,
+    ) {
+        self.insert_error(
+            now_unix,
+            fingerprint_key,
+            CachedGatewayError {
+                trace_id: "trace-test".to_string(),
+                status: StatusCode::SERVICE_UNAVAILABLE,
+                error_code: "GW_ALL_PROVIDERS_UNAVAILABLE",
+                message: "cached unavailable".to_string(),
+                retry_after_seconds: Some(retry_after_seconds),
+                expires_at_unix: now_unix.saturating_add(retry_after_seconds as i64),
+                fingerprint_debug: fingerprint_debug.to_string(),
+            },
+        );
     }
 }
 
@@ -180,5 +219,17 @@ mod tests {
 
         let second_read = cache.get_error(110, 12, "fp-correct");
         assert!(second_read.is_none());
+    }
+
+    #[test]
+    fn clear_removes_all_cached_errors() {
+        let mut cache = RecentErrorCache::default();
+        cache.insert_error(100, 21, cached_error(140, "fp-one"));
+        cache.insert_error(100, 22, cached_error(140, "fp-two"));
+
+        cache.clear();
+
+        assert!(cache.get_error(110, 21, "fp-one").is_none());
+        assert!(cache.get_error(110, 22, "fp-two").is_none());
     }
 }

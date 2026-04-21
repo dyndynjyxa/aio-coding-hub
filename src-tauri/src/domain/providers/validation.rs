@@ -59,11 +59,17 @@ pub(super) fn normalize_reset_time_hms_strict(
     Ok(format!("{h:02}:{m:02}:{s:02}"))
 }
 
+const MIN_STREAM_IDLE_TIMEOUT_SECONDS: u32 = 60;
+
 pub(super) fn normalize_stream_idle_timeout_seconds(
     value: Option<u32>,
 ) -> crate::shared::error::AppResult<Option<u32>> {
     match value {
         None | Some(0) => Ok(None),
+        Some(v) if v < MIN_STREAM_IDLE_TIMEOUT_SECONDS => Err(format!(
+            "SEC_INVALID_INPUT: stream_idle_timeout_seconds must be 0 (disabled) or >= {MIN_STREAM_IDLE_TIMEOUT_SECONDS}, got {v}"
+        )
+        .into()),
         Some(v) if v <= MAX_STREAM_IDLE_TIMEOUT_SECONDS => Ok(Some(v)),
         Some(v) => Err(format!(
             "SEC_INVALID_INPUT: stream_idle_timeout_seconds must be within [0, {MAX_STREAM_IDLE_TIMEOUT_SECONDS}], got {v}"

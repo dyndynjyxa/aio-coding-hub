@@ -1,17 +1,5 @@
 //! Usage: Handle upstream non-success responses and reqwest errors inside `failover_loop::run`.
 
-use super::super::super::errors::{
-    classify_reqwest_error, classify_upstream_status, error_response,
-};
-use super::super::super::failover::{retry_backoff_delay, FailoverDecision};
-use super::super::super::http_util::{
-    build_response, has_gzip_content_encoding, has_non_identity_content_encoding,
-    maybe_gunzip_response_body_bytes_with_limit,
-};
-use super::super::super::is_claude_count_tokens_request;
-use super::super::super::provider_router;
-use super::super::super::upstream_client_error_rules;
-use super::super::super::{ErrorCategory, GatewayErrorCode};
 use super::attempt_record::{
     record_system_failure_and_decide, record_system_failure_and_decide_no_cooldown,
     RecordSystemFailureArgs,
@@ -28,6 +16,18 @@ use super::{
 use crate::circuit_breaker;
 use crate::gateway::events::decision_chain as dc;
 use crate::gateway::events::FailoverAttempt;
+use crate::gateway::proxy::errors::{
+    classify_reqwest_error, classify_upstream_status, error_response,
+};
+use crate::gateway::proxy::failover::{retry_backoff_delay, FailoverDecision};
+use crate::gateway::proxy::http_util::{
+    build_response, has_gzip_content_encoding, has_non_identity_content_encoding,
+    maybe_gunzip_response_body_bytes_with_limit,
+};
+use crate::gateway::proxy::is_claude_count_tokens_request;
+use crate::gateway::proxy::provider_router;
+use crate::gateway::proxy::upstream_client_error_rules;
+use crate::gateway::proxy::{ErrorCategory, GatewayErrorCode};
 use crate::gateway::response_fixer;
 use crate::gateway::streams::GunzipStream;
 use crate::gateway::util::{now_unix_seconds, strip_hop_headers};
@@ -52,6 +52,21 @@ fn upstream_error_decision(
     }
 
     base_decision
+}
+
+/// Abort unmatched catch-all 4xx to prevent pointless retries and circuit breaker pollution.
+///
+/// Catch-all 4xx (anything outside 401–404, 408, 429) that was not matched by the body-scanning
+/// non-retryable rules is almost certainly a deterministic client error.  Retrying the identical
+/// request will produce the identical result, wasting attempts and inflating the provider failure
+/// count until the circuit breaker opens — a single bad request can trip a 30-minute outage.
+fn should_abort_unmatched_client_error(
+    status: reqwest::StatusCode,
+    matched_rule_id: Option<&'static str>,
+) -> bool {
+    status.is_client_error()
+        && !matches!(status.as_u16(), 401 | 402 | 403 | 404 | 408 | 429)
+        && matched_rule_id.is_none()
 }
 
 fn reqwest_error_decision(
@@ -154,19 +169,18 @@ pub(super) async fn handle_non_success_response(
         && (enable_thinking_signature_rectifier || enable_thinking_budget_rectifier)
     {
         return thinking_signature_rectifier_400::handle_thinking_rectifiers_400(
-            ctx,
-            provider_ctx,
-            attempt_ctx,
-            loop_state,
-            enable_thinking_signature_rectifier,
-            enable_thinking_budget_rectifier,
-            resp,
-            status,
-            response_headers,
-            upstream.upstream_body_bytes,
-            upstream.strip_request_content_encoding,
-            upstream.thinking_signature_rectifier_retried,
-            upstream.thinking_budget_rectifier_retried,
+            thinking_signature_rectifier_400::HandleThinkingRectifiers400Input {
+                ctx,
+                provider_ctx,
+                attempt_ctx,
+                loop_state,
+                enable_thinking_signature_rectifier,
+                enable_thinking_budget_rectifier,
+                resp,
+                status,
+                response_headers,
+                upstream,
+            },
         )
         .await;
     }
@@ -218,7 +232,7 @@ pub(super) async fn handle_non_success_response(
     let mut abort_response_headers: Option<axum::http::HeaderMap> = None;
     let mut matched_rule_id: Option<&'static str> = None;
     let mut matched_429_concurrency_limit = false;
-    // Body preview for 5xx errors (used in reason field for diagnostics).
+    // Body preview for errors where preserving the upstream diagnostic text matters.
     let mut upstream_body_preview: Option<String> = None;
     let need_client_error_scan = !is_count_tokens
         && (upstream_client_error_rules::should_attempt_non_retryable_match(
@@ -262,8 +276,8 @@ pub(super) async fn handle_non_success_response(
                         ),
                     );
                 }
-                // Extract body preview for 5xx errors (for diagnostics in reason field).
-                if status.is_server_error() {
+                // Extract body preview for diagnostics on 5xx and catch-all 4xx.
+                if status.is_server_error() || status.is_client_error() {
                     let preview = String::from_utf8_lossy(&body_for_scan);
                     let truncated: String = preview.chars().take(500).collect();
                     if !truncated.is_empty() {
@@ -292,6 +306,21 @@ pub(super) async fn handle_non_success_response(
                 if abort_body_bytes.is_none() {
                     abort_body_bytes = Some(body_for_scan);
                     abort_response_headers = Some(headers_for_scan);
+                }
+            }
+        }
+    }
+
+    if !is_count_tokens && should_abort_unmatched_client_error(status, matched_rule_id) {
+        category = ErrorCategory::NonRetryableClientError;
+        decision = FailoverDecision::Abort;
+        // Extract body preview for diagnostic logging when aborting unmatched 4xx.
+        if upstream_body_preview.is_none() {
+            if let Some(ref bytes) = abort_body_bytes {
+                let preview = String::from_utf8_lossy(bytes);
+                let truncated: String = preview.chars().take(500).collect();
+                if !truncated.is_empty() {
+                    upstream_body_preview = Some(truncated);
                 }
             }
         }
@@ -642,7 +671,10 @@ pub(super) async fn handle_reqwest_error(
 
 #[cfg(test)]
 mod tests {
-    use super::{reqwest_error_decision, upstream_error_decision, FailoverDecision};
+    use super::{
+        reqwest_error_decision, should_abort_unmatched_client_error, upstream_error_decision,
+        FailoverDecision,
+    };
 
     #[test]
     fn upstream_error_decision_aborts_for_count_tokens() {
@@ -688,5 +720,69 @@ mod tests {
     fn reqwest_error_decision_retries_non_connect_errors_before_limit() {
         let decision = reqwest_error_decision(false, false, 1, 5);
         assert!(matches!(decision, FailoverDecision::RetrySameProvider));
+    }
+
+    // --- should_abort_unmatched_client_error ---
+
+    #[test]
+    fn unmatched_400_aborts_for_any_cli() {
+        assert!(should_abort_unmatched_client_error(
+            reqwest::StatusCode::BAD_REQUEST,
+            None,
+        ));
+    }
+
+    #[test]
+    fn unmatched_422_aborts() {
+        assert!(should_abort_unmatched_client_error(
+            reqwest::StatusCode::UNPROCESSABLE_ENTITY,
+            None,
+        ));
+    }
+
+    #[test]
+    fn unmatched_409_aborts() {
+        assert!(should_abort_unmatched_client_error(
+            reqwest::StatusCode::CONFLICT,
+            None,
+        ));
+    }
+
+    #[test]
+    fn matched_rule_does_not_abort() {
+        assert!(!should_abort_unmatched_client_error(
+            reqwest::StatusCode::BAD_REQUEST,
+            Some("prompt_limit"),
+        ));
+    }
+
+    #[test]
+    fn excluded_4xx_codes_do_not_abort() {
+        for status in [
+            reqwest::StatusCode::UNAUTHORIZED,      // 401
+            reqwest::StatusCode::PAYMENT_REQUIRED,  // 402
+            reqwest::StatusCode::FORBIDDEN,         // 403
+            reqwest::StatusCode::NOT_FOUND,         // 404
+            reqwest::StatusCode::REQUEST_TIMEOUT,   // 408
+            reqwest::StatusCode::TOO_MANY_REQUESTS, // 429
+        ] {
+            assert!(
+                !should_abort_unmatched_client_error(status, None),
+                "status {} should not abort",
+                status.as_u16()
+            );
+        }
+    }
+
+    #[test]
+    fn non_4xx_does_not_abort() {
+        assert!(!should_abort_unmatched_client_error(
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            None,
+        ));
+        assert!(!should_abort_unmatched_client_error(
+            reqwest::StatusCode::OK,
+            None,
+        ));
     }
 }

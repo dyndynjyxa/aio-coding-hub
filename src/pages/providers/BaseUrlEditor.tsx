@@ -2,7 +2,7 @@
 
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { toast } from "sonner";
-import { baseUrlPingMs } from "../../services/providers";
+import { baseUrlPingMs } from "../../services/providers/providers";
 import { Button } from "../../ui/Button";
 import { Input } from "../../ui/Input";
 import { cn } from "../../utils/cn";

@@ -7,7 +7,7 @@ use super::bridge::Bridge;
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
 
-type BridgeFactory = fn() -> Bridge;
+pub(crate) type BridgeFactory = fn() -> Bridge;
 
 fn registry() -> &'static RwLock<HashMap<&'static str, BridgeFactory>> {
     static REGISTRY: OnceLock<RwLock<HashMap<&'static str, BridgeFactory>>> = OnceLock::new();
@@ -31,6 +31,24 @@ pub(crate) fn available_bridge_types() -> Vec<&'static str> {
         .ok()
         .map(|r| r.keys().copied().collect())
         .unwrap_or_default()
+}
+
+/// Register a new bridge factory at runtime.
+/// Returns `true` if inserted, `false` if `bridge_type` was already registered.
+#[allow(dead_code)]
+pub(crate) fn register_bridge(bridge_type: &'static str, factory: BridgeFactory) -> bool {
+    if let Ok(mut map) = registry().write() {
+        use std::collections::hash_map::Entry;
+        match map.entry(bridge_type) {
+            Entry::Vacant(e) => {
+                e.insert(factory);
+                true
+            }
+            Entry::Occupied(_) => false,
+        }
+    } else {
+        false
+    }
 }
 
 // ─── Factory functions ──────────────────────────────────────────────────────

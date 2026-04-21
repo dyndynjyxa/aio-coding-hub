@@ -12,6 +12,32 @@ import {
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
 
+// MDXEditor renders contentEditable which lacks a native value setter.
+// Replace with a plain textarea so fireEvent.change works in tests.
+vi.mock("@mdxeditor/editor", () => {
+  function MDXEditor(props: { markdown: string; onChange?: (v: string) => void }) {
+    return (
+      <textarea
+        role="textbox"
+        value={props.markdown}
+        onChange={(e) => props.onChange?.(e.target.value)}
+      />
+    );
+  }
+  return {
+    MDXEditor,
+    headingsPlugin: () => ({}),
+    listsPlugin: () => ({}),
+    quotePlugin: () => ({}),
+    thematicBreakPlugin: () => ({}),
+    markdownShortcutPlugin: () => ({}),
+    toolbarPlugin: () => ({}),
+    BoldItalicUnderlineToggles: () => null,
+    BlockTypeSelect: () => null,
+    ListsToggle: () => null,
+  };
+});
+
 vi.mock("../../../query/prompts", async () => {
   const actual =
     await vi.importActual<typeof import("../../../query/prompts")>("../../../query/prompts");

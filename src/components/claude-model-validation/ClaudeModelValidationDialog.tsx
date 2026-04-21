@@ -77,7 +77,7 @@ export function ClaudeModelValidationDialog({
     >
       {!provider ? (
         <div className="flex h-40 items-center justify-center text-sm text-slate-500 dark:text-slate-400">
-          \u672a\u9009\u62e9\u670d\u52a1\u5546
+          未选择服务商
         </div>
       ) : (
         <div className="space-y-6">
@@ -90,7 +90,7 @@ export function ClaudeModelValidationDialog({
                 </div>
                 <div>
                   <div className="text-[11px] font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    \u670d\u52a1\u5546
+                    服务商
                   </div>
                   <div className="font-semibold text-slate-900 dark:text-slate-100 text-base">
                     {provider.name}
@@ -104,16 +104,14 @@ export function ClaudeModelValidationDialog({
                 </div>
                 <div>
                   <div className="text-[11px] font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    \u6a21\u5f0f
+                    模式
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="font-semibold text-slate-900 dark:text-slate-100">
-                      {provider.base_url_mode === "ping"
-                        ? "\u81ea\u52a8\u6d4b\u901f"
-                        : "\u987a\u5e8f\u8f6e\u8be2"}
+                      {provider.base_url_mode === "ping" ? "自动测速" : "顺序轮询"}
                     </span>
                     <span className="inline-flex items-center rounded-md bg-slate-100/80 dark:bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-600 dark:text-slate-300 ring-1 ring-inset ring-slate-200 dark:ring-slate-700">
-                      {provider.base_urls.length} \u4e2a\u5730\u5740
+                      {provider.base_urls.length} 个地址
                     </span>
                   </div>
                 </div>
@@ -126,11 +124,7 @@ export function ClaudeModelValidationDialog({
             <div className="sm:col-span-4">
               <FormField
                 label="Endpoint"
-                hint={
-                  provider.base_url_mode === "ping" && baseUrlPicking
-                    ? "\u6d4b\u901f\u4e2d..."
-                    : null
-                }
+                hint={provider.base_url_mode === "ping" && baseUrlPicking ? "测速中..." : null}
               >
                 <Select
                   value={baseUrl}
@@ -140,7 +134,7 @@ export function ClaudeModelValidationDialog({
                   className="h-10 bg-white/80 dark:bg-slate-900/80 text-xs shadow-sm"
                 >
                   <option value="" disabled>
-                    \u9009\u62e9 Endpoint...
+                    选择 Endpoint...
                   </option>
                   {provider.base_urls.map((url) => (
                     <option key={url} value={url}>
@@ -158,7 +152,7 @@ export function ClaudeModelValidationDialog({
             </div>
 
             <div className="flex items-end gap-2 sm:col-span-4">
-              <FormField label="\u8f6e\u6570" className="w-20 shrink-0">
+              <FormField label="轮数" className="w-20 shrink-0">
                 <input
                   type="number"
                   min={1}
@@ -184,14 +178,14 @@ export function ClaudeModelValidationDialog({
                     <RefreshCw className="mr-2 h-3.5 w-3.5 animate-spin" />
                     {suiteProgress
                       ? suiteProgress.round > 1
-                        ? `\u8f6e\u6b21 ${suiteProgress.round}/${suiteProgress.totalRounds} \u00b7 \u6b65\u9aa4 ${suiteProgress.current}/${suiteProgress.total}...`
-                        : `\u6267\u884c\u4e2d (${suiteProgress.current}/${suiteProgress.total})...`
-                      : "\u6267\u884c\u4e2d..."}
+                        ? `轮次 ${suiteProgress.round}/${suiteProgress.totalRounds} · 步骤 ${suiteProgress.current}/${suiteProgress.total}...`
+                        : `执行中 (${suiteProgress.current}/${suiteProgress.total})...`
+                      : "执行中..."}
                   </>
                 ) : (
                   <>
                     <Play className="mr-2 h-3.5 w-3.5 fill-current" />
-                    \u5f00\u59cb\u9a8c\u8bc1 ({templates.length})
+                    开始验证 ({templates.length})
                   </>
                 )}
               </Button>
@@ -201,7 +195,7 @@ export function ClaudeModelValidationDialog({
               <div className="sm:col-span-12">
                 <FormField
                   label="Cross-Provider Validation"
-                  hint="\u7528\u4e8e Step3 \u7684\u8de8\u4f9b\u5e94\u5546 Signature \u9a8c\u8bc1"
+                  hint="用于 Step3 的跨供应商 Signature 验证"
                 >
                   <Select
                     value={crossProviderId?.toString() ?? ""}
@@ -212,10 +206,10 @@ export function ClaudeModelValidationDialog({
                     disabled={validating}
                     className="h-10 bg-white/80 dark:bg-slate-900/80 text-xs shadow-sm"
                   >
-                    <option value="">\u9009\u62e9\u5b98\u65b9\u4f9b\u5e94\u5546...</option>
+                    <option value="">选择官方供应商...</option>
                     {crossProviderOptions.map((p) => (
                       <option key={p.id} value={p.id.toString()}>
-                        {p.name} ({p.base_urls[0] ?? "\u65e0 URL"})
+                        {p.name} ({p.base_urls[0] ?? "无 URL"})
                       </option>
                     ))}
                   </Select>
@@ -284,14 +278,14 @@ export function ClaudeModelValidationDialog({
                 <div className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-card">
                   <div className="border-b border-slate-200 dark:border-slate-700 px-5 py-4">
                     <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                      \u786e\u8ba4\u6e05\u7a7a\u5386\u53f2\uff1f
+                      确认清空历史？
                     </div>
                     <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
-                      \u5373\u5c06\u6e05\u7a7a{" "}
+                      即将清空{" "}
                       <span className="font-medium text-slate-900 dark:text-slate-100">
                         {provider?.name ?? "Provider"}
                       </span>{" "}
-                      \u7684\u9a8c\u8bc1\u5386\u53f2\uff0c\u64cd\u4f5c\u4e0d\u53ef\u64a4\u9500\u3002
+                      的验证历史，操作不可撤销。
                     </div>
                   </div>
                   <div className="flex items-center justify-end gap-2 px-5 py-4">
@@ -301,7 +295,7 @@ export function ClaudeModelValidationDialog({
                       disabled={historyClearing}
                       onClick={() => setConfirmClearOpen(false)}
                     >
-                      \u53d6\u6d88
+                      取消
                     </Button>
                     <Button
                       variant="danger"
@@ -309,7 +303,7 @@ export function ClaudeModelValidationDialog({
                       disabled={historyClearing}
                       onClick={() => void clearProviderHistory()}
                     >
-                      {historyClearing ? "\u6e05\u7a7a\u4e2d\u2026" : "\u786e\u8ba4\u6e05\u7a7a"}
+                      {historyClearing ? "清空中…" : "确认清空"}
                     </Button>
                   </div>
                 </div>

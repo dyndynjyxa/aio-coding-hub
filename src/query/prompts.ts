@@ -5,7 +5,7 @@ import {
   promptUpsert,
   promptsList,
   type PromptSummary,
-} from "../services/prompts";
+} from "../services/workspace/prompts";
 import { promptsKeys } from "./keys";
 
 export function usePromptsListQuery(workspaceId: number | null, options?: { enabled?: boolean }) {

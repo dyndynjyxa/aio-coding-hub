@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Settings } from "lucide-react";
-import type { AppSettings } from "../../../services/settings";
+import type { AppSettings } from "../../../services/settings/settings";
 import { cn } from "../../../utils/cn";
 import { Card } from "../../../ui/Card";
 import { Input } from "../../../ui/Input";
@@ -51,6 +51,7 @@ export function CliManagerCx2ccTab({
   const [fallbackModelSonnetText, setFallbackModelSonnetText] = useState("");
   const [fallbackModelHaikuText, setFallbackModelHaikuText] = useState("");
   const [fallbackModelMainText, setFallbackModelMainText] = useState("");
+  const [reasoningEffortText, setReasoningEffortText] = useState("");
   const [serviceTierText, setServiceTierText] = useState("");
 
   useEffect(() => {
@@ -59,16 +60,26 @@ export function CliManagerCx2ccTab({
     setFallbackModelSonnetText(appSettings.cx2cc_fallback_model_sonnet);
     setFallbackModelHaikuText(appSettings.cx2cc_fallback_model_haiku);
     setFallbackModelMainText(appSettings.cx2cc_fallback_model_main);
+    setReasoningEffortText(appSettings.cx2cc_model_reasoning_effort);
     setServiceTierText(appSettings.cx2cc_service_tier);
-  }, [
-    appSettings?.cx2cc_fallback_model_opus,
-    appSettings?.cx2cc_fallback_model_sonnet,
-    appSettings?.cx2cc_fallback_model_haiku,
-    appSettings?.cx2cc_fallback_model_main,
-    appSettings?.cx2cc_service_tier,
-  ]);
+  }, [appSettings]);
 
   const controlsDisabled = commonSettingsSaving || !appSettings;
+
+  async function persistReasoningEffort(value: string) {
+    if (!appSettings) return;
+
+    const previous = appSettings.cx2cc_model_reasoning_effort;
+    setReasoningEffortText(value);
+
+    const updated = await onPersistCommonSettings({ cx2cc_model_reasoning_effort: value });
+    if (!updated) {
+      setReasoningEffortText(previous);
+      return;
+    }
+
+    setReasoningEffortText(updated.cx2cc_model_reasoning_effort);
+  }
 
   return (
     <div className="space-y-6">
@@ -163,15 +174,16 @@ export function CliManagerCx2ccTab({
           >
             <RadioGroup
               name="cx2cc_model_reasoning_effort"
-              value={appSettings?.cx2cc_model_reasoning_effort ?? ""}
+              value={reasoningEffortText}
               onChange={(value) => {
-                void onPersistCommonSettings({ cx2cc_model_reasoning_effort: value });
+                void persistReasoningEffort(value);
               }}
               options={[
                 { value: "", label: "默认 / 不注入" },
                 { value: "low", label: "low" },
                 { value: "medium", label: "medium" },
                 { value: "high", label: "high" },
+                { value: "xhigh", label: "xhigh" },
               ]}
               disabled={controlsDisabled}
             />

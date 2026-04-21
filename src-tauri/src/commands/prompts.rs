@@ -4,6 +4,7 @@ use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::{blocking, prompts};
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn prompts_list(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -18,6 +19,7 @@ pub(crate) async fn prompts_list(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn prompts_default_sync_from_files(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -38,6 +40,7 @@ pub(crate) async fn prompts_default_sync_from_files(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn prompt_upsert(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -63,6 +66,7 @@ pub(crate) async fn prompt_upsert(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn prompt_set_enabled(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -85,6 +89,7 @@ pub(crate) async fn prompt_set_enabled(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn prompt_delete(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,

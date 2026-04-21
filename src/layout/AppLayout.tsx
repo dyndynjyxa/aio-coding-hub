@@ -1,4 +1,5 @@
 import { Outlet } from "react-router-dom";
+import { AppStartupStatusBanner } from "../components/app/AppStartupStatusBanner";
 import { UpdateDialog } from "../components/UpdateDialog";
 import { useResponsive } from "../hooks/useMediaQuery";
 import { useSidebarState } from "../hooks/useSidebarState";
@@ -34,6 +35,7 @@ export function AppLayout() {
             id="main-content"
             className="flex-1 min-h-0 px-4 pb-4 pt-10 sm:px-6 sm:pb-5 sm:pt-11"
           >
+            <AppStartupStatusBanner />
             <Outlet />
           </main>
         </div>

@@ -8,7 +8,7 @@ import {
   type McpImportReport,
 } from "../../query/mcp";
 import { logToConsole } from "../../services/consoleLog";
-import { type McpServerSummary } from "../../services/mcp";
+import { type McpServerSummary } from "../../services/workspace/mcp";
 import { Button } from "../../ui/Button";
 import { EmptyState } from "../../ui/EmptyState";
 import { Spinner } from "../../ui/Spinner";

@@ -81,3 +81,19 @@ realtime events.
 - If request-log rows are updated in place, the consumer side must support
   seeing those updates. An `id > afterId` poll alone is insufficient while any
   row is still in progress.
+
+## Filtered Providers vs Failed Upstreams
+
+Provider gate decisions such as circuit-open, cooldown, and rate-limit skips
+are not the same thing as an upstream request failure.
+
+- Keep gate-filtered attempts in `attempts_json` / `error_details_json` so the
+  operator can see why a provider was skipped.
+- Do not finalize a request as `GW_UPSTREAM_ALL_FAILED` when every recorded
+  attempt is only a pre-send skip. Use `GW_ALL_PROVIDERS_UNAVAILABLE` instead.
+- Preserve retry-after semantics for unavailable states so repeated CLI retries
+  hit `RecentErrorCache` instead of generating a new request-log row every few
+  hundred milliseconds.
+- Review Home/log surfaces after changing terminal error families. A logging bug
+  here often looks like a frontend duplicate, even when the real issue is
+  backend classification drift.

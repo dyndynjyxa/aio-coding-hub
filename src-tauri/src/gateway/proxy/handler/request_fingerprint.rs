@@ -1,5 +1,5 @@
-use super::super::caches::RecentErrorCache;
-use super::super::errors::error_response_with_retry_after;
+use crate::gateway::proxy::caches::RecentErrorCache;
+use crate::gateway::proxy::errors::error_response_with_retry_after;
 use crate::gateway::util::{
     body_for_introspection, compute_all_providers_unavailable_fingerprint,
     compute_request_fingerprint, extract_idempotency_key_hash, now_unix_seconds,

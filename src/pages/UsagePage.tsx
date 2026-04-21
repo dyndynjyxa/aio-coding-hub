@@ -1,9 +1,9 @@
 // Usage: Usage analytics page. Backend commands: `usage_summary_v2`, `usage_leaderboard_v2` (and related `usage_*`).
 
-import type { UsageScope } from "../services/usage";
+import type { UsageScope } from "../services/usage/usage";
 import { UsageFilters } from "../components/usage/UsageFilters";
 import { UsageSummaryCards } from "../components/usage/UsageSummaryCards";
-import { Button } from "../ui/Button";
+import { QueryErrorCard } from "../components/shared/QueryErrorCard";
 import { Card } from "../ui/Card";
 import { PageHeader } from "../ui/PageHeader";
 import { UsageDataPanel } from "./usage/UsageDataPanel";
@@ -60,34 +60,13 @@ function UsageErrorCard({
   loading: boolean;
   onRetry: () => void;
 }) {
-  if (!errorText) return null;
-
   return (
-    <Card
-      padding="md"
-      className="shrink-0 border-rose-200 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/30"
-    >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="text-sm font-semibold text-rose-900 dark:text-rose-400">加载失败</div>
-          <div className="mt-1 text-sm text-rose-800 dark:text-rose-300">
-            用量数据刷新失败，请重试；必要时查看 Console 日志定位 error_code。
-          </div>
-        </div>
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={onRetry}
-          disabled={loading}
-          className="border-rose-200 dark:border-rose-700 bg-white dark:bg-slate-800 text-rose-800 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-900/30"
-        >
-          重试
-        </Button>
-      </div>
-      <div className="mt-3 rounded-lg border border-rose-200 dark:border-rose-700 bg-white/60 dark:bg-slate-800/60 p-3 font-mono text-xs text-slate-800 dark:text-slate-300">
-        {errorText}
-      </div>
-    </Card>
+    <QueryErrorCard
+      errorText={errorText}
+      loading={loading}
+      onRetry={onRetry}
+      message="用量数据刷新失败，请重试；必要时查看 Console 日志定位 error_code。"
+    />
   );
 }
 

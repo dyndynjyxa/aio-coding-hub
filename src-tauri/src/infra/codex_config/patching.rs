@@ -387,6 +387,68 @@ pub(super) fn has_table_or_dotted_keys(lines: &[String], table: &str) -> bool {
     false
 }
 
+/// Rename the `[model_providers.<from_key>]` table to `[model_providers.<to_key>]`.
+/// Also updates the `name` field inside the table and any dotted keys.
+fn rename_model_provider_table(lines: &mut Vec<String>, from_key: &str, to_key: &str) {
+    let from_header = format!("[model_providers.{from_key}]");
+    let to_header = format!("[model_providers.{to_key}]");
+
+    // Rename table header if exists
+    for line in lines.iter_mut() {
+        if line.trim() == from_header {
+            *line = to_header.clone();
+            break;
+        }
+    }
+
+    // Find the renamed table and update the `name` field inside
+    if let Some(start) = lines.iter().position(|l| l.trim() == to_header) {
+        let end = lines[start + 1..]
+            .iter()
+            .position(|line| line.trim().starts_with('['))
+            .map(|offset| start + 1 + offset)
+            .unwrap_or(lines.len());
+
+        // Find and update the `name` key within the table
+        let mut found = false;
+        for line in lines[start + 1..end].iter_mut() {
+            let cleaned = strip_toml_comment(line).trim();
+            if cleaned.is_empty() || cleaned.starts_with('#') {
+                continue;
+            }
+            if let Some((k, _)) = parse_assignment(cleaned) {
+                if normalize_key(&k) == "name" {
+                    *line = format!("name = {}", toml_string_literal(to_key));
+                    found = true;
+                    break;
+                }
+            }
+        }
+
+        // If not found, insert after the header
+        if !found {
+            lines.insert(start + 1, format!("name = {}", toml_string_literal(to_key)));
+        }
+    }
+
+    // Also rename any dotted keys like `model_providers.aio.name` to `model_providers.OpenAI.name`
+    let from_prefix = format!("model_providers.{from_key}.");
+    let to_prefix = format!("model_providers.{to_key}.");
+    for line in lines.iter_mut() {
+        let cleaned = strip_toml_comment(line).trim();
+        if cleaned.is_empty() || cleaned.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = parse_assignment(cleaned) {
+            let normalized = normalize_key(&k);
+            if normalized.starts_with(&from_prefix) {
+                let suffix = &normalized[from_prefix.len()..];
+                *line = format!("{to_prefix}{suffix} = {v}");
+            }
+        }
+    }
+}
+
 /// Unified upsert that auto-detects and applies the appropriate table style.
 pub(super) fn upsert_keys_auto_style(
     lines: &mut Vec<String>,
@@ -742,6 +804,26 @@ pub(super) fn patch_config_toml(
         }
         if let Some(v) = patch.features_remote_compaction {
             items.push(("remote_compaction", v.then(|| "true".to_string())));
+
+            // When remote_compaction is enabled, Codex requires the provider to be named
+            // "OpenAI" for the Remote Compact feature to work. Rename the entire
+            // [model_providers.aio] table to [model_providers.OpenAI] and update model_provider.
+            // See: https://github.com/dyndynjyxa/aio-coding-hub/issues/197
+            if v {
+                upsert_root_key(
+                    &mut lines,
+                    "model_provider",
+                    Some(toml_string_literal("OpenAI")),
+                );
+                rename_model_provider_table(&mut lines, "aio", "OpenAI");
+            } else {
+                upsert_root_key(
+                    &mut lines,
+                    "model_provider",
+                    Some(toml_string_literal("aio")),
+                );
+                rename_model_provider_table(&mut lines, "OpenAI", "aio");
+            }
         }
         if let Some(v) = patch.features_fast_mode {
             items.push(("fast_mode", v.then(|| "true".to_string())));

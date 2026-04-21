@@ -2,7 +2,7 @@ use crate::db;
 use crate::shared::error::db_err;
 use rusqlite::params;
 
-use super::{compute_start_ts_last_n_days, UsageHourlyRow};
+use super::{compute_start_ts_last_n_days, sql_effective_total_tokens_expr, UsageHourlyRow};
 
 pub fn hourly_series(
     db: &db::Db,
@@ -12,7 +12,9 @@ pub fn hourly_series(
     let days = days.clamp(1, 60);
     let start_ts = compute_start_ts_last_n_days(&conn, days)?;
 
-    let mut stmt = conn.prepare_cached(r#"
+    let effective_total_expr = sql_effective_total_tokens_expr();
+    let sql = format!(
+        r#"
     	SELECT
     	  strftime('%Y-%m-%d', created_at, 'unixepoch', 'localtime') AS day,
     	  CAST(strftime('%H', created_at, 'unixepoch', 'localtime') AS INTEGER) AS hour,
@@ -38,13 +40,17 @@ pub fn hourly_series(
     	      error_code IS NOT NULL
     	    ) THEN 1 ELSE 0 END
     	  ) AS requests_failed,
-    	  SUM(COALESCE(total_tokens, COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0))) AS total_tokens
+    	  SUM({effective_total_expr}) AS total_tokens
     	FROM request_logs
     	WHERE excluded_from_stats = 0
     	AND created_at >= ?1
     	GROUP BY day, hour
     	ORDER BY day ASC, hour ASC
-    	"#)
+    	"#
+    );
+
+    let mut stmt = conn
+        .prepare_cached(&sql)
         .map_err(|e| db_err!("failed to prepare hourly series query: {e}"))?;
 
     let rows = stmt

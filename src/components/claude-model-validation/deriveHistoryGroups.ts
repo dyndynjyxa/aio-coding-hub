@@ -1,7 +1,7 @@
 import {
   evaluateClaudeValidation,
   extractTemplateKeyFromRequestJson,
-} from "../../services/claudeValidationTemplates";
+} from "../../services/claude/claudeValidationTemplates";
 import type { ClaudeModelValidationRunView, ClaudeModelValidationHistoryGroup } from "./types";
 import {
   extractSuiteMetaFromRequestJson,

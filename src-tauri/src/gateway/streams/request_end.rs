@@ -18,6 +18,29 @@ pub(super) fn emit_request_event_and_spawn_request_log(
     if !ctx.observe {
         return;
     }
+
+    // When a stream error occurs, update the last attempt's outcome to reflect
+    // the actual error instead of keeping the stale "success" recorded when the
+    // stream initially started.
+    let (attempts, attempts_json) = if error_code.is_some() {
+        let mut attempts = ctx.attempts.clone();
+        if let Some(last) = attempts.last_mut() {
+            if last.outcome == "success" {
+                last.outcome = format!("stream_error: code={}", error_code.unwrap_or("unknown"));
+                last.error_code = error_code;
+                last.error_category = effective_error_category.or(Some(
+                    crate::gateway::proxy::ErrorCategory::SystemError.as_str(),
+                ));
+                // Update duration to the full stream duration instead of the initial value.
+                last.attempt_duration_ms = Some(duration_ms);
+            }
+        }
+        let json = serde_json::to_string(&attempts).unwrap_or_else(|_| "[]".to_string());
+        (attempts, json)
+    } else {
+        (ctx.attempts.clone(), ctx.attempts_json.clone())
+    };
+
     let (log_args, attempts) = RequestLogEnqueueArgs::from_stream_request_end_parts(
         ctx.trace_id.clone(),
         ctx.cli_key.clone(),
@@ -31,8 +54,8 @@ pub(super) fn emit_request_event_and_spawn_request_log(
         error_code,
         duration_ms,
         ttfb_ms,
-        ctx.attempts.clone(),
-        ctx.attempts_json.clone(),
+        attempts,
+        attempts_json,
         requested_model,
         ctx.created_at_ms,
         ctx.created_at,

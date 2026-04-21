@@ -1,19 +1,18 @@
 import { memo, type ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Copy, FlaskConical, Pencil, RefreshCw, Terminal, Trash2 } from "lucide-react";
-import { toast } from "sonner";
-import { logToConsole } from "../../services/consoleLog";
 import { FREE_TAG } from "../../constants/providers";
-import type { GatewayProviderCircuitStatus } from "../../services/gateway";
+import type { GatewayProviderCircuitStatus } from "../../services/gateway/gateway";
 import { getGatewayCircuitDerivedState } from "../../query/gateway";
+import { useOAuthLimitsQuery } from "../../query/providers";
 import {
-  providerOAuthFetchLimits,
+  getProviderTypeInfo,
   type ClaudeModels,
   type OAuthLimitsResult,
   type ProviderSummary,
-} from "../../services/providers";
+} from "../../services/providers/providers";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Switch } from "../../ui/Switch";
@@ -22,8 +21,6 @@ import { cn } from "../../utils/cn";
 import { formatCountdownSeconds, formatUnixSeconds, formatUsdRaw } from "../../utils/formatters";
 import { providerBaseUrlSummary } from "./baseUrl";
 
-/** Module-level cache so OAuth limits survive tab switches / re-renders. */
-const oauthLimitsCache = new Map<number, OAuthLimitsResult>();
 const NOTE_URL_RE = /https?:\/\/[^\s]+/g;
 
 function getOAuthShortWindowLabel(
@@ -103,6 +100,7 @@ function renderProviderNote(note: string) {
 export type SortableProviderCardProps = {
   provider: ProviderSummary;
   sourceProviderName?: string | null;
+  sourceProvider?: ProviderSummary | null;
   circuit: GatewayProviderCircuitStatus | null;
   circuitResetting: boolean;
   onToggleEnabled: (provider: ProviderSummary) => void;
@@ -119,6 +117,7 @@ export type SortableProviderCardProps = {
 export const SortableProviderCard = memo(function SortableProviderCard({
   provider,
   sourceProviderName = null,
+  sourceProvider = null,
   circuit,
   circuitResetting,
   onToggleEnabled,
@@ -161,12 +160,13 @@ export const SortableProviderCard = memo(function SortableProviderCard({
 
   const circuitState = useMemo(() => getGatewayCircuitDerivedState(circuit), [circuit]);
   const { isUnavailable, unavailableUntil } = circuitState;
-  const isOAuth = provider.auth_mode === "oauth";
+  const { isOAuth, isCx2cc, isCx2ccGateway } = getProviderTypeInfo(provider);
   const [apiKeyDetailsVisible, setApiKeyDetailsVisible] = useState(false);
-  const [oauthLimits, setOauthLimits] = useState<OAuthLimitsResult | null>(
-    () => oauthLimitsCache.get(provider.id) ?? null
-  );
-  const [limitsLoading, setLimitsLoading] = useState(false);
+  const {
+    data: oauthLimits = null,
+    isLoading: limitsLoading,
+    refetch: refetchOAuthLimits,
+  } = useOAuthLimitsQuery(provider.id, isOAuth);
   const oauthShortLabel = getOAuthShortWindowLabel(provider, oauthLimits);
   const shouldTrackNowUnix =
     isUnavailable ||
@@ -178,6 +178,16 @@ export const SortableProviderCard = memo(function SortableProviderCard({
     unavailableUntil != null ? Math.max(0, unavailableUntil - nowUnix) : null;
   const unavailableCountdown =
     unavailableRemaining != null ? formatCountdownSeconds(unavailableRemaining) : null;
+  const cx2ccSourceName =
+    sourceProviderName ??
+    sourceProvider?.name ??
+    (provider.source_provider_id != null
+      ? `#${provider.source_provider_id}`
+      : "当前 AIO 服务 Codex 网关");
+  const cx2ccRouteLabel = isCx2ccGateway
+    ? "跟随当前 Codex 分流"
+    : (sourceProvider?.base_urls[0] ?? "跟随网关默认路由");
+  const visibleTags = provider.tags ?? [];
 
   // OAuth 限制重置倒计时
   const limitsResetCountdown = useMemo(() => {
@@ -204,63 +214,6 @@ export const SortableProviderCard = memo(function SortableProviderCard({
       resetWeekly: resetWeekly ? formatReset(resetWeekly) : null,
     };
   }, [isOAuth, oauthLimits, nowUnix]);
-
-  useEffect(() => {
-    // Disconnect switches auth_mode back to api_key; drop stale OAuth limits cache.
-    if (isOAuth) {
-      setApiKeyDetailsVisible(false);
-      return;
-    }
-    oauthLimitsCache.delete(provider.id);
-    setOauthLimits(null);
-  }, [isOAuth, provider.id]);
-
-  // 组件加载时获取 OAuth limits
-  useEffect(() => {
-    if (!isOAuth) return;
-    const cached = oauthLimitsCache.get(provider.id);
-    if (cached) {
-      setOauthLimits(cached);
-    } else {
-      fetchLimits();
-    }
-    const interval = setInterval(fetchLimits, 60000);
-    return () => clearInterval(interval);
-  }, [isOAuth, provider.id]);
-
-  async function fetchLimits() {
-    if (!isOAuth) return;
-    setLimitsLoading(true);
-    try {
-      const result = await providerOAuthFetchLimits(provider.id);
-      if (!result) {
-        const value: OAuthLimitsResult = { limit_5h_text: null, limit_weekly_text: null };
-        oauthLimitsCache.set(provider.id, value);
-        setOauthLimits(value);
-        toast("获取 OAuth 用量失败");
-        logToConsole("warn", `获取 OAuth 用量失败：${provider.name}`, {
-          provider_id: provider.id,
-          cli_key: provider.cli_key,
-        });
-        return;
-      }
-      const value = result;
-      oauthLimitsCache.set(provider.id, value);
-      setOauthLimits(value);
-    } catch (err) {
-      const value: OAuthLimitsResult = { limit_5h_text: null, limit_weekly_text: null };
-      oauthLimitsCache.set(provider.id, value);
-      setOauthLimits(value);
-      toast(`获取 OAuth 用量失败：${String(err)}`);
-      logToConsole("error", `获取 OAuth 用量异常：${provider.name}`, {
-        provider_id: provider.id,
-        cli_key: provider.cli_key,
-        error: String(err),
-      });
-    } finally {
-      setLimitsLoading(false);
-    }
-  }
 
   return (
     <div ref={setNodeRef} style={style} className="relative">
@@ -299,7 +252,7 @@ export const SortableProviderCard = memo(function SortableProviderCard({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    fetchLimits();
+                    refetchOAuthLimits();
                   }}
                   disabled={limitsLoading}
                   className={cn(
@@ -319,7 +272,7 @@ export const SortableProviderCard = memo(function SortableProviderCard({
                   <RefreshCw className={cn("h-2.5 w-2.5", limitsLoading && "animate-spin")} />
                   OAuth
                 </button>
-              ) : provider.source_provider_id != null ? (
+              ) : isCx2cc ? (
                 <span
                   className="inline-flex w-16 shrink-0 items-center justify-center rounded-full px-2 py-0.5 font-mono text-[10px] bg-violet-50 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400"
                   title="CX2CC 转译模式"
@@ -344,6 +297,17 @@ export const SortableProviderCard = memo(function SortableProviderCard({
                   </span>
                 </>
               )}
+              {isCx2cc && provider.cost_multiplier !== 0 ? (
+                <span
+                  className={cn(
+                    "shrink-0 rounded-full px-2 py-0.5 font-mono text-[10px]",
+                    "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                  )}
+                  title={`价格倍率: x${provider.cost_multiplier.toFixed(2)}`}
+                >
+                  x{provider.cost_multiplier.toFixed(2)}
+                </span>
+              ) : null}
               {provider.cli_key === "claude" && hasClaudeModels ? (
                 <span
                   className="shrink-0 rounded-full bg-sky-50 px-2 py-0.5 font-mono text-[10px] text-sky-700 dark:bg-sky-900/30 dark:text-sky-400"
@@ -363,7 +327,7 @@ export const SortableProviderCard = memo(function SortableProviderCard({
                   限额
                 </span>
               ) : null}
-              {(provider.tags ?? []).map((tag) => (
+              {visibleTags.map((tag) => (
                 <span key={tag} className={providerTagClassName(tag)} title={`标签: ${tag}`}>
                   {tag}
                 </span>
@@ -413,13 +377,21 @@ export const SortableProviderCard = memo(function SortableProviderCard({
                     </span>
                   ) : null}
                 </>
-              ) : provider.source_provider_id != null ? (
-                <span
-                  className="truncate font-mono text-xs text-violet-500 dark:text-violet-400 cursor-default"
-                  title={`源 Codex 供应商: ${sourceProviderName ?? `#${provider.source_provider_id}`}`}
-                >
-                  源: {sourceProviderName ?? `#${provider.source_provider_id}`}
-                </span>
+              ) : isCx2cc ? (
+                <>
+                  <span
+                    className="truncate font-mono text-xs text-violet-500 dark:text-violet-400 cursor-default"
+                    title={`来源: ${cx2ccSourceName}`}
+                  >
+                    来源: {cx2ccSourceName}
+                  </span>
+                  <span
+                    className="truncate font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
+                    title={cx2ccRouteLabel}
+                  >
+                    {cx2ccRouteLabel}
+                  </span>
+                </>
               ) : apiKeyDetailsVisible ? (
                 <span
                   className="truncate font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"

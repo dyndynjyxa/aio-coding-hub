@@ -1,26 +1,8 @@
 // Usage: Workspaces configuration center (profiles). All edits are scoped to selected workspace; only active workspace triggers real sync.
 
 import { ArrowRightLeft, Layers, Pencil, Plus, Search, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { toast } from "sonner";
-import { CLIS, cliLongLabel } from "../constants/clis";
-import { useMcpServersListQuery } from "../query/mcp";
-import { usePromptsListQuery } from "../query/prompts";
-import { useSettingsQuery } from "../query/settings";
-import { useSkillsInstalledListQuery } from "../query/skills";
-import {
-  pickWorkspaceById,
-  useWorkspaceApplyMutation,
-  useWorkspaceCreateMutation,
-  useWorkspaceDeleteMutation,
-  useWorkspacePreviewQuery,
-  useWorkspaceRenameMutation,
-  useWorkspacesListQuery,
-} from "../query/workspaces";
-import { logToConsole } from "../services/consoleLog";
-import { getOrderedClis, pickDefaultCliByPriority } from "../services/cliPriorityOrder";
-import type { CliKey } from "../services/providers";
-import { type WorkspaceApplyReport, type WorkspaceSummary } from "../services/workspaces";
+import type { ReactNode } from "react";
+import { cliLongLabel } from "../constants/clis";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Dialog } from "../ui/Dialog";
@@ -34,38 +16,10 @@ import { cn } from "../utils/cn";
 import { McpServersView } from "./mcp/McpServersView";
 import { PromptsView } from "./prompts/PromptsView";
 import { SkillsView } from "./skills/SkillsView";
-
-type RightTab = "overview" | "prompts" | "mcp" | "skills";
-
-type OverviewStats = {
-  prompts: { total: number; enabled: number };
-  mcp: { total: number; enabled: number };
-  skills: { total: number; enabled: number };
-};
-
-const RIGHT_TABS: Array<{ key: RightTab; label: string }> = [
-  { key: "overview", label: "总览" },
-  { key: "prompts", label: "Prompts" },
-  { key: "mcp", label: "MCP" },
-  { key: "skills", label: "Skills" },
-];
-
-function normalizeWorkspaceName(raw: string) {
-  return raw.trim();
-}
-
-function isDuplicateWorkspaceName(
-  items: WorkspaceSummary[],
-  name: string,
-  ignoreId?: number | null
-) {
-  const normalized = normalizeWorkspaceName(name).toLowerCase();
-  if (!normalized) return false;
-  return items.some((w) => {
-    if (ignoreId && w.id === ignoreId) return false;
-    return normalizeWorkspaceName(w.name).toLowerCase() === normalized;
-  });
-}
+import {
+  WORKSPACES_RIGHT_TABS,
+  useWorkspacesPageDataModel,
+} from "./workspaces/useWorkspacesPageDataModel";
 
 function Badge({
   children,
@@ -91,300 +45,65 @@ function Badge({
   );
 }
 
-type CreateMode = "clone_active" | "blank";
-
 export function WorkspacesPage() {
-  const settingsQuery = useSettingsQuery();
-  const orderedCliTabs = getOrderedClis(settingsQuery.data?.cli_priority_order);
-  const orderedCliKeys = orderedCliTabs.map((cli) => cli.key);
-  const defaultCli =
-    pickDefaultCliByPriority(settingsQuery.data?.cli_priority_order, orderedCliKeys) ?? CLIS[0].key;
-  const [activeCli, setActiveCli] = useState<CliKey | null>(null);
-  const effectiveCli = activeCli ?? defaultCli;
-  const workspacesQuery = useWorkspacesListQuery(effectiveCli);
-  const createMutation = useWorkspaceCreateMutation();
-  const renameMutation = useWorkspaceRenameMutation();
-  const deleteMutation = useWorkspaceDeleteMutation();
-  const applyMutation = useWorkspaceApplyMutation();
-
-  const items = useMemo<WorkspaceSummary[]>(
-    () => workspacesQuery.data?.items ?? [],
-    [workspacesQuery.data?.items]
-  );
-  const activeWorkspaceId: number | null = workspacesQuery.data?.active_id ?? null;
-  const loading = workspacesQuery.isFetching;
-
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<number | null>(null);
-  const [filterText, setFilterText] = useState("");
-  const [rightTab, setRightTab] = useState<RightTab>("overview");
-
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createName, setCreateName] = useState("");
-  const [createMode, setCreateMode] = useState<CreateMode>("blank");
-
-  const [renameTargetId, setRenameTargetId] = useState<number | null>(null);
-  const [renameOpen, setRenameOpen] = useState(false);
-  const [renameName, setRenameName] = useState("");
-
-  const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-
-  const [applyReport, setApplyReport] = useState<WorkspaceApplyReport | null>(null);
-
-  const [switchOpen, setSwitchOpen] = useState(false);
-  const [switchTargetId, setSwitchTargetId] = useState<number | null>(null);
-  const [switchConfirm, setSwitchConfirm] = useState("");
-
-  useEffect(() => {
-    if (!workspacesQuery.error) return;
-    logToConsole("error", "加载工作区失败", {
-      error: String(workspacesQuery.error),
-      cli: effectiveCli,
-    });
-    toast("加载失败：请查看控制台日志");
-  }, [effectiveCli, workspacesQuery.error]);
-
-  useEffect(() => {
-    const result = workspacesQuery.data;
-    if (!result) return;
-    setSelectedWorkspaceId((prev) => {
-      const stillExists = prev != null && result.items.some((w) => w.id === prev);
-      if (stillExists) return prev;
-      if (result.active_id != null) return result.active_id;
-      return result.items[0]?.id ?? null;
-    });
-  }, [workspacesQuery.data]);
-
-  const filtered = useMemo(() => {
-    const q = filterText.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((w) => normalizeWorkspaceName(w.name).toLowerCase().includes(q));
-  }, [filterText, items]);
-
-  const selectedWorkspace = useMemo(() => {
-    return pickWorkspaceById(items, selectedWorkspaceId);
-  }, [items, selectedWorkspaceId]);
-
-  const workspaceById = useMemo(() => new Map(items.map((w) => [w.id, w])), [items]);
-  const switchTarget: WorkspaceSummary | null =
-    switchTargetId != null ? (workspaceById.get(switchTargetId) ?? null) : null;
-
-  useEffect(() => {
-    if (!filterText.trim()) return;
-    if (!selectedWorkspace) return;
-    if (filtered.some((w) => w.id === selectedWorkspace.id)) return;
-    if (filtered.length === 0) return;
-    setSelectedWorkspaceId(filtered[0].id);
-  }, [filterText, filtered, selectedWorkspace]);
-
-  const overviewWorkspaceId = rightTab === "overview" ? (selectedWorkspace?.id ?? null) : null;
-  const promptsQuery = usePromptsListQuery(overviewWorkspaceId, {
-    enabled: overviewWorkspaceId != null,
-  });
-  const mcpServersQuery = useMcpServersListQuery(overviewWorkspaceId, {
-    enabled: overviewWorkspaceId != null,
-  });
-  const skillsQuery = useSkillsInstalledListQuery(overviewWorkspaceId, {
-    enabled: overviewWorkspaceId != null,
-  });
-
-  const overviewLoading =
-    promptsQuery.isFetching || mcpServersQuery.isFetching || skillsQuery.isFetching;
-
-  const overviewStats: OverviewStats | null = useMemo(() => {
-    if (!overviewWorkspaceId) return null;
-    const prompts = promptsQuery.data;
-    const mcpServers = mcpServersQuery.data;
-    const skills = skillsQuery.data;
-    if (!prompts || !mcpServers || !skills) return null;
-
-    return {
-      prompts: {
-        total: prompts.length,
-        enabled: prompts.filter((p) => p.enabled).length,
-      },
-      mcp: {
-        total: mcpServers.length,
-        enabled: mcpServers.filter((s) => s.enabled).length,
-      },
-      skills: {
-        total: skills.length,
-        enabled: skills.filter((s) => s.enabled).length,
-      },
-    };
-  }, [mcpServersQuery.data, overviewWorkspaceId, promptsQuery.data, skillsQuery.data]);
-
-  const previewQuery = useWorkspacePreviewQuery(switchTarget?.id ?? null, {
-    enabled: switchOpen,
-  });
-  const preview = previewQuery.data ?? null;
-  const previewLoading = previewQuery.isFetching;
-  const applying = applyMutation.isPending;
-
-  const createError = useMemo(() => {
-    const name = normalizeWorkspaceName(createName);
-    if (!name) return "名称不能为空";
-    if (isDuplicateWorkspaceName(items, name)) return "名称重复：同一 CLI 下必须唯一";
-    return null;
-  }, [createName, items]);
-
-  const renameTarget = useMemo(() => {
-    if (!renameTargetId) return null;
-    return items.find((w) => w.id === renameTargetId) ?? null;
-  }, [items, renameTargetId]);
-
-  const renameError = useMemo(() => {
-    if (!renameOpen) return null;
-    const name = normalizeWorkspaceName(renameName);
-    if (!name) return "名称不能为空";
-    if (isDuplicateWorkspaceName(items, name, renameTargetId))
-      return "名称重复：同一 CLI 下必须唯一";
-    return null;
-  }, [items, renameName, renameOpen, renameTargetId]);
-
-  const deleteTarget = useMemo(() => {
-    if (!deleteTargetId) return null;
-    return items.find((w) => w.id === deleteTargetId) ?? null;
-  }, [items, deleteTargetId]);
-
-  function openCreateDialog() {
-    setCreateName("");
-    setCreateMode("blank");
-    setCreateOpen(true);
-  }
-
-  async function createWorkspace() {
-    if (createError) return;
-    const name = normalizeWorkspaceName(createName);
-    if (!name) return;
-
-    try {
-      const created = await createMutation.mutateAsync({
-        cliKey: effectiveCli,
-        name,
-        cloneFromActive: createMode === "clone_active",
-      });
-      if (!created) {
-        return;
-      }
-
-      toast("已创建");
-      setCreateOpen(false);
-      setSelectedWorkspaceId(created.id);
-      setRightTab("overview");
-    } catch (err) {
-      logToConsole("error", "创建工作区失败", { error: String(err), cli: effectiveCli });
-      toast(`创建失败：${String(err)}`);
-    }
-  }
-
-  function openRenameDialog(target: WorkspaceSummary) {
-    setRenameTargetId(target.id);
-    setRenameName(target.name);
-    setRenameOpen(true);
-  }
-
-  async function renameWorkspace() {
-    if (!renameTarget) return;
-    if (renameError) return;
-    const name = normalizeWorkspaceName(renameName);
-    if (!name) return;
-
-    try {
-      const next = await renameMutation.mutateAsync({
-        cliKey: effectiveCli,
-        workspaceId: renameTarget.id,
-        name,
-      });
-      if (!next) {
-        return;
-      }
-      toast("已重命名");
-      setRenameOpen(false);
-      setRenameTargetId(null);
-    } catch (err) {
-      logToConsole("error", "重命名工作区失败", { error: String(err), id: renameTarget.id });
-      toast(`重命名失败：${String(err)}`);
-    }
-  }
-
-  function openDeleteDialog(target: WorkspaceSummary) {
-    setDeleteTargetId(target.id);
-    setDeleteOpen(true);
-  }
-
-  async function deleteWorkspace() {
-    if (!deleteTarget) return;
-    try {
-      const ok = await deleteMutation.mutateAsync({
-        cliKey: effectiveCli,
-        workspaceId: deleteTarget.id,
-      });
-      if (!ok) {
-        return;
-      }
-      toast("已删除");
-      setDeleteOpen(false);
-      setDeleteTargetId(null);
-    } catch (err) {
-      logToConsole("error", "删除工作区失败", { error: String(err), id: deleteTarget.id });
-      toast(`删除失败：${String(err)}`);
-    }
-  }
-
-  function openSwitchDialog(workspaceId: number) {
-    setRightTab("overview");
-    setSwitchTargetId(workspaceId);
-    setSwitchConfirm("");
-    setSwitchOpen(true);
-  }
-
-  async function applySwitchTarget() {
-    if (!switchTarget) return;
-    if (switchTarget.id === activeWorkspaceId) return;
-    if (applying) return;
-    try {
-      const next = await applyMutation.mutateAsync({
-        cliKey: effectiveCli,
-        workspaceId: switchTarget.id,
-      });
-      if (!next) {
-        return;
-      }
-
-      setApplyReport(next);
-      toast("已切换为当前工作区");
-      setSwitchOpen(false);
-      setSwitchConfirm("");
-    } catch (err) {
-      logToConsole("error", "应用工作区失败", {
-        error: String(err),
-        workspace_id: switchTarget.id,
-      });
-      toast(`应用失败：${String(err)}`);
-    }
-  }
-
-  async function rollbackToPrevious() {
-    if (!applyReport?.from_workspace_id) return;
-    if (applying) return;
-    const workspaceId = applyReport.from_workspace_id;
-    try {
-      const next = await applyMutation.mutateAsync({ cliKey: effectiveCli, workspaceId });
-      if (!next) {
-        return;
-      }
-
-      setApplyReport(next);
-      toast("已回滚到上一个工作区");
-    } catch (err) {
-      logToConsole("error", "回滚工作区失败", {
-        error: String(err),
-        from_workspace_id: workspaceId,
-      });
-      toast(`回滚失败：${String(err)}`);
-    }
-  }
+  const model = useWorkspacesPageDataModel();
+  const {
+    orderedCliTabs,
+    effectiveCli,
+    setActiveCli,
+    items,
+    loading,
+    selectedWorkspaceId,
+    setSelectedWorkspaceId,
+    filterText,
+    setFilterText,
+    filtered,
+    activeWorkspaceId,
+    selectedWorkspace,
+    rightTab,
+    setRightTab,
+    overviewLoading,
+    overviewStats,
+    applyReport,
+    applying,
+    rollbackToPrevious,
+    openCreateDialog,
+    openRenameDialog,
+    openDeleteDialog,
+    openSwitchDialog,
+    createOpen,
+    setCreateOpen,
+    createName,
+    setCreateName,
+    createMode,
+    setCreateMode,
+    createError,
+    createWorkspace,
+    renameOpen,
+    setRenameOpen,
+    renameTarget,
+    renameName,
+    setRenameName,
+    renameError,
+    renameWorkspace,
+    setRenameTargetId,
+    deleteOpen,
+    setDeleteOpen,
+    deleteTarget,
+    deleteWorkspace,
+    setDeleteTargetId,
+    switchOpen,
+    setSwitchOpen,
+    setSwitchTargetId,
+    switchTarget,
+    switchConfirm,
+    setSwitchConfirm,
+    previewQuery,
+    preview,
+    previewLoading,
+    workspaceById,
+    applySwitchTarget,
+  } = model;
 
   return (
     <div className="flex flex-col gap-6 h-full overflow-hidden">
@@ -557,7 +276,7 @@ export function WorkspacesPage() {
 
                 <TabList
                   ariaLabel="配置分类"
-                  items={RIGHT_TABS}
+                  items={WORKSPACES_RIGHT_TABS}
                   value={rightTab}
                   onChange={setRightTab}
                   className="w-full sm:w-auto"

@@ -1,15 +1,15 @@
 // Usage: Shared MSW in-memory state for tests that run through `invoke` -> fetch -> MSW handlers.
 
-import type { AppAboutInfo } from "../../services/appAbout";
-import type { CliProxyResult, CliProxyStatus } from "../../services/cliProxy";
-import type { DbDiskUsage } from "../../services/dataManagement";
-import type { EnvConflict } from "../../services/envConflicts";
-import type { GatewayStatus } from "../../services/gateway";
-import type { CliKey, ProviderSummary } from "../../services/providers";
-import type { AppSettings } from "../../services/settings";
-import type { SortModeActiveRow, SortModeSummary } from "../../services/sortModes";
-import type { UsageSummary } from "../../services/usage";
-import type { WorkspacesListResult } from "../../services/workspaces";
+import type { AppAboutInfo } from "../../services/app/appAbout";
+import type { CliProxyResult, CliProxyStatus } from "../../services/cli/cliProxy";
+import type { DbDiskUsage } from "../../services/app/dataManagement";
+import type { EnvConflict } from "../../services/cli/envConflicts";
+import type { GatewayStatus } from "../../services/gateway/gateway";
+import type { CliKey, ProviderSummary } from "../../services/providers/providers";
+import type { AppSettings } from "../../services/settings/settings";
+import type { SortModeActiveRow, SortModeSummary } from "../../services/providers/sortModes";
+import type { UsageSummary } from "../../services/usage/usage";
+import type { WorkspacesListResult } from "../../services/workspace/workspaces";
 
 const DEFAULT_BASE_ORIGIN = "http://127.0.0.1:37123";
 
@@ -21,7 +21,7 @@ const DEFAULT_CLI_PROXY_STATUS: CliProxyStatus[] = [
 
 // Default settings matching the Rust backend defaults.
 const DEFAULT_SETTINGS: AppSettings = {
-  schema_version: 29,
+  schema_version: 32,
   preferred_port: 37123,
   show_home_heatmap: true,
   show_home_usage: true,
@@ -78,6 +78,10 @@ const DEFAULT_SETTINGS: AppSettings = {
   cx2cc_drop_stop_sequences: true,
   cx2cc_clean_schema: true,
   cx2cc_filter_batch_tool: true,
+  upstream_proxy_enabled: false,
+  upstream_proxy_url: "",
+  upstream_proxy_username: "",
+  upstream_proxy_password_configured: false,
 };
 
 const DEFAULT_GATEWAY_STATUS: GatewayStatus = {
@@ -108,6 +112,7 @@ const DEFAULT_USAGE_SUMMARY: UsageSummary = {
   requests_with_usage: 0,
   requests_success: 0,
   requests_failed: 0,
+  cost_covered_success: 0,
   avg_duration_ms: null,
   avg_ttfb_ms: null,
   avg_output_tokens_per_second: null,

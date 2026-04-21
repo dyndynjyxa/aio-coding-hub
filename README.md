@@ -104,11 +104,16 @@
 
 前往 [Releases](https://github.com/dyndynjyxa/aio-coding-hub/releases) 下载对应平台安装包：
 
-| 平台 | 安装包 |
-|------|--------|
-| **Windows** | `.exe` (NSIS) 或 `.msi` |
-| **macOS** | `.dmg` |
-| **Linux** | `.deb` / `.AppImage` / `-wayland.AppImage` |
+<!-- SUPPORT_MATRIX_RELEASE_DOWNLOAD:START -->
+| 平台 | 官方发布安装包 |
+| --- | --- |
+| Windows x64 | `.msi` / `-portable.zip` |
+| macOS Intel | `.zip` |
+| macOS Apple Silicon | `.zip` |
+| Linux x64 | `.deb` / `.AppImage` / `-wayland.AppImage` |
+<!-- SUPPORT_MATRIX_RELEASE_DOWNLOAD:END -->
+
+官方支持矩阵只覆盖上表 4 个目标。`mac:universal` 和 `win:arm64` 只保留本地构建命令，不进入 Release 产物和 `latest.json`。
 
 <details>
 <summary>Linux Arch / Wayland 用户</summary>
@@ -175,13 +180,20 @@ pnpm tauri:dev
 pnpm tauri:build
 
 # 指定平台
-pnpm tauri:build:mac:arm64       # macOS Apple Silicon
-pnpm tauri:build:mac:x64         # macOS Intel
-pnpm tauri:build:mac:universal   # macOS Universal
-pnpm tauri:build:win:x64         # Windows x64
-pnpm tauri:build:win:arm64       # Windows ARM64
-pnpm tauri:build:linux:x64       # Linux x64
 ```
+
+<!-- SUPPORT_MATRIX_SOURCE_BUILD:START -->
+| 分类 | 命令 | 说明 |
+| --- | --- | --- |
+| 官方支持 | `pnpm tauri:build:win:x64` | Windows x64；官方支持；进入 Release / updater 矩阵 |
+| 官方支持 | `pnpm tauri:build:mac:x64` | macOS Intel；官方支持；进入 Release / updater 矩阵 |
+| 官方支持 | `pnpm tauri:build:mac:arm64` | macOS Apple Silicon；官方支持；进入 Release / updater 矩阵 |
+| 官方支持 | `pnpm tauri:build:linux:x64` | Linux x64；官方支持；进入 Release / updater 矩阵 |
+| 本地构建 | `pnpm tauri:build:mac:universal` | macOS Universal；仅本地构建；不进入官方发布 / updater 矩阵 |
+| 本地构建 | `pnpm tauri:build:win:arm64` | Windows ARM64；仅本地构建；不进入官方发布 / updater 矩阵 |
+<!-- SUPPORT_MATRIX_SOURCE_BUILD:END -->
+
+上表中的“官方支持”会进入 GitHub Release 和自动更新；“本地构建”只保留脚本，不承诺发布和更新。
 
 ---
 

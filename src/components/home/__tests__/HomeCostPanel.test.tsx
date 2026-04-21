@@ -41,7 +41,7 @@ describe("components/home/HomeCostPanel", () => {
     vi.clearAllMocks();
   });
 
-  it("renders with data and shows summary + charts", () => {
+  it("prefers real data over dev preview fallback", () => {
     setTauriRuntime();
 
     vi.mocked(useCustomDateRange).mockReturnValue({
@@ -142,13 +142,45 @@ describe("components/home/HomeCostPanel", () => {
       refetch: vi.fn(),
     } as any);
 
-    render(<HomeCostPanel />);
+    render(<HomeCostPanel devPreviewEnabled={true} />);
 
     expect(screen.getByText("总花费（已计算）")).toBeInTheDocument();
     expect(screen.getByText("$12.340000")).toBeInTheDocument();
     expect(screen.getByText("成本覆盖率")).toBeInTheDocument();
     expect(screen.getByText("花费占比")).toBeInTheDocument();
+    expect(screen.queryByText(/Claude Main/)).not.toBeInTheDocument();
     // Check that recharts containers are rendered (we mock ResponsiveContainer)
+    expect(screen.getAllByTestId("recharts-responsive-container").length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("renders preview analytics when dev preview is enabled and query is empty", () => {
+    clearTauriRuntime();
+
+    vi.mocked(useCustomDateRange).mockReturnValue({
+      customStartDate: "",
+      setCustomStartDate: vi.fn(),
+      customEndDate: "",
+      setCustomEndDate: vi.fn(),
+      customApplied: null,
+      bounds: { startTs: null, endTs: null },
+      showCustomForm: false,
+      applyCustomRange: vi.fn(),
+      clearCustomRange: vi.fn(),
+    } as any);
+
+    vi.mocked(useCostAnalyticsV1Query).mockReturnValue({
+      data: null,
+      isLoading: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any);
+
+    render(<HomeCostPanel devPreviewEnabled={true} />);
+
+    expect(screen.getByText(/Claude Main/)).toBeInTheDocument();
+    expect(screen.getByText(/OpenAI Primary/)).toBeInTheDocument();
+    expect(screen.queryByText(/未检测到 Tauri Runtime/)).not.toBeInTheDocument();
     expect(screen.getAllByTestId("recharts-responsive-container").length).toBeGreaterThanOrEqual(3);
   });
 

@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { NavLink } from "react-router-dom";
 import { AIO_REPO_URL } from "../constants/urls";
+import { useDevPreviewData } from "../hooks/useDevPreviewData";
 import { useGatewayStatus, openReleasesUrl } from "../hooks/useGatewayStatus";
 import { updateDialogSetOpen } from "../hooks/useUpdateMeta";
 import { cn } from "../utils/cn";
@@ -20,6 +21,7 @@ export type MobileNavProps = {
  */
 export function MobileNav({ isOpen, onClose }: MobileNavProps) {
   const { statusText, statusTone, portTone, portText, hasUpdate, isPortable } = useGatewayStatus();
+  const devPreview = useDevPreviewData();
 
   // Close on escape key
   useEffect(() => {
@@ -81,9 +83,13 @@ export function MobileNav({ isOpen, onClose }: MobileNavProps) {
                     "flex items-center gap-1 rounded-lg px-2 py-1 transition",
                     "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-400 dark:ring-emerald-700 dark:hover:bg-emerald-900/50"
                   )}
-                  title={isPortable ? "发现新版本（打开下载页）" : "发现新版本（点击更新）"}
+                  title={
+                    isPortable && !devPreview.enabled
+                      ? "发现新版本（打开下载页）"
+                      : "发现新版本（点击更新）"
+                  }
                   onClick={() => {
-                    if (isPortable) {
+                    if (isPortable && !devPreview.enabled) {
                       openReleasesUrl().catch(() => {});
                       return;
                     }

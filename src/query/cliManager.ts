@@ -19,7 +19,7 @@ import {
   type GeminiConfigPatch,
   type GeminiConfigState,
   type SimpleCliInfo,
-} from "../services/cliManager";
+} from "../services/cli/cliManager";
 import { cliManagerKeys } from "./keys";
 
 export function useCliManagerClaudeInfoQuery(options?: { enabled?: boolean }) {

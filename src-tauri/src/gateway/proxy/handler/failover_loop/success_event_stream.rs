@@ -1,11 +1,10 @@
 //! Usage: Handle successful event-stream upstream responses inside `failover_loop::run`.
 
-use super::super::super::gemini_oauth;
-use super::super::super::protocol_bridge;
 use super::*;
+use crate::gateway::proxy::gemini_oauth;
+use crate::gateway::proxy::protocol_bridge;
 use std::time::Duration;
 
-#[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_success_event_stream(
     ctx: CommonCtx<'_>,
     provider_ctx: ProviderCtx<'_>,

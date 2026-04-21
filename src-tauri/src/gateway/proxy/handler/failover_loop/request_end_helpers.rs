@@ -1,5 +1,5 @@
 //! Usage: Re-export request-end helpers for `failover_loop`.
 
-pub(super) use super::super::super::request_end::{
+pub(super) use crate::gateway::proxy::request_end::{
     emit_request_event_and_enqueue_request_log, RequestEndArgs, RequestEndDeps,
 };

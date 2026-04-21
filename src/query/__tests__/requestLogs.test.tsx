@@ -6,7 +6,7 @@ import {
   requestLogsListAfterIdAll,
   requestLogsListAll,
   type RequestLogSummary,
-} from "../../services/requestLogs";
+} from "../../services/gateway/requestLogs";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import {
@@ -17,9 +17,9 @@ import {
   useRequestLogsListAllQuery,
 } from "../requestLogs";
 
-vi.mock("../../services/requestLogs", async () => {
-  const actual = await vi.importActual<typeof import("../../services/requestLogs")>(
-    "../../services/requestLogs"
+vi.mock("../../services/gateway/requestLogs", async () => {
+  const actual = await vi.importActual<typeof import("../../services/gateway/requestLogs")>(
+    "../../services/gateway/requestLogs"
   );
   return {
     ...actual,
@@ -150,7 +150,7 @@ describe("query/requestLogs", () => {
   it("calls requestLogGet when logId is provided", async () => {
     setTauriRuntime();
 
-    vi.mocked(requestLogGet).mockResolvedValue(null);
+    vi.mocked(requestLogGet).mockResolvedValue(null as any);
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
@@ -244,8 +244,9 @@ describe("query/requestLogs", () => {
     const wrapper = createQueryWrapper(client);
     const listKey = ["requestLogs", "list", "all", 10] as any;
 
+    const nowSec = Math.floor(Date.now() / 1000);
     client.setQueryData(listKey, [
-      makeRequestLogSummary({ id: 5, status: null, error_code: null, created_at: 20 }),
+      makeRequestLogSummary({ id: 5, status: null, error_code: null, created_at: nowSec }),
     ] as any);
 
     vi.mocked(requestLogsListAll).mockResolvedValueOnce([
@@ -298,11 +299,12 @@ describe("query/requestLogs", () => {
     expect((client.getQueryData<any[]>(listKey) ?? []).some((row) => row.id === 6)).toBe(true);
     expect((client.getQueryData<any[]>(listKey) ?? []).some((row) => row.id === 7)).toBe(true);
 
+    const nowSec2 = Math.floor(Date.now() / 1000);
     client.setQueryData(listKey, [
-      makeRequestLogSummary({ id: 8, status: null, error_code: null, created_at: 13 }),
+      makeRequestLogSummary({ id: 8, status: null, error_code: null, created_at: nowSec2 }),
     ] as any);
     vi.mocked(requestLogsListAll).mockResolvedValueOnce([
-      makeRequestLogSummary({ id: 8, status: 200, error_code: null, created_at: 13 }),
+      makeRequestLogSummary({ id: 8, status: 200, error_code: null, created_at: nowSec2 }),
     ] as any);
     await act(async () => {
       const res = await result.current.mutateAsync();

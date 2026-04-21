@@ -1,12 +1,12 @@
 //! Usage: Shared context types for `failover_loop` internal submodules.
 
-use super::super::super::abort_guard::RequestAbortGuard;
-use super::super::super::gemini_oauth;
 use crate::circuit_breaker;
 use crate::gateway::events::FailoverAttempt;
-use crate::gateway::manager::GatewayAppState;
+use crate::gateway::proxy::abort_guard::RequestAbortGuard;
 use crate::gateway::proxy::cx2cc::settings::Cx2ccSettings;
+use crate::gateway::proxy::gemini_oauth;
 use crate::gateway::response_fixer;
+use crate::gateway::runtime::GatewayAppState;
 use crate::gateway::streams::StreamFinalizeCtx;
 use axum::response::Response;
 use std::collections::HashSet;
@@ -283,6 +283,21 @@ impl<'a> LoopState<'a> {
             last_error_code,
             circuit_snapshot,
             abort_guard,
+        }
+    }
+
+    /// Reborrow all fields into a new `LoopState` with a shorter lifetime.
+    ///
+    /// Use this when passing loop state by value to a callee while retaining
+    /// access in the caller after the callee returns.
+    pub(super) fn reborrow(&mut self) -> LoopState<'_> {
+        LoopState {
+            attempts: self.attempts,
+            failed_provider_ids: self.failed_provider_ids,
+            last_error_category: self.last_error_category,
+            last_error_code: self.last_error_code,
+            circuit_snapshot: self.circuit_snapshot,
+            abort_guard: self.abort_guard,
         }
     }
 }

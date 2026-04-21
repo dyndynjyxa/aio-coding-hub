@@ -1,6 +1,18 @@
 // Usage: Prompt templates view for a specific workspace.
 
 import { Pencil, Trash2 } from "lucide-react";
+import {
+  MDXEditor,
+  headingsPlugin,
+  listsPlugin,
+  quotePlugin,
+  thematicBreakPlugin,
+  markdownShortcutPlugin,
+  toolbarPlugin,
+  BoldItalicUnderlineToggles,
+  BlockTypeSelect,
+  ListsToggle,
+} from "@mdxeditor/editor";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -10,8 +22,8 @@ import {
   usePromptsListQuery,
 } from "../../query/prompts";
 import { logToConsole } from "../../services/consoleLog";
-import type { PromptSummary } from "../../services/prompts";
-import type { CliKey } from "../../services/providers";
+import type { PromptSummary } from "../../services/workspace/prompts";
+import type { CliKey } from "../../services/providers/providers";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Dialog } from "../../ui/Dialog";
@@ -20,9 +32,25 @@ import { FormField } from "../../ui/FormField";
 import { Input } from "../../ui/Input";
 import { Spinner } from "../../ui/Spinner";
 import { Switch } from "../../ui/Switch";
-import { Textarea } from "../../ui/Textarea";
 import { cn } from "../../utils/cn";
 import { formatUnknownError } from "../../utils/errors";
+
+const EDITOR_PLUGINS = [
+  headingsPlugin(),
+  listsPlugin(),
+  quotePlugin(),
+  thematicBreakPlugin(),
+  markdownShortcutPlugin(),
+  toolbarPlugin({
+    toolbarContents: () => (
+      <>
+        <BlockTypeSelect />
+        <BoldItalicUnderlineToggles />
+        <ListsToggle />
+      </>
+    ),
+  }),
+];
 
 function promptFileHint(cliKey: CliKey) {
   switch (cliKey) {
@@ -85,6 +113,7 @@ export function PromptsView({ workspaceId, cliKey, isActiveWorkspace = true }: P
   const [editTarget, setEditTarget] = useState<PromptSummary | null>(null);
   const [name, setName] = useState("");
   const [content, setContent] = useState("");
+  const [editorKey, setEditorKey] = useState(0);
 
   const fileHint = useMemo(() => promptFileHint(cliKey), [cliKey]);
 
@@ -102,10 +131,11 @@ export function PromptsView({ workspaceId, cliKey, isActiveWorkspace = true }: P
     if (editTarget) {
       setName(editTarget.name);
       setContent(editTarget.content);
-      return;
+    } else {
+      setName("");
+      setContent("");
     }
-    setName("");
-    setContent("");
+    setEditorKey((k) => k + 1);
   }, [dialogOpen, editTarget]);
 
   async function save() {
@@ -307,18 +337,22 @@ export function PromptsView({ workspaceId, cliKey, isActiveWorkspace = true }: P
           setDialogOpen(open);
           if (!open) setEditTarget(null);
         }}
-        className="max-w-3xl"
+        className="w-[90vw] max-w-5xl"
       >
         <div className="grid gap-4">
           <FormField label="名称">
             <Input value={name} onChange={(e) => setName(e.currentTarget.value)} />
           </FormField>
           <FormField label="内容">
-            <Textarea
-              value={content}
-              onChange={(e) => setContent(e.currentTarget.value)}
-              rows={10}
-            />
+            <div className="min-h-[16rem] lg:min-h-[24rem] max-h-[50vh] overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-700 dark:text-slate-300 [&_.mdxeditor]:bg-transparent [&_.mdxeditor]:text-inherit [&_.mdxeditor]:font-inherit">
+              <MDXEditor
+                key={editorKey}
+                markdown={content}
+                onChange={setContent}
+                plugins={EDITOR_PLUGINS}
+                contentEditableClassName="prose prose-sm dark:prose-invert max-w-none min-h-[14rem] lg:min-h-[22rem] px-3 py-2 outline-none"
+              />
+            </div>
           </FormField>
 
           <div className="flex items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-700 pt-3">

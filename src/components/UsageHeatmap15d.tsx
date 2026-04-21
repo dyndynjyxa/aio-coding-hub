@@ -1,5 +1,5 @@
 import { useMemo, useState, type MouseEvent } from "react";
-import type { UsageHourlyRow } from "../services/usage";
+import type { UsageHourlyRow } from "../services/usage/usage";
 import { cn } from "../utils/cn";
 import { buildRecentDayKeys } from "../utils/dateKeys";
 

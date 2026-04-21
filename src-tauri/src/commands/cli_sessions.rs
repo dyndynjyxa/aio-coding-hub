@@ -2,8 +2,16 @@
 
 use crate::shared::error::AppError;
 use crate::{blocking, cli_sessions};
+use serde::Deserialize;
+
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+pub(crate) struct CliSessionsFolderLookupInput {
+    source: String,
+    session_id: String,
+}
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_sessions_projects_list(
     app: tauri::AppHandle,
     source: String,
@@ -18,6 +26,7 @@ pub(crate) async fn cli_sessions_projects_list(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_sessions_sessions_list(
     app: tauri::AppHandle,
     source: String,
@@ -38,6 +47,7 @@ pub(crate) async fn cli_sessions_sessions_list(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_sessions_messages_get(
     app: tauri::AppHandle,
     source: String,
@@ -73,6 +83,7 @@ pub(crate) async fn cli_sessions_messages_get(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_sessions_session_delete(
     app: tauri::AppHandle,
     source: String,
@@ -96,6 +107,34 @@ pub(crate) async fn cli_sessions_session_delete(
             }
         }
         Ok::<Vec<String>, AppError>(failed)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn cli_sessions_folder_lookup_by_ids(
+    app: tauri::AppHandle,
+    items: Vec<CliSessionsFolderLookupInput>,
+    wsl_distro: Option<String>,
+) -> Result<Vec<cli_sessions::CliSessionsFolderLookupEntry>, String> {
+    let mut normalized: Vec<cli_sessions::CliSessionsFolderLookupKey> = Vec::new();
+    for item in items {
+        let source = item.source.parse::<cli_sessions::CliSessionsSource>()?;
+        let session_id = item.session_id.trim().to_string();
+        if session_id.is_empty() {
+            continue;
+        }
+        normalized.push(cli_sessions::CliSessionsFolderLookupKey { source, session_id });
+    }
+
+    if normalized.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    blocking::run("cli_sessions_folder_lookup_by_ids", move || {
+        cli_sessions::folder_lookup_by_ids(&app, &normalized, wsl_distro.as_deref())
     })
     .await
     .map_err(Into::into)

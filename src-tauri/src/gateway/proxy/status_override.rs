@@ -17,6 +17,7 @@ pub(in crate::gateway) fn status_override_for_error_code(error_code: Option<&str
         GatewayErrorCode::CliProxyDisabled => Some(403),
         GatewayErrorCode::InvalidCliKey => Some(400),
         GatewayErrorCode::BodyTooLarge => Some(413),
+        GatewayErrorCode::LargeBodyMissingModel => Some(400),
         GatewayErrorCode::ResponseBuildError
         | GatewayErrorCode::InternalError
         | GatewayErrorCode::HttpClientInit => Some(500),

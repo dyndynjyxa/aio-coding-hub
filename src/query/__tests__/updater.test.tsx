@@ -1,13 +1,14 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { updaterCheck } from "../../services/updater";
+import { updaterCheck } from "../../services/app/updater";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { useUpdaterCheckQuery } from "../updater";
 
-vi.mock("../../services/updater", async () => {
-  const actual =
-    await vi.importActual<typeof import("../../services/updater")>("../../services/updater");
+vi.mock("../../services/app/updater", async () => {
+  const actual = await vi.importActual<typeof import("../../services/app/updater")>(
+    "../../services/app/updater"
+  );
   return {
     ...actual,
     updaterCheck: vi.fn(),

@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 use serde::Deserialize;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageQueryParams {
     pub period: String,

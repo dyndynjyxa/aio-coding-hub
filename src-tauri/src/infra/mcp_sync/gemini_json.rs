@@ -51,15 +51,21 @@ fn build_gemini_mcp_spec(server: &McpServerForSync) -> Result<serde_json::Value,
             }
             Ok(serde_json::Value::Object(obj))
         }
-        "http" => {
+        "http" | "sse" => {
             let url = server
                 .url
                 .as_ref()
                 .map(|s| s.trim())
                 .filter(|s| !s.is_empty())
-                .ok_or_else(|| "SEC_INVALID_INPUT: http url is required".to_string())?;
+                .ok_or_else(|| format!("SEC_INVALID_INPUT: {transport} url is required"))?;
 
             let mut obj = serde_json::Map::new();
+            if transport == "sse" {
+                obj.insert(
+                    "type".to_string(),
+                    serde_json::Value::String("sse".to_string()),
+                );
+            }
             obj.insert(
                 "httpUrl".to_string(),
                 serde_json::Value::String(url.to_string()),

@@ -1,12 +1,13 @@
 //! Usage: Claude Code session scanning/parsing from `~/.claude/projects/*/*.jsonl`.
 
 use super::{
-    truncate_string, validate_path_under_root, CliSessionsDisplayContentBlock,
-    CliSessionsDisplayMessage, CliSessionsPaginatedMessages, CliSessionsProjectSummary,
-    CliSessionsSessionSummary,
+    folder_name_from_path, truncate_string, validate_path_under_root,
+    CliSessionsDisplayContentBlock, CliSessionsDisplayMessage, CliSessionsFolderLookupEntry,
+    CliSessionsPaginatedMessages, CliSessionsProjectSummary, CliSessionsSessionSummary,
 };
 use crate::shared::error::{AppError, AppResult};
 use serde::Deserialize;
+use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -115,6 +116,13 @@ fn claude_projects_dir(app: &tauri::AppHandle) -> AppResult<PathBuf> {
     Ok(home_dir(app)?.join(".claude").join("projects"))
 }
 
+/// Decode a Claude-CLI encoded project directory name back to the original filesystem path.
+///
+/// Claude CLI encodes project paths by replacing `/` (or `\` on Windows) with `-`.
+/// This encoding is **lossy**: a literal hyphen in a directory name becomes
+/// indistinguishable from a path separator. We therefore try a filesystem-validated
+/// greedy decode first and fall back to the naive replacement only when validation
+/// is impossible (e.g. the path no longer exists on disk).
 fn decode_project_path(encoded: &str) -> String {
     if cfg!(windows) {
         if encoded.len() >= 2 && encoded.chars().nth(1) == Some('-') {
@@ -126,8 +134,93 @@ fn decode_project_path(encoded: &str) -> String {
             encoded.replace('-', "\\")
         }
     } else {
-        encoded.replace('-', "/")
+        decode_unix_path_validated(encoded).unwrap_or_else(|| encoded.replace('-', "/"))
     }
+}
+
+/// Greedily reconstruct a Unix path from a `-`-encoded directory name by checking
+/// the filesystem at each step to decide whether a `-` was originally a `/` or a
+/// literal hyphen.
+fn decode_unix_path_validated(encoded: &str) -> Option<String> {
+    let stripped = encoded.strip_prefix('-').unwrap_or(encoded);
+    let segments: Vec<&str> = stripped.split('-').collect();
+    if segments.is_empty() {
+        return None;
+    }
+
+    let mut resolved = String::new();
+    let mut buf = String::new();
+
+    for (i, seg) in segments.iter().enumerate() {
+        if buf.is_empty() {
+            buf.push_str(seg);
+        } else {
+            buf.push('-');
+            buf.push_str(seg);
+        }
+
+        let is_last = i == segments.len() - 1;
+        if is_last {
+            resolved.push('/');
+            resolved.push_str(&buf);
+        } else {
+            let candidate = format!("{}/{}", resolved, buf);
+            if Path::new(&candidate).is_dir() {
+                resolved = candidate;
+                buf.clear();
+            }
+        }
+    }
+
+    if Path::new(&resolved).exists() {
+        Some(resolved)
+    } else {
+        None
+    }
+}
+
+/// Extract the project working directory from the first `user`-type message in any
+/// JSONL session file within the given project directory.
+fn extract_cwd_from_sessions(project_dir: &Path) -> Option<String> {
+    let rd = fs::read_dir(project_dir).ok()?;
+    for entry in rd.flatten() {
+        let path = entry.path();
+        if path.extension().map(|e| e == "jsonl").unwrap_or(false) {
+            if let Some(cwd) = extract_cwd_from_jsonl(&path) {
+                return Some(cwd);
+            }
+        }
+    }
+    None
+}
+
+fn extract_cwd_from_jsonl(path: &Path) -> Option<String> {
+    let file = fs::File::open(path).ok()?;
+    let reader = BufReader::new(file);
+    for line in reader.lines().take(30) {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let v: Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if v.get("type").and_then(|t| t.as_str()) != Some("user") {
+            continue;
+        }
+        if let Some(cwd) = v.get("cwd").and_then(|c| c.as_str()) {
+            let cwd = cwd.trim();
+            if !cwd.is_empty() {
+                return Some(cwd.to_string());
+            }
+        }
+    }
+    None
 }
 
 fn short_name_from_path(path: &str) -> String {
@@ -452,6 +545,7 @@ pub fn projects_list(app: &tauri::AppHandle) -> AppResult<Vec<CliSessionsProject
 
         let original_path = read_sessions_index(&path)
             .and_then(|idx| idx.original_path)
+            .or_else(|| extract_cwd_from_sessions(&path))
             .unwrap_or_else(|| decode_project_path(&encoded_name));
 
         let short_name = short_name_from_path(&original_path);
@@ -596,6 +690,142 @@ pub fn sessions_list(
 
     out.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
     Ok(out)
+}
+
+fn folder_lookup_in_projects_dir(
+    projects_dir: &Path,
+    decode_project_path: fn(&str) -> String,
+    source: &str,
+    target_session_ids: &[String],
+) -> AppResult<Vec<CliSessionsFolderLookupEntry>> {
+    if target_session_ids.is_empty() || !projects_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut pending: HashSet<String> = target_session_ids
+        .iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect();
+    if pending.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut out: Vec<CliSessionsFolderLookupEntry> = Vec::new();
+    let entries = fs::read_dir(projects_dir).map_err(|e| {
+        AppError::new(
+            "INTERNAL_ERROR",
+            format!("failed to read claude projects dir: {e}"),
+        )
+    })?;
+
+    for entry in entries.flatten() {
+        if pending.is_empty() {
+            break;
+        }
+
+        let project_dir = entry.path();
+        if !project_dir.is_dir() {
+            continue;
+        }
+
+        let encoded_name = match project_dir.file_name().and_then(|name| name.to_str()) {
+            Some(name) if !name.trim().is_empty() => name.to_string(),
+            _ => continue,
+        };
+
+        let index = read_sessions_index(&project_dir);
+        let original_path = index
+            .as_ref()
+            .and_then(|idx| idx.original_path.clone())
+            .or_else(|| extract_cwd_from_sessions(&project_dir))
+            .unwrap_or_else(|| decode_project_path(&encoded_name));
+
+        let default_project_path = if original_path.trim().is_empty() {
+            decode_project_path(&encoded_name)
+        } else {
+            original_path.clone()
+        };
+
+        if let Some(index) = index {
+            for item in index.entries {
+                if !pending.contains(&item.session_id) {
+                    continue;
+                }
+                let folder_path = item
+                    .project_path
+                    .or_else(|| Some(original_path.clone()))
+                    .unwrap_or_else(|| default_project_path.clone());
+                let Some(folder_name) = folder_name_from_path(&folder_path) else {
+                    continue;
+                };
+                pending.remove(&item.session_id);
+                out.push(CliSessionsFolderLookupEntry {
+                    source: source.to_string(),
+                    session_id: item.session_id,
+                    folder_name,
+                    folder_path,
+                });
+            }
+        }
+
+        if pending.is_empty() {
+            break;
+        }
+
+        if let Ok(rd) = fs::read_dir(&project_dir) {
+            for file in rd.flatten() {
+                if pending.is_empty() {
+                    break;
+                }
+                let file_path = file.path();
+                if file_path
+                    .extension()
+                    .map(|ext| ext == "jsonl")
+                    .unwrap_or(false)
+                {
+                    let Some(session_id) = file_path
+                        .file_stem()
+                        .and_then(|stem| stem.to_str())
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_string)
+                    else {
+                        continue;
+                    };
+                    if !pending.contains(&session_id) {
+                        continue;
+                    }
+                    let folder_path = default_project_path.clone();
+                    let Some(folder_name) = folder_name_from_path(&folder_path) else {
+                        continue;
+                    };
+                    pending.remove(&session_id);
+                    out.push(CliSessionsFolderLookupEntry {
+                        source: source.to_string(),
+                        session_id,
+                        folder_name,
+                        folder_path,
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(out)
+}
+
+pub fn folder_lookup_by_session_ids(
+    app: &tauri::AppHandle,
+    target_session_ids: &[String],
+) -> AppResult<Vec<CliSessionsFolderLookupEntry>> {
+    let projects_dir = claude_projects_dir(app)?;
+    folder_lookup_in_projects_dir(
+        &projects_dir,
+        decode_project_path,
+        "claude",
+        target_session_ids,
+    )
 }
 
 pub fn messages_get(
@@ -837,6 +1067,19 @@ pub fn wsl_sessions_list(
     Ok(out)
 }
 
+pub fn wsl_folder_lookup_by_session_ids(
+    distro: &str,
+    target_session_ids: &[String],
+) -> AppResult<Vec<CliSessionsFolderLookupEntry>> {
+    let projects_dir = wsl_claude_projects_dir(distro)?;
+    folder_lookup_in_projects_dir(
+        &projects_dir,
+        decode_project_path_unix,
+        "claude",
+        target_session_ids,
+    )
+}
+
 pub fn wsl_messages_get(
     distro: &str,
     file_path: &str,
@@ -901,4 +1144,61 @@ pub fn wsl_session_delete(distro: &str, file_path: &str) -> AppResult<bool> {
         )
     })?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::folder_lookup_in_projects_dir;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn folder_lookup_uses_project_path_and_disk_fallback() {
+        let dir = tempdir().unwrap();
+        let project_dir = dir.path().join("users-demo-default-root");
+        fs::create_dir_all(&project_dir).unwrap();
+
+        fs::write(
+            project_dir.join("sessions-index.json"),
+            r#"{
+  "originalPath": "/Users/demo/default-root",
+  "entries": [
+    {
+      "sessionId": "claude-indexed",
+      "projectPath": "/Users/demo/feature-a"
+    }
+  ]
+}"#,
+        )
+        .unwrap();
+        fs::write(project_dir.join("claude-disk.jsonl"), "").unwrap();
+
+        let out = folder_lookup_in_projects_dir(
+            dir.path(),
+            |encoded| encoded.replace('-', "/"),
+            "claude",
+            &[
+                "claude-indexed".to_string(),
+                "claude-disk".to_string(),
+                "missing".to_string(),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(out.len(), 2);
+
+        let indexed_entry = out
+            .iter()
+            .find(|item| item.session_id == "claude-indexed")
+            .unwrap();
+        assert_eq!(indexed_entry.folder_name, "feature-a");
+        assert_eq!(indexed_entry.folder_path, "/Users/demo/feature-a");
+
+        let disk_entry = out
+            .iter()
+            .find(|item| item.session_id == "claude-disk")
+            .unwrap();
+        assert_eq!(disk_entry.folder_name, "default-root");
+        assert_eq!(disk_entry.folder_path, "/Users/demo/default-root");
+    }
 }

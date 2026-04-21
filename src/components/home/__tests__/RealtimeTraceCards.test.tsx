@@ -22,6 +22,7 @@ describe("components/home/RealtimeTraceCards", () => {
     const setIntervalSpy = vi.spyOn(window, "setInterval");
     render(
       <RealtimeTraceCards
+        folderLookupBySessionKey={new Map()}
         traces={[]}
         formatUnixSeconds={(ts) => String(ts)}
         showCustomTooltip={false}
@@ -38,6 +39,7 @@ describe("components/home/RealtimeTraceCards", () => {
 
     const inProgress = traceBase({
       trace_id: "t-progress",
+      session_id: "claude-session-1",
       requested_model: "   ",
       first_seen_ms: baseTime - 1000,
       last_seen_ms: baseTime - 1000,
@@ -98,6 +100,19 @@ describe("components/home/RealtimeTraceCards", () => {
 
     render(
       <RealtimeTraceCards
+        folderLookupBySessionKey={
+          new Map([
+            [
+              "claude:claude-session-1",
+              {
+                source: "claude",
+                session_id: "claude-session-1",
+                folder_name: "workspace-alpha",
+                folder_path: "/Users/demo/workspace-alpha",
+              },
+            ],
+          ])
+        }
         traces={[inProgress, completedError, completedOk] as any}
         formatUnixSeconds={(ts) => `ts:${ts}`}
         showCustomTooltip={false}
@@ -105,10 +120,12 @@ describe("components/home/RealtimeTraceCards", () => {
     );
 
     expect(screen.getByText("进行中")).toBeInTheDocument();
+    expect(screen.getByText("当前阶段")).toBeInTheDocument();
+    expect(screen.getByText("等待首个尝试")).toBeInTheDocument();
+    expect(screen.getByText("尝试次数")).toBeInTheDocument();
+    expect(screen.getByText("workspace-alpha")).toBeInTheDocument();
     expect(screen.getAllByText("未知").length).toBeGreaterThan(0); // model/provider fallback
     expect(screen.getAllByText("P3").length).toBeGreaterThan(0);
-    expect(screen.getByLabelText("服务提供商 P3")).toBeInTheDocument();
-    expect(screen.getByLabelText("服务提供商 P2")).toBeInTheDocument();
     expect(screen.getByText("流中断")).toBeInTheDocument();
     expect(screen.getAllByText("会话复用").length).toBeGreaterThan(0);
     expect(screen.getByTitle("P1 → P2")).toBeInTheDocument();

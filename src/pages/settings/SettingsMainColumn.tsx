@@ -1,12 +1,15 @@
-import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { toast } from "sonner";
 import type { GatewayAvailability } from "../../hooks/useGatewayMeta";
-import { gatewayKeys } from "../../query/keys";
 import { useTheme } from "../../hooks/useTheme";
 import { logToConsole } from "../../services/consoleLog";
-import { gatewayStart, gatewayStop, type GatewayStatus } from "../../services/gateway";
-import type { HomeUsagePeriod } from "../../services/settings";
+import type { GatewayStatus } from "../../services/gateway/gateway";
+import {
+  readHomeOverviewLogsPrimaryLayoutFromStorage,
+  writeHomeOverviewLogsPrimaryLayoutToStorage,
+} from "../../services/home/homeOverviewLayout";
+import type { HomeUsagePeriod } from "../../services/settings/settings";
+import { useGatewayStartMutation, useGatewayStopMutation } from "../../query/gateway";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Input } from "../../ui/Input";
@@ -16,7 +19,7 @@ import { cn } from "../../utils/cn";
 import { CliPriorityOrderEditor } from "./CliPriorityOrderEditor";
 import { HomeOverviewTabOrderEditor } from "./HomeOverviewTabOrderEditor";
 import type { NoticePermissionStatus } from "./useSystemNotification";
-import type { CliKey } from "../../services/providers";
+import type { CliKey } from "../../services/providers/providers";
 
 type PersistKey = "preferred_port" | "log_retention_days";
 type BooleanPersistKey =
@@ -124,7 +127,11 @@ export function SettingsMainColumn({
   sendSystemNotificationTest,
 }: SettingsMainColumnProps) {
   const { theme, setTheme } = useTheme();
-  const queryClient = useQueryClient();
+  const gatewayStartMutation = useGatewayStartMutation();
+  const gatewayStopMutation = useGatewayStopMutation();
+  const [homeOverviewLogsPrimaryLayout, setHomeOverviewLogsPrimaryLayout] = useState(() =>
+    readHomeOverviewLogsPrimaryLayoutFromStorage()
+  );
   const settingsInputsDisabled = !settingsReady || settingsWriteBlocked || settingsSaving;
   const gatewayRestartDisabled =
     gatewayAvailable !== "available" || settingsWriteBlocked || settingsSaving;
@@ -177,20 +184,20 @@ export function SettingsMainColumn({
                   }
 
                   if (gateway?.running) {
-                    const stopped = await gatewayStop();
+                    const stopped = await gatewayStopMutation.mutateAsync();
                     if (!stopped) {
                       toast("重启失败：无法停止网关");
                       return;
                     }
-                    queryClient.setQueryData(gatewayKeys.status(), stopped);
                   }
 
-                  const status = await gatewayStart(desiredPort);
+                  const status = await gatewayStartMutation.mutateAsync({
+                    preferredPort: desiredPort,
+                  });
                   if (!status) {
                     toast("启动失败：当前环境不可用或 command 未注册");
                     return;
                   }
-                  queryClient.setQueryData(gatewayKeys.status(), status);
                   logToConsole("info", "启动本地网关", {
                     port: status.port,
                     base_url: status.base_url,
@@ -205,12 +212,11 @@ export function SettingsMainColumn({
               </Button>
               <Button
                 onClick={async () => {
-                  const status = await gatewayStop();
+                  const status = await gatewayStopMutation.mutateAsync();
                   if (!status) {
                     toast("停止失败：当前环境不可用或 command 未注册");
                     return;
                   }
-                  queryClient.setQueryData(gatewayKeys.status(), status);
                   logToConsole("info", "停止本地网关");
                   toast("本地网关已停止");
                 }}
@@ -459,12 +465,12 @@ export function SettingsMainColumn({
                 </div>
               </SettingsRow>
               <SettingsRow label="首页概览排序">
-                <div className="w-full max-w-md">
+                <div className="w-full sm:w-auto sm:max-w-full">
                   <HomeOverviewTabOrderEditor />
                 </div>
               </SettingsRow>
               <SettingsRow label="CLI 优先顺序">
-                <div className="w-full max-w-md">
+                <div className="w-full sm:w-auto sm:max-w-full">
                   <CliPriorityOrderEditor
                     order={cliPriorityOrder}
                     onChange={(nextOrder) => {
@@ -509,6 +515,24 @@ export function SettingsMainColumn({
                   />
                 </SettingsRow>
               ))}
+              <SettingsRow
+                label={
+                  <span className="inline-flex items-center gap-2">
+                    <span>首页个性化布局</span>
+                    <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
+                      测试
+                    </span>
+                  </span>
+                }
+              >
+                <Switch
+                  checked={homeOverviewLogsPrimaryLayout}
+                  onCheckedChange={(next) => {
+                    setHomeOverviewLogsPrimaryLayout(next);
+                    writeHomeOverviewLogsPrimaryLayoutToStorage(next);
+                  }}
+                />
+              </SettingsRow>
             </div>
           </div>
         </div>

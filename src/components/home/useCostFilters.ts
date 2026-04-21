@@ -8,11 +8,13 @@ import { CLI_FILTER_SHORT_ITEMS, cliShortLabel } from "../../constants/clis";
 import { useCustomDateRange } from "../../hooks/useCustomDateRange";
 import { useTheme } from "../../hooks/useTheme";
 import { useCostAnalyticsV1Query } from "../../query/cost";
-import type { CliKey } from "../../services/providers";
-import type { CostPeriod, CostScatterCliProviderModelRowV1 } from "../../services/cost";
+import type { CostAnalyticsV1 } from "../../query/cost";
+import type { CliKey } from "../../services/providers/providers";
+import type { CostPeriod, CostScatterCliProviderModelRowV1 } from "../../services/usage/cost";
 import { buildRecentDayKeys, dayKeyFromLocalDate } from "../../utils/dateKeys";
 import { formatInteger, formatPercent, formatUsd } from "../../utils/formatters";
 import { pickTopSlices, toDateLabel } from "../../utils/chartHelpers";
+import { isCostAnalyticsEmpty, buildPreviewCostAnalytics } from "./previewCostData";
 
 export type CliFilter = "all" | CliKey;
 
@@ -35,6 +37,10 @@ export type SummaryCard = {
   value: string;
   hint: string;
   testId: string;
+};
+
+type UseCostFiltersOptions = {
+  devPreviewEnabled?: boolean;
 };
 
 // --- Date utility helpers ---
@@ -75,7 +81,7 @@ function buildMonthDayKeysToToday() {
 
 // --- Main hook ---
 
-export function useCostFilters() {
+export function useCostFilters({ devPreviewEnabled = false }: UseCostFiltersOptions = {}) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
 
@@ -114,18 +120,23 @@ export function useCostFilters() {
   const loading = costQuery.isLoading;
   const fetching = costQuery.isFetching;
   const errorText = costQuery.error ? String(costQuery.error) : null;
+  const previewActive =
+    devPreviewEnabled && queryEnabled && !loading && isCostAnalyticsEmpty(costQuery.data);
 
-  const tauriAvailable: boolean | null = !queryEnabled
-    ? null
-    : loading
-      ? null
-      : costQuery.data != null;
+  const analytics = useMemo<CostAnalyticsV1 | null>(() => {
+    if (previewActive) {
+      return buildPreviewCostAnalytics(period, filters, customApplied);
+    }
+    return costQuery.data ?? null;
+  }, [costQuery.data, customApplied, filters, period, previewActive]);
 
-  const summary = costQuery.data?.summary ?? null;
-  const trendRows = useMemo(() => costQuery.data?.trend ?? [], [costQuery.data?.trend]);
-  const providerRows = useMemo(() => costQuery.data?.providers ?? [], [costQuery.data?.providers]);
-  const modelRows = useMemo(() => costQuery.data?.models ?? [], [costQuery.data?.models]);
-  const scatterRows = useMemo(() => costQuery.data?.scatter ?? [], [costQuery.data?.scatter]);
+  const tauriAvailable: boolean | null = !queryEnabled ? null : loading ? null : analytics != null;
+
+  const summary = analytics?.summary ?? null;
+  const trendRows = useMemo(() => analytics?.trend ?? [], [analytics?.trend]);
+  const providerRows = useMemo(() => analytics?.providers ?? [], [analytics?.providers]);
+  const modelRows = useMemo(() => analytics?.models ?? [], [analytics?.models]);
+  const scatterRows = useMemo(() => analytics?.scatter ?? [], [analytics?.scatter]);
 
   useEffect(() => {
     if (!costQuery.error) return;

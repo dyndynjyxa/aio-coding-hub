@@ -1,7 +1,7 @@
-import type { CliKey } from "../services/providers";
-import type { CostPeriod } from "../services/cost";
-import type { UsagePeriod, UsageRange, UsageScope } from "../services/usage";
-import type { CliSessionsSource } from "../services/cliSessions";
+import type { CliKey } from "../services/providers/providers";
+import type { CostPeriod } from "../services/usage/cost";
+import type { UsagePeriod, UsageRange, UsageScope } from "../services/usage/usage";
+import type { CliSessionsSource } from "../services/cli/cliSessions";
 
 function normalizeKeyParts(values: readonly string[]): string[] {
   const unique: string[] = [];
@@ -17,11 +17,18 @@ function normalizeKeyParts(values: readonly string[]): string[] {
   return unique;
 }
 
+const oauthLimitsAllKey = ["oauthLimits"] as const;
+export const oauthLimitsKeys = {
+  all: oauthLimitsAllKey,
+  detail: (providerId: number) => [...oauthLimitsAllKey, providerId] as const,
+};
+
 const providersAllKey = ["providers"] as const;
 export const providersKeys = {
   all: providersAllKey,
   lists: () => [...providersAllKey, "list"] as const,
   list: (cliKey: CliKey) => [...providersAllKey, "list", cliKey] as const,
+  oauthStatus: (providerId: number | null) => [...providersAllKey, "oauthStatus", providerId] as const,
 };
 
 const gatewayAllKey = ["gateway"] as const;
@@ -251,6 +258,8 @@ export const cliSessionsKeys = {
     [...cliSessionsAllKey, "projects", source, wslDistro ?? null] as const,
   sessionsList: (source: CliSessionsSource, projectId: string, wslDistro?: string) =>
     [...cliSessionsAllKey, "sessions", source, projectId, wslDistro ?? null] as const,
+  folderLookup: (keys: string[], wslDistro?: string) =>
+    [...cliSessionsAllKey, "folderLookup", ...normalizeKeyParts(keys), wslDistro ?? null] as const,
   messages: (source: CliSessionsSource, filePath: string, fromEnd = true, wslDistro?: string) =>
     [...cliSessionsAllKey, "messages", source, filePath, fromEnd, wslDistro ?? null] as const,
 };

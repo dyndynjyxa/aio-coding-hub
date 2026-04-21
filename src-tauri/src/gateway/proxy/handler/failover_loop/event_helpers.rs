@@ -43,6 +43,7 @@ pub(super) async fn emit_attempt_event_and_log(
     let attempt_event = GatewayAttemptEvent {
         trace_id: ctx.trace_id.clone(),
         cli_key: ctx.cli_key.clone(),
+        session_id: ctx.session_id.clone(),
         method: ctx.method_hint.clone(),
         path: ctx.forwarded_path.clone(),
         query: ctx.query.clone(),

@@ -1,6 +1,10 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { CliKey } from "../services/providers";
-import { cliProxySetEnabled, cliProxyStatusAll, type CliProxyStatus } from "../services/cliProxy";
+import type { CliKey } from "../services/providers/providers";
+import {
+  cliProxySetEnabled,
+  cliProxyStatusAll,
+  type CliProxyStatus,
+} from "../services/cli/cliProxy";
 import { cliProxyKeys } from "./keys";
 
 export function useCliProxyStatusAllQuery(options?: { enabled?: boolean }) {

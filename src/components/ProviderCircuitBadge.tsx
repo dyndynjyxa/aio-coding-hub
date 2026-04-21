@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { cliBadgeTone, cliShortLabel } from "../constants/clis";
 import { useNowUnix } from "../hooks/useNowUnix";
-import type { CliKey } from "../services/providers";
+import type { CliKey } from "../services/providers/providers";
 import { Button } from "../ui/Button";
 import { Popover } from "../ui/Popover";
 import { cn } from "../utils/cn";

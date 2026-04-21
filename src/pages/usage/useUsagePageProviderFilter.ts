@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CLIS, cliShortLabel, type CliFilterKey } from "../../constants/clis";
 import { useProvidersListQuery } from "../../query/providers";
-import type { CliKey, ProviderSummary } from "../../services/providers";
+import type { CliKey, ProviderSummary } from "../../services/providers/providers";
 
 export type UsageProviderOption = {
   id: number;

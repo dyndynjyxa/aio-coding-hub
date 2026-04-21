@@ -1,6 +1,6 @@
-import { buildClaudeModelValidationRequestSnapshotTextFromResult } from "../../services/claudeModelValidationRequestSnapshot";
-import type { ClaudeValidationTemplateKey } from "../../services/claudeValidationTemplates";
-import type { ClaudeModelValidationResult } from "../../services/claudeModelValidation";
+import { buildClaudeModelValidationRequestSnapshotTextFromResult } from "../../services/claude/claudeModelValidationRequestSnapshot";
+import type { ClaudeValidationTemplateKey } from "../../services/claude/claudeValidationTemplates";
+import type { ClaudeModelValidationResult } from "../../services/claude/claudeModelValidation";
 import { ClaudeModelValidationResultPanel } from "../ClaudeModelValidationResultPanel";
 import { Button } from "../../ui/Button";
 import { Textarea } from "../../ui/Textarea";

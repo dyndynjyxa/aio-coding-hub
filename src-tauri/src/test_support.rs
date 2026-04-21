@@ -395,7 +395,7 @@ pub fn gateway_check_port_available_json<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     port: u16,
 ) -> crate::shared::error::AppResult<bool> {
-    tauri::async_runtime::block_on(crate::commands::gateway::gateway_check_port_available_impl(
+    tauri::async_runtime::block_on(crate::app::gateway_service::check_port_available(
         app.clone(),
         port,
     ))
@@ -468,13 +468,94 @@ pub fn settings_set_via_command_json<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     update: serde_json::Value,
 ) -> crate::shared::error::AppResult<serde_json::Value> {
-    let update: crate::commands::settings::SettingsUpdate = serde_json::from_value(update)
+    use crate::commands::settings::{
+        SensitiveStringUpdate, SettingsMutationResult, SettingsMutationRuntime, SettingsUpdate,
+        SettingsView,
+    };
+
+    let update: SettingsUpdate = serde_json::from_value(update)
         .map_err(|e| format!("SEC_INVALID_INPUT: invalid settings command payload: {e}"))?;
-    let persisted = tauri::async_runtime::block_on(crate::commands::settings::settings_set_impl(
-        app.clone(),
-        update,
-    ))?;
-    serialize_json(persisted)
+    let previous = crate::settings::read(app).map_err(|err| {
+        format!(
+            "SETTINGS_RECOVERY_REQUIRED: settings.json could not be read; fix or restore it before saving: {err}"
+        )
+    })?;
+
+    let mut next = previous.clone();
+    next.schema_version = crate::settings::SCHEMA_VERSION;
+    next.preferred_port = update.preferred_port;
+    next.auto_start = update.auto_start;
+    next.log_retention_days = update.log_retention_days;
+    next.failover_max_attempts_per_provider = update.failover_max_attempts_per_provider;
+    next.failover_max_providers_to_try = update.failover_max_providers_to_try;
+
+    if let Some(value) = update.gateway_listen_mode {
+        next.gateway_listen_mode = value;
+    }
+    if let Some(value) = update.gateway_custom_listen_address {
+        next.gateway_custom_listen_address = value;
+    }
+    if let Some(value) = update.upstream_proxy_enabled {
+        next.upstream_proxy_enabled = value;
+    }
+    if let Some(value) = update.upstream_proxy_url {
+        next.upstream_proxy_url = value;
+    }
+    if let Some(value) = update.upstream_proxy_username {
+        next.upstream_proxy_username = value;
+    }
+
+    next.gateway_custom_listen_address = next.gateway_custom_listen_address.trim().to_string();
+    next.upstream_proxy_url = next.upstream_proxy_url.trim().to_string();
+    next.upstream_proxy_username = next.upstream_proxy_username.trim().to_string();
+
+    next.upstream_proxy_password = match update
+        .upstream_proxy_password
+        .unwrap_or(SensitiveStringUpdate::Preserve)
+    {
+        SensitiveStringUpdate::Preserve => previous.upstream_proxy_password.clone(),
+        SensitiveStringUpdate::Clear => String::new(),
+        SensitiveStringUpdate::Replace(value) => value,
+    };
+
+    if next.upstream_proxy_enabled && next.upstream_proxy_url.is_empty() {
+        return Err(
+            "upstream_proxy_url cannot be empty when upstream proxy is enabled"
+                .to_string()
+                .into(),
+        );
+    }
+
+    crate::gateway::http_client::validate_proxy_for_settings(&next)?;
+    let persisted = crate::settings::write(app, &next)?;
+    crate::gateway::http_client::sync_from_settings(&persisted)?;
+
+    let gateway_status = crate::gateway_runtime_access::try_app_gateway_status(app).unwrap_or(
+        crate::gateway::GatewayStatus {
+            running: false,
+            port: None,
+            base_url: None,
+            listen_addr: None,
+        },
+    );
+
+    serialize_json(SettingsMutationResult {
+        settings: SettingsView::from(&persisted),
+        runtime: SettingsMutationRuntime {
+            gateway_rebound: false,
+            cli_proxy_synced: false,
+            wsl_auto_sync_triggered: false,
+            gateway_status,
+        },
+    })
+}
+
+pub fn gateway_upstream_proxy_url_json<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<Option<String>> {
+    let settings = crate::settings::read(app)?;
+    crate::gateway::http_client::sync_from_settings(&settings)?;
+    Ok(crate::gateway::http_client::get_current_proxy_url())
 }
 
 // ---------------------------------------------------------------------------

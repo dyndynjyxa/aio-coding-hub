@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { McpServerDialog } from "../McpServerDialog";
 import { useMcpServerUpsertMutation } from "../../../../query/mcp";
-import { mcpParseJson } from "../../../../services/mcp";
+import { mcpParseJson } from "../../../../services/workspace/mcp";
 
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
@@ -13,9 +13,9 @@ vi.mock("../../../../query/mcp", async () => {
   return { ...actual, useMcpServerUpsertMutation: vi.fn() };
 });
 
-vi.mock("../../../../services/mcp", async () => {
-  const actual = await vi.importActual<typeof import("../../../../services/mcp")>(
-    "../../../../services/mcp"
+vi.mock("../../../../services/workspace/mcp", async () => {
+  const actual = await vi.importActual<typeof import("../../../../services/workspace/mcp")>(
+    "../../../../services/workspace/mcp"
   );
   return { ...actual, mcpParseJson: vi.fn() };
 });
@@ -73,11 +73,21 @@ describe("pages/mcp/components/McpServerDialog", () => {
       expect(mutateAsync).toHaveBeenCalledWith(
         expect.objectContaining({
           serverId: null,
+          serverKey: "",
           name: "Fetch Tool",
           transport: "stdio",
           command: "node",
           args: ["-y", "@foo/bar"],
-          env: { FOO: "bar" },
+          env: {
+            preserve_keys: [],
+            replace: { FOO: "bar" },
+          },
+          cwd: null,
+          url: null,
+          headers: {
+            preserve_keys: [],
+            replace: {},
+          },
         })
       )
     );
@@ -140,10 +150,21 @@ describe("pages/mcp/components/McpServerDialog", () => {
     await waitFor(() =>
       expect(mutateAsync).toHaveBeenCalledWith(
         expect.objectContaining({
+          serverId: null,
+          serverKey: "",
+          name: "Demo",
           transport: "stdio",
           command: "node",
           cwd: "/tmp",
-          env: { FOO: "bar" },
+          env: {
+            preserve_keys: [],
+            replace: { FOO: "bar" },
+          },
+          url: null,
+          headers: {
+            preserve_keys: [],
+            replace: {},
+          },
         })
       )
     );
@@ -200,9 +221,21 @@ describe("pages/mcp/components/McpServerDialog", () => {
       expect(mutateAsync).toHaveBeenCalledWith(
         expect.objectContaining({
           serverId: 7,
+          serverKey: "remote",
+          name: "Remote",
           transport: "http",
+          command: null,
+          args: [],
+          env: {
+            preserve_keys: [],
+            replace: {},
+          },
+          cwd: null,
           url: "https://example.com/mcp",
-          headers: { Authorization: "Bearer y" },
+          headers: {
+            preserve_keys: [],
+            replace: { Authorization: "Bearer y" },
+          },
         })
       )
     );
@@ -234,10 +267,11 @@ describe("pages/mcp/components/McpServerDialog", () => {
     expect(screen.getByDisplayValue("bar")).toBeInTheDocument();
   });
 
-  it("fills fields from mcpServers JSON and normalizes sse transport to http", async () => {
+  it("fills fields from mcpServers JSON and preserves sse transport", async () => {
+    const mutateAsync = vi.fn();
     vi.mocked(useMcpServerUpsertMutation).mockReturnValue({
       isPending: false,
-      mutateAsync: vi.fn(),
+      mutateAsync,
     } as any);
     vi.mocked(mcpParseJson).mockResolvedValueOnce({ servers: [] } as any);
 
@@ -257,6 +291,31 @@ describe("pages/mcp/components/McpServerDialog", () => {
     expect(screen.getByDisplayValue("https://example.com/mcp")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Authorization")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Bearer x")).toBeInTheDocument();
+
+    mutateAsync.mockResolvedValueOnce({ id: 1, server_key: "remote", transport: "sse" });
+    fireEvent.click(screen.getByRole("button", { name: "保存并同步" }));
+    await waitFor(() =>
+      expect(mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          serverId: null,
+          serverKey: "",
+          name: "remote",
+          transport: "sse",
+          command: null,
+          args: [],
+          env: {
+            preserve_keys: [],
+            replace: {},
+          },
+          cwd: null,
+          url: "https://example.com/mcp",
+          headers: {
+            preserve_keys: [],
+            replace: { Authorization: "Bearer x" },
+          },
+        })
+      )
+    );
   });
 
   it("fills fields from CLI-style JSON (codex.servers)", async () => {
@@ -347,10 +406,21 @@ describe("pages/mcp/components/McpServerDialog", () => {
       expect(mutateAsync).toHaveBeenCalledWith(
         expect.objectContaining({
           name: "Fetch",
+          serverId: null,
+          serverKey: "",
           transport: "stdio",
           command: "uvx",
           args: ["mcp-server-fetch"],
-          env: { FOO: "bar" },
+          env: {
+            preserve_keys: [],
+            replace: { FOO: "bar" },
+          },
+          cwd: null,
+          url: null,
+          headers: {
+            preserve_keys: [],
+            replace: {},
+          },
         })
       )
     );

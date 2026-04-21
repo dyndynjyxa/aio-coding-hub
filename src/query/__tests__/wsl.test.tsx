@@ -5,7 +5,7 @@ import {
   wslConfigureClients,
   wslDetect,
   wslHostAddressGet,
-} from "../../services/wsl";
+} from "../../services/app/wsl";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { wslKeys } from "../keys";
@@ -17,8 +17,9 @@ import {
   useWslOverviewQuery,
 } from "../wsl";
 
-vi.mock("../../services/wsl", async () => {
-  const actual = await vi.importActual<typeof import("../../services/wsl")>("../../services/wsl");
+vi.mock("../../services/app/wsl", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../services/app/wsl")>("../../services/app/wsl");
   return {
     ...actual,
     wslDetect: vi.fn(),
@@ -134,7 +135,7 @@ describe("query/wsl", () => {
   it("overview returns null payload when wslDetect returns null", async () => {
     setTauriRuntime();
 
-    vi.mocked(wslDetect).mockResolvedValue(null);
+    vi.mocked(wslDetect).mockResolvedValue(null as never);
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
@@ -224,8 +225,8 @@ describe("query/wsl", () => {
     setTauriRuntime();
 
     vi.mocked(wslDetect).mockResolvedValue({ detected: true, distros: ["Ubuntu"] });
-    vi.mocked(wslHostAddressGet).mockResolvedValue(null);
-    vi.mocked(wslConfigStatusGet).mockResolvedValue(null);
+    vi.mocked(wslHostAddressGet).mockResolvedValue(null as never);
+    vi.mocked(wslConfigStatusGet).mockResolvedValue(null as never);
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);

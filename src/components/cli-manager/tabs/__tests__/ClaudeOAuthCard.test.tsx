@@ -3,21 +3,21 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { ClaudeOAuthCard } from "../ClaudeOAuthCard";
-import type { ProviderSummary } from "../../../../services/providers";
+import type { ProviderSummary } from "../../../../services/providers/providers";
 import {
   providerOAuthDisconnect,
   providerOAuthRefresh,
   providerOAuthStartFlow,
   providerOAuthStatus,
-} from "../../../../services/providers";
+} from "../../../../services/providers/providers";
 
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
 }));
 
-vi.mock("../../../../services/providers", async () => {
-  const actual = await vi.importActual<typeof import("../../../../services/providers")>(
-    "../../../../services/providers"
+vi.mock("../../../../services/providers/providers", async () => {
+  const actual = await vi.importActual<typeof import("../../../../services/providers/providers")>(
+    "../../../../services/providers/providers"
   );
   return {
     ...actual,

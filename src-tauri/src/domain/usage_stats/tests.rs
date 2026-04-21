@@ -11,7 +11,8 @@ fn setup_conn() -> Connection {
 	CREATE TABLE providers (
 	  id INTEGER PRIMARY KEY,
 	  name TEXT NOT NULL,
-	  source_provider_id INTEGER
+	  source_provider_id INTEGER,
+	  bridge_type TEXT
 	);
 
 	CREATE TABLE request_logs (
@@ -193,6 +194,7 @@ INSERT INTO request_logs (
 
     let summary = summary_query(&conn, None, None, None, None).expect("summary_query");
     assert_eq!(summary.requests_total, 3);
+    assert_eq!(summary.cost_covered_success, 2);
     assert_eq!(summary.input_tokens, 520);
     assert_eq!(summary.output_tokens, 60);
     assert_eq!(summary.io_total_tokens, 580);
@@ -340,6 +342,7 @@ INSERT INTO request_logs (
     .expect("insert cx2cc request");
 
     let summary = summary_query(&conn, None, None, None, None).expect("summary_query");
+    assert_eq!(summary.cost_covered_success, 0);
     assert_eq!(summary.input_tokens, 70);
     assert_eq!(summary.cache_read_input_tokens, 30);
     assert_eq!(summary.total_tokens, 110);
@@ -582,6 +585,7 @@ INSERT INTO request_logs (
     let summary = summary_query(&conn, None, None, None, Some(123)).expect("filtered summary");
     assert_eq!(summary.requests_total, 1);
     assert_eq!(summary.requests_success, 1);
+    assert_eq!(summary.cost_covered_success, 0);
     assert_eq!(summary.input_tokens, 110);
 
     let cli_rows = leaderboard_v2_with_conn(

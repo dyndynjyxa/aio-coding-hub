@@ -1,12 +1,12 @@
-import type { ClaudeModelValidationResult } from "../../services/claudeModelValidation";
-import type { ClaudeModelValidationRunRow } from "../../services/claudeModelValidationHistory";
-import type { ClaudeValidationTemplateKey } from "../../services/claudeValidationTemplates";
-import type { evaluateClaudeValidation } from "../../services/claudeValidationTemplates";
+import type { ClaudeModelValidationResult } from "../../services/claude/claudeModelValidation";
+import type { ClaudeModelValidationRunRow } from "../../services/claude/claudeModelValidationHistory";
+import type { ClaudeValidationTemplateKey } from "../../services/claude/claudeValidationTemplates";
+import type { evaluateClaudeValidation } from "../../services/claude/claudeValidationTemplates";
 
 export type ClaudeModelValidationDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  provider: import("../../services/providers").ProviderSummary | null;
+  provider: import("../../services/providers/providers").ProviderSummary | null;
 };
 
 export type SuiteMeta = {

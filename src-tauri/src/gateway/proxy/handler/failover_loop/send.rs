@@ -17,9 +17,8 @@ pub(super) async fn send_upstream(
     headers: HeaderMap,
     body: Bytes,
 ) -> SendResult {
-    let send = ctx
-        .state
-        .client
+    let client = ctx.state.client();
+    let send = client
         .request(method, url)
         .headers(headers)
         .body(body)

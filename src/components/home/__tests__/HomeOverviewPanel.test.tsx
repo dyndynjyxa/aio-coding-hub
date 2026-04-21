@@ -3,6 +3,10 @@ import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeOverviewPanel } from "../HomeOverviewPanel";
 
+const { homeRequestLogsPanelMock } = vi.hoisted(() => ({
+  homeRequestLogsPanelMock: vi.fn(() => <div>request-logs</div>),
+}));
+
 vi.mock("../HomeUsageSection", () => ({
   HomeUsageSection: ({
     showHeatmap,
@@ -46,7 +50,7 @@ vi.mock("../HomeWorkspaceConfigPanel", () => ({
       workspaceName: string | null;
       items: Array<{ id: string; name: string }>;
     }>;
-    selectedCliKey: "claude" | "codex" | "gemini";
+    selectedCliKey: "claude" | "codex" | "gemini" | null;
     onSelectCliKey: (cliKey: "claude" | "codex" | "gemini") => void;
     sortModes: Array<{ id: number; name: string }>;
     activeModeByCli: Record<"claude" | "codex" | "gemini", number | null>;
@@ -107,7 +111,7 @@ vi.mock("../HomeWorkspaceConfigPanel", () => ({
 }));
 
 vi.mock("../HomeRequestLogsPanel", () => ({
-  HomeRequestLogsPanel: () => <div>request-logs</div>,
+  HomeRequestLogsPanel: homeRequestLogsPanelMock,
 }));
 
 function renderPanel(overrides: Partial<ComponentProps<typeof HomeOverviewPanel>> = {}) {
@@ -189,6 +193,7 @@ function renderPanel(overrides: Partial<ComponentProps<typeof HomeOverviewPanel>
 describe("components/home/HomeOverviewPanel", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    homeRequestLogsPanelMock.mockClear();
   });
 
   it("renders preview circuit rows when dev preview is enabled and there are no real open circuits", () => {
@@ -399,6 +404,53 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(screen.getByText("work-status-card:vertical")).toBeInTheDocument();
   });
 
+  it("uses the legacy overview layout by default", () => {
+    renderPanel();
+
+    const requestLogs = screen.getByText("request-logs");
+    const overviewTab = screen.getByRole("tab", { name: "配置信息" });
+
+    expect(
+      overviewTab.compareDocumentPosition(requestLogs) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+
+  it("uses the logs-primary layout when the local preference is enabled", () => {
+    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
+
+    renderPanel();
+
+    const requestLogs = screen.getByText("request-logs");
+    const usageSection = screen.getByText("usage-section:false:true");
+
+    expect(
+      usageSection.compareDocumentPosition(requestLogs) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(screen.getAllByText("work-status-card:vertical")).toHaveLength(1);
+    expect(screen.getByRole("tab", { name: "配置信息" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "熔断信息" })).toBeInTheDocument();
+    expect(homeRequestLogsPanelMock).toHaveBeenCalled();
+    const latestCall = (homeRequestLogsPanelMock as any).mock.calls[
+      (homeRequestLogsPanelMock as any).mock.calls.length - 1
+    ];
+    const latestProps = latestCall?.[0];
+    expect(latestProps?.compactModeOverride).toBe(true);
+    expect(latestProps?.showCompactModeToggle).toBe(false);
+    expect(latestProps?.showRefreshButton).toBe(false);
+  });
+
+  it("uses proxy-left and usage-plus-logs-right in logs-primary layout", () => {
+    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
+
+    renderPanel({ showHomeHeatmap: true, showHomeUsage: false });
+
+    expect(screen.getByText("usage-section:false:true")).toBeInTheDocument();
+    expect(screen.getAllByText("work-status-card:vertical")).toHaveLength(1);
+    expect(screen.queryByText("work-status-card:horizontal")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "配置信息" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "熔断信息" })).toBeInTheDocument();
+  });
+
   it("renders preview active sessions when dev preview is enabled and there are no real sessions", async () => {
     renderPanel({ devPreviewEnabled: true, activeSessions: [] });
 
@@ -560,5 +612,89 @@ describe("components/home/HomeOverviewPanel", () => {
     );
 
     expect(screen.getByText("当前没有熔断中的 Provider")).toBeInTheDocument();
+  });
+
+  it("switches back to 配置信息 when circuits become empty in logs-primary layout", async () => {
+    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
+
+    const { rerender } = renderPanel({
+      openCircuits: [
+        {
+          cli_key: "claude",
+          provider_id: 9,
+          provider_name: "Claude New Circuit",
+          open_until: Math.floor(Date.now() / 1000) + 60,
+        },
+      ],
+      workspaceConfigs: [
+        {
+          cliKey: "claude",
+          cliLabel: "Claude Code",
+          workspaceId: 1,
+          workspaceName: "工作区 A",
+          loading: false,
+          items: [{ id: "prompt:1", type: "prompts", label: "Prompt", name: "Claude Prompt" }],
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "熔断信息" }));
+    expect(screen.getByText("Claude New Circuit")).toBeInTheDocument();
+
+    rerender(
+      <HomeOverviewPanel
+        showCustomTooltip={false}
+        showHomeHeatmap={true}
+        cliPriorityOrder={["claude", "codex", "gemini"]}
+        usageWindowDays={15}
+        usageHeatmapRows={[]}
+        usageHeatmapLoading={false}
+        onRefreshUsageHeatmap={vi.fn()}
+        sortModes={[]}
+        sortModesLoading={false}
+        sortModesAvailable={true}
+        activeModeByCli={{ claude: null, codex: null, gemini: null }}
+        activeModeToggling={{ claude: false, codex: false, gemini: false }}
+        onSetCliActiveMode={vi.fn()}
+        cliProxyLoading={false}
+        cliProxyAvailable={true}
+        cliProxyEnabled={{ claude: false, codex: false, gemini: false }}
+        cliProxyAppliedToCurrentGateway={{ claude: null, codex: null, gemini: null }}
+        cliProxyToggling={{ claude: false, codex: false, gemini: false }}
+        onSetCliProxyEnabled={vi.fn()}
+        activeSessions={[]}
+        activeSessionsLoading={false}
+        activeSessionsAvailable={true}
+        workspaceConfigs={[
+          {
+            cliKey: "claude",
+            cliLabel: "Claude Code",
+            workspaceId: 1,
+            workspaceName: "工作区 A",
+            loading: false,
+            items: [{ id: "prompt:1", type: "prompts", label: "Prompt", name: "Claude Prompt" }],
+          },
+        ]}
+        providerLimitRows={[]}
+        providerLimitLoading={false}
+        providerLimitAvailable={true}
+        providerLimitRefreshing={false}
+        onRefreshProviderLimit={vi.fn()}
+        openCircuits={[]}
+        onResetCircuitProvider={vi.fn()}
+        resettingCircuitProviderIds={new Set()}
+        traces={[]}
+        requestLogs={[]}
+        requestLogsLoading={false}
+        requestLogsRefreshing={false}
+        requestLogsAvailable={true}
+        onRefreshRequestLogs={vi.fn()}
+        selectedLogId={null}
+        onSelectLogId={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText("工作区：")).toBeInTheDocument();
+    expect(screen.getByText("工作区 A")).toBeInTheDocument();
   });
 });

@@ -1,7 +1,9 @@
 #[cfg(test)]
 mod tests {
     use crate::mcp_sync::McpServerForSync;
-    use crate::wsl::{self, *};
+    use crate::wsl::data_gathering::gather_skills_sync_data;
+    use crate::wsl::mcp_adapt::adapt_mcp_servers_for_wsl;
+    use crate::wsl::types::{WslCliBackup, WslDistroManifest};
     use std::collections::BTreeMap;
     use std::ffi::OsString;
     use std::path::PathBuf;

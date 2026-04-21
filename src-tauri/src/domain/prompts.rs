@@ -9,7 +9,7 @@ use crate::workspaces;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct PromptSummary {
     pub id: i64,
     pub workspace_id: i64,
@@ -21,14 +21,14 @@ pub struct PromptSummary {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct DefaultPromptSyncItem {
     pub cli_key: String,
     pub action: String,
     pub message: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct DefaultPromptSyncReport {
     pub items: Vec<DefaultPromptSyncItem>,
 }

@@ -1,16 +1,14 @@
 //! Usage: Best-effort cleanup hooks for app lifecycle events (exit/restart).
 
-use super::app_state::GatewayState;
+use super::gateway_control::app_take_running_gateway;
 use crate::blocking;
 use crate::cli_proxy;
 use crate::gateway::events::GATEWAY_STATUS_EVENT_NAME;
 #[cfg(windows)]
 use crate::infra::wsl;
-use crate::shared::mutex_ext::MutexExt;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::OnceLock;
 use std::time::Duration;
-use tauri::Manager;
 use tokio::sync::Notify;
 
 const CLEANUP_STATE_IDLE: u8 = 0;
@@ -148,12 +146,8 @@ pub(crate) async fn restore_cli_proxy_keep_state_best_effort(
     }
 }
 
-pub(crate) async fn stop_gateway_best_effort(app: &tauri::AppHandle) {
-    let running = {
-        let state = app.state::<GatewayState>();
-        let mut manager = state.0.lock_or_recover();
-        manager.take_running()
-    };
+pub(crate) async fn stop_gateway_best_effort<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let running = app_take_running_gateway(app);
 
     let Some((
         shutdown,

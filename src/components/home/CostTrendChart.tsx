@@ -25,7 +25,7 @@ import {
   getCursorStroke,
   CHART_ANIMATION,
 } from "../charts/chartTheme";
-import type { CostPeriod } from "../../services/cost";
+import type { CostPeriod } from "../../services/usage/cost";
 import { CLI_ITEMS, type CliFilter } from "./useCostFilters";
 
 type TrendChartDataPoint = { label: string; cost: number };

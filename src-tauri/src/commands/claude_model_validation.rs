@@ -4,6 +4,7 @@ use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::{blocking, claude_model_validation, claude_model_validation_history};
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn claude_provider_validate_model(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -18,18 +19,7 @@ pub(crate) async fn claude_provider_validate_model(
 }
 
 #[tauri::command]
-pub(crate) async fn claude_provider_get_api_key_plaintext(
-    app: tauri::AppHandle,
-    db_state: tauri::State<'_, DbInitState>,
-    provider_id: i64,
-) -> Result<String, String> {
-    let db = ensure_db_ready(app, db_state.inner()).await?;
-    claude_model_validation::get_provider_api_key_plaintext(db, provider_id)
-        .await
-        .map_err(Into::into)
-}
-
-#[tauri::command]
+#[specta::specta]
 pub(crate) async fn claude_validation_history_list(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -46,6 +36,7 @@ pub(crate) async fn claude_validation_history_list(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn claude_validation_history_clear_provider(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,

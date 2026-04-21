@@ -1,5 +1,5 @@
-import type { ClaudeModelValidationResult } from "../../services/claudeModelValidation";
-import { evaluateClaudeValidation } from "../../services/claudeValidationTemplates";
+import type { ClaudeModelValidationResult } from "../../services/claude/claudeModelValidation";
+import { evaluateClaudeValidation } from "../../services/claude/claudeValidationTemplates";
 import type { SuiteSummaryRow, SuiteProtocolItem } from "./types";
 import {
   isPlainObject,

@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { McpServerSummary } from "../../services/mcp";
+import type { McpServerSummary } from "../../services/workspace/mcp";
 import {
   mcpImportFromWorkspaceCli,
   mcpImportServers,
@@ -9,7 +9,7 @@ import {
   mcpServerSetEnabled,
   mcpServerUpsert,
   mcpServersList,
-} from "../../services/mcp";
+} from "../../services/workspace/mcp";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { mcpKeys } from "../keys";
@@ -22,8 +22,10 @@ import {
   useMcpServersListQuery,
 } from "../mcp";
 
-vi.mock("../../services/mcp", async () => {
-  const actual = await vi.importActual<typeof import("../../services/mcp")>("../../services/mcp");
+vi.mock("../../services/workspace/mcp", async () => {
+  const actual = await vi.importActual<typeof import("../../services/workspace/mcp")>(
+    "../../services/workspace/mcp"
+  );
   return {
     ...actual,
     mcpServersList: vi.fn(),
@@ -75,10 +77,10 @@ describe("query/mcp", () => {
       transport: "stdio",
       command: "node",
       args: [],
-      env: {},
+      env_keys: [],
       cwd: null,
       url: null,
-      headers: {},
+      header_keys: [],
       enabled: true,
       created_at: 0,
       updated_at: 0,
@@ -99,10 +101,10 @@ describe("query/mcp", () => {
         transport: created.transport,
         command: created.command,
         args: created.args,
-        env: created.env,
+        env: {},
         cwd: created.cwd,
         url: created.url,
-        headers: created.headers,
+        headers: {},
       });
     });
 
@@ -119,10 +121,10 @@ describe("query/mcp", () => {
       transport: "stdio",
       command: "node",
       args: [],
-      env: {},
+      env_keys: [],
       cwd: null,
       url: null,
-      headers: {},
+      header_keys: [],
       enabled: true,
       created_at: 0,
       updated_at: 0,
@@ -156,10 +158,10 @@ describe("query/mcp", () => {
         transport: "stdio",
         command: "node",
         args: [],
-        env: {},
+        env_keys: [],
         cwd: null,
         url: null,
-        headers: {},
+        header_keys: [],
         enabled: true,
         created_at: 0,
         updated_at: 0,
@@ -171,10 +173,10 @@ describe("query/mcp", () => {
         transport: "http",
         command: null,
         args: [],
-        env: {},
+        env_keys: [],
         cwd: null,
         url: "http://localhost",
-        headers: {},
+        header_keys: [],
         enabled: true,
         created_at: 0,
         updated_at: 0,

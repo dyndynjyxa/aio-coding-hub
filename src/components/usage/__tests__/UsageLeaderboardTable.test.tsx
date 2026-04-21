@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { UsageLeaderboardRow, UsageSummary } from "../../../services/usage";
+import type { UsageLeaderboardRow, UsageSummary } from "../../../services/usage/usage";
 import { UsageLeaderboardTable } from "../UsageLeaderboardTable";
 
 const SUMMARY: UsageSummary = {
@@ -8,6 +8,7 @@ const SUMMARY: UsageSummary = {
   requests_with_usage: 0,
   requests_success: 0,
   requests_failed: 0,
+  cost_covered_success: 0,
   avg_duration_ms: null,
   avg_ttfb_ms: null,
   avg_output_tokens_per_second: null,

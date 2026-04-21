@@ -12,7 +12,7 @@ import {
   useRequestLogsIncrementalPollQuery,
   useRequestLogsListAllQuery,
 } from "../../query/requestLogs";
-import type { TraceSession } from "../../services/traceStore";
+import type { TraceSession } from "../../services/gateway/traceStore";
 
 const traceStoreState = vi.hoisted(() => ({
   traces: [] as TraceSession[],
@@ -53,7 +53,7 @@ vi.mock("../../query/requestLogs", async () => {
   };
 });
 
-vi.mock("../../services/traceStore", () => ({
+vi.mock("../../services/gateway/traceStore", () => ({
   useTraceStore: () => ({
     traces: traceStoreState.traces,
   }),

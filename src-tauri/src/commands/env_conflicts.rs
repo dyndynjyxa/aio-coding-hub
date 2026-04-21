@@ -3,6 +3,7 @@
 use crate::{blocking, env_conflicts};
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn env_conflicts_check(
     app: tauri::AppHandle,
     cli_key: String,

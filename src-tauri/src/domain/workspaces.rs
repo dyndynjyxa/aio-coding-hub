@@ -7,7 +7,7 @@ use crate::shared::time::now_unix_seconds;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct WorkspaceSummary {
     pub id: i64,
     pub cli_key: String,
@@ -16,7 +16,7 @@ pub struct WorkspaceSummary {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct WorkspacesListResult {
     pub active_id: Option<i64>,
     pub items: Vec<WorkspaceSummary>,

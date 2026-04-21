@@ -1,8 +1,8 @@
 //! Usage: Provider gating helpers (circuit allow/skip + event emission).
 
-use super::super::super::provider_router;
 use super::context::CommonCtx;
 use crate::circuit_breaker;
+use crate::gateway::proxy::provider_router;
 use crate::gateway::util::now_unix_seconds;
 
 pub(super) struct ProviderGateInput<'a> {

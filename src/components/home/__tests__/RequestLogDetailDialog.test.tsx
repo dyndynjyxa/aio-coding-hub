@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { RequestAttemptLog, RequestLogDetail } from "../../../services/requestLogs";
-import type { TraceSession } from "../../../services/traceStore";
+import type { RequestAttemptLog, RequestLogDetail } from "../../../services/gateway/requestLogs";
+import type { TraceSession } from "../../../services/gateway/traceStore";
 import { RequestLogDetailDialog } from "../RequestLogDetailDialog";
 
 const requestLogQueryState = vi.hoisted(() => ({
@@ -26,7 +26,7 @@ vi.mock("../../../query/requestLogs", () => ({
   }),
 }));
 
-vi.mock("../../../services/traceStore", () => ({
+vi.mock("../../../services/gateway/traceStore", () => ({
   useTraceStore: () => ({
     traces: traceStoreState.traces,
   }),
@@ -86,6 +86,10 @@ function expectMetricValue(label: string, value: string) {
   expect(within(card as HTMLElement).getByText(value)).toBeInTheDocument();
 }
 
+function switchToTab(label: string) {
+  fireEvent.click(screen.getByRole("tab", { name: label }));
+}
+
 describe("home/RequestLogDetailDialog", () => {
   afterEach(() => {
     setRequestLogQueryState();
@@ -108,13 +112,14 @@ describe("home/RequestLogDetailDialog", () => {
     });
   });
 
-  it("renders metrics first and hides raw trace/query details", () => {
+  it("renders metrics on the summary tab", () => {
     setRequestLogQueryState({ selectedLog: createSelectedLog() });
     setTraceStoreState({ traces: [] });
 
     render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
 
     expect(screen.getByText("代理记录详情")).toBeInTheDocument();
+    // Summary tab should be active by default
     expect(screen.getByText("关键指标")).toBeInTheDocument();
     expect(screen.getByText("输入 Token")).toBeInTheDocument();
     expect(screen.getByText("输出 Token")).toBeInTheDocument();
@@ -125,8 +130,7 @@ describe("home/RequestLogDetailDialog", () => {
     expect(screen.getByText("速率")).toBeInTheDocument();
     expect(screen.getByText("花费")).toBeInTheDocument();
 
-    expect(screen.queryByText(/请求追踪 ID/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/查询参数/)).not.toBeInTheDocument();
+    // Raw data not visible on summary tab
     expect(screen.queryByText(/usage_json/)).not.toBeInTheDocument();
   });
 
@@ -170,11 +174,12 @@ describe("home/RequestLogDetailDialog", () => {
     expect(screen.getByText("未找到记录详情（可能已过期被留存策略清理）。")).toBeInTheDocument();
   });
 
-  it("hides metrics when no token or timing fields exist and falls back to unknown provider", () => {
+  it("hides metrics when no token or timing fields exist", () => {
     setRequestLogQueryState({
       selectedLog: createSelectedLog({
         status: null,
         error_code: null,
+        created_at: Math.floor(Date.now() / 1000),
         duration_ms: undefined,
         ttfb_ms: null,
         input_tokens: null,
@@ -194,8 +199,10 @@ describe("home/RequestLogDetailDialog", () => {
     render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
 
     expect(screen.queryByText("关键指标")).not.toBeInTheDocument();
-    expect(screen.getByText("当前供应商：未知")).toBeInTheDocument();
-    expect(screen.getByText("决策链")).toBeInTheDocument();
+
+    // Switch to chain tab to check provider fallback
+    switchToTab("决策链");
+    expect(screen.getByText("最终供应商：未知")).toBeInTheDocument();
   });
 
   it("shows failover success and prefers the 1h cache creation metric when present", () => {
@@ -246,6 +253,52 @@ describe("home/RequestLogDetailDialog", () => {
     expectMetricValue("缓存创建", "8 (1h)");
   });
 
+  it("hides error observation for 200 success even when error_details_json exists", () => {
+    setRequestLogQueryState({
+      selectedLog: createSelectedLog({
+        status: 200,
+        error_code: null,
+        error_details_json: JSON.stringify({
+          error_code: "GW_UPSTREAM_5XX",
+          error_category: "PROVIDER_ERROR",
+          upstream_status: 502,
+          decision: "switch",
+        }),
+      }),
+    });
+
+    render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
+
+    // For 200 success, error observation should not produce a visible card
+    // because resolveRequestLogErrorObservation returns null when status is OK and no error_code
+    expect(screen.queryByText("上游服务返回服务端错误")).not.toBeInTheDocument();
+  });
+
+  it("renders error observation card on summary tab for failed requests", () => {
+    setRequestLogQueryState({
+      selectedLog: createSelectedLog({
+        status: 502,
+        error_code: "GW_UPSTREAM_ALL_FAILED",
+        error_details_json: JSON.stringify({
+          gateway_error_code: "GW_UPSTREAM_ALL_FAILED",
+          error_code: "GW_UPSTREAM_5XX",
+          error_category: "PROVIDER_ERROR",
+          upstream_status: 502,
+        }),
+      }),
+    });
+
+    render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
+
+    // Error observation card visible on summary tab with displayErrorCode = GW_UPSTREAM_5XX
+    // (parsedJson.errorCode takes priority over gatewayErrorCode)
+    expect(screen.getByText("上游服务返回服务端错误 (5xx)")).toBeInTheDocument();
+    // The suggestion text should be present
+    expect(
+      screen.getByText(/Provider 内部错误/)
+    ).toBeInTheDocument();
+  });
+
   it("uses live trace provider and elapsed duration for in-progress logs", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-29T12:00:00.000Z"));
@@ -254,6 +307,7 @@ describe("home/RequestLogDetailDialog", () => {
       selectedLog: createSelectedLog({
         status: null,
         error_code: null,
+        created_at: Math.floor(Date.now() / 1000),
         duration_ms: 0,
         final_provider_id: 0,
         final_provider_name: "Unknown",
@@ -295,14 +349,17 @@ describe("home/RequestLogDetailDialog", () => {
 
     render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
 
-    expect(screen.getByText("当前供应商：Provider Live")).toBeInTheDocument();
+    // Live duration is on the summary tab
     expectMetricValue("总耗时", "6.50s");
 
     act(() => {
       vi.advanceTimersByTime(1000);
     });
-
     expectMetricValue("总耗时", "7.50s");
+
+    // Switch to chain tab to see live provider
+    switchToTab("决策链");
+    expect(screen.getByText("当前供应商：Provider Live")).toBeInTheDocument();
   });
 
   it("uses base cache creation tokens and falls back to dash for missing timing metrics", () => {
@@ -355,5 +412,44 @@ describe("home/RequestLogDetailDialog", () => {
     });
     view.rerender(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
     expectMetricValue("缓存创建", "—");
+  });
+
+  // --- Tab switching tests ---
+
+  it("switches between tabs and shows correct content", () => {
+    setRequestLogQueryState({ selectedLog: createSelectedLog() });
+    setTraceStoreState({ traces: [] });
+
+    render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
+
+    // Summary tab active by default
+    expect(screen.getByText("关键指标")).toBeInTheDocument();
+
+    // Switch to chain tab
+    switchToTab("决策链");
+    expect(screen.queryByText("关键指标")).not.toBeInTheDocument();
+
+    // Switch to raw tab
+    switchToTab("原始数据");
+    expect(screen.getByText("attempts_json")).toBeInTheDocument();
+
+    // Switch back to summary
+    switchToTab("概览");
+    expect(screen.getByText("关键指标")).toBeInTheDocument();
+  });
+
+  it("shows raw error_details_json on raw tab when available", () => {
+    const errorJson = { gateway_error_code: "GW_UPSTREAM_ALL_FAILED", upstream_status: 502 };
+    setRequestLogQueryState({
+      selectedLog: createSelectedLog({
+        error_details_json: JSON.stringify(errorJson),
+      }),
+    });
+
+    render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
+
+    switchToTab("原始数据");
+    expect(screen.getByText("error_details_json")).toBeInTheDocument();
+    expect(screen.getByText(/GW_UPSTREAM_ALL_FAILED/)).toBeInTheDocument();
   });
 });

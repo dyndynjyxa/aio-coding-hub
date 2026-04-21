@@ -1,4 +1,4 @@
-import type { UsageScope } from "../../services/usage";
+import type { UsageScope } from "../../services/usage/usage";
 import type { TabListItem } from "../../ui/TabList";
 import type { UsageTableTab } from "./types";
 

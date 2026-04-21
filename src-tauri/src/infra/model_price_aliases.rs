@@ -12,7 +12,7 @@ const ALIASES_FILE_NAME: &str = "price-aliases.json";
 const ALIASES_SCHEMA_VERSION_V1: i64 = 1;
 const MAX_MODEL_LEN: usize = 200;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelPriceAliasMatchTypeV1 {
     Exact,
@@ -20,7 +20,7 @@ pub enum ModelPriceAliasMatchTypeV1 {
     Wildcard,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ModelPriceAliasRuleV1 {
     pub cli_key: String,
     pub match_type: ModelPriceAliasMatchTypeV1,
@@ -29,7 +29,7 @@ pub struct ModelPriceAliasRuleV1 {
     pub enabled: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(default)]
 pub struct ModelPriceAliasesV1 {
     pub version: i64,

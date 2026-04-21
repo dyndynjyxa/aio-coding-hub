@@ -4,11 +4,13 @@ import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { SkillsView } from "../SkillsView";
 import {
+  useSkillCheckUpdatesMutation,
   useSkillImportLocalMutation,
   useSkillLocalDeleteMutation,
   useSkillReturnToLocalMutation,
   useSkillSetEnabledMutation,
   useSkillUninstallMutation,
+  useSkillUpdateMutation,
   useSkillsInstalledListQuery,
   useSkillsLocalListQuery,
 } from "../../../query/skills";
@@ -29,6 +31,8 @@ vi.mock("../../../query/skills", async () => {
     useSkillReturnToLocalMutation: vi.fn(),
     useSkillLocalDeleteMutation: vi.fn(),
     useSkillImportLocalMutation: vi.fn(),
+    useSkillCheckUpdatesMutation: vi.fn(),
+    useSkillUpdateMutation: vi.fn(),
   };
 });
 
@@ -82,6 +86,13 @@ describe("pages/skills/SkillsView", () => {
     importMutation.mutateAsync.mockResolvedValue({ id: 2 });
     vi.mocked(useSkillImportLocalMutation).mockReturnValue(importMutation as any);
 
+    const checkUpdatesMutation = { isPending: false, mutateAsync: vi.fn() };
+    checkUpdatesMutation.mutateAsync.mockResolvedValue([]);
+    vi.mocked(useSkillCheckUpdatesMutation).mockReturnValue(checkUpdatesMutation as any);
+
+    const updateSkillMutation = { isPending: false, mutateAsync: vi.fn(), variables: null };
+    vi.mocked(useSkillUpdateMutation).mockReturnValue(updateSkillMutation as any);
+
     tauriOpenPath.mockRejectedValueOnce(new Error("no opener"));
     tauriRevealItemInDir.mockResolvedValueOnce(undefined as any);
 
@@ -102,8 +113,6 @@ describe("pages/skills/SkillsView", () => {
 
     const importButton = await screen.findByRole("button", { name: "导入技能库" });
     fireEvent.click(importButton);
-    dialog = within(screen.getByRole("dialog"));
-    fireEvent.click(dialog.getByRole("button", { name: "确认导入" }));
     await waitFor(() => expect(importMutation.mutateAsync).toHaveBeenCalledWith("local-skill"));
 
     fireEvent.click(screen.getByRole("button", { name: "删除本机技能 Local Skill" }));
@@ -177,6 +186,17 @@ describe("pages/skills/SkillsView", () => {
     vi.mocked(useSkillLocalDeleteMutation).mockReturnValue(localDeleteMutation as any);
 
     vi.mocked(useSkillImportLocalMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+      variables: null,
+    } as any);
+
+    vi.mocked(useSkillCheckUpdatesMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn().mockResolvedValue([]),
+    } as any);
+
+    vi.mocked(useSkillUpdateMutation).mockReturnValue({
       isPending: false,
       mutateAsync: vi.fn(),
       variables: null,
@@ -259,6 +279,17 @@ describe("pages/skills/SkillsView", () => {
       variables: null,
     } as any);
 
+    vi.mocked(useSkillCheckUpdatesMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn().mockResolvedValue([]),
+    } as any);
+
+    vi.mocked(useSkillUpdateMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+      variables: null,
+    } as any);
+
     render(
       <SkillsView workspaceId={1} cliKey="claude" isActiveWorkspace localImportMode="batch_init" />
     );
@@ -312,6 +343,17 @@ describe("pages/skills/SkillsView", () => {
       variables: null,
     } as any);
 
+    vi.mocked(useSkillCheckUpdatesMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn().mockResolvedValue([]),
+    } as any);
+
+    vi.mocked(useSkillUpdateMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+      variables: null,
+    } as any);
+
     render(<SkillsView workspaceId={1} cliKey="claude" isActiveWorkspace />);
 
     fireEvent.click(screen.getByRole("button", { name: "刷新本机技能" }));
@@ -349,6 +391,17 @@ describe("pages/skills/SkillsView", () => {
       variables: null,
     } as any);
     vi.mocked(useSkillImportLocalMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+      variables: null,
+    } as any);
+
+    vi.mocked(useSkillCheckUpdatesMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn().mockResolvedValue([]),
+    } as any);
+
+    vi.mocked(useSkillUpdateMutation).mockReturnValue({
       isPending: false,
       mutateAsync: vi.fn(),
       variables: null,
@@ -425,6 +478,17 @@ describe("pages/skills/SkillsView", () => {
     importMutation.mutateAsync.mockResolvedValueOnce(null);
     vi.mocked(useSkillImportLocalMutation).mockReturnValue(importMutation as any);
 
+    vi.mocked(useSkillCheckUpdatesMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn().mockResolvedValue([]),
+    } as any);
+
+    vi.mocked(useSkillUpdateMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+      variables: null,
+    } as any);
+
     tauriOpenPath
       .mockResolvedValueOnce(undefined as any)
       .mockRejectedValueOnce(new Error("no opener"));
@@ -483,10 +547,7 @@ describe("pages/skills/SkillsView", () => {
 
     const importButton = await screen.findByRole("button", { name: "导入技能库" });
     fireEvent.click(importButton);
-    dialog = within(screen.getByRole("dialog"));
-    fireEvent.click(dialog.getByRole("button", { name: "确认导入" }));
     await waitFor(() => expect(importMutation.mutateAsync).toHaveBeenCalledTimes(1));
-    fireEvent.click(dialog.getByRole("button", { name: "取消" }));
 
     fireEvent.click(screen.getByRole("button", { name: "删除本机技能 local-skill" }));
     dialog = within(screen.getByRole("dialog"));

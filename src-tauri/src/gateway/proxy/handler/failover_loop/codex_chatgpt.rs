@@ -1,6 +1,6 @@
 //! Usage: Codex ChatGPT backend compatibility helpers for `failover_loop`.
 
-use super::super::super::protocol_bridge::cx2cc as bridge_cx2cc;
+use crate::gateway::proxy::protocol_bridge::cx2cc as bridge_cx2cc;
 use axum::body::Bytes;
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -24,10 +24,18 @@ pub(super) fn is_codex_chatgpt_backend(
 }
 
 fn normalize_codex_chatgpt_forwarded_path(forwarded_path: &str) -> String {
-    if forwarded_path == "/v1" {
-        return "/".to_string();
+    match forwarded_path.trim_end_matches('/') {
+        "/v1" | "/v1/codex" | "/codex" => return "/".to_string(),
+        _ => {}
+    }
+
+    if let Some(stripped) = forwarded_path.strip_prefix("/v1/codex/") {
+        return format!("/{stripped}");
     }
     if let Some(stripped) = forwarded_path.strip_prefix("/v1/") {
+        return format!("/{stripped}");
+    }
+    if let Some(stripped) = forwarded_path.strip_prefix("/codex/") {
         return format!("/{stripped}");
     }
     forwarded_path.to_string()
@@ -155,8 +163,8 @@ pub(super) fn should_apply_claude_model_mapping(cx2cc_active: bool, forwarded_pa
 mod tests {
     use super::{
         codex_chatgpt_request_compat_value, maybe_apply_codex_chatgpt_request_compat,
-        maybe_inject_codex_chatgpt_headers, should_apply_claude_model_mapping,
-        strip_incompatible_protocol_headers,
+        maybe_inject_codex_chatgpt_headers, normalize_codex_chatgpt_forwarded_path,
+        should_apply_claude_model_mapping, strip_incompatible_protocol_headers,
     };
     use axum::body::Bytes;
     use axum::http::{header, HeaderMap, HeaderValue};
@@ -226,6 +234,45 @@ mod tests {
         assert_eq!(next["stream"], true);
         assert_eq!(next["store"], false);
         assert!(next.get("max_output_tokens").is_none());
+        assert!(next.get("temperature").is_none());
+        assert!(strip_request_content_encoding);
+    }
+
+    #[test]
+    fn codex_chatgpt_normalizes_pi_local_v1_endpoint_paths() {
+        assert_eq!(normalize_codex_chatgpt_forwarded_path("/v1/codex"), "/");
+        assert_eq!(
+            normalize_codex_chatgpt_forwarded_path("/v1/codex/responses"),
+            "/responses"
+        );
+    }
+
+    #[test]
+    fn codex_chatgpt_request_compat_handles_pi_local_v1_codex_responses_path() {
+        let mut forwarded_path = "/v1/codex/responses".to_string();
+        let mut upstream_body_bytes = Bytes::from(
+            serde_json::to_vec(&json!({
+                "model": "gpt-5",
+                "instructions": "system prompt",
+                "input": [],
+                "stream": false,
+                "temperature": 0.3,
+                "store": true,
+            }))
+            .unwrap(),
+        );
+        let mut strip_request_content_encoding = false;
+
+        maybe_apply_codex_chatgpt_request_compat(
+            &mut forwarded_path,
+            &mut upstream_body_bytes,
+            &mut strip_request_content_encoding,
+        );
+
+        let next: serde_json::Value = serde_json::from_slice(&upstream_body_bytes).unwrap();
+        assert_eq!(forwarded_path, "/responses");
+        assert_eq!(next["stream"], true);
+        assert_eq!(next["store"], false);
         assert!(next.get("temperature").is_none());
         assert!(strip_request_content_encoding);
     }

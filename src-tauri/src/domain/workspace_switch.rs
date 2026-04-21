@@ -11,20 +11,20 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use std::collections::HashSet;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct WorkspaceEnabledPromptPreview {
     pub name: String,
     pub excerpt: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct WorkspacePromptsPreview {
     pub from_enabled: Option<WorkspaceEnabledPromptPreview>,
     pub to_enabled: Option<WorkspaceEnabledPromptPreview>,
     pub will_change: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct WorkspaceItemsPreview {
     pub from_enabled: Vec<String>,
     pub to_enabled: Vec<String>,
@@ -32,7 +32,7 @@ pub struct WorkspaceItemsPreview {
     pub removed: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct WorkspacePreview {
     pub cli_key: String,
     pub from_workspace_id: Option<i64>,
@@ -42,7 +42,7 @@ pub struct WorkspacePreview {
     pub skills: WorkspaceItemsPreview,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct WorkspaceApplyReport {
     pub cli_key: String,
     pub from_workspace_id: Option<i64>,

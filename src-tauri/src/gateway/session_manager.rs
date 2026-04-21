@@ -33,6 +33,7 @@ struct SessionBinding {
     sort_mode_id: Option<i64>,
     provider_order: Option<Vec<i64>>,
     expires_at: i64,
+    ttl_secs: i64,
 }
 
 #[derive(Debug, Clone, Eq)]
@@ -161,8 +162,9 @@ impl SessionManager {
         };
 
         let mut guard = self.bindings.lock_or_recover();
-        match guard.get(&key) {
+        match guard.get_mut(&key) {
             Some(binding) if binding.expires_at > now_unix => {
+                binding.expires_at = now_unix.saturating_add(binding.ttl_secs.max(1));
                 (binding.provider_id > 0).then_some(binding.provider_id)
             }
             Some(_) => {
@@ -186,8 +188,11 @@ impl SessionManager {
         };
 
         let mut guard = self.bindings.lock_or_recover();
-        match guard.get(&key) {
-            Some(binding) if binding.expires_at > now_unix => Some(binding.sort_mode_id),
+        match guard.get_mut(&key) {
+            Some(binding) if binding.expires_at > now_unix => {
+                binding.expires_at = now_unix.saturating_add(binding.ttl_secs.max(1));
+                Some(binding.sort_mode_id)
+            }
             Some(_) => {
                 guard.remove(&key);
                 None
@@ -241,6 +246,7 @@ impl SessionManager {
                 sort_mode_id,
                 provider_order,
                 expires_at: now_unix.saturating_add(self.ttl_secs.max(1)),
+                ttl_secs: self.ttl_secs,
             },
         );
     }
@@ -257,8 +263,11 @@ impl SessionManager {
         };
 
         let mut guard = self.bindings.lock_or_recover();
-        match guard.get(&key) {
-            Some(binding) if binding.expires_at > now_unix => binding.provider_order.clone(),
+        match guard.get_mut(&key) {
+            Some(binding) if binding.expires_at > now_unix => {
+                binding.expires_at = now_unix.saturating_add(binding.ttl_secs.max(1));
+                binding.provider_order.clone()
+            }
             Some(_) => {
                 guard.remove(&key);
                 None
@@ -312,6 +321,7 @@ impl SessionManager {
                 sort_mode_id,
                 provider_order: None,
                 expires_at,
+                ttl_secs: self.ttl_secs,
             },
         );
     }

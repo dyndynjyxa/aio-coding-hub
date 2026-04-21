@@ -4,12 +4,12 @@ import type { DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { CLIS, cliFromKeyOrDefault } from "../../constants/clis";
 import { logToConsole } from "../../services/consoleLog";
-import type { CliKey, ProviderSummary } from "../../services/providers";
+import type { CliKey, ProviderSummary } from "../../services/providers/providers";
 import type {
   SortModeActiveRow,
   SortModeProviderRow,
   SortModeSummary,
-} from "../../services/sortModes";
+} from "../../services/providers/sortModes";
 import {
   useSortModeActiveListQuery,
   useSortModeCreateMutation,

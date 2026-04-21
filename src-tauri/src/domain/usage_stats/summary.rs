@@ -63,6 +63,12 @@ pub(super) fn summary_query(
       error_code IS NOT NULL
     ) THEN 1 ELSE 0 END
 	  ) AS requests_failed,
+	  SUM(
+	    CASE WHEN (
+	      status >= 200 AND status < 300 AND error_code IS NULL AND
+	      cost_usd_femto IS NOT NULL
+	    ) THEN 1 ELSE 0 END
+	  ) AS cost_covered_success,
 	  SUM(CASE WHEN status >= 200 AND status < 300 AND error_code IS NULL THEN duration_ms ELSE 0 END) AS success_duration_ms_sum,
 	  SUM(
 	    CASE WHEN (
@@ -157,6 +163,9 @@ pub(super) fn summary_query(
                 .unwrap_or(0),
             requests_success,
             requests_failed: row.get::<_, Option<i64>>("requests_failed")?.unwrap_or(0),
+            cost_covered_success: row
+                .get::<_, Option<i64>>("cost_covered_success")?
+                .unwrap_or(0),
             avg_duration_ms,
             avg_ttfb_ms,
             avg_output_tokens_per_second,

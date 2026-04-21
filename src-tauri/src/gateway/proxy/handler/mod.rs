@@ -1,759 +1,95 @@
 //! Usage: Gateway proxy handler implementation (request forwarding + failover + circuit breaker + logging).
 //!
-//! Note: this module is being split into smaller submodules under `handler/`.
+//! The handler is organized as a middleware chain. Each middleware in the `middleware/`
+//! directory processes a `ProxyContext` and either continues to the next step or
+//! short-circuits with a Response.
 
+use super::is_claude_count_tokens_request;
 use super::logging::enqueue_request_log_placeholder;
-use super::request_context::{RequestContext, RequestContextParts};
-use super::request_end::{
-    emit_request_event_and_enqueue_request_log, emit_request_event_and_spawn_request_log,
-    RequestEndArgs, RequestEndDeps,
-};
-use super::{
-    build_claude_probe_response_body, cli_proxy_guard::cli_proxy_enabled_cached,
-    compute_observe_request, errors::error_response, is_claude_count_tokens_request,
-    is_claude_probe_request, is_internal_forwarded_request, should_seed_in_progress_request_log,
-};
-use super::{ErrorCategory, GatewayErrorCode};
-use provider_selection::{
-    resolve_session_bound_provider_id, resolve_session_routing_decision,
-    select_providers_with_session_binding, ProviderSelection, SessionRoutingDecision,
-};
+use super::request_context::RequestContext;
 
-use crate::shared::mutex_ext::MutexExt;
-use crate::{settings, usage};
+use crate::gateway::events::emit_request_start_event;
+use crate::gateway::proxy::should_seed_in_progress_request_log;
+use crate::gateway::response_fixer;
+use crate::gateway::util::{new_trace_id, now_unix_millis};
 use axum::{
-    body::{to_bytes, Body, Bytes},
-    http::{header, HeaderValue, Request, StatusCode},
-    response::{IntoResponse, Response},
-    Json,
+    body::{Body, Bytes},
+    http::Request,
+    response::Response,
 };
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use super::super::codex_session_id;
-use super::super::events::{decision_chain as dc, emit_gateway_log, emit_request_start_event};
-use super::super::manager::GatewayAppState;
-use super::super::response_fixer;
-use super::super::util::{
-    body_for_introspection, infer_requested_model_info, new_trace_id, now_unix_millis,
-    MAX_REQUEST_BODY_BYTES,
-};
-use super::super::warmup;
-use request_fingerprint::{apply_recent_error_cache_gate, build_request_fingerprints};
-
+mod early_error;
+mod middleware;
 mod provider_order;
 mod provider_selection;
 mod request_fingerprint;
+mod runtime_settings;
 
-const DEFAULT_FAILOVER_MAX_ATTEMPTS_PER_PROVIDER: u32 = 5;
-const DEFAULT_FAILOVER_MAX_PROVIDERS_TO_TRY: u32 = 5;
+use early_error::extract_forced_provider_id;
+use middleware::{
+    BillingHeaderRectifierMiddleware, BodyReaderMiddleware, CliProxyGuardMiddleware,
+    CodexSessionCompletionMiddleware, MiddlewareAction, ModelInferenceMiddleware,
+    ProbeInterceptorMiddleware, ProviderResolutionMiddleware, ProxyContext,
+    RecursionGuardMiddleware, RequestFingerprintMiddleware, RuntimeSettingsMiddleware,
+    WarmupInterceptorMiddleware,
+};
 
 type SpecialSettings = Arc<Mutex<Vec<serde_json::Value>>>;
-
-#[derive(Debug, Clone, Copy)]
-enum EarlyErrorKind {
-    CliProxyDisabled,
-    BodyTooLarge,
-    InvalidCliKey,
-    NoEnabledProvider,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct EarlyErrorContract {
-    status: StatusCode,
-    error_code: &'static str,
-    error_category: Option<&'static str>,
-    excluded_from_stats: bool,
-}
-
-fn early_error_contract(kind: EarlyErrorKind) -> EarlyErrorContract {
-    match kind {
-        EarlyErrorKind::CliProxyDisabled => EarlyErrorContract {
-            status: StatusCode::FORBIDDEN,
-            error_code: GatewayErrorCode::CliProxyDisabled.as_str(),
-            error_category: Some(ErrorCategory::NonRetryableClientError.as_str()),
-            excluded_from_stats: true,
-        },
-        EarlyErrorKind::BodyTooLarge => EarlyErrorContract {
-            status: StatusCode::PAYLOAD_TOO_LARGE,
-            error_code: GatewayErrorCode::BodyTooLarge.as_str(),
-            error_category: None,
-            excluded_from_stats: false,
-        },
-        EarlyErrorKind::InvalidCliKey => EarlyErrorContract {
-            status: StatusCode::BAD_REQUEST,
-            error_code: GatewayErrorCode::InvalidCliKey.as_str(),
-            error_category: None,
-            excluded_from_stats: false,
-        },
-        EarlyErrorKind::NoEnabledProvider => EarlyErrorContract {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            error_code: GatewayErrorCode::NoEnabledProvider.as_str(),
-            error_category: None,
-            excluded_from_stats: false,
-        },
-    }
-}
-
-fn body_too_large_message(err: &str) -> String {
-    format!("failed to read request body: {err}")
-}
-
-fn no_enabled_provider_message(cli_key: &str) -> String {
-    format!("no enabled provider for cli_key={cli_key}")
-}
-
-fn cli_proxy_disabled_message(cli_key: &str, error: Option<&str>) -> String {
-    match error {
-        Some(err) => format!(
-            "CLI 代理状态读取失败（按未开启处理）：{err}；请在首页开启 {cli_key} 的 CLI 代理开关后重试"
-        ),
-        None => format!("CLI 代理未开启：请在首页开启 {cli_key} 的 CLI 代理开关后重试"),
-    }
-}
-
-fn proxy_loop_detected_message(cli_key: &str) -> String {
-    format!(
-        "recursive proxy request blocked for cli_key={cli_key}; upstream preserved aio internal forward marker"
-    )
-}
-
-fn extract_forced_provider_id(headers: &axum::http::HeaderMap) -> Option<i64> {
-    let raw = headers.get("x-aio-provider-id")?.to_str().ok()?.trim();
-    let provider_id = raw.parse::<i64>().ok()?;
-    (provider_id > 0).then_some(provider_id)
-}
-
-fn force_provider_if_requested(
-    providers: &mut Vec<crate::providers::ProviderForGateway>,
-    provider_id: Option<i64>,
-    special_settings: &SpecialSettings,
-) {
-    let Some(provider_id) = provider_id else {
-        return;
-    };
-
-    if let Some(index) = providers.iter().position(|p| p.id == provider_id) {
-        if index > 0 {
-            providers.rotate_left(index);
-        }
-
-        providers.truncate(1);
-
-        push_special_setting(
-            special_settings,
-            serde_json::json!({
-                "type": "provider_lock",
-                "scope": "request",
-                "hit": true,
-                "providerId": provider_id,
-            }),
-        );
-    } else {
-        providers.clear();
-    }
-}
-
-fn cli_proxy_guard_special_settings_json(
-    cache_hit: bool,
-    cache_ttl_ms: i64,
-    error: Option<&str>,
-) -> String {
-    serde_json::json!([{
-        "type": "cli_proxy_guard",
-        "scope": "request",
-        "hit": true,
-        "enabled": false,
-        "cacheHit": cache_hit,
-        "cacheTtlMs": cache_ttl_ms,
-        "error": error,
-    }])
-    .to_string()
-}
 
 fn new_special_settings() -> SpecialSettings {
     Arc::new(Mutex::new(Vec::new()))
 }
 
-fn push_special_setting(special_settings: &SpecialSettings, setting: serde_json::Value) {
-    let mut settings = special_settings.lock_or_recover();
-    settings.push(setting);
-}
+// ---------------------------------------------------------------------------
+// In-progress request log placeholder
+// ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
-async fn enqueue_in_progress_request_log_if_needed(
-    state: &GatewayAppState,
-    trace_id: &str,
-    cli_key: &str,
-    forwarded_path: &str,
-    observe: bool,
-    method_hint: &str,
-    query: Option<&str>,
-    session_id: Option<&str>,
-    requested_model: Option<&str>,
-    created_at_ms: i64,
-    created_at: i64,
-    special_settings: &SpecialSettings,
-) {
-    if !should_seed_in_progress_request_log(cli_key, forwarded_path, observe) {
-        return;
+fn build_in_progress_request_log_args(
+    ctx: &middleware::ProxyContext,
+) -> Option<super::RequestLogEnqueueArgs> {
+    if !should_seed_in_progress_request_log(&ctx.cli_key, &ctx.forwarded_path, ctx.observe_request)
+    {
+        return None;
     }
 
-    enqueue_request_log_placeholder(
-        &state.app,
-        &state.log_tx,
-        super::RequestLogEnqueueArgs {
-            trace_id: trace_id.to_string(),
-            cli_key: cli_key.to_string(),
-            session_id: session_id.map(str::to_string),
-            method: method_hint.to_string(),
-            path: forwarded_path.to_string(),
-            query: query.map(str::to_string),
-            excluded_from_stats: false,
-            special_settings_json: response_fixer::special_settings_json(special_settings),
-            status: None,
-            error_code: None,
-            duration_ms: 0,
-            ttfb_ms: None,
-            attempts_json: "[]".to_string(),
-            requested_model: requested_model.map(str::to_string),
-            created_at_ms,
-            created_at,
-            usage_metrics: None,
-            usage: None,
-            provider_chain_json: None,
-            error_details_json: None,
-        },
-    )
-    .await;
-}
-
-struct EarlyErrorLogCtx<'a> {
-    state: &'a GatewayAppState,
-    trace_id: &'a str,
-    cli_key: &'a str,
-    method_hint: &'a str,
-    forwarded_path: &'a str,
-    observe: bool,
-    query: Option<&'a str>,
-    duration_ms: u128,
-    created_at_ms: i64,
-    created_at: i64,
-}
-
-impl<'a> EarlyErrorLogCtx<'a> {
-    #[allow(clippy::too_many_arguments)]
-    fn new(
-        state: &'a GatewayAppState,
-        trace_id: &'a str,
-        cli_key: &'a str,
-        method_hint: &'a str,
-        forwarded_path: &'a str,
-        observe: bool,
-        query: Option<&'a str>,
-        duration_ms: u128,
-        created_at_ms: i64,
-        created_at: i64,
-    ) -> Self {
-        Self {
-            state,
-            trace_id,
-            cli_key,
-            method_hint,
-            forwarded_path,
-            observe,
-            query,
-            duration_ms,
-            created_at_ms,
-            created_at,
-        }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn build_early_error_log_ctx<'a>(
-    state: &'a GatewayAppState,
-    started: &Instant,
-    trace_id: &'a str,
-    cli_key: &'a str,
-    method_hint: &'a str,
-    forwarded_path: &'a str,
-    observe: bool,
-    query: Option<&'a str>,
-    created_at_ms: i64,
-    created_at: i64,
-) -> EarlyErrorLogCtx<'a> {
-    EarlyErrorLogCtx::new(
-        state,
-        trace_id,
-        cli_key,
-        method_hint,
-        forwarded_path,
-        observe,
-        query,
-        started.elapsed().as_millis(),
-        created_at_ms,
-        created_at,
-    )
-}
-
-fn build_early_error_response(
-    trace_id: &str,
-    contract: EarlyErrorContract,
-    message: String,
-) -> Response {
-    error_response(
-        contract.status,
-        trace_id.to_string(),
-        contract.error_code,
-        message,
-        vec![],
-    )
-}
-
-fn early_error_request_end_args<'a>(
-    ctx: &'a EarlyErrorLogCtx<'a>,
-    contract: EarlyErrorContract,
-    special_settings_json: Option<String>,
-    session_id: Option<String>,
-    requested_model: Option<String>,
-) -> RequestEndArgs<'a> {
-    RequestEndArgs {
-        deps: RequestEndDeps::new(&ctx.state.app, &ctx.state.db, &ctx.state.log_tx),
-        trace_id: ctx.trace_id,
-        cli_key: ctx.cli_key,
-        method: ctx.method_hint,
-        path: ctx.forwarded_path,
-        observe: ctx.observe,
-        query: ctx.query,
-        excluded_from_stats: contract.excluded_from_stats,
-        status: Some(contract.status.as_u16()),
-        error_category: contract.error_category,
-        error_code: Some(contract.error_code),
-        duration_ms: ctx.duration_ms,
-        event_ttfb_ms: None,
-        log_ttfb_ms: None,
-        attempts: &[],
-        special_settings_json,
-        session_id,
-        requested_model,
+    Some(super::RequestLogEnqueueArgs {
+        trace_id: ctx.trace_id.to_string(),
+        cli_key: ctx.cli_key.to_string(),
+        session_id: ctx.session_id.as_deref().map(str::to_string),
+        method: ctx.method_hint.to_string(),
+        path: ctx.forwarded_path.to_string(),
+        query: ctx.query.as_deref().map(str::to_string),
+        excluded_from_stats: false,
+        special_settings_json: response_fixer::special_settings_json(&ctx.special_settings),
+        status: None,
+        error_code: None,
+        duration_ms: 0,
+        ttfb_ms: None,
+        attempts_json: "[]".to_string(),
+        requested_model: ctx.requested_model.as_deref().map(str::to_string),
         created_at_ms: ctx.created_at_ms,
         created_at: ctx.created_at,
         usage_metrics: None,
-        log_usage_metrics: None,
         usage: None,
-    }
+        provider_chain_json: None,
+        error_details_json: None,
+    })
 }
 
-async fn respond_early_error_with_enqueue(
-    ctx: &EarlyErrorLogCtx<'_>,
-    contract: EarlyErrorContract,
-    message: String,
-    special_settings_json: Option<String>,
-    session_id: Option<String>,
-    requested_model: Option<String>,
-) -> Response {
-    let resp = build_early_error_response(ctx.trace_id, contract, message);
-    emit_request_event_and_enqueue_request_log(early_error_request_end_args(
-        ctx,
-        contract,
-        special_settings_json,
-        session_id,
-        requested_model,
-    ))
-    .await;
-    resp
-}
-
-fn respond_early_error_with_spawn(
-    ctx: &EarlyErrorLogCtx<'_>,
-    contract: EarlyErrorContract,
-    message: String,
-    special_settings_json: Option<String>,
-    session_id: Option<String>,
-    requested_model: Option<String>,
-) -> Response {
-    let resp = build_early_error_response(ctx.trace_id, contract, message);
-    emit_request_event_and_spawn_request_log(early_error_request_end_args(
-        ctx,
-        contract,
-        special_settings_json,
-        session_id,
-        requested_model,
-    ));
-    resp
-}
-
-fn respond_invalid_cli_key_with_spawn(
-    ctx: &EarlyErrorLogCtx<'_>,
-    session_id: Option<String>,
-    requested_model: Option<String>,
-    err: String,
-) -> Response {
-    let contract = early_error_contract(EarlyErrorKind::InvalidCliKey);
-    respond_early_error_with_spawn(ctx, contract, err, None, session_id, requested_model)
-}
-
-#[derive(Debug, Clone)]
-struct HandlerRuntimeSettings {
-    verbose_provider_error: bool,
-    intercept_warmup: bool,
-    enable_thinking_signature_rectifier: bool,
-    enable_thinking_budget_rectifier: bool,
-    enable_billing_header_rectifier: bool,
-    cx2cc_settings: super::cx2cc::settings::Cx2ccSettings,
-    enable_response_fixer: bool,
-    response_fixer_stream_config: response_fixer::ResponseFixerConfig,
-    response_fixer_non_stream_config: response_fixer::ResponseFixerConfig,
-    provider_base_url_ping_cache_ttl_seconds: u32,
-    enable_codex_session_id_completion: bool,
-    enable_claude_metadata_user_id_injection: bool,
-    max_attempts_per_provider: u32,
-    max_providers_to_try: u32,
-    provider_cooldown_secs: i64,
-    upstream_first_byte_timeout_secs: u32,
-    upstream_stream_idle_timeout_secs: u32,
-    upstream_request_timeout_non_streaming_secs: u32,
-}
-
-fn handler_runtime_settings(
-    settings_cfg: Option<&settings::AppSettings>,
-    is_claude_count_tokens: bool,
-) -> HandlerRuntimeSettings {
-    let verbose_provider_error = settings_cfg
-        .map(|cfg| cfg.verbose_provider_error)
-        .unwrap_or(true);
-
-    let enable_thinking_signature_rectifier = settings_cfg
-        .map(|cfg| cfg.enable_thinking_signature_rectifier)
-        .unwrap_or(true)
-        && !is_claude_count_tokens;
-
-    let enable_thinking_budget_rectifier = settings_cfg
-        .map(|cfg| cfg.enable_thinking_budget_rectifier)
-        .unwrap_or(true)
-        && !is_claude_count_tokens;
-    let enable_billing_header_rectifier = settings_cfg
-        .map(|cfg| cfg.enable_billing_header_rectifier)
-        .unwrap_or(true);
-    let cx2cc_settings = settings_cfg
-        .map(super::cx2cc::settings::Cx2ccSettings::from_app_settings)
-        .unwrap_or_default();
-
-    let enable_response_fixer = settings_cfg
-        .map(|cfg| cfg.enable_response_fixer)
-        .unwrap_or(true);
-    let response_fixer_fix_encoding = settings_cfg
-        .map(|cfg| cfg.response_fixer_fix_encoding)
-        .unwrap_or(true);
-    let response_fixer_fix_sse_format = settings_cfg
-        .map(|cfg| cfg.response_fixer_fix_sse_format)
-        .unwrap_or(true);
-    let response_fixer_fix_truncated_json = settings_cfg
-        .map(|cfg| cfg.response_fixer_fix_truncated_json)
-        .unwrap_or(true);
-    let response_fixer_max_json_depth = settings_cfg
-        .map(|cfg| cfg.response_fixer_max_json_depth)
-        .unwrap_or(response_fixer::DEFAULT_MAX_JSON_DEPTH as u32);
-    let response_fixer_max_fix_size = settings_cfg
-        .map(|cfg| cfg.response_fixer_max_fix_size)
-        .unwrap_or(response_fixer::DEFAULT_MAX_FIX_SIZE as u32);
-
-    let mut max_attempts_per_provider = settings_cfg
-        .map(|cfg| cfg.failover_max_attempts_per_provider.max(1))
-        .unwrap_or(DEFAULT_FAILOVER_MAX_ATTEMPTS_PER_PROVIDER);
-    let mut max_providers_to_try = settings_cfg
-        .map(|cfg| cfg.failover_max_providers_to_try.max(1))
-        .unwrap_or(DEFAULT_FAILOVER_MAX_PROVIDERS_TO_TRY);
-
-    if is_claude_count_tokens {
-        max_attempts_per_provider = 1;
-        max_providers_to_try = 1;
-    }
-
-    HandlerRuntimeSettings {
-        verbose_provider_error,
-        intercept_warmup: settings_cfg
-            .map(|cfg| cfg.intercept_anthropic_warmup_requests)
-            .unwrap_or(false),
-        enable_thinking_signature_rectifier,
-        enable_thinking_budget_rectifier,
-        enable_billing_header_rectifier,
-        cx2cc_settings,
-        enable_response_fixer,
-        response_fixer_stream_config: response_fixer::ResponseFixerConfig {
-            fix_encoding: response_fixer_fix_encoding,
-            fix_sse_format: response_fixer_fix_sse_format,
-            fix_truncated_json: response_fixer_fix_truncated_json,
-            max_json_depth: response_fixer_max_json_depth as usize,
-            max_fix_size: response_fixer_max_fix_size as usize,
-        },
-        response_fixer_non_stream_config: response_fixer::ResponseFixerConfig {
-            fix_encoding: response_fixer_fix_encoding,
-            fix_sse_format: false,
-            fix_truncated_json: response_fixer_fix_truncated_json,
-            max_json_depth: response_fixer_max_json_depth as usize,
-            max_fix_size: response_fixer_max_fix_size as usize,
-        },
-        provider_base_url_ping_cache_ttl_seconds: settings_cfg
-            .map(|cfg| cfg.provider_base_url_ping_cache_ttl_seconds)
-            .unwrap_or(settings::DEFAULT_PROVIDER_BASE_URL_PING_CACHE_TTL_SECONDS),
-        enable_codex_session_id_completion: settings_cfg
-            .map(|cfg| cfg.enable_codex_session_id_completion)
-            .unwrap_or(true),
-        enable_claude_metadata_user_id_injection: settings_cfg
-            .map(|cfg| cfg.enable_claude_metadata_user_id_injection)
-            .unwrap_or(true)
-            && !is_claude_count_tokens,
-        max_attempts_per_provider,
-        max_providers_to_try,
-        provider_cooldown_secs: settings_cfg
-            .map(|cfg| cfg.provider_cooldown_seconds as i64)
-            .unwrap_or(settings::DEFAULT_PROVIDER_COOLDOWN_SECONDS as i64),
-        upstream_first_byte_timeout_secs: settings_cfg
-            .map(|cfg| cfg.upstream_first_byte_timeout_seconds)
-            .unwrap_or(settings::DEFAULT_UPSTREAM_FIRST_BYTE_TIMEOUT_SECONDS),
-        upstream_stream_idle_timeout_secs: settings_cfg
-            .map(|cfg| cfg.upstream_stream_idle_timeout_seconds)
-            .unwrap_or(settings::DEFAULT_UPSTREAM_STREAM_IDLE_TIMEOUT_SECONDS),
-        upstream_request_timeout_non_streaming_secs: settings_cfg
-            .map(|cfg| cfg.upstream_request_timeout_non_streaming_seconds)
-            .unwrap_or(settings::DEFAULT_UPSTREAM_REQUEST_TIMEOUT_NON_STREAMING_SECONDS),
-    }
-}
-
-struct WarmupInterceptCtx<'a> {
-    state: &'a GatewayAppState,
-    trace_id: &'a str,
-    cli_key: &'a str,
-    method_hint: &'a str,
-    forwarded_path: &'a str,
-    observe: bool,
-    query: Option<&'a str>,
-    requested_model: Option<&'a str>,
-    created_at_ms: i64,
-    created_at: i64,
-    duration_ms: u128,
-}
-
-fn warmup_intercept_special_settings_json() -> String {
-    serde_json::json!([{
-        "type": "warmup_intercept",
-        "scope": "request",
-        "hit": true,
-        "reason": "anthropic_warmup_intercepted",
-        "note": "已由 aio-coding-hub 抢答，未转发上游；写入日志但排除统计",
-    }])
-    .to_string()
-}
-
-fn warmup_log_usage_metrics() -> usage::UsageMetrics {
-    usage::UsageMetrics {
-        input_tokens: Some(0),
-        output_tokens: Some(0),
-        total_tokens: Some(0),
-        cache_read_input_tokens: Some(0),
-        cache_creation_input_tokens: Some(0),
-        cache_creation_5m_input_tokens: Some(0),
-        cache_creation_1h_input_tokens: Some(0),
-    }
-}
-
-fn respond_warmup_intercept(ctx: &WarmupInterceptCtx<'_>) -> Response {
-    let response_body = warmup::build_warmup_response_body(ctx.requested_model, ctx.trace_id);
-    let special_settings_json = warmup_intercept_special_settings_json();
-
-    if ctx.observe {
-        emit_request_start_event(
-            &ctx.state.app,
-            ctx.trace_id.to_string(),
-            ctx.cli_key.to_string(),
-            ctx.method_hint.to_string(),
-            ctx.forwarded_path.to_string(),
-            ctx.query.map(str::to_string),
-            ctx.requested_model.map(str::to_string),
-            ctx.created_at,
-        );
-    }
-
-    let warmup_attempts = [super::super::events::FailoverAttempt {
-        provider_id: 0,
-        provider_name: "Warmup".to_string(),
-        base_url: "/__aio__/warmup".to_string(),
-        outcome: "success".to_string(),
-        status: Some(StatusCode::OK.as_u16()),
-        provider_index: None,
-        retry_index: None,
-        session_reuse: Some(false),
-        error_category: None,
-        error_code: None,
-        decision: Some("success"),
-        reason: None,
-        selection_method: None,
-        reason_code: Some(dc::REASON_REQUEST_SUCCESS),
-        attempt_started_ms: None,
-        attempt_duration_ms: None,
-        circuit_state_before: None,
-        circuit_state_after: None,
-        circuit_failure_count: None,
-        circuit_failure_threshold: None,
-    }];
-
-    emit_request_event_and_spawn_request_log(RequestEndArgs {
-        deps: RequestEndDeps::new(&ctx.state.app, &ctx.state.db, &ctx.state.log_tx),
-        trace_id: ctx.trace_id,
-        cli_key: ctx.cli_key,
-        method: ctx.method_hint,
-        path: ctx.forwarded_path,
-        observe: ctx.observe,
-        query: ctx.query,
-        excluded_from_stats: true,
-        status: Some(StatusCode::OK.as_u16()),
-        error_category: None,
-        error_code: None,
-        duration_ms: ctx.duration_ms,
-        event_ttfb_ms: Some(ctx.duration_ms),
-        log_ttfb_ms: Some(ctx.duration_ms),
-        attempts: &warmup_attempts,
-        special_settings_json: Some(special_settings_json),
-        session_id: None,
-        requested_model: ctx.requested_model.map(str::to_string),
-        created_at_ms: ctx.created_at_ms,
-        created_at: ctx.created_at,
-        usage_metrics: Some(usage::UsageMetrics::default()),
-        log_usage_metrics: Some(warmup_log_usage_metrics()),
-        usage: None,
-    });
-
-    let mut resp = (StatusCode::OK, Json(response_body)).into_response();
-    resp.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("application/json; charset=utf-8"),
-    );
-    resp.headers_mut()
-        .insert("x-aio-intercepted", HeaderValue::from_static("warmup"));
-    resp.headers_mut().insert(
-        "x-aio-intercepted-by",
-        HeaderValue::from_static("aio-coding-hub"),
-    );
-    if let Ok(v) = HeaderValue::from_str(ctx.trace_id) {
-        resp.headers_mut().insert("x-trace-id", v);
-    }
-    resp.headers_mut().insert(
-        "x-aio-upstream-meta-url",
-        HeaderValue::from_static("/__aio__/warmup"),
-    );
-    resp
-}
-
-#[allow(clippy::too_many_arguments)]
-fn complete_codex_session_ids_if_needed(
-    state: &GatewayAppState,
-    cli_key: &str,
-    enabled: bool,
-    created_at: i64,
-    created_at_ms: i64,
-    headers: &mut axum::http::HeaderMap,
-    introspection_json: &mut Option<serde_json::Value>,
-    body_bytes: &mut Bytes,
-    strip_request_content_encoding_seed: &mut bool,
-    special_settings: &SpecialSettings,
-) {
-    if cli_key != "codex" || !enabled {
-        return;
-    }
-
-    let result = {
-        let mut cache = state.codex_session_cache.lock_or_recover();
-        codex_session_id::complete_codex_session_identifiers(
-            &mut cache,
-            created_at,
-            created_at_ms,
-            headers,
-            introspection_json.as_mut(),
-        )
-    };
-
-    if result.changed_body {
-        if let Some(root) = introspection_json.as_ref() {
-            if let Ok(next) = serde_json::to_vec(root) {
-                *body_bytes = Bytes::from(next);
-                *strip_request_content_encoding_seed = true;
-            }
-        }
-    }
-
-    push_special_setting(
-        special_settings,
-        serde_json::json!({
-            "type": "codex_session_id_completion",
-            "scope": "request",
-            "hit": result.applied,
-            "sessionId": result.session_id,
-            "action": result.action,
-            "source": result.source,
-            "changedHeader": result.changed_headers,
-            "changedBody": result.changed_body,
-        }),
-    );
-}
-
-struct RuntimeWarmupDecision {
-    runtime_settings: HandlerRuntimeSettings,
-    is_warmup_request: bool,
-}
-
-fn should_intercept_warmup_request(
-    cli_key: &str,
-    intercept_warmup: bool,
-    forwarded_path: &str,
-    introspection_json: Option<&serde_json::Value>,
-) -> bool {
-    if cli_key != "claude" || !intercept_warmup {
-        return false;
-    }
-
-    warmup::is_anthropic_warmup_request(forwarded_path, introspection_json)
-}
-
-fn resolve_runtime_warmup_decision(
-    state: &GatewayAppState,
-    is_claude_count_tokens: bool,
-    cli_key: &str,
-    forwarded_path: &str,
-    introspection_json: Option<&serde_json::Value>,
-) -> RuntimeWarmupDecision {
-    let settings_cfg = match settings::read(&state.app) {
-        Ok(cfg) => Some(cfg),
-        Err(err) => {
-            tracing::warn!(
-                "using default handler runtime settings because settings read failed: {err}"
-            );
-            None
-        }
-    };
-    let runtime_settings = handler_runtime_settings(settings_cfg.as_ref(), is_claude_count_tokens);
-    let is_warmup_request = should_intercept_warmup_request(
-        cli_key,
-        runtime_settings.intercept_warmup,
-        forwarded_path,
-        introspection_json,
-    );
-
-    RuntimeWarmupDecision {
-        runtime_settings,
-        is_warmup_request,
-    }
-}
+// ---------------------------------------------------------------------------
+// Main entry point: middleware chain orchestrator
+// ---------------------------------------------------------------------------
 
 pub(in crate::gateway) async fn proxy_impl(
-    state: GatewayAppState,
+    state: crate::gateway::runtime::GatewayAppState,
     cli_key: String,
     forwarded_path: String,
     req: Request<Body>,
 ) -> Response {
     let started = Instant::now();
-    let mut trace_id = new_trace_id();
+    let trace_id = new_trace_id();
     let created_at_ms = now_unix_millis() as i64;
     let created_at = (created_at_ms / 1000).max(0);
     let method = req.method().clone();
@@ -761,345 +97,18 @@ pub(in crate::gateway) async fn proxy_impl(
     let query = req.uri().query().map(str::to_string);
     let is_claude_count_tokens = is_claude_count_tokens_request(&cli_key, &forwarded_path);
 
-    let (mut headers, body) = {
-        let (parts, body) = req.into_parts();
-        (parts.headers, body)
+    let (headers, body) = {
+        let (parts, b) = req.into_parts();
+        (parts.headers, b)
     };
-
-    if cli_key == "claude" && is_internal_forwarded_request(&headers) {
-        emit_gateway_log(
-            &state.app,
-            "warn",
-            GatewayErrorCode::InternalError.as_str(),
-            format!(
-                "detected recursive claude proxy hop, blocking request trace_id={trace_id} path={forwarded_path}"
-            ),
-        );
-
-        return error_response(
-            StatusCode::LOOP_DETECTED,
-            trace_id,
-            GatewayErrorCode::InternalError.as_str(),
-            proxy_loop_detected_message(cli_key.as_str()),
-            vec![],
-        );
-    }
 
     let forced_provider_id = extract_forced_provider_id(&headers);
-    let bypass_cli_proxy_guard = forced_provider_id.is_some();
 
-    if crate::shared::cli_key::is_supported_cli_key(cli_key.as_str()) && !bypass_cli_proxy_guard {
-        let enabled_snapshot = cli_proxy_enabled_cached(&state.app, &cli_key);
-        if !enabled_snapshot.enabled {
-            if !enabled_snapshot.cache_hit {
-                if let Some(err) = enabled_snapshot.error.as_deref() {
-                    emit_gateway_log(
-                        &state.app,
-                        "warn",
-                        GatewayErrorCode::CliProxyGuardError.as_str(),
-                        format!(
-                            "CLI 代理开关状态读取失败（按未开启处理）cli={cli_key} trace_id={trace_id} err={err}"
-                        ),
-                    );
-                }
-            }
-
-            let contract = early_error_contract(EarlyErrorKind::CliProxyDisabled);
-            let message = cli_proxy_disabled_message(&cli_key, enabled_snapshot.error.as_deref());
-            let special_settings_json = cli_proxy_guard_special_settings_json(
-                enabled_snapshot.cache_hit,
-                enabled_snapshot.cache_ttl_ms,
-                enabled_snapshot.error.as_deref(),
-            );
-            let log_ctx = build_early_error_log_ctx(
-                &state,
-                &started,
-                trace_id.as_str(),
-                cli_key.as_str(),
-                method_hint.as_str(),
-                forwarded_path.as_str(),
-                compute_observe_request(&cli_key, &forwarded_path, &headers, None),
-                query.as_deref(),
-                created_at_ms,
-                created_at,
-            );
-
-            return respond_early_error_with_enqueue(
-                &log_ctx,
-                contract,
-                message,
-                Some(special_settings_json),
-                None,
-                None,
-            )
-            .await;
-        }
-    }
-
-    headers.remove("x-aio-provider-id");
-
-    let mut body_bytes = match to_bytes(body, MAX_REQUEST_BODY_BYTES).await {
-        Ok(bytes) => bytes,
-        Err(err) => {
-            let contract = early_error_contract(EarlyErrorKind::BodyTooLarge);
-            let log_ctx = build_early_error_log_ctx(
-                &state,
-                &started,
-                trace_id.as_str(),
-                cli_key.as_str(),
-                method_hint.as_str(),
-                forwarded_path.as_str(),
-                compute_observe_request(&cli_key, &forwarded_path, &headers, None),
-                query.as_deref(),
-                created_at_ms,
-                created_at,
-            );
-
-            return respond_early_error_with_enqueue(
-                &log_ctx,
-                contract,
-                body_too_large_message(&err.to_string()),
-                None,
-                None,
-                None,
-            )
-            .await;
-        }
-    };
-
-    let mut introspection_json = {
-        let introspection_body = body_for_introspection(&headers, &body_bytes);
-        serde_json::from_slice::<serde_json::Value>(introspection_body.as_ref()).ok()
-    };
-    let requested_model_info = infer_requested_model_info(
-        &forwarded_path,
-        query.as_deref(),
-        introspection_json.as_ref(),
-    );
-    let requested_model = requested_model_info.model;
-    let requested_model_location = requested_model_info.location;
-    let observe_request = compute_observe_request(
-        &cli_key,
-        &forwarded_path,
-        &headers,
-        introspection_json.as_ref(),
-    );
-
-    if cli_key == "claude" && is_claude_probe_request(&forwarded_path, introspection_json.as_ref())
-    {
-        let mut resp = (StatusCode::OK, Json(build_claude_probe_response_body())).into_response();
-        resp.headers_mut().insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json; charset=utf-8"),
-        );
-        if let Ok(value) = HeaderValue::from_str(trace_id.as_str()) {
-            resp.headers_mut().insert("x-trace-id", value);
-        }
-        return resp;
-    }
-
-    let RuntimeWarmupDecision {
-        runtime_settings,
-        is_warmup_request,
-    } = resolve_runtime_warmup_decision(
-        &state,
-        is_claude_count_tokens,
-        &cli_key,
-        &forwarded_path,
-        introspection_json.as_ref(),
-    );
-
-    if is_warmup_request {
-        let duration_ms = started.elapsed().as_millis();
-        let warmup_ctx = WarmupInterceptCtx {
-            state: &state,
-            trace_id: trace_id.as_str(),
-            cli_key: cli_key.as_str(),
-            method_hint: method_hint.as_str(),
-            forwarded_path: forwarded_path.as_str(),
-            observe: observe_request,
-            query: query.as_deref(),
-            requested_model: requested_model.as_deref(),
-            created_at_ms,
-            created_at,
-            duration_ms,
-        };
-        return respond_warmup_intercept(&warmup_ctx);
-    }
-
-    let special_settings = new_special_settings();
-
-    let mut strip_request_content_encoding_seed = false;
-    complete_codex_session_ids_if_needed(
-        &state,
-        &cli_key,
-        runtime_settings.enable_codex_session_id_completion,
-        created_at,
-        created_at_ms,
-        &mut headers,
-        &mut introspection_json,
-        &mut body_bytes,
-        &mut strip_request_content_encoding_seed,
-        &special_settings,
-    );
-
-    if cli_key == "claude" && runtime_settings.enable_billing_header_rectifier {
-        if let Some(root) = introspection_json.as_mut() {
-            let result = super::super::billing_header_rectifier::rectify(root);
-            if result.applied {
-                if let Ok(next) = serde_json::to_vec(root) {
-                    body_bytes = Bytes::from(next);
-                    strip_request_content_encoding_seed = true;
-                }
-                push_special_setting(
-                    &special_settings,
-                    serde_json::json!({
-                        "type": "billing_header_rectifier",
-                        "scope": "request",
-                        "hit": true,
-                        "removedCount": result.removed_count,
-                    }),
-                );
-            }
-        }
-    }
-
-    let SessionRoutingDecision {
-        session_id,
-        allow_session_reuse,
-    } = resolve_session_routing_decision(
-        &headers,
-        introspection_json.as_ref(),
-        is_claude_count_tokens,
-    );
-
-    let ProviderSelection {
-        effective_sort_mode_id,
-        mut providers,
-        bound_provider_order,
-    } = match select_providers_with_session_binding(
-        &state,
-        &cli_key,
-        session_id.as_deref(),
-        created_at,
-    ) {
-        Ok(selection) => selection,
-        Err(err) => {
-            let log_ctx = build_early_error_log_ctx(
-                &state,
-                &started,
-                trace_id.as_str(),
-                cli_key.as_str(),
-                method_hint.as_str(),
-                forwarded_path.as_str(),
-                observe_request,
-                query.as_deref(),
-                created_at_ms,
-                created_at,
-            );
-            return respond_invalid_cli_key_with_spawn(
-                &log_ctx,
-                session_id.clone(),
-                requested_model.clone(),
-                err.to_string(),
-            );
-        }
-    };
-
-    force_provider_if_requested(&mut providers, forced_provider_id, &special_settings);
-
-    // NOTE: model whitelist filtering removed (Claude uses slot-based model mapping).
-
-    let session_bound_provider_id = resolve_session_bound_provider_id(
-        state.session.as_ref(),
-        state.circuit.as_ref(),
-        &cli_key,
-        session_id.as_deref(),
-        created_at,
-        allow_session_reuse,
-        forced_provider_id,
-        &mut providers,
-        bound_provider_order.as_deref(),
-    );
-
-    if providers.is_empty() {
-        let contract = early_error_contract(EarlyErrorKind::NoEnabledProvider);
-        let message = no_enabled_provider_message(&cli_key);
-        let log_ctx = build_early_error_log_ctx(
-            &state,
-            &started,
-            trace_id.as_str(),
-            cli_key.as_str(),
-            method_hint.as_str(),
-            forwarded_path.as_str(),
-            observe_request,
-            query.as_deref(),
-            created_at_ms,
-            created_at,
-        );
-
-        return respond_early_error_with_enqueue(
-            &log_ctx,
-            contract,
-            message,
-            None,
-            session_id,
-            requested_model,
-        )
-        .await;
-    }
-
-    let fingerprints = build_request_fingerprints(
-        &cli_key,
-        effective_sort_mode_id,
-        &method_hint,
-        &forwarded_path,
-        query.as_deref(),
-        session_id.as_deref(),
-        requested_model.as_deref(),
-        &headers,
-        &body_bytes,
-    );
-
-    trace_id = match apply_recent_error_cache_gate(&state.recent_errors, &fingerprints, trace_id) {
-        Ok(next_trace_id) => next_trace_id,
-        Err(resp) => return *resp,
-    };
-
-    if observe_request {
-        emit_request_start_event(
-            &state.app,
-            trace_id.clone(),
-            cli_key.clone(),
-            method_hint.clone(),
-            forwarded_path.clone(),
-            query.clone(),
-            requested_model.clone(),
-            created_at,
-        );
-    }
-
-    enqueue_in_progress_request_log_if_needed(
-        &state,
-        trace_id.as_str(),
-        cli_key.as_str(),
-        forwarded_path.as_str(),
-        observe_request,
-        method_hint.as_str(),
-        query.as_deref(),
-        session_id.as_deref(),
-        requested_model.as_deref(),
-        created_at_ms,
-        created_at,
-        &special_settings,
-    )
-    .await;
-
-    super::forwarder::forward(RequestContext::from_handler_parts(RequestContextParts {
+    // Build the initial context.
+    let ctx = ProxyContext {
         state,
         cli_key,
         forwarded_path,
-        observe_request,
         req_method: method,
         method_hint,
         query,
@@ -1107,53 +116,140 @@ pub(in crate::gateway) async fn proxy_impl(
         started,
         created_at_ms,
         created_at,
-        session_id,
-        requested_model,
-        requested_model_location,
-        effective_sort_mode_id,
-        providers,
-        session_bound_provider_id,
+        is_claude_count_tokens,
+        request_body: Some(body),
         headers,
-        body_bytes,
-        introspection_json,
-        strip_request_content_encoding_seed,
-        special_settings,
-        provider_base_url_ping_cache_ttl_seconds: runtime_settings
-            .provider_base_url_ping_cache_ttl_seconds,
-        verbose_provider_error: runtime_settings.verbose_provider_error,
-        enable_codex_session_id_completion: runtime_settings.enable_codex_session_id_completion,
-        max_attempts_per_provider: runtime_settings.max_attempts_per_provider,
-        max_providers_to_try: runtime_settings.max_providers_to_try,
-        provider_cooldown_secs: runtime_settings.provider_cooldown_secs,
-        upstream_first_byte_timeout_secs: runtime_settings.upstream_first_byte_timeout_secs,
-        upstream_stream_idle_timeout_secs: runtime_settings.upstream_stream_idle_timeout_secs,
-        upstream_request_timeout_non_streaming_secs: runtime_settings
-            .upstream_request_timeout_non_streaming_secs,
-        fingerprint_key: fingerprints.fingerprint_key,
-        fingerprint_debug: fingerprints.fingerprint_debug,
-        unavailable_fingerprint_key: fingerprints.unavailable_fingerprint_key,
-        unavailable_fingerprint_debug: fingerprints.unavailable_fingerprint_debug,
-        enable_thinking_signature_rectifier: runtime_settings.enable_thinking_signature_rectifier,
-        enable_thinking_budget_rectifier: runtime_settings.enable_thinking_budget_rectifier,
-        enable_claude_metadata_user_id_injection: runtime_settings
-            .enable_claude_metadata_user_id_injection,
-        cx2cc_settings: runtime_settings.cx2cc_settings.clone(),
-        enable_response_fixer: runtime_settings.enable_response_fixer,
-        response_fixer_stream_config: runtime_settings.response_fixer_stream_config,
-        response_fixer_non_stream_config: runtime_settings.response_fixer_non_stream_config,
-    }))
+        body_bytes: Bytes::new(),
+        introspection_json: None,
+        observe_request: false,
+        strip_request_content_encoding_seed: false,
+        special_settings: new_special_settings(),
+        requested_model: None,
+        requested_model_location: None,
+        runtime_settings: None,
+        session_id: None,
+        allow_session_reuse: false,
+        effective_sort_mode_id: None,
+        providers: vec![],
+        session_bound_provider_id: None,
+        forced_provider_id,
+        fingerprint_key: 0,
+        fingerprint_debug: String::new(),
+        unavailable_fingerprint_key: 0,
+        unavailable_fingerprint_debug: String::new(),
+    };
+
+    // --- Middleware chain ---
+    // 1. Recursion guard (blocks recursive loops).
+    let ctx = match RecursionGuardMiddleware::run(ctx) {
+        MiddlewareAction::Continue(ctx) => *ctx,
+        MiddlewareAction::ShortCircuit(resp) => return resp,
+    };
+
+    // 2. CLI proxy guard (checks enable/disable per CLI key).
+    let ctx = match CliProxyGuardMiddleware::run(ctx).await {
+        MiddlewareAction::Continue(ctx) => *ctx,
+        MiddlewareAction::ShortCircuit(resp) => return resp,
+    };
+
+    // 3. Body reader + size validator.
+    let ctx = match BodyReaderMiddleware::run(ctx).await {
+        MiddlewareAction::Continue(ctx) => *ctx,
+        MiddlewareAction::ShortCircuit(resp) => return resp,
+    };
+
+    // 4. Model inference (from path/query/JSON).
+    let ctx = match ModelInferenceMiddleware::run(ctx) {
+        MiddlewareAction::Continue(ctx) => *ctx,
+        MiddlewareAction::ShortCircuit(resp) => return resp,
+    };
+
+    // 5. Probe interceptor (Claude probe requests).
+    let ctx = match ProbeInterceptorMiddleware::run(ctx) {
+        MiddlewareAction::Continue(ctx) => *ctx,
+        MiddlewareAction::ShortCircuit(resp) => return resp,
+    };
+
+    // 6. Runtime settings reader.
+    let ctx = match RuntimeSettingsMiddleware::run(ctx) {
+        MiddlewareAction::Continue(ctx) => *ctx,
+        MiddlewareAction::ShortCircuit(resp) => return resp,
+    };
+
+    // 7. Warmup interceptor (requires runtime_settings).
+    let ctx = match WarmupInterceptorMiddleware::run(ctx) {
+        MiddlewareAction::Continue(ctx) => *ctx,
+        MiddlewareAction::ShortCircuit(resp) => return resp,
+    };
+
+    // 8. Codex session ID completion.
+    let ctx = match CodexSessionCompletionMiddleware::run(ctx) {
+        MiddlewareAction::Continue(ctx) => *ctx,
+        MiddlewareAction::ShortCircuit(resp) => return resp,
+    };
+
+    // 9. Billing header rectifier.
+    let ctx = match BillingHeaderRectifierMiddleware::run(ctx) {
+        MiddlewareAction::Continue(ctx) => *ctx,
+        MiddlewareAction::ShortCircuit(resp) => return resp,
+    };
+
+    // 10. Provider resolution (session routing + provider selection).
+    let ctx = match ProviderResolutionMiddleware::run(ctx).await {
+        MiddlewareAction::Continue(ctx) => *ctx,
+        MiddlewareAction::ShortCircuit(resp) => return resp,
+    };
+
+    // 11. Request fingerprinting + recent error cache gate.
+    let ctx = match RequestFingerprintMiddleware::run(ctx) {
+        MiddlewareAction::Continue(ctx) => *ctx,
+        MiddlewareAction::ShortCircuit(resp) => return resp,
+    };
+
+    // --- Post-chain: emit start event, seed in-progress log, then forward ---
+    if ctx.observe_request {
+        emit_request_start_event(
+            &ctx.state.app,
+            ctx.trace_id.clone(),
+            ctx.cli_key.clone(),
+            ctx.session_id.clone(),
+            ctx.method_hint.clone(),
+            ctx.forwarded_path.clone(),
+            ctx.query.clone(),
+            ctx.requested_model.clone(),
+            ctx.created_at,
+        );
+    }
+
+    if let Some(args) = build_in_progress_request_log_args(&ctx) {
+        enqueue_request_log_placeholder(&ctx.state.app, &ctx.state.log_tx, args).await;
+    }
+
+    super::forwarder::forward(RequestContext::from_handler_parts(
+        ctx.into_request_context_parts(),
+    ))
     .await
 }
 
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
 #[cfg(test)]
 mod tests {
-    use super::{
-        body_too_large_message, build_request_fingerprints, cli_proxy_disabled_message,
-        cli_proxy_guard_special_settings_json, early_error_contract, handler_runtime_settings,
-        no_enabled_provider_message, resolve_session_routing_decision,
-        should_intercept_warmup_request, warmup_intercept_special_settings_json,
-        warmup_log_usage_metrics, EarlyErrorKind,
+    use super::early_error::early_error_contract;
+    use super::middleware::body_reader::body_too_large_message;
+    use super::middleware::cli_proxy_guard::{
+        cli_proxy_disabled_message, cli_proxy_guard_special_settings_json,
     };
+    use super::middleware::provider_resolution::no_enabled_provider_message;
+    use super::middleware::warmup_interceptor::{
+        should_intercept_warmup_request, warmup_intercept_special_settings_json,
+        warmup_log_usage_metrics,
+    };
+    use super::provider_selection::resolve_session_routing_decision;
+    use super::request_fingerprint::build_request_fingerprints;
+    use super::runtime_settings::handler_runtime_settings;
     use crate::gateway::proxy::{ErrorCategory, GatewayErrorCode};
     use crate::settings;
     use axum::body::Bytes;
@@ -1227,6 +323,8 @@ mod tests {
 
     #[test]
     fn early_error_contracts_match_expected_status_and_codes() {
+        use super::early_error::EarlyErrorKind;
+
         let cli_proxy = early_error_contract(EarlyErrorKind::CliProxyDisabled);
         assert_eq!(cli_proxy.status, StatusCode::FORBIDDEN);
         assert_eq!(
@@ -1247,6 +345,15 @@ mod tests {
         );
         assert_eq!(body_too_large.error_category, None);
         assert!(!body_too_large.excluded_from_stats);
+
+        let large_body_missing_model = early_error_contract(EarlyErrorKind::LargeBodyMissingModel);
+        assert_eq!(large_body_missing_model.status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            large_body_missing_model.error_code,
+            GatewayErrorCode::LargeBodyMissingModel.as_str()
+        );
+        assert_eq!(large_body_missing_model.error_category, None);
+        assert!(!large_body_missing_model.excluded_from_stats);
 
         let invalid_cli = early_error_contract(EarlyErrorKind::InvalidCliKey);
         assert_eq!(invalid_cli.status, StatusCode::BAD_REQUEST);
@@ -1493,20 +600,32 @@ mod tests {
     fn extract_forced_provider_id_reads_positive_integer() {
         let mut headers = HeaderMap::new();
         headers.insert("x-aio-provider-id", HeaderValue::from_static("12"));
-        assert_eq!(super::extract_forced_provider_id(&headers), Some(12));
+        assert_eq!(
+            super::early_error::extract_forced_provider_id(&headers),
+            Some(12)
+        );
     }
 
     #[test]
     fn extract_forced_provider_id_rejects_invalid_or_non_positive_values() {
         let mut headers = HeaderMap::new();
         headers.insert("x-aio-provider-id", HeaderValue::from_static("0"));
-        assert_eq!(super::extract_forced_provider_id(&headers), None);
+        assert_eq!(
+            super::early_error::extract_forced_provider_id(&headers),
+            None
+        );
 
         headers.insert("x-aio-provider-id", HeaderValue::from_static("-1"));
-        assert_eq!(super::extract_forced_provider_id(&headers), None);
+        assert_eq!(
+            super::early_error::extract_forced_provider_id(&headers),
+            None
+        );
 
         headers.insert("x-aio-provider-id", HeaderValue::from_static("abc"));
-        assert_eq!(super::extract_forced_provider_id(&headers), None);
+        assert_eq!(
+            super::early_error::extract_forced_provider_id(&headers),
+            None
+        );
     }
 
     #[test]
@@ -1514,7 +633,7 @@ mod tests {
         let mut providers = vec![provider(1), provider(2), provider(3)];
         let special_settings = super::new_special_settings();
 
-        super::force_provider_if_requested(&mut providers, Some(2), &special_settings);
+        super::early_error::force_provider_if_requested(&mut providers, Some(2), &special_settings);
 
         assert_eq!(provider_ids(&providers), vec![2]);
     }
@@ -1524,7 +643,11 @@ mod tests {
         let mut providers = vec![provider(1), provider(2), provider(3)];
         let special_settings = super::new_special_settings();
 
-        super::force_provider_if_requested(&mut providers, Some(99), &special_settings);
+        super::early_error::force_provider_if_requested(
+            &mut providers,
+            Some(99),
+            &special_settings,
+        );
 
         assert!(providers.is_empty());
     }

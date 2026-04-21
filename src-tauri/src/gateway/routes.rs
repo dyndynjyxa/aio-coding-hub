@@ -8,8 +8,8 @@ use axum::{
 };
 use serde::Serialize;
 
-use super::manager::GatewayAppState;
 use super::proxy::proxy_impl;
+use super::runtime::GatewayAppState;
 use super::util::now_unix_seconds;
 
 #[derive(Debug, Serialize)]

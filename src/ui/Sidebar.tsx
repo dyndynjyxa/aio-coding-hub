@@ -15,6 +15,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { AIO_REPO_URL } from "../constants/urls";
+import { useDevPreviewData } from "../hooks/useDevPreviewData";
 import { useGatewayStatus, openReleasesUrl } from "../hooks/useGatewayStatus";
 import { updateDialogSetOpen } from "../hooks/useUpdateMeta";
 import { cn } from "../utils/cn";
@@ -50,7 +51,8 @@ export type SidebarProps = {
 };
 
 export function Sidebar({ isOpen = true, onNavClick, className }: SidebarProps) {
-  const { statusText, statusTone, portTone, portText, hasUpdate, isPortable } = useGatewayStatus();
+  const { statusText, statusTone, portText, hasUpdate, isPortable } = useGatewayStatus();
+  const devPreview = useDevPreviewData();
 
   function handleNavClick() {
     onNavClick?.();
@@ -99,9 +101,13 @@ export function Sidebar({ isOpen = true, onNavClick, className }: SidebarProps) 
                   "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-100",
                   "dark:bg-emerald-900/30 dark:text-emerald-400 dark:ring-emerald-700 dark:hover:bg-emerald-900/50"
                 )}
-                title={isPortable ? "发现新版本（portable：打开下载页）" : "发现新版本（点击更新）"}
+                title={
+                  isPortable && !devPreview.enabled
+                    ? "发现新版本（portable：打开下载页）"
+                    : "发现新版本（点击更新）"
+                }
                 onClick={() => {
-                  if (isPortable) {
+                  if (isPortable && !devPreview.enabled) {
                     openReleasesUrl().catch(() => {});
                     return;
                   }
@@ -147,18 +153,10 @@ export function Sidebar({ isOpen = true, onNavClick, className }: SidebarProps) 
 
         <div className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
           <div className="rounded-xl bg-slate-100/90 px-3 py-2.5 dark:bg-slate-800">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center justify-between gap-2">
               <span className="text-sm font-medium text-slate-600 dark:text-slate-300">网关</span>
               <span className={cn("rounded-full px-2 py-0.5 text-[12px] font-medium", statusTone)}>
-                {statusText}
-              </span>
-              <span
-                className={cn(
-                  "rounded-full px-2 py-0.5 font-mono text-[12px] font-medium",
-                  portTone
-                )}
-              >
-                {portText}
+                {statusText} · {portText}
               </span>
             </div>
           </div>

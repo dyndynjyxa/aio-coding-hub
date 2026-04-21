@@ -3,6 +3,7 @@
 use crate::{blocking, claude_settings, cli_manager, codex_config, gemini_config};
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_manager_claude_info_get(
     app: tauri::AppHandle,
 ) -> Result<cli_manager::ClaudeCliInfo, String> {
@@ -14,6 +15,7 @@ pub(crate) async fn cli_manager_claude_info_get(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_manager_codex_info_get(
     app: tauri::AppHandle,
 ) -> Result<cli_manager::SimpleCliInfo, String> {
@@ -25,6 +27,7 @@ pub(crate) async fn cli_manager_codex_info_get(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_manager_codex_config_get(
     app: tauri::AppHandle,
 ) -> Result<codex_config::CodexConfigState, String> {
@@ -36,6 +39,7 @@ pub(crate) async fn cli_manager_codex_config_get(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_manager_codex_config_set(
     app: tauri::AppHandle,
     patch: codex_config::CodexConfigPatch,
@@ -48,6 +52,7 @@ pub(crate) async fn cli_manager_codex_config_set(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_manager_codex_config_toml_get(
     app: tauri::AppHandle,
 ) -> Result<codex_config::CodexConfigTomlState, String> {
@@ -59,6 +64,7 @@ pub(crate) async fn cli_manager_codex_config_toml_get(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_manager_codex_config_toml_validate(
     toml: String,
 ) -> Result<codex_config::CodexConfigTomlValidationResult, String> {
@@ -70,6 +76,7 @@ pub(crate) async fn cli_manager_codex_config_toml_validate(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_manager_codex_config_toml_set(
     app: tauri::AppHandle,
     toml: String,
@@ -82,6 +89,7 @@ pub(crate) async fn cli_manager_codex_config_toml_set(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_manager_gemini_info_get(
     app: tauri::AppHandle,
 ) -> Result<cli_manager::SimpleCliInfo, String> {
@@ -93,6 +101,7 @@ pub(crate) async fn cli_manager_gemini_info_get(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_manager_gemini_config_get(
     app: tauri::AppHandle,
 ) -> Result<gemini_config::GeminiConfigState, String> {
@@ -104,6 +113,7 @@ pub(crate) async fn cli_manager_gemini_config_get(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_manager_gemini_config_set(
     app: tauri::AppHandle,
     patch: gemini_config::GeminiConfigPatch,
@@ -116,6 +126,7 @@ pub(crate) async fn cli_manager_gemini_config_set(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_manager_claude_env_set(
     app: tauri::AppHandle,
     mcp_timeout_ms: Option<u64>,
@@ -129,6 +140,7 @@ pub(crate) async fn cli_manager_claude_env_set(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_manager_claude_settings_get(
     app: tauri::AppHandle,
 ) -> Result<claude_settings::ClaudeSettingsState, String> {
@@ -140,6 +152,7 @@ pub(crate) async fn cli_manager_claude_settings_get(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_manager_claude_settings_set(
     app: tauri::AppHandle,
     patch: claude_settings::ClaudeSettingsPatch,

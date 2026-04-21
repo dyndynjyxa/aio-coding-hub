@@ -1,6 +1,6 @@
 [package]
 name = "aio-coding-hub"
-version = "0.37.0"
+version = "0.39.2"
 description = "AIO Coding Hub"
 authors = ["dyndynjyxa"]
 edition = "2021"
@@ -43,6 +43,8 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.24"
 reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls-native-roots", "stream", "socks", "macos-system-configuration"] }
+if-addrs = "0.13"
+hostname = "0.4"
 futures-core = "0.3"
 flate2 = "1.1.5"
 zip = { version = "4.6", default-features = false, features = ["deflate"] }
@@ -52,7 +54,7 @@ chrono = { version = "0.4", default-features = false, features = ["std"] }
 tracing-appender = "0.2"
 tracing-log = "0.2"
 thiserror = "2"
-specta = { version = "=2.0.0-rc.22", features = ["derive"] }
+specta = { version = "=2.0.0-rc.22", features = ["derive", "serde_json"] }
 regex = "1"
 specta-typescript = "0.0.9"
 tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
@@ -63,6 +65,7 @@ tauri-plugin-updater = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-notification = "2"
+tauri-plugin-window-state = "2"
 
 [target."cfg(windows)".dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_Registry", "Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }

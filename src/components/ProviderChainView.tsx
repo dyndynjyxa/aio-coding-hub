@@ -1,99 +1,9 @@
-import { useMemo } from "react";
-import { getErrorCodeLabel } from "./home/HomeLogShared";
+import { useMemo, useState } from "react";
 import { Spinner } from "../ui/Spinner";
 import { cn } from "../utils/cn";
-
-function mapSelectionMethod(selectionMethod: string | null) {
-  switch (selectionMethod) {
-    case "ordered":
-      return "按顺序选择供应商";
-    case "session_reuse":
-      return "复用上一次成功的供应商";
-    case "weighted_random":
-      return "按权重选择供应商";
-    default:
-      return null;
-  }
-}
-
-function mapReasonCode(reasonCode: string | null) {
-  switch (reasonCode) {
-    case "request_success":
-      return "请求已成功完成";
-    case "retry_success":
-      return "重试后请求成功";
-    case "request_failed":
-      return "请求失败，系统准备继续处理";
-    case "retry_failed":
-      return "重试后仍然失败";
-    case "session_reuse":
-      return "命中了会话复用";
-    case "provider_skipped":
-      return "该供应商被跳过，未实际发出请求";
-    case "failover":
-      return "当前供应商失败，系统切换到下一个供应商";
-    default:
-      return null;
-  }
-}
-
-function mapDecision(decision: string | null) {
-  switch (decision) {
-    case "success":
-      return "请求成功";
-    case "retry":
-      return "继续重试";
-    case "failover":
-      return "切换供应商";
-    case "skip":
-      return "跳过该供应商";
-    default:
-      return null;
-  }
-}
-
-function buildAttemptReason(attempt: ProviderChainAttempt, hasMultipleAttempts: boolean) {
-  const errorLabel = attempt.error_code ? getErrorCodeLabel(attempt.error_code) : null;
-  const statusText = attempt.status != null ? `HTTP ${attempt.status}` : null;
-
-  if (attempt.session_reuse) {
-    return `命中了会话复用，继续使用 ${attempt.provider_name || "当前供应商"}。`;
-  }
-
-  if (attempt.outcome === "skipped") {
-    return errorLabel
-      ? `该供应商被跳过，原因是 ${errorLabel}。`
-      : "该供应商被跳过，本次没有真正发出请求。";
-  }
-
-  if (attempt.outcome === "success") {
-    if (hasMultipleAttempts && attempt.attempt_index > 1) {
-      return `前面的尝试未成功，系统改走 ${attempt.provider_name || "当前供应商"} 后请求成功。`;
-    }
-    return `系统选择 ${attempt.provider_name || "当前供应商"} 发起请求，并成功返回结果。`;
-  }
-
-  if (hasMultipleAttempts) {
-    if (errorLabel && statusText) {
-      return `${attempt.provider_name || "当前供应商"} 返回 ${statusText}，错误为“${errorLabel}”，因此系统继续重试或切换。`;
-    }
-    if (errorLabel) {
-      return `${attempt.provider_name || "当前供应商"} 请求失败，错误为“${errorLabel}”，因此系统继续重试或切换。`;
-    }
-    if (statusText) {
-      return `${attempt.provider_name || "当前供应商"} 返回 ${statusText}，因此系统继续重试或切换。`;
-    }
-    return `${attempt.provider_name || "当前供应商"} 未成功返回结果，因此系统继续重试或切换。`;
-  }
-
-  if (errorLabel && statusText) {
-    return `${attempt.provider_name || "当前供应商"} 返回 ${statusText}，错误为“${errorLabel}”。`;
-  }
-  if (errorLabel) {
-    return `${attempt.provider_name || "当前供应商"} 请求失败，错误为“${errorLabel}”。`;
-  }
-  return `${attempt.provider_name || "当前供应商"} 未成功返回结果。`;
-}
+import { Globe, AlertTriangle, Zap, ChevronDown, ArrowRight } from "lucide-react";
+import { getGatewayErrorShortLabel } from "../constants/gatewayErrorCodes";
+import { DisclosureSection } from "./home/DisclosureSection";
 
 export type ProviderChainAttemptLog = {
   attempt_index: number;
@@ -337,149 +247,299 @@ export function ProviderChainView({
       <div className="relative pl-8">
         <div className="absolute left-[15px] top-2 bottom-2 w-px bg-slate-200 dark:bg-slate-700" />
         <div className="space-y-4">
-          {attempts.map((attempt) => {
-            const success = attempt.outcome === "success";
-            const skipped = attempt.outcome === "skipped";
-            const isFinal = Boolean(
-              finalAttempt && attempt.attempt_index === finalAttempt.attempt_index
-            );
-            const providerLabel =
-              attempt.provider_name && attempt.provider_name !== "未知"
-                ? attempt.provider_name
-                : `未知（id=${attempt.provider_id}）`;
-            const reasonText = buildAttemptReason(attempt, attempts.length > 1);
-            const selectionText = mapSelectionMethod(attempt.selection_method?.trim() ?? null);
-            const reasonCodeText = mapReasonCode(attempt.reason_code?.trim() ?? null);
-            const decisionText = mapDecision(attempt.decision?.trim() ?? null);
-
-            return (
-              <div
-                key={`${attempt.attempt_index}-${attempt.provider_id}-${attempt.base_url}`}
-                className="relative"
-              >
-                <div
-                  className={cn(
-                    "absolute -left-8 top-4 flex h-8 w-8 items-center justify-center rounded-full border-2 bg-white text-sm font-semibold shadow-sm dark:bg-slate-900",
-                    success
-                      ? "border-emerald-300 text-emerald-600 dark:border-emerald-700 dark:text-emerald-400"
-                      : skipped
-                        ? "border-slate-300 text-slate-500 dark:border-slate-600 dark:text-slate-300"
-                        : "border-rose-300 text-rose-600 dark:border-rose-700 dark:text-rose-400"
-                  )}
-                >
-                  {attempt.attempt_index}
-                </div>
-
-                <div
-                  className={cn(
-                    "rounded-2xl border bg-white px-4 py-4 shadow-sm dark:bg-slate-800/90",
-                    isFinal
-                      ? success
-                        ? "border-emerald-200 bg-emerald-50/50 dark:border-emerald-700 dark:bg-emerald-900/20"
-                        : skipped
-                          ? "border-slate-200 bg-slate-50/50 dark:border-slate-600 dark:bg-slate-700/20"
-                          : "border-rose-200 bg-rose-50/50 dark:border-rose-700 dark:bg-rose-900/20"
-                      : "border-slate-200 dark:border-slate-700"
-                  )}
-                >
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-base font-semibold text-slate-900 dark:text-slate-100">
-                          {success
-                            ? `请求成功：${providerLabel}`
-                            : skipped
-                              ? `跳过：${providerLabel}`
-                              : attempts.length > 1
-                                ? `重试/切换：${providerLabel}`
-                                : `请求失败：${providerLabel}`}
-                        </span>
-                        {attempt.attempt_duration_ms != null ? (
-                          <span className="text-xs text-slate-500 dark:text-slate-400">
-                            +{attempt.attempt_duration_ms}ms
-                          </span>
-                        ) : null}
-                      </div>
-
-                      <div className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
-                        {reasonText}
-                      </div>
-
-                      {attempt.reason ? (
-                        <div className="mt-2 rounded-lg border border-rose-200/60 bg-rose-50/50 px-3 py-2 dark:border-rose-500/20 dark:bg-rose-950/20">
-                          <pre className="whitespace-pre-wrap break-all text-xs font-mono text-rose-800 dark:text-rose-200 leading-relaxed">
-                            {attempt.reason}
-                          </pre>
-                        </div>
-                      ) : null}
-
-                      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                        {attempt.status != null ? (
-                          <span className="rounded-full bg-slate-100 dark:bg-slate-700 px-2.5 py-1">
-                            HTTP {attempt.status}
-                          </span>
-                        ) : null}
-                        {selectionText ? (
-                          <span className="rounded-full bg-slate-100 dark:bg-slate-700 px-2.5 py-1">
-                            {selectionText}
-                          </span>
-                        ) : null}
-                        {reasonCodeText ? (
-                          <span className="rounded-full bg-slate-100 dark:bg-slate-700 px-2.5 py-1">
-                            {reasonCodeText}
-                          </span>
-                        ) : null}
-                        {decisionText ? (
-                          <span className="rounded-full bg-slate-100 dark:bg-slate-700 px-2.5 py-1">
-                            {decisionText}
-                          </span>
-                        ) : null}
-                        {attempt.error_code ? (
-                          <span className="rounded-full bg-amber-50 dark:bg-amber-900/30 px-2.5 py-1 font-medium text-amber-700 dark:text-amber-400">
-                            {getErrorCodeLabel(attempt.error_code)}
-                          </span>
-                        ) : null}
-                        {attempt.circuit_state_after ? (
-                          <span
-                            className={cn(
-                              "rounded-full px-2.5 py-1 font-medium",
-                              attempt.circuit_state_after === "open"
-                                ? "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400"
-                                : attempt.circuit_state_after === "half_open"
-                                  ? "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                                  : "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                            )}
-                          >
-                            {attempt.circuit_failure_count != null &&
-                            attempt.circuit_failure_threshold != null
-                              ? `${attempt.circuit_state_after} ${attempt.circuit_failure_count}/${attempt.circuit_failure_threshold}`
-                              : attempt.circuit_state_after}
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span
-                        className={cn(
-                          "rounded-full px-2.5 py-1 text-xs font-medium",
-                          success
-                            ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                            : skipped
-                              ? "bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200"
-                              : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                        )}
-                      >
-                        {success ? "成功" : skipped ? "已跳过" : "未成功"}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+          {attempts.map((attempt) => (
+            <AttemptCard
+              key={`${attempt.attempt_index}-${attempt.provider_id}-${attempt.base_url}`}
+              attempt={attempt}
+              isFinal={Boolean(
+                finalAttempt && attempt.attempt_index === finalAttempt.attempt_index
+              )}
+              hasMultipleAttempts={attempts.length > 1}
+            />
+          ))}
         </div>
       </div>
     </div>
+  );
+}
+
+function AttemptCard({
+  attempt,
+  isFinal,
+  hasMultipleAttempts,
+}: {
+  attempt: ProviderChainAttempt;
+  isFinal: boolean;
+  hasMultipleAttempts: boolean;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const success = attempt.outcome === "success";
+  const skipped = attempt.outcome === "skipped";
+
+  const hasCircuitBreaker =
+    attempt.circuit_state_after != null || attempt.circuit_state_before != null;
+
+  return (
+    <div className="relative">
+      <div
+        className={cn(
+          "absolute -left-8 top-4 flex h-8 w-8 items-center justify-center rounded-full border-2 bg-white text-sm font-semibold shadow-sm dark:bg-slate-900",
+          success
+            ? "border-emerald-300 text-emerald-600 dark:border-emerald-700 dark:text-emerald-400"
+            : skipped
+              ? "border-slate-300 text-slate-500 dark:border-slate-600 dark:text-slate-300"
+              : "border-rose-300 text-rose-600 dark:border-rose-700 dark:text-rose-400"
+        )}
+      >
+        {attempt.attempt_index}
+      </div>
+
+      <div
+        className={cn(
+          "rounded-2xl border bg-white shadow-sm dark:bg-slate-800/90 overflow-hidden",
+          isFinal
+            ? success
+              ? "border-emerald-200 bg-emerald-50/50 dark:border-emerald-700 dark:bg-emerald-900/20"
+              : skipped
+                ? "border-slate-200 bg-slate-50/50 dark:border-slate-600 dark:bg-slate-700/20"
+                : "border-rose-200 bg-rose-50/50 dark:border-rose-700 dark:bg-rose-900/20"
+            : "border-slate-200 dark:border-slate-700"
+        )}
+      >
+        {/* Header */}
+        <button
+          type="button"
+          className="w-full text-left px-4 py-3 flex items-center justify-between gap-2 hover:bg-slate-50/50 dark:hover:bg-slate-700/30 transition-colors"
+          onClick={() => setExpanded((prev) => !prev)}
+        >
+          <div className="flex flex-wrap items-center gap-2 min-w-0">
+            <span className="text-base font-semibold text-slate-900 dark:text-slate-100">
+              {success
+                ? `请求成功`
+                : skipped
+                  ? `跳过`
+                  : hasMultipleAttempts
+                    ? `重试 #${attempt.attempt_index}`
+                    : `请求失败`}
+            </span>
+            {attempt.attempt_duration_ms != null ? (
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                +{attempt.attempt_duration_ms}ms
+              </span>
+            ) : null}
+            {attempt.status != null ? (
+              <span
+                className={cn(
+                  "text-xs font-medium",
+                  attempt.status >= 400
+                    ? "text-rose-600 dark:text-rose-400"
+                    : "text-slate-500 dark:text-slate-400"
+                )}
+              >
+                HTTP {attempt.status}
+              </span>
+            ) : null}
+          </div>
+          <ChevronDown
+            className={cn(
+              "h-4 w-4 text-slate-400 shrink-0 transition-transform",
+              expanded && "rotate-180"
+            )}
+          />
+        </button>
+
+        {/* Detail body */}
+        {expanded && (
+          <div className="px-4 pb-4 space-y-3 border-t border-slate-100 dark:border-slate-700/50 pt-3">
+            <div className="text-sm text-slate-500 dark:text-slate-400">
+              Provider ID: <span className="font-semibold text-slate-800 dark:text-slate-200">{attempt.provider_id}</span>
+            </div>
+
+            {/* Decision tags */}
+            <DecisionTags attempt={attempt} />
+
+            {attempt.base_url ? (
+              <div className="flex items-start gap-2 text-sm">
+                <Globe className="h-4 w-4 text-slate-400 dark:text-slate-500 shrink-0 mt-0.5" />
+                <div>
+                  <span className="text-slate-500 dark:text-slate-400">端点</span>
+                  <div className="font-mono text-slate-800 dark:text-slate-200 break-all">
+                    {attempt.base_url}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {hasCircuitBreaker ? (
+              <div className="flex items-center gap-2 text-sm">
+                <Zap className="h-4 w-4 text-slate-400 dark:text-slate-500 shrink-0" />
+                <span className="text-slate-500 dark:text-slate-400">熔断器:</span>
+                <CircuitBadge attempt={attempt} />
+              </div>
+            ) : null}
+
+            {!success && !skipped && attempt.reason ? (
+              <div className="rounded-lg border border-rose-200/60 bg-rose-50/50 px-3 py-3 dark:border-rose-500/20 dark:bg-rose-950/20">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <AlertTriangle className="h-4 w-4 text-rose-500 dark:text-rose-400 shrink-0" />
+                  <span className="text-sm font-semibold text-rose-600 dark:text-rose-400">
+                    错误
+                  </span>
+                  {attempt.reason_code && attempt.reason_code !== attempt.reason ? (
+                    <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-600 dark:bg-rose-900/30 dark:text-rose-300">
+                      {attempt.reason_code}
+                    </span>
+                  ) : null}
+                </div>
+                <pre className="whitespace-pre-wrap break-all text-xs font-mono text-rose-800 dark:text-rose-200 leading-relaxed">
+                  {attempt.reason}
+                </pre>
+              </div>
+            ) : null}
+
+            {/* Expandable structured error details */}
+            {!success && !skipped && hasStructuredDetails(attempt) ? (
+              <DisclosureSection label="结构化错误详情">
+                <div className="space-y-1.5 text-xs">
+                  {attempt.error_code ? (
+                    <div className="flex items-baseline gap-2">
+                      <span className="shrink-0 text-slate-500 dark:text-slate-400">错误码:</span>
+                      <span className="font-mono text-slate-700 dark:text-slate-300">
+                        {getGatewayErrorShortLabel(attempt.error_code)} ({attempt.error_code})
+                      </span>
+                    </div>
+                  ) : null}
+                  {attempt.error_category ? (
+                    <div className="flex items-baseline gap-2">
+                      <span className="shrink-0 text-slate-500 dark:text-slate-400">错误分类:</span>
+                      <span className="font-mono text-slate-700 dark:text-slate-300">{attempt.error_category}</span>
+                    </div>
+                  ) : null}
+                  {attempt.decision ? (
+                    <div className="flex items-baseline gap-2">
+                      <span className="shrink-0 text-slate-500 dark:text-slate-400">决策:</span>
+                      <span className="font-mono text-slate-700 dark:text-slate-300">{attempt.decision}</span>
+                    </div>
+                  ) : null}
+                  {attempt.selection_method ? (
+                    <div className="flex items-baseline gap-2">
+                      <span className="shrink-0 text-slate-500 dark:text-slate-400">选择方式:</span>
+                      <span className="font-mono text-slate-700 dark:text-slate-300">{attempt.selection_method}</span>
+                    </div>
+                  ) : null}
+                  {hasCircuitBreaker ? (
+                    <div className="flex items-baseline gap-2">
+                      <span className="shrink-0 text-slate-500 dark:text-slate-400">熔断器变化:</span>
+                      <span className="font-mono text-slate-700 dark:text-slate-300">
+                        {attempt.circuit_state_before ?? "—"}
+                        {attempt.circuit_state_after && attempt.circuit_state_after !== attempt.circuit_state_before ? (
+                          <> <ArrowRight className="inline h-3 w-3" /> {attempt.circuit_state_after}</>
+                        ) : null}
+                        {attempt.circuit_failure_count != null && attempt.circuit_failure_threshold != null
+                          ? ` (${attempt.circuit_failure_count}/${attempt.circuit_failure_threshold})`
+                          : null}
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+              </DisclosureSection>
+            ) : null}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// --- Helper components for AttemptCard ---
+
+const DECISION_BADGE_TONES: Record<string, string> = {
+  switch: "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
+  retry: "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
+  abort: "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300",
+};
+
+function DecisionTags({ attempt }: { attempt: ProviderChainAttempt }) {
+  const tags: Array<{ label: string; value: string; tone: string }> = [];
+
+  if (attempt.selection_method) {
+    tags.push({
+      label: "选择",
+      value: attempt.selection_method,
+      tone: "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
+    });
+  }
+  if (attempt.decision) {
+    tags.push({
+      label: "决策",
+      value: attempt.decision,
+      tone: DECISION_BADGE_TONES[attempt.decision] ?? "bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300",
+    });
+  }
+  if (attempt.error_code) {
+    tags.push({
+      label: "错误码",
+      value: getGatewayErrorShortLabel(attempt.error_code),
+      tone: "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300",
+    });
+  }
+  if (attempt.error_category) {
+    tags.push({
+      label: "分类",
+      value: attempt.error_category,
+      tone: "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300",
+    });
+  }
+
+  if (tags.length === 0) return null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {tags.map((tag) => (
+        <span
+          key={tag.label}
+          className={cn("rounded-full px-2 py-0.5 text-xs font-medium", tag.tone)}
+          title={tag.label}
+        >
+          {tag.value}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function CircuitBadge({ attempt }: { attempt: ProviderChainAttempt }) {
+  const state = attempt.circuit_state_after ?? attempt.circuit_state_before;
+  return (
+    <>
+      <span
+        className={cn(
+          "rounded-md px-2 py-0.5 text-xs font-bold text-white",
+          state === "open"
+            ? "bg-rose-500"
+            : state === "half_open"
+              ? "bg-amber-500"
+              : "bg-emerald-500"
+        )}
+      >
+        {state}
+      </span>
+      {attempt.circuit_failure_count != null && attempt.circuit_failure_threshold != null ? (
+        <span className="text-sm text-slate-600 dark:text-slate-300">
+          {attempt.circuit_failure_count}/{attempt.circuit_failure_threshold} 次失败
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+function hasStructuredDetails(attempt: ProviderChainAttempt): boolean {
+  return (
+    attempt.error_code != null ||
+    attempt.error_category != null ||
+    attempt.decision != null ||
+    attempt.selection_method != null ||
+    attempt.circuit_state_before != null ||
+    attempt.circuit_state_after != null
   );
 }

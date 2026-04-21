@@ -1,6 +1,6 @@
 // Usage: Helpers for displaying and validating provider base URLs.
 
-import type { ProviderSummary } from "../../services/providers";
+import type { ProviderSummary } from "../../services/providers/providers";
 import type { BaseUrlRow } from "./types";
 
 export function providerPrimaryBaseUrl(provider: ProviderSummary | null | undefined) {

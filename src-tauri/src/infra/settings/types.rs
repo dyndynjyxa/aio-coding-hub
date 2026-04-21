@@ -67,7 +67,7 @@ impl Default for CodexHomeMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
 #[serde(default)]
 pub struct WslTargetCli {
     pub claude: bool,
@@ -167,6 +167,11 @@ pub struct AppSettings {
     pub cx2cc_drop_stop_sequences: bool,
     pub cx2cc_clean_schema: bool,
     pub cx2cc_filter_batch_tool: bool,
+    // Upstream proxy settings for gateway outbound requests.
+    pub upstream_proxy_enabled: bool,
+    pub upstream_proxy_url: String,
+    pub upstream_proxy_username: String,
+    pub upstream_proxy_password: String,
 }
 
 impl Default for AppSettings {
@@ -232,6 +237,10 @@ impl Default for AppSettings {
             cx2cc_drop_stop_sequences: true,
             cx2cc_clean_schema: true,
             cx2cc_filter_batch_tool: true,
+            upstream_proxy_enabled: false,
+            upstream_proxy_url: String::new(),
+            upstream_proxy_username: String::new(),
+            upstream_proxy_password: String::new(),
         }
     }
 }

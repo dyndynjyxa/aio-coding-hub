@@ -15,8 +15,8 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
 import { useMemo } from "react";
-import { getOrderedClis } from "../../services/cliPriorityOrder";
-import type { CliKey } from "../../services/providers";
+import { getOrderedClis } from "../../services/cli/cliPriorityOrder";
+import type { CliKey } from "../../services/providers/providers";
 import { Button } from "../../ui/Button";
 import { cn } from "../../utils/cn";
 
@@ -40,15 +40,15 @@ function SortableCliButton({ item }: SortableCliButtonProps) {
         transition,
       }}
       className={cn(
-        "h-auto justify-start gap-1.5 px-2.5 py-1.5 text-left shadow-none touch-none select-none",
+        "h-auto shrink-0 justify-start gap-1 px-2 py-1 text-left shadow-none touch-none select-none",
         "cursor-grab active:cursor-grabbing",
         isDragging && "z-10 opacity-60"
       )}
       {...sortableAttributes}
       {...listeners}
     >
-      <GripVertical className="h-3 w-3 shrink-0 opacity-50" aria-hidden="true" />
-      <span className="text-xs font-medium whitespace-nowrap">{item.label}</span>
+      <GripVertical className="h-3 w-3 shrink-0 opacity-45" aria-hidden="true" />
+      <span className="text-[11px] font-medium whitespace-nowrap">{item.label}</span>
     </Button>
   );
 }
@@ -82,13 +82,13 @@ export function CliPriorityOrderEditor({
   }
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-2 dark:border-slate-700 dark:bg-slate-800/40">
+    <div className="inline-block max-w-full rounded-lg border border-slate-200 bg-slate-50/70 p-1.5 dark:border-slate-700 dark:bg-slate-800/40">
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext
           items={orderedClis.map((item) => item.key)}
           strategy={horizontalListSortingStrategy}
         >
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex gap-1 overflow-x-auto pb-0.5">
             {orderedClis.map((item) => (
               <SortableCliButton key={item.key} item={item} />
             ))}

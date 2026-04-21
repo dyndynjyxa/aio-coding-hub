@@ -1,27 +1,43 @@
 //! Usage: Handle Claude thinking rectifiers (signature/budget) 400 path inside `failover_loop::run`.
 
-use super::super::super::provider_router;
-use super::super::super::upstream_client_error_rules;
 use super::*;
+use crate::gateway::proxy::provider_router;
+use crate::gateway::proxy::upstream_client_error_rules;
 use crate::gateway::thinking_budget_rectifier;
 use crate::shared::mutex_ext::MutexExt;
 
-#[allow(clippy::too_many_arguments)]
+pub(super) struct HandleThinkingRectifiers400Input<'a> {
+    pub(super) ctx: CommonCtx<'a>,
+    pub(super) provider_ctx: ProviderCtx<'a>,
+    pub(super) attempt_ctx: AttemptCtx<'a>,
+    pub(super) loop_state: LoopState<'a>,
+    pub(super) enable_thinking_signature_rectifier: bool,
+    pub(super) enable_thinking_budget_rectifier: bool,
+    pub(super) resp: reqwest::Response,
+    pub(super) status: StatusCode,
+    pub(super) response_headers: HeaderMap,
+    pub(super) upstream: super::upstream_error::UpstreamRequestState<'a>,
+}
+
 pub(super) async fn handle_thinking_rectifiers_400(
-    ctx: CommonCtx<'_>,
-    provider_ctx: ProviderCtx<'_>,
-    attempt_ctx: AttemptCtx<'_>,
-    loop_state: LoopState<'_>,
-    enable_thinking_signature_rectifier: bool,
-    enable_thinking_budget_rectifier: bool,
-    resp: reqwest::Response,
-    status: StatusCode,
-    mut response_headers: HeaderMap,
-    upstream_body_bytes: &mut Bytes,
-    strip_request_content_encoding: &mut bool,
-    thinking_signature_rectifier_retried: &mut bool,
-    thinking_budget_rectifier_retried: &mut bool,
+    input: HandleThinkingRectifiers400Input<'_>,
 ) -> LoopControl {
+    let HandleThinkingRectifiers400Input {
+        ctx,
+        provider_ctx,
+        attempt_ctx,
+        loop_state,
+        enable_thinking_signature_rectifier,
+        enable_thinking_budget_rectifier,
+        resp,
+        status,
+        mut response_headers,
+        upstream,
+    } = input;
+    let upstream_body_bytes = upstream.upstream_body_bytes;
+    let strip_request_content_encoding = upstream.strip_request_content_encoding;
+    let thinking_signature_rectifier_retried = upstream.thinking_signature_rectifier_retried;
+    let thinking_budget_rectifier_retried = upstream.thinking_budget_rectifier_retried;
     let introspection_body = ctx.introspection_body;
 
     let CommonCtxOwned {

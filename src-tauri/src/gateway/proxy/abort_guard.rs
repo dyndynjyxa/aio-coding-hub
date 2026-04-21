@@ -70,6 +70,32 @@ impl RequestAbortGuard {
         self.armed = false;
     }
 
+    /// Take ownership of this guard, leaving a disarmed placeholder behind.
+    /// This is useful when you need to pass the guard to a sub-function while
+    /// keeping the parent struct borrowable.
+    pub(super) fn take(&mut self) -> Self {
+        let taken = Self {
+            app: self.app.clone(),
+            db: self.db.clone(),
+            log_tx: self.log_tx.clone(),
+            trace_id: std::mem::take(&mut self.trace_id),
+            cli_key: std::mem::take(&mut self.cli_key),
+            method: std::mem::take(&mut self.method),
+            path: std::mem::take(&mut self.path),
+            observe: self.observe,
+            query: self.query.take(),
+            session_id: self.session_id.take(),
+            requested_model: self.requested_model.take(),
+            in_flight_attempt: self.in_flight_attempt.take(),
+            created_at_ms: self.created_at_ms,
+            created_at: self.created_at,
+            started: self.started,
+            armed: self.armed,
+        };
+        self.armed = false; // disarm the leftover shell
+        taken
+    }
+
     pub(super) fn capture_in_flight_attempt(&mut self, attempt: &FailoverAttempt) {
         self.in_flight_attempt = Some(attempt.clone());
     }

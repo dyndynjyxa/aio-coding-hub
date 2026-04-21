@@ -20,9 +20,9 @@ vi.mock("@tanstack/react-virtual", () => ({
     };
   },
 }));
-vi.mock("../../services/cliSessions", async () => {
-  const actual = await vi.importActual<typeof import("../../services/cliSessions")>(
-    "../../services/cliSessions"
+vi.mock("../../services/cli/cliSessions", async () => {
+  const actual = await vi.importActual<typeof import("../../services/cli/cliSessions")>(
+    "../../services/cli/cliSessions"
   );
   return { ...actual, cliSessionsProjectsList: vi.fn().mockResolvedValue([]) };
 });
@@ -35,7 +35,7 @@ vi.mock("../../query/settings", async () => {
     await vi.importActual<typeof import("../../query/settings")>("../../query/settings");
   return { ...actual, useSettingsQuery: vi.fn() };
 });
-import { cliSessionsProjectsList } from "../../services/cliSessions";
+import { cliSessionsProjectsList } from "../../services/cli/cliSessions";
 import { useSettingsQuery } from "../../query/settings";
 import { useWslDetectionQuery } from "../../query/wsl";
 import { createTestAppSettings } from "../../test/fixtures/settings";

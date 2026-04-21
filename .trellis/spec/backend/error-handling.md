@@ -25,11 +25,20 @@ integration failures into silent hangs.
 - If a flow depends on an external side effect, do not discard that error and
   keep waiting on the next step.
   Example: browser open failure in OAuth should return immediately.
+- If a settings write changes the address or endpoint used by a running
+  subsystem, fail closed on rebind failure. Do not publish, sync, or announce a
+  new listener value until the runtime path actually serves it.
 - Cleanup-sensitive flows should fail closed.
   If temp files are written for a launcher, define rollback on partial failure
   and explicit cleanup before any `exec` handoff.
 - Prefer keeping blocking IO inside `blocking::run` or other clearly marked
   boundaries so failures surface in one place.
+- Desktop bridge commands should deny unknown URL schemes, unknown filesystem
+  roots, or unsupported actions in Rust and return an actionable error to the
+  frontend.
+- If the frontend only needs success/failure, metadata, or a masked preview, do
+  not send plaintext credentials or other sensitive secrets back across the IPC
+  boundary.
 
 ---
 
@@ -48,6 +57,10 @@ integration failures into silent hangs.
 - Relying on shell lifecycle assumptions for secret cleanup instead of explicit
   removal.
 - Returning generic internal errors after discarding the real boundary failure.
+- Returning or logging sensitive credentials to the renderer because it is
+  convenient for a settings form or copy action.
+- Saving a new listener address to disk, then letting WSL/CLI sync use it while
+  the running gateway is still bound to the old socket.
 
 ---
 

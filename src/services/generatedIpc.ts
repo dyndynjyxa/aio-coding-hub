@@ -5,11 +5,15 @@ export type GeneratedCommandResult<T> =
   | { status: "ok"; data: T }
   | { status: "error"; error: unknown };
 
+export type GeneratedCommandResponse<T> = GeneratedCommandResult<T> | T;
+
 type InvokeGeneratedIpcOptions<T> = {
   title: string;
   cmd: string;
   args?: Record<string, unknown>;
-  invoke: () => Promise<GeneratedCommandResult<T>>;
+  invoke: () => Promise<GeneratedCommandResponse<T>>;
+  fallback?: unknown;
+  nullResultBehavior?: "throw" | "return_fallback";
 };
 
 function isSensitiveLogKey(key: string): boolean {
@@ -64,16 +68,40 @@ function generatedCommandError(cmd: string, error: unknown) {
   return new Error(message || `IPC_ERROR_RESULT: ${cmd}`);
 }
 
-export async function invokeGeneratedIpc<T>(options: InvokeGeneratedIpcOptions<T>): Promise<T> {
+function isGeneratedCommandResult<T>(value: unknown): value is GeneratedCommandResult<T> {
+  if (value == null || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  if (candidate.status !== "ok" && candidate.status !== "error") {
+    return false;
+  }
+
+  return "data" in candidate || "error" in candidate;
+}
+
+export async function invokeGeneratedIpc<T, Fallback = never>(
+  options: InvokeGeneratedIpcOptions<T>
+): Promise<T | Fallback> {
+  const fallback = options.fallback as Fallback;
+
   try {
     const result = await options.invoke();
-    if (result.status === "error") {
-      throw generatedCommandError(options.cmd, result.error);
+    if (isGeneratedCommandResult<T>(result)) {
+      if (result.status === "error") {
+        throw generatedCommandError(options.cmd, result.error);
+      }
+      if (result.data != null) {
+        return result.data;
+      }
+    } else if (result != null) {
+      return result;
     }
-    if (result.data == null) {
-      throw new Error(`IPC_NULL_RESULT: ${options.cmd}`);
+    if (options.nullResultBehavior === "return_fallback") {
+      return fallback;
     }
-    return result.data;
+    throw new Error(`IPC_NULL_RESULT: ${options.cmd}`);
   } catch (err) {
     logToConsole("error", options.title, {
       cmd: options.cmd,

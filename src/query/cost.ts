@@ -16,8 +16,8 @@ import {
   type CostSummaryV1,
   type CostTopRequestRowV1,
   type CostTrendRowV1,
-} from "../services/cost";
-import type { CliKey } from "../services/providers";
+} from "../services/usage/cost";
+import type { CliKey } from "../services/providers/providers";
 import { costKeys } from "./keys";
 
 export type CostFilters = {

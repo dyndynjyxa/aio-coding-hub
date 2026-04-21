@@ -22,6 +22,7 @@ fn request_attempt_logs_limit(limit: Option<u32>) -> usize {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn request_logs_list(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -38,6 +39,7 @@ pub(crate) async fn request_logs_list(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn request_logs_list_all(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -53,6 +55,7 @@ pub(crate) async fn request_logs_list_all(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn request_logs_list_after_id(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -70,6 +73,7 @@ pub(crate) async fn request_logs_list_after_id(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn request_logs_list_after_id_all(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -86,6 +90,7 @@ pub(crate) async fn request_logs_list_after_id_all(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn request_log_get(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -100,6 +105,7 @@ pub(crate) async fn request_log_get(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn request_log_get_by_trace_id(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -114,6 +120,7 @@ pub(crate) async fn request_log_get_by_trace_id(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn request_attempt_logs_by_trace_id(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,

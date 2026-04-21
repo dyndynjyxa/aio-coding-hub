@@ -7,7 +7,7 @@ import type {
   UsageProviderCacheRateTrendRowV1,
   UsageScope,
   UsageSummary,
-} from "../../services/usage";
+} from "../../services/usage/usage";
 import { Card } from "../../ui/Card";
 import type { UsageTableTab } from "./types";
 import { useAutoFocus, useInert } from "./useInert";

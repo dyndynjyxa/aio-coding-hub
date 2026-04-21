@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { cn } from "../utils/cn";
 
 export type SettingsRowProps = {
-  label: string;
+  label: ReactNode;
   subtitle?: string;
   children: ReactNode;
   className?: string;

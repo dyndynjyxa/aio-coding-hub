@@ -14,6 +14,19 @@ fn make_stdio_server(key: &str, env: BTreeMap<String, String>) -> McpServerForSy
     }
 }
 
+fn make_sse_server(key: &str, url: &str, headers: BTreeMap<String, String>) -> McpServerForSync {
+    McpServerForSync {
+        server_key: key.to_string(),
+        transport: "sse".to_string(),
+        command: None,
+        args: vec![],
+        env: BTreeMap::new(),
+        cwd: None,
+        url: Some(url.to_string()),
+        headers,
+    }
+}
+
 #[test]
 fn codex_toml_writes_env_as_nested_table() {
     let mut env = BTreeMap::new();
@@ -121,4 +134,20 @@ EXA_API_KEY = 'b'
     assert!(!s.contains("command = \"b\""), "{s}");
     assert!(!s.contains("EXA_API_KEY = 'a'"), "{s}");
     assert!(!s.contains("EXA_API_KEY = 'b'"), "{s}");
+}
+
+#[test]
+fn codex_toml_writes_sse_transport() {
+    let mut headers = BTreeMap::new();
+    headers.insert("Authorization".to_string(), "Bearer xxx".to_string());
+    let server = make_sse_server("remote", "https://mcp.example.com/sse", headers);
+
+    let out = build_codex_config_toml(None, &[], &[server]).expect("build_codex_config_toml");
+    let s = String::from_utf8(out).expect("utf8");
+
+    assert!(s.contains("[mcp_servers.remote]"), "{s}");
+    assert!(s.contains("type = \"sse\""), "{s}");
+    assert!(s.contains("url = \"https://mcp.example.com/sse\""), "{s}");
+    assert!(s.contains("http_headers = "), "{s}");
+    assert!(s.contains("\"Authorization\""), "{s}");
 }

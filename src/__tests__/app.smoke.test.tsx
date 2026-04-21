@@ -17,26 +17,27 @@ vi.mock("../services/consoleLog", async () => {
   };
 });
 
-vi.mock("../services/gatewayEvents", () => ({
+vi.mock("../services/gateway/gatewayEvents", () => ({
   listenGatewayEvents: vi.fn().mockResolvedValue(() => {}),
 }));
 
-vi.mock("../services/noticeEvents", () => ({
+vi.mock("../services/notification/noticeEvents", () => ({
   listenNoticeEvents: vi.fn().mockResolvedValue(() => {}),
 }));
 
-vi.mock("../services/settings", async () => {
-  const actual =
-    await vi.importActual<typeof import("../services/settings")>("../services/settings");
+vi.mock("../services/settings/settings", async () => {
+  const actual = await vi.importActual<typeof import("../services/settings/settings")>(
+    "../services/settings/settings"
+  );
   return {
     ...actual,
     settingsGet: vi.fn().mockResolvedValue(null),
   };
 });
 
-import { listenGatewayEvents } from "../services/gatewayEvents";
-import { listenNoticeEvents } from "../services/noticeEvents";
-import { settingsGet } from "../services/settings";
+import { listenGatewayEvents } from "../services/gateway/gatewayEvents";
+import { listenNoticeEvents } from "../services/notification/noticeEvents";
+import { settingsGet } from "../services/settings/settings";
 
 const DEFAULT_HASH = "#/";
 

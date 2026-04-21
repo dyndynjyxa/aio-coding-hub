@@ -58,7 +58,7 @@ describe("components/ProviderChainView", () => {
       />
     );
     expect(screen.getByText("数据源：request_logs.attempts_json")).toBeInTheDocument();
-    expect(screen.getAllByText("成功").length).toBeGreaterThan(0);
+    expect(screen.getByText("请求成功")).toBeInTheDocument();
 
     rerender(
       <ProviderChainView
@@ -93,10 +93,12 @@ describe("components/ProviderChainView", () => {
     );
     expect(screen.getByText("数据源：request_logs.attempts_json（结构化）")).toBeInTheDocument();
     expect(screen.getAllByText("未知（id=99）").length).toBeGreaterThan(0);
-    expect(screen.getByText(/请求失败：未知（id=99）/)).toBeInTheDocument();
-    expect(screen.getByText(/未知 返回 HTTP 400/)).toBeInTheDocument();
-    expect(screen.getByText("跳过该供应商")).toBeInTheDocument();
-    expect(screen.getByText("E")).toBeInTheDocument();
-    expect(screen.getAllByText("未成功").length).toBeGreaterThan(0);
+    expect(screen.getByText("请求失败")).toBeInTheDocument();
+    // Error reason is displayed in the error block
+    expect(screen.getByText("because")).toBeInTheDocument();
+    // Provider ID shown in detail body
+    expect(screen.getByText("99")).toBeInTheDocument();
+    // Endpoint shown in detail body
+    expect(screen.getByText("https://p99")).toBeInTheDocument();
   });
 });

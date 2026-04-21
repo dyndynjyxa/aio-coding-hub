@@ -65,6 +65,24 @@ describe("components/home/HomeWorkStatusCard", () => {
     expect(screen.getAllByRole("switch").length).toBe(3);
   });
 
+  it("supports plain chrome when embedded into the info panel", () => {
+    render(
+      <HomeWorkStatusCard
+        layout="vertical"
+        chrome="plain"
+        cliProxyLoading={false}
+        cliProxyAvailable={true}
+        cliProxyEnabled={{ claude: true, codex: false, gemini: false } as any}
+        cliProxyAppliedToCurrentGateway={{ claude: true, codex: null, gemini: null } as any}
+        cliProxyToggling={{ claude: false, codex: false, gemini: false } as any}
+        onSetCliProxyEnabled={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("代理状态")).toBeInTheDocument();
+    expect(screen.getAllByRole("switch")).toHaveLength(3);
+  });
+
   it("shows drift warning and repair button for enabled rows not pointing to current gateway", () => {
     const onSetCliProxyEnabled = vi.fn();
 

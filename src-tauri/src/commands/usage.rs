@@ -4,6 +4,7 @@ use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::{blocking, usage_stats};
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn usage_summary(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -19,6 +20,7 @@ pub(crate) async fn usage_summary(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn usage_summary_v2(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -33,6 +35,7 @@ pub(crate) async fn usage_summary_v2(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn usage_leaderboard_provider(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -50,6 +53,7 @@ pub(crate) async fn usage_leaderboard_provider(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn usage_leaderboard_day(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -67,6 +71,7 @@ pub(crate) async fn usage_leaderboard_day(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn usage_leaderboard_v2(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -84,6 +89,7 @@ pub(crate) async fn usage_leaderboard_v2(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn usage_hourly_series(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -99,6 +105,7 @@ pub(crate) async fn usage_hourly_series(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn usage_provider_cache_rate_trend_v1(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,

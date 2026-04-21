@@ -14,7 +14,7 @@ import {
 import type { TooltipProps } from "recharts";
 import type { ValueType, NameType } from "recharts/types/component/DefaultTooltipContent";
 import type { CustomDateRangeApplied } from "../hooks/useCustomDateRange";
-import type { UsagePeriod, UsageProviderCacheRateTrendRowV1 } from "../services/usage";
+import type { UsagePeriod, UsageProviderCacheRateTrendRowV1 } from "../services/usage/usage";
 import { useTheme } from "../hooks/useTheme";
 import { cn } from "../utils/cn";
 import { buildRecentDayKeys, dayKeyFromLocalDate } from "../utils/dateKeys";

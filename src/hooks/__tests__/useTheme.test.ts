@@ -1,10 +1,9 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setDesktopWindowTheme } from "../../services/desktop/window";
 
-vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: () => ({
-    setTheme: vi.fn().mockResolvedValue(undefined),
-  }),
+vi.mock("../../services/desktop/window", () => ({
+  setDesktopWindowTheme: vi.fn().mockResolvedValue(true),
 }));
 
 describe("hooks/useTheme", () => {
@@ -20,6 +19,42 @@ describe("hooks/useTheme", () => {
   async function importFreshUseTheme() {
     vi.resetModules();
     return await import("../useTheme");
+  }
+
+  function mockMatchMediaWithChangeListener(initialMatches: boolean) {
+    const original = window.matchMedia;
+    let matches = initialMatches;
+    let changeHandler: ((event?: MediaQueryListEvent) => void) | null = null;
+
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      value: vi.fn().mockImplementation(() => ({
+        get matches() {
+          return matches;
+        },
+        media: "(prefers-color-scheme: dark)",
+        onchange: null,
+        addEventListener: (_event: string, handler: (event?: MediaQueryListEvent) => void) => {
+          changeHandler = handler;
+        },
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: () => false,
+      })),
+    });
+
+    return {
+      setMatches(next: boolean) {
+        matches = next;
+      },
+      fireChange() {
+        changeHandler?.();
+      },
+      restore() {
+        Object.defineProperty(window, "matchMedia", { writable: true, value: original });
+      },
+    };
   }
 
   it("defaults to system theme", async () => {
@@ -43,6 +78,7 @@ describe("hooks/useTheme", () => {
     expect(result.current.resolvedTheme).toBe("dark");
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     expect(localStorage.getItem("aio-theme")).toBe("dark");
+    expect(setDesktopWindowTheme).toHaveBeenCalledWith("dark");
   });
 
   it("setTheme(light) removes dark class", async () => {
@@ -163,5 +199,86 @@ describe("hooks/useTheme", () => {
     expect(addListener).toHaveBeenCalledTimes(1);
 
     Object.defineProperty(window, "matchMedia", { writable: true, value: original });
+  });
+
+  it("ignores system theme change events after switching to an explicit theme", async () => {
+    const media = mockMatchMediaWithChangeListener(false);
+    const { useTheme } = await importFreshUseTheme();
+    const { result } = renderHook(() => useTheme());
+
+    act(() => {
+      result.current.setTheme("dark");
+    });
+
+    expect(result.current.theme).toBe("dark");
+    expect(result.current.resolvedTheme).toBe("dark");
+
+    media.setMatches(true);
+    act(() => {
+      media.fireChange();
+    });
+
+    expect(result.current.theme).toBe("dark");
+    expect(result.current.resolvedTheme).toBe("dark");
+    expect(setDesktopWindowTheme).toHaveBeenCalledTimes(2);
+
+    media.restore();
+  });
+
+  it("reacts to system theme changes while in system mode", async () => {
+    const media = mockMatchMediaWithChangeListener(false);
+    const { useTheme } = await importFreshUseTheme();
+    const { result } = renderHook(() => useTheme());
+
+    expect(result.current.theme).toBe("system");
+    expect(result.current.resolvedTheme).toBe("light");
+
+    media.setMatches(true);
+    act(() => {
+      media.fireChange();
+    });
+
+    expect(result.current.theme).toBe("system");
+    expect(result.current.resolvedTheme).toBe("dark");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+    expect(setDesktopWindowTheme).toHaveBeenLastCalledWith("system");
+
+    media.restore();
+  });
+
+  it("keeps the same snapshot when the system theme event does not change the resolved theme", async () => {
+    const media = mockMatchMediaWithChangeListener(false);
+    const { useTheme } = await importFreshUseTheme();
+    const { result } = renderHook(() => useTheme());
+
+    expect(result.current.theme).toBe("system");
+    expect(result.current.resolvedTheme).toBe("light");
+
+    act(() => {
+      media.fireChange();
+    });
+
+    expect(result.current.theme).toBe("system");
+    expect(result.current.resolvedTheme).toBe("light");
+    expect(setDesktopWindowTheme).toHaveBeenCalledTimes(2);
+
+    media.restore();
+  });
+
+  it("keeps DOM theme state even when native window sync rejects", async () => {
+    vi.mocked(setDesktopWindowTheme).mockRejectedValueOnce(new Error("native sync failed"));
+
+    const { useTheme } = await importFreshUseTheme();
+    const { result } = renderHook(() => useTheme());
+
+    act(() => {
+      result.current.setTheme("dark");
+    });
+
+    await Promise.resolve();
+
+    expect(result.current.theme).toBe("dark");
+    expect(result.current.resolvedTheme).toBe("dark");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
   });
 });

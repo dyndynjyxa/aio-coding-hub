@@ -77,4 +77,52 @@ describe("services/generatedIpc", () => {
       error: "boom",
     });
   });
+
+  it("supports null-result fallback for commands that legitimately return null", async () => {
+    await expect(
+      invokeGeneratedIpc<null, string>({
+        title: "读取更新结果失败",
+        cmd: "desktop_updater_check",
+        invoke: async () => ({ status: "ok", data: null }),
+        nullResultBehavior: "return_fallback",
+        fallback: "no-update",
+      })
+    ).resolves.toBe("no-update");
+
+    expect(logToConsole).not.toHaveBeenCalledWith(
+      "error",
+      "读取更新结果失败",
+      expect.anything()
+    );
+  });
+
+  it("passes through raw generated command payloads without Result envelope", async () => {
+    await expect(
+      invokeGeneratedIpc({
+        title: "读取应用信息失败",
+        cmd: "app_about_get",
+        invoke: async () => ({
+          os: "macos",
+          arch: "arm64",
+          profile: "release",
+        }),
+      })
+    ).resolves.toEqual({
+      os: "macos",
+      arch: "arm64",
+      profile: "release",
+    });
+  });
+
+  it("supports fallback when a raw command returns null", async () => {
+    await expect(
+      invokeGeneratedIpc<string | null, string>({
+        title: "读取应用目录失败",
+        cmd: "app_data_dir_get",
+        invoke: async () => null,
+        nullResultBehavior: "return_fallback",
+        fallback: "fallback-dir",
+      })
+    ).resolves.toBe("fallback-dir");
+  });
 });

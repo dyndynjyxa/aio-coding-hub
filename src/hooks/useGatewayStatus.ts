@@ -1,5 +1,5 @@
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { AIO_RELEASES_URL } from "../constants/urls";
+import { openDesktopUrl } from "../services/desktop/opener";
 import { useGatewayMeta } from "./useGatewayMeta";
 import { useUpdateMeta } from "./useUpdateMeta";
 
@@ -53,7 +53,7 @@ export function useGatewayStatus() {
 /** Open the AIO releases page via Tauri opener, fallback to window.open. */
 export async function openReleasesUrl(): Promise<void> {
   try {
-    await openUrl(AIO_RELEASES_URL);
+    await openDesktopUrl(AIO_RELEASES_URL);
   } catch {
     try {
       window.open(AIO_RELEASES_URL, "_blank", "noopener,noreferrer");

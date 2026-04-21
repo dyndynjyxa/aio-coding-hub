@@ -1,13 +1,13 @@
 //! Usage: Codex CLI session scanning/parsing from `$CODEX_HOME/sessions/**.jsonl` (or `~/.codex/sessions`).
 
 use super::{
-    truncate_string, validate_path_under_root, CliSessionsDisplayContentBlock,
-    CliSessionsDisplayMessage, CliSessionsPaginatedMessages, CliSessionsProjectSummary,
-    CliSessionsSessionSummary,
+    folder_name_from_path, truncate_string, validate_path_under_root,
+    CliSessionsDisplayContentBlock, CliSessionsDisplayMessage, CliSessionsFolderLookupEntry,
+    CliSessionsPaginatedMessages, CliSessionsProjectSummary, CliSessionsSessionSummary,
 };
 use crate::shared::error::{AppError, AppResult};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -22,6 +22,7 @@ const MAX_OUTPUT_BLOCK_SIZE: usize = 30_000;
 struct CodexSessionMeta {
     id: String,
     cwd: Option<String>,
+    project_path: Option<String>,
     cli_version: Option<String>,
     model_provider: Option<String>,
     git_branch: Option<String>,
@@ -134,6 +135,11 @@ fn extract_session_meta(path: &Path) -> Option<CodexSessionMeta> {
             .and_then(|v| v.as_str())
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
+        let project_path = payload
+            .get("project_path")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
         let cli_version = payload
             .get("cli_version")
             .and_then(|v| v.as_str())
@@ -154,6 +160,7 @@ fn extract_session_meta(path: &Path) -> Option<CodexSessionMeta> {
         return Some(CodexSessionMeta {
             id,
             cwd,
+            project_path,
             cli_version,
             model_provider,
             git_branch,
@@ -592,6 +599,89 @@ pub fn sessions_list(
     Ok(out)
 }
 
+fn folder_lookup_in_files(
+    files: Vec<PathBuf>,
+    sessions_dir: &Path,
+    source: &str,
+    target_session_ids: &[String],
+) -> Vec<CliSessionsFolderLookupEntry> {
+    if files.is_empty() || target_session_ids.is_empty() {
+        return Vec::new();
+    }
+
+    let mut pending: HashSet<String> = target_session_ids
+        .iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect();
+    let mut out = Vec::new();
+
+    for file_path in files {
+        if pending.is_empty() {
+            break;
+        }
+        if validate_path_under_root(&file_path, sessions_dir).is_err() {
+            continue;
+        }
+        let meta = extract_session_meta(&file_path);
+        let session_id = meta
+            .as_ref()
+            .map(|value| value.id.clone())
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                file_path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+            });
+        let Some(session_id) = session_id else {
+            continue;
+        };
+        if !pending.contains(&session_id) {
+            continue;
+        }
+
+        let folder_path = meta
+            .as_ref()
+            .and_then(|value| value.cwd.clone())
+            .or_else(|| meta.as_ref().and_then(|value| value.project_path.clone()))
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let Some(folder_path) = folder_path else {
+            continue;
+        };
+        let Some(folder_name) = folder_name_from_path(&folder_path) else {
+            continue;
+        };
+
+        pending.remove(&session_id);
+        out.push(CliSessionsFolderLookupEntry {
+            source: source.to_string(),
+            session_id,
+            folder_name,
+            folder_path,
+        });
+    }
+
+    out
+}
+
+pub fn folder_lookup_by_session_ids(
+    app: &tauri::AppHandle,
+    target_session_ids: &[String],
+) -> AppResult<Vec<CliSessionsFolderLookupEntry>> {
+    let sessions_dir = crate::codex_paths::codex_sessions_dir(app)?;
+    let files = scan_all_session_files(app)?;
+    Ok(folder_lookup_in_files(
+        files,
+        &sessions_dir,
+        "codex",
+        target_session_ids,
+    ))
+}
+
 pub fn messages_get(
     app: &tauri::AppHandle,
     file_path: &str,
@@ -819,6 +909,20 @@ pub fn wsl_sessions_list(
     Ok(out)
 }
 
+pub fn wsl_folder_lookup_by_session_ids(
+    distro: &str,
+    target_session_ids: &[String],
+) -> AppResult<Vec<CliSessionsFolderLookupEntry>> {
+    let sessions_dir = wsl_codex_sessions_dir(distro)?;
+    let files = wsl_scan_all_session_files(distro)?;
+    Ok(folder_lookup_in_files(
+        files,
+        &sessions_dir,
+        "codex",
+        target_session_ids,
+    ))
+}
+
 pub fn wsl_messages_get(
     distro: &str,
     file_path: &str,
@@ -883,4 +987,63 @@ pub fn wsl_session_delete(distro: &str, file_path: &str) -> AppResult<bool> {
         )
     })?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::folder_lookup_in_files;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn folder_lookup_prefers_cwd_and_falls_back_to_project_path() {
+        let dir = tempdir().unwrap();
+        let sessions_dir = dir.path();
+        let day_dir = sessions_dir.join("2026").join("04").join("06");
+        fs::create_dir_all(&day_dir).unwrap();
+
+        let cwd_file = day_dir.join("session-cwd.jsonl");
+        fs::write(
+            &cwd_file,
+            r#"{"type":"session_meta","payload":{"id":"codex-cwd","cwd":"/Users/demo/worktrees/current","project_path":"/Users/demo/worktrees/fallback"}}"#,
+        )
+        .unwrap();
+
+        let fallback_file = day_dir.join("session-project.jsonl");
+        fs::write(
+            &fallback_file,
+            r#"{"type":"session_meta","payload":{"id":"codex-project","project_path":"/Users/demo/projects/fallback-only"}}"#,
+        )
+        .unwrap();
+
+        let out = folder_lookup_in_files(
+            vec![cwd_file, fallback_file],
+            sessions_dir,
+            "codex",
+            &[
+                "codex-cwd".to_string(),
+                "codex-project".to_string(),
+                "missing".to_string(),
+            ],
+        );
+
+        assert_eq!(out.len(), 2);
+
+        let cwd_entry = out
+            .iter()
+            .find(|item| item.session_id == "codex-cwd")
+            .unwrap();
+        assert_eq!(cwd_entry.folder_name, "current");
+        assert_eq!(cwd_entry.folder_path, "/Users/demo/worktrees/current");
+
+        let fallback_entry = out
+            .iter()
+            .find(|item| item.session_id == "codex-project")
+            .unwrap();
+        assert_eq!(fallback_entry.folder_name, "fallback-only");
+        assert_eq!(
+            fallback_entry.folder_path,
+            "/Users/demo/projects/fallback-only"
+        );
+    }
 }

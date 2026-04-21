@@ -1,4 +1,6 @@
+use super::types::*;
 use super::*;
+use types::MAX_FAILURE_TIMESTAMPS;
 
 fn breaker() -> CircuitBreaker {
     CircuitBreaker::new(CircuitBreakerConfig::default(), HashMap::new(), None)
@@ -45,7 +47,7 @@ fn open_expires_to_half_open() {
 }
 
 #[test]
-fn half_open_success_transitions_to_closed() {
+fn half_open_one_success_stays_half_open() {
     let cb = breaker();
     let pid = 1;
     let now = 1_000;
@@ -57,6 +59,43 @@ fn half_open_success_transitions_to_closed() {
     cb.should_allow(pid, open_until); // transitions to HalfOpen
 
     let change = cb.record_success(pid, open_until + 1);
+    assert_eq!(change.after.state, CircuitState::HalfOpen);
+    assert!(change.transition.is_none());
+}
+
+#[test]
+fn half_open_two_successes_stays_half_open() {
+    let cb = breaker();
+    let pid = 1;
+    let now = 1_000;
+    for i in 1..=DEFAULT_FAILURE_THRESHOLD {
+        cb.record_failure(pid, now + i as i64);
+    }
+
+    let open_until = cb.snapshot(pid, now + 10).open_until.expect("open_until");
+    cb.should_allow(pid, open_until); // transitions to HalfOpen
+
+    cb.record_success(pid, open_until + 1);
+    let change = cb.record_success(pid, open_until + 2);
+    assert_eq!(change.after.state, CircuitState::HalfOpen);
+    assert!(change.transition.is_none());
+}
+
+#[test]
+fn half_open_three_successes_transitions_to_closed() {
+    let cb = breaker();
+    let pid = 1;
+    let now = 1_000;
+    for i in 1..=DEFAULT_FAILURE_THRESHOLD {
+        cb.record_failure(pid, now + i as i64);
+    }
+
+    let open_until = cb.snapshot(pid, now + 10).open_until.expect("open_until");
+    cb.should_allow(pid, open_until); // transitions to HalfOpen
+
+    cb.record_success(pid, open_until + 1);
+    cb.record_success(pid, open_until + 2);
+    let change = cb.record_success(pid, open_until + 3);
     assert_eq!(change.after.state, CircuitState::Closed);
     assert_eq!(change.after.failure_count, 0);
     assert!(change.transition.is_some());
@@ -64,6 +103,41 @@ fn half_open_success_transitions_to_closed() {
     assert_eq!(t.prev_state, CircuitState::HalfOpen);
     assert_eq!(t.next_state, CircuitState::Closed);
     assert_eq!(t.reason, "HALF_OPEN_SUCCESS");
+}
+
+#[test]
+fn half_open_two_successes_then_failure_resets_to_open() {
+    let cb = breaker();
+    let pid = 1;
+    let now = 1_000;
+    for i in 1..=DEFAULT_FAILURE_THRESHOLD {
+        cb.record_failure(pid, now + i as i64);
+    }
+
+    let open_until = cb.snapshot(pid, now + 10).open_until.expect("open_until");
+    cb.should_allow(pid, open_until); // transitions to HalfOpen
+
+    cb.record_success(pid, open_until + 1);
+    cb.record_success(pid, open_until + 2);
+    let change = cb.record_failure(pid, open_until + 3);
+    assert_eq!(change.after.state, CircuitState::Open);
+    assert!(change.after.open_until.is_some());
+    assert!(change.transition.is_some());
+    let t = change.transition.unwrap();
+    assert_eq!(t.prev_state, CircuitState::HalfOpen);
+    assert_eq!(t.next_state, CircuitState::Open);
+    assert_eq!(t.reason, "HALF_OPEN_FAILURE");
+
+    // After re-opening and expiring, half_open_success_count should be reset
+    let new_open_until = cb
+        .snapshot(pid, open_until + 4)
+        .open_until
+        .expect("open_until");
+    cb.should_allow(pid, new_open_until); // transitions to HalfOpen again
+
+    // Need 3 fresh successes, not 1
+    let change = cb.record_success(pid, new_open_until + 1);
+    assert_eq!(change.after.state, CircuitState::HalfOpen);
 }
 
 #[test]
@@ -89,7 +163,7 @@ fn half_open_failure_transitions_back_to_open() {
 }
 
 #[test]
-fn success_clears_failure_count() {
+fn success_clears_failure_timestamps() {
     let cb = breaker();
     let pid = 1;
     let now = 1_000;
@@ -101,6 +175,71 @@ fn success_clears_failure_count() {
     let after = cb.snapshot(pid, now + 3);
     assert_eq!(after.failure_count, 0);
     assert_eq!(after.state, CircuitState::Closed);
+}
+
+#[test]
+fn failures_within_window_counted_correctly() {
+    let cb = CircuitBreaker::new(
+        CircuitBreakerConfig {
+            failure_threshold: 3,
+            open_duration_secs: 60,
+        },
+        HashMap::new(),
+        None,
+    );
+    let pid = 1;
+    let now = 1_000;
+
+    // Record 2 failures within the window
+    cb.record_failure(pid, now);
+    cb.record_failure(pid, now + 10);
+
+    let snap = cb.snapshot(pid, now + 20);
+    assert_eq!(snap.state, CircuitState::Closed);
+    assert_eq!(snap.failure_count, 2);
+
+    // Third failure within window trips the breaker
+    let change = cb.record_failure(pid, now + 20);
+    assert_eq!(change.after.state, CircuitState::Open);
+}
+
+#[test]
+fn failures_older_than_window_not_counted() {
+    let cb = CircuitBreaker::new(
+        CircuitBreakerConfig {
+            failure_threshold: 3,
+            open_duration_secs: 60,
+        },
+        HashMap::new(),
+        None,
+    );
+    let pid = 1;
+    let now: i64 = 1_000;
+
+    // Record 2 failures
+    cb.record_failure(pid, now);
+    cb.record_failure(pid, now + 1);
+
+    // Jump forward past the window (300s)
+    let later = now + (FAILURE_WINDOW_SECS as i64) + 10;
+
+    // Old failures should have decayed
+    let snap = cb.snapshot(pid, later);
+    assert_eq!(snap.failure_count, 0);
+
+    // Need 3 fresh failures to trip, not 1
+    cb.record_failure(pid, later);
+    let snap = cb.snapshot(pid, later + 1);
+    assert_eq!(snap.state, CircuitState::Closed);
+    assert_eq!(snap.failure_count, 1);
+
+    cb.record_failure(pid, later + 2);
+    let snap = cb.snapshot(pid, later + 3);
+    assert_eq!(snap.state, CircuitState::Closed);
+    assert_eq!(snap.failure_count, 2);
+
+    let change = cb.record_failure(pid, later + 3);
+    assert_eq!(change.after.state, CircuitState::Open);
 }
 
 #[test]
@@ -185,6 +324,36 @@ fn update_config_recalculates_open_until() {
     let check = cb.should_allow(pid, new_open_until);
     assert!(check.allow);
     assert_eq!(check.after.state, CircuitState::HalfOpen);
+}
+
+#[test]
+fn failure_timestamps_capped_at_max() {
+    let cb = CircuitBreaker::new(
+        CircuitBreakerConfig {
+            failure_threshold: (MAX_FAILURE_TIMESTAMPS as u32) + 100,
+            open_duration_secs: 60,
+        },
+        HashMap::new(),
+        None,
+    );
+    let pid = 1;
+    let now: i64 = 10_000;
+
+    // Record more failures than the hard cap, all within the window
+    for i in 0..(MAX_FAILURE_TIMESTAMPS + 50) {
+        cb.record_failure(pid, now + i as i64);
+    }
+
+    let snap = cb.snapshot(pid, now + (MAX_FAILURE_TIMESTAMPS + 50) as i64);
+    // failure_count should be capped at MAX_FAILURE_TIMESTAMPS
+    assert!(
+        snap.failure_count <= MAX_FAILURE_TIMESTAMPS as u32,
+        "failure_count {} exceeded hard cap {}",
+        snap.failure_count,
+        MAX_FAILURE_TIMESTAMPS,
+    );
+    // Circuit should still be Closed because threshold is set very high
+    assert_eq!(snap.state, CircuitState::Closed);
 }
 
 #[test]

@@ -46,8 +46,54 @@ async function parseTauriInvokeResponse(response: Response) {
   }
 }
 
+async function maybeHandleMockDesktopCommand(
+  commandPath: string,
+  payload: Record<string, unknown> | undefined
+) {
+  if (commandPath === "desktop_dialog_open") {
+    const selection = await tauriDialogOpen((payload?.options ?? {}) as Record<string, unknown>);
+    if (!selection) {
+      return null;
+    }
+    return Array.isArray(selection) ? selection : [selection];
+  }
+
+  if (commandPath === "desktop_dialog_save") {
+    const selection = await tauriDialogSave((payload?.options ?? {}) as Record<string, unknown>);
+    return selection ?? null;
+  }
+
+  if (commandPath === "desktop_opener_open_url") {
+    const input = (payload?.input ?? payload) as Record<string, unknown> | undefined;
+    const url = typeof input?.url === "string" ? input.url : "";
+    await tauriOpenUrl(url);
+    return true;
+  }
+
+  if (commandPath === "desktop_opener_open_path") {
+    const input = (payload?.input ?? payload) as Record<string, unknown> | undefined;
+    const path = typeof input?.path === "string" ? input.path : "";
+    await tauriOpenPath(path);
+    return true;
+  }
+
+  if (commandPath === "desktop_opener_reveal_item_in_dir") {
+    const input = (payload?.input ?? payload) as Record<string, unknown> | undefined;
+    const path = typeof input?.path === "string" ? input.path : "";
+    await tauriRevealItemInDir(path);
+    return true;
+  }
+
+  return undefined;
+}
+
 export const tauriInvoke = vi.fn(async (command: string, payload?: Record<string, unknown>) => {
   const commandPath = String(command).replace(/^\/+/, "");
+  const desktopMockResult = await maybeHandleMockDesktopCommand(commandPath, payload);
+  if (desktopMockResult !== undefined) {
+    return desktopMockResult;
+  }
+
   const url = `${TAURI_ENDPOINT}/${commandPath}`;
 
   const response = await fetch(url, {

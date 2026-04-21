@@ -1,12 +1,8 @@
-//! Usage: Shared Tauri state types and DB initialization gate used by `commands/*`.
+//! Usage: Shared DB initialization gate used by `commands/*`.
 
 use crate::shared::error::AppResult;
-use crate::{blocking, db, gateway};
-use std::sync::Mutex;
+use crate::{blocking, db};
 use tokio::sync::{Mutex as AsyncMutex, MutexGuard};
-
-#[derive(Default)]
-pub(crate) struct GatewayState(pub(crate) Mutex<gateway::GatewayManager>);
 
 #[derive(Default)]
 pub(crate) struct DbInitState(pub(crate) AsyncMutex<Option<AppResult<db::Db>>>);

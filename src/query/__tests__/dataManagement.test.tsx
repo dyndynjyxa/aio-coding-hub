@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { dbDiskUsageGet, requestLogsClearAll } from "../../services/dataManagement";
+import { dbDiskUsageGet, requestLogsClearAll } from "../../services/app/dataManagement";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { dataManagementKeys, requestLogsKeys } from "../keys";
@@ -11,9 +11,9 @@ import {
   useRequestLogsClearAllMutation,
 } from "../dataManagement";
 
-vi.mock("../../services/dataManagement", async () => {
-  const actual = await vi.importActual<typeof import("../../services/dataManagement")>(
-    "../../services/dataManagement"
+vi.mock("../../services/app/dataManagement", async () => {
+  const actual = await vi.importActual<typeof import("../../services/app/dataManagement")>(
+    "../../services/app/dataManagement"
   );
   return { ...actual, dbDiskUsageGet: vi.fn(), requestLogsClearAll: vi.fn() };
 });

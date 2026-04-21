@@ -2,7 +2,7 @@
 // NOTE: These are TEST defaults (schema_version:1, empty URLs, etc.).
 // For MSW defaults matching the Rust backend, see `src/test/msw/state.ts`.
 
-import type { AppSettings } from "../../services/settings";
+import type { AppSettings } from "../../services/settings/settings";
 
 export function createTestAppSettings(overrides?: Partial<AppSettings>): AppSettings {
   return {
@@ -63,6 +63,10 @@ export function createTestAppSettings(overrides?: Partial<AppSettings>): AppSett
     cx2cc_drop_stop_sequences: true,
     cx2cc_clean_schema: true,
     cx2cc_filter_batch_tool: true,
+    upstream_proxy_enabled: false,
+    upstream_proxy_url: "",
+    upstream_proxy_username: "",
+    upstream_proxy_password_configured: false,
     ...overrides,
   };
 }

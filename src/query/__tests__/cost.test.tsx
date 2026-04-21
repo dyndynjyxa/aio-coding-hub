@@ -7,13 +7,15 @@ import {
   costSummaryV1,
   costTopRequestsV1,
   costTrendV1,
-} from "../../services/cost";
+} from "../../services/usage/cost";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { useCostAnalyticsV1Query } from "../cost";
 
-vi.mock("../../services/cost", async () => {
-  const actual = await vi.importActual<typeof import("../../services/cost")>("../../services/cost");
+vi.mock("../../services/usage/cost", async () => {
+  const actual = await vi.importActual<typeof import("../../services/usage/cost")>(
+    "../../services/usage/cost"
+  );
   return {
     ...actual,
     costSummaryV1: vi.fn(),
@@ -154,7 +156,7 @@ describe("query/cost", () => {
   it("returns null when any underlying call returns null", async () => {
     setTauriRuntime();
 
-    vi.mocked(costSummaryV1).mockResolvedValue(null);
+    vi.mocked(costSummaryV1).mockResolvedValue(null as never);
     vi.mocked(costTrendV1).mockResolvedValue([]);
     vi.mocked(costBreakdownProviderV1).mockResolvedValue([]);
     vi.mocked(costBreakdownModelV1).mockResolvedValue([]);

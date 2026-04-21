@@ -1,5 +1,5 @@
 use super::proxy::GatewayErrorCode;
-use axum::http::{header, HeaderMap, HeaderValue};
+use axum::http::{header, HeaderMap};
 use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
@@ -8,7 +8,22 @@ use std::io::Read;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub(super) const MAX_REQUEST_BODY_BYTES: usize = 10 * 1024 * 1024;
+/// Hard cap on request body size read into memory. Exists **only** to bound
+/// gateway memory usage (we clone the full body per failover retry); it is not
+/// a product-level limit. Chosen to be large enough that normal AI CLI traffic
+/// — including image uploads, PDFs, long histories — never hits it.
+pub(super) const MAX_REQUEST_BODY_BYTES: usize = 500 * 1024 * 1024;
+
+/// Diagnostic threshold (not a rejection limit). When a request body is larger
+/// than this AND the `model` field cannot be inferred from body/query/path,
+/// the gateway returns a 400 with a helpful message, because a missing model
+/// on an oversized body is almost always an upstream-client bug (truncation,
+/// streaming body, chunking misbehavior). Requests >= this size with a
+/// resolvable model are forwarded normally.
+///
+/// Aligned with claude-code-hub's `LARGE_REQUEST_BODY_BYTES` heuristic.
+pub(super) const LARGE_REQUEST_BODY_BYTES: usize = 10 * 1024 * 1024;
+
 pub(super) const MAX_INTROSPECTION_BODY_BYTES: usize = 2 * 1024 * 1024;
 
 static TRACE_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -395,65 +410,26 @@ pub(super) fn build_target_url(
     Ok(url)
 }
 
-pub(super) fn inject_provider_auth(cli_key: &str, api_key: &str, headers: &mut HeaderMap) {
+/// Clear all authentication-related headers (fail-closed pattern).
+/// Single source of truth for which headers carry credentials.
+pub(super) fn clear_all_auth_headers(headers: &mut HeaderMap) {
     headers.remove(header::AUTHORIZATION);
     headers.remove("x-api-key");
     headers.remove("x-goog-api-key");
     headers.remove("x-goog-api-client");
+}
 
-    match cli_key {
-        "codex" => {
-            let value = format!("Bearer {api_key}");
-            if let Ok(header_value) = HeaderValue::from_str(&value) {
-                headers.insert(header::AUTHORIZATION, header_value);
-            }
-        }
-        "claude" => {
-            if let Ok(header_value) = HeaderValue::from_str(api_key) {
-                headers.insert("x-api-key", header_value);
-            }
-            if !headers.contains_key("anthropic-version") {
-                headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
-            }
-        }
-        "gemini" => {
-            let trimmed = api_key.trim();
-            let oauth_access_token = if trimmed.starts_with("ya29.") {
-                Some(trimmed.to_string())
-            } else if trimmed.starts_with('{') {
-                serde_json::from_str::<serde_json::Value>(trimmed)
-                    .ok()
-                    .and_then(|v| {
-                        v.get("access_token")
-                            .and_then(|v| v.as_str())
-                            .map(str::to_string)
-                    })
-            } else {
-                None
-            };
+pub(super) fn inject_provider_auth(cli_key: &str, api_key: &str, headers: &mut HeaderMap) {
+    clear_all_auth_headers(headers);
 
-            if let Some(token) = oauth_access_token {
-                let value = format!("Bearer {token}");
-                if let Ok(header_value) = HeaderValue::from_str(&value) {
-                    headers.insert(header::AUTHORIZATION, header_value);
-                }
-                if !headers.contains_key("x-goog-api-client") {
-                    headers.insert(
-                        "x-goog-api-client",
-                        HeaderValue::from_static("GeminiCLI/1.0"),
-                    );
-                }
-            } else if let Ok(header_value) = HeaderValue::from_str(trimmed) {
-                headers.insert("x-goog-api-key", header_value);
-            }
-        }
-        _ => {}
+    if let Some(strategy) = crate::gateway::cli_auth::global_cli_auth_registry().get(cli_key) {
+        strategy.inject_api_key_auth(headers, api_key);
     }
 }
 
 pub(super) fn ensure_cli_required_headers(cli_key: &str, headers: &mut HeaderMap) {
-    if cli_key == "claude" && !headers.contains_key("anthropic-version") {
-        headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
+    if let Some(strategy) = crate::gateway::cli_auth::global_cli_auth_registry().get(cli_key) {
+        strategy.ensure_required_headers(headers);
     }
 }
 

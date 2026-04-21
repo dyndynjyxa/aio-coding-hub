@@ -63,14 +63,12 @@ fn retry_delay(attempt_index: u32) -> Duration {
     Duration::from_millis(raw.min(INSERT_RETRY_MAX_DELAY_MS))
 }
 
-fn u32_from_i64(value: i64) -> u32 {
-    if value <= 0 {
-        return 0;
-    }
-    if value > u32::MAX as i64 {
-        return u32::MAX;
-    }
-    value as u32
+fn serialize_failure_timestamps(timestamps: &[u64]) -> String {
+    serde_json::to_string(timestamps).unwrap_or_else(|_| "[]".to_string())
+}
+
+fn deserialize_failure_timestamps(raw: &str) -> Vec<u64> {
+    serde_json::from_str(raw).unwrap_or_default()
 }
 
 pub fn start_buffered_writer(
@@ -169,12 +167,16 @@ INSERT INTO provider_circuit_breakers (
   provider_id,
   state,
   failure_count,
+  failure_timestamps_json,
+  half_open_success_count,
   open_until,
   updated_at
-) VALUES (?1, ?2, ?3, ?4, ?5)
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
 ON CONFLICT(provider_id) DO UPDATE SET
   state = excluded.state,
   failure_count = excluded.failure_count,
+  failure_timestamps_json = excluded.failure_timestamps_json,
+  half_open_success_count = excluded.half_open_success_count,
   open_until = excluded.open_until,
   updated_at = excluded.updated_at
 "#,
@@ -190,10 +192,15 @@ ON CONFLICT(provider_id) DO UPDATE SET
                 now_unix_seconds()
             };
 
+            let timestamps_json = serialize_failure_timestamps(&item.failure_timestamps);
+            let failure_count = item.failure_timestamps.len().min(u32::MAX as usize) as i64;
+
             stmt.execute(params![
                 item.provider_id,
                 item.state.as_str(),
-                item.failure_count as i64,
+                failure_count,
+                timestamps_json,
+                item.half_open_success_count as i64,
                 item.open_until,
                 updated_at
             ])
@@ -219,7 +226,8 @@ pub fn load_all(
     SELECT
       provider_id,
       state,
-      failure_count,
+      failure_timestamps_json,
+      half_open_success_count,
       open_until,
       updated_at
     FROM provider_circuit_breakers
@@ -231,10 +239,16 @@ pub fn load_all(
         .query_map([], |row| {
             let raw_state: String = row.get("state")?;
             let open_until: Option<i64> = row.get("open_until")?;
+            let timestamps_json: String = row
+                .get::<_, String>("failure_timestamps_json")
+                .unwrap_or_else(|_| "[]".to_string());
+            let half_open_success_count: i64 =
+                row.get::<_, i64>("half_open_success_count").unwrap_or(0);
             Ok(circuit_breaker::CircuitPersistedState {
                 provider_id: row.get("provider_id")?,
                 state: circuit_breaker::CircuitState::from_str(&raw_state),
-                failure_count: u32_from_i64(row.get::<_, i64>("failure_count")?),
+                failure_timestamps: deserialize_failure_timestamps(&timestamps_json),
+                half_open_success_count: half_open_success_count.max(0).min(u32::MAX as i64) as u32,
                 open_until,
                 updated_at: row.get("updated_at")?,
             })

@@ -8,8 +8,11 @@ import { Input } from "../../ui/Input";
 import { cn } from "../../utils/cn";
 import { formatUsd } from "../../utils/formatters";
 import { Calendar, Filter, RefreshCw, ChevronDown } from "lucide-react";
-import type { CostPeriod } from "../../services/cost";
-import type { CostProviderBreakdownRowV1, CostModelBreakdownRowV1 } from "../../services/cost";
+import type { CostPeriod } from "../../services/usage/cost";
+import type {
+  CostProviderBreakdownRowV1,
+  CostModelBreakdownRowV1,
+} from "../../services/usage/cost";
 import type { CustomDateRangeApplied } from "../../hooks/useCustomDateRange";
 import { CLI_ITEMS, type CliFilter } from "./useCostFilters";
 

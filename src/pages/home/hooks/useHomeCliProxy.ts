@@ -4,8 +4,8 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { logToConsole } from "../../../services/consoleLog";
-import type { CliKey } from "../../../services/providers";
-import { envConflictsCheck, type EnvConflict } from "../../../services/envConflicts";
+import type { CliKey } from "../../../services/providers/providers";
+import { envConflictsCheck, type EnvConflict } from "../../../services/cli/envConflicts";
 import { useCliProxy } from "../../../hooks/useCliProxy";
 
 export type PendingCliProxyEnablePrompt = {

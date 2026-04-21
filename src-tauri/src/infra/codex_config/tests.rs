@@ -600,3 +600,84 @@ fn patch_updates_sandbox_dotted_mode_when_present() {
     assert!(!s.contains("[sandbox]"), "{s}");
     assert!(!s.contains("sandbox_mode ="), "{s}");
 }
+
+#[test]
+fn patch_remote_compaction_enabled_renames_provider_table_to_openai() {
+    let input = r#"model_provider = "aio"
+
+[model_providers.aio]
+name = "aio"
+base_url = "http://127.0.0.1:37124/v1"
+wire_api = "responses"
+"#;
+
+    let out = patch_config_toml(
+        Some(input.as_bytes().to_vec()),
+        CodexConfigPatch {
+            features_remote_compaction: Some(true),
+            ..empty_patch()
+        },
+    )
+    .expect("patch_config_toml");
+
+    let s = String::from_utf8(out).expect("utf8");
+    assert!(s.contains("model_provider = \"OpenAI\""), "{s}");
+    assert!(s.contains("[model_providers.OpenAI]"), "{s}");
+    assert!(s.contains("name = \"OpenAI\""), "{s}");
+    assert!(!s.contains("[model_providers.aio]"), "{s}");
+    assert!(s.contains("[features]"), "{s}");
+    assert!(s.contains("remote_compaction = true"), "{s}");
+}
+
+#[test]
+fn patch_remote_compaction_disabled_reverts_provider_table_to_aio() {
+    let input = r#"model_provider = "OpenAI"
+
+[model_providers.OpenAI]
+name = "OpenAI"
+base_url = "http://127.0.0.1:37124/v1"
+wire_api = "responses"
+
+[features]
+remote_compaction = true
+"#;
+
+    let out = patch_config_toml(
+        Some(input.as_bytes().to_vec()),
+        CodexConfigPatch {
+            features_remote_compaction: Some(false),
+            ..empty_patch()
+        },
+    )
+    .expect("patch_config_toml");
+
+    let s = String::from_utf8(out).expect("utf8");
+    assert!(s.contains("model_provider = \"aio\""), "{s}");
+    assert!(s.contains("[model_providers.aio]"), "{s}");
+    assert!(s.contains("name = \"aio\""), "{s}");
+    assert!(!s.contains("[model_providers.OpenAI]"), "{s}");
+    assert!(!s.contains("remote_compaction ="), "{s}");
+}
+
+#[test]
+fn patch_remote_compaction_enabled_creates_model_provider_and_renames_table() {
+    let input = r#"[model_providers.aio]
+name = "aio"
+base_url = "http://127.0.0.1:37124/v1"
+"#;
+
+    let out = patch_config_toml(
+        Some(input.as_bytes().to_vec()),
+        CodexConfigPatch {
+            features_remote_compaction: Some(true),
+            ..empty_patch()
+        },
+    )
+    .expect("patch_config_toml");
+
+    let s = String::from_utf8(out).expect("utf8");
+    assert!(s.contains("model_provider = \"OpenAI\""), "{s}");
+    assert!(s.contains("[model_providers.OpenAI]"), "{s}");
+    assert!(s.contains("name = \"OpenAI\""), "{s}");
+    assert!(!s.contains("[model_providers.aio]"), "{s}");
+}

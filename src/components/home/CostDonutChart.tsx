@@ -8,7 +8,7 @@ import { Card } from "../../ui/Card";
 import { formatUsd } from "../../utils/formatters";
 import { getTooltipStyle } from "../charts/chartTheme";
 import { CHART_ANIMATION } from "../charts/chartTheme";
-import type { CostPeriod } from "../../services/cost";
+import type { CostPeriod } from "../../services/usage/cost";
 import type { CustomDateRangeApplied } from "../../hooks/useCustomDateRange";
 
 // Pie chart color palette — aligned with MULTI_SERIES_PALETTE via shared constants

@@ -33,6 +33,12 @@ const INSERT_RETRY_MAX_DELAY_MS: u64 = 500;
 const COST_MULTIPLIER_CACHE_MAX_ENTRIES: usize = 256;
 const MODEL_PRICE_CACHE_MAX_ENTRIES: usize = 512;
 const CACHE_TTL_SECS: i64 = 5 * 60;
+const EFFECTIVE_COST_MULTIPLIER_SQL: &str = r#"
+SELECT COALESCE(source.cost_multiplier, bridge.cost_multiplier)
+FROM providers bridge
+LEFT JOIN providers source ON source.id = bridge.source_provider_id
+WHERE bridge.id = ?1
+"#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DbWriteErrorKind {
@@ -336,11 +342,11 @@ fn insert_batch_once(
         .map_err(|e| DbWriteError::from_rusqlite("failed to start transaction", e))?;
 
     {
-        let mut stmt_multiplier = tx
-            .prepare_cached("SELECT cost_multiplier FROM providers WHERE id = ?1")
-            .map_err(|e| {
-                DbWriteError::from_rusqlite("failed to prepare cost_multiplier query", e)
-            })?;
+        let mut stmt_multiplier =
+            tx.prepare_cached(EFFECTIVE_COST_MULTIPLIER_SQL)
+                .map_err(|e| {
+                    DbWriteError::from_rusqlite("failed to prepare cost_multiplier query", e)
+                })?;
         let mut stmt_price_json = tx
             .prepare_cached("SELECT price_json FROM model_prices WHERE cli_key = ?1 AND model = ?2")
             .map_err(|e| DbWriteError::from_rusqlite("failed to prepare model_price query", e))?;
@@ -452,6 +458,8 @@ fn insert_batch_once(
                         let usage = usage_for_cost(item);
                         if !has_any_cost_usage(&usage) {
                             None
+                        } else if cost_multiplier == 0.0 {
+                            Some(0)
                         } else {
                             let mut priced_model = cost_basis.model.as_str();
                             let priced_cli_key = cost_basis.cli_key.as_str();
@@ -630,7 +638,8 @@ GROUP BY cli_key, session_id
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_cx2cc_cost_basis, InsertBatchCache};
+    use super::{parse_cx2cc_cost_basis, InsertBatchCache, EFFECTIVE_COST_MULTIPLIER_SQL};
+    use rusqlite::{params, Connection};
 
     #[test]
     fn parses_cx2cc_cost_basis_from_special_settings() {
@@ -675,5 +684,72 @@ mod tests {
 
         cache.put_model_price_json(key.clone(), value.clone(), now);
         assert_eq!(cache.get_model_price_json(&key, now), Some(value));
+    }
+
+    #[test]
+    fn effective_cost_multiplier_prefers_cx2cc_source_provider() {
+        let conn = Connection::open_in_memory().expect("open memory db");
+        conn.execute_batch(
+            r#"
+CREATE TABLE providers (
+  id INTEGER PRIMARY KEY,
+  cost_multiplier REAL NOT NULL DEFAULT 1.0,
+  source_provider_id INTEGER
+);
+INSERT INTO providers (id, cost_multiplier, source_provider_id) VALUES (7, 1.8, NULL);
+INSERT INTO providers (id, cost_multiplier, source_provider_id) VALUES (12, 1.2, 7);
+            "#,
+        )
+        .expect("seed providers");
+
+        let multiplier: f64 = conn
+            .query_row(EFFECTIVE_COST_MULTIPLIER_SQL, params![12], |row| row.get(0))
+            .expect("query multiplier");
+
+        assert_eq!(multiplier, 1.8);
+    }
+
+    #[test]
+    fn effective_cost_multiplier_falls_back_when_source_deleted() {
+        let conn = Connection::open_in_memory().expect("open memory db");
+        conn.execute_batch(
+            r#"
+CREATE TABLE providers (
+  id INTEGER PRIMARY KEY,
+  cost_multiplier REAL NOT NULL DEFAULT 1.0,
+  source_provider_id INTEGER
+);
+INSERT INTO providers (id, cost_multiplier, source_provider_id) VALUES (12, 1.2, 999);
+            "#,
+        )
+        .expect("seed providers");
+
+        let multiplier: f64 = conn
+            .query_row(EFFECTIVE_COST_MULTIPLIER_SQL, params![12], |row| row.get(0))
+            .expect("query multiplier");
+
+        assert_eq!(multiplier, 1.2);
+    }
+
+    #[test]
+    fn effective_cost_multiplier_returns_own_when_no_source() {
+        let conn = Connection::open_in_memory().expect("open memory db");
+        conn.execute_batch(
+            r#"
+CREATE TABLE providers (
+  id INTEGER PRIMARY KEY,
+  cost_multiplier REAL NOT NULL DEFAULT 1.0,
+  source_provider_id INTEGER
+);
+INSERT INTO providers (id, cost_multiplier, source_provider_id) VALUES (5, 2.5, NULL);
+            "#,
+        )
+        .expect("seed providers");
+
+        let multiplier: f64 = conn
+            .query_row(EFFECTIVE_COST_MULTIPLIER_SQL, params![5], |row| row.get(0))
+            .expect("query multiplier");
+
+        assert_eq!(multiplier, 2.5);
     }
 }

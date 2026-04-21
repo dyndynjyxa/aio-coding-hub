@@ -226,8 +226,8 @@ impl HeartbeatWatchdogState {
 
 /// Emit an event only when the WebView is believed to be alive.
 /// Use this from any module that sends events to the frontend.
-pub(crate) fn gated_emit<S: serde::Serialize + Clone>(
-    app: &tauri::AppHandle,
+pub(crate) fn gated_emit<R: tauri::Runtime, S: serde::Serialize + Clone>(
+    app: &tauri::AppHandle<R>,
     event: &str,
     payload: S,
 ) {

@@ -1,25 +1,24 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { AIO_RELEASES_URL } from "../../constants/urls";
 import { logToConsole } from "../../services/consoleLog";
-import { appRestart } from "../../services/dataManagement";
+import { appRestart } from "../../services/app/dataManagement";
 import {
   updateDialogSetOpen,
   updateDownloadAndInstall,
   useUpdateMeta,
 } from "../../hooks/useUpdateMeta";
+import { tauriOpenUrl } from "../../test/mocks/tauri";
 import { UpdateDialog } from "../UpdateDialog";
 
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { loading: vi.fn().mockReturnValue("toast-id") }),
 }));
-vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 vi.mock("../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
-vi.mock("../../services/dataManagement", async () => {
-  const actual = await vi.importActual<typeof import("../../services/dataManagement")>(
-    "../../services/dataManagement"
+vi.mock("../../services/app/dataManagement", async () => {
+  const actual = await vi.importActual<typeof import("../../services/app/dataManagement")>(
+    "../../services/app/dataManagement"
   );
   return { ...actual, appRestart: vi.fn() };
 });
@@ -53,6 +52,30 @@ describe("components/UpdateDialog", () => {
     expect(screen.getAllByText("—")).toHaveLength(2);
     expect(screen.getByText("未发现可安装更新。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "下载并安装" })).toBeDisabled();
+  });
+
+  it("renders changelog body with markdown links via MDXEditor", () => {
+    vi.mocked(useUpdateMeta).mockReturnValue({
+      about: { run_mode: "desktop", app_version: "0.0.0" },
+      updateCandidate: {
+        rid: 1,
+        version: "1.2.0",
+        currentVersion: "1.1.0",
+        date: "2026-04-12T11:00:00Z",
+        body: "## [1.2.0](https://example.com) (2026-04-12)\n\n### Features:\n* [新增功能](https://example.com/commit/abc)",
+      },
+      checkingUpdate: false,
+      dialogOpen: true,
+      installingUpdate: false,
+      installError: null,
+      installTotalBytes: null,
+      installDownloadedBytes: 0,
+    } as any);
+
+    render(<UpdateDialog />);
+
+    expect(screen.getByText("更新日志")).toBeInTheDocument();
+    expect(screen.getByText("新增功能")).toBeInTheDocument();
   });
 
   it("renders publish date, installing progress, and install error state", () => {
@@ -222,14 +245,14 @@ describe("components/UpdateDialog", () => {
       installDownloadedBytes: 0,
     } as any);
 
-    vi.mocked(openUrl).mockResolvedValue(undefined as never);
+    vi.mocked(tauriOpenUrl).mockResolvedValue(undefined as never);
 
     render(<UpdateDialog />);
 
     fireEvent.click(screen.getByRole("button", { name: "打开下载页" }));
 
     await waitFor(() => {
-      expect(openUrl).toHaveBeenCalledWith(AIO_RELEASES_URL);
+      expect(tauriOpenUrl).toHaveBeenCalledWith(AIO_RELEASES_URL);
     });
     expect(logToConsole).not.toHaveBeenCalled();
   });
@@ -246,7 +269,7 @@ describe("components/UpdateDialog", () => {
       installDownloadedBytes: 0,
     } as any);
 
-    vi.mocked(openUrl).mockRejectedValue(new Error("blocked"));
+    vi.mocked(tauriOpenUrl).mockRejectedValue(new Error("blocked"));
     vi.spyOn(window, "open").mockImplementation(() => null);
 
     render(<UpdateDialog />);

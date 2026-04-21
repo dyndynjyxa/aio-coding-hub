@@ -78,7 +78,7 @@ pub(crate) const CODEX_CHATGPT_RESPONSES_ALLOWED_KEYS: &[&str] = &[
 ];
 
 /// Filter a request body to only the ChatGPT Responses API allowed keys, then
-/// force `stream: true` and `store: false`.
+/// force `stream: true`, `store: false`, and coerce `instructions` to a string.
 ///
 /// If `root` is not a JSON object it is returned unchanged.
 pub(crate) fn codex_chatgpt_request_compat_value(root: &Value) -> Value {
@@ -94,6 +94,10 @@ pub(crate) fn codex_chatgpt_request_compat_value(root: &Value) -> Value {
     }
     next.insert("stream".to_string(), Value::Bool(true));
     next.insert("store".to_string(), Value::Bool(false));
+    let instructions_needs_coercion = next.get("instructions").and_then(Value::as_str).is_none();
+    if instructions_needs_coercion {
+        next.insert("instructions".to_string(), Value::String(String::new()));
+    }
     Value::Object(next)
 }
 
@@ -277,6 +281,35 @@ mod tests {
 
         assert_eq!(next["stream"], true);
         assert_eq!(next["store"], false);
+    }
+
+    #[test]
+    fn compat_injects_empty_instructions_when_missing() {
+        let root = json!({
+            "model": "gpt-5",
+            "input": "hello"
+        });
+
+        let next = codex_chatgpt_request_compat_value(&root);
+
+        assert_eq!(next["stream"], true);
+        assert_eq!(next["store"], false);
+        assert_eq!(next["instructions"], "");
+    }
+
+    #[test]
+    fn compat_coerces_null_instructions_to_empty_string() {
+        let root = json!({
+            "model": "gpt-5",
+            "input": "hello",
+            "instructions": null
+        });
+
+        let next = codex_chatgpt_request_compat_value(&root);
+
+        assert_eq!(next["stream"], true);
+        assert_eq!(next["store"], false);
+        assert_eq!(next["instructions"], "");
     }
 
     #[test]

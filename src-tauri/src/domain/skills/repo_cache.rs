@@ -197,6 +197,31 @@ fn detect_checked_out_branch(dir: &Path) -> crate::shared::error::AppResult<Stri
     Ok(branch)
 }
 
+/// Get the HEAD commit SHA of a git repository or snapshot directory.
+/// For snapshot directories (GitHub zip downloads), reads from the marker file.
+/// For git repos, uses `git rev-parse HEAD`.
+pub(super) fn get_repo_head_commit(repo_dir: &Path) -> crate::shared::error::AppResult<String> {
+    // For GitHub snapshot directories, there's no .git folder.
+    // In this case, we cannot get a commit hash directly.
+    // We'll try git rev-parse first, and if that fails, return an error.
+    let git_dir = repo_dir.join(".git");
+    if !git_dir.exists() {
+        // Snapshot mode: no commit hash available from the zip download.
+        // The GitHub API doesn't include commit info in zipball downloads.
+        // Return an error indicating no commit info.
+        return Err("SKILL_NO_COMMIT_INFO: snapshot mode, no git history available".into());
+    }
+
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(repo_dir).arg("rev-parse").arg("HEAD");
+    let out = run_git_capture(cmd)?;
+    let commit = out.trim().to_string();
+    if commit.is_empty() {
+        return Err("SKILL_GIT_ERROR: failed to get HEAD commit".into());
+    }
+    Ok(commit)
+}
+
 fn build_github_client() -> crate::shared::error::AppResult<reqwest::Client> {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(60))
@@ -307,6 +332,58 @@ fn github_download_zipball(
             .await
             .map_err(|e| format!("SKILL_HTTP_ERROR: failed to read github zip body: {e}"))?;
         Ok(bytes.to_vec())
+    })
+    .map_err(Into::into)
+}
+
+/// Get the latest commit SHA for a branch from GitHub API.
+pub(super) fn github_get_branch_commit(
+    owner: &str,
+    repo: &str,
+    branch: &str,
+) -> crate::shared::error::AppResult<String> {
+    let client = build_github_client()?;
+    let url = github_api_url(&["repos", owner, repo, "commits", branch])?;
+    tauri::async_runtime::block_on(async move {
+        let resp = client
+            .get(url)
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .map_err(|e| format!("SKILL_HTTP_ERROR: github request failed: {e}"))?;
+
+        let status = resp.status();
+        let body = resp
+            .text()
+            .await
+            .map_err(|e| format!("SKILL_HTTP_ERROR: failed to read github response: {e}"))?;
+
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Err("SKILL_GITHUB_REF_NOT_FOUND: branch/commit not found".to_string());
+        }
+        if status == reqwest::StatusCode::FORBIDDEN {
+            return Err(
+                "SKILL_GITHUB_FORBIDDEN: github request forbidden (rate limit?)".to_string(),
+            );
+        }
+        if !status.is_success() {
+            return Err(format!(
+                "SKILL_GITHUB_HTTP_ERROR: github returned http status {}",
+                status
+            ));
+        }
+
+        let root: serde_json::Value = serde_json::from_str(&body)
+            .map_err(|e| format!("SKILL_GITHUB_PARSE_ERROR: github json parse failed: {e}"))?;
+        let sha = root
+            .get("sha")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        if sha.is_empty() {
+            return Err("SKILL_GITHUB_PARSE_ERROR: missing commit sha".to_string());
+        }
+        Ok(sha.to_string())
     })
     .map_err(Into::into)
 }

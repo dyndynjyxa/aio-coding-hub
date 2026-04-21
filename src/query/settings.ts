@@ -1,17 +1,20 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  createSettingsSetInput,
   settingsGet,
   settingsSet,
+  type AppSettingsPatch,
   type AppSettings,
+  type SettingsMutationResult,
   type SettingsSetInput,
-} from "../services/settings";
-import { settingsCircuitBreakerNoticeSet } from "../services/settingsCircuitBreakerNotice";
-import { settingsCodexSessionIdCompletionSet } from "../services/settingsCodexSessionIdCompletion";
+} from "../services/settings/settings";
+import { settingsCircuitBreakerNoticeSet } from "../services/settings/settingsCircuitBreakerNotice";
+import { settingsCodexSessionIdCompletionSet } from "../services/settings/settingsCodexSessionIdCompletion";
 import {
   settingsGatewayRectifierSet,
   type GatewayRectifierSettingsPatch,
-} from "../services/settingsGatewayRectifier";
-import { settingsKeys } from "./keys";
+} from "../services/settings/settingsGatewayRectifier";
+import { gatewayKeys, settingsKeys } from "./keys";
 
 export const SETTINGS_READONLY_MESSAGE =
   "设置文件读取失败，已进入只读保护。请先修复或恢复 settings.json 后刷新页面。";
@@ -54,17 +57,42 @@ export function useSettingsQuery(options?: { enabled?: boolean }) {
   });
 }
 
-export { type SettingsSetInput } from "../services/settings";
+export { type SettingsSetInput } from "../services/settings/settings";
+export { type SettingsMutationResult } from "../services/settings/settings";
 
 export function useSettingsSetMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: (input: SettingsSetInput) => settingsSet(input),
-    onSuccess: (updated) => {
-      if (!updated) return;
-      queryClient.setQueryData<AppSettings | null>(settingsKeys.get(), updated);
+    onSuccess: (result) => syncSettingsMutationCaches(queryClient, result),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: settingsKeys.get() });
     },
+  });
+}
+
+function syncSettingsMutationCaches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  result: SettingsMutationResult | null | undefined
+) {
+  if (!result) return;
+  queryClient.setQueryData<AppSettings | null>(settingsKeys.get(), result.settings);
+  queryClient.setQueryData(gatewayKeys.status(), result.runtime.gateway_status);
+}
+
+export function useSettingsPatchMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (patch: AppSettingsPatch) => {
+      const current = queryClient.getQueryData<AppSettings | null>(settingsKeys.get());
+      if (!current) {
+        throw new Error("SETTINGS_NOT_READY: settings query cache is empty");
+      }
+      return settingsSet(createSettingsSetInput(current, patch));
+    },
+    onSuccess: (result) => syncSettingsMutationCaches(queryClient, result),
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: settingsKeys.get() });
     },

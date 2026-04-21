@@ -2,7 +2,13 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useMcpServerUpsertMutation } from "../../../query/mcp";
 import { logToConsole } from "../../../services/consoleLog";
-import { mcpParseJson, type McpServerSummary, type McpTransport } from "../../../services/mcp";
+import {
+  mcpParseJson,
+  type McpImportServer,
+  type McpSecretPatchInput,
+  type McpServerSummary,
+  type McpTransport,
+} from "../../../services/workspace/mcp";
 import { Button } from "../../../ui/Button";
 import { Dialog } from "../../../ui/Dialog";
 import { cn } from "../../../utils/cn";
@@ -19,10 +25,10 @@ type McpDialogDraft = {
   transport: McpTransport;
   command: string;
   args: string[];
-  env: Record<string, string>;
+  envPairs: KVPair[];
   cwd: string;
   url: string;
-  headers: Record<string, string>;
+  headerPairs: KVPair[];
 };
 
 type KVPair = { key: string; value: string };
@@ -35,32 +41,73 @@ function recordToPairs(record: Record<string, string>): KVPair[] {
   return pairs.length > 0 ? pairs : [{ key: "", value: "" }];
 }
 
-function validatePairs(
+function keysToPreservedPairs(keys: string[]): KVPair[] {
+  const pairs = keys.map((key) => ({ key, value: "" }));
+  return pairs.length > 0 ? pairs : [{ key: "", value: "" }];
+}
+
+function buildSecretPatch(
   pairs: KVPair[],
-  spec: { label: string; keyLabel: string; valueLabel: string; keyPattern: RegExp }
-): string | null {
+  spec: {
+    label: string;
+    keyLabel: string;
+    valueLabel: string;
+    keyPattern: RegExp;
+    existingKeys: ReadonlySet<string>;
+  }
+): { error: string | null; patch: McpSecretPatchInput } {
+  const preserveKeys: string[] = [];
+  const replace: Record<string, string> = {};
+  const seenKeys = new Set<string>();
+
   for (const [i, pair] of pairs.entries()) {
     const key = pair.key.trim();
     const value = pair.value.trim();
 
-    if (!key && !value) continue;
-    if (!key || !value) {
-      return `${spec.label} 第 ${i + 1} 行：请填写 ${spec.keyLabel}=${spec.valueLabel}`;
+    if (!key && !value) {
+      continue;
+    }
+    if (!key) {
+      return {
+        error: `${spec.label} 第 ${i + 1} 行：请填写 ${spec.keyLabel}`,
+        patch: { preserve_keys: [], replace: {} },
+      };
     }
     if (!spec.keyPattern.test(key)) {
-      return `${spec.label} 第 ${i + 1} 行：${spec.keyLabel} 格式不正确`;
+      return {
+        error: `${spec.label} 第 ${i + 1} 行：${spec.keyLabel} 格式不正确`,
+        patch: { preserve_keys: [], replace: {} },
+      };
     }
-  }
-  return null;
-}
+    if (seenKeys.has(key)) {
+      return {
+        error: `${spec.label} 第 ${i + 1} 行：${spec.keyLabel} ${key} 重复`,
+        patch: { preserve_keys: [], replace: {} },
+      };
+    }
+    seenKeys.add(key);
 
-function pairsToRecord(pairs: KVPair[]): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const { key, value } of pairs) {
-    const k = key.trim();
-    if (k) out[k] = value;
+    if (!value) {
+      if (!spec.existingKeys.has(key)) {
+        return {
+          error: `${spec.label} 第 ${i + 1} 行：新增 ${spec.keyLabel} 必须填写 ${spec.valueLabel}`,
+          patch: { preserve_keys: [], replace: {} },
+        };
+      }
+      preserveKeys.push(key);
+      continue;
+    }
+
+    replace[key] = pair.value;
   }
-  return out;
+
+  return {
+    error: null,
+    patch: {
+      preserve_keys: preserveKeys,
+      replace,
+    },
+  };
 }
 
 function parseLines(text: string) {
@@ -101,7 +148,8 @@ function inferTransport(spec: Record<string, unknown>): McpTransport {
   const transportValue =
     readString(spec.type) || readString(spec.transport) || readString(spec.transport_type);
   const transport = transportValue.trim().toLowerCase();
-  if (transport === "http" || transport === "sse") return "http";
+  if (transport === "sse") return "sse";
+  if (transport === "http") return "http";
   if (transport === "stdio") return "stdio";
 
   if (
@@ -191,16 +239,41 @@ function parseJsonDraftFallback(jsonText: string): McpDialogDraft {
     transport,
     command,
     args: readStringArray(spec.args),
-    env: readStringMap(spec.env),
+    envPairs: recordToPairs(readStringMap(spec.env)),
     cwd: readString(spec.cwd).trim(),
     url,
-    headers: readStringMap(spec.headers ?? spec.http_headers ?? spec.httpHeaders),
+    headerPairs: recordToPairs(readStringMap(spec.headers ?? spec.http_headers ?? spec.httpHeaders)),
   };
 }
 
 function fromServerSummary(
   server: Pick<
     McpServerSummary,
+    | "name"
+    | "transport"
+    | "command"
+    | "args"
+    | "env_keys"
+    | "cwd"
+    | "url"
+    | "header_keys"
+  >
+): McpDialogDraft {
+  return {
+    name: server.name,
+    transport: server.transport,
+    command: server.command ?? "",
+    args: server.args ?? [],
+    envPairs: keysToPreservedPairs(server.env_keys ?? []),
+    cwd: server.cwd ?? "",
+    url: server.url ?? "",
+    headerPairs: keysToPreservedPairs(server.header_keys ?? []),
+  };
+}
+
+function fromImportServer(
+  server: Pick<
+    McpImportServer,
     "name" | "transport" | "command" | "args" | "env" | "cwd" | "url" | "headers"
   >
 ): McpDialogDraft {
@@ -209,10 +282,10 @@ function fromServerSummary(
     transport: server.transport,
     command: server.command ?? "",
     args: server.args ?? [],
-    env: server.env ?? {},
+    envPairs: recordToPairs((server.env ?? {}) as Record<string, string>),
     cwd: server.cwd ?? "",
     url: server.url ?? "",
-    headers: server.headers ?? {},
+    headerPairs: recordToPairs((server.headers ?? {}) as Record<string, string>),
   };
 }
 
@@ -311,10 +384,10 @@ export function McpServerDialog({
       setTransport(draft.transport);
       setCommand(draft.command);
       setArgsText(draft.args.join("\n"));
-      setEnvPairs(recordToPairs(draft.env));
+      setEnvPairs(draft.envPairs);
       setCwd(draft.cwd);
       setUrl(draft.url);
-      setHeaderPairs(recordToPairs(draft.headers));
+      setHeaderPairs(draft.headerPairs);
       setJsonText("");
       return;
     }
@@ -330,17 +403,22 @@ export function McpServerDialog({
     setJsonText("");
   }, [open, editTarget]);
 
-  const transportHint = transport === "http" ? "HTTP（远程服务）" : "STDIO（本地命令）";
+  const transportHint =
+    transport === "sse"
+      ? "SSE（Server-Sent Events）"
+      : transport === "http"
+        ? "HTTP（远程服务）"
+        : "STDIO（本地命令）";
 
   function applyDraft(draft: McpDialogDraft) {
     setName((prev) => (draft.name.trim() ? draft.name.trim() : prev.trim() ? prev : "MCP Server"));
     setTransport(draft.transport);
     setCommand(draft.command);
     setArgsText(draft.args.join("\n"));
-    setEnvPairs(recordToPairs(draft.env));
+    setEnvPairs(draft.envPairs);
     setCwd(draft.cwd);
     setUrl(draft.url);
-    setHeaderPairs(recordToPairs(draft.headers));
+    setHeaderPairs(draft.headerPairs);
   }
 
   async function fillFromJson() {
@@ -355,7 +433,7 @@ export function McpServerDialog({
       if (parsed?.servers?.length) {
         const server = parsed.servers[0];
         applyDraft(
-          fromServerSummary({
+          fromImportServer({
             name: server.name,
             transport: server.transport,
             command: server.command,
@@ -389,19 +467,23 @@ export function McpServerDialog({
   async function save() {
     if (saving) return;
 
-    const pairError =
+    const existingEnvKeys = new Set(editTarget?.env_keys ?? []);
+    const existingHeaderKeys = new Set(editTarget?.header_keys ?? []);
+    const { error: pairError, patch } =
       transport === "stdio"
-        ? validatePairs(envPairs, {
+        ? buildSecretPatch(envPairs, {
             label: "Env",
             keyLabel: "KEY",
             valueLabel: "VALUE",
             keyPattern: ENV_KEY_RE,
+            existingKeys: existingEnvKeys,
           })
-        : validatePairs(headerPairs, {
+        : buildSecretPatch(headerPairs, {
             label: "Headers",
             keyLabel: "Header",
             valueLabel: "Value",
             keyPattern: HEADER_KEY_RE,
+            existingKeys: existingHeaderKeys,
           });
     if (pairError) {
       toast(pairError);
@@ -409,17 +491,18 @@ export function McpServerDialog({
     }
 
     try {
+      const isStdio = transport === "stdio";
       const next = await upsertMutation.mutateAsync({
         serverId: editTarget?.id ?? null,
         serverKey: editTarget?.server_key ?? "",
         name,
         transport,
-        command: transport === "stdio" ? command : null,
-        args: transport === "stdio" ? parseLines(argsText) : [],
-        env: transport === "stdio" ? pairsToRecord(envPairs) : {},
-        cwd: transport === "stdio" ? (cwd.trim() ? cwd : null) : null,
-        url: transport === "http" ? url : null,
-        headers: transport === "http" ? pairsToRecord(headerPairs) : {},
+        command: isStdio ? command : null,
+        args: isStdio ? parseLines(argsText) : [],
+        env: isStdio ? patch : { preserve_keys: [], replace: {} },
+        cwd: isStdio ? (cwd.trim() ? cwd : null) : null,
+        url: !isStdio ? url : null,
+        headers: !isStdio ? patch : { preserve_keys: [], replace: {} },
       });
 
       if (!next) {
@@ -445,7 +528,9 @@ export function McpServerDialog({
       open={open}
       title={editTarget ? "编辑 MCP 服务" : "添加 MCP 服务"}
       description={
-        editTarget ? "修改后会自动同步到所有 CLI 的当前工作区配置文件。" : `类型：${transportHint}`
+        editTarget
+          ? "敏感值不会回显。留空保留旧值，删行删除，填新值替换。"
+          : `类型：${transportHint}`
       }
       onOpenChange={onOpenChange}
       className="max-w-5xl"
@@ -492,7 +577,7 @@ export function McpServerDialog({
               <div className="text-sm font-medium text-slate-700 dark:text-slate-300">类型</div>
               <div className="text-xs text-slate-500 dark:text-slate-400">二选一</div>
             </div>
-            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            <div className="mt-2 grid gap-2 sm:grid-cols-3">
               {(
                 [
                   {
@@ -506,6 +591,12 @@ export function McpServerDialog({
                     title: "HTTP",
                     desc: "远程服务（通过 URL 调用）",
                     icon: "⇄",
+                  },
+                  {
+                    value: "sse",
+                    title: "SSE",
+                    desc: "Server-Sent Events（流式远程服务）",
+                    icon: "↯",
                   },
                 ] as const
               ).map((item) => (
@@ -586,6 +677,11 @@ export function McpServerDialog({
               <div className="text-sm font-medium text-slate-700 dark:text-slate-300">
                 Env（环境变量）
               </div>
+              {editTarget ? (
+                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  旧值默认不显示。留空保留，删行删除，填新值替换。
+                </div>
+              ) : null}
               <div className="mt-2">
                 <KeyValuePairEditor
                   pairs={envPairs}
@@ -624,6 +720,11 @@ export function McpServerDialog({
 
             <div>
               <div className="text-sm font-medium text-slate-700 dark:text-slate-300">Headers</div>
+              {editTarget ? (
+                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  旧值默认不显示。留空保留，删行删除，填新值替换。
+                </div>
+              ) : null}
               <div className="mt-2">
                 <KeyValuePairEditor
                   pairs={headerPairs}

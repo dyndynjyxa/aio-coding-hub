@@ -32,7 +32,7 @@ pub struct RequestLogInsert {
     pub created_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct RequestLogRouteHop {
     pub provider_id: i64,
     pub provider_name: String,
@@ -55,11 +55,12 @@ fn is_false(v: &bool) -> bool {
     !v
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct RequestLogSummary {
     pub id: i64,
     pub trace_id: String,
     pub cli_key: String,
+    pub session_id: Option<String>,
     pub method: String,
     pub path: String,
     pub excluded_from_stats: bool,
@@ -94,11 +95,12 @@ pub struct RequestLogSummary {
     pub created_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct RequestLogDetail {
     pub id: i64,
     pub trace_id: String,
     pub cli_key: String,
+    pub session_id: Option<String>,
     pub method: String,
     pub path: String,
     pub query: Option<String>,

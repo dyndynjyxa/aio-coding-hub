@@ -55,18 +55,18 @@ fn build_claude_mcp_spec(server: &McpServerForSync) -> Result<serde_json::Value,
             }
             Ok(serde_json::Value::Object(obj))
         }
-        "http" => {
+        "http" | "sse" => {
             let url = server
                 .url
                 .as_ref()
                 .map(|s| s.trim())
                 .filter(|s| !s.is_empty())
-                .ok_or_else(|| "SEC_INVALID_INPUT: http url is required".to_string())?;
+                .ok_or_else(|| format!("SEC_INVALID_INPUT: {transport} url is required"))?;
 
             let mut obj = serde_json::Map::new();
             obj.insert(
                 "type".to_string(),
-                serde_json::Value::String("http".to_string()),
+                serde_json::Value::String(transport.to_string()),
             );
             obj.insert(
                 "url".to_string(),

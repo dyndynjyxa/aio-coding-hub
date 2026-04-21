@@ -4,7 +4,7 @@ import type {
   GeminiConfigPatch,
   GeminiConfigState,
   SimpleCliInfo,
-} from "../../../services/cliManager";
+} from "../../../services/cli/cliManager";
 import { cn } from "../../../utils/cn";
 import { Button } from "../../../ui/Button";
 import { Card } from "../../../ui/Card";

@@ -15,8 +15,8 @@ import {
   type CodexConfigTomlState,
   type CodexConfigTomlValidationResult,
   type SimpleCliInfo,
-} from "../../../services/cliManager";
-import type { AppSettings, CodexHomeMode } from "../../../services/settings";
+} from "../../../services/cli/cliManager";
+import type { AppSettings, CodexHomeMode } from "../../../services/settings/settings";
 import { normalizeCustomCodexHome, buildConfigTomlPath } from "../../../utils/codexPaths";
 import { isWindowsRuntime } from "../../../utils/platform";
 import { cn } from "../../../utils/cn";

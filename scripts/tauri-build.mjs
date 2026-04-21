@@ -23,6 +23,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, "..");
 const localDir = resolve(projectRoot, ".local");
 const overlayPath = resolve(localDir, "tauri.build.local.json");
+const DEFAULT_BUNDLES_BY_TARGET = Object.freeze({
+  "x86_64-pc-windows-msvc": "msi",
+  "x86_64-apple-darwin": "app",
+  "aarch64-apple-darwin": "app",
+  "universal-apple-darwin": "app",
+  "x86_64-unknown-linux-gnu": "deb,appimage",
+});
 
 function hasNonWhitespace(value) {
   return typeof value === "string" && value.trim().length > 0;
@@ -45,6 +52,62 @@ function ensureLocalBuildOverlayFileExists() {
 
   writeFileSync(overlayPath, JSON.stringify(overlay, null, 2) + "\n", "utf8");
   console.log(`[tauri:build] Created local overlay: ${overlayPath}`);
+}
+
+function resolveCliOptionValue(args, optionNames) {
+  for (let index = 0; index < args.length; index += 1) {
+    const current = args[index];
+    for (const optionName of optionNames) {
+      if (current === optionName) {
+        return args[index + 1] ?? null;
+      }
+      if (current.startsWith(`${optionName}=`)) {
+        return current.slice(optionName.length + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+function hasCliOption(args, optionNames) {
+  return args.some((current) =>
+    optionNames.some((optionName) => current === optionName || current.startsWith(`${optionName}=`))
+  );
+}
+
+function resolveHostTarget() {
+  if (process.platform === "darwin") {
+    return process.arch === "arm64" ? "aarch64-apple-darwin" : "x86_64-apple-darwin";
+  }
+
+  if (process.platform === "win32") {
+    return process.arch === "arm64" ? "aarch64-pc-windows-msvc" : "x86_64-pc-windows-msvc";
+  }
+
+  if (process.platform === "linux" && process.arch === "x64") {
+    return "x86_64-unknown-linux-gnu";
+  }
+
+  return null;
+}
+
+function appendDefaultBundlesArg(tauriArgs, userArgs) {
+  if (hasCliOption(userArgs, ["--bundles", "-b"])) {
+    return;
+  }
+
+  const resolvedTarget =
+    resolveCliOptionValue(userArgs, ["--target", "-t"]) ?? resolveHostTarget();
+  const defaultBundles = resolvedTarget ? DEFAULT_BUNDLES_BY_TARGET[resolvedTarget] : null;
+  if (!defaultBundles) {
+    return;
+  }
+
+  console.log(
+    `[tauri:build] Target ${resolvedTarget} defaults to --bundles ${defaultBundles} to match the support matrix.`
+  );
+  tauriArgs.push("--bundles", defaultBundles);
 }
 
 function run() {
@@ -72,6 +135,7 @@ function run() {
     );
     tauriArgs.push("-c", overlayPath);
   }
+  appendDefaultBundlesArg(tauriArgs, userArgs);
   tauriArgs.push(...userArgs);
 
   const child = spawn("tauri", tauriArgs, {

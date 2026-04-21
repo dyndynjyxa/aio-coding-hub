@@ -1,5 +1,5 @@
 import { useCallback, useSyncExternalStore } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { setDesktopWindowTheme } from "../services/desktop/window";
 
 type Theme = "light" | "dark" | "system";
 
@@ -80,16 +80,9 @@ function getServerSnapshot(): ThemeSnapshot {
 
 /** Sync native window titlebar theme with the resolved app theme. */
 function syncNativeTheme(theme: Theme) {
-  const nativeTheme = theme === "system" ? null : theme;
-  try {
-    getCurrentWindow()
-      .setTheme(nativeTheme ?? undefined)
-      .catch(() => {
-        // Non-Tauri environment (browser dev) — ignore silently.
-      });
-  } catch {
-    // Non-Tauri environment (browser dev / tests) — ignore silently.
-  }
+  Promise.resolve(setDesktopWindowTheme(theme)).catch(() => {
+    // Backend desktop proxy is best-effort here; DOM theme remains the source of truth.
+  });
 }
 
 function applyTheme(theme: Theme) {

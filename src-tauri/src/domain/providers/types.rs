@@ -5,6 +5,7 @@ use std::collections::HashSet;
 
 pub(super) const DEFAULT_PRIORITY: i64 = 100;
 pub(super) const MAX_MODEL_NAME_LEN: usize = 200;
+pub(crate) const CX2CC_BRIDGE_TYPE: &str = "cx2cc";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -44,6 +45,10 @@ impl ProviderAuthMode {
             Self::Oauth => "oauth",
         }
     }
+}
+
+pub(crate) fn is_cx2cc_bridge(source_provider_id: Option<i64>, bridge_type: Option<&str>) -> bool {
+    source_provider_id.is_some() || bridge_type == Some(CX2CC_BRIDGE_TYPE)
 }
 
 #[derive(Debug, Clone)]
@@ -214,6 +219,7 @@ pub struct ProviderSummary {
     pub source_provider_id: Option<i64>,
     pub bridge_type: Option<String>,
     pub stream_idle_timeout_seconds: Option<u32>,
+    pub api_key_configured: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -253,6 +259,10 @@ pub(crate) struct ClaudeTerminalLaunchContext {
 }
 
 impl ProviderForGateway {
+    pub(crate) fn is_cx2cc_bridge(&self) -> bool {
+        is_cx2cc_bridge(self.source_provider_id, self.bridge_type.as_deref())
+    }
+
     pub(crate) fn get_effective_claude_model(
         &self,
         requested_model: &str,

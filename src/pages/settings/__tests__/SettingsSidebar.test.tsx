@@ -10,22 +10,34 @@ import {
   useModelPricesSyncBasellmMutation,
   useModelPricesTotalCountQuery,
 } from "../../../query/modelPrices";
+import {
+  useConfigExportMutation,
+  useConfigImportMutation,
+} from "../../../query/configMigrate";
 import { useUsageSummaryQuery } from "../../../query/usage";
 import { useDbDiskUsageQuery, useRequestLogsClearAllMutation } from "../../../query/dataManagement";
-import { appDataDirGet, appDataReset, appExit } from "../../../services/dataManagement";
+import { appDataDirGet, appDataReset, appExit } from "../../../services/app/dataManagement";
 import { runBackgroundTask } from "../../../services/backgroundTasks";
 import { logToConsole } from "../../../services/consoleLog";
-import {
-  tauriDialogOpen,
-  tauriOpenPath,
-  tauriOpenUrl,
-  tauriReadTextFile,
-} from "../../../test/mocks/tauri";
-import { notifyModelPricesUpdated } from "../../../services/modelPrices";
+import { tauriDialogOpen, tauriOpenPath, tauriOpenUrl } from "../../../test/mocks/tauri";
+import { notifyModelPricesUpdated } from "../../../services/usage/modelPrices";
 import { modelPricesKeys } from "../../../query/keys";
+
+const devPreviewRef = vi.hoisted(() => ({
+  current: { enabled: false, setEnabled: vi.fn(), toggle: vi.fn() } as any,
+}));
+const configImportMutationRef = vi.hoisted(() => ({
+  current: { isPending: false, mutateAsync: vi.fn() } as any,
+}));
+const configExportMutationRef = vi.hoisted(() => ({
+  current: { isPending: false, mutateAsync: vi.fn() } as any,
+}));
 
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
+vi.mock("../../../hooks/useDevPreviewData", () => ({
+  useDevPreviewData: () => devPreviewRef.current,
+}));
 vi.mock("../../../services/backgroundTasks", async () => {
   const actual = await vi.importActual<typeof import("../../../services/backgroundTasks")>(
     "../../../services/backgroundTasks"
@@ -36,9 +48,9 @@ vi.mock("../../../services/backgroundTasks", async () => {
   };
 });
 
-vi.mock("../../../services/dataManagement", async () => {
-  const actual = await vi.importActual<typeof import("../../../services/dataManagement")>(
-    "../../../services/dataManagement"
+vi.mock("../../../services/app/dataManagement", async () => {
+  const actual = await vi.importActual<typeof import("../../../services/app/dataManagement")>(
+    "../../../services/app/dataManagement"
   );
   return {
     ...actual,
@@ -56,6 +68,16 @@ vi.mock("../../../query/modelPrices", async () => {
     ...actual,
     useModelPricesTotalCountQuery: vi.fn(),
     useModelPricesSyncBasellmMutation: vi.fn(),
+  };
+});
+vi.mock("../../../query/configMigrate", async () => {
+  const actual = await vi.importActual<typeof import("../../../query/configMigrate")>(
+    "../../../query/configMigrate"
+  );
+  return {
+    ...actual,
+    useConfigExportMutation: vi.fn(() => configExportMutationRef.current),
+    useConfigImportMutation: vi.fn(() => configImportMutationRef.current),
   };
 });
 
@@ -134,21 +156,23 @@ vi.mock("../SettingsDataSyncCard", () => ({
 
 vi.mock("../SettingsDialogs", () => ({
   SettingsDialogs: ({
-    clearRequestLogsDialogOpen,
-    resetAllDialogOpen,
-    configImportDialogOpen,
     clearRequestLogs,
-    resetAllData,
+    resetAll,
+    configImport,
   }: any) => (
     <div>
-      <div>clearOpen:{String(clearRequestLogsDialogOpen)}</div>
-      <div>resetOpen:{String(resetAllDialogOpen)}</div>
-      <div>configImportOpen:{String(configImportDialogOpen)}</div>
-      <button type="button" onClick={() => clearRequestLogs()}>
+      <div>clearOpen:{String(clearRequestLogs.open)}</div>
+      <div>resetOpen:{String(resetAll.open)}</div>
+      <div>configImportOpen:{String(configImport.open)}</div>
+      <div>configImportPath:{configImport.pendingFilePath ?? "none"}</div>
+      <button type="button" onClick={() => clearRequestLogs.confirm()}>
         confirm-clear-logs
       </button>
-      <button type="button" onClick={() => resetAllData()}>
+      <button type="button" onClick={() => resetAll.confirm()}>
         confirm-reset-all
+      </button>
+      <button type="button" onClick={() => configImport.confirm()}>
+        confirm-config-import
       </button>
     </div>
   ),
@@ -182,24 +206,6 @@ function createUpdateMeta(overrides: Partial<any> = {}) {
   };
 }
 
-function createConfigImportBundle(overrides: Record<string, unknown> = {}) {
-  return {
-    schema_version: 2,
-    exported_at: "2026-03-29T00:00:00.000Z",
-    app_version: "0.0.0-test",
-    settings: "{}",
-    providers: [],
-    sort_modes: [],
-    sort_mode_active: {},
-    workspaces: [],
-    mcp_servers: [],
-    skill_repos: [],
-    installed_skills: [],
-    local_skills: [],
-    ...overrides,
-  };
-}
-
 function mockSidebarQueries() {
   vi.mocked(useModelPricesTotalCountQuery).mockReturnValue({ data: 1, isLoading: false } as any);
   vi.mocked(useModelPricesSyncBasellmMutation).mockReturnValue({
@@ -216,11 +222,16 @@ function mockSidebarQueries() {
     refetch: vi.fn(),
   } as any);
   vi.mocked(useRequestLogsClearAllMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+  vi.mocked(useConfigExportMutation).mockReturnValue(configExportMutationRef.current);
+  vi.mocked(useConfigImportMutation).mockReturnValue(configImportMutationRef.current);
 }
 
 describe("pages/settings/SettingsSidebar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    devPreviewRef.current = { enabled: false, setEnabled: vi.fn(), toggle: vi.fn() };
+    configExportMutationRef.current = { isPending: false, mutateAsync: vi.fn() };
+    configImportMutationRef.current = { isPending: false, mutateAsync: vi.fn() };
   });
 
   it("handles update checks (no about, portable, normal)", async () => {
@@ -269,6 +280,22 @@ describe("pages/settings/SettingsSidebar", () => {
     expect(runBackgroundTask).toHaveBeenCalledWith("app-update-check", { trigger: "manual" });
   });
 
+  it("runs local update preview even when about.run_mode is portable", async () => {
+    mockSidebarQueries();
+    devPreviewRef.current = { enabled: true, setEnabled: vi.fn(), toggle: vi.fn() };
+
+    renderWithProviders(
+      <SettingsSidebar updateMeta={createUpdateMeta({ about: { run_mode: "portable" } })} />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "check-update" }));
+
+    await waitFor(() => {
+      expect(runBackgroundTask).toHaveBeenCalledWith("app-update-check", { trigger: "manual" });
+    });
+    expect(toast).not.toHaveBeenCalledWith("portable 模式请手动下载");
+  });
+
   it("handles data management, model price sync, and subscription invalidation", async () => {
     vi.useFakeTimers();
     vi.mocked(useModelPricesTotalCountQuery).mockReturnValue({ data: 0, isLoading: false } as any);
@@ -303,13 +330,13 @@ describe("pages/settings/SettingsSidebar", () => {
       .mockRejectedValueOnce(new Error("clear boom"));
     vi.mocked(useRequestLogsClearAllMutation).mockReturnValue(clearMutation as any);
 
-    vi.mocked(appDataDirGet).mockResolvedValueOnce(null).mockResolvedValueOnce("/tmp/app-data");
+    vi.mocked(appDataDirGet).mockResolvedValueOnce(null as any).mockResolvedValueOnce("/tmp/app-data");
     vi.mocked(tauriOpenPath)
       .mockRejectedValueOnce(new Error("open boom"))
       .mockResolvedValueOnce(undefined as any);
 
     vi.mocked(appDataReset)
-      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null as any)
       .mockResolvedValueOnce(true)
       .mockRejectedValueOnce(new Error("reset boom"));
     vi.mocked(appExit).mockResolvedValue(true as any);
@@ -432,91 +459,92 @@ describe("pages/settings/SettingsSidebar", () => {
     vi.useRealTimers();
   });
 
-  it("rejects invalid config import JSON before opening confirm dialog", async () => {
+  it("opens config import confirm dialog after selecting a file", async () => {
     mockSidebarQueries();
 
-    vi.mocked(tauriDialogOpen).mockResolvedValueOnce("/tmp/invalid-config.json");
-    vi.mocked(tauriReadTextFile).mockResolvedValueOnce(
-      JSON.stringify({
-        schema_version: 1,
-        providers: {},
-        sort_modes: [],
-        workspaces: [],
-        mcp_servers: [],
-        skill_repos: [],
-      }) as any
-    );
+    vi.mocked(tauriDialogOpen).mockResolvedValueOnce("/tmp/import-config.json");
 
     renderWithProviders(<SettingsSidebar updateMeta={createUpdateMeta()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "import-config" }));
 
-    await waitFor(() => expect(tauriReadTextFile).toHaveBeenCalled());
-    expect(toast).toHaveBeenCalledWith("无效的配置文件格式");
+    await waitFor(() => expect(tauriDialogOpen).toHaveBeenCalled());
     expect(screen.getByText("clearOpen:false")).toBeInTheDocument();
     expect(screen.getByText("resetOpen:false")).toBeInTheDocument();
-    expect(screen.getByText("configImportOpen:false")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("configImportOpen:true")).toBeInTheDocument());
+    expect(screen.getByText("configImportPath:/tmp/import-config.json")).toBeInTheDocument();
+    expect(configImportMutationRef.current.mutateAsync).not.toHaveBeenCalled();
   });
 
-  it("accepts legacy v1 config import without skill payload arrays", async () => {
+  it("keeps config import dialog closed when file selection is cancelled", async () => {
     mockSidebarQueries();
 
-    vi.mocked(tauriDialogOpen).mockResolvedValueOnce("/tmp/legacy-config.json");
-    vi.mocked(tauriReadTextFile).mockResolvedValueOnce(
-      JSON.stringify(
-        createConfigImportBundle({
-          schema_version: 1,
-          installed_skills: undefined,
-          local_skills: undefined,
-        })
-      ) as any
-    );
+    vi.mocked(tauriDialogOpen).mockResolvedValueOnce(null as any);
 
     renderWithProviders(<SettingsSidebar updateMeta={createUpdateMeta()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "import-config" }));
 
-    await waitFor(() => expect(tauriReadTextFile).toHaveBeenCalled());
-    expect(toast).not.toHaveBeenCalledWith("无效的配置文件格式");
+    await waitFor(() => expect(tauriDialogOpen).toHaveBeenCalled());
+    expect(screen.getByText("configImportOpen:false")).toBeInTheDocument();
+    expect(screen.getByText("configImportPath:none")).toBeInTheDocument();
+    expect(configImportMutationRef.current.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("confirms config import through the shared mutation and closes dialog on success", async () => {
+    mockSidebarQueries();
+
+    vi.mocked(tauriDialogOpen).mockResolvedValueOnce("/tmp/shared-config.json");
+    configImportMutationRef.current.mutateAsync.mockResolvedValueOnce({
+      providers_imported: 2,
+      sort_modes_imported: 1,
+      workspaces_imported: 3,
+      prompts_imported: 4,
+      mcp_servers_imported: 5,
+      skill_repos_imported: 6,
+      installed_skills_imported: 7,
+      local_skills_imported: 8,
+    });
+
+    renderWithProviders(<SettingsSidebar updateMeta={createUpdateMeta()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "import-config" }));
+    await waitFor(() => expect(screen.getByText("configImportOpen:true")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "confirm-config-import" }));
+
+    await waitFor(() => {
+      expect(configImportMutationRef.current.mutateAsync).toHaveBeenCalledWith({
+        filePath: "/tmp/shared-config.json",
+      });
+    });
+    expect(toast).toHaveBeenCalledWith(
+      "配置导入完成：供应商 2，排序模式 1，工作区 3，提示词 4，MCP 5，技能仓库 6，通用技能 7，本机技能 8"
+    );
+    expect(screen.getByText("configImportOpen:false")).toBeInTheDocument();
+    expect(screen.getByText("configImportPath:none")).toBeInTheDocument();
+  });
+
+  it("keeps config import dialog open when the shared mutation fails", async () => {
+    mockSidebarQueries();
+
+    vi.mocked(tauriDialogOpen).mockResolvedValueOnce("/tmp/broken-config.json");
+    configImportMutationRef.current.mutateAsync.mockRejectedValueOnce(new Error("invalid config"));
+
+    renderWithProviders(<SettingsSidebar updateMeta={createUpdateMeta()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "import-config" }));
+    await waitFor(() => expect(screen.getByText("configImportOpen:true")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "confirm-config-import" }));
+
+    await waitFor(() => {
+      expect(configImportMutationRef.current.mutateAsync).toHaveBeenCalledWith({
+        filePath: "/tmp/broken-config.json",
+      });
+    });
+    expect(toast).toHaveBeenCalledWith("导入配置失败：请稍后重试");
     expect(screen.getByText("configImportOpen:true")).toBeInTheDocument();
-  });
-
-  it("rejects v2 config import missing skill payload arrays", async () => {
-    mockSidebarQueries();
-
-    vi.mocked(tauriDialogOpen).mockResolvedValueOnce("/tmp/v2-missing-skills.json");
-    vi.mocked(tauriReadTextFile).mockResolvedValueOnce(
-      JSON.stringify(
-        createConfigImportBundle({
-          installed_skills: undefined,
-          local_skills: undefined,
-        })
-      ) as any
-    );
-
-    renderWithProviders(<SettingsSidebar updateMeta={createUpdateMeta()} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "import-config" }));
-
-    await waitFor(() => expect(tauriReadTextFile).toHaveBeenCalled());
-    expect(toast).toHaveBeenCalledWith("无效的配置文件格式");
-    expect(screen.getByText("configImportOpen:false")).toBeInTheDocument();
-  });
-
-  it("rejects config import missing sort_mode_active", async () => {
-    mockSidebarQueries();
-
-    vi.mocked(tauriDialogOpen).mockResolvedValueOnce("/tmp/missing-sort-mode-active.json");
-    vi.mocked(tauriReadTextFile).mockResolvedValueOnce(
-      JSON.stringify(createConfigImportBundle({ sort_mode_active: undefined })) as any
-    );
-
-    renderWithProviders(<SettingsSidebar updateMeta={createUpdateMeta()} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "import-config" }));
-
-    await waitFor(() => expect(tauriReadTextFile).toHaveBeenCalled());
-    expect(toast).toHaveBeenCalledWith("无效的配置文件格式");
-    expect(screen.getByText("configImportOpen:false")).toBeInTheDocument();
+    expect(screen.getByText("configImportPath:/tmp/broken-config.json")).toBeInTheDocument();
   });
 });

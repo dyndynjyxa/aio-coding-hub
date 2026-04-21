@@ -5,11 +5,11 @@ pub(super) fn token_total(total: Option<i64>, input: Option<i64>, output: Option
     input.unwrap_or(0).saturating_add(output.unwrap_or(0))
 }
 
-pub(super) const SQL_EFFECTIVE_INPUT_TOKENS_EXPR: &str = "CASE WHEN cli_key IN ('codex','gemini') OR EXISTS (SELECT 1 FROM providers p WHERE p.id = final_provider_id AND p.source_provider_id IS NOT NULL) THEN MAX(COALESCE(input_tokens, 0) - COALESCE(cache_read_input_tokens, 0), 0) ELSE COALESCE(input_tokens, 0) END";
+pub(super) const SQL_EFFECTIVE_INPUT_TOKENS_EXPR: &str = "CASE WHEN cli_key IN ('codex','gemini') OR EXISTS (SELECT 1 FROM providers p WHERE p.id = final_provider_id AND (p.source_provider_id IS NOT NULL OR p.bridge_type = 'cx2cc')) THEN MAX(COALESCE(input_tokens, 0) - COALESCE(cache_read_input_tokens, 0), 0) ELSE COALESCE(input_tokens, 0) END";
 
 pub(super) fn sql_effective_input_tokens_expr_with_alias(alias: &str) -> String {
     format!(
-        "CASE WHEN {alias}.cli_key IN ('codex','gemini') OR EXISTS (SELECT 1 FROM providers p WHERE p.id = {alias}.final_provider_id AND p.source_provider_id IS NOT NULL) THEN MAX(COALESCE({alias}.input_tokens, 0) - COALESCE({alias}.cache_read_input_tokens, 0), 0) ELSE COALESCE({alias}.input_tokens, 0) END"
+        "CASE WHEN {alias}.cli_key IN ('codex','gemini') OR EXISTS (SELECT 1 FROM providers p WHERE p.id = {alias}.final_provider_id AND (p.source_provider_id IS NOT NULL OR p.bridge_type = 'cx2cc')) THEN MAX(COALESCE({alias}.input_tokens, 0) - COALESCE({alias}.cache_read_input_tokens, 0), 0) ELSE COALESCE({alias}.input_tokens, 0) END"
     )
 }
 

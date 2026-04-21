@@ -84,6 +84,11 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<ProviderSummary, rusqlite::
         stream_idle_timeout_seconds: parse_positive_optional_u32(
             row.get("stream_idle_timeout_seconds").unwrap_or(None),
         ),
+        api_key_configured: row
+            .get::<_, Option<i64>>("api_key_configured")
+            .unwrap_or(None)
+            .unwrap_or(0)
+            != 0,
     })
 }
 
@@ -122,7 +127,8 @@ SELECT
   oauth_last_error,
   source_provider_id,
   bridge_type,
-  stream_idle_timeout_seconds
+  stream_idle_timeout_seconds,
+  CASE WHEN COALESCE(api_key_plaintext, '') = '' THEN 0 ELSE 1 END AS api_key_configured
 FROM providers
 WHERE id = ?1
 "#,
@@ -146,6 +152,7 @@ pub(crate) fn claude_terminal_launch_context(
         String,
         Option<String>,
         Option<i64>,
+        Option<String>,
     );
 
     if provider_id <= 0 {
@@ -163,7 +170,8 @@ SELECT
   api_key_plaintext,
   auth_mode,
   oauth_access_token,
-  source_provider_id
+  source_provider_id,
+  bridge_type
 FROM providers
 WHERE id = ?1
 "#,
@@ -177,6 +185,7 @@ WHERE id = ?1
                     row.get(4)?,
                     row.get(5)?,
                     row.get(6)?,
+                    row.get(7)?,
                 ))
             },
         )
@@ -191,6 +200,7 @@ WHERE id = ?1
         auth_mode,
         oauth_access_token,
         source_provider_id,
+        bridge_type,
     )) = row
     else {
         return Err("DB_NOT_FOUND: provider not found".to_string().into());
@@ -200,10 +210,12 @@ WHERE id = ?1
         return Err(format!("SEC_INVALID_INPUT: provider_id={provider_id} is not claude").into());
     }
 
-    // For OAuth mode or cx2cc providers (with source_provider_id), base_url may
-    // legitimately be empty (the gateway handles routing via source provider).
-    // For api_key mode without source_provider_id, base_url is still required.
-    if auth_mode != "oauth" && source_provider_id.is_none() {
+    let is_cx2cc = is_cx2cc_bridge(source_provider_id, bridge_type.as_deref());
+
+    // For OAuth mode or cx2cc providers, base_url may legitimately be empty
+    // (the gateway handles routing via source provider or local Codex gateway).
+    // For api_key mode without cx2cc, base_url is still required.
+    if auth_mode != "oauth" && !is_cx2cc {
         let base_url = base_urls_from_row(&base_url_fallback, &base_urls_json)
             .into_iter()
             .find(|v| !v.trim().is_empty())
@@ -227,7 +239,7 @@ WHERE id = ?1
                     .to_string()
             })?;
         token.to_string()
-    } else if source_provider_id.is_some() {
+    } else if is_cx2cc {
         let key = api_key_plaintext.trim().to_string();
         if key.is_empty() {
             format!("cx2cc-{provider_id}")
@@ -372,7 +384,8 @@ SELECT
   oauth_last_error,
   source_provider_id,
   bridge_type,
-  stream_idle_timeout_seconds
+  stream_idle_timeout_seconds,
+  CASE WHEN COALESCE(api_key_plaintext, '') = '' THEN 0 ELSE 1 END AS api_key_configured
 FROM providers
 WHERE cli_key = ?1
 ORDER BY sort_order ASC, id DESC
@@ -680,7 +693,18 @@ pub fn upsert(
     let requested_auth_mode = auth_mode.unwrap_or(ProviderAuthMode::ApiKey);
     let is_oauth = requested_auth_mode == ProviderAuthMode::Oauth;
 
-    let is_cx2cc = source_provider_id.is_some();
+    if let Some(ref bt) = bridge_type {
+        if bt != CX2CC_BRIDGE_TYPE {
+            return Err(format!("SEC_INVALID_INPUT: unsupported bridge_type: {bt}").into());
+        }
+    }
+
+    let is_cx2cc = is_cx2cc_bridge(source_provider_id, bridge_type.as_deref());
+    let bridge_type = if is_cx2cc {
+        Some(CX2CC_BRIDGE_TYPE.to_string())
+    } else {
+        None
+    };
 
     // Validate source_provider_id constraints for CX2CC bridging.
     if let Some(source_id) = source_provider_id {
@@ -733,6 +757,14 @@ pub fn upsert(
                 }
             }
         }
+    }
+
+    if is_cx2cc && cli_key != "claude" {
+        return Err(
+            "SEC_INVALID_INPUT: cx2cc bridge is only supported for claude"
+                .to_string()
+                .into(),
+        );
     }
 
     let base_urls = if is_oauth || is_cx2cc {

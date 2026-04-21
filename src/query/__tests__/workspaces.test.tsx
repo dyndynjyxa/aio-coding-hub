@@ -4,7 +4,7 @@ import type {
   WorkspacesListResult,
   WorkspaceSummary,
   WorkspacePreview,
-} from "../../services/workspaces";
+} from "../../services/workspace/workspaces";
 import {
   workspaceApply,
   workspaceCreate,
@@ -12,7 +12,7 @@ import {
   workspacePreview,
   workspaceRename,
   workspacesList,
-} from "../../services/workspaces";
+} from "../../services/workspace/workspaces";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { workspacesKeys } from "../keys";
@@ -27,9 +27,9 @@ import {
   useWorkspacesListQuery,
 } from "../workspaces";
 
-vi.mock("../../services/workspaces", async () => {
-  const actual = await vi.importActual<typeof import("../../services/workspaces")>(
-    "../../services/workspaces"
+vi.mock("../../services/workspace/workspaces", async () => {
+  const actual = await vi.importActual<typeof import("../../services/workspace/workspaces")>(
+    "../../services/workspace/workspaces"
   );
   return {
     ...actual,

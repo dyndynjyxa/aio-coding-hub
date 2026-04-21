@@ -7,6 +7,7 @@ import {
   setBackgroundTaskSchedulerForeground,
   startBackgroundTaskScheduler,
 } from "../backgroundTasks";
+import { backgroundTaskVisibilityTriggers } from "../../constants/backgroundTaskContracts";
 
 vi.mock("../consoleLog", () => ({ logToConsole: vi.fn() }));
 
@@ -83,13 +84,17 @@ describe("services/backgroundTasks", () => {
       intervalMs: null,
       runOnAppStart: false,
       foregroundOnly: true,
-      visibilityTriggers: ["home-overview-visible"],
+      visibilityTriggers: [backgroundTaskVisibilityTriggers.homeOverviewVisible],
       run,
     });
 
     startBackgroundTaskScheduler();
-    const firstTrigger = emitBackgroundTaskVisibilityTrigger("home-overview-visible");
-    const secondTrigger = emitBackgroundTaskVisibilityTrigger("home-overview-visible");
+    const firstTrigger = emitBackgroundTaskVisibilityTrigger(
+      backgroundTaskVisibilityTriggers.homeOverviewVisible
+    );
+    const secondTrigger = emitBackgroundTaskVisibilityTrigger(
+      backgroundTaskVisibilityTriggers.homeOverviewVisible
+    );
     await Promise.resolve();
     expect(run).toHaveBeenCalledTimes(1);
 
@@ -97,7 +102,9 @@ describe("services/backgroundTasks", () => {
     await firstTrigger;
     await secondTrigger;
 
-    const thirdTrigger = emitBackgroundTaskVisibilityTrigger("home-overview-visible");
+    const thirdTrigger = emitBackgroundTaskVisibilityTrigger(
+      backgroundTaskVisibilityTriggers.homeOverviewVisible
+    );
     await Promise.resolve();
     expect(run).toHaveBeenCalledTimes(2);
 

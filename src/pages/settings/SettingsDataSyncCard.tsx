@@ -1,5 +1,5 @@
-import type { AppAboutInfo } from "../../services/appAbout";
-import type { ModelPricesSyncReport } from "../../services/modelPrices";
+import type { AppAboutInfo } from "../../services/app/appAbout";
+import type { ModelPricesSyncReport } from "../../services/usage/modelPrices";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { SettingsRow } from "../../ui/SettingsRow";

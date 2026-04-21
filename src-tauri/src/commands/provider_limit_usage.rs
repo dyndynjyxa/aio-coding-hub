@@ -4,6 +4,7 @@ use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::{blocking, provider_limit_usage};
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn provider_limit_usage_v1(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,

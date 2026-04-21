@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { cliManagerCodexConfigTomlValidate } from "../../../../services/cliManager";
+import { cliManagerCodexConfigTomlValidate } from "../../../../services/cli/cliManager";
 import { CliManagerCodexTab } from "../CodexTab";
 import { createTestAppSettings } from "../../../../test/fixtures/settings";
 
@@ -19,9 +19,9 @@ vi.mock("../../../../ui/CodeEditor", () => ({
   ),
 }));
 
-vi.mock("../../../../services/cliManager", async () => {
-  const actual = await vi.importActual<typeof import("../../../../services/cliManager")>(
-    "../../../../services/cliManager"
+vi.mock("../../../../services/cli/cliManager", async () => {
+  const actual = await vi.importActual<typeof import("../../../../services/cli/cliManager")>(
+    "../../../../services/cli/cliManager"
   );
   return {
     ...actual,

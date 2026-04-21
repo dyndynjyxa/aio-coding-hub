@@ -2,8 +2,8 @@
 // - Query adapter for `src/services/providerLimitUsage.ts` used by `src/components/home/HomeProviderLimitPanel.tsx`.
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import type { CliKey } from "../services/providers";
-import { providerLimitUsageV1 } from "../services/providerLimitUsage";
+import type { CliKey } from "../services/providers/providers";
+import { providerLimitUsageV1 } from "../services/providers/providerLimitUsage";
 import { providerLimitUsageKeys } from "./keys";
 
 export function useProviderLimitUsageV1Query(

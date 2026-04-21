@@ -1,13 +1,13 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { GatewayProviderCircuitStatus } from "../../services/gateway";
+import type { GatewayProviderCircuitStatus } from "../../services/gateway/gateway";
 import {
   gatewayCircuitResetCli,
   gatewayCircuitResetProvider,
   gatewayCircuitStatus,
   gatewaySessionsList,
   gatewayStatus,
-} from "../../services/gateway";
+} from "../../services/gateway/gateway";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { gatewayKeys } from "../keys";
@@ -21,9 +21,10 @@ import {
   useGatewayStatusQuery,
 } from "../gateway";
 
-vi.mock("../../services/gateway", async () => {
-  const actual =
-    await vi.importActual<typeof import("../../services/gateway")>("../../services/gateway");
+vi.mock("../../services/gateway/gateway", async () => {
+  const actual = await vi.importActual<typeof import("../../services/gateway/gateway")>(
+    "../../services/gateway/gateway"
+  );
   return {
     ...actual,
     gatewayStatus: vi.fn(),

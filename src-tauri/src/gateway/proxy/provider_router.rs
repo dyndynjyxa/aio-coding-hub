@@ -134,7 +134,7 @@ impl<'a> RecordCircuitArgs<'a> {
     }
 
     pub(in crate::gateway) fn from_state(
-        state: &'a crate::gateway::manager::GatewayAppState,
+        state: &'a crate::gateway::runtime::GatewayAppState,
         trace_id: &'a str,
         cli_key: &'a str,
         provider_id: i64,

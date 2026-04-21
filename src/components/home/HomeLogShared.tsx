@@ -3,10 +3,11 @@
 // - Designed to keep status badge / error_code label / session reuse tooltip consistent across the Home page.
 
 import { GatewayErrorCodes, getGatewayErrorShortLabel } from "../../constants/gatewayErrorCodes";
-import type { CliKey } from "../../services/providers";
-import type { RequestLogRouteHop } from "../../services/requestLogs";
-import type { TraceSession } from "../../services/traceStore";
+import type { CliKey } from "../../services/providers/providers";
+import type { RequestLogRouteHop } from "../../services/gateway/requestLogs";
+import type { TraceSession } from "../../services/gateway/traceStore";
 import { Tooltip } from "../../ui/Tooltip";
+import { FolderOpen } from "lucide-react";
 import { RouteTooltipContent } from "./RouteTooltipContent";
 
 const CLIENT_ABORT_ERROR_CODES: ReadonlySet<string> = new Set([
@@ -24,11 +25,6 @@ type RequestLogAuditInput = {
   path: string;
   excluded_from_stats?: boolean | null;
   special_settings_json?: string | null;
-  error_code?: string | null;
-};
-
-type RequestLogProgressInput = {
-  status: number | null;
   error_code?: string | null;
 };
 
@@ -145,10 +141,6 @@ export function buildRequestLogAuditMeta(log: RequestLogAuditInput): RequestLogA
   };
 }
 
-export function isPersistedRequestLogInProgress(log: RequestLogProgressInput) {
-  return log.status == null && (log.error_code ?? null) == null;
-}
-
 export type LiveTraceProvider = {
   providerId: number | null;
   providerName: string;
@@ -189,7 +181,7 @@ export function getErrorCodeLabel(errorCode: string) {
 
 export function SessionReuseBadge({ showCustomTooltip }: { showCustomTooltip: boolean }) {
   const className =
-    "inline-flex items-center rounded-md bg-indigo-50/80 px-2 py-0.5 text-[11px] font-semibold text-indigo-600 ring-1 ring-inset ring-indigo-500/10 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-400/20 cursor-help";
+    "inline-flex shrink-0 items-center whitespace-nowrap rounded-md bg-indigo-50/80 px-2 py-0.5 text-[11px] font-semibold text-indigo-600 ring-1 ring-inset ring-indigo-500/10 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-400/20 cursor-help";
   return showCustomTooltip ? (
     <Tooltip content={SESSION_REUSE_TOOLTIP}>
       <span className={className}>会话复用</span>
@@ -203,8 +195,28 @@ export function SessionReuseBadge({ showCustomTooltip }: { showCustomTooltip: bo
 
 export function FreeBadge() {
   return (
-    <span className="inline-flex items-center rounded-md bg-emerald-50/80 px-2 py-0.5 text-[11px] font-semibold text-emerald-600 ring-1 ring-inset ring-emerald-500/10 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-400/20">
+    <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-md bg-emerald-50/80 px-2 py-0.5 text-[11px] font-semibold text-emerald-600 ring-1 ring-inset ring-emerald-500/10 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-400/20">
       免费
+    </span>
+  );
+}
+
+export function FolderBadge({
+  folderName,
+  folderPath,
+  allowWrap = false,
+}: {
+  folderName: string;
+  folderPath: string;
+  allowWrap?: boolean;
+}) {
+  return (
+    <span
+      className="inline-flex min-w-0 items-center gap-1 rounded-md bg-slate-100/75 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-700/55 dark:text-slate-200"
+      title={folderPath}
+    >
+      <FolderOpen className="h-3 w-3 shrink-0 text-slate-400 dark:text-slate-500" />
+      <span className={allowWrap ? "whitespace-normal break-all" : "truncate"}>{folderName}</span>
     </span>
   );
 }

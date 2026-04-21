@@ -13,7 +13,7 @@ import {
   sortModeProvidersSetOrder,
   sortModeRename,
   sortModesList,
-} from "../../../services/sortModes";
+} from "../../../services/providers/sortModes";
 import { queryClient } from "../../../query/queryClient";
 
 let latestOnDragEnd: ((event: any) => void) | null = null;
@@ -56,9 +56,9 @@ vi.mock("@dnd-kit/utilities", () => ({
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
 
-vi.mock("../../../services/sortModes", async () => {
-  const actual = await vi.importActual<typeof import("../../../services/sortModes")>(
-    "../../../services/sortModes"
+vi.mock("../../../services/providers/sortModes", async () => {
+  const actual = await vi.importActual<typeof import("../../../services/providers/sortModes")>(
+    "../../../services/providers/sortModes"
   );
   return {
     ...actual,

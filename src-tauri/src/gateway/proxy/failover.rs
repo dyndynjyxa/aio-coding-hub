@@ -5,7 +5,7 @@ use crate::shared::mutex_ext::MutexExt;
 use std::collections::HashSet;
 use std::time::Duration;
 
-use crate::gateway::manager::GatewayAppState;
+use crate::gateway::runtime::GatewayAppState;
 use crate::gateway::util::now_unix_millis;
 
 #[derive(Debug, Clone, Copy)]
@@ -200,7 +200,7 @@ pub(super) async fn select_provider_base_url_for_request(
 
     let mut join_set = tokio::task::JoinSet::new();
     for base_url in provider.base_urls.iter().cloned() {
-        let client = state.client.clone();
+        let client = state.client();
         join_set.spawn(async move {
             let result =
                 crate::base_url_probe::probe_base_url_ms(&client, &base_url, timeout).await;

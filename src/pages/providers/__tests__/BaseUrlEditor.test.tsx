@@ -4,13 +4,13 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { BaseUrlEditor } from "../BaseUrlEditor";
 import type { BaseUrlRow } from "../types";
-import { baseUrlPingMs } from "../../../services/providers";
+import { baseUrlPingMs } from "../../../services/providers/providers";
 
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 
-vi.mock("../../../services/providers", async () => {
-  const actual = await vi.importActual<typeof import("../../../services/providers")>(
-    "../../../services/providers"
+vi.mock("../../../services/providers/providers", async () => {
+  const actual = await vi.importActual<typeof import("../../../services/providers/providers")>(
+    "../../../services/providers/providers"
   );
   return { ...actual, baseUrlPingMs: vi.fn() };
 });
@@ -38,7 +38,7 @@ function TestWrapper({ initial }: { initial: BaseUrlRow[] }) {
 describe("pages/providers/BaseUrlEditor", () => {
   it("pings base urls and handles empty/tauri-only/error cases", async () => {
     vi.mocked(baseUrlPingMs).mockResolvedValueOnce(123);
-    vi.mocked(baseUrlPingMs).mockResolvedValueOnce(null);
+    vi.mocked(baseUrlPingMs).mockResolvedValueOnce(88);
     vi.mocked(baseUrlPingMs).mockRejectedValueOnce(new Error("boom"));
 
     render(<TestWrapper initial={[{ id: "1", url: "", ping: { status: "idle" } }]} />);

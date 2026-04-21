@@ -1,5 +1,6 @@
 export const gatewayEventNames = {
   status: "gateway:status",
+  requestSignal: "gateway:request_signal",
   requestStart: "gateway:request_start",
   attempt: "gateway:attempt",
   request: "gateway:request",

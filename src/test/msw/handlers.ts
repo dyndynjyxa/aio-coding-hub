@@ -2,7 +2,7 @@
 
 import { http, HttpResponse } from "msw";
 import { TAURI_ENDPOINT } from "../tauriEndpoint";
-import type { CliKey, ClaudeModels, ProviderSummary } from "../../services/providers";
+import type { CliKey, ClaudeModels, ProviderSummary } from "../../services/providers/providers";
 import {
   buildCliProxySetEnabledResult,
   getAppAboutState,
@@ -56,16 +56,39 @@ export const handlers = [
 
   http.post(`${TAURI_ENDPOINT}/settings_set`, async ({ request }) => {
     const payload = await withJson<{ update?: Partial<Record<string, unknown>> }>(request);
+    let nextSettings = getSettingsState();
     if (payload.update) {
+      const normalizedEntries = Object.entries(payload.update).map(([key, value]) => [
+        key.replace(/[A-Z]/g, (char) => `_${char.toLowerCase()}`),
+        value,
+      ]);
       const normalizedUpdate = Object.fromEntries(
-        Object.entries(payload.update).map(([key, value]) => [
-          key.replace(/[A-Z]/g, (char) => `_${char.toLowerCase()}`),
-          value,
-        ])
+        normalizedEntries.filter(([key]) => key !== "upstream_proxy_password")
       );
-      mergeSettingsState(normalizedUpdate as any);
+
+      if (Object.prototype.hasOwnProperty.call(payload.update, "upstreamProxyPassword")) {
+        const patch = payload.update.upstreamProxyPassword as
+          | { mode?: string; value?: string }
+          | null
+          | undefined;
+        if (patch?.mode === "clear") {
+          normalizedUpdate.upstream_proxy_password_configured = false;
+        } else if (patch?.mode === "replace") {
+          normalizedUpdate.upstream_proxy_password_configured = Boolean(patch.value?.trim());
+        }
+      }
+
+      nextSettings = mergeSettingsState(normalizedUpdate as any);
     }
-    return HttpResponse.json(getSettingsState());
+    return HttpResponse.json({
+      settings: nextSettings,
+      runtime: {
+        gateway_rebound: false,
+        cli_proxy_synced: false,
+        wsl_auto_sync_triggered: false,
+        gateway_status: getGatewayStatusState(),
+      },
+    });
   }),
 
   // Settings sub-commands that return AppSettings.
@@ -182,6 +205,12 @@ export const handlers = [
       source_provider_id:
         typeof input.sourceProviderId === "number" ? input.sourceProviderId : null,
       bridge_type: typeof input.bridgeType === "string" ? input.bridgeType : null,
+      api_key_configured:
+        input.authMode === "oauth"
+          ? false
+          : typeof input.apiKey === "string"
+            ? input.apiKey.trim().length > 0
+            : (existing?.api_key_configured ?? false),
       stream_idle_timeout_seconds:
         typeof input.streamIdleTimeoutSeconds === "number"
           ? input.streamIdleTimeoutSeconds > 0
@@ -200,6 +229,32 @@ export const handlers = [
   http.post(`${TAURI_ENDPOINT}/provider_set_enabled`, () => HttpResponse.json(null)),
 
   http.post(`${TAURI_ENDPOINT}/provider_delete`, () => HttpResponse.json(true)),
+
+  http.post(`${TAURI_ENDPOINT}/provider_duplicate`, async ({ request }) => {
+    const payload = await withJson<{ providerId?: number }>(request);
+    const providerId = payload.providerId ?? -1;
+    const cliKeys: CliKey[] = ["claude", "codex", "gemini"];
+
+    for (const cliKey of cliKeys) {
+      const current = getProvidersState(cliKey);
+      const source = current.find((row) => row.id === providerId);
+      if (!source) continue;
+
+      const nextId = Math.max(0, ...current.map((row) => row.id)) + 1;
+      const duplicated: ProviderSummary = {
+        ...source,
+        id: nextId,
+        name: `${source.name} 副本`,
+        updated_at: Date.now(),
+      };
+      setProvidersState(cliKey, [...current, duplicated]);
+      return HttpResponse.json(duplicated);
+    }
+
+    return HttpResponse.json({ error: "provider not found" }, { status: 404 });
+  }),
+
+  http.post(`${TAURI_ENDPOINT}/provider_copy_api_key_to_clipboard`, () => HttpResponse.json(true)),
 
   http.post(`${TAURI_ENDPOINT}/providers_reorder`, async ({ request }) => {
     const payload = await withJson<{ cliKey?: CliKey }>(request);
@@ -309,8 +364,39 @@ export const handlers = [
   ),
   http.post(`${TAURI_ENDPOINT}/skills_paths_get`, () => HttpResponse.json(null)),
 
+  // ---- App Startup ----
+  http.post(`${TAURI_ENDPOINT}/app_startup_status_get`, () =>
+    HttpResponse.json({
+      running: false,
+      currentStage: "idle",
+      failedStage: null,
+      errorMessage: null,
+      canRetry: false,
+    })
+  ),
+  http.post(`${TAURI_ENDPOINT}/app_startup_retry`, () =>
+    HttpResponse.json({
+      running: false,
+      currentStage: "idle",
+      failedStage: null,
+      errorMessage: null,
+      canRetry: false,
+    })
+  ),
+
   // ---- App About ----
   http.post(`${TAURI_ENDPOINT}/app_about_get`, () => HttpResponse.json(getAppAboutState())),
+  http.post(`${TAURI_ENDPOINT}/desktop_window_set_theme`, () => HttpResponse.json(true)),
+  http.post(`${TAURI_ENDPOINT}/desktop_clipboard_write_text`, () => HttpResponse.json(true)),
+  http.post(`${TAURI_ENDPOINT}/desktop_notification_is_permission_granted`, () =>
+    HttpResponse.json(true)
+  ),
+  http.post(`${TAURI_ENDPOINT}/desktop_notification_request_permission`, () =>
+    HttpResponse.json("granted")
+  ),
+  http.post(`${TAURI_ENDPOINT}/desktop_notification_notify`, () => HttpResponse.json(true)),
+  http.post(`${TAURI_ENDPOINT}/desktop_updater_check`, () => HttpResponse.json(false)),
+  http.post(`${TAURI_ENDPOINT}/desktop_updater_download_and_install`, () => HttpResponse.json(true)),
 
   // ---- Data Management ----
   http.post(`${TAURI_ENDPOINT}/db_disk_usage_get`, () => HttpResponse.json(getDbDiskUsageState())),
@@ -357,9 +443,6 @@ export const handlers = [
 
   // ---- Claude Model Validation ----
   http.post(`${TAURI_ENDPOINT}/claude_provider_validate_model`, () => HttpResponse.json(null)),
-  http.post(`${TAURI_ENDPOINT}/claude_provider_get_api_key_plaintext`, () =>
-    HttpResponse.json(null)
-  ),
   http.post(`${TAURI_ENDPOINT}/claude_validation_history_list`, () => HttpResponse.json([])),
   http.post(`${TAURI_ENDPOINT}/claude_validation_history_clear_provider`, () =>
     HttpResponse.json(true)

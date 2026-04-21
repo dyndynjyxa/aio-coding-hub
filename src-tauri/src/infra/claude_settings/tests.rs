@@ -22,11 +22,13 @@ fn empty_patch() -> ClaudeSettingsPatch {
         env_claude_bash_no_login: None,
         env_claude_code_attribution_header: None,
         env_claude_code_blocking_limit_override: None,
+        env_claude_code_auto_compact_window: None,
         env_claude_code_max_output_tokens: None,
         env_enable_experimental_mcp_cli: None,
         env_enable_tool_search: None,
         env_max_mcp_output_tokens: None,
         env_claude_code_disable_nonessential_traffic: None,
+        env_claude_code_disable_1m_context: None,
         env_claude_code_proxy_resolves_hosts: None,
         env_claude_code_skip_prompt_history: None,
     }
@@ -230,6 +232,69 @@ fn patch_env_numeric_overrides_can_write_and_remove_keys() {
         "{patched}"
     );
     assert_eq!(patched.get("keep").and_then(|v| v.as_i64()), Some(1));
+}
+
+#[test]
+fn patch_env_can_write_auto_compact_window_and_disable_1m_context() {
+    let input = serde_json::json!({
+      "env": {
+        "KEEP": "x"
+      }
+    });
+
+    let patched = patch_claude_settings(
+        input,
+        ClaudeSettingsPatch {
+            env_claude_code_auto_compact_window: Some(200000),
+            env_claude_code_disable_1m_context: Some(true),
+            ..empty_patch()
+        },
+    )
+    .expect("patch");
+
+    let env = patched
+        .as_object()
+        .and_then(|o| o.get("env"))
+        .and_then(|v| v.as_object())
+        .expect("env object");
+
+    assert_eq!(
+        env.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW")
+            .and_then(|v| v.as_str()),
+        Some("200000")
+    );
+    assert_eq!(
+        env.get("CLAUDE_CODE_DISABLE_1M_CONTEXT")
+            .and_then(|v| v.as_str()),
+        Some("1")
+    );
+    assert_eq!(env.get("KEEP").and_then(|v| v.as_str()), Some("x"));
+
+    let patched = patch_claude_settings(
+        patched,
+        ClaudeSettingsPatch {
+            env_claude_code_auto_compact_window: Some(0),
+            env_claude_code_disable_1m_context: Some(false),
+            ..empty_patch()
+        },
+    )
+    .expect("patch");
+
+    let env = patched
+        .as_object()
+        .and_then(|o| o.get("env"))
+        .and_then(|v| v.as_object())
+        .expect("env object");
+
+    assert!(
+        env.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW").is_none(),
+        "{patched}"
+    );
+    assert!(
+        env.get("CLAUDE_CODE_DISABLE_1M_CONTEXT").is_none(),
+        "{patched}"
+    );
+    assert_eq!(env.get("KEEP").and_then(|v| v.as_str()), Some("x"));
 }
 
 #[test]

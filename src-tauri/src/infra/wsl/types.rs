@@ -2,13 +2,13 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct WslDetection {
     pub detected: bool,
     pub distros: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct WslDistroConfigStatus {
     pub distro: String,
     pub claude: bool,
@@ -22,21 +22,21 @@ pub struct WslDistroConfigStatus {
     pub gemini_prompt: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct WslConfigureCliReport {
     pub cli_key: String,
     pub ok: bool,
     pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct WslConfigureDistroReport {
     pub distro: String,
     pub ok: bool,
     pub results: Vec<WslConfigureCliReport>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct WslConfigureReport {
     pub ok: bool,
     pub message: String,

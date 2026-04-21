@@ -14,7 +14,7 @@ const LOGIN_SHELL_TIMEOUT: Duration = Duration::from_secs(2);
 const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 const CMD_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct ClaudeCliInfo {
     pub found: bool,
     pub executable_path: Option<String>,
@@ -28,7 +28,7 @@ pub struct ClaudeCliInfo {
     pub disable_error_reporting: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct SimpleCliInfo {
     pub found: bool,
     pub executable_path: Option<String>,
@@ -38,7 +38,7 @@ pub struct SimpleCliInfo {
     pub resolved_via: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct ClaudeEnvState {
     pub config_dir: String,
     pub settings_path: String,

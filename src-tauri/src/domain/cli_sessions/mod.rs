@@ -5,14 +5,21 @@ mod codex;
 mod types;
 
 pub use types::{
-    CliSessionsDisplayContentBlock, CliSessionsDisplayMessage, CliSessionsPaginatedMessages,
-    CliSessionsProjectSummary, CliSessionsSessionSummary,
+    CliSessionsDisplayContentBlock, CliSessionsDisplayMessage, CliSessionsFolderLookupEntry,
+    CliSessionsPaginatedMessages, CliSessionsProjectSummary, CliSessionsSessionSummary,
 };
 
 use crate::shared::error::{AppError, AppResult};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CliSessionsFolderLookupKey {
+    pub source: CliSessionsSource,
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CliSessionsSource {
     Claude,
     Codex,
@@ -29,6 +36,15 @@ impl std::str::FromStr for CliSessionsSource {
                 "SEC_INVALID_INPUT",
                 format!("unknown source: {other}"),
             )),
+        }
+    }
+}
+
+impl CliSessionsSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CliSessionsSource::Claude => "claude",
+            CliSessionsSource::Codex => "codex",
         }
     }
 }
@@ -76,6 +92,57 @@ pub fn sessions_list(
         CliSessionsSource::Claude => claude::sessions_list(app, project_id),
         CliSessionsSource::Codex => codex::sessions_list(app, project_id),
     }
+}
+
+pub fn folder_lookup_by_ids(
+    app: &tauri::AppHandle,
+    items: &[CliSessionsFolderLookupKey],
+    wsl_distro: Option<&str>,
+) -> AppResult<Vec<CliSessionsFolderLookupEntry>> {
+    if items.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    if let Some(distro) = wsl_distro {
+        crate::wsl::validate_distro(distro)?;
+    }
+
+    let mut claude_ids: Vec<String> = Vec::new();
+    let mut codex_ids: Vec<String> = Vec::new();
+    let mut seen = HashSet::new();
+
+    for item in items {
+        let session_id = item.session_id.trim();
+        if session_id.is_empty() {
+            continue;
+        }
+        let dedupe_key = format!("{}:{session_id}", item.source.as_str());
+        if !seen.insert(dedupe_key) {
+            continue;
+        }
+        match item.source {
+            CliSessionsSource::Claude => claude_ids.push(session_id.to_string()),
+            CliSessionsSource::Codex => codex_ids.push(session_id.to_string()),
+        }
+    }
+
+    let mut out = Vec::new();
+
+    if !claude_ids.is_empty() {
+        out.extend(match wsl_distro {
+            Some(distro) => claude::wsl_folder_lookup_by_session_ids(distro, &claude_ids)?,
+            None => claude::folder_lookup_by_session_ids(app, &claude_ids)?,
+        });
+    }
+
+    if !codex_ids.is_empty() {
+        out.extend(match wsl_distro {
+            Some(distro) => codex::wsl_folder_lookup_by_session_ids(distro, &codex_ids)?,
+            None => codex::folder_lookup_by_session_ids(app, &codex_ids)?,
+        });
+    }
+
+    Ok(out)
 }
 
 pub fn messages_get(
@@ -132,6 +199,19 @@ pub(super) fn truncate_string(raw: &str, max_len: usize) -> String {
         return raw.to_string();
     }
     raw.chars().take(max_len).collect::<String>()
+}
+
+pub(super) fn folder_name_from_path(path: &str) -> Option<String> {
+    let trimmed = path.trim().trim_end_matches(['/', '\\']);
+    if trimmed.is_empty() {
+        return None;
+    }
+    let name = trimmed
+        .rsplit(['/', '\\'])
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    Some(name.to_string())
 }
 
 /// Validates that a path is within the specified root directory.

@@ -1,4 +1,4 @@
-import type { AppAboutInfo } from "../../services/appAbout";
+import type { AppAboutInfo } from "../../services/app/appAbout";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 

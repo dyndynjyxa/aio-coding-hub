@@ -164,14 +164,14 @@ pub(super) fn build_codex_config_toml(
                     lines.push(format!("cwd = \"{}\"", toml_escape_string(cwd)));
                 }
             }
-            "http" => {
+            "http" | "sse" => {
                 let url = server
                     .url
                     .as_ref()
                     .map(|s| s.trim())
                     .filter(|s| !s.is_empty())
-                    .ok_or_else(|| "SEC_INVALID_INPUT: http url is required".to_string())?;
-                lines.push("type = \"http\"".to_string());
+                    .ok_or_else(|| format!("SEC_INVALID_INPUT: {transport} url is required"))?;
+                lines.push(format!("type = \"{}\"", transport));
                 lines.push(format!("url = \"{}\"", toml_escape_string(url)));
                 if !server.headers.is_empty() {
                     lines.push(format!(

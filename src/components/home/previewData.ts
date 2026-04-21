@@ -2,9 +2,10 @@
 // Extracted from HomeRequestLogsPanel to keep the component file lean.
 
 import { GatewayErrorCodes } from "../../constants/gatewayErrorCodes";
-import type { GatewayAttemptEvent } from "../../services/gatewayEvents";
-import type { RequestLogSummary } from "../../services/requestLogs";
-import type { TraceSession } from "../../services/traceStore";
+import type { GatewayAttemptEvent } from "../../services/gateway/gatewayEvents";
+import type { CliSessionsFolderLookupEntry } from "../../services/cli/cliSessions";
+import type { RequestLogSummary } from "../../services/gateway/requestLogs";
+import type { TraceSession } from "../../services/gateway/traceStore";
 
 export function buildPreviewRequestLogs(
   nowSec = Math.floor(Date.now() / 1000)
@@ -14,6 +15,7 @@ export function buildPreviewRequestLogs(
       id: 900010,
       trace_id: "preview-claude-fast",
       cli_key: "claude",
+      session_id: "claude-preview-alpha",
       method: "POST",
       path: "/v1/messages",
       requested_model: "claude-sonnet-4",
@@ -45,6 +47,7 @@ export function buildPreviewRequestLogs(
       id: 900009,
       trace_id: "preview-gemini-flash",
       cli_key: "gemini",
+      session_id: null,
       method: "POST",
       path: "/v1/chat/completions",
       requested_model: "gemini-2.5-flash",
@@ -76,6 +79,7 @@ export function buildPreviewRequestLogs(
       id: 900008,
       trace_id: "preview-codex-failover",
       cli_key: "codex",
+      session_id: "codex-preview-worktree",
       method: "POST",
       path: "/v1/responses",
       requested_model: "gpt-5.4",
@@ -117,6 +121,7 @@ export function buildPreviewRequestLogs(
       id: 900001,
       trace_id: "preview-claude",
       cli_key: "claude",
+      session_id: "claude-preview-alpha",
       method: "POST",
       path: "/v1/messages",
       requested_model: "claude-sonnet-4",
@@ -148,6 +153,7 @@ export function buildPreviewRequestLogs(
       id: 900002,
       trace_id: "preview-codex",
       cli_key: "codex",
+      session_id: "codex-preview-main",
       method: "POST",
       path: "/v1/responses",
       requested_model: "gpt-5.4",
@@ -179,6 +185,7 @@ export function buildPreviewRequestLogs(
       id: 900007,
       trace_id: "preview-claude-opus",
       cli_key: "claude",
+      session_id: "claude-preview-beta",
       method: "POST",
       path: "/v1/messages",
       requested_model: "claude-opus-4",
@@ -210,6 +217,7 @@ export function buildPreviewRequestLogs(
       id: 900006,
       trace_id: "preview-codex-timeout",
       cli_key: "codex",
+      session_id: "codex-preview-main",
       method: "POST",
       path: "/v1/responses",
       requested_model: "gpt-5.4-mini",
@@ -241,6 +249,7 @@ export function buildPreviewRequestLogs(
       id: 900003,
       trace_id: "preview-gemini",
       cli_key: "gemini",
+      session_id: null,
       method: "POST",
       path: "/v1/chat/completions",
       requested_model: "gemini-2.5-pro",
@@ -282,6 +291,7 @@ export function buildPreviewRequestLogs(
       id: 900005,
       trace_id: "preview-claude-abort",
       cli_key: "claude",
+      session_id: "claude-preview-beta",
       method: "POST",
       path: "/v1/messages",
       requested_model: "claude-sonnet-4",
@@ -313,6 +323,7 @@ export function buildPreviewRequestLogs(
       id: 900004,
       trace_id: "preview-gemini-free",
       cli_key: "gemini",
+      session_id: null,
       method: "POST",
       path: "/v1/chat/completions",
       requested_model: "gemini-2.0-flash-exp",
@@ -344,6 +355,7 @@ export function buildPreviewRequestLogs(
       id: 900011,
       trace_id: "preview-codex-retry",
       cli_key: "codex",
+      session_id: "codex-preview-worktree",
       method: "POST",
       path: "/v1/responses",
       requested_model: "gpt-5.4",
@@ -381,6 +393,7 @@ export function buildPreviewTraces(nowMs = Date.now()): TraceSession[] {
     {
       trace_id: "preview-running-codex",
       cli_key: "codex",
+      session_id: "codex-preview-main",
       method: "POST",
       path: "/v1/responses",
       query: null,
@@ -405,6 +418,92 @@ export function buildPreviewTraces(nowMs = Date.now()): TraceSession[] {
           session_reuse: true,
         } satisfies GatewayAttemptEvent,
       ],
+    },
+    {
+      trace_id: "preview-running-claude-failover",
+      cli_key: "claude",
+      session_id: "claude-preview-beta",
+      method: "POST",
+      path: "/v1/messages",
+      query: null,
+      requested_model: "claude-sonnet-4",
+      first_seen_ms: nowMs - 52_000,
+      last_seen_ms: nowMs - 1_200,
+      attempts: [
+        {
+          trace_id: "preview-running-claude-failover",
+          cli_key: "claude",
+          method: "POST",
+          path: "/v1/messages",
+          query: null,
+          attempt_index: 0,
+          provider_id: 31,
+          provider_name: "Claude Main",
+          base_url: "https://preview.local",
+          outcome: "failed",
+          status: 529,
+          attempt_started_ms: nowMs - 52_000,
+          attempt_duration_ms: 21_000,
+          session_reuse: false,
+        } satisfies GatewayAttemptEvent,
+        {
+          trace_id: "preview-running-claude-failover",
+          cli_key: "claude",
+          method: "POST",
+          path: "/v1/messages",
+          query: null,
+          attempt_index: 1,
+          provider_id: 32,
+          provider_name: "Claude Backup",
+          base_url: "https://preview.local",
+          outcome: "started",
+          status: null,
+          attempt_started_ms: nowMs - 29_000,
+          attempt_duration_ms: 29_000,
+          session_reuse: false,
+        } satisfies GatewayAttemptEvent,
+      ],
+    },
+    {
+      trace_id: "preview-running-gemini-pending",
+      cli_key: "gemini",
+      session_id: null,
+      method: "POST",
+      path: "/v1/chat/completions",
+      query: null,
+      requested_model: "gemini-2.5-pro",
+      first_seen_ms: nowMs - 7_000,
+      last_seen_ms: nowMs - 2_500,
+      attempts: [],
+    },
+  ];
+}
+
+export function buildPreviewSessionFolderLookups(): CliSessionsFolderLookupEntry[] {
+  return [
+    {
+      source: "claude",
+      session_id: "claude-preview-alpha",
+      folder_name: "workspace-alpha",
+      folder_path: "/Users/demo/workspace-alpha",
+    },
+    {
+      source: "claude",
+      session_id: "claude-preview-beta",
+      folder_name: "workspace-beta",
+      folder_path: "/Users/demo/workspace-beta",
+    },
+    {
+      source: "codex",
+      session_id: "codex-preview-main",
+      folder_name: "platform-core",
+      folder_path: "/Users/demo/platform-core",
+    },
+    {
+      source: "codex",
+      session_id: "codex-preview-worktree",
+      folder_name: "platform-worktree",
+      folder_path: "/Users/demo/platform-worktree",
     },
   ];
 }

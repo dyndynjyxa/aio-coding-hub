@@ -1,12 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { tauriInvoke } from "../../test/mocks/tauri";
-import { hasTauriRuntime, invokeTauriOrNull } from "../tauriInvoke";
+import { invokeTauriOrNull } from "../tauriInvoke";
 
 describe("services/tauriInvoke", () => {
-  it("hasTauriRuntime always returns true", () => {
-    expect(hasTauriRuntime()).toBe(true);
-  });
-
   it("invokeTauriOrNull calls @tauri-apps/api/core.invoke with runtime", async () => {
     vi.mocked(tauriInvoke).mockResolvedValueOnce({ ok: true });
 

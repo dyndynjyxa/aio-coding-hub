@@ -71,6 +71,9 @@ Use this checklist whenever a Tauri command is added or changed.
 - The Tauri command layer owns IPC shape adaptation.
 - The domain layer owns validation and persistence rules.
 - The frontend service layer owns the final JS wrapper used by pages/hooks.
+- Keep runtime command registration and Specta export coverage derived from one
+  registry module. If those lists diverge, the desktop contract is already
+  drifting even if tests still compile.
 - Generated bindings only protect the commands and types they actually export.
   If Specta covers only a subset, document that boundary explicitly and keep
   service-layer contract tests for the remaining commands.
@@ -81,6 +84,9 @@ Use this checklist whenever a Tauri command is added or changed.
 - If a command intentionally stays outside Specta, keep one explicit owner file
   for the handwritten DTO on the frontend and add a targeted contract test that
   names the Rust command and the JS wrapper together.
+- Keep runtime-only exceptions rare and named. In this project,
+  `desktop_updater_download_and_install` is the known handwritten command path
+  because it depends on a Tauri `Channel` callback.
 
 ---
 
@@ -92,6 +98,9 @@ Use this when touching `src/main.tsx`, `src/App.tsx`, or global event wiring.
 - Move startup side effects into a dedicated hook such as `useAppBootstrap`.
 - Keep route declarations in a dedicated module such as `src/app/AppRoutes.tsx`.
 - Split unrelated synchronization work into separate effects instead of one “startup soup” effect.
+- If root code needs to update runtime-only module singletons, pass one
+  normalized snapshot into a runtime controller instead of calling several
+  setters inline.
 
 ---
 
@@ -189,6 +198,29 @@ Root-boundary checklist:
 - Review blast radius: adding one feature should not require editing unrelated
   startup branches.
 
+### Mistake 12: Letting Root Bridges Drive Multiple Runtime Singletons Directly
+
+**Bad**: A root bridge reads settings and directly calls
+`setCacheAnomalyMonitorEnabled`, `setTaskCompleteNotifyEnabled`,
+`setNotificationSoundEnabled`, and future runtime setters one by one.
+
+**Good**: Normalize the query snapshot once and hand it to a runtime controller
+that owns singleton fan-out, de-duplication, and future toggle growth.
+
+Runtime-bridge checklist:
+- The root hook should see one query snapshot and one controller call.
+- The controller should own de-duplication and normalization.
+- Runtime singleton setters should not leak into app bootstrap or route code.
+
+### Mistake 13: Letting Tauri Commands Become Application Services
+
+**Bad**: `commands/settings.rs` or `commands/cli_proxy.rs` owns persistence,
+runtime rollback, gateway rebind, CLI sync, and session cleanup directly.
+
+**Good**: Keep `commands/*` as IPC wrappers and move orchestration into
+`app/*_service.rs` so the same service can be reused by startup flows, tests,
+or future non-Tauri entrypoints.
+
 ### Mistake 9: Letting Event Names Bypass the Shared Contract
 
 **Bad**: Define a shared `gatewayEventNames` map, but still add raw
@@ -258,12 +290,142 @@ Extension-matrix checklist:
 - If adding one CLI key requires touching frontend constants, backend
   validation, migration schema, and tests separately, stop and re-evaluate the
   design before shipping.
+
+### Mistake 13: Treating Gate-Filtered Providers as Real Upstream Failures
+
+**Bad**: The failover loop records circuit-open / cooldown / rate-limit skips in
+`attempts`, then terminal classification checks only `attempts.is_empty()`.
+Skip-only requests are finalized as `GW_UPSTREAM_ALL_FAILED`, bypass the recent
+error cache, and flood Home request history with repeated failures while the
+provider is still unavailable.
+
+**Good**: Distinguish "provider filtered before send" from "upstream request
+actually failed". Preserve filtered attempts in `attempts_json` for diagnostics,
+but finalize skip-only loops as `GW_ALL_PROVIDERS_UNAVAILABLE` so retry-after
+cache and UI dedupe continue to work.
+
+Failover observability checklist:
+- Terminal classification must answer: "did any upstream request actually get
+  sent?" instead of "is the attempts array non-empty?".
+- Circuit-open / cooldown / rate-limit skips are diagnostic breadcrumbs, not
+  proof of upstream failure.
+- If every candidate was filtered before send, keep `attempts_json` detail but
+  use the unavailable error family and retry-after semantics.
+- When terminal state changes from `upstream_failed` to `unavailable`, verify
+  recent-error cache keys and Home/log polling behavior still align with that
+  state.
 - Prefer data-driven enablement tables over one boolean column per CLI when the
   set is expected to evolve.
 - Keep one authoritative definition for supported identities and generate or
   derive secondary views from it.
 - When schema constraints force duplication, document every mirrored ownership
   point in the same PR.
+
+### Mistake 14: Two-Phase Writes Without Orphan Recovery
+
+**Bad**: Backend writes a placeholder row (`status=NULL`) at request start and
+relies on a second upsert to finalize it. If the second write is lost (crash,
+backpressure drop, channel disconnect), the placeholder persists indefinitely.
+Frontend treats `status==null` as "in progress" with no time bound, causing
+permanent UI artifacts and polling degradation.
+
+**Good**: Any two-phase write pattern must account for the second phase never
+arriving. Define an explicit staleness contract across layers.
+
+Two-phase write checklist:
+- If backend writes a placeholder that expects a later update, define the
+  maximum expected lifetime of the placeholder state.
+- Frontend must enforce a staleness guard: after the threshold, treat the row
+  as abandoned rather than in-progress.
+- Backend should periodically scan for orphaned placeholders (e.g. on startup
+  or via a background sweep) and finalize them with a dedicated error code
+  such as `GW_ORPHANED`.
+- The second-phase write must have equal or higher delivery priority than the
+  first phase. If backpressure drops the completion but keeps the placeholder,
+  the system state is worse than if neither was written.
+- When `shouldUseFullRefresh` or similar polling-mode decisions depend on
+  in-progress detection, verify that a stuck placeholder does not permanently
+  degrade polling performance.
+
+### Mistake 15: Exposing Runtime Settings That Never Reach the Real Runtime Boundary
+
+**Bad**: A setting is persisted in `settings.json` and rendered in the UI, but
+the real consumer reads only static plugin config or startup-time state. Users
+think they changed live behavior, yet the effective endpoint or plugin state
+never moves.
+
+**Good**: For every user-facing setting, identify the real runtime owner and
+wire the final side effect in the same change. If the boundary is build-time or
+startup-only, either make that explicit in the product or stop exposing it as a
+normal live setting.
+
+Runtime-setting checklist:
+- If a setting controls a Tauri plugin, confirm whether that plugin reads
+  `tauri.conf.json`, startup-time builder state, or live command input.
+- Do not keep a UI toggle or text field once the actual runtime consumer is
+  known to ignore it.
+- Add one test that changes the setting and verifies the real side effect, not
+  just the stored JSON.
+- When a value is display-only, document that ownership next to the setting type
+  instead of implying runtime control.
+
+### Mistake 16: Mixing Generated and Handwritten IPC Contracts Without an Ownership Map
+
+**Bad**: Some command families use Specta-generated bindings, others still use
+handwritten `invoke` wrappers, and pages/components import both styles directly.
+Maintainers then talk about a "stable IPC contract" as if one generated file
+protected the whole desktop boundary.
+
+**Good**: Keep one explicit ownership map for the desktop contract. Decide which
+command families are generated-first, which remain handwritten, and which must
+stay behind service adapters. Pages should consume service functions, not pick
+their own IPC style.
+
+IPC-ownership checklist:
+- Group command families under one of: generated binding, handwritten wrapper,
+  plugin API wrapper, or event-only contract.
+- If Specta coverage is partial, document that boundary in code and docs next to
+  the generated file.
+- Keep one targeted contract test for every handwritten command family that
+  names the Rust command and the TypeScript wrapper together.
+- Do not let pages/components import both generated IPC and raw `invoke` for
+  the same feature area.
+
+### Mistake 17: Driving Downstream Side Effects from Persisted Settings Instead of the Active Runtime Snapshot
+
+**Bad**: Persist new host/port settings and immediately push those values into
+WSL, CLI proxy, updater, or other downstream sync flows while the active
+gateway/runtime listener is still bound to the old address.
+
+**Good**: Separate "next persisted config" from "current active runtime
+snapshot". If a setting needs rebind/restart to take effect, downstream sync
+must either use the active snapshot or wait until the rebind succeeds.
+
+Runtime-rebind checklist:
+- Model persisted config and active runtime state as separate concepts.
+- Use the active runtime snapshot for downstream sync until rebind completes.
+- Add one integration test that edits host/port while the runtime is already
+  running and verifies which value external sync receives.
+- If live rebind is unsupported, surface that as explicit UX instead of
+  pretending the new persisted value is already in effect.
+
+### Mistake 18: Broadcasting High-Frequency Events Without Visibility or Payload Ownership
+
+**Bad**: Backend emits large realtime payloads to every window even when the
+window is hidden, no page is subscribed, or the UI only needs a small summary.
+
+**Good**: Classify events by freshness and payload cost. Use push only for the
+small state users must see immediately, and let heavier views re-fetch by ID or
+cursor when visible.
+
+Realtime-event checklist:
+- Decide which events are summary signals and which are detail payloads.
+- If a window is hidden or no subscriber is active, skip or coalesce expensive
+  events.
+- Prefer push-summary + pull-detail for traces, logs, and other high-volume
+  streams.
+- Add simple event-rate instrumentation so regression shows up before UI jank
+  becomes a user report.
 
 ---
 
@@ -300,6 +462,17 @@ After implementation:
 - [ ] Confirm that provider auth/bridge modes do not silently affect each other
       (e.g. API key vs OAuth vs protocol bridge should have clear boundaries)
 - [ ] Reviewed root bootstrap / command registry blast radius after the change
+- [ ] If any write uses a two-phase pattern (placeholder + update), verified
+      that orphan recovery exists and frontend enforces a staleness guard
+- [ ] Confirmed each user-facing setting reaches the real runtime owner
+      (startup builder, plugin config, live command path, or documented
+      display-only field)
+- [ ] Documented IPC ownership for the touched command family
+      (generated, handwritten, plugin wrapper, or event-only)
+- [ ] Verified downstream sync reads the active runtime snapshot instead of
+      assuming persisted settings are already applied
+- [ ] Verified high-frequency events have an explicit payload owner and
+      visibility/backpressure rule
 
 ---
 

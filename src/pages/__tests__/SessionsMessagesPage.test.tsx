@@ -23,9 +23,9 @@ vi.mock("@tanstack/react-virtual", () => ({
   },
 }));
 
-vi.mock("../../services/cliSessions", async () => {
-  const actual = await vi.importActual<typeof import("../../services/cliSessions")>(
-    "../../services/cliSessions"
+vi.mock("../../services/cli/cliSessions", async () => {
+  const actual = await vi.importActual<typeof import("../../services/cli/cliSessions")>(
+    "../../services/cli/cliSessions"
   );
   return {
     ...actual,
@@ -39,11 +39,11 @@ vi.mock("../../services/cliSessions", async () => {
   };
 });
 
-import { cliSessionsMessagesGet } from "../../services/cliSessions";
+import { cliSessionsMessagesGet } from "../../services/cli/cliSessions";
 import type {
   CliSessionsSessionSummary,
   CliSessionsDisplayMessage,
-} from "../../services/cliSessions";
+} from "../../services/cli/cliSessions";
 import { SessionsMessagesPage } from "../SessionsMessagesPage";
 
 const SESSION: CliSessionsSessionSummary = {

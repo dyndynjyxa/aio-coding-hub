@@ -6,11 +6,10 @@ import type {
   ClaudeCliInfo,
   ClaudeSettingsPatch,
   ClaudeSettingsState,
-} from "../../../services/cliManager";
-import type { ProviderSummary } from "../../../services/providers";
+} from "../../../services/cli/cliManager";
+import type { ProviderSummary } from "../../../services/providers/providers";
 import { cn } from "../../../utils/cn";
 import { CliVersionBadge } from "../CliVersionBadge";
-import { ClaudeOAuthCard } from "./ClaudeOAuthCard";
 import { Button } from "../../../ui/Button";
 import { Card } from "../../../ui/Card";
 import { Input } from "../../../ui/Input";
@@ -171,8 +170,8 @@ function EnvTimeoutItem({
 }
 
 type ClaudeEnvU64PatchKey =
+  | "env_claude_code_auto_compact_window"
   | "env_claude_code_blocking_limit_override"
-  | "env_claude_autocompact_pct_override"
   | "env_claude_code_max_output_tokens"
   | "env_max_mcp_output_tokens";
 
@@ -251,7 +250,6 @@ export function CliManagerClaudeTab({
   claudeSettingsLoading,
   claudeSettingsSaving,
   claudeSettings,
-  providers,
   refreshClaude,
   openClaudeConfigDir,
   persistClaudeSettings,
@@ -262,6 +260,7 @@ export function CliManagerClaudeTab({
   const [languageText, setLanguageText] = useState("");
   const [mcpTimeoutMsText, setMcpTimeoutMsText] = useState("");
   const [mcpToolTimeoutMsText, setMcpToolTimeoutMsText] = useState("");
+  const [autoCompactWindowText, setAutoCompactWindowText] = useState("");
   const [blockingLimitOverrideText, setBlockingLimitOverrideText] = useState("");
   const [maxOutputTokensText, setMaxOutputTokensText] = useState("");
   const [maxMcpOutputTokensText, setMaxMcpOutputTokensText] = useState("");
@@ -280,6 +279,11 @@ export function CliManagerClaudeTab({
       claudeSettings.env_mcp_tool_timeout_ms == null
         ? ""
         : String(claudeSettings.env_mcp_tool_timeout_ms)
+    );
+    setAutoCompactWindowText(
+      claudeSettings.env_claude_code_auto_compact_window == null
+        ? ""
+        : String(claudeSettings.env_claude_code_auto_compact_window)
     );
     setBlockingLimitOverrideText(
       claudeSettings.env_claude_code_blocking_limit_override == null
@@ -343,6 +347,15 @@ export function CliManagerClaudeTab({
       claudeSettings.env_claude_code_blocking_limit_override == null
         ? ""
         : String(claudeSettings.env_claude_code_blocking_limit_override)
+    );
+  }
+
+  function revertAutoCompactWindowInput() {
+    if (!claudeSettings) return;
+    setAutoCompactWindowText(
+      claudeSettings.env_claude_code_auto_compact_window == null
+        ? ""
+        : String(claudeSettings.env_claude_code_auto_compact_window)
     );
   }
 
@@ -505,7 +518,6 @@ export function CliManagerClaudeTab({
             <div className="text-sm text-slate-500 dark:text-slate-400 text-center py-8">
               暂无配置，请尝试刷新
             </div>
-            <ClaudeOAuthCard providers={providers} />
           </div>
         ) : (
           <div className="p-6 space-y-6">
@@ -794,6 +806,19 @@ export function CliManagerClaudeTab({
                 />
 
                 <EnvU64Item
+                  label="CLAUDE_CODE_AUTO_COMPACT_WINDOW"
+                  envVarName="CLAUDE_CODE_AUTO_COMPACT_WINDOW"
+                  subtitle="设置 auto compact window。留空或 0 表示删除该键并回退 Claude Code 默认值。"
+                  value={autoCompactWindowText}
+                  onValueChange={setAutoCompactWindowText}
+                  patchKey="env_claude_code_auto_compact_window"
+                  disabled={saving}
+                  revert={revertAutoCompactWindowInput}
+                  persist={persistClaudeSettings}
+                  placeholder="例如: 200000"
+                />
+
+                <EnvU64Item
                   label="CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"
                   envVarName="CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"
                   subtitle="覆盖 blocking limit（有效上下文/阻断阈值）。留空或 0 表示不设置该项。"
@@ -899,6 +924,19 @@ export function CliManagerClaudeTab({
                 </SettingItem>
 
                 <SettingItem
+                  label="CLAUDE_CODE_DISABLE_1M_CONTEXT"
+                  subtitle="关闭 1M context 支持。开启时写入 1，关闭时删除该键。"
+                >
+                  <Switch
+                    checked={claudeSettings.env_claude_code_disable_1m_context}
+                    onCheckedChange={(checked) =>
+                      void persistClaudeSettings({ env_claude_code_disable_1m_context: checked })
+                    }
+                    disabled={saving}
+                  />
+                </SettingItem>
+
+                <SettingItem
                   label="CLAUDE_CODE_SKIP_PROMPT_HISTORY"
                   subtitle="多开 Claude Code 可能产生竞态冲突，打开此选项屏蔽相关日志（开启写入 1；关闭删除该项）。"
                 >
@@ -912,8 +950,6 @@ export function CliManagerClaudeTab({
                 </SettingItem>
               </div>
             </div>
-
-            <ClaudeOAuthCard providers={providers} />
           </div>
         )}
 

@@ -1,44 +1,64 @@
 // Usage: Dashboard / overview page. Backend commands: `request_logs_*`, `request_attempt_logs_*`, `usage_*`, `gateway_*`, `providers_*`, `sort_modes_*`, `provider_limit_usage_*`.
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { CLIS } from "../constants/clis";
 import { HomeOverviewPanel } from "../components/home/HomeOverviewPanel";
+import { useDevPreviewData } from "../hooks/useDevPreviewData";
 import { useDocumentVisibility } from "../hooks/useDocumentVisibility";
-import { useWindowForeground } from "../hooks/useWindowForeground";
 import { useGatewaySessionsListQuery } from "../query/gateway";
-import { useProviderLimitUsageV1Query } from "../query/providerLimitUsage";
-import {
-  useRequestLogsIncrementalPollQuery,
-  useRequestLogsListAllQuery,
-} from "../query/requestLogs";
 import { useSettingsQuery } from "../query/settings";
-import { useUsageHourlySeriesQuery } from "../query/usage";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Dialog } from "../ui/Dialog";
 import { PageHeader } from "../ui/PageHeader";
 import { Spinner } from "../ui/Spinner";
 import { TabList } from "../ui/TabList";
-import { useTraceStore } from "../services/traceStore";
-import { emitBackgroundTaskVisibilityTrigger } from "../services/backgroundTasks";
+import { normalizeCliPriorityOrder } from "../services/cli/cliPriorityOrder";
+import { useTraceStore } from "../services/gateway/traceStore";
+import {
+  readHomeOverviewLogsPrimaryLayoutFromStorage,
+  subscribeHomeOverviewLogsPrimaryLayout,
+} from "../services/home/homeOverviewLayout";
 import { DEFAULT_HOME_USAGE_PERIOD } from "../utils/homeUsagePeriod";
 import { resolveHomeUsageWindowDays } from "../utils/homeUsagePeriod";
 import { useHomeCircuitState } from "./home/hooks/useHomeCircuitState";
 import { useHomeSortMode } from "./home/hooks/useHomeSortMode";
 import { useHomeCliProxy } from "./home/hooks/useHomeCliProxy";
+import { useHomeOverviewFeed } from "./home/hooks/useHomeOverviewFeed";
 import { useHomeWorkspaceConfigs } from "./home/hooks/useHomeWorkspaceConfigs";
 
-type HomeTabKey = "overview" | "cost" | "more";
+type HomeTabKey = "overview" | "cost" | "tokenCost";
 
-const HOME_TABS: Array<{ key: HomeTabKey; label: string }> = [
-  { key: "overview", label: "概览" },
-  { key: "cost", label: "花费" },
-  { key: "more", label: "更多" },
-];
+function buildHomeTabs(
+  personalizedLayoutEnabled: boolean
+): Array<{ key: HomeTabKey; label: string }> {
+  return personalizedLayoutEnabled
+    ? [
+        { key: "overview", label: "概览" },
+        { key: "tokenCost", label: "用量" },
+      ]
+    : [
+        { key: "overview", label: "概览" },
+        { key: "cost", label: "花费" },
+        { key: "tokenCost", label: "用量" },
+      ];
+}
 
 const LazyHomeCostPanel = lazy(() =>
   import("../components/home/HomeCostPanel").then((m) => ({ default: m.HomeCostPanel }))
+);
+
+const LazyHomeTokenCostPanel = lazy(() =>
+  import("../components/home/HomeTokenCostPanel").then((m) => ({
+    default: m.HomeTokenCostPanel,
+  }))
 );
 
 const LazyRequestLogDetailDialog = lazy(() =>
@@ -58,11 +78,19 @@ export function HomePage() {
   const homeUsagePeriod = settingsQuery.data?.home_usage_period ?? DEFAULT_HOME_USAGE_PERIOD;
   const homeUsageWindowDays = resolveHomeUsageWindowDays(homeUsagePeriod);
   const isDevMode = import.meta.env.DEV;
+  const devPreview = useDevPreviewData();
+  const personalizedLayoutEnabled = useSyncExternalStore(
+    subscribeHomeOverviewLogsPrimaryLayout,
+    readHomeOverviewLogsPrimaryLayoutFromStorage,
+    () => false
+  );
+  const homeTabs = useMemo(
+    () => buildHomeTabs(personalizedLayoutEnabled),
+    [personalizedLayoutEnabled]
+  );
 
   const [tab, setTab] = useState<HomeTabKey>("overview");
-  const tabRef = useRef(tab);
   const [selectedLogId, setSelectedLogId] = useState<number | null>(null);
-  const [devPreviewEnabled, setDevPreviewEnabled] = useState(false);
 
   // --- Delegated state hooks ---
   const circuit = useHomeCircuitState();
@@ -83,91 +111,32 @@ export function HomePage() {
   const cliProxyState = useHomeCliProxy();
   const workspaceConfigs = useHomeWorkspaceConfigs({ enabled: tab === "overview" });
 
-  // --- Overview data queries ---
-  const usageHeatmapQuery = useUsageHourlySeriesQuery(homeUsageWindowDays, {
-    enabled: tab === "overview" && showOverviewUsageSection,
+  const {
+    usageHeatmapRows,
+    usageHeatmapLoading,
+    providerLimitRows,
+    providerLimitLoading,
+    providerLimitRefreshing,
+    providerLimitAvailable,
+    requestLogs,
+    requestLogsLoading,
+    requestLogsRefreshing,
+    requestLogsAvailable,
+    refreshUsageHeatmap,
+    refreshProviderLimit,
+    refreshRequestLogs,
+  } = useHomeOverviewFeed({
+    overviewActive: tab === "overview",
+    foregroundActive,
+    showOverviewUsageSection,
+    homeUsageWindowDays,
   });
-  const usageHeatmapRows = usageHeatmapQuery.data ?? [];
-  const usageHeatmapLoading = usageHeatmapQuery.isFetching;
-
-  const providerLimitQuery = useProviderLimitUsageV1Query(null, {
-    enabled: overviewForegroundPollingEnabled,
-    refetchIntervalMs: overviewForegroundPollingEnabled ? 30000 : false,
-  });
-  const providerLimitRows = providerLimitQuery.data ?? [];
-  const providerLimitLoading = providerLimitQuery.isLoading;
-  const providerLimitRefreshing = providerLimitQuery.isFetching && !providerLimitQuery.isLoading;
-  const providerLimitAvailable: boolean | null = providerLimitQuery.isLoading
-    ? null
-    : providerLimitQuery.data != null;
-
-  const requestLogsQuery = useRequestLogsListAllQuery(50, { enabled: tab === "overview" });
-  useRequestLogsIncrementalPollQuery(50, {
-    enabled: overviewForegroundPollingEnabled,
-    refetchIntervalMs: overviewForegroundPollingEnabled ? 1000 : false,
-  });
-  const requestLogsRaw = requestLogsQuery.data;
-  const requestLogs = useMemo(() => requestLogsRaw ?? [], [requestLogsRaw]);
-  const requestLogsLoading = requestLogsQuery.isLoading;
-  const requestLogsRefreshing = requestLogsQuery.isFetching && !requestLogsQuery.isLoading;
-  const requestLogsAvailable: boolean | null = requestLogsQuery.isLoading
-    ? null
-    : requestLogsQuery.data != null;
-
-  // --- Refresh callbacks ---
-  const refreshUsageHeatmap = useCallback(() => {
-    void usageHeatmapQuery.refetch().then((res) => {
-      if (res.error) toast("刷新用量失败：请查看控制台日志");
-    });
-  }, [usageHeatmapQuery]);
-
-  const refreshRequestLogs = useCallback(() => {
-    void requestLogsQuery.refetch().then((res) => {
-      if (res.error) toast("读取使用记录失败：请查看控制台日志");
-    });
-  }, [requestLogsQuery]);
-
-  const refreshProviderLimit = useCallback(() => {
-    void providerLimitQuery.refetch().then((res) => {
-      if (res.error) toast("读取供应商限额失败：请查看控制台日志");
-    });
-  }, [providerLimitQuery]);
-
-  // Refetch overview data when switching back to overview tab
-  useEffect(() => {
-    const prev = tabRef.current;
-    tabRef.current = tab;
-    if (prev !== "overview" && tab === "overview") {
-      emitBackgroundTaskVisibilityTrigger("home-overview-visible");
-      if (showOverviewUsageSection) {
-        void usageHeatmapQuery.refetch();
-      }
-      void requestLogsQuery.refetch();
-      void providerLimitQuery.refetch();
-    }
-  }, [providerLimitQuery, requestLogsQuery, showOverviewUsageSection, tab, usageHeatmapQuery]);
-
-  useWindowForeground({
-    enabled: tab === "overview",
-    throttleMs: 1000,
-    onForeground: () => {
-      emitBackgroundTaskVisibilityTrigger("home-overview-visible");
-      if (showOverviewUsageSection) {
-        void usageHeatmapQuery.refetch();
-      }
-      void requestLogsQuery.refetch();
-      void providerLimitQuery.refetch();
-    },
-  });
-
   const { pendingSortModeSwitch } = sortMode;
   const { pendingCliProxyEnablePrompt } = cliProxyState;
 
   useEffect(() => {
-    if (tab === "overview") {
-      emitBackgroundTaskVisibilityTrigger("home-overview-visible");
-    }
-  }, [tab]);
+    if (personalizedLayoutEnabled && tab === "cost") setTab("tokenCost");
+  }, [personalizedLayoutEnabled, tab]);
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -178,14 +147,14 @@ export function HomePage() {
             <>
               {isDevMode ? (
                 <Button
-                  variant={devPreviewEnabled ? "primary" : "secondary"}
+                  variant={devPreview.enabled ? "primary" : "secondary"}
                   size="md"
-                  onClick={() => setDevPreviewEnabled((prev) => !prev)}
+                  onClick={() => devPreview.toggle()}
                 >
-                  {devPreviewEnabled ? "Dev关闭预览数据" : "Dev开启预览数据"}
+                  {devPreview.enabled ? "Dev关闭预览数据" : "Dev开启预览数据"}
                 </Button>
               ) : null}
-              <TabList ariaLabel="首页视图切换" items={HOME_TABS} value={tab} onChange={setTab} />
+              <TabList ariaLabel="首页视图切换" items={homeTabs} value={tab} onChange={setTab} />
             </>
           }
         />
@@ -195,10 +164,10 @@ export function HomePage() {
         {tab === "overview" ? (
           <HomeOverviewPanel
             showCustomTooltip={showCustomTooltip}
-            devPreviewEnabled={devPreviewEnabled}
+            devPreviewEnabled={devPreview.enabled}
             showHomeHeatmap={showHomeHeatmap}
             showHomeUsage={showHomeUsage}
-            cliPriorityOrder={settingsQuery.data?.cli_priority_order}
+            cliPriorityOrder={normalizeCliPriorityOrder(settingsQuery.data?.cli_priority_order)}
             usageWindowDays={homeUsageWindowDays}
             usageHeatmapRows={usageHeatmapRows}
             usageHeatmapLoading={usageHeatmapLoading}
@@ -247,12 +216,23 @@ export function HomePage() {
               </Card>
             }
           >
-            <LazyHomeCostPanel />
+            <LazyHomeCostPanel devPreviewEnabled={devPreview.enabled} />
+          </Suspense>
+        ) : tab === "tokenCost" ? (
+          <Suspense
+            fallback={
+              <Card padding="md" className="flex h-full items-center justify-center">
+                <div className="flex items-center gap-3 text-sm text-slate-600 dark:text-slate-400">
+                  <Spinner />
+                  <span>加载用量面板中…</span>
+                </div>
+              </Card>
+            }
+          >
+            <LazyHomeTokenCostPanel devPreviewEnabled={devPreview.enabled} />
           </Suspense>
         ) : (
-          <Card padding="md">
-            <div className="text-sm text-slate-600 dark:text-slate-400">更多功能开发中…</div>
-          </Card>
+          <div />
         )}
       </div>
 

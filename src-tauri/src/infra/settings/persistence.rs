@@ -255,6 +255,14 @@ pub fn write<R: tauri::Runtime>(
         )
         .into());
     }
+    if settings.upstream_stream_idle_timeout_seconds > 0
+        && settings.upstream_stream_idle_timeout_seconds < MIN_UPSTREAM_STREAM_IDLE_TIMEOUT_SECONDS
+    {
+        return Err(format!(
+            "SEC_INVALID_INPUT: upstream_stream_idle_timeout_seconds must be 0 (disabled) or >= {MIN_UPSTREAM_STREAM_IDLE_TIMEOUT_SECONDS}"
+        )
+        .into());
+    }
     if settings.upstream_request_timeout_non_streaming_seconds
         > MAX_UPSTREAM_REQUEST_TIMEOUT_NON_STREAMING_SECONDS
     {

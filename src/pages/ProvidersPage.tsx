@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { CLIS } from "../constants/clis";
-import type { CliKey, ProviderSummary } from "../services/providers";
+import type { CliKey, ProviderSummary } from "../services/providers/providers";
 import { useProvidersListQuery } from "../query/providers";
 import { useSettingsQuery } from "../query/settings";
-import { getOrderedClis, pickDefaultCliByPriority } from "../services/cliPriorityOrder";
+import { getOrderedClis, pickDefaultCliByPriority } from "../services/cli/cliPriorityOrder";
 import { PageHeader } from "../ui/PageHeader";
 import { TabList } from "../ui/TabList";
 import { ProvidersView } from "./providers/ProvidersView";

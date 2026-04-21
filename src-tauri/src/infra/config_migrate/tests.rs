@@ -1,4 +1,6 @@
-use super::skill_fs::{cli_skills_root, export_skill_dir_files, ssot_skills_root};
+#[cfg(unix)]
+use super::skill_fs::export_skill_dir_files;
+use super::skill_fs::{cli_skills_root, ssot_skills_root};
 use super::*;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;

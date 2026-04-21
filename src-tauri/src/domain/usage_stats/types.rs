@@ -1,11 +1,12 @@
 use serde::Serialize;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct UsageSummary {
     pub requests_total: i64,
     pub requests_with_usage: i64,
     pub requests_success: i64,
     pub requests_failed: i64,
+    pub cost_covered_success: i64,
     pub avg_duration_ms: Option<i64>,
     pub avg_ttfb_ms: Option<i64>,
     pub avg_output_tokens_per_second: Option<f64>,
@@ -19,7 +20,7 @@ pub struct UsageSummary {
     pub cache_creation_1h_input_tokens: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct UsageProviderRow {
     pub cli_key: String,
     pub provider_id: i64,
@@ -39,7 +40,7 @@ pub struct UsageProviderRow {
     pub cache_creation_1h_input_tokens: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct UsageDayRow {
     pub day: String,
     pub requests_total: i64,
@@ -52,7 +53,7 @@ pub struct UsageDayRow {
     pub cache_creation_1h_input_tokens: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct UsageHourlyRow {
     pub day: String,
     pub hour: i64,
@@ -63,7 +64,7 @@ pub struct UsageHourlyRow {
     pub total_tokens: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct UsageProviderCacheRateTrendRowV1 {
     pub day: String,
     pub hour: Option<i64>,
@@ -74,7 +75,7 @@ pub struct UsageProviderCacheRateTrendRowV1 {
     pub requests_success: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct UsageLeaderboardRow {
     pub key: String,
     pub name: String,

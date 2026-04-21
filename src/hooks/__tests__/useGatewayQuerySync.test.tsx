@@ -6,7 +6,7 @@ import { useGatewayQuerySync } from "../useGatewayQuerySync";
 import { createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { tauriListen, tauriUnlisten } from "../../test/mocks/tauri";
-import { gatewayKeys, requestLogsKeys, usageKeys } from "../../query/keys";
+import { gatewayKeys, usageKeys } from "../../query/keys";
 
 function Harness() {
   useGatewayQuerySync();
@@ -39,7 +39,10 @@ describe("hooks/useGatewayQuerySync", () => {
 
     expect(handlers.has(gatewayEventNames.circuit)).toBe(true);
     expect(handlers.has(gatewayEventNames.status)).toBe(true);
-    expect(handlers.has(gatewayEventNames.request)).toBe(true);
+    expect(handlers.has(gatewayEventNames.requestSignal)).toBe(true);
+    expect(handlers.has(gatewayEventNames.requestStart)).toBe(false);
+    expect(handlers.has(gatewayEventNames.attempt)).toBe(false);
+    expect(handlers.has(gatewayEventNames.request)).toBe(false);
 
     // Circuit invalidation throttled at 500ms.
     const circuitHandler = handlers.get(gatewayEventNames.circuit)!;
@@ -57,12 +60,15 @@ describe("hooks/useGatewayQuerySync", () => {
     vi.advanceTimersByTime(300);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: gatewayKeys.status() });
 
-    // Request invalidation throttled at 1000ms.
-    const requestHandler = handlers.get(gatewayEventNames.request)!;
-    requestHandler({ payload: null });
-    requestHandler({ payload: null });
+    // Usage invalidation only reacts to request completion signals.
+    const requestHandler = handlers.get(gatewayEventNames.requestSignal)!;
+    requestHandler({ payload: { phase: "start" } });
     vi.advanceTimersByTime(1000);
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: requestLogsKeys.lists() });
+    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: usageKeys.all });
+
+    requestHandler({ payload: { phase: "complete" } });
+    requestHandler({ payload: { phase: "complete" } });
+    vi.advanceTimersByTime(1000);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: usageKeys.all });
 
     unmount();

@@ -7,8 +7,7 @@ import { ProvidersView } from "../ProvidersView";
 import { createTestQueryClient } from "../../../test/utils/reactQuery";
 import { copyText } from "../../../services/clipboard";
 import { logToConsole } from "../../../services/consoleLog";
-import { providerGetApiKey } from "../../../services/providers";
-import { gatewayKeys, providersKeys } from "../../../query/keys";
+import { providerDuplicate } from "../../../services/providers/providers";
 import {
   useGatewayCircuitResetCliMutation,
   useGatewayCircuitResetProviderMutation,
@@ -62,13 +61,13 @@ vi.mock("@dnd-kit/utilities", () => ({
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../../services/clipboard", () => ({ copyText: vi.fn() }));
 vi.mock("../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
-vi.mock("../../../services/providers", async () => {
-  const actual = await vi.importActual<typeof import("../../../services/providers")>(
-    "../../../services/providers"
+vi.mock("../../../services/providers/providers", async () => {
+  const actual = await vi.importActual<typeof import("../../../services/providers/providers")>(
+    "../../../services/providers/providers"
   );
   return {
     ...actual,
-    providerGetApiKey: vi.fn(),
+    providerDuplicate: vi.fn(),
   };
 });
 
@@ -135,7 +134,11 @@ function renderWithQuery(element: ReactElement) {
 
 beforeEach(() => {
   vi.mocked(copyText).mockResolvedValue(undefined);
-  vi.mocked(providerGetApiKey).mockResolvedValue("sk-dup");
+  vi.mocked(providerDuplicate).mockResolvedValue({
+    id: 999,
+    cli_key: "claude",
+    name: "P1 副本",
+  } as any);
   vi.mocked(useProviderClaudeTerminalLaunchCommandMutation).mockReturnValue({
     mutateAsync: vi.fn().mockResolvedValue("bash '/tmp/aio.sh'"),
   } as any);
@@ -301,8 +304,9 @@ describe("pages/providers/ProvidersView", () => {
     renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
 
     expect(
-      screen.getAllByText((_, el) => el?.textContent === "源: OpenAI Primary").length
+      screen.getAllByText((_, el) => el?.textContent === "来源: OpenAI Primary").length
     ).toBeGreaterThan(0);
+    expect(screen.getByText("x1.00")).toBeInTheDocument();
   });
 
   it("supports toggling, circuit reset, create/edit/delete, and drag reorder", async () => {
@@ -427,11 +431,15 @@ describe("pages/providers/ProvidersView", () => {
       expect(reorderMutation.mutateAsync).toHaveBeenCalledWith({
         cliKey: "claude",
         orderedProviderIds: [2, 1],
+        optimisticProviders: [
+          expect.objectContaining({ id: 2, name: "P2", enabled: false }),
+          expect.objectContaining({ id: 1, name: "P1", enabled: true }),
+        ],
       })
     );
   });
 
-  it("duplicates a provider into a prefilled create dialog", async () => {
+  it("duplicates a provider directly through backend mutation", async () => {
     const providers = [
       {
         id: 1,
@@ -489,19 +497,13 @@ describe("pages/providers/ProvidersView", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: "复制" })[0]!);
 
-    await waitFor(() => expect(providerGetApiKey).toHaveBeenCalledWith(1));
-
-    const createEditor = screen
-      .getAllByTestId("provider-editor")
-      .find((el) => el.textContent?.includes("create"));
-    expect(createEditor).toBeTruthy();
-    expect(createEditor).toHaveAttribute("data-initial-name", "P1 副本 2");
-    expect(createEditor).toHaveAttribute("data-api-key", "sk-dup");
-    expect(createEditor).toHaveAttribute("data-auth-mode", "api_key");
+    await waitFor(() => expect(providerDuplicate).toHaveBeenCalledWith(1));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("已复制 Provider：P1 副本"));
+    expect(screen.queryByTestId("provider-editor")).not.toBeInTheDocument();
   });
 
   it("shows an explicit toast when duplicating a provider fails", async () => {
-    vi.mocked(providerGetApiKey).mockRejectedValueOnce(new Error("boom"));
+    vi.mocked(providerDuplicate).mockRejectedValueOnce(new Error("boom"));
 
     const providers = [
       {
@@ -540,6 +542,7 @@ describe("pages/providers/ProvidersView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "复制" }));
 
+    await waitFor(() => expect(providerDuplicate).toHaveBeenCalledWith(1));
     await waitFor(() => expect(toast).toHaveBeenCalledWith("复制失败：Error: boom"));
     expect(screen.queryByTestId("provider-editor")).not.toBeInTheDocument();
   });
@@ -898,8 +901,7 @@ describe("pages/providers/ProvidersView", () => {
       .find((el) => el.textContent?.includes("create"));
     expect(createEditor).toBeTruthy();
     fireEvent.click(within(createEditor as HTMLElement).getByRole("button", { name: "saved" }));
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: providersKeys.list("claude") });
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: gatewayKeys.circuitStatus("claude") });
+    expect(invalidateSpy).not.toHaveBeenCalled();
 
     fireEvent.click(
       within(createEditor as HTMLElement).getByRole("button", { name: "close-editor" })
@@ -913,7 +915,7 @@ describe("pages/providers/ProvidersView", () => {
       .find((el) => el.textContent?.includes("edit"));
     expect(editEditor).toBeTruthy();
     fireEvent.click(within(editEditor as HTMLElement).getByRole("button", { name: "saved" }));
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: providersKeys.list("claude") });
+    expect(invalidateSpy).not.toHaveBeenCalled();
 
     fireEvent.click(
       within(editEditor as HTMLElement).getByRole("button", { name: "close-editor" })

@@ -7,7 +7,7 @@ import {
   type WslDetection,
   type WslDistroConfigStatus,
   type WslConfigureReport,
-} from "../services/wsl";
+} from "../services/app/wsl";
 import { wslKeys } from "./keys";
 
 export function useWslDetectionQuery(options?: { enabled?: boolean }) {

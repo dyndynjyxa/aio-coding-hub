@@ -1,4 +1,4 @@
-use super::super::failover::select_next_provider_id_from_order;
+use crate::gateway::proxy::failover::select_next_provider_id_from_order;
 use crate::providers;
 use std::collections::{HashMap, HashSet};
 

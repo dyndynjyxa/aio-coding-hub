@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { updaterCheck } from "../services/updater";
+import { updaterCheck } from "../services/app/updater";
 import { updaterKeys } from "./keys";
 
 export function useUpdaterCheckQuery(options?: { enabled?: boolean }) {

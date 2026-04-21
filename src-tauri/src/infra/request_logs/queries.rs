@@ -17,6 +17,7 @@ const REQUEST_LOG_SUMMARY_FIELDS: &str = "
   id,
   trace_id,
   cli_key,
+  session_id,
   method,
   path,
   excluded_from_stats,
@@ -47,6 +48,7 @@ const REQUEST_LOG_DETAIL_FIELDS: &str = "
   id,
   trace_id,
   cli_key,
+  session_id,
   method,
   path,
   query,
@@ -302,6 +304,7 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<RequestLogSummary, rusqlite
         id: row.get("id")?,
         trace_id: row.get("trace_id")?,
         cli_key: row.get("cli_key")?,
+        session_id: row.get("session_id")?,
         method: row.get("method")?,
         path: row.get("path")?,
         excluded_from_stats: row.get::<_, i64>("excluded_from_stats").unwrap_or(0) != 0,
@@ -347,6 +350,7 @@ fn row_to_detail(row: &rusqlite::Row<'_>) -> Result<RequestLogDetail, rusqlite::
         id: row.get("id")?,
         trace_id: row.get("trace_id")?,
         cli_key: row.get("cli_key")?,
+        session_id: row.get("session_id")?,
         method: row.get("method")?,
         path: row.get("path")?,
         query: row.get("query")?,
@@ -781,5 +785,44 @@ INSERT INTO providers (id, name, source_provider_id) VALUES (12, 'Claude Bridge'
 
         let visible_by_trace = get_by_trace_id(&db, "trace-codex").unwrap();
         assert_eq!(visible_by_trace.as_ref().map(|item| item.id), Some(3));
+    }
+
+    #[test]
+    fn summary_and_detail_expose_session_id() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("request-logs.db");
+        let db = db::init_for_tests(&db_path).unwrap();
+        let conn = db.open_connection().unwrap();
+
+        conn.execute(
+            r#"
+INSERT INTO request_logs (
+  id, trace_id, cli_key, session_id, method, path, query, excluded_from_stats,
+  special_settings_json, status, error_code, duration_ms, ttfb_ms, attempts_json,
+  input_tokens, output_tokens, total_tokens, cache_read_input_tokens,
+  cache_creation_input_tokens, cache_creation_5m_input_tokens,
+  cache_creation_1h_input_tokens, usage_json, requested_model, cost_usd_femto,
+  cost_multiplier, created_at_ms, created_at, final_provider_id
+) VALUES (?1, ?2, ?3, ?4, 'POST', ?5, NULL, 0, NULL, 200, NULL, 10, 5, '[]',
+  NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'model', NULL, 1.0, ?6, ?7, 0)
+"#,
+            rusqlite::params![
+                11_i64,
+                "trace-session-id",
+                "codex",
+                "sess-123",
+                "/v1/responses",
+                11_000_i64,
+                11_i64
+            ],
+        )
+        .unwrap();
+        drop(conn);
+
+        let summary = list_recent_all(&db, 10).unwrap();
+        assert_eq!(summary[0].session_id.as_deref(), Some("sess-123"));
+
+        let detail = get_by_id(&db, 11).unwrap();
+        assert_eq!(detail.session_id.as_deref(), Some("sess-123"));
     }
 }

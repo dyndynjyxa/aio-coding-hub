@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import type { UsageScope } from "../../services/usage";
+import type { UsageScope } from "../../services/usage/usage";
 import type { UsageTableTab } from "./types";
 
 export function useUsagePageTableState() {

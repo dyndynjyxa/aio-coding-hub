@@ -10,7 +10,7 @@ import {
   cliManagerCodexConfigTomlSet,
   cliManagerCodexInfoGet,
   cliManagerGeminiInfoGet,
-} from "../../services/cliManager";
+} from "../../services/cli/cliManager";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { cliManagerKeys } from "../keys";
@@ -27,9 +27,9 @@ import {
   useCliManagerGeminiInfoQuery,
 } from "../cliManager";
 
-vi.mock("../../services/cliManager", async () => {
-  const actual = await vi.importActual<typeof import("../../services/cliManager")>(
-    "../../services/cliManager"
+vi.mock("../../services/cli/cliManager", async () => {
+  const actual = await vi.importActual<typeof import("../../services/cli/cliManager")>(
+    "../../services/cli/cliManager"
   );
   return {
     ...actual,
@@ -178,9 +178,9 @@ describe("query/cliManager", () => {
   it("mutation hooks keep cache unchanged when service returns null", async () => {
     setTauriRuntime();
 
-    vi.mocked(cliManagerClaudeSettingsSet).mockResolvedValue(null);
-    vi.mocked(cliManagerCodexConfigSet).mockResolvedValue(null);
-    vi.mocked(cliManagerCodexConfigTomlSet).mockResolvedValue(null);
+    vi.mocked(cliManagerClaudeSettingsSet).mockResolvedValue(null as never);
+    vi.mocked(cliManagerCodexConfigSet).mockResolvedValue(null as never);
+    vi.mocked(cliManagerCodexConfigTomlSet).mockResolvedValue(null as never);
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
