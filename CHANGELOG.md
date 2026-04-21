@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.39.3](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.39.2...aio-coding-hub-v0.39.3) (2026-04-21)
+
+
+### Features
+
+* **app:** 集成应用启动状态管理和展示组件 ([2c7eb80](https://github.com/dyndynjyxa/aio-coding-hub/commit/2c7eb802e5317e12105eceed9533d3865b69b201))
+* **settings:** 新增cx2cc配置项并添加序列化支持 ([3afaa64](https://github.com/dyndynjyxa/aio-coding-hub/commit/3afaa64ca0ca7c505a83a9906218ba3167769cd0))
+
+
+### Bug Fixes
+
+* **app:** 修复启动状态空值判断，改进Cx2cc选项卡状态管理 ([654eb78](https://github.com/dyndynjyxa/aio-coding-hub/commit/654eb7843fe48c3393d4119f89510de7462a0442))
+* **settings:** 保持完整快照防止默认值变更导致设置漂移 ([6a8626c](https://github.com/dyndynjyxa/aio-coding-hub/commit/6a8626cdc93b06134279fe3d2020ecf1ce0d48f8))
+
 ## [0.39.2](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.39.1...aio-coding-hub-v0.39.2) (2026-04-19)
 
 
