@@ -33,6 +33,7 @@ export function useHomeOverviewFeed({
   });
   const providerLimitQuery = useProviderLimitUsageV1Query(null, {
     enabled: providerLimitEnabled && overviewForegroundActive,
+    refetchIntervalMs: providerLimitEnabled && overviewForegroundActive ? 30000 : false,
   });
   const requestLogsFeed = useRequestLogsFeed({
     limit: 50,

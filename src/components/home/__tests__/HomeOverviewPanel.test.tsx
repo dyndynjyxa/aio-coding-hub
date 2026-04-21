@@ -47,6 +47,34 @@ vi.mock("../HomeProviderLimitPanel", () => ({
   ),
 }));
 
+vi.mock("../HomeOAuthQuotaPanel", () => ({
+  HomeOAuthQuotaPanelContent: ({
+    rows,
+    hasProviders,
+    hasRefreshed,
+    refreshing,
+    onRefresh,
+    onRefreshRow,
+  }: {
+    rows: Array<{ providerId: number }>;
+    hasProviders: boolean;
+    hasRefreshed: boolean;
+    refreshing: boolean;
+    onRefresh?: () => void;
+    onRefreshRow?: (providerId: number) => void;
+  }) => (
+    <div>
+      <div>{`oauth-quota:${rows.length}:${String(hasProviders)}:${String(hasRefreshed)}:${String(refreshing)}`}</div>
+      <button type="button" onClick={() => onRefresh?.()}>
+        refresh-oauth-quota
+      </button>
+      <button type="button" onClick={() => onRefreshRow?.(rows[0]?.providerId ?? 0)}>
+        refresh-oauth-quota-row
+      </button>
+    </div>
+  ),
+}));
+
 vi.mock("../HomeWorkspaceConfigPanel", () => ({
   HomeWorkspaceConfigPanel: ({
     configs,
@@ -157,6 +185,12 @@ function renderPanel(overrides: Partial<ComponentProps<typeof HomeOverviewPanel>
       providerLimitAvailable={true}
       providerLimitRefreshing={false}
       onRefreshProviderLimit={vi.fn()}
+      oauthQuotaRows={[]}
+      oauthQuotaVisible={false}
+      oauthQuotaRefreshing={false}
+      oauthQuotaHasRefreshed={false}
+      onRefreshOAuthQuota={vi.fn()}
+      onRefreshOAuthQuotaRow={vi.fn()}
       openCircuits={[]}
       onResetCircuitProvider={onResetCircuitProvider}
       resettingCircuitProviderIds={new Set()}
@@ -456,11 +490,11 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(screen.queryByRole("tab", { name: "供应商限额" })).not.toBeInTheDocument();
   });
 
-  it("hides the provider limit tab in logs-primary layout when there is no data", () => {
+  it("does not render the provider limit tab in logs-primary layout", () => {
     window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
 
     renderPanel({
-      providerLimitRows: [],
+      providerLimitRows: [{ provider_id: 1 } as any],
       providerLimitAvailable: true,
       providerLimitLoading: false,
     });
@@ -468,21 +502,67 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(screen.queryByRole("tab", { name: "供应商限额" })).not.toBeInTheDocument();
   });
 
-  it("renders provider limits inside the info panel in logs-primary layout", async () => {
+  it("renders the OAuth quota tab only in logs-primary layout and forwards refresh actions", async () => {
     window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
+    const onRefreshOAuthQuota = vi.fn().mockResolvedValue(undefined);
+    const onRefreshOAuthQuotaRow = vi.fn().mockResolvedValue(undefined);
 
-    renderPanel({ devPreviewEnabled: true, providerLimitRows: [] });
+    renderPanel({
+      oauthQuotaVisible: true,
+      oauthQuotaRows: [{ providerId: 9 } as any],
+      oauthQuotaHasRefreshed: true,
+      onRefreshOAuthQuota,
+      onRefreshOAuthQuotaRow,
+    });
 
-    fireEvent.click(screen.getByRole("tab", { name: "供应商限额" }));
-    expect(await screen.findByText("provider-limit:3")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "OAuth 配额" }));
+    expect(await screen.findByText("oauth-quota:1:true:true:false")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "refresh-oauth-quota" }));
+    expect(onRefreshOAuthQuota).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "refresh-oauth-quota-row" }));
+    expect(onRefreshOAuthQuotaRow).toHaveBeenCalledWith(9);
   });
 
-  it("switches back to 配置信息 when provider limit data becomes empty in logs-primary layout", async () => {
+  it("renders preview OAuth quota rows when dev preview is enabled", async () => {
+    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
+    const onRefreshOAuthQuota = vi.fn().mockResolvedValue(undefined);
+    const onRefreshOAuthQuotaRow = vi.fn().mockResolvedValue(undefined);
+
+    renderPanel({
+      devPreviewEnabled: true,
+      oauthQuotaVisible: true,
+      oauthQuotaRows: [{ providerId: 9 } as any],
+      oauthQuotaHasRefreshed: true,
+      onRefreshOAuthQuota,
+      onRefreshOAuthQuotaRow,
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "OAuth 配额" }));
+    expect(await screen.findByText("oauth-quota:5:true:true:false")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "refresh-oauth-quota" }));
+    fireEvent.click(screen.getByRole("button", { name: "refresh-oauth-quota-row" }));
+    expect(onRefreshOAuthQuota).not.toHaveBeenCalled();
+    expect(onRefreshOAuthQuotaRow).not.toHaveBeenCalled();
+  });
+
+  it("does not render the OAuth quota tab in the legacy layout", () => {
+    renderPanel({
+      oauthQuotaVisible: true,
+      oauthQuotaRows: [{ providerId: 9 } as any],
+    });
+
+    expect(screen.queryByRole("tab", { name: "OAuth 配额" })).not.toBeInTheDocument();
+  });
+
+  it("switches back to 配置信息 when OAuth providers disappear in logs-primary layout", async () => {
     window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
 
     const { rerender } = renderPanel({
-      providerLimitRows: [{ provider_id: 1 } as any],
-      providerLimitAvailable: true,
+      oauthQuotaVisible: true,
+      oauthQuotaRows: [{ providerId: 9 } as any],
       workspaceConfigs: [
         {
           cliKey: "claude",
@@ -495,8 +575,8 @@ describe("components/home/HomeOverviewPanel", () => {
       ],
     });
 
-    fireEvent.click(screen.getByRole("tab", { name: "供应商限额" }));
-    expect(screen.getByText("provider-limit:1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "OAuth 配额" }));
+    expect(screen.getByText("oauth-quota:1:true:false:false")).toBeInTheDocument();
 
     rerender(
       <HomeOverviewPanel
@@ -537,6 +617,12 @@ describe("components/home/HomeOverviewPanel", () => {
         providerLimitAvailable={true}
         providerLimitRefreshing={false}
         onRefreshProviderLimit={vi.fn()}
+        oauthQuotaRows={[]}
+        oauthQuotaVisible={false}
+        oauthQuotaRefreshing={false}
+        oauthQuotaHasRefreshed={false}
+        onRefreshOAuthQuota={vi.fn()}
+        onRefreshOAuthQuotaRow={vi.fn()}
         openCircuits={[]}
         onResetCircuitProvider={vi.fn()}
         resettingCircuitProviderIds={new Set()}
@@ -553,6 +639,31 @@ describe("components/home/HomeOverviewPanel", () => {
     );
 
     expect(await screen.findByText("工作区：")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "OAuth 配额" })).not.toBeInTheDocument();
+  });
+
+  it("falls back to 配置信息 when stored tab order starts with provider limit in logs-primary layout", async () => {
+    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
+    window.localStorage.setItem(
+      "aio-home-overview-tab-order",
+      JSON.stringify(["providerLimit", "circuit", "workspaceConfig", "sessions", "oauthQuota"])
+    );
+
+    renderPanel({
+      workspaceConfigs: [
+        {
+          cliKey: "claude",
+          cliLabel: "Claude Code",
+          workspaceId: 1,
+          workspaceName: "工作区 A",
+          loading: false,
+          items: [{ id: "prompt:1", type: "prompts", label: "Prompt", name: "Claude Prompt" }],
+        },
+      ],
+    });
+
+    expect(await screen.findByText("工作区：")).toBeInTheDocument();
+    expect(screen.getByText("工作区 A")).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "供应商限额" })).not.toBeInTheDocument();
   });
 
@@ -621,6 +732,12 @@ describe("components/home/HomeOverviewPanel", () => {
             providerLimitAvailable={true}
             providerLimitRefreshing={false}
             onRefreshProviderLimit={vi.fn()}
+            oauthQuotaRows={[]}
+            oauthQuotaVisible={false}
+            oauthQuotaRefreshing={false}
+            oauthQuotaHasRefreshed={false}
+            onRefreshOAuthQuota={vi.fn()}
+            onRefreshOAuthQuotaRow={vi.fn()}
             openCircuits={[]}
             onResetCircuitProvider={vi.fn()}
             resettingCircuitProviderIds={new Set()}
@@ -726,6 +843,12 @@ describe("components/home/HomeOverviewPanel", () => {
         providerLimitAvailable={true}
         providerLimitRefreshing={false}
         onRefreshProviderLimit={vi.fn()}
+        oauthQuotaRows={[]}
+        oauthQuotaVisible={false}
+        oauthQuotaRefreshing={false}
+        oauthQuotaHasRefreshed={false}
+        onRefreshOAuthQuota={vi.fn()}
+        onRefreshOAuthQuotaRow={vi.fn()}
         openCircuits={[
           {
             cli_key: "claude",
@@ -796,6 +919,12 @@ describe("components/home/HomeOverviewPanel", () => {
         providerLimitAvailable={true}
         providerLimitRefreshing={false}
         onRefreshProviderLimit={vi.fn()}
+        oauthQuotaRows={[]}
+        oauthQuotaVisible={false}
+        oauthQuotaRefreshing={false}
+        oauthQuotaHasRefreshed={false}
+        onRefreshOAuthQuota={vi.fn()}
+        onRefreshOAuthQuotaRow={vi.fn()}
         openCircuits={[]}
         onResetCircuitProvider={vi.fn()}
         resettingCircuitProviderIds={new Set()}
@@ -880,6 +1009,12 @@ describe("components/home/HomeOverviewPanel", () => {
         providerLimitAvailable={true}
         providerLimitRefreshing={false}
         onRefreshProviderLimit={vi.fn()}
+        oauthQuotaRows={[]}
+        oauthQuotaVisible={false}
+        oauthQuotaRefreshing={false}
+        oauthQuotaHasRefreshed={false}
+        onRefreshOAuthQuota={vi.fn()}
+        onRefreshOAuthQuotaRow={vi.fn()}
         openCircuits={[]}
         onResetCircuitProvider={vi.fn()}
         resettingCircuitProviderIds={new Set()}

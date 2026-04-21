@@ -28,6 +28,7 @@ import { useHomeCircuitState } from "./home/hooks/useHomeCircuitState";
 import { useHomeSortMode } from "./home/hooks/useHomeSortMode";
 import { useHomeCliProxy } from "./home/hooks/useHomeCliProxy";
 import { useHomeOverviewFeed } from "./home/hooks/useHomeOverviewFeed";
+import { useHomeOAuthQuota } from "./home/hooks/useHomeOAuthQuota";
 import { useHomeWorkspaceConfigs } from "./home/hooks/useHomeWorkspaceConfigs";
 
 type HomeTabKey = "overview" | "cost" | "tokenCost";
@@ -73,6 +74,7 @@ export function HomePage() {
   const showOverviewUsageSection = showHomeHeatmap || showHomeUsage;
   const homeUsagePeriod = settingsQuery.data?.home_usage_period ?? DEFAULT_HOME_USAGE_PERIOD;
   const homeUsageWindowDays = resolveHomeUsageWindowDays(homeUsagePeriod);
+  const cliPriorityOrder = normalizeCliPriorityOrder(settingsQuery.data?.cli_priority_order);
   const isDevMode = import.meta.env.DEV;
   const devPreview = useDevPreviewData();
   const personalizedLayoutEnabled = useSyncExternalStore(
@@ -112,10 +114,6 @@ export function HomePage() {
     ? null
     : sessionsQuery.data != null;
 
-  const sortMode = useHomeSortMode(activeSessions);
-  const cliProxyState = useHomeCliProxy();
-  const workspaceConfigs = useHomeWorkspaceConfigs({ enabled: tab === "overview" });
-
   const {
     usageHeatmapRows,
     usageHeatmapLoading,
@@ -137,6 +135,14 @@ export function HomePage() {
     shouldRefetchOverviewUsageSeries,
     homeUsageWindowDays,
     providerLimitEnabled: !personalizedLayoutEnabled,
+  });
+  const sortMode = useHomeSortMode(activeSessions);
+  const cliProxyState = useHomeCliProxy();
+  const workspaceConfigs = useHomeWorkspaceConfigs({ enabled: tab === "overview" });
+  const oauthQuota = useHomeOAuthQuota({
+    cliPriorityOrder,
+    requestLogs,
+    enabled: tab === "overview" && personalizedLayoutEnabled,
   });
   const { pendingSortModeSwitch } = sortMode;
   const { pendingCliProxyEnablePrompt } = cliProxyState;
@@ -187,7 +193,7 @@ export function HomePage() {
             devPreviewEnabled={devPreview.enabled}
             showHomeHeatmap={showHomeHeatmap}
             showHomeUsage={showHomeUsage}
-            cliPriorityOrder={normalizeCliPriorityOrder(settingsQuery.data?.cli_priority_order)}
+            cliPriorityOrder={cliPriorityOrder}
             usageWindowDays={homeUsageWindowDays}
             usageHeatmapRows={usageHeatmapRows}
             usageHeatmapLoading={usageHeatmapLoading}
@@ -213,6 +219,12 @@ export function HomePage() {
             providerLimitAvailable={providerLimitAvailable}
             providerLimitRefreshing={providerLimitRefreshing}
             onRefreshProviderLimit={refreshProviderLimit}
+            oauthQuotaRows={oauthQuota.oauthQuotaRows}
+            oauthQuotaVisible={oauthQuota.oauthQuotaVisible}
+            oauthQuotaRefreshing={oauthQuota.oauthQuotaRefreshing}
+            oauthQuotaHasRefreshed={oauthQuota.oauthQuotaHasRefreshed}
+            onRefreshOAuthQuota={oauthQuota.refreshOAuthQuota}
+            onRefreshOAuthQuotaRow={oauthQuota.refreshOAuthQuotaRow}
             openCircuits={circuit.openCircuits}
             onResetCircuitProvider={circuit.handleResetProvider}
             resettingCircuitProviderIds={circuit.resettingProviderIds}

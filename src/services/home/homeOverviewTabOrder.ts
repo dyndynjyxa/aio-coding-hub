@@ -1,4 +1,9 @@
-export type HomeOverviewTabKey = "workspaceConfig" | "circuit" | "sessions" | "providerLimit";
+export type HomeOverviewTabKey =
+  | "workspaceConfig"
+  | "circuit"
+  | "sessions"
+  | "providerLimit"
+  | "oauthQuota";
 
 export const HOME_OVERVIEW_TAB_ORDER_STORAGE_KEY = "aio-home-overview-tab-order";
 
@@ -7,6 +12,7 @@ export const HOME_OVERVIEW_TABS: Array<{ key: HomeOverviewTabKey; label: string 
   { key: "circuit", label: "熔断信息" },
   { key: "sessions", label: "活跃 Session" },
   { key: "providerLimit", label: "供应商限额" },
+  { key: "oauthQuota", label: "OAuth 配额" },
 ];
 
 export function normalizeHomeOverviewTabOrder(input: unknown): HomeOverviewTabKey[] {
