@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.40.1](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.40.0...aio-coding-hub-v0.40.1) (2026-04-24)
+
+
+### Features
+
+* **home:** 支持Codex优先服务层并展示fast徽章 ([bbdb79d](https://github.com/dyndynjyxa/aio-coding-hub/commit/bbdb79d8940473fb81847b60c238f78415a7f504))
+* **service:** 增加辅助函数 mapGeneratedCommandResponse ([b8e14eb](https://github.com/dyndynjyxa/aio-coding-hub/commit/b8e14ebc0ae8449e1fcebe939d1c95b67c033d4f))
+
+
+### Bug Fixes
+
+* **home:** 修正 HomeRequestLogsPanel 多处测试数据的时间戳字段 ([b8e14eb](https://github.com/dyndynjyxa/aio-coding-hub/commit/b8e14ebc0ae8449e1fcebe939d1c95b67c033d4f))
+* **hooks/useGatewayQuerySync:** 在invalidateUsageDerived中添加providerLimitUsageKeys缓存失效 ([4fee7e9](https://github.com/dyndynjyxa/aio-coding-hub/commit/4fee7e90b2492ed0bbb0150eaf7ab897c2fbd36b))
+* **mcp:** 修正 McpServerDialog 组件中 patch 对象命名规范 ([b8e14eb](https://github.com/dyndynjyxa/aio-coding-hub/commit/b8e14ebc0ae8449e1fcebe939d1c95b67c033d4f))
+* **mcp:** 修正测试用例中 McpServerDialog 的 preserveKeys 命名 ([b8e14eb](https://github.com/dyndynjyxa/aio-coding-hub/commit/b8e14ebc0ae8449e1fcebe939d1c95b67c033d4f))
+* **pages:** 统一 SessionsMessagesPage 参数命名风格 ([b8e14eb](https://github.com/dyndynjyxa/aio-coding-hub/commit/b8e14ebc0ae8449e1fcebe939d1c95b67c033d4f))
+* **pages:** 统一 SessionsProjectPage 参数命名风格 ([b8e14eb](https://github.com/dyndynjyxa/aio-coding-hub/commit/b8e14ebc0ae8449e1fcebe939d1c95b67c033d4f))
+* **proxy:** 修改 failover_loop 逻辑中的匹配分支 ([2f8eff5](https://github.com/dyndynjyxa/aio-coding-hub/commit/2f8eff5fa4a4fc85f7bcd4f18d80a40d40f23ee8))
+* **query:** 规范 query 模块参数命名和传递 ([b8e14eb](https://github.com/dyndynjyxa/aio-coding-hub/commit/b8e14ebc0ae8449e1fcebe939d1c95b67c033d4f))
+* **test:** 调整请求日志测试中 created_at_ms 赋值逻辑 ([b8e14eb](https://github.com/dyndynjyxa/aio-coding-hub/commit/b8e14ebc0ae8449e1fcebe939d1c95b67c033d4f))
+
 ## [0.40.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.39.3...aio-coding-hub-v0.40.0) (2026-04-21)
 
 
