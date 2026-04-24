@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.40.2](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.40.1...aio-coding-hub-v0.40.2) (2026-04-24)
+
+
+### Features
+
+* **theme:** 支持 Windows 系统主题跟随 ([#218](https://github.com/dyndynjyxa/aio-coding-hub/issues/218)) ([71b7b5d](https://github.com/dyndynjyxa/aio-coding-hub/commit/71b7b5df0310657d7919b8ba1b3c29ebcc37c70d))
+
+
+### Bug Fixes
+
+* **workflows:** 修正release.yml中skip-github-pull-request的语法问题 ([ba32d2d](https://github.com/dyndynjyxa/aio-coding-hub/commit/ba32d2d43660e94b1ac58ab1db664ac57b0c5e18))
+
 ## [0.40.1](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.40.0...aio-coding-hub-v0.40.1) (2026-04-24)
 
 
