@@ -480,15 +480,15 @@ describe("pages/providers/ProviderEditorDialog", () => {
     fireEvent.change(dialog.getByPlaceholderText("default"), {
       target: { value: "Bridge Provider" },
     });
-    fireEvent.change(dialog.getByRole("combobox"), { target: { value: "7" } });
+    fireEvent.change(dialog.getByLabelText("源 Codex 来源"), { target: { value: "7" } });
 
     await waitFor(() => {
       expect(dialog.getByText("Codex Source")).toBeInTheDocument();
       expect(dialog.getByText("API Key")).toBeInTheDocument();
       expect(dialog.getByText("x1.80")).toBeInTheDocument();
       expect(dialog.getByText("https://codex.example.com/v1")).toBeInTheDocument();
-      expect(dialog.getByText(/默认模型映射：/)).toBeInTheDocument();
-      expect(dialog.getAllByText("gpt-5.4").length).toBeGreaterThanOrEqual(1);
+      expect(dialog.getByText(/当前模型映射：/)).toBeInTheDocument();
+      expect(dialog.getAllByText("gpt-5.5").length).toBeGreaterThanOrEqual(1);
     });
 
     fireEvent.click(dialog.getByRole("button", { name: "保存" }));
@@ -536,9 +536,24 @@ describe("pages/providers/ProviderEditorDialog", () => {
     fireEvent.change(dialog.getByPlaceholderText("default"), {
       target: { value: "Bridge Gateway Provider" },
     });
-    fireEvent.change(dialog.getByRole("combobox"), {
+    fireEvent.change(dialog.getByLabelText("源 Codex 来源"), {
       target: { value: "__codex_gateway__" },
     });
+    const defaultModelSelect = dialog.getByLabelText("默认模型");
+    await waitFor(() => {
+      expect(defaultModelSelect).toHaveValue("gpt-5.5");
+      expect(dialog.getByPlaceholderText(/kimi-k2-thinking/)).toHaveValue("gpt-5.5");
+    });
+    const thinkingInput = dialog.getByPlaceholderText(/kimi-k2-thinking/);
+    fireEvent.change(defaultModelSelect, { target: { value: "__manual__" } });
+    expect(defaultModelSelect).toHaveValue("__manual__");
+    expect(thinkingInput).toHaveValue("gpt-5.5");
+    fireEvent.change(defaultModelSelect, { target: { value: "gpt-5.4" } });
+    expect(thinkingInput).toHaveValue("gpt-5.4");
+    fireEvent.change(thinkingInput, { target: { value: "manual-thinking" } });
+    expect(defaultModelSelect).toHaveValue("__manual__");
+    fireEvent.change(defaultModelSelect, { target: { value: "gpt-5.5" } });
+    expect(thinkingInput).toHaveValue("gpt-5.5");
 
     await waitFor(() => {
       expect(dialog.getByText("当前 AIO 服务 Codex 网关")).toBeInTheDocument();
@@ -547,6 +562,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
       expect(dialog.getByText("http://127.0.0.1:37123/v1")).toBeInTheDocument();
       expect(dialog.getByText("aio-coding-hub")).toBeInTheDocument();
       expect(dialog.getByText(/转译后的请求会进入当前 AIO 服务 Codex 网关/)).toBeInTheDocument();
+      expect(dialog.getAllByText("gpt-5.5").length).toBeGreaterThanOrEqual(1);
     });
 
     fireEvent.click(dialog.getByRole("button", { name: "保存" }));
@@ -558,6 +574,13 @@ describe("pages/providers/ProviderEditorDialog", () => {
           costMultiplier: 0,
           sourceProviderId: null,
           bridgeType: "cx2cc",
+          claudeModels: {
+            main_model: "gpt-5.5",
+            reasoning_model: "gpt-5.5",
+            haiku_model: "gpt-5.5",
+            sonnet_model: "gpt-5.5",
+            opus_model: "gpt-5.5",
+          },
         })
       )
     );
