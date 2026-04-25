@@ -20,7 +20,6 @@ import {
 const SUMMARY_SKELETON_KEYS = [0, 1, 2, 3, 4];
 const PROVIDER_SKELETON_KEYS = [0, 1, 2];
 const MAX_PROVIDER_ROWS = 3;
-const PROVIDER_HEADER_LABEL = "供应商（前 3 个）";
 const LIVE_TRACE_MAX_AGE_MS = 15 * 60 * 1000;
 const STALE_TRACE_TIMEOUT_MS = 5 * 60 * 1000;
 const OVERVIEW_REFRESH_INTERVAL_MS = 60 * 1000;
@@ -29,6 +28,10 @@ const TABLE_TH_CLASS =
 const TABLE_TD_CLASS = "border-b border-slate-100 px-3 py-3 dark:border-slate-800";
 const TABLE_MONO_TD_CLASS =
   "border-b border-slate-100 px-3 py-3 font-mono text-xs tabular-nums text-slate-700 dark:border-slate-800 dark:text-slate-300";
+const TABLE_TH_MAIN_CLASS =
+  "text-[11px] font-medium tracking-normal text-slate-500 dark:text-slate-400";
+const TABLE_TH_NOTE_CLASS =
+  "text-[9px] font-normal tracking-normal text-slate-400 dark:text-slate-500";
 const TODAY_PROVIDER_QUERY_CONFIG = {
   period: "daily" as const,
   input: {
@@ -374,6 +377,21 @@ function rowTokenBreakdown(row: UsageLeaderboardRow) {
   ].join(" / ");
 }
 
+function rowBillableTokenBreakdown(row: UsageLeaderboardRow, summary: UsageSummary | null) {
+  return [formatTokenValue(row.io_total_tokens), formatPercent(tokenShare(row, summary))].join(
+    " / "
+  );
+}
+
+function TableHeaderLabel({ label, note }: { label: string; note?: string }) {
+  return (
+    <div className="inline-flex items-baseline gap-1 whitespace-nowrap normal-case">
+      <span className={TABLE_TH_MAIN_CLASS}>{label}</span>
+      {note ? <span className={TABLE_TH_NOTE_CLASS}>（{note}）</span> : null}
+    </div>
+  );
+}
+
 function SummaryMetricCard({
   title,
   value,
@@ -551,26 +569,19 @@ export function HomeTodayProviderUsageOverview({
               <thead>
                 <tr>
                   <th scope="col" className={TABLE_TH_CLASS}>
-                    {PROVIDER_HEADER_LABEL}
+                    <TableHeaderLabel label="供应商" note="前 3 个" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
-                    <div className="inline-flex items-center gap-1 whitespace-nowrap normal-case">
-                      <span className="text-[11px] font-medium tracking-normal text-slate-500 dark:text-slate-400">
-                        Token
-                      </span>
-                      <span className="text-[9px] font-normal tracking-normal text-slate-400 dark:text-slate-500">
-                        含缓存 / 缓存 / 命中率
-                      </span>
-                    </div>
+                    <TableHeaderLabel label="计费 Token" note="输入+输出" />
+                  </th>
+                  <th scope="col" className={TABLE_TH_CLASS}>
+                    <TableHeaderLabel label="缓存情况" note="含缓存 / 缓存 / 命中率" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
                     总花费
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
                     成功率
-                  </th>
-                  <th scope="col" className={TABLE_TH_CLASS}>
-                    Token 占比
                   </th>
                 </tr>
               </thead>
@@ -592,26 +603,19 @@ export function HomeTodayProviderUsageOverview({
               <thead className="sticky top-0 z-10">
                 <tr>
                   <th scope="col" className={TABLE_TH_CLASS}>
-                    {PROVIDER_HEADER_LABEL}
+                    <TableHeaderLabel label="供应商" note="前 3 个" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
-                    <div className="inline-flex items-center gap-1 whitespace-nowrap normal-case">
-                      <span className="text-[11px] font-medium tracking-normal text-slate-500 dark:text-slate-400">
-                        Token
-                      </span>
-                      <span className="text-[9px] font-normal tracking-normal text-slate-400 dark:text-slate-500">
-                        含缓存 / 缓存 / 命中率
-                      </span>
-                    </div>
+                    <TableHeaderLabel label="计费 Token" note="输入+输出" />
+                  </th>
+                  <th scope="col" className={TABLE_TH_CLASS}>
+                    <TableHeaderLabel label="缓存情况" note="含缓存 / 缓存 / 命中率" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
                     总花费
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
                     成功率
-                  </th>
-                  <th scope="col" className={TABLE_TH_CLASS}>
-                    Token 占比
                   </th>
                 </tr>
               </thead>
@@ -640,6 +644,9 @@ export function HomeTodayProviderUsageOverview({
                       </div>
                     </td>
                     <td className={TABLE_MONO_TD_CLASS}>
+                      {isSynthetic ? "— / —" : rowBillableTokenBreakdown(row, model.summary)}
+                    </td>
+                    <td className={TABLE_MONO_TD_CLASS}>
                       {isSynthetic ? "— / — / —" : rowTokenBreakdown(row)}
                     </td>
                     <td className={TABLE_MONO_TD_CLASS}>
@@ -647,9 +654,6 @@ export function HomeTodayProviderUsageOverview({
                     </td>
                     <td className={TABLE_MONO_TD_CLASS}>
                       {isSynthetic ? "—" : formatPercent(successRate(row))}
-                    </td>
-                    <td className={TABLE_MONO_TD_CLASS}>
-                      {isSynthetic ? "—" : formatPercent(tokenShare(row, model.summary))}
                     </td>
                   </tr>
                 ))}

@@ -250,9 +250,21 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(screen.getByText("20")).toBeInTheDocument();
     expect(screen.getByText("今日花费")).toBeInTheDocument();
     expect(screen.getByText("$2.21")).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "供应商（前 3 个）" })).toBeInTheDocument();
+    const providerHeader = screen.getByText("供应商").closest("th");
+    const billableTokenHeader = screen.getByText("计费 Token").closest("th");
+    const cacheHeader = screen.getByText("缓存情况").closest("th");
+    expect(providerHeader).toBeTruthy();
+    expect(billableTokenHeader).toBeTruthy();
+    expect(cacheHeader).toBeTruthy();
+    expect(within(providerHeader as HTMLElement).getByText("（前 3 个）")).toBeInTheDocument();
+    expect(
+      within(billableTokenHeader as HTMLElement).getByText("（输入+输出）")
+    ).toBeInTheDocument();
+    expect(
+      within(cacheHeader as HTMLElement).getByText("（含缓存 / 缓存 / 命中率）")
+    ).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "成功率" })).toBeInTheDocument();
-    expect(screen.getByText("含缓存 / 缓存 / 命中率")).toBeInTheDocument();
+    expect(screen.queryByText("Token 占比")).not.toBeInTheDocument();
 
     const geminiRow = screen.getByText("Gemini Mirror").closest("tr");
     const claudeRow = screen.getByText("Claude Main").closest("tr");
@@ -264,12 +276,14 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(screen.queryByText("Mistral Edge")).not.toBeInTheDocument();
     expect(screen.queryByText("Local Sandbox")).not.toBeInTheDocument();
 
+    expect(within(geminiRow as HTMLElement).getByText("8.0K / 40.0%")).toBeInTheDocument();
     expect(within(geminiRow as HTMLElement).getByText("10.2K / 2.2K / 20.9%")).toBeInTheDocument();
     expect(within(geminiRow as HTMLElement).getByText("$0.90")).toBeInTheDocument();
     expect(within(geminiRow as HTMLElement).getByText("85.7%")).toBeInTheDocument();
-    expect(within(geminiRow as HTMLElement).getByText("40.0%")).toBeInTheDocument();
     expect(within(claudeRow as HTMLElement).getByText("100.0%")).toBeInTheDocument();
+    expect(within(claudeRow as HTMLElement).getByText("5.0K / 25.0%")).toBeInTheDocument();
     expect(within(claudeRow as HTMLElement).getByText("6.2K / 1.2K / 16.7%")).toBeInTheDocument();
+    expect(within(openaiRow as HTMLElement).getByText("4.0K / 20.0%")).toBeInTheDocument();
     expect(within(openaiRow as HTMLElement).getByText("5.8K / 1.8K / 31.6%")).toBeInTheDocument();
   });
 
@@ -356,8 +370,9 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(runtimeRow).toBeTruthy();
     expect(screen.queryByText("OpenAI Primary")).not.toBeInTheDocument();
     expect(within(runtimeRow as HTMLElement).getByLabelText("进行中")).toBeInTheDocument();
+    expect(within(runtimeRow as HTMLElement).getByText("— / —")).toBeInTheDocument();
     expect(within(runtimeRow as HTMLElement).getByText("— / — / —")).toBeInTheDocument();
-    expect(within(runtimeRow as HTMLElement).getAllByText("—").length).toBeGreaterThanOrEqual(3);
+    expect(within(runtimeRow as HTMLElement).getAllByText("—").length).toBeGreaterThanOrEqual(2);
   });
 
   it("matches a running provider to the prefixed usage row by provider id", () => {
