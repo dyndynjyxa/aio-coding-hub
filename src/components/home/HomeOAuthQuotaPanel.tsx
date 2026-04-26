@@ -177,6 +177,7 @@ export function HomeOAuthQuotaPanelContent({
             disabled={refreshing}
             className="rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-700 dark:hover:text-indigo-400"
             title="刷新 OAuth 配额"
+            aria-label="刷新 OAuth 配额"
           >
             <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
           </button>

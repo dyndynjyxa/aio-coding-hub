@@ -196,10 +196,46 @@ function summaryCostCoverage(summary: UsageSummary | null) {
   return covered / denom;
 }
 
-const CACHE_BREAKDOWN_SEPARATOR = " / ";
-
 function trimCompactZero(value: string) {
   return value.replace(/\.0([KM])$/, "$1").replace(/\.0%$/, "%");
+}
+
+function TableHeaderLabel({ label, note }: { label: string; note?: string }) {
+  return (
+    <div className="inline-flex items-baseline gap-1 whitespace-nowrap normal-case">
+      <span>{label}</span>
+      {note ? (
+        <span className="text-[10px] font-normal tracking-normal text-slate-400 dark:text-slate-500">
+          （{note}）
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function TokenBreakdownInline({ parts }: { parts: string[] }) {
+  return (
+    <span aria-label={parts.join("/")} className="inline-flex items-baseline gap-0.5 tabular-nums">
+      {parts.map((part, index) => (
+        <span key={`${part}-${index}`} className="inline-flex items-baseline gap-0.5">
+          {index > 0 ? (
+            <span className="text-slate-400 dark:text-slate-500" aria-hidden="true">
+              /
+            </span>
+          ) : null}
+          <span>{part}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function BillableTokenValue({ row }: { row: UsageLeaderboardRow }) {
+  return (
+    <span className="whitespace-nowrap tabular-nums">
+      {trimCompactZero(formatTokensMillions(row.io_total_tokens))}
+    </span>
+  );
 }
 
 function CacheHitRateBreakdown({ row }: { row: UsageLeaderboardRow }) {
@@ -217,11 +253,7 @@ function CacheHitRateBreakdown({ row }: { row: UsageLeaderboardRow }) {
   const hitRateText =
     hasValidTotal && Number.isFinite(hitRate) ? trimCompactZero(formatPercent(hitRate)) : "—";
 
-  return (
-    <div className="whitespace-nowrap">
-      {[totalText, cacheText, hitRateText].join(CACHE_BREAKDOWN_SEPARATOR)}
-    </div>
-  );
+  return <TokenBreakdownInline parts={[totalText, cacheText, hitRateText]} />;
 }
 
 function TokenShareBar({ percent }: { percent: number }) {
@@ -280,7 +312,11 @@ function TokenSummaryCards({
         value={formatTokenValue(summary?.total_tokens)}
         accent="purple"
       />
-      <StatCard title="总 Token" value={formatTokenValue(summary?.io_total_tokens)} accent="blue" />
+      <StatCard
+        title="计费 Token"
+        value={formatTokenValue(summary?.io_total_tokens)}
+        accent="blue"
+      />
       <StatCard title="总花费" value={formatCostValue(totalCostUsd)} accent="orange" />
       <StatCard
         title="成本覆盖率"
@@ -343,10 +379,10 @@ function TokenLeaderboardTable({
               {scopeLabel(scope)}
             </th>
             <th scope="col" className={TABLE_TH_CLASS}>
-              <div>Token 明细</div>
-              <div className="mt-0.5 normal-case text-[10px] font-normal tracking-normal text-slate-400 dark:text-slate-500">
-                含缓存总量 / 缓存量 / 缓存命中率
-              </div>
+              <TableHeaderLabel label="计费 Token" note="输入+输出" />
+            </th>
+            <th scope="col" className={TABLE_TH_CLASS}>
+              <TableHeaderLabel label="缓存情况" note="含缓存/缓存/命中率" />
             </th>
             <th scope="col" className={TABLE_TH_CLASS}>
               总花费
@@ -378,6 +414,9 @@ function TokenLeaderboardTable({
               </td>
               <td className={TABLE_TD_CLASS}>
                 <div className="font-medium text-slate-900 dark:text-slate-100">{row.name}</div>
+              </td>
+              <td className={TABLE_MONO_TD_CLASS}>
+                <BillableTokenValue row={row} />
               </td>
               <td className={TABLE_MONO_TD_CLASS}>
                 <CacheHitRateBreakdown row={row} />

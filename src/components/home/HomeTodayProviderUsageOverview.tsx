@@ -146,6 +146,23 @@ function providerIdentityKey(identity: ProviderIdentity) {
   return `name:${identity.normalizedName}`;
 }
 
+function providerScopedNameKey(identity: ProviderIdentity) {
+  if (!identity.cliKey || !identity.normalizedName) return null;
+  return `${identity.cliKey}:${identity.normalizedName}`;
+}
+
+function addUniqueValue<T>(map: Map<string, T | null>, key: string, value: T) {
+  if (map.has(key)) {
+    map.set(key, null);
+    return;
+  }
+  map.set(key, value);
+}
+
+function getUniqueValue<T>(map: Map<string, T | null>, key: string) {
+  return map.get(key) ?? null;
+}
+
 function formatSyntheticProviderName(
   entry: ActiveProviderEntry,
   options: { preferCliPrefix: boolean }
@@ -272,7 +289,6 @@ function selectProviderRows(
       .map((entry) => entry.providerId)
       .filter((providerId): providerId is number => providerId != null)
   );
-  const activeProviderNameSet = new Set(activeProviders.map((entry) => entry.normalizedName));
   const activeProviderById = new Map(
     activeProviders
       .filter(
@@ -280,13 +296,23 @@ function selectProviderRows(
       )
       .map((entry) => [entry.providerId, entry] as const)
   );
-  const activeProviderByName = new Map(
-    activeProviders.map((entry) => [entry.normalizedName, entry] as const)
-  );
+  const activeProviderByScopedName = new Map<string, ActiveProviderEntry>();
+  const uniqueActiveProviderByName = new Map<string, ActiveProviderEntry | null>();
+  activeProviders.forEach((entry) => {
+    const scopedNameKey = providerScopedNameKey(entry);
+    if (scopedNameKey && !activeProviderByScopedName.has(scopedNameKey)) {
+      activeProviderByScopedName.set(scopedNameKey, entry);
+    }
+    if (entry.normalizedName) {
+      addUniqueValue(uniqueActiveProviderByName, entry.normalizedName, entry);
+    }
+  });
   const rowById = new Map<number, UsageLeaderboardRow>();
-  const rowByName = new Map<string, UsageLeaderboardRow>();
+  const rowByScopedName = new Map<string, UsageLeaderboardRow>();
+  const uniqueRowByName = new Map<string, UsageLeaderboardRow | null>();
   const rankById = new Map<number, number>();
-  const rankByName = new Map<string, number>();
+  const rankByScopedName = new Map<string, number>();
+  const uniqueRankByName = new Map<string, number | null>();
 
   sortedRows.forEach((row, index) => {
     const identity = rowIdentityByKey.get(row.key);
@@ -295,19 +321,69 @@ function selectProviderRows(
       rowById.set(identity.providerId, row);
       rankById.set(identity.providerId, index);
     }
-    if (identity.normalizedName && !rowByName.has(identity.normalizedName)) {
-      rowByName.set(identity.normalizedName, row);
-      rankByName.set(identity.normalizedName, index);
+    const scopedNameKey = providerScopedNameKey(identity);
+    if (scopedNameKey && !rowByScopedName.has(scopedNameKey)) {
+      rowByScopedName.set(scopedNameKey, row);
+      rankByScopedName.set(scopedNameKey, index);
+    }
+    if (identity.normalizedName) {
+      addUniqueValue(uniqueRowByName, identity.normalizedName, row);
+      addUniqueValue(uniqueRankByName, identity.normalizedName, index);
     }
   });
   const selected = new Map<string, DisplayProviderRow>();
+  const findActiveProvider = (identity: ProviderIdentity) => {
+    const matchedById =
+      identity.providerId != null ? activeProviderById.get(identity.providerId) : null;
+    if (matchedById) return matchedById;
+
+    const scopedNameKey = providerScopedNameKey(identity);
+    const matchedByScopedName = scopedNameKey
+      ? activeProviderByScopedName.get(scopedNameKey)
+      : null;
+    if (matchedByScopedName) return matchedByScopedName;
+
+    if (!identity.normalizedName) return null;
+    const matchedByName = getUniqueValue(uniqueActiveProviderByName, identity.normalizedName);
+    if (!matchedByName) return null;
+    if (identity.cliKey && matchedByName.cliKey) return null;
+    return matchedByName;
+  };
+  const findRowForActiveProvider = (entry: ActiveProviderEntry) => {
+    const matchedById = entry.providerId != null ? rowById.get(entry.providerId) : null;
+    if (matchedById) return matchedById;
+
+    const scopedNameKey = providerScopedNameKey(entry);
+    const matchedByScopedName = scopedNameKey ? rowByScopedName.get(scopedNameKey) : null;
+    if (matchedByScopedName) return matchedByScopedName;
+
+    if (!entry.normalizedName) return null;
+    const matchedByName = getUniqueValue(uniqueRowByName, entry.normalizedName);
+    if (!matchedByName) return null;
+    const matchedIdentity =
+      rowIdentityByKey.get(matchedByName.key) ?? parseProviderRowIdentity(matchedByName);
+    if (entry.cliKey && matchedIdentity.cliKey) return null;
+    return matchedByName;
+  };
+  const hasActiveProviderMatch = (identity: ProviderIdentity) => {
+    if (identity.providerId != null && activeProviderIdSet.has(identity.providerId)) return true;
+    const scopedNameKey = providerScopedNameKey(identity);
+    if (scopedNameKey && activeProviderByScopedName.has(scopedNameKey)) return true;
+    return findActiveProvider(identity) != null;
+  };
+  const rankForIdentity = (identity: ProviderIdentity) => {
+    const idRank = identity.providerId != null ? rankById.get(identity.providerId) : undefined;
+    if (idRank != null) return idRank;
+    const scopedNameKey = providerScopedNameKey(identity);
+    const scopedRank = scopedNameKey ? rankByScopedName.get(scopedNameKey) : undefined;
+    if (scopedRank != null) return scopedRank;
+    return getUniqueValue(uniqueRankByName, identity.normalizedName) ?? Number.MAX_SAFE_INTEGER;
+  };
 
   for (const row of sortedRows) {
     const identity = rowIdentityByKey.get(row.key);
     if (!identity) continue;
-    const matchedActive =
-      (identity.providerId != null ? activeProviderById.get(identity.providerId) : null) ??
-      activeProviderByName.get(identity.normalizedName);
+    const matchedActive = findActiveProvider(identity);
     if (!matchedActive) continue;
     selected.set(providerIdentityKey(matchedActive), { row, isRunning: true, isSynthetic: false });
     if (selected.size >= MAX_PROVIDER_ROWS) break;
@@ -317,9 +393,7 @@ function selectProviderRows(
     for (const entry of activeProviders) {
       const key = providerIdentityKey(entry);
       if (!entry.normalizedName || selected.has(key)) continue;
-      const matchedRow =
-        (entry.providerId != null ? rowById.get(entry.providerId) : null) ??
-        rowByName.get(entry.normalizedName);
+      const matchedRow = findRowForActiveProvider(entry);
       selected.set(key, {
         row: matchedRow ?? createSyntheticProviderRow(entry),
         isRunning: true,
@@ -335,10 +409,7 @@ function selectProviderRows(
       if (!identity) continue;
       const key = providerIdentityKey(identity);
       if (selected.has(key)) continue;
-      if (
-        (identity.providerId != null && activeProviderIdSet.has(identity.providerId)) ||
-        activeProviderNameSet.has(identity.normalizedName)
-      ) {
+      if (hasActiveProviderMatch(identity)) {
         continue;
       }
       selected.set(key, { row, isRunning: false, isSynthetic: false });
@@ -350,14 +421,8 @@ function selectProviderRows(
     const leftIdentity = rowIdentityByKey.get(left.row.key) ?? parseProviderRowIdentity(left.row);
     const rightIdentity =
       rowIdentityByKey.get(right.row.key) ?? parseProviderRowIdentity(right.row);
-    const leftRank =
-      (leftIdentity.providerId != null ? rankById.get(leftIdentity.providerId) : undefined) ??
-      rankByName.get(leftIdentity.normalizedName) ??
-      Number.MAX_SAFE_INTEGER;
-    const rightRank =
-      (rightIdentity.providerId != null ? rankById.get(rightIdentity.providerId) : undefined) ??
-      rankByName.get(rightIdentity.normalizedName) ??
-      Number.MAX_SAFE_INTEGER;
+    const leftRank = rankForIdentity(leftIdentity);
+    const rightRank = rankForIdentity(rightIdentity);
     if (leftRank !== rightRank) return leftRank - rightRank;
     return left.row.name.localeCompare(right.row.name);
   });
@@ -374,13 +439,11 @@ function rowTokenBreakdown(row: UsageLeaderboardRow) {
         row.cache_read_input_tokens
       )
     ),
-  ].join(" / ");
+  ];
 }
 
 function rowBillableTokenBreakdown(row: UsageLeaderboardRow, summary: UsageSummary | null) {
-  return [formatTokenValue(row.io_total_tokens), formatPercent(tokenShare(row, summary))].join(
-    " / "
-  );
+  return [formatTokenValue(row.io_total_tokens), formatPercent(tokenShare(row, summary))];
 }
 
 function TableHeaderLabel({ label, note }: { label: string; note?: string }) {
@@ -389,6 +452,23 @@ function TableHeaderLabel({ label, note }: { label: string; note?: string }) {
       <span className={TABLE_TH_MAIN_CLASS}>{label}</span>
       {note ? <span className={TABLE_TH_NOTE_CLASS}>（{note}）</span> : null}
     </div>
+  );
+}
+
+function TokenBreakdown({ parts }: { parts: string[] }) {
+  return (
+    <span aria-label={parts.join("/")} className="inline-flex items-baseline gap-0.5 tabular-nums">
+      {parts.map((part, index) => (
+        <span key={`${part}-${index}`} className="inline-flex items-baseline gap-0.5">
+          {index > 0 ? (
+            <span className="text-slate-400 dark:text-slate-500" aria-hidden="true">
+              /
+            </span>
+          ) : null}
+          <span>{part}</span>
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -448,7 +528,7 @@ function SummaryCards({
         accent="purple"
       />
       <SummaryMetricCard
-        title="总 Token"
+        title="计费 Token"
         value={formatTokenValue(summary?.io_total_tokens)}
         accent="blue"
       />
@@ -528,7 +608,7 @@ export function HomeTodayProviderUsageOverview({
     throttleMs: 1000,
   });
 
-  const nowMs = useNowMs(Boolean(traces && traces.length > 0), 250);
+  const nowMs = useNowMs(Boolean(traces && traces.length > 0), 1000);
   const activeProviders = useMemo(
     () =>
       traces != null
@@ -575,7 +655,7 @@ export function HomeTodayProviderUsageOverview({
                     <TableHeaderLabel label="计费 Token" note="输入+输出" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
-                    <TableHeaderLabel label="缓存情况" note="含缓存 / 缓存 / 命中率" />
+                    <TableHeaderLabel label="缓存情况" note="含缓存/缓存/命中率" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
                     总花费
@@ -609,7 +689,7 @@ export function HomeTodayProviderUsageOverview({
                     <TableHeaderLabel label="计费 Token" note="输入+输出" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
-                    <TableHeaderLabel label="缓存情况" note="含缓存 / 缓存 / 命中率" />
+                    <TableHeaderLabel label="缓存情况" note="含缓存/缓存/命中率" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
                     总花费
@@ -644,10 +724,16 @@ export function HomeTodayProviderUsageOverview({
                       </div>
                     </td>
                     <td className={TABLE_MONO_TD_CLASS}>
-                      {isSynthetic ? "— / —" : rowBillableTokenBreakdown(row, model.summary)}
+                      <TokenBreakdown
+                        parts={
+                          isSynthetic ? ["—", "—"] : rowBillableTokenBreakdown(row, model.summary)
+                        }
+                      />
                     </td>
                     <td className={TABLE_MONO_TD_CLASS}>
-                      {isSynthetic ? "— / — / —" : rowTokenBreakdown(row)}
+                      <TokenBreakdown
+                        parts={isSynthetic ? ["—", "—", "—"] : rowTokenBreakdown(row)}
+                      />
                     </td>
                     <td className={TABLE_MONO_TD_CLASS}>
                       {isSynthetic ? "—" : formatUsdCompact(row.cost_usd)}

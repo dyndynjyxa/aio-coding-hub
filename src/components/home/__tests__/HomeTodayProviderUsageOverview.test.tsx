@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeTodayProviderUsageOverview } from "../HomeTodayProviderUsageOverview";
 import { useHomeTokenCostDataModel } from "../useHomeTokenCostDataModel";
 import type { TraceSession } from "../../../services/gateway/traceStore";
+import type { UsageLeaderboardRow } from "../../../services/usage/usage";
 
 vi.mock("../useHomeTokenCostDataModel", () => ({
   useHomeTokenCostDataModel: vi.fn(),
@@ -64,6 +65,31 @@ function createRunningTrace(
         attempt_duration_ms: 3_000,
       },
     ],
+  };
+}
+
+function createLeaderboardRow(
+  overrides: Pick<UsageLeaderboardRow, "key" | "name"> &
+    Partial<Omit<UsageLeaderboardRow, "key" | "name">>
+): UsageLeaderboardRow {
+  const { key, name, ...rest } = overrides;
+  return {
+    key,
+    name,
+    requests_total: 1,
+    requests_success: 1,
+    requests_failed: 0,
+    total_tokens: 1_200,
+    io_total_tokens: 1_000,
+    input_tokens: 700,
+    output_tokens: 300,
+    cache_creation_input_tokens: 100,
+    cache_read_input_tokens: 100,
+    avg_duration_ms: 900,
+    avg_ttfb_ms: 200,
+    avg_output_tokens_per_second: 90,
+    cost_usd: 0.1,
+    ...rest,
   };
 }
 
@@ -238,20 +264,22 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     });
 
     const totalWithCacheCard = screen.getByText("含缓存总 Token").parentElement;
-    const totalTokenCard = screen.getByText("总 Token").parentElement;
+    const billableTokenCard = screen.getAllByText("计费 Token")[0]?.parentElement;
     const cacheHitRateCard = screen.getByText("缓存命中率").parentElement;
     expect(totalWithCacheCard).toBeTruthy();
-    expect(totalTokenCard).toBeTruthy();
+    expect(billableTokenCard).toBeTruthy();
     expect(cacheHitRateCard).toBeTruthy();
     expect(within(totalWithCacheCard as HTMLElement).getByText("25.0K")).toBeInTheDocument();
-    expect(within(totalTokenCard as HTMLElement).getByText("20.0K")).toBeInTheDocument();
+    expect(within(billableTokenCard as HTMLElement).getByText("20.0K")).toBeInTheDocument();
     expect(within(cacheHitRateCard as HTMLElement).getByText("18.8%")).toBeInTheDocument();
     expect(screen.getByText("今日请求数")).toBeInTheDocument();
     expect(screen.getByText("20")).toBeInTheDocument();
     expect(screen.getByText("今日花费")).toBeInTheDocument();
     expect(screen.getByText("$2.21")).toBeInTheDocument();
     const providerHeader = screen.getByText("供应商").closest("th");
-    const billableTokenHeader = screen.getByText("计费 Token").closest("th");
+    const billableTokenHeader = screen.getByRole("columnheader", {
+      name: /计费 Token/,
+    });
     const cacheHeader = screen.getByText("缓存情况").closest("th");
     expect(providerHeader).toBeTruthy();
     expect(billableTokenHeader).toBeTruthy();
@@ -261,7 +289,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
       within(billableTokenHeader as HTMLElement).getByText("（输入+输出）")
     ).toBeInTheDocument();
     expect(
-      within(cacheHeader as HTMLElement).getByText("（含缓存 / 缓存 / 命中率）")
+      within(cacheHeader as HTMLElement).getByText("（含缓存/缓存/命中率）")
     ).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "成功率" })).toBeInTheDocument();
     expect(screen.queryByText("Token 占比")).not.toBeInTheDocument();
@@ -276,15 +304,15 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(screen.queryByText("Mistral Edge")).not.toBeInTheDocument();
     expect(screen.queryByText("Local Sandbox")).not.toBeInTheDocument();
 
-    expect(within(geminiRow as HTMLElement).getByText("8.0K / 40.0%")).toBeInTheDocument();
-    expect(within(geminiRow as HTMLElement).getByText("10.2K / 2.2K / 20.9%")).toBeInTheDocument();
+    expect(within(geminiRow as HTMLElement).getByLabelText("8.0K/40.0%")).toBeInTheDocument();
+    expect(within(geminiRow as HTMLElement).getByLabelText("10.2K/2.2K/20.9%")).toBeInTheDocument();
     expect(within(geminiRow as HTMLElement).getByText("$0.90")).toBeInTheDocument();
     expect(within(geminiRow as HTMLElement).getByText("85.7%")).toBeInTheDocument();
     expect(within(claudeRow as HTMLElement).getByText("100.0%")).toBeInTheDocument();
-    expect(within(claudeRow as HTMLElement).getByText("5.0K / 25.0%")).toBeInTheDocument();
-    expect(within(claudeRow as HTMLElement).getByText("6.2K / 1.2K / 16.7%")).toBeInTheDocument();
-    expect(within(openaiRow as HTMLElement).getByText("4.0K / 20.0%")).toBeInTheDocument();
-    expect(within(openaiRow as HTMLElement).getByText("5.8K / 1.8K / 31.6%")).toBeInTheDocument();
+    expect(within(claudeRow as HTMLElement).getByLabelText("5.0K/25.0%")).toBeInTheDocument();
+    expect(within(claudeRow as HTMLElement).getByLabelText("6.2K/1.2K/16.7%")).toBeInTheDocument();
+    expect(within(openaiRow as HTMLElement).getByLabelText("4.0K/20.0%")).toBeInTheDocument();
+    expect(within(openaiRow as HTMLElement).getByLabelText("5.8K/1.8K/31.6%")).toBeInTheDocument();
   });
 
   it("disables polling while the page is hidden", () => {
@@ -356,7 +384,9 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(deepseekRow).toBeTruthy();
     expect(screen.queryByText("OpenAI Primary")).not.toBeInTheDocument();
     expect(within(deepseekRow as HTMLElement).getByLabelText("进行中")).toBeInTheDocument();
-    expect(within(deepseekRow as HTMLElement).getByText("3.5K / 1.5K / 27.6%")).toBeInTheDocument();
+    expect(
+      within(deepseekRow as HTMLElement).getByLabelText("3.5K/1.5K/27.6%")
+    ).toBeInTheDocument();
   });
 
   it("renders a synthetic running row when the provider has no usage row today", () => {
@@ -370,8 +400,8 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(runtimeRow).toBeTruthy();
     expect(screen.queryByText("OpenAI Primary")).not.toBeInTheDocument();
     expect(within(runtimeRow as HTMLElement).getByLabelText("进行中")).toBeInTheDocument();
-    expect(within(runtimeRow as HTMLElement).getByText("— / —")).toBeInTheDocument();
-    expect(within(runtimeRow as HTMLElement).getByText("— / — / —")).toBeInTheDocument();
+    expect(within(runtimeRow as HTMLElement).getByLabelText("—/—")).toBeInTheDocument();
+    expect(within(runtimeRow as HTMLElement).getByLabelText("—/—/—")).toBeInTheDocument();
     expect(within(runtimeRow as HTMLElement).getAllByText("—").length).toBeGreaterThanOrEqual(2);
   });
 
@@ -408,6 +438,50 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(providerRow).toBeTruthy();
     expect(within(providerRow as HTMLElement).getByLabelText("进行中")).toBeInTheDocument();
     expect(screen.queryByText("codex/codex/鹿森")).not.toBeInTheDocument();
+  });
+
+  it("does not mark same-name providers across CLI when the live trace provider id is missing", () => {
+    mockDataModel({
+      rows: [
+        createLeaderboardRow({
+          key: "claude:21",
+          name: "claude/Shared Relay",
+          total_tokens: 10_000,
+          io_total_tokens: 9_000,
+          input_tokens: 5_000,
+          output_tokens: 4_000,
+        }),
+        createLeaderboardRow({
+          key: "codex:22",
+          name: "codex/Shared Relay",
+          total_tokens: 9_000,
+          io_total_tokens: 8_000,
+          input_tokens: 4_500,
+          output_tokens: 3_500,
+        }),
+        createLeaderboardRow({
+          key: "gemini:23",
+          name: "gemini/Other Relay",
+          total_tokens: 2_000,
+          io_total_tokens: 1_500,
+          input_tokens: 1_000,
+          output_tokens: 500,
+        }),
+      ],
+    });
+
+    render(
+      <HomeTodayProviderUsageOverview
+        traces={[createRunningTrace("Shared Relay", { providerId: 0, cliKey: "codex" })]}
+      />
+    );
+
+    const claudeRow = screen.getByText("claude/Shared Relay").closest("tr");
+    const codexRow = screen.getByText("codex/Shared Relay").closest("tr");
+    expect(claudeRow).toBeTruthy();
+    expect(codexRow).toBeTruthy();
+    expect(within(codexRow as HTMLElement).getByLabelText("进行中")).toBeInTheDocument();
+    expect(within(claudeRow as HTMLElement).queryByLabelText("进行中")).not.toBeInTheDocument();
   });
 
   it("does not keep showing a running badge when traces are gone", () => {

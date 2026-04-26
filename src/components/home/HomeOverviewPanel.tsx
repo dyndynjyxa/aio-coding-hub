@@ -632,9 +632,7 @@ export function HomeOverviewPanel({
               refreshing={providerLimitRefreshing}
             />
           </Suspense>
-        ) : sessionsTab === "oauthQuota" ? (
-          <div />
-        ) : displayedCircuits.length === 0 ? (
+        ) : sessionsTab === "oauthQuota" ? null : displayedCircuits.length === 0 ? (
           <EmptyState title="当前没有熔断中的 Provider" />
         ) : (
           <div className="h-full overflow-y-auto pr-1">
