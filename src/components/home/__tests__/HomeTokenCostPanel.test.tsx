@@ -100,7 +100,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     render(<HomeTokenCostPanel devPreviewEnabled={true} />);
 
     const cachedTotalCard = screen.getByText("含缓存总 Token");
-    const billableTokenCard = screen.getAllByText("计费 Token")[0];
+    const inputOutputTokenCard = screen.getAllByText("输入+输出 Token")[0];
     const totalCostCard = screen.getAllByText("总花费")[0];
     const costCoverageCard = screen.getByText("成本覆盖率");
     const successCard = screen.getByText("成功请求");
@@ -117,17 +117,18 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(within(providerRow as HTMLElement).getByLabelText("12K/2K/16.7%")).toBeInTheDocument();
     expect(screen.getByText("81.0%")).toBeInTheDocument();
     expect(screen.getByText("18.2%")).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: /计费 Token/ })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: /输入\+输出 Token/ })).toBeInTheDocument();
     const cacheHeader = screen.getByRole("columnheader", { name: /缓存情况/ });
     expect(within(cacheHeader).getByText("（含缓存/缓存/命中率）")).toBeInTheDocument();
     expect(screen.queryByText("Token 明细")).not.toBeInTheDocument();
     expect(screen.queryByText("含缓存总量 / 缓存量 / 缓存命中率")).not.toBeInTheDocument();
     expect(screen.queryByText("平均耗时")).not.toBeInTheDocument();
     expect(
-      cachedTotalCard.compareDocumentPosition(billableTokenCard) & Node.DOCUMENT_POSITION_FOLLOWING
+      cachedTotalCard.compareDocumentPosition(inputOutputTokenCard) &
+        Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
     expect(
-      billableTokenCard.compareDocumentPosition(totalCostCard) & Node.DOCUMENT_POSITION_FOLLOWING
+      inputOutputTokenCard.compareDocumentPosition(totalCostCard) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
     expect(
       totalCostCard.compareDocumentPosition(costCoverageCard) & Node.DOCUMENT_POSITION_FOLLOWING

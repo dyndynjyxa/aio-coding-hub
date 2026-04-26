@@ -264,30 +264,27 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     });
 
     const totalWithCacheCard = screen.getByText("含缓存总 Token").parentElement;
-    const billableTokenCard = screen.getAllByText("计费 Token")[0]?.parentElement;
+    const inputOutputTokenCard = screen.getAllByText("输入+输出 Token")[0]?.parentElement;
     const cacheHitRateCard = screen.getByText("缓存命中率").parentElement;
     expect(totalWithCacheCard).toBeTruthy();
-    expect(billableTokenCard).toBeTruthy();
+    expect(inputOutputTokenCard).toBeTruthy();
     expect(cacheHitRateCard).toBeTruthy();
     expect(within(totalWithCacheCard as HTMLElement).getByText("25.0K")).toBeInTheDocument();
-    expect(within(billableTokenCard as HTMLElement).getByText("20.0K")).toBeInTheDocument();
+    expect(within(inputOutputTokenCard as HTMLElement).getByText("20.0K")).toBeInTheDocument();
     expect(within(cacheHitRateCard as HTMLElement).getByText("18.8%")).toBeInTheDocument();
     expect(screen.getByText("今日请求数")).toBeInTheDocument();
     expect(screen.getByText("20")).toBeInTheDocument();
     expect(screen.getByText("今日花费")).toBeInTheDocument();
     expect(screen.getByText("$2.21")).toBeInTheDocument();
     const providerHeader = screen.getByText("供应商").closest("th");
-    const billableTokenHeader = screen.getByRole("columnheader", {
-      name: /计费 Token/,
+    const inputOutputTokenHeader = screen.getByRole("columnheader", {
+      name: /输入\+输出 Token/,
     });
     const cacheHeader = screen.getByText("缓存情况").closest("th");
     expect(providerHeader).toBeTruthy();
-    expect(billableTokenHeader).toBeTruthy();
+    expect(inputOutputTokenHeader).toBeTruthy();
     expect(cacheHeader).toBeTruthy();
     expect(within(providerHeader as HTMLElement).getByText("（前 3 个）")).toBeInTheDocument();
-    expect(
-      within(billableTokenHeader as HTMLElement).getByText("（输入+输出）")
-    ).toBeInTheDocument();
     expect(
       within(cacheHeader as HTMLElement).getByText("（含缓存/缓存/命中率）")
     ).toBeInTheDocument();

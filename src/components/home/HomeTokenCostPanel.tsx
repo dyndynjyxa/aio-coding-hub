@@ -230,7 +230,7 @@ function TokenBreakdownInline({ parts }: { parts: string[] }) {
   );
 }
 
-function BillableTokenValue({ row }: { row: UsageLeaderboardRow }) {
+function InputOutputTokenValue({ row }: { row: UsageLeaderboardRow }) {
   return (
     <span className="whitespace-nowrap tabular-nums">
       {trimCompactZero(formatTokensMillions(row.io_total_tokens))}
@@ -313,7 +313,7 @@ function TokenSummaryCards({
         accent="purple"
       />
       <StatCard
-        title="计费 Token"
+        title="输入+输出 Token"
         value={formatTokenValue(summary?.io_total_tokens)}
         accent="blue"
       />
@@ -379,7 +379,7 @@ function TokenLeaderboardTable({
               {scopeLabel(scope)}
             </th>
             <th scope="col" className={TABLE_TH_CLASS}>
-              <TableHeaderLabel label="计费 Token" note="输入+输出" />
+              <TableHeaderLabel label="输入+输出 Token" />
             </th>
             <th scope="col" className={TABLE_TH_CLASS}>
               <TableHeaderLabel label="缓存情况" note="含缓存/缓存/命中率" />
@@ -416,7 +416,7 @@ function TokenLeaderboardTable({
                 <div className="font-medium text-slate-900 dark:text-slate-100">{row.name}</div>
               </td>
               <td className={TABLE_MONO_TD_CLASS}>
-                <BillableTokenValue row={row} />
+                <InputOutputTokenValue row={row} />
               </td>
               <td className={TABLE_MONO_TD_CLASS}>
                 <CacheHitRateBreakdown row={row} />

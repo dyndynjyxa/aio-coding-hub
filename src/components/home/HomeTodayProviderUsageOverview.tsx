@@ -442,7 +442,7 @@ function rowTokenBreakdown(row: UsageLeaderboardRow) {
   ];
 }
 
-function rowBillableTokenBreakdown(row: UsageLeaderboardRow, summary: UsageSummary | null) {
+function rowInputOutputTokenBreakdown(row: UsageLeaderboardRow, summary: UsageSummary | null) {
   return [formatTokenValue(row.io_total_tokens), formatPercent(tokenShare(row, summary))];
 }
 
@@ -528,7 +528,7 @@ function SummaryCards({
         accent="purple"
       />
       <SummaryMetricCard
-        title="计费 Token"
+        title="输入+输出 Token"
         value={formatTokenValue(summary?.io_total_tokens)}
         accent="blue"
       />
@@ -652,7 +652,7 @@ export function HomeTodayProviderUsageOverview({
                     <TableHeaderLabel label="供应商" note="前 3 个" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
-                    <TableHeaderLabel label="计费 Token" note="输入+输出" />
+                    <TableHeaderLabel label="输入+输出 Token" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
                     <TableHeaderLabel label="缓存情况" note="含缓存/缓存/命中率" />
@@ -686,7 +686,7 @@ export function HomeTodayProviderUsageOverview({
                     <TableHeaderLabel label="供应商" note="前 3 个" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
-                    <TableHeaderLabel label="计费 Token" note="输入+输出" />
+                    <TableHeaderLabel label="输入+输出 Token" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
                     <TableHeaderLabel label="缓存情况" note="含缓存/缓存/命中率" />
@@ -726,7 +726,9 @@ export function HomeTodayProviderUsageOverview({
                     <td className={TABLE_MONO_TD_CLASS}>
                       <TokenBreakdown
                         parts={
-                          isSynthetic ? ["—", "—"] : rowBillableTokenBreakdown(row, model.summary)
+                          isSynthetic
+                            ? ["—", "—"]
+                            : rowInputOutputTokenBreakdown(row, model.summary)
                         }
                       />
                     </td>
