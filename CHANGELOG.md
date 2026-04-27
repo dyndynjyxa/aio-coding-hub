@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.3](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.40.2...aio-coding-hub-v0.40.3) (2026-04-27)
+
+
+### Features
+
+* **ui:** 首页个性化布局新增今日供应商用量总览 ([#222](https://github.com/dyndynjyxa/aio-coding-hub/issues/222)) ([07e3f92](https://github.com/dyndynjyxa/aio-coding-hub/commit/07e3f929f1102c54162b1a70cc842e5f1acbb151))
+
 ## [0.40.2](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.40.1...aio-coding-hub-v0.40.2) (2026-04-24)
 
 
