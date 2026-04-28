@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.4](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.40.3...aio-coding-hub-v0.40.4) (2026-04-28)
+
+
+### Features
+
+* **proxy:** 优化 Codex 上游请求的 continuation ID 重试机制 ([7aad32c](https://github.com/dyndynjyxa/aio-coding-hub/commit/7aad32c63b19c13534ccb9deeac7ed28dc0031cb))
+
 ## [0.40.3](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.40.2...aio-coding-hub-v0.40.3) (2026-04-27)
 
 
