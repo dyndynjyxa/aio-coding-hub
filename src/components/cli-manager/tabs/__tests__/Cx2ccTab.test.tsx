@@ -13,6 +13,7 @@ function createAppSettings(overrides: Partial<AppSettings> = {}): AppSettings {
     cx2cc_fallback_model_main: "gpt-5.4-main",
     cx2cc_service_tier: "fast",
     cx2cc_model_reasoning_effort: "medium",
+    cx2cc_prompt_cache_retention: "24h",
     cx2cc_disable_response_storage: true,
     cx2cc_enable_reasoning_to_thinking: true,
     cx2cc_drop_stop_sequences: true,
@@ -195,6 +196,38 @@ describe("components/cli-manager/tabs/Cx2ccTab", () => {
 
     expect(persistSettings).toHaveBeenCalledWith({
       cx2cc_service_tier: "",
+    });
+  });
+
+  it("renders prompt cache retention radio group with correct value", () => {
+    const persistSettings = vi.fn().mockResolvedValue(null);
+    render(
+      <CliManagerCx2ccTab
+        appSettings={createAppSettings({ cx2cc_prompt_cache_retention: "in_memory" })}
+        commonSettingsSaving={false}
+        onPersistCommonSettings={persistSettings}
+      />
+    );
+
+    expect(screen.getByRole("radio", { name: "in_memory" })).toBeChecked();
+  });
+
+  it("persists prompt cache retention change", () => {
+    const persistSettings = vi.fn().mockResolvedValue(null);
+    render(
+      <CliManagerCx2ccTab
+        appSettings={createAppSettings({ cx2cc_prompt_cache_retention: "24h" })}
+        commonSettingsSaving={false}
+        onPersistCommonSettings={persistSettings}
+      />
+    );
+
+    const skipRadio = screen.getByRole("radio", { name: "跳过注入" });
+    fireEvent.click(skipRadio);
+
+    expect(skipRadio).toBeChecked();
+    expect(persistSettings).toHaveBeenCalledWith({
+      cx2cc_prompt_cache_retention: "",
     });
   });
 

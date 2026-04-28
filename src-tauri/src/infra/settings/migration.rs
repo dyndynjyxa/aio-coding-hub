@@ -77,6 +77,22 @@ pub(super) fn sanitize_cli_priority_order(settings: &mut AppSettings) -> bool {
     changed
 }
 
+pub(crate) fn is_valid_cx2cc_prompt_cache_retention(value: &str) -> bool {
+    matches!(value.trim(), "" | "in_memory" | "24h")
+}
+
+pub(super) fn sanitize_cx2cc_prompt_cache_retention(settings: &mut AppSettings) -> bool {
+    let normalized = settings.cx2cc_prompt_cache_retention.trim();
+    let next = if is_valid_cx2cc_prompt_cache_retention(normalized) {
+        normalized
+    } else {
+        DEFAULT_CX2CC_PROMPT_CACHE_RETENTION
+    };
+    let changed = settings.cx2cc_prompt_cache_retention != next;
+    settings.cx2cc_prompt_cache_retention = next.to_string();
+    changed
+}
+
 pub(super) fn sanitize_failover_settings(settings: &mut AppSettings) -> bool {
     let mut changed = false;
 
@@ -608,9 +624,24 @@ fn migrate_add_upstream_proxy_credentials(
     )
 }
 
+fn migrate_add_cx2cc_prompt_cache_retention(
+    settings: &mut AppSettings,
+    schema_version_present: bool,
+) -> bool {
+    if !migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_CX2CC_PROMPT_CACHE_RETENTION,
+    ) {
+        return false;
+    }
+    settings.cx2cc_prompt_cache_retention = DEFAULT_CX2CC_PROMPT_CACHE_RETENTION.to_string();
+    true
+}
+
 type SettingsMigration = fn(&mut AppSettings, bool) -> bool;
 
-const SETTINGS_MIGRATIONS: [SettingsMigration; 26] = [
+const SETTINGS_MIGRATIONS: [SettingsMigration; 27] = [
     migrate_disable_upstream_timeouts,
     migrate_add_gateway_rectifiers,
     migrate_add_circuit_breaker_notice,
@@ -637,6 +668,7 @@ const SETTINGS_MIGRATIONS: [SettingsMigration; 26] = [
     migrate_raise_stream_idle_timeout_default,
     migrate_add_upstream_proxy,
     migrate_add_upstream_proxy_credentials,
+    migrate_add_cx2cc_prompt_cache_retention,
 ];
 
 fn apply_settings_migrations(settings: &mut AppSettings, schema_version_present: bool) -> bool {
@@ -661,6 +693,7 @@ pub(super) fn repair_settings(
     repaired |= sanitize_response_fixer_limits(settings);
     repaired |= sanitize_codex_home_override(settings);
     repaired |= sanitize_cli_priority_order(settings);
+    repaired |= sanitize_cx2cc_prompt_cache_retention(settings);
     let canonical = super::persistence::canonical_settings_json(settings)?;
     repaired |= raw_settings_json != &canonical;
     Ok(repaired)
@@ -670,6 +703,31 @@ pub(super) fn repair_settings(
 mod tests {
     use super::*;
     use crate::infra::settings::types::default_cli_priority_order;
+
+    #[test]
+    fn sanitize_cx2cc_prompt_cache_retention_resets_invalid_value() {
+        let mut s = AppSettings {
+            cx2cc_prompt_cache_retention: "disk".to_string(),
+            ..Default::default()
+        };
+
+        assert!(sanitize_cx2cc_prompt_cache_retention(&mut s));
+        assert_eq!(
+            s.cx2cc_prompt_cache_retention,
+            DEFAULT_CX2CC_PROMPT_CACHE_RETENTION
+        );
+    }
+
+    #[test]
+    fn sanitize_cx2cc_prompt_cache_retention_trims_valid_value() {
+        let mut s = AppSettings {
+            cx2cc_prompt_cache_retention: " in_memory ".to_string(),
+            ..Default::default()
+        };
+
+        assert!(sanitize_cx2cc_prompt_cache_retention(&mut s));
+        assert_eq!(s.cx2cc_prompt_cache_retention, "in_memory");
+    }
 
     // -- sanitize_failover_settings --
 
@@ -1030,6 +1088,15 @@ mod tests {
     }
 
     #[test]
+    fn app_settings_default_has_cx2cc_prompt_cache_retention() {
+        let s = AppSettings::default();
+        assert_eq!(
+            s.cx2cc_prompt_cache_retention,
+            DEFAULT_CX2CC_PROMPT_CACHE_RETENTION
+        );
+    }
+
+    #[test]
     fn app_settings_default_shows_home_heatmap() {
         let s = AppSettings::default();
         assert!(s.show_home_heatmap);
@@ -1186,6 +1253,25 @@ mod tests {
         assert!(migrate_add_cli_priority_order(&mut s, true));
         assert_eq!(s.schema_version, SCHEMA_VERSION_ADD_CLI_PRIORITY_ORDER);
         assert_eq!(s.cli_priority_order, default_cli_priority_order());
+    }
+
+    #[test]
+    fn migrate_add_cx2cc_prompt_cache_retention_fills_default() {
+        let mut s = AppSettings {
+            schema_version: 32,
+            cx2cc_prompt_cache_retention: String::new(),
+            ..Default::default()
+        };
+
+        assert!(migrate_add_cx2cc_prompt_cache_retention(&mut s, true));
+        assert_eq!(
+            s.schema_version,
+            SCHEMA_VERSION_ADD_CX2CC_PROMPT_CACHE_RETENTION
+        );
+        assert_eq!(
+            s.cx2cc_prompt_cache_retention,
+            DEFAULT_CX2CC_PROMPT_CACHE_RETENTION
+        );
     }
 
     #[test]

@@ -97,7 +97,30 @@ pub(super) fn apply_cx2cc_request_settings(
     if let Some(ref tier) = cx2cc_settings.service_tier {
         responses_body["service_tier"] = serde_json::json!(tier);
     }
+    if let Some(ref retention) = cx2cc_settings.prompt_cache_retention {
+        responses_body["prompt_cache_retention"] = serde_json::json!(retention);
+    }
     if cx2cc_settings.disable_response_storage {
         responses_body["store"] = serde_json::json!(false);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_cx2cc_request_settings;
+    use crate::gateway::proxy::cx2cc::settings::Cx2ccSettings;
+    use serde_json::json;
+
+    #[test]
+    fn apply_cx2cc_request_settings_writes_prompt_cache_retention() {
+        let mut body = json!({"model": "gpt-5.4"});
+        let settings = Cx2ccSettings {
+            prompt_cache_retention: Some("24h".to_string()),
+            ..Default::default()
+        };
+
+        apply_cx2cc_request_settings(&mut body, &settings);
+
+        assert_eq!(body["prompt_cache_retention"], "24h");
     }
 }

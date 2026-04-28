@@ -97,6 +97,9 @@ pub(crate) struct SettingsUpdate {
     #[serde(rename = "cx2CcServiceTier")]
     #[specta(rename = "cx2CcServiceTier")]
     pub cx2cc_service_tier: Option<String>,
+    #[serde(rename = "cx2CcPromptCacheRetention")]
+    #[specta(rename = "cx2CcPromptCacheRetention")]
+    pub cx2cc_prompt_cache_retention: Option<String>,
     #[serde(rename = "cx2CcDisableResponseStorage")]
     #[specta(rename = "cx2CcDisableResponseStorage")]
     pub cx2cc_disable_response_storage: Option<bool>,
@@ -180,6 +183,7 @@ pub(crate) struct SettingsView {
     pub cx2cc_fallback_model_main: String,
     pub cx2cc_model_reasoning_effort: String,
     pub cx2cc_service_tier: String,
+    pub cx2cc_prompt_cache_retention: String,
     pub cx2cc_disable_response_storage: bool,
     pub cx2cc_enable_reasoning_to_thinking: bool,
     pub cx2cc_drop_stop_sequences: bool,
@@ -300,6 +304,7 @@ impl From<&settings::AppSettings> for SettingsView {
             cx2cc_fallback_model_main: value.cx2cc_fallback_model_main.clone(),
             cx2cc_model_reasoning_effort: value.cx2cc_model_reasoning_effort.clone(),
             cx2cc_service_tier: value.cx2cc_service_tier.clone(),
+            cx2cc_prompt_cache_retention: value.cx2cc_prompt_cache_retention.clone(),
             cx2cc_disable_response_storage: value.cx2cc_disable_response_storage,
             cx2cc_enable_reasoning_to_thinking: value.cx2cc_enable_reasoning_to_thinking,
             cx2cc_drop_stop_sequences: value.cx2cc_drop_stop_sequences,
@@ -555,6 +560,7 @@ pub(crate) async fn settings_set_impl(
         cx2cc_fallback_model_main,
         cx2cc_model_reasoning_effort,
         cx2cc_service_tier,
+        cx2cc_prompt_cache_retention,
         cx2cc_disable_response_storage,
         cx2cc_enable_reasoning_to_thinking,
         cx2cc_drop_stop_sequences,
@@ -633,10 +639,19 @@ pub(crate) async fn settings_set_impl(
             if cx2cc_fallback_model_main.is_empty() {
                 return Err("cx2cc_fallback_model_main cannot be empty".into());
             }
-            let cx2cc_model_reasoning_effort =
-                cx2cc_model_reasoning_effort.unwrap_or(previous.cx2cc_model_reasoning_effort.clone());
+            let cx2cc_model_reasoning_effort = cx2cc_model_reasoning_effort
+                .unwrap_or(previous.cx2cc_model_reasoning_effort.clone());
             let cx2cc_service_tier =
                 cx2cc_service_tier.unwrap_or(previous.cx2cc_service_tier.clone());
+            let cx2cc_prompt_cache_retention = cx2cc_prompt_cache_retention
+                .unwrap_or(previous.cx2cc_prompt_cache_retention.clone())
+                .trim()
+                .to_string();
+            if !settings::is_valid_cx2cc_prompt_cache_retention(&cx2cc_prompt_cache_retention) {
+                return Err(
+                    "cx2cc_prompt_cache_retention must be empty, in_memory, or 24h".into(),
+                );
+            }
             let cx2cc_disable_response_storage =
                 cx2cc_disable_response_storage.unwrap_or(previous.cx2cc_disable_response_storage);
             let cx2cc_enable_reasoning_to_thinking = cx2cc_enable_reasoning_to_thinking
@@ -762,6 +777,7 @@ pub(crate) async fn settings_set_impl(
                 cx2cc_fallback_model_main,
                 cx2cc_model_reasoning_effort,
                 cx2cc_service_tier,
+                cx2cc_prompt_cache_retention,
                 cx2cc_disable_response_storage,
                 cx2cc_enable_reasoning_to_thinking,
                 cx2cc_drop_stop_sequences,
@@ -1005,6 +1021,7 @@ mod tests {
             "cx2CcFallbackModelMain": "gpt-5.4",
             "cx2CcModelReasoningEffort": "high",
             "cx2CcServiceTier": "flex",
+            "cx2CcPromptCacheRetention": "24h",
             "cx2CcDisableResponseStorage": false,
             "cx2CcEnableReasoningToThinking": true,
             "cx2CcDropStopSequences": true,
@@ -1025,6 +1042,7 @@ mod tests {
         assert_eq!(update.cx2cc_fallback_model_main.as_deref(), Some("gpt-5.4"));
         assert_eq!(update.cx2cc_model_reasoning_effort.as_deref(), Some("high"));
         assert_eq!(update.cx2cc_service_tier.as_deref(), Some("flex"));
+        assert_eq!(update.cx2cc_prompt_cache_retention.as_deref(), Some("24h"));
         assert_eq!(update.cx2cc_disable_response_storage, Some(false));
         assert_eq!(update.cx2cc_enable_reasoning_to_thinking, Some(true));
         assert_eq!(update.cx2cc_drop_stop_sequences, Some(true));
@@ -1044,6 +1062,7 @@ mod tests {
 
         let update: SettingsUpdate = serde_json::from_value(json).expect("should deserialize");
         assert!(update.cx2cc_model_reasoning_effort.is_none());
+        assert!(update.cx2cc_prompt_cache_retention.is_none());
         assert!(update.cx2cc_fallback_model_opus.is_none());
         assert!(update.cx2cc_filter_batch_tool.is_none());
     }

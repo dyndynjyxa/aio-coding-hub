@@ -11,6 +11,7 @@ pub struct Cx2ccSettings {
     pub fallback_model_main: String,
     pub model_reasoning_effort: Option<String>,
     pub service_tier: Option<String>,
+    pub prompt_cache_retention: Option<String>,
     pub disable_response_storage: bool,
     pub enable_reasoning_to_thinking: bool,
     pub drop_stop_sequences: bool,
@@ -27,6 +28,7 @@ impl Cx2ccSettings {
             fallback_model_main: s.cx2cc_fallback_model_main.clone(),
             model_reasoning_effort: non_empty(&s.cx2cc_model_reasoning_effort),
             service_tier: non_empty(&s.cx2cc_service_tier),
+            prompt_cache_retention: non_empty(&s.cx2cc_prompt_cache_retention),
             disable_response_storage: s.cx2cc_disable_response_storage,
             enable_reasoning_to_thinking: s.cx2cc_enable_reasoning_to_thinking,
             drop_stop_sequences: s.cx2cc_drop_stop_sequences,
@@ -45,6 +47,9 @@ impl Default for Cx2ccSettings {
             fallback_model_main: settings::DEFAULT_CX2CC_FALLBACK_MODEL.to_string(),
             model_reasoning_effort: None,
             service_tier: None,
+            prompt_cache_retention: Some(
+                settings::DEFAULT_CX2CC_PROMPT_CACHE_RETENTION.to_string(),
+            ),
             disable_response_storage: true,
             enable_reasoning_to_thinking: true,
             drop_stop_sequences: true,
@@ -78,6 +83,7 @@ mod tests {
         assert_eq!(cfg.fallback_model_main, "gpt-5.4");
         assert_eq!(cfg.model_reasoning_effort, None);
         assert_eq!(cfg.service_tier, None);
+        assert_eq!(cfg.prompt_cache_retention.as_deref(), Some("24h"));
         assert!(cfg.disable_response_storage);
         assert!(cfg.enable_reasoning_to_thinking);
         assert!(cfg.drop_stop_sequences);
@@ -94,6 +100,7 @@ mod tests {
             cx2cc_fallback_model_main: "gpt-5.4".to_string(),
             cx2cc_model_reasoning_effort: " medium ".to_string(),
             cx2cc_service_tier: "  flex ".to_string(),
+            cx2cc_prompt_cache_retention: " 24h ".to_string(),
             cx2cc_disable_response_storage: false,
             cx2cc_enable_reasoning_to_thinking: false,
             cx2cc_drop_stop_sequences: false,
@@ -110,10 +117,23 @@ mod tests {
         assert_eq!(cfg.fallback_model_main, "gpt-5.4");
         assert_eq!(cfg.model_reasoning_effort.as_deref(), Some("medium"));
         assert_eq!(cfg.service_tier.as_deref(), Some("flex"));
+        assert_eq!(cfg.prompt_cache_retention.as_deref(), Some("24h"));
         assert!(!cfg.disable_response_storage);
         assert!(!cfg.enable_reasoning_to_thinking);
         assert!(!cfg.drop_stop_sequences);
         assert!(!cfg.clean_schema);
         assert!(!cfg.filter_batch_tool);
+    }
+
+    #[test]
+    fn from_app_settings_turns_blank_prompt_cache_retention_into_none() {
+        let app = AppSettings {
+            cx2cc_prompt_cache_retention: "   ".to_string(),
+            ..Default::default()
+        };
+
+        let cfg = Cx2ccSettings::from_app_settings(&app);
+
+        assert_eq!(cfg.prompt_cache_retention, None);
     }
 }

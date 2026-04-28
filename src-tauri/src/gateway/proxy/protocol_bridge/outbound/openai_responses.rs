@@ -142,6 +142,9 @@ fn ir_to_request(ir: &InternalRequest, settings: &Cx2ccSettings) -> Result<Value
         result["top_p"] = json!(top_p);
     }
     result["stream"] = json!(ir.stream);
+    if let Some(ref retention) = settings.prompt_cache_retention {
+        result["prompt_cache_retention"] = json!(retention);
+    }
 
     if !ir.stop_sequences.is_empty() {
         if settings.drop_stop_sequences {

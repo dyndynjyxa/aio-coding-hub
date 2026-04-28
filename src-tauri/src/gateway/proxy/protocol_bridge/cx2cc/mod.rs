@@ -73,6 +73,7 @@ pub(crate) const CODEX_CHATGPT_RESPONSES_ALLOWED_KEYS: &[&str] = &[
     "reasoning",
     "service_tier",
     "prompt_cache_key",
+    "prompt_cache_retention",
     "text",
     "previous_response_id",
 ];
@@ -257,6 +258,7 @@ mod tests {
             "model": "gpt-5",
             "instructions": "system prompt",
             "input": "hello",
+            "prompt_cache_retention": "24h",
             "temperature": 0.7,
             "extra_field": true,
         });
@@ -265,6 +267,7 @@ mod tests {
         assert_eq!(next["model"], "gpt-5");
         assert_eq!(next["instructions"], "system prompt");
         assert_eq!(next["input"], "hello");
+        assert_eq!(next["prompt_cache_retention"], "24h");
         // Stripped fields
         assert!(next.get("temperature").is_none());
         assert!(next.get("extra_field").is_none());

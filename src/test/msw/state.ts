@@ -21,7 +21,7 @@ const DEFAULT_CLI_PROXY_STATUS: CliProxyStatus[] = [
 
 // Default settings matching the Rust backend defaults.
 const DEFAULT_SETTINGS: AppSettings = {
-  schema_version: 32,
+  schema_version: 33,
   preferred_port: 37123,
   show_home_heatmap: true,
   show_home_usage: true,
@@ -73,6 +73,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   cx2cc_fallback_model_main: "gpt-5.4",
   cx2cc_model_reasoning_effort: "",
   cx2cc_service_tier: "",
+  cx2cc_prompt_cache_retention: "24h",
   cx2cc_disable_response_storage: true,
   cx2cc_enable_reasoning_to_thinking: true,
   cx2cc_drop_stop_sequences: true,

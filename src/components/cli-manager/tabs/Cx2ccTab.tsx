@@ -53,6 +53,7 @@ export function CliManagerCx2ccTab({
   const [fallbackModelMainText, setFallbackModelMainText] = useState("");
   const [reasoningEffortText, setReasoningEffortText] = useState("");
   const [serviceTierText, setServiceTierText] = useState("");
+  const [promptCacheRetentionText, setPromptCacheRetentionText] = useState("24h");
 
   useEffect(() => {
     if (!appSettings) return;
@@ -62,6 +63,7 @@ export function CliManagerCx2ccTab({
     setFallbackModelMainText(appSettings.cx2cc_fallback_model_main);
     setReasoningEffortText(appSettings.cx2cc_model_reasoning_effort);
     setServiceTierText(appSettings.cx2cc_service_tier);
+    setPromptCacheRetentionText(appSettings.cx2cc_prompt_cache_retention);
   }, [appSettings]);
 
   const controlsDisabled = commonSettingsSaving || !appSettings;
@@ -79,6 +81,21 @@ export function CliManagerCx2ccTab({
     }
 
     setReasoningEffortText(updated.cx2cc_model_reasoning_effort);
+  }
+
+  async function persistPromptCacheRetention(value: string) {
+    if (!appSettings) return;
+
+    const previous = appSettings.cx2cc_prompt_cache_retention;
+    setPromptCacheRetentionText(value);
+
+    const updated = await onPersistCommonSettings({ cx2cc_prompt_cache_retention: value });
+    if (!updated) {
+      setPromptCacheRetentionText(previous);
+      return;
+    }
+
+    setPromptCacheRetentionText(updated.cx2cc_prompt_cache_retention);
   }
 
   return (
@@ -200,6 +217,25 @@ export function CliManagerCx2ccTab({
               }}
               placeholder="例如: fast"
               className="font-mono w-[240px] max-w-full"
+              disabled={controlsDisabled}
+            />
+          </SettingItem>
+
+          <SettingItem
+            label="Prompt Cache 保留"
+            subtitle="注入 prompt_cache_retention 到上游 Responses 请求"
+          >
+            <RadioGroup
+              name="cx2cc_prompt_cache_retention"
+              value={promptCacheRetentionText}
+              onChange={(value) => {
+                void persistPromptCacheRetention(value);
+              }}
+              options={[
+                { value: "24h", label: "24h" },
+                { value: "in_memory", label: "in_memory" },
+                { value: "", label: "跳过注入" },
+              ]}
               disabled={controlsDisabled}
             />
           </SettingItem>

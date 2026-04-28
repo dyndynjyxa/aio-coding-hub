@@ -2594,6 +2594,7 @@ export type SettingsUpdate = {
   cx2CcFallbackModelMain: string | null;
   cx2CcModelReasoningEffort: string | null;
   cx2CcServiceTier: string | null;
+  cx2CcPromptCacheRetention: string | null;
   cx2CcDisableResponseStorage: boolean | null;
   cx2CcEnableReasoningToThinking: boolean | null;
   cx2CcDropStopSequences: boolean | null;
@@ -2657,6 +2658,7 @@ export type SettingsView = {
   cx2cc_fallback_model_main: string;
   cx2cc_model_reasoning_effort: string;
   cx2cc_service_tier: string;
+  cx2cc_prompt_cache_retention: string;
   cx2cc_disable_response_storage: boolean;
   cx2cc_enable_reasoning_to_thinking: boolean;
   cx2cc_drop_stop_sequences: boolean;

@@ -55,9 +55,10 @@ fn parse_request(body: Value, settings: &Cx2ccSettings) -> Result<InternalReques
         .unwrap_or("")
         .to_string();
 
-    let system = parse_system(&body);
-    let messages = parse_messages(&body)?;
-    let tools = parse_tools(&body, settings.filter_batch_tool);
+    let mut cache_diagnostics = AnthropicCacheControlDiagnostics::default();
+    let system = parse_system(&body, &mut cache_diagnostics);
+    let tools = parse_tools(&body, settings.filter_batch_tool, &mut cache_diagnostics);
+    let messages = parse_messages(&body, &mut cache_diagnostics)?;
     let tool_choice = parse_tool_choice(&body);
 
     let max_tokens = body.get("max_tokens").and_then(|v| v.as_u64());
@@ -78,6 +79,14 @@ fn parse_request(body: Value, settings: &Cx2ccSettings) -> Result<InternalReques
         })
         .unwrap_or_default();
 
+    let mut metadata = IRMetadata::default();
+    if cache_diagnostics.total_markers() > 0 {
+        metadata.extra.insert(
+            "anthropic_cache_control".to_string(),
+            cache_diagnostics.to_json(),
+        );
+    }
+
     Ok(InternalRequest {
         model,
         messages,
@@ -89,11 +98,14 @@ fn parse_request(body: Value, settings: &Cx2ccSettings) -> Result<InternalReques
         top_p,
         stop_sequences,
         stream,
-        metadata: IRMetadata::default(),
+        metadata,
     })
 }
 
-fn parse_system(body: &Value) -> Option<String> {
+fn parse_system(
+    body: &Value,
+    cache_diagnostics: &mut AnthropicCacheControlDiagnostics,
+) -> Option<String> {
     match body.get("system") {
         Some(Value::String(text)) => {
             if text.is_empty() {
@@ -105,7 +117,14 @@ fn parse_system(body: &Value) -> Option<String> {
         Some(Value::Array(arr)) => {
             let joined: String = arr
                 .iter()
-                .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
+                .filter_map(|item| {
+                    if has_cache_control(item) {
+                        cache_diagnostics.system_markers =
+                            cache_diagnostics.system_markers.saturating_add(1);
+                        cache_diagnostics.last_breakpoint = Some("system");
+                    }
+                    item.get("text").and_then(|t| t.as_str())
+                })
                 .collect::<Vec<_>>()
                 .join("\n\n");
             if joined.is_empty() {
@@ -118,7 +137,10 @@ fn parse_system(body: &Value) -> Option<String> {
     }
 }
 
-fn parse_messages(body: &Value) -> Result<Vec<IRMessage>, BridgeError> {
+fn parse_messages(
+    body: &Value,
+    cache_diagnostics: &mut AnthropicCacheControlDiagnostics,
+) -> Result<Vec<IRMessage>, BridgeError> {
     let msgs = body
         .get("messages")
         .and_then(|m| m.as_array())
@@ -131,19 +153,22 @@ fn parse_messages(body: &Value) -> Result<Vec<IRMessage>, BridgeError> {
             _ => IRRole::User,
         };
 
-        let content = parse_content_blocks(msg.get("content"))?;
+        let content = parse_content_blocks(msg.get("content"), cache_diagnostics)?;
         result.push(IRMessage { role, content });
     }
     Ok(result)
 }
 
-fn parse_content_blocks(content: Option<&Value>) -> Result<Vec<IRContentBlock>, BridgeError> {
+fn parse_content_blocks(
+    content: Option<&Value>,
+    cache_diagnostics: &mut AnthropicCacheControlDiagnostics,
+) -> Result<Vec<IRContentBlock>, BridgeError> {
     match content {
         Some(Value::String(text)) => Ok(vec![IRContentBlock::Text { text: text.clone() }]),
         Some(Value::Array(blocks)) => {
             let mut result = Vec::with_capacity(blocks.len());
             for block in blocks {
-                if let Some(b) = parse_single_block(block)? {
+                if let Some(b) = parse_single_block(block, cache_diagnostics)? {
                     result.push(b);
                 }
             }
@@ -153,11 +178,19 @@ fn parse_content_blocks(content: Option<&Value>) -> Result<Vec<IRContentBlock>, 
     }
 }
 
-fn parse_single_block(block: &Value) -> Result<Option<IRContentBlock>, BridgeError> {
+fn parse_single_block(
+    block: &Value,
+    cache_diagnostics: &mut AnthropicCacheControlDiagnostics,
+) -> Result<Option<IRContentBlock>, BridgeError> {
     let block_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
     match block_type {
         "text" => {
+            if has_cache_control(block) {
+                cache_diagnostics.message_text_markers =
+                    cache_diagnostics.message_text_markers.saturating_add(1);
+                cache_diagnostics.last_breakpoint = Some("message_text");
+            }
             let text = block
                 .get("text")
                 .and_then(|t| t.as_str())
@@ -234,7 +267,11 @@ fn parse_single_block(block: &Value) -> Result<Option<IRContentBlock>, BridgeErr
     }
 }
 
-fn parse_tools(body: &Value, filter_batch_tool: bool) -> Vec<IRToolDefinition> {
+fn parse_tools(
+    body: &Value,
+    filter_batch_tool: bool,
+    cache_diagnostics: &mut AnthropicCacheControlDiagnostics,
+) -> Vec<IRToolDefinition> {
     let Some(tools) = body.get("tools").and_then(|t| t.as_array()) else {
         return Vec::new();
     };
@@ -245,11 +282,17 @@ fn parse_tools(body: &Value, filter_batch_tool: bool) -> Vec<IRToolDefinition> {
             !filter_batch_tool || t.get("type").and_then(|v| v.as_str()) != Some("BatchTool")
         })
         .map(|t| IRToolDefinition {
-            name: t
-                .get("name")
-                .and_then(|n| n.as_str())
-                .unwrap_or("")
-                .to_string(),
+            name: {
+                if has_cache_control(t) {
+                    cache_diagnostics.tool_markers =
+                        cache_diagnostics.tool_markers.saturating_add(1);
+                    cache_diagnostics.last_breakpoint = Some("tool");
+                }
+                t.get("name")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            },
             description: t
                 .get("description")
                 .and_then(|d| d.as_str())
@@ -257,6 +300,80 @@ fn parse_tools(body: &Value, filter_batch_tool: bool) -> Vec<IRToolDefinition> {
             parameters: t.get("input_schema").cloned().unwrap_or(json!({})),
         })
         .collect()
+}
+
+#[derive(Default)]
+struct AnthropicCacheControlDiagnostics {
+    system_markers: u64,
+    tool_markers: u64,
+    message_text_markers: u64,
+    last_breakpoint: Option<&'static str>,
+}
+
+impl AnthropicCacheControlDiagnostics {
+    fn total_markers(&self) -> u64 {
+        self.system_markers
+            .saturating_add(self.tool_markers)
+            .saturating_add(self.message_text_markers)
+    }
+
+    fn to_json(&self) -> Value {
+        json!({
+            "system_markers": self.system_markers,
+            "tool_markers": self.tool_markers,
+            "message_text_markers": self.message_text_markers,
+            "total_markers": self.total_markers(),
+            "last_breakpoint": self.last_breakpoint,
+        })
+    }
+}
+
+fn has_cache_control(value: &Value) -> bool {
+    value
+        .get("cache_control")
+        .and_then(|v| v.as_object())
+        .is_some()
+}
+
+pub(crate) fn anthropic_cache_control_diagnostics(body: &Value) -> Value {
+    let mut diagnostics = AnthropicCacheControlDiagnostics::default();
+
+    if let Some(system) = body.get("system").and_then(Value::as_array) {
+        for block in system {
+            if has_cache_control(block) {
+                diagnostics.system_markers = diagnostics.system_markers.saturating_add(1);
+                diagnostics.last_breakpoint = Some("system");
+            }
+        }
+    }
+
+    if let Some(tools) = body.get("tools").and_then(Value::as_array) {
+        for tool in tools {
+            if has_cache_control(tool) {
+                diagnostics.tool_markers = diagnostics.tool_markers.saturating_add(1);
+                diagnostics.last_breakpoint = Some("tool");
+            }
+        }
+    }
+
+    if let Some(messages) = body.get("messages").and_then(Value::as_array) {
+        for message in messages {
+            let Some(content) = message.get("content").and_then(Value::as_array) else {
+                continue;
+            };
+            for block in content {
+                if block.get("type").and_then(Value::as_str) == Some("text")
+                    && has_cache_control(block)
+                {
+                    diagnostics.message_text_markers =
+                        diagnostics.message_text_markers.saturating_add(1);
+                    diagnostics.last_breakpoint = Some("message_text");
+                }
+            }
+        }
+    }
+
+    diagnostics.to_json()
 }
 
 fn parse_tool_choice(body: &Value) -> Option<IRToolChoice> {
@@ -622,6 +739,45 @@ mod tests {
         });
         let ir = parse_request(body, &default_settings()).unwrap();
         assert_eq!(ir.system.as_deref(), Some("Part 1\n\nPart 2"));
+    }
+
+    #[test]
+    fn request_cache_control_markers_are_recorded_in_metadata() {
+        let body = json!({
+            "model": "claude-sonnet-4-20250514",
+            "max_tokens": 1024,
+            "system": [
+                {"type": "text", "text": "Part 1", "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": "Part 2"}
+            ],
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Stable context", "cache_control": {"type": "ephemeral"}}
+                ]
+            }],
+            "tools": [{
+                "name": "get_weather",
+                "input_schema": {},
+                "cache_control": {"type": "ephemeral"}
+            }]
+        });
+
+        let ir = parse_request(body.clone(), &default_settings()).unwrap();
+        let diagnostics = ir
+            .metadata
+            .extra
+            .get("anthropic_cache_control")
+            .expect("cache diagnostics");
+
+        assert_eq!(diagnostics["system_markers"], 1);
+        assert_eq!(diagnostics["tool_markers"], 1);
+        assert_eq!(diagnostics["message_text_markers"], 1);
+        assert_eq!(diagnostics["total_markers"], 3);
+        assert_eq!(
+            anthropic_cache_control_diagnostics(&body)["total_markers"],
+            3
+        );
     }
 
     #[test]

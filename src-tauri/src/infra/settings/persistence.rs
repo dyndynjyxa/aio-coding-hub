@@ -2,7 +2,8 @@
 
 use super::defaults::*;
 use super::migration::{
-    normalize_cli_priority_order, normalize_codex_home_override, repair_settings,
+    is_valid_cx2cc_prompt_cache_retention, normalize_cli_priority_order,
+    normalize_codex_home_override, repair_settings,
 };
 use super::types::{AppSettings, CodexHomeMode};
 use crate::app_paths;
@@ -188,6 +189,8 @@ pub fn write<R: tauri::Runtime>(
     let mut settings = settings.clone();
     settings.cli_priority_order = normalize_cli_priority_order(&settings.cli_priority_order);
     settings.codex_home_override = normalize_codex_home_override(&settings.codex_home_override);
+    settings.cx2cc_prompt_cache_retention =
+        settings.cx2cc_prompt_cache_retention.trim().to_string();
     if settings.codex_home_mode != CodexHomeMode::Custom {
         settings.codex_home_override.clear();
     }
@@ -201,6 +204,12 @@ pub fn write<R: tauri::Runtime>(
     }
     if settings.log_retention_days == 0 {
         return Err("SEC_INVALID_INPUT: log_retention_days must be >= 1".into());
+    }
+    if !is_valid_cx2cc_prompt_cache_retention(&settings.cx2cc_prompt_cache_retention) {
+        return Err(
+            "SEC_INVALID_INPUT: cx2cc_prompt_cache_retention must be empty, in_memory, or 24h"
+                .into(),
+        );
     }
     if settings.provider_cooldown_seconds > MAX_PROVIDER_COOLDOWN_SECONDS {
         return Err(format!(

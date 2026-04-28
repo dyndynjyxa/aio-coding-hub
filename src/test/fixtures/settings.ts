@@ -58,6 +58,7 @@ export function createTestAppSettings(overrides?: Partial<AppSettings>): AppSett
     cx2cc_fallback_model_main: "gpt-5.4",
     cx2cc_model_reasoning_effort: "",
     cx2cc_service_tier: "",
+    cx2cc_prompt_cache_retention: "24h",
     cx2cc_disable_response_storage: true,
     cx2cc_enable_reasoning_to_thinking: true,
     cx2cc_drop_stop_sequences: true,

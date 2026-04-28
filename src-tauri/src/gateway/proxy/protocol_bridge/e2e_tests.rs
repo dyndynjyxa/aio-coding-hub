@@ -85,6 +85,7 @@ mod tests {
                 .unwrap(),
             1024
         );
+        assert_eq!(translated.body["prompt_cache_retention"], "24h");
         // Input should have the user message wrapped with role
         let input = translated.body.get("input").unwrap().as_array().unwrap();
         assert!(!input.is_empty());
