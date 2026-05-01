@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.40.5](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.40.4...aio-coding-hub-v0.40.5) (2026-05-01)
+
+
+### Features
+
+* implement batch 1-2 issues ([#19](https://github.com/dyndynjyxa/aio-coding-hub/issues/19), [#225](https://github.com/dyndynjyxa/aio-coding-hub/issues/225), [#226](https://github.com/dyndynjyxa/aio-coding-hub/issues/226), [#227](https://github.com/dyndynjyxa/aio-coding-hub/issues/227), [#228](https://github.com/dyndynjyxa/aio-coding-hub/issues/228), [#231](https://github.com/dyndynjyxa/aio-coding-hub/issues/231)) ([#232](https://github.com/dyndynjyxa/aio-coding-hub/issues/232)) ([83b9f6e](https://github.com/dyndynjyxa/aio-coding-hub/commit/83b9f6e788523bfd9411a21ad5beea10e478209f))
+* **tauri-domain:** 增强Provider可用性状态检测逻辑 ([478a3ec](https://github.com/dyndynjyxa/aio-coding-hub/commit/478a3ec910ed7a6e3c84fa4fa6f8a017912867a2))
+* **tauri-infra-claude_hooks:** 支持合并已有Hook Group中的未知字段和Hook条目 ([478a3ec](https://github.com/dyndynjyxa/aio-coding-hub/commit/478a3ec910ed7a6e3c84fa4fa6f8a017912867a2))
+* **ui:** 建立 shadcn 标准设计系统并完成 UI 层 token 迁移 ([194048f](https://github.com/dyndynjyxa/aio-coding-hub/commit/194048f98ecdfa982d284c303ad14ef2a0bdb0d2))
+
+
+### Bug Fixes
+
+* **cli-manager:** 优化Hooks配置保存及编辑器行为 ([478a3ec](https://github.com/dyndynjyxa/aio-coding-hub/commit/478a3ec910ed7a6e3c84fa4fa6f8a017912867a2))
+* **provider:** 修正anthropic模型名称版本号 ([c668b7a](https://github.com/dyndynjyxa/aio-coding-hub/commit/c668b7a29c37081c117a06d51d38b3f0bcef68e1))
+* **tauri-infra-cli_proxy:** 防止Codex代理启用时部分写入配置 ([478a3ec](https://github.com/dyndynjyxa/aio-coding-hub/commit/478a3ec910ed7a6e3c84fa4fa6f8a017912867a2))
+
 ## [0.40.4](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.40.3...aio-coding-hub-v0.40.4) (2026-04-28)
 
 
