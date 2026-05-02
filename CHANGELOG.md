@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.6](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.40.5...aio-coding-hub-v0.40.6) (2026-05-02)
+
+
+### Features
+
+* **usage:** 新增供应商可用率时间线功能模块 ([8ab09b1](https://github.com/dyndynjyxa/aio-coding-hub/commit/8ab09b1356d069dcbb7002c53a01038aa5a5a216))
+
 ## [0.40.5](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.40.4...aio-coding-hub-v0.40.5) (2026-05-01)
 
 
