@@ -135,4 +135,39 @@ describe("components/home/RealtimeTraceCards", () => {
 
     vi.useRealTimers();
   });
+
+  it("renders Claude model mapping when a live trace has one", () => {
+    vi.useFakeTimers();
+    const baseTime = 1_700_000_000_000;
+    vi.setSystemTime(baseTime);
+
+    render(
+      <RealtimeTraceCards
+        folderLookupBySessionKey={new Map()}
+        traces={
+          [
+            traceBase({
+              requested_model: "claude-sonnet",
+              first_seen_ms: baseTime - 1000,
+              last_seen_ms: baseTime - 1000,
+              claude_model_mapping: {
+                requestedModel: "claude-sonnet",
+                effectiveModel: "gpt-5.4",
+                mappingKind: "sonnet",
+                providerId: 1,
+                providerName: "Provider A",
+                applied: true,
+              },
+            }),
+          ] as any
+        }
+        formatUnixSeconds={(ts) => String(ts)}
+        showCustomTooltip={false}
+      />
+    );
+
+    expect(screen.getByText("claude-sonnet → gpt-5.4")).toBeInTheDocument();
+
+    vi.useRealTimers();
+  });
 });

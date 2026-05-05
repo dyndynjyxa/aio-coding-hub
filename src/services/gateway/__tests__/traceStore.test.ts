@@ -170,6 +170,154 @@ describe("services/gateway/traceStore", () => {
     vi.useRealTimers();
   });
 
+  it("stores Claude model mapping from attempts and lets completion override it", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+
+    const { ingestTraceAttempt, ingestTraceRequest, useTraceStore } = await importFreshTraceStore();
+    const { result } = renderHook(() => useTraceStore());
+
+    act(() => {
+      ingestTraceAttempt({
+        trace_id: "t-mapping",
+        cli_key: "claude",
+        method: "POST",
+        path: "/v1/messages",
+        query: null,
+        requested_model: "claude-sonnet",
+        attempt_index: 1,
+        provider_id: 1,
+        provider_name: "Provider A",
+        base_url: "https://provider-a.example",
+        outcome: "started",
+        status: null,
+        attempt_started_ms: 0,
+        attempt_duration_ms: 0,
+        claude_model_mapping: {
+          requestedModel: " claude-sonnet ",
+          effectiveModel: " gpt-4.1 ",
+          mappingKind: " sonnet ",
+          providerId: 1,
+          providerName: " Provider A ",
+          applied: true,
+        },
+      });
+    });
+
+    expect(result.current.traces[0]?.claude_model_mapping?.effectiveModel).toBe("gpt-4.1");
+
+    act(() => {
+      ingestTraceAttempt({
+        trace_id: "t-mapping",
+        cli_key: "claude",
+        method: "POST",
+        path: "/v1/messages",
+        query: null,
+        requested_model: "claude-sonnet",
+        attempt_index: 1,
+        provider_id: 1,
+        provider_name: "Provider A",
+        base_url: "https://provider-a.example",
+        outcome: "success",
+        status: 200,
+        attempt_started_ms: 0,
+        attempt_duration_ms: 42,
+      });
+    });
+
+    expect(result.current.traces[0]?.claude_model_mapping?.effectiveModel).toBe("gpt-4.1");
+    expect(result.current.traces[0]?.attempts[0]?.claude_model_mapping?.effectiveModel).toBe(
+      " gpt-4.1 "
+    );
+
+    act(() => {
+      ingestTraceRequest({
+        trace_id: "t-mapping",
+        cli_key: "claude",
+        method: "POST",
+        path: "/v1/messages",
+        query: null,
+        requested_model: "claude-sonnet",
+        status: 200,
+        error_category: null,
+        error_code: null,
+        duration_ms: 50,
+        attempts: [],
+        claude_model_mapping: {
+          requestedModel: "claude-sonnet",
+          effectiveModel: "gpt-5.4",
+          mappingKind: "sonnet",
+          providerId: 2,
+          providerName: "Provider B",
+          applied: true,
+        },
+      });
+    });
+
+    expect(result.current.traces[0]?.claude_model_mapping?.providerId).toBe(2);
+    expect(result.current.traces[0]?.claude_model_mapping?.effectiveModel).toBe("gpt-5.4");
+
+    vi.useRealTimers();
+  });
+
+  it("clears Claude model mapping when completion explicitly has no valid mapping", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+
+    const { ingestTraceAttempt, ingestTraceRequest, useTraceStore } = await importFreshTraceStore();
+    const { result } = renderHook(() => useTraceStore());
+
+    act(() => {
+      ingestTraceAttempt({
+        trace_id: "t-mapping-clear",
+        cli_key: "claude",
+        method: "POST",
+        path: "/v1/messages",
+        query: null,
+        requested_model: "claude-sonnet",
+        attempt_index: 1,
+        provider_id: 1,
+        provider_name: "Provider A",
+        base_url: "https://provider-a.example",
+        outcome: "started",
+        status: null,
+        attempt_started_ms: 0,
+        attempt_duration_ms: 0,
+        claude_model_mapping: {
+          requestedModel: "claude-sonnet",
+          effectiveModel: "gpt-4.1",
+          mappingKind: "sonnet",
+          providerId: 1,
+          providerName: "Provider A",
+          applied: true,
+        },
+      });
+    });
+
+    expect(result.current.traces[0]?.claude_model_mapping?.effectiveModel).toBe("gpt-4.1");
+
+    act(() => {
+      ingestTraceRequest({
+        trace_id: "t-mapping-clear",
+        cli_key: "claude",
+        method: "POST",
+        path: "/v1/messages",
+        query: null,
+        requested_model: "claude-sonnet",
+        status: 200,
+        error_category: null,
+        error_code: null,
+        duration_ms: 50,
+        attempts: [],
+        claude_model_mapping: null,
+      });
+    });
+
+    expect(result.current.traces[0]?.claude_model_mapping).toBeNull();
+
+    vi.useRealTimers();
+  });
+
   it("ingestTraceRequest creates new trace when trace_id not found", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(5000);

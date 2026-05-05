@@ -29,6 +29,7 @@ pub(super) async fn emit_attempt_event_and_log(
         provider_base_url_base,
         provider_index: _,
         session_reuse,
+        claude_model_mapping,
         ..
     } = provider_ctx;
     let AttemptCtx {
@@ -61,6 +62,7 @@ pub(super) async fn emit_attempt_event_and_log(
         circuit_state_after: circuit.state_after,
         circuit_failure_count: circuit.failure_count,
         circuit_failure_threshold: circuit.failure_threshold,
+        claude_model_mapping: claude_model_mapping.cloned(),
     };
 
     let state = ctx.state;

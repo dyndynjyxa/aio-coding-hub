@@ -149,6 +149,7 @@ fn build_error_contexts<'a>(
         provider_index: prepared.provider_index,
         session_reuse: prepared.session_reuse,
         stream_idle_timeout_seconds: prepared.stream_idle_timeout_seconds,
+        claude_model_mapping: prepared.claude_model_mapping.as_ref(),
     };
     (attempt_ctx, provider_ctx)
 }

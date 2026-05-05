@@ -86,6 +86,17 @@ pub(super) struct FailoverAttempt {
     pub(super) circuit_failure_threshold: Option<u32>,
 }
 
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ClaudeModelMapping {
+    pub(super) requested_model: String,
+    pub(super) effective_model: String,
+    pub(super) mapping_kind: String,
+    pub(super) provider_id: i64,
+    pub(super) provider_name: String,
+    pub(super) applied: bool,
+}
+
 #[derive(Debug, Serialize, Clone)]
 struct GatewayRequestEvent {
     trace_id: String,
@@ -108,6 +119,7 @@ struct GatewayRequestEvent {
     cache_creation_input_tokens: Option<i64>,
     cache_creation_5m_input_tokens: Option<i64>,
     cache_creation_1h_input_tokens: Option<i64>,
+    claude_model_mapping: Option<ClaudeModelMapping>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -154,6 +166,7 @@ pub(super) struct GatewayAttemptEvent {
     pub(super) circuit_state_after: Option<&'static str>,
     pub(super) circuit_failure_count: Option<u32>,
     pub(super) circuit_failure_threshold: Option<u32>,
+    pub(super) claude_model_mapping: Option<ClaudeModelMapping>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -246,6 +259,7 @@ pub(super) fn emit_request_event(
     duration_ms: u128,
     ttfb_ms: Option<u128>,
     attempts: Vec<FailoverAttempt>,
+    claude_model_mapping: Option<ClaudeModelMapping>,
     usage: Option<usage::UsageMetrics>,
 ) {
     emit_request_signal(
@@ -284,6 +298,7 @@ pub(super) fn emit_request_event(
         cache_creation_input_tokens: usage.cache_creation_input_tokens,
         cache_creation_5m_input_tokens: usage.cache_creation_5m_input_tokens,
         cache_creation_1h_input_tokens: usage.cache_creation_1h_input_tokens,
+        claude_model_mapping,
     };
 
     gated_emit(app, GATEWAY_REQUEST_EVENT_NAME, payload);
@@ -443,5 +458,92 @@ pub(super) fn emit_circuit_transition(
 
     if let Err(err) = notice::emit(app, notice::build(level, Some(title), lines.join("\n"))) {
         tracing::warn!("failed to emit circuit breaker notice: {}", err);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn sample_mapping() -> ClaudeModelMapping {
+        ClaudeModelMapping {
+            requested_model: "claude-sonnet".to_string(),
+            effective_model: "gpt-5.4".to_string(),
+            mapping_kind: "sonnet".to_string(),
+            provider_id: 7,
+            provider_name: "Provider A".to_string(),
+            applied: true,
+        }
+    }
+
+    #[test]
+    fn attempt_event_serializes_claude_model_mapping() {
+        let payload = GatewayAttemptEvent {
+            trace_id: "trace-1".to_string(),
+            cli_key: "claude".to_string(),
+            session_id: None,
+            method: "POST".to_string(),
+            path: "/v1/messages".to_string(),
+            query: None,
+            requested_model: Some("claude-sonnet".to_string()),
+            attempt_index: 1,
+            provider_id: 7,
+            session_reuse: Some(false),
+            provider_name: "Provider A".to_string(),
+            base_url: "https://provider.example".to_string(),
+            outcome: "started".to_string(),
+            status: None,
+            attempt_started_ms: 10,
+            attempt_duration_ms: 0,
+            circuit_state_before: None,
+            circuit_state_after: None,
+            circuit_failure_count: None,
+            circuit_failure_threshold: None,
+            claude_model_mapping: Some(sample_mapping()),
+        };
+
+        let value = serde_json::to_value(payload).expect("serializable attempt event");
+        assert_eq!(
+            value.get("claude_model_mapping"),
+            Some(&json!({
+                "requestedModel": "claude-sonnet",
+                "effectiveModel": "gpt-5.4",
+                "mappingKind": "sonnet",
+                "providerId": 7,
+                "providerName": "Provider A",
+                "applied": true,
+            }))
+        );
+    }
+
+    #[test]
+    fn request_event_serializes_empty_claude_model_mapping_as_null() {
+        let payload = GatewayRequestEvent {
+            trace_id: "trace-2".to_string(),
+            cli_key: "claude".to_string(),
+            session_id: None,
+            method: "POST".to_string(),
+            path: "/v1/messages".to_string(),
+            query: None,
+            requested_model: Some("claude-sonnet".to_string()),
+            status: Some(200),
+            error_category: None,
+            error_code: None,
+            duration_ms: 50,
+            ttfb_ms: Some(10),
+            attempts: Vec::new(),
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            cache_read_input_tokens: None,
+            cache_creation_input_tokens: None,
+            cache_creation_5m_input_tokens: None,
+            cache_creation_1h_input_tokens: None,
+            claude_model_mapping: None,
+        };
+
+        let value = serde_json::to_value(payload).expect("serializable request event");
+        assert_eq!(value.get("claude_model_mapping"), Some(&json!(null)));
     }
 }

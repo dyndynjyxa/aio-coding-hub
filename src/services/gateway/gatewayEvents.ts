@@ -5,6 +5,9 @@ import { logToConsole, shouldLogToConsole } from "../consoleLog";
 import { subscribeGatewayEvent } from "./gatewayEventBus";
 import { ingestTraceAttempt, ingestTraceRequest, ingestTraceStart } from "./traceStore";
 import { ingestCacheAnomalyRequest, ingestCacheAnomalyRequestStart } from "./cacheAnomalyMonitor";
+import type { ClaudeModelMapping } from "./claudeModelMapping";
+
+export type { ClaudeModelMapping } from "./claudeModelMapping";
 
 export type GatewayAttempt = {
   provider_id: number;
@@ -35,6 +38,7 @@ export type GatewayRequestEvent = {
   cache_creation_input_tokens?: number | null;
   cache_creation_5m_input_tokens?: number | null;
   cache_creation_1h_input_tokens?: number | null;
+  claude_model_mapping?: ClaudeModelMapping | null;
 };
 
 export type GatewayRequestStartEvent = {
@@ -78,6 +82,7 @@ export type GatewayAttemptEvent = {
   circuit_state_after?: string | null;
   circuit_failure_count?: number | null;
   circuit_failure_threshold?: number | null;
+  claude_model_mapping?: ClaudeModelMapping | null;
 };
 
 export type GatewayLogEvent = {
@@ -197,6 +202,24 @@ function isNullableBoolean(value: unknown): value is boolean | null | undefined 
   return isNullish(value) || isBoolean(value);
 }
 
+function isClaudeModelMapping(value: unknown): value is ClaudeModelMapping {
+  if (!isRecord(value)) return false;
+  return (
+    isString(value.requestedModel) &&
+    isString(value.effectiveModel) &&
+    isString(value.mappingKind) &&
+    isNumber(value.providerId) &&
+    isString(value.providerName) &&
+    isBoolean(value.applied)
+  );
+}
+
+function isNullableClaudeModelMapping(
+  value: unknown
+): value is ClaudeModelMapping | null | undefined {
+  return isNullish(value) || isClaudeModelMapping(value);
+}
+
 function isGatewayAttempt(payload: unknown): payload is GatewayAttempt {
   if (!isRecord(payload)) return false;
   return (
@@ -258,7 +281,8 @@ function isGatewayAttemptEvent(payload: unknown): payload is GatewayAttemptEvent
     isNullableString(payload.circuit_state_before) &&
     isNullableString(payload.circuit_state_after) &&
     isNullableNumber(payload.circuit_failure_count) &&
-    isNullableNumber(payload.circuit_failure_threshold)
+    isNullableNumber(payload.circuit_failure_threshold) &&
+    isNullableClaudeModelMapping(payload.claude_model_mapping)
   );
 }
 
@@ -286,7 +310,8 @@ function isGatewayRequestEvent(payload: unknown): payload is GatewayRequestEvent
     isNullableNumber(payload.cache_read_input_tokens) &&
     isNullableNumber(payload.cache_creation_input_tokens) &&
     isNullableNumber(payload.cache_creation_5m_input_tokens) &&
-    isNullableNumber(payload.cache_creation_1h_input_tokens)
+    isNullableNumber(payload.cache_creation_1h_input_tokens) &&
+    isNullableClaudeModelMapping(payload.claude_model_mapping)
   );
 }
 

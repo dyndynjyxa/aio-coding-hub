@@ -1,6 +1,7 @@
 //! Usage: Claude model mapping application for a provider attempt.
 
 use super::context::{CommonCtx, ProviderCtx};
+use crate::gateway::events::ClaudeModelMapping;
 use crate::gateway::proxy::model_rewrite::{
     replace_model_in_body_json, replace_model_in_path, replace_model_in_query,
 };
@@ -23,14 +24,12 @@ pub(super) fn apply_if_needed(
     requested_model_location: Option<RequestedModelLocation>,
     introspection_json: Option<&serde_json::Value>,
     upstream: UpstreamRequestMut<'_>,
-) {
+) -> Option<ClaudeModelMapping> {
     if ctx.cli_key != "claude" || !provider.claude_models.has_any() {
-        return;
+        return None;
     }
 
-    let Some(requested_model) = ctx.requested_model.as_deref() else {
-        return;
-    };
+    let requested_model = ctx.requested_model.as_deref()?;
 
     let has_thinking = introspection_json
         .and_then(|v| v.get("thinking"))
@@ -41,7 +40,7 @@ pub(super) fn apply_if_needed(
 
     let effective_model = provider.get_effective_claude_model(requested_model, has_thinking);
     if effective_model == requested_model {
-        return;
+        return None;
     }
 
     let UpstreamRequestMut {
@@ -125,17 +124,26 @@ pub(super) fn apply_if_needed(
         ..
     } = provider_ctx;
 
+    let mapping = ClaudeModelMapping {
+        requested_model: requested_model.to_string(),
+        effective_model,
+        mapping_kind: kind.to_string(),
+        provider_id,
+        provider_name: provider_name_base.clone(),
+        applied,
+    };
+
     let mut settings = ctx.special_settings.lock_or_recover();
     settings.push(serde_json::json!({
         "type": "claude_model_mapping",
         "scope": "attempt",
         "hit": true,
-        "applied": applied,
-        "providerId": provider_id,
-        "providerName": provider_name_base.clone(),
-        "requestedModel": requested_model,
-        "effectiveModel": effective_model,
-        "mappingKind": kind,
+        "applied": mapping.applied,
+        "providerId": mapping.provider_id,
+        "providerName": &mapping.provider_name,
+        "requestedModel": &mapping.requested_model,
+        "effectiveModel": &mapping.effective_model,
+        "mappingKind": &mapping.mapping_kind,
         "hasThinking": has_thinking,
         "location": match location {
             RequestedModelLocation::BodyJson => "body",
@@ -143,4 +151,6 @@ pub(super) fn apply_if_needed(
             RequestedModelLocation::Path => "path",
         },
     }));
+
+    Some(mapping)
 }

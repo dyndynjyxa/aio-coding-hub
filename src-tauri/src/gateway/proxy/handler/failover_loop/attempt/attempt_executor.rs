@@ -215,6 +215,7 @@ fn build_provider_ctx(prepared: &PreparedProvider) -> ProviderCtx<'_> {
         provider_index: prepared.provider_index,
         session_reuse: prepared.session_reuse,
         stream_idle_timeout_seconds: prepared.stream_idle_timeout_seconds,
+        claude_model_mapping: prepared.claude_model_mapping.as_ref(),
     }
 }
 
@@ -278,6 +279,7 @@ fn emit_started_event(
                 circuit_state_after: None,
                 circuit_failure_count: Some(circuit_before.failure_count),
                 circuit_failure_threshold: Some(circuit_before.failure_threshold),
+                claude_model_mapping: prepared.claude_model_mapping.clone(),
             },
         );
     }

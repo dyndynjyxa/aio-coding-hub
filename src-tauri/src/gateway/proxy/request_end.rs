@@ -3,8 +3,9 @@
 use super::logging::enqueue_request_log_with_backpressure;
 use super::status_override;
 use super::{spawn_enqueue_request_log_with_backpressure, RequestLogEnqueueArgs};
-use crate::gateway::events::{emit_request_event, FailoverAttempt};
+use crate::gateway::events::{emit_request_event, ClaudeModelMapping, FailoverAttempt};
 use crate::{db, request_logs};
+use serde_json::Value;
 
 pub(super) struct RequestEndDeps<'a> {
     pub(super) app: &'a tauri::AppHandle,
@@ -256,6 +257,86 @@ fn build_provider_chain_json(attempts: &[FailoverAttempt]) -> Option<String> {
 fn non_empty_text(value: &str) -> Option<&str> {
     let trimmed = value.trim();
     (!trimmed.is_empty()).then_some(trimmed)
+}
+
+fn parse_claude_model_mapping_setting(value: &Value) -> Option<ClaudeModelMapping> {
+    let obj = value.as_object()?;
+    if obj.get("type").and_then(Value::as_str) != Some("claude_model_mapping") {
+        return None;
+    }
+
+    let requested_model = obj
+        .get("requestedModel")
+        .and_then(Value::as_str)
+        .and_then(non_empty_text)?;
+    let effective_model = obj
+        .get("effectiveModel")
+        .and_then(Value::as_str)
+        .and_then(non_empty_text)?;
+    let mapping_kind = obj
+        .get("mappingKind")
+        .and_then(Value::as_str)
+        .and_then(non_empty_text)?;
+    let provider_name = obj
+        .get("providerName")
+        .and_then(Value::as_str)
+        .and_then(non_empty_text)?;
+    let provider_id = obj.get("providerId").and_then(Value::as_i64)?;
+    let applied = obj.get("applied").and_then(Value::as_bool).unwrap_or(false);
+
+    Some(ClaudeModelMapping {
+        requested_model: requested_model.to_string(),
+        effective_model: effective_model.to_string(),
+        mapping_kind: mapping_kind.to_string(),
+        provider_id,
+        provider_name: provider_name.to_string(),
+        applied,
+    })
+}
+
+fn select_claude_model_mapping(
+    special_settings_json: Option<&str>,
+    attempts: &[FailoverAttempt],
+) -> Option<ClaudeModelMapping> {
+    let raw = special_settings_json?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+
+    let parsed: Value = serde_json::from_str(raw).ok()?;
+    let mut mappings: Vec<ClaudeModelMapping> = match &parsed {
+        Value::Array(items) => items
+            .iter()
+            .filter_map(parse_claude_model_mapping_setting)
+            .collect(),
+        Value::Object(_) => parse_claude_model_mapping_setting(&parsed)
+            .into_iter()
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    mappings
+        .retain(|mapping| mapping.applied && mapping.requested_model != mapping.effective_model);
+    if mappings.is_empty() {
+        return None;
+    }
+
+    if let Some(success_provider_id) = attempts
+        .iter()
+        .rev()
+        .find(|attempt| attempt.outcome == "success")
+        .map(|attempt| attempt.provider_id)
+    {
+        if let Some(mapping) = mappings
+            .iter()
+            .rev()
+            .find(|mapping| mapping.provider_id == success_provider_id)
+        {
+            return Some(mapping.clone());
+        }
+    }
+
+    mappings.pop()
 }
 
 fn select_error_observation_attempt(attempts: &[FailoverAttempt]) -> Option<&FailoverAttempt> {
@@ -574,6 +655,8 @@ impl RequestLogEnqueueArgs {
         attempts: Vec<FailoverAttempt>,
         usage_metrics: Option<crate::usage::UsageMetrics>,
     ) {
+        let claude_model_mapping =
+            select_claude_model_mapping(self.special_settings_json.as_deref(), &attempts);
         emit_request_event(
             app,
             self.trace_id.clone(),
@@ -589,6 +672,7 @@ impl RequestLogEnqueueArgs {
             self.duration_ms,
             event_ttfb_ms,
             attempts,
+            claude_model_mapping,
             usage_metrics,
         );
     }
@@ -865,6 +949,80 @@ mod tests {
         assert!(log_args.usage_metrics.is_none());
         assert_eq!(cloned_attempts.len(), 1);
         assert_eq!(cloned_attempts[0].provider_id, 7);
+    }
+
+    #[test]
+    fn select_claude_model_mapping_prefers_success_provider() {
+        let mut failed_attempt = sample_attempt();
+        failed_attempt.provider_id = 1;
+        failed_attempt.outcome = "failed".to_string();
+        failed_attempt.status = Some(500);
+
+        let mut success_attempt = sample_attempt();
+        success_attempt.provider_id = 2;
+        success_attempt.provider_name = "Provider B".to_string();
+
+        let special_settings_json = json!([
+            {
+                "type": "claude_model_mapping",
+                "scope": "attempt",
+                "applied": true,
+                "providerId": 1,
+                "providerName": "Provider A",
+                "requestedModel": "claude-sonnet",
+                "effectiveModel": "gpt-4.1",
+                "mappingKind": "sonnet"
+            },
+            {
+                "type": "claude_model_mapping",
+                "scope": "attempt",
+                "applied": true,
+                "providerId": 2,
+                "providerName": "Provider B",
+                "requestedModel": "claude-sonnet",
+                "effectiveModel": "gpt-5.4",
+                "mappingKind": "sonnet"
+            }
+        ])
+        .to_string();
+
+        let mapping = select_claude_model_mapping(
+            Some(special_settings_json.as_str()),
+            &[failed_attempt, success_attempt],
+        )
+        .expect("selected mapping");
+
+        assert_eq!(mapping.provider_id, 2);
+        assert_eq!(mapping.effective_model, "gpt-5.4");
+    }
+
+    #[test]
+    fn select_claude_model_mapping_ignores_unapplied_or_identity_mapping() {
+        let special_settings_json = json!([
+            {
+                "type": "claude_model_mapping",
+                "scope": "attempt",
+                "applied": false,
+                "providerId": 1,
+                "providerName": "Provider A",
+                "requestedModel": "claude-sonnet",
+                "effectiveModel": "gpt-5.4",
+                "mappingKind": "sonnet"
+            },
+            {
+                "type": "claude_model_mapping",
+                "scope": "attempt",
+                "applied": true,
+                "providerId": 2,
+                "providerName": "Provider B",
+                "requestedModel": "claude-sonnet",
+                "effectiveModel": "claude-sonnet",
+                "mappingKind": "sonnet"
+            }
+        ])
+        .to_string();
+
+        assert!(select_claude_model_mapping(Some(special_settings_json.as_str()), &[]).is_none());
     }
 
     #[test]

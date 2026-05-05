@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { normalizeClaudeModelMapping, type ClaudeModelMapping } from "./claudeModelMapping";
 import type {
   GatewayAttemptEvent,
   GatewayRequestEvent,
@@ -19,6 +20,7 @@ export type TraceSession = {
   path: string;
   query: string | null;
   requested_model?: string | null;
+  claude_model_mapping?: ClaudeModelMapping | null;
   first_seen_ms: number;
   last_seen_ms: number;
   attempts: GatewayAttemptEvent[];
@@ -75,10 +77,19 @@ function upsertAttempt(
   attempts: GatewayAttemptEvent[],
   payload: GatewayAttemptEvent
 ): GatewayAttemptEvent[] {
+  const existing = attempts.find((a) => a.attempt_index === payload.attempt_index);
+  const mergedPayload =
+    existing?.claude_model_mapping && !payload.claude_model_mapping
+      ? { ...payload, claude_model_mapping: existing.claude_model_mapping }
+      : payload;
   const next = attempts.filter((a) => a.attempt_index !== payload.attempt_index);
-  next.push(payload);
+  next.push(mergedPayload);
   next.sort((a, b) => a.attempt_index - b.attempt_index);
   return next.slice(-MAX_ATTEMPTS_PER_TRACE);
+}
+
+function hasClaudeModelMappingField(payload: GatewayRequestEvent): boolean {
+  return Object.prototype.hasOwnProperty.call(payload, "claude_model_mapping");
 }
 
 /**
@@ -159,6 +170,7 @@ export function ingestTraceStart(payload: GatewayRequestStartEvent) {
         path: payload.path,
         query: payload.query ?? null,
         requested_model: nextRequestedModel,
+        claude_model_mapping: shouldReset ? null : (existing.claude_model_mapping ?? null),
         last_seen_ms: now,
         ...(shouldReset ? { first_seen_ms: now, attempts: [], summary: undefined } : {}),
       };
@@ -179,12 +191,17 @@ export function ingestTraceAttempt(payload: GatewayAttemptEvent) {
       path: payload.path,
       query: payload.query ?? null,
       requested_model: payload.requested_model ?? null,
+      claude_model_mapping: normalizeClaudeModelMapping(payload.claude_model_mapping),
       first_seen_ms: now,
       last_seen_ms: now,
       attempts: [payload],
     }),
     (existing, now) => {
       const nextRequestedModel = payload.requested_model ?? existing.requested_model ?? null;
+      const nextClaudeModelMapping =
+        normalizeClaudeModelMapping(payload.claude_model_mapping) ??
+        existing.claude_model_mapping ??
+        null;
       return {
         ...existing,
         cli_key: payload.cli_key,
@@ -193,6 +210,7 @@ export function ingestTraceAttempt(payload: GatewayAttemptEvent) {
         path: payload.path,
         query: payload.query ?? null,
         requested_model: nextRequestedModel,
+        claude_model_mapping: nextClaudeModelMapping,
         last_seen_ms: now,
         attempts: upsertAttempt(existing.attempts, payload),
       };
@@ -213,6 +231,7 @@ export function ingestTraceRequest(payload: GatewayRequestEvent) {
       path: payload.path,
       query: payload.query ?? null,
       requested_model: payload.requested_model ?? null,
+      claude_model_mapping: normalizeClaudeModelMapping(payload.claude_model_mapping),
       first_seen_ms: now,
       last_seen_ms: now,
       attempts: [],
@@ -220,6 +239,12 @@ export function ingestTraceRequest(payload: GatewayRequestEvent) {
     }),
     (existing, now) => {
       const nextRequestedModel = payload.requested_model ?? existing.requested_model ?? null;
+      const normalizedClaudeModelMapping = normalizeClaudeModelMapping(
+        payload.claude_model_mapping
+      );
+      const nextClaudeModelMapping = hasClaudeModelMappingField(payload)
+        ? normalizedClaudeModelMapping
+        : (normalizedClaudeModelMapping ?? existing.claude_model_mapping ?? null);
       return {
         ...existing,
         cli_key: payload.cli_key,
@@ -228,6 +253,7 @@ export function ingestTraceRequest(payload: GatewayRequestEvent) {
         path: payload.path,
         query: payload.query ?? null,
         requested_model: nextRequestedModel,
+        claude_model_mapping: nextClaudeModelMapping,
         last_seen_ms: now,
         summary: payload,
       };

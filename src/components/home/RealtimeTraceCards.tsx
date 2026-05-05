@@ -23,6 +23,7 @@ import {
   computeEffectiveInputTokens,
   computeStatusBadge,
   FolderBadge,
+  formatClaudeModelMappingText,
   FreeBadge,
   getErrorCodeLabel,
   SessionReuseBadge,
@@ -227,10 +228,10 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
             : `${attemptRoute.startProvider} → ${attemptRoute.endProvider}${extra}`;
         })();
 
-        const modelText =
-          trace.requested_model && trace.requested_model.trim()
-            ? trace.requested_model.trim()
-            : "未知";
+        const modelText = formatClaudeModelMappingText(
+          trace.requested_model,
+          trace.claude_model_mapping
+        );
         const cliLabel = cliShortLabel(trace.cli_key);
         const cliTone = cliBadgeToneStatic(trace.cli_key);
 

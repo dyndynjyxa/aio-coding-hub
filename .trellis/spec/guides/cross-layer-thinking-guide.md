@@ -460,6 +460,47 @@ Realtime-event checklist:
 - Add simple event-rate instrumentation so regression shows up before UI jank
   becomes a user report.
 
+### Mistake 18b: Splitting Realtime and Historical Observability Contracts
+
+**Bad**: A gateway transformation is written to `special_settings_json` for
+history but omitted from realtime events, or added to realtime events but parsed
+differently from historical request logs. Recent-agent cards then show one model
+while request-log rows show another.
+
+**Good**: Treat a user-visible gateway transformation as one contract with two
+transport paths: realtime events for freshness, `request_logs` for history.
+
+Claude model mapping contract:
+- Backend owner:
+  `src-tauri/src/gateway/proxy/handler/failover_loop/prepare/claude_model_mapping.rs`.
+  `apply_if_needed` must both append a `special_settings_json` item and return
+  `ClaudeModelMapping`.
+- Realtime event payload owner: `src-tauri/src/gateway/events.rs`.
+  `GatewayAttemptEvent.claude_model_mapping` carries the attempted provider's
+  mapping as soon as the attempt starts. `GatewayRequestEvent.claude_model_mapping`
+  carries the final mapping on completion.
+- Serialized mapping fields are:
+  `requestedModel`, `effectiveModel`, `mappingKind`, `providerId`,
+  `providerName`, and `applied`. The event field itself is
+  `claude_model_mapping`.
+- Historical source: `request_logs.special_settings_json` item with
+  `type: "claude_model_mapping"`. No database column is required for this display.
+- Display rule: show `requestedModel -> effectiveModel` only when
+  `applied === true`, both model names are non-empty, and the names differ.
+  Invalid, unapplied, or identity mappings fall back to the plain requested model.
+- Final selection rule: prefer the mapping for the successful/final provider;
+  when none matches, use the last valid applied mapping.
+- Frontend owners:
+  `src/services/gateway/gatewayEvents.ts`,
+  `src/services/gateway/traceStore.ts`,
+  and `src/components/home/HomeLogShared.tsx`. Realtime cards and historical
+  request-log cards must share the same normalization and formatting helpers.
+- Required assertions:
+  Rust tests cover attempt-event serialization, request-event null serialization,
+  success-provider selection, and invalid/unapplied filtering. Frontend tests
+  cover event guards, trace-store attempt/completion replacement, historical
+  final-provider selection, and realtime card display.
+
 ### Mistake 19: Assuming One Enable Flag Owns Every Route View
 
 **Bad**: A route has multiple enable flags (`providers.enabled`,

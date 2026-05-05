@@ -4,6 +4,7 @@
 
 use super::provider_checks;
 use super::*;
+use crate::gateway::events::ClaudeModelMapping;
 use crate::gateway::proxy::gemini_oauth::GeminiOAuthResponseMode;
 use std::collections::HashSet;
 
@@ -33,6 +34,7 @@ pub(super) struct PreparedProvider {
     pub(super) circuit_snapshot: crate::circuit_breaker::CircuitSnapshot,
     pub(super) anthropic_stream_requested: bool,
     pub(super) stream_idle_timeout_seconds: Option<u32>,
+    pub(super) claude_model_mapping: Option<ClaudeModelMapping>,
 }
 
 /// Counters accumulated across all providers in the iteration loop.
@@ -271,10 +273,12 @@ pub(super) async fn prepare_provider(
         provider_index,
         session_reuse,
         stream_idle_timeout_seconds: provider.stream_idle_timeout_seconds,
+        claude_model_mapping: None,
     };
 
+    let mut claude_model_mapping = None;
     if should_apply_claude_model_mapping(cx2cc_active, &upstream_forwarded_path) {
-        claude_model_mapping::apply_if_needed(
+        claude_model_mapping = claude_model_mapping::apply_if_needed(
             ctx,
             provider,
             provider_ctx,
@@ -333,6 +337,7 @@ pub(super) async fn prepare_provider(
         circuit_snapshot,
         anthropic_stream_requested,
         stream_idle_timeout_seconds: provider.stream_idle_timeout_seconds,
+        claude_model_mapping,
     }))
 }
 
