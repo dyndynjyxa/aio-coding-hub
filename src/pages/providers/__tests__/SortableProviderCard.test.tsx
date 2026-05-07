@@ -262,6 +262,42 @@ describe("pages/providers/SortableProviderCard", () => {
     });
   });
 
+  it("falls back to window.open when the desktop opener fails", async () => {
+    vi.mocked(tauriOpenUrl).mockRejectedValue(new Error("blocked"));
+    const windowOpen = vi.spyOn(window, "open").mockImplementation(() => null);
+
+    renderCard({ note: "文档 https://example.com/docs?q=1, 备用说明" });
+
+    fireEvent.click(screen.getByRole("link", { name: "https://example.com/docs?q=1" }));
+
+    await waitFor(() => {
+      expect(windowOpen).toHaveBeenCalledWith(
+        "https://example.com/docs?q=1",
+        "_blank",
+        "noopener,noreferrer"
+      );
+    });
+  });
+
+  it("ignores window.open errors after the desktop opener fails", async () => {
+    vi.mocked(tauriOpenUrl).mockRejectedValue(new Error("blocked"));
+    const windowOpen = vi.spyOn(window, "open").mockImplementation(() => {
+      throw new Error("popup blocked");
+    });
+
+    renderCard({ note: "文档 https://example.com/docs?q=1, 备用说明" });
+
+    fireEvent.click(screen.getByRole("link", { name: "https://example.com/docs?q=1" }));
+
+    await waitFor(() => {
+      expect(windowOpen).toHaveBeenCalledWith(
+        "https://example.com/docs?q=1",
+        "_blank",
+        "noopener,noreferrer"
+      );
+    });
+  });
+
   it("renders limit chips", () => {
     renderCard({
       limit_5h_usd: 10,
