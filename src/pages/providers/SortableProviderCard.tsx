@@ -1,4 +1,4 @@
-import { memo, type ReactNode } from "react";
+import { memo, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -13,6 +13,7 @@ import {
   type OAuthLimitsResult,
   type ProviderSummary,
 } from "../../services/providers/providers";
+import { openDesktopUrl } from "../../services/desktop/opener";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Switch } from "../../ui/Switch";
@@ -50,6 +51,22 @@ function trimTrailingUrlPunctuation(url: string) {
   return url.replace(/[.,!?;:，。；：]+$/u, "");
 }
 
+async function openProviderNoteUrl(url: string) {
+  try {
+    await openDesktopUrl(url);
+  } catch {
+    try {
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch {}
+  }
+}
+
+function handleProviderNoteUrlClick(event: ReactMouseEvent<HTMLAnchorElement>, url: string) {
+  event.preventDefault();
+  event.stopPropagation();
+  void openProviderNoteUrl(url);
+}
+
 function providerTagClassName(tag: string) {
   if (tag === FREE_TAG) {
     return "shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300";
@@ -77,6 +94,7 @@ function renderProviderNote(note: string) {
         href={normalizedUrl}
         target="_blank"
         rel="noopener noreferrer"
+        onClick={(event) => handleProviderNoteUrlClick(event, normalizedUrl)}
         className="text-sky-600 underline underline-offset-2 transition hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300"
       >
         {normalizedUrl}

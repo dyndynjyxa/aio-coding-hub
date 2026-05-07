@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { tauriOpenUrl } from "../../../test/mocks/tauri";
 import { SortableProviderCard, type SortableProviderCardProps } from "../SortableProviderCard";
 import {
   providerOAuthFetchLimits,
@@ -247,6 +248,18 @@ describe("pages/providers/SortableProviderCard", () => {
     const link = screen.getByRole("link", { name: "https://example.com/docs?q=1" });
     expect(link).toBeInTheDocument();
     expect(link).toHaveAttribute("href", "https://example.com/docs?q=1");
+  });
+
+  it("opens http links in note through the desktop opener", async () => {
+    vi.mocked(tauriOpenUrl).mockResolvedValue(undefined as never);
+
+    renderCard({ note: "文档 https://example.com/docs?q=1, 备用说明" });
+
+    fireEvent.click(screen.getByRole("link", { name: "https://example.com/docs?q=1" }));
+
+    await waitFor(() => {
+      expect(tauriOpenUrl).toHaveBeenCalledWith("https://example.com/docs?q=1");
+    });
   });
 
   it("renders limit chips", () => {
