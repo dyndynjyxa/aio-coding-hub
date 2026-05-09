@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.7](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.40.6...aio-coding-hub-v0.40.7) (2026-05-09)
+
+
+### Features
+
+* 展示 Claude 模型映射 ([#236](https://github.com/dyndynjyxa/aio-coding-hub/issues/236)) ([5554b46](https://github.com/dyndynjyxa/aio-coding-hub/commit/5554b468583f5fd287d9b4c31ea40cdfeb5ec36c))
+
 ## [0.40.6](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.40.5...aio-coding-hub-v0.40.6) (2026-05-02)
 
 
