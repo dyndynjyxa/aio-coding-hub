@@ -85,11 +85,6 @@ const SUMMARY_METRIC_ACCENT_CLASS: Record<SummaryMetricAccent, string> = {
   slate: "bg-slate-400 dark:bg-slate-500",
 };
 
-function tokenShare(row: UsageLeaderboardRow, summary: UsageSummary | null) {
-  if (!summary || summary.io_total_tokens <= 0) return 0;
-  return row.io_total_tokens / summary.io_total_tokens;
-}
-
 function successRate(row: UsageLeaderboardRow) {
   if (row.requests_total <= 0) return NaN;
   return row.requests_success / row.requests_total;
@@ -428,22 +423,14 @@ function selectProviderRows(
   });
 }
 
-function rowTokenBreakdown(row: UsageLeaderboardRow) {
-  return [
-    formatTokenValue(row.total_tokens),
-    formatTokenValue(Math.max(0, row.total_tokens - row.io_total_tokens)),
-    formatPercent(
-      computeCacheHitRate(
-        row.input_tokens,
-        row.cache_creation_input_tokens,
-        row.cache_read_input_tokens
-      )
-    ),
-  ];
-}
-
-function rowInputOutputTokenBreakdown(row: UsageLeaderboardRow, summary: UsageSummary | null) {
-  return [formatTokenValue(row.io_total_tokens), formatPercent(tokenShare(row, summary))];
+function rowCacheHitRate(row: UsageLeaderboardRow) {
+  return formatPercent(
+    computeCacheHitRate(
+      row.input_tokens,
+      row.cache_creation_input_tokens,
+      row.cache_read_input_tokens
+    )
+  );
 }
 
 function TableHeaderLabel({ label, note }: { label: string; note?: string }) {
@@ -452,23 +439,6 @@ function TableHeaderLabel({ label, note }: { label: string; note?: string }) {
       <span className={TABLE_TH_MAIN_CLASS}>{label}</span>
       {note ? <span className={TABLE_TH_NOTE_CLASS}>（{note}）</span> : null}
     </div>
-  );
-}
-
-function TokenBreakdown({ parts }: { parts: string[] }) {
-  return (
-    <span aria-label={parts.join("/")} className="inline-flex items-baseline gap-0.5 tabular-nums">
-      {parts.map((part, index) => (
-        <span key={`${part}-${index}`} className="inline-flex items-baseline gap-0.5">
-          {index > 0 ? (
-            <span className="text-slate-400 dark:text-slate-500" aria-hidden="true">
-              /
-            </span>
-          ) : null}
-          <span>{part}</span>
-        </span>
-      ))}
-    </span>
   );
 }
 
@@ -554,10 +524,13 @@ function ProviderUsageSkeleton() {
         <div className="h-4 w-28 rounded bg-slate-200 dark:bg-slate-700" />
       </td>
       <td className={TABLE_MONO_TD_CLASS}>
-        <div className="h-3 w-40 rounded bg-slate-100 dark:bg-slate-600" />
+        <div className="h-3 w-16 rounded bg-slate-100 dark:bg-slate-600" />
       </td>
       <td className={TABLE_MONO_TD_CLASS}>
         <div className="h-3 w-14 rounded bg-slate-100 dark:bg-slate-600" />
+      </td>
+      <td className={TABLE_MONO_TD_CLASS}>
+        <div className="h-3 w-12 rounded bg-slate-100 dark:bg-slate-600" />
       </td>
       <td className={TABLE_MONO_TD_CLASS}>
         <div className="h-3 w-12 rounded bg-slate-100 dark:bg-slate-600" />
@@ -652,10 +625,13 @@ export function HomeTodayProviderUsageOverview({
                     <TableHeaderLabel label="供应商" note="前 3 个" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
-                    <TableHeaderLabel label="输入+输出 Token" />
+                    <TableHeaderLabel label="总Token" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
-                    <TableHeaderLabel label="缓存情况" note="含缓存/缓存/命中率" />
+                    <TableHeaderLabel label="缓存命中率" />
+                  </th>
+                  <th scope="col" className={TABLE_TH_CLASS}>
+                    <TableHeaderLabel label="输入+输出Token" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
                     总花费
@@ -686,10 +662,13 @@ export function HomeTodayProviderUsageOverview({
                     <TableHeaderLabel label="供应商" note="前 3 个" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
-                    <TableHeaderLabel label="输入+输出 Token" />
+                    <TableHeaderLabel label="总Token" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
-                    <TableHeaderLabel label="缓存情况" note="含缓存/缓存/命中率" />
+                    <TableHeaderLabel label="缓存命中率" />
+                  </th>
+                  <th scope="col" className={TABLE_TH_CLASS}>
+                    <TableHeaderLabel label="输入+输出Token" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
                     总花费
@@ -724,18 +703,13 @@ export function HomeTodayProviderUsageOverview({
                       </div>
                     </td>
                     <td className={TABLE_MONO_TD_CLASS}>
-                      <TokenBreakdown
-                        parts={
-                          isSynthetic
-                            ? ["—", "—"]
-                            : rowInputOutputTokenBreakdown(row, model.summary)
-                        }
-                      />
+                      {isSynthetic ? "—" : formatTokenValue(row.total_tokens)}
                     </td>
                     <td className={TABLE_MONO_TD_CLASS}>
-                      <TokenBreakdown
-                        parts={isSynthetic ? ["—", "—", "—"] : rowTokenBreakdown(row)}
-                      />
+                      {isSynthetic ? "—" : rowCacheHitRate(row)}
+                    </td>
+                    <td className={TABLE_MONO_TD_CLASS}>
+                      {isSynthetic ? "—" : formatTokenValue(row.io_total_tokens)}
                     </td>
                     <td className={TABLE_MONO_TD_CLASS}>
                       {isSynthetic ? "—" : formatUsdCompact(row.cost_usd)}

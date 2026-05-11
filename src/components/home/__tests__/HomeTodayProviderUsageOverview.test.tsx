@@ -227,6 +227,12 @@ function mockDataModel(overrides: Partial<ReturnType<typeof useHomeTokenCostData
   } as ReturnType<typeof useHomeTokenCostDataModel>);
 }
 
+function rowCellTexts(row: HTMLElement) {
+  return within(row)
+    .getAllByRole("cell")
+    .map((cell) => cell.textContent?.trim() ?? "");
+}
+
 describe("components/home/HomeTodayProviderUsageOverview", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -265,7 +271,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
 
     const totalWithCacheCard = screen.getByText("含缓存总 Token").parentElement;
     const inputOutputTokenCard = screen.getAllByText("输入+输出 Token")[0]?.parentElement;
-    const cacheHitRateCard = screen.getByText("缓存命中率").parentElement;
+    const cacheHitRateCard = screen.getAllByText("缓存命中率")[0]?.parentElement;
     expect(totalWithCacheCard).toBeTruthy();
     expect(inputOutputTokenCard).toBeTruthy();
     expect(cacheHitRateCard).toBeTruthy();
@@ -277,18 +283,30 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(screen.getByText("今日花费")).toBeInTheDocument();
     expect(screen.getByText("$2.21")).toBeInTheDocument();
     const providerHeader = screen.getByText("供应商").closest("th");
+    const usageTable = screen.getByRole("table", { name: "今日供应商用量" });
+    const headerTexts = within(usageTable)
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent?.trim() ?? "");
+    const totalTokenHeader = screen.getByRole("columnheader", { name: "总Token" });
+    const cacheHitRateHeader = screen.getByRole("columnheader", { name: "缓存命中率" });
     const inputOutputTokenHeader = screen.getByRole("columnheader", {
-      name: /输入\+输出 Token/,
+      name: "输入+输出Token",
     });
-    const cacheHeader = screen.getByText("缓存情况").closest("th");
     expect(providerHeader).toBeTruthy();
+    expect(headerTexts).toEqual([
+      "供应商（前 3 个）",
+      "总Token",
+      "缓存命中率",
+      "输入+输出Token",
+      "总花费",
+      "成功率",
+    ]);
+    expect(totalTokenHeader).toBeTruthy();
+    expect(cacheHitRateHeader).toBeTruthy();
     expect(inputOutputTokenHeader).toBeTruthy();
-    expect(cacheHeader).toBeTruthy();
     expect(within(providerHeader as HTMLElement).getByText("（前 3 个）")).toBeInTheDocument();
-    expect(
-      within(cacheHeader as HTMLElement).getByText("（含缓存/缓存/命中率）")
-    ).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "成功率" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: /缓存情况/ })).not.toBeInTheDocument();
     expect(screen.queryByText("Token 占比")).not.toBeInTheDocument();
 
     const geminiRow = screen.getByText("Gemini Mirror").closest("tr");
@@ -301,15 +319,33 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(screen.queryByText("Mistral Edge")).not.toBeInTheDocument();
     expect(screen.queryByText("Local Sandbox")).not.toBeInTheDocument();
 
-    expect(within(geminiRow as HTMLElement).getByLabelText("8.0K/40.0%")).toBeInTheDocument();
-    expect(within(geminiRow as HTMLElement).getByLabelText("10.2K/2.2K/20.9%")).toBeInTheDocument();
+    expect(rowCellTexts(geminiRow as HTMLElement)).toEqual([
+      "Gemini Mirror",
+      "10.2K",
+      "20.9%",
+      "8.0K",
+      "$0.90",
+      "85.7%",
+    ]);
     expect(within(geminiRow as HTMLElement).getByText("$0.90")).toBeInTheDocument();
     expect(within(geminiRow as HTMLElement).getByText("85.7%")).toBeInTheDocument();
     expect(within(claudeRow as HTMLElement).getByText("100.0%")).toBeInTheDocument();
-    expect(within(claudeRow as HTMLElement).getByLabelText("5.0K/25.0%")).toBeInTheDocument();
-    expect(within(claudeRow as HTMLElement).getByLabelText("6.2K/1.2K/16.7%")).toBeInTheDocument();
-    expect(within(openaiRow as HTMLElement).getByLabelText("4.0K/20.0%")).toBeInTheDocument();
-    expect(within(openaiRow as HTMLElement).getByLabelText("5.8K/1.8K/31.6%")).toBeInTheDocument();
+    expect(rowCellTexts(claudeRow as HTMLElement)).toEqual([
+      "Claude Main",
+      "6.2K",
+      "16.7%",
+      "5.0K",
+      "$0.50",
+      "100.0%",
+    ]);
+    expect(rowCellTexts(openaiRow as HTMLElement)).toEqual([
+      "OpenAI Primary",
+      "5.8K",
+      "31.6%",
+      "4.0K",
+      "$0.70",
+      "100.0%",
+    ]);
   });
 
   it("disables polling while the page is hidden", () => {
@@ -381,9 +417,14 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(deepseekRow).toBeTruthy();
     expect(screen.queryByText("OpenAI Primary")).not.toBeInTheDocument();
     expect(within(deepseekRow as HTMLElement).getByLabelText("进行中")).toBeInTheDocument();
-    expect(
-      within(deepseekRow as HTMLElement).getByLabelText("3.5K/1.5K/27.6%")
-    ).toBeInTheDocument();
+    expect(rowCellTexts(deepseekRow as HTMLElement)).toEqual([
+      "DeepSeek Relay",
+      "3.5K",
+      "27.6%",
+      "2.0K",
+      "—",
+      "100.0%",
+    ]);
   });
 
   it("renders a synthetic running row when the provider has no usage row today", () => {
@@ -397,9 +438,14 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(runtimeRow).toBeTruthy();
     expect(screen.queryByText("OpenAI Primary")).not.toBeInTheDocument();
     expect(within(runtimeRow as HTMLElement).getByLabelText("进行中")).toBeInTheDocument();
-    expect(within(runtimeRow as HTMLElement).getByLabelText("—/—")).toBeInTheDocument();
-    expect(within(runtimeRow as HTMLElement).getByLabelText("—/—/—")).toBeInTheDocument();
-    expect(within(runtimeRow as HTMLElement).getAllByText("—").length).toBeGreaterThanOrEqual(2);
+    expect(rowCellTexts(runtimeRow as HTMLElement)).toEqual([
+      "claude/Runtime Fresh",
+      "—",
+      "—",
+      "—",
+      "—",
+      "—",
+    ]);
   });
 
   it("matches a running provider to the prefixed usage row by provider id", () => {
