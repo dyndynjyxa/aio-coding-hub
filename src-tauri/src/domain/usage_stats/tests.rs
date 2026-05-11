@@ -1,6 +1,8 @@
 use super::cache_rate_trend_v1::provider_cache_rate_trend_v1_with_conn;
-use super::leaderboard_v2::leaderboard_v2_with_conn;
-use super::summary::summary_query;
+use super::day_detail::{day_detail_v1_with_conn, UsageDayResolvedFolder};
+use super::folder_options::folder_options_v1_with_conn;
+use super::leaderboard_v2::{leaderboard_v2_folder_filtered_with_conn, leaderboard_v2_with_conn};
+use super::summary::{summary_query, summary_v2_with_conn};
 use super::*;
 use rusqlite::{params, Connection};
 
@@ -34,12 +36,159 @@ fn setup_conn() -> Connection {
 	  cost_usd_femto INTEGER,
 	  usage_json TEXT,
 	  excluded_from_stats INTEGER NOT NULL DEFAULT 0,
+	  session_id TEXT,
 	  created_at INTEGER NOT NULL
 	);
 	"#,
     )
     .expect("create schema");
     conn
+}
+
+fn local_day_key(conn: &Connection, ts: i64) -> String {
+    conn.query_row(
+        "SELECT strftime('%Y-%m-%d', ?1, 'unixepoch', 'localtime')",
+        params![ts],
+        |row| row.get(0),
+    )
+    .expect("query local day key")
+}
+
+fn local_day_start_ts(conn: &Connection, day: &str) -> i64 {
+    conn.query_row(
+        "SELECT CAST(strftime('%s', ?1 || ' 00:00:00', 'utc') AS INTEGER)",
+        params![day],
+        |row| row.get(0),
+    )
+    .expect("query local day start ts")
+}
+
+#[derive(Clone)]
+struct TestUsageLog<'a> {
+    cli_key: &'a str,
+    provider_id: i64,
+    provider_name: &'a str,
+    requested_model: &'a str,
+    status: Option<i64>,
+    error_code: Option<&'a str>,
+    duration_ms: i64,
+    ttfb_ms: Option<i64>,
+    input_tokens: Option<i64>,
+    output_tokens: Option<i64>,
+    total_tokens: Option<i64>,
+    cache_read_input_tokens: Option<i64>,
+    cache_creation_input_tokens: Option<i64>,
+    cost_usd_femto: Option<i64>,
+    session_id: Option<&'a str>,
+    excluded_from_stats: i64,
+    created_at: i64,
+}
+
+fn base_usage_log(created_at: i64) -> TestUsageLog<'static> {
+    TestUsageLog {
+        cli_key: "codex",
+        provider_id: 123,
+        provider_name: "OpenAI",
+        requested_model: "model-test",
+        status: Some(200),
+        error_code: None,
+        duration_ms: 1000,
+        ttfb_ms: Some(100),
+        input_tokens: Some(100),
+        output_tokens: Some(20),
+        total_tokens: None,
+        cache_read_input_tokens: Some(0),
+        cache_creation_input_tokens: Some(0),
+        cost_usd_femto: None,
+        session_id: None,
+        excluded_from_stats: 0,
+        created_at,
+    }
+}
+
+fn insert_usage_log(conn: &Connection, log: TestUsageLog<'_>) {
+    let attempts_json = format!(
+        r#"[{{"provider_id":{},"provider_name":"{}","outcome":"success"}}]"#,
+        log.provider_id, log.provider_name
+    );
+
+    conn.execute(
+        r#"
+INSERT INTO request_logs (
+  cli_key,
+  attempts_json,
+  final_provider_id,
+  requested_model,
+  status,
+  error_code,
+  duration_ms,
+  ttfb_ms,
+  input_tokens,
+  output_tokens,
+  total_tokens,
+  cache_read_input_tokens,
+  cache_creation_input_tokens,
+  cache_creation_5m_input_tokens,
+  cache_creation_1h_input_tokens,
+  cost_usd_femto,
+  usage_json,
+  excluded_from_stats,
+  session_id,
+  created_at
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20);
+        "#,
+        params![
+            log.cli_key,
+            attempts_json,
+            log.provider_id,
+            log.requested_model,
+            log.status,
+            log.error_code,
+            log.duration_ms,
+            log.ttfb_ms,
+            log.input_tokens,
+            log.output_tokens,
+            log.total_tokens,
+            log.cache_read_input_tokens,
+            log.cache_creation_input_tokens,
+            0i64,
+            0i64,
+            log.cost_usd_femto,
+            Option::<String>::None,
+            log.excluded_from_stats,
+            log.session_id,
+            log.created_at
+        ],
+    )
+    .expect("insert usage log");
+}
+
+fn fixture_folder_lookup(keys: &[UsageSessionLookupKey]) -> Vec<UsageResolvedFolder> {
+    let requested: std::collections::HashSet<String> = keys
+        .iter()
+        .map(|key| format!("{}:{}", key.cli_key, key.session_id))
+        .collect();
+    let fixtures = [
+        ("codex", "codex-alpha-1", "alpha", "/work/alpha"),
+        ("codex", "codex-alpha-2", "alpha", "/work/alpha"),
+        ("claude", "claude-alpha-1", "alpha", "/work/alpha"),
+        ("codex", "codex-beta-1", "beta", "/work/beta"),
+    ];
+
+    fixtures
+        .into_iter()
+        .filter(|(cli_key, session_id, _, _)| {
+            requested.contains(&format!("{cli_key}:{session_id}"))
+        })
+        .map(
+            |(cli_key, session_id, folder_name, folder_path)| UsageResolvedFolder {
+                cli_key: cli_key.to_string(),
+                session_id: session_id.to_string(),
+                folder_name: folder_name.to_string(),
+                folder_path: folder_path.to_string(),
+            },
+        )
+        .collect()
 }
 
 #[test]
@@ -614,4 +763,691 @@ INSERT INTO request_logs (
     .expect("filtered cache trend");
     assert_eq!(cache_rows.len(), 1);
     assert_eq!(cache_rows[0].key, "codex:123");
+}
+
+#[test]
+fn v2_day_leaderboard_groups_by_local_day_and_applies_filters() {
+    let conn = setup_conn();
+
+    for (provider_id, provider_name) in [(123, "OpenAI"), (456, "Gemini Upstream")] {
+        conn.execute(
+            "INSERT INTO providers (id, name) VALUES (?1, ?2)",
+            params![provider_id, provider_name],
+        )
+        .expect("insert provider");
+    }
+
+    let day_one_ts = 1_704_108_800i64;
+    let day_two_ts = day_one_ts + 86_400;
+    let end_ts = day_one_ts + 172_800;
+
+    for (
+        cli_key,
+        provider_id,
+        provider_name,
+        requested_model,
+        input_tokens,
+        output_tokens,
+        cache_read_input_tokens,
+        cost_usd_femto,
+        created_at,
+    ) in [
+        (
+            "codex",
+            123,
+            "OpenAI",
+            "gpt-test",
+            100i64,
+            50i64,
+            10i64,
+            1_000_000_000_000_000i64,
+            day_one_ts,
+        ),
+        (
+            "codex",
+            123,
+            "OpenAI",
+            "gpt-test",
+            200i64,
+            40i64,
+            20i64,
+            2_000_000_000_000_000i64,
+            day_one_ts + 3600,
+        ),
+        (
+            "gemini",
+            456,
+            "Gemini Upstream",
+            "gemini-test",
+            300i64,
+            30i64,
+            30i64,
+            3_000_000_000_000_000i64,
+            day_two_ts,
+        ),
+        (
+            "codex",
+            123,
+            "OpenAI",
+            "gpt-test",
+            999i64,
+            1i64,
+            0i64,
+            4_000_000_000_000_000i64,
+            end_ts,
+        ),
+    ] {
+        let attempts_json = format!(
+            r#"[{{"provider_id":{provider_id},"provider_name":"{provider_name}","outcome":"success"}}]"#
+        );
+
+        conn.execute(
+            r#"
+INSERT INTO request_logs (
+  cli_key,
+  attempts_json,
+  final_provider_id,
+  requested_model,
+  status,
+  error_code,
+  duration_ms,
+  ttfb_ms,
+  input_tokens,
+  output_tokens,
+  total_tokens,
+  cache_read_input_tokens,
+  cache_creation_input_tokens,
+  cache_creation_5m_input_tokens,
+  cache_creation_1h_input_tokens,
+  cost_usd_femto,
+  usage_json,
+  excluded_from_stats,
+  created_at
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19);
+            "#,
+            params![
+                cli_key,
+                attempts_json,
+                provider_id,
+                requested_model,
+                200,
+                Option::<String>::None,
+                1000,
+                100,
+                input_tokens,
+                output_tokens,
+                Option::<i64>::None,
+                cache_read_input_tokens,
+                0,
+                0,
+                0,
+                cost_usd_femto,
+                Option::<String>::None,
+                0,
+                created_at
+            ],
+        )
+        .expect("insert request log");
+    }
+
+    let day_one = local_day_key(&conn, day_one_ts);
+    let day_two = local_day_key(&conn, day_two_ts);
+
+    let rows = leaderboard_v2_with_conn(
+        &conn,
+        UsageScopeV2::Day,
+        Some(day_one_ts),
+        Some(end_ts),
+        None,
+        None,
+        Some(50),
+    )
+    .expect("day leaderboard");
+
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].key, day_two);
+    assert_eq!(rows[0].name, day_two);
+    assert_eq!(rows[0].requests_total, 1);
+    assert_eq!(rows[0].input_tokens, 270);
+    assert_eq!(rows[0].output_tokens, 30);
+    assert_eq!(rows[0].total_tokens, 330);
+    assert_eq!(rows[0].cost_usd, Some(3.0));
+
+    assert_eq!(rows[1].key, day_one);
+    assert_eq!(rows[1].name, day_one);
+    assert_eq!(rows[1].requests_total, 2);
+    assert_eq!(rows[1].input_tokens, 270);
+    assert_eq!(rows[1].output_tokens, 90);
+    assert_eq!(rows[1].total_tokens, 390);
+    assert_eq!(rows[1].cost_usd, Some(3.0));
+
+    let cli_filtered = leaderboard_v2_with_conn(
+        &conn,
+        UsageScopeV2::Day,
+        Some(day_one_ts),
+        Some(end_ts),
+        Some("codex"),
+        None,
+        Some(50),
+    )
+    .expect("day leaderboard cli filter");
+    assert_eq!(cli_filtered.len(), 1);
+    assert_eq!(cli_filtered[0].key, day_one);
+    assert_eq!(cli_filtered[0].requests_total, 2);
+
+    let provider_filtered = leaderboard_v2_with_conn(
+        &conn,
+        UsageScopeV2::Day,
+        Some(day_one_ts),
+        Some(end_ts),
+        None,
+        Some(456),
+        Some(50),
+    )
+    .expect("day leaderboard provider filter");
+    assert_eq!(provider_filtered.len(), 1);
+    assert_eq!(provider_filtered[0].key, day_two);
+    assert_eq!(provider_filtered[0].requests_total, 1);
+}
+
+#[test]
+fn day_detail_v1_filters_by_local_day_and_returns_hour_buckets() {
+    let conn = setup_conn();
+    let day = "2026-04-16";
+    let start_ts = local_day_start_ts(&conn, day);
+
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            cli_key: "codex",
+            provider_id: 123,
+            provider_name: "OpenAI",
+            input_tokens: Some(120),
+            output_tokens: Some(30),
+            cache_read_input_tokens: Some(20),
+            cache_creation_input_tokens: Some(10),
+            session_id: Some("codex-hour-2"),
+            created_at: start_ts + 2 * 3600,
+            ..base_usage_log(start_ts)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            cli_key: "claude",
+            provider_id: 123,
+            provider_name: "OpenAI",
+            input_tokens: Some(50),
+            output_tokens: Some(10),
+            cache_read_input_tokens: Some(5),
+            cache_creation_input_tokens: Some(5),
+            session_id: Some("claude-hour-2"),
+            created_at: start_ts + 2 * 3600,
+            ..base_usage_log(start_ts)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            cli_key: "codex",
+            provider_id: 456,
+            provider_name: "Gemini Upstream",
+            input_tokens: Some(70),
+            output_tokens: Some(20),
+            cache_read_input_tokens: Some(10),
+            session_id: Some("codex-hour-5"),
+            created_at: start_ts + 5 * 3600,
+            ..base_usage_log(start_ts)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            input_tokens: Some(999),
+            output_tokens: Some(1),
+            created_at: start_ts - 1,
+            ..base_usage_log(start_ts)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            input_tokens: Some(999),
+            output_tokens: Some(1),
+            created_at: start_ts + 86_400,
+            ..base_usage_log(start_ts)
+        },
+    );
+
+    let detail = day_detail_v1_with_conn(
+        &conn,
+        &UsageDayDetailParams {
+            day: day.to_string(),
+            cli_key: None,
+            provider_id: None,
+            folder_limit: None,
+            folder_keys: None,
+        },
+        |_| Vec::new(),
+    )
+    .expect("day detail");
+
+    assert_eq!(detail.day, day);
+    assert_eq!(detail.hours.len(), 24);
+    assert_eq!(detail.hours[0].hour, 0);
+    assert_eq!(detail.hours[0].requests_total, 0);
+    assert_eq!(detail.hours[0].total_tokens, 0);
+    assert_eq!(detail.hours[2].requests_total, 2);
+    assert_eq!(detail.hours[2].total_tokens, 230);
+    assert_eq!(detail.hours[2].io_total_tokens, 190);
+    assert_eq!(detail.hours[5].requests_total, 1);
+    assert_eq!(detail.hours[5].total_tokens, 90);
+    assert_eq!(detail.hours[23].hour, 23);
+    assert_eq!(detail.folders.len(), 1);
+    assert_eq!(detail.folders[0].name, "未知文件夹");
+    assert_eq!(detail.folders[0].requests_total, 3);
+    assert_eq!(detail.folders[0].total_tokens, 320);
+
+    let provider_filtered = day_detail_v1_with_conn(
+        &conn,
+        &UsageDayDetailParams {
+            day: day.to_string(),
+            cli_key: None,
+            provider_id: Some(456),
+            folder_limit: None,
+            folder_keys: None,
+        },
+        |_| Vec::new(),
+    )
+    .expect("provider filtered day detail");
+    assert_eq!(provider_filtered.hours[2].requests_total, 0);
+    assert_eq!(provider_filtered.hours[5].requests_total, 1);
+    assert_eq!(provider_filtered.hours[5].total_tokens, 90);
+    assert_eq!(provider_filtered.folders[0].requests_total, 1);
+
+    let cli_filtered = day_detail_v1_with_conn(
+        &conn,
+        &UsageDayDetailParams {
+            day: day.to_string(),
+            cli_key: Some("claude".to_string()),
+            provider_id: None,
+            folder_limit: None,
+            folder_keys: None,
+        },
+        |_| Vec::new(),
+    )
+    .expect("cli filtered day detail");
+    assert_eq!(cli_filtered.hours[2].requests_total, 1);
+    assert_eq!(cli_filtered.hours[2].total_tokens, 70);
+    assert_eq!(cli_filtered.hours[5].requests_total, 0);
+    assert_eq!(cli_filtered.folders[0].input_tokens, 50);
+}
+
+#[test]
+fn day_detail_v1_groups_resolved_folders_and_unknown_sessions() {
+    let conn = setup_conn();
+    let day = "2026-04-17";
+    let start_ts = local_day_start_ts(&conn, day);
+
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            cli_key: "codex",
+            input_tokens: Some(120),
+            output_tokens: Some(30),
+            cache_read_input_tokens: Some(20),
+            cache_creation_input_tokens: Some(10),
+            session_id: Some("codex-s1"),
+            created_at: start_ts + 3600,
+            ..base_usage_log(start_ts)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            cli_key: "codex",
+            input_tokens: Some(80),
+            output_tokens: Some(20),
+            session_id: Some("codex-s2"),
+            created_at: start_ts + 2 * 3600,
+            ..base_usage_log(start_ts)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            cli_key: "claude",
+            status: Some(500),
+            input_tokens: Some(60),
+            output_tokens: Some(10),
+            session_id: Some("claude-s3"),
+            created_at: start_ts + 3 * 3600,
+            ..base_usage_log(start_ts)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            cli_key: "codex",
+            input_tokens: Some(40),
+            output_tokens: Some(5),
+            session_id: Some("missing-folder"),
+            created_at: start_ts + 4 * 3600,
+            ..base_usage_log(start_ts)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            cli_key: "gemini",
+            input_tokens: Some(50),
+            output_tokens: Some(5),
+            cache_read_input_tokens: Some(10),
+            session_id: Some("gemini-s1"),
+            created_at: start_ts + 5 * 3600,
+            ..base_usage_log(start_ts)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            cli_key: "claude",
+            input_tokens: Some(30),
+            output_tokens: Some(5),
+            session_id: None,
+            created_at: start_ts + 6 * 3600,
+            ..base_usage_log(start_ts)
+        },
+    );
+
+    let detail = day_detail_v1_with_conn(
+        &conn,
+        &UsageDayDetailParams {
+            day: day.to_string(),
+            cli_key: None,
+            provider_id: None,
+            folder_limit: None,
+            folder_keys: None,
+        },
+        |keys| {
+            let mut pairs: Vec<String> = keys
+                .iter()
+                .map(|key| format!("{}:{}", key.cli_key, key.session_id))
+                .collect();
+            pairs.sort();
+            assert_eq!(
+                pairs,
+                vec![
+                    "claude:claude-s3".to_string(),
+                    "codex:codex-s1".to_string(),
+                    "codex:codex-s2".to_string(),
+                    "codex:missing-folder".to_string(),
+                ]
+            );
+
+            vec![
+                UsageDayResolvedFolder {
+                    cli_key: "codex".to_string(),
+                    session_id: "codex-s1".to_string(),
+                    folder_name: "alpha".to_string(),
+                    folder_path: "/work/alpha".to_string(),
+                },
+                UsageDayResolvedFolder {
+                    cli_key: "codex".to_string(),
+                    session_id: "codex-s2".to_string(),
+                    folder_name: "alpha".to_string(),
+                    folder_path: "/work/alpha".to_string(),
+                },
+                UsageDayResolvedFolder {
+                    cli_key: "claude".to_string(),
+                    session_id: "claude-s3".to_string(),
+                    folder_name: "beta".to_string(),
+                    folder_path: "/work/beta".to_string(),
+                },
+            ]
+        },
+    )
+    .expect("day detail");
+
+    let by_key: std::collections::HashMap<String, UsageDayFolderRow> = detail
+        .folders
+        .into_iter()
+        .map(|row| (row.key.clone(), row))
+        .collect();
+
+    let alpha = by_key.get("/work/alpha").expect("alpha folder row");
+    assert_eq!(alpha.name, "alpha");
+    assert_eq!(alpha.folder_path.as_deref(), Some("/work/alpha"));
+    assert_eq!(alpha.requests_total, 2);
+    assert_eq!(alpha.requests_success, 2);
+    assert_eq!(alpha.total_tokens, 260);
+    assert_eq!(alpha.io_total_tokens, 230);
+
+    let beta = by_key.get("/work/beta").expect("beta folder row");
+    assert_eq!(beta.name, "beta");
+    assert_eq!(beta.requests_total, 1);
+    assert_eq!(beta.requests_success, 0);
+    assert_eq!(beta.requests_failed, 1);
+    assert_eq!(beta.total_tokens, 70);
+
+    let unknown = by_key.get("__unknown__").expect("unknown folder row");
+    assert_eq!(unknown.name, "未知文件夹");
+    assert_eq!(unknown.folder_path, None);
+    assert_eq!(unknown.requests_total, 3);
+    assert_eq!(unknown.total_tokens, 135);
+}
+
+#[test]
+fn folder_options_v1_groups_resolved_folders_and_keeps_unknown_selectable() {
+    let conn = setup_conn();
+    let day = "2026-04-18";
+    let start_ts = local_day_start_ts(&conn, day);
+
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            cli_key: "codex",
+            input_tokens: Some(100),
+            output_tokens: Some(20),
+            session_id: Some("codex-alpha-1"),
+            created_at: start_ts + 60,
+            ..base_usage_log(start_ts)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            cli_key: "codex",
+            input_tokens: Some(40),
+            output_tokens: Some(10),
+            session_id: Some("codex-alpha-2"),
+            created_at: start_ts + 120,
+            ..base_usage_log(start_ts)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            cli_key: "gemini",
+            input_tokens: Some(30),
+            output_tokens: Some(5),
+            session_id: Some("gemini-unknown"),
+            created_at: start_ts + 180,
+            ..base_usage_log(start_ts)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            cli_key: "codex",
+            input_tokens: Some(20),
+            output_tokens: Some(5),
+            session_id: Some("missing-folder"),
+            created_at: start_ts + 240,
+            ..base_usage_log(start_ts)
+        },
+    );
+
+    let options = folder_options_v1_with_conn(
+        &conn,
+        &UsageQueryParams {
+            period: "custom".to_string(),
+            start_ts: Some(start_ts),
+            end_ts: Some(start_ts + 86_400),
+            cli_key: None,
+            provider_id: None,
+            folder_keys: Some(vec!["/work/alpha".to_string()]),
+        },
+        fixture_folder_lookup,
+    )
+    .expect("folder options");
+
+    assert_eq!(options.len(), 2);
+    assert_eq!(options[0].key, "/work/alpha");
+    assert_eq!(options[0].name, "alpha");
+    assert_eq!(options[0].folder_path.as_deref(), Some("/work/alpha"));
+    assert_eq!(options[0].requests_total, 2);
+    assert_eq!(options[0].total_tokens, 170);
+    assert_eq!(options[1].key, "__unknown__");
+    assert_eq!(options[1].name, "未知文件夹");
+    assert_eq!(options[1].folder_path, None);
+    assert_eq!(options[1].requests_total, 2);
+    assert_eq!(options[1].total_tokens, 60);
+}
+
+#[test]
+fn folder_keys_filter_summary_leaderboard_and_day_detail() {
+    let conn = setup_conn();
+    let day = "2026-04-19";
+    let start_ts = local_day_start_ts(&conn, day);
+
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            cli_key: "codex",
+            provider_id: 123,
+            requested_model: "gpt-alpha",
+            input_tokens: Some(100),
+            output_tokens: Some(20),
+            session_id: Some("codex-alpha-1"),
+            created_at: start_ts + 2 * 3600,
+            ..base_usage_log(start_ts)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            cli_key: "codex",
+            provider_id: 456,
+            requested_model: "gpt-beta",
+            input_tokens: Some(70),
+            output_tokens: Some(10),
+            session_id: Some("codex-beta-1"),
+            created_at: start_ts + 5 * 3600,
+            ..base_usage_log(start_ts)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            cli_key: "gemini",
+            provider_id: 456,
+            requested_model: "gemini-unknown",
+            input_tokens: Some(30),
+            output_tokens: Some(5),
+            session_id: Some("gemini-unknown"),
+            created_at: start_ts + 7 * 3600,
+            ..base_usage_log(start_ts)
+        },
+    );
+
+    let alpha_params = UsageQueryParams {
+        period: "custom".to_string(),
+        start_ts: Some(start_ts),
+        end_ts: Some(start_ts + 86_400),
+        cli_key: None,
+        provider_id: None,
+        folder_keys: Some(vec!["/work/alpha".to_string()]),
+    };
+    let alpha_summary =
+        summary_v2_with_conn(&conn, &alpha_params, fixture_folder_lookup).expect("summary");
+    assert_eq!(alpha_summary.requests_total, 1);
+    assert_eq!(alpha_summary.total_tokens, 120);
+    assert_eq!(alpha_summary.io_total_tokens, 120);
+
+    let alpha_day_rows = leaderboard_v2_folder_filtered_with_conn(
+        &conn,
+        UsageScopeV2::Day,
+        Some(start_ts),
+        Some(start_ts + 86_400),
+        None,
+        None,
+        &["/work/alpha".to_string()],
+        Some(50),
+        fixture_folder_lookup,
+    )
+    .expect("day leaderboard");
+    assert_eq!(alpha_day_rows.len(), 1);
+    assert_eq!(alpha_day_rows[0].key, day);
+    assert_eq!(alpha_day_rows[0].total_tokens, 120);
+
+    let alpha_model_rows = leaderboard_v2_folder_filtered_with_conn(
+        &conn,
+        UsageScopeV2::Model,
+        Some(start_ts),
+        Some(start_ts + 86_400),
+        None,
+        None,
+        &["/work/alpha".to_string()],
+        Some(50),
+        fixture_folder_lookup,
+    )
+    .expect("model leaderboard");
+    assert_eq!(alpha_model_rows.len(), 1);
+    assert_eq!(alpha_model_rows[0].key, "gpt-alpha");
+
+    let unknown_summary = summary_v2_with_conn(
+        &conn,
+        &UsageQueryParams {
+            folder_keys: Some(vec!["__unknown__".to_string()]),
+            ..alpha_params.clone()
+        },
+        fixture_folder_lookup,
+    )
+    .expect("unknown summary");
+    assert_eq!(unknown_summary.requests_total, 1);
+    assert_eq!(unknown_summary.total_tokens, 35);
+
+    let provider_filtered = summary_v2_with_conn(
+        &conn,
+        &UsageQueryParams {
+            provider_id: Some(456),
+            folder_keys: Some(vec!["/work/beta".to_string()]),
+            ..alpha_params
+        },
+        fixture_folder_lookup,
+    )
+    .expect("provider plus folder summary");
+    assert_eq!(provider_filtered.requests_total, 1);
+    assert_eq!(provider_filtered.total_tokens, 80);
+
+    let detail = day_detail_v1_with_conn(
+        &conn,
+        &UsageDayDetailParams {
+            day: day.to_string(),
+            cli_key: None,
+            provider_id: None,
+            folder_limit: None,
+            folder_keys: Some(vec!["/work/alpha".to_string()]),
+        },
+        fixture_folder_lookup,
+    )
+    .expect("day detail");
+    assert_eq!(detail.hours.len(), 24);
+    assert_eq!(detail.hours[2].requests_total, 1);
+    assert_eq!(detail.hours[2].total_tokens, 120);
+    assert_eq!(detail.hours[5].requests_total, 0);
+    assert_eq!(detail.folders.len(), 1);
+    assert_eq!(detail.folders[0].key, "/work/alpha");
+    assert_eq!(detail.folders[0].total_tokens, 120);
 }

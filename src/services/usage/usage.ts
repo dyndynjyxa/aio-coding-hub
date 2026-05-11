@@ -1,5 +1,10 @@
 import {
   commands,
+  type UsageDayDetailParams as GeneratedUsageDayDetailParams,
+  type UsageDayDetailV1,
+  type UsageDayFolderRow,
+  type UsageDayHourRow,
+  type UsageFolderOptionV1,
   type UsageDayRow,
   type UsageHourlyRow,
   type UsageLeaderboardRow,
@@ -19,7 +24,7 @@ import type { CliKey } from "../providers/providers";
 const CLI_KEY_VALUES = ["claude", "codex", "gemini"] as const satisfies readonly CliKey[];
 
 export type UsageRange = "today" | "last7" | "last30" | "month" | "all";
-export type UsageScope = "cli" | "provider" | "model";
+export type UsageScope = "cli" | "provider" | "model" | "day";
 export type UsagePeriod = "daily" | "weekly" | "monthly" | "allTime" | "custom";
 
 export type UsageProviderRow = Override<
@@ -30,6 +35,12 @@ export type UsageProviderRow = Override<
 >;
 
 type UsageQueryInputV2 = Omit<OptionalNullableGeneratedFields<GeneratedUsageQueryParams>, "period">;
+export type UsageDayDetailInput = Override<
+  OptionalNullableGeneratedFields<GeneratedUsageDayDetailParams>,
+  {
+    cliKey?: CliKey | null;
+  }
+>;
 
 function buildQueryParamsV2(
   period: UsagePeriod,
@@ -41,6 +52,17 @@ function buildQueryParamsV2(
     endTs: input?.endTs ?? null,
     cliKey: input?.cliKey ?? null,
     providerId: input?.providerId ?? null,
+    folderKeys: input?.folderKeys ?? null,
+  };
+}
+
+function buildUsageDayDetailParams(input: UsageDayDetailInput): GeneratedUsageDayDetailParams {
+  return {
+    day: input.day,
+    cliKey: input.cliKey ?? null,
+    providerId: input.providerId ?? null,
+    folderLimit: input.folderLimit ?? null,
+    folderKeys: input.folderKeys ?? null,
   };
 }
 
@@ -142,6 +164,30 @@ export async function usageLeaderboardV2(
   });
 }
 
+export async function usageDayDetailV1(input: UsageDayDetailInput) {
+  const params = buildUsageDayDetailParams(input);
+  return invokeGeneratedIpc<UsageDayDetailV1>({
+    title: "读取日期用量详情失败",
+    cmd: "usage_day_detail_v1",
+    args: {
+      params,
+    },
+    invoke: () => commands.usageDayDetailV1(params),
+  });
+}
+
+export async function usageFolderOptionsV1(period: UsagePeriod, input?: UsageQueryInputV2) {
+  const params = buildQueryParamsV2(period, input);
+  return invokeGeneratedIpc<UsageFolderOptionV1[]>({
+    title: "读取用量文件夹筛选项失败",
+    cmd: "usage_folder_options_v1",
+    args: {
+      params,
+    },
+    invoke: () => commands.usageFolderOptionsV1(params),
+  });
+}
+
 export async function usageProviderCacheRateTrendV1(
   period: UsagePeriod,
   input?: UsageQueryInputV2 & { limit?: number | null }
@@ -159,6 +205,10 @@ export async function usageProviderCacheRateTrendV1(
 }
 
 export type {
+  UsageDayDetailV1,
+  UsageDayFolderRow,
+  UsageDayHourRow,
+  UsageFolderOptionV1,
   UsageDayRow,
   UsageHourlyRow,
   UsageLeaderboardRow,

@@ -1475,6 +1475,24 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async usageDayDetailV1(params: UsageDayDetailParams): Promise<Result<UsageDayDetailV1, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("usage_day_detail_v1", { params }) };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async usageFolderOptionsV1(
+    params: UsageQueryParams
+  ): Promise<Result<UsageFolderOptionV1[], string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("usage_folder_options_v1", { params }) };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async usageProviderCacheRateTrendV1(
     params: UsageQueryParams,
     limit: number | null
@@ -2744,6 +2762,42 @@ export type SkillsPaths = { ssot_dir: string; repos_dir: string; cli_dir: string
 export type SortModeActiveRow = { cli_key: string; mode_id: number | null; updated_at: number };
 export type SortModeProviderRow = { provider_id: number; enabled: boolean };
 export type SortModeSummary = { id: number; name: string; created_at: number; updated_at: number };
+export type UsageDayDetailParams = {
+  day: string;
+  cliKey: string | null;
+  providerId: number | null;
+  folderLimit: number | null;
+  folderKeys: string[] | null;
+};
+export type UsageDayDetailV1 = {
+  day: string;
+  folders: UsageDayFolderRow[];
+  hours: UsageDayHourRow[];
+};
+export type UsageDayFolderRow = {
+  key: string;
+  name: string;
+  folder_path: string | null;
+  requests_total: number;
+  requests_success: number;
+  requests_failed: number;
+  total_tokens: number;
+  io_total_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+  avg_duration_ms: number | null;
+  avg_ttfb_ms: number | null;
+  avg_output_tokens_per_second: number | null;
+  cost_usd: number | null;
+};
+export type UsageDayHourRow = {
+  hour: number;
+  requests_total: number;
+  total_tokens: number;
+  io_total_tokens: number;
+};
 export type UsageDayRow = {
   day: string;
   requests_total: number;
@@ -2754,6 +2808,13 @@ export type UsageDayRow = {
   cache_creation_input_tokens: number;
   cache_creation_5m_input_tokens: number;
   cache_creation_1h_input_tokens: number;
+};
+export type UsageFolderOptionV1 = {
+  key: string;
+  name: string;
+  folder_path: string | null;
+  requests_total: number;
+  total_tokens: number;
 };
 export type UsageHourlyRow = {
   day: string;
@@ -2814,6 +2875,7 @@ export type UsageQueryParams = {
   endTs: number | null;
   cliKey: string | null;
   providerId: number | null;
+  folderKeys: string[] | null;
 };
 export type UsageSummary = {
   requests_total: number;

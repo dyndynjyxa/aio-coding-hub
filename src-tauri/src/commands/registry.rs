@@ -173,6 +173,8 @@ macro_rules! generated_command_registry {
             usage_leaderboard_day => crate::commands::usage::usage_leaderboard_day,
             usage_leaderboard_v2 => crate::commands::usage::usage_leaderboard_v2,
             usage_hourly_series => crate::commands::usage::usage_hourly_series,
+            usage_day_detail_v1 => crate::commands::usage::usage_day_detail_v1,
+            usage_folder_options_v1 => crate::commands::usage::usage_folder_options_v1,
             usage_provider_cache_rate_trend_v1 => crate::commands::usage::usage_provider_cache_rate_trend_v1,
             // ── cost ──
             cost_summary_v1 => crate::commands::cost::cost_summary_v1,

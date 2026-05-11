@@ -72,6 +72,7 @@ export const usageKeys = {
       endTs: number | null;
       cliKey: CliKey | null;
       providerId: number | null;
+      folderKeys?: readonly string[] | null;
     }
   ) =>
     [
@@ -82,6 +83,7 @@ export const usageKeys = {
       input.endTs,
       input.cliKey,
       input.providerId,
+      normalizeKeyParts(input.folderKeys ?? []),
     ] as const,
   leaderboardV2: (
     scope: UsageScope,
@@ -92,6 +94,7 @@ export const usageKeys = {
       cliKey: CliKey | null;
       providerId: number | null;
       limit: number | null;
+      folderKeys?: readonly string[] | null;
     }
   ) =>
     [
@@ -104,6 +107,41 @@ export const usageKeys = {
       input.cliKey,
       input.providerId,
       input.limit,
+      normalizeKeyParts(input.folderKeys ?? []),
+    ] as const,
+  dayDetailV1: (input: {
+    day: string;
+    cliKey: CliKey | null;
+    providerId: number | null;
+    folderLimit: number | null;
+    folderKeys?: readonly string[] | null;
+  }) =>
+    [
+      ...usageAllKey,
+      "dayDetailV1",
+      input.day,
+      input.cliKey,
+      input.providerId,
+      input.folderLimit,
+      normalizeKeyParts(input.folderKeys ?? []),
+    ] as const,
+  folderOptionsV1: (
+    period: UsagePeriod,
+    input: {
+      startTs: number | null;
+      endTs: number | null;
+      cliKey: CliKey | null;
+      providerId: number | null;
+    }
+  ) =>
+    [
+      ...usageAllKey,
+      "folderOptionsV1",
+      period,
+      input.startTs,
+      input.endTs,
+      input.cliKey,
+      input.providerId,
     ] as const,
   providerCacheRateTrendV1: (
     period: UsagePeriod,

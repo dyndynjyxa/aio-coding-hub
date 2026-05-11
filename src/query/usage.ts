@@ -2,10 +2,13 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { CliKey } from "../services/providers/providers";
 import {
   usageHourlySeries,
+  usageDayDetailV1,
+  usageFolderOptionsV1,
   usageLeaderboardV2,
   usageProviderCacheRateTrendV1,
   usageSummary,
   usageSummaryV2,
+  type UsageDayDetailInput,
   type UsagePeriod,
   type UsageRange,
   type UsageScope,
@@ -52,6 +55,7 @@ export function useUsageSummaryV2Query(
     endTs: number | null;
     cliKey: CliKey | null;
     providerId: number | null;
+    folderKeys?: string[] | null;
   },
   options?: UsageV2QueryOptions
 ) {
@@ -74,6 +78,7 @@ export function useUsageLeaderboardV2Query(
     cliKey: CliKey | null;
     providerId: number | null;
     limit: number | null;
+    folderKeys?: string[] | null;
   },
   options?: UsageV2QueryOptions
 ) {
@@ -84,6 +89,41 @@ export function useUsageLeaderboardV2Query(
     placeholderData: keepPreviousData,
     refetchInterval: options?.refetchIntervalMs ?? false,
     refetchOnMount: options?.refetchOnMount,
+  });
+}
+
+export function useUsageDayDetailV1Query(input: UsageDayDetailInput, options?: UsageQueryOptions) {
+  return useQuery({
+    queryKey: usageKeys.dayDetailV1({
+      day: input.day,
+      cliKey: input.cliKey ?? null,
+      providerId: input.providerId ?? null,
+      folderLimit: input.folderLimit ?? null,
+      folderKeys: input.folderKeys ?? null,
+    }),
+    queryFn: () => usageDayDetailV1(input),
+    enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
+    refetchInterval: options?.refetchIntervalMs ?? false,
+  });
+}
+
+export function useUsageFolderOptionsV1Query(
+  period: UsagePeriod,
+  input: {
+    startTs: number | null;
+    endTs: number | null;
+    cliKey: CliKey | null;
+    providerId: number | null;
+  },
+  options?: UsageQueryOptions
+) {
+  return useQuery({
+    queryKey: usageKeys.folderOptionsV1(period, input),
+    queryFn: () => usageFolderOptionsV1(period, input),
+    enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
+    refetchInterval: options?.refetchIntervalMs ?? false,
   });
 }
 
