@@ -427,6 +427,46 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     ]);
   });
 
+  it("keeps provider rows sorted by requests and name when token totals are tied", () => {
+    mockDataModel({
+      rows: [
+        createLeaderboardRow({
+          key: "provider-alpha",
+          name: "Alpha Relay",
+          requests_total: 2,
+          requests_success: 2,
+          io_total_tokens: 5_000,
+          total_tokens: 6_000,
+        }),
+        createLeaderboardRow({
+          key: "provider-gamma",
+          name: "Gamma Relay",
+          requests_total: 5,
+          requests_success: 5,
+          io_total_tokens: 5_000,
+          total_tokens: 6_500,
+        }),
+        createLeaderboardRow({
+          key: "provider-beta",
+          name: "Beta Relay",
+          requests_total: 5,
+          requests_success: 5,
+          io_total_tokens: 5_000,
+          total_tokens: 7_000,
+        }),
+      ],
+    });
+
+    render(<HomeTodayProviderUsageOverview />);
+
+    const usageTable = screen.getByRole("table", { name: "今日供应商用量" });
+    const providerNames = within(usageTable)
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) => within(row).getAllByRole("cell")[0]?.textContent?.trim());
+    expect(providerNames).toEqual(["Beta Relay", "Gamma Relay", "Alpha Relay"]);
+  });
+
   it("renders a synthetic running row when the provider has no usage row today", () => {
     mockDataModel();
 
@@ -443,6 +483,237 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
       "—",
       "—",
       "—",
+      "—",
+      "—",
+    ]);
+  });
+
+  it("skips unnamed active sessions and keeps already-prefixed provider names", () => {
+    mockDataModel({ rows: [] });
+
+    render(
+      <HomeTodayProviderUsageOverview
+        activeSessions={[
+          createActiveSession("", { providerId: 2, cliKey: "claude" }),
+          createActiveSession("claude/Runtime Fresh", { providerId: 3, cliKey: "claude" }),
+          createActiveSession("claude/Runtime Fresh", { providerId: 3, cliKey: "claude" }),
+        ]}
+      />
+    );
+
+    expect(screen.getByText("claude/Runtime Fresh")).toBeInTheDocument();
+    expect(screen.queryByText("未知")).not.toBeInTheDocument();
+    expect(screen.queryByText("claude/claude/Runtime Fresh")).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText("进行中")).toHaveLength(1);
+  });
+
+  it("keeps synthetic provider names unprefixed while preview data is active", () => {
+    mockDataModel({ rows: [], previewActive: true });
+
+    render(
+      <HomeTodayProviderUsageOverview
+        activeSessions={[createActiveSession("Runtime Fresh", { providerId: 5, cliKey: "claude" })]}
+      />
+    );
+
+    expect(screen.getByText("Runtime Fresh")).toBeInTheDocument();
+    expect(screen.queryByText("claude/Runtime Fresh")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("进行中")).toBeInTheDocument();
+  });
+
+  it("limits synthetic active session rows to the first three providers", () => {
+    mockDataModel({ rows: [] });
+
+    render(
+      <HomeTodayProviderUsageOverview
+        activeSessions={[
+          createActiveSession("Runtime One", { providerId: 11, cliKey: "claude" }),
+          createActiveSession("Runtime Two", { providerId: 12, cliKey: "claude" }),
+          createActiveSession("Runtime Three", { providerId: 13, cliKey: "claude" }),
+          createActiveSession("Runtime Four", { providerId: 14, cliKey: "claude" }),
+        ]}
+      />
+    );
+
+    expect(screen.getByText("claude/Runtime One")).toBeInTheDocument();
+    expect(screen.getByText("claude/Runtime Two")).toBeInTheDocument();
+    expect(screen.getByText("claude/Runtime Three")).toBeInTheDocument();
+    expect(screen.queryByText("claude/Runtime Four")).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText("进行中")).toHaveLength(3);
+  });
+
+  it("matches active sessions by scoped or unscoped names when provider ids are absent", () => {
+    mockDataModel({
+      rows: [
+        createLeaderboardRow({
+          key: "claude:0",
+          name: "claude/Zero Id",
+          total_tokens: 8_000,
+          io_total_tokens: 7_000,
+        }),
+        createLeaderboardRow({
+          key: "provider-name-only",
+          name: "Name Only",
+          total_tokens: 6_000,
+          io_total_tokens: 5_000,
+        }),
+      ],
+    });
+
+    render(
+      <HomeTodayProviderUsageOverview
+        activeSessions={[
+          createActiveSession("Zero Id", { providerId: 0, cliKey: "claude" }),
+          createActiveSession("Name Only", { providerId: 0, cliKey: " " }),
+          createActiveSession("New Name Only", { providerId: 0, cliKey: " " }),
+        ]}
+      />
+    );
+
+    expect(screen.getByText("claude/Zero Id").closest("tr")).toHaveTextContent("8.0K");
+    expect(screen.getByText("Name Only").closest("tr")).toHaveTextContent("6.0K");
+    expect(screen.getByText("New Name Only")).toBeInTheDocument();
+    expect(screen.getAllByLabelText("进行中")).toHaveLength(3);
+  });
+
+  it("ignores completed, stale, unnamed, unknown, and duplicate live traces", () => {
+    mockDataModel({ rows: [] });
+    const now = Date.now();
+    const completedTrace = {
+      ...createRunningTrace("Completed Trace", { providerId: 21, traceId: "completed" }),
+      summary: {} as NonNullable<TraceSession["summary"]>,
+    };
+    const oldTrace = {
+      ...createRunningTrace("Old Trace", { providerId: 22, traceId: "old" }),
+      first_seen_ms: now - 16 * 60 * 1000,
+      last_seen_ms: now,
+    };
+    const staleTrace = {
+      ...createRunningTrace("Stale Trace", { providerId: 23, traceId: "stale" }),
+      first_seen_ms: now - 60 * 1000,
+      last_seen_ms: now - 6 * 60 * 1000,
+    };
+    const unnamedTrace = {
+      ...createRunningTrace("Unnamed Trace", { providerId: 24, traceId: "unnamed" }),
+      attempts: [],
+    };
+    const missingAttemptsTrace = {
+      ...createRunningTrace("Missing Attempts Trace", {
+        providerId: 25,
+        traceId: "missing-attempts",
+      }),
+      attempts: undefined,
+    } as unknown as TraceSession;
+    const unknownTrace = createRunningTrace("Unknown", {
+      providerId: 26,
+      traceId: "unknown",
+    });
+    const emptyScopedNameTrace = createRunningTrace("claude/", {
+      providerId: 27,
+      traceId: "empty-scoped-name",
+    });
+    const liveTrace = createRunningTrace("Trace Fresh", {
+      providerId: 28,
+      traceId: "live",
+    });
+    const duplicateTrace = createRunningTrace("Trace Fresh", {
+      providerId: 28,
+      traceId: "duplicate",
+    });
+
+    render(
+      <HomeTodayProviderUsageOverview
+        traces={[
+          completedTrace,
+          oldTrace,
+          staleTrace,
+          unnamedTrace,
+          missingAttemptsTrace,
+          unknownTrace,
+          emptyScopedNameTrace,
+          liveTrace,
+          duplicateTrace,
+        ]}
+      />
+    );
+
+    expect(screen.getByText("claude/Trace Fresh")).toBeInTheDocument();
+    expect(screen.queryByText("claude/Completed Trace")).not.toBeInTheDocument();
+    expect(screen.queryByText("claude/Old Trace")).not.toBeInTheDocument();
+    expect(screen.queryByText("claude/Stale Trace")).not.toBeInTheDocument();
+    expect(screen.queryByText("claude/Unknown")).not.toBeInTheDocument();
+    expect(screen.queryByText("claude/Missing Attempts Trace")).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText("进行中")).toHaveLength(1);
+  });
+
+  it("matches active sessions by scoped name when provider id is invalid", () => {
+    mockDataModel({
+      rows: [
+        createLeaderboardRow({
+          key: "claude:44",
+          name: "claude/Runtime Fresh",
+          total_tokens: 9_200,
+          io_total_tokens: 8_000,
+          input_tokens: 5_000,
+          output_tokens: 3_000,
+        }),
+        createLeaderboardRow({
+          key: "provider-other",
+          name: "Other Relay",
+          total_tokens: 7_000,
+          io_total_tokens: 6_000,
+        }),
+      ],
+    });
+
+    render(
+      <HomeTodayProviderUsageOverview
+        activeSessions={[createActiveSession("Runtime Fresh", { providerId: 0, cliKey: "claude" })]}
+      />
+    );
+
+    const providerRow = screen.getByText("claude/Runtime Fresh").closest("tr");
+    expect(providerRow).toBeTruthy();
+    expect(within(providerRow as HTMLElement).getByLabelText("进行中")).toBeInTheDocument();
+    expect(rowCellTexts(providerRow as HTMLElement)).toEqual([
+      "claude/Runtime Fresh",
+      "9.2K",
+      "1.9%",
+      "8.0K",
+      "$0.10",
+      "100.0%",
+    ]);
+  });
+
+  it("shows dashes for provider rates when a row has no requests or cache denominator", () => {
+    mockDataModel({
+      rows: [
+        createLeaderboardRow({
+          key: "provider-zero",
+          name: "Zero Request Relay",
+          requests_total: 0,
+          requests_success: 0,
+          requests_failed: 0,
+          total_tokens: 1_200,
+          io_total_tokens: 1_000,
+          input_tokens: 0,
+          output_tokens: 1_000,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+          cost_usd: null,
+        }),
+      ],
+    });
+
+    render(<HomeTodayProviderUsageOverview />);
+
+    const providerRow = screen.getByText("Zero Request Relay").closest("tr");
+    expect(providerRow).toBeTruthy();
+    expect(rowCellTexts(providerRow as HTMLElement)).toEqual([
+      "Zero Request Relay",
+      "1.2K",
+      "—",
+      "1.0K",
       "—",
       "—",
     ]);
