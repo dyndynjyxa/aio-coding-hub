@@ -897,7 +897,7 @@ function TokenLeaderboardTable({
   }
 
   return (
-    <div className="overflow-x-auto">
+    <div className="min-h-0 flex-1 overflow-auto scrollbar-overlay">
       <table className="w-full border-separate border-spacing-0 text-left text-sm">
         <caption className="sr-only">用量排行榜</caption>
         <thead className="sticky top-0 z-10">
@@ -1367,7 +1367,7 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
   }, [applyCustomRange]);
 
   return (
-    <div className="flex h-full flex-col gap-5 overflow-auto">
+    <div className="flex h-full min-h-0 flex-col gap-5 overflow-hidden">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="用量筛选">
           <FolderMultiSelect
@@ -1427,8 +1427,8 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
         onRetry={model.refresh}
       />
 
-      <Card padding="none" className="min-h-0 overflow-hidden">
-        <div className="border-b border-slate-200 px-6 pb-4 pt-5 dark:border-slate-700">
+      <Card padding="none" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className="shrink-0 border-b border-slate-200 px-6 pb-4 pt-5 dark:border-slate-700">
           <div className="text-base font-semibold text-slate-900 dark:text-slate-100">
             {scopeLabel(scope)}排行
           </div>
