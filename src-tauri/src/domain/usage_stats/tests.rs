@@ -1,7 +1,10 @@
 use super::cache_rate_trend_v1::provider_cache_rate_trend_v1_with_conn;
 use super::day_detail::{day_detail_v1_with_conn, UsageDayResolvedFolder};
 use super::folder_options::folder_options_v1_with_conn;
-use super::leaderboard_v2::{leaderboard_v2_folder_filtered_with_conn, leaderboard_v2_with_conn};
+use super::leaderboard_v2::{
+    leaderboard_v2_folder_filtered_with_conn, leaderboard_v2_with_conn,
+    FolderFilteredLeaderboardParams,
+};
 use super::summary::{summary_query, summary_v2_with_conn};
 use super::*;
 use rusqlite::{params, Connection};
@@ -1377,13 +1380,15 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
 
     let alpha_day_rows = leaderboard_v2_folder_filtered_with_conn(
         &conn,
-        UsageScopeV2::Day,
-        Some(start_ts),
-        Some(start_ts + 86_400),
-        None,
-        None,
-        &["/work/alpha".to_string()],
-        Some(50),
+        FolderFilteredLeaderboardParams {
+            scope: UsageScopeV2::Day,
+            start_ts: Some(start_ts),
+            end_ts: Some(start_ts + 86_400),
+            cli_key: None,
+            provider_id: None,
+            folder_keys: &["/work/alpha".to_string()],
+            limit: Some(50),
+        },
         fixture_folder_lookup,
     )
     .expect("day leaderboard");
@@ -1393,13 +1398,15 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
 
     let alpha_model_rows = leaderboard_v2_folder_filtered_with_conn(
         &conn,
-        UsageScopeV2::Model,
-        Some(start_ts),
-        Some(start_ts + 86_400),
-        None,
-        None,
-        &["/work/alpha".to_string()],
-        Some(50),
+        FolderFilteredLeaderboardParams {
+            scope: UsageScopeV2::Model,
+            start_ts: Some(start_ts),
+            end_ts: Some(start_ts + 86_400),
+            cli_key: None,
+            provider_id: None,
+            folder_keys: &["/work/alpha".to_string()],
+            limit: Some(50),
+        },
         fixture_folder_lookup,
     )
     .expect("model leaderboard");

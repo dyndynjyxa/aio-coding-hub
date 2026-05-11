@@ -708,21 +708,25 @@ fn provider_name_from_event(row: &UsageEventAgg) -> Option<String> {
     Some(provider_name)
 }
 
+pub(super) struct FolderFilteredLeaderboardParams<'a> {
+    pub(super) scope: UsageScopeV2,
+    pub(super) start_ts: Option<i64>,
+    pub(super) end_ts: Option<i64>,
+    pub(super) cli_key: Option<&'a str>,
+    pub(super) provider_id: Option<i64>,
+    pub(super) folder_keys: &'a [String],
+    pub(super) limit: Option<usize>,
+}
+
 pub(super) fn leaderboard_v2_folder_filtered_with_conn<F>(
     conn: &Connection,
-    scope: UsageScopeV2,
-    start_ts: Option<i64>,
-    end_ts: Option<i64>,
-    cli_key: Option<&str>,
-    provider_id: Option<i64>,
-    folder_keys: &[String],
-    limit: Option<usize>,
+    params: FolderFilteredLeaderboardParams<'_>,
     folder_lookup: F,
 ) -> Result<Vec<UsageLeaderboardRow>, String>
 where
     F: FnOnce(&[UsageSessionLookupKey]) -> Vec<UsageResolvedFolder>,
 {
-    let bucket_sql = match scope {
+    let bucket_sql = match params.scope {
         UsageScopeV2::Cli => None,
         UsageScopeV2::Provider => {
             Some("CASE WHEN r.final_provider_id IS NULL THEN NULL ELSE CAST(r.final_provider_id AS TEXT) END")
@@ -735,20 +739,20 @@ where
 
     let rows = usage_event_rows(
         conn,
-        start_ts,
-        end_ts,
-        cli_key,
-        provider_id,
+        params.start_ts,
+        params.end_ts,
+        params.cli_key,
+        params.provider_id,
         bucket_sql,
         false,
     )?;
     let lookup_keys = session_lookup_keys(&rows);
     let resolved = resolved_folder_map(folder_lookup(&lookup_keys));
-    let rows = filter_rows_by_folder_keys(rows, &resolved, Some(folder_keys));
+    let rows = filter_rows_by_folder_keys(rows, &resolved, Some(params.folder_keys));
 
     let mut by_key: HashMap<String, (String, ProviderAgg)> = HashMap::new();
     for row in rows {
-        let item = match scope {
+        let item = match params.scope {
             UsageScopeV2::Cli => {
                 let key = row.cli_key.clone();
                 Some((key.clone(), key))
@@ -786,7 +790,7 @@ where
         .map(|(key, (name, agg))| agg.into_leaderboard_row(key, name))
         .collect();
 
-    if matches!(scope, UsageScopeV2::Day) {
+    if matches!(params.scope, UsageScopeV2::Day) {
         out.sort_by(|a, b| b.key.cmp(&a.key));
     } else {
         out.sort_by(|a, b| {
@@ -797,7 +801,7 @@ where
                 .then_with(|| a.key.cmp(&b.key))
         });
     }
-    if let Some(limit) = limit {
+    if let Some(limit) = params.limit {
         out.truncate(limit.clamp(1, 200));
     } else {
         out.truncate(200);
@@ -821,13 +825,15 @@ where
     if let Some(folder_keys) = resolved.folder_keys.as_deref() {
         return Ok(leaderboard_v2_folder_filtered_with_conn(
             &conn,
-            scope,
-            resolved.start_ts,
-            resolved.end_ts,
-            resolved.cli_key,
-            resolved.provider_id,
-            folder_keys,
-            limit,
+            FolderFilteredLeaderboardParams {
+                scope,
+                start_ts: resolved.start_ts,
+                end_ts: resolved.end_ts,
+                cli_key: resolved.cli_key,
+                provider_id: resolved.provider_id,
+                folder_keys,
+                limit,
+            },
             folder_lookup,
         )?);
     }
