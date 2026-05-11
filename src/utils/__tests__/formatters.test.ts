@@ -27,6 +27,7 @@ describe("utils/formatters", () => {
     expect(formatDurationMs(1200)).toBe("1.20s");
     expect(formatDurationMs(61_000)).toBe("1m1.0s");
 
+    expect(formatDurationMsShort(null)).toBe("—");
     expect(formatDurationMsShort(999)).toBe("999ms");
     expect(formatDurationMsShort(1200)).toBe("1.2s");
     expect(formatDurationMsShort(61_000)).toBe("1m");
@@ -44,6 +45,7 @@ describe("utils/formatters", () => {
   it("formatInteger / percent", () => {
     expect(formatInteger(undefined)).toBe("—");
     expect(formatInteger(12.7)).toBe("13");
+    expect(formatPercent(null)).toBe("—");
     expect(formatPercent(0.1234, 2)).toBe("12.34%");
     expect(formatPercent(0.1234, Number.NaN)).toBe("12%");
   });
@@ -84,11 +86,13 @@ describe("utils/formatters", () => {
     expect(formatUsd(0)).toBe("$0.000000");
     expect(formatUsdRaw(0.12)).toBe("$0.12");
     expect(formatUsdRaw(null)).toBe("—");
+    expect(formatUsdShort(null)).toBe("—");
     expect(formatUsdShort(1.2)).toBe("$1.20");
   });
 
   it("time formatters", () => {
     expect(formatUnixSeconds(null)).toBe("—");
+    expect(formatCountdownSeconds(null)).toBe("—");
     expect(formatCountdownSeconds(61)).toBe("01:01");
     expect(formatCountdownSeconds(3661)).toBe("1:01:01");
     expect(formatRelativeTimeFromMs(null)).toBe("—");
@@ -96,10 +100,12 @@ describe("utils/formatters", () => {
     expect(formatRelativeTimeFromMs(0, 0)).toBe("<1分钟");
     expect(formatRelativeTimeFromMs(0, 2 * 3_600_000)).toBe("2小时");
     expect(formatRelativeTimeFromMs(0, 2 * 86_400_000)).toBe("2天");
+    expect(formatRelativeTimeFromUnixSeconds(null)).toBe("—");
     expect(formatRelativeTimeFromUnixSeconds(0, 60_000)).toBe("1分钟");
   });
 
   it("bytes and ISO datetime", () => {
+    expect(formatBytes(null)).toBe("—");
     expect(formatBytes(-1)).toBe("—");
     expect(formatBytes(10)).toBe("10 B");
     expect(formatBytes(1024)).toContain("KB");
