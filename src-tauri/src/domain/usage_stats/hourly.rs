@@ -2,6 +2,7 @@ use crate::db;
 use crate::shared::error::db_err;
 use rusqlite::params;
 
+use super::filters::sql_exclude_cx2cc_gateway_bridge_clause;
 use super::{compute_start_ts_last_n_days, sql_effective_total_tokens_expr, UsageHourlyRow};
 
 pub fn hourly_series(
@@ -13,6 +14,7 @@ pub fn hourly_series(
     let start_ts = compute_start_ts_last_n_days(&conn, days)?;
 
     let effective_total_expr = sql_effective_total_tokens_expr();
+    let cx2cc_filter_clause = sql_exclude_cx2cc_gateway_bridge_clause(None, true);
     let sql = format!(
         r#"
     	SELECT
@@ -44,6 +46,7 @@ pub fn hourly_series(
     	FROM request_logs
     	WHERE excluded_from_stats = 0
     	AND created_at >= ?1
+        {cx2cc_filter_clause}
     	GROUP BY day, hour
     	ORDER BY day ASC, hour ASC
     	"#

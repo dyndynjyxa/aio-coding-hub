@@ -25,6 +25,7 @@ import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Popover } from "../../ui/Popover";
 import { Spinner } from "../../ui/Spinner";
+import { Switch } from "../../ui/Switch";
 import { TabList, type TabListItem } from "../../ui/TabList";
 import { formatTokensMillions } from "../../utils/chartHelpers";
 import { computeCacheHitRate } from "../../utils/cacheRateMetrics";
@@ -75,6 +76,7 @@ const TABLE_MONO_TD_CLASS =
   "border-b border-slate-100 dark:border-slate-700 px-3 py-3 font-mono text-xs tabular-nums text-slate-700 dark:text-slate-300";
 
 const SUMMARY_SKELETON_KEYS = [0, 1, 2, 3, 4, 5, 6];
+const EMPTY_LEADERBOARD_ROWS: UsageLeaderboardRow[] = [];
 
 type TokenCostQueryInput = {
   startTs: number | null;
@@ -82,6 +84,7 @@ type TokenCostQueryInput = {
   cliKey: null;
   providerId: null;
   folderKeys?: string[] | null;
+  excludeCx2CcGatewayBridge?: boolean | null;
 };
 
 type TokenCostQueryConfig = {
@@ -1231,6 +1234,7 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
   const [range, setRange] = useState<TokenCostRange>("today");
   const [expandedDay, setExpandedDay] = useState<string | null>(null);
   const [selectedFolderKeys, setSelectedFolderKeys] = useState<string[]>([]);
+  const [excludeCx2CcGatewayBridge, setExcludeCx2CcGatewayBridge] = useState(true);
   const onInvalidCustomRange = useCallback((message: string) => toast(message), []);
   const customDateRangeOptions = useMemo(
     () => ({ onInvalid: onInvalidCustomRange }),
@@ -1260,9 +1264,10 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
       input: {
         ...queryConfig.input,
         folderKeys: selectedFolderKeysForQuery,
+        excludeCx2CcGatewayBridge,
       },
     }),
-    [queryConfig, selectedFolderKeysForQuery]
+    [excludeCx2CcGatewayBridge, queryConfig, selectedFolderKeysForQuery]
   );
   const queryRefreshConfig = useMemo(
     () =>
@@ -1281,7 +1286,14 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
     devPreviewEnabled,
     queryRefreshConfig,
   });
-  const folderOptionsQuery = useUsageFolderOptionsV1Query(queryConfig.period, queryConfig.input, {
+  const folderOptionsInput = useMemo(
+    () => ({
+      ...queryConfig.input,
+      excludeCx2CcGatewayBridge,
+    }),
+    [excludeCx2CcGatewayBridge, queryConfig.input]
+  );
+  const folderOptionsQuery = useUsageFolderOptionsV1Query(queryConfig.period, folderOptionsInput, {
     enabled: !customPending,
   });
   const folderOptions =
@@ -1296,7 +1308,7 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
     customPending ||
     (!folderOptionsLoading && folderOptions.length === 0 && selectedFolderKeys.length === 0);
   const displaySummary = customPending ? null : model.summary;
-  const displayRows = customPending ? [] : model.rows;
+  const displayRows = customPending ? EMPTY_LEADERBOARD_ROWS : model.rows;
   const displayTotalCostUsd = customPending ? null : model.totalCostUsd;
   const displayLoading = customPending ? false : model.loading;
   const expandedVisibleDay = useMemo(() => {
@@ -1310,8 +1322,10 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
       providerId: filteredQueryConfig.input.providerId,
       folderLimit: 8,
       folderKeys: selectedFolderKeysForQuery,
+      excludeCx2CcGatewayBridge,
     }),
     [
+      excludeCx2CcGatewayBridge,
       expandedVisibleDay,
       filteredQueryConfig.input.cliKey,
       filteredQueryConfig.input.providerId,
@@ -1378,6 +1392,15 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
             onToggleKey={handleToggleFolderKey}
             onClear={handleClearFolderKeys}
           />
+          <label className="flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+            <span className="whitespace-nowrap">转接去重</span>
+            <Switch
+              checked={excludeCx2CcGatewayBridge}
+              onCheckedChange={setExcludeCx2CcGatewayBridge}
+              size="sm"
+              aria-label="过滤转接重复用量"
+            />
+          </label>
           {TOKEN_COST_RANGE_ITEMS.map((item) => {
             const active = range === item.key;
             return (

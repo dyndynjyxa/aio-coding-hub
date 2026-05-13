@@ -148,6 +148,7 @@ where
     let provider_id = normalize_provider_id_filter(params.provider_id)?;
     let folder_limit = params.folder_limit.map(|value| value.clamp(1, 50) as usize);
     let folder_keys = normalize_folder_keys(params.folder_keys.as_deref())?;
+    let exclude_cx2cc_gateway_bridge = params.exclude_cx2cc_gateway_bridge.unwrap_or(false);
 
     let rows = usage_event_rows(
         conn,
@@ -157,6 +158,7 @@ where
         provider_id,
         None,
         true,
+        exclude_cx2cc_gateway_bridge,
     )?;
     let lookup_keys = session_lookup_keys(&rows);
     let resolved = resolved_folder_map(folder_lookup(&lookup_keys));

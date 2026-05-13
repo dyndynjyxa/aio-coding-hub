@@ -26,6 +26,7 @@ type TokenCostQueryInput = {
   cliKey: null;
   providerId: null;
   folderKeys?: string[] | null;
+  excludeCx2CcGatewayBridge?: boolean | null;
 };
 
 type TokenCostQueryConfig = {

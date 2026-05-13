@@ -4,7 +4,8 @@ use rusqlite::{params_from_iter, Connection, OptionalExtension};
 use std::collections::HashMap;
 
 use super::filters::{
-    build_optional_range_cli_provider_filters, build_optional_range_filters_with_offset, SqlValues,
+    build_optional_range_cli_provider_filters, build_optional_range_filters_with_offset,
+    sql_exclude_cx2cc_gateway_bridge_clause, SqlValues,
 };
 use super::folders::{
     filter_rows_by_folder_keys, resolved_folder_map, session_lookup_keys, usage_event_rows,
@@ -18,6 +19,7 @@ use super::{
     SQL_EFFECTIVE_INPUT_TOKENS_EXPR,
 };
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn leaderboard_v2_with_conn(
     conn: &Connection,
     scope: UsageScopeV2,
@@ -26,6 +28,7 @@ pub(super) fn leaderboard_v2_with_conn(
     cli_key: Option<&str>,
     provider_id: Option<i64>,
     limit: Option<usize>,
+    exclude_cx2cc_gateway_bridge: bool,
 ) -> Result<Vec<UsageLeaderboardRow>, String> {
     let effective_input_expr = SQL_EFFECTIVE_INPUT_TOKENS_EXPR;
     let effective_total_expr = sql_effective_total_tokens_expr();
@@ -49,6 +52,10 @@ pub(super) fn leaderboard_v2_with_conn(
     );
     let (provider_fallback_where_clause, provider_fallback_range_params) =
         build_optional_range_filters_with_offset("r.created_at", start_ts, end_ts, 2);
+    let cx2cc_filter_clause =
+        sql_exclude_cx2cc_gateway_bridge_clause(None, exclude_cx2cc_gateway_bridge);
+    let provider_cx2cc_filter_clause =
+        sql_exclude_cx2cc_gateway_bridge_clause(Some("r"), exclude_cx2cc_gateway_bridge);
 
     let mut out: Vec<UsageLeaderboardRow> = match scope {
         UsageScopeV2::Cli => {
@@ -117,11 +124,13 @@ SELECT
 FROM request_logs
 WHERE excluded_from_stats = 0
 {where_clause}
+{cx2cc_filter_clause}
 GROUP BY cli_key
 "#,
                 effective_input_expr = effective_input_expr,
                 effective_total_expr = effective_total_expr.as_str(),
-                where_clause = where_clause
+                where_clause = where_clause,
+                cx2cc_filter_clause = cx2cc_filter_clause
             );
             let mut stmt = conn
                 .prepare(&sql)
@@ -246,11 +255,13 @@ SELECT
 FROM request_logs
 WHERE excluded_from_stats = 0
 {where_clause}
+{cx2cc_filter_clause}
 GROUP BY COALESCE(NULLIF(requested_model, ''), 'Unknown')
 "#,
                 effective_input_expr = effective_input_expr,
                 effective_total_expr = effective_total_expr.as_str(),
-                where_clause = where_clause
+                where_clause = where_clause,
+                cx2cc_filter_clause = cx2cc_filter_clause
             );
             let mut stmt = conn
                 .prepare(&sql)
@@ -375,11 +386,13 @@ SELECT
 FROM request_logs
 WHERE excluded_from_stats = 0
 {where_clause}
+{cx2cc_filter_clause}
 GROUP BY key
 "#,
                 effective_input_expr = effective_input_expr,
                 effective_total_expr = effective_total_expr.as_str(),
-                where_clause = where_clause
+                where_clause = where_clause,
+                cx2cc_filter_clause = cx2cc_filter_clause
             );
             let mut stmt = conn
                 .prepare(&sql)
@@ -514,11 +527,13 @@ WHERE r.excluded_from_stats = 0
 AND r.final_provider_id IS NOT NULL
 AND r.final_provider_id > 0
 {provider_where_clause}
+{provider_cx2cc_filter_clause}
 GROUP BY r.cli_key, r.final_provider_id
 "#,
                 effective_input_expr = effective_input_expr,
                 effective_total_expr = effective_total_expr,
-                provider_where_clause = provider_where_clause
+                provider_where_clause = provider_where_clause,
+                provider_cx2cc_filter_clause = provider_cx2cc_filter_clause
             );
 
             let mut stmt = conn
@@ -587,9 +602,11 @@ WHERE r.excluded_from_stats = 0
 AND r.final_provider_id = ?1
 AND r.cli_key = ?2
 {provider_fallback_where_clause}
+{provider_cx2cc_filter_clause}
 LIMIT 1
 "#,
-                provider_fallback_where_clause = provider_fallback_where_clause
+                provider_fallback_where_clause = provider_fallback_where_clause,
+                provider_cx2cc_filter_clause = provider_cx2cc_filter_clause
             );
             let mut stmt_fallback_name = conn
                 .prepare(&fallback_name_sql)
@@ -716,6 +733,7 @@ pub(super) struct FolderFilteredLeaderboardParams<'a> {
     pub(super) provider_id: Option<i64>,
     pub(super) folder_keys: &'a [String],
     pub(super) limit: Option<usize>,
+    pub(super) exclude_cx2cc_gateway_bridge: bool,
 }
 
 pub(super) fn leaderboard_v2_folder_filtered_with_conn<F>(
@@ -745,6 +763,7 @@ where
         params.provider_id,
         bucket_sql,
         false,
+        params.exclude_cx2cc_gateway_bridge,
     )?;
     let lookup_keys = session_lookup_keys(&rows);
     let resolved = resolved_folder_map(folder_lookup(&lookup_keys));
@@ -833,6 +852,7 @@ where
                 provider_id: resolved.provider_id,
                 folder_keys,
                 limit,
+                exclude_cx2cc_gateway_bridge: resolved.exclude_cx2cc_gateway_bridge,
             },
             folder_lookup,
         )?);
@@ -846,5 +866,6 @@ where
         resolved.cli_key,
         resolved.provider_id,
         limit,
+        resolved.exclude_cx2cc_gateway_bridge,
     )?)
 }

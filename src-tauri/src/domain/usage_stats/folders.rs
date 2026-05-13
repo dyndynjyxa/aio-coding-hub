@@ -2,7 +2,9 @@ use crate::shared::error::db_err;
 use rusqlite::{params_from_iter, Connection, Row};
 use std::collections::{HashMap, HashSet};
 
-use super::filters::build_optional_range_cli_provider_filters;
+use super::filters::{
+    build_optional_range_cli_provider_filters, sql_exclude_cx2cc_gateway_bridge_clause,
+};
 use super::{
     sql_effective_input_tokens_expr_with_alias, sql_effective_total_tokens_expr_with_alias,
     ProviderAgg, UsageFolderOptionV1,
@@ -166,6 +168,7 @@ pub(super) fn row_to_agg(row: &Row<'_>) -> rusqlite::Result<ProviderAgg> {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn usage_event_rows(
     conn: &Connection,
     start_ts: Option<i64>,
@@ -174,6 +177,7 @@ pub(super) fn usage_event_rows(
     provider_id: Option<i64>,
     bucket_sql: Option<&str>,
     include_hour: bool,
+    exclude_cx2cc_gateway_bridge: bool,
 ) -> Result<Vec<UsageEventAgg>, String> {
     let effective_input_expr = sql_effective_input_tokens_expr_with_alias("r");
     let effective_total_expr = sql_effective_total_tokens_expr_with_alias("r");
@@ -186,6 +190,8 @@ pub(super) fn usage_event_rows(
         cli_key,
         provider_id,
     );
+    let cx2cc_filter_clause =
+        sql_exclude_cx2cc_gateway_bridge_clause(Some("r"), exclude_cx2cc_gateway_bridge);
 
     let bucket_select = match bucket_sql {
         Some(sql) => format!(",\n  {sql} AS bucket_key"),
@@ -287,6 +293,7 @@ FROM request_logs r
 LEFT JOIN providers p ON p.id = r.final_provider_id
 WHERE r.excluded_from_stats = 0
 {where_clause}
+{cx2cc_filter_clause}
 GROUP BY r.cli_key, session_id{bucket_group}{hour_group}
 "#,
         bucket_select = bucket_select,
@@ -294,6 +301,7 @@ GROUP BY r.cli_key, session_id{bucket_group}{hour_group}
         effective_input_expr = effective_input_expr,
         effective_total_expr = effective_total_expr.as_str(),
         where_clause = where_clause,
+        cx2cc_filter_clause = cx2cc_filter_clause,
         bucket_group = bucket_group,
         hour_group = hour_group
     );

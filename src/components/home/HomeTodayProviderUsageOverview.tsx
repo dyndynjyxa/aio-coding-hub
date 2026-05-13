@@ -39,6 +39,7 @@ const TODAY_PROVIDER_QUERY_CONFIG = {
     endTs: null,
     cliKey: null,
     providerId: null,
+    excludeCx2CcGatewayBridge: true,
   },
   previewFactor: 1,
 };

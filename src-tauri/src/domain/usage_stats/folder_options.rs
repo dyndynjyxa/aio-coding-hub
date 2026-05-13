@@ -26,6 +26,7 @@ where
         resolved.provider_id,
         None,
         false,
+        resolved.exclude_cx2cc_gateway_bridge,
     )?;
     let lookup_keys = session_lookup_keys(&rows);
     let folder_map = resolved_folder_map(folder_lookup(&lookup_keys));

@@ -73,6 +73,7 @@ export const usageKeys = {
       cliKey: CliKey | null;
       providerId: number | null;
       folderKeys?: readonly string[] | null;
+      excludeCx2CcGatewayBridge?: boolean | null;
     }
   ) =>
     [
@@ -84,6 +85,7 @@ export const usageKeys = {
       input.cliKey,
       input.providerId,
       normalizeKeyParts(input.folderKeys ?? []),
+      input.excludeCx2CcGatewayBridge ?? null,
     ] as const,
   leaderboardV2: (
     scope: UsageScope,
@@ -95,6 +97,7 @@ export const usageKeys = {
       providerId: number | null;
       limit: number | null;
       folderKeys?: readonly string[] | null;
+      excludeCx2CcGatewayBridge?: boolean | null;
     }
   ) =>
     [
@@ -108,6 +111,7 @@ export const usageKeys = {
       input.providerId,
       input.limit,
       normalizeKeyParts(input.folderKeys ?? []),
+      input.excludeCx2CcGatewayBridge ?? null,
     ] as const,
   dayDetailV1: (input: {
     day: string;
@@ -115,6 +119,7 @@ export const usageKeys = {
     providerId: number | null;
     folderLimit: number | null;
     folderKeys?: readonly string[] | null;
+    excludeCx2CcGatewayBridge?: boolean | null;
   }) =>
     [
       ...usageAllKey,
@@ -124,6 +129,7 @@ export const usageKeys = {
       input.providerId,
       input.folderLimit,
       normalizeKeyParts(input.folderKeys ?? []),
+      input.excludeCx2CcGatewayBridge ?? null,
     ] as const,
   folderOptionsV1: (
     period: UsagePeriod,
@@ -132,6 +138,7 @@ export const usageKeys = {
       endTs: number | null;
       cliKey: CliKey | null;
       providerId: number | null;
+      excludeCx2CcGatewayBridge?: boolean | null;
     }
   ) =>
     [
@@ -142,6 +149,7 @@ export const usageKeys = {
       input.endTs,
       input.cliKey,
       input.providerId,
+      input.excludeCx2CcGatewayBridge ?? null,
     ] as const,
   providerCacheRateTrendV1: (
     period: UsagePeriod,

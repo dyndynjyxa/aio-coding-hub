@@ -11,6 +11,12 @@ pub struct UsageQueryParams {
     pub cli_key: Option<String>,
     pub provider_id: Option<i64>,
     pub folder_keys: Option<Vec<String>>,
+    #[serde(
+        rename = "excludeCx2CcGatewayBridge",
+        alias = "excludeCx2ccGatewayBridge"
+    )]
+    #[specta(rename = "excludeCx2CcGatewayBridge")]
+    pub exclude_cx2cc_gateway_bridge: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, specta::Type)]
@@ -21,6 +27,12 @@ pub struct UsageDayDetailParams {
     pub provider_id: Option<i64>,
     pub folder_limit: Option<u32>,
     pub folder_keys: Option<Vec<String>>,
+    #[serde(
+        rename = "excludeCx2CcGatewayBridge",
+        alias = "excludeCx2ccGatewayBridge"
+    )]
+    #[specta(rename = "excludeCx2CcGatewayBridge")]
+    pub exclude_cx2cc_gateway_bridge: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -147,6 +159,7 @@ pub(super) struct ResolvedQueryParams<'a> {
     pub cli_key: Option<&'a str>,
     pub provider_id: Option<i64>,
     pub folder_keys: Option<Vec<String>>,
+    pub exclude_cx2cc_gateway_bridge: bool,
 }
 
 /// Parse, validate, and compute bounds from raw [`UsageQueryParams`].
@@ -164,6 +177,7 @@ pub(super) fn resolve_query_params<'a>(
     let cli_key = normalize_cli_filter(params.cli_key.as_deref())?;
     let provider_id = normalize_provider_id_filter(params.provider_id)?;
     let folder_keys = normalize_folder_keys(params.folder_keys.as_deref())?;
+    let exclude_cx2cc_gateway_bridge = params.exclude_cx2cc_gateway_bridge.unwrap_or(false);
     Ok(ResolvedQueryParams {
         period,
         start_ts,
@@ -171,5 +185,6 @@ pub(super) fn resolve_query_params<'a>(
         cli_key,
         provider_id,
         folder_keys,
+        exclude_cx2cc_gateway_bridge,
     })
 }

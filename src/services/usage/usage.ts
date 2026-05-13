@@ -53,6 +53,7 @@ function buildQueryParamsV2(
     cliKey: input?.cliKey ?? null,
     providerId: input?.providerId ?? null,
     folderKeys: input?.folderKeys ?? null,
+    excludeCx2CcGatewayBridge: input?.excludeCx2CcGatewayBridge ?? null,
   };
 }
 
@@ -63,6 +64,7 @@ function buildUsageDayDetailParams(input: UsageDayDetailInput): GeneratedUsageDa
     providerId: input.providerId ?? null,
     folderLimit: input.folderLimit ?? null,
     folderKeys: input.folderKeys ?? null,
+    excludeCx2CcGatewayBridge: input.excludeCx2CcGatewayBridge ?? null,
   };
 }
 

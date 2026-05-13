@@ -121,10 +121,7 @@ function makeSortableDayDetail(day = "2026-04-16") {
 }
 
 function controlLabel(element: Element) {
-  if (element instanceof HTMLInputElement) {
-    return element.getAttribute("aria-label");
-  }
-  return element.textContent?.replace(/\s+/g, " ").trim();
+  return element.getAttribute("aria-label") ?? element.textContent?.replace(/\s+/g, " ").trim();
 }
 
 function expectTableRowsInOrder(table: HTMLElement, names: string[]) {
@@ -285,6 +282,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     const filterLabels = Array.from(filterGroup.querySelectorAll("button,input")).map(controlLabel);
     expect(filterLabels).toEqual([
       "全部文件夹",
+      "过滤转接重复用量",
       "今天",
       "昨天",
       "最近 3 天",
@@ -366,6 +364,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         limit: null,
+        excludeCx2CcGatewayBridge: true,
       }),
       undefined
     );
@@ -383,6 +382,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         limit: null,
+        excludeCx2CcGatewayBridge: true,
       }),
       undefined
     );
@@ -521,6 +521,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         limit: null,
+        excludeCx2CcGatewayBridge: true,
       }),
       undefined
     );
@@ -602,6 +603,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         providerId: null,
         folderLimit: 8,
         folderKeys: null,
+        excludeCx2CcGatewayBridge: true,
       },
       expect.objectContaining({ enabled: true })
     );
@@ -819,6 +821,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         endTs: null,
         cliKey: null,
         providerId: null,
+        excludeCx2CcGatewayBridge: true,
       },
       expect.objectContaining({ enabled: true })
     );
@@ -830,6 +833,7 @@ describe("components/home/HomeTokenCostPanel", () => {
       "daily",
       expect.objectContaining({
         folderKeys: ["/Users/demo/aio-coding-hub"],
+        excludeCx2CcGatewayBridge: true,
       }),
       undefined
     );
@@ -838,6 +842,7 @@ describe("components/home/HomeTokenCostPanel", () => {
       "daily",
       expect.objectContaining({
         folderKeys: ["/Users/demo/aio-coding-hub"],
+        excludeCx2CcGatewayBridge: true,
       }),
       undefined
     );
@@ -849,6 +854,127 @@ describe("components/home/HomeTokenCostPanel", () => {
       expect.objectContaining({
         day: "2026-04-16",
         folderKeys: ["/Users/demo/aio-coding-hub"],
+        excludeCx2CcGatewayBridge: true,
+      }),
+      expect.objectContaining({ enabled: true })
+    );
+  });
+
+  it("can include cx2cc gateway bridge usage when the filter is disabled", () => {
+    vi.mocked(useUsageSummaryV2Query).mockReturnValue({
+      data: {
+        requests_total: 6,
+        requests_with_usage: 6,
+        requests_success: 6,
+        requests_failed: 0,
+        cost_covered_success: 6,
+        avg_duration_ms: 880,
+        avg_ttfb_ms: 210,
+        avg_output_tokens_per_second: 102.4,
+        input_tokens: 3400,
+        output_tokens: 1800,
+        io_total_tokens: 5200,
+        total_tokens: 6200,
+        cache_read_input_tokens: 800,
+        cache_creation_input_tokens: 200,
+        cache_creation_5m_input_tokens: 0,
+      },
+      isLoading: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useUsageLeaderboardV2Query).mockImplementation(
+      (scope) =>
+        ({
+          data:
+            scope === "day"
+              ? [
+                  {
+                    key: "2026-04-16",
+                    name: "2026-04-16",
+                    requests_total: 6,
+                    requests_success: 6,
+                    requests_failed: 0,
+                    total_tokens: 6200,
+                    io_total_tokens: 5200,
+                    input_tokens: 3400,
+                    output_tokens: 1800,
+                    cache_creation_input_tokens: 200,
+                    cache_read_input_tokens: 800,
+                    avg_duration_ms: 880,
+                    avg_ttfb_ms: 210,
+                    avg_output_tokens_per_second: 102.4,
+                    cost_usd: 0.6,
+                  },
+                ]
+              : [
+                  {
+                    key: "provider-1",
+                    name: "OpenAI 主供应商",
+                    requests_total: 6,
+                    requests_success: 6,
+                    requests_failed: 0,
+                    total_tokens: 6200,
+                    io_total_tokens: 5200,
+                    input_tokens: 3400,
+                    output_tokens: 1800,
+                    cache_creation_input_tokens: 200,
+                    cache_read_input_tokens: 800,
+                    avg_duration_ms: 880,
+                    avg_ttfb_ms: 210,
+                    avg_output_tokens_per_second: 102.4,
+                    cost_usd: 0.6,
+                  },
+                ],
+          isLoading: false,
+          isFetching: false,
+          error: null,
+          refetch: vi.fn(),
+        }) as any
+    );
+    vi.mocked(useUsageDayDetailV1Query).mockReturnValue({
+      data: makeDayDetail(),
+      isLoading: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any);
+
+    render(<HomeTokenCostPanel />);
+
+    fireEvent.click(screen.getByRole("switch", { name: "过滤转接重复用量" }));
+
+    expect(vi.mocked(useUsageSummaryV2Query)).toHaveBeenLastCalledWith(
+      "daily",
+      expect.objectContaining({
+        excludeCx2CcGatewayBridge: false,
+      }),
+      undefined
+    );
+    expect(vi.mocked(useUsageLeaderboardV2Query)).toHaveBeenLastCalledWith(
+      "provider",
+      "daily",
+      expect.objectContaining({
+        excludeCx2CcGatewayBridge: false,
+      }),
+      undefined
+    );
+    expect(vi.mocked(useUsageFolderOptionsV1Query)).toHaveBeenLastCalledWith(
+      "daily",
+      expect.objectContaining({
+        excludeCx2CcGatewayBridge: false,
+      }),
+      expect.objectContaining({ enabled: true })
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "日期" }));
+    fireEvent.click(screen.getByRole("button", { name: "展开 2026-04-16 日期详情" }));
+
+    expect(vi.mocked(useUsageDayDetailV1Query)).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        day: "2026-04-16",
+        excludeCx2CcGatewayBridge: false,
       }),
       expect.objectContaining({ enabled: true })
     );
@@ -950,6 +1076,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         endTs: Math.floor(new Date(2026, 3, 16, 0, 0, 0).getTime() / 1000),
         cliKey: null,
         providerId: null,
+        excludeCx2CcGatewayBridge: true,
       }),
       undefined
     );
@@ -962,6 +1089,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         limit: null,
+        excludeCx2CcGatewayBridge: true,
       }),
       undefined
     );
@@ -975,6 +1103,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         endTs: Math.floor(new Date(2026, 3, 17, 0, 0, 0).getTime() / 1000),
         cliKey: null,
         providerId: null,
+        excludeCx2CcGatewayBridge: true,
       }),
       undefined
     );
@@ -987,6 +1116,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         limit: null,
+        excludeCx2CcGatewayBridge: true,
       }),
       undefined
     );
@@ -1001,6 +1131,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         folderKeys: null,
+        excludeCx2CcGatewayBridge: true,
       },
       undefined
     );
@@ -1015,6 +1146,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         folderKeys: null,
+        excludeCx2CcGatewayBridge: true,
       },
       undefined
     );
@@ -1085,7 +1217,11 @@ describe("components/home/HomeTokenCostPanel", () => {
     ).toBe(false);
     expect(vi.mocked(useUsageFolderOptionsV1Query)).toHaveBeenLastCalledWith(
       "daily",
-      expect.objectContaining({ startTs: null, endTs: null }),
+      expect.objectContaining({
+        startTs: null,
+        endTs: null,
+        excludeCx2CcGatewayBridge: true,
+      }),
       expect.objectContaining({ enabled: true })
     );
     expect(vi.mocked(useUsageDayDetailV1Query)).toHaveBeenLastCalledWith(
@@ -1094,12 +1230,17 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         folderLimit: 8,
+        excludeCx2CcGatewayBridge: true,
       }),
       expect.objectContaining({ enabled: false })
     );
     expect(vi.mocked(useUsageSummaryV2Query)).toHaveBeenLastCalledWith(
       "daily",
-      expect.objectContaining({ startTs: null, endTs: null }),
+      expect.objectContaining({
+        startTs: null,
+        endTs: null,
+        excludeCx2CcGatewayBridge: true,
+      }),
       undefined
     );
 
@@ -1114,6 +1255,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         endTs: Math.floor(new Date(2026, 4, 1, 0, 0, 0).getTime() / 1000),
         cliKey: null,
         providerId: null,
+        excludeCx2CcGatewayBridge: true,
       }),
       undefined
     );
@@ -1126,6 +1268,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         limit: null,
+        excludeCx2CcGatewayBridge: true,
       }),
       undefined
     );
@@ -1205,6 +1348,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         folderLimit: 8,
+        excludeCx2CcGatewayBridge: true,
       }),
       expect.objectContaining({ enabled: false })
     );

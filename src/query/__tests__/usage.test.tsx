@@ -163,6 +163,7 @@ describe("query/usage", () => {
       cliKey: "claude" as const,
       providerId: 7,
       folderKeys: ["/tmp/project"],
+      excludeCx2CcGatewayBridge: true,
     };
 
     renderHook(
@@ -218,6 +219,7 @@ describe("query/usage", () => {
       providerId: 9,
       limit: null,
       folderKeys: ["/tmp/project"],
+      excludeCx2CcGatewayBridge: true,
     };
 
     renderHook(
@@ -290,6 +292,7 @@ describe("query/usage", () => {
       providerId: null,
       folderLimit: 8,
       folderKeys: ["/tmp/project"],
+      excludeCx2CcGatewayBridge: true,
     };
 
     renderHook(() => useUsageDayDetailV1Query(input), { wrapper });
@@ -318,6 +321,7 @@ describe("query/usage", () => {
             providerId: 9,
             folderLimit: 8,
             folderKeys: ["/tmp/project"],
+            excludeCx2CcGatewayBridge: true,
           },
           { enabled: false }
         ),
@@ -340,6 +344,7 @@ describe("query/usage", () => {
       endTs: 2,
       cliKey: "claude" as const,
       providerId: 11,
+      excludeCx2CcGatewayBridge: true,
     };
 
     renderHook(() => useUsageFolderOptionsV1Query("daily", input), { wrapper });

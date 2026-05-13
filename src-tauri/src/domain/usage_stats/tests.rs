@@ -7,7 +7,9 @@ use super::leaderboard_v2::{
 };
 use super::summary::{summary_query, summary_v2_with_conn};
 use super::*;
+use crate::db;
 use rusqlite::{params, Connection};
+use tempfile::tempdir;
 
 fn setup_conn() -> Connection {
     let conn = Connection::open_in_memory().expect("open in-memory sqlite");
@@ -46,6 +48,13 @@ fn setup_conn() -> Connection {
     )
     .expect("create schema");
     conn
+}
+
+fn setup_temp_db() -> (tempfile::TempDir, db::Db) {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("usage-stats-test.db");
+    let db = db::init_for_tests(&path).expect("init test db");
+    (dir, db)
 }
 
 fn local_day_key(conn: &Connection, ts: i64) -> String {
@@ -166,6 +175,194 @@ INSERT INTO request_logs (
     .expect("insert usage log");
 }
 
+fn insert_migrated_provider(
+    conn: &Connection,
+    id: i64,
+    cli_key: &str,
+    name: &str,
+    source_provider_id: Option<i64>,
+    bridge_type: Option<&str>,
+) {
+    conn.execute(
+        r#"
+INSERT INTO providers (
+  id,
+  cli_key,
+  name,
+  base_url,
+  base_urls_json,
+  base_url_mode,
+  claude_models_json,
+  api_key_plaintext,
+  enabled,
+  priority,
+  created_at,
+  updated_at,
+  sort_order,
+  cost_multiplier,
+  supported_models_json,
+  model_mapping_json,
+  source_provider_id,
+  bridge_type
+) VALUES (
+  ?1,
+  ?2,
+  ?3,
+  'https://example.invalid',
+  '[]',
+  'order',
+  '{}',
+  'test-key',
+  1,
+  100,
+  1000,
+  1000,
+  0,
+  1.0,
+  '{}',
+  '{}',
+  ?4,
+  ?5
+);
+        "#,
+        params![id, cli_key, name, source_provider_id, bridge_type],
+    )
+    .expect("insert migrated provider");
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_migrated_usage_log(
+    conn: &Connection,
+    trace_id: &str,
+    cli_key: &str,
+    provider_id: i64,
+    provider_name: &str,
+    input_tokens: i64,
+    output_tokens: i64,
+    created_at: i64,
+    session_id: Option<&str>,
+) {
+    let attempts_json = format!(
+        r#"[{{"provider_id":{provider_id},"provider_name":"{provider_name}","outcome":"success"}}]"#
+    );
+    conn.execute(
+        r#"
+INSERT INTO request_logs (
+  trace_id,
+  cli_key,
+  method,
+  path,
+  status,
+  error_code,
+  duration_ms,
+  attempts_json,
+  created_at,
+  input_tokens,
+  output_tokens,
+  total_tokens,
+  cache_read_input_tokens,
+  cache_creation_input_tokens,
+  cache_creation_5m_input_tokens,
+  cache_creation_1h_input_tokens,
+  usage_json,
+  ttfb_ms,
+  requested_model,
+  cost_usd_femto,
+  excluded_from_stats,
+  session_id,
+  final_provider_id
+) VALUES (
+  ?1,
+  ?2,
+  'POST',
+  '/v1/messages',
+  200,
+  NULL,
+  1000,
+  ?3,
+  ?4,
+  ?5,
+  ?6,
+  NULL,
+  0,
+  0,
+  0,
+  0,
+  NULL,
+  100,
+  'model-test',
+  NULL,
+  0,
+  ?7,
+  ?8
+);
+        "#,
+        params![
+            trace_id,
+            cli_key,
+            attempts_json,
+            created_at,
+            input_tokens,
+            output_tokens,
+            session_id,
+            provider_id
+        ],
+    )
+    .expect("insert migrated usage log");
+}
+
+#[test]
+fn usage_params_accept_generated_and_legacy_cx2cc_filter_keys() {
+    let params: UsageQueryParams = serde_json::from_value(serde_json::json!({
+        "period": "daily",
+        "startTs": null,
+        "endTs": null,
+        "cliKey": null,
+        "providerId": null,
+        "folderKeys": null,
+        "excludeCx2CcGatewayBridge": true
+    }))
+    .expect("deserialize usage query params");
+    assert_eq!(params.exclude_cx2cc_gateway_bridge, Some(true));
+
+    let legacy_params: UsageQueryParams = serde_json::from_value(serde_json::json!({
+        "period": "daily",
+        "startTs": null,
+        "endTs": null,
+        "cliKey": null,
+        "providerId": null,
+        "folderKeys": null,
+        "excludeCx2ccGatewayBridge": true
+    }))
+    .expect("deserialize legacy usage query params");
+    assert_eq!(legacy_params.exclude_cx2cc_gateway_bridge, Some(true));
+
+    let detail_params: UsageDayDetailParams = serde_json::from_value(serde_json::json!({
+        "day": "2026-04-22",
+        "cliKey": null,
+        "providerId": null,
+        "folderLimit": 8,
+        "folderKeys": null,
+        "excludeCx2CcGatewayBridge": true
+    }))
+    .expect("deserialize usage day detail params");
+    assert_eq!(detail_params.exclude_cx2cc_gateway_bridge, Some(true));
+
+    let legacy_detail_params: UsageDayDetailParams = serde_json::from_value(serde_json::json!({
+        "day": "2026-04-22",
+        "cliKey": null,
+        "providerId": null,
+        "folderLimit": 8,
+        "folderKeys": null,
+        "excludeCx2ccGatewayBridge": true
+    }))
+    .expect("deserialize legacy usage day detail params");
+    assert_eq!(
+        legacy_detail_params.exclude_cx2cc_gateway_bridge,
+        Some(true)
+    );
+}
+
 fn fixture_folder_lookup(keys: &[UsageSessionLookupKey]) -> Vec<UsageResolvedFolder> {
     let requested: std::collections::HashSet<String> = keys
         .iter()
@@ -192,6 +389,185 @@ fn fixture_folder_lookup(keys: &[UsageSessionLookupKey]) -> Vec<UsageResolvedFol
             },
         )
         .collect()
+}
+
+#[test]
+fn cx2cc_gateway_bridge_filter_covers_overview_and_home_usage_queries() {
+    let (_dir, db) = setup_temp_db();
+    let conn = db.open_connection().expect("open test db connection");
+    let start_ts = compute_start_ts_last_n_days(&conn, 1).expect("today start ts");
+    let day = local_day_key(&conn, start_ts);
+
+    insert_migrated_provider(&conn, 100, "claude", "CX2CC Gateway", None, Some("cx2cc"));
+    insert_migrated_provider(&conn, 200, "codex", "Codex Inner", None, None);
+    insert_migrated_provider(
+        &conn,
+        300,
+        "claude",
+        "CX2CC Fixed Source",
+        Some(200),
+        Some("cx2cc"),
+    );
+
+    insert_migrated_usage_log(
+        &conn,
+        "trace-outer",
+        "claude",
+        100,
+        "CX2CC Gateway",
+        1_000,
+        100,
+        start_ts + 60,
+        Some("claude-alpha-1"),
+    );
+    insert_migrated_usage_log(
+        &conn,
+        "trace-inner",
+        "codex",
+        200,
+        "Codex Inner",
+        2_000,
+        200,
+        start_ts + 120,
+        Some("codex-alpha-1"),
+    );
+    insert_migrated_usage_log(
+        &conn,
+        "trace-fixed-source",
+        "claude",
+        300,
+        "CX2CC Fixed Source",
+        3_000,
+        300,
+        start_ts + 180,
+        Some("claude-alpha-1"),
+    );
+
+    let unfiltered = summary_query(
+        &conn,
+        Some(start_ts),
+        Some(start_ts + 86_400),
+        None,
+        None,
+        false,
+    )
+    .expect("unfiltered summary");
+    assert_eq!(unfiltered.requests_total, 3);
+    assert_eq!(unfiltered.total_tokens, 6_600);
+
+    let filtered = summary_query(
+        &conn,
+        Some(start_ts),
+        Some(start_ts + 86_400),
+        None,
+        None,
+        true,
+    )
+    .expect("filtered summary");
+    assert_eq!(filtered.requests_total, 2);
+    assert_eq!(filtered.total_tokens, 5_500);
+
+    let rows = leaderboard_v2_with_conn(
+        &conn,
+        UsageScopeV2::Provider,
+        Some(start_ts),
+        Some(start_ts + 86_400),
+        None,
+        None,
+        Some(50),
+        true,
+    )
+    .expect("filtered provider leaderboard");
+    let keys: std::collections::HashSet<&str> = rows.iter().map(|row| row.key.as_str()).collect();
+    assert!(!keys.contains("claude:100"));
+    assert!(keys.contains("codex:200"));
+    assert!(keys.contains("claude:300"));
+
+    let summary_v2_filtered = summary_v2_with_conn(
+        &conn,
+        &UsageQueryParams {
+            period: "custom".to_string(),
+            start_ts: Some(start_ts),
+            end_ts: Some(start_ts + 86_400),
+            cli_key: None,
+            provider_id: None,
+            folder_keys: None,
+            exclude_cx2cc_gateway_bridge: Some(true),
+        },
+        fixture_folder_lookup,
+    )
+    .expect("filtered summary v2");
+    assert_eq!(summary_v2_filtered.requests_total, 2);
+    assert_eq!(summary_v2_filtered.total_tokens, 5_500);
+
+    let summary_v2_unfiltered = summary_v2_with_conn(
+        &conn,
+        &UsageQueryParams {
+            period: "custom".to_string(),
+            start_ts: Some(start_ts),
+            end_ts: Some(start_ts + 86_400),
+            cli_key: None,
+            provider_id: None,
+            folder_keys: None,
+            exclude_cx2cc_gateway_bridge: Some(false),
+        },
+        fixture_folder_lookup,
+    )
+    .expect("unfiltered summary v2");
+    assert_eq!(summary_v2_unfiltered.requests_total, 3);
+    assert_eq!(summary_v2_unfiltered.total_tokens, 6_600);
+
+    let folder_options = folder_options_v1_with_conn(
+        &conn,
+        &UsageQueryParams {
+            period: "custom".to_string(),
+            start_ts: Some(start_ts),
+            end_ts: Some(start_ts + 86_400),
+            cli_key: None,
+            provider_id: None,
+            folder_keys: None,
+            exclude_cx2cc_gateway_bridge: Some(true),
+        },
+        fixture_folder_lookup,
+    )
+    .expect("filtered folder options");
+    let alpha = folder_options
+        .iter()
+        .find(|row| row.key == "/work/alpha")
+        .expect("alpha folder option");
+    assert_eq!(alpha.requests_total, 2);
+    assert_eq!(alpha.total_tokens, 5_500);
+
+    let detail = day_detail_v1_with_conn(
+        &conn,
+        &UsageDayDetailParams {
+            day: day.to_string(),
+            cli_key: None,
+            provider_id: None,
+            folder_limit: None,
+            folder_keys: Some(vec!["/work/alpha".to_string()]),
+            exclude_cx2cc_gateway_bridge: Some(true),
+        },
+        fixture_folder_lookup,
+    )
+    .expect("filtered day detail");
+    assert_eq!(
+        detail
+            .hours
+            .iter()
+            .map(|row| row.requests_total)
+            .sum::<i64>(),
+        2
+    );
+    assert_eq!(detail.folders.len(), 1);
+    assert_eq!(detail.folders[0].key, "/work/alpha");
+    assert_eq!(detail.folders[0].total_tokens, 5_500);
+
+    drop(conn);
+
+    let hourly_rows = hourly_series(&db, 1).expect("hourly series");
+    let hourly_total: i64 = hourly_rows.iter().map(|row| row.total_tokens).sum();
+    assert_eq!(hourly_total, 5_500);
 }
 
 #[test]
@@ -344,7 +720,7 @@ INSERT INTO request_logs (
     )
     .expect("insert claude");
 
-    let summary = summary_query(&conn, None, None, None, None).expect("summary_query");
+    let summary = summary_query(&conn, None, None, None, None, false).expect("summary_query");
     assert_eq!(summary.requests_total, 3);
     assert_eq!(summary.cost_covered_success, 2);
     assert_eq!(summary.input_tokens, 520);
@@ -362,6 +738,7 @@ INSERT INTO request_logs (
         None,
         None,
         Some(50),
+        false,
     )
     .expect("leaderboard_v2_with_conn");
     assert_eq!(rows.len(), 3);
@@ -396,8 +773,17 @@ INSERT INTO request_logs (
     assert_eq!(claude.total_tokens, 395);
     assert_eq!(claude.cost_usd, None);
 
-    let rows = leaderboard_v2_with_conn(&conn, UsageScopeV2::Cli, None, None, None, None, Some(50))
-        .expect("leaderboard_v2_with_conn cli");
+    let rows = leaderboard_v2_with_conn(
+        &conn,
+        UsageScopeV2::Cli,
+        None,
+        None,
+        None,
+        None,
+        Some(50),
+        false,
+    )
+    .expect("leaderboard_v2_with_conn cli");
     let by_key: std::collections::HashMap<String, UsageLeaderboardRow> =
         rows.into_iter().map(|row| (row.key.clone(), row)).collect();
     assert_eq!(
@@ -410,9 +796,17 @@ INSERT INTO request_logs (
     );
     assert_eq!(by_key.get("claude").expect("claude cli row").cost_usd, None);
 
-    let rows =
-        leaderboard_v2_with_conn(&conn, UsageScopeV2::Model, None, None, None, None, Some(50))
-            .expect("leaderboard_v2_with_conn model");
+    let rows = leaderboard_v2_with_conn(
+        &conn,
+        UsageScopeV2::Model,
+        None,
+        None,
+        None,
+        None,
+        Some(50),
+        false,
+    )
+    .expect("leaderboard_v2_with_conn model");
     let by_key: std::collections::HashMap<String, UsageLeaderboardRow> =
         rows.into_iter().map(|row| (row.key.clone(), row)).collect();
     assert_eq!(
@@ -493,7 +887,7 @@ INSERT INTO request_logs (
     )
     .expect("insert cx2cc request");
 
-    let summary = summary_query(&conn, None, None, None, None).expect("summary_query");
+    let summary = summary_query(&conn, None, None, None, None, false).expect("summary_query");
     assert_eq!(summary.cost_covered_success, 0);
     assert_eq!(summary.input_tokens, 70);
     assert_eq!(summary.cache_read_input_tokens, 30);
@@ -507,6 +901,7 @@ INSERT INTO request_logs (
         None,
         None,
         Some(50),
+        false,
     )
     .expect("leaderboard_v2_with_conn");
     let row = rows
@@ -560,6 +955,7 @@ INSERT INTO request_logs (
         None,
         None,
         Some(50),
+        false,
     )
     .expect("leaderboard_v2_with_conn provider");
 
@@ -734,7 +1130,8 @@ INSERT INTO request_logs (
         .expect("insert request log");
     }
 
-    let summary = summary_query(&conn, None, None, None, Some(123)).expect("filtered summary");
+    let summary =
+        summary_query(&conn, None, None, None, Some(123), false).expect("filtered summary");
     assert_eq!(summary.requests_total, 1);
     assert_eq!(summary.requests_success, 1);
     assert_eq!(summary.cost_covered_success, 0);
@@ -748,6 +1145,7 @@ INSERT INTO request_logs (
         None,
         Some(123),
         Some(50),
+        false,
     )
     .expect("filtered cli leaderboard");
     assert_eq!(cli_rows.len(), 1);
@@ -904,6 +1302,7 @@ INSERT INTO request_logs (
         None,
         None,
         Some(50),
+        false,
     )
     .expect("day leaderboard");
 
@@ -932,6 +1331,7 @@ INSERT INTO request_logs (
         Some("codex"),
         None,
         Some(50),
+        false,
     )
     .expect("day leaderboard cli filter");
     assert_eq!(cli_filtered.len(), 1);
@@ -946,6 +1346,7 @@ INSERT INTO request_logs (
         None,
         Some(456),
         Some(50),
+        false,
     )
     .expect("day leaderboard provider filter");
     assert_eq!(provider_filtered.len(), 1);
@@ -1030,6 +1431,7 @@ fn day_detail_v1_filters_by_local_day_and_returns_hour_buckets() {
             provider_id: None,
             folder_limit: None,
             folder_keys: None,
+            exclude_cx2cc_gateway_bridge: None,
         },
         |_| Vec::new(),
     )
@@ -1059,6 +1461,7 @@ fn day_detail_v1_filters_by_local_day_and_returns_hour_buckets() {
             provider_id: Some(456),
             folder_limit: None,
             folder_keys: None,
+            exclude_cx2cc_gateway_bridge: None,
         },
         |_| Vec::new(),
     )
@@ -1076,6 +1479,7 @@ fn day_detail_v1_filters_by_local_day_and_returns_hour_buckets() {
             provider_id: None,
             folder_limit: None,
             folder_keys: None,
+            exclude_cx2cc_gateway_bridge: None,
         },
         |_| Vec::new(),
     )
@@ -1171,6 +1575,7 @@ fn day_detail_v1_groups_resolved_folders_and_unknown_sessions() {
             provider_id: None,
             folder_limit: None,
             folder_keys: None,
+            exclude_cx2cc_gateway_bridge: None,
         },
         |keys| {
             let mut pairs: Vec<String> = keys
@@ -1300,6 +1705,7 @@ fn folder_options_v1_groups_resolved_folders_and_keeps_unknown_selectable() {
             cli_key: None,
             provider_id: None,
             folder_keys: Some(vec!["/work/alpha".to_string()]),
+            exclude_cx2cc_gateway_bridge: None,
         },
         fixture_folder_lookup,
     )
@@ -1371,6 +1777,7 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
         cli_key: None,
         provider_id: None,
         folder_keys: Some(vec!["/work/alpha".to_string()]),
+        exclude_cx2cc_gateway_bridge: None,
     };
     let alpha_summary =
         summary_v2_with_conn(&conn, &alpha_params, fixture_folder_lookup).expect("summary");
@@ -1388,6 +1795,7 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
             provider_id: None,
             folder_keys: &["/work/alpha".to_string()],
             limit: Some(50),
+            exclude_cx2cc_gateway_bridge: false,
         },
         fixture_folder_lookup,
     )
@@ -1406,6 +1814,7 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
             provider_id: None,
             folder_keys: &["/work/alpha".to_string()],
             limit: Some(50),
+            exclude_cx2cc_gateway_bridge: false,
         },
         fixture_folder_lookup,
     )
@@ -1417,6 +1826,7 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
         &conn,
         &UsageQueryParams {
             folder_keys: Some(vec!["__unknown__".to_string()]),
+            exclude_cx2cc_gateway_bridge: None,
             ..alpha_params.clone()
         },
         fixture_folder_lookup,
@@ -1430,6 +1840,7 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
         &UsageQueryParams {
             provider_id: Some(456),
             folder_keys: Some(vec!["/work/beta".to_string()]),
+            exclude_cx2cc_gateway_bridge: None,
             ..alpha_params
         },
         fixture_folder_lookup,
@@ -1446,6 +1857,7 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
             provider_id: None,
             folder_limit: None,
             folder_keys: Some(vec!["/work/alpha".to_string()]),
+            exclude_cx2cc_gateway_bridge: None,
         },
         fixture_folder_lookup,
     )

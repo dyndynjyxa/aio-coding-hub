@@ -1,7 +1,9 @@
 use crate::db;
 use rusqlite::{params_from_iter, Connection};
 
-use super::filters::build_optional_range_cli_provider_filters;
+use super::filters::{
+    build_optional_range_cli_provider_filters, sql_exclude_cx2cc_gateway_bridge_clause,
+};
 use super::folders::{
     filter_rows_by_folder_keys, resolved_folder_map, session_lookup_keys, usage_event_rows,
     UsageEventAgg,
@@ -17,6 +19,7 @@ fn build_summary_where_clause(
     end_ts: Option<i64>,
     cli_key: Option<&str>,
     provider_id: Option<i64>,
+    exclude_cx2cc_gateway_bridge: bool,
 ) -> (String, Vec<rusqlite::types::Value>) {
     let (filter_sql, values) = build_optional_range_cli_provider_filters(
         "created_at",
@@ -27,7 +30,9 @@ fn build_summary_where_clause(
         cli_key,
         provider_id,
     );
-    let clause = format!("excluded_from_stats = 0{filter_sql}");
+    let cx2cc_filter_sql =
+        sql_exclude_cx2cc_gateway_bridge_clause(None, exclude_cx2cc_gateway_bridge);
+    let clause = format!("excluded_from_stats = 0{filter_sql}{cx2cc_filter_sql}");
     (clause, values)
 }
 
@@ -37,11 +42,17 @@ pub(super) fn summary_query(
     end_ts: Option<i64>,
     cli_key: Option<&str>,
     provider_id: Option<i64>,
+    exclude_cx2cc_gateway_bridge: bool,
 ) -> Result<UsageSummary, String> {
     let effective_input_expr = SQL_EFFECTIVE_INPUT_TOKENS_EXPR;
     let effective_total_expr = sql_effective_total_tokens_expr();
-    let (where_sql, params_vec) =
-        build_summary_where_clause(start_ts, end_ts, cli_key, provider_id);
+    let (where_sql, params_vec) = build_summary_where_clause(
+        start_ts,
+        end_ts,
+        cli_key,
+        provider_id,
+        exclude_cx2cc_gateway_bridge,
+    );
     let sql = format!(
         r#"
 	SELECT
@@ -204,7 +215,7 @@ pub fn summary(
     let start_ts = compute_start_ts(&conn, range)?;
     let cli_key = normalize_cli_filter(cli_key)?;
 
-    Ok(summary_query(&conn, start_ts, None, cli_key, None)?)
+    Ok(summary_query(&conn, start_ts, None, cli_key, None, false)?)
 }
 
 fn summary_from_event_rows(rows: &[UsageEventAgg]) -> UsageSummary {
@@ -272,6 +283,7 @@ where
             resolved.provider_id,
             None,
             false,
+            resolved.exclude_cx2cc_gateway_bridge,
         )?;
         let lookup_keys = session_lookup_keys(&rows);
         let folder_map = resolved_folder_map(folder_lookup(&lookup_keys));
@@ -285,6 +297,7 @@ where
         resolved.end_ts,
         resolved.cli_key,
         resolved.provider_id,
+        resolved.exclude_cx2cc_gateway_bridge,
     )
 }
 

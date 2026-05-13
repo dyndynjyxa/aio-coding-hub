@@ -59,6 +59,13 @@ Use this checklist whenever a Tauri command is added or changed.
 - Use a **single DTO struct** when a command carries more than 3 business fields.
 - Prefer `#[serde(rename_all = "camelCase")]` on command DTOs so the JS side keeps a stable shape.
 - Keep UI form models and IPC DTOs separate when the UI needs different naming or defaults.
+- For fields with acronym-like segments, do not rely on default case conversion across Serde and
+  Specta. Pin the exported and accepted key names explicitly, then add a contract test. Example:
+  `UsageQueryParams.exclude_cx2cc_gateway_bridge` and
+  `UsageDayDetailParams.exclude_cx2cc_gateway_bridge` must export and accept
+  `excludeCx2CcGatewayBridge`; keep `excludeCx2ccGatewayBridge` as a Serde alias for older
+  handwritten callers. Required assertions: generated `src/generated/bindings.ts` contains
+  `excludeCx2CcGatewayBridge`, and Rust deserializes that key to `Some(true)`.
 
 ### Output shape
 

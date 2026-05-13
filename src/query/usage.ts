@@ -56,6 +56,7 @@ export function useUsageSummaryV2Query(
     cliKey: CliKey | null;
     providerId: number | null;
     folderKeys?: string[] | null;
+    excludeCx2CcGatewayBridge?: boolean | null;
   },
   options?: UsageV2QueryOptions
 ) {
@@ -79,6 +80,7 @@ export function useUsageLeaderboardV2Query(
     providerId: number | null;
     limit: number | null;
     folderKeys?: string[] | null;
+    excludeCx2CcGatewayBridge?: boolean | null;
   },
   options?: UsageV2QueryOptions
 ) {
@@ -100,6 +102,7 @@ export function useUsageDayDetailV1Query(input: UsageDayDetailInput, options?: U
       providerId: input.providerId ?? null,
       folderLimit: input.folderLimit ?? null,
       folderKeys: input.folderKeys ?? null,
+      excludeCx2CcGatewayBridge: input.excludeCx2CcGatewayBridge ?? null,
     }),
     queryFn: () => usageDayDetailV1(input),
     enabled: options?.enabled ?? true,
@@ -115,6 +118,7 @@ export function useUsageFolderOptionsV1Query(
     endTs: number | null;
     cliKey: CliKey | null;
     providerId: number | null;
+    excludeCx2CcGatewayBridge?: boolean | null;
   },
   options?: UsageQueryOptions
 ) {

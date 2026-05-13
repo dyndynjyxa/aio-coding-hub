@@ -2768,6 +2768,7 @@ export type UsageDayDetailParams = {
   providerId: number | null;
   folderLimit: number | null;
   folderKeys: string[] | null;
+  excludeCx2CcGatewayBridge: boolean | null;
 };
 export type UsageDayDetailV1 = {
   day: string;
@@ -2876,6 +2877,7 @@ export type UsageQueryParams = {
   cliKey: string | null;
   providerId: number | null;
   folderKeys: string[] | null;
+  excludeCx2CcGatewayBridge: boolean | null;
 };
 export type UsageSummary = {
   requests_total: number;

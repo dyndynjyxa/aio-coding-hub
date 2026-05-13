@@ -276,6 +276,7 @@ describe("services/usage/usage", () => {
       providerId: null,
       folderLimit: 8,
       folderKeys: ["/tmp/project"],
+      excludeCx2CcGatewayBridge: true,
     });
 
     const summaryV2 = await usageSummaryV2("custom");
@@ -285,6 +286,7 @@ describe("services/usage/usage", () => {
       cliKey: "gemini",
       providerId: 7,
       folderKeys: ["/tmp/project"],
+      excludeCx2CcGatewayBridge: true,
     });
 
     const leaderboardRows = await usageLeaderboardV2("provider", "custom");
@@ -295,12 +297,14 @@ describe("services/usage/usage", () => {
       providerId: 9,
       limit: null,
       folderKeys: ["/tmp/project"],
+      excludeCx2CcGatewayBridge: true,
     });
     const folderOptions = await usageFolderOptionsV1("custom", {
       startTs: 1,
       endTs: 2,
       cliKey: "claude",
       providerId: 9,
+      excludeCx2CcGatewayBridge: true,
     });
 
     const cacheRateRows = await usageProviderCacheRateTrendV1("daily", {
@@ -335,6 +339,7 @@ describe("services/usage/usage", () => {
       providerId: null,
       folderLimit: 8,
       folderKeys: ["/tmp/project"],
+      excludeCx2CcGatewayBridge: true,
     });
     expect(commands.usageSummaryV2).toHaveBeenNthCalledWith(1, {
       period: "custom",
@@ -343,6 +348,7 @@ describe("services/usage/usage", () => {
       cliKey: null,
       providerId: null,
       folderKeys: null,
+      excludeCx2CcGatewayBridge: null,
     });
     expect(commands.usageSummaryV2).toHaveBeenNthCalledWith(2, {
       period: "custom",
@@ -351,6 +357,7 @@ describe("services/usage/usage", () => {
       cliKey: "gemini",
       providerId: 7,
       folderKeys: ["/tmp/project"],
+      excludeCx2CcGatewayBridge: true,
     });
     expect(commands.usageLeaderboardV2).toHaveBeenNthCalledWith(
       1,
@@ -362,6 +369,7 @@ describe("services/usage/usage", () => {
         cliKey: null,
         providerId: null,
         folderKeys: null,
+        excludeCx2CcGatewayBridge: null,
       },
       null
     );
@@ -375,6 +383,7 @@ describe("services/usage/usage", () => {
         cliKey: "claude",
         providerId: 9,
         folderKeys: ["/tmp/project"],
+        excludeCx2CcGatewayBridge: true,
       },
       null
     );
@@ -385,6 +394,7 @@ describe("services/usage/usage", () => {
       cliKey: "claude",
       providerId: 9,
       folderKeys: null,
+      excludeCx2CcGatewayBridge: true,
     });
     expect(commands.usageProviderCacheRateTrendV1).toHaveBeenCalledWith(
       {
@@ -394,6 +404,7 @@ describe("services/usage/usage", () => {
         cliKey: "claude",
         providerId: 11,
         folderKeys: null,
+        excludeCx2CcGatewayBridge: null,
       },
       20
     );
