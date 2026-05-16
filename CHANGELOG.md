@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.8](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.40.7...aio-coding-hub-v0.40.8) (2026-05-16)
+
+
+### Features
+
+* **proxy:** 增加活动排序模式ID支持并改进失败重试逻辑 ([3383982](https://github.com/dyndynjyxa/aio-coding-hub/commit/33839827e36cf7af495174cd809d185c4144d0f1))
+
 ## [0.40.7](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.40.6...aio-coding-hub-v0.40.7) (2026-05-09)
 
 
