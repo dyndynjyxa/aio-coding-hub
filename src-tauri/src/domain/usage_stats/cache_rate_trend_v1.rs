@@ -30,18 +30,23 @@ fn bucket_for_period(period: UsagePeriodV2) -> TrendBucketV1 {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ProviderCacheRateTrendQuery<'a> {
+    pub period: UsagePeriodV2,
+    pub start_ts: Option<i64>,
+    pub end_ts: Option<i64>,
+    pub cli_key: Option<&'a str>,
+    pub provider_id: Option<i64>,
+    pub limit: Option<usize>,
+    pub exclude_cx2cc_gateway_bridge: bool,
+}
+
 pub(super) fn provider_cache_rate_trend_v1_with_conn(
     conn: &Connection,
-    period: UsagePeriodV2,
-    start_ts: Option<i64>,
-    end_ts: Option<i64>,
-    cli_key: Option<&str>,
-    provider_id: Option<i64>,
-    limit: Option<usize>,
-    exclude_cx2cc_gateway_bridge: bool,
+    query: ProviderCacheRateTrendQuery<'_>,
 ) -> Result<Vec<UsageProviderCacheRateTrendRowV1>, String> {
-    let bucket = bucket_for_period(period);
-    let limit = match limit {
+    let bucket = bucket_for_period(query.period);
+    let limit = match query.limit {
         None => -1,
         Some(0) => -1,
         Some(v) => v.clamp(1, 200) as i64,
@@ -74,15 +79,15 @@ pub(super) fn provider_cache_rate_trend_v1_with_conn(
         "r.created_at",
         "r.cli_key",
         "r.final_provider_id",
-        start_ts,
-        end_ts,
-        cli_key,
-        provider_id,
+        query.start_ts,
+        query.end_ts,
+        query.cli_key,
+        query.provider_id,
     );
     let (fallback_where_clause, fallback_range_params) =
-        build_optional_range_filters_with_offset("r.created_at", start_ts, end_ts, 2);
+        build_optional_range_filters_with_offset("r.created_at", query.start_ts, query.end_ts, 2);
     let cx2cc_filter_clause =
-        sql_exclude_cx2cc_gateway_bridge_clause(Some("r"), exclude_cx2cc_gateway_bridge);
+        sql_exclude_cx2cc_gateway_bridge_clause(Some("r"), query.exclude_cx2cc_gateway_bridge);
 
     let sql = format!(
         r#"
@@ -280,12 +285,14 @@ pub fn provider_cache_rate_trend_v1(
     let resolved = resolve_query_params(&conn, params)?;
     Ok(provider_cache_rate_trend_v1_with_conn(
         &conn,
-        resolved.period,
-        resolved.start_ts,
-        resolved.end_ts,
-        resolved.cli_key,
-        resolved.provider_id,
-        limit,
-        resolved.exclude_cx2cc_gateway_bridge,
+        ProviderCacheRateTrendQuery {
+            period: resolved.period,
+            start_ts: resolved.start_ts,
+            end_ts: resolved.end_ts,
+            cli_key: resolved.cli_key,
+            provider_id: resolved.provider_id,
+            limit,
+            exclude_cx2cc_gateway_bridge: resolved.exclude_cx2cc_gateway_bridge,
+        },
     )?)
 }

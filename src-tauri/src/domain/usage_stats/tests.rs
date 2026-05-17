@@ -1,4 +1,6 @@
-use super::cache_rate_trend_v1::provider_cache_rate_trend_v1_with_conn;
+use super::cache_rate_trend_v1::{
+    provider_cache_rate_trend_v1_with_conn, ProviderCacheRateTrendQuery,
+};
 use super::day_detail::{day_detail_v1_with_conn, UsageDayResolvedFolder};
 use super::folder_options::folder_options_v1_with_conn;
 use super::leaderboard_v2::{
@@ -1023,13 +1025,15 @@ INSERT INTO request_logs (
 
     let rows_hour = provider_cache_rate_trend_v1_with_conn(
         &conn,
-        UsagePeriodV2::Daily,
-        Some(start_ts_today),
-        Some(start_ts_today + 86_400),
-        None,
-        None,
-        None,
-        false,
+        ProviderCacheRateTrendQuery {
+            period: UsagePeriodV2::Daily,
+            start_ts: Some(start_ts_today),
+            end_ts: Some(start_ts_today + 86_400),
+            cli_key: None,
+            provider_id: None,
+            limit: None,
+            exclude_cx2cc_gateway_bridge: false,
+        },
     )
     .expect("provider_cache_rate_trend_v1_with_conn hour");
 
@@ -1046,13 +1050,15 @@ INSERT INTO request_logs (
     // Weekly bucket is day-based and aggregates both rows into a single point.
     let rows_day = provider_cache_rate_trend_v1_with_conn(
         &conn,
-        UsagePeriodV2::Weekly,
-        Some(start_ts_today),
-        Some(start_ts_today + 86_400),
-        None,
-        None,
-        None,
-        false,
+        ProviderCacheRateTrendQuery {
+            period: UsagePeriodV2::Weekly,
+            start_ts: Some(start_ts_today),
+            end_ts: Some(start_ts_today + 86_400),
+            cli_key: None,
+            provider_id: None,
+            limit: None,
+            exclude_cx2cc_gateway_bridge: false,
+        },
     )
     .expect("provider_cache_rate_trend_v1_with_conn day");
 
@@ -1104,26 +1110,30 @@ fn provider_cache_rate_trend_excludes_cx2cc_gateway_bridge_when_requested() {
 
     let rows_with_bridge = provider_cache_rate_trend_v1_with_conn(
         &conn,
-        UsagePeriodV2::Daily,
-        None,
-        None,
-        None,
-        None,
-        None,
-        false,
+        ProviderCacheRateTrendQuery {
+            period: UsagePeriodV2::Daily,
+            start_ts: None,
+            end_ts: None,
+            cli_key: None,
+            provider_id: None,
+            limit: None,
+            exclude_cx2cc_gateway_bridge: false,
+        },
     )
     .expect("cache trend with bridge");
     assert_eq!(rows_with_bridge.len(), 2);
 
     let rows_without_bridge = provider_cache_rate_trend_v1_with_conn(
         &conn,
-        UsagePeriodV2::Daily,
-        None,
-        None,
-        None,
-        None,
-        None,
-        true,
+        ProviderCacheRateTrendQuery {
+            period: UsagePeriodV2::Daily,
+            start_ts: None,
+            end_ts: None,
+            cli_key: None,
+            provider_id: None,
+            limit: None,
+            exclude_cx2cc_gateway_bridge: true,
+        },
     )
     .expect("cache trend without bridge");
     assert_eq!(rows_without_bridge.len(), 1);
@@ -1223,13 +1233,15 @@ INSERT INTO request_logs (
 
     let cache_rows = provider_cache_rate_trend_v1_with_conn(
         &conn,
-        UsagePeriodV2::Daily,
-        None,
-        None,
-        None,
-        Some(123),
-        None,
-        false,
+        ProviderCacheRateTrendQuery {
+            period: UsagePeriodV2::Daily,
+            start_ts: None,
+            end_ts: None,
+            cli_key: None,
+            provider_id: Some(123),
+            limit: None,
+            exclude_cx2cc_gateway_bridge: false,
+        },
     )
     .expect("filtered cache trend");
     assert_eq!(cache_rows.len(), 1);
