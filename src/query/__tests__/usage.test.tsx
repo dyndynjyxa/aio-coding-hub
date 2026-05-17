@@ -376,6 +376,7 @@ describe("query/usage", () => {
           cliKey: "claude",
           providerId: 11,
           limit: 20,
+          excludeCx2CcGatewayBridge: true,
         }),
       { wrapper }
     );
@@ -387,6 +388,7 @@ describe("query/usage", () => {
         cliKey: "claude",
         providerId: 11,
         limit: 20,
+        excludeCx2CcGatewayBridge: true,
       });
     });
   });

@@ -313,6 +313,7 @@ describe("services/usage/usage", () => {
       cliKey: "claude",
       providerId: 11,
       limit: 20,
+      excludeCx2CcGatewayBridge: true,
     });
 
     expect(todaySummary.requests_total).toBe(1);
@@ -404,7 +405,7 @@ describe("services/usage/usage", () => {
         cliKey: "claude",
         providerId: 11,
         folderKeys: null,
-        excludeCx2CcGatewayBridge: null,
+        excludeCx2CcGatewayBridge: true,
       },
       20
     );

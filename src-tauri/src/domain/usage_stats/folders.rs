@@ -249,7 +249,7 @@ SELECT
   SUM(
     CASE WHEN (
       r.status >= 200 AND r.status < 300 AND r.error_code IS NULL AND
-      r.cost_usd_femto IS NOT NULL AND r.cost_usd_femto > 0
+      r.cost_usd_femto IS NOT NULL
     ) THEN 1 ELSE 0 END
   ) AS cost_covered_success,
   SUM(

@@ -1029,6 +1029,7 @@ INSERT INTO request_logs (
         None,
         None,
         None,
+        false,
     )
     .expect("provider_cache_rate_trend_v1_with_conn hour");
 
@@ -1051,6 +1052,7 @@ INSERT INTO request_logs (
         None,
         None,
         None,
+        false,
     )
     .expect("provider_cache_rate_trend_v1_with_conn day");
 
@@ -1059,6 +1061,73 @@ INSERT INTO request_logs (
     assert_eq!(rows_day[0].denom_tokens, 630);
     assert_eq!(rows_day[0].cache_read_input_tokens, 250);
     assert_eq!(rows_day[0].requests_success, 2);
+}
+
+#[test]
+fn provider_cache_rate_trend_excludes_cx2cc_gateway_bridge_when_requested() {
+    let conn = setup_conn();
+
+    conn.execute(
+        r#"INSERT INTO providers (id, name, source_provider_id, bridge_type) VALUES (?1, ?2, ?3, ?4);"#,
+        params![123, "OpenAI", Option::<i64>::None, Option::<String>::None],
+    )
+    .expect("insert normal provider");
+    conn.execute(
+        r#"INSERT INTO providers (id, name, source_provider_id, bridge_type) VALUES (?1, ?2, ?3, ?4);"#,
+        params![900, "Bridge CX2CC", Option::<i64>::None, "cx2cc"],
+    )
+    .expect("insert cx2cc provider");
+
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            provider_id: 123,
+            provider_name: "OpenAI",
+            input_tokens: Some(120),
+            cache_read_input_tokens: Some(20),
+            created_at: 1000,
+            ..base_usage_log(1000)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            cli_key: "claude",
+            provider_id: 900,
+            provider_name: "Bridge CX2CC",
+            input_tokens: Some(240),
+            cache_read_input_tokens: Some(80),
+            created_at: 1010,
+            ..base_usage_log(1010)
+        },
+    );
+
+    let rows_with_bridge = provider_cache_rate_trend_v1_with_conn(
+        &conn,
+        UsagePeriodV2::Daily,
+        None,
+        None,
+        None,
+        None,
+        None,
+        false,
+    )
+    .expect("cache trend with bridge");
+    assert_eq!(rows_with_bridge.len(), 2);
+
+    let rows_without_bridge = provider_cache_rate_trend_v1_with_conn(
+        &conn,
+        UsagePeriodV2::Daily,
+        None,
+        None,
+        None,
+        None,
+        None,
+        true,
+    )
+    .expect("cache trend without bridge");
+    assert_eq!(rows_without_bridge.len(), 1);
+    assert_eq!(rows_without_bridge[0].key, "codex:123");
 }
 
 #[test]
@@ -1160,6 +1229,7 @@ INSERT INTO request_logs (
         None,
         Some(123),
         None,
+        false,
     )
     .expect("filtered cache trend");
     assert_eq!(cache_rows.len(), 1);
@@ -1738,6 +1808,7 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
             requested_model: "gpt-alpha",
             input_tokens: Some(100),
             output_tokens: Some(20),
+            cost_usd_femto: Some(0),
             session_id: Some("codex-alpha-1"),
             created_at: start_ts + 2 * 3600,
             ..base_usage_log(start_ts)
@@ -1779,9 +1850,21 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
         folder_keys: Some(vec!["/work/alpha".to_string()]),
         exclude_cx2cc_gateway_bridge: None,
     };
+    let unfiltered_summary = summary_v2_with_conn(
+        &conn,
+        &UsageQueryParams {
+            folder_keys: None,
+            ..alpha_params.clone()
+        },
+        fixture_folder_lookup,
+    )
+    .expect("unfiltered summary");
+    assert_eq!(unfiltered_summary.cost_covered_success, 1);
+
     let alpha_summary =
         summary_v2_with_conn(&conn, &alpha_params, fixture_folder_lookup).expect("summary");
     assert_eq!(alpha_summary.requests_total, 1);
+    assert_eq!(alpha_summary.cost_covered_success, 1);
     assert_eq!(alpha_summary.total_tokens, 120);
     assert_eq!(alpha_summary.io_total_tokens, 120);
 

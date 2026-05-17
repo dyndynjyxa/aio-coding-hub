@@ -4,7 +4,8 @@ use rusqlite::{params_from_iter, Connection, OptionalExtension};
 use std::collections::HashMap;
 
 use super::filters::{
-    build_optional_range_cli_provider_filters, build_optional_range_filters_with_offset, SqlValues,
+    build_optional_range_cli_provider_filters, build_optional_range_filters_with_offset,
+    sql_exclude_cx2cc_gateway_bridge_clause, SqlValues,
 };
 use super::{
     extract_final_provider, has_valid_provider_key, resolve_query_params,
@@ -37,6 +38,7 @@ pub(super) fn provider_cache_rate_trend_v1_with_conn(
     cli_key: Option<&str>,
     provider_id: Option<i64>,
     limit: Option<usize>,
+    exclude_cx2cc_gateway_bridge: bool,
 ) -> Result<Vec<UsageProviderCacheRateTrendRowV1>, String> {
     let bucket = bucket_for_period(period);
     let limit = match limit {
@@ -79,6 +81,8 @@ pub(super) fn provider_cache_rate_trend_v1_with_conn(
     );
     let (fallback_where_clause, fallback_range_params) =
         build_optional_range_filters_with_offset("r.created_at", start_ts, end_ts, 2);
+    let cx2cc_filter_clause =
+        sql_exclude_cx2cc_gateway_bridge_clause(Some("r"), exclude_cx2cc_gateway_bridge);
 
     let sql = format!(
         r#"
@@ -93,6 +97,7 @@ WITH top_providers AS (
   AND r.final_provider_id IS NOT NULL
   AND r.final_provider_id > 0
   {where_clause}
+  {cx2cc_filter_clause}
   GROUP BY r.cli_key, r.final_provider_id
   ORDER BY denom_tokens DESC
   LIMIT ?{limit_bind_idx}
@@ -115,6 +120,7 @@ AND r.status >= 200 AND r.status < 300 AND r.error_code IS NULL
 AND r.final_provider_id IS NOT NULL
 AND r.final_provider_id > 0
 {where_clause}
+{cx2cc_filter_clause}
 GROUP BY {group_by_fields}, r.cli_key, r.final_provider_id
 ORDER BY {order_by_fields}, denom_tokens DESC
 "#,
@@ -123,6 +129,7 @@ ORDER BY {order_by_fields}, denom_tokens DESC
         group_by_fields = group_by_fields,
         order_by_fields = order_by_fields,
         where_clause = where_clause,
+        cx2cc_filter_clause = cx2cc_filter_clause,
         limit_bind_idx = where_params.len() + 1,
     );
 
@@ -186,9 +193,11 @@ WHERE r.excluded_from_stats = 0
 AND r.final_provider_id = ?1
 AND r.cli_key = ?2
 {fallback_where_clause}
+{cx2cc_filter_clause}
 LIMIT 1
 "#,
-        fallback_where_clause = fallback_where_clause
+        fallback_where_clause = fallback_where_clause,
+        cx2cc_filter_clause = cx2cc_filter_clause
     );
     let mut stmt_fallback_name = conn
         .prepare(&fallback_sql)
@@ -277,5 +286,6 @@ pub fn provider_cache_rate_trend_v1(
         resolved.cli_key,
         resolved.provider_id,
         limit,
+        resolved.exclude_cx2cc_gateway_bridge,
     )?)
 }

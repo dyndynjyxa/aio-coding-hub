@@ -159,6 +159,7 @@ export const usageKeys = {
       cliKey: CliKey | null;
       providerId: number | null;
       limit: number | null;
+      excludeCx2CcGatewayBridge?: boolean | null;
     }
   ) =>
     [
@@ -170,6 +171,7 @@ export const usageKeys = {
       input.cliKey,
       input.providerId,
       input.limit,
+      input.excludeCx2CcGatewayBridge ?? null,
     ] as const,
 };
 

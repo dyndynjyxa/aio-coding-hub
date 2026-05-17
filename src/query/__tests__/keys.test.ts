@@ -79,6 +79,16 @@ describe("query/keys", () => {
         limit: null,
       })
     ).toEqual(["usage", "leaderboardV2", "provider", "weekly", 1, 2, "claude", 3, null, [], null]);
+    expect(
+      usageKeys.providerCacheRateTrendV1("daily", {
+        startTs: 1,
+        endTs: 2,
+        cliKey: "claude",
+        providerId: 3,
+        limit: 20,
+        excludeCx2CcGatewayBridge: true,
+      })
+    ).toEqual(["usage", "providerCacheRateTrendV1", "daily", 1, 2, "claude", 3, 20, true]);
   });
 
   it("builds cost keys", () => {

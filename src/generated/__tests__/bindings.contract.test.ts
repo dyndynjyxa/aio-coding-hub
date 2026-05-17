@@ -18,6 +18,12 @@ function extractRustStringConst(source: string, constName: string) {
   return match![1];
 }
 
+function extractTypeBody(source: string, typeName: string) {
+  const match = source.match(new RegExp(`export type ${typeName} = \\{([\\s\\S]*?)\\};`));
+  expect(match).toBeTruthy();
+  return match![1];
+}
+
 describe("generated/bindings.ts contract", () => {
   it("documents the generated IPC ownership surface", () => {
     expect(bindingsSource).toContain(
@@ -91,6 +97,16 @@ describe("generated/bindings.ts contract", () => {
     expect(bindingsSource).toContain("upstreamProxyPassword: SensitiveStringUpdate | null");
     expect(bindingsSource).toContain("export type SensitiveStringUpdate");
     expect(bindingsSource).toContain("export type SettingsMutationResult");
+  });
+
+  it("pins acronym casing for usage bridge filter DTO fields", () => {
+    expect(extractTypeBody(bindingsSource, "UsageQueryParams")).toContain(
+      "excludeCx2CcGatewayBridge: boolean | null;"
+    );
+    expect(extractTypeBody(bindingsSource, "UsageDayDetailParams")).toContain(
+      "excludeCx2CcGatewayBridge: boolean | null;"
+    );
+    expect(bindingsSource).not.toContain("excludeCx2ccGatewayBridge: boolean | null;");
   });
 
   it("leaves updater install outside generated bindings when a Channel callback is required", () => {

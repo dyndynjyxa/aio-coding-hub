@@ -139,6 +139,7 @@ export function useUsageProviderCacheRateTrendV1Query(
     cliKey: CliKey | null;
     providerId: number | null;
     limit: number | null;
+    excludeCx2CcGatewayBridge?: boolean | null;
   },
   options?: { enabled?: boolean }
 ) {
