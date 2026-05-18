@@ -23,5 +23,6 @@ pub(crate) mod provider_circuit_breakers;
 pub(crate) mod request_attempt_logs;
 pub(crate) mod request_logs;
 pub(crate) mod settings;
+pub(crate) mod webdav;
 #[cfg_attr(not(windows), allow(dead_code, unused_imports))]
 pub(crate) mod wsl;

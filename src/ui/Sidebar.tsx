@@ -3,6 +3,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   Activity,
   Boxes,
+  CloudUpload,
   Command,
   Cpu,
   FileText,
@@ -38,6 +39,7 @@ const NAV: NavItem[] = [
   { to: "/console", label: "控制台", icon: Terminal },
   { to: "/logs", label: "代理记录", icon: FileText },
   { to: "/cli-manager", label: "CLI 管理", icon: Wrench },
+  { to: "/data-sync", label: "导入/导出", icon: CloudUpload },
   { to: "/settings", label: "设置", icon: Settings2 },
 ];
 
