@@ -95,7 +95,12 @@ export const SortableProviderOrderItem = memo(function SortableProviderOrderItem
   };
 
   return (
-    <div ref={setNodeRef} style={style}>
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn("cursor-grab active:cursor-grabbing", disabled && "cursor-default")}
+      {...(disabled ? {} : { ...attributes, ...listeners })}
+    >
       <ProviderOrderItem
         provider={provider}
         providerId={providerId}
@@ -106,7 +111,6 @@ export const SortableProviderOrderItem = memo(function SortableProviderOrderItem
           isDragging && "z-10 scale-[1.02] opacity-95 shadow-lg ring-2 ring-ring/30",
           disabled && "opacity-70"
         )}
-        dragHandleProps={disabled ? undefined : { ...attributes, ...listeners }}
       />
     </div>
   );
