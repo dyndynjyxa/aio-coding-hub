@@ -28,7 +28,7 @@ function saveWebDavConfig(config: WebDavConfig) {
   localStorage.setItem(WEBDAV_CONFIG_STORAGE_KEY, JSON.stringify(config));
 }
 
-type SyncDataKey = "accounts" | "providers" | "prompts" | "settings";
+type SyncDataKey = "providers" | "prompts" | "settings";
 
 export function WebDavSyncSection() {
   const [config, setConfig] = useState<WebDavConfig>(loadWebDavConfig);
@@ -45,7 +45,6 @@ export function WebDavSyncSection() {
   const [downloading, setDownloading] = useState(false);
 
   const [syncData, setSyncData] = useState<Record<SyncDataKey, boolean>>({
-    accounts: true,
     providers: true,
     prompts: true,
     settings: true,
@@ -184,14 +183,13 @@ export function WebDavSyncSection() {
           <label className="mb-1 block text-xs font-medium text-foreground">同步数据</label>
           <p className="mb-2.5 text-[11px] leading-relaxed text-muted-foreground">
             选择需要通过 WebDAV 同步的共享数据类型。例如 WebDAV
-            配置、同步选择和账号会自动创新等设备本地信息不会被覆盖在当前设备。
+            配置、同步选择等设备本地信息不会被覆盖在当前设备。
           </p>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {(
               [
-                { key: "accounts", label: "账号" },
                 { key: "providers", label: "供应商" },
-                { key: "prompts", label: "并发" },
+                { key: "prompts", label: "提示词" },
                 { key: "settings", label: "偏好设置" },
               ] as const
             ).map(({ key, label }) => (
