@@ -115,32 +115,32 @@ export function WebDavSyncSection() {
   }, [getEffectiveConfig]);
 
   return (
-    <Card className="p-6">
-      <div className="mb-2 flex items-center gap-2">
-        <Cloud className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-        <h3 className="font-semibold text-foreground">WebDAV 同步</h3>
+    <Card className="p-5">
+      <div className="mb-1 flex items-center gap-2">
+        <Cloud className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+        <h3 className="text-sm font-semibold text-foreground">WebDAV 同步</h3>
       </div>
-      <p className="mb-5 text-xs text-muted-foreground">
+      <p className="mb-5 text-xs leading-relaxed text-muted-foreground">
         配置 WebDAV 以同步共享数据。部分设备本地设置不会上传，也不会被远端覆盖。
       </p>
 
       {/* 同步范围说明 */}
-      <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-950/30">
+      <div className="mb-5 rounded-lg border border-blue-200 bg-blue-50/60 px-3 py-2.5 dark:border-blue-800 dark:bg-blue-950/30">
         <div className="flex items-start gap-2">
-          <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-          <div className="text-xs text-blue-800 dark:text-blue-300">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-600 dark:text-blue-400" />
+          <p className="text-[11px] leading-relaxed text-blue-800 dark:text-blue-300">
             <span className="font-medium">同步范围说明：</span>
             WebDAV 主要用于同步共享数据，不等同于完整设备备份。当前设备的 WebDAV
             连接/加密设置、同步数据选择、以及那些自动同步 WebDAV 配置不会通过 WebDAV
             上传，也不会被或替覆盖。如需工作区本地设置，请使用手动导出/导入。
-          </div>
+          </p>
         </div>
       </div>
 
       {/* WebDAV 配置表单 */}
       <div className="space-y-4">
         <div>
-          <label className="mb-1.5 block text-sm font-medium text-foreground">WebDAV 地址</label>
+          <label className="mb-1.5 block text-xs font-medium text-foreground">WebDAV 地址</label>
           <Input
             placeholder="https://"
             value={config.url}
@@ -150,7 +150,7 @@ export function WebDavSyncSection() {
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-foreground">用户名</label>
+            <label className="mb-1.5 block text-xs font-medium text-foreground">用户名</label>
             <Input
               placeholder="用户名"
               value={config.username}
@@ -158,19 +158,20 @@ export function WebDavSyncSection() {
             />
           </div>
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-foreground">密码</label>
+            <label className="mb-1.5 block text-xs font-medium text-foreground">密码</label>
             <div className="relative">
               <Input
                 type={showPassword ? "text" : "password"}
                 placeholder="••••••••••"
                 value={config.password}
                 onChange={(e) => updateField("password", e.target.value)}
-                className="pr-10"
+                className="pr-9"
               />
               <button
                 type="button"
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? "隐藏密码" : "显示密码"}
               >
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
@@ -180,12 +181,12 @@ export function WebDavSyncSection() {
 
         {/* 同步数据选择 */}
         <div>
-          <label className="mb-2 block text-sm font-medium text-foreground">同步数据</label>
-          <p className="mb-3 text-xs text-muted-foreground">
+          <label className="mb-1 block text-xs font-medium text-foreground">同步数据</label>
+          <p className="mb-2.5 text-[11px] leading-relaxed text-muted-foreground">
             选择需要通过 WebDAV 同步的共享数据类型。例如 WebDAV
             配置、同步选择和账号会自动创新等设备本地信息不会被覆盖在当前设备。
           </p>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {(
               [
                 { key: "accounts", label: "账号" },
@@ -196,13 +197,13 @@ export function WebDavSyncSection() {
             ).map(({ key, label }) => (
               <label
                 key={key}
-                className="flex items-center gap-2 rounded-lg border border-input px-3 py-2 text-sm"
+                className="flex cursor-pointer items-center gap-2 rounded-md border border-input px-2.5 py-1.5 text-xs transition hover:bg-secondary"
               >
                 <input
                   type="checkbox"
                   checked={syncData[key]}
                   onChange={(e) => setSyncData((prev) => ({ ...prev, [key]: e.target.checked }))}
-                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                 />
                 <span className="text-foreground">{label}</span>
               </label>
@@ -211,11 +212,11 @@ export function WebDavSyncSection() {
         </div>
 
         {/* 加密设置 */}
-        <div className="rounded-lg border border-input p-4">
+        <div className="rounded-lg border border-input px-4 py-3">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-sm font-medium text-foreground">WebDAV 数据加密</div>
-              <div className="text-xs text-muted-foreground">
+              <div className="text-xs font-medium text-foreground">WebDAV 数据加密</div>
+              <div className="mt-0.5 text-[11px] text-muted-foreground">
                 使用密码加密上传到 WebDAV 的同步数据。恢复时需要同一密码。
               </div>
             </div>
@@ -223,25 +224,26 @@ export function WebDavSyncSection() {
           </div>
 
           {encryptionEnabled && (
-            <div className="mt-4">
-              <label className="mb-1.5 block text-sm font-medium text-foreground">加密密码</label>
+            <div className="mt-3 border-t border-input pt-3">
+              <label className="mb-1.5 block text-xs font-medium text-foreground">加密密码</label>
               <div className="relative">
                 <Input
                   type={showEncPassword ? "text" : "password"}
                   placeholder="请输入密码"
                   value={encPassword}
                   onChange={(e) => setEncPassword(e.target.value)}
-                  className="pr-10"
+                  className="pr-9"
                 />
                 <button
                   type="button"
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                   onClick={() => setShowEncPassword(!showEncPassword)}
+                  aria-label={showEncPassword ? "隐藏密码" : "显示密码"}
                 >
                   {showEncPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
-              <p className="mt-1.5 text-xs text-muted-foreground">
+              <p className="mt-1 text-[11px] text-muted-foreground">
                 用于加密上传到 WebDAV 的同步数据，以及解密从 WebDAV 下载的数据。
               </p>
             </div>
@@ -249,13 +251,13 @@ export function WebDavSyncSection() {
         </div>
 
         {/* 操作按钮 */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Button variant="primary" size="md" onClick={handleSaveConfig} className="w-full">
+        <div className="grid grid-cols-4 gap-2">
+          <Button variant="primary" size="sm" onClick={handleSaveConfig} className="w-full">
             保存配置
           </Button>
           <Button
             variant="secondary"
-            size="md"
+            size="sm"
             onClick={() => void handleTest()}
             disabled={testing || !config.url}
             className="w-full"
@@ -264,7 +266,7 @@ export function WebDavSyncSection() {
           </Button>
           <Button
             variant="warning"
-            size="md"
+            size="sm"
             onClick={() => void handleUpload()}
             disabled={uploading || !config.url}
             className="w-full"
@@ -273,7 +275,7 @@ export function WebDavSyncSection() {
           </Button>
           <Button
             variant="secondary"
-            size="md"
+            size="sm"
             onClick={() => void handleDownload()}
             disabled={downloading || !config.url}
             className="w-full"
