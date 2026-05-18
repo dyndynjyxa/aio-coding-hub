@@ -42,18 +42,30 @@ export function useNotificationSoundEnabled(): boolean {
   );
 }
 
-let cachedAudio: HTMLAudioElement | null = null;
-
 export function playNotificationSound(): void {
   try {
-    // Create a fresh Audio instance each time to avoid stale state issues in Tauri WebView.
-    // Reusing a cached instance can fail silently after the first play on some platforms.
-    const audio = cachedAudio ?? new Audio("/ding.mp3");
-    cachedAudio = audio;
+    // Always create a fresh Audio instance and discard after playback.
+    // Do NOT cache the HTMLAudioElement — on macOS, a live Audio element causes
+    // the app to register as a "Now Playing" media session, which hijacks the
+    // system media keys (F7/F8/F9) away from the user's music player.
+    const audio = new Audio("/ding.mp3");
     audio.currentTime = 0;
-    audio.play()?.catch((err) => {
-      logToConsole("warn", "通知音效播放失败", { error: String(err) });
-    });
+    const playPromise = audio.play();
+    playPromise
+      ?.then(() => {
+        // Release the audio element after playback ends so macOS drops the media session.
+        audio.addEventListener(
+          "ended",
+          () => {
+            audio.src = "";
+            audio.load();
+          },
+          { once: true }
+        );
+      })
+      .catch((err) => {
+        logToConsole("warn", "通知音效播放失败", { error: String(err) });
+      });
   } catch (err) {
     logToConsole("warn", "通知音效创建失败", { error: String(err) });
   }
