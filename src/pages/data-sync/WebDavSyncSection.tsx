@@ -191,7 +191,7 @@ export function WebDavSyncSection() {
               [
                 { key: "accounts", label: "账号" },
                 { key: "providers", label: "供应商" },
-                { key: "prompts", label: "并发" },
+                { key: "prompts", label: "提示词" },
                 { key: "settings", label: "偏好设置" },
               ] as const
             ).map(({ key, label }) => (
