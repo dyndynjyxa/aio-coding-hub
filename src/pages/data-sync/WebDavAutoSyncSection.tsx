@@ -91,29 +91,28 @@ export function WebDavAutoSyncSection() {
   }, [config.enabled, config.intervalSeconds, handleSyncNow]);
 
   return (
-    <Card className="p-6">
-      <div className="mb-2 flex items-center justify-between">
+    <Card className="p-5">
+      <div className="mb-1 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <RefreshCw className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-          <h3 className="font-semibold text-foreground">WebDAV 自动同步</h3>
+          <RefreshCw className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+          <h3 className="text-sm font-semibold text-foreground">WebDAV 自动同步</h3>
         </div>
         <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
           实验性
         </span>
       </div>
-      <p className="mb-5 text-xs text-muted-foreground">
+      <p className="mb-5 text-xs leading-relaxed text-muted-foreground">
         配置自动同步共享数据。设备本地设置仍保留在当前设备。
       </p>
 
-      <div className="space-y-5">
+      <div className="space-y-4">
         {/* 启用开关 */}
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-sm font-medium text-foreground">启用自动同步</div>
-            <div className="text-xs text-muted-foreground">
+            <div className="text-xs font-medium text-foreground">启用自动同步</div>
+            <div className="mt-0.5 text-[11px] text-muted-foreground">
               {config.enabled ? "已启用" : "已停用"}
-              {" — "}
-              开启后将按设定间隔自动从 WebDAV 拉取共享数据。
+              {" — "}开启后将按设定间隔自动从 WebDAV 拉取共享数据。
             </div>
           </div>
           <Switch
@@ -124,7 +123,7 @@ export function WebDavAutoSyncSection() {
 
         {/* 同步间隔 */}
         <div>
-          <label className="mb-1.5 block text-sm font-medium text-foreground">同步间隔（秒）</label>
+          <label className="mb-1.5 block text-xs font-medium text-foreground">同步间隔（秒）</label>
           <Input
             type="number"
             min={60}
@@ -137,15 +136,14 @@ export function WebDavAutoSyncSection() {
               }))
             }
           />
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-[11px] text-muted-foreground">
             约 {Math.round(config.intervalSeconds / 60)} 分钟
           </p>
-          <p className="text-xs text-muted-foreground">设置自动同步的间隔时间</p>
         </div>
 
         {/* 同步策略 */}
         <div>
-          <label className="mb-1.5 block text-sm font-medium text-foreground">同步策略</label>
+          <label className="mb-1.5 block text-xs font-medium text-foreground">同步策略</label>
           <Select
             value={config.strategy}
             onChange={(e) =>
@@ -159,17 +157,17 @@ export function WebDavAutoSyncSection() {
             <option value="remote_overwrite">远程覆盖 - 远程数据覆盖本地</option>
             <option value="local_overwrite">本地优先 - 保留本地数据，仅补充远程新增</option>
           </Select>
-          <p className="mt-1 text-xs text-muted-foreground">选择数据冲突的处理方式</p>
+          <p className="mt-1 text-[11px] text-muted-foreground">选择数据冲突的处理方式</p>
         </div>
 
         {/* 操作按钮 */}
         <div className="grid grid-cols-2 gap-3">
-          <Button variant="primary" size="md" onClick={handleSave} className="w-full">
+          <Button variant="primary" size="sm" onClick={handleSave} className="w-full">
             保存设置
           </Button>
           <Button
             variant="primary"
-            size="md"
+            size="sm"
             onClick={() => void handleSyncNow()}
             disabled={syncing}
             className="w-full"
