@@ -193,6 +193,10 @@ macro_rules! generated_command_registry {
             cli_proxy_rebind_codex_home => crate::commands::cli_proxy::cli_proxy_rebind_codex_home,
             // ── provider_limit_usage ──
             provider_limit_usage_v1 => crate::commands::provider_limit_usage::provider_limit_usage_v1,
+            // ── webdav ──
+            webdav_test => crate::commands::webdav::webdav_test,
+            webdav_upload_sync => crate::commands::webdav::webdav_upload_sync,
+            webdav_download_sync => crate::commands::webdav::webdav_download_sync,
             // ── workspaces ──
             workspaces_list => crate::commands::workspaces::workspaces_list,
             workspace_create => crate::commands::workspaces::workspace_create,
