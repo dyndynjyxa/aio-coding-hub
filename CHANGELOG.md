@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.40.9](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.40.8...aio-coding-hub-v0.40.9) (2026-05-18)
+
+
+### Features
+
+* 优化首页用量面板的日期详情、文件夹筛选和列表展示 ([#242](https://github.com/dyndynjyxa/aio-coding-hub/issues/242)) ([5218ec5](https://github.com/dyndynjyxa/aio-coding-hub/commit/5218ec5cb48210a40ac1ba36d405fd096f33f6b9))
+
+
+### Bug Fixes
+
+* **proxy:** 修正非匹配客户端错误的中止判定逻辑 ([56f37e7](https://github.com/dyndynjyxa/aio-coding-hub/commit/56f37e75fbf0e9266f031e9daabc5d215eea1593))
+* repair CI lockfile and clippy ([d403671](https://github.com/dyndynjyxa/aio-coding-hub/commit/d4036715b46ef9a6b6237f8cce8d0839bc94873e))
+
 ## [0.40.8](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.40.7...aio-coding-hub-v0.40.8) (2026-05-16)
 
 
