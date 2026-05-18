@@ -37,7 +37,7 @@ dependencies = [
 
 [[package]]
 name = "aio-coding-hub"
-version = "0.40.8"
+version = "0.40.9"
 dependencies = [
  "axum",
  "base64 0.22.1",
