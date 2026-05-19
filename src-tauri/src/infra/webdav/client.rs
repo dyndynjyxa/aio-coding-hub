@@ -88,8 +88,8 @@ fn encrypt_data(plaintext: &[u8], password: &str) -> AppResult<Vec<u8>> {
 
     // Compute HMAC-like tag: SHA-256(key || nonce || ciphertext)
     let mut tag_hasher = Sha256::new();
-    tag_hasher.update(&key_bytes);
-    tag_hasher.update(&nonce);
+    tag_hasher.update(key_bytes);
+    tag_hasher.update(nonce);
     tag_hasher.update(&ciphertext);
     let tag = tag_hasher.finalize();
 
@@ -122,7 +122,7 @@ fn decrypt_data(encrypted: &[u8], password: &str) -> AppResult<Vec<u8>> {
 
     // Verify tag
     let mut tag_hasher = Sha256::new();
-    tag_hasher.update(&key_bytes);
+    tag_hasher.update(key_bytes);
     tag_hasher.update(nonce);
     tag_hasher.update(ciphertext);
     let expected_tag = tag_hasher.finalize();
@@ -142,9 +142,8 @@ fn xor_encrypt(data: &[u8], key: &[u8], nonce: &[u8]) -> Vec<u8> {
     use sha2::{Digest, Sha256};
 
     let mut output = Vec::with_capacity(data.len());
-    let mut block_counter: u64 = 0;
 
-    for chunk in data.chunks(32) {
+    for (block_counter, chunk) in (0_u64..).zip(data.chunks(32)) {
         let mut stream_hasher = Sha256::new();
         stream_hasher.update(key);
         stream_hasher.update(nonce);
@@ -154,7 +153,6 @@ fn xor_encrypt(data: &[u8], key: &[u8], nonce: &[u8]) -> Vec<u8> {
         for (i, &byte) in chunk.iter().enumerate() {
             output.push(byte ^ stream_block[i]);
         }
-        block_counter += 1;
     }
 
     output

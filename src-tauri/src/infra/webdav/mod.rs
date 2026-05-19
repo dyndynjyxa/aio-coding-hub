@@ -6,6 +6,6 @@ mod client;
 mod tests;
 
 pub use client::{
-    webdav_download, webdav_test_connection, webdav_upload, WebDavConfig, WebDavDownloadResult,
-    WebDavTestResult, WebDavUploadResult,
+    webdav_download, webdav_test_connection, webdav_upload, WebDavConfig, WebDavTestResult,
+    WebDavUploadResult,
 };

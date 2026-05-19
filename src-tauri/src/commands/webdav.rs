@@ -1,9 +1,9 @@
 //! Usage: WebDAV sync Tauri commands (test, upload, download).
 
 use crate::app_state::{ensure_db_ready, DbInitState};
+use crate::blocking;
 use crate::infra::config_migrate;
-use crate::webdav::{WebDavConfig, WebDavDownloadResult, WebDavTestResult, WebDavUploadResult};
-use crate::{blocking, db, settings};
+use crate::webdav::{WebDavConfig, WebDavTestResult, WebDavUploadResult};
 
 #[tauri::command]
 #[specta::specta]
