@@ -51,3 +51,12 @@ export async function desktopNotificationNotify(options: {
       commands.desktopNotificationNotify(payload) as Promise<GeneratedCommandResult<boolean>>,
   });
 }
+
+export async function desktopNotificationPlaySound(): Promise<void> {
+  await invokeGeneratedIpc<boolean>({
+    title: "播放通知音效失败",
+    cmd: "desktop_notification_play_sound",
+    invoke: () =>
+      commands.desktopNotificationPlaySound() as Promise<GeneratedCommandResult<boolean>>,
+  });
+}

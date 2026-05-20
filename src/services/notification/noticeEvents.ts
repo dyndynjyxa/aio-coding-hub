@@ -37,7 +37,7 @@ export async function listenNoticeEvents(): Promise<() => void> {
         if (!permissionGranted) return;
 
         if (getNotificationSoundEnabled()) {
-          // Custom sound enabled: play ding.mp3 and send silent notification (no sound param)
+          // Custom sound enabled: play native custom sound and send silent notification.
           playNotificationSound();
           await desktopNotificationNotify({ title: payload.title, body: payload.body });
         } else {

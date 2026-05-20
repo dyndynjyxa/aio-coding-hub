@@ -37,6 +37,7 @@ macro_rules! generated_command_registry {
             desktop_dialog_save => crate::commands::desktop::desktop_dialog_save,
             desktop_notification_is_permission_granted => crate::commands::desktop::desktop_notification_is_permission_granted,
             desktop_notification_notify => crate::commands::desktop::desktop_notification_notify,
+            desktop_notification_play_sound => crate::commands::desktop::desktop_notification_play_sound,
             desktop_notification_request_permission => crate::commands::desktop::desktop_notification_request_permission,
             desktop_opener_open_path => crate::commands::desktop::desktop_opener_open_path,
             desktop_opener_open_url => crate::commands::desktop::desktop_opener_open_url,

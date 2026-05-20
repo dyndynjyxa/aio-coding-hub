@@ -4,12 +4,13 @@
  * Usage:
  * - `setNotificationSoundEnabled(true/false)` to toggle
  * - `useNotificationSoundEnabled()` for React state
- * - `playNotificationSound()` to play ding.mp3
+ * - `playNotificationSound()` to play the bundled native notification sound
  */
 
 import { useSyncExternalStore } from "react";
 
 import { logToConsole } from "../consoleLog";
+import { desktopNotificationPlaySound } from "../desktop/notification";
 
 let enabled = true;
 const listeners = new Set<() => void>();
@@ -43,30 +44,7 @@ export function useNotificationSoundEnabled(): boolean {
 }
 
 export function playNotificationSound(): void {
-  try {
-    // Always create a fresh Audio instance and discard after playback.
-    // Do NOT cache the HTMLAudioElement — on macOS, a live Audio element causes
-    // the app to register as a "Now Playing" media session, which hijacks the
-    // system media keys (F7/F8/F9) away from the user's music player.
-    const audio = new Audio("/ding.mp3");
-    audio.currentTime = 0;
-    const playPromise = audio.play();
-    playPromise
-      ?.then(() => {
-        // Release the audio element after playback ends so macOS drops the media session.
-        audio.addEventListener(
-          "ended",
-          () => {
-            audio.src = "";
-            audio.load();
-          },
-          { once: true }
-        );
-      })
-      .catch((err) => {
-        logToConsole("warn", "通知音效播放失败", { error: String(err) });
-      });
-  } catch (err) {
-    logToConsole("warn", "通知音效创建失败", { error: String(err) });
-  }
+  void desktopNotificationPlaySound().catch((err) => {
+    logToConsole("warn", "通知音效播放失败", { error: String(err) });
+  });
 }
