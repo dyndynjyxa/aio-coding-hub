@@ -24,6 +24,15 @@ function extractTypeBody(source: string, typeName: string) {
   return match![1];
 }
 
+function extractGeneratedCommand(source: string, commandName: string) {
+  const start = source.indexOf(`async ${commandName}(`);
+  expect(start).toBeGreaterThanOrEqual(0);
+  const tail = source.slice(start);
+  const end = tail.search(/\n\s*},/);
+  expect(end).toBeGreaterThan(0);
+  return tail.slice(0, end);
+}
+
 describe("generated/bindings.ts contract", () => {
   it("documents the generated IPC ownership surface", () => {
     expect(bindingsSource).toContain(
@@ -107,6 +116,23 @@ describe("generated/bindings.ts contract", () => {
       "excludeCx2CcGatewayBridge: boolean | null"
     );
     expect(bindingsSource).not.toContain("excludeCx2ccGatewayBridge: boolean | null;");
+  });
+
+  it("keeps Result commands wrapped in ok/error envelopes while raw commands stay raw", () => {
+    const settingsGet = extractGeneratedCommand(bindingsSource, "settingsGet");
+    const gatewayStart = extractGeneratedCommand(bindingsSource, "gatewayStart");
+    const requestLogsList = extractGeneratedCommand(bindingsSource, "requestLogsList");
+    const gatewayStatus = extractGeneratedCommand(bindingsSource, "gatewayStatus");
+
+    for (const body of [settingsGet, gatewayStart, requestLogsList]) {
+      expect(body).toContain("Promise<Result<");
+      expect(body).toContain('return { status: "ok", data: await TAURI_INVOKE(');
+      expect(body).toContain('return { status: "error", error: e as any };');
+    }
+
+    expect(gatewayStatus).toContain("Promise<GatewayStatus>");
+    expect(gatewayStatus).toContain('return await TAURI_INVOKE("gateway_status");');
+    expect(gatewayStatus).not.toContain('status: "error"');
   });
 
   it("leaves updater install outside generated bindings when a Channel callback is required", () => {

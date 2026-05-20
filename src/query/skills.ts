@@ -21,6 +21,8 @@ import {
   skillReturnToLocal,
   skillCheckUpdates,
   skillUpdate,
+  normalizeSkillLocalDirName,
+  normalizeSkillsLocalDirNames,
   type AvailableSkillSummary,
   type InstalledSkillSummary,
   type LocalSkillSummary,
@@ -29,6 +31,8 @@ import {
   type SkillRepoSummary,
   type SkillsPaths,
   type SkillUpdateInfo,
+  validateSkillsCliKey,
+  validateSkillsWorkspaceId,
 } from "../services/workspace/skills";
 import { skillsKeys } from "./keys";
 
@@ -45,13 +49,15 @@ export function useSkillsInstalledListQuery(
   workspaceId: number | null,
   options?: { enabled?: boolean }
 ) {
+  const normalizedWorkspaceId = workspaceId == null ? null : validateSkillsWorkspaceId(workspaceId);
+
   return useQuery({
-    queryKey: skillsKeys.installedList(workspaceId),
+    queryKey: skillsKeys.installedList(normalizedWorkspaceId),
     queryFn: () => {
-      if (!workspaceId) return null;
-      return skillsInstalledList(workspaceId);
+      if (normalizedWorkspaceId == null) return null;
+      return skillsInstalledList(normalizedWorkspaceId);
     },
-    enabled: Boolean(workspaceId) && (options?.enabled ?? true),
+    enabled: normalizedWorkspaceId != null && (options?.enabled ?? true),
   });
 }
 
@@ -59,13 +65,15 @@ export function useSkillsLocalListQuery(
   workspaceId: number | null,
   options?: { enabled?: boolean }
 ) {
+  const normalizedWorkspaceId = workspaceId == null ? null : validateSkillsWorkspaceId(workspaceId);
+
   return useQuery({
-    queryKey: skillsKeys.localList(workspaceId),
+    queryKey: skillsKeys.localList(normalizedWorkspaceId),
     queryFn: () => {
-      if (!workspaceId) return null;
-      return skillsLocalList(workspaceId);
+      if (normalizedWorkspaceId == null) return null;
+      return skillsLocalList(normalizedWorkspaceId);
     },
-    enabled: Boolean(workspaceId) && (options?.enabled ?? true),
+    enabled: normalizedWorkspaceId != null && (options?.enabled ?? true),
   });
 }
 
@@ -99,13 +107,15 @@ export function useSkillsDiscoverAvailableMutation() {
 }
 
 export function useSkillsPathsQuery(cliKey: CliKey | null, options?: { enabled?: boolean }) {
+  const normalizedCliKey = cliKey == null ? null : validateSkillsCliKey(cliKey);
+
   return useQuery({
-    queryKey: skillsKeys.paths(cliKey),
+    queryKey: skillsKeys.paths(normalizedCliKey),
     queryFn: () => {
-      if (!cliKey) return null;
-      return skillsPathsGet(cliKey);
+      if (!normalizedCliKey) return null;
+      return skillsPathsGet(normalizedCliKey);
     },
-    enabled: Boolean(cliKey) && (options?.enabled ?? true),
+    enabled: Boolean(normalizedCliKey) && (options?.enabled ?? true),
     placeholderData: keepPreviousData,
   });
 }
@@ -155,6 +165,7 @@ export function useSkillRepoDeleteMutation() {
 }
 
 export function useSkillInstallMutation(workspaceId: number) {
+  const normalizedWorkspaceId = validateSkillsWorkspaceId(workspaceId);
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -165,7 +176,7 @@ export function useSkillInstallMutation(workspaceId: number) {
       enabled: boolean;
     }) =>
       skillInstall({
-        workspaceId,
+        workspaceId: normalizedWorkspaceId,
         gitUrl: input.gitUrl,
         branch: input.branch,
         sourceSubdir: input.sourceSubdir,
@@ -174,7 +185,7 @@ export function useSkillInstallMutation(workspaceId: number) {
     onSuccess: (next) => {
       if (!next) return;
       queryClient.setQueryData<InstalledSkillSummary[]>(
-        skillsKeys.installedList(workspaceId),
+        skillsKeys.installedList(normalizedWorkspaceId),
         (cur) => {
           const prev = cur ?? [];
           const exists = prev.some((s) => s.id === next.id);
@@ -187,45 +198,55 @@ export function useSkillInstallMutation(workspaceId: number) {
   });
 }
 
-export function useSkillInstallToLocalMutation(workspaceId: number) {
+export function useSkillInstallToLocalMutation(workspaceId: number | null) {
+  const normalizedWorkspaceId = workspaceId == null ? null : validateSkillsWorkspaceId(workspaceId);
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (input: { gitUrl: string; branch: string; sourceSubdir: string }) =>
-      skillInstallToLocal({
-        workspaceId,
+    mutationFn: async (input: { gitUrl: string; branch: string; sourceSubdir: string }) => {
+      if (normalizedWorkspaceId == null) {
+        throw new Error("SEC_INVALID_INPUT: workspaceId is required");
+      }
+      return skillInstallToLocal({
+        workspaceId: normalizedWorkspaceId,
         gitUrl: input.gitUrl,
         branch: input.branch,
         sourceSubdir: input.sourceSubdir,
-      }),
-    onSuccess: (next) => {
-      if (!next) return;
-      queryClient.setQueryData<LocalSkillSummary[]>(skillsKeys.localList(workspaceId), (cur) => {
-        const prev = cur ?? [];
-        const exists = prev.some((skill) => skill.dir_name === next.dir_name);
-        if (exists) {
-          return prev.map((skill) => (skill.dir_name === next.dir_name ? next : skill));
-        }
-        return [next, ...prev];
       });
+    },
+    onSuccess: (next) => {
+      if (normalizedWorkspaceId == null) return;
+      if (!next) return;
+      queryClient.setQueryData<LocalSkillSummary[]>(
+        skillsKeys.localList(normalizedWorkspaceId),
+        (cur) => {
+          const prev = cur ?? [];
+          const exists = prev.some((skill) => skill.dir_name === next.dir_name);
+          if (exists) {
+            return prev.map((skill) => (skill.dir_name === next.dir_name ? next : skill));
+          }
+          return [next, ...prev];
+        }
+      );
     },
   });
 }
 
 export function useSkillSetEnabledMutation(workspaceId: number) {
+  const normalizedWorkspaceId = validateSkillsWorkspaceId(workspaceId);
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (input: { skillId: number; enabled: boolean }) =>
       skillSetEnabled({
-        workspaceId,
+        workspaceId: normalizedWorkspaceId,
         skillId: input.skillId,
         enabled: input.enabled,
       }),
     onSuccess: (next) => {
       if (!next) return;
       queryClient.setQueryData<InstalledSkillSummary[]>(
-        skillsKeys.installedList(workspaceId),
+        skillsKeys.installedList(normalizedWorkspaceId),
         (cur) => (cur ?? []).map((s) => (s.id === next.id ? next : s))
       );
     },
@@ -233,6 +254,7 @@ export function useSkillSetEnabledMutation(workspaceId: number) {
 }
 
 export function useSkillUninstallMutation(workspaceId: number) {
+  const normalizedWorkspaceId = validateSkillsWorkspaceId(workspaceId);
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -240,7 +262,7 @@ export function useSkillUninstallMutation(workspaceId: number) {
     onSuccess: (ok, skillId) => {
       if (!ok) return;
       queryClient.setQueryData<InstalledSkillSummary[]>(
-        skillsKeys.installedList(workspaceId),
+        skillsKeys.installedList(normalizedWorkspaceId),
         (cur) => (cur ?? []).filter((s) => s.id !== skillId)
       );
       queryClient.invalidateQueries({ queryKey: skillsKeys.discoverAvailable(false) });
@@ -249,14 +271,19 @@ export function useSkillUninstallMutation(workspaceId: number) {
 }
 
 export function useSkillImportLocalMutation(workspaceId: number) {
+  const normalizedWorkspaceId = validateSkillsWorkspaceId(workspaceId);
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (dirName: string) => skillImportLocal({ workspaceId, dirName }),
+    mutationFn: async (dirName: string) =>
+      skillImportLocal({
+        workspaceId: normalizedWorkspaceId,
+        dirName: normalizeSkillLocalDirName(dirName),
+      }),
     onSuccess: (next) => {
       if (!next) return;
       queryClient.setQueryData<InstalledSkillSummary[]>(
-        skillsKeys.installedList(workspaceId),
+        skillsKeys.installedList(normalizedWorkspaceId),
         (cur) => {
           const prev = cur ?? [];
           const exists = prev.some((s) => s.id === next.id);
@@ -264,52 +291,66 @@ export function useSkillImportLocalMutation(workspaceId: number) {
           return [next, ...prev];
         }
       );
-      queryClient.invalidateQueries({ queryKey: skillsKeys.localList(workspaceId) });
+      queryClient.invalidateQueries({ queryKey: skillsKeys.localList(normalizedWorkspaceId) });
     },
   });
 }
 
 export function useSkillReturnToLocalMutation(workspaceId: number) {
+  const normalizedWorkspaceId = validateSkillsWorkspaceId(workspaceId);
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (skillId: number) => skillReturnToLocal({ workspaceId, skillId }),
+    mutationFn: async (skillId: number) =>
+      skillReturnToLocal({ workspaceId: normalizedWorkspaceId, skillId }),
     onSuccess: (ok, skillId) => {
       if (!ok) return;
       queryClient.setQueryData<InstalledSkillSummary[]>(
-        skillsKeys.installedList(workspaceId),
+        skillsKeys.installedList(normalizedWorkspaceId),
         (cur) => (cur ?? []).filter((s) => s.id !== skillId)
       );
-      queryClient.invalidateQueries({ queryKey: skillsKeys.localList(workspaceId) });
+      queryClient.invalidateQueries({ queryKey: skillsKeys.localList(normalizedWorkspaceId) });
       queryClient.invalidateQueries({ queryKey: skillsKeys.discoverAvailable(false) });
     },
   });
 }
 
 export function useSkillLocalDeleteMutation(workspaceId: number) {
+  const normalizedWorkspaceId = validateSkillsWorkspaceId(workspaceId);
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (dirName: string) => skillLocalDelete({ workspaceId, dirName }),
+    mutationFn: async (dirName: string) =>
+      skillLocalDelete({
+        workspaceId: normalizedWorkspaceId,
+        dirName: normalizeSkillLocalDirName(dirName),
+      }),
     onSuccess: (ok, dirName) => {
       if (!ok) return;
-      queryClient.setQueryData<LocalSkillSummary[]>(skillsKeys.localList(workspaceId), (cur) =>
-        (cur ?? []).filter((skill) => skill.dir_name !== dirName)
+      const normalizedDirName = normalizeSkillLocalDirName(dirName);
+      queryClient.setQueryData<LocalSkillSummary[]>(
+        skillsKeys.localList(normalizedWorkspaceId),
+        (cur) => (cur ?? []).filter((skill) => skill.dir_name !== normalizedDirName)
       );
     },
   });
 }
 
 export function useSkillsImportLocalBatchMutation(workspaceId: number) {
+  const normalizedWorkspaceId = validateSkillsWorkspaceId(workspaceId);
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (dirNames: string[]) => skillsImportLocalBatch({ workspaceId, dirNames }),
+    mutationFn: async (dirNames: string[]) =>
+      skillsImportLocalBatch({
+        workspaceId: normalizedWorkspaceId,
+        dirNames: normalizeSkillsLocalDirNames(dirNames),
+      }),
     onSuccess: (report) => {
       if (!report) return;
       const imported = report.imported ?? [];
       queryClient.setQueryData<InstalledSkillSummary[]>(
-        skillsKeys.installedList(workspaceId),
+        skillsKeys.installedList(normalizedWorkspaceId),
         (cur) => {
           const prev = cur ?? [];
           if (imported.length === 0) return prev;
@@ -320,32 +361,35 @@ export function useSkillsImportLocalBatchMutation(workspaceId: number) {
           return Array.from(byId.values());
         }
       );
-      queryClient.invalidateQueries({ queryKey: skillsKeys.localList(workspaceId) });
+      queryClient.invalidateQueries({ queryKey: skillsKeys.localList(normalizedWorkspaceId) });
     },
   });
 }
 
 export function useSkillCheckUpdatesMutation(workspaceId: number) {
+  const normalizedWorkspaceId = validateSkillsWorkspaceId(workspaceId);
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async () => skillCheckUpdates(workspaceId),
+    mutationFn: async () => skillCheckUpdates(normalizedWorkspaceId),
     onSuccess: () => {
       // Invalidate installed list to refresh any stale data
-      queryClient.invalidateQueries({ queryKey: skillsKeys.installedList(workspaceId) });
+      queryClient.invalidateQueries({ queryKey: skillsKeys.installedList(normalizedWorkspaceId) });
     },
   });
 }
 
 export function useSkillUpdateMutation(workspaceId: number) {
+  const normalizedWorkspaceId = validateSkillsWorkspaceId(workspaceId);
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (skillId: number) => skillUpdate({ workspaceId, skillId }),
+    mutationFn: async (skillId: number) =>
+      skillUpdate({ workspaceId: normalizedWorkspaceId, skillId }),
     onSuccess: (next) => {
       if (!next) return;
       queryClient.setQueryData<InstalledSkillSummary[]>(
-        skillsKeys.installedList(workspaceId),
+        skillsKeys.installedList(normalizedWorkspaceId),
         (cur) => {
           const prev = cur ?? [];
           // The skill was uninstalled and reinstalled, so it has a new ID.

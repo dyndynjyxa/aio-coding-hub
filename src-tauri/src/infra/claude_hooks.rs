@@ -1,8 +1,10 @@
 //! Usage: Read / write the `hooks` section of Claude Code's `settings.json`.
 
-use crate::shared::fs::{read_optional_file, write_file_atomic_if_changed};
+use crate::shared::fs::{read_optional_file_with_max_len, write_file_atomic_if_changed};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+const CLAUDE_HOOKS_SETTINGS_MAX_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ClaudeHookEntry {
@@ -47,6 +49,25 @@ fn json_root_from_bytes(
             .map_err(|e| format!("settings.json 解析失败，拒绝{action}以保护现有配置: {e}").into()),
         None => Ok(serde_json::json!({})),
     }
+}
+
+fn read_optional_claude_hooks_settings_file(
+    path: &Path,
+) -> crate::shared::error::AppResult<Option<Vec<u8>>> {
+    read_optional_file_with_max_len(path, CLAUDE_HOOKS_SETTINGS_MAX_BYTES)
+}
+
+fn ensure_claude_hooks_settings_len(
+    bytes: &[u8],
+    label: &str,
+) -> crate::shared::error::AppResult<()> {
+    if bytes.len() > CLAUDE_HOOKS_SETTINGS_MAX_BYTES {
+        return Err(format!(
+            "SEC_INVALID_INPUT: {label} too large (max {CLAUDE_HOOKS_SETTINGS_MAX_BYTES} bytes)"
+        )
+        .into());
+    }
+    Ok(())
 }
 
 fn parse_hooks_from_root(root: &serde_json::Value) -> Vec<ClaudeHookGroup> {
@@ -269,7 +290,10 @@ pub fn claude_hooks_get<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> crate::shared::error::AppResult<ClaudeHooksState> {
     let path = claude_settings_path(app)?;
-    let root = json_root_from_bytes(read_optional_file(&path)?, "读取 Hooks 空配置")?;
+    let root = json_root_from_bytes(
+        read_optional_claude_hooks_settings_file(&path)?,
+        "读取 Hooks 空配置",
+    )?;
     if !root.is_object() {
         return Err(
             "settings.json 根节点不是 JSON 对象，拒绝读取 Hooks 空配置以保护现有配置"
@@ -297,7 +321,7 @@ pub fn claude_hooks_set<R: tauri::Runtime>(
         .into());
     }
 
-    let current = read_optional_file(&path)?;
+    let current = read_optional_claude_hooks_settings_file(&path)?;
     let mut root = json_root_from_bytes(current, "覆写")?;
     if !root.is_object() {
         return Err("settings.json 根节点不是 JSON 对象，拒绝覆写以保护现有配置"
@@ -323,6 +347,7 @@ pub fn claude_hooks_set<R: tauri::Runtime>(
     let mut out = serde_json::to_vec_pretty(&root)
         .map_err(|e| format!("failed to serialize settings.json: {e}"))?;
     out.push(b'\n');
+    ensure_claude_hooks_settings_len(&out, "claude/hooks settings.json")?;
     let _ = write_file_atomic_if_changed(&path, &out)?;
     claude_hooks_get(app)
 }

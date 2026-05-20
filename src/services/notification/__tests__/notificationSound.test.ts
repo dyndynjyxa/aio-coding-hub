@@ -5,6 +5,7 @@ import {
   getNotificationSoundEnabled,
   playNotificationSound,
   setNotificationSoundEnabled,
+  subscribeNotificationSoundEnabled,
 } from "../notificationSound";
 
 vi.mock("../../consoleLog", async () => {
@@ -33,6 +34,29 @@ describe("services/notification/notificationSound", () => {
     setNotificationSoundEnabled(true);
     setNotificationSoundEnabled(true); // should not emit
     expect(getNotificationSoundEnabled()).toBe(true);
+  });
+
+  it("isolates notification sound subscribers when one throws", () => {
+    const throwingListener = vi.fn(() => {
+      throw new Error("listener boom");
+    });
+    const healthyListener = vi.fn();
+
+    const unsubscribeThrowing = subscribeNotificationSoundEnabled(throwingListener);
+    const unsubscribeHealthy = subscribeNotificationSoundEnabled(healthyListener);
+
+    try {
+      setNotificationSoundEnabled(false);
+
+      expect(throwingListener).toHaveBeenCalledTimes(1);
+      expect(healthyListener).toHaveBeenCalledTimes(1);
+      expect(logToConsole).toHaveBeenCalledWith("warn", "通知音效状态订阅处理失败", {
+        error: "Error: listener boom",
+      });
+    } finally {
+      unsubscribeThrowing();
+      unsubscribeHealthy();
+    }
   });
 
   it("playNotificationSound delegates playback to the native desktop service", async () => {

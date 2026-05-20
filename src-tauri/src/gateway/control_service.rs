@@ -264,7 +264,7 @@ fn configure_http_client(
     bind_host: &str,
     base_host: &str,
 ) -> crate::shared::error::AppResult<()> {
-    super::http_client::sync_runtime_context(port, bind_host, base_host);
+    let context = super::http_client::runtime_self_check_context(port, bind_host, base_host);
     let proxy_url = if cfg.upstream_proxy_enabled {
         super::http_client::build_effective_proxy_url(
             Some(cfg.upstream_proxy_url.as_str()),
@@ -275,6 +275,9 @@ fn configure_http_client(
     } else {
         None
     };
+    super::http_client::validate_proxy_with_context(proxy_url.as_deref(), &context)
+        .map_err(|err| format!("{}: {err}", GatewayErrorCode::HttpClientInit.as_str()))?;
+    super::http_client::sync_runtime_context(port, bind_host, base_host);
     super::http_client::init(proxy_url.as_deref())
         .map_err(|err| format!("{}: {err}", GatewayErrorCode::HttpClientInit.as_str()).into())
 }
@@ -301,4 +304,25 @@ fn build_circuit_breaker(
         circuit_initial,
         Some(persist_tx),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configure_http_client_rejects_runtime_self_loop_proxy() {
+        let cfg = settings::AppSettings {
+            upstream_proxy_enabled: true,
+            upstream_proxy_url: "http://127.0.0.1:37123".to_string(),
+            ..settings::AppSettings::default()
+        };
+
+        let err = configure_http_client(&cfg, 37123, "127.0.0.1", "127.0.0.1")
+            .expect_err("runtime self-loop proxy should be rejected")
+            .to_string();
+
+        assert!(err.contains(GatewayErrorCode::HttpClientInit.as_str()));
+        assert!(err.contains("self-loop"));
+    }
 }

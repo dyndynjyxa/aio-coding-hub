@@ -1,9 +1,19 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClientProvider } from "@tanstack/react-query";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { toast } from "sonner";
 import { ProvidersView } from "../ProvidersView";
+import { useProvidersViewDataModel } from "../hooks/useProvidersViewDataModel";
 import { createTestQueryClient } from "../../../test/utils/reactQuery";
 import { copyText } from "../../../services/clipboard";
 import { logToConsole } from "../../../services/consoleLog";
@@ -130,6 +140,13 @@ vi.mock("../../../query/providers", async () => {
 function renderWithQuery(element: ReactElement) {
   const client = createTestQueryClient();
   return render(<QueryClientProvider client={client}>{element}</QueryClientProvider>);
+}
+
+function queryWrapper() {
+  const client = createTestQueryClient();
+  return function QueryWrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  };
 }
 
 beforeEach(() => {
@@ -458,6 +475,87 @@ describe("pages/providers/ProvidersView", () => {
     );
   });
 
+  it("keeps rapid provider reorders behind one in-flight mutation per CLI", async () => {
+    const providers = [
+      {
+        id: 1,
+        cli_key: "claude",
+        name: "P1",
+        enabled: true,
+        base_urls: ["https://a"],
+        base_url_mode: "order",
+        cost_multiplier: 1,
+        claude_models: {},
+      },
+      {
+        id: 2,
+        cli_key: "claude",
+        name: "P2",
+        enabled: true,
+        base_urls: ["https://b"],
+        base_url_mode: "order",
+        cost_multiplier: 1,
+        claude_models: {},
+      },
+      {
+        id: 3,
+        cli_key: "claude",
+        name: "P3",
+        enabled: true,
+        base_urls: ["https://c"],
+        base_url_mode: "order",
+        cost_multiplier: 1,
+        claude_models: {},
+      },
+    ] as any[];
+
+    vi.mocked(useProvidersListQuery).mockReturnValue({
+      data: providers,
+      isFetching: false,
+      error: null,
+    } as any);
+    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useProviderSetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProviderDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+    } as any);
+    vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+
+    let resolveReorder: (rows: any[]) => void = () => {
+      throw new Error("resolveReorder not set");
+    };
+    const reorderPromise = new Promise<any[]>((resolve) => {
+      resolveReorder = resolve;
+    });
+    const reorderMutation = { mutateAsync: vi.fn().mockReturnValue(reorderPromise) };
+    vi.mocked(useProvidersReorderMutation).mockReturnValue(reorderMutation as any);
+
+    renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
+
+    latestOnDragEnd?.({ active: { id: 1 }, over: { id: 2 } });
+    latestOnDragEnd?.({ active: { id: 2 }, over: { id: 3 } });
+
+    expect(reorderMutation.mutateAsync).toHaveBeenCalledTimes(1);
+    expect(reorderMutation.mutateAsync).toHaveBeenCalledWith({
+      cliKey: "claude",
+      orderedProviderIds: [2, 1, 3],
+      optimisticProviders: [
+        expect.objectContaining({ id: 2, name: "P2" }),
+        expect.objectContaining({ id: 1, name: "P1" }),
+        expect.objectContaining({ id: 3, name: "P3" }),
+      ],
+    });
+
+    resolveReorder([providers[1], providers[0], providers[2]]);
+    await reorderPromise;
+  });
+
   it("duplicates a provider directly through backend mutation", async () => {
     const providers = [
       {
@@ -612,6 +710,87 @@ describe("pages/providers/ProvidersView", () => {
     await waitFor(() =>
       expect(toast).toHaveBeenCalledWith(expect.stringContaining("生成启动命令失败"))
     );
+  });
+
+  it("releases terminal-launch copying state after null command and gates rapid retries", async () => {
+    vi.mocked(toast).mockClear();
+    vi.mocked(copyText).mockClear();
+
+    const provider = {
+      id: 1,
+      cli_key: "claude",
+      name: "P1",
+      enabled: true,
+      base_urls: ["https://a"],
+      base_url_mode: "order",
+      cost_multiplier: 1,
+      claude_models: {},
+    } as any;
+
+    vi.mocked(useProvidersListQuery).mockReturnValue({
+      data: [provider],
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      refetch: vi.fn().mockResolvedValue({ data: [] }),
+    } as any);
+    vi.mocked(useProviderSetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProviderDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProvidersReorderMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+    } as any);
+    vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+
+    let resolveFirst: (command: string | null) => void = () => {
+      throw new Error("resolveFirst not set");
+    };
+    const firstCommandPromise = new Promise<string | null>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const terminalMutation = {
+      mutateAsync: vi
+        .fn()
+        .mockReturnValueOnce(firstCommandPromise)
+        .mockResolvedValueOnce("bash '/tmp/aio.sh'"),
+    };
+    vi.mocked(useProviderClaudeTerminalLaunchCommandMutation).mockReturnValue(
+      terminalMutation as any
+    );
+
+    const { result } = renderHook(() => useProvidersViewDataModel("claude"), {
+      wrapper: queryWrapper(),
+    });
+
+    let firstCopy: Promise<void> | undefined;
+    let secondCopy: Promise<void> | undefined;
+    act(() => {
+      firstCopy = result.current.copyTerminalLaunchCommand(provider);
+      secondCopy = result.current.copyTerminalLaunchCommand(provider);
+    });
+
+    expect(terminalMutation.mutateAsync).toHaveBeenCalledTimes(1);
+    await secondCopy;
+
+    await act(async () => {
+      resolveFirst(null);
+      await firstCommandPromise;
+      await firstCopy;
+    });
+
+    await waitFor(() => expect(result.current.terminalCopyingByProviderId[1]).toBeUndefined());
+    expect(toast).toHaveBeenCalledWith("生成启动命令失败");
+    expect(copyText).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.copyTerminalLaunchCommand(provider);
+    });
+
+    expect(terminalMutation.mutateAsync).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(copyText).toHaveBeenCalledWith("bash '/tmp/aio.sh'"));
   });
 
   it("shows PowerShell-specific toast when copied command targets Windows terminal", async () => {
@@ -800,6 +979,262 @@ describe("pages/providers/ProvidersView", () => {
 
     await waitFor(() => expect(refetchClaudeProviders).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(refetchCodexProviders).toHaveBeenCalledTimes(1));
+  });
+
+  it("serializes provider refreshes per CLI and ignores stale refresh failures", async () => {
+    vi.mocked(toast).mockClear();
+
+    let resolveClaudeProviders: (result: { data: any[]; error: unknown | null }) => void = () => {
+      throw new Error("resolveClaudeProviders not set");
+    };
+    let rejectCodexSourceProviders: (error: Error) => void = () => {
+      throw new Error("rejectCodexSourceProviders not set");
+    };
+    const claudeRefreshPromise = new Promise<{ data: any[]; error: unknown | null }>((resolve) => {
+      resolveClaudeProviders = resolve;
+    });
+    const codexSourceRefreshPromise = new Promise<{ data: any[]; error: unknown | null }>(
+      (_resolve, reject) => {
+        rejectCodexSourceProviders = reject;
+      }
+    );
+    const refetchClaudeProviders = vi.fn().mockReturnValue(claudeRefreshPromise);
+    const refetchCodexSourceProviders = vi.fn().mockReturnValue(codexSourceRefreshPromise);
+    const refetchCodexProviders = vi.fn().mockResolvedValue({ data: [], error: null });
+
+    vi.mocked(useProvidersListQuery).mockImplementation((cliKey: any, options?: any) => {
+      if (cliKey === "claude") {
+        return {
+          data: [],
+          isFetching: false,
+          refetch: refetchClaudeProviders,
+        } as any;
+      }
+      if (options?.enabled) {
+        return {
+          data: [],
+          isFetching: false,
+          refetch: refetchCodexSourceProviders,
+        } as any;
+      }
+
+      return {
+        data: [],
+        isFetching: false,
+        refetch: refetchCodexProviders,
+      } as any;
+    });
+    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useProviderSetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProviderDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProvidersReorderMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+    } as any);
+    vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+
+    const client = createTestQueryClient();
+    const { rerender } = render(
+      <QueryClientProvider client={client}>
+        <ProvidersView activeCli="claude" setActiveCli={vi.fn()} />
+      </QueryClientProvider>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    expect(screen.getByRole("button", { name: "刷新中…" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "刷新中…" }));
+
+    expect(refetchClaudeProviders).toHaveBeenCalledTimes(1);
+    expect(refetchCodexSourceProviders).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <QueryClientProvider client={client}>
+        <ProvidersView activeCli="codex" setActiveCli={vi.fn()} />
+      </QueryClientProvider>
+    );
+    expect(screen.getByRole("button", { name: "刷新" })).toBeEnabled();
+
+    rerender(
+      <QueryClientProvider client={client}>
+        <ProvidersView activeCli="claude" setActiveCli={vi.fn()} />
+      </QueryClientProvider>
+    );
+    expect(screen.getByRole("button", { name: "刷新中…" })).toBeDisabled();
+
+    rerender(
+      <QueryClientProvider client={client}>
+        <ProvidersView activeCli="codex" setActiveCli={vi.fn()} />
+      </QueryClientProvider>
+    );
+
+    await act(async () => {
+      resolveClaudeProviders({ data: [], error: null });
+      rejectCodexSourceProviders(new Error("stale boom"));
+      await claudeRefreshPromise;
+      await codexSourceRefreshPromise.catch(() => undefined);
+    });
+    expect(toast).not.toHaveBeenCalledWith("刷新供应商列表失败：请查看控制台日志");
+
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(refetchCodexProviders).toHaveBeenCalledTimes(1));
+  });
+
+  it("suppresses refresh failure feedback after the providers view unmounts", async () => {
+    vi.mocked(toast).mockClear();
+
+    let resolveClaudeProviders: (result: { data: any[]; error: unknown | null }) => void = () => {
+      throw new Error("resolveClaudeProviders not set");
+    };
+    let rejectCodexSourceProviders: (error: Error) => void = () => {
+      throw new Error("rejectCodexSourceProviders not set");
+    };
+    const claudeRefreshPromise = new Promise<{ data: any[]; error: unknown | null }>((resolve) => {
+      resolveClaudeProviders = resolve;
+    });
+    const codexSourceRefreshPromise = new Promise<{ data: any[]; error: unknown | null }>(
+      (_resolve, reject) => {
+        rejectCodexSourceProviders = reject;
+      }
+    );
+
+    vi.mocked(useProvidersListQuery).mockImplementation((cliKey: any, options?: any) => {
+      if (cliKey === "claude") {
+        return {
+          data: [],
+          isFetching: false,
+          refetch: vi.fn().mockReturnValue(claudeRefreshPromise),
+        } as any;
+      }
+      if (options?.enabled) {
+        return {
+          data: [],
+          isFetching: false,
+          refetch: vi.fn().mockReturnValue(codexSourceRefreshPromise),
+        } as any;
+      }
+
+      return {
+        data: [],
+        isFetching: false,
+        refetch: vi.fn().mockResolvedValue({ data: [], error: null }),
+      } as any;
+    });
+    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useProviderSetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProviderDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProvidersReorderMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+    } as any);
+    vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+
+    const { result, unmount } = renderHook(() => useProvidersViewDataModel("claude"), {
+      wrapper: queryWrapper(),
+    });
+
+    let refreshPromise: Promise<void> | undefined;
+    act(() => {
+      refreshPromise = result.current.refreshProviders();
+    });
+    expect(result.current.providersRefreshing).toBe(true);
+
+    unmount();
+
+    await act(async () => {
+      resolveClaudeProviders({ data: [], error: null });
+      rejectCodexSourceProviders(new Error("unmounted boom"));
+      await refreshPromise;
+    });
+
+    expect(toast).not.toHaveBeenCalledWith("刷新供应商列表失败：请查看控制台日志");
+  });
+
+  it("clears create, edit, and delete dialogs when switching activeCli", async () => {
+    const providers = [
+      {
+        id: 1,
+        cli_key: "claude",
+        name: "P1",
+        enabled: true,
+        base_urls: ["https://a"],
+        base_url_mode: "order",
+        cost_multiplier: 1,
+        claude_models: {},
+      },
+    ] as any[];
+
+    vi.mocked(useProvidersListQuery).mockReturnValue({
+      data: providers,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      refetch: vi.fn().mockResolvedValue({ data: [] }),
+    } as any);
+    vi.mocked(useProviderSetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProviderDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProvidersReorderMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+    } as any);
+    vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+
+    const client = createTestQueryClient();
+    const { rerender } = render(
+      <QueryClientProvider client={client}>
+        <ProvidersView activeCli="claude" setActiveCli={vi.fn()} />
+      </QueryClientProvider>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+    expect(screen.getByTestId("provider-editor")).toHaveTextContent("create");
+
+    rerender(
+      <QueryClientProvider client={client}>
+        <ProvidersView activeCli="codex" setActiveCli={vi.fn()} />
+      </QueryClientProvider>
+    );
+    await waitFor(() => expect(screen.queryByTestId("provider-editor")).not.toBeInTheDocument());
+
+    rerender(
+      <QueryClientProvider client={client}>
+        <ProvidersView activeCli="claude" setActiveCli={vi.fn()} />
+      </QueryClientProvider>
+    );
+    fireEvent.click(screen.getByTitle("编辑"));
+    expect(screen.getByTestId("provider-editor")).toHaveTextContent("edit");
+
+    rerender(
+      <QueryClientProvider client={client}>
+        <ProvidersView activeCli="gemini" setActiveCli={vi.fn()} />
+      </QueryClientProvider>
+    );
+    await waitFor(() => expect(screen.queryByTestId("provider-editor")).not.toBeInTheDocument());
+
+    rerender(
+      <QueryClientProvider client={client}>
+        <ProvidersView activeCli="claude" setActiveCli={vi.fn()} />
+      </QueryClientProvider>
+    );
+    fireEvent.click(screen.getByTitle("删除"));
+    expect(screen.getByRole("dialog")).toHaveTextContent("将删除：P1");
+
+    rerender(
+      <QueryClientProvider client={client}>
+        <ProvidersView activeCli="codex" setActiveCli={vi.fn()} />
+      </QueryClientProvider>
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
   it("opens validate dialog and closes it when switching activeCli", async () => {
@@ -1068,19 +1503,23 @@ describe("pages/providers/ProvidersView", () => {
 
     renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
 
-    // toggle enabled: null + error branches
+    // toggle enabled: null branch, then error branch after the per-provider gate releases
     fireEvent.click(screen.getAllByRole("switch")[1]!);
+    await waitFor(() => expect(toggleMutation.mutateAsync).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
     fireEvent.click(screen.getAllByRole("switch")[1]!);
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(vi.mocked(toast)).toHaveBeenCalled();
+    await waitFor(() => expect(toggleMutation.mutateAsync).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("更新失败：Error: boom"));
 
-    // reset circuit provider: ok false + error branches
+    // reset circuit provider: ok false branch, then error branch after the action gate releases
     fireEvent.click(screen.getAllByRole("button", { name: "解除熔断" })[0]!);
+    await waitFor(() => expect(resetProviderMutation.mutateAsync).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "解除熔断" })[0]!).toBeEnabled()
+    );
     fireEvent.click(screen.getAllByRole("button", { name: "解除熔断" })[0]!);
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(vi.mocked(toast)).toHaveBeenCalled();
+    await waitFor(() => expect(resetProviderMutation.mutateAsync).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("解除熔断失败：Error: boom"));
 
     // reset circuit all: null + 0 + error branches
     fireEvent.click(screen.getByRole("button", { name: "解除熔断（全部）" }));
@@ -1109,10 +1548,11 @@ describe("pages/providers/ProvidersView", () => {
     latestOnDragEnd?.({ active: { id: 1 }, over: { id: 1 } });
     latestOnDragEnd?.({ active: { id: 999 }, over: { id: 2 } });
     latestOnDragEnd?.({ active: { id: 1 }, over: { id: 3 } });
+    await waitFor(() => expect(reorderMutation.mutateAsync).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
     latestOnDragEnd?.({ active: { id: 1 }, over: { id: 3 } });
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(reorderMutation.mutateAsync).toHaveBeenCalled();
+    await waitFor(() => expect(reorderMutation.mutateAsync).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("顺序更新失败：Error: boom"));
 
     // circuit auto refresh (until=null -> now)
     await waitFor(() => expect(refetchCircuits).toHaveBeenCalled(), { timeout: 1000 });

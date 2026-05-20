@@ -1,9 +1,14 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  REQUEST_ATTEMPT_LOGS_DEFAULT_LIMIT,
+  REQUEST_LOGS_DEFAULT_LIMIT,
   requestAttemptLogsByTraceId,
   requestLogGet,
   requestLogsListAfterIdAll,
   requestLogsListAll,
+  normalizeRequestAttemptLogsLimit,
+  normalizeRequestLogTraceIdOrNull,
+  normalizeRequestLogsLimit,
   type RequestLogSummary,
 } from "../services/gateway/requestLogs";
 import {
@@ -16,6 +21,9 @@ type RequestLogsIncrementalRefreshResult = {
   mode: "full" | "incremental";
   items: RequestLogSummary[];
 };
+
+export const REQUEST_LOG_DETAIL_STALE_TIME_MS = 0;
+export const REQUEST_LOG_DETAIL_GC_TIME_MS = 60 * 1000;
 
 function isRequestLogsQueryEnabled(enabled: boolean | undefined) {
   return enabled ?? true;
@@ -52,16 +60,22 @@ function mergeRequestLogs(prev: RequestLogSummary[], incoming: RequestLogSummary
   return merged.slice(0, limit);
 }
 
+function capRequestLogs(rows: RequestLogSummary[], limit: number) {
+  return rows.slice().sort(sortRequestLogsDesc).slice(0, limit);
+}
+
 export function useRequestLogsListAllQuery(
-  limit: number,
+  limit?: number | null,
   options?: { enabled?: boolean; refetchIntervalMs?: number | false }
 ) {
   const enabled = isRequestLogsQueryEnabled(options?.enabled);
+  const normalizedLimit = normalizeRequestLogsLimit(limit) ?? REQUEST_LOGS_DEFAULT_LIMIT;
+
   return useQuery<RequestLogSummary[]>({
-    queryKey: requestLogsKeys.listAll(limit),
+    queryKey: requestLogsKeys.listAll(normalizedLimit),
     queryFn: async () => {
-      const rows = await requestLogsListAll(limit);
-      return rows;
+      const rows = await requestLogsListAll(normalizedLimit);
+      return capRequestLogs(rows, normalizedLimit);
     },
     enabled,
     placeholderData: keepPreviousData,
@@ -69,40 +83,39 @@ export function useRequestLogsListAllQuery(
   });
 }
 
-export function useRequestLogsIncrementalRefreshMutation(limit: number) {
+export function useRequestLogsIncrementalRefreshMutation(limit?: number | null) {
   const queryClient = useQueryClient();
+  const normalizedLimit = normalizeRequestLogsLimit(limit) ?? REQUEST_LOGS_DEFAULT_LIMIT;
 
   return useMutation<RequestLogsIncrementalRefreshResult>({
     mutationFn: async () => {
       const prev = queryClient.getQueryData<RequestLogSummary[] | null>(
-        requestLogsKeys.listAll(limit)
+        requestLogsKeys.listAll(normalizedLimit)
       );
       const cursorId = prev?.length ? computeRequestLogsCursorId(prev) : 0;
       const useFullRefresh = shouldUseFullRefresh(prev);
 
       if (useFullRefresh) {
-        const items = await requestLogsListAll(limit);
-        return { mode: "full" as const, items };
+        const items = await requestLogsListAll(normalizedLimit);
+        return { mode: "full" as const, items: capRequestLogs(items, normalizedLimit) };
       }
 
-      const items = await requestLogsListAfterIdAll(cursorId, limit);
-      return { mode: "incremental" as const, items };
+      const items = await requestLogsListAfterIdAll(cursorId, normalizedLimit);
+      return { mode: "incremental" as const, items: capRequestLogs(items, normalizedLimit) };
     },
     onSuccess: (result) => {
       if (!result) return;
 
       if (result.mode === "full") {
-        queryClient.setQueryData(
-          requestLogsKeys.listAll(limit),
-          result.items.slice().sort(sortRequestLogsDesc)
-        );
+        queryClient.setQueryData(requestLogsKeys.listAll(normalizedLimit), result.items);
         return;
       }
 
       if (result.items.length === 0) return;
 
-      queryClient.setQueryData<RequestLogSummary[]>(requestLogsKeys.listAll(limit), (cur) =>
-        mergeRequestLogs(cur ?? [], result.items, limit)
+      queryClient.setQueryData<RequestLogSummary[]>(
+        requestLogsKeys.listAll(normalizedLimit),
+        (cur) => mergeRequestLogs(cur ?? [], result.items, normalizedLimit)
       );
     },
   });
@@ -117,17 +130,25 @@ export function useRequestLogDetailQuery(logId: number | null) {
     },
     enabled: logId != null,
     placeholderData: keepPreviousData,
+    staleTime: REQUEST_LOG_DETAIL_STALE_TIME_MS,
+    gcTime: REQUEST_LOG_DETAIL_GC_TIME_MS,
   });
 }
 
-export function useRequestAttemptLogsByTraceIdQuery(traceId: string | null, limit: number) {
+export function useRequestAttemptLogsByTraceIdQuery(traceId: string | null, limit?: number | null) {
+  const normalizedTraceId = normalizeRequestLogTraceIdOrNull(traceId);
+  const normalizedLimit =
+    normalizeRequestAttemptLogsLimit(limit) ?? REQUEST_ATTEMPT_LOGS_DEFAULT_LIMIT;
+
   return useQuery({
-    queryKey: requestLogsKeys.attemptsByTrace(traceId, limit),
+    queryKey: requestLogsKeys.attemptsByTrace(normalizedTraceId, normalizedLimit),
     queryFn: () => {
-      if (!traceId) return null;
-      return requestAttemptLogsByTraceId(traceId, limit);
+      if (!normalizedTraceId) return null;
+      return requestAttemptLogsByTraceId(normalizedTraceId, normalizedLimit);
     },
-    enabled: Boolean(traceId),
+    enabled: Boolean(normalizedTraceId),
     placeholderData: keepPreviousData,
+    staleTime: REQUEST_LOG_DETAIL_STALE_TIME_MS,
+    gcTime: REQUEST_LOG_DETAIL_GC_TIME_MS,
   });
 }

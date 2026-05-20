@@ -2,7 +2,9 @@
 
 use super::finalize::finalize_circuit_and_session;
 use super::StreamFinalizeCtx;
-use crate::gateway::proxy::{spawn_enqueue_request_log_with_backpressure, RequestLogEnqueueArgs};
+use crate::gateway::proxy::{
+    spawn_enqueue_request_log_with_backpressure, GatewayErrorCode, RequestLogEnqueueArgs,
+};
 use crate::gateway::response_fixer;
 
 pub(super) struct StreamRequestCompletion {
@@ -59,8 +61,55 @@ impl StreamRequestCompletion {
     }
 }
 
-pub(super) fn emit_request_event_and_spawn_request_log(
-    ctx: &StreamFinalizeCtx,
+fn ensure_stream_client_abort_setting<R: tauri::Runtime>(
+    ctx: &StreamFinalizeCtx<R>,
+    duration_ms: u128,
+    ttfb_ms: Option<u128>,
+    error_code: Option<&'static str>,
+) {
+    if error_code != Some(GatewayErrorCode::StreamAborted.as_str()) {
+        return;
+    }
+
+    let already_recorded = ctx
+        .special_settings
+        .lock()
+        .map(|guard| {
+            guard.iter().any(|entry| {
+                entry.get("type").and_then(serde_json::Value::as_str) == Some("client_abort")
+                    && entry.get("scope").and_then(serde_json::Value::as_str) == Some("stream")
+            })
+        })
+        .unwrap_or(false);
+
+    if already_recorded {
+        return;
+    }
+
+    let duration_ms_i64 = duration_ms.min(i64::MAX as u128) as i64;
+    let ttfb_ms_i64 = ttfb_ms.and_then(|value| {
+        if value >= duration_ms {
+            return None;
+        }
+        Some(value.min(i64::MAX as u128) as i64)
+    });
+
+    response_fixer::push_special_setting(
+        &ctx.special_settings,
+        serde_json::json!({
+            "type": "client_abort",
+            "scope": "stream",
+            "reason": "stream_finalized_aborted",
+            "detected_by": "stream_finalize",
+            "duration_ms": duration_ms_i64,
+            "ttfb_ms": ttfb_ms_i64,
+            "ts": crate::gateway::util::now_unix_seconds() as i64,
+        }),
+    );
+}
+
+pub(super) fn emit_request_event_and_spawn_request_log<R: tauri::Runtime>(
+    ctx: &StreamFinalizeCtx<R>,
     completion: StreamRequestCompletion,
 ) {
     let duration_ms = ctx.started.elapsed().as_millis();
@@ -68,6 +117,7 @@ pub(super) fn emit_request_event_and_spawn_request_log(
     if !ctx.observe {
         return;
     }
+    ensure_stream_client_abort_setting(ctx, duration_ms, completion.ttfb_ms, completion.error_code);
 
     // When a stream error occurs, update the last attempt's outcome to reflect
     // the actual error instead of keeping the stale "success" recorded when the

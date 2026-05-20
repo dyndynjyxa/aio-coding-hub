@@ -15,16 +15,20 @@ use crate::gateway::proxy::request_context::RequestContext;
 /// Returns a `LoopControl` indicating whether to continue retrying,
 /// break out of the retry loop, or return a final response.
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn route_response(
-    ctx: CommonCtx<'_>,
-    input: &RequestContext,
+pub(super) async fn route_response<R>(
+    ctx: CommonCtx<'_, R>,
+    input: &RequestContext<R>,
     prepared: &mut PreparedProvider,
     retry_state: &mut RetryLoopState,
     indices: AttemptIndices,
     resp: reqwest::Response,
     timing: AttemptTiming,
-    loop_state: &mut LoopState<'_>,
-) -> LoopControl {
+    loop_state: &mut LoopState<'_, R>,
+) -> LoopControl
+where
+    R: tauri::Runtime,
+    R::Handle: Unpin,
+{
     let status = resp.status();
     let response_headers = resp.headers().clone();
     let response_content_type = response_headers
@@ -73,18 +77,17 @@ pub(super) async fn route_response(
         claude_model_mapping: prepared.claude_model_mapping.as_ref(),
     };
 
-    emit_gateway_debug_log(
-        &ctx.state.app,
+    emit_gateway_debug_log_lazy(&ctx.state.app, || {
         format!(
-            "[RESP] trace_id={} status={} provider={} (id={}) is_stream={}\n  headers={:?}",
+            "[RESP] trace_id={} status={} provider={} (id={}) is_stream={}\n  headers={}",
             ctx.trace_id,
             status.as_u16(),
             prepared.provider_name_base,
             prepared.provider_id,
             is_event_stream(&response_headers),
-            response_headers,
-        ),
-    );
+            redacted_headers_for_debug(&response_headers),
+        )
+    });
 
     if status.is_success() {
         // When upstream returns SSE, always route to the stream handler.
@@ -126,18 +129,20 @@ pub(super) async fn route_response(
     // --- Claude API key auth scheme fallback (401/403) ---
     if should_try_claude_auth_fallback(input, prepared, retry_state, indices.retry_index, status) {
         retry_state.claude_api_key_bearer_fallback = true;
-        let mut settings = ctx.special_settings.lock_or_recover();
-        settings.push(serde_json::json!({
-            "type": "claude_auth_injection",
-            "scope": "attempt",
-            "hit": true,
-            "action": "fallback_to_authorization_bearer",
-            "providerId": prepared.provider_id,
-            "providerName": prepared.provider_name_base.clone(),
-            "status": status.as_u16(),
-            "retryAttemptNumber": indices.retry_index,
-            "retryAttemptNumberNext": indices.retry_index + 1,
-        }));
+        response_fixer::push_special_setting(
+            ctx.special_settings,
+            serde_json::json!({
+                "type": "claude_auth_injection",
+                "scope": "attempt",
+                "hit": true,
+                "action": "fallback_to_authorization_bearer",
+                "providerId": prepared.provider_id,
+                "providerName": prepared.provider_name_base.clone(),
+                "status": status.as_u16(),
+                "retryAttemptNumber": indices.retry_index,
+                "retryAttemptNumberNext": indices.retry_index + 1,
+            }),
+        );
         return LoopControl::ContinueRetry;
     }
 
@@ -196,8 +201,8 @@ pub(super) async fn route_response(
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn should_try_claude_auth_fallback(
-    input: &RequestContext,
+fn should_try_claude_auth_fallback<R: tauri::Runtime>(
+    input: &RequestContext<R>,
     prepared: &PreparedProvider,
     retry_state: &RetryLoopState,
     retry_index: u32,
@@ -211,8 +216,8 @@ fn should_try_claude_auth_fallback(
         && matches!(status.as_u16(), 401 | 403)
 }
 
-async fn try_oauth_reactive_refresh(
-    input: &RequestContext,
+async fn try_oauth_reactive_refresh<R: tauri::Runtime>(
+    input: &RequestContext<R>,
     prepared: &mut PreparedProvider,
     retry_state: &mut RetryLoopState,
 ) -> Option<LoopControl> {
@@ -271,8 +276,8 @@ async fn try_oauth_reactive_refresh(
     }
 }
 
-fn emit_cx2cc_upstream_log(
-    input: &RequestContext,
+fn emit_cx2cc_upstream_log<R: tauri::Runtime>(
+    input: &RequestContext<R>,
     prepared: &PreparedProvider,
     status: reqwest::StatusCode,
     response_content_type: &str,

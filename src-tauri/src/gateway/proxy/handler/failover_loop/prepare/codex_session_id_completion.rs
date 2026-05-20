@@ -1,12 +1,13 @@
 use super::context::CommonCtx;
 use crate::gateway::codex_session_id::{self, CodexSessionCompletionResult, CodexSessionIdCache};
+use crate::gateway::response_fixer;
 use crate::shared::mutex_ext::MutexExt;
 use axum::body::Bytes;
 use axum::http::{HeaderMap, HeaderValue};
 use serde_json::Value;
 
-pub(super) struct ApplyCodexSessionIdCompletionInput<'a> {
-    pub(super) ctx: CommonCtx<'a>,
+pub(super) struct ApplyCodexSessionIdCompletionInput<'a, R: tauri::Runtime = tauri::Wry> {
+    pub(super) ctx: CommonCtx<'a, R>,
     pub(super) enabled: bool,
     pub(super) source_cli_key: &'a str,
     pub(super) session_id: Option<&'a str>,
@@ -20,7 +21,9 @@ struct BridgeCodexSessionCompletion {
     body_bytes: Option<Vec<u8>>,
 }
 
-pub(super) fn apply_if_needed(input: ApplyCodexSessionIdCompletionInput<'_>) -> Option<String> {
+pub(super) fn apply_if_needed<R: tauri::Runtime>(
+    input: ApplyCodexSessionIdCompletionInput<'_, R>,
+) -> Option<String> {
     let ApplyCodexSessionIdCompletionInput {
         ctx,
         enabled,
@@ -54,37 +57,41 @@ pub(super) fn apply_if_needed(input: ApplyCodexSessionIdCompletionInput<'_>) -> 
                 *strip_request_content_encoding = true;
             }
 
-            let mut settings = ctx.special_settings.lock_or_recover();
-            settings.push(serde_json::json!({
-                "type": "codex_session_id_completion",
-                "scope": "request",
-                "hit": completion.result.applied,
-                "action": completion.result.action,
-                "source": completion.result.source,
-                "sessionId": completion.result.session_id,
-                "changedHeader": completion.result.changed_headers,
-                "changedBody": completion.result.changed_body,
-                "bridgeType": "cx2cc",
-                "upstreamCliKey": source_cli_key,
-            }));
+            response_fixer::push_special_setting(
+                ctx.special_settings,
+                serde_json::json!({
+                    "type": "codex_session_id_completion",
+                    "scope": "request",
+                    "hit": completion.result.applied,
+                    "action": completion.result.action,
+                    "source": completion.result.source,
+                    "sessionId": completion.result.session_id,
+                    "changedHeader": completion.result.changed_headers,
+                    "changedBody": completion.result.changed_body,
+                    "bridgeType": "cx2cc",
+                    "upstreamCliKey": source_cli_key,
+                }),
+            );
 
             Some(completion.result.session_id)
         }
         None => {
-            let mut settings = ctx.special_settings.lock_or_recover();
-            settings.push(serde_json::json!({
-                "type": "codex_session_id_completion",
-                "scope": "request",
-                "hit": false,
-                "action": "skipped",
-                "source": "cx2cc_bridge",
-                "sessionId": session_id,
-                "changedHeader": false,
-                "changedBody": false,
-                "bridgeType": "cx2cc",
-                "upstreamCliKey": source_cli_key,
-                "reason": "invalid_translated_body",
-            }));
+            response_fixer::push_special_setting(
+                ctx.special_settings,
+                serde_json::json!({
+                    "type": "codex_session_id_completion",
+                    "scope": "request",
+                    "hit": false,
+                    "action": "skipped",
+                    "source": "cx2cc_bridge",
+                    "sessionId": session_id,
+                    "changedHeader": false,
+                    "changedBody": false,
+                    "bridgeType": "cx2cc",
+                    "upstreamCliKey": source_cli_key,
+                    "reason": "invalid_translated_body",
+                }),
+            );
 
             session_id.map(str::to_string)
         }

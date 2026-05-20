@@ -7,6 +7,9 @@ use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
+const MAX_SORT_MODE_NAME_CHARS: usize = 32;
+const MAX_SORT_MODE_PROVIDER_IDS: usize = 512;
+
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct SortModeSummary {
     pub id: i64,
@@ -50,8 +53,11 @@ fn validate_mode_name(name: &str) -> crate::shared::error::AppResult<String> {
         return Err("SEC_INVALID_INPUT: mode name is required".into());
     }
 
-    if name.chars().count() > 32 {
-        return Err("SEC_INVALID_INPUT: mode name is too long (max 32 chars)".into());
+    if name.chars().nth(MAX_SORT_MODE_NAME_CHARS).is_some() {
+        return Err(format!(
+            "SEC_INVALID_INPUT: mode name is too long (max {MAX_SORT_MODE_NAME_CHARS} chars)"
+        )
+        .into());
     }
 
     let lowered = name.to_ascii_lowercase();
@@ -358,6 +364,13 @@ fn ensure_providers_belong_to_cli(
 ) -> crate::shared::error::AppResult<()> {
     if provider_ids.is_empty() {
         return Ok(());
+    }
+
+    if provider_ids.len() > MAX_SORT_MODE_PROVIDER_IDS {
+        return Err(format!(
+            "SEC_INVALID_INPUT: ordered_provider_ids must contain at most {MAX_SORT_MODE_PROVIDER_IDS} entries"
+        )
+        .into());
     }
 
     let mut unique_ids = HashSet::new();

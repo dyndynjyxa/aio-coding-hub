@@ -2,14 +2,30 @@
 
 use crate::prompt_sync;
 use crate::shared::error::AppResult;
+use crate::shared::fs::{
+    read_file_with_max_len, read_optional_file_with_max_len, write_file_atomic,
+};
 
 use super::shell::{
-    bash_single_quote, read_wsl_file, remove_wsl_file, run_wsl_bash_script_capture, write_wsl_file,
-    wsl_resolve_codex_home_script,
+    bash_single_quote, read_wsl_file_with_max_len, remove_wsl_file, run_wsl_bash_script_capture,
+    write_wsl_file, wsl_resolve_codex_home_script,
 };
 
 const WSL_PROMPT_MANIFEST_SCHEMA_VERSION: u32 = 1;
 const WSL_PROMPT_MANAGED_BY: &str = "aio-coding-hub";
+const WSL_PROMPT_TARGET_MAX_BYTES: usize = 1024 * 1024;
+const WSL_PROMPT_MANIFEST_MAX_BYTES: usize = 256 * 1024;
+
+fn ensure_wsl_prompt_sync_bytes_within_limit(
+    bytes: &[u8],
+    max_len: usize,
+    label: &str,
+) -> AppResult<()> {
+    if bytes.len() > max_len {
+        return Err(format!("SEC_INVALID_INPUT: {label} too large (max {max_len} bytes)").into());
+    }
+    Ok(())
+}
 
 // ── WSL prompt manifest ──
 
@@ -61,12 +77,9 @@ fn read_wsl_prompt_manifest(
     cli_key: &str,
 ) -> AppResult<Option<WslPromptManifest>> {
     let path = wsl_prompt_manifest_path(app, distro, cli_key)?;
-    let bytes = match std::fs::read(&path) {
-        Ok(content) => content,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => {
-            return Err(format!("failed to read WSL prompt manifest: {err}").into());
-        }
+    let bytes = match read_optional_file_with_max_len(&path, WSL_PROMPT_MANIFEST_MAX_BYTES)? {
+        Some(content) => content,
+        None => return Ok(None),
     };
 
     let manifest: WslPromptManifest = serde_json::from_slice(&bytes)
@@ -93,8 +106,12 @@ fn write_wsl_prompt_manifest(
     let path = wsl_prompt_manifest_path(app, distro, cli_key)?;
     let json = serde_json::to_string_pretty(manifest)
         .map_err(|e| format!("failed to serialize WSL prompt manifest: {e}"))?;
-    std::fs::write(&path, json.as_bytes())
-        .map_err(|e| format!("failed to write WSL prompt manifest: {e}"))?;
+    ensure_wsl_prompt_sync_bytes_within_limit(
+        json.as_bytes(),
+        WSL_PROMPT_MANIFEST_MAX_BYTES,
+        "WSL prompt manifest",
+    )?;
+    write_file_atomic(&path, json.as_bytes())?;
     Ok(())
 }
 
@@ -137,7 +154,8 @@ fn backup_wsl_prompt_for_enable(
     std::fs::create_dir_all(&files_dir)
         .map_err(|e| format!("failed to create WSL prompt files dir: {e}"))?;
 
-    let existing_bytes = read_wsl_file(distro, target_path)?;
+    let existing_bytes =
+        read_wsl_file_with_max_len(distro, target_path, WSL_PROMPT_TARGET_MAX_BYTES)?;
     let backup_rel = if let Some(bytes) = existing_bytes {
         let backup_name = std::path::Path::new(target_path)
             .file_name()
@@ -145,8 +163,7 @@ fn backup_wsl_prompt_for_enable(
             .unwrap_or("prompt.md")
             .to_string();
         let backup_path = files_dir.join(&backup_name);
-        std::fs::write(&backup_path, bytes)
-            .map_err(|e| format!("failed to write WSL prompt backup: {e}"))?;
+        write_file_atomic(&backup_path, &bytes)?;
         Some(backup_name)
     } else {
         None
@@ -186,8 +203,7 @@ fn restore_wsl_prompt_from_manifest(
             &manifest.cli_key,
         )?);
         let backup_path = backup_root.join(backup_rel);
-        let bytes = std::fs::read(&backup_path)
-            .map_err(|e| format!("failed to read WSL prompt backup: {e}"))?;
+        let bytes = read_file_with_max_len(&backup_path, WSL_PROMPT_TARGET_MAX_BYTES)?;
         return write_wsl_file(distro, target_path, &bytes);
     }
 
@@ -224,6 +240,11 @@ pub(super) fn sync_wsl_prompt_for_cli(
             }
 
             let bytes = prompt_sync::prompt_content_to_bytes(content);
+            ensure_wsl_prompt_sync_bytes_within_limit(
+                &bytes,
+                WSL_PROMPT_TARGET_MAX_BYTES,
+                "WSL prompt target",
+            )?;
             write_wsl_file(distro, &target_path, &bytes)?;
 
             manifest.enabled = true;
@@ -244,5 +265,24 @@ pub(super) fn sync_wsl_prompt_for_cli(
             manifest.updated_at = crate::shared::time::now_unix_seconds();
             write_wsl_prompt_manifest(app, distro, cli_key, &manifest)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wsl_prompt_sync_bytes_limit_rejects_oversized_content() {
+        let bytes = vec![b'x'; WSL_PROMPT_TARGET_MAX_BYTES + 1];
+
+        let err = ensure_wsl_prompt_sync_bytes_within_limit(
+            &bytes,
+            WSL_PROMPT_TARGET_MAX_BYTES,
+            "WSL prompt target",
+        )
+        .expect_err("oversized WSL prompt content should fail");
+
+        assert!(err.to_string().contains("too large"));
     }
 }

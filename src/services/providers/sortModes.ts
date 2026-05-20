@@ -1,6 +1,9 @@
 import { commands } from "../../generated/bindings";
 import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
-import type { CliKey } from "./providers";
+import { validateProviderCliKey, type CliKey } from "./providers";
+
+export const MAX_SORT_MODE_NAME_CHARS = 32;
+export const MAX_SORT_MODE_PROVIDER_IDS = 512;
 
 export type SortModeSummary = {
   id: number;
@@ -20,6 +23,50 @@ export type SortModeProviderRow = {
   enabled: boolean;
 };
 
+function normalizeSortModeName(name: string) {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    throw new Error("SEC_INVALID_INPUT: mode name is required");
+  }
+  if ([...trimmed].length > MAX_SORT_MODE_NAME_CHARS) {
+    throw new Error(
+      `SEC_INVALID_INPUT: mode name is too long (max ${MAX_SORT_MODE_NAME_CHARS} chars)`
+    );
+  }
+  if (trimmed.toLowerCase() === "default" || trimmed === "默认") {
+    throw new Error("SEC_INVALID_INPUT: mode name is reserved");
+  }
+  return trimmed;
+}
+
+function validatePositiveId(field: string, value: number) {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`SEC_INVALID_INPUT: invalid ${field}=${value}`);
+  }
+}
+
+export function validateSortModeId(modeId: number): number {
+  validatePositiveId("modeId", modeId);
+  return modeId;
+}
+
+function validateOrderedProviderIds(orderedProviderIds: number[]) {
+  if (orderedProviderIds.length > MAX_SORT_MODE_PROVIDER_IDS) {
+    throw new Error(
+      `SEC_INVALID_INPUT: orderedProviderIds must contain at most ${MAX_SORT_MODE_PROVIDER_IDS} entries`
+    );
+  }
+
+  const seen = new Set<number>();
+  for (const providerId of orderedProviderIds) {
+    validatePositiveId("providerId", providerId);
+    if (seen.has(providerId)) {
+      throw new Error(`SEC_INVALID_INPUT: duplicate providerId=${providerId}`);
+    }
+    seen.add(providerId);
+  }
+}
+
 export async function sortModesList() {
   return invokeGeneratedIpc<SortModeSummary[]>({
     title: "读取排序模板失败",
@@ -29,34 +76,37 @@ export async function sortModesList() {
 }
 
 export async function sortModeCreate(input: { name: string }) {
+  const name = normalizeSortModeName(input.name);
+
   return invokeGeneratedIpc<SortModeSummary>({
     title: "创建排序模板失败",
     cmd: "sort_mode_create",
-    args: { name: input.name },
-    invoke: () =>
-      commands.sortModeCreate(input.name) as Promise<GeneratedCommandResult<SortModeSummary>>,
+    args: { name },
+    invoke: () => commands.sortModeCreate(name) as Promise<GeneratedCommandResult<SortModeSummary>>,
   });
 }
 
 export async function sortModeRename(input: { mode_id: number; name: string }) {
+  const modeId = validateSortModeId(input.mode_id);
+  const name = normalizeSortModeName(input.name);
+
   return invokeGeneratedIpc<SortModeSummary>({
     title: "重命名排序模板失败",
     cmd: "sort_mode_rename",
-    args: { modeId: input.mode_id, name: input.name },
+    args: { modeId, name },
     invoke: () =>
-      commands.sortModeRename(input.mode_id, input.name) as Promise<
-        GeneratedCommandResult<SortModeSummary>
-      >,
+      commands.sortModeRename(modeId, name) as Promise<GeneratedCommandResult<SortModeSummary>>,
   });
 }
 
 export async function sortModeDelete(input: { mode_id: number }) {
+  const modeId = validateSortModeId(input.mode_id);
+
   return invokeGeneratedIpc<boolean>({
     title: "删除排序模板失败",
     cmd: "sort_mode_delete",
-    args: { modeId: input.mode_id },
-    invoke: () =>
-      commands.sortModeDelete(input.mode_id) as Promise<GeneratedCommandResult<boolean>>,
+    args: { modeId },
+    invoke: () => commands.sortModeDelete(modeId) as Promise<GeneratedCommandResult<boolean>>,
   });
 }
 
@@ -70,24 +120,30 @@ export async function sortModeActiveList() {
 }
 
 export async function sortModeActiveSet(input: { cli_key: CliKey; mode_id: number | null }) {
+  const cliKey = validateProviderCliKey(input.cli_key);
+  const modeId = input.mode_id == null ? null : validateSortModeId(input.mode_id);
+
   return invokeGeneratedIpc<SortModeActiveRow>({
     title: "设置激活排序模板失败",
     cmd: "sort_mode_active_set",
-    args: { cliKey: input.cli_key, modeId: input.mode_id },
+    args: { cliKey, modeId },
     invoke: () =>
-      commands.sortModeActiveSet(input.cli_key, input.mode_id) as Promise<
+      commands.sortModeActiveSet(cliKey, modeId) as Promise<
         GeneratedCommandResult<SortModeActiveRow>
       >,
   });
 }
 
 export async function sortModeProvidersList(input: { mode_id: number; cli_key: CliKey }) {
+  const cliKey = validateProviderCliKey(input.cli_key);
+  const modeId = validateSortModeId(input.mode_id);
+
   return invokeGeneratedIpc<SortModeProviderRow[]>({
     title: "读取排序模板供应商失败",
     cmd: "sort_mode_providers_list",
-    args: { modeId: input.mode_id, cliKey: input.cli_key },
+    args: { modeId, cliKey },
     invoke: () =>
-      commands.sortModeProvidersList(input.mode_id, input.cli_key) as Promise<
+      commands.sortModeProvidersList(modeId, cliKey) as Promise<
         GeneratedCommandResult<SortModeProviderRow[]>
       >,
   });
@@ -98,20 +154,22 @@ export async function sortModeProvidersSetOrder(input: {
   cli_key: CliKey;
   ordered_provider_ids: number[];
 }) {
+  const cliKey = validateProviderCliKey(input.cli_key);
+  const modeId = validateSortModeId(input.mode_id);
+  validateOrderedProviderIds(input.ordered_provider_ids);
+
   return invokeGeneratedIpc<SortModeProviderRow[]>({
     title: "更新排序模板供应商顺序失败",
     cmd: "sort_mode_providers_set_order",
     args: {
-      modeId: input.mode_id,
-      cliKey: input.cli_key,
+      modeId,
+      cliKey,
       orderedProviderIds: input.ordered_provider_ids,
     },
     invoke: () =>
-      commands.sortModeProvidersSetOrder(
-        input.mode_id,
-        input.cli_key,
-        input.ordered_provider_ids
-      ) as Promise<GeneratedCommandResult<SortModeProviderRow[]>>,
+      commands.sortModeProvidersSetOrder(modeId, cliKey, input.ordered_provider_ids) as Promise<
+        GeneratedCommandResult<SortModeProviderRow[]>
+      >,
   });
 }
 
@@ -121,19 +179,23 @@ export async function sortModeProviderSetEnabled(input: {
   provider_id: number;
   enabled: boolean;
 }) {
+  const cliKey = validateProviderCliKey(input.cli_key);
+  const modeId = validateSortModeId(input.mode_id);
+  validatePositiveId("providerId", input.provider_id);
+
   return invokeGeneratedIpc<SortModeProviderRow>({
     title: "更新排序模板供应商启用状态失败",
     cmd: "sort_mode_provider_set_enabled",
     args: {
-      modeId: input.mode_id,
-      cliKey: input.cli_key,
+      modeId,
+      cliKey,
       providerId: input.provider_id,
       enabled: input.enabled,
     },
     invoke: () =>
       commands.sortModeProviderSetEnabled(
-        input.mode_id,
-        input.cli_key,
+        modeId,
+        cliKey,
         input.provider_id,
         input.enabled
       ) as Promise<GeneratedCommandResult<SortModeProviderRow>>,

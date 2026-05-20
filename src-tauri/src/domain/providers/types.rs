@@ -51,6 +51,13 @@ pub(crate) fn is_cx2cc_bridge(source_provider_id: Option<i64>, bridge_type: Opti
     source_provider_id.is_some() || bridge_type == Some(CX2CC_BRIDGE_TYPE)
 }
 
+fn take_first_chars(value: &str, max_chars: usize) -> String {
+    if value.chars().nth(max_chars).is_none() {
+        return value.to_string();
+    }
+    value.chars().take(max_chars).collect()
+}
+
 #[derive(Debug, Clone)]
 pub struct ProviderUpsertParams {
     pub provider_id: Option<i64>,
@@ -103,8 +110,8 @@ pub(super) fn normalize_model_slot(raw: Option<String>) -> Option<String> {
     if value.is_empty() {
         return None;
     }
-    if value.len() > MAX_MODEL_NAME_LEN {
-        return Some(value[..MAX_MODEL_NAME_LEN].to_string());
+    if value.chars().nth(MAX_MODEL_NAME_LEN).is_some() {
+        return Some(take_first_chars(value, MAX_MODEL_NAME_LEN));
     }
     Some(value.to_string())
 }

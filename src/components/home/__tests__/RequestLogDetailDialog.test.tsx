@@ -8,22 +8,48 @@ import { RequestLogDetailDialog } from "../RequestLogDetailDialog";
 const requestLogQueryState = vi.hoisted(() => ({
   selectedLog: null as RequestLogDetail | null,
   selectedLogLoading: false,
+  selectedLogRefetch: (() => Promise.resolve(null)) as () => Promise<unknown>,
   attemptLogs: [] as RequestAttemptLog[],
   attemptLogsLoading: false,
+  attemptLogsRefetch: (() => Promise.resolve(null)) as () => Promise<unknown>,
 }));
 
 const traceStoreState = vi.hoisted(() => ({
   traces: [] as TraceSession[],
 }));
 
+const gatewayEventState = vi.hoisted(() => ({
+  requestSignalHandler: null as ((payload: unknown) => void) | null,
+  unsubscribe: (() => undefined) as () => void,
+}));
+
 vi.mock("../../../query/requestLogs", () => ({
   useRequestLogDetailQuery: () => ({
     data: requestLogQueryState.selectedLog,
     isFetching: requestLogQueryState.selectedLogLoading,
+    refetch: requestLogQueryState.selectedLogRefetch,
   }),
   useRequestAttemptLogsByTraceIdQuery: () => ({
     data: requestLogQueryState.attemptLogs,
     isFetching: requestLogQueryState.attemptLogsLoading,
+    refetch: requestLogQueryState.attemptLogsRefetch,
+  }),
+}));
+
+vi.mock("../../../services/gateway/gatewayEventBus", () => ({
+  subscribeGatewayEvent: vi.fn((event: string, handler: (payload: unknown) => void) => {
+    if (event === "gateway:request_signal") {
+      gatewayEventState.requestSignalHandler = handler;
+    }
+    return {
+      ready: Promise.resolve(),
+      unsubscribe: () => {
+        if (gatewayEventState.requestSignalHandler === handler) {
+          gatewayEventState.requestSignalHandler = null;
+        }
+        gatewayEventState.unsubscribe();
+      },
+    };
   }),
 }));
 
@@ -65,12 +91,30 @@ function createSelectedLog(overrides: Partial<RequestLogDetail> = {}): RequestLo
 function setRequestLogQueryState(overrides: Partial<typeof requestLogQueryState> = {}) {
   requestLogQueryState.selectedLog = overrides.selectedLog ?? null;
   requestLogQueryState.selectedLogLoading = overrides.selectedLogLoading ?? false;
+  requestLogQueryState.selectedLogRefetch =
+    overrides.selectedLogRefetch ?? (() => Promise.resolve(null));
   requestLogQueryState.attemptLogs = overrides.attemptLogs ?? [];
   requestLogQueryState.attemptLogsLoading = overrides.attemptLogsLoading ?? false;
+  requestLogQueryState.attemptLogsRefetch =
+    overrides.attemptLogsRefetch ?? (() => Promise.resolve(null));
 }
 
 function setTraceStoreState(overrides: Partial<typeof traceStoreState> = {}) {
   traceStoreState.traces = overrides.traces ?? [];
+}
+
+function createLiveTrace(traceId = "trace-1"): TraceSession {
+  return {
+    trace_id: traceId,
+    cli_key: "claude",
+    method: "POST",
+    path: "/v1/messages",
+    query: null,
+    requested_model: "claude-3",
+    first_seen_ms: Date.now() - 1000,
+    last_seen_ms: Date.now(),
+    attempts: [],
+  };
 }
 
 function expectMetricValue(label: string, value: string) {
@@ -88,6 +132,8 @@ describe("home/RequestLogDetailDialog", () => {
   afterEach(() => {
     setRequestLogQueryState();
     setTraceStoreState();
+    gatewayEventState.requestSignalHandler = null;
+    gatewayEventState.unsubscribe = () => undefined;
     vi.useRealTimers();
   });
 
@@ -378,6 +424,259 @@ describe("home/RequestLogDetailDialog", () => {
     // Switch to chain tab to see live provider
     switchToTab("决策链");
     expect(screen.getByText("当前供应商：Provider Live")).toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      label: "fake-200",
+      status: 502,
+      errorCode: "GW_FAKE_200",
+      expectedBadge: "502 失败",
+    },
+    {
+      label: "stream-abort",
+      status: 499,
+      errorCode: "GW_STREAM_ABORTED",
+      expectedBadge: "499 已中断",
+    },
+  ])(
+    "refreshes the selected in-progress detail when a $label terminal signal arrives",
+    async ({ status, errorCode, expectedBadge }) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-03-29T12:00:00.000Z"));
+      const traceId = "trace-terminal";
+      const terminalLog = createSelectedLog({
+        trace_id: traceId,
+        status,
+        error_code: errorCode,
+        duration_ms: 777,
+      });
+      const selectedLogRefetch = vi.fn(async () => {
+        requestLogQueryState.selectedLog = terminalLog;
+        return { data: terminalLog };
+      });
+      const attemptLogsRefetch = vi.fn(async () => ({ data: [] }));
+
+      setRequestLogQueryState({
+        selectedLog: createSelectedLog({
+          trace_id: traceId,
+          status: null,
+          error_code: null,
+          created_at: Math.floor(Date.now() / 1000),
+          created_at_ms: Date.now(),
+          duration_ms: 0,
+        }),
+        selectedLogRefetch,
+        attemptLogsRefetch,
+      });
+      setTraceStoreState({ traces: [createLiveTrace(traceId)] });
+
+      const view = render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
+      expect(screen.getByText("进行中")).toBeInTheDocument();
+
+      act(() => {
+        gatewayEventState.requestSignalHandler?.({
+          trace_id: "other-trace",
+          cli_key: "claude",
+          phase: "complete",
+          ts: Date.now(),
+        });
+        gatewayEventState.requestSignalHandler?.({
+          trace_id: traceId,
+          cli_key: "claude",
+          phase: "start",
+          ts: Date.now(),
+        });
+        gatewayEventState.requestSignalHandler?.({
+          trace_id: traceId,
+          cli_key: "claude",
+          phase: "complete",
+          status,
+          error_code: errorCode,
+          ts: Date.now(),
+        });
+        gatewayEventState.requestSignalHandler?.({
+          trace_id: traceId,
+          cli_key: "claude",
+          phase: "complete",
+          status,
+          error_code: errorCode,
+          ts: Date.now() + 1,
+        });
+      });
+
+      expect(selectedLogRefetch).not.toHaveBeenCalled();
+      expect(attemptLogsRefetch).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(400);
+        await Promise.resolve();
+      });
+
+      expect(selectedLogRefetch).toHaveBeenCalledTimes(1);
+      expect(attemptLogsRefetch).toHaveBeenCalledTimes(1);
+
+      view.rerender(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
+      expect(screen.queryByText("进行中")).not.toBeInTheDocument();
+      expect(screen.getByText(expectedBadge)).toBeInTheDocument();
+    }
+  );
+
+  it("cancels a queued terminal-signal refresh when the selected trace changes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-29T12:00:00.000Z"));
+    const traceA = "trace-a";
+    const traceB = "trace-b";
+    const refetchA = vi.fn(async () => ({ data: requestLogQueryState.selectedLog }));
+    const refetchB = vi.fn(async () => ({ data: requestLogQueryState.selectedLog }));
+
+    setRequestLogQueryState({
+      selectedLog: createSelectedLog({
+        id: 1,
+        trace_id: traceA,
+        status: null,
+        error_code: null,
+        created_at: Math.floor(Date.now() / 1000),
+        created_at_ms: Date.now(),
+      }),
+      selectedLogRefetch: refetchA,
+      attemptLogsRefetch: vi.fn(async () => ({ data: [] })),
+    });
+    setTraceStoreState({ traces: [createLiveTrace(traceA), createLiveTrace(traceB)] });
+
+    const view = render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
+
+    act(() => {
+      gatewayEventState.requestSignalHandler?.({
+        trace_id: traceA,
+        cli_key: "claude",
+        phase: "complete",
+        ts: Date.now(),
+      });
+    });
+
+    setRequestLogQueryState({
+      selectedLog: createSelectedLog({
+        id: 2,
+        trace_id: traceB,
+        status: null,
+        error_code: null,
+        created_at: Math.floor(Date.now() / 1000),
+        created_at_ms: Date.now(),
+      }),
+      selectedLogRefetch: refetchB,
+      attemptLogsRefetch: vi.fn(async () => ({ data: [] })),
+    });
+    view.rerender(<RequestLogDetailDialog selectedLogId={2} onSelectLogId={vi.fn()} />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400);
+      await Promise.resolve();
+    });
+
+    expect(refetchA).not.toHaveBeenCalled();
+    expect(refetchB).not.toHaveBeenCalled();
+
+    act(() => {
+      gatewayEventState.requestSignalHandler?.({
+        trace_id: traceB,
+        cli_key: "claude",
+        phase: "complete",
+        ts: Date.now(),
+      });
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400);
+      await Promise.resolve();
+    });
+
+    expect(refetchA).not.toHaveBeenCalled();
+    expect(refetchB).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not subscribe to a placeholder detail trace after selection changes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-29T12:00:00.000Z"));
+    const traceA = "trace-placeholder-a";
+    const traceB = "trace-placeholder-b";
+    const refetchA = vi.fn(async () => ({ data: requestLogQueryState.selectedLog }));
+    const refetchB = vi.fn(async () => ({ data: requestLogQueryState.selectedLog }));
+
+    setRequestLogQueryState({
+      selectedLog: createSelectedLog({
+        id: 1,
+        trace_id: traceA,
+        status: null,
+        error_code: null,
+        created_at: Math.floor(Date.now() / 1000),
+        created_at_ms: Date.now(),
+      }),
+      selectedLogRefetch: refetchA,
+      attemptLogsRefetch: vi.fn(async () => ({ data: [] })),
+    });
+    setTraceStoreState({ traces: [createLiveTrace(traceA), createLiveTrace(traceB)] });
+
+    const view = render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
+    expect(gatewayEventState.requestSignalHandler).not.toBeNull();
+
+    setRequestLogQueryState({
+      // React Query's keepPreviousData can expose the old detail while the new id is fetching.
+      selectedLog: createSelectedLog({
+        id: 1,
+        trace_id: traceA,
+        status: null,
+        error_code: null,
+        created_at: Math.floor(Date.now() / 1000),
+        created_at_ms: Date.now(),
+      }),
+      selectedLogLoading: true,
+      selectedLogRefetch: refetchB,
+      attemptLogsRefetch: vi.fn(async () => ({ data: [] })),
+    });
+    view.rerender(<RequestLogDetailDialog selectedLogId={2} onSelectLogId={vi.fn()} />);
+
+    expect(gatewayEventState.requestSignalHandler).toBeNull();
+    expect(screen.getByText("加载中…")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400);
+      await Promise.resolve();
+    });
+    expect(refetchA).not.toHaveBeenCalled();
+    expect(refetchB).not.toHaveBeenCalled();
+
+    setRequestLogQueryState({
+      selectedLog: createSelectedLog({
+        id: 2,
+        trace_id: traceB,
+        status: null,
+        error_code: null,
+        created_at: Math.floor(Date.now() / 1000),
+        created_at_ms: Date.now(),
+      }),
+      selectedLogRefetch: refetchB,
+      attemptLogsRefetch: vi.fn(async () => ({ data: [] })),
+    });
+    view.rerender(<RequestLogDetailDialog selectedLogId={2} onSelectLogId={vi.fn()} />);
+    expect(gatewayEventState.requestSignalHandler).not.toBeNull();
+
+    act(() => {
+      gatewayEventState.requestSignalHandler?.({
+        trace_id: traceB,
+        cli_key: "claude",
+        phase: "complete",
+        ts: Date.now(),
+      });
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400);
+      await Promise.resolve();
+    });
+
+    expect(refetchA).not.toHaveBeenCalled();
+    expect(refetchB).toHaveBeenCalledTimes(1);
   });
 
   it("uses base cache creation tokens and falls back to dash for missing timing metrics", () => {

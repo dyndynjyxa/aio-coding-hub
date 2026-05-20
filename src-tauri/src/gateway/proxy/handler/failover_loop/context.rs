@@ -15,8 +15,8 @@ use std::time::{Duration, Instant};
 
 pub(super) const MAX_NON_SSE_BODY_BYTES: usize = 20 * 1024 * 1024;
 
-pub(super) struct CommonCtxArgs<'a> {
-    pub(super) state: &'a GatewayAppState,
+pub(super) struct CommonCtxArgs<'a, R: tauri::Runtime = tauri::Wry> {
+    pub(super) state: &'a GatewayAppState<R>,
     pub(super) cli_key: &'a String,
     pub(super) forwarded_path: &'a String,
     pub(super) observe: bool,
@@ -44,9 +44,8 @@ pub(super) struct CommonCtxArgs<'a> {
     pub(super) introspection_body: &'a [u8],
 }
 
-#[derive(Clone, Copy)]
-pub(super) struct CommonCtx<'a> {
-    pub(super) state: &'a GatewayAppState,
+pub(super) struct CommonCtx<'a, R: tauri::Runtime = tauri::Wry> {
+    pub(super) state: &'a GatewayAppState<R>,
     pub(super) cli_key: &'a String,
     pub(super) forwarded_path: &'a String,
     pub(super) observe: bool,
@@ -74,8 +73,16 @@ pub(super) struct CommonCtx<'a> {
     pub(super) introspection_body: &'a [u8],
 }
 
-impl<'a> CommonCtx<'a> {
-    pub(super) fn new(args: CommonCtxArgs<'a>) -> Self {
+impl<'a, R: tauri::Runtime> Copy for CommonCtx<'a, R> {}
+
+impl<'a, R: tauri::Runtime> Clone for CommonCtx<'a, R> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<'a, R: tauri::Runtime> CommonCtx<'a, R> {
+    pub(super) fn new(args: CommonCtxArgs<'a, R>) -> Self {
         Self {
             state: args.state,
             cli_key: args.cli_key,
@@ -107,14 +114,14 @@ impl<'a> CommonCtx<'a> {
     }
 }
 
-impl<'a> From<CommonCtxArgs<'a>> for CommonCtx<'a> {
-    fn from(args: CommonCtxArgs<'a>) -> Self {
+impl<'a, R: tauri::Runtime> From<CommonCtxArgs<'a, R>> for CommonCtx<'a, R> {
+    fn from(args: CommonCtxArgs<'a, R>) -> Self {
         Self::new(args)
     }
 }
 
-pub(super) struct CommonCtxOwned<'a> {
-    pub(super) state: &'a GatewayAppState,
+pub(super) struct CommonCtxOwned<'a, R: tauri::Runtime = tauri::Wry> {
+    pub(super) state: &'a GatewayAppState<R>,
     pub(super) cli_key: String,
     pub(super) forwarded_path: String,
     pub(super) observe: bool,
@@ -141,8 +148,8 @@ pub(super) struct CommonCtxOwned<'a> {
     pub(super) introspection_body: Vec<u8>,
 }
 
-impl<'a> From<CommonCtx<'a>> for CommonCtxOwned<'a> {
-    fn from(ctx: CommonCtx<'a>) -> Self {
+impl<'a, R: tauri::Runtime> From<CommonCtx<'a, R>> for CommonCtxOwned<'a, R> {
+    fn from(ctx: CommonCtx<'a, R>) -> Self {
         Self {
             state: ctx.state,
             cli_key: ctx.cli_key.clone(),
@@ -206,14 +213,14 @@ impl<'a> From<ProviderCtx<'a>> for ProviderCtxOwned {
     }
 }
 
-pub(super) fn build_stream_finalize_ctx(
-    ctx: &CommonCtxOwned<'_>,
+pub(super) fn build_stream_finalize_ctx<R: tauri::Runtime>(
+    ctx: &CommonCtxOwned<'_, R>,
     provider_ctx: &ProviderCtxOwned,
     attempts: &[FailoverAttempt],
     status: u16,
     error_category: Option<&'static str>,
     error_code: Option<&'static str>,
-) -> StreamFinalizeCtx {
+) -> StreamFinalizeCtx<R> {
     let attempts_json = serde_json::to_string(attempts).unwrap_or_else(|_| "[]".to_string());
 
     StreamFinalizeCtx {
@@ -261,12 +268,12 @@ pub(super) struct AttemptCtx<'a> {
     pub(super) anthropic_stream_requested: bool,
 }
 
-pub(super) struct LoopState<'a> {
+pub(super) struct LoopState<'a, R: tauri::Runtime = tauri::Wry> {
     pub(super) attempts: &'a mut Vec<FailoverAttempt>,
     pub(super) failed_provider_ids: &'a mut HashSet<i64>,
     pub(super) last_outcome: &'a mut Option<AttemptOutcome>,
     pub(super) circuit_snapshot: &'a mut circuit_breaker::CircuitSnapshot,
-    pub(super) abort_guard: &'a mut RequestAbortGuard,
+    pub(super) abort_guard: &'a mut RequestAbortGuard<R>,
 }
 
 #[derive(Clone, Copy)]
@@ -300,13 +307,13 @@ impl FailoverRunState {
     }
 }
 
-impl<'a> LoopState<'a> {
+impl<'a, R: tauri::Runtime> LoopState<'a, R> {
     pub(super) fn new(
         attempts: &'a mut Vec<FailoverAttempt>,
         failed_provider_ids: &'a mut HashSet<i64>,
         last_outcome: &'a mut Option<AttemptOutcome>,
         circuit_snapshot: &'a mut circuit_breaker::CircuitSnapshot,
-        abort_guard: &'a mut RequestAbortGuard,
+        abort_guard: &'a mut RequestAbortGuard<R>,
     ) -> Self {
         Self {
             attempts,
@@ -321,7 +328,7 @@ impl<'a> LoopState<'a> {
     ///
     /// Use this when passing loop state by value to a callee while retaining
     /// access in the caller after the callee returns.
-    pub(super) fn reborrow(&mut self) -> LoopState<'_> {
+    pub(super) fn reborrow(&mut self) -> LoopState<'_, R> {
         LoopState {
             attempts: self.attempts,
             failed_provider_ids: self.failed_provider_ids,

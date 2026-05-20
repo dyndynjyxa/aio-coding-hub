@@ -20,7 +20,9 @@ impl BodyReaderMiddleware {
     /// Reads the request body into `ctx.body_bytes` and parses introspection JSON.
     ///
     /// Also strips the `x-aio-provider-id` header (already consumed as `forced_provider_id`).
-    pub(in crate::gateway::proxy::handler) async fn run(mut ctx: ProxyContext) -> MiddlewareAction {
+    pub(in crate::gateway::proxy::handler) async fn run<R: tauri::Runtime>(
+        mut ctx: ProxyContext<R>,
+    ) -> MiddlewareAction<R> {
         let body = ctx
             .request_body
             .take()

@@ -9,6 +9,7 @@ pub(super) mod cx2cc;
 mod error_code;
 mod errors;
 mod failover;
+mod fake_200;
 mod forwarder;
 mod gemini_oauth;
 mod handler;
@@ -25,6 +26,7 @@ mod upstream_client_error_rules;
 
 pub(super) use caches::{ProviderBaseUrlPingCache, RecentErrorCache};
 pub(super) use error_code::GatewayErrorCode;
+pub(in crate::gateway) use fake_200::is_fake_200_non_stream_body;
 pub(in crate::gateway) use logging::spawn_enqueue_request_log_with_backpressure;
 pub(super) use types::ErrorCategory;
 

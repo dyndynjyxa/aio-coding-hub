@@ -5,8 +5,8 @@ use crate::providers;
 use crate::shared::error::db_err;
 use rusqlite::{params, Connection};
 
-pub(super) struct ProviderLimitsInput<'a> {
-    pub(super) ctx: CommonCtx<'a>,
+pub(super) struct ProviderLimitsInput<'a, R: tauri::Runtime = tauri::Wry> {
+    pub(super) ctx: CommonCtx<'a, R>,
     pub(super) provider: &'a providers::ProviderForGateway,
     pub(super) earliest_available_unix: &'a mut Option<i64>,
     pub(super) skipped_limits: &'a mut usize,
@@ -355,7 +355,7 @@ fn resolve_fixed_5h_start(
     Ok(now_unix)
 }
 
-pub(super) fn gate_provider(input: ProviderLimitsInput<'_>) -> bool {
+pub(super) fn gate_provider<R: tauri::Runtime>(input: ProviderLimitsInput<'_, R>) -> bool {
     let ProviderLimitsInput {
         ctx,
         provider,

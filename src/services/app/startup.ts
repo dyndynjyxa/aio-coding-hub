@@ -2,26 +2,29 @@ import { logToConsole } from "../consoleLog";
 import { modelPricesSyncBasellm, setLastModelPricesSync } from "../usage/modelPrices";
 import { promptsDefaultSyncFromFiles } from "../workspace/prompts";
 
-let modelPricesSyncStarted = false;
+let modelPricesSyncPromise: Promise<void> | null = null;
 let defaultPromptsSyncPromise: Promise<void> | null = null;
 
-export async function startupSyncModelPricesOnce(): Promise<void> {
-  if (modelPricesSyncStarted) return;
-  modelPricesSyncStarted = true;
+export function startupSyncModelPricesOnce(): Promise<void> {
+  if (modelPricesSyncPromise) return modelPricesSyncPromise;
 
-  try {
-    const report = await modelPricesSyncBasellm(false);
-    setLastModelPricesSync(report);
-    logToConsole("info", "启动同步：模型定价同步完成", {
-      status: report.status,
-      inserted: report.inserted,
-      updated: report.updated,
-      skipped: report.skipped,
-      total: report.total,
-    });
-  } catch (err) {
-    logToConsole("error", "启动同步：模型定价同步失败", { error: String(err) });
-  }
+  modelPricesSyncPromise = (async () => {
+    try {
+      const report = await modelPricesSyncBasellm(false);
+      setLastModelPricesSync(report);
+      logToConsole("info", "启动同步：模型定价同步完成", {
+        status: report.status,
+        inserted: report.inserted,
+        updated: report.updated,
+        skipped: report.skipped,
+        total: report.total,
+      });
+    } catch (err) {
+      logToConsole("error", "启动同步：模型定价同步失败", { error: String(err) });
+    }
+  })();
+
+  return modelPricesSyncPromise;
 }
 
 function summarizeDefaultPromptSyncActions(items: { action: string }[]) {

@@ -5,7 +5,10 @@ mod codex;
 mod gemini;
 
 use crate::app_paths;
-use crate::shared::fs::{read_optional_file, write_file_atomic, write_file_atomic_if_changed};
+use crate::shared::fs::{
+    read_file_with_max_len, read_optional_file_with_max_len, write_file_atomic,
+    write_file_atomic_if_changed,
+};
 use crate::shared::time::now_unix_seconds;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -14,6 +17,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const MANIFEST_SCHEMA_VERSION: u32 = 1;
 const MANAGED_BY: &str = "aio-coding-hub";
 pub(crate) const PLACEHOLDER_KEY: &str = "aio-coding-hub";
+const CLI_PROXY_MANIFEST_MAX_BYTES: usize = 256 * 1024;
+pub(super) const CLI_PROXY_FILE_MAX_BYTES: usize = 1024 * 1024;
 
 static TRACE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -162,13 +167,47 @@ fn cli_proxy_manifest_path(root: &Path) -> PathBuf {
     root.join("manifest.json")
 }
 
+fn ensure_cli_proxy_bytes_len(
+    bytes: &[u8],
+    max_len: usize,
+    label: &str,
+) -> crate::shared::error::AppResult<()> {
+    if bytes.len() > max_len {
+        return Err(format!("SEC_INVALID_INPUT: {label} too large (max {max_len} bytes)").into());
+    }
+    Ok(())
+}
+
+pub(super) fn read_optional_cli_proxy_file(
+    path: &Path,
+) -> crate::shared::error::AppResult<Option<Vec<u8>>> {
+    read_optional_file_with_max_len(path, CLI_PROXY_FILE_MAX_BYTES)
+}
+
+pub(super) fn read_cli_proxy_file(path: &Path) -> crate::shared::error::AppResult<Vec<u8>> {
+    read_file_with_max_len(path, CLI_PROXY_FILE_MAX_BYTES)
+}
+
+pub(super) fn write_cli_proxy_file_atomic(
+    path: &Path,
+    bytes: &[u8],
+) -> crate::shared::error::AppResult<()> {
+    ensure_cli_proxy_bytes_len(
+        bytes,
+        CLI_PROXY_FILE_MAX_BYTES,
+        &format!("CLI proxy file {}", path.display()),
+    )?;
+    write_file_atomic(path, bytes)
+}
+
 fn read_manifest<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     cli_key: &str,
 ) -> crate::shared::error::AppResult<Option<CliProxyManifest>> {
     let root = cli_proxy_root_dir(app, cli_key)?;
     let path = cli_proxy_manifest_path(&root);
-    let Some(content) = read_optional_file(&path)? else {
+    let Some(content) = read_optional_file_with_max_len(&path, CLI_PROXY_MANIFEST_MAX_BYTES)?
+    else {
         return Ok(None);
     };
 
@@ -198,6 +237,7 @@ fn write_manifest<R: tauri::Runtime>(
 
     let bytes = serde_json::to_vec_pretty(manifest)
         .map_err(|e| format!("failed to serialize manifest.json: {e}"))?;
+    ensure_cli_proxy_bytes_len(&bytes, CLI_PROXY_MANIFEST_MAX_BYTES, "CLI proxy manifest")?;
     write_file_atomic(&path, &bytes)?;
     Ok(())
 }
@@ -265,7 +305,7 @@ fn apply_proxy_config<R: tauri::Runtime>(
     let mut prepared_writes: Vec<(PathBuf, Vec<u8>)> = Vec::with_capacity(targets.len());
 
     for t in targets {
-        let current = read_optional_file(&t.path)?;
+        let current = read_optional_cli_proxy_file(&t.path)?;
 
         let bytes = match cli_key {
             "claude" => {
@@ -278,7 +318,7 @@ fn apply_proxy_config<R: tauri::Runtime>(
                         // Preserve the original file — never clobber user data on parse failure.
                         if let Some(original_bytes) = current.as_ref() {
                             let backup_path = t.path.with_extension("json.invalid-backup");
-                            let _ = write_file_atomic(&backup_path, original_bytes);
+                            let _ = write_cli_proxy_file_atomic(&backup_path, original_bytes);
                             tracing::warn!(
                                 "cli_proxy: preserved invalid config as {}",
                                 backup_path.display()
@@ -299,7 +339,7 @@ fn apply_proxy_config<R: tauri::Runtime>(
                         Err(err) => {
                             if let Some(original_bytes) = current.as_ref() {
                                 let backup_path = t.path.with_extension("toml.invalid-backup");
-                                let _ = write_file_atomic(&backup_path, original_bytes);
+                                let _ = write_cli_proxy_file_atomic(&backup_path, original_bytes);
                             }
                             return Err(err);
                         }
@@ -310,7 +350,7 @@ fn apply_proxy_config<R: tauri::Runtime>(
                         Err(err) => {
                             if let Some(original_bytes) = current.as_ref() {
                                 let backup_path = t.path.with_extension("json.invalid-backup");
-                                let _ = write_file_atomic(&backup_path, original_bytes);
+                                let _ = write_cli_proxy_file_atomic(&backup_path, original_bytes);
                             }
                             return Err(err);
                         }
@@ -325,6 +365,11 @@ fn apply_proxy_config<R: tauri::Runtime>(
     }
 
     for (path, bytes) in prepared_writes {
+        ensure_cli_proxy_bytes_len(
+            &bytes,
+            CLI_PROXY_FILE_MAX_BYTES,
+            &format!("CLI proxy file {}", path.display()),
+        )?;
         let _ = write_file_atomic_if_changed(&path, &bytes)?;
     }
 
@@ -379,14 +424,8 @@ fn restore_from_manifest<R: tauri::Runtime>(
             }
 
             // Fallback: full restore for unknown file kinds
-            let bytes = std::fs::read(&backup_path).map_err(|e| {
-                format!(
-                    "failed to read backup {} for {}: {e}",
-                    backup_path.display(),
-                    entry.kind
-                )
-            })?;
-            write_file_atomic(&target_path, &bytes)?;
+            let bytes = read_cli_proxy_file(&backup_path)?;
+            write_cli_proxy_file_atomic(&target_path, &bytes)?;
             continue;
         }
 
@@ -396,10 +435,11 @@ fn restore_from_manifest<R: tauri::Runtime>(
 
         // If the file did not exist before enabling proxy, restore to "absent".
         // Safety copy current content before removal.
-        if let Ok(bytes) = std::fs::read(&target_path) {
+        if target_path.exists() {
+            let bytes = read_cli_proxy_file(&target_path)?;
             let safe_name = format!("{ts}_{}_before_remove", entry.kind);
             let safe_path = safety_dir.join(safe_name);
-            let _ = write_file_atomic(&safe_path, &bytes);
+            write_cli_proxy_file_atomic(&safe_path, &bytes)?;
         }
 
         std::fs::remove_file(&target_path)
@@ -492,11 +532,11 @@ fn backup_for_enable<R: tauri::Runtime>(
 
     let mut entries = Vec::with_capacity(targets.len());
     for t in targets {
-        let read_bytes = read_optional_file(&t.path)?;
+        let read_bytes = read_optional_cli_proxy_file(&t.path)?;
         let existed = read_bytes.is_some();
         let backup_rel = if let Some(bytes) = read_bytes {
             let backup_path = files_dir.join(t.backup_name);
-            write_file_atomic(&backup_path, &bytes)?;
+            write_cli_proxy_file_atomic(&backup_path, &bytes)?;
             Some(t.backup_name.to_string())
         } else {
             None
@@ -532,7 +572,7 @@ fn capture_current_target_state<R: tauri::Runtime>(
     let mut captured = Vec::with_capacity(targets.len());
 
     for target in targets {
-        let backup_bytes = read_optional_file(&target.path)?;
+        let backup_bytes = read_optional_cli_proxy_file(&target.path)?;
 
         captured.push(PendingBackupEntry {
             kind: target.kind.to_string(),
@@ -580,7 +620,7 @@ fn write_captured_backups<R: tauri::Runtime>(
     for entry in captured {
         if let Some(bytes) = entry.backup_bytes.as_ref() {
             let backup_path = files_dir.join(entry.backup_name);
-            write_file_atomic(&backup_path, bytes)?;
+            write_cli_proxy_file_atomic(&backup_path, bytes)?;
         }
     }
 
@@ -588,7 +628,7 @@ fn write_captured_backups<R: tauri::Runtime>(
 }
 
 fn snapshot_file(path: &Path) -> crate::shared::error::AppResult<FileSnapshot> {
-    let bytes = read_optional_file(path)?;
+    let bytes = read_optional_cli_proxy_file(path)?;
 
     Ok(FileSnapshot {
         path: path.to_path_buf(),
@@ -604,7 +644,7 @@ fn restore_file_snapshots(snapshots: &[FileSnapshot]) -> crate::shared::error::A
                 std::fs::create_dir_all(parent)
                     .map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
             }
-            write_file_atomic(&snapshot.path, bytes)?;
+            write_cli_proxy_file_atomic(&snapshot.path, bytes)?;
             continue;
         }
 
@@ -642,18 +682,12 @@ fn restore_backups_exactly_from_manifest<R: tauri::Runtime>(
                 return Err(format!("missing backup_rel for {}", entry.kind).into());
             };
             let backup_path = files_dir.join(rel);
-            let bytes = std::fs::read(&backup_path).map_err(|e| {
-                format!(
-                    "failed to read backup {} for {}: {e}",
-                    backup_path.display(),
-                    entry.kind
-                )
-            })?;
+            let bytes = read_cli_proxy_file(&backup_path)?;
             if let Some(parent) = target_path.parent() {
                 std::fs::create_dir_all(parent)
                     .map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
             }
-            write_file_atomic(&target_path, &bytes)?;
+            write_cli_proxy_file_atomic(&target_path, &bytes)?;
             continue;
         }
 

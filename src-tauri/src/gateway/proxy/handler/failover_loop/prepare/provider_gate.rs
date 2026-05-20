@@ -5,8 +5,8 @@ use crate::circuit_breaker;
 use crate::gateway::proxy::provider_router;
 use crate::gateway::util::now_unix_seconds;
 
-pub(super) struct ProviderGateInput<'a> {
-    pub(super) ctx: CommonCtx<'a>,
+pub(super) struct ProviderGateInput<'a, R: tauri::Runtime = tauri::Wry> {
+    pub(super) ctx: CommonCtx<'a, R>,
     pub(super) provider_id: i64,
     pub(super) provider_name_base: &'a String,
     pub(super) provider_base_url_display: &'a String,
@@ -19,7 +19,9 @@ pub(super) struct ProviderGateAllow {
     pub(super) circuit_after: circuit_breaker::CircuitSnapshot,
 }
 
-pub(super) fn gate_provider(input: ProviderGateInput<'_>) -> Option<ProviderGateAllow> {
+pub(super) fn gate_provider<R: tauri::Runtime>(
+    input: ProviderGateInput<'_, R>,
+) -> Option<ProviderGateAllow> {
     let ProviderGateInput {
         ctx,
         provider_id,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { gatewayEventNames } from "../constants/gatewayEvents";
 import {
   useRequestLogsIncrementalRefreshMutation,
@@ -6,8 +6,9 @@ import {
 } from "../query/requestLogs";
 import { logToConsole } from "../services/consoleLog";
 import { subscribeGatewayEvent } from "../services/gateway/gatewayEventBus";
-import { isGatewayRequestSignalEvent } from "../services/gateway/gatewayEvents";
+import { normalizeGatewayRequestSignalEvent } from "../services/gateway/gatewayEvents";
 import { isRequestSignalComplete } from "../services/gateway/requestLogState";
+import { useCoalescedAsyncRefresh } from "./useCoalescedAsyncRefresh";
 import { useDocumentVisibility } from "./useDocumentVisibility";
 import { useWindowForeground } from "./useWindowForeground";
 
@@ -39,63 +40,15 @@ export function useRequestLogsFeed({
   const incrementalRefreshMutation = useRequestLogsIncrementalRefreshMutation(limit);
   const liveRefreshEnabled = enabled && liveUpdatesEnabled && foregroundActive;
   const liveRefreshWindowMs = resolveSignalRefreshWindowMs(liveUpdateIntervalMs);
-  const liveRefreshTimerRef = useRef<number | null>(null);
-  const liveRefreshQueuedRef = useRef(false);
-  const liveRefreshInFlightRef = useRef(false);
-  const liveRefreshEnabledRef = useRef(liveRefreshEnabled);
-
-  const clearQueuedLiveRefresh = useCallback(() => {
-    if (liveRefreshTimerRef.current != null) {
-      window.clearTimeout(liveRefreshTimerRef.current);
-      liveRefreshTimerRef.current = null;
-    }
-    liveRefreshQueuedRef.current = false;
-  }, []);
-
-  const flushLiveRefresh = useCallback(() => {
-    if (!liveRefreshEnabledRef.current) {
-      clearQueuedLiveRefresh();
-      return;
-    }
-
-    if (liveRefreshInFlightRef.current) {
-      liveRefreshQueuedRef.current = true;
-      return;
-    }
-
-    liveRefreshQueuedRef.current = false;
-    liveRefreshInFlightRef.current = true;
-
-    void incrementalRefreshMutation
-      .mutateAsync()
-      .catch((error) => {
-        logToConsole("warn", "增量刷新请求记录失败", { limit, error: String(error) });
-      })
-      .finally(() => {
-        liveRefreshInFlightRef.current = false;
-        if (!liveRefreshQueuedRef.current || !liveRefreshEnabledRef.current) {
-          liveRefreshQueuedRef.current = false;
-          return;
-        }
-        liveRefreshQueuedRef.current = false;
-        flushLiveRefresh();
-      });
-  }, [clearQueuedLiveRefresh, incrementalRefreshMutation, limit]);
-
-  const scheduleLiveRefresh = useCallback(() => {
-    if (!liveRefreshEnabled) {
-      return;
-    }
-    if (liveRefreshTimerRef.current != null) {
-      liveRefreshQueuedRef.current = true;
-      return;
-    }
-
-    liveRefreshTimerRef.current = window.setTimeout(() => {
-      liveRefreshTimerRef.current = null;
-      flushLiveRefresh();
-    }, liveRefreshWindowMs);
-  }, [flushLiveRefresh, liveRefreshEnabled, liveRefreshWindowMs]);
+  const { schedule: scheduleLiveRefresh } = useCoalescedAsyncRefresh<void, unknown>({
+    enabled: liveRefreshEnabled,
+    delayMs: liveRefreshWindowMs,
+    task: () => incrementalRefreshMutation.mutateAsync(),
+    onError: (error) => {
+      logToConsole("warn", "增量刷新请求记录失败", { limit, error: String(error) });
+      return null;
+    },
+  });
 
   const refreshRequestLogs = useCallback(() => {
     return requestLogsQuery.refetch();
@@ -127,11 +80,12 @@ export function useRequestLogsFeed({
 
     let cancelled = false;
     const requestSignalSub = subscribeGatewayEvent(gatewayEventNames.requestSignal, (payload) => {
-      if (cancelled || !isGatewayRequestSignalEvent(payload)) {
+      const requestSignal = normalizeGatewayRequestSignalEvent(payload);
+      if (cancelled || !requestSignal) {
         return;
       }
 
-      if (!isRequestSignalComplete(payload)) {
+      if (!isRequestSignalComplete(requestSignal)) {
         return;
       }
 
@@ -161,20 +115,6 @@ export function useRequestLogsFeed({
       requestSignalSub.unsubscribe();
     };
   }, [liveRefreshEnabled, scheduleLiveRefresh]);
-
-  useEffect(() => {
-    liveRefreshEnabledRef.current = liveRefreshEnabled;
-    if (!liveRefreshEnabled) {
-      clearQueuedLiveRefresh();
-    }
-  }, [clearQueuedLiveRefresh, liveRefreshEnabled]);
-
-  useEffect(() => {
-    return () => {
-      clearQueuedLiveRefresh();
-      liveRefreshInFlightRef.current = false;
-    };
-  }, [clearQueuedLiveRefresh]);
 
   const requestLogs = useMemo(() => requestLogsQuery.data ?? [], [requestLogsQuery.data]);
   const requestLogsLoading = requestLogsQuery.isLoading;

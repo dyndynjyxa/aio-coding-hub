@@ -6,8 +6,11 @@ import {
   gatewayCircuitResetCli,
   gatewayCircuitResetProvider,
   gatewayCircuitStatus,
+  GATEWAY_SESSIONS_DEFAULT_LIMIT,
   gatewaySessionsList,
   gatewayStatus,
+  normalizeGatewaySessionsLimit,
+  validateGatewayCliKey,
   type GatewayProviderCircuitStatus,
 } from "../services/gateway/gateway";
 import type { CliKey } from "../services/providers/providers";
@@ -131,28 +134,33 @@ export function useGatewayStopMutation() {
 }
 
 export function useGatewayCircuitStatusQuery(cliKey: CliKey) {
+  const normalizedCliKey = validateGatewayCliKey(cliKey);
+
   return useQuery({
-    queryKey: gatewayKeys.circuitStatus(cliKey),
-    queryFn: () => gatewayCircuitStatus(cliKey),
+    queryKey: gatewayKeys.circuitStatus(normalizedCliKey),
+    queryFn: () => gatewayCircuitStatus(normalizedCliKey),
     enabled: true,
     placeholderData: keepPreviousData,
   });
 }
 
 export function useGatewayCircuitByProviderId(cliKey: CliKey) {
-  const query = useGatewayCircuitStatusQuery(cliKey);
+  const normalizedCliKey = validateGatewayCliKey(cliKey);
+  const query = useGatewayCircuitStatusQuery(normalizedCliKey);
   const byId = useMemo(() => summarizeGatewayCircuitRows(query.data).byProviderId, [query.data]);
 
   return { ...query, circuitByProviderId: byId };
 }
 
 export function useGatewaySessionsListQuery(
-  limit: number,
+  limit?: number | null,
   options?: { enabled?: boolean; refetchIntervalMs?: number | false }
 ) {
+  const normalizedLimit = normalizeGatewaySessionsLimit(limit) ?? GATEWAY_SESSIONS_DEFAULT_LIMIT;
+
   return useQuery({
-    queryKey: gatewayKeys.sessionsList(limit),
-    queryFn: () => gatewaySessionsList(limit),
+    queryKey: gatewayKeys.sessionsList(normalizedLimit),
+    queryFn: () => gatewaySessionsList(normalizedLimit),
     enabled: options?.enabled ?? true,
     placeholderData: keepPreviousData,
     refetchInterval: options?.refetchIntervalMs ?? false,
@@ -164,11 +172,15 @@ export function useGatewayCircuitResetProviderMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (input: { cliKey?: CliKey | null; providerId: number }) =>
-      gatewayCircuitResetProvider(input.providerId),
+    mutationFn: (input: { cliKey?: CliKey | null; providerId: number }) => {
+      if (input.cliKey) validateGatewayCliKey(input.cliKey);
+      return gatewayCircuitResetProvider(input.providerId);
+    },
     onSuccess: (_ok, input) => {
       if (input.cliKey) {
-        queryClient.invalidateQueries({ queryKey: gatewayKeys.circuitStatus(input.cliKey) });
+        queryClient.invalidateQueries({
+          queryKey: gatewayKeys.circuitStatus(validateGatewayCliKey(input.cliKey)),
+        });
         return;
       }
       queryClient.invalidateQueries({ queryKey: gatewayKeys.circuits() });
@@ -180,9 +192,12 @@ export function useGatewayCircuitResetCliMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (input: { cliKey: CliKey }) => gatewayCircuitResetCli(input.cliKey),
+    mutationFn: (input: { cliKey: CliKey }) =>
+      gatewayCircuitResetCli(validateGatewayCliKey(input.cliKey)),
     onSuccess: (_count, input) => {
-      queryClient.invalidateQueries({ queryKey: gatewayKeys.circuitStatus(input.cliKey) });
+      queryClient.invalidateQueries({
+        queryKey: gatewayKeys.circuitStatus(validateGatewayCliKey(input.cliKey)),
+      });
     },
   });
 }
@@ -194,6 +209,7 @@ export function useGatewayCircuitAutoRefresh(
 ) {
   const queryClient = useQueryClient();
   const timerRef = useRef<number | null>(null);
+  const normalizedCliKey = validateGatewayCliKey(cliKey);
   const enabled = options?.enabled ?? true;
 
   useEffect(() => {
@@ -217,7 +233,7 @@ export function useGatewayCircuitAutoRefresh(
     const delayMs = Math.max(200, (nextAvailableUntil - nowUnix) * 1000 + 250);
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null;
-      void queryClient.invalidateQueries({ queryKey: gatewayKeys.circuitStatus(cliKey) });
+      void queryClient.invalidateQueries({ queryKey: gatewayKeys.circuitStatus(normalizedCliKey) });
     }, delayMs);
 
     return () => {
@@ -227,8 +243,8 @@ export function useGatewayCircuitAutoRefresh(
       }
     };
   }, [
-    cliKey,
     enabled,
+    normalizedCliKey,
     queryClient,
     summary.earliestUnavailableUntil,
     summary.hasUnavailable,

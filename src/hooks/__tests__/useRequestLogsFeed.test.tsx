@@ -141,6 +141,76 @@ describe("hooks/useRequestLogsFeed", () => {
     vi.useRealTimers();
   });
 
+  it("treats fake-200 and stream-abort complete signals as live refresh triggers", async () => {
+    vi.useFakeTimers();
+    const incrementalRefresh = vi.fn().mockResolvedValue(null);
+    let eventHandler: ((payload: Record<string, unknown>) => void) | null = null;
+
+    vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
+      data: [{ id: 1 }],
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useRequestLogsIncrementalRefreshMutation).mockReturnValue({
+      mutateAsync: incrementalRefresh,
+      isPending: false,
+    } as any);
+    vi.mocked(subscribeGatewayEvent).mockImplementation((event: string, handler: any) => {
+      expect(event).toBe(gatewayEventNames.requestSignal);
+      eventHandler = handler;
+      return {
+        ready: Promise.resolve(),
+        unsubscribe: vi.fn(),
+      };
+    });
+
+    renderHook(() =>
+      useRequestLogsFeed({
+        limit: 10,
+        liveUpdatesEnabled: true,
+        liveUpdateIntervalMs: 400,
+      })
+    );
+
+    act(() => {
+      eventHandler?.({
+        trace_id: "t-fake-200",
+        cli_key: "codex",
+        phase: "start",
+        status: 502,
+        error_code: "GW_FAKE_200",
+        ts: 1,
+      });
+      eventHandler?.({
+        trace_id: "t-fake-200",
+        cli_key: "codex",
+        phase: "complete",
+        status: 502,
+        error_code: "GW_FAKE_200",
+        ts: 2,
+      });
+      eventHandler?.({
+        trace_id: "t-abort",
+        cli_key: "codex",
+        phase: "complete",
+        status: 499,
+        error_code: "GW_STREAM_ABORTED",
+        ts: 3,
+      });
+    });
+
+    expect(incrementalRefresh).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+      await Promise.resolve();
+    });
+
+    expect(incrementalRefresh).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
   it("refreshes through incremental mutation on foreground when live updates own freshness", () => {
     const incrementalRefresh = vi.fn().mockResolvedValue(null);
     let foregroundArgs: { onForeground: () => void } | null = null;

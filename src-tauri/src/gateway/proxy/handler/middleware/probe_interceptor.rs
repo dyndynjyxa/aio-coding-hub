@@ -9,7 +9,9 @@ use axum::Json;
 pub(in crate::gateway::proxy::handler) struct ProbeInterceptorMiddleware;
 
 impl ProbeInterceptorMiddleware {
-    pub(in crate::gateway::proxy::handler) fn run(ctx: ProxyContext) -> MiddlewareAction {
+    pub(in crate::gateway::proxy::handler) fn run<R: tauri::Runtime>(
+        ctx: ProxyContext<R>,
+    ) -> MiddlewareAction<R> {
         if ctx.cli_key != "claude" {
             return MiddlewareAction::Continue(Box::new(ctx));
         }

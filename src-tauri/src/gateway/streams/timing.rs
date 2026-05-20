@@ -10,27 +10,31 @@ use super::super::proxy::GatewayErrorCode;
 use super::request_end::{emit_request_event_and_spawn_request_log, StreamRequestCompletion};
 use super::StreamFinalizeCtx;
 
-pub(in crate::gateway) struct TimingOnlyTeeStream<S, B>
+pub(in crate::gateway) struct TimingOnlyTeeStream<S, B, R = tauri::Wry>
 where
     S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
     B: AsRef<[u8]>,
+    R: tauri::Runtime,
+    R::Handle: Unpin,
 {
     upstream: S,
-    ctx: StreamFinalizeCtx,
+    ctx: StreamFinalizeCtx<R>,
     first_byte_ms: Option<u128>,
     total_timeout: Option<Duration>,
     total_sleep: Option<Pin<Box<tokio::time::Sleep>>>,
     finalized: bool,
 }
 
-impl<S, B> TimingOnlyTeeStream<S, B>
+impl<S, B, R> TimingOnlyTeeStream<S, B, R>
 where
     S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
     B: AsRef<[u8]>,
+    R: tauri::Runtime,
+    R::Handle: Unpin,
 {
     pub(in crate::gateway) fn new(
         upstream: S,
-        ctx: StreamFinalizeCtx,
+        ctx: StreamFinalizeCtx<R>,
         total_timeout: Option<Duration>,
     ) -> Self {
         let remaining = total_timeout.and_then(|d| d.checked_sub(ctx.started.elapsed()));
@@ -63,10 +67,12 @@ where
     }
 }
 
-impl<S, B> Stream for TimingOnlyTeeStream<S, B>
+impl<S, B, R> Stream for TimingOnlyTeeStream<S, B, R>
 where
     S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
     B: AsRef<[u8]>,
+    R: tauri::Runtime,
+    R::Handle: Unpin,
 {
     type Item = Result<B, reqwest::Error>;
 
@@ -109,10 +115,12 @@ where
     }
 }
 
-impl<S, B> Drop for TimingOnlyTeeStream<S, B>
+impl<S, B, R> Drop for TimingOnlyTeeStream<S, B, R>
 where
     S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
     B: AsRef<[u8]>,
+    R: tauri::Runtime,
+    R::Handle: Unpin,
 {
     fn drop(&mut self) {
         if !self.finalized {

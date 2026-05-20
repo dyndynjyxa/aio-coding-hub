@@ -382,6 +382,8 @@ fn import_workspaces(
             prompts,
             prompt,
         } = workspace;
+        let cli_key = crate::workspaces::normalize_cli_key(&cli_key)?;
+        let name = crate::workspaces::validate_workspace_name(&name)?;
         let normalized_name = crate::shared::text::normalize_name(&name);
         tx.execute(
             r#"

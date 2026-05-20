@@ -1,10 +1,11 @@
 //! Claude-specific CLI proxy configuration helpers.
 
 use crate::shared::error::AppResult;
-use crate::shared::fs::{read_optional_file, write_file_atomic};
 use std::path::Path;
 
-use super::PLACEHOLDER_KEY;
+use super::{
+    read_cli_proxy_file, read_optional_cli_proxy_file, write_cli_proxy_file_atomic, PLACEHOLDER_KEY,
+};
 
 pub(super) fn claude_settings_path<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
@@ -82,13 +83,8 @@ pub(super) fn merge_restore_claude_settings_json(
 ) -> AppResult<()> {
     const PROXY_ENV_KEYS: &[&str] = &["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"];
 
-    let current_bytes = read_optional_file(target_path)?;
-    let backup_bytes = std::fs::read(backup_path).map_err(|e| {
-        format!(
-            "failed to read backup {} for claude_settings_json: {e}",
-            backup_path.display()
-        )
-    })?;
+    let current_bytes = read_optional_cli_proxy_file(target_path)?;
+    let backup_bytes = read_cli_proxy_file(backup_path)?;
 
     let mut current: serde_json::Value = match current_bytes {
         Some(b) if !b.is_empty() => {
@@ -120,7 +116,7 @@ pub(super) fn merge_restore_claude_settings_json(
     let mut bytes = serde_json::to_vec_pretty(&current)
         .map_err(|e| format!("failed to serialize settings.json: {e}"))?;
     bytes.push(b'\n');
-    write_file_atomic(target_path, &bytes)?;
+    write_cli_proxy_file_atomic(target_path, &bytes)?;
     Ok(())
 }
 
@@ -133,7 +129,7 @@ pub(super) fn is_proxy_config_applied<R: tauri::Runtime>(
         Ok(p) => p,
         Err(_) => return false,
     };
-    let bytes = match std::fs::read(&path) {
+    let bytes = match read_cli_proxy_file(&path) {
         Ok(b) => b,
         Err(_) => return false,
     };

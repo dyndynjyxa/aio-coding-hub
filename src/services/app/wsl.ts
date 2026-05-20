@@ -1,6 +1,9 @@
 import { commands } from "../../generated/bindings";
 import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
 
+export const WSL_DISTROS_MAX_COUNT = 64;
+export const WSL_DISTRO_MAX_CHARS = 128;
+
 export type WslDetection = {
   detected: boolean;
   distros: string[];
@@ -37,6 +40,34 @@ export type WslConfigureReport = {
   distros: WslConfigureDistroReport[];
 };
 
+export function normalizeWslDistros(distros?: readonly string[] | null): string[] | null {
+  if (distros == null) return null;
+  if (distros.length > WSL_DISTROS_MAX_COUNT) {
+    throw new Error(
+      `SEC_INVALID_INPUT: WSL distro list must contain at most ${WSL_DISTROS_MAX_COUNT} entries`
+    );
+  }
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const raw of distros) {
+    const distro = raw.trim();
+    if (!distro || seen.has(distro)) continue;
+    if (/[\u0000-\u001f\u007f]/u.test(distro)) {
+      throw new Error("SEC_INVALID_INPUT: WSL distro name contains control characters");
+    }
+    if ([...distro].length > WSL_DISTRO_MAX_CHARS) {
+      throw new Error(
+        `SEC_INVALID_INPUT: WSL distro name is too long (max ${WSL_DISTRO_MAX_CHARS} chars)`
+      );
+    }
+    seen.add(distro);
+    normalized.push(distro);
+  }
+
+  return normalized;
+}
+
 export async function wslDetect() {
   return invokeGeneratedIpc<WslDetection>({
     title: "检测 WSL 失败",
@@ -56,11 +87,14 @@ export async function wslHostAddressGet() {
 }
 
 export async function wslConfigStatusGet(distros?: string[]) {
+  const normalizedDistros = normalizeWslDistros(distros);
+  if (normalizedDistros?.length === 0) return [];
+
   return invokeGeneratedIpc<WslDistroConfigStatus[]>({
     title: "读取 WSL 配置状态失败",
     cmd: "wsl_config_status_get",
-    args: distros !== undefined ? { distros } : undefined,
-    invoke: () => commands.wslConfigStatusGet(distros ?? null),
+    args: normalizedDistros !== null ? { distros: normalizedDistros } : undefined,
+    invoke: () => commands.wslConfigStatusGet(normalizedDistros),
   });
 }
 

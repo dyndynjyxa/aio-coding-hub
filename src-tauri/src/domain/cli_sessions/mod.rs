@@ -51,10 +51,41 @@ impl CliSessionsSource {
 
 const DEFAULT_PAGE_SIZE: usize = 50;
 const MAX_PAGE_SIZE: usize = 200;
+const MAX_TAIL_RETAINED_MESSAGES: usize = 2_000;
 
 fn normalize_page_size(raw: usize) -> usize {
     let v = if raw == 0 { DEFAULT_PAGE_SIZE } else { raw };
     v.clamp(1, MAX_PAGE_SIZE)
+}
+
+fn message_tail_window_size(page: usize, page_size: usize) -> Option<usize> {
+    page.checked_add(1)?.checked_mul(page_size)
+}
+
+fn validate_message_page_window(page: usize, page_size: usize, from_end: bool) -> AppResult<()> {
+    if !from_end {
+        return Ok(());
+    }
+
+    let Some(window_size) = message_tail_window_size(page, page_size) else {
+        return Err(AppError::new(
+            "SEC_INVALID_INPUT",
+            format!(
+                "message pagination window is too large (max {MAX_TAIL_RETAINED_MESSAGES} retained messages)"
+            ),
+        ));
+    };
+
+    if window_size > MAX_TAIL_RETAINED_MESSAGES {
+        return Err(AppError::new(
+            "SEC_INVALID_INPUT",
+            format!(
+                "message pagination window is too large (max {MAX_TAIL_RETAINED_MESSAGES} retained messages)"
+            ),
+        ));
+    }
+
+    Ok(())
 }
 
 pub(super) struct MessagePageAccumulator {
@@ -73,7 +104,8 @@ impl MessagePageAccumulator {
             page.saturating_add(1).saturating_mul(page_size)
         } else {
             0
-        };
+        }
+        .min(MAX_TAIL_RETAINED_MESSAGES);
 
         Self {
             page,
@@ -150,10 +182,10 @@ pub fn projects_list(
     wsl_distro: Option<&str>,
 ) -> AppResult<Vec<CliSessionsProjectSummary>> {
     if let Some(distro) = wsl_distro {
-        crate::wsl::validate_distro(distro)?;
+        let distro = crate::wsl::normalize_distro(distro)?;
         return match source {
-            CliSessionsSource::Claude => claude::wsl_projects_list(distro),
-            CliSessionsSource::Codex => codex::wsl_projects_list(distro),
+            CliSessionsSource::Claude => claude::wsl_projects_list(&distro),
+            CliSessionsSource::Codex => codex::wsl_projects_list(&distro),
         };
     }
     match source {
@@ -169,10 +201,10 @@ pub fn sessions_list(
     wsl_distro: Option<&str>,
 ) -> AppResult<Vec<CliSessionsSessionSummary>> {
     if let Some(distro) = wsl_distro {
-        crate::wsl::validate_distro(distro)?;
+        let distro = crate::wsl::normalize_distro(distro)?;
         return match source {
-            CliSessionsSource::Claude => claude::wsl_sessions_list(distro, project_id),
-            CliSessionsSource::Codex => codex::wsl_sessions_list(distro, project_id),
+            CliSessionsSource::Claude => claude::wsl_sessions_list(&distro, project_id),
+            CliSessionsSource::Codex => codex::wsl_sessions_list(&distro, project_id),
         };
     }
     match source {
@@ -190,9 +222,7 @@ pub fn folder_lookup_by_ids(
         return Ok(Vec::new());
     }
 
-    if let Some(distro) = wsl_distro {
-        crate::wsl::validate_distro(distro)?;
-    }
+    let wsl_distro = wsl_distro.map(crate::wsl::normalize_distro).transpose()?;
 
     let mut claude_ids: Vec<String> = Vec::new();
     let mut codex_ids: Vec<String> = Vec::new();
@@ -216,14 +246,14 @@ pub fn folder_lookup_by_ids(
     let mut out = Vec::new();
 
     if !claude_ids.is_empty() {
-        out.extend(match wsl_distro {
+        out.extend(match wsl_distro.as_deref() {
             Some(distro) => claude::wsl_folder_lookup_by_session_ids(distro, &claude_ids)?,
             None => claude::folder_lookup_by_session_ids(app, &claude_ids)?,
         });
     }
 
     if !codex_ids.is_empty() {
-        out.extend(match wsl_distro {
+        out.extend(match wsl_distro.as_deref() {
             Some(distro) => codex::wsl_folder_lookup_by_session_ids(distro, &codex_ids)?,
             None => codex::folder_lookup_by_session_ids(app, &codex_ids)?,
         });
@@ -242,14 +272,15 @@ pub fn messages_get(
     wsl_distro: Option<&str>,
 ) -> AppResult<CliSessionsPaginatedMessages> {
     let page_size = normalize_page_size(page_size);
+    validate_message_page_window(page, page_size, from_end)?;
     if let Some(distro) = wsl_distro {
-        crate::wsl::validate_distro(distro)?;
+        let distro = crate::wsl::normalize_distro(distro)?;
         return match source {
             CliSessionsSource::Claude => {
-                claude::wsl_messages_get(distro, file_path, page, page_size, from_end)
+                claude::wsl_messages_get(&distro, file_path, page, page_size, from_end)
             }
             CliSessionsSource::Codex => {
-                codex::wsl_messages_get(distro, file_path, page, page_size, from_end)
+                codex::wsl_messages_get(&distro, file_path, page, page_size, from_end)
             }
         };
     }
@@ -269,10 +300,10 @@ pub fn session_delete(
     wsl_distro: Option<&str>,
 ) -> AppResult<bool> {
     if let Some(distro) = wsl_distro {
-        crate::wsl::validate_distro(distro)?;
+        let distro = crate::wsl::normalize_distro(distro)?;
         return match source {
-            CliSessionsSource::Claude => claude::wsl_session_delete(distro, file_path),
-            CliSessionsSource::Codex => codex::wsl_session_delete(distro, file_path),
+            CliSessionsSource::Claude => claude::wsl_session_delete(&distro, file_path),
+            CliSessionsSource::Codex => codex::wsl_session_delete(&distro, file_path),
         };
     }
     match source {
@@ -387,6 +418,26 @@ mod tests {
         assert_eq!(page.total, 5);
         assert!(page.has_more);
         assert_eq!(collect_roles(page), vec!["m1", "m2"]);
+    }
+
+    #[test]
+    fn message_page_window_rejects_oversized_tail_retention() {
+        assert!(validate_message_page_window(39, 50, true).is_ok());
+        assert!(validate_message_page_window(40, 50, true)
+            .expect_err("oversized tail window should fail")
+            .to_string()
+            .contains("SEC_INVALID_INPUT"));
+        assert!(validate_message_page_window(usize::MAX, 50, true)
+            .expect_err("overflowing tail window should fail")
+            .to_string()
+            .contains("SEC_INVALID_INPUT"));
+        assert!(validate_message_page_window(usize::MAX, 50, false).is_ok());
+    }
+
+    #[test]
+    fn message_page_accumulator_caps_tail_capacity_defensively() {
+        let acc = MessagePageAccumulator::new(usize::MAX, MAX_PAGE_SIZE, true);
+        assert_eq!(acc.tail_capacity, MAX_TAIL_RETAINED_MESSAGES);
     }
 
     #[test]

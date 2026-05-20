@@ -4,6 +4,7 @@ mod discover;
 mod fs_ops;
 mod git_url;
 mod installed;
+mod limits;
 mod local;
 mod local_swap;
 mod ops;

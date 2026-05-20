@@ -13,6 +13,7 @@ import {
 } from "../../generated/bindings";
 import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
 import { type OptionalNullableGeneratedFields } from "../generatedTypeUtils";
+import { validateSettingsSetInput } from "./settingsValidation";
 
 export type {
   CodexHomeMode,
@@ -127,6 +128,21 @@ export type __AssertNoStaleHandledSettingsViewKeys = AssertNever<
   >
 >;
 
+function validateRequiredSettingsSetInput(input: SettingsSetInput): string | null {
+  for (const [fieldLabel, value] of [
+    ["preferredPort", input.preferredPort],
+    ["autoStart", input.autoStart],
+    ["logRetentionDays", input.logRetentionDays],
+    ["failoverMaxAttemptsPerProvider", input.failoverMaxAttemptsPerProvider],
+    ["failoverMaxProvidersToTry", input.failoverMaxProvidersToTry],
+  ] as const) {
+    if (value == null) {
+      return `SEC_INVALID_INPUT: ${fieldLabel} is required`;
+    }
+  }
+  return null;
+}
+
 export function pickSettingsSetInputFieldsFromView<
   const TKeys extends readonly SettingsViewBackedInputKey[],
 >(
@@ -230,6 +246,16 @@ export async function settingsGet() {
 }
 
 export async function settingsSet(input: SettingsSetInput) {
+  const requiredMessage = validateRequiredSettingsSetInput(input);
+  if (requiredMessage) {
+    throw new Error(requiredMessage);
+  }
+
+  const validationMessage = validateSettingsSetInput(input);
+  if (validationMessage) {
+    throw new Error(validationMessage);
+  }
+
   const update = toGeneratedSettingsUpdate(input);
   return invokeGeneratedIpc<SettingsMutationResult>({
     title: "更新设置失败",

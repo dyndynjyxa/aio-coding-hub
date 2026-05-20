@@ -1,6 +1,9 @@
 //! WSL skills sync: sync skill directories to WSL distros.
 
 use crate::shared::error::AppResult;
+use crate::shared::fs::{
+    read_file_with_max_len, read_optional_file_with_max_len, write_file_atomic,
+};
 
 use super::shell::{
     bash_single_quote, remove_wsl_dir, run_wsl_bash_script_capture, write_wsl_file,
@@ -10,6 +13,27 @@ use super::types::{WslSkillFileSyncEntry, WslSkillSyncEntry};
 
 pub(super) const WSL_SKILL_MANAGED_MARKER_FILE: &str = ".aio-coding-hub.managed";
 pub(super) const WSL_SKILL_SOURCE_MARKER_FILE: &str = ".aio-coding-hub.source.json";
+const WSL_SKILLS_MANIFEST_MAX_BYTES: usize = 256 * 1024;
+const WSL_SKILL_FILE_MAX_BYTES: usize = 1024 * 1024;
+const WSL_SKILL_TOTAL_MAX_BYTES: usize = 8 * 1024 * 1024;
+const WSL_SKILL_MAX_FILES: usize = 256;
+const WSL_SKILL_COMPONENT_MAX_CHARS: usize = 128;
+const WSL_SKILL_RELATIVE_PATH_MAX_CHARS: usize = 512;
+
+fn ensure_wsl_skill_bytes_within_limit(
+    bytes_len: usize,
+    max_len: usize,
+    label: &str,
+) -> AppResult<()> {
+    if bytes_len > max_len {
+        return Err(format!("SEC_INVALID_INPUT: {label} too large (max {max_len} bytes)").into());
+    }
+    Ok(())
+}
+
+fn char_len(value: &str) -> usize {
+    value.chars().count()
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct WslSkillsManifest {
@@ -40,9 +64,9 @@ pub(super) fn read_wsl_skills_manifest(
         Ok(path) => path,
         Err(_) => return Vec::new(),
     };
-    let bytes = match std::fs::read(&path) {
-        Ok(bytes) => bytes,
-        Err(_) => return Vec::new(),
+    let bytes = match read_optional_file_with_max_len(&path, WSL_SKILLS_MANIFEST_MAX_BYTES) {
+        Ok(Some(bytes)) => bytes,
+        Ok(None) | Err(_) => return Vec::new(),
     };
     match serde_json::from_slice::<WslSkillsManifest>(&bytes) {
         Ok(manifest) => manifest.managed_keys,
@@ -69,8 +93,12 @@ pub(super) fn write_wsl_skills_manifest(
     };
     let json = serde_json::to_string_pretty(&manifest)
         .map_err(|e| format!("failed to serialize wsl skills manifest: {e}"))?;
-    std::fs::write(&path, json.as_bytes())
-        .map_err(|e| format!("failed to write wsl skills manifest: {e}"))?;
+    ensure_wsl_skill_bytes_within_limit(
+        json.len(),
+        WSL_SKILLS_MANIFEST_MAX_BYTES,
+        "WSL skills manifest",
+    )?;
+    write_file_atomic(&path, json.as_bytes())?;
     Ok(())
 }
 
@@ -103,6 +131,12 @@ fn validate_wsl_skill_component(value: &str, label: &str) -> AppResult<()> {
     if value.trim().is_empty() {
         return Err(format!("SEC_INVALID_INPUT: empty skill {label}").into());
     }
+    if char_len(value) > WSL_SKILL_COMPONENT_MAX_CHARS {
+        return Err(format!(
+            "SEC_INVALID_INPUT: skill {label} is too long (max {WSL_SKILL_COMPONENT_MAX_CHARS} chars)"
+        )
+        .into());
+    }
     if path.components().count() != 1 {
         return Err(format!("SEC_INVALID_INPUT: invalid skill {label}: {value}").into());
     }
@@ -116,6 +150,12 @@ fn validate_wsl_skill_relative_path(path: &str) -> AppResult<std::path::PathBuf>
     let mut out = std::path::PathBuf::new();
     if path.trim().is_empty() {
         return Err("SEC_INVALID_INPUT: empty skill relative path".into());
+    }
+    if char_len(path) > WSL_SKILL_RELATIVE_PATH_MAX_CHARS {
+        return Err(format!(
+            "SEC_INVALID_INPUT: skill relative path too long (max {WSL_SKILL_RELATIVE_PATH_MAX_CHARS} chars)"
+        )
+        .into());
     }
     for component in std::path::Path::new(path).components() {
         match component {
@@ -154,7 +194,14 @@ fn relative_skill_path_string(path: &std::path::Path) -> AppResult<String> {
     if parts.is_empty() {
         return Err("SEC_INVALID_INPUT: empty skill relative path".into());
     }
-    Ok(parts.join("/"))
+    let out = parts.join("/");
+    if char_len(&out) > WSL_SKILL_RELATIVE_PATH_MAX_CHARS {
+        return Err(format!(
+            "SEC_INVALID_INPUT: skill relative path too long (max {WSL_SKILL_RELATIVE_PATH_MAX_CHARS} chars)"
+        )
+        .into());
+    }
+    Ok(out)
 }
 
 fn ensure_skill_path_within_root(
@@ -173,6 +220,7 @@ fn collect_wsl_skill_dir_files(
     relative_root: &std::path::Path,
     files: &mut Vec<WslSkillFileSyncEntry>,
     visited_dirs: &mut std::collections::HashSet<std::path::PathBuf>,
+    total_bytes: &mut usize,
 ) -> AppResult<()> {
     let mut entries = Vec::new();
     let read_dir =
@@ -224,14 +272,11 @@ fn collect_wsl_skill_dir_files(
                         &relative_path,
                         files,
                         visited_dirs,
+                        total_bytes,
                     )?;
                 }
             } else if resolved_meta.is_file() {
-                files.push(WslSkillFileSyncEntry {
-                    relative_path: relative_skill_path_string(&relative_path)?,
-                    content: std::fs::read(&canonical)
-                        .map_err(|e| format!("failed to read {}: {e}", canonical.display()))?,
-                });
+                push_wsl_skill_file(files, &relative_path, &canonical, total_bytes)?;
             } else {
                 return Err(format!(
                     "WSL_SKILL_SYNC_BLOCKED_SPECIAL_FILE: {}",
@@ -254,6 +299,7 @@ fn collect_wsl_skill_dir_files(
                     &relative_path,
                     files,
                     visited_dirs,
+                    total_bytes,
                 )?;
             }
             continue;
@@ -267,13 +313,40 @@ fn collect_wsl_skill_dir_files(
             .into());
         }
 
-        files.push(WslSkillFileSyncEntry {
-            relative_path: relative_skill_path_string(&relative_path)?,
-            content: std::fs::read(&entry_path)
-                .map_err(|e| format!("failed to read {}: {e}", entry_path.display()))?,
-        });
+        push_wsl_skill_file(files, &relative_path, &entry_path, total_bytes)?;
     }
 
+    Ok(())
+}
+
+fn push_wsl_skill_file(
+    files: &mut Vec<WslSkillFileSyncEntry>,
+    relative_path: &std::path::Path,
+    source_path: &std::path::Path,
+    total_bytes: &mut usize,
+) -> AppResult<()> {
+    if files.len() >= WSL_SKILL_MAX_FILES {
+        return Err(format!(
+            "SEC_INVALID_INPUT: WSL skill has too many files (max {WSL_SKILL_MAX_FILES})"
+        )
+        .into());
+    }
+
+    let content = read_file_with_max_len(source_path, WSL_SKILL_FILE_MAX_BYTES)?;
+    let next_total = total_bytes
+        .checked_add(content.len())
+        .ok_or_else(|| "SEC_INVALID_INPUT: WSL skill total size overflow".to_string())?;
+    ensure_wsl_skill_bytes_within_limit(
+        next_total,
+        WSL_SKILL_TOTAL_MAX_BYTES,
+        "WSL skill total content",
+    )?;
+    *total_bytes = next_total;
+
+    files.push(WslSkillFileSyncEntry {
+        relative_path: relative_skill_path_string(relative_path)?,
+        content,
+    });
     Ok(())
 }
 
@@ -283,6 +356,7 @@ pub(super) fn export_wsl_skill_dir(dir: &std::path::Path) -> AppResult<Vec<WslSk
         .map_err(|e| format!("failed to resolve {}: {e}", dir.display()))?;
     let mut files = Vec::new();
     let mut visited_dirs = std::collections::HashSet::new();
+    let mut total_bytes = 0;
     visited_dirs.insert(canonical_root.clone());
     collect_wsl_skill_dir_files(
         &canonical_root,
@@ -290,8 +364,41 @@ pub(super) fn export_wsl_skill_dir(dir: &std::path::Path) -> AppResult<Vec<WslSk
         std::path::Path::new(""),
         &mut files,
         &mut visited_dirs,
+        &mut total_bytes,
     )?;
     Ok(files)
+}
+
+fn validate_wsl_skill_files(skill: &WslSkillSyncEntry) -> AppResult<()> {
+    if skill.files.is_empty() {
+        return Err(format!("WSL_SKILL_SYNC_EMPTY: {}", skill.skill_key).into());
+    }
+    if skill.files.len() > WSL_SKILL_MAX_FILES {
+        return Err(format!(
+            "SEC_INVALID_INPUT: WSL skill {} has too many files (max {WSL_SKILL_MAX_FILES})",
+            skill.skill_key
+        )
+        .into());
+    }
+
+    let mut total_bytes = 0usize;
+    for file in &skill.files {
+        validate_wsl_skill_relative_path(&file.relative_path)?;
+        ensure_wsl_skill_bytes_within_limit(
+            file.content.len(),
+            WSL_SKILL_FILE_MAX_BYTES,
+            "WSL skill file",
+        )?;
+        total_bytes = total_bytes
+            .checked_add(file.content.len())
+            .ok_or_else(|| "SEC_INVALID_INPUT: WSL skill total size overflow".to_string())?;
+        ensure_wsl_skill_bytes_within_limit(
+            total_bytes,
+            WSL_SKILL_TOTAL_MAX_BYTES,
+            "WSL skill total content",
+        )?;
+    }
+    Ok(())
 }
 
 pub(super) fn sync_wsl_skills_for_cli(
@@ -312,9 +419,7 @@ pub(super) fn sync_wsl_skills_for_cli(
     let mut seen = std::collections::HashSet::new();
     for skill in skills {
         validate_wsl_skill_component(&skill.skill_key, "key")?;
-        if skill.files.is_empty() {
-            return Err(format!("WSL_SKILL_SYNC_EMPTY: {}", skill.skill_key).into());
-        }
+        validate_wsl_skill_files(skill)?;
         if seen.insert(skill.skill_key.clone()) {
             next_keys.push(skill.skill_key.clone());
         }
@@ -361,4 +466,48 @@ pub(super) fn sync_wsl_skills_for_cli(
     }
 
     Ok(next_keys)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn export_wsl_skill_dir_rejects_oversized_files() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().join("large-skill");
+        std::fs::create_dir_all(&root).expect("create skill dir");
+        std::fs::write(
+            root.join("SKILL.md"),
+            vec![b'x'; WSL_SKILL_FILE_MAX_BYTES + 1],
+        )
+        .expect("write oversized skill file");
+
+        let err = match export_wsl_skill_dir(&root) {
+            Ok(_) => panic!("oversized skill file should fail"),
+            Err(err) => err,
+        };
+
+        assert!(err.to_string().contains("too large"));
+    }
+
+    #[test]
+    fn validate_wsl_skill_files_rejects_too_many_files() {
+        let skill = WslSkillSyncEntry {
+            skill_key: "large-skill".to_string(),
+            files: (0..=WSL_SKILL_MAX_FILES)
+                .map(|index| WslSkillFileSyncEntry {
+                    relative_path: format!("file-{index}.txt"),
+                    content: b"x".to_vec(),
+                })
+                .collect(),
+        };
+
+        let err = match validate_wsl_skill_files(&skill) {
+            Ok(_) => panic!("too many files should fail"),
+            Err(err) => err,
+        };
+
+        assert!(err.to_string().contains("too many files"));
+    }
 }

@@ -83,6 +83,32 @@ pub(super) fn match_429_concurrency_limit(body: &[u8]) -> bool {
     has_direct_phrase || has_structured_fields
 }
 
+/// Returns whether a response body clearly indicates account/provider quota exhaustion.
+pub(super) fn match_quota_exhausted(body: &[u8]) -> bool {
+    if body.is_empty() {
+        return false;
+    }
+
+    let scan = if body.len() > MAX_SCAN_BYTES {
+        &body[..MAX_SCAN_BYTES]
+    } else {
+        body
+    };
+
+    let haystack_lower = String::from_utf8_lossy(scan).to_ascii_lowercase();
+
+    haystack_lower.contains("insufficient_quota")
+        || haystack_lower.contains("quota exhausted")
+        || haystack_lower.contains("resource_exhausted")
+        || haystack_lower.contains("exceeded your current quota")
+        || haystack_lower.contains("you exceeded your current quota")
+        || (haystack_lower.contains("quota") && haystack_lower.contains("exceeded"))
+        || (haystack_lower.contains("quota") && haystack_lower.contains("exhausted"))
+        || (haystack_lower.contains("rate limit") && haystack_lower.contains("exceeded"))
+        || (haystack_lower.contains("rate_limit") && haystack_lower.contains("exceeded"))
+        || (haystack_lower.contains("usage limit") && haystack_lower.contains("reached"))
+}
+
 struct Rule {
     id: &'static str,
     any_of: &'static [&'static str],
@@ -271,7 +297,7 @@ pub(super) fn match_non_retryable_client_error(
 #[cfg(test)]
 mod tests {
     use super::{
-        match_429_concurrency_limit, match_non_retryable_client_error,
+        match_429_concurrency_limit, match_non_retryable_client_error, match_quota_exhausted,
         should_abort_unmatched_client_error,
     };
 
@@ -319,6 +345,30 @@ mod tests {
     fn does_not_match_429_concurrency_limit_for_generic_rate_limit() {
         let body = b"{\"error\":\"rate limit\",\"message\":\"too many requests per minute\"}";
         assert!(!match_429_concurrency_limit(body));
+    }
+
+    #[test]
+    fn matches_quota_exhausted_bodies() {
+        assert!(match_quota_exhausted(
+            br#"{"error":{"message":"quota exhausted","type":"insufficient_quota"}}"#
+        ));
+        assert!(match_quota_exhausted(
+            b"You exceeded your current quota, please check your plan and billing details"
+        ));
+        assert!(match_quota_exhausted(
+            b"Rate limit exceeded for this account"
+        ));
+        assert!(match_quota_exhausted(
+            b"RESOURCE_EXHAUSTED: Resource has been exhausted (e.g. check quota)."
+        ));
+    }
+
+    #[test]
+    fn does_not_match_generic_throttling_without_exhaustion() {
+        assert!(!match_quota_exhausted(
+            b"{\"error\":\"rate limit\",\"message\":\"too many requests per minute\"}"
+        ));
+        assert!(!match_quota_exhausted(b"concurrency limit exceeded"));
     }
 
     #[test]

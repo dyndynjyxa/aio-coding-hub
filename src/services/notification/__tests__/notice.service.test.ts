@@ -1,7 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
-import { noticeSend } from "../notice";
+import {
+  noticeSend,
+  normalizeNoticeSendInput,
+  NOTICE_TITLE_MAX_CHARS,
+  type NoticeSendParams,
+} from "../notice";
 
 vi.mock("../../../generated/bindings", async () => {
   const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
@@ -25,13 +30,47 @@ vi.mock("../../consoleLog", async () => {
 });
 
 describe("services/notification/notice", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("maps true/false results as before", async () => {
     vi.mocked(commands.noticeSend)
       .mockResolvedValueOnce({ status: "ok", data: true })
       .mockResolvedValueOnce({ status: "ok", data: false });
 
-    await expect(noticeSend({ level: "info", body: "ok" })).resolves.toBe(true);
+    await expect(
+      noticeSend({ level: " info " as NoticeSendParams["level"], title: " Title ", body: " ok " })
+    ).resolves.toBe(true);
     await expect(noticeSend({ level: "warning", body: "no" })).resolves.toBe(false);
+
+    expect(commands.noticeSend).toHaveBeenNthCalledWith(1, {
+      level: "info",
+      title: "Title",
+      body: "ok",
+    });
+  });
+
+  it("rejects invalid notification payloads before generated IPC", async () => {
+    expect(normalizeNoticeSendInput({ level: "success", title: " ", body: " done " })).toEqual({
+      level: "success",
+      title: null,
+      body: "done",
+    });
+
+    await expect(noticeSend({ level: "bad" as never, body: "x" })).rejects.toThrow(
+      "SEC_INVALID_INPUT"
+    );
+    await expect(noticeSend({ level: "info", body: " " })).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(
+      noticeSend({
+        level: "info",
+        title: "x".repeat(NOTICE_TITLE_MAX_CHARS + 1),
+        body: "ok",
+      })
+    ).rejects.toThrow("SEC_INVALID_INPUT");
+
+    expect(commands.noticeSend).not.toHaveBeenCalled();
   });
 
   it("rethrows invoke errors and logs", async () => {

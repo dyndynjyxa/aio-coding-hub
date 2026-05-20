@@ -26,6 +26,33 @@ describe("services/gatewayEvents (coverage)", () => {
     vi.clearAllMocks();
   });
 
+  it("normalizes request-signal text while rejecting oversized identity fields", async () => {
+    vi.resetModules();
+    const { isGatewayRequestSignalEvent, normalizeGatewayRequestSignalEvent } =
+      await import("../gatewayEvents");
+
+    const longModel = "m".repeat(5000);
+    const normalized = normalizeGatewayRequestSignalEvent({
+      trace_id: "trace-1",
+      cli_key: "claude",
+      session_id: "session-1",
+      requested_model: longModel,
+      phase: "complete",
+      ts: 1,
+    });
+
+    expect(normalized?.requested_model).toHaveLength(512);
+    expect(isGatewayRequestSignalEvent({ ...normalized, requested_model: longModel })).toBe(true);
+    expect(
+      normalizeGatewayRequestSignalEvent({
+        trace_id: "t".repeat(300),
+        cli_key: "claude",
+        phase: "complete",
+        ts: 1,
+      })
+    ).toBeNull();
+  });
+
   it("skips debug logging when console min-level is above debug", async () => {
     setTauriRuntime();
     vi.resetModules();
@@ -350,6 +377,161 @@ describe("services/gatewayEvents (coverage)", () => {
     expect(payloads.some((p) => p?.trace_id === "t3" && p?.output_tokens_per_second != null)).toBe(
       true
     );
+
+    unlisten();
+  });
+
+  it("bounds oversized request attempts before forwarding request event consumers", async () => {
+    setTauriRuntime();
+    vi.resetModules();
+
+    shouldLogToConsole.mockReturnValue(false);
+    vi.mocked(tauriListen).mockResolvedValue(tauriUnlisten);
+
+    const { MAX_ATTEMPTS_PER_TRACE } = await import("../traceLimits");
+    const traceStore = await import("../traceStore");
+    const cacheAnomalyMonitor = await import("../cacheAnomalyMonitor");
+    const { listenGatewayEvents } = await import("../gatewayEvents");
+    const unlisten = await listenGatewayEvents();
+
+    const request = vi
+      .mocked(tauriListen)
+      .mock.calls.find((call) => call[0] === "gateway:request")?.[1];
+    const attempts = Array.from({ length: MAX_ATTEMPTS_PER_TRACE + 50 }, (_, index) => ({
+      provider_id: index,
+      provider_name: `P${index}`,
+      base_url: `https://p${index}.example`,
+      outcome: index === MAX_ATTEMPTS_PER_TRACE + 49 ? "success" : "failed",
+      status: index === MAX_ATTEMPTS_PER_TRACE + 49 ? 200 : 500,
+    }));
+
+    request?.({
+      payload: {
+        trace_id: "large-attempts",
+        cli_key: "claude",
+        method: "POST",
+        path: "/v1/messages",
+        query: null,
+        status: 200,
+        error_category: null,
+        error_code: null,
+        duration_ms: 100,
+        ttfb_ms: 10,
+        attempts,
+        output_tokens: 10,
+      },
+    } as any);
+
+    const tracePayload = vi.mocked(traceStore.ingestTraceRequest).mock.calls[0]?.[0];
+    const anomalyPayload = vi.mocked(cacheAnomalyMonitor.ingestCacheAnomalyRequest).mock
+      .calls[0]?.[0];
+    expect(tracePayload?.attempts).toHaveLength(MAX_ATTEMPTS_PER_TRACE);
+    expect(anomalyPayload?.attempts).toHaveLength(MAX_ATTEMPTS_PER_TRACE);
+    expect(tracePayload?.attempts[0]?.provider_id).toBe(50);
+    const traceAttempts = tracePayload?.attempts ?? [];
+    expect(traceAttempts[traceAttempts.length - 1]?.provider_id).toBe(MAX_ATTEMPTS_PER_TRACE + 49);
+    expect(attempts).toHaveLength(MAX_ATTEMPTS_PER_TRACE + 50);
+
+    unlisten();
+  });
+
+  it("bounds high-frequency gateway event text fields before forwarding consumers", async () => {
+    setTauriRuntime();
+    vi.resetModules();
+
+    shouldLogToConsole.mockReturnValue(false);
+    vi.mocked(tauriListen).mockResolvedValue(tauriUnlisten);
+
+    const traceStore = await import("../traceStore");
+    const { listenGatewayEvents } = await import("../gatewayEvents");
+    const unlisten = await listenGatewayEvents();
+
+    const handlerFor = (eventName: string) =>
+      vi.mocked(tauriListen).mock.calls.find((call) => call[0] === eventName)?.[1];
+    const long = "x".repeat(5000);
+    const longMethod = "POST".repeat(20);
+
+    handlerFor("gateway:request_start")?.({
+      payload: {
+        trace_id: "text-start",
+        cli_key: "claude",
+        method: longMethod,
+        path: `/${long}`,
+        query: long,
+        requested_model: long,
+        ts: 0,
+      },
+    } as any);
+
+    const startPayload = vi.mocked(traceStore.ingestTraceStart).mock.calls[0]?.[0];
+    expect(startPayload?.method).toHaveLength(32);
+    expect(startPayload?.path).toHaveLength(2048);
+    expect(startPayload?.query).toHaveLength(4096);
+    expect(startPayload?.requested_model).toHaveLength(512);
+
+    handlerFor("gateway:attempt")?.({
+      payload: {
+        trace_id: "text-attempt",
+        cli_key: "claude",
+        method: longMethod,
+        path: `/${long}`,
+        query: long,
+        requested_model: long,
+        attempt_index: 1,
+        provider_id: 1,
+        provider_name: long,
+        base_url: `https://${long}.example`,
+        outcome: long,
+        status: null,
+        attempt_started_ms: 1,
+        attempt_duration_ms: 0,
+      },
+    } as any);
+
+    const attemptPayload = vi.mocked(traceStore.ingestTraceAttempt).mock.calls[0]?.[0];
+    expect(attemptPayload?.method).toHaveLength(32);
+    expect(attemptPayload?.path).toHaveLength(2048);
+    expect(attemptPayload?.query).toHaveLength(4096);
+    expect(attemptPayload?.requested_model).toHaveLength(512);
+    expect(attemptPayload?.provider_name).toHaveLength(512);
+    expect(attemptPayload?.base_url).toHaveLength(2048);
+    expect(attemptPayload?.outcome).toHaveLength(64);
+
+    handlerFor("gateway:request")?.({
+      payload: {
+        trace_id: "text-request",
+        cli_key: "claude",
+        method: longMethod,
+        path: `/${long}`,
+        query: long,
+        requested_model: long,
+        status: 500,
+        error_category: long,
+        error_code: long,
+        duration_ms: 100,
+        ttfb_ms: 10,
+        attempts: [
+          {
+            provider_id: 7,
+            provider_name: long,
+            base_url: `https://${long}.example`,
+            outcome: long,
+            status: 500,
+          },
+        ],
+      },
+    } as any);
+
+    const requestPayload = vi.mocked(traceStore.ingestTraceRequest).mock.calls[0]?.[0];
+    expect(requestPayload?.method).toHaveLength(32);
+    expect(requestPayload?.path).toHaveLength(2048);
+    expect(requestPayload?.query).toHaveLength(4096);
+    expect(requestPayload?.requested_model).toHaveLength(512);
+    expect(requestPayload?.error_category).toHaveLength(512);
+    expect(requestPayload?.error_code).toHaveLength(512);
+    expect(requestPayload?.attempts[0]?.provider_name).toHaveLength(512);
+    expect(requestPayload?.attempts[0]?.base_url).toHaveLength(2048);
+    expect(requestPayload?.attempts[0]?.outcome).toHaveLength(64);
 
     unlisten();
   });

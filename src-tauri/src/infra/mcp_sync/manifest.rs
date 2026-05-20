@@ -3,7 +3,7 @@
 use crate::shared::time::now_unix_seconds;
 use serde::{Deserialize, Serialize};
 
-use super::fs::{read_optional_file, write_file_atomic};
+use super::fs::{read_file_with_max_len, read_optional_file_with_max_len, write_file_atomic};
 use super::legacy::try_migrate_legacy_mcp_sync_dir;
 use super::paths::{
     backup_file_name, mcp_sync_files_dir, mcp_sync_manifest_path, mcp_sync_root_dir,
@@ -35,7 +35,7 @@ pub fn read_manifest_bytes<R: tauri::Runtime>(
 ) -> crate::shared::error::AppResult<Option<Vec<u8>>> {
     let root = mcp_sync_root_dir(app, cli_key)?;
     let path = mcp_sync_manifest_path(&root);
-    read_optional_file(&path)
+    read_optional_file_with_max_len(&path, super::MCP_SYNC_MANIFEST_MAX_BYTES)
 }
 
 pub fn restore_manifest_bytes<R: tauri::Runtime>(
@@ -47,6 +47,13 @@ pub fn restore_manifest_bytes<R: tauri::Runtime>(
     let path = mcp_sync_manifest_path(&root);
     match bytes {
         Some(content) => {
+            if content.len() > super::MCP_SYNC_MANIFEST_MAX_BYTES {
+                return Err(format!(
+                    "SEC_INVALID_INPUT: MCP sync manifest restore too large (max {} bytes)",
+                    super::MCP_SYNC_MANIFEST_MAX_BYTES
+                )
+                .into());
+            }
             write_file_atomic(&path, &content)?;
             Ok(())
         }
@@ -73,7 +80,8 @@ pub(super) fn read_manifest<R: tauri::Runtime>(
         }
     }
 
-    let Some(content) = read_optional_file(&path)? else {
+    let Some(content) = read_optional_file_with_max_len(&path, super::MCP_SYNC_MANIFEST_MAX_BYTES)?
+    else {
         return Ok(None);
     };
 
@@ -123,8 +131,7 @@ pub(super) fn backup_for_enable<R: tauri::Runtime>(
 
     let existed = target_path.exists();
     let backup_rel = if existed {
-        let bytes = std::fs::read(&target_path)
-            .map_err(|e| format!("failed to read {}: {e}", target_path.display()))?;
+        let bytes = read_file_with_max_len(&target_path, super::MCP_SYNC_TARGET_MAX_BYTES)?;
         let backup_name = backup_file_name(cli_key);
         let backup_path = files_dir.join(backup_name);
         write_file_atomic(&backup_path, &bytes)?;

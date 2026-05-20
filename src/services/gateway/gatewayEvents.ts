@@ -6,6 +6,7 @@ import { subscribeGatewayEvent } from "./gatewayEventBus";
 import { ingestTraceAttempt, ingestTraceRequest, ingestTraceStart } from "./traceStore";
 import { ingestCacheAnomalyRequest, ingestCacheAnomalyRequestStart } from "./cacheAnomalyMonitor";
 import type { ClaudeModelMapping } from "./claudeModelMapping";
+import { MAX_ATTEMPTS_PER_TRACE } from "./traceLimits";
 
 export type { ClaudeModelMapping } from "./claudeModelMapping";
 
@@ -170,12 +171,60 @@ function computeOutputTokensPerSecond(payload: GatewayRequestEvent) {
 
 type GatewayEventGuard<TPayload> = (payload: unknown) => payload is TPayload;
 
+const EVENT_ID_MAX_LENGTH = 256;
+const EVENT_METHOD_MAX_LENGTH = 32;
+const EVENT_STATE_MAX_LENGTH = 64;
+const EVENT_SHORT_TEXT_MAX_LENGTH = 512;
+const EVENT_PATH_MAX_LENGTH = 2048;
+const EVENT_QUERY_MAX_LENGTH = 4096;
+const EVENT_URL_MAX_LENGTH = 2048;
+
+const CIRCUIT_NON_TRANSITION_DEDUP_WINDOW_MS = 3000;
+const CIRCUIT_NON_TRANSITION_DEDUP_MAX_ENTRIES = 500;
+
+function pruneCircuitNonTransitionDedup(dedup: Map<string, number>, now: number) {
+  for (const [key, last] of dedup) {
+    if (now - last >= CIRCUIT_NON_TRANSITION_DEDUP_WINDOW_MS) dedup.delete(key);
+  }
+}
+
+function evictOldestCircuitNonTransitionDedup(dedup: Map<string, number>) {
+  let oldestKey: string | null = null;
+  let oldestTs = Number.POSITIVE_INFINITY;
+  for (const [key, ts] of dedup) {
+    if (ts >= oldestTs) continue;
+    oldestKey = key;
+    oldestTs = ts;
+  }
+  if (oldestKey != null) dedup.delete(oldestKey);
+}
+
+export function shouldLogCircuitNonTransition(
+  dedup: Map<string, number>,
+  dedupKey: string,
+  now: number
+) {
+  const last = dedup.get(dedupKey);
+  if (last != null && now - last < CIRCUIT_NON_TRANSITION_DEDUP_WINDOW_MS) return false;
+
+  pruneCircuitNonTransitionDedup(dedup, now);
+  if (!dedup.has(dedupKey) && dedup.size >= CIRCUIT_NON_TRANSITION_DEDUP_MAX_ENTRIES) {
+    evictOldestCircuitNonTransitionDedup(dedup);
+  }
+  dedup.set(dedupKey, now);
+  return true;
+}
+
 function isRecord(payload: unknown): payload is Record<string, unknown> {
   return typeof payload === "object" && payload !== null && !Array.isArray(payload);
 }
 
 function isString(value: unknown): value is string {
   return typeof value === "string";
+}
+
+function isStringWithin(value: unknown, maxLength: number): value is string {
+  return isString(value) && value.length <= maxLength;
 }
 
 function isNumber(value: unknown): value is number {
@@ -194,6 +243,13 @@ function isNullableString(value: unknown): value is string | null | undefined {
   return isNullish(value) || isString(value);
 }
 
+function isNullableStringWithin(
+  value: unknown,
+  maxLength: number
+): value is string | null | undefined {
+  return isNullish(value) || isStringWithin(value, maxLength);
+}
+
 function isNullableNumber(value: unknown): value is number | null | undefined {
   return isNullish(value) || isNumber(value);
 }
@@ -202,14 +258,25 @@ function isNullableBoolean(value: unknown): value is boolean | null | undefined 
   return isNullish(value) || isBoolean(value);
 }
 
+function truncateString(value: string, maxLength: number): string {
+  return value.length > maxLength ? value.slice(0, maxLength) : value;
+}
+
+function truncateNullableString(
+  value: string | null | undefined,
+  maxLength: number
+): string | null | undefined {
+  return value == null ? value : truncateString(value, maxLength);
+}
+
 function isClaudeModelMapping(value: unknown): value is ClaudeModelMapping {
   if (!isRecord(value)) return false;
   return (
-    isString(value.requestedModel) &&
-    isString(value.effectiveModel) &&
-    isString(value.mappingKind) &&
+    isStringWithin(value.requestedModel, EVENT_SHORT_TEXT_MAX_LENGTH) &&
+    isStringWithin(value.effectiveModel, EVENT_SHORT_TEXT_MAX_LENGTH) &&
+    isStringWithin(value.mappingKind, EVENT_SHORT_TEXT_MAX_LENGTH) &&
     isNumber(value.providerId) &&
-    isString(value.providerName) &&
+    isStringWithin(value.providerName, EVENT_SHORT_TEXT_MAX_LENGTH) &&
     isBoolean(value.applied)
   );
 }
@@ -231,68 +298,153 @@ function isGatewayAttempt(payload: unknown): payload is GatewayAttempt {
   );
 }
 
+function normalizeGatewayAttempt(payload: unknown): GatewayAttempt | null {
+  if (!isGatewayAttempt(payload)) return null;
+  return {
+    provider_id: payload.provider_id,
+    provider_name: truncateString(payload.provider_name, EVENT_SHORT_TEXT_MAX_LENGTH),
+    base_url: truncateString(payload.base_url, EVENT_URL_MAX_LENGTH),
+    outcome: truncateString(payload.outcome, EVENT_STATE_MAX_LENGTH),
+    status: payload.status ?? null,
+  };
+}
+
+function normalizeGatewayRequestStartEvent(payload: unknown): GatewayRequestStartEvent | null {
+  if (!isRecord(payload)) return null;
+  if (
+    !isStringWithin(payload.trace_id, EVENT_ID_MAX_LENGTH) ||
+    !isStringWithin(payload.cli_key, EVENT_ID_MAX_LENGTH) ||
+    !isNullableStringWithin(payload.session_id, EVENT_ID_MAX_LENGTH) ||
+    !isString(payload.method) ||
+    !isString(payload.path) ||
+    !isNullableString(payload.query) ||
+    !isNullableString(payload.requested_model) ||
+    !isNumber(payload.ts)
+  ) {
+    return null;
+  }
+
+  return {
+    trace_id: payload.trace_id,
+    cli_key: payload.cli_key,
+    session_id: truncateNullableString(payload.session_id, EVENT_ID_MAX_LENGTH),
+    method: truncateString(payload.method, EVENT_METHOD_MAX_LENGTH),
+    path: truncateString(payload.path, EVENT_PATH_MAX_LENGTH),
+    query: truncateNullableString(payload.query, EVENT_QUERY_MAX_LENGTH) ?? null,
+    requested_model: truncateNullableString(payload.requested_model, EVENT_SHORT_TEXT_MAX_LENGTH),
+    ts: payload.ts,
+  };
+}
+
 export function isGatewayRequestStartEvent(payload: unknown): payload is GatewayRequestStartEvent {
-  if (!isRecord(payload)) return false;
-  return (
-    isString(payload.trace_id) &&
-    isString(payload.cli_key) &&
-    isNullableString(payload.session_id) &&
-    isString(payload.method) &&
-    isString(payload.path) &&
-    isNullableString(payload.query) &&
-    isNullableString(payload.requested_model) &&
-    isNumber(payload.ts)
-  );
+  return normalizeGatewayRequestStartEvent(payload) != null;
 }
 
 export function isGatewayRequestSignalEvent(
   payload: unknown
 ): payload is GatewayRequestSignalEvent {
-  if (!isRecord(payload)) return false;
-  return (
-    isString(payload.trace_id) &&
-    isString(payload.cli_key) &&
-    isNullableString(payload.session_id) &&
-    isNullableString(payload.requested_model) &&
-    (payload.phase === "start" || payload.phase === "complete") &&
-    isNumber(payload.ts)
-  );
+  return normalizeGatewayRequestSignalEvent(payload) != null;
 }
 
-function isGatewayAttemptEvent(payload: unknown): payload is GatewayAttemptEvent {
-  if (!isRecord(payload)) return false;
-  return (
-    isString(payload.trace_id) &&
-    isString(payload.cli_key) &&
-    isNullableString(payload.session_id) &&
-    isString(payload.method) &&
-    isString(payload.path) &&
-    isNullableString(payload.query) &&
-    isNullableString(payload.requested_model) &&
-    isNumber(payload.attempt_index) &&
-    isNumber(payload.provider_id) &&
-    isNullableBoolean(payload.session_reuse) &&
-    isString(payload.provider_name) &&
-    isString(payload.base_url) &&
-    isString(payload.outcome) &&
-    isNullableNumber(payload.status) &&
-    isNumber(payload.attempt_started_ms) &&
-    isNumber(payload.attempt_duration_ms) &&
-    isNullableString(payload.circuit_state_before) &&
-    isNullableString(payload.circuit_state_after) &&
-    isNullableNumber(payload.circuit_failure_count) &&
-    isNullableNumber(payload.circuit_failure_threshold) &&
-    isNullableClaudeModelMapping(payload.claude_model_mapping)
-  );
+export function normalizeGatewayRequestSignalEvent(
+  payload: unknown
+): GatewayRequestSignalEvent | null {
+  if (!isRecord(payload)) return null;
+  if (
+    !isStringWithin(payload.trace_id, EVENT_ID_MAX_LENGTH) ||
+    !isStringWithin(payload.cli_key, EVENT_ID_MAX_LENGTH) ||
+    !isNullableStringWithin(payload.session_id, EVENT_ID_MAX_LENGTH) ||
+    !isNullableString(payload.requested_model) ||
+    (payload.phase !== "start" && payload.phase !== "complete") ||
+    !isNumber(payload.ts)
+  ) {
+    return null;
+  }
+
+  return {
+    trace_id: payload.trace_id,
+    cli_key: payload.cli_key,
+    session_id: truncateNullableString(payload.session_id, EVENT_ID_MAX_LENGTH),
+    requested_model: truncateNullableString(payload.requested_model, EVENT_SHORT_TEXT_MAX_LENGTH),
+    phase: payload.phase,
+    ts: payload.ts,
+  };
 }
 
-function isGatewayRequestEvent(payload: unknown): payload is GatewayRequestEvent {
-  if (!isRecord(payload)) return false;
+function normalizeGatewayAttemptEvent(payload: unknown): GatewayAttemptEvent | null {
+  if (!isRecord(payload)) return null;
+  if (
+    !isStringWithin(payload.trace_id, EVENT_ID_MAX_LENGTH) ||
+    !isStringWithin(payload.cli_key, EVENT_ID_MAX_LENGTH) ||
+    !isNullableStringWithin(payload.session_id, EVENT_ID_MAX_LENGTH) ||
+    !isString(payload.method) ||
+    !isString(payload.path) ||
+    !isNullableString(payload.query) ||
+    !isNullableString(payload.requested_model) ||
+    !isNumber(payload.attempt_index) ||
+    !isNumber(payload.provider_id) ||
+    !isNullableBoolean(payload.session_reuse) ||
+    !isString(payload.provider_name) ||
+    !isString(payload.base_url) ||
+    !isString(payload.outcome) ||
+    !isNullableNumber(payload.status) ||
+    !isNumber(payload.attempt_started_ms) ||
+    !isNumber(payload.attempt_duration_ms) ||
+    !isNullableString(payload.circuit_state_before) ||
+    !isNullableString(payload.circuit_state_after) ||
+    !isNullableNumber(payload.circuit_failure_count) ||
+    !isNullableNumber(payload.circuit_failure_threshold) ||
+    !isNullableClaudeModelMapping(payload.claude_model_mapping)
+  ) {
+    return null;
+  }
+
+  return {
+    trace_id: payload.trace_id,
+    cli_key: payload.cli_key,
+    session_id: truncateNullableString(payload.session_id, EVENT_ID_MAX_LENGTH),
+    method: truncateString(payload.method, EVENT_METHOD_MAX_LENGTH),
+    path: truncateString(payload.path, EVENT_PATH_MAX_LENGTH),
+    query: truncateNullableString(payload.query, EVENT_QUERY_MAX_LENGTH) ?? null,
+    requested_model: truncateNullableString(payload.requested_model, EVENT_SHORT_TEXT_MAX_LENGTH),
+    attempt_index: payload.attempt_index,
+    provider_id: payload.provider_id,
+    session_reuse: payload.session_reuse,
+    provider_name: truncateString(payload.provider_name, EVENT_SHORT_TEXT_MAX_LENGTH),
+    base_url: truncateString(payload.base_url, EVENT_URL_MAX_LENGTH),
+    outcome: truncateString(payload.outcome, EVENT_STATE_MAX_LENGTH),
+    status: payload.status ?? null,
+    attempt_started_ms: payload.attempt_started_ms,
+    attempt_duration_ms: payload.attempt_duration_ms,
+    circuit_state_before: truncateNullableString(
+      payload.circuit_state_before,
+      EVENT_STATE_MAX_LENGTH
+    ),
+    circuit_state_after: truncateNullableString(
+      payload.circuit_state_after,
+      EVENT_STATE_MAX_LENGTH
+    ),
+    circuit_failure_count: payload.circuit_failure_count,
+    circuit_failure_threshold: payload.circuit_failure_threshold,
+    claude_model_mapping: payload.claude_model_mapping,
+  };
+}
+
+function normalizeGatewayRequestEvent(payload: unknown): GatewayRequestEvent | null {
+  if (!isRecord(payload)) return null;
   const attempts = payload.attempts;
-  return (
-    isString(payload.trace_id) &&
-    isString(payload.cli_key) &&
-    isNullableString(payload.session_id) &&
+  if (!Array.isArray(attempts)) return null;
+  const boundedAttempts =
+    attempts.length > MAX_ATTEMPTS_PER_TRACE ? attempts.slice(-MAX_ATTEMPTS_PER_TRACE) : attempts;
+  const normalizedAttempts = boundedAttempts.map(normalizeGatewayAttempt);
+  const validAttempts = normalizedAttempts.filter(
+    (attempt): attempt is GatewayAttempt => attempt != null
+  );
+
+  if (
+    isStringWithin(payload.trace_id, EVENT_ID_MAX_LENGTH) &&
+    isStringWithin(payload.cli_key, EVENT_ID_MAX_LENGTH) &&
+    isNullableStringWithin(payload.session_id, EVENT_ID_MAX_LENGTH) &&
     isString(payload.method) &&
     isString(payload.path) &&
     isNullableString(payload.query) &&
@@ -302,8 +454,7 @@ function isGatewayRequestEvent(payload: unknown): payload is GatewayRequestEvent
     isNullableString(payload.error_code) &&
     isNumber(payload.duration_ms) &&
     isNullableNumber(payload.ttfb_ms) &&
-    Array.isArray(attempts) &&
-    attempts.every(isGatewayAttempt) &&
+    validAttempts.length === normalizedAttempts.length &&
     isNullableNumber(payload.input_tokens) &&
     isNullableNumber(payload.output_tokens) &&
     isNullableNumber(payload.total_tokens) &&
@@ -312,37 +463,73 @@ function isGatewayRequestEvent(payload: unknown): payload is GatewayRequestEvent
     isNullableNumber(payload.cache_creation_5m_input_tokens) &&
     isNullableNumber(payload.cache_creation_1h_input_tokens) &&
     isNullableClaudeModelMapping(payload.claude_model_mapping)
-  );
+  ) {
+    return {
+      trace_id: payload.trace_id,
+      cli_key: payload.cli_key,
+      session_id: truncateNullableString(payload.session_id, EVENT_ID_MAX_LENGTH),
+      method: truncateString(payload.method, EVENT_METHOD_MAX_LENGTH),
+      path: truncateString(payload.path, EVENT_PATH_MAX_LENGTH),
+      query: truncateNullableString(payload.query, EVENT_QUERY_MAX_LENGTH) ?? null,
+      requested_model: truncateNullableString(payload.requested_model, EVENT_SHORT_TEXT_MAX_LENGTH),
+      status: payload.status ?? null,
+      error_category:
+        truncateNullableString(payload.error_category, EVENT_SHORT_TEXT_MAX_LENGTH) ?? null,
+      error_code: truncateNullableString(payload.error_code, EVENT_SHORT_TEXT_MAX_LENGTH) ?? null,
+      duration_ms: payload.duration_ms,
+      ttfb_ms: payload.ttfb_ms,
+      attempts: validAttempts,
+      input_tokens: payload.input_tokens,
+      output_tokens: payload.output_tokens,
+      total_tokens: payload.total_tokens,
+      cache_read_input_tokens: payload.cache_read_input_tokens,
+      cache_creation_input_tokens: payload.cache_creation_input_tokens,
+      cache_creation_5m_input_tokens: payload.cache_creation_5m_input_tokens,
+      cache_creation_1h_input_tokens: payload.cache_creation_1h_input_tokens,
+      claude_model_mapping: payload.claude_model_mapping,
+    };
+  }
+
+  return null;
 }
 
 function isGatewayLogEvent(payload: unknown): payload is GatewayLogEvent {
   if (!isRecord(payload)) return false;
   return (
-    isString(payload.level) &&
-    isString(payload.error_code) &&
-    isString(payload.message) &&
+    isStringWithin(payload.level, EVENT_STATE_MAX_LENGTH) &&
+    isStringWithin(payload.error_code, EVENT_SHORT_TEXT_MAX_LENGTH) &&
+    isStringWithin(payload.message, EVENT_QUERY_MAX_LENGTH) &&
     isNumber(payload.requested_port) &&
     isNumber(payload.bound_port) &&
-    isString(payload.base_url)
+    isStringWithin(payload.base_url, EVENT_URL_MAX_LENGTH)
   );
 }
 
 function isGatewayCircuitEvent(payload: unknown): payload is GatewayCircuitEvent {
   if (!isRecord(payload)) return false;
   return (
-    isString(payload.trace_id) &&
-    isString(payload.cli_key) &&
+    isStringWithin(payload.trace_id, EVENT_ID_MAX_LENGTH) &&
+    isStringWithin(payload.cli_key, EVENT_ID_MAX_LENGTH) &&
     isNumber(payload.provider_id) &&
-    isString(payload.provider_name) &&
-    isString(payload.base_url) &&
-    isString(payload.prev_state) &&
-    isString(payload.next_state) &&
+    isStringWithin(payload.provider_name, EVENT_SHORT_TEXT_MAX_LENGTH) &&
+    isStringWithin(payload.base_url, EVENT_URL_MAX_LENGTH) &&
+    isStringWithin(payload.prev_state, EVENT_STATE_MAX_LENGTH) &&
+    isStringWithin(payload.next_state, EVENT_STATE_MAX_LENGTH) &&
     isNumber(payload.failure_count) &&
     isNumber(payload.failure_threshold) &&
     isNullableNumber(payload.open_until) &&
     isNullableNumber(payload.cooldown_until) &&
-    isString(payload.reason) &&
+    isStringWithin(payload.reason, EVENT_SHORT_TEXT_MAX_LENGTH) &&
     isNumber(payload.ts)
+  );
+}
+
+function logInvalidGatewayPayload(event: string, payload: unknown) {
+  logToConsole(
+    "warn",
+    "网关事件 payload 无效，已丢弃",
+    { event, payload_type: typeof payload },
+    "gateway:event_guard"
   );
 }
 
@@ -353,24 +540,30 @@ function readGatewayPayload<TPayload>(
 ): TPayload | null {
   if (guard(payload)) return payload;
 
-  logToConsole(
-    "warn",
-    "网关事件 payload 无效，已丢弃",
-    { event, payload_type: typeof payload },
-    "gateway:event_guard"
-  );
+  logInvalidGatewayPayload(event, payload);
+  return null;
+}
+
+function readNormalizedGatewayPayload<TPayload>(
+  event: string,
+  payload: unknown,
+  normalize: (payload: unknown) => TPayload | null
+): TPayload | null {
+  const normalized = normalize(payload);
+  if (normalized) return normalized;
+
+  logInvalidGatewayPayload(event, payload);
   return null;
 }
 
 export async function listenGatewayEvents(): Promise<() => void> {
   const circuitNonTransitionDedup = new Map<string, number>();
-  const CIRCUIT_NON_TRANSITION_DEDUP_WINDOW_MS = 3000;
 
   const requestStartSub = subscribeGatewayEvent(gatewayEventNames.requestStart, (rawPayload) => {
-    const payload = readGatewayPayload(
+    const payload = readNormalizedGatewayPayload(
       gatewayEventNames.requestStart,
       rawPayload,
-      isGatewayRequestStartEvent
+      normalizeGatewayRequestStartEvent
     );
     if (!payload) return;
 
@@ -395,10 +588,10 @@ export async function listenGatewayEvents(): Promise<() => void> {
   });
 
   const attemptSub = subscribeGatewayEvent(gatewayEventNames.attempt, (rawPayload) => {
-    const payload = readGatewayPayload(
+    const payload = readNormalizedGatewayPayload(
       gatewayEventNames.attempt,
       rawPayload,
-      isGatewayAttemptEvent
+      normalizeGatewayAttemptEvent
     );
     if (!payload) return;
 
@@ -433,10 +626,10 @@ export async function listenGatewayEvents(): Promise<() => void> {
   });
 
   const requestSub = subscribeGatewayEvent(gatewayEventNames.request, (rawPayload) => {
-    const payload = readGatewayPayload(
+    const payload = readNormalizedGatewayPayload(
       gatewayEventNames.request,
       rawPayload,
-      isGatewayRequestEvent
+      normalizeGatewayRequestEvent
     );
     if (!payload) return;
 
@@ -556,10 +749,7 @@ export async function listenGatewayEvents(): Promise<() => void> {
     ].join(":");
 
     const now = Date.now();
-    const last = circuitNonTransitionDedup.get(dedupKey);
-    if (last != null && now - last < CIRCUIT_NON_TRANSITION_DEDUP_WINDOW_MS) return;
-    circuitNonTransitionDedup.set(dedupKey, now);
-    if (circuitNonTransitionDedup.size > 500) circuitNonTransitionDedup.clear();
+    if (!shouldLogCircuitNonTransition(circuitNonTransitionDedup, dedupKey, now)) return;
 
     const title = `Provider 跳过：${provider}（${reason}）`;
     logToConsole(

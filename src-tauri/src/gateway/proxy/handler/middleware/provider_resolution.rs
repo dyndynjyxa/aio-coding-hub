@@ -17,7 +17,9 @@ pub(in crate::gateway::proxy::handler) struct ProviderResolutionMiddleware;
 const SESSION_ID_DIAGNOSTIC_SUFFIX_LEN: usize = 8;
 
 impl ProviderResolutionMiddleware {
-    pub(in crate::gateway::proxy::handler) async fn run(mut ctx: ProxyContext) -> MiddlewareAction {
+    pub(in crate::gateway::proxy::handler) async fn run<R: tauri::Runtime>(
+        mut ctx: ProxyContext<R>,
+    ) -> MiddlewareAction<R> {
         // --- session routing decision ---
         let decision = resolve_session_routing_decision(
             &ctx.headers,

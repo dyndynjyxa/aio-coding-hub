@@ -12,13 +12,25 @@ import {
 } from "../../../query/modelPrices";
 import { useConfigExportMutation, useConfigImportMutation } from "../../../query/configMigrate";
 import { useUsageSummaryQuery } from "../../../query/usage";
-import { useDbDiskUsageQuery, useRequestLogsClearAllMutation } from "../../../query/dataManagement";
+import {
+  APP_DATA_RESET_STOPPED_GATEWAY_STATUS,
+  useDbDiskUsageQuery,
+  useRequestLogsClearAllMutation,
+} from "../../../query/dataManagement";
 import { appDataDirGet, appDataReset, appExit } from "../../../services/app/dataManagement";
 import { runBackgroundTask } from "../../../services/backgroundTasks";
 import { logToConsole } from "../../../services/consoleLog";
 import { tauriDialogOpen, tauriOpenPath, tauriOpenUrl } from "../../../test/mocks/tauri";
 import { notifyModelPricesUpdated } from "../../../services/usage/modelPrices";
-import { modelPricesKeys } from "../../../query/keys";
+import {
+  appAboutKeys,
+  dataManagementKeys,
+  gatewayKeys,
+  modelPricesKeys,
+  requestLogsKeys,
+  settingsKeys,
+  usageKeys,
+} from "../../../query/keys";
 
 const devPreviewRef = vi.hoisted(() => ({
   current: { enabled: false, setEnabled: vi.fn(), toggle: vi.fn() } as any,
@@ -338,6 +350,19 @@ describe("pages/settings/SettingsSidebar", () => {
 
     const client = createTestQueryClient();
     const invalidateQueries = vi.spyOn(client, "invalidateQueries");
+    client.setQueryData(gatewayKeys.status(), {
+      running: true,
+      port: 37123,
+      base_url: "http://127.0.0.1:37123",
+      listen_addr: "127.0.0.1:37123",
+    });
+    client.setQueryData(gatewayKeys.sessions(), [{ session_id: "session-1" }]);
+    client.setQueryData(requestLogsKeys.listAll(null), [{ id: 1 }]);
+    client.setQueryData(usageKeys.summary("today", { cliKey: null }), { requests_total: 5 });
+    client.setQueryData(modelPricesKeys.aliases(), { aliases: [] });
+    client.setQueryData(settingsKeys.get(), { preferred_port: 37123 });
+    client.setQueryData(dataManagementKeys.dbDiskUsage(), { total_bytes: 123 });
+    client.setQueryData(appAboutKeys.get(), { version: "keep" });
 
     render(
       <QueryClientProvider client={client}>
@@ -407,6 +432,16 @@ describe("pages/settings/SettingsSidebar", () => {
     });
     expect(appDataReset).toHaveBeenCalledTimes(2);
     expect(toast).toHaveBeenCalledWith("已清理全部信息：应用即将退出，请重新打开");
+    expect(client.getQueryData(gatewayKeys.status())).toEqual(
+      APP_DATA_RESET_STOPPED_GATEWAY_STATUS
+    );
+    expect(client.getQueryData(gatewayKeys.sessions())).toBeUndefined();
+    expect(client.getQueryData(requestLogsKeys.listAll(null))).toBeUndefined();
+    expect(client.getQueryData(usageKeys.summary("today", { cliKey: null }))).toBeUndefined();
+    expect(client.getQueryData(modelPricesKeys.aliases())).toBeUndefined();
+    expect(client.getQueryData(settingsKeys.get())).toBeUndefined();
+    expect(client.getQueryData(dataManagementKeys.dbDiskUsage())).toBeUndefined();
+    expect(client.getQueryData(appAboutKeys.get())).toEqual({ version: "keep" });
     vi.advanceTimersByTime(1000);
     await act(async () => {
       await Promise.resolve();
@@ -452,6 +487,102 @@ describe("pages/settings/SettingsSidebar", () => {
     notifyModelPricesUpdated();
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: modelPricesKeys.all });
     vi.useRealTimers();
+  });
+
+  it("serializes rapid sidebar actions before mutation pending props update", async () => {
+    mockSidebarQueries();
+
+    let resolveClear: (result: any) => void = () => {
+      throw new Error("resolveClear not set");
+    };
+    const clearPromise = new Promise<any>((resolve) => {
+      resolveClear = resolve;
+    });
+    const clearMutation = {
+      isPending: false,
+      mutateAsync: vi.fn(() => clearPromise),
+    };
+    vi.mocked(useRequestLogsClearAllMutation).mockReturnValue(clearMutation as any);
+
+    let resolveReset: (ok: boolean | null) => void = () => {
+      throw new Error("resolveReset not set");
+    };
+    const resetPromise = new Promise<boolean | null>((resolve) => {
+      resolveReset = resolve;
+    });
+    vi.mocked(appDataReset).mockImplementation(() => resetPromise as any);
+
+    let resolveSync: (result: any) => void = () => {
+      throw new Error("resolveSync not set");
+    };
+    const syncPromise = new Promise<any>((resolve) => {
+      resolveSync = resolve;
+    });
+    const syncMutation = {
+      isPending: false,
+      mutateAsync: vi.fn(() => syncPromise),
+    };
+    vi.mocked(useModelPricesSyncBasellmMutation).mockReturnValue(syncMutation as any);
+
+    let resolveImport: (result: any) => void = () => {
+      throw new Error("resolveImport not set");
+    };
+    const importPromise = new Promise<any>((resolve) => {
+      resolveImport = resolve;
+    });
+    configImportMutationRef.current = {
+      isPending: false,
+      mutateAsync: vi.fn(() => importPromise),
+    };
+    vi.mocked(useConfigImportMutation).mockReturnValue(configImportMutationRef.current);
+    vi.mocked(tauriDialogOpen).mockResolvedValueOnce("/tmp/rapid-config.json");
+
+    renderWithProviders(<SettingsSidebar updateMeta={createUpdateMeta()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "open-clear-logs" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "confirm-clear-logs" }));
+      fireEvent.click(screen.getByRole("button", { name: "confirm-clear-logs" }));
+      await Promise.resolve();
+    });
+    expect(clearMutation.mutateAsync).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "open-reset-all" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "confirm-reset-all" }));
+      fireEvent.click(screen.getByRole("button", { name: "confirm-reset-all" }));
+      await Promise.resolve();
+    });
+    expect(appDataReset).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "sync-model-prices" }));
+      fireEvent.click(screen.getByRole("button", { name: "sync-model-prices" }));
+      await Promise.resolve();
+    });
+    expect(syncMutation.mutateAsync).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "import-config" }));
+    await waitFor(() => expect(screen.getByText("configImportOpen:true")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("configImportPath:/tmp/rapid-config.json")).toBeInTheDocument()
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "confirm-config-import" }));
+      fireEvent.click(screen.getByRole("button", { name: "confirm-config-import" }));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(configImportMutationRef.current.mutateAsync).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => {
+      resolveClear({ request_logs_deleted: 0, request_attempt_logs_deleted: 0 });
+      resolveReset(false);
+      resolveSync(null);
+      resolveImport(null);
+      await Promise.allSettled([clearPromise, resetPromise, syncPromise, importPromise]);
+    });
   });
 
   it("opens config import confirm dialog after selecting a file", async () => {

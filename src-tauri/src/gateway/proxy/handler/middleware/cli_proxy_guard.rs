@@ -8,11 +8,14 @@ use crate::gateway::proxy::handler::early_error::{
     EarlyErrorKind,
 };
 use crate::gateway::proxy::{compute_observe_request, GatewayErrorCode};
+use crate::gateway::response_fixer;
 
 pub(in crate::gateway::proxy::handler) struct CliProxyGuardMiddleware;
 
 impl CliProxyGuardMiddleware {
-    pub(in crate::gateway::proxy::handler) async fn run(ctx: ProxyContext) -> MiddlewareAction {
+    pub(in crate::gateway::proxy::handler) async fn run<R: tauri::Runtime>(
+        ctx: ProxyContext<R>,
+    ) -> MiddlewareAction<R> {
         let bypass = ctx.forced_provider_id.is_some();
         if !crate::shared::cli_key::is_supported_cli_key(&ctx.cli_key) || bypass {
             return MiddlewareAction::Continue(Box::new(ctx));
@@ -84,7 +87,7 @@ pub(in crate::gateway::proxy::handler) fn cli_proxy_guard_special_settings_json(
     cache_ttl_ms: i64,
     error: Option<&str>,
 ) -> String {
-    serde_json::json!([{
+    response_fixer::special_settings_json_from_values(vec![serde_json::json!({
         "type": "cli_proxy_guard",
         "scope": "request",
         "hit": true,
@@ -92,8 +95,8 @@ pub(in crate::gateway::proxy::handler) fn cli_proxy_guard_special_settings_json(
         "cacheHit": cache_hit,
         "cacheTtlMs": cache_ttl_ms,
         "error": error,
-    }])
-    .to_string()
+    })])
+    .unwrap_or_else(|| "[]".to_string())
 }
 
 #[cfg(test)]
@@ -134,5 +137,14 @@ mod tests {
         assert_eq!(row.get("cacheHit").and_then(|v| v.as_bool()), Some(false));
         assert_eq!(row.get("cacheTtlMs").and_then(|v| v.as_i64()), Some(5000));
         assert_eq!(row.get("error").and_then(|v| v.as_str()), Some("boom"));
+    }
+
+    #[test]
+    fn special_settings_json_bounds_large_error() {
+        let encoded = cli_proxy_guard_special_settings_json(false, 5000, Some(&"x".repeat(8192)));
+
+        assert!(encoded.contains("truncated"));
+        assert!(encoded.contains("hash="));
+        assert!(!encoded.contains(&"x".repeat(1024)));
     }
 }

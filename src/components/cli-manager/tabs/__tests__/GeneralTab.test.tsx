@@ -408,6 +408,45 @@ describe("cli-manager/GeneralTab", () => {
     });
   });
 
+  it("rejects invalid proxy protocol before enabling", async () => {
+    const onPersistCommonSettings = vi.fn();
+
+    renderTab(
+      <CliManagerGeneralTab
+        {...createDefaultTabProps({
+          appSettings: createTestAppSettings({
+            upstream_proxy_enabled: false,
+            upstream_proxy_url: "ftp://proxy.example.com:21",
+          }),
+          onPersistCommonSettings,
+        })}
+      />
+    );
+
+    const switches = screen.getAllByRole("switch");
+    fireEvent.click(switches[switches.length - 1]);
+
+    await waitFor(() => {
+      expect(toast).toHaveBeenCalledWith("代理地址协议仅支持 http/https/socks5/socks5h");
+    });
+    expect(onPersistCommonSettings).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid proxy protocol before running test command", async () => {
+    renderTab(<CliManagerGeneralTab {...createDefaultTabProps()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("http://127.0.0.1:7890"), {
+      target: { value: "ftp://proxy.example.com:21" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
+
+    await waitFor(() => {
+      expect(toast).toHaveBeenCalledWith("代理地址协议仅支持 http/https/socks5/socks5h");
+    });
+    expect(mockGatewayUpstreamProxyTest).not.toHaveBeenCalled();
+  });
+
   it("handles proxy connectivity failure on test", async () => {
     mockGatewayUpstreamProxyTest.mockRejectedValue(new Error("connection refused"));
 
@@ -514,6 +553,31 @@ describe("cli-manager/GeneralTab", () => {
       });
     });
     expect(toast.success).toHaveBeenCalledWith("代理认证信息已更新");
+  });
+
+  it("rejects oversized proxy username before persisting", async () => {
+    const onPersistCommonSettings = vi.fn();
+
+    renderTab(
+      <CliManagerGeneralTab
+        {...createDefaultTabProps({
+          appSettings: createTestAppSettings({
+            upstream_proxy_enabled: true,
+            upstream_proxy_url: "http://127.0.0.1:7890",
+          }),
+          onPersistCommonSettings,
+        })}
+      />
+    );
+
+    const usernameInput = screen.getByPlaceholderText("proxy-user");
+    fireEvent.change(usernameInput, { target: { value: "x".repeat(257) } });
+    fireEvent.blur(usernameInput);
+
+    await waitFor(() => {
+      expect(toast).toHaveBeenCalledWith("代理用户名必须 <= 256 字符");
+    });
+    expect(onPersistCommonSettings).not.toHaveBeenCalled();
   });
 
   it("prevents clearing proxy URL when proxy is enabled", async () => {

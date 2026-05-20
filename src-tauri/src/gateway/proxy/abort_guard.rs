@@ -9,8 +9,8 @@ use super::request_end::{
     RequestEndContextArgs, RequestEndDeps,
 };
 
-pub(super) struct RequestAbortGuard {
-    app: tauri::AppHandle,
+pub(super) struct RequestAbortGuard<R: tauri::Runtime = tauri::Wry> {
+    app: tauri::AppHandle<R>,
     db: db::Db,
     log_tx: tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
     trace_id: String,
@@ -28,10 +28,10 @@ pub(super) struct RequestAbortGuard {
     armed: bool,
 }
 
-impl RequestAbortGuard {
+impl<R: tauri::Runtime> RequestAbortGuard<R> {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
-        app: tauri::AppHandle,
+        app: tauri::AppHandle<R>,
         db: db::Db,
         log_tx: tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
         trace_id: String,
@@ -101,7 +101,7 @@ impl RequestAbortGuard {
     }
 }
 
-impl Drop for RequestAbortGuard {
+impl<R: tauri::Runtime> Drop for RequestAbortGuard<R> {
     fn drop(&mut self) {
         if !self.armed {
             return;

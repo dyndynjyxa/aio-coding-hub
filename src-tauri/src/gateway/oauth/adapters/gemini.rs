@@ -1,6 +1,7 @@
 //! Usage: Gemini (Google) OAuth adapter.
 
 use crate::gateway::oauth::provider_trait::*;
+use crate::shared::http_body::read_text_with_limit;
 use axum::http::{HeaderMap, HeaderValue};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -26,6 +27,9 @@ const GEMINI_SHORT_LIMIT_LABEL: &str = "短窗";
 const GEMINI_FREE_TIER_ID: &str = "free-tier";
 const GEMINI_FALLBACK_TIER_ID: &str = "legacy-tier";
 const GEMINI_PROJECT_CACHE_TTL: Duration = Duration::from_secs(300);
+const GEMINI_PROJECT_CACHE_MAX_ENTRIES: usize = 256;
+const GEMINI_JSON_RESPONSE_BODY_LIMIT: usize = 2 * 1024 * 1024;
+const GEMINI_ERROR_BODY_PREVIEW_CHARS: usize = 500;
 
 #[derive(Debug, Clone)]
 struct GeminiProjectCacheEntry {
@@ -387,24 +391,58 @@ fn gemini_project_cache_key(access_token: &str, project_override: Option<&str>) 
 }
 
 fn gemini_project_cache_get(cache_key: &str) -> Option<String> {
-    let cache = gemini_project_cache().lock().ok()?;
+    let mut cache = gemini_project_cache().lock().ok()?;
+    let now = Instant::now();
+    gemini_project_cache_prune_locked(&mut cache, now);
     let entry = cache.get(cache_key)?;
-    if entry.cached_at.elapsed() > GEMINI_PROJECT_CACHE_TTL {
-        return None;
-    }
     Some(entry.project_id.clone())
 }
 
 fn gemini_project_cache_put(cache_key: String, project_id: String) {
     if let Ok(mut cache) = gemini_project_cache().lock() {
+        let now = Instant::now();
+        gemini_project_cache_prune_locked(&mut cache, now);
         cache.insert(
             cache_key,
             GeminiProjectCacheEntry {
                 project_id,
-                cached_at: Instant::now(),
+                cached_at: now,
             },
         );
+        gemini_project_cache_prune_locked(&mut cache, now);
     }
+}
+
+fn gemini_project_cache_prune_locked(
+    cache: &mut BTreeMap<String, GeminiProjectCacheEntry>,
+    now: Instant,
+) {
+    cache.retain(|_, entry| {
+        now.saturating_duration_since(entry.cached_at) <= GEMINI_PROJECT_CACHE_TTL
+    });
+
+    if cache.len() <= GEMINI_PROJECT_CACHE_MAX_ENTRIES {
+        return;
+    }
+
+    let mut entries: Vec<(String, Instant)> = cache
+        .iter()
+        .map(|(key, entry)| (key.clone(), entry.cached_at))
+        .collect();
+    entries.sort_by_key(|(_, cached_at)| *cached_at);
+    let evict_count = cache.len() - GEMINI_PROJECT_CACHE_MAX_ENTRIES;
+    for (key, _) in entries.into_iter().take(evict_count) {
+        cache.remove(&key);
+    }
+}
+
+fn gemini_body_preview(body: &str) -> String {
+    let body = body.trim();
+    let mut preview: String = body.chars().take(GEMINI_ERROR_BODY_PREVIEW_CHARS).collect();
+    if preview.len() < body.len() {
+        preview.push_str(" [truncated]");
+    }
+    preview
 }
 
 async fn gemini_decode_response(
@@ -412,20 +450,30 @@ async fn gemini_decode_response(
     context: &str,
 ) -> Result<serde_json::Value, String> {
     let status = response.status();
-    let text = response
-        .text()
+    let text = read_text_with_limit(response, GEMINI_JSON_RESPONSE_BODY_LIMIT, context)
         .await
-        .map_err(|e| format!("{context} body read failed: {e}"))?;
+        .map_err(|e| {
+            if status.is_success() {
+                e
+            } else {
+                format!("{context} status: {status}; {e}")
+            }
+        })?;
 
     if !status.is_success() {
-        let body = text.trim();
+        let body = gemini_body_preview(&text);
         if body.is_empty() {
             return Err(format!("{context} status: {status}"));
         }
         return Err(format!("{context} status: {status}; body: {body}"));
     }
 
-    serde_json::from_str(&text).map_err(|e| format!("{context} parse failed: {e}; body: {text}"))
+    serde_json::from_str(&text).map_err(|e| {
+        format!(
+            "{context} parse failed: {e}; body: {}",
+            gemini_body_preview(&text)
+        )
+    })
 }
 
 fn gemini_parse_quota_texts(body: &serde_json::Value) -> (Option<String>, Option<String>) {
@@ -571,5 +619,57 @@ mod tests {
         let (limit_5h_text, limit_weekly_text) = gemini_parse_quota_texts(&body);
         assert_eq!(limit_5h_text.as_deref(), Some("40%"));
         assert_eq!(limit_weekly_text.as_deref(), Some("20%"));
+    }
+
+    #[test]
+    fn gemini_project_cache_prune_removes_expired_entries() {
+        let cached_at = Instant::now();
+        let now = cached_at + GEMINI_PROJECT_CACHE_TTL + Duration::from_secs(1);
+        let mut cache = BTreeMap::new();
+        cache.insert(
+            "expired".to_string(),
+            GeminiProjectCacheEntry {
+                project_id: "old-project".to_string(),
+                cached_at,
+            },
+        );
+        cache.insert(
+            "fresh".to_string(),
+            GeminiProjectCacheEntry {
+                project_id: "fresh-project".to_string(),
+                cached_at: now,
+            },
+        );
+
+        gemini_project_cache_prune_locked(&mut cache, now);
+
+        assert!(!cache.contains_key("expired"));
+        assert_eq!(
+            cache.get("fresh").map(|e| e.project_id.as_str()),
+            Some("fresh-project")
+        );
+    }
+
+    #[test]
+    fn gemini_project_cache_prune_evicts_oldest_entries_over_capacity() {
+        let base = Instant::now();
+        let now = base + Duration::from_secs((GEMINI_PROJECT_CACHE_MAX_ENTRIES + 2) as u64);
+        let mut cache = BTreeMap::new();
+        for index in 0..(GEMINI_PROJECT_CACHE_MAX_ENTRIES + 2) {
+            cache.insert(
+                format!("key-{index:03}"),
+                GeminiProjectCacheEntry {
+                    project_id: format!("project-{index}"),
+                    cached_at: base + Duration::from_secs(index as u64),
+                },
+            );
+        }
+
+        gemini_project_cache_prune_locked(&mut cache, now);
+
+        assert_eq!(cache.len(), GEMINI_PROJECT_CACHE_MAX_ENTRIES);
+        assert!(!cache.contains_key("key-000"));
+        assert!(!cache.contains_key("key-001"));
+        assert!(cache.contains_key("key-002"));
     }
 }

@@ -1,6 +1,15 @@
 // Usage: Data-model hook for ProvidersView orchestration.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type MutableRefObject,
+  type SetStateAction,
+} from "react";
 import { toast } from "sonner";
 import { PointerSensor, type DragEndEvent, useSensor, useSensors } from "@dnd-kit/core";
 import { logToConsole } from "../../../services/consoleLog";
@@ -31,7 +40,69 @@ type CreateDialogState = {
   initialValues: ProviderEditorInitialValues | null;
 };
 
+type ProviderRefreshResult = { error: unknown | null };
+type ProviderActionMap = Record<number, boolean>;
+type ProviderActionMapSetter = Dispatch<SetStateAction<ProviderActionMap>>;
+
+function beginProviderAction(ref: MutableRefObject<ProviderActionMap>, providerId: number) {
+  if (ref.current[providerId]) {
+    return false;
+  }
+
+  ref.current = { ...ref.current, [providerId]: true };
+  return true;
+}
+
+function finishProviderAction(ref: MutableRefObject<ProviderActionMap>, providerId: number) {
+  if (!ref.current[providerId]) {
+    return;
+  }
+
+  const next = { ...ref.current };
+  delete next[providerId];
+  ref.current = next;
+}
+
+function beginStatefulProviderAction(
+  ref: MutableRefObject<ProviderActionMap>,
+  setState: ProviderActionMapSetter,
+  providerId: number
+) {
+  if (!beginProviderAction(ref, providerId)) {
+    return false;
+  }
+
+  setState((current) => ({ ...current, [providerId]: true }));
+  return true;
+}
+
+function finishStatefulProviderAction(
+  ref: MutableRefObject<ProviderActionMap>,
+  setState: ProviderActionMapSetter,
+  providerId: number
+) {
+  if (!ref.current[providerId]) {
+    return;
+  }
+
+  finishProviderAction(ref, providerId);
+  setState((current) => {
+    if (!current[providerId]) return current;
+    const next = { ...current };
+    delete next[providerId];
+    return next;
+  });
+}
+
 export function useProvidersViewDataModel(activeCli: CliKey) {
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const activeCliRef = useRef(activeCli);
   useEffect(() => {
     activeCliRef.current = activeCli;
@@ -62,6 +133,10 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
   useEffect(() => {
     providersRef.current = providers;
   }, [providers]);
+  const providersRefreshTokenByCliRef = useRef<Partial<Record<CliKey, number>>>({});
+  const providersRefreshNextTokenRef = useRef(0);
+  const providerReorderSaveTokenByCliRef = useRef<Partial<Record<CliKey, number>>>({});
+  const providerReorderNextSaveTokenRef = useRef(0);
 
   const circuitQuery = useGatewayCircuitStatusQuery(activeCli);
   const circuitRows = useMemo<GatewayProviderCircuitStatus[]>(
@@ -74,22 +149,32 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
   useGatewayCircuitAutoRefresh(activeCli, circuitSummary);
 
   const [circuitResetting, setCircuitResetting] = useState<Record<number, boolean>>({});
+  const circuitResettingRef = useRef<ProviderActionMap>({});
   const [circuitResettingAll, setCircuitResettingAll] = useState(false);
+  const circuitResettingAllRef = useRef(false);
   const [createDialogState, setCreateDialogState] = useState<CreateDialogState | null>(null);
   const [editTarget, setEditTarget] = useState<ProviderSummary | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProviderSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const deletingRef = useRef(false);
   const [terminalCopyingByProviderId, setTerminalCopyingByProviderId] = useState<
     Record<number, boolean>
   >({});
+  const terminalCopyingByProviderIdRef = useRef<ProviderActionMap>({});
   const [duplicatingByProviderId, setDuplicatingByProviderId] = useState<Record<number, boolean>>(
     {}
   );
+  const duplicatingByProviderIdRef = useRef<ProviderActionMap>({});
   const [testingByProviderId, setTestingByProviderId] = useState<Record<number, boolean>>({});
+  const testingByProviderIdRef = useRef<ProviderActionMap>({});
+  const togglingByProviderIdRef = useRef<ProviderActionMap>({});
   const [validateDialogOpen, setValidateDialogOpen] = useState(false);
   const [validateProvider, setValidateProvider] = useState<ProviderSummary | null>(null);
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [providerSearch, setProviderSearch] = useState("");
+  const [providersRefreshingByCli, setProvidersRefreshingByCli] = useState<
+    Partial<Record<CliKey, boolean>>
+  >({});
 
   const resetCircuitProviderMutation = useGatewayCircuitResetProviderMutation();
   const resetCircuitCliMutation = useGatewayCircuitResetCliMutation();
@@ -122,21 +207,72 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
     });
   }, [providerSearch, providers, selectedTags]);
 
+  const beginProvidersRefresh = useCallback((cliKey: CliKey) => {
+    if (providersRefreshTokenByCliRef.current[cliKey] != null) {
+      return null;
+    }
+
+    const token = providersRefreshNextTokenRef.current + 1;
+    providersRefreshNextTokenRef.current = token;
+    providersRefreshTokenByCliRef.current = {
+      ...providersRefreshTokenByCliRef.current,
+      [cliKey]: token,
+    };
+    if (mountedRef.current) {
+      setProvidersRefreshingByCli((current) => ({ ...current, [cliKey]: true }));
+    }
+    return token;
+  }, []);
+
+  const finishProvidersRefresh = useCallback((cliKey: CliKey, token: number) => {
+    if (providersRefreshTokenByCliRef.current[cliKey] !== token) {
+      return;
+    }
+
+    const next = { ...providersRefreshTokenByCliRef.current };
+    delete next[cliKey];
+    providersRefreshTokenByCliRef.current = next;
+    if (!mountedRef.current) {
+      return;
+    }
+
+    setProvidersRefreshingByCli((current) => {
+      if (!current[cliKey]) return current;
+      const nextState = { ...current };
+      delete nextState[cliKey];
+      return nextState;
+    });
+  }, []);
+
   const refreshProviders = useCallback(async () => {
-    const refreshes: Array<Promise<{ error: unknown | null }>> = [providersQuery.refetch()];
-    if (activeCli === "claude") {
+    const cliKey = activeCliRef.current;
+    const refreshToken = beginProvidersRefresh(cliKey);
+    if (refreshToken == null) return;
+
+    const refreshes: Array<Promise<ProviderRefreshResult>> = [providersQuery.refetch()];
+    if (cliKey === "claude") {
       refreshes.push(codexProvidersQuery.refetch());
     }
 
-    const results = await Promise.all(refreshes);
-    if (results.some((result) => result.error != null)) {
-      toast("刷新供应商列表失败：请查看控制台日志");
+    try {
+      const results = await Promise.allSettled(refreshes);
+      const hasError = results.some(
+        (result) => result.status === "rejected" || result.value.error != null
+      );
+      if (mountedRef.current && activeCliRef.current === cliKey && hasError) {
+        toast("刷新供应商列表失败：请查看控制台日志");
+      }
+    } finally {
+      finishProvidersRefresh(cliKey, refreshToken);
     }
-  }, [activeCli, codexProvidersQuery, providersQuery]);
+  }, [beginProvidersRefresh, codexProvidersQuery, finishProvidersRefresh, providersQuery]);
 
   useEffect(() => {
     setSelectedTags(new Set());
     setProviderSearch("");
+    setCreateDialogState(null);
+    setEditTarget(null);
+    setDeleteTarget(null);
   }, [activeCli]);
 
   useEffect(() => {
@@ -147,8 +283,15 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
   }, [activeCli, validateDialogOpen]);
 
   useEffect(() => {
+    togglingByProviderIdRef.current = {};
+    circuitResettingRef.current = {};
+    circuitResettingAllRef.current = false;
+    terminalCopyingByProviderIdRef.current = {};
+    duplicatingByProviderIdRef.current = {};
+    testingByProviderIdRef.current = {};
     setCircuitResetting({});
     setCircuitResettingAll(false);
+    setTerminalCopyingByProviderId({});
     setDuplicatingByProviderId({});
     setTestingByProviderId({});
   }, [activeCli]);
@@ -159,6 +302,30 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
     })
   );
 
+  const beginProviderReorderSave = useCallback((cliKey: CliKey) => {
+    if (providerReorderSaveTokenByCliRef.current[cliKey] != null) {
+      return null;
+    }
+
+    const token = providerReorderNextSaveTokenRef.current + 1;
+    providerReorderNextSaveTokenRef.current = token;
+    providerReorderSaveTokenByCliRef.current = {
+      ...providerReorderSaveTokenByCliRef.current,
+      [cliKey]: token,
+    };
+    return token;
+  }, []);
+
+  const finishProviderReorderSave = useCallback((cliKey: CliKey, token: number) => {
+    if (providerReorderSaveTokenByCliRef.current[cliKey] !== token) {
+      return;
+    }
+
+    const next = { ...providerReorderSaveTokenByCliRef.current };
+    delete next[cliKey];
+    providerReorderSaveTokenByCliRef.current = next;
+  }, []);
+
   function openCreateDialog(
     cliKey: CliKey,
     initialValues: ProviderEditorInitialValues | null = null
@@ -168,6 +335,10 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
 
   const toggleProviderEnabled = useCallback(
     async (provider: ProviderSummary) => {
+      if (!beginProviderAction(togglingByProviderIdRef, provider.id)) {
+        return;
+      }
+
       try {
         const next = await providerSetEnabledMutation.mutateAsync({
           providerId: provider.id,
@@ -183,6 +354,8 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
           id: provider.id,
         });
         toast(`更新失败：${String(error)}`);
+      } finally {
+        finishProviderAction(togglingByProviderIdRef, provider.id);
       }
     },
     [providerSetEnabledMutation]
@@ -190,9 +363,10 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
 
   const resetCircuit = useCallback(
     async (provider: ProviderSummary) => {
-      if (circuitResetting[provider.id]) return;
+      if (!beginStatefulProviderAction(circuitResettingRef, setCircuitResetting, provider.id)) {
+        return;
+      }
 
-      setCircuitResetting((current) => ({ ...current, [provider.id]: true }));
       try {
         await resetCircuitProviderMutation.mutateAsync({
           cliKey: provider.cli_key,
@@ -208,16 +382,17 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
         });
         toast(`解除熔断失败：${String(error)}`);
       } finally {
-        setCircuitResetting((current) => ({ ...current, [provider.id]: false }));
+        finishStatefulProviderAction(circuitResettingRef, setCircuitResetting, provider.id);
       }
     },
-    [circuitQuery, circuitResetting, resetCircuitProviderMutation]
+    [circuitQuery, resetCircuitProviderMutation]
   );
 
   const resetCircuitAll = useCallback(
     async (cliKey: CliKey) => {
-      if (circuitResettingAll) return;
+      if (circuitResettingAllRef.current) return;
 
+      circuitResettingAllRef.current = true;
       setCircuitResettingAll(true);
       try {
         const count = await resetCircuitCliMutation.mutateAsync({ cliKey });
@@ -232,10 +407,11 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
         });
         toast(`解除熔断失败：${String(error)}`);
       } finally {
+        circuitResettingAllRef.current = false;
         setCircuitResettingAll(false);
       }
     },
-    [circuitQuery, circuitResettingAll, resetCircuitCliMutation]
+    [circuitQuery, resetCircuitCliMutation]
   );
 
   const requestValidateProviderModel = useCallback((provider: ProviderSummary) => {
@@ -245,8 +421,9 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
   }, []);
 
   const confirmRemoveProvider = useCallback(async () => {
-    if (!deleteTarget || deleting) return;
+    if (!deleteTarget || deletingRef.current) return;
 
+    deletingRef.current = true;
     setDeleting(true);
     try {
       await providerDeleteMutation.mutateAsync({
@@ -267,9 +444,10 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
       });
       toast(`删除失败：${String(error)}`);
     } finally {
+      deletingRef.current = false;
       setDeleting(false);
     }
-  }, [deleteTarget, deleting, providerDeleteMutation]);
+  }, [deleteTarget, providerDeleteMutation]);
 
   function terminalLaunchCopiedToastMessage(command: string) {
     const normalized = command.trim().toLowerCase();
@@ -286,52 +464,71 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
   const copyTerminalLaunchCommand = useCallback(
     async (provider: ProviderSummary) => {
       if (provider.cli_key !== "claude") return;
-      if (terminalCopyingByProviderId[provider.id]) return;
-
-      setTerminalCopyingByProviderId((current) => ({ ...current, [provider.id]: true }));
-
-      let launchCommand: string | null = null;
-      try {
-        launchCommand = await terminalLaunchCommandMutation.mutateAsync({
-          providerId: provider.id,
-        });
-        if (!launchCommand) {
-          toast("生成启动命令失败");
-          return;
-        }
-      } catch (error) {
-        logToConsole("error", "生成 Claude 终端启动命令失败", {
-          provider_id: provider.id,
-          error: String(error),
-        });
-        toast(`生成启动命令失败：${String(error)}`);
+      if (
+        !beginStatefulProviderAction(
+          terminalCopyingByProviderIdRef,
+          setTerminalCopyingByProviderId,
+          provider.id
+        )
+      ) {
         return;
       }
 
+      let launchCommand: string | null = null;
       try {
-        await copyText(launchCommand);
-        toast(terminalLaunchCopiedToastMessage(launchCommand));
-        logToConsole("info", "复制 Claude 终端启动命令", {
-          provider_id: provider.id,
-        });
-      } catch (error) {
-        logToConsole("error", "复制 Claude 终端启动命令失败", {
-          provider_id: provider.id,
-          error: String(error),
-        });
-        toast("复制失败：当前环境不支持剪贴板");
+        try {
+          launchCommand = await terminalLaunchCommandMutation.mutateAsync({
+            providerId: provider.id,
+          });
+          if (!launchCommand) {
+            toast("生成启动命令失败");
+            return;
+          }
+        } catch (error) {
+          logToConsole("error", "生成 Claude 终端启动命令失败", {
+            provider_id: provider.id,
+            error: String(error),
+          });
+          toast(`生成启动命令失败：${String(error)}`);
+          return;
+        }
+
+        try {
+          await copyText(launchCommand);
+          toast(terminalLaunchCopiedToastMessage(launchCommand));
+          logToConsole("info", "复制 Claude 终端启动命令", {
+            provider_id: provider.id,
+          });
+        } catch (error) {
+          logToConsole("error", "复制 Claude 终端启动命令失败", {
+            provider_id: provider.id,
+            error: String(error),
+          });
+          toast("复制失败：当前环境不支持剪贴板");
+        }
       } finally {
-        setTerminalCopyingByProviderId((current) => ({ ...current, [provider.id]: false }));
+        finishStatefulProviderAction(
+          terminalCopyingByProviderIdRef,
+          setTerminalCopyingByProviderId,
+          provider.id
+        );
       }
     },
-    [terminalCopyingByProviderId, terminalLaunchCommandMutation]
+    [terminalLaunchCommandMutation]
   );
 
   const duplicateProvider = useCallback(
     async (provider: ProviderSummary) => {
-      if (duplicatingByProviderId[provider.id]) return;
+      if (
+        !beginStatefulProviderAction(
+          duplicatingByProviderIdRef,
+          setDuplicatingByProviderId,
+          provider.id
+        )
+      ) {
+        return;
+      }
 
-      setDuplicatingByProviderId((current) => ({ ...current, [provider.id]: true }));
       try {
         const duplicated = await providerDuplicateMutation.mutateAsync({
           providerId: provider.id,
@@ -353,17 +550,24 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
         });
         toast(`复制失败：${String(error)}`);
       } finally {
-        setDuplicatingByProviderId((current) => ({ ...current, [provider.id]: false }));
+        finishStatefulProviderAction(
+          duplicatingByProviderIdRef,
+          setDuplicatingByProviderId,
+          provider.id
+        );
       }
     },
-    [duplicatingByProviderId, providerDuplicateMutation]
+    [providerDuplicateMutation]
   );
 
   const testProviderAvailability = useCallback(
     async (provider: ProviderSummary) => {
-      if (testingByProviderId[provider.id]) return;
+      if (
+        !beginStatefulProviderAction(testingByProviderIdRef, setTestingByProviderId, provider.id)
+      ) {
+        return;
+      }
 
-      setTestingByProviderId((current) => ({ ...current, [provider.id]: true }));
       try {
         const result = await testAvailabilityMutation.mutateAsync({
           providerId: provider.id,
@@ -389,13 +593,17 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
         });
         toast(`测试失败：${String(error)}`);
       } finally {
-        setTestingByProviderId((current) => ({ ...current, [provider.id]: false }));
+        finishStatefulProviderAction(testingByProviderIdRef, setTestingByProviderId, provider.id);
       }
     },
-    [testingByProviderId, testAvailabilityMutation]
+    [testAvailabilityMutation]
   );
 
-  async function persistProvidersOrder(cliKey: CliKey, nextProviders: ProviderSummary[]) {
+  async function persistProvidersOrder(
+    cliKey: CliKey,
+    saveToken: number,
+    nextProviders: ProviderSummary[]
+  ) {
     try {
       const saved = await providersReorderMutation.mutateAsync({
         cliKey,
@@ -416,6 +624,8 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
         error: String(error),
       });
       toast(`顺序更新失败：${String(error)}`);
+    } finally {
+      finishProviderReorderSave(cliKey, saveToken);
     }
   }
 
@@ -434,13 +644,17 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
     });
     if (!nextProviders) return;
 
-    void persistProvidersOrder(cliKey, nextProviders);
+    const saveToken = beginProviderReorderSave(cliKey);
+    if (saveToken == null) return;
+
+    void persistProvidersOrder(cliKey, saveToken, nextProviders);
   }
 
   return {
     providers,
     codexProviders,
     providersLoading,
+    providersRefreshing: Boolean(providersRefreshingByCli[activeCli]),
     filteredProviders,
     tagCounts,
     selectedTags,

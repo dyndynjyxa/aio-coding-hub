@@ -11,8 +11,8 @@ use axum::http::{header, HeaderMap, HeaderValue, Method};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-pub(super) struct RequestContext {
-    pub(super) state: GatewayAppState,
+pub(super) struct RequestContext<R: tauri::Runtime = tauri::Wry> {
+    pub(super) state: GatewayAppState<R>,
     pub(super) cli_key: String,
     pub(super) forwarded_path: String,
     pub(super) observe_request: bool,
@@ -48,7 +48,7 @@ pub(super) struct RequestContext {
     pub(super) fingerprint_debug: String,
     pub(super) unavailable_fingerprint_key: u64,
     pub(super) unavailable_fingerprint_debug: String,
-    pub(super) abort_guard: RequestAbortGuard,
+    pub(super) abort_guard: RequestAbortGuard<R>,
     pub(super) enable_thinking_signature_rectifier: bool,
     pub(super) enable_thinking_budget_rectifier: bool,
     pub(super) enable_claude_metadata_user_id_injection: bool,
@@ -59,8 +59,8 @@ pub(super) struct RequestContext {
     pub(super) response_fixer_non_stream_config: response_fixer::ResponseFixerConfig,
 }
 
-impl RequestContext {
-    pub(super) fn from_handler_parts(parts: RequestContextParts) -> Self {
+impl<R: tauri::Runtime> RequestContext<R> {
+    pub(super) fn from_handler_parts(parts: RequestContextParts<R>) -> Self {
         let RequestContextParts {
             state,
             cli_key,
@@ -242,8 +242,8 @@ fn duration_from_secs(secs: u32) -> Option<Duration> {
     }
 }
 
-pub(super) struct RequestContextParts {
-    pub(super) state: GatewayAppState,
+pub(super) struct RequestContextParts<R: tauri::Runtime = tauri::Wry> {
+    pub(super) state: GatewayAppState<R>,
     pub(super) cli_key: String,
     pub(super) forwarded_path: String,
     pub(super) observe_request: bool,

@@ -26,6 +26,7 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
     providers,
     codexProviders,
     providersLoading,
+    providersRefreshing,
     filteredProviders,
     tagCounts,
     selectedTags,
@@ -153,8 +154,9 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
               variant="secondary"
               size="sm"
               className="h-9"
+              disabled={providersRefreshing}
             >
-              刷新
+              {providersRefreshing ? "刷新中…" : "刷新"}
             </Button>
 
             <Button

@@ -1,7 +1,10 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { toast } from "sonner";
 import { CliManagerCx2ccTab } from "../Cx2ccTab";
 import type { AppSettings } from "../../../../services/settings/settings";
+
+vi.mock("sonner", () => ({ toast: vi.fn() }));
 
 function createAppSettings(overrides: Partial<AppSettings> = {}): AppSettings {
   return {
@@ -36,6 +39,10 @@ function createAppSettings(overrides: Partial<AppSettings> = {}): AppSettings {
 }
 
 describe("components/cli-manager/tabs/Cx2ccTab", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("renders all setting sections", () => {
     const persistSettings = vi.fn().mockResolvedValue(null);
     render(
@@ -160,6 +167,24 @@ describe("components/cli-manager/tabs/Cx2ccTab", () => {
     expect(persistSettings).not.toHaveBeenCalled();
   });
 
+  it("rejects oversized fallback model before persisting", async () => {
+    const persistSettings = vi.fn().mockResolvedValue(null);
+    render(
+      <CliManagerCx2ccTab
+        appSettings={createAppSettings()}
+        commonSettingsSaving={false}
+        onPersistCommonSettings={persistSettings}
+      />
+    );
+
+    const opusInput = screen.getByDisplayValue("gpt-5.4-opus");
+    fireEvent.change(opusInput, { target: { value: "x".repeat(129) } });
+    fireEvent.blur(opusInput);
+
+    expect(persistSettings).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith("Opus 默认模型必须 <= 128 字符");
+  });
+
   it("persists service tier on blur", async () => {
     const persistSettings = vi.fn().mockResolvedValue(null);
     render(
@@ -196,6 +221,24 @@ describe("components/cli-manager/tabs/Cx2ccTab", () => {
     expect(persistSettings).toHaveBeenCalledWith({
       cx2cc_service_tier: "",
     });
+  });
+
+  it("rejects service tier control characters before persisting", async () => {
+    const persistSettings = vi.fn().mockResolvedValue(null);
+    render(
+      <CliManagerCx2ccTab
+        appSettings={createAppSettings()}
+        commonSettingsSaving={false}
+        onPersistCommonSettings={persistSettings}
+      />
+    );
+
+    const serviceTierInput = screen.getByDisplayValue("fast");
+    fireEvent.change(serviceTierInput, { target: { value: "standard\u0001" } });
+    fireEvent.blur(serviceTierInput);
+
+    expect(persistSettings).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith("服务层级不能包含控制字符");
   });
 
   it("renders reasoning effort radio group with correct value", () => {

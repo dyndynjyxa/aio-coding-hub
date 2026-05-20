@@ -13,6 +13,14 @@ import { narrowGeneratedStringUnion, type Override } from "../generatedTypeUtils
 
 const CLI_SESSION_SOURCE_VALUES = ["claude", "codex"] as const;
 
+export const CLI_SESSIONS_DEFAULT_PAGE_SIZE = 50;
+export const CLI_SESSIONS_MAX_PAGE_SIZE = 200;
+export const CLI_SESSIONS_MAX_PATH_CHARS = 4096;
+export const CLI_SESSIONS_MAX_TAIL_MESSAGES = 2000;
+export const CLI_SESSIONS_MAX_DELETE_PATHS = 512;
+export const CLI_SESSIONS_MAX_LOOKUP_ITEMS = 512;
+export const CLI_SESSIONS_WSL_DISTRO_MAX_CHARS = 128;
+
 export type CliSessionsSource = (typeof CLI_SESSION_SOURCE_VALUES)[number];
 
 export type CliSessionsProjectSummary = Override<
@@ -65,6 +73,112 @@ function toCliSessionsSource(value: string, label: string): CliSessionsSource {
   return narrowGeneratedStringUnion(value, CLI_SESSION_SOURCE_VALUES, label);
 }
 
+function normalizeRequiredText(
+  value: string,
+  label: string,
+  maxChars = CLI_SESSIONS_MAX_PATH_CHARS
+) {
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new Error(`SEC_INVALID_INPUT: ${label} is required`);
+  }
+  if ([...normalized].length > maxChars) {
+    throw new Error(`SEC_INVALID_INPUT: ${label} is too long (max ${maxChars} chars)`);
+  }
+  return normalized;
+}
+
+export function normalizeCliSessionsPage(page: number): number {
+  if (!Number.isSafeInteger(page) || page < 0) {
+    throw new Error(`SEC_INVALID_INPUT: invalid page=${page}`);
+  }
+  return page;
+}
+
+export function normalizeCliSessionsPageSize(pageSize: number): number {
+  if (!Number.isSafeInteger(pageSize) || pageSize < 0) {
+    throw new Error(`SEC_INVALID_INPUT: invalid pageSize=${pageSize}`);
+  }
+  if (pageSize === 0) return CLI_SESSIONS_DEFAULT_PAGE_SIZE;
+  return Math.min(pageSize, CLI_SESSIONS_MAX_PAGE_SIZE);
+}
+
+export function validateCliSessionsMessageWindow(
+  page: number,
+  pageSize: number,
+  fromEnd: boolean | null
+) {
+  if (fromEnd === false) return;
+
+  const retainedMessages = (page + 1) * pageSize;
+  if (retainedMessages > CLI_SESSIONS_MAX_TAIL_MESSAGES) {
+    throw new Error(
+      `SEC_INVALID_INPUT: message pagination window is too large (max ${CLI_SESSIONS_MAX_TAIL_MESSAGES} retained messages)`
+    );
+  }
+}
+
+export function normalizeCliSessionsProjectId(projectId: string): string {
+  return normalizeRequiredText(projectId, "projectId");
+}
+
+export function normalizeCliSessionsFilePath(filePath: string): string {
+  return normalizeRequiredText(filePath, "filePath");
+}
+
+export function normalizeCliSessionsFolderLookupItems(
+  items: readonly CliSessionsFolderLookupInput[]
+): CliSessionsFolderLookupInput[] {
+  if (items.length > CLI_SESSIONS_MAX_LOOKUP_ITEMS) {
+    throw new Error(
+      `SEC_INVALID_INPUT: folder lookup items must contain at most ${CLI_SESSIONS_MAX_LOOKUP_ITEMS} entries`
+    );
+  }
+
+  return items
+    .map((item) => ({ source: item.source, session_id: item.session_id.trim() }))
+    .filter((item) => item.session_id.length > 0)
+    .map((item) => ({
+      source: item.source,
+      session_id: normalizeRequiredText(item.session_id, "sessionId"),
+    }));
+}
+
+export function normalizeCliSessionsDeleteFilePaths(filePaths: readonly string[]): string[] {
+  if (filePaths.length === 0) {
+    throw new Error("SEC_INVALID_INPUT: filePaths is required");
+  }
+  if (filePaths.length > CLI_SESSIONS_MAX_DELETE_PATHS) {
+    throw new Error(
+      `SEC_INVALID_INPUT: filePaths must contain at most ${CLI_SESSIONS_MAX_DELETE_PATHS} entries`
+    );
+  }
+
+  const normalized = filePaths
+    .map((filePath) => filePath.trim())
+    .filter((filePath) => filePath.length > 0)
+    .map((filePath) => normalizeRequiredText(filePath, "filePath"));
+  if (normalized.length === 0) {
+    throw new Error("SEC_INVALID_INPUT: filePaths is required");
+  }
+  return normalized;
+}
+
+export function normalizeCliSessionsWslDistro(value?: string | null): string | null {
+  if (value == null) return null;
+  const normalized = value.trim();
+  if (!normalized) return null;
+  if (/[\u0000-\u001f\u007f]/u.test(normalized)) {
+    throw new Error("SEC_INVALID_INPUT: WSL distro name contains control characters");
+  }
+  if ([...normalized].length > CLI_SESSIONS_WSL_DISTRO_MAX_CHARS) {
+    throw new Error(
+      `SEC_INVALID_INPUT: WSL distro name is too long (max ${CLI_SESSIONS_WSL_DISTRO_MAX_CHARS} chars)`
+    );
+  }
+  return normalized;
+}
+
 function toCliSessionsProjectSummary(
   value: GeneratedCliSessionsProjectSummary
 ): CliSessionsProjectSummary {
@@ -93,16 +207,18 @@ function toCliSessionsFolderLookupEntry(
 }
 
 export async function cliSessionsProjectsList(source: CliSessionsSource, wslDistro?: string) {
+  const normalizedWslDistro = normalizeCliSessionsWslDistro(wslDistro);
+
   return invokeGeneratedIpc<CliSessionsProjectSummary[]>({
     title: "读取会话项目列表失败",
     cmd: "cli_sessions_projects_list",
     args: {
       source,
-      wslDistro: wslDistro ?? null,
+      wslDistro: normalizedWslDistro,
     },
     invoke: async () =>
       mapGeneratedCommandResponse(
-        await commands.cliSessionsProjectsList(source, wslDistro ?? null),
+        await commands.cliSessionsProjectsList(source, normalizedWslDistro),
         (rows) => rows.map(toCliSessionsProjectSummary)
       ),
   });
@@ -113,57 +229,68 @@ export async function cliSessionsSessionsList(
   projectId: string,
   wslDistro?: string
 ) {
+  const normalizedProjectId = normalizeCliSessionsProjectId(projectId);
+  const normalizedWslDistro = normalizeCliSessionsWslDistro(wslDistro);
+
   return invokeGeneratedIpc<CliSessionsSessionSummary[]>({
     title: "读取会话列表失败",
     cmd: "cli_sessions_sessions_list",
     args: {
       source,
-      projectId,
-      wslDistro: wslDistro ?? null,
+      projectId: normalizedProjectId,
+      wslDistro: normalizedWslDistro,
     },
     invoke: async () =>
       mapGeneratedCommandResponse(
-        await commands.cliSessionsSessionsList(source, projectId, wslDistro ?? null),
+        await commands.cliSessionsSessionsList(source, normalizedProjectId, normalizedWslDistro),
         (rows) => rows.map(toCliSessionsSessionSummary)
       ),
   });
 }
 
 export async function cliSessionsMessagesGet(input: CliSessionsMessagesInput) {
+  const filePath = normalizeCliSessionsFilePath(input.filePath);
+  const page = normalizeCliSessionsPage(input.page);
+  const pageSize = normalizeCliSessionsPageSize(input.pageSize);
+  validateCliSessionsMessageWindow(page, pageSize, input.fromEnd);
+  const normalizedWslDistro = normalizeCliSessionsWslDistro(input.wslDistro);
+
   return invokeGeneratedIpc<CliSessionsPaginatedMessages>({
     title: "读取会话消息失败",
     cmd: "cli_sessions_messages_get",
     args: {
       source: input.source,
-      filePath: input.filePath,
-      page: input.page,
-      pageSize: input.pageSize,
+      filePath,
+      page,
+      pageSize,
       fromEnd: input.fromEnd,
-      wslDistro: input.wslDistro ?? null,
+      wslDistro: normalizedWslDistro,
     },
     invoke: () =>
       commands.cliSessionsMessagesGet(
         input.source,
-        input.filePath,
-        input.page,
-        input.pageSize,
+        filePath,
+        page,
+        pageSize,
         input.fromEnd,
-        input.wslDistro ?? null
+        normalizedWslDistro
       ),
   });
 }
 
 export async function cliSessionsSessionDelete(input: CliSessionsSessionDeleteInput) {
+  const filePaths = normalizeCliSessionsDeleteFilePaths(input.filePaths);
+  const normalizedWslDistro = normalizeCliSessionsWslDistro(input.wslDistro);
+
   return invokeGeneratedIpc<string[]>({
     title: "删除会话失败",
     cmd: "cli_sessions_session_delete",
     args: {
       source: input.source,
-      filePaths: input.filePaths,
-      wslDistro: input.wslDistro ?? null,
+      filePaths,
+      wslDistro: normalizedWslDistro,
     },
-    invoke: () =>
-      commands.cliSessionsSessionDelete(input.source, input.filePaths, input.wslDistro ?? null),
+    invoke: () => commands.cliSessionsSessionDelete(input.source, filePaths, normalizedWslDistro),
   });
 }
 
@@ -171,16 +298,20 @@ export async function cliSessionsFolderLookupByIds(
   items: CliSessionsFolderLookupInput[],
   wslDistro?: string
 ) {
+  const normalizedItems = normalizeCliSessionsFolderLookupItems(items);
+  if (normalizedItems.length === 0) return [];
+  const normalizedWslDistro = normalizeCliSessionsWslDistro(wslDistro);
+
   return invokeGeneratedIpc<CliSessionsFolderLookupEntry[]>({
     title: "读取会话文件夹信息失败",
     cmd: "cli_sessions_folder_lookup_by_ids",
     args: {
-      items,
-      wslDistro: wslDistro ?? null,
+      items: normalizedItems,
+      wslDistro: normalizedWslDistro,
     },
     invoke: async () =>
       mapGeneratedCommandResponse(
-        await commands.cliSessionsFolderLookupByIds(items, wslDistro ?? null),
+        await commands.cliSessionsFolderLookupByIds(normalizedItems, normalizedWslDistro),
         (rows) => rows.map(toCliSessionsFolderLookupEntry)
       ),
   });

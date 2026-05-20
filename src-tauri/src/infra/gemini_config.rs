@@ -1,8 +1,12 @@
 //! Usage: Read / patch Gemini CLI `settings.json` (~/.gemini/settings.json).
 
-use crate::shared::fs::{is_symlink, read_optional_file, write_file_atomic_if_changed};
+use crate::shared::fs::{
+    is_symlink, read_optional_file_with_max_len, write_file_atomic_if_changed,
+};
 use serde::{Deserialize, Deserializer, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+const GEMINI_CONFIG_MAX_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Default)]
 #[serde(rename_all = "camelCase")]
@@ -219,7 +223,24 @@ fn json_to_bytes(
     let mut out =
         serde_json::to_vec_pretty(value).map_err(|e| format!("failed to serialize {hint}: {e}"))?;
     out.push(b'\n');
+    ensure_gemini_config_len(&out, hint)?;
     Ok(out)
+}
+
+fn ensure_gemini_config_len(bytes: &[u8], label: &str) -> crate::shared::error::AppResult<()> {
+    if bytes.len() > GEMINI_CONFIG_MAX_BYTES {
+        return Err(format!(
+            "SEC_INVALID_INPUT: {label} too large (max {GEMINI_CONFIG_MAX_BYTES} bytes)"
+        )
+        .into());
+    }
+    Ok(())
+}
+
+fn read_optional_gemini_config_file(
+    path: &Path,
+) -> crate::shared::error::AppResult<Option<Vec<u8>>> {
+    read_optional_file_with_max_len(path, GEMINI_CONFIG_MAX_BYTES)
 }
 
 fn parse_json_root(bytes: Option<Vec<u8>>) -> crate::shared::error::AppResult<serde_json::Value> {
@@ -570,7 +591,7 @@ pub fn gemini_config_get<R: tauri::Runtime>(
     let config_dir = gemini_config_dir(app)?;
     let config_path = gemini_config_path(app)?;
     let exists = config_path.exists();
-    let root = parse_json_root(read_optional_file(&config_path)?)?;
+    let root = parse_json_root(read_optional_gemini_config_file(&config_path)?)?;
 
     Ok(make_state(
         config_dir.to_string_lossy().to_string(),
@@ -593,7 +614,7 @@ pub fn gemini_config_set<R: tauri::Runtime>(
         .into());
     }
 
-    let current = parse_json_root(read_optional_file(&path)?)?;
+    let current = parse_json_root(read_optional_gemini_config_file(&path)?)?;
     let next = patch_gemini_config(current, patch)?;
     let bytes = json_to_bytes(&next, "gemini/settings.json")?;
     let _ = write_file_atomic_if_changed(&path, &bytes)?;
@@ -745,5 +766,31 @@ mod tests {
         assert_eq!(patch.enable_auto_update, Some(None));
         assert_eq!(patch.max_attempts, Some(None));
         assert_eq!(patch.model_compression_threshold, Some(None));
+    }
+
+    #[test]
+    fn read_optional_gemini_config_file_rejects_oversized_file() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("settings.json");
+        std::fs::write(&path, vec![b'x'; GEMINI_CONFIG_MAX_BYTES + 1]).expect("write config");
+
+        let err = read_optional_gemini_config_file(&path)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("too large"));
+    }
+
+    #[test]
+    fn json_to_bytes_rejects_oversized_gemini_config() {
+        let value = serde_json::json!({
+            "unknown": "x".repeat(GEMINI_CONFIG_MAX_BYTES + 1)
+        });
+
+        let err = json_to_bytes(&value, "gemini/settings.json")
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("gemini/settings.json too large"));
     }
 }

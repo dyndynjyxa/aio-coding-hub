@@ -22,6 +22,15 @@ import type { CliKey } from "../providers/providers";
 
 const CLI_KEY_VALUES = ["claude", "codex", "gemini"] as const satisfies readonly CliKey[];
 
+export const COST_LIMIT_MIN = 1;
+export const COST_BREAKDOWN_DEFAULT_LIMIT = 50;
+export const COST_BREAKDOWN_MAX_LIMIT = 200;
+export const COST_SCATTER_DEFAULT_LIMIT = 500;
+export const COST_SCATTER_MAX_LIMIT = 5000;
+export const COST_BACKFILL_DEFAULT_MAX_ROWS = 5000;
+export const COST_BACKFILL_MAX_ROWS = 10_000;
+export const COST_MODEL_FILTER_MAX_CHARS = 200;
+
 export type CostPeriod = "daily" | "weekly" | "monthly" | "allTime" | "custom";
 
 export type CostProviderBreakdownRowV1 = Override<
@@ -45,16 +54,99 @@ export type CostTopRequestRowV1 = Override<
   }
 >;
 
-type CostQueryInput = Omit<OptionalNullableGeneratedFields<GeneratedCostQueryParams>, "period">;
+export type CostQueryInput = Omit<
+  OptionalNullableGeneratedFields<GeneratedCostQueryParams>,
+  "period"
+>;
+export type NormalizedCostQueryInput = {
+  startTs: number | null;
+  endTs: number | null;
+  cliKey: CliKey | null;
+  providerId: number | null;
+  model: string | null;
+};
+
+function normalizeBoundedCostInteger(
+  label: string,
+  value: number | null | undefined,
+  max: number
+): number | null {
+  if (value == null) return null;
+  if (!Number.isSafeInteger(value)) {
+    throw new Error(`SEC_INVALID_INPUT: invalid ${label}=${value}`);
+  }
+  return Math.min(Math.max(value, COST_LIMIT_MIN), max);
+}
+
+export function normalizeCostBreakdownLimit(limit?: number | null): number | null {
+  return normalizeBoundedCostInteger("cost breakdown limit", limit, COST_BREAKDOWN_MAX_LIMIT);
+}
+
+export function normalizeCostScatterLimit(limit?: number | null): number | null {
+  return normalizeBoundedCostInteger("cost scatter limit", limit, COST_SCATTER_MAX_LIMIT);
+}
+
+export function normalizeCostBackfillMaxRows(maxRows?: number | null): number | null {
+  return normalizeBoundedCostInteger("cost backfill maxRows", maxRows, COST_BACKFILL_MAX_ROWS);
+}
+
+export function validateCostCliKey(cliKey?: string | null): CliKey | null {
+  if (cliKey == null) return null;
+  const normalizedCliKey = cliKey.trim();
+  if (!normalizedCliKey) return null;
+  if ((CLI_KEY_VALUES as readonly string[]).includes(normalizedCliKey)) {
+    return normalizedCliKey as CliKey;
+  }
+  throw new Error(`SEC_INVALID_INPUT: invalid cliKey=${cliKey}`);
+}
+
+function normalizeCostTimestamp(label: string, value: number | null | undefined): number | null {
+  if (value == null) return null;
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`SEC_INVALID_INPUT: invalid ${label}=${value}`);
+  }
+  return value;
+}
+
+function normalizeCostProviderId(providerId?: number | null): number | null {
+  if (providerId == null) return null;
+  if (!Number.isSafeInteger(providerId) || providerId <= 0) {
+    throw new Error(`SEC_INVALID_INPUT: invalid providerId=${providerId}`);
+  }
+  return providerId;
+}
+
+function normalizeCostModel(model?: string | null): string | null {
+  if (model == null) return null;
+  const normalizedModel = model.trim();
+  if (!normalizedModel) return null;
+  if ([...normalizedModel].length > COST_MODEL_FILTER_MAX_CHARS) {
+    throw new Error(
+      `SEC_INVALID_INPUT: model is too long (max ${COST_MODEL_FILTER_MAX_CHARS} chars)`
+    );
+  }
+  return normalizedModel;
+}
+
+export function normalizeCostQueryInput(input?: CostQueryInput): NormalizedCostQueryInput {
+  return {
+    startTs: normalizeCostTimestamp("startTs", input?.startTs),
+    endTs: normalizeCostTimestamp("endTs", input?.endTs),
+    cliKey: validateCostCliKey(input?.cliKey),
+    providerId: normalizeCostProviderId(input?.providerId),
+    model: normalizeCostModel(input?.model),
+  };
+}
 
 function buildParams(period: CostPeriod, input?: CostQueryInput): GeneratedCostQueryParams {
+  const normalizedInput = normalizeCostQueryInput(input);
   return {
     period,
-    startTs: input?.startTs ?? null,
-    endTs: input?.endTs ?? null,
-    cliKey: input?.cliKey ?? null,
-    providerId: input?.providerId ?? null,
-    model: input?.model ?? null,
+    startTs: normalizedInput.startTs,
+    endTs: normalizedInput.endTs,
+    cliKey: normalizedInput.cliKey,
+    providerId: normalizedInput.providerId,
+    model: normalizedInput.model,
   };
 }
 
@@ -112,17 +204,18 @@ export async function costBreakdownProviderV1(
   input?: CostQueryInput & { limit?: number | null }
 ) {
   const params = buildParams(period, input);
+  const limit = normalizeCostBreakdownLimit(input?.limit);
+
   return invokeGeneratedIpc<CostProviderBreakdownRowV1[]>({
     title: "读取按供应商花费分布失败",
     cmd: "cost_breakdown_provider_v1",
     args: {
       params,
-      limit: input?.limit ?? null,
+      limit,
     },
     invoke: async () =>
-      mapGeneratedCommandResponse(
-        await commands.costBreakdownProviderV1(params, input?.limit ?? null),
-        (rows) => rows.map(toCostProviderBreakdownRowV1)
+      mapGeneratedCommandResponse(await commands.costBreakdownProviderV1(params, limit), (rows) =>
+        rows.map(toCostProviderBreakdownRowV1)
       ),
   });
 }
@@ -132,14 +225,16 @@ export async function costBreakdownModelV1(
   input?: CostQueryInput & { limit?: number | null }
 ) {
   const params = buildParams(period, input);
+  const limit = normalizeCostBreakdownLimit(input?.limit);
+
   return invokeGeneratedIpc<CostModelBreakdownRowV1[]>({
     title: "读取按模型花费分布失败",
     cmd: "cost_breakdown_model_v1",
     args: {
       params,
-      limit: input?.limit ?? null,
+      limit,
     },
-    invoke: () => commands.costBreakdownModelV1(params, input?.limit ?? null),
+    invoke: () => commands.costBreakdownModelV1(params, limit),
   });
 }
 
@@ -148,17 +243,18 @@ export async function costTopRequestsV1(
   input?: CostQueryInput & { limit?: number | null }
 ) {
   const params = buildParams(period, input);
+  const limit = normalizeCostBreakdownLimit(input?.limit);
+
   return invokeGeneratedIpc<CostTopRequestRowV1[]>({
     title: "读取高花费请求失败",
     cmd: "cost_top_requests_v1",
     args: {
       params,
-      limit: input?.limit ?? null,
+      limit,
     },
     invoke: async () =>
-      mapGeneratedCommandResponse(
-        await commands.costTopRequestsV1(params, input?.limit ?? null),
-        (rows) => rows.map(toCostTopRequestRowV1)
+      mapGeneratedCommandResponse(await commands.costTopRequestsV1(params, limit), (rows) =>
+        rows.map(toCostTopRequestRowV1)
       ),
   });
 }
@@ -168,16 +264,18 @@ export async function costScatterCliProviderModelV1(
   input?: CostQueryInput & { limit?: number | null }
 ) {
   const params = buildParams(period, input);
+  const limit = normalizeCostScatterLimit(input?.limit);
+
   return invokeGeneratedIpc<CostScatterCliProviderModelRowV1[]>({
     title: "读取花费散点数据失败",
     cmd: "cost_scatter_cli_provider_model_v1",
     args: {
       params,
-      limit: input?.limit ?? null,
+      limit,
     },
     invoke: async () =>
       mapGeneratedCommandResponse(
-        await commands.costScatterCliProviderModelV1(params, input?.limit ?? null),
+        await commands.costScatterCliProviderModelV1(params, limit),
         (rows) => rows.map(toCostScatterCliProviderModelRowV1)
       ),
   });
@@ -188,14 +286,16 @@ export async function costBackfillMissingV1(
   input?: CostQueryInput & { maxRows?: number | null }
 ) {
   const params = buildParams(period, input);
+  const maxRows = normalizeCostBackfillMaxRows(input?.maxRows);
+
   return invokeGeneratedIpc<CostBackfillReportV1>({
     title: "回填花费数据失败",
     cmd: "cost_backfill_missing_v1",
     args: {
       params,
-      maxRows: input?.maxRows ?? null,
+      maxRows,
     },
-    invoke: () => commands.costBackfillMissingV1(params, input?.maxRows ?? null),
+    invoke: () => commands.costBackfillMissingV1(params, maxRows),
   });
 }
 

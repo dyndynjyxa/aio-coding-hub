@@ -10,16 +10,37 @@ pub use types::{
 };
 
 use crate::codex_paths;
-use crate::shared::fs::{is_symlink, read_optional_file, write_file_atomic_if_changed};
+use crate::shared::fs::{
+    is_symlink, read_optional_file_with_max_len, write_file_atomic_if_changed,
+};
 use parsing::{make_state_from_bytes, validate_codex_config_toml_raw};
 use patching::patch_config_toml;
 use std::path::Path;
 use types::CodexConfigStateMeta;
 
+const CODEX_CONFIG_MAX_BYTES: usize = 1024 * 1024;
+
+fn ensure_codex_config_len(bytes: &[u8], label: &str) -> crate::shared::error::AppResult<()> {
+    if bytes.len() > CODEX_CONFIG_MAX_BYTES {
+        return Err(format!(
+            "SEC_INVALID_INPUT: {label} too large (max {CODEX_CONFIG_MAX_BYTES} bytes)"
+        )
+        .into());
+    }
+    Ok(())
+}
+
+fn read_optional_codex_config_file(
+    path: &Path,
+) -> crate::shared::error::AppResult<Option<Vec<u8>>> {
+    read_optional_file_with_max_len(path, CODEX_CONFIG_MAX_BYTES)
+}
+
 fn sync_codex_cli_proxy_backup_if_enabled<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     next_bytes: &[u8],
 ) -> crate::shared::error::AppResult<()> {
+    ensure_codex_config_len(next_bytes, "codex config backup")?;
     let Some(backup_path) = super::cli_proxy::backup_file_path_for_enabled_manifest(
         app,
         "codex",
@@ -66,7 +87,7 @@ pub fn codex_config_get<R: tauri::Runtime>(
         .to_path_buf();
     let follow_path = codex_paths::codex_home_dir_follow_env_or_default(app)?.join("config.toml");
     let follow_dir = follow_path.parent().unwrap_or(Path::new("")).to_path_buf();
-    let bytes = read_optional_file(&path)?;
+    let bytes = read_optional_codex_config_file(&path)?;
 
     let can_open_config_dir = crate::app_paths::home_dir(app)
         .ok()
@@ -98,7 +119,7 @@ pub fn codex_config_toml_get_raw<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> crate::shared::error::AppResult<CodexConfigTomlState> {
     let path = codex_paths::codex_config_toml_path(app)?;
-    let bytes = read_optional_file(&path)?;
+    let bytes = read_optional_codex_config_file(&path)?;
     let exists = bytes.is_some();
 
     let toml = match bytes {
@@ -124,6 +145,7 @@ pub fn codex_config_toml_set_raw<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     mut toml: String,
 ) -> crate::shared::error::AppResult<CodexConfigState> {
+    ensure_codex_config_len(toml.as_bytes(), "codex config.toml")?;
     let validation = validate_codex_config_toml_raw(&toml);
     if !validation.ok {
         let err = validation.error.unwrap_or(CodexConfigTomlValidationError {
@@ -144,6 +166,7 @@ pub fn codex_config_toml_set_raw<R: tauri::Runtime>(
     if !toml.ends_with('\n') {
         toml.push('\n');
     }
+    ensure_codex_config_len(toml.as_bytes(), "codex config.toml")?;
 
     let path = codex_paths::codex_config_toml_path(app)?;
     if path.exists() && is_symlink(&path)? {
@@ -172,8 +195,9 @@ pub fn codex_config_set<R: tauri::Runtime>(
         .into());
     }
 
-    let current = read_optional_file(&path)?;
+    let current = read_optional_codex_config_file(&path)?;
     let next = patch_config_toml(current, patch)?;
+    ensure_codex_config_len(&next, "codex config.toml")?;
     let _ = write_file_atomic_if_changed(&path, &next)?;
     sync_codex_cli_proxy_backup_if_enabled(app, &next)?;
     codex_config_get(app)

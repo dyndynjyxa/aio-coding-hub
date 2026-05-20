@@ -6,6 +6,74 @@ export type UseWindowForegroundOptions = {
   throttleMs?: number;
 };
 
+type RefBox<T> = {
+  current: T;
+};
+
+type ForegroundSubscriber = {
+  onForegroundRef: RefBox<() => void>;
+  throttleMsRef: RefBox<number>;
+  lastFiredAtMsRef: RefBox<number>;
+};
+
+const foregroundSubscribers = new Set<ForegroundSubscriber>();
+let foregroundListenersInstalled = false;
+
+function maybeFireSubscriber(subscriber: ForegroundSubscriber) {
+  const now = Date.now();
+  const throttle = subscriber.throttleMsRef.current;
+  if (Number.isFinite(throttle) && throttle > 0) {
+    const elapsed = now - subscriber.lastFiredAtMsRef.current;
+    if (elapsed >= 0 && elapsed < throttle) return;
+  }
+  subscriber.lastFiredAtMsRef.current = now;
+  subscriber.onForegroundRef.current();
+}
+
+function emitForeground() {
+  for (const subscriber of Array.from(foregroundSubscribers)) {
+    if (foregroundSubscribers.has(subscriber)) {
+      maybeFireSubscriber(subscriber);
+    }
+  }
+}
+
+function handleFocus() {
+  emitForeground();
+}
+
+function handleVisibilityChange() {
+  if (typeof document === "undefined" || document.visibilityState === "visible") {
+    emitForeground();
+  }
+}
+
+function installForegroundListeners() {
+  if (
+    foregroundListenersInstalled ||
+    typeof window === "undefined" ||
+    typeof document === "undefined"
+  ) {
+    return;
+  }
+  window.addEventListener("focus", handleFocus);
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+  foregroundListenersInstalled = true;
+}
+
+function uninstallForegroundListeners() {
+  if (
+    !foregroundListenersInstalled ||
+    typeof window === "undefined" ||
+    typeof document === "undefined"
+  ) {
+    return;
+  }
+  window.removeEventListener("focus", handleFocus);
+  document.removeEventListener("visibilitychange", handleVisibilityChange);
+  foregroundListenersInstalled = false;
+}
+
 export function useWindowForeground({
   enabled,
   onForeground,
@@ -26,33 +94,19 @@ export function useWindowForeground({
   useEffect(() => {
     if (!enabled) return;
 
-    function maybeFire() {
-      const now = Date.now();
-      const throttle = throttleMsRef.current;
-      if (Number.isFinite(throttle) && throttle > 0) {
-        const elapsed = now - lastFiredAtMsRef.current;
-        if (elapsed >= 0 && elapsed < throttle) return;
-      }
-      lastFiredAtMsRef.current = now;
-      onForegroundRef.current();
-    }
-
-    function handleFocus() {
-      maybeFire();
-    }
-
-    function handleVisibilityChange() {
-      if (document.visibilityState === "visible") {
-        maybeFire();
-      }
-    }
-
-    window.addEventListener("focus", handleFocus);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+    const subscriber: ForegroundSubscriber = {
+      onForegroundRef,
+      throttleMsRef,
+      lastFiredAtMsRef,
+    };
+    foregroundSubscribers.add(subscriber);
+    installForegroundListeners();
 
     return () => {
-      window.removeEventListener("focus", handleFocus);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      foregroundSubscribers.delete(subscriber);
+      if (foregroundSubscribers.size === 0) {
+        uninstallForegroundListeners();
+      }
     };
   }, [enabled]);
 }

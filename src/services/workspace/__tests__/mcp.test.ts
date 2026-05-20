@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
 import {
+  MCP_IMPORT_MAX_SERVERS,
+  MCP_PARSE_JSON_MAX_CHARS,
   type McpImportReport,
   type McpImportServer,
   type McpParseResult,
@@ -13,6 +15,9 @@ import {
   mcpServerSetEnabled,
   mcpServerUpsert,
   mcpServersList,
+  normalizeMcpImportServers,
+  validateMcpServerId,
+  validateMcpWorkspaceId,
 } from "../mcp";
 
 vi.mock("../../../generated/bindings", async () => {
@@ -149,14 +154,16 @@ describe("services/workspace/mcp", () => {
       serverKey: "fetch",
       name: "Fetch",
       transport: "stdio",
+      command: "npx",
+      args: ["-y"],
     });
     expect(commands.mcpServerUpsert).toHaveBeenNthCalledWith(1, {
       serverId: null,
       serverKey: "fetch",
       name: "Fetch",
       transport: "stdio",
-      command: null,
-      args: [],
+      command: "npx",
+      args: ["-y"],
       env: {
         preserveKeys: [],
         replace: {},
@@ -208,5 +215,158 @@ describe("services/workspace/mcp", () => {
       ],
     });
     expect(report.updated).toBe(1);
+  });
+
+  it("normalizes mcp import servers before IPC", () => {
+    expect(
+      normalizeMcpImportServers([
+        makeMcpImportServer({
+          server_key: " fetch ",
+          name: " Fetch ",
+          transport: "stdio",
+          command: " npx ",
+          args: [" -y ", " @modelcontextprotocol/server-fetch "],
+          env: { " TOKEN ": " secret " },
+          cwd: " /tmp ",
+          url: " http://ignored.example ",
+          headers: { Authorization: "ignored" },
+        }),
+      ])
+    ).toEqual([
+      {
+        server_key: "fetch",
+        name: "Fetch",
+        transport: "stdio",
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-fetch"],
+        env: { TOKEN: " secret " },
+        cwd: "/tmp",
+        url: null,
+        headers: {},
+        enabled: true,
+      },
+    ]);
+
+    expect(
+      normalizeMcpImportServers([
+        makeMcpImportServer({
+          server_key: " remote ",
+          name: " Remote ",
+          transport: "sse",
+          command: "ignored",
+          args: ["ignored"],
+          env: { IGNORED: "1" },
+          cwd: "/ignored",
+          url: " https://example.com/mcp/sse ",
+          headers: { " Authorization ": "Bearer token" },
+        }),
+      ])
+    ).toEqual([
+      {
+        server_key: "remote",
+        name: "Remote",
+        transport: "sse",
+        command: null,
+        args: [],
+        env: {},
+        cwd: null,
+        url: "https://example.com/mcp/sse",
+        headers: { Authorization: "Bearer token" },
+        enabled: true,
+      },
+    ]);
+  });
+
+  it("rejects invalid ids and oversized import batches before invoking generated commands", async () => {
+    expect(validateMcpWorkspaceId(7)).toBe(7);
+    expect(validateMcpServerId(9)).toBe(9);
+    expect(() => validateMcpWorkspaceId(0)).toThrow("SEC_INVALID_INPUT");
+    expect(() => validateMcpServerId(Number.NaN)).toThrow("SEC_INVALID_INPUT");
+
+    await expect(mcpServersList(0)).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(
+      mcpServerSetEnabled({ workspaceId: 1, serverId: 0, enabled: true })
+    ).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(mcpServerDelete(Number.NaN)).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(mcpImportFromWorkspaceCli(-1)).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(mcpParseJson("   ")).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(mcpParseJson("x".repeat(MCP_PARSE_JSON_MAX_CHARS + 1))).rejects.toThrow(
+      "SEC_INVALID_INPUT"
+    );
+    await expect(
+      mcpServerUpsert({
+        serverId: 0,
+        serverKey: "fetch",
+        name: "Fetch",
+        transport: "stdio",
+        command: "npx",
+      })
+    ).rejects.toThrow("SEC_INVALID_INPUT");
+
+    const tooManyServers = Array.from({ length: MCP_IMPORT_MAX_SERVERS + 1 }, (_, index) =>
+      makeMcpImportServer({ server_key: `fetch-${index}`, name: `Fetch ${index}` })
+    );
+    await expect(mcpImportServers({ workspaceId: 1, servers: tooManyServers })).rejects.toThrow(
+      "SEC_INVALID_INPUT"
+    );
+
+    expect(commands.mcpServersList).not.toHaveBeenCalledWith({ workspaceId: 0 });
+    expect(commands.mcpServerSetEnabled).not.toHaveBeenCalledWith({
+      workspaceId: 1,
+      serverId: 0,
+      enabled: true,
+    });
+    expect(commands.mcpServerDelete).not.toHaveBeenCalledWith({ serverId: Number.NaN });
+    expect(commands.mcpImportFromWorkspaceCli).not.toHaveBeenCalledWith({ workspaceId: -1 });
+    expect(commands.mcpParseJson).not.toHaveBeenCalledWith({ jsonText: "" });
+    expect(commands.mcpImportServers).not.toHaveBeenCalledWith(
+      expect.objectContaining({ servers: tooManyServers })
+    );
+  });
+
+  it("preserves sse transport when upserting remote mcp servers", async () => {
+    vi.mocked(commands.mcpServerUpsert).mockResolvedValueOnce({
+      status: "ok",
+      data: makeMcpServerSummary({
+        id: 8,
+        server_key: "remote",
+        name: "Remote",
+        transport: "sse",
+        url: "https://example.com/mcp/sse",
+        header_keys: ["Authorization"],
+      }),
+    });
+
+    const saved = await mcpServerUpsert({
+      serverKey: " remote ",
+      name: " Remote ",
+      transport: "sse",
+      command: "ignored",
+      args: ["ignored"],
+      env: { IGNORED: "1" },
+      cwd: "/ignored",
+      url: " https://example.com/mcp/sse ",
+      headers: { " Authorization ": "Bearer token" },
+    });
+
+    expect(commands.mcpServerUpsert).toHaveBeenLastCalledWith({
+      serverId: null,
+      serverKey: "remote",
+      name: "Remote",
+      transport: "sse",
+      command: null,
+      args: [],
+      env: {
+        preserveKeys: [],
+        replace: {},
+      },
+      cwd: null,
+      url: "https://example.com/mcp/sse",
+      headers: {
+        preserveKeys: [],
+        replace: { Authorization: "Bearer token" },
+      },
+    });
+    expect(saved.transport).toBe("sse");
   });
 });

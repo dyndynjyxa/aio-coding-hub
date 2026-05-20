@@ -13,6 +13,7 @@ const WRITE_BATCH_MAX: usize = 200;
 const INSERT_RETRY_MAX_ATTEMPTS: u32 = 6;
 const INSERT_RETRY_BASE_DELAY_MS: u64 = 20;
 const INSERT_RETRY_MAX_DELAY_MS: u64 = 400;
+const FAILURE_TIMESTAMPS_JSON_MAX_BYTES: usize = circuit_breaker::MAX_FAILURE_TIMESTAMPS * 24 + 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DbWriteErrorKind {
@@ -63,12 +64,42 @@ fn retry_delay(attempt_index: u32) -> Duration {
     Duration::from_millis(raw.min(INSERT_RETRY_MAX_DELAY_MS))
 }
 
+fn bounded_failure_timestamp_slice(timestamps: &[u64]) -> &[u64] {
+    let start = timestamps
+        .len()
+        .saturating_sub(circuit_breaker::MAX_FAILURE_TIMESTAMPS);
+    &timestamps[start..]
+}
+
 fn serialize_failure_timestamps(timestamps: &[u64]) -> String {
-    serde_json::to_string(timestamps).unwrap_or_else(|_| "[]".to_string())
+    serde_json::to_string(bounded_failure_timestamp_slice(timestamps))
+        .unwrap_or_else(|_| "[]".to_string())
+}
+
+fn is_inert_closed_state(item: &circuit_breaker::CircuitPersistedState) -> bool {
+    item.provider_id > 0
+        && item.state == circuit_breaker::CircuitState::Closed
+        && item.failure_timestamps.is_empty()
+        && item.half_open_success_count == 0
+        && item.open_until.is_none()
 }
 
 fn deserialize_failure_timestamps(raw: &str) -> Vec<u64> {
-    serde_json::from_str(raw).unwrap_or_default()
+    if raw.len() > FAILURE_TIMESTAMPS_JSON_MAX_BYTES {
+        tracing::warn!(
+            bytes = raw.len(),
+            max_bytes = FAILURE_TIMESTAMPS_JSON_MAX_BYTES,
+            "ignoring oversized circuit breaker failure timestamp history"
+        );
+        return Vec::new();
+    }
+
+    let mut timestamps: Vec<u64> = serde_json::from_str(raw).unwrap_or_default();
+    if timestamps.len() > circuit_breaker::MAX_FAILURE_TIMESTAMPS {
+        let excess = timestamps.len() - circuit_breaker::MAX_FAILURE_TIMESTAMPS;
+        timestamps.drain(..excess);
+    }
+    timestamps
 }
 
 pub fn start_buffered_writer(
@@ -161,6 +192,23 @@ fn insert_batch_once(
 
     {
         let mut stmt = tx
+            .prepare_cached("DELETE FROM provider_circuit_breakers WHERE provider_id = ?1")
+            .map_err(|e| {
+                DbWriteError::from_rusqlite("failed to prepare circuit breaker delete", e)
+            })?;
+
+        for item in latest_by_provider.values() {
+            if !is_inert_closed_state(item) {
+                continue;
+            }
+            stmt.execute(params![item.provider_id]).map_err(|e| {
+                DbWriteError::from_rusqlite("failed to delete inert provider_circuit_breaker", e)
+            })?;
+        }
+    }
+
+    {
+        let mut stmt = tx
             .prepare_cached(
                 r#"
 INSERT INTO provider_circuit_breakers (
@@ -186,14 +234,19 @@ ON CONFLICT(provider_id) DO UPDATE SET
             })?;
 
         for item in latest_by_provider.values() {
+            if is_inert_closed_state(item) {
+                continue;
+            }
+
             let updated_at = if item.updated_at > 0 {
                 item.updated_at
             } else {
                 now_unix_seconds()
             };
 
-            let timestamps_json = serialize_failure_timestamps(&item.failure_timestamps);
-            let failure_count = item.failure_timestamps.len().min(u32::MAX as usize) as i64;
+            let bounded_timestamps = bounded_failure_timestamp_slice(&item.failure_timestamps);
+            let timestamps_json = serialize_failure_timestamps(bounded_timestamps);
+            let failure_count = bounded_timestamps.len().min(u32::MAX as usize) as i64;
 
             stmt.execute(params![
                 item.provider_id,
@@ -258,6 +311,9 @@ pub fn load_all(
     let mut items = HashMap::new();
     for row in rows {
         let item = row.map_err(|e| db_err!("failed to read circuit breaker state: {e}"))?;
+        if is_inert_closed_state(&item) {
+            continue;
+        }
         items.insert(item.provider_id, item);
     }
 
@@ -296,4 +352,183 @@ pub fn delete_by_provider_ids(
     let conn = db.open_connection()?;
     conn.execute(&sql, params_from_iter(ids.iter()))
         .map_err(|e| db_err!("failed to delete circuit breaker states: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn init_test_db() -> (tempfile::TempDir, db::Db) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("provider_circuit_breakers.db");
+        let db = db::init_for_tests(&db_path).expect("init db");
+        (dir, db)
+    }
+
+    fn insert_test_provider(db: &db::Db, provider_id: i64) {
+        let conn = db.open_connection().expect("open db");
+        conn.execute(
+            r#"
+            INSERT INTO providers(
+              id,
+              cli_key,
+              name,
+              base_url,
+              api_key_plaintext,
+              enabled,
+              priority,
+              created_at,
+              updated_at,
+              sort_order,
+              cost_multiplier,
+              base_urls_json,
+              base_url_mode,
+              supported_models_json,
+              model_mapping_json
+            ) VALUES (?1, 'test-cli', ?2, 'https://example.test', '', 1, 100, 1, 1, 0, 1.0, '[]', 'order', '{}', '{}')
+            "#,
+            params![provider_id, format!("provider-{provider_id}")],
+        )
+        .expect("insert provider");
+    }
+
+    fn oversized_timestamps() -> Vec<u64> {
+        (0..(circuit_breaker::MAX_FAILURE_TIMESTAMPS + 3))
+            .map(|value| value as u64)
+            .collect()
+    }
+
+    #[test]
+    fn deserialize_failure_timestamps_keeps_most_recent_capped_entries() {
+        let raw = serde_json::to_string(&oversized_timestamps()).expect("serialize timestamps");
+
+        let timestamps = deserialize_failure_timestamps(&raw);
+
+        assert_eq!(timestamps.len(), circuit_breaker::MAX_FAILURE_TIMESTAMPS);
+        assert_eq!(timestamps.first().copied(), Some(3));
+        assert_eq!(
+            timestamps.last().copied(),
+            Some((circuit_breaker::MAX_FAILURE_TIMESTAMPS + 2) as u64)
+        );
+    }
+
+    #[test]
+    fn deserialize_failure_timestamps_rejects_oversized_json_before_parse() {
+        let raw = format!("[{}]", "1,".repeat(FAILURE_TIMESTAMPS_JSON_MAX_BYTES));
+        assert!(raw.len() > FAILURE_TIMESTAMPS_JSON_MAX_BYTES);
+
+        let timestamps = deserialize_failure_timestamps(&raw);
+
+        assert!(timestamps.is_empty());
+    }
+
+    #[test]
+    fn serialize_failure_timestamps_writes_only_capped_entries() {
+        let raw = serialize_failure_timestamps(&oversized_timestamps());
+        let timestamps: Vec<u64> = serde_json::from_str(&raw).expect("parse serialized timestamps");
+
+        assert_eq!(timestamps.len(), circuit_breaker::MAX_FAILURE_TIMESTAMPS);
+        assert_eq!(timestamps.first().copied(), Some(3));
+    }
+
+    #[test]
+    fn load_all_skips_legacy_inert_closed_rows() {
+        let (_dir, db) = init_test_db();
+        insert_test_provider(&db, 1);
+        insert_test_provider(&db, 2);
+
+        let conn = db.open_connection().expect("open db");
+        conn.execute(
+            r#"
+            INSERT INTO provider_circuit_breakers(
+              provider_id,
+              state,
+              failure_count,
+              failure_timestamps_json,
+              half_open_success_count,
+              open_until,
+              updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "#,
+            params![
+                1_i64,
+                "CLOSED",
+                0_i64,
+                "[]",
+                0_i64,
+                Option::<i64>::None,
+                1_i64
+            ],
+        )
+        .expect("insert inert closed row");
+        conn.execute(
+            r#"
+            INSERT INTO provider_circuit_breakers(
+              provider_id,
+              state,
+              failure_count,
+              failure_timestamps_json,
+              half_open_success_count,
+              open_until,
+              updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "#,
+            params![
+                2_i64,
+                "CLOSED",
+                1_i64,
+                "[42]",
+                0_i64,
+                Option::<i64>::None,
+                1_i64
+            ],
+        )
+        .expect("insert active closed row");
+        drop(conn);
+
+        let loaded = load_all(&db).expect("load circuit states");
+
+        assert!(!loaded.contains_key(&1));
+        assert!(loaded.contains_key(&2));
+    }
+
+    #[test]
+    fn insert_batch_deletes_inert_closed_rows() {
+        let (_dir, db) = init_test_db();
+        insert_test_provider(&db, 7);
+
+        let open = circuit_breaker::CircuitPersistedState {
+            provider_id: 7,
+            state: circuit_breaker::CircuitState::Open,
+            failure_timestamps: vec![10],
+            half_open_success_count: 0,
+            open_until: Some(100),
+            updated_at: 10,
+        };
+        insert_batch_once(&db, &[open]).expect("insert open state");
+        assert!(load_all(&db).expect("load open state").contains_key(&7));
+
+        let inert_closed = circuit_breaker::CircuitPersistedState {
+            provider_id: 7,
+            state: circuit_breaker::CircuitState::Closed,
+            failure_timestamps: Vec::new(),
+            half_open_success_count: 0,
+            open_until: None,
+            updated_at: 20,
+        };
+        insert_batch_once(&db, &[inert_closed]).expect("delete inert closed state");
+
+        let loaded = load_all(&db).expect("load after delete");
+        assert!(!loaded.contains_key(&7));
+
+        let conn = db.open_connection().expect("open db");
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM provider_circuit_breakers WHERE provider_id = ?1",
+                params![7_i64],
+                |row| row.get(0),
+            )
+            .expect("count circuit rows");
+        assert_eq!(count, 0);
+    }
 }

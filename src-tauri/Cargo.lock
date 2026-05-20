@@ -76,6 +76,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.2",
+ "tower",
  "tracing",
  "tracing-appender",
  "tracing-log",

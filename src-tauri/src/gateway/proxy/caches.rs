@@ -4,6 +4,7 @@ use axum::http::StatusCode;
 use std::collections::HashMap;
 
 const RECENT_ERROR_CACHE_MAX_ENTRIES: usize = 512;
+const PROVIDER_BASE_URL_PING_CACHE_MAX_ENTRIES: usize = 1024;
 
 #[derive(Debug, Clone)]
 pub(super) struct CachedGatewayError {
@@ -60,7 +61,9 @@ impl RecentErrorCache {
     ) {
         self.prune_expired(now_unix);
 
-        if self.errors.len() >= RECENT_ERROR_CACHE_MAX_ENTRIES {
+        if self.errors.len() >= RECENT_ERROR_CACHE_MAX_ENTRIES
+            && !self.errors.contains_key(&fingerprint_key)
+        {
             if let Some((oldest_key, _)) = self
                 .errors
                 .iter()
@@ -132,14 +135,35 @@ pub(in crate::gateway) struct ProviderBaseUrlPingCache {
 }
 
 impl ProviderBaseUrlPingCache {
+    fn prune_expired(&mut self, now_unix_ms: u64) {
+        self.entries
+            .retain(|_, v| v.expires_at_unix_ms > now_unix_ms);
+    }
+
+    fn evict_oldest_if_full(&mut self, provider_id: i64) {
+        if self.entries.len() < PROVIDER_BASE_URL_PING_CACHE_MAX_ENTRIES {
+            return;
+        }
+        if self.entries.contains_key(&provider_id) {
+            return;
+        }
+        if let Some((oldest_provider_id, _)) = self
+            .entries
+            .iter()
+            .min_by_key(|(_, v)| v.expires_at_unix_ms)
+            .map(|(k, v)| (*k, v.expires_at_unix_ms))
+        {
+            self.entries.remove(&oldest_provider_id);
+        }
+    }
+
     pub(super) fn get_valid_best_base_url(
         &mut self,
         provider_id: i64,
         now_unix_ms: u64,
         base_urls: &[String],
     ) -> Option<String> {
-        self.entries
-            .retain(|_, v| v.expires_at_unix_ms > now_unix_ms);
+        self.prune_expired(now_unix_ms);
 
         let entry = self.entries.get(&provider_id)?;
         if entry.expires_at_unix_ms <= now_unix_ms {
@@ -160,7 +184,10 @@ impl ProviderBaseUrlPingCache {
         provider_id: i64,
         best_base_url: String,
         expires_at_unix_ms: u64,
+        now_unix_ms: u64,
     ) {
+        self.prune_expired(now_unix_ms);
+        self.evict_oldest_if_full(provider_id);
         self.entries.insert(
             provider_id,
             CachedProviderBaseUrlPing {
@@ -173,7 +200,10 @@ impl ProviderBaseUrlPingCache {
 
 #[cfg(test)]
 mod tests {
-    use super::{CachedGatewayError, RecentErrorCache};
+    use super::{
+        CachedGatewayError, ProviderBaseUrlPingCache, RecentErrorCache,
+        PROVIDER_BASE_URL_PING_CACHE_MAX_ENTRIES, RECENT_ERROR_CACHE_MAX_ENTRIES,
+    };
     use axum::http::StatusCode;
 
     fn cached_error(expires_at_unix: i64, fingerprint_debug: &str) -> CachedGatewayError {
@@ -233,5 +263,110 @@ mod tests {
 
         assert!(cache.get_error(110, 21, "fp-one").is_none());
         assert!(cache.get_error(110, 22, "fp-two").is_none());
+    }
+
+    #[test]
+    fn insert_error_updates_existing_key_without_evicting_another_entry() {
+        let mut cache = RecentErrorCache::default();
+        for key in 0..RECENT_ERROR_CACHE_MAX_ENTRIES {
+            cache.insert_error(
+                100,
+                key as u64,
+                cached_error(1_000 + key as i64, &format!("fp-{key}")),
+            );
+        }
+
+        let update_key = (RECENT_ERROR_CACHE_MAX_ENTRIES - 1) as u64;
+        cache.insert_error(100, update_key, cached_error(9_999, "fp-updated"));
+
+        assert_eq!(cache.errors.len(), RECENT_ERROR_CACHE_MAX_ENTRIES);
+        assert!(cache.errors.contains_key(&0));
+        assert_eq!(
+            cache
+                .errors
+                .get(&update_key)
+                .map(|entry| entry.fingerprint_debug.as_str()),
+            Some("fp-updated")
+        );
+    }
+
+    #[test]
+    fn base_url_ping_cache_returns_only_fresh_matching_urls() {
+        let mut cache = ProviderBaseUrlPingCache::default();
+        let base_url = "https://fast.example".to_string();
+
+        cache.put_best_base_url(1, base_url.clone(), 2000, 1000);
+
+        assert_eq!(
+            cache.get_valid_best_base_url(1, 1500, std::slice::from_ref(&base_url)),
+            Some(base_url.clone())
+        );
+        assert_eq!(
+            cache.get_valid_best_base_url(1, 1500, &["https://other.example".to_string()]),
+            None
+        );
+
+        cache.put_best_base_url(1, base_url.clone(), 2000, 1500);
+        assert_eq!(
+            cache.get_valid_best_base_url(1, 2000, std::slice::from_ref(&base_url)),
+            None
+        );
+    }
+
+    #[test]
+    fn base_url_ping_cache_prunes_expired_entries_on_write() {
+        let mut cache = ProviderBaseUrlPingCache::default();
+        let expired_url = "https://expired.example".to_string();
+        let fresh_url = "https://fresh.example".to_string();
+
+        cache.put_best_base_url(1, expired_url.clone(), 1000, 0);
+        cache.put_best_base_url(2, fresh_url.clone(), 3000, 1000);
+
+        assert_eq!(
+            cache.get_valid_best_base_url(1, 1000, std::slice::from_ref(&expired_url)),
+            None
+        );
+        assert_eq!(
+            cache.get_valid_best_base_url(2, 1000, std::slice::from_ref(&fresh_url)),
+            Some(fresh_url)
+        );
+    }
+
+    #[test]
+    fn base_url_ping_cache_evicts_oldest_entry_when_full() {
+        let mut cache = ProviderBaseUrlPingCache::default();
+
+        for provider_id in 0..PROVIDER_BASE_URL_PING_CACHE_MAX_ENTRIES {
+            cache.put_best_base_url(
+                provider_id as i64,
+                format!("https://p{provider_id}.example"),
+                10_000 + provider_id as u64,
+                0,
+            );
+        }
+
+        cache.put_best_base_url(
+            PROVIDER_BASE_URL_PING_CACHE_MAX_ENTRIES as i64,
+            "https://new.example".to_string(),
+            99_999,
+            0,
+        );
+
+        assert_eq!(
+            cache.get_valid_best_base_url(0, 1, &["https://p0.example".to_string()]),
+            None
+        );
+        assert_eq!(
+            cache.get_valid_best_base_url(1, 1, &["https://p1.example".to_string()]),
+            Some("https://p1.example".to_string())
+        );
+        assert_eq!(
+            cache.get_valid_best_base_url(
+                PROVIDER_BASE_URL_PING_CACHE_MAX_ENTRIES as i64,
+                1,
+                &["https://new.example".to_string()]
+            ),
+            Some("https://new.example".to_string())
+        );
     }
 }

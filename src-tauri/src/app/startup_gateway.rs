@@ -11,6 +11,7 @@ pub(crate) async fn start(
     let preferred_port = settings.preferred_port;
     let enable_cli_proxy_startup_recovery = settings.enable_cli_proxy_startup_recovery;
 
+    let _gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
     let status = match blocking::run("startup_gateway_autostart", {
         let app_handle = app_handle.clone();
         let db = db.clone();
@@ -45,11 +46,13 @@ pub(crate) async fn start(
 
 pub(crate) async fn sync_cli_proxy_after_autostart(
     app_handle: &tauri::AppHandle,
-    status: &crate::gateway::GatewayStatus,
+    _status: &crate::gateway::GatewayStatus,
 ) {
+    let _gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
+    let status = crate::app::gateway_runtime_access::app_gateway_status(app_handle);
     gateway_service::sync_cli_proxy_to_gateway(
         app_handle,
-        status,
+        &status,
         "cli_proxy_sync_enabled_after_autostart",
     )
     .await;

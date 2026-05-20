@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
-import { settingsGatewayRectifierSet } from "../settingsGatewayRectifier";
+import {
+  normalizeGatewayRectifierSettingsPatch,
+  settingsGatewayRectifierSet,
+} from "../settingsGatewayRectifier";
 
 vi.mock("../../../generated/bindings", async () => {
   const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
@@ -83,5 +86,21 @@ describe("services/settings/settingsGatewayRectifier", () => {
       responseFixerMaxJsonDepth: 8,
       responseFixerMaxFixSize: 4096,
     });
+  });
+
+  it("rejects malformed booleans and out-of-range response fixer bounds before generated commands", async () => {
+    expect(normalizeGatewayRectifierSettingsPatch(input)).toEqual(input);
+
+    await expect(
+      settingsGatewayRectifierSet({ ...input, enable_response_fixer: "yes" as any })
+    ).rejects.toThrow("enable_response_fixer must be a boolean");
+    await expect(
+      settingsGatewayRectifierSet({ ...input, response_fixer_max_json_depth: 0 })
+    ).rejects.toThrow("invalid response_fixer_max_json_depth=0");
+    await expect(
+      settingsGatewayRectifierSet({ ...input, response_fixer_max_fix_size: 16 * 1024 * 1024 + 1 })
+    ).rejects.toThrow("invalid response_fixer_max_fix_size=16777217");
+
+    expect(commands.settingsGatewayRectifierSet).not.toHaveBeenCalled();
   });
 });

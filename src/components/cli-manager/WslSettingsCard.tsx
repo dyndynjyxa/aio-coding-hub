@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { AppSettings, WslHostAddressMode } from "../../services/settings/settings";
 import { logToConsole } from "../../services/consoleLog";
+import { validateWslCustomHostAddress } from "../../services/settings/settingsValidation";
 import type { WslConfigureReport } from "../../services/app/wsl";
 import { listenDesktopEvent } from "../../services/desktop/event";
 import { useAppAboutQuery } from "../../query/appAbout";
@@ -171,18 +172,6 @@ export function WslSettingsCard({ available, saving, settings }: WslSettingsCard
     }
   }
 
-  function validateCustomHostAddress(value: string): string | null {
-    const trimmed = value.trim();
-    if (!trimmed) return "请输入 IP（例如 172.20.0.1）";
-    if (trimmed.includes("://") || trimmed.includes("/") || trimmed.includes("\\")) {
-      return "宿主机地址仅支持 IP（不要包含协议或路径）";
-    }
-    if (trimmed.includes(":")) {
-      return "宿主机地址不支持端口；请只填写 IP（例如 172.20.0.1）";
-    }
-    return null;
-  }
-
   async function commitHostAddressMode(next: WslHostAddressMode) {
     if (!available) return;
     if (saving || settingsMutating) return;
@@ -214,7 +203,7 @@ export function WslSettingsCard({ available, saving, settings }: WslSettingsCard
     const current = settings.wsl_custom_host_address.trim();
     if (trimmed === current) return;
 
-    const err = validateCustomHostAddress(trimmed);
+    const err = validateWslCustomHostAddress(trimmed);
     if (err) {
       toast(err);
       setCustomHostAddress(settings.wsl_custom_host_address);
@@ -530,7 +519,7 @@ export function WslSettingsCard({ available, saving, settings }: WslSettingsCard
             <div className="px-3 pb-3 space-y-2">
               <div className="text-xs text-slate-500 dark:text-slate-400">
                 当自动检测到的宿主机地址不可用（WSL 无法访问网关）时，可手动指定一个可用的
-                IP；修改后通常需要重启应用/网关后生效。
+                host/IP；修改后通常需要重启应用/网关后生效。
               </div>
 
               <SettingsRow label="生效宿主机地址">

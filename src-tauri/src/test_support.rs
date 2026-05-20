@@ -506,11 +506,38 @@ pub fn settings_set_via_command_json<R: tauri::Runtime>(
     next.failover_max_attempts_per_provider = update.failover_max_attempts_per_provider;
     next.failover_max_providers_to_try = update.failover_max_providers_to_try;
 
+    if let Some(value) = update.update_releases_url {
+        next.update_releases_url = value;
+    }
     if let Some(value) = update.gateway_listen_mode {
         next.gateway_listen_mode = value;
     }
     if let Some(value) = update.gateway_custom_listen_address {
         next.gateway_custom_listen_address = value;
+    }
+    if let Some(value) = update.wsl_host_address_mode {
+        next.wsl_host_address_mode = value;
+    }
+    if let Some(value) = update.wsl_custom_host_address {
+        next.wsl_custom_host_address = value;
+    }
+    if let Some(value) = update.cx2cc_fallback_model_opus {
+        next.cx2cc_fallback_model_opus = value;
+    }
+    if let Some(value) = update.cx2cc_fallback_model_sonnet {
+        next.cx2cc_fallback_model_sonnet = value;
+    }
+    if let Some(value) = update.cx2cc_fallback_model_haiku {
+        next.cx2cc_fallback_model_haiku = value;
+    }
+    if let Some(value) = update.cx2cc_fallback_model_main {
+        next.cx2cc_fallback_model_main = value;
+    }
+    if let Some(value) = update.cx2cc_model_reasoning_effort {
+        next.cx2cc_model_reasoning_effort = value;
+    }
+    if let Some(value) = update.cx2cc_service_tier {
+        next.cx2cc_service_tier = value;
     }
     if let Some(value) = update.upstream_proxy_enabled {
         next.upstream_proxy_enabled = value;
@@ -522,7 +549,15 @@ pub fn settings_set_via_command_json<R: tauri::Runtime>(
         next.upstream_proxy_username = value;
     }
 
+    next.update_releases_url = next.update_releases_url.trim().to_string();
     next.gateway_custom_listen_address = next.gateway_custom_listen_address.trim().to_string();
+    next.wsl_custom_host_address = next.wsl_custom_host_address.trim().to_string();
+    next.cx2cc_fallback_model_opus = next.cx2cc_fallback_model_opus.trim().to_string();
+    next.cx2cc_fallback_model_sonnet = next.cx2cc_fallback_model_sonnet.trim().to_string();
+    next.cx2cc_fallback_model_haiku = next.cx2cc_fallback_model_haiku.trim().to_string();
+    next.cx2cc_fallback_model_main = next.cx2cc_fallback_model_main.trim().to_string();
+    next.cx2cc_model_reasoning_effort = next.cx2cc_model_reasoning_effort.trim().to_string();
+    next.cx2cc_service_tier = next.cx2cc_service_tier.trim().to_string();
     next.upstream_proxy_url = next.upstream_proxy_url.trim().to_string();
     next.upstream_proxy_username = next.upstream_proxy_username.trim().to_string();
 
@@ -543,6 +578,7 @@ pub fn settings_set_via_command_json<R: tauri::Runtime>(
         );
     }
 
+    crate::settings::validate_bounds(&next)?;
     crate::gateway::http_client::validate_proxy_for_settings(&next)?;
     let persisted = crate::settings::write(app, &next)?;
     crate::gateway::http_client::sync_from_settings(&persisted)?;
@@ -737,6 +773,18 @@ pub fn sort_mode_active_set_json<R: tauri::Runtime>(
     let db = crate::infra::db::init(app)?;
     let row = crate::sort_modes::set_active(&db, cli_key, mode_id)?;
     serialize_json(row)
+}
+
+pub fn sort_mode_providers_set_order_json<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    mode_id: i64,
+    cli_key: &str,
+    ordered_provider_ids: Vec<i64>,
+) -> crate::shared::error::AppResult<serde_json::Value> {
+    let db = crate::infra::db::init(app)?;
+    let rows =
+        crate::sort_modes::set_mode_providers_order(&db, mode_id, cli_key, ordered_provider_ids)?;
+    serialize_json(rows)
 }
 
 // ---------------------------------------------------------------------------

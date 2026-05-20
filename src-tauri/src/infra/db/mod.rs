@@ -5,6 +5,7 @@ mod migrations;
 use crate::app_paths;
 use crate::shared::error::db_err;
 use crate::shared::error::AppResult;
+use crate::shared::fs::read_file_with_max_len;
 use crate::shared::time::now_unix_seconds;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
@@ -22,6 +23,7 @@ const PRAGMA_SYNCHRONOUS_DEFAULT: &str = "NORMAL";
 const PRAGMA_MMAP_SIZE_DEFAULT: i64 = 268_435_456;
 const DB_OPTIMIZE_STAMP_FILE_NAME: &str = "db_optimize.stamp";
 const DB_OPTIMIZE_MIN_INTERVAL_SECS: i64 = 24 * 60 * 60;
+const DB_OPTIMIZE_STAMP_MAX_BYTES: usize = 64;
 
 #[derive(Debug, Clone)]
 struct DbRuntimeConfig {
@@ -273,10 +275,7 @@ fn maybe_run_db_optimize<R: tauri::Runtime>(app: &tauri::AppHandle<R>, conn: &Co
         }
     };
 
-    let last_run = std::fs::read_to_string(&stamp_path)
-        .ok()
-        .and_then(|s| s.trim().parse::<i64>().ok())
-        .unwrap_or(0);
+    let last_run = read_db_optimize_stamp(&stamp_path);
 
     if last_run > 0 && now.saturating_sub(last_run) < DB_OPTIMIZE_MIN_INTERVAL_SECS {
         tracing::debug!(
@@ -301,6 +300,17 @@ fn maybe_run_db_optimize<R: tauri::Runtime>(app: &tauri::AppHandle<R>, conn: &Co
     }
 
     tracing::info!("sqlite optimize completed");
+}
+
+fn read_db_optimize_stamp(path: &std::path::Path) -> i64 {
+    read_file_with_max_len(path, DB_OPTIMIZE_STAMP_MAX_BYTES)
+        .ok()
+        .and_then(|bytes| {
+            std::str::from_utf8(&bytes)
+                .ok()
+                .and_then(|s| s.trim().parse::<i64>().ok())
+        })
+        .unwrap_or(0)
 }
 
 fn configure_connection(conn: &Connection, config: &DbRuntimeConfig) -> rusqlite::Result<()> {
@@ -433,5 +443,14 @@ mod tests {
         assert_eq!(cfg.pragma_mmap_size, PRAGMA_MMAP_SIZE_DEFAULT);
         assert_eq!(cfg.pragma_wal_autocheckpoint, None);
         assert_eq!(cfg.pragma_cache_size, None);
+    }
+
+    #[test]
+    fn db_optimize_stamp_rejects_oversized_marker() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join(DB_OPTIMIZE_STAMP_FILE_NAME);
+        std::fs::write(&path, vec![b'1'; DB_OPTIMIZE_STAMP_MAX_BYTES + 1]).expect("write stamp");
+
+        assert_eq!(read_db_optimize_stamp(&path), 0);
     }
 }

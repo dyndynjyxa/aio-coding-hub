@@ -2,6 +2,8 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderSummary } from "../../services/providers/providers";
 import {
+  providerOAuthFetchLimits,
+  providerOAuthStatus,
   providerClaudeTerminalLaunchCommand,
   providerDelete,
   providerTestAvailability,
@@ -11,15 +13,20 @@ import {
   providersReorder,
 } from "../../services/providers/providers";
 import {
+  fetchProviderOAuthStatus,
+  readProviderOAuthLimitsCache,
+  refreshProviderOAuthLimits,
+  useOAuthLimitsQuery,
   useProviderClaudeTerminalLaunchCommandMutation,
   useProviderDeleteMutation,
+  useProviderOAuthStatusQuery,
   useProviderSetEnabledMutation,
   useProviderTestAvailabilityMutation,
   useProviderUpsertMutation,
   useProvidersListQuery,
   useProvidersReorderMutation,
 } from "../providers";
-import { gatewayKeys, providersKeys } from "../keys";
+import { gatewayKeys, oauthLimitsKeys, providersKeys } from "../keys";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 
@@ -30,6 +37,8 @@ vi.mock("../../services/providers/providers", async () => {
   return {
     ...actual,
     providersList: vi.fn(),
+    providerOAuthStatus: vi.fn(),
+    providerOAuthFetchLimits: vi.fn(),
     providerUpsert: vi.fn(),
     providerSetEnabled: vi.fn(),
     providerDelete: vi.fn(),
@@ -91,6 +100,37 @@ describe("query/providers", () => {
     });
   });
 
+  it("useProvidersListQuery normalizes cliKey before cache key and service call", async () => {
+    setTauriRuntime();
+
+    vi.mocked(providersList).mockResolvedValue([]);
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useProvidersListQuery(" claude " as never), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+    });
+
+    expect(providersList).toHaveBeenCalledWith("claude");
+    expect(client.getQueryState(providersKeys.list("claude"))).toBeTruthy();
+    expect(client.getQueryState(providersKeys.list(" claude " as never))).toBeUndefined();
+  });
+
+  it("rejects invalid provider list cliKey before creating query adapters", () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    expect(() => renderHook(() => useProvidersListQuery("opencode" as never), { wrapper })).toThrow(
+      "SEC_INVALID_INPUT"
+    );
+    expect(providersList).not.toHaveBeenCalled();
+  });
+
   it("useProvidersListQuery enters error state when providersList rejects", async () => {
     setTauriRuntime();
 
@@ -116,6 +156,104 @@ describe("query/providers", () => {
     await Promise.resolve();
 
     expect(providersList).not.toHaveBeenCalled();
+  });
+
+  it("normalizes OAuth status providerId before cache key and service call", async () => {
+    setTauriRuntime();
+
+    const status = {
+      connected: true,
+      provider_type: "google",
+      email: "test@example.com",
+      expires_at: 1700000000,
+      has_refresh_token: true,
+    };
+    vi.mocked(providerOAuthStatus).mockResolvedValue(status);
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useProviderOAuthStatusQuery(7), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.data).toEqual(status);
+    });
+
+    expect(providerOAuthStatus).toHaveBeenCalledWith(7);
+    expect(client.getQueryState(providersKeys.oauthStatus(7))).toBeTruthy();
+  });
+
+  it("rejects invalid OAuth status providerId before creating query adapters", () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    expect(() => renderHook(() => useProviderOAuthStatusQuery(0), { wrapper })).toThrow(
+      "SEC_INVALID_INPUT"
+    );
+    expect(providerOAuthStatus).not.toHaveBeenCalled();
+    expect(client.getQueryState(providersKeys.oauthStatus(0))).toBeUndefined();
+  });
+
+  it("fetchProviderOAuthStatus normalizes providerId before cache key and service call", async () => {
+    setTauriRuntime();
+
+    const status = {
+      connected: false,
+      provider_type: null,
+      email: null,
+      expires_at: null,
+      has_refresh_token: false,
+    };
+    vi.mocked(providerOAuthStatus).mockResolvedValue(status);
+
+    const client = createTestQueryClient();
+
+    await expect(fetchProviderOAuthStatus(client as never, null)).resolves.toBeNull();
+    await expect(fetchProviderOAuthStatus(client as never, 9)).resolves.toEqual(status);
+    await expect(fetchProviderOAuthStatus(client as never, Number.NaN)).rejects.toThrow(
+      "SEC_INVALID_INPUT"
+    );
+
+    expect(providerOAuthStatus).toHaveBeenCalledWith(9);
+    expect(client.getQueryData(providersKeys.oauthStatus(9))).toEqual(status);
+    expect(client.getQueryState(providersKeys.oauthStatus(Number.NaN))).toBeUndefined();
+  });
+
+  it("normalizes OAuth limits providerId before cache reads, refreshes, and query calls", async () => {
+    setTauriRuntime();
+
+    const limits = {
+      limit_short_label: "5h",
+      limit_5h_text: "100 requests",
+      limit_weekly_text: null,
+      limit_5h_reset_at: 1700000000,
+      limit_weekly_reset_at: null,
+    };
+    vi.mocked(providerOAuthFetchLimits).mockResolvedValue(limits);
+
+    const client = createTestQueryClient();
+    client.setQueryData(oauthLimitsKeys.detail(11), limits);
+
+    expect(readProviderOAuthLimitsCache(client, 11)).toEqual(limits);
+    expect(() => readProviderOAuthLimitsCache(client, 0)).toThrow("SEC_INVALID_INPUT");
+
+    await expect(refreshProviderOAuthLimits(client, 11)).resolves.toEqual(limits);
+    await expect(refreshProviderOAuthLimits(client, 0)).rejects.toThrow("SEC_INVALID_INPUT");
+
+    const wrapper = createQueryWrapper(client);
+    const { result } = renderHook(() => useOAuthLimitsQuery(11, true), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.data).toEqual(limits);
+    });
+
+    expect(providerOAuthFetchLimits).toHaveBeenCalledWith(11);
+    expect(client.getQueryData(oauthLimitsKeys.detail(11))).toEqual(limits);
+    expect(() => renderHook(() => useOAuthLimitsQuery(0, false), { wrapper })).toThrow(
+      "SEC_INVALID_INPUT"
+    );
   });
 
   it("useProviderSetEnabledMutation updates cached providers list", async () => {
@@ -255,11 +393,12 @@ describe("query/providers", () => {
 
     const { result } = renderHook(() => useProviderDeleteMutation(), { wrapper });
     await act(async () => {
-      await result.current.mutateAsync({ cliKey: "claude", providerId: 1 });
+      await result.current.mutateAsync({ cliKey: " claude " as never, providerId: 1 });
     });
 
     expect(providerDelete).toHaveBeenCalledWith(1);
     expect(client.getQueryData(providersKeys.list("claude"))).toEqual([providers[1]]);
+    expect(client.getQueryData(providersKeys.list(" claude " as never))).toBeUndefined();
   });
 
   it("useProviderDeleteMutation is a no-op when service returns false", async () => {
@@ -315,11 +454,12 @@ describe("query/providers", () => {
 
     const { result } = renderHook(() => useProvidersReorderMutation(), { wrapper });
     await act(async () => {
-      await result.current.mutateAsync({ cliKey: "claude", orderedProviderIds: [2, 1] });
+      await result.current.mutateAsync({ cliKey: " claude " as never, orderedProviderIds: [2, 1] });
     });
 
     expect(providersReorder).toHaveBeenCalledWith("claude", [2, 1]);
     expect(client.getQueryData(providersKeys.list("claude"))).toEqual(next);
+    expect(client.getQueryData(providersKeys.list(" claude " as never))).toBeUndefined();
   });
 
   it("useProvidersReorderMutation is a no-op when service returns null", async () => {

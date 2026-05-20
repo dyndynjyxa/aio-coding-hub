@@ -9,7 +9,9 @@ use axum::http::StatusCode;
 pub(in crate::gateway::proxy::handler) struct RecursionGuardMiddleware;
 
 impl RecursionGuardMiddleware {
-    pub(in crate::gateway::proxy::handler) fn run(ctx: ProxyContext) -> MiddlewareAction {
+    pub(in crate::gateway::proxy::handler) fn run<R: tauri::Runtime>(
+        ctx: ProxyContext<R>,
+    ) -> MiddlewareAction<R> {
         if ctx.cli_key != "claude" || !is_internal_forwarded_request(&ctx.headers) {
             return MiddlewareAction::Continue(Box::new(ctx));
         }

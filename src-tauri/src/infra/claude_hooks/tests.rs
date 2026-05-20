@@ -127,3 +127,27 @@ fn groups_to_json_with_existing_preserves_unknown_hook_fields_and_entries() {
     assert_eq!(group["hooks"][4]["type"], "custom");
     assert_eq!(group["hooks"][4]["payload"]["position"], "after");
 }
+
+#[test]
+fn read_optional_claude_hooks_settings_file_rejects_oversized_file() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let path = temp.path().join("settings.json");
+    std::fs::write(&path, vec![b'x'; CLAUDE_HOOKS_SETTINGS_MAX_BYTES + 1]).expect("write settings");
+
+    let err = read_optional_claude_hooks_settings_file(&path)
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("too large"));
+}
+
+#[test]
+fn ensure_claude_hooks_settings_len_rejects_oversized_output() {
+    let bytes = vec![b'x'; CLAUDE_HOOKS_SETTINGS_MAX_BYTES + 1];
+
+    let err = ensure_claude_hooks_settings_len(&bytes, "claude/hooks settings.json")
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("claude/hooks settings.json too large"));
+}

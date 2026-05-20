@@ -1,10 +1,12 @@
 import { commands } from "../../generated/bindings";
 import type { AppSettings } from "./settings";
 import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
+import { normalizeBooleanSetting } from "./settingsPrimitiveValidation";
 
 export async function settingsCodexSessionIdCompletionSet(enable: boolean) {
+  const normalizedEnable = normalizeBooleanSetting(enable, "enableCodexSessionIdCompletion");
   const update = {
-    enableCodexSessionIdCompletion: enable,
+    enableCodexSessionIdCompletion: normalizedEnable,
   };
 
   return invokeGeneratedIpc<AppSettings>({

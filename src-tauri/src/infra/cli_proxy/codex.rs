@@ -1,13 +1,13 @@
 //! Codex-specific CLI proxy configuration helpers.
 
 use crate::shared::error::AppResult;
-use crate::shared::fs::{read_optional_file, write_file_atomic};
 use std::path::{Path, PathBuf};
 
 use super::{
     apply_proxy_config, build_manifest_from_captured, build_manifest_with_current_target_paths,
-    capture_current_target_state, restore_file_snapshots, snapshot_backup_files,
-    snapshot_target_files, write_captured_backups, write_manifest, CliProxyResult, PLACEHOLDER_KEY,
+    capture_current_target_state, read_cli_proxy_file, read_optional_cli_proxy_file,
+    restore_file_snapshots, snapshot_backup_files, snapshot_target_files, write_captured_backups,
+    write_cli_proxy_file_atomic, write_manifest, CliProxyResult, PLACEHOLDER_KEY,
 };
 
 pub(super) const CODEX_PROVIDER_KEY: &str = "aio";
@@ -32,11 +32,11 @@ pub(super) fn is_codex_proxy_target_state<R: tauri::Runtime>(app: &tauri::AppHan
         Err(_) => return false,
     };
 
-    let config = match std::fs::read_to_string(&config_path) {
-        Ok(content) => content,
+    let config = match read_cli_proxy_file(&config_path) {
+        Ok(content) => String::from_utf8_lossy(&content).to_string(),
         Err(_) => return false,
     };
-    let auth_bytes = match std::fs::read(&auth_path) {
+    let auth_bytes = match read_cli_proxy_file(&auth_path) {
         Ok(bytes) => bytes,
         Err(_) => return false,
     };
@@ -198,13 +198,8 @@ pub(super) fn merge_restore_codex_auth_json(
     const PROXY_INSERTED_KEYS: &[&str] = &["OPENAI_API_KEY", "auth_mode"];
     const PROXY_REMOVED_KEYS: &[&str] = &["tokens", "last_refresh"];
 
-    let current_bytes = read_optional_file(target_path)?;
-    let backup_bytes = std::fs::read(backup_path).map_err(|e| {
-        format!(
-            "failed to read backup {} for codex_auth_json: {e}",
-            backup_path.display()
-        )
-    })?;
+    let current_bytes = read_optional_cli_proxy_file(target_path)?;
+    let backup_bytes = read_cli_proxy_file(backup_path)?;
 
     let mut current: serde_json::Value = match current_bytes {
         Some(b) if !b.is_empty() => {
@@ -239,7 +234,7 @@ pub(super) fn merge_restore_codex_auth_json(
     let mut bytes = serde_json::to_vec_pretty(&current)
         .map_err(|e| format!("failed to serialize auth.json: {e}"))?;
     bytes.push(b'\n');
-    write_file_atomic(target_path, &bytes)?;
+    write_cli_proxy_file_atomic(target_path, &bytes)?;
     Ok(())
 }
 
@@ -250,13 +245,8 @@ pub(super) fn merge_restore_codex_config_toml(
     target_path: &Path,
     backup_path: &Path,
 ) -> AppResult<()> {
-    let current_bytes = read_optional_file(target_path)?;
-    let backup_bytes = std::fs::read(backup_path).map_err(|e| {
-        format!(
-            "failed to read backup {} for codex_config_toml: {e}",
-            backup_path.display()
-        )
-    })?;
+    let current_bytes = read_optional_cli_proxy_file(target_path)?;
+    let backup_bytes = read_cli_proxy_file(backup_path)?;
 
     let current_str = current_bytes
         .as_deref()
@@ -309,7 +299,7 @@ pub(super) fn merge_restore_codex_config_toml(
 
     let mut out = lines.join("\n");
     out.push('\n');
-    write_file_atomic(target_path, out.as_bytes())?;
+    write_cli_proxy_file_atomic(target_path, out.as_bytes())?;
     Ok(())
 }
 
@@ -727,8 +717,8 @@ pub(super) fn is_proxy_config_applied<R: tauri::Runtime>(
         Err(_) => return false,
     };
 
-    let config = match std::fs::read_to_string(&config_path) {
-        Ok(v) => v,
+    let config = match read_cli_proxy_file(&config_path) {
+        Ok(v) => String::from_utf8_lossy(&v).to_string(),
         Err(_) => return false,
     };
 
@@ -748,7 +738,7 @@ pub(super) fn is_proxy_config_applied<R: tauri::Runtime>(
         return false;
     }
 
-    let auth_bytes = match std::fs::read(&auth_path) {
+    let auth_bytes = match read_cli_proxy_file(&auth_path) {
         Ok(v) => v,
         Err(_) => return false,
     };

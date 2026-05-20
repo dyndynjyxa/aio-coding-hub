@@ -472,14 +472,18 @@ export function buildRequestRouteMeta(input: {
     };
   }
 
-  const totalHopAttempts = hops.reduce((sum, h) => sum + (h.attempts ?? 1), 0);
-  const skippedCount = Math.max(0, input.attemptCount - totalHopAttempts);
-  const hasRetry = hops.some((h) => (h.attempts ?? 1) > 1);
+  const skippedCount = hops
+    .filter((h) => h.skipped)
+    .reduce((sum, h) => sum + (h.attempts ?? 1), 0);
+  const activeAttemptCount = hops
+    .filter((h) => !h.skipped)
+    .reduce((sum, h) => sum + (h.attempts ?? 1), 0);
+  const hasRetry = hops.some((h) => !h.skipped && (h.attempts ?? 1) > 1);
 
   const summary = input.hasFailover
     ? `切换 ${input.attemptCount} 次后${input.status != null && input.status < 400 ? "成功" : "结束"}`
     : skippedCount > 0 && hasRetry
-      ? `跳过 ${skippedCount} 个候选，并重试 ${input.attemptCount} 次`
+      ? `跳过 ${skippedCount} 个候选，并重试 ${activeAttemptCount} 次`
       : skippedCount > 0
         ? `跳过 ${skippedCount} 个候选`
         : hasRetry

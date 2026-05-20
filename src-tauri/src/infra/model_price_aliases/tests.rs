@@ -75,3 +75,35 @@ fn resolves_longer_patterns_first_within_same_type() {
         Some("b")
     );
 }
+
+#[test]
+fn validate_aliases_rejects_too_many_rules() {
+    let rule = ModelPriceAliasRuleV1 {
+        cli_key: "claude".to_string(),
+        match_type: ModelPriceAliasMatchTypeV1::Exact,
+        pattern: "claude-opus-4-5".to_string(),
+        target_model: "claude-opus-4-5".to_string(),
+        enabled: true,
+    };
+    let aliases = ModelPriceAliasesV1 {
+        version: 1,
+        rules: vec![rule; ALIASES_RULES_MAX + 1],
+    };
+
+    let err = validate_aliases(aliases).unwrap_err().to_string();
+
+    assert!(err.contains("too many price alias rules"));
+}
+
+#[test]
+fn write_json_atomically_rejects_oversized_aliases_file() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let path = temp.path().join("price-aliases.json");
+
+    let err = write_json_atomically(&path, vec![b'x'; ALIASES_FILE_MAX_BYTES + 1])
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("price aliases file too large"));
+    assert!(!path.exists());
+}

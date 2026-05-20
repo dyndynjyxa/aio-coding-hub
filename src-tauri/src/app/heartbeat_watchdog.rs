@@ -22,6 +22,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::shared::error::AppError;
+use crate::shared::fs::read_file_with_max_len;
 
 const MAIN_WINDOW_LABEL: &str = "main";
 
@@ -43,6 +44,7 @@ const REBUILD_COOLDOWN: Duration = Duration::from_secs(120);
 /// the app to be in a restart storm and refuse to auto-recover.
 pub(crate) const RESTART_STORM_WINDOW: Duration = Duration::from_secs(30);
 const RESTART_MARKER_FILENAME: &str = "restart_marker";
+const RESTART_MARKER_MAX_BYTES: usize = 64;
 
 #[derive(Debug, Clone, Copy, Serialize)]
 struct HeartbeatPayload {
@@ -257,7 +259,7 @@ pub(crate) fn install(app: &tauri::AppHandle) {
 
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        let mut interval = tokio::time::interval(HEARTBEAT_INTERVAL);
+        let mut interval = heartbeat_interval();
         // First tick is immediate; skip it to avoid double fire at startup.
         interval.tick().await;
         // Counter used to probe the WebView at reduced frequency when it is marked dead.
@@ -287,6 +289,12 @@ pub(crate) fn install(app: &tauri::AppHandle) {
             check_and_recover_if_needed(&app).await;
         }
     });
+}
+
+fn heartbeat_interval() -> tokio::time::Interval {
+    let mut interval = tokio::time::interval(HEARTBEAT_INTERVAL);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    interval
 }
 
 async fn check_and_recover_if_needed(app: &tauri::AppHandle) {
@@ -568,10 +576,15 @@ fn is_restart_storm(app: &tauri::AppHandle) -> bool {
 
 fn read_restart_marker_age_ms(app: &tauri::AppHandle) -> Option<u64> {
     let path = restart_marker_path(app)?;
-    let content = std::fs::read_to_string(&path).ok()?;
-    let marker_ts: u64 = content.trim().parse().ok()?;
+    let marker_ts = read_restart_marker_timestamp(&path)?;
     let now = now_unix_millis();
     Some(now.saturating_sub(marker_ts))
+}
+
+fn read_restart_marker_timestamp(path: &std::path::Path) -> Option<u64> {
+    let bytes = read_file_with_max_len(path, RESTART_MARKER_MAX_BYTES).ok()?;
+    let content = std::str::from_utf8(&bytes).ok()?;
+    content.trim().parse().ok()
 }
 
 /// Called at startup to check and clear the restart marker.
@@ -708,6 +721,14 @@ mod tests {
         assert_eq!(recovery_backoff_delay(100), Duration::from_secs(300));
     }
 
+    #[tokio::test]
+    async fn heartbeat_interval_delays_missed_ticks() {
+        assert_eq!(
+            heartbeat_interval().missed_tick_behavior(),
+            tokio::time::MissedTickBehavior::Delay
+        );
+    }
+
     #[test]
     fn should_trip_circuit_triggers_at_threshold() {
         assert!(!should_trip_circuit(RECOVERY_CIRCUIT_THRESHOLD - 1));
@@ -819,5 +840,14 @@ mod tests {
         // Pong clears it.
         state.record_pong();
         assert!(!state.recovery_in_flight.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn restart_marker_timestamp_rejects_oversized_marker() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("restart_marker");
+        std::fs::write(&path, vec![b'1'; RESTART_MARKER_MAX_BYTES + 1]).expect("write marker");
+
+        assert_eq!(read_restart_marker_timestamp(&path), None);
     }
 }

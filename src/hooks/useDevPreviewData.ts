@@ -1,13 +1,19 @@
 import { useMemo, useSyncExternalStore } from "react";
+import { emitListenerSnapshot } from "../utils/listeners";
 
 const STORAGE_KEY_DEV_PREVIEW_ENABLED = "devPreview.enabled";
 
 type Listener = () => void;
 
 const listeners = new Set<Listener>();
+let storageListenerInstalled = false;
 
 function emit() {
-  for (const listener of listeners) listener();
+  emitListenerSnapshot(listeners, (listener) => listener());
+}
+
+function canUseWindow() {
+  return typeof window !== "undefined";
 }
 
 function canUseDevPreview() {
@@ -18,7 +24,7 @@ function readDevPreviewEnabled() {
   if (!canUseDevPreview()) return false;
 
   try {
-    return localStorage.getItem(STORAGE_KEY_DEV_PREVIEW_ENABLED) === "1";
+    return window.localStorage.getItem(STORAGE_KEY_DEV_PREVIEW_ENABLED) === "1";
   } catch {
     return false;
   }
@@ -28,8 +34,40 @@ function writeDevPreviewEnabled(enabled: boolean) {
   if (!canUseDevPreview()) return;
 
   try {
-    localStorage.setItem(STORAGE_KEY_DEV_PREVIEW_ENABLED, enabled ? "1" : "0");
+    window.localStorage.setItem(STORAGE_KEY_DEV_PREVIEW_ENABLED, enabled ? "1" : "0");
   } catch {}
+}
+
+function handleStorageEvent(event: StorageEvent) {
+  if (event.key !== null && event.key !== STORAGE_KEY_DEV_PREVIEW_ENABLED) return;
+  emit();
+}
+
+function ensureStorageListener() {
+  if (!canUseWindow() || !canUseDevPreview() || storageListenerInstalled) return;
+  window.addEventListener("storage", handleStorageEvent);
+  storageListenerInstalled = true;
+}
+
+function teardownStorageListener() {
+  if (!canUseWindow() || !storageListenerInstalled) return;
+  window.removeEventListener("storage", handleStorageEvent);
+  storageListenerInstalled = false;
+}
+
+export function subscribeDevPreview(listener: Listener) {
+  const wasEmpty = listeners.size === 0;
+  listeners.add(listener);
+  if (wasEmpty && listeners.size > 0) {
+    ensureStorageListener();
+  }
+
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) {
+      teardownStorageListener();
+    }
+  };
 }
 
 export function getDevPreviewEnabled() {
@@ -46,14 +84,7 @@ export function toggleDevPreviewEnabled() {
 }
 
 export function useDevPreviewData() {
-  const enabled = useSyncExternalStore(
-    (listener) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    readDevPreviewEnabled,
-    () => false
-  );
+  const enabled = useSyncExternalStore(subscribeDevPreview, readDevPreviewEnabled, () => false);
 
   return useMemo(
     () => ({

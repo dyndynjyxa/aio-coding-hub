@@ -34,6 +34,14 @@ describe("services/desktop/notification", () => {
     expect(tauriInvoke).toHaveBeenCalledWith("desktop_notification_request_permission");
   });
 
+  it("rejects invalid backend permission states", async () => {
+    vi.mocked(tauriInvoke).mockResolvedValueOnce("unknown-state");
+
+    await expect(desktopNotificationRequestPermission()).rejects.toThrow(
+      "invalid desktop notification permission=unknown-state"
+    );
+  });
+
   it("sends notification payloads with optional sound only when provided", async () => {
     vi.mocked(tauriInvoke).mockResolvedValue(true as any);
 
@@ -61,6 +69,54 @@ describe("services/desktop/notification", () => {
         sound: null,
       },
     });
+  });
+
+  it("normalizes notification payloads before invoking the backend", async () => {
+    vi.mocked(tauriInvoke).mockResolvedValue(true as any);
+
+    await desktopNotificationNotify({
+      title: "  Build finished  ",
+      body: "  All checks passed  ",
+      sound: "  default  ",
+    });
+    await desktopNotificationNotify({
+      title: "  Build finished  ",
+      body: "  All checks passed  ",
+      sound: "   ",
+    });
+
+    expect(tauriInvoke).toHaveBeenNthCalledWith(1, "desktop_notification_notify", {
+      options: {
+        title: "Build finished",
+        body: "All checks passed",
+        sound: "default",
+      },
+    });
+    expect(tauriInvoke).toHaveBeenNthCalledWith(2, "desktop_notification_notify", {
+      options: {
+        title: "Build finished",
+        body: "All checks passed",
+        sound: null,
+      },
+    });
+  });
+
+  it("rejects invalid notification payloads before invoking the backend", async () => {
+    await expect(
+      desktopNotificationNotify({ title: "   ", body: "All checks passed" })
+    ).rejects.toThrow("title is required");
+    await expect(
+      desktopNotificationNotify({ title: "Build finished", body: "x".repeat(4097) })
+    ).rejects.toThrow("body is too long");
+    await expect(
+      desktopNotificationNotify({
+        title: "Build finished",
+        body: "All checks passed",
+        sound: "x".repeat(129),
+      })
+    ).rejects.toThrow("sound is too long");
+
+    expect(tauriInvoke).not.toHaveBeenCalled();
   });
 
   it("delegates custom notification sound playback to the backend", async () => {

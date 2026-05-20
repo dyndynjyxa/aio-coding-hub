@@ -42,6 +42,9 @@ pub(super) fn max_request_body_bytes() -> usize {
 pub(super) const LARGE_REQUEST_BODY_BYTES: usize = 10 * 1024 * 1024;
 
 pub(super) const MAX_INTROSPECTION_BODY_BYTES: usize = 2 * 1024 * 1024;
+pub(super) const MAX_DEBUG_BODY_PREVIEW_BYTES: usize = 4 * 1024;
+pub(super) const MAX_DEBUG_HEADER_VALUE_PREVIEW_BYTES: usize = 256;
+const FINGERPRINT_DEBUG_COMPONENT_MAX_BYTES: usize = 256;
 
 static TRACE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -106,6 +109,35 @@ fn normalize_query_for_fingerprint(query: Option<&str>) -> Option<String> {
     Some(pairs.join("&"))
 }
 
+fn utf8_prefix(value: &str, max_bytes: usize) -> &str {
+    if value.len() <= max_bytes {
+        return value;
+    }
+
+    let mut end = 0usize;
+    for (idx, ch) in value.char_indices() {
+        let next = idx + ch.len_utf8();
+        if next > max_bytes {
+            break;
+        }
+        end = next;
+    }
+    &value[..end]
+}
+
+fn fingerprint_debug_component(value: &str) -> Cow<'_, str> {
+    if value.len() <= FINGERPRINT_DEBUG_COMPONENT_MAX_BYTES {
+        return Cow::Borrowed(value);
+    }
+
+    let hash = hash_u64_of_bytes(value.as_bytes());
+    Cow::Owned(format!(
+        "{}...[len={},hash={hash:016x}]",
+        utf8_prefix(value, FINGERPRINT_DEBUG_COMPONENT_MAX_BYTES),
+        value.len()
+    ))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn compute_request_fingerprint(
     cli_key: &str,
@@ -128,12 +160,28 @@ pub(super) fn compute_request_fingerprint(
     let idem_hash = idempotency_key_hash
         .map(|v| format!("{v:016x}"))
         .unwrap_or_else(|| "-".to_string());
+    let cli_debug = fingerprint_debug_component(cli_key);
+    let method_debug = fingerprint_debug_component(method);
+    let path_debug = fingerprint_debug_component(path);
+    let query_debug = normalized_query
+        .as_deref()
+        .map(fingerprint_debug_component)
+        .unwrap_or_else(|| Cow::Borrowed("-"));
+    let session_debug = session_for_fingerprint
+        .map(fingerprint_debug_component)
+        .unwrap_or_else(|| Cow::Borrowed("-"));
+    let model_debug = requested_model
+        .map(fingerprint_debug_component)
+        .unwrap_or_else(|| Cow::Borrowed("-"));
 
     let debug = format!(
-        "v2|cli={cli_key}|method={method}|path={path}|query={}|session={}|model={}|idem_hash={idem_hash}|len={body_len}|body_hash={body_hash:016x}",
-        normalized_query.as_deref().unwrap_or("-"),
-        session_for_fingerprint.unwrap_or("-"),
-        requested_model.unwrap_or("-"),
+        "v3|cli={}|method={}|path={}|query={}|session={}|model={}|idem_hash={idem_hash}|len={body_len}|body_hash={body_hash:016x}",
+        cli_debug.as_ref(),
+        method_debug.as_ref(),
+        path_debug.as_ref(),
+        query_debug.as_ref(),
+        session_debug.as_ref(),
+        model_debug.as_ref(),
     );
 
     let mut hasher = DefaultHasher::new();
@@ -150,7 +198,17 @@ pub(super) fn compute_all_providers_unavailable_fingerprint(
     let mode = sort_mode_id
         .map(|v| v.to_string())
         .unwrap_or_else(|| "-".to_string());
-    let debug = format!("v1|gw_unavail|cli={cli_key}|mode={mode}|method={method}|path={path}");
+    let cli_debug = fingerprint_debug_component(cli_key);
+    let mode_debug = fingerprint_debug_component(&mode);
+    let method_debug = fingerprint_debug_component(method);
+    let path_debug = fingerprint_debug_component(path);
+    let debug = format!(
+        "v2|gw_unavail|cli={}|mode={}|method={}|path={}",
+        cli_debug.as_ref(),
+        mode_debug.as_ref(),
+        method_debug.as_ref(),
+        path_debug.as_ref()
+    );
 
     let mut hasher = DefaultHasher::new();
     debug.hash(&mut hasher);
@@ -208,6 +266,57 @@ pub(super) fn body_for_introspection<'a>(
         Ok(decoded) => Cow::Owned(decoded),
         Err(_) => Cow::Borrowed(body_bytes),
     }
+}
+
+pub(super) fn lossy_utf8_preview(bytes: &[u8], max_bytes: usize) -> String {
+    let preview_len = bytes.len().min(max_bytes);
+    let mut preview = String::from_utf8_lossy(&bytes[..preview_len]).to_string();
+    if preview_len < bytes.len() {
+        preview.push_str(&format!(
+            "\n... [truncated at {preview_len}/{} bytes]",
+            bytes.len()
+        ));
+    }
+    preview
+}
+
+fn is_sensitive_header_name(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    matches!(
+        name.as_str(),
+        "authorization"
+            | "proxy-authorization"
+            | "cookie"
+            | "set-cookie"
+            | "x-api-key"
+            | "api-key"
+            | "x-goog-api-key"
+            | "x-auth-token"
+            | "x-csrf-token"
+            | "x-xsrf-token"
+            | "access-token"
+            | "refresh-token"
+    ) || name.contains("api-key")
+        || name.contains("apikey")
+        || name.contains("token")
+        || name.contains("secret")
+        || name.contains("password")
+        || name.contains("auth-token")
+        || name.contains("session-token")
+}
+
+pub(super) fn redacted_headers_for_debug(headers: &HeaderMap) -> String {
+    let mut parts = Vec::with_capacity(headers.len());
+    for (name, value) in headers.iter() {
+        let name = name.as_str();
+        let value = if is_sensitive_header_name(name) {
+            "[redacted]".to_string()
+        } else {
+            lossy_utf8_preview(value.as_bytes(), MAX_DEBUG_HEADER_VALUE_PREVIEW_BYTES)
+        };
+        parts.push(format!("{name}: {value}"));
+    }
+    format!("[{}]", parts.join(", "))
 }
 
 pub(crate) fn url_decode_component(input: &str) -> String {
@@ -453,11 +562,13 @@ pub(super) fn ensure_cli_required_headers(cli_key: &str, headers: &mut HeaderMap
 #[cfg(test)]
 mod tests {
     use super::{
-        compute_request_fingerprint, inject_provider_auth, normalize_query_for_fingerprint,
-        parse_request_body_limit_mb, DEFAULT_MAX_REQUEST_BODY_MB, MAX_REQUEST_BODY_MB,
-        MIN_REQUEST_BODY_MB,
+        compute_all_providers_unavailable_fingerprint, compute_request_fingerprint,
+        inject_provider_auth, lossy_utf8_preview, normalize_query_for_fingerprint,
+        parse_request_body_limit_mb, redacted_headers_for_debug, DEFAULT_MAX_REQUEST_BODY_MB,
+        FINGERPRINT_DEBUG_COMPONENT_MAX_BYTES, MAX_DEBUG_HEADER_VALUE_PREVIEW_BYTES,
+        MAX_REQUEST_BODY_MB, MIN_REQUEST_BODY_MB,
     };
-    use axum::http::{header, HeaderMap};
+    use axum::http::{header, HeaderMap, HeaderValue};
 
     #[test]
     fn request_body_limit_uses_default_and_clamps_env_values() {
@@ -487,6 +598,63 @@ mod tests {
     fn normalize_query_keeps_order_when_duplicate_keys_exist() {
         let normalized = normalize_query_for_fingerprint(Some("a=2&a=1&b=3"));
         assert_eq!(normalized.as_deref(), Some("a=2&a=1&b=3"));
+    }
+
+    #[test]
+    fn lossy_utf8_preview_truncates_without_stringifying_full_body() {
+        assert_eq!(lossy_utf8_preview(b"hello", 16), "hello");
+
+        let preview = lossy_utf8_preview(b"abcdef", 3);
+        assert!(preview.starts_with("abc"));
+        assert!(preview.contains("truncated at 3/6 bytes"));
+        assert!(!preview.contains("def"));
+    }
+
+    #[test]
+    fn redacted_headers_for_debug_masks_sensitive_values() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer secret"),
+        );
+        headers.insert("x-api-key", HeaderValue::from_static("sk-secret"));
+        headers.insert("x-custom-token", HeaderValue::from_static("custom-secret"));
+        headers.insert(header::COOKIE, HeaderValue::from_static("sid=secret"));
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+
+        let debug = redacted_headers_for_debug(&headers);
+
+        assert!(debug.contains("authorization: [redacted]"));
+        assert!(debug.contains("x-api-key: [redacted]"));
+        assert!(debug.contains("x-custom-token: [redacted]"));
+        assert!(debug.contains("cookie: [redacted]"));
+        assert!(debug.contains("content-type: application/json"));
+        assert!(!debug.contains("Bearer secret"));
+        assert!(!debug.contains("sk-secret"));
+        assert!(!debug.contains("custom-secret"));
+        assert!(!debug.contains("sid=secret"));
+    }
+
+    #[test]
+    fn redacted_headers_for_debug_truncates_large_non_sensitive_values() {
+        let mut headers = HeaderMap::new();
+        let long_value = "x".repeat(MAX_DEBUG_HEADER_VALUE_PREVIEW_BYTES + 16);
+        headers.insert(
+            header::USER_AGENT,
+            HeaderValue::from_str(&long_value).expect("valid header value"),
+        );
+
+        let debug = redacted_headers_for_debug(&headers);
+
+        assert!(debug.contains("user-agent: "));
+        assert!(debug.contains(&format!(
+            "truncated at {}/{} bytes",
+            MAX_DEBUG_HEADER_VALUE_PREVIEW_BYTES,
+            MAX_DEBUG_HEADER_VALUE_PREVIEW_BYTES + 16
+        )));
     }
 
     #[test]
@@ -591,6 +759,56 @@ mod tests {
         );
 
         assert_ne!(left, right);
+    }
+
+    #[test]
+    fn fingerprint_debug_bounds_long_components_without_collapsing_identity() {
+        let long_path = format!("/v1/messages/{}", "p".repeat(2048));
+        let long_query_a = format!("q={}", "a".repeat(2048));
+        let long_query_b = format!("q={}", "b".repeat(2048));
+        let long_session = format!("session-{}", "s".repeat(2048));
+        let long_model = format!("model-{}", "m".repeat(2048));
+
+        let (left, left_debug) = compute_request_fingerprint(
+            "claude",
+            "POST",
+            &long_path,
+            Some(&long_query_a),
+            Some(&long_session),
+            Some(&long_model),
+            None,
+            b"{}",
+        );
+        let (right, right_debug) = compute_request_fingerprint(
+            "claude",
+            "POST",
+            &long_path,
+            Some(&long_query_b),
+            Some(&long_session),
+            Some(&long_model),
+            None,
+            b"{}",
+        );
+
+        assert_ne!(left, right);
+        assert_ne!(left_debug, right_debug);
+        assert!(left_debug.len() < FINGERPRINT_DEBUG_COMPONENT_MAX_BYTES * 8);
+        assert!(left_debug.contains("len="));
+        assert!(left_debug.contains("hash="));
+        assert!(!left_debug.contains(&"a".repeat(FINGERPRINT_DEBUG_COMPONENT_MAX_BYTES + 1)));
+    }
+
+    #[test]
+    fn unavailable_fingerprint_debug_bounds_long_path() {
+        let long_path = format!("/v1/messages/{}", "p".repeat(4096));
+        let (fingerprint, debug) =
+            compute_all_providers_unavailable_fingerprint("claude", Some(42), "POST", &long_path);
+
+        assert_ne!(fingerprint, 0);
+        assert!(debug.len() < FINGERPRINT_DEBUG_COMPONENT_MAX_BYTES * 3);
+        assert!(debug.contains("len="));
+        assert!(debug.contains("hash="));
+        assert!(!debug.contains(&"p".repeat(FINGERPRINT_DEBUG_COMPONENT_MAX_BYTES + 1)));
     }
 
     #[test]

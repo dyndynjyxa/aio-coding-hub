@@ -100,6 +100,13 @@ fn normalize_model_slot_truncates_long_names() {
     assert_eq!(result.as_ref().map(|s| s.len()), Some(MAX_MODEL_NAME_LEN));
 }
 
+#[test]
+fn normalize_model_slot_truncates_multibyte_without_panic() {
+    let long_name = "模".repeat(MAX_MODEL_NAME_LEN + 1);
+    let result = normalize_model_slot(Some(long_name)).expect("normalized model");
+    assert_eq!(result.chars().count(), MAX_MODEL_NAME_LEN);
+}
+
 // -- DailyResetMode::parse --
 
 #[test]
@@ -310,6 +317,25 @@ fn normalize_base_urls_rejects_invalid_url() {
     assert!(normalize_base_urls(vec!["not a url".to_string()]).is_err());
 }
 
+#[test]
+fn normalize_base_urls_rejects_too_many_urls() {
+    let urls: Vec<String> = (0..=MAX_PROVIDER_BASE_URLS)
+        .map(|idx| format!("https://api-{idx}.example.com"))
+        .collect();
+    let err = normalize_base_urls(urls).expect_err("too many urls");
+    assert!(err.to_string().contains("base_urls must contain at most"));
+}
+
+#[test]
+fn normalize_base_urls_rejects_overlong_url() {
+    let url = format!(
+        "https://example.com/{}",
+        "a".repeat(MAX_PROVIDER_BASE_URL_CHARS)
+    );
+    let err = normalize_base_urls(vec![url]).expect_err("overlong url");
+    assert!(err.to_string().contains("base_url must be at most"));
+}
+
 // -- base_urls_from_row --
 
 #[test]
@@ -363,6 +389,97 @@ fn claude_models_from_json_invalid_returns_default() {
 fn claude_models_from_json_empty_object() {
     let models = claude_models_from_json("{}");
     assert!(!models.has_any());
+}
+
+fn default_provider_params(name: &str) -> ProviderUpsertParams {
+    ProviderUpsertParams {
+        provider_id: None,
+        cli_key: "claude".to_string(),
+        name: name.to_string(),
+        base_urls: vec!["https://api.example.com".to_string()],
+        base_url_mode: ProviderBaseUrlMode::Order,
+        auth_mode: Some(ProviderAuthMode::ApiKey),
+        api_key: Some("sk-test".to_string()),
+        enabled: true,
+        cost_multiplier: 1.0,
+        priority: Some(100),
+        claude_models: None,
+        limit_5h_usd: None,
+        limit_daily_usd: None,
+        daily_reset_mode: Some(DailyResetMode::Fixed),
+        daily_reset_time: Some("00:00:00".to_string()),
+        limit_weekly_usd: None,
+        limit_monthly_usd: None,
+        limit_total_usd: None,
+        tags: None,
+        note: None,
+        source_provider_id: None,
+        bridge_type: None,
+        stream_idle_timeout_seconds: None,
+    }
+}
+
+#[test]
+fn upsert_accepts_unicode_note_at_character_limit() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("providers_note_limit.db");
+    let db = crate::db::init_for_tests(&db_path).expect("init db");
+
+    let mut params = default_provider_params("unicode-note-limit");
+    params.note = Some("注".repeat(MAX_PROVIDER_NOTE_CHARS));
+
+    let saved = upsert(&db, params).expect("save provider");
+    assert_eq!(saved.note.chars().count(), MAX_PROVIDER_NOTE_CHARS);
+}
+
+#[test]
+fn upsert_rejects_unicode_note_over_character_limit() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("providers_note_over_limit.db");
+    let db = crate::db::init_for_tests(&db_path).expect("init db");
+
+    let mut params = default_provider_params("unicode-note-over-limit");
+    params.note = Some("注".repeat(MAX_PROVIDER_NOTE_CHARS + 1));
+
+    let err = upsert(&db, params).expect_err("note over limit");
+    assert!(err.to_string().contains("note must be at most"));
+}
+
+#[test]
+fn upsert_oauth_provider_drops_submitted_base_urls() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("providers_oauth_base_urls.db");
+    let db = crate::db::init_for_tests(&db_path).expect("init db");
+
+    let mut params = default_provider_params("oauth-drops-base-urls");
+    params.auth_mode = Some(ProviderAuthMode::Oauth);
+    params.api_key = None;
+    params.base_urls = vec!["ftp://malicious.invalid".to_string()];
+
+    let saved = upsert(&db, params).expect("save oauth provider");
+    assert!(saved.base_urls.is_empty());
+}
+
+#[test]
+fn reorder_rejects_invalid_duplicate_and_oversized_provider_ids() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("providers_reorder_bounds.db");
+    let db = crate::db::init_for_tests(&db_path).expect("init db");
+
+    let saved = upsert(&db, default_provider_params("reorder-bound-p1")).expect("save provider");
+
+    let invalid = reorder(&db, "claude", vec![saved.id, 0]).expect_err("invalid provider id");
+    assert!(invalid.to_string().contains("invalid provider_id=0"));
+
+    let duplicate =
+        reorder(&db, "claude", vec![saved.id, saved.id]).expect_err("duplicate provider id");
+    assert!(duplicate.to_string().contains("duplicate provider_id"));
+
+    let oversized_ids: Vec<i64> = (1..=(MAX_PROVIDER_ORDER_IDS as i64 + 1)).collect();
+    let oversized = reorder(&db, "claude", oversized_ids).expect_err("too many provider ids");
+    assert!(oversized
+        .to_string()
+        .contains("ordered_provider_ids must contain at most"));
 }
 
 fn create_oauth_provider_for_cas_test(db: &crate::db::Db, name: &str) -> i64 {

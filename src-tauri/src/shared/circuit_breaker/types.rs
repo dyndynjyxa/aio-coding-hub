@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 pub(super) const FAILURE_WINDOW_SECS: u64 = 300;
 
 /// Hard cap on stored failure timestamps to prevent unbounded memory growth.
-pub(super) const MAX_FAILURE_TIMESTAMPS: usize = 256;
+pub(crate) const MAX_FAILURE_TIMESTAMPS: usize = 256;
 
 /// In HalfOpen state, this many consecutive successes are required to close the circuit.
 pub(super) const HALF_OPEN_SUCCESS_REQUIRED: u32 = 3;
@@ -144,11 +144,13 @@ impl ProviderHealth {
 }
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
 #[derive(Debug)]
 pub struct CircuitBreaker {
     pub(super) config: Mutex<CircuitBreakerConfig>,
     pub(super) health: Mutex<HashMap<i64, ProviderHealth>>,
     pub(super) persist_tx: Option<mpsc::Sender<CircuitPersistedState>>,
+    pub(super) persist_backlog: Arc<Mutex<HashMap<i64, CircuitPersistedState>>>,
+    pub(super) persist_backlog_flush_scheduled: Arc<AtomicBool>,
 }

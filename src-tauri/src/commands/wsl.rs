@@ -8,6 +8,9 @@ use crate::{blocking, gateway, settings, wsl};
 #[cfg(windows)]
 use tauri::Manager;
 
+const WSL_CONFIG_STATUS_MAX_DISTROS: usize = 64;
+const WSL_CONFIG_STATUS_DISTRO_MAX_CHARS: usize = 128;
+
 async fn detect_wsl_blocking(label: &'static str) -> Result<wsl::WslDetection, String> {
     blocking::run(
         label,
@@ -44,6 +47,44 @@ async fn resolve_wsl_host_blocking(
     .map_err(Into::into)
 }
 
+fn normalize_wsl_config_status_distros(
+    distros: Option<Vec<String>>,
+) -> Result<Option<Vec<String>>, String> {
+    let Some(distros) = distros else {
+        return Ok(None);
+    };
+
+    if distros.len() > WSL_CONFIG_STATUS_MAX_DISTROS {
+        return Err(format!(
+            "SEC_INVALID_INPUT: WSL distro list must contain at most {WSL_CONFIG_STATUS_MAX_DISTROS} entries"
+        ));
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    let mut normalized = Vec::new();
+    for raw in distros {
+        let distro = raw.trim();
+        if distro.is_empty() {
+            continue;
+        }
+        if distro.chars().any(char::is_control) {
+            return Err(
+                "SEC_INVALID_INPUT: WSL distro name contains control characters".to_string(),
+            );
+        }
+        if distro.chars().count() > WSL_CONFIG_STATUS_DISTRO_MAX_CHARS {
+            return Err(format!(
+                "SEC_INVALID_INPUT: WSL distro name is too long (max {WSL_CONFIG_STATUS_DISTRO_MAX_CHARS} chars)"
+            ));
+        }
+        if seen.insert(distro.to_string()) {
+            normalized.push(distro.to_string());
+        }
+    }
+
+    Ok(Some(normalized))
+}
+
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn wsl_detect() -> wsl::WslDetection {
@@ -73,6 +114,14 @@ pub(crate) async fn wsl_host_address_get() -> Option<String> {
 pub(crate) async fn wsl_config_status_get(
     distros: Option<Vec<String>>,
 ) -> Vec<wsl::WslDistroConfigStatus> {
+    let distros = match normalize_wsl_config_status_distros(distros) {
+        Ok(distros) => distros,
+        Err(err) => {
+            tracing::warn!("invalid WSL config-status distro filters: {err}");
+            return Vec::new();
+        }
+    };
+
     blocking::run(
         "wsl_config_status_get",
         move || -> crate::shared::error::AppResult<Vec<wsl::WslDistroConfigStatus>> {
@@ -135,6 +184,7 @@ pub(crate) async fn wsl_configure_clients(
     }
 
     let preferred_port = cfg.preferred_port;
+    let _gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
     let status = blocking::run("wsl_configure_clients_ensure_gateway", {
         let app = app.clone();
         let db = db.clone();
@@ -302,6 +352,76 @@ pub(crate) async fn wsl_auto_sync_core(app: &tauri::AppHandle) -> Result<(), Str
     crate::app::heartbeat_watchdog::gated_emit(app, "wsl:auto_config_result", &report);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_wsl_config_status_distros_keeps_none_for_auto_detect() {
+        assert_eq!(normalize_wsl_config_status_distros(None).unwrap(), None);
+    }
+
+    #[test]
+    fn normalize_wsl_config_status_distros_trims_dedupes_and_drops_empty_items() {
+        assert_eq!(
+            normalize_wsl_config_status_distros(Some(vec![
+                " Ubuntu ".to_string(),
+                "\t".to_string(),
+                "Ubuntu".to_string(),
+                "Debian".to_string(),
+            ]))
+            .unwrap(),
+            Some(vec!["Ubuntu".to_string(), "Debian".to_string()])
+        );
+    }
+
+    #[test]
+    fn normalize_wsl_config_status_distros_preserves_explicit_empty_filter() {
+        assert_eq!(
+            normalize_wsl_config_status_distros(Some(vec![" ".to_string()])).unwrap(),
+            Some(Vec::new())
+        );
+    }
+
+    #[test]
+    fn normalize_wsl_config_status_distros_rejects_oversized_lists() {
+        let err = normalize_wsl_config_status_distros(Some(vec![
+            "Ubuntu".to_string();
+            WSL_CONFIG_STATUS_MAX_DISTROS + 1
+        ]))
+        .expect_err("oversized distro list");
+
+        assert_eq!(
+            err,
+            "SEC_INVALID_INPUT: WSL distro list must contain at most 64 entries"
+        );
+    }
+
+    #[test]
+    fn normalize_wsl_config_status_distros_rejects_control_characters() {
+        let err = normalize_wsl_config_status_distros(Some(vec!["Ubu\nntu".to_string()]))
+            .expect_err("control character");
+
+        assert_eq!(
+            err,
+            "SEC_INVALID_INPUT: WSL distro name contains control characters"
+        );
+    }
+
+    #[test]
+    fn normalize_wsl_config_status_distros_rejects_oversized_names() {
+        let err = normalize_wsl_config_status_distros(Some(vec![
+            ":".repeat(WSL_CONFIG_STATUS_DISTRO_MAX_CHARS + 1)
+        ]))
+        .expect_err("oversized distro name");
+
+        assert_eq!(
+            err,
+            "SEC_INVALID_INPUT: WSL distro name is too long (max 128 chars)"
+        );
+    }
 }
 
 /// Debounced WSL sync trigger for MCP/Prompt/Skills changes.

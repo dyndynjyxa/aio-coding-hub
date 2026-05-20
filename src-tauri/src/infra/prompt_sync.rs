@@ -3,8 +3,8 @@
 use crate::app_paths;
 use crate::codex_paths;
 use crate::shared::fs::{
-    copy_dir_recursive_if_missing, copy_file_if_missing, read_optional_file, write_file_atomic,
-    write_file_atomic_if_changed,
+    copy_dir_recursive_if_missing, copy_file_if_missing, read_file_with_max_len,
+    read_optional_file_with_max_len, write_file_atomic, write_file_atomic_if_changed,
 };
 use crate::shared::time::now_unix_seconds;
 use serde::{Deserialize, Serialize};
@@ -13,6 +13,19 @@ use std::path::{Path, PathBuf};
 const MANIFEST_SCHEMA_VERSION: u32 = 1;
 const MANAGED_BY: &str = "aio-coding-hub";
 const LEGACY_APP_DOTDIR_NAMES: &[&str] = &[".aio-gateway", ".aio_gateway"];
+const PROMPT_SYNC_TARGET_MAX_BYTES: usize = 1024 * 1024;
+const PROMPT_SYNC_MANIFEST_MAX_BYTES: usize = 256 * 1024;
+
+fn ensure_prompt_sync_bytes_within_limit(
+    bytes: &[u8],
+    max_len: usize,
+    label: &str,
+) -> crate::shared::error::AppResult<()> {
+    if bytes.len() > max_len {
+        return Err(format!("SEC_INVALID_INPUT: {label} too large (max {max_len} bytes)").into());
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PromptSyncFileEntry {
@@ -128,7 +141,7 @@ pub fn read_target_bytes<R: tauri::Runtime>(
     cli_key: &str,
 ) -> crate::shared::error::AppResult<Option<Vec<u8>>> {
     let path = prompt_target_path(app, cli_key)?;
-    read_optional_file(&path)
+    read_optional_file_with_max_len(&path, PROMPT_SYNC_TARGET_MAX_BYTES)
 }
 
 pub fn restore_target_bytes<R: tauri::Runtime>(
@@ -138,7 +151,14 @@ pub fn restore_target_bytes<R: tauri::Runtime>(
 ) -> crate::shared::error::AppResult<()> {
     let path = prompt_target_path(app, cli_key)?;
     match bytes {
-        Some(content) => write_file_atomic(&path, &content),
+        Some(content) => {
+            ensure_prompt_sync_bytes_within_limit(
+                &content,
+                PROMPT_SYNC_TARGET_MAX_BYTES,
+                "prompt sync target restore",
+            )?;
+            write_file_atomic(&path, &content)
+        }
         None => {
             if path.exists() {
                 std::fs::remove_file(&path)
@@ -155,7 +175,7 @@ pub fn read_manifest_bytes<R: tauri::Runtime>(
 ) -> crate::shared::error::AppResult<Option<Vec<u8>>> {
     let root = prompt_sync_root_dir(app, cli_key)?;
     let path = prompt_sync_manifest_path(&root);
-    read_optional_file(&path)
+    read_optional_file_with_max_len(&path, PROMPT_SYNC_MANIFEST_MAX_BYTES)
 }
 
 pub fn restore_manifest_bytes<R: tauri::Runtime>(
@@ -166,7 +186,14 @@ pub fn restore_manifest_bytes<R: tauri::Runtime>(
     let root = prompt_sync_root_dir(app, cli_key)?;
     let path = prompt_sync_manifest_path(&root);
     match bytes {
-        Some(content) => write_file_atomic(&path, &content),
+        Some(content) => {
+            ensure_prompt_sync_bytes_within_limit(
+                &content,
+                PROMPT_SYNC_MANIFEST_MAX_BYTES,
+                "prompt sync manifest restore",
+            )?;
+            write_file_atomic(&path, &content)
+        }
         None => {
             if path.exists() {
                 std::fs::remove_file(&path)
@@ -190,7 +217,8 @@ fn read_manifest<R: tauri::Runtime>(
         }
     }
 
-    let Some(content) = read_optional_file(&path)? else {
+    let Some(content) = read_optional_file_with_max_len(&path, PROMPT_SYNC_MANIFEST_MAX_BYTES)?
+    else {
         return Ok(None);
     };
 
@@ -239,8 +267,7 @@ fn backup_for_enable<R: tauri::Runtime>(
 
     let existed = target_path.exists();
     let backup_rel = if existed {
-        let bytes = std::fs::read(&target_path)
-            .map_err(|e| format!("failed to read {}: {e}", target_path.display()))?;
+        let bytes = read_file_with_max_len(&target_path, PROMPT_SYNC_TARGET_MAX_BYTES)?;
         let backup_name = target_path
             .file_name()
             .and_then(|v| v.to_str())
@@ -314,8 +341,7 @@ fn restore_from_manifest<R: tauri::Runtime>(
             if !backup_path.exists() {
                 continue;
             }
-            let bytes = std::fs::read(&backup_path)
-                .map_err(|e| format!("failed to read backup {}: {e}", backup_path.display()))?;
+            let bytes = read_file_with_max_len(&backup_path, PROMPT_SYNC_TARGET_MAX_BYTES)?;
             write_file_atomic(&target_path, &bytes)?;
             return Ok(());
         }
@@ -323,7 +349,9 @@ fn restore_from_manifest<R: tauri::Runtime>(
         // No backup available. Keep current file content as-is (best-effort),
         // but store a safety snapshot to help users recover manually.
         if target_path.exists() {
-            if let Ok(bytes) = std::fs::read(&target_path) {
+            if let Ok(Some(bytes)) =
+                read_optional_file_with_max_len(&target_path, PROMPT_SYNC_TARGET_MAX_BYTES)
+            {
                 let safe_name = format!("{ts}_prompt_keep_current_no_backup");
                 let safe_path = safety_dir.join(safe_name);
                 let _ = write_file_atomic(&safe_path, &bytes);
@@ -340,7 +368,9 @@ fn restore_from_manifest<R: tauri::Runtime>(
 
     // If the file did not exist before enabling prompt sync, restore to "absent".
     // Safety copy current content before removal.
-    if let Ok(bytes) = std::fs::read(&target_path) {
+    if let Ok(Some(bytes)) =
+        read_optional_file_with_max_len(&target_path, PROMPT_SYNC_TARGET_MAX_BYTES)
+    {
         let safe_name = format!("{ts}_prompt_before_remove");
         let safe_path = safety_dir.join(safe_name);
         let _ = write_file_atomic(&safe_path, &bytes);
@@ -384,6 +414,11 @@ pub fn apply_enabled_prompt<R: tauri::Runtime>(
     manifest.file.path = target_path.to_string_lossy().to_string();
 
     let bytes = prompt_content_to_bytes(content);
+    ensure_prompt_sync_bytes_within_limit(
+        &bytes,
+        PROMPT_SYNC_TARGET_MAX_BYTES,
+        "prompt sync target content",
+    )?;
     write_file_atomic_if_changed(&target_path, &bytes)?;
 
     manifest.enabled = true;
@@ -420,13 +455,16 @@ pub fn restore_disabled_prompt<R: tauri::Runtime>(
                     return None;
                 }
 
-                let bytes = std::fs::read(&backup_path).ok()?;
+                let bytes =
+                    read_file_with_max_len(&backup_path, PROMPT_SYNC_TARGET_MAX_BYTES).ok()?;
                 write_file_atomic(&target_path, &bytes).ok()?;
                 Some(name)
             });
 
         if backup_rel.is_none() && target_path.exists() {
-            if let Ok(bytes) = std::fs::read(&target_path) {
+            if let Ok(Some(bytes)) =
+                read_optional_file_with_max_len(&target_path, PROMPT_SYNC_TARGET_MAX_BYTES)
+            {
                 let safe_name = format!("{ts}_prompt_keep_current_no_manifest");
                 let safe_path = safety_dir.join(safe_name);
                 let _ = write_file_atomic(&safe_path, &bytes);
@@ -461,4 +499,23 @@ pub fn restore_disabled_prompt<R: tauri::Runtime>(
     write_manifest(app, cli_key, &manifest)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prompt_sync_bytes_limit_rejects_oversized_content() {
+        let bytes = vec![b'x'; PROMPT_SYNC_TARGET_MAX_BYTES + 1];
+
+        let err = ensure_prompt_sync_bytes_within_limit(
+            &bytes,
+            PROMPT_SYNC_TARGET_MAX_BYTES,
+            "prompt sync target content",
+        )
+        .expect_err("oversized prompt sync content should fail");
+
+        assert!(err.to_string().contains("too large"));
+    }
 }

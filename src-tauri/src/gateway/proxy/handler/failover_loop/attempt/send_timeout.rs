@@ -11,11 +11,11 @@ fn timeout_decision(is_count_tokens: bool) -> FailoverDecision {
     FailoverDecision::SwitchProvider
 }
 
-pub(super) async fn handle_timeout(
-    ctx: CommonCtx<'_>,
+pub(super) async fn handle_timeout<R: tauri::Runtime>(
+    ctx: CommonCtx<'_, R>,
     provider_ctx: ProviderCtx<'_>,
     attempt_ctx: AttemptCtx<'_>,
-    loop_state: LoopState<'_>,
+    loop_state: LoopState<'_, R>,
 ) -> LoopControl {
     let is_count_tokens =
         is_claude_count_tokens_request(ctx.cli_key.as_str(), ctx.forwarded_path.as_str());

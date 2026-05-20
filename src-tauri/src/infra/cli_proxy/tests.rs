@@ -150,6 +150,77 @@ fn manifest_entry<'a>(manifest: &'a CliProxyManifest, kind: &str) -> &'a BackupF
 }
 
 #[test]
+fn read_manifest_rejects_oversized_file() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let root = cli_proxy_root_dir(&handle, "codex").expect("cli proxy root");
+    std::fs::create_dir_all(&root).expect("create root");
+    std::fs::write(
+        cli_proxy_manifest_path(&root),
+        vec![b'x'; CLI_PROXY_MANIFEST_MAX_BYTES + 1],
+    )
+    .expect("write oversized manifest");
+
+    let err = read_manifest(&handle, "codex").expect_err("oversized manifest should fail");
+
+    assert!(err.to_string().contains("too large"));
+}
+
+#[test]
+fn backup_for_enable_rejects_oversized_target_file() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let config_path = codex_config_path(&handle).expect("codex config path");
+    std::fs::create_dir_all(config_path.parent().expect("config parent"))
+        .expect("create config parent");
+    std::fs::write(&config_path, vec![b'x'; CLI_PROXY_FILE_MAX_BYTES + 1])
+        .expect("write oversized config");
+
+    let err = backup_for_enable(&handle, "codex", "http://127.0.0.1:37123", None)
+        .expect_err("oversized target file should fail");
+
+    assert!(err.to_string().contains("too large"));
+    assert!(read_manifest(&handle, "codex")
+        .expect("read manifest")
+        .is_none());
+}
+
+#[test]
+fn restore_backups_exactly_rejects_oversized_backup_file() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let config_path = codex_config_path(&handle).expect("codex config path");
+    let root = cli_proxy_root_dir(&handle, "codex").expect("cli proxy root");
+    let files_dir = cli_proxy_files_dir(&root);
+    std::fs::create_dir_all(&files_dir).expect("create files dir");
+    std::fs::write(
+        files_dir.join("config.toml"),
+        vec![b'x'; CLI_PROXY_FILE_MAX_BYTES + 1],
+    )
+    .expect("write oversized backup");
+    let manifest = CliProxyManifest {
+        schema_version: MANIFEST_SCHEMA_VERSION,
+        managed_by: MANAGED_BY.to_string(),
+        cli_key: "codex".to_string(),
+        enabled: true,
+        base_origin: Some("http://127.0.0.1:37123".to_string()),
+        created_at: 1,
+        updated_at: 1,
+        files: vec![BackupFileEntry {
+            kind: "unknown_kind".to_string(),
+            path: config_path.to_string_lossy().to_string(),
+            existed: true,
+            backup_rel: Some("config.toml".to_string()),
+        }],
+    };
+
+    let err = restore_backups_exactly_from_manifest(&handle, &manifest)
+        .expect_err("oversized backup should fail");
+
+    assert!(err.to_string().contains("too large"));
+}
+
+#[test]
 fn codex_proxy_preserves_nested_model_provider_tables_and_order() {
     let input = r#"
 model_provider = "aio"

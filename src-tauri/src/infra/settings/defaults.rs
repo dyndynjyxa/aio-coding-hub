@@ -41,6 +41,7 @@ pub(super) const SCHEMA_VERSION_ADD_UPSTREAM_PROXY: u32 = 31;
 pub(super) const SCHEMA_VERSION_ADD_UPSTREAM_PROXY_CREDENTIALS: u32 = 32;
 
 pub(super) const DEFAULT_LOG_RETENTION_DAYS: u32 = 7;
+pub(super) const MAX_LOG_RETENTION_DAYS: u32 = 3650;
 pub(super) const DEFAULT_FAILOVER_MAX_ATTEMPTS_PER_PROVIDER: u32 = 5;
 pub(super) const DEFAULT_FAILOVER_MAX_PROVIDERS_TO_TRY: u32 = 5;
 pub(super) const DEFAULT_CIRCUIT_BREAKER_FAILURE_THRESHOLD: u32 = 5;
@@ -79,6 +80,13 @@ pub(super) const MAX_CIRCUIT_BREAKER_FAILURE_THRESHOLD: u32 = 50;
 pub(super) const MAX_CIRCUIT_BREAKER_OPEN_DURATION_MINUTES: u32 = 24 * 60;
 pub(super) const MAX_RESPONSE_FIXER_MAX_JSON_DEPTH: u32 = 2000;
 pub(super) const MAX_RESPONSE_FIXER_MAX_FIX_SIZE: u32 = 16 * 1024 * 1024;
+pub(super) const MAX_UPDATE_RELEASES_URL_LEN: usize = 2048;
+pub(super) const MAX_UPSTREAM_PROXY_URL_LEN: usize = 2048;
+pub(super) const MAX_UPSTREAM_PROXY_USERNAME_LEN: usize = 256;
+pub(super) const MAX_UPSTREAM_PROXY_PASSWORD_LEN: usize = 4096;
+pub(super) const MAX_CX2CC_MODEL_NAME_LEN: usize = 128;
+pub(super) const MAX_CX2CC_OPTIONAL_FIELD_LEN: usize = 64;
+pub(super) const SETTINGS_FILE_MAX_BYTES: usize = 1024 * 1024;
 
 pub(super) const LEGACY_IDENTIFIER: &str = "io.aio.gateway";
 pub(super) const DEFAULT_UPDATE_RELEASES_URL: &str =

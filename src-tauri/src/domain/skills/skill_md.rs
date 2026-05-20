@@ -1,8 +1,12 @@
+use super::limits::{SKILL_DISCOVERY_DIR_MAX, SKILL_DISCOVERY_SKILL_MD_MAX, SKILL_MD_MAX_BYTES};
+use crate::shared::fs::read_file_with_max_len;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-fn read_to_string(path: &Path) -> Result<String, String> {
-    std::fs::read_to_string(path).map_err(|e| format!("failed to read {}: {e}", path.display()))
+fn read_skill_md_text(path: &Path) -> Result<String, String> {
+    let bytes = read_file_with_max_len(path, SKILL_MD_MAX_BYTES).map_err(|e| e.to_string())?;
+    String::from_utf8(bytes)
+        .map_err(|e| format!("SEC_INVALID_INPUT: invalid UTF-8 in SKILL.md: {e}"))
 }
 
 fn strip_quotes(input: &str) -> &str {
@@ -42,7 +46,7 @@ fn parse_front_matter(text: &str) -> BTreeMap<String, String> {
 }
 
 pub(super) fn parse_skill_md(skill_md_path: &Path) -> Result<(String, String), String> {
-    let text = read_to_string(skill_md_path)?;
+    let text = read_skill_md_text(skill_md_path)?;
     let text = text.trim_start();
     let mut lines = text.lines();
     let Some(first) = lines.next() else {
@@ -75,8 +79,16 @@ pub(super) fn parse_skill_md(skill_md_path: &Path) -> Result<(String, String), S
 pub(super) fn find_skill_md_files(root: &Path) -> Result<Vec<PathBuf>, String> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
+    let mut visited_dirs = 0_usize;
 
     while let Some(dir) = stack.pop() {
+        if visited_dirs >= SKILL_DISCOVERY_DIR_MAX {
+            return Err(format!(
+                "SEC_INVALID_INPUT: too many skill directories (max {SKILL_DISCOVERY_DIR_MAX})"
+            ));
+        }
+        visited_dirs += 1;
+
         let entries = std::fs::read_dir(&dir)
             .map_err(|e| format!("failed to read dir {}: {e}", dir.display()))?;
         for entry in entries {
@@ -85,8 +97,11 @@ pub(super) fn find_skill_md_files(root: &Path) -> Result<Vec<PathBuf>, String> {
             let path = entry.path();
             let file_name = entry.file_name();
             let file_name = file_name.to_string_lossy();
+            let file_type = entry
+                .file_type()
+                .map_err(|e| format!("failed to read file type {}: {e}", path.display()))?;
 
-            if path.is_dir() {
+            if file_type.is_dir() {
                 if file_name == ".git" {
                     continue;
                 }
@@ -95,6 +110,11 @@ pub(super) fn find_skill_md_files(root: &Path) -> Result<Vec<PathBuf>, String> {
             }
 
             if file_name.eq_ignore_ascii_case("SKILL.md") {
+                if out.len() >= SKILL_DISCOVERY_SKILL_MD_MAX {
+                    return Err(format!(
+                        "SEC_INVALID_INPUT: too many SKILL.md files (max {SKILL_DISCOVERY_SKILL_MD_MAX})"
+                    ));
+                }
                 out.push(path);
             }
         }

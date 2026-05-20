@@ -3,7 +3,16 @@ import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
 import { createRequestLogDetail, createRequestLogSummary } from "../requestLogFixtures";
 import {
+  REQUEST_ATTEMPT_LOGS_MAX_LIMIT,
+  REQUEST_LOGS_MAX_LIMIT,
+  REQUEST_LOGS_MIN_LIMIT,
+  REQUEST_LOG_TRACE_ID_MAX_LENGTH,
   type RequestAttemptLog,
+  normalizeRequestAttemptLogsLimit,
+  normalizeRequestLogCursorId,
+  normalizeRequestLogId,
+  normalizeRequestLogTraceId,
+  normalizeRequestLogsLimit,
   requestAttemptLogsByTraceId,
   requestLogGet,
   requestLogGetByTraceId,
@@ -73,6 +82,24 @@ describe("services/gateway/requestLogs", () => {
     );
   });
 
+  it("maps generated DB error envelopes at request-log service boundaries", async () => {
+    vi.mocked(commands.requestLogsList).mockResolvedValueOnce({
+      status: "error",
+      error: "DB_ERROR: database is locked",
+    });
+
+    await expect(requestLogsList("claude", 10)).rejects.toThrow("DB_ERROR");
+    expect(logToConsole).toHaveBeenCalledWith(
+      "error",
+      "读取请求日志失败",
+      expect.objectContaining({
+        cmd: "request_logs_list",
+        args: { cliKey: "claude", limit: 10 },
+        error: expect.stringContaining("DB_ERROR"),
+      })
+    );
+  });
+
   it("treats null invoke result as error with runtime", async () => {
     vi.mocked(commands.requestLogsList).mockResolvedValueOnce({
       status: "ok",
@@ -123,6 +150,125 @@ describe("services/gateway/requestLogs", () => {
     expect(commands.requestLogGet).toHaveBeenCalledWith(1);
     expect(commands.requestLogGetByTraceId).toHaveBeenCalledWith("t1");
     expect(commands.requestAttemptLogsByTraceId).toHaveBeenCalledWith("t1", 99);
+  });
+
+  it("normalizes request log list limits before ipc", async () => {
+    vi.mocked(commands.requestLogsList).mockClear();
+    vi.mocked(commands.requestLogsListAll).mockClear();
+    vi.mocked(commands.requestLogsListAfterId).mockClear();
+    vi.mocked(commands.requestLogsListAfterIdAll).mockClear();
+    vi.mocked(commands.requestAttemptLogsByTraceId).mockClear();
+
+    vi.mocked(commands.requestLogsList).mockResolvedValueOnce({ status: "ok", data: [] });
+    vi.mocked(commands.requestLogsListAll).mockResolvedValueOnce({ status: "ok", data: [] });
+    vi.mocked(commands.requestLogsListAfterId).mockResolvedValueOnce({
+      status: "ok",
+      data: [],
+    });
+    vi.mocked(commands.requestLogsListAfterIdAll).mockResolvedValueOnce({
+      status: "ok",
+      data: [],
+    });
+    vi.mocked(commands.requestAttemptLogsByTraceId).mockResolvedValueOnce({
+      status: "ok",
+      data: [],
+    });
+
+    expect(normalizeRequestLogsLimit(undefined)).toBeNull();
+    expect(normalizeRequestLogsLimit(null)).toBeNull();
+    expect(normalizeRequestLogsLimit(0)).toBe(REQUEST_LOGS_MIN_LIMIT);
+    expect(normalizeRequestLogsLimit(999)).toBe(REQUEST_LOGS_MAX_LIMIT);
+    expect(normalizeRequestAttemptLogsLimit(999)).toBe(REQUEST_ATTEMPT_LOGS_MAX_LIMIT);
+
+    await requestLogsList("claude", 0);
+    await requestLogsListAll(999);
+    await requestLogsListAfterId("codex", 5, 999);
+    await requestLogsListAfterIdAll(6, 0);
+    await requestAttemptLogsByTraceId("t1", 999);
+
+    expect(commands.requestLogsList).toHaveBeenCalledWith("claude", REQUEST_LOGS_MIN_LIMIT);
+    expect(commands.requestLogsListAll).toHaveBeenCalledWith(REQUEST_LOGS_MAX_LIMIT);
+    expect(commands.requestLogsListAfterId).toHaveBeenCalledWith(
+      "codex",
+      5,
+      REQUEST_LOGS_MAX_LIMIT
+    );
+    expect(commands.requestLogsListAfterIdAll).toHaveBeenCalledWith(6, REQUEST_LOGS_MIN_LIMIT);
+    expect(commands.requestAttemptLogsByTraceId).toHaveBeenCalledWith(
+      "t1",
+      REQUEST_ATTEMPT_LOGS_MAX_LIMIT
+    );
+  });
+
+  it("rejects invalid request log limits before ipc", async () => {
+    vi.mocked(commands.requestLogsList).mockClear();
+    vi.mocked(commands.requestLogsListAfterIdAll).mockClear();
+    vi.mocked(commands.requestAttemptLogsByTraceId).mockClear();
+
+    await expect(requestLogsList("claude", Number.NaN)).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(requestLogsListAfterIdAll(1, 1.5)).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(requestAttemptLogsByTraceId("t1", Number.POSITIVE_INFINITY)).rejects.toThrow(
+      "SEC_INVALID_INPUT"
+    );
+
+    expect(commands.requestLogsList).not.toHaveBeenCalled();
+    expect(commands.requestLogsListAfterIdAll).not.toHaveBeenCalled();
+    expect(commands.requestAttemptLogsByTraceId).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid request log ids before ipc", async () => {
+    vi.mocked(commands.requestLogsListAfterId).mockClear();
+    vi.mocked(commands.requestLogsListAfterIdAll).mockClear();
+    vi.mocked(commands.requestLogGet).mockClear();
+
+    expect(normalizeRequestLogId(1)).toBe(1);
+    expect(normalizeRequestLogCursorId(0)).toBe(0);
+    expect(normalizeRequestLogCursorId(9)).toBe(9);
+
+    await expect(requestLogsListAfterId("claude", -1, 10)).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(requestLogsListAfterIdAll(1.5, 10)).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(requestLogGet(0)).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(requestLogGet(Number.NaN)).rejects.toThrow("SEC_INVALID_INPUT");
+
+    expect(commands.requestLogsListAfterId).not.toHaveBeenCalled();
+    expect(commands.requestLogsListAfterIdAll).not.toHaveBeenCalled();
+    expect(commands.requestLogGet).not.toHaveBeenCalled();
+  });
+
+  it("normalizes trace ids before request-log trace ipc", async () => {
+    vi.mocked(commands.requestLogGetByTraceId).mockClear();
+    vi.mocked(commands.requestAttemptLogsByTraceId).mockClear();
+    vi.mocked(commands.requestLogGetByTraceId).mockResolvedValueOnce({
+      status: "ok",
+      data: null,
+    });
+    vi.mocked(commands.requestAttemptLogsByTraceId).mockResolvedValueOnce({
+      status: "ok",
+      data: [],
+    });
+
+    expect(normalizeRequestLogTraceId(" trace-1 ")).toBe("trace-1");
+
+    await requestLogGetByTraceId(" trace-1 ");
+    await requestAttemptLogsByTraceId(" trace-2 ", 10);
+
+    expect(commands.requestLogGetByTraceId).toHaveBeenCalledWith("trace-1");
+    expect(commands.requestAttemptLogsByTraceId).toHaveBeenCalledWith("trace-2", 10);
+  });
+
+  it("rejects invalid trace ids before request-log trace ipc", async () => {
+    vi.mocked(commands.requestLogGetByTraceId).mockClear();
+    vi.mocked(commands.requestAttemptLogsByTraceId).mockClear();
+    const tooLongTraceId = "t".repeat(REQUEST_LOG_TRACE_ID_MAX_LENGTH + 1);
+
+    await expect(requestLogGetByTraceId("   ")).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(requestLogGetByTraceId("trace\n1")).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(requestAttemptLogsByTraceId(tooLongTraceId, 10)).rejects.toThrow(
+      "SEC_INVALID_INPUT"
+    );
+
+    expect(commands.requestLogGetByTraceId).not.toHaveBeenCalled();
+    expect(commands.requestAttemptLogsByTraceId).not.toHaveBeenCalled();
   });
 
   it("maps non-empty command responses and default limit fallbacks", async () => {

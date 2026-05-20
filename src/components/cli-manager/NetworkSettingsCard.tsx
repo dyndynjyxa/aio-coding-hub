@@ -2,6 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { AppSettings, GatewayListenMode } from "../../services/settings/settings";
 import { logToConsole } from "../../services/consoleLog";
+import {
+  formatHostPort,
+  parseCustomListenAddress,
+  validateGatewayCustomListenAddress,
+} from "../../services/settings/settingsValidation";
 import { useGatewayMeta } from "../../hooks/useGatewayMeta";
 import { useWslHostAddressQuery } from "../../query/wsl";
 import { Card } from "../../ui/Card";
@@ -10,50 +15,6 @@ import { Select } from "../../ui/Select";
 import { SettingsRow } from "../../ui/SettingsRow";
 import { cn } from "../../utils/cn";
 import { AlertTriangle, Network } from "lucide-react";
-
-function parseCustomAddress(input: string, fallbackPort: number) {
-  const raw = input.trim();
-  if (!raw) return { host: "0.0.0.0", port: fallbackPort, overridden: false };
-  if (raw.includes("://") || raw.includes("/")) return null;
-
-  if (raw.startsWith("[")) {
-    const idx = raw.indexOf("]");
-    if (idx < 0) return null;
-    const host = raw.slice(1, idx).trim();
-    if (!host) return null;
-    const tail = raw.slice(idx + 1).trim();
-    if (!tail) return { host, port: fallbackPort, overridden: false };
-    if (!tail.startsWith(":")) return null;
-    const portRaw = tail.slice(1).trim();
-    const port = Number(portRaw);
-    if (!Number.isFinite(port) || port <= 0 || port > 65535) return null;
-    return { host, port: Math.floor(port), overridden: true };
-  }
-
-  const parts = raw.split(":");
-  if (parts.length === 2) {
-    const host = parts[0].trim();
-    const portRaw = parts[1].trim();
-    const port = Number(portRaw);
-    if (!host) return null;
-    if (!Number.isFinite(port) || port <= 0 || port > 65535) return null;
-    return { host, port: Math.floor(port), overridden: true };
-  }
-
-  if (parts.length > 2) {
-    // IPv6 without bracket is ambiguous; require [addr]:port.
-    return null;
-  }
-
-  return { host: raw, port: fallbackPort, overridden: false };
-}
-
-function validateCustomAddress(input: string) {
-  const parsed = parseCustomAddress(input, 37123);
-  if (!parsed) return "自定义地址仅支持 host 或 host:port（IPv6 请使用 [addr]:port）";
-  if (parsed.overridden && parsed.port < 1024) return "端口必须 >= 1024";
-  return null;
-}
 
 export type NetworkSettingsCardProps = {
   available: boolean;
@@ -97,9 +58,9 @@ export function NetworkSettingsCard({
     if (listenMode === "localhost") return `127.0.0.1:${port}`;
     if (listenMode === "lan") return `0.0.0.0:${port}`;
     if (listenMode === "wsl_auto") return `${wslHost ?? "127.0.0.1"}:${port}`;
-    const parsed = parseCustomAddress(customAddress, port);
+    const parsed = parseCustomListenAddress(customAddress);
     if (!parsed) return "（自定义地址格式无效）";
-    return `${parsed.host}:${parsed.port}`;
+    return formatHostPort(parsed.host, parsed.port ?? port);
   }, [
     gateway?.listen_addr,
     gateway?.running,
@@ -130,7 +91,8 @@ export function NetworkSettingsCard({
 
   async function commitCustomAddress() {
     if (!available) return;
-    const err = validateCustomAddress(customAddress);
+    const trimmed = customAddress.trim();
+    const err = validateGatewayCustomListenAddress(trimmed);
     if (err) {
       toast(err);
       setCustomAddress(settings.gateway_custom_listen_address);
@@ -138,21 +100,21 @@ export function NetworkSettingsCard({
     }
 
     try {
-      const updated = await onPersistSettings({ gateway_custom_listen_address: customAddress });
+      const updated = await onPersistSettings({ gateway_custom_listen_address: trimmed });
       if (!updated) {
         setCustomAddress(settings.gateway_custom_listen_address);
         return;
       }
 
       logToConsole("info", "更新自定义监听地址", {
-        address: customAddress,
+        address: trimmed,
         running: gateway?.running ?? false,
       });
       toast("自定义监听地址已保存");
     } catch (err) {
       logToConsole("error", "更新自定义监听地址失败", {
         error: String(err),
-        address: customAddress,
+        address: trimmed,
       });
       toast("更新自定义监听地址失败：请稍后重试");
       setCustomAddress(settings.gateway_custom_listen_address);

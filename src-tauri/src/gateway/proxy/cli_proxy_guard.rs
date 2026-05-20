@@ -8,6 +8,7 @@ use std::sync::{Mutex, OnceLock};
 
 const CLI_PROXY_ENABLED_CACHE_TTL_MS_OK: i64 = 500;
 const CLI_PROXY_ENABLED_CACHE_TTL_MS_ERR: i64 = 5_000;
+const CLI_PROXY_ENABLED_CACHE_MAX_ENTRIES: usize = 16;
 
 #[derive(Debug, Clone)]
 struct CliProxyEnabledCacheEntry {
@@ -24,8 +25,8 @@ pub(super) struct CliProxyEnabledSnapshot {
     pub(super) cache_ttl_ms: i64,
 }
 
-pub(super) fn cli_proxy_enabled_cached(
-    app: &tauri::AppHandle,
+pub(super) fn cli_proxy_enabled_cached<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     cli_key: &str,
 ) -> CliProxyEnabledSnapshot {
     static CLI_PROXY_ENABLED_CACHE: OnceLock<Mutex<HashMap<String, CliProxyEnabledCacheEntry>>> =
@@ -65,6 +66,8 @@ pub(super) fn cli_proxy_enabled_cached(
 
     {
         let mut cache = cache.lock_or_recover();
+        prune_cli_proxy_enabled_cache(&mut cache, now_unix_ms);
+        evict_oldest_cli_proxy_enabled_cache_entry_if_full(&mut cache, cli_key);
         cache.insert(
             cli_key.to_string(),
             CliProxyEnabledCacheEntry {
@@ -80,5 +83,84 @@ pub(super) fn cli_proxy_enabled_cached(
         error,
         cache_hit: false,
         cache_ttl_ms,
+    }
+}
+
+fn prune_cli_proxy_enabled_cache(
+    cache: &mut HashMap<String, CliProxyEnabledCacheEntry>,
+    now_unix_ms: i64,
+) {
+    cache.retain(|_, entry| entry.expires_at_unix_ms > now_unix_ms);
+}
+
+fn evict_oldest_cli_proxy_enabled_cache_entry_if_full(
+    cache: &mut HashMap<String, CliProxyEnabledCacheEntry>,
+    cli_key: &str,
+) {
+    if cache.len() < CLI_PROXY_ENABLED_CACHE_MAX_ENTRIES || cache.contains_key(cli_key) {
+        return;
+    }
+
+    let Some(oldest_key) = cache
+        .iter()
+        .min_by_key(|(_, entry)| entry.expires_at_unix_ms)
+        .map(|(key, _)| key.clone())
+    else {
+        return;
+    };
+    cache.remove(&oldest_key);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cache_entry(expires_at_unix_ms: i64) -> CliProxyEnabledCacheEntry {
+        CliProxyEnabledCacheEntry {
+            enabled: true,
+            error: None,
+            expires_at_unix_ms,
+        }
+    }
+
+    #[test]
+    fn prune_cli_proxy_enabled_cache_removes_expired_entries() {
+        let mut cache = HashMap::new();
+        cache.insert("expired".to_string(), cache_entry(100));
+        cache.insert("fresh".to_string(), cache_entry(101));
+
+        prune_cli_proxy_enabled_cache(&mut cache, 100);
+
+        assert!(!cache.contains_key("expired"));
+        assert!(cache.contains_key("fresh"));
+    }
+
+    #[test]
+    fn evict_oldest_cli_proxy_enabled_cache_entry_keeps_capacity() {
+        let mut cache = HashMap::new();
+        for index in 0..CLI_PROXY_ENABLED_CACHE_MAX_ENTRIES {
+            cache.insert(format!("cli-{index}"), cache_entry(1_000 + index as i64));
+        }
+
+        evict_oldest_cli_proxy_enabled_cache_entry_if_full(&mut cache, "new-cli");
+        cache.insert("new-cli".to_string(), cache_entry(2_000));
+
+        assert_eq!(cache.len(), CLI_PROXY_ENABLED_CACHE_MAX_ENTRIES);
+        assert!(!cache.contains_key("cli-0"));
+        assert!(cache.contains_key("cli-1"));
+        assert!(cache.contains_key("new-cli"));
+    }
+
+    #[test]
+    fn evict_oldest_cli_proxy_enabled_cache_entry_does_not_evict_existing_key() {
+        let mut cache = HashMap::new();
+        for index in 0..CLI_PROXY_ENABLED_CACHE_MAX_ENTRIES {
+            cache.insert(format!("cli-{index}"), cache_entry(1_000 + index as i64));
+        }
+
+        evict_oldest_cli_proxy_enabled_cache_entry_if_full(&mut cache, "cli-0");
+
+        assert_eq!(cache.len(), CLI_PROXY_ENABLED_CACHE_MAX_ENTRIES);
+        assert!(cache.contains_key("cli-0"));
     }
 }

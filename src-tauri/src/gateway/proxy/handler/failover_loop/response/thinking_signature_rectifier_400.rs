@@ -4,13 +4,12 @@ use super::*;
 use crate::gateway::proxy::provider_router;
 use crate::gateway::proxy::upstream_client_error_rules;
 use crate::gateway::thinking_budget_rectifier;
-use crate::shared::mutex_ext::MutexExt;
 
-pub(super) struct HandleThinkingRectifiers400Input<'a> {
-    pub(super) ctx: CommonCtx<'a>,
+pub(super) struct HandleThinkingRectifiers400Input<'a, R: tauri::Runtime = tauri::Wry> {
+    pub(super) ctx: CommonCtx<'a, R>,
     pub(super) provider_ctx: ProviderCtx<'a>,
     pub(super) attempt_ctx: AttemptCtx<'a>,
-    pub(super) loop_state: LoopState<'a>,
+    pub(super) loop_state: LoopState<'a, R>,
     pub(super) enable_thinking_signature_rectifier: bool,
     pub(super) enable_thinking_budget_rectifier: bool,
     pub(super) resp: reqwest::Response,
@@ -19,8 +18,8 @@ pub(super) struct HandleThinkingRectifiers400Input<'a> {
     pub(super) upstream: super::upstream_error::UpstreamRequestState<'a>,
 }
 
-pub(super) async fn handle_thinking_rectifiers_400(
-    input: HandleThinkingRectifiers400Input<'_>,
+pub(super) async fn handle_thinking_rectifiers_400<R: tauri::Runtime>(
+    input: HandleThinkingRectifiers400Input<'_, R>,
 ) -> LoopControl {
     let HandleThinkingRectifiers400Input {
         ctx,
@@ -90,57 +89,58 @@ pub(super) async fn handle_thinking_rectifiers_400(
         && status.as_u16() == 400
         && (enable_thinking_signature_rectifier || enable_thinking_budget_rectifier)
     {
-        let buffered_body = match resp.bytes().await {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                let duration_ms = started.elapsed().as_millis();
-                let client_attempts = if ctx.verbose_provider_error {
-                    attempts.clone()
-                } else {
-                    vec![]
-                };
-                let resp = error_response(
-                    StatusCode::BAD_GATEWAY,
-                    trace_id.clone(),
-                    GatewayErrorCode::UpstreamBodyReadError.as_str(),
-                    format!("failed to read upstream error body: {err}"),
-                    client_attempts,
-                );
-                emit_request_event_and_enqueue_request_log(
-                    RequestEndArgs::from_context(RequestEndContextArgs {
-                        deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx),
-                        trace_id: trace_id.as_str(),
-                        cli_key: cli_key.as_str(),
-                        method: method_hint.as_str(),
-                        path: forwarded_path.as_str(),
-                        observe: ctx.observe,
-                        query: query.as_deref(),
-                        excluded_from_stats: false,
-                        duration_ms,
-                        attempts: attempts.as_slice(),
-                        special_settings_json: None,
-                        session_id,
-                        requested_model,
-                        created_at_ms,
-                        created_at,
-                    })
-                    .with_completion(RequestCompletion::failure(
-                        StatusCode::BAD_GATEWAY.as_u16(),
-                        Some(ErrorCategory::SystemError.as_str()),
+        let buffered_body =
+            match super::upstream_error::read_response_body_for_error_scan(resp).await {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    let duration_ms = started.elapsed().as_millis();
+                    let client_attempts = if ctx.verbose_provider_error {
+                        attempts.clone()
+                    } else {
+                        vec![]
+                    };
+                    let resp = error_response(
+                        StatusCode::BAD_GATEWAY,
+                        trace_id.clone(),
                         GatewayErrorCode::UpstreamBodyReadError.as_str(),
-                    )),
-                )
-                .await;
-                abort_guard.disarm();
-                return LoopControl::Return(resp);
-            }
-        };
+                        format!("failed to read upstream error body: {err}"),
+                        client_attempts,
+                    );
+                    emit_request_event_and_enqueue_request_log(
+                        RequestEndArgs::from_context(RequestEndContextArgs {
+                            deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx),
+                            trace_id: trace_id.as_str(),
+                            cli_key: cli_key.as_str(),
+                            method: method_hint.as_str(),
+                            path: forwarded_path.as_str(),
+                            observe: ctx.observe,
+                            query: query.as_deref(),
+                            excluded_from_stats: false,
+                            duration_ms,
+                            attempts: attempts.as_slice(),
+                            special_settings_json: None,
+                            session_id,
+                            requested_model,
+                            created_at_ms,
+                            created_at,
+                        })
+                        .with_completion(RequestCompletion::failure(
+                            StatusCode::BAD_GATEWAY.as_u16(),
+                            Some(ErrorCategory::SystemError.as_str()),
+                            GatewayErrorCode::UpstreamBodyReadError.as_str(),
+                        )),
+                    )
+                    .await;
+                    abort_guard.disarm();
+                    return LoopControl::Return(resp);
+                }
+            };
 
         let mut headers_for_scan = response_headers.clone();
         let body_for_scan = maybe_gunzip_response_body_bytes_with_limit(
             buffered_body.clone(),
             &mut headers_for_scan,
-            MAX_NON_SSE_BODY_BYTES,
+            super::upstream_error::error_body_scan_limit_usize(),
         );
         let upstream_body_text = String::from_utf8_lossy(body_for_scan.as_ref()).to_string();
         let signature_trigger = enable_thinking_signature_rectifier
@@ -183,21 +183,23 @@ pub(super) async fn handle_thinking_rectifiers_400(
                     &mut message_value,
                 );
 
-                let mut settings = special_settings.lock_or_recover();
-                settings.push(serde_json::json!({
-                    "type": "thinking_signature_rectifier",
-                    "scope": "request",
-                    "hit": rectified.applied,
-                    "providerId": provider_id,
-                    "providerName": provider_name_base.clone(),
-                    "trigger": trigger,
-                    "attemptNumber": retry_index,
-                    "retryAttemptNumber": retry_index + 1,
-                    "removedThinkingBlocks": rectified.removed_thinking_blocks,
-                    "removedRedactedThinkingBlocks": rectified.removed_redacted_thinking_blocks,
-                    "removedSignatureFields": rectified.removed_signature_fields,
-                    "removedTopLevelThinking": rectified.removed_top_level_thinking,
-                }));
+                response_fixer::push_special_setting(
+                    &special_settings,
+                    serde_json::json!({
+                        "type": "thinking_signature_rectifier",
+                        "scope": "request",
+                        "hit": rectified.applied,
+                        "providerId": provider_id,
+                        "providerName": provider_name_base.clone(),
+                        "trigger": trigger,
+                        "attemptNumber": retry_index,
+                        "retryAttemptNumber": retry_index + 1,
+                        "removedThinkingBlocks": rectified.removed_thinking_blocks,
+                        "removedRedactedThinkingBlocks": rectified.removed_redacted_thinking_blocks,
+                        "removedSignatureFields": rectified.removed_signature_fields,
+                        "removedTopLevelThinking": rectified.removed_top_level_thinking,
+                    }),
+                );
 
                 if rectified.applied {
                     if let Ok(next) = serde_json::to_vec(&message_value) {
@@ -236,27 +238,29 @@ pub(super) async fn handle_thinking_rectifiers_400(
                     &mut message_value,
                 );
 
-                let mut settings = special_settings.lock_or_recover();
-                settings.push(serde_json::json!({
-                    "type": "thinking_budget_rectifier",
-                    "scope": "request",
-                    "hit": rectified.applied,
-                    "providerId": provider_id,
-                    "providerName": provider_name_base.clone(),
-                    "trigger": trigger,
-                    "attemptNumber": retry_index,
-                    "retryAttemptNumber": retry_index + 1,
-                    "before": {
-                        "maxTokens": rectified.before.max_tokens,
-                        "thinkingType": rectified.before.thinking_type,
-                        "thinkingBudgetTokens": rectified.before.thinking_budget_tokens,
-                    },
-                    "after": {
-                        "maxTokens": rectified.after.max_tokens,
-                        "thinkingType": rectified.after.thinking_type,
-                        "thinkingBudgetTokens": rectified.after.thinking_budget_tokens,
-                    },
-                }));
+                response_fixer::push_special_setting(
+                    &special_settings,
+                    serde_json::json!({
+                        "type": "thinking_budget_rectifier",
+                        "scope": "request",
+                        "hit": rectified.applied,
+                        "providerId": provider_id,
+                        "providerName": provider_name_base.clone(),
+                        "trigger": trigger,
+                        "attemptNumber": retry_index,
+                        "retryAttemptNumber": retry_index + 1,
+                        "before": {
+                            "maxTokens": rectified.before.max_tokens,
+                            "thinkingType": rectified.before.thinking_type,
+                            "thinkingBudgetTokens": rectified.before.thinking_budget_tokens,
+                        },
+                        "after": {
+                            "maxTokens": rectified.after.max_tokens,
+                            "thinkingType": rectified.after.thinking_type,
+                            "thinkingBudgetTokens": rectified.after.thinking_budget_tokens,
+                        },
+                    }),
+                );
 
                 if rectified.applied {
                     if let Ok(next) = serde_json::to_vec(&message_value) {
@@ -446,8 +450,7 @@ pub(super) async fn handle_thinking_rectifiers_400(
                         HeaderValue::from_static(outcome.header_value),
                     );
                     if let Some(setting) = outcome.special_setting {
-                        let mut settings = special_settings.lock_or_recover();
-                        settings.push(setting);
+                        response_fixer::push_special_setting(&special_settings, setting);
                     }
                     body_to_return = outcome.body;
                 }

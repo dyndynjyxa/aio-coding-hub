@@ -2,8 +2,9 @@
 // - Used by `HomeRequestLogsPanel` to show the selected request log detail.
 // - Keeps the dialog UI isolated from the main overview panel to reduce file size and improve cohesion.
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useNowMs } from "../../hooks/useNowMs";
+import { useRequestLogDetailSignalRefresh } from "../../hooks/useRequestLogDetailSignalRefresh";
 import { isPersistedRequestLogInProgress } from "../../services/gateway/requestLogState";
 import { useTraceStore } from "../../services/gateway/traceStore";
 import {
@@ -44,12 +45,24 @@ export function RequestLogDetailDialog({
   const [activeTab, setActiveTab] = useState<DetailTab>("summary");
   const { traces } = useTraceStore();
   const selectedLogQuery = useRequestLogDetailQuery(selectedLogId);
-  const selectedLog = selectedLogQuery.data ?? null;
+  const queriedSelectedLog = selectedLogQuery.data ?? null;
+  const selectedLog =
+    queriedSelectedLog != null && queriedSelectedLog.id === selectedLogId
+      ? queriedSelectedLog
+      : null;
   const selectedLogLoading = selectedLogQuery.isFetching;
 
   const attemptLogsQuery = useRequestAttemptLogsByTraceIdQuery(selectedLog?.trace_id ?? null, 50);
   const attemptLogs = attemptLogsQuery.data ?? [];
   const attemptLogsLoading = attemptLogsQuery.isFetching;
+  const refreshSelectedLogDetail = useCallback(async () => {
+    await Promise.allSettled([selectedLogQuery.refetch(), attemptLogsQuery.refetch()]);
+  }, [attemptLogsQuery, selectedLogQuery]);
+  useRequestLogDetailSignalRefresh({
+    traceId: selectedLog?.trace_id ?? null,
+    enabled: selectedLogId != null,
+    refresh: refreshSelectedLogDetail,
+  });
 
   // Trace store is the authority on whether the request is still alive.
   const matchingTrace = selectedLog

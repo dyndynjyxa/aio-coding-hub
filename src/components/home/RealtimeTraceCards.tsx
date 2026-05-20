@@ -5,6 +5,7 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { cliBadgeToneStatic, cliShortLabel } from "../../constants/clis";
 import { GatewayErrorCodes } from "../../constants/gatewayErrorCodes";
+import { useNowMs } from "../../hooks/useNowMs";
 import type { CliSessionsFolderLookupEntry } from "../../services/cli/cliSessions";
 import type { CliKey } from "../../services/providers/providers";
 import type { TraceSession } from "../../services/gateway/traceStore";
@@ -60,55 +61,42 @@ const STALE_TRACE_TIMEOUT_MS = 5 * 60 * 1000;
  */
 const BATCH_EXIT_WINDOW_MS = 500;
 
+function shouldKeepRealtimeTraceVisible(trace: TraceSession, nowMs: number): boolean {
+  if (!trace.summary) {
+    return nowMs - trace.last_seen_ms < STALE_TRACE_TIMEOUT_MS;
+  }
+  return Math.max(0, nowMs - trace.last_seen_ms) < REALTIME_TRACE_EXIT_TOTAL_MS;
+}
+
+function shouldUseRealtimeTraceClock(traces: TraceSession[], nowMs: number): boolean {
+  return traces.some((trace) => shouldKeepRealtimeTraceVisible(trace, nowMs));
+}
+
 export const RealtimeTraceCards = memo(function RealtimeTraceCards({
   folderLookupBySessionKey,
   traces,
   formatUnixSeconds,
   showCustomTooltip,
 }: RealtimeTraceCardsProps) {
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [clockEnabled, setClockEnabled] = useState(() =>
+    shouldUseRealtimeTraceClock(traces, Date.now())
+  );
+  const clockNowMs = useNowMs(clockEnabled, 250);
+  const nowMs = clockEnabled ? clockNowMs : Date.now();
 
   useEffect(() => {
-    if (traces.length === 0) return;
-    let timer: number | null = null;
-    let active = true;
-
-    const tick = () => {
-      if (!active) return false;
-      const now = Date.now();
-      setNowMs(now);
-
-      return traces.some((trace) => {
-        if (!trace.summary) {
-          return now - trace.last_seen_ms < STALE_TRACE_TIMEOUT_MS;
-        }
-        return Math.max(0, now - trace.last_seen_ms) < REALTIME_TRACE_EXIT_TOTAL_MS;
-      });
-    };
-
-    const stillNeeded = tick();
-    if (!stillNeeded) return;
-
-    timer = window.setInterval(() => {
-      const needed = tick();
-      if (!needed && timer != null) {
-        window.clearInterval(timer);
-        timer = null;
-      }
-    }, 250);
-    return () => {
-      active = false;
-      if (timer != null) window.clearInterval(timer);
-    };
+    const nextEnabled = shouldUseRealtimeTraceClock(traces, Date.now());
+    setClockEnabled((current) => (current === nextEnabled ? current : nextEnabled));
   }, [traces]);
 
+  useEffect(() => {
+    if (!clockEnabled) return;
+    if (shouldUseRealtimeTraceClock(traces, clockNowMs)) return;
+    setClockEnabled(false);
+  }, [clockEnabled, clockNowMs, traces]);
+
   const visibleTraces = useMemo(() => {
-    const kept = traces.filter((trace) => {
-      if (!trace.summary) {
-        return nowMs - trace.last_seen_ms < STALE_TRACE_TIMEOUT_MS;
-      }
-      return Math.max(0, nowMs - trace.last_seen_ms) < REALTIME_TRACE_EXIT_TOTAL_MS;
-    });
+    const kept = traces.filter((trace) => shouldKeepRealtimeTraceVisible(trace, nowMs));
     return kept.slice(0, 5);
   }, [traces, nowMs]);
 

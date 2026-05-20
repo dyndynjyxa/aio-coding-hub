@@ -1,7 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
-import { wslConfigStatusGet, wslConfigureClients, wslDetect, wslHostAddressGet } from "../wsl";
+import {
+  normalizeWslDistros,
+  WSL_DISTRO_MAX_CHARS,
+  WSL_DISTROS_MAX_COUNT,
+  wslConfigStatusGet,
+  wslConfigureClients,
+  wslDetect,
+  wslHostAddressGet,
+} from "../wsl";
 
 vi.mock("../../../generated/bindings", async () => {
   const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
@@ -28,6 +36,10 @@ vi.mock("../../consoleLog", async () => {
 });
 
 describe("services/app/wsl", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("rethrows invoke errors and logs", async () => {
     vi.mocked(commands.wslDetect).mockRejectedValueOnce(new Error("wsl boom"));
 
@@ -68,10 +80,34 @@ describe("services/app/wsl", () => {
     await wslConfigStatusGet();
     expect(commands.wslConfigStatusGet).toHaveBeenCalledWith(null);
 
-    await wslConfigStatusGet(["Ubuntu"]);
-    expect(commands.wslConfigStatusGet).toHaveBeenCalledWith(["Ubuntu"]);
+    await wslConfigStatusGet([" Ubuntu ", "Ubuntu", "", "Debian"]);
+    expect(commands.wslConfigStatusGet).toHaveBeenCalledWith(["Ubuntu", "Debian"]);
 
     await wslConfigureClients();
     expect(commands.wslConfigureClients).toHaveBeenCalledWith();
+  });
+
+  it("normalizes and bounds distro filters before WSL status IPC", async () => {
+    expect(normalizeWslDistros(null)).toBeNull();
+    expect(normalizeWslDistros(undefined)).toBeNull();
+    expect(normalizeWslDistros([" Ubuntu ", "Ubuntu", "", "Debian "])).toEqual([
+      "Ubuntu",
+      "Debian",
+    ]);
+
+    await expect(wslConfigStatusGet([" ", "\t"])).resolves.toEqual([]);
+    expect(commands.wslConfigStatusGet).not.toHaveBeenCalled();
+
+    await expect(wslConfigStatusGet(["Ubuntu\u0000bad"])).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(wslConfigStatusGet(["x".repeat(WSL_DISTRO_MAX_CHARS + 1)])).rejects.toThrow(
+      "SEC_INVALID_INPUT"
+    );
+    await expect(
+      wslConfigStatusGet(
+        Array.from({ length: WSL_DISTROS_MAX_COUNT + 1 }, (_, index) => `Distro-${index}`)
+      )
+    ).rejects.toThrow("SEC_INVALID_INPUT");
+
+    expect(commands.wslConfigStatusGet).not.toHaveBeenCalled();
   });
 });

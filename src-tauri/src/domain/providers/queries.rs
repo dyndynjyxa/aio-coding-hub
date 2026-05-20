@@ -785,13 +785,9 @@ pub fn upsert(
     }
 
     let base_urls = if is_oauth || is_cx2cc {
-        // OAuth and CX2CC providers don't need base URLs — inherited from source/adapter.
-        let filtered: Vec<String> = base_urls
-            .into_iter()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        filtered
+        // OAuth and CX2CC providers don't need base URLs; storing an empty list
+        // keeps stale or malicious transport values out of gateway selection.
+        Vec::new()
     } else {
         normalize_base_urls(base_urls)?
     };
@@ -857,12 +853,7 @@ pub fn upsert(
             let tags_normalized = normalize_tags(tags.unwrap_or_default());
             let tags_json_value = serde_json::to_string(&tags_normalized)
                 .map_err(|e| format!("SYSTEM_ERROR: {e}"))?;
-            let note_value = note.as_deref().unwrap_or("").trim().to_string();
-            if note_value.len() > 500 {
-                return Err("SEC_INVALID_INPUT: note must be at most 500 characters"
-                    .to_string()
-                    .into());
-            }
+            let note_value = normalize_note(note.as_deref())?;
 
             conn.execute(
                 r#"
@@ -1046,15 +1037,7 @@ INSERT INTO providers(
                 serde_json::to_string(&next_tags).map_err(|e| format!("SYSTEM_ERROR: {e}"))?;
 
             let next_note = match note {
-                Some(v) => {
-                    let trimmed = v.trim().to_string();
-                    if trimmed.len() > 500 {
-                        return Err("SEC_INVALID_INPUT: note must be at most 500 characters"
-                            .to_string()
-                            .into());
-                    }
-                    trimmed
-                }
+                Some(v) => normalize_note(Some(&v))?,
                 None => existing_note,
             };
             let next_stream_idle_timeout_seconds = if stream_idle_timeout_seconds_specified {
@@ -1181,8 +1164,18 @@ pub fn reorder(
 ) -> crate::shared::error::AppResult<Vec<ProviderSummary>> {
     validate_cli_key(cli_key)?;
 
+    if ordered_provider_ids.len() > MAX_PROVIDER_ORDER_IDS {
+        return Err(format!(
+            "SEC_INVALID_INPUT: ordered_provider_ids must contain at most {MAX_PROVIDER_ORDER_IDS} entries"
+        )
+        .into());
+    }
+
     let mut seen = HashSet::new();
     for id in &ordered_provider_ids {
+        if *id <= 0 {
+            return Err(format!("SEC_INVALID_INPUT: invalid provider_id={id}").into());
+        }
         if !seen.insert(*id) {
             return Err(format!("SEC_INVALID_INPUT: duplicate provider_id={id}").into());
         }

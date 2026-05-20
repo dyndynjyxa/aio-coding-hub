@@ -1,8 +1,11 @@
 use crate::app_paths;
 use crate::mcp_sync;
+use crate::shared::fs::read_file_with_max_len;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+
+const MCP_LOCAL_STASH_MAX_BYTES: usize = 1024 * 1024;
 
 fn stash_bucket_name(workspace_id: Option<i64>) -> String {
     workspace_id
@@ -90,12 +93,13 @@ fn json_write_stash(
 ) -> crate::shared::error::AppResult<()> {
     let bytes = serde_json::to_vec_pretty(&Value::Object(map.clone()))
         .map_err(|e| format!("failed to serialize stash json: {e}"))?;
+    ensure_stash_bytes_len(&bytes)?;
     std::fs::write(path, bytes)
         .map_err(|e| format!("failed to write {}: {e}", path.display()).into())
 }
 
 fn json_read_stash(path: &Path) -> serde_json::Map<String, Value> {
-    let Ok(bytes) = std::fs::read(path) else {
+    let Ok(bytes) = read_file_with_max_len(path, MCP_LOCAL_STASH_MAX_BYTES) else {
         return serde_json::Map::new();
     };
     let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
@@ -176,14 +180,29 @@ fn codex_split_local_blocks(
 fn codex_write_stash(path: &Path, lines: &[String]) -> crate::shared::error::AppResult<()> {
     let mut out = lines.join("\n");
     out.push('\n');
-    std::fs::write(path, out).map_err(|e| format!("failed to write {}: {e}", path.display()).into())
+    ensure_stash_bytes_len(out.as_bytes())?;
+    std::fs::write(path, out.as_bytes())
+        .map_err(|e| format!("failed to write {}: {e}", path.display()).into())
 }
 
 fn codex_read_stash(path: &Path) -> Vec<String> {
-    let Ok(content) = std::fs::read_to_string(path) else {
+    let Ok(bytes) = read_file_with_max_len(path, MCP_LOCAL_STASH_MAX_BYTES) else {
+        return Vec::new();
+    };
+    let Ok(content) = String::from_utf8(bytes) else {
         return Vec::new();
     };
     content.lines().map(|l| l.to_string()).collect()
+}
+
+fn ensure_stash_bytes_len(bytes: &[u8]) -> crate::shared::error::AppResult<()> {
+    if bytes.len() > MCP_LOCAL_STASH_MAX_BYTES {
+        return Err(format!(
+            "SEC_INVALID_INPUT: MCP local stash too large (max {MCP_LOCAL_STASH_MAX_BYTES} bytes)"
+        )
+        .into());
+    }
+    Ok(())
 }
 
 pub(crate) fn swap_local_mcp_servers_for_workspace_switch<R: tauri::Runtime>(
@@ -248,4 +267,39 @@ pub(crate) fn swap_local_mcp_servers_for_workspace_switch<R: tauri::Runtime>(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_read_stash_returns_empty_for_oversized_file() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("mcpServers.json");
+        std::fs::write(&path, vec![b'x'; MCP_LOCAL_STASH_MAX_BYTES + 1]).expect("write stash");
+
+        assert!(json_read_stash(&path).is_empty());
+    }
+
+    #[test]
+    fn codex_read_stash_returns_empty_for_oversized_file() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("mcpServers.toml");
+        std::fs::write(&path, vec![b'x'; MCP_LOCAL_STASH_MAX_BYTES + 1]).expect("write stash");
+
+        assert!(codex_read_stash(&path).is_empty());
+    }
+
+    #[test]
+    fn codex_write_stash_rejects_oversized_payload() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("mcpServers.toml");
+        let lines = vec!["x".repeat(MCP_LOCAL_STASH_MAX_BYTES + 1)];
+
+        let err = codex_write_stash(&path, &lines).unwrap_err().to_string();
+
+        assert!(err.contains("MCP local stash too large"));
+        assert!(!path.exists());
+    }
 }

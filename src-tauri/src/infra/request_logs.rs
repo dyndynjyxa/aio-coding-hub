@@ -6,8 +6,10 @@ use crate::{cost, db, model_price_aliases};
 use rusqlite::{params, params_from_iter, ErrorCode, OptionalExtension, TransactionBehavior};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 
 mod types;
 pub use types::{
@@ -26,6 +28,7 @@ pub use queries::{
 
 const WRITE_BUFFER_CAPACITY: usize = 512;
 const WRITE_BATCH_MAX: usize = 50;
+const WRITE_THROUGH_MAX_CONCURRENT: usize = 4;
 const INSERT_RETRY_MAX_ATTEMPTS: u32 = 8;
 const INSERT_RETRY_BASE_DELAY_MS: u64 = 20;
 const INSERT_RETRY_MAX_DELAY_MS: u64 = 500;
@@ -39,6 +42,8 @@ FROM providers bridge
 LEFT JOIN providers source ON source.id = bridge.source_provider_id
 WHERE bridge.id = ?1
 "#;
+
+static WRITE_THROUGH_LIMITER: OnceLock<Arc<Semaphore>> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DbWriteErrorKind {
@@ -112,8 +117,11 @@ impl InsertBatchCache {
     }
 
     fn put_cost_multiplier(&mut self, provider_id: i64, value: f64, now: i64) {
-        if self.provider_multiplier.len() >= COST_MULTIPLIER_CACHE_MAX_ENTRIES {
-            self.provider_multiplier.clear();
+        prune_expired_cached_values(&mut self.provider_multiplier, now);
+        if self.provider_multiplier.len() >= COST_MULTIPLIER_CACHE_MAX_ENTRIES
+            && !self.provider_multiplier.contains_key(&provider_id)
+        {
+            evict_oldest_cached_value(&mut self.provider_multiplier);
         }
         self.provider_multiplier.insert(
             provider_id,
@@ -138,8 +146,11 @@ impl InsertBatchCache {
             return;
         };
 
-        if self.model_price_json.len() >= MODEL_PRICE_CACHE_MAX_ENTRIES {
-            self.model_price_json.clear();
+        prune_expired_cached_values(&mut self.model_price_json, now);
+        if self.model_price_json.len() >= MODEL_PRICE_CACHE_MAX_ENTRIES
+            && !self.model_price_json.contains_key(&key)
+        {
+            evict_oldest_cached_value(&mut self.model_price_json);
         }
         self.model_price_json.insert(
             key,
@@ -149,6 +160,27 @@ impl InsertBatchCache {
             },
         );
     }
+}
+
+fn prune_expired_cached_values<K, T>(map: &mut HashMap<K, CachedValue<T>>, now: i64)
+where
+    K: Eq + Hash,
+{
+    map.retain(|_, entry| now.saturating_sub(entry.fetched_at) <= CACHE_TTL_SECS);
+}
+
+fn evict_oldest_cached_value<K, T>(map: &mut HashMap<K, CachedValue<T>>)
+where
+    K: Clone + Eq + Hash,
+{
+    let Some(oldest_key) = map
+        .iter()
+        .min_by_key(|(_, entry)| entry.fetched_at)
+        .map(|(key, _)| key.clone())
+    else {
+        return;
+    };
+    map.remove(&oldest_key);
 }
 
 fn fetch_model_price_json(
@@ -281,8 +313,18 @@ fn effective_cost_basis(item: &RequestLogInsert) -> Option<EffectiveCostBasis> {
     })
 }
 
-pub fn start_buffered_writer(
-    app: tauri::AppHandle,
+fn write_through_limiter() -> Arc<Semaphore> {
+    WRITE_THROUGH_LIMITER
+        .get_or_init(|| Arc::new(Semaphore::new(WRITE_THROUGH_MAX_CONCURRENT)))
+        .clone()
+}
+
+fn try_acquire_write_through_permit(limiter: Arc<Semaphore>) -> Option<OwnedSemaphorePermit> {
+    limiter.try_acquire_owned().ok()
+}
+
+pub fn start_buffered_writer<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     db: db::Db,
 ) -> (
     mpsc::Sender<RequestLogInsert>,
@@ -295,17 +337,39 @@ pub fn start_buffered_writer(
     (tx, task)
 }
 
-pub fn spawn_write_through(app: tauri::AppHandle, db: db::Db, item: RequestLogInsert) {
+pub fn spawn_write_through<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    db: db::Db,
+    item: RequestLogInsert,
+) -> bool {
+    let trace_id = item.trace_id.clone();
+    let cli_key = item.cli_key.clone();
+    let Some(permit) = try_acquire_write_through_permit(write_through_limiter()) else {
+        tracing::warn!(
+            trace_id = %trace_id,
+            cli = %cli_key,
+            max_concurrent = WRITE_THROUGH_MAX_CONCURRENT,
+            "request log write-through fallback saturated; dropping log"
+        );
+        return false;
+    };
+
     tauri::async_runtime::spawn_blocking(move || {
+        let _permit = permit;
         let mut cache = InsertBatchCache::default();
         let items = [item];
         if let Err(err) = insert_batch_with_retries(&app, &db, &items, &mut cache) {
             tracing::error!(error = %err.message, "request log write-through insert failed");
         }
     });
+    true
 }
 
-fn writer_loop(app: tauri::AppHandle, db: db::Db, mut rx: mpsc::Receiver<RequestLogInsert>) {
+fn writer_loop<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    db: db::Db,
+    mut rx: mpsc::Receiver<RequestLogInsert>,
+) {
     let mut buffer: Vec<RequestLogInsert> = Vec::with_capacity(WRITE_BATCH_MAX);
     let mut cache = InsertBatchCache::default();
 
@@ -334,7 +398,7 @@ fn writer_loop(app: tauri::AppHandle, db: db::Db, mut rx: mpsc::Receiver<Request
 }
 
 fn insert_batch_with_retries(
-    app: &tauri::AppHandle,
+    app: &tauri::AppHandle<impl tauri::Runtime>,
     db: &db::Db,
     items: &[RequestLogInsert],
     cache: &mut InsertBatchCache,
@@ -362,7 +426,7 @@ fn insert_batch_with_retries(
 }
 
 fn insert_batch_once(
-    app: &tauri::AppHandle,
+    app: &tauri::AppHandle<impl tauri::Runtime>,
     db: &db::Db,
     items: &[RequestLogInsert],
     cache: &mut InsertBatchCache,
@@ -686,8 +750,118 @@ GROUP BY cli_key, session_id
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_cx2cc_cost_basis, InsertBatchCache, EFFECTIVE_COST_MULTIPLIER_SQL};
+    use super::{
+        parse_cx2cc_cost_basis, try_acquire_write_through_permit, writer_loop, InsertBatchCache,
+        RequestLogInsert, COST_MULTIPLIER_CACHE_MAX_ENTRIES, EFFECTIVE_COST_MULTIPLIER_SQL,
+        MODEL_PRICE_CACHE_MAX_ENTRIES, WRITE_BATCH_MAX,
+    };
     use rusqlite::{params, Connection};
+    use std::sync::Arc;
+    use tempfile::TempDir;
+    use tokio::sync::{mpsc, Semaphore};
+
+    fn request_log_insert(trace_id: &str) -> RequestLogInsert {
+        RequestLogInsert {
+            trace_id: trace_id.to_string(),
+            cli_key: "claude".to_string(),
+            session_id: None,
+            method: "POST".to_string(),
+            path: "/v1/messages".to_string(),
+            query: None,
+            excluded_from_stats: false,
+            special_settings_json: None,
+            status: Some(200),
+            error_code: None,
+            duration_ms: 10,
+            ttfb_ms: Some(5),
+            attempts_json: "[]".to_string(),
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            cache_read_input_tokens: None,
+            cache_creation_input_tokens: None,
+            cache_creation_5m_input_tokens: None,
+            cache_creation_1h_input_tokens: None,
+            usage_json: None,
+            requested_model: None,
+            provider_chain_json: None,
+            error_details_json: None,
+            created_at_ms: 1_770_000_000_000,
+            created_at: 1_770_000_000,
+        }
+    }
+
+    fn init_test_db() -> (tauri::App<tauri::test::MockRuntime>, crate::db::Db, TempDir) {
+        let app = tauri::test::mock_app();
+        let dir = TempDir::new().expect("temp dir");
+        let db_path = dir.path().join("request-log-writer.sqlite");
+        let db = crate::db::init_for_tests(&db_path).expect("init db");
+        (app, db, dir)
+    }
+
+    fn count_request_logs(db: &crate::db::Db) -> i64 {
+        let conn = db.open_connection().expect("open connection");
+        conn.query_row("SELECT COUNT(1) FROM request_logs", [], |row| row.get(0))
+            .expect("count request logs")
+    }
+
+    #[test]
+    fn writer_loop_flushes_partial_batch_when_sender_closes() {
+        let (app, db, _dir) = init_test_db();
+        let app_handle = app.handle().clone();
+        let db_for_writer = db.clone();
+        let (tx, rx) = mpsc::channel(WRITE_BATCH_MAX);
+
+        let writer = std::thread::spawn(move || {
+            writer_loop(app_handle, db_for_writer, rx);
+        });
+
+        for idx in 0..3 {
+            tx.blocking_send(request_log_insert(&format!("trace-partial-{idx}")))
+                .expect("send log");
+        }
+        drop(tx);
+
+        writer.join().expect("writer joins");
+
+        assert_eq!(count_request_logs(&db), 3);
+    }
+
+    #[test]
+    fn writer_loop_flushes_final_partial_batch_after_full_batches() {
+        let (app, db, _dir) = init_test_db();
+        let app_handle = app.handle().clone();
+        let db_for_writer = db.clone();
+        let total = WRITE_BATCH_MAX + 3;
+        let (tx, rx) = mpsc::channel(total);
+
+        let writer = std::thread::spawn(move || {
+            writer_loop(app_handle, db_for_writer, rx);
+        });
+
+        for idx in 0..total {
+            tx.blocking_send(request_log_insert(&format!("trace-multi-{idx}")))
+                .expect("send log");
+        }
+        drop(tx);
+
+        writer.join().expect("writer joins");
+
+        assert_eq!(count_request_logs(&db), total as i64);
+    }
+
+    #[test]
+    fn write_through_permit_helper_rejects_when_limiter_full() {
+        let limiter = Arc::new(Semaphore::new(2));
+        let first = try_acquire_write_through_permit(limiter.clone()).expect("first permit");
+        let second = try_acquire_write_through_permit(limiter.clone()).expect("second permit");
+
+        assert!(try_acquire_write_through_permit(limiter.clone()).is_none());
+
+        drop(first);
+        assert!(try_acquire_write_through_permit(limiter).is_some());
+        drop(second);
+    }
 
     #[test]
     fn parses_cx2cc_cost_basis_from_special_settings() {
@@ -732,6 +906,48 @@ mod tests {
 
         cache.put_model_price_json(key.clone(), value.clone(), now);
         assert_eq!(cache.get_model_price_json(&key, now), Some(value));
+    }
+
+    #[test]
+    fn model_price_cache_evicts_oldest_entry_instead_of_clearing_all() {
+        let mut cache = InsertBatchCache::default();
+        let now = 1_770_000_001;
+        let value = Some(r#"{"input_cost_per_token":"0.000005"}"#.to_string());
+
+        for index in 0..MODEL_PRICE_CACHE_MAX_ENTRIES {
+            let fetched_at = if index == 0 { now } else { now + 1 };
+            cache.put_model_price_json(format!("claude\nmodel-{index}"), value.clone(), fetched_at);
+        }
+
+        cache.put_model_price_json("claude\nnew-model".to_string(), value.clone(), now + 2);
+
+        assert_eq!(cache.model_price_json.len(), MODEL_PRICE_CACHE_MAX_ENTRIES);
+        assert_eq!(cache.get_model_price_json("claude\nmodel-0", now + 2), None);
+        assert_eq!(
+            cache.get_model_price_json("claude\nmodel-1", now + 2),
+            Some(value.clone())
+        );
+        assert_eq!(
+            cache.get_model_price_json("claude\nnew-model", now + 2),
+            Some(value)
+        );
+    }
+
+    #[test]
+    fn cost_multiplier_cache_prunes_expired_entries_before_capacity_eviction() {
+        let mut cache = InsertBatchCache::default();
+        let expired_now = 10_000;
+        cache.put_cost_multiplier(1, 1.1, expired_now - super::CACHE_TTL_SECS - 1);
+
+        for index in 2..=COST_MULTIPLIER_CACHE_MAX_ENTRIES as i64 {
+            cache.put_cost_multiplier(index, 1.2, expired_now);
+        }
+
+        cache.put_cost_multiplier(99_999, 1.3, expired_now);
+
+        assert!(cache.provider_multiplier.len() <= COST_MULTIPLIER_CACHE_MAX_ENTRIES);
+        assert_eq!(cache.get_cost_multiplier(1, expired_now), None);
+        assert_eq!(cache.get_cost_multiplier(99_999, expired_now), Some(1.3));
     }
 
     #[test]

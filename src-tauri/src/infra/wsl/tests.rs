@@ -295,6 +295,75 @@ mod tests {
     }
 
     #[test]
+    fn read_wsl_manifest_rejects_oversized_file() {
+        let result = (|| -> crate::shared::error::AppResult<()> {
+            let _guard = crate::test_support::test_env_lock();
+            let temp = tempfile::tempdir().expect("tempdir");
+            let _test_home = ScopedEnvVar::set(
+                "AIO_CODING_HUB_TEST_HOME",
+                temp.path().as_os_str().to_os_string(),
+            );
+
+            let app = tauri::test::mock_app();
+            let app_handle = app.handle().clone();
+            let path = crate::wsl::manifest::wsl_manifest_path(&app_handle, "Ubuntu")?;
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("create manifest dir");
+            }
+            std::fs::write(
+                &path,
+                vec![b'x'; crate::wsl::manifest::WSL_MANIFEST_MAX_BYTES + 1],
+            )
+            .expect("write oversized manifest");
+
+            let err = crate::wsl::manifest::read_wsl_manifest(&app_handle, "Ubuntu")
+                .expect_err("oversized manifest should fail");
+
+            assert!(err.to_string().contains("too large"));
+            Ok(())
+        })();
+
+        result.expect("test result");
+    }
+
+    #[test]
+    fn read_json_top_level_str_rejects_oversized_file_as_missing() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("auth.json");
+        std::fs::write(
+            &path,
+            vec![b'x'; crate::wsl::manifest::WSL_CLIENT_CONFIG_MAX_BYTES + 1],
+        )
+        .expect("write oversized auth");
+
+        let value = crate::wsl::manifest::read_json_top_level_str(&path, "OPENAI_API_KEY");
+
+        assert!(value.is_none());
+    }
+
+    #[test]
+    fn restore_wsl_cli_backup_rejects_oversized_codex_config() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let codex_home = temp.path().join(".codex");
+        std::fs::create_dir_all(&codex_home).expect("create codex home");
+        std::fs::write(
+            codex_home.join("config.toml"),
+            vec![b'x'; crate::wsl::manifest::WSL_CLIENT_CONFIG_MAX_BYTES + 1],
+        )
+        .expect("write oversized config");
+        let backup = WslCliBackup {
+            cli_key: "codex".to_string(),
+            injected_keys: std::collections::HashMap::new(),
+            original_values: std::collections::HashMap::new(),
+        };
+
+        let err = crate::wsl::manifest::restore_wsl_cli_backup("Ubuntu", temp.path(), &backup)
+            .expect_err("oversized config should fail");
+
+        assert!(err.to_string().contains("too large"));
+    }
+
+    #[test]
     fn test_extract_toml_value() {
         let content = r#"
 preferred_auth_method = "api-key"

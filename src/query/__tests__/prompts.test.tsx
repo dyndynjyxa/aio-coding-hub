@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PromptSummary } from "../../services/workspace/prompts";
 import {
   promptDelete,
@@ -31,6 +31,10 @@ vi.mock("../../services/workspace/prompts", async () => {
 });
 
 describe("query/prompts", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("calls promptsList with tauri runtime", async () => {
     setTauriRuntime();
 
@@ -44,6 +48,33 @@ describe("query/prompts", () => {
     await waitFor(() => {
       expect(promptsList).toHaveBeenCalledWith(1);
     });
+  });
+
+  it("keeps null workspace list queries disabled", () => {
+    setTauriRuntime();
+    vi.mocked(promptsList).mockResolvedValue([]);
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => usePromptsListQuery(null), { wrapper });
+
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(promptsList).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid workspace ids before creating prompt query adapters", () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    expect(() => renderHook(() => usePromptsListQuery(0), { wrapper })).toThrow(
+      "SEC_INVALID_INPUT"
+    );
+    expect(() => renderHook(() => usePromptUpsertMutation(Number.NaN), { wrapper })).toThrow(
+      "SEC_INVALID_INPUT"
+    );
   });
 
   it("usePromptsListQuery enters error state when promptsList rejects", async () => {

@@ -10,8 +10,8 @@ use crate::gateway::proxy::request_end::{
     RequestCompletion, RequestEndArgs, RequestEndContextArgs, RequestEndDeps,
 };
 use crate::gateway::proxy::{ErrorCategory, GatewayErrorCode};
+use crate::gateway::response_fixer;
 use crate::gateway::runtime::GatewayAppState;
-use crate::shared::mutex_ext::MutexExt;
 use axum::http::StatusCode;
 use axum::response::Response;
 
@@ -116,16 +116,15 @@ pub(super) fn force_provider_if_requested(
 // ---------------------------------------------------------------------------
 
 pub(super) fn push_special_setting(special_settings: &SpecialSettings, setting: serde_json::Value) {
-    let mut settings = special_settings.lock_or_recover();
-    settings.push(setting);
+    response_fixer::push_special_setting(special_settings, setting);
 }
 
 // ---------------------------------------------------------------------------
 // Early-error logging context
 // ---------------------------------------------------------------------------
 
-pub(super) struct EarlyErrorLogCtx<'a> {
-    pub(super) state: &'a GatewayAppState,
+pub(super) struct EarlyErrorLogCtx<'a, R: tauri::Runtime = tauri::Wry> {
+    pub(super) state: &'a GatewayAppState<R>,
     pub(super) trace_id: &'a str,
     pub(super) cli_key: &'a str,
     pub(super) method_hint: &'a str,
@@ -137,9 +136,9 @@ pub(super) struct EarlyErrorLogCtx<'a> {
     pub(super) created_at: i64,
 }
 
-pub(super) fn build_early_error_log_ctx<'a>(
-    ctx: &'a super::middleware::ProxyContext,
-) -> EarlyErrorLogCtx<'a> {
+pub(super) fn build_early_error_log_ctx<'a, R: tauri::Runtime>(
+    ctx: &'a super::middleware::ProxyContext<R>,
+) -> EarlyErrorLogCtx<'a, R> {
     EarlyErrorLogCtx {
         state: &ctx.state,
         trace_id: &ctx.trace_id,
@@ -172,13 +171,13 @@ fn build_early_error_response(
     )
 }
 
-fn early_error_request_end_args<'a>(
-    ctx: &'a EarlyErrorLogCtx<'a>,
+fn early_error_request_end_args<'a, R: tauri::Runtime>(
+    ctx: &'a EarlyErrorLogCtx<'a, R>,
     contract: EarlyErrorContract,
     special_settings_json: Option<String>,
     session_id: Option<String>,
     requested_model: Option<String>,
-) -> RequestEndArgs<'a> {
+) -> RequestEndArgs<'a, R> {
     RequestEndArgs::from_context(RequestEndContextArgs {
         deps: RequestEndDeps::new(&ctx.state.app, &ctx.state.db, &ctx.state.log_tx),
         trace_id: ctx.trace_id,
@@ -203,8 +202,8 @@ fn early_error_request_end_args<'a>(
     ))
 }
 
-pub(super) async fn respond_early_error_with_enqueue(
-    ctx: &EarlyErrorLogCtx<'_>,
+pub(super) async fn respond_early_error_with_enqueue<R: tauri::Runtime>(
+    ctx: &EarlyErrorLogCtx<'_, R>,
     contract: EarlyErrorContract,
     message: String,
     special_settings_json: Option<String>,
@@ -223,8 +222,8 @@ pub(super) async fn respond_early_error_with_enqueue(
     resp
 }
 
-pub(super) fn respond_early_error_with_spawn(
-    ctx: &EarlyErrorLogCtx<'_>,
+pub(super) fn respond_early_error_with_spawn<R: tauri::Runtime>(
+    ctx: &EarlyErrorLogCtx<'_, R>,
     contract: EarlyErrorContract,
     message: String,
     special_settings_json: Option<String>,
@@ -242,8 +241,8 @@ pub(super) fn respond_early_error_with_spawn(
     resp
 }
 
-pub(super) fn respond_invalid_cli_key_with_spawn(
-    ctx: &EarlyErrorLogCtx<'_>,
+pub(super) fn respond_invalid_cli_key_with_spawn<R: tauri::Runtime>(
+    ctx: &EarlyErrorLogCtx<'_, R>,
     session_id: Option<String>,
     requested_model: Option<String>,
     err: String,

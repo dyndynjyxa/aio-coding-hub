@@ -37,9 +37,9 @@ pub(super) struct ProviderIdentity<'a> {
     pub(super) provider_base_url_display: &'a String,
 }
 
-pub(super) fn run_gates(
-    ctx: CommonCtx<'_>,
-    input: &RequestContext,
+pub(super) fn run_gates<R: tauri::Runtime>(
+    ctx: CommonCtx<'_, R>,
+    input: &RequestContext<R>,
     provider: &crate::providers::ProviderForGateway,
     identity: &ProviderIdentity<'_>,
     counters: &mut IterationCounters,
@@ -105,8 +105,8 @@ pub(super) fn run_gates(
     gate_allow
 }
 
-pub(super) async fn resolve_base_url(
-    input: &RequestContext,
+pub(super) async fn resolve_base_url<R: tauri::Runtime>(
+    input: &RequestContext<R>,
     provider: &crate::providers::ProviderForGateway,
     provider_id: i64,
     provider_name_base: &str,
@@ -178,8 +178,8 @@ pub(super) fn extract_codex_chatgpt_account_id(
     })
 }
 
-pub(super) fn resolve_oauth(
-    input: &RequestContext,
+pub(super) fn resolve_oauth<R: tauri::Runtime>(
+    input: &RequestContext<R>,
     provider: &crate::providers::ProviderForGateway,
     provider_id: i64,
     provider_name_base: &str,
@@ -230,8 +230,8 @@ pub(super) struct GeminiOAuthPrepared {
     pub(super) response_mode: GeminiOAuthResponseMode,
 }
 
-pub(super) async fn prepare_gemini_oauth(
-    input: &RequestContext,
+pub(super) async fn prepare_gemini_oauth<R: tauri::Runtime>(
+    input: &RequestContext<R>,
     effective_credential: &str,
     provider_base_url_base: &mut String,
 ) -> Option<GeminiOAuthPrepared> {

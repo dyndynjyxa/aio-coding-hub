@@ -152,7 +152,7 @@ export function useSkillsMarketPageDataModel() {
   const discoverMutation = useSkillsDiscoverAvailableMutation();
   const repoUpsertMutation = useSkillRepoUpsertMutation();
   const repoDeleteMutation = useSkillRepoDeleteMutation();
-  const installToLocalMutation = useSkillInstallToLocalMutation(activeWorkspaceId ?? 0);
+  const installToLocalMutation = useSkillInstallToLocalMutation(activeWorkspaceId);
 
   const loading =
     reposQuery.isLoading ||

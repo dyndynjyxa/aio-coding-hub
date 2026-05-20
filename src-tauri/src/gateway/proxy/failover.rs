@@ -3,6 +3,7 @@
 use crate::providers;
 use crate::shared::mutex_ext::MutexExt;
 use std::collections::HashSet;
+use std::future::Future;
 use std::time::Duration;
 
 use crate::gateway::runtime::GatewayAppState;
@@ -110,6 +111,38 @@ pub(super) fn select_next_provider_id_from_order(
 
 const PROVIDER_BASE_URL_PING_TIMEOUT_MS: u64 = 2000;
 
+async fn first_successful_base_url_probe<F, Fut>(
+    base_urls: &[String],
+    mut probe: F,
+) -> Option<(String, u64)>
+where
+    F: FnMut(String) -> Fut,
+    Fut: Future<Output = Result<u64, String>> + Send + 'static,
+{
+    let mut join_set = tokio::task::JoinSet::new();
+    for base_url in base_urls
+        .iter()
+        .map(|base_url| base_url.trim())
+        .filter(|base_url| !base_url.is_empty())
+    {
+        let base_url = base_url.to_string();
+        let task = probe(base_url.clone());
+        join_set.spawn(async move { (base_url, task.await) });
+    }
+
+    while let Some(joined) = join_set.join_next().await {
+        let Ok((base_url, result)) = joined else {
+            continue;
+        };
+        let Ok(ms) = result else {
+            continue;
+        };
+        return Some((base_url, ms));
+    }
+
+    None
+}
+
 pub(super) fn resolve_primary_provider_base_url(
     provider: &providers::ProviderForGateway,
     cli_key: &str,
@@ -163,8 +196,8 @@ pub(super) fn resolve_primary_provider_base_url(
         .unwrap_or_default())
 }
 
-pub(super) async fn select_provider_base_url_for_request(
-    state: &GatewayAppState,
+pub(super) async fn select_provider_base_url_for_request<R: tauri::Runtime>(
+    state: &GatewayAppState<R>,
     provider: &providers::ProviderForGateway,
     cli_key: &str,
     cache_ttl_seconds: u32,
@@ -198,38 +231,25 @@ pub(super) async fn select_provider_base_url_for_request(
     let expires_at_unix_ms = now_unix_ms.saturating_add(ttl_ms);
     let timeout = Duration::from_millis(PROVIDER_BASE_URL_PING_TIMEOUT_MS);
 
-    let mut join_set = tokio::task::JoinSet::new();
-    for base_url in provider.base_urls.iter().cloned() {
-        let client = state.client();
-        join_set.spawn(async move {
-            let result =
-                crate::base_url_probe::probe_base_url_ms(&client, &base_url, timeout).await;
-            (base_url, result)
-        });
-    }
-
-    let mut best: Option<(String, u64)> = None;
-    while let Some(joined) = join_set.join_next().await {
-        let Ok((base_url, result)) = joined else {
-            continue;
-        };
-        let Ok(ms) = result else {
-            continue;
-        };
-
-        match best.as_ref() {
-            Some((_, best_ms)) if ms >= *best_ms => {}
-            _ => best = Some((base_url, ms)),
-        }
-    }
-
-    let Some((best_base_url, _best_latency_ms)) = best else {
+    let client = state.client();
+    let Some((best_base_url, _best_latency_ms)) =
+        first_successful_base_url_probe(&provider.base_urls, |base_url| {
+            let client = client.clone();
+            async move { crate::base_url_probe::probe_base_url_ms(&client, &base_url, timeout).await }
+        })
+        .await
+    else {
         return Ok(primary);
     };
 
     {
         let mut cache = state.latency_cache.lock_or_recover();
-        cache.put_best_base_url(provider.id, best_base_url.clone(), expires_at_unix_ms);
+        cache.put_best_base_url(
+            provider.id,
+            best_base_url.clone(),
+            expires_at_unix_ms,
+            now_unix_ms,
+        );
     }
 
     Ok(best_base_url)

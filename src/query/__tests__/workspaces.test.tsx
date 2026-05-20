@@ -1,11 +1,12 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   WorkspacesListResult,
   WorkspaceSummary,
   WorkspacePreview,
 } from "../../services/workspace/workspaces";
 import {
+  MAX_WORKSPACE_NAME_CHARS,
   workspaceApply,
   workspaceCreate,
   workspaceDelete,
@@ -43,6 +44,10 @@ vi.mock("../../services/workspace/workspaces", async () => {
 });
 
 describe("query/workspaces", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("calls workspacesList with tauri runtime", async () => {
     setTauriRuntime();
 
@@ -57,6 +62,20 @@ describe("query/workspaces", () => {
     await waitFor(() => {
       expect(workspacesList).toHaveBeenCalledWith("claude");
     });
+  });
+
+  it("rejects invalid cli keys or workspace ids before creating workspace query adapters", () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    expect(() => renderHook(() => useWorkspacesListQuery("unknown" as never), { wrapper })).toThrow(
+      "SEC_INVALID_INPUT"
+    );
+    expect(() => renderHook(() => useWorkspacePreviewQuery(0), { wrapper })).toThrow(
+      "SEC_INVALID_INPUT"
+    );
   });
 
   it("useWorkspacesListQuery enters error state when workspacesList rejects", async () => {
@@ -97,6 +116,19 @@ describe("query/workspaces", () => {
     });
   });
 
+  it("keeps null workspace preview queries disabled", () => {
+    setTauriRuntime();
+    vi.mocked(workspacePreview).mockResolvedValue(null as never);
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useWorkspacePreviewQuery(null), { wrapper });
+
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(workspacePreview).not.toHaveBeenCalled();
+  });
+
   it("useWorkspaceCreateMutation inserts into cached list", async () => {
     setTauriRuntime();
 
@@ -126,11 +158,16 @@ describe("query/workspaces", () => {
 
     const { result } = renderHook(() => useWorkspaceCreateMutation(), { wrapper });
     await act(async () => {
-      await result.current.mutateAsync({ cliKey: "claude", name: "W2" });
+      await result.current.mutateAsync({ cliKey: "claude", name: " W2 " });
     });
 
     const next = client.getQueryData<WorkspacesListResult | null>(workspacesKeys.list("claude"));
     expect(next?.items.map((w) => w.id)).toEqual([2, 1]);
+    expect(workspaceCreate).toHaveBeenCalledWith({
+      cliKey: "claude",
+      name: "W2",
+      cloneFromActive: undefined,
+    });
   });
 
   it("useWorkspaceRenameMutation updates cached list row", async () => {
@@ -215,6 +252,49 @@ describe("query/workspaces", () => {
     const next = client.getQueryData<WorkspacesListResult | null>(workspacesKeys.list("claude"));
     expect(next?.active_id).toBe(2);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: workspacesKeys.preview(2) });
+  });
+
+  it("rejects invalid workspace mutation inputs before service calls", async () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    const { result: createResult } = renderHook(() => useWorkspaceCreateMutation(), { wrapper });
+    await expect(
+      createResult.current.mutateAsync({ cliKey: "unknown" as never, name: "W2" })
+    ).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(
+      createResult.current.mutateAsync({ cliKey: "claude", name: "   " })
+    ).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(
+      createResult.current.mutateAsync({
+        cliKey: "claude",
+        name: "x".repeat(MAX_WORKSPACE_NAME_CHARS + 1),
+      })
+    ).rejects.toThrow("workspace name is too long");
+    expect(workspaceCreate).not.toHaveBeenCalled();
+
+    const { result: renameResult } = renderHook(() => useWorkspaceRenameMutation(), { wrapper });
+    await expect(
+      renameResult.current.mutateAsync({ cliKey: "claude", workspaceId: 0, name: "W2" })
+    ).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(
+      renameResult.current.mutateAsync({ cliKey: "claude", workspaceId: 1, name: "bad\nname" })
+    ).rejects.toThrow("workspace name contains control characters");
+    expect(workspaceRename).not.toHaveBeenCalled();
+
+    const { result: deleteResult } = renderHook(() => useWorkspaceDeleteMutation(), { wrapper });
+    await expect(
+      deleteResult.current.mutateAsync({ cliKey: "claude", workspaceId: Number.NaN })
+    ).rejects.toThrow("SEC_INVALID_INPUT");
+    expect(workspaceDelete).not.toHaveBeenCalled();
+
+    const { result: applyResult } = renderHook(() => useWorkspaceApplyMutation(), { wrapper });
+    await expect(
+      applyResult.current.mutateAsync({ cliKey: "claude", workspaceId: -1 })
+    ).rejects.toThrow("SEC_INVALID_INPUT");
+    expect(workspaceApply).not.toHaveBeenCalled();
   });
 
   it("pickWorkspaceById returns the matching workspace or null", () => {

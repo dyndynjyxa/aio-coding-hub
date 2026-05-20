@@ -11,6 +11,10 @@ const MAX_SESSION_ID_LEN: usize = 256;
 const MAX_BINDINGS: usize = 5000;
 const SESSION_SUFFIX_LEN: usize = 8;
 const SESSION_FINGERPRINT_MAX_SEGMENTS: usize = 3;
+const SESSION_FINGERPRINT_TEXT_SAMPLE_BYTES: usize = 32 * 1024;
+const SESSION_FINGERPRINT_COMBINED_PREFIX_BYTES: usize = 8 * 1024;
+const SESSION_FINGERPRINT_COMBINED_SUFFIX_BYTES: usize = 8 * 1024;
+const SESSION_FINGERPRINT_CONTENT_PARTS_MAX_ITEMS: usize = 64;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ActiveSessionSnapshot {
@@ -524,68 +528,129 @@ fn update_hasher_from_message_item(hasher: &mut Sha256, segments_added: &mut usi
                 }
             }
 
-            let mut combined = String::new();
+            let mut combined = FingerprintTextSample::default();
 
-            if let Some(content) = obj
-                .get("content")
-                .and_then(extract_fingerprint_text_from_content)
-            {
-                combined.push_str(&content);
+            if let Some(content) = obj.get("content") {
+                append_fingerprint_text_from_content(&mut combined, content);
             }
 
             if let Some(parts) = obj.get("parts").and_then(|v| v.as_array()) {
-                let mut joined = String::new();
-                for part in parts {
+                for part in parts
+                    .iter()
+                    .take(SESSION_FINGERPRINT_CONTENT_PARTS_MAX_ITEMS)
+                {
                     let Some(part_obj) = part.as_object() else {
                         continue;
                     };
                     if let Some(text) = part_obj.get("text").and_then(|v| v.as_str()) {
-                        joined.push_str(text);
+                        combined.append_text(text);
                         continue;
                     }
                     if let Some(text) = part_obj.get("content").and_then(|v| v.as_str()) {
-                        joined.push_str(text);
+                        combined.append_text(text);
                     }
                 }
-                if !joined.trim().is_empty() {
-                    combined.push_str(&joined);
+                if parts.len() > SESSION_FINGERPRINT_CONTENT_PARTS_MAX_ITEMS {
+                    combined.mark_truncated_parts(parts.len());
                 }
             }
 
-            update_hasher_with_text(hasher, segments_added, &combined);
+            if let Some(text) = combined.into_text() {
+                update_hasher_with_text(hasher, segments_added, &text);
+            }
         }
         _ => {}
     }
 }
 
-fn extract_fingerprint_text_from_content(content: &Value) -> Option<String> {
+#[derive(Debug, Default)]
+struct FingerprintTextSample {
+    prefix: String,
+    suffix: String,
+    total_bytes: usize,
+    truncated_parts: Option<usize>,
+}
+
+impl FingerprintTextSample {
+    fn append_text(&mut self, raw: &str) {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+
+        self.total_bytes = self.total_bytes.saturating_add(trimmed.len());
+        append_utf8_prefix(
+            &mut self.prefix,
+            trimmed,
+            SESSION_FINGERPRINT_COMBINED_PREFIX_BYTES,
+        );
+        append_utf8_suffix(
+            &mut self.suffix,
+            trimmed,
+            SESSION_FINGERPRINT_COMBINED_SUFFIX_BYTES,
+        );
+    }
+
+    fn mark_truncated_parts(&mut self, total_parts: usize) {
+        self.truncated_parts = Some(total_parts);
+    }
+
+    fn into_text(self) -> Option<String> {
+        if self.total_bytes == 0 {
+            return None;
+        }
+
+        let exact = self.truncated_parts.is_none() && self.prefix.len() == self.total_bytes;
+        if exact {
+            return Some(self.prefix);
+        }
+
+        Some(format!(
+            "{}|aio_fingerprint_sample:v1:bytes={}:parts={}|{}",
+            self.prefix,
+            self.total_bytes,
+            self.truncated_parts.unwrap_or(0),
+            self.suffix
+        ))
+    }
+}
+
+fn append_fingerprint_text_from_content(sample: &mut FingerprintTextSample, content: &Value) {
     match content {
-        Value::String(s) => Some(s.trim().to_string()).filter(|v| !v.is_empty()),
+        Value::String(s) => sample.append_text(s),
         Value::Array(parts) => {
-            let mut joined = String::new();
-            for part in parts {
+            for part in parts
+                .iter()
+                .take(SESSION_FINGERPRINT_CONTENT_PARTS_MAX_ITEMS)
+            {
                 let Some(part_obj) = part.as_object() else {
                     continue;
                 };
 
                 if let Some(text) = part_obj.get("text").and_then(|v| v.as_str()) {
-                    joined.push_str(text);
+                    sample.append_text(text);
                     continue;
                 }
 
                 if let Some(text) = part_obj.get("content").and_then(|v| v.as_str()) {
-                    joined.push_str(text);
+                    sample.append_text(text);
                     continue;
                 }
             }
-            Some(joined.trim().to_string()).filter(|v| !v.is_empty())
+            if parts.len() > SESSION_FINGERPRINT_CONTENT_PARTS_MAX_ITEMS {
+                sample.mark_truncated_parts(parts.len());
+            }
         }
-        Value::Object(obj) => obj
-            .get("text")
-            .and_then(|v| v.as_str())
-            .or_else(|| obj.get("content").and_then(|v| v.as_str()))
-            .and_then(|text| Some(text.trim().to_string()).filter(|v| !v.is_empty())),
-        _ => None,
+        Value::Object(obj) => {
+            if let Some(text) = obj
+                .get("text")
+                .and_then(|v| v.as_str())
+                .or_else(|| obj.get("content").and_then(|v| v.as_str()))
+            {
+                sample.append_text(text);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -599,9 +664,65 @@ fn update_hasher_with_text(hasher: &mut Sha256, segments_added: &mut usize, raw:
         return;
     }
 
-    hasher.update(trimmed.as_bytes());
+    let bytes = trimmed.as_bytes();
+    if bytes.len() <= SESSION_FINGERPRINT_TEXT_SAMPLE_BYTES {
+        hasher.update(bytes);
+    } else {
+        let edge_bytes = SESSION_FINGERPRINT_TEXT_SAMPLE_BYTES / 2;
+        hasher.update(b"sample:v1:bytes=");
+        hasher.update(bytes.len().to_string().as_bytes());
+        hasher.update(b":head:");
+        hasher.update(&bytes[..edge_bytes]);
+        hasher.update(b":tail:");
+        hasher.update(&bytes[bytes.len() - edge_bytes..]);
+    }
     hasher.update(b"|");
     *segments_added += 1;
+}
+
+fn append_utf8_prefix(out: &mut String, raw: &str, max_bytes: usize) {
+    if out.len() >= max_bytes {
+        return;
+    }
+
+    for ch in raw.chars() {
+        let len = ch.len_utf8();
+        if out.len().saturating_add(len) > max_bytes {
+            break;
+        }
+        out.push(ch);
+    }
+}
+
+fn append_utf8_suffix(out: &mut String, raw: &str, max_bytes: usize) {
+    if raw.len() >= max_bytes {
+        out.clear();
+        out.push_str(utf8_suffix_slice(raw, max_bytes));
+        return;
+    }
+
+    out.push_str(raw);
+    while out.len() > max_bytes {
+        let Some(ch) = out.chars().next() else {
+            break;
+        };
+        out.drain(..ch.len_utf8());
+    }
+}
+
+fn utf8_suffix_slice(raw: &str, max_bytes: usize) -> &str {
+    if raw.len() <= max_bytes {
+        return raw;
+    }
+
+    let mut start = raw.len();
+    for (idx, _) in raw.char_indices().rev() {
+        if raw.len().saturating_sub(idx) > max_bytes {
+            break;
+        }
+        start = idx;
+    }
+    &raw[start..]
 }
 
 fn sanitize_deterministic_part(raw: &str) -> Option<String> {
@@ -609,8 +730,16 @@ fn sanitize_deterministic_part(raw: &str) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
-    let mut out = trimmed.to_string();
-    out.retain(|c| c != '\n' && c != '\r' && c != '\t');
+    let mut out = String::with_capacity(trimmed.len().min(MAX_SESSION_ID_LEN));
+    for c in trimmed.chars() {
+        if matches!(c, '\n' | '\r' | '\t') {
+            continue;
+        }
+        if out.len().saturating_add(c.len_utf8()) > MAX_SESSION_ID_LEN {
+            break;
+        }
+        out.push(c);
+    }
     if out.is_empty() {
         return None;
     }
@@ -622,13 +751,17 @@ fn sanitize_session_id(raw: &str) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
-    let mut out = if trimmed.len() > MAX_SESSION_ID_LEN {
-        trimmed[..MAX_SESSION_ID_LEN].to_string()
-    } else {
-        trimmed.to_string()
-    };
-    // Avoid newlines/whitespace causing log injection if someone mistakenly logs it.
-    out.retain(|c| c != '\n' && c != '\r' && c != '\t');
+    let mut out = String::with_capacity(trimmed.len().min(MAX_SESSION_ID_LEN));
+    for c in trimmed.chars() {
+        // Avoid newlines/whitespace causing log injection if someone mistakenly logs it.
+        if matches!(c, '\n' | '\r' | '\t') {
+            continue;
+        }
+        if out.len().saturating_add(c.len_utf8()) > MAX_SESSION_ID_LEN {
+            break;
+        }
+        out.push(c);
+    }
     if out.is_empty() {
         return None;
     }

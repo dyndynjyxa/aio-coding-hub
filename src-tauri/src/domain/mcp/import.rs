@@ -14,6 +14,33 @@ use super::types::{McpImportReport, McpImportServer, McpImportSkip, McpParseResu
 use super::validate::{suggest_key, validate_server_key};
 use crate::shared::text::normalize_name;
 
+const MCP_CONFIG_IMPORT_MAX_BYTES: usize = 1024 * 1024;
+const MCP_PARSE_MAX_SERVERS: usize = 512;
+const MCP_PARSE_MAX_STRING_ARRAY_ITEMS: usize = 256;
+const MCP_PARSE_MAX_STRING_MAP_ENTRIES: usize = 256;
+
+fn ensure_config_text_within_limit(text: &str, hint: &str) -> Result<(), String> {
+    if text.len() > MCP_CONFIG_IMPORT_MAX_BYTES {
+        return Err(format!(
+            "SEC_INVALID_INPUT: {hint} config too large (max {MCP_CONFIG_IMPORT_MAX_BYTES} bytes)"
+        ));
+    }
+    Ok(())
+}
+
+fn push_import_server(
+    out: &mut Vec<McpImportServer>,
+    server: McpImportServer,
+) -> Result<(), String> {
+    if out.len() >= MCP_PARSE_MAX_SERVERS {
+        return Err(format!(
+            "SEC_INVALID_INPUT: import supports at most {MCP_PARSE_MAX_SERVERS} MCP servers"
+        ));
+    }
+    out.push(server);
+    Ok(())
+}
+
 fn is_code_switch_r_shape(root: &serde_json::Value) -> bool {
     root.get("claude").is_some() || root.get("codex").is_some() || root.get("gemini").is_some()
 }
@@ -55,26 +82,39 @@ fn preserve_import_key_or_suggest(raw_key: &str, fallback_name: &str) -> String 
     suggest_key(trimmed)
 }
 
-fn extract_string_array(value: Option<&serde_json::Value>) -> Vec<String> {
+fn extract_string_array(value: Option<&serde_json::Value>) -> Result<Vec<String>, String> {
     let Some(arr) = value.and_then(|v| v.as_array()) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    arr.iter()
+    if arr.len() > MCP_PARSE_MAX_STRING_ARRAY_ITEMS {
+        return Err(format!(
+            "SEC_INVALID_INPUT: import string arrays must contain at most {MCP_PARSE_MAX_STRING_ARRAY_ITEMS} entries"
+        ));
+    }
+    Ok(arr
+        .iter()
         .filter_map(|v| v.as_str().map(|s| s.to_string()))
-        .collect()
+        .collect())
 }
 
-fn extract_string_map(value: Option<&serde_json::Value>) -> BTreeMap<String, String> {
+fn extract_string_map(
+    value: Option<&serde_json::Value>,
+) -> Result<BTreeMap<String, String>, String> {
     let mut out = BTreeMap::new();
     let Some(obj) = value.and_then(|v| v.as_object()) else {
-        return out;
+        return Ok(out);
     };
+    if obj.len() > MCP_PARSE_MAX_STRING_MAP_ENTRIES {
+        return Err(format!(
+            "SEC_INVALID_INPUT: import string maps must contain at most {MCP_PARSE_MAX_STRING_MAP_ENTRIES} entries"
+        ));
+    }
     for (k, v) in obj {
         if let Some(s) = v.as_str() {
             out.insert(k.to_string(), s.to_string());
         }
     }
-    out
+    Ok(out)
 }
 
 fn normalize_transport_from_json(spec: &serde_json::Value) -> Option<String> {
@@ -88,7 +128,7 @@ fn normalize_transport_from_json(spec: &serde_json::Value) -> Option<String> {
     match lower.as_str() {
         "stdio" => Some("stdio".to_string()),
         "http" => Some("http".to_string()),
-        "sse" => Some("http".to_string()),
+        "sse" => Some("sse".to_string()),
         _ => None,
     }
 }
@@ -162,7 +202,7 @@ fn parse_json_server_entry(
         spec.get("headers")
             .or_else(|| spec.get("http_headers"))
             .or_else(|| spec.get("httpHeaders")),
-    );
+    )?;
 
     let raw_name = name_hint
         .or_else(|| entry.get("name").and_then(|v| v.as_str()))
@@ -181,9 +221,9 @@ fn parse_json_server_entry(
             "SEC_INVALID_INPUT: import server '{name}' missing command"
         ));
     }
-    if transport == "http" && url.as_deref().unwrap_or("").trim().is_empty() {
+    if transport != "stdio" && url.as_deref().unwrap_or("").trim().is_empty() {
         return Err(format!(
-            "SEC_INVALID_INPUT: import server '{name}' missing url"
+            "SEC_INVALID_INPUT: import server '{name}' missing {transport} url"
         ));
     }
 
@@ -192,8 +232,8 @@ fn parse_json_server_entry(
         name,
         transport,
         command,
-        args: extract_string_array(spec.get("args")),
-        env: extract_string_map(spec.get("env")),
+        args: extract_string_array(spec.get("args"))?,
+        env: extract_string_map(spec.get("env"))?,
         cwd: spec
             .get("cwd")
             .and_then(|v| v.as_str())
@@ -214,39 +254,53 @@ fn parse_json_mcp_servers_map(
         let mut server = parse_json_server_entry(Some(key), entry)?;
         let base = preserve_import_key_or_suggest(key, &server.name);
         server.server_key = ensure_unique_key(&base, &mut used_keys);
-        out.push(server);
+        push_import_server(&mut out, server)?;
     }
 
     out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(out)
 }
 
-fn extract_toml_string_array(value: Option<&toml::Value>) -> Vec<String> {
+fn extract_toml_string_array(value: Option<&toml::Value>) -> Result<Vec<String>, String> {
     let Some(arr) = value.and_then(|v| v.as_array()) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
 
-    arr.iter()
+    if arr.len() > MCP_PARSE_MAX_STRING_ARRAY_ITEMS {
+        return Err(format!(
+            "SEC_INVALID_INPUT: import string arrays must contain at most {MCP_PARSE_MAX_STRING_ARRAY_ITEMS} entries"
+        ));
+    }
+    Ok(arr
+        .iter()
         .filter_map(|v| v.as_str().map(|s| s.to_string()))
-        .collect()
+        .collect())
 }
 
-fn extract_toml_string_map(value: Option<&toml::Value>) -> BTreeMap<String, String> {
+fn extract_toml_string_map(
+    value: Option<&toml::Value>,
+) -> Result<BTreeMap<String, String>, String> {
     let mut out = BTreeMap::new();
     let Some(table) = value.and_then(|v| v.as_table()) else {
-        return out;
+        return Ok(out);
     };
 
+    if table.len() > MCP_PARSE_MAX_STRING_MAP_ENTRIES {
+        return Err(format!(
+            "SEC_INVALID_INPUT: import string maps must contain at most {MCP_PARSE_MAX_STRING_MAP_ENTRIES} entries"
+        ));
+    }
     for (k, v) in table {
         if let Some(s) = v.as_str() {
             out.insert(k.to_string(), s.to_string());
         }
     }
 
-    out
+    Ok(out)
 }
 
 fn parse_codex_toml_mcp_servers(toml_text: &str) -> Result<Vec<McpImportServer>, String> {
+    ensure_config_text_within_limit(toml_text, "codex toml")?;
     let root: toml::Value = toml::from_str(toml_text)
         .map_err(|e| format!("SEC_INVALID_INPUT: invalid codex toml: {e}"))?;
     let Some(servers) = root.get("mcp_servers").and_then(|v| v.as_table()) else {
@@ -299,23 +353,26 @@ fn parse_codex_toml_mcp_servers(toml_text: &str) -> Result<Vec<McpImportServer>,
         let base = preserve_import_key_or_suggest(key, &name);
         let server_key = ensure_unique_key(&base, &mut used_keys);
 
-        out.push(McpImportServer {
-            server_key,
-            name,
-            transport,
-            command,
-            args: extract_toml_string_array(spec.get("args")),
-            env: extract_toml_string_map(spec.get("env")),
-            cwd: spec
-                .get("cwd")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
-            url,
-            headers: extract_toml_string_map(
-                spec.get("headers").or_else(|| spec.get("http_headers")),
-            ),
-            enabled: true,
-        });
+        push_import_server(
+            &mut out,
+            McpImportServer {
+                server_key,
+                name,
+                transport,
+                command,
+                args: extract_toml_string_array(spec.get("args"))?,
+                env: extract_toml_string_map(spec.get("env"))?,
+                cwd: spec
+                    .get("cwd")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                url,
+                headers: extract_toml_string_map(
+                    spec.get("headers").or_else(|| spec.get("http_headers")),
+                )?,
+                enabled: true,
+            },
+        )?;
     }
 
     out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -358,10 +415,10 @@ fn parse_code_switch_r(root: &serde_json::Value) -> Result<Vec<McpImportServer>,
                 .get("cwd")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
-            let args = extract_string_array(spec.get("args"));
-            let env = extract_string_map(spec.get("env"));
+            let args = extract_string_array(spec.get("args"))?;
+            let env = extract_string_map(spec.get("env"))?;
             let headers =
-                extract_string_map(spec.get("headers").or_else(|| spec.get("http_headers")));
+                extract_string_map(spec.get("headers").or_else(|| spec.get("http_headers")))?;
 
             if transport == "stdio" && command.as_deref().unwrap_or("").trim().is_empty() {
                 return Err(format!(
@@ -371,6 +428,12 @@ fn parse_code_switch_r(root: &serde_json::Value) -> Result<Vec<McpImportServer>,
             if transport == "http" && url.as_deref().unwrap_or("").trim().is_empty() {
                 return Err(format!(
                     "SEC_INVALID_INPUT: import {cli_key} server '{name}' missing url"
+                ));
+            }
+
+            if !by_name.contains_key(name) && by_name.len() >= MCP_PARSE_MAX_SERVERS {
+                return Err(format!(
+                    "SEC_INVALID_INPUT: import supports at most {MCP_PARSE_MAX_SERVERS} MCP servers"
                 ));
             }
 
@@ -424,6 +487,8 @@ pub fn parse_json(json_text: &str) -> crate::shared::error::AppResult<McpParseRe
     if json_text.is_empty() {
         return Err("SEC_INVALID_INPUT: JSON is required".to_string().into());
     }
+    ensure_config_text_within_limit(json_text, "json")
+        .map_err(crate::shared::error::AppError::from)?;
 
     let root: serde_json::Value = serde_json::from_str(json_text)
         .map_err(|e| format!("SEC_INVALID_INPUT: invalid JSON: {e}"))?;
@@ -489,21 +554,24 @@ pub fn parse_json(json_text: &str) -> crate::shared::error::AppResult<McpParseRe
                     }
                 });
 
-            out.push(McpImportServer {
-                server_key: base,
-                name,
-                transport,
-                command,
-                args: extract_string_array(obj.get("args")),
-                env: extract_string_map(obj.get("env")),
-                cwd: obj
-                    .get("cwd")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
-                url,
-                headers: extract_string_map(obj.get("headers")),
-                enabled,
-            });
+            push_import_server(
+                &mut out,
+                McpImportServer {
+                    server_key: base,
+                    name,
+                    transport,
+                    command,
+                    args: extract_string_array(obj.get("args"))?,
+                    env: extract_string_map(obj.get("env"))?,
+                    cwd: obj
+                        .get("cwd")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    url,
+                    headers: extract_string_map(obj.get("headers"))?,
+                    enabled,
+                },
+            )?;
         }
         out
     } else {
@@ -529,6 +597,12 @@ pub fn parse_workspace_cli_target_json<R: tauri::Runtime>(
     let Some(raw) = bytes else {
         return Err(format!("SEC_INVALID_INPUT: {cli_key} target config not found").into());
     };
+    if raw.len() > MCP_CONFIG_IMPORT_MAX_BYTES {
+        return Err(format!(
+            "SEC_INVALID_INPUT: {cli_key} target config too large (max {MCP_CONFIG_IMPORT_MAX_BYTES} bytes)"
+        )
+        .into());
+    }
 
     let text = String::from_utf8(raw)
         .map_err(|e| format!("SEC_INVALID_INPUT: {cli_key} target config is not utf8: {e}"))?;
@@ -717,4 +791,69 @@ ON CONFLICT(workspace_id, server_id) DO UPDATE SET
         updated,
         skipped,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_json_rejects_oversized_config_text() {
+        let text = format!(
+            "{{\"mcpServers\":{{\"fetch\":{{\"command\":\"{}\"}}}}}}",
+            "x".repeat(MCP_CONFIG_IMPORT_MAX_BYTES)
+        );
+
+        let err = parse_json(&text).expect_err("oversized json should fail");
+
+        assert!(err.to_string().contains("json config too large"));
+    }
+
+    #[test]
+    fn parse_json_caps_server_count() {
+        let servers = (0..=MCP_PARSE_MAX_SERVERS)
+            .map(|index| format!("\"srv-{index}\":{{\"command\":\"npx\"}}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let text = format!("{{\"mcpServers\":{{{servers}}}}}");
+
+        let err = parse_json(&text).expect_err("too many servers should fail");
+
+        assert!(err.to_string().contains("at most 512 MCP servers"));
+    }
+
+    #[test]
+    fn parse_json_caps_nested_string_arrays_and_maps() {
+        let args = (0..=MCP_PARSE_MAX_STRING_ARRAY_ITEMS)
+            .map(|index| format!("\"arg-{index}\""))
+            .collect::<Vec<_>>()
+            .join(",");
+        let text =
+            format!("{{\"mcpServers\":{{\"fetch\":{{\"command\":\"npx\",\"args\":[{args}]}}}}}}");
+
+        let err = parse_json(&text).expect_err("too many args should fail");
+        assert!(err.to_string().contains("string arrays"));
+
+        let env = (0..=MCP_PARSE_MAX_STRING_MAP_ENTRIES)
+            .map(|index| format!("\"KEY_{index}\":\"value\""))
+            .collect::<Vec<_>>()
+            .join(",");
+        let text =
+            format!("{{\"mcpServers\":{{\"fetch\":{{\"command\":\"npx\",\"env\":{{{env}}}}}}}}}");
+
+        let err = parse_json(&text).expect_err("too many env keys should fail");
+        assert!(err.to_string().contains("string maps"));
+    }
+
+    #[test]
+    fn parse_codex_toml_caps_server_count() {
+        let text = (0..=MCP_PARSE_MAX_SERVERS)
+            .map(|index| format!("[mcp_servers.srv-{index}]\ncommand = \"npx\"\n"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let err = parse_codex_toml_mcp_servers(&text).expect_err("too many toml servers fail");
+
+        assert!(err.to_string().contains("at most 512 MCP servers"));
+    }
 }

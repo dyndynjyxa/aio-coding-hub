@@ -26,6 +26,37 @@ describe("services/gateway/gatewayEvents", () => {
     unlistenFns.forEach((fn) => expect(fn).toHaveBeenCalledTimes(1));
   });
 
+  it("bounds non-transition circuit dedup without clearing hot entries", async () => {
+    vi.resetModules();
+    const { shouldLogCircuitNonTransition } = await import("../gatewayEvents");
+
+    const dedup = new Map<string, number>();
+    expect(shouldLogCircuitNonTransition(dedup, "same", 0)).toBe(true);
+    expect(shouldLogCircuitNonTransition(dedup, "same", 100)).toBe(false);
+    expect(shouldLogCircuitNonTransition(dedup, "same", 3000)).toBe(true);
+
+    const withExpired = new Map<string, number>([
+      ["old", 0],
+      ["fresh", 9500],
+    ]);
+    expect(shouldLogCircuitNonTransition(withExpired, "next", 10_000)).toBe(true);
+    expect(withExpired.has("old")).toBe(false);
+    expect(withExpired.has("fresh")).toBe(true);
+    expect(withExpired.has("next")).toBe(true);
+
+    const full = new Map<string, number>();
+    for (let index = 0; index < 500; index += 1) {
+      full.set(`key-${index}`, 10_000 + index);
+    }
+
+    expect(shouldLogCircuitNonTransition(full, "key-new", 11_000)).toBe(true);
+
+    expect(full.size).toBe(500);
+    expect(full.has("key-0")).toBe(false);
+    expect(full.has("key-1")).toBe(true);
+    expect(full.has("key-new")).toBe(true);
+  });
+
   it("registers listeners and handles payload branches", async () => {
     setTauriRuntime();
     vi.resetModules();

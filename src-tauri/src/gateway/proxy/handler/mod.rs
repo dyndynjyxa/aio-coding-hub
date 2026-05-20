@@ -8,10 +8,13 @@ use super::is_claude_count_tokens_request;
 use super::logging::enqueue_request_log_placeholder;
 use super::request_context::RequestContext;
 
-use crate::gateway::events::{emit_gateway_debug_log, emit_request_start_event};
+use crate::gateway::events::{emit_gateway_debug_log_lazy, emit_request_start_event};
 use crate::gateway::proxy::should_seed_in_progress_request_log;
 use crate::gateway::response_fixer;
-use crate::gateway::util::{new_trace_id, now_unix_millis};
+use crate::gateway::util::{
+    lossy_utf8_preview, new_trace_id, now_unix_millis, redacted_headers_for_debug,
+    MAX_DEBUG_BODY_PREVIEW_BYTES,
+};
 use axum::{
     body::{Body, Bytes},
     http::Request,
@@ -46,8 +49,8 @@ fn new_special_settings() -> SpecialSettings {
 // In-progress request log placeholder
 // ---------------------------------------------------------------------------
 
-fn build_in_progress_request_log_args(
-    ctx: &middleware::ProxyContext,
+fn build_in_progress_request_log_args<R: tauri::Runtime>(
+    ctx: &middleware::ProxyContext<R>,
 ) -> Option<super::RequestLogEnqueueArgs> {
     if !should_seed_in_progress_request_log(&ctx.cli_key, &ctx.forwarded_path, ctx.observe_request)
     {
@@ -82,12 +85,16 @@ fn build_in_progress_request_log_args(
 // Main entry point: middleware chain orchestrator
 // ---------------------------------------------------------------------------
 
-pub(in crate::gateway) async fn proxy_impl(
-    state: crate::gateway::runtime::GatewayAppState,
+pub(in crate::gateway) async fn proxy_impl<R>(
+    state: crate::gateway::runtime::GatewayAppState<R>,
     cli_key: String,
     forwarded_path: String,
     req: Request<Body>,
-) -> Response {
+) -> Response
+where
+    R: tauri::Runtime + 'static,
+    R::Handle: Unpin,
+{
     let started = Instant::now();
     let trace_id = new_trace_id();
     let created_at_ms = now_unix_millis() as i64;
@@ -221,20 +228,19 @@ pub(in crate::gateway) async fn proxy_impl(
         );
     }
 
-    emit_gateway_debug_log(
-        &ctx.state.app,
+    emit_gateway_debug_log_lazy(&ctx.state.app, || {
         format!(
-            "[REQ] trace_id={} cli_key={} method={} path={} model={}\n  headers={:?}\n  body({} bytes)={}",
+            "[REQ] trace_id={} cli_key={} method={} path={} model={}\n  headers={}\n  body({} bytes)={}",
             ctx.trace_id,
             ctx.cli_key,
             ctx.method_hint,
             ctx.forwarded_path,
             ctx.requested_model.as_deref().unwrap_or("-"),
-            ctx.headers,
+            redacted_headers_for_debug(&ctx.headers),
             ctx.body_bytes.len(),
-            String::from_utf8_lossy(&ctx.body_bytes),
-        ),
-    );
+            lossy_utf8_preview(&ctx.body_bytes, MAX_DEBUG_BODY_PREVIEW_BYTES),
+        )
+    });
 
     if let Some(args) = build_in_progress_request_log_args(&ctx) {
         enqueue_request_log_placeholder(&ctx.state.app, &ctx.state.log_tx, args).await;
@@ -466,7 +472,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_session_reuse_binding_promotes_bound_provider_when_allowed() {
+    fn apply_session_reuse_binding_rotates_from_bound_provider_when_allowed() {
         let mut providers = vec![provider(11), provider(22), provider(33)];
 
         let selected = super::provider_selection::apply_session_reuse_provider_binding(
@@ -477,7 +483,7 @@ mod tests {
         );
 
         assert_eq!(selected, Some(22));
-        assert_eq!(provider_ids(&providers), vec![22, 11, 33]);
+        assert_eq!(provider_ids(&providers), vec![22, 33, 11]);
     }
 
     #[test]

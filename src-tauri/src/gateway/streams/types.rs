@@ -6,8 +6,8 @@ use std::time::Instant;
 
 use super::super::events::FailoverAttempt;
 
-pub(in crate::gateway) struct StreamFinalizeCtx {
-    pub(in crate::gateway) app: tauri::AppHandle,
+pub(in crate::gateway) struct StreamFinalizeCtx<R: tauri::Runtime = tauri::Wry> {
+    pub(in crate::gateway) app: tauri::AppHandle<R>,
     pub(in crate::gateway) db: db::Db,
     pub(in crate::gateway) log_tx: tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
     pub(in crate::gateway) circuit: Arc<circuit_breaker::CircuitBreaker>,

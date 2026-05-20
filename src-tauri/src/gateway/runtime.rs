@@ -10,9 +10,8 @@ use super::codex_session_id::CodexSessionIdCache;
 use super::proxy::{ProviderBaseUrlPingCache, RecentErrorCache};
 use super::{GatewayProviderCircuitStatus, GatewayStatus};
 
-#[derive(Clone)]
-pub(in crate::gateway) struct GatewayAppState {
-    pub(super) app: tauri::AppHandle,
+pub(in crate::gateway) struct GatewayAppState<R: tauri::Runtime = tauri::Wry> {
+    pub(super) app: tauri::AppHandle<R>,
     pub(super) db: db::Db,
     pub(super) log_tx: tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
     pub(super) circuit: Arc<circuit_breaker::CircuitBreaker>,
@@ -22,11 +21,29 @@ pub(in crate::gateway) struct GatewayAppState {
     pub(super) latency_cache: Arc<Mutex<ProviderBaseUrlPingCache>>,
 }
 
-impl GatewayAppState {
+impl<R: tauri::Runtime> Clone for GatewayAppState<R> {
+    fn clone(&self) -> Self {
+        Self {
+            app: self.app.clone(),
+            db: self.db.clone(),
+            log_tx: self.log_tx.clone(),
+            circuit: self.circuit.clone(),
+            session: self.session.clone(),
+            codex_session_cache: self.codex_session_cache.clone(),
+            recent_errors: self.recent_errors.clone(),
+            latency_cache: self.latency_cache.clone(),
+        }
+    }
+}
+
+impl<R: tauri::Runtime> GatewayAppState<R> {
     pub(in crate::gateway) fn client(&self) -> reqwest::Client {
         super::http_client::get()
     }
+}
 
+#[cfg(test)]
+impl GatewayAppState {
     #[cfg(test)]
     pub(in crate::gateway) fn current_client() -> reqwest::Client {
         super::http_client::get()

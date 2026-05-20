@@ -1,10 +1,11 @@
 //! Gemini-specific CLI proxy configuration helpers.
 
 use crate::shared::error::AppResult;
-use crate::shared::fs::{read_optional_file, write_file_atomic};
 use std::path::Path;
 
-use super::PLACEHOLDER_KEY;
+use super::{
+    read_cli_proxy_file, read_optional_cli_proxy_file, write_cli_proxy_file_atomic, PLACEHOLDER_KEY,
+};
 
 pub(super) fn gemini_env_path<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
@@ -93,13 +94,8 @@ pub(super) fn env_var_value(input: &str, key: &str) -> Option<String> {
 pub(super) fn merge_restore_gemini_env(target_path: &Path, backup_path: &Path) -> AppResult<()> {
     const PROXY_ENV_KEYS: &[&str] = &["GOOGLE_GEMINI_BASE_URL", "GEMINI_API_KEY"];
 
-    let current_bytes = read_optional_file(target_path)?;
-    let backup_bytes = std::fs::read(backup_path).map_err(|e| {
-        format!(
-            "failed to read backup {} for gemini_env: {e}",
-            backup_path.display()
-        )
-    })?;
+    let current_bytes = read_optional_cli_proxy_file(target_path)?;
+    let backup_bytes = read_cli_proxy_file(backup_path)?;
 
     let current_str = current_bytes
         .as_deref()
@@ -118,7 +114,7 @@ pub(super) fn merge_restore_gemini_env(target_path: &Path, backup_path: &Path) -
     if !out.ends_with('\n') {
         out.push('\n');
     }
-    write_file_atomic(target_path, out.as_bytes())?;
+    write_cli_proxy_file_atomic(target_path, out.as_bytes())?;
     Ok(())
 }
 
@@ -143,8 +139,8 @@ pub(super) fn is_proxy_config_applied<R: tauri::Runtime>(
         Ok(p) => p,
         Err(_) => return false,
     };
-    let content = match std::fs::read_to_string(&path) {
-        Ok(v) => v,
+    let content = match read_cli_proxy_file(&path) {
+        Ok(v) => String::from_utf8_lossy(&v).to_string(),
         Err(_) => return false,
     };
     let Some(base) = env_var_value(&content, "GOOGLE_GEMINI_BASE_URL") else {

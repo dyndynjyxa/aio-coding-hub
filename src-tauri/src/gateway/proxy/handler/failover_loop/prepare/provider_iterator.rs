@@ -71,9 +71,9 @@ pub(super) struct SkipReason {
 }
 
 /// Prepare a single provider for the retry loop.
-pub(super) async fn prepare_provider(
-    ctx: CommonCtx<'_>,
-    input: &RequestContext,
+pub(super) async fn prepare_provider<R: tauri::Runtime>(
+    ctx: CommonCtx<'_, R>,
+    input: &RequestContext<R>,
     provider: &crate::providers::ProviderForGateway,
     counters: &mut IterationCounters,
     attempts: &mut Vec<FailoverAttempt>,
@@ -341,7 +341,7 @@ pub(super) async fn prepare_provider(
     }))
 }
 
-fn codex_request_has_previous_response_id(input: &RequestContext) -> bool {
+fn codex_request_has_previous_response_id<R: tauri::Runtime>(input: &RequestContext<R>) -> bool {
     codex_body_has_previous_response_id(&input.cli_key, &input.body_bytes)
 }
 

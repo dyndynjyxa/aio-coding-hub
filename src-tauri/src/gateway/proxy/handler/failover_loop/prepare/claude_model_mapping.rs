@@ -5,9 +5,9 @@ use crate::gateway::events::ClaudeModelMapping;
 use crate::gateway::proxy::model_rewrite::{
     replace_model_in_body_json, replace_model_in_path, replace_model_in_query,
 };
+use crate::gateway::response_fixer;
 use crate::gateway::util::RequestedModelLocation;
 use crate::providers;
-use crate::shared::mutex_ext::MutexExt;
 use axum::body::Bytes;
 
 pub(super) struct UpstreamRequestMut<'a> {
@@ -17,8 +17,8 @@ pub(super) struct UpstreamRequestMut<'a> {
     pub(super) strip_request_content_encoding: &'a mut bool,
 }
 
-pub(super) fn apply_if_needed(
-    ctx: CommonCtx<'_>,
+pub(super) fn apply_if_needed<R: tauri::Runtime>(
+    ctx: CommonCtx<'_, R>,
     provider: &providers::ProviderForGateway,
     provider_ctx: ProviderCtx<'_>,
     requested_model_location: Option<RequestedModelLocation>,
@@ -133,24 +133,26 @@ pub(super) fn apply_if_needed(
         applied,
     };
 
-    let mut settings = ctx.special_settings.lock_or_recover();
-    settings.push(serde_json::json!({
-        "type": "claude_model_mapping",
-        "scope": "attempt",
-        "hit": true,
-        "applied": mapping.applied,
-        "providerId": mapping.provider_id,
-        "providerName": &mapping.provider_name,
-        "requestedModel": &mapping.requested_model,
-        "effectiveModel": &mapping.effective_model,
-        "mappingKind": &mapping.mapping_kind,
-        "hasThinking": has_thinking,
-        "location": match location {
-            RequestedModelLocation::BodyJson => "body",
-            RequestedModelLocation::Query => "query",
-            RequestedModelLocation::Path => "path",
-        },
-    }));
+    response_fixer::push_special_setting(
+        ctx.special_settings,
+        serde_json::json!({
+            "type": "claude_model_mapping",
+            "scope": "attempt",
+            "hit": true,
+            "applied": mapping.applied,
+            "providerId": mapping.provider_id,
+            "providerName": &mapping.provider_name,
+            "requestedModel": &mapping.requested_model,
+            "effectiveModel": &mapping.effective_model,
+            "mappingKind": &mapping.mapping_kind,
+            "hasThinking": has_thinking,
+            "location": match location {
+                RequestedModelLocation::BodyJson => "body",
+                RequestedModelLocation::Query => "query",
+                RequestedModelLocation::Path => "path",
+            },
+        }),
+    );
 
     Some(mapping)
 }

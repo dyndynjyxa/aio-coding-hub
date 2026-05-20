@@ -38,7 +38,7 @@ base64 = "0.22"
 rand = "0.8"
 bytes = "1"
 axum = "0.7"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "process", "sync", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "process", "sync", "time", "io-util"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.24"
@@ -75,6 +75,7 @@ junction = "1"
 [dev-dependencies]
 tempfile = "3"
 tauri = { version = "2", features = ["test"] }
+tower = { version = "0.5", features = ["util"] }
 
 [patch.crates-io]
 # Patch `mac-notification-sys` so notifications can still present when app is foreground on macOS.

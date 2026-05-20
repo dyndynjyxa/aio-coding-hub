@@ -17,6 +17,13 @@ use tauri::Manager;
 
 pub const CONFIG_BUNDLE_SCHEMA_VERSION: u32 = 2;
 pub const CONFIG_BUNDLE_SCHEMA_VERSION_V1: u32 = 1;
+pub(crate) const CONFIG_IMPORT_FILE_MAX_BYTES: usize = 64 * 1024 * 1024;
+pub(crate) const CONFIG_SKILL_FILE_MAX_BYTES: usize = 1024 * 1024;
+pub(crate) const CONFIG_SKILL_TOTAL_MAX_BYTES: usize = 8 * 1024 * 1024;
+pub(crate) const CONFIG_SKILL_FILE_COUNT_MAX: usize = 256;
+pub(crate) const CONFIG_SKILL_RELATIVE_PATH_MAX_CHARS: usize = 512;
+pub(crate) const CONFIG_SKILL_SOURCE_METADATA_MAX_BYTES: usize = 64 * 1024;
+pub(crate) const CONFIG_SKILL_MD_MAX_BYTES: usize = 256 * 1024;
 const SKILL_MANAGED_MARKER_FILE: &str = ".aio-coding-hub.managed";
 const SKILL_SOURCE_MARKER_FILE: &str = ".aio-coding-hub.source.json";
 

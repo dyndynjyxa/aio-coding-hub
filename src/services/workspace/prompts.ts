@@ -53,6 +53,38 @@ export type PromptUpsertInput = {
   enabled: boolean;
 };
 
+function validatePositiveSafeInteger(label: string, value: number): number {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`SEC_INVALID_INPUT: invalid ${label}=${value}`);
+  }
+  return value;
+}
+
+export function validatePromptWorkspaceId(workspaceId: number): number {
+  return validatePositiveSafeInteger("workspaceId", workspaceId);
+}
+
+export function validatePromptId(promptId: number): number {
+  return validatePositiveSafeInteger("promptId", promptId);
+}
+
+function normalizeOptionalPromptId(promptId: number | null | undefined): number | null {
+  if (promptId == null) return null;
+  return validatePromptId(promptId);
+}
+
+function normalizePromptName(name: string): string {
+  const normalized = name.trim();
+  if (!normalized) {
+    throw new Error("SEC_INVALID_INPUT: prompt name is required");
+  }
+  return normalized;
+}
+
+function normalizePromptContent(content: string): string {
+  return content.trim();
+}
+
 function toCliKey(value: string, label: string): CliKey {
   return narrowGeneratedStringUnion(value, CLI_KEY_VALUES, label);
 }
@@ -86,12 +118,14 @@ function toDefaultPromptSyncReport(
 }
 
 export async function promptsList(workspaceId: number) {
+  const normalizedWorkspaceId = validatePromptWorkspaceId(workspaceId);
+
   return invokeGeneratedIpc<PromptSummary[]>({
     title: "读取提示词列表失败",
     cmd: "prompts_list",
-    args: { workspaceId },
+    args: { workspaceId: normalizedWorkspaceId },
     invoke: async () =>
-      mapGeneratedCommandResponse(await commands.promptsList(workspaceId), (rows) =>
+      mapGeneratedCommandResponse(await commands.promptsList(normalizedWorkspaceId), (rows) =>
         rows.map(toPromptSummary)
       ),
   });
@@ -110,51 +144,55 @@ export async function promptsDefaultSyncFromFiles() {
 }
 
 export async function promptUpsert(input: PromptUpsertInput) {
+  const promptId = normalizeOptionalPromptId(input.promptId);
+  const workspaceId = validatePromptWorkspaceId(input.workspaceId);
+  const name = normalizePromptName(input.name);
+  const content = normalizePromptContent(input.content);
+
   return invokeGeneratedIpc<PromptSummary>({
     title: "保存提示词失败",
     cmd: "prompt_upsert",
     args: {
-      promptId: input.promptId ?? null,
-      workspaceId: input.workspaceId,
-      name: input.name,
-      content: input.content,
+      promptId,
+      workspaceId,
+      name,
+      content,
       enabled: input.enabled,
     },
     invoke: async () =>
       mapGeneratedCommandResponse(
-        await commands.promptUpsert(
-          input.promptId ?? null,
-          input.workspaceId,
-          input.name,
-          input.content,
-          input.enabled
-        ),
+        await commands.promptUpsert(promptId, workspaceId, name, content, input.enabled),
         toPromptSummary
       ),
   });
 }
 
 export async function promptSetEnabled(promptId: number, enabled: boolean) {
+  const normalizedPromptId = validatePromptId(promptId);
+
   return invokeGeneratedIpc<PromptSummary>({
     title: "更新提示词启用状态失败",
     cmd: "prompt_set_enabled",
     args: {
-      promptId,
+      promptId: normalizedPromptId,
       enabled,
     },
     invoke: async () =>
       mapGeneratedCommandResponse(
-        await commands.promptSetEnabled(promptId, enabled),
+        await commands.promptSetEnabled(normalizedPromptId, enabled),
         toPromptSummary
       ),
   });
 }
 
 export async function promptDelete(promptId: number) {
+  const normalizedPromptId = validatePromptId(promptId);
+
   return invokeGeneratedIpc<boolean>({
     title: "删除提示词失败",
     cmd: "prompt_delete",
-    args: { promptId },
-    invoke: () => commands.promptDelete(promptId) as Promise<GeneratedCommandResult<boolean>>,
+    args: { promptId: normalizedPromptId },
+    invoke: () =>
+      commands.promptDelete(normalizedPromptId) as Promise<GeneratedCommandResult<boolean>>,
   });
 }

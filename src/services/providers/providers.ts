@@ -47,6 +47,7 @@ const PROVIDER_AUTH_MODE_VALUES = [
   "api_key",
   "oauth",
 ] as const satisfies readonly ProviderAuthMode[];
+export const MAX_PROVIDER_ORDER_IDS = 512;
 
 export type ProviderSummary = Override<
   GeneratedProviderSummary,
@@ -110,6 +111,14 @@ function toCliKey(value: string, label: string): CliKey {
   return narrowGeneratedStringUnion(value, CLI_KEY_VALUES, label);
 }
 
+export function validateProviderCliKey(cliKey: string): CliKey {
+  const normalizedCliKey = cliKey.trim();
+  if ((CLI_KEY_VALUES as readonly string[]).includes(normalizedCliKey)) {
+    return normalizedCliKey as CliKey;
+  }
+  throw new Error(`SEC_INVALID_INPUT: invalid cliKey=${cliKey}`);
+}
+
 function toProviderAuthMode(value: string, label: string): ProviderAuthMode {
   return narrowGeneratedStringUnion(value, PROVIDER_AUTH_MODE_VALUES, label);
 }
@@ -122,10 +131,24 @@ function toProviderSummary(value: GeneratedProviderSummary): ProviderSummary {
   };
 }
 
+export function validateProviderId(providerId: number, label = "providerId"): number {
+  if (!Number.isSafeInteger(providerId) || providerId <= 0) {
+    throw new Error(`SEC_INVALID_INPUT: invalid ${label}=${providerId}`);
+  }
+  return providerId;
+}
+
 function toProviderUpsertPayload(input: ProviderUpsertInput): ProviderUpsertTransportInput {
+  const providerId = input.providerId == null ? null : validateProviderId(input.providerId);
+  const sourceProviderId =
+    input.sourceProviderId == null
+      ? null
+      : validateProviderId(input.sourceProviderId, "sourceProviderId");
+  const cliKey = validateProviderCliKey(input.cliKey);
+
   const payloadBase = {
-    providerId: input.providerId ?? null,
-    cliKey: input.cliKey,
+    providerId,
+    cliKey,
     name: input.name,
     baseUrls: input.baseUrls,
     baseUrlMode: input.baseUrlMode,
@@ -144,7 +167,7 @@ function toProviderUpsertPayload(input: ProviderUpsertInput): ProviderUpsertTran
     limitTotalUsd: input.limitTotalUsd ?? null,
     tags: input.tags ?? null,
     note: input.note ?? null,
-    sourceProviderId: input.sourceProviderId ?? null,
+    sourceProviderId,
     bridgeType: input.bridgeType ?? null,
   } satisfies Omit<GeneratedProviderUpsertInput, "streamIdleTimeoutSeconds">;
 
@@ -158,13 +181,32 @@ function toProviderUpsertPayload(input: ProviderUpsertInput): ProviderUpsertTran
   return payloadBase;
 }
 
+function validateOrderedProviderIds(orderedProviderIds: number[]) {
+  if (orderedProviderIds.length > MAX_PROVIDER_ORDER_IDS) {
+    throw new Error(
+      `SEC_INVALID_INPUT: orderedProviderIds must contain at most ${MAX_PROVIDER_ORDER_IDS} entries`
+    );
+  }
+
+  const seen = new Set<number>();
+  for (const providerId of orderedProviderIds) {
+    validateProviderId(providerId);
+    if (seen.has(providerId)) {
+      throw new Error(`SEC_INVALID_INPUT: duplicate providerId=${providerId}`);
+    }
+    seen.add(providerId);
+  }
+}
+
 export async function providersList(cliKey: CliKey) {
+  const normalizedCliKey = validateProviderCliKey(cliKey);
+
   return invokeGeneratedIpc<ProviderSummary[]>({
     title: "读取供应商列表失败",
     cmd: "providers_list",
-    args: { cliKey },
+    args: { cliKey: normalizedCliKey },
     invoke: async () =>
-      mapGeneratedCommandResponse(await commands.providersList(cliKey), (rows) =>
+      mapGeneratedCommandResponse(await commands.providersList(normalizedCliKey), (rows) =>
         rows.map(toProviderSummary)
       ),
   });
@@ -202,24 +244,29 @@ export async function providerSetEnabled(
   providerId: number,
   enabled: boolean
 ): Promise<ProviderSummary | null> {
+  const normalizedProviderId = validateProviderId(providerId);
+
   return invokeGeneratedIpc<ProviderSummary>({
     title: "更新供应商启用状态失败",
     cmd: "provider_set_enabled",
-    args: { providerId, enabled },
+    args: { providerId: normalizedProviderId, enabled },
     invoke: async () =>
       mapGeneratedCommandResponse(
-        await commands.providerSetEnabled(providerId, enabled),
+        await commands.providerSetEnabled(normalizedProviderId, enabled),
         toProviderSummary
       ),
   });
 }
 
 export async function providerDelete(providerId: number) {
+  const normalizedProviderId = validateProviderId(providerId);
+
   return invokeGeneratedIpc<boolean>({
     title: "删除供应商失败",
     cmd: "provider_delete",
-    args: { providerId },
-    invoke: () => commands.providerDelete(providerId) as Promise<GeneratedCommandResult<boolean>>,
+    args: { providerId: normalizedProviderId },
+    invoke: () =>
+      commands.providerDelete(normalizedProviderId) as Promise<GeneratedCommandResult<boolean>>,
   });
 }
 
@@ -227,51 +274,62 @@ export async function providersReorder(
   cliKey: CliKey,
   orderedProviderIds: number[]
 ): Promise<ProviderSummary[] | null> {
+  const normalizedCliKey = validateProviderCliKey(cliKey);
+  validateOrderedProviderIds(orderedProviderIds);
+
   return invokeGeneratedIpc<ProviderSummary[]>({
     title: "调整供应商顺序失败",
     cmd: "providers_reorder",
-    args: { cliKey, orderedProviderIds },
+    args: { cliKey: normalizedCliKey, orderedProviderIds },
     invoke: async () =>
       mapGeneratedCommandResponse(
-        await commands.providersReorder(cliKey, orderedProviderIds),
+        await commands.providersReorder(normalizedCliKey, orderedProviderIds),
         (rows) => rows.map(toProviderSummary)
       ),
   });
 }
 
 export async function providerDuplicate(providerId: number): Promise<ProviderSummary | null> {
+  const normalizedProviderId = validateProviderId(providerId);
+
   return invokeGeneratedIpc<ProviderSummary>({
     title: "复制供应商失败",
     cmd: "provider_duplicate",
-    args: { providerId },
+    args: { providerId: normalizedProviderId },
     invoke: async () =>
-      mapGeneratedCommandResponse(await commands.providerDuplicate(providerId), toProviderSummary),
+      mapGeneratedCommandResponse(
+        await commands.providerDuplicate(normalizedProviderId),
+        toProviderSummary
+      ),
   });
 }
 
 export async function providerCopyApiKeyToClipboard(providerId: number) {
+  const normalizedProviderId = validateProviderId(providerId);
   const confirm = createRiskyIpcConfirm(
     "provider_copy_api_key_to_clipboard",
-    `provider:${providerId}:api_key`
+    `provider:${normalizedProviderId}:api_key`
   );
   return invokeGeneratedIpc<boolean>({
     title: "复制 API Key 失败",
     cmd: "provider_copy_api_key_to_clipboard",
-    args: { providerId, confirm },
+    args: { providerId: normalizedProviderId, confirm },
     invoke: () =>
-      commands.providerCopyApiKeyToClipboard(providerId, confirm) as Promise<
+      commands.providerCopyApiKeyToClipboard(normalizedProviderId, confirm) as Promise<
         GeneratedCommandResult<boolean>
       >,
   });
 }
 
 export async function providerClaudeTerminalLaunchCommand(providerId: number) {
+  const normalizedProviderId = validateProviderId(providerId);
+
   return invokeGeneratedIpc<string>({
     title: "生成 Claude 终端启动命令失败",
     cmd: "provider_claude_terminal_launch_command",
-    args: { providerId },
+    args: { providerId: normalizedProviderId },
     invoke: () =>
-      commands.providerClaudeTerminalLaunchCommand(providerId) as Promise<
+      commands.providerClaudeTerminalLaunchCommand(normalizedProviderId) as Promise<
         GeneratedCommandResult<string>
       >,
   });
@@ -281,12 +339,15 @@ export async function providerOAuthStartFlow(
   cliKey: string,
   providerId: number
 ): Promise<ProviderOAuthStartFlowResult> {
+  const normalizedCliKey = validateProviderCliKey(cliKey);
+  const normalizedProviderId = validateProviderId(providerId);
+
   return invokeGeneratedIpc<ProviderOAuthStartFlowResult>({
     title: "启动 OAuth 登录失败",
     cmd: "provider_oauth_start_flow",
-    args: { cliKey, providerId },
+    args: { cliKey: normalizedCliKey, providerId: normalizedProviderId },
     invoke: () =>
-      commands.providerOauthStartFlow(cliKey, providerId) as Promise<
+      commands.providerOauthStartFlow(normalizedCliKey, normalizedProviderId) as Promise<
         GeneratedCommandResult<ProviderOAuthStartFlowResult>
       >,
   });
@@ -295,12 +356,14 @@ export async function providerOAuthStartFlow(
 export async function providerOAuthRefresh(
   providerId: number
 ): Promise<ProviderOAuthRefreshResult> {
+  const normalizedProviderId = validateProviderId(providerId);
+
   return invokeGeneratedIpc<ProviderOAuthRefreshResult>({
     title: "刷新 OAuth 登录失败",
     cmd: "provider_oauth_refresh",
-    args: { providerId },
+    args: { providerId: normalizedProviderId },
     invoke: () =>
-      commands.providerOauthRefresh(providerId) as Promise<
+      commands.providerOauthRefresh(normalizedProviderId) as Promise<
         GeneratedCommandResult<ProviderOAuthRefreshResult>
       >,
   });
@@ -309,24 +372,28 @@ export async function providerOAuthRefresh(
 export async function providerOAuthDisconnect(
   providerId: number
 ): Promise<ProviderOAuthDisconnectResult> {
+  const normalizedProviderId = validateProviderId(providerId);
+
   return invokeGeneratedIpc<ProviderOAuthDisconnectResult>({
     title: "断开 OAuth 登录失败",
     cmd: "provider_oauth_disconnect",
-    args: { providerId },
+    args: { providerId: normalizedProviderId },
     invoke: () =>
-      commands.providerOauthDisconnect(providerId) as Promise<
+      commands.providerOauthDisconnect(normalizedProviderId) as Promise<
         GeneratedCommandResult<ProviderOAuthDisconnectResult>
       >,
   });
 }
 
 export async function providerOAuthStatus(providerId: number): Promise<ProviderOAuthStatusResult> {
+  const normalizedProviderId = validateProviderId(providerId);
+
   return invokeGeneratedIpc<ProviderOAuthStatusResult>({
     title: "读取 OAuth 状态失败",
     cmd: "provider_oauth_status",
-    args: { providerId },
+    args: { providerId: normalizedProviderId },
     invoke: () =>
-      commands.providerOauthStatus(providerId) as Promise<
+      commands.providerOauthStatus(normalizedProviderId) as Promise<
         GeneratedCommandResult<ProviderOAuthStatusResult>
       >,
   });
@@ -337,12 +404,14 @@ export type OAuthLimitsResult = ProviderOAuthLimitsResult;
 export async function providerOAuthFetchLimits(
   providerId: number
 ): Promise<OAuthLimitsResult | null> {
+  const normalizedProviderId = validateProviderId(providerId);
+
   return invokeGeneratedIpc<OAuthLimitsResult>({
     title: "读取 OAuth 限额失败",
     cmd: "provider_oauth_fetch_limits",
-    args: { providerId },
+    args: { providerId: normalizedProviderId },
     invoke: () =>
-      commands.providerOauthFetchLimits(providerId) as Promise<
+      commands.providerOauthFetchLimits(normalizedProviderId) as Promise<
         GeneratedCommandResult<OAuthLimitsResult>
       >,
   });
@@ -351,12 +420,14 @@ export async function providerOAuthFetchLimits(
 export async function providerTestAvailability(
   providerId: number
 ): Promise<ProviderAvailabilityResult | null> {
+  const normalizedProviderId = validateProviderId(providerId);
+
   return invokeGeneratedIpc<ProviderAvailabilityResult>({
     title: "测试供应商可用性失败",
     cmd: "provider_test_availability",
-    args: { providerId },
+    args: { providerId: normalizedProviderId },
     invoke: () =>
-      commands.providerTestAvailability(providerId) as Promise<
+      commands.providerTestAvailability(normalizedProviderId) as Promise<
         GeneratedCommandResult<ProviderAvailabilityResult>
       >,
   });

@@ -44,6 +44,17 @@ pub(crate) fn build_default_oauth_http_client() -> Result<reqwest::Client, Strin
     )
 }
 
+fn mask_oauth_proxy_env_value(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if reqwest::Url::parse(trimmed).is_err() && trimmed.contains('@') {
+        return "[redacted]".to_string();
+    }
+    super::http_client::mask_url(trimmed)
+}
+
 /// Build an HTTP client suitable for OAuth token exchange and refresh requests.
 ///
 /// Respects standard proxy environment variables (`HTTPS_PROXY`, `HTTP_PROXY`,
@@ -65,12 +76,13 @@ pub(crate) fn build_oauth_http_client(
     if let Ok(proxy_url) = std::env::var("AIO_OAUTH_PROXY_URL") {
         let trimmed = proxy_url.trim();
         if !trimmed.is_empty() {
+            let masked = mask_oauth_proxy_env_value(trimmed);
             tracing::info!(
-                proxy_url = %trimmed,
+                proxy_url = %masked,
                 "oauth: using explicit proxy from AIO_OAUTH_PROXY_URL"
             );
             let proxy = reqwest::Proxy::all(trimmed)
-                .map_err(|e| format!("invalid AIO_OAUTH_PROXY_URL={trimmed}: {e}"))?;
+                .map_err(|e| format!("invalid AIO_OAUTH_PROXY_URL={masked}: {e}"))?;
             builder = builder.proxy(proxy);
         }
     } else {
@@ -85,7 +97,11 @@ pub(crate) fn build_oauth_http_client(
         ] {
             if let Ok(val) = std::env::var(var) {
                 if !val.is_empty() {
-                    tracing::debug!(env_var = var, value = %val, "oauth: detected proxy env var");
+                    tracing::debug!(
+                        env_var = var,
+                        value = %mask_oauth_proxy_env_value(&val),
+                        "oauth: detected proxy env var"
+                    );
                 }
             }
         }
@@ -94,4 +110,62 @@ pub(crate) fn build_oauth_http_client(
     builder
         .build()
         .map_err(|e| format!("oauth HTTP client init failed: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+
+    struct EnvVarRestore {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvVarRestore {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarRestore {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    #[test]
+    fn oauth_proxy_env_mask_redacts_valid_url_credentials() {
+        assert_eq!(
+            mask_oauth_proxy_env_value("http://user:secret@proxy.example.com:7890"),
+            "http://proxy.example.com:7890"
+        );
+    }
+
+    #[test]
+    fn oauth_proxy_env_mask_redacts_invalid_credential_like_values() {
+        assert_eq!(
+            mask_oauth_proxy_env_value("http://user:super-secret@"),
+            "[redacted]"
+        );
+    }
+
+    #[test]
+    fn explicit_oauth_proxy_error_masks_env_value() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let _restore = EnvVarRestore::set("AIO_OAUTH_PROXY_URL", "http://user:super-secret@");
+
+        let err = build_oauth_http_client("test-agent", 1, 1)
+            .expect_err("invalid explicit proxy should fail")
+            .to_string();
+
+        assert!(err.contains("[redacted]"));
+        assert!(!err.contains("super-secret"));
+        assert!(!err.contains("user:"));
+    }
 }

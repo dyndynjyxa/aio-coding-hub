@@ -1,5 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { configExport, configImport } from "../services/app/configMigrate";
+import {
+  configExport,
+  configImport,
+  normalizeConfigMigrateFilePath,
+} from "../services/app/configMigrate";
 import {
   cliProxyKeys,
   gatewayKeys,
@@ -30,7 +34,8 @@ async function invalidateImportedConfigQueries(queryClient: ReturnType<typeof us
 
 export function useConfigExportMutation() {
   return useMutation({
-    mutationFn: (input: { filePath: string }) => configExport(input.filePath),
+    mutationFn: (input: { filePath: string }) =>
+      configExport(normalizeConfigMigrateFilePath(input.filePath)),
   });
 }
 
@@ -38,7 +43,8 @@ export function useConfigImportMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (input: { filePath: string }) => configImport(input.filePath),
+    mutationFn: (input: { filePath: string }) =>
+      configImport(normalizeConfigMigrateFilePath(input.filePath)),
     onSuccess: async (result) => {
       if (!result) return;
       await invalidateImportedConfigQueries(queryClient);

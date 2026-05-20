@@ -1,9 +1,19 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { SortModesView } from "../SortModesView";
+import { useSortModesDataModel } from "../useSortModesDataModel";
+import { logToConsole } from "../../../services/consoleLog";
 import {
   sortModeActiveList,
   sortModeCreate,
@@ -83,6 +93,13 @@ function renderWithQueryClient(ui: ReactElement) {
   };
 }
 
+function queryWrapper() {
+  queryClient.clear();
+  return function QueryWrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  };
+}
+
 describe("pages/providers/SortModesView", () => {
   it("keeps the internal cli switcher available in sort modes view", () => {
     const setActiveCli = vi.fn();
@@ -159,6 +176,301 @@ describe("pages/providers/SortModesView", () => {
     expect(vi.mocked(toast)).not.toHaveBeenCalledWith(
       expect.stringContaining("读取排序模板 Provider 列表失败")
     );
+  });
+
+  it("serializes manual sort-mode refreshes and suppresses unmounted failures", async () => {
+    vi.mocked(toast).mockClear();
+
+    let resolveModes: (rows: any[]) => void = () => {
+      throw new Error("resolveModes not set");
+    };
+    let rejectActiveRows: (err: Error) => void = () => {
+      throw new Error("rejectActiveRows not set");
+    };
+    const pendingModes = new Promise<any[]>((resolve) => {
+      resolveModes = resolve;
+    });
+    const pendingActiveRows = new Promise<any[]>((_resolve, reject) => {
+      rejectActiveRows = reject;
+    });
+
+    vi.mocked(sortModesList)
+      .mockResolvedValueOnce([] as any)
+      .mockReturnValueOnce(pendingModes as any);
+    vi.mocked(sortModeActiveList)
+      .mockResolvedValueOnce([] as any)
+      .mockReturnValueOnce(pendingActiveRows as any);
+    vi.mocked(sortModeProvidersList).mockResolvedValue([] as any);
+
+    const { unmount } = renderWithQueryClient(
+      <SortModesView
+        activeCli="claude"
+        setActiveCli={vi.fn()}
+        providers={[] as any}
+        providersLoading={false}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "刷新" })).toBeEnabled());
+
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    expect(screen.getByRole("button", { name: "刷新" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+
+    expect(vi.mocked(sortModesList)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(sortModeActiveList)).toHaveBeenCalledTimes(2);
+
+    unmount();
+
+    await act(async () => {
+      resolveModes([]);
+      rejectActiveRows(new Error("unmounted boom"));
+      await pendingModes;
+      await pendingActiveRows.catch(() => undefined);
+    });
+
+    expect(toast).not.toHaveBeenCalledWith(expect.stringContaining("读取排序模板失败"));
+  });
+
+  it("keeps rapid sort-mode CRUD submissions behind one in-flight mutation", async () => {
+    vi.mocked(toast).mockClear();
+
+    vi.mocked(sortModesList).mockResolvedValue([{ id: 1, name: "Work" }] as any);
+    vi.mocked(sortModeActiveList).mockResolvedValue([{ cli_key: "claude", mode_id: 1 }] as any);
+    vi.mocked(sortModeProvidersList).mockResolvedValue([] as any);
+
+    const { result } = renderHook(
+      () =>
+        useSortModesDataModel({
+          activeCli: "claude",
+          setActiveCli: vi.fn(),
+          providers: [] as any,
+          providersLoading: false,
+        }),
+      { wrapper: queryWrapper() }
+    );
+
+    await waitFor(() => expect(result.current.selectedMode?.id).toBe(1));
+
+    let resolveCreate: (mode: any) => void = () => {
+      throw new Error("resolveCreate not set");
+    };
+    const pendingCreate = new Promise<any>((resolve) => {
+      resolveCreate = resolve;
+    });
+    vi.mocked(sortModeCreate).mockReturnValueOnce(pendingCreate as any);
+    act(() => result.current.setCreateModeName("Life"));
+    await waitFor(() => expect(result.current.createModeName).toBe("Life"));
+
+    let createPromise: Promise<void> | undefined;
+    act(() => {
+      createPromise = result.current.createSortMode();
+      void result.current.createSortMode();
+    });
+
+    await waitFor(() => expect(vi.mocked(sortModeCreate)).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(sortModeCreate)).toHaveBeenCalledWith({ name: "Life" });
+
+    await act(async () => {
+      resolveCreate({ id: 2, name: "Life" });
+      await createPromise;
+    });
+    await waitFor(() => expect(result.current.selectedMode?.id).toBe(2));
+
+    let resolveRename: (mode: any) => void = () => {
+      throw new Error("resolveRename not set");
+    };
+    const pendingRename = new Promise<any>((resolve) => {
+      resolveRename = resolve;
+    });
+    vi.mocked(sortModeRename).mockReturnValueOnce(pendingRename as any);
+    act(() => result.current.setRenameModeName("Life2"));
+    await waitFor(() => expect(result.current.renameModeName).toBe("Life2"));
+
+    let renamePromise: Promise<void> | undefined;
+    act(() => {
+      renamePromise = result.current.renameSortMode();
+      void result.current.renameSortMode();
+    });
+
+    await waitFor(() => expect(vi.mocked(sortModeRename)).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(sortModeRename)).toHaveBeenCalledWith({ mode_id: 2, name: "Life2" });
+
+    await act(async () => {
+      resolveRename({ id: 2, name: "Life2" });
+      await renamePromise;
+    });
+    await waitFor(() => expect(result.current.selectedMode?.name).toBe("Life2"));
+
+    let resolveDelete: (ok: boolean) => void = () => {
+      throw new Error("resolveDelete not set");
+    };
+    const pendingDelete = new Promise<boolean>((resolve) => {
+      resolveDelete = resolve;
+    });
+    vi.mocked(sortModeDelete).mockReturnValueOnce(pendingDelete as any);
+    act(() => result.current.setDeleteModeTarget(result.current.selectedMode));
+    await waitFor(() => expect(result.current.deleteModeTarget?.id).toBe(2));
+
+    let deletePromise: Promise<void> | undefined;
+    act(() => {
+      deletePromise = result.current.deleteSortMode();
+      void result.current.deleteSortMode();
+    });
+
+    await waitFor(() => expect(vi.mocked(sortModeDelete)).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(sortModeDelete)).toHaveBeenCalledWith({ mode_id: 2 });
+
+    await act(async () => {
+      resolveDelete(true);
+      await deletePromise;
+    });
+    await waitFor(() => expect(result.current.deleteModeTarget).toBeNull());
+  });
+
+  it("suppresses mode-provider save feedback after the sort modes view unmounts", async () => {
+    vi.mocked(toast).mockClear();
+
+    vi.mocked(sortModesList).mockResolvedValue([{ id: 1, name: "Work" }] as any);
+    vi.mocked(sortModeActiveList).mockResolvedValue([{ cli_key: "claude", mode_id: 1 }] as any);
+    vi.mocked(sortModeProvidersList).mockResolvedValue([
+      { provider_id: 101, enabled: true },
+    ] as any);
+
+    let rejectOrder: (err: Error) => void = () => {
+      throw new Error("rejectOrder not set");
+    };
+    const pendingOrder = new Promise<any[]>((_resolve, reject) => {
+      rejectOrder = reject;
+    });
+    vi.mocked(sortModeProvidersSetOrder).mockReturnValueOnce(pendingOrder as any);
+
+    const { result, unmount } = renderHook(
+      () =>
+        useSortModesDataModel({
+          activeCli: "claude",
+          setActiveCli: vi.fn(),
+          providers: [
+            { id: 101, name: "P1", enabled: true, base_urls: ["https://a"] },
+            { id: 102, name: "P2", enabled: true, base_urls: ["https://b"] },
+          ] as any,
+          providersLoading: false,
+        }),
+      { wrapper: queryWrapper() }
+    );
+
+    await waitFor(() => expect(result.current.modeProviders).toHaveLength(1));
+
+    act(() => {
+      result.current.addProviderToMode(102);
+    });
+    expect(result.current.modeProvidersSaving).toBe(true);
+
+    unmount();
+
+    await act(async () => {
+      rejectOrder(new Error("unmounted order boom"));
+      await pendingOrder.catch(() => undefined);
+    });
+
+    expect(toast).not.toHaveBeenCalledWith(expect.stringContaining("模式顺序更新失败"));
+  });
+
+  it("suppresses stale mode-provider save failures after switching away from the mode", async () => {
+    vi.mocked(toast).mockClear();
+    vi.mocked(logToConsole).mockClear();
+
+    vi.mocked(sortModesList).mockResolvedValue([{ id: 1, name: "Work" }] as any);
+    vi.mocked(sortModeActiveList).mockResolvedValue([{ cli_key: "claude", mode_id: 1 }] as any);
+    vi.mocked(sortModeProvidersList).mockResolvedValue([
+      { provider_id: 101, enabled: true },
+    ] as any);
+
+    let rejectOrder: (err: Error) => void = () => {
+      throw new Error("rejectOrder not set");
+    };
+    const pendingOrder = new Promise<any[]>((_resolve, reject) => {
+      rejectOrder = reject;
+    });
+    vi.mocked(sortModeProvidersSetOrder).mockReturnValueOnce(pendingOrder as any);
+
+    const { result } = renderHook(
+      () =>
+        useSortModesDataModel({
+          activeCli: "claude",
+          setActiveCli: vi.fn(),
+          providers: [
+            { id: 101, name: "P1", enabled: true, base_urls: ["https://a"] },
+            { id: 102, name: "P2", enabled: true, base_urls: ["https://b"] },
+          ] as any,
+          providersLoading: false,
+        }),
+      { wrapper: queryWrapper() }
+    );
+
+    await waitFor(() => expect(result.current.selectedMode?.id).toBe(1));
+    await waitFor(() => expect(result.current.modeProviders).toHaveLength(1));
+
+    act(() => {
+      result.current.addProviderToMode(102);
+    });
+    expect(result.current.modeProvidersSaving).toBe(true);
+
+    act(() => {
+      result.current.selectEditingMode(null);
+    });
+    await waitFor(() => expect(result.current.activeModeId).toBeNull());
+
+    await act(async () => {
+      rejectOrder(new Error("stale order boom"));
+      await pendingOrder.catch(() => undefined);
+    });
+
+    expect(toast).not.toHaveBeenCalledWith(expect.stringContaining("模式顺序更新失败"));
+    expect(logToConsole).not.toHaveBeenCalledWith(
+      "error",
+      "更新排序模板顺序失败",
+      expect.anything()
+    );
+    await waitFor(() => expect(result.current.modeProvidersSaving).toBe(false));
+  });
+
+  it("clears rename and delete targets when the selected sort mode disappears", async () => {
+    vi.mocked(sortModesList)
+      .mockResolvedValueOnce([{ id: 1, name: "Work" }] as any)
+      .mockResolvedValueOnce([] as any);
+    vi.mocked(sortModeActiveList)
+      .mockResolvedValueOnce([{ cli_key: "claude", mode_id: 1 }] as any)
+      .mockResolvedValueOnce([] as any);
+    vi.mocked(sortModeProvidersList).mockResolvedValue([] as any);
+
+    const { result } = renderHook(
+      () =>
+        useSortModesDataModel({
+          activeCli: "claude",
+          setActiveCli: vi.fn(),
+          providers: [] as any,
+          providersLoading: false,
+        }),
+      { wrapper: queryWrapper() }
+    );
+
+    await waitFor(() => expect(result.current.selectedMode?.id).toBe(1));
+
+    act(() => {
+      result.current.setRenameModeDialogOpen(true);
+      result.current.setDeleteModeTarget(result.current.selectedMode);
+    });
+    await waitFor(() => expect(result.current.renameModeDialogOpen).toBe(true));
+    await waitFor(() => expect(result.current.deleteModeTarget?.id).toBe(1));
+
+    await act(async () => {
+      await result.current.refreshSortModes();
+    });
+
+    await waitFor(() => expect(result.current.renameModeDialogOpen).toBe(false));
+    expect(result.current.renameModeName).toBe("");
+    expect(result.current.deleteModeTarget).toBeNull();
   });
 
   it("loads modes, joins providers, reorders, and supports CRUD", async () => {
@@ -311,6 +623,82 @@ describe("pages/providers/SortModesView", () => {
         expect.objectContaining({ ordered_provider_ids: [102, 103, 101] })
       )
     );
+  });
+
+  it("keeps rapid drag saves behind one in-flight provider order mutation", async () => {
+    vi.mocked(sortModesList).mockResolvedValue([{ id: 1, name: "Work" }] as any);
+    vi.mocked(sortModeActiveList).mockResolvedValue([{ cli_key: "claude", mode_id: 1 }] as any);
+    vi.mocked(sortModeProvidersList).mockResolvedValue([
+      { provider_id: 101, enabled: true },
+      { provider_id: 102, enabled: true },
+      { provider_id: 103, enabled: true },
+    ] as any);
+
+    let resolveOrder: (rows: any[]) => void = () => {
+      throw new Error("resolveOrder not set");
+    };
+    const pendingOrder = new Promise<any[]>((resolve) => {
+      resolveOrder = resolve;
+    });
+    vi.mocked(sortModeProvidersSetOrder).mockReturnValue(pendingOrder as any);
+
+    renderWithQueryClient(
+      <SortModesView
+        activeCli="claude"
+        setActiveCli={vi.fn()}
+        providers={
+          [
+            {
+              id: 101,
+              name: "P1",
+              enabled: true,
+              base_urls: ["https://a"],
+              base_url_mode: "order",
+            },
+            {
+              id: 102,
+              name: "P2",
+              enabled: true,
+              base_urls: ["https://b"],
+              base_url_mode: "order",
+            },
+            {
+              id: 103,
+              name: "P3",
+              enabled: true,
+              base_urls: ["https://c"],
+              base_url_mode: "order",
+            },
+          ] as any
+        }
+        providersLoading={false}
+      />
+    );
+
+    const orderPanel = () =>
+      within(screen.getByRole("complementary", { name: "排序模板调用顺序" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Work" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Work" }));
+    await waitFor(() =>
+      expect(orderPanel().getAllByRole("button", { name: "移除" })).toHaveLength(3)
+    );
+
+    await act(async () => {
+      latestOnDragEnd?.({ active: { id: 101 }, over: { id: 102 } });
+      latestOnDragEnd?.({ active: { id: 102 }, over: { id: 103 } });
+    });
+
+    expect(vi.mocked(sortModeProvidersSetOrder)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sortModeProvidersSetOrder)).toHaveBeenCalledWith(
+      expect.objectContaining({ ordered_provider_ids: [102, 101, 103] })
+    );
+
+    resolveOrder([
+      { provider_id: 102, enabled: true },
+      { provider_id: 101, enabled: true },
+      { provider_id: 103, enabled: true },
+    ]);
+    await waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalledWith("模式顺序已更新"));
   });
 
   it("supports toggling provider enabled state inside a sort mode", async () => {

@@ -1,5 +1,6 @@
 //! Usage: Streaming tee wrappers that emit usage/cost and enqueue request logs.
 
+use crate::gateway::response_fixer;
 use crate::usage;
 use axum::body::{Body, Bytes};
 use futures_core::Stream;
@@ -8,9 +9,9 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use super::super::events::emit_gateway_debug_log;
-use super::super::proxy::GatewayErrorCode;
-use super::super::util::now_unix_seconds;
+use super::super::events::{emit_gateway_debug_log, emit_gateway_debug_log_lazy};
+use super::super::proxy::{is_fake_200_non_stream_body, GatewayErrorCode};
+use super::super::util::{lossy_utf8_preview, now_unix_seconds, MAX_DEBUG_BODY_PREVIEW_BYTES};
 use super::request_end::{emit_request_event_and_spawn_request_log, StreamRequestCompletion};
 use super::{RelayBodyStream, StreamFinalizeCtx};
 
@@ -120,14 +121,16 @@ async fn next_item<S: Stream + Unpin>(stream: &mut S) -> Option<S::Item> {
     NextFuture(stream).await
 }
 
-pub(in crate::gateway) struct UsageSseTeeStream<S, B>
+pub(in crate::gateway) struct UsageSseTeeStream<S, B, R = tauri::Wry>
 where
     S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
     B: AsRef<[u8]>,
+    R: tauri::Runtime,
+    R::Handle: Unpin,
 {
     upstream: S,
     tracker: usage::SseUsageTracker,
-    ctx: StreamFinalizeCtx,
+    ctx: StreamFinalizeCtx<R>,
     first_byte_ms: Option<u128>,
     idle_timeout: Option<Duration>,
     idle_sleep: Option<Pin<Box<tokio::time::Sleep>>>,
@@ -135,14 +138,16 @@ where
     defer_terminal_error: bool,
 }
 
-impl<S, B> UsageSseTeeStream<S, B>
+impl<S, B, R> UsageSseTeeStream<S, B, R>
 where
     S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
     B: AsRef<[u8]>,
+    R: tauri::Runtime,
+    R::Handle: Unpin,
 {
     pub(in crate::gateway) fn new(
         upstream: S,
-        ctx: StreamFinalizeCtx,
+        ctx: StreamFinalizeCtx<R>,
         idle_timeout: Option<Duration>,
         initial_first_byte_ms: Option<u128>,
     ) -> Self {
@@ -161,6 +166,109 @@ where
     pub(in crate::gateway) fn with_defer_terminal_error(mut self) -> Self {
         self.defer_terminal_error = true;
         self
+    }
+
+    fn poll_next_inner(
+        &mut self,
+        cx: &mut Context<'_>,
+        enforce_idle_timeout: bool,
+    ) -> Poll<Option<Result<B, reqwest::Error>>> {
+        let next = Pin::new(&mut self.upstream).poll_next(cx);
+
+        match next {
+            Poll::Pending => {
+                if enforce_idle_timeout {
+                    if let Some(timer) = self.idle_sleep.as_mut() {
+                        if timer.as_mut().poll(cx).is_ready() {
+                            self.finalize(Some(GatewayErrorCode::StreamIdleTimeout.as_str()));
+                            return Poll::Ready(None);
+                        }
+                    }
+                }
+                Poll::Pending
+            }
+            Poll::Ready(None) => {
+                // When defer_terminal_error is set and the tracker saw a terminal
+                // error, skip finalization here — the relay task will decide the
+                // final error_code with Codex-specific tolerance logic.
+                if !(self.defer_terminal_error && self.tracker.terminal_error_seen()) {
+                    self.finalize(self.ctx.error_code);
+                }
+                Poll::Ready(None)
+            }
+            Poll::Ready(Some(Ok(chunk))) => {
+                if self.first_byte_ms.is_none() {
+                    self.first_byte_ms = Some(self.ctx.started.elapsed().as_millis());
+                }
+                // Reuse existing Box allocation via Sleep::reset() to avoid heap churn per chunk
+                if let Some(d) = self.idle_timeout {
+                    if let Some(ref mut sleep) = self.idle_sleep {
+                        sleep.as_mut().reset(tokio::time::Instant::now() + d);
+                    } else {
+                        self.idle_sleep = Some(Box::pin(tokio::time::sleep(d)));
+                    }
+                }
+                emit_gateway_debug_log_lazy(&self.ctx.app, || {
+                    format!(
+                        "[SSE_CHUNK] trace_id={} len={}\n  {}",
+                        self.ctx.trace_id,
+                        chunk.as_ref().len(),
+                        lossy_utf8_preview(chunk.as_ref(), MAX_DEBUG_BODY_PREVIEW_BYTES),
+                    )
+                });
+                let was_terminal_error = self.tracker.terminal_error_seen();
+                self.tracker.ingest_chunk(chunk.as_ref());
+                if self.tracker.terminal_error_seen() {
+                    if !was_terminal_error {
+                        emit_gateway_debug_log(
+                            &self.ctx.app,
+                            format!(
+                                "[SSE] terminal_error_seen triggered — trace_id={} cli_key={} path={} fake_200={}",
+                                self.ctx.trace_id,
+                                self.ctx.cli_key,
+                                self.ctx.path,
+                                self.tracker.fake_200_detected(),
+                            ),
+                        );
+                    }
+                    if !self.defer_terminal_error {
+                        let code = if self.tracker.fake_200_detected() {
+                            GatewayErrorCode::Fake200.as_str()
+                        } else {
+                            GatewayErrorCode::StreamError.as_str()
+                        };
+                        self.finalize(Some(code));
+                        return Poll::Ready(None);
+                    }
+                }
+                Poll::Ready(Some(Ok(chunk)))
+            }
+            Poll::Ready(Some(Err(err))) => {
+                let completion_seen = self.tracker.completion_seen();
+                let codex_successish = is_codex_stream_tail_error_successish(
+                    &self.ctx.cli_key,
+                    &self.ctx.path,
+                    self.ctx.status,
+                    self.first_byte_ms.is_some(),
+                    completion_seen,
+                    completion_seen,
+                );
+                if codex_successish {
+                    emit_gateway_debug_log(
+                        &self.ctx.app,
+                        format!(
+                            "[SSE] tolerating late stream read error after completion trace_id={} cli_key={} path={} err={}",
+                            self.ctx.trace_id, self.ctx.cli_key, self.ctx.path, err
+                        ),
+                    );
+                    self.finalize(None);
+                    Poll::Ready(None)
+                } else {
+                    self.finalize(Some(GatewayErrorCode::StreamError.as_str()));
+                    Poll::Ready(Some(Err(err)))
+                }
+            }
+        }
     }
 
     fn finalize(&mut self, error_code: Option<&'static str>) {
@@ -195,117 +303,60 @@ where
     }
 }
 
-impl<S, B> Stream for UsageSseTeeStream<S, B>
+impl<S, B, R> Stream for UsageSseTeeStream<S, B, R>
 where
     S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
     B: AsRef<[u8]>,
+    R: tauri::Runtime,
+    R::Handle: Unpin,
 {
     type Item = Result<B, reqwest::Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.as_mut().get_mut();
-        let next = Pin::new(&mut this.upstream).poll_next(cx);
-
-        match next {
-            Poll::Pending => {
-                if let Some(timer) = this.idle_sleep.as_mut() {
-                    if timer.as_mut().poll(cx).is_ready() {
-                        this.finalize(Some(GatewayErrorCode::StreamIdleTimeout.as_str()));
-                        return Poll::Ready(None);
-                    }
-                }
-                Poll::Pending
-            }
-            Poll::Ready(None) => {
-                // When defer_terminal_error is set and the tracker saw a terminal
-                // error, skip finalization here — the relay task will decide the
-                // final error_code with Codex-specific tolerance logic.
-                if !(this.defer_terminal_error && this.tracker.terminal_error_seen()) {
-                    this.finalize(this.ctx.error_code);
-                }
-                Poll::Ready(None)
-            }
-            Poll::Ready(Some(Ok(chunk))) => {
-                if this.first_byte_ms.is_none() {
-                    this.first_byte_ms = Some(this.ctx.started.elapsed().as_millis());
-                }
-                // Reuse existing Box allocation via Sleep::reset() to avoid heap churn per chunk
-                if let Some(d) = this.idle_timeout {
-                    if let Some(ref mut sleep) = this.idle_sleep {
-                        sleep.as_mut().reset(tokio::time::Instant::now() + d);
-                    } else {
-                        this.idle_sleep = Some(Box::pin(tokio::time::sleep(d)));
-                    }
-                }
-                emit_gateway_debug_log(
-                    &this.ctx.app,
-                    format!(
-                        "[SSE_CHUNK] trace_id={} len={}\n  {}",
-                        this.ctx.trace_id,
-                        chunk.as_ref().len(),
-                        String::from_utf8_lossy(chunk.as_ref()),
-                    ),
-                );
-                let was_terminal_error = this.tracker.terminal_error_seen();
-                this.tracker.ingest_chunk(chunk.as_ref());
-                if this.tracker.terminal_error_seen() {
-                    if !was_terminal_error {
-                        emit_gateway_debug_log(
-                            &this.ctx.app,
-                            format!(
-                                "[SSE] terminal_error_seen triggered — trace_id={} cli_key={} path={} fake_200={}",
-                                this.ctx.trace_id,
-                                this.ctx.cli_key,
-                                this.ctx.path,
-                                this.tracker.fake_200_detected(),
-                            ),
-                        );
-                    }
-                    if !this.defer_terminal_error {
-                        let code = if this.tracker.fake_200_detected() {
-                            GatewayErrorCode::Fake200.as_str()
-                        } else {
-                            GatewayErrorCode::StreamError.as_str()
-                        };
-                        this.finalize(Some(code));
-                        return Poll::Ready(None);
-                    }
-                }
-                Poll::Ready(Some(Ok(chunk)))
-            }
-            Poll::Ready(Some(Err(err))) => {
-                let completion_seen = this.tracker.completion_seen();
-                let codex_successish = is_codex_stream_tail_error_successish(
-                    &this.ctx.cli_key,
-                    &this.ctx.path,
-                    this.ctx.status,
-                    this.first_byte_ms.is_some(),
-                    completion_seen,
-                    completion_seen,
-                );
-                if codex_successish {
-                    emit_gateway_debug_log(
-                        &this.ctx.app,
-                        format!(
-                            "[SSE] tolerating late stream read error after completion trace_id={} cli_key={} path={} err={}",
-                            this.ctx.trace_id, this.ctx.cli_key, this.ctx.path, err
-                        ),
-                    );
-                    this.finalize(None);
-                    Poll::Ready(None)
-                } else {
-                    this.finalize(Some(GatewayErrorCode::StreamError.as_str()));
-                    Poll::Ready(Some(Err(err)))
-                }
-            }
-        }
+        this.poll_next_inner(cx, true)
     }
 }
 
-impl<S, B> Drop for UsageSseTeeStream<S, B>
+struct DrainNextFuture<'a, S, B, R>(&'a mut UsageSseTeeStream<S, B, R>)
 where
     S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
     B: AsRef<[u8]>,
+    R: tauri::Runtime,
+    R::Handle: Unpin;
+
+impl<'a, S, B, R> Future for DrainNextFuture<'a, S, B, R>
+where
+    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    B: AsRef<[u8]>,
+    R: tauri::Runtime,
+    R::Handle: Unpin,
+{
+    type Output = Option<Result<B, reqwest::Error>>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.0.poll_next_inner(cx, false)
+    }
+}
+
+async fn next_drain_item<S, B, R>(
+    stream: &mut UsageSseTeeStream<S, B, R>,
+) -> Option<Result<B, reqwest::Error>>
+where
+    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    B: AsRef<[u8]>,
+    R: tauri::Runtime,
+    R::Handle: Unpin,
+{
+    DrainNextFuture(stream).await
+}
+
+impl<S, B, R> Drop for UsageSseTeeStream<S, B, R>
+where
+    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    B: AsRef<[u8]>,
+    R: tauri::Runtime,
+    R::Handle: Unpin,
 {
     fn drop(&mut self) {
         if !self.finalized {
@@ -336,14 +387,16 @@ where
 
 const SSE_RELAY_BUFFER_CAPACITY: usize = 32;
 
-pub(in crate::gateway) fn spawn_usage_sse_relay_body<S>(
+pub(in crate::gateway) fn spawn_usage_sse_relay_body<S, R>(
     upstream: S,
-    ctx: StreamFinalizeCtx,
+    ctx: StreamFinalizeCtx<R>,
     idle_timeout: Option<Duration>,
     initial_first_byte_ms: Option<u128>,
 ) -> Body
 where
     S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin + Send + 'static,
+    R: tauri::Runtime + 'static,
+    R::Handle: Unpin,
 {
     let (tx, rx) =
         tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(SSE_RELAY_BUFFER_CAPACITY);
@@ -405,7 +458,7 @@ where
                 }
 
                 let remaining = deadline.saturating_duration_since(now);
-                match tokio::time::timeout(remaining, next_item(&mut tee)).await {
+                match tokio::time::timeout(remaining, next_drain_item(&mut tee)).await {
                     Ok(Some(Ok(chunk))) => {
                         let chunk_len = chunk.len().min(i64::MAX as usize) as i64;
                         drained_chunks = drained_chunks.saturating_add(1);
@@ -525,8 +578,9 @@ where
                 || drained_chunks > 0
                 || drained_bytes > 0;
 
-            if let Ok(mut guard) = tee.ctx.special_settings.lock() {
-                guard.push(serde_json::json!({
+            response_fixer::push_special_setting(
+                &tee.ctx.special_settings,
+                serde_json::json!({
                     "type": "client_abort",
                     "scope": "stream",
                     "reason": "client_disconnected",
@@ -542,8 +596,8 @@ where
                     "terminal_error_seen": terminal_error_seen,
                     "saw_stream_output": saw_stream_output,
                     "ts": now_unix_seconds() as i64,
-                }));
-            }
+                }),
+            );
 
             // Codex SSE: 2xx + saw output + no terminal error => treat client disconnect as success.
             // Do NOT require completion_seen: ChatGPT backend's response.completed may arrive
@@ -569,13 +623,15 @@ where
     Body::from_stream(RelayBodyStream::new(rx))
 }
 
-pub(in crate::gateway) struct UsageBodyBufferTeeStream<S, B>
+pub(in crate::gateway) struct UsageBodyBufferTeeStream<S, B, R = tauri::Wry>
 where
     S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
     B: AsRef<[u8]>,
+    R: tauri::Runtime,
+    R::Handle: Unpin,
 {
     upstream: S,
-    ctx: StreamFinalizeCtx,
+    ctx: StreamFinalizeCtx<R>,
     first_byte_ms: Option<u128>,
     buffer: Vec<u8>,
     max_bytes: usize,
@@ -585,14 +641,16 @@ where
     finalized: bool,
 }
 
-impl<S, B> UsageBodyBufferTeeStream<S, B>
+impl<S, B, R> UsageBodyBufferTeeStream<S, B, R>
 where
     S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
     B: AsRef<[u8]>,
+    R: tauri::Runtime,
+    R::Handle: Unpin,
 {
     pub(in crate::gateway) fn new(
         upstream: S,
-        ctx: StreamFinalizeCtx,
+        ctx: StreamFinalizeCtx<R>,
         max_bytes: usize,
         total_timeout: Option<Duration>,
     ) -> Self {
@@ -616,6 +674,19 @@ where
         }
         self.finalized = true;
 
+        let effective_error_code = if error_code.is_none()
+            && !self.truncated
+            && !self.buffer.is_empty()
+            && is_fake_200_non_stream_body(&self.buffer)
+        {
+            Some(GatewayErrorCode::Fake200.as_str())
+        } else {
+            error_code
+        };
+        if effective_error_code == Some(GatewayErrorCode::Fake200.as_str()) {
+            self.ctx.fake_200_detected = true;
+        }
+
         let usage = if self.truncated || self.buffer.is_empty() {
             None
         } else {
@@ -633,7 +704,7 @@ where
         emit_request_event_and_spawn_request_log(
             &self.ctx,
             StreamRequestCompletion::from_error_code(
-                error_code,
+                effective_error_code,
                 self.first_byte_ms,
                 requested_model,
                 usage_metrics,
@@ -643,10 +714,12 @@ where
     }
 }
 
-impl<S, B> Stream for UsageBodyBufferTeeStream<S, B>
+impl<S, B, R> Stream for UsageBodyBufferTeeStream<S, B, R>
 where
     S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
     B: AsRef<[u8]>,
+    R: tauri::Runtime,
+    R::Handle: Unpin,
 {
     type Item = Result<B, reqwest::Error>;
 
@@ -698,10 +771,12 @@ where
     }
 }
 
-impl<S, B> Drop for UsageBodyBufferTeeStream<S, B>
+impl<S, B, R> Drop for UsageBodyBufferTeeStream<S, B, R>
 where
     S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
     B: AsRef<[u8]>,
+    R: tauri::Runtime,
+    R::Handle: Unpin,
 {
     fn drop(&mut self) {
         if !self.finalized {
@@ -732,8 +807,56 @@ mod tests {
     use super::{
         is_codex_body_buffer_drop_successish, is_codex_client_abort_successish,
         is_codex_drop_successish, is_codex_responses_path, is_codex_stream_tail_error_successish,
-        is_codex_stream_terminal_error_successish,
+        is_codex_stream_terminal_error_successish, next_item, spawn_usage_sse_relay_body,
+        RelayBodyStream, StreamFinalizeCtx,
     };
+    use crate::{circuit_breaker, db, request_logs, session_manager};
+    use axum::body::Bytes;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    fn test_stream_finalize_ctx(
+        app: tauri::AppHandle<tauri::test::MockRuntime>,
+        db: db::Db,
+        log_tx: tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
+    ) -> StreamFinalizeCtx<tauri::test::MockRuntime> {
+        StreamFinalizeCtx {
+            app,
+            db,
+            log_tx,
+            circuit: Arc::new(circuit_breaker::CircuitBreaker::new(
+                circuit_breaker::CircuitBreakerConfig::default(),
+                HashMap::new(),
+                None,
+            )),
+            session: Arc::new(session_manager::SessionManager::new()),
+            session_id: Some("sess-usage-tee-drain".to_string()),
+            sort_mode_id: None,
+            trace_id: "trace-usage-tee-drain".to_string(),
+            cli_key: "codex".to_string(),
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            observe: true,
+            query: None,
+            excluded_from_stats: false,
+            special_settings: Arc::new(Mutex::new(Vec::new())),
+            status: 200,
+            error_category: None,
+            error_code: None,
+            started: Instant::now(),
+            attempts: Vec::new(),
+            attempts_json: "[]".to_string(),
+            requested_model: None,
+            created_at_ms: 1_700_000_000_000,
+            created_at: 1_700_000_000,
+            provider_cooldown_secs: 0,
+            provider_id: 1,
+            provider_name: "test-provider".to_string(),
+            base_url: "https://upstream.example".to_string(),
+            fake_200_detected: false,
+        }
+    }
 
     #[test]
     fn codex_responses_path_accepts_v1_and_backend_style_paths() {
@@ -977,5 +1100,68 @@ mod tests {
             false,
             false
         ));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn codex_disconnect_drain_ignores_stream_idle_timeout_until_completion() {
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("usage-tee-drain.sqlite"))
+            .expect("init test db");
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let ctx = test_stream_finalize_ctx(app_handle, db, log_tx);
+        let (upstream_tx, upstream_rx) =
+            tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(4);
+
+        let body = spawn_usage_sse_relay_body(
+            RelayBodyStream::new(upstream_rx),
+            ctx,
+            Some(Duration::from_millis(10)),
+            None,
+        );
+
+        upstream_tx
+            .send(Ok(Bytes::from_static(
+                b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n",
+            )))
+            .await
+            .expect("send first output chunk");
+
+        let mut body_stream = body.into_data_stream();
+        let first = tokio::time::timeout(Duration::from_secs(1), next_item(&mut body_stream))
+            .await
+            .expect("first output chunk should arrive")
+            .expect("body should yield first output")
+            .expect("first output should be ok");
+        assert!(first.as_ref().starts_with(b"data:"));
+
+        drop(body_stream);
+
+        let completion_tx = upstream_tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let _ = completion_tx
+                .send(Ok(Bytes::from_static(
+                    b"event: response.completed\n\
+                      data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"model\":\"gpt-5\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+                )))
+                .await;
+        });
+
+        let log = tokio::time::timeout(Duration::from_secs(2), log_rx.recv())
+            .await
+            .expect("request log should be enqueued")
+            .expect("request log channel should stay open");
+
+        assert_eq!(log.error_code, None);
+        assert_eq!(log.status, Some(200));
+        assert_eq!(log.input_tokens, Some(1));
+        assert_eq!(log.output_tokens, Some(2));
+        assert_eq!(log.total_tokens, Some(3));
+        assert!(log
+            .special_settings_json
+            .as_deref()
+            .is_some_and(|value| value.contains("\"client_abort\"")));
     }
 }

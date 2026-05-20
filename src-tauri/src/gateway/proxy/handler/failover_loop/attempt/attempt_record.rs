@@ -6,11 +6,11 @@ use crate::gateway::events::decision_chain as dc;
 use crate::gateway::proxy::status_override;
 use crate::gateway::proxy::{is_claude_count_tokens_request, provider_router};
 
-pub(super) struct RecordSystemFailureArgs<'a> {
-    pub(super) ctx: CommonCtx<'a>,
+pub(super) struct RecordSystemFailureArgs<'a, R: tauri::Runtime = tauri::Wry> {
+    pub(super) ctx: CommonCtx<'a, R>,
     pub(super) provider_ctx: ProviderCtx<'a>,
     pub(super) attempt_ctx: AttemptCtx<'a>,
-    pub(super) loop_state: LoopState<'a>,
+    pub(super) loop_state: LoopState<'a, R>,
     pub(super) status: Option<u16>,
     pub(super) error_code: &'static str,
     pub(super) decision: FailoverDecision,
@@ -18,14 +18,14 @@ pub(super) struct RecordSystemFailureArgs<'a> {
     pub(super) reason: String,
 }
 
-pub(super) async fn record_system_failure_and_decide(
-    args: RecordSystemFailureArgs<'_>,
+pub(super) async fn record_system_failure_and_decide<R: tauri::Runtime>(
+    args: RecordSystemFailureArgs<'_, R>,
 ) -> LoopControl {
     record_system_failure_and_decide_impl(args, CooldownPolicy::Apply).await
 }
 
-pub(super) async fn record_system_failure_and_decide_no_cooldown(
-    args: RecordSystemFailureArgs<'_>,
+pub(super) async fn record_system_failure_and_decide_no_cooldown<R: tauri::Runtime>(
+    args: RecordSystemFailureArgs<'_, R>,
 ) -> LoopControl {
     record_system_failure_and_decide_impl(args, CooldownPolicy::Skip).await
 }
@@ -36,8 +36,8 @@ enum CooldownPolicy {
     Skip,
 }
 
-async fn record_system_failure_and_decide_impl(
-    args: RecordSystemFailureArgs<'_>,
+async fn record_system_failure_and_decide_impl<R: tauri::Runtime>(
+    args: RecordSystemFailureArgs<'_, R>,
     cooldown_policy: CooldownPolicy,
 ) -> LoopControl {
     let RecordSystemFailureArgs {

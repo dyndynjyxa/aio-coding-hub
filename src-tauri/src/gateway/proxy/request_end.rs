@@ -7,15 +7,20 @@ use crate::gateway::events::{emit_request_event, ClaudeModelMapping, FailoverAtt
 use crate::{db, request_logs};
 use serde_json::Value;
 
-pub(super) struct RequestEndDeps<'a> {
-    pub(super) app: &'a tauri::AppHandle,
+const REQUEST_END_LOG_MAX_ATTEMPTS: usize = 100;
+const REQUEST_END_LOG_SHORT_TEXT_MAX_CHARS: usize = 512;
+const REQUEST_END_LOG_URL_MAX_CHARS: usize = 2048;
+const REQUEST_END_LOG_REASON_MAX_CHARS: usize = 2048;
+
+pub(super) struct RequestEndDeps<'a, R: tauri::Runtime = tauri::Wry> {
+    pub(super) app: &'a tauri::AppHandle<R>,
     pub(super) db: &'a db::Db,
     pub(super) log_tx: &'a tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
 }
 
-impl<'a> RequestEndDeps<'a> {
+impl<'a, R: tauri::Runtime> RequestEndDeps<'a, R> {
     pub(super) fn new(
-        app: &'a tauri::AppHandle,
+        app: &'a tauri::AppHandle<R>,
         db: &'a db::Db,
         log_tx: &'a tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
     ) -> Self {
@@ -98,8 +103,8 @@ impl RequestCompletion {
     }
 }
 
-pub(super) struct RequestEndContextArgs<'a> {
-    pub(super) deps: RequestEndDeps<'a>,
+pub(super) struct RequestEndContextArgs<'a, R: tauri::Runtime = tauri::Wry> {
+    pub(super) deps: RequestEndDeps<'a, R>,
     pub(super) trace_id: &'a str,
     pub(super) cli_key: &'a str,
     pub(super) method: &'a str,
@@ -116,8 +121,8 @@ pub(super) struct RequestEndContextArgs<'a> {
     pub(super) created_at: i64,
 }
 
-pub(super) struct RequestEndArgs<'a> {
-    deps: RequestEndDeps<'a>,
+pub(super) struct RequestEndArgs<'a, R: tauri::Runtime = tauri::Wry> {
+    deps: RequestEndDeps<'a, R>,
     trace_id: &'a str,
     cli_key: &'a str,
     method: &'a str,
@@ -142,8 +147,8 @@ pub(super) struct RequestEndArgs<'a> {
     usage: Option<crate::usage::UsageExtract>,
 }
 
-impl<'a> RequestEndArgs<'a> {
-    pub(super) fn from_context(context: RequestEndContextArgs<'a>) -> Self {
+impl<'a, R: tauri::Runtime> RequestEndArgs<'a, R> {
+    pub(super) fn from_context(context: RequestEndContextArgs<'a, R>) -> Self {
         Self {
             deps: context.deps,
             trace_id: context.trace_id,
@@ -184,8 +189,8 @@ impl<'a> RequestEndArgs<'a> {
     }
 }
 
-struct PreparedRequestEnd<'a> {
-    deps: RequestEndDeps<'a>,
+struct PreparedRequestEnd<'a, R: tauri::Runtime = tauri::Wry> {
+    deps: RequestEndDeps<'a, R>,
     error_category: Option<&'static str>,
     event_ttfb_ms: Option<u128>,
     attempts: Vec<FailoverAttempt>,
@@ -217,20 +222,58 @@ struct RequestEndPayloadParts {
     error_details_json: Option<String>,
 }
 
-fn serialize_attempts(attempts: &[FailoverAttempt]) -> String {
-    if attempts.is_empty() {
-        "[]".to_string()
-    } else {
-        serde_json::to_string(attempts).unwrap_or_else(|_| "[]".to_string())
+fn truncate_chars(mut value: String, max_chars: usize) -> String {
+    if let Some((index, _)) = value.char_indices().nth(max_chars) {
+        value.truncate(index);
     }
+    value
+}
+
+fn truncate_optional_text(value: Option<String>, max_chars: usize) -> Option<String> {
+    value.map(|value| truncate_chars(value, max_chars))
+}
+
+fn truncate_text_ref(value: &str, max_chars: usize) -> String {
+    truncate_chars(value.to_string(), max_chars)
+}
+
+fn bounded_log_attempt(mut attempt: FailoverAttempt) -> FailoverAttempt {
+    attempt.provider_name =
+        truncate_chars(attempt.provider_name, REQUEST_END_LOG_SHORT_TEXT_MAX_CHARS);
+    attempt.base_url = truncate_chars(attempt.base_url, REQUEST_END_LOG_URL_MAX_CHARS);
+    attempt.outcome = truncate_chars(attempt.outcome, REQUEST_END_LOG_SHORT_TEXT_MAX_CHARS);
+    attempt.reason = truncate_optional_text(attempt.reason, REQUEST_END_LOG_REASON_MAX_CHARS);
+    attempt
+}
+
+fn bounded_log_attempts(attempts: &[FailoverAttempt]) -> Vec<FailoverAttempt> {
+    if attempts.is_empty() {
+        return Vec::new();
+    }
+
+    let start = attempts.len().saturating_sub(REQUEST_END_LOG_MAX_ATTEMPTS);
+    attempts[start..]
+        .iter()
+        .cloned()
+        .map(bounded_log_attempt)
+        .collect()
+}
+
+fn serialize_attempts(attempts: &[FailoverAttempt]) -> String {
+    let attempts = bounded_log_attempts(attempts);
+    if attempts.is_empty() {
+        return "[]".to_string();
+    }
+    serde_json::to_string(&attempts).unwrap_or_else(|_| "[]".to_string())
 }
 
 fn build_provider_chain_json(attempts: &[FailoverAttempt]) -> Option<String> {
     if attempts.is_empty() {
         return None;
     }
+    let attempts = bounded_log_attempts(attempts);
     let chain: Vec<serde_json::Value> = attempts
-        .iter()
+        .into_iter()
         .map(|a| {
             let mut obj = serde_json::Map::new();
             obj.insert("provider_id".into(), serde_json::json!(a.provider_id));
@@ -382,6 +425,20 @@ fn split_attempt_reason(reason: &str) -> (Option<&str>, Option<&str>, Option<&st
     )
 }
 
+fn insert_text_if_present(
+    obj: &mut serde_json::Map<String, Value>,
+    key: &'static str,
+    value: &str,
+    max_chars: usize,
+) {
+    if let Some(value) = non_empty_text(value) {
+        obj.insert(
+            key.into(),
+            serde_json::json!(truncate_text_ref(value, max_chars)),
+        );
+    }
+}
+
 fn build_error_details_json(
     error_code: Option<&str>,
     attempts: &[FailoverAttempt],
@@ -432,9 +489,12 @@ fn build_error_details_json(
                 serde_json::json!(last_attempt.provider_id),
             );
         }
-        if let Some(provider_name) = non_empty_text(last_attempt.provider_name.as_str()) {
-            obj.insert("provider_name".into(), serde_json::json!(provider_name));
-        }
+        insert_text_if_present(
+            &mut obj,
+            "provider_name",
+            last_attempt.provider_name.as_str(),
+            REQUEST_END_LOG_SHORT_TEXT_MAX_CHARS,
+        );
         if let Some(attempt_duration_ms) = last_attempt.attempt_duration_ms {
             obj.insert(
                 "attempt_duration_ms".into(),
@@ -469,16 +529,28 @@ fn build_error_details_json(
             let (reason_summary, upstream_body_preview, matched_rule) =
                 split_attempt_reason(reason.as_str());
             if let Some(reason_summary) = reason_summary {
-                obj.insert("reason".into(), serde_json::json!(reason_summary));
+                insert_text_if_present(
+                    &mut obj,
+                    "reason",
+                    reason_summary,
+                    REQUEST_END_LOG_REASON_MAX_CHARS,
+                );
             }
             if let Some(upstream_body_preview) = upstream_body_preview {
-                obj.insert(
-                    "upstream_body_preview".into(),
-                    serde_json::json!(upstream_body_preview),
+                insert_text_if_present(
+                    &mut obj,
+                    "upstream_body_preview",
+                    upstream_body_preview,
+                    REQUEST_END_LOG_REASON_MAX_CHARS,
                 );
             }
             if let Some(matched_rule) = matched_rule {
-                obj.insert("matched_rule".into(), serde_json::json!(matched_rule));
+                insert_text_if_present(
+                    &mut obj,
+                    "matched_rule",
+                    matched_rule,
+                    REQUEST_END_LOG_SHORT_TEXT_MAX_CHARS,
+                );
             }
         }
     } else if let Some(gateway_error_code) = error_code {
@@ -647,9 +719,9 @@ impl RequestLogEnqueueArgs {
         })
     }
 
-    pub(in crate::gateway) fn emit_gateway_request_event(
+    pub(in crate::gateway) fn emit_gateway_request_event<R: tauri::Runtime>(
         &self,
-        app: &tauri::AppHandle,
+        app: &tauri::AppHandle<R>,
         error_category: Option<&'static str>,
         event_ttfb_ms: Option<u128>,
         attempts: Vec<FailoverAttempt>,
@@ -678,7 +750,9 @@ impl RequestLogEnqueueArgs {
     }
 }
 
-fn prepare_request_end(args: RequestEndArgs<'_>) -> PreparedRequestEnd<'_> {
+fn prepare_request_end<R: tauri::Runtime>(
+    args: RequestEndArgs<'_, R>,
+) -> PreparedRequestEnd<'_, R> {
     let (log_args, attempts) = RequestLogEnqueueArgs::from_proxy_request_end_parts(
         args.trace_id,
         args.cli_key,
@@ -710,7 +784,9 @@ fn prepare_request_end(args: RequestEndArgs<'_>) -> PreparedRequestEnd<'_> {
     }
 }
 
-pub(super) async fn emit_request_event_and_enqueue_request_log(args: RequestEndArgs<'_>) {
+pub(super) async fn emit_request_event_and_enqueue_request_log<R: tauri::Runtime>(
+    args: RequestEndArgs<'_, R>,
+) {
     // Disk log: request ended with error (failure path only).
     if let Some(error_code) = args.error_code {
         tracing::warn!(
@@ -747,7 +823,9 @@ pub(super) async fn emit_request_event_and_enqueue_request_log(args: RequestEndA
     enqueue_request_log_with_backpressure(deps.app, deps.db, deps.log_tx, log_args).await;
 }
 
-pub(super) fn emit_request_event_and_spawn_request_log(args: RequestEndArgs<'_>) {
+pub(super) fn emit_request_event_and_spawn_request_log<R: tauri::Runtime>(
+    args: RequestEndArgs<'_, R>,
+) {
     // Disk log: request ended with error (failure path only).
     if let Some(error_code) = args.error_code {
         tracing::warn!(
@@ -820,6 +898,42 @@ mod tests {
         }
     }
 
+    fn timeout_attempt(
+        provider_id: i64,
+        provider_index: u32,
+        session_reuse: Option<bool>,
+    ) -> FailoverAttempt {
+        FailoverAttempt {
+            provider_id,
+            provider_name: format!("provider-{provider_id}"),
+            base_url: "http://127.0.0.1:1".to_string(),
+            outcome: "request_timeout: category=SYSTEM_ERROR code=GW_UPSTREAM_TIMEOUT decision=switch timeout_secs=1".to_string(),
+            status: None,
+            provider_index: Some(provider_index),
+            retry_index: Some(1),
+            session_reuse,
+            error_category: Some(ErrorCategory::SystemError.as_str()),
+            error_code: Some(GatewayErrorCode::UpstreamTimeout.as_str()),
+            decision: Some("switch"),
+            reason: Some("request timeout".to_string()),
+            selection_method: Some("session_reuse"),
+            reason_code: Some(ErrorCategory::SystemError.reason_code()),
+            attempt_started_ms: Some(1),
+            attempt_duration_ms: Some(1_000),
+            circuit_state_before: Some("CLOSED"),
+            circuit_state_after: Some("OPEN"),
+            circuit_failure_count: Some(5),
+            circuit_failure_threshold: Some(5),
+        }
+    }
+
+    fn json_field_char_count(value: &serde_json::Value, key: &str) -> Option<usize> {
+        value
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(|text| text.chars().count())
+    }
+
     #[test]
     fn proxy_request_end_parts_apply_count_tokens_exclusion_and_serialize_attempts() {
         let attempts = vec![sample_attempt()];
@@ -852,6 +966,211 @@ mod tests {
         assert_eq!(log_args.attempts_json, expected_attempts_json);
         assert_eq!(cloned_attempts.len(), 1);
         assert_eq!(cloned_attempts[0].provider_id, 7);
+    }
+
+    #[test]
+    fn proxy_request_end_parts_preserve_timeout_storm_attempts_in_log_payload() {
+        let attempts = vec![
+            timeout_attempt(10, 1, Some(true)),
+            timeout_attempt(20, 2, None),
+        ];
+
+        let (log_args, cloned_attempts) = RequestLogEnqueueArgs::from_proxy_request_end_parts(
+            "trace-timeout-storm",
+            "claude",
+            Some("session-timeout".to_string()),
+            "POST",
+            "/v1/messages",
+            None,
+            false,
+            None,
+            Some(502),
+            Some(GatewayErrorCode::UpstreamTimeout.as_str()),
+            2_000,
+            None,
+            &attempts,
+            Some("claude-sonnet-4-5".to_string()),
+            100,
+            200,
+            None,
+            None,
+        );
+
+        assert!(!log_args.excluded_from_stats);
+        assert_eq!(log_args.status, Some(524));
+        assert_eq!(
+            log_args.error_code,
+            Some(GatewayErrorCode::UpstreamTimeout.as_str())
+        );
+        assert_eq!(cloned_attempts.len(), 2);
+        assert_eq!(cloned_attempts[0].session_reuse, Some(true));
+        assert!(cloned_attempts.iter().all(|attempt| {
+            attempt.outcome.starts_with("request_timeout:")
+                && attempt.error_code == Some(GatewayErrorCode::UpstreamTimeout.as_str())
+        }));
+
+        let encoded_attempts: Vec<serde_json::Value> =
+            serde_json::from_str(&log_args.attempts_json).expect("attempts json");
+        assert_eq!(encoded_attempts.len(), 2);
+        assert_eq!(
+            encoded_attempts[0]
+                .get("outcome")
+                .and_then(serde_json::Value::as_str),
+            Some(attempts[0].outcome.as_str())
+        );
+
+        let provider_chain: Vec<serde_json::Value> = serde_json::from_str(
+            log_args
+                .provider_chain_json
+                .as_deref()
+                .expect("provider chain json"),
+        )
+        .expect("provider chain json parses");
+        assert_eq!(provider_chain.len(), 2);
+        assert_eq!(provider_chain[0].get("provider_id"), Some(&json!(10)));
+        assert_eq!(
+            provider_chain[0].get("reason"),
+            Some(&json!("request timeout"))
+        );
+
+        let error_details: serde_json::Value = serde_json::from_str(
+            log_args
+                .error_details_json
+                .as_deref()
+                .expect("error details json"),
+        )
+        .expect("error details json parses");
+        assert_eq!(
+            error_details.get("gateway_error_code"),
+            Some(&json!(GatewayErrorCode::UpstreamTimeout.as_str()))
+        );
+        assert_eq!(
+            error_details.get("error_code"),
+            Some(&json!(GatewayErrorCode::UpstreamTimeout.as_str()))
+        );
+        assert_eq!(
+            error_details.get("reason_code"),
+            Some(&json!(ErrorCategory::SystemError.reason_code()))
+        );
+    }
+
+    #[test]
+    fn proxy_request_end_parts_bounds_attempt_log_tail_and_text_fields() {
+        let attempts: Vec<FailoverAttempt> = (0..(REQUEST_END_LOG_MAX_ATTEMPTS + 5))
+            .map(|index| {
+                let mut attempt = timeout_attempt(index as i64, index as u32, None);
+                attempt.provider_name = format!(
+                    "provider-{index}-{}",
+                    "p".repeat(REQUEST_END_LOG_SHORT_TEXT_MAX_CHARS)
+                );
+                attempt.base_url = format!(
+                    "https://provider-{index}.example/{}",
+                    "b".repeat(REQUEST_END_LOG_URL_MAX_CHARS)
+                );
+                attempt.outcome = format!(
+                    "request_timeout-{index}:{}",
+                    "o".repeat(REQUEST_END_LOG_SHORT_TEXT_MAX_CHARS)
+                );
+                attempt.reason = Some(format!(
+                    "request timeout {index}:{}",
+                    "r".repeat(REQUEST_END_LOG_REASON_MAX_CHARS)
+                ));
+                attempt
+            })
+            .collect();
+        let original_last_reason = attempts
+            .last()
+            .and_then(|attempt| attempt.reason.as_ref())
+            .expect("last reason")
+            .clone();
+
+        let (log_args, cloned_attempts) = RequestLogEnqueueArgs::from_proxy_request_end_parts(
+            "trace-bounded-attempts",
+            "claude",
+            Some("session-bounded".to_string()),
+            "POST",
+            "/v1/messages",
+            None,
+            false,
+            None,
+            Some(502),
+            Some(GatewayErrorCode::UpstreamTimeout.as_str()),
+            2_000,
+            None,
+            &attempts,
+            Some("claude-sonnet-4-5".to_string()),
+            100,
+            200,
+            None,
+            None,
+        );
+
+        assert_eq!(cloned_attempts.len(), REQUEST_END_LOG_MAX_ATTEMPTS + 5);
+        assert_eq!(
+            cloned_attempts
+                .last()
+                .and_then(|attempt| attempt.reason.as_ref()),
+            Some(&original_last_reason)
+        );
+
+        let encoded_attempts: Vec<serde_json::Value> =
+            serde_json::from_str(&log_args.attempts_json).expect("attempts json");
+        assert_eq!(encoded_attempts.len(), REQUEST_END_LOG_MAX_ATTEMPTS);
+        assert_eq!(encoded_attempts[0].get("provider_id"), Some(&json!(5)));
+        assert_eq!(
+            encoded_attempts
+                .last()
+                .and_then(|attempt| attempt.get("provider_id")),
+            Some(&json!((REQUEST_END_LOG_MAX_ATTEMPTS + 4) as i64))
+        );
+
+        let last_attempt = encoded_attempts.last().expect("last bounded attempt");
+        assert_eq!(
+            json_field_char_count(last_attempt, "provider_name"),
+            Some(REQUEST_END_LOG_SHORT_TEXT_MAX_CHARS)
+        );
+        assert_eq!(
+            json_field_char_count(last_attempt, "base_url"),
+            Some(REQUEST_END_LOG_URL_MAX_CHARS)
+        );
+        assert_eq!(
+            json_field_char_count(last_attempt, "outcome"),
+            Some(REQUEST_END_LOG_SHORT_TEXT_MAX_CHARS)
+        );
+        assert_eq!(
+            json_field_char_count(last_attempt, "reason"),
+            Some(REQUEST_END_LOG_REASON_MAX_CHARS)
+        );
+    }
+
+    #[test]
+    fn build_provider_chain_json_bounds_latest_tail_and_reason_text() {
+        let attempts: Vec<FailoverAttempt> = (0..(REQUEST_END_LOG_MAX_ATTEMPTS + 2))
+            .map(|index| {
+                let mut attempt = timeout_attempt(index as i64, index as u32, None);
+                attempt.reason = Some(format!(
+                    "timeout reason {index}:{}",
+                    "由".repeat(REQUEST_END_LOG_REASON_MAX_CHARS)
+                ));
+                attempt
+            })
+            .collect();
+
+        let encoded = build_provider_chain_json(&attempts).expect("provider chain json");
+        let chain: Vec<serde_json::Value> =
+            serde_json::from_str(encoded.as_str()).expect("provider chain json parses");
+
+        assert_eq!(chain.len(), REQUEST_END_LOG_MAX_ATTEMPTS);
+        assert_eq!(chain[0].get("provider_id"), Some(&json!(2)));
+        assert_eq!(
+            chain.last().and_then(|attempt| attempt.get("provider_id")),
+            Some(&json!((REQUEST_END_LOG_MAX_ATTEMPTS + 1) as i64))
+        );
+        let last_attempt = chain.last().expect("last provider-chain attempt");
+        assert_eq!(
+            json_field_char_count(last_attempt, "reason"),
+            Some(REQUEST_END_LOG_REASON_MAX_CHARS)
+        );
     }
 
     #[test]
@@ -1131,5 +1450,41 @@ mod tests {
             Some(&json!(ErrorCategory::SystemError.reason_code()))
         );
         assert_eq!(value.get("decision"), Some(&json!("abort")));
+    }
+
+    #[test]
+    fn build_error_details_json_truncates_large_upstream_body_preview() {
+        let mut attempt = sample_attempt();
+        attempt.provider_name = "Provider".repeat(REQUEST_END_LOG_SHORT_TEXT_MAX_CHARS);
+        attempt.outcome = "upstream_error".to_string();
+        attempt.status = Some(502);
+        attempt.error_category = Some(ErrorCategory::ProviderError.as_str());
+        attempt.error_code = Some(GatewayErrorCode::Upstream5xx.as_str());
+        attempt.reason = Some(format!(
+            "status=502, rule=bad_gateway, upstream_body={}",
+            "错".repeat(REQUEST_END_LOG_REASON_MAX_CHARS + 64)
+        ));
+
+        let encoded = build_error_details_json(
+            Some(GatewayErrorCode::UpstreamAllFailed.as_str()),
+            &[attempt],
+        )
+        .expect("error details json");
+        let value: serde_json::Value =
+            serde_json::from_str(encoded.as_str()).expect("valid error details json");
+
+        assert_eq!(
+            json_field_char_count(&value, "provider_name"),
+            Some(REQUEST_END_LOG_SHORT_TEXT_MAX_CHARS)
+        );
+        assert_eq!(
+            json_field_char_count(&value, "upstream_body_preview"),
+            Some(REQUEST_END_LOG_REASON_MAX_CHARS)
+        );
+        assert_eq!(
+            value.get("reason"),
+            Some(&json!("status=502, rule=bad_gateway"))
+        );
+        assert_eq!(value.get("matched_rule"), Some(&json!("bad_gateway")));
     }
 }

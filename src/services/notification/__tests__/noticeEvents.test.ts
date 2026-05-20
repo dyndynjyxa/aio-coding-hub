@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { appEventNames } from "../../../constants/appEvents";
 import { tauriInvoke, tauriListen, tauriUnlisten } from "../../../test/mocks/tauri";
 
@@ -16,6 +16,10 @@ vi.mock("../notificationSound", () => ({
 }));
 
 describe("services/notification/noticeEvents", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("listens and sends notifications when permission is granted", async () => {
     vi.resetModules();
 
@@ -36,11 +40,13 @@ describe("services/notification/noticeEvents", () => {
       .mock.calls.find((c) => c[0] === appEventNames.notice)?.[1];
     expect(handler).toBeTypeOf("function");
 
-    await handler?.({ payload: { level: "info", title: "T", body: "B" } } as any);
-    expect(playNotificationSoundMock).toHaveBeenCalledTimes(1);
-    expect(tauriInvoke).toHaveBeenCalledWith("desktop_notification_is_permission_granted");
-    expect(tauriInvoke).toHaveBeenCalledWith("desktop_notification_notify", {
-      options: { title: "T", body: "B", sound: null },
+    handler?.({ payload: { level: "info", title: "T", body: "B" } } as any);
+    await vi.waitFor(() => {
+      expect(playNotificationSoundMock).toHaveBeenCalledTimes(1);
+      expect(tauriInvoke).toHaveBeenCalledWith("desktop_notification_is_permission_granted");
+      expect(tauriInvoke).toHaveBeenCalledWith("desktop_notification_notify", {
+        options: { title: "T", body: "B", sound: null },
+      });
     });
 
     unlisten();
@@ -63,7 +69,10 @@ describe("services/notification/noticeEvents", () => {
     const handler = vi
       .mocked(tauriListen)
       .mock.calls.find((c) => c[0] === appEventNames.notice)?.[1];
-    await handler?.({ payload: { level: "info", title: "T", body: "B" } } as any);
+    handler?.({ payload: { level: "info", title: "T", body: "B" } } as any);
+    await vi.waitFor(() => {
+      expect(tauriInvoke).toHaveBeenCalledWith("desktop_notification_is_permission_granted");
+    });
 
     expect(playNotificationSoundMock).not.toHaveBeenCalled();
     expect(tauriInvoke).not.toHaveBeenCalledWith("desktop_notification_notify", expect.anything());
@@ -88,17 +97,19 @@ describe("services/notification/noticeEvents", () => {
       .mock.calls.find((c) => c[0] === appEventNames.notice)?.[1];
     expect(handler).toBeTypeOf("function");
 
-    await handler?.({ payload: { level: "error", title: "T", body: "B" } } as any);
+    handler?.({ payload: { level: "error", title: "T", body: "B" } } as any);
 
-    expect(logToConsoleMock).toHaveBeenCalledWith(
-      "error",
-      "发送系统通知失败",
-      expect.objectContaining({
-        error: expect.stringContaining("notification failed"),
-        level: "error",
-        title: "T",
-      })
-    );
-    expect(playNotificationSoundMock).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(logToConsoleMock).toHaveBeenCalledWith(
+        "error",
+        "发送系统通知失败",
+        expect.objectContaining({
+          error: expect.stringContaining("notification failed"),
+          level: "error",
+          title: "T",
+        })
+      );
+      expect(playNotificationSoundMock).toHaveBeenCalledTimes(1);
+    });
   });
 });

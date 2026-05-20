@@ -1,8 +1,10 @@
 //! Usage: Handle successful non-SSE upstream responses inside `failover_loop::run`.
 
 use super::*;
-use crate::gateway::proxy::{gemini_oauth, protocol_bridge, provider_router, GatewayErrorCode};
-use crate::shared::mutex_ext::MutexExt;
+use crate::gateway::proxy::{
+    gemini_oauth, is_fake_200_non_stream_body, protocol_bridge, provider_router,
+    upstream_client_error_rules, GatewayErrorCode,
+};
 
 fn buffer_cx2cc_event_stream_as_json(
     cx2cc_active: bool,
@@ -195,6 +197,96 @@ fn should_passthrough_non_stream_success(
     gemini_oauth_response_mode.is_none() && !cx2cc_buffered_event_stream && !cx2cc_active
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NonStreamBodyReadError {
+    Timeout,
+    ReadError,
+    TooLarge,
+}
+
+impl NonStreamBodyReadError {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Timeout => "timeout",
+            Self::ReadError => "read_error",
+            Self::TooLarge => "too_large",
+        }
+    }
+
+    fn error_code(self) -> &'static str {
+        match self {
+            Self::Timeout => GatewayErrorCode::UpstreamTimeout.as_str(),
+            Self::ReadError => GatewayErrorCode::UpstreamReadError.as_str(),
+            Self::TooLarge => GatewayErrorCode::UpstreamBodyReadError.as_str(),
+        }
+    }
+
+    fn decision(self, retry_index: u32, max_attempts_per_provider: u32) -> FailoverDecision {
+        match self {
+            Self::Timeout | Self::TooLarge => FailoverDecision::SwitchProvider,
+            Self::ReadError if retry_index < max_attempts_per_provider => {
+                FailoverDecision::RetrySameProvider
+            }
+            Self::ReadError => FailoverDecision::SwitchProvider,
+        }
+    }
+
+    fn reason(self, limit_bytes: usize) -> String {
+        match self {
+            Self::Timeout => "failed to read upstream body: timeout".to_string(),
+            Self::ReadError => "failed to read upstream body".to_string(),
+            Self::TooLarge => format!(
+                "upstream body exceeded gateway non-stream transform buffer limit ({} bytes)",
+                limit_bytes
+            ),
+        }
+    }
+}
+
+async fn read_non_stream_body_with_limit(
+    mut resp: reqwest::Response,
+    started: Instant,
+    timeout: Option<std::time::Duration>,
+    limit_bytes: usize,
+) -> Result<Bytes, NonStreamBodyReadError> {
+    if resp
+        .content_length()
+        .is_some_and(|len| len > limit_bytes as u64)
+    {
+        return Err(NonStreamBodyReadError::TooLarge);
+    }
+
+    let capacity = resp
+        .content_length()
+        .and_then(|len| usize::try_from(len).ok())
+        .unwrap_or_default()
+        .min(limit_bytes);
+    let mut out = Vec::with_capacity(capacity);
+
+    loop {
+        let chunk_result = match timeout.and_then(|total| total.checked_sub(started.elapsed())) {
+            Some(remaining) if remaining.is_zero() => Err(NonStreamBodyReadError::Timeout),
+            Some(remaining) => match tokio::time::timeout(remaining, resp.chunk()).await {
+                Ok(Ok(chunk)) => Ok(chunk),
+                Ok(Err(_)) => Err(NonStreamBodyReadError::ReadError),
+                Err(_) => Err(NonStreamBodyReadError::Timeout),
+            },
+            None => resp
+                .chunk()
+                .await
+                .map_err(|_| NonStreamBodyReadError::ReadError),
+        }?;
+
+        let Some(chunk) = chunk_result else {
+            return Ok(Bytes::from(out));
+        };
+        if chunk.len() > limit_bytes.saturating_sub(out.len()) {
+            return Err(NonStreamBodyReadError::TooLarge);
+        }
+        out.extend_from_slice(&chunk);
+    }
+}
+
 fn translate_cx2cc_non_stream_body(
     cx2cc_active: bool,
     anthropic_stream_requested: bool,
@@ -248,15 +340,19 @@ fn translate_cx2cc_non_stream_body(
     Ok(Bytes::from(encoded))
 }
 
-pub(super) async fn handle_success_non_stream(
-    ctx: CommonCtx<'_>,
+pub(super) async fn handle_success_non_stream<R>(
+    ctx: CommonCtx<'_, R>,
     provider_ctx: ProviderCtx<'_>,
     attempt_ctx: AttemptCtx<'_>,
-    loop_state: LoopState<'_>,
+    loop_state: LoopState<'_, R>,
     resp: reqwest::Response,
     status: StatusCode,
     mut response_headers: HeaderMap,
-) -> LoopControl {
+) -> LoopControl
+where
+    R: tauri::Runtime,
+    R::Handle: Unpin,
+{
     let common = CommonCtxOwned::from(ctx);
     let provider_ctx_owned = ProviderCtxOwned::from(provider_ctx);
     tracing::debug!(
@@ -503,58 +599,36 @@ pub(super) async fn handle_success_non_stream(
         }
     }
 
-    let remaining_total =
-        upstream_request_timeout_non_streaming.and_then(|t| t.checked_sub(started.elapsed()));
-    let bytes_result = match remaining_total {
-        Some(remaining) => {
-            if remaining.is_zero() {
-                Err("timeout")
-            } else {
-                match tokio::time::timeout(remaining, resp.bytes()).await {
-                    Ok(Ok(b)) => Ok(b),
-                    Ok(Err(_)) => Err("read_error"),
-                    Err(_) => Err("timeout"),
-                }
-            }
-        }
-        None => match resp.bytes().await {
-            Ok(b) => Ok(b),
-            Err(_) => Err("read_error"),
-        },
-    };
+    let bytes_result = read_non_stream_body_with_limit(
+        resp,
+        started,
+        upstream_request_timeout_non_streaming,
+        MAX_NON_SSE_BODY_BYTES,
+    )
+    .await;
 
     let mut body_bytes = match bytes_result {
         Ok(b) => {
-            emit_gateway_debug_log(
-                &state.app,
+            emit_gateway_debug_log_lazy(&state.app, || {
                 format!(
                     "[RESP_BODY] trace_id={} body({} bytes)={}",
                     common.trace_id,
                     b.len(),
-                    String::from_utf8_lossy(&b),
-                ),
-            );
+                    lossy_utf8_preview(&b, MAX_DEBUG_BODY_PREVIEW_BYTES),
+                )
+            });
             b
         }
         Err(kind) => {
-            let error_code = if kind == "timeout" {
-                GatewayErrorCode::UpstreamTimeout.as_str()
-            } else {
-                GatewayErrorCode::UpstreamReadError.as_str()
-            };
-            let decision = if kind == "timeout" {
-                FailoverDecision::SwitchProvider
-            } else if retry_index < max_attempts_per_provider {
-                FailoverDecision::RetrySameProvider
-            } else {
-                FailoverDecision::SwitchProvider
-            };
+            let error_code = kind.error_code();
+            let decision = kind.decision(retry_index, max_attempts_per_provider);
 
             let outcome = format!(
                 "upstream_body_error: category={} code={} decision={} kind={kind}",
                 ErrorCategory::SystemError.as_str(),
                 error_code,
                 decision.as_str(),
+                kind = kind.as_str(),
             );
 
             return record_system_failure_and_decide(RecordSystemFailureArgs {
@@ -572,7 +646,7 @@ pub(super) async fn handle_success_non_stream(
                 error_code,
                 decision,
                 outcome,
-                reason: "failed to read upstream body".to_string(),
+                reason: kind.reason(MAX_NON_SSE_BODY_BYTES),
             })
             .await;
         }
@@ -827,10 +901,110 @@ pub(super) async fn handle_success_non_stream(
             HeaderValue::from_static(outcome.header_value),
         );
         if let Some(setting) = outcome.special_setting {
-            let mut settings = common.special_settings.lock_or_recover();
-            settings.push(setting);
+            response_fixer::push_special_setting(&common.special_settings, setting);
         }
         body_bytes = outcome.body;
+    }
+
+    if (200..300).contains(&status.as_u16()) && is_fake_200_non_stream_body(body_bytes.as_ref()) {
+        let error_code = GatewayErrorCode::Fake200.as_str();
+        let duration_ms = started.elapsed().as_millis();
+        let quota_exhausted =
+            upstream_client_error_rules::match_quota_exhausted(body_bytes.as_ref());
+        let decision = if quota_exhausted {
+            FailoverDecision::SwitchProvider
+        } else {
+            FailoverDecision::Abort
+        };
+        if let Some(last) = attempts.last_mut() {
+            if last.outcome == "success" {
+                last.outcome = format!("body_error: code={error_code}");
+            }
+            last.error_category = Some(ErrorCategory::ProviderError.as_str());
+            last.error_code = Some(error_code);
+            last.decision = Some(decision.as_str());
+            last.reason = Some(if quota_exhausted {
+                "successful HTTP status with quota exhausted error body".to_string()
+            } else {
+                "successful HTTP status with error body".to_string()
+            });
+            last.reason_code = Some(ErrorCategory::ProviderError.reason_code());
+            last.attempt_duration_ms = Some(duration_ms);
+        }
+
+        let now_unix = now_unix_seconds() as i64;
+        let change = provider_router::record_failure_and_emit_transition(
+            provider_router::RecordCircuitArgs::from_state(
+                state,
+                common.trace_id.as_str(),
+                common.cli_key.as_str(),
+                provider_id,
+                provider_ctx_owned.provider_name_base.as_str(),
+                provider_ctx_owned.provider_base_url_base.as_str(),
+                now_unix,
+            ),
+        );
+        if let Some(last) = attempts.last_mut() {
+            last.circuit_state_after = Some(change.after.state.as_str());
+            last.circuit_failure_count = Some(change.after.failure_count);
+            last.circuit_failure_threshold = Some(change.after.failure_threshold);
+        }
+        *circuit_snapshot = change.after.clone();
+
+        if quota_exhausted {
+            if common.provider_cooldown_secs > 0 {
+                let snap = provider_router::trigger_cooldown(
+                    state.circuit.as_ref(),
+                    provider_id,
+                    now_unix,
+                    common.provider_cooldown_secs,
+                );
+                *circuit_snapshot = snap;
+            }
+            failed_provider_ids.insert(provider_id);
+            *last_outcome = Some(AttemptOutcome::new(
+                ErrorCategory::ProviderError.as_str(),
+                error_code,
+            ));
+            return LoopControl::BreakRetry;
+        }
+
+        emit_request_event_and_enqueue_request_log(
+            RequestEndArgs::from_context(RequestEndContextArgs {
+                deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx),
+                trace_id: common.trace_id.as_str(),
+                cli_key: common.cli_key.as_str(),
+                method: common.method_hint.as_str(),
+                path: common.forwarded_path.as_str(),
+                observe: common.observe,
+                query: common.query.as_deref(),
+                excluded_from_stats: false,
+                duration_ms,
+                attempts: attempts.as_slice(),
+                special_settings_json: response_fixer::special_settings_json(
+                    &common.special_settings,
+                ),
+                session_id: common.session_id.clone(),
+                requested_model: common.requested_model.clone(),
+                created_at_ms,
+                created_at,
+            })
+            .with_completion(RequestCompletion::failure_with_ttfb(
+                StatusCode::BAD_GATEWAY.as_u16(),
+                Some(ErrorCategory::ProviderError.as_str()),
+                error_code,
+                duration_ms,
+            )),
+        )
+        .await;
+
+        abort_guard.disarm();
+        return LoopControl::Return(build_response(
+            StatusCode::BAD_GATEWAY,
+            &response_headers,
+            common.trace_id.as_str(),
+            Body::from(body_bytes),
+        ));
     }
 
     codex_service_tier::append_result_if_detected(
@@ -941,13 +1115,115 @@ pub(super) async fn handle_success_non_stream(
 mod tests {
     use super::{
         buffer_cx2cc_event_stream_as_json, classify_cx2cc_success_payload,
-        should_passthrough_non_stream_success, translate_cx2cc_non_stream_body,
-        Cx2ccSuccessPayloadKind,
+        read_non_stream_body_with_limit, should_passthrough_non_stream_success,
+        translate_cx2cc_non_stream_body, Cx2ccSuccessPayloadKind, NonStreamBodyReadError,
     };
     use crate::domain::usage;
     use axum::body::Bytes;
     use axum::http::{header, HeaderMap, HeaderValue};
     use serde_json::json;
+    use std::time::{Duration, Instant};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    async fn known_length_response(
+        declared_content_length: usize,
+        sent_body: Vec<u8>,
+        keep_open: bool,
+    ) -> (reqwest::Response, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test upstream");
+        let addr = listener.local_addr().expect("local addr");
+        let task = tokio::spawn(async move {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                return;
+            };
+            let mut request_buf = [0u8; 1024];
+            let _ = socket.read(&mut request_buf).await;
+            let headers = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {declared_content_length}\r\nConnection: keep-alive\r\n\r\n"
+            );
+            let _ = socket.write_all(headers.as_bytes()).await;
+            let _ = socket.write_all(&sent_body).await;
+            if keep_open {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            } else {
+                let _ = socket.shutdown().await;
+            }
+        });
+        let response = reqwest::Client::new()
+            .get(format!("http://{addr}/ok"))
+            .send()
+            .await
+            .expect("response");
+        (response, task)
+    }
+
+    async fn unknown_length_response(
+        sent_body: Vec<u8>,
+    ) -> (reqwest::Response, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test upstream");
+        let addr = listener.local_addr().expect("local addr");
+        let task = tokio::spawn(async move {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                return;
+            };
+            let mut request_buf = [0u8; 1024];
+            let _ = socket.read(&mut request_buf).await;
+            let headers =
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
+            let _ = socket.write_all(headers.as_bytes()).await;
+            let _ = socket.write_all(&sent_body).await;
+            let _ = socket.shutdown().await;
+        });
+        let response = reqwest::Client::new()
+            .get(format!("http://{addr}/ok"))
+            .send()
+            .await
+            .expect("response");
+        (response, task)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn read_non_stream_body_rejects_large_known_length_before_drain() {
+        let limit = 64;
+        let (response, task) =
+            known_length_response(limit + 1024, b"{\"ok\":true}".to_vec(), true).await;
+
+        let err = read_non_stream_body_with_limit(
+            response,
+            Instant::now(),
+            Some(Duration::from_secs(2)),
+            limit,
+        )
+        .await
+        .expect_err("known oversized body should be rejected");
+
+        assert_eq!(err, NonStreamBodyReadError::TooLarge);
+        task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn read_non_stream_body_caps_unknown_length() {
+        let limit = 64;
+        let body = vec![b'x'; limit + 1];
+        let (response, task) = unknown_length_response(body).await;
+
+        let err = read_non_stream_body_with_limit(
+            response,
+            Instant::now(),
+            Some(Duration::from_secs(2)),
+            limit,
+        )
+        .await
+        .expect_err("unknown oversized body should be rejected");
+
+        assert_eq!(err, NonStreamBodyReadError::TooLarge);
+        task.abort();
+    }
 
     #[test]
     fn buffers_cx2cc_event_stream_into_json_response() {

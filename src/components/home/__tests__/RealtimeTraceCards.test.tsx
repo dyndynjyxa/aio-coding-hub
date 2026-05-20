@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { RealtimeTraceCards } from "../RealtimeTraceCards";
 
@@ -30,6 +30,92 @@ describe("components/home/RealtimeTraceCards", () => {
     );
     expect(setIntervalSpy).not.toHaveBeenCalled();
     setIntervalSpy.mockRestore();
+  });
+
+  it("shares the live clock interval across active realtime card mounts", () => {
+    vi.useFakeTimers();
+    const baseTime = 1_700_000_000_000;
+    vi.setSystemTime(baseTime);
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
+    const clearIntervalSpy = vi.spyOn(window, "clearInterval");
+    const activeTrace = traceBase({
+      trace_id: "t-active",
+      first_seen_ms: baseTime - 100,
+      last_seen_ms: baseTime - 100,
+      summary: undefined,
+    });
+
+    const first = render(
+      <RealtimeTraceCards
+        folderLookupBySessionKey={new Map()}
+        traces={[activeTrace] as any}
+        formatUnixSeconds={(ts) => String(ts)}
+        showCustomTooltip={false}
+      />
+    );
+    const second = render(
+      <RealtimeTraceCards
+        folderLookupBySessionKey={new Map()}
+        traces={[activeTrace] as any}
+        formatUnixSeconds={(ts) => String(ts)}
+        showCustomTooltip={false}
+      />
+    );
+
+    expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+    first.unmount();
+    expect(clearIntervalSpy).not.toHaveBeenCalled();
+    second.unmount();
+    expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+
+    setIntervalSpy.mockRestore();
+    clearIntervalSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it("stops the shared live clock when visible traces age out", () => {
+    vi.useFakeTimers();
+    const baseTime = 1_700_000_000_000;
+    vi.setSystemTime(baseTime);
+    const clearIntervalSpy = vi.spyOn(window, "clearInterval");
+
+    render(
+      <RealtimeTraceCards
+        folderLookupBySessionKey={new Map()}
+        traces={
+          [
+            traceBase({
+              trace_id: "t-completed",
+              first_seen_ms: baseTime - 1000,
+              last_seen_ms: baseTime,
+              summary: {
+                trace_id: "t-completed",
+                cli_key: "claude",
+                method: "POST",
+                path: "/v1/messages",
+                query: null,
+                status: 200,
+                error_code: null,
+                duration_ms: 100,
+                ttfb_ms: 10,
+              },
+            }),
+          ] as any
+        }
+        formatUnixSeconds={(ts) => String(ts)}
+        showCustomTooltip={false}
+      />
+    );
+
+    act(() => {
+      vi.setSystemTime(baseTime + 2_000);
+      vi.advanceTimersByTime(250);
+    });
+
+    expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+
+    clearIntervalSpy.mockRestore();
+    vi.useRealTimers();
   });
 
   it("renders in-progress and completed traces, including route and cache hints", () => {

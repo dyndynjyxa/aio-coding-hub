@@ -10,7 +10,10 @@ use crate::gateway::proxy::request_context::RequestContext;
 use axum::body::Bytes;
 
 /// Clean request body (e.g. remove empty text blocks for Claude OAuth).
-pub(super) fn clean_body(input: &RequestContext, prepared: &PreparedProvider) -> Bytes {
+pub(super) fn clean_body<R: tauri::Runtime>(
+    input: &RequestContext<R>,
+    prepared: &PreparedProvider,
+) -> Bytes {
     if input.cli_key == "claude" && prepared.oauth_adapter.is_some() {
         if let Ok(mut json) =
             serde_json::from_slice::<serde_json::Value>(&prepared.upstream_body_bytes)

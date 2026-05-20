@@ -11,6 +11,11 @@ import {
   cliSessionsProjectsList,
   cliSessionsSessionDelete,
   cliSessionsSessionsList,
+  normalizeCliSessionsDeleteFilePaths,
+  normalizeCliSessionsFilePath,
+  normalizeCliSessionsFolderLookupItems,
+  normalizeCliSessionsProjectId,
+  normalizeCliSessionsWslDistro,
   type CliSessionsFolderLookupEntry,
   type CliSessionsFolderLookupInput,
   type CliSessionsSessionSummary,
@@ -18,10 +23,26 @@ import {
 } from "../services/cli/cliSessions";
 import { cliSessionsKeys } from "./keys";
 
+function normalizeCliSessionsMutationCacheInput(input: { projectId: string; wslDistro?: string }) {
+  return {
+    projectId: normalizeCliSessionsProjectId(input.projectId),
+    wslDistro: normalizeCliSessionsWslDistro(input.wslDistro) ?? undefined,
+  };
+}
+
+function normalizeOptionalCliSessionsProjectId(projectId: string): string {
+  return projectId.trim() ? normalizeCliSessionsProjectId(projectId) : "";
+}
+
+function normalizeOptionalCliSessionsFilePath(filePath: string): string {
+  return filePath.trim() ? normalizeCliSessionsFilePath(filePath) : "";
+}
+
 export function useCliSessionsProjectsListQuery(source: CliSessionsSource, wslDistro?: string) {
+  const normalizedWslDistro = normalizeCliSessionsWslDistro(wslDistro) ?? undefined;
   return useQuery({
-    queryKey: cliSessionsKeys.projectsList(source, wslDistro),
-    queryFn: () => cliSessionsProjectsList(source, wslDistro),
+    queryKey: cliSessionsKeys.projectsList(source, normalizedWslDistro),
+    queryFn: () => cliSessionsProjectsList(source, normalizedWslDistro),
     enabled: true,
     placeholderData: keepPreviousData,
   });
@@ -32,11 +53,12 @@ export function useCliSessionsSessionsListQuery(
   projectId: string,
   options?: { enabled?: boolean; wslDistro?: string }
 ) {
-  const wslDistro = options?.wslDistro;
+  const wslDistro = normalizeCliSessionsWslDistro(options?.wslDistro) ?? undefined;
+  const normalizedProjectId = normalizeOptionalCliSessionsProjectId(projectId);
   return useQuery({
-    queryKey: cliSessionsKeys.sessionsList(source, projectId, wslDistro),
-    queryFn: () => cliSessionsSessionsList(source, projectId, wslDistro),
-    enabled: Boolean(projectId.trim()) && (options?.enabled ?? true),
+    queryKey: cliSessionsKeys.sessionsList(source, normalizedProjectId, wslDistro),
+    queryFn: () => cliSessionsSessionsList(source, normalizedProjectId, wslDistro),
+    enabled: Boolean(normalizedProjectId) && (options?.enabled ?? true),
     placeholderData: keepPreviousData,
   });
 }
@@ -45,12 +67,13 @@ export function useCliSessionsFolderLookupByIdsQuery(
   items: CliSessionsFolderLookupInput[],
   options?: { enabled?: boolean; wslDistro?: string }
 ) {
-  const wslDistro = options?.wslDistro;
-  const lookupKeys = items.map((item) => `${item.source}:${item.session_id}`);
+  const wslDistro = normalizeCliSessionsWslDistro(options?.wslDistro) ?? undefined;
+  const normalizedItems = normalizeCliSessionsFolderLookupItems(items);
+  const lookupKeys = normalizedItems.map((item) => `${item.source}:${item.session_id}`);
   return useQuery<CliSessionsFolderLookupEntry[]>({
     queryKey: cliSessionsKeys.folderLookup(lookupKeys, wslDistro),
-    queryFn: async () => (await cliSessionsFolderLookupByIds(items, wslDistro)) ?? [],
-    enabled: items.length > 0 && (options?.enabled ?? true),
+    queryFn: async () => (await cliSessionsFolderLookupByIds(normalizedItems, wslDistro)) ?? [],
+    enabled: normalizedItems.length > 0 && (options?.enabled ?? true),
   });
 }
 
@@ -60,19 +83,20 @@ export function useCliSessionsMessagesInfiniteQuery(
   options?: { enabled?: boolean; fromEnd?: boolean; wslDistro?: string }
 ) {
   const fromEnd = options?.fromEnd ?? true;
-  const wslDistro = options?.wslDistro;
+  const wslDistro = normalizeCliSessionsWslDistro(options?.wslDistro) ?? undefined;
+  const normalizedFilePath = normalizeOptionalCliSessionsFilePath(filePath);
   return useInfiniteQuery({
-    queryKey: cliSessionsKeys.messages(source, filePath, fromEnd, wslDistro),
+    queryKey: cliSessionsKeys.messages(source, normalizedFilePath, fromEnd, wslDistro),
     queryFn: ({ pageParam = 0 }) =>
       cliSessionsMessagesGet({
         source,
-        filePath,
+        filePath: normalizedFilePath,
         page: pageParam,
         pageSize: 50,
         fromEnd,
         wslDistro,
       }),
-    enabled: Boolean(filePath.trim()) && (options?.enabled ?? true),
+    enabled: Boolean(normalizedFilePath) && (options?.enabled ?? true),
     getNextPageParam: (lastPage) => (lastPage?.has_more ? lastPage.page + 1 : undefined),
     initialPageParam: 0,
   });
@@ -87,19 +111,34 @@ export function useCliSessionsSessionDeleteMutation() {
       filePaths: string[];
       projectId: string;
       wslDistro?: string;
-    }) =>
-      cliSessionsSessionDelete({
+    }) => {
+      const wslDistro = normalizeCliSessionsWslDistro(input.wslDistro) ?? undefined;
+      const filePaths = normalizeCliSessionsDeleteFilePaths(input.filePaths);
+      return cliSessionsSessionDelete({
         source: input.source,
-        filePaths: input.filePaths,
-        wslDistro: input.wslDistro,
-      }),
+        filePaths,
+        wslDistro,
+      });
+    },
     onSuccess: (failedList, input) => {
       if (!failedList) return;
+      let normalizedInput: ReturnType<typeof normalizeCliSessionsMutationCacheInput>;
+      let filePaths: string[];
+      try {
+        normalizedInput = normalizeCliSessionsMutationCacheInput(input);
+        filePaths = normalizeCliSessionsDeleteFilePaths(input.filePaths);
+      } catch {
+        return;
+      }
       const deletedPaths = new Set(
-        input.filePaths.filter((fp) => !failedList.some((f) => f.startsWith(fp)))
+        filePaths.filter((fp) => !failedList.some((failedPath) => failedPath.startsWith(fp)))
       );
       if (deletedPaths.size === 0) return;
-      const key = cliSessionsKeys.sessionsList(input.source, input.projectId, input.wslDistro);
+      const key = cliSessionsKeys.sessionsList(
+        input.source,
+        normalizedInput.projectId,
+        normalizedInput.wslDistro
+      );
       queryClient.setQueryData<CliSessionsSessionSummary[] | null>(key, (prev) => {
         if (!prev) return prev;
         return prev.filter((s) => !deletedPaths.has(s.file_path));
@@ -107,11 +146,21 @@ export function useCliSessionsSessionDeleteMutation() {
     },
     onSettled: (_res, _err, input) => {
       if (!input) return;
+      let normalizedInput: ReturnType<typeof normalizeCliSessionsMutationCacheInput>;
+      try {
+        normalizedInput = normalizeCliSessionsMutationCacheInput(input);
+      } catch {
+        return;
+      }
       queryClient.invalidateQueries({
-        queryKey: cliSessionsKeys.sessionsList(input.source, input.projectId, input.wslDistro),
+        queryKey: cliSessionsKeys.sessionsList(
+          input.source,
+          normalizedInput.projectId,
+          normalizedInput.wslDistro
+        ),
       });
       queryClient.invalidateQueries({
-        queryKey: cliSessionsKeys.projectsList(input.source, input.wslDistro),
+        queryKey: cliSessionsKeys.projectsList(input.source, normalizedInput.wslDistro),
       });
     },
   });
