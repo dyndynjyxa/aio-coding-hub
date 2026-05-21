@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.40.10](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.40.9...aio-coding-hub-v0.40.10) (2026-05-21)
+
+
+### Bug Fixes
+
+* **gateway:** preserve provider order and fail over on quota exhaustion ([#255](https://github.com/dyndynjyxa/aio-coding-hub/issues/255)) ([13bba9b](https://github.com/dyndynjyxa/aio-coding-hub/commit/13bba9b047b1e7f2867cc0cbbbb8ba5e58a37ea6))
+* **notification:** 修复 macOS 媒体键被通知音效抢占的问题 ([#251](https://github.com/dyndynjyxa/aio-coding-hub/issues/251)) ([831bcf8](https://github.com/dyndynjyxa/aio-coding-hub/commit/831bcf8146e7dd8f5c5ce221507d70c0875edbee))
+* reduce macOS webview memory pressure ([273fe70](https://github.com/dyndynjyxa/aio-coding-hub/commit/273fe70bc3faab6590fcec0890ebf81361bbe64e))
+
 ## [0.40.9](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.40.8...aio-coding-hub-v0.40.9) (2026-05-18)
 
 
