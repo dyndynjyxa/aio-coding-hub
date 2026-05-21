@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.41.1](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.41.0...aio-coding-hub-v0.41.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* open sidebar repo link in system browser ([d3bd836](https://github.com/dyndynjyxa/aio-coding-hub/commit/d3bd83615b99c287b7f606eb75373fdc62d8c971))
+
 ## [0.41.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.40.10...aio-coding-hub-v0.41.0) (2026-05-21)
 
 
