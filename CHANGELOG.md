@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.41.2](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.41.1...aio-coding-hub-v0.41.2) (2026-05-22)
+
+
+### Features
+
+* **home:** 在主面板中添加 OAuth 配额标签页及相关刷新功能 ([fd8e57b](https://github.com/dyndynjyxa/aio-coding-hub/commit/fd8e57b820ad780140c4284a71ab31d9d25eac6e))
+
+
+### Bug Fixes
+
+* gate OAuth quota snapshots ([0a6e53c](https://github.com/dyndynjyxa/aio-coding-hub/commit/0a6e53c67869b3b6713813807e533313534d830e))
+
 ## [0.41.1](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.41.0...aio-coding-hub-v0.41.1) (2026-05-21)
 
 
