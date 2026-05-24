@@ -117,16 +117,56 @@ jobs:
               )"
             fi
 
+            if [ -z "${pr_number}" ]; then
+              echo "Failed to resolve sync PR number." >&2
+              exit 1
+            fi
+
+            local mergeable=""
+            local mergeable_state=""
+            local head_sha=""
+            local merged="false"
+
+            for attempt in {1..12}; do
+              IFS=$'\t' read -r mergeable mergeable_state head_sha < <(
+                gh api "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}" \
+                  --jq '[.mergeable, .mergeable_state, .head.sha] | @tsv'
+              )
+
+              echo "PR #${pr_number} mergeability attempt ${attempt}: mergeable=${mergeable}, state=${mergeable_state}"
+
+              if [ "${mergeable}" = "true" ]; then
+                gh pr merge "${pr_number}" \
+                  --repo "${GITHUB_REPOSITORY}" \
+                  --merge \
+                  --match-head-commit "${head_sha}" \
+                  --subject "${title}" \
+                  --body "Auto-merged upstream sync from ${UPSTREAM_REPO}:${TARGET_BRANCH}."
+                merged="true"
+                break
+              fi
+
+              if [ "${mergeable}" = "false" ] && [ "${mergeable_state}" = "dirty" ]; then
+                echo "PR #${pr_number} has merge conflicts. Manual intervention required." >&2
+                exit 1
+              fi
+
+              sleep 5
+            done
+
+            if [ "${merged}" != "true" ]; then
+              echo "PR #${pr_number} was not mergeable after waiting. Manual intervention required." >&2
+              exit 1
+            fi
+
             {
               echo "## Sync Upstream"
               echo ""
-              echo "Created or updated cross-repository sync PR for \`${TARGET_BRANCH}\`."
+              echo "Created or updated and auto-merged cross-repository sync PR for \`${TARGET_BRANCH}\`."
               echo ""
               echo "Reason: ${reason}"
-              if [ -n "${pr_number}" ]; then
-                echo ""
-                echo "PR: #${pr_number}"
-              fi
+              echo ""
+              echo "PR: #${pr_number}"
             } >> "${GITHUB_STEP_SUMMARY}"
           }
 
