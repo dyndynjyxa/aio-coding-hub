@@ -176,7 +176,7 @@ describe("ui/Sidebar", () => {
     expect(updateDialogSetOpenMock).toHaveBeenCalledWith(true);
   });
 
-  it("uses stopped tone for the status pill when gateway is stopped", () => {
+  it("renders stopped status with the preferred port when gateway is stopped", () => {
     gatewayMetaRef.current = {
       gatewayAvailable: "available",
       gateway: { running: false, port: null },
@@ -189,8 +189,8 @@ describe("ui/Sidebar", () => {
       </MemoryRouter>
     );
 
-    const statusPill = screen.getByText("已停止 · 37123");
-    expect(statusPill.className).toContain("bg-secondary");
-    expect(statusPill.className).not.toContain("bg-emerald-50");
+    const statusText = screen.getByText("已停止 · 37123");
+    expect(statusText).toBeInTheDocument();
+    expect(statusText.parentElement!).toHaveClass("text-muted-foreground");
   });
 });
