@@ -38,6 +38,9 @@ const SkillsMarketPage = lazy(() =>
   import("../pages/SkillsMarketPage").then((m) => ({ default: m.SkillsMarketPage }))
 );
 const UsagePage = lazy(() => import("../pages/UsagePage").then((m) => ({ default: m.UsagePage })));
+const DataSyncPage = lazy(() =>
+  import("../pages/DataSyncPage").then((m) => ({ default: m.DataSyncPage }))
+);
 const WorkspacesPage = lazy(() =>
   import("../pages/WorkspacesPage").then((m) => ({ default: m.WorkspacesPage }))
 );
@@ -80,6 +83,7 @@ export function AppRoutes() {
         <Route path="/cli-manager" element={renderLazyPage(CliManagerPage)} />
         <Route path="/skills" element={renderLazyPage(SkillsPage)} />
         <Route path="/skills/market" element={renderLazyPage(SkillsMarketPage)} />
+        <Route path="/data-sync" element={renderLazyPage(DataSyncPage)} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
