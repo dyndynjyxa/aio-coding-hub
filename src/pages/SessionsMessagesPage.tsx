@@ -56,11 +56,11 @@ function renderBlock(block: CliSessionsDisplayContentBlock, key: string) {
 
   if (block.type === "thinking") {
     return (
-      <details key={key} className="rounded-lg border border-slate-200 dark:border-slate-700">
-        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+      <details key={key} className="rounded-lg border border-border">
+        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-slate-600 dark:text-secondary">
           思考过程
         </summary>
-        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-slate-600 dark:text-slate-300">
+        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-slate-600 dark:text-secondary">
           {block.thinking}
         </pre>
       </details>
@@ -69,11 +69,11 @@ function renderBlock(block: CliSessionsDisplayContentBlock, key: string) {
 
   if (block.type === "reasoning") {
     return (
-      <details key={key} className="rounded-lg border border-slate-200 dark:border-slate-700">
-        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+      <details key={key} className="rounded-lg border border-border">
+        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-slate-600 dark:text-secondary">
           推理过程
         </summary>
-        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-slate-600 dark:text-slate-300">
+        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-slate-600 dark:text-secondary">
           {block.text}
         </pre>
       </details>
@@ -82,11 +82,11 @@ function renderBlock(block: CliSessionsDisplayContentBlock, key: string) {
 
   if (block.type === "tool_use") {
     return (
-      <details key={key} className="rounded-lg border border-slate-200 dark:border-slate-700">
-        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+      <details key={key} className="rounded-lg border border-border">
+        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-slate-600 dark:text-secondary">
           Tool 调用：{block.name}
         </summary>
-        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-slate-600 dark:text-slate-300">
+        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-slate-600 dark:text-secondary">
           {block.input}
         </pre>
       </details>
@@ -95,11 +95,11 @@ function renderBlock(block: CliSessionsDisplayContentBlock, key: string) {
 
   if (block.type === "tool_result") {
     return (
-      <details key={key} className="rounded-lg border border-slate-200 dark:border-slate-700">
-        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+      <details key={key} className="rounded-lg border border-border">
+        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-slate-600 dark:text-secondary">
           Tool 结果{block.is_error ? "（错误）" : ""}
         </summary>
-        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-slate-600 dark:text-slate-300">
+        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-slate-600 dark:text-secondary">
           {block.content}
         </pre>
       </details>
@@ -108,11 +108,11 @@ function renderBlock(block: CliSessionsDisplayContentBlock, key: string) {
 
   if (block.type === "function_call") {
     return (
-      <details key={key} className="rounded-lg border border-slate-200 dark:border-slate-700">
-        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+      <details key={key} className="rounded-lg border border-border">
+        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-slate-600 dark:text-secondary">
           Function 调用：{block.name}
         </summary>
-        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-slate-600 dark:text-slate-300">
+        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-slate-600 dark:text-secondary">
           {block.arguments}
         </pre>
       </details>
@@ -121,11 +121,11 @@ function renderBlock(block: CliSessionsDisplayContentBlock, key: string) {
 
   if (block.type === "function_call_output") {
     return (
-      <details key={key} className="rounded-lg border border-slate-200 dark:border-slate-700">
-        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+      <details key={key} className="rounded-lg border border-border">
+        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-slate-600 dark:text-secondary">
           Function 输出
         </summary>
-        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-slate-600 dark:text-slate-300">
+        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-slate-600 dark:text-secondary">
           {block.output}
         </pre>
       </details>
@@ -299,10 +299,8 @@ export function SessionsMessagesPage() {
         >
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                会话信息
-              </div>
-              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              <div className="text-sm font-semibold text-foreground">会话信息</div>
+              <div className="mt-1 text-xs text-muted-foreground">
                 {total > 0 ? (
                   <span>
                     {loadedRangeText}
@@ -326,8 +324,8 @@ export function SessionsMessagesPage() {
             </Button>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900/40">
-            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">快速操作</div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-border dark:bg-slate-900/40">
+            <div className="text-sm font-semibold text-foreground">快速操作</div>
             <div className="mt-3 flex flex-wrap gap-2">
               <Button
                 variant="primary"
@@ -364,14 +362,14 @@ export function SessionsMessagesPage() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900/40">
-            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">显示选项</div>
-            <div className="mt-3 space-y-3 text-xs text-slate-600 dark:text-slate-400">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-border dark:bg-slate-900/40">
+            <div className="text-sm font-semibold text-foreground">显示选项</div>
+            <div className="mt-3 space-y-3 text-xs text-muted-foreground">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <label
                     htmlFor="switch-show-timestamp"
-                    className="font-semibold text-slate-700 dark:text-slate-200 cursor-pointer"
+                    className="font-semibold text-slate-700 dark:text-foreground cursor-pointer"
                   >
                     显示时间
                   </label>
@@ -390,7 +388,7 @@ export function SessionsMessagesPage() {
                 <div className="min-w-0">
                   <label
                     htmlFor="switch-show-model"
-                    className="font-semibold text-slate-700 dark:text-slate-200 cursor-pointer"
+                    className="font-semibold text-slate-700 dark:text-foreground cursor-pointer"
                   >
                     显示模型
                   </label>
@@ -408,35 +406,29 @@ export function SessionsMessagesPage() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900/40">
-            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">元信息</div>
-            <div className="mt-3 space-y-2 text-xs text-slate-600 dark:text-slate-400">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-border dark:bg-slate-900/40">
+            <div className="text-sm font-semibold text-foreground">元信息</div>
+            <div className="mt-3 space-y-2 text-xs text-muted-foreground">
               <div className="flex items-start justify-between gap-3">
                 <span className="shrink-0 text-slate-500 dark:text-slate-500">来源</span>
-                <span className="font-mono text-[11px] text-slate-700 dark:text-slate-300">
-                  {source}
-                </span>
+                <span className="font-mono text-[11px] text-secondary">{source}</span>
               </div>
               {distro ? (
                 <div className="flex items-start justify-between gap-3">
                   <span className="shrink-0 text-slate-500 dark:text-slate-500">环境</span>
-                  <span className="font-mono text-[11px] text-slate-700 dark:text-slate-300">
-                    WSL: {distro}
-                  </span>
+                  <span className="font-mono text-[11px] text-secondary">WSL: {distro}</span>
                 </div>
               ) : null}
               {session?.git_branch ? (
                 <div className="flex items-start justify-between gap-3">
                   <span className="shrink-0 text-slate-500 dark:text-slate-500">分支</span>
-                  <span className="font-mono text-[11px] text-slate-700 dark:text-slate-300">
-                    {session.git_branch}
-                  </span>
+                  <span className="font-mono text-[11px] text-secondary">{session.git_branch}</span>
                 </div>
               ) : null}
               {session?.created_at != null ? (
                 <div className="flex items-start justify-between gap-3">
                   <span className="shrink-0 text-slate-500 dark:text-slate-500">创建</span>
-                  <span className="text-right font-mono text-[11px] text-slate-700 dark:text-slate-300">
+                  <span className="text-right font-mono text-[11px] text-secondary">
                     {formatUnixSeconds(session.created_at)}
                   </span>
                 </div>
@@ -445,7 +437,7 @@ export function SessionsMessagesPage() {
                 <div className="flex items-start justify-between gap-3">
                   <span className="shrink-0 text-slate-500 dark:text-slate-500">更新</span>
                   <span
-                    className="text-right font-mono text-[11px] text-slate-700 dark:text-slate-300"
+                    className="text-right font-mono text-[11px] text-secondary"
                     title={formatUnixSeconds(session.modified_at)}
                   >
                     {formatRelativeTimeFromUnixSeconds(session.modified_at)}
@@ -455,7 +447,7 @@ export function SessionsMessagesPage() {
               {session?.cli_version ? (
                 <div className="flex items-start justify-between gap-3">
                   <span className="shrink-0 text-slate-500 dark:text-slate-500">CLI 版本</span>
-                  <span className="font-mono text-[11px] text-slate-700 dark:text-slate-300">
+                  <span className="font-mono text-[11px] text-secondary">
                     {session.cli_version}
                   </span>
                 </div>
@@ -464,7 +456,7 @@ export function SessionsMessagesPage() {
                 <div className="flex items-start justify-between gap-3">
                   <span className="shrink-0 text-slate-500 dark:text-slate-500">CWD</span>
                   <span
-                    className="min-w-0 truncate text-right font-mono text-[11px] text-slate-700 dark:text-slate-300"
+                    className="min-w-0 truncate text-right font-mono text-[11px] text-secondary"
                     title={session.cwd}
                   >
                     {session.cwd}
@@ -475,7 +467,7 @@ export function SessionsMessagesPage() {
                 <div className="flex items-start justify-between gap-3">
                   <span className="shrink-0 text-slate-500 dark:text-slate-500">项目路径</span>
                   <span
-                    className="min-w-0 truncate text-right font-mono text-[11px] text-slate-700 dark:text-slate-300"
+                    className="min-w-0 truncate text-right font-mono text-[11px] text-secondary"
                     title={session.project_path}
                   >
                     {session.project_path}
@@ -486,7 +478,7 @@ export function SessionsMessagesPage() {
                 <div className="flex items-start justify-between gap-3">
                   <span className="shrink-0 text-slate-500 dark:text-slate-500">文件</span>
                   <span
-                    className="min-w-0 truncate text-right font-mono text-[11px] text-slate-700 dark:text-slate-300"
+                    className="min-w-0 truncate text-right font-mono text-[11px] text-secondary"
                     title={filePath}
                   >
                     {filePath}
@@ -498,7 +490,7 @@ export function SessionsMessagesPage() {
         </Card>
 
         <Card padding="none" className="flex min-h-0 flex-1 flex-col">
-          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 text-xs text-slate-500 dark:border-border dark:text-muted-foreground">
             <div>
               {total > 0 ? (
                 <span>
@@ -545,7 +537,7 @@ export function SessionsMessagesPage() {
               <EmptyState title="此会话没有可显示的消息" variant="dashed" />
             ) : (
               <>
-                <div className="py-2 text-center text-[11px] text-slate-400 dark:text-slate-500">
+                <div className="py-2 text-center text-[11px] text-muted-foreground">
                   — 会话开始 —
                 </div>
                 <div
@@ -570,19 +562,19 @@ export function SessionsMessagesPage() {
                     const avatarText = avatarTextForRole(role);
                     const avatarClass =
                       side === "right"
-                        ? "border-slate-200 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                        ? "border-slate-200 bg-white text-slate-900 dark:border-border dark:bg-secondary dark:text-foreground"
                         : side === "left"
                           ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
                           : "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700 dark:border-fuchsia-700 dark:bg-fuchsia-900/30 dark:text-fuchsia-300";
 
                     const bubbleClass =
                       side === "right"
-                        ? "border-accent/20 bg-gradient-to-br from-accent/10 to-accent-secondary/5 text-slate-900 dark:border-accent/30 dark:from-accent/20 dark:to-accent-secondary/10 dark:text-slate-100"
+                        ? "border-accent/20 bg-gradient-to-br from-accent/10 to-accent-secondary/5 text-slate-900 dark:border-accent/30 dark:from-accent/20 dark:to-accent-secondary/10 dark:text-foreground"
                         : side === "center"
                           ? "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-800 dark:border-fuchsia-700 dark:bg-fuchsia-900/30 dark:text-fuchsia-200"
                           : role.toLowerCase().startsWith("tool")
                             ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200"
-                            : "border-slate-200 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-100";
+                            : "border-slate-200 bg-white text-slate-900 dark:border-border dark:bg-slate-900/40 dark:text-foreground";
 
                     return (
                       <div
@@ -634,8 +626,8 @@ export function SessionsMessagesPage() {
                                 className={cn(
                                   "mb-2 flex flex-wrap items-center justify-between gap-2 text-[11px]",
                                   side === "right"
-                                    ? "text-slate-600 dark:text-slate-300"
-                                    : "text-slate-500 dark:text-slate-400"
+                                    ? "text-slate-600 dark:text-secondary"
+                                    : "text-muted-foreground"
                                 )}
                               >
                                 <div className="flex min-w-0 items-center gap-2">
@@ -682,7 +674,7 @@ export function SessionsMessagesPage() {
                   })}
                 </div>
                 {!hasMore ? (
-                  <div className="py-2 text-center text-[11px] text-slate-400 dark:text-slate-500">
+                  <div className="py-2 text-center text-[11px] text-muted-foreground">
                     — 会话结束 —
                   </div>
                 ) : null}

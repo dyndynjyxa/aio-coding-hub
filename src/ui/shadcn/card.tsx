@@ -16,12 +16,7 @@ const PADDING_CLASS: Record<CardPadding, string> = {
 export function Card({ padding = "md", className, ...props }: CardProps) {
   return (
     <div
-      className={cn(
-        "overflow-hidden border border-border bg-card shadow-card",
-        "rounded-xl sm:rounded-2xl",
-        PADDING_CLASS[padding],
-        className
-      )}
+      className={cn("overflow-hidden bg-card", "rounded-[10px]", PADDING_CLASS[padding], className)}
       {...props}
     />
   );

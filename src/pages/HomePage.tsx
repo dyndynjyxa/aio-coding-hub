@@ -242,7 +242,7 @@ export function HomePage() {
           <Suspense
             fallback={
               <Card padding="md" className="flex h-full items-center justify-center">
-                <div className="flex items-center gap-3 text-sm text-slate-600 dark:text-slate-400">
+                <div className="flex items-center gap-3 text-sm text-muted-foreground">
                   <Spinner />
                   <span>加载花费面板中…</span>
                 </div>
@@ -255,7 +255,7 @@ export function HomePage() {
           <Suspense
             fallback={
               <Card padding="md" className="flex h-full items-center justify-center">
-                <div className="flex items-center gap-3 text-sm text-slate-600 dark:text-slate-400">
+                <div className="flex items-center gap-3 text-sm text-muted-foreground">
                   <Spinner />
                   <span>加载用量面板中…</span>
                 </div>
@@ -317,14 +317,10 @@ export function HomePage() {
               {pendingCliProxyEnablePrompt.conflicts.map((row) => (
                 <li
                   key={`${row.var_name}:${row.source_type}:${row.source_path}`}
-                  className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2"
+                  className="rounded-lg border border-border bg-secondary px-3 py-2"
                 >
-                  <div className="font-mono text-xs text-slate-800 dark:text-slate-200">
-                    {row.var_name}
-                  </div>
-                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    {row.source_path}
-                  </div>
+                  <div className="font-mono text-xs text-foreground">{row.var_name}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">{row.source_path}</div>
                 </li>
               ))}
             </ul>
@@ -361,7 +357,7 @@ export function HomePage() {
               description="先看关键指标，再看为什么会重试、跳过或切换供应商。"
               className="max-w-3xl"
             >
-              <div className="flex items-center gap-3 text-sm text-slate-600 dark:text-slate-400">
+              <div className="flex items-center gap-3 text-sm text-muted-foreground">
                 <Spinner />
                 <span>加载代理记录详情中…</span>
               </div>

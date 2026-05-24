@@ -148,23 +148,23 @@ export function SettingsMainColumn({
       {settingsReadErrorMessage ? (
         <div
           role="alert"
-          className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+          className="rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
         >
           {settingsReadErrorMessage}
         </div>
       ) : null}
       {/* 网关服务 */}
       <Card>
-        <div className="mb-4 flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-4">
-          <div className="font-semibold text-slate-900 dark:text-slate-100">网关服务</div>
+        <div className="mb-4 flex items-center justify-between border-b border-border pb-4">
+          <div className="font-semibold text-foreground">网关服务</div>
           <span
             className={cn(
               "rounded-full px-2.5 py-0.5 text-xs font-medium",
               gatewayAvailable === "checking" || gatewayAvailable === "unavailable"
-                ? "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400"
+                ? "bg-secondary text-muted-foreground"
                 : gateway?.running
                   ? "bg-emerald-50 text-emerald-700"
-                  : "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400"
+                  : "bg-secondary text-muted-foreground"
             )}
           >
             {gatewayAvailable === "checking"
@@ -263,15 +263,15 @@ export function SettingsMainColumn({
 
       {/* 参数配置 */}
       <Card>
-        <div className="mb-4 border-b border-slate-100 dark:border-slate-700 pb-4">
-          <div className="font-semibold text-slate-900 dark:text-slate-100">参数配置</div>
+        <div className="mb-4 border-b border-border pb-4">
+          <div className="font-semibold text-foreground">参数配置</div>
         </div>
 
         <div className="space-y-8">
           <div className="grid gap-6 xl:grid-cols-2 xl:items-start">
             {/* 系统设置 */}
-            <div className="rounded-xl border border-slate-200/80 bg-slate-50/40 p-4 dark:border-slate-700 dark:bg-slate-800/30">
-              <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            <div className="rounded-[10px] bg-secondary p-4">
+              <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
                 系统设置
               </h3>
               <div className="space-y-1">
@@ -318,15 +318,15 @@ export function SettingsMainColumn({
                   </SettingsRow>
                 ))}
                 <SettingsRow label="调试日志">
-                    <Switch
-                      checked={enableDebugLog}
-                      onCheckedChange={(next) => {
-                        setEnableDebugLog(next);
-                        requestPersist({ enable_debug_log: next });
-                      }}
-                      disabled={settingsInputsDisabled}
-                    />
-                  </SettingsRow>
+                  <Switch
+                    checked={enableDebugLog}
+                    onCheckedChange={(next) => {
+                      setEnableDebugLog(next);
+                      requestPersist({ enable_debug_log: next });
+                    }}
+                    disabled={settingsInputsDisabled}
+                  />
+                </SettingsRow>
                 <SettingsRow label="日志保留">
                   <div className="flex items-center gap-2">
                     <Input
@@ -351,15 +351,15 @@ export function SettingsMainColumn({
                       max={3650}
                       disabled={settingsInputsDisabled}
                     />
-                    <span className="text-sm text-slate-500 dark:text-slate-400">天</span>
+                    <span className="text-sm text-muted-foreground">天</span>
                   </div>
                 </SettingsRow>
               </div>
             </div>
 
             {/* 系统通知 */}
-            <div className="rounded-xl border border-slate-200/80 bg-slate-50/40 p-4 dark:border-slate-700 dark:bg-slate-800/30">
-              <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            <div className="rounded-[10px] bg-secondary p-4">
+              <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
                 系统通知
               </h3>
               <div className="space-y-1">
@@ -371,7 +371,7 @@ export function SettingsMainColumn({
                         ? "bg-emerald-50 text-emerald-700"
                         : noticePermissionStatus === "checking" ||
                             noticePermissionStatus === "unknown"
-                          ? "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400"
+                          ? "bg-secondary text-muted-foreground"
                           : "bg-amber-50 text-amber-700"
                     )}
                   >
@@ -411,13 +411,13 @@ export function SettingsMainColumn({
           </div>
 
           {/* UI 偏好 */}
-          <div className="rounded-xl border border-slate-200/80 bg-slate-50/40 p-4 dark:border-slate-700 dark:bg-slate-800/30">
-            <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+          <div className="rounded-[10px] bg-secondary p-4">
+            <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
               UI 偏好
             </h3>
             <div className="space-y-1">
               <SettingsRow label="主题">
-                <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-700/50">
+                <div className="flex items-center gap-1 rounded-[6px] bg-secondary p-0.5">
                   {(["light", "dark", "system"] as const).map((value) => (
                     <button
                       key={value}
@@ -425,8 +425,8 @@ export function SettingsMainColumn({
                       className={cn(
                         "flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition",
                         theme === value
-                          ? "bg-white text-slate-900 shadow-sm dark:bg-slate-500 dark:text-white"
-                          : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                          ? "bg-card text-foreground"
+                          : "text-muted-foreground hover:text-foreground"
                       )}
                       onClick={() => setTheme(value)}
                     >
@@ -436,7 +436,7 @@ export function SettingsMainColumn({
                 </div>
               </SettingsRow>
               <SettingsRow label="首页用量范围">
-                <div className="flex flex-wrap items-center gap-1 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-700/50">
+                <div className="flex flex-wrap items-center gap-1 rounded-[6px] bg-secondary p-0.5">
                   {HOME_USAGE_PERIOD_OPTIONS.map((option) => (
                     <button
                       key={option.value}
@@ -444,8 +444,8 @@ export function SettingsMainColumn({
                       className={cn(
                         "flex items-center justify-center rounded-md px-2.5 py-1.5 text-xs transition",
                         homeUsagePeriod === option.value
-                          ? "bg-white text-slate-900 shadow-sm dark:bg-slate-500 dark:text-white"
-                          : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                          ? "bg-card text-foreground"
+                          : "text-muted-foreground hover:text-foreground"
                       )}
                       onClick={() => {
                         setHomeUsagePeriod(option.value);

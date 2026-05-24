@@ -221,11 +221,11 @@ export function SessionsPage() {
           <Card padding="md" className="flex flex-col gap-4 lg:min-h-0">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">概览</div>
-                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                <div className="text-sm font-semibold text-foreground">概览</div>
+                <div className="mt-1 text-xs text-muted-foreground">
                   当前来源：<span className="font-semibold">{source}</span>
                   {activeDistro ? (
-                    <span className="ml-2 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                    <span className="ml-2 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:border-border dark:bg-secondary dark:text-secondary">
                       {envLabel}
                     </span>
                   ) : null}
@@ -243,27 +243,21 @@ export function SessionsPage() {
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/30">
-                <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                  项目
-                </div>
-                <div className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-border dark:bg-slate-900/30">
+                <div className="text-[11px] font-semibold text-muted-foreground">项目</div>
+                <div className="mt-1 text-lg font-semibold text-foreground">
                   {stats.totalProjects}
                 </div>
               </div>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/30">
-                <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                  会话总数
-                </div>
-                <div className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-border dark:bg-slate-900/30">
+                <div className="text-[11px] font-semibold text-muted-foreground">会话总数</div>
+                <div className="mt-1 text-lg font-semibold text-foreground">
                   {stats.totalSessions}
                 </div>
               </div>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/30">
-                <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                  最近更新
-                </div>
-                <div className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-border dark:bg-slate-900/30">
+                <div className="text-[11px] font-semibold text-muted-foreground">最近更新</div>
+                <div className="mt-1 text-lg font-semibold text-foreground">
                   {stats.lastModified != null
                     ? formatRelativeTimeFromUnixSeconds(stats.lastModified)
                     : "—"}
@@ -271,23 +265,21 @@ export function SessionsPage() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900/40">
-              <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">数据源</div>
-              <div className="mt-2 text-xs text-slate-600 dark:text-slate-400">
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-border dark:bg-slate-900/40">
+              <div className="text-sm font-semibold text-foreground">数据源</div>
+              <div className="mt-2 text-xs text-muted-foreground">
                 <div className="flex items-start justify-between gap-2">
                   <span className="shrink-0 text-slate-500 dark:text-slate-500">目录</span>
-                  <span className="min-w-0 text-right font-mono text-[11px] text-slate-700 dark:text-slate-300">
+                  <span className="min-w-0 text-right font-mono text-[11px] text-secondary">
                     {sourceDirHint(source, activeDistro)}
                   </span>
                 </div>
               </div>
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900/40">
-              <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                操作提示
-              </div>
-              <ul className="mt-2 space-y-1 text-xs text-slate-600 dark:text-slate-400">
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-border dark:bg-slate-900/40">
+              <div className="text-sm font-semibold text-foreground">操作提示</div>
+              <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
                 <li>1) 选择项目进入会话列表</li>
                 <li>2) 在会话列表中复制恢复命令或查看消息</li>
                 <li>3) 消息页支持"加载更多"</li>
@@ -298,14 +290,14 @@ export function SessionsPage() {
           <Card padding="sm" className="flex flex-col lg:h-full">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
-                <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
+                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                   <FolderOpen className="h-4 w-4 shrink-0 text-accent" />
                   <span className="shrink-0">项目</span>
-                  <span className="shrink-0 text-xs font-medium text-slate-500 dark:text-slate-400">
+                  <span className="shrink-0 text-xs font-medium text-muted-foreground">
                     {filteredProjects.length}/{projects.length}
                   </span>
                 </div>
-                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                <div className="mt-1 text-xs text-muted-foreground">
                   在左侧查看数据源与统计;点击项目进入会话列表。
                 </div>
               </div>
@@ -347,7 +339,7 @@ export function SessionsPage() {
               </div>
             </div>
 
-            <div className="mt-3 hidden grid-cols-[1fr_110px_140px] gap-3 px-3 text-[11px] font-semibold text-slate-500 dark:text-slate-400 sm:grid">
+            <div className="mt-3 hidden grid-cols-[1fr_110px_140px] gap-3 px-3 text-[11px] font-semibold text-muted-foreground sm:grid">
               <span>项目</span>
               <span className="text-right">会话</span>
               <span className="text-right">最近更新</span>
@@ -402,39 +394,39 @@ export function SessionsPage() {
                         className={cn(
                           "w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-left shadow-card transition",
                           "hover:border-slate-300 hover:bg-slate-50",
-                          "dark:border-slate-700 dark:bg-slate-900/40 dark:hover:border-slate-600 dark:hover:bg-slate-900/60"
+                          "dark:border-border dark:bg-slate-900/40 dark:hover:border-slate-600 dark:hover:bg-slate-900/60"
                         )}
                       >
                         <div className="grid gap-2 sm:grid-cols-[1fr_110px_140px] sm:items-center sm:gap-3">
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
-                              <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+                              <div className="truncate text-sm font-semibold text-foreground">
                                 {projectDisplayName(project)}
                               </div>
                               {project.model_provider ? (
-                                <span className="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                                <span className="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:border-border dark:bg-secondary dark:text-secondary">
                                   {project.model_provider}
                                 </span>
                               ) : null}
                             </div>
                             <div
-                              className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400"
+                              className="mt-1 truncate text-xs text-muted-foreground"
                               title={project.display_path}
                             >
                               {project.display_path}
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300 sm:justify-end">
-                            <Hash className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500" />
+                          <div className="flex items-center gap-1 text-xs text-slate-600 dark:text-secondary sm:justify-end">
+                            <Hash className="h-3.5 w-3.5 text-muted-foreground" />
                             <span className="font-semibold">{project.session_count}</span>
                           </div>
 
                           <div
-                            className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300 sm:justify-end"
+                            className="flex items-center gap-1 text-xs text-slate-600 dark:text-secondary sm:justify-end"
                             title={modifiedTitle}
                           >
-                            <Clock className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500" />
+                            <Clock className="h-3.5 w-3.5 text-muted-foreground" />
                             <span className="font-semibold">{modifiedLabel}</span>
                           </div>
                         </div>

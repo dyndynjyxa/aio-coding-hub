@@ -127,9 +127,9 @@ export function RequestLogDetailDialog({
       className="max-w-3xl lg:max-w-5xl"
     >
       {selectedLogLoading ? (
-        <div className="text-sm text-slate-600 dark:text-slate-400">加载中…</div>
+        <div className="text-sm text-muted-foreground">加载中…</div>
       ) : !selectedLog ? (
-        <div className="text-sm text-slate-600 dark:text-slate-400">
+        <div className="text-sm text-muted-foreground">
           未找到记录详情（可能已过期被留存策略清理）。
         </div>
       ) : (

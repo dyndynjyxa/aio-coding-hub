@@ -135,11 +135,9 @@ export function CliManagerGeneralTab({
   return (
     <div className="space-y-6">
       <Card className="overflow-hidden">
-        <div className="border-b border-slate-100 dark:border-slate-700 p-6">
-          <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">通用配置</h2>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            网关整流、通知、超时与熔断策略。
-          </p>
+        <div className="border-b border-border p-6">
+          <h2 className="text-xl font-bold text-foreground">通用配置</h2>
+          <p className="mt-1 text-sm text-muted-foreground">网关整流、通知、超时与熔断策略。</p>
         </div>
 
         {settingsReadErrorMessage ? (
@@ -149,17 +147,15 @@ export function CliManagerGeneralTab({
         ) : null}
 
         {rectifierAvailable === "unavailable" ? (
-          <div className="text-sm text-slate-600 dark:text-slate-400 text-center py-8">
-            数据不可用
-          </div>
+          <div className="text-sm text-muted-foreground text-center py-8">数据不可用</div>
         ) : (
           <div className="p-6 space-y-6">
-            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-5">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-3">
-                <Shield className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+            <div className="rounded-lg border border-border bg-white dark:bg-secondary p-5">
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
+                <Shield className="h-4 w-4 text-muted-foreground" />
                 网关整流器
               </h3>
-              <div className="divide-y divide-slate-100 dark:divide-slate-700">
+              <div className="divide-y divide-border">
                 <SettingsRow label="详细供应商错误信息" subtitle="在日志中显示完整的上游错误详情。">
                   <Switch
                     checked={rectifier.verbose_provider_error}
@@ -287,18 +283,18 @@ export function CliManagerGeneralTab({
               </div>
             </div>
 
-            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-5">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-1">
-                <Bell className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+            <div className="rounded-lg border border-border bg-white dark:bg-secondary p-5">
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-1">
+                <Bell className="h-4 w-4 text-muted-foreground" />
                 通知
               </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+              <p className="text-xs text-muted-foreground mb-3">
                 控制系统通知与音效提醒行为。
                 <span className="ml-1 text-amber-600/80 dark:text-amber-400/80">
                   * 需在系统设置中授予通知权限
                 </span>
               </p>
-              <div className="divide-y divide-slate-100 dark:divide-slate-700">
+              <div className="divide-y divide-border">
                 <SettingsRow
                   label="任务结束提醒"
                   subtitle="当 AI CLI 工具（Claude/Gemini：30 秒；Codex：120 秒）请求结束后静默无新请求时，发送系统通知提醒。"
@@ -329,15 +325,15 @@ export function CliManagerGeneralTab({
               </div>
             </div>
 
-            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-5">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-1">
-                <TrendingDown className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+            <div className="rounded-lg border border-border bg-white dark:bg-secondary p-5">
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-1">
+                <TrendingDown className="h-4 w-4 text-muted-foreground" />
                 缓存异常监测（实验）
               </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+              <p className="text-xs text-muted-foreground mb-3">
                 {CACHE_ANOMALY_MONITOR_GUIDE_COPY.overview}
               </p>
-              <div className="divide-y divide-slate-100 dark:divide-slate-700">
+              <div className="divide-y divide-border">
                 <SettingsRow
                   label="启用缓存异常监测"
                   subtitle={`${CACHE_ANOMALY_MONITOR_GUIDE_COPY.trigger} ${CACHE_ANOMALY_MONITOR_GUIDE_COPY.metric}`}
@@ -349,12 +345,12 @@ export function CliManagerGeneralTab({
                   />
                 </SettingsRow>
               </div>
-              <div className="mt-3 space-y-1 text-xs text-slate-500 dark:text-slate-400">
+              <div className="mt-3 space-y-1 text-xs text-muted-foreground">
                 <p>{CACHE_ANOMALY_MONITOR_GUIDE_COPY.coldStart}</p>
                 <p>{CACHE_ANOMALY_MONITOR_GUIDE_COPY.nonCachingModel}</p>
                 <p>{CACHE_ANOMALY_MONITOR_GUIDE_COPY.thresholds}</p>
               </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 <span>
                   提示：告警会以 <span className="font-mono">WARN</span>{" "}
                   写入「控制台」页（无需开启调试日志）。
@@ -366,12 +362,12 @@ export function CliManagerGeneralTab({
             </div>
 
             {appSettings ? (
-              <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-5">
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-3">
-                  <Shield className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+              <div className="rounded-lg border border-border bg-white dark:bg-secondary p-5">
+                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
+                  <Shield className="h-4 w-4 text-muted-foreground" />
                   启动与恢复
                 </h3>
-                <div className="divide-y divide-slate-100 dark:divide-slate-700">
+                <div className="divide-y divide-border">
                   <SettingsRow
                     label="启动时 CLI 代理自愈"
                     subtitle="应用启动后仅修复异常退出导致的 CLI 代理残留状态，不会主动改写当前配置。建议保持开启。"
@@ -412,15 +408,15 @@ export function CliManagerGeneralTab({
               </>
             ) : null}
 
-            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-5">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-1">
-                <Shield className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+            <div className="rounded-lg border border-border bg-white dark:bg-secondary p-5">
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-1">
+                <Shield className="h-4 w-4 text-muted-foreground" />
                 超时策略
               </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+              <p className="text-xs text-muted-foreground mb-3">
                 控制上游请求的超时行为。0 表示禁用（交由上游/网络自行超时）。
               </p>
-              <div className="divide-y divide-slate-100 dark:divide-slate-700">
+              <div className="divide-y divide-border">
                 <SettingsRow
                   label="首字节超时（0=禁用）"
                   subtitle="等待上游返回第一个字节的最大时间。"
@@ -451,7 +447,7 @@ export function CliManagerGeneralTab({
                       max={3600}
                       disabled={commonSettingsDisabled}
                     />
-                    <span className="w-8 text-sm text-slate-500 dark:text-slate-400">秒</span>
+                    <span className="w-8 text-sm text-muted-foreground">秒</span>
                   </div>
                 </SettingsRow>
 
@@ -492,7 +488,7 @@ export function CliManagerGeneralTab({
                       max={3600}
                       disabled={commonSettingsDisabled}
                     />
-                    <span className="w-8 text-sm text-slate-500 dark:text-slate-400">秒</span>
+                    <span className="w-8 text-sm text-muted-foreground">秒</span>
                   </div>
                 </SettingsRow>
 
@@ -526,21 +522,21 @@ export function CliManagerGeneralTab({
                       max={86400}
                       disabled={commonSettingsDisabled}
                     />
-                    <span className="w-8 text-sm text-slate-500 dark:text-slate-400">秒</span>
+                    <span className="w-8 text-sm text-muted-foreground">秒</span>
                   </div>
                 </SettingsRow>
               </div>
             </div>
 
-            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-5">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-1">
-                <Shield className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+            <div className="rounded-lg border border-border bg-white dark:bg-secondary p-5">
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-1">
+                <Shield className="h-4 w-4 text-muted-foreground" />
                 熔断与重试
               </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+              <p className="text-xs text-muted-foreground mb-3">
                 控制 Provider 失败后的冷却、重试与熔断行为。修改后建议重启网关以完全生效。
               </p>
-              <div className="divide-y divide-slate-100 dark:divide-slate-700">
+              <div className="divide-y divide-border">
                 <SettingsRow label="Provider 冷却" subtitle="单个 Provider 失败后的短暂冷却时间。">
                   <div className="flex items-center gap-2">
                     <Input
@@ -566,7 +562,7 @@ export function CliManagerGeneralTab({
                       max={3600}
                       disabled={commonSettingsDisabled}
                     />
-                    <span className="w-8 text-sm text-slate-500 dark:text-slate-400">秒</span>
+                    <span className="w-8 text-sm text-muted-foreground">秒</span>
                   </div>
                 </SettingsRow>
 
@@ -602,7 +598,7 @@ export function CliManagerGeneralTab({
                       max={3600}
                       disabled={commonSettingsDisabled}
                     />
-                    <span className="w-8 text-sm text-slate-500 dark:text-slate-400">秒</span>
+                    <span className="w-8 text-sm text-muted-foreground">秒</span>
                   </div>
                 </SettingsRow>
 
@@ -633,7 +629,7 @@ export function CliManagerGeneralTab({
                       max={50}
                       disabled={commonSettingsDisabled}
                     />
-                    <span className="w-8 text-sm text-slate-500 dark:text-slate-400">次</span>
+                    <span className="w-8 text-sm text-muted-foreground">次</span>
                   </div>
                 </SettingsRow>
 
@@ -666,7 +662,7 @@ export function CliManagerGeneralTab({
                       max={1440}
                       disabled={commonSettingsDisabled}
                     />
-                    <span className="w-8 text-sm text-slate-500 dark:text-slate-400">分钟</span>
+                    <span className="w-8 text-sm text-muted-foreground">分钟</span>
                   </div>
                 </SettingsRow>
               </div>
@@ -887,16 +883,16 @@ function UpstreamProxySettingsCard({
   }
 
   return (
-    <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-5">
-      <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-1">
-        <Globe className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+    <div className="rounded-lg border border-border bg-white dark:bg-secondary p-5">
+      <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-1">
+        <Globe className="h-4 w-4 text-muted-foreground" />
         上游代理
       </h3>
-      <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+      <p className="text-xs text-muted-foreground mb-3">
         网关向上游 AI 服务（Claude/Codex/Gemini）发起请求时使用的代理。支持
         http/https/socks5/socks5h 协议。
       </p>
-      <div className="divide-y divide-slate-100 dark:divide-slate-700">
+      <div className="divide-y divide-border">
         <SettingsRow label="启用上游代理" subtitle="启用后，所有上游请求将通过指定代理发送。">
           <Switch
             checked={settings.upstream_proxy_enabled}
@@ -984,7 +980,7 @@ function UpstreamProxySettingsCard({
             disabled={disabled}
           />
           {settings.upstream_proxy_password_configured ? (
-            <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
               <span>{clearSavedPassword ? "保存后会删除已保存密码" : "已保存代理密码"}</span>
               <button
                 type="button"

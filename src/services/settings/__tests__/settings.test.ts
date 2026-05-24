@@ -108,6 +108,7 @@ describe("services/settings/settings", () => {
     const { createSettingsSetInput } = await import("../settings");
 
     const input = createSettingsSetInput(createTestAppSettings(), {
+      codex_oauth_compatible_proxy_mode: true,
       upstream_proxy_password: { mode: "clear" },
     });
 
@@ -115,10 +116,12 @@ describe("services/settings/settings", () => {
       preferredPort: 37123,
       gatewayListenMode: "localhost",
       wslTargetCli: { claude: true, codex: true, gemini: true },
+      codexOauthCompatibleProxyMode: true,
       cx2CcFallbackModelMain: "gpt-5.4",
       upstreamProxyPassword: { mode: "clear" },
     });
     expect(input).not.toHaveProperty("cx2ccFallbackModelMain");
+    expect(input).not.toHaveProperty("codex_oauth_compatible_proxy_mode");
   });
 
   it("rejects invalid settings at the frontend boundary before IPC", async () => {

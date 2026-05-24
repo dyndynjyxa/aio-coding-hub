@@ -195,6 +195,39 @@ describe("components/cli-manager/tabs/CodexTab", () => {
     confirmSpy.mockRestore();
   });
 
+  it("toggles Codex OAuth compatible proxy mode from app settings", () => {
+    const persistCodexOauthCompatibleProxyMode = vi.fn().mockResolvedValue(true);
+
+    render(
+      <CliManagerCodexTab
+        codexAvailable="available"
+        codexLoading={false}
+        codexConfigLoading={false}
+        codexConfigSaving={false}
+        codexConfigTomlLoading={false}
+        codexConfigTomlSaving={false}
+        codexInfo={createCodexInfo()}
+        codexConfig={createCodexConfig()}
+        codexConfigToml={{
+          config_path: "/home/user/.codex/config.toml",
+          exists: true,
+          toml: 'approval_policy = "on-request"\\n',
+        }}
+        appSettings={createAppSettings({ codex_oauth_compatible_proxy_mode: false })}
+        refreshCodex={vi.fn()}
+        openCodexConfigDir={vi.fn()}
+        persistCodexConfig={vi.fn()}
+        persistCodexConfigToml={vi.fn().mockResolvedValue(true)}
+        persistCodexOauthCompatibleProxyMode={persistCodexOauthCompatibleProxyMode}
+      />
+    );
+
+    expect(screen.getByText("OAuth 兼容代理模式")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("switch", { name: "切换 Codex OAuth 兼容代理模式" }));
+
+    expect(persistCodexOauthCompatibleProxyMode).toHaveBeenCalledWith(true);
+  });
+
   it("renders unavailable state", () => {
     render(
       <CliManagerCodexTab

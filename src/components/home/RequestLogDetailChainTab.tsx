@@ -24,8 +24,8 @@ export function RequestLogDetailChainTab({
     <div className="space-y-3">
       <Card padding="sm">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">决策链</div>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+          <div className="text-sm font-semibold text-foreground">决策链</div>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <span
               className={cn(
                 "rounded-full px-2 py-0.5 font-medium",
@@ -34,7 +34,7 @@ export function RequestLogDetailChainTab({
             >
               {cliShortLabel(selectedLog.cli_key)}
             </span>
-            <span className="rounded-full bg-slate-100 dark:bg-slate-700 px-2 py-0.5">
+            <span className="rounded-full bg-secondary px-2 py-0.5">
               {isInProgress ? "当前供应商" : "最终供应商"}：{finalProviderText || "未知"}
             </span>
           </div>

@@ -80,6 +80,7 @@ pub(crate) struct SettingsUpdate {
     pub wsl_custom_host_address: Option<String>,
     pub codex_home_mode: Option<settings::CodexHomeMode>,
     pub codex_home_override: Option<String>,
+    pub codex_oauth_compatible_proxy_mode: Option<bool>,
     #[serde(rename = "cx2CcFallbackModelOpus")]
     #[specta(rename = "cx2CcFallbackModelOpus")]
     pub cx2cc_fallback_model_opus: Option<String>,
@@ -143,6 +144,7 @@ pub(crate) struct SettingsView {
     pub wsl_custom_host_address: String,
     pub codex_home_mode: settings::CodexHomeMode,
     pub codex_home_override: String,
+    pub codex_oauth_compatible_proxy_mode: bool,
     pub auto_start: bool,
     pub start_minimized: bool,
     pub tray_enabled: bool,
@@ -261,6 +263,7 @@ impl From<&settings::AppSettings> for SettingsView {
             wsl_custom_host_address: value.wsl_custom_host_address.clone(),
             codex_home_mode: value.codex_home_mode,
             codex_home_override: value.codex_home_override.clone(),
+            codex_oauth_compatible_proxy_mode: value.codex_oauth_compatible_proxy_mode,
             auto_start: value.auto_start,
             start_minimized: value.start_minimized,
             tray_enabled: value.tray_enabled,
@@ -321,7 +324,10 @@ impl SettingsRuntimePlan {
         let gateway_rebind_required = crate::gateway::listen_rebind_required(previous, next);
         let codex_home_changed = previous.codex_home_mode != next.codex_home_mode
             || previous.codex_home_override != next.codex_home_override;
-        let cli_proxy_sync_required = gateway_rebind_required || codex_home_changed;
+        let codex_proxy_mode_changed =
+            previous.codex_oauth_compatible_proxy_mode != next.codex_oauth_compatible_proxy_mode;
+        let cli_proxy_sync_required =
+            gateway_rebind_required || codex_home_changed || codex_proxy_mode_changed;
         #[cfg(windows)]
         let wsl_auto_sync_required = next.wsl_auto_config
             && next.gateway_listen_mode != settings::GatewayListenMode::Localhost
@@ -570,6 +576,7 @@ pub(crate) async fn settings_set_impl(
         wsl_custom_host_address,
         codex_home_mode,
         codex_home_override,
+        codex_oauth_compatible_proxy_mode,
         cx2cc_fallback_model_opus,
         cx2cc_fallback_model_sonnet,
         cx2cc_fallback_model_haiku,
@@ -628,6 +635,8 @@ pub(crate) async fn settings_set_impl(
                 .unwrap_or(previous.codex_home_override.clone())
                 .trim()
                 .to_string();
+            let codex_oauth_compatible_proxy_mode = codex_oauth_compatible_proxy_mode
+                .unwrap_or(previous.codex_oauth_compatible_proxy_mode);
             let cx2cc_fallback_model_opus = cx2cc_fallback_model_opus
                 .unwrap_or(previous.cx2cc_fallback_model_opus.clone())
                 .trim()
@@ -749,6 +758,7 @@ pub(crate) async fn settings_set_impl(
                 wsl_custom_host_address,
                 codex_home_mode,
                 codex_home_override,
+                codex_oauth_compatible_proxy_mode,
                 auto_start: next_auto_start,
                 start_minimized,
                 tray_enabled,

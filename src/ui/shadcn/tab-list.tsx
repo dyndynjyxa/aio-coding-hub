@@ -30,10 +30,7 @@ export function TabList<T extends string>({
     <div
       role="tablist"
       aria-label={ariaLabel}
-      className={cn(
-        "flex items-center rounded-lg border border-border bg-card p-1",
-        className
-      )}
+      className={cn("flex items-center rounded-full bg-secondary p-[3px]", className)}
     >
       {items.map((item) => {
         const active = value === item.key;
@@ -46,7 +43,7 @@ export function TabList<T extends string>({
             role="tab"
             aria-selected={active}
             disabled={item.disabled}
-            className={cn("h-auto px-3 py-2 shadow-none", buttonClassName)}
+            className={cn("h-auto rounded-full px-3 py-2 shadow-none", buttonClassName)}
           >
             <span className="text-sm font-semibold">{item.label}</span>
           </Button>

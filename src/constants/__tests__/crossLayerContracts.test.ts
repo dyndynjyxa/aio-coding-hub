@@ -88,6 +88,8 @@ describe("cross-layer contracts", () => {
   });
 
   it("keeps secret-safe upstream proxy fields in the generated settings contract", () => {
+    expect(bindingsSource).toContain("codex_oauth_compatible_proxy_mode");
+    expect(bindingsSource).toContain("codexOauthCompatibleProxyMode");
     expect(bindingsSource).toContain("upstream_proxy_enabled");
     expect(bindingsSource).toContain("upstream_proxy_url");
     expect(bindingsSource).toContain("upstream_proxy_username");

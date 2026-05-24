@@ -112,6 +112,9 @@ pub struct AppSettings {
     pub codex_home_mode: CodexHomeMode,
     // Optional Codex config directory override. Empty = default resolution.
     pub codex_home_override: String,
+    // Codex CLI proxy OAuth compatible mode. When enabled, proxy takeover
+    // manages config.toml only and leaves auth.json untouched.
+    pub codex_oauth_compatible_proxy_mode: bool,
     pub auto_start: bool,
     // Start with window hidden when auto-starting (silent startup).
     pub start_minimized: bool,
@@ -193,6 +196,7 @@ impl Default for AppSettings {
             wsl_custom_host_address: "127.0.0.1".to_string(),
             codex_home_mode: CodexHomeMode::default(),
             codex_home_override: String::new(),
+            codex_oauth_compatible_proxy_mode: DEFAULT_CODEX_OAUTH_COMPATIBLE_PROXY_MODE,
             auto_start: false,
             start_minimized: false,
             tray_enabled: true,

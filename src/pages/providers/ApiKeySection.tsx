@@ -74,7 +74,7 @@ export function ApiKeySection(props: { form: UseProviderEditorFormReturn }) {
           disabled={saving}
           footerStart={
             <div className="flex items-center gap-2">
-              <span className="shrink-0 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              <span className="shrink-0 text-[11px] font-medium text-muted-foreground">
                 URL 选择策略
               </span>
               <RadioButtonGroup<ProviderBaseUrlMode>

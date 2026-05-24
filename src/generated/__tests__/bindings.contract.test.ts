@@ -96,6 +96,8 @@ describe("generated/bindings.ts contract", () => {
   });
 
   it("includes secret-safe upstream proxy settings in the generated settings contract", () => {
+    expect(bindingsSource).toContain("codex_oauth_compatible_proxy_mode");
+    expect(bindingsSource).toContain("codexOauthCompatibleProxyMode");
     expect(bindingsSource).toContain("upstream_proxy_enabled");
     expect(bindingsSource).toContain("upstream_proxy_url");
     expect(bindingsSource).toContain("upstream_proxy_username");

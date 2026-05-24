@@ -119,12 +119,35 @@ fn write_codex_proxy_files<R: tauri::Runtime>(app: &tauri::AppHandle<R>, base_or
     std::fs::write(&auth_path, auth).expect("write auth");
 }
 
+fn write_codex_oauth_proxy_config<R: tauri::Runtime>(app: &tauri::AppHandle<R>, base_origin: &str) {
+    let config_path = codex_config_path(app).expect("codex config path");
+    std::fs::create_dir_all(config_path.parent().expect("config parent"))
+        .expect("create config dir");
+
+    let config = build_codex_config_toml_oauth_compatible(
+        None,
+        &format!("{base_origin}/v1"),
+        codex_platform_for_tests(),
+    )
+    .expect("build codex oauth config");
+    std::fs::write(&config_path, config).expect("write config");
+}
+
 fn set_custom_codex_home<R: tauri::Runtime>(app: &tauri::AppHandle<R>, codex_home: &Path) {
     let settings = AppSettings {
         codex_home_mode: CodexHomeMode::Custom,
         codex_home_override: codex_home.display().to_string(),
         ..AppSettings::default()
     };
+    settings::write(app, &settings).expect("write settings");
+}
+
+fn set_codex_oauth_compatible_proxy_mode<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    enabled: bool,
+) {
+    let mut settings = settings::read(app).unwrap_or_default();
+    settings.codex_oauth_compatible_proxy_mode = enabled;
     settings::write(app, &settings).expect("write settings");
 }
 
@@ -314,6 +337,52 @@ trust_level = "trusted"
         s.contains("[model_providers.aio.projects.\"C:\\\\work\"]"),
         "{s}"
     );
+}
+
+#[test]
+fn codex_oauth_compatible_config_removes_aio_owned_preferred_auth_method() {
+    let input = r#"
+preferred_auth_method = "apikey"
+model = "gpt-5-codex"
+
+[model_providers.aio]
+base_url = "http://old/v1"
+"#;
+
+    let out = build_codex_config_toml_oauth_compatible(
+        Some(input.as_bytes().to_vec()),
+        "http://new/v1",
+        CodexConfigPlatform::Other,
+    )
+    .expect("build");
+    let s = String::from_utf8(out).expect("utf8");
+
+    assert!(s.contains("model_provider = \"aio\""), "{s}");
+    assert!(!s.contains("preferred_auth_method"), "{s}");
+    assert!(s.contains("model = \"gpt-5-codex\""), "{s}");
+    assert!(s.contains("base_url = \"http://new/v1\""), "{s}");
+    assert!(s.contains("requires_openai_auth = true"), "{s}");
+}
+
+#[test]
+fn codex_oauth_compatible_config_preserves_non_aio_preferred_auth_method() {
+    let input = r#"
+preferred_auth_method = "chatgpt"
+
+[existing]
+foo = "bar"
+"#;
+
+    let out = build_codex_config_toml_oauth_compatible(
+        Some(input.as_bytes().to_vec()),
+        "http://new/v1",
+        CodexConfigPlatform::Other,
+    )
+    .expect("build");
+    let s = String::from_utf8(out).expect("utf8");
+
+    assert!(s.contains("preferred_auth_method = \"chatgpt\""), "{s}");
+    assert!(s.contains("base_url = \"http://new/v1\""), "{s}");
 }
 
 #[test]
@@ -606,6 +675,268 @@ fn status_all_reports_drift_against_current_gateway_origin() {
         Some(current_origin)
     );
     assert_eq!(codex.applied_to_current_gateway, Some(false));
+}
+
+#[test]
+fn enabling_codex_oauth_compatible_proxy_writes_config_only_and_does_not_create_auth() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    set_codex_oauth_compatible_proxy_mode(&handle, true);
+
+    let result = set_enabled(&handle, "codex", true, base_origin).expect("enable codex");
+    assert!(result.ok, "{result:?}");
+
+    let config_path = codex_config_path(&handle).expect("config path");
+    let auth_path = codex_auth_path(&handle).expect("auth path");
+    let config = std::fs::read_to_string(config_path).expect("read config");
+
+    assert!(config.contains("model_provider = \"aio\""), "{config}");
+    assert!(
+        config.contains(&format!("base_url = \"{base_origin}/v1\"")),
+        "{config}"
+    );
+    assert!(config.contains("requires_openai_auth = true"), "{config}");
+    assert!(!config.contains("preferred_auth_method"), "{config}");
+    assert!(
+        !auth_path.exists(),
+        "oauth compatible proxy must not create auth.json at {}",
+        auth_path.display()
+    );
+
+    let manifest = read_manifest(&handle, "codex")
+        .expect("read manifest")
+        .expect("manifest exists");
+    assert!(manifest
+        .files
+        .iter()
+        .any(|entry| entry.kind == "codex_config_toml"));
+    assert!(
+        !manifest
+            .files
+            .iter()
+            .any(|entry| entry.kind == "codex_auth_json"),
+        "oauth compatible manifest should not target auth.json: {manifest:?}"
+    );
+}
+
+#[test]
+fn enabling_codex_oauth_compatible_proxy_preserves_existing_auth_json() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    set_codex_oauth_compatible_proxy_mode(&handle, true);
+
+    let config = r#"
+preferred_auth_method = "apikey"
+
+[existing]
+foo = "bar"
+"#;
+    let auth = r#"{
+  "tokens": { "access": "oauth-token" },
+  "last_refresh": 123,
+  "profile": "teacher"
+}"#;
+    write_codex_direct_files(&handle, config, auth);
+    let auth_path = codex_auth_path(&handle).expect("auth path");
+    let before_auth = std::fs::read_to_string(&auth_path).expect("read auth before");
+
+    let result = set_enabled(&handle, "codex", true, base_origin).expect("enable codex");
+    assert!(result.ok, "{result:?}");
+
+    let after_auth = std::fs::read_to_string(&auth_path).expect("read auth after");
+    let config_path = codex_config_path(&handle).expect("config path");
+    let after_config = std::fs::read_to_string(config_path).expect("read config after");
+
+    assert_eq!(after_auth, before_auth);
+    assert!(
+        !after_config.contains("preferred_auth_method"),
+        "{after_config}"
+    );
+    assert!(after_config.contains(&format!("base_url = \"{base_origin}/v1\"")));
+}
+
+#[test]
+fn codex_oauth_compatible_status_uses_config_without_auth_json() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    set_codex_oauth_compatible_proxy_mode(&handle, true);
+
+    write_cli_proxy_manifest(&handle, "codex", true, Some(base_origin));
+    write_codex_oauth_proxy_config(&handle, base_origin);
+
+    let rows = status_all(&handle, Some(base_origin)).expect("status_all");
+    let codex = rows
+        .into_iter()
+        .find(|row| row.cli_key == "codex")
+        .expect("codex row");
+
+    assert!(codex.enabled);
+    assert_eq!(codex.applied_to_current_gateway, Some(true));
+}
+
+#[test]
+fn codex_oauth_compatible_status_reports_drift_when_old_apikey_preference_remains() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    set_codex_oauth_compatible_proxy_mode(&handle, true);
+
+    write_cli_proxy_manifest(&handle, "codex", true, Some(base_origin));
+    write_codex_proxy_files(&handle, base_origin);
+
+    let rows = status_all(&handle, Some(base_origin)).expect("status_all");
+    let codex = rows
+        .into_iter()
+        .find(|row| row.cli_key == "codex")
+        .expect("codex row");
+
+    assert_eq!(codex.applied_to_current_gateway, Some(false));
+}
+
+#[test]
+fn disabling_codex_oauth_compatible_proxy_restores_config_and_leaves_auth_json() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    set_codex_oauth_compatible_proxy_mode(&handle, true);
+
+    let config = r#"[existing]
+foo = "bar"
+"#;
+    let auth = r#"{
+  "tokens": { "access": "oauth-token" },
+  "profile": "teacher"
+}"#;
+    write_codex_direct_files(&handle, config, auth);
+    let auth_path = codex_auth_path(&handle).expect("auth path");
+
+    let enabled = set_enabled(&handle, "codex", true, base_origin).expect("enable codex");
+    assert!(enabled.ok, "{enabled:?}");
+
+    let user_changed_auth = r#"{
+  "tokens": { "access": "new-oauth-token" },
+  "profile": "teacher",
+  "user_added": true
+}"#;
+    std::fs::write(&auth_path, user_changed_auth).expect("write auth user change");
+
+    let disabled = set_enabled(&handle, "codex", false, base_origin).expect("disable codex");
+    assert!(disabled.ok, "{disabled:?}");
+
+    let config_after = std::fs::read_to_string(codex_config_path(&handle).expect("config path"))
+        .expect("read config after disable");
+    let auth_after = std::fs::read_to_string(auth_path).expect("read auth after disable");
+
+    assert!(config_after.contains("[existing]"), "{config_after}");
+    assert!(
+        !config_after.contains("model_provider = \"aio\""),
+        "{config_after}"
+    );
+    assert_eq!(auth_after, user_changed_auth);
+}
+
+#[test]
+fn switching_codex_oauth_compatible_proxy_to_normal_mode_adds_auth_backup_and_writes_auth() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    set_codex_oauth_compatible_proxy_mode(&handle, true);
+
+    let config = r#"[existing]
+foo = "bar"
+"#;
+    let auth = r#"{
+  "tokens": { "access": "oauth-token" },
+  "last_refresh": 123,
+  "profile": "teacher"
+}"#;
+    write_codex_direct_files(&handle, config, auth);
+    let auth_path = codex_auth_path(&handle).expect("auth path");
+
+    let enabled = set_enabled(&handle, "codex", true, base_origin).expect("enable codex oauth");
+    assert!(enabled.ok, "{enabled:?}");
+
+    let oauth_manifest = read_manifest(&handle, "codex")
+        .expect("read manifest")
+        .expect("manifest exists");
+    assert!(
+        !oauth_manifest
+            .files
+            .iter()
+            .any(|entry| entry.kind == "codex_auth_json"),
+        "oauth compatible manifest should not backup auth: {oauth_manifest:?}"
+    );
+
+    set_codex_oauth_compatible_proxy_mode(&handle, false);
+    let sync_rows = sync_enabled(&handle, base_origin, true).expect("sync after mode switch");
+    let codex_row = sync_rows
+        .into_iter()
+        .find(|row| row.cli_key == "codex")
+        .expect("codex sync row");
+    assert!(codex_row.ok, "{codex_row:?}");
+
+    let config_after_sync =
+        std::fs::read_to_string(codex_config_path(&handle).expect("config path"))
+            .expect("read config after sync");
+    assert!(
+        config_after_sync.contains("preferred_auth_method = \"apikey\""),
+        "{config_after_sync}"
+    );
+
+    let auth_after_sync = std::fs::read_to_string(&auth_path).expect("read auth after sync");
+    let auth_after_sync_json: serde_json::Value =
+        serde_json::from_str(&auth_after_sync).expect("parse auth after sync");
+    assert_eq!(
+        auth_after_sync_json
+            .get("OPENAI_API_KEY")
+            .and_then(|value| value.as_str()),
+        Some(PLACEHOLDER_KEY)
+    );
+    assert_eq!(
+        auth_after_sync_json
+            .get("auth_mode")
+            .and_then(|value| value.as_str()),
+        Some("apikey")
+    );
+    assert!(auth_after_sync_json.get("tokens").is_none());
+
+    let normal_manifest = read_manifest(&handle, "codex")
+        .expect("read manifest")
+        .expect("manifest exists");
+    let auth_entry = manifest_entry(&normal_manifest, "codex_auth_json");
+    assert!(auth_entry.existed);
+    let root = cli_proxy_root_dir(&handle, "codex").expect("codex root");
+    let backup_rel = auth_entry.backup_rel.as_ref().expect("auth backup rel");
+    let auth_backup =
+        std::fs::read_to_string(cli_proxy_files_dir(&root).join(backup_rel)).expect("read backup");
+    let auth_backup_json: serde_json::Value =
+        serde_json::from_str(&auth_backup).expect("parse auth backup");
+    assert_eq!(
+        auth_backup_json
+            .get("tokens")
+            .and_then(|tokens| tokens.get("access"))
+            .and_then(|value| value.as_str()),
+        Some("oauth-token")
+    );
+
+    let disabled = set_enabled(&handle, "codex", false, base_origin).expect("disable codex");
+    assert!(disabled.ok, "{disabled:?}");
+
+    let auth_after_disable = std::fs::read_to_string(auth_path).expect("read auth after disable");
+    let auth_after_disable_json: serde_json::Value =
+        serde_json::from_str(&auth_after_disable).expect("parse auth after disable");
+    assert_eq!(
+        auth_after_disable_json
+            .get("tokens")
+            .and_then(|tokens| tokens.get("access"))
+            .and_then(|value| value.as_str()),
+        Some("oauth-token")
+    );
+    assert!(auth_after_disable_json.get("OPENAI_API_KEY").is_none());
+    assert!(auth_after_disable_json.get("auth_mode").is_none());
 }
 
 #[test]

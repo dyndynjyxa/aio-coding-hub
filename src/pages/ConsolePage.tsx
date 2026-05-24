@@ -52,7 +52,7 @@ function getLevelBadgeStyles(level: ConsoleLogEntry["level"]) {
     case "warn":
       return "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20";
     case "debug":
-      return "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-500/10 dark:text-slate-400 dark:border-slate-500/20";
+      return "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-500/10 dark:text-muted-foreground dark:border-slate-500/20";
     default:
       return "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20";
   }
@@ -158,7 +158,7 @@ const ConsoleLogRow = memo(function ConsoleLogRow({
         "items-start px-4 py-3 group-hover:bg-slate-100/80 dark:group-hover:bg-slate-800/40 transition-colors duration-200"
       )}
     >
-      <span className="shrink-0 text-slate-500 dark:text-slate-400 font-mono text-[11px] pt-0.5">
+      <span className="shrink-0 text-muted-foreground font-mono text-[11px] pt-0.5">
         {entry.tsText}
       </span>
       <div className="flex items-center pt-0.5">
@@ -172,12 +172,12 @@ const ConsoleLogRow = memo(function ConsoleLogRow({
         </span>
       </div>
       <div className="min-w-0">
-        <span className="whitespace-pre-wrap break-words text-slate-700 dark:text-slate-300 text-[13px] leading-relaxed font-normal">
+        <span className="whitespace-pre-wrap break-words text-secondary text-[13px] leading-relaxed font-normal">
           {entry.title}
         </span>
         <MetaTags meta={entry.meta} />
       </div>
-      <span className="flex justify-end text-slate-600 dark:text-slate-400 group-open:text-slate-400 transition-colors duration-200 pt-0.5">
+      <span className="flex justify-end text-muted-foreground group-open:text-slate-400 transition-colors duration-200 pt-0.5">
         {hasDetails ? (
           <ChevronRight className="h-4 w-4 transition-transform duration-200 group-open:rotate-90" />
         ) : null}
@@ -229,7 +229,7 @@ const ConsoleLogRow = memo(function ConsoleLogRow({
       {isOpen ? (
         <div className={cn(ROW_GRID_CLASS, "px-4 pb-4 pt-0")}>
           <div className="col-start-3 col-span-2 space-y-2">
-            <pre className="scrollbar-overlay max-h-60 overflow-auto rounded-md bg-slate-100 dark:bg-slate-950 p-3 text-[11px] leading-relaxed text-slate-700 dark:text-slate-400 font-mono border border-slate-200 dark:border-white/5 mx-1 whitespace-pre-wrap">
+            <pre className="scrollbar-overlay max-h-60 overflow-auto rounded-md bg-slate-100 dark:bg-slate-950 p-3 text-[11px] leading-relaxed text-slate-700 dark:text-muted-foreground font-mono border border-slate-200 dark:border-white/5 mx-1 whitespace-pre-wrap">
               {smartText == null ? "加载中…" : smartText ? smartText : "// 无可显示的详情"}
             </pre>
             <details className="group/raw">
@@ -330,11 +330,11 @@ export function ConsolePage() {
           actions={
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-2">
-                <span className="text-sm text-slate-600 dark:text-slate-400">自动滚动</span>
+                <span className="text-sm text-muted-foreground">自动滚动</span>
                 <Switch checked={autoScroll} onCheckedChange={setAutoScroll} size="sm" />
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-sm text-slate-600 dark:text-slate-400">调试日志</span>
+                <span className="text-sm text-muted-foreground">调试日志</span>
                 <Switch
                   checked={debugEnabled}
                   onCheckedChange={(next) => {
@@ -393,7 +393,7 @@ export function ConsolePage() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="搜索标题、trace_id、错误码..."
-                className="h-8 w-full rounded-md border border-slate-200 bg-white pl-8 pr-3 text-xs text-slate-700 placeholder:text-slate-400 outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:placeholder:text-slate-500"
+                className="h-8 w-full rounded-md border border-slate-200 bg-white pl-8 pr-3 text-xs text-slate-700 placeholder:text-slate-400 outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 dark:border-slate-600 dark:bg-secondary dark:text-foreground dark:placeholder:text-slate-500"
               />
             </div>
             <div className="flex items-center gap-1.5">
@@ -406,7 +406,7 @@ export function ConsolePage() {
                     "px-2 py-1 rounded text-[10px] font-medium border transition-colors cursor-pointer",
                     levelFilter.has(level)
                       ? getLevelBadgeStyles(level)
-                      : "bg-slate-50 text-slate-500 border-slate-200 opacity-70 dark:bg-slate-800 dark:text-slate-500 dark:border-slate-700 dark:opacity-50"
+                      : "bg-slate-50 text-slate-500 border-slate-200 opacity-70 dark:bg-secondary dark:text-slate-500 dark:border-border dark:opacity-50"
                   )}
                 >
                   {levelText(level)}
@@ -418,25 +418,25 @@ export function ConsolePage() {
       ) : null}
 
       <Card padding="none" className="min-h-0 flex-1 flex flex-col overflow-hidden">
-        <div className="shrink-0 border-b border-slate-200 dark:border-slate-700 bg-gradient-to-r from-slate-50 to-slate-100/50 dark:from-slate-800 dark:to-slate-800/50 px-6 py-4">
+        <div className="shrink-0 border-b border-border bg-gradient-to-r from-slate-50 to-slate-100/50 dark:from-slate-800 dark:to-slate-800/50 px-6 py-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+              <div className="text-sm font-semibold text-foreground">
                 日志{" "}
                 <span className="ml-1.5 inline-flex items-center rounded-full bg-accent/10 px-2.5 py-0.5 text-xs font-medium text-accent">
                   {visibleLogs.length}
                 </span>
               </div>
               {hiddenCount > 0 ? (
-                <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                <div className="text-xs text-muted-foreground flex items-center gap-1.5">
                   <span className="inline-block h-1 w-1 rounded-full bg-slate-400 dark:bg-slate-500"></span>
                   已隐藏 {hiddenCount} 条日志
                 </div>
               ) : null}
             </div>
-            <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+            <div className="text-xs text-muted-foreground flex items-center gap-1.5">
               <svg
-                className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500"
+                className="h-3.5 w-3.5 text-muted-foreground"
                 fill="none"
                 viewBox="0 0 24 24"
                 strokeWidth="2"
@@ -458,15 +458,15 @@ export function ConsolePage() {
           onScroll={handleScroll}
           className={cn(
             "scrollbar-overlay min-h-0 flex-1 overflow-auto",
-            "bg-gradient-to-b from-slate-50 to-white dark:from-slate-950 dark:to-slate-900 font-mono text-[12px] leading-relaxed text-slate-700 dark:text-slate-200",
+            "bg-gradient-to-b from-slate-50 to-white dark:from-slate-950 dark:to-slate-900 font-mono text-[12px] leading-relaxed text-slate-700 dark:text-foreground",
             "shadow-inner"
           )}
         >
           {visibleLogs.length === 0 ? (
             <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
-              <div className="mb-3 rounded-full bg-slate-100 p-4 border border-slate-200 dark:bg-slate-800/50 dark:border-slate-700/50">
+              <div className="mb-3 rounded-full bg-slate-100 p-4 border border-slate-200 dark:bg-secondary/50 dark:border-border/50">
                 <svg
-                  className="h-8 w-8 text-slate-600 dark:text-slate-400"
+                  className="h-8 w-8 text-muted-foreground"
                   fill="none"
                   viewBox="0 0 24 24"
                   strokeWidth="1.5"
@@ -479,10 +479,10 @@ export function ConsolePage() {
                   />
                 </svg>
               </div>
-              <p className="text-sm font-medium text-slate-400 dark:text-slate-500">
+              <p className="text-sm font-medium text-muted-foreground">
                 {logs.length === 0 ? "暂无日志" : "暂无可显示的日志"}
               </p>
-              <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+              <p className="mt-1 text-xs text-muted-foreground">
                 {logs.length === 0 ? "系统日志将在这里显示" : "调整过滤器以查看更多日志"}
               </p>
             </div>

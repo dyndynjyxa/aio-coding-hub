@@ -54,10 +54,8 @@ function SettingItem({
       )}
     >
       <div className="min-w-0">
-        <div className="text-sm text-slate-700 dark:text-slate-300">{label}</div>
-        <div className="mt-1 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-          {subtitle}
-        </div>
+        <div className="text-sm text-secondary">{label}</div>
+        <div className="mt-1 text-xs text-muted-foreground leading-relaxed">{subtitle}</div>
       </div>
       <div className="flex flex-wrap items-center justify-end gap-2">{children}</div>
     </div>
@@ -149,15 +147,15 @@ export function CliManagerGeminiTab({
   return (
     <div className="space-y-6">
       <Card className="overflow-hidden">
-        <div className="border-b border-slate-100 dark:border-slate-700">
+        <div className="border-b border-border">
           <div className="flex flex-col gap-4 p-6">
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <div className="flex items-center gap-4">
-                <div className="h-14 w-14 rounded-xl bg-slate-900/5 dark:bg-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-300">
+                <div className="h-14 w-14 rounded-xl bg-slate-900/5 dark:bg-secondary flex items-center justify-center text-secondary">
                   <Cpu className="h-8 w-8" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">Gemini</h2>
+                  <h2 className="text-xl font-bold text-foreground">Gemini</h2>
                   <div className="flex items-center gap-2 mt-1 flex-wrap">
                     {geminiAvailable === "available" && geminiInfo?.found ? (
                       <>
@@ -178,7 +176,7 @@ export function CliManagerGeminiTab({
                         检测中...
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 dark:bg-slate-700 px-2.5 py-0.5 text-xs font-medium text-slate-600 dark:text-slate-400 ring-1 ring-inset ring-slate-500/10">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-muted-foreground ring-1 ring-inset ring-slate-500/10">
                         未检测到
                       </span>
                     )}
@@ -199,62 +197,56 @@ export function CliManagerGeminiTab({
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mt-2">
-              <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3 border border-slate-100 dark:border-slate-700">
-                <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 mb-1.5">
+              <div className="bg-secondary rounded-lg p-3 border border-border">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1.5">
                   <FolderOpen className="h-3 w-3" />
                   配置目录
                 </div>
-                <div
-                  className="font-mono text-xs text-slate-700 dark:text-slate-300 truncate"
-                  title={configDir}
-                >
+                <div className="font-mono text-xs text-secondary truncate" title={configDir}>
                   {configDir}
                 </div>
               </div>
 
-              <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3 border border-slate-100 dark:border-slate-700">
-                <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 mb-1.5">
+              <div className="bg-secondary rounded-lg p-3 border border-border">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1.5">
                   <FileJson className="h-3 w-3" />
                   settings.json
                 </div>
-                <div
-                  className="font-mono text-xs text-slate-700 dark:text-slate-300 truncate"
-                  title={configPath}
-                >
+                <div className="font-mono text-xs text-secondary truncate" title={configPath}>
                   {configPath}
                 </div>
                 {geminiConfig ? (
-                  <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                  <div className="mt-1 text-[11px] text-muted-foreground">
                     {geminiConfig.exists ? "已存在" : "不存在（保存时自动创建）"}
                   </div>
                 ) : null}
               </div>
 
-              <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3 border border-slate-100 dark:border-slate-700">
-                <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 mb-1.5">
+              <div className="bg-secondary rounded-lg p-3 border border-border">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1.5">
                   <Cpu className="h-3 w-3" />
                   可执行文件
                 </div>
                 <div
-                  className="font-mono text-xs text-slate-700 dark:text-slate-300 truncate"
+                  className="font-mono text-xs text-secondary truncate"
                   title={geminiInfo?.executable_path ?? "—"}
                 >
                   {geminiInfo?.executable_path ?? "—"}
                 </div>
               </div>
 
-              <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3 border border-slate-100 dark:border-slate-700">
-                <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 mb-1.5">
+              <div className="bg-secondary rounded-lg p-3 border border-border">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1.5">
                   <Settings className="h-3 w-3" />
                   解析方式
                 </div>
                 <div
-                  className="font-mono text-xs text-slate-700 dark:text-slate-300 truncate"
+                  className="font-mono text-xs text-secondary truncate"
                   title={geminiInfo?.resolved_via ?? "—"}
                 >
                   {geminiInfo?.resolved_via ?? "—"}
                 </div>
-                <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                <div className="mt-1 text-[11px] text-muted-foreground">
                   SHELL: {geminiInfo?.shell ?? "—"}
                 </div>
               </div>
@@ -263,23 +255,19 @@ export function CliManagerGeminiTab({
         </div>
 
         {geminiAvailable === "unavailable" ? (
-          <div className="text-sm text-slate-600 dark:text-slate-400 text-center py-8">
-            数据不可用
-          </div>
+          <div className="text-sm text-muted-foreground text-center py-8">数据不可用</div>
         ) : !geminiInfo ? (
-          <div className="text-sm text-slate-500 dark:text-slate-400 text-center py-8">
-            暂无信息，请尝试刷新
-          </div>
+          <div className="text-sm text-muted-foreground text-center py-8">暂无信息，请尝试刷新</div>
         ) : (
           <div className="p-6 space-y-6">
             {geminiConfig ? (
               <>
-                <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-5">
-                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-3">
-                    <Settings className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+                <div className="rounded-lg border border-border bg-white dark:bg-secondary p-5">
+                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
+                    <Settings className="h-4 w-4 text-muted-foreground" />
                     模型与行为
                   </h3>
-                  <div className="divide-y divide-slate-100 dark:divide-slate-700">
+                  <div className="divide-y divide-border">
                     <SettingItem
                       label="默认模型 (model.name)"
                       subtitle="留空会删除该配置，交给 Gemini CLI 默认行为。"
@@ -395,12 +383,12 @@ export function CliManagerGeminiTab({
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-5">
-                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-3">
-                    <Settings className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+                <div className="rounded-lg border border-border bg-white dark:bg-secondary p-5">
+                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
+                    <Settings className="h-4 w-4 text-muted-foreground" />
                     界面设置
                   </h3>
-                  <div className="divide-y divide-slate-100 dark:divide-slate-700">
+                  <div className="divide-y divide-border">
                     <SettingItem label="主题 (ui.theme)" subtitle="输入主题名；留空会删除该配置。">
                       <Input
                         value={uiThemeText}
@@ -478,12 +466,12 @@ export function CliManagerGeminiTab({
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-5">
-                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-3">
-                    <Settings className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+                <div className="rounded-lg border border-border bg-white dark:bg-secondary p-5">
+                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
+                    <Settings className="h-4 w-4 text-muted-foreground" />
                     功能开关
                   </h3>
-                  <div className="divide-y divide-slate-100 dark:divide-slate-700">
+                  <div className="divide-y divide-border">
                     <SettingItem
                       label="自动更新 (general.enableAutoUpdate)"
                       subtitle="控制 CLI 自更新。"
@@ -538,12 +526,12 @@ export function CliManagerGeminiTab({
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-5">
-                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-3">
-                    <Settings className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+                <div className="rounded-lg border border-border bg-white dark:bg-secondary p-5">
+                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
+                    <Settings className="h-4 w-4 text-muted-foreground" />
                     会话与认证
                   </h3>
-                  <div className="divide-y divide-slate-100 dark:divide-slate-700">
+                  <div className="divide-y divide-border">
                     <SettingItem
                       label="会话保留 (general.sessionRetention.enabled)"
                       subtitle="开启后保留历史会话。"
@@ -609,7 +597,7 @@ export function CliManagerGeminiTab({
                 </div>
               </>
             ) : (
-              <div className="text-sm text-slate-500 dark:text-slate-400 text-center py-8">
+              <div className="text-sm text-muted-foreground text-center py-8">
                 暂无配置，请尝试刷新
               </div>
             )}

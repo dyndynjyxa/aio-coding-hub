@@ -130,10 +130,8 @@ export function MobileNav({ isOpen, onClose }: MobileNavProps) {
                   to={item.to}
                   className={({ isActive }) =>
                     cn(
-                      "group flex items-center gap-3 rounded-lg px-3 py-3 text-sm transition",
-                      isActive
-                        ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
-                        : "text-foreground hover:bg-secondary"
+                      "group flex items-center gap-3 rounded-[6px] px-3 py-3 text-sm transition",
+                      isActive ? "bg-accent/15 text-accent" : "text-foreground hover:bg-secondary"
                     )
                   }
                   end={item.to === "/"}

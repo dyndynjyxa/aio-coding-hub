@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-pub const SCHEMA_VERSION: u32 = 32;
+pub const SCHEMA_VERSION: u32 = 33;
 pub const DEFAULT_GATEWAY_PORT: u16 = 37123;
 pub const MAX_GATEWAY_PORT: u16 = 37199;
 pub const DEFAULT_PROVIDER_COOLDOWN_SECONDS: u32 = 30;
@@ -39,6 +39,7 @@ pub(super) const SCHEMA_VERSION_ADD_CLI_PRIORITY_ORDER: u32 = 29;
 pub(super) const SCHEMA_VERSION_RAISE_STREAM_IDLE_TIMEOUT_DEFAULT: u32 = 30;
 pub(super) const SCHEMA_VERSION_ADD_UPSTREAM_PROXY: u32 = 31;
 pub(super) const SCHEMA_VERSION_ADD_UPSTREAM_PROXY_CREDENTIALS: u32 = 32;
+pub(super) const SCHEMA_VERSION_ADD_CODEX_OAUTH_COMPATIBLE_PROXY_MODE: u32 = 33;
 
 pub(super) const DEFAULT_LOG_RETENTION_DAYS: u32 = 7;
 pub(super) const MAX_LOG_RETENTION_DAYS: u32 = 3650;
@@ -60,6 +61,7 @@ pub(super) const DEFAULT_ENABLE_TASK_COMPLETE_NOTIFY: bool = true;
 pub(super) const DEFAULT_ENABLE_NOTIFICATION_SOUND: bool = true;
 pub(super) const DEFAULT_ENABLE_RESPONSE_FIXER: bool = true;
 pub(super) const DEFAULT_ENABLE_CLI_PROXY_STARTUP_RECOVERY: bool = true;
+pub(super) const DEFAULT_CODEX_OAUTH_COMPATIBLE_PROXY_MODE: bool = false;
 pub(super) const DEFAULT_SHOW_HOME_HEATMAP: bool = true;
 pub(super) const DEFAULT_SHOW_HOME_USAGE: bool = true;
 pub(super) const DEFAULT_RESPONSE_FIXER_FIX_ENCODING: bool = true;

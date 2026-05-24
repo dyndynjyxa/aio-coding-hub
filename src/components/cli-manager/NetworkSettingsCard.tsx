@@ -128,15 +128,15 @@ export function NetworkSettingsCard({
       </div>
 
       <div className="relative z-10">
-        <div className="mb-4 border-b border-slate-100 dark:border-slate-700 pb-4">
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+        <div className="mb-4 border-b border-border pb-4">
+          <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
             <Network className="h-5 w-5 text-blue-500" />
             网络设置
           </h2>
         </div>
 
         {!available ? (
-          <div className="text-sm font-medium text-slate-700 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 p-4 rounded-lg">
+          <div className="text-sm font-medium text-slate-700 dark:text-foreground bg-secondary p-4 rounded-lg">
             数据不可用
           </div>
         ) : (
@@ -171,7 +171,7 @@ export function NetworkSettingsCard({
             <SettingsRow label="当前监听地址">
               <div
                 className={cn(
-                  "font-mono text-xs text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-800 px-3 py-2 rounded border border-slate-100 dark:border-slate-700 break-all",
+                  "font-mono text-xs text-secondary bg-secondary px-3 py-2 rounded border border-border break-all",
                   !gateway?.running ? "opacity-80" : null
                 )}
               >

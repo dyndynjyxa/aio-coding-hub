@@ -16,7 +16,20 @@ export default {
     },
     extend: {
       fontFamily: {
+        sans: [
+          "Plus Jakarta Sans",
+          "DM Sans",
+          "ui-sans-serif",
+          "system-ui",
+          "-apple-system",
+          "Segoe UI",
+          "Roboto",
+          "Helvetica Neue",
+          "Arial",
+          "sans-serif",
+        ],
         mono: [
+          "JetBrains Mono",
           "ui-monospace",
           "SF Mono",
           "Menlo",
@@ -61,7 +74,7 @@ export default {
         accent: {
           DEFAULT: "hsl(var(--accent))",
           foreground: "hsl(var(--accent-foreground))",
-          secondary: "#4D7CFF",
+          secondary: "#6366F1",
         },
         destructive: {
           DEFAULT: "hsl(var(--destructive))",
@@ -71,12 +84,12 @@ export default {
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
         brand: {
-          DEFAULT: "#0052FF",
-          secondary: "#4D7CFF",
+          DEFAULT: "#818CF8",
+          secondary: "#6366F1",
         },
-        success: { DEFAULT: "#16A34A" },
-        warning: { DEFAULT: "#F97316" },
-        danger: { DEFAULT: "#DC2626" },
+        success: { DEFAULT: "#34D399" },
+        warning: { DEFAULT: "#FB923C" },
+        danger: { DEFAULT: "#F87171" },
         info: { DEFAULT: "#0EA5E9" },
         chart: {
           1: "hsl(var(--chart-1))",
@@ -117,7 +130,7 @@ export default {
         sm: "calc(var(--radius) - 4px)",
       },
       boxShadow: {
-        card: "0 1px 3px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.06)",
+        card: "none",
       },
       keyframes: {
         "accordion-down": {

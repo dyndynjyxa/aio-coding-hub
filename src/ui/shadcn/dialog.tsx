@@ -33,9 +33,9 @@ export const DialogContent = forwardRef<
           ref={ref}
           className={cn(
             [
-              "w-full overflow-hidden border border-border bg-card shadow-card",
+              "w-full overflow-hidden bg-card",
               "flex max-h-[calc(100vh-2rem)] flex-col outline-none",
-              "rounded-xl sm:rounded-2xl",
+              "rounded-[10px]",
               "max-w-[calc(100vw-2rem)]",
             ].join(" "),
             className

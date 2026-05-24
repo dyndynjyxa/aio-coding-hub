@@ -5,7 +5,7 @@ import { cn } from "@/ui/shadcn/utils";
 
 export const buttonVariants = cva(
   [
-    "inline-flex items-center justify-center gap-2 rounded-lg font-medium transition",
+    "inline-flex items-center justify-center gap-2 rounded-[6px] font-medium transition",
     "disabled:cursor-not-allowed disabled:opacity-50",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
     "focus-visible:ring-offset-2 focus-visible:ring-offset-background",
@@ -13,10 +13,8 @@ export const buttonVariants = cva(
   {
     variants: {
       variant: {
-        primary:
-          "bg-gradient-to-br from-accent to-accent-secondary text-accent-foreground shadow-sm hover:opacity-95",
-        secondary:
-          "border border-border bg-card text-foreground hover:bg-secondary dark:hover:bg-secondary",
+        primary: "bg-accent/15 text-accent hover:bg-accent/25",
+        secondary: "bg-secondary text-foreground hover:bg-muted",
         ghost: "text-foreground hover:bg-secondary",
         warning:
           "border border-amber-200 bg-card text-amber-800 hover:bg-amber-50 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-300 dark:hover:bg-amber-900/50",

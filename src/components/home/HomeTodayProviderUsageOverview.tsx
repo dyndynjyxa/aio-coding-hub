@@ -24,14 +24,12 @@ const LIVE_TRACE_MAX_AGE_MS = 15 * 60 * 1000;
 const STALE_TRACE_TIMEOUT_MS = 5 * 60 * 1000;
 const OVERVIEW_REFRESH_INTERVAL_MS = 60 * 1000;
 const TABLE_TH_CLASS =
-  "border-b border-slate-200 bg-slate-50/70 px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-400";
+  "border-b border-slate-200 bg-slate-50/70 px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:border-border dark:bg-secondary/70 dark:text-muted-foreground";
 const TABLE_TD_CLASS = "border-b border-slate-100 px-3 py-3 dark:border-slate-800";
 const TABLE_MONO_TD_CLASS =
-  "border-b border-slate-100 px-3 py-3 font-mono text-xs tabular-nums text-slate-700 dark:border-slate-800 dark:text-slate-300";
-const TABLE_TH_MAIN_CLASS =
-  "text-[11px] font-medium tracking-normal text-slate-500 dark:text-slate-400";
-const TABLE_TH_NOTE_CLASS =
-  "text-[9px] font-normal tracking-normal text-slate-400 dark:text-slate-500";
+  "border-b border-slate-100 px-3 py-3 font-mono text-xs tabular-nums text-slate-700 dark:border-slate-800 dark:text-secondary";
+const TABLE_TH_MAIN_CLASS = "text-[11px] font-medium tracking-normal text-muted-foreground";
+const TABLE_TH_NOTE_CLASS = "text-[9px] font-normal tracking-normal text-muted-foreground";
 const TODAY_PROVIDER_QUERY_CONFIG = {
   period: "daily" as const,
   input: {
@@ -455,8 +453,8 @@ function SummaryMetricCard({
   return (
     <Card padding="sm" className="relative h-full overflow-hidden">
       <div className={`absolute inset-x-0 top-0 h-0.5 ${SUMMARY_METRIC_ACCENT_CLASS[accent]}`} />
-      <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">{title}</div>
-      <div className="mt-1 font-mono text-sm font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+      <div className="text-[11px] font-medium text-muted-foreground">{title}</div>
+      <div className="mt-1 font-mono text-sm font-semibold tracking-tight text-foreground">
         {value}
       </div>
     </Card>
@@ -466,8 +464,8 @@ function SummaryMetricCard({
 function SummaryMetricCardSkeleton() {
   return (
     <Card padding="sm" className="h-full animate-pulse">
-      <div className="h-3 w-14 rounded bg-slate-200 dark:bg-slate-700" />
-      <div className="mt-2 h-5 w-16 rounded bg-slate-200 dark:bg-slate-700" />
+      <div className="h-3 w-14 rounded bg-slate-200 dark:bg-secondary" />
+      <div className="mt-2 h-5 w-16 rounded bg-slate-200 dark:bg-secondary" />
     </Card>
   );
 }
@@ -522,7 +520,7 @@ function ProviderUsageSkeleton() {
   return (
     <tr className="animate-pulse">
       <td className={TABLE_TD_CLASS}>
-        <div className="h-4 w-28 rounded bg-slate-200 dark:bg-slate-700" />
+        <div className="h-4 w-28 rounded bg-slate-200 dark:bg-secondary" />
       </td>
       <td className={TABLE_MONO_TD_CLASS}>
         <div className="h-3 w-16 rounded bg-slate-100 dark:bg-slate-600" />
@@ -650,7 +648,7 @@ export function HomeTodayProviderUsageOverview({
             </table>
           </div>
         ) : topRows.length === 0 ? (
-          <div className="px-4 py-10 text-center text-sm text-slate-600 dark:text-slate-400">
+          <div className="px-4 py-10 text-center text-sm text-muted-foreground">
             今日暂无供应商用量数据。
           </div>
         ) : (
@@ -687,9 +685,7 @@ export function HomeTodayProviderUsageOverview({
                   >
                     <td className={TABLE_TD_CLASS}>
                       <div className="flex items-center gap-2">
-                        <div className="min-w-0 font-medium text-slate-900 dark:text-slate-100">
-                          {row.name}
-                        </div>
+                        <div className="min-w-0 font-medium text-foreground">{row.name}</div>
                         <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
                           {isRunning ? (
                             <span

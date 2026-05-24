@@ -125,10 +125,10 @@ export function LogsPage() {
 
       <Card padding="md" className="overflow-visible flex flex-col gap-6 pb-7">
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">筛选条件</div>
+          <div className="text-sm font-semibold text-foreground">筛选条件</div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span>自动刷新</span>
               <Switch
                 checked={autoRefresh}
@@ -150,7 +150,7 @@ export function LogsPage() {
 
         <div className="grid items-start gap-5 md:grid-cols-2 xl:grid-cols-[1.35fr_1fr_1fr_1fr]">
           <div className="space-y-2">
-            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               CLI
             </div>
             <TabList
@@ -165,7 +165,7 @@ export function LogsPage() {
           </div>
 
           <div className="space-y-2">
-            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Status
             </div>
             <Input
@@ -175,7 +175,7 @@ export function LogsPage() {
               mono
               disabled={requestLogsAvailable === false}
             />
-            <div className="text-[11px] leading-4 text-slate-500 dark:text-slate-400">
+            <div className="text-[11px] leading-4 text-muted-foreground">
               支持 `499`、`!200`、`&gt;=400`、`&lt;=399`
             </div>
             {!statusFilterValid ? (
@@ -186,7 +186,7 @@ export function LogsPage() {
           </div>
 
           <div className="space-y-2">
-            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               error_code
             </div>
             <Input
@@ -196,13 +196,13 @@ export function LogsPage() {
               mono
               disabled={requestLogsAvailable === false}
             />
-            <div className="text-[11px] leading-4 text-slate-500 dark:text-slate-400">
+            <div className="text-[11px] leading-4 text-muted-foreground">
               支持按错误码关键字模糊匹配
             </div>
           </div>
 
           <div className="space-y-2">
-            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Path
             </div>
             <Input
@@ -212,7 +212,7 @@ export function LogsPage() {
               mono
               disabled={requestLogsAvailable === false}
             />
-            <div className="text-[11px] leading-4 text-slate-500 dark:text-slate-400">
+            <div className="text-[11px] leading-4 text-muted-foreground">
               按请求路径或方法路径组合模糊匹配
             </div>
           </div>

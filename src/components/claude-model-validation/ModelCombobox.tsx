@@ -24,10 +24,10 @@ export function ModelCombobox({
           type="button"
           disabled={disabled}
           className={cn(
-            "flex h-10 w-full items-center justify-between rounded-md border border-slate-200 dark:border-slate-700",
+            "flex h-10 w-full items-center justify-between rounded-md border border-border",
             "bg-white/80 dark:bg-slate-900/80 px-3 text-xs font-mono shadow-sm",
             "focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50",
-            !value.trim() && "text-slate-400 dark:text-slate-500"
+            !value.trim() && "text-muted-foreground"
           )}
         >
           <span className="truncate">{value.trim() || "选择或输入模型..."}</span>
@@ -35,7 +35,7 @@ export function ModelCombobox({
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0">
-        <div className="border-b border-slate-100 dark:border-slate-700 px-2 py-1.5">
+        <div className="border-b border-border px-2 py-1.5">
           <input
             ref={inputRef}
             value={value}
@@ -56,7 +56,7 @@ export function ModelCombobox({
               className={cn(
                 "flex w-full items-center gap-2 px-3 py-1.5 text-xs font-mono text-left",
                 "hover:bg-slate-100 dark:hover:bg-slate-700/60 transition-colors",
-                m === value && "bg-slate-50 dark:bg-slate-700/40"
+                m === value && "bg-slate-50 dark:bg-secondary/40"
               )}
               onClick={() => {
                 onChange(m);

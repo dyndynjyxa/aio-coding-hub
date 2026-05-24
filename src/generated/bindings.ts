@@ -2730,6 +2730,7 @@ export type SettingsUpdate = {
   wslCustomHostAddress: string | null;
   codexHomeMode: CodexHomeMode | null;
   codexHomeOverride: string | null;
+  codexOauthCompatibleProxyMode: boolean | null;
   cx2CcFallbackModelOpus: string | null;
   cx2CcFallbackModelSonnet: string | null;
   cx2CcFallbackModelHaiku: string | null;
@@ -2761,6 +2762,7 @@ export type SettingsView = {
   wsl_custom_host_address: string;
   codex_home_mode: CodexHomeMode;
   codex_home_override: string;
+  codex_oauth_compatible_proxy_mode: boolean;
   auto_start: boolean;
   start_minimized: boolean;
   tray_enabled: boolean;

@@ -16,21 +16,14 @@ export function CacheBreakdown({
 
   return (
     <div className="space-y-0.5 text-[10px] leading-4">
-      <div className="text-slate-500 dark:text-slate-400">
-        创建{" "}
-        <span className="text-slate-700 dark:text-slate-300">
-          {formatInteger(cacheCreationInputTokens)}
-        </span>
+      <div className="text-muted-foreground">
+        创建 <span className="text-secondary">{formatInteger(cacheCreationInputTokens)}</span>
       </div>
-      <div className="text-slate-500 dark:text-slate-400">
-        读取{" "}
-        <span className="text-slate-700 dark:text-slate-300">
-          {formatInteger(cacheReadInputTokens)}
-        </span>
+      <div className="text-muted-foreground">
+        读取 <span className="text-secondary">{formatInteger(cacheReadInputTokens)}</span>
       </div>
-      <div className="text-slate-500 dark:text-slate-400">
-        命中率{" "}
-        <span className="text-slate-700 dark:text-slate-300">{formatPercent(hitRate, 2)}</span>
+      <div className="text-muted-foreground">
+        命中率 <span className="text-secondary">{formatPercent(hitRate, 2)}</span>
       </div>
     </div>
   );

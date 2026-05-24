@@ -62,10 +62,98 @@ traffic can or cannot reach the gateway.
 - For Codex, inspect `codex_home_mode` and `codex_home_override` before reading
   `~/.codex`. A stale custom Codex home can make the status card report drift
   even when the real Codex CLI process is using a valid `~/.codex/config.toml`.
-- Codex applied checks depend on the resolved `config.toml` base URL/provider
-  and a readable `auth.json` with `OPENAI_API_KEY`.
+- Codex applied checks depend on the resolved `config.toml` base URL/provider.
+  In default API-key-placeholder mode they also require a readable `auth.json`
+  with `OPENAI_API_KEY`; in Codex OAuth compatible proxy mode they must not
+  read or require `auth.json`, and should instead fail drift if the root
+  `preferred_auth_method = "apikey"` proxy preference remains.
 - Repair actions write to the currently resolved Codex home. Surface the target
   path or a reason code before telling users to repair a drifted Codex proxy.
+
+### Scenario: Codex OAuth compatible CLI proxy mode
+
+#### 1. Scope / Trigger
+
+- Trigger: Codex CLI proxy can run in a compatibility mode that preserves
+  Codex's own ChatGPT/OAuth `auth.json` instead of replacing it with AIO's
+  API-key placeholder.
+
+#### 2. Signatures
+
+- Persisted setting: `AppSettings.codex_oauth_compatible_proxy_mode: bool`.
+- Settings update field: `SettingsUpdate.codexOauthCompatibleProxyMode:
+  boolean | null`.
+- CLI proxy target kinds:
+  - default mode: `codex_config_toml`, `codex_auth_json`
+  - OAuth compatible mode: `codex_config_toml` only
+
+#### 3. Contracts
+
+- OAuth compatible apply/sync writes `config.toml` only.
+- OAuth compatible apply/sync must not create, backup, parse, write, delete, or
+  restore `auth.json`.
+- OAuth compatible `config.toml` writes:
+  ```toml
+  model_provider = "aio"
+
+  [model_providers.aio]
+  name = "aio"
+  base_url = "http://127.0.0.1:<port>/v1"
+  wire_api = "responses"
+  requires_openai_auth = true
+  ```
+- Do not write `preferred_auth_method = "chatgpt"`. Remove only the old
+  AIO-owned root `preferred_auth_method = "apikey"` when switching the config
+  into OAuth compatible mode; preserve other user values.
+
+#### 4. Validation & Error Matrix
+
+- `config.toml` missing current `<base_origin>/v1` -> `applied_to_current_gateway = false`.
+- provider table missing `model_providers.aio` / remote-compaction provider ->
+  `applied_to_current_gateway = false`.
+- OAuth compatible mode with root `preferred_auth_method = "apikey"` still
+  present -> `applied_to_current_gateway = false`.
+- Default mode with unreadable `auth.json` or missing `OPENAI_API_KEY` ->
+  `applied_to_current_gateway = false`.
+
+#### 5. Good/Base/Bad Cases
+
+- Good: OAuth compatible mode writes the AIO provider table, keeps existing
+  OAuth tokens untouched, and reports applied without reading `auth.json`.
+- Base: default mode keeps existing behavior: backup both Codex files, write the
+  API-key placeholder auth file, and restore via merge on disable.
+- Bad: OAuth compatible disable restores or removes `auth.json`; this can
+  destroy a user's Codex OAuth login and must not happen.
+
+#### 6. Tests Required
+
+- Builder test removes only `preferred_auth_method = "apikey"` and preserves a
+  user `preferred_auth_method = "chatgpt"`.
+- Enable test proves OAuth compatible mode writes config only and does not
+  create `auth.json`.
+- Status test proves OAuth compatible mode does not need `auth.json`, but
+  reports drift when the old API-key preference remains.
+- Mode-switch test proves OAuth compatible -> default mode adds an auth backup
+  before writing placeholder auth.
+- Disable test proves OAuth compatible mode restores config and leaves
+  `auth.json` unchanged.
+
+#### 7. Wrong vs Correct
+
+Wrong:
+
+```toml
+preferred_auth_method = "chatgpt"
+```
+
+Correct:
+
+```toml
+model_provider = "aio"
+
+[model_providers.aio]
+requires_openai_auth = true
+```
 
 ---
 

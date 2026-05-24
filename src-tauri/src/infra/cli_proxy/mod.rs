@@ -121,6 +121,20 @@ struct PendingBackupEntry {
     backup_bytes: Option<Vec<u8>>,
 }
 
+fn codex_oauth_compatible_proxy_mode<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    crate::settings::read(app)
+        .map(|settings| settings.codex_oauth_compatible_proxy_mode)
+        .unwrap_or(false)
+}
+
+fn should_skip_manifest_entry_for_current_settings<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    cli_key: &str,
+    kind: &str,
+) -> bool {
+    cli_key == "codex" && kind == "codex_auth_json" && codex_oauth_compatible_proxy_mode(app)
+}
+
 #[derive(Debug, Clone)]
 struct FileSnapshot {
     path: PathBuf,
@@ -256,18 +270,21 @@ fn target_files<R: tauri::Runtime>(
             path: claude::claude_settings_path(app)?,
             backup_name: "settings.json",
         }]),
-        "codex" => Ok(vec![
-            TargetFile {
+        "codex" => {
+            let mut files = vec![TargetFile {
                 kind: "codex_config_toml",
                 path: codex::codex_config_path(app)?,
                 backup_name: "config.toml",
-            },
-            TargetFile {
-                kind: "codex_auth_json",
-                path: codex::codex_auth_path(app)?,
-                backup_name: "auth.json",
-            },
-        ]),
+            }];
+            if !codex_oauth_compatible_proxy_mode(app) {
+                files.push(TargetFile {
+                    kind: "codex_auth_json",
+                    path: codex::codex_auth_path(app)?,
+                    backup_name: "auth.json",
+                });
+            }
+            Ok(files)
+        }
         "gemini" => Ok(vec![TargetFile {
             kind: "gemini_env",
             path: gemini::gemini_env_path(app)?,
@@ -330,11 +347,20 @@ fn apply_proxy_config<R: tauri::Runtime>(
             }
             "codex" => {
                 if t.kind == "codex_config_toml" {
-                    match codex::build_codex_config_toml(
-                        current.clone(),
-                        &format!("{base_origin}/v1"),
-                        codex::CodexConfigPlatform::current(),
-                    ) {
+                    let build_result = if codex_oauth_compatible_proxy_mode(app) {
+                        codex::build_codex_config_toml_oauth_compatible(
+                            current.clone(),
+                            &format!("{base_origin}/v1"),
+                            codex::CodexConfigPlatform::current(),
+                        )
+                    } else {
+                        codex::build_codex_config_toml(
+                            current.clone(),
+                            &format!("{base_origin}/v1"),
+                            codex::CodexConfigPlatform::current(),
+                        )
+                    };
+                    match build_result {
                         Ok(b) => b,
                         Err(err) => {
                             if let Some(original_bytes) = current.as_ref() {
@@ -394,6 +420,10 @@ fn restore_from_manifest<R: tauri::Runtime>(
     let ts = now_unix_seconds();
 
     for entry in &manifest.files {
+        if should_skip_manifest_entry_for_current_settings(app, cli_key, &entry.kind) {
+            continue;
+        }
+
         let target_path = PathBuf::from(&entry.path);
         if entry.existed {
             let Some(rel) = entry.backup_rel.as_ref() else {
@@ -564,6 +594,50 @@ fn backup_for_enable<R: tauri::Runtime>(
     })
 }
 
+fn ensure_manifest_has_current_targets<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    cli_key: &str,
+    manifest: &mut CliProxyManifest,
+) -> crate::shared::error::AppResult<()> {
+    let targets = target_files(app, cli_key)?;
+    if targets
+        .iter()
+        .all(|target| manifest.files.iter().any(|entry| entry.kind == target.kind))
+    {
+        return Ok(());
+    }
+
+    let root = cli_proxy_root_dir(app, cli_key)?;
+    let files_dir = cli_proxy_files_dir(&root);
+    std::fs::create_dir_all(&files_dir)
+        .map_err(|e| format!("failed to create {}: {e}", files_dir.display()))?;
+
+    for target in targets {
+        if manifest.files.iter().any(|entry| entry.kind == target.kind) {
+            continue;
+        }
+
+        let read_bytes = read_optional_cli_proxy_file(&target.path)?;
+        let existed = read_bytes.is_some();
+        let backup_rel = if let Some(bytes) = read_bytes {
+            let backup_path = files_dir.join(target.backup_name);
+            write_cli_proxy_file_atomic(&backup_path, &bytes)?;
+            Some(target.backup_name.to_string())
+        } else {
+            None
+        };
+
+        manifest.files.push(BackupFileEntry {
+            kind: target.kind.to_string(),
+            path: target.path.to_string_lossy().to_string(),
+            existed,
+            backup_rel,
+        });
+    }
+
+    Ok(())
+}
+
 fn capture_current_target_state<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     cli_key: &str,
@@ -676,6 +750,10 @@ fn restore_backups_exactly_from_manifest<R: tauri::Runtime>(
     let files_dir = cli_proxy_files_dir(&root);
 
     for entry in &manifest.files {
+        if should_skip_manifest_entry_for_current_settings(app, cli_key, &entry.kind) {
+            continue;
+        }
+
         let target_path = PathBuf::from(&entry.path);
         if entry.existed {
             let Some(rel) = entry.backup_rel.as_ref() else {
@@ -881,6 +959,15 @@ pub fn set_enabled<R: tauri::Runtime>(
                     origin,
                 ));
             }
+        } else if let Err(err) = ensure_manifest_has_current_targets(app, cli_key, &mut manifest) {
+            return Ok(CliProxyResult::failure(
+                trace_id,
+                cli_key,
+                true,
+                "CLI_PROXY_BACKUP_FAILED",
+                err.to_string(),
+                origin,
+            ));
         }
 
         return match apply_proxy_config(app, cli_key, base_origin) {
@@ -1078,6 +1165,18 @@ pub fn sync_enabled<R: tauri::Runtime>(
             continue;
         }
 
+        if let Err(err) = ensure_manifest_has_current_targets(app, cli_key, &mut manifest) {
+            out.push(CliProxyResult::failure(
+                trace_id,
+                cli_key,
+                true,
+                "CLI_PROXY_BACKUP_FAILED",
+                err.to_string(),
+                Some(base_origin.to_string()),
+            ));
+            continue;
+        }
+
         match apply_proxy_config(app, cli_key, base_origin) {
             Ok(()) => {
                 manifest.base_origin = Some(base_origin.to_string());
@@ -1154,8 +1253,9 @@ pub fn restore_enabled_keep_state<R: tauri::Runtime>(
 use claude::{build_claude_settings_json, merge_restore_claude_settings_json};
 #[cfg(test)]
 use codex::{
-    build_codex_auth_json, build_codex_config_toml, codex_auth_path, codex_config_path,
-    merge_restore_codex_auth_json, merge_restore_codex_config_toml, CodexConfigPlatform,
+    build_codex_auth_json, build_codex_config_toml, build_codex_config_toml_oauth_compatible,
+    codex_auth_path, codex_config_path, merge_restore_codex_auth_json,
+    merge_restore_codex_config_toml, CodexConfigPlatform,
 };
 #[cfg(test)]
 use gemini::merge_restore_gemini_env;

@@ -27,27 +27,25 @@ export function LimitsSection(props: { form: UseProviderEditorFormReturn }) {
   } = props.form;
 
   return (
-    <details className="group rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50/80 to-white shadow-sm open:ring-2 open:ring-accent/10 transition-all dark:border-slate-700 dark:from-slate-800/80 dark:to-slate-900">
+    <details className="group rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50/80 to-white shadow-sm open:ring-2 open:ring-accent/10 transition-all dark:border-border dark:from-slate-800/80 dark:to-slate-900">
       <summary className="flex cursor-pointer items-center justify-between px-5 py-4 select-none">
         <div className="flex items-center gap-3">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 shadow-sm">
             <DollarSign className="h-4 w-4 text-white" />
           </div>
           <div>
-            <span className="text-sm font-semibold text-slate-700 group-open:text-accent dark:text-slate-300">
+            <span className="text-sm font-semibold text-slate-700 group-open:text-accent dark:text-secondary">
               限流配置
             </span>
-            <p className="text-xs text-slate-400 dark:text-slate-500">
-              配置不同时间窗口的消费限制以控制成本
-            </p>
+            <p className="text-xs text-muted-foreground">配置不同时间窗口的消费限制以控制成本</p>
           </div>
         </div>
         <ChevronDown className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-180" />
       </summary>
 
-      <div className="space-y-6 border-t border-slate-100 px-5 py-5 dark:border-slate-700">
+      <div className="space-y-6 border-t border-slate-100 px-5 py-5 dark:border-border">
         <div>
-          <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+          <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             时间维度限制
           </h4>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -95,10 +93,10 @@ export function LimitsSection(props: { form: UseProviderEditorFormReturn }) {
         </div>
 
         <div>
-          <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+          <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             每日重置设置
           </h4>
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-border dark:bg-secondary">
             <div className="flex items-start gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-sky-50 dark:bg-sky-900/30">
                 <RotateCcw className="h-5 w-5 text-sky-600" />
@@ -106,12 +104,8 @@ export function LimitsSection(props: { form: UseProviderEditorFormReturn }) {
               <div className="min-w-0 flex-1 space-y-4">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
-                    <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                      每日重置模式
-                    </label>
-                    <p className="mb-2 text-xs text-slate-400 dark:text-slate-500">
-                      rolling 为过去 24 小时窗口
-                    </p>
+                    <label className="text-sm font-medium text-secondary">每日重置模式</label>
+                    <p className="mb-2 text-xs text-muted-foreground">rolling 为过去 24 小时窗口</p>
                     <RadioButtonGroup<DailyResetMode>
                       items={[
                         { value: "fixed", label: "固定时间" },
@@ -126,10 +120,8 @@ export function LimitsSection(props: { form: UseProviderEditorFormReturn }) {
                     />
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                      每日重置时间
-                    </label>
-                    <p className="mb-2 text-xs text-slate-400 dark:text-slate-500">
+                    <label className="text-sm font-medium text-secondary">每日重置时间</label>
+                    <p className="mb-2 text-xs text-muted-foreground">
                       {dailyResetMode === "fixed"
                         ? "默认 00:00:00（本机时区）"
                         : "rolling 模式下忽略"}
@@ -148,7 +140,7 @@ export function LimitsSection(props: { form: UseProviderEditorFormReturn }) {
         </div>
 
         <div>
-          <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+          <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             其他限制
           </h4>
           <div className="grid gap-4 sm:grid-cols-2">

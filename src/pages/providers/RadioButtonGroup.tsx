@@ -26,7 +26,7 @@ export function RadioButtonGroup<T extends string>({
       role="radiogroup"
       aria-label={ariaLabel}
       className={cn(
-        "inline-flex overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-600 dark:bg-slate-800",
+        "inline-flex overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-600 dark:bg-secondary",
         fullWidth ? "w-full" : "w-auto",
         disabled ? "opacity-60" : null
       )}
@@ -51,7 +51,7 @@ export function RadioButtonGroup<T extends string>({
               index < items.length - 1 ? "border-r border-slate-200 dark:border-slate-600" : null,
               active ? "bg-gradient-to-br from-accent to-accent-secondary text-white" : null,
               !active
-                ? "bg-white text-slate-700 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                ? "bg-white text-slate-700 hover:bg-secondary dark:text-secondary dark:hover:bg-slate-700"
                 : null,
               disabled ? "cursor-not-allowed" : null
             )}

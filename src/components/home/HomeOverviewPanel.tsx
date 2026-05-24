@@ -252,7 +252,7 @@ function didKeysChange(current: string[], previous: string[]) {
 
 function OverviewPanelFallback() {
   return (
-    <div className="flex h-full items-center justify-center text-sm text-slate-600 dark:text-slate-400">
+    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
       <div className="flex items-center gap-3">
         <Spinner />
         <span>加载面板中…</span>
@@ -665,7 +665,7 @@ export function HomeOverviewPanel({
                 return (
                   <div
                     key={`${row.cli_key}:${row.provider_id}`}
-                    className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/50"
+                    className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 dark:border-border dark:bg-secondary/50"
                   >
                     <div className="min-w-0 flex flex-1 items-center gap-2.5">
                       <CliBrandIcon
@@ -673,13 +673,13 @@ export function HomeOverviewPanel({
                         className="h-4 w-4 shrink-0 rounded-[4px] object-contain"
                       />
                       <div
-                        className="truncate text-sm font-medium text-slate-700 dark:text-slate-300"
+                        className="truncate text-sm font-medium text-secondary"
                         title={row.provider_name}
                       >
                         {row.provider_name || "未知"}
                       </div>
                     </div>
-                    <div className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400">
+                    <div className="shrink-0 font-mono text-xs text-muted-foreground">
                       {remaining}
                     </div>
                     <Button
@@ -757,7 +757,7 @@ export function HomeOverviewPanel({
                   return (
                     <div
                       key={`${row.cli_key}:${row.provider_id}`}
-                      className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/50"
+                      className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 dark:border-border dark:bg-secondary/50"
                     >
                       <div className="min-w-0 flex flex-1 items-center gap-2.5">
                         <CliBrandIcon
@@ -765,13 +765,13 @@ export function HomeOverviewPanel({
                           className="h-4 w-4 shrink-0 rounded-[4px] object-contain"
                         />
                         <div
-                          className="truncate text-sm font-medium text-slate-700 dark:text-slate-300"
+                          className="truncate text-sm font-medium text-secondary"
                           title={row.provider_name}
                         >
                           {row.provider_name || "未知"}
                         </div>
                       </div>
-                      <div className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400">
+                      <div className="shrink-0 font-mono text-xs text-muted-foreground">
                         {remaining}
                       </div>
                       <Button

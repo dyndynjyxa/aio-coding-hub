@@ -224,15 +224,13 @@ export function PromptsView({ workspaceId, cliKey, isActiveWorkspace = true }: P
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-slate-500 dark:text-slate-400">
+          <span className="text-xs text-muted-foreground">
             {loading ? "加载中…" : `共 ${items.length} 条`}
           </span>
           {isActiveWorkspace ? (
-            <span className="text-xs text-slate-500 dark:text-slate-400">
-              启用后会写入 {fileHint}
-            </span>
+            <span className="text-xs text-muted-foreground">启用后会写入 {fileHint}</span>
           ) : (
-            <span className="text-xs text-slate-500 dark:text-slate-400">
+            <span className="text-xs text-muted-foreground">
               非当前工作区：仅写入数据库，不触发同步
             </span>
           )}
@@ -252,7 +250,7 @@ export function PromptsView({ workspaceId, cliKey, isActiveWorkspace = true }: P
       </div>
 
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner size="sm" />
           加载中…
         </div>
@@ -265,7 +263,7 @@ export function PromptsView({ workspaceId, cliKey, isActiveWorkspace = true }: P
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <div className="truncate text-base font-semibold text-slate-900 dark:text-slate-100 leading-tight">
+                    <div className="truncate text-base font-semibold text-foreground leading-tight">
                       {prompt.name}
                     </div>
                     {prompt.enabled ? (
@@ -273,19 +271,19 @@ export function PromptsView({ workspaceId, cliKey, isActiveWorkspace = true }: P
                         已启用
                       </span>
                     ) : (
-                      <span className="rounded-full bg-slate-100 dark:bg-slate-700 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                      <span className="rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
                         未启用
                       </span>
                     )}
                   </div>
-                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  <div className="mt-1 text-xs text-muted-foreground">
                     {previewContent(prompt.content)}
                   </div>
                 </div>
 
                 <div className="flex shrink-0 items-center gap-3">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-600 dark:text-slate-400">启用</span>
+                    <span className="text-xs text-muted-foreground">启用</span>
                     <Switch
                       checked={prompt.enabled}
                       disabled={togglingId === prompt.id}
@@ -303,7 +301,7 @@ export function PromptsView({ workspaceId, cliKey, isActiveWorkspace = true }: P
                       }}
                       size="icon"
                       variant="ghost"
-                      className="h-8 w-8 p-0 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:text-slate-400 dark:hover:text-indigo-400 dark:hover:bg-indigo-900/30"
+                      className="h-8 w-8 p-0 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:text-muted-foreground dark:hover:text-indigo-400 dark:hover:bg-indigo-900/30"
                       aria-label="Edit"
                       title="编辑"
                     >
@@ -344,7 +342,7 @@ export function PromptsView({ workspaceId, cliKey, isActiveWorkspace = true }: P
             <Input value={name} onChange={(e) => setName(e.currentTarget.value)} />
           </FormField>
           <FormField label="内容">
-            <div className="min-h-[16rem] lg:min-h-[24rem] max-h-[50vh] overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-700 dark:text-slate-300 [&_.mdxeditor]:bg-transparent [&_.mdxeditor]:text-inherit [&_.mdxeditor]:font-inherit">
+            <div className="min-h-[16rem] lg:min-h-[24rem] max-h-[50vh] overflow-y-auto rounded-lg border border-border bg-white dark:bg-secondary text-sm text-secondary [&_.mdxeditor]:bg-transparent [&_.mdxeditor]:text-inherit [&_.mdxeditor]:font-inherit">
               <MDXEditor
                 key={editorKey}
                 markdown={content}
@@ -355,7 +353,7 @@ export function PromptsView({ workspaceId, cliKey, isActiveWorkspace = true }: P
             </div>
           </FormField>
 
-          <div className="flex items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-700 pt-3">
+          <div className="flex items-center justify-end gap-2 border-t border-border pt-3">
             <Button onClick={() => setDialogOpen(false)} variant="secondary">
               取消
             </Button>

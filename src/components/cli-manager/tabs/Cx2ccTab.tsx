@@ -44,10 +44,8 @@ function SettingItem({
       )}
     >
       <div className="min-w-0">
-        <div className="text-sm text-slate-700 dark:text-slate-300">{label}</div>
-        <div className="mt-1 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-          {subtitle}
-        </div>
+        <div className="text-sm text-secondary">{label}</div>
+        <div className="mt-1 text-xs text-muted-foreground leading-relaxed">{subtitle}</div>
       </div>
       <div className="flex flex-wrap items-center justify-end gap-2">{children}</div>
     </div>
@@ -142,11 +140,11 @@ export function CliManagerCx2ccTab({
   return (
     <div className="space-y-6">
       <Card className="overflow-hidden p-5">
-        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
-          <Settings className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Settings className="h-4 w-4 text-muted-foreground" />
           模型 Fallback 映射
         </h3>
-        <div className="divide-y divide-slate-100 dark:divide-slate-700">
+        <div className="divide-y divide-border">
           <SettingItem label="Opus 默认模型" subtitle="当 Provider 未设置 Opus 覆盖时使用此模型">
             <Input
               value={fallbackModelOpusText}
@@ -225,11 +223,11 @@ export function CliManagerCx2ccTab({
       </Card>
 
       <Card className="overflow-hidden p-5">
-        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
-          <Settings className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Settings className="h-4 w-4 text-muted-foreground" />
           上游请求注入
         </h3>
-        <div className="divide-y divide-slate-100 dark:divide-slate-700">
+        <div className="divide-y divide-border">
           <SettingItem
             label="推理强度"
             subtitle="注入 reasoning.effort 到上游请求；默认表示不注入。"
@@ -282,11 +280,11 @@ export function CliManagerCx2ccTab({
       </Card>
 
       <Card className="overflow-hidden p-5">
-        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
-          <Settings className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Settings className="h-4 w-4 text-muted-foreground" />
           转换行为开关
         </h3>
-        <div className="divide-y divide-slate-100 dark:divide-slate-700">
+        <div className="divide-y divide-border">
           <SettingItem
             label="启用推理转思考"
             subtitle="将上游 reasoning 输出转换为 Claude thinking 格式"

@@ -48,7 +48,7 @@ export type SidebarProps = {
 };
 
 export function Sidebar({ className }: SidebarProps) {
-  const { statusText, statusTone, portText, hasUpdate, isPortable } = useGatewayStatus();
+  const { statusText, portText, hasUpdate, isPortable } = useGatewayStatus();
   const devPreview = useDevPreviewData();
 
   function handleRepoClick(event: ReactMouseEvent<HTMLAnchorElement>) {
@@ -60,8 +60,8 @@ export function Sidebar({ className }: SidebarProps) {
   return (
     <aside
       className={cn(
-        "sticky top-0 h-screen w-64 shrink-0",
-        "border-r border-sidebar-border bg-sidebar/70 backdrop-blur",
+        "sticky top-0 h-screen w-[232px] shrink-0",
+        "border-r border-sidebar-border bg-sidebar",
         className
       )}
     >
@@ -118,9 +118,9 @@ export function Sidebar({ className }: SidebarProps) {
               to={item.to}
               className={({ isActive }) =>
                 cn(
-                  "group flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition",
+                  "group flex items-center gap-3 rounded-[6px] px-3 py-2 text-sm transition",
                   isActive
-                    ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
+                    ? "bg-accent/15 text-accent"
                     : "text-sidebar-foreground hover:bg-sidebar-accent"
                 )
               }
@@ -141,14 +141,12 @@ export function Sidebar({ className }: SidebarProps) {
           ))}
         </nav>
 
-        <div className="px-4 py-3 text-xs text-muted-foreground">
-          <div className="rounded-xl bg-sidebar-accent px-3 py-2.5">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-medium text-sidebar-foreground">网关</span>
-              <span className={cn("rounded-full px-2 py-0.5 text-[12px] font-medium", statusTone)}>
-                {statusText} · {portText}
-              </span>
-            </div>
+        <div className="px-4 py-3">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="h-[5px] w-[5px] rounded-full bg-green shadow-[0_0_6px] shadow-green" />
+            <span>
+              {statusText} · {portText}
+            </span>
           </div>
         </div>
       </div>

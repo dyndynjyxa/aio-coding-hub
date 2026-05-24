@@ -52,7 +52,7 @@ export function HomeWorkspaceConfigPanel({
                 "inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
                 active
                   ? "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300"
-                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-border dark:bg-secondary dark:text-secondary dark:hover:bg-slate-700"
               )}
             >
               <CliBrandIcon
@@ -71,9 +71,9 @@ export function HomeWorkspaceConfigPanel({
           headerAddon != null && "md:grid-cols-[minmax(0,1fr)_fit-content(240px)]"
         )}
       >
-        <div className="flex min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800/50">
-          <span className="shrink-0 font-medium text-slate-500 dark:text-slate-400">工作区：</span>
-          <span className="min-w-0 truncate font-medium text-slate-700 dark:text-slate-200">
+        <div className="flex min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-sm dark:border-border dark:bg-secondary/50">
+          <span className="shrink-0 font-medium text-muted-foreground">工作区：</span>
+          <span className="min-w-0 truncate font-medium text-slate-700 dark:text-foreground">
             {selectedConfig.workspaceName?.trim() || "默认"}
           </span>
         </div>
@@ -82,7 +82,7 @@ export function HomeWorkspaceConfigPanel({
 
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         {selectedConfig.loading ? (
-          <div className="text-sm text-slate-600 dark:text-slate-400">加载中…</div>
+          <div className="text-sm text-muted-foreground">加载中…</div>
         ) : selectedConfig.items.length === 0 ? (
           <EmptyState title="当前工作区暂无配置信息" />
         ) : (
@@ -93,14 +93,14 @@ export function HomeWorkspaceConfigPanel({
               return (
                 <div
                   key={item.id}
-                  className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/50"
+                  className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 dark:border-border dark:bg-secondary/50"
                 >
-                  <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-slate-500 dark:bg-slate-700 dark:text-slate-300">
+                  <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-slate-500 dark:bg-secondary dark:text-secondary">
                     <Icon className="h-3 w-3" />
                     {item.label}
                   </span>
                   <div
-                    className="min-w-0 truncate text-sm text-slate-700 dark:text-slate-200"
+                    className="min-w-0 truncate text-sm text-slate-700 dark:text-foreground"
                     title={item.name}
                   >
                     {item.name}
