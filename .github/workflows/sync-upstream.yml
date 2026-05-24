@@ -103,7 +103,8 @@ jobs:
                 --base "${TARGET_BRANCH}" \
                 --head "${UPSTREAM_HEAD}" \
                 --title "${title}" \
-                --body "${body}"
+                --body "${body}" \
+                --no-maintainer-edit
 
               pr_number="$(
                 gh pr list \
