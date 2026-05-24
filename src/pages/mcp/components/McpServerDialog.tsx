@@ -551,7 +551,7 @@ export function McpServerDialog({
           </div>
 
           <div className="mt-3">
-            <div className="text-sm font-medium text-secondary">名称</div>
+            <div className="text-sm font-medium text-secondary-foreground">名称</div>
             <input
               type="text"
               value={name}
@@ -563,7 +563,7 @@ export function McpServerDialog({
 
           <div className="mt-4">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-sm font-medium text-secondary">类型</div>
+              <div className="text-sm font-medium text-secondary-foreground">类型</div>
               <div className="text-xs text-muted-foreground">二选一</div>
             </div>
             <div className="mt-2 grid gap-2 sm:grid-cols-3">
@@ -610,7 +610,7 @@ export function McpServerDialog({
                     <div
                       className={cn(
                         "mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg border bg-white dark:bg-secondary shadow-sm",
-                        "border-border text-secondary dark:border-border dark:text-secondary",
+                        "border-border text-secondary-foreground dark:border-border dark:text-secondary-foreground",
                         "peer-checked:border-accent/40 peer-checked:bg-accent/10 peer-checked:text-accent"
                       )}
                     >
@@ -637,7 +637,7 @@ export function McpServerDialog({
         {transport === "stdio" ? (
           <>
             <div>
-              <div className="text-sm font-medium text-secondary">Command</div>
+              <div className="text-sm font-medium text-secondary-foreground">Command</div>
               <input
                 type="text"
                 value={command}
@@ -648,7 +648,7 @@ export function McpServerDialog({
             </div>
 
             <div>
-              <div className="text-sm font-medium text-secondary">Args（每行一个）</div>
+              <div className="text-sm font-medium text-secondary-foreground">Args（每行一个）</div>
               <textarea
                 value={argsText}
                 onChange={(e) => setArgsText(e.currentTarget.value)}
@@ -659,7 +659,7 @@ export function McpServerDialog({
             </div>
 
             <div>
-              <div className="text-sm font-medium text-secondary">Env（环境变量）</div>
+              <div className="text-sm font-medium text-secondary-foreground">Env（环境变量）</div>
               {editTarget ? (
                 <div className="mt-1 text-xs text-muted-foreground">
                   旧值默认不显示。留空保留，删行删除，填新值替换。
@@ -676,7 +676,7 @@ export function McpServerDialog({
             </div>
 
             <div>
-              <div className="text-sm font-medium text-secondary">CWD（可选）</div>
+              <div className="text-sm font-medium text-secondary-foreground">CWD（可选）</div>
               <input
                 type="text"
                 value={cwd}
@@ -689,7 +689,7 @@ export function McpServerDialog({
         ) : (
           <>
             <div>
-              <div className="text-sm font-medium text-secondary">URL</div>
+              <div className="text-sm font-medium text-secondary-foreground">URL</div>
               <input
                 type="text"
                 value={url}
@@ -700,7 +700,7 @@ export function McpServerDialog({
             </div>
 
             <div>
-              <div className="text-sm font-medium text-secondary">Headers</div>
+              <div className="text-sm font-medium text-secondary-foreground">Headers</div>
               {editTarget ? (
                 <div className="mt-1 text-xs text-muted-foreground">
                   旧值默认不显示。留空保留，删行删除，填新值替换。

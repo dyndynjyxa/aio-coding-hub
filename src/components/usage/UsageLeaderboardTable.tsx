@@ -17,7 +17,7 @@ import { TABLE_COLUMNS } from "./UsageTableColumns";
 const TH_CLASS =
   "border-b border-border bg-secondary/60 dark:bg-secondary/60 px-3 py-2.5 backdrop-blur-sm";
 const TD_CLASS = "border-b border-border px-3 py-3";
-const MONO_TD = `${TD_CLASS} font-mono text-xs tabular-nums text-secondary`;
+const MONO_TD = `${TD_CLASS} font-mono text-xs tabular-nums text-secondary-foreground`;
 
 function successRate(row: UsageLeaderboardRow) {
   if (row.requests_total <= 0) return NaN;

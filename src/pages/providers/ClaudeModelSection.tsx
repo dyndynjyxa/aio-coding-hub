@@ -20,7 +20,7 @@ export function ClaudeModelSection(props: { form: UseProviderEditorFormReturn })
     <details className="group rounded-xl border border-border bg-white shadow-sm open:ring-2 open:ring-accent/10 transition-all dark:border-border dark:bg-secondary">
       <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
         <div className="flex items-center gap-3">
-          <span className="text-sm font-medium text-secondary group-open:text-accent dark:text-secondary">
+          <span className="text-sm font-medium text-secondary-foreground group-open:text-accent dark:text-secondary-foreground">
             {sectionTitle}
           </span>
           <span className="text-xs font-mono text-muted-foreground">

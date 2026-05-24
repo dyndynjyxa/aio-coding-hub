@@ -240,7 +240,9 @@ function CheckRow({
         ) : (
           <div className="h-4 w-4 shrink-0 rounded-full border border-border dark:border-border bg-secondary" />
         )}
-        <span className={cn("text-secondary", !required && "text-muted-foreground")}>{label}</span>
+        <span className={cn("text-secondary-foreground", !required && "text-muted-foreground")}>
+          {label}
+        </span>
         {help ? (
           <Tooltip
             content={help}
@@ -632,7 +634,7 @@ export function ClaudeModelValidationResultPanel({ templateKey, result, mode = "
                 ? "text-emerald-800 dark:text-emerald-400"
                 : overallPass === false
                   ? "text-rose-800 dark:text-rose-400"
-                  : "text-secondary"
+                  : "text-secondary-foreground"
             )}
           >
             {overallPass === false ? (
@@ -648,7 +650,7 @@ export function ClaudeModelValidationResultPanel({ templateKey, result, mode = "
                   ? "bg-emerald-100 text-emerald-800 ring-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:ring-emerald-700"
                   : overallPass === false
                     ? "bg-rose-100 text-rose-800 ring-rose-200 dark:bg-rose-900/30 dark:text-rose-400 dark:ring-rose-700"
-                    : "bg-secondary text-secondary ring-border dark:bg-secondary/50 dark:text-secondary dark:ring-border"
+                    : "bg-secondary text-secondary-foreground ring-border dark:bg-secondary/50 dark:text-secondary-foreground dark:ring-border"
               )}
               title={
                 overallPass === true
@@ -745,7 +747,7 @@ export function ClaudeModelValidationResultPanel({ templateKey, result, mode = "
                 {typeof cacheReadStep2 === "number" && Number.isFinite(cacheReadStep2) ? (
                   <div className="mt-1 text-[11px] text-muted-foreground">
                     step2 read-hit:{" "}
-                    <span className="font-mono text-secondary">{cacheReadStep2}</span>
+                    <span className="font-mono text-secondary-foreground">{cacheReadStep2}</span>
                   </div>
                 ) : null}
               </div>
@@ -967,7 +969,7 @@ export function ClaudeModelValidationResultPanel({ templateKey, result, mode = "
             open={open}
           >
             <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
-              <div className="flex items-center gap-2 text-sm font-medium text-secondary group-open:text-indigo-600 dark:group-open:text-indigo-400">
+              <div className="flex items-center gap-2 text-sm font-medium text-secondary-foreground group-open:text-indigo-600 dark:group-open:text-indigo-400">
                 <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
                 <span>检查点详情</span>
               </div>
@@ -1010,14 +1012,14 @@ export function ClaudeModelValidationResultPanel({ templateKey, result, mode = "
         ) : (
           <details className="group rounded-xl border border-border bg-white dark:bg-secondary shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
             <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
-              <div className="flex items-center gap-2 text-sm font-medium text-secondary group-open:text-indigo-600 dark:group-open:text-indigo-400">
+              <div className="flex items-center gap-2 text-sm font-medium text-secondary-foreground group-open:text-indigo-600 dark:group-open:text-indigo-400">
                 <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
                 <span>输出预览</span>
               </div>
             </summary>
             <div className="border-t border-border px-4 py-3">
               <div className="mb-3 flex items-center justify-between">
-                <div className="text-xs font-semibold text-secondary">输出预览</div>
+                <div className="text-xs font-semibold text-secondary-foreground">输出预览</div>
                 <Button
                   size="sm"
                   variant="secondary"

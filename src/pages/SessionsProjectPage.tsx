@@ -275,7 +275,7 @@ export function SessionsProjectPage() {
               <div className="mt-1 text-xs text-muted-foreground">
                 来源：<span className="font-semibold">{source}</span>
                 {distro ? (
-                  <span className="ml-2 rounded-full border border-border bg-secondary px-2 py-0.5 text-[11px] font-medium text-muted-foreground dark:border-border dark:bg-secondary dark:text-secondary">
+                  <span className="ml-2 rounded-full border border-border bg-secondary px-2 py-0.5 text-[11px] font-medium text-muted-foreground dark:border-border dark:bg-secondary dark:text-secondary-foreground">
                     WSL: {distro}
                   </span>
                 ) : null}
@@ -328,7 +328,7 @@ export function SessionsProjectPage() {
                   {overview.topBranches.map(([branch, count]) => (
                     <span
                       key={branch}
-                      className="inline-flex items-center gap-1 rounded-full border border-border bg-white px-2 py-0.5 text-[11px] font-medium text-muted-foreground dark:border-border dark:bg-secondary dark:text-secondary"
+                      className="inline-flex items-center gap-1 rounded-full border border-border bg-white px-2 py-0.5 text-[11px] font-medium text-muted-foreground dark:border-border dark:bg-secondary dark:text-secondary-foreground"
                       title={`${count} 个会话`}
                     >
                       <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
@@ -346,7 +346,7 @@ export function SessionsProjectPage() {
                   {overview.providerList.map((p) => (
                     <span
                       key={p}
-                      className="inline-flex items-center rounded-full border border-border bg-white px-2 py-0.5 text-[11px] font-medium text-muted-foreground dark:border-border dark:bg-secondary dark:text-secondary"
+                      className="inline-flex items-center rounded-full border border-border bg-white px-2 py-0.5 text-[11px] font-medium text-muted-foreground dark:border-border dark:bg-secondary dark:text-secondary-foreground"
                     >
                       {p}
                     </span>
@@ -431,7 +431,7 @@ export function SessionsProjectPage() {
                 type="checkbox"
                 checked={allVisibleSelected}
                 onChange={toggleSelectAll}
-                className="h-4 w-4 rounded border-border text-accent focus:ring-accent dark:border-border"
+                className="h-4 w-4 rounded border border-slate-400 bg-card accent-accent focus:ring-2 focus:ring-accent/30 dark:border-slate-600 dark:bg-secondary"
                 aria-label="全选"
               />
             </span>
@@ -530,7 +530,7 @@ export function SessionsProjectPage() {
                               type="checkbox"
                               checked={isSelected}
                               onChange={() => toggleSelect(session.file_path)}
-                              className="h-4 w-4 rounded border-border text-accent focus:ring-accent dark:border-border"
+                              className="h-4 w-4 rounded border border-slate-400 bg-card accent-accent focus:ring-2 focus:ring-accent/30 dark:border-slate-600 dark:bg-secondary"
                               aria-label={`选择会话 ${title}`}
                             />
                           </div>
@@ -555,12 +555,12 @@ export function SessionsProjectPage() {
                             </div>
                           </div>
 
-                          <div className="flex items-center justify-end gap-1 text-xs text-muted-foreground dark:text-secondary">
+                          <div className="flex items-center justify-end gap-1 text-xs text-muted-foreground dark:text-secondary-foreground">
                             <span className="font-semibold">{session.message_count}</span>
                           </div>
 
                           <div
-                            className="flex items-center justify-end gap-1 text-xs text-muted-foreground dark:text-secondary"
+                            className="flex items-center justify-end gap-1 text-xs text-muted-foreground dark:text-secondary-foreground"
                             title={modifiedTitle}
                           >
                             <Clock className="h-3.5 w-3.5 text-muted-foreground" />

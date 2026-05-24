@@ -83,7 +83,7 @@ export function ClaudeModelValidationDialog({
         <div className="space-y-6">
           {/* Provider Info Banner */}
           <div className="flex flex-wrap items-center justify-between rounded-2xl border border-border/60 dark:border-border/60 bg-white/50 dark:bg-card/30 px-5 py-4 text-sm shadow-sm backdrop-blur-md">
-            <div className="flex flex-wrap items-center gap-6 text-secondary">
+            <div className="flex flex-wrap items-center gap-6 text-secondary-foreground">
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-50 to-white dark:from-indigo-950/50 dark:to-secondary shadow-sm ring-1 ring-indigo-100 dark:ring-indigo-800/50">
                   <Server className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
@@ -108,7 +108,7 @@ export function ClaudeModelValidationDialog({
                     <span className="font-semibold text-foreground">
                       {provider.base_url_mode === "ping" ? "自动测速" : "顺序轮询"}
                     </span>
-                    <span className="inline-flex items-center rounded-md bg-secondary/80 dark:bg-secondary px-2 py-0.5 text-xs font-medium text-muted-foreground dark:text-secondary ring-1 ring-inset ring-border">
+                    <span className="inline-flex items-center rounded-md bg-secondary/80 dark:bg-secondary px-2 py-0.5 text-xs font-medium text-muted-foreground dark:text-secondary-foreground ring-1 ring-inset ring-border">
                       {provider.base_urls.length} 个地址
                     </span>
                   </div>

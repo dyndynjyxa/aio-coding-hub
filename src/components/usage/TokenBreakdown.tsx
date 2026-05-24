@@ -17,14 +17,15 @@ export function TokenBreakdown({
     <div className="space-y-0.5">
       <div>{formatInteger(totalTokens)}</div>
       <div className="text-[10px] leading-4 text-muted-foreground">
-        输入 <span className="text-secondary">{formatInteger(inputTokens)}</span>
+        输入 <span className="text-secondary-foreground">{formatInteger(inputTokens)}</span>
       </div>
       <div className="text-[10px] leading-4 text-muted-foreground">
-        输出 <span className="text-secondary">{formatInteger(outputTokens)}</span>
+        输出 <span className="text-secondary-foreground">{formatInteger(outputTokens)}</span>
       </div>
       {totalTokensWithCache != null && Number.isFinite(totalTokensWithCache) ? (
         <div className="text-[10px] leading-4 text-muted-foreground">
-          含缓存 <span className="text-secondary">{formatInteger(totalTokensWithCache)}</span>
+          含缓存{" "}
+          <span className="text-secondary-foreground">{formatInteger(totalTokensWithCache)}</span>
         </div>
       ) : null}
     </div>

@@ -60,7 +60,7 @@ export function HomeActiveSessionsCardContent({
           >
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-xs text-secondary">
+                <div className="flex items-center gap-2 text-xs text-secondary-foreground">
                   <span
                     className={cn(
                       "shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium",
@@ -77,7 +77,7 @@ export function HomeActiveSessionsCardContent({
 
                 <div className="flex items-center gap-1 rounded-md border border-border bg-white dark:bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground shadow-sm">
                   <DollarSign className="h-3 w-3 text-muted-foreground" />
-                  <span className="font-mono font-medium text-secondary">
+                  <span className="font-mono font-medium text-secondary-foreground">
                     {formatUsd(row.total_cost_usd)}
                   </span>
                 </div>

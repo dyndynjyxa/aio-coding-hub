@@ -604,7 +604,7 @@ export function HomeOverviewPanel({
 
   const overviewInfoPanel = (
     <Card padding="sm" className="flex h-full min-h-0 flex-1 flex-col">
-      <div className="shrink-0">
+      <div className="shrink-0 overflow-x-auto scrollbar-overlay">
         <TabList
           ariaLabel="概览状态切换"
           items={legacySessionsTabs}
@@ -615,7 +615,7 @@ export function HomeOverviewPanel({
           }
           onChange={setSessionsTab}
           size="sm"
-          className="w-full overflow-x-auto"
+          className="w-max min-w-full"
           buttonClassName="whitespace-nowrap flex-1"
         />
       </div>
@@ -653,7 +653,7 @@ export function HomeOverviewPanel({
         ) : displayedCircuits.length === 0 ? (
           <EmptyState title="当前没有熔断中的 Provider" />
         ) : (
-          <div className="h-full overflow-y-auto pr-1">
+          <div className="h-full overflow-y-auto pr-1 scrollbar-overlay">
             <div className="space-y-3">
               {displayedCircuits.map((row) => {
                 const remaining =
@@ -673,7 +673,7 @@ export function HomeOverviewPanel({
                         className="h-4 w-4 shrink-0 rounded-[4px] object-contain"
                       />
                       <div
-                        className="truncate text-sm font-medium text-secondary"
+                        className="truncate text-sm font-medium text-foreground"
                         title={row.provider_name}
                       >
                         {row.provider_name || "未知"}
@@ -724,7 +724,7 @@ export function HomeOverviewPanel({
         />
       </div>
 
-      <div className="mt-3 shrink-0">
+      <div className="mt-3 shrink-0 overflow-x-auto scrollbar-overlay">
         <TabList
           ariaLabel="新布局信息切换"
           items={logsPrimaryTabs}
@@ -735,7 +735,7 @@ export function HomeOverviewPanel({
           }
           onChange={(next) => setSessionsTab(next as HomeOverviewTabKey)}
           size="sm"
-          className="w-full overflow-x-auto"
+          className="w-max min-w-full"
           buttonClassName="whitespace-nowrap flex-1"
         />
       </div>
@@ -745,7 +745,7 @@ export function HomeOverviewPanel({
           displayedCircuits.length === 0 ? (
             <EmptyState title="当前没有熔断中的 Provider" />
           ) : (
-            <div className="h-full overflow-y-auto pr-1">
+            <div className="h-full overflow-y-auto pr-1 scrollbar-overlay">
               <div className="space-y-3">
                 {displayedCircuits.map((row) => {
                   const remaining =
@@ -765,7 +765,7 @@ export function HomeOverviewPanel({
                           className="h-4 w-4 shrink-0 rounded-[4px] object-contain"
                         />
                         <div
-                          className="truncate text-sm font-medium text-secondary"
+                          className="truncate text-sm font-medium text-foreground"
                           title={row.provider_name}
                         >
                           {row.provider_name || "未知"}

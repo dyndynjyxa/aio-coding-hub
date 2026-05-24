@@ -415,7 +415,7 @@ const RequestLogCard = memo(function RequestLogCard({
               <div className="flex flex-col gap-y-0.5 w-[110px] shrink-0" title={providerTitle}>
                 <div className="flex items-center gap-1 h-4">
                   <Server className="h-3 w-3 text-muted-foreground/80 dark:text-muted-foreground/80 shrink-0" />
-                  <span className="truncate font-semibold text-muted-foreground dark:text-secondary">
+                  <span className="truncate font-semibold text-muted-foreground dark:text-secondary-foreground">
                     {providerText}
                   </span>
                 </div>
@@ -456,7 +456,7 @@ const RequestLogCard = memo(function RequestLogCard({
                   <span className="text-muted-foreground/80 dark:text-muted-foreground/80 shrink-0">
                     输入
                   </span>
-                  <span className="font-mono tabular-nums text-secondary dark:text-foreground truncate">
+                  <span className="font-mono tabular-nums text-secondary-foreground dark:text-foreground truncate">
                     {formatInteger(effectiveInputTokens)}
                   </span>
                 </div>
@@ -466,7 +466,7 @@ const RequestLogCard = memo(function RequestLogCard({
                   </span>
                   {cacheWrite.tokens != null ? (
                     <>
-                      <span className="font-mono tabular-nums text-secondary dark:text-foreground truncate">
+                      <span className="font-mono tabular-nums text-secondary-foreground dark:text-foreground truncate">
                         {formatInteger(cacheWrite.tokens)}
                       </span>
                       {cacheWrite.ttl && cacheWrite.tokens > 0 && (
@@ -485,7 +485,7 @@ const RequestLogCard = memo(function RequestLogCard({
                   <span className="text-muted-foreground/80 dark:text-muted-foreground/80 shrink-0">
                     首字
                   </span>
-                  <span className="font-mono tabular-nums text-secondary dark:text-foreground truncate">
+                  <span className="font-mono tabular-nums text-secondary-foreground dark:text-foreground truncate">
                     {ttfbMs != null ? formatDurationMs(ttfbMs) : "—"}
                   </span>
                 </div>
@@ -496,7 +496,7 @@ const RequestLogCard = memo(function RequestLogCard({
                   <span className="text-muted-foreground/80 dark:text-muted-foreground/80 shrink-0">
                     花费
                   </span>
-                  <span className="font-mono tabular-nums text-secondary dark:text-foreground truncate">
+                  <span className="font-mono tabular-nums text-secondary-foreground dark:text-foreground truncate">
                     {costUsdText}
                   </span>
                   {isPriorityServiceTier && <FastModeBadge showCustomTooltip={showCustomTooltip} />}
@@ -506,7 +506,7 @@ const RequestLogCard = memo(function RequestLogCard({
                   <span className="text-muted-foreground/80 dark:text-muted-foreground/80 shrink-0">
                     输出
                   </span>
-                  <span className="font-mono tabular-nums text-secondary dark:text-foreground truncate">
+                  <span className="font-mono tabular-nums text-secondary-foreground dark:text-foreground truncate">
                     {formatInteger(log.output_tokens)}
                   </span>
                 </div>
@@ -515,7 +515,7 @@ const RequestLogCard = memo(function RequestLogCard({
                     缓存读取
                   </span>
                   {log.cache_read_input_tokens != null ? (
-                    <span className="font-mono tabular-nums text-secondary dark:text-foreground truncate">
+                    <span className="font-mono tabular-nums text-secondary-foreground dark:text-foreground truncate">
                       {formatInteger(log.cache_read_input_tokens)}
                     </span>
                   ) : (
@@ -528,7 +528,7 @@ const RequestLogCard = memo(function RequestLogCard({
                   <span className="text-muted-foreground/80 dark:text-muted-foreground/80 shrink-0">
                     耗时
                   </span>
-                  <span className="font-mono tabular-nums text-secondary dark:text-foreground truncate">
+                  <span className="font-mono tabular-nums text-secondary-foreground dark:text-foreground truncate">
                     {formatDurationMs(displayDurationMs)}
                   </span>
                 </div>
@@ -544,7 +544,7 @@ const RequestLogCard = memo(function RequestLogCard({
                     速率
                   </span>
                   {outputTokensPerSecond != null ? (
-                    <span className="font-mono tabular-nums text-secondary dark:text-foreground truncate">
+                    <span className="font-mono tabular-nums text-secondary-foreground dark:text-foreground truncate">
                       {formatTokensPerSecondShort(outputTokensPerSecond)}
                     </span>
                   ) : (

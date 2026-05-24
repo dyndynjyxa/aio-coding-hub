@@ -31,7 +31,7 @@ export function OAuthSection(props: { form: UseProviderEditorFormReturn }) {
           ) : oauthStatus?.connected ? (
             <div className="space-y-2">
               {oauthStatus.email && (
-                <p className="text-sm text-secondary">
+                <p className="text-sm text-secondary-foreground">
                   <span className="font-medium">账号：</span>
                   {oauthStatus.email}
                 </p>

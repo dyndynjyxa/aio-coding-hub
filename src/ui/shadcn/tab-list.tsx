@@ -30,7 +30,7 @@ export function TabList<T extends string>({
     <div
       role="tablist"
       aria-label={ariaLabel}
-      className={cn("flex items-center rounded-full bg-secondary p-[3px]", className)}
+      className={cn("inline-flex items-center rounded-full bg-secondary p-[3px]", className)}
     >
       {items.map((item) => {
         const active = value === item.key;

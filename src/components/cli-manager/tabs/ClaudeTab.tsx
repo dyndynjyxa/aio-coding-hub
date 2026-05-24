@@ -77,7 +77,7 @@ function SettingItem({
       )}
     >
       <div className="min-w-0">
-        <div className="text-sm text-secondary">{label}</div>
+        <div className="text-sm text-secondary-foreground">{label}</div>
         <div className="mt-1 text-xs text-muted-foreground leading-relaxed">{subtitle}</div>
       </div>
       <div className="flex flex-wrap items-center justify-end gap-2">{children}</div>
@@ -461,7 +461,7 @@ function ClaudeHooksSection() {
                     {group.event}
                   </span>
                   {group.matcher ? (
-                    <span className="inline-flex items-center rounded-md bg-secondary px-2 py-0.5 text-xs text-muted-foreground dark:bg-secondary dark:text-secondary">
+                    <span className="inline-flex items-center rounded-md bg-secondary px-2 py-0.5 text-xs text-muted-foreground dark:bg-secondary dark:text-secondary-foreground">
                       {group.matcher}
                     </span>
                   ) : null}
@@ -527,7 +527,7 @@ function ClaudeHooksSection() {
         >
           <div className="flex flex-col gap-4">
             <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground dark:text-secondary">
+              <label className="mb-1 block text-xs font-medium text-muted-foreground dark:text-secondary-foreground">
                 事件
               </label>
               <Select
@@ -543,7 +543,7 @@ function ClaudeHooksSection() {
               </Select>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground dark:text-secondary">
+              <label className="mb-1 block text-xs font-medium text-muted-foreground dark:text-secondary-foreground">
                 Matcher（匹配工具名或事件子类型，多个用 | 分隔，留空匹配全部）
               </label>
               <Input
@@ -554,7 +554,7 @@ function ClaudeHooksSection() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground dark:text-secondary">
+              <label className="mb-1 block text-xs font-medium text-muted-foreground dark:text-secondary-foreground">
                 命令
               </label>
               <Input
@@ -565,7 +565,7 @@ function ClaudeHooksSection() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground dark:text-secondary">
+              <label className="mb-1 block text-xs font-medium text-muted-foreground dark:text-secondary-foreground">
                 超时（秒，留空使用默认值）
               </label>
               <Input
@@ -825,7 +825,7 @@ export function CliManagerClaudeTab({
                   </div>
                   <div className="flex items-center gap-1.5">
                     <div
-                      className="font-mono text-xs text-secondary truncate flex-1"
+                      className="font-mono text-xs text-secondary-foreground truncate flex-1"
                       title={configDir}
                     >
                       {configDir ?? "—"}
@@ -849,7 +849,7 @@ export function CliManagerClaudeTab({
                     settings.json
                   </div>
                   <div
-                    className="font-mono text-xs text-secondary truncate"
+                    className="font-mono text-xs text-secondary-foreground truncate"
                     title={settingsPath ?? "—"}
                   >
                     {settingsPath ?? "—"}
@@ -867,7 +867,7 @@ export function CliManagerClaudeTab({
                     可执行文件
                   </div>
                   <div
-                    className="font-mono text-xs text-secondary truncate"
+                    className="font-mono text-xs text-secondary-foreground truncate"
                     title={claudeInfo?.executable_path ?? "—"}
                   >
                     {claudeInfo?.executable_path ?? "—"}
@@ -880,7 +880,7 @@ export function CliManagerClaudeTab({
                     解析方式
                   </div>
                   <div
-                    className="font-mono text-xs text-secondary truncate"
+                    className="font-mono text-xs text-secondary-foreground truncate"
                     title={claudeInfo?.resolved_via ?? "—"}
                   >
                     {claudeInfo?.resolved_via ?? "—"}

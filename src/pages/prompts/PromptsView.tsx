@@ -342,7 +342,7 @@ export function PromptsView({ workspaceId, cliKey, isActiveWorkspace = true }: P
             <Input value={name} onChange={(e) => setName(e.currentTarget.value)} />
           </FormField>
           <FormField label="内容">
-            <div className="min-h-[16rem] lg:min-h-[24rem] max-h-[50vh] overflow-y-auto rounded-lg border border-border bg-white dark:bg-secondary text-sm text-secondary [&_.mdxeditor]:bg-transparent [&_.mdxeditor]:text-inherit [&_.mdxeditor]:font-inherit">
+            <div className="min-h-[16rem] lg:min-h-[24rem] max-h-[50vh] overflow-y-auto rounded-lg border border-border bg-white dark:bg-secondary text-sm text-secondary-foreground [&_.mdxeditor]:bg-transparent [&_.mdxeditor]:text-inherit [&_.mdxeditor]:font-inherit">
               <MDXEditor
                 key={editorKey}
                 markdown={content}

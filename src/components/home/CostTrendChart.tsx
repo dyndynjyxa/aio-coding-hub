@@ -144,7 +144,7 @@ export function CostTrendChart({
                   "px-3 py-1 text-xs rounded-lg font-medium transition-all",
                   cliKey === item.key
                     ? "bg-indigo-500 text-white shadow-sm"
-                    : "bg-secondary text-muted-foreground dark:text-secondary hover:bg-muted dark:hover:bg-secondary"
+                    : "bg-secondary text-muted-foreground dark:text-secondary-foreground hover:bg-muted dark:hover:bg-secondary"
                 )}
               >
                 {item.label}

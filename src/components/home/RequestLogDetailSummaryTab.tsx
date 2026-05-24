@@ -64,7 +64,7 @@ export function RequestLogDetailSummaryTab({
             </div>
           </div>
           {auditMeta.summary ? (
-            <div className="mt-3 text-sm text-muted-foreground dark:text-secondary">
+            <div className="mt-3 text-sm text-muted-foreground dark:text-secondary-foreground">
               {auditMeta.summary}
             </div>
           ) : null}

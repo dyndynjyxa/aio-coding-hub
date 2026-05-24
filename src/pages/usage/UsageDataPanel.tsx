@@ -80,7 +80,9 @@ function CustomPendingOverlay({
       className="absolute inset-0 z-20 flex items-center justify-center rounded-lg bg-white/60 dark:bg-card/60 backdrop-blur-[1px]"
     >
       <div className="rounded-lg border border-border bg-white dark:bg-secondary px-6 py-4 text-center shadow-lg">
-        <div className="text-sm font-medium text-secondary">请选择日期后点击"应用"查看数据</div>
+        <div className="text-sm font-medium text-secondary-foreground">
+          请选择日期后点击"应用"查看数据
+        </div>
         <div className="mt-1 text-xs text-muted-foreground">当前显示为上一次查询的缓存数据</div>
       </div>
     </div>

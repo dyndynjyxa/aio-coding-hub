@@ -118,7 +118,7 @@ export function ProviderCircuitBadge({
                     >
                       <div className="min-w-0 flex-1">
                         <div
-                          className="truncate text-sm font-medium text-secondary"
+                          className="truncate text-sm font-medium text-secondary-foreground"
                           title={row.provider_name}
                         >
                           {row.provider_name || "未知"}

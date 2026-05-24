@@ -227,7 +227,7 @@ export function ProviderChainView({
         ) : null}
         <span className="text-muted-foreground">{dataSourceLabel}</span>
         {attemptLogs.length === 0 && parsedAttemptsJson.ok ? (
-          <span className="rounded-full bg-secondary px-2.5 py-1 font-medium text-secondary">
+          <span className="rounded-full bg-secondary px-2.5 py-1 font-medium text-secondary-foreground">
             当前显示的是摘要链路，未拿到逐次尝试日志
           </span>
         ) : null}
@@ -281,7 +281,7 @@ function AttemptCard({
           success
             ? "border-emerald-300 text-emerald-600 dark:border-emerald-700 dark:text-emerald-400"
             : skipped
-              ? "border-border text-muted-foreground dark:border-border dark:text-secondary"
+              ? "border-border text-muted-foreground dark:border-border dark:text-secondary-foreground"
               : "border-rose-300 text-rose-600 dark:border-rose-700 dark:text-rose-400"
         )}
       >
@@ -397,7 +397,7 @@ function AttemptCard({
                   {attempt.error_code ? (
                     <div className="flex items-baseline gap-2">
                       <span className="shrink-0 text-muted-foreground">错误码:</span>
-                      <span className="font-mono text-secondary">
+                      <span className="font-mono text-secondary-foreground">
                         {getGatewayErrorShortLabel(attempt.error_code)} ({attempt.error_code})
                       </span>
                     </div>
@@ -405,25 +405,31 @@ function AttemptCard({
                   {attempt.error_category ? (
                     <div className="flex items-baseline gap-2">
                       <span className="shrink-0 text-muted-foreground">错误分类:</span>
-                      <span className="font-mono text-secondary">{attempt.error_category}</span>
+                      <span className="font-mono text-secondary-foreground">
+                        {attempt.error_category}
+                      </span>
                     </div>
                   ) : null}
                   {attempt.decision ? (
                     <div className="flex items-baseline gap-2">
                       <span className="shrink-0 text-muted-foreground">决策:</span>
-                      <span className="font-mono text-secondary">{attempt.decision}</span>
+                      <span className="font-mono text-secondary-foreground">
+                        {attempt.decision}
+                      </span>
                     </div>
                   ) : null}
                   {attempt.selection_method ? (
                     <div className="flex items-baseline gap-2">
                       <span className="shrink-0 text-muted-foreground">选择方式:</span>
-                      <span className="font-mono text-secondary">{attempt.selection_method}</span>
+                      <span className="font-mono text-secondary-foreground">
+                        {attempt.selection_method}
+                      </span>
                     </div>
                   ) : null}
                   {hasCircuitBreaker ? (
                     <div className="flex items-baseline gap-2">
                       <span className="shrink-0 text-muted-foreground">熔断器变化:</span>
-                      <span className="font-mono text-secondary">
+                      <span className="font-mono text-secondary-foreground">
                         {attempt.circuit_state_before ?? "—"}
                         {attempt.circuit_state_after &&
                         attempt.circuit_state_after !== attempt.circuit_state_before ? (
@@ -473,7 +479,7 @@ function DecisionTags({ attempt }: { attempt: ProviderChainAttempt }) {
       value: attempt.decision,
       tone:
         DECISION_BADGE_TONES[attempt.decision] ??
-        "bg-secondary text-secondary dark:bg-secondary dark:text-secondary",
+        "bg-secondary text-secondary-foreground dark:bg-secondary dark:text-secondary-foreground",
     });
   }
   if (attempt.error_code) {
@@ -487,7 +493,7 @@ function DecisionTags({ attempt }: { attempt: ProviderChainAttempt }) {
     tags.push({
       label: "分类",
       value: attempt.error_category,
-      tone: "bg-secondary text-muted-foreground dark:bg-secondary dark:text-secondary",
+      tone: "bg-secondary text-muted-foreground dark:bg-secondary dark:text-secondary-foreground",
     });
   }
 
@@ -525,7 +531,7 @@ function CircuitBadge({ attempt }: { attempt: ProviderChainAttempt }) {
         {state}
       </span>
       {attempt.circuit_failure_count != null && attempt.circuit_failure_threshold != null ? (
-        <span className="text-sm text-muted-foreground dark:text-secondary">
+        <span className="text-sm text-muted-foreground dark:text-secondary-foreground">
           {attempt.circuit_failure_count}/{attempt.circuit_failure_threshold} 次失败
         </span>
       ) : null}

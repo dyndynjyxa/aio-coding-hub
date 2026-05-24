@@ -112,13 +112,13 @@ export function SkillsMarketPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2 text-xs">
-            <span className="rounded-full bg-white/80 px-3 py-1.5 text-secondary shadow-sm dark:bg-secondary dark:text-secondary">
+            <span className="rounded-full bg-white/80 px-3 py-1.5 text-secondary-foreground shadow-sm dark:bg-secondary dark:text-secondary-foreground">
               已启用仓库 {enabledRepoCount} / {repos.length}
             </span>
-            <span className="rounded-full bg-white/80 px-3 py-1.5 text-secondary shadow-sm dark:bg-secondary dark:text-secondary">
+            <span className="rounded-full bg-white/80 px-3 py-1.5 text-secondary-foreground shadow-sm dark:bg-secondary dark:text-secondary-foreground">
               当前 CLI {currentCli.name}
             </span>
-            <span className="rounded-full bg-white/80 px-3 py-1.5 text-secondary shadow-sm dark:bg-secondary dark:text-secondary">
+            <span className="rounded-full bg-white/80 px-3 py-1.5 text-secondary-foreground shadow-sm dark:bg-secondary dark:text-secondary-foreground">
               发现技能 {available.length}
             </span>
           </div>
@@ -205,7 +205,7 @@ export function SkillsMarketPage() {
                           onClick={() => toggleRepoExpanded(group.key)}
                           className="flex min-w-0 items-start gap-3 text-left"
                         >
-                          <span className="mt-0.5 rounded-full border border-border bg-white p-1 text-muted-foreground dark:border-border dark:bg-secondary dark:text-secondary">
+                          <span className="mt-0.5 rounded-full border border-border bg-white p-1 text-muted-foreground dark:border-border dark:bg-secondary dark:text-secondary-foreground">
                             {expanded ? (
                               <ChevronDown className="h-4 w-4" />
                             ) : (
@@ -250,7 +250,7 @@ export function SkillsMarketPage() {
                             href={repoUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-white text-muted-foreground transition hover:text-foreground dark:border-border dark:bg-secondary dark:text-secondary dark:hover:text-foreground"
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-white text-muted-foreground transition hover:text-foreground dark:border-border dark:bg-secondary dark:text-secondary-foreground dark:hover:text-foreground"
                             title={group.repoPath}
                           >
                             <ExternalLink className="h-4 w-4" />
@@ -279,7 +279,7 @@ export function SkillsMarketPage() {
                         {group.skills.slice(0, 4).map((skill) => (
                           <span
                             key={sourceKey(skill)}
-                            className="rounded-full border border-border bg-white px-3 py-1 text-xs text-muted-foreground dark:border-border dark:bg-secondary dark:text-secondary"
+                            className="rounded-full border border-border bg-white px-3 py-1 text-xs text-muted-foreground dark:border-border dark:bg-secondary dark:text-secondary-foreground"
                           >
                             {skill.name}
                           </span>
@@ -492,7 +492,7 @@ export function SkillsMarketPage() {
         }}
       >
         <div className="space-y-3">
-          <div className="text-sm text-secondary">确认删除以下仓库？</div>
+          <div className="text-sm text-secondary-foreground">确认删除以下仓库？</div>
           <div className="rounded-xl border border-border bg-secondary p-3 text-xs text-muted-foreground dark:border-border dark:bg-secondary dark:text-muted-foreground">
             <div className="break-all font-mono">{repoDeleteTarget?.git_url}</div>
             <div className="mt-1">

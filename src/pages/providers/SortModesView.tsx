@@ -134,7 +134,7 @@ export function SortModesView({
               </div>
             </div>
 
-            <div className="mt-3 lg:min-h-0 lg:flex-1 lg:overflow-auto lg:pr-1">
+            <div className="mt-3 lg:min-h-0 lg:flex-1 lg:overflow-auto lg:pr-1 scrollbar-overlay">
               {model.providersLoading ? (
                 <div className="text-sm text-muted-foreground">加载中…</div>
               ) : model.providers.length === 0 ? (
@@ -240,7 +240,7 @@ export function SortModesView({
               </span>
             </div>
 
-            <div className="mt-3 lg:min-h-0 lg:flex-1 lg:overflow-auto lg:pr-1">
+            <div className="mt-3 lg:min-h-0 lg:flex-1 lg:overflow-auto lg:pr-1 scrollbar-overlay">
               {model.activeModeId == null ? (
                 defaultEnabledProviders.length === 0 ? (
                   <div className="text-sm text-muted-foreground">

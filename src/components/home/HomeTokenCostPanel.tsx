@@ -73,7 +73,7 @@ const TABLE_TH_CLASS =
   "border-b border-border bg-secondary/70 dark:bg-secondary/70 px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground";
 const TABLE_TD_CLASS = "border-b border-border px-3 py-3";
 const TABLE_MONO_TD_CLASS =
-  "border-b border-border px-3 py-3 font-mono text-xs tabular-nums text-secondary";
+  "border-b border-border px-3 py-3 font-mono text-xs tabular-nums text-secondary-foreground";
 
 const SUMMARY_SKELETON_KEYS = [0, 1, 2, 3, 4, 5, 6];
 const EMPTY_LEADERBOARD_ROWS: UsageLeaderboardRow[] = [];
@@ -1382,7 +1382,7 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
             onToggleKey={handleToggleFolderKey}
             onClear={handleClearFolderKeys}
           />
-          <label className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-white px-2.5 text-xs text-muted-foreground shadow-sm dark:border-border dark:bg-card dark:text-secondary">
+          <label className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-white px-2.5 text-xs text-muted-foreground shadow-sm dark:border-border dark:bg-card dark:text-secondary-foreground">
             <span className="whitespace-nowrap">转接去重</span>
             <Switch
               checked={excludeCx2CcGatewayBridge}

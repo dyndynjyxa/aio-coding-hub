@@ -34,7 +34,7 @@ export function LimitsSection(props: { form: UseProviderEditorFormReturn }) {
             <DollarSign className="h-4 w-4 text-white" />
           </div>
           <div>
-            <span className="text-sm font-semibold text-secondary group-open:text-accent dark:text-secondary">
+            <span className="text-sm font-semibold text-secondary-foreground group-open:text-accent dark:text-secondary-foreground">
               限流配置
             </span>
             <p className="text-xs text-muted-foreground">配置不同时间窗口的消费限制以控制成本</p>
@@ -104,7 +104,9 @@ export function LimitsSection(props: { form: UseProviderEditorFormReturn }) {
               <div className="min-w-0 flex-1 space-y-4">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
-                    <label className="text-sm font-medium text-secondary">每日重置模式</label>
+                    <label className="text-sm font-medium text-secondary-foreground">
+                      每日重置模式
+                    </label>
                     <p className="mb-2 text-xs text-muted-foreground">rolling 为过去 24 小时窗口</p>
                     <RadioButtonGroup<DailyResetMode>
                       items={[
@@ -120,7 +122,9 @@ export function LimitsSection(props: { form: UseProviderEditorFormReturn }) {
                     />
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-secondary">每日重置时间</label>
+                    <label className="text-sm font-medium text-secondary-foreground">
+                      每日重置时间
+                    </label>
                     <p className="mb-2 text-xs text-muted-foreground">
                       {dailyResetMode === "fixed"
                         ? "默认 00:00:00（本机时区）"

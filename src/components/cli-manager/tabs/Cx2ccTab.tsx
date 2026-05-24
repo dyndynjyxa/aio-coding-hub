@@ -44,7 +44,7 @@ function SettingItem({
       )}
     >
       <div className="min-w-0">
-        <div className="text-sm text-secondary">{label}</div>
+        <div className="text-sm text-secondary-foreground">{label}</div>
         <div className="mt-1 text-xs text-muted-foreground leading-relaxed">{subtitle}</div>
       </div>
       <div className="flex flex-wrap items-center justify-end gap-2">{children}</div>

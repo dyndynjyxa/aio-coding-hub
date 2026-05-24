@@ -130,7 +130,7 @@ export function HomeUsageSection({
               <span className="mr-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                 今日用量
               </span>
-              <span className="font-semibold text-secondary dark:text-foreground">
+              <span className="font-semibold text-secondary-foreground dark:text-foreground">
                 {formatTokensMillions(todayTokens)}
               </span>
             </div>

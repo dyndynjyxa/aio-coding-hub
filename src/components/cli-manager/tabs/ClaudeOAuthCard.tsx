@@ -190,7 +190,7 @@ export function ClaudeOAuthCard({ providers }: ClaudeOAuthCardProps) {
               "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset",
               connected
                 ? "bg-green-50 text-green-700 ring-green-600/20 dark:bg-green-900/30 dark:text-green-400"
-                : "bg-secondary text-muted-foreground ring-border dark:bg-secondary dark:text-secondary",
+                : "bg-secondary text-muted-foreground ring-border dark:bg-secondary dark:text-secondary-foreground",
             ].join(" ")}
           >
             {connected ? <ShieldCheck className="h-3 w-3" /> : <ShieldOff className="h-3 w-3" />}

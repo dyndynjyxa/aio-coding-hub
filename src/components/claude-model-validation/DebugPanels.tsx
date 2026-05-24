@@ -28,7 +28,7 @@ export function SuiteDebugPanel({
     <div className="space-y-4">
       <details className="group rounded-xl border border-border bg-white dark:bg-secondary shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
         <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
-          <div className="flex items-center gap-2 text-sm font-medium text-secondary group-open:text-indigo-600 dark:group-open:text-indigo-400">
+          <div className="flex items-center gap-2 text-sm font-medium text-secondary-foreground group-open:text-indigo-600 dark:group-open:text-indigo-400">
             <FileJson className="h-4 w-4" />
             <span>\u53ef\u590d\u5236\u603b\u7ed3\uff08\u7eaf\u6587\u672c\uff09</span>
           </div>
@@ -67,7 +67,7 @@ export function SuiteDebugPanel({
 
       <details className="group rounded-xl border border-border bg-white dark:bg-secondary shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
         <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
-          <div className="flex items-center gap-2 text-sm font-medium text-secondary group-open:text-indigo-600 dark:group-open:text-indigo-400">
+          <div className="flex items-center gap-2 text-sm font-medium text-secondary-foreground group-open:text-indigo-600 dark:group-open:text-indigo-400">
             <Settings2 className="h-4 w-4" />
             <span>\u6267\u884c\u6a21\u677f\uff08\u5168\u90e8\uff09</span>
           </div>
@@ -115,7 +115,7 @@ export function SuiteDebugPanel({
         className="group rounded-xl border border-border bg-white dark:bg-secondary shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all"
       >
         <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
-          <div className="flex items-center gap-2 text-sm font-medium text-secondary group-open:text-indigo-600 dark:group-open:text-indigo-400">
+          <div className="flex items-center gap-2 text-sm font-medium text-secondary-foreground group-open:text-indigo-600 dark:group-open:text-indigo-400">
             <Activity className="h-4 w-4" />
             <span>\u5b98\u65b9\u534f\u8bae\u68c0\u67e5\u70b9\uff08\u5168\u90e8\uff09</span>
           </div>
@@ -173,7 +173,7 @@ export function NonSuiteDebugPanel({
     <div className="space-y-4">
       <details className="group rounded-xl border border-border bg-white dark:bg-secondary shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
         <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
-          <div className="flex items-center gap-2 text-sm font-medium text-secondary group-open:text-indigo-600 dark:group-open:text-indigo-400">
+          <div className="flex items-center gap-2 text-sm font-medium text-secondary-foreground group-open:text-indigo-600 dark:group-open:text-indigo-400">
             <Settings2 className="h-4 w-4" />
             <span>\u9ad8\u7ea7\u8bf7\u6c42\u914d\u7f6e</span>
           </div>
@@ -213,7 +213,7 @@ export function NonSuiteDebugPanel({
 
       <details className="group rounded-xl border border-border bg-white dark:bg-secondary shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
         <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
-          <div className="flex items-center gap-2 text-sm font-medium text-secondary group-open:text-indigo-600 dark:group-open:text-indigo-400">
+          <div className="flex items-center gap-2 text-sm font-medium text-secondary-foreground group-open:text-indigo-600 dark:group-open:text-indigo-400">
             <Activity className="h-4 w-4" />
             <span>SSE \u6d41\u5f0f\u54cd\u5e94\u9884\u89c8</span>
           </div>

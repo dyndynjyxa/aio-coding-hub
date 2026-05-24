@@ -80,7 +80,7 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
               className={`inline-flex h-9 items-center rounded-full border px-3.5 text-xs font-medium transition-colors ${
                 selectedTags.size === 0
                   ? "border-accent bg-accent text-white shadow-sm"
-                  : "border-border bg-white text-muted-foreground hover:border-border hover:bg-secondary dark:border-border dark:bg-secondary dark:text-secondary dark:hover:border-border dark:hover:bg-secondary"
+                  : "border-border bg-white text-muted-foreground hover:border-border hover:bg-secondary dark:border-border dark:bg-secondary dark:text-secondary-foreground dark:hover:border-border dark:hover:bg-secondary"
               }`}
             >
               全部({providers.length})
@@ -107,7 +107,7 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
                       className={`inline-flex h-9 items-center rounded-full border px-3.5 text-xs font-medium transition-colors ${
                         isSelected
                           ? "border-accent bg-accent text-white shadow-sm"
-                          : "border-border bg-white text-muted-foreground hover:border-border hover:bg-secondary dark:border-border dark:bg-secondary dark:text-secondary dark:hover:border-border dark:hover:bg-secondary"
+                          : "border-border bg-white text-muted-foreground hover:border-border hover:bg-secondary dark:border-border dark:bg-secondary dark:text-secondary-foreground dark:hover:border-border dark:hover:bg-secondary"
                       }`}
                     >
                       {tag}({count})
@@ -173,7 +173,7 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
         </div>
 
         <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_280px] xl:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="lg:min-h-0 lg:overflow-auto lg:pr-1">
+          <div className="lg:min-h-0 lg:overflow-auto lg:pr-1 scrollbar-overlay">
             {providersLoading ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Spinner size="sm" />
@@ -248,7 +248,7 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
                 </span>
               </div>
 
-              <div className="mt-3 lg:min-h-0 lg:flex-1 lg:overflow-auto lg:pr-1">
+              <div className="mt-3 lg:min-h-0 lg:flex-1 lg:overflow-auto lg:pr-1 scrollbar-overlay">
                 {enabledProviders.length === 0 ? (
                   <div className="text-sm text-muted-foreground">当前没有已启用的 Provider。</div>
                 ) : (

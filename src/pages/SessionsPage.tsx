@@ -225,7 +225,7 @@ export function SessionsPage() {
                 <div className="mt-1 text-xs text-muted-foreground">
                   当前来源：<span className="font-semibold">{source}</span>
                   {activeDistro ? (
-                    <span className="ml-2 rounded-full border border-border bg-secondary px-2 py-0.5 text-[11px] font-medium text-muted-foreground dark:border-border dark:bg-secondary dark:text-secondary">
+                    <span className="ml-2 rounded-full border border-border bg-secondary px-2 py-0.5 text-[11px] font-medium text-muted-foreground dark:border-border dark:bg-secondary dark:text-secondary-foreground">
                       {envLabel}
                     </span>
                   ) : null}
@@ -272,7 +272,7 @@ export function SessionsPage() {
                   <span className="shrink-0 text-muted-foreground dark:text-muted-foreground">
                     目录
                   </span>
-                  <span className="min-w-0 text-right font-mono text-[11px] text-secondary">
+                  <span className="min-w-0 text-right font-mono text-[11px] text-secondary-foreground">
                     {sourceDirHint(source, activeDistro)}
                   </span>
                 </div>
@@ -406,7 +406,7 @@ export function SessionsPage() {
                                 {projectDisplayName(project)}
                               </div>
                               {project.model_provider ? (
-                                <span className="shrink-0 rounded-full border border-border bg-white px-2 py-0.5 text-[11px] font-medium text-muted-foreground dark:border-border dark:bg-secondary dark:text-secondary">
+                                <span className="shrink-0 rounded-full border border-border bg-white px-2 py-0.5 text-[11px] font-medium text-muted-foreground dark:border-border dark:bg-secondary dark:text-secondary-foreground">
                                   {project.model_provider}
                                 </span>
                               ) : null}
@@ -419,13 +419,13 @@ export function SessionsPage() {
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-1 text-xs text-muted-foreground dark:text-secondary sm:justify-end">
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground dark:text-secondary-foreground sm:justify-end">
                             <Hash className="h-3.5 w-3.5 text-muted-foreground" />
                             <span className="font-semibold">{project.session_count}</span>
                           </div>
 
                           <div
-                            className="flex items-center gap-1 text-xs text-muted-foreground dark:text-secondary sm:justify-end"
+                            className="flex items-center gap-1 text-xs text-muted-foreground dark:text-secondary-foreground sm:justify-end"
                             title={modifiedTitle}
                           >
                             <Clock className="h-3.5 w-3.5 text-muted-foreground" />

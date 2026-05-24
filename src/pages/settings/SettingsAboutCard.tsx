@@ -13,7 +13,7 @@ export function SettingsAboutCard({ about, checkingUpdate, checkUpdate }: Settin
     <Card>
       <div className="mb-4 font-semibold text-foreground">关于应用</div>
       {about ? (
-        <div className="grid gap-2 text-sm text-secondary">
+        <div className="grid gap-2 text-sm text-secondary-foreground">
           <div className="flex items-center justify-between gap-4">
             <span className="text-muted-foreground">版本</span>
             <span className="font-mono">{about.app_version}</span>

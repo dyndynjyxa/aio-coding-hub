@@ -160,7 +160,7 @@ function SettingItem({
       )}
     >
       <div className="min-w-0">
-        <div className="text-sm text-secondary">{label}</div>
+        <div className="text-sm text-secondary-foreground">{label}</div>
         <div className="mt-1 text-xs text-muted-foreground leading-relaxed">{subtitle}</div>
       </div>
       <div className="flex flex-wrap items-center justify-end gap-2">{children}</div>
@@ -598,7 +598,7 @@ export function CliManagerCodexTab({
           <div className="flex flex-col gap-4 p-6">
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <div className="flex items-center gap-4">
-                <div className="h-14 w-14 rounded-xl bg-card/5 dark:bg-secondary flex items-center justify-center text-secondary">
+                <div className="h-14 w-14 rounded-xl bg-card/5 dark:bg-secondary flex items-center justify-center text-secondary-foreground">
                   <Terminal className="h-8 w-8" />
                 </div>
                 <div>
@@ -652,7 +652,7 @@ export function CliManagerCodexTab({
                   </div>
                   <div className="flex items-center gap-1.5">
                     <div
-                      className="font-mono text-xs text-secondary truncate flex-1"
+                      className="font-mono text-xs text-secondary-foreground truncate flex-1"
                       title={codexConfig.config_dir}
                     >
                       {codexConfig.config_dir}
@@ -688,7 +688,7 @@ export function CliManagerCodexTab({
                     config.toml
                   </div>
                   <div
-                    className="font-mono text-xs text-secondary truncate"
+                    className="font-mono text-xs text-secondary-foreground truncate"
                     title={codexConfig.config_path}
                   >
                     {codexConfig.config_path}
@@ -704,7 +704,7 @@ export function CliManagerCodexTab({
                     可执行文件
                   </div>
                   <div
-                    className="font-mono text-xs text-secondary truncate"
+                    className="font-mono text-xs text-secondary-foreground truncate"
                     title={codexInfo?.executable_path ?? "—"}
                   >
                     {codexInfo?.executable_path ?? "—"}
@@ -717,7 +717,7 @@ export function CliManagerCodexTab({
                     解析方式
                   </div>
                   <div
-                    className="font-mono text-xs text-secondary truncate"
+                    className="font-mono text-xs text-secondary-foreground truncate"
                     title={codexInfo?.resolved_via ?? "—"}
                   >
                     {codexInfo?.resolved_via ?? "—"}
@@ -743,7 +743,7 @@ export function CliManagerCodexTab({
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <span className="inline-flex items-center rounded-full border border-border bg-secondary px-2.5 py-1 text-[11px] font-medium text-secondary dark:border-border dark:bg-secondary dark:text-foreground">
+                      <span className="inline-flex items-center rounded-full border border-border bg-secondary px-2.5 py-1 text-[11px] font-medium text-secondary-foreground dark:border-border dark:bg-secondary dark:text-foreground">
                         {activeConfigModeBadgeText}
                       </span>
                       <Button
@@ -769,7 +769,7 @@ export function CliManagerCodexTab({
                           当前会使用
                         </div>
                         <div
-                          className="mt-1 break-all font-mono text-xs text-secondary"
+                          className="mt-1 break-all font-mono text-xs text-secondary-foreground"
                           title={activeConfigDirPrimaryText}
                         >
                           {activeConfigDirPrimaryText}
@@ -784,7 +784,7 @@ export function CliManagerCodexTab({
                           config.toml
                         </div>
                         <div
-                          className="mt-1 break-all font-mono text-xs text-secondary"
+                          className="mt-1 break-all font-mono text-xs text-secondary-foreground"
                           title={codexConfig.config_path}
                         >
                           {codexConfig.config_path}
@@ -840,7 +840,7 @@ export function CliManagerCodexTab({
 
                   {configLocationMode === "custom" ? (
                     <div className="rounded-lg border border-border/70 bg-secondary/80 p-3 dark:border-border dark:bg-secondary/80">
-                      <label className="text-xs font-medium text-secondary">
+                      <label className="text-xs font-medium text-secondary-foreground">
                         自定义 .codex 目录
                       </label>
 
@@ -1340,7 +1340,7 @@ export function CliManagerCodexTab({
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <div className="min-w-0">
                         <div className="text-xs text-muted-foreground">路径</div>
-                        <div className="mt-1 font-mono text-xs text-secondary truncate">
+                        <div className="mt-1 font-mono text-xs text-secondary-foreground truncate">
                           {codexConfig?.config_path ?? codexConfigToml?.config_path ?? "—"}
                         </div>
                       </div>

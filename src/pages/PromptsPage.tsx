@@ -53,7 +53,7 @@ export function PromptsPage() {
         }
       />
 
-      <div className="shrink-0 rounded-xl border border-border bg-secondary px-3 py-2 text-sm text-secondary">
+      <div className="shrink-0 rounded-xl border border-border bg-secondary px-3 py-2 text-sm text-secondary-foreground">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>这是高级入口：默认操作当前 workspace。推荐在「Workspaces」配置中心统一管理。</div>
           <Button variant="secondary" onClick={() => navigate("/workspaces")}>

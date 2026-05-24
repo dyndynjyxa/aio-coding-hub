@@ -172,7 +172,7 @@ const ConsoleLogRow = memo(function ConsoleLogRow({
         </span>
       </div>
       <div className="min-w-0">
-        <span className="whitespace-pre-wrap break-words text-secondary text-[13px] leading-relaxed font-normal">
+        <span className="whitespace-pre-wrap break-words text-secondary-foreground text-[13px] leading-relaxed font-normal">
           {entry.title}
         </span>
         <MetaTags meta={entry.meta} />
@@ -229,11 +229,11 @@ const ConsoleLogRow = memo(function ConsoleLogRow({
       {isOpen ? (
         <div className={cn(ROW_GRID_CLASS, "px-4 pb-4 pt-0")}>
           <div className="col-start-3 col-span-2 space-y-2">
-            <pre className="scrollbar-overlay max-h-60 overflow-auto rounded-md bg-secondary dark:bg-background p-3 text-[11px] leading-relaxed text-secondary dark:text-muted-foreground font-mono border border-border dark:border-white/5 mx-1 whitespace-pre-wrap">
+            <pre className="scrollbar-overlay max-h-60 overflow-auto rounded-md bg-secondary dark:bg-background p-3 text-[11px] leading-relaxed text-secondary-foreground dark:text-muted-foreground font-mono border border-border dark:border-white/5 mx-1 whitespace-pre-wrap">
               {smartText == null ? "加载中…" : smartText ? smartText : "// 无可显示的详情"}
             </pre>
             <details className="group/raw">
-              <summary className="text-[10px] text-muted-foreground cursor-pointer hover:text-secondary dark:hover:text-muted-foreground select-none mx-1">
+              <summary className="text-[10px] text-muted-foreground cursor-pointer hover:text-secondary-foreground dark:hover:text-muted-foreground select-none mx-1">
                 原始数据
               </summary>
               <pre className="scrollbar-overlay max-h-40 overflow-auto rounded-md bg-secondary dark:bg-background p-3 text-[11px] leading-relaxed text-muted-foreground dark:text-muted-foreground font-mono border border-border dark:border-white/5 mx-1 mt-1">
@@ -393,7 +393,7 @@ export function ConsolePage() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="搜索标题、trace_id、错误码..."
-                className="h-8 w-full rounded-md border border-border bg-white pl-8 pr-3 text-xs text-secondary placeholder:text-muted-foreground outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 dark:border-border dark:bg-secondary dark:text-foreground dark:placeholder:text-muted-foreground"
+                className="h-8 w-full rounded-md border border-border bg-white pl-8 pr-3 text-xs text-secondary-foreground placeholder:text-muted-foreground outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 dark:border-border dark:bg-secondary dark:text-foreground dark:placeholder:text-muted-foreground"
               />
             </div>
             <div className="flex items-center gap-1.5">
@@ -458,7 +458,7 @@ export function ConsolePage() {
           onScroll={handleScroll}
           className={cn(
             "scrollbar-overlay min-h-0 flex-1 overflow-auto",
-            "bg-gradient-to-b from-secondary to-white dark:from-background dark:to-secondary font-mono text-[12px] leading-relaxed text-secondary dark:text-foreground",
+            "bg-gradient-to-b from-secondary to-white dark:from-background dark:to-secondary font-mono text-[12px] leading-relaxed text-secondary-foreground dark:text-foreground",
             "shadow-inner"
           )}
         >

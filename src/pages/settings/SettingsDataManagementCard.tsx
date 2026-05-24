@@ -80,7 +80,7 @@ export function SettingsDataManagementCard({
         </SettingsRow>
         <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
           <div className="min-w-0 sm:flex-1 sm:pr-2">
-            <div className="text-sm text-secondary">导出配置</div>
+            <div className="text-sm text-secondary-foreground">导出配置</div>
             <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
               导出所有供应商、工作区、提示词、MCP 服务器等配置
             </div>

@@ -101,7 +101,7 @@ export function CostFilterPanel({
                     "rounded-md px-2.5 py-1 text-xs font-medium transition-all",
                     cliKey === item.key
                       ? "bg-indigo-500 text-white shadow-sm"
-                      : "bg-secondary text-muted-foreground dark:text-secondary hover:bg-muted dark:hover:bg-secondary",
+                      : "bg-secondary text-muted-foreground dark:text-secondary-foreground hover:bg-muted dark:hover:bg-secondary",
                     fetching && "opacity-50 cursor-not-allowed"
                   )}
                 >
@@ -126,7 +126,7 @@ export function CostFilterPanel({
                     "rounded-md px-2.5 py-1 text-xs font-medium transition-all",
                     period === item.key
                       ? "bg-indigo-500 text-white shadow-sm"
-                      : "bg-secondary text-muted-foreground dark:text-secondary hover:bg-muted dark:hover:bg-secondary",
+                      : "bg-secondary text-muted-foreground dark:text-secondary-foreground hover:bg-muted dark:hover:bg-secondary",
                     fetching && "opacity-50 cursor-not-allowed"
                   )}
                 >
@@ -189,7 +189,7 @@ export function CostFilterPanel({
                     "rounded-md px-3 py-1.5 text-xs font-medium transition-all",
                     fetching
                       ? "bg-muted dark:bg-secondary text-muted-foreground cursor-not-allowed"
-                      : "bg-white dark:bg-secondary border border-border text-muted-foreground dark:text-secondary hover:bg-secondary dark:hover:bg-secondary"
+                      : "bg-white dark:bg-secondary border border-border text-muted-foreground dark:text-secondary-foreground hover:bg-secondary dark:hover:bg-secondary"
                   )}
                 >
                   清空
@@ -217,7 +217,7 @@ export function CostFilterPanel({
                 disabled={fetching || tauriAvailable === false}
                 title="选择供应商"
                 className={cn(
-                  "w-full rounded-md border border-border bg-white dark:bg-secondary pl-3 pr-8 py-1.5 text-xs text-secondary",
+                  "w-full rounded-md border border-border bg-white dark:bg-secondary pl-3 pr-8 py-1.5 text-xs text-secondary-foreground",
                   "focus:border-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-100",
                   "disabled:bg-secondary dark:disabled:bg-card disabled:text-muted-foreground dark:disabled:text-muted-foreground disabled:cursor-not-allowed",
                   "appearance-none cursor-pointer"
@@ -245,7 +245,7 @@ export function CostFilterPanel({
                 disabled={fetching || tauriAvailable === false}
                 title="选择模型"
                 className={cn(
-                  "w-full rounded-md border border-border bg-white dark:bg-secondary pl-3 pr-8 py-1.5 text-xs text-secondary",
+                  "w-full rounded-md border border-border bg-white dark:bg-secondary pl-3 pr-8 py-1.5 text-xs text-secondary-foreground",
                   "focus:border-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-100",
                   "disabled:bg-secondary dark:disabled:bg-card disabled:text-muted-foreground dark:disabled:text-muted-foreground disabled:cursor-not-allowed",
                   "appearance-none cursor-pointer"

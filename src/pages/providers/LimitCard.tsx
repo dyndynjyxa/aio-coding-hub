@@ -37,7 +37,7 @@ export function LimitCard({
           {icon}
         </div>
         <div className="min-w-0 flex-1">
-          <label className="text-sm font-medium text-secondary">{label}</label>
+          <label className="text-sm font-medium text-secondary-foreground">{label}</label>
           {hint ? <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p> : null}
           <div className="relative mt-2">
             <Input

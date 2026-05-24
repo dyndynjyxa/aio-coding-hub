@@ -415,14 +415,14 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                     </div>
                     <div className="rounded-md border border-border/70 bg-secondary/80 px-2.5 py-2 dark:border-border/70 dark:bg-secondary/70">
                       <div className="text-muted-foreground">尝试次数</div>
-                      <div className="mt-1 truncate font-mono tabular-nums text-secondary dark:text-foreground">
+                      <div className="mt-1 truncate font-mono tabular-nums text-secondary-foreground dark:text-foreground">
                         {formatInteger(trace.attempts.length)}
                       </div>
                     </div>
                     <div className="col-span-2 rounded-md border border-border/70 bg-secondary/80 px-2.5 py-2 dark:border-border/70 dark:bg-secondary/70 lg:col-span-1">
                       <div className="text-muted-foreground">当前链路</div>
                       <div
-                        className="mt-1 truncate font-medium text-secondary dark:text-foreground"
+                        className="mt-1 truncate font-medium text-secondary-foreground dark:text-foreground"
                         title={routeTooltipText ?? liveRouteText}
                       >
                         {liveRouteText}
@@ -437,7 +437,7 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                     >
                       <div className="flex items-center gap-1 h-4">
                         <Server className="h-3 w-3 text-muted-foreground/80 dark:text-muted-foreground/80 shrink-0" />
-                        <span className="truncate font-semibold text-muted-foreground dark:text-secondary">
+                        <span className="truncate font-semibold text-muted-foreground dark:text-secondary-foreground">
                           {providerText}
                         </span>
                       </div>
@@ -465,7 +465,7 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                         <span className="text-muted-foreground/80 dark:text-muted-foreground/80 shrink-0">
                           输入
                         </span>
-                        <span className="font-mono tabular-nums text-secondary dark:text-foreground truncate">
+                        <span className="font-mono tabular-nums text-secondary-foreground dark:text-foreground truncate">
                           {formatInteger(displayInputTokens)}
                         </span>
                       </div>
@@ -475,7 +475,7 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                         </span>
                         {displayCacheWriteTokens != null ? (
                           <>
-                            <span className="font-mono tabular-nums text-secondary dark:text-foreground truncate">
+                            <span className="font-mono tabular-nums text-secondary-foreground dark:text-foreground truncate">
                               {formatInteger(displayCacheWriteTokens)}
                             </span>
                             {cacheWrite.ttl && displayCacheWriteTokens > 0 && (
@@ -494,7 +494,7 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                         <span className="text-muted-foreground/80 dark:text-muted-foreground/80 shrink-0">
                           首字
                         </span>
-                        <span className="font-mono tabular-nums text-secondary dark:text-foreground truncate">
+                        <span className="font-mono tabular-nums text-secondary-foreground dark:text-foreground truncate">
                           {ttfbMs != null ? formatDurationMs(ttfbMs) : "—"}
                         </span>
                       </div>
@@ -502,7 +502,7 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                         <span className="text-muted-foreground/80 dark:text-muted-foreground/80 shrink-0">
                           花费
                         </span>
-                        <span className="font-mono tabular-nums text-secondary dark:text-foreground truncate">
+                        <span className="font-mono tabular-nums text-secondary-foreground dark:text-foreground truncate">
                           {displayCostText}
                         </span>
                       </div>
@@ -511,7 +511,7 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                         <span className="text-muted-foreground/80 dark:text-muted-foreground/80 shrink-0">
                           输出
                         </span>
-                        <span className="font-mono tabular-nums text-secondary dark:text-foreground truncate">
+                        <span className="font-mono tabular-nums text-secondary-foreground dark:text-foreground truncate">
                           {formatInteger(displayOutputTokens)}
                         </span>
                       </div>
@@ -520,7 +520,7 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                           缓存读取
                         </span>
                         {displayCacheReadTokens != null ? (
-                          <span className="font-mono tabular-nums text-secondary dark:text-foreground truncate">
+                          <span className="font-mono tabular-nums text-secondary-foreground dark:text-foreground truncate">
                             {formatInteger(displayCacheReadTokens)}
                           </span>
                         ) : (
@@ -533,7 +533,7 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                         <span className="text-muted-foreground/80 dark:text-muted-foreground/80 shrink-0">
                           耗时
                         </span>
-                        <span className="font-mono tabular-nums text-muted-foreground dark:text-secondary truncate">
+                        <span className="font-mono tabular-nums text-muted-foreground dark:text-secondary-foreground truncate">
                           {formatDurationMs(runningMs)}
                         </span>
                       </div>
@@ -549,7 +549,7 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                           速率
                         </span>
                         {displayOutputTokensPerSecond != null ? (
-                          <span className="font-mono tabular-nums text-secondary dark:text-foreground truncate">
+                          <span className="font-mono tabular-nums text-secondary-foreground dark:text-foreground truncate">
                             {formatTokensPerSecondShort(displayOutputTokensPerSecond)}
                           </span>
                         ) : (

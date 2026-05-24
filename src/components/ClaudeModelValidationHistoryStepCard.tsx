@@ -116,7 +116,9 @@ export function ClaudeModelValidationHistoryStepCard({
       <summary className="flex cursor-pointer items-start justify-between gap-3 px-4 py-3 select-none">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <div className="min-w-0 text-xs font-medium text-secondary truncate">{title}</div>
+            <div className="min-w-0 text-xs font-medium text-secondary-foreground truncate">
+              {title}
+            </div>
             {rightBadge ? <div className="shrink-0">{rightBadge}</div> : null}
           </div>
           {metaText ? (
@@ -135,7 +137,7 @@ export function ClaudeModelValidationHistoryStepCard({
 
         <details className="group rounded-xl border border-border/60 dark:border-border/60 bg-white/60 dark:bg-secondary/60 shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
           <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
-            <div className="flex items-center gap-2 text-sm font-medium text-secondary group-open:text-indigo-600 dark:group-open:text-indigo-400">
+            <div className="flex items-center gap-2 text-sm font-medium text-secondary-foreground group-open:text-indigo-600 dark:group-open:text-indigo-400">
               <Settings2 className="h-4 w-4" />
               <span>请求 JSON</span>
             </div>
@@ -175,7 +177,7 @@ export function ClaudeModelValidationHistoryStepCard({
 
         <details className="group rounded-xl border border-border/60 dark:border-border/60 bg-white/60 dark:bg-secondary/60 shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
           <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
-            <div className="flex items-center gap-2 text-sm font-medium text-secondary group-open:text-indigo-600 dark:group-open:text-indigo-400">
+            <div className="flex items-center gap-2 text-sm font-medium text-secondary-foreground group-open:text-indigo-600 dark:group-open:text-indigo-400">
               <Activity className="h-4 w-4" />
               <span>响应原文</span>
             </div>
@@ -214,7 +216,7 @@ export function ClaudeModelValidationHistoryStepCard({
 
           <div className="border-t border-border px-4 py-3 space-y-3">
             <div className="space-y-2">
-              <div className="text-[11px] font-semibold text-secondary">Result JSON</div>
+              <div className="text-[11px] font-semibold text-secondary-foreground">Result JSON</div>
               <Textarea
                 mono
                 readOnly
@@ -225,7 +227,7 @@ export function ClaudeModelValidationHistoryStepCard({
 
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <div className="text-[11px] font-semibold text-secondary">SSE 原文</div>
+                <div className="text-[11px] font-semibold text-secondary-foreground">SSE 原文</div>
                 <Button
                   onClick={(e) => {
                     stopDetailsToggle(e);

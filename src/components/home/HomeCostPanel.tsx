@@ -51,7 +51,7 @@ export function HomeCostPanel({ devPreviewEnabled = false }: HomeCostPanelProps)
   const hasData = !!(f.summary && f.summary.requests_success > 0);
 
   return (
-    <div className="flex flex-col gap-5 h-full overflow-auto">
+    <div className="flex flex-col gap-5 h-full overflow-auto scrollbar-overlay">
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
         <CostFilterPanel
           period={f.period}

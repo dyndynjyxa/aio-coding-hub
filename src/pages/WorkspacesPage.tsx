@@ -157,7 +157,7 @@ export function WorkspacesPage() {
             </div>
           </div>
 
-          <div className="mt-3 space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-auto lg:pr-1">
+          <div className="mt-3 space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-auto lg:pr-1 scrollbar-overlay">
             {loading ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground px-1">
                 <Spinner size="sm" />
@@ -323,7 +323,7 @@ export function WorkspacesPage() {
                     )}
 
                     {applyReport && applyReport.to_workspace_id === selectedWorkspace.id ? (
-                      <div className="rounded-xl border border-border bg-secondary px-3 py-2 text-sm text-secondary">
+                      <div className="rounded-xl border border-border bg-secondary px-3 py-2 text-sm text-secondary-foreground">
                         已切换为当前工作区（
                         {new Date(applyReport.applied_at * 1000).toLocaleString()}）
                         {applyReport.from_workspace_id ? (
@@ -345,7 +345,7 @@ export function WorkspacesPage() {
                         <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                           Prompts
                         </div>
-                        <div className="mt-2 text-sm text-secondary">
+                        <div className="mt-2 text-sm text-secondary-foreground">
                           {overviewLoading ? (
                             "加载中…"
                           ) : overviewStats ? (
@@ -372,7 +372,7 @@ export function WorkspacesPage() {
                         <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                           MCP
                         </div>
-                        <div className="mt-2 text-sm text-secondary">
+                        <div className="mt-2 text-sm text-secondary-foreground">
                           {overviewLoading ? (
                             "加载中…"
                           ) : overviewStats ? (
@@ -394,7 +394,7 @@ export function WorkspacesPage() {
                         <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                           Skills
                         </div>
-                        <div className="mt-2 text-sm text-secondary">
+                        <div className="mt-2 text-sm text-secondary-foreground">
                           {overviewLoading ? (
                             "加载中…"
                           ) : overviewStats ? (
@@ -427,7 +427,7 @@ export function WorkspacesPage() {
                 ) : rightTab === "mcp" ? (
                   <>
                     {selectedWorkspace.id === activeWorkspaceId ? null : (
-                      <div className="mb-3 rounded-xl border border-border bg-secondary px-3 py-2 text-sm text-secondary">
+                      <div className="mb-3 rounded-xl border border-border bg-secondary px-3 py-2 text-sm text-secondary-foreground">
                         非当前工作区：启用/停用仅写入数据库，不会同步到 CLI。
                       </div>
                     )}
@@ -468,7 +468,7 @@ export function WorkspacesPage() {
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               对比范围
             </div>
-            <div className="mt-2 text-sm text-secondary">
+            <div className="mt-2 text-sm text-secondary-foreground">
               当前：
               {(() => {
                 const fromId = preview?.from_workspace_id ?? activeWorkspaceId;
@@ -496,7 +496,7 @@ export function WorkspacesPage() {
                 <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Prompts
                 </div>
-                <div className="mt-2 text-sm text-secondary">
+                <div className="mt-2 text-sm text-secondary-foreground">
                   {preview.prompts.will_change ? (
                     <span className="rounded-full bg-amber-50 dark:bg-amber-900/30 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:text-amber-400">
                       将变更
@@ -533,7 +533,7 @@ export function WorkspacesPage() {
                 <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   MCP
                 </div>
-                <div className="mt-2 text-sm text-secondary">
+                <div className="mt-2 text-sm text-secondary-foreground">
                   +{preview.mcp.added.length} / -{preview.mcp.removed.length}
                 </div>
                 {preview.mcp.added.length || preview.mcp.removed.length ? (
@@ -574,7 +574,7 @@ export function WorkspacesPage() {
                 <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Skills
                 </div>
-                <div className="mt-2 text-sm text-secondary">
+                <div className="mt-2 text-sm text-secondary-foreground">
                   +{preview.skills.added.length} / -{preview.skills.removed.length}
                 </div>
                 {preview.skills.added.length || preview.skills.removed.length ? (
@@ -663,7 +663,7 @@ export function WorkspacesPage() {
 
           <FormField label="创建方式">
             <div className="grid gap-2">
-              <label className="flex items-center gap-2 text-sm text-secondary">
+              <label className="flex items-center gap-2 text-sm text-secondary-foreground">
                 <input
                   type="radio"
                   name="create-mode"
@@ -672,7 +672,7 @@ export function WorkspacesPage() {
                 />
                 从当前工作区克隆
               </label>
-              <label className="flex items-center gap-2 text-sm text-secondary">
+              <label className="flex items-center gap-2 text-sm text-secondary-foreground">
                 <input
                   type="radio"
                   name="create-mode"

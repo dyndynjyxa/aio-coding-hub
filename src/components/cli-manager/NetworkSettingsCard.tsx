@@ -136,7 +136,7 @@ export function NetworkSettingsCard({
         </div>
 
         {!available ? (
-          <div className="text-sm font-medium text-secondary dark:text-foreground bg-secondary p-4 rounded-lg">
+          <div className="text-sm font-medium text-secondary-foreground dark:text-foreground bg-secondary p-4 rounded-lg">
             数据不可用
           </div>
         ) : (
@@ -171,7 +171,7 @@ export function NetworkSettingsCard({
             <SettingsRow label="当前监听地址">
               <div
                 className={cn(
-                  "font-mono text-xs text-secondary bg-secondary px-3 py-2 rounded border border-border break-all",
+                  "font-mono text-xs text-secondary-foreground bg-secondary px-3 py-2 rounded border border-border break-all",
                   !gateway?.running ? "opacity-80" : null
                 )}
               >

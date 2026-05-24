@@ -45,7 +45,7 @@ export function RequestLogErrorObservationCard({
 
             {/* Reason text (if no desc available, show reason as primary text) */}
             {!desc && observation.reason ? (
-              <p className="mt-1 text-sm text-secondary">{observation.reason}</p>
+              <p className="mt-1 text-sm text-secondary-foreground">{observation.reason}</p>
             ) : null}
           </div>
         </div>
@@ -69,7 +69,7 @@ export function RequestLogErrorObservationCard({
               {observation.upstreamBodyPreview ? (
                 <div>
                   <div className="mb-1 text-xs font-medium text-muted-foreground">上游响应预览</div>
-                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-secondary px-2.5 py-2 text-xs font-mono text-secondary dark:bg-secondary dark:text-secondary">
+                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-secondary px-2.5 py-2 text-xs font-mono text-secondary-foreground dark:bg-secondary dark:text-secondary-foreground">
                     {observation.upstreamBodyPreview.length > 500
                       ? `${observation.upstreamBodyPreview.slice(0, 500)}…`
                       : observation.upstreamBodyPreview}
@@ -80,7 +80,7 @@ export function RequestLogErrorObservationCard({
               {observation.rawDetailsText && !observation.upstreamBodyPreview ? (
                 <div>
                   <div className="mb-1 text-xs font-medium text-muted-foreground">原始错误信息</div>
-                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-secondary px-2.5 py-2 text-xs font-mono text-secondary dark:bg-secondary dark:text-secondary">
+                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-secondary px-2.5 py-2 text-xs font-mono text-secondary-foreground dark:bg-secondary dark:text-secondary-foreground">
                     {observation.rawDetailsText.length > 500
                       ? `${observation.rawDetailsText.slice(0, 500)}…`
                       : observation.rawDetailsText}
@@ -99,7 +99,7 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline gap-2 text-xs">
       <span className="shrink-0 text-muted-foreground">{label}:</span>
-      <span className="font-mono text-secondary">{value}</span>
+      <span className="font-mono text-secondary-foreground">{value}</span>
     </div>
   );
 }

@@ -54,7 +54,7 @@ function SettingItem({
       )}
     >
       <div className="min-w-0">
-        <div className="text-sm text-secondary">{label}</div>
+        <div className="text-sm text-secondary-foreground">{label}</div>
         <div className="mt-1 text-xs text-muted-foreground leading-relaxed">{subtitle}</div>
       </div>
       <div className="flex flex-wrap items-center justify-end gap-2">{children}</div>
@@ -151,7 +151,7 @@ export function CliManagerGeminiTab({
           <div className="flex flex-col gap-4 p-6">
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <div className="flex items-center gap-4">
-                <div className="h-14 w-14 rounded-xl bg-card/5 dark:bg-secondary flex items-center justify-center text-secondary">
+                <div className="h-14 w-14 rounded-xl bg-card/5 dark:bg-secondary flex items-center justify-center text-secondary-foreground">
                   <Cpu className="h-8 w-8" />
                 </div>
                 <div>
@@ -202,7 +202,10 @@ export function CliManagerGeminiTab({
                   <FolderOpen className="h-3 w-3" />
                   配置目录
                 </div>
-                <div className="font-mono text-xs text-secondary truncate" title={configDir}>
+                <div
+                  className="font-mono text-xs text-secondary-foreground truncate"
+                  title={configDir}
+                >
                   {configDir}
                 </div>
               </div>
@@ -212,7 +215,10 @@ export function CliManagerGeminiTab({
                   <FileJson className="h-3 w-3" />
                   settings.json
                 </div>
-                <div className="font-mono text-xs text-secondary truncate" title={configPath}>
+                <div
+                  className="font-mono text-xs text-secondary-foreground truncate"
+                  title={configPath}
+                >
                   {configPath}
                 </div>
                 {geminiConfig ? (
@@ -228,7 +234,7 @@ export function CliManagerGeminiTab({
                   可执行文件
                 </div>
                 <div
-                  className="font-mono text-xs text-secondary truncate"
+                  className="font-mono text-xs text-secondary-foreground truncate"
                   title={geminiInfo?.executable_path ?? "—"}
                 >
                   {geminiInfo?.executable_path ?? "—"}
@@ -241,7 +247,7 @@ export function CliManagerGeminiTab({
                   解析方式
                 </div>
                 <div
-                  className="font-mono text-xs text-secondary truncate"
+                  className="font-mono text-xs text-secondary-foreground truncate"
                   title={geminiInfo?.resolved_via ?? "—"}
                 >
                   {geminiInfo?.resolved_via ?? "—"}

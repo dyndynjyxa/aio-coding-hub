@@ -20,7 +20,7 @@ export function RequestLogDetailRawTab({ selectedLog }: RequestLogDetailRawTabPr
     <div className="space-y-3">
       {errorDetailsJson != null ? (
         <DisclosureSection label="error_details_json" defaultOpen>
-          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs font-mono text-secondary">
+          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs font-mono text-secondary-foreground">
             {errorDetailsJson}
           </pre>
         </DisclosureSection>
@@ -28,7 +28,7 @@ export function RequestLogDetailRawTab({ selectedLog }: RequestLogDetailRawTabPr
 
       {attemptsJson != null ? (
         <DisclosureSection label="attempts_json" defaultOpen={errorDetailsJson == null}>
-          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs font-mono text-secondary">
+          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs font-mono text-secondary-foreground">
             {attemptsJson}
           </pre>
         </DisclosureSection>
@@ -36,7 +36,7 @@ export function RequestLogDetailRawTab({ selectedLog }: RequestLogDetailRawTabPr
 
       {usageJson != null ? (
         <DisclosureSection label="usage_json">
-          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs font-mono text-secondary">
+          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs font-mono text-secondary-foreground">
             {usageJson}
           </pre>
         </DisclosureSection>

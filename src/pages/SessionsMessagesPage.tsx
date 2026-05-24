@@ -57,10 +57,10 @@ function renderBlock(block: CliSessionsDisplayContentBlock, key: string) {
   if (block.type === "thinking") {
     return (
       <details key={key} className="rounded-lg border border-border">
-        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-muted-foreground dark:text-secondary">
+        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-muted-foreground dark:text-secondary-foreground">
           思考过程
         </summary>
-        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-muted-foreground dark:text-secondary">
+        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-muted-foreground dark:text-secondary-foreground">
           {block.thinking}
         </pre>
       </details>
@@ -70,10 +70,10 @@ function renderBlock(block: CliSessionsDisplayContentBlock, key: string) {
   if (block.type === "reasoning") {
     return (
       <details key={key} className="rounded-lg border border-border">
-        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-muted-foreground dark:text-secondary">
+        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-muted-foreground dark:text-secondary-foreground">
           推理过程
         </summary>
-        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-muted-foreground dark:text-secondary">
+        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-muted-foreground dark:text-secondary-foreground">
           {block.text}
         </pre>
       </details>
@@ -83,10 +83,10 @@ function renderBlock(block: CliSessionsDisplayContentBlock, key: string) {
   if (block.type === "tool_use") {
     return (
       <details key={key} className="rounded-lg border border-border">
-        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-muted-foreground dark:text-secondary">
+        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-muted-foreground dark:text-secondary-foreground">
           Tool 调用：{block.name}
         </summary>
-        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-muted-foreground dark:text-secondary">
+        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-muted-foreground dark:text-secondary-foreground">
           {block.input}
         </pre>
       </details>
@@ -96,10 +96,10 @@ function renderBlock(block: CliSessionsDisplayContentBlock, key: string) {
   if (block.type === "tool_result") {
     return (
       <details key={key} className="rounded-lg border border-border">
-        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-muted-foreground dark:text-secondary">
+        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-muted-foreground dark:text-secondary-foreground">
           Tool 结果{block.is_error ? "（错误）" : ""}
         </summary>
-        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-muted-foreground dark:text-secondary">
+        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-muted-foreground dark:text-secondary-foreground">
           {block.content}
         </pre>
       </details>
@@ -109,10 +109,10 @@ function renderBlock(block: CliSessionsDisplayContentBlock, key: string) {
   if (block.type === "function_call") {
     return (
       <details key={key} className="rounded-lg border border-border">
-        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-muted-foreground dark:text-secondary">
+        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-muted-foreground dark:text-secondary-foreground">
           Function 调用：{block.name}
         </summary>
-        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-muted-foreground dark:text-secondary">
+        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-muted-foreground dark:text-secondary-foreground">
           {block.arguments}
         </pre>
       </details>
@@ -122,10 +122,10 @@ function renderBlock(block: CliSessionsDisplayContentBlock, key: string) {
   if (block.type === "function_call_output") {
     return (
       <details key={key} className="rounded-lg border border-border">
-        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-muted-foreground dark:text-secondary">
+        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-muted-foreground dark:text-secondary-foreground">
           Function 输出
         </summary>
-        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-muted-foreground dark:text-secondary">
+        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-xs text-muted-foreground dark:text-secondary-foreground">
           {block.output}
         </pre>
       </details>
@@ -369,7 +369,7 @@ export function SessionsMessagesPage() {
                 <div className="min-w-0">
                   <label
                     htmlFor="switch-show-timestamp"
-                    className="font-semibold text-secondary dark:text-foreground cursor-pointer"
+                    className="font-semibold text-secondary-foreground dark:text-foreground cursor-pointer"
                   >
                     显示时间
                   </label>
@@ -388,7 +388,7 @@ export function SessionsMessagesPage() {
                 <div className="min-w-0">
                   <label
                     htmlFor="switch-show-model"
-                    className="font-semibold text-secondary dark:text-foreground cursor-pointer"
+                    className="font-semibold text-secondary-foreground dark:text-foreground cursor-pointer"
                   >
                     显示模型
                   </label>
@@ -413,14 +413,16 @@ export function SessionsMessagesPage() {
                 <span className="shrink-0 text-muted-foreground dark:text-muted-foreground">
                   来源
                 </span>
-                <span className="font-mono text-[11px] text-secondary">{source}</span>
+                <span className="font-mono text-[11px] text-secondary-foreground">{source}</span>
               </div>
               {distro ? (
                 <div className="flex items-start justify-between gap-3">
                   <span className="shrink-0 text-muted-foreground dark:text-muted-foreground">
                     环境
                   </span>
-                  <span className="font-mono text-[11px] text-secondary">WSL: {distro}</span>
+                  <span className="font-mono text-[11px] text-secondary-foreground">
+                    WSL: {distro}
+                  </span>
                 </div>
               ) : null}
               {session?.git_branch ? (
@@ -428,7 +430,9 @@ export function SessionsMessagesPage() {
                   <span className="shrink-0 text-muted-foreground dark:text-muted-foreground">
                     分支
                   </span>
-                  <span className="font-mono text-[11px] text-secondary">{session.git_branch}</span>
+                  <span className="font-mono text-[11px] text-secondary-foreground">
+                    {session.git_branch}
+                  </span>
                 </div>
               ) : null}
               {session?.created_at != null ? (
@@ -436,7 +440,7 @@ export function SessionsMessagesPage() {
                   <span className="shrink-0 text-muted-foreground dark:text-muted-foreground">
                     创建
                   </span>
-                  <span className="text-right font-mono text-[11px] text-secondary">
+                  <span className="text-right font-mono text-[11px] text-secondary-foreground">
                     {formatUnixSeconds(session.created_at)}
                   </span>
                 </div>
@@ -447,7 +451,7 @@ export function SessionsMessagesPage() {
                     更新
                   </span>
                   <span
-                    className="text-right font-mono text-[11px] text-secondary"
+                    className="text-right font-mono text-[11px] text-secondary-foreground"
                     title={formatUnixSeconds(session.modified_at)}
                   >
                     {formatRelativeTimeFromUnixSeconds(session.modified_at)}
@@ -459,7 +463,7 @@ export function SessionsMessagesPage() {
                   <span className="shrink-0 text-muted-foreground dark:text-muted-foreground">
                     CLI 版本
                   </span>
-                  <span className="font-mono text-[11px] text-secondary">
+                  <span className="font-mono text-[11px] text-secondary-foreground">
                     {session.cli_version}
                   </span>
                 </div>
@@ -470,7 +474,7 @@ export function SessionsMessagesPage() {
                     CWD
                   </span>
                   <span
-                    className="min-w-0 truncate text-right font-mono text-[11px] text-secondary"
+                    className="min-w-0 truncate text-right font-mono text-[11px] text-secondary-foreground"
                     title={session.cwd}
                   >
                     {session.cwd}
@@ -483,7 +487,7 @@ export function SessionsMessagesPage() {
                     项目路径
                   </span>
                   <span
-                    className="min-w-0 truncate text-right font-mono text-[11px] text-secondary"
+                    className="min-w-0 truncate text-right font-mono text-[11px] text-secondary-foreground"
                     title={session.project_path}
                   >
                     {session.project_path}
@@ -496,7 +500,7 @@ export function SessionsMessagesPage() {
                     文件
                   </span>
                   <span
-                    className="min-w-0 truncate text-right font-mono text-[11px] text-secondary"
+                    className="min-w-0 truncate text-right font-mono text-[11px] text-secondary-foreground"
                     title={filePath}
                   >
                     {filePath}
@@ -644,7 +648,7 @@ export function SessionsMessagesPage() {
                                 className={cn(
                                   "mb-2 flex flex-wrap items-center justify-between gap-2 text-[11px]",
                                   side === "right"
-                                    ? "text-muted-foreground dark:text-secondary"
+                                    ? "text-muted-foreground dark:text-secondary-foreground"
                                     : "text-muted-foreground"
                                 )}
                               >

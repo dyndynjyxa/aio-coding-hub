@@ -99,7 +99,7 @@ export function UpdateDialog() {
       className="max-w-xl"
     >
       <div className="space-y-4">
-        <div className="grid gap-2 text-sm text-secondary">
+        <div className="grid gap-2 text-sm text-secondary-foreground">
           <div className="flex items-center justify-between gap-4">
             <span className="text-muted-foreground">当前版本</span>
             <span className="font-mono">
@@ -121,7 +121,7 @@ export function UpdateDialog() {
         {updateCandidate?.body ? (
           <div className="space-y-1">
             <span className="text-xs font-medium text-muted-foreground">更新日志</span>
-            <div className="max-h-60 overflow-y-auto rounded-lg border border-border bg-white dark:bg-secondary text-sm text-secondary">
+            <div className="max-h-60 overflow-y-auto rounded-lg border border-border bg-white dark:bg-secondary text-sm text-secondary-foreground">
               <MDXEditor
                 markdown={updateCandidate.body}
                 readOnly
@@ -133,13 +133,13 @@ export function UpdateDialog() {
         ) : null}
 
         {!updateCandidate ? (
-          <div className="rounded-lg border border-border bg-white dark:bg-secondary p-3 text-sm text-secondary">
+          <div className="rounded-lg border border-border bg-white dark:bg-secondary p-3 text-sm text-secondary-foreground">
             未发现可安装更新。
           </div>
         ) : null}
 
         {meta.installingUpdate ? (
-          <div className="rounded-lg border border-border bg-white dark:bg-secondary p-3 text-sm text-secondary">
+          <div className="rounded-lg border border-border bg-white dark:bg-secondary p-3 text-sm text-secondary-foreground">
             <div className="font-medium">下载并安装中…</div>
             <div className="mt-1 font-mono text-xs text-muted-foreground">
               {formatBytes(meta.installDownloadedBytes)}

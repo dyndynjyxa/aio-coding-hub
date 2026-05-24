@@ -195,7 +195,7 @@ function SingleHistoryOverview({
       />
       <details className="group rounded-xl border border-border bg-white dark:bg-secondary shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
         <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
-          <div className="flex items-center gap-2 text-sm font-medium text-secondary group-open:text-indigo-600 dark:group-open:text-indigo-400">
+          <div className="flex items-center gap-2 text-sm font-medium text-secondary-foreground group-open:text-indigo-600 dark:group-open:text-indigo-400">
             <Settings2 className="h-4 w-4" />
             <span>\u8bf7\u6c42 JSON</span>
           </div>
@@ -212,7 +212,7 @@ function SingleHistoryOverview({
       </details>
       <details className="group rounded-xl border border-border bg-white dark:bg-secondary shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
         <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
-          <div className="flex items-center gap-2 text-sm font-medium text-secondary group-open:text-indigo-600 dark:group-open:text-indigo-400">
+          <div className="flex items-center gap-2 text-sm font-medium text-secondary-foreground group-open:text-indigo-600 dark:group-open:text-indigo-400">
             <Activity className="h-4 w-4" />
             <span>\u54cd\u5e94\u539f\u6587</span>
           </div>
@@ -220,7 +220,7 @@ function SingleHistoryOverview({
         </summary>
         <div className="border-t border-border px-4 py-3 space-y-3">
           <div className="space-y-2">
-            <div className="text-[11px] font-semibold text-secondary">Result JSON</div>
+            <div className="text-[11px] font-semibold text-secondary-foreground">Result JSON</div>
             <Textarea
               mono
               readOnly
@@ -229,7 +229,9 @@ function SingleHistoryOverview({
             />
           </div>
           <div className="space-y-2">
-            <div className="text-[11px] font-semibold text-secondary">SSE \u539f\u6587</div>
+            <div className="text-[11px] font-semibold text-secondary-foreground">
+              SSE \u539f\u6587
+            </div>
             <pre className="scrollbar-overlay max-h-60 overflow-auto rounded-lg bg-background p-4 font-mono text-[10px] leading-relaxed text-muted-foreground">
               {sseText ? (
                 sseText

@@ -77,7 +77,7 @@ function providerTagClassName(tag: string) {
   if (tag === FREE_TAG) {
     return "shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300";
   }
-  return "shrink-0 rounded-full bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground dark:bg-secondary dark:text-secondary";
+  return "shrink-0 rounded-full bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground dark:bg-secondary dark:text-secondary-foreground";
 }
 
 function renderProviderNote(note: string) {
@@ -470,7 +470,7 @@ export const ProviderCard = memo(function ProviderCard({
           </Button>
 
           <div className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-white px-3 text-sm shadow-sm dark:border-border dark:bg-secondary">
-            <span className="text-sm font-medium text-secondary">
+            <span className="text-sm font-medium text-secondary-foreground">
               {provider.enabled ? "已启用" : "已关闭"}
             </span>
             <Switch checked={provider.enabled} onCheckedChange={() => onToggleEnabled(provider)} />

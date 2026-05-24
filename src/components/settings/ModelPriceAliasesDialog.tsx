@@ -238,7 +238,7 @@ export function ModelPriceAliasesDialog({
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
               </svg>
             </div>
-            <div className="text-sm font-medium text-secondary">暂无规则</div>
+            <div className="text-sm font-medium text-secondary-foreground">暂无规则</div>
             <div className="mt-1 text-xs text-muted-foreground">
               示例：Gemini 配置{" "}
               <code className="rounded bg-muted dark:bg-secondary px-1 py-0.5 font-mono text-[11px]">
@@ -293,7 +293,9 @@ export function ModelPriceAliasesDialog({
 
                   <div className="mt-4 grid items-start gap-4 lg:grid-cols-12">
                     <div className="lg:col-span-2">
-                      <label className="mb-1.5 block text-xs font-medium text-secondary">CLI</label>
+                      <label className="mb-1.5 block text-xs font-medium text-secondary-foreground">
+                        CLI
+                      </label>
                       <Select
                         value={cliKey}
                         onChange={(e) =>
@@ -310,7 +312,7 @@ export function ModelPriceAliasesDialog({
                     </div>
 
                     <div className="lg:col-span-2">
-                      <label className="mb-1.5 block text-xs font-medium text-secondary">
+                      <label className="mb-1.5 block text-xs font-medium text-secondary-foreground">
                         匹配类型
                       </label>
                       <Select
@@ -331,7 +333,7 @@ export function ModelPriceAliasesDialog({
                     </div>
 
                     <div className="lg:col-span-4">
-                      <label className="mb-1.5 block text-xs font-medium text-secondary">
+                      <label className="mb-1.5 block text-xs font-medium text-secondary-foreground">
                         Pattern
                       </label>
                       <Input
@@ -357,7 +359,7 @@ export function ModelPriceAliasesDialog({
                     </div>
 
                     <div className="lg:col-span-4">
-                      <label className="mb-1.5 block text-xs font-medium text-secondary">
+                      <label className="mb-1.5 block text-xs font-medium text-secondary-foreground">
                         目标模型
                       </label>
                       <Input

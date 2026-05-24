@@ -85,7 +85,7 @@ function OAuthQuotaProviderCard({
     <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-sm dark:border-border dark:bg-secondary">
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2 text-xs text-secondary">
+          <div className="flex min-w-0 items-center gap-2 text-xs text-secondary-foreground">
             <span
               className={cn(
                 "shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium",

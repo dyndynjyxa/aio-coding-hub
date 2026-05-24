@@ -45,7 +45,7 @@ export function SettingsDialogs({
         className="max-w-lg"
       >
         <div className="space-y-4">
-          <div className="text-sm text-secondary">
+          <div className="text-sm text-secondary-foreground">
             说明：仅影响请求日志与明细，不会影响 Providers、Prompts、MCP 等配置。
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-3">
@@ -116,7 +116,7 @@ export function SettingsDialogs({
           <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
             ⚠️ 导入将覆盖当前所有配置（供应商、工作区、提示词、MCP 服务器等），此操作不可撤销。
           </div>
-          <div className="rounded-lg border border-border bg-secondary p-3 text-sm text-secondary dark:bg-secondary/60">
+          <div className="rounded-lg border border-border bg-secondary p-3 text-sm text-secondary-foreground dark:bg-secondary/60">
             <div className="font-medium text-foreground">导入文件</div>
             <div className="mt-2 break-all font-mono text-xs">
               {configImport.pendingFilePath ?? "未选择文件"}

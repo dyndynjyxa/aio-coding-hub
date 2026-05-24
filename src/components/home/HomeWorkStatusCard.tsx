@@ -86,7 +86,7 @@ export function HomeWorkStatusCard({
                 <div className="min-w-0 space-y-1.5">
                   <div className="flex items-center gap-3">
                     <div className={cn("min-w-0", !horizontal && "flex-1")}>
-                      <div className="flex items-center gap-2 text-left text-xs font-medium text-secondary">
+                      <div className="flex items-center gap-2 text-left text-xs font-medium text-secondary-foreground">
                         <CliBrandIcon
                           cliKey={cliKey}
                           className="h-4 w-4 shrink-0 rounded-[4px] object-contain"
