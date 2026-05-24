@@ -51,10 +51,10 @@ describe("ui/TabList", () => {
   it("applies primary variant to active tab and ghost to inactive", () => {
     render(<TabList ariaLabel="tabs" items={[...defaultItems]} value="tab1" onChange={() => {}} />);
     const tabs = screen.getAllByRole("tab");
-    // Active tab gets primary variant (gradient)
-    expect(tabs[0]).toHaveClass("bg-gradient-to-br");
+    // Active tab gets the primary accent variant
+    expect(tabs[0]).toHaveClass("bg-accent/15");
     // Inactive tabs get ghost variant
-    expect(tabs[1]).not.toHaveClass("bg-gradient-to-br");
+    expect(tabs[1]).not.toHaveClass("bg-accent/15");
   });
 
   it("merges custom className on the container", () => {
