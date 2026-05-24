@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
 import {
@@ -6,6 +6,8 @@ import {
   cliProxySetEnabled,
   cliProxyStatusAll,
   cliProxySyncEnabled,
+  normalizeCliProxyBaseOrigin,
+  validateCliProxyCliKey,
 } from "../cliProxy";
 
 vi.mock("../../../generated/bindings", async () => {
@@ -33,6 +35,10 @@ vi.mock("../../consoleLog", async () => {
 });
 
 describe("services/cli/cliProxy", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("rethrows invoke errors and logs", async () => {
     vi.mocked(commands.cliProxyStatusAll).mockRejectedValueOnce(new Error("cli proxy boom"));
 
@@ -56,32 +62,73 @@ describe("services/cli/cliProxy", () => {
     await expect(cliProxyStatusAll()).rejects.toThrow("IPC_NULL_RESULT: cli_proxy_status_all");
   });
 
-  it("keeps argument mapping unchanged", async () => {
-    vi.mocked(commands.cliProxyStatusAll).mockResolvedValueOnce({ status: "ok", data: [] as any });
+  it("invokes generated commands with normalized args and typed payloads", async () => {
+    vi.mocked(commands.cliProxyStatusAll).mockResolvedValueOnce({
+      status: "ok",
+      data: [
+        {
+          cli_key: "claude",
+          enabled: false,
+          base_origin: null,
+          current_gateway_origin: null,
+          applied_to_current_gateway: null,
+        },
+      ],
+    });
     vi.mocked(commands.cliProxySetEnabled).mockResolvedValueOnce({
       status: "ok",
-      data: { cli_key: "claude" } as any,
+      data: {
+        trace_id: "t1",
+        cli_key: "claude",
+        enabled: true,
+        ok: true,
+        error_code: null,
+        message: "ok",
+        base_origin: "http://127.0.0.1:37123",
+      },
     });
     vi.mocked(commands.cliProxySyncEnabled).mockResolvedValueOnce({
       status: "ok",
-      data: [] as any,
+      data: [
+        {
+          trace_id: "t2",
+          cli_key: "codex",
+          enabled: true,
+          ok: true,
+          error_code: null,
+          message: "ok",
+          base_origin: "http://127.0.0.1:37123",
+        },
+      ],
     });
     vi.mocked(commands.cliProxyRebindCodexHome).mockResolvedValueOnce({
       status: "ok",
-      data: { cli_key: "codex" } as any,
+      data: {
+        trace_id: "t3",
+        cli_key: "codex",
+        enabled: true,
+        ok: true,
+        error_code: null,
+        message: "ok",
+        base_origin: "http://127.0.0.1:37123",
+      },
     });
 
-    await cliProxyStatusAll();
+    const statuses = await cliProxyStatusAll();
     expect(commands.cliProxyStatusAll).toHaveBeenCalledWith();
+    expect(statuses[0]?.cli_key).toBe("claude");
 
-    await cliProxySetEnabled({ cli_key: "claude", enabled: true });
+    const enabled = await cliProxySetEnabled({ cli_key: " claude " as never, enabled: true });
     expect(commands.cliProxySetEnabled).toHaveBeenCalledWith("claude", true);
+    expect(enabled.cli_key).toBe("claude");
 
-    await cliProxySyncEnabled("http://127.0.0.1:37123", { apply_live: false });
+    const synced = await cliProxySyncEnabled(" http://127.0.0.1:37123/ ", { apply_live: false });
     expect(commands.cliProxySyncEnabled).toHaveBeenCalledWith("http://127.0.0.1:37123", false);
+    expect(synced[0]?.cli_key).toBe("codex");
 
-    await cliProxyRebindCodexHome();
+    const rebound = await cliProxyRebindCodexHome();
     expect(commands.cliProxyRebindCodexHome).toHaveBeenCalledWith();
+    expect(rebound.cli_key).toBe("codex");
   });
 
   it("defaults cliProxySyncEnabled apply_live to null when omitted", async () => {
@@ -93,5 +140,30 @@ describe("services/cli/cliProxy", () => {
     await cliProxySyncEnabled("http://127.0.0.1:37123");
 
     expect(commands.cliProxySyncEnabled).toHaveBeenCalledWith("http://127.0.0.1:37123", null);
+  });
+
+  it("rejects invalid cli keys and base origins before generated commands", async () => {
+    expect(validateCliProxyCliKey(" codex ")).toBe("codex");
+    expect(normalizeCliProxyBaseOrigin(" http://127.0.0.1:37123/ ")).toBe("http://127.0.0.1:37123");
+    expect(normalizeCliProxyBaseOrigin("https://example.com")).toBe("https://example.com");
+    expect(() => validateCliProxyCliKey("unknown")).toThrow("SEC_INVALID_INPUT");
+    expect(() => normalizeCliProxyBaseOrigin("")).toThrow("SEC_INVALID_INPUT");
+    expect(() => normalizeCliProxyBaseOrigin("ftp://example.com")).toThrow("SEC_INVALID_INPUT");
+    expect(() => normalizeCliProxyBaseOrigin("https://user@example.com")).toThrow(
+      "SEC_INVALID_INPUT"
+    );
+    expect(() => normalizeCliProxyBaseOrigin("https://example.com/v1")).toThrow(
+      "SEC_INVALID_INPUT"
+    );
+
+    await expect(
+      cliProxySetEnabled({ cli_key: "unknown" as never, enabled: true })
+    ).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(cliProxySyncEnabled("https://example.com/v1")).rejects.toThrow(
+      "SEC_INVALID_INPUT"
+    );
+
+    expect(commands.cliProxySetEnabled).not.toHaveBeenCalled();
+    expect(commands.cliProxySyncEnabled).not.toHaveBeenCalled();
   });
 });

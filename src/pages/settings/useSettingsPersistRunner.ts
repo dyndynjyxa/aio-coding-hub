@@ -66,6 +66,28 @@ export function useSettingsPersistRunner(input: UseSettingsPersistRunnerInput) {
     inFlight: boolean;
     pending: PersistedSettings | null;
   }>({ inFlight: false, pending: null });
+  const persistGateRef = useRef({
+    settingsReady,
+    settingsWriteBlocked,
+  });
+  persistGateRef.current = {
+    settingsReady,
+    settingsWriteBlocked,
+  };
+
+  const canPersistNow = useCallback(() => {
+    const gate = persistGateRef.current;
+    return gate.settingsReady && !gate.settingsWriteBlocked;
+  }, []);
+
+  const enterReadOnlyProtection = useCallback(() => {
+    persistQueueRef.current.pending = null;
+    persistGateRef.current = {
+      ...persistGateRef.current,
+      settingsWriteBlocked: true,
+    };
+    setSettingsReadErrorMessage(SETTINGS_READONLY_MESSAGE);
+  }, [setSettingsReadErrorMessage]);
 
   const revertSettledKeys = useCallback(
     (desiredSnapshot: PersistedSettings, keysToConsider: PersistKey[]) => {
@@ -133,7 +155,7 @@ export function useSettingsPersistRunner(input: UseSettingsPersistRunnerInput) {
         } catch (err) {
           revertSettledKeys(desired, ["preferred_port"]);
           if (isSettingsReadFailure(err)) {
-            setSettingsReadErrorMessage(SETTINGS_READONLY_MESSAGE);
+            enterReadOnlyProtection();
             toast(SETTINGS_READONLY_MESSAGE);
             return;
           }
@@ -165,7 +187,7 @@ export function useSettingsPersistRunner(input: UseSettingsPersistRunnerInput) {
       } catch (err) {
         if (isSettingsReadFailure(err)) {
           reportSettingsReadFailure(err);
-          setSettingsReadErrorMessage(SETTINGS_READONLY_MESSAGE);
+          enterReadOnlyProtection();
           revertSettledKeys(desired, changedKeys);
           return;
         }
@@ -208,15 +230,15 @@ export function useSettingsPersistRunner(input: UseSettingsPersistRunnerInput) {
       persistedSettingsRef,
       reconcileSettledKeys,
       reportSettingsReadFailure,
+      enterReadOnlyProtection,
       revertSettledKeys,
-      setSettingsReadErrorMessage,
       settingsSetMutation,
     ]
   );
 
   const enqueuePersist = useCallback(
     (desiredSnapshot: PersistedSettings) => {
-      if (!settingsReady || settingsWriteBlocked) {
+      if (!canPersistNow()) {
         return;
       }
 
@@ -233,13 +255,17 @@ export function useSettingsPersistRunner(input: UseSettingsPersistRunnerInput) {
         queue.pending = null;
         queue.inFlight = false;
         if (next) {
-          enqueuePersist(next);
+          if (canPersistNow()) {
+            enqueuePersist(next);
+          } else {
+            setSettingsSaving(false);
+          }
           return;
         }
         setSettingsSaving(false);
       });
     },
-    [persistSettings, settingsReady, settingsWriteBlocked]
+    [canPersistNow, persistSettings]
   );
 
   const requestPersist = useCallback(

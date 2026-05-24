@@ -61,6 +61,28 @@ describe("services/notification/taskCompleteNotifyEvents", () => {
     vi.useRealTimers();
   });
 
+  it("keeps enabled-state subscribers isolated when one listener throws", async () => {
+    vi.useFakeTimers();
+
+    const { mod } = await importFreshTaskCompleteNotify();
+    const failingListener = vi.fn(() => {
+      throw new Error("listener boom");
+    });
+    const healthyListener = vi.fn();
+
+    const unsubscribeFailing = mod.subscribeTaskCompleteNotifyEnabled(failingListener);
+    const unsubscribeHealthy = mod.subscribeTaskCompleteNotifyEnabled(healthyListener);
+
+    expect(() => mod.setTaskCompleteNotifyEnabled(false)).not.toThrow();
+    expect(failingListener).toHaveBeenCalledTimes(1);
+    expect(healthyListener).toHaveBeenCalledTimes(1);
+
+    unsubscribeFailing();
+    unsubscribeHealthy();
+    mod.setTaskCompleteNotifyEnabled(true);
+    vi.useRealTimers();
+  });
+
   it("ignores gateway events without payload", async () => {
     setTauriRuntime();
     vi.useFakeTimers();
@@ -264,6 +286,53 @@ describe("services/notification/taskCompleteNotifyEvents", () => {
     vi.useRealTimers();
   });
 
+  it("bounds high-cardinality unknown cli sessions and truncates display labels", async () => {
+    setTauriRuntime();
+    vi.useFakeTimers();
+    vi.setSystemTime(1_700_000_000_000);
+
+    const { mod, noticeSend } = await importFreshTaskCompleteNotify();
+    noticeSend.mockResolvedValue(true);
+
+    const cleanup = await mod.listenTaskCompleteNotifyEvents();
+
+    for (let i = 0; i < 16; i += 1) {
+      emitTauriEvent(
+        gatewayEventNames.requestSignal,
+        requestSignalComplete(`unknown-${i}`, `t-${i}`)
+      );
+    }
+    const longCliKey = `${"x".repeat(80)}-newest`;
+    emitTauriEvent(gatewayEventNames.requestSignal, requestSignalComplete(longCliKey, "t-long"));
+
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(noticeSend).toHaveBeenCalledTimes(16);
+    expect(noticeSend).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining("x".repeat(65)),
+      })
+    );
+    expect(noticeSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining(`${"x".repeat(64)} 请求已完成`),
+      })
+    );
+    expect(noticeSend).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining("unknown-0"),
+      })
+    );
+    expect(noticeSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining("unknown-15 请求已完成"),
+      })
+    );
+
+    cleanup();
+    vi.useRealTimers();
+  });
+
   it("uses default quiet period for codex (no extra delay)", async () => {
     setTauriRuntime();
     vi.useFakeTimers();
@@ -288,6 +357,38 @@ describe("services/notification/taskCompleteNotifyEvents", () => {
       title: "任务完成",
       body: expect.stringContaining("Codex 请求已完成（gpt-4.1）"),
     });
+
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("accepts overlong request-signal model labels through the shared normalizer", async () => {
+    setTauriRuntime();
+    vi.useFakeTimers();
+    vi.setSystemTime(1_700_000_000_000);
+
+    const { mod, noticeSend } = await importFreshTaskCompleteNotify();
+    noticeSend.mockResolvedValue(true);
+
+    const cleanup = await mod.listenTaskCompleteNotifyEvents();
+    const longModel = "m".repeat(5000);
+
+    emitTauriEvent(gatewayEventNames.requestSignal, requestSignalStart("codex", "t-1", longModel));
+    emitTauriEvent(gatewayEventNames.requestSignal, requestSignalComplete("codex", "t-1"));
+
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(noticeSend).toHaveBeenCalledTimes(1);
+    expect(noticeSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining(`（${"m".repeat(200)}）`),
+      })
+    );
+    expect(noticeSend).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining("m".repeat(201)),
+      })
+    );
 
     cleanup();
     vi.useRealTimers();
@@ -319,6 +420,58 @@ describe("services/notification/taskCompleteNotifyEvents", () => {
     // Finish the in-flight request; now quiet period should trigger.
     emitTauriEvent(gatewayEventNames.requestSignal, requestSignalComplete("claude", "t-1"));
     await vi.advanceTimersByTimeAsync(30_000);
+    expect(noticeSend).toHaveBeenCalledTimes(1);
+
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("prunes stale in-flight traces so a missing complete does not block forever", async () => {
+    setTauriRuntime();
+    vi.useFakeTimers();
+    vi.setSystemTime(1_700_000_000_000);
+
+    const { mod, noticeSend } = await importFreshTaskCompleteNotify();
+    noticeSend.mockResolvedValue(true);
+
+    const cleanup = await mod.listenTaskCompleteNotifyEvents();
+
+    emitTauriEvent(
+      gatewayEventNames.requestSignal,
+      requestSignalStart("claude", "stale-trace", "claude-3-5-sonnet")
+    );
+
+    vi.setSystemTime(1_700_000_000_000 + 2 * 60 * 60 * 1000 + 1);
+    emitTauriEvent(gatewayEventNames.requestSignal, requestSignalComplete("claude", "fresh-done"));
+
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(noticeSend).toHaveBeenCalledTimes(1);
+
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("bounds missing complete events by trimming the oldest in-flight traces", async () => {
+    setTauriRuntime();
+    vi.useFakeTimers();
+    vi.setSystemTime(1_700_000_000_000);
+
+    const { mod, noticeSend } = await importFreshTaskCompleteNotify();
+    noticeSend.mockResolvedValue(true);
+
+    const cleanup = await mod.listenTaskCompleteNotifyEvents();
+
+    for (let i = 0; i <= 500; i += 1) {
+      emitTauriEvent(gatewayEventNames.requestSignal, requestSignalStart("claude", `t-${i}`));
+    }
+
+    for (let i = 1; i <= 500; i += 1) {
+      emitTauriEvent(gatewayEventNames.requestSignal, requestSignalComplete("claude", `t-${i}`));
+    }
+
+    await vi.advanceTimersByTimeAsync(30_000);
+
     expect(noticeSend).toHaveBeenCalledTimes(1);
 
     cleanup();

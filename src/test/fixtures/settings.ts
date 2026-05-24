@@ -44,6 +44,7 @@ export function createTestAppSettings(overrides?: Partial<AppSettings>): AppSett
     enable_codex_session_id_completion: true,
     enable_claude_metadata_user_id_injection: true,
     enable_cache_anomaly_monitor: false,
+    enable_debug_log: false,
     enable_task_complete_notify: true,
     enable_notification_sound: true,
     enable_response_fixer: true,

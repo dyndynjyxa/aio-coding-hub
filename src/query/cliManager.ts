@@ -3,6 +3,8 @@ import {
   cliManagerClaudeInfoGet,
   cliManagerClaudeSettingsGet,
   cliManagerClaudeSettingsSet,
+  cliManagerClaudeHooksGet,
+  cliManagerClaudeHooksSet,
   cliManagerCodexConfigGet,
   cliManagerCodexConfigSet,
   cliManagerCodexConfigTomlGet,
@@ -12,6 +14,8 @@ import {
   cliManagerGeminiConfigSet,
   cliManagerGeminiInfoGet,
   type ClaudeCliInfo,
+  type ClaudeHooksSetInput,
+  type ClaudeHooksState,
   type ClaudeSettingsPatch,
   type ClaudeSettingsState,
   type CodexConfigPatch,
@@ -143,6 +147,30 @@ export function useCliManagerGeminiConfigSetMutation() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: cliManagerKeys.geminiConfig() });
+    },
+  });
+}
+
+export function useCliManagerClaudeHooksQuery(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: cliManagerKeys.claudeHooks(),
+    queryFn: () => cliManagerClaudeHooksGet(),
+    enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useCliManagerClaudeHooksSetMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: ClaudeHooksSetInput) => cliManagerClaudeHooksSet(input),
+    onSuccess: (next) => {
+      if (!next) return;
+      queryClient.setQueryData<ClaudeHooksState | null>(cliManagerKeys.claudeHooks(), next);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: cliManagerKeys.claudeHooks() });
     },
   });
 }

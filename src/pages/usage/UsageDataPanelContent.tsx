@@ -5,6 +5,7 @@ import { TabList } from "../../ui/TabList";
 import { formatInteger } from "../../utils/formatters";
 import { PROVIDER_FILTER_ALL, SCOPE_ITEMS, USAGE_TABLE_TAB_ITEMS } from "./constants";
 import { CacheTrendBody, UsageTableBody } from "./UsageDataPanelBodies";
+import { UsageAvailabilityPanel } from "../../components/usage/UsageAvailabilityPanel";
 
 function UsageScopeGroup({
   scope,
@@ -117,9 +118,9 @@ function UsageDataPanelHeader({
           className="shrink-0"
           size="sm"
         />
-        {tableTab === "usage" ? (
+        {tableTab === "usage" && (
           <UsageScopeGroup scope={scope} onChangeScope={onChangeScope} loading={loading} />
-        ) : null}
+        )}
       </div>
       <div className="flex items-center gap-3">
         {titleText ? (
@@ -222,6 +223,28 @@ function UsageTablePanelBody({
   );
 }
 
+function AvailabilityPanelBody({
+  activeStale,
+  availabilityData,
+  availabilityLoading,
+  availabilityRefreshing,
+  onRefreshAvailability,
+}: Pick<
+  UsageDataPanelProps,
+  "availabilityData" | "availabilityLoading" | "availabilityRefreshing" | "onRefreshAvailability"
+> & { activeStale: boolean }) {
+  return (
+    <UsageDataPanelScrollArea activeStale={activeStale}>
+      <UsageAvailabilityPanel
+        data={availabilityData}
+        loading={availabilityLoading}
+        onRefresh={onRefreshAvailability}
+        refreshing={availabilityRefreshing}
+      />
+    </UsageDataPanelScrollArea>
+  );
+}
+
 function UsageDataPanelBody({
   tableTab,
   activeStale,
@@ -235,6 +258,10 @@ function UsageDataPanelBody({
   rows,
   summary,
   totalCostUsd,
+  availabilityData,
+  availabilityLoading,
+  availabilityRefreshing,
+  onRefreshAvailability,
 }: Pick<
   UsageDataPanelProps,
   | "tableTab"
@@ -248,7 +275,23 @@ function UsageDataPanelBody({
   | "rows"
   | "summary"
   | "totalCostUsd"
+  | "availabilityData"
+  | "availabilityLoading"
+  | "availabilityRefreshing"
+  | "onRefreshAvailability"
 > & { activeStale: boolean }) {
+  if (tableTab === "availability") {
+    return (
+      <AvailabilityPanelBody
+        activeStale={activeStale}
+        availabilityData={availabilityData}
+        availabilityLoading={availabilityLoading}
+        availabilityRefreshing={availabilityRefreshing}
+        onRefreshAvailability={onRefreshAvailability}
+      />
+    );
+  }
+
   if (tableTab === "cacheTrend") {
     return (
       <CacheTrendPanelBody
@@ -318,6 +361,10 @@ export function UsageDataPanelContent({
         rows={props.rows}
         summary={props.summary}
         totalCostUsd={props.totalCostUsd}
+        availabilityData={props.availabilityData}
+        availabilityLoading={props.availabilityLoading}
+        availabilityRefreshing={props.availabilityRefreshing}
+        onRefreshAvailability={props.onRefreshAvailability}
       />
     </div>
   );

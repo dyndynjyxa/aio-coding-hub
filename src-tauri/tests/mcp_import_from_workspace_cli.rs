@@ -6,6 +6,7 @@ use serde_json::json;
 fn mcp_import_from_workspace_cli_flows_are_stable() {
     mcp_import_from_workspace_cli_reads_claude_json_and_imports();
     mcp_import_from_workspace_cli_parses_codex_toml();
+    mcp_import_from_workspace_cli_preserves_sse_transport();
     mcp_import_from_workspace_cli_preserves_server_key_casing();
     mcp_import_from_workspace_cli_codex_does_not_create_suffix_key();
 }
@@ -54,6 +55,71 @@ fn mcp_import_from_workspace_cli_reads_claude_json_and_imports() {
     );
     assert_eq!(first.get("command").and_then(|v| v.as_str()), Some("uvx"));
     assert_eq!(first.get("enabled").and_then(|v| v.as_bool()), Some(true));
+}
+
+fn mcp_import_from_workspace_cli_preserves_sse_transport() {
+    let app = support::TestApp::new();
+    let handle = app.handle();
+
+    let source = json!({
+      "mcpServers": {
+        "remote": {
+          "type": "sse",
+          "url": "https://example.com/mcp/sse",
+          "headers": {"Authorization": "Bearer token"}
+        }
+      }
+    });
+
+    let bytes = serde_json::to_vec(&source).expect("json bytes");
+    aio_coding_hub_lib::test_support::mcp_restore_target_bytes(&handle, "claude", Some(bytes))
+        .expect("write claude target");
+
+    let workspace_id =
+        aio_coding_hub_lib::test_support::workspace_active_id_by_cli(&handle, "claude")
+            .expect("claude active workspace");
+
+    let report =
+        aio_coding_hub_lib::test_support::mcp_import_from_workspace_cli_json(&handle, workspace_id)
+            .expect("import from workspace cli");
+
+    assert_eq!(report.get("inserted").and_then(|v| v.as_u64()), Some(1));
+    assert_eq!(report.get("updated").and_then(|v| v.as_u64()), Some(0));
+
+    let rows = aio_coding_hub_lib::test_support::mcp_servers_list_json(&handle, workspace_id)
+        .expect("list imported rows");
+    let rows = rows.as_array().cloned().unwrap_or_default();
+    assert_eq!(rows.len(), 1);
+
+    let first = &rows[0];
+    assert_eq!(first.get("name").and_then(|v| v.as_str()), Some("remote"));
+    assert_eq!(first.get("transport").and_then(|v| v.as_str()), Some("sse"));
+    assert_eq!(
+        first.get("url").and_then(|v| v.as_str()),
+        Some("https://example.com/mcp/sse")
+    );
+    assert_eq!(
+        first
+            .get("header_keys")
+            .and_then(|v| v.as_array())
+            .map(|v| {
+                v.iter()
+                    .filter_map(|item| item.as_str())
+                    .collect::<Vec<_>>()
+            }),
+        Some(vec!["Authorization"])
+    );
+
+    let synced = aio_coding_hub_lib::test_support::mcp_read_target_bytes(&handle, "claude")
+        .expect("read synced claude target")
+        .expect("synced claude target must exist");
+    let root: serde_json::Value = serde_json::from_slice(&synced).expect("parse synced json");
+    let remote = &root["mcpServers"]["remote"];
+    assert_eq!(remote.get("type").and_then(|v| v.as_str()), Some("sse"));
+    assert_eq!(
+        remote.get("url").and_then(|v| v.as_str()),
+        Some("https://example.com/mcp/sse")
+    );
 }
 
 fn mcp_import_from_workspace_cli_parses_codex_toml() {

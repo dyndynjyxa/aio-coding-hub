@@ -10,6 +10,7 @@ import {
 import { logToConsole } from "../../../services/consoleLog";
 import type { AppSettings, SensitiveStringUpdate } from "../../../services/settings/settings";
 import type { GatewayRectifierSettingsPatch } from "../../../services/settings/settingsGatewayRectifier";
+import { validateUpstreamProxyFields } from "../../../services/settings/settingsValidation";
 import { Button } from "../../../ui/Button";
 import { Card } from "../../../ui/Card";
 import { Input } from "../../../ui/Input";
@@ -724,10 +725,41 @@ function UpstreamProxySettingsCard({
     return { mode: "preserve" };
   }
 
+  function resetProxyDraft() {
+    setProxyUrl(settings.upstream_proxy_url);
+    setProxyUsername(settings.upstream_proxy_username);
+    setProxyPassword("");
+    setClearSavedPassword(false);
+    setHasPendingEdits(false);
+  }
+
+  function validateProxyDraft(options: {
+    enabled: boolean;
+    requireUrl?: boolean;
+    validateUrlWhenPresent?: boolean;
+  }) {
+    const message = validateUpstreamProxyFields({
+      enabled: options.enabled,
+      requireUrl: options.requireUrl,
+      validateUrlWhenPresent: options.validateUrlWhenPresent,
+      url: proxyUrl,
+      username: proxyUsername,
+      passwordUpdate: resolveProxyPasswordPatch(),
+    });
+    if (message) {
+      toast(message);
+      return false;
+    }
+    return true;
+  }
+
   async function handleProxyEnabledChange(enabled: boolean) {
     if (disabled) return;
     if (enabled && !proxyUrl.trim()) {
       toast("请先输入代理地址");
+      return;
+    }
+    if (!validateProxyDraft({ enabled, validateUrlWhenPresent: enabled })) {
       return;
     }
     const updated = await onPersistSettings({
@@ -759,11 +791,16 @@ function UpstreamProxySettingsCard({
     }
     if (settings.upstream_proxy_enabled && !trimmedUrl) {
       toast("代理已启用时地址不能为空");
-      setProxyUrl(settings.upstream_proxy_url);
-      setProxyUsername(settings.upstream_proxy_username);
-      setProxyPassword("");
-      setClearSavedPassword(false);
-      setHasPendingEdits(false);
+      resetProxyDraft();
+      return;
+    }
+    if (
+      !validateProxyDraft({
+        enabled: settings.upstream_proxy_enabled,
+        validateUrlWhenPresent: true,
+      })
+    ) {
+      resetProxyDraft();
       return;
     }
     const updated = await onPersistSettings({
@@ -773,10 +810,7 @@ function UpstreamProxySettingsCard({
     });
     setHasPendingEdits(false);
     if (!updated) {
-      setProxyUrl(settings.upstream_proxy_url);
-      setProxyUsername(settings.upstream_proxy_username);
-      setProxyPassword("");
-      setClearSavedPassword(false);
+      resetProxyDraft();
       return;
     }
     setProxyPassword("");
@@ -791,6 +825,16 @@ function UpstreamProxySettingsCard({
     const trimmed = proxyUrl.trim();
     if (!trimmed) {
       toast("请先输入代理地址");
+      return;
+    }
+    const validationMessage = validateUpstreamProxyFields({
+      requireUrl: true,
+      url: trimmed,
+      username: proxyUsername,
+      password: proxyPassword,
+    });
+    if (validationMessage) {
+      toast(validationMessage);
       return;
     }
     setTestingConnection(true);
@@ -814,6 +858,16 @@ function UpstreamProxySettingsCard({
     const trimmed = proxyUrl.trim();
     if (!trimmed) {
       toast("请先输入代理地址");
+      return;
+    }
+    const validationMessage = validateUpstreamProxyFields({
+      requireUrl: true,
+      url: trimmed,
+      username: proxyUsername,
+      password: proxyPassword,
+    });
+    if (validationMessage) {
+      toast(validationMessage);
       return;
     }
     setDetectingExitIp(true);

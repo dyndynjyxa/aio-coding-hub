@@ -470,6 +470,52 @@ describe("settings/useSettingsPersistence", () => {
     expect(mutation.mutateAsync).toHaveBeenCalledTimes(2);
   });
 
+  it("drops queued persists when an in-flight save enters readonly protection", async () => {
+    vi.mocked(useSettingsQuery).mockReturnValue({
+      data: createSettings(),
+      isLoading: false,
+      isError: false,
+      error: null,
+    } as any);
+
+    let rejectFirst: (err: unknown) => void = () => {
+      throw new Error("rejectFirst not set");
+    };
+    const firstPromise = new Promise<any>((_resolve, reject) => {
+      rejectFirst = reject;
+    });
+
+    const mutation = { mutateAsync: vi.fn() };
+    mutation.mutateAsync
+      .mockReturnValueOnce(firstPromise)
+      .mockResolvedValueOnce(
+        createSettingsMutationResult({ provider_base_url_ping_cache_ttl_seconds: 120 })
+      );
+    vi.mocked(useSettingsSetMutation).mockReturnValue(mutation as any);
+
+    const { result } = renderHook(() => useSettingsPersistence({ gateway: null, about: null }));
+    await waitFor(() => expect(result.current.settingsReady).toBe(true));
+
+    act(() => {
+      result.current.requestPersist({ provider_cooldown_seconds: 12 });
+      result.current.requestPersist({ provider_base_url_ping_cache_ttl_seconds: 120 });
+    });
+
+    await waitFor(() => {
+      expect(mutation.mutateAsync).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => {
+      rejectFirst(new Error("SETTINGS_RECOVERY_REQUIRED: bad settings"));
+      await firstPromise.catch(() => {});
+    });
+
+    await waitFor(() => expect(result.current.settingsWriteBlocked).toBe(true));
+    expect(mutation.mutateAsync).toHaveBeenCalledTimes(1);
+    expect(result.current.settingsSaving).toBe(false);
+    expect(toast).not.toHaveBeenCalledWith("Ping 选择缓存 TTL 必须为 1-3600 秒");
+  });
+
   it("persists homepage usage period changes", async () => {
     vi.mocked(useSettingsQuery).mockReturnValue({
       data: createSettings(),
@@ -641,6 +687,14 @@ describe("settings/useSettingsPersistence", () => {
       result.current.requestPersist({ circuit_breaker_failure_threshold: 0 } as any);
     });
     await waitFor(() => expect(toast).toHaveBeenCalledWith("熔断阈值必须为 1-50"));
+
+    act(() => {
+      result.current.requestPersist({
+        failover_max_attempts_per_provider: 20,
+        failover_max_providers_to_try: 20,
+      } as any);
+    });
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("Provider 重试总量必须不超过 100"));
 
     expect(mutation.mutateAsync).not.toHaveBeenCalled();
   });

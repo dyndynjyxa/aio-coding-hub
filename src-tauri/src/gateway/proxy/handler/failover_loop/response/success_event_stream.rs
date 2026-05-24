@@ -5,15 +5,19 @@ use crate::gateway::proxy::gemini_oauth;
 use crate::gateway::proxy::protocol_bridge;
 use std::time::Duration;
 
-pub(super) async fn handle_success_event_stream(
-    ctx: CommonCtx<'_>,
+pub(super) async fn handle_success_event_stream<R>(
+    ctx: CommonCtx<'_, R>,
     provider_ctx: ProviderCtx<'_>,
     attempt_ctx: AttemptCtx<'_>,
-    loop_state: LoopState<'_>,
+    loop_state: LoopState<'_, R>,
     resp: reqwest::Response,
     status: StatusCode,
     mut response_headers: HeaderMap,
-) -> LoopControl {
+) -> LoopControl
+where
+    R: tauri::Runtime,
+    R::Handle: Unpin,
+{
     let common = CommonCtxOwned::from(ctx);
     let provider_ctx_owned = ProviderCtxOwned::from(provider_ctx);
 
@@ -155,11 +159,7 @@ pub(super) async fn handle_success_event_stream(
             }
             FirstChunkProbe::Timeout => {
                 let error_code = GatewayErrorCode::UpstreamTimeout.as_str();
-                let decision = if retry_index < max_attempts_per_provider {
-                    FailoverDecision::RetrySameProvider
-                } else {
-                    FailoverDecision::SwitchProvider
-                };
+                let decision = FailoverDecision::SwitchProvider;
 
                 let outcome = format!(
                     "stream_first_byte_timeout: category={} code={} decision={} timeout_secs={}",

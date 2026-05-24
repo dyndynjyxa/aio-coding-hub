@@ -17,7 +17,7 @@ pub(super) struct ProviderKey {
     pub(super) provider_name: String,
 }
 
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub(super) struct ProviderAgg {
     pub(super) requests_total: i64,
     pub(super) requests_success: i64,

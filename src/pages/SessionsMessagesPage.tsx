@@ -192,6 +192,9 @@ export function SessionsMessagesPage() {
   const allMessages = useMemo(() => {
     return messagesQuery.data?.pages.flatMap((page) => page?.messages ?? []) ?? [];
   }, [messagesQuery.data]);
+  const firstCachedPage = messagesQuery.data?.pages[0]?.page ?? 0;
+  const firstCachedPageSize = messagesQuery.data?.pages[0]?.page_size ?? 50;
+  const globalStartIndex = firstCachedPage * firstCachedPageSize;
   const rowVirtualizer = useVirtualizer({
     count: allMessages.length,
     getScrollElement: () => containerRef.current,
@@ -263,7 +266,10 @@ export function SessionsMessagesPage() {
   const subtitle = subtitleParts.length > 0 ? subtitleParts.join(" · ") : undefined;
   const canCopyResume = Boolean(session?.session_id?.trim());
   const loadedCount = allMessages.length;
-  const globalStartIndex = 0;
+  const loadedStart = total > 0 && loadedCount > 0 ? globalStartIndex + 1 : 0;
+  const loadedEnd = globalStartIndex + loadedCount;
+  const loadedRangeText =
+    loadedStart > 0 ? `显示 ${loadedStart}-${loadedEnd}/${total} 条消息` : "—";
 
   return (
     <div className="flex min-h-0 flex-col gap-6 h-full overflow-hidden">
@@ -299,7 +305,8 @@ export function SessionsMessagesPage() {
               <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                 {total > 0 ? (
                   <span>
-                    已加载 {loadedCount}/{total} 条消息{hasMore ? "（可加载更多）" : ""}
+                    {loadedRangeText}
+                    {hasMore ? "（可加载更多）" : ""}
                   </span>
                 ) : (
                   <span>—</span>
@@ -495,7 +502,7 @@ export function SessionsMessagesPage() {
             <div>
               {total > 0 ? (
                 <span>
-                  {hasMore ? "可加载更多" : "已到会话末尾"} · 已加载 {loadedCount}/{total}
+                  {hasMore ? "可加载更多" : "已到会话末尾"} · {loadedRangeText}
                 </span>
               ) : (
                 <span>—</span>

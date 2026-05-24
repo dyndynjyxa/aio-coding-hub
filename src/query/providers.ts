@@ -10,17 +10,26 @@ import {
   providerSetEnabled,
   providersList,
   providersReorder,
+  providerTestAvailability,
   type CliKey,
   type OAuthLimitsResult,
+  type ProviderAvailabilityResult,
   type ProviderUpsertInput,
   type ProviderSummary,
+  validateProviderCliKey,
+  validateProviderId,
 } from "../services/providers/providers";
+import { logToConsole } from "../services/consoleLog";
+import { gatewayCircuitResetProvider } from "../services/gateway/gateway";
+import { formatUnknownError } from "../utils/errors";
 import { gatewayKeys, oauthLimitsKeys, providersKeys } from "./keys";
 
 export function useProvidersListQuery(cliKey: CliKey, options?: { enabled?: boolean }) {
+  const normalizedCliKey = validateProviderCliKey(cliKey);
+
   return useQuery({
-    queryKey: providersKeys.list(cliKey),
-    queryFn: () => providersList(cliKey),
+    queryKey: providersKeys.list(normalizedCliKey),
+    queryFn: () => providersList(normalizedCliKey),
     enabled: options?.enabled ?? true,
     placeholderData: keepPreviousData,
   });
@@ -30,13 +39,15 @@ export function useProviderOAuthStatusQuery(
   providerId: number | null,
   options?: { enabled?: boolean }
 ) {
+  const normalizedProviderId = providerId == null ? null : validateProviderId(providerId);
+
   return useQuery({
-    queryKey: providersKeys.oauthStatus(providerId),
+    queryKey: providersKeys.oauthStatus(normalizedProviderId),
     queryFn: () => {
-      if (providerId == null) return null;
-      return providerOAuthStatus(providerId);
+      if (normalizedProviderId == null) return null;
+      return providerOAuthStatus(normalizedProviderId);
     },
-    enabled: (options?.enabled ?? true) && providerId != null,
+    enabled: (options?.enabled ?? true) && normalizedProviderId != null,
     placeholderData: keepPreviousData,
   });
 }
@@ -46,9 +57,10 @@ export async function fetchProviderOAuthStatus(
   providerId: number | null
 ) {
   if (providerId == null) return null;
+  const normalizedProviderId = validateProviderId(providerId);
   return queryClient.fetchQuery({
-    queryKey: providersKeys.oauthStatus(providerId),
-    queryFn: () => providerOAuthStatus(providerId),
+    queryKey: providersKeys.oauthStatus(normalizedProviderId),
+    queryFn: () => providerOAuthStatus(normalizedProviderId),
   });
 }
 
@@ -71,16 +83,37 @@ export function readProviderOAuthLimitsCache(
   queryClient: QueryClient,
   providerId: number
 ): OAuthLimitsResult | null {
-  const state = queryClient.getQueryState<OAuthLimitsResult>(oauthLimitsKeys.detail(providerId));
+  const normalizedProviderId = validateProviderId(providerId);
+  const state = queryClient.getQueryState<OAuthLimitsResult>(
+    oauthLimitsKeys.detail(normalizedProviderId)
+  );
   return state?.data ?? null;
 }
 
 export async function refreshProviderOAuthLimits(
   queryClient: QueryClient,
-  providerId: number
+  providerId: number,
+  options?: { resetCircuitAfterRefresh?: boolean }
 ): Promise<OAuthLimitsResult> {
-  const next = normalizeProviderOAuthLimitsResult(await providerOAuthFetchLimits(providerId));
-  queryClient.setQueryData(oauthLimitsKeys.detail(providerId), next);
+  const normalizedProviderId = validateProviderId(providerId);
+  const next = normalizeProviderOAuthLimitsResult(
+    await providerOAuthFetchLimits(normalizedProviderId)
+  );
+  queryClient.setQueryData(oauthLimitsKeys.detail(normalizedProviderId), next);
+  try {
+    if (options?.resetCircuitAfterRefresh) {
+      try {
+        await gatewayCircuitResetProvider(normalizedProviderId);
+      } catch (error) {
+        logToConsole("warn", "OAuth 配额刷新成功，但重置熔断器失败", {
+          provider_id: normalizedProviderId,
+          error: formatUnknownError(error),
+        });
+      }
+    }
+  } finally {
+    void queryClient.invalidateQueries({ queryKey: gatewayKeys.circuits() });
+  }
   return next;
 }
 
@@ -139,14 +172,12 @@ export function useProviderDeleteMutation() {
     mutationFn: (input: { cliKey: CliKey; providerId: number }) => providerDelete(input.providerId),
     onSuccess: (ok, input) => {
       if (!ok) return;
+      const cliKey = validateProviderCliKey(input.cliKey);
 
-      queryClient.setQueryData<ProviderSummary[] | null>(
-        providersKeys.list(input.cliKey),
-        (prev) => {
-          if (!prev) return prev;
-          return prev.filter((row) => row.id !== input.providerId);
-        }
-      );
+      queryClient.setQueryData<ProviderSummary[] | null>(providersKeys.list(cliKey), (prev) => {
+        if (!prev) return prev;
+        return prev.filter((row) => row.id !== input.providerId);
+      });
     },
   });
 }
@@ -168,25 +199,28 @@ export function useProvidersReorderMutation() {
       cliKey: CliKey;
       orderedProviderIds: number[];
       optimisticProviders?: ProviderSummary[];
-    }) => providersReorder(input.cliKey, input.orderedProviderIds),
+    }) => providersReorder(validateProviderCliKey(input.cliKey), input.orderedProviderIds),
     onMutate: async (input) => {
-      await queryClient.cancelQueries({ queryKey: providersKeys.list(input.cliKey) });
+      const cliKey = validateProviderCliKey(input.cliKey);
+      await queryClient.cancelQueries({ queryKey: providersKeys.list(cliKey) });
       const previousProviders = queryClient.getQueryData<ProviderSummary[] | null>(
-        providersKeys.list(input.cliKey)
+        providersKeys.list(cliKey)
       );
       if (input.optimisticProviders) {
-        queryClient.setQueryData(providersKeys.list(input.cliKey), input.optimisticProviders);
+        queryClient.setQueryData(providersKeys.list(cliKey), input.optimisticProviders);
       }
       return { previousProviders };
     },
     onError: (_error, input, context) => {
       if (context?.previousProviders !== undefined) {
-        queryClient.setQueryData(providersKeys.list(input.cliKey), context.previousProviders);
+        const cliKey = validateProviderCliKey(input.cliKey);
+        queryClient.setQueryData(providersKeys.list(cliKey), context.previousProviders);
       }
     },
     onSuccess: (next, input) => {
       if (!next) return;
-      queryClient.setQueryData(providersKeys.list(input.cliKey), next);
+      const cliKey = validateProviderCliKey(input.cliKey);
+      queryClient.setQueryData(providersKeys.list(cliKey), next);
     },
   });
 }
@@ -219,13 +253,23 @@ export function useProviderClaudeTerminalLaunchCommandMutation() {
 }
 
 export function useOAuthLimitsQuery(providerId: number, enabled: boolean) {
+  const normalizedProviderId = validateProviderId(providerId);
+
   return useQuery({
-    queryKey: oauthLimitsKeys.detail(providerId),
+    queryKey: oauthLimitsKeys.detail(normalizedProviderId),
     queryFn: async (): Promise<OAuthLimitsResult> => {
-      return normalizeProviderOAuthLimitsResult(await providerOAuthFetchLimits(providerId));
+      return normalizeProviderOAuthLimitsResult(
+        await providerOAuthFetchLimits(normalizedProviderId)
+      );
     },
     enabled,
     staleTime: 180_000,
     refetchInterval: 180_000,
+  });
+}
+
+export function useProviderTestAvailabilityMutation() {
+  return useMutation<ProviderAvailabilityResult | null, Error, { providerId: number }>({
+    mutationFn: (input) => providerTestAvailability(input.providerId),
   });
 }

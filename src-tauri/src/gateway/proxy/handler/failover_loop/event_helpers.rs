@@ -11,8 +11,8 @@ pub(super) struct AttemptCircuitFields {
     pub(super) failure_threshold: Option<u32>,
 }
 
-pub(super) async fn emit_attempt_event_and_log(
-    ctx: CommonCtx<'_>,
+pub(super) async fn emit_attempt_event_and_log<R: tauri::Runtime>(
+    ctx: CommonCtx<'_, R>,
     provider_ctx: ProviderCtx<'_>,
     attempt_ctx: AttemptCtx<'_>,
     outcome: String,
@@ -29,6 +29,7 @@ pub(super) async fn emit_attempt_event_and_log(
         provider_base_url_base,
         provider_index: _,
         session_reuse,
+        claude_model_mapping,
         ..
     } = provider_ctx;
     let AttemptCtx {
@@ -61,14 +62,15 @@ pub(super) async fn emit_attempt_event_and_log(
         circuit_state_after: circuit.state_after,
         circuit_failure_count: circuit.failure_count,
         circuit_failure_threshold: circuit.failure_threshold,
+        claude_model_mapping: claude_model_mapping.cloned(),
     };
 
     let state = ctx.state;
     emit_attempt_event(&state.app, attempt_event);
 }
 
-pub(super) async fn emit_attempt_event_and_log_with_circuit_before(
-    ctx: CommonCtx<'_>,
+pub(super) async fn emit_attempt_event_and_log_with_circuit_before<R: tauri::Runtime>(
+    ctx: CommonCtx<'_, R>,
     provider_ctx: ProviderCtx<'_>,
     attempt_ctx: AttemptCtx<'_>,
     outcome: String,

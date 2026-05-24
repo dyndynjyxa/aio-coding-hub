@@ -227,6 +227,12 @@ function mockDataModel(overrides: Partial<ReturnType<typeof useHomeTokenCostData
   } as ReturnType<typeof useHomeTokenCostDataModel>);
 }
 
+function rowCellTexts(row: HTMLElement) {
+  return within(row)
+    .getAllByRole("cell")
+    .map((cell) => cell.textContent?.trim() ?? "");
+}
+
 describe("components/home/HomeTodayProviderUsageOverview", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -247,6 +253,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
           endTs: null,
           cliKey: null,
           providerId: null,
+          excludeCx2CcGatewayBridge: true,
         },
         previewFactor: 1,
       },
@@ -265,7 +272,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
 
     const totalWithCacheCard = screen.getByText("含缓存总 Token").parentElement;
     const inputOutputTokenCard = screen.getAllByText("输入+输出 Token")[0]?.parentElement;
-    const cacheHitRateCard = screen.getByText("缓存命中率").parentElement;
+    const cacheHitRateCard = screen.getAllByText("缓存命中率")[0]?.parentElement;
     expect(totalWithCacheCard).toBeTruthy();
     expect(inputOutputTokenCard).toBeTruthy();
     expect(cacheHitRateCard).toBeTruthy();
@@ -277,18 +284,30 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(screen.getByText("今日花费")).toBeInTheDocument();
     expect(screen.getByText("$2.21")).toBeInTheDocument();
     const providerHeader = screen.getByText("供应商").closest("th");
+    const usageTable = screen.getByRole("table", { name: "今日供应商用量" });
+    const headerTexts = within(usageTable)
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent?.trim() ?? "");
+    const totalTokenHeader = screen.getByRole("columnheader", { name: "总Token" });
+    const cacheHitRateHeader = screen.getByRole("columnheader", { name: "缓存命中率" });
     const inputOutputTokenHeader = screen.getByRole("columnheader", {
-      name: /输入\+输出 Token/,
+      name: "输入+输出Token",
     });
-    const cacheHeader = screen.getByText("缓存情况").closest("th");
     expect(providerHeader).toBeTruthy();
+    expect(headerTexts).toEqual([
+      "供应商（前 3 个）",
+      "总Token",
+      "缓存命中率",
+      "输入+输出Token",
+      "总花费",
+      "成功率",
+    ]);
+    expect(totalTokenHeader).toBeTruthy();
+    expect(cacheHitRateHeader).toBeTruthy();
     expect(inputOutputTokenHeader).toBeTruthy();
-    expect(cacheHeader).toBeTruthy();
     expect(within(providerHeader as HTMLElement).getByText("（前 3 个）")).toBeInTheDocument();
-    expect(
-      within(cacheHeader as HTMLElement).getByText("（含缓存/缓存/命中率）")
-    ).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "成功率" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: /缓存情况/ })).not.toBeInTheDocument();
     expect(screen.queryByText("Token 占比")).not.toBeInTheDocument();
 
     const geminiRow = screen.getByText("Gemini Mirror").closest("tr");
@@ -301,15 +320,33 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(screen.queryByText("Mistral Edge")).not.toBeInTheDocument();
     expect(screen.queryByText("Local Sandbox")).not.toBeInTheDocument();
 
-    expect(within(geminiRow as HTMLElement).getByLabelText("8.0K/40.0%")).toBeInTheDocument();
-    expect(within(geminiRow as HTMLElement).getByLabelText("10.2K/2.2K/20.9%")).toBeInTheDocument();
+    expect(rowCellTexts(geminiRow as HTMLElement)).toEqual([
+      "Gemini Mirror",
+      "10.2K",
+      "20.9%",
+      "8.0K",
+      "$0.90",
+      "85.7%",
+    ]);
     expect(within(geminiRow as HTMLElement).getByText("$0.90")).toBeInTheDocument();
     expect(within(geminiRow as HTMLElement).getByText("85.7%")).toBeInTheDocument();
     expect(within(claudeRow as HTMLElement).getByText("100.0%")).toBeInTheDocument();
-    expect(within(claudeRow as HTMLElement).getByLabelText("5.0K/25.0%")).toBeInTheDocument();
-    expect(within(claudeRow as HTMLElement).getByLabelText("6.2K/1.2K/16.7%")).toBeInTheDocument();
-    expect(within(openaiRow as HTMLElement).getByLabelText("4.0K/20.0%")).toBeInTheDocument();
-    expect(within(openaiRow as HTMLElement).getByLabelText("5.8K/1.8K/31.6%")).toBeInTheDocument();
+    expect(rowCellTexts(claudeRow as HTMLElement)).toEqual([
+      "Claude Main",
+      "6.2K",
+      "16.7%",
+      "5.0K",
+      "$0.50",
+      "100.0%",
+    ]);
+    expect(rowCellTexts(openaiRow as HTMLElement)).toEqual([
+      "OpenAI Primary",
+      "5.8K",
+      "31.6%",
+      "4.0K",
+      "$0.70",
+      "100.0%",
+    ]);
   });
 
   it("disables polling while the page is hidden", () => {
@@ -327,6 +364,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
           endTs: null,
           cliKey: null,
           providerId: null,
+          excludeCx2CcGatewayBridge: true,
         },
         previewFactor: 1,
       },
@@ -381,9 +419,54 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(deepseekRow).toBeTruthy();
     expect(screen.queryByText("OpenAI Primary")).not.toBeInTheDocument();
     expect(within(deepseekRow as HTMLElement).getByLabelText("进行中")).toBeInTheDocument();
-    expect(
-      within(deepseekRow as HTMLElement).getByLabelText("3.5K/1.5K/27.6%")
-    ).toBeInTheDocument();
+    expect(rowCellTexts(deepseekRow as HTMLElement)).toEqual([
+      "DeepSeek Relay",
+      "3.5K",
+      "27.6%",
+      "2.0K",
+      "—",
+      "100.0%",
+    ]);
+  });
+
+  it("keeps provider rows sorted by requests and name when token totals are tied", () => {
+    mockDataModel({
+      rows: [
+        createLeaderboardRow({
+          key: "provider-alpha",
+          name: "Alpha Relay",
+          requests_total: 2,
+          requests_success: 2,
+          io_total_tokens: 5_000,
+          total_tokens: 6_000,
+        }),
+        createLeaderboardRow({
+          key: "provider-gamma",
+          name: "Gamma Relay",
+          requests_total: 5,
+          requests_success: 5,
+          io_total_tokens: 5_000,
+          total_tokens: 6_500,
+        }),
+        createLeaderboardRow({
+          key: "provider-beta",
+          name: "Beta Relay",
+          requests_total: 5,
+          requests_success: 5,
+          io_total_tokens: 5_000,
+          total_tokens: 7_000,
+        }),
+      ],
+    });
+
+    render(<HomeTodayProviderUsageOverview />);
+
+    const usageTable = screen.getByRole("table", { name: "今日供应商用量" });
+    const providerNames = within(usageTable)
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) => within(row).getAllByRole("cell")[0]?.textContent?.trim());
+    expect(providerNames).toEqual(["Beta Relay", "Gamma Relay", "Alpha Relay"]);
   });
 
   it("renders a synthetic running row when the provider has no usage row today", () => {
@@ -397,9 +480,245 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(runtimeRow).toBeTruthy();
     expect(screen.queryByText("OpenAI Primary")).not.toBeInTheDocument();
     expect(within(runtimeRow as HTMLElement).getByLabelText("进行中")).toBeInTheDocument();
-    expect(within(runtimeRow as HTMLElement).getByLabelText("—/—")).toBeInTheDocument();
-    expect(within(runtimeRow as HTMLElement).getByLabelText("—/—/—")).toBeInTheDocument();
-    expect(within(runtimeRow as HTMLElement).getAllByText("—").length).toBeGreaterThanOrEqual(2);
+    expect(rowCellTexts(runtimeRow as HTMLElement)).toEqual([
+      "claude/Runtime Fresh",
+      "—",
+      "—",
+      "—",
+      "—",
+      "—",
+    ]);
+  });
+
+  it("skips unnamed active sessions and keeps already-prefixed provider names", () => {
+    mockDataModel({ rows: [] });
+
+    render(
+      <HomeTodayProviderUsageOverview
+        activeSessions={[
+          createActiveSession("", { providerId: 2, cliKey: "claude" }),
+          createActiveSession("claude/Runtime Fresh", { providerId: 3, cliKey: "claude" }),
+          createActiveSession("claude/Runtime Fresh", { providerId: 3, cliKey: "claude" }),
+        ]}
+      />
+    );
+
+    expect(screen.getByText("claude/Runtime Fresh")).toBeInTheDocument();
+    expect(screen.queryByText("未知")).not.toBeInTheDocument();
+    expect(screen.queryByText("claude/claude/Runtime Fresh")).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText("进行中")).toHaveLength(1);
+  });
+
+  it("keeps synthetic provider names unprefixed while preview data is active", () => {
+    mockDataModel({ rows: [], previewActive: true });
+
+    render(
+      <HomeTodayProviderUsageOverview
+        activeSessions={[createActiveSession("Runtime Fresh", { providerId: 5, cliKey: "claude" })]}
+      />
+    );
+
+    expect(screen.getByText("Runtime Fresh")).toBeInTheDocument();
+    expect(screen.queryByText("claude/Runtime Fresh")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("进行中")).toBeInTheDocument();
+  });
+
+  it("limits synthetic active session rows to the first three providers", () => {
+    mockDataModel({ rows: [] });
+
+    render(
+      <HomeTodayProviderUsageOverview
+        activeSessions={[
+          createActiveSession("Runtime One", { providerId: 11, cliKey: "claude" }),
+          createActiveSession("Runtime Two", { providerId: 12, cliKey: "claude" }),
+          createActiveSession("Runtime Three", { providerId: 13, cliKey: "claude" }),
+          createActiveSession("Runtime Four", { providerId: 14, cliKey: "claude" }),
+        ]}
+      />
+    );
+
+    expect(screen.getByText("claude/Runtime One")).toBeInTheDocument();
+    expect(screen.getByText("claude/Runtime Two")).toBeInTheDocument();
+    expect(screen.getByText("claude/Runtime Three")).toBeInTheDocument();
+    expect(screen.queryByText("claude/Runtime Four")).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText("进行中")).toHaveLength(3);
+  });
+
+  it("matches active sessions by scoped or unscoped names when provider ids are absent", () => {
+    mockDataModel({
+      rows: [
+        createLeaderboardRow({
+          key: "claude:0",
+          name: "claude/Zero Id",
+          total_tokens: 8_000,
+          io_total_tokens: 7_000,
+        }),
+        createLeaderboardRow({
+          key: "provider-name-only",
+          name: "Name Only",
+          total_tokens: 6_000,
+          io_total_tokens: 5_000,
+        }),
+      ],
+    });
+
+    render(
+      <HomeTodayProviderUsageOverview
+        activeSessions={[
+          createActiveSession("Zero Id", { providerId: 0, cliKey: "claude" }),
+          createActiveSession("Name Only", { providerId: 0, cliKey: " " }),
+          createActiveSession("New Name Only", { providerId: 0, cliKey: " " }),
+        ]}
+      />
+    );
+
+    expect(screen.getByText("claude/Zero Id").closest("tr")).toHaveTextContent("8.0K");
+    expect(screen.getByText("Name Only").closest("tr")).toHaveTextContent("6.0K");
+    expect(screen.getByText("New Name Only")).toBeInTheDocument();
+    expect(screen.getAllByLabelText("进行中")).toHaveLength(3);
+  });
+
+  it("ignores completed, stale, unnamed, unknown, and duplicate live traces", () => {
+    mockDataModel({ rows: [] });
+    const now = Date.now();
+    const completedTrace = {
+      ...createRunningTrace("Completed Trace", { providerId: 21, traceId: "completed" }),
+      summary: {} as NonNullable<TraceSession["summary"]>,
+    };
+    const oldTrace = {
+      ...createRunningTrace("Old Trace", { providerId: 22, traceId: "old" }),
+      first_seen_ms: now - 16 * 60 * 1000,
+      last_seen_ms: now,
+    };
+    const staleTrace = {
+      ...createRunningTrace("Stale Trace", { providerId: 23, traceId: "stale" }),
+      first_seen_ms: now - 60 * 1000,
+      last_seen_ms: now - 6 * 60 * 1000,
+    };
+    const unnamedTrace = {
+      ...createRunningTrace("Unnamed Trace", { providerId: 24, traceId: "unnamed" }),
+      attempts: [],
+    };
+    const missingAttemptsTrace = {
+      ...createRunningTrace("Missing Attempts Trace", {
+        providerId: 25,
+        traceId: "missing-attempts",
+      }),
+      attempts: undefined,
+    } as unknown as TraceSession;
+    const unknownTrace = createRunningTrace("Unknown", {
+      providerId: 26,
+      traceId: "unknown",
+    });
+    const emptyScopedNameTrace = createRunningTrace("claude/", {
+      providerId: 27,
+      traceId: "empty-scoped-name",
+    });
+    const liveTrace = createRunningTrace("Trace Fresh", {
+      providerId: 28,
+      traceId: "live",
+    });
+    const duplicateTrace = createRunningTrace("Trace Fresh", {
+      providerId: 28,
+      traceId: "duplicate",
+    });
+
+    render(
+      <HomeTodayProviderUsageOverview
+        traces={[
+          completedTrace,
+          oldTrace,
+          staleTrace,
+          unnamedTrace,
+          missingAttemptsTrace,
+          unknownTrace,
+          emptyScopedNameTrace,
+          liveTrace,
+          duplicateTrace,
+        ]}
+      />
+    );
+
+    expect(screen.getByText("claude/Trace Fresh")).toBeInTheDocument();
+    expect(screen.queryByText("claude/Completed Trace")).not.toBeInTheDocument();
+    expect(screen.queryByText("claude/Old Trace")).not.toBeInTheDocument();
+    expect(screen.queryByText("claude/Stale Trace")).not.toBeInTheDocument();
+    expect(screen.queryByText("claude/Unknown")).not.toBeInTheDocument();
+    expect(screen.queryByText("claude/Missing Attempts Trace")).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText("进行中")).toHaveLength(1);
+  });
+
+  it("matches active sessions by scoped name when provider id is invalid", () => {
+    mockDataModel({
+      rows: [
+        createLeaderboardRow({
+          key: "claude:44",
+          name: "claude/Runtime Fresh",
+          total_tokens: 9_200,
+          io_total_tokens: 8_000,
+          input_tokens: 5_000,
+          output_tokens: 3_000,
+        }),
+        createLeaderboardRow({
+          key: "provider-other",
+          name: "Other Relay",
+          total_tokens: 7_000,
+          io_total_tokens: 6_000,
+        }),
+      ],
+    });
+
+    render(
+      <HomeTodayProviderUsageOverview
+        activeSessions={[createActiveSession("Runtime Fresh", { providerId: 0, cliKey: "claude" })]}
+      />
+    );
+
+    const providerRow = screen.getByText("claude/Runtime Fresh").closest("tr");
+    expect(providerRow).toBeTruthy();
+    expect(within(providerRow as HTMLElement).getByLabelText("进行中")).toBeInTheDocument();
+    expect(rowCellTexts(providerRow as HTMLElement)).toEqual([
+      "claude/Runtime Fresh",
+      "9.2K",
+      "1.9%",
+      "8.0K",
+      "$0.10",
+      "100.0%",
+    ]);
+  });
+
+  it("shows dashes for provider rates when a row has no requests or cache denominator", () => {
+    mockDataModel({
+      rows: [
+        createLeaderboardRow({
+          key: "provider-zero",
+          name: "Zero Request Relay",
+          requests_total: 0,
+          requests_success: 0,
+          requests_failed: 0,
+          total_tokens: 1_200,
+          io_total_tokens: 1_000,
+          input_tokens: 0,
+          output_tokens: 1_000,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+          cost_usd: null,
+        }),
+      ],
+    });
+
+    render(<HomeTodayProviderUsageOverview />);
+
+    const providerRow = screen.getByText("Zero Request Relay").closest("tr");
+    expect(providerRow).toBeTruthy();
+    expect(rowCellTexts(providerRow as HTMLElement)).toEqual([
+      "Zero Request Relay",
+      "1.2K",
+      "—",
+      "1.0K",
+      "—",
+      "—",
+    ]);
   });
 
   it("matches a running provider to the prefixed usage row by provider id", () => {

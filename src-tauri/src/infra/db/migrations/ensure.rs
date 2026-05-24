@@ -12,6 +12,7 @@ pub(super) fn apply_ensure_patches(conn: &mut Connection) -> crate::shared::erro
     ensure_workspace_cluster(conn)?;
     ensure_provider_limits(conn)?;
     ensure_provider_oauth_columns(conn)?;
+    ensure_provider_oauth_limit_snapshots(conn)?;
     ensure_sort_mode_providers_enabled(conn)?;
     ensure_usage_indexes(conn)?;
     ensure_provider_tags(conn)?;
@@ -523,6 +524,27 @@ WHERE oauth_refresh_lead_s IS NULL OR oauth_refresh_lead_s <= 0;
     Ok(())
 }
 
+fn ensure_provider_oauth_limit_snapshots(conn: &Connection) -> crate::shared::error::AppResult<()> {
+    conn.execute_batch(
+        r#"
+CREATE TABLE IF NOT EXISTS provider_oauth_limit_snapshots (
+  provider_id INTEGER PRIMARY KEY,
+  limit_short_label TEXT,
+  limit_5h_text TEXT,
+  limit_weekly_text TEXT,
+  limit_5h_reset_at INTEGER,
+  limit_weekly_reset_at INTEGER,
+  checked_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(provider_id) REFERENCES providers(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_provider_oauth_limit_snapshots_checked_at
+  ON provider_oauth_limit_snapshots(checked_at);
+"#,
+    )
+    .map_err(|e| format!("failed to ensure provider OAuth limit snapshots table: {e}").into())
+}
+
 // ---------------------------------------------------------------------------
 // ensure_sort_mode_providers_enabled (from v29_to_v30_sort_mode_providers_enabled.rs)
 // ---------------------------------------------------------------------------
@@ -625,6 +647,26 @@ CREATE INDEX IF NOT EXISTS idx_request_logs_provider_success_cost
 "#,
     )
     .map_err(|e| format!("failed to create idx_request_logs_provider_success_cost: {e}"))?;
+
+    // Index 3: Request log pages sort by created_at_ms DESC, id DESC. Keep
+    // path in the key for Claude's visible `/v1/messages` filter.
+    tx.execute_batch(
+        r#"
+CREATE INDEX IF NOT EXISTS idx_request_logs_cli_path_created_at_ms_id
+  ON request_logs(cli_key, path, created_at_ms DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_request_logs_cli_created_at_ms_id
+  ON request_logs(cli_key, created_at_ms DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_request_logs_visible_created_at_ms_id
+  ON request_logs(created_at_ms DESC, id DESC)
+  WHERE cli_key != 'claude' OR path = '/v1/messages';
+
+CREATE INDEX IF NOT EXISTS idx_request_logs_cli_id
+  ON request_logs(cli_key, id);
+"#,
+    )
+    .map_err(|e| format!("failed to create request log list indexes: {e}"))?;
 
     tx.commit()
         .map_err(|e| format!("failed to commit sqlite transaction: {e}"))?;

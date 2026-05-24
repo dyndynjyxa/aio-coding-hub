@@ -1,1 +1,1 @@
-export type UsageTableTab = "usage" | "cacheTrend";
+export type UsageTableTab = "usage" | "cacheTrend" | "availability";

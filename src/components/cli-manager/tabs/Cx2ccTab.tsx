@@ -1,6 +1,11 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { toast } from "sonner";
 import { Settings } from "lucide-react";
 import type { AppSettings } from "../../../services/settings/settings";
+import {
+  validateCx2ccFallbackModel,
+  validateCx2ccOptionalField,
+} from "../../../services/settings/settingsValidation";
 import { cn } from "../../../utils/cn";
 import { Card } from "../../../ui/Card";
 import { Input } from "../../../ui/Input";
@@ -12,6 +17,13 @@ export type CliManagerCx2ccTabProps = {
   commonSettingsSaving: boolean;
   onPersistCommonSettings: (patch: Partial<AppSettings>) => Promise<AppSettings | null>;
 };
+
+type Cx2ccTextSettingKey =
+  | "cx2cc_fallback_model_opus"
+  | "cx2cc_fallback_model_sonnet"
+  | "cx2cc_fallback_model_haiku"
+  | "cx2cc_fallback_model_main"
+  | "cx2cc_service_tier";
 
 function SettingItem({
   label,
@@ -81,6 +93,52 @@ export function CliManagerCx2ccTab({
     setReasoningEffortText(updated.cx2cc_model_reasoning_effort);
   }
 
+  async function persistFallbackModel(
+    key: Exclude<Cx2ccTextSettingKey, "cx2cc_service_tier">,
+    label: string,
+    value: string,
+    setText: (value: string) => void
+  ) {
+    if (!appSettings) return;
+
+    const previous = appSettings[key];
+    const trimmed = value.trim();
+    setText(trimmed);
+
+    const validationMessage = validateCx2ccFallbackModel(label, trimmed);
+    if (validationMessage) {
+      toast(validationMessage);
+      setText(previous);
+      return;
+    }
+
+    const updated = await onPersistCommonSettings({ [key]: trimmed } as Partial<AppSettings>);
+    setText(updated ? updated[key] : previous);
+  }
+
+  async function persistOptionalTextSetting(
+    key: Extract<Cx2ccTextSettingKey, "cx2cc_service_tier">,
+    label: string,
+    value: string,
+    setText: (value: string) => void
+  ) {
+    if (!appSettings) return;
+
+    const previous = appSettings[key];
+    const trimmed = value.trim();
+    setText(trimmed);
+
+    const validationMessage = validateCx2ccOptionalField(label, trimmed);
+    if (validationMessage) {
+      toast(validationMessage);
+      setText(previous);
+      return;
+    }
+
+    const updated = await onPersistCommonSettings({ [key]: trimmed } as Partial<AppSettings>);
+    setText(updated ? updated[key] : previous);
+  }
+
   return (
     <div className="space-y-6">
       <Card className="overflow-hidden p-5">
@@ -94,11 +152,12 @@ export function CliManagerCx2ccTab({
               value={fallbackModelOpusText}
               onChange={(e) => setFallbackModelOpusText(e.currentTarget.value)}
               onBlur={(e) => {
-                const value = e.currentTarget.value.trim();
-                setFallbackModelOpusText(value);
-                if (value) {
-                  void onPersistCommonSettings({ cx2cc_fallback_model_opus: value });
-                }
+                void persistFallbackModel(
+                  "cx2cc_fallback_model_opus",
+                  "Opus 默认模型",
+                  e.currentTarget.value,
+                  setFallbackModelOpusText
+                );
               }}
               placeholder="gpt-5.4"
               className="font-mono w-[240px] max-w-full"
@@ -114,11 +173,12 @@ export function CliManagerCx2ccTab({
               value={fallbackModelSonnetText}
               onChange={(e) => setFallbackModelSonnetText(e.currentTarget.value)}
               onBlur={(e) => {
-                const value = e.currentTarget.value.trim();
-                setFallbackModelSonnetText(value);
-                if (value) {
-                  void onPersistCommonSettings({ cx2cc_fallback_model_sonnet: value });
-                }
+                void persistFallbackModel(
+                  "cx2cc_fallback_model_sonnet",
+                  "Sonnet 默认模型",
+                  e.currentTarget.value,
+                  setFallbackModelSonnetText
+                );
               }}
               placeholder="gpt-5.4"
               className="font-mono w-[240px] max-w-full"
@@ -131,11 +191,12 @@ export function CliManagerCx2ccTab({
               value={fallbackModelHaikuText}
               onChange={(e) => setFallbackModelHaikuText(e.currentTarget.value)}
               onBlur={(e) => {
-                const value = e.currentTarget.value.trim();
-                setFallbackModelHaikuText(value);
-                if (value) {
-                  void onPersistCommonSettings({ cx2cc_fallback_model_haiku: value });
-                }
+                void persistFallbackModel(
+                  "cx2cc_fallback_model_haiku",
+                  "Haiku 默认模型",
+                  e.currentTarget.value,
+                  setFallbackModelHaikuText
+                );
               }}
               placeholder="gpt-5.4"
               className="font-mono w-[240px] max-w-full"
@@ -148,11 +209,12 @@ export function CliManagerCx2ccTab({
               value={fallbackModelMainText}
               onChange={(e) => setFallbackModelMainText(e.currentTarget.value)}
               onBlur={(e) => {
-                const value = e.currentTarget.value.trim();
-                setFallbackModelMainText(value);
-                if (value) {
-                  void onPersistCommonSettings({ cx2cc_fallback_model_main: value });
-                }
+                void persistFallbackModel(
+                  "cx2cc_fallback_model_main",
+                  "主模型默认",
+                  e.currentTarget.value,
+                  setFallbackModelMainText
+                );
               }}
               placeholder="gpt-5.4"
               className="font-mono w-[240px] max-w-full"
@@ -194,9 +256,12 @@ export function CliManagerCx2ccTab({
               value={serviceTierText}
               onChange={(e) => setServiceTierText(e.currentTarget.value)}
               onBlur={(e) => {
-                const value = e.currentTarget.value.trim();
-                setServiceTierText(value);
-                void onPersistCommonSettings({ cx2cc_service_tier: value });
+                void persistOptionalTextSetting(
+                  "cx2cc_service_tier",
+                  "服务层级",
+                  e.currentTarget.value,
+                  setServiceTierText
+                );
               }}
               placeholder="例如: fast"
               className="font-mono w-[240px] max-w-full"

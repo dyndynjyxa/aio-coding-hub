@@ -16,7 +16,9 @@ pub(super) struct FinalizeOwnedCommon {
     pub(super) special_settings: Arc<Mutex<Vec<serde_json::Value>>>,
 }
 
-pub(super) fn finalize_owned_from_input(input: &RequestContext) -> FinalizeOwnedCommon {
+pub(super) fn finalize_owned_from_input<R: tauri::Runtime>(
+    input: &RequestContext<R>,
+) -> FinalizeOwnedCommon {
     FinalizeOwnedCommon {
         cli_key: input.cli_key.clone(),
         method_hint: input.method_hint.clone(),

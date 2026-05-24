@@ -1,11 +1,17 @@
 use crate::db;
 use rusqlite::{params_from_iter, Connection};
 
-use super::filters::build_optional_range_cli_provider_filters;
+use super::filters::{
+    build_optional_range_cli_provider_filters, sql_exclude_cx2cc_gateway_bridge_clause,
+};
+use super::folders::{
+    filter_rows_by_folder_keys, resolved_folder_map, session_lookup_keys, usage_event_rows,
+    UsageEventAgg,
+};
 use super::{
     compute_start_ts, normalize_cli_filter, parse_range, resolve_query_params,
-    sql_effective_total_tokens_expr, UsageQueryParams, UsageSummary,
-    SQL_EFFECTIVE_INPUT_TOKENS_EXPR,
+    sql_effective_total_tokens_expr, ProviderAgg, UsageQueryParams, UsageResolvedFolder,
+    UsageSessionLookupKey, UsageSummary, SQL_EFFECTIVE_INPUT_TOKENS_EXPR,
 };
 
 fn build_summary_where_clause(
@@ -13,6 +19,7 @@ fn build_summary_where_clause(
     end_ts: Option<i64>,
     cli_key: Option<&str>,
     provider_id: Option<i64>,
+    exclude_cx2cc_gateway_bridge: bool,
 ) -> (String, Vec<rusqlite::types::Value>) {
     let (filter_sql, values) = build_optional_range_cli_provider_filters(
         "created_at",
@@ -23,7 +30,9 @@ fn build_summary_where_clause(
         cli_key,
         provider_id,
     );
-    let clause = format!("excluded_from_stats = 0{filter_sql}");
+    let cx2cc_filter_sql =
+        sql_exclude_cx2cc_gateway_bridge_clause(None, exclude_cx2cc_gateway_bridge);
+    let clause = format!("excluded_from_stats = 0{filter_sql}{cx2cc_filter_sql}");
     (clause, values)
 }
 
@@ -33,11 +42,17 @@ pub(super) fn summary_query(
     end_ts: Option<i64>,
     cli_key: Option<&str>,
     provider_id: Option<i64>,
+    exclude_cx2cc_gateway_bridge: bool,
 ) -> Result<UsageSummary, String> {
     let effective_input_expr = SQL_EFFECTIVE_INPUT_TOKENS_EXPR;
     let effective_total_expr = sql_effective_total_tokens_expr();
-    let (where_sql, params_vec) =
-        build_summary_where_clause(start_ts, end_ts, cli_key, provider_id);
+    let (where_sql, params_vec) = build_summary_where_clause(
+        start_ts,
+        end_ts,
+        cli_key,
+        provider_id,
+        exclude_cx2cc_gateway_bridge,
+    );
     let sql = format!(
         r#"
 	SELECT
@@ -200,20 +215,100 @@ pub fn summary(
     let start_ts = compute_start_ts(&conn, range)?;
     let cli_key = normalize_cli_filter(cli_key)?;
 
-    Ok(summary_query(&conn, start_ts, None, cli_key, None)?)
+    Ok(summary_query(&conn, start_ts, None, cli_key, None, false)?)
 }
 
-pub fn summary_v2(
-    db: &db::Db,
+fn summary_from_event_rows(rows: &[UsageEventAgg]) -> UsageSummary {
+    let mut agg = ProviderAgg::default();
+    let mut requests_with_usage = 0i64;
+    for row in rows {
+        requests_with_usage = requests_with_usage.saturating_add(row.requests_with_usage);
+        agg.merge(row.agg.clone());
+    }
+
+    let avg_duration_ms = if agg.requests_success > 0 {
+        Some(agg.success_duration_ms_sum / agg.requests_success)
+    } else {
+        None
+    };
+    let avg_ttfb_ms = if agg.success_ttfb_ms_count > 0 {
+        Some(agg.success_ttfb_ms_sum / agg.success_ttfb_ms_count)
+    } else {
+        None
+    };
+    let avg_output_tokens_per_second = if agg.success_generation_ms_sum > 0 {
+        Some(
+            agg.success_output_tokens_for_rate_sum as f64
+                / (agg.success_generation_ms_sum as f64 / 1000.0),
+        )
+    } else {
+        None
+    };
+
+    UsageSummary {
+        requests_total: agg.requests_total,
+        requests_with_usage,
+        requests_success: agg.requests_success,
+        requests_failed: agg.requests_failed,
+        cost_covered_success: agg.cost_covered_success,
+        avg_duration_ms,
+        avg_ttfb_ms,
+        avg_output_tokens_per_second,
+        input_tokens: agg.input_tokens,
+        output_tokens: agg.output_tokens,
+        io_total_tokens: agg.input_tokens.saturating_add(agg.output_tokens),
+        total_tokens: agg.total_tokens,
+        cache_read_input_tokens: agg.cache_read_input_tokens,
+        cache_creation_input_tokens: agg.cache_creation_input_tokens,
+        cache_creation_5m_input_tokens: agg.cache_creation_5m_input_tokens,
+        cache_creation_1h_input_tokens: agg.cache_creation_1h_input_tokens,
+    }
+}
+
+pub(super) fn summary_v2_with_conn<F>(
+    conn: &Connection,
     params: &UsageQueryParams,
-) -> crate::shared::error::AppResult<UsageSummary> {
-    let conn = db.open_connection()?;
-    let resolved = resolve_query_params(&conn, params)?;
-    Ok(summary_query(
-        &conn,
+    folder_lookup: F,
+) -> Result<UsageSummary, String>
+where
+    F: FnOnce(&[UsageSessionLookupKey]) -> Vec<UsageResolvedFolder>,
+{
+    let resolved = resolve_query_params(conn, params)?;
+    if let Some(folder_keys) = resolved.folder_keys.as_deref() {
+        let rows = usage_event_rows(
+            conn,
+            resolved.start_ts,
+            resolved.end_ts,
+            resolved.cli_key,
+            resolved.provider_id,
+            None,
+            false,
+            resolved.exclude_cx2cc_gateway_bridge,
+        )?;
+        let lookup_keys = session_lookup_keys(&rows);
+        let folder_map = resolved_folder_map(folder_lookup(&lookup_keys));
+        let rows = filter_rows_by_folder_keys(rows, &folder_map, Some(folder_keys));
+        return Ok(summary_from_event_rows(&rows));
+    }
+
+    summary_query(
+        conn,
         resolved.start_ts,
         resolved.end_ts,
         resolved.cli_key,
         resolved.provider_id,
-    )?)
+        resolved.exclude_cx2cc_gateway_bridge,
+    )
+}
+
+pub fn summary_v2<F>(
+    db: &db::Db,
+    params: &UsageQueryParams,
+    folder_lookup: F,
+) -> crate::shared::error::AppResult<UsageSummary>
+where
+    F: FnOnce(&[UsageSessionLookupKey]) -> Vec<UsageResolvedFolder>,
+{
+    let conn = db.open_connection()?;
+    Ok(summary_v2_with_conn(&conn, params, folder_lookup)?)
 }

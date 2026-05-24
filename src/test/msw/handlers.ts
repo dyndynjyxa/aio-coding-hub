@@ -263,6 +263,19 @@ export const handlers = [
 
   http.post(`${TAURI_ENDPOINT}/base_url_ping_ms`, () => HttpResponse.json(50)),
 
+  http.post(`${TAURI_ENDPOINT}/provider_test_availability`, () =>
+    HttpResponse.json({
+      ok: true,
+      provider_id: 1,
+      provider_name: "Test Provider",
+      base_url: "https://api.example.com",
+      status: 200,
+      latency_ms: 123,
+      error: null,
+      response_preview: null,
+    })
+  ),
+
   // ---- Usage ----
   http.post(`${TAURI_ENDPOINT}/usage_summary`, () => HttpResponse.json(getUsageSummaryState())),
 
@@ -442,6 +455,12 @@ export const handlers = [
   http.post(`${TAURI_ENDPOINT}/cli_manager_claude_env_set`, () => HttpResponse.json(null)),
   http.post(`${TAURI_ENDPOINT}/cli_manager_claude_settings_get`, () => HttpResponse.json(null)),
   http.post(`${TAURI_ENDPOINT}/cli_manager_claude_settings_set`, () => HttpResponse.json(null)),
+  http.post(`${TAURI_ENDPOINT}/cli_manager_claude_hooks_get`, () =>
+    HttpResponse.json({ settings_path: "", groups: [] })
+  ),
+  http.post(`${TAURI_ENDPOINT}/cli_manager_claude_hooks_set`, () =>
+    HttpResponse.json({ settings_path: "", groups: [] })
+  ),
 
   // ---- Claude Model Validation ----
   http.post(`${TAURI_ENDPOINT}/claude_provider_validate_model`, () => HttpResponse.json(null)),

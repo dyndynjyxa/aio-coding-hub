@@ -3,6 +3,9 @@
 import type { ProviderSummary } from "../../services/providers/providers";
 import type { BaseUrlRow } from "./types";
 
+export const MAX_PROVIDER_BASE_URLS = 32;
+export const MAX_PROVIDER_BASE_URL_CHARS = 2048;
+
 export function providerPrimaryBaseUrl(provider: ProviderSummary | null | undefined) {
   return provider?.base_urls?.[0] ?? "—";
 }
@@ -39,6 +42,13 @@ export function normalizeBaseUrlRows(rows: BaseUrlRow[]) {
     const url = row.url.trim();
     if (!url) continue;
 
+    if ([...url].length > MAX_PROVIDER_BASE_URL_CHARS) {
+      return {
+        ok: false as const,
+        message: `Base URL 不能超过 ${MAX_PROVIDER_BASE_URL_CHARS} 字符：${url.slice(0, 80)}`,
+      };
+    }
+
     try {
       const parsed = new URL(url);
       if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
@@ -53,6 +63,13 @@ export function normalizeBaseUrlRows(rows: BaseUrlRow[]) {
     }
     seen.add(url);
     baseUrls.push(url);
+
+    if (baseUrls.length > MAX_PROVIDER_BASE_URLS) {
+      return {
+        ok: false as const,
+        message: `Base URL 最多支持 ${MAX_PROVIDER_BASE_URLS} 个`,
+      };
+    }
   }
 
   if (baseUrls.length === 0) {

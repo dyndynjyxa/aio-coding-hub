@@ -1,6 +1,6 @@
 //! Usage: CLI environment / integration related Tauri commands.
 
-use crate::{blocking, claude_settings, cli_manager, codex_config, gemini_config};
+use crate::{blocking, claude_hooks, claude_settings, cli_manager, codex_config, gemini_config};
 
 #[tauri::command]
 #[specta::specta]
@@ -159,6 +159,31 @@ pub(crate) async fn cli_manager_claude_settings_set(
 ) -> Result<claude_settings::ClaudeSettingsState, String> {
     blocking::run("cli_manager_claude_settings_set", move || {
         claude_settings::claude_settings_set(&app, patch)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn cli_manager_claude_hooks_get(
+    app: tauri::AppHandle,
+) -> Result<claude_hooks::ClaudeHooksState, String> {
+    blocking::run("cli_manager_claude_hooks_get", move || {
+        claude_hooks::claude_hooks_get(&app)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn cli_manager_claude_hooks_set(
+    app: tauri::AppHandle,
+    input: claude_hooks::ClaudeHooksSetInput,
+) -> Result<claude_hooks::ClaudeHooksState, String> {
+    blocking::run("cli_manager_claude_hooks_set", move || {
+        claude_hooks::claude_hooks_set(&app, input)
     })
     .await
     .map_err(Into::into)

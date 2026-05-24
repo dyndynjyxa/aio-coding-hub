@@ -142,7 +142,7 @@ export function HomePage() {
   const oauthQuota = useHomeOAuthQuota({
     cliPriorityOrder,
     requestLogs,
-    enabled: tab === "overview" && personalizedLayoutEnabled,
+    enabled: tab === "overview",
   });
   const { pendingSortModeSwitch } = sortMode;
   const { pendingCliProxyEnablePrompt } = cliProxyState;

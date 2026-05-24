@@ -502,7 +502,7 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(screen.queryByRole("tab", { name: "供应商限额" })).not.toBeInTheDocument();
   });
 
-  it("renders the OAuth quota tab only in logs-primary layout and forwards refresh actions", async () => {
+  it("renders the OAuth quota tab in logs-primary layout and forwards refresh actions", async () => {
     window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
     const onRefreshOAuthQuota = vi.fn().mockResolvedValue(undefined);
     const onRefreshOAuthQuotaRow = vi.fn().mockResolvedValue(undefined);
@@ -548,13 +548,26 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(onRefreshOAuthQuotaRow).not.toHaveBeenCalled();
   });
 
-  it("does not render the OAuth quota tab in the legacy layout", () => {
+  it("renders the OAuth quota tab in the legacy layout and forwards refresh actions", async () => {
+    const onRefreshOAuthQuota = vi.fn().mockResolvedValue(undefined);
+    const onRefreshOAuthQuotaRow = vi.fn().mockResolvedValue(undefined);
+
     renderPanel({
       oauthQuotaVisible: true,
       oauthQuotaRows: [{ providerId: 9 } as any],
+      oauthQuotaHasRefreshed: true,
+      onRefreshOAuthQuota,
+      onRefreshOAuthQuotaRow,
     });
 
-    expect(screen.queryByRole("tab", { name: "OAuth 配额" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "OAuth 配额" }));
+    expect(await screen.findByText("oauth-quota:1:true:true:false")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "refresh-oauth-quota" }));
+    expect(onRefreshOAuthQuota).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "refresh-oauth-quota-row" }));
+    expect(onRefreshOAuthQuotaRow).toHaveBeenCalledWith(9);
   });
 
   it("switches back to 配置信息 when OAuth providers disappear in logs-primary layout", async () => {
@@ -793,6 +806,7 @@ describe("components/home/HomeOverviewPanel", () => {
       "活跃 Session",
       "熔断信息",
       "配置信息",
+      "OAuth 配额",
     ]);
   });
 

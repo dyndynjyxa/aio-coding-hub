@@ -20,12 +20,16 @@ pub(super) struct AttemptIndices {
 /// Returns `Some(Response)` if a final response was produced (success or
 /// terminal error); returns `None` when all retries for this provider are
 /// exhausted and the outer loop should try the next provider.
-pub(super) async fn run_retry_loop(
-    ctx: CommonCtx<'_>,
-    input: &RequestContext,
+pub(super) async fn run_retry_loop<R>(
+    ctx: CommonCtx<'_, R>,
+    input: &RequestContext<R>,
     prepared: &mut PreparedProvider,
-    mut loop_state: LoopState<'_>,
-) -> Option<Response> {
+    mut loop_state: LoopState<'_, R>,
+) -> Option<Response>
+where
+    R: tauri::Runtime,
+    R::Handle: Unpin,
+{
     let mut retry_state = RetryLoopState::new();
 
     for retry_index in 1..=prepared.provider_max_attempts {
@@ -68,15 +72,19 @@ pub(super) async fn run_retry_loop(
 
 /// Dispatch one attempt outcome to the appropriate handler and return
 /// a `LoopControl` for the retry loop.
-async fn dispatch_outcome(
-    ctx: CommonCtx<'_>,
-    input: &RequestContext,
+async fn dispatch_outcome<R>(
+    ctx: CommonCtx<'_, R>,
+    input: &RequestContext<R>,
     prepared: &mut PreparedProvider,
     retry_state: &mut RetryLoopState,
     indices: AttemptIndices,
     send_outcome: AttemptSendOutcome,
-    loop_state: &mut LoopState<'_>,
-) -> LoopControl {
+    loop_state: &mut LoopState<'_, R>,
+) -> LoopControl
+where
+    R: tauri::Runtime,
+    R::Handle: Unpin,
+{
     match send_outcome {
         AttemptSendOutcome::UrlBuildFailed(ctrl) => ctrl,
         AttemptSendOutcome::OAuthInjectFailed => LoopControl::BreakRetry,
@@ -125,8 +133,8 @@ async fn dispatch_outcome(
 }
 
 /// Build `AttemptCtx` and `ProviderCtx` for error-path handling (timeout / reqwest error).
-fn build_error_contexts<'a>(
-    _input: &RequestContext,
+fn build_error_contexts<'a, R: tauri::Runtime>(
+    _input: &RequestContext<R>,
     prepared: &'a PreparedProvider,
     timing: &AttemptTiming,
     attempt_index: u32,
@@ -146,9 +154,11 @@ fn build_error_contexts<'a>(
         provider_id: prepared.provider_id,
         provider_name_base: &prepared.provider_name_base,
         provider_base_url_base: &prepared.provider_base_url_base,
+        auth_mode: prepared.auth_mode.as_str(),
         provider_index: prepared.provider_index,
         session_reuse: prepared.session_reuse,
         stream_idle_timeout_seconds: prepared.stream_idle_timeout_seconds,
+        claude_model_mapping: prepared.claude_model_mapping.as_ref(),
     };
     (attempt_ctx, provider_ctx)
 }

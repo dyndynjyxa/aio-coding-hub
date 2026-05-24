@@ -16,10 +16,7 @@ export const PopoverContent = forwardRef<
         align={align}
         sideOffset={sideOffset}
         className={cn(
-          [
-            "z-50 rounded-lg border border-slate-200 bg-white p-2 shadow-lg outline-none",
-            "dark:border-slate-700 dark:bg-slate-800 dark:shadow-slate-900/50",
-          ].join(" "),
+          "z-50 rounded-lg border border-border bg-popover p-2 text-popover-foreground shadow-lg outline-none",
           className
         )}
         {...props}

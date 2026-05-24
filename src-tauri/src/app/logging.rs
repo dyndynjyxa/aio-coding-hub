@@ -1,6 +1,6 @@
 //! Usage: Tracing/logging initialization (rolling file logs + best-effort cleanup).
 
-use crate::{app_paths, settings};
+use crate::{app_paths, blocking, settings};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -104,24 +104,28 @@ fn ensure_log_dir(app: &tauri::AppHandle) -> crate::shared::error::AppResult<Pat
 
 fn spawn_cleanup_task(app: tauri::AppHandle, log_dir: PathBuf) {
     tauri::async_runtime::spawn(async move {
-        let app_for_cleanup = app.clone();
-        let log_dir_for_cleanup = log_dir.clone();
-        std::mem::drop(tauri::async_runtime::spawn_blocking(move || {
-            cleanup_once(&app_for_cleanup, &log_dir_for_cleanup);
-        }));
+        run_cleanup_once_blocking(app.clone(), log_dir.clone()).await;
 
         let mut interval = tokio::time::interval(CLEANUP_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         // First tick is immediate; skip it so we don't run twice at startup.
         interval.tick().await;
         loop {
             interval.tick().await;
-            let app_for_cleanup = app.clone();
-            let log_dir_for_cleanup = log_dir.clone();
-            std::mem::drop(tauri::async_runtime::spawn_blocking(move || {
-                cleanup_once(&app_for_cleanup, &log_dir_for_cleanup);
-            }));
+            run_cleanup_once_blocking(app.clone(), log_dir.clone()).await;
         }
     });
+}
+
+async fn run_cleanup_once_blocking(app: tauri::AppHandle, log_dir: PathBuf) {
+    if let Err(err) = blocking::run("log_cleanup", move || {
+        cleanup_once(&app, &log_dir);
+        Ok::<(), String>(())
+    })
+    .await
+    {
+        tracing::warn!("log cleanup task failed: {}", err);
+    }
 }
 
 fn cleanup_once(app: &tauri::AppHandle, log_dir: &Path) {
@@ -145,7 +149,13 @@ fn cleanup_logs(log_dir: &Path, retention_days: u32) -> crate::shared::error::Ap
             (retention_days as u64).saturating_mul(24 * 60 * 60),
         ))
         .unwrap_or(UNIX_EPOCH);
+    cleanup_logs_before(log_dir, cutoff)
+}
 
+fn cleanup_logs_before(
+    log_dir: &Path,
+    cutoff: SystemTime,
+) -> crate::shared::error::AppResult<usize> {
     let mut deleted = 0usize;
     let entries = std::fs::read_dir(log_dir).map_err(|e| format!("read_dir failed: {e}"))?;
     for entry in entries {
@@ -190,4 +200,28 @@ fn cleanup_logs(log_dir: &Path, retention_days: u32) -> crate::shared::error::Ap
     }
 
     Ok(deleted)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cleanup_logs_before_deletes_only_matching_files() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let stale_log = dir.path().join(format!("{LOG_FILE_PREFIX}.2026-01-01"));
+        let unrelated = dir.path().join("other.log");
+        let matching_dir = dir.path().join(format!("{LOG_FILE_PREFIX}.directory"));
+        std::fs::write(&stale_log, "old log").expect("write stale log");
+        std::fs::write(&unrelated, "keep me").expect("write unrelated file");
+        std::fs::create_dir(&matching_dir).expect("create matching dir");
+
+        let deleted = cleanup_logs_before(dir.path(), SystemTime::now() + Duration::from_secs(60))
+            .expect("cleanup succeeds");
+
+        assert_eq!(deleted, 1);
+        assert!(!stale_log.exists());
+        assert!(unrelated.exists());
+        assert!(matching_dir.exists());
+    }
 }

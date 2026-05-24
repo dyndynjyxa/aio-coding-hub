@@ -44,6 +44,21 @@ pub(super) fn max_body_read_bytes() -> u64 {
     MAX_BODY_READ_BYTES
 }
 
+/// Abort unmatched catch-all 4xx to prevent pointless retries and circuit breaker pollution.
+///
+/// Catch-all 4xx (anything outside 401-404, 408, 429) that was not matched by the body-scanning
+/// non-retryable rules is almost certainly a deterministic client error. Retrying the identical
+/// request will produce the identical result, wasting attempts and inflating the provider failure
+/// count until the circuit breaker opens.
+pub(super) fn should_abort_unmatched_client_error(
+    status: reqwest::StatusCode,
+    matched_rule_id: Option<&'static str>,
+) -> bool {
+    status.is_client_error()
+        && !matches!(status.as_u16(), 401 | 402 | 403 | 404 | 408 | 429)
+        && matched_rule_id.is_none()
+}
+
 /// Returns whether a 429 response body indicates upstream concurrency saturation.
 ///
 /// This is intentionally conservative: only match clear concurrency-limit signatures.
@@ -66,6 +81,32 @@ pub(super) fn match_429_concurrency_limit(body: &[u8]) -> bool {
         && haystack_lower.contains("concurrencylimit");
 
     has_direct_phrase || has_structured_fields
+}
+
+/// Returns whether a response body clearly indicates account/provider quota exhaustion.
+pub(in crate::gateway) fn match_quota_exhausted(body: &[u8]) -> bool {
+    if body.is_empty() {
+        return false;
+    }
+
+    let scan = if body.len() > MAX_SCAN_BYTES {
+        &body[..MAX_SCAN_BYTES]
+    } else {
+        body
+    };
+
+    let haystack_lower = String::from_utf8_lossy(scan).to_ascii_lowercase();
+
+    haystack_lower.contains("insufficient_quota")
+        || haystack_lower.contains("quota exhausted")
+        || haystack_lower.contains("resource_exhausted")
+        || haystack_lower.contains("exceeded your current quota")
+        || haystack_lower.contains("you exceeded your current quota")
+        || (haystack_lower.contains("quota") && haystack_lower.contains("exceeded"))
+        || (haystack_lower.contains("quota") && haystack_lower.contains("exhausted"))
+        || (haystack_lower.contains("rate limit") && haystack_lower.contains("exceeded"))
+        || (haystack_lower.contains("rate_limit") && haystack_lower.contains("exceeded"))
+        || (haystack_lower.contains("usage limit") && haystack_lower.contains("reached"))
 }
 
 struct Rule {
@@ -255,7 +296,10 @@ pub(super) fn match_non_retryable_client_error(
 
 #[cfg(test)]
 mod tests {
-    use super::{match_429_concurrency_limit, match_non_retryable_client_error};
+    use super::{
+        match_429_concurrency_limit, match_non_retryable_client_error, match_quota_exhausted,
+        should_abort_unmatched_client_error,
+    };
 
     #[test]
     fn matches_prompt_limit() {
@@ -301,5 +345,91 @@ mod tests {
     fn does_not_match_429_concurrency_limit_for_generic_rate_limit() {
         let body = b"{\"error\":\"rate limit\",\"message\":\"too many requests per minute\"}";
         assert!(!match_429_concurrency_limit(body));
+    }
+
+    #[test]
+    fn matches_quota_exhausted_bodies() {
+        assert!(match_quota_exhausted(
+            br#"{"error":{"message":"quota exhausted","type":"insufficient_quota"}}"#
+        ));
+        assert!(match_quota_exhausted(
+            b"You exceeded your current quota, please check your plan and billing details"
+        ));
+        assert!(match_quota_exhausted(
+            b"Rate limit exceeded for this account"
+        ));
+        assert!(match_quota_exhausted(
+            b"RESOURCE_EXHAUSTED: Resource has been exhausted (e.g. check quota)."
+        ));
+    }
+
+    #[test]
+    fn does_not_match_generic_throttling_without_exhaustion() {
+        assert!(!match_quota_exhausted(
+            b"{\"error\":\"rate limit\",\"message\":\"too many requests per minute\"}"
+        ));
+        assert!(!match_quota_exhausted(b"concurrency limit exceeded"));
+    }
+
+    #[test]
+    fn unmatched_400_aborts_for_any_cli() {
+        assert!(should_abort_unmatched_client_error(
+            reqwest::StatusCode::BAD_REQUEST,
+            None,
+        ));
+    }
+
+    #[test]
+    fn unmatched_422_aborts() {
+        assert!(should_abort_unmatched_client_error(
+            reqwest::StatusCode::UNPROCESSABLE_ENTITY,
+            None,
+        ));
+    }
+
+    #[test]
+    fn unmatched_409_aborts() {
+        assert!(should_abort_unmatched_client_error(
+            reqwest::StatusCode::CONFLICT,
+            None,
+        ));
+    }
+
+    #[test]
+    fn matched_rule_does_not_abort() {
+        assert!(!should_abort_unmatched_client_error(
+            reqwest::StatusCode::BAD_REQUEST,
+            Some("prompt_limit"),
+        ));
+    }
+
+    #[test]
+    fn excluded_4xx_codes_do_not_abort() {
+        for status in [
+            reqwest::StatusCode::UNAUTHORIZED,
+            reqwest::StatusCode::PAYMENT_REQUIRED,
+            reqwest::StatusCode::FORBIDDEN,
+            reqwest::StatusCode::NOT_FOUND,
+            reqwest::StatusCode::REQUEST_TIMEOUT,
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+        ] {
+            assert!(
+                !should_abort_unmatched_client_error(status, None),
+                "status {} should not abort",
+                status.as_u16()
+            );
+        }
+    }
+
+    #[test]
+    fn non_4xx_does_not_abort() {
+        assert!(!should_abort_unmatched_client_error(
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            None,
+        ));
+        assert!(!should_abort_unmatched_client_error(
+            reqwest::StatusCode::OK,
+            None,
+        ));
     }
 }

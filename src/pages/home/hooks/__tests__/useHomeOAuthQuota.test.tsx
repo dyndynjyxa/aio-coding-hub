@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RequestLogSummary } from "../../../../services/gateway/requestLogs";
 import type { ProviderSummary } from "../../../../services/providers/providers";
 import { providerOAuthFetchLimits, providersList } from "../../../../services/providers/providers";
+import { gatewayCircuitResetProvider } from "../../../../services/gateway/gateway";
 import { oauthLimitsKeys } from "../../../../query/keys";
 import { createQueryWrapper, createTestQueryClient } from "../../../../test/utils/reactQuery";
 import { useHomeOAuthQuota } from "../useHomeOAuthQuota";
@@ -15,6 +16,16 @@ vi.mock("../../../../services/providers/providers", async () => {
     ...actual,
     providersList: vi.fn(),
     providerOAuthFetchLimits: vi.fn(),
+  };
+});
+
+vi.mock("../../../../services/gateway/gateway", async () => {
+  const actual = await vi.importActual<typeof import("../../../../services/gateway/gateway")>(
+    "../../../../services/gateway/gateway"
+  );
+  return {
+    ...actual,
+    gatewayCircuitResetProvider: vi.fn(),
   };
 });
 
@@ -173,6 +184,7 @@ describe("pages/home/hooks/useHomeOAuthQuota", () => {
     });
 
     expect(providerOAuthFetchLimits).toHaveBeenCalledWith(11);
+    expect(gatewayCircuitResetProvider).toHaveBeenCalledWith(11);
     expect(result.current.oauthQuotaHasRefreshed).toBe(true);
     expect(client.getQueryData(oauthLimitsKeys.detail(11))).toEqual({
       limit_short_label: "5h",
@@ -231,6 +243,7 @@ describe("pages/home/hooks/useHomeOAuthQuota", () => {
 
     expect(providerOAuthFetchLimits).toHaveBeenCalledTimes(1);
     expect(providerOAuthFetchLimits).toHaveBeenCalledWith(22);
+    expect(gatewayCircuitResetProvider).toHaveBeenCalledWith(22);
     expect(client.getQueryData(oauthLimitsKeys.detail(11))).toBeUndefined();
     expect(client.getQueryData(oauthLimitsKeys.detail(22))).toEqual({
       limit_short_label: "短窗",

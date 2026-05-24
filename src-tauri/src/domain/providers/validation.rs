@@ -4,6 +4,33 @@ use std::collections::HashSet;
 
 pub(super) const MAX_LIMIT_USD: f64 = 1_000_000_000.0;
 pub(super) const MAX_STREAM_IDLE_TIMEOUT_SECONDS: u32 = 60 * 60;
+pub(super) const MAX_PROVIDER_BASE_URLS: usize = 32;
+pub(super) const MAX_PROVIDER_BASE_URL_CHARS: usize = 2048;
+pub(super) const MAX_PROVIDER_NOTE_CHARS: usize = 500;
+pub(super) const MAX_PROVIDER_ORDER_IDS: usize = 512;
+
+pub(super) fn exceeds_max_chars(value: &str, max_chars: usize) -> bool {
+    value.chars().nth(max_chars).is_some()
+}
+
+pub(super) fn validate_max_chars(
+    field: &str,
+    value: &str,
+    max_chars: usize,
+) -> crate::shared::error::AppResult<()> {
+    if exceeds_max_chars(value, max_chars) {
+        return Err(
+            format!("SEC_INVALID_INPUT: {field} must be at most {max_chars} characters").into(),
+        );
+    }
+    Ok(())
+}
+
+pub(super) fn normalize_note(value: Option<&str>) -> crate::shared::error::AppResult<String> {
+    let note = value.unwrap_or("").trim().to_string();
+    validate_max_chars("note", &note, MAX_PROVIDER_NOTE_CHARS)?;
+    Ok(note)
+}
 
 pub(super) fn parse_reset_time_hms(input: &str) -> Option<(u8, u8, u8)> {
     let trimmed = input.trim();
@@ -110,8 +137,9 @@ pub(super) fn validate_cli_key(cli_key: &str) -> crate::shared::error::AppResult
 pub(super) fn normalize_base_urls(
     base_urls: Vec<String>,
 ) -> crate::shared::error::AppResult<Vec<String>> {
-    let mut out: Vec<String> = Vec::with_capacity(base_urls.len().max(1));
-    let mut seen: HashSet<String> = HashSet::with_capacity(base_urls.len());
+    let initial_capacity = base_urls.len().clamp(1, MAX_PROVIDER_BASE_URLS);
+    let mut out: Vec<String> = Vec::with_capacity(initial_capacity);
+    let mut seen: HashSet<String> = HashSet::with_capacity(initial_capacity);
 
     for raw in base_urls {
         let trimmed = raw.trim();
@@ -119,8 +147,17 @@ pub(super) fn normalize_base_urls(
             continue;
         }
 
+        validate_max_chars("base_url", trimmed, MAX_PROVIDER_BASE_URL_CHARS)?;
+
         if !seen.insert(trimmed.to_string()) {
             continue;
+        }
+
+        if out.len() >= MAX_PROVIDER_BASE_URLS {
+            return Err(format!(
+                "SEC_INVALID_INPUT: base_urls must contain at most {MAX_PROVIDER_BASE_URLS} entries"
+            )
+            .into());
         }
 
         // Validate URL early to avoid runtime proxy errors.

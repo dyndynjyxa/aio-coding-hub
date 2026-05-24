@@ -1,12 +1,13 @@
 //! Usage: Claude model mapping application for a provider attempt.
 
 use super::context::{CommonCtx, ProviderCtx};
+use crate::gateway::events::ClaudeModelMapping;
 use crate::gateway::proxy::model_rewrite::{
     replace_model_in_body_json, replace_model_in_path, replace_model_in_query,
 };
+use crate::gateway::response_fixer;
 use crate::gateway::util::RequestedModelLocation;
 use crate::providers;
-use crate::shared::mutex_ext::MutexExt;
 use axum::body::Bytes;
 
 pub(super) struct UpstreamRequestMut<'a> {
@@ -16,21 +17,19 @@ pub(super) struct UpstreamRequestMut<'a> {
     pub(super) strip_request_content_encoding: &'a mut bool,
 }
 
-pub(super) fn apply_if_needed(
-    ctx: CommonCtx<'_>,
+pub(super) fn apply_if_needed<R: tauri::Runtime>(
+    ctx: CommonCtx<'_, R>,
     provider: &providers::ProviderForGateway,
     provider_ctx: ProviderCtx<'_>,
     requested_model_location: Option<RequestedModelLocation>,
     introspection_json: Option<&serde_json::Value>,
     upstream: UpstreamRequestMut<'_>,
-) {
+) -> Option<ClaudeModelMapping> {
     if ctx.cli_key != "claude" || !provider.claude_models.has_any() {
-        return;
+        return None;
     }
 
-    let Some(requested_model) = ctx.requested_model.as_deref() else {
-        return;
-    };
+    let requested_model = ctx.requested_model.as_deref()?;
 
     let has_thinking = introspection_json
         .and_then(|v| v.get("thinking"))
@@ -41,7 +40,7 @@ pub(super) fn apply_if_needed(
 
     let effective_model = provider.get_effective_claude_model(requested_model, has_thinking);
     if effective_model == requested_model {
-        return;
+        return None;
     }
 
     let UpstreamRequestMut {
@@ -125,22 +124,35 @@ pub(super) fn apply_if_needed(
         ..
     } = provider_ctx;
 
-    let mut settings = ctx.special_settings.lock_or_recover();
-    settings.push(serde_json::json!({
-        "type": "claude_model_mapping",
-        "scope": "attempt",
-        "hit": true,
-        "applied": applied,
-        "providerId": provider_id,
-        "providerName": provider_name_base.clone(),
-        "requestedModel": requested_model,
-        "effectiveModel": effective_model,
-        "mappingKind": kind,
-        "hasThinking": has_thinking,
-        "location": match location {
-            RequestedModelLocation::BodyJson => "body",
-            RequestedModelLocation::Query => "query",
-            RequestedModelLocation::Path => "path",
-        },
-    }));
+    let mapping = ClaudeModelMapping {
+        requested_model: requested_model.to_string(),
+        effective_model,
+        mapping_kind: kind.to_string(),
+        provider_id,
+        provider_name: provider_name_base.clone(),
+        applied,
+    };
+
+    response_fixer::push_special_setting(
+        ctx.special_settings,
+        serde_json::json!({
+            "type": "claude_model_mapping",
+            "scope": "attempt",
+            "hit": true,
+            "applied": mapping.applied,
+            "providerId": mapping.provider_id,
+            "providerName": &mapping.provider_name,
+            "requestedModel": &mapping.requested_model,
+            "effectiveModel": &mapping.effective_model,
+            "mappingKind": &mapping.mapping_kind,
+            "hasThinking": has_thinking,
+            "location": match location {
+                RequestedModelLocation::BodyJson => "body",
+                RequestedModelLocation::Query => "query",
+                RequestedModelLocation::Path => "path",
+            },
+        }),
+    );
+
+    Some(mapping)
 }

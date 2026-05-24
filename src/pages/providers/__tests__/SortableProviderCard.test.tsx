@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { tauriOpenUrl } from "../../../test/mocks/tauri";
 import { SortableProviderCard, type SortableProviderCardProps } from "../SortableProviderCard";
 import {
   providerOAuthFetchLimits,
@@ -13,6 +14,13 @@ vi.mock("../../../services/providers/providers", async () => {
     "../../../services/providers/providers"
   );
   return { ...actual, providerOAuthFetchLimits: vi.fn() };
+});
+
+vi.mock("../../../services/gateway/gateway", async () => {
+  const actual = await vi.importActual<typeof import("../../../services/gateway/gateway")>(
+    "../../../services/gateway/gateway"
+  );
+  return { ...actual, gatewayCircuitResetProvider: vi.fn() };
 });
 
 vi.mock("@dnd-kit/sortable", () => ({
@@ -87,6 +95,10 @@ function renderCard(
 }
 
 describe("pages/providers/SortableProviderCard", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("renders OAuth badge with email", () => {
     renderCard({
       auth_mode: "oauth",
@@ -128,24 +140,6 @@ describe("pages/providers/SortableProviderCard", () => {
     const oauthButton = screen.getByText("OAuth");
     expect(oauthButton).toBeInTheDocument();
     expect(oauthButton.tagName).toBe("BUTTON");
-  });
-
-  it("fetches OAuth limits on button click", async () => {
-    vi.mocked(providerOAuthFetchLimits).mockResolvedValue({
-      limit_short_label: null,
-      limit_5h_text: "100 requests",
-      limit_weekly_text: "1000 requests",
-      limit_5h_reset_at: null,
-      limit_weekly_reset_at: null,
-    });
-
-    renderCard({
-      auth_mode: "oauth",
-    });
-
-    fireEvent.click(screen.getByText("OAuth"));
-
-    await waitFor(() => expect(vi.mocked(providerOAuthFetchLimits)).toHaveBeenCalledWith(1));
   });
 
   it("auto-fetches OAuth limits on mount for oauth providers", async () => {
@@ -247,6 +241,54 @@ describe("pages/providers/SortableProviderCard", () => {
     const link = screen.getByRole("link", { name: "https://example.com/docs?q=1" });
     expect(link).toBeInTheDocument();
     expect(link).toHaveAttribute("href", "https://example.com/docs?q=1");
+  });
+
+  it("opens http links in note through the desktop opener", async () => {
+    vi.mocked(tauriOpenUrl).mockResolvedValue(undefined as never);
+
+    renderCard({ note: "文档 https://example.com/docs?q=1, 备用说明" });
+
+    fireEvent.click(screen.getByRole("link", { name: "https://example.com/docs?q=1" }));
+
+    await waitFor(() => {
+      expect(tauriOpenUrl).toHaveBeenCalledWith("https://example.com/docs?q=1");
+    });
+  });
+
+  it("falls back to window.open when the desktop opener fails", async () => {
+    vi.mocked(tauriOpenUrl).mockRejectedValue(new Error("blocked"));
+    const windowOpen = vi.spyOn(window, "open").mockImplementation(() => null);
+
+    renderCard({ note: "文档 https://example.com/docs?q=1, 备用说明" });
+
+    fireEvent.click(screen.getByRole("link", { name: "https://example.com/docs?q=1" }));
+
+    await waitFor(() => {
+      expect(windowOpen).toHaveBeenCalledWith(
+        "https://example.com/docs?q=1",
+        "_blank",
+        "noopener,noreferrer"
+      );
+    });
+  });
+
+  it("ignores window.open errors after the desktop opener fails", async () => {
+    vi.mocked(tauriOpenUrl).mockRejectedValue(new Error("blocked"));
+    const windowOpen = vi.spyOn(window, "open").mockImplementation(() => {
+      throw new Error("popup blocked");
+    });
+
+    renderCard({ note: "文档 https://example.com/docs?q=1, 备用说明" });
+
+    fireEvent.click(screen.getByRole("link", { name: "https://example.com/docs?q=1" }));
+
+    await waitFor(() => {
+      expect(windowOpen).toHaveBeenCalledWith(
+        "https://example.com/docs?q=1",
+        "_blank",
+        "noopener,noreferrer"
+      );
+    });
   });
 
   it("renders limit chips", () => {

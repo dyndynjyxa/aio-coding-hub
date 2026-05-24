@@ -1,5 +1,6 @@
 mod support;
 
+use aio_coding_hub_lib::test_support::ProviderUpsertJsonInput;
 use support::{json_array, json_i64, json_str};
 
 #[test]
@@ -150,4 +151,80 @@ fn sort_mode_delete_nonexistent_fails() {
         .expect_err("delete non-existent should fail");
     let err = err.to_string();
     assert!(err.contains("not found"), "unexpected error: {err}");
+}
+
+fn insert_provider(handle: &tauri::AppHandle<tauri::test::MockRuntime>, name: &str) -> i64 {
+    let provider = aio_coding_hub_lib::test_support::provider_upsert_json(
+        handle,
+        ProviderUpsertJsonInput {
+            provider_id: None,
+            cli_key: "claude".to_string(),
+            name: name.to_string(),
+            base_urls: vec!["https://api.anthropic.com".to_string()],
+            base_url_mode: "order".to_string(),
+            api_key: Some(format!("sk-{name}")),
+            enabled: true,
+            cost_multiplier: 1.0,
+            priority: Some(100),
+            claude_models: None,
+            limit_5h_usd: None,
+            limit_daily_usd: None,
+            daily_reset_mode: None,
+            daily_reset_time: None,
+            limit_weekly_usd: None,
+            limit_monthly_usd: None,
+            limit_total_usd: None,
+        },
+    )
+    .expect("insert provider");
+    json_i64(&provider, "id")
+}
+
+#[test]
+fn sort_mode_provider_order_rejects_invalid_duplicate_and_oversized_ids() {
+    let app = support::TestApp::new();
+    let handle = app.handle();
+
+    aio_coding_hub_lib::test_support::init_db(&handle).expect("init db");
+
+    let mode = aio_coding_hub_lib::test_support::sort_mode_create_json(&handle, "Bounded Mode")
+        .expect("create sort mode");
+    let mode_id = json_i64(&mode, "id");
+    let provider_id = insert_provider(&handle, "P-sort-bound");
+
+    let invalid = aio_coding_hub_lib::test_support::sort_mode_providers_set_order_json(
+        &handle,
+        mode_id,
+        "claude",
+        vec![provider_id, 0],
+    )
+    .expect_err("invalid provider id");
+    assert!(
+        invalid.to_string().contains("invalid provider_id=0"),
+        "unexpected error: {invalid}"
+    );
+
+    let duplicate = aio_coding_hub_lib::test_support::sort_mode_providers_set_order_json(
+        &handle,
+        mode_id,
+        "claude",
+        vec![provider_id, provider_id],
+    )
+    .expect_err("duplicate provider id");
+    assert!(
+        duplicate.to_string().contains("duplicate provider_id"),
+        "unexpected error: {duplicate}"
+    );
+
+    let oversized: Vec<i64> = (1..=513).collect();
+    let oversized_err = aio_coding_hub_lib::test_support::sort_mode_providers_set_order_json(
+        &handle, mode_id, "claude", oversized,
+    )
+    .expect_err("too many provider ids");
+    assert!(
+        oversized_err
+            .to_string()
+            .contains("ordered_provider_ids must contain at most"),
+        "unexpected error: {oversized_err}"
+    );
 }

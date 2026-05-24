@@ -8,6 +8,7 @@ import type {
   UsageScope,
   UsageSummary,
 } from "../../services/usage/usage";
+import type { AvailabilityTimelineData } from "../../components/usage/UsageAvailabilityPanel";
 import { Card } from "../../ui/Card";
 import type { UsageTableTab } from "./types";
 import { useAutoFocus, useInert } from "./useInert";
@@ -37,6 +38,10 @@ export type UsageDataPanelProps = {
   period: UsagePeriod;
   customApplied: CustomDateRangeApplied | null;
   customPending: boolean;
+  availabilityData: AvailabilityTimelineData | null;
+  availabilityLoading: boolean;
+  availabilityRefreshing: boolean;
+  onRefreshAvailability: () => void;
 };
 
 function overlayOpenForCustomPending({
@@ -45,12 +50,14 @@ function overlayOpenForCustomPending({
   rows,
   summary,
   cacheTrendRows,
+  availabilityData,
 }: Pick<
   UsageDataPanelProps,
-  "customPending" | "tableTab" | "rows" | "summary" | "cacheTrendRows"
+  "customPending" | "tableTab" | "rows" | "summary" | "cacheTrendRows" | "availabilityData"
 >) {
   if (!customPending) return false;
   if (tableTab === "cacheTrend") return cacheTrendRows.length > 0;
+  if (tableTab === "availability") return availabilityData != null && availabilityData.providers.length > 0;
   return rows.length > 0 || summary != null;
 }
 
@@ -90,8 +97,14 @@ export function UsageDataPanel(props: UsageDataPanelProps) {
     rows: props.rows,
     summary: props.summary,
     cacheTrendRows: props.cacheTrendRows,
+    availabilityData: props.availabilityData,
   });
-  const activeStale = props.tableTab === "cacheTrend" ? props.cacheTrendStale : props.dataStale;
+  const activeStale =
+    props.tableTab === "cacheTrend"
+      ? props.cacheTrendStale
+      : props.tableTab === "availability"
+        ? props.availabilityRefreshing
+        : props.dataStale;
 
   const contentRef = useRef<HTMLDivElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);

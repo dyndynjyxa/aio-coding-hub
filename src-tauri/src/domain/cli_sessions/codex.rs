@@ -4,6 +4,7 @@ use super::{
     folder_name_from_path, truncate_string, validate_path_under_root,
     CliSessionsDisplayContentBlock, CliSessionsDisplayMessage, CliSessionsFolderLookupEntry,
     CliSessionsPaginatedMessages, CliSessionsProjectSummary, CliSessionsSessionSummary,
+    MessagePageAccumulator,
 };
 use crate::shared::error::{AppError, AppResult};
 use serde_json::Value;
@@ -215,10 +216,156 @@ fn extract_message_content(payload: &Value) -> Vec<CliSessionsDisplayContentBloc
     blocks
 }
 
-fn parse_all_messages(path: &Path) -> Result<Vec<CliSessionsDisplayMessage>, String> {
+fn parse_message_line(trimmed: &str) -> Option<CliSessionsDisplayMessage> {
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let row: Value = serde_json::from_str(trimmed).ok()?;
+    let row_type = row.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    if row_type != "response_item" {
+        return None;
+    }
+
+    let timestamp = row
+        .get("timestamp")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let payload = row.get("payload")?;
+    let payload_type = payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+    match payload_type {
+        "message" => {
+            let role = payload.get("role").and_then(|v| v.as_str()).unwrap_or("");
+            if role == "developer" || role == "system" {
+                return None;
+            }
+            if role != "user" && role != "assistant" {
+                return None;
+            }
+            let blocks = extract_message_content(payload);
+            if blocks.is_empty() {
+                return None;
+            }
+            Some(CliSessionsDisplayMessage {
+                uuid: None,
+                role: role.to_string(),
+                timestamp,
+                model: None,
+                content: blocks,
+            })
+        }
+        "function_call" => {
+            let name = payload
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let arguments = payload
+                .get("arguments")
+                .map(|v| {
+                    if let Some(s) = v.as_str() {
+                        if let Ok(parsed) = serde_json::from_str::<Value>(s) {
+                            serde_json::to_string_pretty(&parsed).unwrap_or_else(|_| s.to_string())
+                        } else {
+                            s.to_string()
+                        }
+                    } else {
+                        serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string())
+                    }
+                })
+                .unwrap_or_default();
+            let call_id = payload
+                .get("call_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            Some(CliSessionsDisplayMessage {
+                uuid: None,
+                role: "assistant".to_string(),
+                timestamp,
+                model: None,
+                content: vec![CliSessionsDisplayContentBlock::FunctionCall {
+                    name,
+                    arguments: truncate_string(&arguments, MAX_ARGS_SIZE),
+                    call_id,
+                }],
+            })
+        }
+        "function_call_output" => {
+            let call_id = payload
+                .get("call_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let output = payload
+                .get("output")
+                .map(|v| {
+                    if let Some(s) = v.as_str() {
+                        s.to_string()
+                    } else {
+                        serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string())
+                    }
+                })
+                .unwrap_or_default();
+
+            Some(CliSessionsDisplayMessage {
+                uuid: None,
+                role: "tool".to_string(),
+                timestamp,
+                model: None,
+                content: vec![CliSessionsDisplayContentBlock::FunctionCallOutput {
+                    call_id,
+                    output: truncate_string(&output, MAX_OUTPUT_BLOCK_SIZE),
+                }],
+            })
+        }
+        "reasoning" => {
+            let text = payload
+                .get("text")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| {
+                    payload
+                        .get("summary")
+                        .and_then(|s| s.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
+                                .filter(|t| !t.trim().is_empty())
+                                .collect::<Vec<&str>>()
+                                .join("\n")
+                        })
+                })
+                .unwrap_or_default();
+            let t = text.trim();
+            if t.is_empty() {
+                return None;
+            }
+            Some(CliSessionsDisplayMessage {
+                uuid: None,
+                role: "assistant".to_string(),
+                timestamp,
+                model: None,
+                content: vec![CliSessionsDisplayContentBlock::Reasoning {
+                    text: truncate_string(t, MAX_TEXT_BLOCK_SIZE),
+                }],
+            })
+        }
+        _ => None,
+    }
+}
+
+fn parse_messages_page(
+    path: &Path,
+    page: usize,
+    page_size: usize,
+    from_end: bool,
+) -> Result<CliSessionsPaginatedMessages, String> {
     let file = fs::File::open(path).map_err(|e| format!("failed to open file: {e}"))?;
     let reader = BufReader::new(file);
-    let mut messages: Vec<CliSessionsDisplayMessage> = Vec::new();
+    let mut acc = MessagePageAccumulator::new(page, page_size, from_end);
 
     for line in reader.lines() {
         let line = match line {
@@ -226,155 +373,12 @@ fn parse_all_messages(path: &Path) -> Result<Vec<CliSessionsDisplayMessage>, Str
             Err(_) => continue,
         };
         let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        let row: Value = match serde_json::from_str(trimmed) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-
-        let row_type = row.get("type").and_then(|v| v.as_str()).unwrap_or("");
-        let timestamp = row
-            .get("timestamp")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let payload = match row.get("payload") {
-            Some(p) => p,
-            None => continue,
-        };
-
-        if row_type != "response_item" {
-            continue;
-        }
-
-        let payload_type = payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
-        match payload_type {
-            "message" => {
-                let role = payload.get("role").and_then(|v| v.as_str()).unwrap_or("");
-                if role == "developer" || role == "system" {
-                    continue;
-                }
-                if role != "user" && role != "assistant" {
-                    continue;
-                }
-                let blocks = extract_message_content(payload);
-                if blocks.is_empty() {
-                    continue;
-                }
-                messages.push(CliSessionsDisplayMessage {
-                    uuid: None,
-                    role: role.to_string(),
-                    timestamp: timestamp.clone(),
-                    model: None,
-                    content: blocks,
-                });
-            }
-            "function_call" => {
-                let name = payload
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown")
-                    .to_string();
-                let arguments = payload
-                    .get("arguments")
-                    .map(|v| {
-                        if let Some(s) = v.as_str() {
-                            if let Ok(parsed) = serde_json::from_str::<Value>(s) {
-                                serde_json::to_string_pretty(&parsed)
-                                    .unwrap_or_else(|_| s.to_string())
-                            } else {
-                                s.to_string()
-                            }
-                        } else {
-                            serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string())
-                        }
-                    })
-                    .unwrap_or_default();
-                let call_id = payload
-                    .get("call_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-
-                messages.push(CliSessionsDisplayMessage {
-                    uuid: None,
-                    role: "assistant".to_string(),
-                    timestamp: timestamp.clone(),
-                    model: None,
-                    content: vec![CliSessionsDisplayContentBlock::FunctionCall {
-                        name,
-                        arguments: truncate_string(&arguments, MAX_ARGS_SIZE),
-                        call_id,
-                    }],
-                });
-            }
-            "function_call_output" => {
-                let call_id = payload
-                    .get("call_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let output = payload
-                    .get("output")
-                    .map(|v| {
-                        if let Some(s) = v.as_str() {
-                            s.to_string()
-                        } else {
-                            serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string())
-                        }
-                    })
-                    .unwrap_or_default();
-
-                messages.push(CliSessionsDisplayMessage {
-                    uuid: None,
-                    role: "tool".to_string(),
-                    timestamp: timestamp.clone(),
-                    model: None,
-                    content: vec![CliSessionsDisplayContentBlock::FunctionCallOutput {
-                        call_id,
-                        output: truncate_string(&output, MAX_OUTPUT_BLOCK_SIZE),
-                    }],
-                });
-            }
-            "reasoning" => {
-                let text = payload
-                    .get("text")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .or_else(|| {
-                        payload
-                            .get("summary")
-                            .and_then(|s| s.as_array())
-                            .map(|arr| {
-                                arr.iter()
-                                    .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
-                                    .filter(|t| !t.trim().is_empty())
-                                    .collect::<Vec<&str>>()
-                                    .join("\n")
-                            })
-                    })
-                    .unwrap_or_default();
-                let t = text.trim();
-                if t.is_empty() {
-                    continue;
-                }
-                messages.push(CliSessionsDisplayMessage {
-                    uuid: None,
-                    role: "assistant".to_string(),
-                    timestamp: timestamp.clone(),
-                    model: None,
-                    content: vec![CliSessionsDisplayContentBlock::Reasoning {
-                        text: truncate_string(t, MAX_TEXT_BLOCK_SIZE),
-                    }],
-                });
-            }
-            _ => {}
+        if let Some(message) = parse_message_line(trimmed) {
+            acc.push(message);
         }
     }
 
-    Ok(messages)
+    Ok(acc.finish())
 }
 
 fn extract_first_prompt(path: &Path) -> Option<String> {
@@ -690,34 +694,7 @@ pub fn messages_get(
     from_end: bool,
 ) -> AppResult<CliSessionsPaginatedMessages> {
     let resolved = resolve_and_validate_session_file_path(app, file_path)?;
-    let messages = parse_all_messages(&resolved).map_err(AppError::from)?;
-
-    let total = messages.len();
-    let (start, end, has_more) = if from_end {
-        let end = total.saturating_sub(page * page_size);
-        let start = end.saturating_sub(page_size);
-        let has_more = start > 0;
-        (start, end, has_more)
-    } else {
-        let start = page * page_size;
-        let end = (start + page_size).min(total);
-        let has_more = end < total;
-        (start, end, has_more)
-    };
-
-    let page_messages = if start < end && end <= total {
-        messages[start..end].to_vec()
-    } else {
-        Vec::new()
-    };
-
-    Ok(CliSessionsPaginatedMessages {
-        messages: page_messages,
-        total,
-        page,
-        page_size,
-        has_more,
-    })
+    parse_messages_page(&resolved, page, page_size, from_end).map_err(AppError::from)
 }
 
 pub fn session_delete(app: &tauri::AppHandle, file_path: &str) -> AppResult<bool> {
@@ -940,34 +917,7 @@ pub fn wsl_messages_get(
     }
 
     let resolved = super::validate_path_under_root(&raw, &root)?;
-    let messages = parse_all_messages(&resolved).map_err(AppError::from)?;
-
-    let total = messages.len();
-    let (start, end, has_more) = if from_end {
-        let end = total.saturating_sub(page * page_size);
-        let start = end.saturating_sub(page_size);
-        let has_more = start > 0;
-        (start, end, has_more)
-    } else {
-        let start = page * page_size;
-        let end = (start + page_size).min(total);
-        let has_more = end < total;
-        (start, end, has_more)
-    };
-
-    let page_messages = if start < end && end <= total {
-        messages[start..end].to_vec()
-    } else {
-        Vec::new()
-    };
-
-    Ok(CliSessionsPaginatedMessages {
-        messages: page_messages,
-        total,
-        page,
-        page_size,
-        has_more,
-    })
+    parse_messages_page(&resolved, page, page_size, from_end).map_err(AppError::from)
 }
 
 pub fn wsl_session_delete(distro: &str, file_path: &str) -> AppResult<bool> {

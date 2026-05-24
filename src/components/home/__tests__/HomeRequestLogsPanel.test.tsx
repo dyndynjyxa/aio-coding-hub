@@ -165,6 +165,157 @@ describe("components/home/HomeRequestLogsPanel", () => {
     expect(onSelectLogId).toHaveBeenCalledWith(1);
   });
 
+  it("renders Claude model mapping from historical request logs", () => {
+    render(
+      <MemoryRouter>
+        <HomeRequestLogsPanel
+          showCustomTooltip={false}
+          compactModeOverride={false}
+          traces={[]}
+          requestLogs={makeRequestLogs([
+            {
+              id: 41,
+              trace_id: "t-mapped-log",
+              cli_key: "claude",
+              method: "POST",
+              path: "/v1/messages",
+              requested_model: "claude-sonnet",
+              status: 200,
+              error_code: null,
+              special_settings_json: JSON.stringify([
+                {
+                  type: "claude_model_mapping",
+                  scope: "attempt",
+                  applied: true,
+                  providerId: 1,
+                  providerName: "Provider A",
+                  requestedModel: "claude-sonnet",
+                  effectiveModel: "gpt-5.4",
+                  mappingKind: "sonnet",
+                },
+              ]),
+              duration_ms: 1234,
+              ttfb_ms: 120,
+              attempt_count: 1,
+              has_failover: false,
+              start_provider_id: 1,
+              start_provider_name: "Provider A",
+              final_provider_id: 1,
+              final_provider_name: "Provider A",
+              route: [
+                createRequestLogRouteHop({
+                  provider_id: 1,
+                  provider_name: "Provider A",
+                  ok: true,
+                  status: 200,
+                }),
+              ],
+              session_reuse: false,
+              created_at: Math.floor(Date.now() / 1000),
+            },
+          ])}
+          requestLogsLoading={false}
+          requestLogsRefreshing={false}
+          requestLogsAvailable={true}
+          onRefreshRequestLogs={vi.fn()}
+          selectedLogId={null}
+          onSelectLogId={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("claude-sonnet → gpt-5.4")).toBeInTheDocument();
+  });
+
+  it("prefers the final provider mapping from historical request logs", () => {
+    render(
+      <MemoryRouter>
+        <HomeRequestLogsPanel
+          showCustomTooltip={false}
+          compactModeOverride={false}
+          traces={[]}
+          requestLogs={makeRequestLogs([
+            {
+              id: 42,
+              trace_id: "t-mapped-failover-log",
+              cli_key: "claude",
+              method: "POST",
+              path: "/v1/messages",
+              requested_model: "claude-sonnet",
+              status: 200,
+              error_code: null,
+              special_settings_json: JSON.stringify([
+                {
+                  type: "claude_model_mapping",
+                  scope: "attempt",
+                  applied: true,
+                  providerId: 1,
+                  providerName: "Provider A",
+                  requestedModel: "claude-sonnet",
+                  effectiveModel: "gpt-4.1",
+                  mappingKind: "sonnet",
+                },
+                {
+                  type: "claude_model_mapping",
+                  scope: "attempt",
+                  applied: true,
+                  providerId: 2,
+                  providerName: "Provider B",
+                  requestedModel: "claude-sonnet",
+                  effectiveModel: "gpt-5.4",
+                  mappingKind: "sonnet",
+                },
+                {
+                  type: "claude_model_mapping",
+                  scope: "attempt",
+                  applied: true,
+                  providerId: 1,
+                  providerName: "Provider A",
+                  requestedModel: "claude-sonnet",
+                  effectiveModel: "gpt-4.1-mini",
+                  mappingKind: "sonnet",
+                },
+              ]),
+              duration_ms: 1234,
+              ttfb_ms: 120,
+              attempt_count: 3,
+              has_failover: true,
+              start_provider_id: 1,
+              start_provider_name: "Provider A",
+              final_provider_id: 2,
+              final_provider_name: "Provider B",
+              route: [
+                createRequestLogRouteHop({
+                  provider_id: 1,
+                  provider_name: "Provider A",
+                  ok: false,
+                  status: 500,
+                }),
+                createRequestLogRouteHop({
+                  provider_id: 2,
+                  provider_name: "Provider B",
+                  ok: true,
+                  status: 200,
+                }),
+              ],
+              session_reuse: false,
+              created_at: Math.floor(Date.now() / 1000),
+            },
+          ])}
+          requestLogsLoading={false}
+          requestLogsRefreshing={false}
+          requestLogsAvailable={true}
+          onRefreshRequestLogs={vi.fn()}
+          selectedLogId={null}
+          onSelectLogId={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("claude-sonnet → gpt-5.4")).toBeInTheDocument();
+    expect(screen.queryByText("claude-sonnet → gpt-4.1-mini")).not.toBeInTheDocument();
+  });
+
   it("keeps Claude realtime traces visible when the persisted request log already exists", () => {
     const traces: TraceSession[] = [
       {
@@ -989,6 +1140,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
     expect(screen.getAllByTitle("Codex / gpt-5.4").length).toBeGreaterThan(0);
     expect(screen.getAllByTitle("Claude Code / claude-sonnet-4").length).toBeGreaterThan(0);
     expect(screen.getAllByTitle("Gemini / gemini-2.5-pro").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("claude-sonnet-4 → gpt-5.4").length).toBeGreaterThan(0);
     expect(screen.getAllByText("免费").length).toBeGreaterThan(0);
     expect(screen.getAllByText("进行中").length).toBeGreaterThan(0);
     expect(screen.getByText("切换处理中")).toBeInTheDocument();

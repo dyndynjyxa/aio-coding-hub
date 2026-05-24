@@ -122,6 +122,34 @@ describe("services/consoleLog (formatting)", () => {
       expect(result).toContain("错误信息");
     });
 
+    it("formats gateway:request edge branches with sparse attempts and unknown errors", async () => {
+      const { formatConsoleLogDetailsSmart } = await importFresh();
+      const entry: ConsoleLogEntry = {
+        id: "1",
+        ts: Date.now(),
+        tsText: "",
+        level: "info",
+        title: "test",
+        details: {
+          trace_id: "",
+          cli: "",
+          status: 302,
+          duration_ms: 10,
+          attempts: [null, { provider_name: "", outcome: "", status: null }],
+          error_code: "GW_UNKNOWN",
+        },
+        eventType: gatewayEventNames.request,
+      };
+
+      const result = formatConsoleLogDetailsSmart(entry)!;
+
+      expect(result).toContain("状态码:    302");
+      expect(result).toContain("Trace ID:  —");
+      expect(result).toContain("#1  —  ✗ —");
+      expect(result).toContain("GW_UNKNOWN");
+      expect(result).not.toContain("说明:");
+    });
+
     it("formats gateway:attempt event", async () => {
       const { formatConsoleLogDetailsSmart } = await importFresh();
       const entry: ConsoleLogEntry = {
@@ -150,6 +178,30 @@ describe("services/consoleLog (formatting)", () => {
       expect(result).toContain("成功");
       expect(result).toContain("150ms");
       expect(result).toContain("熔断器状态");
+    });
+
+    it("formats gateway:attempt without status or circuit details", async () => {
+      const { formatConsoleLogDetailsSmart } = await importFresh();
+      const entry: ConsoleLogEntry = {
+        id: "1",
+        ts: Date.now(),
+        tsText: "",
+        level: "info",
+        title: "test",
+        details: {
+          attempt_index: 1,
+          provider_name: "P1",
+          provider_id: 1,
+          outcome: "failure",
+        },
+        eventType: gatewayEventNames.attempt,
+      };
+
+      const result = formatConsoleLogDetailsSmart(entry)!;
+
+      expect(result).toContain("失败");
+      expect(result).not.toContain("status:");
+      expect(result).not.toContain("熔断器状态");
     });
 
     it("formats gateway:attempt with near-threshold warning", async () => {
@@ -297,6 +349,23 @@ describe("services/consoleLog (formatting)", () => {
       expect(result).toContain("Port 8080 in use");
       expect(result).toContain("请求端口");
       expect(result).toContain("实际端口");
+    });
+
+    it("formats gateway:log event without error code", async () => {
+      const { formatConsoleLogDetailsSmart } = await importFresh();
+      const entry: ConsoleLogEntry = {
+        id: "1",
+        ts: Date.now(),
+        tsText: "",
+        level: "info",
+        title: "test",
+        details: {},
+        eventType: gatewayEventNames.log,
+      };
+
+      const result = formatConsoleLogDetailsSmart(entry)!;
+      expect(result).toContain("网关事件: 未知");
+      expect(result).not.toContain("说明");
     });
 
     it("formats gateway:request_start event", async () => {

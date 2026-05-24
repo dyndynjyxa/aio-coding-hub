@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   baseUrlPingMs,
+  MAX_PROVIDER_ORDER_IDS,
   type ProviderSummary,
   providerClaudeTerminalLaunchCommand,
   providerCopyApiKeyToClipboard,
@@ -12,9 +13,12 @@ import {
   providerOAuthStartFlow,
   providerOAuthStatus,
   providerSetEnabled,
+  providerTestAvailability,
   providersList,
   providersReorder,
   providerUpsert,
+  validateProviderCliKey,
+  validateProviderId,
 } from "../providers";
 import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
@@ -41,6 +45,7 @@ vi.mock("../../../generated/bindings", async () => {
       providerOauthDisconnect: vi.fn(),
       providerOauthStatus: vi.fn(),
       providerOauthFetchLimits: vi.fn(),
+      providerTestAvailability: vi.fn(),
     },
   };
 });
@@ -207,6 +212,19 @@ describe("services/providers/providers", () => {
       status: "ok",
       data: "bash '/tmp/aio.sh'" as any,
     });
+    vi.mocked(commands.providerTestAvailability).mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        ok: true,
+        provider_id: 5,
+        provider_name: "P1",
+        base_url: "https://api.example.com",
+        status: 200,
+        latency_ms: 42,
+        error: null,
+        response_preview: null,
+      } as any,
+    });
 
     await providersList("claude");
     await baseUrlPingMs("https://api.example.com");
@@ -214,6 +232,7 @@ describe("services/providers/providers", () => {
     await providerDelete(1);
     await providersReorder("claude", [2, 1]);
     await providerClaudeTerminalLaunchCommand(5);
+    await providerTestAvailability(5);
 
     expect(commands.providersList).toHaveBeenCalledWith("claude");
     expect(commands.baseUrlPingMs).toHaveBeenCalledWith("https://api.example.com");
@@ -221,6 +240,165 @@ describe("services/providers/providers", () => {
     expect(commands.providerDelete).toHaveBeenCalledWith(1);
     expect(commands.providersReorder).toHaveBeenCalledWith("claude", [2, 1]);
     expect(commands.providerClaudeTerminalLaunchCommand).toHaveBeenCalledWith(5);
+    expect(commands.providerTestAvailability).toHaveBeenCalledWith(5);
+  });
+
+  it("normalizes provider cli keys before IPC", async () => {
+    vi.mocked(commands.providersList).mockClear();
+    vi.mocked(commands.providerUpsert).mockClear();
+    vi.mocked(commands.providersReorder).mockClear();
+    vi.mocked(commands.providerOauthStartFlow).mockClear();
+
+    vi.mocked(commands.providersList).mockResolvedValue({ status: "ok", data: [] as any });
+    vi.mocked(commands.providerUpsert).mockResolvedValue({
+      status: "ok",
+      data: createProviderSummary({ cli_key: "codex" }),
+    });
+    vi.mocked(commands.providersReorder).mockResolvedValue({
+      status: "ok",
+      data: [] as any,
+    });
+    vi.mocked(commands.providerOauthStartFlow).mockResolvedValue({
+      status: "ok",
+      data: {
+        success: true,
+        provider_type: "google",
+        expires_at: 1700000000,
+        provider_id: 10,
+      } as any,
+    });
+
+    expect(validateProviderCliKey(" claude ")).toBe("claude");
+
+    await providersList(" claude " as never);
+    await providerUpsert({
+      providerId: null,
+      cliKey: " codex " as never,
+      name: "P1",
+      baseUrls: ["https://example.com"],
+      baseUrlMode: "order",
+      apiKey: null,
+      enabled: true,
+      costMultiplier: 1,
+      priority: null,
+      claudeModels: null,
+      limit5hUsd: null,
+      limitDailyUsd: null,
+      dailyResetMode: "fixed",
+      dailyResetTime: "00:00:00",
+      limitWeeklyUsd: null,
+      limitMonthlyUsd: null,
+      limitTotalUsd: null,
+    });
+    await providersReorder(" gemini " as never, [2, 1]);
+    await providerOAuthStartFlow(" claude ", 10);
+
+    expect(commands.providersList).toHaveBeenCalledWith("claude");
+    expect(commands.providerUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ cliKey: "codex" })
+    );
+    expect(commands.providersReorder).toHaveBeenCalledWith("gemini", [2, 1]);
+    expect(commands.providerOauthStartFlow).toHaveBeenCalledWith("claude", 10);
+  });
+
+  it("rejects invalid provider reorder ids before IPC", async () => {
+    vi.mocked(commands.providersReorder).mockClear();
+
+    await expect(providersReorder("claude", [2, 0])).rejects.toThrow(
+      "SEC_INVALID_INPUT: invalid providerId=0"
+    );
+    await expect(providersReorder("claude", [2, 2])).rejects.toThrow(
+      "SEC_INVALID_INPUT: duplicate providerId=2"
+    );
+    await expect(
+      providersReorder(
+        "claude",
+        Array.from({ length: MAX_PROVIDER_ORDER_IDS + 1 }, (_, index) => index + 1)
+      )
+    ).rejects.toThrow("orderedProviderIds must contain at most");
+
+    expect(commands.providersReorder).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid provider ids before IPC", async () => {
+    vi.mocked(commands.providerUpsert).mockClear();
+    vi.mocked(commands.providerSetEnabled).mockClear();
+    vi.mocked(commands.providerDelete).mockClear();
+    vi.mocked(commands.providerDuplicate).mockClear();
+    vi.mocked(commands.providerOauthStartFlow).mockClear();
+    vi.mocked(commands.providerOauthRefresh).mockClear();
+    vi.mocked(commands.providerOauthDisconnect).mockClear();
+    vi.mocked(commands.providerOauthStatus).mockClear();
+    vi.mocked(commands.providerOauthFetchLimits).mockClear();
+    vi.mocked(commands.providerTestAvailability).mockClear();
+
+    expect(validateProviderId(42)).toBe(42);
+    expect(() => validateProviderId(0)).toThrow("SEC_INVALID_INPUT");
+    expect(() => validateProviderId(Number.NaN)).toThrow("SEC_INVALID_INPUT");
+
+    await expect(
+      providerUpsert({
+        providerId: 0,
+        cliKey: "claude",
+        name: "P1",
+        baseUrls: ["https://example.com"],
+        baseUrlMode: "order",
+        apiKey: null,
+        enabled: true,
+        costMultiplier: 1,
+        priority: null,
+        claudeModels: null,
+        limit5hUsd: null,
+        limitDailyUsd: null,
+        dailyResetMode: "fixed",
+        dailyResetTime: "00:00:00",
+        limitWeeklyUsd: null,
+        limitMonthlyUsd: null,
+        limitTotalUsd: null,
+      })
+    ).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(
+      providerUpsert({
+        providerId: null,
+        cliKey: "claude",
+        name: "P1",
+        baseUrls: ["https://example.com"],
+        baseUrlMode: "order",
+        apiKey: null,
+        enabled: true,
+        costMultiplier: 1,
+        priority: null,
+        claudeModels: null,
+        limit5hUsd: null,
+        limitDailyUsd: null,
+        dailyResetMode: "fixed",
+        dailyResetTime: "00:00:00",
+        limitWeeklyUsd: null,
+        limitMonthlyUsd: null,
+        limitTotalUsd: null,
+        sourceProviderId: 0,
+      })
+    ).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(providerSetEnabled(0, true)).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(providerDelete(0)).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(providerDuplicate(1.5)).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(providerOAuthStartFlow("not-a-cli", 1)).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(providerOAuthRefresh(0)).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(providerOAuthDisconnect(0)).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(providerOAuthStatus(0)).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(providerOAuthFetchLimits(0)).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(providerTestAvailability(0)).rejects.toThrow("SEC_INVALID_INPUT");
+
+    expect(commands.providerUpsert).not.toHaveBeenCalled();
+    expect(commands.providerSetEnabled).not.toHaveBeenCalled();
+    expect(commands.providerDelete).not.toHaveBeenCalled();
+    expect(commands.providerDuplicate).not.toHaveBeenCalled();
+    expect(commands.providerOauthStartFlow).not.toHaveBeenCalled();
+    expect(commands.providerOauthRefresh).not.toHaveBeenCalled();
+    expect(commands.providerOauthDisconnect).not.toHaveBeenCalled();
+    expect(commands.providerOauthStatus).not.toHaveBeenCalled();
+    expect(commands.providerOauthFetchLimits).not.toHaveBeenCalled();
+    expect(commands.providerTestAvailability).not.toHaveBeenCalled();
   });
 
   it("provider duplicate and clipboard copy both use generated ipc", async () => {

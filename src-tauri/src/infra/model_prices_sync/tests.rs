@@ -75,3 +75,16 @@ fn parses_google_context_over_200k_to_above_200k_fields() {
         "0.000015"
     );
 }
+
+#[test]
+fn write_json_atomically_rejects_oversized_basellm_cache_file() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let path = temp.path().join("basellm-cache.json");
+
+    let err = write_json_atomically(&path, vec![b'x'; BASELLM_CACHE_MAX_BYTES + 1])
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("basellm cache file too large"));
+    assert!(!path.exists());
+}

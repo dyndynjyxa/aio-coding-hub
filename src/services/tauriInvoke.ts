@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 const DEFAULT_TAURI_INVOKE_TIMEOUT_MS = 60_000;
+const MAX_TAURI_INVOKE_TIMEOUT_MS = 2_147_483_647;
 
 export type InvokeTauriOptions = {
   timeoutMs?: number | null;
@@ -8,8 +9,9 @@ export type InvokeTauriOptions = {
 
 function normalizeTimeoutMs(value: number | null | undefined) {
   if (value == null) return DEFAULT_TAURI_INVOKE_TIMEOUT_MS;
-  if (!Number.isFinite(value) || value <= 0) return null;
-  return Math.floor(value);
+  if (!Number.isFinite(value)) return DEFAULT_TAURI_INVOKE_TIMEOUT_MS;
+  if (value <= 0) return null;
+  return Math.min(MAX_TAURI_INVOKE_TIMEOUT_MS, Math.max(1, Math.floor(value)));
 }
 
 export async function invokeTauriOrNull<T>(

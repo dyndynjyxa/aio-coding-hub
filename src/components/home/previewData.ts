@@ -2,15 +2,55 @@
 // Extracted from HomeRequestLogsPanel to keep the component file lean.
 
 import { GatewayErrorCodes } from "../../constants/gatewayErrorCodes";
+import type { ClaudeModelMapping } from "../../services/gateway/claudeModelMapping";
 import type { GatewayAttemptEvent } from "../../services/gateway/gatewayEvents";
 import { createRequestLogSummary } from "../../services/gateway/requestLogFixtures";
 import type { CliSessionsFolderLookupEntry } from "../../services/cli/cliSessions";
 import type { RequestLogSummary } from "../../services/gateway/requestLogs";
 import type { TraceSession } from "../../services/gateway/traceStore";
 
+function buildClaudeModelMappingPreview(
+  requestedModel: string,
+  effectiveModel: string,
+  mappingKind: string,
+  providerId: number,
+  providerName: string
+): ClaudeModelMapping {
+  return {
+    requestedModel,
+    effectiveModel,
+    mappingKind,
+    providerId,
+    providerName,
+    applied: true,
+  };
+}
+
+function buildClaudeModelMappingSpecialSettingsJson(mapping: ClaudeModelMapping): string {
+  return JSON.stringify([
+    {
+      type: "claude_model_mapping",
+      scope: "attempt",
+      applied: mapping.applied,
+      providerId: mapping.providerId,
+      providerName: mapping.providerName,
+      requestedModel: mapping.requestedModel,
+      effectiveModel: mapping.effectiveModel,
+      mappingKind: mapping.mappingKind,
+    },
+  ]);
+}
+
 export function buildPreviewRequestLogs(
   nowSec = Math.floor(Date.now() / 1000)
 ): RequestLogSummary[] {
+  const claudeFastMapping = buildClaudeModelMappingPreview(
+    "claude-sonnet-4",
+    "gpt-5.4",
+    "sonnet",
+    18,
+    "Claude Fast"
+  );
   return [
     {
       id: 900010,
@@ -32,6 +72,7 @@ export function buildPreviewRequestLogs(
       final_provider_name: "Claude Fast",
       route: [{ provider_id: 18, provider_name: "Claude Fast", ok: true, status: 200 }],
       session_reuse: true,
+      special_settings_json: buildClaudeModelMappingSpecialSettingsJson(claudeFastMapping),
       input_tokens: 86,
       output_tokens: 214,
       total_tokens: 300,
@@ -390,6 +431,13 @@ export function buildPreviewRequestLogs(
 }
 
 export function buildPreviewTraces(nowMs = Date.now()): TraceSession[] {
+  const claudeFailoverMapping = buildClaudeModelMappingPreview(
+    "claude-sonnet-4",
+    "gpt-5.4",
+    "sonnet",
+    32,
+    "Claude Backup"
+  );
   return [
     {
       trace_id: "preview-running-codex",
@@ -428,6 +476,7 @@ export function buildPreviewTraces(nowMs = Date.now()): TraceSession[] {
       path: "/v1/messages",
       query: null,
       requested_model: "claude-sonnet-4",
+      claude_model_mapping: claudeFailoverMapping,
       first_seen_ms: nowMs - 52_000,
       last_seen_ms: nowMs - 1_200,
       attempts: [
@@ -446,6 +495,7 @@ export function buildPreviewTraces(nowMs = Date.now()): TraceSession[] {
           attempt_started_ms: nowMs - 52_000,
           attempt_duration_ms: 21_000,
           session_reuse: false,
+          claude_model_mapping: claudeFailoverMapping,
         } satisfies GatewayAttemptEvent,
         {
           trace_id: "preview-running-claude-failover",
@@ -462,6 +512,7 @@ export function buildPreviewTraces(nowMs = Date.now()): TraceSession[] {
           attempt_started_ms: nowMs - 29_000,
           attempt_duration_ms: 29_000,
           session_reuse: false,
+          claude_model_mapping: claudeFailoverMapping,
         } satisfies GatewayAttemptEvent,
       ],
     },

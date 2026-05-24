@@ -5,7 +5,11 @@ import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";
 import { Spinner } from "../../ui/Spinner";
 import { cn } from "../../utils/cn";
-import { hasHomeOAuthQuotaText, type HomeOAuthQuotaRow } from "./homeOAuthQuotaTypes";
+import {
+  hasHomeOAuthQuotaText,
+  hasInsufficientHomeOAuthQuota,
+  type HomeOAuthQuotaRow,
+} from "./homeOAuthQuotaTypes";
 
 export type HomeOAuthQuotaPanelContentProps = {
   rows: HomeOAuthQuotaRow[];
@@ -74,6 +78,8 @@ function OAuthQuotaProviderCard({
   ]
     .filter((segment): segment is string => Boolean(segment))
     .join(" / ");
+  const showInsufficientQuota =
+    row.state === "success" && hasInsufficientHomeOAuthQuota(row.limits);
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
@@ -136,10 +142,15 @@ function OAuthQuotaProviderCard({
         ) : !hasHomeOAuthQuotaText(row.limits) ? (
           <div className="text-xs text-slate-500 dark:text-slate-400">暂无 OAuth 配额信息</div>
         ) : (
-          <div className="text-xs text-slate-600 dark:text-slate-400">
-            <span className="font-mono" title={quotaSummary}>
+          <div className="flex items-center justify-between gap-2 text-xs text-slate-600 dark:text-slate-400">
+            <span className="min-w-0 truncate font-mono" title={quotaSummary}>
               {quotaSummary}
             </span>
+            {showInsufficientQuota ? (
+              <span className="shrink-0 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                配额不足
+              </span>
+            ) : null}
           </div>
         )}
       </div>

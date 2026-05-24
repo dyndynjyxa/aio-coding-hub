@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   wslConfigStatusGet,
   wslConfigureClients,
@@ -30,6 +30,10 @@ vi.mock("../../services/app/wsl", async () => {
 });
 
 describe("query/wsl", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("fetches detection and host address with tauri runtime", async () => {
     setTauriRuntime();
 
@@ -77,13 +81,14 @@ describe("query/wsl", () => {
     expect(wslHostAddressGet).not.toHaveBeenCalled();
   });
 
-  it("useWslConfigStatusQuery does not call API when distros is empty", async () => {
+  it("useWslConfigStatusQuery does not call API when distros normalize to empty", async () => {
     setTauriRuntime();
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
 
     renderHook(() => useWslConfigStatusQuery([]), { wrapper });
+    renderHook(() => useWslConfigStatusQuery([" ", "\t"]), { wrapper });
     await Promise.resolve();
 
     expect(wslConfigStatusGet).not.toHaveBeenCalled();
@@ -110,7 +115,9 @@ describe("query/wsl", () => {
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
 
-    const { result } = renderHook(() => useWslConfigStatusQuery(["Ubuntu"]), { wrapper });
+    const { result } = renderHook(() => useWslConfigStatusQuery([" Ubuntu ", "Ubuntu", ""]), {
+      wrapper,
+    });
 
     await waitFor(() => {
       expect(result.current.isSuccess).toBe(true);
@@ -189,7 +196,7 @@ describe("query/wsl", () => {
   it("overview fetches host ip + config status when distros exist", async () => {
     setTauriRuntime();
 
-    vi.mocked(wslDetect).mockResolvedValue({ detected: true, distros: ["Ubuntu"] });
+    vi.mocked(wslDetect).mockResolvedValue({ detected: true, distros: [" Ubuntu ", "Ubuntu", ""] });
     vi.mocked(wslHostAddressGet).mockResolvedValue("172.20.1.1");
     vi.mocked(wslConfigStatusGet).mockResolvedValue([
       {
@@ -218,6 +225,7 @@ describe("query/wsl", () => {
     expect(wslHostAddressGet).toHaveBeenCalledTimes(1);
     expect(wslConfigStatusGet).toHaveBeenCalledWith(["Ubuntu"]);
     expect(result.current.data?.hostIp).toBe("172.20.1.1");
+    expect(result.current.data?.detection?.distros).toEqual(["Ubuntu"]);
     expect(result.current.data?.statusRows?.[0]?.distro).toBe("Ubuntu");
   });
 

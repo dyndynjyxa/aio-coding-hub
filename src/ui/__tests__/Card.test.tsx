@@ -35,7 +35,7 @@ describe("ui/Card", () => {
   it("applies base styling classes", () => {
     const { container } = render(<Card>Base</Card>);
     const card = container.firstElementChild;
-    expect(card).toHaveClass("overflow-hidden", "border", "border-slate-200", "bg-white");
+    expect(card).toHaveClass("overflow-hidden", "border", "border-border", "bg-card");
   });
 
   it("passes through HTML div attributes", () => {

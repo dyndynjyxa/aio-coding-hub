@@ -7,6 +7,8 @@ use crate::shared::time::now_unix_seconds;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
+pub(crate) const MAX_WORKSPACE_NAME_CHARS: usize = 128;
+
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct WorkspaceSummary {
     pub id: i64,
@@ -24,6 +26,35 @@ pub struct WorkspacesListResult {
 
 fn validate_cli_key(cli_key: &str) -> crate::shared::error::AppResult<()> {
     crate::shared::cli_key::validate_cli_key(cli_key)
+}
+
+pub(crate) fn normalize_cli_key(cli_key: &str) -> crate::shared::error::AppResult<String> {
+    let cli_key = cli_key.trim();
+    validate_cli_key(cli_key)?;
+    Ok(cli_key.to_string())
+}
+
+pub(crate) fn validate_workspace_name(name: &str) -> crate::shared::error::AppResult<String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("SEC_INVALID_INPUT: workspace name is required"
+            .to_string()
+            .into());
+    }
+    if name.chars().any(char::is_control) {
+        return Err(
+            "SEC_INVALID_INPUT: workspace name contains control characters"
+                .to_string()
+                .into(),
+        );
+    }
+    if name.chars().nth(MAX_WORKSPACE_NAME_CHARS).is_some() {
+        return Err(format!(
+            "SEC_INVALID_INPUT: workspace name is too long (max {MAX_WORKSPACE_NAME_CHARS} chars)"
+        )
+        .into());
+    }
+    Ok(name.to_string())
 }
 
 fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<WorkspaceSummary, rusqlite::Error> {
@@ -74,8 +105,7 @@ pub fn active_id_by_cli(
     conn: &Connection,
     cli_key: &str,
 ) -> crate::shared::error::AppResult<Option<i64>> {
-    let cli_key = cli_key.trim();
-    validate_cli_key(cli_key)?;
+    let cli_key = normalize_cli_key(cli_key)?;
 
     let id = conn
         .query_row(
@@ -102,11 +132,10 @@ pub fn list_by_cli(
     db: &db::Db,
     cli_key: &str,
 ) -> crate::shared::error::AppResult<WorkspacesListResult> {
-    let cli_key = cli_key.trim();
-    validate_cli_key(cli_key)?;
+    let cli_key = normalize_cli_key(cli_key)?;
 
     let conn = db.open_connection()?;
-    let active_id = active_id_by_cli(&conn, cli_key)?;
+    let active_id = active_id_by_cli(&conn, &cli_key)?;
 
     let mut stmt = conn
         .prepare_cached(
@@ -142,17 +171,10 @@ pub fn create(
     name: &str,
     clone_from_active: bool,
 ) -> crate::shared::error::AppResult<WorkspaceSummary> {
-    let cli_key = cli_key.trim();
-    validate_cli_key(cli_key)?;
+    let cli_key = normalize_cli_key(cli_key)?;
+    let name = validate_workspace_name(name)?;
 
-    let name = name.trim();
-    if name.is_empty() {
-        return Err("SEC_INVALID_INPUT: workspace name is required"
-            .to_string()
-            .into());
-    }
-
-    let normalized_name = normalize_name(name);
+    let normalized_name = normalize_name(&name);
     let now = now_unix_seconds();
 
     let mut conn = db.open_connection()?;
@@ -187,7 +209,7 @@ INSERT INTO workspaces(
     let id = tx.last_insert_rowid();
 
     if clone_from_active {
-        if let Some(from_workspace_id) = active_id_by_cli(&tx, cli_key)? {
+        if let Some(from_workspace_id) = active_id_by_cli(&tx, &cli_key)? {
             tx.execute(
                 r#"
 INSERT INTO prompts(
@@ -281,14 +303,9 @@ pub fn rename(
     workspace_id: i64,
     name: &str,
 ) -> crate::shared::error::AppResult<WorkspaceSummary> {
-    let name = name.trim();
-    if name.is_empty() {
-        return Err("SEC_INVALID_INPUT: workspace name is required"
-            .to_string()
-            .into());
-    }
+    let name = validate_workspace_name(name)?;
 
-    let normalized_name = normalize_name(name);
+    let normalized_name = normalize_name(&name);
     let now = now_unix_seconds();
 
     let conn = db.open_connection()?;

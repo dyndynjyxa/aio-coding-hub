@@ -212,7 +212,9 @@ export function useHomeOAuthQuota({
 
       const settled = await Promise.allSettled(
         providers.map(async (provider) => {
-          await refreshProviderOAuthLimits(queryClient, provider.providerId);
+          await refreshProviderOAuthLimits(queryClient, provider.providerId, {
+            resetCircuitAfterRefresh: true,
+          });
           return provider.providerId;
         })
       );

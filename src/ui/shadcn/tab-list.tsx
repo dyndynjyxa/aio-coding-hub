@@ -31,7 +31,7 @@ export function TabList<T extends string>({
       role="tablist"
       aria-label={ariaLabel}
       className={cn(
-        "flex items-center rounded-lg border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-800",
+        "flex items-center rounded-lg border border-border bg-card p-1",
         className
       )}
     >

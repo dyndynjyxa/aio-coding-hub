@@ -87,6 +87,8 @@ function renderSettingsMainColumn(
     setTrayEnabled: vi.fn(),
     logRetentionDays: 30,
     setLogRetentionDays: vi.fn(),
+    enableDebugLog: false,
+    setEnableDebugLog: vi.fn(),
     requestPersist: vi.fn(),
     noticePermissionStatus: "checking",
     requestingNoticePermission: false,

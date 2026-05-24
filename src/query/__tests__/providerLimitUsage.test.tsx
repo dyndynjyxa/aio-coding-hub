@@ -1,5 +1,5 @@
 import { renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { providerLimitUsageV1 } from "../../services/providers/providerLimitUsage";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
@@ -16,6 +16,10 @@ vi.mock("../../services/providers/providerLimitUsage", async () => {
 });
 
 describe("query/providerLimitUsage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("calls providerLimitUsageV1 with tauri runtime", async () => {
     setTauriRuntime();
 
@@ -24,7 +28,7 @@ describe("query/providerLimitUsage", () => {
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
 
-    renderHook(() => useProviderLimitUsageV1Query("claude"), { wrapper });
+    renderHook(() => useProviderLimitUsageV1Query(" claude " as never), { wrapper });
 
     await waitFor(() => {
       expect(providerLimitUsageV1).toHaveBeenCalledWith("claude");

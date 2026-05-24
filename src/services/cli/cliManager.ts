@@ -2,6 +2,9 @@ import {
   commands,
   type ClaudeCliInfo as GeneratedClaudeCliInfo,
   type ClaudeEnvState as GeneratedClaudeEnvState,
+  type ClaudeHookGroup as GeneratedClaudeHookGroup,
+  type ClaudeHooksSetInput as GeneratedClaudeHooksSetInput,
+  type ClaudeHooksState as GeneratedClaudeHooksState,
   type ClaudeSettingsPatch as GeneratedClaudeSettingsPatch,
   type ClaudeSettingsState as GeneratedClaudeSettingsState,
   type CodexConfigPatch as GeneratedCodexConfigPatch,
@@ -20,6 +23,9 @@ export type SimpleCliInfo = GeneratedSimpleCliInfo;
 export type ClaudeEnvState = GeneratedClaudeEnvState;
 export type ClaudeSettingsState = GeneratedClaudeSettingsState;
 export type ClaudeSettingsPatch = Partial<GeneratedClaudeSettingsPatch>;
+export type ClaudeHooksState = GeneratedClaudeHooksState;
+export type ClaudeHookGroup = GeneratedClaudeHookGroup;
+export type ClaudeHooksSetInput = GeneratedClaudeHooksSetInput;
 export type CodexConfigState = GeneratedCodexConfigState;
 export type CodexConfigPatch = Partial<GeneratedCodexConfigPatch>;
 export type CodexConfigTomlState = GeneratedCodexConfigTomlState;
@@ -273,5 +279,24 @@ export async function cliManagerClaudeSettingsSet(patch: ClaudeSettingsPatch) {
       commands.cliManagerClaudeSettingsSet(normalizedPatch) as Promise<
         GeneratedCommandResult<ClaudeSettingsState>
       >,
+  });
+}
+
+export async function cliManagerClaudeHooksGet() {
+  return invokeGeneratedIpc<ClaudeHooksState>({
+    title: "读取 Claude Hooks 失败",
+    cmd: "cli_manager_claude_hooks_get",
+    invoke: () =>
+      commands.cliManagerClaudeHooksGet() as Promise<GeneratedCommandResult<ClaudeHooksState>>,
+  });
+}
+
+export async function cliManagerClaudeHooksSet(input: ClaudeHooksSetInput) {
+  return invokeGeneratedIpc<ClaudeHooksState>({
+    title: "保存 Claude Hooks 失败",
+    cmd: "cli_manager_claude_hooks_set",
+    args: { input },
+    invoke: () =>
+      commands.cliManagerClaudeHooksSet(input) as Promise<GeneratedCommandResult<ClaudeHooksState>>,
   });
 }

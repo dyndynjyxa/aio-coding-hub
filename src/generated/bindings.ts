@@ -129,6 +129,14 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async appMemoryDiagnosticsGet(): Promise<Result<AppMemoryDiagnosticsSnapshot, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("app_memory_diagnostics_get") };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async desktopClipboardWriteText(text: string): Promise<Result<boolean, string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("desktop_clipboard_write_text", { text }) };
@@ -173,6 +181,14 @@ export const commands = {
   ): Promise<Result<boolean, string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("desktop_notification_notify", { options }) };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async desktopNotificationPlaySound(): Promise<Result<boolean, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("desktop_notification_play_sound") };
     } catch (e) {
       if (e instanceof Error) throw e;
       else return { status: "error", error: e as any };
@@ -368,6 +384,24 @@ export const commands = {
         status: "ok",
         data: await TAURI_INVOKE("cli_manager_claude_settings_set", { patch }),
       };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async cliManagerClaudeHooksGet(): Promise<Result<ClaudeHooksState, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("cli_manager_claude_hooks_get") };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async cliManagerClaudeHooksSet(
+    input: ClaudeHooksSetInput
+  ): Promise<Result<ClaudeHooksState, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("cli_manager_claude_hooks_set", { input }) };
     } catch (e) {
       if (e instanceof Error) throw e;
       else return { status: "error", error: e as any };
@@ -668,6 +702,19 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async providerTestAvailability(
+    providerId: number
+  ): Promise<Result<ProviderAvailabilityResult, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("provider_test_availability", { providerId }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async providerOauthStartFlow(
     cliKey: string,
     providerId: number
@@ -931,6 +978,14 @@ export const commands = {
   async promptsList(workspaceId: number): Promise<Result<PromptSummary[], string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("prompts_list", { workspaceId }) };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async promptsListSummary(workspaceId: number): Promise<Result<PromptListSummary[], string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("prompts_list_summary", { workspaceId }) };
     } catch (e) {
       if (e instanceof Error) throw e;
       else return { status: "error", error: e as any };
@@ -1444,6 +1499,24 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async usageDayDetailV1(params: UsageDayDetailParams): Promise<Result<UsageDayDetailV1, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("usage_day_detail_v1", { params }) };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async usageFolderOptionsV1(
+    params: UsageQueryParams
+  ): Promise<Result<UsageFolderOptionV1[], string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("usage_folder_options_v1", { params }) };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async usageProviderCacheRateTrendV1(
     params: UsageQueryParams,
     limit: number | null
@@ -1677,6 +1750,49 @@ export type AppAboutInfo = {
   bundle_type: string | null;
   run_mode: string;
 };
+export type AppMemoryDiagnosticsCliSessionStats = {
+  source: string;
+  root: string;
+  exists: boolean;
+  file_count: number;
+  total_bytes: number;
+  max_file_bytes: number;
+  truncated: boolean;
+  top_files: AppMemoryDiagnosticsFileStat[];
+};
+export type AppMemoryDiagnosticsDbStats = {
+  path: string;
+  exists: boolean;
+  db_bytes: number;
+  wal_bytes: number;
+  shm_bytes: number;
+};
+export type AppMemoryDiagnosticsFileStat = {
+  path: string;
+  bytes: number;
+  modified_at: number | null;
+};
+export type AppMemoryDiagnosticsPromptStats = {
+  count: number;
+  total_content_len: number;
+  max_content_len: number;
+  top_items: AppMemoryDiagnosticsPromptTopItem[];
+};
+export type AppMemoryDiagnosticsPromptTopItem = {
+  id: number;
+  workspace_id: number;
+  cli_key: string;
+  name: string;
+  enabled: boolean;
+  content_len: number;
+};
+export type AppMemoryDiagnosticsSnapshot = {
+  generated_at_unix: number;
+  app_data_dir: string;
+  db: AppMemoryDiagnosticsDbStats;
+  prompt_stats: AppMemoryDiagnosticsPromptStats;
+  cli_sessions: AppMemoryDiagnosticsCliSessionStats[];
+};
 export type AppStartupStage =
   | "idle"
   | "initializing_db"
@@ -1720,6 +1836,10 @@ export type ClaudeEnvState = {
   mcp_timeout_ms: number | null;
   disable_error_reporting: boolean;
 };
+export type ClaudeHookEntry = { hook_type: string; command: string; timeout?: number | null };
+export type ClaudeHookGroup = { event: string; matcher: string; hooks: ClaudeHookEntry[] };
+export type ClaudeHooksSetInput = { groups: ClaudeHookGroup[] };
+export type ClaudeHooksState = { settings_path: string; groups: ClaudeHookGroup[] };
 export type ClaudeModelValidationResult = {
   ok: boolean;
   provider_id: number;
@@ -2318,6 +2438,17 @@ export type ModelPricesSyncReport = {
 };
 export type NoticeLevel = "info" | "success" | "warning" | "error";
 export type NoticeSendInput = { level: NoticeLevel; title: string | null; body: string };
+export type PromptListSummary = {
+  id: number;
+  workspace_id: number;
+  cli_key: string;
+  name: string;
+  enabled: boolean;
+  content_len: number;
+  content_preview: string;
+  created_at: number;
+  updated_at: number;
+};
 export type PromptSummary = {
   id: number;
   workspace_id: number;
@@ -2329,6 +2460,16 @@ export type PromptSummary = {
   updated_at: number;
 };
 export type ProviderAuthMode = "api_key" | "oauth";
+export type ProviderAvailabilityResult = {
+  ok: boolean;
+  provider_id: number;
+  provider_name: string;
+  base_url: string;
+  status: number | null;
+  latency_ms: number;
+  error: string | null;
+  response_preview: string | null;
+};
 export type ProviderBaseUrlMode = "order" | "ping";
 export type ProviderLimitUsageRow = {
   cli_key: string;
@@ -2569,6 +2710,7 @@ export type SettingsUpdate = {
   enableBillingHeaderRectifier: boolean | null;
   enableClaudeMetadataUserIdInjection: boolean | null;
   enableCacheAnomalyMonitor: boolean | null;
+  enableDebugLog: boolean | null;
   enableTaskCompleteNotify: boolean | null;
   enableNotificationSound: boolean | null;
   enableResponseFixer: boolean | null;
@@ -2643,6 +2785,7 @@ export type SettingsView = {
   enable_codex_session_id_completion: boolean;
   enable_claude_metadata_user_id_injection: boolean;
   enable_cache_anomaly_monitor: boolean;
+  enable_debug_log: boolean;
   enable_task_complete_notify: boolean;
   enable_notification_sound: boolean;
   enable_response_fixer: boolean;
@@ -2699,6 +2842,43 @@ export type SkillsPaths = { ssot_dir: string; repos_dir: string; cli_dir: string
 export type SortModeActiveRow = { cli_key: string; mode_id: number | null; updated_at: number };
 export type SortModeProviderRow = { provider_id: number; enabled: boolean };
 export type SortModeSummary = { id: number; name: string; created_at: number; updated_at: number };
+export type UsageDayDetailParams = {
+  day: string;
+  cliKey: string | null;
+  providerId: number | null;
+  folderLimit: number | null;
+  folderKeys: string[] | null;
+  excludeCx2CcGatewayBridge: boolean | null;
+};
+export type UsageDayDetailV1 = {
+  day: string;
+  folders: UsageDayFolderRow[];
+  hours: UsageDayHourRow[];
+};
+export type UsageDayFolderRow = {
+  key: string;
+  name: string;
+  folder_path: string | null;
+  requests_total: number;
+  requests_success: number;
+  requests_failed: number;
+  total_tokens: number;
+  io_total_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+  avg_duration_ms: number | null;
+  avg_ttfb_ms: number | null;
+  avg_output_tokens_per_second: number | null;
+  cost_usd: number | null;
+};
+export type UsageDayHourRow = {
+  hour: number;
+  requests_total: number;
+  total_tokens: number;
+  io_total_tokens: number;
+};
 export type UsageDayRow = {
   day: string;
   requests_total: number;
@@ -2709,6 +2889,13 @@ export type UsageDayRow = {
   cache_creation_input_tokens: number;
   cache_creation_5m_input_tokens: number;
   cache_creation_1h_input_tokens: number;
+};
+export type UsageFolderOptionV1 = {
+  key: string;
+  name: string;
+  folder_path: string | null;
+  requests_total: number;
+  total_tokens: number;
 };
 export type UsageHourlyRow = {
   day: string;
@@ -2769,6 +2956,8 @@ export type UsageQueryParams = {
   endTs: number | null;
   cliKey: string | null;
   providerId: number | null;
+  folderKeys: string[] | null;
+  excludeCx2CcGatewayBridge: boolean | null;
 };
 export type UsageSummary = {
   requests_total: number;

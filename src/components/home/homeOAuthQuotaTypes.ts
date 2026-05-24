@@ -1,4 +1,8 @@
-import type { CliKey, OAuthLimitsResult } from "../../services/providers/providers";
+import {
+  hasInsufficientOAuthQuota,
+  type CliKey,
+  type OAuthLimitsResult,
+} from "../../services/providers/providers";
 
 export type HomeOAuthQuotaRowState = "idle" | "loading" | "success" | "error";
 
@@ -14,4 +18,8 @@ export type HomeOAuthQuotaRow = {
 
 export function hasHomeOAuthQuotaText(limits: OAuthLimitsResult | null): boolean {
   return Boolean(limits?.limit_5h_text || limits?.limit_weekly_text);
+}
+
+export function hasInsufficientHomeOAuthQuota(limits: OAuthLimitsResult | null): boolean {
+  return hasInsufficientOAuthQuota(limits);
 }

@@ -14,6 +14,9 @@ use super::json::{fix_sse_json_lines, JsonFixer};
 use super::sse::SseFixer;
 use super::ResponseFixerConfig;
 
+const CHUNK_BUFFER_COMPACT_CHUNK_THRESHOLD: usize = 1024;
+const CHUNK_BUFFER_COMPACT_MIN_GROWTH_BYTES: usize = 16 * 1024;
+
 struct ChunkBuffer {
     chunks: Vec<Bytes>,
     head: usize,
@@ -21,6 +24,7 @@ struct ChunkBuffer {
     total: usize,
     processable_end: usize,
     pending_cr: bool,
+    next_compact_total: usize,
 }
 
 impl ChunkBuffer {
@@ -32,6 +36,7 @@ impl ChunkBuffer {
             total: 0,
             processable_end: 0,
             pending_cr: false,
+            next_compact_total: CHUNK_BUFFER_COMPACT_MIN_GROWTH_BYTES,
         }
     }
 
@@ -76,6 +81,7 @@ impl ChunkBuffer {
 
         self.chunks.push(chunk);
         self.total += chunk_len;
+        self.compact_if_fragmented();
     }
 
     fn find_processable_end(&self) -> usize {
@@ -121,6 +127,11 @@ impl ChunkBuffer {
             }
         }
 
+        if self.total == 0 {
+            self.clear();
+            return out;
+        }
+
         if self.head > 64 {
             self.chunks.drain(0..self.head);
             self.head = 0;
@@ -137,19 +148,44 @@ impl ChunkBuffer {
         out
     }
 
-    fn flush_to(&mut self, queue: &mut VecDeque<Bytes>) {
+    fn unread_chunk_count(&self) -> usize {
+        self.chunks.len().saturating_sub(self.head)
+    }
+
+    fn compact_if_fragmented(&mut self) {
+        if self.unread_chunk_count() <= CHUNK_BUFFER_COMPACT_CHUNK_THRESHOLD {
+            return;
+        }
+        if self.total < self.next_compact_total {
+            return;
+        }
+
+        self.compact_unread();
+        self.next_compact_total = self
+            .total
+            .saturating_add(self.total.max(CHUNK_BUFFER_COMPACT_MIN_GROWTH_BYTES));
+    }
+
+    fn compact_unread(&mut self) {
+        if self.total == 0 {
+            self.clear();
+            return;
+        }
+
+        let mut out = Vec::with_capacity(self.total);
         for i in self.head..self.chunks.len() {
             let chunk = &self.chunks[i];
             if i == self.head && self.head_offset > 0 {
-                let view = chunk.slice(self.head_offset..);
-                if !view.is_empty() {
-                    queue.push_back(view);
-                }
+                out.extend_from_slice(&chunk.as_ref()[self.head_offset..]);
                 continue;
             }
-            queue.push_back(chunk.clone());
+            out.extend_from_slice(chunk.as_ref());
         }
-        self.clear();
+
+        self.chunks.clear();
+        self.chunks.push(Bytes::from(out));
+        self.head = 0;
+        self.head_offset = 0;
     }
 
     fn clear(&mut self) {
@@ -159,6 +195,7 @@ impl ChunkBuffer {
         self.total = 0;
         self.processable_end = 0;
         self.pending_cr = false;
+        self.next_compact_total = CHUNK_BUFFER_COMPACT_MIN_GROWTH_BYTES;
     }
 }
 
@@ -226,9 +263,7 @@ where
             processing_time_ms,
         );
 
-        if let Ok(mut guard) = self.special_settings.lock() {
-            guard.push(special);
-        }
+        super::push_special_setting(&self.special_settings, special);
     }
 
     fn process_bytes(&mut self, input: Bytes) -> Bytes {
@@ -335,7 +370,10 @@ where
                     // 安全保护：如果长时间无换行，buffer 会持续增长。达到上限后降级为透传，避免内存无界增长。
                     if this.buffer.len().saturating_add(chunk.len()) > this.config.max_fix_size {
                         this.passthrough = true;
-                        this.buffer.flush_to(&mut this.queued);
+                        let buffered = Bytes::from(this.buffer.drain());
+                        if !buffered.is_empty() {
+                            this.queued.push_back(buffered);
+                        }
                         this.queued.push_back(chunk);
                         continue;
                     }
@@ -365,5 +403,28 @@ where
 {
     fn drop(&mut self) {
         self.finalize_if_needed();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chunk_buffer_compacts_fragmented_tiny_chunks() {
+        let mut buffer = ChunkBuffer::new();
+        let total = CHUNK_BUFFER_COMPACT_MIN_GROWTH_BYTES + 1;
+
+        for _ in 0..total {
+            buffer.push(Bytes::from_static(b"a"));
+        }
+
+        assert_eq!(buffer.len(), total);
+        assert_eq!(buffer.find_processable_end(), 0);
+        assert!(buffer.unread_chunk_count() < CHUNK_BUFFER_COMPACT_CHUNK_THRESHOLD);
+
+        let drained = buffer.drain();
+        assert_eq!(drained.len(), total);
+        assert!(drained.iter().all(|b| *b == b'a'));
     }
 }

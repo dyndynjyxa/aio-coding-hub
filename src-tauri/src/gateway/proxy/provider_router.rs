@@ -3,8 +3,8 @@
 use crate::circuit_breaker;
 use crate::gateway::events::{emit_circuit_event, emit_circuit_transition, GatewayCircuitEvent};
 
-pub(super) struct GateProviderArgs<'a> {
-    pub(super) app: Option<&'a tauri::AppHandle>,
+pub(super) struct GateProviderArgs<'a, R: tauri::Runtime = tauri::Wry> {
+    pub(super) app: Option<&'a tauri::AppHandle<R>>,
     pub(super) circuit: &'a circuit_breaker::CircuitBreaker,
     pub(super) trace_id: &'a str,
     pub(super) cli_key: &'a str,
@@ -17,8 +17,8 @@ pub(super) struct GateProviderArgs<'a> {
     pub(super) skipped_cooldown: &'a mut usize,
 }
 
-pub(super) fn gate_provider(
-    args: GateProviderArgs<'_>,
+pub(super) fn gate_provider<R: tauri::Runtime>(
+    args: GateProviderArgs<'_, R>,
 ) -> Option<circuit_breaker::CircuitSnapshot> {
     let GateProviderArgs {
         app,
@@ -98,8 +98,8 @@ pub(super) fn gate_provider(
     None
 }
 
-pub(in crate::gateway) struct RecordCircuitArgs<'a> {
-    pub(in crate::gateway) app: Option<&'a tauri::AppHandle>,
+pub(in crate::gateway) struct RecordCircuitArgs<'a, R: tauri::Runtime = tauri::Wry> {
+    pub(in crate::gateway) app: Option<&'a tauri::AppHandle<R>>,
     pub(in crate::gateway) circuit: &'a circuit_breaker::CircuitBreaker,
     pub(in crate::gateway) trace_id: &'a str,
     pub(in crate::gateway) cli_key: &'a str,
@@ -109,10 +109,10 @@ pub(in crate::gateway) struct RecordCircuitArgs<'a> {
     pub(in crate::gateway) now_unix: i64,
 }
 
-impl<'a> RecordCircuitArgs<'a> {
+impl<'a, R: tauri::Runtime> RecordCircuitArgs<'a, R> {
     #[allow(clippy::too_many_arguments)]
     pub(in crate::gateway) fn new(
-        app: Option<&'a tauri::AppHandle>,
+        app: Option<&'a tauri::AppHandle<R>>,
         circuit: &'a circuit_breaker::CircuitBreaker,
         trace_id: &'a str,
         cli_key: &'a str,
@@ -132,9 +132,11 @@ impl<'a> RecordCircuitArgs<'a> {
             now_unix,
         }
     }
+}
 
+impl<'a, R: tauri::Runtime> RecordCircuitArgs<'a, R> {
     pub(in crate::gateway) fn from_state(
-        state: &'a crate::gateway::runtime::GatewayAppState,
+        state: &'a crate::gateway::runtime::GatewayAppState<R>,
         trace_id: &'a str,
         cli_key: &'a str,
         provider_id: i64,
@@ -155,7 +157,7 @@ impl<'a> RecordCircuitArgs<'a> {
     }
 
     pub(in crate::gateway) fn from_stream_ctx(
-        ctx: &'a crate::gateway::streams::StreamFinalizeCtx,
+        ctx: &'a crate::gateway::streams::StreamFinalizeCtx<R>,
         now_unix: i64,
     ) -> Self {
         Self::new(
@@ -172,7 +174,7 @@ impl<'a> RecordCircuitArgs<'a> {
 }
 
 pub(in crate::gateway) fn record_success_and_emit_transition(
-    args: RecordCircuitArgs<'_>,
+    args: RecordCircuitArgs<'_, impl tauri::Runtime>,
 ) -> circuit_breaker::CircuitChange {
     let RecordCircuitArgs {
         app,
@@ -202,7 +204,7 @@ pub(in crate::gateway) fn record_success_and_emit_transition(
 }
 
 pub(in crate::gateway) fn record_failure_and_emit_transition(
-    args: RecordCircuitArgs<'_>,
+    args: RecordCircuitArgs<'_, impl tauri::Runtime>,
 ) -> circuit_breaker::CircuitChange {
     let RecordCircuitArgs {
         app,
@@ -245,6 +247,9 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
+    type TestGateProviderArgs<'a> = GateProviderArgs<'a, tauri::Wry>;
+    type TestRecordCircuitArgs<'a> = RecordCircuitArgs<'a, tauri::Wry>;
+
     fn breaker(config: circuit_breaker::CircuitBreakerConfig) -> circuit_breaker::CircuitBreaker {
         circuit_breaker::CircuitBreaker::new(config, HashMap::new(), None)
     }
@@ -262,7 +267,7 @@ mod tests {
         let mut skipped_open = 0usize;
         let mut skipped_cooldown = 0usize;
 
-        let snap = gate_provider(GateProviderArgs {
+        let snap = gate_provider(TestGateProviderArgs {
             app: None,
             circuit: &cb,
             trace_id: "t",
@@ -301,7 +306,7 @@ mod tests {
         let mut skipped_open = 0usize;
         let mut skipped_cooldown = 0usize;
 
-        let allowed = gate_provider(GateProviderArgs {
+        let allowed = gate_provider(TestGateProviderArgs {
             app: None,
             circuit: &cb,
             trace_id: "t",
@@ -338,7 +343,7 @@ mod tests {
         let mut skipped_open = 0usize;
         let mut skipped_cooldown = 0usize;
 
-        let allowed = gate_provider(GateProviderArgs {
+        let allowed = gate_provider(TestGateProviderArgs {
             app: None,
             circuit: &cb,
             trace_id: "t",
@@ -373,7 +378,7 @@ mod tests {
         let mut skipped_open = 0usize;
         let mut skipped_cooldown = 0usize;
 
-        let snap = gate_provider(GateProviderArgs {
+        let snap = gate_provider(TestGateProviderArgs {
             app: None,
             circuit: &cb,
             trace_id: "t",
@@ -404,7 +409,7 @@ mod tests {
         let pid = 1;
         let now = 1_000;
 
-        let change = record_failure_and_emit_transition(RecordCircuitArgs::new(
+        let change = record_failure_and_emit_transition(TestRecordCircuitArgs::new(
             None,
             &cb,
             "t",
@@ -430,7 +435,7 @@ mod tests {
         cb.record_failure(pid, now);
         assert!(cb.snapshot(pid, now).failure_count > 0);
 
-        let change = record_success_and_emit_transition(RecordCircuitArgs::new(
+        let change = record_success_and_emit_transition(TestRecordCircuitArgs::new(
             None,
             &cb,
             "t",

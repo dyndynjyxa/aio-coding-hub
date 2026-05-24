@@ -1,8 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { tauriInvoke } from "../../../test/mocks/tauri";
 import { setTauriRuntime } from "../../../test/utils/tauriRuntime";
 
 describe("services/app/updater", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("parseUpdaterCheckResult rejects invalid values and keeps optional fields", async () => {
     const { parseUpdaterCheckResult } = await import("../updater");
 
@@ -11,6 +15,9 @@ describe("services/app/updater", () => {
     expect(parseUpdaterCheckResult("x")).toBeNull();
     expect(parseUpdaterCheckResult({})).toBeNull();
     expect(parseUpdaterCheckResult({ rid: "1" })).toBeNull();
+    expect(parseUpdaterCheckResult({ rid: -1 })).toBeNull();
+    expect(parseUpdaterCheckResult({ rid: 1.5 })).toBeNull();
+    expect(parseUpdaterCheckResult({ rid: Number.NaN })).toBeNull();
 
     expect(
       parseUpdaterCheckResult({
@@ -94,6 +101,24 @@ describe("services/app/updater", () => {
       { event: "progress", data: { chunkLength: undefined } },
       { event: "finished", data: { ok: true } },
     ]);
+  });
+
+  it("updaterDownloadAndInstall rejects invalid rid and timeout before handwritten IPC", async () => {
+    const { updaterDownloadAndInstall } = await import("../updater");
+    const { desktopUpdaterCheck } = await import("../../desktop/updater");
+
+    setTauriRuntime();
+
+    await expect(updaterDownloadAndInstall({ rid: -1 })).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(updaterDownloadAndInstall({ rid: 1.5 })).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(updaterDownloadAndInstall({ rid: 1, timeoutMs: 0 })).rejects.toThrow(
+      "SEC_INVALID_INPUT"
+    );
+    await expect(desktopUpdaterCheck({ timeoutMs: Number.NaN })).rejects.toThrow(
+      "SEC_INVALID_INPUT"
+    );
+
+    expect(tauriInvoke).not.toHaveBeenCalled();
   });
 
   it("updaterDownloadAndInstall tolerates missing callback and default timeout branches", async () => {

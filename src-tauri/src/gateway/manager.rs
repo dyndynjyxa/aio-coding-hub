@@ -22,10 +22,28 @@ mod tests {
     use crate::providers;
     use std::io::{Read, Write};
     use std::sync::mpsc;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, MutexGuard};
     use std::thread;
     use std::time::Duration;
     use tempfile::tempdir;
+
+    struct HttpClientTestGuard {
+        _env_guard: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for HttpClientTestGuard {
+        fn drop(&mut self) {
+            let _ = crate::gateway::http_client::apply_proxy(None);
+        }
+    }
+
+    fn http_client_test_guard() -> HttpClientTestGuard {
+        let env_guard = crate::test_support::test_env_lock();
+        let _ = crate::gateway::http_client::apply_proxy(None);
+        HttpClientTestGuard {
+            _env_guard: env_guard,
+        }
+    }
 
     fn build_running_gateway(
         rt: &tokio::runtime::Runtime,
@@ -306,6 +324,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn gateway_app_state_client_follows_hot_reloaded_proxy() {
+        let _guard = http_client_test_guard();
         let (proxy_a, rx_a) = spawn_http_proxy_server();
         let (proxy_b, rx_b) = spawn_http_proxy_server();
 

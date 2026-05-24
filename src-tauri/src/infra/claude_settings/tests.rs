@@ -386,3 +386,29 @@ fn patch_non_object_root_is_replaced_with_object() {
         Some("claude-3-5-sonnet")
     );
 }
+
+#[test]
+fn read_optional_claude_settings_file_rejects_oversized_file() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let path = temp.path().join("settings.json");
+    std::fs::write(&path, vec![b'x'; CLAUDE_SETTINGS_MAX_BYTES + 1]).expect("write settings");
+
+    let err = read_optional_claude_settings_file(&path)
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("too large"));
+}
+
+#[test]
+fn json_to_bytes_rejects_oversized_claude_settings() {
+    let value = serde_json::json!({
+        "unknown": "x".repeat(CLAUDE_SETTINGS_MAX_BYTES + 1)
+    });
+
+    let err = json_to_bytes(&value, "claude/settings.json")
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("claude/settings.json too large"));
+}

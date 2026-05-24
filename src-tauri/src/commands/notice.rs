@@ -13,6 +13,7 @@ pub(crate) struct NoticeSendInput {
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn notice_send(app: tauri::AppHandle, input: NoticeSendInput) -> Result<bool, String> {
-    notice::emit(&app, notice::build(input.level, input.title, input.body))?;
+    let payload = notice::build(input.level, input.title, input.body)?;
+    notice::emit(&app, payload)?;
     Ok(true)
 }

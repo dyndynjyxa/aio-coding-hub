@@ -174,10 +174,15 @@ back to disk.
 Config write checklist:
 - Decide whether read failure should block writes, offer reset, or restore from
   backup. Do not let `unwrap_or_default()` make that choice implicitly.
+- For multi-file config apply flows, parse and build every target output before
+  writing the first file. A parse failure in a later file must not leave an
+  earlier file partially switched to proxy/managed state.
 - Log the failure with enough context to diagnose file corruption or migration
   drift.
 - Add one test that proves a read failure does not silently erase unrelated
   fields on the next save.
+- Add one test where the first target can be built but a later target fails to
+  parse, proving no target file was modified.
 - For app-owned settings files, persist the full managed snapshot. Do not drop
   keys just because they equal today's default.
 - For third-party config bridges, document whether each field is explicitly
@@ -533,6 +538,84 @@ Test-env checklist:
   mtime with session logs for `cargo test` / `pnpm tauri:test` and search for
   temp fixture names before assuming the user edited the file.
 
+### Mistake 22: Editing Third-Party Configs Through a Narrow Projection
+
+**Bad**: Read a third-party config node into a simplified UI model, then write
+that simplified model back over the whole node. Any upstream-supported fields
+outside the UI model, such as unknown handler types, conditions, async flags, or
+future extension fields, disappear after the user edits one visible row.
+
+**Good**: Treat third-party config as a preserve-by-default document. The UI may
+present a supported subset, but save flows must patch only the selected item or
+carry unknown fields through a raw JSON model.
+
+Third-party config checklist:
+- Before adding a GUI editor for a third-party config file, compare the UI model
+  against the upstream schema and decide which fields are first-class, read-only,
+  or pass-through.
+- Round-trip tests must include unknown fields and unsupported item types. A
+  save of one visible item must preserve sibling items and extra fields.
+- If the product intentionally supports only a subset, expose unsupported rows as
+  read-only instead of silently dropping them on save.
+- Invalid JSON must fail closed. Do not downgrade parse failures into `{}` and
+  then write defaults back over user config.
+
+### Mistake 23: Treating Provider Probe Status Codes as the Whole Contract
+
+**Bad**: Mark a provider available whenever the probe returns any non-401/403
+HTTP response. Some upstreams report invalid credentials as 400 with an auth
+message, while 5xx proves the endpoint responded but not that the provider is
+usable.
+
+**Good**: Classify provider probe results with both status and body semantics:
+explicit auth failures fail closed, upstream 5xx is unavailable, and expected
+model/rate-limit errors can still prove the route and credential reached the
+provider.
+
+Provider-probe checklist:
+- Keep auth-failure detection provider-aware enough to cover body-level errors
+  such as "API key not valid" and `invalid_api_key`.
+- Treat 5xx probe responses as unavailable unless product requirements define a
+  separate degraded state.
+- Regression tests must cover model-not-found/rate-limit success, 5xx failure,
+  and body-level auth failure with a 4xx status.
+
+### Mistake 24: Cache Hit-Rate Denominators Drift Across Layers
+
+**Bad**: Backend usage summaries, provider trends, Home cards, Usage tables,
+and realtime trace cards each calculate "cache rate" from whichever fields are
+nearby. One screen shows cached-token share, another shows read-hit rate, and
+bridge providers get counted differently from Codex/Gemini.
+
+**Good**: Treat cache hit rate as a cross-layer metric contract:
+
+- Formula: `cache_read_input_tokens / (effective_input_tokens + cache_creation_input_tokens + cache_read_input_tokens)`.
+- `effective_input_tokens` subtracts cache reads for Codex/Gemini and any
+  backend-classified bridge/source provider where cached reads are already a
+  subset of input tokens.
+- Rust usage aggregation owns SQL-level effective input and total token
+  expressions in `src-tauri/src/domain/usage_stats/tokens.rs`.
+- Frontend display helpers own UI-level math in `src/utils/cacheRateMetrics.ts`;
+  components should not duplicate the formula.
+- Usage summary/leaderboard DTOs already expose effective `input_tokens`; do
+  not subtract cache reads again in components that consume those DTOs.
+- Raw realtime logs/traces may still need frontend effective-input correction
+  before display because they carry unaggregated gateway metrics.
+
+Cache metric checklist:
+- [ ] Decide whether the data source is raw gateway metrics or already
+      aggregated usage DTO data
+- [ ] For backend trend rows, expose `denom_tokens` from the backend and let
+      charts divide `cache_read_input_tokens / denom_tokens`
+- [ ] For frontend summary/table rows, use `computeCacheHitRate` and confirm the
+      input argument is already the effective input from Rust aggregation
+- [ ] For raw trace/log cards, use the shared effective-input helper instead of
+      local CLI string checks
+- [ ] Add regression tests that distinguish old cached-token share from the
+      read-hit formula
+- [ ] Include Codex/Gemini and bridge/source-provider examples when touching
+      denominator logic
+
 ---
 
 ## Checklist for Cross-Layer Features
@@ -571,8 +654,16 @@ After implementation:
       skips in user-facing wording
 - [ ] For request logs, documented unsupported CLI folder lookup instead of
       treating it as a lookup miss
+- [ ] For Codex SSE responses, distinguished terminal error markers from late
+      tail read failures after `response.completed`; do not let teardown I/O
+      noise overwrite a successful user-visible completion
 - [ ] Classified helper/probe routes as user-visible vs infra-only and verified
       logs, events, stats, and provider-health side effects match that choice
+- [ ] Classified provider availability probe results by status and body
+      semantics, including 5xx and body-level auth errors
+- [ ] If displaying cache hit rate or cache denominator data, verified the
+      formula owner and whether the source data is raw gateway metrics or
+      already-aggregated effective usage
 - [ ] If the change touches gateway/proxy paths, explicitly list all non-passthrough
       mutations (headers, path/query, body JSON, response translation) and ensure each
       mutation is either:
@@ -592,6 +683,8 @@ After implementation:
       assuming persisted settings are already applied
 - [ ] Verified high-frequency events have an explicit payload owner and
       visibility/backpressure rule
+- [ ] If editing a third-party config file, verified unsupported fields and
+      unknown item types survive read-modify-write round trips
 
 ---
 

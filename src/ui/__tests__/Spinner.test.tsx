@@ -46,9 +46,9 @@ describe("ui/Spinner", () => {
     expect(spinner).toHaveClass("my-spinner");
   });
 
-  it("supports dark mode border classes", () => {
+  it("supports semantic border classes", () => {
     const { container } = render(<Spinner />);
     const spinner = container.firstElementChild;
-    expect(spinner).toHaveClass("dark:border-slate-600");
+    expect(spinner).toHaveClass("border-muted-foreground/30");
   });
 });

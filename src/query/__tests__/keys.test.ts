@@ -60,7 +60,16 @@ describe("query/keys", () => {
     expect(usageKeys.hourlySeries(7)).toEqual(["usage", "hourlySeries", 7]);
     expect(
       usageKeys.summaryV2("daily", { startTs: 1, endTs: 2, cliKey: "claude", providerId: 3 })
-    ).toEqual(["usage", "summaryV2", "daily", 1, 2, "claude", 3]);
+    ).toEqual(["usage", "summaryV2", "daily", 1, 2, "claude", 3, [], null]);
+    expect(
+      usageKeys.summaryV2("daily", {
+        startTs: 1,
+        endTs: 2,
+        cliKey: "claude",
+        providerId: 3,
+        folderKeys: [" /tmp/b ", "", "/tmp/a", "/tmp/a"],
+      })
+    ).toEqual(["usage", "summaryV2", "daily", 1, 2, "claude", 3, ["/tmp/a", "/tmp/b"], null]);
     expect(
       usageKeys.leaderboardV2("provider", "weekly", {
         startTs: 1,
@@ -69,7 +78,17 @@ describe("query/keys", () => {
         providerId: 3,
         limit: null,
       })
-    ).toEqual(["usage", "leaderboardV2", "provider", "weekly", 1, 2, "claude", 3, null]);
+    ).toEqual(["usage", "leaderboardV2", "provider", "weekly", 1, 2, "claude", 3, null, [], null]);
+    expect(
+      usageKeys.providerCacheRateTrendV1("daily", {
+        startTs: 1,
+        endTs: 2,
+        cliKey: "claude",
+        providerId: 3,
+        limit: 20,
+        excludeCx2CcGatewayBridge: true,
+      })
+    ).toEqual(["usage", "providerCacheRateTrendV1", "daily", 1, 2, "claude", 3, 20, true]);
   });
 
   it("builds cost keys", () => {

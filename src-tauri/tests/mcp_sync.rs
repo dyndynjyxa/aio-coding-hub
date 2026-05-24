@@ -64,3 +64,16 @@ fn mcp_sync_can_restore_and_remove_targets() {
         .expect("remove codex target");
     assert!(!codex_path.exists());
 }
+
+#[test]
+fn mcp_sync_rejects_oversized_target_reads() {
+    let app = support::TestApp::new();
+    let handle = app.handle();
+    let target = app.home_dir().join(".claude.json");
+    std::fs::write(&target, vec![b'x'; 1024 * 1024 + 1]).expect("write oversized target");
+
+    let err = aio_coding_hub_lib::test_support::mcp_read_target_bytes(&handle, "claude")
+        .expect_err("oversized target should fail");
+
+    assert!(err.to_string().contains("too large"));
+}

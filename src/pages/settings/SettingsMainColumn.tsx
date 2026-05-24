@@ -36,6 +36,7 @@ type SettingsPersistPatch = Partial<{
   auto_start: boolean;
   start_minimized: boolean;
   tray_enabled: boolean;
+  enable_debug_log: boolean;
 }>;
 
 const HOME_USAGE_PERIOD_OPTIONS: Array<{ value: HomeUsagePeriod; label: string }> = [
@@ -80,6 +81,8 @@ export type SettingsMainColumnProps = {
   setTrayEnabled: (next: boolean) => void;
   logRetentionDays: number;
   setLogRetentionDays: (next: number) => void;
+  enableDebugLog: boolean;
+  setEnableDebugLog: (next: boolean) => void;
   requestPersist: (patch: SettingsPersistPatch) => void;
 
   noticePermissionStatus: NoticePermissionStatus;
@@ -119,6 +122,8 @@ export function SettingsMainColumn({
   setTrayEnabled,
   logRetentionDays,
   setLogRetentionDays,
+  enableDebugLog,
+  setEnableDebugLog,
   requestPersist,
   noticePermissionStatus,
   requestingNoticePermission,
@@ -312,6 +317,16 @@ export function SettingsMainColumn({
                     />
                   </SettingsRow>
                 ))}
+                <SettingsRow label="调试日志">
+                    <Switch
+                      checked={enableDebugLog}
+                      onCheckedChange={(next) => {
+                        setEnableDebugLog(next);
+                        requestPersist({ enable_debug_log: next });
+                      }}
+                      disabled={settingsInputsDisabled}
+                    />
+                  </SettingsRow>
                 <SettingsRow label="日志保留">
                   <div className="flex items-center gap-2">
                     <Input
@@ -402,47 +417,26 @@ export function SettingsMainColumn({
             </h3>
             <div className="space-y-1">
               <SettingsRow label="主题">
-                <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800">
-                  <button
-                    type="button"
-                    className={cn(
-                      "flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition",
-                      theme === "light"
-                        ? "bg-white text-slate-900 shadow-sm dark:bg-slate-600 dark:text-slate-100"
-                        : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-                    )}
-                    onClick={() => setTheme("light")}
-                  >
-                    Light
-                  </button>
-                  <button
-                    type="button"
-                    className={cn(
-                      "flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition",
-                      theme === "dark"
-                        ? "bg-white text-slate-900 shadow-sm dark:bg-slate-600 dark:text-slate-100"
-                        : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-                    )}
-                    onClick={() => setTheme("dark")}
-                  >
-                    Dark
-                  </button>
-                  <button
-                    type="button"
-                    className={cn(
-                      "flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition",
-                      theme === "system"
-                        ? "bg-white text-slate-900 shadow-sm dark:bg-slate-600 dark:text-slate-100"
-                        : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-                    )}
-                    onClick={() => setTheme("system")}
-                  >
-                    System
-                  </button>
+                <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-700/50">
+                  {(["light", "dark", "system"] as const).map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={cn(
+                        "flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition",
+                        theme === value
+                          ? "bg-white text-slate-900 shadow-sm dark:bg-slate-500 dark:text-white"
+                          : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                      )}
+                      onClick={() => setTheme(value)}
+                    >
+                      {value === "light" ? "Light" : value === "dark" ? "Dark" : "System"}
+                    </button>
+                  ))}
                 </div>
               </SettingsRow>
               <SettingsRow label="首页用量范围">
-                <div className="flex flex-wrap items-center gap-1 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800">
+                <div className="flex flex-wrap items-center gap-1 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-700/50">
                   {HOME_USAGE_PERIOD_OPTIONS.map((option) => (
                     <button
                       key={option.value}
@@ -450,7 +444,7 @@ export function SettingsMainColumn({
                       className={cn(
                         "flex items-center justify-center rounded-md px-2.5 py-1.5 text-xs transition",
                         homeUsagePeriod === option.value
-                          ? "bg-white text-slate-900 shadow-sm dark:bg-slate-600 dark:text-slate-100"
+                          ? "bg-white text-slate-900 shadow-sm dark:bg-slate-500 dark:text-white"
                           : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
                       )}
                       onClick={() => {

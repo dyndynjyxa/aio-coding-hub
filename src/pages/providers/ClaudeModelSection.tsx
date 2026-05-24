@@ -6,14 +6,22 @@ import type { UseProviderEditorFormReturn } from "./useProviderEditorForm";
 export function ClaudeModelSection(props: { form: UseProviderEditorFormReturn }) {
   const { claudeModels, setClaudeModels, claudeModelCount, saving, cliKey, authMode } = props.form;
 
-  if (cliKey !== "claude" || authMode === "oauth") return null;
+  // Show for all claude providers (api_key, oauth, cx2cc) — each provider can
+  // independently override which upstream model to use per model tier.
+  if (cliKey !== "claude") return null;
+
+  const isCx2cc = authMode === "cx2cc";
+  const sectionTitle = isCx2cc ? "CX2CC 模型映射" : "Claude 模型映射";
+  const mainPlaceholder = isCx2cc
+    ? "例如: gpt-5.4 / o3"
+    : "例如: glm-4-plus / minimax-text-01 / kimi-k2";
 
   return (
     <details className="group rounded-xl border border-slate-200 bg-white shadow-sm open:ring-2 open:ring-accent/10 transition-all dark:border-slate-700 dark:bg-slate-800">
       <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
         <div className="flex items-center gap-3">
           <span className="text-sm font-medium text-slate-700 group-open:text-accent dark:text-slate-300">
-            Claude 模型映射
+            {sectionTitle}
           </span>
           <span className="text-xs font-mono text-slate-500 dark:text-slate-400">
             已配置 {claudeModelCount}/5
@@ -46,7 +54,7 @@ export function ClaudeModelSection(props: { form: UseProviderEditorFormReturn })
                 };
               });
             }}
-            placeholder="例如: glm-4-plus / minimax-text-01 / kimi-k2"
+            placeholder={mainPlaceholder}
             disabled={saving}
           />
         </FormField>

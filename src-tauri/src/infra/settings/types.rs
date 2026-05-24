@@ -144,6 +144,8 @@ pub struct AppSettings {
     pub enable_claude_metadata_user_id_injection: bool,
     // Cache anomaly monitor (default disabled).
     pub enable_cache_anomaly_monitor: bool,
+    // Debug log mode: emit detailed request/response data to gateway:log events (default disabled).
+    pub enable_debug_log: bool,
     // Task complete notification (default enabled).
     pub enable_task_complete_notify: bool,
     // Notification sound toggle - play custom sound when notifications fire (default enabled).
@@ -218,6 +220,7 @@ impl Default for AppSettings {
             enable_claude_metadata_user_id_injection:
                 DEFAULT_ENABLE_CLAUDE_METADATA_USER_ID_INJECTION,
             enable_cache_anomaly_monitor: DEFAULT_ENABLE_CACHE_ANOMALY_MONITOR,
+            enable_debug_log: DEFAULT_ENABLE_DEBUG_LOG,
             enable_task_complete_notify: DEFAULT_ENABLE_TASK_COMPLETE_NOTIFY,
             enable_notification_sound: DEFAULT_ENABLE_NOTIFICATION_SOUND,
             enable_response_fixer: DEFAULT_ENABLE_RESPONSE_FIXER,

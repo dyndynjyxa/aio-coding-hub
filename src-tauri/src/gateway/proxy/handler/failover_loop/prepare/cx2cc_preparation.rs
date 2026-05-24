@@ -24,9 +24,9 @@ pub(super) struct Cx2ccResult {
     pub(super) codex_chatgpt_account_id: Option<String>,
 }
 
-pub(super) struct Cx2ccPreparationInput<'a> {
-    pub(super) ctx: CommonCtx<'a>,
-    pub(super) input: &'a RequestContext,
+pub(super) struct Cx2ccPreparationInput<'a, R: tauri::Runtime = tauri::Wry> {
+    pub(super) ctx: CommonCtx<'a, R>,
+    pub(super) input: &'a RequestContext<R>,
     pub(super) provider_id: i64,
     pub(super) provider_name_base: &'a str,
     pub(super) source_id: Option<i64>,
@@ -42,7 +42,7 @@ pub(super) enum Cx2ccOutcome {
 }
 
 /// Prepare CX2CC translation for a source-provider-backed bridge provider.
-pub(super) async fn prepare(args: Cx2ccPreparationInput<'_>) -> Cx2ccOutcome {
+pub(super) async fn prepare<R: tauri::Runtime>(args: Cx2ccPreparationInput<'_, R>) -> Cx2ccOutcome {
     let (
         source,
         source_cli_key,
@@ -279,17 +279,17 @@ pub(super) async fn prepare(args: Cx2ccPreparationInput<'_>) -> Cx2ccOutcome {
             args.provider_name_base
         ),
     );
-    {
-        let mut settings = args.input.special_settings.lock_or_recover();
-        settings.push(serde_json::json!({
+    response_fixer::push_special_setting(
+        &args.input.special_settings,
+        serde_json::json!({
             "type": "cx2cc_cost_basis",
             "scope": "request",
             "source_cli_key": source_cli_key,
             "source_provider_id": args.source_id,
             "source_provider_name": source_provider_name,
             "priced_model": openai_model,
-        }));
-    }
+        }),
+    );
     // DEBUG: dump translated body for troubleshooting.
     {
         let debug_body: serde_json::Value =

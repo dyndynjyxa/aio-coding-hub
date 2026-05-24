@@ -89,7 +89,7 @@ export function buildProviderEditorUpsertInput(
     finalBaseUrls = normalized.baseUrls;
   }
 
-  if (ctx.cliKey === "claude" && ctx.authMode !== "oauth") {
+  if (ctx.cliKey === "claude") {
     const modelError = validateProviderClaudeModels(ctx.claudeModels);
     if (modelError) {
       return {
@@ -132,9 +132,7 @@ export function buildProviderEditorUpsertInput(
     tags: ctx.tags,
     note: parsed.data.note,
     streamIdleTimeoutSeconds: parsedTimeout,
-    ...(ctx.cliKey === "claude" && ctx.authMode !== "oauth"
-      ? { claudeModels: ctx.claudeModels }
-      : {}),
+    ...(ctx.cliKey === "claude" ? { claudeModels: ctx.claudeModels } : {}),
     sourceProviderId:
       ctx.authMode === "cx2cc" && !ctx.isCodexGatewaySource ? ctx.sourceProviderId : null,
     bridgeType: ctx.authMode === "cx2cc" ? "cx2cc" : null,

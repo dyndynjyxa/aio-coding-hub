@@ -1,7 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
-import { providerLimitUsageV1, type ProviderLimitUsageRow } from "../providerLimitUsage";
+import {
+  providerLimitUsageV1,
+  validateProviderLimitUsageCliKey,
+  type ProviderLimitUsageRow,
+} from "../providerLimitUsage";
 
 vi.mock("../../../generated/bindings", async () => {
   const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
@@ -53,6 +57,10 @@ vi.mock("../../consoleLog", async () => {
 });
 
 describe("services/providers/providerLimitUsage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("rethrows invoke errors and logs", async () => {
     vi.mocked(commands.providerLimitUsageV1).mockRejectedValueOnce(
       new Error("provider limit boom")
@@ -73,16 +81,51 @@ describe("services/providers/providerLimitUsage", () => {
     vi.mocked(commands.providerLimitUsageV1)
       .mockResolvedValueOnce({
         status: "ok",
-        data: [makeProviderLimitUsageRow()],
+        data: [
+          makeProviderLimitUsageRow({
+            provider_name: " Fetch ",
+            limit_daily_usd: 10,
+            daily_reset_mode: " rolling " as never,
+            daily_reset_time: " 00:00:00 ",
+          }),
+        ],
       })
       .mockResolvedValueOnce({ status: "ok", data: [] });
 
-    const rows = await providerLimitUsageV1("claude");
+    const rows = await providerLimitUsageV1(" claude " as never);
     const allRows = await providerLimitUsageV1(null);
 
     expect(rows?.[0]?.cli_key).toBe("claude");
+    expect(rows?.[0]?.provider_name).toBe("Fetch");
+    expect(rows?.[0]?.daily_reset_mode).toBe("rolling");
+    expect(rows?.[0]?.daily_reset_time).toBe("00:00:00");
     expect(allRows).toEqual([]);
     expect(commands.providerLimitUsageV1).toHaveBeenNthCalledWith(1, "claude");
     expect(commands.providerLimitUsageV1).toHaveBeenNthCalledWith(2, null);
+  });
+
+  it("rejects invalid cli keys before generated IPC", async () => {
+    expect(validateProviderLimitUsageCliKey(null)).toBeNull();
+    expect(validateProviderLimitUsageCliKey(" codex ")).toBe("codex");
+
+    await expect(providerLimitUsageV1("unknown" as never)).rejects.toThrow("SEC_INVALID_INPUT");
+
+    expect(commands.providerLimitUsageV1).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid generated usage payloads before cache consumers", async () => {
+    vi.mocked(commands.providerLimitUsageV1).mockResolvedValueOnce({
+      status: "ok",
+      data: [makeProviderLimitUsageRow({ usage_total_usd: Number.NaN })],
+    });
+
+    await expect(providerLimitUsageV1("claude")).rejects.toThrow("IPC_INVALID_RESULT");
+
+    vi.mocked(commands.providerLimitUsageV1).mockResolvedValueOnce({
+      status: "ok",
+      data: [makeProviderLimitUsageRow({ provider_id: 0 })],
+    });
+
+    await expect(providerLimitUsageV1("claude")).rejects.toThrow("IPC_INVALID_RESULT");
   });
 });

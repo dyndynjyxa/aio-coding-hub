@@ -4,6 +4,7 @@ use super::{
     folder_name_from_path, truncate_string, validate_path_under_root,
     CliSessionsDisplayContentBlock, CliSessionsDisplayMessage, CliSessionsFolderLookupEntry,
     CliSessionsPaginatedMessages, CliSessionsProjectSummary, CliSessionsSessionSummary,
+    MessagePageAccumulator,
 };
 use crate::shared::error::{AppError, AppResult};
 use serde::Deserialize;
@@ -348,11 +349,46 @@ fn convert_content(content: &ContentValue) -> Vec<CliSessionsDisplayContentBlock
     }
 }
 
-fn parse_all_messages(path: &Path) -> Result<Vec<CliSessionsDisplayMessage>, String> {
+fn parse_message_line(trimmed: &str) -> Option<CliSessionsDisplayMessage> {
+    if trimmed.is_empty() {
+        return None;
+    }
+    if SKIP_TYPES
+        .iter()
+        .any(|t| trimmed.contains(&format!("\"type\":\"{t}\"")))
+    {
+        return None;
+    }
+
+    let record: RawRecord = serde_json::from_str(trimmed).ok()?;
+    if record.record_type != "user" && record.record_type != "assistant" {
+        return None;
+    }
+    let msg = record.message?;
+
+    let blocks = convert_content(&msg.content);
+    if blocks.is_empty() {
+        return None;
+    }
+
+    Some(CliSessionsDisplayMessage {
+        uuid: record.uuid,
+        role: msg.role,
+        timestamp: record.timestamp,
+        model: msg.model,
+        content: blocks,
+    })
+}
+
+fn parse_messages_page(
+    path: &Path,
+    page: usize,
+    page_size: usize,
+    from_end: bool,
+) -> Result<CliSessionsPaginatedMessages, String> {
     let file = fs::File::open(path).map_err(|e| format!("failed to open file: {e}"))?;
     let reader = BufReader::new(file);
-
-    let mut messages: Vec<CliSessionsDisplayMessage> = Vec::new();
+    let mut acc = MessagePageAccumulator::new(page, page_size, from_end);
 
     for line in reader.lines() {
         let line = match line {
@@ -360,43 +396,12 @@ fn parse_all_messages(path: &Path) -> Result<Vec<CliSessionsDisplayMessage>, Str
             Err(_) => continue,
         };
         let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
+        if let Some(message) = parse_message_line(trimmed) {
+            acc.push(message);
         }
-        if SKIP_TYPES
-            .iter()
-            .any(|t| trimmed.contains(&format!("\"type\":\"{t}\"")))
-        {
-            continue;
-        }
-
-        let record: RawRecord = match serde_json::from_str(trimmed) {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-
-        if record.record_type != "user" && record.record_type != "assistant" {
-            continue;
-        }
-        let Some(msg) = record.message else {
-            continue;
-        };
-
-        let blocks = convert_content(&msg.content);
-        if blocks.is_empty() {
-            continue;
-        }
-
-        messages.push(CliSessionsDisplayMessage {
-            uuid: record.uuid,
-            role: msg.role,
-            timestamp: record.timestamp,
-            model: msg.model,
-            content: blocks,
-        });
     }
 
-    Ok(messages)
+    Ok(acc.finish())
 }
 
 fn extract_first_prompt(path: &Path) -> Option<String> {
@@ -836,34 +841,7 @@ pub fn messages_get(
     from_end: bool,
 ) -> AppResult<CliSessionsPaginatedMessages> {
     let resolved = resolve_and_validate_session_file_path(app, file_path)?;
-    let messages = parse_all_messages(&resolved).map_err(AppError::from)?;
-
-    let total = messages.len();
-    let (start, end, has_more) = if from_end {
-        let end = total.saturating_sub(page * page_size);
-        let start = end.saturating_sub(page_size);
-        let has_more = start > 0;
-        (start, end, has_more)
-    } else {
-        let start = page * page_size;
-        let end = (start + page_size).min(total);
-        let has_more = end < total;
-        (start, end, has_more)
-    };
-
-    let page_messages = if start < end && end <= total {
-        messages[start..end].to_vec()
-    } else {
-        Vec::new()
-    };
-
-    Ok(CliSessionsPaginatedMessages {
-        messages: page_messages,
-        total,
-        page,
-        page_size,
-        has_more,
-    })
+    parse_messages_page(&resolved, page, page_size, from_end).map_err(AppError::from)
 }
 
 pub fn session_delete(app: &tauri::AppHandle, file_path: &str) -> AppResult<bool> {
@@ -1097,34 +1075,7 @@ pub fn wsl_messages_get(
     }
 
     let resolved = super::validate_path_under_root(&raw, &root)?;
-    let messages = parse_all_messages(&resolved).map_err(AppError::from)?;
-
-    let total = messages.len();
-    let (start, end, has_more) = if from_end {
-        let end = total.saturating_sub(page * page_size);
-        let start = end.saturating_sub(page_size);
-        let has_more = start > 0;
-        (start, end, has_more)
-    } else {
-        let start = page * page_size;
-        let end = (start + page_size).min(total);
-        let has_more = end < total;
-        (start, end, has_more)
-    };
-
-    let page_messages = if start < end && end <= total {
-        messages[start..end].to_vec()
-    } else {
-        Vec::new()
-    };
-
-    Ok(CliSessionsPaginatedMessages {
-        messages: page_messages,
-        total,
-        page,
-        page_size,
-        has_more,
-    })
+    parse_messages_page(&resolved, page, page_size, from_end).map_err(AppError::from)
 }
 
 pub fn wsl_session_delete(distro: &str, file_path: &str) -> AppResult<bool> {

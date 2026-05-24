@@ -13,6 +13,14 @@ use super::types::{McpImportServer, McpServerSummary};
 use super::validate::{suggest_key, validate_cli_key, validate_server_key, validate_transport};
 use crate::shared::text::normalize_name;
 
+const MCP_NAME_MAX_LEN: usize = 256;
+const MCP_OPTIONAL_TEXT_MAX_LEN: usize = 4096;
+const MCP_ARGS_MAX_COUNT: usize = 256;
+const MCP_ARG_MAX_LEN: usize = 4096;
+const MCP_SECRET_MAX_ENTRIES: usize = 256;
+const MCP_SECRET_KEY_MAX_LEN: usize = 256;
+const MCP_SECRET_VALUE_MAX_LEN: usize = 8192;
+
 fn server_key_exists(conn: &Connection, server_key: &str) -> crate::shared::error::AppResult<bool> {
     let exists: Option<i64> = conn
         .query_row(
@@ -77,16 +85,81 @@ fn map_to_json(
         .map_err(|e| format!("SEC_INVALID_INPUT: failed to serialize {hint}: {e}").into())
 }
 
-fn normalize_patch_preserve_keys(keys: Vec<String>) -> Vec<String> {
+fn validate_text_len(
+    hint: &str,
+    value: &str,
+    max_len: usize,
+) -> crate::shared::error::AppResult<()> {
+    if value.len() > max_len {
+        return Err(format!("SEC_INVALID_INPUT: {hint} too long (max {max_len})").into());
+    }
+    Ok(())
+}
+
+fn normalize_required_text<'a>(
+    raw: &'a str,
+    hint: &str,
+    max_len: usize,
+) -> crate::shared::error::AppResult<&'a str> {
+    let value = raw.trim();
+    if value.is_empty() {
+        return Err(format!("SEC_INVALID_INPUT: {hint} is required").into());
+    }
+    validate_text_len(hint, value, max_len)?;
+    Ok(value)
+}
+
+fn normalize_optional_text<'a>(
+    raw: Option<&'a str>,
+    hint: &str,
+    max_len: usize,
+) -> crate::shared::error::AppResult<Option<&'a str>> {
+    let Some(value) = raw.map(str::trim).filter(|v| !v.is_empty()) else {
+        return Ok(None);
+    };
+    validate_text_len(hint, value, max_len)?;
+    Ok(Some(value))
+}
+
+fn normalize_args(args: Vec<String>) -> crate::shared::error::AppResult<Vec<String>> {
+    let mut normalized = Vec::new();
+    for arg in args {
+        let trimmed = arg.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if normalized.len() >= MCP_ARGS_MAX_COUNT {
+            return Err(format!(
+                "SEC_INVALID_INPUT: args must contain at most {MCP_ARGS_MAX_COUNT} entries"
+            )
+            .into());
+        }
+        validate_text_len("args entry", trimmed, MCP_ARG_MAX_LEN)?;
+        normalized.push(trimmed.to_string());
+    }
+    Ok(normalized)
+}
+
+fn normalize_patch_preserve_keys(
+    keys: Vec<String>,
+    hint: &str,
+) -> crate::shared::error::AppResult<Vec<String>> {
     let mut deduped = BTreeSet::new();
     for key in keys {
         let normalized = key.trim();
         if normalized.is_empty() {
             continue;
         }
+        if deduped.len() >= MCP_SECRET_MAX_ENTRIES && !deduped.contains(normalized) {
+            return Err(format!(
+                "SEC_INVALID_INPUT: {hint} preserve_keys must contain at most {MCP_SECRET_MAX_ENTRIES} entries"
+            )
+            .into());
+        }
+        validate_text_len(&format!("{hint} key"), normalized, MCP_SECRET_KEY_MAX_LEN)?;
         deduped.insert(normalized.to_string());
     }
-    deduped.into_iter().collect()
+    Ok(deduped.into_iter().collect())
 }
 
 fn normalize_patch_replace(
@@ -99,11 +172,23 @@ fn normalize_patch_replace(
         if key.is_empty() {
             return Err(format!("SEC_INVALID_INPUT: {hint} key is required").into());
         }
+        if normalized.len() >= MCP_SECRET_MAX_ENTRIES && !normalized.contains_key(key) {
+            return Err(format!(
+                "SEC_INVALID_INPUT: {hint} must contain at most {MCP_SECRET_MAX_ENTRIES} entries"
+            )
+            .into());
+        }
+        validate_text_len(&format!("{hint} key"), key, MCP_SECRET_KEY_MAX_LEN)?;
         if value.trim().is_empty() {
             return Err(
                 format!("SEC_INVALID_INPUT: {hint} value is required for key '{key}'").into(),
             );
         }
+        validate_text_len(
+            &format!("{hint} value for key '{key}'"),
+            &value,
+            MCP_SECRET_VALUE_MAX_LEN,
+        )?;
         normalized.insert(key.to_string(), value);
     }
     Ok(normalized)
@@ -115,7 +200,7 @@ fn merge_secret_patch(
     replace: BTreeMap<String, String>,
     hint: &str,
 ) -> crate::shared::error::AppResult<BTreeMap<String, String>> {
-    let normalized_preserve_keys = normalize_patch_preserve_keys(preserve_keys);
+    let normalized_preserve_keys = normalize_patch_preserve_keys(preserve_keys, hint)?;
     let normalized_replace = normalize_patch_replace(replace, hint)?;
     let mut merged = BTreeMap::new();
 
@@ -128,6 +213,12 @@ fn merge_secret_patch(
     }
 
     for (key, value) in normalized_replace {
+        if !merged.contains_key(&key) && merged.len() >= MCP_SECRET_MAX_ENTRIES {
+            return Err(format!(
+                "SEC_INVALID_INPUT: {hint} must contain at most {MCP_SECRET_MAX_ENTRIES} entries"
+            )
+            .into());
+        }
         merged.insert(key, value);
     }
 
@@ -286,34 +377,27 @@ pub fn upsert(
     header_preserve_keys: Vec<String>,
     header_replace: BTreeMap<String, String>,
 ) -> crate::shared::error::AppResult<McpServerSummary> {
-    let name = name.trim();
-    if name.is_empty() {
-        return Err("SEC_INVALID_INPUT: name is required".to_string().into());
-    }
+    let name = normalize_required_text(name, "name", MCP_NAME_MAX_LEN)?;
 
     let provided_key = server_key.trim();
 
     let transport = transport.trim().to_lowercase();
     validate_transport(&transport)?;
 
-    let command = command.map(str::trim).filter(|v| !v.is_empty());
-    let url = url.map(str::trim).filter(|v| !v.is_empty());
-    let cwd = cwd.map(str::trim).filter(|v| !v.is_empty());
+    let command = normalize_optional_text(command, "command", MCP_OPTIONAL_TEXT_MAX_LEN)?;
+    let url = normalize_optional_text(url, "url", MCP_OPTIONAL_TEXT_MAX_LEN)?;
+    let cwd = normalize_optional_text(cwd, "cwd", MCP_OPTIONAL_TEXT_MAX_LEN)?;
 
     if transport == "stdio" && command.is_none() {
         return Err("SEC_INVALID_INPUT: stdio command is required"
             .to_string()
             .into());
     }
-    if transport == "http" && url.is_none() {
-        return Err("SEC_INVALID_INPUT: http url is required".to_string().into());
+    if transport != "stdio" && url.is_none() {
+        return Err(format!("SEC_INVALID_INPUT: {transport} url is required").into());
     }
 
-    let args: Vec<String> = args
-        .into_iter()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
+    let args = normalize_args(args)?;
 
     let mut conn = db.open_connection()?;
     let now = now_unix_seconds();
@@ -571,28 +655,17 @@ pub(super) fn upsert_by_name(
     input: &McpImportServer,
     now: i64,
 ) -> crate::shared::error::AppResult<(bool, i64)> {
-    let name = input.name.trim();
-    if name.is_empty() {
-        return Err("SEC_INVALID_INPUT: name is required".into());
-    }
+    let name = normalize_required_text(&input.name, "name", MCP_NAME_MAX_LEN)?;
     let transport = input.transport.trim().to_lowercase();
     validate_transport(&transport)?;
 
-    let command = input
-        .command
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty());
-    let url = input
-        .url
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty());
-    let cwd = input
-        .cwd
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty());
+    let command = normalize_optional_text(
+        input.command.as_deref(),
+        "command",
+        MCP_OPTIONAL_TEXT_MAX_LEN,
+    )?;
+    let url = normalize_optional_text(input.url.as_deref(), "url", MCP_OPTIONAL_TEXT_MAX_LEN)?;
+    let cwd = normalize_optional_text(input.cwd.as_deref(), "cwd", MCP_OPTIONAL_TEXT_MAX_LEN)?;
 
     if transport == "stdio" && command.is_none() {
         return Err(format!(
@@ -601,17 +674,20 @@ pub(super) fn upsert_by_name(
         )
         .into());
     }
-    if transport == "http" && url.is_none() {
+    if transport != "stdio" && url.is_none() {
         return Err(format!(
-            "SEC_INVALID_INPUT: http url is required for server='{}'",
+            "SEC_INVALID_INPUT: {transport} url is required for server='{}'",
             name
         )
         .into());
     }
 
-    let args_json = args_to_json(&input.args)?;
-    let env_json = map_to_json(&input.env, "env")?;
-    let headers_json = map_to_json(&input.headers, "headers")?;
+    let args = normalize_args(input.args.clone())?;
+    let env = normalize_patch_replace(input.env.clone(), "env")?;
+    let headers = normalize_patch_replace(input.headers.clone(), "headers")?;
+    let args_json = args_to_json(&args)?;
+    let env_json = map_to_json(&env, "env")?;
+    let headers_json = map_to_json(&headers, "headers")?;
 
     let normalized_name = normalize_name(name);
     let existing_id: Option<i64> = tx
@@ -709,5 +785,58 @@ WHERE id = ?11
 
             Ok((false, id))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_args_trims_filters_and_caps_entries() {
+        let normalized =
+            normalize_args(vec!["  --flag  ".to_string(), "   ".to_string()]).expect("args");
+        assert_eq!(normalized, vec!["--flag"]);
+
+        let too_many = (0..=MCP_ARGS_MAX_COUNT)
+            .map(|index| format!("arg-{index}"))
+            .collect();
+        let err = normalize_args(too_many).expect_err("too many args should fail");
+        assert!(err.to_string().contains("args must contain at most"));
+
+        let err =
+            normalize_args(vec!["x".repeat(MCP_ARG_MAX_LEN + 1)]).expect_err("long arg fails");
+        assert!(err.to_string().contains("args entry too long"));
+    }
+
+    #[test]
+    fn merge_secret_patch_bounds_keys_values_and_total_entries() {
+        let mut existing = BTreeMap::new();
+        let preserve_keys = (0..MCP_SECRET_MAX_ENTRIES)
+            .map(|index| {
+                let key = format!("KEY_{index}");
+                existing.insert(key.clone(), "value".to_string());
+                key
+            })
+            .collect();
+        let mut replace = BTreeMap::new();
+        replace.insert("EXTRA".to_string(), "value".to_string());
+
+        let err = merge_secret_patch(Some(&existing), preserve_keys, replace, "env")
+            .expect_err("merged map should stay capped");
+        assert!(err.to_string().contains("env must contain at most"));
+
+        let mut long_key = BTreeMap::new();
+        long_key.insert("K".repeat(MCP_SECRET_KEY_MAX_LEN + 1), "value".to_string());
+        let err = normalize_patch_replace(long_key, "headers").expect_err("long key fails");
+        assert!(err.to_string().contains("headers key too long"));
+
+        let mut long_value = BTreeMap::new();
+        long_value.insert(
+            "Authorization".to_string(),
+            "x".repeat(MCP_SECRET_VALUE_MAX_LEN + 1),
+        );
+        let err = normalize_patch_replace(long_value, "headers").expect_err("long value fails");
+        assert!(err.to_string().contains("headers value for key"));
     }
 }

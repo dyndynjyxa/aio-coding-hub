@@ -2,6 +2,8 @@
 
 use std::path::Path;
 
+const WRITE_IF_CHANGED_COMPARE_MAX_BYTES: usize = 16 * 1024 * 1024;
+
 /// Check whether the given path is a symbolic link.
 /// Returns an error when metadata cannot be read so callers can fail-closed.
 pub(crate) fn is_symlink(path: &Path) -> crate::shared::error::AppResult<bool> {
@@ -64,13 +66,46 @@ pub(crate) fn copy_file_if_missing(
     Ok(true)
 }
 
-pub(crate) fn read_optional_file(path: &Path) -> crate::shared::error::AppResult<Option<Vec<u8>>> {
+pub(crate) fn read_optional_file_with_max_len(
+    path: &Path,
+    max_len: usize,
+) -> crate::shared::error::AppResult<Option<Vec<u8>>> {
     if !path.exists() {
         return Ok(None);
     }
-    Ok(std::fs::read(path)
-        .map(Some)
-        .map_err(|e| format!("failed to read {}: {e}", path.display()))?)
+
+    let metadata = std::fs::metadata(path)
+        .map_err(|e| format!("failed to read metadata {}: {e}", path.display()))?;
+    if metadata.len() > max_len as u64 {
+        return Err(format!(
+            "SEC_INVALID_INPUT: file {} too large (max {max_len} bytes)",
+            path.display()
+        )
+        .into());
+    }
+
+    let bytes =
+        std::fs::read(path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+    if bytes.len() > max_len {
+        return Err(format!(
+            "SEC_INVALID_INPUT: file {} too large (max {max_len} bytes)",
+            path.display()
+        )
+        .into());
+    }
+    Ok(Some(bytes))
+}
+
+pub(crate) fn read_file_with_max_len(
+    path: &Path,
+    max_len: usize,
+) -> crate::shared::error::AppResult<Vec<u8>> {
+    read_optional_file_with_max_len(path, max_len)?.ok_or_else(|| {
+        crate::shared::error::AppError::from(format!(
+            "failed to read {}: not found",
+            path.display()
+        ))
+    })
 }
 
 pub(crate) fn write_file_atomic(path: &Path, bytes: &[u8]) -> crate::shared::error::AppResult<()> {
@@ -100,9 +135,14 @@ pub(crate) fn write_file_atomic_if_changed(
     path: &Path,
     bytes: &[u8],
 ) -> crate::shared::error::AppResult<bool> {
-    if let Ok(existing) = std::fs::read(path) {
-        if existing == bytes {
-            return Ok(false);
+    if let Ok(metadata) = std::fs::metadata(path) {
+        if metadata.len() == bytes.len() as u64 && bytes.len() <= WRITE_IF_CHANGED_COMPARE_MAX_BYTES
+        {
+            if let Ok(existing) = std::fs::read(path) {
+                if existing == bytes {
+                    return Ok(false);
+                }
+            }
         }
     }
     write_file_atomic(path, bytes)?;
@@ -143,11 +183,25 @@ mod tests {
     }
 
     #[test]
-    fn read_optional_file_missing_is_none() {
+    fn read_optional_file_with_max_len_rejects_oversized_files() {
+        let dir = unique_tmp_dir();
+        let path = dir.join("large.txt");
+        std::fs::write(&path, b"hello").expect("write large");
+
+        let err = read_optional_file_with_max_len(&path, 4).expect_err("oversized file fails");
+
+        assert!(err.to_string().contains("too large"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_file_with_max_len_missing_is_error() {
         let dir = unique_tmp_dir();
         let path = dir.join("missing.txt");
-        let out = read_optional_file(&path).expect("read_optional_file");
-        assert!(out.is_none());
+
+        let err = read_file_with_max_len(&path, 4).expect_err("missing file fails");
+
+        assert!(err.to_string().contains("not found"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -156,9 +210,7 @@ mod tests {
         let dir = unique_tmp_dir();
         let path = dir.join("a").join("b").join("file.txt");
         write_file_atomic(&path, b"hello").expect("write_file_atomic");
-        let got = read_optional_file(&path)
-            .expect("read_optional_file")
-            .expect("file exists");
+        let got = read_file_with_max_len(&path, 16).expect("read_file_with_max_len");
         assert_eq!(got, b"hello");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -170,10 +222,23 @@ mod tests {
         assert!(write_file_atomic_if_changed(&path, b"v1").expect("write"));
         assert!(!write_file_atomic_if_changed(&path, b"v1").expect("write"));
         assert!(write_file_atomic_if_changed(&path, b"v2").expect("write"));
-        let got = read_optional_file(&path)
-            .expect("read_optional_file")
-            .expect("file exists");
+        let got = read_file_with_max_len(&path, 16).expect("read_file_with_max_len");
         assert_eq!(got, b"v2");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_file_atomic_if_changed_skips_compare_for_oversized_inputs() {
+        let dir = unique_tmp_dir();
+        let path = dir.join("large.txt");
+        let bytes = vec![b'x'; WRITE_IF_CHANGED_COMPARE_MAX_BYTES + 1];
+        write_file_atomic(&path, &bytes).expect("write initial large file");
+
+        assert!(
+            write_file_atomic_if_changed(&path, &bytes).expect("rewrite oversized file"),
+            "oversized inputs should skip full-file equality compare"
+        );
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

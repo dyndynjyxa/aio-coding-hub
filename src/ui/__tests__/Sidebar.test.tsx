@@ -81,6 +81,22 @@ describe("ui/Sidebar", () => {
     expect(repoLink.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("opens the GitHub link through the desktop opener", async () => {
+    vi.mocked(tauriOpenUrl).mockResolvedValue(undefined as never);
+
+    render(
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "AIO Coding Hub GitHub 仓库" }));
+
+    await waitFor(() => {
+      expect(tauriOpenUrl).toHaveBeenCalledWith(AIO_REPO_URL);
+    });
+  });
+
   it("opens update dialog when update candidate exists (non-portable)", () => {
     gatewayMetaRef.current = {
       gatewayAvailable: "available",
@@ -160,18 +176,6 @@ describe("ui/Sidebar", () => {
     expect(updateDialogSetOpenMock).toHaveBeenCalledWith(true);
   });
 
-  it("calls onNavClick when a nav item is clicked", () => {
-    const onNavClick = vi.fn();
-    render(
-      <MemoryRouter>
-        <Sidebar onNavClick={onNavClick} />
-      </MemoryRouter>
-    );
-
-    fireEvent.click(screen.getByText("首页"));
-    expect(onNavClick).toHaveBeenCalledTimes(1);
-  });
-
   it("uses stopped tone for the status pill when gateway is stopped", () => {
     gatewayMetaRef.current = {
       gatewayAvailable: "available",
@@ -186,7 +190,7 @@ describe("ui/Sidebar", () => {
     );
 
     const statusPill = screen.getByText("已停止 · 37123");
-    expect(statusPill.className).toContain("bg-slate-100");
+    expect(statusPill.className).toContain("bg-secondary");
     expect(statusPill.className).not.toContain("bg-emerald-50");
   });
 });

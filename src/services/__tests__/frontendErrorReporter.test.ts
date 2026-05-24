@@ -189,23 +189,24 @@ describe("services/frontendErrorReporter", () => {
     expect(details.reason).toBe("string rejection reason");
   });
 
-  it("dedup overflow clears map and re-adds", async () => {
+  it("dedup overflow evicts oldest key without clearing fresh keys", async () => {
     const mod = await import("../frontendErrorReporter");
     mod.__testResetFrontendErrorReporterState();
 
-    // Send 201 unique errors to trigger the overflow (MAX_DEDUP_KEYS = 200)
     for (let i = 0; i < 201; i++) {
-      mod.reportRenderError(new Error(`unique-error-${i}`));
+      mod.reportRenderError(`unique-error-${i}`);
     }
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    // All 201 should be sent (each is unique, so none deduped)
     expect(invokeCalls).toHaveLength(201);
 
-    // Now re-send the first error; since the map was cleared at overflow,
-    // error #0 is no longer in the dedup map, so it should be sent again.
     invokeCalls = [];
-    mod.reportRenderError(new Error("unique-error-0"));
+    mod.reportRenderError("unique-error-200");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(invokeCalls).toHaveLength(0);
+
+    mod.reportRenderError("unique-error-0");
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(invokeCalls).toHaveLength(1);
@@ -215,6 +216,20 @@ describe("services/frontendErrorReporter", () => {
         message: "unique-error-0",
       }),
     ]);
+  });
+
+  it("reset removes installed global handlers", async () => {
+    const mod = await import("../frontendErrorReporter");
+    mod.__testResetFrontendErrorReporterState();
+
+    mod.installGlobalErrorReporting();
+    mod.__testResetFrontendErrorReporterState();
+
+    window.dispatchEvent(new ErrorEvent("error", { message: "after reset" }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(logToConsoleCalls).toHaveLength(0);
+    expect(invokeCalls).toHaveLength(0);
   });
 
   it("swallows error when frontend error report service rejects", async () => {

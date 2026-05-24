@@ -4,6 +4,7 @@ import {
   cliProxySetEnabled,
   cliProxyStatusAll,
   type CliProxyStatus,
+  validateCliProxyCliKey,
 } from "../services/cli/cliProxy";
 import { cliProxyKeys } from "./keys";
 
@@ -21,18 +22,19 @@ export function useCliProxySetEnabledMutation() {
 
   return useMutation({
     mutationFn: (input: { cliKey: CliKey; enabled: boolean }) =>
-      cliProxySetEnabled({ cli_key: input.cliKey, enabled: input.enabled }),
+      cliProxySetEnabled({ cli_key: validateCliProxyCliKey(input.cliKey), enabled: input.enabled }),
     onMutate: (input) => {
+      const cliKey = validateCliProxyCliKey(input.cliKey);
       queryClient.cancelQueries({ queryKey: cliProxyKeys.statusAll() });
       const prev = queryClient.getQueryData<CliProxyStatus[] | null>(cliProxyKeys.statusAll());
 
       queryClient.setQueryData<CliProxyStatus[] | null>(cliProxyKeys.statusAll(), (cur) => {
         if (!cur) return cur;
-        const exists = cur.some((row) => row.cli_key === input.cliKey);
+        const exists = cur.some((row) => row.cli_key === cliKey);
         if (!exists) {
           return [
             {
-              cli_key: input.cliKey,
+              cli_key: cliKey,
               enabled: input.enabled,
               base_origin: null,
               applied_to_current_gateway: input.enabled ? true : null,
@@ -41,7 +43,7 @@ export function useCliProxySetEnabledMutation() {
           ];
         }
         return cur.map((row) =>
-          row.cli_key === input.cliKey
+          row.cli_key === cliKey
             ? {
                 ...row,
                 enabled: input.enabled,

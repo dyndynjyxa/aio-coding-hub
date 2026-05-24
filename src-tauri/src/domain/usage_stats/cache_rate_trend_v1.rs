@@ -4,7 +4,8 @@ use rusqlite::{params_from_iter, Connection, OptionalExtension};
 use std::collections::HashMap;
 
 use super::filters::{
-    build_optional_range_cli_provider_filters, build_optional_range_filters_with_offset, SqlValues,
+    build_optional_range_cli_provider_filters, build_optional_range_filters_with_offset,
+    sql_exclude_cx2cc_gateway_bridge_clause, SqlValues,
 };
 use super::{
     extract_final_provider, has_valid_provider_key, resolve_query_params,
@@ -29,17 +30,23 @@ fn bucket_for_period(period: UsagePeriodV2) -> TrendBucketV1 {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ProviderCacheRateTrendQuery<'a> {
+    pub period: UsagePeriodV2,
+    pub start_ts: Option<i64>,
+    pub end_ts: Option<i64>,
+    pub cli_key: Option<&'a str>,
+    pub provider_id: Option<i64>,
+    pub limit: Option<usize>,
+    pub exclude_cx2cc_gateway_bridge: bool,
+}
+
 pub(super) fn provider_cache_rate_trend_v1_with_conn(
     conn: &Connection,
-    period: UsagePeriodV2,
-    start_ts: Option<i64>,
-    end_ts: Option<i64>,
-    cli_key: Option<&str>,
-    provider_id: Option<i64>,
-    limit: Option<usize>,
+    query: ProviderCacheRateTrendQuery<'_>,
 ) -> Result<Vec<UsageProviderCacheRateTrendRowV1>, String> {
-    let bucket = bucket_for_period(period);
-    let limit = match limit {
+    let bucket = bucket_for_period(query.period);
+    let limit = match query.limit {
         None => -1,
         Some(0) => -1,
         Some(v) => v.clamp(1, 200) as i64,
@@ -72,13 +79,15 @@ pub(super) fn provider_cache_rate_trend_v1_with_conn(
         "r.created_at",
         "r.cli_key",
         "r.final_provider_id",
-        start_ts,
-        end_ts,
-        cli_key,
-        provider_id,
+        query.start_ts,
+        query.end_ts,
+        query.cli_key,
+        query.provider_id,
     );
     let (fallback_where_clause, fallback_range_params) =
-        build_optional_range_filters_with_offset("r.created_at", start_ts, end_ts, 2);
+        build_optional_range_filters_with_offset("r.created_at", query.start_ts, query.end_ts, 2);
+    let cx2cc_filter_clause =
+        sql_exclude_cx2cc_gateway_bridge_clause(Some("r"), query.exclude_cx2cc_gateway_bridge);
 
     let sql = format!(
         r#"
@@ -93,6 +102,7 @@ WITH top_providers AS (
   AND r.final_provider_id IS NOT NULL
   AND r.final_provider_id > 0
   {where_clause}
+  {cx2cc_filter_clause}
   GROUP BY r.cli_key, r.final_provider_id
   ORDER BY denom_tokens DESC
   LIMIT ?{limit_bind_idx}
@@ -115,6 +125,7 @@ AND r.status >= 200 AND r.status < 300 AND r.error_code IS NULL
 AND r.final_provider_id IS NOT NULL
 AND r.final_provider_id > 0
 {where_clause}
+{cx2cc_filter_clause}
 GROUP BY {group_by_fields}, r.cli_key, r.final_provider_id
 ORDER BY {order_by_fields}, denom_tokens DESC
 "#,
@@ -123,6 +134,7 @@ ORDER BY {order_by_fields}, denom_tokens DESC
         group_by_fields = group_by_fields,
         order_by_fields = order_by_fields,
         where_clause = where_clause,
+        cx2cc_filter_clause = cx2cc_filter_clause,
         limit_bind_idx = where_params.len() + 1,
     );
 
@@ -186,9 +198,11 @@ WHERE r.excluded_from_stats = 0
 AND r.final_provider_id = ?1
 AND r.cli_key = ?2
 {fallback_where_clause}
+{cx2cc_filter_clause}
 LIMIT 1
 "#,
-        fallback_where_clause = fallback_where_clause
+        fallback_where_clause = fallback_where_clause,
+        cx2cc_filter_clause = cx2cc_filter_clause
     );
     let mut stmt_fallback_name = conn
         .prepare(&fallback_sql)
@@ -271,11 +285,14 @@ pub fn provider_cache_rate_trend_v1(
     let resolved = resolve_query_params(&conn, params)?;
     Ok(provider_cache_rate_trend_v1_with_conn(
         &conn,
-        resolved.period,
-        resolved.start_ts,
-        resolved.end_ts,
-        resolved.cli_key,
-        resolved.provider_id,
-        limit,
+        ProviderCacheRateTrendQuery {
+            period: resolved.period,
+            start_ts: resolved.start_ts,
+            end_ts: resolved.end_ts,
+            cli_key: resolved.cli_key,
+            provider_id: resolved.provider_id,
+            limit,
+            exclude_cx2cc_gateway_bridge: resolved.exclude_cx2cc_gateway_bridge,
+        },
     )?)
 }

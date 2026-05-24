@@ -65,6 +65,39 @@ describe("services/gateway/traceStore", () => {
     vi.useRealTimers();
   });
 
+  it("keeps store subscribers isolated when one listener throws", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+
+    const { ingestTraceStart, subscribeTraceStore } = await importFreshTraceStore();
+    const failingListener = vi.fn(() => {
+      throw new Error("listener boom");
+    });
+    const healthyListener = vi.fn();
+
+    const unsubscribeFailing = subscribeTraceStore(failingListener);
+    const unsubscribeHealthy = subscribeTraceStore(healthyListener);
+
+    expect(() => {
+      ingestTraceStart({
+        trace_id: "subscriber-isolation",
+        cli_key: "claude",
+        method: "GET",
+        path: "/v1/test",
+        query: null,
+        requested_model: "claude-3",
+        ts: 0,
+      });
+    }).not.toThrow();
+
+    expect(failingListener).toHaveBeenCalledTimes(1);
+    expect(healthyListener).toHaveBeenCalledTimes(1);
+
+    unsubscribeFailing();
+    unsubscribeHealthy();
+    vi.useRealTimers();
+  });
+
   it("ingestTraceAttempt upserts attempts and moves trace to front", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
@@ -170,6 +203,154 @@ describe("services/gateway/traceStore", () => {
     vi.useRealTimers();
   });
 
+  it("stores Claude model mapping from attempts and lets completion override it", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+
+    const { ingestTraceAttempt, ingestTraceRequest, useTraceStore } = await importFreshTraceStore();
+    const { result } = renderHook(() => useTraceStore());
+
+    act(() => {
+      ingestTraceAttempt({
+        trace_id: "t-mapping",
+        cli_key: "claude",
+        method: "POST",
+        path: "/v1/messages",
+        query: null,
+        requested_model: "claude-sonnet",
+        attempt_index: 1,
+        provider_id: 1,
+        provider_name: "Provider A",
+        base_url: "https://provider-a.example",
+        outcome: "started",
+        status: null,
+        attempt_started_ms: 0,
+        attempt_duration_ms: 0,
+        claude_model_mapping: {
+          requestedModel: " claude-sonnet ",
+          effectiveModel: " gpt-4.1 ",
+          mappingKind: " sonnet ",
+          providerId: 1,
+          providerName: " Provider A ",
+          applied: true,
+        },
+      });
+    });
+
+    expect(result.current.traces[0]?.claude_model_mapping?.effectiveModel).toBe("gpt-4.1");
+
+    act(() => {
+      ingestTraceAttempt({
+        trace_id: "t-mapping",
+        cli_key: "claude",
+        method: "POST",
+        path: "/v1/messages",
+        query: null,
+        requested_model: "claude-sonnet",
+        attempt_index: 1,
+        provider_id: 1,
+        provider_name: "Provider A",
+        base_url: "https://provider-a.example",
+        outcome: "success",
+        status: 200,
+        attempt_started_ms: 0,
+        attempt_duration_ms: 42,
+      });
+    });
+
+    expect(result.current.traces[0]?.claude_model_mapping?.effectiveModel).toBe("gpt-4.1");
+    expect(result.current.traces[0]?.attempts[0]?.claude_model_mapping?.effectiveModel).toBe(
+      " gpt-4.1 "
+    );
+
+    act(() => {
+      ingestTraceRequest({
+        trace_id: "t-mapping",
+        cli_key: "claude",
+        method: "POST",
+        path: "/v1/messages",
+        query: null,
+        requested_model: "claude-sonnet",
+        status: 200,
+        error_category: null,
+        error_code: null,
+        duration_ms: 50,
+        attempts: [],
+        claude_model_mapping: {
+          requestedModel: "claude-sonnet",
+          effectiveModel: "gpt-5.4",
+          mappingKind: "sonnet",
+          providerId: 2,
+          providerName: "Provider B",
+          applied: true,
+        },
+      });
+    });
+
+    expect(result.current.traces[0]?.claude_model_mapping?.providerId).toBe(2);
+    expect(result.current.traces[0]?.claude_model_mapping?.effectiveModel).toBe("gpt-5.4");
+
+    vi.useRealTimers();
+  });
+
+  it("clears Claude model mapping when completion explicitly has no valid mapping", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+
+    const { ingestTraceAttempt, ingestTraceRequest, useTraceStore } = await importFreshTraceStore();
+    const { result } = renderHook(() => useTraceStore());
+
+    act(() => {
+      ingestTraceAttempt({
+        trace_id: "t-mapping-clear",
+        cli_key: "claude",
+        method: "POST",
+        path: "/v1/messages",
+        query: null,
+        requested_model: "claude-sonnet",
+        attempt_index: 1,
+        provider_id: 1,
+        provider_name: "Provider A",
+        base_url: "https://provider-a.example",
+        outcome: "started",
+        status: null,
+        attempt_started_ms: 0,
+        attempt_duration_ms: 0,
+        claude_model_mapping: {
+          requestedModel: "claude-sonnet",
+          effectiveModel: "gpt-4.1",
+          mappingKind: "sonnet",
+          providerId: 1,
+          providerName: "Provider A",
+          applied: true,
+        },
+      });
+    });
+
+    expect(result.current.traces[0]?.claude_model_mapping?.effectiveModel).toBe("gpt-4.1");
+
+    act(() => {
+      ingestTraceRequest({
+        trace_id: "t-mapping-clear",
+        cli_key: "claude",
+        method: "POST",
+        path: "/v1/messages",
+        query: null,
+        requested_model: "claude-sonnet",
+        status: 200,
+        error_category: null,
+        error_code: null,
+        duration_ms: 50,
+        attempts: [],
+        claude_model_mapping: null,
+      });
+    });
+
+    expect(result.current.traces[0]?.claude_model_mapping).toBeNull();
+
+    vi.useRealTimers();
+  });
+
   it("ingestTraceRequest creates new trace when trace_id not found", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(5000);
@@ -200,6 +381,47 @@ describe("services/gateway/traceStore", () => {
     expect(result.current.traces[0]?.summary?.status).toBe(200);
     expect(result.current.traces[0]?.summary?.duration_ms).toBe(50);
     expect(result.current.traces[0]?.attempts).toEqual([]);
+
+    vi.useRealTimers();
+  });
+
+  it("bounds completion summary attempts retained in the trace store", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(5000);
+
+    const { MAX_ATTEMPTS_PER_TRACE } = await import("../traceLimits");
+    const { ingestTraceRequest, useTraceStore } = await importFreshTraceStore();
+    const { result } = renderHook(() => useTraceStore());
+    const attempts = Array.from({ length: MAX_ATTEMPTS_PER_TRACE + 50 }, (_, index) => ({
+      provider_id: index,
+      provider_name: `P${index}`,
+      base_url: `https://p${index}.example`,
+      outcome: "failed",
+      status: 500,
+    }));
+
+    act(() => {
+      ingestTraceRequest({
+        trace_id: "large-summary",
+        cli_key: "claude",
+        method: "POST",
+        path: "/v1/messages",
+        query: null,
+        status: 500,
+        error_category: "upstream",
+        error_code: "GW_UPSTREAM_ERROR",
+        duration_ms: 50,
+        attempts,
+      });
+    });
+
+    const retainedAttempts = result.current.traces[0]?.summary?.attempts ?? [];
+    expect(retainedAttempts).toHaveLength(MAX_ATTEMPTS_PER_TRACE);
+    expect(retainedAttempts[0]?.provider_id).toBe(50);
+    expect(retainedAttempts[retainedAttempts.length - 1]?.provider_id).toBe(
+      MAX_ATTEMPTS_PER_TRACE + 49
+    );
+    expect(attempts).toHaveLength(MAX_ATTEMPTS_PER_TRACE + 50);
 
     vi.useRealTimers();
   });

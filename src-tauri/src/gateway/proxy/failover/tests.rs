@@ -1,10 +1,11 @@
 use super::{
-    resolve_primary_provider_base_url, retry_backoff_delay, select_next_provider_id_from_order,
-    should_reuse_provider,
+    first_successful_base_url_probe, resolve_primary_provider_base_url, retry_backoff_delay,
+    select_next_provider_id_from_order, should_reuse_provider,
 };
 use crate::providers;
 use serde_json::json;
 use std::collections::HashSet;
+use std::time::Duration;
 
 fn set(ids: &[i64]) -> HashSet<i64> {
     ids.iter().copied().collect()
@@ -245,4 +246,50 @@ fn should_reuse_provider_returns_false_for_empty_messages() {
         "messages": []
     });
     assert!(!should_reuse_provider(Some(&body)));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn first_successful_base_url_probe_returns_without_waiting_for_slowest_probe() {
+    let base_urls = vec![
+        "https://slow.example".to_string(),
+        "https://fast.example".to_string(),
+    ];
+
+    let started = std::time::Instant::now();
+    let selected = first_successful_base_url_probe(&base_urls, |base_url| async move {
+        if base_url.contains("slow") {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            Ok(200)
+        } else {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            Ok(10)
+        }
+    })
+    .await;
+
+    assert_eq!(selected, Some(("https://fast.example".to_string(), 10)));
+    assert!(
+        started.elapsed() < Duration::from_millis(150),
+        "probe selection should not wait for the slowest candidate"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn first_successful_base_url_probe_skips_empty_and_failed_candidates() {
+    let base_urls = vec![
+        "   ".to_string(),
+        "https://failed.example".to_string(),
+        "https://ok.example".to_string(),
+    ];
+
+    let selected = first_successful_base_url_probe(&base_urls, |base_url| async move {
+        if base_url.contains("failed") {
+            Err("probe failed".to_string())
+        } else {
+            Ok(15)
+        }
+    })
+    .await;
+
+    assert_eq!(selected, Some(("https://ok.example".to_string(), 15)));
 }

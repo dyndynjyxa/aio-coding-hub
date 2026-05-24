@@ -11,7 +11,8 @@ import { EmptyState } from "../../ui/EmptyState";
 import { Input } from "../../ui/Input";
 import { Spinner } from "../../ui/Spinner";
 import { ProviderEditorDialog } from "./ProviderEditorDialog";
-import { SortableProviderCard } from "./SortableProviderCard";
+import { ProviderCard } from "./SortableProviderCard";
+import { SortableProviderOrderItem } from "./SortableProviderOrderItem";
 import { useProvidersViewDataModel } from "./hooks/useProvidersViewDataModel";
 
 export type ProvidersViewProps = {
@@ -25,6 +26,7 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
     providers,
     codexProviders,
     providersLoading,
+    providersRefreshing,
     filteredProviders,
     tagCounts,
     selectedTags,
@@ -62,7 +64,10 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
     sourceProvidersById,
     terminalCopyingByProviderId,
     duplicatingByProviderId,
+    testProviderAvailability,
+    testingByProviderId,
   } = model;
+  const enabledProviders = providers.filter((provider) => provider.enabled);
 
   return (
     <>
@@ -111,10 +116,8 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
                 })}
               </>
             )}
-            <span className="text-[11px] text-slate-500 dark:text-slate-400">
-              路由顺序：按拖拽顺序（上→下）
-            </span>
-            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+            <span className="text-[11px] text-muted-foreground">路由顺序：右侧拖拽（上→下）</span>
+            <span className="text-[11px] text-muted-foreground">
               共 {filteredProviders.length} / {providers.length} 条
             </span>
           </div>
@@ -151,8 +154,9 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
               variant="secondary"
               size="sm"
               className="h-9"
+              disabled={providersRefreshing}
             >
-              刷新
+              {providersRefreshing ? "刷新中…" : "刷新"}
             </Button>
 
             <Button
@@ -168,71 +172,110 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
           </div>
         </div>
 
-        <div className="lg:min-h-0 lg:flex-1 lg:overflow-auto lg:pr-1">
-          {providersLoading ? (
-            <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
-              <Spinner size="sm" />
-              加载中…
-            </div>
-          ) : providers.length === 0 ? (
-            <EmptyState title="暂无 Provider" description="请点击「添加」新增。" />
-          ) : filteredProviders.length === 0 ? (
-            <EmptyState
-              title="无匹配的 Provider"
-              description={
-                selectedTags.size > 0 || providerSearch.trim()
-                  ? "当前名称搜索或标签筛选无结果，请调整筛选条件。"
-                  : "当前列表无可展示的 Provider。"
-              }
-            />
-          ) : (
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragEnd={handleDragEnd}
+        <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_280px] xl:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="lg:min-h-0 lg:overflow-auto lg:pr-1">
+            {providersLoading ? (
+              <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+                <Spinner size="sm" />
+                加载中…
+              </div>
+            ) : providers.length === 0 ? (
+              <EmptyState title="暂无 Provider" description="请点击「添加」新增。" />
+            ) : filteredProviders.length === 0 ? (
+              <EmptyState
+                title="无匹配的 Provider"
+                description={
+                  selectedTags.size > 0 || providerSearch.trim()
+                    ? "当前名称搜索或标签筛选无结果，请调整筛选条件。"
+                    : "当前列表无可展示的 Provider。"
+                }
+              />
+            ) : (
+              <div className="space-y-3">
+                {filteredProviders.map((provider) => (
+                  <ProviderCard
+                    key={provider.id}
+                    provider={provider}
+                    sourceProviderName={
+                      provider.source_provider_id != null
+                        ? (sourceProviderNamesById[provider.source_provider_id] ?? null)
+                        : provider.bridge_type === "cx2cc"
+                          ? "当前 AIO 服务 Codex 网关"
+                          : undefined
+                    }
+                    sourceProvider={
+                      provider.source_provider_id != null
+                        ? (sourceProvidersById[provider.source_provider_id] ?? null)
+                        : null
+                    }
+                    circuit={circuitByProviderId[provider.id] ?? null}
+                    circuitResetting={Boolean(circuitResetting[provider.id]) || circuitLoading}
+                    onToggleEnabled={toggleProviderEnabled}
+                    onResetCircuit={resetCircuit}
+                    onCopyTerminalLaunchCommand={
+                      provider.cli_key === "claude" ? copyTerminalLaunchCommand : undefined
+                    }
+                    terminalLaunchCopying={Boolean(terminalCopyingByProviderId[provider.id])}
+                    onValidateModel={
+                      activeCli === "claude" ? requestValidateProviderModel : undefined
+                    }
+                    onTestAvailability={testProviderAvailability}
+                    testAvailabilityLoading={Boolean(testingByProviderId[provider.id])}
+                    onDuplicate={duplicateProvider}
+                    duplicateLoading={Boolean(duplicatingByProviderId[provider.id])}
+                    onEdit={setEditTarget}
+                    onDelete={setDeleteTarget}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {providers.length > 0 ? (
+            <aside
+              aria-label="供应商调用顺序"
+              className="flex flex-col rounded-lg border border-border bg-card p-3 lg:min-h-0"
             >
-              <SortableContext
-                items={filteredProviders.map((p) => p.id)}
-                strategy={verticalListSortingStrategy}
-              >
-                <div className="space-y-3">
-                  {filteredProviders.map((provider) => (
-                    <SortableProviderCard
-                      key={provider.id}
-                      provider={provider}
-                      sourceProviderName={
-                        provider.source_provider_id != null
-                          ? (sourceProviderNamesById[provider.source_provider_id] ?? null)
-                          : provider.bridge_type === "cx2cc"
-                            ? "当前 AIO 服务 Codex 网关"
-                            : undefined
-                      }
-                      sourceProvider={
-                        provider.source_provider_id != null
-                          ? (sourceProvidersById[provider.source_provider_id] ?? null)
-                          : null
-                      }
-                      circuit={circuitByProviderId[provider.id] ?? null}
-                      circuitResetting={Boolean(circuitResetting[provider.id]) || circuitLoading}
-                      onToggleEnabled={toggleProviderEnabled}
-                      onResetCircuit={resetCircuit}
-                      onCopyTerminalLaunchCommand={
-                        provider.cli_key === "claude" ? copyTerminalLaunchCommand : undefined
-                      }
-                      terminalLaunchCopying={Boolean(terminalCopyingByProviderId[provider.id])}
-                      onValidateModel={
-                        activeCli === "claude" ? requestValidateProviderModel : undefined
-                      }
-                      onDuplicate={duplicateProvider}
-                      duplicateLoading={Boolean(duplicatingByProviderId[provider.id])}
-                      onEdit={setEditTarget}
-                      onDelete={setDeleteTarget}
-                    />
-                  ))}
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-foreground">调用顺序</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    调用顺序按照从上到下依次调用
+                  </div>
                 </div>
-              </SortableContext>
-            </DndContext>
-          )}
+                <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                  {enabledProviders.length}
+                </span>
+              </div>
+
+              <div className="mt-3 lg:min-h-0 lg:flex-1 lg:overflow-auto lg:pr-1">
+                {enabledProviders.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">当前没有已启用的 Provider。</div>
+                ) : (
+                  <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    onDragEnd={handleDragEnd}
+                  >
+                    <SortableContext
+                      items={enabledProviders.map((p) => p.id)}
+                      strategy={verticalListSortingStrategy}
+                    >
+                      <div className="space-y-2">
+                        {enabledProviders.map((provider, index) => (
+                          <SortableProviderOrderItem
+                            key={provider.id}
+                            provider={provider}
+                            index={index}
+                          />
+                        ))}
+                      </div>
+                    </SortableContext>
+                  </DndContext>
+                )}
+              </div>
+            </aside>
+          ) : null}
         </div>
       </div>
 

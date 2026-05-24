@@ -2,10 +2,13 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
   type ClaudeCliInfo,
+  type ClaudeHooksState,
   type ClaudeSettingsState,
   type CodexConfigState,
   type CodexConfigTomlState,
   type SimpleCliInfo,
+  cliManagerClaudeHooksGet,
+  cliManagerClaudeHooksSet,
   cliManagerClaudeInfoGet,
   cliManagerClaudeSettingsGet,
   cliManagerClaudeSettingsSet,
@@ -21,6 +24,8 @@ import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { cliManagerKeys } from "../keys";
 import {
   pickCliAvailable,
+  useCliManagerClaudeHooksQuery,
+  useCliManagerClaudeHooksSetMutation,
   useCliManagerClaudeInfoQuery,
   useCliManagerClaudeSettingsQuery,
   useCliManagerClaudeSettingsSetMutation,
@@ -39,6 +44,8 @@ vi.mock("../../services/cli/cliManager", async () => {
   return {
     ...actual,
     cliManagerClaudeInfoGet: vi.fn(),
+    cliManagerClaudeHooksGet: vi.fn(),
+    cliManagerClaudeHooksSet: vi.fn(),
     cliManagerClaudeSettingsGet: vi.fn(),
     cliManagerClaudeSettingsSet: vi.fn(),
     cliManagerCodexInfoGet: vi.fn(),
@@ -113,6 +120,14 @@ function makeClaudeSettingsState(
   };
 }
 
+function makeClaudeHooksState(overrides: Partial<ClaudeHooksState> = {}): ClaudeHooksState {
+  return {
+    settings_path: "/tmp/.claude/settings.json",
+    groups: [],
+    ...overrides,
+  };
+}
+
 function makeCodexConfigState(overrides: Partial<CodexConfigState> = {}): CodexConfigState {
   return {
     config_dir: "/tmp/.codex",
@@ -163,6 +178,7 @@ describe("query/cliManager", () => {
     setTauriRuntime();
 
     vi.mocked(cliManagerClaudeInfoGet).mockResolvedValue(makeClaudeCliInfo());
+    vi.mocked(cliManagerClaudeHooksGet).mockResolvedValue(makeClaudeHooksState());
     vi.mocked(cliManagerClaudeSettingsGet).mockResolvedValue(makeClaudeSettingsState());
     vi.mocked(cliManagerCodexInfoGet).mockResolvedValue(makeSimpleCliInfo());
     vi.mocked(cliManagerCodexConfigGet).mockResolvedValue(makeCodexConfigState());
@@ -173,6 +189,7 @@ describe("query/cliManager", () => {
     const wrapper = createQueryWrapper(client);
 
     renderHook(() => useCliManagerClaudeInfoQuery(), { wrapper });
+    renderHook(() => useCliManagerClaudeHooksQuery(), { wrapper });
     renderHook(() => useCliManagerClaudeSettingsQuery(), { wrapper });
     renderHook(() => useCliManagerCodexInfoQuery(), { wrapper });
     renderHook(() => useCliManagerCodexConfigQuery(), { wrapper });
@@ -181,6 +198,7 @@ describe("query/cliManager", () => {
 
     await waitFor(() => {
       expect(cliManagerClaudeInfoGet).toHaveBeenCalled();
+      expect(cliManagerClaudeHooksGet).toHaveBeenCalled();
       expect(cliManagerClaudeSettingsGet).toHaveBeenCalled();
       expect(cliManagerCodexInfoGet).toHaveBeenCalled();
       expect(cliManagerCodexConfigGet).toHaveBeenCalled();
@@ -211,6 +229,7 @@ describe("query/cliManager", () => {
     const wrapper = createQueryWrapper(client);
 
     renderHook(() => useCliManagerClaudeInfoQuery({ enabled: false }), { wrapper });
+    renderHook(() => useCliManagerClaudeHooksQuery({ enabled: false }), { wrapper });
     renderHook(() => useCliManagerClaudeSettingsQuery({ enabled: false }), { wrapper });
     renderHook(() => useCliManagerCodexInfoQuery({ enabled: false }), { wrapper });
     renderHook(() => useCliManagerCodexConfigQuery({ enabled: false }), { wrapper });
@@ -220,6 +239,7 @@ describe("query/cliManager", () => {
     await Promise.resolve();
 
     expect(cliManagerClaudeInfoGet).not.toHaveBeenCalled();
+    expect(cliManagerClaudeHooksGet).not.toHaveBeenCalled();
     expect(cliManagerClaudeSettingsGet).not.toHaveBeenCalled();
     expect(cliManagerCodexInfoGet).not.toHaveBeenCalled();
     expect(cliManagerCodexConfigGet).not.toHaveBeenCalled();
@@ -245,6 +265,34 @@ describe("query/cliManager", () => {
 
     expect(client.getQueryData(cliManagerKeys.claudeSettings())).toEqual(updated);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: cliManagerKeys.claudeSettings() });
+  });
+
+  it("useCliManagerClaudeHooksSetMutation updates cache and invalidates", async () => {
+    setTauriRuntime();
+
+    const updated = makeClaudeHooksState({
+      groups: [
+        {
+          event: "PreToolUse",
+          matcher: "",
+          hooks: [{ hook_type: "command", command: "echo ok", timeout: null }],
+        },
+      ],
+    });
+    vi.mocked(cliManagerClaudeHooksSet).mockResolvedValue(updated);
+
+    const client = createTestQueryClient();
+    client.setQueryData(cliManagerKeys.claudeHooks(), makeClaudeHooksState());
+    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useCliManagerClaudeHooksSetMutation(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ groups: updated.groups });
+    });
+
+    expect(client.getQueryData(cliManagerKeys.claudeHooks())).toEqual(updated);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: cliManagerKeys.claudeHooks() });
   });
 
   it("useCliManagerCodexConfigSetMutation updates cache and invalidates", async () => {

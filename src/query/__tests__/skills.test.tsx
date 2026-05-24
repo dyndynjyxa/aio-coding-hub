@@ -162,6 +162,40 @@ describe("query/skills", () => {
     expect(skillsInstalledList).not.toHaveBeenCalled();
   });
 
+  it("rejects invalid workspace ids before creating skills query adapters", () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    expect(() => renderHook(() => useSkillsInstalledListQuery(0), { wrapper })).toThrow(
+      "SEC_INVALID_INPUT"
+    );
+    expect(() => renderHook(() => useSkillImportLocalMutation(Number.NaN), { wrapper })).toThrow(
+      "SEC_INVALID_INPUT"
+    );
+  });
+
+  it("useSkillInstallToLocalMutation allows missing workspace during render only", async () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useSkillInstallToLocalMutation(null), { wrapper });
+
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync({
+          gitUrl: "https://x",
+          branch: "main",
+          sourceSubdir: "s",
+        })
+      ).rejects.toThrow("SEC_INVALID_INPUT");
+    });
+    expect(skillInstallToLocal).not.toHaveBeenCalled();
+  });
+
   it("useSkillsInstalledListQuery calls skillsInstalledList when workspaceId is set", async () => {
     setTauriRuntime();
     vi.mocked(skillsInstalledList).mockResolvedValue([]);
@@ -327,6 +361,47 @@ describe("query/skills", () => {
     await waitFor(() => {
       expect(skillsPathsGet).toHaveBeenCalledWith("claude");
     });
+  });
+
+  it("useSkillsPathsQuery normalizes cliKey before cache key and service call", async () => {
+    setTauriRuntime();
+
+    const paths: SkillsPaths = {
+      ssot_dir: "/tmp/ssot",
+      repos_dir: "/tmp/repos",
+      cli_dir: "/tmp/cli",
+    };
+    vi.mocked(skillsPathsGet).mockResolvedValue(paths);
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    renderHook(() => useSkillsPathsQuery(" claude " as Parameters<typeof useSkillsPathsQuery>[0]), {
+      wrapper,
+    });
+
+    await waitFor(() => {
+      expect(skillsPathsGet).toHaveBeenCalledWith("claude");
+    });
+    expect(client.getQueryData(skillsKeys.paths("claude"))).toEqual(paths);
+    expect(
+      client.getQueryData(skillsKeys.paths(" claude " as Parameters<typeof useSkillsPathsQuery>[0]))
+    ).toBeUndefined();
+  });
+
+  it("rejects invalid skills path cliKey before creating query adapters", () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    expect(() =>
+      renderHook(
+        () => useSkillsPathsQuery("opencode" as Parameters<typeof useSkillsPathsQuery>[0]),
+        { wrapper }
+      )
+    ).toThrow("SEC_INVALID_INPUT");
+    expect(skillsPathsGet).not.toHaveBeenCalled();
   });
 
   it("useSkillsDiscoverAvailableMutation handles null rows", async () => {
@@ -897,9 +972,10 @@ describe("query/skills", () => {
 
     const { result } = renderHook(() => useSkillLocalDeleteMutation(1), { wrapper });
     await act(async () => {
-      await result.current.mutateAsync("local-skill");
+      await result.current.mutateAsync(" local-skill ");
     });
 
+    expect(skillLocalDelete).toHaveBeenCalledWith({ workspaceId: 1, dirName: "local-skill" });
     expect(client.getQueryData(skillsKeys.localList(1))).toEqual([prev[1]]);
   });
 
@@ -952,9 +1028,10 @@ describe("query/skills", () => {
 
     const { result } = renderHook(() => useSkillImportLocalMutation(1), { wrapper });
     await act(async () => {
-      await result.current.mutateAsync("s2");
+      await result.current.mutateAsync(" s2 ");
     });
 
+    expect(skillImportLocal).toHaveBeenCalledWith({ workspaceId: 1, dirName: "s2" });
     expect(client.getQueryData(skillsKeys.installedList(1))).toEqual([next]);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: skillsKeys.localList(1) });
   });
@@ -1060,9 +1137,10 @@ describe("query/skills", () => {
 
     const { result } = renderHook(() => useSkillsImportLocalBatchMutation(1), { wrapper });
     await act(async () => {
-      await result.current.mutateAsync(["s3"]);
+      await result.current.mutateAsync([" s3 ", "", "s3"]);
     });
 
+    expect(skillsImportLocalBatch).toHaveBeenCalledWith({ workspaceId: 1, dirNames: ["s3"] });
     expect(client.getQueryData(skillsKeys.installedList(1))).toEqual([
       prev[0],
       expect.objectContaining({ id: 12, skill_key: "s3" }),

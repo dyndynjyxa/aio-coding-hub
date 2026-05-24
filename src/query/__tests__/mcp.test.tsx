@@ -53,6 +53,33 @@ describe("query/mcp", () => {
     });
   });
 
+  it("keeps null workspace list queries disabled", () => {
+    setTauriRuntime();
+    vi.mocked(mcpServersList).mockResolvedValue([]);
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useMcpServersListQuery(null), { wrapper });
+
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(mcpServersList).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid workspace ids before creating mcp query adapters", () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    expect(() => renderHook(() => useMcpServersListQuery(0), { wrapper })).toThrow(
+      "SEC_INVALID_INPUT"
+    );
+    expect(() => renderHook(() => useMcpImportServersMutation(Number.NaN), { wrapper })).toThrow(
+      "SEC_INVALID_INPUT"
+    );
+  });
+
   it("useMcpServersListQuery enters error state when mcpServersList rejects", async () => {
     setTauriRuntime();
     vi.mocked(mcpServersList).mockRejectedValue(new Error("mcp query boom"));

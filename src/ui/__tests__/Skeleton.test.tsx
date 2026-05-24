@@ -31,13 +31,13 @@ describe("ui/Skeleton", () => {
   it("applies background color classes", () => {
     const { container } = render(<Skeleton />);
     const el = container.firstElementChild;
-    expect(el).toHaveClass("bg-slate-200");
+    expect(el).toHaveClass("bg-muted");
   });
 
-  it("supports dark mode classes", () => {
+  it("supports semantic token classes", () => {
     const { container } = render(<Skeleton />);
     const el = container.firstElementChild;
-    expect(el).toHaveClass("dark:bg-slate-700");
+    expect(el).toHaveClass("bg-muted");
   });
 
   it("merges custom className", () => {

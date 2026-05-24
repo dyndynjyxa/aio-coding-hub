@@ -7,16 +7,20 @@ import {
   modelPriceAliasesSet,
   modelPricesList,
   modelPricesSyncBasellm,
+  normalizeModelPriceAliases,
   subscribeModelPricesUpdated,
+  validateModelPricesCliKey,
   type ModelPriceAliases,
   type ModelPricesSyncReport,
 } from "../services/usage/modelPrices";
 import { modelPricesKeys } from "./keys";
 
 export function useModelPricesListQuery(cliKey: CliKey, options?: { enabled?: boolean }) {
+  const normalizedCliKey = validateModelPricesCliKey(cliKey);
+
   return useQuery({
-    queryKey: modelPricesKeys.list(cliKey),
-    queryFn: () => modelPricesList(cliKey),
+    queryKey: modelPricesKeys.list(normalizedCliKey),
+    queryFn: () => modelPricesList(normalizedCliKey),
     enabled: options?.enabled ?? true,
     placeholderData: keepPreviousData,
   });
@@ -51,7 +55,8 @@ export function useModelPriceAliasesSetMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (aliases: ModelPriceAliases) => modelPriceAliasesSet(aliases),
+    mutationFn: (aliases: ModelPriceAliases) =>
+      modelPriceAliasesSet(normalizeModelPriceAliases(aliases)),
     onSuccess: (updated) => {
       queryClient.setQueryData<ModelPriceAliases | null>(modelPricesKeys.aliases(), updated);
     },

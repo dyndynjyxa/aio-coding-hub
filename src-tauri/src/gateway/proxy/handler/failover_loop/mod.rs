@@ -118,8 +118,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::gateway::events::{
-    decision_chain as dc, emit_attempt_event, emit_gateway_log, FailoverAttempt,
-    GatewayAttemptEvent,
+    decision_chain as dc, emit_attempt_event, emit_gateway_debug_log_lazy, emit_gateway_log,
+    FailoverAttempt, GatewayAttemptEvent,
 };
 use crate::gateway::response_fixer;
 use crate::gateway::streams::{
@@ -129,9 +129,9 @@ use crate::gateway::streams::{
 use crate::gateway::thinking_signature_rectifier;
 use crate::gateway::util::{
     body_for_introspection, build_target_url, clear_all_auth_headers, ensure_cli_required_headers,
-    inject_provider_auth, now_unix_seconds, strip_hop_headers,
+    inject_provider_auth, lossy_utf8_preview, now_unix_seconds, redacted_headers_for_debug,
+    strip_hop_headers, MAX_DEBUG_BODY_PREVIEW_BYTES,
 };
-use crate::shared::mutex_ext::MutexExt;
 
 use context::{
     build_stream_finalize_ctx, AttemptCtx, AttemptOutcome, CommonCtx, CommonCtxArgs,
@@ -139,13 +139,29 @@ use context::{
     MAX_NON_SSE_BODY_BYTES,
 };
 
+/// Fallback stream detection from raw body bytes when introspection_json
+/// parsing failed (e.g. gzip decompression exceeded limit). Looks for the
+/// `"stream":true` pattern in the first 2 KB of the body.
+fn stream_flag_from_raw_body(body: &[u8]) -> bool {
+    let search_window = &body[..body.len().min(2048)];
+    let haystack = match std::str::from_utf8(search_window) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    haystack.contains("\"stream\":true") || haystack.contains("\"stream\": true")
+}
+
 /// Main failover loop: iterate providers, retry attempts, handle responses.
 ///
 /// This is a thin orchestrator that delegates to:
 /// - `provider_iterator` for provider preparation (gate, credential, CX2CC)
 /// - `retry_engine` for the per-provider retry loop
 /// - `finalize` for terminal states (all unavailable / all failed)
-pub(super) async fn run(mut input: RequestContext) -> Response {
+pub(super) async fn run<R>(mut input: RequestContext<R>) -> Response
+where
+    R: tauri::Runtime + 'static,
+    R::Handle: Unpin,
+{
     let started = input.started;
     let created_at_ms = input.created_at_ms;
     let created_at = input.created_at;
@@ -188,7 +204,8 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
     let max_providers_to_try = (input.max_providers_to_try as usize).max(1);
     let mut counters = provider_iterator::IterationCounters::new();
     let anthropic_stream_requested =
-        original_anthropic_stream_requested(input.introspection_json.as_ref());
+        original_anthropic_stream_requested(input.introspection_json.as_ref())
+            || stream_flag_from_raw_body(&introspection_body);
 
     let providers: Vec<_> = input.providers.clone();
 

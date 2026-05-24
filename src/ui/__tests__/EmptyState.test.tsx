@@ -57,6 +57,6 @@ describe("ui/EmptyState", () => {
   it("supports dark mode text classes", () => {
     render(<EmptyState title="No data" />);
     const titleEl = screen.getByText("No data");
-    expect(titleEl).toHaveClass("dark:text-slate-400");
+    expect(titleEl).toHaveClass("text-muted-foreground");
   });
 });

@@ -134,6 +134,14 @@ pub(super) fn sanitize_circuit_breaker_settings(settings: &mut AppSettings) -> b
     changed
 }
 
+pub(super) fn sanitize_log_retention_days(settings: &mut AppSettings) -> bool {
+    if settings.log_retention_days > MAX_LOG_RETENTION_DAYS {
+        settings.log_retention_days = MAX_LOG_RETENTION_DAYS;
+        return true;
+    }
+    false
+}
+
 pub(super) fn sanitize_provider_cooldown_seconds(settings: &mut AppSettings) -> bool {
     if settings.provider_cooldown_seconds > MAX_PROVIDER_COOLDOWN_SECONDS {
         settings.provider_cooldown_seconds = MAX_PROVIDER_COOLDOWN_SECONDS;
@@ -653,6 +661,7 @@ pub(super) fn repair_settings(
     raw_settings_json: &serde_json::Value,
 ) -> AppResult<bool> {
     let mut repaired = apply_settings_migrations(settings, schema_version_present);
+    repaired |= sanitize_log_retention_days(settings);
     repaired |= sanitize_failover_settings(settings);
     repaired |= sanitize_circuit_breaker_settings(settings);
     repaired |= sanitize_provider_cooldown_seconds(settings);
@@ -766,6 +775,28 @@ mod tests {
     fn sanitize_circuit_breaker_no_change_for_valid_values() {
         let mut s = AppSettings::default();
         assert!(!sanitize_circuit_breaker_settings(&mut s));
+    }
+
+    // -- sanitize_log_retention_days --
+
+    #[test]
+    fn sanitize_log_retention_days_clamps_excessive_value() {
+        let mut s = AppSettings {
+            log_retention_days: MAX_LOG_RETENTION_DAYS + 1,
+            ..Default::default()
+        };
+        assert!(sanitize_log_retention_days(&mut s));
+        assert_eq!(s.log_retention_days, MAX_LOG_RETENTION_DAYS);
+    }
+
+    #[test]
+    fn sanitize_log_retention_days_leaves_valid_value() {
+        let mut s = AppSettings {
+            log_retention_days: 30,
+            ..Default::default()
+        };
+        assert!(!sanitize_log_retention_days(&mut s));
+        assert_eq!(s.log_retention_days, 30);
     }
 
     // -- sanitize_provider_cooldown_seconds --

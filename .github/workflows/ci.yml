@@ -118,7 +118,7 @@ jobs:
       - name: Install system deps (Tauri/Linux)
         run: |
           sudo apt-get update
-          sudo apt-get install -y librsvg2-dev patchelf
+          sudo apt-get install -y libasound2-dev librsvg2-dev patchelf
 
           # AppIndicator (Ubuntu 22.04 typically uses ayatana; some images still provide appindicator)
           if ! sudo apt-get install -y libayatana-appindicator3-dev; then

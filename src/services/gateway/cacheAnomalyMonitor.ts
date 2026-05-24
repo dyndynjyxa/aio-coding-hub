@@ -18,6 +18,7 @@ import {
   CACHE_ANOMALY_MONITOR_THRESHOLDS,
   CACHE_ANOMALY_MONITOR_WINDOW_MINUTES,
 } from "./cacheAnomalyMonitorConfig";
+import { emitListenerSnapshot } from "../../utils/listeners";
 
 const MINUTE_MS = 60_000;
 const WINDOW_MINUTES = CACHE_ANOMALY_MONITOR_WINDOW_MINUTES;
@@ -30,7 +31,10 @@ const ALERT_DEDUP_MS = 15 * MINUTE_MS;
 const COLD_START_WINDOW_MS = COLD_START_MINUTES * MINUTE_MS;
 
 const SAMPLE_RETENTION_MINUTES = 75;
+const MAX_SAMPLE_BUCKETS_PER_GROUP = SAMPLE_RETENTION_MINUTES + 1;
 const TRACE_MODEL_TTL_MS = 10 * MINUTE_MS;
+const MAX_TRACE_MODEL_ENTRIES = 2_000;
+const MAX_GROUP_ENTRIES = 500;
 
 const THRESHOLDS = CACHE_ANOMALY_MONITOR_THRESHOLDS;
 
@@ -56,7 +60,11 @@ let enabledSnapshot: EnabledSnapshot = { enabled };
 const enabledListeners = new Set<Listener>();
 
 function emitEnabled() {
-  for (const listener of enabledListeners) listener();
+  emitListenerSnapshot(
+    enabledListeners,
+    (listener) => listener(),
+    (error) => logToConsole("warn", "缓存异常监控状态订阅处理失败", { error: String(error) })
+  );
 }
 
 function setEnabledInternal(next: boolean) {
@@ -78,12 +86,14 @@ export function setCacheAnomalyMonitorEnabled(next: boolean) {
   setEnabledInternal(normalized);
 }
 
+export function subscribeCacheAnomalyMonitorEnabled(listener: Listener) {
+  enabledListeners.add(listener);
+  return () => enabledListeners.delete(listener);
+}
+
 export function useCacheAnomalyMonitorEnabled(): boolean {
   return useSyncExternalStore(
-    (listener) => {
-      enabledListeners.add(listener);
-      return () => enabledListeners.delete(listener);
-    },
+    subscribeCacheAnomalyMonitorEnabled,
     () => enabledSnapshot.enabled,
     () => enabledSnapshot.enabled
   );
@@ -105,12 +115,11 @@ type WindowSums = {
 };
 
 type Sample = {
-  tsMs: number;
   minute: number;
   denomTokens: number;
   cacheReadTokens: number;
   cacheCreateTokens: number;
-  successRequest: 0 | 1;
+  successRequest: number;
 };
 
 type GroupKeyParts = {
@@ -197,6 +206,19 @@ function resetState() {
   state.enabledAtMs = 0;
 }
 
+export function __testGetCacheAnomalyMonitorStateSizes() {
+  const groups = Array.from(state.groups.values());
+  const sampleBuckets = groups.reduce((sum, group) => sum + group.samples.length, 0);
+  const maxSampleBucketsPerGroup = Math.max(0, ...groups.map((group) => group.samples.length));
+
+  return {
+    traceModels: state.traceModels.size,
+    groups: state.groups.size,
+    sampleBuckets,
+    maxSampleBucketsPerGroup,
+  };
+}
+
 function mod(value: number, base: number): number {
   const r = value % base;
   return r < 0 ? r + base : r;
@@ -274,7 +296,7 @@ function extractSample(
   cliKey: SupportedCliKey,
   payload: GatewayRequestEvent,
   nowMs: number
-): Omit<Sample, "tsMs"> {
+): Sample {
   const inputTokens = normalizeTokenCount(payload.input_tokens ?? null);
   const cacheReadTokens = normalizeTokenCount(payload.cache_read_input_tokens ?? null);
 
@@ -306,13 +328,66 @@ function pruneTraceModels(nowMs: number) {
   for (const [traceId, entry] of state.traceModels) {
     if (entry.seenAtMs < cutoff) state.traceModels.delete(traceId);
   }
+
+  const overflow = state.traceModels.size - MAX_TRACE_MODEL_ENTRIES;
+  if (overflow <= 0) return;
+
+  let removed = 0;
+  for (const traceId of state.traceModels.keys()) {
+    state.traceModels.delete(traceId);
+    removed += 1;
+    if (removed >= overflow) break;
+  }
+}
+
+function pruneGroups(minuteNow: number) {
+  const staleBeforeMinute = minuteNow - WINDOW_MINUTES;
+  for (const [key, group] of state.groups) {
+    if (group.lastSeenMinute < staleBeforeMinute) {
+      state.groups.delete(key);
+    }
+  }
+
+  while (state.groups.size > MAX_GROUP_ENTRIES) {
+    evictOldestGroup();
+  }
+}
+
+function evictOldestGroup() {
+  let oldestKey: string | null = null;
+  let oldestMinute = Number.POSITIVE_INFINITY;
+
+  for (const [key, group] of state.groups) {
+    if (group.lastSeenMinute < oldestMinute) {
+      oldestKey = key;
+      oldestMinute = group.lastSeenMinute;
+    }
+  }
+
+  if (oldestKey != null) {
+    state.groups.delete(oldestKey);
+  }
 }
 
 function pruneSamples(samples: Sample[], minMinuteInclusive: number): Sample[] {
-  const idx = samples.findIndex((s) => s.minute >= minMinuteInclusive);
-  if (idx === -1) return [];
-  if (idx === 0) return samples;
-  return samples.slice(idx);
+  const kept = samples.filter((s) => s.minute >= minMinuteInclusive);
+  if (kept.length <= MAX_SAMPLE_BUCKETS_PER_GROUP) return kept;
+
+  return kept.sort((a, b) => a.minute - b.minute).slice(kept.length - MAX_SAMPLE_BUCKETS_PER_GROUP);
+}
+
+function addSampleBucket(samples: Sample[], sample: Sample, minMinuteInclusive: number): Sample[] {
+  const bucket = samples.find((s) => s.minute === sample.minute);
+  if (bucket) {
+    bucket.denomTokens += sample.denomTokens;
+    bucket.cacheReadTokens += sample.cacheReadTokens;
+    bucket.cacheCreateTokens += sample.cacheCreateTokens;
+    bucket.successRequest += sample.successRequest;
+    return pruneSamples(samples, minMinuteInclusive);
+  }
+
+  samples.push({ ...sample });
+  return pruneSamples(samples, minMinuteInclusive);
 }
 
 function slowSumSamples(samples: Sample[], minStart: number, minEnd: number): WindowSums {
@@ -480,13 +555,9 @@ function maybeEvaluate(nowMs: number) {
   const observeEnd = minuteNow;
 
   const evalRows: GroupEval[] = [];
+  pruneGroups(minuteNow);
 
-  for (const [key, group] of state.groups) {
-    if (group.lastSeenMinute < minuteNow - WINDOW_MINUTES) {
-      state.groups.delete(key);
-      continue;
-    }
-
+  for (const group of state.groups.values()) {
     const baseline = group.ring.sumRange(baselineStart, baselineEnd);
     const recent = group.ring.sumRange(recentStart, recentEnd);
     const observe = coldStartActive ? group.ring.sumRange(observeStart, observeEnd) : recent;
@@ -564,6 +635,8 @@ export function ingestCacheAnomalyRequestStart(payload: GatewayRequestStartEvent
   if (!isSupportedCliKey(payload.cli_key)) return;
 
   const nowMs = Date.now();
+  pruneTraceModels(nowMs);
+
   const model = normalizeModelName(payload.requested_model);
   const ignore = isNonCachingModel(payload.cli_key, model);
 
@@ -579,8 +652,12 @@ export function ingestCacheAnomalyRequest(payload: GatewayRequestEvent) {
   if (!isSupportedCliKey(payload.cli_key)) return;
 
   const nowMs = Date.now();
-  if (!isSuccessRequest(payload)) return;
   pruneTraceModels(nowMs);
+
+  const traceEntry = state.traceModels.get(payload.trace_id);
+  if (traceEntry) state.traceModels.delete(payload.trace_id);
+
+  if (!isSuccessRequest(payload)) return;
 
   const attempt = pickFinalProvider(payload.attempts);
   if (!attempt) return;
@@ -589,8 +666,6 @@ export function ingestCacheAnomalyRequest(payload: GatewayRequestEvent) {
 
   const providerName = (attempt.provider_name || "Unknown").trim() || "Unknown";
 
-  const traceEntry = state.traceModels.get(payload.trace_id);
-  if (traceEntry) state.traceModels.delete(payload.trace_id);
   if (traceEntry?.ignore) return;
   const model = traceEntry && !traceEntry.ignore ? traceEntry.model : "Unknown";
 
@@ -626,8 +701,8 @@ export function ingestCacheAnomalyRequest(payload: GatewayRequestEvent) {
 
   group.lastSeenMinute = minuteNow;
   group.ring.add(sampleBase.minute, sampleBase);
-  group.samples.push({ ...sampleBase, tsMs: nowMs });
-  group.samples = pruneSamples(group.samples, minKeep);
+  group.samples = addSampleBucket(group.samples, sampleBase, minKeep);
+  pruneGroups(minuteNow);
 
   maybeEvaluate(nowMs);
 }

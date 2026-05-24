@@ -40,9 +40,9 @@ describe("ui components", () => {
     );
 
     await user.hover(screen.getByText("anchor"));
-    await waitFor(() => expect(document.querySelector(".bg-slate-900")).not.toBeNull());
+    await waitFor(() => expect(document.querySelector(".bg-foreground")).not.toBeNull());
     await user.unhover(screen.getByText("anchor"));
-    await waitFor(() => expect(document.querySelector(".bg-slate-900")).toBeNull());
+    await waitFor(() => expect(document.querySelector(".bg-foreground")).toBeNull());
 
     rerender(
       <Tooltip content="world" placement="bottom">
@@ -50,7 +50,7 @@ describe("ui components", () => {
       </Tooltip>
     );
     await user.hover(screen.getByText("anchor"));
-    await waitFor(() => expect(document.querySelector(".bg-slate-900")).not.toBeNull());
+    await waitFor(() => expect(document.querySelector(".bg-foreground")).not.toBeNull());
   });
 
   it("RadioGroup calls onChange and respects disabled", () => {

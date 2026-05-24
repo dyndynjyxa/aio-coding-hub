@@ -13,6 +13,7 @@ import { useUsagePageErrorToast } from "./usage/useUsagePageErrorToast";
 import { useUsagePageFiltersState } from "./usage/useUsagePageFiltersState";
 import { useUsagePageProviderFilter } from "./usage/useUsagePageProviderFilter";
 import { useUsagePageTableState } from "./usage/useUsagePageTableState";
+import { useUsageAvailabilityData } from "./usage/useUsageAvailabilityData";
 
 export function UsagePage() {
   const baseFilters = useUsagePageFiltersState();
@@ -29,9 +30,17 @@ export function UsagePage() {
     bounds: filters.bounds,
   });
 
+  const availability = useUsageAvailabilityData({
+    enabled: table.tableTab === "availability",
+    cliKey: filters.cliKey,
+    providerId: filters.providerId,
+    period: filters.period,
+    customApplied: filters.customApplied,
+  });
+
   useUsagePageErrorToast(model.errorText, table.tableTab);
 
-  return <UsagePageView filters={filters} table={table} model={model} />;
+  return <UsagePageView filters={filters} table={table} model={model} availability={availability} />;
 }
 
 type UsagePageFiltersState = ReturnType<typeof useUsagePageFiltersState> &
@@ -113,14 +122,18 @@ function UsagePageHeader({
   );
 }
 
+type UsageAvailabilityState = ReturnType<typeof useUsageAvailabilityData>;
+
 function UsageDataPanelSection({
   filters,
   table,
   model,
+  availability,
 }: {
   filters: UsagePageFiltersState;
   table: UsagePageTableState;
   model: UsagePageDataModel;
+  availability: UsageAvailabilityState;
 }) {
   return (
     <UsageDataPanel
@@ -149,6 +162,10 @@ function UsageDataPanelSection({
       period={filters.period}
       customApplied={filters.customApplied}
       customPending={model.customPending}
+      availabilityData={availability.data}
+      availabilityLoading={availability.loading}
+      availabilityRefreshing={availability.refreshing}
+      onRefreshAvailability={availability.refetch}
     />
   );
 }
@@ -157,31 +174,35 @@ function UsagePageView({
   filters,
   table,
   model,
+  availability,
 }: {
   filters: UsagePageFiltersState;
   table: UsagePageTableState;
   model: UsagePageDataModel;
+  availability: UsageAvailabilityState;
 }) {
   return (
     <div className="flex flex-col gap-5 h-full overflow-hidden">
       <div className="shrink-0">
         <UsagePageHeader loading={model.loading} filters={filters} />
       </div>
-      <div className="shrink-0">
-        <UsageSummaryCards
-          summary={model.summary}
-          totalCostUsd={model.totalCostUsd}
-          leaderboardCount={model.rows.length}
-          loading={model.dataLoading}
-        />
-      </div>
+      {table.tableTab !== "availability" && (
+        <div className="shrink-0">
+          <UsageSummaryCards
+            summary={model.summary}
+            totalCostUsd={model.totalCostUsd}
+            leaderboardCount={model.rows.length}
+            loading={model.dataLoading}
+          />
+        </div>
+      )}
       <UsageErrorCard
         errorText={model.errorText}
         loading={model.loading}
         onRetry={model.handleRetry}
       />
       <TauriUnavailableHint open={model.tauriAvailable === false} />
-      <UsageDataPanelSection filters={filters} table={table} model={model} />
+      <UsageDataPanelSection filters={filters} table={table} model={model} availability={availability} />
     </div>
   );
 }

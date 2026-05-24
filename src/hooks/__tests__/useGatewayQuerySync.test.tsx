@@ -81,7 +81,7 @@ describe("hooks/useGatewayQuerySync", () => {
         trace_id: "t-1",
         cli_key: "claude",
         session_id: null,
-        requested_model: null,
+        requested_model: "m".repeat(5000),
         ts: 2,
       },
     });
@@ -101,6 +101,109 @@ describe("hooks/useGatewayQuerySync", () => {
 
     unmount();
     expect(tauriUnlisten).toHaveBeenCalled();
+
+    vi.useRealTimers();
+  });
+
+  it("drops queued invalidations on unmount", async () => {
+    vi.useFakeTimers();
+    setTauriRuntime();
+
+    const handlers = new Map<string, (event: any) => void>();
+    vi.mocked(tauriListen).mockImplementation(async (event: string, handler: any) => {
+      handlers.set(event, handler);
+      return tauriUnlisten;
+    });
+
+    const client = createTestQueryClient();
+    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
+
+    const { unmount } = render(
+      <QueryClientProvider client={client}>
+        <Harness />
+      </QueryClientProvider>
+    );
+
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    handlers.get(gatewayEventNames.circuit)?.({ payload: null });
+    unmount();
+
+    vi.advanceTimersByTime(500);
+    expect(invalidateSpy).not.toHaveBeenCalled();
+
+    vi.useRealTimers();
+  });
+
+  it("coalesces request-signal usage invalidations while a prior invalidation is in flight", async () => {
+    vi.useFakeTimers();
+    setTauriRuntime();
+
+    const handlers = new Map<string, (event: any) => void>();
+    vi.mocked(tauriListen).mockImplementation(async (event: string, handler: any) => {
+      handlers.set(event, handler);
+      return tauriUnlisten;
+    });
+
+    const client = createTestQueryClient();
+    const usageResolvers: Array<() => void> = [];
+    const invalidateSpy = vi.spyOn(client, "invalidateQueries").mockImplementation((filters) => {
+      if (filters?.queryKey === usageKeys.all) {
+        return new Promise<void>((resolve) => {
+          usageResolvers.push(resolve);
+        }) as ReturnType<typeof client.invalidateQueries>;
+      }
+      return Promise.resolve() as ReturnType<typeof client.invalidateQueries>;
+    });
+
+    render(
+      <QueryClientProvider client={client}>
+        <Harness />
+      </QueryClientProvider>
+    );
+
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    const requestHandler = handlers.get(gatewayEventNames.requestSignal)!;
+    const emitComplete = (traceId: string) =>
+      requestHandler({
+        payload: {
+          phase: "complete",
+          trace_id: traceId,
+          cli_key: "codex",
+          session_id: null,
+          requested_model: null,
+          ts: 1,
+        },
+      });
+    const countInvalidationsFor = (queryKey: readonly unknown[]) =>
+      invalidateSpy.mock.calls.filter(([filters]) => filters?.queryKey === queryKey).length;
+
+    emitComplete("t-1");
+    await vi.advanceTimersByTimeAsync(1000);
+    await Promise.resolve();
+
+    expect(countInvalidationsFor(usageKeys.all)).toBe(1);
+    expect(countInvalidationsFor(providerLimitUsageKeys.all)).toBe(1);
+
+    emitComplete("t-2");
+    emitComplete("t-3");
+    emitComplete("t-4");
+    await vi.advanceTimersByTimeAsync(1000);
+    await Promise.resolve();
+
+    expect(countInvalidationsFor(usageKeys.all)).toBe(1);
+    expect(countInvalidationsFor(providerLimitUsageKeys.all)).toBe(1);
+
+    usageResolvers.shift()?.();
+    for (let i = 0; i < 5; i += 1) {
+      await Promise.resolve();
+    }
+
+    expect(countInvalidationsFor(usageKeys.all)).toBe(2);
+    expect(countInvalidationsFor(providerLimitUsageKeys.all)).toBe(2);
 
     vi.useRealTimers();
   });

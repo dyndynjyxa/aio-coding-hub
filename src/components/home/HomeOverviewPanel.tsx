@@ -485,10 +485,7 @@ export function HomeOverviewPanel({
     const labelByKey = new Map(HOME_OVERVIEW_TABS.map((item) => [item.key, item.label]));
     return sessionsTabsOrder.map((key) => ({ key, label: labelByKey.get(key) ?? key }));
   }, [sessionsTabsOrder]);
-  const legacySessionsTabs = useMemo(
-    () => sessionsTabs.filter((item) => item.key !== "oauthQuota"),
-    [sessionsTabs]
-  );
+  const legacySessionsTabs = sessionsTabs;
   const logsPrimaryTabs = useMemo(
     () =>
       sessionsTabs.filter(
@@ -586,6 +583,25 @@ export function HomeOverviewPanel({
     />
   );
 
+  const oauthQuotaPanelContent = (
+    <Suspense fallback={<OverviewPanelFallback />}>
+      <LazyHomeOAuthQuotaPanelContent
+        rows={displayedOAuthQuotaRows}
+        hasProviders={displayedOAuthQuotaVisible}
+        hasRefreshed={displayedOAuthQuotaHasRefreshed}
+        refreshing={displayedOAuthQuotaRefreshing}
+        onRefresh={() => {
+          if (oauthQuotaPreviewActive) return;
+          void onRefreshOAuthQuota();
+        }}
+        onRefreshRow={(providerId) => {
+          if (oauthQuotaPreviewActive) return;
+          void onRefreshOAuthQuotaRow(providerId);
+        }}
+      />
+    </Suspense>
+  );
+
   const overviewInfoPanel = (
     <Card padding="sm" className="flex h-full min-h-0 flex-1 flex-col">
       <div className="shrink-0">
@@ -632,7 +648,9 @@ export function HomeOverviewPanel({
               refreshing={providerLimitRefreshing}
             />
           </Suspense>
-        ) : sessionsTab === "oauthQuota" ? null : displayedCircuits.length === 0 ? (
+        ) : sessionsTab === "oauthQuota" ? (
+          oauthQuotaPanelContent
+        ) : displayedCircuits.length === 0 ? (
           <EmptyState title="当前没有熔断中的 Provider" />
         ) : (
           <div className="h-full overflow-y-auto pr-1">
@@ -774,22 +792,7 @@ export function HomeOverviewPanel({
             </div>
           )
         ) : sessionsTab === "oauthQuota" ? (
-          <Suspense fallback={<OverviewPanelFallback />}>
-            <LazyHomeOAuthQuotaPanelContent
-              rows={displayedOAuthQuotaRows}
-              hasProviders={displayedOAuthQuotaVisible}
-              hasRefreshed={displayedOAuthQuotaHasRefreshed}
-              refreshing={displayedOAuthQuotaRefreshing}
-              onRefresh={() => {
-                if (oauthQuotaPreviewActive) return;
-                void onRefreshOAuthQuota();
-              }}
-              onRefreshRow={(providerId) => {
-                if (oauthQuotaPreviewActive) return;
-                void onRefreshOAuthQuotaRow(providerId);
-              }}
-            />
-          </Suspense>
+          oauthQuotaPanelContent
         ) : (
           <Suspense fallback={<OverviewPanelFallback />}>
             <LazyHomeWorkspaceConfigPanel

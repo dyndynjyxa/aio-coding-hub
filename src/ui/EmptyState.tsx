@@ -15,7 +15,7 @@ export type EmptyStateProps = {
 const VARIANT_CLASS: Record<EmptyStateVariant, string> = {
   default: "",
   dashed:
-    "rounded-xl border border-dashed border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 p-6",
+    "rounded-xl border border-dashed border-border bg-muted p-6",
 };
 
 export function EmptyState({
@@ -35,10 +35,10 @@ export function EmptyState({
         className
       )}
     >
-      {icon ? <div className="mb-3 text-slate-400 dark:text-slate-500">{icon}</div> : null}
-      <div className="text-sm text-slate-500 dark:text-slate-400">{title}</div>
+      {icon ? <div className="mb-3 text-muted-foreground">{icon}</div> : null}
+      <div className="text-sm text-muted-foreground">{title}</div>
       {description ? (
-        <div className="mt-1 text-sm text-slate-500 dark:text-slate-400">{description}</div>
+        <div className="mt-1 text-sm text-muted-foreground">{description}</div>
       ) : null}
       {action ? <div className="mt-3">{action}</div> : null}
     </div>

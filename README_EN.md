@@ -23,6 +23,7 @@
 |---------|------------------------------|
 | Each CLI needs separate API config | **Unified gateway** — all CLIs route through `127.0.0.1` |
 | Upstream goes down, requests fail | **Smart failover** — auto-switch providers with circuit breaker |
+| Different scenarios need different provider sets | **Sort templates** — multiple sets, per-CLI activation |
 | No idea how many tokens or how much it costs | **Full observability** — trace, usage stats, cost estimation |
 | Different projects need different Prompts / MCP configs | **Workspace isolation** — per-project CLI config, one-click switch |
 
@@ -49,6 +50,7 @@
 ### Gateway Proxy
 
 - Single entry point for Claude Code / Codex / Gemini CLI
+- Per-CLI proxy toggle on Home, one-click on/off
 - Custom model name mapping
 - Auto-fix for SSE / JSON responses
 
@@ -57,13 +59,17 @@
 - Multi-provider priority ordering + automatic failover
 - Circuit breaker (configurable threshold & recovery time)
 - Sticky session for consistent provider routing
+- Sort templates: multiple provider sets, activated per CLI
+- Drag-to-reorder, per-provider toggle, instant switching
 
 ### Usage & Observability
 
 - Token usage analytics (by CLI / provider / model)
 - Cost estimation + auto-synced model pricing
 - Request trace & real-time console logs
-- Heatmap & cache trend charts
+- Request heatmap (time-of-day distribution)
+- Cache trend chart: per-provider hit rate, 60% warning line
+- Availability: provider timeline dots, 15s auto-refresh
 
 ### Workspace Management
 

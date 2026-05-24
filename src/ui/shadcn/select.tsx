@@ -13,8 +13,8 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
     <select
       ref={ref}
       className={cn(
-        "h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm outline-none transition dark:bg-slate-800 dark:border-slate-600 dark:text-slate-100 dark:shadow-none",
-        "focus:border-accent focus:ring-2 focus:ring-accent/20 dark:focus:border-accent dark:focus:ring-accent/20",
+        "h-10 w-full rounded-lg border border-input bg-card px-3 text-sm text-foreground shadow-sm outline-none transition",
+        "focus:border-ring focus:ring-2 focus:ring-ring/20",
         "disabled:cursor-not-allowed disabled:opacity-50",
         mono ? "font-mono" : null,
         className

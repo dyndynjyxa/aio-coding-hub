@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
-import { envConflictsCheck } from "../envConflicts";
+import { envConflictsCheck, normalizeEnvConflictCliKey } from "../envConflicts";
 
 vi.mock("../../../generated/bindings", async () => {
   const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
@@ -51,7 +51,53 @@ describe("services/cli/envConflicts", () => {
       data: [] as any,
     });
 
-    await envConflictsCheck("codex");
+    await envConflictsCheck(" CODEX " as any);
     expect(commands.envConflictsCheck).toHaveBeenCalledWith("codex");
+  });
+
+  it("normalizes env conflict result rows", async () => {
+    vi.mocked(commands.envConflictsCheck).mockResolvedValueOnce({
+      status: "ok",
+      data: [
+        {
+          var_name: "  OPENAI_API_KEY  ",
+          source_type: "file",
+          source_path: "  /tmp/.zshrc:1  ",
+        },
+      ],
+    });
+
+    await expect(envConflictsCheck("codex")).resolves.toEqual([
+      {
+        var_name: "OPENAI_API_KEY",
+        source_type: "file",
+        source_path: "/tmp/.zshrc:1",
+      },
+    ]);
+  });
+
+  it("rejects invalid cli keys before generated commands", async () => {
+    expect(normalizeEnvConflictCliKey(" gemini ")).toBe("gemini");
+    expect(() => normalizeEnvConflictCliKey("npm")).toThrow("invalid cliKey=npm");
+
+    await expect(envConflictsCheck("npm" as any)).rejects.toThrow("SEC_INVALID_INPUT");
+    expect(commands.envConflictsCheck).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid env conflict result rows", async () => {
+    vi.mocked(commands.envConflictsCheck).mockResolvedValueOnce({
+      status: "ok",
+      data: [
+        {
+          var_name: "OPENAI_API_KEY",
+          source_type: "profile",
+          source_path: "/tmp/.zshrc:1",
+        },
+      ],
+    });
+
+    await expect(envConflictsCheck("codex")).rejects.toThrow(
+      "invalid env conflict source_type=profile"
+    );
   });
 });

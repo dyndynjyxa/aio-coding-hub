@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 use super::claude_json::build_claude_config_json;
 use super::codex_toml::build_codex_config_toml;
-use super::fs::{read_optional_file, write_file_atomic_if_changed};
+use super::fs::{read_optional_file_with_max_len, write_file_atomic_if_changed};
 use super::gemini_json::build_gemini_settings_json;
 use super::manifest::{backup_for_enable, read_manifest, write_manifest};
 use super::paths::{mcp_target_path, validate_cli_key};
@@ -64,7 +64,7 @@ pub fn sync_cli<R: tauri::Runtime>(
     let target_path = mcp_target_path(app, cli_key)?;
     manifest.file.path = target_path.to_string_lossy().to_string();
 
-    let current = read_optional_file(&target_path)?;
+    let current = read_optional_file_with_max_len(&target_path, super::MCP_SYNC_TARGET_MAX_BYTES)?;
     let managed_keys = manifest.managed_keys.clone();
 
     let next_bytes = build_next_bytes(cli_key, current, &managed_keys, servers)?;

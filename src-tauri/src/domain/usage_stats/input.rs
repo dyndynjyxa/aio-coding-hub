@@ -1,3 +1,4 @@
+use chrono::NaiveDate;
 use rusqlite::Connection;
 use serde::Deserialize;
 
@@ -9,6 +10,29 @@ pub struct UsageQueryParams {
     pub end_ts: Option<i64>,
     pub cli_key: Option<String>,
     pub provider_id: Option<i64>,
+    pub folder_keys: Option<Vec<String>>,
+    #[serde(
+        rename = "excludeCx2CcGatewayBridge",
+        alias = "excludeCx2ccGatewayBridge"
+    )]
+    #[specta(rename = "excludeCx2CcGatewayBridge")]
+    pub exclude_cx2cc_gateway_bridge: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageDayDetailParams {
+    pub day: String,
+    pub cli_key: Option<String>,
+    pub provider_id: Option<i64>,
+    pub folder_limit: Option<u32>,
+    pub folder_keys: Option<Vec<String>>,
+    #[serde(
+        rename = "excludeCx2CcGatewayBridge",
+        alias = "excludeCx2ccGatewayBridge"
+    )]
+    #[specta(rename = "excludeCx2CcGatewayBridge")]
+    pub exclude_cx2cc_gateway_bridge: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -36,6 +60,7 @@ pub(super) enum UsageScopeV2 {
     Cli,
     Provider,
     Model,
+    Day,
 }
 
 pub(super) fn parse_scope_v2(input: &str) -> crate::shared::error::AppResult<UsageScopeV2> {
@@ -43,6 +68,7 @@ pub(super) fn parse_scope_v2(input: &str) -> crate::shared::error::AppResult<Usa
         "cli" => Ok(UsageScopeV2::Cli),
         "provider" => Ok(UsageScopeV2::Provider),
         "model" => Ok(UsageScopeV2::Model),
+        "day" => Ok(UsageScopeV2::Day),
         _ => Err(format!("SEC_INVALID_INPUT: unknown scope={input}").into()),
     }
 }
@@ -93,6 +119,38 @@ pub(super) fn normalize_provider_id_filter(
     Ok(None)
 }
 
+pub(super) fn normalize_day(input: &str) -> crate::shared::error::AppResult<String> {
+    let trimmed = input.trim();
+    let day = NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
+        .map_err(|_| format!("SEC_INVALID_INPUT: invalid day={trimmed}"))?;
+    Ok(day.format("%Y-%m-%d").to_string())
+}
+
+pub(super) fn normalize_folder_keys(
+    folder_keys: Option<&[String]>,
+) -> crate::shared::error::AppResult<Option<Vec<String>>> {
+    let Some(folder_keys) = folder_keys else {
+        return Ok(None);
+    };
+
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for raw in folder_keys {
+        let key = raw.trim();
+        if key.is_empty() {
+            continue;
+        }
+        if seen.insert(key.to_string()) {
+            out.push(key.to_string());
+        }
+    }
+
+    if out.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(out))
+}
+
 /// Validated and resolved query parameters ready for SQL execution.
 pub(super) struct ResolvedQueryParams<'a> {
     pub period: UsagePeriodV2,
@@ -100,6 +158,8 @@ pub(super) struct ResolvedQueryParams<'a> {
     pub end_ts: Option<i64>,
     pub cli_key: Option<&'a str>,
     pub provider_id: Option<i64>,
+    pub folder_keys: Option<Vec<String>>,
+    pub exclude_cx2cc_gateway_bridge: bool,
 }
 
 /// Parse, validate, and compute bounds from raw [`UsageQueryParams`].
@@ -116,11 +176,15 @@ pub(super) fn resolve_query_params<'a>(
         super::compute_bounds_v2(conn, period, params.start_ts, params.end_ts)?;
     let cli_key = normalize_cli_filter(params.cli_key.as_deref())?;
     let provider_id = normalize_provider_id_filter(params.provider_id)?;
+    let folder_keys = normalize_folder_keys(params.folder_keys.as_deref())?;
+    let exclude_cx2cc_gateway_bridge = params.exclude_cx2cc_gateway_bridge.unwrap_or(false);
     Ok(ResolvedQueryParams {
         period,
         start_ts,
         end_ts,
         cli_key,
         provider_id,
+        folder_keys,
+        exclude_cx2cc_gateway_bridge,
     })
 }

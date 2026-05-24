@@ -23,6 +23,7 @@
 |------|--------------------------|
 | 每个 CLI 都要单独配置 API | **统一网关** — 所有 CLI 走 `127.0.0.1` 本机入口 |
 | 上游不稳定时请求失败 | **智能 Failover** — 自动切换供应商，熔断保护 |
+| 不同场景需要不同的供应商组合 | **排序模板** — 多套组合按 CLI 激活，一键切换 |
 | 不知道用了多少 Token 和花了多少钱 | **全链路可观测** — Trace 追踪、用量统计、花费估算 |
 | 不同项目需要不同的 Prompts / MCP 配置 | **工作区隔离** — 按项目管理 CLI 配置，一键切换 |
 
@@ -49,6 +50,7 @@
 ### 网关代理
 
 - 单一入口代理 Claude Code / Codex / Gemini CLI 请求
+- 首页每个 CLI 独立代理开关，一键启停
 - 自定义模型名称映射
 - SSE / JSON 响应自动修复
 
@@ -57,13 +59,17 @@
 - 多供应商优先级排序 + 自动故障转移
 - 熔断器模式（可配置阈值与恢复时间）
 - Sticky Session 保持会话粘滞
+- 排序模板：多套供应商组合，三个 CLI 各自激活
+- 模板内拖拽排序、独立 enabled 开关、切换即时生效
 
 ### 用量与可观测
 
 - Token 用量统计（按 CLI / 供应商 / 模型维度）
 - 花费估算 + 模型价格自动同步
 - 请求 Trace 与实时控制台日志
-- 热力图与缓存趋势图
+- 请求热力图（按时段分布）
+- 缓存走势图：分供应商命中率折线，60% 预警线
+- 可用率：供应商时间线点阵，15s 自动刷新
 
 ### 工作区管理
 
@@ -163,7 +169,7 @@ sudo xattr -cr /Applications/"AIO Coding Hub.app"
 **Linux (Ubuntu/Debian)：**
 ```bash
 sudo apt-get update
-sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+sudo apt-get install -y libasound2-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 ```
 
 </details>

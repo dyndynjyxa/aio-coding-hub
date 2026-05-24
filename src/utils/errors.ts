@@ -1,17 +1,75 @@
-export function formatUnknownError(err: unknown) {
-  if (typeof err === "string") return err;
-  if (err instanceof Error && err.message) return err.message;
-  if (err && typeof err === "object") {
-    const maybeMessage = (err as { message?: unknown }).message;
-    if (typeof maybeMessage === "string" && maybeMessage.trim()) return maybeMessage;
+const ERROR_TEXT_MAX_CHARS = 4096;
+const ERROR_FIELD_STRING_MAX_CHARS = 512;
+const ERROR_OBJECT_MAX_DEPTH = 4;
+const ERROR_OBJECT_MAX_ARRAY_ITEMS = 25;
+const ERROR_OBJECT_MAX_KEYS = 25;
+
+function truncateErrorText(value: string, maxChars = ERROR_TEXT_MAX_CHARS) {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars)}[Truncated ${value.length - maxChars} chars]`;
+}
+
+function sanitizeErrorValue(value: unknown, seen: WeakSet<object>, depth: number): unknown {
+  if (value == null) return value;
+  if (typeof value === "string") return truncateErrorText(value, ERROR_FIELD_STRING_MAX_CHARS);
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "bigint") return value.toString();
+  if (typeof value === "function") return "[Function]";
+  if (typeof value !== "object") return String(value);
+  if (seen.has(value)) return "[Circular]";
+  if (depth >= ERROR_OBJECT_MAX_DEPTH) return "[Truncated]";
+
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    const items = value
+      .slice(0, ERROR_OBJECT_MAX_ARRAY_ITEMS)
+      .map((item) => sanitizeErrorValue(item, seen, depth + 1));
+    if (value.length > ERROR_OBJECT_MAX_ARRAY_ITEMS) {
+      items.push(`[Truncated ${value.length - ERROR_OBJECT_MAX_ARRAY_ITEMS} items]`);
+    }
+    return items;
+  }
+
+  const output: Record<string, unknown> = {};
+  const keys = Object.keys(value).slice(0, ERROR_OBJECT_MAX_KEYS);
+  for (const key of keys) {
     try {
-      return JSON.stringify(err);
+      output[key] = sanitizeErrorValue((value as Record<string, unknown>)[key], seen, depth + 1);
     } catch {
-      // ignore
+      output[key] = "[Unreadable]";
     }
   }
+  const omittedKeys = Object.keys(value).length - ERROR_OBJECT_MAX_KEYS;
+  if (omittedKeys > 0) {
+    output.__truncated__ = `${omittedKeys} keys truncated`;
+  }
+  return output;
+}
+
+function stringifyErrorObject(value: object) {
   try {
-    return String(err);
+    const serialized = JSON.stringify(sanitizeErrorValue(value, new WeakSet(), 0));
+    if (serialized) return truncateErrorText(serialized);
+  } catch {
+    // Fall through to String below.
+  }
+  return null;
+}
+
+export function formatUnknownError(err: unknown) {
+  if (typeof err === "string") return truncateErrorText(err);
+  if (err instanceof Error && err.message) return truncateErrorText(err.message);
+  if (err && typeof err === "object") {
+    const maybeMessage = (err as { message?: unknown }).message;
+    if (typeof maybeMessage === "string" && maybeMessage.trim()) {
+      return truncateErrorText(maybeMessage);
+    }
+    const serialized = stringifyErrorObject(err);
+    if (serialized) return serialized;
+  }
+  try {
+    return truncateErrorText(String(err));
   } catch {
     return "未知错误";
   }

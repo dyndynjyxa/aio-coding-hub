@@ -22,11 +22,11 @@ export function PageHeader({ title, subtitle, actions }: PageHeaderProps) {
         <div className="h-6 w-1 shrink-0 rounded-full bg-gradient-to-b from-accent to-accent-secondary sm:h-8" />
         <div className="min-w-0">
           {/* Responsive title size */}
-          <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100 sm:text-2xl">
+          <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
             {title}
           </h1>
           {subtitle ? (
-            <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-400 sm:mt-1 sm:text-sm">
+            <p className="mt-0.5 text-xs text-muted-foreground sm:mt-1 sm:text-sm">
               {subtitle}
             </p>
           ) : null}

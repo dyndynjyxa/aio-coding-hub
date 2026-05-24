@@ -374,6 +374,15 @@ fn test_has_column(conn: &Connection, table: &str, column: &str) -> bool {
     false
 }
 
+fn test_has_index(conn: &Connection, index: &str) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1 LIMIT 1",
+        [index],
+        |_| Ok(true),
+    )
+    .unwrap_or(false)
+}
+
 #[test]
 fn strict_v29_patch_adds_sort_mode_provider_enabled_column() {
     let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
@@ -901,6 +910,21 @@ fn baseline_v25_creates_complete_schema_for_fresh_install() {
 
     // Verify sort_mode_providers.enabled from ensure patch
     assert!(test_has_column(&conn, "sort_mode_providers", "enabled"));
+
+    // Verify request log read-path indexes from ensure patches
+    assert!(test_has_index(
+        &conn,
+        "idx_request_logs_cli_path_created_at_ms_id"
+    ));
+    assert!(test_has_index(
+        &conn,
+        "idx_request_logs_cli_created_at_ms_id"
+    ));
+    assert!(test_has_index(
+        &conn,
+        "idx_request_logs_visible_created_at_ms_id"
+    ));
+    assert!(test_has_index(&conn, "idx_request_logs_cli_id"));
 
     // Verify prompts was migrated to workspace_id
     assert!(test_has_column(&conn, "prompts", "workspace_id"));

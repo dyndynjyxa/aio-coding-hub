@@ -42,10 +42,13 @@ import {
   computeEffectiveInputTokens,
   computeStatusBadge,
   FastModeBadge,
+  formatClaudeModelMappingText,
   FolderBadge,
   FreeBadge,
   getErrorCodeLabel,
+  hasClaudeModelMappingSpecialSetting,
   hasPriorityServiceTierSpecialSetting,
+  resolveClaudeModelMappingFromSpecialSettings,
   resolveLiveTraceDurationMs,
   resolveLiveTraceProvider,
   SessionReuseBadge,
@@ -113,10 +116,15 @@ function mergeTraceWithRequestLog(
   // which fields to backfill from the persisted record.
   const requestLogInProgress = isPersistedRequestLogInProgress(requestLog);
   if (!summary && requestLogInProgress) {
+    const claudeModelMapping = resolveClaudeModelMappingFromSpecialSettings(
+      requestLog.special_settings_json,
+      requestLog.final_provider_id
+    );
     return {
       ...trace,
       session_id: trace.session_id ?? requestLog.session_id ?? null,
       requested_model: trace.requested_model ?? requestLog.requested_model ?? null,
+      claude_model_mapping: trace.claude_model_mapping ?? claudeModelMapping,
       last_seen_ms: Math.max(trace.last_seen_ms, requestLogCreatedAtMs(requestLog)),
     };
   }
@@ -152,6 +160,12 @@ function mergeTraceWithRequestLog(
     ...trace,
     session_id: trace.session_id ?? requestLog.session_id ?? null,
     requested_model: trace.requested_model ?? requestLog.requested_model ?? null,
+    claude_model_mapping: hasClaudeModelMappingSpecialSetting(requestLog.special_settings_json)
+      ? resolveClaudeModelMappingFromSpecialSettings(
+          requestLog.special_settings_json,
+          requestLog.final_provider_id
+        )
+      : (trace.claude_model_mapping ?? null),
     summary: mergedSummary,
     last_seen_ms: Math.max(trace.last_seen_ms, requestLogCreatedAtMs(requestLog)),
   };
@@ -215,8 +229,10 @@ const RequestLogCard = memo(function RequestLogCard({
 
   const providerTitle = providerText;
 
-  const modelText =
-    log.requested_model && log.requested_model.trim() ? log.requested_model.trim() : "未知";
+  const modelText = formatClaudeModelMappingText(
+    log.requested_model,
+    resolveClaudeModelMappingFromSpecialSettings(log.special_settings_json, log.final_provider_id)
+  );
 
   const cliLabel = cliShortLabel(log.cli_key);
   const cliTone = cliBadgeToneStatic(log.cli_key);

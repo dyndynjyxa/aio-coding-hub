@@ -1,28 +1,35 @@
 //! WSL manifest (config lifecycle): backup, restore, and startup repair.
 
 use crate::shared::error::AppResult;
+use crate::shared::fs::{read_file_with_max_len, read_optional_file_with_max_len};
 
 use super::detection::{resolve_wsl_codex_home_host_path, resolve_wsl_home_unc};
 use super::shell::write_file_synced;
 use super::types::{WslCliBackup, WslDistroManifest};
 
-pub(super) fn wsl_manifests_dir(app: &tauri::AppHandle) -> AppResult<std::path::PathBuf> {
+pub(super) const WSL_MANIFEST_MAX_BYTES: usize = 256 * 1024;
+const WSL_MANIFEST_FILE_COUNT_MAX: usize = 256;
+pub(super) const WSL_CLIENT_CONFIG_MAX_BYTES: usize = 1024 * 1024;
+
+pub(super) fn wsl_manifests_dir<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> AppResult<std::path::PathBuf> {
     Ok(crate::infra::app_paths::app_data_dir(app)?.join("wsl-manifests"))
 }
 
-pub(super) fn wsl_manifest_path(
-    app: &tauri::AppHandle,
+pub(super) fn wsl_manifest_path<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     distro: &str,
 ) -> AppResult<std::path::PathBuf> {
     Ok(wsl_manifests_dir(app)?.join(format!("{distro}.json")))
 }
 
-pub(super) fn read_wsl_manifest(
-    app: &tauri::AppHandle,
+pub(super) fn read_wsl_manifest<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     distro: &str,
 ) -> AppResult<Option<WslDistroManifest>> {
     let path = wsl_manifest_path(app, distro)?;
-    let Some(content) = crate::shared::fs::read_optional_file(&path)? else {
+    let Some(content) = read_optional_file_with_max_len(&path, WSL_MANIFEST_MAX_BYTES)? else {
         return Ok(None);
     };
     let manifest: WslDistroManifest = serde_json::from_slice(&content)
@@ -30,8 +37,8 @@ pub(super) fn read_wsl_manifest(
     Ok(Some(manifest))
 }
 
-pub(super) fn write_wsl_manifest(
-    app: &tauri::AppHandle,
+pub(super) fn write_wsl_manifest<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     distro: &str,
     manifest: &WslDistroManifest,
 ) -> AppResult<()> {
@@ -41,7 +48,10 @@ pub(super) fn write_wsl_manifest(
     crate::shared::fs::write_file_atomic(&path, json.as_bytes())
 }
 
-pub(super) fn delete_wsl_manifest(app: &tauri::AppHandle, distro: &str) -> AppResult<()> {
+pub(super) fn delete_wsl_manifest<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    distro: &str,
+) -> AppResult<()> {
     let path = wsl_manifest_path(app, distro)?;
     if path.exists() {
         std::fs::remove_file(&path)
@@ -50,12 +60,15 @@ pub(super) fn delete_wsl_manifest(app: &tauri::AppHandle, distro: &str) -> AppRe
     Ok(())
 }
 
-pub(super) fn read_all_wsl_manifests(app: &tauri::AppHandle) -> AppResult<Vec<WslDistroManifest>> {
+pub(super) fn read_all_wsl_manifests<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> AppResult<Vec<WslDistroManifest>> {
     let dir = wsl_manifests_dir(app)?;
     if !dir.exists() {
         return Ok(Vec::new());
     }
     let mut manifests = Vec::new();
+    let mut json_files_seen = 0_usize;
     let entries =
         std::fs::read_dir(&dir).map_err(|e| format!("failed to read wsl-manifests dir: {e}"))?;
     for entry in entries {
@@ -64,9 +77,21 @@ pub(super) fn read_all_wsl_manifests(app: &tauri::AppHandle) -> AppResult<Vec<Ws
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
         }
-        let bytes = match std::fs::read(&path) {
+        json_files_seen += 1;
+        if json_files_seen > WSL_MANIFEST_FILE_COUNT_MAX {
+            tracing::warn!(
+                "too many WSL manifest files in {} (max {})",
+                dir.display(),
+                WSL_MANIFEST_FILE_COUNT_MAX
+            );
+            break;
+        }
+        let bytes = match read_file_with_max_len(&path, WSL_MANIFEST_MAX_BYTES) {
             Ok(b) => b,
-            Err(_) => continue,
+            Err(e) => {
+                tracing::warn!("failed to read WSL manifest {}: {e}", path.display());
+                continue;
+            }
         };
         match serde_json::from_slice::<WslDistroManifest>(&bytes) {
             Ok(m) => manifests.push(m),
@@ -105,7 +130,10 @@ pub(super) fn read_wsl_current_values(
                 resolve_wsl_codex_home_host_path(distro).unwrap_or_else(|_| home.join(".codex"));
             // config.toml
             let toml_path = codex_home.join("config.toml");
-            let toml_content = std::fs::read_to_string(&toml_path).unwrap_or_default();
+            let toml_content = read_optional_utf8_file(&toml_path)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
             map.insert(
                 "preferred_auth_method".to_string(),
                 extract_toml_value(&toml_content, "preferred_auth_method"),
@@ -121,7 +149,10 @@ pub(super) fn read_wsl_current_values(
         }
         "gemini" => {
             let env_path = home.join(".gemini").join(".env");
-            let env_content = std::fs::read_to_string(&env_path).unwrap_or_default();
+            let env_content = read_optional_utf8_file(&env_path)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
             map.insert(
                 "GOOGLE_GEMINI_BASE_URL".to_string(),
                 extract_env_value(&env_content, "GOOGLE_GEMINI_BASE_URL"),
@@ -142,9 +173,11 @@ fn read_json_nested_str_map(
     path: &std::path::Path,
     key: &str,
 ) -> std::collections::HashMap<String, String> {
-    let bytes = match std::fs::read(path) {
-        Ok(b) => b,
-        Err(_) => return std::collections::HashMap::new(),
+    let Some(bytes) = read_optional_file_with_max_len(path, WSL_CLIENT_CONFIG_MAX_BYTES)
+        .ok()
+        .flatten()
+    else {
+        return std::collections::HashMap::new();
     };
     let val: serde_json::Value = match serde_json::from_slice(&bytes) {
         Ok(v) => v,
@@ -159,10 +192,36 @@ fn read_json_nested_str_map(
 }
 
 /// Read a top-level string value from a JSON file.
-fn read_json_top_level_str(path: &std::path::Path, key: &str) -> Option<String> {
-    let bytes = std::fs::read(path).ok()?;
+pub(super) fn read_json_top_level_str(path: &std::path::Path, key: &str) -> Option<String> {
+    let bytes = read_optional_file_with_max_len(path, WSL_CLIENT_CONFIG_MAX_BYTES)
+        .ok()
+        .flatten()?;
     let val: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     val.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
+}
+
+fn read_optional_utf8_file(path: &std::path::Path) -> AppResult<Option<String>> {
+    let Some(bytes) = read_optional_file_with_max_len(path, WSL_CLIENT_CONFIG_MAX_BYTES)? else {
+        return Ok(None);
+    };
+    let text = String::from_utf8(bytes).map_err(|e| {
+        format!(
+            "SEC_INVALID_INPUT: invalid UTF-8 in {}: {e}",
+            path.display()
+        )
+    })?;
+    Ok(Some(text))
+}
+
+fn read_existing_utf8_file(path: &std::path::Path) -> AppResult<String> {
+    let bytes = read_file_with_max_len(path, WSL_CLIENT_CONFIG_MAX_BYTES)?;
+    String::from_utf8(bytes).map_err(|e| {
+        format!(
+            "SEC_INVALID_INPUT: invalid UTF-8 in {}: {e}",
+            path.display()
+        )
+        .into()
+    })
 }
 
 /// Extract a value from TOML like `key = "value"`.
@@ -275,8 +334,7 @@ pub(super) fn restore_wsl_cli_backup(
             if !path.exists() {
                 return Ok(());
             }
-            let bytes = std::fs::read(&path)
-                .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+            let bytes = read_file_with_max_len(&path, WSL_CLIENT_CONFIG_MAX_BYTES)?;
             let mut data: serde_json::Value = serde_json::from_slice(&bytes)
                 .map_err(|e| format!("failed to parse {}: {e}", path.display()))?;
 
@@ -304,8 +362,7 @@ pub(super) fn restore_wsl_cli_backup(
             // config.toml
             let toml_path = codex_home.join("config.toml");
             if toml_path.exists() {
-                let content = std::fs::read_to_string(&toml_path)
-                    .map_err(|e| format!("failed to read {}: {e}", toml_path.display()))?;
+                let content = read_existing_utf8_file(&toml_path)?;
                 let restored = restore_codex_config_toml(&content, backup)?;
                 write_file_synced(&toml_path, restored.as_bytes())?;
             }
@@ -313,8 +370,7 @@ pub(super) fn restore_wsl_cli_backup(
             // auth.json
             let auth_path = codex_home.join("auth.json");
             if auth_path.exists() {
-                let bytes = std::fs::read(&auth_path)
-                    .map_err(|e| format!("failed to read {}: {e}", auth_path.display()))?;
+                let bytes = read_file_with_max_len(&auth_path, WSL_CLIENT_CONFIG_MAX_BYTES)?;
                 let mut data: serde_json::Value = serde_json::from_slice(&bytes)
                     .map_err(|e| format!("failed to parse {}: {e}", auth_path.display()))?;
 
@@ -342,8 +398,7 @@ pub(super) fn restore_wsl_cli_backup(
             if !env_path.exists() {
                 return Ok(());
             }
-            let content = std::fs::read_to_string(&env_path)
-                .map_err(|e| format!("failed to read {}: {e}", env_path.display()))?;
+            let content = read_existing_utf8_file(&env_path)?;
             let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
 
             for key in ["GOOGLE_GEMINI_BASE_URL", "GEMINI_API_KEY"] {
@@ -373,7 +428,7 @@ pub(super) fn restore_wsl_cli_backup(
 }
 
 /// Restore WSL client configurations using saved manifests.
-pub fn restore_wsl_clients(app: &tauri::AppHandle) -> AppResult<()> {
+pub fn restore_wsl_clients<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<()> {
     let manifests = read_all_wsl_manifests(app)?;
     if manifests.is_empty() {
         return Ok(());
@@ -421,7 +476,7 @@ pub fn restore_wsl_clients(app: &tauri::AppHandle) -> AppResult<()> {
 // ── Startup repair ──
 
 /// Check for stale manifests at startup and restore if the gateway is dead.
-pub fn startup_repair_wsl_manifests(app: &tauri::AppHandle) -> AppResult<()> {
+pub fn startup_repair_wsl_manifests<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<()> {
     let manifests = read_all_wsl_manifests(app)?;
     if manifests.is_empty() {
         return Ok(());

@@ -165,6 +165,44 @@ fn settings_set_blocks_when_settings_json_is_corrupted() {
 }
 
 #[test]
+fn settings_read_rejects_oversized_settings_json() {
+    let app = support::TestApp::new();
+    let handle = app.handle();
+
+    let app_data_dir =
+        aio_coding_hub_lib::test_support::app_data_dir(&handle).expect("app data dir");
+    std::fs::create_dir_all(&app_data_dir).expect("create app data dir");
+    let settings_path = app_data_dir.join("settings.json");
+    std::fs::write(&settings_path, vec![b'x'; 1024 * 1024 + 1]).expect("write oversized settings");
+
+    let err =
+        aio_coding_hub_lib::test_support::settings_get_json(&handle).expect_err("read should fail");
+    let err_text = err.to_string();
+    assert!(
+        err_text.contains("too large"),
+        "unexpected error: {err_text}"
+    );
+}
+
+#[test]
+fn settings_write_rejects_oversized_serialized_settings_json() {
+    let app = support::TestApp::new();
+    let handle = app.handle();
+
+    let mut settings =
+        aio_coding_hub_lib::test_support::settings_get_json(&handle).expect("read defaults");
+    settings["gateway_custom_listen_address"] = serde_json::json!("x".repeat(1024 * 1024 + 1));
+
+    let err = aio_coding_hub_lib::test_support::settings_set_json(&handle, settings)
+        .expect_err("oversized serialized settings should fail");
+    let err_text = err.to_string();
+    assert!(
+        err_text.contains("settings.json too large"),
+        "unexpected error: {err_text}"
+    );
+}
+
+#[test]
 fn gateway_check_port_available_fails_when_settings_json_is_corrupted() {
     let app = support::TestApp::new();
     let handle = app.handle();
@@ -348,6 +386,111 @@ fn settings_set_via_command_requires_proxy_url_when_enabled() {
     let err_text = err.to_string();
     assert!(
         err_text.contains("upstream_proxy_url cannot be empty"),
+        "unexpected error: {err_text}"
+    );
+}
+
+#[test]
+fn settings_set_via_command_rejects_oversized_upstream_proxy_username() {
+    let app = support::TestApp::new();
+    let handle = app.handle();
+
+    let mut update = settings_command_update_json(38000);
+    update["upstreamProxyUsername"] = serde_json::json!("x".repeat(257));
+
+    let err = aio_coding_hub_lib::test_support::settings_set_via_command_json(&handle, update)
+        .expect_err("oversized upstream proxy username should fail");
+    let err_text = err.to_string();
+    assert!(
+        err_text.contains("upstream_proxy_username must be <="),
+        "unexpected error: {err_text}"
+    );
+}
+
+#[test]
+fn settings_set_via_command_rejects_oversized_cx2cc_fallback_model() {
+    let app = support::TestApp::new();
+    let handle = app.handle();
+
+    let mut update = settings_command_update_json(38000);
+    update["cx2CcFallbackModelMain"] = serde_json::json!("x".repeat(129));
+
+    let err = aio_coding_hub_lib::test_support::settings_set_via_command_json(&handle, update)
+        .expect_err("oversized cx2cc fallback model should fail");
+    let err_text = err.to_string();
+    assert!(
+        err_text.contains("cx2cc_fallback_model_main must be <="),
+        "unexpected error: {err_text}"
+    );
+}
+
+#[test]
+fn settings_set_via_command_rejects_excessive_failover_product() {
+    let app = support::TestApp::new();
+    let handle = app.handle();
+
+    let mut update = settings_command_update_json(38000);
+    update["failoverMaxAttemptsPerProvider"] = serde_json::json!(20);
+    update["failoverMaxProvidersToTry"] = serde_json::json!(20);
+
+    let err = aio_coding_hub_lib::test_support::settings_set_via_command_json(&handle, update)
+        .expect_err("excessive failover product should fail");
+    let err_text = err.to_string();
+    assert!(
+        err_text.contains("failover limits too high"),
+        "unexpected error: {err_text}"
+    );
+}
+
+#[test]
+fn settings_set_via_command_rejects_invalid_custom_listen_address() {
+    let app = support::TestApp::new();
+    let handle = app.handle();
+
+    let mut update = settings_command_update_json(38000);
+    update["gatewayListenMode"] = serde_json::json!("custom");
+    update["gatewayCustomListenAddress"] = serde_json::json!("http://127.0.0.1:37123");
+
+    let err = aio_coding_hub_lib::test_support::settings_set_via_command_json(&handle, update)
+        .expect_err("invalid custom listen address should fail");
+    let err_text = err.to_string();
+    assert!(
+        err_text.contains("custom listen address must be host or host:port"),
+        "unexpected error: {err_text}"
+    );
+}
+
+#[test]
+fn settings_set_via_command_rejects_invalid_wsl_custom_host_address() {
+    let app = support::TestApp::new();
+    let handle = app.handle();
+
+    let mut update = settings_command_update_json(38000);
+    update["wslHostAddressMode"] = serde_json::json!("custom");
+    update["wslCustomHostAddress"] = serde_json::json!("127.0.0.1:37123");
+
+    let err = aio_coding_hub_lib::test_support::settings_set_via_command_json(&handle, update)
+        .expect_err("invalid WSL custom host address should fail");
+    let err_text = err.to_string();
+    assert!(
+        err_text.contains("custom host address"),
+        "unexpected error: {err_text}"
+    );
+}
+
+#[test]
+fn settings_set_via_command_rejects_invalid_update_releases_url() {
+    let app = support::TestApp::new();
+    let handle = app.handle();
+
+    let mut update = settings_command_update_json(38000);
+    update["updateReleasesUrl"] = serde_json::json!("ftp://example.invalid/releases");
+
+    let err = aio_coding_hub_lib::test_support::settings_set_via_command_json(&handle, update)
+        .expect_err("invalid update releases url should fail");
+    let err_text = err.to_string();
+    assert!(
+        err_text.contains("update_releases_url must use http or https"),
         "unexpected error: {err_text}"
     );
 }

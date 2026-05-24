@@ -1,13 +1,19 @@
 //! Usage: Check installed CLI versions against npm and run CLI updates.
 
+use crate::shared::http_body::read_text_with_limit;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
+use tokio::task::JoinHandle;
 
 const NPM_LATEST_TIMEOUT: Duration = Duration::from_secs(10);
 const NPM_INSTALL_TIMEOUT: Duration = Duration::from_secs(120);
+const NPM_INSTALL_OUTPUT_STREAM_LIMIT: usize = 32 * 1024;
+const NPM_INSTALL_OUTPUT_READ_CHUNK_SIZE: usize = 8 * 1024;
+const NPM_LATEST_RESPONSE_BODY_LIMIT: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -67,9 +73,14 @@ async fn fetch_latest_version(npm_package: &str) -> Result<String, String> {
         .error_for_status()
         .map_err(|e| format!("npm registry returned error: {e}"))?;
 
-    let payload: serde_json::Value = response
-        .json()
-        .await
+    let body = read_text_with_limit(
+        response,
+        NPM_LATEST_RESPONSE_BODY_LIMIT,
+        "npm registry response",
+    )
+    .await
+    .map_err(|e| format!("failed to read npm registry response: {e}"))?;
+    let payload: serde_json::Value = serde_json::from_str(&body)
         .map_err(|e| format!("failed to parse npm registry response: {e}"))?;
     payload
         .get("version")
@@ -139,9 +150,76 @@ pub async fn cli_check_latest_version(app: &tauri::AppHandle, cli_key: String) -
     }
 }
 
-fn join_command_output(stdout: &[u8], stderr: &[u8]) -> String {
-    let stdout = String::from_utf8_lossy(stdout).trim().to_string();
-    let stderr = String::from_utf8_lossy(stderr).trim().to_string();
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LimitedCommandOutput {
+    bytes: Vec<u8>,
+    truncated: bool,
+    limit: usize,
+}
+
+impl LimitedCommandOutput {
+    fn empty(limit: usize) -> Self {
+        Self {
+            bytes: Vec::new(),
+            truncated: false,
+            limit,
+        }
+    }
+}
+
+async fn read_limited_output<R>(
+    mut reader: R,
+    limit: usize,
+) -> std::io::Result<LimitedCommandOutput>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut bytes = Vec::with_capacity(limit.min(NPM_INSTALL_OUTPUT_READ_CHUNK_SIZE));
+    let mut truncated = false;
+    let mut chunk = [0_u8; NPM_INSTALL_OUTPUT_READ_CHUNK_SIZE];
+
+    loop {
+        let read = reader.read(&mut chunk).await?;
+        if read == 0 {
+            break;
+        }
+
+        let remaining = limit.saturating_sub(bytes.len());
+        if remaining > 0 {
+            let keep = read.min(remaining);
+            bytes.extend_from_slice(&chunk[..keep]);
+            if keep < read {
+                truncated = true;
+            }
+        } else {
+            truncated = true;
+        }
+    }
+
+    Ok(LimitedCommandOutput {
+        bytes,
+        truncated,
+        limit,
+    })
+}
+
+fn render_limited_output(output: &LimitedCommandOutput, stream_name: &str) -> String {
+    let mut rendered = String::from_utf8_lossy(&output.bytes).trim().to_string();
+    if output.truncated {
+        if !rendered.is_empty() {
+            rendered.push('\n');
+        }
+        rendered.push_str(&format!(
+            "[{stream_name} truncated after {} bytes]",
+            output.limit
+        ));
+    }
+    rendered
+}
+
+fn join_command_output(stdout: &LimitedCommandOutput, stderr: &LimitedCommandOutput) -> String {
+    let stdout = render_limited_output(stdout, "stdout");
+    let stderr = render_limited_output(stderr, "stderr");
     match (stdout.is_empty(), stderr.is_empty()) {
         (false, false) => format!("{stdout}\n{stderr}"),
         (false, true) => stdout,
@@ -231,6 +309,34 @@ fn build_cli_update_command(
     Ok(command)
 }
 
+type OutputReadTask = JoinHandle<std::io::Result<LimitedCommandOutput>>;
+
+async fn collect_output_task(
+    task: Option<OutputReadTask>,
+    stream_name: &str,
+) -> Result<LimitedCommandOutput, String> {
+    let Some(task) = task else {
+        return Ok(LimitedCommandOutput::empty(NPM_INSTALL_OUTPUT_STREAM_LIMIT));
+    };
+
+    match task.await {
+        Ok(Ok(output)) => Ok(output),
+        Ok(Err(error)) => Err(format!("failed to read npm update {stream_name}: {error}")),
+        Err(error) => Err(format!(
+            "failed to join npm update {stream_name} reader: {error}"
+        )),
+    }
+}
+
+async fn collect_update_output(
+    stdout_task: Option<OutputReadTask>,
+    stderr_task: Option<OutputReadTask>,
+) -> Result<(LimitedCommandOutput, LimitedCommandOutput), String> {
+    let stdout = collect_output_task(stdout_task, "stdout").await?;
+    let stderr = collect_output_task(stderr_task, "stderr").await?;
+    Ok((stdout, stderr))
+}
+
 pub async fn cli_update(app: &tauri::AppHandle, cli_key: String) -> CliUpdateResult {
     let normalized_cli_key = cli_key.trim().to_ascii_lowercase();
     let Some(npm_package) = npm_package_for_cli_key(&normalized_cli_key) else {
@@ -265,7 +371,7 @@ pub async fn cli_update(app: &tauri::AppHandle, cli_key: String) -> CliUpdateRes
     }
 
     let spawn_result = command.spawn();
-    let child = match spawn_result {
+    let mut child = match spawn_result {
         Ok(child) => child,
         Err(error) => {
             return CliUpdateResult {
@@ -277,11 +383,32 @@ pub async fn cli_update(app: &tauri::AppHandle, cli_key: String) -> CliUpdateRes
         }
     };
 
-    let wait_result = tokio::time::timeout(NPM_INSTALL_TIMEOUT, child.wait_with_output()).await;
+    let stdout_task = child
+        .stdout
+        .take()
+        .map(|stdout| tokio::spawn(read_limited_output(stdout, NPM_INSTALL_OUTPUT_STREAM_LIMIT)));
+    let stderr_task = child
+        .stderr
+        .take()
+        .map(|stderr| tokio::spawn(read_limited_output(stderr, NPM_INSTALL_OUTPUT_STREAM_LIMIT)));
+
+    let wait_result = tokio::time::timeout(NPM_INSTALL_TIMEOUT, child.wait()).await;
     match wait_result {
-        Ok(Ok(output)) => {
-            let combined_output = join_command_output(&output.stdout, &output.stderr);
-            if output.status.success() {
+        Ok(Ok(status)) => {
+            let output_result = collect_update_output(stdout_task, stderr_task).await;
+            let (stdout, stderr) = match output_result {
+                Ok(output) => output,
+                Err(error) => {
+                    return CliUpdateResult {
+                        cli_key: normalized_cli_key,
+                        success: false,
+                        output: String::new(),
+                        error: Some(error),
+                    };
+                }
+            };
+            let combined_output = join_command_output(&stdout, &stderr);
+            if status.success() {
                 CliUpdateResult {
                     cli_key: normalized_cli_key,
                     success: true,
@@ -295,26 +422,33 @@ pub async fn cli_update(app: &tauri::AppHandle, cli_key: String) -> CliUpdateRes
                     output: combined_output,
                     error: Some(format!(
                         "npm update failed with exit code {:?}",
-                        output.status.code()
+                        status.code()
                     )),
                 }
             }
         }
-        Ok(Err(error)) => CliUpdateResult {
-            cli_key: normalized_cli_key,
-            success: false,
-            output: String::new(),
-            error: Some(format!("failed while waiting for npm update: {error}")),
-        },
-        Err(_) => CliUpdateResult {
-            cli_key: normalized_cli_key,
-            success: false,
-            output: String::new(),
-            error: Some(format!(
-                "npm update timed out after {}s",
-                NPM_INSTALL_TIMEOUT.as_secs()
-            )),
-        },
+        Ok(Err(error)) => {
+            let _ = collect_update_output(stdout_task, stderr_task).await;
+            CliUpdateResult {
+                cli_key: normalized_cli_key,
+                success: false,
+                output: String::new(),
+                error: Some(format!("failed while waiting for npm update: {error}")),
+            }
+        }
+        Err(_) => {
+            let _ = child.kill().await;
+            let _ = collect_update_output(stdout_task, stderr_task).await;
+            CliUpdateResult {
+                cli_key: normalized_cli_key,
+                success: false,
+                output: String::new(),
+                error: Some(format!(
+                    "npm update timed out after {}s",
+                    NPM_INSTALL_TIMEOUT.as_secs()
+                )),
+            }
+        }
     }
 }
 
@@ -347,9 +481,59 @@ mod tests {
 
     #[test]
     fn join_command_output_combines_stdout_and_stderr() {
-        assert_eq!(join_command_output(b"done\n", b"warn\n"), "done\nwarn");
-        assert_eq!(join_command_output(b"done\n", b""), "done");
-        assert_eq!(join_command_output(b"", b"warn\n"), "warn");
+        let stdout = LimitedCommandOutput {
+            bytes: b"done\n".to_vec(),
+            truncated: false,
+            limit: 32,
+        };
+        let stderr = LimitedCommandOutput {
+            bytes: b"warn\n".to_vec(),
+            truncated: false,
+            limit: 32,
+        };
+        assert_eq!(join_command_output(&stdout, &stderr), "done\nwarn");
+
+        assert_eq!(
+            join_command_output(&stdout, &LimitedCommandOutput::empty(32)),
+            "done"
+        );
+        assert_eq!(
+            join_command_output(&LimitedCommandOutput::empty(32), &stderr),
+            "warn"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_limited_output_drains_reader_but_keeps_bounded_prefix() {
+        let input = std::io::Cursor::new(vec![b'a'; 20]);
+        let output = read_limited_output(input, 8).await.expect("read output");
+
+        assert_eq!(output.bytes, vec![b'a'; 8]);
+        assert!(output.truncated);
+        assert_eq!(output.limit, 8);
+        assert_eq!(
+            render_limited_output(&output, "stdout"),
+            "aaaaaaaa\n[stdout truncated after 8 bytes]"
+        );
+    }
+
+    #[test]
+    fn join_command_output_marks_each_truncated_stream() {
+        let stdout = LimitedCommandOutput {
+            bytes: b"done".to_vec(),
+            truncated: true,
+            limit: 4,
+        };
+        let stderr = LimitedCommandOutput {
+            bytes: b"warn".to_vec(),
+            truncated: true,
+            limit: 4,
+        };
+
+        assert_eq!(
+            join_command_output(&stdout, &stderr),
+            "done\n[stdout truncated after 4 bytes]\nwarn\n[stderr truncated after 4 bytes]"
+        );
     }
 
     #[test]

@@ -20,14 +20,18 @@ function requestStart(traceId: string, model: string) {
   } as any;
 }
 
-function requestEvent(traceId: string, opts: { create: number; read: number; input: number }) {
+function requestEvent(
+  traceId: string,
+  opts: { create: number; read: number; input: number; status?: number }
+) {
+  const status = opts.status ?? 200;
   return {
     trace_id: traceId,
     cli_key: "claude",
     method: "POST",
     path: "/v1/messages",
     query: null,
-    status: 200,
+    status,
     error_category: null,
     error_code: null,
     duration_ms: 100,
@@ -74,6 +78,29 @@ describe("services/gateway/cacheAnomalyMonitor", () => {
     expect(mod.getCacheAnomalyMonitorEnabled()).toBe(false);
     expect(result.current).toBe(false);
 
+    vi.useRealTimers();
+  });
+
+  it("keeps enabled-state subscribers isolated when one listener throws", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_700_000_000_000);
+
+    const mod = await importFreshCacheAnomalyMonitor();
+    const failingListener = vi.fn(() => {
+      throw new Error("listener boom");
+    });
+    const healthyListener = vi.fn();
+
+    const unsubscribeFailing = mod.subscribeCacheAnomalyMonitorEnabled(failingListener);
+    const unsubscribeHealthy = mod.subscribeCacheAnomalyMonitorEnabled(healthyListener);
+
+    expect(() => mod.setCacheAnomalyMonitorEnabled(true)).not.toThrow();
+    expect(failingListener).toHaveBeenCalledTimes(1);
+    expect(healthyListener).toHaveBeenCalledTimes(1);
+
+    unsubscribeFailing();
+    unsubscribeHealthy();
+    mod.setCacheAnomalyMonitorEnabled(false);
     vi.useRealTimers();
   });
 
@@ -514,6 +541,151 @@ describe("services/gateway/cacheAnomalyMonitor", () => {
     await Promise.resolve();
 
     expect(tauriInvoke).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("drops trace model state when a request completes unsuccessfully", async () => {
+    vi.useFakeTimers();
+    const baseTimeMs = 1_700_000_000_000;
+    vi.setSystemTime(baseTimeMs);
+
+    const {
+      setCacheAnomalyMonitorEnabled,
+      ingestCacheAnomalyRequestStart,
+      ingestCacheAnomalyRequest,
+    } = await importFreshCacheAnomalyMonitor();
+
+    vi.mocked(tauriInvoke).mockResolvedValue(true as any);
+    setCacheAnomalyMonitorEnabled(true);
+
+    ingestCacheAnomalyRequestStart(requestStart("t-reused", "claude-3-opus"));
+    ingestCacheAnomalyRequest(
+      requestEvent("t-reused", {
+        input: 500,
+        read: 0,
+        create: 100,
+        status: 500,
+      })
+    );
+
+    for (let i = 0; i < 4; i += 1) {
+      ingestCacheAnomalyRequest(
+        requestEvent("t-reused", {
+          input: 500,
+          read: 0,
+          create: 100,
+        })
+      );
+    }
+
+    vi.setSystemTime(baseTimeMs + 60_001);
+    ingestCacheAnomalyRequest(
+      requestEvent("t-reused", {
+        input: 500,
+        read: 0,
+        create: 100,
+      })
+    );
+
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(tauriInvoke).toHaveBeenCalledWith(
+      "notice_send",
+      expect.objectContaining({
+        input: expect.objectContaining({
+          level: "warning",
+          body: expect.stringContaining("Model：Unknown"),
+        }),
+      })
+    );
+
+    vi.useRealTimers();
+  });
+
+  it("caps high-cardinality monitor groups", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_700_000_000_000);
+
+    const {
+      __testGetCacheAnomalyMonitorStateSizes,
+      setCacheAnomalyMonitorEnabled,
+      ingestCacheAnomalyRequestStart,
+      ingestCacheAnomalyRequest,
+    } = await importFreshCacheAnomalyMonitor();
+
+    vi.mocked(tauriInvoke).mockResolvedValue(true as any);
+    setCacheAnomalyMonitorEnabled(true);
+
+    for (let i = 0; i < 520; i += 1) {
+      const traceId = `t-group-${i}`;
+      ingestCacheAnomalyRequestStart(requestStart(traceId, `claude-3-opus-${i}`));
+      ingestCacheAnomalyRequest(
+        requestEvent(traceId, {
+          input: 1000,
+          read: 100,
+          create: 0,
+        })
+      );
+    }
+
+    expect(__testGetCacheAnomalyMonitorStateSizes().groups).toBe(500);
+    vi.useRealTimers();
+  });
+
+  it("aggregates self-check samples by minute for high-throughput groups", async () => {
+    vi.useFakeTimers();
+    const baseTimeMs = 1_700_000_000_000;
+    vi.setSystemTime(baseTimeMs);
+
+    const {
+      __testGetCacheAnomalyMonitorStateSizes,
+      setCacheAnomalyMonitorEnabled,
+      ingestCacheAnomalyRequestStart,
+      ingestCacheAnomalyRequest,
+    } = await importFreshCacheAnomalyMonitor();
+
+    vi.mocked(tauriInvoke).mockResolvedValue(true as any);
+    setCacheAnomalyMonitorEnabled(true);
+
+    for (let i = 0; i < 1_000; i += 1) {
+      const traceId = `t-hot-${i}`;
+      ingestCacheAnomalyRequestStart(requestStart(traceId, "claude-3-opus"));
+      ingestCacheAnomalyRequest(
+        requestEvent(traceId, {
+          input: 1000,
+          read: 100,
+          create: 0,
+        })
+      );
+    }
+
+    expect(__testGetCacheAnomalyMonitorStateSizes()).toEqual(
+      expect.objectContaining({
+        groups: 1,
+        sampleBuckets: 1,
+        maxSampleBucketsPerGroup: 1,
+      })
+    );
+
+    for (let minute = 1; minute < 90; minute += 1) {
+      vi.setSystemTime(baseTimeMs + minute * 60_000);
+      const traceId = `t-hot-minute-${minute}`;
+      ingestCacheAnomalyRequestStart(requestStart(traceId, "claude-3-opus"));
+      ingestCacheAnomalyRequest(
+        requestEvent(traceId, {
+          input: 1000,
+          read: 100,
+          create: 0,
+        })
+      );
+    }
+
+    const sizes = __testGetCacheAnomalyMonitorStateSizes();
+    expect(sizes.groups).toBe(1);
+    expect(sizes.sampleBuckets).toBeLessThanOrEqual(76);
+    expect(sizes.maxSampleBucketsPerGroup).toBeLessThanOrEqual(76);
+
     vi.useRealTimers();
   });
 

@@ -2,7 +2,9 @@
 
 use crate::{db, request_logs};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use super::super::events::emit_gateway_log;
 use super::super::util::now_unix_seconds;
@@ -10,9 +12,28 @@ use super::GatewayErrorCode;
 
 const LOG_ENQUEUE_MAX_WAIT: Duration = Duration::from_millis(100);
 
+const REQUEST_LOG_ENQUEUE_TASK_MAX_CONCURRENT: usize = 256;
 const REQUEST_LOG_WRITE_THROUGH_MAX_PER_SEC: u32 = 50;
+const REQUEST_LOG_METHOD_MAX_CHARS: usize = 32;
+const REQUEST_LOG_SHORT_TEXT_MAX_CHARS: usize = 512;
+const REQUEST_LOG_PATH_MAX_CHARS: usize = 2048;
+const REQUEST_LOG_QUERY_MAX_CHARS: usize = 4096;
+const REQUEST_LOG_JSON_MAX_BYTES: usize = 256 * 1024;
+static REQUEST_LOG_ENQUEUE_TASK_LIMITER: OnceLock<Arc<Semaphore>> = OnceLock::new();
 static REQUEST_LOG_WRITE_THROUGH_WINDOW_UNIX: AtomicU64 = AtomicU64::new(0);
 static REQUEST_LOG_WRITE_THROUGH_COUNT: AtomicU32 = AtomicU32::new(0);
+
+fn request_log_enqueue_task_limiter() -> Arc<Semaphore> {
+    REQUEST_LOG_ENQUEUE_TASK_LIMITER
+        .get_or_init(|| Arc::new(Semaphore::new(REQUEST_LOG_ENQUEUE_TASK_MAX_CONCURRENT)))
+        .clone()
+}
+
+fn try_acquire_request_log_enqueue_task_permit(
+    limiter: Arc<Semaphore>,
+) -> Option<OwnedSemaphorePermit> {
+    limiter.try_acquire_owned().ok()
+}
 
 fn next_request_log_write_through_count(now_unix: u64) -> u32 {
     let prev = REQUEST_LOG_WRITE_THROUGH_WINDOW_UNIX.load(Ordering::Relaxed);
@@ -24,6 +45,67 @@ fn next_request_log_write_through_count(now_unix: u64) -> u32 {
         REQUEST_LOG_WRITE_THROUGH_COUNT.store(0, Ordering::Relaxed);
     }
     REQUEST_LOG_WRITE_THROUGH_COUNT.fetch_add(1, Ordering::Relaxed) + 1
+}
+
+fn truncate_chars(mut value: String, max_chars: usize) -> String {
+    if let Some((index, _)) = value.char_indices().nth(max_chars) {
+        value.truncate(index);
+    }
+    value
+}
+
+fn bound_optional_chars(value: Option<String>, max_chars: usize) -> Option<String> {
+    value.map(|value| truncate_chars(value, max_chars))
+}
+
+fn byte_len_exceeds(value: &str, max_bytes: usize) -> bool {
+    value.len() > max_bytes
+}
+
+fn request_log_json_truncated_object(field: &'static str) -> String {
+    serde_json::json!({
+        "type": "request_log_payload_truncated",
+        "field": field,
+        "maxBytes": REQUEST_LOG_JSON_MAX_BYTES,
+    })
+    .to_string()
+}
+
+fn request_log_json_truncated_array(field: &'static str) -> String {
+    serde_json::json!([{
+        "type": "request_log_payload_truncated",
+        "field": field,
+        "maxBytes": REQUEST_LOG_JSON_MAX_BYTES,
+    }])
+    .to_string()
+}
+
+fn bound_attempts_json(value: String) -> String {
+    if byte_len_exceeds(&value, REQUEST_LOG_JSON_MAX_BYTES) {
+        "[]".to_string()
+    } else {
+        value
+    }
+}
+
+fn bound_optional_json_object(value: Option<String>, field: &'static str) -> Option<String> {
+    value.map(|value| {
+        if byte_len_exceeds(&value, REQUEST_LOG_JSON_MAX_BYTES) {
+            request_log_json_truncated_object(field)
+        } else {
+            value
+        }
+    })
+}
+
+fn bound_optional_json_array(value: Option<String>, field: &'static str) -> Option<String> {
+    value.map(|value| {
+        if byte_len_exceeds(&value, REQUEST_LOG_JSON_MAX_BYTES) {
+            request_log_json_truncated_array(field)
+        } else {
+            value
+        }
+    })
 }
 
 fn request_log_insert_from_args(
@@ -72,17 +154,20 @@ fn request_log_insert_from_args(
     Some(request_logs::RequestLogInsert {
         trace_id,
         cli_key,
-        session_id,
-        method,
-        path,
-        query,
+        session_id: bound_optional_chars(session_id, REQUEST_LOG_SHORT_TEXT_MAX_CHARS),
+        method: truncate_chars(method, REQUEST_LOG_METHOD_MAX_CHARS),
+        path: truncate_chars(path, REQUEST_LOG_PATH_MAX_CHARS),
+        query: bound_optional_chars(query, REQUEST_LOG_QUERY_MAX_CHARS),
         excluded_from_stats,
-        special_settings_json,
+        special_settings_json: bound_optional_json_array(
+            special_settings_json,
+            "special_settings_json",
+        ),
         status: status.map(|v| v as i64),
         error_code: error_code.map(str::to_string),
         duration_ms,
         ttfb_ms,
-        attempts_json,
+        attempts_json: bound_attempts_json(attempts_json),
         input_tokens: metrics.input_tokens,
         output_tokens: metrics.output_tokens,
         total_tokens: metrics.total_tokens,
@@ -90,17 +175,17 @@ fn request_log_insert_from_args(
         cache_creation_input_tokens: metrics.cache_creation_input_tokens,
         cache_creation_5m_input_tokens: metrics.cache_creation_5m_input_tokens,
         cache_creation_1h_input_tokens: metrics.cache_creation_1h_input_tokens,
-        usage_json,
-        requested_model,
+        usage_json: bound_optional_json_object(usage_json, "usage_json"),
+        requested_model: bound_optional_chars(requested_model, REQUEST_LOG_SHORT_TEXT_MAX_CHARS),
         created_at_ms,
         created_at,
-        provider_chain_json,
-        error_details_json,
+        provider_chain_json: bound_optional_json_array(provider_chain_json, "provider_chain_json"),
+        error_details_json: bound_optional_json_object(error_details_json, "error_details_json"),
     })
 }
 
-pub(super) async fn enqueue_request_log_with_backpressure(
-    app: &tauri::AppHandle,
+pub(super) async fn enqueue_request_log_with_backpressure<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     db: &db::Db,
     log_tx: &tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
     args: super::RequestLogEnqueueArgs,
@@ -199,8 +284,8 @@ pub(super) async fn enqueue_request_log_with_backpressure(
     }
 }
 
-pub(super) async fn enqueue_request_log_placeholder(
-    app: &tauri::AppHandle,
+pub(super) async fn enqueue_request_log_placeholder<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     log_tx: &tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
     args: super::RequestLogEnqueueArgs,
 ) {
@@ -257,21 +342,117 @@ pub(super) async fn enqueue_request_log_placeholder(
     }
 }
 
-pub(in crate::gateway) fn spawn_enqueue_request_log_with_backpressure(
-    app: tauri::AppHandle,
+pub(in crate::gateway) fn spawn_enqueue_request_log_with_backpressure<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     db: db::Db,
     log_tx: tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
     args: super::RequestLogEnqueueArgs,
 ) {
+    let Some(permit) =
+        try_acquire_request_log_enqueue_task_permit(request_log_enqueue_task_limiter())
+    else {
+        enqueue_request_log_when_spawn_saturated(&app, &db, &log_tx, args);
+        return;
+    };
+
     tauri::async_runtime::spawn(async move {
+        let _permit = permit;
         enqueue_request_log_with_backpressure(&app, &db, &log_tx, args).await;
     });
+}
+
+fn enqueue_request_log_when_spawn_saturated<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    db: &db::Db,
+    log_tx: &tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
+    args: super::RequestLogEnqueueArgs,
+) {
+    let trace_id = args.trace_id.clone();
+    let cli_key = args.cli_key.clone();
+    let Some(insert) = request_log_insert_from_args(args) else {
+        return;
+    };
+
+    let status = insert.status.unwrap_or(0);
+    let is_important = insert.error_code.is_some() || status >= 400;
+
+    match log_tx.try_send(insert) {
+        Ok(()) => {}
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(insert)) => {
+            emit_gateway_log(
+                app,
+                "warn",
+                GatewayErrorCode::RequestLogChannelClosed.as_str(),
+                format!(
+                    "request log enqueue task saturated and channel closed; using write-through fallback trace_id={} cli={}",
+                    trace_id, cli_key
+                ),
+            );
+            request_logs::spawn_write_through(app.clone(), db.clone(), insert);
+        }
+        Err(tokio::sync::mpsc::error::TrySendError::Full(insert)) if is_important => {
+            let count = next_request_log_write_through_count(now_unix_seconds());
+            if count <= REQUEST_LOG_WRITE_THROUGH_MAX_PER_SEC {
+                emit_gateway_log(
+                    app,
+                    "warn",
+                    GatewayErrorCode::RequestLogWriteThroughOnBackpressure.as_str(),
+                    format!(
+                        "request log enqueue task saturated and channel full; using write-through fallback trace_id={} cli={} status={}",
+                        trace_id, cli_key, status
+                    ),
+                );
+                request_logs::spawn_write_through(app.clone(), db.clone(), insert);
+            } else if count == REQUEST_LOG_WRITE_THROUGH_MAX_PER_SEC + 1 {
+                emit_gateway_log(
+                    app,
+                    "error",
+                    GatewayErrorCode::RequestLogWriteThroughRateLimited.as_str(),
+                    format!(
+                        "request log write-through rate limited while enqueue tasks saturated: max_per_sec={} (dropping important logs) trace_id={} cli={} status={}",
+                        REQUEST_LOG_WRITE_THROUGH_MAX_PER_SEC, trace_id, cli_key, status
+                    ),
+                );
+            }
+        }
+        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+            emit_gateway_log(
+                app,
+                "error",
+                GatewayErrorCode::RequestLogDropped.as_str(),
+                format!(
+                    "request log dropped (enqueue task saturated and queue full) trace_id={} cli={}",
+                    trace_id, cli_key
+                ),
+            );
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::usage::{UsageExtract, UsageMetrics};
+
+    #[test]
+    fn request_log_enqueue_task_permit_returns_none_when_full() {
+        let limiter = Arc::new(Semaphore::new(1));
+        let _held =
+            try_acquire_request_log_enqueue_task_permit(limiter.clone()).expect("first permit");
+
+        assert!(try_acquire_request_log_enqueue_task_permit(limiter).is_none());
+    }
+
+    #[test]
+    fn request_log_enqueue_task_permit_releases_on_drop() {
+        let limiter = Arc::new(Semaphore::new(1));
+        let held =
+            try_acquire_request_log_enqueue_task_permit(limiter.clone()).expect("first permit");
+
+        drop(held);
+
+        assert!(try_acquire_request_log_enqueue_task_permit(limiter).is_some());
+    }
 
     fn base_args() -> super::super::RequestLogEnqueueArgs {
         super::super::RequestLogEnqueueArgs {
@@ -411,5 +592,133 @@ mod tests {
         assert_eq!(insert.error_code, None);
         assert_eq!(insert.duration_ms, 0);
         assert_eq!(insert.requested_model.as_deref(), Some("claude-sonnet"));
+    }
+
+    #[test]
+    fn request_log_insert_bounds_text_fields_on_utf8_boundaries() {
+        let mut args = base_args();
+        args.session_id = Some("会".repeat(REQUEST_LOG_SHORT_TEXT_MAX_CHARS + 1));
+        args.method = "M".repeat(REQUEST_LOG_METHOD_MAX_CHARS + 1);
+        args.path = "路".repeat(REQUEST_LOG_PATH_MAX_CHARS + 1);
+        args.query = Some("查".repeat(REQUEST_LOG_QUERY_MAX_CHARS + 1));
+        args.requested_model = Some("模".repeat(REQUEST_LOG_SHORT_TEXT_MAX_CHARS + 1));
+
+        let insert = request_log_insert_from_args(args).expect("insert");
+
+        assert_eq!(
+            insert
+                .session_id
+                .as_deref()
+                .map(|value| value.chars().count()),
+            Some(REQUEST_LOG_SHORT_TEXT_MAX_CHARS)
+        );
+        assert_eq!(insert.method.chars().count(), REQUEST_LOG_METHOD_MAX_CHARS);
+        assert_eq!(insert.path.chars().count(), REQUEST_LOG_PATH_MAX_CHARS);
+        assert_eq!(
+            insert.query.as_deref().map(|value| value.chars().count()),
+            Some(REQUEST_LOG_QUERY_MAX_CHARS)
+        );
+        assert_eq!(
+            insert
+                .requested_model
+                .as_deref()
+                .map(|value| value.chars().count()),
+            Some(REQUEST_LOG_SHORT_TEXT_MAX_CHARS)
+        );
+    }
+
+    #[test]
+    fn request_log_insert_replaces_oversized_json_fields_with_valid_markers() {
+        let oversized = "x".repeat(REQUEST_LOG_JSON_MAX_BYTES + 1);
+        let mut args = base_args();
+        args.attempts_json = oversized.clone();
+        args.special_settings_json = Some(oversized.clone());
+        args.usage = Some(UsageExtract {
+            metrics: UsageMetrics::default(),
+            usage_json: oversized.clone(),
+        });
+        args.provider_chain_json = Some(oversized.clone());
+        args.error_details_json = Some(oversized);
+
+        let insert = request_log_insert_from_args(args).expect("insert");
+
+        assert_eq!(insert.attempts_json, "[]");
+
+        let special_settings: serde_json::Value = serde_json::from_str(
+            insert
+                .special_settings_json
+                .as_deref()
+                .expect("settings json"),
+        )
+        .expect("valid settings marker");
+        assert_eq!(
+            special_settings
+                .get(0)
+                .and_then(|item| item.get("field"))
+                .and_then(serde_json::Value::as_str),
+            Some("special_settings_json")
+        );
+
+        let provider_chain: serde_json::Value =
+            serde_json::from_str(insert.provider_chain_json.as_deref().expect("chain json"))
+                .expect("valid chain marker");
+        assert!(provider_chain.is_array());
+        assert_eq!(
+            provider_chain
+                .get(0)
+                .and_then(|item| item.get("field"))
+                .and_then(serde_json::Value::as_str),
+            Some("provider_chain_json")
+        );
+
+        let usage_json: serde_json::Value =
+            serde_json::from_str(insert.usage_json.as_deref().expect("usage json"))
+                .expect("valid usage marker");
+        assert_eq!(
+            usage_json.get("field").and_then(serde_json::Value::as_str),
+            Some("usage_json")
+        );
+
+        let error_details: serde_json::Value =
+            serde_json::from_str(insert.error_details_json.as_deref().expect("error json"))
+                .expect("valid error marker");
+        assert_eq!(
+            error_details
+                .get("field")
+                .and_then(serde_json::Value::as_str),
+            Some("error_details_json")
+        );
+    }
+
+    #[test]
+    fn request_log_insert_bounds_json_fields_by_utf8_bytes() {
+        let oversized_multibyte = format!(
+            "[\"{}\"]",
+            "界".repeat((REQUEST_LOG_JSON_MAX_BYTES / "界".len()) + 1)
+        );
+        assert!(oversized_multibyte.len() > REQUEST_LOG_JSON_MAX_BYTES);
+        assert!(oversized_multibyte.chars().count() < REQUEST_LOG_JSON_MAX_BYTES);
+
+        let mut args = base_args();
+        args.attempts_json = oversized_multibyte.clone();
+        args.special_settings_json = Some(oversized_multibyte);
+
+        let insert = request_log_insert_from_args(args).expect("insert");
+
+        assert_eq!(insert.attempts_json, "[]");
+        let special_settings: serde_json::Value = serde_json::from_str(
+            insert
+                .special_settings_json
+                .as_deref()
+                .expect("settings json"),
+        )
+        .expect("valid settings marker");
+        assert_eq!(
+            special_settings
+                .get(0)
+                .and_then(|item| item.get("maxBytes"))
+                .and_then(serde_json::Value::as_u64),
+            Some(REQUEST_LOG_JSON_MAX_BYTES as u64)
+        );
     }
 }

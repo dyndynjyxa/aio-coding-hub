@@ -19,6 +19,34 @@ describe("services/clipboard", () => {
     expect(writeDesktopClipboardText).toHaveBeenCalledWith("hello");
   });
 
+  it("normalizes copied text before using clipboard backends", async () => {
+    vi.mocked(writeDesktopClipboardText).mockRejectedValue(new Error("denied"));
+
+    const navWrite = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: navWrite },
+      configurable: true,
+    });
+
+    await copyText("  hello  ");
+
+    expect(writeDesktopClipboardText).toHaveBeenCalledWith("hello");
+    expect(navWrite).toHaveBeenCalledWith("hello");
+  });
+
+  it("rejects invalid copied text before using clipboard backends", async () => {
+    const navWrite = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: navWrite },
+      configurable: true,
+    });
+
+    await expect(copyText("   ")).rejects.toThrow("clipboard text is required");
+
+    expect(writeDesktopClipboardText).not.toHaveBeenCalled();
+    expect(navWrite).not.toHaveBeenCalled();
+  });
+
   it("falls back to navigator clipboard when tauri write fails", async () => {
     vi.mocked(writeDesktopClipboardText).mockRejectedValue(new Error("denied"));
 

@@ -20,9 +20,9 @@ use axum::response::Response;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-pub(super) struct AllUnavailableInput<'a> {
-    pub(super) state: &'a GatewayAppState,
-    pub(super) abort_guard: &'a mut RequestAbortGuard,
+pub(super) struct AllUnavailableInput<'a, R: tauri::Runtime = tauri::Wry> {
+    pub(super) state: &'a GatewayAppState<R>,
+    pub(super) abort_guard: &'a mut RequestAbortGuard<R>,
     pub(super) observe: bool,
     pub(super) attempts: Vec<FailoverAttempt>,
     pub(super) cli_key: String,
@@ -47,7 +47,9 @@ pub(super) struct AllUnavailableInput<'a> {
     pub(super) unavailable_fingerprint_debug: String,
 }
 
-pub(super) async fn all_providers_unavailable(input: AllUnavailableInput<'_>) -> Response {
+pub(super) async fn all_providers_unavailable<R: tauri::Runtime>(
+    input: AllUnavailableInput<'_, R>,
+) -> Response {
     let AllUnavailableInput {
         state,
         abort_guard,
@@ -175,9 +177,9 @@ pub(super) async fn all_providers_unavailable(input: AllUnavailableInput<'_>) ->
     resp
 }
 
-pub(super) struct AllFailedInput<'a> {
-    pub(super) state: &'a GatewayAppState,
-    pub(super) abort_guard: &'a mut RequestAbortGuard,
+pub(super) struct AllFailedInput<'a, R: tauri::Runtime = tauri::Wry> {
+    pub(super) state: &'a GatewayAppState<R>,
+    pub(super) abort_guard: &'a mut RequestAbortGuard<R>,
     pub(super) observe: bool,
     pub(super) attempts: Vec<FailoverAttempt>,
     pub(super) last_outcome: Option<AttemptOutcome>,
@@ -195,7 +197,9 @@ pub(super) struct AllFailedInput<'a> {
     pub(super) verbose_provider_error: bool,
 }
 
-pub(super) async fn all_providers_failed(input: AllFailedInput<'_>) -> Response {
+pub(super) async fn all_providers_failed<R: tauri::Runtime>(
+    input: AllFailedInput<'_, R>,
+) -> Response {
     let AllFailedInput {
         state,
         abort_guard,

@@ -53,6 +53,35 @@ fn real_attempt() -> FailoverAttempt {
     }
 }
 
+fn timeout_attempt(
+    provider_id: i64,
+    provider_index: u32,
+    session_reuse: Option<bool>,
+) -> FailoverAttempt {
+    FailoverAttempt {
+        provider_id,
+        provider_name: format!("provider-{provider_id}"),
+        base_url: "https://example.com".to_string(),
+        outcome: "request_timeout: category=SYSTEM_ERROR code=GW_UPSTREAM_TIMEOUT decision=switch timeout_secs=30".to_string(),
+        status: None,
+        provider_index: Some(provider_index),
+        retry_index: Some(1),
+        session_reuse,
+        error_category: Some("SYSTEM_ERROR"),
+        error_code: Some(GatewayErrorCode::UpstreamTimeout.as_str()),
+        decision: Some("switch"),
+        reason: Some("request timeout".to_string()),
+        selection_method: dc::selection_method(provider_index, 1, session_reuse),
+        reason_code: Some(dc::REASON_SYSTEM_ERROR),
+        attempt_started_ms: Some(1),
+        attempt_duration_ms: Some(30_000),
+        circuit_state_before: Some("CLOSED"),
+        circuit_state_after: Some("OPEN"),
+        circuit_failure_count: Some(5),
+        circuit_failure_threshold: Some(5),
+    }
+}
+
 #[test]
 fn skip_only_gate_attempts_finalize_as_unavailable() {
     let attempts = vec![
@@ -76,6 +105,23 @@ fn real_attempts_do_not_finalize_as_unavailable() {
     ];
 
     assert!(!should_finalize_as_all_providers_unavailable(&attempts));
+}
+
+#[test]
+fn timeout_storm_attempts_finalize_as_failed_not_unavailable() {
+    let attempts = vec![
+        timeout_attempt(10, 1, Some(true)),
+        timeout_attempt(20, 2, None),
+    ];
+
+    assert!(!should_finalize_as_all_providers_unavailable(&attempts));
+    assert!(attempts
+        .iter()
+        .all(|attempt| attempt.retry_index == Some(1)));
+    assert!(attempts
+        .iter()
+        .all(|attempt| attempt.error_code == Some(GatewayErrorCode::UpstreamTimeout.as_str())));
+    assert_eq!(attempts[0].session_reuse, Some(true));
 }
 
 #[test]
@@ -115,4 +161,25 @@ fn attempt_outcome_preserves_terminal_error_pair() {
         outcome.error_code,
         GatewayErrorCode::UpstreamConnectFailed.as_str()
     );
+}
+
+#[test]
+fn stream_flag_from_raw_body_detects_compact_and_spaced_json_flags() {
+    assert!(super::stream_flag_from_raw_body(br#"{"stream":true}"#));
+    assert!(super::stream_flag_from_raw_body(
+        br#"{"model":"claude","stream": true}"#
+    ));
+}
+
+#[test]
+fn stream_flag_from_raw_body_only_scans_first_two_kb() {
+    let mut body = vec![b' '; 2048];
+    body.extend_from_slice(br#"{"stream":true}"#);
+
+    assert!(!super::stream_flag_from_raw_body(&body));
+}
+
+#[test]
+fn stream_flag_from_raw_body_ignores_non_utf8_payloads() {
+    assert!(!super::stream_flag_from_raw_body(&[0xff, 0xfe, b'{']));
 }

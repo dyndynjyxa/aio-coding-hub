@@ -8,10 +8,12 @@ pub(super) struct ProviderSelection {
     pub(super) effective_sort_mode_id: Option<i64>,
     pub(super) providers: Vec<providers::ProviderForGateway>,
     pub(super) bound_provider_order: Option<Vec<i64>>,
+    pub(super) active_sort_mode_id: Option<i64>,
+    pub(super) session_bound_sort_mode_id: Option<Option<i64>>,
 }
 
-pub(super) fn select_providers_with_session_binding(
-    state: &GatewayAppState,
+pub(super) fn select_providers_with_session_binding<R: tauri::Runtime>(
+    state: &GatewayAppState<R>,
     cli_key: &str,
     session_id: Option<&str>,
     created_at: i64,
@@ -22,16 +24,22 @@ pub(super) fn select_providers_with_session_binding(
             .get_bound_sort_mode_id(cli_key, sid, created_at)
     });
 
-    let (effective_sort_mode_id, mut providers) = match bound_sort_mode_id {
+    let (active_sort_mode_id, effective_sort_mode_id, mut providers) = match bound_sort_mode_id {
         Some(sort_mode_id) => {
+            let active_sort_mode_id =
+                providers::active_sort_mode_id_for_gateway(&state.db, cli_key)?;
             let providers =
                 providers::list_enabled_for_gateway_in_mode(&state.db, cli_key, sort_mode_id)?;
-            (sort_mode_id, providers)
+            (active_sort_mode_id, sort_mode_id, providers)
         }
         None => {
             let selection =
                 providers::list_enabled_for_gateway_using_active_mode(&state.db, cli_key)?;
-            (selection.sort_mode_id, selection.providers)
+            (
+                selection.sort_mode_id,
+                selection.sort_mode_id,
+                selection.providers,
+            )
         }
     };
 
@@ -59,6 +67,8 @@ pub(super) fn select_providers_with_session_binding(
         effective_sort_mode_id,
         providers,
         bound_provider_order,
+        active_sort_mode_id,
+        session_bound_sort_mode_id: bound_sort_mode_id,
     })
 }
 
@@ -90,7 +100,7 @@ pub(super) fn resolve_session_routing_decision(
 
 pub(super) fn apply_session_reuse_provider_binding(
     allow_session_reuse: bool,
-    providers: &mut Vec<providers::ProviderForGateway>,
+    providers: &mut [providers::ProviderForGateway],
     bound_provider_id: Option<i64>,
     bound_provider_order: Option<&[i64]>,
 ) -> Option<i64> {
@@ -115,7 +125,7 @@ pub(super) fn resolve_session_bound_provider_id(
     created_at: i64,
     allow_session_reuse: bool,
     forced_provider_id: Option<i64>,
-    providers: &mut Vec<providers::ProviderForGateway>,
+    providers: &mut [providers::ProviderForGateway],
     bound_provider_order: Option<&[i64]>,
 ) -> Option<i64> {
     let bound_provider_id =

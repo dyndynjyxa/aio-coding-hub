@@ -1,6 +1,5 @@
 //! Middleware: reads the request body into memory, bounded by an OOM-safety
-//! hard cap (`MAX_REQUEST_BODY_BYTES`). The cap is intentionally large — normal
-//! AI CLI traffic (uploads, PDFs, long histories) must pass through transparently.
+//! hard cap. The cap is configurable via `AIO_GATEWAY_MAX_REQUEST_BODY_MB`.
 //!
 //! A smaller diagnostic threshold (`LARGE_REQUEST_BODY_BYTES`) is applied later
 //! in `ModelInferenceMiddleware` and only affects requests whose `model` field
@@ -12,7 +11,7 @@ use crate::gateway::proxy::handler::early_error::{
     build_early_error_log_ctx, early_error_contract, respond_early_error_with_enqueue,
     EarlyErrorKind,
 };
-use crate::gateway::util::{body_for_introspection, MAX_REQUEST_BODY_BYTES};
+use crate::gateway::util::{body_for_introspection, max_request_body_bytes};
 use axum::body::to_bytes;
 
 pub(in crate::gateway::proxy::handler) struct BodyReaderMiddleware;
@@ -21,14 +20,17 @@ impl BodyReaderMiddleware {
     /// Reads the request body into `ctx.body_bytes` and parses introspection JSON.
     ///
     /// Also strips the `x-aio-provider-id` header (already consumed as `forced_provider_id`).
-    pub(in crate::gateway::proxy::handler) async fn run(mut ctx: ProxyContext) -> MiddlewareAction {
+    pub(in crate::gateway::proxy::handler) async fn run<R: tauri::Runtime>(
+        mut ctx: ProxyContext<R>,
+    ) -> MiddlewareAction<R> {
         let body = ctx
             .request_body
             .take()
             .expect("request_body must be set before BodyReaderMiddleware");
         ctx.headers.remove("x-aio-provider-id");
 
-        match to_bytes(body, MAX_REQUEST_BODY_BYTES).await {
+        let request_body_limit = max_request_body_bytes();
+        match to_bytes(body, request_body_limit).await {
             Ok(bytes) => {
                 ctx.body_bytes = bytes;
             }
@@ -41,7 +43,7 @@ impl BodyReaderMiddleware {
                 let resp = respond_early_error_with_enqueue(
                     &log_ctx,
                     contract,
-                    body_too_large_message(&err.to_string()),
+                    body_too_large_message(&err.to_string(), request_body_limit),
                     None,
                     None,
                     None,
@@ -59,12 +61,14 @@ impl BodyReaderMiddleware {
     }
 }
 
-pub(in crate::gateway::proxy::handler) fn body_too_large_message(err: &str) -> String {
-    let limit_mb = MAX_REQUEST_BODY_BYTES / (1024 * 1024);
+pub(in crate::gateway::proxy::handler) fn body_too_large_message(
+    err: &str,
+    limit_bytes: usize,
+) -> String {
+    let limit_mb = limit_bytes / (1024 * 1024);
     format!(
         "failed to read request body: {err} (gateway hard cap: {limit_mb} MB; \
-         this cap exists only to bound memory — contact the administrator if you \
-         have a legitimate request above this size)"
+         set AIO_GATEWAY_MAX_REQUEST_BODY_MB if this request is legitimate)"
     )
 }
 
@@ -74,8 +78,9 @@ mod tests {
 
     #[test]
     fn body_too_large_message_includes_error() {
-        let message = body_too_large_message("stream exceeded limit");
+        let message = body_too_large_message("stream exceeded limit", 64 * 1024 * 1024);
         assert!(message.contains("failed to read request body:"));
         assert!(message.contains("stream exceeded limit"));
+        assert!(message.contains("64 MB"));
     }
 }

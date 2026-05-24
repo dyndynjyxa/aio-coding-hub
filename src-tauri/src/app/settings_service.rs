@@ -60,6 +60,7 @@ pub(crate) struct SettingsUpdate {
     pub enable_billing_header_rectifier: Option<bool>,
     pub enable_claude_metadata_user_id_injection: Option<bool>,
     pub enable_cache_anomaly_monitor: Option<bool>,
+    pub enable_debug_log: Option<bool>,
     pub enable_task_complete_notify: Option<bool>,
     pub enable_notification_sound: Option<bool>,
     pub enable_response_fixer: Option<bool>,
@@ -166,6 +167,7 @@ pub(crate) struct SettingsView {
     pub enable_codex_session_id_completion: bool,
     pub enable_claude_metadata_user_id_injection: bool,
     pub enable_cache_anomaly_monitor: bool,
+    pub enable_debug_log: bool,
     pub enable_task_complete_notify: bool,
     pub enable_notification_sound: bool,
     pub enable_response_fixer: bool,
@@ -286,6 +288,7 @@ impl From<&settings::AppSettings> for SettingsView {
             enable_claude_metadata_user_id_injection: value
                 .enable_claude_metadata_user_id_injection,
             enable_cache_anomaly_monitor: value.enable_cache_anomaly_monitor,
+            enable_debug_log: value.enable_debug_log,
             enable_task_complete_notify: value.enable_task_complete_notify,
             enable_notification_sound: value.enable_notification_sound,
             enable_response_fixer: value.enable_response_fixer,
@@ -370,7 +373,7 @@ fn current_gateway_status(app: &tauri::AppHandle) -> crate::gateway::GatewayStat
     app_gateway_status(app)
 }
 
-async fn start_gateway_with_settings(
+async fn start_gateway_with_settings_unlocked(
     app: &tauri::AppHandle,
     db_state: &DbInitState,
     next_settings: &settings::AppSettings,
@@ -424,8 +427,9 @@ async fn restore_previous_runtime(
         return current_gateway_status(app);
     }
 
-    crate::app::cleanup::stop_gateway_best_effort(app).await;
-    match start_gateway_with_settings(app, db_state, previous_settings).await {
+    let _gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
+    crate::app::cleanup::stop_gateway_best_effort_unlocked(app).await;
+    match start_gateway_with_settings_unlocked(app, db_state, previous_settings).await {
         Ok(result) => result.status,
         Err(err) => {
             tracing::error!(
@@ -465,6 +469,22 @@ async fn sync_cli_proxy_for_settings(
     base_origin: String,
     apply_live: bool,
 ) -> bool {
+    let _gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
+    let status = current_gateway_status(app);
+    let (base_origin, apply_live) = if status.running {
+        (
+            status.base_url.unwrap_or_else(|| {
+                format!(
+                    "http://127.0.0.1:{}",
+                    status.port.unwrap_or(settings::DEFAULT_GATEWAY_PORT)
+                )
+            }),
+            true,
+        )
+    } else {
+        (base_origin, apply_live && status.running)
+    };
+
     match blocking::run("settings_set_cli_proxy_sync", {
         let app = app.clone();
         move || cli_proxy::sync_enabled(&app, &base_origin, apply_live)
@@ -530,6 +550,7 @@ pub(crate) async fn settings_set_impl(
         enable_billing_header_rectifier,
         enable_claude_metadata_user_id_injection,
         enable_cache_anomaly_monitor,
+        enable_debug_log,
         enable_task_complete_notify,
         enable_notification_sound,
         enable_response_fixer,
@@ -574,8 +595,10 @@ pub(crate) async fn settings_set_impl(
             settings::AppSettings,
         )> {
             let previous = read_settings_for_update(&app_for_work)?;
-            let update_releases_url =
-                update_releases_url.unwrap_or(previous.update_releases_url.clone());
+            let update_releases_url = update_releases_url
+                .unwrap_or(previous.update_releases_url.clone())
+                .trim()
+                .to_string();
             let tray_enabled = tray_enabled.unwrap_or(previous.tray_enabled);
             let start_minimized = start_minimized.unwrap_or(previous.start_minimized);
             let enable_cli_proxy_startup_recovery = enable_cli_proxy_startup_recovery
@@ -684,6 +707,8 @@ pub(crate) async fn settings_set_impl(
                 .unwrap_or(previous.enable_claude_metadata_user_id_injection);
             let enable_cache_anomaly_monitor =
                 enable_cache_anomaly_monitor.unwrap_or(previous.enable_cache_anomaly_monitor);
+            let enable_debug_log =
+                enable_debug_log.unwrap_or(previous.enable_debug_log);
             let enable_task_complete_notify =
                 enable_task_complete_notify.unwrap_or(previous.enable_task_complete_notify);
             let enable_notification_sound =
@@ -748,6 +773,7 @@ pub(crate) async fn settings_set_impl(
                 enable_codex_session_id_completion: previous.enable_codex_session_id_completion,
                 enable_claude_metadata_user_id_injection,
                 enable_cache_anomaly_monitor,
+                enable_debug_log,
                 enable_task_complete_notify,
                 enable_notification_sound,
                 enable_response_fixer,
@@ -773,6 +799,7 @@ pub(crate) async fn settings_set_impl(
                 upstream_proxy_password,
             };
 
+            settings::validate_bounds(&settings)?;
             crate::gateway::http_client::validate_proxy_for_settings(&settings)?;
             Ok((previous, settings))
         },
@@ -786,8 +813,9 @@ pub(crate) async fn settings_set_impl(
     let mut gateway_rebound = false;
     let mut committed_settings = candidate_settings.clone();
     if runtime_plan.gateway_rebind_required && previous_gateway_status.running {
-        crate::app::cleanup::stop_gateway_best_effort(&app).await;
-        match start_gateway_with_settings(&app, db_state, &committed_settings).await {
+        let _gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
+        crate::app::cleanup::stop_gateway_best_effort_unlocked(&app).await;
+        match start_gateway_with_settings_unlocked(&app, db_state, &committed_settings).await {
             Ok(start_result) => {
                 committed_settings.preferred_port = start_result.effective_preferred_port;
                 gateway_status = start_result.status;
@@ -798,13 +826,15 @@ pub(crate) async fn settings_set_impl(
                     error = %rebind_error,
                     "settings update failed during gateway rebind; restoring previous runtime"
                 );
-                restore_previous_runtime(
-                    &app,
-                    db_state,
-                    &previous_settings,
-                    &previous_gateway_status,
-                )
-                .await;
+                let _ = sync_runtime_side_effects(&app, &previous_settings);
+                if let Err(restore_error) =
+                    start_gateway_with_settings_unlocked(&app, db_state, &previous_settings).await
+                {
+                    tracing::error!(
+                        error = %restore_error,
+                        "settings update rollback failed to restore previous gateway runtime"
+                    );
+                }
                 return Err(format!(
                     "监听地址未生效，新的运行态重绑失败：{rebind_error}"
                 ));

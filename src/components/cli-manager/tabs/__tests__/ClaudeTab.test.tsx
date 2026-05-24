@@ -1,8 +1,12 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { CliManagerClaudeTab } from "../ClaudeTab";
 import type { ClaudeCliInfo, ClaudeSettingsState } from "../../../../services/cli/cliManager";
+import {
+  useCliManagerClaudeHooksQuery,
+  useCliManagerClaudeHooksSetMutation,
+} from "../../../../query/cliManager";
 
 type ClaudeInfoOverride = Omit<
   Partial<ClaudeCliInfo>,
@@ -35,6 +39,17 @@ vi.mock("../../CliVersionBadge", () => ({
 vi.mock("../ClaudeOAuthCard", () => ({
   ClaudeOAuthCard: () => <div>claude-oauth-card</div>,
 }));
+
+vi.mock("../../../../query/cliManager", async () => {
+  const actual = await vi.importActual<typeof import("../../../../query/cliManager")>(
+    "../../../../query/cliManager"
+  );
+  return {
+    ...actual,
+    useCliManagerClaudeHooksQuery: vi.fn(),
+    useCliManagerClaudeHooksSetMutation: vi.fn(),
+  };
+});
 
 function createClaudeInfo(overrides: ClaudeInfoOverride = {}): ClaudeCliInfo {
   return {
@@ -91,6 +106,21 @@ function createClaudeSettings(overrides: ClaudeSettingsOverride = {}): ClaudeSet
 }
 
 describe("components/cli-manager/tabs/ClaudeTab", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(useCliManagerClaudeHooksQuery).mockReturnValue({
+      data: { settings_path: "/home/user/.claude/settings.json", groups: [] },
+      error: null,
+      isError: false,
+      isLoading: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useCliManagerClaudeHooksSetMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+    } as any);
+  });
+
   it("handles unavailable and empty settings states", () => {
     render(
       <CliManagerClaudeTab
@@ -452,5 +482,82 @@ describe("components/cli-manager/tabs/ClaudeTab", () => {
 
     expect(screen.getByText("暂无配置，请尝试刷新")).toBeInTheDocument();
     expect(screen.queryByText("配置目录")).not.toBeInTheDocument();
+  });
+
+  it("shows hooks read errors inside the Claude tab and disables adding", () => {
+    const refetch = vi.fn();
+    vi.mocked(useCliManagerClaudeHooksQuery).mockReturnValue({
+      data: undefined,
+      error: new Error("settings.json 解析失败"),
+      isError: true,
+      isLoading: false,
+      refetch,
+    } as any);
+
+    render(
+      <CliManagerClaudeTab
+        claudeAvailable="available"
+        claudeLoading={false}
+        claudeInfo={createClaudeInfo()}
+        claudeSettingsLoading={false}
+        claudeSettingsSaving={false}
+        claudeSettings={createClaudeSettings()}
+        providers={null}
+        refreshClaude={vi.fn()}
+        openClaudeConfigDir={vi.fn()}
+        persistClaudeSettings={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("读取 Hooks 失败")).toBeInTheDocument();
+    expect(screen.getByText(/settings\.json 解析失败/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /添加/ })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(refetch).toHaveBeenCalled();
+  });
+
+  it("keeps the hook editor open when saving hooks fails", async () => {
+    const mutateAsync = vi.fn().mockRejectedValue(new Error("save hooks boom"));
+    vi.mocked(useCliManagerClaudeHooksSetMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync,
+    } as any);
+
+    render(
+      <CliManagerClaudeTab
+        claudeAvailable="available"
+        claudeLoading={false}
+        claudeInfo={createClaudeInfo()}
+        claudeSettingsLoading={false}
+        claudeSettingsSaving={false}
+        claudeSettings={createClaudeSettings()}
+        providers={null}
+        refreshClaude={vi.fn()}
+        openClaudeConfigDir={vi.fn()}
+        persistClaudeSettings={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /添加/ }));
+    fireEvent.change(screen.getByPlaceholderText("要执行的 shell 命令"), {
+      target: { value: "echo fail" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(mutateAsync).toHaveBeenCalledWith({
+        groups: [
+          {
+            event: "PreToolUse",
+            matcher: "",
+            hooks: [{ hook_type: "command", command: "echo fail", timeout: null }],
+          },
+        ],
+      });
+    });
+
+    expect(screen.getByText("添加 Hook")).toBeInTheDocument();
+    expect(toast).toHaveBeenCalledWith("保存 Hooks 失败：请稍后重试");
   });
 });

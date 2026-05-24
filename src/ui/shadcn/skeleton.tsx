@@ -18,7 +18,7 @@ export function Skeleton({ variant = "text", className }: SkeletonProps) {
     <div
       aria-hidden="true"
       className={cn(
-        "animate-pulse bg-slate-200 dark:bg-slate-700",
+        "animate-pulse bg-muted",
         VARIANT_CLASS[variant],
         className
       )}

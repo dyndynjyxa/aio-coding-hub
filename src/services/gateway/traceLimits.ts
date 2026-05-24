@@ -1,0 +1,1 @@
+export const MAX_ATTEMPTS_PER_TRACE = 100;

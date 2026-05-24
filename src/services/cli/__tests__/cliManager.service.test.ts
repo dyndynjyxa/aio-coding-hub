@@ -3,12 +3,15 @@ import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
 import {
   type ClaudeEnvState,
+  type ClaudeHooksState,
   type ClaudeSettingsState,
   type CodexConfigState,
   type CodexConfigTomlState,
   type CodexConfigTomlValidationResult,
   type SimpleCliInfo,
   cliManagerClaudeEnvSet,
+  cliManagerClaudeHooksGet,
+  cliManagerClaudeHooksSet,
   cliManagerClaudeInfoGet,
   cliManagerClaudeSettingsGet,
   cliManagerClaudeSettingsSet,
@@ -34,6 +37,8 @@ vi.mock("../../../generated/bindings", async () => {
       cliManagerCodexConfigTomlValidate: vi.fn(),
       cliManagerCodexConfigTomlSet: vi.fn(),
       cliManagerClaudeEnvSet: vi.fn(),
+      cliManagerClaudeHooksGet: vi.fn(),
+      cliManagerClaudeHooksSet: vi.fn(),
       cliManagerClaudeSettingsGet: vi.fn(),
       cliManagerClaudeSettingsSet: vi.fn(),
     },
@@ -121,6 +126,14 @@ function makeClaudeEnvState(overrides: Partial<ClaudeEnvState> = {}): ClaudeEnvS
     settings_path: "/tmp/.claude/settings.json",
     mcp_timeout_ms: null,
     disable_error_reporting: false,
+    ...overrides,
+  };
+}
+
+function makeClaudeHooksState(overrides: Partial<ClaudeHooksState> = {}): ClaudeHooksState {
+  return {
+    settings_path: "/tmp/.claude/settings.json",
+    groups: [],
     ...overrides,
   };
 }
@@ -215,6 +228,14 @@ describe("services/cli/cliManager", () => {
       status: "ok",
       data: makeClaudeEnvState(),
     });
+    vi.mocked(commands.cliManagerClaudeHooksGet).mockResolvedValue({
+      status: "ok",
+      data: makeClaudeHooksState(),
+    });
+    vi.mocked(commands.cliManagerClaudeHooksSet).mockResolvedValue({
+      status: "ok",
+      data: makeClaudeHooksState(),
+    });
     vi.mocked(commands.cliManagerClaudeSettingsGet).mockResolvedValue({
       status: "ok",
       data: makeClaudeSettingsState(),
@@ -243,6 +264,21 @@ describe("services/cli/cliManager", () => {
 
     await cliManagerClaudeEnvSet({ mcpTimeoutMs: 30_000, disableErrorReporting: true });
     expect(commands.cliManagerClaudeEnvSet).toHaveBeenCalledWith(30_000, true);
+
+    await cliManagerClaudeHooksGet();
+    expect(commands.cliManagerClaudeHooksGet).toHaveBeenCalledWith();
+
+    const hooksInput = {
+      groups: [
+        {
+          event: "PreToolUse",
+          matcher: "",
+          hooks: [{ hook_type: "command", command: "echo ok", timeout: null }],
+        },
+      ],
+    };
+    await cliManagerClaudeHooksSet(hooksInput);
+    expect(commands.cliManagerClaudeHooksSet).toHaveBeenCalledWith(hooksInput);
 
     await cliManagerClaudeSettingsGet();
     expect(commands.cliManagerClaudeSettingsGet).toHaveBeenCalledWith();

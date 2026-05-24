@@ -3,6 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import { CliManagerClaudeTab } from "../ClaudeTab";
 import { CliManagerCodexTab } from "../CodexTab";
 import { CliManagerGeminiTab } from "../GeminiTab";
+import {
+  useCliManagerClaudeHooksQuery,
+  useCliManagerClaudeHooksSetMutation,
+} from "../../../../query/cliManager";
 
 vi.mock("../../CliVersionBadge", () => ({
   CliVersionBadge: ({ cliKey }: { cliKey: string }) => <div>version-badge-{cliKey}</div>,
@@ -12,8 +16,31 @@ vi.mock("../ClaudeOAuthCard", () => ({
   ClaudeOAuthCard: () => <div>claude-oauth-card</div>,
 }));
 
+vi.mock("../../../../query/cliManager", async () => {
+  const actual = await vi.importActual<typeof import("../../../../query/cliManager")>(
+    "../../../../query/cliManager"
+  );
+  return {
+    ...actual,
+    useCliManagerClaudeHooksQuery: vi.fn(),
+    useCliManagerClaudeHooksSetMutation: vi.fn(),
+  };
+});
+
 describe("cli-manager tabs (coverage)", () => {
   it("renders ClaudeTab (available)", () => {
+    vi.mocked(useCliManagerClaudeHooksQuery).mockReturnValue({
+      data: { settings_path: "/tmp/.claude/settings.json", groups: [] },
+      error: null,
+      isError: false,
+      isLoading: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useCliManagerClaudeHooksSetMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+    } as any);
+
     render(
       <CliManagerClaudeTab
         claudeAvailable="available"

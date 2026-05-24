@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { CLIS } from "../../../constants/clis";
 import { useMcpServersListQuery } from "../../../query/mcp";
-import { usePromptsListQuery } from "../../../query/prompts";
+import { usePromptsListSummaryQuery } from "../../../query/prompts";
 import { useSkillsInstalledListQuery } from "../../../query/skills";
 import { pickWorkspaceById, useWorkspacesListQuery } from "../../../query/workspaces";
 import type {
@@ -59,7 +59,7 @@ function buildCliWorkspaceConfig(input: {
   cliKey: CliKey;
   enabled: boolean;
   workspacesQuery: ReturnType<typeof useWorkspacesListQuery>;
-  promptsQuery: ReturnType<typeof usePromptsListQuery>;
+  promptsQuery: ReturnType<typeof usePromptsListSummaryQuery>;
   mcpQuery: ReturnType<typeof useMcpServersListQuery>;
   skillsQuery: ReturnType<typeof useSkillsInstalledListQuery>;
 }): HomeCliWorkspaceConfig {
@@ -98,9 +98,9 @@ export function useHomeWorkspaceConfigs(options?: { enabled?: boolean }) {
   const codexWorkspaceId = codexWorkspacesQuery.data?.active_id ?? null;
   const geminiWorkspaceId = geminiWorkspacesQuery.data?.active_id ?? null;
 
-  const claudePromptsQuery = usePromptsListQuery(claudeWorkspaceId, { enabled });
-  const codexPromptsQuery = usePromptsListQuery(codexWorkspaceId, { enabled });
-  const geminiPromptsQuery = usePromptsListQuery(geminiWorkspaceId, { enabled });
+  const claudePromptsQuery = usePromptsListSummaryQuery(claudeWorkspaceId, { enabled });
+  const codexPromptsQuery = usePromptsListSummaryQuery(codexWorkspaceId, { enabled });
+  const geminiPromptsQuery = usePromptsListSummaryQuery(geminiWorkspaceId, { enabled });
 
   const claudeMcpQuery = useMcpServersListQuery(claudeWorkspaceId, { enabled });
   const codexMcpQuery = useMcpServersListQuery(codexWorkspaceId, { enabled });

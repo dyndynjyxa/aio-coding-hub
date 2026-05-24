@@ -324,6 +324,6 @@ describe("ui/MobileHeader", () => {
     );
     const dot = document.querySelector("[title='网关未运行']")!;
     expect(dot).toBeInTheDocument();
-    expect(dot.className).toContain("bg-slate-300");
+    expect(dot.className).toContain("bg-muted-foreground/40");
   });
 });

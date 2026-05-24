@@ -107,6 +107,12 @@ export function useSettingsPersistence(options: {
     },
     [setField]
   );
+  const setEnableDebugLog = useCallback(
+    (next: boolean) => {
+      setField("enable_debug_log", next);
+    },
+    [setField]
+  );
 
   return {
     settingsReady,
@@ -132,6 +138,8 @@ export function useSettingsPersistence(options: {
     setTrayEnabled,
     logRetentionDays: draft.log_retention_days,
     setLogRetentionDays,
+    enableDebugLog: draft.enable_debug_log,
+    setEnableDebugLog,
 
     requestPersist,
     commitNumberField,

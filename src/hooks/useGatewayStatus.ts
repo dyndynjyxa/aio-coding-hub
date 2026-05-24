@@ -5,7 +5,7 @@ import { useUpdateMeta } from "./useUpdateMeta";
 
 /**
  * Derived gateway status for UI display.
- * Consolidates logic shared between Sidebar and MobileNav.
+ * Derived gateway status for Sidebar display.
  */
 export function useGatewayStatus() {
   const { gatewayAvailable, gateway, preferredPort } = useGatewayMeta();
@@ -27,12 +27,12 @@ export function useGatewayStatus() {
   const statusTone =
     gatewayAvailable === "available" && gateway?.running
       ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-      : "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300";
+      : "bg-secondary text-muted-foreground";
 
   const portTone =
     gatewayAvailable === "available" && gateway?.running
       ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
-      : "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300";
+      : "bg-secondary text-muted-foreground";
 
   const portText = gatewayAvailable === "available" ? String(gateway?.port ?? preferredPort) : "—";
 

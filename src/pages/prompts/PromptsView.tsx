@@ -221,7 +221,7 @@ export function PromptsView({ workspaceId, cliKey, isActiveWorkspace = true }: P
   }
 
   return (
-    <>
+    <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-slate-500 dark:text-slate-400">
@@ -395,6 +395,6 @@ export function PromptsView({ workspaceId, cliKey, isActiveWorkspace = true }: P
           </div>
         </div>
       </Dialog>
-    </>
+    </div>
   );
 }

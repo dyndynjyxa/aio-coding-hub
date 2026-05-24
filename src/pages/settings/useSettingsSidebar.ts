@@ -1,7 +1,13 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { useCallback } from "react";
 import { useDevPreviewData } from "../../hooks/useDevPreviewData";
 import type { UpdateMeta } from "../../hooks/useUpdateMeta";
 import { useConfigExportMutation, useConfigImportMutation } from "../../query/configMigrate";
-import { useDbDiskUsageQuery, useRequestLogsClearAllMutation } from "../../query/dataManagement";
+import {
+  resetAppDataQueryCaches,
+  useDbDiskUsageQuery,
+  useRequestLogsClearAllMutation,
+} from "../../query/dataManagement";
 import {
   useModelPricesSyncBasellmMutation,
   useModelPricesTotalCountQuery,
@@ -13,6 +19,11 @@ import { useSettingsSidebarController } from "./useSettingsSidebarController";
 export function useSettingsSidebar(updateMeta: UpdateMeta) {
   const about = updateMeta.about;
   const devPreview = useDevPreviewData();
+  const queryClient = useQueryClient();
+  const clearAppDataResetCaches = useCallback(
+    () => resetAppDataQueryCaches(queryClient),
+    [queryClient]
+  );
 
   const modelPricesCountQuery = useModelPricesTotalCountQuery();
   const modelPricesSyncMutation = useModelPricesSyncBasellmMutation();
@@ -26,6 +37,7 @@ export function useSettingsSidebar(updateMeta: UpdateMeta) {
     updateMeta,
     devPreviewEnabled: devPreview.enabled,
     refreshDbDiskUsage: dbDiskUsageQuery.refetch,
+    clearAppDataResetCaches,
     clearRequestLogsMutation: {
       isPending: clearRequestLogsMutation.isPending,
       mutateAsync: clearRequestLogsMutation.mutateAsync,

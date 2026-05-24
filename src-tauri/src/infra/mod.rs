@@ -2,6 +2,7 @@
 
 pub(crate) mod app_paths;
 pub(crate) mod base_url_probe;
+pub(crate) mod claude_hooks;
 pub(crate) mod claude_settings;
 pub(crate) mod cli_manager;
 pub(crate) mod cli_proxy;

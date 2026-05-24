@@ -3,10 +3,15 @@
 // - Designed to keep status badge / error_code label / session reuse tooltip consistent across the Home page.
 
 import { GatewayErrorCodes, getGatewayErrorShortLabel } from "../../constants/gatewayErrorCodes";
+import {
+  normalizeClaudeModelMapping,
+  type ClaudeModelMapping,
+} from "../../services/gateway/claudeModelMapping";
 import type { CliKey } from "../../services/providers/providers";
 import type { RequestLogRouteHop } from "../../services/gateway/requestLogs";
 import type { TraceSession } from "../../services/gateway/traceStore";
 import { Tooltip } from "../../ui/Tooltip";
+import { computeEffectiveInputTokens as computeSharedEffectiveInputTokens } from "../../utils/cacheRateMetrics";
 import { FolderOpen } from "lucide-react";
 import { RouteTooltipContent } from "./RouteTooltipContent";
 
@@ -45,7 +50,7 @@ export type RequestLogAuditMeta = {
 type ParsedRequestLogSpecialSetting = {
   type?: string;
   reason?: string;
-};
+} & Record<string, unknown>;
 
 function parseRequestLogSpecialSettings(
   specialSettingsJson: string | null | undefined
@@ -65,6 +70,74 @@ function parseRequestLogSpecialSettings(
 
 function isParsedRequestLogSpecialSetting(value: unknown): value is ParsedRequestLogSpecialSetting {
   return typeof value === "object" && value !== null;
+}
+
+function parsedSettingString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function parsedSettingNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : Number.NaN;
+}
+
+function parsedSettingBoolean(value: unknown): boolean {
+  return typeof value === "boolean" ? value : false;
+}
+
+export function resolveClaudeModelMappingFromSpecialSettings(
+  specialSettingsJson: string | null | undefined,
+  finalProviderId?: number | null
+): ClaudeModelMapping | null {
+  const settings = parseRequestLogSpecialSettings(specialSettingsJson);
+  const mappings = settings
+    .map((setting) => {
+      if (setting.type !== "claude_model_mapping") return null;
+      return normalizeClaudeModelMapping({
+        requestedModel: parsedSettingString(setting.requestedModel),
+        effectiveModel: parsedSettingString(setting.effectiveModel),
+        mappingKind: parsedSettingString(setting.mappingKind),
+        providerId: parsedSettingNumber(setting.providerId),
+        providerName: parsedSettingString(setting.providerName),
+        applied: parsedSettingBoolean(setting.applied),
+      });
+    })
+    .filter((mapping): mapping is ClaudeModelMapping => mapping !== null);
+
+  if (mappings.length === 0) return null;
+
+  if (finalProviderId != null) {
+    const finalProviderMapping = mappings
+      .slice()
+      .reverse()
+      .find((mapping) => mapping.providerId === finalProviderId);
+    if (finalProviderMapping) return finalProviderMapping;
+  }
+
+  return mappings[mappings.length - 1] ?? null;
+}
+
+export function hasClaudeModelMappingSpecialSetting(
+  specialSettingsJson: string | null | undefined
+): boolean {
+  const settings = parseRequestLogSpecialSettings(specialSettingsJson);
+  for (const setting of settings) {
+    if (setting.type !== "claude_model_mapping") continue;
+    return true;
+  }
+  return false;
+}
+
+export function formatClaudeModelMappingText(
+  requestedModel: string | null | undefined,
+  mapping: ClaudeModelMapping | null | undefined
+) {
+  const normalized = normalizeClaudeModelMapping(mapping);
+  if (normalized) {
+    return `${normalized.requestedModel} → ${normalized.effectiveModel}`;
+  }
+
+  const fallback = requestedModel?.trim();
+  return fallback || "未知";
 }
 
 type CodexServiceTierResultSetting = {
@@ -379,9 +452,7 @@ export function computeEffectiveInputTokens(
   cacheReadInputTokens: number | null
 ) {
   if (inputTokens == null) return null;
-  const cacheRead = cacheReadInputTokens ?? 0;
-  if (cliKey === "codex" || cliKey === "gemini") return Math.max(inputTokens - cacheRead, 0);
-  return inputTokens;
+  return computeSharedEffectiveInputTokens(cliKey, inputTokens, cacheReadInputTokens);
 }
 
 export function buildRequestRouteMeta(input: {
@@ -401,14 +472,18 @@ export function buildRequestRouteMeta(input: {
     };
   }
 
-  const totalHopAttempts = hops.reduce((sum, h) => sum + (h.attempts ?? 1), 0);
-  const skippedCount = Math.max(0, input.attemptCount - totalHopAttempts);
-  const hasRetry = hops.some((h) => (h.attempts ?? 1) > 1);
+  const skippedCount = hops
+    .filter((h) => h.skipped)
+    .reduce((sum, h) => sum + (h.attempts ?? 1), 0);
+  const activeAttemptCount = hops
+    .filter((h) => !h.skipped)
+    .reduce((sum, h) => sum + (h.attempts ?? 1), 0);
+  const hasRetry = hops.some((h) => !h.skipped && (h.attempts ?? 1) > 1);
 
   const summary = input.hasFailover
     ? `切换 ${input.attemptCount} 次后${input.status != null && input.status < 400 ? "成功" : "结束"}`
     : skippedCount > 0 && hasRetry
-      ? `跳过 ${skippedCount} 个候选，并重试 ${input.attemptCount} 次`
+      ? `跳过 ${skippedCount} 个候选，并重试 ${activeAttemptCount} 次`
       : skippedCount > 0
         ? `跳过 ${skippedCount} 个候选`
         : hasRetry

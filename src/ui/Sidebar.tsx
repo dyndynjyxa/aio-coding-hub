@@ -1,3 +1,4 @@
+import type { MouseEvent as ReactMouseEvent } from "react";
 import { NavLink } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -18,6 +19,7 @@ import { AIO_REPO_URL } from "../constants/urls";
 import { useDevPreviewData } from "../hooks/useDevPreviewData";
 import { useGatewayStatus, openReleasesUrl } from "../hooks/useGatewayStatus";
 import { updateDialogSetOpen } from "../hooks/useUpdateMeta";
+import { openDesktopUrl } from "../services/desktop/opener";
 import { cn } from "../utils/cn";
 
 type NavItem = {
@@ -42,36 +44,24 @@ const NAV: NavItem[] = [
 ];
 
 export type SidebarProps = {
-  /** Whether the sidebar is visible (for responsive control) */
-  isOpen?: boolean;
-  /** Callback when navigation item is clicked (for mobile drawer close) */
-  onNavClick?: () => void;
-  /** Additional className for the sidebar container */
   className?: string;
 };
 
-export function Sidebar({ isOpen = true, onNavClick, className }: SidebarProps) {
+export function Sidebar({ className }: SidebarProps) {
   const { statusText, statusTone, portText, hasUpdate, isPortable } = useGatewayStatus();
   const devPreview = useDevPreviewData();
 
-  function handleNavClick() {
-    onNavClick?.();
+  function handleRepoClick(event: ReactMouseEvent<HTMLAnchorElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    openDesktopUrl(AIO_REPO_URL).catch(() => {});
   }
 
   return (
     <aside
       className={cn(
-        "sticky top-0 h-screen shrink-0",
-        "border-r border-slate-200 bg-white/70 backdrop-blur",
-        "dark:border-slate-700 dark:bg-slate-900/70",
-        // Responsive width: hidden on mobile, full width on desktop
-        "w-64",
-        // Transition for smooth open/close
-        "transition-transform duration-200 ease-in-out",
-        // On desktop (lg+), always show
-        "lg:translate-x-0",
-        // On smaller screens, control via isOpen prop
-        !isOpen && "max-lg:-translate-x-full max-lg:absolute max-lg:z-40",
+        "sticky top-0 h-screen w-64 shrink-0",
+        "border-r border-sidebar-border bg-sidebar/70 backdrop-blur",
         className
       )}
     >
@@ -85,13 +75,14 @@ export function Sidebar({ isOpen = true, onNavClick, className }: SidebarProps) 
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="AIO Coding Hub GitHub 仓库"
-                className="text-slate-500 transition hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
+                onClick={handleRepoClick}
+                className="text-muted-foreground transition hover:text-foreground"
               >
                 <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
                 </svg>
               </a>
-              <div className="text-sm font-semibold dark:text-slate-100">AIO Coding Hub</div>
+              <div className="text-sm font-semibold text-sidebar-foreground">AIO Coding Hub</div>
             </div>
             {hasUpdate ? (
               <button
@@ -129,12 +120,11 @@ export function Sidebar({ isOpen = true, onNavClick, className }: SidebarProps) 
                 cn(
                   "group flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition",
                   isActive
-                    ? "bg-slate-900 text-white shadow-sm dark:bg-slate-100 dark:text-slate-900"
-                    : "text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                    ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
+                    : "text-sidebar-foreground hover:bg-sidebar-accent"
                 )
               }
               end={item.to === "/"}
-              onClick={handleNavClick}
             >
               {({ isActive }) => (
                 <>
@@ -151,10 +141,10 @@ export function Sidebar({ isOpen = true, onNavClick, className }: SidebarProps) 
           ))}
         </nav>
 
-        <div className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
-          <div className="rounded-xl bg-slate-100/90 px-3 py-2.5 dark:bg-slate-800">
+        <div className="px-4 py-3 text-xs text-muted-foreground">
+          <div className="rounded-xl bg-sidebar-accent px-3 py-2.5">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-medium text-slate-600 dark:text-slate-300">网关</span>
+              <span className="text-sm font-medium text-sidebar-foreground">网关</span>
               <span className={cn("rounded-full px-2 py-0.5 text-[12px] font-medium", statusTone)}>
                 {statusText} · {portText}
               </span>
@@ -166,6 +156,5 @@ export function Sidebar({ isOpen = true, onNavClick, className }: SidebarProps) 
   );
 }
 
-// Export NAV items for use in MobileNav
 export { NAV };
 export type { NavItem };

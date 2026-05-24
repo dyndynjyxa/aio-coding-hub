@@ -1,6 +1,7 @@
 //! Usage: Codex (OpenAI / ChatGPT) OAuth adapter.
 
 use crate::gateway::oauth::provider_trait::*;
+use crate::shared::http_body::read_text_with_limit;
 use axum::http::{HeaderMap, HeaderValue};
 use std::future::Future;
 use std::pin::Pin;
@@ -8,6 +9,8 @@ use std::pin::Pin;
 pub(crate) struct CodexOAuthProvider {
     endpoints: OAuthEndpoints,
 }
+
+const CODEX_LIMITS_RESPONSE_BODY_LIMIT: usize = 1024 * 1024;
 
 impl CodexOAuthProvider {
     pub(crate) fn new() -> Self {
@@ -111,9 +114,10 @@ impl OAuthProvider for CodexOAuthProvider {
                 return Err(format!("codex limits fetch status: {}", resp.status()));
             }
 
-            let json: serde_json::Value = resp
-                .json()
+            let body = read_text_with_limit(resp, CODEX_LIMITS_RESPONSE_BODY_LIMIT, "codex limits")
                 .await
+                .map_err(|e| format!("codex limits body read failed: {e}"))?;
+            let json: serde_json::Value = serde_json::from_str(&body)
                 .map_err(|e| format!("codex limits parse failed: {e}"))?;
 
             Ok(OAuthLimitsResult {

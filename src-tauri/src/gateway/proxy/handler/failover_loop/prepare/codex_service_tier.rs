@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 
-use crate::shared::mutex_ext::MutexExt;
+use crate::gateway::response_fixer;
 
 /// Result of Codex service tier detection and billing decision.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -199,8 +199,7 @@ pub(super) fn append_result_if_detected(
         return;
     };
 
-    let mut settings = special_settings.lock_or_recover();
-    settings.push(value);
+    response_fixer::push_special_setting(special_settings, value);
 }
 
 #[cfg(test)]

@@ -26,6 +26,37 @@ describe("services/gateway/gatewayEvents", () => {
     unlistenFns.forEach((fn) => expect(fn).toHaveBeenCalledTimes(1));
   });
 
+  it("bounds non-transition circuit dedup without clearing hot entries", async () => {
+    vi.resetModules();
+    const { shouldLogCircuitNonTransition } = await import("../gatewayEvents");
+
+    const dedup = new Map<string, number>();
+    expect(shouldLogCircuitNonTransition(dedup, "same", 0)).toBe(true);
+    expect(shouldLogCircuitNonTransition(dedup, "same", 100)).toBe(false);
+    expect(shouldLogCircuitNonTransition(dedup, "same", 3000)).toBe(true);
+
+    const withExpired = new Map<string, number>([
+      ["old", 0],
+      ["fresh", 9500],
+    ]);
+    expect(shouldLogCircuitNonTransition(withExpired, "next", 10_000)).toBe(true);
+    expect(withExpired.has("old")).toBe(false);
+    expect(withExpired.has("fresh")).toBe(true);
+    expect(withExpired.has("next")).toBe(true);
+
+    const full = new Map<string, number>();
+    for (let index = 0; index < 500; index += 1) {
+      full.set(`key-${index}`, 10_000 + index);
+    }
+
+    expect(shouldLogCircuitNonTransition(full, "key-new", 11_000)).toBe(true);
+
+    expect(full.size).toBe(500);
+    expect(full.has("key-0")).toBe(false);
+    expect(full.has("key-1")).toBe(true);
+    expect(full.has("key-new")).toBe(true);
+  });
+
   it("registers listeners and handles payload branches", async () => {
     setTauriRuntime();
     vi.resetModules();
@@ -297,6 +328,100 @@ describe("services/gateway/gatewayEvents", () => {
     );
     expect(guardEntry?.level).toBe("warn");
     expect(guardEntry?.details).toMatchObject({ event: gatewayEventNames.requestStart });
+
+    unlisten();
+    vi.useRealTimers();
+  });
+
+  it("accepts valid Claude model mapping payloads and drops invalid ones", async () => {
+    setTauriRuntime();
+    vi.resetModules();
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    clearTauriEventListeners();
+
+    vi.mocked(tauriListen).mockResolvedValue(tauriUnlisten);
+
+    const { useTraceStore } = await import("../traceStore");
+    const { listenGatewayEvents } = await import("../gatewayEvents");
+    const unlisten = await listenGatewayEvents();
+
+    const traceResult = renderHook(() => useTraceStore()).result;
+
+    const handlerFor = (eventName: string) =>
+      vi
+        .mocked(tauriListen)
+        .mock.calls.slice()
+        .reverse()
+        .find((call) => call[0] === eventName)?.[1];
+
+    act(() => {
+      handlerFor(gatewayEventNames.attempt)?.({
+        payload: {
+          trace_id: "mapping-trace",
+          cli_key: "claude",
+          method: "POST",
+          path: "/v1/messages",
+          query: null,
+          requested_model: "claude-sonnet",
+          attempt_index: 1,
+          provider_id: 1,
+          provider_name: "Provider A",
+          base_url: "https://provider-a.example",
+          outcome: "started",
+          status: null,
+          attempt_started_ms: 0,
+          attempt_duration_ms: 0,
+          claude_model_mapping: {
+            requestedModel: "claude-sonnet",
+            effectiveModel: "gpt-5.4",
+            mappingKind: "sonnet",
+            providerId: 1,
+            providerName: "Provider A",
+            applied: true,
+          },
+        },
+      } as any);
+    });
+
+    expect(traceResult.current.traces[0]?.claude_model_mapping?.effectiveModel).toBe("gpt-5.4");
+
+    act(() => {
+      handlerFor(gatewayEventNames.request)?.({
+        payload: {
+          trace_id: "invalid-mapping-trace",
+          cli_key: "claude",
+          method: "POST",
+          path: "/v1/messages",
+          query: null,
+          requested_model: "claude-sonnet",
+          status: 200,
+          error_category: null,
+          error_code: null,
+          duration_ms: 10,
+          ttfb_ms: null,
+          attempts: [],
+          input_tokens: null,
+          output_tokens: null,
+          total_tokens: null,
+          cache_read_input_tokens: null,
+          cache_creation_input_tokens: null,
+          cache_creation_5m_input_tokens: null,
+          cache_creation_1h_input_tokens: null,
+          claude_model_mapping: {
+            requestedModel: "claude-sonnet",
+            effectiveModel: "gpt-5.4",
+            mappingKind: "sonnet",
+            providerId: "bad",
+            providerName: "Provider A",
+            applied: true,
+          },
+        },
+      } as any);
+    });
+
+    expect(traceResult.current.traces.map((trace) => trace.trace_id)).toEqual(["mapping-trace"]);
 
     unlisten();
     vi.useRealTimers();

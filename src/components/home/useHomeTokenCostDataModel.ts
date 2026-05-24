@@ -11,18 +11,22 @@ import {
 import { formatUnknownError } from "../../utils/errors";
 import {
   buildPreviewTokenSummary,
+  previewFolderSelectionFactor,
   scalePreviewTokenRows,
   PREVIEW_TOKEN_PROVIDER_ROWS,
   PREVIEW_TOKEN_MODEL_ROWS,
+  PREVIEW_TOKEN_DAY_ROWS,
 } from "./previewTokenData";
 
-type TokenCostScope = "provider" | "model";
+type TokenCostScope = "provider" | "model" | "day";
 
 type TokenCostQueryInput = {
   startTs: number | null;
   endTs: number | null;
   cliKey: null;
   providerId: null;
+  folderKeys?: string[] | null;
+  excludeCx2CcGatewayBridge?: boolean | null;
 };
 
 type TokenCostQueryConfig = {
@@ -88,12 +92,18 @@ export function useHomeTokenCostDataModel({
     [queryConfig.input]
   );
 
+  const previewFactor = useMemo(
+    () => queryConfig.previewFactor * previewFolderSelectionFactor(queryConfig.input.folderKeys),
+    [queryConfig.input.folderKeys, queryConfig.previewFactor]
+  );
+
   const previewRowsByScope = useMemo(
     () => ({
-      provider: scalePreviewTokenRows(PREVIEW_TOKEN_PROVIDER_ROWS, queryConfig.previewFactor),
-      model: scalePreviewTokenRows(PREVIEW_TOKEN_MODEL_ROWS, queryConfig.previewFactor),
+      provider: scalePreviewTokenRows(PREVIEW_TOKEN_PROVIDER_ROWS, previewFactor),
+      model: scalePreviewTokenRows(PREVIEW_TOKEN_MODEL_ROWS, previewFactor),
+      day: scalePreviewTokenRows(PREVIEW_TOKEN_DAY_ROWS, previewFactor),
     }),
-    [queryConfig.previewFactor]
+    [previewFactor]
   );
   const previewSummary = useMemo(
     () => buildPreviewTokenSummary(previewRowsByScope.provider),
@@ -127,8 +137,8 @@ export function useHomeTokenCostDataModel({
   const summary = previewActive ? previewSummary : summaryRaw;
   const rows = useMemo(() => {
     if (!previewActive) return rowsRaw;
-    return scope === "provider" ? previewRowsByScope.provider : previewRowsByScope.model;
-  }, [previewActive, previewRowsByScope.model, previewRowsByScope.provider, rowsRaw, scope]);
+    return previewRowsByScope[scope];
+  }, [previewActive, previewRowsByScope, rowsRaw, scope]);
   const totalCostUsd = useMemo(() => totalCostUsdFromRows(rows), [rows]);
 
   const refresh = useCallback(() => {

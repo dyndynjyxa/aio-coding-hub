@@ -150,6 +150,77 @@ fn manifest_entry<'a>(manifest: &'a CliProxyManifest, kind: &str) -> &'a BackupF
 }
 
 #[test]
+fn read_manifest_rejects_oversized_file() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let root = cli_proxy_root_dir(&handle, "codex").expect("cli proxy root");
+    std::fs::create_dir_all(&root).expect("create root");
+    std::fs::write(
+        cli_proxy_manifest_path(&root),
+        vec![b'x'; CLI_PROXY_MANIFEST_MAX_BYTES + 1],
+    )
+    .expect("write oversized manifest");
+
+    let err = read_manifest(&handle, "codex").expect_err("oversized manifest should fail");
+
+    assert!(err.to_string().contains("too large"));
+}
+
+#[test]
+fn backup_for_enable_rejects_oversized_target_file() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let config_path = codex_config_path(&handle).expect("codex config path");
+    std::fs::create_dir_all(config_path.parent().expect("config parent"))
+        .expect("create config parent");
+    std::fs::write(&config_path, vec![b'x'; CLI_PROXY_FILE_MAX_BYTES + 1])
+        .expect("write oversized config");
+
+    let err = backup_for_enable(&handle, "codex", "http://127.0.0.1:37123", None)
+        .expect_err("oversized target file should fail");
+
+    assert!(err.to_string().contains("too large"));
+    assert!(read_manifest(&handle, "codex")
+        .expect("read manifest")
+        .is_none());
+}
+
+#[test]
+fn restore_backups_exactly_rejects_oversized_backup_file() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let config_path = codex_config_path(&handle).expect("codex config path");
+    let root = cli_proxy_root_dir(&handle, "codex").expect("cli proxy root");
+    let files_dir = cli_proxy_files_dir(&root);
+    std::fs::create_dir_all(&files_dir).expect("create files dir");
+    std::fs::write(
+        files_dir.join("config.toml"),
+        vec![b'x'; CLI_PROXY_FILE_MAX_BYTES + 1],
+    )
+    .expect("write oversized backup");
+    let manifest = CliProxyManifest {
+        schema_version: MANIFEST_SCHEMA_VERSION,
+        managed_by: MANAGED_BY.to_string(),
+        cli_key: "codex".to_string(),
+        enabled: true,
+        base_origin: Some("http://127.0.0.1:37123".to_string()),
+        created_at: 1,
+        updated_at: 1,
+        files: vec![BackupFileEntry {
+            kind: "unknown_kind".to_string(),
+            path: config_path.to_string_lossy().to_string(),
+            existed: true,
+            backup_rel: Some("config.toml".to_string()),
+        }],
+    };
+
+    let err = restore_backups_exactly_from_manifest(&handle, &manifest)
+        .expect_err("oversized backup should fail");
+
+    assert!(err.to_string().contains("too large"));
+}
+
+#[test]
 fn codex_proxy_preserves_nested_model_provider_tables_and_order() {
     let input = r#"
 model_provider = "aio"
@@ -373,6 +444,58 @@ fn codex_proxy_auth_json_rejects_non_object_root() {
     assert!(err
         .to_string()
         .contains("auth.json root must be a JSON object"));
+}
+
+#[test]
+fn codex_proxy_enable_does_not_partially_write_config_when_auth_json_is_invalid() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    let original_config = r#"[model_providers.openai]
+name = "openai"
+base_url = "https://api.openai.com/v1"
+"#;
+    let invalid_auth = r#"{ "tokens": "#;
+
+    write_codex_direct_files(&handle, original_config, invalid_auth);
+
+    let result = set_enabled(&handle, "codex", true, base_origin).expect("enable codex");
+    assert!(!result.ok, "enable must fail: {result:?}");
+    assert_eq!(
+        result.error_code.as_deref(),
+        Some("CLI_PROXY_ENABLE_FAILED")
+    );
+    assert!(
+        result.message.contains("CLI_PROXY_INVALID_AUTH_JSON"),
+        "unexpected message: {}",
+        result.message
+    );
+
+    let config_path = codex_config_path(&handle).expect("codex config path");
+    let auth_path = codex_auth_path(&handle).expect("codex auth path");
+    assert_eq!(
+        std::fs::read_to_string(&config_path).expect("read config"),
+        original_config,
+        "config.toml must stay untouched when a later target fails to parse"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&auth_path).expect("read auth"),
+        invalid_auth,
+        "auth.json must stay untouched on parse failure"
+    );
+    assert_eq!(
+        std::fs::read_to_string(auth_path.with_extension("json.invalid-backup"))
+            .expect("read invalid backup"),
+        invalid_auth
+    );
+
+    let manifest = read_manifest(&handle, "codex")
+        .expect("read manifest")
+        .expect("manifest should preserve backup snapshot");
+    assert!(
+        !manifest.enabled,
+        "failed enable should not mark the proxy as enabled"
+    );
 }
 
 #[test]

@@ -44,3 +44,4 @@ src/templates/
 .opencode/
 src-tauri/target*/
 .pnpm-store/
+subagent.md

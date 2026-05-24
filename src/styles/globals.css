@@ -2,33 +2,133 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Theme variables */
-:root {
-  --color-bg-primary: #f8fafc;
-  --color-bg-secondary: #f1f5f9;
-  --color-bg-card: #ffffff;
-  --color-text-primary: #0f172a;
-  --color-text-secondary: #475569;
-  --color-text-muted: #94a3b8;
-  --color-border: #e2e8f0;
-  --color-border-light: #f1f5f9;
-  --color-scrollbar: rgba(148, 163, 184, 0.3);
-  --color-scrollbar-hover: rgba(148, 163, 184, 0.6);
-  --color-scrollbar-active: rgba(100, 116, 139, 0.7);
-}
+@layer base {
+  :root {
+    /* shadcn standard semantic tokens (HSL values without wrapper) */
+    --background: 210 40% 98%;
+    --foreground: 222.2 84% 4.9%;
 
-.dark {
-  --color-bg-primary: #0f172a;
-  --color-bg-secondary: #1e293b;
-  --color-bg-card: #1e293b;
-  --color-text-primary: #f1f5f9;
-  --color-text-secondary: #94a3b8;
-  --color-text-muted: #64748b;
-  --color-border: #334155;
-  --color-border-light: #1e293b;
-  --color-scrollbar: rgba(148, 163, 184, 0.2);
-  --color-scrollbar-hover: rgba(148, 163, 184, 0.4);
-  --color-scrollbar-active: rgba(148, 163, 184, 0.5);
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --primary: 220 100% 50%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 220 100% 50%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 220 100% 50%;
+
+    --radius: 0.5rem;
+
+    /* Chart palette */
+    --chart-1: 220 100% 50%;
+    --chart-2: 271 81.3% 55.9%;
+    --chart-3: 152 56.8% 39.6%;
+    --chart-4: 27.5 95.8% 53.1%;
+    --chart-5: 199.4 89.7% 48.4%;
+
+    /* Sidebar tokens */
+    --sidebar: 0 0% 100%;
+    --sidebar-foreground: 222.2 84% 4.9%;
+    --sidebar-primary: 222.2 84% 4.9%;
+    --sidebar-primary-foreground: 210 40% 98%;
+    --sidebar-accent: 210 40% 96.1%;
+    --sidebar-accent-foreground: 222.2 47.4% 11.2%;
+    --sidebar-border: 214.3 31.8% 91.4%;
+    --sidebar-ring: 220 100% 50%;
+
+    /* Scrollbar */
+    --color-scrollbar: rgba(148, 163, 184, 0.3);
+    --color-scrollbar-hover: rgba(148, 163, 184, 0.6);
+    --color-scrollbar-active: rgba(100, 116, 139, 0.7);
+
+    /* Legacy bridge (deprecated — migrate to shadcn tokens above) */
+    --color-bg-primary: #f8fafc;
+    --color-bg-secondary: #f1f5f9;
+    --color-bg-card: #ffffff;
+    --color-text-primary: #0f172a;
+    --color-text-secondary: #475569;
+    --color-text-muted: #94a3b8;
+    --color-border: #e2e8f0;
+    --color-border-light: #f1f5f9;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+
+    --card: 217.2 32.6% 17.5%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 220 100% 50%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 220 100% 50%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 215 25% 27%;
+    --input: 215 25% 27%;
+    --ring: 220 100% 60%;
+
+    /* Chart palette (dark) */
+    --chart-1: 220 100% 60%;
+    --chart-2: 271 91% 65%;
+    --chart-3: 152 60% 52%;
+    --chart-4: 27 96% 61%;
+    --chart-5: 199 90% 58%;
+
+    /* Sidebar tokens (dark) */
+    --sidebar: 222.2 84% 4.9%;
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-primary: 210 40% 96.1%;
+    --sidebar-primary-foreground: 222.2 84% 4.9%;
+    --sidebar-accent: 217.2 32.6% 17.5%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 215 25% 27%;
+    --sidebar-ring: 220 100% 60%;
+
+    /* Scrollbar */
+    --color-scrollbar: rgba(148, 163, 184, 0.2);
+    --color-scrollbar-hover: rgba(148, 163, 184, 0.4);
+    --color-scrollbar-active: rgba(148, 163, 184, 0.5);
+
+    /* Legacy bridge (deprecated) */
+    --color-bg-primary: #0f172a;
+    --color-bg-secondary: #1e293b;
+    --color-bg-card: #1e293b;
+    --color-text-primary: #f1f5f9;
+    --color-text-secondary: #94a3b8;
+    --color-text-muted: #64748b;
+    --color-border: #334155;
+    --color-border-light: #1e293b;
+  }
 }
 
 html,
@@ -39,17 +139,23 @@ body,
 
 body {
   margin: 0;
-  background: var(--color-bg-primary);
-  color: var(--color-text-primary);
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
   font-family:
     ui-sans-serif,
     system-ui,
     -apple-system,
-    Segoe UI,
+    "Segoe UI",
     Roboto,
+    "Helvetica Neue",
     Arial,
+    sans-serif,
     "Apple Color Emoji",
     "Segoe UI Emoji";
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Custom scrollbar - overlay style, minimal footprint */

@@ -18,7 +18,7 @@ describe("utils/errors", () => {
   it("formatUnknownError handles circular objects and broken toString", () => {
     const circular: any = {};
     circular.self = circular;
-    expect(formatUnknownError(circular)).toBe("[object Object]");
+    expect(formatUnknownError(circular)).toContain('"self":"[Circular]"');
 
     const broken: any = {
       toString() {
@@ -26,7 +26,45 @@ describe("utils/errors", () => {
       },
     };
     broken.self = broken;
-    expect(formatUnknownError(broken)).toBe("未知错误");
+    expect(formatUnknownError(broken)).toContain('"toString":"[Function]"');
+  });
+
+  it("formatUnknownError bounds large strings and structured error objects", () => {
+    const long = `ERR_CODE: ${"x".repeat(5000)}`;
+    const formatted = formatUnknownError(long);
+    expect(formatted.length).toBeLessThan(4200);
+    expect(formatted).toContain("[Truncated");
+
+    const structured = formatUnknownError({
+      items: Array.from({ length: 40 }, (_, index) => ({
+        label: `item-${index}`,
+        text: "y".repeat(1000),
+      })),
+    });
+
+    expect(structured.length).toBeLessThanOrEqual(4140);
+    expect(structured).toContain("[Truncated");
+    expect(structured).not.toContain("item-39");
+
+    const wide = formatUnknownError(
+      Object.fromEntries(
+        Array.from({ length: 40 }, (_, index) => [`k${String(index).padStart(2, "0")}`, index])
+      )
+    );
+    expect(wide).toContain("__truncated__");
+    expect(wide).not.toContain("k39");
+  });
+
+  it("formatUnknownError tolerates unreadable object properties", () => {
+    const err: Record<string, unknown> = {};
+    Object.defineProperty(err, "bad", {
+      enumerable: true,
+      get() {
+        throw new Error("nope");
+      },
+    });
+
+    expect(formatUnknownError(err)).toContain('"bad":"[Unreadable]"');
   });
 
   it("parseErrorCodeMessage parses code prefix", () => {

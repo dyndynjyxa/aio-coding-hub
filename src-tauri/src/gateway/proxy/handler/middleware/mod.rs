@@ -39,8 +39,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 /// Result of a middleware step: continue processing or return early.
-pub(super) enum MiddlewareAction {
-    Continue(Box<ProxyContext>),
+pub(super) enum MiddlewareAction<R: tauri::Runtime = tauri::Wry> {
+    Continue(Box<ProxyContext<R>>),
     ShortCircuit(Response),
 }
 
@@ -49,9 +49,9 @@ pub(super) enum MiddlewareAction {
 /// Fields are progressively populated by each middleware. The context starts
 /// with only the minimal request information and gains richer data as it passes
 /// through the chain.
-pub(super) struct ProxyContext {
+pub(super) struct ProxyContext<R: tauri::Runtime = tauri::Wry> {
     // -- immutable request metadata (set at construction) --
-    pub(super) state: GatewayAppState,
+    pub(super) state: GatewayAppState<R>,
     pub(super) cli_key: String,
     pub(super) forwarded_path: String,
     pub(super) req_method: Method,
@@ -96,9 +96,9 @@ pub(super) struct ProxyContext {
     pub(super) unavailable_fingerprint_debug: String,
 }
 
-impl ProxyContext {
+impl<R: tauri::Runtime> ProxyContext<R> {
     /// Build the `RequestContextParts` needed by the forwarder, consuming this context.
-    pub(super) fn into_request_context_parts(self) -> RequestContextParts {
+    pub(super) fn into_request_context_parts(self) -> RequestContextParts<R> {
         let rs = self
             .runtime_settings
             .expect("runtime_settings must be populated before forwarding");

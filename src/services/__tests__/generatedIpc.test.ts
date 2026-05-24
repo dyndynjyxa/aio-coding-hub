@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invokeGeneratedIpc, mapGeneratedCommandResponse } from "../generatedIpc";
 import { logToConsole } from "../consoleLog";
 
@@ -11,6 +11,10 @@ vi.mock("../consoleLog", async () => {
 });
 
 describe("services/generatedIpc", () => {
+  beforeEach(() => {
+    vi.mocked(logToConsole).mockClear();
+  });
+
   it("throws string error results and logs command details", async () => {
     await expect(
       invokeGeneratedIpc({
@@ -76,6 +80,60 @@ describe("services/generatedIpc", () => {
       },
       error: "boom",
     });
+  });
+
+  it("bounds large log args while preserving sensitive-key redaction", async () => {
+    const items = Array.from({ length: 80 }, (_, index) => ({
+      label: `item-${index}`,
+      token: `secret-${index}`,
+      text: "x".repeat(3_000),
+    }));
+    const wide = Object.fromEntries(
+      Array.from({ length: 80 }, (_, index) => [`k${String(index).padStart(2, "0")}`, index])
+    );
+
+    await expect(
+      invokeGeneratedIpc({
+        title: "保存失败",
+        cmd: "large_payload",
+        args: {
+          input: {
+            apiKey: "sk-secret",
+            items,
+            wide,
+          },
+        },
+        invoke: async () => ({ status: "error", error: "boom" }),
+      })
+    ).rejects.toThrow("boom");
+
+    const calls = vi.mocked(logToConsole).mock.calls;
+    const loggedDetails = calls[calls.length - 1]?.[2] as {
+      args: {
+        input: {
+          apiKey: string;
+          items: Array<Record<string, unknown> | string>;
+          wide: Record<string, unknown>;
+        };
+      };
+    };
+
+    expect(loggedDetails.args.input.apiKey).toBe("[REDACTED]");
+    expect(loggedDetails.args.input.items).toHaveLength(51);
+    expect(loggedDetails.args.input.items[0]).toMatchObject({
+      label: "item-0",
+      token: "[REDACTED]",
+      text: expect.stringContaining("[Truncated"),
+    });
+    expect(loggedDetails.args.input.items[loggedDetails.args.input.items.length - 1]).toBe(
+      "[Truncated 30 items]"
+    );
+    expect(loggedDetails.args.input.items).not.toContainEqual(
+      expect.objectContaining({ label: "item-79" })
+    );
+    expect(loggedDetails.args.input.wide.k00).toBe(0);
+    expect(loggedDetails.args.input.wide.k79).toBeUndefined();
+    expect(loggedDetails.args.input.wide.__truncated__).toBe("30 keys truncated");
   });
 
   it("supports null-result fallback for commands that legitimately return null", async () => {

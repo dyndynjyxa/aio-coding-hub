@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 const USD_FEMTO_DENOM: f64 = 1_000_000_000_000_000.0;
 const SQL_MODEL_KEY_EXPR: &str = "COALESCE(NULLIF(TRIM(requested_model), ''), 'Unknown')";
+const MODEL_FILTER_MAX_CHARS: usize = 200;
 
 /// Common query parameters shared by all cost analytics endpoints.
 #[derive(Debug, Clone, Deserialize, specta::Type)]
@@ -152,8 +153,8 @@ fn normalize_model_filter(model: Option<&str>) -> Option<String> {
     if raw.is_empty() {
         return None;
     }
-    Some(if raw.len() > 200 {
-        raw[..200].to_string()
+    Some(if raw.chars().count() > MODEL_FILTER_MAX_CHARS {
+        raw.chars().take(MODEL_FILTER_MAX_CHARS).collect()
     } else {
         raw.to_string()
     })
@@ -835,20 +836,18 @@ LIMIT ?6
             let (effective_cli_key, model) = if let Some((basis_cli_key, basis_model)) =
                 request_logs::parse_cx2cc_cost_basis(special_settings_json.as_deref())
             {
-                (basis_cli_key, basis_model)
+                let Some(model) = normalize_model_filter(Some(&basis_model)) else {
+                    report.skipped_no_model = report.skipped_no_model.saturating_add(1);
+                    continue;
+                };
+                (basis_cli_key, model)
             } else {
-                let model = requested_model
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|v| !v.is_empty())
-                    .map(|v| if v.len() > 200 { &v[..200] } else { v });
-
-                let Some(model) = model else {
+                let Some(model) = normalize_model_filter(requested_model.as_deref()) else {
                     report.skipped_no_model = report.skipped_no_model.saturating_add(1);
                     continue;
                 };
 
-                (cli_key.clone(), model.to_string())
+                (cli_key.clone(), model)
             };
 
             let usage = cost::CostUsage {
@@ -866,7 +865,7 @@ LIMIT ?6
             }
 
             let price_json: Option<String> = stmt_price
-                .query_row(params![effective_cli_key, model], |row| {
+                .query_row(params![&effective_cli_key, &model], |row| {
                     row.get::<_, String>(0)
                 })
                 .optional()
@@ -924,4 +923,24 @@ LIMIT ?6
         .map_err(|e| db_err!("failed to commit backfill transaction: {e}"))?;
 
     Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_model_filter_trims_blanks_and_truncates_on_char_boundary() {
+        assert_eq!(
+            normalize_model_filter(Some("  model-test  ")).as_deref(),
+            Some("model-test")
+        );
+        assert!(normalize_model_filter(Some("   ")).is_none());
+
+        let raw = "测".repeat(MODEL_FILTER_MAX_CHARS + 1);
+        let normalized = normalize_model_filter(Some(&raw)).expect("normalized model");
+
+        assert_eq!(normalized.chars().count(), MODEL_FILTER_MAX_CHARS);
+        assert!(normalized.is_char_boundary(normalized.len()));
+    }
 }

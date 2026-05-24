@@ -90,7 +90,11 @@ describe("services/app/startup", () => {
       })
     );
 
-    await m.startupSyncModelPricesOnce();
+    const firstRun = m.startupSyncModelPricesOnce();
+    const dedupedRun = m.startupSyncModelPricesOnce();
+    expect(dedupedRun).toBe(firstRun);
+
+    await firstRun;
     expect(modelPricesSyncBasellm).toHaveBeenCalledTimes(1);
 
     await m.startupSyncModelPricesOnce();

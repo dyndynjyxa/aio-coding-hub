@@ -1,18 +1,25 @@
-import { memo, type ReactNode } from "react";
+import {
+  memo,
+  type HTMLAttributes,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
 import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Copy, FlaskConical, Pencil, RefreshCw, Terminal, Trash2 } from "lucide-react";
+import { Copy, FlaskConical, Pencil, RefreshCw, Terminal, Trash2, Zap } from "lucide-react";
 import { FREE_TAG } from "../../constants/providers";
 import type { GatewayProviderCircuitStatus } from "../../services/gateway/gateway";
 import { getGatewayCircuitDerivedState } from "../../query/gateway";
-import { useOAuthLimitsQuery } from "../../query/providers";
+import { refreshProviderOAuthLimits, useOAuthLimitsQuery } from "../../query/providers";
 import {
   getProviderTypeInfo,
   type ClaudeModels,
   type OAuthLimitsResult,
   type ProviderSummary,
 } from "../../services/providers/providers";
+import { openDesktopUrl } from "../../services/desktop/opener";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Switch } from "../../ui/Switch";
@@ -50,6 +57,22 @@ function trimTrailingUrlPunctuation(url: string) {
   return url.replace(/[.,!?;:，。；：]+$/u, "");
 }
 
+async function openProviderNoteUrl(url: string) {
+  try {
+    await openDesktopUrl(url);
+  } catch {
+    try {
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch {}
+  }
+}
+
+function handleProviderNoteUrlClick(event: ReactMouseEvent<HTMLAnchorElement>, url: string) {
+  event.preventDefault();
+  event.stopPropagation();
+  void openProviderNoteUrl(url);
+}
+
 function providerTagClassName(tag: string) {
   if (tag === FREE_TAG) {
     return "shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300";
@@ -77,6 +100,7 @@ function renderProviderNote(note: string) {
         href={normalizedUrl}
         target="_blank"
         rel="noopener noreferrer"
+        onClick={(event) => handleProviderNoteUrlClick(event, normalizedUrl)}
         className="text-sky-600 underline underline-offset-2 transition hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300"
       >
         {normalizedUrl}
@@ -108,13 +132,19 @@ export type SortableProviderCardProps = {
   onCopyTerminalLaunchCommand?: (provider: ProviderSummary) => void;
   terminalLaunchCopying?: boolean;
   onValidateModel?: (provider: ProviderSummary) => void;
+  onTestAvailability?: (provider: ProviderSummary) => void;
+  testAvailabilityLoading?: boolean;
   onDuplicate?: (provider: ProviderSummary) => void;
   duplicateLoading?: boolean;
   onEdit: (provider: ProviderSummary) => void;
   onDelete: (provider: ProviderSummary) => void;
 };
 
-export const SortableProviderCard = memo(function SortableProviderCard({
+type ProviderCardProps = SortableProviderCardProps & {
+  className?: string;
+} & HTMLAttributes<HTMLDivElement>;
+
+export const ProviderCard = memo(function ProviderCard({
   provider,
   sourceProviderName = null,
   sourceProvider = null,
@@ -125,20 +155,15 @@ export const SortableProviderCard = memo(function SortableProviderCard({
   onCopyTerminalLaunchCommand,
   terminalLaunchCopying = false,
   onValidateModel,
+  onTestAvailability,
+  testAvailabilityLoading = false,
   onDuplicate,
   duplicateLoading = false,
   onEdit,
   onDelete,
-}: SortableProviderCardProps) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: provider.id,
-  });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-  };
-
+  className,
+  ...cardProps
+}: ProviderCardProps) {
   const claudeModelMappings = getConfiguredClaudeModelMappings(provider.claude_models);
   const claudeModelsCount = claudeModelMappings.length;
   const hasClaudeModels = claudeModelsCount > 0;
@@ -162,11 +187,13 @@ export const SortableProviderCard = memo(function SortableProviderCard({
   const { isUnavailable, unavailableUntil } = circuitState;
   const { isOAuth, isCx2cc, isCx2ccGateway } = getProviderTypeInfo(provider);
   const [apiKeyDetailsVisible, setApiKeyDetailsVisible] = useState(false);
-  const {
-    data: oauthLimits = null,
-    isLoading: limitsLoading,
-    refetch: refetchOAuthLimits,
-  } = useOAuthLimitsQuery(provider.id, isOAuth);
+  const [limitsRefreshing, setLimitsRefreshing] = useState(false);
+  const queryClient = useQueryClient();
+  const { data: oauthLimits = null, isLoading: limitsQueryLoading } = useOAuthLimitsQuery(
+    provider.id,
+    isOAuth
+  );
+  const limitsLoading = limitsQueryLoading || limitsRefreshing;
   const oauthShortLabel = getOAuthShortWindowLabel(provider, oauthLimits);
   const shouldTrackNowUnix =
     isUnavailable ||
@@ -216,294 +243,335 @@ export const SortableProviderCard = memo(function SortableProviderCard({
   }, [isOAuth, oauthLimits, nowUnix]);
 
   return (
-    <div ref={setNodeRef} style={style} className="relative">
-      <Card
-        padding="sm"
-        className={cn(
-          "rounded-lg sm:rounded-xl flex cursor-grab flex-col gap-2 transition-shadow duration-200 active:cursor-grabbing sm:flex-row sm:items-center sm:justify-between",
-          isDragging && "z-10 scale-[1.02] shadow-lg ring-2 ring-accent/30"
-        )}
-        {...attributes}
-        {...listeners}
-      >
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="inline-flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-500">
-            ⠿
+    <Card
+      padding="sm"
+      className={cn(
+        "rounded-lg sm:rounded-xl flex flex-col gap-2 transition-shadow duration-200 sm:flex-row sm:items-center sm:justify-between",
+        className
+      )}
+      {...cardProps}
+    >
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="inline-flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-500">
+          ⠿
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="truncate text-base font-semibold">{provider.name}</div>
+            {isUnavailable ? (
+              <span
+                className="shrink-0 rounded-full bg-rose-50 px-2 py-0.5 font-mono text-[10px] text-rose-700 dark:bg-rose-900/30 dark:text-rose-400"
+                title={
+                  unavailableUntil != null
+                    ? `熔断至 ${formatUnixSeconds(unavailableUntil)}`
+                    : "熔断"
+                }
+              >
+                熔断{unavailableCountdown ? ` ${unavailableCountdown}` : ""}
+              </span>
+            ) : null}
           </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 items-center gap-2">
-              <div className="truncate text-base font-semibold">{provider.name}</div>
-              {isUnavailable ? (
-                <span
-                  className="shrink-0 rounded-full bg-rose-50 px-2 py-0.5 font-mono text-[10px] text-rose-700 dark:bg-rose-900/30 dark:text-rose-400"
-                  title={
-                    unavailableUntil != null
-                      ? `熔断至 ${formatUnixSeconds(unavailableUntil)}`
-                      : "熔断"
-                  }
-                >
-                  熔断{unavailableCountdown ? ` ${unavailableCountdown}` : ""}
-                </span>
-              ) : null}
-            </div>
-            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
-              {isOAuth ? (
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
+            {isOAuth ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (limitsRefreshing) return;
+                  setLimitsRefreshing(true);
+                  void refreshProviderOAuthLimits(queryClient, provider.id, {
+                    resetCircuitAfterRefresh: true,
+                  })
+                    .catch(() => {})
+                    .finally(() => setLimitsRefreshing(false));
+                }}
+                disabled={limitsLoading}
+                className={cn(
+                  "inline-flex w-16 shrink-0 cursor-pointer items-center justify-center gap-1 rounded-full px-2 py-0.5 font-mono text-[10px] transition-opacity hover:opacity-80",
+                  provider.oauth_last_error
+                    ? "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400"
+                    : "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+                )}
+                title={
+                  provider.oauth_last_error
+                    ? `OAuth 错误: ${provider.oauth_last_error}（点击刷新用量）`
+                    : provider.oauth_email
+                      ? `OAuth: ${provider.oauth_email}（点击刷新用量）`
+                      : "OAuth 已连接（点击刷新用量）"
+                }
+              >
+                <RefreshCw className={cn("h-2.5 w-2.5", limitsLoading && "animate-spin")} />
+                OAuth
+              </button>
+            ) : isCx2cc ? (
+              <span
+                className="inline-flex w-16 shrink-0 items-center justify-center rounded-full px-2 py-0.5 font-mono text-[10px] bg-violet-50 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400"
+                title="CX2CC 转译模式"
+              >
+                CX2CC
+              </span>
+            ) : (
+              <>
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    refetchOAuthLimits();
+                    setApiKeyDetailsVisible((current) => !current);
                   }}
-                  disabled={limitsLoading}
-                  className={cn(
-                    "inline-flex w-16 shrink-0 cursor-pointer items-center justify-center gap-1 rounded-full px-2 py-0.5 font-mono text-[10px] transition-opacity hover:opacity-80",
-                    provider.oauth_last_error
-                      ? "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400"
-                      : "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                  )}
-                  title={
-                    provider.oauth_last_error
-                      ? `OAuth 错误: ${provider.oauth_last_error}（点击刷新用量）`
-                      : provider.oauth_email
-                        ? `OAuth: ${provider.oauth_email}（点击刷新用量）`
-                        : "OAuth 已连接（点击刷新用量）"
-                  }
+                  className="inline-flex w-16 shrink-0 cursor-pointer items-center justify-center rounded-full px-2 py-0.5 font-mono text-[10px] transition-opacity hover:opacity-80 bg-sky-50 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400"
+                  title="API Key 认证"
                 >
-                  <RefreshCw className={cn("h-2.5 w-2.5", limitsLoading && "animate-spin")} />
-                  OAuth
+                  API Key
                 </button>
-              ) : isCx2cc ? (
-                <span
-                  className="inline-flex w-16 shrink-0 items-center justify-center rounded-full px-2 py-0.5 font-mono text-[10px] bg-violet-50 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400"
-                  title="CX2CC 转译模式"
-                >
-                  CX2CC
+                <span className="shrink-0 rounded-full bg-cyan-50 px-2 py-0.5 font-mono text-[10px] text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300">
+                  {provider.base_url_mode === "ping" ? "Ping" : "顺序"}
                 </span>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setApiKeyDetailsVisible((current) => !current);
-                    }}
-                    className="inline-flex w-16 shrink-0 cursor-pointer items-center justify-center rounded-full px-2 py-0.5 font-mono text-[10px] transition-opacity hover:opacity-80 bg-sky-50 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400"
-                    title="API Key 认证"
-                  >
-                    API Key
-                  </button>
-                  <span className="shrink-0 rounded-full bg-cyan-50 px-2 py-0.5 font-mono text-[10px] text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300">
-                    {provider.base_url_mode === "ping" ? "Ping" : "顺序"}
-                  </span>
-                </>
-              )}
-              {isCx2cc && provider.cost_multiplier !== 0 ? (
-                <span
-                  className={cn(
-                    "shrink-0 rounded-full px-2 py-0.5 font-mono text-[10px]",
-                    "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                  )}
-                  title={`价格倍率: x${provider.cost_multiplier.toFixed(2)}`}
-                >
-                  x{provider.cost_multiplier.toFixed(2)}
-                </span>
-              ) : null}
-              {provider.cli_key === "claude" && hasClaudeModels ? (
-                <span
-                  className="shrink-0 rounded-full bg-sky-50 px-2 py-0.5 font-mono text-[10px] text-sky-700 dark:bg-sky-900/30 dark:text-sky-400"
-                  title={[
-                    `已配置 Claude 模型映射（${claudeModelsCount}/5）`,
-                    ...claudeModelMappings,
-                  ].join("\n")}
-                >
-                  模型映射 {claudeModelsCount}/5
-                </span>
-              ) : null}
-              {hasLimits ? (
-                <span
-                  className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 font-mono text-[10px] text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                  title={limitChips.join("\n")}
-                >
-                  限额
-                </span>
-              ) : null}
-              {visibleTags.map((tag) => (
-                <span key={tag} className={providerTagClassName(tag)} title={`标签: ${tag}`}>
-                  {tag}
-                </span>
-              ))}
-            </div>
-            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
-              {isOAuth ? (
-                <>
-                  {provider.oauth_email ? (
-                    <span
-                      className="truncate font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
-                      title={`OAuth: ${provider.oauth_email}`}
-                    >
-                      {provider.oauth_email}
-                    </span>
-                  ) : null}
-                  {oauthLimits?.limit_5h_text ? (
-                    <span
-                      className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
-                      title={`${oauthShortLabel} 用量: ${oauthLimits.limit_5h_text}`}
-                    >
-                      {oauthShortLabel}: {oauthLimits.limit_5h_text}
-                    </span>
-                  ) : null}
-                  {oauthLimits?.limit_weekly_text ? (
-                    <span
-                      className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
-                      title={`周用量: ${oauthLimits.limit_weekly_text}`}
-                    >
-                      周: {oauthLimits.limit_weekly_text}
-                    </span>
-                  ) : null}
-                  {limitsResetCountdown?.reset5h && oauthLimits?.limit_5h_text ? (
-                    <span
-                      className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
-                      title={`${oauthShortLabel} 重置: ${limitsResetCountdown.reset5h}`}
-                    >
-                      重置: {limitsResetCountdown.reset5h}
-                    </span>
-                  ) : null}
-                  {limitsResetCountdown?.resetWeekly && oauthLimits?.limit_weekly_text ? (
-                    <span
-                      className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
-                      title={`周重置: ${limitsResetCountdown.resetWeekly}`}
-                    >
-                      周重置: {limitsResetCountdown.resetWeekly}
-                    </span>
-                  ) : null}
-                </>
-              ) : isCx2cc ? (
-                <>
-                  <span
-                    className="truncate font-mono text-xs text-violet-500 dark:text-violet-400 cursor-default"
-                    title={`来源: ${cx2ccSourceName}`}
-                  >
-                    来源: {cx2ccSourceName}
-                  </span>
+              </>
+            )}
+            {isCx2cc && provider.cost_multiplier !== 0 ? (
+              <span
+                className={cn(
+                  "shrink-0 rounded-full px-2 py-0.5 font-mono text-[10px]",
+                  "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                )}
+                title={`价格倍率: x${provider.cost_multiplier.toFixed(2)}`}
+              >
+                x{provider.cost_multiplier.toFixed(2)}
+              </span>
+            ) : null}
+            {provider.cli_key === "claude" && hasClaudeModels ? (
+              <span
+                className="shrink-0 rounded-full bg-sky-50 px-2 py-0.5 font-mono text-[10px] text-sky-700 dark:bg-sky-900/30 dark:text-sky-400"
+                title={[
+                  `已配置 Claude 模型映射（${claudeModelsCount}/5）`,
+                  ...claudeModelMappings,
+                ].join("\n")}
+              >
+                模型映射 {claudeModelsCount}/5
+              </span>
+            ) : null}
+            {hasLimits ? (
+              <span
+                className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 font-mono text-[10px] text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                title={limitChips.join("\n")}
+              >
+                限额
+              </span>
+            ) : null}
+            {visibleTags.map((tag) => (
+              <span key={tag} className={providerTagClassName(tag)} title={`标签: ${tag}`}>
+                {tag}
+              </span>
+            ))}
+          </div>
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
+            {isOAuth ? (
+              <>
+                {provider.oauth_email ? (
                   <span
                     className="truncate font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
-                    title={cx2ccRouteLabel}
+                    title={`OAuth: ${provider.oauth_email}`}
                   >
-                    {cx2ccRouteLabel}
+                    {provider.oauth_email}
                   </span>
-                </>
-              ) : apiKeyDetailsVisible ? (
+                ) : null}
+                {oauthLimits?.limit_5h_text ? (
+                  <span
+                    className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
+                    title={`${oauthShortLabel} 用量: ${oauthLimits.limit_5h_text}`}
+                  >
+                    {oauthShortLabel}: {oauthLimits.limit_5h_text}
+                  </span>
+                ) : null}
+                {oauthLimits?.limit_weekly_text ? (
+                  <span
+                    className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
+                    title={`周用量: ${oauthLimits.limit_weekly_text}`}
+                  >
+                    周: {oauthLimits.limit_weekly_text}
+                  </span>
+                ) : null}
+                {limitsResetCountdown?.reset5h && oauthLimits?.limit_5h_text ? (
+                  <span
+                    className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
+                    title={`${oauthShortLabel} 重置: ${limitsResetCountdown.reset5h}`}
+                  >
+                    重置: {limitsResetCountdown.reset5h}
+                  </span>
+                ) : null}
+                {limitsResetCountdown?.resetWeekly && oauthLimits?.limit_weekly_text ? (
+                  <span
+                    className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
+                    title={`周重置: ${limitsResetCountdown.resetWeekly}`}
+                  >
+                    周重置: {limitsResetCountdown.resetWeekly}
+                  </span>
+                ) : null}
+              </>
+            ) : isCx2cc ? (
+              <>
+                <span
+                  className="truncate font-mono text-xs text-violet-500 dark:text-violet-400 cursor-default"
+                  title={`来源: ${cx2ccSourceName}`}
+                >
+                  来源: {cx2ccSourceName}
+                </span>
                 <span
                   className="truncate font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
-                  title={provider.base_urls.join("\n")}
+                  title={cx2ccRouteLabel}
                 >
-                  {providerBaseUrlSummary(provider)}
+                  {cx2ccRouteLabel}
                 </span>
-              ) : null}
-            </div>
-            {provider.note ? (
-              <div
-                className="mt-1 break-words text-xs text-slate-400 dark:text-slate-500 cursor-default"
-                title={provider.note}
-                onPointerDown={(e) => e.stopPropagation()}
+              </>
+            ) : apiKeyDetailsVisible ? (
+              <span
+                className="truncate font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
+                title={provider.base_urls.join("\n")}
               >
-                {renderProviderNote(provider.note)}
-              </div>
+                {providerBaseUrlSummary(provider)}
+              </span>
             ) : null}
           </div>
+          {provider.note ? (
+            <div
+              className="mt-1 break-words text-xs text-slate-400 dark:text-slate-500 cursor-default"
+              title={provider.note}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              {renderProviderNote(provider.note)}
+            </div>
+          ) : null}
         </div>
+      </div>
 
-        <div className="flex flex-col items-end gap-2" onPointerDown={(e) => e.stopPropagation()}>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {isUnavailable ? (
-              <Button
-                onClick={() => onResetCircuit(provider)}
-                variant="secondary"
-                size="md"
-                className="h-9"
-                disabled={circuitResetting}
-              >
-                {circuitResetting ? "处理中…" : "解除熔断"}
-              </Button>
-            ) : null}
-
+      <div className="flex flex-col items-end gap-2" onPointerDown={(e) => e.stopPropagation()}>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {isUnavailable ? (
             <Button
-              onClick={() => onEdit(provider)}
+              onClick={() => onResetCircuit(provider)}
               variant="secondary"
               size="md"
               className="h-9"
-              title="编辑"
+              disabled={circuitResetting}
             >
-              <Pencil className="h-4 w-4" />
-              编辑
+              {circuitResetting ? "处理中…" : "解除熔断"}
             </Button>
+          ) : null}
 
-            <div className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm shadow-sm dark:border-slate-600 dark:bg-slate-800">
-              <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                {provider.enabled ? "已启用" : "已关闭"}
-              </span>
-              <Switch
-                checked={provider.enabled}
-                onCheckedChange={() => onToggleEnabled(provider)}
-              />
-            </div>
-          </div>
+          <Button
+            onClick={() => onEdit(provider)}
+            variant="secondary"
+            size="md"
+            className="h-9"
+            title="编辑"
+          >
+            <Pencil className="h-4 w-4" />
+            编辑
+          </Button>
 
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {onCopyTerminalLaunchCommand ? (
-              <Button
-                onClick={() => onCopyTerminalLaunchCommand(provider)}
-                variant="secondary"
-                size="sm"
-                className="px-2 py-1 text-[11px] gap-1.5"
-                disabled={terminalLaunchCopying}
-                title="复制终端启动命令"
-              >
-                <Terminal className="h-3.5 w-3.5" />
-                {terminalLaunchCopying ? "复制中…" : "终端启动"}
-              </Button>
-            ) : null}
-
-            {onValidateModel ? (
-              <Button
-                onClick={() => onValidateModel(provider)}
-                variant="secondary"
-                size="sm"
-                className="px-2 py-1 text-[11px] gap-1.5"
-                title="模型验证"
-              >
-                <FlaskConical className="h-3.5 w-3.5" />
-                模型验证
-              </Button>
-            ) : null}
-
-            {onDuplicate ? (
-              <Button
-                onClick={() => onDuplicate(provider)}
-                variant="secondary"
-                size="sm"
-                className="px-2 py-1 text-[11px] gap-1.5"
-                disabled={duplicateLoading}
-                title="复制"
-              >
-                <Copy className="h-3.5 w-3.5" />
-                {duplicateLoading ? "复制中…" : "复制"}
-              </Button>
-            ) : null}
-
-            <Button
-              onClick={() => onDelete(provider)}
-              variant="danger"
-              size="sm"
-              className="px-2 py-1 text-[11px] gap-1.5"
-              title="删除"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              删除
-            </Button>
+          <div className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm shadow-sm dark:border-slate-600 dark:bg-slate-800">
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+              {provider.enabled ? "已启用" : "已关闭"}
+            </span>
+            <Switch checked={provider.enabled} onCheckedChange={() => onToggleEnabled(provider)} />
           </div>
         </div>
-      </Card>
+
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {onCopyTerminalLaunchCommand ? (
+            <Button
+              onClick={() => onCopyTerminalLaunchCommand(provider)}
+              variant="secondary"
+              size="sm"
+              className="px-2 py-1 text-[11px] gap-1.5"
+              disabled={terminalLaunchCopying}
+              title="复制终端启动命令"
+            >
+              <Terminal className="h-3.5 w-3.5" />
+              {terminalLaunchCopying ? "复制中…" : "终端启动"}
+            </Button>
+          ) : null}
+
+          {onTestAvailability ? (
+            <Button
+              onClick={() => onTestAvailability(provider)}
+              variant="secondary"
+              size="sm"
+              className="px-2 py-1 text-[11px] gap-1.5"
+              disabled={testAvailabilityLoading}
+              title="测试供应商可用性"
+            >
+              <Zap className="h-3.5 w-3.5" />
+              {testAvailabilityLoading ? "测试中…" : "测试"}
+            </Button>
+          ) : null}
+
+          {onValidateModel ? (
+            <Button
+              onClick={() => onValidateModel(provider)}
+              variant="secondary"
+              size="sm"
+              className="px-2 py-1 text-[11px] gap-1.5"
+              title="模型验证"
+            >
+              <FlaskConical className="h-3.5 w-3.5" />
+              模型验证
+            </Button>
+          ) : null}
+
+          {onDuplicate ? (
+            <Button
+              onClick={() => onDuplicate(provider)}
+              variant="secondary"
+              size="sm"
+              className="px-2 py-1 text-[11px] gap-1.5"
+              disabled={duplicateLoading}
+              title="复制"
+            >
+              <Copy className="h-3.5 w-3.5" />
+              {duplicateLoading ? "复制中…" : "复制"}
+            </Button>
+          ) : null}
+
+          <Button
+            onClick={() => onDelete(provider)}
+            variant="danger"
+            size="sm"
+            className="px-2 py-1 text-[11px] gap-1.5"
+            title="删除"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            删除
+          </Button>
+        </div>
+      </div>
+    </Card>
+  );
+});
+
+export const SortableProviderCard = memo(function SortableProviderCard(
+  props: SortableProviderCardProps
+) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: props.provider.id,
+  });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} className="relative">
+      <ProviderCard
+        {...props}
+        className={cn(
+          "cursor-grab active:cursor-grabbing",
+          isDragging && "z-10 scale-[1.02] shadow-lg ring-2 ring-accent/30"
+        )}
+        {...attributes}
+        {...listeners}
+      />
     </div>
   );
 });

@@ -1,6 +1,8 @@
 //! Usage: Sync model price data from external sources and persist into sqlite.
 
 use crate::shared::error::db_err;
+use crate::shared::fs::read_file_with_max_len;
+use crate::shared::http_body::read_text_with_limit;
 use crate::shared::time::now_unix_seconds;
 use crate::{app_paths, blocking, db};
 use reqwest::header::{HeaderMap, HeaderValue, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED};
@@ -12,6 +14,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 const BASELLM_ALL_JSON_URL: &str = "https://basellm.github.io/llm-metadata/api/all.json";
+const BASELLM_RESPONSE_BODY_LIMIT: usize = 16 * 1024 * 1024;
+const BASELLM_CACHE_MAX_BYTES: usize = 256 * 1024;
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct ModelPricesSyncReport {
@@ -54,7 +58,11 @@ fn read_basellm_cache(app: &tauri::AppHandle) -> BasellmCacheMeta {
     if !path.exists() {
         return BasellmCacheMeta::default();
     }
-    let content = match std::fs::read_to_string(&path) {
+    let bytes = match read_file_with_max_len(&path, BASELLM_CACHE_MAX_BYTES) {
+        Ok(v) => v,
+        Err(_) => return BasellmCacheMeta::default(),
+    };
+    let content = match String::from_utf8(bytes) {
         Ok(v) => v,
         Err(_) => return BasellmCacheMeta::default(),
     };
@@ -62,6 +70,13 @@ fn read_basellm_cache(app: &tauri::AppHandle) -> BasellmCacheMeta {
 }
 
 fn write_json_atomically(path: &Path, json_bytes: Vec<u8>) -> crate::shared::error::AppResult<()> {
+    if json_bytes.len() > BASELLM_CACHE_MAX_BYTES {
+        return Err(format!(
+            "SEC_INVALID_INPUT: basellm cache file too large (max {BASELLM_CACHE_MAX_BYTES} bytes)"
+        )
+        .into());
+    }
+
     let tmp_path = path.with_extension("json.tmp");
     let backup_path = path.with_extension("json.bak");
 
@@ -531,8 +546,7 @@ pub async fn sync_basellm(
     }
 
     let new_cache = headers_to_cache(resp.headers());
-    let body = resp
-        .text()
+    let body = read_text_with_limit(resp, BASELLM_RESPONSE_BODY_LIMIT, "basellm response")
         .await
         .map_err(|e| format!("SYNC_ERROR: failed to read basellm response: {e}"))?;
 

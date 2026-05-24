@@ -1,12 +1,15 @@
 [package]
 name = "aio-coding-hub"
-version = "0.40.4"
+version = "0.41.2"
 description = "AIO Coding Hub"
 authors = ["dyndynjyxa"]
 edition = "2021"
 default-run = "aio-coding-hub"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = []
 
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary
@@ -15,12 +18,6 @@ default-run = "aio-coding-hub"
 name = "aio_coding_hub_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 doctest = false
-
-[[bin]]
-name = "export-bindings"
-path = "src/bin/export-bindings.rs"
-test = false
-bench = false
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -38,7 +35,7 @@ base64 = "0.22"
 rand = "0.8"
 bytes = "1"
 axum = "0.7"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "process", "sync", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "process", "sync", "time", "io-util"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.24"
@@ -59,6 +56,7 @@ regex = "1"
 specta-typescript = "0.0.9"
 tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
 tauri-plugin-dialog = "2"
+rodio = { version = "0.21.1", default-features = false, features = ["playback", "mp3"] }
 
 [target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
 tauri-plugin-updater = "2"
@@ -69,10 +67,12 @@ tauri-plugin-window-state = "2"
 
 [target."cfg(windows)".dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_Registry", "Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
+junction = "1"
 
 [dev-dependencies]
 tempfile = "3"
 tauri = { version = "2", features = ["test"] }
+tower = { version = "0.5", features = ["util"] }
 
 [patch.crates-io]
 # Patch `mac-notification-sys` so notifications can still present when app is foreground on macOS.

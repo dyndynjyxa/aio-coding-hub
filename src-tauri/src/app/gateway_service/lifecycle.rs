@@ -35,6 +35,7 @@ pub(crate) async fn start_and_sync(
     db: db::Db,
     preferred_port: Option<u16>,
 ) -> AppResult<gateway::GatewayStatus> {
+    let _gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
     let status = blocking::run("gateway_start", {
         let app = app.clone();
         let db = db.clone();
@@ -49,7 +50,8 @@ pub(crate) async fn start_and_sync(
 }
 
 pub(crate) async fn stop_and_restore(app: tauri::AppHandle) -> AppResult<gateway::GatewayStatus> {
-    crate::app::cleanup::stop_gateway_best_effort(&app).await;
+    let _gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
+    crate::app::cleanup::stop_gateway_best_effort_unlocked(&app).await;
 
     let status = app_gateway_status(&app);
     emit_gateway_status(&app, &status);

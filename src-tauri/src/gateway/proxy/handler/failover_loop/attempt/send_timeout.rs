@@ -3,36 +3,24 @@
 use super::*;
 use crate::gateway::proxy::is_claude_count_tokens_request;
 
-fn timeout_decision(
-    is_count_tokens: bool,
-    retry_index: u32,
-    max_attempts_per_provider: u32,
-) -> FailoverDecision {
+fn timeout_decision(is_count_tokens: bool) -> FailoverDecision {
     if is_count_tokens {
         return FailoverDecision::Abort;
     }
 
-    if retry_index < max_attempts_per_provider {
-        FailoverDecision::RetrySameProvider
-    } else {
-        FailoverDecision::SwitchProvider
-    }
+    FailoverDecision::SwitchProvider
 }
 
-pub(super) async fn handle_timeout(
-    ctx: CommonCtx<'_>,
+pub(super) async fn handle_timeout<R: tauri::Runtime>(
+    ctx: CommonCtx<'_, R>,
     provider_ctx: ProviderCtx<'_>,
     attempt_ctx: AttemptCtx<'_>,
-    loop_state: LoopState<'_>,
+    loop_state: LoopState<'_, R>,
 ) -> LoopControl {
     let is_count_tokens =
         is_claude_count_tokens_request(ctx.cli_key.as_str(), ctx.forwarded_path.as_str());
     let error_code = GatewayErrorCode::UpstreamTimeout.as_str();
-    let decision = timeout_decision(
-        is_count_tokens,
-        attempt_ctx.retry_index,
-        ctx.max_attempts_per_provider,
-    );
+    let decision = timeout_decision(is_count_tokens);
 
     let outcome = format!(
         "request_timeout: category={} code={} decision={} timeout_secs={}",
@@ -77,19 +65,19 @@ mod tests {
 
     #[test]
     fn timeout_decision_aborts_for_count_tokens() {
-        let decision = timeout_decision(true, 1, 5);
+        let decision = timeout_decision(true);
         assert!(matches!(decision, FailoverDecision::Abort));
     }
 
     #[test]
-    fn timeout_decision_retries_before_retry_limit() {
-        let decision = timeout_decision(false, 1, 5);
-        assert!(matches!(decision, FailoverDecision::RetrySameProvider));
+    fn timeout_decision_switches_for_regular_requests_before_retry_limit() {
+        let decision = timeout_decision(false);
+        assert!(matches!(decision, FailoverDecision::SwitchProvider));
     }
 
     #[test]
-    fn timeout_decision_switches_after_retry_limit() {
-        let decision = timeout_decision(false, 5, 5);
+    fn timeout_decision_switches_for_regular_requests_after_retry_limit() {
+        let decision = timeout_decision(false);
         assert!(matches!(decision, FailoverDecision::SwitchProvider));
     }
 }

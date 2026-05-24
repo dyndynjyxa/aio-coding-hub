@@ -18,7 +18,9 @@ describe("hooks/useWindowForeground", () => {
     vi.setSystemTime(base);
 
     const onForeground = vi.fn();
-    renderHook(() => useWindowForeground({ enabled: true, onForeground, throttleMs: 1000 }));
+    const { unmount } = renderHook(() =>
+      useWindowForeground({ enabled: true, onForeground, throttleMs: 1000 })
+    );
 
     act(() => {
       window.dispatchEvent(new Event("focus"));
@@ -38,6 +40,57 @@ describe("hooks/useWindowForeground", () => {
     });
     expect(onForeground).toHaveBeenCalledTimes(2);
 
+    unmount();
     vi.useRealTimers();
+  });
+
+  it("shares one foreground listener pair across enabled subscribers", () => {
+    const addWindowListener = vi.spyOn(window, "addEventListener");
+    const removeWindowListener = vi.spyOn(window, "removeEventListener");
+    const addDocumentListener = vi.spyOn(document, "addEventListener");
+    const removeDocumentListener = vi.spyOn(document, "removeEventListener");
+    const firstForeground = vi.fn();
+    const secondForeground = vi.fn();
+
+    const first = renderHook(() =>
+      useWindowForeground({ enabled: true, onForeground: firstForeground, throttleMs: 0 })
+    );
+    const second = renderHook(() =>
+      useWindowForeground({ enabled: true, onForeground: secondForeground, throttleMs: 0 })
+    );
+
+    expect(
+      addWindowListener.mock.calls.filter(([eventName]) => eventName === "focus")
+    ).toHaveLength(1);
+    expect(
+      addDocumentListener.mock.calls.filter(([eventName]) => eventName === "visibilitychange")
+    ).toHaveLength(1);
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(firstForeground).toHaveBeenCalledTimes(1);
+    expect(secondForeground).toHaveBeenCalledTimes(1);
+
+    first.unmount();
+    expect(
+      removeWindowListener.mock.calls.filter(([eventName]) => eventName === "focus")
+    ).toHaveLength(0);
+    expect(
+      removeDocumentListener.mock.calls.filter(([eventName]) => eventName === "visibilitychange")
+    ).toHaveLength(0);
+
+    second.unmount();
+    expect(
+      removeWindowListener.mock.calls.filter(([eventName]) => eventName === "focus")
+    ).toHaveLength(1);
+    expect(
+      removeDocumentListener.mock.calls.filter(([eventName]) => eventName === "visibilitychange")
+    ).toHaveLength(1);
+
+    addWindowListener.mockRestore();
+    removeWindowListener.mockRestore();
+    addDocumentListener.mockRestore();
+    removeDocumentListener.mockRestore();
   });
 });

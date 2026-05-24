@@ -66,6 +66,105 @@ describe("components/home/HomeOAuthQuotaPanel", () => {
     expect(screen.getByText("5h: 61%·2h34m / 7d: 92%·3d2h29m")).toBeInTheDocument();
   });
 
+  it("shows insufficient quota when either quota window is exhausted", () => {
+    const { rerender } = render(
+      <HomeOAuthQuotaPanelContent
+        rows={[
+          makeRow({
+            limits: {
+              limit_short_label: "5h",
+              limit_5h_text: "61%",
+              limit_weekly_text: "0%",
+              limit_5h_reset_at: null,
+              limit_weekly_reset_at: null,
+            },
+          }),
+        ]}
+        hasProviders={true}
+        hasRefreshed={true}
+        refreshing={false}
+        onRefresh={vi.fn()}
+        onRefreshRow={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("配额不足")).toBeInTheDocument();
+
+    rerender(
+      <HomeOAuthQuotaPanelContent
+        rows={[
+          makeRow({
+            limits: {
+              limit_short_label: "5h",
+              limit_5h_text: "0%",
+              limit_weekly_text: "92%",
+              limit_5h_reset_at: null,
+              limit_weekly_reset_at: null,
+            },
+          }),
+        ]}
+        hasProviders={true}
+        hasRefreshed={true}
+        refreshing={false}
+        onRefresh={vi.fn()}
+        onRefreshRow={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("配额不足")).toBeInTheDocument();
+  });
+
+  it("does not show insufficient quota for non-exhausted percentages", () => {
+    render(
+      <HomeOAuthQuotaPanelContent
+        rows={[
+          makeRow({
+            limits: {
+              limit_short_label: "5h",
+              limit_5h_text: "1%",
+              limit_weekly_text: "1%",
+              limit_5h_reset_at: null,
+              limit_weekly_reset_at: null,
+            },
+          }),
+        ]}
+        hasProviders={true}
+        hasRefreshed={true}
+        refreshing={false}
+        onRefresh={vi.fn()}
+        onRefreshRow={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText("配额不足")).not.toBeInTheDocument();
+  });
+
+  it("shows insufficient quota for exhausted numeric Gemini quota", () => {
+    render(
+      <HomeOAuthQuotaPanelContent
+        rows={[
+          makeRow({
+            cliKey: "gemini",
+            limits: {
+              limit_short_label: "短窗",
+              limit_5h_text: "0",
+              limit_weekly_text: "3",
+              limit_5h_reset_at: null,
+              limit_weekly_reset_at: null,
+            },
+          }),
+        ]}
+        hasProviders={true}
+        hasRefreshed={true}
+        refreshing={false}
+        onRefresh={vi.fn()}
+        onRefreshRow={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("配额不足")).toBeInTheDocument();
+  });
+
   it("renders loading, empty, and error card states", () => {
     const { rerender } = render(
       <HomeOAuthQuotaPanelContent
@@ -79,6 +178,7 @@ describe("components/home/HomeOAuthQuotaPanel", () => {
     );
 
     expect(screen.getByText("刷新中...")).toBeInTheDocument();
+    expect(screen.queryByText("配额不足")).not.toBeInTheDocument();
 
     rerender(
       <HomeOAuthQuotaPanelContent
@@ -103,6 +203,7 @@ describe("components/home/HomeOAuthQuotaPanel", () => {
     );
 
     expect(screen.getByText("暂无 OAuth 配额信息")).toBeInTheDocument();
+    expect(screen.queryByText("配额不足")).not.toBeInTheDocument();
 
     rerender(
       <HomeOAuthQuotaPanelContent
@@ -118,6 +219,7 @@ describe("components/home/HomeOAuthQuotaPanel", () => {
     expect(screen.getByText("刷新失败")).toBeInTheDocument();
     expect(screen.getByText("刷新失败，请重试")).toBeInTheDocument();
     expect(screen.queryByText("fetch boom")).not.toBeInTheDocument();
+    expect(screen.queryByText("配额不足")).not.toBeInTheDocument();
   });
 
   it("forwards bulk and row refresh actions", () => {

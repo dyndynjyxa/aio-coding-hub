@@ -14,6 +14,7 @@ import type { CliKey } from "../providers/providers";
 import { narrowGeneratedStringUnion, type Override } from "../generatedTypeUtils";
 
 const CLI_KEY_VALUES = ["claude", "codex", "gemini"] as const satisfies readonly CliKey[];
+export const MAX_WORKSPACE_NAME_CHARS = 128;
 
 export type WorkspaceSummary = Override<
   GeneratedWorkspaceSummary,
@@ -54,6 +55,41 @@ export type WorkspaceApplyReport = Override<
   }
 >;
 
+function validatePositiveSafeInteger(label: string, value: number): number {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`SEC_INVALID_INPUT: invalid ${label}=${value}`);
+  }
+  return value;
+}
+
+export function validateWorkspaceId(workspaceId: number): number {
+  return validatePositiveSafeInteger("workspaceId", workspaceId);
+}
+
+export function validateWorkspaceCliKey(cliKey: string): CliKey {
+  const normalizedCliKey = cliKey.trim();
+  if ((CLI_KEY_VALUES as readonly string[]).includes(normalizedCliKey)) {
+    return normalizedCliKey as CliKey;
+  }
+  throw new Error(`SEC_INVALID_INPUT: invalid cliKey=${cliKey}`);
+}
+
+export function normalizeWorkspaceName(name: string): string {
+  const normalized = name.trim();
+  if (!normalized) {
+    throw new Error("SEC_INVALID_INPUT: workspace name is required");
+  }
+  if (/[\u0000-\u001f\u007f]/u.test(normalized)) {
+    throw new Error("SEC_INVALID_INPUT: workspace name contains control characters");
+  }
+  if ([...normalized].length > MAX_WORKSPACE_NAME_CHARS) {
+    throw new Error(
+      `SEC_INVALID_INPUT: workspace name is too long (max ${MAX_WORKSPACE_NAME_CHARS} chars)`
+    );
+  }
+  return normalized;
+}
+
 function toCliKey(value: string, label: string): CliKey {
   return narrowGeneratedStringUnion(value, CLI_KEY_VALUES, label);
 }
@@ -87,75 +123,97 @@ function toWorkspaceApplyReport(value: GeneratedWorkspaceApplyReport): Workspace
 }
 
 export async function workspacesList(cliKey: CliKey) {
+  const normalizedCliKey = validateWorkspaceCliKey(cliKey);
+
   return invokeGeneratedIpc<WorkspacesListResult>({
     title: "读取工作区列表失败",
     cmd: "workspaces_list",
-    args: { cliKey },
+    args: { cliKey: normalizedCliKey },
     invoke: async () =>
-      mapGeneratedCommandResponse(await commands.workspacesList(cliKey), toWorkspacesListResult),
+      mapGeneratedCommandResponse(
+        await commands.workspacesList(normalizedCliKey),
+        toWorkspacesListResult
+      ),
   });
 }
 
 export async function workspaceCreate(input: WorkspaceCreateInput) {
+  const cliKey = validateWorkspaceCliKey(input.cliKey);
+  const name = normalizeWorkspaceName(input.name);
+  const cloneFromActive = input.cloneFromActive ?? false;
+
   return invokeGeneratedIpc<WorkspaceSummary>({
     title: "创建工作区失败",
     cmd: "workspace_create",
     args: {
-      cliKey: input.cliKey,
-      name: input.name,
-      cloneFromActive: input.cloneFromActive ?? false,
+      cliKey,
+      name,
+      cloneFromActive,
     },
     invoke: async () =>
       mapGeneratedCommandResponse(
-        await commands.workspaceCreate(input.cliKey, input.name, input.cloneFromActive ?? false),
+        await commands.workspaceCreate(cliKey, name, cloneFromActive),
         toWorkspaceSummary
       ),
   });
 }
 
 export async function workspaceRename(input: WorkspaceRenameInput) {
+  const workspaceId = validateWorkspaceId(input.workspaceId);
+  const name = normalizeWorkspaceName(input.name);
+
   return invokeGeneratedIpc<WorkspaceSummary>({
     title: "重命名工作区失败",
     cmd: "workspace_rename",
     args: {
-      workspaceId: input.workspaceId,
-      name: input.name,
+      workspaceId,
+      name,
     },
     invoke: async () =>
       mapGeneratedCommandResponse(
-        await commands.workspaceRename(input.workspaceId, input.name),
+        await commands.workspaceRename(workspaceId, name),
         toWorkspaceSummary
       ),
   });
 }
 
 export async function workspaceDelete(workspaceId: number) {
+  const normalizedWorkspaceId = validateWorkspaceId(workspaceId);
+
   return invokeGeneratedIpc<boolean>({
     title: "删除工作区失败",
     cmd: "workspace_delete",
-    args: { workspaceId },
-    invoke: () => commands.workspaceDelete(workspaceId) as Promise<GeneratedCommandResult<boolean>>,
+    args: { workspaceId: normalizedWorkspaceId },
+    invoke: () =>
+      commands.workspaceDelete(normalizedWorkspaceId) as Promise<GeneratedCommandResult<boolean>>,
   });
 }
 
 export async function workspacePreview(workspaceId: number) {
+  const normalizedWorkspaceId = validateWorkspaceId(workspaceId);
+
   return invokeGeneratedIpc<WorkspacePreview>({
     title: "读取工作区预览失败",
     cmd: "workspace_preview",
-    args: { workspaceId },
+    args: { workspaceId: normalizedWorkspaceId },
     invoke: async () =>
-      mapGeneratedCommandResponse(await commands.workspacePreview(workspaceId), toWorkspacePreview),
+      mapGeneratedCommandResponse(
+        await commands.workspacePreview(normalizedWorkspaceId),
+        toWorkspacePreview
+      ),
   });
 }
 
 export async function workspaceApply(workspaceId: number) {
+  const normalizedWorkspaceId = validateWorkspaceId(workspaceId);
+
   return invokeGeneratedIpc<WorkspaceApplyReport>({
     title: "应用工作区失败",
     cmd: "workspace_apply",
-    args: { workspaceId },
+    args: { workspaceId: normalizedWorkspaceId },
     invoke: async () =>
       mapGeneratedCommandResponse(
-        await commands.workspaceApply(workspaceId),
+        await commands.workspaceApply(normalizedWorkspaceId),
         toWorkspaceApplyReport
       ),
   });

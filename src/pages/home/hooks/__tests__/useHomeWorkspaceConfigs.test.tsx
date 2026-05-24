@@ -1,7 +1,7 @@
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useMcpServersListQuery } from "../../../../query/mcp";
-import { usePromptsListQuery } from "../../../../query/prompts";
+import { usePromptsListSummaryQuery } from "../../../../query/prompts";
 import { useSkillsInstalledListQuery } from "../../../../query/skills";
 import { useWorkspacesListQuery } from "../../../../query/workspaces";
 import type { CliKey } from "../../../../services/providers/providers";
@@ -17,7 +17,7 @@ vi.mock("../../../../query/prompts", async () => {
   const actual = await vi.importActual<typeof import("../../../../query/prompts")>(
     "../../../../query/prompts"
   );
-  return { ...actual, usePromptsListQuery: vi.fn() };
+  return { ...actual, usePromptsListSummaryQuery: vi.fn() };
 });
 
 vi.mock("../../../../query/skills", async () => {
@@ -74,10 +74,10 @@ beforeEach(() => {
 
   vi.mocked(useWorkspacesListQuery).mockImplementation(((cliKey: CliKey) =>
     asMockedQueryResult(queryState.workspaces[cliKey])) as typeof useWorkspacesListQuery);
-  vi.mocked(usePromptsListQuery).mockImplementation(((workspaceId: number | null) =>
+  vi.mocked(usePromptsListSummaryQuery).mockImplementation(((workspaceId: number | null) =>
     asMockedQueryResult(
       queryState.prompts.get(workspaceId) ?? { data: null, isLoading: false }
-    )) as typeof usePromptsListQuery);
+    )) as typeof usePromptsListSummaryQuery);
   vi.mocked(useMcpServersListQuery).mockImplementation(((workspaceId: number | null) =>
     asMockedQueryResult(
       queryState.mcp.get(workspaceId) ?? { data: null, isLoading: false }
@@ -255,9 +255,9 @@ describe("pages/home/hooks/useHomeWorkspaceConfigs", () => {
     expect(useWorkspacesListQuery).toHaveBeenNthCalledWith(2, "codex", { enabled: false });
     expect(useWorkspacesListQuery).toHaveBeenNthCalledWith(3, "gemini", { enabled: false });
 
-    expect(usePromptsListQuery).toHaveBeenNthCalledWith(1, null, { enabled: false });
-    expect(usePromptsListQuery).toHaveBeenNthCalledWith(2, 3, { enabled: false });
-    expect(usePromptsListQuery).toHaveBeenNthCalledWith(3, null, { enabled: false });
+    expect(usePromptsListSummaryQuery).toHaveBeenNthCalledWith(1, null, { enabled: false });
+    expect(usePromptsListSummaryQuery).toHaveBeenNthCalledWith(2, 3, { enabled: false });
+    expect(usePromptsListSummaryQuery).toHaveBeenNthCalledWith(3, null, { enabled: false });
 
     expect(useMcpServersListQuery).toHaveBeenNthCalledWith(1, null, { enabled: false });
     expect(useMcpServersListQuery).toHaveBeenNthCalledWith(2, 3, { enabled: false });

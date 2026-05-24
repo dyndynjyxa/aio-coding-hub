@@ -12,9 +12,10 @@ import {
   type ConsoleLogLevel,
   useConsoleLogs,
 } from "../services/consoleLog";
+import { collectAppMemoryDiagnostics } from "../services/app/memoryDiagnostics";
 import { gatewayEventNames } from "../constants/gatewayEvents";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ChevronRight, Search, Filter } from "lucide-react";
+import { Activity, ChevronRight, Search, Filter } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
@@ -253,6 +254,7 @@ export function ConsolePage() {
   const logs = useConsoleLogs();
   const [autoScroll, setAutoScroll] = useState(true);
   const [debugEnabled, setDebugEnabled] = useState(() => getConsoleDebugEnabled());
+  const [diagnosticsRunning, setDiagnosticsRunning] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [levelFilter, setLevelFilter] = useState<Set<ConsoleLogLevel>>(
@@ -346,6 +348,25 @@ export function ConsolePage() {
               <Button onClick={() => setShowFilters((v) => !v)} variant="secondary">
                 <Filter className="h-3.5 w-3.5 mr-1.5" />
                 过滤
+              </Button>
+              <Button
+                onClick={async () => {
+                  if (diagnosticsRunning) return;
+                  setDiagnosticsRunning(true);
+                  try {
+                    await collectAppMemoryDiagnostics();
+                    toast("已生成内存诊断日志");
+                  } catch {
+                    toast("内存诊断失败，请查看错误日志");
+                  } finally {
+                    setDiagnosticsRunning(false);
+                  }
+                }}
+                variant="secondary"
+                disabled={diagnosticsRunning}
+              >
+                <Activity className="h-3.5 w-3.5 mr-1.5" />
+                内存诊断
               </Button>
               <Button
                 onClick={() => {

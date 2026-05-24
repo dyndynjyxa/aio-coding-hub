@@ -76,6 +76,50 @@ pub struct UsageProviderCacheRateTrendRowV1 {
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct UsageDayHourRow {
+    pub hour: i64,
+    pub requests_total: i64,
+    pub total_tokens: i64,
+    pub io_total_tokens: i64,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct UsageDayFolderRow {
+    pub key: String,
+    pub name: String,
+    pub folder_path: Option<String>,
+    pub requests_total: i64,
+    pub requests_success: i64,
+    pub requests_failed: i64,
+    pub total_tokens: i64,
+    pub io_total_tokens: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_creation_input_tokens: i64,
+    pub cache_read_input_tokens: i64,
+    pub avg_duration_ms: Option<i64>,
+    pub avg_ttfb_ms: Option<i64>,
+    pub avg_output_tokens_per_second: Option<f64>,
+    pub cost_usd: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct UsageFolderOptionV1 {
+    pub key: String,
+    pub name: String,
+    pub folder_path: Option<String>,
+    pub requests_total: i64,
+    pub total_tokens: i64,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct UsageDayDetailV1 {
+    pub day: String,
+    pub folders: Vec<UsageDayFolderRow>,
+    pub hours: Vec<UsageDayHourRow>,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct UsageLeaderboardRow {
     pub key: String,
     pub name: String,

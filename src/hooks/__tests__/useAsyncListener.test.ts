@@ -65,4 +65,23 @@ describe("hooks/useAsyncListener", () => {
       );
     });
   });
+
+  it("logs warning when subscribe throws before returning a promise", async () => {
+    const subscribe = vi.fn(() => {
+      throw new Error("sync fail");
+    });
+
+    renderHook(() => useAsyncListener(subscribe, "sync-stage", "Sync listener failed"));
+
+    await vi.waitFor(() => {
+      expect(mockLogToConsole).toHaveBeenCalledWith(
+        "warn",
+        "Sync listener failed",
+        expect.objectContaining({
+          stage: "sync-stage",
+          error: "Error: sync fail",
+        })
+      );
+    });
+  });
 });

@@ -1,9 +1,11 @@
 //! Usage: Discover installed CLIs and manage related local config (infra adapter).
 
-use crate::shared::fs::{read_optional_file, write_file_atomic_if_changed};
+use crate::shared::fs::{read_optional_file_with_max_len, write_file_atomic_if_changed};
 use serde::Serialize;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 const ENV_KEY_MCP_TIMEOUT: &str = "MCP_TIMEOUT";
@@ -13,6 +15,9 @@ const ENV_KEY_DISABLE_ERROR_REPORTING: &str = "DISABLE_ERROR_REPORTING";
 const LOGIN_SHELL_TIMEOUT: Duration = Duration::from_secs(2);
 const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 const CMD_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const COMMAND_OUTPUT_STREAM_LIMIT: usize = 16 * 1024;
+const COMMAND_OUTPUT_READ_CHUNK_SIZE: usize = 8 * 1024;
+const CLAUDE_SETTINGS_MAX_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct ClaudeCliInfo {
@@ -56,11 +61,126 @@ struct CliProbeResult {
     resolved_via: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LimitedCommandOutput {
+    bytes: Vec<u8>,
+    truncated: bool,
+    limit: usize,
+}
+
+impl LimitedCommandOutput {
+    fn empty(limit: usize) -> Self {
+        Self {
+            bytes: Vec::new(),
+            truncated: false,
+            limit,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct LimitedProcessOutput {
+    status: std::process::ExitStatus,
+    stdout: LimitedCommandOutput,
+    stderr: LimitedCommandOutput,
+}
+
+fn read_limited_command_output<R: Read>(
+    mut reader: R,
+    limit: usize,
+) -> std::io::Result<LimitedCommandOutput> {
+    let mut bytes = Vec::with_capacity(limit.min(COMMAND_OUTPUT_READ_CHUNK_SIZE));
+    let mut truncated = false;
+    let mut chunk = [0_u8; COMMAND_OUTPUT_READ_CHUNK_SIZE];
+
+    loop {
+        let read = reader.read(&mut chunk)?;
+        if read == 0 {
+            break;
+        }
+
+        let remaining = limit.saturating_sub(bytes.len());
+        if remaining > 0 {
+            let keep = read.min(remaining);
+            bytes.extend_from_slice(&chunk[..keep]);
+            if keep < read {
+                truncated = true;
+            }
+        } else {
+            truncated = true;
+        }
+    }
+
+    Ok(LimitedCommandOutput {
+        bytes,
+        truncated,
+        limit,
+    })
+}
+
+fn spawn_limited_output_reader<R>(reader: R) -> JoinHandle<std::io::Result<LimitedCommandOutput>>
+where
+    R: Read + Send + 'static,
+{
+    std::thread::spawn(move || read_limited_command_output(reader, COMMAND_OUTPUT_STREAM_LIMIT))
+}
+
+fn collect_output_reader(
+    task: Option<JoinHandle<std::io::Result<LimitedCommandOutput>>>,
+    stream_name: &str,
+) -> crate::shared::error::AppResult<LimitedCommandOutput> {
+    let Some(task) = task else {
+        return Ok(LimitedCommandOutput::empty(COMMAND_OUTPUT_STREAM_LIMIT));
+    };
+
+    match task.join() {
+        Ok(Ok(output)) => Ok(output),
+        Ok(Err(error)) => Err(format!("failed to read {stream_name}: {error}").into()),
+        Err(_) => Err(format!("failed to join {stream_name} reader").into()),
+    }
+}
+
+fn collect_limited_process_output(
+    status: std::process::ExitStatus,
+    stdout_task: Option<JoinHandle<std::io::Result<LimitedCommandOutput>>>,
+    stderr_task: Option<JoinHandle<std::io::Result<LimitedCommandOutput>>>,
+) -> crate::shared::error::AppResult<LimitedProcessOutput> {
+    let stdout = collect_output_reader(stdout_task, "stdout")?;
+    let stderr = collect_output_reader(stderr_task, "stderr")?;
+    Ok(LimitedProcessOutput {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+fn drain_limited_output_readers(
+    stdout_task: Option<JoinHandle<std::io::Result<LimitedCommandOutput>>>,
+    stderr_task: Option<JoinHandle<std::io::Result<LimitedCommandOutput>>>,
+) {
+    let _ = collect_output_reader(stdout_task, "stdout");
+    let _ = collect_output_reader(stderr_task, "stderr");
+}
+
+fn limited_output_to_string(output: &LimitedCommandOutput, stream_name: &str) -> String {
+    let mut rendered = String::from_utf8_lossy(&output.bytes).trim().to_string();
+    if output.truncated {
+        if !rendered.is_empty() {
+            rendered.push('\n');
+        }
+        rendered.push_str(&format!(
+            "[{stream_name} truncated after {} bytes]",
+            output.limit
+        ));
+    }
+    rendered
+}
+
 fn command_output_with_timeout(
     mut cmd: Command,
     timeout: Duration,
     label: String,
-) -> crate::shared::error::AppResult<std::process::Output> {
+) -> crate::shared::error::AppResult<LimitedProcessOutput> {
     cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
@@ -68,19 +188,20 @@ fn command_output_with_timeout(
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("failed to execute {label}: {e}"))?;
+    let stdout_task = child.stdout.take().map(spawn_limited_output_reader);
+    let stderr_task = child.stderr.take().map(spawn_limited_output_reader);
 
     let start = Instant::now();
     loop {
         match child.try_wait() {
-            Ok(Some(_)) => {
-                return child
-                    .wait_with_output()
-                    .map_err(|e| format!("failed to collect output {label}: {e}").into());
+            Ok(Some(status)) => {
+                return collect_limited_process_output(status, stdout_task, stderr_task);
             }
             Ok(None) => {
                 if start.elapsed() >= timeout {
                     let _ = child.kill();
                     let _ = child.wait();
+                    drain_limited_output_readers(stdout_task, stderr_task);
                     return Err(format!("{label} timed out after {}ms", timeout.as_millis()).into());
                 }
                 std::thread::sleep(CMD_POLL_INTERVAL);
@@ -88,6 +209,7 @@ fn command_output_with_timeout(
             Err(e) => {
                 let _ = child.kill();
                 let _ = child.wait();
+                drain_limited_output_readers(stdout_task, stderr_task);
                 return Err(format!("failed to wait for {label}: {e}").into());
             }
         }
@@ -127,7 +249,24 @@ fn json_to_bytes(
     let mut out =
         serde_json::to_vec_pretty(value).map_err(|e| format!("failed to serialize {hint}: {e}"))?;
     out.push(b'\n');
+    ensure_claude_settings_len(&out, hint)?;
     Ok(out)
+}
+
+fn ensure_claude_settings_len(bytes: &[u8], label: &str) -> crate::shared::error::AppResult<()> {
+    if bytes.len() > CLAUDE_SETTINGS_MAX_BYTES {
+        return Err(format!(
+            "SEC_INVALID_INPUT: {label} too large (max {CLAUDE_SETTINGS_MAX_BYTES} bytes)"
+        )
+        .into());
+    }
+    Ok(())
+}
+
+fn read_optional_claude_settings_file(
+    path: &Path,
+) -> crate::shared::error::AppResult<Option<Vec<u8>>> {
+    read_optional_file_with_max_len(path, CLAUDE_SETTINGS_MAX_BYTES)
 }
 
 fn ensure_json_object_root(mut root: serde_json::Value) -> serde_json::Value {
@@ -148,7 +287,7 @@ fn env_string_value(value: &serde_json::Value) -> Option<String> {
 }
 
 fn read_claude_env(settings_path: &Path) -> crate::shared::error::AppResult<(Option<u64>, bool)> {
-    let Some(bytes) = read_optional_file(settings_path)? else {
+    let Some(bytes) = read_optional_claude_settings_file(settings_path)? else {
         return Ok((None, false));
     };
 
@@ -221,7 +360,7 @@ fn write_claude_env<R: tauri::Runtime>(
     disable_error_reporting: bool,
 ) -> crate::shared::error::AppResult<()> {
     let settings_path = claude_settings_path(app)?;
-    let current = read_optional_file(&settings_path)?;
+    let current = read_optional_claude_settings_file(&settings_path)?;
     let root = json_root_from_bytes(current);
     let patched = patch_claude_env(root, mcp_timeout_ms, disable_error_reporting)?;
     let bytes = json_to_bytes(&patched, "claude/settings.json")?;
@@ -233,7 +372,7 @@ fn write_claude_env<R: tauri::Runtime>(
         "claude_settings_json",
         "settings.json",
     )? {
-        let backup_current = read_optional_file(&backup_path)?;
+        let backup_current = read_optional_claude_settings_file(&backup_path)?;
         let backup_root = json_root_from_bytes(backup_current);
         let backup_patched =
             patch_claude_env(backup_root, mcp_timeout_ms, disable_error_reporting)?;
@@ -422,8 +561,8 @@ fn run_in_login_shell(shell: &Path, script: &str) -> crate::shared::error::AppRe
             format!("login shell {}", shell.display()),
         )?;
         if !out.status.success() {
-            let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            let stdout = limited_output_to_string(&out.stdout, "stdout");
+            let stderr = limited_output_to_string(&out.stderr, "stderr");
             let msg = if !stderr.is_empty() { stderr } else { stdout };
             return Err(if msg.is_empty() {
                 "unknown error"
@@ -434,7 +573,7 @@ fn run_in_login_shell(shell: &Path, script: &str) -> crate::shared::error::AppRe
             .into());
         }
 
-        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+        Ok(limited_output_to_string(&out.stdout, "stdout"))
     }
 }
 
@@ -489,8 +628,8 @@ fn run_version(exe: &Path) -> crate::shared::error::AppResult<String> {
     let out =
         command_output_with_timeout(cmd, VERSION_TIMEOUT, format!("{} --version", exe.display()))?;
 
-    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    let stdout = limited_output_to_string(&out.stdout, "stdout");
+    let stderr = limited_output_to_string(&out.stderr, "stderr");
     if out.status.success() {
         let first = stdout.lines().next().unwrap_or("").trim().to_string();
         if !first.is_empty() {
@@ -654,5 +793,53 @@ mod tests {
 
         let names = vec!["codex".to_string()];
         assert_eq!(find_exe_in_dir(dir.path(), &names), Some(path));
+    }
+
+    #[test]
+    fn read_limited_command_output_keeps_bounded_prefix() {
+        let input = std::io::Cursor::new(vec![b'x'; 20]);
+        let output = read_limited_command_output(input, 8).expect("read output");
+
+        assert_eq!(output.bytes, vec![b'x'; 8]);
+        assert!(output.truncated);
+        assert_eq!(output.limit, 8);
+    }
+
+    #[test]
+    fn limited_output_to_string_marks_truncated_stream() {
+        let output = LimitedCommandOutput {
+            bytes: b"hello\n".to_vec(),
+            truncated: true,
+            limit: 5,
+        };
+
+        assert_eq!(
+            limited_output_to_string(&output, "stdout"),
+            "hello\n[stdout truncated after 5 bytes]"
+        );
+    }
+
+    #[test]
+    fn read_claude_env_rejects_oversized_settings_file() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("settings.json");
+        fs::write(&path, vec![b'x'; CLAUDE_SETTINGS_MAX_BYTES + 1]).expect("write settings");
+
+        let err = read_claude_env(&path).unwrap_err().to_string();
+
+        assert!(err.contains("too large"));
+    }
+
+    #[test]
+    fn json_to_bytes_rejects_oversized_claude_env_settings() {
+        let value = serde_json::json!({
+            "unknown": "x".repeat(CLAUDE_SETTINGS_MAX_BYTES + 1)
+        });
+
+        let err = json_to_bytes(&value, "claude/settings.json")
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("claude/settings.json too large"));
     }
 }

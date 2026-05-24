@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
 import { appAboutGet } from "../appAbout";
@@ -22,20 +22,54 @@ vi.mock("../../consoleLog", async () => {
 });
 
 describe("services/app/appAbout", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("returns about info when available", async () => {
     vi.mocked(commands.appAboutGet).mockResolvedValue({
-      os: "mac",
+      os: " mac ",
       arch: "arm64",
-      profile: "dev",
-      app_version: "0.0.0",
-      bundle_type: null,
-      run_mode: "desktop",
+      profile: "debug",
+      app_version: " 0.0.0 ",
+      bundle_type: " appimage ",
+      run_mode: "portable",
     } as any);
 
     const result = await appAboutGet();
     expect(result).toEqual(
-      expect.objectContaining({ os: "mac", arch: "arm64", run_mode: "desktop" })
+      expect.objectContaining({
+        os: "mac",
+        arch: "arm64",
+        app_version: "0.0.0",
+        bundle_type: "appimage",
+        run_mode: "portable",
+      })
     );
+  });
+
+  it("rejects invalid about info payloads before caching app lifecycle branches", async () => {
+    vi.mocked(commands.appAboutGet).mockResolvedValueOnce({
+      os: "mac",
+      arch: "arm64",
+      profile: "release",
+      app_version: "0.1.0",
+      bundle_type: null,
+      run_mode: "desktop",
+    } as any);
+
+    await expect(appAboutGet()).rejects.toThrow("IPC_INVALID_RESULT");
+
+    vi.mocked(commands.appAboutGet).mockResolvedValueOnce({
+      os: "",
+      arch: "arm64",
+      profile: "release",
+      app_version: "0.1.0",
+      bundle_type: null,
+      run_mode: "portable",
+    } as any);
+
+    await expect(appAboutGet()).rejects.toThrow("IPC_INVALID_RESULT");
   });
 
   it("throws when invoke throws", async () => {

@@ -36,8 +36,10 @@ pub(crate) async fn cli_proxy_set_enabled_impl(
 ) -> Result<cli_proxy::CliProxyResult, String> {
     tracing::info!(cli_key = %cli_key, enabled = enabled, "cli proxy enabled state changing");
 
+    let gateway_lifecycle: Option<crate::app::gateway_lifecycle_lock::GatewayLifecycleGuard>;
     let base_origin = if enabled {
         let db = ensure_db_ready(app.clone(), db_state).await?;
+        gateway_lifecycle = Some(crate::app::gateway_lifecycle_lock::lock().await);
 
         blocking::run("cli_proxy_set_enabled_ensure_gateway", {
             let app = app.clone();
@@ -64,6 +66,7 @@ pub(crate) async fn cli_proxy_set_enabled_impl(
         })
         .await?
     } else {
+        gateway_lifecycle = None;
         format!("http://127.0.0.1:{}", settings::DEFAULT_GATEWAY_PORT)
     };
 
@@ -115,6 +118,7 @@ pub(crate) async fn cli_proxy_set_enabled_impl(
         _ => {}
     }
 
+    drop(gateway_lifecycle);
     result
 }
 

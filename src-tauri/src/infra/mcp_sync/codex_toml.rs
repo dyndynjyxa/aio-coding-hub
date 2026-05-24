@@ -1,6 +1,6 @@
 //! Usage: Build Codex MCP config TOML bytes.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::McpServerForSync;
 
@@ -23,6 +23,43 @@ fn remove_toml_table_block(lines: &mut Vec<String>, table_header: &str) -> bool 
 
     lines.drain(start..end);
     true
+}
+
+fn is_mcp_server_table_for_key(line: &str, key: &str) -> bool {
+    let trimmed = line.trim();
+    let Some(inner) = trimmed
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+    else {
+        return false;
+    };
+    if inner.starts_with('[') || inner.ends_with(']') {
+        return false;
+    }
+
+    let Some(rest) = inner.strip_prefix("mcp_servers.") else {
+        return false;
+    };
+
+    rest == key
+        || rest
+            .strip_prefix(key)
+            .is_some_and(|suffix| suffix.starts_with('.'))
+}
+
+fn remove_mcp_server_table_blocks(lines: &mut Vec<String>, key: &str) {
+    while let Some(start) = lines
+        .iter()
+        .position(|line| is_mcp_server_table_for_key(line, key))
+    {
+        let end = lines[start.saturating_add(1)..]
+            .iter()
+            .position(|line| line.trim().starts_with('['))
+            .map(|offset| start + 1 + offset)
+            .unwrap_or(lines.len());
+
+        lines.drain(start..end);
+    }
 }
 
 fn toml_escape_string(value: &str) -> String {
@@ -119,10 +156,18 @@ pub(super) fn build_codex_config_toml(
         input.lines().map(|l| l.to_string()).collect()
     };
 
-    let mut keys_to_purge: Vec<&str> = Vec::with_capacity(managed_keys.len() + servers.len());
+    let active_keys: BTreeSet<&str> = servers
+        .iter()
+        .map(|server| server.server_key.as_str())
+        .collect();
+
     for key in managed_keys {
-        keys_to_purge.push(key.as_str());
+        if !active_keys.contains(key.as_str()) {
+            remove_mcp_server_table_blocks(&mut lines, key);
+        }
     }
+
+    let mut keys_to_purge: Vec<&str> = Vec::with_capacity(servers.len());
     for server in servers {
         keys_to_purge.push(server.server_key.as_str());
     }

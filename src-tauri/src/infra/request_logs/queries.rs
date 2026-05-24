@@ -139,9 +139,6 @@ pub(super) fn route_from_attempts(attempts: &[AttemptRow]) -> Vec<RequestLogRout
         if attempt.provider_id <= 0 {
             continue;
         }
-        if attempt.outcome == "skipped" {
-            continue;
-        }
         if attempt.provider_id == last_provider_id {
             // 同一 provider 连续尝试，累加计数
             last_hop_attempt_count += 1;
@@ -153,11 +150,15 @@ pub(super) fn route_from_attempts(attempts: &[AttemptRow]) -> Vec<RequestLogRout
         last_provider_id = attempt.provider_id;
         last_hop_attempt_count = 1;
 
-        let ok = attempts
-            .iter()
-            .any(|row| row.provider_id == attempt.provider_id && row.outcome == "success");
+        let skipped = attempt.outcome == "skipped";
+        let ok = !skipped
+            && attempts
+                .iter()
+                .any(|row| row.provider_id == attempt.provider_id && row.outcome == "success");
 
-        let picked = if ok {
+        let picked = if skipped {
+            Some(attempt)
+        } else if ok {
             attempts
                 .iter()
                 .find(|row| row.provider_id == attempt.provider_id && row.outcome == "success")
@@ -189,7 +190,7 @@ pub(super) fn route_from_attempts(attempts: &[AttemptRow]) -> Vec<RequestLogRout
             provider_name: attempt.provider_name.clone(),
             ok,
             attempts: 1,
-            skipped: false,
+            skipped,
             status,
             error_code,
             decision,
@@ -611,7 +612,7 @@ INSERT INTO request_logs (
     }
 
     #[test]
-    fn route_excludes_skipped_attempts() {
+    fn route_includes_skipped_attempts() {
         let attempts = parse_attempts(
             r#"[
                 {"provider_id":1,"provider_name":"A","outcome":"skipped","status":null,"error_code":"GW_PROVIDER_RATE_LIMITED","decision":"skip","reason":"provider skipped by rate limit"},
@@ -619,11 +620,38 @@ INSERT INTO request_logs (
             ]"#,
         );
         let route = route_from_attempts(&attempts);
-        // skipped 的 provider 不出现在 route 中
+        assert_eq!(route.len(), 2);
+        assert_eq!(route[0].provider_id, 1);
+        assert!(route[0].skipped);
+        assert!(!route[0].ok);
+        assert_eq!(route[0].attempts, 1);
+        assert_eq!(
+            route[0].error_code.as_deref(),
+            Some("GW_PROVIDER_RATE_LIMITED")
+        );
+        assert_eq!(route[0].decision.as_deref(), Some("skip"));
+        assert_eq!(
+            route[0].reason.as_deref(),
+            Some("provider skipped by rate limit")
+        );
+        assert_eq!(route[1].provider_id, 2);
+        assert!(!route[1].skipped);
+        assert!(route[1].ok);
+        assert_eq!(route[1].attempts, 1);
+    }
+
+    #[test]
+    fn route_includes_gate_only_skip_attempts() {
+        let attempts = parse_attempts(
+            r#"[
+                {"provider_id":1,"provider_name":"A","outcome":"skipped","status":null,"error_code":"GW_PROVIDER_CIRCUIT_OPEN","decision":"skip","reason":"provider skipped by circuit breaker"}
+            ]"#,
+        );
+        let route = route_from_attempts(&attempts);
         assert_eq!(route.len(), 1);
-        assert_eq!(route[0].provider_id, 2);
-        assert!(!route[0].skipped);
-        assert!(route[0].ok);
+        assert_eq!(route[0].provider_id, 1);
+        assert!(route[0].skipped);
+        assert!(!route[0].ok);
         assert_eq!(route[0].attempts, 1);
     }
 
@@ -662,7 +690,9 @@ INSERT INTO request_logs (
         assert_eq!(final_name, "Unknown");
 
         let route = route_from_attempts(&attempts);
-        assert!(route.is_empty());
+        assert_eq!(route.len(), 1);
+        assert!(route[0].skipped);
+        assert!(!route[0].ok);
     }
 
     #[test]

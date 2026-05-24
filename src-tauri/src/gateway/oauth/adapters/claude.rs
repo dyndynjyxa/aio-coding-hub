@@ -1,6 +1,7 @@
 //! Usage: Claude (Anthropic) OAuth adapter.
 
 use crate::gateway::oauth::provider_trait::*;
+use crate::shared::http_body::read_text_with_limit;
 use axum::http::{HeaderMap, HeaderValue};
 use chrono::DateTime;
 use std::future::Future;
@@ -9,6 +10,8 @@ use std::pin::Pin;
 pub(crate) struct ClaudeOAuthProvider {
     endpoints: OAuthEndpoints,
 }
+
+const CLAUDE_LIMITS_RESPONSE_BODY_LIMIT: usize = 1024 * 1024;
 
 impl ClaudeOAuthProvider {
     pub(crate) fn new() -> Self {
@@ -148,9 +151,11 @@ impl OAuthProvider for ClaudeOAuthProvider {
                 return Err(format!("claude limits fetch status: {}", resp.status()));
             }
 
-            let mut json: serde_json::Value = resp
-                .json()
-                .await
+            let body =
+                read_text_with_limit(resp, CLAUDE_LIMITS_RESPONSE_BODY_LIMIT, "claude limits")
+                    .await
+                    .map_err(|e| format!("claude limits body read failed: {e}"))?;
+            let mut json: serde_json::Value = serde_json::from_str(&body)
                 .map_err(|e| format!("claude limits parse failed: {e}"))?;
             // Convert ISO 8601 resets_at to Unix seconds for frontend countdown
             fn inject_reset_at_unix(json: &mut serde_json::Value, key: &str) {

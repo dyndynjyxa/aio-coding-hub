@@ -6,11 +6,11 @@ use crate::gateway::events::decision_chain as dc;
 use crate::gateway::proxy::status_override;
 use crate::gateway::proxy::{is_claude_count_tokens_request, provider_router};
 
-pub(super) struct RecordSystemFailureArgs<'a> {
-    pub(super) ctx: CommonCtx<'a>,
+pub(super) struct RecordSystemFailureArgs<'a, R: tauri::Runtime = tauri::Wry> {
+    pub(super) ctx: CommonCtx<'a, R>,
     pub(super) provider_ctx: ProviderCtx<'a>,
     pub(super) attempt_ctx: AttemptCtx<'a>,
-    pub(super) loop_state: LoopState<'a>,
+    pub(super) loop_state: LoopState<'a, R>,
     pub(super) status: Option<u16>,
     pub(super) error_code: &'static str,
     pub(super) decision: FailoverDecision,
@@ -18,14 +18,14 @@ pub(super) struct RecordSystemFailureArgs<'a> {
     pub(super) reason: String,
 }
 
-pub(super) async fn record_system_failure_and_decide(
-    args: RecordSystemFailureArgs<'_>,
+pub(super) async fn record_system_failure_and_decide<R: tauri::Runtime>(
+    args: RecordSystemFailureArgs<'_, R>,
 ) -> LoopControl {
     record_system_failure_and_decide_impl(args, CooldownPolicy::Apply).await
 }
 
-pub(super) async fn record_system_failure_and_decide_no_cooldown(
-    args: RecordSystemFailureArgs<'_>,
+pub(super) async fn record_system_failure_and_decide_no_cooldown<R: tauri::Runtime>(
+    args: RecordSystemFailureArgs<'_, R>,
 ) -> LoopControl {
     record_system_failure_and_decide_impl(args, CooldownPolicy::Skip).await
 }
@@ -36,8 +36,8 @@ enum CooldownPolicy {
     Skip,
 }
 
-async fn record_system_failure_and_decide_impl(
-    args: RecordSystemFailureArgs<'_>,
+async fn record_system_failure_and_decide_impl<R: tauri::Runtime>(
+    args: RecordSystemFailureArgs<'_, R>,
     cooldown_policy: CooldownPolicy,
 ) -> LoopControl {
     let RecordSystemFailureArgs {
@@ -47,8 +47,8 @@ async fn record_system_failure_and_decide_impl(
         loop_state,
         status,
         error_code,
-        decision,
-        outcome,
+        mut decision,
+        mut outcome,
         reason,
     } = args;
     let ProviderCtx {
@@ -106,10 +106,11 @@ async fn record_system_failure_and_decide_impl(
         circuit_state_after = Some(change.after.state.as_str());
         circuit_failure_count = Some(change.after.failure_count);
 
-        if change.after.state == circuit_breaker::CircuitState::Open {
-            // Override decision to switch if circuit just opened.
-            // (The original decision may have been RetrySameProvider.)
-        }
+        let recorded_decision = decision;
+        decision =
+            system_failure_decision_after_circuit_record(decision, false, Some(change.after.state));
+        outcome =
+            system_failure_outcome_after_decision_override(outcome, recorded_decision, decision);
     }
 
     attempts.push(FailoverAttempt {
@@ -175,5 +176,91 @@ async fn record_system_failure_and_decide_impl(
             LoopControl::BreakRetry
         }
         FailoverDecision::Abort => LoopControl::BreakRetry,
+    }
+}
+
+fn system_failure_decision_after_circuit_record(
+    decision: FailoverDecision,
+    is_count_tokens: bool,
+    circuit_state_after: Option<circuit_breaker::CircuitState>,
+) -> FailoverDecision {
+    if !is_count_tokens
+        && matches!(decision, FailoverDecision::RetrySameProvider)
+        && matches!(
+            circuit_state_after,
+            Some(circuit_breaker::CircuitState::Open)
+        )
+    {
+        return FailoverDecision::SwitchProvider;
+    }
+
+    decision
+}
+
+fn system_failure_outcome_after_decision_override(
+    outcome: String,
+    before: FailoverDecision,
+    after: FailoverDecision,
+) -> String {
+    if matches!(before, FailoverDecision::RetrySameProvider)
+        && matches!(after, FailoverDecision::SwitchProvider)
+    {
+        return outcome.replace("decision=retry", "decision=switch");
+    }
+
+    outcome
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        circuit_breaker, system_failure_decision_after_circuit_record,
+        system_failure_outcome_after_decision_override, FailoverDecision,
+    };
+
+    #[test]
+    fn system_failure_switches_when_circuit_opens() {
+        let decision = system_failure_decision_after_circuit_record(
+            FailoverDecision::RetrySameProvider,
+            false,
+            Some(circuit_breaker::CircuitState::Open),
+        );
+
+        assert!(matches!(decision, FailoverDecision::SwitchProvider));
+    }
+
+    #[test]
+    fn system_failure_preserves_retry_when_circuit_stays_closed() {
+        let decision = system_failure_decision_after_circuit_record(
+            FailoverDecision::RetrySameProvider,
+            false,
+            Some(circuit_breaker::CircuitState::Closed),
+        );
+
+        assert!(matches!(decision, FailoverDecision::RetrySameProvider));
+    }
+
+    #[test]
+    fn system_failure_preserves_count_tokens_abort() {
+        let decision = system_failure_decision_after_circuit_record(
+            FailoverDecision::Abort,
+            true,
+            Some(circuit_breaker::CircuitState::Open),
+        );
+
+        assert!(matches!(decision, FailoverDecision::Abort));
+    }
+
+    #[test]
+    fn system_failure_outcome_tracks_retry_to_switch_override() {
+        let outcome = system_failure_outcome_after_decision_override(
+            "request_timeout: category=SYSTEM_ERROR code=GW_UPSTREAM_TIMEOUT decision=retry timeout_secs=30"
+                .to_string(),
+            FailoverDecision::RetrySameProvider,
+            FailoverDecision::SwitchProvider,
+        );
+
+        assert!(outcome.contains("decision=switch"));
+        assert!(!outcome.contains("decision=retry"));
     }
 }

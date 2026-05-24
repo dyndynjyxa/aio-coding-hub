@@ -21,10 +21,11 @@ const MAX_JSON_LENGTH = 10_000;
 const dedupMap = new Map<string, number>();
 
 let installed = false;
+let installedWindow: Window | null = null;
 
 export function __testResetFrontendErrorReporterState() {
+  uninstallGlobalErrorReporting();
   dedupMap.clear();
-  installed = false;
 }
 
 function truncateText(value: string, max: number): string {
@@ -72,15 +73,40 @@ function makeDedupKey(payload: FrontendErrorPayload): string {
 function shouldSend(payload: FrontendErrorPayload): boolean {
   const key = makeDedupKey(payload);
   const now = Date.now();
+  pruneExpiredDedupKeys(now);
+
   const last = dedupMap.get(key);
   if (last != null && now - last < DEDUP_WINDOW_MS) return false;
 
   dedupMap.set(key, now);
-  if (dedupMap.size > MAX_DEDUP_KEYS) {
-    dedupMap.clear();
-    dedupMap.set(key, now);
+  while (dedupMap.size > MAX_DEDUP_KEYS) {
+    evictOldestDedupKey();
   }
   return true;
+}
+
+function pruneExpiredDedupKeys(now: number) {
+  for (const [key, lastSeenAt] of dedupMap) {
+    if (now - lastSeenAt >= DEDUP_WINDOW_MS) {
+      dedupMap.delete(key);
+    }
+  }
+}
+
+function evictOldestDedupKey() {
+  let oldestKey: string | null = null;
+  let oldestSeenAt = Number.POSITIVE_INFINITY;
+
+  for (const [key, lastSeenAt] of dedupMap) {
+    if (lastSeenAt < oldestSeenAt) {
+      oldestKey = key;
+      oldestSeenAt = lastSeenAt;
+    }
+  }
+
+  if (oldestKey != null) {
+    dedupMap.delete(oldestKey);
+  }
 }
 
 async function send(payload: FrontendErrorPayload): Promise<void> {
@@ -165,12 +191,26 @@ export function reportRenderError(error: unknown, errorInfo?: { componentStack?:
   });
 }
 
-export function installGlobalErrorReporting() {
-  if (installed) return;
-  if (typeof window === "undefined") return;
+export function uninstallGlobalErrorReporting() {
+  if (!installedWindow) {
+    installed = false;
+    return;
+  }
+
+  installedWindow.removeEventListener("error", reportWindowError);
+  installedWindow.removeEventListener("unhandledrejection", reportUnhandledRejection);
+  installedWindow = null;
+  installed = false;
+}
+
+export function installGlobalErrorReporting(): () => void {
+  if (installed) return uninstallGlobalErrorReporting;
+  if (typeof window === "undefined") return () => {};
 
   window.addEventListener("error", reportWindowError);
   window.addEventListener("unhandledrejection", reportUnhandledRejection);
 
+  installedWindow = window;
   installed = true;
+  return uninstallGlobalErrorReporting;
 }

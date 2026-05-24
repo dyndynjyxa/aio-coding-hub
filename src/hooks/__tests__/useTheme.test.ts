@@ -205,6 +205,7 @@ describe("hooks/useTheme", () => {
   it("uses addListener fallback when addEventListener is unavailable", async () => {
     const original = window.matchMedia;
     const addListener = vi.fn();
+    const removeListener = vi.fn();
 
     Object.defineProperty(window, "matchMedia", {
       writable: true,
@@ -213,16 +214,132 @@ describe("hooks/useTheme", () => {
         media: "(prefers-color-scheme: dark)",
         onchange: null,
         addListener,
+        removeListener,
+        dispatchEvent: () => false,
+      }),
+    });
+
+    const { useTheme } = await importFreshUseTheme();
+    const { unmount } = renderHook(() => useTheme());
+
+    expect(addListener).toHaveBeenCalledTimes(1);
+    unmount();
+    expect(removeListener).toHaveBeenCalledTimes(1);
+
+    Object.defineProperty(window, "matchMedia", { writable: true, value: original });
+  });
+
+  it("installs theme listeners only while hooks are subscribed", async () => {
+    const original = window.matchMedia;
+    const addMediaListener = vi.fn();
+    const removeMediaListener = vi.fn();
+    const nativeUnlisten = vi.fn();
+    const addWindowListener = vi.spyOn(window, "addEventListener");
+    const removeWindowListener = vi.spyOn(window, "removeEventListener");
+    mockTauriListen.mockImplementation(() => Promise.resolve(nativeUnlisten));
+
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      value: vi.fn().mockReturnValue({
+        matches: false,
+        media: "(prefers-color-scheme: dark)",
+        onchange: null,
+        addEventListener: addMediaListener,
+        removeEventListener: removeMediaListener,
+        addListener: vi.fn(),
         removeListener: vi.fn(),
         dispatchEvent: () => false,
       }),
     });
 
-    await importFreshUseTheme();
+    const { useTheme } = await importFreshUseTheme();
+    const first = renderHook(() => useTheme());
+    const second = renderHook(() => useTheme());
+    await Promise.resolve();
 
-    expect(addListener).toHaveBeenCalledTimes(1);
+    expect(addMediaListener).toHaveBeenCalledTimes(1);
+    expect(addWindowListener).toHaveBeenCalledWith("storage", expect.any(Function));
+    expect(mockTauriListen).toHaveBeenCalledTimes(1);
+
+    first.unmount();
+    expect(removeMediaListener).not.toHaveBeenCalled();
+    expect(nativeUnlisten).not.toHaveBeenCalled();
+
+    second.unmount();
+    expect(removeMediaListener).toHaveBeenCalledWith("change", expect.any(Function));
+    expect(removeWindowListener).toHaveBeenCalledWith("storage", expect.any(Function));
+    expect(nativeUnlisten).toHaveBeenCalledTimes(1);
 
     Object.defineProperty(window, "matchMedia", { writable: true, value: original });
+  });
+
+  it("keeps theme subscribers isolated when one listener throws", async () => {
+    const { subscribeTheme } = await importFreshUseTheme();
+    const failingListener = vi.fn(() => {
+      throw new Error("listener boom");
+    });
+    const healthyListener = vi.fn();
+
+    const unsubscribeFailing = subscribeTheme(failingListener);
+    const unsubscribeHealthy = subscribeTheme(healthyListener);
+
+    expect(() => {
+      window.localStorage.setItem("aio-theme", "dark");
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: "aio-theme",
+          storageArea: window.localStorage,
+        })
+      );
+    }).not.toThrow();
+
+    expect(failingListener).toHaveBeenCalledTimes(1);
+    expect(healthyListener).toHaveBeenCalledTimes(1);
+
+    unsubscribeFailing();
+    unsubscribeHealthy();
+  });
+
+  it("cleans up a Tauri theme listener that resolves after unmount", async () => {
+    let resolveListen!: (unlisten: () => void) => void;
+    const nativeUnlisten = vi.fn();
+    mockTauriListen.mockImplementation(
+      () =>
+        new Promise<() => void>((resolve) => {
+          resolveListen = resolve;
+        })
+    );
+
+    const { useTheme } = await importFreshUseTheme();
+    const view = renderHook(() => useTheme());
+    view.unmount();
+
+    resolveListen(nativeUnlisten);
+    await Promise.resolve();
+
+    expect(nativeUnlisten).toHaveBeenCalledTimes(1);
+  });
+
+  it("syncs stored theme changes from other tabs or WebViews", async () => {
+    const { useTheme } = await importFreshUseTheme();
+    const { result } = renderHook(() => useTheme());
+
+    expect(result.current.theme).toBe("system");
+
+    act(() => {
+      window.localStorage.setItem("aio-theme", "dark");
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: "aio-theme",
+          newValue: "dark",
+          storageArea: window.localStorage,
+        })
+      );
+    });
+
+    expect(result.current.theme).toBe("dark");
+    expect(result.current.resolvedTheme).toBe("dark");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
   });
 
   it("ignores system theme change events after switching to an explicit theme", async () => {

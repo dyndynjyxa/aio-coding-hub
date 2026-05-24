@@ -1,4 +1,7 @@
 use super::git_url::parse_github_owner_repo;
+use super::limits::{
+    SKILL_FILE_COUNT_MAX, SKILL_FILE_MAX_BYTES, SKILL_MD_MAX_BYTES, SKILL_SOURCE_METADATA_MAX_BYTES,
+};
 use super::repo_cache::{github_api_url, unzip_repo_zip};
 use super::util::now_unix_nanos;
 use std::io::{Cursor, Write};
@@ -84,4 +87,70 @@ fn unzip_repo_zip_accepts_backslash_paths_inside_repo() {
     assert!(repo_root.join("nested").join("SKILL.md").exists());
 
     let _ = std::fs::remove_dir_all(&out_dir);
+}
+
+#[test]
+fn parse_skill_md_rejects_oversized_file() {
+    let dir = make_temp_dir("aio-skill-md-large");
+    let path = dir.join("SKILL.md");
+    std::fs::write(&path, vec![b'x'; SKILL_MD_MAX_BYTES + 1]).expect("write large skill md");
+
+    let err = super::skill_md::parse_skill_md(&path).expect_err("oversized SKILL.md should fail");
+
+    assert!(err.contains("too large"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn copy_dir_recursive_rejects_oversized_file() {
+    let src = make_temp_dir("aio-skill-copy-large-src");
+    let dst = make_temp_dir("aio-skill-copy-large-dst");
+    let dst = dst.join("copy");
+    std::fs::write(src.join("SKILL.md"), "---\nname: Large\n---\n").expect("write skill md");
+    std::fs::write(
+        src.join("large.bin"),
+        vec![b'x'; SKILL_FILE_MAX_BYTES as usize + 1],
+    )
+    .expect("write large file");
+
+    let err = super::fs_ops::copy_dir_recursive(&src, &dst)
+        .expect_err("oversized skill copy should fail");
+
+    assert!(err.to_string().contains("too large"));
+    let _ = std::fs::remove_dir_all(&src);
+    let _ = std::fs::remove_dir_all(dst.parent().unwrap_or(&dst));
+}
+
+#[test]
+fn copy_dir_recursive_rejects_too_many_files() {
+    let src = make_temp_dir("aio-skill-copy-many-src");
+    let dst = make_temp_dir("aio-skill-copy-many-dst");
+    let dst = dst.join("copy");
+    std::fs::write(src.join("SKILL.md"), "---\nname: Many\n---\n").expect("write skill md");
+    for index in 0..SKILL_FILE_COUNT_MAX {
+        std::fs::write(src.join(format!("{index}.txt")), b"x").expect("write file");
+    }
+
+    let err = super::fs_ops::copy_dir_recursive(&src, &dst)
+        .expect_err("too many skill files should fail");
+
+    assert!(err.to_string().contains("too many skill files"));
+    let _ = std::fs::remove_dir_all(&src);
+    let _ = std::fs::remove_dir_all(dst.parent().unwrap_or(&dst));
+}
+
+#[test]
+fn read_source_metadata_rejects_oversized_file() {
+    let dir = make_temp_dir("aio-skill-source-large");
+    std::fs::write(
+        dir.join(".aio-coding-hub.source.json"),
+        vec![b'x'; SKILL_SOURCE_METADATA_MAX_BYTES + 1],
+    )
+    .expect("write large source metadata");
+
+    let err = super::fs_ops::read_source_metadata(&dir)
+        .expect_err("oversized source metadata should fail");
+
+    assert!(err.to_string().contains("too large"));
+    let _ = std::fs::remove_dir_all(&dir);
 }

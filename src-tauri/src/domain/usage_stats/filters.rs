@@ -48,6 +48,31 @@ pub(super) fn build_optional_range_cli_provider_filters(
     (sql, values)
 }
 
+pub(super) fn sql_exclude_cx2cc_gateway_bridge_clause(
+    request_log_alias: Option<&str>,
+    enabled: bool,
+) -> String {
+    if !enabled {
+        return String::new();
+    }
+
+    let final_provider_id_column = match request_log_alias {
+        Some(alias) if !alias.trim().is_empty() => format!("{}.final_provider_id", alias.trim()),
+        _ => "final_provider_id".to_string(),
+    };
+
+    format!(
+        r#"
+AND NOT EXISTS (
+  SELECT 1
+  FROM providers usage_filter_provider
+  WHERE usage_filter_provider.id = {final_provider_id_column}
+  AND usage_filter_provider.bridge_type = 'cx2cc'
+  AND usage_filter_provider.source_provider_id IS NULL
+)"#
+    )
+}
+
 /// Build optional AND clauses for time-range filters with a placeholder offset.
 ///
 /// Similar to [`build_optional_range_cli_provider_filters`] but only handles
