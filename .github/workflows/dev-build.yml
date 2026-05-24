@@ -1,0 +1,82 @@
+name: dev-build
+
+on:
+  push:
+    branches-ignore: [main, upstream/*]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Rust 1.90.0
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.90.0
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Tauri (Windows, portable)
+        run: pnpm tauri build --target x86_64-pc-windows-msvc --no-bundle
+
+      - name: Package portable ZIP
+        shell: pwsh
+        run: |
+          $targetDir = "src-tauri/target/x86_64-pc-windows-msvc/release"
+          $exePath = Join-Path $targetDir "AIO Coding Hub.exe"
+          if (-not (Test-Path $exePath)) {
+            $exePath = Join-Path $targetDir "aio-coding-hub.exe"
+          }
+          if (-not (Test-Path $exePath)) {
+            Write-Error "Cannot find built exe"
+            Get-ChildItem $targetDir -Filter "*.exe" | ForEach-Object { Write-Host $_.FullName }
+            exit 1
+          }
+
+          $portableDir = "dev-build/AIO Coding Hub"
+          New-Item -ItemType Directory -Path $portableDir -Force | Out-Null
+          Copy-Item $exePath $portableDir
+
+          $resourceDir = Join-Path $targetDir "resources"
+          if (Test-Path $resourceDir) {
+            Copy-Item -Recurse $resourceDir (Join-Path $portableDir "resources")
+          }
+
+          $sha = "${{ github.sha }}".Substring(0, 7)
+          $zipName = "aio-coding-hub-dev-win64-${sha}.zip"
+          Compress-Archive -Path "$portableDir/*" -DestinationPath "dev-build/$zipName" -Force
+          Write-Host "Created: dev-build/$zipName"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-build-win64
+          path: dev-build/*.zip
+          retention-days: 7
