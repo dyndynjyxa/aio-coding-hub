@@ -1,0 +1,150 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    # 每天北京时间 08:00，UTC 00:00
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: Branch to sync from upstream
+        required: false
+        default: main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-upstream-${{ github.event.inputs.target_branch || 'main' }}
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: dyndynjyxa/aio-coding-hub
+  TARGET_BRANCH: ${{ github.event.inputs.target_branch || 'main' }}
+  SYNC_BRANCH: sync/upstream-${{ github.event.inputs.target_branch || 'main' }}
+
+jobs:
+  sync:
+    name: Sync upstream branch
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          # Optional: set SYNC_UPSTREAM_TOKEN to a PAT with workflow scope if
+          # upstream changes to .github/workflows need to be synced.
+          token: ${{ secrets.SYNC_UPSTREAM_TOKEN || github.token }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch origin and upstream
+        run: |
+          set -euo pipefail
+
+          git check-ref-format --branch "${TARGET_BRANCH}"
+
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+
+          git fetch origin "+refs/heads/${TARGET_BRANCH}:refs/remotes/origin/${TARGET_BRANCH}"
+          git fetch upstream "+refs/heads/${TARGET_BRANCH}:refs/remotes/upstream/${TARGET_BRANCH}"
+
+      - name: Sync by fast-forward or open PR
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_UPSTREAM_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+
+          LOCAL="origin/${TARGET_BRANCH}"
+          UPSTREAM="upstream/${TARGET_BRANCH}"
+
+          echo "Local branch: ${LOCAL}"
+          echo "Upstream branch: ${UPSTREAM}"
+
+          if git merge-base --is-ancestor "${UPSTREAM}" "${LOCAL}"; then
+            echo "Already up to date. Nothing to sync."
+            {
+              echo "## Sync Upstream"
+              echo ""
+              echo "\`${TARGET_BRANCH}\` is already up to date with \`${UPSTREAM_REPO}:${TARGET_BRANCH}\`."
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          if git merge-base --is-ancestor "${LOCAL}" "${UPSTREAM}"; then
+            echo "Fast-forward sync is possible."
+
+            git checkout -B "${TARGET_BRANCH}" "${LOCAL}"
+            git merge --ff-only "${UPSTREAM}"
+            git push origin "HEAD:${TARGET_BRANCH}"
+
+            {
+              echo "## Sync Upstream"
+              echo ""
+              echo "Fast-forwarded \`${TARGET_BRANCH}\` to \`${UPSTREAM_REPO}:${TARGET_BRANCH}\`."
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          echo "Branches have diverged. Creating sync PR instead."
+
+          git checkout -B "${SYNC_BRANCH}" "${LOCAL}"
+          git merge --no-edit "${UPSTREAM}"
+          git push --force-with-lease origin "HEAD:${SYNC_BRANCH}"
+
+          title="chore(sync): sync upstream ${TARGET_BRANCH}"
+          body="Automatic upstream sync from \`${UPSTREAM_REPO}:${TARGET_BRANCH}\`.
+
+          The target branch has local commits, so this workflow opened a PR instead of pushing directly to \`${TARGET_BRANCH}\`.
+
+          Please review and merge manually."
+
+          existing_pr="$(
+            gh pr list \
+              --repo "${GITHUB_REPOSITORY}" \
+              --head "${SYNC_BRANCH}" \
+              --base "${TARGET_BRANCH}" \
+              --state open \
+              --json number \
+              --jq '.[0].number // empty'
+          )"
+
+          if [ -n "${existing_pr}" ]; then
+            gh pr edit "${existing_pr}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "${title}" \
+              --body "${body}"
+            pr_number="${existing_pr}"
+          else
+            gh pr create \
+              --repo "${GITHUB_REPOSITORY}" \
+              --base "${TARGET_BRANCH}" \
+              --head "${SYNC_BRANCH}" \
+              --title "${title}" \
+              --body "${body}"
+
+            pr_number="$(
+              gh pr list \
+                --repo "${GITHUB_REPOSITORY}" \
+                --head "${SYNC_BRANCH}" \
+                --base "${TARGET_BRANCH}" \
+                --state open \
+                --json number \
+                --jq '.[0].number // empty'
+            )"
+          fi
+
+          {
+            echo "## Sync Upstream"
+            echo ""
+            echo "Created or updated sync PR for \`${TARGET_BRANCH}\`."
+            if [ -n "${pr_number}" ]; then
+              echo ""
+              echo "PR: #${pr_number}"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
