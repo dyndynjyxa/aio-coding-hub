@@ -78,6 +78,16 @@ Use this checklist whenever a Tauri command is added or changed.
 - The Tauri command layer owns IPC shape adaptation.
 - The domain layer owns validation and persistence rules.
 - The frontend service layer owns the final JS wrapper used by pages/hooks.
+- `src-tauri/src/commands/registry.rs` is the single source for generated
+  command registration and TypeScript export. Runtime-only commands must be
+  rare, named, and tested as exceptions.
+- `src/generated/bindings.ts` is generated transport code. Do not edit it by
+  hand; regenerate through `pnpm tauri:gen-types` and verify with
+  `pnpm check:generated-bindings`.
+- `src/services/generatedIpc.ts` owns generated-result unwrapping, null-result
+  policy, sensitive argument redaction, and logging. Feature services should
+  call generated commands through this layer instead of duplicating envelope
+  handling.
 - Keep runtime command registration and Specta export coverage derived from one
   registry module. If those lists diverge, the desktop contract is already
   drifting even if tests still compile.
@@ -94,6 +104,30 @@ Use this checklist whenever a Tauri command is added or changed.
 - Keep runtime-only exceptions rare and named. In this project,
   `desktop_updater_download_and_install` is the known handwritten command path
   because it depends on a Tauri `Channel` callback.
+
+### Tauri native events (listen / on*)
+
+- Tauri event payloads are **not** the same shape as command responses.
+  `onThemeChanged` passes `"light" | "dark"` directly, not `{ theme: ... }`.
+  Always verify the actual payload shape against Tauri source/docs before
+  writing the handler, not against a guessed convention.
+- Platform-specific behavior gaps (e.g. WebView2 `prefers-color-scheme` does
+  not update live on Windows) may require listening to both the browser API
+  and the Tauri native event as a fallback pair.
+- Keep event wrappers in `src/services/desktop/*` and add them to the
+  `allowedRawTauriImportFiles` set in the desktop bridge contract test.
+
+### Current IPC ownership map
+
+Use this map before adding or changing a desktop boundary:
+
+| Boundary kind | Owner files | Verification |
+|---|---|---|
+| Generated Tauri commands | `src-tauri/src/commands/registry.rs`, `src/generated/bindings.ts` | `pnpm check:generated-bindings`, `src/generated/__tests__/bindings.contract.test.ts` |
+| Generated command wrappers | `src/services/generatedIpc.ts`, domain files under `src/services/*/` | service tests next to the wrapper |
+| Raw Tauri/plugin imports | `src/services/desktop/*`, `src/services/tauriInvoke.ts`, generated bindings | `src/services/__tests__/desktopBridge.contract.test.ts` |
+| Runtime-only handwritten command | `src/services/desktop/updater.ts` for `desktop_updater_download_and_install` only | desktop bridge contract test |
+| Native/backend events | `src/services/*/*Events.ts`, shared constants such as `src/constants/appEvents.ts` | event parser tests and generated-binding contract tests when Rust emits shared names |
 
 ---
 
@@ -674,6 +708,8 @@ Before implementation:
 - [ ] Defined format at each boundary
 - [ ] Decided where validation happens
 - [ ] Decided whether Specta bindings must be regenerated
+- [ ] If the flow uses request logs, mapped `gateway event → request_logs row →
+      generated binding → service type → list card → detail dialog`
 
 After implementation:
 - [ ] Tested with edge cases (null, empty, invalid)
@@ -727,6 +763,10 @@ After implementation:
       visibility/backpressure rule
 - [ ] If editing a third-party config file, verified unsupported fields and
       unknown item types survive read-modify-write round trips
+- [ ] For request logs, separated real upstream attempts from provider-gate
+      skips in user-facing wording
+- [ ] For request logs, documented unsupported CLI folder lookup instead of
+      treating it as a lookup miss
 
 ---
 

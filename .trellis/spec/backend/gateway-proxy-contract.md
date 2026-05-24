@@ -15,9 +15,6 @@ The gateway is **not** a dumb TCP tunnel. It is an application-level proxy that:
 
 This document makes those mutations explicit, so "透传/不透传" is not a guess.
 
-Related: rectifier toggles and cross-layer settings contract live in
-`./../guides/gateway-rectifier-settings-contract.md`.
-
 ---
 
 ## High-Level Request Lifecycle (Claude/Codex/Gemini)
@@ -280,26 +277,30 @@ New/important `special_settings_json` markers include:
 
 Never include secrets (API keys, bearer tokens, refresh tokens) in any of these surfaces.
 
-### Skip-Only Failover Classification
+### Provider Gates, Skipped Attempts, and Terminal Logs
 
-Provider candidates can be filtered before any upstream send happens:
+Provider gates run before an upstream request is sent. Circuit-open, cooldown,
+and provider limit checks may append a skipped `FailoverAttempt` for diagnostics,
+but that skipped attempt is not a real provider request.
 
-- circuit open / cooldown
-- provider rate limit
-- other gate-level "skip" decisions
+Required behavior:
 
-Contract:
-
-- Keep those filtered attempts in `attempts_json` and `error_details_json` so
-  diagnostics still show which provider was blocked and why.
-- If **all** recorded attempts are pre-send skips, the terminal request must be
-  classified as `GW_ALL_PROVIDERS_UNAVAILABLE`, not `GW_UPSTREAM_ALL_FAILED`.
+- `outcome=skipped` means the provider was not called.
+- Skipped attempts may appear in `attempts_json` and route diagnostics.
+- All gate-only skips must finalize as `GW_ALL_PROVIDERS_UNAVAILABLE`.
 - `GW_UPSTREAM_ALL_FAILED` is reserved for requests where at least one upstream
   call was actually attempted and failed.
-- The unavailable classification is what enables recent-error caching /
-  retry-after reuse. If this contract drifts, the same CLI session can produce a
-  burst of new request-log rows during one breaker window even though the
-  provider never left the unavailable state.
+- The terminal request log should describe provider unavailability, not a failed
+  upstream response from the skipped provider.
+- Retry-after/recent-error cache should short-circuit repeated identical
+  unavailable requests where possible.
+
+Forbidden pattern:
+
+- Do not let skipped circuit-breaker attempts look like new upstream attempts in
+  summary/detail UI.
+- Do not use the last skipped provider as the user-facing final provider without
+  also exposing the terminal unavailable state.
 
 ### Codex SSE Tail Errors After Completion
 
@@ -330,6 +331,7 @@ Contract:
 #### 2. Signatures
 
 - `FailoverRunState`: owns `attempts`, `failed_provider_ids`, and `last_outcome` for one failover run.
+  Owner: `src-tauri/src/gateway/proxy/handler/failover_loop/context.rs`.
 - `AttemptOutcome`: stores the terminal error pair as one atomic value:
   `error_category` + `error_code`.
 - `RequestEndContextArgs`: stores request context only: deps, trace id, CLI,
@@ -337,10 +339,12 @@ Contract:
   session/model, and timestamps.
 - `RequestCompletion`: stores request-end completion fields:
   `status`, `error_category`, `error_code`, TTFB fields, usage fields.
+  Owner: `src-tauri/src/gateway/proxy/request_end.rs`.
 - Constructors: `success(...)`, `failure(...)`, `failure_with_ttfb(...)`, and
   `client_abort()` are the canonical ways to describe proxy terminal outcomes.
 - `StreamRequestCompletion`: stores stream tail completion fields as one value:
   `error_code`, `ttfb_ms`, `requested_model`, `usage_metrics`, and `usage`.
+  Owner: `src-tauri/src/gateway/streams/request_end.rs`.
 - Constructors: `success(...)`, `failure(...)`, and `from_error_code(...)` are
   the canonical ways to describe stream tail outcomes.
 
@@ -422,13 +426,23 @@ For Claude `/v1/messages` requests, the gateway writes request logs in two phase
 
 1. **Placeholder** (request start): `status=NULL, duration_ms=0, attempts_json='[]'`
    - Written via `enqueue_in_progress_request_log_if_needed()` in `handler/mod.rs`
+     (`src-tauri/src/gateway/proxy/handler/mod.rs`)
    - Purpose: let the frontend show "in progress" immediately
 2. **Finalization** (request end): `status=200/499/..., duration_ms=actual, ...`
    - Written via `emit_request_event_and_enqueue_request_log()` in `request_end.rs`
+     (`src-tauri/src/gateway/proxy/request_end.rs`)
    - Uses `INSERT ... ON CONFLICT(trace_id) DO UPDATE` to overwrite the placeholder
 
 **Known failure mode**: If the finalization write is lost (app crash, buffered
 writer backpressure drop), the placeholder persists with `status=NULL`
 indefinitely. The frontend applies a 10-minute staleness guard
-(`STALE_IN_PROGRESS_THRESHOLD_MS` in `HomeLogShared.tsx`) to treat stale
-placeholders as abandoned. Backend orphan cleanup is not yet implemented.
+(`STALE_IN_PROGRESS_THRESHOLD_MS` in
+`src/components/home/HomeLogShared.tsx`) to treat stale placeholders as
+abandoned. Backend orphan cleanup is not yet implemented.
+
+Frontend consumers must keep realtime events and history rows aligned. If a
+request-log display changes, trace the whole path:
+
+`src-tauri/src/gateway/events.rs` → `src-tauri/src/infra/request_logs.rs` →
+`src/generated/bindings.ts` → `src/services/gateway/requestLogs.ts` →
+`src/components/home/HomeLogShared.tsx` / `src/components/home/RequestLogDetailDialog.tsx`.
