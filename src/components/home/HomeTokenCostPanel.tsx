@@ -70,7 +70,7 @@ const TOKEN_COST_RANGE_ITEMS = [
 ] as const satisfies ReadonlyArray<{ key: Exclude<TokenCostRange, "custom">; label: string }>;
 
 const TABLE_TH_CLASS =
-  "border-b border-border bg-slate-50/70 dark:bg-secondary/70 px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground";
+  "border-b border-border bg-secondary/70 dark:bg-secondary/70 px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground";
 const TABLE_TD_CLASS = "border-b border-border px-3 py-3";
 const TABLE_MONO_TD_CLASS =
   "border-b border-border px-3 py-3 font-mono text-xs tabular-nums text-secondary";
@@ -496,7 +496,7 @@ function SortableColumnHeader<T extends string>({
         type="button"
         onClick={() => onSort(sortKey)}
         className={cn(
-          "-mx-1 inline-flex items-center gap-1 rounded px-1 py-0.5 text-left transition hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-accent/30 dark:hover:text-slate-100",
+          "-mx-1 inline-flex items-center gap-1 rounded px-1 py-0.5 text-left transition hover:text-foreground focus:outline-none focus:ring-2 focus:ring-accent/30 dark:hover:text-foreground",
           active && "text-sky-700 dark:text-sky-300"
         )}
       >
@@ -716,7 +716,7 @@ function DayHourlyMiniBarChart({ hours }: { hours: UsageDayHourRow[] }) {
         </div>
       </div>
       <div
-        className="flex h-28 items-end gap-1 rounded-md border border-slate-200 bg-white px-2 py-2 dark:border-border dark:bg-slate-900/50"
+        className="flex h-28 items-end gap-1 rounded-md border border-border bg-white px-2 py-2 dark:border-border dark:bg-card/50"
         role="img"
         aria-label="24 小时 Token 分布"
       >
@@ -735,7 +735,7 @@ function DayHourlyMiniBarChart({ hours }: { hours: UsageDayHourRow[] }) {
                   "w-full rounded-sm transition-colors",
                   row.total_tokens > 0
                     ? "bg-sky-500 hover:bg-sky-600 dark:bg-sky-400 dark:hover:bg-sky-300"
-                    : "bg-slate-200 dark:bg-secondary"
+                    : "bg-muted dark:bg-secondary"
                 )}
                 style={{ height: `${height}%` }}
               />
@@ -966,8 +966,8 @@ function TokenLeaderboardTable({
               <Fragment key={row.key}>
                 <tr
                   className={cn(
-                    "align-top transition-colors hover:bg-slate-50/60 dark:hover:bg-slate-800/50",
-                    expanded && "bg-slate-50/80 dark:bg-secondary/60"
+                    "align-top transition-colors hover:bg-secondary/60 dark:hover:bg-secondary/50",
+                    expanded && "bg-secondary/80 dark:bg-secondary/60"
                   )}
                 >
                   <td className={`${TABLE_TD_CLASS} text-xs tabular-nums text-muted-foreground`}>
@@ -985,11 +985,11 @@ function TokenLeaderboardTable({
                         <ChevronRight
                           aria-hidden="true"
                           className={cn(
-                            "h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform dark:text-slate-500",
+                            "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform dark:text-muted-foreground",
                             expanded && "rotate-90 text-sky-500 dark:text-sky-300"
                           )}
                         />
-                        <span className="font-medium text-slate-900 group-hover:text-sky-700 dark:text-foreground dark:group-hover:text-sky-300">
+                        <span className="font-medium text-foreground group-hover:text-sky-700 dark:text-foreground dark:group-hover:text-sky-300">
                           {row.name}
                         </span>
                       </button>
@@ -1020,7 +1020,7 @@ function TokenLeaderboardTable({
                   <tr>
                     <td
                       colSpan={10}
-                      className="border-b border-slate-100 bg-slate-50/70 px-4 py-4 dark:border-border dark:bg-slate-900/40"
+                      className="border-b border-border bg-secondary/70 px-4 py-4 dark:border-border dark:bg-card/40"
                     >
                       <DayDetailPanel
                         detail={dayDetail?.day === row.key ? dayDetail : null}
@@ -1061,15 +1061,15 @@ function CustomRangeForm({
         value={customStartDate}
         onChange={(event) => onCustomStartDateChange(event.currentTarget.value)}
         aria-label="开始日期"
-        className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900 outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-border dark:bg-secondary dark:text-foreground"
+        className="h-8 rounded-md border border-border bg-white px-2 text-xs text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-border dark:bg-secondary dark:text-foreground"
       />
-      <span className="text-xs text-slate-400">→</span>
+      <span className="text-xs text-muted-foreground">→</span>
       <input
         type="date"
         value={customEndDate}
         onChange={(event) => onCustomEndDateChange(event.currentTarget.value)}
         aria-label="结束日期"
-        className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900 outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-border dark:bg-secondary dark:text-foreground"
+        className="h-8 rounded-md border border-border bg-white px-2 text-xs text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-border dark:bg-secondary dark:text-foreground"
       />
       <Button
         size="sm"
@@ -1152,7 +1152,7 @@ function FolderMultiSelect({
       contentClassName="w-80 p-0"
       className="whitespace-nowrap"
     >
-      <div className="border-b border-slate-200 px-3 py-2 dark:border-border">
+      <div className="border-b border-border px-3 py-2 dark:border-border">
         <div className="flex items-center justify-between gap-2">
           <div className="text-sm font-semibold text-foreground">文件夹</div>
           <Button
@@ -1189,11 +1189,11 @@ function FolderMultiSelect({
               role="checkbox"
               aria-checked={selected}
               onClick={() => onToggleKey(option.key)}
-              className="flex w-full items-start gap-2 px-3 py-2 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800"
+              className="flex w-full items-start gap-2 px-3 py-2 text-left transition hover:bg-secondary dark:hover:bg-secondary"
             >
               <span
                 className={cn(
-                  "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border border-slate-300 dark:border-slate-600",
+                  "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border border-border dark:border-border",
                   selected && "border-sky-500 bg-sky-500 text-white"
                 )}
               >
@@ -1382,7 +1382,7 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
             onToggleKey={handleToggleFolderKey}
             onClear={handleClearFolderKeys}
           />
-          <label className="flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs text-slate-600 shadow-sm dark:border-border dark:bg-slate-900 dark:text-secondary">
+          <label className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-white px-2.5 text-xs text-muted-foreground shadow-sm dark:border-border dark:bg-card dark:text-secondary">
             <span className="whitespace-nowrap">转接去重</span>
             <Switch
               checked={excludeCx2CcGatewayBridge}
@@ -1441,7 +1441,7 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
       />
 
       <Card padding="none" className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="shrink-0 border-b border-slate-200 px-6 pb-4 pt-5 dark:border-border">
+        <div className="shrink-0 border-b border-border px-6 pb-4 pt-5 dark:border-border">
           <div className="text-base font-semibold text-foreground">{scopeLabel(scope)}排行</div>
         </div>
         <TokenLeaderboardTable

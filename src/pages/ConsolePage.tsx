@@ -52,7 +52,7 @@ function getLevelBadgeStyles(level: ConsoleLogEntry["level"]) {
     case "warn":
       return "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20";
     case "debug":
-      return "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-500/10 dark:text-muted-foreground dark:border-slate-500/20";
+      return "bg-secondary text-muted-foreground border-border dark:bg-muted/10 dark:text-muted-foreground dark:border-border/20";
     default:
       return "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20";
   }
@@ -155,7 +155,7 @@ const ConsoleLogRow = memo(function ConsoleLogRow({
     <div
       className={cn(
         ROW_GRID_CLASS,
-        "items-start px-4 py-3 group-hover:bg-slate-100/80 dark:group-hover:bg-slate-800/40 transition-colors duration-200"
+        "items-start px-4 py-3 group-hover:bg-secondary/80 dark:group-hover:bg-secondary/40 transition-colors duration-200"
       )}
     >
       <span className="shrink-0 text-muted-foreground font-mono text-[11px] pt-0.5">
@@ -177,7 +177,7 @@ const ConsoleLogRow = memo(function ConsoleLogRow({
         </span>
         <MetaTags meta={entry.meta} />
       </div>
-      <span className="flex justify-end text-muted-foreground group-open:text-slate-400 transition-colors duration-200 pt-0.5">
+      <span className="flex justify-end text-muted-foreground group-open:text-muted-foreground transition-colors duration-200 pt-0.5">
         {hasDetails ? (
           <ChevronRight className="h-4 w-4 transition-transform duration-200 group-open:rotate-90" />
         ) : null}
@@ -229,14 +229,14 @@ const ConsoleLogRow = memo(function ConsoleLogRow({
       {isOpen ? (
         <div className={cn(ROW_GRID_CLASS, "px-4 pb-4 pt-0")}>
           <div className="col-start-3 col-span-2 space-y-2">
-            <pre className="scrollbar-overlay max-h-60 overflow-auto rounded-md bg-slate-100 dark:bg-slate-950 p-3 text-[11px] leading-relaxed text-slate-700 dark:text-muted-foreground font-mono border border-slate-200 dark:border-white/5 mx-1 whitespace-pre-wrap">
+            <pre className="scrollbar-overlay max-h-60 overflow-auto rounded-md bg-secondary dark:bg-background p-3 text-[11px] leading-relaxed text-secondary dark:text-muted-foreground font-mono border border-border dark:border-white/5 mx-1 whitespace-pre-wrap">
               {smartText == null ? "加载中…" : smartText ? smartText : "// 无可显示的详情"}
             </pre>
             <details className="group/raw">
-              <summary className="text-[10px] text-slate-500 cursor-pointer hover:text-slate-700 dark:hover:text-slate-400 select-none mx-1">
+              <summary className="text-[10px] text-muted-foreground cursor-pointer hover:text-secondary dark:hover:text-muted-foreground select-none mx-1">
                 原始数据
               </summary>
-              <pre className="scrollbar-overlay max-h-40 overflow-auto rounded-md bg-slate-100 dark:bg-slate-950 p-3 text-[11px] leading-relaxed text-slate-600 dark:text-slate-500 font-mono border border-slate-200 dark:border-white/5 mx-1 mt-1">
+              <pre className="scrollbar-overlay max-h-40 overflow-auto rounded-md bg-secondary dark:bg-background p-3 text-[11px] leading-relaxed text-muted-foreground dark:text-muted-foreground font-mono border border-border dark:border-white/5 mx-1 mt-1">
                 {rawText == null ? "加载中…" : rawText ? rawText : "// 无原始数据"}
               </pre>
             </details>
@@ -387,13 +387,13 @@ export function ConsolePage() {
         <Card padding="none">
           <div className="px-4 py-3 flex flex-wrap items-center gap-3">
             <div className="relative flex-1 min-w-[200px] max-w-[360px]">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="搜索标题、trace_id、错误码..."
-                className="h-8 w-full rounded-md border border-slate-200 bg-white pl-8 pr-3 text-xs text-slate-700 placeholder:text-slate-400 outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 dark:border-slate-600 dark:bg-secondary dark:text-foreground dark:placeholder:text-slate-500"
+                className="h-8 w-full rounded-md border border-border bg-white pl-8 pr-3 text-xs text-secondary placeholder:text-muted-foreground outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 dark:border-border dark:bg-secondary dark:text-foreground dark:placeholder:text-muted-foreground"
               />
             </div>
             <div className="flex items-center gap-1.5">
@@ -406,7 +406,7 @@ export function ConsolePage() {
                     "px-2 py-1 rounded text-[10px] font-medium border transition-colors cursor-pointer",
                     levelFilter.has(level)
                       ? getLevelBadgeStyles(level)
-                      : "bg-slate-50 text-slate-500 border-slate-200 opacity-70 dark:bg-secondary dark:text-slate-500 dark:border-border dark:opacity-50"
+                      : "bg-secondary text-muted-foreground border-border opacity-70 dark:bg-secondary dark:text-muted-foreground dark:border-border dark:opacity-50"
                   )}
                 >
                   {levelText(level)}
@@ -418,7 +418,7 @@ export function ConsolePage() {
       ) : null}
 
       <Card padding="none" className="min-h-0 flex-1 flex flex-col overflow-hidden">
-        <div className="shrink-0 border-b border-border bg-gradient-to-r from-slate-50 to-slate-100/50 dark:from-slate-800 dark:to-slate-800/50 px-6 py-4">
+        <div className="shrink-0 border-b border-border bg-gradient-to-r from-secondary to-secondary/50 dark:from-secondary dark:to-secondary/50 px-6 py-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <div className="text-sm font-semibold text-foreground">
@@ -429,7 +429,7 @@ export function ConsolePage() {
               </div>
               {hiddenCount > 0 ? (
                 <div className="text-xs text-muted-foreground flex items-center gap-1.5">
-                  <span className="inline-block h-1 w-1 rounded-full bg-slate-400 dark:bg-slate-500"></span>
+                  <span className="inline-block h-1 w-1 rounded-full bg-muted dark:bg-muted"></span>
                   已隐藏 {hiddenCount} 条日志
                 </div>
               ) : null}
@@ -458,13 +458,13 @@ export function ConsolePage() {
           onScroll={handleScroll}
           className={cn(
             "scrollbar-overlay min-h-0 flex-1 overflow-auto",
-            "bg-gradient-to-b from-slate-50 to-white dark:from-slate-950 dark:to-slate-900 font-mono text-[12px] leading-relaxed text-slate-700 dark:text-foreground",
+            "bg-gradient-to-b from-secondary to-white dark:from-background dark:to-secondary font-mono text-[12px] leading-relaxed text-secondary dark:text-foreground",
             "shadow-inner"
           )}
         >
           {visibleLogs.length === 0 ? (
             <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
-              <div className="mb-3 rounded-full bg-slate-100 p-4 border border-slate-200 dark:bg-secondary/50 dark:border-border/50">
+              <div className="mb-3 rounded-full bg-secondary p-4 border border-border dark:bg-secondary/50 dark:border-border/50">
                 <svg
                   className="h-8 w-8 text-muted-foreground"
                   fill="none"

@@ -200,7 +200,7 @@ export function ModelPriceAliasesDialog({
         </datalist>
 
         {loading ? (
-          <div className="flex items-center justify-center rounded-xl border border-border bg-slate-50/50 dark:bg-secondary/50 p-8">
+          <div className="flex items-center justify-center rounded-xl border border-border bg-secondary/50 dark:bg-secondary/50 p-8">
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
               <svg
                 className="h-5 w-5 animate-spin text-muted-foreground"
@@ -226,7 +226,7 @@ export function ModelPriceAliasesDialog({
             </div>
           </div>
         ) : aliases.rules.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-600 bg-slate-50/50 dark:bg-secondary/50 p-8 text-center">
+          <div className="rounded-xl border border-dashed border-border dark:border-border bg-secondary/50 dark:bg-secondary/50 p-8 text-center">
             <div className="mx-auto mb-2 h-10 w-10 rounded-full bg-secondary p-2.5 text-muted-foreground">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -241,11 +241,11 @@ export function ModelPriceAliasesDialog({
             <div className="text-sm font-medium text-secondary">暂无规则</div>
             <div className="mt-1 text-xs text-muted-foreground">
               示例：Gemini 配置{" "}
-              <code className="rounded bg-slate-200 dark:bg-secondary px-1 py-0.5 font-mono text-[11px]">
+              <code className="rounded bg-muted dark:bg-secondary px-1 py-0.5 font-mono text-[11px]">
                 prefix gemini-3-flash
               </code>{" "}
               →{" "}
-              <code className="rounded bg-slate-200 dark:bg-secondary px-1 py-0.5 font-mono text-[11px]">
+              <code className="rounded bg-muted dark:bg-secondary px-1 py-0.5 font-mono text-[11px]">
                 gemini-3-flash-preview
               </code>
             </div>
@@ -264,7 +264,7 @@ export function ModelPriceAliasesDialog({
                     "transition-all duration-200 ease-in-out",
                     disabled
                       ? "opacity-60 grayscale-[30%]"
-                      : "hover:border-slate-300 dark:hover:border-slate-600 hover:shadow-md"
+                      : "hover:border-border dark:hover:border-border hover:shadow-md"
                   )}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-3">

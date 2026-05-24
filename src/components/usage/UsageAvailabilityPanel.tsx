@@ -287,7 +287,7 @@ function ProviderTimelineRow({
   maxBucketRequests: number;
 }) {
   return (
-    <div className="flex items-center gap-0 border-b border-slate-100 dark:border-slate-800 last:border-b-0">
+    <div className="flex items-center gap-0 border-b border-border dark:border-border last:border-b-0">
       {/* Left: Provider info */}
       <div className="shrink-0 w-44 py-3 pr-3">
         <div className="flex items-center gap-2">
@@ -295,7 +295,7 @@ function ProviderTimelineRow({
             className={cn(
               "h-2.5 w-2.5 shrink-0 rounded-full",
               provider.totalRequests === 0
-                ? "bg-slate-300 dark:bg-slate-600"
+                ? "bg-muted dark:bg-secondary"
                 : statusDotColor(provider.availabilityRate)
             )}
           />
@@ -444,7 +444,7 @@ export function UsageAvailabilityPanel({
       <AvailabilitySummaryCards providers={data.providers} loading={false} />
 
       {/* Timeline section */}
-      <div className="rounded-lg border border-border bg-white dark:bg-slate-900 p-4">
+      <div className="rounded-lg border border-border bg-white dark:bg-card p-4">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-foreground">供应商可用性时间线</h3>
           <div className="flex items-center gap-3">
@@ -455,7 +455,7 @@ export function UsageAvailabilityPanel({
               type="button"
               onClick={onRefresh}
               disabled={refreshing}
-              className="rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-700 dark:hover:text-indigo-400"
+              className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-secondary dark:hover:text-indigo-400"
               title="刷新可用率数据"
             >
               <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />

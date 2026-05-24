@@ -127,7 +127,7 @@ function getLimitDisplays(row: ProviderLimitUsageRow): LimitDisplay[] {
 function ProgressBar({ percent, warning }: { percent: number; warning: boolean }) {
   const width = Math.min(100, Math.max(0, percent * 100));
   return (
-    <div className="h-1.5 w-full rounded-full bg-slate-200 dark:bg-secondary overflow-hidden">
+    <div className="h-1.5 w-full rounded-full bg-muted dark:bg-secondary overflow-hidden">
       <div
         className={cn(
           "h-full rounded-full transition-all duration-300",
@@ -175,7 +175,7 @@ function ProviderCard({ row }: { row: ProviderLimitUsageRow }) {
         "rounded-lg border bg-white dark:bg-secondary px-3 py-2.5 shadow-sm transition-all duration-200 hover:shadow-md",
         hasWarning
           ? "border-amber-200 hover:border-amber-300 dark:border-amber-700 dark:hover:border-amber-600"
-          : "border-slate-200 hover:border-indigo-200 dark:border-border dark:hover:border-indigo-700"
+          : "border-border hover:border-indigo-200 dark:border-border dark:hover:border-indigo-700"
       )}
     >
       <div className="flex flex-col gap-2">
@@ -265,7 +265,7 @@ export function HomeProviderLimitPanelContent({
             type="button"
             onClick={onRefresh}
             disabled={refreshing}
-            className="rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-700 dark:hover:text-indigo-400"
+            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-secondary dark:hover:text-indigo-400"
             title="刷新供应商限额"
           >
             <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />

@@ -64,7 +64,7 @@ export function RequestLogDetailSummaryTab({
             </div>
           </div>
           {auditMeta.summary ? (
-            <div className="mt-3 text-sm text-slate-600 dark:text-secondary">
+            <div className="mt-3 text-sm text-muted-foreground dark:text-secondary">
               {auditMeta.summary}
             </div>
           ) : null}
@@ -133,7 +133,7 @@ function MetricCard({
   value: string | number | null | undefined;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200/80 bg-slate-50/80 px-3 py-3 dark:border-border dark:bg-secondary/70">
+    <div className="rounded-xl border border-border/80 bg-secondary/80 px-3 py-3 dark:border-border dark:bg-secondary/70">
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="mt-1 text-lg font-semibold text-foreground">
         {value == null || value === "" ? "—" : value}

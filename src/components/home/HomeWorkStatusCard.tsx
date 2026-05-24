@@ -81,7 +81,7 @@ export function HomeWorkStatusCard({
             return (
               <div
                 key={cli.key}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-sm transition-all duration-200 hover:bg-slate-50 hover:border-indigo-200 hover:shadow-md dark:border-border dark:bg-secondary dark:shadow-none dark:hover:bg-slate-700 dark:hover:border-indigo-700"
+                className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-sm transition-all duration-200 hover:bg-secondary hover:border-indigo-200 hover:shadow-md dark:border-border dark:bg-secondary dark:shadow-none dark:hover:bg-secondary dark:hover:border-indigo-700"
               >
                 <div className="min-w-0 space-y-1.5">
                   <div className="flex items-center gap-3">

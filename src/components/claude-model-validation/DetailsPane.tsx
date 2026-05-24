@@ -336,7 +336,7 @@ export function DetailsPane(props: DetailsPaneProps) {
 
   return (
     <div className="flex flex-col gap-4 h-full min-h-0 min-w-0 flex-1 overflow-y-auto scrollbar-overlay pr-1">
-      <div className="sticky top-0 z-20 bg-white/90 dark:bg-slate-900/80 backdrop-blur border-b border-border pb-3 pt-2">
+      <div className="sticky top-0 z-20 bg-white/90 dark:bg-card/80 backdrop-blur border-b border-border pb-3 pt-2">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
@@ -546,7 +546,7 @@ function StepDetailPanel({
           <Textarea
             mono
             readOnly
-            className="h-[160px] resize-none text-[10px] leading-relaxed bg-white dark:bg-slate-900"
+            className="h-[160px] resize-none text-[10px] leading-relaxed bg-white dark:bg-card"
             value={requestText}
           />
         </div>
@@ -565,13 +565,13 @@ function StepDetailPanel({
             <Textarea
               mono
               readOnly
-              className="h-[160px] resize-none text-[10px] leading-relaxed bg-white dark:bg-slate-900"
+              className="h-[160px] resize-none text-[10px] leading-relaxed bg-white dark:bg-card"
               value={resultText || ""}
             />
           </div>
           <div className="space-y-2">
             <div className="text-[11px] font-semibold text-secondary">SSE \u539f\u6587</div>
-            <pre className="scrollbar-overlay max-h-60 overflow-auto rounded-lg bg-slate-950 p-4 font-mono text-[10px] leading-relaxed text-slate-300">
+            <pre className="scrollbar-overlay max-h-60 overflow-auto rounded-lg bg-background p-4 font-mono text-[10px] leading-relaxed text-muted-foreground">
               {sseText ? (
                 sseText
               ) : (

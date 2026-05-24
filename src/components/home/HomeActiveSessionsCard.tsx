@@ -56,7 +56,7 @@ export function HomeActiveSessionsCardContent({
         return (
           <div
             key={`${row.cli_key}:${row.session_id}`}
-            className="flex-1 rounded-lg border border-border bg-white dark:bg-secondary px-3 py-2.5 shadow-sm transition-all duration-200 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-indigo-200 dark:hover:border-indigo-700 hover:shadow-md"
+            className="flex-1 rounded-lg border border-border bg-white dark:bg-secondary px-3 py-2.5 shadow-sm transition-all duration-200 hover:bg-secondary dark:hover:bg-secondary hover:border-indigo-200 dark:hover:border-indigo-700 hover:shadow-md"
           >
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between gap-2">

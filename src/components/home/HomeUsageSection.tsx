@@ -105,7 +105,7 @@ export function HomeUsageSection({
         >
           <div className="text-sm font-medium text-muted-foreground mb-2">热力图</div>
           {usageHeatmapLoading && displayedUsageHeatmapRows.length === 0 ? (
-            <div className="text-sm text-slate-400">加载中…</div>
+            <div className="text-sm text-muted-foreground">加载中…</div>
           ) : (
             <div className="flex-1">
               <UsageHeatmap15d
@@ -130,13 +130,13 @@ export function HomeUsageSection({
               <span className="mr-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                 今日用量
               </span>
-              <span className="font-semibold text-slate-700 dark:text-foreground">
+              <span className="font-semibold text-secondary dark:text-foreground">
                 {formatTokensMillions(todayTokens)}
               </span>
             </div>
           </div>
           {usageHeatmapLoading && displayedUsageHeatmapRows.length === 0 ? (
-            <div className="text-sm text-slate-400">加载中…</div>
+            <div className="text-sm text-muted-foreground">加载中…</div>
           ) : (
             <div className="h-[160px] flex-1">
               <UsageTokensChart

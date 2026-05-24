@@ -136,7 +136,7 @@ export function NetworkSettingsCard({
         </div>
 
         {!available ? (
-          <div className="text-sm font-medium text-slate-700 dark:text-foreground bg-secondary p-4 rounded-lg">
+          <div className="text-sm font-medium text-secondary dark:text-foreground bg-secondary p-4 rounded-lg">
             数据不可用
           </div>
         ) : (

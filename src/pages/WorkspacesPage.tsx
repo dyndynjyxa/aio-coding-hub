@@ -31,7 +31,7 @@ function Badge({
   const toneClass =
     tone === "active"
       ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-      : "border-slate-200 bg-white text-slate-600 dark:border-border dark:bg-secondary dark:text-muted-foreground";
+      : "border-border bg-white text-muted-foreground dark:border-border dark:bg-secondary dark:text-muted-foreground";
 
   return (
     <span
@@ -144,7 +144,7 @@ export function WorkspacesPage() {
 
           <div className="mt-3">
             <div className="relative">
-              <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
+              <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-muted-foreground">
                 <Search className="h-4 w-4" aria-hidden="true" />
               </div>
               <Input
@@ -178,8 +178,8 @@ export function WorkspacesPage() {
                       isActive
                         ? "border-accent/30 bg-accent/[0.03] shadow-sm dark:border-accent/40 dark:bg-accent/10"
                         : isSelected
-                          ? "border-slate-300 bg-slate-50 dark:border-slate-600 dark:bg-secondary"
-                          : "border-slate-200 bg-white hover:bg-slate-50 dark:border-border dark:bg-secondary dark:hover:bg-slate-700"
+                          ? "border-border bg-secondary dark:border-border dark:bg-secondary"
+                          : "border-border bg-white hover:bg-secondary dark:border-border dark:bg-secondary dark:hover:bg-secondary"
                     )}
                     aria-current={isActive ? "true" : undefined}
                     role="button"

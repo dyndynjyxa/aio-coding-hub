@@ -219,7 +219,7 @@ export function UsageHeatmap15d({
               onClick={onRefresh}
               disabled={refreshing}
               className={cn(
-                "ml-1 p-0.5 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 transition-colors",
+                "ml-1 p-0.5 text-muted-foreground hover:text-muted-foreground dark:text-muted-foreground dark:hover:text-muted-foreground transition-colors",
                 "disabled:opacity-50 disabled:cursor-not-allowed",
                 refreshing && "animate-spin"
               )}

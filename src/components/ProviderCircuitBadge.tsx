@@ -114,7 +114,7 @@ export function ProviderCircuitBadge({
                   return (
                     <div
                       key={`${row.cli_key}:${row.provider_id}`}
-                      className="flex items-center justify-between gap-3 rounded-lg border border-border bg-slate-50/50 dark:bg-secondary/50 px-3 py-2 transition-colors hover:bg-slate-100 dark:hover:bg-slate-700"
+                      className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/50 dark:bg-secondary/50 px-3 py-2 transition-colors hover:bg-secondary dark:hover:bg-secondary"
                     >
                       <div className="min-w-0 flex-1">
                         <div

@@ -25,7 +25,7 @@ export function CacheTrendBody({
   customApplied: CustomDateRangeApplied | null;
 }) {
   if (cacheTrendLoading && cacheTrendRows.length === 0) {
-    return <div className="h-80 animate-pulse rounded-lg bg-slate-100 dark:bg-secondary" />;
+    return <div className="h-80 animate-pulse rounded-lg bg-secondary dark:bg-secondary" />;
   }
 
   if (cacheTrendRows.length === 0) {

@@ -69,7 +69,7 @@ export function RequestLogErrorObservationCard({
               {observation.upstreamBodyPreview ? (
                 <div>
                   <div className="mb-1 text-xs font-medium text-muted-foreground">上游响应预览</div>
-                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-slate-100 px-2.5 py-2 text-xs font-mono text-slate-700 dark:bg-secondary dark:text-secondary">
+                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-secondary px-2.5 py-2 text-xs font-mono text-secondary dark:bg-secondary dark:text-secondary">
                     {observation.upstreamBodyPreview.length > 500
                       ? `${observation.upstreamBodyPreview.slice(0, 500)}…`
                       : observation.upstreamBodyPreview}
@@ -80,7 +80,7 @@ export function RequestLogErrorObservationCard({
               {observation.rawDetailsText && !observation.upstreamBodyPreview ? (
                 <div>
                   <div className="mb-1 text-xs font-medium text-muted-foreground">原始错误信息</div>
-                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-slate-100 px-2.5 py-2 text-xs font-mono text-slate-700 dark:bg-secondary dark:text-secondary">
+                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-secondary px-2.5 py-2 text-xs font-mono text-secondary dark:bg-secondary dark:text-secondary">
                     {observation.rawDetailsText.length > 500
                       ? `${observation.rawDetailsText.slice(0, 500)}…`
                       : observation.rawDetailsText}

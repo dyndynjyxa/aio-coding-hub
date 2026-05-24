@@ -63,7 +63,7 @@ function UsageProviderFilterSelect({
           onProviderIdChange(next === PROVIDER_FILTER_ALL ? null : Number(next));
         }}
         disabled={loading}
-        className="h-8 min-w-44 rounded-md border border-border bg-white dark:bg-secondary px-2 text-xs text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:cursor-not-allowed disabled:bg-slate-50 dark:disabled:bg-slate-900"
+        className="h-8 min-w-44 rounded-md border border-border bg-white dark:bg-secondary px-2 text-xs text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:cursor-not-allowed disabled:bg-secondary dark:disabled:bg-card"
       >
         <option value={PROVIDER_FILTER_ALL}>全部</option>
         {providerOptions.map((option) => (

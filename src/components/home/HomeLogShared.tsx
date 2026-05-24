@@ -250,7 +250,7 @@ export function buildRequestLogAuditMeta(log: RequestLogAuditInput): RequestLogA
     tags.push(
       auditTag(
         "不计统计",
-        "bg-slate-100/90 text-slate-600 ring-1 ring-inset ring-slate-500/10 dark:bg-secondary/70 dark:text-foreground dark:ring-slate-500/20",
+        "bg-secondary/90 text-muted-foreground ring-1 ring-inset ring-border dark:bg-secondary/70 dark:text-foreground dark:ring-border",
         "这条记录保留在审计列表中，但不会进入 usage/cost/provider 聚合"
       )
     );
@@ -371,7 +371,7 @@ export function FolderBadge({
 }) {
   return (
     <span
-      className="inline-flex min-w-0 items-center gap-1 rounded-md bg-slate-100/75 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-secondary/55 dark:text-foreground"
+      className="inline-flex min-w-0 items-center gap-1 rounded-md bg-secondary/75 px-2 py-0.5 text-[11px] font-medium text-muted-foreground dark:bg-secondary/55 dark:text-foreground"
       title={folderPath}
     >
       <FolderOpen className="h-3 w-3 shrink-0 text-muted-foreground" />
@@ -437,7 +437,7 @@ export function computeStatusBadge(input: {
         : "text-emerald-600 bg-emerald-50/60 ring-1 ring-inset ring-emerald-500/10 dark:text-emerald-400 dark:bg-emerald-500/15 dark:ring-emerald-400/20"
       : isError
         ? "text-rose-600 bg-rose-50/60 ring-1 ring-inset ring-rose-500/10 dark:text-rose-400 dark:bg-rose-500/15 dark:ring-rose-400/20"
-        : "text-slate-500 bg-slate-100 ring-1 ring-inset ring-slate-500/10 dark:text-muted-foreground dark:bg-secondary dark:ring-slate-500/20";
+        : "text-muted-foreground bg-secondary ring-1 ring-inset ring-border dark:text-muted-foreground dark:bg-secondary dark:ring-border";
 
   const title = input.errorCode
     ? `${semanticText} · ${getErrorCodeLabel(input.errorCode)} (${input.errorCode})`

@@ -151,7 +151,7 @@ export function CliManagerGeminiTab({
           <div className="flex flex-col gap-4 p-6">
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <div className="flex items-center gap-4">
-                <div className="h-14 w-14 rounded-xl bg-slate-900/5 dark:bg-secondary flex items-center justify-center text-secondary">
+                <div className="h-14 w-14 rounded-xl bg-card/5 dark:bg-secondary flex items-center justify-center text-secondary">
                   <Cpu className="h-8 w-8" />
                 </div>
                 <div>
@@ -176,7 +176,7 @@ export function CliManagerGeminiTab({
                         检测中...
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-muted-foreground ring-1 ring-inset ring-slate-500/10">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-muted-foreground ring-1 ring-inset ring-border">
                         未检测到
                       </span>
                     )}

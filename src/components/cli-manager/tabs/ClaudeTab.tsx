@@ -401,7 +401,7 @@ function ClaudeHooksSection() {
   }
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-5 dark:border-border dark:bg-secondary">
+    <div className="rounded-lg border border-border bg-white p-5 dark:border-border dark:bg-secondary">
       <div className="mb-4 flex items-center justify-between gap-3">
         <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
           <Zap className="h-4 w-4 text-muted-foreground" />
@@ -453,7 +453,7 @@ function ClaudeHooksSection() {
           {groups.map((group, index) => (
             <div
               key={`${group.event}-${group.matcher}-${index}`}
-              className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3 dark:border-border dark:bg-secondary"
+              className="flex items-start justify-between gap-3 rounded-lg border border-border bg-white p-3 dark:border-border dark:bg-secondary"
             >
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-1.5">
@@ -461,7 +461,7 @@ function ClaudeHooksSection() {
                     {group.event}
                   </span>
                   {group.matcher ? (
-                    <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-secondary dark:text-secondary">
+                    <span className="inline-flex items-center rounded-md bg-secondary px-2 py-0.5 text-xs text-muted-foreground dark:bg-secondary dark:text-secondary">
                       {group.matcher}
                     </span>
                   ) : null}
@@ -527,7 +527,7 @@ function ClaudeHooksSection() {
         >
           <div className="flex flex-col gap-4">
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-secondary">
+              <label className="mb-1 block text-xs font-medium text-muted-foreground dark:text-secondary">
                 事件
               </label>
               <Select
@@ -543,7 +543,7 @@ function ClaudeHooksSection() {
               </Select>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-secondary">
+              <label className="mb-1 block text-xs font-medium text-muted-foreground dark:text-secondary">
                 Matcher（匹配工具名或事件子类型，多个用 | 分隔，留空匹配全部）
               </label>
               <Input
@@ -554,7 +554,7 @@ function ClaudeHooksSection() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-secondary">
+              <label className="mb-1 block text-xs font-medium text-muted-foreground dark:text-secondary">
                 命令
               </label>
               <Input
@@ -565,7 +565,7 @@ function ClaudeHooksSection() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-secondary">
+              <label className="mb-1 block text-xs font-medium text-muted-foreground dark:text-secondary">
                 超时（秒，留空使用默认值）
               </label>
               <Input
@@ -796,7 +796,7 @@ export function CliManagerClaudeTab({
                         加载中...
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-muted-foreground ring-1 ring-inset ring-slate-500/10">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-muted-foreground ring-1 ring-inset ring-border">
                         未检测到
                       </span>
                     )}
@@ -835,7 +835,7 @@ export function CliManagerClaudeTab({
                       disabled={!configDir}
                       size="sm"
                       variant="ghost"
-                      className="shrink-0 h-6 w-6 p-0 hover:bg-slate-200 dark:hover:bg-slate-700"
+                      className="shrink-0 h-6 w-6 p-0 hover:bg-muted dark:hover:bg-secondary"
                       title="打开配置目录"
                     >
                       <ExternalLink className="h-3 w-3" />

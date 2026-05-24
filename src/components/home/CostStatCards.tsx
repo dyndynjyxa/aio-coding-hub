@@ -34,9 +34,9 @@ function StatCard({
 function StatCardSkeleton({ className }: { className?: string }) {
   return (
     <Card padding="md" className={cn("h-full animate-pulse", className)}>
-      <div className="h-3 w-24 rounded bg-slate-200 dark:bg-secondary" />
-      <div className="mt-3 h-8 w-28 rounded bg-slate-200 dark:bg-secondary" />
-      <div className="mt-3 h-3 w-44 rounded bg-slate-100 dark:bg-slate-600" />
+      <div className="h-3 w-24 rounded bg-muted dark:bg-secondary" />
+      <div className="mt-3 h-8 w-28 rounded bg-muted dark:bg-secondary" />
+      <div className="mt-3 h-3 w-44 rounded bg-secondary dark:bg-secondary" />
     </Card>
   );
 }

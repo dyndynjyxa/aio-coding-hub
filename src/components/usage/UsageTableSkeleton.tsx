@@ -5,7 +5,7 @@ import { TABLE_COLUMNS } from "./UsageTableColumns";
 const SKELETON_ROWS = 5;
 
 const TH_CLASS =
-  "border-b border-border bg-slate-50/60 dark:bg-secondary/60 px-3 py-2.5 backdrop-blur-sm";
+  "border-b border-border bg-secondary/60 dark:bg-secondary/60 px-3 py-2.5 backdrop-blur-sm";
 
 export function UsageTableSkeleton() {
   return (
@@ -25,9 +25,9 @@ export function UsageTableSkeleton() {
             <tr key={idx} className="align-top">
               {TABLE_COLUMNS.map((col) => (
                 <td key={col.key} className="border-b border-border px-3 py-3.5">
-                  <div className={`h-3 ${col.width} rounded-md bg-slate-200 dark:bg-secondary`} />
+                  <div className={`h-3 ${col.width} rounded-md bg-muted dark:bg-secondary`} />
                   {col.key === "name" ? (
-                    <div className="mt-2 h-3 w-48 rounded-md bg-slate-100 dark:bg-slate-600" />
+                    <div className="mt-2 h-3 w-48 rounded-md bg-secondary dark:bg-secondary" />
                   ) : null}
                 </td>
               ))}

@@ -323,7 +323,7 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                 "group/item relative rounded-lg border transition-colors duration-300 ease-out",
                 isInProgress
                   ? "bg-white/90 border-indigo-200/80 shadow-[0_0_0_1px_rgba(99,102,241,0.06),0_2px_12px_rgba(99,102,241,0.1)] glow-pulse-active dark:bg-secondary/90 dark:border-indigo-600/50 dark:shadow-[0_0_0_1px_rgba(99,102,241,0.12),0_2px_12px_rgba(99,102,241,0.15)]"
-                  : "bg-white/80 border-slate-200/60 shadow-sm dark:bg-secondary/80 dark:border-border/60"
+                  : "bg-white/80 border-border/60 shadow-sm dark:bg-secondary/80 dark:border-border/60"
               )}
             >
               <div
@@ -335,7 +335,7 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                       ? "bg-rose-400 opacity-80"
                       : hasFailover
                         ? "bg-amber-400 opacity-80"
-                        : "bg-slate-300/60 opacity-50 dark:bg-slate-500/60"
+                        : "bg-muted/60 opacity-50 dark:bg-muted/60"
                 )}
               />
 
@@ -413,16 +413,16 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                         {liveStageText}
                       </div>
                     </div>
-                    <div className="rounded-md border border-slate-200/70 bg-slate-50/80 px-2.5 py-2 dark:border-border/70 dark:bg-secondary/70">
+                    <div className="rounded-md border border-border/70 bg-secondary/80 px-2.5 py-2 dark:border-border/70 dark:bg-secondary/70">
                       <div className="text-muted-foreground">尝试次数</div>
-                      <div className="mt-1 truncate font-mono tabular-nums text-slate-700 dark:text-foreground">
+                      <div className="mt-1 truncate font-mono tabular-nums text-secondary dark:text-foreground">
                         {formatInteger(trace.attempts.length)}
                       </div>
                     </div>
-                    <div className="col-span-2 rounded-md border border-slate-200/70 bg-slate-50/80 px-2.5 py-2 dark:border-border/70 dark:bg-secondary/70 lg:col-span-1">
+                    <div className="col-span-2 rounded-md border border-border/70 bg-secondary/80 px-2.5 py-2 dark:border-border/70 dark:bg-secondary/70 lg:col-span-1">
                       <div className="text-muted-foreground">当前链路</div>
                       <div
-                        className="mt-1 truncate font-medium text-slate-700 dark:text-foreground"
+                        className="mt-1 truncate font-medium text-secondary dark:text-foreground"
                         title={routeTooltipText ?? liveRouteText}
                       >
                         {liveRouteText}
@@ -436,8 +436,8 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                       title={providerTitle}
                     >
                       <div className="flex items-center gap-1 h-4">
-                        <Server className="h-3 w-3 text-slate-400/80 dark:text-slate-500/80 shrink-0" />
-                        <span className="truncate font-semibold text-slate-600 dark:text-secondary">
+                        <Server className="h-3 w-3 text-muted-foreground/80 dark:text-muted-foreground/80 shrink-0" />
+                        <span className="truncate font-semibold text-muted-foreground dark:text-secondary">
                           {providerText}
                         </span>
                       </div>
@@ -462,74 +462,78 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
 
                     <div className="grid flex-1 grid-cols-4 gap-x-3 gap-y-0.5 text-muted-foreground">
                       <div className="flex items-center gap-1 h-4" title="Input Tokens">
-                        <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                        <span className="text-muted-foreground/80 dark:text-muted-foreground/80 shrink-0">
                           输入
                         </span>
-                        <span className="font-mono tabular-nums text-slate-700 dark:text-foreground truncate">
+                        <span className="font-mono tabular-nums text-secondary dark:text-foreground truncate">
                           {formatInteger(displayInputTokens)}
                         </span>
                       </div>
                       <div className="flex items-center gap-1 h-4" title="Cache Write">
-                        <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                        <span className="text-muted-foreground/80 dark:text-muted-foreground/80 shrink-0">
                           缓存创建
                         </span>
                         {displayCacheWriteTokens != null ? (
                           <>
-                            <span className="font-mono tabular-nums text-slate-700 dark:text-foreground truncate">
+                            <span className="font-mono tabular-nums text-secondary dark:text-foreground truncate">
                               {formatInteger(displayCacheWriteTokens)}
                             </span>
                             {cacheWrite.ttl && displayCacheWriteTokens > 0 && (
-                              <span className="text-slate-400/70 dark:text-slate-500/70 text-[10px]">
+                              <span className="text-muted-foreground/70 dark:text-muted-foreground/70 text-[10px]">
                                 ({cacheWrite.ttl})
                               </span>
                             )}
                           </>
                         ) : (
-                          <span className="text-slate-300/60 dark:text-slate-600/60">—</span>
+                          <span className="text-muted-foreground/60 dark:text-muted-foreground/60">
+                            —
+                          </span>
                         )}
                       </div>
                       <div className="flex items-center gap-1 h-4" title="TTFB">
-                        <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                        <span className="text-muted-foreground/80 dark:text-muted-foreground/80 shrink-0">
                           首字
                         </span>
-                        <span className="font-mono tabular-nums text-slate-700 dark:text-foreground truncate">
+                        <span className="font-mono tabular-nums text-secondary dark:text-foreground truncate">
                           {ttfbMs != null ? formatDurationMs(ttfbMs) : "—"}
                         </span>
                       </div>
                       <div className="flex items-center gap-1 h-4" title="Cost">
-                        <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                        <span className="text-muted-foreground/80 dark:text-muted-foreground/80 shrink-0">
                           花费
                         </span>
-                        <span className="font-mono tabular-nums text-slate-700 dark:text-foreground truncate">
+                        <span className="font-mono tabular-nums text-secondary dark:text-foreground truncate">
                           {displayCostText}
                         </span>
                       </div>
 
                       <div className="flex items-center gap-1 h-4" title="Output Tokens">
-                        <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                        <span className="text-muted-foreground/80 dark:text-muted-foreground/80 shrink-0">
                           输出
                         </span>
-                        <span className="font-mono tabular-nums text-slate-700 dark:text-foreground truncate">
+                        <span className="font-mono tabular-nums text-secondary dark:text-foreground truncate">
                           {formatInteger(displayOutputTokens)}
                         </span>
                       </div>
                       <div className="flex items-center gap-1 h-4" title="Cache Read">
-                        <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                        <span className="text-muted-foreground/80 dark:text-muted-foreground/80 shrink-0">
                           缓存读取
                         </span>
                         {displayCacheReadTokens != null ? (
-                          <span className="font-mono tabular-nums text-slate-700 dark:text-foreground truncate">
+                          <span className="font-mono tabular-nums text-secondary dark:text-foreground truncate">
                             {formatInteger(displayCacheReadTokens)}
                           </span>
                         ) : (
-                          <span className="text-slate-300/60 dark:text-slate-600/60">—</span>
+                          <span className="text-muted-foreground/60 dark:text-muted-foreground/60">
+                            —
+                          </span>
                         )}
                       </div>
                       <div className="flex items-center gap-1 h-4" title="Duration">
-                        <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                        <span className="text-muted-foreground/80 dark:text-muted-foreground/80 shrink-0">
                           耗时
                         </span>
-                        <span className="font-mono tabular-nums text-slate-600 dark:text-secondary truncate">
+                        <span className="font-mono tabular-nums text-muted-foreground dark:text-secondary truncate">
                           {formatDurationMs(runningMs)}
                         </span>
                       </div>
@@ -541,15 +545,17 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                             : undefined
                         }
                       >
-                        <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                        <span className="text-muted-foreground/80 dark:text-muted-foreground/80 shrink-0">
                           速率
                         </span>
                         {displayOutputTokensPerSecond != null ? (
-                          <span className="font-mono tabular-nums text-slate-700 dark:text-foreground truncate">
+                          <span className="font-mono tabular-nums text-secondary dark:text-foreground truncate">
                             {formatTokensPerSecondShort(displayOutputTokensPerSecond)}
                           </span>
                         ) : (
-                          <span className="text-slate-300/60 dark:text-slate-600/60">—</span>
+                          <span className="text-muted-foreground/60 dark:text-muted-foreground/60">
+                            —
+                          </span>
                         )}
                       </div>
                     </div>

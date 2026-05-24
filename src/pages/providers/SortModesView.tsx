@@ -354,7 +354,7 @@ export function SortModesView({
             />
           </FormField>
 
-          <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3 dark:border-border">
+          <div className="flex items-center justify-end gap-2 border-t border-border pt-3 dark:border-border">
             <Button
               onClick={() => model.setCreateModeDialogOpen(false)}
               variant="secondary"
@@ -388,7 +388,7 @@ export function SortModesView({
             />
           </FormField>
 
-          <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3 dark:border-border">
+          <div className="flex items-center justify-end gap-2 border-t border-border pt-3 dark:border-border">
             <Button
               onClick={() => model.setRenameModeDialogOpen(false)}
               variant="secondary"

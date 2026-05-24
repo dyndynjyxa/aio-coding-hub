@@ -22,9 +22,9 @@ export function OAuthSection(props: { form: UseProviderEditorFormReturn }) {
       </FormField>
 
       <FormField label="OAuth 连接">
-        <div className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-border dark:bg-secondary/50">
+        <div className="rounded-md border border-border bg-secondary p-3 dark:border-border dark:bg-secondary/50">
           {oauthLoading ? (
-            <div className="flex items-center gap-2 text-sm text-slate-500">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <span className="animate-spin">⏳</span>
               <span>处理中...</span>
             </div>

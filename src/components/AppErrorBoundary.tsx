@@ -39,7 +39,7 @@ export class AppErrorBoundary extends Component<Props, State> {
             <button
               type="button"
               onClick={this.handleReload}
-              className="mt-4 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
+              className="mt-4 rounded-lg bg-card px-4 py-2 text-sm font-medium text-white transition hover:bg-secondary dark:bg-secondary dark:text-foreground dark:hover:bg-muted"
             >
               重新加载
             </button>

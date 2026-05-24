@@ -33,7 +33,7 @@ export function SuiteSummaryCard({
     }
     return {
       text: "协议：未知",
-      cls: "bg-slate-100 text-slate-600 dark:bg-secondary dark:text-muted-foreground",
+      cls: "bg-secondary text-muted-foreground dark:bg-secondary dark:text-muted-foreground",
     };
   })();
 
@@ -236,7 +236,9 @@ export function SuiteSummaryCard({
       ) : null}
 
       {interpretLine ? (
-        <div className="text-[11px] text-slate-500 dark:text-slate-500">{interpretLine}</div>
+        <div className="text-[11px] text-muted-foreground dark:text-muted-foreground">
+          {interpretLine}
+        </div>
       ) : null}
 
       <div className={cn("grid gap-3", evidenceBox ? "sm:grid-cols-2" : "sm:grid-cols-1")}>

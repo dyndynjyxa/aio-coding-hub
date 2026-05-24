@@ -239,7 +239,7 @@ export function ProviderChainView({
       </div>
 
       <div className="relative pl-8">
-        <div className="absolute left-[15px] top-2 bottom-2 w-px bg-slate-200 dark:bg-secondary" />
+        <div className="absolute left-[15px] top-2 bottom-2 w-px bg-muted dark:bg-secondary" />
         <div className="space-y-4">
           {attempts.map((attempt) => (
             <AttemptCard
@@ -277,11 +277,11 @@ function AttemptCard({
     <div className="relative">
       <div
         className={cn(
-          "absolute -left-8 top-4 flex h-8 w-8 items-center justify-center rounded-full border-2 bg-white text-sm font-semibold shadow-sm dark:bg-slate-900",
+          "absolute -left-8 top-4 flex h-8 w-8 items-center justify-center rounded-full border-2 bg-white text-sm font-semibold shadow-sm dark:bg-card",
           success
             ? "border-emerald-300 text-emerald-600 dark:border-emerald-700 dark:text-emerald-400"
             : skipped
-              ? "border-slate-300 text-slate-500 dark:border-slate-600 dark:text-secondary"
+              ? "border-border text-muted-foreground dark:border-border dark:text-secondary"
               : "border-rose-300 text-rose-600 dark:border-rose-700 dark:text-rose-400"
         )}
       >
@@ -295,7 +295,7 @@ function AttemptCard({
             ? success
               ? "border-emerald-200 bg-emerald-50/50 dark:border-emerald-700 dark:bg-emerald-900/20"
               : skipped
-                ? "border-slate-200 bg-slate-50/50 dark:border-slate-600 dark:bg-secondary/20"
+                ? "border-border bg-secondary/50 dark:border-border dark:bg-secondary/20"
                 : "border-rose-200 bg-rose-50/50 dark:border-rose-700 dark:bg-rose-900/20"
             : "border-border"
         )}
@@ -303,7 +303,7 @@ function AttemptCard({
         {/* Header */}
         <button
           type="button"
-          className="w-full text-left px-4 py-3 flex items-center justify-between gap-2 hover:bg-slate-50/50 dark:hover:bg-slate-700/30 transition-colors"
+          className="w-full text-left px-4 py-3 flex items-center justify-between gap-2 hover:bg-secondary/50 dark:hover:bg-secondary/30 transition-colors"
           onClick={() => setExpanded((prev) => !prev)}
         >
           <div className="flex flex-wrap items-center gap-2 min-w-0">
@@ -336,7 +336,7 @@ function AttemptCard({
           </div>
           <ChevronDown
             className={cn(
-              "h-4 w-4 text-slate-400 shrink-0 transition-transform",
+              "h-4 w-4 text-muted-foreground shrink-0 transition-transform",
               expanded && "rotate-180"
             )}
           />
@@ -473,7 +473,7 @@ function DecisionTags({ attempt }: { attempt: ProviderChainAttempt }) {
       value: attempt.decision,
       tone:
         DECISION_BADGE_TONES[attempt.decision] ??
-        "bg-slate-100 text-slate-700 dark:bg-secondary dark:text-secondary",
+        "bg-secondary text-secondary dark:bg-secondary dark:text-secondary",
     });
   }
   if (attempt.error_code) {
@@ -487,7 +487,7 @@ function DecisionTags({ attempt }: { attempt: ProviderChainAttempt }) {
     tags.push({
       label: "分类",
       value: attempt.error_category,
-      tone: "bg-slate-100 text-slate-600 dark:bg-secondary dark:text-secondary",
+      tone: "bg-secondary text-muted-foreground dark:bg-secondary dark:text-secondary",
     });
   }
 
@@ -525,7 +525,7 @@ function CircuitBadge({ attempt }: { attempt: ProviderChainAttempt }) {
         {state}
       </span>
       {attempt.circuit_failure_count != null && attempt.circuit_failure_threshold != null ? (
-        <span className="text-sm text-slate-600 dark:text-secondary">
+        <span className="text-sm text-muted-foreground dark:text-secondary">
           {attempt.circuit_failure_count}/{attempt.circuit_failure_threshold} 次失败
         </span>
       ) : null}

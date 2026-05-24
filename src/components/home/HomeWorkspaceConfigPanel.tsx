@@ -52,7 +52,7 @@ export function HomeWorkspaceConfigPanel({
                 "inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
                 active
                   ? "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300"
-                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-border dark:bg-secondary dark:text-secondary dark:hover:bg-slate-700"
+                  : "border-border bg-white text-muted-foreground hover:bg-secondary dark:border-border dark:bg-secondary dark:text-secondary dark:hover:bg-secondary"
               )}
             >
               <CliBrandIcon
@@ -71,9 +71,9 @@ export function HomeWorkspaceConfigPanel({
           headerAddon != null && "md:grid-cols-[minmax(0,1fr)_fit-content(240px)]"
         )}
       >
-        <div className="flex min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-sm dark:border-border dark:bg-secondary/50">
+        <div className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-secondary/70 px-3 py-1.5 text-sm dark:border-border dark:bg-secondary/50">
           <span className="shrink-0 font-medium text-muted-foreground">工作区：</span>
-          <span className="min-w-0 truncate font-medium text-slate-700 dark:text-foreground">
+          <span className="min-w-0 truncate font-medium text-secondary dark:text-foreground">
             {selectedConfig.workspaceName?.trim() || "默认"}
           </span>
         </div>
@@ -93,14 +93,14 @@ export function HomeWorkspaceConfigPanel({
               return (
                 <div
                   key={item.id}
-                  className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 dark:border-border dark:bg-secondary/50"
+                  className="flex items-center gap-3 rounded-lg border border-border bg-secondary/70 px-3 py-2 dark:border-border dark:bg-secondary/50"
                 >
-                  <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-slate-500 dark:bg-secondary dark:text-secondary">
+                  <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-muted-foreground dark:bg-secondary dark:text-secondary">
                     <Icon className="h-3 w-3" />
                     {item.label}
                   </span>
                   <div
-                    className="min-w-0 truncate text-sm text-slate-700 dark:text-foreground"
+                    className="min-w-0 truncate text-sm text-secondary dark:text-foreground"
                     title={item.name}
                   >
                     {item.name}

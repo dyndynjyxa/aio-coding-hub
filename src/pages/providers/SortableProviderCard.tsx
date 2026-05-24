@@ -77,7 +77,7 @@ function providerTagClassName(tag: string) {
   if (tag === FREE_TAG) {
     return "shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300";
   }
-  return "shrink-0 rounded-full bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600 dark:bg-secondary dark:text-secondary";
+  return "shrink-0 rounded-full bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground dark:bg-secondary dark:text-secondary";
 }
 
 function renderProviderNote(note: string) {
@@ -252,7 +252,7 @@ export const ProviderCard = memo(function ProviderCard({
       {...cardProps}
     >
       <div className="flex min-w-0 items-center gap-3">
-        <div className="inline-flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 dark:border-border dark:bg-secondary dark:text-slate-500">
+        <div className="inline-flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-lg border border-border bg-white text-muted-foreground dark:border-border dark:bg-secondary dark:text-muted-foreground">
           ⠿
         </div>
         <div className="min-w-0 flex-1">
@@ -469,7 +469,7 @@ export const ProviderCard = memo(function ProviderCard({
             编辑
           </Button>
 
-          <div className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm shadow-sm dark:border-slate-600 dark:bg-secondary">
+          <div className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-white px-3 text-sm shadow-sm dark:border-border dark:bg-secondary">
             <span className="text-sm font-medium text-secondary">
               {provider.enabled ? "已启用" : "已关闭"}
             </span>

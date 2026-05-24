@@ -181,10 +181,10 @@ function MetricCard({
   subValue?: string;
 }) {
   return (
-    <div className="group flex flex-col gap-1.5 rounded-xl border border-slate-200/60 dark:border-border/60 bg-white/50 dark:bg-secondary/50 p-3.5 shadow-sm transition-all hover:bg-white dark:hover:bg-slate-800 hover:shadow-md">
+    <div className="group flex flex-col gap-1.5 rounded-xl border border-border/60 dark:border-border/60 bg-white/50 dark:bg-secondary/50 p-3.5 shadow-sm transition-all hover:bg-white dark:hover:bg-secondary hover:shadow-md">
       <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
         {Icon && (
-          <Icon className="h-4 w-4 text-slate-400 group-hover:text-indigo-500 transition-colors" />
+          <Icon className="h-4 w-4 text-muted-foreground group-hover:text-indigo-500 transition-colors" />
         )}
         {label}
       </div>
@@ -231,11 +231,14 @@ function CheckRow({
             <CheckCircle2 className={cn("h-4 w-4 shrink-0", "text-emerald-500")} />
           ) : (
             <XCircle
-              className={cn("h-4 w-4 shrink-0", required ? "text-rose-500" : "text-slate-400")}
+              className={cn(
+                "h-4 w-4 shrink-0",
+                required ? "text-rose-500" : "text-muted-foreground"
+              )}
             />
           )
         ) : (
-          <div className="h-4 w-4 shrink-0 rounded-full border border-slate-300 dark:border-slate-600 bg-secondary" />
+          <div className="h-4 w-4 shrink-0 rounded-full border border-border dark:border-border bg-secondary" />
         )}
         <span className={cn("text-secondary", !required && "text-muted-foreground")}>{label}</span>
         {help ? (
@@ -245,7 +248,7 @@ function CheckRow({
             contentClassName="whitespace-pre-line max-w-[420px]"
           >
             <span
-              className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-300 dark:border-slate-600 bg-secondary text-[10px] font-bold leading-none text-muted-foreground cursor-help"
+              className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-border dark:border-border bg-secondary text-[10px] font-bold leading-none text-muted-foreground cursor-help"
               aria-label={`${label} 说明`}
               title="查看说明"
             >
@@ -288,8 +291,8 @@ function formatClaudeValidationFailure(result: ClaudeModelValidationResult) {
 export function ClaudeModelValidationResultPanel({ templateKey, result, mode = "full" }: Props) {
   if (!result) {
     return (
-      <div className="flex h-40 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-slate-50/50 dark:bg-secondary/50 text-muted-foreground">
-        <Server className="h-8 w-8 text-slate-300 dark:text-slate-600" />
+      <div className="flex h-40 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-secondary/50 dark:bg-secondary/50 text-muted-foreground">
+        <Server className="h-8 w-8 text-muted-foreground dark:text-muted-foreground" />
         <span className="text-sm">暂无验证结果</span>
       </div>
     );
@@ -322,7 +325,7 @@ export function ClaudeModelValidationResultPanel({ templateKey, result, mode = "
           </div>
 
           {failure.raw && (
-            <div className="rounded-lg bg-slate-950 p-3">
+            <div className="rounded-lg bg-background p-3">
               <pre className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-rose-300">
                 {failure.raw}
               </pre>
@@ -619,7 +622,7 @@ export function ClaudeModelValidationResultPanel({ templateKey, result, mode = "
               ? "border-emerald-100 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-900/30"
               : overallPass === false
                 ? "border-rose-100 dark:border-rose-800 bg-rose-50/50 dark:bg-rose-900/30"
-                : "border-border bg-slate-50/50 dark:bg-secondary/50"
+                : "border-border bg-secondary/50 dark:bg-secondary/50"
           )}
         >
           <div
@@ -645,7 +648,7 @@ export function ClaudeModelValidationResultPanel({ templateKey, result, mode = "
                   ? "bg-emerald-100 text-emerald-800 ring-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:ring-emerald-700"
                   : overallPass === false
                     ? "bg-rose-100 text-rose-800 ring-rose-200 dark:bg-rose-900/30 dark:text-rose-400 dark:ring-rose-700"
-                    : "bg-slate-100 text-slate-700 ring-slate-200 dark:bg-secondary/50 dark:text-secondary dark:ring-slate-600"
+                    : "bg-secondary text-secondary ring-border dark:bg-secondary/50 dark:text-secondary dark:ring-border"
               )}
               title={
                 overallPass === true
@@ -999,9 +1002,9 @@ export function ClaudeModelValidationResultPanel({ templateKey, result, mode = "
                 <Copy className="mr-1.5 h-3 w-3" />
               </Button>
             </div>
-            <div className="group relative rounded-lg border border-border bg-slate-900 p-4 font-mono text-xs leading-relaxed text-slate-300 shadow-sm transition-all hover:border-slate-300 dark:hover:border-slate-600">
+            <div className="group relative rounded-lg border border-border bg-card p-4 font-mono text-xs leading-relaxed text-muted-foreground shadow-sm transition-all hover:border-border dark:hover:border-border">
               <span className="block whitespace-pre-wrap">{outputPreviewForDisplay}</span>
-              <div className="pointer-events-none absolute inset-0 rounded-lg ring-1 ring-inset ring-slate-400/10" />
+              <div className="pointer-events-none absolute inset-0 rounded-lg ring-1 ring-inset ring-border" />
             </div>
           </section>
         ) : (
@@ -1031,9 +1034,9 @@ export function ClaudeModelValidationResultPanel({ templateKey, result, mode = "
                   <Copy className="mr-1.5 h-3 w-3" />
                 </Button>
               </div>
-              <div className="group relative rounded-lg border border-border bg-slate-900 p-4 font-mono text-xs leading-relaxed text-slate-300 shadow-sm transition-all hover:border-slate-300 dark:hover:border-slate-600">
+              <div className="group relative rounded-lg border border-border bg-card p-4 font-mono text-xs leading-relaxed text-muted-foreground shadow-sm transition-all hover:border-border dark:hover:border-border">
                 <span className="block whitespace-pre-wrap">{outputPreviewForDisplay}</span>
-                <div className="pointer-events-none absolute inset-0 rounded-lg ring-1 ring-inset ring-slate-400/10" />
+                <div className="pointer-events-none absolute inset-0 rounded-lg ring-1 ring-inset ring-border" />
               </div>
             </div>
           </details>

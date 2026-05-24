@@ -296,7 +296,7 @@ function KeyValuePairEditor({
   valuePlaceholder?: string;
 }) {
   const inputCls =
-    "rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-secondary px-3 py-1.5 font-mono text-xs text-foreground shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20";
+    "rounded-lg border border-border dark:border-border bg-white dark:bg-secondary px-3 py-1.5 font-mono text-xs text-foreground shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20";
 
   const updatePair = (index: number, field: "key" | "value", val: string) => {
     const next = pairs.map((p, i) => (i === index ? { ...p, [field]: val } : p));
@@ -323,7 +323,7 @@ function KeyValuePairEditor({
             placeholder={keyPlaceholder}
             className={cn("w-[40%] shrink-0", inputCls)}
           />
-          <span className="text-xs text-slate-400 select-none">=</span>
+          <span className="text-xs text-muted-foreground select-none">=</span>
           <input
             type="text"
             value={pair.value}
@@ -334,7 +334,7 @@ function KeyValuePairEditor({
           <button
             type="button"
             onClick={() => removePair(index)}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 dark:hover:text-red-400 transition-colors"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 dark:hover:text-red-400 transition-colors"
             title="删除"
           >
             ×
@@ -535,7 +535,7 @@ export function McpServerDialog({
               onChange={(e) => setJsonText(e.currentTarget.value)}
               placeholder='示例：{"type":"stdio","command":"uvx","args":["mcp-server-fetch"]}'
               rows={4}
-              className="mt-2 w-full resize-y rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-secondary px-3 py-2 font-mono text-xs text-foreground shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+              className="mt-2 w-full resize-y rounded-lg border border-border dark:border-border bg-white dark:bg-secondary px-3 py-2 font-mono text-xs text-foreground shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
             />
             <div className="mt-2 flex justify-end">
               <Button variant="secondary" onClick={() => void fillFromJson()} disabled={saving}>
@@ -545,7 +545,7 @@ export function McpServerDialog({
           </div>
         ) : null}
 
-        <div className="rounded-2xl border border-border bg-gradient-to-b from-white to-slate-50/60 dark:from-slate-800 dark:to-slate-800/60 p-4 shadow-card">
+        <div className="rounded-2xl border border-border bg-gradient-to-b from-white to-secondary/60 dark:from-secondary dark:to-secondary/60 p-4 shadow-card">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-xs font-medium text-muted-foreground">基础信息</div>
           </div>
@@ -557,7 +557,7 @@ export function McpServerDialog({
               value={name}
               onChange={(e) => setName(e.currentTarget.value)}
               placeholder="例如：Fetch 工具"
-              className="mt-2 w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-secondary px-3 py-2 text-sm text-foreground shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+              className="mt-2 w-full rounded-xl border border-border dark:border-border bg-white dark:bg-secondary px-3 py-2 text-sm text-foreground shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
             />
           </div>
 
@@ -602,15 +602,15 @@ export function McpServerDialog({
                     className={cn(
                       "flex h-full cursor-pointer items-start gap-3 rounded-xl border px-3 py-3 shadow-sm transition-all",
                       "bg-white dark:bg-secondary",
-                      "hover:border-slate-300 hover:bg-slate-50/60 dark:hover:border-slate-600 dark:hover:bg-slate-700",
-                      "peer-focus-visible:ring-2 peer-focus-visible:ring-accent/20 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-white dark:peer-focus-visible:ring-offset-slate-900",
+                      "hover:border-border hover:bg-secondary/60 dark:hover:border-border dark:hover:bg-secondary",
+                      "peer-focus-visible:ring-2 peer-focus-visible:ring-accent/20 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-white dark:peer-focus-visible:ring-offset-background",
                       "peer-checked:border-accent/60 peer-checked:bg-accent/5 peer-checked:shadow dark:peer-checked:bg-accent/10"
                     )}
                   >
                     <div
                       className={cn(
                         "mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg border bg-white dark:bg-secondary shadow-sm",
-                        "border-slate-200 text-slate-700 dark:border-slate-600 dark:text-secondary",
+                        "border-border text-secondary dark:border-border dark:text-secondary",
                         "peer-checked:border-accent/40 peer-checked:bg-accent/10 peer-checked:text-accent"
                       )}
                     >
@@ -624,7 +624,7 @@ export function McpServerDialog({
                       </div>
                     </div>
 
-                    <div className="pointer-events-none absolute right-3 top-3 flex h-5 w-5 items-center justify-center rounded-full border border-slate-300 dark:border-slate-600 bg-white dark:bg-secondary text-[11px] text-white shadow-sm transition peer-checked:border-accent peer-checked:bg-accent">
+                    <div className="pointer-events-none absolute right-3 top-3 flex h-5 w-5 items-center justify-center rounded-full border border-border dark:border-border bg-white dark:bg-secondary text-[11px] text-white shadow-sm transition peer-checked:border-accent peer-checked:bg-accent">
                       ✓
                     </div>
                   </div>
@@ -643,7 +643,7 @@ export function McpServerDialog({
                 value={command}
                 onChange={(e) => setCommand(e.currentTarget.value)}
                 placeholder="例如：npx"
-                className="mt-2 w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-secondary px-3 py-2 font-mono text-sm text-foreground shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className="mt-2 w-full rounded-lg border border-border dark:border-border bg-white dark:bg-secondary px-3 py-2 font-mono text-sm text-foreground shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
               />
             </div>
 
@@ -654,7 +654,7 @@ export function McpServerDialog({
                 onChange={(e) => setArgsText(e.currentTarget.value)}
                 placeholder={`例如：\n-y\n@modelcontextprotocol/server-fetch`}
                 rows={4}
-                className="mt-2 w-full resize-y rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-secondary px-3 py-2 font-mono text-xs text-foreground shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className="mt-2 w-full resize-y rounded-lg border border-border dark:border-border bg-white dark:bg-secondary px-3 py-2 font-mono text-xs text-foreground shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
               />
             </div>
 
@@ -682,7 +682,7 @@ export function McpServerDialog({
                 value={cwd}
                 onChange={(e) => setCwd(e.currentTarget.value)}
                 placeholder="例如：/Users/xxx/project"
-                className="mt-2 w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-secondary px-3 py-2 font-mono text-sm text-foreground shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className="mt-2 w-full rounded-lg border border-border dark:border-border bg-white dark:bg-secondary px-3 py-2 font-mono text-sm text-foreground shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
               />
             </div>
           </>
@@ -695,7 +695,7 @@ export function McpServerDialog({
                 value={url}
                 onChange={(e) => setUrl(e.currentTarget.value)}
                 placeholder="例如：https://example.com/mcp"
-                className="mt-2 w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-secondary px-3 py-2 font-mono text-sm text-foreground shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className="mt-2 w-full rounded-lg border border-border dark:border-border bg-white dark:bg-secondary px-3 py-2 font-mono text-sm text-foreground shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
               />
             </div>
 

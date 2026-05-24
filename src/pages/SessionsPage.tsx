@@ -225,7 +225,7 @@ export function SessionsPage() {
                 <div className="mt-1 text-xs text-muted-foreground">
                   当前来源：<span className="font-semibold">{source}</span>
                   {activeDistro ? (
-                    <span className="ml-2 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:border-border dark:bg-secondary dark:text-secondary">
+                    <span className="ml-2 rounded-full border border-border bg-secondary px-2 py-0.5 text-[11px] font-medium text-muted-foreground dark:border-border dark:bg-secondary dark:text-secondary">
                       {envLabel}
                     </span>
                   ) : null}
@@ -243,19 +243,19 @@ export function SessionsPage() {
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-border dark:bg-slate-900/30">
+              <div className="rounded-2xl border border-border bg-secondary p-3 dark:border-border dark:bg-card/30">
                 <div className="text-[11px] font-semibold text-muted-foreground">项目</div>
                 <div className="mt-1 text-lg font-semibold text-foreground">
                   {stats.totalProjects}
                 </div>
               </div>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-border dark:bg-slate-900/30">
+              <div className="rounded-2xl border border-border bg-secondary p-3 dark:border-border dark:bg-card/30">
                 <div className="text-[11px] font-semibold text-muted-foreground">会话总数</div>
                 <div className="mt-1 text-lg font-semibold text-foreground">
                   {stats.totalSessions}
                 </div>
               </div>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-border dark:bg-slate-900/30">
+              <div className="rounded-2xl border border-border bg-secondary p-3 dark:border-border dark:bg-card/30">
                 <div className="text-[11px] font-semibold text-muted-foreground">最近更新</div>
                 <div className="mt-1 text-lg font-semibold text-foreground">
                   {stats.lastModified != null
@@ -265,11 +265,13 @@ export function SessionsPage() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-border dark:bg-slate-900/40">
+            <div className="rounded-2xl border border-border bg-white p-4 dark:border-border dark:bg-card/40">
               <div className="text-sm font-semibold text-foreground">数据源</div>
               <div className="mt-2 text-xs text-muted-foreground">
                 <div className="flex items-start justify-between gap-2">
-                  <span className="shrink-0 text-slate-500 dark:text-slate-500">目录</span>
+                  <span className="shrink-0 text-muted-foreground dark:text-muted-foreground">
+                    目录
+                  </span>
                   <span className="min-w-0 text-right font-mono text-[11px] text-secondary">
                     {sourceDirHint(source, activeDistro)}
                   </span>
@@ -277,7 +279,7 @@ export function SessionsPage() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-border dark:bg-slate-900/40">
+            <div className="rounded-2xl border border-border bg-white p-4 dark:border-border dark:bg-card/40">
               <div className="text-sm font-semibold text-foreground">操作提示</div>
               <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
                 <li>1) 选择项目进入会话列表</li>
@@ -326,7 +328,7 @@ export function SessionsPage() {
 
             <div className="mt-3">
               <div className="relative">
-                <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
+                <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-muted-foreground">
                   <Search className="h-4 w-4" aria-hidden="true" />
                 </div>
                 <Input
@@ -392,9 +394,9 @@ export function SessionsPage() {
                           navigate(navUrl);
                         }}
                         className={cn(
-                          "w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-left shadow-card transition",
-                          "hover:border-slate-300 hover:bg-slate-50",
-                          "dark:border-border dark:bg-slate-900/40 dark:hover:border-slate-600 dark:hover:bg-slate-900/60"
+                          "w-full rounded-2xl border border-border bg-white px-3 py-3 text-left shadow-card transition",
+                          "hover:border-border hover:bg-secondary",
+                          "dark:border-border dark:bg-card/40 dark:hover:border-border dark:hover:bg-card/60"
                         )}
                       >
                         <div className="grid gap-2 sm:grid-cols-[1fr_110px_140px] sm:items-center sm:gap-3">
@@ -404,7 +406,7 @@ export function SessionsPage() {
                                 {projectDisplayName(project)}
                               </div>
                               {project.model_provider ? (
-                                <span className="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:border-border dark:bg-secondary dark:text-secondary">
+                                <span className="shrink-0 rounded-full border border-border bg-white px-2 py-0.5 text-[11px] font-medium text-muted-foreground dark:border-border dark:bg-secondary dark:text-secondary">
                                   {project.model_provider}
                                 </span>
                               ) : null}
@@ -417,13 +419,13 @@ export function SessionsPage() {
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-1 text-xs text-slate-600 dark:text-secondary sm:justify-end">
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground dark:text-secondary sm:justify-end">
                             <Hash className="h-3.5 w-3.5 text-muted-foreground" />
                             <span className="font-semibold">{project.session_count}</span>
                           </div>
 
                           <div
-                            className="flex items-center gap-1 text-xs text-slate-600 dark:text-secondary sm:justify-end"
+                            className="flex items-center gap-1 text-xs text-muted-foreground dark:text-secondary sm:justify-end"
                             title={modifiedTitle}
                           >
                             <Clock className="h-3.5 w-3.5 text-muted-foreground" />

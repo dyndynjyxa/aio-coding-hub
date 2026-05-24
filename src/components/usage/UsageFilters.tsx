@@ -85,7 +85,7 @@ function CustomDateRangeForm({
         aria-label="开始日期"
         className="h-8 rounded-md border border-border bg-white dark:bg-secondary px-2 text-xs text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
       />
-      <span className="text-xs text-slate-400">→</span>
+      <span className="text-xs text-muted-foreground">→</span>
       <input
         type="date"
         value={customEndDate}
@@ -136,7 +136,7 @@ export function UsageFilters({
       />
 
       {/* 分隔 */}
-      <div className="hidden h-5 w-px bg-slate-200 dark:bg-secondary sm:block" />
+      <div className="hidden h-5 w-px bg-muted dark:bg-secondary sm:block" />
 
       {/* 时间窗筛选 */}
       <FilterButtonGroup

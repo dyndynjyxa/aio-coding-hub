@@ -30,22 +30,22 @@ export function RouteTooltipContent({
   return (
     <div className="flex flex-col gap-2 py-0.5">
       {summary ? (
-        <div className="rounded-md bg-slate-800/80 px-2 py-1 text-[11px] text-slate-100">
+        <div className="rounded-md bg-secondary/80 px-2 py-1 text-[11px] text-foreground">
           {summary}
           {skippedCount > 0 ? (
-            <span className="ml-1 text-slate-400">· 跳过 {skippedCount} 个候选</span>
+            <span className="ml-1 text-muted-foreground">· 跳过 {skippedCount} 个候选</span>
           ) : null}
         </div>
       ) : null}
 
-      <div className="flex items-center gap-1 text-[11px] font-medium text-slate-200">
-        <span className="text-slate-400 shrink-0">链路</span>
+      <div className="flex items-center gap-1 text-[11px] font-medium text-foreground">
+        <span className="text-muted-foreground shrink-0">链路</span>
         <span className="flex items-center gap-1 flex-wrap">
           {hops.map((hop, idx) => {
             const name = resolveProviderName(hop.provider_name);
             return (
               <span key={idx} className="flex items-center gap-1">
-                {idx > 0 && <span className="text-slate-500">→</span>}
+                {idx > 0 && <span className="text-muted-foreground">→</span>}
                 <span className="text-white">{name}</span>
               </span>
             );
@@ -53,7 +53,7 @@ export function RouteTooltipContent({
         </span>
       </div>
 
-      <div className="border-t border-slate-700" />
+      <div className="border-t border-border" />
 
       <div className="flex flex-col gap-1.5">
         {hops.map((hop, idx) => (
@@ -102,13 +102,13 @@ function RouteHopRow({ hop, index, isLast, finalStatus, totalHops }: RouteHopRow
         : "失败";
 
   const statusTone = skipped
-    ? "bg-slate-500/20 text-slate-200"
+    ? "bg-muted/20 text-foreground"
     : hop.ok
       ? "bg-emerald-500/20 text-emerald-300"
       : "bg-rose-500/20 text-rose-300";
 
   const dotTone = skipped
-    ? "bg-slate-500/20 text-slate-300 ring-1 ring-slate-500/30"
+    ? "bg-muted/20 text-muted-foreground ring-1 ring-border"
     : hop.ok
       ? "bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/30"
       : "bg-rose-500/20 text-rose-400 ring-1 ring-rose-500/30";
@@ -124,7 +124,7 @@ function RouteHopRow({ hop, index, isLast, finalStatus, totalHops }: RouteHopRow
         >
           {index + 1}
         </span>
-        {!isLast && totalHops > 1 && <div className="w-px h-3 bg-slate-600 mt-0.5" />}
+        {!isLast && totalHops > 1 && <div className="w-px h-3 bg-secondary mt-0.5" />}
       </div>
 
       <div className="flex flex-col gap-0.5 min-w-0 flex-1">
@@ -148,9 +148,9 @@ function RouteHopRow({ hop, index, isLast, finalStatus, totalHops }: RouteHopRow
               </span>
             )}
             {errorLabel && <span className="text-amber-400">{errorLabel}</span>}
-            {hop.decision && <span className="text-slate-300">{hop.decision}</span>}
-            {hop.reason && <span className="text-slate-500">{hop.reason}</span>}
-            {skipped && <span className="text-slate-400">本次未实际发出请求</span>}
+            {hop.decision && <span className="text-muted-foreground">{hop.decision}</span>}
+            {hop.reason && <span className="text-muted-foreground">{hop.reason}</span>}
+            {skipped && <span className="text-muted-foreground">本次未实际发出请求</span>}
           </div>
         )}
       </div>

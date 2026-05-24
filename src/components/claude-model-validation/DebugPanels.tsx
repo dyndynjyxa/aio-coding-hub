@@ -59,7 +59,7 @@ export function SuiteDebugPanel({
           <Textarea
             mono
             readOnly
-            className="h-[220px] resize-none text-[11px] leading-relaxed bg-white dark:bg-slate-900"
+            className="h-[220px] resize-none text-[11px] leading-relaxed bg-white dark:bg-card"
             value={suiteSummary.plainText}
           />
         </div>
@@ -77,7 +77,7 @@ export function SuiteDebugPanel({
           {suiteSummary.templateRows.map((r) => (
             <div
               key={r.templateKey}
-              className="flex items-center justify-between gap-3 rounded-lg border border-border bg-white dark:bg-slate-900/30 px-3 py-2"
+              className="flex items-center justify-between gap-3 rounded-lg border border-border bg-white dark:bg-card/30 px-3 py-2"
               title={r.grade?.title ?? ""}
             >
               <div className="min-w-0">
@@ -125,12 +125,12 @@ export function SuiteDebugPanel({
           {suiteSummary.protocol.map((p) => (
             <div
               key={p.key}
-              className="flex items-start justify-between gap-3 rounded-lg border border-border bg-white dark:bg-slate-900/30 px-3 py-2"
+              className="flex items-start justify-between gap-3 rounded-lg border border-border bg-white dark:bg-card/30 px-3 py-2"
               title={p.detail ?? ""}
             >
               <div className="flex items-start gap-2 min-w-0">
                 {p.ok == null ? (
-                  <div className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded-full border border-slate-300 dark:border-slate-600 bg-secondary" />
+                  <div className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded-full border border-border dark:border-border bg-secondary" />
                 ) : p.ok ? (
                   <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 text-emerald-500 shrink-0" />
                 ) : (
@@ -201,7 +201,7 @@ export function NonSuiteDebugPanel({
         <div className="border-t border-border px-4 py-3">
           <Textarea
             mono
-            className="h-[220px] resize-none text-xs leading-5 bg-white dark:bg-slate-900 shadow-sm focus:ring-indigo-500"
+            className="h-[220px] resize-none text-xs leading-5 bg-white dark:bg-card shadow-sm focus:ring-indigo-500"
             value={requestJson}
             onChange={(e) => {
               setRequestJson(e.currentTarget.value);
@@ -239,7 +239,7 @@ export function NonSuiteDebugPanel({
           </div>
         </summary>
         <div className="border-t border-border p-0">
-          <pre className="scrollbar-overlay max-h-60 overflow-auto bg-slate-950 p-4 font-mono text-[10px] leading-relaxed text-slate-300">
+          <pre className="scrollbar-overlay max-h-60 overflow-auto bg-background p-4 font-mono text-[10px] leading-relaxed text-muted-foreground">
             <span className="text-muted-foreground">
               {(() => {
                 const t = getClaudeValidationTemplate(activeResultTemplateKey);

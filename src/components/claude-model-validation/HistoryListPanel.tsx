@@ -32,7 +32,7 @@ export function HistoryListPanel({
   return (
     <div className="flex flex-col gap-4 h-full min-h-0 w-full lg:flex-[0_1_420px] lg:max-w-[420px]">
       <Card padding="none" className="flex h-full flex-col overflow-hidden">
-        <div className="flex items-center justify-between border-b border-border bg-slate-50/50 dark:bg-secondary/50 px-4 py-3">
+        <div className="flex items-center justify-between border-b border-border bg-secondary/50 dark:bg-secondary/50 px-4 py-3">
           <div className="flex items-center gap-2">
             <History className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm font-semibold text-foreground">History</span>
@@ -67,7 +67,7 @@ export function HistoryListPanel({
         <div className="flex-1 overflow-hidden">
           {historyAvailable === false ? (
             <div className="flex h-40 flex-col items-center justify-center gap-2 text-muted-foreground">
-              <Cpu className="h-8 w-8 text-slate-200 dark:text-slate-600" />
+              <Cpu className="h-8 w-8 text-foreground dark:text-muted-foreground" />
               <span className="text-xs">\u4ec5\u9650\u684c\u9762\u7aef</span>
             </div>
           ) : historyLoading && historyGroups.length === 0 ? (
@@ -76,7 +76,7 @@ export function HistoryListPanel({
             </div>
           ) : historyGroups.length === 0 ? (
             <div className="flex h-40 flex-col items-center justify-center gap-2 text-muted-foreground">
-              <History className="h-8 w-8 text-slate-200 dark:text-slate-600" />
+              <History className="h-8 w-8 text-foreground dark:text-muted-foreground" />
               <span className="text-xs">No History</span>
             </div>
           ) : (
@@ -199,17 +199,17 @@ function HistoryGroupButton({
               <div className="flex items-center gap-2 min-w-0">
                 <span className="text-xs font-semibold text-foreground truncate">{titleText}</span>
                 {!group.isSuite ? (
-                  <span className="rounded bg-secondary px-2 py-0.5 text-[10px] font-medium text-muted-foreground border border-slate-200 dark:border-slate-600 shrink-0">
+                  <span className="rounded bg-secondary px-2 py-0.5 text-[10px] font-medium text-muted-foreground border border-border dark:border-border shrink-0">
                     {group.modelName}
                   </span>
                 ) : (
-                  <span className="rounded bg-secondary px-2 py-0.5 text-[10px] font-medium text-muted-foreground border border-slate-200 dark:border-slate-600 shrink-0">
+                  <span className="rounded bg-secondary px-2 py-0.5 text-[10px] font-medium text-muted-foreground border border-border dark:border-border shrink-0">
                     Suite
                   </span>
                 )}
                 {mentionsBedrock ? (
                   <span
-                    className="rounded bg-secondary px-2 py-0.5 text-[10px] font-medium text-muted-foreground border border-slate-200 dark:border-slate-600 shrink-0"
+                    className="rounded bg-secondary px-2 py-0.5 text-[10px] font-medium text-muted-foreground border border-border dark:border-border shrink-0"
                     title="signals.mentions_amazon_bedrock=true"
                   >
                     Bedrock
@@ -230,7 +230,7 @@ function HistoryGroupButton({
 
         <ChevronRight
           className={cn(
-            "mt-0.5 h-4 w-4 text-slate-300 transition-transform",
+            "mt-0.5 h-4 w-4 text-muted-foreground transition-transform",
             active && "text-indigo-400"
           )}
         />

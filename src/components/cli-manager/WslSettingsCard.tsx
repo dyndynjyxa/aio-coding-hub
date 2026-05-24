@@ -293,11 +293,11 @@ export function WslSettingsCard({ available, saving, settings }: WslSettingsCard
       </div>
 
       {!available ? (
-        <div className="text-sm font-medium text-slate-700 dark:text-foreground bg-secondary p-4 rounded-lg">
+        <div className="text-sm font-medium text-secondary dark:text-foreground bg-secondary p-4 rounded-lg">
           数据不可用
         </div>
       ) : aboutOs && !wslSupported ? (
-        <div className="text-sm font-medium text-slate-700 dark:text-foreground bg-secondary p-4 rounded-lg">
+        <div className="text-sm font-medium text-secondary dark:text-foreground bg-secondary p-4 rounded-lg">
           仅 Windows 支持 WSL 配置
         </div>
       ) : (
@@ -307,7 +307,7 @@ export function WslSettingsCard({ available, saving, settings }: WslSettingsCard
               <span
                 className={cn(
                   "inline-block h-2.5 w-2.5 rounded-full",
-                  wslDetected ? "bg-emerald-500" : checkedOnce ? "bg-slate-300" : "bg-slate-200"
+                  wslDetected ? "bg-emerald-500" : checkedOnce ? "bg-muted" : "bg-muted"
                 )}
               />
               <span className="text-sm text-secondary">
@@ -331,7 +331,7 @@ export function WslSettingsCard({ available, saving, settings }: WslSettingsCard
                 {distros.map((d) => (
                   <span
                     key={d}
-                    className="rounded-full bg-secondary px-2.5 py-1 text-xs text-secondary border border-slate-200/60 dark:border-slate-600"
+                    className="rounded-full bg-secondary px-2.5 py-1 text-xs text-secondary border border-border/60 dark:border-border"
                   >
                     {d}
                   </span>
@@ -382,19 +382,19 @@ export function WslSettingsCard({ available, saving, settings }: WslSettingsCard
                               <span
                                 className={cn(
                                   "inline-block h-2 w-2 rounded-full",
-                                  auth ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-600"
+                                  auth ? "bg-emerald-500" : "bg-muted dark:bg-secondary"
                                 )}
                               />
                               <span
                                 className={cn(
                                   "inline-block h-2 w-2 rounded-full",
-                                  mcp ? "bg-blue-500" : "bg-slate-300 dark:bg-slate-600"
+                                  mcp ? "bg-blue-500" : "bg-muted dark:bg-secondary"
                                 )}
                               />
                               <span
                                 className={cn(
                                   "inline-block h-2 w-2 rounded-full",
-                                  prompt ? "bg-violet-500" : "bg-slate-300 dark:bg-slate-600"
+                                  prompt ? "bg-violet-500" : "bg-muted dark:bg-secondary"
                                 )}
                               />
                             </div>
@@ -416,7 +416,7 @@ export function WslSettingsCard({ available, saving, settings }: WslSettingsCard
                   <span className="inline-block h-2 w-2 rounded-full bg-violet-500" /> Prompt
                 </span>
                 <span className="flex items-center gap-1">
-                  <span className="inline-block h-2 w-2 rounded-full bg-slate-300 dark:bg-slate-600" />{" "}
+                  <span className="inline-block h-2 w-2 rounded-full bg-muted dark:bg-secondary" />{" "}
                   未配置
                 </span>
               </div>
@@ -450,7 +450,7 @@ export function WslSettingsCard({ available, saving, settings }: WslSettingsCard
             ) : null}
           </div>
 
-          <div className="mt-3 rounded-lg border border-slate-200/70 bg-slate-50/70 p-3 dark:border-border dark:bg-secondary/40">
+          <div className="mt-3 rounded-lg border border-border/70 bg-secondary/70 p-3 dark:border-border dark:bg-secondary/40">
             <div className="text-sm font-medium text-secondary">WSL 中的 Codex 同步目标</div>
             <div className="mt-2 font-mono text-xs text-secondary break-all">
               $CODEX_HOME/config.toml
@@ -501,7 +501,7 @@ export function WslSettingsCard({ available, saving, settings }: WslSettingsCard
             </span>
           </div>
 
-          <details className="mt-3 rounded-lg border border-border bg-slate-50/60 dark:bg-secondary/40">
+          <details className="mt-3 rounded-lg border border-border bg-secondary/60 dark:bg-secondary/40">
             <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-secondary">
               高级选项（地址兜底）
             </summary>
@@ -512,13 +512,13 @@ export function WslSettingsCard({ available, saving, settings }: WslSettingsCard
               </div>
 
               <SettingsRow label="生效宿主机地址">
-                <div className="font-mono text-xs text-secondary bg-white/60 dark:bg-slate-900/20 px-2 py-1 rounded border border-slate-200/60 dark:border-border break-all">
+                <div className="font-mono text-xs text-secondary bg-white/60 dark:bg-card/20 px-2 py-1 rounded border border-border/60 dark:border-border break-all">
                   {effectiveHost}
                 </div>
               </SettingsRow>
 
               <SettingsRow label="自动检测地址">
-                <div className="font-mono text-xs text-secondary bg-white/60 dark:bg-slate-900/20 px-2 py-1 rounded border border-slate-200/60 dark:border-border break-all">
+                <div className="font-mono text-xs text-secondary bg-white/60 dark:bg-card/20 px-2 py-1 rounded border border-border/60 dark:border-border break-all">
                   {hostIp ?? "（未检测到）"}
                 </div>
               </SettingsRow>

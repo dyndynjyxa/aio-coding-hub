@@ -31,7 +31,7 @@ export const McpServerCard = memo(function McpServerCard({
     <Card padding="md">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-start gap-4 min-w-0">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-secondary text-muted-foreground ring-1 ring-slate-200 dark:ring-slate-600">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-secondary text-muted-foreground ring-1 ring-border dark:ring-border">
             {server.transport === "http" ? (
               <Globe className="h-6 w-6" />
             ) : (
@@ -44,7 +44,7 @@ export const McpServerCard = memo(function McpServerCard({
               <div className="truncate text-base font-semibold text-foreground leading-tight">
                 {server.name}
               </div>
-              <span className="inline-flex items-center gap-1 rounded-md bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground border border-slate-200 dark:border-slate-600 uppercase tracking-wider">
+              <span className="inline-flex items-center gap-1 rounded-md bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground border border-border dark:border-border uppercase tracking-wider">
                 {server.transport}
               </span>
             </div>
@@ -80,14 +80,14 @@ export const McpServerCard = memo(function McpServerCard({
             </div>
           </div>
 
-          <div className="h-8 w-px bg-slate-200 dark:bg-slate-600" />
+          <div className="h-8 w-px bg-muted dark:bg-secondary" />
 
           <div className="flex items-center gap-1">
             <Button
               onClick={() => onEdit(server)}
               size="sm"
               variant="ghost"
-              className="h-8 w-8 p-0 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:text-muted-foreground dark:hover:text-indigo-400 dark:hover:bg-indigo-900/30"
+              className="h-8 w-8 p-0 text-muted-foreground hover:text-indigo-600 hover:bg-indigo-50 dark:text-muted-foreground dark:hover:text-indigo-400 dark:hover:bg-indigo-900/30"
               title="编辑"
             >
               <Edit2 className="h-4 w-4" />
@@ -96,7 +96,7 @@ export const McpServerCard = memo(function McpServerCard({
               onClick={() => onDelete(server)}
               size="sm"
               variant="ghost"
-              className="h-8 w-8 p-0 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:text-rose-400 dark:hover:bg-rose-900/30"
+              className="h-8 w-8 p-0 text-muted-foreground hover:text-rose-600 hover:bg-rose-50 dark:hover:text-rose-400 dark:hover:bg-rose-900/30"
               title="删除"
             >
               <Trash2 className="h-4 w-4" />

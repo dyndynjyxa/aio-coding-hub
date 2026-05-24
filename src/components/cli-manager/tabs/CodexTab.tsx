@@ -598,7 +598,7 @@ export function CliManagerCodexTab({
           <div className="flex flex-col gap-4 p-6">
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <div className="flex items-center gap-4">
-                <div className="h-14 w-14 rounded-xl bg-slate-900/5 dark:bg-secondary flex items-center justify-center text-secondary">
+                <div className="h-14 w-14 rounded-xl bg-card/5 dark:bg-secondary flex items-center justify-center text-secondary">
                   <Terminal className="h-8 w-8" />
                 </div>
                 <div>
@@ -623,7 +623,7 @@ export function CliManagerCodexTab({
                         加载中...
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-muted-foreground ring-1 ring-inset ring-slate-500/10">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-muted-foreground ring-1 ring-inset ring-border">
                         未检测到
                       </span>
                     )}
@@ -662,7 +662,7 @@ export function CliManagerCodexTab({
                       disabled={!codexConfig.can_open_config_dir}
                       size="sm"
                       variant="ghost"
-                      className="shrink-0 h-6 w-6 p-0 hover:bg-slate-200 dark:hover:bg-slate-700"
+                      className="shrink-0 h-6 w-6 p-0 hover:bg-muted dark:hover:bg-secondary"
                       title={
                         codexConfig.can_open_config_dir
                           ? "打开当前生效目录"
@@ -730,7 +730,7 @@ export function CliManagerCodexTab({
             )}
 
             {codexConfig && isWindowsRuntime() ? (
-              <div className="rounded-xl border border-slate-200/80 bg-white/80 p-4 dark:border-border dark:bg-slate-900/20">
+              <div className="rounded-xl border border-border/80 bg-white/80 p-4 dark:border-border dark:bg-card/20">
                 <div className="flex flex-col gap-4">
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div className="min-w-0">
@@ -743,7 +743,7 @@ export function CliManagerCodexTab({
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-700 dark:border-slate-600 dark:bg-secondary dark:text-foreground">
+                      <span className="inline-flex items-center rounded-full border border-border bg-secondary px-2.5 py-1 text-[11px] font-medium text-secondary dark:border-border dark:bg-secondary dark:text-foreground">
                         {activeConfigModeBadgeText}
                       </span>
                       <Button
@@ -762,7 +762,7 @@ export function CliManagerCodexTab({
                     </div>
                   </div>
 
-                  <div className="rounded-lg border border-slate-200/70 bg-slate-50/80 p-3 dark:border-border dark:bg-secondary/80">
+                  <div className="rounded-lg border border-border/70 bg-secondary/80 p-3 dark:border-border dark:bg-secondary/80">
                     <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                       <div className="min-w-0">
                         <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
@@ -796,7 +796,7 @@ export function CliManagerCodexTab({
                     </div>
                   </div>
 
-                  <div className="rounded-lg border border-slate-200/70 bg-white/70 p-3 dark:border-border dark:bg-slate-900/20">
+                  <div className="rounded-lg border border-border/70 bg-white/70 p-3 dark:border-border dark:bg-card/20">
                     <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
                       目录来源
                     </div>
@@ -839,7 +839,7 @@ export function CliManagerCodexTab({
                   </div>
 
                   {configLocationMode === "custom" ? (
-                    <div className="rounded-lg border border-slate-200/70 bg-slate-50/80 p-3 dark:border-border dark:bg-secondary/80">
+                    <div className="rounded-lg border border-border/70 bg-secondary/80 p-3 dark:border-border dark:bg-secondary/80">
                       <label className="text-xs font-medium text-secondary">
                         自定义 .codex 目录
                       </label>
@@ -904,7 +904,7 @@ export function CliManagerCodexTab({
                       </div>
                     </div>
                   ) : (
-                    <div className="rounded-lg border border-dashed border-slate-200/80 bg-slate-50/50 px-3 py-2 text-[11px] leading-relaxed text-slate-500 dark:border-border dark:bg-secondary/40 dark:text-muted-foreground">
+                    <div className="rounded-lg border border-dashed border-border/80 bg-secondary/50 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground dark:border-border dark:bg-secondary/40 dark:text-muted-foreground">
                       {configLocationMode === "follow_codex_home"
                         ? `当前为跟随模式，手动目录选择器已收起；现在会使用 ${followCodexHomeResolvedDir}。`
                         : `当前为默认模式，手动目录选择器已收起；固定使用 ${userDefaultResolvedHomeDir}。`}
@@ -920,7 +920,7 @@ export function CliManagerCodexTab({
             </div>
 
             {appSettings ? (
-              <div className="rounded-xl border border-slate-200/80 bg-white/80 p-4 dark:border-border dark:bg-slate-900/20">
+              <div className="rounded-xl border border-border/80 bg-white/80 p-4 dark:border-border dark:bg-card/20">
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-foreground">OAuth 兼容代理模式</div>

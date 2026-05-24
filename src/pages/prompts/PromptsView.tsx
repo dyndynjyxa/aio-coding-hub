@@ -291,7 +291,7 @@ export function PromptsView({ workspaceId, cliKey, isActiveWorkspace = true }: P
                     />
                   </div>
 
-                  <div className="h-8 w-px bg-slate-200 dark:bg-slate-600" />
+                  <div className="h-8 w-px bg-muted dark:bg-secondary" />
 
                   <div className="flex items-center gap-1">
                     <Button
@@ -301,7 +301,7 @@ export function PromptsView({ workspaceId, cliKey, isActiveWorkspace = true }: P
                       }}
                       size="icon"
                       variant="ghost"
-                      className="h-8 w-8 p-0 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:text-muted-foreground dark:hover:text-indigo-400 dark:hover:bg-indigo-900/30"
+                      className="h-8 w-8 p-0 text-muted-foreground hover:text-indigo-600 hover:bg-indigo-50 dark:text-muted-foreground dark:hover:text-indigo-400 dark:hover:bg-indigo-900/30"
                       aria-label="Edit"
                       title="编辑"
                     >
@@ -311,7 +311,7 @@ export function PromptsView({ workspaceId, cliKey, isActiveWorkspace = true }: P
                       onClick={() => setDeleteTarget(prompt)}
                       size="icon"
                       variant="ghost"
-                      className="h-8 w-8 p-0 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:text-rose-400 dark:hover:bg-rose-900/30"
+                      className="h-8 w-8 p-0 text-muted-foreground hover:text-rose-600 hover:bg-rose-50 dark:hover:text-rose-400 dark:hover:bg-rose-900/30"
                       aria-label="Delete"
                       title="删除"
                     >

@@ -556,7 +556,7 @@ export function SkillsView({
                       toggleMutation.isPending ||
                       returnToLocalMutation.isPending
                     }
-                    className="h-4 w-4 rounded border-slate-300 text-accent focus:ring-accent dark:border-slate-600"
+                    className="h-4 w-4 rounded border-border text-accent focus:ring-accent dark:border-border"
                     aria-label="全选通用技能"
                   />
                   <span>全选</span>
@@ -597,7 +597,7 @@ export function SkillsView({
               >
                 {loading ? "刷新中…" : "刷新"}
               </Button>
-              <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700 dark:bg-secondary dark:text-secondary">
+              <span className="rounded-full bg-secondary px-2 py-1 text-xs font-medium text-secondary dark:bg-secondary dark:text-secondary">
                 {installed.length}
               </span>
             </div>
@@ -618,7 +618,7 @@ export function SkillsView({
                 return (
                   <div
                     key={skill.id}
-                    className="rounded-xl border border-slate-200 bg-white p-3 dark:border-border dark:bg-secondary"
+                    className="rounded-xl border border-border bg-white p-3 dark:border-border dark:bg-secondary"
                   >
                     <div className="flex items-start gap-3">
                       <input
@@ -630,7 +630,7 @@ export function SkillsView({
                           togglingSkillId === skill.id ||
                           returningLocalSkillId === skill.id
                         }
-                        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-accent focus:ring-accent dark:border-slate-600"
+                        className="mt-0.5 h-4 w-4 rounded border-border text-accent focus:ring-accent dark:border-border"
                         aria-label={`选择通用技能 ${skill.name}`}
                       />
 
@@ -654,7 +654,7 @@ export function SkillsView({
                               href={repoUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="shrink-0 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
+                              className="shrink-0 text-muted-foreground hover:text-muted-foreground dark:text-muted-foreground dark:hover:text-muted-foreground"
                               title={sourceHint(skill)}
                             >
                               <ExternalLink className="h-3.5 w-3.5" />
@@ -734,7 +734,7 @@ export function SkillsView({
                               "rounded-full px-2 py-1 font-medium",
                               skill.enabled
                                 ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                                : "bg-slate-100 text-slate-600 dark:bg-secondary dark:text-muted-foreground"
+                                : "bg-secondary text-muted-foreground dark:bg-secondary dark:text-muted-foreground"
                             )}
                           >
                             {skill.enabled ? "已启用" : "未启用"}
@@ -761,7 +761,7 @@ export function SkillsView({
                     checked={allLocalSelected}
                     onChange={toggleAllLocalSelection}
                     disabled={deletingLocal || importingLocal}
-                    className="h-4 w-4 rounded border-slate-300 text-accent focus:ring-accent dark:border-slate-600"
+                    className="h-4 w-4 rounded border-border text-accent focus:ring-accent dark:border-border"
                     aria-label="全选本机技能"
                   />
                   <span>全选</span>
@@ -789,7 +789,7 @@ export function SkillsView({
               >
                 {localLoading ? "刷新中…" : "刷新"}
               </Button>
-              <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700 dark:bg-secondary dark:text-secondary">
+              <span className="rounded-full bg-secondary px-2 py-1 text-xs font-medium text-secondary dark:bg-secondary dark:text-secondary">
                 {canOperateLocal ? (localLoading ? "扫描中…" : `${localSkills.length}`) : "—"}
               </span>
             </div>
@@ -817,7 +817,7 @@ export function SkillsView({
                 return (
                   <div
                     key={skill.path}
-                    className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-border dark:bg-secondary"
+                    className="rounded-xl border border-border bg-secondary p-3 dark:border-border dark:bg-secondary"
                   >
                     <div className="flex items-start gap-3">
                       <input
@@ -825,7 +825,7 @@ export function SkillsView({
                         checked={selectedLocalDirNames.has(skill.dir_name)}
                         onChange={() => toggleLocalSelection(skill.dir_name)}
                         disabled={deletingLocal || importingLocal}
-                        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-accent focus:ring-accent dark:border-slate-600"
+                        className="mt-0.5 h-4 w-4 rounded border-border text-accent focus:ring-accent dark:border-border"
                         aria-label={`选择本机技能 ${label}`}
                       />
 
@@ -844,7 +844,7 @@ export function SkillsView({
                               href={repoUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="shrink-0 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
+                              className="shrink-0 text-muted-foreground hover:text-muted-foreground dark:text-muted-foreground dark:hover:text-muted-foreground"
                               title={sourceHint(skill)}
                             >
                               <ExternalLink className="h-3.5 w-3.5" />
@@ -917,7 +917,9 @@ export function SkillsView({
               </li>
             ))}
             {selectedInstalledSkills.length > 10 ? (
-              <li className="text-slate-400">...还有 {selectedInstalledSkills.length - 10} 个</li>
+              <li className="text-muted-foreground">
+                ...还有 {selectedInstalledSkills.length - 10} 个
+              </li>
             ) : null}
           </ul>
         </div>
@@ -942,14 +944,14 @@ export function SkillsView({
           {localDeleteTargets.slice(0, 10).map((skill) => (
             <div
               key={skill.path}
-              className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-border dark:bg-secondary"
+              className="rounded-xl border border-border bg-secondary p-3 dark:border-border dark:bg-secondary"
             >
               <div className="font-medium text-foreground">{skill.name || skill.dir_name}</div>
               <div className="mt-1 break-all font-mono">{skill.path}</div>
             </div>
           ))}
           {localDeleteTargets.length > 10 ? (
-            <div className="text-slate-400">...还有 {localDeleteTargets.length - 10} 个</div>
+            <div className="text-muted-foreground">...还有 {localDeleteTargets.length - 10} 个</div>
           ) : null}
         </div>
       </ConfirmDialog>

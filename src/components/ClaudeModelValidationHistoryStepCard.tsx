@@ -109,7 +109,7 @@ export function ClaudeModelValidationHistoryStepCard({
       open={open}
       onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
       className={cn(
-        "group/step rounded-2xl border border-slate-200/60 dark:border-border/60 bg-white/50 dark:bg-secondary/40 shadow-sm backdrop-blur-sm open:ring-2 open:ring-indigo-500/10 transition-all",
+        "group/step rounded-2xl border border-border/60 dark:border-border/60 bg-white/50 dark:bg-secondary/40 shadow-sm backdrop-blur-sm open:ring-2 open:ring-indigo-500/10 transition-all",
         className
       )}
     >
@@ -133,7 +133,7 @@ export function ClaudeModelValidationHistoryStepCard({
           </div>
         ) : null}
 
-        <details className="group rounded-xl border border-slate-200/60 dark:border-border/60 bg-white/60 dark:bg-secondary/60 shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
+        <details className="group rounded-xl border border-border/60 dark:border-border/60 bg-white/60 dark:bg-secondary/60 shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
           <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
             <div className="flex items-center gap-2 text-sm font-medium text-secondary group-open:text-indigo-600 dark:group-open:text-indigo-400">
               <Settings2 className="h-4 w-4" />
@@ -161,7 +161,7 @@ export function ClaudeModelValidationHistoryStepCard({
             <Textarea
               mono
               readOnly
-              className="h-[140px] resize-none text-[10px] leading-relaxed bg-white dark:bg-slate-900"
+              className="h-[140px] resize-none text-[10px] leading-relaxed bg-white dark:bg-card"
               value={requestText}
             />
           </div>
@@ -173,7 +173,7 @@ export function ClaudeModelValidationHistoryStepCard({
           mode="compact"
         />
 
-        <details className="group rounded-xl border border-slate-200/60 dark:border-border/60 bg-white/60 dark:bg-secondary/60 shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
+        <details className="group rounded-xl border border-border/60 dark:border-border/60 bg-white/60 dark:bg-secondary/60 shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
           <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
             <div className="flex items-center gap-2 text-sm font-medium text-secondary group-open:text-indigo-600 dark:group-open:text-indigo-400">
               <Activity className="h-4 w-4" />
@@ -218,7 +218,7 @@ export function ClaudeModelValidationHistoryStepCard({
               <Textarea
                 mono
                 readOnly
-                className="h-[160px] resize-none text-[10px] leading-relaxed bg-white dark:bg-slate-900"
+                className="h-[160px] resize-none text-[10px] leading-relaxed bg-white dark:bg-card"
                 value={resultText || ""}
               />
             </div>
@@ -241,7 +241,7 @@ export function ClaudeModelValidationHistoryStepCard({
                   <Copy className="h-4 w-4" />
                 </Button>
               </div>
-              <pre className="scrollbar-overlay max-h-60 overflow-auto rounded-lg bg-slate-950 p-4 font-mono text-[10px] leading-relaxed text-slate-300">
+              <pre className="scrollbar-overlay max-h-60 overflow-auto rounded-lg bg-background p-4 font-mono text-[10px] leading-relaxed text-muted-foreground">
                 {sseText ? (
                   sseText
                 ) : (

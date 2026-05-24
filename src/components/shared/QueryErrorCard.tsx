@@ -36,7 +36,7 @@ export function QueryErrorCard({
           重试
         </Button>
       </div>
-      <div className="mt-3 rounded-lg border border-rose-200 bg-white/70 p-3 font-mono text-xs text-slate-800 dark:border-rose-700 dark:bg-secondary/70 dark:text-foreground">
+      <div className="mt-3 rounded-lg border border-rose-200 bg-white/70 p-3 font-mono text-xs text-foreground dark:border-rose-700 dark:bg-secondary/70 dark:text-foreground">
         {errorText}
       </div>
     </Card>

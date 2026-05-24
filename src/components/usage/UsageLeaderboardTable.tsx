@@ -15,7 +15,7 @@ import { CostBar } from "./CostBar";
 import { TABLE_COLUMNS } from "./UsageTableColumns";
 
 const TH_CLASS =
-  "border-b border-border bg-slate-50/60 dark:bg-secondary/60 px-3 py-2.5 backdrop-blur-sm";
+  "border-b border-border bg-secondary/60 dark:bg-secondary/60 px-3 py-2.5 backdrop-blur-sm";
 const TD_CLASS = "border-b border-border px-3 py-3";
 const MONO_TD = `${TD_CLASS} font-mono text-xs tabular-nums text-secondary`;
 
@@ -99,7 +99,7 @@ const UsageLeaderboardDataRow = memo(function UsageLeaderboardDataRow({
   return (
     <tr
       key={row.key}
-      className="align-top transition-colors hover:bg-slate-50/50 dark:hover:bg-slate-800/50"
+      className="align-top transition-colors hover:bg-secondary/50 dark:hover:bg-secondary/50"
     >
       <td className={`${TD_CLASS} text-xs tabular-nums text-muted-foreground`}>{index + 1}</td>
       <td className={TD_CLASS}>
@@ -152,7 +152,7 @@ function UsageLeaderboardSummaryRow({
       : "—";
 
   return (
-    <tr className="align-top bg-slate-100/80 dark:bg-secondary/80">
+    <tr className="align-top bg-secondary/80 dark:bg-secondary/80">
       <td className={`${TD_CLASS} text-sm font-semibold text-muted-foreground`}>Σ</td>
       <td className={TD_CLASS}>
         <div className="font-semibold text-foreground">总计</div>

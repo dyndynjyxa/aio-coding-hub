@@ -101,7 +101,7 @@ export function CostFilterPanel({
                     "rounded-md px-2.5 py-1 text-xs font-medium transition-all",
                     cliKey === item.key
                       ? "bg-indigo-500 text-white shadow-sm"
-                      : "bg-secondary text-slate-600 dark:text-secondary hover:bg-slate-200 dark:hover:bg-slate-600",
+                      : "bg-secondary text-muted-foreground dark:text-secondary hover:bg-muted dark:hover:bg-secondary",
                     fetching && "opacity-50 cursor-not-allowed"
                   )}
                 >
@@ -111,7 +111,7 @@ export function CostFilterPanel({
             </div>
           </div>
 
-          <div className="h-4 w-px bg-slate-200 dark:bg-secondary hidden sm:block" />
+          <div className="h-4 w-px bg-muted dark:bg-secondary hidden sm:block" />
 
           <div className="flex items-center gap-2">
             <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
@@ -126,7 +126,7 @@ export function CostFilterPanel({
                     "rounded-md px-2.5 py-1 text-xs font-medium transition-all",
                     period === item.key
                       ? "bg-indigo-500 text-white shadow-sm"
-                      : "bg-secondary text-slate-600 dark:text-secondary hover:bg-slate-200 dark:hover:bg-slate-600",
+                      : "bg-secondary text-muted-foreground dark:text-secondary hover:bg-muted dark:hover:bg-secondary",
                     fetching && "opacity-50 cursor-not-allowed"
                   )}
                 >
@@ -175,7 +175,7 @@ export function CostFilterPanel({
                   className={cn(
                     "rounded-md px-3 py-1.5 text-xs font-medium transition-all",
                     fetching
-                      ? "bg-slate-200 dark:bg-secondary text-muted-foreground cursor-not-allowed"
+                      ? "bg-muted dark:bg-secondary text-muted-foreground cursor-not-allowed"
                       : "bg-indigo-500 text-white hover:bg-indigo-600"
                   )}
                 >
@@ -188,8 +188,8 @@ export function CostFilterPanel({
                   className={cn(
                     "rounded-md px-3 py-1.5 text-xs font-medium transition-all",
                     fetching
-                      ? "bg-slate-200 dark:bg-secondary text-muted-foreground cursor-not-allowed"
-                      : "bg-white dark:bg-secondary border border-border text-slate-600 dark:text-secondary hover:bg-slate-50 dark:hover:bg-slate-700"
+                      ? "bg-muted dark:bg-secondary text-muted-foreground cursor-not-allowed"
+                      : "bg-white dark:bg-secondary border border-border text-muted-foreground dark:text-secondary hover:bg-secondary dark:hover:bg-secondary"
                   )}
                 >
                   清空
@@ -219,7 +219,7 @@ export function CostFilterPanel({
                 className={cn(
                   "w-full rounded-md border border-border bg-white dark:bg-secondary pl-3 pr-8 py-1.5 text-xs text-secondary",
                   "focus:border-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-100",
-                  "disabled:bg-slate-50 dark:disabled:bg-slate-900 disabled:text-slate-400 dark:disabled:text-slate-500 disabled:cursor-not-allowed",
+                  "disabled:bg-secondary dark:disabled:bg-card disabled:text-muted-foreground dark:disabled:text-muted-foreground disabled:cursor-not-allowed",
                   "appearance-none cursor-pointer"
                 )}
               >
@@ -247,7 +247,7 @@ export function CostFilterPanel({
                 className={cn(
                   "w-full rounded-md border border-border bg-white dark:bg-secondary pl-3 pr-8 py-1.5 text-xs text-secondary",
                   "focus:border-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-100",
-                  "disabled:bg-slate-50 dark:disabled:bg-slate-900 disabled:text-slate-400 dark:disabled:text-slate-500 disabled:cursor-not-allowed",
+                  "disabled:bg-secondary dark:disabled:bg-card disabled:text-muted-foreground dark:disabled:text-muted-foreground disabled:cursor-not-allowed",
                   "appearance-none cursor-pointer"
                 )}
               >
