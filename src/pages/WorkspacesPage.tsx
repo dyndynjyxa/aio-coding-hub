@@ -21,6 +21,23 @@ import {
   useWorkspacesPageDataModel,
 } from "./workspaces/useWorkspacesPageDataModel";
 
+type NoticeTone = "success" | "warning" | "danger" | "neutral";
+
+const NOTICE_TONE_CLASS: Record<NoticeTone, string> = {
+  success:
+    "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300",
+  warning:
+    "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300",
+  danger:
+    "border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-800 dark:bg-rose-900/20 dark:text-rose-300",
+  neutral: "border-line-subtle bg-surface-inset text-secondary-foreground",
+};
+
+const WORKSPACE_ITEM_BASE_CLASS =
+  "rounded-2xl border p-4 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/35";
+
+const DIFF_BOX_CLASS = "rounded-xl border border-line-subtle bg-surface-inset p-3";
+
 function Badge({
   children,
   tone = "neutral",
@@ -31,7 +48,7 @@ function Badge({
   const toneClass =
     tone === "active"
       ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-      : "border-border bg-white text-muted-foreground dark:border-border dark:bg-secondary dark:text-muted-foreground";
+      : "border-line-subtle bg-surface-inset text-muted-foreground";
 
   return (
     <span
@@ -42,6 +59,22 @@ function Badge({
     >
       {children}
     </span>
+  );
+}
+
+function Notice({
+  children,
+  tone,
+  className,
+}: {
+  children: ReactNode;
+  tone: NoticeTone;
+  className?: string;
+}) {
+  return (
+    <div className={cn("rounded-xl border px-3 py-2 text-sm", NOTICE_TONE_CLASS[tone], className)}>
+      {children}
+    </div>
   );
 }
 
@@ -174,12 +207,12 @@ export function WorkspacesPage() {
                   <div
                     key={workspace.id}
                     className={cn(
-                      "rounded-2xl border p-4 transition",
+                      WORKSPACE_ITEM_BASE_CLASS,
                       isActive
-                        ? "border-accent/30 bg-accent/[0.03] shadow-sm dark:border-accent/40 dark:bg-accent/10"
+                        ? "border-state-selected-border bg-state-selected shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
                         : isSelected
-                          ? "border-border bg-secondary dark:border-border dark:bg-secondary"
-                          : "border-border bg-white hover:bg-secondary dark:border-border dark:bg-secondary dark:hover:bg-secondary"
+                          ? "border-line bg-surface-inset"
+                          : "border-line-subtle bg-surface-panel hover:border-line hover:bg-state-hover"
                     )}
                     aria-current={isActive ? "true" : undefined}
                     role="button"
@@ -292,14 +325,14 @@ export function WorkspacesPage() {
                 {rightTab === "overview" ? (
                   <div className="space-y-4">
                     {selectedWorkspace.id === activeWorkspaceId ? (
-                      <div className="rounded-xl border border-emerald-200 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/30 px-3 py-2 text-sm text-emerald-900 dark:text-emerald-400">
+                      <Notice tone="success">
                         <div className="font-medium">当前工作区</div>
                         <div className="mt-1 text-xs text-emerald-900/80 dark:text-emerald-400/80">
                           对 Prompts/MCP/Skills 的修改会立即生效。
                         </div>
-                      </div>
+                      </Notice>
                     ) : (
-                      <div className="rounded-xl border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/30 px-3 py-2 text-sm text-amber-900 dark:text-amber-400">
+                      <Notice tone="warning">
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                           <div>
                             <div className="font-medium text-foreground">该工作区尚未生效</div>
@@ -319,11 +352,11 @@ export function WorkspacesPage() {
                             切换…
                           </Button>
                         </div>
-                      </div>
+                      </Notice>
                     )}
 
                     {applyReport && applyReport.to_workspace_id === selectedWorkspace.id ? (
-                      <div className="rounded-xl border border-border bg-secondary px-3 py-2 text-sm text-secondary-foreground">
+                      <Notice tone="neutral">
                         已切换为当前工作区（
                         {new Date(applyReport.applied_at * 1000).toLocaleString()}）
                         {applyReport.from_workspace_id ? (
@@ -337,7 +370,7 @@ export function WorkspacesPage() {
                             回滚到上一个
                           </Button>
                         ) : null}
-                      </div>
+                      </Notice>
                     ) : null}
 
                     <div className="grid gap-3 sm:grid-cols-3">
@@ -427,9 +460,9 @@ export function WorkspacesPage() {
                 ) : rightTab === "mcp" ? (
                   <>
                     {selectedWorkspace.id === activeWorkspaceId ? null : (
-                      <div className="mb-3 rounded-xl border border-border bg-secondary px-3 py-2 text-sm text-secondary-foreground">
+                      <Notice tone="neutral" className="mb-3">
                         非当前工作区：启用/停用仅写入数据库，不会同步到 CLI。
-                      </div>
+                      </Notice>
                     )}
                     <McpServersView workspaceId={selectedWorkspace.id} />
                   </>
@@ -508,7 +541,7 @@ export function WorkspacesPage() {
                   )}
                 </div>
                 <div className="mt-2 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-xl border border-border bg-white dark:bg-secondary p-3">
+                  <div className={DIFF_BOX_CLASS}>
                     <div className="text-xs font-medium text-muted-foreground">当前</div>
                     <div className="mt-1 text-sm font-semibold text-foreground">
                       {preview.prompts.from_enabled?.name ?? "（未启用）"}
@@ -517,7 +550,7 @@ export function WorkspacesPage() {
                       {preview.prompts.from_enabled?.excerpt ?? "—"}
                     </div>
                   </div>
-                  <div className="rounded-xl border border-border bg-white dark:bg-secondary p-3">
+                  <div className={DIFF_BOX_CLASS}>
                     <div className="text-xs font-medium text-muted-foreground">目标</div>
                     <div className="mt-1 text-sm font-semibold text-foreground">
                       {preview.prompts.to_enabled?.name ?? "（未启用）"}
@@ -538,7 +571,7 @@ export function WorkspacesPage() {
                 </div>
                 {preview.mcp.added.length || preview.mcp.removed.length ? (
                   <div className="mt-2 grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-xl border border-border bg-white dark:bg-secondary p-3">
+                    <div className={DIFF_BOX_CLASS}>
                       <div className="text-xs font-medium text-muted-foreground">新增</div>
                       <div className="mt-2 flex flex-wrap gap-2">
                         {preview.mcp.added.map((k) => (
@@ -551,7 +584,7 @@ export function WorkspacesPage() {
                         ))}
                       </div>
                     </div>
-                    <div className="rounded-xl border border-border bg-white dark:bg-secondary p-3">
+                    <div className={DIFF_BOX_CLASS}>
                       <div className="text-xs font-medium text-muted-foreground">移除</div>
                       <div className="mt-2 flex flex-wrap gap-2">
                         {preview.mcp.removed.map((k) => (
@@ -579,7 +612,7 @@ export function WorkspacesPage() {
                 </div>
                 {preview.skills.added.length || preview.skills.removed.length ? (
                   <div className="mt-2 grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-xl border border-border bg-white dark:bg-secondary p-3">
+                    <div className={DIFF_BOX_CLASS}>
                       <div className="text-xs font-medium text-muted-foreground">新增</div>
                       <div className="mt-2 flex flex-wrap gap-2">
                         {preview.skills.added.map((k) => (
@@ -592,7 +625,7 @@ export function WorkspacesPage() {
                         ))}
                       </div>
                     </div>
-                    <div className="rounded-xl border border-border bg-white dark:bg-secondary p-3">
+                    <div className={DIFF_BOX_CLASS}>
                       <div className="text-xs font-medium text-muted-foreground">移除</div>
                       <div className="mt-2 flex flex-wrap gap-2">
                         {preview.skills.removed.map((k) => (
@@ -620,7 +653,7 @@ export function WorkspacesPage() {
             />
           </FormField>
 
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line-subtle pt-3">
             <Button
               variant="secondary"
               onClick={() => void previewQuery.refetch()}
@@ -684,13 +717,9 @@ export function WorkspacesPage() {
             </div>
           </FormField>
 
-          {createError ? (
-            <div className="rounded-xl border border-rose-200 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/30 px-3 py-2 text-sm text-rose-800 dark:text-rose-400">
-              {createError}
-            </div>
-          ) : null}
+          {createError ? <Notice tone="danger">{createError}</Notice> : null}
 
-          <div className="flex items-center justify-end gap-2 border-t border-border pt-3">
+          <div className="flex items-center justify-end gap-2 border-t border-line-subtle pt-3">
             <Button onClick={() => setCreateOpen(false)} variant="secondary">
               取消
             </Button>
@@ -720,13 +749,9 @@ export function WorkspacesPage() {
             <Input value={renameName} onChange={(e) => setRenameName(e.currentTarget.value)} />
           </FormField>
 
-          {renameError ? (
-            <div className="rounded-xl border border-rose-200 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/30 px-3 py-2 text-sm text-rose-800 dark:text-rose-400">
-              {renameError}
-            </div>
-          ) : null}
+          {renameError ? <Notice tone="danger">{renameError}</Notice> : null}
 
-          <div className="flex items-center justify-end gap-2 border-t border-border pt-3">
+          <div className="flex items-center justify-end gap-2 border-t border-line-subtle pt-3">
             <Button onClick={() => setRenameOpen(false)} variant="secondary">
               取消
             </Button>
@@ -752,9 +777,9 @@ export function WorkspacesPage() {
         className="max-w-lg"
       >
         <div className="space-y-4">
-          <div className="rounded-xl border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/30 px-3 py-2 text-sm text-amber-900 dark:text-amber-400">
+          <Notice tone="warning">
             删除会移除此工作区下的 Prompts/MCP/Skills 配置（DB）。不会删除任何未托管的 CLI 文件。
-          </div>
+          </Notice>
           <div className="flex flex-wrap items-center justify-end gap-2">
             <Button onClick={() => setDeleteOpen(false)} variant="secondary">
               取消

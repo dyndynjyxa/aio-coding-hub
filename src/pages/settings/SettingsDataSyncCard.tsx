@@ -46,7 +46,7 @@ export function SettingsDataSyncCard({
   return (
     <Card>
       <div className="mb-4 font-semibold text-foreground">数据与同步</div>
-      <div className="divide-y divide-border">
+      <div className="divide-y divide-line-subtle">
         <SettingsRow label="模型定价">
           <span className="font-mono text-sm text-foreground">
             {modelPricesAvailable === "checking"

@@ -148,14 +148,14 @@ export function SettingsMainColumn({
       {settingsReadErrorMessage ? (
         <div
           role="alert"
-          className="rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+          className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
         >
           {settingsReadErrorMessage}
         </div>
       ) : null}
       {/* 网关服务 */}
       <Card>
-        <div className="mb-4 flex items-center justify-between border-b border-border pb-4">
+        <div className="mb-4 flex items-center justify-between border-b border-line-subtle pb-4">
           <div className="font-semibold text-foreground">网关服务</div>
           <span
             className={cn(
@@ -263,14 +263,14 @@ export function SettingsMainColumn({
 
       {/* 参数配置 */}
       <Card>
-        <div className="mb-4 border-b border-border pb-4">
+        <div className="mb-4 border-b border-line-subtle pb-4">
           <div className="font-semibold text-foreground">参数配置</div>
         </div>
 
         <div className="space-y-8">
           <div className="grid gap-6 xl:grid-cols-2 xl:items-start">
             {/* 系统设置 */}
-            <div className="rounded-[10px] bg-secondary p-4">
+            <div className="rounded-2xl border border-line-subtle bg-surface-inset p-4">
               <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
                 系统设置
               </h3>
@@ -358,7 +358,7 @@ export function SettingsMainColumn({
             </div>
 
             {/* 系统通知 */}
-            <div className="rounded-[10px] bg-secondary p-4">
+            <div className="rounded-2xl border border-line-subtle bg-surface-inset p-4">
               <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
                 系统通知
               </h3>
@@ -371,7 +371,7 @@ export function SettingsMainColumn({
                         ? "bg-emerald-50 text-emerald-700"
                         : noticePermissionStatus === "checking" ||
                             noticePermissionStatus === "unknown"
-                          ? "bg-secondary text-muted-foreground"
+                          ? "bg-surface-muted text-muted-foreground"
                           : "bg-amber-50 text-amber-700"
                     )}
                   >
@@ -411,21 +411,21 @@ export function SettingsMainColumn({
           </div>
 
           {/* UI 偏好 */}
-          <div className="rounded-[10px] bg-secondary p-4">
+          <div className="rounded-2xl border border-line-subtle bg-surface-inset p-4">
             <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
               UI 偏好
             </h3>
             <div className="space-y-1">
               <SettingsRow label="主题">
-                <div className="flex items-center gap-1 rounded-[6px] bg-secondary p-0.5">
+                <div className="flex items-center gap-1 rounded-xl border border-line-subtle bg-surface-muted p-0.5">
                   {(["light", "dark", "system"] as const).map((value) => (
                     <button
                       key={value}
                       type="button"
                       className={cn(
-                        "flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition",
+                        "flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition",
                         theme === value
-                          ? "bg-card text-foreground"
+                          ? "bg-surface-panel text-foreground"
                           : "text-muted-foreground hover:text-foreground"
                       )}
                       onClick={() => setTheme(value)}
@@ -436,15 +436,15 @@ export function SettingsMainColumn({
                 </div>
               </SettingsRow>
               <SettingsRow label="首页用量范围">
-                <div className="flex flex-wrap items-center gap-1 rounded-[6px] bg-secondary p-0.5">
+                <div className="flex flex-wrap items-center gap-1 rounded-xl border border-line-subtle bg-surface-muted p-0.5">
                   {HOME_USAGE_PERIOD_OPTIONS.map((option) => (
                     <button
                       key={option.value}
                       type="button"
                       className={cn(
-                        "flex items-center justify-center rounded-md px-2.5 py-1.5 text-xs transition",
+                        "flex items-center justify-center rounded-lg px-2.5 py-1.5 text-xs transition",
                         homeUsagePeriod === option.value
-                          ? "bg-card text-foreground"
+                          ? "bg-surface-panel text-foreground"
                           : "text-muted-foreground hover:text-foreground"
                       )}
                       onClick={() => {

@@ -35,6 +35,14 @@ type KVPair = { key: string; value: string };
 
 const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const HEADER_KEY_RE = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+const FORM_CONTROL_CLASS =
+  "rounded-lg border border-line bg-surface-inset px-3 text-foreground outline-none transition-colors focus:border-ring focus:bg-surface-panel focus:ring-2 focus:ring-ring/20 disabled:cursor-not-allowed disabled:bg-surface-muted disabled:opacity-60";
+const TEXT_INPUT_CLASS = cn("h-10 w-full text-sm", FORM_CONTROL_CLASS);
+const MONO_INPUT_CLASS = cn("h-10 w-full font-mono text-sm", FORM_CONTROL_CLASS);
+const MONO_TEXTAREA_CLASS = cn("w-full resize-y py-2 font-mono text-xs", FORM_CONTROL_CLASS);
+const SECTION_PANEL_CLASS = "rounded-2xl border border-line-subtle bg-surface-inset p-4";
+const PRIMARY_PANEL_CLASS =
+  "rounded-2xl border border-line bg-surface-panel p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]";
 
 function recordToPairs(record: Record<string, string>): KVPair[] {
   const pairs = Object.entries(record).map(([key, value]) => ({ key, value }));
@@ -295,9 +303,6 @@ function KeyValuePairEditor({
   keyPlaceholder?: string;
   valuePlaceholder?: string;
 }) {
-  const inputCls =
-    "rounded-lg border border-border dark:border-border bg-white dark:bg-secondary px-3 py-1.5 font-mono text-xs text-foreground shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20";
-
   const updatePair = (index: number, field: "key" | "value", val: string) => {
     const next = pairs.map((p, i) => (i === index ? { ...p, [field]: val } : p));
     onChange(next);
@@ -321,7 +326,7 @@ function KeyValuePairEditor({
             value={pair.key}
             onChange={(e) => updatePair(index, "key", e.currentTarget.value)}
             placeholder={keyPlaceholder}
-            className={cn("w-[40%] shrink-0", inputCls)}
+            className={cn("w-[40%] shrink-0 py-1.5 font-mono text-xs", FORM_CONTROL_CLASS)}
           />
           <span className="text-xs text-muted-foreground select-none">=</span>
           <input
@@ -329,7 +334,7 @@ function KeyValuePairEditor({
             value={pair.value}
             onChange={(e) => updatePair(index, "value", e.currentTarget.value)}
             placeholder={valuePlaceholder}
-            className={cn("min-w-0 flex-1", inputCls)}
+            className={cn("min-w-0 flex-1 py-1.5 font-mono text-xs", FORM_CONTROL_CLASS)}
           />
           <button
             type="button"
@@ -528,14 +533,14 @@ export function McpServerDialog({
     >
       <div className="grid gap-4">
         {!editTarget ? (
-          <div className="rounded-2xl border border-border bg-secondary p-4 shadow-sm">
+          <div className={SECTION_PANEL_CLASS}>
             <div className="text-xs font-medium text-muted-foreground">快速导入 JSON（可选）</div>
             <textarea
               value={jsonText}
               onChange={(e) => setJsonText(e.currentTarget.value)}
               placeholder='示例：{"type":"stdio","command":"uvx","args":["mcp-server-fetch"]}'
               rows={4}
-              className="mt-2 w-full resize-y rounded-lg border border-border dark:border-border bg-white dark:bg-secondary px-3 py-2 font-mono text-xs text-foreground shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+              className={cn("mt-2", MONO_TEXTAREA_CLASS)}
             />
             <div className="mt-2 flex justify-end">
               <Button variant="secondary" onClick={() => void fillFromJson()} disabled={saving}>
@@ -545,7 +550,7 @@ export function McpServerDialog({
           </div>
         ) : null}
 
-        <div className="rounded-2xl border border-border bg-gradient-to-b from-white to-secondary/60 dark:from-secondary dark:to-secondary/60 p-4 shadow-card">
+        <div className={PRIMARY_PANEL_CLASS}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-xs font-medium text-muted-foreground">基础信息</div>
           </div>
@@ -557,7 +562,7 @@ export function McpServerDialog({
               value={name}
               onChange={(e) => setName(e.currentTarget.value)}
               placeholder="例如：Fetch 工具"
-              className="mt-2 w-full rounded-xl border border-border dark:border-border bg-white dark:bg-secondary px-3 py-2 text-sm text-foreground shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+              className={cn("mt-2", TEXT_INPUT_CLASS)}
             />
           </div>
 
@@ -600,18 +605,17 @@ export function McpServerDialog({
                   />
                   <div
                     className={cn(
-                      "flex h-full cursor-pointer items-start gap-3 rounded-xl border px-3 py-3 shadow-sm transition-all",
-                      "bg-white dark:bg-secondary",
-                      "hover:border-border hover:bg-secondary/60 dark:hover:border-border dark:hover:bg-secondary",
-                      "peer-focus-visible:ring-2 peer-focus-visible:ring-accent/20 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-white dark:peer-focus-visible:ring-offset-background",
-                      "peer-checked:border-accent/60 peer-checked:bg-accent/5 peer-checked:shadow dark:peer-checked:bg-accent/10"
+                      "flex h-full cursor-pointer items-start gap-3 rounded-xl border px-3 py-3 transition-colors",
+                      "border-line-subtle bg-surface-panel hover:border-line hover:bg-state-hover",
+                      "peer-focus-visible:ring-2 peer-focus-visible:ring-ring/35 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-background",
+                      "peer-checked:border-state-selected-border peer-checked:bg-state-selected"
                     )}
                   >
                     <div
                       className={cn(
-                        "mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg border bg-white dark:bg-secondary shadow-sm",
-                        "border-border text-secondary-foreground dark:border-border dark:text-secondary-foreground",
-                        "peer-checked:border-accent/40 peer-checked:bg-accent/10 peer-checked:text-accent"
+                        "mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg border",
+                        "border-line-subtle bg-surface-inset text-secondary-foreground",
+                        "peer-checked:border-state-selected-border peer-checked:bg-surface-panel peer-checked:text-state-selected-foreground"
                       )}
                     >
                       <span className="text-sm font-semibold">{item.icon}</span>
@@ -624,7 +628,7 @@ export function McpServerDialog({
                       </div>
                     </div>
 
-                    <div className="pointer-events-none absolute right-3 top-3 flex h-5 w-5 items-center justify-center rounded-full border border-border dark:border-border bg-white dark:bg-secondary text-[11px] text-white shadow-sm transition peer-checked:border-accent peer-checked:bg-accent">
+                    <div className="pointer-events-none absolute right-3 top-3 flex h-5 w-5 items-center justify-center rounded-full border border-line bg-surface-inset text-[11px] text-transparent transition peer-checked:border-state-selected-border peer-checked:bg-state-selected-foreground peer-checked:text-white">
                       ✓
                     </div>
                   </div>
@@ -643,7 +647,7 @@ export function McpServerDialog({
                 value={command}
                 onChange={(e) => setCommand(e.currentTarget.value)}
                 placeholder="例如：npx"
-                className="mt-2 w-full rounded-lg border border-border dark:border-border bg-white dark:bg-secondary px-3 py-2 font-mono text-sm text-foreground shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className={cn("mt-2", MONO_INPUT_CLASS)}
               />
             </div>
 
@@ -654,7 +658,7 @@ export function McpServerDialog({
                 onChange={(e) => setArgsText(e.currentTarget.value)}
                 placeholder={`例如：\n-y\n@modelcontextprotocol/server-fetch`}
                 rows={4}
-                className="mt-2 w-full resize-y rounded-lg border border-border dark:border-border bg-white dark:bg-secondary px-3 py-2 font-mono text-xs text-foreground shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className={cn("mt-2", MONO_TEXTAREA_CLASS)}
               />
             </div>
 
@@ -682,7 +686,7 @@ export function McpServerDialog({
                 value={cwd}
                 onChange={(e) => setCwd(e.currentTarget.value)}
                 placeholder="例如：/Users/xxx/project"
-                className="mt-2 w-full rounded-lg border border-border dark:border-border bg-white dark:bg-secondary px-3 py-2 font-mono text-sm text-foreground shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className={cn("mt-2", MONO_INPUT_CLASS)}
               />
             </div>
           </>
@@ -695,7 +699,7 @@ export function McpServerDialog({
                 value={url}
                 onChange={(e) => setUrl(e.currentTarget.value)}
                 placeholder="例如：https://example.com/mcp"
-                className="mt-2 w-full rounded-lg border border-border dark:border-border bg-white dark:bg-secondary px-3 py-2 font-mono text-sm text-foreground shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className={cn("mt-2", MONO_INPUT_CLASS)}
               />
             </div>
 

@@ -82,7 +82,7 @@ export function CliPriorityOrderEditor({
   }
 
   return (
-    <div className="inline-block max-w-full rounded-lg border border-border bg-secondary/70 p-1.5 dark:bg-secondary/40">
+    <div className="inline-block max-w-full rounded-xl border border-line-subtle bg-surface-inset p-1.5">
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext
           items={orderedClis.map((item) => item.key)}

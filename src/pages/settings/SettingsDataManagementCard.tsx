@@ -43,7 +43,7 @@ export function SettingsDataManagementCard({
           打开数据/日志目录
         </Button>
       </div>
-      <div className="divide-y divide-border">
+      <div className="divide-y divide-line-subtle">
         <SettingsRow label="数据磁盘占用">
           <span className="font-mono text-sm text-foreground">
             {dbDiskUsageAvailable === "checking"
