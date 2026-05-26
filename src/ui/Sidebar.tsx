@@ -15,12 +15,18 @@ import {
   TrendingDown,
   Wrench,
 } from "lucide-react";
+import { CLIS } from "../constants/clis";
 import { AIO_REPO_URL } from "../constants/urls";
 import { useDevPreviewData } from "../hooks/useDevPreviewData";
 import { useGatewayStatus, openReleasesUrl } from "../hooks/useGatewayStatus";
 import { useTheme } from "../hooks/useTheme";
 import { updateDialogSetOpen } from "../hooks/useUpdateMeta";
+import { useCliProxyControls } from "../hooks/useCliProxyControls";
 import { openDesktopUrl } from "../services/desktop/opener";
+import type { CliKey } from "../services/providers/providers";
+import { Button } from "./Button";
+import { Dialog } from "./Dialog";
+import { Switch } from "./Switch";
 import { cn } from "../utils/cn";
 
 type NavItem = {
@@ -76,6 +82,12 @@ const THEME_OPTIONS = [
   { value: "system", label: "系统" },
 ] as const;
 
+const SIDEBAR_CLI_LABELS: Record<CliKey, string> = {
+  claude: "Claude",
+  codex: "Codex",
+  gemini: "Gemini",
+};
+
 export type SidebarProps = {
   className?: string;
 };
@@ -92,6 +104,8 @@ export function Sidebar({ className }: SidebarProps) {
   } = useGatewayStatus();
   const { theme, setTheme } = useTheme();
   const devPreview = useDevPreviewData();
+  const cliProxyState = useCliProxyControls();
+  const { pendingCliProxyEnablePrompt } = cliProxyState;
   const gatewayAriaLabel = `网关状态：${statusText}，端口 ${portText}`;
   const gatewayDotClass = isGatewayRunning
     ? "bg-emerald-500 shadow-[0_0_6px] shadow-emerald-500/70"
@@ -243,20 +257,114 @@ export function Sidebar({ className }: SidebarProps) {
             ))}
           </div>
 
-          <div
-            className="flex items-center gap-2 rounded-xl border border-sidebar-border bg-sidebar-muted px-3 py-2 text-xs text-muted-foreground"
-            aria-label={gatewayAriaLabel}
-            title={gatewayAriaLabel}
-          >
-            <span
-              className={cn("h-[5px] w-[5px] shrink-0 rounded-full", gatewayDotClass)}
-              aria-hidden="true"
-            />
-            <span className="min-w-0 truncate">{statusText}</span>
-            <span className="ml-auto shrink-0 text-right font-mono tabular-nums">{portText}</span>
+          <div className="space-y-1.5 rounded-xl border border-sidebar-border bg-sidebar-muted p-2 text-xs">
+            <div
+              className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-muted-foreground"
+              aria-label={gatewayAriaLabel}
+              title={gatewayAriaLabel}
+            >
+              <span
+                className={cn("h-[5px] w-[5px] shrink-0 rounded-full", gatewayDotClass)}
+                aria-hidden="true"
+              />
+              <span className="min-w-0 truncate">网关状态</span>
+              <span className="shrink-0 text-right font-medium text-sidebar-foreground">
+                {statusText}
+              </span>
+              <span className="ml-auto shrink-0 text-right font-mono tabular-nums">{portText}</span>
+            </div>
+
+            {cliProxyState.cliProxyLoading ? (
+              <div className="rounded-lg px-2 py-1.5 text-muted-foreground">代理状态加载中…</div>
+            ) : cliProxyState.cliProxyAvailable === false ? (
+              <div className="rounded-lg px-2 py-1.5 text-muted-foreground">代理状态不可用</div>
+            ) : (
+              CLIS.map((cli) => {
+                const cliKey = cli.key;
+                const drifted =
+                  cliProxyState.cliProxyEnabled[cliKey] &&
+                  cliProxyState.cliProxyAppliedToCurrentGateway[cliKey] === false;
+
+                return (
+                  <div
+                    key={cliKey}
+                    className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sidebar-foreground hover:bg-sidebar-accent"
+                  >
+                    <span className="min-w-0 flex-1 truncate">{SIDEBAR_CLI_LABELS[cliKey]}</span>
+                    {drifted ? (
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        className="h-6 px-2 py-0 text-[11px]"
+                        disabled={cliProxyState.cliProxyToggling[cliKey]}
+                        onClick={() => cliProxyState.requestCliProxyEnabledSwitch(cliKey, true)}
+                        aria-label={`修复 ${SIDEBAR_CLI_LABELS[cliKey]} 代理`}
+                      >
+                        修复
+                      </Button>
+                    ) : null}
+                    <Switch
+                      checked={cliProxyState.cliProxyEnabled[cliKey]}
+                      disabled={cliProxyState.cliProxyToggling[cliKey]}
+                      onCheckedChange={(next) =>
+                        cliProxyState.requestCliProxyEnabledSwitch(cliKey, next)
+                      }
+                      size="sm"
+                      aria-label={`${SIDEBAR_CLI_LABELS[cliKey]} 代理开关`}
+                    />
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
       </div>
+
+      <Dialog
+        open={pendingCliProxyEnablePrompt != null}
+        onOpenChange={(open) => {
+          if (!open) cliProxyState.setPendingCliProxyEnablePrompt(null);
+        }}
+        title={
+          pendingCliProxyEnablePrompt
+            ? `检测到 ${SIDEBAR_CLI_LABELS[pendingCliProxyEnablePrompt.cliKey]} 代理相关环境变量冲突`
+            : "检测到环境变量冲突"
+        }
+        description="继续启用可能会被这些环境变量覆盖（不会显示变量值）。是否继续？"
+      >
+        {pendingCliProxyEnablePrompt ? (
+          <div className="space-y-4">
+            <ul className="space-y-2">
+              {pendingCliProxyEnablePrompt.conflicts.map((row) => (
+                <li
+                  key={`${row.var_name}:${row.source_type}:${row.source_path}`}
+                  className="rounded-lg border border-border bg-secondary px-3 py-2"
+                >
+                  <div className="font-mono text-xs text-foreground">{row.var_name}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">{row.source_path}</div>
+                </li>
+              ))}
+            </ul>
+
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                variant="secondary"
+                size="md"
+                onClick={() => cliProxyState.setPendingCliProxyEnablePrompt(null)}
+              >
+                取消
+              </Button>
+              <Button
+                variant="primary"
+                size="md"
+                onClick={cliProxyState.confirmPendingCliProxyEnable}
+              >
+                继续启用
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Dialog>
     </aside>
   );
 }

@@ -26,7 +26,6 @@ import { DEFAULT_HOME_USAGE_PERIOD } from "../utils/homeUsagePeriod";
 import { resolveHomeUsageWindowDays } from "../utils/homeUsagePeriod";
 import { useHomeCircuitState } from "./home/hooks/useHomeCircuitState";
 import { useHomeSortMode } from "./home/hooks/useHomeSortMode";
-import { useHomeCliProxy } from "./home/hooks/useHomeCliProxy";
 import { useHomeOverviewFeed } from "./home/hooks/useHomeOverviewFeed";
 import { useHomeOAuthQuota } from "./home/hooks/useHomeOAuthQuota";
 import { useHomeWorkspaceConfigs } from "./home/hooks/useHomeWorkspaceConfigs";
@@ -137,7 +136,6 @@ export function HomePage() {
     providerLimitEnabled: !personalizedLayoutEnabled,
   });
   const sortMode = useHomeSortMode(activeSessions);
-  const cliProxyState = useHomeCliProxy();
   const workspaceConfigs = useHomeWorkspaceConfigs({ enabled: tab === "overview" });
   const oauthQuota = useHomeOAuthQuota({
     cliPriorityOrder,
@@ -145,7 +143,6 @@ export function HomePage() {
     enabled: tab === "overview",
   });
   const { pendingSortModeSwitch } = sortMode;
-  const { pendingCliProxyEnablePrompt } = cliProxyState;
 
   useEffect(() => {
     if (personalizedLayoutEnabled && tab === "cost") setTab("tokenCost");
@@ -204,12 +201,6 @@ export function HomePage() {
             activeModeByCli={sortMode.activeModeByCli}
             activeModeToggling={sortMode.activeModeToggling}
             onSetCliActiveMode={sortMode.requestCliActiveModeSwitch}
-            cliProxyLoading={cliProxyState.cliProxyLoading}
-            cliProxyAvailable={cliProxyState.cliProxyAvailable}
-            cliProxyEnabled={cliProxyState.cliProxyEnabled}
-            cliProxyAppliedToCurrentGateway={cliProxyState.cliProxyAppliedToCurrentGateway}
-            cliProxyToggling={cliProxyState.cliProxyToggling}
-            onSetCliProxyEnabled={cliProxyState.requestCliProxyEnabledSwitch}
             activeSessions={activeSessions}
             activeSessionsLoading={activeSessionsLoading}
             activeSessionsAvailable={activeSessionsAvailable}
@@ -297,52 +288,6 @@ export function HomePage() {
             确认切换
           </Button>
         </div>
-      </Dialog>
-
-      <Dialog
-        open={pendingCliProxyEnablePrompt != null}
-        onOpenChange={(open) => {
-          if (!open) cliProxyState.setPendingCliProxyEnablePrompt(null);
-        }}
-        title={
-          pendingCliProxyEnablePrompt
-            ? `检测到 ${CLIS.find((cli) => cli.key === pendingCliProxyEnablePrompt.cliKey)?.name ?? pendingCliProxyEnablePrompt.cliKey} 代理相关环境变量冲突`
-            : "检测到环境变量冲突"
-        }
-        description="继续启用可能会被这些环境变量覆盖（不会显示变量值）。是否继续？"
-      >
-        {pendingCliProxyEnablePrompt ? (
-          <div className="space-y-4">
-            <ul className="space-y-2">
-              {pendingCliProxyEnablePrompt.conflicts.map((row) => (
-                <li
-                  key={`${row.var_name}:${row.source_type}:${row.source_path}`}
-                  className="rounded-lg border border-border bg-secondary px-3 py-2"
-                >
-                  <div className="font-mono text-xs text-foreground">{row.var_name}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">{row.source_path}</div>
-                </li>
-              ))}
-            </ul>
-
-            <div className="flex items-center justify-end gap-2">
-              <Button
-                variant="secondary"
-                size="md"
-                onClick={() => cliProxyState.setPendingCliProxyEnablePrompt(null)}
-              >
-                取消
-              </Button>
-              <Button
-                variant="primary"
-                size="md"
-                onClick={cliProxyState.confirmPendingCliProxyEnable}
-              >
-                继续启用
-              </Button>
-            </div>
-          </div>
-        ) : null}
       </Dialog>
 
       {selectedLogId != null ? (

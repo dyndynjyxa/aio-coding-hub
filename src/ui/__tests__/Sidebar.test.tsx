@@ -29,6 +29,28 @@ const devPreviewRef = vi.hoisted(() => ({
 const themeRef = vi.hoisted(() => ({
   current: { theme: "system", resolvedTheme: "light", setTheme: vi.fn() } as any,
 }));
+const cliProxyMocks = vi.hoisted(() => {
+  const requestCliProxyEnabledSwitch = vi.fn();
+  const setPendingCliProxyEnablePrompt = vi.fn();
+  const confirmPendingCliProxyEnable = vi.fn();
+
+  return {
+    requestCliProxyEnabledSwitch,
+    setPendingCliProxyEnablePrompt,
+    confirmPendingCliProxyEnable,
+    current: {
+      cliProxyLoading: false,
+      cliProxyAvailable: true,
+      cliProxyEnabled: { claude: true, codex: false, gemini: false },
+      cliProxyAppliedToCurrentGateway: { claude: true, codex: null, gemini: null },
+      cliProxyToggling: { claude: false, codex: false, gemini: false },
+      pendingCliProxyEnablePrompt: null,
+      requestCliProxyEnabledSwitch,
+      setPendingCliProxyEnablePrompt,
+      confirmPendingCliProxyEnable,
+    } as any,
+  };
+});
 
 vi.mock("../../hooks/useGatewayMeta", () => ({
   useGatewayMeta: () => gatewayMetaRef.current,
@@ -44,12 +66,26 @@ vi.mock("../../hooks/useDevPreviewData", () => ({
 vi.mock("../../hooks/useTheme", () => ({
   useTheme: () => themeRef.current,
 }));
+vi.mock("../../hooks/useCliProxyControls", () => ({
+  useCliProxyControls: () => cliProxyMocks.current,
+}));
 
 describe("ui/Sidebar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     devPreviewRef.current = { enabled: false, setEnabled: vi.fn(), toggle: vi.fn() };
     themeRef.current = { theme: "system", resolvedTheme: "light", setTheme: vi.fn() };
+    cliProxyMocks.current = {
+      cliProxyLoading: false,
+      cliProxyAvailable: true,
+      cliProxyEnabled: { claude: true, codex: false, gemini: false },
+      cliProxyAppliedToCurrentGateway: { claude: true, codex: null, gemini: null },
+      cliProxyToggling: { claude: false, codex: false, gemini: false },
+      pendingCliProxyEnablePrompt: null,
+      requestCliProxyEnabledSwitch: cliProxyMocks.requestCliProxyEnabledSwitch,
+      setPendingCliProxyEnablePrompt: cliProxyMocks.setPendingCliProxyEnablePrompt,
+      confirmPendingCliProxyEnable: cliProxyMocks.confirmPendingCliProxyEnable,
+    };
     gatewayMetaRef.current = { gatewayAvailable: "checking", gateway: null, preferredPort: 37123 };
     updateMetaRef.current = {
       about: null,
@@ -245,5 +281,105 @@ describe("ui/Sidebar", () => {
     expect(gatewayStatus).toBeInTheDocument();
     expect(within(gatewayStatus).getByText("已停止")).toBeInTheDocument();
     expect(within(gatewayStatus).getByText("37123")).toHaveClass("ml-auto", "text-right");
+  });
+
+  it("renders gateway status and Claude/Codex/Gemini proxy switches in the bottom panel", () => {
+    gatewayMetaRef.current = {
+      gatewayAvailable: "available",
+      gateway: { running: true, port: 37124 },
+      preferredPort: 37123,
+    };
+
+    render(
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>
+    );
+
+    const gatewayStatus = screen.getByLabelText("网关状态：运行中，端口 37124");
+    expect(gatewayStatus).toBeInTheDocument();
+    expect(within(gatewayStatus).getByText("网关状态")).toBeInTheDocument();
+    expect(within(gatewayStatus).getByText("运行中")).toBeInTheDocument();
+    expect(within(gatewayStatus).getByText("37124")).toBeInTheDocument();
+
+    expect(screen.getByRole("switch", { name: "Claude 代理开关" })).toHaveAttribute(
+      "data-state",
+      "checked"
+    );
+    expect(screen.getByRole("switch", { name: "Codex 代理开关" })).toHaveAttribute(
+      "data-state",
+      "unchecked"
+    );
+    expect(screen.getByRole("switch", { name: "Gemini 代理开关" })).toHaveAttribute(
+      "data-state",
+      "unchecked"
+    );
+  });
+
+  it("forwards proxy switch requests through useCliProxyControls", () => {
+    render(
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByRole("switch", { name: "Codex 代理开关" }));
+    expect(cliProxyMocks.requestCliProxyEnabledSwitch).toHaveBeenCalledWith("codex", true);
+
+    fireEvent.click(screen.getByRole("switch", { name: "Claude 代理开关" }));
+    expect(cliProxyMocks.requestCliProxyEnabledSwitch).toHaveBeenCalledWith("claude", false);
+
+    fireEvent.click(screen.getByRole("switch", { name: "Gemini 代理开关" }));
+    expect(cliProxyMocks.requestCliProxyEnabledSwitch).toHaveBeenCalledWith("gemini", true);
+  });
+
+  it("shows repair for drifted proxy rows and requests enable on repair", () => {
+    cliProxyMocks.current = {
+      ...cliProxyMocks.current,
+      cliProxyEnabled: { claude: true, codex: true, gemini: false },
+      cliProxyAppliedToCurrentGateway: { claude: true, codex: false, gemini: null },
+    };
+
+    render(
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "修复 Codex 代理" }));
+    expect(cliProxyMocks.requestCliProxyEnabledSwitch).toHaveBeenCalledWith("codex", true);
+    expect(screen.queryByRole("button", { name: "修复 Claude 代理" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the CLI proxy conflict confirmation dialog in the sidebar flow", () => {
+    cliProxyMocks.current = {
+      ...cliProxyMocks.current,
+      pendingCliProxyEnablePrompt: {
+        cliKey: "gemini",
+        conflicts: [
+          {
+            var_name: "GEMINI_API_KEY",
+            source_type: "system",
+            source_path: "Process Environment",
+          },
+        ],
+      },
+    };
+
+    render(
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>
+    );
+
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("GEMINI_API_KEY")).toBeInTheDocument();
+    expect(within(dialog).getByText("Process Environment")).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "继续启用" }));
+    expect(cliProxyMocks.confirmPendingCliProxyEnable).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(cliProxyMocks.setPendingCliProxyEnablePrompt).toHaveBeenCalledWith(null);
   });
 });

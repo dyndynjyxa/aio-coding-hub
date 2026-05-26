@@ -31,7 +31,6 @@ import type { HomeOAuthQuotaRow } from "./homeOAuthQuotaTypes";
 import { HomeRequestLogsPanel } from "./HomeRequestLogsPanel";
 import { HomeTodayProviderUsageOverview } from "./HomeTodayProviderUsageOverview";
 import { HomeUsageSection } from "./HomeUsageSection";
-import { HomeProxyStatusControls, HomeWorkStatusCard } from "./HomeWorkStatusCard";
 import type { HomeCliWorkspaceConfig } from "./homeWorkspaceConfigTypes";
 
 export type HomeOverviewUsageView = "summary" | "usageChart";
@@ -279,13 +278,6 @@ export type HomeOverviewPanelProps = {
   activeModeToggling: Record<CliKey, boolean>;
   onSetCliActiveMode: (cliKey: CliKey, modeId: number | null) => void;
 
-  cliProxyLoading: boolean;
-  cliProxyAvailable: boolean | null;
-  cliProxyEnabled: Record<CliKey, boolean>;
-  cliProxyAppliedToCurrentGateway: Record<CliKey, boolean | null>;
-  cliProxyToggling: Record<CliKey, boolean>;
-  onSetCliProxyEnabled: (cliKey: CliKey, enabled: boolean) => void;
-
   activeSessions: GatewayActiveSession[];
   activeSessionsLoading: boolean;
   activeSessionsAvailable: boolean | null;
@@ -381,12 +373,6 @@ export function HomeOverviewPanel({
   activeModeByCli,
   activeModeToggling,
   onSetCliActiveMode,
-  cliProxyLoading,
-  cliProxyAvailable,
-  cliProxyEnabled,
-  cliProxyAppliedToCurrentGateway,
-  cliProxyToggling,
-  onSetCliProxyEnabled,
   activeSessions,
   activeSessionsLoading,
   activeSessionsAvailable,
@@ -787,29 +773,9 @@ export function HomeOverviewPanel({
     </Card>
   );
 
-  const logsPrimaryProxyPanel = (
-    <Card padding="sm">
-      <HomeProxyStatusControls
-        layout="vertical"
-        cliProxyLoading={cliProxyLoading}
-        cliProxyAvailable={cliProxyAvailable}
-        cliProxyEnabled={cliProxyEnabled}
-        cliProxyAppliedToCurrentGateway={cliProxyAppliedToCurrentGateway}
-        cliProxyToggling={cliProxyToggling}
-        onSetCliProxyEnabled={onSetCliProxyEnabled}
-        sortModes={sortModes}
-        sortModesLoading={sortModesLoading}
-        sortModesAvailable={sortModesAvailable}
-        activeModeByCli={activeModeByCli}
-        activeModeToggling={activeModeToggling}
-        onSetCliActiveMode={onSetCliActiveMode}
-      />
-    </Card>
-  );
-
   return (
     <div className="flex flex-col h-full gap-4">
-      {!logsPrimaryLayout ? (
+      {!logsPrimaryLayout && showUsageRow ? (
         <div className="shrink-0">
           {showHomeHeatmap && showHomeUsage ? (
             <div className="space-y-4">
@@ -824,55 +790,17 @@ export function HomeOverviewPanel({
                   onRefreshUsageHeatmap={onRefreshUsageHeatmap}
                 />
               </div>
-
-              <div className="flex">
-                <HomeWorkStatusCard
-                  layout="horizontal"
-                  cliProxyLoading={cliProxyLoading}
-                  cliProxyAvailable={cliProxyAvailable}
-                  cliProxyEnabled={cliProxyEnabled}
-                  cliProxyAppliedToCurrentGateway={cliProxyAppliedToCurrentGateway}
-                  cliProxyToggling={cliProxyToggling}
-                  onSetCliProxyEnabled={onSetCliProxyEnabled}
-                />
-              </div>
-            </div>
-          ) : showUsageRow ? (
-            <div className="grid gap-4 lg:grid-cols-12 lg:items-stretch">
-              <div className="flex lg:col-span-4">
-                <HomeWorkStatusCard
-                  layout="vertical"
-                  cliProxyLoading={cliProxyLoading}
-                  cliProxyAvailable={cliProxyAvailable}
-                  cliProxyEnabled={cliProxyEnabled}
-                  cliProxyAppliedToCurrentGateway={cliProxyAppliedToCurrentGateway}
-                  cliProxyToggling={cliProxyToggling}
-                  onSetCliProxyEnabled={onSetCliProxyEnabled}
-                />
-              </div>
-
-              <div className="flex lg:col-span-8">
-                <HomeUsageSection
-                  devPreviewEnabled={devPreviewEnabled}
-                  showHeatmap={showHomeHeatmap}
-                  showUsageChart={showHomeUsage}
-                  usageWindowDays={usageWindowDays}
-                  usageHeatmapRows={usageHeatmapRows}
-                  usageHeatmapLoading={usageHeatmapLoading}
-                  onRefreshUsageHeatmap={onRefreshUsageHeatmap}
-                />
-              </div>
             </div>
           ) : (
             <div className="flex">
-              <HomeWorkStatusCard
-                layout="horizontal"
-                cliProxyLoading={cliProxyLoading}
-                cliProxyAvailable={cliProxyAvailable}
-                cliProxyEnabled={cliProxyEnabled}
-                cliProxyAppliedToCurrentGateway={cliProxyAppliedToCurrentGateway}
-                cliProxyToggling={cliProxyToggling}
-                onSetCliProxyEnabled={onSetCliProxyEnabled}
+              <HomeUsageSection
+                devPreviewEnabled={devPreviewEnabled}
+                showHeatmap={showHomeHeatmap}
+                showUsageChart={showHomeUsage}
+                usageWindowDays={usageWindowDays}
+                usageHeatmapRows={usageHeatmapRows}
+                usageHeatmapLoading={usageHeatmapLoading}
+                onRefreshUsageHeatmap={onRefreshUsageHeatmap}
               />
             </div>
           )}
@@ -891,7 +819,6 @@ export function HomeOverviewPanel({
                     activeSessions={displayedActiveSessions}
                     traces={traces}
                   />
-                  {logsPrimaryProxyPanel}
                 </div>
               ) : (
                 <HomeUsageSection

@@ -23,32 +23,6 @@ vi.mock("../HomeTodayProviderUsageOverview", () => ({
   ),
 }));
 
-vi.mock("../HomeWorkStatusCard", () => ({
-  HomeWorkStatusCard: ({
-    layout,
-    sortModes,
-  }: {
-    layout: string;
-    sortModes?: Array<{ id: number; name: string }>;
-  }) => <div>{`work-status-card:${layout}:${String(sortModes != null)}`}</div>,
-  HomeProxyStatusControls: ({
-    layout,
-    sortModes,
-    onSetCliProxyEnabled,
-  }: {
-    layout: string;
-    sortModes?: Array<{ id: number; name: string }>;
-    onSetCliProxyEnabled?: (cliKey: "claude", enabled: boolean) => void;
-  }) => (
-    <div>
-      <div>{`proxy-status-controls:${layout}:${String(sortModes != null)}`}</div>
-      <button type="button" onClick={() => onSetCliProxyEnabled?.("claude", true)}>
-        enable-claude-proxy
-      </button>
-    </div>
-  ),
-}));
-
 vi.mock("../HomeActiveSessionsCard", () => ({
   HomeActiveSessionsCardContent: ({
     activeSessions,
@@ -161,12 +135,6 @@ function renderPanel(overrides: Partial<ComponentProps<typeof HomeOverviewPanel>
       activeModeByCli={{ claude: null, codex: null, gemini: null }}
       activeModeToggling={{ claude: false, codex: false, gemini: false }}
       onSetCliActiveMode={onSetCliActiveMode}
-      cliProxyLoading={false}
-      cliProxyAvailable={true}
-      cliProxyEnabled={{ claude: false, codex: false, gemini: false }}
-      cliProxyAppliedToCurrentGateway={{ claude: null, codex: null, gemini: null }}
-      cliProxyToggling={{ claude: false, codex: false, gemini: false }}
-      onSetCliProxyEnabled={vi.fn()}
       activeSessions={[]}
       activeSessionsLoading={false}
       activeSessionsAvailable={true}
@@ -328,16 +296,13 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(onSetCliActiveMode).toHaveBeenCalledWith("codex", 1);
   });
 
-  it("moves the route strategy entry into the work status card in logs-primary layout", async () => {
+  it("keeps route strategy out of the workspace header in logs-primary layout", async () => {
     window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
 
     renderPanel({
       sortModes: [{ id: 1, name: "工作策略", created_at: 1, updated_at: 1 }],
       activeModeByCli: { claude: 1, codex: null, gemini: null },
     });
-
-    expect(screen.getByText("proxy-status-controls:vertical:true")).toBeInTheDocument();
-    expect(screen.queryByText("work-status-card:vertical:true")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "配置信息" }));
     expect(await screen.findByText("工作区：")).toBeInTheDocument();
@@ -437,25 +402,22 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(screen.getByText("code-review")).toBeInTheDocument();
   });
 
-  it("renders only the horizontal proxy status card when both heatmap and usage are hidden", () => {
+  it("omits the legacy top metrics row when both heatmap and usage are hidden", () => {
     renderPanel({ showHomeHeatmap: false, showHomeUsage: false });
 
     expect(screen.queryByText(/usage-section:/)).not.toBeInTheDocument();
-    expect(screen.getByText("work-status-card:horizontal:false")).toBeInTheDocument();
   });
 
-  it("uses the split layout with usage statistics when heatmap is hidden", () => {
+  it("renders usage statistics when heatmap is hidden", () => {
     renderPanel({ showHomeHeatmap: false, showHomeUsage: true });
 
     expect(screen.getByText("usage-section:false:true")).toBeInTheDocument();
-    expect(screen.getByText("work-status-card:vertical:false")).toBeInTheDocument();
   });
 
-  it("uses the split layout with heatmap when usage statistics are hidden", () => {
+  it("renders the heatmap when usage statistics are hidden", () => {
     renderPanel({ showHomeHeatmap: true, showHomeUsage: false });
 
     expect(screen.getByText("usage-section:true:false")).toBeInTheDocument();
-    expect(screen.getByText("work-status-card:vertical:false")).toBeInTheDocument();
   });
 
   it("uses the legacy overview layout by default", () => {
@@ -480,8 +442,6 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(
       usageSection.compareDocumentPosition(requestLogs) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
-    expect(screen.getAllByText("proxy-status-controls:vertical:true")).toHaveLength(1);
-    expect(screen.queryByText("work-status-card:vertical:true")).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "配置信息" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "熔断信息" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "供应商限额" })).not.toBeInTheDocument();
@@ -495,21 +455,14 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(latestProps?.showRefreshButton).toBe(false);
   });
 
-  it("places proxy controls below the running gateway summary in logs-primary layout", () => {
+  it("does not render proxy controls in logs-primary layout", () => {
     window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
-    const onSetCliProxyEnabled = vi.fn();
 
-    renderPanel({ showHomeHeatmap: true, showHomeUsage: false, onSetCliProxyEnabled });
+    renderPanel({ showHomeHeatmap: true, showHomeUsage: false });
 
     const usageSummary = screen.getByText("today-provider-usage:false");
-    const proxyControls = screen.getByText("proxy-status-controls:vertical:true");
-    expect(
-      usageSummary.compareDocumentPosition(proxyControls) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "enable-claude-proxy" }));
-    expect(onSetCliProxyEnabled).toHaveBeenCalledWith("claude", true);
-    expect(screen.queryByText("work-status-card:vertical:true")).not.toBeInTheDocument();
-    expect(screen.queryByText("work-status-card:horizontal:false")).not.toBeInTheDocument();
+    expect(usageSummary).toBeInTheDocument();
+    expect(screen.queryByText("代理状态")).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "配置信息" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "熔断信息" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "供应商限额" })).not.toBeInTheDocument();
@@ -631,12 +584,6 @@ describe("components/home/HomeOverviewPanel", () => {
         activeModeByCli={{ claude: null, codex: null, gemini: null }}
         activeModeToggling={{ claude: false, codex: false, gemini: false }}
         onSetCliActiveMode={vi.fn()}
-        cliProxyLoading={false}
-        cliProxyAvailable={true}
-        cliProxyEnabled={{ claude: false, codex: false, gemini: false }}
-        cliProxyAppliedToCurrentGateway={{ claude: null, codex: null, gemini: null }}
-        cliProxyToggling={{ claude: false, codex: false, gemini: false }}
-        onSetCliProxyEnabled={vi.fn()}
         activeSessions={[]}
         activeSessionsLoading={false}
         activeSessionsAvailable={true}
@@ -730,12 +677,6 @@ describe("components/home/HomeOverviewPanel", () => {
             activeModeByCli={{ claude: null, codex: null, gemini: null }}
             activeModeToggling={{ claude: false, codex: false, gemini: false }}
             onSetCliActiveMode={vi.fn()}
-            cliProxyLoading={false}
-            cliProxyAvailable={true}
-            cliProxyEnabled={{ claude: false, codex: false, gemini: false }}
-            cliProxyAppliedToCurrentGateway={{ claude: null, codex: null, gemini: null }}
-            cliProxyToggling={{ claude: false, codex: false, gemini: false }}
-            onSetCliProxyEnabled={vi.fn()}
             activeSessions={[]}
             activeSessionsLoading={false}
             activeSessionsAvailable={true}
@@ -867,12 +808,6 @@ describe("components/home/HomeOverviewPanel", () => {
         activeModeByCli={{ claude: null, codex: null, gemini: null }}
         activeModeToggling={{ claude: false, codex: false, gemini: false }}
         onSetCliActiveMode={vi.fn()}
-        cliProxyLoading={false}
-        cliProxyAvailable={true}
-        cliProxyEnabled={{ claude: false, codex: false, gemini: false }}
-        cliProxyAppliedToCurrentGateway={{ claude: null, codex: null, gemini: null }}
-        cliProxyToggling={{ claude: false, codex: false, gemini: false }}
-        onSetCliProxyEnabled={vi.fn()}
         activeSessions={[]}
         activeSessionsLoading={false}
         activeSessionsAvailable={true}
@@ -943,12 +878,6 @@ describe("components/home/HomeOverviewPanel", () => {
         activeModeByCli={{ claude: null, codex: null, gemini: null }}
         activeModeToggling={{ claude: false, codex: false, gemini: false }}
         onSetCliActiveMode={vi.fn()}
-        cliProxyLoading={false}
-        cliProxyAvailable={true}
-        cliProxyEnabled={{ claude: false, codex: false, gemini: false }}
-        cliProxyAppliedToCurrentGateway={{ claude: null, codex: null, gemini: null }}
-        cliProxyToggling={{ claude: false, codex: false, gemini: false }}
-        onSetCliProxyEnabled={vi.fn()}
         activeSessions={[]}
         activeSessionsLoading={false}
         activeSessionsAvailable={true}
@@ -1024,12 +953,6 @@ describe("components/home/HomeOverviewPanel", () => {
         activeModeByCli={{ claude: null, codex: null, gemini: null }}
         activeModeToggling={{ claude: false, codex: false, gemini: false }}
         onSetCliActiveMode={vi.fn()}
-        cliProxyLoading={false}
-        cliProxyAvailable={true}
-        cliProxyEnabled={{ claude: false, codex: false, gemini: false }}
-        cliProxyAppliedToCurrentGateway={{ claude: null, codex: null, gemini: null }}
-        cliProxyToggling={{ claude: false, codex: false, gemini: false }}
-        onSetCliProxyEnabled={vi.fn()}
         activeSessions={[]}
         activeSessionsLoading={false}
         activeSessionsAvailable={true}
