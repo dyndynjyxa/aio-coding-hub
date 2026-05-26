@@ -8,9 +8,12 @@ import {
   Cpu,
   FileText,
   Layers,
+  Monitor,
+  Moon,
   MessageSquare,
   Pencil,
   Settings2,
+  Sun,
   Terminal,
   TrendingDown,
   Wrench,
@@ -77,9 +80,9 @@ const NAV_SECTIONS: NavSection[] = [
 const NAV: NavItem[] = NAV_SECTIONS.flatMap((section) => section.items);
 
 const THEME_OPTIONS = [
-  { value: "light", label: "亮" },
-  { value: "dark", label: "暗" },
-  { value: "system", label: "系统" },
+  { value: "light", label: "Light", icon: Sun },
+  { value: "dark", label: "Dark", icon: Moon },
+  { value: "system", label: "System", icon: Monitor },
 ] as const;
 
 const SIDEBAR_CLI_LABELS: Record<CliKey, string> = {
@@ -242,7 +245,7 @@ export function Sidebar({ className }: SidebarProps) {
                 key={option.value}
                 type="button"
                 className={cn(
-                  "flex min-w-0 flex-1 items-center justify-center rounded-lg px-2 py-1.5 transition",
+                  "flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 transition",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/35 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar",
                   theme === option.value
                     ? "bg-sidebar-panel text-sidebar-foreground shadow-sm"
@@ -252,6 +255,7 @@ export function Sidebar({ className }: SidebarProps) {
                 title={`切换主题：${option.label}`}
                 onClick={() => setTheme(option.value)}
               >
+                <option.icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 {option.label}
               </button>
             ))}

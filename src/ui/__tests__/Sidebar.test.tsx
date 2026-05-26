@@ -121,12 +121,27 @@ describe("ui/Sidebar", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByRole("button", { name: "系统" })).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(screen.getByRole("button", { name: "亮" }));
+    const themeSwitcher = screen.getByLabelText("主题切换");
+    const icons = themeSwitcher.querySelectorAll("svg");
+
+    expect(screen.getByRole("button", { name: "System" })).toHaveAttribute("aria-pressed", "true");
+    expect(
+      within(themeSwitcher)
+        .getAllByRole("button")
+        .map((button) => button.textContent)
+    ).toEqual(["Light", "Dark", "System"]);
+    expect(Array.from(icons).every((icon) => icon.getAttribute("aria-hidden") === "true")).toBe(
+      true
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Light" }));
     expect(setTheme).toHaveBeenCalledWith("light");
 
-    fireEvent.click(screen.getByRole("button", { name: "暗" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dark" }));
     expect(setTheme).toHaveBeenCalledWith("dark");
+
+    fireEvent.click(screen.getByRole("button", { name: "System" }));
+    expect(setTheme).toHaveBeenCalledWith("system");
   });
 
   it("renders grouped navigation sections and keeps navigation exports compatible", () => {
