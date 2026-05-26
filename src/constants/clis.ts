@@ -73,7 +73,7 @@ export function cliShortLabel(cliKey: string) {
 }
 
 const CLI_BADGE_BASE =
-  "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 border border-transparent";
+  "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 border border-slate-200/90 dark:border-slate-600/70";
 
 const CLI_BADGE_HOVER =
   "group-hover:bg-white dark:group-hover:bg-slate-800 group-hover:border-slate-200 dark:group-hover:border-slate-700";

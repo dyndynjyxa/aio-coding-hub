@@ -323,7 +323,7 @@ export function getErrorCodeLabel(errorCode: string) {
 
 export function SessionReuseBadge({ showCustomTooltip }: { showCustomTooltip: boolean }) {
   const className =
-    "inline-flex shrink-0 items-center whitespace-nowrap rounded-md bg-indigo-50/80 px-2 py-0.5 text-[11px] font-semibold text-indigo-600 ring-1 ring-inset ring-indigo-500/10 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-400/20 cursor-help";
+    "inline-flex shrink-0 items-center whitespace-nowrap rounded-md bg-blue-50/85 px-2 py-0.5 text-[11px] font-semibold text-blue-600 ring-1 ring-inset ring-blue-400/35 dark:bg-blue-500/15 dark:text-blue-300 dark:ring-blue-400/20 cursor-help";
   return showCustomTooltip ? (
     <Tooltip content={SESSION_REUSE_TOOLTIP}>
       <span className={className}>会话复用</span>
@@ -371,10 +371,10 @@ export function FolderBadge({
 }) {
   return (
     <span
-      className="inline-flex min-w-0 items-center gap-1 rounded-md bg-secondary/75 px-2 py-0.5 text-[11px] font-medium text-muted-foreground dark:bg-secondary/55 dark:text-foreground"
+      className="inline-flex min-w-0 items-center gap-1 rounded-md bg-slate-100/80 px-2 py-0.5 text-[11px] font-medium text-slate-600 border border-slate-200/50 dark:bg-slate-800/80 dark:text-slate-300 dark:border-slate-700/50 shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
       title={folderPath}
     >
-      <FolderOpen className="h-3 w-3 shrink-0 text-muted-foreground" />
+      <FolderOpen className="h-3 w-3 shrink-0 text-slate-400 dark:text-slate-500" />
       <span className={allowWrap ? "whitespace-normal break-all" : "truncate"}>{folderName}</span>
     </span>
   );

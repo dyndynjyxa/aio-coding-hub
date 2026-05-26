@@ -430,10 +430,11 @@ describe("components/home/HomeLogShared", () => {
     );
 
     expect(screen.getAllByText("会话复用")[0]).toHaveAttribute("title");
+    expect(screen.getAllByText("会话复用")[0]).toHaveClass("ring-blue-400/35");
     expect(screen.getAllByText("fast")[0]).toHaveAttribute("title");
     expect(screen.getByText("免费")).toBeInTheDocument();
     expect(screen.getByText("workspace-alpha")).toBeInTheDocument();
-    expect(screen.getByTitle("/tmp/workspace-alpha")).toBeInTheDocument();
+    expect(screen.getByTitle("/tmp/workspace-alpha")).toHaveClass("border-slate-200/50");
     expect(getErrorCodeLabel(GatewayErrorCodes.UPSTREAM_TIMEOUT)).toBe("上游超时");
     expect(computeEffectiveInputTokens("codex", 100, 30)).toBe(70);
     expect(computeEffectiveInputTokens("claude", 100, 30)).toBe(100);
