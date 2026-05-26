@@ -104,6 +104,5 @@ export function useResponsive() {
     isLargeDesktop,
     // Sidebar visibility helpers
     shouldShowSidebar: isDesktop,
-    shouldShowMobileNav: isMobile,
   };
 }

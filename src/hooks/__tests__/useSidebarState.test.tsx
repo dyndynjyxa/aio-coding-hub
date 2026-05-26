@@ -2,17 +2,6 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useSidebarState } from "../useSidebarState";
 
-vi.mock("../useMediaQuery", () => ({
-  useResponsive: () => ({
-    isMobile: false,
-    isTablet: false,
-    isDesktop: true,
-    isLargeDesktop: false,
-    shouldShowSidebar: true,
-    shouldShowMobileNav: false,
-  }),
-}));
-
 describe("hooks/useSidebarState", () => {
   afterEach(() => {
     vi.restoreAllMocks();

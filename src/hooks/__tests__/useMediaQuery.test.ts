@@ -70,7 +70,6 @@ describe("hooks/useMediaQuery", () => {
         isDesktop: expect.any(Boolean),
         isLargeDesktop: expect.any(Boolean),
         shouldShowSidebar: expect.any(Boolean),
-        shouldShowMobileNav: expect.any(Boolean),
       })
     );
   });
