@@ -18,6 +18,7 @@ import {
 import { AIO_REPO_URL } from "../constants/urls";
 import { useDevPreviewData } from "../hooks/useDevPreviewData";
 import { useGatewayStatus, openReleasesUrl } from "../hooks/useGatewayStatus";
+import { useTheme } from "../hooks/useTheme";
 import { updateDialogSetOpen } from "../hooks/useUpdateMeta";
 import { openDesktopUrl } from "../services/desktop/opener";
 import { cn } from "../utils/cn";
@@ -69,13 +70,36 @@ const NAV_SECTIONS: NavSection[] = [
 
 const NAV: NavItem[] = NAV_SECTIONS.flatMap((section) => section.items);
 
+const THEME_OPTIONS = [
+  { value: "light", label: "亮" },
+  { value: "dark", label: "暗" },
+  { value: "system", label: "系统" },
+] as const;
+
 export type SidebarProps = {
   className?: string;
 };
 
 export function Sidebar({ className }: SidebarProps) {
-  const { statusText, portText, hasUpdate, isPortable } = useGatewayStatus();
+  const {
+    gatewayAvailable,
+    statusText,
+    portText,
+    isGatewayRunning,
+    isGatewayStopped,
+    hasUpdate,
+    isPortable,
+  } = useGatewayStatus();
+  const { theme, setTheme } = useTheme();
   const devPreview = useDevPreviewData();
+  const gatewayAriaLabel = `网关状态：${statusText}，端口 ${portText}`;
+  const gatewayDotClass = isGatewayRunning
+    ? "bg-emerald-500 shadow-[0_0_6px] shadow-emerald-500/70"
+    : isGatewayStopped
+      ? "bg-rose-500 shadow-[0_0_6px] shadow-rose-500/70"
+      : gatewayAvailable === "checking"
+        ? "bg-amber-400 shadow-[0_0_6px] shadow-amber-400/70"
+        : "bg-muted-foreground/50";
 
   function handleRepoClick(event: ReactMouseEvent<HTMLAnchorElement>) {
     event.preventDefault();
@@ -194,12 +218,42 @@ export function Sidebar({ className }: SidebarProps) {
           })}
         </nav>
 
-        <div className="px-4 py-3">
-          <div className="flex items-center gap-2 rounded-xl border border-sidebar-border bg-sidebar-muted px-3 py-2 text-xs text-muted-foreground">
-            <span className="h-[5px] w-[5px] rounded-full bg-green shadow-[0_0_6px] shadow-green" />
-            <span>
-              {statusText} · {portText}
-            </span>
+        <div className="space-y-2 px-4 py-3">
+          <div
+            className="flex items-center justify-between gap-2 rounded-xl border border-sidebar-border bg-sidebar-muted p-1 text-xs"
+            aria-label="主题切换"
+          >
+            {THEME_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={cn(
+                  "flex min-w-0 flex-1 items-center justify-center rounded-lg px-2 py-1.5 transition",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/35 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar",
+                  theme === option.value
+                    ? "bg-sidebar-panel text-sidebar-foreground shadow-sm"
+                    : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                )}
+                aria-pressed={theme === option.value}
+                title={`切换主题：${option.label}`}
+                onClick={() => setTheme(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+
+          <div
+            className="flex items-center gap-2 rounded-xl border border-sidebar-border bg-sidebar-muted px-3 py-2 text-xs text-muted-foreground"
+            aria-label={gatewayAriaLabel}
+            title={gatewayAriaLabel}
+          >
+            <span
+              className={cn("h-[5px] w-[5px] shrink-0 rounded-full", gatewayDotClass)}
+              aria-hidden="true"
+            />
+            <span className="min-w-0 truncate">{statusText}</span>
+            <span className="ml-auto shrink-0 text-right font-mono tabular-nums">{portText}</span>
           </div>
         </div>
       </div>

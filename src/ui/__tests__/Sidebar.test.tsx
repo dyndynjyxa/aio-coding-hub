@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { NAV, NAV_SECTIONS, Sidebar } from "../Sidebar";
@@ -26,6 +26,9 @@ const updateDialogSetOpenMock = vi.hoisted(() => vi.fn());
 const devPreviewRef = vi.hoisted(() => ({
   current: { enabled: false, setEnabled: vi.fn(), toggle: vi.fn() } as any,
 }));
+const themeRef = vi.hoisted(() => ({
+  current: { theme: "system", resolvedTheme: "light", setTheme: vi.fn() } as any,
+}));
 
 vi.mock("../../hooks/useGatewayMeta", () => ({
   useGatewayMeta: () => gatewayMetaRef.current,
@@ -38,11 +41,15 @@ vi.mock("../../hooks/useUpdateMeta", () => ({
 vi.mock("../../hooks/useDevPreviewData", () => ({
   useDevPreviewData: () => devPreviewRef.current,
 }));
+vi.mock("../../hooks/useTheme", () => ({
+  useTheme: () => themeRef.current,
+}));
 
 describe("ui/Sidebar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     devPreviewRef.current = { enabled: false, setEnabled: vi.fn(), toggle: vi.fn() };
+    themeRef.current = { theme: "system", resolvedTheme: "light", setTheme: vi.fn() };
     gatewayMetaRef.current = { gatewayAvailable: "checking", gateway: null, preferredPort: 37123 };
     updateMetaRef.current = {
       about: null,
@@ -63,8 +70,27 @@ describe("ui/Sidebar", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText("检查中 · —")).toBeInTheDocument();
+    expect(screen.getByText("检查中")).toBeInTheDocument();
+    expect(screen.getByText("—")).toBeInTheDocument();
     expect(screen.queryByText("NEW")).not.toBeInTheDocument();
+  });
+
+  it("switches theme from the sidebar control", () => {
+    const setTheme = vi.fn();
+    themeRef.current = { theme: "system", resolvedTheme: "light", setTheme };
+
+    render(
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByRole("button", { name: "系统" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "亮" }));
+    expect(setTheme).toHaveBeenCalledWith("light");
+
+    fireEvent.click(screen.getByRole("button", { name: "暗" }));
+    expect(setTheme).toHaveBeenCalledWith("dark");
   });
 
   it("renders grouped navigation sections and keeps navigation exports compatible", () => {
@@ -215,8 +241,9 @@ describe("ui/Sidebar", () => {
       </MemoryRouter>
     );
 
-    const statusText = screen.getByText("已停止 · 37123");
-    expect(statusText).toBeInTheDocument();
-    expect(statusText.parentElement!).toHaveClass("text-muted-foreground");
+    const gatewayStatus = screen.getByLabelText("网关状态：已停止，端口 37123");
+    expect(gatewayStatus).toBeInTheDocument();
+    expect(within(gatewayStatus).getByText("已停止")).toBeInTheDocument();
+    expect(within(gatewayStatus).getByText("37123")).toHaveClass("ml-auto", "text-right");
   });
 });

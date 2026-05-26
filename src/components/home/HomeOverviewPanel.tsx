@@ -31,7 +31,7 @@ import type { HomeOAuthQuotaRow } from "./homeOAuthQuotaTypes";
 import { HomeRequestLogsPanel } from "./HomeRequestLogsPanel";
 import { HomeTodayProviderUsageOverview } from "./HomeTodayProviderUsageOverview";
 import { HomeUsageSection } from "./HomeUsageSection";
-import { HomeWorkStatusCard } from "./HomeWorkStatusCard";
+import { HomeProxyStatusControls, HomeWorkStatusCard } from "./HomeWorkStatusCard";
 import type { HomeCliWorkspaceConfig } from "./homeWorkspaceConfigTypes";
 
 export type HomeOverviewUsageView = "summary" | "usageChart";
@@ -705,26 +705,7 @@ export function HomeOverviewPanel({
 
   const logsPrimaryInfoPanel = (
     <Card padding="sm" className="flex h-full min-h-0 flex-1 flex-col">
-      <div className="shrink-0 pb-3">
-        <HomeWorkStatusCard
-          layout="vertical"
-          chrome="plain"
-          cliProxyLoading={cliProxyLoading}
-          cliProxyAvailable={cliProxyAvailable}
-          cliProxyEnabled={cliProxyEnabled}
-          cliProxyAppliedToCurrentGateway={cliProxyAppliedToCurrentGateway}
-          cliProxyToggling={cliProxyToggling}
-          onSetCliProxyEnabled={onSetCliProxyEnabled}
-          sortModes={sortModes}
-          sortModesLoading={sortModesLoading}
-          sortModesAvailable={sortModesAvailable}
-          activeModeByCli={activeModeByCli}
-          activeModeToggling={activeModeToggling}
-          onSetCliActiveMode={onSetCliActiveMode}
-        />
-      </div>
-
-      <div className="mt-3 shrink-0 overflow-x-auto scrollbar-overlay">
+      <div className="shrink-0 overflow-x-auto scrollbar-overlay">
         <TabList
           ariaLabel="新布局信息切换"
           items={logsPrimaryTabs}
@@ -806,6 +787,26 @@ export function HomeOverviewPanel({
     </Card>
   );
 
+  const logsPrimaryProxyPanel = (
+    <Card padding="sm">
+      <HomeProxyStatusControls
+        layout="vertical"
+        cliProxyLoading={cliProxyLoading}
+        cliProxyAvailable={cliProxyAvailable}
+        cliProxyEnabled={cliProxyEnabled}
+        cliProxyAppliedToCurrentGateway={cliProxyAppliedToCurrentGateway}
+        cliProxyToggling={cliProxyToggling}
+        onSetCliProxyEnabled={onSetCliProxyEnabled}
+        sortModes={sortModes}
+        sortModesLoading={sortModesLoading}
+        sortModesAvailable={sortModesAvailable}
+        activeModeByCli={activeModeByCli}
+        activeModeToggling={activeModeToggling}
+        onSetCliActiveMode={onSetCliActiveMode}
+      />
+    </Card>
+  );
+
   return (
     <div className="flex flex-col h-full gap-4">
       {!logsPrimaryLayout ? (
@@ -884,11 +885,14 @@ export function HomeOverviewPanel({
           <div className="flex min-h-0 flex-col gap-4 lg:col-span-8">
             <div className="shrink-0">
               {personalizedUsageView === "summary" ? (
-                <HomeTodayProviderUsageOverview
-                  devPreviewEnabled={devPreviewEnabled}
-                  activeSessions={displayedActiveSessions}
-                  traces={traces}
-                />
+                <div className="space-y-4">
+                  <HomeTodayProviderUsageOverview
+                    devPreviewEnabled={devPreviewEnabled}
+                    activeSessions={displayedActiveSessions}
+                    traces={traces}
+                  />
+                  {logsPrimaryProxyPanel}
+                </div>
               ) : (
                 <HomeUsageSection
                   devPreviewEnabled={devPreviewEnabled}

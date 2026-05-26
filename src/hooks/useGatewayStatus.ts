@@ -4,7 +4,6 @@ import { useGatewayMeta } from "./useGatewayMeta";
 import { useUpdateMeta } from "./useUpdateMeta";
 
 /**
- * Derived gateway status for UI display.
  * Derived gateway status for Sidebar display.
  */
 export function useGatewayStatus() {
@@ -36,14 +35,17 @@ export function useGatewayStatus() {
 
   const portText = gatewayAvailable === "available" ? String(gateway?.port ?? preferredPort) : "—";
 
-  const isGatewayRunning = gatewayAvailable === "available" && gateway?.running;
+  const isGatewayRunning = gatewayAvailable === "available" && gateway?.running === true;
+  const isGatewayStopped = gatewayAvailable === "available" && gateway != null && !gateway.running;
 
   return {
+    gatewayAvailable,
     statusText,
     statusTone,
     portTone,
     portText,
     isGatewayRunning,
+    isGatewayStopped,
     hasUpdate,
     isPortable,
     updateMeta,

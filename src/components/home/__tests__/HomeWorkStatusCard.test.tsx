@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { HomeWorkStatusCard } from "../HomeWorkStatusCard";
+import { HomeProxyStatusControls, HomeWorkStatusCard } from "../HomeWorkStatusCard";
 
 const baseProxyProps = {
   cliProxyLoading: false,
@@ -41,6 +41,13 @@ describe("components/home/HomeWorkStatusCard", () => {
     const switches = screen.getAllByRole("switch");
     fireEvent.click(switches[0]);
     expect(onSetCliProxyEnabled).toHaveBeenCalledWith("claude", false);
+  });
+
+  it("renders standalone proxy controls without card chrome", () => {
+    render(<HomeProxyStatusControls {...baseProxyProps} />);
+
+    expect(screen.getByText("代理状态")).toBeInTheDocument();
+    expect(screen.getAllByRole("switch")).toHaveLength(3);
   });
 
   it("supports horizontal layout for the second overview row", () => {

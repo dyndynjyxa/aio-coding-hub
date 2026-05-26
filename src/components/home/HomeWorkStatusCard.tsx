@@ -14,6 +14,10 @@ import { HomeCliRouteStrategyControl } from "./HomeCliRouteStrategyControl";
 export type HomeWorkStatusCardProps = {
   layout?: "vertical" | "horizontal";
   chrome?: "card" | "plain";
+} & HomeProxyStatusControlsProps;
+
+export type HomeProxyStatusControlsProps = {
+  layout?: "vertical" | "horizontal";
   cliProxyLoading: boolean;
   cliProxyAvailable: boolean | null;
 
@@ -30,9 +34,8 @@ export type HomeWorkStatusCardProps = {
   onSetCliActiveMode?: (cliKey: CliKey, modeId: number | null) => void;
 };
 
-export function HomeWorkStatusCard({
+export function HomeProxyStatusControls({
   layout = "vertical",
-  chrome = "card",
   cliProxyLoading,
   cliProxyAvailable,
   cliProxyEnabled,
@@ -45,9 +48,8 @@ export function HomeWorkStatusCard({
   activeModeByCli,
   activeModeToggling,
   onSetCliActiveMode,
-}: HomeWorkStatusCardProps) {
+}: HomeProxyStatusControlsProps) {
   const horizontal = layout === "horizontal";
-  const plain = chrome === "plain";
   const showRouteStrategy =
     !horizontal &&
     sortModes != null &&
@@ -57,7 +59,7 @@ export function HomeWorkStatusCard({
     activeModeToggling != null &&
     onSetCliActiveMode != null;
 
-  const content = (
+  return (
     <>
       <div className="flex items-center justify-between gap-2">
         <div className="text-sm font-semibold">代理状态</div>
@@ -81,7 +83,7 @@ export function HomeWorkStatusCard({
             return (
               <div
                 key={cli.key}
-                className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-sm transition-all duration-200 hover:bg-secondary hover:border-indigo-200 hover:shadow-md dark:border-border dark:bg-secondary dark:shadow-none dark:hover:bg-secondary dark:hover:border-indigo-700"
+                className="rounded-lg border border-border bg-card px-3 py-2.5 shadow-sm transition-all duration-200 hover:border-border hover:bg-secondary hover:shadow-md dark:shadow-none"
               >
                 <div className="min-w-0 space-y-1.5">
                   <div className="flex items-center gap-3">
@@ -145,6 +147,11 @@ export function HomeWorkStatusCard({
       )}
     </>
   );
+}
+
+export function HomeWorkStatusCard({ chrome = "card", ...props }: HomeWorkStatusCardProps) {
+  const plain = chrome === "plain";
+  const content = <HomeProxyStatusControls {...props} />;
 
   if (plain) {
     return <div className="flex h-full flex-1 flex-col">{content}</div>;
