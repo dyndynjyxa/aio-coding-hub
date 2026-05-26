@@ -76,12 +76,13 @@ describe("ui/Sidebar", () => {
 
     expect(screen.getByRole("heading", { name: "MAIN" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "TOOLS" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "SETTING" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "SETTING" })).toBeInTheDocument();
     expect(
       NAV_SECTIONS.map((section) => [section.label, section.items.map((item) => item.to)])
     ).toEqual([
-      ["MAIN", ["/", "/providers", "/sessions", "/workspaces", "/prompts"]],
-      ["TOOLS", ["/mcp", "/skills", "/usage", "/logs", "/cli-manager", "/console", "/settings"]],
+      ["MAIN", ["/", "/providers", "/sessions"]],
+      ["TOOLS", ["/workspaces", "/prompts", "/mcp", "/skills", "/usage", "/logs", "/cli-manager"]],
+      ["SETTING", ["/console", "/settings"]],
     ]);
     expect(NAV.map((item) => item.to)).toEqual(
       NAV_SECTIONS.flatMap((section) => section.items.map((item) => item.to))

@@ -42,19 +42,25 @@ const NAV_SECTIONS: NavSection[] = [
       { to: "/", label: "首页", icon: Activity },
       { to: "/providers", label: "供应商", icon: Boxes },
       { to: "/sessions", label: "Session 会话", icon: MessageSquare },
-      { to: "/workspaces", label: "工作区", icon: Layers },
-      { to: "/prompts", label: "提示词", icon: Pencil },
     ],
   },
   {
     id: "tools",
     label: "TOOLS",
     items: [
+      { to: "/workspaces", label: "工作区", icon: Layers },
+      { to: "/prompts", label: "提示词", icon: Pencil },
       { to: "/mcp", label: "MCP", icon: Command },
       { to: "/skills", label: "Skill", icon: Cpu },
       { to: "/usage", label: "用量", icon: TrendingDown },
       { to: "/logs", label: "请求日志", icon: FileText },
       { to: "/cli-manager", label: "CLI 管理", icon: Wrench },
+    ],
+  },
+  {
+    id: "setting",
+    label: "SETTING",
+    items: [
       { to: "/console", label: "控制台", icon: Terminal },
       { to: "/settings", label: "设置", icon: Settings2 },
     ],
