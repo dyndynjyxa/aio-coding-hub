@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
-import { Sidebar } from "../Sidebar";
+import { NAV, NAV_SECTIONS, Sidebar } from "../Sidebar";
 import { AIO_RELEASES_URL, AIO_REPO_URL } from "../../constants/urls";
 import { tauriOpenUrl } from "../../test/mocks/tauri";
 
@@ -65,6 +65,31 @@ describe("ui/Sidebar", () => {
 
     expect(screen.getByText("检查中 · —")).toBeInTheDocument();
     expect(screen.queryByText("NEW")).not.toBeInTheDocument();
+  });
+
+  it("renders grouped navigation sections and keeps navigation exports compatible", () => {
+    render(
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByRole("heading", { name: "MAIN" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "TOOLS" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "SETTING" })).not.toBeInTheDocument();
+    expect(
+      NAV_SECTIONS.map((section) => [section.label, section.items.map((item) => item.to)])
+    ).toEqual([
+      ["MAIN", ["/", "/providers", "/sessions", "/workspaces", "/prompts"]],
+      ["TOOLS", ["/mcp", "/skills", "/usage", "/logs", "/cli-manager", "/console", "/settings"]],
+    ]);
+    expect(NAV.map((item) => item.to)).toEqual(
+      NAV_SECTIONS.flatMap((section) => section.items.map((item) => item.to))
+    );
+
+    for (const item of NAV) {
+      expect(screen.getByRole("link", { name: item.label })).toBeInTheDocument();
+    }
   });
 
   it("renders the GitHub link before the app name when no update candidate exists", () => {
