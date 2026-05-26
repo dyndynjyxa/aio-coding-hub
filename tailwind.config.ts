@@ -74,7 +74,7 @@ export default {
         accent: {
           DEFAULT: "hsl(var(--accent))",
           foreground: "hsl(var(--accent-foreground))",
-          secondary: "#6366F1",
+          secondary: "#0EA5E9",
         },
         destructive: {
           DEFAULT: "hsl(var(--destructive))",
@@ -83,9 +83,27 @@ export default {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
+        surface: {
+          canvas: "hsl(var(--surface-canvas))",
+          panel: "hsl(var(--surface-panel))",
+          raised: "hsl(var(--surface-raised))",
+          inset: "hsl(var(--surface-inset))",
+          muted: "hsl(var(--surface-muted))",
+        },
+        line: {
+          subtle: "hsl(var(--border-subtle))",
+          DEFAULT: "hsl(var(--border-default))",
+          strong: "hsl(var(--border-strong))",
+        },
+        state: {
+          hover: "hsl(var(--state-hover))",
+          selected: "hsl(var(--state-selected))",
+          "selected-foreground": "hsl(var(--state-selected-foreground))",
+          "selected-border": "hsl(var(--state-selected-border))",
+        },
         brand: {
-          DEFAULT: "#818CF8",
-          secondary: "#6366F1",
+          DEFAULT: "#2563EB",
+          secondary: "#0EA5E9",
         },
         success: { DEFAULT: "#34D399" },
         warning: { DEFAULT: "#FB923C" },
@@ -107,6 +125,8 @@ export default {
           "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
+          panel: "hsl(var(--sidebar-panel))",
+          muted: "hsl(var(--sidebar-muted))",
         },
         // Legacy bridge (deprecated — migrate to shadcn tokens above)
         bg: {

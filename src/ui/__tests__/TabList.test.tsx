@@ -52,9 +52,20 @@ describe("ui/TabList", () => {
     render(<TabList ariaLabel="tabs" items={[...defaultItems]} value="tab1" onChange={() => {}} />);
     const tabs = screen.getAllByRole("tab");
     // Active tab gets the primary accent variant
-    expect(tabs[0]).toHaveClass("bg-accent/15");
+    expect(tabs[0]).toHaveClass("bg-state-selected");
     // Inactive tabs get ghost variant
-    expect(tabs[1]).not.toHaveClass("bg-accent/15");
+    expect(tabs[1]).not.toHaveClass("bg-state-selected");
+  });
+
+  it("supports keyboard tab navigation", () => {
+    const onChange = vi.fn();
+    render(<TabList ariaLabel="tabs" items={[...defaultItems]} value="tab2" onChange={onChange} />);
+
+    fireEvent.keyDown(screen.getByRole("tablist"), { key: "ArrowRight" });
+    expect(onChange).toHaveBeenCalledWith("tab3");
+
+    fireEvent.keyDown(screen.getByRole("tablist"), { key: "Home" });
+    expect(onChange).toHaveBeenCalledWith("tab1");
   });
 
   it("merges custom className on the container", () => {

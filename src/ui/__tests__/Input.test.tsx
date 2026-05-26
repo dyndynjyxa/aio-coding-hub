@@ -6,7 +6,9 @@ import { Input } from "../Input";
 describe("ui/Input", () => {
   it("renders an input element", () => {
     render(<Input aria-label="test-input" />);
-    expect(screen.getByLabelText("test-input")).toBeInTheDocument();
+    const input = screen.getByLabelText("test-input");
+    expect(input).toBeInTheDocument();
+    expect(input).toHaveClass("bg-surface-inset", "border-line", "rounded-lg");
   });
 
   it("forwards value and onChange", () => {

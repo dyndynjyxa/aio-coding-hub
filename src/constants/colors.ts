@@ -4,8 +4,8 @@
 
 /** Brand colors */
 export const BRAND = {
-  accent: "#818CF8",
-  accentSecondary: "#6366F1",
+  accent: "#2563EB",
+  accentSecondary: "#0EA5E9",
 } as const;
 
 /** Semantic status colors */
@@ -19,7 +19,7 @@ export const STATUS = {
 /** Extended palette for multi-series charts */
 export const CHART_PALETTE = [
   BRAND.accent,
-  "#7C3AED",
+  BRAND.accentSecondary,
   STATUS.success,
   STATUS.warning,
   STATUS.danger,

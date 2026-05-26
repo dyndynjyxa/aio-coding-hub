@@ -9,7 +9,7 @@ import { BRAND, STATUS, CHART_PALETTE } from "../../constants/colors";
  */
 export const CHART_COLORS = {
   primary: BRAND.accent,
-  secondary: "#7C3AED",
+  secondary: BRAND.accentSecondary,
   success: STATUS.success,
   warning: STATUS.warning,
   danger: STATUS.danger,

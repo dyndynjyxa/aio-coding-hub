@@ -14,7 +14,7 @@
     --popover: 0 0% 100%;
     --popover-foreground: 225 30% 8%;
 
-    --primary: 239 84% 67%;
+    --primary: 221 83% 53%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 220 20% 96%;
@@ -23,7 +23,7 @@
     --muted: 220 20% 96%;
     --muted-foreground: 225 15% 50%;
 
-    --accent: 239 84% 67%;
+    --accent: 221 83% 53%;
     --accent-foreground: 0 0% 100%;
 
     --destructive: 0 84% 60%;
@@ -31,26 +31,44 @@
 
     --border: 220 15% 90%;
     --input: 220 15% 90%;
-    --ring: 239 84% 67%;
+    --ring: 221 83% 53%;
 
     --radius: 0.625rem;
 
+    /* Desktop surface hierarchy */
+    --surface-canvas: 220 20% 98%;
+    --surface-panel: 0 0% 100%;
+    --surface-raised: 0 0% 100%;
+    --surface-inset: 220 20% 96%;
+    --surface-muted: 220 20% 94%;
+
+    --border-subtle: 220 16% 92%;
+    --border-default: 220 15% 86%;
+    --border-strong: 220 13% 78%;
+
+    --state-hover: 220 20% 94%;
+    --state-selected: 214 100% 97%;
+    --state-selected-foreground: 221 83% 32%;
+    --state-selected-border: 213 94% 68%;
+
     /* Chart palette */
-    --chart-1: 239 84% 67%;
-    --chart-2: 271 81% 56%;
+    --chart-1: 221 83% 53%;
+    --chart-2: 188 86% 53%;
     --chart-3: 152 57% 40%;
     --chart-4: 28 96% 53%;
     --chart-5: 199 90% 48%;
 
     /* Sidebar tokens */
-    --sidebar: 0 0% 100%;
+    --sidebar: 222 28% 97%;
     --sidebar-foreground: 225 30% 8%;
-    --sidebar-primary: 239 84% 67%;
+    --sidebar-primary: 221 83% 53%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 220 20% 96%;
     --sidebar-accent-foreground: 225 20% 25%;
-    --sidebar-border: 220 15% 90%;
-    --sidebar-ring: 239 84% 67%;
+    --sidebar-border: 220 15% 86%;
+    --sidebar-ring: 221 83% 53%;
+    --sidebar-panel: 0 0% 100%;
+    --sidebar-muted: 220 20% 94%;
 
     /* Scrollbar */
     --color-scrollbar: rgba(148, 163, 184, 0.3);
@@ -78,8 +96,8 @@
     --popover: 225 50% 6%;
     --popover-foreground: 220 30% 91%;
 
-    --primary: 239 84% 67%;
-    --primary-foreground: 0 0% 100%;
+    --primary: 213 94% 68%;
+    --primary-foreground: 225 50% 6%;
 
     --secondary: 222 30% 12%;
     --secondary-foreground: 220 30% 91%;
@@ -87,19 +105,35 @@
     --muted: 222 30% 12%;
     --muted-foreground: 225 15% 68%;
 
-    --accent: 239 84% 67%;
-    --accent-foreground: 0 0% 100%;
+    --accent: 213 94% 68%;
+    --accent-foreground: 225 50% 6%;
 
     --destructive: 0 63% 31%;
     --destructive-foreground: 220 30% 91%;
 
     --border: 225 30% 8%;
     --input: 225 30% 8%;
-    --ring: 239 84% 67%;
+    --ring: 213 94% 68%;
+
+    /* Desktop surface hierarchy (dark) */
+    --surface-canvas: 225 50% 6%;
+    --surface-panel: 220 30% 9%;
+    --surface-raised: 222 28% 12%;
+    --surface-inset: 225 30% 8%;
+    --surface-muted: 222 30% 12%;
+
+    --border-subtle: 225 24% 14%;
+    --border-default: 225 20% 18%;
+    --border-strong: 224 18% 26%;
+
+    --state-hover: 222 28% 14%;
+    --state-selected: 217 91% 18%;
+    --state-selected-foreground: 213 94% 82%;
+    --state-selected-border: 213 94% 48%;
 
     /* Chart palette (dark) */
-    --chart-1: 239 84% 72%;
-    --chart-2: 271 91% 65%;
+    --chart-1: 213 94% 68%;
+    --chart-2: 188 86% 60%;
     --chart-3: 152 60% 52%;
     --chart-4: 28 96% 61%;
     --chart-5: 199 90% 58%;
@@ -107,12 +141,14 @@
     /* Sidebar tokens (dark) */
     --sidebar: 220 30% 9%;
     --sidebar-foreground: 220 30% 91%;
-    --sidebar-primary: 239 84% 67%;
-    --sidebar-primary-foreground: 225 50% 95%;
+    --sidebar-primary: 213 94% 68%;
+    --sidebar-primary-foreground: 225 50% 6%;
     --sidebar-accent: 222 30% 12%;
     --sidebar-accent-foreground: 220 30% 91%;
     --sidebar-border: 225 30% 8%;
-    --sidebar-ring: 239 84% 67%;
+    --sidebar-ring: 213 94% 68%;
+    --sidebar-panel: 222 30% 11%;
+    --sidebar-muted: 222 28% 14%;
 
     /* Scrollbar */
     --color-scrollbar: rgba(148, 163, 184, 0.2);
