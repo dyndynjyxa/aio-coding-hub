@@ -481,8 +481,10 @@ where
             }
 
             tokio::select! {
+                biased;
                 // 如果客户端提前断开，但上游短时间没有新 chunk，就会卡在 next_item().await。
                 // 这里通过监听 rx 端被 drop 来更早感知断开，避免误记 GW_STREAM_ABORTED。
+                // 如果断开和 idle timeout 同时 ready，断开应优先进入 Codex drain。
                 _ = tx.closed() => {
                     client_abort_detected_by = Some("rx_closed");
                     downstream_closed = true;
