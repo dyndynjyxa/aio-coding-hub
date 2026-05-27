@@ -294,7 +294,7 @@ const RequestLogCard = memo(function RequestLogCard({
             ? "bg-indigo-50/50 border-indigo-200/80 shadow-[0_0_0_1px_rgba(99,102,241,0.08),0_2px_8px_rgba(99,102,241,0.1)] dark:bg-indigo-950/30 dark:border-indigo-600/40 dark:shadow-[0_0_0_1px_rgba(99,102,241,0.15),0_2px_8px_rgba(99,102,241,0.12)]"
             : auditMeta.muted
               ? "bg-secondary/85 border-border/70 hover:bg-secondary/85 hover:border-border/70 dark:bg-secondary/70 dark:border-border/80 dark:hover:bg-secondary/90 dark:hover:border-border/80"
-              : "bg-white/80 border-border/60 hover:bg-secondary/80 hover:border-border/60 hover:shadow-[0_2px_8px_rgba(15,23,42,0.06)] dark:bg-secondary/80 dark:border-border/60 dark:hover:bg-muted/80 dark:hover:border-border/60 dark:hover:shadow-[0_2px_8px_rgba(0,0,0,0.2)]"
+              : "bg-white/80 border-border/60 hover:bg-secondary/80 hover:border-border/60 hover:shadow-[0_2px_8px_rgba(15,23,42,0.06)] dark:bg-secondary/80 dark:border-border dark:hover:bg-muted/80 dark:hover:border-border dark:hover:shadow-[0_2px_8px_rgba(0,0,0,0.2)]"
         )}
       >
         {/* Selection indicator */}

@@ -117,10 +117,28 @@ export function Sidebar({ className }: SidebarProps) {
       : gatewayAvailable === "checking"
         ? "bg-amber-400 shadow-[0_0_6px] shadow-amber-400/70"
         : "bg-muted-foreground/50";
+  const repoLinkLabel = hasUpdate
+    ? isPortable && !devPreview.enabled
+      ? "AIO Coding Hub GitHub：发现新版本，打开下载页"
+      : "AIO Coding Hub GitHub：发现新版本，打开更新对话框"
+    : "AIO Coding Hub GitHub 仓库";
+  const repoLinkTitle = hasUpdate
+    ? isPortable && !devPreview.enabled
+      ? "发现新版本（portable：打开下载页）"
+      : "发现新版本（点击更新）"
+    : "AIO Coding Hub GitHub 仓库";
 
   function handleRepoClick(event: ReactMouseEvent<HTMLAnchorElement>) {
     event.preventDefault();
     event.stopPropagation();
+    if (hasUpdate) {
+      if (isPortable && !devPreview.enabled) {
+        openReleasesUrl().catch(() => {});
+        return;
+      }
+      updateDialogSetOpen(true);
+      return;
+    }
     openDesktopUrl(AIO_REPO_URL).catch(() => {});
   }
 
@@ -134,53 +152,49 @@ export function Sidebar({ className }: SidebarProps) {
     >
       <div className="flex h-full flex-col">
         {/* macOS traffic lights safe area (titleBarStyle: overlay) + drag region */}
-        <div data-tauri-drag-region className="px-3 pb-4 pt-9">
-          <div className="rounded-xl border border-sidebar-border bg-sidebar-panel px-3 py-2.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <a
-                  href={AIO_REPO_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label="AIO Coding Hub GitHub 仓库"
-                  onClick={handleRepoClick}
-                  className="text-muted-foreground transition hover:text-foreground"
-                >
-                  <svg
-                    className="h-5 w-5"
-                    fill="currentColor"
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
-                  >
-                    <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
-                  </svg>
-                </a>
-                <div className="text-sm font-semibold text-sidebar-foreground">AIO Coding Hub</div>
+        <div data-tauri-drag-region className="px-5 pb-5 pt-9">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              {/* Premium abstract AIO high-tech SVG Logo */}
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-lg shadow-sm shadow-primary/10">
+                <img src="/logo.jpg" alt="AIO Logo" className="h-full w-full object-cover" />
               </div>
-              {hasUpdate ? (
-                <button
-                  type="button"
-                  className={cn(
-                    "flex items-center gap-1 rounded-lg px-2 py-1 transition",
-                    "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-100",
-                    "dark:bg-emerald-900/30 dark:text-emerald-400 dark:ring-emerald-700 dark:hover:bg-emerald-900/50"
-                  )}
-                  title={
-                    isPortable && !devPreview.enabled
-                      ? "发现新版本（portable：打开下载页）"
-                      : "发现新版本（点击更新）"
-                  }
-                  onClick={() => {
-                    if (isPortable && !devPreview.enabled) {
-                      openReleasesUrl().catch(() => {});
-                      return;
-                    }
-                    updateDialogSetOpen(true);
-                  }}
-                >
-                  <span className="text-[10px] font-bold leading-none tracking-wide">NEW</span>
-                </button>
-              ) : null}
+              <div className="flex flex-col">
+                <span className="text-[14px] font-extrabold tracking-tight text-sidebar-foreground">
+                  AIO Coding Hub
+                </span>
+                <span className="text-[9px] font-bold tracking-wider text-muted-foreground/60 uppercase -mt-0.5">
+                  Desktop Gateway
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <a
+                href={AIO_REPO_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={repoLinkLabel}
+                title={repoLinkTitle}
+                onClick={handleRepoClick}
+                className={cn(
+                  "relative inline-flex h-6 w-6 items-center justify-center transition",
+                  hasUpdate
+                    ? "text-success hover:text-success"
+                    : "text-muted-foreground/40 hover:text-muted-foreground"
+                )}
+              >
+                {hasUpdate ? (
+                  <span
+                    aria-hidden="true"
+                    className="absolute -top-2 left-1/2 -translate-x-1/2 rounded-full bg-success/15 px-1 text-[7px] font-extrabold leading-normal tracking-wider text-success ring-1 ring-success/30"
+                  >
+                    NEW
+                  </span>
+                ) : null}
+                <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
+                </svg>
+              </a>
             </div>
           </div>
         </div>
@@ -207,7 +221,7 @@ export function Sidebar({ className }: SidebarProps) {
                           "group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
                           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/35 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar",
                           isActive
-                            ? "border border-state-selected-border bg-state-selected text-state-selected-foreground"
+                            ? "border border-primary bg-primary text-primary-foreground shadow-sm shadow-primary/10"
                             : "border border-transparent text-sidebar-foreground hover:bg-sidebar-accent"
                         )
                       }
@@ -215,9 +229,6 @@ export function Sidebar({ className }: SidebarProps) {
                     >
                       {({ isActive }) => (
                         <>
-                          {isActive ? (
-                            <span className="absolute left-1 top-1/2 h-4 -translate-y-1/2 rounded-full border-l-2 border-state-selected-foreground" />
-                          ) : null}
                           <item.icon
                             className={cn(
                               "h-4 w-4 shrink-0 transition-opacity",
@@ -235,9 +246,9 @@ export function Sidebar({ className }: SidebarProps) {
           })}
         </nav>
 
-        <div className="space-y-2 px-4 py-3">
+        <div className="space-y-2.5 px-4 py-4 border-t border-sidebar-border/80 dark:border-sidebar-border">
           <div
-            className="flex items-center justify-between gap-2 rounded-xl border border-sidebar-border bg-sidebar-muted p-1 text-xs"
+            className="flex items-center justify-between gap-2 rounded-xl border border-sidebar-border/80 bg-sidebar-muted/50 p-1 text-xs shadow-inner"
             aria-label="主题切换"
           >
             {THEME_OPTIONS.map((option) => (
@@ -248,40 +259,43 @@ export function Sidebar({ className }: SidebarProps) {
                   "flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 transition",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/35 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar",
                   theme === option.value
-                    ? "bg-sidebar-panel text-sidebar-foreground shadow-sm"
+                    ? "bg-sidebar-panel text-primary shadow-sm ring-1 ring-sidebar-border/30 dark:ring-sidebar-border/50"
                     : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
                 )}
                 aria-pressed={theme === option.value}
-                title={`切换主题：${option.label}`}
+                aria-label={`切换到 ${option.label} 主题`}
+                title={`切换到 ${option.label} 主题`}
                 onClick={() => setTheme(option.value)}
               >
                 <option.icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                {option.label}
               </button>
             ))}
           </div>
 
-          <div className="space-y-1.5 rounded-xl border border-sidebar-border bg-sidebar-muted p-2 text-xs">
+          <div className="space-y-1.5 rounded-xl border border-sidebar-border bg-sidebar-panel p-2.5 text-xs shadow-[0_1px_3px_rgba(15,23,42,0.03)]">
             <div
-              className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-muted-foreground"
+              className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sidebar-foreground/75 font-semibold"
               aria-label={gatewayAriaLabel}
               title={gatewayAriaLabel}
             >
+              <span className="min-w-0 truncate font-semibold">网关状态</span>
               <span
                 className={cn("h-[5px] w-[5px] shrink-0 rounded-full", gatewayDotClass)}
                 aria-hidden="true"
               />
-              <span className="min-w-0 truncate">网关状态</span>
-              <span className="shrink-0 text-right font-medium text-sidebar-foreground">
-                {statusText}
+              <span className="ml-auto shrink-0 text-right font-mono tabular-nums text-sidebar-foreground/80">
+                {portText}
               </span>
-              <span className="ml-auto shrink-0 text-right font-mono tabular-nums">{portText}</span>
             </div>
 
             {cliProxyState.cliProxyLoading ? (
-              <div className="rounded-lg px-2 py-1.5 text-muted-foreground">代理状态加载中…</div>
+              <div className="rounded-lg px-2 py-1.5 text-muted-foreground font-medium">
+                代理状态加载中…
+              </div>
             ) : cliProxyState.cliProxyAvailable === false ? (
-              <div className="rounded-lg px-2 py-1.5 text-muted-foreground">代理状态不可用</div>
+              <div className="rounded-lg px-2 py-1.5 text-muted-foreground font-medium">
+                代理状态不可用
+              </div>
             ) : (
               CLIS.map((cli) => {
                 const cliKey = cli.key;
@@ -292,9 +306,11 @@ export function Sidebar({ className }: SidebarProps) {
                 return (
                   <div
                     key={cliKey}
-                    className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sidebar-foreground hover:bg-sidebar-accent"
+                    className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
                   >
-                    <span className="min-w-0 flex-1 truncate">{SIDEBAR_CLI_LABELS[cliKey]}</span>
+                    <span className="min-w-0 flex-1 truncate font-semibold text-sidebar-foreground/90">
+                      {SIDEBAR_CLI_LABELS[cliKey]}
+                    </span>
                     {drifted ? (
                       <Button
                         variant="danger"

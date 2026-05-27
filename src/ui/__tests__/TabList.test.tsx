@@ -48,13 +48,11 @@ describe("ui/TabList", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("applies primary variant to active tab and ghost to inactive", () => {
+  it("applies active and inactive tab classes", () => {
     render(<TabList ariaLabel="tabs" items={[...defaultItems]} value="tab1" onChange={() => {}} />);
     const tabs = screen.getAllByRole("tab");
-    // Active tab gets the primary accent variant
-    expect(tabs[0]).toHaveClass("bg-state-selected");
-    // Inactive tabs get ghost variant
-    expect(tabs[1]).not.toHaveClass("bg-state-selected");
+    expect(tabs[0]).toHaveClass("bg-primary");
+    expect(tabs[1]).not.toHaveClass("bg-primary");
   });
 
   it("supports keyboard tab navigation", () => {

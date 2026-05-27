@@ -106,7 +106,10 @@ describe("ui/Sidebar", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText("检查中")).toBeInTheDocument();
+    const gatewayStatus = screen.getByLabelText("网关状态：检查中，端口 —");
+
+    expect(gatewayStatus).toBeInTheDocument();
+    expect(within(gatewayStatus).queryByText("检查中")).not.toBeInTheDocument();
     expect(screen.getByText("—")).toBeInTheDocument();
     expect(screen.queryByText("NEW")).not.toBeInTheDocument();
   });
@@ -124,23 +127,24 @@ describe("ui/Sidebar", () => {
     const themeSwitcher = screen.getByLabelText("主题切换");
     const icons = themeSwitcher.querySelectorAll("svg");
 
-    expect(screen.getByRole("button", { name: "System" })).toHaveAttribute("aria-pressed", "true");
-    expect(
-      within(themeSwitcher)
-        .getAllByRole("button")
-        .map((button) => button.textContent)
-    ).toEqual(["Light", "Dark", "System"]);
+    expect(screen.getByRole("button", { name: /切换到 System 主题/ })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+    expect(within(themeSwitcher).queryByText("Light")).not.toBeInTheDocument();
+    expect(within(themeSwitcher).queryByText("Dark")).not.toBeInTheDocument();
+    expect(within(themeSwitcher).queryByText("System")).not.toBeInTheDocument();
     expect(Array.from(icons).every((icon) => icon.getAttribute("aria-hidden") === "true")).toBe(
       true
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Light" }));
+    fireEvent.click(screen.getByRole("button", { name: /切换到 Light 主题/ }));
     expect(setTheme).toHaveBeenCalledWith("light");
 
-    fireEvent.click(screen.getByRole("button", { name: "Dark" }));
+    fireEvent.click(screen.getByRole("button", { name: /切换到 Dark 主题/ }));
     expect(setTheme).toHaveBeenCalledWith("dark");
 
-    fireEvent.click(screen.getByRole("button", { name: "System" }));
+    fireEvent.click(screen.getByRole("button", { name: /切换到 System 主题/ }));
     expect(setTheme).toHaveBeenCalledWith("system");
   });
 
@@ -170,7 +174,7 @@ describe("ui/Sidebar", () => {
     }
   });
 
-  it("renders the GitHub link before the app name when no update candidate exists", () => {
+  it("renders the GitHub link when no update candidate exists", () => {
     render(
       <MemoryRouter>
         <Sidebar />
@@ -178,10 +182,8 @@ describe("ui/Sidebar", () => {
     );
 
     const repoLink = screen.getByRole("link", { name: "AIO Coding Hub GitHub 仓库" });
-    const title = screen.getByText("AIO Coding Hub");
 
     expect(repoLink).toHaveAttribute("href", AIO_REPO_URL);
-    expect(repoLink.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("opens the GitHub link through the desktop opener", async () => {
@@ -218,11 +220,14 @@ describe("ui/Sidebar", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByRole("link", { name: "AIO Coding Hub GitHub 仓库" })).toHaveAttribute(
-      "href",
-      AIO_REPO_URL
-    );
-    fireEvent.click(screen.getByRole("button", { name: "NEW" }));
+    const updateLink = screen.getByRole("link", {
+      name: "AIO Coding Hub GitHub：发现新版本，打开更新对话框",
+    });
+
+    expect(updateLink).toHaveAttribute("href", AIO_REPO_URL);
+    expect(screen.getByText("NEW")).toBeInTheDocument();
+
+    fireEvent.click(updateLink);
     expect(updateDialogSetOpenMock).toHaveBeenCalledWith(true);
   });
 
@@ -247,7 +252,14 @@ describe("ui/Sidebar", () => {
       </MemoryRouter>
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "NEW" }));
+    const updateLink = screen.getByRole("link", {
+      name: "AIO Coding Hub GitHub：发现新版本，打开下载页",
+    });
+
+    expect(updateLink).toHaveAttribute("href", AIO_REPO_URL);
+    expect(screen.getByText("NEW")).toBeInTheDocument();
+
+    fireEvent.click(updateLink);
 
     await waitFor(() => {
       expect(tauriOpenUrl).toHaveBeenCalledWith(AIO_RELEASES_URL);
@@ -275,7 +287,14 @@ describe("ui/Sidebar", () => {
       </MemoryRouter>
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "NEW" }));
+    const updateLink = screen.getByRole("link", {
+      name: "AIO Coding Hub GitHub：发现新版本，打开更新对话框",
+    });
+
+    expect(updateLink).toHaveAttribute("href", AIO_REPO_URL);
+    expect(screen.getByText("NEW")).toBeInTheDocument();
+
+    fireEvent.click(updateLink);
     expect(updateDialogSetOpenMock).toHaveBeenCalledWith(true);
   });
 
@@ -294,7 +313,8 @@ describe("ui/Sidebar", () => {
 
     const gatewayStatus = screen.getByLabelText("网关状态：已停止，端口 37123");
     expect(gatewayStatus).toBeInTheDocument();
-    expect(within(gatewayStatus).getByText("已停止")).toBeInTheDocument();
+    expect(gatewayStatus).toHaveAttribute("aria-label", expect.stringContaining("已停止"));
+    expect(within(gatewayStatus).queryByText("已停止")).not.toBeInTheDocument();
     expect(within(gatewayStatus).getByText("37123")).toHaveClass("ml-auto", "text-right");
   });
 
@@ -313,9 +333,10 @@ describe("ui/Sidebar", () => {
 
     const gatewayStatus = screen.getByLabelText("网关状态：运行中，端口 37124");
     expect(gatewayStatus).toBeInTheDocument();
+    expect(gatewayStatus).toHaveAttribute("aria-label", expect.stringContaining("运行中"));
     expect(within(gatewayStatus).getByText("网关状态")).toBeInTheDocument();
-    expect(within(gatewayStatus).getByText("运行中")).toBeInTheDocument();
-    expect(within(gatewayStatus).getByText("37124")).toBeInTheDocument();
+    expect(within(gatewayStatus).queryByText("运行中")).not.toBeInTheDocument();
+    expect(within(gatewayStatus).getByText("37124")).toHaveClass("ml-auto", "text-right");
 
     expect(screen.getByRole("switch", { name: "Claude 代理开关" })).toHaveAttribute(
       "data-state",

@@ -53,7 +53,7 @@ function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
+        "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-bold shrink-0 whitespace-nowrap",
         toneClass
       )}
     >
@@ -156,23 +156,21 @@ export function WorkspacesPage() {
 
       <div className="grid gap-4 lg:flex-1 lg:min-h-0 lg:grid-cols-[360px_1fr] lg:items-stretch lg:overflow-hidden">
         <Card padding="sm" className="flex flex-col lg:min-h-0">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-2 text-sm font-semibold text-foreground">
-                  <Layers className="h-4 w-4 shrink-0 text-accent" />
-                  <span className="shrink-0">工作区</span>
-                  <span className="shrink-0 text-xs font-medium text-muted-foreground">
-                    {items.length} 个
-                  </span>
-                </div>
-                <Button variant="primary" onClick={openCreateDialog}>
-                  <Plus className="h-4 w-4" />
-                  新建
-                </Button>
-              </div>
-              <div className="mt-1 text-xs text-muted-foreground">同一 CLI 下名称不可重复。</div>
+          <div className="flex items-center justify-between gap-3 w-full pb-3 border-b border-line-subtle">
+            <div className="flex items-center gap-2 text-sm font-bold text-foreground">
+              <Layers className="h-4 w-4 shrink-0 text-accent" />
+              <span>工作区</span>
+              <span className="text-xs font-medium text-muted-foreground">({items.length} 个)</span>
             </div>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={openCreateDialog}
+              className="h-8 gap-1.5 px-3 font-semibold rounded-lg shadow-sm"
+            >
+              <Plus className="h-4 w-4" />
+              新建
+            </Button>
           </div>
 
           <div className="mt-3">
@@ -222,62 +220,77 @@ export function WorkspacesPage() {
                       if (e.key === "Enter" || e.key === " ") setSelectedWorkspaceId(workspace.id);
                     }}
                   >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <div className="truncate text-sm font-semibold text-foreground">
+                    <div className="flex flex-col gap-3">
+                      {/* Top Row: Name and Status Badge */}
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <Layers className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+                          <div className="truncate text-sm font-bold text-foreground">
                             {workspace.name}
                           </div>
-                          {isActive ? (
-                            <Badge tone="active">当前</Badge>
-                          ) : (
-                            <Badge tone="neutral">可用</Badge>
-                          )}
                         </div>
+                        {isActive ? (
+                          <Badge tone="active">当前</Badge>
+                        ) : (
+                          <Badge tone="neutral">可用</Badge>
+                        )}
                       </div>
 
-                      <div className="flex shrink-0 items-center gap-1.5">
-                        {isActive ? null : (
+                      {/* Bottom Row: Action bar */}
+                      <div className="flex items-center justify-between border-t border-line-subtle/50 pt-2.5 mt-0.5">
+                        <div className="flex items-center">
+                          {isActive ? (
+                            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_4px] shadow-emerald-500/70" />
+                              <span>当前网关已启用</span>
+                            </div>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedWorkspaceId(workspace.id);
+                                openSwitchDialog(workspace.id);
+                              }}
+                              className="h-7 px-2 text-[11px] font-bold gap-1 rounded-md"
+                              title="对比当前工作区与目标工作区的差异，并确认切换"
+                            >
+                              <ArrowRightLeft className="h-3 w-3" />
+                              <span>对比切换</span>
+                            </Button>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-1">
                           <Button
-                            size="sm"
-                            variant="secondary"
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-muted-foreground/70 hover:text-foreground hover:bg-state-hover rounded-md"
+                            aria-label="重命名"
+                            title="重命名"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedWorkspaceId(workspace.id);
-                              openSwitchDialog(workspace.id);
+                              openRenameDialog(workspace);
                             }}
-                            className="h-8"
-                            title="对比当前工作区与目标工作区的差异，并确认切换"
                           >
-                            <ArrowRightLeft className="h-4 w-4" />
-                            切换…
+                            <Pencil className="h-3.5 w-3.5" />
                           </Button>
-                        )}
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          aria-label="重命名"
-                          title="重命名"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openRenameDialog(workspace);
-                          }}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="danger"
-                          aria-label="删除"
-                          title={isActive ? "请先切换当前工作区再删除" : "删除"}
-                          disabled={isActive}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openDeleteDialog(workspace);
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-muted-foreground/45 hover:text-destructive hover:bg-destructive/10 disabled:opacity-20 disabled:hover:bg-transparent rounded-md"
+                            aria-label="删除"
+                            title={isActive ? "请先切换当前工作区再删除" : "删除"}
+                            disabled={isActive}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openDeleteDialog(workspace);
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   </div>
