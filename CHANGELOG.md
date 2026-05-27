@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.51.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.50.0...aio-coding-hub-v0.51.0) (2026-05-27)
+
+
+### Features
+
+* **sidebar:** 优化侧边栏主题按钮样式和全局样式变量 ([fda23a8](https://github.com/dyndynjyxa/aio-coding-hub/commit/fda23a8f11c669c134f17931073bad2f501e9fe0))
+
 ## [0.50.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.49.0...aio-coding-hub-v0.50.0) (2026-05-27)
 
 
