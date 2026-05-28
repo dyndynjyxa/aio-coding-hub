@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.51.1](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.51.0...aio-coding-hub-v0.51.1) (2026-05-28)
+
+
+### Bug Fixes
+
+* **sidebar:** restore repair button accessibility ([ce38ce8](https://github.com/dyndynjyxa/aio-coding-hub/commit/ce38ce82cb189eefa66480657e2fea7bcf37b7e4))
+
 ## [0.51.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.50.0...aio-coding-hub-v0.51.0) (2026-05-27)
 
 
