@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.52.1](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.52.0...aio-coding-hub-v0.52.1) (2026-05-28)
+
+
+### Bug Fixes
+
+* **windows:** hide native titlebar icon ([06f7d70](https://github.com/dyndynjyxa/aio-coding-hub/commit/06f7d70d951ec1333dbecd2d2091b362af15ac95))
+
 ## [0.52.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.51.1...aio-coding-hub-v0.52.0) (2026-05-28)
 
 
