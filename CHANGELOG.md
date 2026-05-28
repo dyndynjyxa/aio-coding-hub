@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.52.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.51.1...aio-coding-hub-v0.52.0) (2026-05-28)
+
+
+### Features
+
+* **sidebar:** 在Windows运行环境中隐藏侧边栏Logo ([15b9bcf](https://github.com/dyndynjyxa/aio-coding-hub/commit/15b9bcfc18178871cc1c95369dec227e82a1ca93))
+
 ## [0.51.1](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.51.0...aio-coding-hub-v0.51.1) (2026-05-28)
 
 
