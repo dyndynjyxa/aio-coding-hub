@@ -1,8 +1,8 @@
 //! Config.toml mutation (line-level patching) for Codex configuration.
 
 use super::parsing::{
-    is_any_table_header_line, normalize_key, parse_assignment, strip_toml_comment,
-    update_multiline_string_state, validate_enum_or_empty,
+    is_aio_model_provider_table, is_any_table_header_line, normalize_key, parse_assignment,
+    parse_table_header, strip_toml_comment, update_multiline_string_state, validate_enum_or_empty,
 };
 use super::types::CodexConfigPatch;
 
@@ -144,6 +144,82 @@ fn find_table_block(lines: &[String], table_header: &str) -> Option<(usize, usiz
         .map(|offset| start + 1 + offset)
         .unwrap_or(lines.len());
     Some((start, end))
+}
+
+fn find_aio_model_provider_table_block(lines: &[String]) -> Option<(usize, usize)> {
+    let start = lines.iter().position(|line| {
+        let cleaned = strip_toml_comment(line).trim();
+        parse_table_header(cleaned).is_some_and(|table| is_aio_model_provider_table(&table))
+    })?;
+    let end = lines[start.saturating_add(1)..]
+        .iter()
+        .position(|line| line.trim().starts_with('['))
+        .map(|offset| start + 1 + offset)
+        .unwrap_or(lines.len());
+    Some((start, end))
+}
+
+fn upsert_aio_model_provider_supports_websockets(lines: &mut Vec<String>, enabled: bool) {
+    let value = enabled.then(|| "true".to_string());
+
+    if find_aio_model_provider_table_block(lines).is_none() {
+        let Some(value) = value else {
+            return;
+        };
+        if !lines.is_empty() && !lines.last().unwrap_or(&String::new()).trim().is_empty() {
+            lines.push(String::new());
+        }
+        lines.push("[model_providers.aio]".to_string());
+        lines.push(format!("supports_websockets = {value}"));
+        return;
+    }
+
+    let Some((start, end)) = find_aio_model_provider_table_block(lines) else {
+        return;
+    };
+    let mut found_idx: Option<usize> = None;
+    for (idx, line) in lines
+        .iter()
+        .enumerate()
+        .take(end.min(lines.len()))
+        .skip(start + 1)
+    {
+        let cleaned = strip_toml_comment(line).trim();
+        if cleaned.is_empty() || cleaned.starts_with('#') {
+            continue;
+        }
+        let Some((k, _)) = parse_assignment(cleaned) else {
+            continue;
+        };
+        if normalize_key(&k) == "supports_websockets" {
+            found_idx = Some(idx);
+            break;
+        }
+    }
+
+    match (found_idx, value) {
+        (Some(idx), Some(v)) => lines[idx] = format!("supports_websockets = {v}"),
+        (Some(idx), None) => {
+            lines.remove(idx);
+        }
+        (None, Some(v)) => {
+            let mut insert_at = end.min(lines.len());
+            while insert_at > start + 1 && lines[insert_at - 1].trim().is_empty() {
+                insert_at -= 1;
+            }
+            lines.insert(insert_at, format!("supports_websockets = {v}"));
+        }
+        (None, None) => {}
+    }
+
+    if let Some((start, end)) = find_aio_model_provider_table_block(lines) {
+        let has_body_content = lines[start + 1..end]
+            .iter()
+            .any(|line| !line.trim().is_empty() && !line.trim_start().starts_with('#'));
+        if !has_body_content {
+            lines.drain(start..end);
+        }
+    }
 }
 
 fn upsert_table_keys(lines: &mut Vec<String>, table: &str, items: Vec<(&str, Option<String>)>) {
@@ -770,6 +846,10 @@ pub(super) fn patch_config_toml(
             &["network_access"],
             vec![("network_access", Some(v.to_string()))],
         );
+    }
+
+    if let Some(v) = patch.model_providers_aio_supports_websockets {
+        upsert_aio_model_provider_supports_websockets(&mut lines, v);
     }
 
     // features.*

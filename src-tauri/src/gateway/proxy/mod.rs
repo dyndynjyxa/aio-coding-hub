@@ -23,6 +23,7 @@ mod request_end;
 pub(in crate::gateway) mod status_override;
 mod types;
 pub(in crate::gateway) mod upstream_client_error_rules;
+mod websocket;
 
 pub(super) use caches::{ProviderBaseUrlPingCache, RecentErrorCache};
 pub(super) use error_code::GatewayErrorCode;
@@ -31,6 +32,7 @@ pub(in crate::gateway) use logging::spawn_enqueue_request_log_with_backpressure;
 pub(super) use types::ErrorCategory;
 
 pub(super) use handler::proxy_impl;
+pub(super) use websocket::proxy_websocket_impl;
 
 const CLAUDE_COUNT_TOKENS_PATH: &str = "/v1/messages/count_tokens";
 const CLAUDE_LOGGED_MESSAGES_PATH: &str = "/v1/messages";

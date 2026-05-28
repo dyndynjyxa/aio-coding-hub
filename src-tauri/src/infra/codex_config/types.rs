@@ -26,6 +26,8 @@ pub struct CodexConfigState {
 
     pub sandbox_workspace_write_network_access: Option<bool>,
 
+    pub model_providers_aio_supports_websockets: Option<bool>,
+
     pub features_unified_exec: Option<bool>,
     pub features_shell_snapshot: Option<bool>,
     pub features_apply_patch_freeform: Option<bool>,
@@ -64,6 +66,8 @@ pub struct CodexConfigPatch {
     pub service_tier: Option<String>,
 
     pub sandbox_workspace_write_network_access: Option<bool>,
+
+    pub model_providers_aio_supports_websockets: Option<bool>,
 
     pub features_unified_exec: Option<bool>,
     pub features_shell_snapshot: Option<bool>,

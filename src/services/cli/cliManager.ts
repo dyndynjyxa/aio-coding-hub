@@ -50,6 +50,7 @@ const DEFAULT_CODEX_CONFIG_PATCH = {
   model_auto_compact_token_limit: null,
   service_tier: null,
   sandbox_workspace_write_network_access: null,
+  model_providers_aio_supports_websockets: null,
   features_unified_exec: null,
   features_shell_snapshot: null,
   features_apply_patch_freeform: null,

@@ -1157,6 +1157,24 @@ export function CliManagerCodexTab({
                     disabled={saving}
                   />
                 </SettingItem>
+
+                <SettingItem
+                  label="supports_websockets"
+                  subtitle="Write supports_websockets under the aio model provider table so Codex can negotiate WebSocket-capable upstreams."
+                >
+                  <Switch
+                    checked={boolOrDefault(
+                      codexConfig.model_providers_aio_supports_websockets,
+                      false
+                    )}
+                    onCheckedChange={(checked) =>
+                      void persistCodexConfig({
+                        model_providers_aio_supports_websockets: checked,
+                      })
+                    }
+                    disabled={saving}
+                  />
+                </SettingItem>
               </div>
             </div>
 

@@ -140,6 +140,7 @@ describe("cli-manager tabs (coverage)", () => {
           model_auto_compact_token_limit: 900000,
           service_tier: "fast",
           sandbox_workspace_write_network_access: false,
+          model_providers_aio_supports_websockets: true,
           features_unified_exec: true,
           features_shell_snapshot: true,
           features_apply_patch_freeform: true,

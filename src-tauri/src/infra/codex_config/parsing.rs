@@ -128,6 +128,30 @@ pub(super) fn key_table_and_name(
     (table, k)
 }
 
+pub(super) fn is_aio_model_provider_table(table: &str) -> bool {
+    matches!(
+        table.trim(),
+        "model_providers.aio"
+            | "model_providers.\"aio\""
+            | "model_providers.'aio'"
+            | "\"model_providers\".aio"
+            | "\"model_providers\".\"aio\""
+            | "\"model_providers\".'aio'"
+            | "'model_providers'.aio"
+            | "'model_providers'.\"aio\""
+            | "'model_providers'.'aio'"
+            | "model_providers.OpenAI"
+            | "model_providers.\"OpenAI\""
+            | "model_providers.'OpenAI'"
+            | "\"model_providers\".OpenAI"
+            | "\"model_providers\".\"OpenAI\""
+            | "\"model_providers\".'OpenAI'"
+            | "'model_providers'.OpenAI"
+            | "'model_providers'.\"OpenAI\""
+            | "'model_providers'.'OpenAI'"
+    )
+}
+
 pub(super) fn is_allowed_value(value: &str, allowed: &[&str]) -> bool {
     allowed.iter().any(|v| v.eq_ignore_ascii_case(value))
 }
@@ -244,6 +268,7 @@ pub(super) fn make_state_from_bytes(
         service_tier: None,
 
         sandbox_workspace_write_network_access: None,
+        model_providers_aio_supports_websockets: None,
 
         features_unified_exec: None,
         features_shell_snapshot: None,
@@ -358,6 +383,10 @@ pub(super) fn make_state_from_bytes(
             ("features", "multi_agent") => state.features_multi_agent = parse_bool(&raw_value),
 
             _ => {}
+        }
+
+        if is_aio_model_provider_table(table) && key == "supports_websockets" {
+            state.model_providers_aio_supports_websockets = parse_bool(&raw_value);
         }
 
         update_multiline_string_state(raw_line, &mut in_multiline_double, &mut in_multiline_single);

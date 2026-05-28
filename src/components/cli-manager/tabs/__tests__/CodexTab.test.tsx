@@ -65,6 +65,7 @@ function createCodexConfig(overrides: Partial<any> = {}) {
     model_auto_compact_token_limit: null,
     service_tier: null,
     features_shell_snapshot: false,
+    model_providers_aio_supports_websockets: false,
     features_unified_exec: false,
     features_shell_tool: false,
     features_exec_policy: false,
@@ -149,6 +150,14 @@ describe("components/cli-manager/tabs/CodexTab", () => {
     fireEvent.click(within(websocketItem as HTMLElement).getByRole("switch"));
     expect(persistCodexConfig).toHaveBeenCalledWith({
       features_responses_websockets_v2: true,
+    });
+
+    const providerWebsocketItem =
+      screen.getByText("supports_websockets").parentElement?.parentElement;
+    expect(providerWebsocketItem).toBeTruthy();
+    fireEvent.click(within(providerWebsocketItem as HTMLElement).getByRole("switch"));
+    expect(persistCodexConfig).toHaveBeenCalledWith({
+      model_providers_aio_supports_websockets: true,
     });
 
     // Radio group

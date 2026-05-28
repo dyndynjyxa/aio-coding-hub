@@ -434,6 +434,7 @@ fn insert_model_provider_section(
         format!("base_url = \"{base_url}\""),
         "wire_api = \"responses\"".to_string(),
         "requires_openai_auth = true".to_string(),
+        "supports_websockets = true".to_string(),
     ];
 
     lines.splice(insert_at..insert_at, section);
@@ -496,7 +497,7 @@ fn patch_model_provider_base_table(
         };
 
         match k.trim() {
-            "name" | "base_url" | "wire_api" | "requires_openai_auth" => {}
+            "name" | "base_url" | "wire_api" | "requires_openai_auth" | "supports_websockets" => {}
             _ => body.push(line.clone()),
         }
     }
@@ -506,6 +507,7 @@ fn patch_model_provider_base_table(
         format!("base_url = \"{base_url}\""),
         "wire_api = \"responses\"".to_string(),
         "requires_openai_auth = true".to_string(),
+        "supports_websockets = true".to_string(),
     ];
 
     let mut patched: Vec<String> = Vec::with_capacity(managed.len() + body.len());

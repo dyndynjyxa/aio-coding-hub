@@ -13,6 +13,7 @@ fn empty_patch() -> CodexConfigPatch {
         model_auto_compact_token_limit: None,
         service_tier: None,
         sandbox_workspace_write_network_access: None,
+        model_providers_aio_supports_websockets: None,
         features_unified_exec: None,
         features_shell_snapshot: None,
         features_apply_patch_freeform: None,
@@ -291,6 +292,55 @@ fn patch_writes_personality_and_websocket_feature() {
 }
 
 #[test]
+fn patch_writes_aio_model_provider_websocket_support() {
+    let input = r#"model_provider = "aio"
+
+[model_providers.aio]
+name = "aio"
+base_url = "http://127.0.0.1:37124/v1"
+wire_api = "responses"
+"#;
+
+    let out = patch_config_toml(
+        Some(input.as_bytes().to_vec()),
+        CodexConfigPatch {
+            model_providers_aio_supports_websockets: Some(true),
+            ..empty_patch()
+        },
+    )
+    .expect("patch_config_toml");
+
+    let s = String::from_utf8(out).expect("utf8");
+    assert!(s.contains("[model_providers.aio]"), "{s}");
+    assert!(s.contains("supports_websockets = true"), "{s}");
+}
+
+#[test]
+fn patch_removes_aio_model_provider_websocket_support_when_disabled() {
+    let input = r#"model_provider = "aio"
+
+[model_providers.aio]
+name = "aio"
+base_url = "http://127.0.0.1:37124/v1"
+wire_api = "responses"
+supports_websockets = true
+"#;
+
+    let out = patch_config_toml(
+        Some(input.as_bytes().to_vec()),
+        CodexConfigPatch {
+            model_providers_aio_supports_websockets: Some(false),
+            ..empty_patch()
+        },
+    )
+    .expect("patch_config_toml");
+
+    let s = String::from_utf8(out).expect("utf8");
+    assert!(!s.contains("supports_websockets ="), "{s}");
+    assert!(s.contains("[model_providers.aio]"), "{s}");
+}
+
+#[test]
 fn patch_deletes_personality_and_websocket_feature_when_disabled() {
     let input = r#"personality = "friendly"
 
@@ -523,12 +573,16 @@ fn parse_reads_personality_and_websocket_feature() {
 
 [features]
 responses_websockets_v2 = true
+
+[model_providers.aio]
+supports_websockets = true
 "#;
 
     let state = make_test_state(input).expect("make_test_state");
 
     assert_eq!(state.personality.as_deref(), Some("friendly"));
     assert_eq!(state.features_responses_websockets_v2, Some(true));
+    assert_eq!(state.model_providers_aio_supports_websockets, Some(true));
 }
 
 #[test]

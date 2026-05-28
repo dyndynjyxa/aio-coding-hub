@@ -2041,6 +2041,7 @@ export type CodexConfigPatch = {
   model_auto_compact_token_limit?: number | null;
   service_tier: string | null;
   sandbox_workspace_write_network_access: boolean | null;
+  model_providers_aio_supports_websockets: boolean | null;
   features_unified_exec: boolean | null;
   features_shell_snapshot: boolean | null;
   features_apply_patch_freeform: boolean | null;
@@ -2071,6 +2072,7 @@ export type CodexConfigState = {
   model_auto_compact_token_limit: number | null;
   service_tier: string | null;
   sandbox_workspace_write_network_access: boolean | null;
+  model_providers_aio_supports_websockets: boolean | null;
   features_unified_exec: boolean | null;
   features_shell_snapshot: boolean | null;
   features_apply_patch_freeform: boolean | null;

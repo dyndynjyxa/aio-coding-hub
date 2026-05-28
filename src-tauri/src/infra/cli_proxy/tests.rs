@@ -271,6 +271,7 @@ foo = "bar"
     let s = String::from_utf8(out).expect("utf8");
 
     assert!(s.contains("base_url = \"http://new/v1\""), "{s}");
+    assert!(s.contains("supports_websockets = true"), "{s}");
     assert!(
         s.contains("[model_providers.aio.projects.\"C:\\\\work\"]"),
         "{s}"
@@ -304,6 +305,7 @@ trusted_roots = ["C:\\work"]
     let s = String::from_utf8(out).expect("utf8");
 
     assert!(s.contains("base_url = \"http://new/v1\""), "{s}");
+    assert!(s.contains("supports_websockets = true"), "{s}");
     assert!(s.contains("trusted_roots = [\"C:\\\\work\"]"), "{s}");
 }
 
@@ -333,6 +335,7 @@ trust_level = "trusted"
         + s.matches("[model_providers.'aio']").count();
     assert_eq!(count, 1, "{s}");
     assert!(s.contains("base_url = \"http://new/v1\""), "{s}");
+    assert!(s.contains("supports_websockets = true"), "{s}");
     assert!(
         s.contains("[model_providers.aio.projects.\"C:\\\\work\"]"),
         "{s}"
@@ -697,6 +700,7 @@ fn enabling_codex_oauth_compatible_proxy_writes_config_only_and_does_not_create_
         "{config}"
     );
     assert!(config.contains("requires_openai_auth = true"), "{config}");
+    assert!(config.contains("supports_websockets = true"), "{config}");
     assert!(!config.contains("preferred_auth_method"), "{config}");
     assert!(
         !auth_path.exists(),

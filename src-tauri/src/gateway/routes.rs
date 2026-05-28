@@ -1,6 +1,9 @@
 use axum::{
     body::Body,
-    extract::{Path, State},
+    extract::{
+        ws::{rejection::WebSocketUpgradeRejection, WebSocketUpgrade},
+        Path, State,
+    },
     http::Request,
     response::Response,
     routing::{any, get},
@@ -8,7 +11,7 @@ use axum::{
 };
 use serde::Serialize;
 
-use super::proxy::proxy_impl;
+use super::proxy::{proxy_impl, proxy_websocket_impl};
 use super::runtime::GatewayAppState;
 use super::util::now_unix_seconds;
 
@@ -36,6 +39,7 @@ async fn root() -> &'static str {
 async fn proxy_cli_any<R>(
     State(state): State<GatewayAppState<R>>,
     Path((cli_key, path)): Path<(String, String)>,
+    ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
     req: Request<Body>,
 ) -> Response
 where
@@ -47,12 +51,16 @@ where
     } else {
         format!("/{path}")
     };
-    proxy_impl(state, cli_key, forwarded_path, req).await
+    match ws {
+        Ok(ws) => proxy_websocket_impl(state, cli_key, forwarded_path, ws, req).await,
+        Err(_) => proxy_impl(state, cli_key, forwarded_path, req).await,
+    }
 }
 
 async fn proxy_cli_with_provider_any<R>(
     State(state): State<GatewayAppState<R>>,
     Path((cli_key, provider_id, path)): Path<(String, i64, String)>,
+    ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
     mut req: Request<Body>,
 ) -> Response
 where
@@ -69,12 +77,16 @@ where
         format!("/{path}")
     };
 
-    proxy_impl(state, cli_key, forwarded_path, req).await
+    match ws {
+        Ok(ws) => proxy_websocket_impl(state, cli_key, forwarded_path, ws, req).await,
+        Err(_) => proxy_impl(state, cli_key, forwarded_path, req).await,
+    }
 }
 
 async fn proxy_openai_v1_any<R>(
     State(state): State<GatewayAppState<R>>,
     Path(path): Path<String>,
+    ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
     req: Request<Body>,
 ) -> Response
 where
@@ -86,18 +98,27 @@ where
     } else {
         format!("/v1/{path}")
     };
-    proxy_impl(state, "codex".to_string(), forwarded_path, req).await
+    match ws {
+        Ok(ws) => proxy_websocket_impl(state, "codex".to_string(), forwarded_path, ws, req).await,
+        Err(_) => proxy_impl(state, "codex".to_string(), forwarded_path, req).await,
+    }
 }
 
 async fn proxy_openai_v1_root<R>(
     State(state): State<GatewayAppState<R>>,
+    ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
     req: Request<Body>,
 ) -> Response
 where
     R: tauri::Runtime + 'static,
     R::Handle: Unpin,
 {
-    proxy_impl(state, "codex".to_string(), "/v1".to_string(), req).await
+    match ws {
+        Ok(ws) => {
+            proxy_websocket_impl(state, "codex".to_string(), "/v1".to_string(), ws, req).await
+        }
+        Err(_) => proxy_impl(state, "codex".to_string(), "/v1".to_string(), req).await,
+    }
 }
 
 pub(super) fn build_router<R>(state: GatewayAppState<R>) -> Router
