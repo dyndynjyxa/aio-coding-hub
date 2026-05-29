@@ -127,6 +127,14 @@ export function hasClaudeModelMappingSpecialSetting(
   return false;
 }
 
+export function hasRequestLogSpecialSettingType(
+  specialSettingsJson: string | null | undefined,
+  type: string
+): boolean {
+  const settings = parseRequestLogSpecialSettings(specialSettingsJson);
+  return settings.some((setting) => setting.type === type);
+}
+
 export function formatClaudeModelMappingText(
   requestedModel: string | null | undefined,
   mapping: ClaudeModelMapping | null | undefined
@@ -196,7 +204,10 @@ export function buildRequestLogAuditMeta(log: RequestLogAuditInput): RequestLogA
   const settingTypes = new Set(settings.map((item) => item.type).filter(Boolean));
   const isWarmupIntercept = settingTypes.has("warmup_intercept");
   const isCliProxyGuard = settingTypes.has("cli_proxy_guard");
-  const isSuccessful = typeof log.status === "number" && log.status >= 200 && log.status < 300;
+  const isWebsocketProxy = settingTypes.has("websocket_proxy");
+  const isSuccessful =
+    typeof log.status === "number" &&
+    (log.status === 101 || (log.status >= 200 && log.status < 300));
   const isClientAbort =
     !isSuccessful &&
     (!!(log.error_code && CLIENT_ABORT_ERROR_CODES.has(log.error_code)) ||
@@ -222,6 +233,16 @@ export function buildRequestLogAuditMeta(log: RequestLogAuditInput): RequestLogA
         "代理守卫",
         "bg-orange-50/80 text-orange-700 ring-1 ring-inset ring-orange-500/10 dark:bg-orange-500/15 dark:text-orange-200 dark:ring-orange-400/20",
         "CLI 代理守卫提前处理了这次请求"
+      )
+    );
+  }
+
+  if (isWebsocketProxy) {
+    tags.push(
+      auditTag(
+        "WS",
+        "bg-indigo-50/80 text-indigo-700 ring-1 ring-inset ring-indigo-500/10 dark:bg-indigo-500/15 dark:text-indigo-200 dark:ring-indigo-400/20",
+        "WebSocket 代理请求"
       )
     );
   }
@@ -409,7 +430,8 @@ export function computeStatusBadge(input: {
 
   const isClientAbort = !!(input.errorCode && CLIENT_ABORT_ERROR_CODES.has(input.errorCode));
   const hasFailover = !!input.hasFailover;
-  const isSuccessStatus = input.status != null && input.status >= 200 && input.status < 400;
+  const isSuccessStatus =
+    input.status != null && (input.status === 101 || (input.status >= 200 && input.status < 400));
   const isError = input.status != null ? input.status >= 400 : input.errorCode != null;
 
   let text = STATUS_TEXT_UNKNOWN;

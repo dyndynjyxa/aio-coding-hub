@@ -416,6 +416,7 @@ fn default_provider_params(name: &str) -> ProviderUpsertParams {
         source_provider_id: None,
         bridge_type: None,
         stream_idle_timeout_seconds: None,
+        supports_websockets: None,
     }
 }
 
@@ -458,6 +459,30 @@ fn upsert_oauth_provider_drops_submitted_base_urls() {
 
     let saved = upsert(&db, params).expect("save oauth provider");
     assert!(saved.base_urls.is_empty());
+}
+
+#[test]
+fn upsert_defaults_and_persists_websocket_support_flag() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("providers_websocket_flag.db");
+    let db = crate::db::init_for_tests(&db_path).expect("init db");
+
+    let saved_default =
+        upsert(&db, default_provider_params("websocket-flag-default")).expect("save provider");
+    assert!(!saved_default.supports_websockets);
+
+    let mut params = default_provider_params("websocket-flag-enabled");
+    params.supports_websockets = Some(true);
+    let saved_enabled = upsert(&db, params).expect("save websocket provider");
+    assert!(saved_enabled.supports_websockets);
+
+    let gateway_provider =
+        list_enabled_for_gateway_in_mode(&db, "claude", None).expect("list gateway providers");
+    let from_gateway = gateway_provider
+        .into_iter()
+        .find(|provider| provider.id == saved_enabled.id)
+        .expect("gateway provider");
+    assert!(from_gateway.supports_websockets);
 }
 
 #[test]
@@ -509,6 +534,7 @@ fn create_oauth_provider_for_cas_test(db: &crate::db::Db, name: &str) -> i64 {
             source_provider_id: None,
             bridge_type: None,
             stream_idle_timeout_seconds: None,
+            supports_websockets: None,
         },
     )
     .expect("create oauth provider")

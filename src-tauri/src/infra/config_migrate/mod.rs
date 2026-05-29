@@ -99,6 +99,8 @@ pub struct ProviderExport {
     pub source_provider_id: Option<i64>,
     pub source_provider_cli_key: Option<String>,
     pub bridge_type: Option<String>,
+    #[serde(default)]
+    pub supports_websockets: bool,
 }
 
 #[derive(Serialize, Deserialize, specta::Type)]

@@ -132,6 +132,7 @@ export function buildProviderEditorUpsertInput(
     tags: ctx.tags,
     note: parsed.data.note,
     streamIdleTimeoutSeconds: parsedTimeout,
+    supportsWebsockets: ctx.supportsWebsockets,
     ...(ctx.cliKey === "claude" ? { claudeModels: ctx.claudeModels } : {}),
     sourceProviderId:
       ctx.authMode === "cx2cc" && !ctx.isCodexGatewaySource ? ctx.sourceProviderId : null,

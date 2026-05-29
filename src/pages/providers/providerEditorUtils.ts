@@ -24,6 +24,7 @@ export const DEFAULT_FORM_VALUES: ProviderEditorDialogFormInput = {
   daily_reset_mode: "fixed",
   daily_reset_time: "00:00:00",
   enabled: true,
+  supports_websockets: false,
   note: "",
 };
 
@@ -92,6 +93,7 @@ export function buildFormValues(initialValues: ProviderEditorInitialValues | nul
     daily_reset_mode: initialValues.daily_reset_mode,
     daily_reset_time: initialValues.daily_reset_time,
     enabled: initialValues.enabled,
+    supports_websockets: initialValues.supports_websockets ?? false,
     note: initialValues.note,
   };
 }

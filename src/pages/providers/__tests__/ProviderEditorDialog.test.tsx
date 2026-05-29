@@ -77,6 +77,7 @@ function makeProvider(partial: Partial<ProviderSummary> = {}): ProviderSummary {
     api_key_configured: partial.api_key_configured ?? false,
     ...partial,
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,
+    supports_websockets: partial.supports_websockets ?? false,
   };
 }
 
@@ -105,6 +106,7 @@ function makeInitialValues(
     bridge_type: null,
     ...partial,
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,
+    supports_websockets: partial.supports_websockets ?? false,
   };
 }
 
@@ -208,6 +210,12 @@ describe("pages/providers/ProviderEditorDialog", () => {
     });
 
     fireEvent.click(dialog.getByText("Claude 模型映射"));
+    fireEvent.click(
+      within(dialog.getByText("支持 WebSocket 上游").parentElement as HTMLElement).getByRole(
+        "switch"
+      )
+    );
+
     fireEvent.change(dialog.getByPlaceholderText(/minimax-text-01/), {
       target: { value: "x".repeat(201) },
     });
@@ -227,6 +235,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
           apiKey: "sk-test",
           enabled: true,
           costMultiplier: 1.0,
+          supportsWebsockets: true,
         })
       )
     );
@@ -749,7 +758,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
     fireEvent.change(dialog.getByPlaceholderText("例如: 1000"), { target: { value: "2" } });
 
     // Toggle enabled switch (covers Switch onCheckedChange handler)
-    fireEvent.click(dialog.getByRole("switch"));
+    fireEvent.click(dialog.getAllByRole("switch")[0]);
 
     // Drive Claude models onChange handlers
     fireEvent.click(dialog.getByText("Claude 模型映射"));

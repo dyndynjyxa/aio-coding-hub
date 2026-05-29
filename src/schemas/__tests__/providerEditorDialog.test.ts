@@ -21,6 +21,7 @@ describe("schemas/providerEditorDialog", () => {
       daily_reset_mode: "fixed",
       daily_reset_time: "00:00:00",
       enabled: true,
+      supports_websockets: false,
       note: "",
     } as const;
 
@@ -54,6 +55,7 @@ describe("schemas/providerEditorDialog", () => {
       daily_reset_mode: "fixed",
       daily_reset_time: "01:02",
       enabled: true,
+      supports_websockets: false,
       note: "",
     });
     expect(res.success).toBe(true);
@@ -74,6 +76,7 @@ describe("schemas/providerEditorDialog", () => {
       daily_reset_mode: "fixed",
       daily_reset_time: "25:00:00",
       enabled: true,
+      supports_websockets: false,
       note: "",
     });
     expect(bad.success).toBe(false);
@@ -102,6 +105,7 @@ describe("schemas/providerEditorDialog", () => {
       daily_reset_mode: "fixed",
       daily_reset_time: "00:00:00",
       enabled: true,
+      supports_websockets: false,
       note: "",
     });
     expect(ok.success).toBe(true);
@@ -123,6 +127,7 @@ describe("schemas/providerEditorDialog", () => {
       daily_reset_mode: "fixed",
       daily_reset_time: "00:00:00",
       enabled: true,
+      supports_websockets: false,
       note: "",
     });
     expect(badCost.success).toBe(false);
@@ -145,6 +150,7 @@ describe("schemas/providerEditorDialog", () => {
       daily_reset_mode: "fixed",
       daily_reset_time: "00:00:00",
       enabled: true,
+      supports_websockets: false,
       note: "",
     });
     expect(badLimit.success).toBe(false);
@@ -170,6 +176,7 @@ describe("schemas/providerEditorDialog", () => {
       daily_reset_mode: "fixed",
       daily_reset_time: "00:00:00",
       enabled: true,
+      supports_websockets: false,
       note: "",
     });
     expect(res.success).toBe(false);
@@ -193,6 +200,7 @@ describe("schemas/providerEditorDialog", () => {
       daily_reset_mode: "fixed",
       daily_reset_time: "00:00:00",
       enabled: true,
+      supports_websockets: false,
       note: "",
     });
     expect(res.success).toBe(false);
@@ -216,6 +224,7 @@ describe("schemas/providerEditorDialog", () => {
       daily_reset_mode: "fixed",
       daily_reset_time: "00:00:00",
       enabled: true,
+      supports_websockets: false,
       note: "",
     });
     expect(res.success).toBe(false);
@@ -241,6 +250,7 @@ describe("schemas/providerEditorDialog", () => {
       daily_reset_mode: "fixed",
       daily_reset_time: "00:00:00",
       enabled: true,
+      supports_websockets: false,
       note: "",
     });
     expect(res.success).toBe(false);
@@ -266,6 +276,7 @@ describe("schemas/providerEditorDialog", () => {
       daily_reset_mode: "fixed",
       daily_reset_time: "not-a-time",
       enabled: true,
+      supports_websockets: false,
       note: "",
     });
     expect(res.success).toBe(false);
@@ -291,6 +302,7 @@ describe("schemas/providerEditorDialog", () => {
       daily_reset_mode: "fixed",
       daily_reset_time: "",
       enabled: true,
+      supports_websockets: false,
       note: "",
     });
     expect(res.success).toBe(true);
@@ -314,6 +326,7 @@ describe("schemas/providerEditorDialog", () => {
       daily_reset_mode: "fixed",
       daily_reset_time: "00:00:00",
       enabled: true,
+      supports_websockets: false,
       note: "",
     });
     expect(res.success).toBe(true);

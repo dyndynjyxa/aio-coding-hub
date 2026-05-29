@@ -30,6 +30,7 @@ pub(crate) struct ProviderUpsertInput {
     pub source_provider_id: Option<i64>,
     pub bridge_type: Option<String>,
     pub stream_idle_timeout_seconds: Option<u32>,
+    pub supports_websockets: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -100,7 +101,8 @@ fn provider_runtime_reset_decision(
         || previous.auth_mode != next.auth_mode
         || submitted_api_key_changed(previous_api_key, submitted_api_key)
         || previous.source_provider_id != next.source_provider_id
-        || previous.bridge_type != next.bridge_type;
+        || previous.bridge_type != next.bridge_type
+        || previous.supports_websockets != next.supports_websockets;
 
     ProviderRuntimeResetDecision {
         clear_route_runtime_state: sensitive_config_changed,
@@ -149,6 +151,7 @@ pub(crate) async fn provider_upsert(
         source_provider_id,
         bridge_type,
         stream_idle_timeout_seconds,
+        supports_websockets,
     } = input;
 
     let is_create = provider_id.is_none();
@@ -195,6 +198,7 @@ pub(crate) async fn provider_upsert(
                 source_provider_id,
                 bridge_type,
                 stream_idle_timeout_seconds,
+                supports_websockets,
             },
         )?;
 
@@ -287,6 +291,7 @@ pub(crate) async fn provider_duplicate(
                 source_provider_id: source.source_provider_id,
                 bridge_type: source.bridge_type.clone(),
                 stream_idle_timeout_seconds: source.stream_idle_timeout_seconds,
+                supports_websockets: Some(source.supports_websockets),
             },
         )
     })
@@ -432,7 +437,8 @@ mod tests {
             "limitTotalUsd": null,
             "tags": ["x"],
             "note": "n",
-            "streamIdleTimeoutSeconds": 90
+            "streamIdleTimeoutSeconds": 90,
+            "supportsWebsockets": true
         }))
         .expect("deserialize provider input");
 
@@ -444,6 +450,7 @@ mod tests {
             Some(providers::DailyResetMode::Fixed)
         );
         assert_eq!(input.stream_idle_timeout_seconds, Some(90));
+        assert_eq!(input.supports_websockets, Some(true));
     }
 
     #[test]
@@ -505,6 +512,7 @@ mod tests {
             source_provider_id: None,
             bridge_type: None,
             stream_idle_timeout_seconds: None,
+            supports_websockets: false,
             api_key_configured: true,
         };
 
@@ -589,6 +597,7 @@ mod tests {
             source_provider_id: None,
             bridge_type: None,
             stream_idle_timeout_seconds: None,
+            supports_websockets: false,
             api_key_configured: true,
         };
 

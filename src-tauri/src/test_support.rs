@@ -313,6 +313,7 @@ pub fn provider_upsert_json<R: tauri::Runtime>(
             source_provider_id: None,
             bridge_type: None,
             stream_idle_timeout_seconds: None,
+            supports_websockets: None,
         },
     )?;
     serialize_json(provider)

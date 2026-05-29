@@ -16,6 +16,7 @@ function makeContext(
     tags: [],
     claudeModels: {},
     streamIdleTimeoutSeconds: "",
+    supportsWebsockets: false,
     apiKeyConfigured: false,
     isCodexGatewaySource: false,
     sourceProviderId: null,

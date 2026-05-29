@@ -165,6 +165,187 @@ describe("components/home/HomeRequestLogsPanel", () => {
     expect(onSelectLogId).toHaveBeenCalledWith(1);
   });
 
+  it("hides websocket audit-only logs from the home list", () => {
+    render(
+      <MemoryRouter>
+        <HomeRequestLogsPanel
+          showCustomTooltip={false}
+          compactModeOverride={false}
+          traces={[]}
+          requestLogs={makeRequestLogs([
+            {
+              id: 1,
+              trace_id: "ws-audit",
+              cli_key: "codex",
+              session_id: "my_test",
+              requested_model: null,
+              status: 101,
+              excluded_from_stats: true,
+              special_settings_json: JSON.stringify([{ type: "websocket_proxy" }]),
+              output_tokens: null,
+            },
+            {
+              id: 2,
+              trace_id: "normal",
+              cli_key: "codex",
+              session_id: "my_test",
+              requested_model: "gpt-5.5",
+              status: 200,
+              final_provider_name: "Provider Visible",
+              output_tokens: 3,
+            },
+          ])}
+          requestLogsLoading={false}
+          requestLogsRefreshing={false}
+          requestLogsAvailable={true}
+          onRefreshRequestLogs={vi.fn()}
+          selectedLogId={null}
+          onSelectLogId={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    expect(screen.queryByText("ws-audit")).not.toBeInTheDocument();
+    expect(screen.getByText("Provider Visible")).toBeInTheDocument();
+  });
+
+  it("marks visible websocket reconnect rows", () => {
+    render(
+      <MemoryRouter>
+        <HomeRequestLogsPanel
+          showCustomTooltip={false}
+          compactModeOverride={false}
+          traces={[]}
+          requestLogs={makeRequestLogs([
+            {
+              id: 1,
+              trace_id: "ws-connection-1",
+              cli_key: "codex",
+              session_id: "my_test",
+              status: 101,
+              excluded_from_stats: true,
+              special_settings_json: JSON.stringify([{ type: "websocket_proxy" }]),
+              created_at_ms: 1000,
+            },
+            {
+              id: 2,
+              trace_id: "ws-turn-2",
+              cli_key: "codex",
+              session_id: "my_test",
+              status: 101,
+              excluded_from_stats: false,
+              special_settings_json: JSON.stringify([
+                { type: "websocket_proxy" },
+                { type: "websocket_turn" },
+              ]),
+              requested_model: "gpt-5.5",
+              input_tokens: 10,
+              output_tokens: 2,
+              total_tokens: 12,
+              created_at_ms: 2000,
+            },
+          ])}
+          requestLogsLoading={false}
+          requestLogsRefreshing={false}
+          requestLogsAvailable={true}
+          onRefreshRequestLogs={vi.fn()}
+          selectedLogId={null}
+          onSelectLogId={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("Reconnect 1")).toBeInTheDocument();
+  });
+
+  it("shows codex websocket project badge from folder lookup", () => {
+    useCliSessionsFolderLookupByIdsQueryMock.mockReturnValue({
+      data: [
+        {
+          source: "codex",
+          session_id: "codex-session-1",
+          folder_name: "aio-coding-hub",
+          folder_path: "F:\\github\\aio-coding-hub",
+        },
+      ],
+      isLoading: false,
+    });
+
+    render(
+      <MemoryRouter>
+        <HomeRequestLogsPanel
+          showCustomTooltip={false}
+          compactModeOverride={false}
+          traces={[]}
+          requestLogs={makeRequestLogs([
+            {
+              id: 1,
+              trace_id: "ws-turn",
+              cli_key: "codex",
+              session_id: "codex-session-1",
+              status: 101,
+              excluded_from_stats: false,
+              special_settings_json: JSON.stringify([
+                { type: "websocket_proxy" },
+                { type: "websocket_turn" },
+              ]),
+              requested_model: "gpt-5.5",
+              input_tokens: 10,
+              output_tokens: 2,
+              total_tokens: 12,
+            },
+          ])}
+          requestLogsLoading={false}
+          requestLogsRefreshing={false}
+          requestLogsAvailable={true}
+          onRefreshRequestLogs={vi.fn()}
+          selectedLogId={null}
+          onSelectLogId={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("aio-coding-hub")).toBeInTheDocument();
+  });
+
+  it("does not show a codex websocket session id when folder lookup misses", () => {
+    render(
+      <MemoryRouter>
+        <HomeRequestLogsPanel
+          showCustomTooltip={false}
+          compactModeOverride={false}
+          traces={[]}
+          requestLogs={makeRequestLogs([
+            {
+              id: 1,
+              trace_id: "ws-turn",
+              cli_key: "codex",
+              session_id: "codex-session-missing",
+              status: 101,
+              excluded_from_stats: false,
+              special_settings_json: JSON.stringify([
+                { type: "websocket_proxy" },
+                { type: "websocket_turn" },
+              ]),
+              requested_model: "gpt-5.5",
+              input_tokens: 10,
+              output_tokens: 2,
+              total_tokens: 12,
+            },
+          ])}
+          requestLogsLoading={false}
+          requestLogsRefreshing={false}
+          requestLogsAvailable={true}
+          onRefreshRequestLogs={vi.fn()}
+          selectedLogId={null}
+          onSelectLogId={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    expect(screen.queryByText("codex-session-missing")).not.toBeInTheDocument();
+  });
+
   it("renders Claude model mapping from historical request logs", () => {
     render(
       <MemoryRouter>

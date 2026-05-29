@@ -184,6 +184,14 @@ describe("components/home/HomeLogShared", () => {
       special_settings_json: "bad-json",
     });
     expect(plain).toMatchObject({ muted: false, summary: null, providerFallbackText: null });
+
+    const websocket = buildRequestLogAuditMeta({
+      cli_key: "codex",
+      path: "/v1/realtime",
+      status: 101,
+      special_settings_json: JSON.stringify([{ type: "websocket_proxy" }]),
+    });
+    expect(websocket.tags.map((tag) => tag.label)).toContain("WS");
   });
 
   it("computes status badges across success, failover, errors, and client aborts", () => {
@@ -199,6 +207,10 @@ describe("components/home/HomeLogShared", () => {
     expect(computeStatusBadge({ status: 204, errorCode: null })).toMatchObject({
       text: "204 成功",
       semanticText: "请求成功",
+    });
+    expect(computeStatusBadge({ status: 101, errorCode: null })).toMatchObject({
+      text: expect.stringContaining("101"),
+      isError: false,
     });
     expect(computeStatusBadge({ status: 500, errorCode: null })).toMatchObject({
       text: "500 失败",

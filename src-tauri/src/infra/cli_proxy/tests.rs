@@ -310,6 +310,60 @@ trusted_roots = ["C:\\work"]
 }
 
 #[test]
+fn codex_proxy_uses_openai_provider_when_remote_compaction_is_enabled() {
+    let input = r#"model_provider = "OpenAI"
+
+[model_providers.OpenAI]
+name = "OpenAI"
+base_url = "http://old/v1"
+wire_api = "responses"
+
+[features]
+remote_compaction = true
+responses_websockets_v2 = true
+"#;
+
+    let out = build_codex_config_toml(
+        Some(input.as_bytes().to_vec()),
+        "http://new/v1",
+        CodexConfigPlatform::Other,
+    )
+    .expect("build");
+    let s = String::from_utf8(out).expect("utf8");
+
+    assert!(s.contains("model_provider = \"OpenAI\""), "{s}");
+    assert!(s.contains("[model_providers.OpenAI]"), "{s}");
+    assert!(s.contains("name = \"OpenAI\""), "{s}");
+    assert!(s.contains("base_url = \"http://new/v1\""), "{s}");
+    assert!(s.contains("supports_websockets = true"), "{s}");
+    assert!(s.contains("remote_compaction = true"), "{s}");
+    assert!(!s.contains("[model_providers.aio]"), "{s}");
+}
+
+#[test]
+fn codex_proxy_keeps_openai_provider_if_model_provider_already_openai() {
+    let input = r#"model_provider = "OpenAI"
+
+[model_providers.OpenAI]
+name = "OpenAI"
+base_url = "http://old/v1"
+"#;
+
+    let out = build_codex_config_toml(
+        Some(input.as_bytes().to_vec()),
+        "http://new/v1",
+        CodexConfigPlatform::Other,
+    )
+    .expect("build");
+    let s = String::from_utf8(out).expect("utf8");
+
+    assert!(s.contains("model_provider = \"OpenAI\""), "{s}");
+    assert!(s.contains("[model_providers.OpenAI]"), "{s}");
+    assert!(s.contains("supports_websockets = true"), "{s}");
+    assert!(!s.contains("[model_providers.aio]"), "{s}");
+}
+
+#[test]
 fn codex_proxy_dedupes_multiple_base_tables() {
     let input = r#"
 [model_providers."aio"]

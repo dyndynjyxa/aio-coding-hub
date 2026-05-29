@@ -61,6 +61,7 @@ export async function runProviderEditorSave(ctx: SaveActionContext) {
       tags: saved.tags,
       note: saved.note,
       stream_idle_timeout_seconds: saved.stream_idle_timeout_seconds,
+      supports_websockets: saved.supports_websockets,
     });
     toast(ctx.mode === "create" ? "Provider 已保存" : "Provider 已更新");
 

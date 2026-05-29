@@ -22,6 +22,30 @@ fn parse_openai_responses_usage_with_cached_tokens() {
 }
 
 #[test]
+fn parse_openai_realtime_usage_with_singular_cached_token_details() {
+    let body = br#"{"type":"response.done","response":{"model":"gpt-realtime","usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18,"input_token_details":{"cached_tokens":3}}}}"#;
+    let extract = parse_usage_from_json_bytes(body).expect("should parse usage");
+    assert_eq!(extract.metrics.input_tokens, Some(11));
+    assert_eq!(extract.metrics.output_tokens, Some(7));
+    assert_eq!(extract.metrics.total_tokens, Some(18));
+    assert_eq!(extract.metrics.cache_read_input_tokens, Some(3));
+}
+
+#[test]
+fn parse_usage_and_model_from_nested_realtime_payload() {
+    let body = br#"{"event":{"payload":{"type":"response.done","response":{"model":"gpt-realtime","usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18}}}}}"#;
+    let extract = parse_usage_from_json_bytes(body).expect("should parse usage");
+
+    assert_eq!(
+        parse_model_from_json_bytes(body).as_deref(),
+        Some("gpt-realtime")
+    );
+    assert_eq!(extract.metrics.input_tokens, Some(11));
+    assert_eq!(extract.metrics.output_tokens, Some(7));
+    assert_eq!(extract.metrics.total_tokens, Some(18));
+}
+
+#[test]
 fn parse_gemini_usage_metadata() {
     let body = br#"{"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":9,"thoughtsTokenCount":2,"totalTokenCount":19,"cachedContentTokenCount":4}}"#;
     let extract = parse_usage_from_json_bytes(body).expect("should parse usage");

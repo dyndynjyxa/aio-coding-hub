@@ -83,7 +83,8 @@ SELECT
   tags_json,
   note,
   source_provider_id,
-  bridge_type
+  bridge_type,
+  supports_websockets
 FROM providers
 ORDER BY cli_key ASC, sort_order ASC, id ASC
 "#,
@@ -146,6 +147,7 @@ ORDER BY cli_key ASC, sort_order ASC, id ASC
                     .get::<_, Option<i64>>("source_provider_id")?
                     .and_then(|source_id| provider_cli_key_by_id.get(&source_id).cloned()),
                 bridge_type: row.get("bridge_type")?,
+                supports_websockets: row.get::<_, i64>("supports_websockets")? != 0,
             })
         })
         .map_err(|e| db_err!("failed to query providers for export: {e}"))?;

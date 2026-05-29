@@ -105,6 +105,26 @@ fn extract_model_from_json_value(value: &Value) -> Option<String> {
     None
 }
 
+fn extract_model_recursive(value: &Value, depth: usize) -> Option<String> {
+    if depth > 8 {
+        return None;
+    }
+
+    if let Some(model) = extract_model_from_json_value(value) {
+        return Some(model);
+    }
+
+    match value {
+        Value::Object(obj) => obj
+            .values()
+            .find_map(|item| extract_model_recursive(item, depth + 1)),
+        Value::Array(items) => items
+            .iter()
+            .find_map(|item| extract_model_recursive(item, depth + 1)),
+        _ => None,
+    }
+}
+
 pub fn parse_model_from_json_bytes(body: &[u8]) -> Option<String> {
     let value: Value = serde_json::from_slice(body).ok()?;
 
@@ -123,7 +143,7 @@ pub fn parse_model_from_json_bytes(body: &[u8]) -> Option<String> {
         }
     }
 
-    None
+    extract_model_recursive(&value, 0)
 }
 
 fn extract_usage_metrics(value: &Value) -> Option<UsageMetrics> {
@@ -156,6 +176,11 @@ fn extract_usage_metrics(value: &Value) -> Option<UsageMetrics> {
     // OpenAI detail: input_tokens_details.cached_tokens OR prompt_tokens_details.cached_tokens
     metrics.cache_read_input_tokens = metrics.cache_read_input_tokens.or_else(|| {
         obj.get("input_tokens_details")
+            .and_then(|v| v.as_object())
+            .and_then(|m| as_i64(m.get("cached_tokens")))
+    });
+    metrics.cache_read_input_tokens = metrics.cache_read_input_tokens.or_else(|| {
+        obj.get("input_token_details")
             .and_then(|v| v.as_object())
             .and_then(|m| as_i64(m.get("cached_tokens")))
     });
@@ -280,9 +305,29 @@ fn extract_from_json_value(value: &Value) -> Option<UsageMetrics> {
     None
 }
 
+fn extract_from_json_value_recursive(value: &Value, depth: usize) -> Option<UsageMetrics> {
+    if depth > 8 {
+        return None;
+    }
+
+    if let Some(metrics) = extract_from_json_value(value) {
+        return Some(metrics);
+    }
+
+    match value {
+        Value::Object(obj) => obj
+            .values()
+            .find_map(|item| extract_from_json_value_recursive(item, depth + 1)),
+        Value::Array(items) => items
+            .iter()
+            .find_map(|item| extract_from_json_value_recursive(item, depth + 1)),
+        _ => None,
+    }
+}
+
 pub fn parse_usage_from_json_bytes(body: &[u8]) -> Option<UsageExtract> {
     let value: Value = serde_json::from_slice(body).ok()?;
-    let metrics = extract_from_json_value(&value)?;
+    let metrics = extract_from_json_value_recursive(&value, 0)?;
     Some(UsageExtract {
         usage_json: normalize_usage_json(&metrics),
         metrics,

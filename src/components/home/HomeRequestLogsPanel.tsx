@@ -48,6 +48,7 @@ import {
   getErrorCodeLabel,
   hasClaudeModelMappingSpecialSetting,
   hasPriorityServiceTierSpecialSetting,
+  hasRequestLogSpecialSettingType,
   resolveClaudeModelMappingFromSpecialSettings,
   resolveLiveTraceDurationMs,
   resolveLiveTraceProvider,
@@ -61,6 +62,7 @@ import {
   RefreshCw,
   ArrowUpRight,
   Loader2,
+  Wifi,
 } from "lucide-react";
 import { RealtimeTraceCards } from "./RealtimeTraceCards";
 import { CliBrandIcon } from "./CliBrandIcon";
@@ -90,6 +92,16 @@ function sessionFolderLookupKey(cliKey: string, sessionId: string | null | undef
   return `${cliKey}:${normalized}`;
 }
 
+function resolveSessionFolderForRequestLog(
+  log: RequestLogSummary,
+  trace: TraceSession | undefined,
+  folderLookupBySessionKey: Map<string, CliSessionsFolderLookupEntry>
+): CliSessionsFolderLookupEntry | null {
+  const sessionId = (log.session_id ?? trace?.session_id)?.trim();
+  const key = sessionFolderLookupKey(log.cli_key, sessionId);
+  return key ? (folderLookupBySessionKey.get(key) ?? null) : null;
+}
+
 function makeSortRequestLogsForDisplay(liveTraceIds: ReadonlySet<string>) {
   return (a: RequestLogSummary, b: RequestLogSummary) => {
     // Only treat a log as in-progress when the trace store still tracks it.
@@ -102,6 +114,44 @@ function makeSortRequestLogsForDisplay(liveTraceIds: ReadonlySet<string>) {
     if (aTsMs !== bTsMs) return bTsMs - aTsMs;
     return b.id - a.id;
   };
+}
+
+function isWebsocketAuditOnlyLog(log: RequestLogSummary) {
+  if (!hasRequestLogSpecialSettingType(log.special_settings_json, "websocket_proxy")) return false;
+  if (!log.excluded_from_stats) return false;
+  return (log.output_tokens ?? 0) <= 0;
+}
+
+function visibleRequestLogsForHomeList(requestLogs: RequestLogSummary[]) {
+  return requestLogs.filter((log) => !isWebsocketAuditOnlyLog(log));
+}
+
+function websocketConnectionGroupKey(log: RequestLogSummary) {
+  if (!hasRequestLogSpecialSettingType(log.special_settings_json, "websocket_proxy")) return null;
+  const sessionId = log.session_id?.trim();
+  if (!sessionId) return null;
+  return `${log.cli_key}:${sessionId}`;
+}
+
+function buildWebsocketReconnectCounts(requestLogs: RequestLogSummary[]) {
+  const ordered = requestLogs.slice().sort((a, b) => {
+    const aTs = requestLogCreatedAtMs(a);
+    const bTs = requestLogCreatedAtMs(b);
+    if (aTs !== bTs) return aTs - bTs;
+    return a.id - b.id;
+  });
+  const seenByGroup = new Map<string, number>();
+  const reconnectById = new Map<number, number>();
+
+  for (const log of ordered) {
+    const key = websocketConnectionGroupKey(log);
+    if (!key) continue;
+    const seen = seenByGroup.get(key) ?? 0;
+    if (seen > 0) reconnectById.set(log.id, seen);
+    seenByGroup.set(key, seen + 1);
+  }
+
+  return reconnectById;
 }
 
 function mergeTraceWithRequestLog(
@@ -175,6 +225,7 @@ type RequestLogCardProps = {
   compactMode: boolean;
   log: RequestLogSummary;
   liveTrace?: TraceSession;
+  reconnectCount?: number;
   nowMs: number;
   isSelected: boolean;
   sessionFolder?: CliSessionsFolderLookupEntry | null;
@@ -187,6 +238,7 @@ const RequestLogCard = memo(function RequestLogCard({
   compactMode,
   log,
   liveTrace,
+  reconnectCount,
   nowMs,
   isSelected,
   sessionFolder,
@@ -378,6 +430,16 @@ const RequestLogCard = memo(function RequestLogCard({
                   {getErrorCodeLabel(log.error_code)}
                 </span>
               )}
+
+              {reconnectCount ? (
+                <span
+                  className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md bg-cyan-50/80 px-2 py-0.5 text-[11px] font-semibold text-cyan-700 ring-1 ring-inset ring-cyan-500/10 dark:bg-cyan-500/15 dark:text-cyan-200 dark:ring-cyan-400/20"
+                  title="同一 session 的 WebSocket 已重新连接"
+                >
+                  <Wifi className="h-3 w-3 shrink-0" />
+                  Reconnect {reconnectCount}
+                </span>
+              ) : null}
 
               {auditMeta.tags.map((tag) => (
                 <span
@@ -853,12 +915,17 @@ const RequestLogsList = memo(function RequestLogsList({
   onSelectLogId,
 }: RequestLogsListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const websocketReconnectCounts = useMemo(
+    () => buildWebsocketReconnectCounts(requestLogs),
+    [requestLogs]
+  );
   const renderedRequestLogs = useMemo(() => {
-    if (realtimeTraceCandidates.length === 0) return requestLogs;
+    const visibleRequestLogs = visibleRequestLogsForHomeList(requestLogs);
+    if (realtimeTraceCandidates.length === 0) return visibleRequestLogs;
     const realtimeTraceIds = new Set(
       realtimeTraceCandidates.map((trace) => trace.trace_id?.trim()).filter(Boolean)
     );
-    return requestLogs.filter((log) => {
+    return visibleRequestLogs.filter((log) => {
       if (!isPersistedRequestLogInProgress(log)) return true;
       const traceId = log.trace_id?.trim();
       if (!traceId) return true;
@@ -885,16 +952,18 @@ const RequestLogsList = memo(function RequestLogsList({
       {renderedRequestLogs.map((log) => {
         const trace = tracesByTraceId.get(log.trace_id);
         const liveNow = trace && isPersistedRequestLogInProgress(log) ? nowMs : 0;
-        const sessionFolder = (() => {
-          const key = sessionFolderLookupKey(log.cli_key, log.session_id ?? trace?.session_id);
-          return key ? (folderLookupBySessionKey.get(key) ?? null) : null;
-        })();
+        const sessionFolder = resolveSessionFolderForRequestLog(
+          log,
+          trace,
+          folderLookupBySessionKey
+        );
         return (
           <RequestLogCard
             compactMode={compactMode}
             key={log.id}
             log={log}
             liveTrace={trace}
+            reconnectCount={websocketReconnectCounts.get(log.id)}
             nowMs={liveNow}
             isSelected={selectedLogId === log.id}
             sessionFolder={sessionFolder}
@@ -952,19 +1021,18 @@ const RequestLogsList = memo(function RequestLogsList({
               const vLog = renderedRequestLogs[virtualRow.index];
               const vTrace = tracesByTraceId.get(vLog.trace_id);
               const vNow = vTrace && isPersistedRequestLogInProgress(vLog) ? nowMs : 0;
-              const sessionFolder = (() => {
-                const key = sessionFolderLookupKey(
-                  vLog.cli_key,
-                  vLog.session_id ?? vTrace?.session_id
-                );
-                return key ? (folderLookupBySessionKey.get(key) ?? null) : null;
-              })();
+              const sessionFolder = resolveSessionFolderForRequestLog(
+                vLog,
+                vTrace,
+                folderLookupBySessionKey
+              );
               return (
                 <div key={vLog.id} data-index={virtualRow.index} ref={virtualizer.measureElement}>
                   <RequestLogCard
                     compactMode={compactMode}
                     log={vLog}
                     liveTrace={vTrace}
+                    reconnectCount={websocketReconnectCounts.get(vLog.id)}
                     nowMs={vNow}
                     isSelected={selectedLogId === vLog.id}
                     sessionFolder={sessionFolder}

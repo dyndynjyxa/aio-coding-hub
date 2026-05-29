@@ -88,6 +88,7 @@ function createProviderSummary(overrides: Partial<ProviderSummary> = {}): Provid
     source_provider_id: null,
     bridge_type: null,
     stream_idle_timeout_seconds: null,
+    supports_websockets: false,
     api_key_configured: false,
     ...overrides,
   };

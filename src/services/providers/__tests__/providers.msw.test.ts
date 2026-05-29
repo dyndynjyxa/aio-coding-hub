@@ -30,6 +30,7 @@ describe("services/providers via MSW bridge", () => {
       limitTotalUsd: 25,
       tags: ["a", "b"],
       note: "hello",
+      supportsWebsockets: true,
     });
 
     expect(saved).toMatchObject({
@@ -43,12 +44,14 @@ describe("services/providers via MSW bridge", () => {
       auth_mode: "api_key",
       tags: ["a", "b"],
       note: "hello",
+      supports_websockets: true,
     });
 
     expect(getProvidersState("claude")).toHaveLength(1);
     expect(getProvidersState("claude")[0]).toMatchObject({
       name: "Bridge Provider",
       limit_5h_usd: 5,
+      supports_websockets: true,
     });
   });
 

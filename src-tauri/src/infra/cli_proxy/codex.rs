@@ -11,6 +11,8 @@ use super::{
 };
 
 pub(super) const CODEX_PROVIDER_KEY: &str = "aio";
+/// Provider key used when remote_compaction is enabled (Codex requires "OpenAI" for Remote Compact).
+const CODEX_REMOTE_COMPACTION_PROVIDER_KEY: &str = "OpenAI";
 
 pub(super) fn codex_config_path<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
@@ -710,13 +712,17 @@ fn build_codex_config_toml_with_auth_strategy(
         input.lines().map(|l| l.to_string()).collect()
     };
 
-    upsert_root_model_provider(&mut lines, CODEX_PROVIDER_KEY);
+    let provider_key = codex_managed_provider_key_for_current_config(&lines);
+    upsert_root_model_provider(&mut lines, provider_key);
     if oauth_compatible {
         remove_root_preferred_auth_method_if_api_key(&mut lines);
     } else {
         upsert_root_preferred_auth_method(&mut lines, "apikey");
     }
-    upsert_model_provider_base_table(&mut lines, CODEX_PROVIDER_KEY, base_url);
+    if provider_key == CODEX_REMOTE_COMPACTION_PROVIDER_KEY {
+        remove_model_provider_section(&mut lines, CODEX_PROVIDER_KEY);
+    }
+    upsert_model_provider_base_table(&mut lines, provider_key, base_url);
     if platform == CodexConfigPlatform::Windows {
         upsert_windows_sandbox(&mut lines);
     }
@@ -724,6 +730,57 @@ fn build_codex_config_toml_with_auth_strategy(
     let mut out = lines.join("\n");
     out.push('\n');
     Ok(out.into_bytes())
+}
+
+fn codex_managed_provider_key_for_current_config(lines: &[String]) -> &'static str {
+    if codex_config_remote_compaction_enabled(lines)
+        || codex_config_root_model_provider_is(lines, CODEX_REMOTE_COMPACTION_PROVIDER_KEY)
+    {
+        CODEX_REMOTE_COMPACTION_PROVIDER_KEY
+    } else {
+        CODEX_PROVIDER_KEY
+    }
+}
+
+fn codex_config_remote_compaction_enabled(lines: &[String]) -> bool {
+    let mut in_features = false;
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            in_features = trimmed == "[features]";
+            continue;
+        }
+        if !in_features || trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = trimmed.split_once('=') else {
+            continue;
+        };
+        if key.trim() == "remote_compaction" {
+            return value.trim().trim_end_matches(',') == "true";
+        }
+    }
+    false
+}
+
+fn codex_config_root_model_provider_is(lines: &[String], provider_key: &str) -> bool {
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            return false;
+        }
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = trimmed.split_once('=') else {
+            continue;
+        };
+        if key.trim() != "model_provider" {
+            continue;
+        }
+        return value.trim().trim_matches('"') == provider_key;
+    }
+    false
 }
 
 pub(super) fn build_codex_auth_json(current: Option<Vec<u8>>) -> AppResult<Vec<u8>> {
@@ -756,9 +813,6 @@ pub(super) fn build_codex_auth_json(current: Option<Vec<u8>>) -> AppResult<Vec<u
     out.push(b'\n');
     Ok(out)
 }
-
-/// Provider key used when remote_compaction is enabled (Codex requires "OpenAI" for Remote Compact).
-const CODEX_REMOTE_COMPACTION_PROVIDER_KEY: &str = "OpenAI";
 
 /// Check whether Codex proxy config is currently applied.
 /// Supports both normal mode (provider key = "aio") and remote_compaction mode (provider key = "OpenAI").

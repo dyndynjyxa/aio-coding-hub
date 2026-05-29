@@ -45,6 +45,11 @@ fn decode_provider_row(
         oauth_provider_type: row.get("oauth_provider_type")?,
         source_provider_id: row.get("source_provider_id")?,
         bridge_type: row.get("bridge_type").unwrap_or(None),
+        supports_websockets: row
+            .get::<_, Option<i64>>("supports_websockets")
+            .unwrap_or(None)
+            .unwrap_or(0)
+            != 0,
     })
 }
 
@@ -84,6 +89,7 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<ProviderSummary, rusqlite::
         stream_idle_timeout_seconds: parse_positive_optional_u32(
             row.get("stream_idle_timeout_seconds").unwrap_or(None),
         ),
+        supports_websockets: decoded.supports_websockets,
         api_key_configured: row
             .get::<_, Option<i64>>("api_key_configured")
             .unwrap_or(None)
@@ -128,6 +134,7 @@ SELECT
   source_provider_id,
   bridge_type,
   stream_idle_timeout_seconds,
+  supports_websockets,
   CASE WHEN COALESCE(api_key_plaintext, '') = '' THEN 0 ELSE 1 END AS api_key_configured
 FROM providers
 WHERE id = ?1
@@ -385,6 +392,7 @@ SELECT
   source_provider_id,
   bridge_type,
   stream_idle_timeout_seconds,
+  supports_websockets,
   CASE WHEN COALESCE(api_key_plaintext, '') = '' THEN 0 ELSE 1 END AS api_key_configured
 FROM providers
 WHERE cli_key = ?1
@@ -434,6 +442,7 @@ fn map_gateway_provider_row(
         stream_idle_timeout_seconds: parse_positive_optional_u32(
             row.get("stream_idle_timeout_seconds").unwrap_or(None),
         ),
+        supports_websockets: decoded.supports_websockets,
     })
 }
 
@@ -465,7 +474,8 @@ SELECT
   p.oauth_provider_type,
   p.source_provider_id,
   p.bridge_type,
-  p.stream_idle_timeout_seconds
+  p.stream_idle_timeout_seconds,
+  p.supports_websockets
 FROM sort_mode_providers mp
 JOIN providers p ON p.id = mp.provider_id
 WHERE mp.mode_id = ?1
@@ -517,7 +527,8 @@ SELECT
   oauth_provider_type,
   source_provider_id,
   bridge_type,
-  stream_idle_timeout_seconds
+  stream_idle_timeout_seconds,
+  supports_websockets
 FROM providers
 WHERE cli_key = ?1
   AND enabled = 1
@@ -644,7 +655,8 @@ SELECT
   oauth_provider_type,
   source_provider_id,
   bridge_type,
-  stream_idle_timeout_seconds
+  stream_idle_timeout_seconds,
+  supports_websockets
 FROM providers
 WHERE id = ?1 AND enabled = 1 AND source_provider_id IS NULL AND cli_key = 'codex'
 "#,
@@ -696,6 +708,7 @@ pub fn upsert(
         source_provider_id,
         bridge_type,
         stream_idle_timeout_seconds,
+        supports_websockets,
     } = input;
     let cli_key = cli_key.trim();
     validate_cli_key(cli_key)?;
@@ -798,6 +811,8 @@ pub fn upsert(
     let stream_idle_timeout_seconds_specified = stream_idle_timeout_seconds.is_some();
     let stream_idle_timeout_seconds =
         normalize_stream_idle_timeout_seconds(stream_idle_timeout_seconds)?;
+    let supports_websockets_specified = supports_websockets.is_some();
+    let supports_websockets = supports_websockets.unwrap_or(false);
 
     let api_key = api_key.as_deref().map(str::trim).filter(|v| !v.is_empty());
 
@@ -884,9 +899,10 @@ INSERT INTO providers(
   source_provider_id,
   bridge_type,
   stream_idle_timeout_seconds,
+  supports_websockets,
   created_at,
   updated_at
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '{}', '{}', ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '{}', '{}', ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)
 "#,
                 params![
                     cli_key,
@@ -913,6 +929,7 @@ INSERT INTO providers(
                     source_provider_id,
                     bridge_type,
                     stream_idle_timeout_seconds,
+                    enabled_to_int(supports_websockets),
                     now,
                     now
                 ],
@@ -947,12 +964,13 @@ INSERT INTO providers(
                 String,
                 String,
                 Option<i64>,
+                i64,
             );
             let existing: Option<ExistingProviderRow> = tx
                 .query_row(
-                    "SELECT cli_key, api_key_plaintext, priority, claude_models_json, auth_mode, daily_reset_mode, daily_reset_time, tags_json, note, stream_idle_timeout_seconds FROM providers WHERE id = ?1",
+                    "SELECT cli_key, api_key_plaintext, priority, claude_models_json, auth_mode, daily_reset_mode, daily_reset_time, tags_json, note, stream_idle_timeout_seconds, supports_websockets FROM providers WHERE id = ?1",
                     params![id],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?)),
                 )
                 .optional()
                 .map_err(|e| db_err!("failed to query provider: {e}"))?;
@@ -968,6 +986,7 @@ INSERT INTO providers(
                 existing_tags_json,
                 existing_note,
                 existing_stream_idle_timeout_seconds,
+                existing_supports_websockets,
             )) = existing
             else {
                 return Err("DB_NOT_FOUND: provider not found".to_string().into());
@@ -1045,6 +1064,11 @@ INSERT INTO providers(
             } else {
                 parse_positive_optional_u32(existing_stream_idle_timeout_seconds)
             };
+            let next_supports_websockets = if supports_websockets_specified {
+                supports_websockets
+            } else {
+                existing_supports_websockets != 0
+            };
 
             tx.execute(
                 r#"
@@ -1074,8 +1098,9 @@ SET
   source_provider_id = ?20,
   bridge_type = ?21,
   stream_idle_timeout_seconds = ?22,
-  updated_at = ?23
-WHERE id = ?24
+  supports_websockets = ?23,
+  updated_at = ?24
+WHERE id = ?25
 "#,
                 params![
                     name,
@@ -1100,6 +1125,7 @@ WHERE id = ?24
                     source_provider_id,
                     bridge_type,
                     next_stream_idle_timeout_seconds,
+                    enabled_to_int(next_supports_websockets),
                     now,
                     id
                 ],

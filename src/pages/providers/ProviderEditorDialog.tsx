@@ -104,6 +104,22 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
           />
         </FormField>
 
+        <FormField
+          label="WebSocket"
+          hint="仅当上游明确支持 Responses WebSocket 时开启；关闭时 WS 请求会跳过该 Provider。"
+        >
+          <div className="flex items-center justify-between rounded-md border border-border px-3 py-2 dark:border-border">
+            <span className="text-sm text-secondary-foreground">支持 WebSocket 上游</span>
+            <Switch
+              checked={f.supportsWebsockets}
+              onCheckedChange={(checked) =>
+                f.setValue("supports_websockets", checked, { shouldDirty: true })
+              }
+              disabled={f.saving}
+            />
+          </div>
+        </FormField>
+
         <LimitsSection form={f} />
         <ClaudeModelSection form={f} />
 

@@ -11,7 +11,7 @@ pub(super) fn cost_usd_from_femto(cost_usd_femto: Option<i64>) -> Option<f64> {
 }
 
 pub(super) fn is_success_status(status: Option<i64>, error_code: Option<&str>) -> bool {
-    status.is_some_and(|v| (200..300).contains(&v)) && error_code.is_none()
+    status.is_some_and(|v| v == 101 || (200..300).contains(&v)) && error_code.is_none()
 }
 
 pub(super) fn usage_for_cost(item: &RequestLogInsert) -> cost::CostUsage {

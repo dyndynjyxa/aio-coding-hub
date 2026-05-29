@@ -93,6 +93,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
 
   const { register, reset, setValue, watch } = form;
   const enabled = watch("enabled");
+  const supportsWebsockets = watch("supports_websockets");
   const dailyResetMode = watch("daily_reset_mode");
   const limit5hUsd = watch("limit_5h_usd");
   const limitDailyUsd = watch("limit_daily_usd");
@@ -191,6 +192,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       tags,
       claudeModels,
       streamIdleTimeoutSeconds,
+      supportsWebsockets,
       apiKeyConfigured,
       isCodexGatewaySource,
       sourceProviderId,
@@ -207,6 +209,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       tags,
       claudeModels,
       streamIdleTimeoutSeconds,
+      supportsWebsockets,
       apiKeyConfigured,
       isCodexGatewaySource,
       sourceProviderId,
@@ -320,6 +323,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     setValue,
     watch,
     enabled,
+    supportsWebsockets,
     dailyResetMode,
     limit5hUsd,
     limitDailyUsd,

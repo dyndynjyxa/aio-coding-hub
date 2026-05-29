@@ -7,7 +7,7 @@ import {
 import { logToConsole } from "../services/consoleLog";
 import { subscribeGatewayEvent } from "../services/gateway/gatewayEventBus";
 import { normalizeGatewayRequestSignalEvent } from "../services/gateway/gatewayEvents";
-import { isRequestSignalComplete } from "../services/gateway/requestLogState";
+import { isRequestSignalLogRefreshTrigger } from "../services/gateway/requestLogState";
 import { useCoalescedAsyncRefresh } from "./useCoalescedAsyncRefresh";
 import { useDocumentVisibility } from "./useDocumentVisibility";
 import { useWindowForeground } from "./useWindowForeground";
@@ -85,7 +85,7 @@ export function useRequestLogsFeed({
         return;
       }
 
-      if (!isRequestSignalComplete(requestSignal)) {
+      if (!isRequestSignalLogRefreshTrigger(requestSignal)) {
         return;
       }
 

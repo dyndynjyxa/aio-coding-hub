@@ -150,6 +150,7 @@ describe("components/cli-manager/tabs/CodexTab", () => {
     fireEvent.click(within(websocketItem as HTMLElement).getByRole("switch"));
     expect(persistCodexConfig).toHaveBeenCalledWith({
       features_responses_websockets_v2: true,
+      model_providers_aio_supports_websockets: true,
     });
 
     const providerWebsocketItem =

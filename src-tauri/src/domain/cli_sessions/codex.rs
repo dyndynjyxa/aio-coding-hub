@@ -649,8 +649,8 @@ fn folder_lookup_in_files(
 
         let folder_path = meta
             .as_ref()
-            .and_then(|value| value.cwd.clone())
-            .or_else(|| meta.as_ref().and_then(|value| value.project_path.clone()))
+            .and_then(|value| value.project_path.clone())
+            .or_else(|| meta.as_ref().and_then(|value| value.cwd.clone()))
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
         let Some(folder_path) = folder_path else {
@@ -946,7 +946,7 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn folder_lookup_prefers_cwd_and_falls_back_to_project_path() {
+    fn folder_lookup_prefers_project_path_and_falls_back_to_cwd() {
         let dir = tempdir().unwrap();
         let sessions_dir = dir.path();
         let day_dir = sessions_dir.join("2026").join("04").join("06");
@@ -979,12 +979,12 @@ mod tests {
 
         assert_eq!(out.len(), 2);
 
-        let cwd_entry = out
+        let project_entry = out
             .iter()
             .find(|item| item.session_id == "codex-cwd")
             .unwrap();
-        assert_eq!(cwd_entry.folder_name, "current");
-        assert_eq!(cwd_entry.folder_path, "/Users/demo/worktrees/current");
+        assert_eq!(project_entry.folder_name, "fallback");
+        assert_eq!(project_entry.folder_path, "/Users/demo/worktrees/fallback");
 
         let fallback_entry = out
             .iter()

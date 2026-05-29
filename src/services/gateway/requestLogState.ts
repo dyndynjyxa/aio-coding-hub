@@ -33,3 +33,7 @@ export function isPersistedRequestLogInProgress(log: RequestLogProgressInput) {
 export function isRequestSignalComplete(signal: RequestSignalLike | null | undefined) {
   return signal?.phase === "complete";
 }
+
+export function isRequestSignalLogRefreshTrigger(signal: RequestSignalLike | null | undefined) {
+  return signal?.phase === "start" || signal?.phase === "complete";
+}

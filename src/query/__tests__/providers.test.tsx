@@ -91,6 +91,7 @@ function makeProvider(
     source_provider_id: partial.source_provider_id ?? null,
     bridge_type: partial.bridge_type ?? null,
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,
+    supports_websockets: partial.supports_websockets ?? false,
     api_key_configured: partial.api_key_configured ?? false,
   };
 }

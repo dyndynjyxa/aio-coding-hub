@@ -81,6 +81,7 @@ type ProviderUpsertFieldMap = {
   sourceProviderId: "sourceProviderId";
   bridgeType: "bridgeType";
   streamIdleTimeoutSeconds: "streamIdleTimeoutSeconds";
+  supportsWebsockets: "supportsWebsockets";
 };
 
 type ProviderUpsertAuthority = RemapGeneratedKeys<
@@ -91,7 +92,8 @@ type ProviderUpsertAuthority = RemapGeneratedKeys<
 
 type ProviderUpsertOptionalKeys =
   | NullableGeneratedKeys<ProviderUpsertAuthority>
-  | "streamIdleTimeoutSeconds";
+  | "streamIdleTimeoutSeconds"
+  | "supportsWebsockets";
 
 export type ProviderUpsertInput = Omit<
   ProviderUpsertAuthority,
@@ -102,9 +104,10 @@ export type ProviderUpsertInput = Omit<
 
 type ProviderUpsertTransportInput = Omit<
   GeneratedProviderUpsertInput,
-  "streamIdleTimeoutSeconds"
+  "streamIdleTimeoutSeconds" | "supportsWebsockets"
 > & {
   streamIdleTimeoutSeconds?: GeneratedProviderUpsertInput["streamIdleTimeoutSeconds"];
+  supportsWebsockets?: GeneratedProviderUpsertInput["supportsWebsockets"];
 };
 
 function toCliKey(value: string, label: string): CliKey {
@@ -169,16 +172,22 @@ function toProviderUpsertPayload(input: ProviderUpsertInput): ProviderUpsertTran
     note: input.note ?? null,
     sourceProviderId,
     bridgeType: input.bridgeType ?? null,
-  } satisfies Omit<GeneratedProviderUpsertInput, "streamIdleTimeoutSeconds">;
+  } satisfies Omit<GeneratedProviderUpsertInput, "streamIdleTimeoutSeconds" | "supportsWebsockets">;
+  const payloadWithWebsockets = Object.prototype.hasOwnProperty.call(input, "supportsWebsockets")
+    ? {
+        ...payloadBase,
+        supportsWebsockets: input.supportsWebsockets ?? false,
+      }
+    : payloadBase;
 
   if (Object.prototype.hasOwnProperty.call(input, "streamIdleTimeoutSeconds")) {
     return {
-      ...payloadBase,
+      ...payloadWithWebsockets,
       streamIdleTimeoutSeconds: input.streamIdleTimeoutSeconds ?? 0,
     } satisfies ProviderUpsertTransportInput;
   }
 
-  return payloadBase;
+  return payloadWithWebsockets;
 }
 
 function validateOrderedProviderIds(orderedProviderIds: number[]) {

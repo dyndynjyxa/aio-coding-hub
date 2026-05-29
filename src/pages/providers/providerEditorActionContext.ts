@@ -48,6 +48,7 @@ export type FormActionContext = {
   claudeModels: ClaudeModels;
   streamIdleTimeoutSeconds: string;
   apiKeyConfigured: boolean;
+  supportsWebsockets: boolean;
   apiKeyValue: string;
   form: {
     getValues: () => ProviderEditorDialogFormInput;
@@ -69,6 +70,7 @@ export type ProviderEditorPayloadContext = {
   tags: string[];
   claudeModels: ClaudeModels;
   streamIdleTimeoutSeconds: string;
+  supportsWebsockets: boolean;
   apiKeyConfigured: boolean;
   isCodexGatewaySource: boolean;
   sourceProviderId: number | null;

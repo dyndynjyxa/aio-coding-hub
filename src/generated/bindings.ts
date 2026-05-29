@@ -2546,6 +2546,7 @@ export type ProviderSummary = {
   source_provider_id: number | null;
   bridge_type: string | null;
   stream_idle_timeout_seconds: number | null;
+  supports_websockets: boolean;
   api_key_configured: boolean;
 };
 export type ProviderUpsertInput = {
@@ -2572,6 +2573,7 @@ export type ProviderUpsertInput = {
   sourceProviderId: number | null;
   bridgeType: string | null;
   streamIdleTimeoutSeconds: number | null;
+  supportsWebsockets: boolean | null;
 };
 export type RequestAttemptLog = {
   id: number;

@@ -378,6 +378,7 @@ fn config_import_v2_restores_full_prompt_and_skill_payload() {
             source_provider_id: None,
             source_provider_cli_key: None,
             bridge_type: None,
+            supports_websockets: true,
         }],
         sort_modes: Vec::new(),
         sort_mode_active: HashMap::new(),

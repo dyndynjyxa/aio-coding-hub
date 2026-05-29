@@ -170,6 +170,7 @@ export function useProviderEditorEffects(d: EffectDeps) {
       daily_reset_mode: snapshot.daily_reset_mode ?? "fixed",
       daily_reset_time: snapshot.daily_reset_time ?? "00:00:00",
       enabled: snapshot.enabled,
+      supports_websockets: snapshot.supports_websockets ?? false,
       note: snapshot.note ?? "",
     });
     return () => {

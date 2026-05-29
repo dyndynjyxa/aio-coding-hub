@@ -33,6 +33,7 @@ function createProvider(overrides: Record<string, unknown> = {}) {
     oauth_last_error: null,
     source_provider_id: null,
     bridge_type: null,
+    supports_websockets: false,
     ...overrides,
   } as any;
 }
@@ -74,6 +75,7 @@ describe("pages/providers/providerDuplicate", () => {
       source_provider_id: null,
       bridge_type: null,
       stream_idle_timeout_seconds: null,
+      supports_websockets: false,
     });
     expect(duplicated.base_urls).toEqual(["https://a.example.com", "https://b.example.com"]);
     expect(duplicated.tags).toEqual(["tag-a", "tag-b"]);

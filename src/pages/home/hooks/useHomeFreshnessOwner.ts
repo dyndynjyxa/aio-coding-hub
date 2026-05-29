@@ -5,7 +5,7 @@ import { useWindowForeground } from "../../../hooks/useWindowForeground";
 import { logToConsole } from "../../../services/consoleLog";
 import { subscribeGatewayEvent } from "../../../services/gateway/gatewayEventBus";
 import { normalizeGatewayRequestSignalEvent } from "../../../services/gateway/gatewayEvents";
-import { isRequestSignalComplete } from "../../../services/gateway/requestLogState";
+import { isRequestSignalLogRefreshTrigger } from "../../../services/gateway/requestLogState";
 
 type RefreshSource = "request_signal.complete" | "foreground" | "manual";
 
@@ -86,7 +86,7 @@ export function useHomeFreshnessOwner({
         return;
       }
 
-      if (!isRequestSignalComplete(requestSignal)) {
+      if (!isRequestSignalLogRefreshTrigger(requestSignal)) {
         return;
       }
 

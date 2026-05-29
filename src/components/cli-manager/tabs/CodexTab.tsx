@@ -1317,7 +1317,10 @@ export function CliManagerCodexTab({
                   <Switch
                     checked={boolOrDefault(codexConfig.features_responses_websockets_v2, false)}
                     onCheckedChange={(checked) =>
-                      void persistCodexConfig({ features_responses_websockets_v2: checked })
+                      void persistCodexConfig({
+                        features_responses_websockets_v2: checked,
+                        ...(checked ? { model_providers_aio_supports_websockets: true } : {}),
+                      })
                     }
                     disabled={saving}
                   />

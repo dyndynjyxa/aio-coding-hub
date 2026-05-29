@@ -79,6 +79,7 @@ pub(super) fn import_into_transaction(
             source_provider_id,
             source_provider_cli_key,
             bridge_type,
+            supports_websockets,
         } = provider;
 
         let sort_order = provider_sort_order_by_cli_key
@@ -128,9 +129,10 @@ INSERT INTO providers(
   oauth_last_error,
   source_provider_id,
   bridge_type,
+  supports_websockets,
   created_at,
   updated_at
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, NULL, ?36, ?37, ?37)
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, NULL, ?36, ?37, ?38, ?38)
 "#,
             params![
                 cli_key,
@@ -169,6 +171,7 @@ INSERT INTO providers(
                 oauth_last_refreshed_at,
                 oauth_last_error,
                 bridge_type,
+                bool_to_int(supports_websockets),
                 now,
             ],
         )

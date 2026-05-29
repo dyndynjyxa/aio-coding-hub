@@ -35,6 +35,7 @@ fn provider_for_base_url_test(
         source_provider_id: None,
         bridge_type: None,
         stream_idle_timeout_seconds: None,
+        supports_websockets: false,
     }
 }
 

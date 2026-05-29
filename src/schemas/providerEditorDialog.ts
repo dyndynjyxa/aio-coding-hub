@@ -106,6 +106,7 @@ export function createProviderEditorDialogSchema(options: {
       daily_reset_mode: z.enum(["fixed", "rolling"]),
       daily_reset_time: parseResetTimeHms(),
       enabled: z.boolean(),
+      supports_websockets: z.boolean(),
       note: z.string().trim().max(500, { message: "备注不能超过 500 字符" }),
     })
     .superRefine((values, ctx) => {

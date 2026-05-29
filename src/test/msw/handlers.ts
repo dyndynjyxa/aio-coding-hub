@@ -217,6 +217,10 @@ export const handlers = [
             ? input.streamIdleTimeoutSeconds
             : null
           : (existing?.stream_idle_timeout_seconds ?? null),
+      supports_websockets:
+        typeof input.supportsWebsockets === "boolean"
+          ? input.supportsWebsockets
+          : (existing?.supports_websockets ?? false),
     };
 
     setProvidersState(
