@@ -99,7 +99,7 @@ pub(super) fn mark_internal_forwarded_request(headers: &mut HeaderMap) {
     );
 }
 
-fn compute_observe_request(
+pub(super) fn compute_observe_request(
     cli_key: &str,
     forwarded_path: &str,
     headers: &HeaderMap,
