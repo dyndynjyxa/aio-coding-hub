@@ -101,6 +101,10 @@ pub(crate) fn app_gateway_clear_cli_route_runtime_state<R: tauri::Runtime>(
     })
 }
 
+pub(crate) fn app_gateway_close_provider_websockets(provider_id: i64) -> usize {
+    gateway::close_active_provider_websockets(provider_id)
+}
+
 pub(crate) fn try_app_gateway_update_circuit_config<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     failure_threshold: u32,

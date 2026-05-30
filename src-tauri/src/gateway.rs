@@ -54,3 +54,7 @@ pub(crate) fn listen_rebind_required(
 ) -> bool {
     binder::listen_rebind_required(previous, next)
 }
+
+pub(crate) fn close_active_provider_websockets(provider_id: i64) -> usize {
+    proxy::close_active_provider_websockets(provider_id)
+}

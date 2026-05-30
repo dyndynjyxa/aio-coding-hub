@@ -26,6 +26,7 @@ use futures_util::{SinkExt, StreamExt};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
+use tokio::sync::watch;
 use tokio_tungstenite::tungstenite::{self, client::IntoClientRequest};
 
 type UpstreamWsStream =
@@ -40,6 +41,9 @@ const WEBSOCKET_UNSUPPORTED_CACHE_SECS: i64 = 10 * 60;
 static WEBSOCKET_CONNECTION_REGISTRY: OnceLock<Mutex<HashMap<String, WebsocketConnectionStats>>> =
     OnceLock::new();
 static WEBSOCKET_UNSUPPORTED_CACHE: OnceLock<Mutex<HashMap<String, i64>>> = OnceLock::new();
+static WEBSOCKET_ACTIVE_CONNECTIONS: OnceLock<
+    Mutex<HashMap<i64, HashMap<String, watch::Sender<u64>>>>,
+> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy)]
 struct WebsocketConnectionStats {
@@ -606,14 +610,65 @@ async fn relay_websocket<R: tauri::Runtime>(
     upstream_socket: UpstreamWsStream,
     observation: WebsocketObservation<R>,
 ) {
-    let relay_metadata =
-        relay_websocket_messages(client_socket, upstream_socket, &observation).await;
+    let mut provider_close_rx =
+        register_active_websocket_connection(observation.provider_id, &observation.trace_id);
+    let relay_metadata = relay_websocket_messages(
+        client_socket,
+        upstream_socket,
+        &observation,
+        &mut provider_close_rx,
+    )
+    .await;
+    unregister_active_websocket_connection(observation.provider_id, &observation.trace_id);
     let ttfb_ms = relay_metadata.first_token_ms;
     record_websocket_request_end(
         observation,
         WebsocketCompletion::success(ttfb_ms),
         relay_metadata,
     );
+}
+
+pub(in crate::gateway) fn close_active_provider_websockets(provider_id: i64) -> usize {
+    let registry = WEBSOCKET_ACTIVE_CONNECTIONS.get_or_init(|| Mutex::new(HashMap::new()));
+    let Ok(mut registry) = registry.lock() else {
+        return 0;
+    };
+    let Some(connections) = registry.remove(&provider_id) else {
+        return 0;
+    };
+    let count = connections.len();
+    for tx in connections.into_values() {
+        let _ = tx.send(1);
+    }
+    count
+}
+
+fn register_active_websocket_connection(provider_id: i64, trace_id: &str) -> watch::Receiver<u64> {
+    let (tx, rx) = watch::channel(0);
+    let registry = WEBSOCKET_ACTIVE_CONNECTIONS.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(mut registry) = registry.lock() {
+        registry
+            .entry(provider_id)
+            .or_default()
+            .insert(trace_id.to_string(), tx);
+    }
+    rx
+}
+
+fn unregister_active_websocket_connection(provider_id: i64, trace_id: &str) {
+    let Some(registry) = WEBSOCKET_ACTIVE_CONNECTIONS.get() else {
+        return;
+    };
+    let Ok(mut registry) = registry.lock() else {
+        return;
+    };
+    let Some(connections) = registry.get_mut(&provider_id) else {
+        return;
+    };
+    connections.remove(trace_id);
+    if connections.is_empty() {
+        registry.remove(&provider_id);
+    }
 }
 
 fn emit_websocket_request_start<R: tauri::Runtime>(observation: &WebsocketObservation<R>) {
@@ -977,6 +1032,7 @@ async fn relay_websocket_messages<R: tauri::Runtime>(
     client_socket: WebSocket,
     upstream_socket: UpstreamWsStream,
     observation: &WebsocketObservation<R>,
+    provider_close_rx: &mut watch::Receiver<u64>,
 ) -> WebsocketRelayMetadata {
     let (mut client_tx, mut client_rx) = client_socket.split();
     let (mut upstream_tx, mut upstream_rx) = upstream_socket.split();
@@ -991,6 +1047,15 @@ async fn relay_websocket_messages<R: tauri::Runtime>(
 
     loop {
         tokio::select! {
+            changed = provider_close_rx.changed() => {
+                if changed.is_ok() {
+                    emit_websocket_relay_debug(
+                        observation,
+                        "websocket provider config changed, closing active connection",
+                    );
+                }
+                break;
+            }
             _ = heartbeat.tick() => {
                 emit_websocket_progress_event(observation);
             }
@@ -1805,6 +1870,27 @@ mod tests {
 
         assert!(websocket_turn_excluded_from_stats(&input_only_turn));
         assert!(!websocket_turn_excluded_from_stats(&answered_turn));
+    }
+
+    #[test]
+    fn active_provider_websocket_registry_closes_registered_connections() {
+        let provider_id = 9_001_001;
+        let mut close_rx = register_active_websocket_connection(provider_id, "trace-close");
+
+        assert_eq!(close_active_provider_websockets(provider_id), 1);
+        assert!(close_rx.has_changed().expect("close signal available"));
+        assert_eq!(*close_rx.borrow_and_update(), 1);
+        assert_eq!(close_active_provider_websockets(provider_id), 0);
+    }
+
+    #[test]
+    fn active_provider_websocket_registry_unregisters_finished_connections() {
+        let provider_id = 9_001_002;
+        let close_rx = register_active_websocket_connection(provider_id, "trace-finished");
+        unregister_active_websocket_connection(provider_id, "trace-finished");
+
+        assert_eq!(close_active_provider_websockets(provider_id), 0);
+        assert!(close_rx.has_changed().is_err());
     }
 
     #[tokio::test(flavor = "current_thread")]

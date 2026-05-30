@@ -32,6 +32,7 @@ pub(in crate::gateway) use logging::spawn_enqueue_request_log_with_backpressure;
 pub(super) use types::ErrorCategory;
 
 pub(super) use handler::proxy_impl;
+pub(in crate::gateway) use websocket::close_active_provider_websockets;
 pub(super) use websocket::proxy_websocket_impl;
 
 const CLAUDE_COUNT_TOKENS_PATH: &str = "/v1/messages/count_tokens";

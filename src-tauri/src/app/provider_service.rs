@@ -1,5 +1,7 @@
 use crate::app_state::{ensure_db_ready, DbInitState};
-use crate::gateway_control::app_gateway_clear_cli_route_runtime_state;
+use crate::gateway_control::{
+    app_gateway_clear_cli_route_runtime_state, app_gateway_close_provider_websockets,
+};
 use crate::{blocking, providers};
 
 #[derive(serde::Deserialize, specta::Type)]
@@ -36,6 +38,7 @@ pub(crate) struct ProviderUpsertInput {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct ProviderRuntimeResetDecision {
     clear_route_runtime_state: bool,
+    close_provider_websockets: bool,
 }
 
 fn normalize_provider_name(name: &str) -> String {
@@ -92,9 +95,11 @@ fn provider_runtime_reset_decision(
     let Some(previous) = previous else {
         return ProviderRuntimeResetDecision {
             clear_route_runtime_state: next.enabled,
+            close_provider_websockets: false,
         };
     };
 
+    let websocket_support_changed = previous.supports_websockets != next.supports_websockets;
     let sensitive_config_changed = previous.base_urls != next.base_urls
         || previous.base_url_mode != next.base_url_mode
         || previous.enabled != next.enabled
@@ -102,10 +107,11 @@ fn provider_runtime_reset_decision(
         || submitted_api_key_changed(previous_api_key, submitted_api_key)
         || previous.source_provider_id != next.source_provider_id
         || previous.bridge_type != next.bridge_type
-        || previous.supports_websockets != next.supports_websockets;
+        || websocket_support_changed;
 
     ProviderRuntimeResetDecision {
         clear_route_runtime_state: sensitive_config_changed,
+        close_provider_websockets: websocket_support_changed,
     }
 }
 
@@ -239,6 +245,16 @@ pub(crate) async fn provider_upsert(
                 cleared_sessions = cleared.cleared_sessions,
                 cleared_recent_errors = cleared.cleared_recent_errors,
                 "provider route runtime state cleared after provider save"
+            );
+        }
+
+        if decision.close_provider_websockets {
+            let closed_websockets = app_gateway_close_provider_websockets(provider.id);
+            tracing::info!(
+                provider_id = provider.id,
+                cli_key = %provider.cli_key,
+                closed_websockets,
+                "provider websocket connections closed after websocket support changed"
             );
         }
     }
@@ -520,6 +536,7 @@ mod tests {
             provider_runtime_reset_decision(None, None, &next, None),
             ProviderRuntimeResetDecision {
                 clear_route_runtime_state: true,
+                close_provider_websockets: false,
             }
         );
 
@@ -562,6 +579,7 @@ mod tests {
             provider_runtime_reset_decision(Some(&next), Some("sk-existing"), &disabled, None),
             ProviderRuntimeResetDecision {
                 clear_route_runtime_state: true,
+                close_provider_websockets: false,
             }
         );
     }
@@ -608,6 +626,7 @@ mod tests {
             provider_runtime_reset_decision(Some(&previous), Some("sk-old"), &next, None),
             ProviderRuntimeResetDecision {
                 clear_route_runtime_state: true,
+                close_provider_websockets: false,
             }
         );
 
@@ -623,6 +642,18 @@ mod tests {
             ),
             ProviderRuntimeResetDecision {
                 clear_route_runtime_state: true,
+                close_provider_websockets: false,
+            }
+        );
+
+        let mut next_websocket = previous.clone();
+        next_websocket.supports_websockets = true;
+
+        assert_eq!(
+            provider_runtime_reset_decision(Some(&previous), Some("sk-old"), &next_websocket, None),
+            ProviderRuntimeResetDecision {
+                clear_route_runtime_state: true,
+                close_provider_websockets: true,
             }
         );
     }
