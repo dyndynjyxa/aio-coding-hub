@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.53.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.52.1...aio-coding-hub-v0.53.0) (2026-06-02)
+
+
+### Features
+
+* **proxy:** 本地拦截处理CX2CC Claude计数Token请求 ([9fa1201](https://github.com/dyndynjyxa/aio-coding-hub/commit/9fa12019f9e0c1a641f31419fa730cca6f813e47))
+
+
+### Bug Fixes
+
+* **gateway:** prioritize Claude model slots before thinking fallback ([95d5ece](https://github.com/dyndynjyxa/aio-coding-hub/commit/95d5ece7fe80e03b834b56e3e4cb394c7c952a8c))
+* **scripts:** 修复pnpm audit命令参数以只检查生产依赖 ([d0bc737](https://github.com/dyndynjyxa/aio-coding-hub/commit/d0bc737cbb054aedac97c4a75c596de438364e8f))
+
 ## [0.52.1](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.52.0...aio-coding-hub-v0.52.1) (2026-05-28)
 
 
