@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.54.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.53.0...aio-coding-hub-v0.54.0) (2026-06-03)
+
+
+### Features
+
+* **config:** 优化release-please配置的changelog分区 ([69315b7](https://github.com/dyndynjyxa/aio-coding-hub/commit/69315b7543bacf590ed25392ed0fa6940307b681))
+
+
+### Code Refactoring
+
+* **proxy:** 移除内部请求标记相关代码并简化测试逻辑 ([5f16257](https://github.com/dyndynjyxa/aio-coding-hub/commit/5f1625707dd1df85de460463e2901864080eb7c6))
+
 ## [0.53.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.52.1...aio-coding-hub-v0.53.0) (2026-06-02)
 
 
