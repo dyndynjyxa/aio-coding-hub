@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.56.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.55.0...aio-coding-hub-v0.56.0) (2026-06-04)
+
+
+### Features
+
+* **providers:** 复制供应商时副本插入到源供应商下方 ([#249](https://github.com/dyndynjyxa/aio-coding-hub/issues/249)) ([5888a60](https://github.com/dyndynjyxa/aio-coding-hub/commit/5888a6009dab29dddec40dae6b44ecb62ae08083))
+
+
+### Bug Fixes
+
+* **skills:** list Windows linked local skills ([36296bd](https://github.com/dyndynjyxa/aio-coding-hub/commit/36296bd2b2a5990a5dae06e299e518bfb5531895))
+
 ## [0.55.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.54.0...aio-coding-hub-v0.55.0) (2026-06-03)
 
 
