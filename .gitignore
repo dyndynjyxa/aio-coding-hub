@@ -44,4 +44,5 @@ src/templates/
 .opencode/
 src-tauri/target*/
 .pnpm-store/
+.codegraph/
 subagent.md

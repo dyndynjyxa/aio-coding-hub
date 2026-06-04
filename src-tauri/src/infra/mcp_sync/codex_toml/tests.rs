@@ -65,6 +65,69 @@ foo = "bar"
 }
 
 #[test]
+fn codex_toml_removes_tool_permission_tables_for_managed_keys() {
+    let input = r#"[mcp_servers.dbhub]
+type = "stdio"
+command = "npx"
+
+[mcp_servers.dbhub.tools.execute_sql]
+approval_mode = "approve"
+
+[mcp_servers.dbhub-extra]
+type = "stdio"
+command = "npx"
+
+[mcp_servers.dbhub-extra.tools.execute_sql]
+approval_mode = "approve"
+
+[mcp_servers.other]
+type = "stdio"
+command = "npx"
+
+[mcp_servers.other.tools.search]
+approval_mode = "approve"
+"#;
+
+    let managed_keys = vec!["dbhub".to_string()];
+    let out = build_codex_config_toml(Some(input.as_bytes().to_vec()), &managed_keys, &[])
+        .expect("build_codex_config_toml");
+    let s = String::from_utf8(out).expect("utf8");
+
+    assert!(!s.contains("[mcp_servers.dbhub]"), "{s}");
+    assert!(!s.contains("[mcp_servers.dbhub.tools.execute_sql]"), "{s}");
+    assert!(s.contains("[mcp_servers.dbhub-extra]"), "{s}");
+    assert!(
+        s.contains("[mcp_servers.dbhub-extra.tools.execute_sql]"),
+        "{s}"
+    );
+    assert!(s.contains("[mcp_servers.other]"), "{s}");
+    assert!(s.contains("[mcp_servers.other.tools.search]"), "{s}");
+}
+
+#[test]
+fn codex_toml_preserves_tool_permission_tables_for_active_servers() {
+    let input = r#"[mcp_servers.dbhub]
+type = "stdio"
+command = "old"
+
+[mcp_servers.dbhub.tools.execute_sql]
+approval_mode = "approve"
+"#;
+
+    let server = make_stdio_server("dbhub", BTreeMap::new());
+    let managed_keys = vec!["dbhub".to_string()];
+    let out = build_codex_config_toml(Some(input.as_bytes().to_vec()), &managed_keys, &[server])
+        .expect("build_codex_config_toml");
+    let s = String::from_utf8(out).expect("utf8");
+
+    assert!(s.contains("[mcp_servers.dbhub.tools.execute_sql]"), "{s}");
+    assert!(s.contains("approval_mode = \"approve\""), "{s}");
+    assert_eq!(s.matches("[mcp_servers.dbhub]").count(), 1, "{s}");
+    assert!(s.contains("command = \"npx\""), "{s}");
+    assert!(!s.contains("command = \"old\""), "{s}");
+}
+
+#[test]
 fn codex_env_value_with_single_quote_falls_back_to_basic_string() {
     let mut env = BTreeMap::new();
     env.insert("EXA_API_KEY".to_string(), "o'brien".to_string());

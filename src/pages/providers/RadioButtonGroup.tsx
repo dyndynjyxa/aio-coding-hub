@@ -26,7 +26,7 @@ export function RadioButtonGroup<T extends string>({
       role="radiogroup"
       aria-label={ariaLabel}
       className={cn(
-        "inline-flex overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-600 dark:bg-slate-800",
+        "inline-flex overflow-hidden rounded-lg border border-border bg-white shadow-sm dark:border-border dark:bg-secondary",
         fullWidth ? "w-full" : "w-auto",
         disabled ? "opacity-60" : null
       )}
@@ -47,11 +47,11 @@ export function RadioButtonGroup<T extends string>({
                 ? "px-2.5 py-1.5 text-xs font-medium"
                 : "px-3 py-2 text-sm font-medium",
               "transition",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-slate-900",
-              index < items.length - 1 ? "border-r border-slate-200 dark:border-slate-600" : null,
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-background",
+              index < items.length - 1 ? "border-r border-border dark:border-border" : null,
               active ? "bg-gradient-to-br from-accent to-accent-secondary text-white" : null,
               !active
-                ? "bg-white text-slate-700 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                ? "bg-white text-secondary-foreground hover:bg-secondary dark:text-secondary-foreground dark:hover:bg-secondary"
                 : null,
               disabled ? "cursor-not-allowed" : null
             )}

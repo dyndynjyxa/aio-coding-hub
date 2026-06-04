@@ -15,6 +15,7 @@ pub(super) struct PreparedProvider {
     pub(super) provider_name_base: String,
     pub(super) provider_base_url_base: String,
     pub(super) provider_base_url_display: String,
+    pub(super) auth_mode: String,
     pub(super) provider_index: u32,
     pub(super) session_reuse: Option<bool>,
     pub(super) effective_credential: String,
@@ -71,9 +72,9 @@ pub(super) struct SkipReason {
 }
 
 /// Prepare a single provider for the retry loop.
-pub(super) async fn prepare_provider(
-    ctx: CommonCtx<'_>,
-    input: &RequestContext,
+pub(super) async fn prepare_provider<R: tauri::Runtime>(
+    ctx: CommonCtx<'_, R>,
+    input: &RequestContext<R>,
     provider: &crate::providers::ProviderForGateway,
     counters: &mut IterationCounters,
     attempts: &mut Vec<FailoverAttempt>,
@@ -270,6 +271,7 @@ pub(super) async fn prepare_provider(
         provider_id,
         provider_name_base: &provider_name_base,
         provider_base_url_base: &provider_base_url_base,
+        auth_mode: provider.auth_mode.as_str(),
         provider_index,
         session_reuse,
         stream_idle_timeout_seconds: provider.stream_idle_timeout_seconds,
@@ -319,6 +321,7 @@ pub(super) async fn prepare_provider(
         provider_name_base,
         provider_base_url_base,
         provider_base_url_display,
+        auth_mode: provider.auth_mode.clone(),
         provider_index,
         session_reuse,
         effective_credential,
@@ -341,7 +344,7 @@ pub(super) async fn prepare_provider(
     }))
 }
 
-fn codex_request_has_previous_response_id(input: &RequestContext) -> bool {
+fn codex_request_has_previous_response_id<R: tauri::Runtime>(input: &RequestContext<R>) -> bool {
     codex_body_has_previous_response_id(&input.cli_key, &input.body_bytes)
 }
 

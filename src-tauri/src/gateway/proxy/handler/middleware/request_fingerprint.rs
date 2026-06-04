@@ -6,7 +6,9 @@ use crate::gateway::proxy::handler::request_fingerprint as fp;
 pub(in crate::gateway::proxy::handler) struct RequestFingerprintMiddleware;
 
 impl RequestFingerprintMiddleware {
-    pub(in crate::gateway::proxy::handler) fn run(mut ctx: ProxyContext) -> MiddlewareAction {
+    pub(in crate::gateway::proxy::handler) fn run<R: tauri::Runtime>(
+        mut ctx: ProxyContext<R>,
+    ) -> MiddlewareAction<R> {
         let fingerprints = fp::build_request_fingerprints(
             &ctx.cli_key,
             ctx.effective_sort_mode_id,

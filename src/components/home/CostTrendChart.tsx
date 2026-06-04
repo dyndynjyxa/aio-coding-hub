@@ -127,10 +127,8 @@ export function CostTrendChart({
     >
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-baseline gap-2">
-          <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-            总花费趋势
-          </span>
-          <span className="text-xs text-slate-400 dark:text-slate-500">
+          <span className="text-sm font-semibold text-foreground">总花费趋势</span>
+          <span className="text-xs text-muted-foreground">
             {period === "daily" ? "按小时" : "按天"}
           </span>
         </div>
@@ -146,7 +144,7 @@ export function CostTrendChart({
                   "px-3 py-1 text-xs rounded-lg font-medium transition-all",
                   cliKey === item.key
                     ? "bg-indigo-500 text-white shadow-sm"
-                    : "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600"
+                    : "bg-secondary text-muted-foreground dark:text-secondary-foreground hover:bg-muted dark:hover:bg-secondary"
                 )}
               >
                 {item.label}
@@ -156,7 +154,7 @@ export function CostTrendChart({
         </div>
       </div>
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-slate-400 dark:text-slate-500">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner size="sm" />
           加载中…
         </div>

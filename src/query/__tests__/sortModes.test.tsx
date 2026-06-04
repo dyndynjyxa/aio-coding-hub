@@ -98,10 +98,70 @@ describe("query/sortModes", () => {
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
 
-    renderHook(() => useSortModeProvidersListQuery({ modeId: 1, cliKey: "claude" }), { wrapper });
+    renderHook(() => useSortModeProvidersListQuery({ modeId: 1, cliKey: " claude " as never }), {
+      wrapper,
+    });
 
     await waitFor(() => {
       expect(sortModeProvidersList).toHaveBeenCalledWith({ mode_id: 1, cli_key: "claude" });
+    });
+
+    expect(client.getQueryState(sortModeProvidersQueryKey(1, "claude"))).toBeTruthy();
+    expect(
+      client.getQueryState([...sortModesKeys.all, "providers", " claude ", 1] as const)
+    ).toBeUndefined();
+  });
+
+  it("rejects invalid sort mode provider cliKey before creating query adapters", () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    expect(() =>
+      renderHook(() => useSortModeProvidersListQuery({ modeId: 1, cliKey: "opencode" as never }), {
+        wrapper,
+      })
+    ).toThrow("SEC_INVALID_INPUT");
+    expect(sortModeProvidersList).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid sort mode ids before query keys or optimistic updates", async () => {
+    setTauriRuntime();
+    vi.mocked(sortModeActiveSet).mockClear();
+    vi.mocked(sortModeProvidersList).mockClear();
+    vi.mocked(sortModeProvidersSetOrder).mockClear();
+
+    const previous: SortModeActiveRow[] = [{ cli_key: "claude", mode_id: 1, updated_at: 0 }];
+    const client = createTestQueryClient();
+    client.setQueryData(sortModesKeys.activeList(), previous);
+    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
+    const wrapper = createQueryWrapper(client);
+
+    expect(() => sortModeProvidersQueryKey(0, "claude")).toThrow("SEC_INVALID_INPUT");
+    expect(() =>
+      renderHook(() => useSortModeProvidersListQuery({ modeId: 0, cliKey: "claude" }), { wrapper })
+    ).toThrow("SEC_INVALID_INPUT");
+    expect(sortModeProvidersList).not.toHaveBeenCalled();
+
+    const activeResult = renderHook(() => useSortModeActiveSetMutation(), { wrapper });
+    await expect(
+      activeResult.result.current.mutateAsync({ cliKey: "claude", modeId: 0 })
+    ).rejects.toThrow("SEC_INVALID_INPUT");
+    expect(sortModeActiveSet).not.toHaveBeenCalled();
+    expect(client.getQueryData(sortModesKeys.activeList())).toEqual(previous);
+
+    const orderResult = renderHook(() => useSortModeProvidersSetOrderMutation(), { wrapper });
+    await expect(
+      orderResult.result.current.mutateAsync({
+        modeId: 0,
+        cliKey: "claude",
+        orderedProviderIds: [101],
+      })
+    ).rejects.toThrow("SEC_INVALID_INPUT");
+    expect(sortModeProvidersSetOrder).not.toHaveBeenCalled();
+    expect(invalidateSpy).not.toHaveBeenCalledWith({
+      queryKey: [...sortModesKeys.all, "providers", "claude", 0] as const,
     });
   });
 
@@ -139,13 +199,16 @@ describe("query/sortModes", () => {
     const { result } = renderHook(() => useSortModeActiveSetMutation(), { wrapper });
 
     act(() => {
-      result.current.mutate({ cliKey: "claude", modeId: 2 });
+      result.current.mutate({ cliKey: " claude " as never, modeId: 2 });
     });
 
     expect(client.getQueryData(sortModesKeys.activeList())).toEqual([
       { ...previous[0], mode_id: 2 },
       previous[1],
     ]);
+    await waitFor(() => {
+      expect(sortModeActiveSet).toHaveBeenCalledWith({ cli_key: "claude", mode_id: 2 });
+    });
 
     deferred.resolve(updated);
 
@@ -269,7 +332,7 @@ describe("query/sortModes", () => {
     await act(async () => {
       await result.current.mutateAsync({
         modeId: 3,
-        cliKey: "codex",
+        cliKey: " codex " as never,
         orderedProviderIds: [101],
       });
     });
@@ -299,7 +362,7 @@ describe("query/sortModes", () => {
     await act(async () => {
       await result.current.mutateAsync({
         modeId: 4,
-        cliKey: "gemini",
+        cliKey: " gemini " as never,
         providerId: 101,
         enabled: false,
       });

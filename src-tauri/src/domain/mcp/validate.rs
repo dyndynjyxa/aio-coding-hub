@@ -2,7 +2,7 @@
 
 pub(super) fn validate_transport(transport: &str) -> crate::shared::error::AppResult<()> {
     match transport {
-        "stdio" | "http" => Ok(()),
+        "stdio" | "http" | "sse" => Ok(()),
         other => Err(format!("SEC_INVALID_INPUT: unsupported transport={other}").into()),
     }
 }
@@ -75,4 +75,25 @@ pub(super) fn suggest_key(name: &str) -> String {
         key.truncate(64);
     }
     key
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_transport;
+
+    #[test]
+    fn validate_transport_accepts_all_supported_mcp_transports() {
+        for transport in ["stdio", "http", "sse"] {
+            assert!(
+                validate_transport(transport).is_ok(),
+                "transport={transport} should be supported"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_transport_rejects_unknown_transports() {
+        let err = validate_transport("websocket").expect_err("unknown transport should fail");
+        assert!(err.to_string().contains("unsupported transport=websocket"));
+    }
 }

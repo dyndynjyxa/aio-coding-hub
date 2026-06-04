@@ -67,10 +67,7 @@ function computeBucketSizeMs(rangeMs: number): { sizeMs: number; label: string }
   return candidates[candidates.length - 1]!;
 }
 
-function classifyDensity(
-  totalRequests: number,
-  bucketCount: number
-): "dense" | "sparse" | "none" {
+function classifyDensity(totalRequests: number, bucketCount: number): "dense" | "sparse" | "none" {
   if (totalRequests === 0) return "none";
   const avgPerBucket = totalRequests / bucketCount;
   return avgPerBucket >= 2 ? "dense" : "sparse";
@@ -244,7 +241,7 @@ function TimeAxisLabels({
   }
 
   return (
-    <div className="relative h-5 text-[10px] text-slate-400 dark:text-slate-500">
+    <div className="relative h-5 text-[10px] text-muted-foreground">
       {ticks.map((tick, i) => (
         <span
           key={i}
@@ -258,13 +255,7 @@ function TimeAxisLabels({
   );
 }
 
-function BucketDot({
-  bucket,
-  maxRequests,
-}: {
-  bucket: TimeBucket;
-  maxRequests: number;
-}) {
+function BucketDot({ bucket, maxRequests }: { bucket: TimeBucket; maxRequests: number }) {
   if (bucket.totalRequests === 0) return <div className="h-full" />;
 
   const color = bucketDotColor(bucket)!;
@@ -274,16 +265,16 @@ function BucketDot({
   const size = minSize + ratio * (maxSize - minSize);
 
   return (
-    <div className="flex h-full items-center justify-center" title={
-      `${formatTimeLabel(bucket.startMs)} - ${formatTimeLabel(bucket.endMs)}\n` +
-      `请求: ${bucket.totalRequests}\n` +
-      `成功: ${bucket.successCount}\n` +
-      `可用率: ${formatPercent(bucket.availabilityRate, 1)}`
-    }>
-      <div
-        className={cn("rounded-full", color)}
-        style={{ width: size, height: size }}
-      />
+    <div
+      className="flex h-full items-center justify-center"
+      title={
+        `${formatTimeLabel(bucket.startMs)} - ${formatTimeLabel(bucket.endMs)}\n` +
+        `请求: ${bucket.totalRequests}\n` +
+        `成功: ${bucket.successCount}\n` +
+        `可用率: ${formatPercent(bucket.availabilityRate, 1)}`
+      }
+    >
+      <div className={cn("rounded-full", color)} style={{ width: size, height: size }} />
     </div>
   );
 }
@@ -296,7 +287,7 @@ function ProviderTimelineRow({
   maxBucketRequests: number;
 }) {
   return (
-    <div className="flex items-center gap-0 border-b border-slate-100 dark:border-slate-800 last:border-b-0">
+    <div className="flex items-center gap-0 border-b border-border dark:border-border last:border-b-0">
       {/* Left: Provider info */}
       <div className="shrink-0 w-44 py-3 pr-3">
         <div className="flex items-center gap-2">
@@ -304,16 +295,16 @@ function ProviderTimelineRow({
             className={cn(
               "h-2.5 w-2.5 shrink-0 rounded-full",
               provider.totalRequests === 0
-                ? "bg-slate-300 dark:bg-slate-600"
+                ? "bg-muted dark:bg-secondary"
                 : statusDotColor(provider.availabilityRate)
             )}
           />
-          <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
+          <span className="text-xs font-semibold text-foreground truncate">
             {provider.providerName}
           </span>
         </div>
         {provider.totalRequests > 0 && (
-          <div className="mt-0.5 ml-[18px] text-[10px] text-slate-400 dark:text-slate-500">
+          <div className="mt-0.5 ml-[18px] text-[10px] text-muted-foreground">
             {densityLabel(provider.density)}
           </div>
         )}
@@ -322,7 +313,7 @@ function ProviderTimelineRow({
       {/* Middle: Timeline dots */}
       <div className="flex-1 min-w-0 py-2">
         <div
-          className="grid h-8 rounded bg-slate-50 dark:bg-slate-800/50"
+          className="grid h-8 rounded bg-secondary/50"
           style={{ gridTemplateColumns: `repeat(${provider.buckets.length}, 1fr)` }}
         >
           {provider.buckets.map((bucket, i) => (
@@ -335,17 +326,19 @@ function ProviderTimelineRow({
       <div className="shrink-0 w-28 text-right pl-3 py-3">
         {provider.totalRequests > 0 ? (
           <>
-            <div className={cn("text-sm font-bold tabular-nums", rateColor(provider.availabilityRate))}>
+            <div
+              className={cn("text-sm font-bold tabular-nums", rateColor(provider.availabilityRate))}
+            >
               {formatPercent(provider.availabilityRate, 1)}
             </div>
-            <div className="text-[10px] text-slate-400 dark:text-slate-500">
+            <div className="text-[10px] text-muted-foreground">
               {formatInteger(provider.totalRequests)} 个请求
             </div>
           </>
         ) : (
           <>
-            <div className="text-xs text-slate-400 dark:text-slate-500">暂无数据</div>
-            <div className="text-[10px] text-slate-400 dark:text-slate-500">无请求</div>
+            <div className="text-xs text-muted-foreground">暂无数据</div>
+            <div className="text-[10px] text-muted-foreground">无请求</div>
           </>
         )}
       </div>
@@ -394,11 +387,7 @@ function AvailabilitySummaryCards({
         accent="green"
         hint={`${providers.length} 个供应商`}
       />
-      <StatCard
-        title="平均延迟"
-        value={formatDurationMs(avgLatency)}
-        accent="blue"
-      />
+      <StatCard title="平均延迟" value={formatDurationMs(avgLatency)} accent="blue" />
       <StatCard
         title="错误率"
         value={formatPercent(errorRate, 2)}
@@ -425,7 +414,7 @@ export function UsageAvailabilityPanel({
     return (
       <div className="flex flex-col gap-4 px-6 pb-6">
         <AvailabilitySummaryCards providers={[]} loading />
-        <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner size="sm" />
           加载可用率数据中...
         </div>
@@ -455,20 +444,18 @@ export function UsageAvailabilityPanel({
       <AvailabilitySummaryCards providers={data.providers} loading={false} />
 
       {/* Timeline section */}
-      <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
+      <div className="rounded-lg border border-border bg-white dark:bg-card p-4">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">
-            供应商可用性时间线
-          </h3>
+          <h3 className="text-sm font-semibold text-foreground">供应商可用性时间线</h3>
           <div className="flex items-center gap-3">
-            <span className="text-[10px] text-slate-400 dark:text-slate-500">
+            <span className="text-[10px] text-muted-foreground">
               时间分段: {data.bucketSizeLabel}
             </span>
             <button
               type="button"
               onClick={onRefresh}
               disabled={refreshing}
-              className="rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-700 dark:hover:text-indigo-400"
+              className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-secondary dark:hover:text-indigo-400"
               title="刷新可用率数据"
             >
               <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />

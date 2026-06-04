@@ -40,7 +40,7 @@ describe("query/configMigrate", () => {
     const { result } = renderHook(() => useConfigExportMutation(), { wrapper });
 
     await act(async () => {
-      await result.current.mutateAsync({ filePath: "/tmp/export.json" });
+      await result.current.mutateAsync({ filePath: " /tmp/export.json " });
     });
 
     expect(configExport).toHaveBeenCalledWith("/tmp/export.json");
@@ -64,7 +64,7 @@ describe("query/configMigrate", () => {
     const { result } = renderHook(() => useConfigImportMutation(), { wrapper });
 
     await act(async () => {
-      await result.current.mutateAsync({ filePath: "/tmp/import.json" });
+      await result.current.mutateAsync({ filePath: " /tmp/import.json " });
     });
 
     expect(configImport).toHaveBeenCalledWith("/tmp/import.json");
@@ -95,5 +95,22 @@ describe("query/configMigrate", () => {
 
     expect(configImport).toHaveBeenCalledWith("/tmp/import.json");
     expect(invalidateSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects blank file paths before service calls", async () => {
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    const { result: exportResult } = renderHook(() => useConfigExportMutation(), { wrapper });
+    await expect(exportResult.current.mutateAsync({ filePath: "   " })).rejects.toThrow(
+      "SEC_INVALID_INPUT"
+    );
+    expect(configExport).not.toHaveBeenCalled();
+
+    const { result: importResult } = renderHook(() => useConfigImportMutation(), { wrapper });
+    await expect(importResult.current.mutateAsync({ filePath: "\n" })).rejects.toThrow(
+      "SEC_INVALID_INPUT"
+    );
+    expect(configImport).not.toHaveBeenCalled();
   });
 });

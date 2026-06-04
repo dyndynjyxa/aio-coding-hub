@@ -220,6 +220,53 @@ describe("pages/home/hooks/useHomeFreshnessOwner", () => {
     expect(refreshRequestLogs).toHaveBeenCalledTimes(2);
   });
 
+  it("logs and resolves failed automatic refreshes without leaking unhandled rejections", async () => {
+    vi.useFakeTimers();
+    const refreshError = new Error("refresh boom");
+    const refreshRequestLogs = vi.fn().mockRejectedValue(refreshError);
+    let eventHandler:
+      | ((payload: { trace_id: string; cli_key: string; phase: "complete"; ts: number }) => void)
+      | null = null;
+
+    vi.mocked(subscribeGatewayEvent).mockImplementation((event: string, handler: any) => {
+      expect(event).toBe(gatewayEventNames.requestSignal);
+      eventHandler = handler;
+      return {
+        ready: Promise.resolve(),
+        unsubscribe: vi.fn(),
+      };
+    });
+
+    renderHook(() =>
+      useHomeFreshnessOwner({
+        overviewActive: true,
+        foregroundActive: true,
+        requestLogsRefreshWindowMs: 400,
+        onRefreshRequestLogs: refreshRequestLogs,
+      })
+    );
+
+    act(() => {
+      eventHandler?.({ trace_id: "t-1", cli_key: "claude", phase: "complete", ts: 2 });
+    });
+
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+      await Promise.resolve();
+    });
+
+    expect(refreshRequestLogs).toHaveBeenCalledTimes(1);
+    expect(logToConsole).toHaveBeenCalledWith(
+      "warn",
+      "首页请求记录刷新失败",
+      expect.objectContaining({
+        source: "request_signal.complete",
+        error: String(refreshError),
+      })
+    );
+    vi.useRealTimers();
+  });
+
   it("returns null for manual refresh when inactive and reports subscribe failures", async () => {
     const refreshRequestLogs = vi.fn().mockResolvedValue(null);
 

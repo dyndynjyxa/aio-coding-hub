@@ -1138,7 +1138,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
     );
 
     expect(screen.getAllByTitle("Codex / gpt-5.4").length).toBeGreaterThan(0);
-    expect(screen.getAllByTitle("Claude Code / claude-sonnet-4").length).toBeGreaterThan(0);
+    expect(screen.getAllByTitle("Claude / claude-sonnet-4").length).toBeGreaterThan(0);
     expect(screen.getAllByTitle("Gemini / gemini-2.5-pro").length).toBeGreaterThan(0);
     expect(screen.getAllByText("claude-sonnet-4 → gpt-5.4").length).toBeGreaterThan(0);
     expect(screen.getAllByText("免费").length).toBeGreaterThan(0);

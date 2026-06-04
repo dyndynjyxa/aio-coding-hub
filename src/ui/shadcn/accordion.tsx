@@ -12,7 +12,7 @@ export const AccordionItem = forwardRef<
   return (
     <AccordionPrimitive.Item
       ref={ref}
-      className={cn("border-b", className)}
+      className={cn("border-b border-line-subtle", className)}
       {...props}
     />
   );

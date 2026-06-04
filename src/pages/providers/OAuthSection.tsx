@@ -22,22 +22,22 @@ export function OAuthSection(props: { form: UseProviderEditorFormReturn }) {
       </FormField>
 
       <FormField label="OAuth 连接">
-        <div className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+        <div className="rounded-md border border-border bg-secondary p-3 dark:border-border dark:bg-secondary/50">
           {oauthLoading ? (
-            <div className="flex items-center gap-2 text-sm text-slate-500">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <span className="animate-spin">⏳</span>
               <span>处理中...</span>
             </div>
           ) : oauthStatus?.connected ? (
             <div className="space-y-2">
               {oauthStatus.email && (
-                <p className="text-sm text-slate-700 dark:text-slate-300">
+                <p className="text-sm text-secondary-foreground">
                   <span className="font-medium">账号：</span>
                   {oauthStatus.email}
                 </p>
               )}
               {oauthStatus.expires_at && (
-                <p className="text-xs text-slate-500 dark:text-slate-400">
+                <p className="text-xs text-muted-foreground">
                   <span className="font-medium">到期：</span>
                   {formatUnixSeconds(oauthStatus.expires_at)}
                 </p>
@@ -61,7 +61,7 @@ export function OAuthSection(props: { form: UseProviderEditorFormReturn }) {
             </div>
           ) : (
             <div className="space-y-2">
-              <p className="text-sm text-slate-500 dark:text-slate-400">未连接 OAuth</p>
+              <p className="text-sm text-muted-foreground">未连接 OAuth</p>
               <Button
                 onClick={handleOAuthLogin}
                 variant="primary"

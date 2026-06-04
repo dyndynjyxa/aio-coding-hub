@@ -13,14 +13,14 @@ export function RequestLogDetailRawTab({ selectedLog }: RequestLogDetailRawTabPr
   const hasAny = errorDetailsJson != null || attemptsJson != null || usageJson != null;
 
   if (!hasAny) {
-    return <div className="text-sm text-slate-500 dark:text-slate-400">无原始数据。</div>;
+    return <div className="text-sm text-muted-foreground">无原始数据。</div>;
   }
 
   return (
     <div className="space-y-3">
       {errorDetailsJson != null ? (
         <DisclosureSection label="error_details_json" defaultOpen>
-          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs font-mono text-slate-700 dark:text-slate-300">
+          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs font-mono text-secondary-foreground">
             {errorDetailsJson}
           </pre>
         </DisclosureSection>
@@ -28,7 +28,7 @@ export function RequestLogDetailRawTab({ selectedLog }: RequestLogDetailRawTabPr
 
       {attemptsJson != null ? (
         <DisclosureSection label="attempts_json" defaultOpen={errorDetailsJson == null}>
-          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs font-mono text-slate-700 dark:text-slate-300">
+          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs font-mono text-secondary-foreground">
             {attemptsJson}
           </pre>
         </DisclosureSection>
@@ -36,7 +36,7 @@ export function RequestLogDetailRawTab({ selectedLog }: RequestLogDetailRawTabPr
 
       {usageJson != null ? (
         <DisclosureSection label="usage_json">
-          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs font-mono text-slate-700 dark:text-slate-300">
+          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs font-mono text-secondary-foreground">
             {usageJson}
           </pre>
         </DisclosureSection>

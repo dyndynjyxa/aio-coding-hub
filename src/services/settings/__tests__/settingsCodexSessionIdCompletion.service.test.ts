@@ -57,4 +57,12 @@ describe("services/settings/settingsCodexSessionIdCompletion", () => {
       enableCodexSessionIdCompletion: true,
     });
   });
+
+  it("rejects malformed boolean input before generated commands", async () => {
+    await expect(settingsCodexSessionIdCompletionSet("yes" as any)).rejects.toThrow(
+      "enableCodexSessionIdCompletion must be a boolean"
+    );
+
+    expect(commands.settingsCodexSessionIdCompletionSet).not.toHaveBeenCalled();
+  });
 });

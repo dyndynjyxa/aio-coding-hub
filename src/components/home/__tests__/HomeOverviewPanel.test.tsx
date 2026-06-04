@@ -23,16 +23,6 @@ vi.mock("../HomeTodayProviderUsageOverview", () => ({
   ),
 }));
 
-vi.mock("../HomeWorkStatusCard", () => ({
-  HomeWorkStatusCard: ({
-    layout,
-    sortModes,
-  }: {
-    layout: string;
-    sortModes?: Array<{ id: number; name: string }>;
-  }) => <div>{`work-status-card:${layout}:${String(sortModes != null)}`}</div>,
-}));
-
 vi.mock("../HomeActiveSessionsCard", () => ({
   HomeActiveSessionsCardContent: ({
     activeSessions,
@@ -145,19 +135,13 @@ function renderPanel(overrides: Partial<ComponentProps<typeof HomeOverviewPanel>
       activeModeByCli={{ claude: null, codex: null, gemini: null }}
       activeModeToggling={{ claude: false, codex: false, gemini: false }}
       onSetCliActiveMode={onSetCliActiveMode}
-      cliProxyLoading={false}
-      cliProxyAvailable={true}
-      cliProxyEnabled={{ claude: false, codex: false, gemini: false }}
-      cliProxyAppliedToCurrentGateway={{ claude: null, codex: null, gemini: null }}
-      cliProxyToggling={{ claude: false, codex: false, gemini: false }}
-      onSetCliProxyEnabled={vi.fn()}
       activeSessions={[]}
       activeSessionsLoading={false}
       activeSessionsAvailable={true}
       workspaceConfigs={[
         {
           cliKey: "claude",
-          cliLabel: "Claude Code",
+          cliLabel: "Claude",
           workspaceId: 1,
           workspaceName: "默认",
           loading: false,
@@ -266,7 +250,7 @@ describe("components/home/HomeOverviewPanel", () => {
       workspaceConfigs: [
         {
           cliKey: "claude",
-          cliLabel: "Claude Code",
+          cliLabel: "Claude",
           workspaceId: 1,
           workspaceName: "工作区 A",
           loading: false,
@@ -295,9 +279,9 @@ describe("components/home/HomeOverviewPanel", () => {
     });
 
     fireEvent.click(screen.getByRole("tab", { name: "配置信息" }));
-    expect(await screen.findByRole("button", { name: "Claude Code" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Claude" })).toBeInTheDocument();
     expect(screen.getByText("工作区 A")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Claude Code 路由策略" })).toHaveValue("1");
+    expect(screen.getByRole("combobox", { name: "Claude 路由策略" })).toHaveValue("1");
     expect(screen.getByRole("option", { name: "工作策略" })).toBeInTheDocument();
     expect(screen.getByText("默认提示词")).toBeInTheDocument();
     expect(screen.getByText("filesystem")).toBeInTheDocument();
@@ -312,7 +296,7 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(onSetCliActiveMode).toHaveBeenCalledWith("codex", 1);
   });
 
-  it("moves the route strategy entry into the work status card in logs-primary layout", async () => {
+  it("keeps route strategy out of the workspace header in logs-primary layout", async () => {
     window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
 
     renderPanel({
@@ -320,14 +304,10 @@ describe("components/home/HomeOverviewPanel", () => {
       activeModeByCli: { claude: 1, codex: null, gemini: null },
     });
 
-    expect(screen.getByText("work-status-card:vertical:true")).toBeInTheDocument();
-
     fireEvent.click(screen.getByRole("tab", { name: "配置信息" }));
     expect(await screen.findByText("工作区：")).toBeInTheDocument();
     expect(screen.queryByText("路由策略：")).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("combobox", { name: "Claude Code 路由策略" })
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Claude 路由策略" })).not.toBeInTheDocument();
   });
 
   it("uses CLI priority order for workspace config button order and default selection", async () => {
@@ -336,7 +316,7 @@ describe("components/home/HomeOverviewPanel", () => {
       workspaceConfigs: [
         {
           cliKey: "claude",
-          cliLabel: "Claude Code",
+          cliLabel: "Claude",
           workspaceId: 1,
           workspaceName: "工作区 A",
           loading: false,
@@ -364,9 +344,9 @@ describe("components/home/HomeOverviewPanel", () => {
     fireEvent.click(screen.getByRole("tab", { name: "配置信息" }));
     expect(
       screen
-        .getAllByRole("button", { name: /Claude Code|Codex|Gemini/ })
+        .getAllByRole("button", { name: /Claude|Codex|Gemini/ })
         .map((button) => button.textContent)
-    ).toEqual(["Gemini", "Codex", "Claude Code"]);
+    ).toEqual(["Gemini", "Codex", "Claude"]);
     expect(await screen.findByText("工作区 C")).toBeInTheDocument();
     expect(screen.getByText("Gemini Prompt")).toBeInTheDocument();
   });
@@ -375,7 +355,7 @@ describe("components/home/HomeOverviewPanel", () => {
     renderPanel({ workspaceConfigs: [], devPreviewEnabled: true });
 
     fireEvent.click(screen.getByRole("tab", { name: "配置信息" }));
-    expect(await screen.findByRole("button", { name: "Claude Code" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Claude" })).toBeInTheDocument();
     expect(screen.getByText("工作区 Alpha")).toBeInTheDocument();
     expect(screen.getByText("PR Review")).toBeInTheDocument();
     expect(screen.getByText("filesystem")).toBeInTheDocument();
@@ -387,7 +367,7 @@ describe("components/home/HomeOverviewPanel", () => {
       workspaceConfigs: [
         {
           cliKey: "claude",
-          cliLabel: "Claude Code",
+          cliLabel: "Claude",
           workspaceId: 1,
           workspaceName: "工作区 A",
           loading: false,
@@ -420,25 +400,22 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(screen.getByText("code-review")).toBeInTheDocument();
   });
 
-  it("renders only the horizontal proxy status card when both heatmap and usage are hidden", () => {
+  it("omits the legacy top metrics row when both heatmap and usage are hidden", () => {
     renderPanel({ showHomeHeatmap: false, showHomeUsage: false });
 
     expect(screen.queryByText(/usage-section:/)).not.toBeInTheDocument();
-    expect(screen.getByText("work-status-card:horizontal:false")).toBeInTheDocument();
   });
 
-  it("uses the split layout with usage statistics when heatmap is hidden", () => {
+  it("renders usage statistics when heatmap is hidden", () => {
     renderPanel({ showHomeHeatmap: false, showHomeUsage: true });
 
     expect(screen.getByText("usage-section:false:true")).toBeInTheDocument();
-    expect(screen.getByText("work-status-card:vertical:false")).toBeInTheDocument();
   });
 
-  it("uses the split layout with heatmap when usage statistics are hidden", () => {
+  it("renders the heatmap when usage statistics are hidden", () => {
     renderPanel({ showHomeHeatmap: true, showHomeUsage: false });
 
     expect(screen.getByText("usage-section:true:false")).toBeInTheDocument();
-    expect(screen.getByText("work-status-card:vertical:false")).toBeInTheDocument();
   });
 
   it("uses the legacy overview layout by default", () => {
@@ -463,7 +440,6 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(
       usageSection.compareDocumentPosition(requestLogs) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
-    expect(screen.getAllByText("work-status-card:vertical:true")).toHaveLength(1);
     expect(screen.getByRole("tab", { name: "配置信息" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "熔断信息" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "供应商限额" })).not.toBeInTheDocument();
@@ -477,14 +453,14 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(latestProps?.showRefreshButton).toBe(false);
   });
 
-  it("uses proxy-left and usage-plus-logs-right in logs-primary layout", () => {
+  it("does not render proxy controls in logs-primary layout", () => {
     window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
 
     renderPanel({ showHomeHeatmap: true, showHomeUsage: false });
 
-    expect(screen.getByText("today-provider-usage:false")).toBeInTheDocument();
-    expect(screen.getAllByText("work-status-card:vertical:true")).toHaveLength(1);
-    expect(screen.queryByText("work-status-card:horizontal:false")).not.toBeInTheDocument();
+    const usageSummary = screen.getByText("today-provider-usage:false");
+    expect(usageSummary).toBeInTheDocument();
+    expect(screen.queryByText("代理状态")).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "配置信息" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "熔断信息" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "供应商限额" })).not.toBeInTheDocument();
@@ -502,7 +478,7 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(screen.queryByRole("tab", { name: "供应商限额" })).not.toBeInTheDocument();
   });
 
-  it("renders the OAuth quota tab only in logs-primary layout and forwards refresh actions", async () => {
+  it("renders the OAuth quota tab in logs-primary layout and forwards refresh actions", async () => {
     window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
     const onRefreshOAuthQuota = vi.fn().mockResolvedValue(undefined);
     const onRefreshOAuthQuotaRow = vi.fn().mockResolvedValue(undefined);
@@ -548,13 +524,26 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(onRefreshOAuthQuotaRow).not.toHaveBeenCalled();
   });
 
-  it("does not render the OAuth quota tab in the legacy layout", () => {
+  it("renders the OAuth quota tab in the legacy layout and forwards refresh actions", async () => {
+    const onRefreshOAuthQuota = vi.fn().mockResolvedValue(undefined);
+    const onRefreshOAuthQuotaRow = vi.fn().mockResolvedValue(undefined);
+
     renderPanel({
       oauthQuotaVisible: true,
       oauthQuotaRows: [{ providerId: 9 } as any],
+      oauthQuotaHasRefreshed: true,
+      onRefreshOAuthQuota,
+      onRefreshOAuthQuotaRow,
     });
 
-    expect(screen.queryByRole("tab", { name: "OAuth 配额" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "OAuth 配额" }));
+    expect(await screen.findByText("oauth-quota:1:true:true:false")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "refresh-oauth-quota" }));
+    expect(onRefreshOAuthQuota).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "refresh-oauth-quota-row" }));
+    expect(onRefreshOAuthQuotaRow).toHaveBeenCalledWith(9);
   });
 
   it("switches back to 配置信息 when OAuth providers disappear in logs-primary layout", async () => {
@@ -566,7 +555,7 @@ describe("components/home/HomeOverviewPanel", () => {
       workspaceConfigs: [
         {
           cliKey: "claude",
-          cliLabel: "Claude Code",
+          cliLabel: "Claude",
           workspaceId: 1,
           workspaceName: "工作区 A",
           loading: false,
@@ -593,19 +582,13 @@ describe("components/home/HomeOverviewPanel", () => {
         activeModeByCli={{ claude: null, codex: null, gemini: null }}
         activeModeToggling={{ claude: false, codex: false, gemini: false }}
         onSetCliActiveMode={vi.fn()}
-        cliProxyLoading={false}
-        cliProxyAvailable={true}
-        cliProxyEnabled={{ claude: false, codex: false, gemini: false }}
-        cliProxyAppliedToCurrentGateway={{ claude: null, codex: null, gemini: null }}
-        cliProxyToggling={{ claude: false, codex: false, gemini: false }}
-        onSetCliProxyEnabled={vi.fn()}
         activeSessions={[]}
         activeSessionsLoading={false}
         activeSessionsAvailable={true}
         workspaceConfigs={[
           {
             cliKey: "claude",
-            cliLabel: "Claude Code",
+            cliLabel: "Claude",
             workspaceId: 1,
             workspaceName: "工作区 A",
             loading: false,
@@ -653,7 +636,7 @@ describe("components/home/HomeOverviewPanel", () => {
       workspaceConfigs: [
         {
           cliKey: "claude",
-          cliLabel: "Claude Code",
+          cliLabel: "Claude",
           workspaceId: 1,
           workspaceName: "工作区 A",
           loading: false,
@@ -692,19 +675,13 @@ describe("components/home/HomeOverviewPanel", () => {
             activeModeByCli={{ claude: null, codex: null, gemini: null }}
             activeModeToggling={{ claude: false, codex: false, gemini: false }}
             onSetCliActiveMode={vi.fn()}
-            cliProxyLoading={false}
-            cliProxyAvailable={true}
-            cliProxyEnabled={{ claude: false, codex: false, gemini: false }}
-            cliProxyAppliedToCurrentGateway={{ claude: null, codex: null, gemini: null }}
-            cliProxyToggling={{ claude: false, codex: false, gemini: false }}
-            onSetCliProxyEnabled={vi.fn()}
             activeSessions={[]}
             activeSessionsLoading={false}
             activeSessionsAvailable={true}
             workspaceConfigs={[
               {
                 cliKey: "claude",
-                cliLabel: "Claude Code",
+                cliLabel: "Claude",
                 workspaceId: 1,
                 workspaceName: "默认",
                 loading: false,
@@ -793,6 +770,7 @@ describe("components/home/HomeOverviewPanel", () => {
       "活跃 Session",
       "熔断信息",
       "配置信息",
+      "OAuth 配额",
     ]);
   });
 
@@ -828,12 +806,6 @@ describe("components/home/HomeOverviewPanel", () => {
         activeModeByCli={{ claude: null, codex: null, gemini: null }}
         activeModeToggling={{ claude: false, codex: false, gemini: false }}
         onSetCliActiveMode={vi.fn()}
-        cliProxyLoading={false}
-        cliProxyAvailable={true}
-        cliProxyEnabled={{ claude: false, codex: false, gemini: false }}
-        cliProxyAppliedToCurrentGateway={{ claude: null, codex: null, gemini: null }}
-        cliProxyToggling={{ claude: false, codex: false, gemini: false }}
-        onSetCliProxyEnabled={vi.fn()}
         activeSessions={[]}
         activeSessionsLoading={false}
         activeSessionsAvailable={true}
@@ -904,12 +876,6 @@ describe("components/home/HomeOverviewPanel", () => {
         activeModeByCli={{ claude: null, codex: null, gemini: null }}
         activeModeToggling={{ claude: false, codex: false, gemini: false }}
         onSetCliActiveMode={vi.fn()}
-        cliProxyLoading={false}
-        cliProxyAvailable={true}
-        cliProxyEnabled={{ claude: false, codex: false, gemini: false }}
-        cliProxyAppliedToCurrentGateway={{ claude: null, codex: null, gemini: null }}
-        cliProxyToggling={{ claude: false, codex: false, gemini: false }}
-        onSetCliProxyEnabled={vi.fn()}
         activeSessions={[]}
         activeSessionsLoading={false}
         activeSessionsAvailable={true}
@@ -958,7 +924,7 @@ describe("components/home/HomeOverviewPanel", () => {
       workspaceConfigs: [
         {
           cliKey: "claude",
-          cliLabel: "Claude Code",
+          cliLabel: "Claude",
           workspaceId: 1,
           workspaceName: "工作区 A",
           loading: false,
@@ -985,19 +951,13 @@ describe("components/home/HomeOverviewPanel", () => {
         activeModeByCli={{ claude: null, codex: null, gemini: null }}
         activeModeToggling={{ claude: false, codex: false, gemini: false }}
         onSetCliActiveMode={vi.fn()}
-        cliProxyLoading={false}
-        cliProxyAvailable={true}
-        cliProxyEnabled={{ claude: false, codex: false, gemini: false }}
-        cliProxyAppliedToCurrentGateway={{ claude: null, codex: null, gemini: null }}
-        cliProxyToggling={{ claude: false, codex: false, gemini: false }}
-        onSetCliProxyEnabled={vi.fn()}
         activeSessions={[]}
         activeSessionsLoading={false}
         activeSessionsAvailable={true}
         workspaceConfigs={[
           {
             cliKey: "claude",
-            cliLabel: "Claude Code",
+            cliLabel: "Claude",
             workspaceId: 1,
             workspaceName: "工作区 A",
             loading: false,

@@ -77,10 +77,8 @@ function SettingItem({
       )}
     >
       <div className="min-w-0">
-        <div className="text-sm text-slate-700 dark:text-slate-300">{label}</div>
-        <div className="mt-1 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-          {subtitle}
-        </div>
+        <div className="text-sm text-secondary-foreground">{label}</div>
+        <div className="mt-1 text-xs text-muted-foreground leading-relaxed">{subtitle}</div>
       </div>
       <div className="flex flex-wrap items-center justify-end gap-2">{children}</div>
     </div>
@@ -403,10 +401,10 @@ function ClaudeHooksSection() {
   }
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
+    <div className="rounded-lg border border-border bg-white p-5 dark:border-border dark:bg-secondary">
       <div className="mb-4 flex items-center justify-between gap-3">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
-          <Zap className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Zap className="h-4 w-4 text-muted-foreground" />
           Claude Code Hooks ({groups.length})
         </h3>
         <div className="flex items-center gap-2">
@@ -434,7 +432,7 @@ function ClaudeHooksSection() {
       </div>
 
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner size="sm" />
           加载中…
         </div>
@@ -455,7 +453,7 @@ function ClaudeHooksSection() {
           {groups.map((group, index) => (
             <div
               key={`${group.event}-${group.matcher}-${index}`}
-              className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800"
+              className="flex items-start justify-between gap-3 rounded-lg border border-border bg-white p-3 dark:border-border dark:bg-secondary"
             >
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-1.5">
@@ -463,7 +461,7 @@ function ClaudeHooksSection() {
                     {group.event}
                   </span>
                   {group.matcher ? (
-                    <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+                    <span className="inline-flex items-center rounded-md bg-secondary px-2 py-0.5 text-xs text-muted-foreground dark:bg-secondary dark:text-secondary-foreground">
                       {group.matcher}
                     </span>
                   ) : null}
@@ -471,14 +469,12 @@ function ClaudeHooksSection() {
                 {group.hooks.map((hook, hookIndex) => (
                   <div key={hookIndex} className="mt-1.5 flex items-center gap-1.5">
                     <div
-                      className="min-w-0 flex-1 truncate font-mono text-xs text-slate-500 dark:text-slate-400"
+                      className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground"
                       title={hook.command}
                     >
                       {hook.command}
                       {hook.timeout != null ? (
-                        <span className="ml-2 text-slate-400 dark:text-slate-500">
-                          ({hook.timeout}s)
-                        </span>
+                        <span className="ml-2 text-muted-foreground">({hook.timeout}s)</span>
                       ) : null}
                     </div>
                     {group.hooks.length > 1 ? (
@@ -531,7 +527,7 @@ function ClaudeHooksSection() {
         >
           <div className="flex flex-col gap-4">
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+              <label className="mb-1 block text-xs font-medium text-muted-foreground dark:text-secondary-foreground">
                 事件
               </label>
               <Select
@@ -547,7 +543,7 @@ function ClaudeHooksSection() {
               </Select>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+              <label className="mb-1 block text-xs font-medium text-muted-foreground dark:text-secondary-foreground">
                 Matcher（匹配工具名或事件子类型，多个用 | 分隔，留空匹配全部）
               </label>
               <Input
@@ -558,7 +554,7 @@ function ClaudeHooksSection() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+              <label className="mb-1 block text-xs font-medium text-muted-foreground dark:text-secondary-foreground">
                 命令
               </label>
               <Input
@@ -569,7 +565,7 @@ function ClaudeHooksSection() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+              <label className="mb-1 block text-xs font-medium text-muted-foreground dark:text-secondary-foreground">
                 超时（秒，留空使用默认值）
               </label>
               <Input
@@ -771,7 +767,7 @@ export function CliManagerClaudeTab({
   return (
     <div className="space-y-6">
       <Card className="overflow-hidden">
-        <div className="border-b border-slate-100 dark:border-slate-700">
+        <div className="border-b border-border">
           <div className="flex flex-col gap-4 p-6">
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <div className="flex items-center gap-4">
@@ -779,9 +775,7 @@ export function CliManagerClaudeTab({
                   <Bot className="h-8 w-8" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
-                    Claude Code
-                  </h2>
+                  <h2 className="text-base font-semibold text-foreground">Claude Code</h2>
                   <div className="flex items-center gap-2 mt-1">
                     {claudeAvailable === "available" && claudeInfo?.found ? (
                       <>
@@ -802,7 +796,7 @@ export function CliManagerClaudeTab({
                         加载中...
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 dark:bg-slate-700 px-2.5 py-0.5 text-xs font-medium text-slate-600 dark:text-slate-400 ring-1 ring-inset ring-slate-500/10">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-muted-foreground ring-1 ring-inset ring-border">
                         未检测到
                       </span>
                     )}
@@ -824,14 +818,14 @@ export function CliManagerClaudeTab({
 
             {(configDir || settingsPath || claudeInfo) && (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mt-2">
-                <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3 border border-slate-100 dark:border-slate-700">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 mb-1.5">
+                <div className="bg-secondary rounded-lg p-3 border border-border">
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1.5">
                     <FolderOpen className="h-3 w-3" />
                     配置目录
                   </div>
                   <div className="flex items-center gap-1.5">
                     <div
-                      className="font-mono text-xs text-slate-700 dark:text-slate-300 truncate flex-1"
+                      className="font-mono text-xs text-secondary-foreground truncate flex-1"
                       title={configDir}
                     >
                       {configDir ?? "—"}
@@ -841,7 +835,7 @@ export function CliManagerClaudeTab({
                       disabled={!configDir}
                       size="sm"
                       variant="ghost"
-                      className="shrink-0 h-6 w-6 p-0 hover:bg-slate-200 dark:hover:bg-slate-700"
+                      className="shrink-0 h-6 w-6 p-0 hover:bg-muted dark:hover:bg-secondary"
                       title="打开配置目录"
                     >
                       <ExternalLink className="h-3 w-3" />
@@ -849,49 +843,49 @@ export function CliManagerClaudeTab({
                   </div>
                 </div>
 
-                <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3 border border-slate-100 dark:border-slate-700">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 mb-1.5">
+                <div className="bg-secondary rounded-lg p-3 border border-border">
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1.5">
                     <FileJson className="h-3 w-3" />
                     settings.json
                   </div>
                   <div
-                    className="font-mono text-xs text-slate-700 dark:text-slate-300 truncate"
+                    className="font-mono text-xs text-secondary-foreground truncate"
                     title={settingsPath ?? "—"}
                   >
                     {settingsPath ?? "—"}
                   </div>
                   {claudeSettings ? (
-                    <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                    <div className="mt-1 text-[11px] text-muted-foreground">
                       {claudeSettings.exists ? "已存在" : "不存在（将自动创建）"}
                     </div>
                   ) : null}
                 </div>
 
-                <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3 border border-slate-100 dark:border-slate-700">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 mb-1.5">
+                <div className="bg-secondary rounded-lg p-3 border border-border">
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1.5">
                     <Terminal className="h-3 w-3" />
                     可执行文件
                   </div>
                   <div
-                    className="font-mono text-xs text-slate-700 dark:text-slate-300 truncate"
+                    className="font-mono text-xs text-secondary-foreground truncate"
                     title={claudeInfo?.executable_path ?? "—"}
                   >
                     {claudeInfo?.executable_path ?? "—"}
                   </div>
                 </div>
 
-                <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3 border border-slate-100 dark:border-slate-700">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 mb-1.5">
+                <div className="bg-secondary rounded-lg p-3 border border-border">
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1.5">
                     <Settings className="h-3 w-3" />
                     解析方式
                   </div>
                   <div
-                    className="font-mono text-xs text-slate-700 dark:text-slate-300 truncate"
+                    className="font-mono text-xs text-secondary-foreground truncate"
                     title={claudeInfo?.resolved_via ?? "—"}
                   >
                     {claudeInfo?.resolved_via ?? "—"}
                   </div>
-                  <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                  <div className="mt-1 text-[11px] text-muted-foreground">
                     SHELL: {claudeInfo?.shell ?? "—"}
                   </div>
                 </div>
@@ -901,23 +895,21 @@ export function CliManagerClaudeTab({
         </div>
 
         {claudeAvailable === "unavailable" ? (
-          <div className="text-sm text-slate-600 dark:text-slate-400 text-center py-8">
-            数据不可用
-          </div>
+          <div className="text-sm text-muted-foreground text-center py-8">数据不可用</div>
         ) : !claudeSettings ? (
           <div className="p-6 space-y-6">
-            <div className="text-sm text-slate-500 dark:text-slate-400 text-center py-8">
+            <div className="text-sm text-muted-foreground text-center py-8">
               暂无配置，请尝试刷新
             </div>
           </div>
         ) : (
           <div className="p-6 space-y-6">
-            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-5">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-3">
-                <Settings className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+            <div className="rounded-lg border border-border bg-white dark:bg-secondary p-5">
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
+                <Settings className="h-4 w-4 text-muted-foreground" />
                 基础配置
               </h3>
-              <div className="divide-y divide-slate-100 dark:divide-slate-700">
+              <div className="divide-y divide-border">
                 <SettingItem
                   label="默认模型 (model)"
                   subtitle="覆盖 Claude Code 默认使用的模型。留空表示不设置（交由 Claude Code 默认/上层配置决定）。"
@@ -974,12 +966,12 @@ export function CliManagerClaudeTab({
               </div>
             </div>
 
-            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-5">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-3">
-                <Settings className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+            <div className="rounded-lg border border-border bg-white dark:bg-secondary p-5">
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
+                <Settings className="h-4 w-4 text-muted-foreground" />
                 交互与显示
               </h3>
-              <div className="divide-y divide-slate-100 dark:divide-slate-700">
+              <div className="divide-y divide-border">
                 <SettingItem
                   label="显示耗时 (showTurnDuration)"
                   subtitle="显示 turn duration（默认开启）。"
@@ -1047,12 +1039,12 @@ export function CliManagerClaudeTab({
               </div>
             </div>
 
-            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-5">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-3">
-                <Shield className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+            <div className="rounded-lg border border-border bg-white dark:bg-secondary p-5">
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
+                <Shield className="h-4 w-4 text-muted-foreground" />
                 Permissions
               </h3>
-              <div className="divide-y divide-slate-100 dark:divide-slate-700">
+              <div className="divide-y divide-border">
                 <PermissionTextareaItem
                   label="permissions.allow"
                   subtitle="允许的工具规则（每行一条）。留空表示不设置。"
@@ -1151,12 +1143,12 @@ export function CliManagerClaudeTab({
               </div>
             </div>
 
-            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-5">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-3">
-                <FileJson className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+            <div className="rounded-lg border border-border bg-white dark:bg-secondary p-5">
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
+                <FileJson className="h-4 w-4 text-muted-foreground" />
                 环境配置（env / 白名单）
               </h3>
-              <div className="divide-y divide-slate-100 dark:divide-slate-700">
+              <div className="divide-y divide-border">
                 <SettingItem
                   label="CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
                   subtitle="启用 Agent Teams 功能，允许多个 Agent 协作完成任务。"

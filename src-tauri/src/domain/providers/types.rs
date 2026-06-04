@@ -51,6 +51,13 @@ pub(crate) fn is_cx2cc_bridge(source_provider_id: Option<i64>, bridge_type: Opti
     source_provider_id.is_some() || bridge_type == Some(CX2CC_BRIDGE_TYPE)
 }
 
+fn take_first_chars(value: &str, max_chars: usize) -> String {
+    if value.chars().nth(max_chars).is_none() {
+        return value.to_string();
+    }
+    value.chars().take(max_chars).collect()
+}
+
 #[derive(Debug, Clone)]
 pub struct ProviderUpsertParams {
     pub provider_id: Option<i64>,
@@ -103,8 +110,8 @@ pub(super) fn normalize_model_slot(raw: Option<String>) -> Option<String> {
     if value.is_empty() {
         return None;
     }
-    if value.len() > MAX_MODEL_NAME_LEN {
-        return Some(value[..MAX_MODEL_NAME_LEN].to_string());
+    if value.chars().nth(MAX_MODEL_NAME_LEN).is_some() {
+        return Some(take_first_chars(value, MAX_MODEL_NAME_LEN));
     }
     Some(value.to_string())
 }
@@ -131,14 +138,7 @@ impl ClaudeModels {
     pub(crate) fn map_model(&self, original_model: &str, has_thinking: bool) -> String {
         let model_lower = original_model.to_ascii_lowercase();
 
-        // 1) thinking 模式优先使用推理模型
-        if has_thinking {
-            if let Some(model) = self.reasoning_model.as_deref() {
-                return model.to_string();
-            }
-        }
-
-        // 2) 按模型类型匹配（子串）
+        // 1) 按模型类型匹配（子串）
         if model_lower.contains("haiku") {
             if let Some(model) = self.haiku_model.as_deref() {
                 return model.to_string();
@@ -151,6 +151,13 @@ impl ClaudeModels {
         }
         if model_lower.contains("sonnet") {
             if let Some(model) = self.sonnet_model.as_deref() {
+                return model.to_string();
+            }
+        }
+
+        // 2) thinking 模式在未命中具体模型槽位时使用推理模型
+        if has_thinking {
+            if let Some(model) = self.reasoning_model.as_deref() {
                 return model.to_string();
             }
         }

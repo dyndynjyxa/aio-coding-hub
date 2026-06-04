@@ -5,8 +5,8 @@ use crate::providers;
 use crate::shared::error::db_err;
 use rusqlite::{params, Connection};
 
-pub(super) struct ProviderLimitsInput<'a> {
-    pub(super) ctx: CommonCtx<'a>,
+pub(super) struct ProviderLimitsInput<'a, R: tauri::Runtime = tauri::Wry> {
+    pub(super) ctx: CommonCtx<'a, R>,
     pub(super) provider: &'a providers::ProviderForGateway,
     pub(super) earliest_available_unix: &'a mut Option<i64>,
     pub(super) skipped_limits: &'a mut usize,
@@ -355,7 +355,7 @@ fn resolve_fixed_5h_start(
     Ok(now_unix)
 }
 
-pub(super) fn gate_provider(input: ProviderLimitsInput<'_>) -> bool {
+pub(super) fn gate_provider<R: tauri::Runtime>(input: ProviderLimitsInput<'_, R>) -> bool {
     let ProviderLimitsInput {
         ctx,
         provider,
@@ -363,7 +363,9 @@ pub(super) fn gate_provider(input: ProviderLimitsInput<'_>) -> bool {
         skipped_limits,
     } = input;
 
-    if !has_any_limit(provider) {
+    let has_oauth_quota_gate = provider.auth_mode == "oauth";
+    let has_spend_limit = has_any_limit(provider);
+    if !has_oauth_quota_gate && !has_spend_limit {
         return true;
     }
 
@@ -374,6 +376,30 @@ pub(super) fn gate_provider(input: ProviderLimitsInput<'_>) -> bool {
 
     let now_unix = ctx.created_at;
     let end_unix = now_unix.saturating_add(1);
+
+    if has_oauth_quota_gate {
+        match crate::domain::provider_oauth_limits::gate_snapshot(&conn, provider.id, now_unix) {
+            Ok(crate::domain::provider_oauth_limits::OAuthLimitGate::Allow) => {}
+            Ok(crate::domain::provider_oauth_limits::OAuthLimitGate::Limited { reset_at }) => {
+                *skipped_limits = skipped_limits.saturating_add(1);
+                if let Some(reset_at) = reset_at {
+                    update_earliest(earliest_available_unix, reset_at);
+                }
+                return false;
+            }
+            Err(err) => {
+                tracing::warn!(
+                    provider_id = provider.id,
+                    provider_name = %provider.name,
+                    "failed to gate OAuth provider quota snapshot: {err}"
+                );
+            }
+        }
+    }
+
+    if !has_spend_limit {
+        return true;
+    }
 
     // Use fixed window for 5h limit
     let start_5h = if provider.limit_5h_usd.is_some() {

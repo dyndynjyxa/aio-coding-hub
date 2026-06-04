@@ -77,8 +77,8 @@ export function registerBackgroundTask(definition: BackgroundTaskDefinition) {
 
   return () => {
     const current = tasks.get(definition.taskId);
-    if (!current) return;
-    clearTaskInterval(current);
+    if (current !== task) return;
+    clearTaskInterval(task);
     tasks.delete(definition.taskId);
   };
 }
@@ -95,7 +95,10 @@ export function startBackgroundTaskScheduler() {
 }
 
 export function setBackgroundTaskSchedulerForeground(active: boolean) {
-  foregroundActive = active;
+  const normalized = active === true;
+  if (foregroundActive === normalized) return;
+
+  foregroundActive = normalized;
   rescheduleAllTasks();
 }
 
@@ -123,28 +126,30 @@ export async function runBackgroundTask(
       task.pendingContext = context;
     }
     if (!task.pendingPromise) {
-      task.pendingPromise = task.runningPromise
+      let pendingPromise: Promise<void> | null = null;
+      pendingPromise = task.runningPromise
         .catch(() => {})
         .then(async () => {
           const current = tasks.get(taskId);
-          const nextContext = current?.pendingContext ?? null;
-          if (current) {
-            current.pendingContext = null;
-          }
+          if (!current || current.pendingPromise !== pendingPromise) return;
+          const nextContext = current.pendingContext;
+          current.pendingContext = null;
           if (!nextContext) return;
           await runBackgroundTask(taskId, nextContext);
         })
         .finally(() => {
           const current = tasks.get(taskId);
-          if (current) {
+          if (current?.pendingPromise === pendingPromise) {
             current.pendingPromise = null;
           }
         });
+      task.pendingPromise = pendingPromise;
     }
     return task.pendingPromise;
   }
 
-  const promise = Promise.resolve()
+  let promise: Promise<void> | null = null;
+  promise = Promise.resolve()
     .then(() => task.run(context))
     .catch((error) => {
       logToConsole("warn", "后台任务执行失败", {
@@ -154,7 +159,7 @@ export async function runBackgroundTask(
     })
     .finally(() => {
       const current = tasks.get(taskId);
-      if (current) {
+      if (current?.runningPromise === promise) {
         current.runningPromise = null;
       }
     });

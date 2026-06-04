@@ -127,7 +127,7 @@ export function McpServersView({ workspaceId }: McpServersViewProps) {
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-slate-500 dark:text-slate-400">
+          <span className="text-xs text-muted-foreground">
             {loading ? "加载中…" : `共 ${items.length} 条`}
           </span>
         </div>
@@ -153,7 +153,7 @@ export function McpServersView({ workspaceId }: McpServersViewProps) {
       </div>
 
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner size="sm" />
           加载中…
         </div>

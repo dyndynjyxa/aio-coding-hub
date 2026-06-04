@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   ModelPriceAliases,
   ModelPriceSummary,
@@ -62,6 +62,10 @@ function makeModelPricesSyncReport(
 }
 
 describe("query/modelPrices", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("calls modelPricesList with tauri runtime", async () => {
     setTauriRuntime();
     vi.mocked(modelPricesList).mockResolvedValue([]);
@@ -69,7 +73,7 @@ describe("query/modelPrices", () => {
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
 
-    renderHook(() => useModelPricesListQuery("claude"), { wrapper });
+    renderHook(() => useModelPricesListQuery(" claude " as never), { wrapper });
 
     await waitFor(() => {
       expect(modelPricesList).toHaveBeenCalledWith("claude");
@@ -127,7 +131,18 @@ describe("query/modelPrices", () => {
   it("useModelPriceAliasesSetMutation updates cache and invalidates aliases", async () => {
     setTauriRuntime();
 
-    const updated: ModelPriceAliases = { version: 2, rules: [] };
+    const updated: ModelPriceAliases = {
+      version: 1,
+      rules: [
+        {
+          cli_key: " codex " as never,
+          match_type: "prefix",
+          pattern: " gpt- ",
+          target_model: " gpt-5 ",
+          enabled: true,
+        },
+      ],
+    };
     vi.mocked(modelPriceAliasesSet).mockResolvedValue(updated);
 
     const client = createTestQueryClient();
@@ -141,6 +156,18 @@ describe("query/modelPrices", () => {
     });
 
     expect(client.getQueryData(modelPricesKeys.aliases())).toEqual(updated);
+    expect(modelPriceAliasesSet).toHaveBeenCalledWith({
+      version: 1,
+      rules: [
+        {
+          cli_key: "codex",
+          match_type: "prefix",
+          pattern: "gpt-",
+          target_model: "gpt-5",
+          enabled: true,
+        },
+      ],
+    });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: modelPricesKeys.aliases() });
   });
 

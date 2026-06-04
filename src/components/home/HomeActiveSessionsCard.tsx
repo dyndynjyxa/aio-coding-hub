@@ -32,7 +32,7 @@ export function HomeActiveSessionsCardContent({
 
   if (activeSessionsLoading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Spinner size="sm" />
         加载中…
       </div>
@@ -40,7 +40,7 @@ export function HomeActiveSessionsCardContent({
   }
 
   if (activeSessionsAvailable === false) {
-    return <div className="text-sm text-slate-600 dark:text-slate-400">数据不可用</div>;
+    return <div className="text-sm text-muted-foreground">数据不可用</div>;
   }
 
   if (activeSessions.length === 0) {
@@ -56,11 +56,11 @@ export function HomeActiveSessionsCardContent({
         return (
           <div
             key={`${row.cli_key}:${row.session_id}`}
-            className="flex-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2.5 shadow-sm transition-all duration-200 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-indigo-200 dark:hover:border-indigo-700 hover:shadow-md"
+            className="flex-1 rounded-lg border border-border bg-white dark:bg-secondary px-3 py-2.5 shadow-sm transition-all duration-200 hover:bg-secondary dark:hover:bg-secondary hover:border-indigo-200 dark:hover:border-indigo-700 hover:shadow-md"
           >
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
+                <div className="flex items-center gap-2 text-xs text-secondary-foreground">
                   <span
                     className={cn(
                       "shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium",
@@ -69,21 +69,21 @@ export function HomeActiveSessionsCardContent({
                   >
                     {cliShortLabel(row.cli_key)}
                   </span>
-                  <span className="font-mono text-xs text-slate-400 dark:text-slate-500">
+                  <span className="font-mono text-xs text-muted-foreground">
                     {row.session_suffix}
                   </span>
                   <span className="truncate max-w-[150px]">{providerLabel}</span>
                 </div>
 
-                <div className="flex items-center gap-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-500 dark:text-slate-400 shadow-sm">
-                  <DollarSign className="h-3 w-3 text-slate-400 dark:text-slate-500" />
-                  <span className="font-mono font-medium text-slate-700 dark:text-slate-300">
+                <div className="flex items-center gap-1 rounded-md border border-border bg-white dark:bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground shadow-sm">
+                  <DollarSign className="h-3 w-3 text-muted-foreground" />
+                  <span className="font-mono font-medium text-secondary-foreground">
                     {formatUsd(row.total_cost_usd)}
                   </span>
                 </div>
               </div>
 
-              <div className="grid grid-cols-4 gap-x-4 text-[10px] font-mono text-slate-500 dark:text-slate-400">
+              <div className="grid grid-cols-4 gap-x-4 text-[10px] font-mono text-muted-foreground">
                 <span>请求</span>
                 <span>输入</span>
                 <span>输出</span>
@@ -110,7 +110,7 @@ export function HomeActiveSessionsCard({
     <Card padding="sm" className="flex flex-col h-full">
       <div className="flex items-center justify-between gap-2 shrink-0">
         <div className="text-sm font-semibold">活跃 Session</div>
-        <div className="text-xs text-slate-400 dark:text-slate-500">{activeSessions.length}</div>
+        <div className="text-xs text-muted-foreground">{activeSessions.length}</div>
       </div>
 
       <div className="mt-3 flex-1 min-h-0">

@@ -3,7 +3,7 @@ import { cn } from "../../utils/cn";
 export function OutcomePill({ pass }: { pass: boolean | null }) {
   if (pass == null) {
     return (
-      <span className="rounded bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 dark:text-slate-400">
+      <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
         未知
       </span>
     );

@@ -21,12 +21,27 @@ export type DesktopUpdaterDownloadEvent =
   | { event: "progress"; data?: { chunkLength?: number } }
   | { event: "finished"; data?: unknown };
 
+export function validateDesktopUpdaterRid(rid: number): number {
+  if (!Number.isSafeInteger(rid) || rid < 0) {
+    throw new Error(`SEC_INVALID_INPUT: invalid updater rid=${rid}`);
+  }
+  return rid;
+}
+
+export function normalizeDesktopUpdaterTimeoutMs(timeoutMs?: number | null): number | null {
+  if (timeoutMs == null) return null;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new Error(`SEC_INVALID_INPUT: invalid updater timeoutMs=${timeoutMs}`);
+  }
+  return timeoutMs;
+}
+
 function asOptionalString(value: unknown) {
   return typeof value === "string" ? value : undefined;
 }
 
-function asOptionalNumber(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+function asOptionalNonNegativeSafeInteger(value: unknown) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
 export function parseDesktopUpdaterCheck(value: unknown): DesktopUpdaterCheck | null {
@@ -35,7 +50,7 @@ export function parseDesktopUpdaterCheck(value: unknown): DesktopUpdaterCheck | 
   }
 
   const obj = value as Record<string, unknown>;
-  const rid = asOptionalNumber(obj.rid);
+  const rid = asOptionalNonNegativeSafeInteger(obj.rid);
   if (rid == null) {
     return null;
   }
@@ -64,7 +79,11 @@ function parseDesktopUpdaterDownloadEvent(value: unknown): DesktopUpdaterDownloa
   if (event === "started") {
     const startedData =
       data && typeof data === "object"
-        ? { contentLength: asOptionalNumber((data as Record<string, unknown>).contentLength) }
+        ? {
+            contentLength: asOptionalNonNegativeSafeInteger(
+              (data as Record<string, unknown>).contentLength
+            ),
+          }
         : undefined;
     return { event, data: startedData };
   }
@@ -72,7 +91,11 @@ function parseDesktopUpdaterDownloadEvent(value: unknown): DesktopUpdaterDownloa
   if (event === "progress") {
     const progressData =
       data && typeof data === "object"
-        ? { chunkLength: asOptionalNumber((data as Record<string, unknown>).chunkLength) }
+        ? {
+            chunkLength: asOptionalNonNegativeSafeInteger(
+              (data as Record<string, unknown>).chunkLength
+            ),
+          }
         : undefined;
     return { event, data: progressData };
   }
@@ -83,14 +106,12 @@ function parseDesktopUpdaterDownloadEvent(value: unknown): DesktopUpdaterDownloa
 export async function desktopUpdaterCheck(options?: {
   timeoutMs?: number | null;
 }): Promise<DesktopUpdaterCheck | null> {
+  const timeout = normalizeDesktopUpdaterTimeoutMs(options?.timeoutMs);
   const result = await invokeGeneratedIpc<unknown, null>({
     title: "检查更新失败",
     cmd: "desktop_updater_check",
-    args: { timeout: options?.timeoutMs ?? null },
-    invoke: () =>
-      commands.desktopUpdaterCheck(options?.timeoutMs ?? null) as Promise<
-        GeneratedCommandResult<unknown>
-      >,
+    args: { timeout },
+    invoke: () => commands.desktopUpdaterCheck(timeout) as Promise<GeneratedCommandResult<unknown>>,
     nullResultBehavior: "return_fallback",
     fallback: null,
   });
@@ -104,6 +125,8 @@ export async function desktopUpdaterDownloadAndInstall(options: {
 }) {
   // Generated bindings cover the check path. Install stays handwritten because
   // the Rust command accepts a Channel callback and Specta cannot express it.
+  const rid = validateDesktopUpdaterRid(options.rid);
+  const timeout = normalizeDesktopUpdaterTimeoutMs(options.timeoutMs);
   const onEvent = typeof options.onEvent === "function" ? options.onEvent : undefined;
   const channel = new Channel<unknown>((message) => {
     const evt = parseDesktopUpdaterDownloadEvent(message);
@@ -112,17 +135,14 @@ export async function desktopUpdaterDownloadAndInstall(options: {
     }
     onEvent?.(evt);
   });
-  const confirm = createRiskyIpcConfirm(
-    "desktop_updater_download_and_install",
-    `updater:${options.rid}`
-  );
+  const confirm = createRiskyIpcConfirm("desktop_updater_download_and_install", `updater:${rid}`);
 
   return invokeTauriOrNull<boolean>(
     DESKTOP_UPDATER_HANDWRITTEN_COMMAND,
     {
-      rid: options.rid,
+      rid,
       onEvent: channel,
-      timeout: typeof options.timeoutMs === "number" ? options.timeoutMs : null,
+      timeout,
       confirm,
     },
     { timeoutMs: null }

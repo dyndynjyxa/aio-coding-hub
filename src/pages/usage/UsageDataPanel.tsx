@@ -57,7 +57,8 @@ function overlayOpenForCustomPending({
 >) {
   if (!customPending) return false;
   if (tableTab === "cacheTrend") return cacheTrendRows.length > 0;
-  if (tableTab === "availability") return availabilityData != null && availabilityData.providers.length > 0;
+  if (tableTab === "availability")
+    return availabilityData != null && availabilityData.providers.length > 0;
   return rows.length > 0 || summary != null;
 }
 
@@ -76,15 +77,13 @@ function CustomPendingOverlay({
       tabIndex={-1}
       role="status"
       aria-live="polite"
-      className="absolute inset-0 z-20 flex items-center justify-center rounded-lg bg-white/60 dark:bg-slate-900/60 backdrop-blur-[1px]"
+      className="absolute inset-0 z-20 flex items-center justify-center rounded-lg bg-white/60 dark:bg-card/60 backdrop-blur-[1px]"
     >
-      <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-6 py-4 text-center shadow-lg">
-        <div className="text-sm font-medium text-slate-700 dark:text-slate-300">
+      <div className="rounded-lg border border-border bg-white dark:bg-secondary px-6 py-4 text-center shadow-lg">
+        <div className="text-sm font-medium text-secondary-foreground">
           请选择日期后点击"应用"查看数据
         </div>
-        <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-          当前显示为上一次查询的缓存数据
-        </div>
+        <div className="mt-1 text-xs text-muted-foreground">当前显示为上一次查询的缓存数据</div>
       </div>
     </div>
   );

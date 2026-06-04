@@ -25,12 +25,12 @@ export function CacheTrendBody({
   customApplied: CustomDateRangeApplied | null;
 }) {
   if (cacheTrendLoading && cacheTrendRows.length === 0) {
-    return <div className="h-80 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />;
+    return <div className="h-80 animate-pulse rounded-lg bg-secondary dark:bg-secondary" />;
   }
 
   if (cacheTrendRows.length === 0) {
     return (
-      <div className="text-sm text-slate-600 dark:text-slate-400">
+      <div className="text-sm text-muted-foreground">
         {errorText
           ? '加载失败：暂无可展示的数据。请点击上方"重试"。'
           : customPending
@@ -50,7 +50,7 @@ export function CacheTrendBody({
           className="h-full"
         />
       </div>
-      <div className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+      <div className="mt-3 text-xs text-muted-foreground">
         命中率=读取 /（有效输入 + 创建 + 读取）。有效输入：Codex/Gemini 做 input-cache_read
         纠偏；Claude 原样。预警阈值：60%（低于阈值的时间段会高亮背景）。
       </div>
@@ -77,7 +77,7 @@ export function UsageTableBody({
 
   if (rows.length === 0 && !summary) {
     return (
-      <div className="px-6 pb-5 text-sm text-slate-600 dark:text-slate-400">
+      <div className="px-6 pb-5 text-sm text-muted-foreground">
         {errorText
           ? '加载失败：暂无可展示的数据。请点击上方"重试"。'
           : customPending

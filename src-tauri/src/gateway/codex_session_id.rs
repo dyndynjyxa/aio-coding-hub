@@ -8,6 +8,12 @@ const CODEX_SESSION_ID_MIN_LENGTH: usize = 21;
 const CODEX_SESSION_ID_MAX_LENGTH: usize = 256;
 const DEFAULT_TTL_SECS: i64 = 300;
 const MAX_CACHE_ENTRIES: usize = 5000;
+const FINGERPRINT_MAX_MESSAGE_SEGMENTS: usize = 3;
+const FINGERPRINT_INPUT_MAX_ITEMS: usize = 64;
+const FINGERPRINT_CONTENT_PARTS_MAX_ITEMS: usize = 64;
+const FINGERPRINT_TEXT_SAMPLE_BYTES: usize = 32 * 1024;
+const FINGERPRINT_COMBINED_PREFIX_BYTES: usize = 8 * 1024;
+const FINGERPRINT_COMBINED_SUFFIX_BYTES: usize = 8 * 1024;
 
 static UUID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -115,9 +121,13 @@ fn extract_initial_message_text_hash(body: Option<&Value>) -> Option<String> {
         return None;
     }
 
-    let mut texts: Vec<String> = Vec::new();
+    let mut hasher = Sha256::new();
+    let mut segments_added = 0usize;
 
-    for item in input.iter() {
+    for item in input.iter().take(FINGERPRINT_INPUT_MAX_ITEMS) {
+        if segments_added >= FINGERPRINT_MAX_MESSAGE_SEGMENTS {
+            break;
+        }
         let Some(obj) = item.as_object() else {
             continue;
         };
@@ -131,13 +141,10 @@ fn extract_initial_message_text_hash(body: Option<&Value>) -> Option<String> {
 
         let content = obj.get("content");
         if let Some(Value::String(s)) = content {
-            if s.trim().is_empty() {
-                continue;
-            }
-            texts.push(s.trim().to_string());
+            hash_text_segment(&mut hasher, &mut segments_added, s);
         } else if let Some(Value::Array(parts)) = content {
-            let mut joined = String::new();
-            for part in parts {
+            let mut sample = FingerprintTextSample::default();
+            for part in parts.iter().take(FINGERPRINT_CONTENT_PARTS_MAX_ITEMS) {
                 let Some(part_obj) = part.as_object() else {
                     continue;
                 };
@@ -147,26 +154,143 @@ fn extract_initial_message_text_hash(body: Option<&Value>) -> Option<String> {
                 if text.is_empty() {
                     continue;
                 }
-                joined.push_str(text);
+                sample.append_text(text);
             }
-            if !joined.trim().is_empty() {
-                texts.push(joined);
+            if parts.len() > FINGERPRINT_CONTENT_PARTS_MAX_ITEMS {
+                sample.mark_truncated_parts(parts.len());
             }
-        }
-
-        if texts.len() >= 3 {
-            break;
+            if let Some(text) = sample.into_text() {
+                hash_text_segment(&mut hasher, &mut segments_added, &text);
+            }
         }
     }
 
-    if texts.is_empty() {
+    if segments_added == 0 {
         return None;
     }
 
-    let combined = texts.join("|");
-    let digest = Sha256::digest(combined.as_bytes());
+    let digest = hasher.finalize();
     let hex = format!("{digest:x}");
     Some(hex.get(..16).unwrap_or("").to_string()).filter(|v| !v.is_empty())
+}
+
+#[derive(Debug, Default)]
+struct FingerprintTextSample {
+    prefix: String,
+    suffix: String,
+    total_bytes: usize,
+    truncated_parts: Option<usize>,
+}
+
+impl FingerprintTextSample {
+    fn append_text(&mut self, raw: &str) {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+
+        self.total_bytes = self.total_bytes.saturating_add(trimmed.len());
+        append_utf8_prefix(&mut self.prefix, trimmed, FINGERPRINT_COMBINED_PREFIX_BYTES);
+        append_utf8_suffix(&mut self.suffix, trimmed, FINGERPRINT_COMBINED_SUFFIX_BYTES);
+    }
+
+    fn mark_truncated_parts(&mut self, total_parts: usize) {
+        self.truncated_parts = Some(total_parts);
+    }
+
+    fn into_text(self) -> Option<String> {
+        if self.total_bytes == 0 {
+            return None;
+        }
+
+        let exact = self.truncated_parts.is_none() && self.prefix.len() == self.total_bytes;
+        if exact {
+            return Some(self.prefix);
+        }
+
+        Some(format!(
+            "{}|aio_codex_fingerprint_sample:v1:bytes={}:parts={}|{}",
+            self.prefix,
+            self.total_bytes,
+            self.truncated_parts.unwrap_or(0),
+            self.suffix
+        ))
+    }
+}
+
+fn hash_text_segment(hasher: &mut Sha256, segments_added: &mut usize, raw: &str) {
+    if *segments_added >= FINGERPRINT_MAX_MESSAGE_SEGMENTS {
+        return;
+    }
+
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+
+    if *segments_added > 0 {
+        hasher.update(b"|");
+    }
+
+    let bytes = trimmed.as_bytes();
+    if bytes.len() <= FINGERPRINT_TEXT_SAMPLE_BYTES {
+        hasher.update(bytes);
+    } else {
+        let edge_bytes = FINGERPRINT_TEXT_SAMPLE_BYTES / 2;
+        hasher.update(b"sample:v1:bytes=");
+        hasher.update(bytes.len().to_string().as_bytes());
+        hasher.update(b":head:");
+        hasher.update(&bytes[..edge_bytes]);
+        hasher.update(b":tail:");
+        hasher.update(&bytes[bytes.len() - edge_bytes..]);
+    }
+
+    *segments_added += 1;
+}
+
+fn append_utf8_prefix(out: &mut String, raw: &str, max_bytes: usize) {
+    if out.len() >= max_bytes {
+        return;
+    }
+
+    for ch in raw.chars() {
+        let len = ch.len_utf8();
+        if out.len().saturating_add(len) > max_bytes {
+            break;
+        }
+        out.push(ch);
+    }
+}
+
+fn append_utf8_suffix(out: &mut String, raw: &str, max_bytes: usize) {
+    if raw.len() >= max_bytes {
+        out.clear();
+        out.push_str(utf8_suffix_slice(raw, max_bytes));
+        return;
+    }
+
+    out.push_str(raw);
+    while out.len() > max_bytes {
+        let Some(ch) = out.chars().next() else {
+            break;
+        };
+        out.drain(..ch.len_utf8());
+    }
+}
+
+fn utf8_suffix_slice(raw: &str, max_bytes: usize) -> &str {
+    if raw.len() <= max_bytes {
+        return raw;
+    }
+
+    let mut start = raw.len();
+    for (idx, _) in raw.char_indices().rev() {
+        if raw.len().saturating_sub(idx) > max_bytes {
+            break;
+        }
+        start = idx;
+    }
+    &raw[start..]
 }
 
 fn calculate_fingerprint_hash(headers: &HeaderMap, body: Option<&Value>) -> String {
@@ -231,9 +355,31 @@ fn prune_cache(cache: &mut CodexSessionIdCache, now_unix: i64) {
     cache
         .entries
         .retain(|_, entry| entry.expires_at_unix > now_unix);
+    trim_cache_to_capacity(cache);
+}
 
-    if cache.entries.len() > MAX_CACHE_ENTRIES {
-        cache.entries.clear();
+fn trim_cache_to_capacity(cache: &mut CodexSessionIdCache) {
+    while cache.entries.len() > MAX_CACHE_ENTRIES {
+        evict_oldest_cache_entry(cache);
+    }
+}
+
+fn evict_oldest_cache_entry_if_full(cache: &mut CodexSessionIdCache, incoming_key: &str) {
+    if cache.entries.len() < MAX_CACHE_ENTRIES || cache.entries.contains_key(incoming_key) {
+        return;
+    }
+
+    evict_oldest_cache_entry(cache);
+}
+
+fn evict_oldest_cache_entry(cache: &mut CodexSessionIdCache) {
+    if let Some(oldest_key) = cache
+        .entries
+        .iter()
+        .min_by_key(|(_, entry)| entry.expires_at_unix)
+        .map(|(key, _)| key.clone())
+    {
+        cache.entries.remove(&oldest_key);
     }
 }
 
@@ -260,6 +406,7 @@ fn get_or_create_from_fingerprint(
     }
 
     let candidate = generate_uuid_v7_like(now_unix_ms);
+    evict_oldest_cache_entry_if_full(cache, &fingerprint_hash);
     cache.entries.insert(
         fingerprint_hash,
         CacheEntry {

@@ -45,10 +45,10 @@ export function SettingsDialogs({
         className="max-w-lg"
       >
         <div className="space-y-4">
-          <div className="text-sm text-slate-700 dark:text-slate-300">
+          <div className="text-sm text-secondary-foreground">
             说明：仅影响请求日志与明细，不会影响 Providers、Prompts、MCP 等配置。
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-700 pt-3">
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line-subtle pt-3">
             <Button
               onClick={() => clearRequestLogs.setOpen(false)}
               variant="secondary"
@@ -81,7 +81,7 @@ export function SettingsDialogs({
           <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
             注意：此操作会清空所有本地数据与配置。完成后应用会自动退出，需要手动重新打开。
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-700 pt-3">
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line-subtle pt-3">
             <Button
               onClick={() => resetAll.setOpen(false)}
               variant="secondary"
@@ -116,13 +116,13 @@ export function SettingsDialogs({
           <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
             ⚠️ 导入将覆盖当前所有配置（供应商、工作区、提示词、MCP 服务器等），此操作不可撤销。
           </div>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-200">
-            <div className="font-medium text-slate-900 dark:text-slate-100">导入文件</div>
+          <div className="rounded-xl border border-line-subtle bg-surface-inset p-3 text-sm text-secondary-foreground">
+            <div className="font-medium text-foreground">导入文件</div>
             <div className="mt-2 break-all font-mono text-xs">
               {configImport.pendingFilePath ?? "未选择文件"}
             </div>
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-700">
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line-subtle pt-3">
             <Button
               onClick={() => configImport.setOpen(false)}
               variant="secondary"

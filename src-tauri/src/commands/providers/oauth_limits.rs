@@ -1,5 +1,6 @@
 use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::blocking;
+use crate::domain::provider_oauth_limits::OAuthLimitSnapshotInput;
 
 use super::oauth::{
     effective_oauth_access_token, oauth_details_can_refresh, refresh_oauth_details_for_limits,
@@ -115,13 +116,35 @@ pub(crate) async fn provider_oauth_fetch_limits(
             (None, None, None, None)
         };
 
-    Ok(ProviderOAuthLimitsResult {
+    let result = ProviderOAuthLimitsResult {
         limit_short_label,
         limit_5h_text,
         limit_weekly_text,
         limit_5h_reset_at,
         limit_weekly_reset_at,
+    };
+
+    blocking::run("provider_oauth_fetch_limits_save_snapshot", {
+        let db = db.clone();
+        let result = result.clone();
+        move || {
+            crate::domain::provider_oauth_limits::save_snapshot(
+                &db,
+                OAuthLimitSnapshotInput {
+                    provider_id,
+                    limit_short_label: result.limit_short_label.as_deref(),
+                    limit_5h_text: result.limit_5h_text.as_deref(),
+                    limit_weekly_text: result.limit_weekly_text.as_deref(),
+                    limit_5h_reset_at: result.limit_5h_reset_at,
+                    limit_weekly_reset_at: result.limit_weekly_reset_at,
+                },
+            )
+        }
     })
+    .await
+    .map_err(Into::<String>::into)?;
+
+    Ok(result)
 }
 
 fn default_oauth_short_window_label(cli_key: &str) -> Option<String> {
@@ -239,21 +262,62 @@ fn parse_claude_limits(body: &serde_json::Value) -> (Option<String>, Option<Stri
         .map(|used| format_percent_label(100.0 - used));
     (limit_5h, limit_weekly)
 }
+fn parse_reset_timestamp_value(value: &serde_json::Value) -> Option<i64> {
+    if let Some(timestamp) = value.as_i64().filter(|timestamp| *timestamp > 0) {
+        return Some(timestamp);
+    }
+
+    let text = value.as_str()?.trim();
+    if text.is_empty() {
+        return None;
+    }
+    if let Ok(timestamp) = text.parse::<i64>() {
+        return (timestamp > 0).then_some(timestamp);
+    }
+
+    chrono::DateTime::parse_from_rfc3339(text)
+        .ok()
+        .map(|value| value.timestamp())
+        .filter(|timestamp| *timestamp > 0)
+}
+
 fn extract_reset_timestamp(window: &serde_json::Value) -> Option<i64> {
     window
         .get("reset_at")
         .or_else(|| window.get("resetAt"))
         .or_else(|| window.get("resets_at"))
         .or_else(|| window.get("resetsAt"))
-        .and_then(serde_json::Value::as_i64)
+        .or_else(|| window.get("reset_time"))
+        .or_else(|| window.get("resetTime"))
+        .and_then(parse_reset_timestamp_value)
+}
+
+fn extract_bucket_reset_timestamps(body: &serde_json::Value) -> (Option<i64>, Option<i64>) {
+    let Some(buckets) = body.get("buckets").and_then(serde_json::Value::as_array) else {
+        return (None, None);
+    };
+
+    let mut reset_times: Vec<i64> = buckets.iter().filter_map(extract_reset_timestamp).collect();
+    reset_times.sort_unstable();
+    reset_times.dedup();
+
+    match (reset_times.first().copied(), reset_times.last().copied()) {
+        (Some(first), Some(last)) if first != last => (Some(first), Some(last)),
+        (Some(first), _) => (Some(first), None),
+        _ => (None, None),
+    }
 }
 
 fn extract_reset_timestamps(body: &serde_json::Value) -> (Option<i64>, Option<i64>) {
     let (primary, secondary) = resolve_rate_windows(body);
-    (
+    let resets = (
         primary.and_then(extract_reset_timestamp),
         secondary.and_then(extract_reset_timestamp),
-    )
+    );
+    if resets.0.is_some() || resets.1.is_some() {
+        return resets;
+    }
+    extract_bucket_reset_timestamps(body)
 }
 
 #[cfg(test)]
@@ -322,6 +386,21 @@ mod tests {
 
         assert_eq!(limit_5h.as_deref(), Some("50%"));
         assert_eq!(limit_weekly.as_deref(), Some("75%"));
+    }
+
+    #[test]
+    fn extract_reset_timestamps_supports_gemini_bucket_reset_time() {
+        let body = serde_json::json!({
+            "buckets": [
+                { "remainingAmount": "0", "resetTime": "2026-03-09T11:00:00Z" },
+                { "remainingAmount": "7", "resetTime": "2026-03-16T00:00:00Z" }
+            ]
+        });
+
+        let resets = extract_reset_timestamps(&body);
+
+        assert_eq!(resets.0, Some(1_773_054_000));
+        assert_eq!(resets.1, Some(1_773_619_200));
     }
 
     #[test]

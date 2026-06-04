@@ -10,7 +10,8 @@ import {
 } from "../../services/usage/cost";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
-import { useCostAnalyticsV1Query } from "../cost";
+import { useCostAnalyticsV1Query, type CostFilters } from "../cost";
+import { costKeys } from "../keys";
 
 vi.mock("../../services/usage/cost", async () => {
   const actual = await vi.importActual<typeof import("../../services/usage/cost")>(
@@ -125,6 +126,98 @@ describe("query/cost", () => {
       scatter,
       topRequests: top,
     });
+  });
+
+  it("normalizes cost filters before cache key and service calls", async () => {
+    setTauriRuntime();
+
+    const summary = {
+      requests_total: 0,
+      requests_success: 0,
+      requests_failed: 0,
+      cost_covered_success: 0,
+      total_cost_usd: 0,
+      avg_cost_usd_per_covered_success: null,
+    };
+
+    vi.mocked(costSummaryV1).mockResolvedValue(summary);
+    vi.mocked(costTrendV1).mockResolvedValue([]);
+    vi.mocked(costBreakdownProviderV1).mockResolvedValue([]);
+    vi.mocked(costBreakdownModelV1).mockResolvedValue([]);
+    vi.mocked(costScatterCliProviderModelV1).mockResolvedValue([]);
+    vi.mocked(costTopRequestsV1).mockResolvedValue([]);
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+    const filters = {
+      startTs: 1,
+      endTs: 2,
+      cliKey: " claude ",
+      providerId: 3,
+      model: " m1 ",
+    } as unknown as CostFilters;
+    const normalizedFilters = {
+      startTs: 1,
+      endTs: 2,
+      cliKey: "claude",
+      providerId: 3,
+      model: "m1",
+    } satisfies CostFilters;
+
+    const { result } = renderHook(() => useCostAnalyticsV1Query("custom", filters), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+    });
+
+    expect(costSummaryV1).toHaveBeenCalledWith("custom", normalizedFilters);
+    expect(costTrendV1).toHaveBeenCalledWith("custom", normalizedFilters);
+    expect(costBreakdownProviderV1).toHaveBeenCalledWith("custom", {
+      ...normalizedFilters,
+      limit: 120,
+    });
+    expect(costBreakdownModelV1).toHaveBeenCalledWith("custom", {
+      ...normalizedFilters,
+      limit: 120,
+    });
+    expect(costScatterCliProviderModelV1).toHaveBeenCalledWith("custom", {
+      ...normalizedFilters,
+      limit: 500,
+    });
+    expect(costTopRequestsV1).toHaveBeenCalledWith("custom", {
+      ...normalizedFilters,
+      limit: 50,
+    });
+    expect(client.getQueryState(costKeys.analyticsV1("custom", normalizedFilters))).toBeTruthy();
+    expect(client.getQueryState(costKeys.analyticsV1("custom", filters))).toBeUndefined();
+  });
+
+  it("rejects invalid cost filters before creating query adapters", () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    expect(() =>
+      renderHook(
+        () =>
+          useCostAnalyticsV1Query("daily", {
+            startTs: null,
+            endTs: null,
+            cliKey: "opencode",
+            providerId: null,
+            model: null,
+          } as unknown as CostFilters),
+        { wrapper }
+      )
+    ).toThrow("SEC_INVALID_INPUT");
+
+    expect(costSummaryV1).not.toHaveBeenCalled();
+    expect(costTrendV1).not.toHaveBeenCalled();
+    expect(costBreakdownProviderV1).not.toHaveBeenCalled();
+    expect(costBreakdownModelV1).not.toHaveBeenCalled();
+    expect(costScatterCliProviderModelV1).not.toHaveBeenCalled();
+    expect(costTopRequestsV1).not.toHaveBeenCalled();
   });
 
   it("useCostAnalyticsV1Query enters error state when underlying call rejects", async () => {

@@ -193,7 +193,7 @@ describe("pages/WorkspacesPage", () => {
       | HTMLElement
       | undefined;
     if (!w2Card) throw new Error("W2 workspace card not found");
-    expect(within(w2Card).getByRole("button", { name: "切换…" })).toBeInTheDocument();
+    expect(within(w2Card).getByRole("button", { name: "对比切换" })).toBeInTheDocument();
 
     // Create workspace (duplicate blocked, then create blank)
     fireEvent.click(screen.getByRole("button", { name: "新建" }));
@@ -230,11 +230,11 @@ describe("pages/WorkspacesPage", () => {
     );
 
     // Switch dialog (compare -> confirm switch)
-    fireEvent.click(within(w2Card).getByRole("button", { name: "切换…" }));
+    fireEvent.click(within(w2Card).getByRole("button", { name: "对比切换" }));
     dialog = within(screen.getByRole("dialog"));
     expect(dialog.getByText("+1 / -0")).toBeInTheDocument();
     await closeDialogByOverlay();
-    fireEvent.click(within(w2Card).getByRole("button", { name: "切换…" }));
+    fireEvent.click(within(w2Card).getByRole("button", { name: "对比切换" }));
     dialog = within(screen.getByRole("dialog"));
     fireEvent.change(dialog.getByRole("textbox"), { target: { value: "APPLY" } });
     fireEvent.click(dialog.getByRole("button", { name: "确认切换" }));
@@ -345,7 +345,7 @@ describe("pages/WorkspacesPage", () => {
         (el) => el.getAttribute("tabindex") === "0" && el.getAttribute("aria-current") === "true"
       ) as HTMLElement | undefined;
     if (!codexCard) throw new Error("Active workspace card not found");
-    expect(within(codexCard).queryByRole("button", { name: "切换…" })).not.toBeInTheDocument();
+    expect(within(codexCard).queryByRole("button", { name: "对比切换" })).not.toBeInTheDocument();
 
     // active workspace => mcp tab has no non-active hint
     fireEvent.click(screen.getByRole("tab", { name: "MCP" }));
@@ -359,7 +359,7 @@ describe("pages/WorkspacesPage", () => {
       | HTMLElement
       | undefined;
     if (!geminiCard) throw new Error("Gemini workspace card not found");
-    fireEvent.click(within(geminiCard).getByRole("button", { name: "切换…" }));
+    fireEvent.click(within(geminiCard).getByRole("button", { name: "对比切换" }));
     const dialog = within(screen.getByRole("dialog"));
 
     // no paths shown (requirement: do not display ~/.xxx hints)
@@ -506,7 +506,7 @@ describe("pages/WorkspacesPage", () => {
     fireEvent.click(screen.getByRole("tab", { name: "总览" }));
 
     // switch dialog refresh button
-    fireEvent.click(within(w2Card).getByRole("button", { name: "切换…" }));
+    fireEvent.click(within(w2Card).getByRole("button", { name: "对比切换" }));
     let dialog = within(screen.getByRole("dialog"));
     fireEvent.click(dialog.getByRole("button", { name: "刷新对比" }));
     expect(previewRefetch).toHaveBeenCalled();

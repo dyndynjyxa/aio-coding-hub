@@ -33,7 +33,7 @@ const LazyGeminiTab = lazy(() =>
   }))
 );
 
-const TAB_FALLBACK = <div className="p-6 text-sm text-slate-500 dark:text-slate-400">加载中…</div>;
+const TAB_FALLBACK = <div className="p-6 text-sm text-muted-foreground">加载中…</div>;
 
 export function CliManagerPage() {
   const model = useCliManagerPageDataModel();

@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CliProxyStatus } from "../../services/cli/cliProxy";
 import { cliProxySetEnabled, cliProxyStatusAll } from "../../services/cli/cliProxy";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
@@ -19,9 +19,12 @@ vi.mock("../../services/cli/cliProxy", async () => {
 });
 
 describe("query/cliProxy", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("useCliProxyStatusAllQuery respects enabled=false", () => {
     setTauriRuntime();
-    vi.mocked(cliProxyStatusAll).mockClear();
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
@@ -84,7 +87,7 @@ describe("query/cliProxy", () => {
     const { result } = renderHook(() => useCliProxySetEnabledMutation(), { wrapper });
 
     await act(async () => {
-      const promise = result.current.mutateAsync({ cliKey: "codex", enabled: true });
+      const promise = result.current.mutateAsync({ cliKey: " codex " as never, enabled: true });
 
       const optimistic = client.getQueryData<CliProxyStatus[] | null>(cliProxyKeys.statusAll());
       expect(optimistic?.find((r) => r.cli_key === "codex")?.enabled).toBe(true);
@@ -216,6 +219,28 @@ describe("query/cliProxy", () => {
       );
     });
 
+    expect(client.getQueryData(cliProxyKeys.statusAll())).toEqual(initial);
+  });
+
+  it("rejects invalid cli keys before service calls or optimistic cache writes", async () => {
+    setTauriRuntime();
+
+    const initial: CliProxyStatus[] = [
+      { cli_key: "codex", enabled: false, base_origin: null, applied_to_current_gateway: null },
+    ];
+    const client = createTestQueryClient();
+    client.setQueryData(cliProxyKeys.statusAll(), initial);
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useCliProxySetEnabledMutation(), { wrapper });
+
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync({ cliKey: "unknown" as never, enabled: true })
+      ).rejects.toThrow("SEC_INVALID_INPUT");
+    });
+
+    expect(cliProxySetEnabled).not.toHaveBeenCalled();
     expect(client.getQueryData(cliProxyKeys.statusAll())).toEqual(initial);
   });
 });

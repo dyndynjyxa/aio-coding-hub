@@ -11,6 +11,8 @@ use std::collections::VecDeque;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+const MAX_GEMINI_OAUTH_SSE_EVENT_BUFFER_BYTES: usize = 1024 * 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum GeminiOAuthResponseMode {
     GenerateContent,
@@ -143,6 +145,7 @@ where
     queued: VecDeque<Bytes>,
     pending_error: Option<reqwest::Error>,
     upstream_done: bool,
+    passthrough: bool,
 }
 
 impl<S> GeminiOAuthSseStream<S>
@@ -157,6 +160,7 @@ where
             queued: VecDeque::new(),
             pending_error: None,
             upstream_done: false,
+            passthrough: false,
         }
     }
 
@@ -165,6 +169,21 @@ where
             self.response_mode,
             Some(GeminiOAuthResponseMode::StreamGenerateContent)
         )
+    }
+
+    fn degrade_to_passthrough(&mut self, chunk: Bytes) {
+        tracing::warn!(
+            max_bytes = MAX_GEMINI_OAUTH_SSE_EVENT_BUFFER_BYTES,
+            "Gemini OAuth SSE event buffer exceeded maximum size; switching to passthrough"
+        );
+        self.passthrough = true;
+        let buffered = std::mem::take(&mut self.buffer);
+        if !buffered.is_empty() {
+            self.queued.push_back(Bytes::from(buffered));
+        }
+        if !chunk.is_empty() {
+            self.queued.push_back(chunk);
+        }
     }
 
     fn queue_buffered_events(&mut self) {
@@ -209,6 +228,10 @@ where
                 return Poll::Ready(None);
             }
 
+            if this.passthrough {
+                return Pin::new(&mut this.upstream).poll_next(cx);
+            }
+
             match Pin::new(&mut this.upstream).poll_next(cx) {
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(None) => {
@@ -219,6 +242,12 @@ where
                     this.pending_error = Some(err);
                 }
                 Poll::Ready(Some(Ok(chunk))) => {
+                    if this.buffer.len().saturating_add(chunk.len())
+                        > MAX_GEMINI_OAUTH_SSE_EVENT_BUFFER_BYTES
+                    {
+                        this.degrade_to_passthrough(chunk);
+                        continue;
+                    }
                     this.buffer.extend_from_slice(chunk.as_ref());
                     this.queue_buffered_events();
                 }
@@ -668,6 +697,30 @@ fn trim_ascii_prefix(bytes: &[u8]) -> &[u8] {
 mod tests {
     use super::*;
 
+    struct VecBytesStream {
+        items: VecDeque<Result<Bytes, reqwest::Error>>,
+    }
+
+    impl VecBytesStream {
+        fn new(items: Vec<Result<Bytes, reqwest::Error>>) -> Self {
+            Self {
+                items: items.into_iter().collect(),
+            }
+        }
+    }
+
+    impl Stream for VecBytesStream {
+        type Item = Result<Bytes, reqwest::Error>;
+
+        fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            Poll::Ready(self.items.pop_front())
+        }
+    }
+
+    async fn next_item<S: Stream + Unpin>(stream: &mut S) -> Option<S::Item> {
+        std::future::poll_fn(|cx| Pin::new(&mut *stream).poll_next(cx)).await
+    }
+
     #[test]
     fn prepare_upstream_request_with_project_wraps_generate_content() {
         let prepared = prepare_upstream_request_with_project(
@@ -873,6 +926,29 @@ mod tests {
         assert_eq!(find_sse_event_end(b"data: one\n"), None);
         assert_eq!(find_sse_event_end(b"data: one\n\n"), Some(11));
         assert_eq!(find_sse_event_end(b"data: one\r\n\r\n"), Some(13));
+    }
+
+    #[tokio::test]
+    async fn gemini_oauth_sse_stream_degrades_to_passthrough_when_event_buffer_exceeds_limit() {
+        let buffered = Bytes::from_static(b"data: ");
+        let oversized = Bytes::from(vec![b'a'; MAX_GEMINI_OAUTH_SSE_EVENT_BUFFER_BYTES]);
+        let mut stream = GeminiOAuthSseStream::new(
+            VecBytesStream::new(vec![Ok(buffered.clone()), Ok(oversized.clone())]),
+            Some(GeminiOAuthResponseMode::StreamGenerateContent),
+        );
+
+        let first = next_item(&mut stream)
+            .await
+            .expect("buffered output")
+            .expect("buffered ok");
+        let second = next_item(&mut stream)
+            .await
+            .expect("oversized output")
+            .expect("oversized ok");
+
+        assert_eq!(first, buffered);
+        assert_eq!(second, oversized);
+        assert!(next_item(&mut stream).await.is_none());
     }
 
     #[test]

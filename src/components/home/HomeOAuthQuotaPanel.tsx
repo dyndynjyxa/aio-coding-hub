@@ -82,10 +82,10 @@ function OAuthQuotaProviderCard({
     row.state === "success" && hasInsufficientHomeOAuthQuota(row.limits);
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+    <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-sm dark:border-border dark:bg-secondary">
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
+          <div className="flex min-w-0 items-center gap-2 text-xs text-secondary-foreground">
             <span
               className={cn(
                 "shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium",
@@ -99,7 +99,7 @@ function OAuthQuotaProviderCard({
 
           <div className="flex items-center gap-1">
             {!row.enabled ? (
-              <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500 dark:bg-slate-700 dark:text-slate-400">
+              <span className="rounded-full bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground dark:bg-secondary dark:text-muted-foreground">
                 已禁用
               </span>
             ) : null}
@@ -113,7 +113,7 @@ function OAuthQuotaProviderCard({
                 type="button"
                 onClick={() => onRefreshRow(row.providerId)}
                 disabled={row.state === "loading"}
-                className="rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-700 dark:hover:text-indigo-400"
+                className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-secondary dark:hover:text-indigo-400"
                 title={`刷新 ${row.providerName} OAuth 配额`}
                 aria-label={`刷新 ${row.providerName} OAuth 配额`}
               >
@@ -126,7 +126,7 @@ function OAuthQuotaProviderCard({
         </div>
 
         {row.state === "loading" ? (
-          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Spinner size="sm" />
             刷新中...
           </div>
@@ -136,13 +136,11 @@ function OAuthQuotaProviderCard({
             <span>刷新失败，请重试</span>
           </div>
         ) : row.state === "idle" ? (
-          <div className="text-xs text-slate-500 dark:text-slate-400">
-            点击右上角刷新获取 OAuth 配额
-          </div>
+          <div className="text-xs text-muted-foreground">点击右上角刷新获取 OAuth 配额</div>
         ) : !hasHomeOAuthQuotaText(row.limits) ? (
-          <div className="text-xs text-slate-500 dark:text-slate-400">暂无 OAuth 配额信息</div>
+          <div className="text-xs text-muted-foreground">暂无 OAuth 配额信息</div>
         ) : (
-          <div className="flex items-center justify-between gap-2 text-xs text-slate-600 dark:text-slate-400">
+          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
             <span className="min-w-0 truncate font-mono" title={quotaSummary}>
               {quotaSummary}
             </span>
@@ -178,15 +176,13 @@ export function HomeOAuthQuotaPanelContent({
   return (
     <div className="flex h-full min-h-0 flex-col gap-2">
       <div className="flex items-center justify-between shrink-0">
-        <span className="text-xs text-slate-400 dark:text-slate-500">
-          {rows.length} 个 OAuth 供应商
-        </span>
+        <span className="text-xs text-muted-foreground">{rows.length} 个 OAuth 供应商</span>
         {onRefresh ? (
           <button
             type="button"
             onClick={onRefresh}
             disabled={refreshing}
-            className="rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-700 dark:hover:text-indigo-400"
+            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-secondary dark:hover:text-indigo-400"
             title="刷新 OAuth 配额"
             aria-label="刷新 OAuth 配额"
           >
@@ -197,7 +193,7 @@ export function HomeOAuthQuotaPanelContent({
 
       <>
         {showNoQuotaNotice ? (
-          <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/80 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-400">
+          <div className="rounded-lg border border-dashed border-border bg-secondary/80 px-3 py-2 text-xs text-muted-foreground dark:border-border dark:bg-secondary/40 dark:text-muted-foreground">
             当前暂无 OAuth 配额信息
           </div>
         ) : null}

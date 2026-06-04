@@ -7,10 +7,10 @@ import { CLIS, cliFromKeyOrDefault, isCliKey } from "../../constants/clis";
 import { useSettingsQuery } from "../../query/settings";
 import {
   useSkillInstallToLocalMutation,
+  useSkillRepoDiscoverAvailableMutation,
   useSkillRepoDeleteMutation,
   useSkillRepoUpsertMutation,
   useSkillReposListQuery,
-  useSkillsDiscoverAvailableMutation,
   useSkillsDiscoverAvailableQuery,
   useSkillsInstalledListQuery,
   useSkillsLocalListQuery,
@@ -126,7 +126,8 @@ export function useSkillsMarketPageDataModel() {
 
   const reposQuery = useSkillReposListQuery();
   const repos = useMemo(() => reposQuery.data ?? [], [reposQuery.data]);
-  const enabledRepoCount = useMemo(() => repos.filter((repo) => repo.enabled).length, [repos]);
+  const enabledRepos = useMemo(() => repos.filter((repo) => repo.enabled), [repos]);
+  const enabledRepoCount = enabledRepos.length;
 
   const workspacesQuery = useWorkspacesListQuery(effectiveCli);
   const activeWorkspaceId = workspacesQuery.data?.active_id ?? null;
@@ -149,17 +150,17 @@ export function useSkillsMarketPageDataModel() {
   );
   const available = useMemo(() => availableQuery.data ?? [], [availableQuery.data]);
 
-  const discoverMutation = useSkillsDiscoverAvailableMutation();
+  const discoverRepoMutation = useSkillRepoDiscoverAvailableMutation();
   const repoUpsertMutation = useSkillRepoUpsertMutation();
   const repoDeleteMutation = useSkillRepoDeleteMutation();
-  const installToLocalMutation = useSkillInstallToLocalMutation(activeWorkspaceId ?? 0);
+  const installToLocalMutation = useSkillInstallToLocalMutation(activeWorkspaceId);
 
   const loading =
     reposQuery.isLoading ||
     workspacesQuery.isLoading ||
     installedQuery.isLoading ||
     (Boolean(activeWorkspaceId) && localQuery.isLoading);
-  const discovering = discoverMutation.isPending || availableQuery.isFetching;
+  const discovering = discoverRepoMutation.isPending || availableQuery.isFetching;
   const installBusy = installingRepoKey != null || installingSources.size > 0;
 
   useEffect(() => {
@@ -308,23 +309,51 @@ export function useSkillsMarketPageDataModel() {
   }, [groupedAvailable, repoFilter]);
 
   async function refreshAvailable(refresh: boolean, toastOnSuccess = true) {
-    try {
-      const rows = await discoverMutation.mutateAsync(refresh);
-      if (!rows) return;
+    if (enabledRepos.length === 0) {
+      toast("没有启用的 Skill 仓库");
+      return;
+    }
 
-      logToConsole("info", refresh ? "刷新 Skill 发现（下载更新）" : "扫描 Skill（缓存）", {
-        refresh,
-        count: rows.length,
-      });
-      if (toastOnSuccess) toast(`已发现 ${rows.length} 个 Skill`);
-    } catch (error) {
-      const formatted = formatActionFailureToast("刷新发现", error);
-      logToConsole("error", "刷新 Skill 发现失败", {
-        error: formatted.raw,
-        error_code: formatted.error_code ?? undefined,
-        refresh,
-      });
-      toast(formatted.toast);
+    let refreshedCount = 0;
+    let failedCount = 0;
+    let discoveredCount = 0;
+
+    for (const repo of enabledRepos) {
+      try {
+        const rows = await discoverRepoMutation.mutateAsync({ repo, refresh });
+        if (!rows) continue;
+
+        refreshedCount += 1;
+        discoveredCount += rows.length;
+        logToConsole("info", refresh ? "刷新 Skill 仓库发现" : "扫描 Skill 仓库缓存", {
+          refresh,
+          repo_id: repo.id,
+          git_url: repo.git_url,
+          branch: repo.branch,
+          count: rows.length,
+        });
+      } catch (error) {
+        failedCount += 1;
+        const formatted = formatActionFailureToast("刷新发现", error);
+        logToConsole("error", "刷新 Skill 仓库发现失败", {
+          error: formatted.raw,
+          error_code: formatted.error_code ?? undefined,
+          refresh,
+          repo_id: repo.id,
+          git_url: repo.git_url,
+          branch: repo.branch,
+        });
+      }
+    }
+
+    if (toastOnSuccess) {
+      if (failedCount === 0) {
+        toast(`已刷新 ${refreshedCount} 个仓库，发现 ${discoveredCount} 个 Skill`);
+      } else if (refreshedCount > 0) {
+        toast(`已刷新 ${refreshedCount} 个仓库，${failedCount} 个失败`);
+      } else {
+        toast("刷新发现失败");
+      }
     }
   }
 

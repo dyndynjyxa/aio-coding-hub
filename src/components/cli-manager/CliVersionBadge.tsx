@@ -70,7 +70,7 @@ export function CliVersionBadge({
   }
 
   if (result?.error) {
-    return <span className="text-xs text-slate-500 dark:text-slate-400">{result.error}</span>;
+    return <span className="text-xs text-muted-foreground">{result.error}</span>;
   }
 
   if (!result) {

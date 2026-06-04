@@ -10,8 +10,8 @@ pub(super) enum SendResult {
     Timeout,
 }
 
-pub(super) async fn send_upstream(
-    ctx: CommonCtx<'_>,
+pub(super) async fn send_upstream<R: tauri::Runtime>(
+    ctx: CommonCtx<'_, R>,
     method: Method,
     url: reqwest::Url,
     headers: HeaderMap,

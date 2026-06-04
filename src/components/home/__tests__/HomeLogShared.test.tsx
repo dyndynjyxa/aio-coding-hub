@@ -331,6 +331,7 @@ describe("components/home/HomeLogShared", () => {
           ok: false,
           error_code: GatewayErrorCodes.UPSTREAM_TIMEOUT,
           status: 504,
+          attempts: 3,
         }),
       ],
       status: 504,
@@ -338,8 +339,9 @@ describe("components/home/HomeLogShared", () => {
       attemptCount: 5,
     });
     expect(skippedAndRetry.label).toBe("跳过 2 个 + 重试");
+    expect(skippedAndRetry.summary).toBe("跳过 2 个候选，并重试 3 次");
     expect(skippedAndRetry.tooltipText).toContain("未知（已跳过，尝试 2 次）");
-    expect(skippedAndRetry.tooltipText).toContain("Provider B（504，上游超时）");
+    expect(skippedAndRetry.tooltipText).toContain("Provider B（504，上游超时，尝试 3 次）");
 
     const failover = buildRequestRouteMeta({
       route: [
@@ -365,7 +367,16 @@ describe("components/home/HomeLogShared", () => {
     expect(failedFailover.summary).toBe("切换 2 次后结束");
 
     const skippedOnly = buildRequestRouteMeta({
-      route: [createRequestLogRouteHop({ provider_name: "Provider B", ok: true, status: 200 })],
+      route: [
+        createRequestLogRouteHop({
+          provider_name: "Provider A",
+          ok: false,
+          skipped: true,
+          status: null,
+          attempts: 2,
+        }),
+        createRequestLogRouteHop({ provider_name: "Provider B", ok: true, status: 200 }),
+      ],
       status: 200,
       hasFailover: false,
       attemptCount: 3,
@@ -419,10 +430,11 @@ describe("components/home/HomeLogShared", () => {
     );
 
     expect(screen.getAllByText("会话复用")[0]).toHaveAttribute("title");
+    expect(screen.getAllByText("会话复用")[0]).toHaveClass("ring-blue-400/35");
     expect(screen.getAllByText("fast")[0]).toHaveAttribute("title");
     expect(screen.getByText("免费")).toBeInTheDocument();
     expect(screen.getByText("workspace-alpha")).toBeInTheDocument();
-    expect(screen.getByTitle("/tmp/workspace-alpha")).toBeInTheDocument();
+    expect(screen.getByTitle("/tmp/workspace-alpha")).toHaveClass("border-border/45");
     expect(getErrorCodeLabel(GatewayErrorCodes.UPSTREAM_TIMEOUT)).toBe("上游超时");
     expect(computeEffectiveInputTokens("codex", 100, 30)).toBe(70);
     expect(computeEffectiveInputTokens("claude", 100, 30)).toBe(100);

@@ -22,9 +22,9 @@ pub(super) struct AuthErrorCtx<'a> {
 /// Returns `Err(Box<FailoverAttempt>)` when OAuth header injection fails
 /// (the attempt should be pushed to the attempts list and the retry
 /// loop should break).
-pub(super) fn inject_auth(
-    ctx: CommonCtx<'_>,
-    input: &RequestContext,
+pub(super) fn inject_auth<R: tauri::Runtime>(
+    ctx: CommonCtx<'_, R>,
+    input: &RequestContext<R>,
     prepared: &PreparedProvider,
     retry_state: &RetryLoopState,
     error_ctx: &AuthErrorCtx<'_>,
@@ -71,9 +71,9 @@ pub(super) fn inject_auth(
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-fn inject_oauth_auth(
+fn inject_oauth_auth<R: tauri::Runtime>(
     prepared: &PreparedProvider,
-    input: &RequestContext,
+    input: &RequestContext<R>,
     error_ctx: &AuthErrorCtx<'_>,
     headers: &mut HeaderMap,
 ) -> Result<(), Box<FailoverAttempt>> {
@@ -148,9 +148,9 @@ fn inject_oauth_auth(
     }
 }
 
-fn inject_standard_auth(
-    ctx: CommonCtx<'_>,
-    input: &RequestContext,
+fn inject_standard_auth<R: tauri::Runtime>(
+    ctx: CommonCtx<'_, R>,
+    input: &RequestContext<R>,
     prepared: &PreparedProvider,
     retry_state: &RetryLoopState,
     retry_index: u32,
@@ -173,15 +173,17 @@ fn inject_standard_auth(
         }
 
         if retry_index == 1 || retry_state.claude_api_key_bearer_fallback {
-            let mut settings = ctx.special_settings.lock_or_recover();
-            settings.push(serde_json::json!({
-                "type": "claude_auth_injection",
-                "scope": "attempt",
-                "providerId": prepared.provider_id,
-                "providerName": prepared.provider_name_base.clone(),
-                "retryAttemptNumber": retry_index,
-                "mode": if retry_state.claude_api_key_bearer_fallback { "authorization_bearer" } else { "x_api_key" },
-            }));
+            response_fixer::push_special_setting(
+                ctx.special_settings,
+                serde_json::json!({
+                    "type": "claude_auth_injection",
+                    "scope": "attempt",
+                    "providerId": prepared.provider_id,
+                    "providerName": prepared.provider_name_base.clone(),
+                    "retryAttemptNumber": retry_index,
+                    "mode": if retry_state.claude_api_key_bearer_fallback { "authorization_bearer" } else { "x_api_key" },
+                }),
+            );
         }
     }
 }

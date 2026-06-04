@@ -8,6 +8,7 @@ pub(super) mod billing_header_rectifier;
 pub(super) mod body_reader;
 pub(super) mod cli_proxy_guard;
 pub(super) mod codex_session_completion;
+pub(super) mod cx2cc_count_tokens_interceptor;
 pub(super) mod model_inference;
 pub(super) mod probe_interceptor;
 pub(super) mod provider_resolution;
@@ -20,6 +21,7 @@ pub(super) use billing_header_rectifier::BillingHeaderRectifierMiddleware;
 pub(super) use body_reader::BodyReaderMiddleware;
 pub(super) use cli_proxy_guard::CliProxyGuardMiddleware;
 pub(super) use codex_session_completion::CodexSessionCompletionMiddleware;
+pub(super) use cx2cc_count_tokens_interceptor::Cx2ccCountTokensInterceptorMiddleware;
 pub(super) use model_inference::ModelInferenceMiddleware;
 pub(super) use probe_interceptor::ProbeInterceptorMiddleware;
 pub(super) use provider_resolution::ProviderResolutionMiddleware;
@@ -39,8 +41,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 /// Result of a middleware step: continue processing or return early.
-pub(super) enum MiddlewareAction {
-    Continue(Box<ProxyContext>),
+pub(super) enum MiddlewareAction<R: tauri::Runtime = tauri::Wry> {
+    Continue(Box<ProxyContext<R>>),
     ShortCircuit(Response),
 }
 
@@ -49,9 +51,9 @@ pub(super) enum MiddlewareAction {
 /// Fields are progressively populated by each middleware. The context starts
 /// with only the minimal request information and gains richer data as it passes
 /// through the chain.
-pub(super) struct ProxyContext {
+pub(super) struct ProxyContext<R: tauri::Runtime = tauri::Wry> {
     // -- immutable request metadata (set at construction) --
-    pub(super) state: GatewayAppState,
+    pub(super) state: GatewayAppState<R>,
     pub(super) cli_key: String,
     pub(super) forwarded_path: String,
     pub(super) req_method: Method,
@@ -96,9 +98,9 @@ pub(super) struct ProxyContext {
     pub(super) unavailable_fingerprint_debug: String,
 }
 
-impl ProxyContext {
+impl<R: tauri::Runtime> ProxyContext<R> {
     /// Build the `RequestContextParts` needed by the forwarder, consuming this context.
-    pub(super) fn into_request_context_parts(self) -> RequestContextParts {
+    pub(super) fn into_request_context_parts(self) -> RequestContextParts<R> {
         let rs = self
             .runtime_settings
             .expect("runtime_settings must be populated before forwarding");

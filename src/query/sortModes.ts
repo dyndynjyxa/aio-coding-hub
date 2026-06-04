@@ -5,7 +5,7 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import type { CliKey } from "../services/providers/providers";
+import { validateProviderCliKey, type CliKey } from "../services/providers/providers";
 import {
   sortModeActiveList,
   sortModeActiveSet,
@@ -18,6 +18,7 @@ import {
   sortModesList,
   type SortModeActiveRow,
   type SortModeProviderRow,
+  validateSortModeId,
 } from "../services/providers/sortModes";
 import { sortModesKeys } from "./keys";
 
@@ -32,16 +33,36 @@ function invalidateSortModesQueries(
 }
 
 export function sortModeProvidersQueryKey(modeId: number, cliKey: CliKey) {
-  return [...sortModesKeys.all, "providers", cliKey, modeId] as const;
+  return [
+    ...sortModesKeys.all,
+    "providers",
+    validateProviderCliKey(cliKey),
+    validateSortModeId(modeId),
+  ] as const;
 }
 
 function invalidateSortModeProvidersQuery(
   queryClient: QueryClient,
   input: { modeId: number; cliKey: CliKey }
 ) {
+  const cliKey = validateProviderCliKey(input.cliKey);
+  const modeId = validateSortModeId(input.modeId);
+
   void queryClient.invalidateQueries({
-    queryKey: sortModeProvidersQueryKey(input.modeId, input.cliKey),
+    queryKey: sortModeProvidersQueryKey(modeId, cliKey),
   });
+}
+
+function invalidateSortModeProvidersQueryIfValid(
+  queryClient: QueryClient,
+  input: { modeId: number; cliKey: CliKey }
+) {
+  try {
+    invalidateSortModeProvidersQuery(queryClient, input);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("SEC_INVALID_INPUT")) return;
+    throw error;
+  }
 }
 
 export function useSortModesListQuery(options: { enabled?: boolean } = {}) {
@@ -68,18 +89,21 @@ export function useSortModeProvidersListQuery(
   input: { modeId: number | null; cliKey: CliKey },
   options: { enabled?: boolean } = {}
 ) {
+  const cliKey = validateProviderCliKey(input.cliKey);
+  const modeId = input.modeId == null ? null : validateSortModeId(input.modeId);
+
   return useQuery({
     queryKey:
-      input.modeId == null
-        ? [...sortModesKeys.all, "providers", input.cliKey, null]
-        : sortModeProvidersQueryKey(input.modeId, input.cliKey),
+      modeId == null
+        ? [...sortModesKeys.all, "providers", cliKey, null]
+        : sortModeProvidersQueryKey(modeId, cliKey),
     queryFn: () => {
-      if (input.modeId == null) {
+      if (modeId == null) {
         return Promise.resolve<SortModeProviderRow[] | null>(null);
       }
-      return sortModeProvidersList({ mode_id: input.modeId, cli_key: input.cliKey });
+      return sortModeProvidersList({ mode_id: modeId, cli_key: cliKey });
     },
-    enabled: input.modeId != null && (options.enabled ?? true),
+    enabled: modeId != null && (options.enabled ?? true),
     retry: false,
   });
 }
@@ -88,9 +112,13 @@ export function useSortModeActiveSetMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (input: { cliKey: CliKey; modeId: number | null }) =>
-      sortModeActiveSet({ cli_key: input.cliKey, mode_id: input.modeId }),
+    mutationFn: (input: { cliKey: CliKey; modeId: number | null }) => {
+      const modeId = input.modeId == null ? null : validateSortModeId(input.modeId);
+      return sortModeActiveSet({ cli_key: validateProviderCliKey(input.cliKey), mode_id: modeId });
+    },
     onMutate: (input) => {
+      const cliKey = validateProviderCliKey(input.cliKey);
+      const modeId = input.modeId == null ? null : validateSortModeId(input.modeId);
       void queryClient.cancelQueries({ queryKey: sortModesKeys.activeList() });
 
       const previous =
@@ -98,7 +126,7 @@ export function useSortModeActiveSetMutation() {
 
       if (previous) {
         const next = previous.map((row) =>
-          row.cli_key === input.cliKey ? { ...row, mode_id: input.modeId } : row
+          row.cli_key === cliKey ? { ...row, mode_id: modeId } : row
         );
         queryClient.setQueryData(sortModesKeys.activeList(), next);
       }
@@ -138,7 +166,7 @@ export function useSortModeRenameMutation() {
 
   return useMutation({
     mutationFn: (input: { modeId: number; name: string }) =>
-      sortModeRename({ mode_id: input.modeId, name: input.name }),
+      sortModeRename({ mode_id: validateSortModeId(input.modeId), name: input.name }),
     onSettled: () => {
       invalidateSortModesQueries(queryClient);
     },
@@ -149,7 +177,8 @@ export function useSortModeDeleteMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (input: { modeId: number }) => sortModeDelete({ mode_id: input.modeId }),
+    mutationFn: (input: { modeId: number }) =>
+      sortModeDelete({ mode_id: validateSortModeId(input.modeId) }),
     onSettled: () => {
       invalidateSortModesQueries(queryClient, { includeActiveList: true });
     },
@@ -162,12 +191,12 @@ export function useSortModeProvidersSetOrderMutation() {
   return useMutation({
     mutationFn: (input: { modeId: number; cliKey: CliKey; orderedProviderIds: number[] }) =>
       sortModeProvidersSetOrder({
-        mode_id: input.modeId,
-        cli_key: input.cliKey,
+        mode_id: validateSortModeId(input.modeId),
+        cli_key: validateProviderCliKey(input.cliKey),
         ordered_provider_ids: input.orderedProviderIds,
       }),
     onSettled: (_data, _error, input) => {
-      invalidateSortModeProvidersQuery(queryClient, {
+      invalidateSortModeProvidersQueryIfValid(queryClient, {
         modeId: input.modeId,
         cliKey: input.cliKey,
       });
@@ -181,13 +210,13 @@ export function useSortModeProviderSetEnabledMutation() {
   return useMutation({
     mutationFn: (input: { modeId: number; cliKey: CliKey; providerId: number; enabled: boolean }) =>
       sortModeProviderSetEnabled({
-        mode_id: input.modeId,
-        cli_key: input.cliKey,
+        mode_id: validateSortModeId(input.modeId),
+        cli_key: validateProviderCliKey(input.cliKey),
         provider_id: input.providerId,
         enabled: input.enabled,
       }),
     onSettled: (_data, _error, input) => {
-      invalidateSortModeProvidersQuery(queryClient, {
+      invalidateSortModeProvidersQueryIfValid(queryClient, {
         modeId: input.modeId,
         cliKey: input.cliKey,
       });

@@ -44,6 +44,45 @@ describe("services/tauriInvoke", () => {
     }
   });
 
+  it("invokeTauriOrNull keeps timeout values inside safe timer boundaries", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(tauriInvoke)
+        .mockImplementationOnce(() => new Promise(() => {}))
+        .mockImplementationOnce(() => new Promise(() => {}))
+        .mockImplementationOnce(() => new Promise(() => {}));
+
+      const fractionalTimeout = invokeTauriOrNull("cmd-fractional-timeout", undefined, {
+        timeoutMs: 0.5,
+      });
+      const fractionalAssertion = expect(fractionalTimeout).rejects.toThrow(
+        "IPC_TIMEOUT: cmd-fractional-timeout timed out after 1ms"
+      );
+      await vi.advanceTimersByTimeAsync(1);
+      await fractionalAssertion;
+
+      const invalidTimeout = invokeTauriOrNull("cmd-invalid-timeout", undefined, {
+        timeoutMs: Number.NaN,
+      });
+      const invalidAssertion = expect(invalidTimeout).rejects.toThrow(
+        "IPC_TIMEOUT: cmd-invalid-timeout timed out after 60000ms"
+      );
+      await vi.advanceTimersByTimeAsync(60_000);
+      await invalidAssertion;
+
+      const largeTimeout = invokeTauriOrNull("cmd-large-timeout", undefined, {
+        timeoutMs: Number.MAX_SAFE_INTEGER,
+      });
+      const largeAssertion = expect(largeTimeout).rejects.toThrow(
+        "IPC_TIMEOUT: cmd-large-timeout timed out after 2147483647ms"
+      );
+      await vi.advanceTimersByTimeAsync(2_147_483_647);
+      await largeAssertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("invokeTauriOrNull disables timeout when timeoutMs <= 0", async () => {
     vi.useFakeTimers();
     try {

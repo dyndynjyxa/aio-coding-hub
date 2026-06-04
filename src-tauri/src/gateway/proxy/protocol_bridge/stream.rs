@@ -12,6 +12,13 @@ use std::collections::VecDeque;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+const MAX_BRIDGE_SSE_FRAME_BUFFER_BYTES: usize = 1024 * 1024;
+const BRIDGE_SSE_FRAME_TOO_LARGE: &[u8] = concat!(
+    "event: error\n",
+    "data: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"bridge_sse_frame_too_large\"}}\n\n"
+)
+.as_bytes();
+
 /// Generic stream wrapper that translates upstream SSE events via IR.
 pub(crate) struct BridgeStream<S>
 where
@@ -25,6 +32,7 @@ where
     buffer: VecDeque<Bytes>,
     /// Accumulator for partial SSE lines from the upstream.
     line_buf: Vec<u8>,
+    terminated: bool,
 }
 
 /// Owned version of StreamTranslator that doesn't borrow from Bridge.
@@ -133,19 +141,53 @@ where
             ctx,
             buffer: VecDeque::new(),
             line_buf: Vec::new(),
+            terminated: false,
         }
+    }
+
+    fn terminate_oversized_frame(&mut self) {
+        tracing::warn!(
+            max_bytes = MAX_BRIDGE_SSE_FRAME_BUFFER_BYTES,
+            "bridge stream SSE frame exceeded maximum buffered size"
+        );
+        self.line_buf.clear();
+        self.buffer
+            .push_back(Bytes::from_static(BRIDGE_SSE_FRAME_TOO_LARGE));
+        self.terminated = true;
     }
 
     /// Process a raw byte chunk from upstream: split into SSE frames, translate
     /// each, and push the results into `self.buffer`.
     fn process_chunk(&mut self, bytes: &[u8]) {
-        let translator = match self.translator.as_mut() {
-            Some(t) => t,
-            None => return,
-        };
+        if self.translator.is_none() || self.terminated {
+            return;
+        }
 
-        self.line_buf.extend_from_slice(bytes);
+        let mut remaining = bytes;
+        while !remaining.is_empty() && !self.terminated {
+            let available = MAX_BRIDGE_SSE_FRAME_BUFFER_BYTES.saturating_sub(self.line_buf.len());
+            if available == 0 {
+                self.terminate_oversized_frame();
+                return;
+            }
 
+            let take = remaining.len().min(available);
+            self.line_buf.extend_from_slice(&remaining[..take]);
+            remaining = &remaining[take..];
+            self.process_complete_frames();
+
+            if !remaining.is_empty() && self.line_buf.len() >= MAX_BRIDGE_SSE_FRAME_BUFFER_BYTES {
+                self.terminate_oversized_frame();
+                return;
+            }
+        }
+
+        if self.line_buf.len() >= MAX_BRIDGE_SSE_FRAME_BUFFER_BYTES {
+            self.terminate_oversized_frame();
+        }
+    }
+
+    fn process_complete_frames(&mut self) {
         // SSE frames are delimited by `\n\n` or `\r\n\r\n`.
         while let Some(end) = find_sse_event_end(&self.line_buf) {
             let frame_bytes: Vec<u8> = self.line_buf.drain(..end).collect();
@@ -155,6 +197,9 @@ where
             };
 
             if let Some((event_type, data)) = parse_sse_frame(frame_str) {
+                let Some(translator) = self.translator.as_mut() else {
+                    return;
+                };
                 match translator.translate_event(&event_type, &data, &self.ctx) {
                     Ok(frames) => {
                         for f in frames {
@@ -187,6 +232,10 @@ where
             // Yield buffered frames first.
             if let Some(frame) = this.buffer.pop_front() {
                 return Poll::Ready(Some(Ok(frame)));
+            }
+
+            if this.terminated {
+                return Poll::Ready(None);
             }
 
             // Poll upstream for more data.
@@ -271,14 +320,16 @@ fn parse_sse_frame(frame: &str) -> Option<(String, Value)> {
 
 /// Aggregate an OpenAI Responses SSE stream into a single JSON response.
 pub(crate) fn aggregate_responses_event_stream(raw: &[u8]) -> Result<Value, String> {
-    let mut buffer = raw.to_vec();
     let mut response: Option<Value> = None;
     let mut output: Vec<Value> = Vec::new();
+    let mut cursor = 0usize;
 
-    while let Some(event_end) = find_sse_event_end(&buffer) {
-        let frame: Vec<u8> = buffer.drain(..event_end).collect();
+    while let Some(relative_end) = find_sse_event_end(&raw[cursor..]) {
+        let event_end = cursor + relative_end;
+        let frame = &raw[cursor..event_end];
+        cursor = event_end;
         let text =
-            std::str::from_utf8(&frame).map_err(|e| format!("invalid utf-8 in SSE frame: {e}"))?;
+            std::str::from_utf8(frame).map_err(|e| format!("invalid utf-8 in SSE frame: {e}"))?;
         let Some((event_name, data)) = parse_sse_frame(text) else {
             continue;
         };
@@ -357,6 +408,9 @@ fn upsert_output_item(output: &mut Vec<Value>, item: Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
+    use std::sync::Arc;
+    use std::task::Wake;
 
     #[test]
     fn find_sse_event_end_basic() {
@@ -393,5 +447,89 @@ mod tests {
         let frame = ": keepalive\ndata: {\"type\":\"ping\"}\n\n";
         let (evt, _) = parse_sse_frame(frame).unwrap();
         assert_eq!(evt, "ping");
+    }
+
+    #[test]
+    fn aggregate_responses_event_stream_handles_many_frames_with_trailing_partial() {
+        let mut raw = String::from(
+            "event: response.created\n\
+             data: {\"response\":{\"id\":\"resp_many\",\"status\":\"in_progress\"}}\n\n",
+        );
+        for index in 0..128 {
+            raw.push_str(&format!(
+                "event: response.output_item.done\n\
+                 data: {{\"item\":{{\"id\":\"msg_{index}\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[]}}}}\n\n"
+            ));
+        }
+        raw.push_str(
+            "event: response.completed\n\
+             data: {\"response\":{\"id\":\"resp_many\",\"status\":\"completed\"}}\n\n\
+             event: response.output_item.done\n\
+             data: {\"item\":{\"id\":\"partial\"",
+        );
+
+        let aggregated = aggregate_responses_event_stream(raw.as_bytes()).expect("aggregate");
+
+        assert_eq!(aggregated["id"], "resp_many");
+        assert_eq!(aggregated["status"], "completed");
+        assert_eq!(
+            aggregated
+                .get("output")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(128)
+        );
+    }
+
+    struct MockStream {
+        items: VecDeque<Result<Bytes, reqwest::Error>>,
+    }
+
+    impl MockStream {
+        fn new(items: Vec<Result<Bytes, reqwest::Error>>) -> Self {
+            Self {
+                items: items.into_iter().collect(),
+            }
+        }
+    }
+
+    impl Stream for MockStream {
+        type Item = Result<Bytes, reqwest::Error>;
+
+        fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            Poll::Ready(self.items.pop_front())
+        }
+    }
+
+    struct NoopWaker;
+
+    impl Wake for NoopWaker {
+        fn wake(self: Arc<Self>) {}
+    }
+
+    #[test]
+    fn bridge_stream_emits_error_and_stops_when_frame_buffer_exceeds_limit() {
+        let oversized = Bytes::from(vec![b'a'; MAX_BRIDGE_SSE_FRAME_BUFFER_BYTES + 1]);
+        let mut stream = BridgeStream::for_cx2cc(
+            MockStream::new(vec![Ok(oversized)]),
+            true,
+            None,
+            crate::gateway::proxy::cx2cc::settings::Cx2ccSettings::default(),
+        );
+        let waker = std::task::Waker::from(Arc::new(NoopWaker));
+        let mut cx = Context::from_waker(&waker);
+
+        let first = Pin::new(&mut stream).poll_next(&mut cx);
+        let Poll::Ready(Some(Ok(frame))) = first else {
+            panic!("expected bridge error frame, got {first:?}");
+        };
+        let text = std::str::from_utf8(frame.as_ref()).expect("utf-8 error frame");
+        assert!(text.contains("event: error"));
+        assert!(text.contains("bridge_sse_frame_too_large"));
+
+        assert!(matches!(
+            Pin::new(&mut stream).poll_next(&mut cx),
+            Poll::Ready(None)
+        ));
     }
 }

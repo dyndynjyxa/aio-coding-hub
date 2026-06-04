@@ -2,13 +2,13 @@ use super::context::CommonCtx;
 use crate::gateway::claude_metadata_user_id_injection::{
     inject_from_json_bytes_with_ua, ClaudeMetadataUserIdInjectionOutcome,
 };
+use crate::gateway::response_fixer;
 use crate::gateway::util::body_for_introspection;
-use crate::shared::mutex_ext::MutexExt;
 use axum::body::Bytes;
 use axum::http::{header, HeaderMap};
 
-pub(super) struct ApplyClaudeMetadataUserIdInjectionInput<'a> {
-    pub(super) ctx: CommonCtx<'a>,
+pub(super) struct ApplyClaudeMetadataUserIdInjectionInput<'a, R: tauri::Runtime = tauri::Wry> {
+    pub(super) ctx: CommonCtx<'a, R>,
     pub(super) provider_id: i64,
     pub(super) enabled: bool,
     pub(super) session_id: Option<&'a str>,
@@ -18,7 +18,9 @@ pub(super) struct ApplyClaudeMetadataUserIdInjectionInput<'a> {
     pub(super) strip_request_content_encoding: &'a mut bool,
 }
 
-pub(super) fn apply_if_needed(input: ApplyClaudeMetadataUserIdInjectionInput<'_>) {
+pub(super) fn apply_if_needed<R: tauri::Runtime>(
+    input: ApplyClaudeMetadataUserIdInjectionInput<'_, R>,
+) {
     let ApplyClaudeMetadataUserIdInjectionInput {
         ctx,
         provider_id,
@@ -52,29 +54,33 @@ pub(super) fn apply_if_needed(input: ApplyClaudeMetadataUserIdInjectionInput<'_>
         ClaudeMetadataUserIdInjectionOutcome::Injected { body_bytes } => {
             *upstream_body_bytes = Bytes::from(body_bytes);
             *strip_request_content_encoding = true;
-            let mut settings = ctx.special_settings.lock_or_recover();
-            settings.push(serde_json::json!({
-                "type": "claude_metadata_user_id_injection",
-                "scope": "request",
-                "hit": true,
-                "action": "injected",
-                "reason": "injected",
-                "keyId": provider_id,
-                "sessionId": session_id,
-            }));
+            response_fixer::push_special_setting(
+                ctx.special_settings,
+                serde_json::json!({
+                    "type": "claude_metadata_user_id_injection",
+                    "scope": "request",
+                    "hit": true,
+                    "action": "injected",
+                    "reason": "injected",
+                    "keyId": provider_id,
+                    "sessionId": session_id,
+                }),
+            );
         }
         ClaudeMetadataUserIdInjectionOutcome::Skipped(skip) => {
-            let mut settings = ctx.special_settings.lock_or_recover();
-            settings.push(serde_json::json!({
-                "type": "claude_metadata_user_id_injection",
-                "scope": "request",
-                "hit": false,
-                "action": "skipped",
-                "reason": skip.reason,
-                "keyId": provider_id,
-                "sessionId": session_id,
-                "error": skip.error,
-            }));
+            response_fixer::push_special_setting(
+                ctx.special_settings,
+                serde_json::json!({
+                    "type": "claude_metadata_user_id_injection",
+                    "scope": "request",
+                    "hit": false,
+                    "action": "skipped",
+                    "reason": skip.reason,
+                    "keyId": provider_id,
+                    "sessionId": session_id,
+                    "error": skip.error,
+                }),
+            );
         }
     }
 }

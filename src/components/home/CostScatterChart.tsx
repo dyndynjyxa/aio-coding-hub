@@ -179,9 +179,7 @@ export function CostScatterChartCard({
     >
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-            总成本 × 总耗时
-          </span>
+          <span className="text-sm font-semibold text-foreground">总成本 × 总耗时</span>
           {scatterChartData.activeClis.length > 1 && (
             <div className="flex items-center gap-1.5">
               {scatterChartData.activeClis.map((cli) => (
@@ -190,9 +188,7 @@ export function CostScatterChartCard({
                     className="inline-block h-2 w-2 rounded-full"
                     style={{ backgroundColor: SCATTER_COLORS[cli] }}
                   />
-                  <span className="text-[10px] text-slate-500 dark:text-slate-400">
-                    {cliShortLabel(cli)}
-                  </span>
+                  <span className="text-[10px] text-muted-foreground">{cliShortLabel(cli)}</span>
                 </div>
               ))}
             </div>
@@ -209,7 +205,7 @@ export function CostScatterChartCard({
                 "px-3 py-1 text-xs rounded-lg font-medium transition-all",
                 scatterCliFilter === item.key
                   ? "bg-indigo-500 text-white shadow-sm"
-                  : "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600"
+                  : "bg-secondary text-muted-foreground dark:text-secondary-foreground hover:bg-muted dark:hover:bg-secondary"
               )}
             >
               {item.label}
@@ -218,9 +214,9 @@ export function CostScatterChartCard({
         </div>
       </div>
       {loading ? (
-        <div className="text-sm text-slate-400 dark:text-slate-500">加载中…</div>
+        <div className="text-sm text-muted-foreground">加载中…</div>
       ) : scatterRows.length === 0 ? (
-        <div className="text-sm text-slate-600 dark:text-slate-400">暂无可展示的数据。</div>
+        <div className="text-sm text-muted-foreground">暂无可展示的数据。</div>
       ) : (
         <div className="h-[280px] flex-1 min-h-0">
           <ScatterChartInner data={scatterChartData.data} isDark={isDark} />

@@ -15,9 +15,9 @@ import { CostBar } from "./CostBar";
 import { TABLE_COLUMNS } from "./UsageTableColumns";
 
 const TH_CLASS =
-  "border-b border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/60 px-3 py-2.5 backdrop-blur-sm";
-const TD_CLASS = "border-b border-slate-100 dark:border-slate-700 px-3 py-3";
-const MONO_TD = `${TD_CLASS} font-mono text-xs tabular-nums text-slate-700 dark:text-slate-300`;
+  "border-b border-border bg-secondary/60 dark:bg-secondary/60 px-3 py-2.5 backdrop-blur-sm";
+const TD_CLASS = "border-b border-border px-3 py-3";
+const MONO_TD = `${TD_CLASS} font-mono text-xs tabular-nums text-secondary-foreground`;
 
 function successRate(row: UsageLeaderboardRow) {
   if (row.requests_total <= 0) return NaN;
@@ -39,7 +39,7 @@ type UsageLeaderboardTableProps = {
 
 function UsageTableEmptyState({ errorText }: { errorText: string | null }) {
   return (
-    <div className="px-6 pb-5 text-sm text-slate-600 dark:text-slate-400">
+    <div className="px-6 pb-5 text-sm text-muted-foreground">
       {errorText
         ? '加载失败：暂无可展示的数据。请点击上方"重试"。'
         : "暂无用量数据。请先通过网关发起请求。"}
@@ -50,7 +50,7 @@ function UsageTableEmptyState({ errorText }: { errorText: string | null }) {
 function UsageTableHeader() {
   return (
     <thead className="sticky top-0 z-10">
-      <tr className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+      <tr className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
         {TABLE_COLUMNS.map((col) => (
           <th key={col.key} scope="col" className={TH_CLASS}>
             {col.label}
@@ -72,7 +72,7 @@ function UsageLeaderboardEmptyRow({
     <tr className="align-top">
       <td
         colSpan={TABLE_COLUMNS.length}
-        className="border-b border-slate-100 dark:border-slate-700 px-3 py-4 text-sm text-slate-600 dark:text-slate-400"
+        className="border-b border-border px-3 py-4 text-sm text-muted-foreground"
       >
         {errorText
           ? '加载失败：暂无可展示的数据。请点击上方"重试"。'
@@ -99,13 +99,11 @@ const UsageLeaderboardDataRow = memo(function UsageLeaderboardDataRow({
   return (
     <tr
       key={row.key}
-      className="align-top transition-colors hover:bg-slate-50/50 dark:hover:bg-slate-800/50"
+      className="align-top transition-colors hover:bg-secondary/50 dark:hover:bg-secondary/50"
     >
-      <td className={`${TD_CLASS} text-xs tabular-nums text-slate-400 dark:text-slate-500`}>
-        {index + 1}
-      </td>
+      <td className={`${TD_CLASS} text-xs tabular-nums text-muted-foreground`}>{index + 1}</td>
       <td className={TD_CLASS}>
-        <div className="font-medium text-slate-900 dark:text-slate-100">{row.name}</div>
+        <div className="font-medium text-foreground">{row.name}</div>
       </td>
       <td className={MONO_TD}>{formatInteger(row.requests_total)}</td>
       <td className={MONO_TD}>{formatPercent(successRate(row))}</td>
@@ -154,25 +152,23 @@ function UsageLeaderboardSummaryRow({
       : "—";
 
   return (
-    <tr className="align-top bg-slate-100/80 dark:bg-slate-800/80">
-      <td className={`${TD_CLASS} text-sm font-semibold text-slate-500 dark:text-slate-400`}>Σ</td>
+    <tr className="align-top bg-secondary/80 dark:bg-secondary/80">
+      <td className={`${TD_CLASS} text-sm font-semibold text-muted-foreground`}>Σ</td>
       <td className={TD_CLASS}>
-        <div className="font-semibold text-slate-900 dark:text-slate-100">总计</div>
-        <div className="mt-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+        <div className="font-semibold text-foreground">总计</div>
+        <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
           {formatInteger(summary.requests_total)} 请求 ·{" "}
           {formatInteger(summary.requests_with_usage)} 有用量
         </div>
-        <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+        <div className="mt-0.5 text-xs text-muted-foreground">
           仅统计成功请求（{formatInteger(summary.requests_success)}）
         </div>
       </td>
-      <td className={`${MONO_TD} font-medium text-slate-900 dark:text-slate-100`}>
+      <td className={`${MONO_TD} font-medium text-foreground`}>
         {formatInteger(summary.requests_total)}
       </td>
-      <td className={`${MONO_TD} font-medium text-slate-900 dark:text-slate-100`}>
-        {successRateText}
-      </td>
-      <td className={`${MONO_TD} font-medium text-slate-900 dark:text-slate-100`}>
+      <td className={`${MONO_TD} font-medium text-foreground`}>{successRateText}</td>
+      <td className={`${MONO_TD} font-medium text-foreground`}>
         <TokenBreakdown
           totalTokens={summary.io_total_tokens}
           inputTokens={summary.input_tokens}
@@ -180,29 +176,25 @@ function UsageLeaderboardSummaryRow({
           totalTokensWithCache={summary.total_tokens}
         />
       </td>
-      <td className={`${MONO_TD} font-medium text-slate-900 dark:text-slate-100`}>
+      <td className={`${MONO_TD} font-medium text-foreground`}>
         <CacheBreakdown
           inputTokens={summary.input_tokens}
           cacheCreationInputTokens={summary.cache_creation_input_tokens}
           cacheReadInputTokens={summary.cache_read_input_tokens}
         />
       </td>
-      <td className={`${MONO_TD} font-medium text-slate-900 dark:text-slate-100`}>
-        {formatUsd(totalCostUsd)}
-      </td>
+      <td className={`${MONO_TD} font-medium text-foreground`}>{formatUsd(totalCostUsd)}</td>
       <td className={TD_CLASS}>
-        <span className="text-xs text-slate-500 dark:text-slate-400">100%</span>
+        <span className="text-xs text-muted-foreground">100%</span>
       </td>
-      <td className={`${MONO_TD} font-medium text-slate-500 dark:text-slate-400`}>
-        {costPer1kText}
-      </td>
-      <td className={`${MONO_TD} font-medium text-slate-900 dark:text-slate-100`}>
+      <td className={`${MONO_TD} font-medium text-muted-foreground`}>{costPer1kText}</td>
+      <td className={`${MONO_TD} font-medium text-foreground`}>
         {formatDurationMs(summary.avg_duration_ms)}
       </td>
-      <td className={`${MONO_TD} font-medium text-slate-900 dark:text-slate-100`}>
+      <td className={`${MONO_TD} font-medium text-foreground`}>
         {formatDurationMs(summary.avg_ttfb_ms)}
       </td>
-      <td className={`${MONO_TD} font-medium text-slate-900 dark:text-slate-100`}>
+      <td className={`${MONO_TD} font-medium text-foreground`}>
         {formatTokensPerSecond(summary.avg_output_tokens_per_second)}
       </td>
     </tr>

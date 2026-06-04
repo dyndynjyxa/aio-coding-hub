@@ -6,6 +6,7 @@ import { useAppAboutQuery } from "../query/appAbout";
 import { useUpdaterCheckQuery } from "../query/updater";
 import { getDevPreviewEnabled, useDevPreviewData } from "./useDevPreviewData";
 import { logToConsole } from "../services/consoleLog";
+import { emitListenerSnapshot } from "../utils/listeners";
 import {
   updaterCheck,
   updaterDownloadAndInstall,
@@ -76,7 +77,11 @@ function isDevPreviewUpdateCandidate(value: UpdaterCheckUpdate | null) {
 }
 
 function emit() {
-  for (const listener of listeners) listener();
+  emitListenerSnapshot(
+    listeners,
+    (listener) => listener(),
+    (error) => logToConsole("warn", "更新状态订阅处理失败", { error: String(error) })
+  );
 }
 
 function setUiSnapshot(patch: Partial<UpdateUiState>) {
@@ -225,17 +230,19 @@ export function updateDialogSetOpen(open: boolean) {
   }
 }
 
+export function subscribeUpdateMeta(listener: Listener) {
+  listeners.add(listener);
+  void ensureStarted();
+  return () => listeners.delete(listener);
+}
+
 export function useUpdateMeta(): UpdateMeta {
   const aboutQuery = useAppAboutQuery();
   const updaterCheckQuery = useUpdaterCheckQuery();
   const devPreview = useDevPreviewData();
 
   const ui = useSyncExternalStore(
-    (listener) => {
-      listeners.add(listener);
-      void ensureStarted();
-      return () => listeners.delete(listener);
-    },
+    subscribeUpdateMeta,
     () => uiSnapshot,
     () => uiSnapshot
   );

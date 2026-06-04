@@ -17,20 +17,20 @@ export function ClaudeModelSection(props: { form: UseProviderEditorFormReturn })
     : "例如: glm-4-plus / minimax-text-01 / kimi-k2";
 
   return (
-    <details className="group rounded-xl border border-slate-200 bg-white shadow-sm open:ring-2 open:ring-accent/10 transition-all dark:border-slate-700 dark:bg-slate-800">
+    <details className="group rounded-xl border border-border bg-white shadow-sm open:ring-2 open:ring-accent/10 transition-all dark:border-border dark:bg-secondary">
       <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
         <div className="flex items-center gap-3">
-          <span className="text-sm font-medium text-slate-700 group-open:text-accent dark:text-slate-300">
+          <span className="text-sm font-medium text-secondary-foreground group-open:text-accent dark:text-secondary-foreground">
             {sectionTitle}
           </span>
-          <span className="text-xs font-mono text-slate-500 dark:text-slate-400">
+          <span className="text-xs font-mono text-muted-foreground">
             已配置 {claudeModelCount}/5
           </span>
         </div>
-        <ChevronDown className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-180" />
+        <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
       </summary>
 
-      <div className="space-y-4 border-t border-slate-100 px-4 py-3 dark:border-slate-700">
+      <div className="space-y-4 border-t border-border px-4 py-3 dark:border-border">
         <FormField
           label="主模型"
           hint="默认兜底模型；未命中 haiku/sonnet/opus 且未启用 Thinking 时使用"
@@ -59,7 +59,10 @@ export function ClaudeModelSection(props: { form: UseProviderEditorFormReturn })
           />
         </FormField>
 
-        <FormField label="推理模型 (Thinking)" hint="当请求中 thinking.type=enabled 时优先使用">
+        <FormField
+          label="推理模型 (Thinking)"
+          hint="当请求中 thinking.type=enabled 且未命中 Haiku/Sonnet/Opus 槽位时使用"
+        >
           <Input
             value={claudeModels.reasoning_model ?? ""}
             onChange={(e) => {

@@ -1,5 +1,5 @@
 import { renderHook } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   BREAKPOINTS,
   useMediaQuery,
@@ -70,7 +70,6 @@ describe("hooks/useMediaQuery", () => {
         isDesktop: expect.any(Boolean),
         isLargeDesktop: expect.any(Boolean),
         shouldShowSidebar: expect.any(Boolean),
-        shouldShowMobileNav: expect.any(Boolean),
       })
     );
   });
@@ -81,6 +80,31 @@ describe("hooks/useMediaQuery", () => {
 
     const { result } = renderHook(() => useMediaQuery("(min-width: 768px)"));
     expect(result.current).toBe(false);
+
+    Object.defineProperty(window, "matchMedia", { writable: true, value: original });
+  });
+
+  it("uses addListener fallback when MediaQueryList event listeners are unavailable", () => {
+    const original = window.matchMedia;
+    const addListener = vi.fn();
+    const removeListener = vi.fn();
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      value: (query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener,
+        removeListener,
+        dispatchEvent: () => false,
+      }),
+    });
+
+    const { unmount } = renderHook(() => useMediaQuery("(min-width: 768px)"));
+    expect(addListener).toHaveBeenCalledWith(expect.any(Function));
+
+    unmount();
+    expect(removeListener).toHaveBeenCalledWith(expect.any(Function));
 
     Object.defineProperty(window, "matchMedia", { writable: true, value: original });
   });

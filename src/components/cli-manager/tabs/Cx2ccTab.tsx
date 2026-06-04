@@ -1,6 +1,11 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { toast } from "sonner";
 import { Settings } from "lucide-react";
 import type { AppSettings } from "../../../services/settings/settings";
+import {
+  validateCx2ccFallbackModel,
+  validateCx2ccOptionalField,
+} from "../../../services/settings/settingsValidation";
 import { cn } from "../../../utils/cn";
 import { Card } from "../../../ui/Card";
 import { Input } from "../../../ui/Input";
@@ -12,6 +17,13 @@ export type CliManagerCx2ccTabProps = {
   commonSettingsSaving: boolean;
   onPersistCommonSettings: (patch: Partial<AppSettings>) => Promise<AppSettings | null>;
 };
+
+type Cx2ccTextSettingKey =
+  | "cx2cc_fallback_model_opus"
+  | "cx2cc_fallback_model_sonnet"
+  | "cx2cc_fallback_model_haiku"
+  | "cx2cc_fallback_model_main"
+  | "cx2cc_service_tier";
 
 function SettingItem({
   label,
@@ -32,10 +44,8 @@ function SettingItem({
       )}
     >
       <div className="min-w-0">
-        <div className="text-sm text-slate-700 dark:text-slate-300">{label}</div>
-        <div className="mt-1 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-          {subtitle}
-        </div>
+        <div className="text-sm text-secondary-foreground">{label}</div>
+        <div className="mt-1 text-xs text-muted-foreground leading-relaxed">{subtitle}</div>
       </div>
       <div className="flex flex-wrap items-center justify-end gap-2">{children}</div>
     </div>
@@ -81,24 +91,71 @@ export function CliManagerCx2ccTab({
     setReasoningEffortText(updated.cx2cc_model_reasoning_effort);
   }
 
+  async function persistFallbackModel(
+    key: Exclude<Cx2ccTextSettingKey, "cx2cc_service_tier">,
+    label: string,
+    value: string,
+    setText: (value: string) => void
+  ) {
+    if (!appSettings) return;
+
+    const previous = appSettings[key];
+    const trimmed = value.trim();
+    setText(trimmed);
+
+    const validationMessage = validateCx2ccFallbackModel(label, trimmed);
+    if (validationMessage) {
+      toast(validationMessage);
+      setText(previous);
+      return;
+    }
+
+    const updated = await onPersistCommonSettings({ [key]: trimmed } as Partial<AppSettings>);
+    setText(updated ? updated[key] : previous);
+  }
+
+  async function persistOptionalTextSetting(
+    key: Extract<Cx2ccTextSettingKey, "cx2cc_service_tier">,
+    label: string,
+    value: string,
+    setText: (value: string) => void
+  ) {
+    if (!appSettings) return;
+
+    const previous = appSettings[key];
+    const trimmed = value.trim();
+    setText(trimmed);
+
+    const validationMessage = validateCx2ccOptionalField(label, trimmed);
+    if (validationMessage) {
+      toast(validationMessage);
+      setText(previous);
+      return;
+    }
+
+    const updated = await onPersistCommonSettings({ [key]: trimmed } as Partial<AppSettings>);
+    setText(updated ? updated[key] : previous);
+  }
+
   return (
     <div className="space-y-6">
       <Card className="overflow-hidden p-5">
-        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
-          <Settings className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Settings className="h-4 w-4 text-muted-foreground" />
           模型 Fallback 映射
         </h3>
-        <div className="divide-y divide-slate-100 dark:divide-slate-700">
+        <div className="divide-y divide-border">
           <SettingItem label="Opus 默认模型" subtitle="当 Provider 未设置 Opus 覆盖时使用此模型">
             <Input
               value={fallbackModelOpusText}
               onChange={(e) => setFallbackModelOpusText(e.currentTarget.value)}
               onBlur={(e) => {
-                const value = e.currentTarget.value.trim();
-                setFallbackModelOpusText(value);
-                if (value) {
-                  void onPersistCommonSettings({ cx2cc_fallback_model_opus: value });
-                }
+                void persistFallbackModel(
+                  "cx2cc_fallback_model_opus",
+                  "Opus 默认模型",
+                  e.currentTarget.value,
+                  setFallbackModelOpusText
+                );
               }}
               placeholder="gpt-5.4"
               className="font-mono w-[240px] max-w-full"
@@ -114,11 +171,12 @@ export function CliManagerCx2ccTab({
               value={fallbackModelSonnetText}
               onChange={(e) => setFallbackModelSonnetText(e.currentTarget.value)}
               onBlur={(e) => {
-                const value = e.currentTarget.value.trim();
-                setFallbackModelSonnetText(value);
-                if (value) {
-                  void onPersistCommonSettings({ cx2cc_fallback_model_sonnet: value });
-                }
+                void persistFallbackModel(
+                  "cx2cc_fallback_model_sonnet",
+                  "Sonnet 默认模型",
+                  e.currentTarget.value,
+                  setFallbackModelSonnetText
+                );
               }}
               placeholder="gpt-5.4"
               className="font-mono w-[240px] max-w-full"
@@ -131,11 +189,12 @@ export function CliManagerCx2ccTab({
               value={fallbackModelHaikuText}
               onChange={(e) => setFallbackModelHaikuText(e.currentTarget.value)}
               onBlur={(e) => {
-                const value = e.currentTarget.value.trim();
-                setFallbackModelHaikuText(value);
-                if (value) {
-                  void onPersistCommonSettings({ cx2cc_fallback_model_haiku: value });
-                }
+                void persistFallbackModel(
+                  "cx2cc_fallback_model_haiku",
+                  "Haiku 默认模型",
+                  e.currentTarget.value,
+                  setFallbackModelHaikuText
+                );
               }}
               placeholder="gpt-5.4"
               className="font-mono w-[240px] max-w-full"
@@ -148,11 +207,12 @@ export function CliManagerCx2ccTab({
               value={fallbackModelMainText}
               onChange={(e) => setFallbackModelMainText(e.currentTarget.value)}
               onBlur={(e) => {
-                const value = e.currentTarget.value.trim();
-                setFallbackModelMainText(value);
-                if (value) {
-                  void onPersistCommonSettings({ cx2cc_fallback_model_main: value });
-                }
+                void persistFallbackModel(
+                  "cx2cc_fallback_model_main",
+                  "主模型默认",
+                  e.currentTarget.value,
+                  setFallbackModelMainText
+                );
               }}
               placeholder="gpt-5.4"
               className="font-mono w-[240px] max-w-full"
@@ -163,11 +223,11 @@ export function CliManagerCx2ccTab({
       </Card>
 
       <Card className="overflow-hidden p-5">
-        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
-          <Settings className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Settings className="h-4 w-4 text-muted-foreground" />
           上游请求注入
         </h3>
-        <div className="divide-y divide-slate-100 dark:divide-slate-700">
+        <div className="divide-y divide-border">
           <SettingItem
             label="推理强度"
             subtitle="注入 reasoning.effort 到上游请求；默认表示不注入。"
@@ -194,9 +254,12 @@ export function CliManagerCx2ccTab({
               value={serviceTierText}
               onChange={(e) => setServiceTierText(e.currentTarget.value)}
               onBlur={(e) => {
-                const value = e.currentTarget.value.trim();
-                setServiceTierText(value);
-                void onPersistCommonSettings({ cx2cc_service_tier: value });
+                void persistOptionalTextSetting(
+                  "cx2cc_service_tier",
+                  "服务层级",
+                  e.currentTarget.value,
+                  setServiceTierText
+                );
               }}
               placeholder="例如: fast"
               className="font-mono w-[240px] max-w-full"
@@ -217,11 +280,11 @@ export function CliManagerCx2ccTab({
       </Card>
 
       <Card className="overflow-hidden p-5">
-        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
-          <Settings className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Settings className="h-4 w-4 text-muted-foreground" />
           转换行为开关
         </h3>
-        <div className="divide-y divide-slate-100 dark:divide-slate-700">
+        <div className="divide-y divide-border">
           <SettingItem
             label="启用推理转思考"
             subtitle="将上游 reasoning 输出转换为 Claude thinking 格式"

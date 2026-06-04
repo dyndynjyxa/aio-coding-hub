@@ -24,8 +24,12 @@ export function useMediaQuery(query: string): boolean {
       return () => {};
     }
     const mql = window.matchMedia(query);
-    mql.addEventListener("change", callback);
-    return () => mql.removeEventListener("change", callback);
+    if (typeof mql.addEventListener === "function") {
+      mql.addEventListener("change", callback);
+      return () => mql.removeEventListener("change", callback);
+    }
+    mql.addListener(callback);
+    return () => mql.removeListener(callback);
   };
 
   const getSnapshot = () => {
@@ -100,6 +104,5 @@ export function useResponsive() {
     isLargeDesktop,
     // Sidebar visibility helpers
     shouldShowSidebar: isDesktop,
-    shouldShowMobileNav: isMobile,
   };
 }

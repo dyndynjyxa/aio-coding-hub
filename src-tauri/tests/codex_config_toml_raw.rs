@@ -35,6 +35,47 @@ fn codex_config_toml_raw_set_refuses_invalid_input_without_writing() {
 }
 
 #[test]
+fn codex_config_get_rejects_oversized_config_toml() {
+    let app = support::TestApp::new();
+    let handle = app.handle();
+
+    let path =
+        aio_coding_hub_lib::test_support::codex_config_toml_path(&handle).expect("codex path");
+    std::fs::create_dir_all(path.parent().expect("parent")).expect("create codex dir");
+    std::fs::write(&path, vec![b'x'; 1024 * 1024 + 1]).expect("write oversized config");
+
+    let err = aio_coding_hub_lib::test_support::codex_config_get_json(&handle)
+        .expect_err("oversized config should fail");
+    let err_text = err.to_string();
+    assert!(
+        err_text.contains("too large"),
+        "unexpected error: {err_text}"
+    );
+}
+
+#[test]
+fn codex_config_toml_raw_set_rejects_oversized_input_without_writing() {
+    let app = support::TestApp::new();
+    let handle = app.handle();
+
+    let path =
+        aio_coding_hub_lib::test_support::codex_config_toml_path(&handle).expect("codex path");
+    assert!(!path.exists(), "precondition: config.toml should not exist");
+
+    let err = aio_coding_hub_lib::test_support::codex_config_toml_raw_set(
+        &handle,
+        "x".repeat(1024 * 1024 + 1),
+    )
+    .expect_err("oversized TOML should fail");
+    let err_text = err.to_string();
+    assert!(
+        err_text.contains("too large"),
+        "unexpected error: {err_text}"
+    );
+    assert!(!path.exists(), "oversized TOML should not be written");
+}
+
+#[test]
 fn codex_config_toml_raw_set_uses_settings_override_directory() {
     let app = support::TestApp::new();
     let handle = app.handle();

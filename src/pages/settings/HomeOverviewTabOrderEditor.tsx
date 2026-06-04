@@ -88,7 +88,7 @@ export function HomeOverviewTabOrderEditor() {
   }
 
   return (
-    <div className="inline-block max-w-full rounded-lg border border-slate-200 bg-slate-50/70 p-1.5 dark:border-slate-700 dark:bg-slate-800/40">
+    <div className="inline-block max-w-full rounded-xl border border-line-subtle bg-surface-inset p-1.5">
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext
           items={orderedTabs.map((item) => item.key)}

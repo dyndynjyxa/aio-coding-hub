@@ -8,16 +8,16 @@ import {
   Tooltip,
   CartesianGrid,
 } from "recharts";
+import type { TooltipProps } from "recharts";
+import type { ValueType, NameType } from "recharts/types/component/DefaultTooltipContent";
 import type { UsageHourlyRow } from "../services/usage/usage";
 import { useTheme } from "../hooks/useTheme";
 import { cn } from "../utils/cn";
 import { buildRecentDayKeys } from "../utils/dateKeys";
 import { formatTokensMillions, computeNiceYAxis, toDateLabel } from "../utils/chartHelpers";
 import {
-  CHART_COLORS,
   getAxisStyle,
   getGridLineStyle,
-  getTooltipStyle,
   getAxisLineStroke,
   getCursorStroke,
   CHART_ANIMATION,
@@ -42,6 +42,28 @@ export function buildUsageTokensXAxisTicks(labels: string[]) {
   return ticks;
 }
 
+const CustomTooltip = ({ active, payload, label }: TooltipProps<ValueType, NameType>) => {
+  if (active && payload && payload.length) {
+    const value = typeof payload[0]?.value === "number" ? payload[0].value : 0;
+
+    return (
+      <div className="rounded-2xl border border-glass-border bg-glass backdrop-blur-md px-3.5 py-2.5 shadow-2xl transition-all duration-150">
+        <p className="text-[10px] font-bold text-muted-foreground/80 uppercase tracking-wider mb-1">
+          {label}
+        </p>
+        <div className="flex items-center gap-2">
+          <div className="h-1.5 w-1.5 rounded-full bg-page-accent animate-pulse" />
+          <span className="text-xs font-semibold text-foreground">
+            {formatTokensMillions(value)}
+          </span>
+          <span className="text-[10px] font-medium text-muted-foreground">Tokens</span>
+        </div>
+      </div>
+    );
+  }
+  return null;
+};
+
 export function UsageTokensChart({
   rows,
   days = 15,
@@ -56,7 +78,6 @@ export function UsageTokensChart({
 
   const axisStyle = useMemo(() => getAxisStyle(isDark), [isDark]);
   const gridLineStyle = useMemo(() => getGridLineStyle(isDark), [isDark]);
-  const tooltipStyle = useMemo(() => getTooltipStyle(isDark), [isDark]);
   const axisLineStroke = getAxisLineStroke(isDark);
   const cursorStroke = getCursorStroke(isDark);
 
@@ -104,8 +125,8 @@ export function UsageTokensChart({
         <AreaChart data={chartData} margin={{ left: 0, right: 16, top: 8, bottom: 0 }}>
           <defs>
             <linearGradient id="tokenAreaGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={CHART_COLORS.primary} stopOpacity={0.25} />
-              <stop offset="100%" stopColor={CHART_COLORS.primary} stopOpacity={0} />
+              <stop offset="0%" stopColor="hsl(var(--page-accent-color))" stopOpacity={0.25} />
+              <stop offset="100%" stopColor="hsl(var(--page-accent-color))" stopOpacity={0} />
             </linearGradient>
           </defs>
           <CartesianGrid
@@ -130,19 +151,21 @@ export function UsageTokensChart({
             tickFormatter={formatTokensMillions}
             width={45}
           />
-          <Tooltip
-            contentStyle={tooltipStyle}
-            labelStyle={{ fontWeight: 600, marginBottom: 4 }}
-            formatter={(value: number) => [formatTokensMillions(value), "Tokens"]}
-            cursor={{ stroke: cursorStroke, strokeWidth: 1 }}
-          />
+          <Tooltip content={<CustomTooltip />} cursor={{ stroke: cursorStroke, strokeWidth: 1 }} />
           <Area
             type="monotone"
             dataKey="tokens"
-            stroke={CHART_COLORS.primary}
-            strokeWidth={3}
+            stroke="hsl(var(--page-accent-color))"
+            strokeWidth={3.5}
             fill="url(#tokenAreaGradient)"
             animationDuration={CHART_ANIMATION.animationDuration}
+            activeDot={{
+              r: 5,
+              stroke: "hsl(var(--page-accent-color))",
+              strokeWidth: 2,
+              fill: "hsl(var(--chart-active-dot-fill))",
+              className: "animate-pulse",
+            }}
           />
         </AreaChart>
       </ResponsiveContainer>

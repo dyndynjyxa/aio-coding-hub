@@ -16,7 +16,35 @@ export default {
     },
     extend: {
       fontFamily: {
+        // Display family for route headers and premium navigation surfaces.
+        // Shares the sans fallback stack so platforms without Plus Jakarta Sans
+        // (typical on Windows/Linux) degrade to the same body fallbacks.
+        display: [
+          "Plus Jakarta Sans",
+          "DM Sans",
+          "ui-sans-serif",
+          "system-ui",
+          "-apple-system",
+          "Segoe UI",
+          "Roboto",
+          "Helvetica Neue",
+          "Arial",
+          "sans-serif",
+        ],
+        sans: [
+          "Plus Jakarta Sans",
+          "DM Sans",
+          "ui-sans-serif",
+          "system-ui",
+          "-apple-system",
+          "Segoe UI",
+          "Roboto",
+          "Helvetica Neue",
+          "Arial",
+          "sans-serif",
+        ],
         mono: [
+          "JetBrains Mono",
           "ui-monospace",
           "SF Mono",
           "Menlo",
@@ -61,7 +89,7 @@ export default {
         accent: {
           DEFAULT: "hsl(var(--accent))",
           foreground: "hsl(var(--accent-foreground))",
-          secondary: "#4D7CFF",
+          secondary: "#0EA5E9",
         },
         destructive: {
           DEFAULT: "hsl(var(--destructive))",
@@ -70,13 +98,31 @@ export default {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
-        brand: {
-          DEFAULT: "#0052FF",
-          secondary: "#4D7CFF",
+        surface: {
+          canvas: "hsl(var(--surface-canvas))",
+          panel: "hsl(var(--surface-panel))",
+          raised: "hsl(var(--surface-raised))",
+          inset: "hsl(var(--surface-inset))",
+          muted: "hsl(var(--surface-muted))",
         },
-        success: { DEFAULT: "#16A34A" },
-        warning: { DEFAULT: "#F97316" },
-        danger: { DEFAULT: "#DC2626" },
+        line: {
+          subtle: "hsl(var(--border-subtle))",
+          DEFAULT: "hsl(var(--border-default))",
+          strong: "hsl(var(--border-strong))",
+        },
+        state: {
+          hover: "hsl(var(--state-hover))",
+          selected: "hsl(var(--state-selected))",
+          "selected-foreground": "hsl(var(--state-selected-foreground))",
+          "selected-border": "hsl(var(--state-selected-border))",
+        },
+        brand: {
+          DEFAULT: "#2563EB",
+          secondary: "#0EA5E9",
+        },
+        success: { DEFAULT: "#34D399" },
+        warning: { DEFAULT: "#FB923C" },
+        danger: { DEFAULT: "#F87171" },
         info: { DEFAULT: "#0EA5E9" },
         chart: {
           1: "hsl(var(--chart-1))",
@@ -84,6 +130,32 @@ export default {
           3: "hsl(var(--chart-3))",
           4: "hsl(var(--chart-4))",
           5: "hsl(var(--chart-5))",
+        },
+        heatmap: {
+          0: "var(--heatmap-l0)",
+          1: "var(--heatmap-l1)",
+          2: "var(--heatmap-l2)",
+          3: "var(--heatmap-l3)",
+          4: "var(--heatmap-l4)",
+        },
+        page: {
+          accent: "hsl(var(--page-accent-color))",
+          secondary: "hsl(var(--page-secondary-color))",
+        },
+        "theme-option": {
+          light: "hsl(var(--theme-option-light))",
+          dark: "hsl(var(--theme-option-dark))",
+          system: "hsl(var(--theme-option-system))",
+        },
+        glass: {
+          DEFAULT: "hsl(var(--glass-surface))",
+          border: "hsl(var(--glass-border))",
+        },
+        trace: {
+          "live-from": "hsl(var(--trace-live-from))",
+          "live-to": "hsl(var(--trace-live-to))",
+          "metric-surface": "hsl(var(--trace-metric-surface))",
+          "metric-border": "hsl(var(--trace-metric-border))",
         },
         sidebar: {
           DEFAULT: "hsl(var(--sidebar))",
@@ -94,6 +166,13 @@ export default {
           "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
+          panel: "hsl(var(--sidebar-panel))",
+          muted: "hsl(var(--sidebar-muted))",
+          control: "hsl(var(--sidebar-control))",
+          "control-border": "hsl(var(--sidebar-control-border))",
+          "control-muted": "hsl(var(--sidebar-control-muted))",
+          "control-inset": "hsl(var(--sidebar-control-inset))",
+          "option-active": "hsl(var(--sidebar-option-active))",
         },
         // Legacy bridge (deprecated — migrate to shadcn tokens above)
         bg: {
@@ -111,13 +190,44 @@ export default {
           light: "var(--color-border-light)",
         },
       },
+      spacing: {
+        "4.5": "1.125rem",
+      },
       borderRadius: {
+        "3xl": "calc(var(--radius) + 8px)",
+        "2xl": "calc(var(--radius) + 4px)",
+        xl: "calc(var(--radius) + 2px)",
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
       boxShadow: {
-        card: "0 1px 3px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.06)",
+        card: "none",
+        elevated: "var(--shadow-elevated)",
+        panel: "var(--shadow-panel)",
+        dialog: "var(--shadow-dialog)",
+        "heatmap-strong": "var(--heatmap-l4-glow)",
+        "page-accent-soft": "var(--shadow-page-accent-soft)",
+        "sidebar-control": "var(--shadow-sidebar-control)",
+        "sidebar-control-hover": "var(--shadow-sidebar-control-hover)",
+        "sidebar-option": "var(--shadow-sidebar-option)",
+        "trace-metric": "var(--shadow-trace-metric)",
+        "trace-card": "var(--shadow-trace-card)",
+        "trace-card-hover": "var(--shadow-trace-card-hover)",
+        "trace-panel-hover": "var(--shadow-trace-panel-hover)",
+        "trace-panel-live-hover": "var(--shadow-trace-panel-live-hover)",
+        "pill-subtle": "var(--shadow-pill-subtle)",
+        "status-dot": "0 0 8px var(--tw-shadow-color)",
+        "status-dot-sm": "0 0 5px var(--tw-shadow-color)",
+        "request-log-selected": "var(--shadow-request-log-selected)",
+        "request-log-hover": "var(--shadow-request-log-hover)",
+        "request-log-hover-dark": "var(--shadow-request-log-hover-dark)",
+      },
+      dropShadow: {
+        "page-accent": "var(--drop-shadow-page-accent)",
+      },
+      transitionDuration: {
+        400: "400ms",
       },
       keyframes: {
         "accordion-down": {

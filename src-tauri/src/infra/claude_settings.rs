@@ -1,8 +1,10 @@
 //! Usage: Read / patch Claude Code global `settings.json` (~/.claude/settings.json).
 
-use crate::shared::fs::{read_optional_file, write_file_atomic_if_changed};
+use crate::shared::fs::{read_optional_file_with_max_len, write_file_atomic_if_changed};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+const CLAUDE_SETTINGS_MAX_BYTES: usize = 1024 * 1024;
 
 const ENV_KEY_MCP_TIMEOUT: &str = "MCP_TIMEOUT";
 const ENV_KEY_MCP_TOOL_TIMEOUT: &str = "MCP_TOOL_TIMEOUT";
@@ -141,7 +143,7 @@ fn sync_claude_cli_proxy_backup_if_enabled<R: tauri::Runtime>(
         return Ok(());
     };
 
-    let current = read_optional_file(&backup_path)?;
+    let current = read_optional_claude_settings_file(&backup_path)?;
     let root = json_root_from_bytes(current);
     let patched = patch_claude_settings(root, patch.clone())?;
     let bytes = json_to_bytes(&patched, "claude/settings.json backup")?;
@@ -164,7 +166,24 @@ fn json_to_bytes(
     let mut out =
         serde_json::to_vec_pretty(value).map_err(|e| format!("failed to serialize {hint}: {e}"))?;
     out.push(b'\n');
+    ensure_claude_settings_len(&out, hint)?;
     Ok(out)
+}
+
+fn ensure_claude_settings_len(bytes: &[u8], label: &str) -> crate::shared::error::AppResult<()> {
+    if bytes.len() > CLAUDE_SETTINGS_MAX_BYTES {
+        return Err(format!(
+            "SEC_INVALID_INPUT: {label} too large (max {CLAUDE_SETTINGS_MAX_BYTES} bytes)"
+        )
+        .into());
+    }
+    Ok(())
+}
+
+fn read_optional_claude_settings_file(
+    path: &Path,
+) -> crate::shared::error::AppResult<Option<Vec<u8>>> {
+    read_optional_file_with_max_len(path, CLAUDE_SETTINGS_MAX_BYTES)
 }
 
 fn ensure_json_object_root(mut root: serde_json::Value) -> serde_json::Value {
@@ -259,7 +278,7 @@ pub fn claude_settings_get<R: tauri::Runtime>(
     let settings_path = claude_settings_path(app)?;
     let exists = settings_path.exists();
 
-    let root = json_root_from_bytes(read_optional_file(&settings_path)?);
+    let root = json_root_from_bytes(read_optional_claude_settings_file(&settings_path)?);
     let root = ensure_json_object_root(root);
     let obj = root.as_object().expect("root must be object");
 
@@ -717,7 +736,7 @@ pub fn claude_settings_set<R: tauri::Runtime>(
         .into());
     }
 
-    let current = read_optional_file(&path)?;
+    let current = read_optional_claude_settings_file(&path)?;
     let root = json_root_from_bytes(current);
     let backup_patch = patch.clone();
     let patched = patch_claude_settings(root, patch)?;

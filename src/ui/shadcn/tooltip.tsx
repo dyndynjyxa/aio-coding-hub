@@ -18,7 +18,7 @@ export const TooltipContent = forwardRef<
         className={cn(
           [
             "z-50 max-w-[280px] whitespace-normal rounded-lg bg-foreground px-2 py-1",
-            "text-xs leading-snug text-background shadow-lg outline-none",
+            "text-xs leading-snug text-background shadow-panel outline-none",
           ].join(" "),
           className
         )}

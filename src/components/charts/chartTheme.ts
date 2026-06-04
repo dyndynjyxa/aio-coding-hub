@@ -9,7 +9,7 @@ import { BRAND, STATUS, CHART_PALETTE } from "../../constants/colors";
  */
 export const CHART_COLORS = {
   primary: BRAND.accent,
-  secondary: "#7C3AED",
+  secondary: BRAND.accentSecondary,
   success: STATUS.success,
   warning: STATUS.warning,
   danger: STATUS.danger,
@@ -68,7 +68,7 @@ export const AXIS_STYLE = getAxisStyle(false);
  */
 export function getGridLineStyle(isDark: boolean) {
   return {
-    stroke: isDark ? "rgba(100, 150, 255, 0.15)" : "rgba(0, 82, 255, 0.10)",
+    stroke: isDark ? "rgba(148, 163, 184, 0.08)" : "rgba(15, 23, 42, 0.05)",
     strokeDasharray: "3 3",
   };
 }

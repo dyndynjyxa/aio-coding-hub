@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { UpdateMeta } from "../../hooks/useUpdateMeta";
 import { AIO_RELEASES_URL } from "../../constants/urls";
@@ -27,6 +27,7 @@ type SettingsSidebarControllerInput = {
   updateMeta: UpdateMeta;
   devPreviewEnabled: boolean;
   refreshDbDiskUsage: () => Promise<unknown>;
+  clearAppDataResetCaches: () => Promise<unknown> | unknown;
   clearRequestLogsMutation: {
     isPending: boolean;
     mutateAsync: () => Promise<ClearRequestLogsResult | null>;
@@ -64,6 +65,7 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
     updateMeta,
     devPreviewEnabled,
     refreshDbDiskUsage,
+    clearAppDataResetCaches,
     clearRequestLogsMutation,
     configExportMutation,
     configImportMutation,
@@ -77,6 +79,15 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
   const [configImportDialogOpen, setConfigImportDialogOpen] = useState(false);
   const [pendingConfigImportPath, setPendingConfigImportPath] = useState<string | null>(null);
   const [resettingAll, setResettingAll] = useState(false);
+  const clearingRequestLogsRef = useRef(false);
+  const [clearingRequestLogs, setClearingRequestLogs] = useState(false);
+  const resettingAllRef = useRef(false);
+  const exportingConfigRef = useRef(false);
+  const [exportingConfig, setExportingConfig] = useState(false);
+  const importingConfigRef = useRef(false);
+  const [importingConfig, setImportingConfig] = useState(false);
+  const syncingModelPricesRef = useRef(false);
+  const [syncingModelPrices, setSyncingModelPrices] = useState(false);
   const [lastModelPricesSyncState, setLastModelPricesSyncState] = useState(() => {
     const initialSync = getLastModelPricesSync();
     return {
@@ -163,9 +174,12 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
   }, []);
 
   const clearRequestLogs = useCallback(async () => {
-    if (clearRequestLogsMutation.isPending) {
+    if (clearRequestLogsMutation.isPending || clearingRequestLogsRef.current) {
       return;
     }
+
+    clearingRequestLogsRef.current = true;
+    setClearingRequestLogs(true);
 
     try {
       const result = await clearRequestLogsMutation.mutateAsync();
@@ -181,14 +195,18 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
         toastMessage: "清理请求日志失败：请稍后重试",
         error,
       });
+    } finally {
+      clearingRequestLogsRef.current = false;
+      setClearingRequestLogs(false);
     }
   }, [clearRequestLogsMutation]);
 
   const resetAllData = useCallback(async () => {
-    if (resettingAll) {
+    if (resettingAllRef.current) {
       return;
     }
 
+    resettingAllRef.current = true;
     setResettingAll(true);
 
     try {
@@ -197,6 +215,7 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
         return;
       }
 
+      await clearAppDataResetCaches();
       presentResetAllSuccess();
       setResetAllDialogOpen(false);
 
@@ -210,14 +229,18 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
         error,
       });
     } finally {
+      resettingAllRef.current = false;
       setResettingAll(false);
     }
-  }, [resettingAll]);
+  }, [clearAppDataResetCaches]);
 
   const exportConfig = useCallback(async () => {
-    if (configExportMutation.isPending) {
+    if (configExportMutation.isPending || exportingConfigRef.current) {
       return;
     }
+
+    exportingConfigRef.current = true;
+    setExportingConfig(true);
 
     try {
       const filePath = await saveDesktopFilePath({
@@ -242,6 +265,9 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
         toastMessage: `导出配置失败：${error instanceof Error ? error.message : String(error)}`,
         error,
       });
+    } finally {
+      exportingConfigRef.current = false;
+      setExportingConfig(false);
     }
   }, [configExportMutation]);
 
@@ -276,9 +302,12 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
   }, []);
 
   const confirmConfigImport = useCallback(async () => {
-    if (configImportMutation.isPending || !pendingConfigImportPath) {
+    if (configImportMutation.isPending || importingConfigRef.current || !pendingConfigImportPath) {
       return;
     }
+
+    importingConfigRef.current = true;
+    setImportingConfig(true);
 
     try {
       const result = await configImportMutation.mutateAsync({
@@ -297,15 +326,20 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
         toastMessage: "导入配置失败：请稍后重试",
         error,
       });
+    } finally {
+      importingConfigRef.current = false;
+      setImportingConfig(false);
     }
   }, [configImportMutation, pendingConfigImportPath]);
 
   const syncModelPrices = useCallback(
     async (force: boolean) => {
-      if (modelPricesSyncMutation.isPending) {
+      if (modelPricesSyncMutation.isPending || syncingModelPricesRef.current) {
         return;
       }
 
+      syncingModelPricesRef.current = true;
+      setSyncingModelPrices(true);
       setLastModelPricesSyncState((current) => ({
         ...current,
         error: null,
@@ -334,6 +368,9 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
           ...current,
           error: String(error),
         }));
+      } finally {
+        syncingModelPricesRef.current = false;
+        setSyncingModelPrices(false);
       }
     },
     [modelPricesSyncMutation]
@@ -353,7 +390,7 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
       clearRequestLogs: {
         open: clearRequestLogsDialogOpen,
         setOpen: setClearRequestLogsDialogOpen,
-        pending: clearRequestLogsMutation.isPending,
+        pending: clearRequestLogsMutation.isPending || clearingRequestLogs,
         confirm: clearRequestLogs,
       },
       resetAll: {
@@ -365,7 +402,7 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
       configImport: {
         open: configImportDialogOpen,
         setOpen: closeConfigImportDialog,
-        pending: configImportMutation.isPending,
+        pending: configImportMutation.isPending || importingConfig,
         confirm: confirmConfigImport,
         pendingFilePath: pendingConfigImportPath,
       },
@@ -374,10 +411,12 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
       clearRequestLogs,
       clearRequestLogsDialogOpen,
       clearRequestLogsMutation.isPending,
+      clearingRequestLogs,
       closeConfigImportDialog,
       configImportDialogOpen,
       configImportMutation.isPending,
       confirmConfigImport,
+      importingConfig,
       modelPriceAliasesDialogOpen,
       pendingConfigImportPath,
       resetAllData,
@@ -399,8 +438,8 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
     lastModelPricesSyncReport: lastModelPricesSyncState.report,
     lastModelPricesSyncTime: lastModelPricesSyncState.syncedAt,
     lastModelPricesSyncError: lastModelPricesSyncState.error,
-    syncingModelPrices: modelPricesSyncMutation.isPending,
-    exportingConfig: configExportMutation.isPending,
+    syncingModelPrices: modelPricesSyncMutation.isPending || syncingModelPrices,
+    exportingConfig: configExportMutation.isPending || exportingConfig,
     dialogs,
   };
 }

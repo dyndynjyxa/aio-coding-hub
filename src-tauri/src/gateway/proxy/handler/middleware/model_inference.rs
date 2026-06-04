@@ -18,7 +18,9 @@ use crate::gateway::util::{infer_requested_model_info, LARGE_REQUEST_BODY_BYTES}
 pub(in crate::gateway::proxy::handler) struct ModelInferenceMiddleware;
 
 impl ModelInferenceMiddleware {
-    pub(in crate::gateway::proxy::handler) fn run(mut ctx: ProxyContext) -> MiddlewareAction {
+    pub(in crate::gateway::proxy::handler) fn run<R: tauri::Runtime>(
+        mut ctx: ProxyContext<R>,
+    ) -> MiddlewareAction<R> {
         let model_info = infer_requested_model_info(
             &ctx.forwarded_path,
             ctx.query.as_deref(),

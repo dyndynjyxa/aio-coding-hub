@@ -77,13 +77,24 @@ export type ConsoleLogEntry = {
 type Listener = () => void;
 
 const MAX_ENTRIES = 500;
+const MAX_DETAIL_STRING_CHARS = 4096;
+const MAX_DETAIL_ARRAY_ITEMS = 100;
+const MAX_DETAIL_OBJECT_KEYS = 100;
 
 let entries: ConsoleLogEntry[] = [];
 const listeners = new Set<Listener>();
 let emitScheduled = false;
 
 function emit() {
-  for (const listener of listeners) listener();
+  for (const listener of Array.from(listeners)) {
+    if (!listeners.has(listener)) continue;
+    try {
+      listener();
+    } catch (error) {
+      // Avoid recursive logToConsole calls from the logging bus itself.
+      console.warn("Console log subscriber failed", error);
+    }
+  }
 }
 
 function scheduleEmit() {
@@ -141,27 +152,47 @@ function sanitizeDetails(value: unknown, seen: WeakSet<object>, depth: number): 
   if (value === null) return value;
   if (depth > 6) return "[Truncated]";
 
+  if (typeof value === "string") return truncateDetailString(value);
   if (typeof value !== "object") return value;
   if (seen.has(value)) return "[Circular]";
   seen.add(value);
 
   if (Array.isArray(value)) {
-    return value.map((item) => sanitizeDetails(item, seen, depth + 1));
+    const out = value
+      .slice(0, MAX_DETAIL_ARRAY_ITEMS)
+      .map((item) => sanitizeDetails(item, seen, depth + 1));
+    if (value.length > MAX_DETAIL_ARRAY_ITEMS) {
+      out.push(`[Truncated ${value.length - MAX_DETAIL_ARRAY_ITEMS} items]`);
+    }
+    return out;
   }
 
   const input = value as Record<string, unknown>;
   const out: Record<string, unknown> = {};
+  let copied = 0;
 
-  for (const [k, v] of Object.entries(input)) {
+  for (const k in input) {
+    if (!Object.prototype.hasOwnProperty.call(input, k)) continue;
+    if (copied >= MAX_DETAIL_OBJECT_KEYS) {
+      out.__truncated_keys = "[Truncated]";
+      break;
+    }
+    const v = input[k];
     out[k] = isSensitiveKey(k) ? "[REDACTED]" : sanitizeDetails(v, seen, depth + 1);
+    copied += 1;
   }
 
   return out;
 }
 
+function truncateDetailString(value: string): string {
+  if (value.length <= MAX_DETAIL_STRING_CHARS) return value;
+  return `${value.slice(0, MAX_DETAIL_STRING_CHARS)}[Truncated]`;
+}
+
 function redactDetails(value: unknown): unknown | undefined {
   if (value === undefined) return undefined;
-  if (typeof value === "string") return value;
+  if (typeof value === "string") return truncateDetailString(value);
   try {
     return sanitizeDetails(value, new WeakSet(), 0);
   } catch {
@@ -277,12 +308,14 @@ export function clearConsoleLogs() {
   scheduleEmit();
 }
 
+export function subscribeConsoleLogs(listener: Listener): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
 export function useConsoleLogs() {
   return useSyncExternalStore(
-    (listener) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
+    subscribeConsoleLogs,
     () => entries,
     () => entries
   );

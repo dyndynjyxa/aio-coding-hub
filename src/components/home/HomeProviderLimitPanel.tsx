@@ -127,7 +127,7 @@ function getLimitDisplays(row: ProviderLimitUsageRow): LimitDisplay[] {
 function ProgressBar({ percent, warning }: { percent: number; warning: boolean }) {
   const width = Math.min(100, Math.max(0, percent * 100));
   return (
-    <div className="h-1.5 w-full rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+    <div className="h-1.5 w-full rounded-full bg-muted dark:bg-secondary overflow-hidden">
       <div
         className={cn(
           "h-full rounded-full transition-all duration-300",
@@ -149,19 +149,15 @@ function LimitItem({ display }: { display: LimitDisplay }) {
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between text-[10px]">
         <div className="flex items-center gap-1.5">
-          <span className="text-slate-500 dark:text-slate-400 font-medium">{display.label}</span>
-          {windowLabel && (
-            <span className="text-slate-400 dark:text-slate-500 font-mono">{windowLabel}</span>
-          )}
+          <span className="text-muted-foreground font-medium">{display.label}</span>
+          {windowLabel && <span className="text-muted-foreground font-mono">{windowLabel}</span>}
         </div>
         <div className="flex items-center gap-1">
           {display.warning && <AlertTriangle className="h-3 w-3 text-amber-500" />}
-          <span className="font-mono text-slate-700 dark:text-slate-300">
+          <span className="font-mono text-secondary-foreground">
             {formatUsdRaw(display.usage)} / {formatUsdRaw(display.limit)}
           </span>
-          <span className="text-slate-400 dark:text-slate-500">
-            ({formatPercent(display.percent, 0)})
-          </span>
+          <span className="text-muted-foreground">({formatPercent(display.percent, 0)})</span>
         </div>
       </div>
       <ProgressBar percent={display.percent} warning={display.warning} />
@@ -176,15 +172,15 @@ function ProviderCard({ row }: { row: ProviderLimitUsageRow }) {
   return (
     <div
       className={cn(
-        "rounded-lg border bg-white dark:bg-slate-800 px-3 py-2.5 shadow-sm transition-all duration-200 hover:shadow-md",
+        "rounded-lg border bg-white dark:bg-secondary px-3 py-2.5 shadow-sm transition-all duration-200 hover:shadow-md",
         hasWarning
           ? "border-amber-200 hover:border-amber-300 dark:border-amber-700 dark:hover:border-amber-600"
-          : "border-slate-200 hover:border-indigo-200 dark:border-slate-700 dark:hover:border-indigo-700"
+          : "border-border hover:border-indigo-200 dark:border-border dark:hover:border-indigo-700"
       )}
     >
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
+          <div className="flex items-center gap-2 text-xs text-secondary-foreground">
             <span
               className={cn(
                 "shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium",
@@ -197,7 +193,7 @@ function ProviderCard({ row }: { row: ProviderLimitUsageRow }) {
           </div>
           <div className="flex items-center gap-1">
             {!row.enabled && (
-              <span className="text-[10px] text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded">
+              <span className="text-[10px] text-muted-foreground bg-secondary px-1.5 py-0.5 rounded">
                 已禁用
               </span>
             )}
@@ -245,7 +241,7 @@ export function HomeProviderLimitPanelContent({
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Spinner size="sm" />
         加载中...
       </div>
@@ -253,7 +249,7 @@ export function HomeProviderLimitPanelContent({
   }
 
   if (available === false) {
-    return <div className="text-sm text-slate-600 dark:text-slate-400">数据不可用</div>;
+    return <div className="text-sm text-muted-foreground">数据不可用</div>;
   }
 
   if (rows.length === 0) {
@@ -263,13 +259,13 @@ export function HomeProviderLimitPanelContent({
   return (
     <div className="flex flex-col h-full gap-2">
       <div className="flex items-center justify-between shrink-0">
-        <span className="text-xs text-slate-400 dark:text-slate-500">{rows.length} 个供应商</span>
+        <span className="text-xs text-muted-foreground">{rows.length} 个供应商</span>
         {onRefresh && (
           <button
             type="button"
             onClick={onRefresh}
             disabled={refreshing}
-            className="rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-700 dark:hover:text-indigo-400"
+            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-secondary dark:hover:text-indigo-400"
             title="刷新供应商限额"
           >
             <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
@@ -306,7 +302,7 @@ export function HomeProviderLimitPanel({
       <div className="flex items-center justify-between gap-2 shrink-0">
         <div className="text-sm font-semibold">供应商限额</div>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-400 dark:text-slate-500">{rows.length} 个供应商</span>
+          <span className="text-xs text-muted-foreground">{rows.length} 个供应商</span>
           <button
             type="button"
             onClick={onRefresh}
@@ -314,7 +310,7 @@ export function HomeProviderLimitPanel({
             className={cn(
               "flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-all",
               refreshing
-                ? "bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed"
+                ? "bg-secondary text-muted-foreground cursor-not-allowed"
                 : "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50"
             )}
           >
@@ -325,12 +321,12 @@ export function HomeProviderLimitPanel({
       </div>
 
       {loading ? (
-        <div className="mt-2 flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+        <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner size="sm" />
           加载中...
         </div>
       ) : available === false ? (
-        <div className="mt-2 text-sm text-slate-600 dark:text-slate-400">数据不可用</div>
+        <div className="mt-2 text-sm text-muted-foreground">数据不可用</div>
       ) : rows.length === 0 ? (
         <div className="mt-2">
           <EmptyState title="暂无配置限额的供应商" description="请在供应商编辑界面配置限额。" />

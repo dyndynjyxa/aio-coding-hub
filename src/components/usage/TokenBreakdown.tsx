@@ -16,20 +16,16 @@ export function TokenBreakdown({
   return (
     <div className="space-y-0.5">
       <div>{formatInteger(totalTokens)}</div>
-      <div className="text-[10px] leading-4 text-slate-500 dark:text-slate-400">
-        输入{" "}
-        <span className="text-slate-700 dark:text-slate-300">{formatInteger(inputTokens)}</span>
+      <div className="text-[10px] leading-4 text-muted-foreground">
+        输入 <span className="text-secondary-foreground">{formatInteger(inputTokens)}</span>
       </div>
-      <div className="text-[10px] leading-4 text-slate-500 dark:text-slate-400">
-        输出{" "}
-        <span className="text-slate-700 dark:text-slate-300">{formatInteger(outputTokens)}</span>
+      <div className="text-[10px] leading-4 text-muted-foreground">
+        输出 <span className="text-secondary-foreground">{formatInteger(outputTokens)}</span>
       </div>
       {totalTokensWithCache != null && Number.isFinite(totalTokensWithCache) ? (
-        <div className="text-[10px] leading-4 text-slate-500 dark:text-slate-400">
+        <div className="text-[10px] leading-4 text-muted-foreground">
           含缓存{" "}
-          <span className="text-slate-700 dark:text-slate-300">
-            {formatInteger(totalTokensWithCache)}
-          </span>
+          <span className="text-secondary-foreground">{formatInteger(totalTokensWithCache)}</span>
         </div>
       ) : null}
     </div>

@@ -20,7 +20,7 @@ pub(super) struct GatewayBackgroundTasks {
 }
 
 impl GatewayBackgroundTasks {
-    pub(super) fn start(app: tauri::AppHandle, db: db::Db) -> Self {
+    pub(super) fn start<R: tauri::Runtime>(app: tauri::AppHandle<R>, db: db::Db) -> Self {
         let (log_tx, log_task) = request_logs::start_buffered_writer(app, db.clone());
         let (circuit_persist_tx, circuit_task) =
             provider_circuit_breakers::start_buffered_writer(db.clone());

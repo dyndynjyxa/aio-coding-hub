@@ -26,7 +26,7 @@ export function LimitCard({
   disabled,
 }: LimitCardProps) {
   return (
-    <div className="group relative rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-all hover:border-slate-300 hover:shadow-md dark:border-slate-700 dark:bg-slate-800 dark:hover:border-slate-600">
+    <div className="group relative rounded-xl border border-border bg-white p-4 shadow-sm transition-all hover:border-border hover:shadow-md dark:border-border dark:bg-secondary dark:hover:border-border">
       <div className="flex items-start gap-3">
         <div
           className={cn(
@@ -37,10 +37,8 @@ export function LimitCard({
           {icon}
         </div>
         <div className="min-w-0 flex-1">
-          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">{label}</label>
-          {hint ? (
-            <p className="mt-0.5 text-xs text-slate-400 dark:text-slate-500">{hint}</p>
-          ) : null}
+          <label className="text-sm font-medium text-secondary-foreground">{label}</label>
+          {hint ? <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p> : null}
           <div className="relative mt-2">
             <Input
               type="number"
@@ -52,7 +50,7 @@ export function LimitCard({
               disabled={disabled}
               className="pr-12"
             />
-            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-slate-400">
+            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-muted-foreground">
               USD
             </span>
           </div>

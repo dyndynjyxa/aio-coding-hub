@@ -16,6 +16,11 @@ type InvokeGeneratedIpcOptions<T> = {
   nullResultBehavior?: "throw" | "return_fallback";
 };
 
+const LOG_PAYLOAD_MAX_DEPTH = 6;
+const LOG_PAYLOAD_MAX_ARRAY_ITEMS = 50;
+const LOG_PAYLOAD_MAX_OBJECT_KEYS = 50;
+const LOG_PAYLOAD_MAX_STRING_CHARS = 2048;
+
 function isSensitiveLogKey(key: string): boolean {
   const normalized = key.toLowerCase();
   return (
@@ -33,22 +38,40 @@ function isSensitiveLogKey(key: string): boolean {
   );
 }
 
+function truncateLogString(value: string): string {
+  if (value.length <= LOG_PAYLOAD_MAX_STRING_CHARS) return value;
+  return `${value.slice(0, LOG_PAYLOAD_MAX_STRING_CHARS)}[Truncated ${
+    value.length - LOG_PAYLOAD_MAX_STRING_CHARS
+  } chars]`;
+}
+
 function redactLogPayload(value: unknown, seen: WeakSet<object>, depth: number): unknown {
   if (value == null) return value;
-  if (depth > 6) return "[Truncated]";
+  if (typeof value === "string") return truncateLogString(value);
+  if (depth > LOG_PAYLOAD_MAX_DEPTH) return "[Truncated]";
   if (typeof value !== "object") return value;
   if (seen.has(value)) return "[Circular]";
 
   seen.add(value);
 
   if (Array.isArray(value)) {
-    return value.map((item) => redactLogPayload(item, seen, depth + 1));
+    const items = value
+      .slice(0, LOG_PAYLOAD_MAX_ARRAY_ITEMS)
+      .map((item) => redactLogPayload(item, seen, depth + 1));
+    if (value.length > LOG_PAYLOAD_MAX_ARRAY_ITEMS) {
+      items.push(`[Truncated ${value.length - LOG_PAYLOAD_MAX_ARRAY_ITEMS} items]`);
+    }
+    return items;
   }
 
   const record = value as Record<string, unknown>;
   const output: Record<string, unknown> = {};
-  for (const [key, item] of Object.entries(record)) {
+  const entries = Object.entries(record);
+  for (const [key, item] of entries.slice(0, LOG_PAYLOAD_MAX_OBJECT_KEYS)) {
     output[key] = isSensitiveLogKey(key) ? "[REDACTED]" : redactLogPayload(item, seen, depth + 1);
+  }
+  if (entries.length > LOG_PAYLOAD_MAX_OBJECT_KEYS) {
+    output.__truncated__ = `${entries.length - LOG_PAYLOAD_MAX_OBJECT_KEYS} keys truncated`;
   }
   return output;
 }

@@ -250,7 +250,7 @@ export function buildRequestLogAuditMeta(log: RequestLogAuditInput): RequestLogA
     tags.push(
       auditTag(
         "不计统计",
-        "bg-slate-100/90 text-slate-600 ring-1 ring-inset ring-slate-500/10 dark:bg-slate-700/70 dark:text-slate-200 dark:ring-slate-500/20",
+        "bg-secondary/90 text-muted-foreground ring-1 ring-inset ring-border dark:bg-secondary/70 dark:text-foreground dark:ring-border",
         "这条记录保留在审计列表中，但不会进入 usage/cost/provider 聚合"
       )
     );
@@ -323,7 +323,7 @@ export function getErrorCodeLabel(errorCode: string) {
 
 export function SessionReuseBadge({ showCustomTooltip }: { showCustomTooltip: boolean }) {
   const className =
-    "inline-flex shrink-0 items-center whitespace-nowrap rounded-md bg-indigo-50/80 px-2 py-0.5 text-[11px] font-semibold text-indigo-600 ring-1 ring-inset ring-indigo-500/10 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-400/20 cursor-help";
+    "inline-flex shrink-0 items-center whitespace-nowrap rounded-md bg-blue-50/85 px-2 py-0.5 text-[11px] font-semibold text-blue-600 ring-1 ring-inset ring-blue-400/35 dark:bg-blue-500/15 dark:text-blue-300 dark:ring-blue-400/20 cursor-help";
   return showCustomTooltip ? (
     <Tooltip content={SESSION_REUSE_TOOLTIP}>
       <span className={className}>会话复用</span>
@@ -371,10 +371,10 @@ export function FolderBadge({
 }) {
   return (
     <span
-      className="inline-flex min-w-0 items-center gap-1 rounded-md bg-slate-100/75 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-700/55 dark:text-slate-200"
+      className="inline-flex min-w-0 items-center gap-1 rounded-md bg-muted/65 px-2 py-0.5 text-[11px] font-medium text-muted-foreground border border-border/45 dark:bg-muted/40 dark:border-border/30 shadow-[0_1px_2px_rgba(0,0,0,0.01)]"
       title={folderPath}
     >
-      <FolderOpen className="h-3 w-3 shrink-0 text-slate-400 dark:text-slate-500" />
+      <FolderOpen className="h-3 w-3 shrink-0 text-muted-foreground/60" />
       <span className={allowWrap ? "whitespace-normal break-all" : "truncate"}>{folderName}</span>
     </span>
   );
@@ -437,7 +437,7 @@ export function computeStatusBadge(input: {
         : "text-emerald-600 bg-emerald-50/60 ring-1 ring-inset ring-emerald-500/10 dark:text-emerald-400 dark:bg-emerald-500/15 dark:ring-emerald-400/20"
       : isError
         ? "text-rose-600 bg-rose-50/60 ring-1 ring-inset ring-rose-500/10 dark:text-rose-400 dark:bg-rose-500/15 dark:ring-rose-400/20"
-        : "text-slate-500 bg-slate-100 ring-1 ring-inset ring-slate-500/10 dark:text-slate-400 dark:bg-slate-700 dark:ring-slate-500/20";
+        : "text-muted-foreground bg-secondary ring-1 ring-inset ring-border dark:text-muted-foreground dark:bg-secondary dark:ring-border";
 
   const title = input.errorCode
     ? `${semanticText} · ${getErrorCodeLabel(input.errorCode)} (${input.errorCode})`
@@ -472,14 +472,16 @@ export function buildRequestRouteMeta(input: {
     };
   }
 
-  const totalHopAttempts = hops.reduce((sum, h) => sum + (h.attempts ?? 1), 0);
-  const skippedCount = Math.max(0, input.attemptCount - totalHopAttempts);
-  const hasRetry = hops.some((h) => (h.attempts ?? 1) > 1);
+  const skippedCount = hops.filter((h) => h.skipped).reduce((sum, h) => sum + (h.attempts ?? 1), 0);
+  const activeAttemptCount = hops
+    .filter((h) => !h.skipped)
+    .reduce((sum, h) => sum + (h.attempts ?? 1), 0);
+  const hasRetry = hops.some((h) => !h.skipped && (h.attempts ?? 1) > 1);
 
   const summary = input.hasFailover
     ? `切换 ${input.attemptCount} 次后${input.status != null && input.status < 400 ? "成功" : "结束"}`
     : skippedCount > 0 && hasRetry
-      ? `跳过 ${skippedCount} 个候选，并重试 ${input.attemptCount} 次`
+      ? `跳过 ${skippedCount} 个候选，并重试 ${activeAttemptCount} 次`
       : skippedCount > 0
         ? `跳过 ${skippedCount} 个候选`
         : hasRetry

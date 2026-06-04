@@ -19,7 +19,7 @@ describe("constants/clis", () => {
     expect(CLI_FILTER_ITEMS[0]).toEqual({ key: "all", label: "全部" });
     expect(CLI_FILTER_ITEMS.map((item) => item.key)).toContain("claude");
     expect(CLI_SHORT_ITEMS).toEqual([
-      { key: "claude", label: "Claude Code" },
+      { key: "claude", label: "Claude" },
       { key: "codex", label: "Codex" },
       { key: "gemini", label: "Gemini" },
     ]);
@@ -43,12 +43,13 @@ describe("constants/clis", () => {
     expect(enabledFlagForCli(row, "claude" as any)).toBe(true);
     expect(enabledFlagForCli(row, "codex" as any)).toBe(false);
 
-    expect(cliShortLabel("claude")).toBe("Claude Code");
+    expect(cliShortLabel("claude")).toBe("Claude");
     expect(cliShortLabel("codex")).toBe("Codex");
     expect(cliShortLabel("gemini")).toBe("Gemini");
     expect(cliShortLabel("other")).toBe("other");
 
     expect(cliBadgeTone("claude")).toContain("bg-slate-100");
+    expect(cliBadgeTone("claude")).toContain("border-slate-200/90");
     expect(cliBadgeTone("claude")).toContain("group-hover:bg-white");
     expect(cliBadgeTone("codex")).toContain("bg-slate-100");
     expect(cliBadgeTone("gemini")).toContain("bg-slate-100");
@@ -56,6 +57,7 @@ describe("constants/clis", () => {
     expect(cliBadgeTone("unknown")).not.toContain("group-hover");
 
     expect(cliBadgeToneStatic("claude")).toContain("bg-slate-100");
+    expect(cliBadgeToneStatic("claude")).toContain("border-slate-200/90");
     expect(cliBadgeToneStatic("claude")).not.toContain("group-hover");
     expect(cliBadgeToneStatic("unknown")).toContain("bg-slate-100");
   });

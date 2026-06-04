@@ -34,7 +34,7 @@ pub(super) fn reorder_providers_by_bound_order(
 }
 
 pub(super) fn apply_session_provider_preference(
-    providers: &mut Vec<providers::ProviderForGateway>,
+    providers: &mut [providers::ProviderForGateway],
     bound_provider_id: i64,
     bound_provider_order: Option<&[i64]>,
 ) -> Option<i64> {
@@ -44,8 +44,7 @@ pub(super) fn apply_session_provider_preference(
 
     if let Some(idx) = providers.iter().position(|p| p.id == bound_provider_id) {
         if idx > 0 {
-            let chosen = providers.remove(idx);
-            providers.insert(0, chosen);
+            providers.rotate_left(idx);
         }
         return Some(bound_provider_id);
     }
@@ -108,11 +107,11 @@ mod tests {
     }
 
     #[test]
-    fn apply_session_preference_promotes_bound_provider_when_present() {
+    fn apply_session_preference_rotates_from_bound_provider_when_present() {
         let mut providers = vec![provider(11), provider(22), provider(33)];
         let selected = apply_session_provider_preference(&mut providers, 22, Some(&[11, 22, 33]));
         assert_eq!(selected, Some(22));
-        assert_eq!(ids(&providers), vec![22, 11, 33]);
+        assert_eq!(ids(&providers), vec![22, 33, 11]);
     }
 
     #[test]

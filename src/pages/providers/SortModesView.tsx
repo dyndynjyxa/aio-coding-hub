@@ -68,7 +68,7 @@ export function SortModesView({
                 {mode.name}
               </Button>
             ))}
-            <span className="text-xs text-slate-500 dark:text-slate-400">
+            <span className="text-xs text-muted-foreground">
               {model.sortModesLoading ? "加载中…" : `共 ${model.sortModes.length + 1} 个`}
             </span>
           </div>
@@ -118,7 +118,7 @@ export function SortModesView({
               {cli.name}
             </Button>
           ))}
-          <span className="text-xs text-slate-500 dark:text-slate-400">选择要配置的 CLI</span>
+          <span className="text-xs text-muted-foreground">选择要配置的 CLI</span>
         </div>
 
         <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_420px] xl:grid-cols-[minmax(0,1fr)_480px]">
@@ -134,11 +134,11 @@ export function SortModesView({
               </div>
             </div>
 
-            <div className="mt-3 lg:min-h-0 lg:flex-1 lg:overflow-auto lg:pr-1">
+            <div className="mt-3 lg:min-h-0 lg:flex-1 lg:overflow-auto lg:pr-1 scrollbar-overlay">
               {model.providersLoading ? (
-                <div className="text-sm text-slate-600 dark:text-slate-400">加载中…</div>
+                <div className="text-sm text-muted-foreground">加载中…</div>
               ) : model.providers.length === 0 ? (
-                <div className="text-sm text-slate-600 dark:text-slate-400">
+                <div className="text-sm text-muted-foreground">
                   暂无 Provider。请先在「供应商」视图添加。
                 </div>
               ) : (
@@ -240,7 +240,7 @@ export function SortModesView({
               </span>
             </div>
 
-            <div className="mt-3 lg:min-h-0 lg:flex-1 lg:overflow-auto lg:pr-1">
+            <div className="mt-3 lg:min-h-0 lg:flex-1 lg:overflow-auto lg:pr-1 scrollbar-overlay">
               {model.activeModeId == null ? (
                 defaultEnabledProviders.length === 0 ? (
                   <div className="text-sm text-muted-foreground">
@@ -354,7 +354,7 @@ export function SortModesView({
             />
           </FormField>
 
-          <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-700">
+          <div className="flex items-center justify-end gap-2 border-t border-border pt-3 dark:border-border">
             <Button
               onClick={() => model.setCreateModeDialogOpen(false)}
               variant="secondary"
@@ -388,7 +388,7 @@ export function SortModesView({
             />
           </FormField>
 
-          <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-700">
+          <div className="flex items-center justify-end gap-2 border-t border-border pt-3 dark:border-border">
             <Button
               onClick={() => model.setRenameModeDialogOpen(false)}
               variant="secondary"

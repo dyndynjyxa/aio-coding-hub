@@ -2,11 +2,26 @@
 
 use crate::mcp_sync::McpServerForSync;
 use crate::shared::error::AppResult;
+use crate::shared::fs::{read_optional_file_with_max_len, write_file_atomic};
 
 use super::shell::{
-    bash_single_quote, read_wsl_file, run_wsl_bash_script_capture, write_wsl_file,
+    bash_single_quote, read_wsl_file_with_max_len, run_wsl_bash_script_capture, write_wsl_file,
     wsl_resolve_codex_home_script,
 };
+
+const WSL_MCP_SYNC_TARGET_MAX_BYTES: usize = 1024 * 1024;
+const WSL_MCP_SYNC_MANIFEST_MAX_BYTES: usize = 256 * 1024;
+
+fn ensure_wsl_mcp_sync_bytes_within_limit(
+    bytes: &[u8],
+    max_len: usize,
+    label: &str,
+) -> AppResult<()> {
+    if bytes.len() > max_len {
+        return Err(format!("SEC_INVALID_INPUT: {label} too large (max {max_len} bytes)").into());
+    }
+    Ok(())
+}
 
 // ── WSL MCP manifest ──
 
@@ -41,9 +56,9 @@ pub(super) fn read_wsl_mcp_manifest(
         Ok(p) => p,
         Err(_) => return Vec::new(),
     };
-    let bytes = match std::fs::read(&path) {
-        Ok(b) => b,
-        Err(_) => return Vec::new(),
+    let bytes = match read_optional_file_with_max_len(&path, WSL_MCP_SYNC_MANIFEST_MAX_BYTES) {
+        Ok(Some(b)) => b,
+        Ok(None) | Err(_) => return Vec::new(),
     };
     match serde_json::from_slice::<WslMcpManifest>(&bytes) {
         Ok(m) => m.managed_keys,
@@ -70,8 +85,12 @@ pub(super) fn write_wsl_mcp_manifest(
     };
     let json = serde_json::to_string_pretty(&manifest)
         .map_err(|e| format!("failed to serialize wsl mcp manifest: {e}"))?;
-    std::fs::write(&path, json.as_bytes())
-        .map_err(|e| format!("failed to write wsl mcp manifest: {e}"))?;
+    ensure_wsl_mcp_sync_bytes_within_limit(
+        json.as_bytes(),
+        WSL_MCP_SYNC_MANIFEST_MAX_BYTES,
+        "WSL MCP manifest",
+    )?;
+    write_file_atomic(&path, json.as_bytes())?;
     Ok(())
 }
 
@@ -110,11 +129,16 @@ esac
     let resolved_path = resolved_path.trim();
 
     // Read current config from WSL
-    let current = read_wsl_file(distro, resolved_path)?;
+    let current = read_wsl_file_with_max_len(distro, resolved_path, WSL_MCP_SYNC_TARGET_MAX_BYTES)?;
 
     // Build merged config using existing infrastructure
     let next_bytes = crate::mcp_sync::build_next_bytes(cli_key, current, managed_keys, servers)
         .map_err(|e| format!("WSL MCP build failed for {cli_key}: {e}"))?;
+    ensure_wsl_mcp_sync_bytes_within_limit(
+        &next_bytes,
+        WSL_MCP_SYNC_TARGET_MAX_BYTES,
+        "WSL MCP target",
+    )?;
 
     // Write back to WSL
     write_wsl_file(distro, resolved_path, &next_bytes)?;
@@ -124,4 +148,23 @@ esac
     keys.sort();
     keys.dedup();
     Ok(keys)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wsl_mcp_sync_bytes_limit_rejects_oversized_content() {
+        let bytes = vec![b'x'; WSL_MCP_SYNC_TARGET_MAX_BYTES + 1];
+
+        let err = ensure_wsl_mcp_sync_bytes_within_limit(
+            &bytes,
+            WSL_MCP_SYNC_TARGET_MAX_BYTES,
+            "WSL MCP target",
+        )
+        .expect_err("oversized WSL MCP content should fail");
+
+        assert!(err.to_string().contains("too large"));
+    }
 }

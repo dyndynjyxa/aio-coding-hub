@@ -342,6 +342,8 @@ pub struct SseUsageTracker {
     fake_200_detected: bool,
 }
 
+const MAX_SSE_USAGE_TRACKER_PENDING_BYTES: usize = 1024 * 1024;
+
 fn trim_ascii(bytes: &[u8]) -> &[u8] {
     let mut start = 0;
     let mut end = bytes.len();
@@ -447,27 +449,66 @@ impl SseUsageTracker {
     }
 
     pub fn ingest_chunk(&mut self, chunk: &[u8]) {
-        self.buffer.extend_from_slice(chunk);
-
-        let buf = std::mem::take(&mut self.buffer);
         let mut start = 0usize;
 
-        for (idx, b) in buf.iter().enumerate() {
+        for (idx, b) in chunk.iter().enumerate() {
             if *b != b'\n' {
                 continue;
             }
 
-            let mut line = &buf[start..idx];
+            self.ingest_complete_line(&chunk[start..idx]);
+            start = idx + 1;
+        }
+
+        if start < chunk.len() {
+            self.append_pending_line_fragment(&chunk[start..]);
+        }
+    }
+
+    fn clear_pending_event(&mut self) {
+        self.buffer.clear();
+        self.current_event.clear();
+        self.current_data.clear();
+    }
+
+    fn append_pending_line_fragment(&mut self, fragment: &[u8]) -> bool {
+        if fragment.is_empty() {
+            return true;
+        }
+
+        if self.buffer.len().saturating_add(fragment.len()) > MAX_SSE_USAGE_TRACKER_PENDING_BYTES {
+            self.clear_pending_event();
+            return false;
+        }
+
+        self.buffer.extend_from_slice(fragment);
+        true
+    }
+
+    fn ingest_complete_line(&mut self, fragment: &[u8]) {
+        if self.buffer.is_empty() {
+            if fragment.len() > MAX_SSE_USAGE_TRACKER_PENDING_BYTES {
+                self.clear_pending_event();
+                return;
+            }
+
+            let mut line = fragment;
             if line.last() == Some(&b'\r') {
                 line = &line[..line.len().saturating_sub(1)];
             }
             self.ingest_line(line);
-            start = idx + 1;
+            return;
         }
 
-        if start < buf.len() {
-            self.buffer.extend_from_slice(&buf[start..]);
+        if !self.append_pending_line_fragment(fragment) {
+            return;
         }
+
+        let mut line = std::mem::take(&mut self.buffer);
+        if line.last() == Some(&b'\r') {
+            line.pop();
+        }
+        self.ingest_line(&line);
     }
 
     fn ingest_line(&mut self, line: &[u8]) {
@@ -482,6 +523,10 @@ impl SseUsageTracker {
 
         if let Some(rest) = line.strip_prefix(b"event:") {
             let rest = trim_ascii(rest);
+            if rest.len() > MAX_SSE_USAGE_TRACKER_PENDING_BYTES {
+                self.clear_pending_event();
+                return;
+            }
             self.current_event.clear();
             self.current_event.extend_from_slice(rest);
             return;
@@ -494,6 +539,18 @@ impl SseUsageTracker {
             }
             if rest == b"[DONE]" {
                 self.completion_seen = true;
+                return;
+            }
+
+            let separator_len = usize::from(!self.current_data.is_empty());
+            if self
+                .current_data
+                .len()
+                .saturating_add(separator_len)
+                .saturating_add(rest.len())
+                > MAX_SSE_USAGE_TRACKER_PENDING_BYTES
+            {
+                self.clear_pending_event();
                 return;
             }
 

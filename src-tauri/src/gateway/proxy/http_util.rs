@@ -118,3 +118,57 @@ pub(super) fn build_response(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::maybe_gunzip_response_body_bytes_with_limit;
+    use axum::body::Bytes;
+    use axum::http::{header, HeaderMap, HeaderValue};
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use std::io::Write;
+
+    fn gzip_bytes(input: &[u8]) -> Bytes {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(input).expect("gzip write");
+        Bytes::from(encoder.finish().expect("gzip finish"))
+    }
+
+    fn gzip_headers(content_length: usize) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static("gzip"));
+        headers.insert(
+            header::CONTENT_LENGTH,
+            HeaderValue::from_str(&content_length.to_string()).expect("content length"),
+        );
+        headers
+    }
+
+    #[test]
+    fn maybe_gunzip_decodes_within_limit_and_removes_encoding_headers() {
+        let plain = Bytes::from_static(b"{\"ok\":true}");
+        let compressed = gzip_bytes(plain.as_ref());
+        let mut headers = gzip_headers(compressed.len());
+
+        let decoded =
+            maybe_gunzip_response_body_bytes_with_limit(compressed, &mut headers, plain.len());
+
+        assert_eq!(decoded, plain);
+        assert!(headers.get(header::CONTENT_ENCODING).is_none());
+        assert!(headers.get(header::CONTENT_LENGTH).is_none());
+    }
+
+    #[test]
+    fn maybe_gunzip_preserves_compressed_body_when_output_limit_exceeded() {
+        let plain = Bytes::from(vec![b'a'; 128 * 1024]);
+        let compressed = gzip_bytes(plain.as_ref());
+        let mut headers = gzip_headers(compressed.len());
+
+        let output =
+            maybe_gunzip_response_body_bytes_with_limit(compressed.clone(), &mut headers, 1024);
+
+        assert_eq!(output, compressed);
+        assert_eq!(headers.get(header::CONTENT_ENCODING).unwrap(), "gzip");
+        assert!(headers.get(header::CONTENT_LENGTH).is_some());
+    }
+}

@@ -1,14 +1,66 @@
 import { commands, type ClearRequestLogsResult, type DbDiskUsage } from "../../generated/bindings";
-import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
+import {
+  invokeGeneratedIpc,
+  mapGeneratedCommandResponse,
+  type GeneratedCommandResult,
+} from "../generatedIpc";
 import { createRiskyIpcConfirm } from "../ipcConfirm";
 
 export type { ClearRequestLogsResult, DbDiskUsage };
+
+function requireNonNegativeSafeInteger(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`IPC_INVALID_RESULT: ${label} must be a non-negative safe integer`);
+  }
+  return value;
+}
+
+function toDbDiskUsage(value: DbDiskUsage): DbDiskUsage {
+  const dbBytes = requireNonNegativeSafeInteger(value.db_bytes, "db_disk_usage.db_bytes");
+  const walBytes = requireNonNegativeSafeInteger(value.wal_bytes, "db_disk_usage.wal_bytes");
+  const shmBytes = requireNonNegativeSafeInteger(value.shm_bytes, "db_disk_usage.shm_bytes");
+  const totalBytes = requireNonNegativeSafeInteger(value.total_bytes, "db_disk_usage.total_bytes");
+  const expectedTotal = dbBytes + walBytes + shmBytes;
+  if (!Number.isSafeInteger(expectedTotal) || totalBytes !== expectedTotal) {
+    throw new Error("IPC_INVALID_RESULT: db_disk_usage.total_bytes mismatch");
+  }
+
+  return {
+    db_bytes: dbBytes,
+    wal_bytes: walBytes,
+    shm_bytes: shmBytes,
+    total_bytes: totalBytes,
+  };
+}
+
+export function isClearRequestLogsResult(
+  value: ClearRequestLogsResult | null | undefined
+): value is ClearRequestLogsResult {
+  return (
+    !!value &&
+    Number.isSafeInteger(value.request_logs_deleted) &&
+    value.request_logs_deleted >= 0 &&
+    Number.isSafeInteger(value.request_attempt_logs_deleted) &&
+    value.request_attempt_logs_deleted >= 0
+  );
+}
+
+function toClearRequestLogsResult(value: ClearRequestLogsResult): ClearRequestLogsResult {
+  if (!isClearRequestLogsResult(value)) {
+    throw new Error("IPC_INVALID_RESULT: clear request logs counts must be non-negative integers");
+  }
+  return value;
+}
 
 export async function dbDiskUsageGet() {
   return invokeGeneratedIpc<DbDiskUsage>({
     title: "读取数据库磁盘用量失败",
     cmd: "db_disk_usage_get",
-    invoke: () => commands.dbDiskUsageGet() as Promise<GeneratedCommandResult<DbDiskUsage>>,
+    invoke: async () =>
+      mapGeneratedCommandResponse(
+        (await commands.dbDiskUsageGet()) as GeneratedCommandResult<DbDiskUsage>,
+        toDbDiskUsage
+      ),
   });
 }
 
@@ -16,8 +68,11 @@ export async function requestLogsClearAll() {
   return invokeGeneratedIpc<ClearRequestLogsResult>({
     title: "清空请求日志失败",
     cmd: "request_logs_clear_all",
-    invoke: () =>
-      commands.requestLogsClearAll() as Promise<GeneratedCommandResult<ClearRequestLogsResult>>,
+    invoke: async () =>
+      mapGeneratedCommandResponse(
+        (await commands.requestLogsClearAll()) as GeneratedCommandResult<ClearRequestLogsResult>,
+        toClearRequestLogsResult
+      ),
   });
 }
 

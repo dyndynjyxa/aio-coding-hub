@@ -86,6 +86,53 @@ fn workspace_rename() {
 }
 
 #[test]
+fn workspace_names_are_bounded_before_persistence() {
+    let app = support::TestApp::new();
+    let handle = app.handle();
+
+    aio_coding_hub_lib::test_support::init_db(&handle).expect("init db");
+
+    let long_name = "x".repeat(129);
+    let err = aio_coding_hub_lib::test_support::workspace_create_json(
+        &handle, "claude", &long_name, false,
+    )
+    .expect_err("oversized workspace name should fail");
+    let err = err.to_string();
+    assert!(
+        err.contains("workspace name is too long"),
+        "unexpected error: {err}"
+    );
+
+    let err = aio_coding_hub_lib::test_support::workspace_create_json(
+        &handle,
+        "claude",
+        "bad\nname",
+        false,
+    )
+    .expect_err("control-character workspace name should fail");
+    let err = err.to_string();
+    assert!(
+        err.contains("workspace name contains control characters"),
+        "unexpected error: {err}"
+    );
+
+    let created = aio_coding_hub_lib::test_support::workspace_create_json(
+        &handle, "claude", "Bounded", false,
+    )
+    .expect("create workspace");
+    let ws_id = json_i64(&created, "id");
+
+    let err =
+        aio_coding_hub_lib::test_support::workspace_rename_json(&handle, ws_id, &"y".repeat(129))
+            .expect_err("oversized workspace rename should fail");
+    let err = err.to_string();
+    assert!(
+        err.contains("workspace name is too long"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn workspace_create_multiple_and_delete() {
     let app = support::TestApp::new();
     let handle = app.handle();

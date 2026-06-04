@@ -1,10 +1,13 @@
 import { useSyncExternalStore } from "react";
+import { emitListenerSnapshot } from "../../utils/listeners";
 import { normalizeClaudeModelMapping, type ClaudeModelMapping } from "./claudeModelMapping";
 import type {
+  GatewayAttempt,
   GatewayAttemptEvent,
   GatewayRequestEvent,
   GatewayRequestStartEvent,
 } from "./gatewayEvents";
+import { MAX_ATTEMPTS_PER_TRACE } from "./traceLimits";
 
 export type TraceSummary = GatewayRequestEvent & {
   // Preview/demo traces may carry cost hints that are not part of the runtime gateway event payload.
@@ -34,7 +37,6 @@ export type TraceStoreSnapshot = {
 type Listener = () => void;
 
 const MAX_TRACES = 50;
-const MAX_ATTEMPTS_PER_TRACE = 100;
 
 /**
  * Traces without summary older than this threshold are considered stale
@@ -58,7 +60,7 @@ let snapshot: TraceStoreSnapshot = {
 const listeners = new Set<Listener>();
 
 function emit() {
-  for (const listener of listeners) listener();
+  emitListenerSnapshot(listeners, (listener) => listener());
 }
 
 function setState(next: TraceStoreState) {
@@ -90,6 +92,19 @@ function upsertAttempt(
 
 function hasClaudeModelMappingField(payload: GatewayRequestEvent): boolean {
   return Object.prototype.hasOwnProperty.call(payload, "claude_model_mapping");
+}
+
+function trimSummaryAttempts<T extends GatewayAttempt | GatewayAttemptEvent>(attempts: T[]): T[] {
+  return attempts.length > MAX_ATTEMPTS_PER_TRACE
+    ? attempts.slice(-MAX_ATTEMPTS_PER_TRACE)
+    : attempts;
+}
+
+function trimSummary(payload: GatewayRequestEvent): TraceSummary {
+  return {
+    ...payload,
+    attempts: trimSummaryAttempts(payload.attempts),
+  };
 }
 
 /**
@@ -220,53 +235,56 @@ export function ingestTraceAttempt(payload: GatewayAttemptEvent) {
 
 export function ingestTraceRequest(payload: GatewayRequestEvent) {
   if (!payload?.trace_id) return;
+  const summary = trimSummary(payload);
 
   upsertTrace(
-    payload.trace_id,
+    summary.trace_id,
     (now) => ({
-      trace_id: payload.trace_id,
-      cli_key: payload.cli_key,
-      session_id: payload.session_id ?? null,
-      method: payload.method,
-      path: payload.path,
-      query: payload.query ?? null,
-      requested_model: payload.requested_model ?? null,
-      claude_model_mapping: normalizeClaudeModelMapping(payload.claude_model_mapping),
+      trace_id: summary.trace_id,
+      cli_key: summary.cli_key,
+      session_id: summary.session_id ?? null,
+      method: summary.method,
+      path: summary.path,
+      query: summary.query ?? null,
+      requested_model: summary.requested_model ?? null,
+      claude_model_mapping: normalizeClaudeModelMapping(summary.claude_model_mapping),
       first_seen_ms: now,
       last_seen_ms: now,
       attempts: [],
-      summary: payload,
+      summary,
     }),
     (existing, now) => {
-      const nextRequestedModel = payload.requested_model ?? existing.requested_model ?? null;
+      const nextRequestedModel = summary.requested_model ?? existing.requested_model ?? null;
       const normalizedClaudeModelMapping = normalizeClaudeModelMapping(
-        payload.claude_model_mapping
+        summary.claude_model_mapping
       );
-      const nextClaudeModelMapping = hasClaudeModelMappingField(payload)
+      const nextClaudeModelMapping = hasClaudeModelMappingField(summary)
         ? normalizedClaudeModelMapping
         : (normalizedClaudeModelMapping ?? existing.claude_model_mapping ?? null);
       return {
         ...existing,
-        cli_key: payload.cli_key,
-        session_id: payload.session_id ?? existing.session_id ?? null,
-        method: payload.method,
-        path: payload.path,
-        query: payload.query ?? null,
+        cli_key: summary.cli_key,
+        session_id: summary.session_id ?? existing.session_id ?? null,
+        method: summary.method,
+        path: summary.path,
+        query: summary.query ?? null,
         requested_model: nextRequestedModel,
         claude_model_mapping: nextClaudeModelMapping,
         last_seen_ms: now,
-        summary: payload,
+        summary,
       };
     }
   );
 }
 
+export function subscribeTraceStore(listener: Listener) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
 export function useTraceStore(): TraceStoreSnapshot {
   return useSyncExternalStore(
-    (listener) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
+    subscribeTraceStore,
     () => snapshot,
     () => snapshot
   );

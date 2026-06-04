@@ -2,6 +2,7 @@ use super::*;
 use flate2::{write::GzEncoder, Compression};
 use std::collections::VecDeque;
 use std::future::Future;
+use std::io::Write;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -84,5 +85,37 @@ async fn gunzip_stream_ignores_truncated_gzip_and_returns_partial_output() {
 
     let upstream = VecBytesStream::new(vec![Ok(Bytes::from(gz))]);
     let out = collect_ok_bytes(GunzipStream::new(upstream)).await;
+    assert_eq!(out, original);
+}
+
+#[tokio::test]
+async fn gunzip_stream_splits_large_output_from_single_compressed_chunk() {
+    let original = vec![b'x'; (GUNZIP_OUTPUT_CHUNK_BYTES * 2) + 17];
+    let gz = gzip_bytes(&original);
+    let upstream = VecBytesStream::new(vec![Ok(Bytes::from(gz))]);
+    let mut stream = GunzipStream::new(upstream);
+
+    let first = next_item(&mut stream)
+        .await
+        .expect("first chunk")
+        .expect("first chunk ok");
+    let second = next_item(&mut stream)
+        .await
+        .expect("second chunk")
+        .expect("second chunk ok");
+    let third = next_item(&mut stream)
+        .await
+        .expect("third chunk")
+        .expect("third chunk ok");
+
+    assert_eq!(first.len(), GUNZIP_OUTPUT_CHUNK_BYTES);
+    assert_eq!(second.len(), GUNZIP_OUTPUT_CHUNK_BYTES);
+    assert_eq!(third.len(), 17);
+    assert!(next_item(&mut stream).await.is_none());
+
+    let mut out = Vec::new();
+    out.extend_from_slice(&first);
+    out.extend_from_slice(&second);
+    out.extend_from_slice(&third);
     assert_eq!(out, original);
 }

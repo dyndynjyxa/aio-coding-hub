@@ -49,15 +49,19 @@ pub(super) enum AttemptSendOutcome {
 /// Build request headers, inject auth, clean body, send upstream, and return
 /// the raw outcome. The caller (retry engine / response router) handles the
 /// result.
-pub(super) async fn execute_attempt(
-    ctx: CommonCtx<'_>,
-    input: &RequestContext,
+pub(super) async fn execute_attempt<R>(
+    ctx: CommonCtx<'_, R>,
+    input: &RequestContext<R>,
     prepared: &mut PreparedProvider,
     retry_state: &mut RetryLoopState,
     retry_index: u32,
     attempt_index: u32,
-    loop_state: &mut LoopState<'_>,
-) -> AttemptSendOutcome {
+    loop_state: &mut LoopState<'_, R>,
+) -> AttemptSendOutcome
+where
+    R: tauri::Runtime,
+    R::Handle: Unpin,
+{
     let attempt_started_ms = input.started.elapsed().as_millis();
     let circuit_before = prepared.circuit_snapshot.clone();
 
@@ -94,9 +98,6 @@ pub(super) async fn execute_attempt(
     // --- Build headers + inject auth ---
     let mut headers = input.base_headers.clone();
     ensure_cli_required_headers(&input.cli_key, &mut headers);
-    if input.cli_key == "claude" {
-        mark_internal_forwarded_request(&mut headers);
-    }
     codex_session_id_completion::inject_session_headers_if_needed(
         &mut headers,
         prepared.cx2cc_codex_session_id.as_deref(),
@@ -150,13 +151,13 @@ fn try_build_url(prepared: &PreparedProvider) -> Result<reqwest::Url, String> {
     .map_err(|e| e.to_string())
 }
 
-async fn handle_url_build_failure(
-    ctx: CommonCtx<'_>,
-    input: &RequestContext,
+async fn handle_url_build_failure<R: tauri::Runtime>(
+    ctx: CommonCtx<'_, R>,
+    input: &RequestContext<R>,
     attempt_ctx: AttemptCtx<'_>,
     provider_ctx: ProviderCtx<'_>,
     err: String,
-    loop_state: &mut LoopState<'_>,
+    loop_state: &mut LoopState<'_, R>,
 ) -> LoopControl {
     tracing::warn!(
         trace_id = %input.trace_id,
@@ -212,6 +213,7 @@ fn build_provider_ctx(prepared: &PreparedProvider) -> ProviderCtx<'_> {
         provider_id: prepared.provider_id,
         provider_name_base: &prepared.provider_name_base,
         provider_base_url_base: &prepared.provider_base_url_base,
+        auth_mode: prepared.auth_mode.as_str(),
         provider_index: prepared.provider_index,
         session_reuse: prepared.session_reuse,
         stream_idle_timeout_seconds: prepared.stream_idle_timeout_seconds,
@@ -219,14 +221,14 @@ fn build_provider_ctx(prepared: &PreparedProvider) -> ProviderCtx<'_> {
     }
 }
 
-fn emit_started_event(
-    input: &RequestContext,
+fn emit_started_event<R: tauri::Runtime>(
+    input: &RequestContext<R>,
     prepared: &PreparedProvider,
     attempt_index: u32,
     retry_index: u32,
     attempt_started_ms: u128,
     circuit_before: &crate::circuit_breaker::CircuitSnapshot,
-    abort_guard: &mut RequestAbortGuard,
+    abort_guard: &mut RequestAbortGuard<R>,
 ) {
     let started_attempt = FailoverAttempt {
         provider_id: prepared.provider_id,

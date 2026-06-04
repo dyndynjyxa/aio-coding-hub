@@ -1,0 +1,205 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    # 每天北京时间 08:00，UTC 00:00
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: Branch to sync from upstream
+        required: false
+        default: main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-upstream-${{ github.event.inputs.target_branch || 'main' }}
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: dyndynjyxa/aio-coding-hub
+  TARGET_BRANCH: ${{ github.event.inputs.target_branch || 'main' }}
+
+jobs:
+  sync:
+    name: Sync upstream branch
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          # Optional: set SYNC_UPSTREAM_TOKEN to a PAT with workflow scope if
+          # upstream changes to .github/workflows need to be synced.
+          token: ${{ secrets.SYNC_UPSTREAM_TOKEN || github.token }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch origin and upstream
+        run: |
+          set -euo pipefail
+
+          git check-ref-format --branch "${TARGET_BRANCH}"
+
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+
+          git fetch origin "+refs/heads/${TARGET_BRANCH}:refs/remotes/origin/${TARGET_BRANCH}"
+          git fetch upstream "+refs/heads/${TARGET_BRANCH}:refs/remotes/upstream/${TARGET_BRANCH}"
+
+      - name: Sync by fast-forward or open PR
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_UPSTREAM_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+
+          LOCAL="origin/${TARGET_BRANCH}"
+          UPSTREAM="upstream/${TARGET_BRANCH}"
+          UPSTREAM_OWNER="${UPSTREAM_REPO%%/*}"
+          UPSTREAM_HEAD="${UPSTREAM_OWNER}:${TARGET_BRANCH}"
+
+          echo "Local branch: ${LOCAL}"
+          echo "Upstream branch: ${UPSTREAM}"
+
+          create_or_update_upstream_pr() {
+            local reason="$1"
+            local title="chore(sync): sync upstream ${TARGET_BRANCH}"
+            local body
+            body="Automatic upstream sync from \`${UPSTREAM_REPO}:${TARGET_BRANCH}\`.
+
+          Reason: ${reason}
+
+          This workflow opened a cross-repository PR instead of pushing directly to \`${TARGET_BRANCH}\`.
+
+          Please review and merge manually."
+
+            local existing_pr
+            existing_pr="$(
+              gh pr list \
+                --repo "${GITHUB_REPOSITORY}" \
+                --head "${UPSTREAM_HEAD}" \
+                --base "${TARGET_BRANCH}" \
+                --state open \
+                --json number \
+                --jq '.[0].number // empty'
+            )"
+
+            local pr_number
+            if [ -n "${existing_pr}" ]; then
+              gh pr edit "${existing_pr}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --title "${title}" \
+                --body "${body}"
+              pr_number="${existing_pr}"
+            else
+              gh pr create \
+                --repo "${GITHUB_REPOSITORY}" \
+                --base "${TARGET_BRANCH}" \
+                --head "${UPSTREAM_HEAD}" \
+                --title "${title}" \
+                --body "${body}" \
+                --no-maintainer-edit
+
+              pr_number="$(
+                gh pr list \
+                  --repo "${GITHUB_REPOSITORY}" \
+                  --head "${UPSTREAM_HEAD}" \
+                  --base "${TARGET_BRANCH}" \
+                  --state open \
+                  --json number \
+                  --jq '.[0].number // empty'
+              )"
+            fi
+
+            if [ -z "${pr_number}" ]; then
+              echo "Failed to resolve sync PR number." >&2
+              exit 1
+            fi
+
+            local mergeable=""
+            local mergeable_state=""
+            local head_sha=""
+            local merged="false"
+
+            for attempt in {1..12}; do
+              IFS=$'\t' read -r mergeable mergeable_state head_sha < <(
+                gh api "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}" \
+                  --jq '[.mergeable, .mergeable_state, .head.sha] | @tsv'
+              )
+
+              echo "PR #${pr_number} mergeability attempt ${attempt}: mergeable=${mergeable}, state=${mergeable_state}"
+
+              if [ "${mergeable}" = "true" ]; then
+                gh pr merge "${pr_number}" \
+                  --repo "${GITHUB_REPOSITORY}" \
+                  --merge \
+                  --match-head-commit "${head_sha}" \
+                  --subject "${title}" \
+                  --body "Auto-merged upstream sync from ${UPSTREAM_REPO}:${TARGET_BRANCH}."
+                merged="true"
+                break
+              fi
+
+              if [ "${mergeable}" = "false" ] && [ "${mergeable_state}" = "dirty" ]; then
+                echo "PR #${pr_number} has merge conflicts. Manual intervention required." >&2
+                exit 1
+              fi
+
+              sleep 5
+            done
+
+            if [ "${merged}" != "true" ]; then
+              echo "PR #${pr_number} was not mergeable after waiting. Manual intervention required." >&2
+              exit 1
+            fi
+
+            {
+              echo "## Sync Upstream"
+              echo ""
+              echo "Created or updated and auto-merged cross-repository sync PR for \`${TARGET_BRANCH}\`."
+              echo ""
+              echo "Reason: ${reason}"
+              echo ""
+              echo "PR: #${pr_number}"
+            } >> "${GITHUB_STEP_SUMMARY}"
+          }
+
+          if git merge-base --is-ancestor "${UPSTREAM}" "${LOCAL}"; then
+            echo "Already up to date. Nothing to sync."
+            {
+              echo "## Sync Upstream"
+              echo ""
+              echo "\`${TARGET_BRANCH}\` is already up to date with \`${UPSTREAM_REPO}:${TARGET_BRANCH}\`."
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          if git merge-base --is-ancestor "${LOCAL}" "${UPSTREAM}"; then
+            echo "Fast-forward sync is possible."
+
+            if git diff --name-only "${LOCAL}..${UPSTREAM}" -- .github/workflows | grep -q .; then
+              echo "Upstream includes workflow file changes. Creating PR instead of pushing with GITHUB_TOKEN."
+              create_or_update_upstream_pr "upstream changes include \`.github/workflows/*\`, which \`GITHUB_TOKEN\` cannot push directly."
+              exit 0
+            fi
+
+            git checkout -B "${TARGET_BRANCH}" "${LOCAL}"
+            git merge --ff-only "${UPSTREAM}"
+            git push origin "HEAD:${TARGET_BRANCH}"
+
+            {
+              echo "## Sync Upstream"
+              echo ""
+              echo "Fast-forwarded \`${TARGET_BRANCH}\` to \`${UPSTREAM_REPO}:${TARGET_BRANCH}\`."
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          echo "Branches have diverged. Creating cross-repository sync PR instead."
+          create_or_update_upstream_pr "target branch has local commits and cannot be safely fast-forwarded."

@@ -1,26 +1,35 @@
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
+import { emitListenerSnapshot } from "../utils/listeners";
 
 function isDocumentVisible() {
   return typeof document === "undefined" ? true : document.visibilityState === "visible";
 }
 
-export function useDocumentVisibility() {
-  const [visible, setVisible] = useState(isDocumentVisible);
+type Listener = () => void;
 
-  useEffect(() => {
-    if (typeof document === "undefined") return;
+const listeners = new Set<Listener>();
 
-    function handleVisibilityChange() {
-      setVisible(document.visibilityState === "visible");
+function emit() {
+  emitListenerSnapshot(listeners, (listener) => listener());
+}
+
+export function subscribeDocumentVisibility(listener: Listener) {
+  if (typeof document === "undefined") return () => {};
+
+  const wasEmpty = listeners.size === 0;
+  listeners.add(listener);
+  if (wasEmpty) {
+    document.addEventListener("visibilitychange", emit);
+  }
+
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) {
+      document.removeEventListener("visibilitychange", emit);
     }
+  };
+}
 
-    handleVisibilityChange();
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, []);
-
-  return visible;
+export function useDocumentVisibility() {
+  return useSyncExternalStore(subscribeDocumentVisibility, isDocumentVisible, () => true);
 }

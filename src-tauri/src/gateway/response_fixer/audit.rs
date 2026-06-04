@@ -67,6 +67,13 @@ pub(super) fn process_non_stream(
 
     let mut data = body;
     let total_bytes_processed = data.len();
+    if total_bytes_processed > config.max_fix_size {
+        return super::NonStreamFixOutcome {
+            body: data,
+            header_value: "skipped-too-large",
+            special_setting: None,
+        };
+    }
 
     if config.fix_encoding {
         let res = EncodingFixer::fix_bytes(data);

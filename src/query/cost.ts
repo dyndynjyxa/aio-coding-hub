@@ -9,6 +9,7 @@ import {
   costSummaryV1,
   costTopRequestsV1,
   costTrendV1,
+  normalizeCostQueryInput,
   type CostModelBreakdownRowV1,
   type CostPeriod,
   type CostProviderBreakdownRowV1,
@@ -16,17 +17,11 @@ import {
   type CostSummaryV1,
   type CostTopRequestRowV1,
   type CostTrendRowV1,
+  type NormalizedCostQueryInput,
 } from "../services/usage/cost";
-import type { CliKey } from "../services/providers/providers";
 import { costKeys } from "./keys";
 
-export type CostFilters = {
-  startTs: number | null;
-  endTs: number | null;
-  cliKey: CliKey | null;
-  providerId: number | null;
-  model: string | null;
-};
+export type CostFilters = NormalizedCostQueryInput;
 
 export type CostAnalyticsV1 = {
   summary: CostSummaryV1;
@@ -42,16 +37,18 @@ export function useCostAnalyticsV1Query(
   filters: CostFilters,
   options?: { enabled?: boolean }
 ) {
+  const normalizedFilters = normalizeCostQueryInput(filters);
+
   return useQuery({
-    queryKey: costKeys.analyticsV1(period, filters),
+    queryKey: costKeys.analyticsV1(period, normalizedFilters),
     queryFn: async () => {
       const [summary, trend, providers, models, scatter, top] = await Promise.all([
-        costSummaryV1(period, filters),
-        costTrendV1(period, filters),
-        costBreakdownProviderV1(period, { ...filters, limit: 120 }),
-        costBreakdownModelV1(period, { ...filters, limit: 120 }),
-        costScatterCliProviderModelV1(period, { ...filters, limit: 500 }),
-        costTopRequestsV1(period, { ...filters, limit: 50 }),
+        costSummaryV1(period, normalizedFilters),
+        costTrendV1(period, normalizedFilters),
+        costBreakdownProviderV1(period, { ...normalizedFilters, limit: 120 }),
+        costBreakdownModelV1(period, { ...normalizedFilters, limit: 120 }),
+        costScatterCliProviderModelV1(period, { ...normalizedFilters, limit: 500 }),
+        costTopRequestsV1(period, { ...normalizedFilters, limit: 50 }),
       ]);
 
       return {

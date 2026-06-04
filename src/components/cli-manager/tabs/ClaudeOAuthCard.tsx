@@ -96,10 +96,8 @@ export function ClaudeOAuthCard({ providers }: ClaudeOAuthCardProps) {
       <Card className="p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-              Claude OAuth
-            </h3>
-            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+            <h3 className="text-sm font-semibold text-foreground">Claude OAuth</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
               请先在供应商页面创建一个 Claude OAuth 供应商
             </p>
           </div>
@@ -182,10 +180,8 @@ export function ClaudeOAuthCard({ providers }: ClaudeOAuthCardProps) {
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-              Claude OAuth
-            </h3>
-            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+            <h3 className="text-sm font-semibold text-foreground">Claude OAuth</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
               使用浏览器完成 Claude 官方 OAuth 授权，适用于 OAuth 模式的 Claude 供应商。
             </p>
           </div>
@@ -194,7 +190,7 @@ export function ClaudeOAuthCard({ providers }: ClaudeOAuthCardProps) {
               "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset",
               connected
                 ? "bg-green-50 text-green-700 ring-green-600/20 dark:bg-green-900/30 dark:text-green-400"
-                : "bg-slate-100 text-slate-600 ring-slate-500/10 dark:bg-slate-700 dark:text-slate-300",
+                : "bg-secondary text-muted-foreground ring-border dark:bg-secondary dark:text-secondary-foreground",
             ].join(" ")}
           >
             {connected ? <ShieldCheck className="h-3 w-3" /> : <ShieldOff className="h-3 w-3" />}
@@ -203,21 +199,19 @@ export function ClaudeOAuthCard({ providers }: ClaudeOAuthCardProps) {
         </div>
 
         <div className="grid gap-3 md:grid-cols-3">
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
-            <div className="text-xs text-slate-500 dark:text-slate-400">供应商</div>
-            <div className="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">
-              {oauthProvider.name}
-            </div>
+          <div className="rounded-lg border border-border bg-secondary p-3 dark:border-border dark:bg-secondary">
+            <div className="text-xs text-muted-foreground">供应商</div>
+            <div className="mt-1 text-sm font-medium text-foreground">{oauthProvider.name}</div>
           </div>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
-            <div className="text-xs text-slate-500 dark:text-slate-400">邮箱</div>
-            <div className="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">
+          <div className="rounded-lg border border-border bg-secondary p-3 dark:border-border dark:bg-secondary">
+            <div className="text-xs text-muted-foreground">邮箱</div>
+            <div className="mt-1 text-sm font-medium text-foreground">
               {connected ? (status?.email ?? "—") : "—"}
             </div>
           </div>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
-            <div className="text-xs text-slate-500 dark:text-slate-400">到期时间</div>
-            <div className="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">
+          <div className="rounded-lg border border-border bg-secondary p-3 dark:border-border dark:bg-secondary">
+            <div className="text-xs text-muted-foreground">到期时间</div>
+            <div className="mt-1 text-sm font-medium text-foreground">
               {connected ? formatExpiresAt(status?.expires_at) : "—"}
             </div>
           </div>

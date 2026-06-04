@@ -7,7 +7,9 @@ use crate::settings;
 pub(in crate::gateway::proxy::handler) struct RuntimeSettingsMiddleware;
 
 impl RuntimeSettingsMiddleware {
-    pub(in crate::gateway::proxy::handler) fn run(mut ctx: ProxyContext) -> MiddlewareAction {
+    pub(in crate::gateway::proxy::handler) fn run<R: tauri::Runtime>(
+        mut ctx: ProxyContext<R>,
+    ) -> MiddlewareAction<R> {
         let settings_cfg = match settings::read(&ctx.state.app) {
             Ok(cfg) => Some(cfg),
             Err(err) => {

@@ -93,6 +93,14 @@ export function useSortModesDataModel({
   providers,
   providersLoading,
 }: UseSortModesDataModelArgs): SortModesDataModel {
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const activeCliRef = useRef(activeCli);
   useEffect(() => {
     activeCliRef.current = activeCli;
@@ -102,6 +110,8 @@ export function useSortModesDataModel({
 
   const [sortModes, setSortModes] = useState<SortModeSummary[]>(EMPTY_SORT_MODES);
   const [sortModesLoading, setSortModesLoading] = useState(false);
+  const sortModesLoadingRef = useRef(false);
+  const sortModesRefreshTokenRef = useRef(0);
   const [sortModesAvailable, setSortModesAvailable] = useState<boolean | null>(null);
   const [activeModeId, setActiveModeId] = useState<number | null>(null);
   const [activeModeIdTouched, setActiveModeIdTouched] = useState(false);
@@ -114,17 +124,22 @@ export function useSortModesDataModel({
   const [modeProvidersLoading, setModeProvidersLoading] = useState(false);
   const [modeProvidersAvailable, setModeProvidersAvailable] = useState<boolean | null>(null);
   const [modeProvidersSaving, setModeProvidersSaving] = useState(false);
+  const modeProvidersSavingRef = useRef(false);
+  const modeProvidersSaveTokenRef = useRef(0);
 
   const [createModeDialogOpen, setCreateModeDialogOpen] = useState(false);
   const [createModeName, setCreateModeName] = useState("");
   const [createModeSaving, setCreateModeSaving] = useState(false);
+  const createModeSavingRef = useRef(false);
 
   const [renameModeDialogOpen, setRenameModeDialogOpen] = useState(false);
   const [renameModeName, setRenameModeName] = useState("");
   const [renameModeSaving, setRenameModeSaving] = useState(false);
+  const renameModeSavingRef = useRef(false);
 
   const [deleteModeTarget, setDeleteModeTarget] = useState<SortModeSummary | null>(null);
   const [deleteModeDeleting, setDeleteModeDeleting] = useState(false);
+  const deleteModeDeletingRef = useRef(false);
 
   const sortModesListQuery = useSortModesListQuery({ enabled: false });
   const sortModeActiveListQuery = useSortModeActiveListQuery({ enabled: false });
@@ -146,6 +161,37 @@ export function useSortModesDataModel({
   useEffect(() => {
     modeProvidersRef.current = modeProviders;
   }, [modeProviders]);
+
+  const beginModeProvidersSave = useCallback(() => {
+    if (modeProvidersSavingRef.current) {
+      return null;
+    }
+
+    const token = modeProvidersSaveTokenRef.current + 1;
+    modeProvidersSaveTokenRef.current = token;
+    modeProvidersSavingRef.current = true;
+    if (mountedRef.current) {
+      setModeProvidersSaving(true);
+    }
+    return token;
+  }, []);
+
+  const finishModeProvidersSave = useCallback((token: number) => {
+    if (modeProvidersSaveTokenRef.current !== token) {
+      return;
+    }
+
+    modeProvidersSavingRef.current = false;
+    if (mountedRef.current) {
+      setModeProvidersSaving(false);
+    }
+  }, []);
+
+  const isActiveModeContext = useCallback((modeId: number, cliKey: CliKey) => {
+    return (
+      mountedRef.current && activeModeIdRef.current === modeId && activeCliRef.current === cliKey
+    );
+  }, []);
 
   const selectedMode = useMemo(
     () =>
@@ -174,23 +220,59 @@ export function useSortModesDataModel({
   const refetchSortModesList = sortModesListQuery.refetch;
   const refetchSortModeActiveList = sortModeActiveListQuery.refetch;
 
+  const beginSortModesRefresh = useCallback(() => {
+    if (sortModesLoadingRef.current) {
+      return null;
+    }
+
+    const token = sortModesRefreshTokenRef.current + 1;
+    sortModesRefreshTokenRef.current = token;
+    sortModesLoadingRef.current = true;
+    if (mountedRef.current) {
+      setSortModesLoading(true);
+    }
+    return token;
+  }, []);
+
+  const finishSortModesRefresh = useCallback((token: number) => {
+    if (sortModesRefreshTokenRef.current !== token) {
+      return;
+    }
+
+    sortModesLoadingRef.current = false;
+    if (mountedRef.current) {
+      setSortModesLoading(false);
+    }
+  }, []);
+
   const refreshSortModes = useCallback(async () => {
-    setSortModesLoading(true);
+    const refreshToken = beginSortModesRefresh();
+    if (refreshToken == null) return;
+
     try {
-      const [modesResult, activeResult] = await Promise.all([
+      const [modesResult, activeResult] = await Promise.allSettled([
         refetchSortModesList(),
         refetchSortModeActiveList(),
       ]);
-
-      if (modesResult.error) {
-        throw modesResult.error;
-      }
-      if (activeResult.error) {
-        throw activeResult.error;
+      if (!mountedRef.current || sortModesRefreshTokenRef.current !== refreshToken) {
+        return;
       }
 
-      const modes = modesResult.data ?? null;
-      const activeRows = activeResult.data ?? null;
+      if (modesResult.status === "rejected") {
+        throw modesResult.reason;
+      }
+      if (activeResult.status === "rejected") {
+        throw activeResult.reason;
+      }
+      if (modesResult.value.error) {
+        throw modesResult.value.error;
+      }
+      if (activeResult.value.error) {
+        throw activeResult.value.error;
+      }
+
+      const modes = modesResult.value.data ?? null;
+      const activeRows = activeResult.value.data ?? null;
       if (!modes || !activeRows) {
         setSortModesAvailable(false);
         setSortModes(EMPTY_SORT_MODES);
@@ -208,9 +290,14 @@ export function useSortModesDataModel({
       logToConsole("error", "读取排序模板失败", { error: String(err) });
       toast(`读取排序模板失败：${String(err)}`);
     } finally {
-      setSortModesLoading(false);
+      finishSortModesRefresh(refreshToken);
     }
-  }, [refetchSortModeActiveList, refetchSortModesList]);
+  }, [
+    beginSortModesRefresh,
+    finishSortModesRefresh,
+    refetchSortModeActiveList,
+    refetchSortModesList,
+  ]);
 
   useEffect(() => {
     void refreshSortModes();
@@ -293,31 +380,51 @@ export function useSortModesDataModel({
     setRenameModeName(selectedMode?.name ?? "");
   }, [renameModeDialogOpen, selectedMode]);
 
+  useEffect(() => {
+    if (!renameModeDialogOpen || renameModeSaving || selectedMode != null) return;
+    setRenameModeDialogOpen(false);
+    setRenameModeName("");
+  }, [renameModeDialogOpen, renameModeSaving, selectedMode]);
+
+  useEffect(() => {
+    if (!deleteModeTarget || deleteModeDeleting) return;
+    if (sortModes.some((mode) => mode.id === deleteModeTarget.id)) return;
+    setDeleteModeTarget(null);
+  }, [deleteModeDeleting, deleteModeTarget, sortModes]);
+
   async function createSortMode() {
-    if (createModeSaving) return;
+    if (createModeSavingRef.current) return;
     const name = createModeName.trim();
     if (!name) {
       toast("模式名称不能为空");
       return;
     }
 
-    setCreateModeSaving(true);
+    createModeSavingRef.current = true;
+    if (mountedRef.current) {
+      setCreateModeSaving(true);
+    }
     try {
       const saved = await createSortModeMutation.mutateAsync({ name });
+      if (!mountedRef.current) return;
       setSortModes((prev) => [...prev, saved]);
       selectEditingMode(saved.id);
       setCreateModeDialogOpen(false);
       toast("排序模板已创建");
     } catch (err) {
+      if (!mountedRef.current) return;
       logToConsole("error", "创建排序模板失败", { error: String(err) });
       toast(`创建失败：${String(err)}`);
     } finally {
-      setCreateModeSaving(false);
+      createModeSavingRef.current = false;
+      if (mountedRef.current) {
+        setCreateModeSaving(false);
+      }
     }
   }
 
   async function renameSortMode() {
-    if (renameModeSaving) return;
+    if (renameModeSavingRef.current) return;
     if (!selectedMode) return;
     const name = renameModeName.trim();
     if (!name) {
@@ -325,25 +432,37 @@ export function useSortModesDataModel({
       return;
     }
 
-    setRenameModeSaving(true);
+    renameModeSavingRef.current = true;
+    if (mountedRef.current) {
+      setRenameModeSaving(true);
+    }
     try {
       const saved = await renameSortModeMutation.mutateAsync({ modeId: selectedMode.id, name });
+      if (!mountedRef.current) return;
       setSortModes((prev) => prev.map((mode) => (mode.id === saved.id ? saved : mode)));
       setRenameModeDialogOpen(false);
       toast("排序模板已更新");
     } catch (err) {
+      if (!mountedRef.current) return;
       logToConsole("error", "重命名排序模板失败", { error: String(err), mode_id: selectedMode.id });
       toast(`重命名失败：${String(err)}`);
     } finally {
-      setRenameModeSaving(false);
+      renameModeSavingRef.current = false;
+      if (mountedRef.current) {
+        setRenameModeSaving(false);
+      }
     }
   }
 
   async function deleteSortMode() {
-    if (!deleteModeTarget || deleteModeDeleting) return;
-    setDeleteModeDeleting(true);
+    if (!deleteModeTarget || deleteModeDeletingRef.current) return;
+    deleteModeDeletingRef.current = true;
+    if (mountedRef.current) {
+      setDeleteModeDeleting(true);
+    }
     try {
       const ok = await deleteSortModeMutation.mutateAsync({ modeId: deleteModeTarget.id });
+      if (!mountedRef.current) return;
       if (!ok) {
         return;
       }
@@ -365,24 +484,27 @@ export function useSortModesDataModel({
       setDeleteModeTarget(null);
       toast("排序模板已删除");
     } catch (err) {
+      if (!mountedRef.current) return;
       logToConsole("error", "删除排序模板失败", {
         error: String(err),
         mode_id: deleteModeTarget.id,
       });
       toast(`删除失败：${String(err)}`);
     } finally {
-      setDeleteModeDeleting(false);
+      deleteModeDeletingRef.current = false;
+      if (mountedRef.current) {
+        setDeleteModeDeleting(false);
+      }
     }
   }
 
   async function persistModeProvidersOrder(
+    saveToken: number,
     modeId: number,
     cliKey: CliKey,
     nextRows: SortModeProviderRow[],
     prevRows: SortModeProviderRow[]
   ) {
-    if (modeProvidersSaving) return;
-    setModeProvidersSaving(true);
     try {
       const saved = await sortModeProvidersSetOrderMutation.mutateAsync({
         modeId,
@@ -390,16 +512,15 @@ export function useSortModesDataModel({
         orderedProviderIds: nextRows.map((row) => row.provider_id),
       });
 
-      if (activeModeIdRef.current === modeId && activeCliRef.current === cliKey) {
+      if (isActiveModeContext(modeId, cliKey)) {
         setModeProviders(saved);
         modeProvidersRef.current = saved;
         toast("模式顺序已更新");
       }
     } catch (err) {
-      if (activeModeIdRef.current === modeId && activeCliRef.current === cliKey) {
-        setModeProviders(prevRows);
-        modeProvidersRef.current = prevRows;
-      }
+      if (!isActiveModeContext(modeId, cliKey)) return;
+      setModeProviders(prevRows);
+      modeProvidersRef.current = prevRows;
       logToConsole("error", "更新排序模板顺序失败", {
         error: String(err),
         mode_id: modeId,
@@ -407,7 +528,7 @@ export function useSortModesDataModel({
       });
       toast(`模式顺序更新失败：${String(err)}`);
     } finally {
-      setModeProvidersSaving(false);
+      finishModeProvidersSave(saveToken);
     }
   }
 
@@ -421,9 +542,12 @@ export function useSortModesDataModel({
       ...prevRows,
       { provider_id: providerId, enabled: true },
     ];
+    const saveToken = beginModeProvidersSave();
+    if (saveToken == null) return;
+
     setModeProviders(nextRows);
     modeProvidersRef.current = nextRows;
-    void persistModeProvidersOrder(modeId, cliKey, nextRows, prevRows);
+    void persistModeProvidersOrder(saveToken, modeId, cliKey, nextRows, prevRows);
   }
 
   function removeProviderFromMode(providerId: number) {
@@ -433,14 +557,15 @@ export function useSortModesDataModel({
     const prevRows = modeProvidersRef.current;
     if (!prevRows.some((row) => row.provider_id === providerId)) return;
     const nextRows = prevRows.filter((row) => row.provider_id !== providerId);
+    const saveToken = beginModeProvidersSave();
+    if (saveToken == null) return;
+
     setModeProviders(nextRows);
     modeProvidersRef.current = nextRows;
-    void persistModeProvidersOrder(modeId, cliKey, nextRows, prevRows);
+    void persistModeProvidersOrder(saveToken, modeId, cliKey, nextRows, prevRows);
   }
 
   async function setModeProviderEnabled(providerId: number, enabled: boolean) {
-    if (modeProvidersSaving) return;
-
     const modeId = activeModeIdRef.current;
     if (modeId == null) return;
 
@@ -454,10 +579,12 @@ export function useSortModesDataModel({
     const nextRows = prevRows.map((row) =>
       row.provider_id === providerId ? { ...row, enabled } : row
     );
+    const saveToken = beginModeProvidersSave();
+    if (saveToken == null) return;
+
     setModeProviders(nextRows);
     modeProvidersRef.current = nextRows;
 
-    setModeProvidersSaving(true);
     try {
       const saved = await sortModeProviderSetEnabledMutation.mutateAsync({
         modeId,
@@ -466,17 +593,16 @@ export function useSortModesDataModel({
         enabled,
       });
 
-      if (activeModeIdRef.current === modeId && activeCliRef.current === cliKey) {
+      if (isActiveModeContext(modeId, cliKey)) {
         const finalRows = nextRows.map((row) => (row.provider_id === providerId ? saved : row));
         setModeProviders(finalRows);
         modeProvidersRef.current = finalRows;
         toast(saved.enabled ? "模板已启用 Provider" : "模板已禁用 Provider");
       }
     } catch (err) {
-      if (activeModeIdRef.current === modeId && activeCliRef.current === cliKey) {
-        setModeProviders(prevRows);
-        modeProvidersRef.current = prevRows;
-      }
+      if (!isActiveModeContext(modeId, cliKey)) return;
+      setModeProviders(prevRows);
+      modeProvidersRef.current = prevRows;
       logToConsole("error", "更新排序模板 Provider 启用状态失败", {
         error: String(err),
         mode_id: modeId,
@@ -486,7 +612,7 @@ export function useSortModesDataModel({
       });
       toast(`模板启用状态更新失败：${String(err)}`);
     } finally {
-      setModeProvidersSaving(false);
+      finishModeProvidersSave(saveToken);
     }
   }
 
@@ -503,10 +629,12 @@ export function useSortModesDataModel({
     if (oldIndex === -1 || newIndex === -1) return;
 
     const nextRows = arrayMove(prevRows, oldIndex, newIndex);
+    const saveToken = beginModeProvidersSave();
+    if (saveToken == null) return;
 
     setModeProviders(nextRows);
     modeProvidersRef.current = nextRows;
-    void persistModeProvidersOrder(modeId, activeCliRef.current, nextRows, prevRows);
+    void persistModeProvidersOrder(saveToken, modeId, activeCliRef.current, nextRows, prevRows);
   }
 
   return {

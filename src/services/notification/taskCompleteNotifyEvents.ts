@@ -12,7 +12,8 @@ import { cliShortLabel } from "../../constants/clis";
 import { gatewayEventNames } from "../../constants/gatewayEvents";
 import { logToConsole } from "../consoleLog";
 import { subscribeGatewayEvent } from "../gateway/gatewayEventBus";
-import { isGatewayRequestSignalEvent } from "../gateway/gatewayEvents";
+import { normalizeGatewayRequestSignalEvent } from "../gateway/gatewayEvents";
+import { emitListenerSnapshot } from "../../utils/listeners";
 import { noticeSend } from "./notice";
 import type { GatewayRequestSignalEvent } from "../gateway/gatewayEvents";
 
@@ -22,6 +23,12 @@ import type { GatewayRequestSignalEvent } from "../gateway/gatewayEvents";
 
 /** 静默期：最后一次请求完成后等待多久判定任务结束（ms） */
 const QUIET_PERIOD_MS_DEFAULT = 30_000;
+const IN_FLIGHT_TRACE_TTL_MS = 2 * 60 * 60 * 1000;
+const MAX_IN_FLIGHT_TRACE_IDS = 500;
+const MAX_SESSION_KEYS = 16;
+const MAX_CLI_KEY_CHARS = 64;
+const MAX_TRACE_ID_CHARS = 128;
+const MAX_MODEL_NAME_CHARS = 200;
 
 // ---------------------------------------------------------------------------
 // Module-level enabled flag (reactive via useSyncExternalStore)
@@ -31,7 +38,11 @@ let enabled = true;
 const subscribers = new Set<() => void>();
 
 function notifySubscribers() {
-  for (const fn of subscribers) fn();
+  emitListenerSnapshot(
+    subscribers,
+    (fn) => fn(),
+    (error) => logToConsole("warn", "任务完成提醒状态订阅处理失败", { error: String(error) })
+  );
 }
 
 export function setTaskCompleteNotifyEnabled(value: boolean) {
@@ -46,14 +57,14 @@ export function getTaskCompleteNotifyEnabled(): boolean {
   return enabled;
 }
 
-function subscribeEnabled(callback: () => void): () => void {
+export function subscribeTaskCompleteNotifyEnabled(callback: () => void): () => void {
   subscribers.add(callback);
   return () => subscribers.delete(callback);
 }
 
 /** React hook：读取当前 enabled 状态 */
 export function useTaskCompleteNotifyEnabled(): boolean {
-  return useSyncExternalStore(subscribeEnabled, getTaskCompleteNotifyEnabled);
+  return useSyncExternalStore(subscribeTaskCompleteNotifyEnabled, getTaskCompleteNotifyEnabled);
 }
 
 // ---------------------------------------------------------------------------
@@ -75,7 +86,7 @@ type SessionState = {
    *   （例如某些早期错误路径未 emit request_start）时，会把其它正在 in-flight 的请求错误减到 0，
    *   导致静默定时器误触发通知。
    */
-  inFlightTraceIds: Set<string>;
+  inFlightTraceIds: Map<string, number>;
   /** 最后使用的模型名（来自 request_start） */
   lastRequestedModel: string | null;
   /** 去抖定时器 ID */
@@ -105,11 +116,52 @@ function formatDuration(ms: number): string {
   return remainingMinutes > 0 ? `${hours} 时 ${remainingMinutes} 分` : `${hours} 时`;
 }
 
-function normalizeModelName(value: unknown): string | null {
+function normalizeBoundedText(value: unknown, maxChars: number): string | null {
   const raw = typeof value === "string" ? value : "";
   const trimmed = raw.trim();
   if (!trimmed) return null;
-  return trimmed.length > 200 ? trimmed.slice(0, 200) : trimmed;
+  const chars = [...trimmed];
+  return chars.length > maxChars ? chars.slice(0, maxChars).join("") : trimmed;
+}
+
+function normalizeCliKey(value: unknown): string | null {
+  return normalizeBoundedText(value, MAX_CLI_KEY_CHARS);
+}
+
+function normalizeTraceId(value: unknown): string | null {
+  return normalizeBoundedText(value, MAX_TRACE_ID_CHARS);
+}
+
+function normalizeModelName(value: unknown): string | null {
+  return normalizeBoundedText(value, MAX_MODEL_NAME_CHARS);
+}
+
+function createSession(now: number): SessionState {
+  return {
+    firstRequestAt: now,
+    lastRequestAt: now,
+    requestCount: 0,
+    inFlightTraceIds: new Map(),
+    lastRequestedModel: null,
+    pendingTimer: null,
+    notified: false,
+  };
+}
+
+function pruneStaleInFlightTraceIds(session: SessionState, now: number) {
+  for (const [traceId, startedAt] of session.inFlightTraceIds) {
+    if (now - startedAt > IN_FLIGHT_TRACE_TTL_MS) {
+      session.inFlightTraceIds.delete(traceId);
+    }
+  }
+}
+
+function trimInFlightTraceIds(session: SessionState) {
+  while (session.inFlightTraceIds.size > MAX_IN_FLIGHT_TRACE_IDS) {
+    const oldestTraceId = session.inFlightTraceIds.keys().next().value;
+    if (!oldestTraceId) return;
+    session.inFlightTraceIds.delete(oldestTraceId);
+  }
 }
 
 function resetSessions() {
@@ -119,6 +171,25 @@ function resetSessions() {
   sessions.clear();
 }
 
+function disposeSession(cliKey: string) {
+  const session = sessions.get(cliKey);
+  if (session?.pendingTimer != null) clearTimeout(session.pendingTimer);
+  sessions.delete(cliKey);
+}
+
+function rememberSession(cliKey: string, session: SessionState) {
+  if (sessions.has(cliKey)) {
+    sessions.delete(cliKey);
+  } else {
+    while (sessions.size >= MAX_SESSION_KEYS) {
+      const oldestCliKey = sessions.keys().next().value;
+      if (!oldestCliKey) break;
+      disposeSession(oldestCliKey);
+    }
+  }
+  sessions.set(cliKey, session);
+}
+
 // ---------------------------------------------------------------------------
 // Core logic
 // ---------------------------------------------------------------------------
@@ -126,29 +197,26 @@ function resetSessions() {
 function handleRequestStart(payload: GatewayRequestSignalEvent) {
   if (!enabled) return;
 
-  const { cli_key, requested_model, trace_id } = payload;
+  const cliKey = normalizeCliKey(payload.cli_key);
+  if (!cliKey) return;
+
+  const { requested_model } = payload;
+  const traceId = normalizeTraceId(payload.trace_id);
   const now = Date.now();
-  let session = sessions.get(cli_key);
+  let session = sessions.get(cliKey);
 
   if (session?.notified) {
     // 如果上一轮已通知，说明用户开始了新任务 → 重置会话
-    if (session.pendingTimer != null) clearTimeout(session.pendingTimer);
-    sessions.delete(cli_key);
+    disposeSession(cliKey);
     session = undefined;
   }
 
   if (!session) {
-    session = {
-      firstRequestAt: now,
-      lastRequestAt: now,
-      requestCount: 0,
-      inFlightTraceIds: new Set(),
-      lastRequestedModel: null,
-      pendingTimer: null,
-      notified: false,
-    };
-    sessions.set(cli_key, session);
+    session = createSession(now);
+  } else {
+    pruneStaleInFlightTraceIds(session, now);
   }
+  rememberSession(cliKey, session);
 
   // 只要有新请求开始，就应该取消“静默结束”定时器，避免长请求/并发请求误触发通知。
   if (session.pendingTimer != null) {
@@ -156,7 +224,10 @@ function handleRequestStart(payload: GatewayRequestSignalEvent) {
     session.pendingTimer = null;
   }
 
-  if (trace_id) session.inFlightTraceIds.add(trace_id);
+  if (traceId) {
+    session.inFlightTraceIds.set(traceId, now);
+    trimInFlightTraceIds(session);
+  }
 
   const model = normalizeModelName(requested_model);
   if (model) session.lastRequestedModel = model;
@@ -165,27 +236,24 @@ function handleRequestStart(payload: GatewayRequestSignalEvent) {
 function handleRequestComplete(payload: GatewayRequestSignalEvent) {
   if (!enabled) return;
 
-  const { cli_key, trace_id } = payload;
+  const cliKey = normalizeCliKey(payload.cli_key);
+  if (!cliKey) return;
+
+  const traceId = normalizeTraceId(payload.trace_id);
   const now = Date.now();
 
-  let session = sessions.get(cli_key);
+  let session = sessions.get(cliKey);
   if (!session) {
-    session = {
-      firstRequestAt: now,
-      lastRequestAt: now,
-      requestCount: 0,
-      inFlightTraceIds: new Set(),
-      lastRequestedModel: null,
-      pendingTimer: null,
-      notified: false,
-    };
-    sessions.set(cli_key, session);
+    session = createSession(now);
+  } else {
+    pruneStaleInFlightTraceIds(session, now);
   }
+  rememberSession(cliKey, session);
 
   session.lastRequestAt = now;
   session.requestCount += 1;
   session.notified = false;
-  if (trace_id) session.inFlightTraceIds.delete(trace_id);
+  if (traceId) session.inFlightTraceIds.delete(traceId);
 
   // 清除旧定时器（若仍有 in-flight 请求，不应开启静默结束倒计时）
   if (session.pendingTimer != null) {
@@ -195,7 +263,7 @@ function handleRequestComplete(payload: GatewayRequestSignalEvent) {
 
   if (session.inFlightTraceIds.size === 0) {
     session.pendingTimer = setTimeout(() => {
-      void maybeNotify(cli_key);
+      void maybeNotify(cliKey);
     }, QUIET_PERIOD_MS_DEFAULT);
   }
 }
@@ -243,12 +311,13 @@ async function maybeNotify(cliKey: string) {
 
 export async function listenTaskCompleteNotifyEvents(): Promise<() => void> {
   const requestSignalSub = subscribeGatewayEvent(gatewayEventNames.requestSignal, (payload) => {
-    if (!isGatewayRequestSignalEvent(payload)) return;
-    if (payload.phase === "start") {
-      handleRequestStart(payload);
+    const requestSignal = normalizeGatewayRequestSignalEvent(payload);
+    if (!requestSignal) return;
+    if (requestSignal.phase === "start") {
+      handleRequestStart(requestSignal);
       return;
     }
-    handleRequestComplete(payload);
+    handleRequestComplete(requestSignal);
   });
   const readyResults = await Promise.allSettled([requestSignalSub.ready]);
   const subscribeFailed = readyResults.some((result) => result.status === "rejected");

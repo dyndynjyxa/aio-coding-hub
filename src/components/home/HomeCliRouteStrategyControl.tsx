@@ -56,8 +56,8 @@ export function HomeCliRouteStrategyControl({
         disabled={sortModeSelectDisabled}
         className={cn(
           vertical
-            ? "h-6 max-w-full border-slate-200 bg-white px-2 pr-5 text-[12px] dark:border-slate-600 dark:bg-slate-900"
-            : "h-7 max-w-full flex-none border-slate-200 bg-white px-2 pr-6 text-sm dark:border-slate-600 dark:bg-slate-900",
+            ? "h-6 max-w-full border-border bg-white px-2 pr-5 text-[12px] dark:border-border dark:bg-card"
+            : "h-7 max-w-full flex-none border-border bg-white px-2 pr-6 text-sm dark:border-border dark:bg-card",
           selectClassName
         )}
         style={{ width: `${selectWidthCh}ch`, maxWidth: "100%" }}

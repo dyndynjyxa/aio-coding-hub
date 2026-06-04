@@ -182,7 +182,9 @@ pub(crate) async fn provider_oauth_start_flow(
             endpoints.client_secret.as_deref(),
             token_expires_at,
             None,
-        )
+        )?;
+        crate::domain::provider_oauth_limits::clear_snapshot(&db, provider_id)?;
+        Ok::<(), crate::shared::error::AppError>(())
     })
     .await
     .map_err(Into::<String>::into)?;
@@ -305,7 +307,9 @@ pub(crate) async fn provider_oauth_disconnect(
 ) -> Result<ProviderOAuthDisconnectResult, String> {
     let db = ensure_db_ready(app, db_state.inner()).await?;
     blocking::run("provider_oauth_disconnect", move || {
-        crate::providers::clear_oauth(&db, provider_id)
+        crate::providers::clear_oauth(&db, provider_id)?;
+        crate::domain::provider_oauth_limits::clear_snapshot(&db, provider_id)?;
+        Ok::<(), crate::shared::error::AppError>(())
     })
     .await
     .map_err(Into::<String>::into)?;

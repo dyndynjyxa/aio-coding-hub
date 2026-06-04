@@ -6,7 +6,7 @@ import type { HomeCliWorkspaceConfig } from "../homeWorkspaceConfigTypes";
 const configs: HomeCliWorkspaceConfig[] = [
   {
     cliKey: "claude",
-    cliLabel: "Claude Code",
+    cliLabel: "Claude",
     workspaceId: 1,
     workspaceName: "工作区 A",
     loading: false,

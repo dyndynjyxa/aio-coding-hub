@@ -3,6 +3,7 @@
 use crate::app::gateway_service::{self, GatewayActiveSessionSummary};
 use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::gateway_runtime_access::app_gateway_status;
+use crate::shared::cli_key::CliKey;
 use crate::{gateway, settings};
 
 #[derive(Debug, Clone, serde::Deserialize, specta::Type)]
@@ -71,6 +72,7 @@ pub(crate) async fn gateway_circuit_status(
     db_state: tauri::State<'_, DbInitState>,
     cli_key: String,
 ) -> Result<Vec<gateway::GatewayProviderCircuitStatus>, String> {
+    let cli_key = normalize_gateway_cli_key(&cli_key)?;
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
     gateway_service::circuit_status(app, db, cli_key)
         .await
@@ -97,10 +99,17 @@ pub(crate) async fn gateway_circuit_reset_cli(
     db_state: tauri::State<'_, DbInitState>,
     cli_key: String,
 ) -> Result<usize, String> {
+    let cli_key = normalize_gateway_cli_key(&cli_key)?;
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
     gateway_service::circuit_reset_cli(app, db, cli_key)
         .await
         .map_err(Into::into)
+}
+
+fn normalize_gateway_cli_key(cli_key: &str) -> Result<String, String> {
+    Ok(CliKey::parse(cli_key.trim())
+        .map_err(String::from)?
+        .to_string())
 }
 
 #[tauri::command]
@@ -152,4 +161,23 @@ pub(crate) async fn gateway_upstream_proxy_detect_ip(
 ) -> Result<String, String> {
     let (proxy_url, context) = resolve_gateway_upstream_proxy_context(&app, &input)?;
     gateway::http_client::detect_proxy_exit_ip_with_context(proxy_url.as_deref(), &context).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_gateway_cli_key_trims_supported_keys() {
+        assert_eq!(
+            normalize_gateway_cli_key(" codex ").expect("valid cli key"),
+            "codex"
+        );
+    }
+
+    #[test]
+    fn normalize_gateway_cli_key_rejects_invalid_keys() {
+        let err = normalize_gateway_cli_key(" opencode ").expect_err("invalid cli key");
+        assert_eq!(err, "SEC_INVALID_INPUT: unknown cli_key=opencode");
+    }
 }

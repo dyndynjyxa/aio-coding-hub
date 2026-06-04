@@ -68,9 +68,7 @@ export function CostFilterPanel({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Filter className="h-4 w-4 text-indigo-500" />
-            <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-              筛选条件
-            </span>
+            <span className="text-sm font-semibold text-foreground">筛选条件</span>
           </div>
           <button
             type="button"
@@ -79,7 +77,7 @@ export function CostFilterPanel({
             className={cn(
               "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all",
               fetching
-                ? "bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed"
+                ? "bg-secondary text-muted-foreground cursor-not-allowed"
                 : "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50"
             )}
           >
@@ -91,9 +89,7 @@ export function CostFilterPanel({
         {/* Primary Filters: CLI + Period in one row */}
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-slate-500 dark:text-slate-400 whitespace-nowrap">
-              CLI
-            </span>
+            <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">CLI</span>
             <div className="flex items-center gap-1">
               {CLI_ITEMS.map((item) => (
                 <button
@@ -105,7 +101,7 @@ export function CostFilterPanel({
                     "rounded-md px-2.5 py-1 text-xs font-medium transition-all",
                     cliKey === item.key
                       ? "bg-indigo-500 text-white shadow-sm"
-                      : "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600",
+                      : "bg-secondary text-muted-foreground dark:text-secondary-foreground hover:bg-muted dark:hover:bg-secondary",
                     fetching && "opacity-50 cursor-not-allowed"
                   )}
                 >
@@ -115,10 +111,10 @@ export function CostFilterPanel({
             </div>
           </div>
 
-          <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 hidden sm:block" />
+          <div className="h-4 w-px bg-muted dark:bg-secondary hidden sm:block" />
 
           <div className="flex items-center gap-2">
-            <Calendar className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500" />
+            <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
             <div className="flex items-center gap-1">
               {PERIOD_ITEMS.map((item) => (
                 <button
@@ -130,7 +126,7 @@ export function CostFilterPanel({
                     "rounded-md px-2.5 py-1 text-xs font-medium transition-all",
                     period === item.key
                       ? "bg-indigo-500 text-white shadow-sm"
-                      : "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600",
+                      : "bg-secondary text-muted-foreground dark:text-secondary-foreground hover:bg-muted dark:hover:bg-secondary",
                     fetching && "opacity-50 cursor-not-allowed"
                   )}
                 >
@@ -144,10 +140,7 @@ export function CostFilterPanel({
 
         {/* Custom Date Range */}
         {showCustomForm && (
-          <div
-            className="rounded-lg bg-slate-50 dark:bg-slate-800 p-3"
-            data-testid="home-cost-custom-range"
-          >
+          <div className="rounded-lg bg-secondary p-3" data-testid="home-cost-custom-range">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <div className="flex items-center gap-2 flex-1">
                 <label className="sr-only" htmlFor="home-cost-custom-start-date">
@@ -158,10 +151,10 @@ export function CostFilterPanel({
                   type="date"
                   value={customStartDate}
                   onChange={(e) => setCustomStartDate(e.currentTarget.value)}
-                  className="h-8 text-xs border-slate-200 dark:border-slate-700 flex-1"
+                  className="h-8 text-xs border-border flex-1"
                   disabled={fetching}
                 />
-                <span className="text-slate-400 dark:text-slate-500 text-xs">→</span>
+                <span className="text-muted-foreground text-xs">→</span>
                 <label className="sr-only" htmlFor="home-cost-custom-end-date">
                   结束日期
                 </label>
@@ -170,7 +163,7 @@ export function CostFilterPanel({
                   type="date"
                   value={customEndDate}
                   onChange={(e) => setCustomEndDate(e.currentTarget.value)}
-                  className="h-8 text-xs border-slate-200 dark:border-slate-700 flex-1"
+                  className="h-8 text-xs border-border flex-1"
                   disabled={fetching}
                 />
               </div>
@@ -182,7 +175,7 @@ export function CostFilterPanel({
                   className={cn(
                     "rounded-md px-3 py-1.5 text-xs font-medium transition-all",
                     fetching
-                      ? "bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed"
+                      ? "bg-muted dark:bg-secondary text-muted-foreground cursor-not-allowed"
                       : "bg-indigo-500 text-white hover:bg-indigo-600"
                   )}
                 >
@@ -195,8 +188,8 @@ export function CostFilterPanel({
                   className={cn(
                     "rounded-md px-3 py-1.5 text-xs font-medium transition-all",
                     fetching
-                      ? "bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed"
-                      : "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+                      ? "bg-muted dark:bg-secondary text-muted-foreground cursor-not-allowed"
+                      : "bg-white dark:bg-secondary border border-border text-muted-foreground dark:text-secondary-foreground hover:bg-secondary dark:hover:bg-secondary"
                   )}
                 >
                   清空
@@ -214,7 +207,7 @@ export function CostFilterPanel({
         {/* Advanced Filters */}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
           <div className="flex items-center gap-2 flex-1">
-            <label className="text-xs font-medium text-slate-500 dark:text-slate-400 whitespace-nowrap">
+            <label className="text-xs font-medium text-muted-foreground whitespace-nowrap">
               供应商
             </label>
             <div className="relative flex-1">
@@ -224,9 +217,9 @@ export function CostFilterPanel({
                 disabled={fetching || tauriAvailable === false}
                 title="选择供应商"
                 className={cn(
-                  "w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 pl-3 pr-8 py-1.5 text-xs text-slate-700 dark:text-slate-300",
+                  "w-full rounded-md border border-border bg-white dark:bg-secondary pl-3 pr-8 py-1.5 text-xs text-secondary-foreground",
                   "focus:border-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-100",
-                  "disabled:bg-slate-50 dark:disabled:bg-slate-900 disabled:text-slate-400 dark:disabled:text-slate-500 disabled:cursor-not-allowed",
+                  "disabled:bg-secondary dark:disabled:bg-card disabled:text-muted-foreground dark:disabled:text-muted-foreground disabled:cursor-not-allowed",
                   "appearance-none cursor-pointer"
                 )}
               >
@@ -237,12 +230,12 @@ export function CostFilterPanel({
                   </option>
                 ))}
               </select>
-              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 dark:text-slate-500 pointer-events-none" />
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
             </div>
           </div>
 
           <div className="flex items-center gap-2 flex-1">
-            <label className="text-xs font-medium text-slate-500 dark:text-slate-400 whitespace-nowrap">
+            <label className="text-xs font-medium text-muted-foreground whitespace-nowrap">
               模型
             </label>
             <div className="relative flex-1">
@@ -252,9 +245,9 @@ export function CostFilterPanel({
                 disabled={fetching || tauriAvailable === false}
                 title="选择模型"
                 className={cn(
-                  "w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 pl-3 pr-8 py-1.5 text-xs text-slate-700 dark:text-slate-300",
+                  "w-full rounded-md border border-border bg-white dark:bg-secondary pl-3 pr-8 py-1.5 text-xs text-secondary-foreground",
                   "focus:border-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-100",
-                  "disabled:bg-slate-50 dark:disabled:bg-slate-900 disabled:text-slate-400 dark:disabled:text-slate-500 disabled:cursor-not-allowed",
+                  "disabled:bg-secondary dark:disabled:bg-card disabled:text-muted-foreground dark:disabled:text-muted-foreground disabled:cursor-not-allowed",
                   "appearance-none cursor-pointer"
                 )}
               >
@@ -265,7 +258,7 @@ export function CostFilterPanel({
                   </option>
                 ))}
               </select>
-              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 dark:text-slate-500 pointer-events-none" />
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
             </div>
           </div>
         </div>

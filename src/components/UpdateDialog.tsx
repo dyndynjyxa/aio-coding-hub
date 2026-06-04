@@ -99,20 +99,20 @@ export function UpdateDialog() {
       className="max-w-xl"
     >
       <div className="space-y-4">
-        <div className="grid gap-2 text-sm text-slate-700 dark:text-slate-300">
+        <div className="grid gap-2 text-sm text-secondary-foreground">
           <div className="flex items-center justify-between gap-4">
-            <span className="text-slate-500 dark:text-slate-400">当前版本</span>
+            <span className="text-muted-foreground">当前版本</span>
             <span className="font-mono">
               {updateCandidate?.currentVersion ?? about?.app_version ?? "—"}
             </span>
           </div>
           <div className="flex items-center justify-between gap-4">
-            <span className="text-slate-500 dark:text-slate-400">最新版本</span>
+            <span className="text-muted-foreground">最新版本</span>
             <span className="font-mono">{updateCandidate?.version ?? "—"}</span>
           </div>
           {updateCandidate?.date ? (
             <div className="flex items-center justify-between gap-4">
-              <span className="text-slate-500 dark:text-slate-400">发布日期</span>
+              <span className="text-muted-foreground">发布日期</span>
               <span className="font-mono">{formatIsoDateTime(updateCandidate.date)}</span>
             </div>
           ) : null}
@@ -120,8 +120,8 @@ export function UpdateDialog() {
 
         {updateCandidate?.body ? (
           <div className="space-y-1">
-            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">更新日志</span>
-            <div className="max-h-60 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-700 dark:text-slate-300">
+            <span className="text-xs font-medium text-muted-foreground">更新日志</span>
+            <div className="max-h-60 overflow-y-auto rounded-lg border border-border bg-white dark:bg-secondary text-sm text-secondary-foreground">
               <MDXEditor
                 markdown={updateCandidate.body}
                 readOnly
@@ -133,15 +133,15 @@ export function UpdateDialog() {
         ) : null}
 
         {!updateCandidate ? (
-          <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-3 text-sm text-slate-700 dark:text-slate-300">
+          <div className="rounded-lg border border-border bg-white dark:bg-secondary p-3 text-sm text-secondary-foreground">
             未发现可安装更新。
           </div>
         ) : null}
 
         {meta.installingUpdate ? (
-          <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-3 text-sm text-slate-700 dark:text-slate-300">
+          <div className="rounded-lg border border-border bg-white dark:bg-secondary p-3 text-sm text-secondary-foreground">
             <div className="font-medium">下载并安装中…</div>
-            <div className="mt-1 font-mono text-xs text-slate-500 dark:text-slate-400">
+            <div className="mt-1 font-mono text-xs text-muted-foreground">
               {formatBytes(meta.installDownloadedBytes)}
               {meta.installTotalBytes != null ? ` / ${formatBytes(meta.installTotalBytes)}` : ""}
             </div>

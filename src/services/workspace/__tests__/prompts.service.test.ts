@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
 import {
@@ -7,6 +7,8 @@ import {
   promptUpsert,
   promptsList,
   type PromptSummary,
+  validatePromptId,
+  validatePromptWorkspaceId,
 } from "../prompts";
 
 vi.mock("../../../generated/bindings", async () => {
@@ -34,6 +36,10 @@ vi.mock("../../consoleLog", async () => {
 });
 
 describe("services/workspace/prompts", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   function createPromptSummary(overrides: Partial<PromptSummary> = {}): PromptSummary {
     return {
       id: 1,
@@ -68,7 +74,7 @@ describe("services/workspace/prompts", () => {
     await expect(promptsList(1)).rejects.toThrow("IPC_NULL_RESULT: prompts_list");
   });
 
-  it("keeps argument mapping unchanged", async () => {
+  it("invokes generated commands with normalized args", async () => {
     vi.mocked(commands.promptUpsert).mockResolvedValue({
       status: "ok",
       data: createPromptSummary(),
@@ -82,8 +88,8 @@ describe("services/workspace/prompts", () => {
     await promptUpsert({
       promptId: null,
       workspaceId: 1,
-      name: "P1",
-      content: "hello",
+      name: " P1 ",
+      content: " hello ",
       enabled: true,
     });
     expect(commands.promptUpsert).toHaveBeenCalledWith(null, 1, "P1", "hello", true);
@@ -93,5 +99,48 @@ describe("services/workspace/prompts", () => {
 
     await promptDelete(10);
     expect(commands.promptDelete).toHaveBeenCalledWith(10);
+  });
+
+  it("rejects invalid ids and blank names before generated commands", async () => {
+    expect(validatePromptWorkspaceId(1)).toBe(1);
+    expect(validatePromptId(2)).toBe(2);
+    expect(() => validatePromptWorkspaceId(0)).toThrow("SEC_INVALID_INPUT");
+    expect(() => validatePromptId(Number.NaN)).toThrow("SEC_INVALID_INPUT");
+
+    await expect(promptsList(0)).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(
+      promptUpsert({
+        promptId: 0,
+        workspaceId: 1,
+        name: "P1",
+        content: "hello",
+        enabled: true,
+      })
+    ).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(
+      promptUpsert({
+        promptId: null,
+        workspaceId: Number.NaN,
+        name: "P1",
+        content: "hello",
+        enabled: true,
+      })
+    ).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(
+      promptUpsert({
+        promptId: null,
+        workspaceId: 1,
+        name: "   ",
+        content: "hello",
+        enabled: true,
+      })
+    ).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(promptSetEnabled(-1, true)).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(promptDelete(Number.NaN)).rejects.toThrow("SEC_INVALID_INPUT");
+
+    expect(commands.promptsList).not.toHaveBeenCalled();
+    expect(commands.promptUpsert).not.toHaveBeenCalled();
+    expect(commands.promptSetEnabled).not.toHaveBeenCalled();
+    expect(commands.promptDelete).not.toHaveBeenCalled();
   });
 });

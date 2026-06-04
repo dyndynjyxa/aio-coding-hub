@@ -1,8 +1,11 @@
 //! Usage: OAuth token exchange (authorization_code grant) and refresh (refresh_token grant).
 
 use super::provider_trait::OAuthTokenSet;
+use crate::shared::http_body::read_text_with_limit;
 use crate::shared::security::mask_token;
 use crate::shared::time::now_unix_seconds;
+
+const OAUTH_TOKEN_RESPONSE_BODY_LIMIT: usize = 1024 * 1024;
 
 #[derive(Debug)]
 pub(crate) struct TokenExchangeRequest {
@@ -176,8 +179,7 @@ fn is_anthropic_oauth_token_uri(token_uri: &str) -> bool {
 
 async fn parse_token_response(resp: reqwest::Response) -> Result<OAuthTokenSet, String> {
     let status = resp.status();
-    let body = resp
-        .text()
+    let body = read_text_with_limit(resp, OAUTH_TOKEN_RESPONSE_BODY_LIMIT, "token response")
         .await
         .map_err(|e| format!("failed to read token response body: {e}"))?;
 

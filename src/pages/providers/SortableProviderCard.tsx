@@ -5,13 +5,14 @@ import {
   type ReactNode,
 } from "react";
 import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Copy, FlaskConical, Pencil, RefreshCw, Terminal, Trash2, Zap } from "lucide-react";
 import { FREE_TAG } from "../../constants/providers";
 import type { GatewayProviderCircuitStatus } from "../../services/gateway/gateway";
 import { getGatewayCircuitDerivedState } from "../../query/gateway";
-import { useOAuthLimitsQuery } from "../../query/providers";
+import { refreshProviderOAuthLimits, useOAuthLimitsQuery } from "../../query/providers";
 import {
   getProviderTypeInfo,
   type ClaudeModels,
@@ -76,7 +77,7 @@ function providerTagClassName(tag: string) {
   if (tag === FREE_TAG) {
     return "shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300";
   }
-  return "shrink-0 rounded-full bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-300";
+  return "shrink-0 rounded-full bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground dark:bg-secondary dark:text-secondary-foreground";
 }
 
 function renderProviderNote(note: string) {
@@ -186,11 +187,13 @@ export const ProviderCard = memo(function ProviderCard({
   const { isUnavailable, unavailableUntil } = circuitState;
   const { isOAuth, isCx2cc, isCx2ccGateway } = getProviderTypeInfo(provider);
   const [apiKeyDetailsVisible, setApiKeyDetailsVisible] = useState(false);
-  const {
-    data: oauthLimits = null,
-    isLoading: limitsLoading,
-    refetch: refetchOAuthLimits,
-  } = useOAuthLimitsQuery(provider.id, isOAuth);
+  const [limitsRefreshing, setLimitsRefreshing] = useState(false);
+  const queryClient = useQueryClient();
+  const { data: oauthLimits = null, isLoading: limitsQueryLoading } = useOAuthLimitsQuery(
+    provider.id,
+    isOAuth
+  );
+  const limitsLoading = limitsQueryLoading || limitsRefreshing;
   const oauthShortLabel = getOAuthShortWindowLabel(provider, oauthLimits);
   const shouldTrackNowUnix =
     isUnavailable ||
@@ -249,7 +252,7 @@ export const ProviderCard = memo(function ProviderCard({
       {...cardProps}
     >
       <div className="flex min-w-0 items-center gap-3">
-        <div className="inline-flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-500">
+        <div className="inline-flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-lg border border-border bg-white text-muted-foreground dark:border-border dark:bg-secondary dark:text-muted-foreground">
           ⠿
         </div>
         <div className="min-w-0 flex-1">
@@ -274,7 +277,13 @@ export const ProviderCard = memo(function ProviderCard({
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  refetchOAuthLimits();
+                  if (limitsRefreshing) return;
+                  setLimitsRefreshing(true);
+                  void refreshProviderOAuthLimits(queryClient, provider.id, {
+                    resetCircuitAfterRefresh: true,
+                  })
+                    .catch(() => {})
+                    .finally(() => setLimitsRefreshing(false));
                 }}
                 disabled={limitsLoading}
                 className={cn(
@@ -360,7 +369,7 @@ export const ProviderCard = memo(function ProviderCard({
               <>
                 {provider.oauth_email ? (
                   <span
-                    className="truncate font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
+                    className="truncate font-mono text-xs text-muted-foreground cursor-default"
                     title={`OAuth: ${provider.oauth_email}`}
                   >
                     {provider.oauth_email}
@@ -368,7 +377,7 @@ export const ProviderCard = memo(function ProviderCard({
                 ) : null}
                 {oauthLimits?.limit_5h_text ? (
                   <span
-                    className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
+                    className="shrink-0 font-mono text-xs text-muted-foreground cursor-default"
                     title={`${oauthShortLabel} 用量: ${oauthLimits.limit_5h_text}`}
                   >
                     {oauthShortLabel}: {oauthLimits.limit_5h_text}
@@ -376,7 +385,7 @@ export const ProviderCard = memo(function ProviderCard({
                 ) : null}
                 {oauthLimits?.limit_weekly_text ? (
                   <span
-                    className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
+                    className="shrink-0 font-mono text-xs text-muted-foreground cursor-default"
                     title={`周用量: ${oauthLimits.limit_weekly_text}`}
                   >
                     周: {oauthLimits.limit_weekly_text}
@@ -384,7 +393,7 @@ export const ProviderCard = memo(function ProviderCard({
                 ) : null}
                 {limitsResetCountdown?.reset5h && oauthLimits?.limit_5h_text ? (
                   <span
-                    className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
+                    className="shrink-0 font-mono text-xs text-muted-foreground cursor-default"
                     title={`${oauthShortLabel} 重置: ${limitsResetCountdown.reset5h}`}
                   >
                     重置: {limitsResetCountdown.reset5h}
@@ -392,7 +401,7 @@ export const ProviderCard = memo(function ProviderCard({
                 ) : null}
                 {limitsResetCountdown?.resetWeekly && oauthLimits?.limit_weekly_text ? (
                   <span
-                    className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
+                    className="shrink-0 font-mono text-xs text-muted-foreground cursor-default"
                     title={`周重置: ${limitsResetCountdown.resetWeekly}`}
                   >
                     周重置: {limitsResetCountdown.resetWeekly}
@@ -408,7 +417,7 @@ export const ProviderCard = memo(function ProviderCard({
                   来源: {cx2ccSourceName}
                 </span>
                 <span
-                  className="truncate font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
+                  className="truncate font-mono text-xs text-muted-foreground cursor-default"
                   title={cx2ccRouteLabel}
                 >
                   {cx2ccRouteLabel}
@@ -416,7 +425,7 @@ export const ProviderCard = memo(function ProviderCard({
               </>
             ) : apiKeyDetailsVisible ? (
               <span
-                className="truncate font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
+                className="truncate font-mono text-xs text-muted-foreground cursor-default"
                 title={provider.base_urls.join("\n")}
               >
                 {providerBaseUrlSummary(provider)}
@@ -425,7 +434,7 @@ export const ProviderCard = memo(function ProviderCard({
           </div>
           {provider.note ? (
             <div
-              className="mt-1 break-words text-xs text-slate-400 dark:text-slate-500 cursor-default"
+              className="mt-1 break-words text-xs text-muted-foreground cursor-default"
               title={provider.note}
               onPointerDown={(e) => e.stopPropagation()}
             >
@@ -460,8 +469,8 @@ export const ProviderCard = memo(function ProviderCard({
             编辑
           </Button>
 
-          <div className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm shadow-sm dark:border-slate-600 dark:bg-slate-800">
-            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+          <div className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-white px-3 text-sm shadow-sm dark:border-border dark:bg-secondary">
+            <span className="text-sm font-medium text-secondary-foreground">
               {provider.enabled ? "已启用" : "已关闭"}
             </span>
             <Switch checked={provider.enabled} onCheckedChange={() => onToggleEnabled(provider)} />

@@ -4,6 +4,7 @@
 //! to resolve model name mismatches (e.g. `claude-opus-4-5-thinking` -> `claude-opus-4-5`).
 
 use crate::app_paths;
+use crate::shared::fs::read_file_with_max_len;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -11,6 +12,8 @@ const MODEL_PRICE_DIR_NAME: &str = "model-prices";
 const ALIASES_FILE_NAME: &str = "price-aliases.json";
 const ALIASES_SCHEMA_VERSION_V1: i64 = 1;
 const MAX_MODEL_LEN: usize = 200;
+const ALIASES_FILE_MAX_BYTES: usize = 1024 * 1024;
+const ALIASES_RULES_MAX: usize = 512;
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
@@ -49,13 +52,17 @@ fn validate_cli_key(cli_key: &str) -> Result<(), String> {
     crate::shared::cli_key::validate_cli_key(cli_key).map_err(Into::into)
 }
 
-fn model_prices_dir(app: &tauri::AppHandle) -> crate::shared::error::AppResult<PathBuf> {
+fn model_prices_dir<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<PathBuf> {
     let dir = app_paths::app_data_dir(app)?.join(MODEL_PRICE_DIR_NAME);
     std::fs::create_dir_all(&dir).map_err(|e| format!("failed to create model-prices dir: {e}"))?;
     Ok(dir)
 }
 
-fn aliases_path(app: &tauri::AppHandle) -> crate::shared::error::AppResult<PathBuf> {
+fn aliases_path<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<PathBuf> {
     Ok(model_prices_dir(app)?.join(ALIASES_FILE_NAME))
 }
 
@@ -127,6 +134,12 @@ fn validate_aliases(
         )
         .into());
     }
+    if aliases.rules.len() > ALIASES_RULES_MAX {
+        return Err(format!(
+            "SEC_INVALID_INPUT: too many price alias rules (max {ALIASES_RULES_MAX})"
+        )
+        .into());
+    }
 
     let mut out: Vec<ModelPriceAliasRuleV1> = Vec::with_capacity(aliases.rules.len());
     for rule in aliases.rules {
@@ -137,6 +150,13 @@ fn validate_aliases(
 }
 
 fn write_json_atomically(path: &Path, json_bytes: Vec<u8>) -> crate::shared::error::AppResult<()> {
+    if json_bytes.len() > ALIASES_FILE_MAX_BYTES {
+        return Err(format!(
+            "SEC_INVALID_INPUT: price aliases file too large (max {ALIASES_FILE_MAX_BYTES} bytes)"
+        )
+        .into());
+    }
+
     let tmp_path = path.with_extension("json.tmp");
     let backup_path = path.with_extension("json.bak");
 
@@ -164,7 +184,7 @@ fn write_json_atomically(path: &Path, json_bytes: Vec<u8>) -> crate::shared::err
     Ok(())
 }
 
-pub fn read_fail_open(app: &tauri::AppHandle) -> ModelPriceAliasesV1 {
+pub fn read_fail_open<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> ModelPriceAliasesV1 {
     match read(app) {
         Ok(v) => v,
         Err(err) => {
@@ -174,21 +194,25 @@ pub fn read_fail_open(app: &tauri::AppHandle) -> ModelPriceAliasesV1 {
     }
 }
 
-pub fn read(app: &tauri::AppHandle) -> crate::shared::error::AppResult<ModelPriceAliasesV1> {
+pub fn read<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<ModelPriceAliasesV1> {
     let path = aliases_path(app)?;
     if !path.exists() {
         return Ok(ModelPriceAliasesV1::default());
     }
 
-    let content =
-        std::fs::read_to_string(&path).map_err(|e| format!("failed to read aliases: {e}"))?;
+    let bytes = read_file_with_max_len(&path, ALIASES_FILE_MAX_BYTES)
+        .map_err(|e| format!("failed to read aliases: {e}"))?;
+    let content = String::from_utf8(bytes)
+        .map_err(|e| format!("SEC_INVALID_INPUT: invalid price aliases UTF-8: {e}"))?;
     let parsed: ModelPriceAliasesV1 =
         serde_json::from_str(&content).map_err(|e| format!("failed to parse aliases: {e}"))?;
     validate_aliases(parsed)
 }
 
-pub fn write(
-    app: &tauri::AppHandle,
+pub fn write<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     aliases: ModelPriceAliasesV1,
 ) -> crate::shared::error::AppResult<ModelPriceAliasesV1> {
     let aliases = validate_aliases(aliases)?;

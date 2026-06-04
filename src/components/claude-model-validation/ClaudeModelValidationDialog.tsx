@@ -76,41 +76,39 @@ export function ClaudeModelValidationDialog({
       className="max-w-[95vw] sm:max-w-[95vw] md:max-w-[95vw] lg:max-w-[95vw] xl:max-w-[1600px] 2xl:max-w-[1800px] w-full"
     >
       {!provider ? (
-        <div className="flex h-40 items-center justify-center text-sm text-slate-500 dark:text-slate-400">
+        <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
           未选择服务商
         </div>
       ) : (
         <div className="space-y-6">
           {/* Provider Info Banner */}
-          <div className="flex flex-wrap items-center justify-between rounded-2xl border border-slate-200/60 dark:border-slate-700/60 bg-white/50 dark:bg-slate-900/30 px-5 py-4 text-sm shadow-sm backdrop-blur-md">
-            <div className="flex flex-wrap items-center gap-6 text-slate-700 dark:text-slate-300">
+          <div className="flex flex-wrap items-center justify-between rounded-2xl border border-border/60 dark:border-border/60 bg-white/50 dark:bg-card/30 px-5 py-4 text-sm shadow-sm backdrop-blur-md">
+            <div className="flex flex-wrap items-center gap-6 text-secondary-foreground">
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-50 to-white dark:from-indigo-950/50 dark:to-slate-900 shadow-sm ring-1 ring-indigo-100 dark:ring-indigo-800/50">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-50 to-white dark:from-indigo-950/50 dark:to-secondary shadow-sm ring-1 ring-indigo-100 dark:ring-indigo-800/50">
                   <Server className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
                 </div>
                 <div>
-                  <div className="text-[11px] font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                     服务商
                   </div>
-                  <div className="font-semibold text-slate-900 dark:text-slate-100 text-base">
-                    {provider.name}
-                  </div>
+                  <div className="font-semibold text-foreground text-base">{provider.name}</div>
                 </div>
               </div>
-              <div className="hidden h-10 w-px bg-slate-200 dark:bg-slate-700 sm:block" />
+              <div className="hidden h-10 w-px bg-muted dark:bg-secondary sm:block" />
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-sky-50 to-white dark:from-sky-950/50 dark:to-slate-900 shadow-sm ring-1 ring-sky-100 dark:ring-sky-800/50">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-sky-50 to-white dark:from-sky-950/50 dark:to-secondary shadow-sm ring-1 ring-sky-100 dark:ring-sky-800/50">
                   <Network className="h-5 w-5 text-sky-600 dark:text-sky-400" />
                 </div>
                 <div>
-                  <div className="text-[11px] font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                     模式
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="font-semibold text-slate-900 dark:text-slate-100">
+                    <span className="font-semibold text-foreground">
                       {provider.base_url_mode === "ping" ? "自动测速" : "顺序轮询"}
                     </span>
-                    <span className="inline-flex items-center rounded-md bg-slate-100/80 dark:bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-600 dark:text-slate-300 ring-1 ring-inset ring-slate-200 dark:ring-slate-700">
+                    <span className="inline-flex items-center rounded-md bg-secondary/80 dark:bg-secondary px-2 py-0.5 text-xs font-medium text-muted-foreground dark:text-secondary-foreground ring-1 ring-inset ring-border">
                       {provider.base_urls.length} 个地址
                     </span>
                   </div>
@@ -120,7 +118,7 @@ export function ClaudeModelValidationDialog({
           </div>
 
           {/* Form Bar */}
-          <div className="grid gap-5 rounded-2xl border border-slate-200/60 dark:border-slate-700/60 bg-slate-50/40 dark:bg-slate-800/40 p-5 sm:grid-cols-12 shadow-sm">
+          <div className="grid gap-5 rounded-2xl border border-border/60 dark:border-border/60 bg-secondary/40 dark:bg-secondary/40 p-5 sm:grid-cols-12 shadow-sm">
             <div className="sm:col-span-4">
               <FormField
                 label="Endpoint"
@@ -131,7 +129,7 @@ export function ClaudeModelValidationDialog({
                   onChange={(e) => setBaseUrl(e.currentTarget.value)}
                   disabled={validating}
                   mono
-                  className="h-10 bg-white/80 dark:bg-slate-900/80 text-xs shadow-sm"
+                  className="h-10 bg-white/80 dark:bg-card/80 text-xs shadow-sm"
                 >
                   <option value="" disabled>
                     选择 Endpoint...
@@ -163,7 +161,7 @@ export function ClaudeModelValidationDialog({
                     setSuiteRounds(Number.isFinite(v) && v >= 1 ? Math.min(v, 99) : 1);
                   }}
                   disabled={validating}
-                  className="h-10 w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-900/80 px-3 text-xs font-mono text-center shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  className="h-10 w-full rounded-md border border-border bg-white/80 dark:bg-card/80 px-3 text-xs font-mono text-center shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
                 />
               </FormField>
               <Button
@@ -204,7 +202,7 @@ export function ClaudeModelValidationDialog({
                       setCrossProviderId(val ? parseInt(val, 10) : null);
                     }}
                     disabled={validating}
-                    className="h-10 bg-white/80 dark:bg-slate-900/80 text-xs shadow-sm"
+                    className="h-10 bg-white/80 dark:bg-card/80 text-xs shadow-sm"
                   >
                     <option value="">选择官方供应商...</option>
                     {crossProviderOptions.map((p) => (
@@ -275,14 +273,12 @@ export function ClaudeModelValidationDialog({
                 }}
               />
               <div className="absolute inset-0 flex items-center justify-center p-4">
-                <div className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-card">
-                  <div className="border-b border-slate-200 dark:border-slate-700 px-5 py-4">
-                    <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                      确认清空历史？
-                    </div>
-                    <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                <div className="w-full max-w-md overflow-hidden rounded-2xl border border-border bg-white dark:bg-secondary shadow-card">
+                  <div className="border-b border-border px-5 py-4">
+                    <div className="text-sm font-semibold text-foreground">确认清空历史？</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
                       即将清空{" "}
-                      <span className="font-medium text-slate-900 dark:text-slate-100">
+                      <span className="font-medium text-foreground">
                         {provider?.name ?? "Provider"}
                       </span>{" "}
                       的验证历史，操作不可撤销。

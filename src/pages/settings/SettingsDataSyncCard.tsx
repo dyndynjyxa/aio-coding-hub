@@ -45,10 +45,10 @@ export function SettingsDataSyncCard({
 }) {
   return (
     <Card>
-      <div className="mb-4 font-semibold text-slate-900 dark:text-slate-100">数据与同步</div>
-      <div className="divide-y divide-slate-100 dark:divide-slate-700">
+      <div className="mb-4 font-semibold text-foreground">数据与同步</div>
+      <div className="divide-y divide-line-subtle">
         <SettingsRow label="模型定价">
-          <span className="font-mono text-sm text-slate-900 dark:text-slate-100">
+          <span className="font-mono text-sm text-foreground">
             {modelPricesAvailable === "checking"
               ? "加载中…"
               : modelPricesAvailable === "unavailable"
@@ -60,22 +60,20 @@ export function SettingsDataSyncCard({
           {lastModelPricesSyncError ? (
             <span className="text-xs text-rose-600">失败</span>
           ) : lastModelPricesSyncReport ? (
-            <span className="text-xs text-slate-500 dark:text-slate-400">
+            <span className="text-xs text-muted-foreground">
               {lastModelPricesSyncReport.status === "not_modified"
                 ? "最新"
                 : `+${lastModelPricesSyncReport.inserted} / ~${lastModelPricesSyncReport.updated}`}
             </span>
           ) : null}
           {lastModelPricesSyncTime ? (
-            <span className="text-xs text-slate-400 dark:text-slate-500">
+            <span className="text-xs text-muted-foreground">
               {formatRelativeTime(lastModelPricesSyncTime)} 同步
             </span>
           ) : null}
         </SettingsRow>
         <SettingsRow label="定价匹配">
-          <span className="text-xs text-slate-500 dark:text-slate-400">
-            prefix / wildcard / exact
-          </span>
+          <span className="text-xs text-muted-foreground">prefix / wildcard / exact</span>
           <Button
             onClick={openModelPriceAliasesDialog}
             variant="secondary"
@@ -86,7 +84,7 @@ export function SettingsDataSyncCard({
           </Button>
         </SettingsRow>
         <SettingsRow label="今日请求">
-          <span className="font-mono text-sm text-slate-900 dark:text-slate-100">
+          <span className="font-mono text-sm text-foreground">
             {todayRequestsAvailable === "checking"
               ? "加载中…"
               : todayRequestsAvailable === "unavailable"

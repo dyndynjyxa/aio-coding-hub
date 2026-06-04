@@ -26,7 +26,6 @@ import { DEFAULT_HOME_USAGE_PERIOD } from "../utils/homeUsagePeriod";
 import { resolveHomeUsageWindowDays } from "../utils/homeUsagePeriod";
 import { useHomeCircuitState } from "./home/hooks/useHomeCircuitState";
 import { useHomeSortMode } from "./home/hooks/useHomeSortMode";
-import { useHomeCliProxy } from "./home/hooks/useHomeCliProxy";
 import { useHomeOverviewFeed } from "./home/hooks/useHomeOverviewFeed";
 import { useHomeOAuthQuota } from "./home/hooks/useHomeOAuthQuota";
 import { useHomeWorkspaceConfigs } from "./home/hooks/useHomeWorkspaceConfigs";
@@ -137,23 +136,21 @@ export function HomePage() {
     providerLimitEnabled: !personalizedLayoutEnabled,
   });
   const sortMode = useHomeSortMode(activeSessions);
-  const cliProxyState = useHomeCliProxy();
   const workspaceConfigs = useHomeWorkspaceConfigs({ enabled: tab === "overview" });
   const oauthQuota = useHomeOAuthQuota({
     cliPriorityOrder,
     requestLogs,
-    enabled: tab === "overview" && personalizedLayoutEnabled,
+    enabled: tab === "overview",
   });
   const { pendingSortModeSwitch } = sortMode;
-  const { pendingCliProxyEnablePrompt } = cliProxyState;
 
   useEffect(() => {
     if (personalizedLayoutEnabled && tab === "cost") setTab("tokenCost");
   }, [personalizedLayoutEnabled, tab]);
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      <div className="shrink-0 mb-5">
+    <div className="flex flex-col h-full gap-6 overflow-hidden">
+      <div className="shrink-0">
         <PageHeader
           title="首页"
           actions={
@@ -204,12 +201,6 @@ export function HomePage() {
             activeModeByCli={sortMode.activeModeByCli}
             activeModeToggling={sortMode.activeModeToggling}
             onSetCliActiveMode={sortMode.requestCliActiveModeSwitch}
-            cliProxyLoading={cliProxyState.cliProxyLoading}
-            cliProxyAvailable={cliProxyState.cliProxyAvailable}
-            cliProxyEnabled={cliProxyState.cliProxyEnabled}
-            cliProxyAppliedToCurrentGateway={cliProxyState.cliProxyAppliedToCurrentGateway}
-            cliProxyToggling={cliProxyState.cliProxyToggling}
-            onSetCliProxyEnabled={cliProxyState.requestCliProxyEnabledSwitch}
             activeSessions={activeSessions}
             activeSessionsLoading={activeSessionsLoading}
             activeSessionsAvailable={activeSessionsAvailable}
@@ -242,7 +233,7 @@ export function HomePage() {
           <Suspense
             fallback={
               <Card padding="md" className="flex h-full items-center justify-center">
-                <div className="flex items-center gap-3 text-sm text-slate-600 dark:text-slate-400">
+                <div className="flex items-center gap-3 text-sm text-muted-foreground">
                   <Spinner />
                   <span>加载花费面板中…</span>
                 </div>
@@ -255,7 +246,7 @@ export function HomePage() {
           <Suspense
             fallback={
               <Card padding="md" className="flex h-full items-center justify-center">
-                <div className="flex items-center gap-3 text-sm text-slate-600 dark:text-slate-400">
+                <div className="flex items-center gap-3 text-sm text-muted-foreground">
                   <Spinner />
                   <span>加载用量面板中…</span>
                 </div>
@@ -299,56 +290,6 @@ export function HomePage() {
         </div>
       </Dialog>
 
-      <Dialog
-        open={pendingCliProxyEnablePrompt != null}
-        onOpenChange={(open) => {
-          if (!open) cliProxyState.setPendingCliProxyEnablePrompt(null);
-        }}
-        title={
-          pendingCliProxyEnablePrompt
-            ? `检测到 ${CLIS.find((cli) => cli.key === pendingCliProxyEnablePrompt.cliKey)?.name ?? pendingCliProxyEnablePrompt.cliKey} 代理相关环境变量冲突`
-            : "检测到环境变量冲突"
-        }
-        description="继续启用可能会被这些环境变量覆盖（不会显示变量值）。是否继续？"
-      >
-        {pendingCliProxyEnablePrompt ? (
-          <div className="space-y-4">
-            <ul className="space-y-2">
-              {pendingCliProxyEnablePrompt.conflicts.map((row) => (
-                <li
-                  key={`${row.var_name}:${row.source_type}:${row.source_path}`}
-                  className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2"
-                >
-                  <div className="font-mono text-xs text-slate-800 dark:text-slate-200">
-                    {row.var_name}
-                  </div>
-                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    {row.source_path}
-                  </div>
-                </li>
-              ))}
-            </ul>
-
-            <div className="flex items-center justify-end gap-2">
-              <Button
-                variant="secondary"
-                size="md"
-                onClick={() => cliProxyState.setPendingCliProxyEnablePrompt(null)}
-              >
-                取消
-              </Button>
-              <Button
-                variant="primary"
-                size="md"
-                onClick={cliProxyState.confirmPendingCliProxyEnable}
-              >
-                继续启用
-              </Button>
-            </div>
-          </div>
-        ) : null}
-      </Dialog>
-
       {selectedLogId != null ? (
         <Suspense
           fallback={
@@ -361,7 +302,7 @@ export function HomePage() {
               description="先看关键指标，再看为什么会重试、跳过或切换供应商。"
               className="max-w-3xl"
             >
-              <div className="flex items-center gap-3 text-sm text-slate-600 dark:text-slate-400">
+              <div className="flex items-center gap-3 text-sm text-muted-foreground">
                 <Spinner />
                 <span>加载代理记录详情中…</span>
               </div>

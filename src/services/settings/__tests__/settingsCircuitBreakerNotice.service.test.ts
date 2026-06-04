@@ -57,4 +57,12 @@ describe("services/settings/settingsCircuitBreakerNotice", () => {
       enableCircuitBreakerNotice: true,
     });
   });
+
+  it("rejects malformed boolean input before generated commands", async () => {
+    await expect(settingsCircuitBreakerNoticeSet("yes" as any)).rejects.toThrow(
+      "enableCircuitBreakerNotice must be a boolean"
+    );
+
+    expect(commands.settingsCircuitBreakerNoticeSet).not.toHaveBeenCalled();
+  });
 });

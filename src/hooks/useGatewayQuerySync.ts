@@ -1,11 +1,12 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { gatewayEventNames } from "../constants/gatewayEvents";
 import { gatewayKeys, providerLimitUsageKeys, usageKeys } from "../query/keys";
 import { logToConsole } from "../services/consoleLog";
 import { subscribeGatewayEvent } from "../services/gateway/gatewayEventBus";
-import { isGatewayRequestSignalEvent } from "../services/gateway/gatewayEvents";
+import { normalizeGatewayRequestSignalEvent } from "../services/gateway/gatewayEvents";
 import { isRequestSignalComplete } from "../services/gateway/requestLogState";
+import { useCoalescedAsyncRefresh } from "./useCoalescedAsyncRefresh";
 
 const CIRCUIT_INVALIDATE_THROTTLE_MS = 500;
 const STATUS_INVALIDATE_THROTTLE_MS = 300;
@@ -14,52 +15,43 @@ const USAGE_INVALIDATE_THROTTLE_MS = 1000;
 export function useGatewayQuerySync() {
   const queryClient = useQueryClient();
 
-  const circuitTimerRef = useRef<number | null>(null);
-  const statusTimerRef = useRef<number | null>(null);
-  const usageTimerRef = useRef<number | null>(null);
+  const logInvalidationError = useCallback((source: string, error: unknown) => {
+    logToConsole("warn", "网关查询缓存失效失败", {
+      stage: "useGatewayQuerySync",
+      source,
+      error: String(error),
+    });
+    return null;
+  }, []);
+
+  const { schedule: scheduleInvalidateCircuits } = useCoalescedAsyncRefresh<void, unknown>({
+    enabled: true,
+    delayMs: CIRCUIT_INVALIDATE_THROTTLE_MS,
+    task: () => queryClient.invalidateQueries({ queryKey: gatewayKeys.circuits() }),
+    onError: (error) => logInvalidationError("circuit", error),
+  });
+
+  const { schedule: scheduleInvalidateStatus } = useCoalescedAsyncRefresh<void, unknown>({
+    enabled: true,
+    delayMs: STATUS_INVALIDATE_THROTTLE_MS,
+    task: () => queryClient.invalidateQueries({ queryKey: gatewayKeys.status() }),
+    onError: (error) => logInvalidationError("status", error),
+  });
+
+  const { schedule: scheduleInvalidateUsageDerived } = useCoalescedAsyncRefresh<void, unknown>({
+    enabled: true,
+    delayMs: USAGE_INVALIDATE_THROTTLE_MS,
+    task: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: usageKeys.all }),
+        queryClient.invalidateQueries({ queryKey: providerLimitUsageKeys.all }),
+      ]);
+    },
+    onError: (error) => logInvalidationError("usage", error),
+  });
 
   useEffect(() => {
     let cancelled = false;
-
-    const invalidateCircuits = () => {
-      queryClient.invalidateQueries({ queryKey: gatewayKeys.circuits() });
-    };
-
-    const invalidateStatus = () => {
-      queryClient.invalidateQueries({ queryKey: gatewayKeys.status() });
-    };
-
-    const invalidateUsageDerived = () => {
-      queryClient.invalidateQueries({ queryKey: usageKeys.all });
-      queryClient.invalidateQueries({ queryKey: providerLimitUsageKeys.all });
-    };
-
-    const scheduleInvalidateCircuits = () => {
-      if (circuitTimerRef.current != null) return;
-      circuitTimerRef.current = window.setTimeout(() => {
-        circuitTimerRef.current = null;
-        if (cancelled) return;
-        invalidateCircuits();
-      }, CIRCUIT_INVALIDATE_THROTTLE_MS);
-    };
-
-    const scheduleInvalidateStatus = () => {
-      if (statusTimerRef.current != null) return;
-      statusTimerRef.current = window.setTimeout(() => {
-        statusTimerRef.current = null;
-        if (cancelled) return;
-        invalidateStatus();
-      }, STATUS_INVALIDATE_THROTTLE_MS);
-    };
-
-    const scheduleInvalidateUsageDerived = () => {
-      if (usageTimerRef.current != null) return;
-      usageTimerRef.current = window.setTimeout(() => {
-        usageTimerRef.current = null;
-        if (cancelled) return;
-        invalidateUsageDerived();
-      }, USAGE_INVALIDATE_THROTTLE_MS);
-    };
 
     const circuitSub = subscribeGatewayEvent(gatewayEventNames.circuit, () => {
       if (cancelled) return;
@@ -70,7 +62,8 @@ export function useGatewayQuerySync() {
       scheduleInvalidateStatus();
     });
     const requestSignalSub = subscribeGatewayEvent(gatewayEventNames.requestSignal, (payload) => {
-      if (!isGatewayRequestSignalEvent(payload) || !isRequestSignalComplete(payload)) {
+      const requestSignal = normalizeGatewayRequestSignalEvent(payload);
+      if (!requestSignal || !isRequestSignalComplete(requestSignal)) {
         return;
       }
       if (cancelled) return;
@@ -101,19 +94,6 @@ export function useGatewayQuerySync() {
       circuitSub.unsubscribe();
       statusSub.unsubscribe();
       requestSignalSub.unsubscribe();
-
-      if (circuitTimerRef.current != null) {
-        window.clearTimeout(circuitTimerRef.current);
-        circuitTimerRef.current = null;
-      }
-      if (statusTimerRef.current != null) {
-        window.clearTimeout(statusTimerRef.current);
-        statusTimerRef.current = null;
-      }
-      if (usageTimerRef.current != null) {
-        window.clearTimeout(usageTimerRef.current);
-        usageTimerRef.current = null;
-      }
     };
-  }, [queryClient]);
+  }, [scheduleInvalidateCircuits, scheduleInvalidateStatus, scheduleInvalidateUsageDerived]);
 }

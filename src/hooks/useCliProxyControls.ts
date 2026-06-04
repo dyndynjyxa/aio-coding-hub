@@ -3,17 +3,17 @@
 // - Manages the pending confirmation dialog state for environment variable conflicts.
 
 import { useCallback, useMemo, useState } from "react";
-import { logToConsole } from "../../../services/consoleLog";
-import type { CliKey } from "../../../services/providers/providers";
-import { envConflictsCheck, type EnvConflict } from "../../../services/cli/envConflicts";
-import { useCliProxy } from "../../../hooks/useCliProxy";
+import { envConflictsCheck, type EnvConflict } from "../services/cli/envConflicts";
+import { logToConsole } from "../services/consoleLog";
+import type { CliKey } from "../services/providers/providers";
+import { useCliProxy } from "./useCliProxy";
 
 export type PendingCliProxyEnablePrompt = {
   cliKey: CliKey;
   conflicts: EnvConflict[];
 };
 
-export type HomeCliProxyState = {
+export type CliProxyControlsState = {
   cliProxyLoading: boolean;
   cliProxyAvailable: boolean | null;
   cliProxyEnabled: Record<CliKey, boolean>;
@@ -25,7 +25,7 @@ export type HomeCliProxyState = {
   confirmPendingCliProxyEnable: () => void;
 };
 
-export function useHomeCliProxy(): HomeCliProxyState {
+export function useCliProxyControls(): CliProxyControlsState {
   const cliProxy = useCliProxy();
 
   const [pendingCliProxyEnablePrompt, setPendingCliProxyEnablePrompt] =

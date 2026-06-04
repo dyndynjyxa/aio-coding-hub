@@ -10,23 +10,79 @@ export type DesktopOpenUrlOptions = DesktopOpenUrlRequest;
 export type DesktopOpenPathOptions = DesktopOpenPathRequest;
 export type DesktopRevealItemOptions = DesktopRevealItemRequest;
 
+const DESKTOP_OPEN_URL_MAX_CHARS = 2048;
+const DESKTOP_OPEN_PATH_MAX_CHARS = 4096;
+const DESKTOP_OPEN_WITH_MAX_CHARS = 256;
+const DESKTOP_OPEN_URL_SCHEMES = ["http", "https", "mailto", "tel"] as const;
+
+function charLength(value: string) {
+  return [...value].length;
+}
+
+function normalizeRequiredDesktopText(value: unknown, label: string, maxChars: number) {
+  if (typeof value !== "string") {
+    throw new Error(`SEC_INVALID_INPUT: ${label} must be a string`);
+  }
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new Error(`SEC_INVALID_INPUT: ${label} is required`);
+  }
+  if (charLength(normalized) > maxChars) {
+    throw new Error(`SEC_INVALID_INPUT: ${label} is too long (max ${maxChars} chars)`);
+  }
+  return normalized;
+}
+
+function normalizeOptionalDesktopProgram(value: unknown) {
+  if (value == null) return null;
+  if (typeof value !== "string") {
+    throw new Error("SEC_INVALID_INPUT: with must be a string");
+  }
+  const normalized = value.trim();
+  if (!normalized) return null;
+  if (charLength(normalized) > DESKTOP_OPEN_WITH_MAX_CHARS) {
+    throw new Error(
+      `SEC_INVALID_INPUT: with is too long (max ${DESKTOP_OPEN_WITH_MAX_CHARS} chars)`
+    );
+  }
+  return normalized;
+}
+
+function normalizeDesktopUrl(value: unknown) {
+  const url = normalizeRequiredDesktopText(value, "url", DESKTOP_OPEN_URL_MAX_CHARS);
+  let scheme: string;
+  try {
+    scheme = new URL(url).protocol.replace(/:$/, "").toLowerCase();
+  } catch (error) {
+    throw new Error(`SEC_INVALID_INPUT: invalid url: ${error}`);
+  }
+  if ((DESKTOP_OPEN_URL_SCHEMES as readonly string[]).includes(scheme)) {
+    return url;
+  }
+  throw new Error(`SEC_INVALID_INPUT: unsupported url scheme=${scheme}`);
+}
+
+function normalizeDesktopPath(value: unknown) {
+  return normalizeRequiredDesktopText(value, "path", DESKTOP_OPEN_PATH_MAX_CHARS);
+}
+
 function normalizeOpenUrlInput(input: string | DesktopOpenUrlOptions): DesktopOpenUrlOptions {
   if (typeof input === "string") {
-    return { url: input, with: null };
+    return { url: normalizeDesktopUrl(input), with: null };
   }
   return {
-    url: input.url,
-    with: input.with ?? null,
+    url: normalizeDesktopUrl(input.url),
+    with: normalizeOptionalDesktopProgram(input.with),
   };
 }
 
 function normalizeOpenPathInput(input: string | DesktopOpenPathOptions): DesktopOpenPathOptions {
   if (typeof input === "string") {
-    return { path: input, with: null };
+    return { path: normalizeDesktopPath(input), with: null };
   }
   return {
-    path: input.path,
-    with: input.with ?? null,
+    path: normalizeDesktopPath(input.path),
+    with: normalizeOptionalDesktopProgram(input.with),
   };
 }
 
@@ -34,9 +90,9 @@ function normalizeRevealItemInput(
   input: string | DesktopRevealItemOptions
 ): DesktopRevealItemOptions {
   if (typeof input === "string") {
-    return { path: input };
+    return { path: normalizeDesktopPath(input) };
   }
-  return { path: input.path };
+  return { path: normalizeDesktopPath(input.path) };
 }
 
 export async function openDesktopUrl(input: string | DesktopOpenUrlOptions) {

@@ -1,6 +1,6 @@
-#[cfg(unix)]
-use super::skill_fs::export_skill_dir_files;
-use super::skill_fs::{cli_skills_root, ssot_skills_root};
+use super::skill_fs::{
+    cli_skills_root, export_skill_dir_files, ssot_skills_root, write_skill_files_to_dir,
+};
 use super::*;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
@@ -143,6 +143,33 @@ fn validate_bundle_schema_version_rejects_mismatch() {
     assert!(err
         .to_string()
         .contains("SEC_INVALID_INPUT: unsupported config bundle schema_version"));
+}
+
+#[test]
+fn config_import_rejects_invalid_workspace_boundary_values() {
+    {
+        let test_app = ConfigMigrateTestApp::new();
+        let app = test_app.handle();
+        let mut bundle = make_test_bundle(CONFIG_BUNDLE_SCHEMA_VERSION);
+        bundle.workspaces[0].name = "x".repeat(129);
+
+        let Err(err) = config_import(&app, &test_app.db, bundle) else {
+            panic!("oversized workspace name should fail");
+        };
+        assert!(err.to_string().contains("workspace name is too long"));
+    }
+
+    {
+        let test_app = ConfigMigrateTestApp::new();
+        let app = test_app.handle();
+        let mut bundle = make_test_bundle(CONFIG_BUNDLE_SCHEMA_VERSION);
+        bundle.workspaces[0].cli_key = "opencode".to_string();
+
+        let Err(err) = config_import(&app, &test_app.db, bundle) else {
+            panic!("invalid workspace cli key should fail");
+        };
+        assert!(err.to_string().contains("unknown cli_key=opencode"));
+    }
 }
 
 #[test]
@@ -563,9 +590,9 @@ fn config_import_v2_rejects_missing_installed_skills_payload() {
     let mut bundle = make_test_bundle(CONFIG_BUNDLE_SCHEMA_VERSION);
     bundle.installed_skills = None;
 
-    let err = config_import(&app, &test_app.db, bundle)
-        .err()
-        .expect("missing installed_skills");
+    let Err(err) = config_import(&app, &test_app.db, bundle) else {
+        panic!("missing installed_skills");
+    };
     assert!(err
         .to_string()
         .contains("SEC_INVALID_INPUT: config bundle missing installed_skills"));
@@ -578,9 +605,9 @@ fn config_import_v2_rejects_missing_local_skills_payload() {
     let mut bundle = make_test_bundle(CONFIG_BUNDLE_SCHEMA_VERSION);
     bundle.local_skills = None;
 
-    let err = config_import(&app, &test_app.db, bundle)
-        .err()
-        .expect("missing local_skills");
+    let Err(err) = config_import(&app, &test_app.db, bundle) else {
+        panic!("missing local_skills");
+    };
     assert!(err
         .to_string()
         .contains("SEC_INVALID_INPUT: config bundle missing local_skills"));
@@ -619,10 +646,62 @@ fn export_skill_dir_files_rejects_symlink_escape() {
     std::fs::write(&outside_file, "secret").expect("write outside file");
     create_file_symlink(&outside_file, &skill_dir.join("escape.txt"));
 
-    let err = export_skill_dir_files(&skill_dir, true)
-        .err()
-        .expect("symlink escape should fail");
+    let Err(err) = export_skill_dir_files(&skill_dir, true) else {
+        panic!("symlink escape should fail");
+    };
     assert!(err
         .to_string()
         .contains("SKILL_EXPORT_BLOCKED_SYMLINK_ESCAPE"));
+}
+
+#[test]
+fn export_skill_dir_files_rejects_oversized_file() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let skill_dir = temp.path().join("local-review");
+    write_skill_md(&skill_dir, "Local Review", "Local review skill");
+    std::fs::write(
+        skill_dir.join("large.bin"),
+        vec![b'x'; CONFIG_SKILL_FILE_MAX_BYTES + 1],
+    )
+    .expect("write large file");
+
+    let Err(err) = export_skill_dir_files(&skill_dir, true) else {
+        panic!("oversized skill file should fail");
+    };
+
+    assert!(err.to_string().contains("too large"));
+}
+
+#[test]
+fn write_skill_files_to_dir_rejects_too_many_files_before_creating_dir() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let target = temp.path().join("local-review");
+    let files: Vec<SkillFileExport> = (0..=CONFIG_SKILL_FILE_COUNT_MAX)
+        .map(|index| SkillFileExport {
+            relative_path: format!("{index}.txt"),
+            content_base64: BASE64_STANDARD.encode(b"x"),
+        })
+        .collect();
+
+    let err = write_skill_files_to_dir(&target, &files, None)
+        .expect_err("too many skill files should fail");
+
+    assert!(err.to_string().contains("too many skill files"));
+    assert!(!target.exists());
+}
+
+#[test]
+fn write_skill_files_to_dir_rejects_oversized_base64_before_creating_dir() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let target = temp.path().join("local-review");
+    let files = vec![SkillFileExport {
+        relative_path: "large.bin".to_string(),
+        content_base64: BASE64_STANDARD.encode(vec![b'x'; CONFIG_SKILL_FILE_MAX_BYTES + 1]),
+    }];
+
+    let err = write_skill_files_to_dir(&target, &files, None)
+        .expect_err("oversized skill file should fail");
+
+    assert!(err.to_string().contains("too large"));
+    assert!(!target.exists());
 }

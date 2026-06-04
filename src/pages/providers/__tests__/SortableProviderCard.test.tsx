@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { tauriOpenUrl } from "../../../test/mocks/tauri";
 import { SortableProviderCard, type SortableProviderCardProps } from "../SortableProviderCard";
 import {
@@ -14,6 +14,13 @@ vi.mock("../../../services/providers/providers", async () => {
     "../../../services/providers/providers"
   );
   return { ...actual, providerOAuthFetchLimits: vi.fn() };
+});
+
+vi.mock("../../../services/gateway/gateway", async () => {
+  const actual = await vi.importActual<typeof import("../../../services/gateway/gateway")>(
+    "../../../services/gateway/gateway"
+  );
+  return { ...actual, gatewayCircuitResetProvider: vi.fn() };
 });
 
 vi.mock("@dnd-kit/sortable", () => ({
@@ -88,6 +95,10 @@ function renderCard(
 }
 
 describe("pages/providers/SortableProviderCard", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("renders OAuth badge with email", () => {
     renderCard({
       auth_mode: "oauth",
@@ -129,24 +140,6 @@ describe("pages/providers/SortableProviderCard", () => {
     const oauthButton = screen.getByText("OAuth");
     expect(oauthButton).toBeInTheDocument();
     expect(oauthButton.tagName).toBe("BUTTON");
-  });
-
-  it("fetches OAuth limits on button click", async () => {
-    vi.mocked(providerOAuthFetchLimits).mockResolvedValue({
-      limit_short_label: null,
-      limit_5h_text: "100 requests",
-      limit_weekly_text: "1000 requests",
-      limit_5h_reset_at: null,
-      limit_weekly_reset_at: null,
-    });
-
-    renderCard({
-      auth_mode: "oauth",
-    });
-
-    fireEvent.click(screen.getByText("OAuth"));
-
-    await waitFor(() => expect(vi.mocked(providerOAuthFetchLimits)).toHaveBeenCalledWith(1));
   });
 
   it("auto-fetches OAuth limits on mount for oauth providers", async () => {

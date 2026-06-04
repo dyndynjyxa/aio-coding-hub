@@ -22,13 +22,11 @@ function StatCard({
 }) {
   return (
     <Card padding="md" className={cn("flex h-full flex-col", className)} data-testid={testId}>
-      <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{title}</div>
-      <div className="mt-2 text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100 xl:text-xl">
+      <div className="text-xs font-medium text-muted-foreground">{title}</div>
+      <div className="mt-2 text-lg font-semibold tracking-tight text-foreground xl:text-xl">
         {value}
       </div>
-      {hint ? (
-        <div className="mt-auto pt-2 text-xs text-slate-500 dark:text-slate-400">{hint}</div>
-      ) : null}
+      {hint ? <div className="mt-auto pt-2 text-xs text-muted-foreground">{hint}</div> : null}
     </Card>
   );
 }
@@ -36,9 +34,9 @@ function StatCard({
 function StatCardSkeleton({ className }: { className?: string }) {
   return (
     <Card padding="md" className={cn("h-full animate-pulse", className)}>
-      <div className="h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" />
-      <div className="mt-3 h-8 w-28 rounded bg-slate-200 dark:bg-slate-700" />
-      <div className="mt-3 h-3 w-44 rounded bg-slate-100 dark:bg-slate-600" />
+      <div className="h-3 w-24 rounded bg-muted dark:bg-secondary" />
+      <div className="mt-3 h-8 w-28 rounded bg-muted dark:bg-secondary" />
+      <div className="mt-3 h-3 w-44 rounded bg-secondary dark:bg-secondary" />
     </Card>
   );
 }
@@ -67,7 +65,7 @@ export function CostStatCards({
   if (summaryCards.length === 0) {
     return (
       <Card padding="md">
-        <div className="text-sm text-slate-600 dark:text-slate-400">
+        <div className="text-sm text-muted-foreground">
           {period === "custom" && !customApplied
             ? "自定义范围：请选择日期后点击「应用」。"
             : "暂无花费数据。"}

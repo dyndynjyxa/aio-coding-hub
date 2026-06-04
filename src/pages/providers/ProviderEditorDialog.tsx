@@ -107,9 +107,9 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
         <LimitsSection form={f} />
         <ClaudeModelSection form={f} />
 
-        <div className="flex items-center justify-between border-t border-slate-100 pt-3 dark:border-slate-700">
+        <div className="flex items-center justify-between border-t border-border pt-3 dark:border-border">
           <div className="flex items-center gap-2">
-            <span className="text-sm text-slate-700 dark:text-slate-300">启用</span>
+            <span className="text-sm text-secondary-foreground">启用</span>
             <Switch
               checked={f.enabled}
               onCheckedChange={(checked) => f.setValue("enabled", checked, { shouldDirty: true })}

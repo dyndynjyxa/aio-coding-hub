@@ -18,25 +18,23 @@ export function DisclosureSection({
   const [open, setOpen] = useState(defaultOpen);
 
   return (
-    <div
-      className={cn("rounded-lg border border-slate-200/60 dark:border-slate-700/60", className)}
-    >
+    <div className={cn("rounded-lg border border-border/60 dark:border-border/60", className)}>
       <button
         type="button"
-        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium text-slate-600 hover:bg-slate-50/50 dark:text-slate-400 dark:hover:bg-slate-700/30 transition-colors"
+        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-secondary/50 dark:text-muted-foreground dark:hover:bg-secondary/30 transition-colors"
         onClick={() => setOpen((prev) => !prev)}
         aria-expanded={open}
       >
         {label}
         <ChevronDown
           className={cn(
-            "h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform",
+            "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform",
             open && "rotate-180"
           )}
         />
       </button>
       {open && (
-        <div className="border-t border-slate-200/60 px-3 py-2.5 dark:border-slate-700/60">
+        <div className="border-t border-border/60 px-3 py-2.5 dark:border-border/60">
           {children}
         </div>
       )}

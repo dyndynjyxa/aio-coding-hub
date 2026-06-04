@@ -12,12 +12,14 @@ import {
   type ConsoleLogLevel,
   useConsoleLogs,
 } from "../services/consoleLog";
+import { collectAppMemoryDiagnostics } from "../services/app/memoryDiagnostics";
 import { gatewayEventNames } from "../constants/gatewayEvents";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ChevronRight, Search, Filter } from "lucide-react";
+import { Activity, ChevronRight, Search, Filter } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
+import { EmptyState } from "../ui/EmptyState";
 import { PageHeader } from "../ui/PageHeader";
 import { Switch } from "../ui/Switch";
 import { cn } from "../utils/cn";
@@ -51,7 +53,7 @@ function getLevelBadgeStyles(level: ConsoleLogEntry["level"]) {
     case "warn":
       return "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20";
     case "debug":
-      return "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-500/10 dark:text-slate-400 dark:border-slate-500/20";
+      return "bg-secondary text-muted-foreground border-border dark:bg-muted/10 dark:text-muted-foreground dark:border-border/20";
     default:
       return "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20";
   }
@@ -154,10 +156,10 @@ const ConsoleLogRow = memo(function ConsoleLogRow({
     <div
       className={cn(
         ROW_GRID_CLASS,
-        "items-start px-4 py-3 group-hover:bg-slate-100/80 dark:group-hover:bg-slate-800/40 transition-colors duration-200"
+        "items-start px-4 py-3 group-hover:bg-secondary/80 dark:group-hover:bg-secondary/40 transition-colors duration-200"
       )}
     >
-      <span className="shrink-0 text-slate-500 dark:text-slate-400 font-mono text-[11px] pt-0.5">
+      <span className="shrink-0 text-muted-foreground font-mono text-[11px] pt-0.5">
         {entry.tsText}
       </span>
       <div className="flex items-center pt-0.5">
@@ -171,12 +173,12 @@ const ConsoleLogRow = memo(function ConsoleLogRow({
         </span>
       </div>
       <div className="min-w-0">
-        <span className="whitespace-pre-wrap break-words text-slate-700 dark:text-slate-300 text-[13px] leading-relaxed font-normal">
+        <span className="whitespace-pre-wrap break-words text-secondary-foreground text-[13px] leading-relaxed font-normal">
           {entry.title}
         </span>
         <MetaTags meta={entry.meta} />
       </div>
-      <span className="flex justify-end text-slate-600 dark:text-slate-400 group-open:text-slate-400 transition-colors duration-200 pt-0.5">
+      <span className="flex justify-end text-muted-foreground group-open:text-muted-foreground transition-colors duration-200 pt-0.5">
         {hasDetails ? (
           <ChevronRight className="h-4 w-4 transition-transform duration-200 group-open:rotate-90" />
         ) : null}
@@ -228,14 +230,14 @@ const ConsoleLogRow = memo(function ConsoleLogRow({
       {isOpen ? (
         <div className={cn(ROW_GRID_CLASS, "px-4 pb-4 pt-0")}>
           <div className="col-start-3 col-span-2 space-y-2">
-            <pre className="scrollbar-overlay max-h-60 overflow-auto rounded-md bg-slate-100 dark:bg-slate-950 p-3 text-[11px] leading-relaxed text-slate-700 dark:text-slate-400 font-mono border border-slate-200 dark:border-white/5 mx-1 whitespace-pre-wrap">
+            <pre className="scrollbar-overlay max-h-60 overflow-auto rounded-md bg-secondary dark:bg-background p-3 text-[11px] leading-relaxed text-secondary-foreground dark:text-muted-foreground font-mono border border-border dark:border-white/5 mx-1 whitespace-pre-wrap">
               {smartText == null ? "加载中…" : smartText ? smartText : "// 无可显示的详情"}
             </pre>
             <details className="group/raw">
-              <summary className="text-[10px] text-slate-500 cursor-pointer hover:text-slate-700 dark:hover:text-slate-400 select-none mx-1">
+              <summary className="text-[10px] text-muted-foreground cursor-pointer hover:text-secondary-foreground dark:hover:text-muted-foreground select-none mx-1">
                 原始数据
               </summary>
-              <pre className="scrollbar-overlay max-h-40 overflow-auto rounded-md bg-slate-100 dark:bg-slate-950 p-3 text-[11px] leading-relaxed text-slate-600 dark:text-slate-500 font-mono border border-slate-200 dark:border-white/5 mx-1 mt-1">
+              <pre className="scrollbar-overlay max-h-40 overflow-auto rounded-md bg-secondary dark:bg-background p-3 text-[11px] leading-relaxed text-muted-foreground dark:text-muted-foreground font-mono border border-border dark:border-white/5 mx-1 mt-1">
                 {rawText == null ? "加载中…" : rawText ? rawText : "// 无原始数据"}
               </pre>
             </details>
@@ -253,6 +255,7 @@ export function ConsolePage() {
   const logs = useConsoleLogs();
   const [autoScroll, setAutoScroll] = useState(true);
   const [debugEnabled, setDebugEnabled] = useState(() => getConsoleDebugEnabled());
+  const [diagnosticsRunning, setDiagnosticsRunning] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [levelFilter, setLevelFilter] = useState<Set<ConsoleLogLevel>>(
@@ -328,11 +331,11 @@ export function ConsolePage() {
           actions={
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-2">
-                <span className="text-sm text-slate-600 dark:text-slate-400">自动滚动</span>
+                <span className="text-sm text-muted-foreground">自动滚动</span>
                 <Switch checked={autoScroll} onCheckedChange={setAutoScroll} size="sm" />
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-sm text-slate-600 dark:text-slate-400">调试日志</span>
+                <span className="text-sm text-muted-foreground">调试日志</span>
                 <Switch
                   checked={debugEnabled}
                   onCheckedChange={(next) => {
@@ -346,6 +349,25 @@ export function ConsolePage() {
               <Button onClick={() => setShowFilters((v) => !v)} variant="secondary">
                 <Filter className="h-3.5 w-3.5 mr-1.5" />
                 过滤
+              </Button>
+              <Button
+                onClick={async () => {
+                  if (diagnosticsRunning) return;
+                  setDiagnosticsRunning(true);
+                  try {
+                    await collectAppMemoryDiagnostics();
+                    toast("已生成内存诊断日志");
+                  } catch {
+                    toast("内存诊断失败，请查看错误日志");
+                  } finally {
+                    setDiagnosticsRunning(false);
+                  }
+                }}
+                variant="secondary"
+                disabled={diagnosticsRunning}
+              >
+                <Activity className="h-3.5 w-3.5 mr-1.5" />
+                内存诊断
               </Button>
               <Button
                 onClick={() => {
@@ -363,16 +385,16 @@ export function ConsolePage() {
 
       {/* Filter bar */}
       {showFilters ? (
-        <Card padding="none">
-          <div className="px-4 py-3 flex flex-wrap items-center gap-3">
+        <Card padding="sm">
+          <div className="flex flex-wrap items-center gap-3">
             <div className="relative flex-1 min-w-[200px] max-w-[360px]">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="搜索标题、trace_id、错误码..."
-                className="h-8 w-full rounded-md border border-slate-200 bg-white pl-8 pr-3 text-xs text-slate-700 placeholder:text-slate-400 outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:placeholder:text-slate-500"
+                className="h-8 w-full rounded-md border border-border bg-white pl-8 pr-3 text-xs text-secondary-foreground placeholder:text-muted-foreground outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 dark:border-border dark:bg-secondary dark:text-foreground dark:placeholder:text-muted-foreground"
               />
             </div>
             <div className="flex items-center gap-1.5">
@@ -385,7 +407,7 @@ export function ConsolePage() {
                     "px-2 py-1 rounded text-[10px] font-medium border transition-colors cursor-pointer",
                     levelFilter.has(level)
                       ? getLevelBadgeStyles(level)
-                      : "bg-slate-50 text-slate-500 border-slate-200 opacity-70 dark:bg-slate-800 dark:text-slate-500 dark:border-slate-700 dark:opacity-50"
+                      : "bg-secondary text-muted-foreground border-border opacity-70 dark:bg-secondary dark:text-muted-foreground dark:border-border dark:opacity-50"
                   )}
                 >
                   {levelText(level)}
@@ -397,25 +419,25 @@ export function ConsolePage() {
       ) : null}
 
       <Card padding="none" className="min-h-0 flex-1 flex flex-col overflow-hidden">
-        <div className="shrink-0 border-b border-slate-200 dark:border-slate-700 bg-gradient-to-r from-slate-50 to-slate-100/50 dark:from-slate-800 dark:to-slate-800/50 px-6 py-4">
+        <div className="shrink-0 border-b border-border bg-gradient-to-r from-secondary to-secondary/50 dark:from-secondary dark:to-secondary/50 px-6 py-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+              <div className="text-sm font-semibold text-foreground">
                 日志{" "}
                 <span className="ml-1.5 inline-flex items-center rounded-full bg-accent/10 px-2.5 py-0.5 text-xs font-medium text-accent">
                   {visibleLogs.length}
                 </span>
               </div>
               {hiddenCount > 0 ? (
-                <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                  <span className="inline-block h-1 w-1 rounded-full bg-slate-400 dark:bg-slate-500"></span>
+                <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+                  <span className="inline-block h-1 w-1 rounded-full bg-muted dark:bg-muted"></span>
                   已隐藏 {hiddenCount} 条日志
                 </div>
               ) : null}
             </div>
-            <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+            <div className="text-xs text-muted-foreground flex items-center gap-1.5">
               <svg
-                className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500"
+                className="h-3.5 w-3.5 text-muted-foreground"
                 fill="none"
                 viewBox="0 0 24 24"
                 strokeWidth="2"
@@ -437,34 +459,33 @@ export function ConsolePage() {
           onScroll={handleScroll}
           className={cn(
             "scrollbar-overlay min-h-0 flex-1 overflow-auto",
-            "bg-gradient-to-b from-slate-50 to-white dark:from-slate-950 dark:to-slate-900 font-mono text-[12px] leading-relaxed text-slate-700 dark:text-slate-200",
+            "bg-gradient-to-b from-secondary to-white dark:from-background dark:to-secondary font-mono text-[12px] leading-relaxed text-secondary-foreground dark:text-foreground",
             "shadow-inner"
           )}
         >
           {visibleLogs.length === 0 ? (
-            <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
-              <div className="mb-3 rounded-full bg-slate-100 p-4 border border-slate-200 dark:bg-slate-800/50 dark:border-slate-700/50">
-                <svg
-                  className="h-8 w-8 text-slate-600 dark:text-slate-400"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth="1.5"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"
-                  />
-                </svg>
-              </div>
-              <p className="text-sm font-medium text-slate-400 dark:text-slate-500">
-                {logs.length === 0 ? "暂无日志" : "暂无可显示的日志"}
-              </p>
-              <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
-                {logs.length === 0 ? "系统日志将在这里显示" : "调整过滤器以查看更多日志"}
-              </p>
-            </div>
+            <EmptyState
+              className="px-4 py-16"
+              icon={
+                <div className="rounded-full bg-secondary p-4 border border-border dark:bg-secondary/50 dark:border-border/50">
+                  <svg
+                    className="h-8 w-8 text-muted-foreground"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth="1.5"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"
+                    />
+                  </svg>
+                </div>
+              }
+              title={logs.length === 0 ? "暂无日志" : "暂无可显示的日志"}
+              description={logs.length === 0 ? "系统日志将在这里显示" : "调整过滤器以查看更多日志"}
+            />
           ) : (
             <div
               style={{

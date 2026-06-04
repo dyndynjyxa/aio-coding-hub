@@ -80,6 +80,7 @@ pub(crate) struct SettingsUpdate {
     pub wsl_custom_host_address: Option<String>,
     pub codex_home_mode: Option<settings::CodexHomeMode>,
     pub codex_home_override: Option<String>,
+    pub codex_oauth_compatible_proxy_mode: Option<bool>,
     #[serde(rename = "cx2CcFallbackModelOpus")]
     #[specta(rename = "cx2CcFallbackModelOpus")]
     pub cx2cc_fallback_model_opus: Option<String>,
@@ -143,6 +144,7 @@ pub(crate) struct SettingsView {
     pub wsl_custom_host_address: String,
     pub codex_home_mode: settings::CodexHomeMode,
     pub codex_home_override: String,
+    pub codex_oauth_compatible_proxy_mode: bool,
     pub auto_start: bool,
     pub start_minimized: bool,
     pub tray_enabled: bool,
@@ -261,6 +263,7 @@ impl From<&settings::AppSettings> for SettingsView {
             wsl_custom_host_address: value.wsl_custom_host_address.clone(),
             codex_home_mode: value.codex_home_mode,
             codex_home_override: value.codex_home_override.clone(),
+            codex_oauth_compatible_proxy_mode: value.codex_oauth_compatible_proxy_mode,
             auto_start: value.auto_start,
             start_minimized: value.start_minimized,
             tray_enabled: value.tray_enabled,
@@ -321,7 +324,10 @@ impl SettingsRuntimePlan {
         let gateway_rebind_required = crate::gateway::listen_rebind_required(previous, next);
         let codex_home_changed = previous.codex_home_mode != next.codex_home_mode
             || previous.codex_home_override != next.codex_home_override;
-        let cli_proxy_sync_required = gateway_rebind_required || codex_home_changed;
+        let codex_proxy_mode_changed =
+            previous.codex_oauth_compatible_proxy_mode != next.codex_oauth_compatible_proxy_mode;
+        let cli_proxy_sync_required =
+            gateway_rebind_required || codex_home_changed || codex_proxy_mode_changed;
         #[cfg(windows)]
         let wsl_auto_sync_required = next.wsl_auto_config
             && next.gateway_listen_mode != settings::GatewayListenMode::Localhost
@@ -373,7 +379,7 @@ fn current_gateway_status(app: &tauri::AppHandle) -> crate::gateway::GatewayStat
     app_gateway_status(app)
 }
 
-async fn start_gateway_with_settings(
+async fn start_gateway_with_settings_unlocked(
     app: &tauri::AppHandle,
     db_state: &DbInitState,
     next_settings: &settings::AppSettings,
@@ -427,8 +433,9 @@ async fn restore_previous_runtime(
         return current_gateway_status(app);
     }
 
-    crate::app::cleanup::stop_gateway_best_effort(app).await;
-    match start_gateway_with_settings(app, db_state, previous_settings).await {
+    let _gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
+    crate::app::cleanup::stop_gateway_best_effort_unlocked(app).await;
+    match start_gateway_with_settings_unlocked(app, db_state, previous_settings).await {
         Ok(result) => result.status,
         Err(err) => {
             tracing::error!(
@@ -468,6 +475,22 @@ async fn sync_cli_proxy_for_settings(
     base_origin: String,
     apply_live: bool,
 ) -> bool {
+    let _gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
+    let status = current_gateway_status(app);
+    let (base_origin, apply_live) = if status.running {
+        (
+            status.base_url.unwrap_or_else(|| {
+                format!(
+                    "http://127.0.0.1:{}",
+                    status.port.unwrap_or(settings::DEFAULT_GATEWAY_PORT)
+                )
+            }),
+            true,
+        )
+    } else {
+        (base_origin, apply_live && status.running)
+    };
+
     match blocking::run("settings_set_cli_proxy_sync", {
         let app = app.clone();
         move || cli_proxy::sync_enabled(&app, &base_origin, apply_live)
@@ -553,6 +576,7 @@ pub(crate) async fn settings_set_impl(
         wsl_custom_host_address,
         codex_home_mode,
         codex_home_override,
+        codex_oauth_compatible_proxy_mode,
         cx2cc_fallback_model_opus,
         cx2cc_fallback_model_sonnet,
         cx2cc_fallback_model_haiku,
@@ -578,8 +602,10 @@ pub(crate) async fn settings_set_impl(
             settings::AppSettings,
         )> {
             let previous = read_settings_for_update(&app_for_work)?;
-            let update_releases_url =
-                update_releases_url.unwrap_or(previous.update_releases_url.clone());
+            let update_releases_url = update_releases_url
+                .unwrap_or(previous.update_releases_url.clone())
+                .trim()
+                .to_string();
             let tray_enabled = tray_enabled.unwrap_or(previous.tray_enabled);
             let start_minimized = start_minimized.unwrap_or(previous.start_minimized);
             let enable_cli_proxy_startup_recovery = enable_cli_proxy_startup_recovery
@@ -609,6 +635,8 @@ pub(crate) async fn settings_set_impl(
                 .unwrap_or(previous.codex_home_override.clone())
                 .trim()
                 .to_string();
+            let codex_oauth_compatible_proxy_mode = codex_oauth_compatible_proxy_mode
+                .unwrap_or(previous.codex_oauth_compatible_proxy_mode);
             let cx2cc_fallback_model_opus = cx2cc_fallback_model_opus
                 .unwrap_or(previous.cx2cc_fallback_model_opus.clone())
                 .trim()
@@ -730,6 +758,7 @@ pub(crate) async fn settings_set_impl(
                 wsl_custom_host_address,
                 codex_home_mode,
                 codex_home_override,
+                codex_oauth_compatible_proxy_mode,
                 auto_start: next_auto_start,
                 start_minimized,
                 tray_enabled,
@@ -780,6 +809,7 @@ pub(crate) async fn settings_set_impl(
                 upstream_proxy_password,
             };
 
+            settings::validate_bounds(&settings)?;
             crate::gateway::http_client::validate_proxy_for_settings(&settings)?;
             Ok((previous, settings))
         },
@@ -793,8 +823,9 @@ pub(crate) async fn settings_set_impl(
     let mut gateway_rebound = false;
     let mut committed_settings = candidate_settings.clone();
     if runtime_plan.gateway_rebind_required && previous_gateway_status.running {
-        crate::app::cleanup::stop_gateway_best_effort(&app).await;
-        match start_gateway_with_settings(&app, db_state, &committed_settings).await {
+        let _gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
+        crate::app::cleanup::stop_gateway_best_effort_unlocked(&app).await;
+        match start_gateway_with_settings_unlocked(&app, db_state, &committed_settings).await {
             Ok(start_result) => {
                 committed_settings.preferred_port = start_result.effective_preferred_port;
                 gateway_status = start_result.status;
@@ -805,13 +836,15 @@ pub(crate) async fn settings_set_impl(
                     error = %rebind_error,
                     "settings update failed during gateway rebind; restoring previous runtime"
                 );
-                restore_previous_runtime(
-                    &app,
-                    db_state,
-                    &previous_settings,
-                    &previous_gateway_status,
-                )
-                .await;
+                let _ = sync_runtime_side_effects(&app, &previous_settings);
+                if let Err(restore_error) =
+                    start_gateway_with_settings_unlocked(&app, db_state, &previous_settings).await
+                {
+                    tracing::error!(
+                        error = %restore_error,
+                        "settings update rollback failed to restore previous gateway runtime"
+                    );
+                }
                 return Err(format!(
                     "监听地址未生效，新的运行态重绑失败：{rebind_error}"
                 ));

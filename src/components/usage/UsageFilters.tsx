@@ -83,15 +83,15 @@ function CustomDateRangeForm({
         value={customStartDate}
         onChange={(e) => onCustomStartDateChange(e.currentTarget.value)}
         aria-label="开始日期"
-        className="h-8 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 text-xs text-slate-900 dark:text-slate-100 outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+        className="h-8 rounded-md border border-border bg-white dark:bg-secondary px-2 text-xs text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
       />
-      <span className="text-xs text-slate-400">→</span>
+      <span className="text-xs text-muted-foreground">→</span>
       <input
         type="date"
         value={customEndDate}
         onChange={(e) => onCustomEndDateChange(e.currentTarget.value)}
         aria-label="结束日期"
-        className="h-8 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 text-xs text-slate-900 dark:text-slate-100 outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+        className="h-8 rounded-md border border-border bg-white dark:bg-secondary px-2 text-xs text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
       />
       <Button size="sm" variant="primary" onClick={onApplyCustomRange} disabled={loading}>
         应用
@@ -100,7 +100,7 @@ function CustomDateRangeForm({
         清空
       </Button>
       {customApplied ? (
-        <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
+        <span className="text-xs font-medium text-muted-foreground">
           {customApplied.startDate} → {customApplied.endDate}
         </span>
       ) : null}
@@ -136,7 +136,7 @@ export function UsageFilters({
       />
 
       {/* 分隔 */}
-      <div className="hidden h-5 w-px bg-slate-200 dark:bg-slate-700 sm:block" />
+      <div className="hidden h-5 w-px bg-muted dark:bg-secondary sm:block" />
 
       {/* 时间窗筛选 */}
       <FilterButtonGroup

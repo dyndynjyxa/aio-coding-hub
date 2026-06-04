@@ -35,6 +35,14 @@ type KVPair = { key: string; value: string };
 
 const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const HEADER_KEY_RE = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+const FORM_CONTROL_CLASS =
+  "rounded-lg border border-line bg-surface-inset px-3 text-foreground outline-none transition-colors focus:border-ring focus:bg-surface-panel focus:ring-2 focus:ring-ring/20 disabled:cursor-not-allowed disabled:bg-surface-muted disabled:opacity-60";
+const TEXT_INPUT_CLASS = cn("h-10 w-full text-sm", FORM_CONTROL_CLASS);
+const MONO_INPUT_CLASS = cn("h-10 w-full font-mono text-sm", FORM_CONTROL_CLASS);
+const MONO_TEXTAREA_CLASS = cn("w-full resize-y py-2 font-mono text-xs", FORM_CONTROL_CLASS);
+const SECTION_PANEL_CLASS = "rounded-2xl border border-line-subtle bg-surface-inset p-4";
+const PRIMARY_PANEL_CLASS =
+  "rounded-2xl border border-line bg-surface-panel p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]";
 
 function recordToPairs(record: Record<string, string>): KVPair[] {
   const pairs = Object.entries(record).map(([key, value]) => ({ key, value }));
@@ -295,9 +303,6 @@ function KeyValuePairEditor({
   keyPlaceholder?: string;
   valuePlaceholder?: string;
 }) {
-  const inputCls =
-    "rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 font-mono text-xs text-slate-900 dark:text-slate-100 shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20";
-
   const updatePair = (index: number, field: "key" | "value", val: string) => {
     const next = pairs.map((p, i) => (i === index ? { ...p, [field]: val } : p));
     onChange(next);
@@ -321,20 +326,20 @@ function KeyValuePairEditor({
             value={pair.key}
             onChange={(e) => updatePair(index, "key", e.currentTarget.value)}
             placeholder={keyPlaceholder}
-            className={cn("w-[40%] shrink-0", inputCls)}
+            className={cn("w-[40%] shrink-0 py-1.5 font-mono text-xs", FORM_CONTROL_CLASS)}
           />
-          <span className="text-xs text-slate-400 select-none">=</span>
+          <span className="text-xs text-muted-foreground select-none">=</span>
           <input
             type="text"
             value={pair.value}
             onChange={(e) => updatePair(index, "value", e.currentTarget.value)}
             placeholder={valuePlaceholder}
-            className={cn("min-w-0 flex-1", inputCls)}
+            className={cn("min-w-0 flex-1 py-1.5 font-mono text-xs", FORM_CONTROL_CLASS)}
           />
           <button
             type="button"
             onClick={() => removePair(index)}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 dark:hover:text-red-400 transition-colors"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 dark:hover:text-red-400 transition-colors"
             title="删除"
           >
             ×
@@ -528,16 +533,14 @@ export function McpServerDialog({
     >
       <div className="grid gap-4">
         {!editTarget ? (
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-4 shadow-sm">
-            <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
-              快速导入 JSON（可选）
-            </div>
+          <div className={SECTION_PANEL_CLASS}>
+            <div className="text-xs font-medium text-muted-foreground">快速导入 JSON（可选）</div>
             <textarea
               value={jsonText}
               onChange={(e) => setJsonText(e.currentTarget.value)}
               placeholder='示例：{"type":"stdio","command":"uvx","args":["mcp-server-fetch"]}'
               rows={4}
-              className="mt-2 w-full resize-y rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 font-mono text-xs text-slate-900 dark:text-slate-100 shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+              className={cn("mt-2", MONO_TEXTAREA_CLASS)}
             />
             <div className="mt-2 flex justify-end">
               <Button variant="secondary" onClick={() => void fillFromJson()} disabled={saving}>
@@ -547,26 +550,26 @@ export function McpServerDialog({
           </div>
         ) : null}
 
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-gradient-to-b from-white to-slate-50/60 dark:from-slate-800 dark:to-slate-800/60 p-4 shadow-card">
+        <div className={PRIMARY_PANEL_CLASS}>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-xs font-medium text-slate-500 dark:text-slate-400">基础信息</div>
+            <div className="text-xs font-medium text-muted-foreground">基础信息</div>
           </div>
 
           <div className="mt-3">
-            <div className="text-sm font-medium text-slate-700 dark:text-slate-300">名称</div>
+            <div className="text-sm font-medium text-secondary-foreground">名称</div>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.currentTarget.value)}
               placeholder="例如：Fetch 工具"
-              className="mt-2 w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+              className={cn("mt-2", TEXT_INPUT_CLASS)}
             />
           </div>
 
           <div className="mt-4">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-sm font-medium text-slate-700 dark:text-slate-300">类型</div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">二选一</div>
+              <div className="text-sm font-medium text-secondary-foreground">类型</div>
+              <div className="text-xs text-muted-foreground">二选一</div>
             </div>
             <div className="mt-2 grid gap-2 sm:grid-cols-3">
               {(
@@ -602,33 +605,30 @@ export function McpServerDialog({
                   />
                   <div
                     className={cn(
-                      "flex h-full cursor-pointer items-start gap-3 rounded-xl border px-3 py-3 shadow-sm transition-all",
-                      "bg-white dark:bg-slate-800",
-                      "hover:border-slate-300 hover:bg-slate-50/60 dark:hover:border-slate-600 dark:hover:bg-slate-700",
-                      "peer-focus-visible:ring-2 peer-focus-visible:ring-accent/20 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-white dark:peer-focus-visible:ring-offset-slate-900",
-                      "peer-checked:border-accent/60 peer-checked:bg-accent/5 peer-checked:shadow dark:peer-checked:bg-accent/10"
+                      "flex h-full cursor-pointer items-start gap-3 rounded-xl border px-3 py-3 transition-colors",
+                      "border-line-subtle bg-surface-panel hover:border-line hover:bg-state-hover",
+                      "peer-focus-visible:ring-2 peer-focus-visible:ring-ring/35 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-background",
+                      "peer-checked:border-state-selected-border peer-checked:bg-state-selected"
                     )}
                   >
                     <div
                       className={cn(
-                        "mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg border bg-white dark:bg-slate-800 shadow-sm",
-                        "border-slate-200 text-slate-700 dark:border-slate-600 dark:text-slate-300",
-                        "peer-checked:border-accent/40 peer-checked:bg-accent/10 peer-checked:text-accent"
+                        "mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg border",
+                        "border-line-subtle bg-surface-inset text-secondary-foreground",
+                        "peer-checked:border-state-selected-border peer-checked:bg-surface-panel peer-checked:text-state-selected-foreground"
                       )}
                     >
                       <span className="text-sm font-semibold">{item.icon}</span>
                     </div>
 
                     <div className="min-w-0 pr-7">
-                      <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                        {item.title}
-                      </div>
-                      <div className="mt-0.5 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                      <div className="text-sm font-semibold text-foreground">{item.title}</div>
+                      <div className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
                         {item.desc}
                       </div>
                     </div>
 
-                    <div className="pointer-events-none absolute right-3 top-3 flex h-5 w-5 items-center justify-center rounded-full border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-[11px] text-white shadow-sm transition peer-checked:border-accent peer-checked:bg-accent">
+                    <div className="pointer-events-none absolute right-3 top-3 flex h-5 w-5 items-center justify-center rounded-full border border-line bg-surface-inset text-[11px] text-transparent transition peer-checked:border-state-selected-border peer-checked:bg-state-selected-foreground peer-checked:text-white">
                       ✓
                     </div>
                   </div>
@@ -641,35 +641,31 @@ export function McpServerDialog({
         {transport === "stdio" ? (
           <>
             <div>
-              <div className="text-sm font-medium text-slate-700 dark:text-slate-300">Command</div>
+              <div className="text-sm font-medium text-secondary-foreground">Command</div>
               <input
                 type="text"
                 value={command}
                 onChange={(e) => setCommand(e.currentTarget.value)}
                 placeholder="例如：npx"
-                className="mt-2 w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 font-mono text-sm text-slate-900 dark:text-slate-100 shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className={cn("mt-2", MONO_INPUT_CLASS)}
               />
             </div>
 
             <div>
-              <div className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                Args（每行一个）
-              </div>
+              <div className="text-sm font-medium text-secondary-foreground">Args（每行一个）</div>
               <textarea
                 value={argsText}
                 onChange={(e) => setArgsText(e.currentTarget.value)}
                 placeholder={`例如：\n-y\n@modelcontextprotocol/server-fetch`}
                 rows={4}
-                className="mt-2 w-full resize-y rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 font-mono text-xs text-slate-900 dark:text-slate-100 shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className={cn("mt-2", MONO_TEXTAREA_CLASS)}
               />
             </div>
 
             <div>
-              <div className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                Env（环境变量）
-              </div>
+              <div className="text-sm font-medium text-secondary-foreground">Env（环境变量）</div>
               {editTarget ? (
-                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                <div className="mt-1 text-xs text-muted-foreground">
                   旧值默认不显示。留空保留，删行删除，填新值替换。
                 </div>
               ) : null}
@@ -684,35 +680,33 @@ export function McpServerDialog({
             </div>
 
             <div>
-              <div className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                CWD（可选）
-              </div>
+              <div className="text-sm font-medium text-secondary-foreground">CWD（可选）</div>
               <input
                 type="text"
                 value={cwd}
                 onChange={(e) => setCwd(e.currentTarget.value)}
                 placeholder="例如：/Users/xxx/project"
-                className="mt-2 w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 font-mono text-sm text-slate-900 dark:text-slate-100 shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className={cn("mt-2", MONO_INPUT_CLASS)}
               />
             </div>
           </>
         ) : (
           <>
             <div>
-              <div className="text-sm font-medium text-slate-700 dark:text-slate-300">URL</div>
+              <div className="text-sm font-medium text-secondary-foreground">URL</div>
               <input
                 type="text"
                 value={url}
                 onChange={(e) => setUrl(e.currentTarget.value)}
                 placeholder="例如：https://example.com/mcp"
-                className="mt-2 w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 font-mono text-sm text-slate-900 dark:text-slate-100 shadow-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className={cn("mt-2", MONO_INPUT_CLASS)}
               />
             </div>
 
             <div>
-              <div className="text-sm font-medium text-slate-700 dark:text-slate-300">Headers</div>
+              <div className="text-sm font-medium text-secondary-foreground">Headers</div>
               {editTarget ? (
-                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                <div className="mt-1 text-xs text-muted-foreground">
                   旧值默认不显示。留空保留，删行删除，填新值替换。
                 </div>
               ) : null}

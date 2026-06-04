@@ -12,32 +12,6 @@ import {
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
 
-// MDXEditor renders contentEditable which lacks a native value setter.
-// Replace with a plain textarea so fireEvent.change works in tests.
-vi.mock("@mdxeditor/editor", () => {
-  function MDXEditor(props: { markdown: string; onChange?: (v: string) => void }) {
-    return (
-      <textarea
-        role="textbox"
-        value={props.markdown}
-        onChange={(e) => props.onChange?.(e.target.value)}
-      />
-    );
-  }
-  return {
-    MDXEditor,
-    headingsPlugin: () => ({}),
-    listsPlugin: () => ({}),
-    quotePlugin: () => ({}),
-    thematicBreakPlugin: () => ({}),
-    markdownShortcutPlugin: () => ({}),
-    toolbarPlugin: () => ({}),
-    BoldItalicUnderlineToggles: () => null,
-    BlockTypeSelect: () => null,
-    ListsToggle: () => null,
-  };
-});
-
 vi.mock("../../../query/prompts", async () => {
   const actual =
     await vi.importActual<typeof import("../../../query/prompts")>("../../../query/prompts");
@@ -82,14 +56,15 @@ describe("pages/prompts/PromptsView", () => {
     fireEvent.click(screen.getByRole("button", { name: "新增提示词" }));
     const createDialog = within(screen.getByRole("dialog"));
     const [nameInput, contentTextarea] = createDialog.getAllByRole("textbox");
+    const markdownContent = "**Minimum code that solves the problem. Nothing speculative.**";
     fireEvent.change(nameInput, { target: { value: "P2" } });
-    fireEvent.change(contentTextarea, { target: { value: "" } });
+    fireEvent.change(contentTextarea, { target: { value: markdownContent } });
     fireEvent.click(createDialog.getByRole("button", { name: "保存" }));
     await waitFor(() =>
       expect(upsertMutation.mutateAsync).toHaveBeenCalledWith({
         promptId: null,
         name: "P2",
-        content: "",
+        content: markdownContent,
         enabled: false,
       })
     );

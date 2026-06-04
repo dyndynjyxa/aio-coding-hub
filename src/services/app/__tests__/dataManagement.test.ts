@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
 import {
@@ -7,6 +7,7 @@ import {
   appExit,
   appRestart,
   dbDiskUsageGet,
+  isClearRequestLogsResult,
   requestLogsClearAll,
 } from "../dataManagement";
 
@@ -37,6 +38,10 @@ vi.mock("../../consoleLog", async () => {
 });
 
 describe("services/app/dataManagement", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("rethrows invoke errors and logs", async () => {
     vi.mocked(commands.dbDiskUsageGet).mockRejectedValueOnce(new Error("data management boom"));
 
@@ -60,7 +65,7 @@ describe("services/app/dataManagement", () => {
   it("invokes data management commands with expected parameters", async () => {
     vi.mocked(commands.dbDiskUsageGet).mockResolvedValueOnce({
       status: "ok",
-      data: { total_bytes: 0 } as any,
+      data: { db_bytes: 1, wal_bytes: 2, shm_bytes: 3, total_bytes: 6 } as any,
     });
     vi.mocked(commands.requestLogsClearAll).mockResolvedValueOnce({
       status: "ok",
@@ -96,5 +101,32 @@ describe("services/app/dataManagement", () => {
 
     await appRestart();
     expect(commands.appRestart).toHaveBeenCalledWith();
+  });
+
+  it("validates generated disk usage and clear-count payloads", async () => {
+    vi.mocked(commands.dbDiskUsageGet).mockResolvedValueOnce({
+      status: "ok",
+      data: { db_bytes: 1, wal_bytes: 2, shm_bytes: 3, total_bytes: 7 } as any,
+    });
+
+    await expect(dbDiskUsageGet()).rejects.toThrow("IPC_INVALID_RESULT");
+
+    vi.mocked(commands.requestLogsClearAll).mockResolvedValueOnce({
+      status: "ok",
+      data: { request_logs_deleted: -1, request_attempt_logs_deleted: 2 } as any,
+    });
+
+    await expect(requestLogsClearAll()).rejects.toThrow("IPC_INVALID_RESULT");
+
+    expect(isClearRequestLogsResult(null)).toBe(false);
+    expect(
+      isClearRequestLogsResult({ request_logs_deleted: 1, request_attempt_logs_deleted: 2 })
+    ).toBe(true);
+    expect(
+      isClearRequestLogsResult({
+        request_logs_deleted: 1.5,
+        request_attempt_logs_deleted: 2,
+      } as any)
+    ).toBe(false);
   });
 });

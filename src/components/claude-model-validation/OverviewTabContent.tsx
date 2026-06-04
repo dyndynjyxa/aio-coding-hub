@@ -44,7 +44,7 @@ export function OverviewTabContent({
     return currentSuiteSummary ? (
       <SuiteSummaryCard summary={currentSuiteSummary} copyText={copyTextOrToast} />
     ) : (
-      <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 text-xs text-slate-600 dark:text-slate-400">
+      <div className="rounded-xl border border-border bg-white dark:bg-secondary px-4 py-3 text-xs text-muted-foreground">
         \u6682\u65e0\u7efc\u5408\u603b\u7ed3\uff08\u6267\u884c\u540e\u751f\u6210\uff09\u3002
       </div>
     );
@@ -53,7 +53,7 @@ export function OverviewTabContent({
     return historySuiteSummary ? (
       <SuiteSummaryCard summary={historySuiteSummary} copyText={copyTextOrToast} />
     ) : (
-      <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 text-xs text-slate-600 dark:text-slate-400">
+      <div className="rounded-xl border border-border bg-white dark:bg-secondary px-4 py-3 text-xs text-muted-foreground">
         \u6682\u65e0\u7efc\u5408\u603b\u7ed3\uff08\u5386\u53f2\u6570\u636e\u4e0d\u8db3\uff09\u3002
       </div>
     );
@@ -77,7 +77,7 @@ export function OverviewTabContent({
     );
   }
   return (
-    <div className="flex h-40 items-center justify-center text-xs text-slate-400 dark:text-slate-500">
+    <div className="flex h-40 items-center justify-center text-xs text-muted-foreground">
       \u6682\u65e0\u5386\u53f2\u6570\u636e
     </div>
   );
@@ -129,13 +129,13 @@ function SingleHistoryOverview({
 
   return (
     <div className="space-y-3">
-      <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3">
+      <div className="rounded-xl border border-border bg-white dark:bg-secondary px-4 py-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+            <div className="text-sm font-semibold text-foreground">
               \u9a8c\u8bc1\uff1a{getTemplateDisplayTitle(ev.template)}
             </div>
-            <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400 truncate">
+            <div className="mt-1 text-[11px] text-muted-foreground truncate">
               {meta ? `${meta} \u00b7 ` : ""}
               {ev.templateKey}
             </div>
@@ -193,52 +193,50 @@ function SingleHistoryOverview({
         result={result}
         mode="compact"
       />
-      <details className="group rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
+      <details className="group rounded-xl border border-border bg-white dark:bg-secondary shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
         <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
-          <div className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300 group-open:text-indigo-600 dark:group-open:text-indigo-400">
+          <div className="flex items-center gap-2 text-sm font-medium text-secondary-foreground group-open:text-indigo-600 dark:group-open:text-indigo-400">
             <Settings2 className="h-4 w-4" />
             <span>\u8bf7\u6c42 JSON</span>
           </div>
-          <ChevronDown className="h-4 w-4 text-slate-400 dark:text-slate-500 transition-transform group-open:rotate-180" />
+          <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
         </summary>
-        <div className="border-t border-slate-100 dark:border-slate-700 px-4 py-3">
+        <div className="border-t border-border px-4 py-3">
           <Textarea
             mono
             readOnly
-            className="h-[160px] resize-none text-[10px] leading-relaxed bg-white dark:bg-slate-900"
+            className="h-[160px] resize-none text-[10px] leading-relaxed bg-white dark:bg-card"
             value={requestText}
           />
         </div>
       </details>
-      <details className="group rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
+      <details className="group rounded-xl border border-border bg-white dark:bg-secondary shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
         <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
-          <div className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300 group-open:text-indigo-600 dark:group-open:text-indigo-400">
+          <div className="flex items-center gap-2 text-sm font-medium text-secondary-foreground group-open:text-indigo-600 dark:group-open:text-indigo-400">
             <Activity className="h-4 w-4" />
             <span>\u54cd\u5e94\u539f\u6587</span>
           </div>
-          <ChevronDown className="h-4 w-4 text-slate-400 dark:text-slate-500 transition-transform group-open:rotate-180" />
+          <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
         </summary>
-        <div className="border-t border-slate-100 dark:border-slate-700 px-4 py-3 space-y-3">
+        <div className="border-t border-border px-4 py-3 space-y-3">
           <div className="space-y-2">
-            <div className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
-              Result JSON
-            </div>
+            <div className="text-[11px] font-semibold text-secondary-foreground">Result JSON</div>
             <Textarea
               mono
               readOnly
-              className="h-[160px] resize-none text-[10px] leading-relaxed bg-white dark:bg-slate-900"
+              className="h-[160px] resize-none text-[10px] leading-relaxed bg-white dark:bg-card"
               value={resultText}
             />
           </div>
           <div className="space-y-2">
-            <div className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+            <div className="text-[11px] font-semibold text-secondary-foreground">
               SSE \u539f\u6587
             </div>
-            <pre className="scrollbar-overlay max-h-60 overflow-auto rounded-lg bg-slate-950 p-4 font-mono text-[10px] leading-relaxed text-slate-300">
+            <pre className="scrollbar-overlay max-h-60 overflow-auto rounded-lg bg-background p-4 font-mono text-[10px] leading-relaxed text-muted-foreground">
               {sseText ? (
                 sseText
               ) : (
-                <span className="text-slate-600 dark:text-slate-400 italic">
+                <span className="text-muted-foreground italic">
                   // \u6682\u65e0 SSE \u6570\u636e
                 </span>
               )}

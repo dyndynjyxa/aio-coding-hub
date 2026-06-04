@@ -31,12 +31,12 @@ export function QueryErrorCard({
           variant="secondary"
           onClick={onRetry}
           disabled={loading}
-          className="border-rose-200 bg-white text-rose-800 hover:bg-rose-50 dark:border-rose-700 dark:bg-slate-800 dark:text-rose-200 dark:hover:bg-rose-900/30"
+          className="border-rose-200 bg-white text-rose-800 hover:bg-rose-50 dark:border-rose-700 dark:bg-secondary dark:text-rose-200 dark:hover:bg-rose-900/30"
         >
           重试
         </Button>
       </div>
-      <div className="mt-3 rounded-lg border border-rose-200 bg-white/70 p-3 font-mono text-xs text-slate-800 dark:border-rose-700 dark:bg-slate-800/70 dark:text-slate-200">
+      <div className="mt-3 rounded-lg border border-rose-200 bg-white/70 p-3 font-mono text-xs text-foreground dark:border-rose-700 dark:bg-secondary/70 dark:text-foreground">
         {errorText}
       </div>
     </Card>

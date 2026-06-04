@@ -9,6 +9,7 @@ describe("ui/Textarea", () => {
     const ta = screen.getByLabelText("notes");
     expect(ta).toBeInTheDocument();
     expect(ta.tagName).toBe("TEXTAREA");
+    expect(ta).toHaveClass("bg-surface-inset", "border-line", "rounded-lg");
   });
 
   it("forwards value and onChange", () => {

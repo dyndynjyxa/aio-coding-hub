@@ -109,37 +109,35 @@ export function ClaudeModelValidationHistoryStepCard({
       open={open}
       onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
       className={cn(
-        "group/step rounded-2xl border border-slate-200/60 dark:border-slate-700/60 bg-white/50 dark:bg-slate-800/40 shadow-sm backdrop-blur-sm open:ring-2 open:ring-indigo-500/10 transition-all",
+        "group/step rounded-2xl border border-border/60 dark:border-border/60 bg-white/50 dark:bg-secondary/40 shadow-sm backdrop-blur-sm open:ring-2 open:ring-indigo-500/10 transition-all",
         className
       )}
     >
       <summary className="flex cursor-pointer items-start justify-between gap-3 px-4 py-3 select-none">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <div className="min-w-0 text-xs font-medium text-slate-700 dark:text-slate-300 truncate">
+            <div className="min-w-0 text-xs font-medium text-secondary-foreground truncate">
               {title}
             </div>
             {rightBadge ? <div className="shrink-0">{rightBadge}</div> : null}
           </div>
           {metaText ? (
-            <div className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400 truncate">
-              {metaText}
-            </div>
+            <div className="mt-0.5 text-[10px] text-muted-foreground truncate">{metaText}</div>
           ) : null}
         </div>
-        <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500 transition-transform group-open/step:rotate-180" />
+        <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open/step:rotate-180" />
       </summary>
 
-      <div className="border-t border-slate-100 dark:border-slate-700 px-4 py-3 space-y-3">
+      <div className="border-t border-border px-4 py-3 space-y-3">
         {errorText ? (
           <div className="rounded bg-rose-50 dark:bg-rose-900/30 px-2 py-1 text-xs text-rose-700 dark:text-rose-400">
             {errorText}
           </div>
         ) : null}
 
-        <details className="group rounded-xl border border-slate-200/60 dark:border-slate-700/60 bg-white/60 dark:bg-slate-800/60 shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
+        <details className="group rounded-xl border border-border/60 dark:border-border/60 bg-white/60 dark:bg-secondary/60 shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
           <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
-            <div className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300 group-open:text-indigo-600 dark:group-open:text-indigo-400">
+            <div className="flex items-center gap-2 text-sm font-medium text-secondary-foreground group-open:text-indigo-600 dark:group-open:text-indigo-400">
               <Settings2 className="h-4 w-4" />
               <span>请求 JSON</span>
             </div>
@@ -158,14 +156,14 @@ export function ClaudeModelValidationHistoryStepCard({
               >
                 <FileJson className="h-4 w-4" />
               </Button>
-              <ChevronDown className="h-4 w-4 text-slate-400 dark:text-slate-500 transition-transform group-open:rotate-180" />
+              <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
             </div>
           </summary>
-          <div className="border-t border-slate-100 dark:border-slate-700 px-4 py-3">
+          <div className="border-t border-border px-4 py-3">
             <Textarea
               mono
               readOnly
-              className="h-[140px] resize-none text-[10px] leading-relaxed bg-white dark:bg-slate-900"
+              className="h-[140px] resize-none text-[10px] leading-relaxed bg-white dark:bg-card"
               value={requestText}
             />
           </div>
@@ -177,9 +175,9 @@ export function ClaudeModelValidationHistoryStepCard({
           mode="compact"
         />
 
-        <details className="group rounded-xl border border-slate-200/60 dark:border-slate-700/60 bg-white/60 dark:bg-slate-800/60 shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
+        <details className="group rounded-xl border border-border/60 dark:border-border/60 bg-white/60 dark:bg-secondary/60 shadow-sm open:ring-2 open:ring-indigo-500/10 transition-all">
           <summary className="flex cursor-pointer items-center justify-between px-4 py-3 select-none">
-            <div className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300 group-open:text-indigo-600 dark:group-open:text-indigo-400">
+            <div className="flex items-center gap-2 text-sm font-medium text-secondary-foreground group-open:text-indigo-600 dark:group-open:text-indigo-400">
               <Activity className="h-4 w-4" />
               <span>响应原文</span>
             </div>
@@ -212,28 +210,24 @@ export function ClaudeModelValidationHistoryStepCard({
               >
                 <Copy className="h-4 w-4" />
               </Button>
-              <ChevronDown className="h-4 w-4 text-slate-400 dark:text-slate-500 transition-transform group-open:rotate-180" />
+              <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
             </div>
           </summary>
 
-          <div className="border-t border-slate-100 dark:border-slate-700 px-4 py-3 space-y-3">
+          <div className="border-t border-border px-4 py-3 space-y-3">
             <div className="space-y-2">
-              <div className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
-                Result JSON
-              </div>
+              <div className="text-[11px] font-semibold text-secondary-foreground">Result JSON</div>
               <Textarea
                 mono
                 readOnly
-                className="h-[160px] resize-none text-[10px] leading-relaxed bg-white dark:bg-slate-900"
+                className="h-[160px] resize-none text-[10px] leading-relaxed bg-white dark:bg-card"
                 value={resultText || ""}
               />
             </div>
 
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <div className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
-                  SSE 原文
-                </div>
+                <div className="text-[11px] font-semibold text-secondary-foreground">SSE 原文</div>
                 <Button
                   onClick={(e) => {
                     stopDetailsToggle(e);
@@ -249,13 +243,11 @@ export function ClaudeModelValidationHistoryStepCard({
                   <Copy className="h-4 w-4" />
                 </Button>
               </div>
-              <pre className="scrollbar-overlay max-h-60 overflow-auto rounded-lg bg-slate-950 p-4 font-mono text-[10px] leading-relaxed text-slate-300">
+              <pre className="scrollbar-overlay max-h-60 overflow-auto rounded-lg bg-background p-4 font-mono text-[10px] leading-relaxed text-muted-foreground">
                 {sseText ? (
                   sseText
                 ) : (
-                  <span className="text-slate-600 dark:text-slate-400 italic">
-                    // 暂无 SSE 数据
-                  </span>
+                  <span className="text-muted-foreground italic">// 暂无 SSE 数据</span>
                 )}
               </pre>
             </div>

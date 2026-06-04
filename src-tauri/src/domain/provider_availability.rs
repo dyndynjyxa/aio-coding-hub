@@ -12,6 +12,8 @@ use std::time::{Duration, Instant};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+const PROBE_RESPONSE_BODY_LIMIT: usize = 64 * 1024;
+const PROBE_RESPONSE_PREVIEW_LIMIT: usize = 500;
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct ProviderAvailabilityResult {
@@ -34,6 +36,73 @@ struct LoadedProvider {
     auth_mode: String,
     source_provider_id: Option<i64>,
     bridge_type: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProbeResponseBody {
+    bytes: Vec<u8>,
+    truncated: bool,
+    limit: usize,
+}
+
+fn append_probe_response_chunk(bytes: &mut Vec<u8>, chunk: &[u8], limit: usize) -> bool {
+    let remaining = limit.saturating_sub(bytes.len());
+    if remaining == 0 {
+        return !chunk.is_empty();
+    }
+
+    let keep = chunk.len().min(remaining);
+    bytes.extend_from_slice(&chunk[..keep]);
+    keep < chunk.len()
+}
+
+async fn read_probe_response_body_with_limit(
+    mut resp: reqwest::Response,
+    limit: usize,
+) -> Result<ProbeResponseBody, String> {
+    let content_length = resp.content_length();
+    let mut truncated = content_length.is_some_and(|len| len > limit as u64);
+    let capacity = content_length
+        .and_then(|len| usize::try_from(len).ok())
+        .unwrap_or_default()
+        .min(limit);
+    let mut bytes = Vec::with_capacity(capacity);
+
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| format!("failed to read probe response: {e}"))?
+    {
+        if append_probe_response_chunk(&mut bytes, chunk.as_ref(), limit) {
+            truncated = true;
+            break;
+        }
+        if bytes.len() >= limit && content_length != Some(limit as u64) {
+            truncated = true;
+            break;
+        }
+    }
+
+    Ok(ProbeResponseBody {
+        bytes,
+        truncated,
+        limit,
+    })
+}
+
+fn probe_response_preview(body: &ProbeResponseBody) -> String {
+    let preview_len = body.bytes.len().min(PROBE_RESPONSE_PREVIEW_LIMIT);
+    let mut preview = String::from_utf8_lossy(&body.bytes[..preview_len]).to_string();
+    if body.truncated {
+        if !preview.is_empty() {
+            preview.push('\n');
+        }
+        preview.push_str(&format!(
+            "[probe response truncated after {} bytes]",
+            body.limit
+        ));
+    }
+    preview
 }
 
 async fn load_provider_for_test(db: db::Db, provider_id: i64) -> AppResult<LoadedProvider> {
@@ -266,9 +335,14 @@ pub async fn test_provider_availability(
     match result {
         Ok(resp) => {
             let status = resp.status().as_u16();
-            let body_bytes = resp.bytes().await.unwrap_or_default();
-            let preview =
-                String::from_utf8_lossy(&body_bytes[..body_bytes.len().min(500)]).to_string();
+            let body = read_probe_response_body_with_limit(resp, PROBE_RESPONSE_BODY_LIMIT)
+                .await
+                .unwrap_or_else(|_| ProbeResponseBody {
+                    bytes: Vec::new(),
+                    truncated: false,
+                    limit: PROBE_RESPONSE_BODY_LIMIT,
+                });
+            let preview = probe_response_preview(&body);
             // Provider is "available" if the endpoint responds without an auth
             // failure or upstream 5xx. 400/404 model errors and 429 rate limits
             // still prove the configured base URL and credential reached the
@@ -279,7 +353,7 @@ pub async fn test_provider_availability(
             let error = if ok {
                 None
             } else {
-                let msg = serde_json::from_slice::<serde_json::Value>(&body_bytes)
+                let msg = serde_json::from_slice::<serde_json::Value>(&body.bytes)
                     .ok()
                     .and_then(|v| {
                         v.get("error").and_then(|e| {
@@ -397,6 +471,29 @@ mod tests {
             "连接失败: https://host/v1beta/models?alt=sse&key=***&other=1"
         );
         assert!(!redacted.contains("sk-secret"));
+    }
+
+    #[test]
+    fn append_probe_response_chunk_keeps_bounded_prefix() {
+        let mut bytes = b"abcd".to_vec();
+        let truncated = append_probe_response_chunk(&mut bytes, b"efgh", 6);
+
+        assert_eq!(bytes, b"abcdef");
+        assert!(truncated);
+    }
+
+    #[test]
+    fn probe_response_preview_marks_truncated_payloads() {
+        let preview = probe_response_preview(&ProbeResponseBody {
+            bytes: b"upstream error".to_vec(),
+            truncated: true,
+            limit: 12,
+        });
+
+        assert_eq!(
+            preview,
+            "upstream error\n[probe response truncated after 12 bytes]"
+        );
     }
 
     #[test]

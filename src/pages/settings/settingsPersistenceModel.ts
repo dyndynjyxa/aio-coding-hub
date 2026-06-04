@@ -71,6 +71,10 @@ export const DEFAULT_PERSISTED_SETTINGS: PersistedSettings = {
   circuit_breaker_open_duration_minutes: 30,
 };
 
+const MAX_FAILOVER_ATTEMPTS_PER_PROVIDER = 20;
+const MAX_FAILOVER_PROVIDERS_TO_TRY = 20;
+const MAX_FAILOVER_TOTAL_ATTEMPTS = 100;
+
 const PERSISTED_SETTINGS_INPUT_KEYS = [
   "preferredPort",
   "showHomeHeatmap",
@@ -212,62 +216,44 @@ export function buildPersistedSettingsMutationInput(desired: PersistedSettings):
   return pickSettingsSetInputFieldsFromView(desired, PERSISTED_SETTINGS_INPUT_KEYS);
 }
 
+function isIntegerInRange(value: number, min: number, max: number) {
+  return Number.isInteger(value) && value >= min && value <= max;
+}
+
 export function validatePersistedSettings(desired: PersistedSettings, keys: PersistKey[]) {
   if (keys.includes("preferred_port")) {
-    if (
-      !Number.isFinite(desired.preferred_port) ||
-      desired.preferred_port < 1024 ||
-      desired.preferred_port > 65535
-    ) {
+    if (!isIntegerInRange(desired.preferred_port, 1024, 65535)) {
       return "端口号必须为 1024-65535";
     }
   }
 
   if (keys.includes("log_retention_days")) {
-    if (
-      !Number.isFinite(desired.log_retention_days) ||
-      desired.log_retention_days < 1 ||
-      desired.log_retention_days > 3650
-    ) {
+    if (!isIntegerInRange(desired.log_retention_days, 1, 3650)) {
       return "日志保留必须为 1-3650 天";
     }
   }
 
   if (keys.includes("provider_cooldown_seconds")) {
-    if (
-      !Number.isFinite(desired.provider_cooldown_seconds) ||
-      desired.provider_cooldown_seconds < 0 ||
-      desired.provider_cooldown_seconds > 3600
-    ) {
+    if (!isIntegerInRange(desired.provider_cooldown_seconds, 0, 3600)) {
       return "短熔断冷却必须为 0-3600 秒";
     }
   }
 
   if (keys.includes("provider_base_url_ping_cache_ttl_seconds")) {
-    if (
-      !Number.isFinite(desired.provider_base_url_ping_cache_ttl_seconds) ||
-      desired.provider_base_url_ping_cache_ttl_seconds < 1 ||
-      desired.provider_base_url_ping_cache_ttl_seconds > 3600
-    ) {
+    if (!isIntegerInRange(desired.provider_base_url_ping_cache_ttl_seconds, 1, 3600)) {
       return "Ping 选择缓存 TTL 必须为 1-3600 秒";
     }
   }
 
   if (keys.includes("upstream_first_byte_timeout_seconds")) {
-    if (
-      !Number.isFinite(desired.upstream_first_byte_timeout_seconds) ||
-      desired.upstream_first_byte_timeout_seconds < 0 ||
-      desired.upstream_first_byte_timeout_seconds > 3600
-    ) {
+    if (!isIntegerInRange(desired.upstream_first_byte_timeout_seconds, 0, 3600)) {
       return "上游首字节超时必须为 0-3600 秒";
     }
   }
 
   if (keys.includes("upstream_stream_idle_timeout_seconds")) {
     if (
-      !Number.isFinite(desired.upstream_stream_idle_timeout_seconds) ||
-      desired.upstream_stream_idle_timeout_seconds < 0 ||
-      desired.upstream_stream_idle_timeout_seconds > 3600 ||
+      !isIntegerInRange(desired.upstream_stream_idle_timeout_seconds, 0, 3600) ||
       (desired.upstream_stream_idle_timeout_seconds > 0 &&
         desired.upstream_stream_idle_timeout_seconds < 60)
     ) {
@@ -276,31 +262,48 @@ export function validatePersistedSettings(desired: PersistedSettings, keys: Pers
   }
 
   if (keys.includes("upstream_request_timeout_non_streaming_seconds")) {
-    if (
-      !Number.isFinite(desired.upstream_request_timeout_non_streaming_seconds) ||
-      desired.upstream_request_timeout_non_streaming_seconds < 0 ||
-      desired.upstream_request_timeout_non_streaming_seconds > 86400
-    ) {
+    if (!isIntegerInRange(desired.upstream_request_timeout_non_streaming_seconds, 0, 86400)) {
       return "上游非流式总超时必须为 0-86400 秒";
     }
   }
 
-  if (keys.includes("circuit_breaker_failure_threshold")) {
+  if (keys.includes("failover_max_attempts_per_provider")) {
     if (
-      !Number.isFinite(desired.circuit_breaker_failure_threshold) ||
-      desired.circuit_breaker_failure_threshold < 1 ||
-      desired.circuit_breaker_failure_threshold > 50
+      !isIntegerInRange(
+        desired.failover_max_attempts_per_provider,
+        1,
+        MAX_FAILOVER_ATTEMPTS_PER_PROVIDER
+      )
     ) {
+      return `单个 Provider 重试次数必须为 1-${MAX_FAILOVER_ATTEMPTS_PER_PROVIDER}`;
+    }
+  }
+
+  if (keys.includes("failover_max_providers_to_try")) {
+    if (
+      !isIntegerInRange(desired.failover_max_providers_to_try, 1, MAX_FAILOVER_PROVIDERS_TO_TRY)
+    ) {
+      return `Provider 尝试数量必须为 1-${MAX_FAILOVER_PROVIDERS_TO_TRY}`;
+    }
+  }
+
+  if (
+    (keys.includes("failover_max_attempts_per_provider") ||
+      keys.includes("failover_max_providers_to_try")) &&
+    desired.failover_max_attempts_per_provider * desired.failover_max_providers_to_try >
+      MAX_FAILOVER_TOTAL_ATTEMPTS
+  ) {
+    return `Provider 重试总量必须不超过 ${MAX_FAILOVER_TOTAL_ATTEMPTS}`;
+  }
+
+  if (keys.includes("circuit_breaker_failure_threshold")) {
+    if (!isIntegerInRange(desired.circuit_breaker_failure_threshold, 1, 50)) {
       return "熔断阈值必须为 1-50";
     }
   }
 
   if (keys.includes("circuit_breaker_open_duration_minutes")) {
-    if (
-      !Number.isFinite(desired.circuit_breaker_open_duration_minutes) ||
-      desired.circuit_breaker_open_duration_minutes < 1 ||
-      desired.circuit_breaker_open_duration_minutes > 1440
-    ) {
+    if (!isIntegerInRange(desired.circuit_breaker_open_duration_minutes, 1, 1440)) {
       return "熔断时长必须为 1-1440 分钟";
     }
   }

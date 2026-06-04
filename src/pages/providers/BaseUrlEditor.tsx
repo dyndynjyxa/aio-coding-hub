@@ -101,7 +101,7 @@ export function BaseUrlEditor({
         const pinging = row.ping.status === "pinging";
         const pingBadge =
           row.ping.status === "pinging" ? (
-            <span className="text-xs text-slate-400">…</span>
+            <span className="text-xs text-muted-foreground">…</span>
           ) : row.ping.status === "ok" ? (
             <span className="font-mono text-xs text-emerald-600">{row.ping.ms}ms</span>
           ) : row.ping.status === "error" ? (

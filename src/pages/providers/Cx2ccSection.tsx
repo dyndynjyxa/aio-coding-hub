@@ -164,31 +164,33 @@ function Cx2ccGatewaySourceInfo(props: {
   const { codexGatewayBaseUrl, cx2ccFallbackModels, claudeModels } = props;
 
   return (
-    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-400">
+    <div className="rounded-md border border-border bg-secondary px-3 py-2.5 text-xs text-muted-foreground dark:border-border dark:bg-secondary/50 dark:text-muted-foreground">
       <p>
         已选择
-        <span className="mx-1 font-medium text-slate-700 dark:text-slate-200">
+        <span className="mx-1 font-medium text-secondary-foreground dark:text-foreground">
           当前 AIO 服务 Codex 网关
         </span>
       </p>
       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] leading-5">
         <span>
           认证：
-          <span className="ml-1 text-slate-700 dark:text-slate-200">App Token</span>
+          <span className="ml-1 text-secondary-foreground dark:text-foreground">App Token</span>
         </span>
         <span>
           价格倍率：
-          <span className="ml-1 font-mono text-slate-700 dark:text-slate-200">免费</span>
+          <span className="ml-1 font-mono text-secondary-foreground dark:text-foreground">
+            免费
+          </span>
         </span>
         <span className="min-w-0 max-w-full truncate" title={codexGatewayBaseUrl}>
           Base URL：
-          <span className="ml-1 font-mono text-slate-700 dark:text-slate-200">
+          <span className="ml-1 font-mono text-secondary-foreground dark:text-foreground">
             {codexGatewayBaseUrl}
           </span>
         </span>
         <span>
           Token：
-          <span className="ml-1 font-mono text-slate-700 dark:text-slate-200">
+          <span className="ml-1 font-mono text-secondary-foreground dark:text-foreground">
             {CX2CC_PROXY_TOKEN}
           </span>
         </span>
@@ -212,21 +214,23 @@ function Cx2ccProviderSourceInfo(props: {
   const { provider, cx2ccFallbackModels, claudeModels } = props;
 
   return (
-    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-400">
+    <div className="rounded-md border border-border bg-secondary px-3 py-2.5 text-xs text-muted-foreground dark:border-border dark:bg-secondary/50 dark:text-muted-foreground">
       <p>
         已选择
-        <span className="mx-1 font-medium text-slate-700 dark:text-slate-200">{provider.name}</span>
+        <span className="mx-1 font-medium text-secondary-foreground dark:text-foreground">
+          {provider.name}
+        </span>
       </p>
       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] leading-5">
         <span>
           认证：
-          <span className="ml-1 text-slate-700 dark:text-slate-200">
+          <span className="ml-1 text-secondary-foreground dark:text-foreground">
             {provider.auth_mode === "oauth" ? "OAuth" : "API Key"}
           </span>
         </span>
         <span>
           价格倍率：
-          <span className="ml-1 font-mono text-slate-700 dark:text-slate-200">
+          <span className="ml-1 font-mono text-secondary-foreground dark:text-foreground">
             x{provider.cost_multiplier.toFixed(2)}
           </span>
         </span>
@@ -235,7 +239,7 @@ function Cx2ccProviderSourceInfo(props: {
           title={provider.base_urls[0] ?? "跟随网关默认路由"}
         >
           Base URL：
-          <span className="ml-1 font-mono text-slate-700 dark:text-slate-200">
+          <span className="ml-1 font-mono text-secondary-foreground dark:text-foreground">
             {provider.base_urls[0] ?? "跟随网关默认路由"}
           </span>
         </span>
@@ -257,19 +261,19 @@ function Cx2ccFallbackModelsInfo(props: {
   return (
     <p className="mt-1 text-[11px] leading-5">
       当前模型映射： 主模型
-      <span className="mx-1 font-mono text-slate-700 dark:text-slate-200">
+      <span className="mx-1 font-mono text-secondary-foreground dark:text-foreground">
         {effectiveCx2ccModel(claudeModels.main_model, cx2ccFallbackModels?.main)}
       </span>
       / Haiku
-      <span className="mx-1 font-mono text-slate-700 dark:text-slate-200">
+      <span className="mx-1 font-mono text-secondary-foreground dark:text-foreground">
         {effectiveCx2ccModel(claudeModels.haiku_model, cx2ccFallbackModels?.haiku)}
       </span>
       / Sonnet
-      <span className="mx-1 font-mono text-slate-700 dark:text-slate-200">
+      <span className="mx-1 font-mono text-secondary-foreground dark:text-foreground">
         {effectiveCx2ccModel(claudeModels.sonnet_model, cx2ccFallbackModels?.sonnet)}
       </span>
       / Opus
-      <span className="mx-1 font-mono text-slate-700 dark:text-slate-200">
+      <span className="mx-1 font-mono text-secondary-foreground dark:text-foreground">
         {effectiveCx2ccModel(claudeModels.opus_model, cx2ccFallbackModels?.opus)}
       </span>
     </p>

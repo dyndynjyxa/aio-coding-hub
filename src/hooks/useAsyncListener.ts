@@ -20,7 +20,14 @@ export function useAsyncListener(
     let cancelled = false;
     let cleanup: (() => void) | null = null;
 
-    subscribe()
+    let subscription: Promise<() => void>;
+    try {
+      subscription = subscribe();
+    } catch (error) {
+      subscription = Promise.reject(error);
+    }
+
+    subscription
       .then((unlisten) => {
         if (cancelled) {
           unlisten();

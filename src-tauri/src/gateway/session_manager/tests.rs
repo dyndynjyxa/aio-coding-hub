@@ -281,6 +281,45 @@ fn extract_session_id_fallback_supports_input_string_shape() {
 }
 
 #[test]
+fn extract_session_id_fallback_samples_large_input_text_with_tail() {
+    let headers = HeaderMap::new();
+    let prefix = "a".repeat(SESSION_FINGERPRINT_TEXT_SAMPLE_BYTES + 1024);
+    let body1 = serde_json::json!({ "input": format!("{prefix}tail-a") });
+    let body2 = serde_json::json!({ "input": format!("{prefix}tail-b") });
+
+    let id1 = SessionManager::extract_session_id_from_json(&headers, Some(&body1)).expect("sid 1");
+    let id2 = SessionManager::extract_session_id_from_json(&headers, Some(&body2)).expect("sid 2");
+
+    assert_ne!(id1, id2);
+}
+
+#[test]
+fn extract_session_id_fallback_bounds_content_part_scanning() {
+    let headers = HeaderMap::new();
+    let mut parts = Vec::new();
+    for index in 0..SESSION_FINGERPRINT_CONTENT_PARTS_MAX_ITEMS {
+        parts.push(serde_json::json!({ "text": format!("part-{index};") }));
+    }
+
+    let mut parts_with_extra_a = parts.clone();
+    parts_with_extra_a.push(serde_json::json!({ "text": "ignored-a" }));
+    let mut parts_with_extra_b = parts;
+    parts_with_extra_b.push(serde_json::json!({ "text": "ignored-b" }));
+
+    let body1 = serde_json::json!({
+        "messages": [{ "role": "user", "content": parts_with_extra_a }]
+    });
+    let body2 = serde_json::json!({
+        "messages": [{ "role": "user", "content": parts_with_extra_b }]
+    });
+
+    let id1 = SessionManager::extract_session_id_from_json(&headers, Some(&body1)).expect("sid 1");
+    let id2 = SessionManager::extract_session_id_from_json(&headers, Some(&body2)).expect("sid 2");
+
+    assert_eq!(id1, id2);
+}
+
+#[test]
 fn extract_session_id_fallback_distinguishes_different_api_keys() {
     let body = serde_json::json!({ "messages": [{ "role": "user", "content": "hello" }] });
 
@@ -292,4 +331,44 @@ fn extract_session_id_fallback_distinguishes_different_api_keys() {
     let id1 = SessionManager::extract_session_id_from_json(&h1, Some(&body)).expect("sid 1");
     let id2 = SessionManager::extract_session_id_from_json(&h2, Some(&body)).expect("sid 2");
     assert_ne!(id1, id2);
+}
+
+#[test]
+fn sanitize_session_id_truncates_without_splitting_utf8() {
+    let raw = format!("{}{}", "a".repeat(MAX_SESSION_ID_LEN - 1), "é");
+
+    let sanitized = sanitize_session_id(&raw).expect("sanitized");
+
+    assert_eq!(sanitized.len(), MAX_SESSION_ID_LEN - 1);
+    assert!(sanitized.ends_with('a'));
+}
+
+#[test]
+fn sanitize_session_id_removes_log_injection_controls_before_truncating() {
+    let raw = format!("{}\n{}", "a".repeat(MAX_SESSION_ID_LEN), "tail");
+
+    let sanitized = sanitize_session_id(&raw).expect("sanitized");
+
+    assert_eq!(sanitized.len(), MAX_SESSION_ID_LEN);
+    assert!(!sanitized.contains('\n'));
+}
+
+#[test]
+fn sanitize_deterministic_part_truncates_without_splitting_utf8() {
+    let raw = format!("{}{}", "a".repeat(MAX_SESSION_ID_LEN - 1), "é");
+
+    let sanitized = sanitize_deterministic_part(&raw).expect("sanitized");
+
+    assert_eq!(sanitized.len(), MAX_SESSION_ID_LEN - 1);
+    assert!(sanitized.ends_with('a'));
+}
+
+#[test]
+fn sanitize_deterministic_part_removes_log_injection_controls_before_truncating() {
+    let raw = format!("{}\n{}", "a".repeat(MAX_SESSION_ID_LEN), "tail");
+
+    let sanitized = sanitize_deterministic_part(&raw).expect("sanitized");
+
+    assert_eq!(sanitized.len(), MAX_SESSION_ID_LEN);
+    assert!(!sanitized.contains('\n'));
 }

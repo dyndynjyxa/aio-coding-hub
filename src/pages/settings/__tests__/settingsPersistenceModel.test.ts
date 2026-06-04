@@ -105,6 +105,36 @@ describe("pages/settings/settingsPersistenceModel", () => {
     ).toBeNull();
   });
 
+  it("validates failover bounds and total attempt product", () => {
+    expect(
+      validatePersistedSettings(
+        applyPersistedSettingsPatch(DEFAULT_PERSISTED_SETTINGS, {
+          failover_max_attempts_per_provider: 0,
+        }),
+        ["failover_max_attempts_per_provider"]
+      )
+    ).toBe("单个 Provider 重试次数必须为 1-20");
+
+    expect(
+      validatePersistedSettings(
+        applyPersistedSettingsPatch(DEFAULT_PERSISTED_SETTINGS, {
+          failover_max_providers_to_try: 21,
+        }),
+        ["failover_max_providers_to_try"]
+      )
+    ).toBe("Provider 尝试数量必须为 1-20");
+
+    expect(
+      validatePersistedSettings(
+        applyPersistedSettingsPatch(DEFAULT_PERSISTED_SETTINGS, {
+          failover_max_attempts_per_provider: 20,
+          failover_max_providers_to_try: 20,
+        }),
+        ["failover_max_attempts_per_provider", "failover_max_providers_to_try"]
+      )
+    ).toBe("Provider 重试总量必须不超过 100");
+  });
+
   it("builds the generated settings mutation payload from persisted draft state", () => {
     const input = buildPersistedSettingsMutationInput(
       applyPersistedSettingsPatch(DEFAULT_PERSISTED_SETTINGS, {

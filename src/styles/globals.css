@@ -4,130 +4,282 @@
 
 @layer base {
   :root {
-    /* shadcn standard semantic tokens (HSL values without wrapper) */
-    --background: 210 40% 98%;
-    --foreground: 222.2 84% 4.9%;
+    /* shadcn standard semantic tokens (Glacial Cobalt & Steel Slate) */
+    --background: 220 15% 98%;
+    --foreground: 220 40% 10%;
 
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 220 40% 10%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover-foreground: 220 40% 10%;
 
-    --primary: 220 100% 50%;
+    --primary: 221 83% 53%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 220 20% 30%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 10% 50%;
 
-    --accent: 220 100% 50%;
+    --accent: 221 83% 53%;
     --accent-foreground: 0 0% 100%;
 
-    --destructive: 0 84.2% 60.2%;
+    --destructive: 0 80% 55%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 220 100% 50%;
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 221 83% 53%;
 
-    --radius: 0.5rem;
+    --radius: 0.875rem;
 
-    /* Chart palette */
-    --chart-1: 220 100% 50%;
-    --chart-2: 271 81.3% 55.9%;
-    --chart-3: 152 56.8% 39.6%;
-    --chart-4: 27.5 95.8% 53.1%;
-    --chart-5: 199.4 89.7% 48.4%;
+    /* Heatmap styling tokens (premium ecosystem GitHub Green) */
+    --heatmap-l0: hsl(220 10% 93% / 0.8);
+    --heatmap-l1: hsl(138 48% 85%);
+    --heatmap-l2: hsl(138 52% 68%);
+    --heatmap-l3: hsl(138 60% 48%);
+    --heatmap-l4: hsl(138 65% 34%);
+    --heatmap-l4-glow: 0 0 6px hsla(138 65% 34% / 0.25);
+
+    /* Glass and route-accent surfaces */
+    --glass-surface: 0 0% 100% / 0.8;
+    --glass-border: 0 0% 0% / 0.05;
+    --page-accent-color: 221 83% 53%;
+    --page-secondary-color: 198 85% 48%;
+    --chart-active-dot-fill: 0 0% 100%;
+    --shadow-page-accent-soft: 0 0 8px hsla(var(--page-accent-color) / 0.55);
+    --drop-shadow-page-accent: 0 0 8px hsla(var(--page-accent-color) / 0.2);
+    --theme-option-light: 38 92% 50%;
+    --theme-option-dark: 262 83% 58%;
+    --theme-option-system: 199 89% 48%;
+
+    /* Sidebar control center */
+    --sidebar-control: 0 0% 100% / 0.8;
+    --sidebar-control-border: 220 13% 91% / 0.8;
+    --sidebar-control-muted: 220 14% 96% / 0.8;
+    --sidebar-control-inset: 220 16% 93% / 0.9;
+    --sidebar-option-active: 0 0% 100%;
+    --shadow-sidebar-control: 0 8px 30px rgb(0 0 0 / 0.02);
+    --shadow-sidebar-control-hover: 0 12px 40px rgb(0 0 0 / 0.05);
+    --shadow-sidebar-option: 0 1px 3px rgb(0 0 0 / 0.1);
+
+    /* Live trace premium cards */
+    --trace-live-from: 0 0% 100% / 0.95;
+    --trace-live-to: 220 14% 98% / 0.95;
+    --trace-metric-surface: 220 14% 96% / 0.5;
+    --trace-metric-border: 220 13% 91%;
+    --shadow-pill-subtle: 0 1px 2px rgb(0 0 0 / 0.01);
+    --shadow-trace-metric: 0 2px 8px hsla(var(--page-accent-color) / 0.04);
+    --shadow-trace-card: inset 0 1px 1px rgb(255 255 255 / 0.9), 0 1px 2px rgb(0 0 0 / 0.01);
+    --shadow-trace-card-hover: 0 4px 12px rgb(59 130 246 / 0.04);
+    --shadow-trace-panel-hover: 0 8px 20px -4px rgb(0 0 0 / 0.15);
+    --shadow-trace-panel-live-hover: 0 8px 30px rgb(0 0 0 / 0.35);
+    --shadow-request-log-selected:
+      0 4px 16px rgb(37 99 235 / 0.06), inset 0 1px 1.5px rgb(255 255 255 / 0.6);
+    --shadow-request-log-hover: 0 4px 12px rgb(0 0 0 / 0.03);
+    --shadow-request-log-hover-dark: 0 8px 24px rgb(0 0 0 / 0.35);
+
+    /* Elevation scale (three semantic tiers — single source of truth) */
+    --shadow-elevated: 0 1px 2px rgb(15 23 42 / 0.04);
+    --shadow-panel: 0 8px 24px -6px rgb(15 23 42 / 0.12), 0 2px 6px -2px rgb(15 23 42 / 0.06);
+    --shadow-dialog: 0 18px 48px rgb(15 23 42 / 0.18);
+
+    /* Desktop surface hierarchy (Glacial Cobalt & Steel Slate) */
+    --surface-canvas: 220 15% 98%;
+    --surface-panel: 0 0% 100%;
+    --surface-raised: 0 0% 100%;
+    --surface-inset: 220 14% 96%;
+    --surface-muted: 220 14% 94%;
+
+    --border-subtle: 220 14% 94%;
+    --border-default: 220 13% 90%;
+    --border-strong: 220 12% 80%;
+
+    --state-hover: 220 14% 94%;
+    --state-selected: 221 80% 96%;
+    --state-selected-foreground: 221 90% 40%;
+    --state-selected-border: 221 80% 85%;
+
+    /* Chart palette (Glacial Cobalt developer tones) */
+    --chart-1: 221 83% 53%;
+    --chart-2: 215 25% 27%;
+    --chart-3: 198 85% 48%;
+    --chart-4: 142 45% 44%;
+    --chart-5: 38 85% 48%;
 
     /* Sidebar tokens */
-    --sidebar: 0 0% 100%;
-    --sidebar-foreground: 222.2 84% 4.9%;
-    --sidebar-primary: 222.2 84% 4.9%;
-    --sidebar-primary-foreground: 210 40% 98%;
-    --sidebar-accent: 210 40% 96.1%;
-    --sidebar-accent-foreground: 222.2 47.4% 11.2%;
-    --sidebar-border: 214.3 31.8% 91.4%;
-    --sidebar-ring: 220 100% 50%;
+    --sidebar: 220 20% 96%;
+    --sidebar-foreground: 220 40% 12%;
+    --sidebar-primary: 221 83% 53%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 14% 94%;
+    --sidebar-accent-foreground: 220 20% 30%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 221 83% 53%;
+    --sidebar-panel: 0 0% 100%;
+    --sidebar-muted: 220 14% 94%;
 
     /* Scrollbar */
-    --color-scrollbar: rgba(148, 163, 184, 0.3);
-    --color-scrollbar-hover: rgba(148, 163, 184, 0.6);
-    --color-scrollbar-active: rgba(100, 116, 139, 0.7);
+    --scrollbar-width: 8px;
+    --scrollbar-height: 8px;
+    --scrollbar-track: transparent;
+    --color-scrollbar: rgba(15, 23, 42, 0.16);
+    --color-scrollbar-hover: rgba(15, 23, 42, 0.32);
+    --color-scrollbar-active: rgba(30, 98, 236, 0.55);
 
     /* Legacy bridge (deprecated — migrate to shadcn tokens above) */
     --color-bg-primary: #f8fafc;
     --color-bg-secondary: #f1f5f9;
     --color-bg-card: #ffffff;
     --color-text-primary: #0f172a;
-    --color-text-secondary: #475569;
-    --color-text-muted: #94a3b8;
-    --color-border: #e2e8f0;
-    --color-border-light: #f1f5f9;
+    --color-text-secondary: #334155;
+    --color-text-muted: #64748b;
+    --color-border: rgba(15, 23, 42, 0.05);
+    --color-border-light: rgba(15, 23, 42, 0.02);
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
+    --background: 222 35% 7%;
+    --foreground: 220 15% 90%;
 
-    --card: 217.2 32.6% 17.5%;
-    --card-foreground: 210 40% 98%;
+    --card: 222 25% 10%;
+    --card-foreground: 220 15% 90%;
 
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
+    --popover: 222 25% 10%;
+    --popover-foreground: 220 15% 90%;
 
-    --primary: 220 100% 50%;
+    --primary: 217 91% 60%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary: 222 20% 12%;
+    --secondary-foreground: 220 15% 90%;
 
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
+    --muted: 222 20% 12%;
+    --muted-foreground: 220 10% 60%;
 
-    --accent: 220 100% 50%;
+    --accent: 217 91% 60%;
     --accent-foreground: 0 0% 100%;
 
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 65% 45%;
+    --destructive-foreground: 220 15% 90%;
 
-    --border: 215 25% 27%;
-    --input: 215 25% 27%;
-    --ring: 220 100% 60%;
+    --border: 222 18% 15%;
+    --input: 222 18% 15%;
+    --ring: 217 91% 60%;
+
+    /* Heatmap styling tokens (dark adaptive premium ecosystem GitHub Green) */
+    --heatmap-l0: hsl(220 16% 14%);
+    --heatmap-l1: hsl(142 50% 16%);
+    --heatmap-l2: hsl(140 52% 26%);
+    --heatmap-l3: hsl(138 60% 42%);
+    --heatmap-l4: hsl(138 72% 62%);
+    --heatmap-l4-glow: 0 0 8px hsla(138 72% 62% / 0.45);
+
+    /* Glass and route-accent surfaces */
+    --glass-surface: var(--card) / 0.85;
+    --glass-border: 0 0% 100% / 0.1;
+    --page-accent-color: 217 91% 60%;
+    --page-secondary-color: 198 85% 58%;
+    --chart-active-dot-fill: 215 25% 27%;
+    --shadow-page-accent-soft: 0 0 8px hsla(var(--page-accent-color) / 0.55);
+    --drop-shadow-page-accent: 0 0 8px hsla(var(--page-accent-color) / 0.2);
+    --theme-option-light: 38 90% 55%;
+    --theme-option-dark: 263 90% 65%;
+    --theme-option-system: 199 90% 60%;
+
+    /* Sidebar control center */
+    --sidebar-control: 220 16% 13% / 0.55;
+    --sidebar-control-border: 220 14% 18% / 0.65;
+    --sidebar-control-muted: 220 12% 19% / 0.8;
+    --sidebar-control-inset: 220 20% 6% / 0.4;
+    --sidebar-option-active: 220 12% 19%;
+    --shadow-sidebar-control: 0 8px 30px rgb(0 0 0 / 0.2);
+    --shadow-sidebar-control-hover: 0 12px 40px rgb(0 0 0 / 0.3);
+    --shadow-sidebar-option: 0 1px 2.5px rgb(0 0 0 / 0.06);
+
+    /* Live trace premium cards */
+    --trace-live-from: 222 33% 11% / 0.95;
+    --trace-live-to: 220 34% 15% / 0.95;
+    --trace-metric-surface: 220 24% 16% / 0.6;
+    --trace-metric-border: 218 25% 22%;
+    --shadow-pill-subtle: 0 1px 2px rgb(0 0 0 / 0.02);
+    --shadow-trace-metric: 0 2px 8px hsla(var(--page-accent-color) / 0.04);
+    --shadow-trace-card: inset 0 1px 1px rgb(255 255 255 / 0.03);
+    --shadow-trace-card-hover: 0 4px 16px rgb(0 0 0 / 0.3);
+    --shadow-trace-panel-hover: 0 8px 24px rgb(0 0 0 / 0.35);
+    --shadow-trace-panel-live-hover: 0 8px 30px rgb(0 0 0 / 0.35);
+    --shadow-request-log-selected:
+      0 4px 24px rgb(0 0 0 / 0.35), inset 0 1px 1px rgb(255 255 255 / 0.02);
+    --shadow-request-log-hover: 0 4px 12px rgb(0 0 0 / 0.03);
+    --shadow-request-log-hover-dark: 0 8px 24px rgb(0 0 0 / 0.35);
+
+    /* Elevation scale (dark — deeper to read on dark surfaces) */
+    --shadow-elevated: 0 1px 2px rgb(0 0 0 / 0.3);
+    --shadow-panel: 0 8px 24px -6px rgb(0 0 0 / 0.45), 0 2px 6px -2px rgb(0 0 0 / 0.3);
+    --shadow-dialog: 0 18px 48px rgb(0 0 0 / 0.55);
+
+    /* Desktop surface hierarchy (dark) */
+    --surface-canvas: 222 35% 7%;
+    --surface-panel: 222 25% 10%;
+    --surface-raised: 220 18% 13%;
+    --surface-inset: 222 30% 8%;
+    --surface-muted: 222 25% 8.5%;
+
+    --border-subtle: 222 20% 12%;
+    --border-default: 222 18% 15%;
+    --border-strong: 222 18% 22%;
+
+    --state-hover: 220 12% 21%;
+    --state-selected: 217 50% 24%;
+    --state-selected-foreground: 217 90% 85%;
+    --state-selected-border: 217 80% 40%;
 
     /* Chart palette (dark) */
-    --chart-1: 220 100% 60%;
-    --chart-2: 271 91% 65%;
-    --chart-3: 152 60% 52%;
-    --chart-4: 27 96% 61%;
-    --chart-5: 199 90% 58%;
+    --chart-1: 217 91% 60%;
+    --chart-2: 215 20% 65%;
+    --chart-3: 198 85% 58%;
+    --chart-4: 142 45% 52%;
+    --chart-5: 38 85% 58%;
 
     /* Sidebar tokens (dark) */
-    --sidebar: 222.2 84% 4.9%;
-    --sidebar-foreground: 210 40% 98%;
-    --sidebar-primary: 210 40% 96.1%;
-    --sidebar-primary-foreground: 222.2 84% 4.9%;
-    --sidebar-accent: 217.2 32.6% 17.5%;
-    --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 215 25% 27%;
-    --sidebar-ring: 220 100% 60%;
+    --sidebar: 220 16% 13%;
+    --sidebar-foreground: 220 15% 90%;
+    --sidebar-primary: 217 91% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 12% 19%;
+    --sidebar-accent-foreground: 220 15% 90%;
+    --sidebar-border: 220 14% 18%;
+    --sidebar-ring: 217 91% 60%;
+    --sidebar-panel: 220 12% 19%;
+    --sidebar-muted: 220 16% 15%;
 
     /* Scrollbar */
-    --color-scrollbar: rgba(148, 163, 184, 0.2);
-    --color-scrollbar-hover: rgba(148, 163, 184, 0.4);
-    --color-scrollbar-active: rgba(148, 163, 184, 0.5);
+    --color-scrollbar: rgba(255, 255, 255, 0.18);
+    --color-scrollbar-hover: rgba(255, 255, 255, 0.32);
+    --color-scrollbar-active: rgba(59, 130, 246, 0.55);
 
     /* Legacy bridge (deprecated) */
-    --color-bg-primary: #0f172a;
-    --color-bg-secondary: #1e293b;
-    --color-bg-card: #1e293b;
-    --color-text-primary: #f1f5f9;
+    --color-bg-primary: #22252e;
+    --color-bg-secondary: #1c1e24;
+    --color-bg-card: #2f323c;
+    --color-text-primary: #e2e8f0;
     --color-text-secondary: #94a3b8;
     --color-text-muted: #64748b;
-    --color-border: #334155;
-    --color-border-light: #1e293b;
+    --color-border: rgba(255, 255, 255, 0.05);
+    --color-border-light: rgba(255, 255, 255, 0.01);
+  }
+
+  /* Base heading family/color only; explicit Tailwind classes own size and weight. */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: "Plus Jakarta Sans", "DM Sans", ui-sans-serif, system-ui, sans-serif;
+    color: hsl(var(--foreground));
   }
 }
 
@@ -142,6 +294,7 @@ body {
   background: hsl(var(--background));
   color: hsl(var(--foreground));
   font-family:
+    "DM Sans",
     ui-sans-serif,
     system-ui,
     -apple-system,
@@ -158,13 +311,51 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Premium Global Custom Scrollbar Style for all elements */
+::-webkit-scrollbar {
+  width: var(--scrollbar-width, 8px);
+  height: var(--scrollbar-height, 8px);
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track, transparent);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-scrollbar);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 9999px;
+  transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-scrollbar-hover);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:active {
+  background: var(--color-scrollbar-active);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+/* Firefox scrollbar compatibility */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar) transparent;
+}
+
 /* Custom scrollbar - overlay style, minimal footprint */
 .scrollbar-overlay {
   overflow-y: overlay; /* WebKit: scrollbar overlays content, doesn't take space */
   scrollbar-gutter: auto;
 }
 
-/* Fallback for non-WebKit browsers */
+/* Fallback for non-WebKit browsers (Firefox / most Linux WebKitGTK builds):
+   overflow:overlay is unsupported, so reserve gutter space to avoid the
+   scrollbar pushing fixed-width panels (e.g. the 248px Sidebar) on scroll. */
 @supports not (overflow-y: overlay) {
   .scrollbar-overlay {
     overflow-y: auto;
@@ -172,37 +363,29 @@ body {
   }
 }
 
-.scrollbar-overlay::-webkit-scrollbar {
-  width: 6px;
-  background: transparent;
+/* Scrollbar Utility Classes */
+.scrollbar-none {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none !important;
 }
 
-.scrollbar-overlay::-webkit-scrollbar-track {
-  background: transparent;
+.scrollbar-thin::-webkit-scrollbar {
+  width: 5px !important;
+  height: 5px !important;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  border-width: 1px !important;
 }
 
-.scrollbar-overlay::-webkit-scrollbar-thumb {
-  background: var(--color-scrollbar);
-  border-radius: 3px;
-  transition: background 0.2s ease;
+.scrollbar-thick::-webkit-scrollbar {
+  width: 12px !important;
+  height: 12px !important;
 }
-
-.scrollbar-overlay:hover::-webkit-scrollbar-thumb {
-  background: var(--color-scrollbar-hover);
-}
-
-.scrollbar-overlay::-webkit-scrollbar-thumb:hover {
-  background: var(--color-scrollbar-active);
-}
-
-/* Firefox */
-.scrollbar-overlay {
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-scrollbar) transparent;
-}
-
-.scrollbar-overlay:hover {
-  scrollbar-color: var(--color-scrollbar-hover) transparent;
+.scrollbar-thick::-webkit-scrollbar-thumb {
+  border-width: 3px !important;
 }
 
 /* Loading bar animation for in-progress indicators */
@@ -223,13 +406,13 @@ body {
   0%,
   100% {
     box-shadow:
-      0 0 0 0 rgba(99, 102, 241, 0),
+      0 0 0 0 rgba(30, 98, 236, 0),
       0 1px 2px rgba(15, 23, 42, 0.04);
   }
   50% {
     box-shadow:
-      0 0 0 3px rgba(99, 102, 241, 0.12),
-      0 2px 8px rgba(99, 102, 241, 0.1);
+      0 0 0 3px rgba(30, 98, 236, 0.12),
+      0 2px 8px rgba(30, 98, 236, 0.1);
   }
 }
 
@@ -242,13 +425,13 @@ body {
   0%,
   100% {
     box-shadow:
-      0 0 0 0 rgba(99, 102, 241, 0),
+      0 0 0 0 rgba(59, 130, 246, 0),
       0 1px 2px rgba(0, 0, 0, 0.2);
   }
   50% {
     box-shadow:
-      0 0 0 3px rgba(99, 102, 241, 0.2),
-      0 2px 8px rgba(99, 102, 241, 0.15);
+      0 0 0 3px rgba(59, 130, 246, 0.2),
+      0 2px 8px rgba(59, 130, 246, 0.15);
   }
 }
 
@@ -277,9 +460,9 @@ body {
 .indicator-shimmer-active {
   background: linear-gradient(
     90deg,
-    rgba(99, 102, 241, 0.85) 0%,
-    rgba(129, 140, 248, 1) 40%,
-    rgba(99, 102, 241, 0.85) 100%
+    rgba(30, 98, 236, 0.85) 0%,
+    rgba(51, 65, 85, 1) 40%,
+    rgba(30, 98, 236, 0.85) 100%
   );
   background-size: 200% 100%;
   animation: indicator-shimmer 2.5s ease-in-out infinite;
@@ -288,63 +471,188 @@ body {
 .dark .indicator-shimmer-active {
   background: linear-gradient(
     90deg,
-    rgba(99, 102, 241, 0.7) 0%,
-    rgba(165, 180, 252, 0.9) 40%,
-    rgba(99, 102, 241, 0.7) 100%
+    rgba(59, 130, 246, 0.7) 0%,
+    rgba(148, 163, 184, 0.9) 40%,
+    rgba(59, 130, 246, 0.7) 100%
   );
   background-size: 200% 100%;
 }
 
 /* Gradient Mesh - Linear style grid with gradient halos */
 .bg-grid-pattern {
-  background-color: var(--color-bg-primary);
+  background-color: hsl(var(--background));
   background-image:
-    /* Top-left blue gradient halo - more visible */
+    /* Top-left custom gradient halo */
     radial-gradient(
       ellipse 100% 80% at 0% 0%,
-      rgba(59, 130, 246, 0.12) 0%,
-      rgba(59, 130, 246, 0.04) 30%,
+      hsla(var(--page-accent-color, 221 83% 53%) / 0.07) 0%,
+      hsla(var(--page-accent-color, 221 83% 53%) / 0.02) 30%,
       transparent 60%
     ),
-    /* Bottom-right purple gradient halo - more visible */
+    /* Bottom-right sky blue gradient halo */
     radial-gradient(
         ellipse 80% 100% at 100% 100%,
-        rgba(139, 92, 246, 0.1) 0%,
-        rgba(139, 92, 246, 0.03) 30%,
+        hsla(var(--page-secondary-color, 198 85% 48%) / 0.05) 0%,
+        hsla(var(--page-secondary-color, 198 85% 48%) / 0.01) 30%,
         transparent 60%
       ),
-    /* Base grid lines */ linear-gradient(to right, rgba(148, 163, 184, 0.12) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(148, 163, 184, 0.12) 1px, transparent 1px);
+    /* Base grid lines (Classic clean linear grid optimized for visibility) */
+    linear-gradient(to right, rgba(148, 163, 184, 0.15) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.15) 1px, transparent 1px);
   background-size:
     100% 100%,
     100% 100%,
-    24px 24px,
-    24px 24px;
+    32px 32px,
+    32px 32px;
   background-attachment: fixed;
 }
 
-/* Dark mode grid pattern */
+/* Dark mode grid pattern (Classic clean linear grid optimized for visibility in dark mode) */
 .dark .bg-grid-pattern {
-  background-color: var(--color-bg-primary);
+  background-color: hsl(var(--background));
   background-image:
+    /* Top-left custom gradient halo */
     radial-gradient(
       ellipse 100% 80% at 0% 0%,
-      rgba(59, 130, 246, 0.08) 0%,
-      rgba(59, 130, 246, 0.02) 30%,
+      hsla(var(--page-accent-color, 217 91% 60%) / 0.08) 0%,
+      hsla(var(--page-accent-color, 217 91% 60%) / 0.02) 30%,
       transparent 60%
     ),
+    /* Bottom-right sky blue gradient halo */
     radial-gradient(
-      ellipse 80% 100% at 100% 100%,
-      rgba(139, 92, 246, 0.06) 0%,
-      rgba(139, 92, 246, 0.02) 30%,
-      transparent 60%
-    ),
-    linear-gradient(to right, rgba(148, 163, 184, 0.06) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(148, 163, 184, 0.06) 1px, transparent 1px);
+        ellipse 80% 100% at 100% 100%,
+        hsla(var(--page-secondary-color, 198 85% 58%) / 0.06) 0%,
+        hsla(var(--page-secondary-color, 198 85% 58%) / 0.01) 30%,
+        transparent 60%
+      ),
+    /* Base grid lines */ linear-gradient(to right, rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
   background-size:
     100% 100%,
     100% 100%,
-    24px 24px,
-    24px 24px;
+    32px 32px,
+    32px 32px;
   background-attachment: fixed;
+}
+
+/* Page color themes (HSL format) */
+.theme-blue {
+  --page-accent-color: 221 83% 53%;
+  --page-secondary-color: 198 85% 48%;
+}
+.dark .theme-blue {
+  --page-accent-color: 217 91% 60%;
+  --page-secondary-color: 198 85% 58%;
+}
+
+.theme-cyan {
+  --page-accent-color: 188 86% 43%;
+  --page-secondary-color: 198 85% 48%;
+}
+.dark .theme-cyan {
+  --page-accent-color: 188 90% 50%;
+  --page-secondary-color: 198 85% 58%;
+}
+
+.theme-violet {
+  --page-accent-color: 262 83% 58%;
+  --page-secondary-color: 292 84% 50%;
+}
+.dark .theme-violet {
+  --page-accent-color: 263 90% 65%;
+  --page-secondary-color: 292 90% 65%;
+}
+
+.theme-emerald {
+  --page-accent-color: 142 71% 45%;
+  --page-secondary-color: 160 84% 39%;
+}
+.dark .theme-emerald {
+  --page-accent-color: 142 70% 50%;
+  --page-secondary-color: 160 80% 45%;
+}
+
+.theme-amber {
+  --page-accent-color: 38 92% 50%;
+  --page-secondary-color: 48 96% 48%;
+}
+.dark .theme-amber {
+  --page-accent-color: 38 90% 55%;
+  --page-secondary-color: 48 90% 50%;
+}
+
+.theme-indigo {
+  --page-accent-color: 239 84% 59%;
+  --page-secondary-color: 262 83% 58%;
+}
+.dark .theme-indigo {
+  --page-accent-color: 239 90% 66%;
+  --page-secondary-color: 263 90% 65%;
+}
+
+.theme-pink {
+  --page-accent-color: 327 73% 53%;
+  --page-secondary-color: 292 84% 50%;
+}
+.dark .theme-pink {
+  --page-accent-color: 327 90% 65%;
+  --page-secondary-color: 292 90% 65%;
+}
+
+.theme-orange {
+  --page-accent-color: 24 90% 50%;
+  --page-secondary-color: 38 92% 50%;
+}
+.dark .theme-orange {
+  --page-accent-color: 24 95% 55%;
+  --page-secondary-color: 38 90% 55%;
+}
+
+.theme-sky {
+  --page-accent-color: 199 89% 48%;
+  --page-secondary-color: 188 86% 43%;
+}
+.dark .theme-sky {
+  --page-accent-color: 199 90% 60%;
+  --page-secondary-color: 188 90% 50%;
+}
+
+.theme-rose {
+  --page-accent-color: 343 89% 55%;
+  --page-secondary-color: 326 78% 50%;
+}
+.dark .theme-rose {
+  --page-accent-color: 343 90% 60%;
+  --page-secondary-color: 326 80% 55%;
+}
+
+.theme-slate {
+  --page-accent-color: 220 9% 46%;
+  --page-secondary-color: 220 13% 91%;
+}
+.dark .theme-slate {
+  --page-accent-color: 220 10% 60%;
+  --page-secondary-color: 220 14% 18%;
+}
+
+/* Sidebar Nav Item Themes */
+.sidebar-active-item {
+  background-color: hsl(var(--primary)) !important;
+  color: hsl(var(--primary-foreground)) !important;
+  border-color: hsl(var(--primary)) !important;
+  box-shadow: 0 4px 10px 0 hsla(var(--primary) / 0.15) !important;
+}
+.dark .sidebar-active-item {
+  background-color: hsl(var(--primary)) !important;
+  color: hsl(var(--primary-foreground)) !important;
+  border-color: hsl(var(--primary)) !important;
+  box-shadow: 0 4px 10px 0 hsla(var(--primary) / 0.25) !important;
+}
+
+.group.nav-link-item {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.group.nav-link-item:active {
+  transform: scale(0.97);
 }

@@ -764,6 +764,7 @@ INSERT INTO skills(
     assert!(test_has_column(&conn, "providers", "limit_weekly_usd"));
     assert!(test_has_column(&conn, "providers", "limit_monthly_usd"));
     assert!(test_has_column(&conn, "providers", "limit_total_usd"));
+    assert!(test_has_column(&conn, "skills", "installed_content_hash"));
 
     let claude_default_ws_id: i64 = conn
         .query_row(
@@ -904,6 +905,7 @@ fn baseline_v25_creates_complete_schema_for_fresh_install() {
     assert!(test_has_column(&conn, "providers", "limit_5h_usd"));
     assert!(test_has_column(&conn, "providers", "limit_daily_usd"));
     assert!(test_has_column(&conn, "providers", "tags_json"));
+    assert!(test_has_column(&conn, "skills", "installed_content_hash"));
 
     // Verify v25->v26 migration ran (claude_models_json)
     assert!(test_has_column(&conn, "providers", "claude_models_json"));
@@ -1109,6 +1111,7 @@ PRAGMA user_version = 33;
     assert!(test_has_column(&conn, "providers", "limit_weekly_usd"));
     assert!(test_has_column(&conn, "providers", "limit_monthly_usd"));
     assert!(test_has_column(&conn, "providers", "limit_total_usd"));
+    assert!(test_has_column(&conn, "skills", "installed_content_hash"));
 
     let active_id: i64 = conn
         .query_row(

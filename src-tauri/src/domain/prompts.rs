@@ -22,6 +22,19 @@ pub struct PromptSummary {
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct PromptListSummary {
+    pub id: i64,
+    pub workspace_id: i64,
+    pub cli_key: String,
+    pub name: String,
+    pub enabled: bool,
+    pub content_len: i64,
+    pub content_preview: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct DefaultPromptSyncItem {
     pub cli_key: String,
     pub action: String,
@@ -45,6 +58,20 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<PromptSummary, rusqlite::Er
         name: row.get("name")?,
         content: row.get("content")?,
         enabled: row.get::<_, i64>("enabled")? != 0,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+    })
+}
+
+fn row_to_list_summary(row: &rusqlite::Row<'_>) -> Result<PromptListSummary, rusqlite::Error> {
+    Ok(PromptListSummary {
+        id: row.get("id")?,
+        workspace_id: row.get("workspace_id")?,
+        cli_key: row.get("cli_key")?,
+        name: row.get("name")?,
+        enabled: row.get::<_, i64>("enabled")? != 0,
+        content_len: row.get("content_len")?,
+        content_preview: row.get("content_preview")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
     })
@@ -116,6 +143,46 @@ pub fn list_by_workspace(
     let mut items = Vec::new();
     for row in rows {
         items.push(row.map_err(|e| db_err!("failed to read prompt row: {e}"))?);
+    }
+
+    Ok(items)
+}
+
+pub fn list_summaries_by_workspace(
+    db: &db::Db,
+    workspace_id: i64,
+) -> crate::shared::error::AppResult<Vec<PromptListSummary>> {
+    let conn = db.open_connection()?;
+    let _ = workspaces::get_cli_key_by_id(&conn, workspace_id)?;
+
+    let mut stmt = conn
+        .prepare_cached(
+            r#"
+    SELECT
+      p.id,
+      p.workspace_id,
+      w.cli_key,
+      p.name,
+      p.enabled,
+      length(p.content) AS content_len,
+      substr(p.content, 1, 240) AS content_preview,
+      p.created_at,
+      p.updated_at
+    FROM prompts p
+    JOIN workspaces w ON w.id = p.workspace_id
+    WHERE p.workspace_id = ?1
+    ORDER BY p.id DESC
+    "#,
+        )
+        .map_err(|e| db_err!("failed to prepare prompt summary query: {e}"))?;
+
+    let rows = stmt
+        .query_map(params![workspace_id], row_to_list_summary)
+        .map_err(|e| db_err!("failed to list prompt summaries: {e}"))?;
+
+    let mut items = Vec::new();
+    for row in rows {
+        items.push(row.map_err(|e| db_err!("failed to read prompt summary row: {e}"))?);
     }
 
     Ok(items)

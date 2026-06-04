@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef } from "react";
 import { gatewayEventNames } from "../../../constants/gatewayEvents";
+import { useCoalescedAsyncRefresh } from "../../../hooks/useCoalescedAsyncRefresh";
 import { useWindowForeground } from "../../../hooks/useWindowForeground";
 import { logToConsole } from "../../../services/consoleLog";
 import { subscribeGatewayEvent } from "../../../services/gateway/gatewayEventBus";
-import { isGatewayRequestSignalEvent } from "../../../services/gateway/gatewayEvents";
+import { normalizeGatewayRequestSignalEvent } from "../../../services/gateway/gatewayEvents";
 import { isRequestSignalComplete } from "../../../services/gateway/requestLogState";
 
 type RefreshSource = "request_signal.complete" | "foreground" | "manual";
@@ -30,80 +31,23 @@ export function useHomeFreshnessOwner({
 }: UseHomeFreshnessOwnerOptions) {
   const active = overviewActive && foregroundActive;
   const refreshWindowMs = resolveRequestLogsRefreshWindowMs(requestLogsRefreshWindowMs);
-  const timerRef = useRef<number | null>(null);
-  const queuedRef = useRef(false);
-  const inFlightRef = useRef(false);
-  const activeRef = useRef(active);
   const previousActiveRef = useRef(active);
-  const onRefreshRequestLogsRef = useRef(onRefreshRequestLogs);
-
-  useEffect(() => {
-    onRefreshRequestLogsRef.current = onRefreshRequestLogs;
-  }, [onRefreshRequestLogs]);
-
-  const clearQueuedRefresh = useCallback(() => {
-    if (timerRef.current != null) {
-      window.clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    queuedRef.current = false;
-  }, []);
-
-  const flushRequestLogs = useCallback(
-    (source: RefreshSource): Promise<unknown> | null => {
-      if (!activeRef.current) {
-        clearQueuedRefresh();
-        return null;
-      }
-
-      if (inFlightRef.current) {
-        queuedRef.current = true;
-        return null;
-      }
-
-      queuedRef.current = false;
-      inFlightRef.current = true;
-
-      return onRefreshRequestLogsRef
-        .current()
-        .catch((error) => {
-          logToConsole("warn", "首页请求记录刷新失败", {
-            source,
-            error: String(error),
-          });
-          throw error;
-        })
-        .finally(() => {
-          inFlightRef.current = false;
-          if (!queuedRef.current || !activeRef.current) {
-            queuedRef.current = false;
-            return;
-          }
-          queuedRef.current = false;
-          void flushRequestLogs(source);
-        });
+  const {
+    clearQueued: clearQueuedRefresh,
+    flush: flushRequestLogs,
+    schedule: scheduleRequestLogsRefresh,
+  } = useCoalescedAsyncRefresh<RefreshSource, unknown>({
+    enabled: active,
+    delayMs: refreshWindowMs,
+    task: () => onRefreshRequestLogs(),
+    onError: (error, source) => {
+      logToConsole("warn", "首页请求记录刷新失败", {
+        source,
+        error: String(error),
+      });
+      return { error };
     },
-    [clearQueuedRefresh]
-  );
-
-  const scheduleRequestLogsRefresh = useCallback(
-    (source: RefreshSource) => {
-      if (!activeRef.current) {
-        return;
-      }
-
-      if (timerRef.current != null) {
-        queuedRef.current = true;
-        return;
-      }
-
-      timerRef.current = window.setTimeout(() => {
-        timerRef.current = null;
-        void flushRequestLogs(source);
-      }, refreshWindowMs);
-    },
-    [flushRequestLogs, refreshWindowMs]
-  );
+  });
 
   const refreshRequestLogsNow = useCallback(() => {
     return flushRequestLogs("manual") ?? Promise.resolve(null);
@@ -120,7 +64,6 @@ export function useHomeFreshnessOwner({
   useEffect(() => {
     const wasActive = previousActiveRef.current;
     previousActiveRef.current = active;
-    activeRef.current = active;
     if (!active) {
       clearQueuedRefresh();
       return;
@@ -138,11 +81,12 @@ export function useHomeFreshnessOwner({
 
     let cancelled = false;
     const requestSignalSub = subscribeGatewayEvent(gatewayEventNames.requestSignal, (payload) => {
-      if (cancelled || !isGatewayRequestSignalEvent(payload)) {
+      const requestSignal = normalizeGatewayRequestSignalEvent(payload);
+      if (cancelled || !requestSignal) {
         return;
       }
 
-      if (!isRequestSignalComplete(payload)) {
+      if (!isRequestSignalComplete(requestSignal)) {
         return;
       }
 
@@ -172,13 +116,6 @@ export function useHomeFreshnessOwner({
       requestSignalSub.unsubscribe();
     };
   }, [active, scheduleRequestLogsRefresh]);
-
-  useEffect(() => {
-    return () => {
-      clearQueuedRefresh();
-      inFlightRef.current = false;
-    };
-  }, [clearQueuedRefresh]);
 
   return {
     refreshRequestLogsNow,

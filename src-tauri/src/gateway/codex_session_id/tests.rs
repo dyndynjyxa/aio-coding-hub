@@ -209,3 +209,126 @@ fn fingerprint_cache_reuses_with_same_credential() {
     assert_eq!(result2.action, "reused_fingerprint_cache");
     assert_eq!(result1.session_id, result2.session_id);
 }
+
+#[test]
+fn fingerprint_hash_samples_large_message_text_with_tail() {
+    let headers = HeaderMap::new();
+    let prefix = "a".repeat(FINGERPRINT_TEXT_SAMPLE_BYTES + 1024);
+    let body1 = serde_json::json!({
+        "input": [{ "type": "message", "content": format!("{prefix}tail-a") }]
+    });
+    let body2 = serde_json::json!({
+        "input": [{ "type": "message", "content": format!("{prefix}tail-b") }]
+    });
+
+    assert_ne!(
+        calculate_fingerprint_hash(&headers, Some(&body1)),
+        calculate_fingerprint_hash(&headers, Some(&body2))
+    );
+}
+
+#[test]
+fn fingerprint_hash_bounds_content_part_scanning() {
+    let headers = HeaderMap::new();
+    let mut parts = Vec::new();
+    for index in 0..FINGERPRINT_CONTENT_PARTS_MAX_ITEMS {
+        parts.push(serde_json::json!({ "text": format!("part-{index};") }));
+    }
+
+    let mut parts_with_extra_a = parts.clone();
+    parts_with_extra_a.push(serde_json::json!({ "text": "ignored-a" }));
+    let mut parts_with_extra_b = parts;
+    parts_with_extra_b.push(serde_json::json!({ "text": "ignored-b" }));
+
+    let body1 = serde_json::json!({
+        "input": [{ "type": "message", "content": parts_with_extra_a }]
+    });
+    let body2 = serde_json::json!({
+        "input": [{ "type": "message", "content": parts_with_extra_b }]
+    });
+
+    assert_eq!(
+        calculate_fingerprint_hash(&headers, Some(&body1)),
+        calculate_fingerprint_hash(&headers, Some(&body2))
+    );
+}
+
+fn cache_entry(index: usize, expires_at_unix: i64) -> CacheEntry {
+    CacheEntry {
+        session_id: format!("cached-session-{index:04}"),
+        expires_at_unix,
+    }
+}
+
+#[test]
+fn prune_cache_removes_expired_entries_and_keeps_fresh_entries() {
+    let mut cache = CodexSessionIdCache::default();
+    cache.entries.insert("expired".into(), cache_entry(0, 100));
+    cache.entries.insert("fresh".into(), cache_entry(1, 101));
+
+    prune_cache(&mut cache, 100);
+
+    assert!(!cache.entries.contains_key("expired"));
+    assert!(cache.entries.contains_key("fresh"));
+}
+
+#[test]
+fn prune_cache_trims_oldest_entries_without_clearing_cache() {
+    let mut cache = CodexSessionIdCache::default();
+    for index in 0..(MAX_CACHE_ENTRIES + 2) {
+        cache.entries.insert(
+            format!("fingerprint-{index}"),
+            cache_entry(index, 1_000 + index as i64),
+        );
+    }
+
+    prune_cache(&mut cache, 1);
+
+    assert_eq!(cache.entries.len(), MAX_CACHE_ENTRIES);
+    assert!(!cache.entries.contains_key("fingerprint-0"));
+    assert!(!cache.entries.contains_key("fingerprint-1"));
+    assert!(cache.entries.contains_key("fingerprint-2"));
+    assert!(cache
+        .entries
+        .contains_key(&format!("fingerprint-{}", MAX_CACHE_ENTRIES + 1)));
+}
+
+#[test]
+fn fingerprint_cache_evicts_oldest_entry_when_inserting_at_capacity() {
+    let mut cache = CodexSessionIdCache::default();
+    for index in 0..MAX_CACHE_ENTRIES {
+        cache.entries.insert(
+            format!("fingerprint-{index}"),
+            cache_entry(index, 1_000 + index as i64),
+        );
+    }
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "authorization",
+        HeaderValue::from_static("Bearer capacity_test_key"),
+    );
+    headers.insert("x-real-ip", HeaderValue::from_static("1.2.3.4"));
+    headers.insert("user-agent", HeaderValue::from_static("ua"));
+    let body = serde_json::json!({
+        "input": [
+            { "type": "message", "content": "capacity test" }
+        ]
+    });
+    let fingerprint_hash = calculate_fingerprint_hash(&headers, Some(&body));
+    assert!(!cache.entries.contains_key(&fingerprint_hash));
+
+    let (session_id, _, _) =
+        get_or_create_from_fingerprint(&mut cache, 10, 10_000, &headers, Some(&body));
+
+    assert_eq!(cache.entries.len(), MAX_CACHE_ENTRIES);
+    assert!(!cache.entries.contains_key("fingerprint-0"));
+    assert!(cache.entries.contains_key("fingerprint-1"));
+    assert_eq!(
+        cache
+            .entries
+            .get(&fingerprint_hash)
+            .map(|entry| entry.session_id.as_str()),
+        Some(session_id.as_str())
+    );
+}

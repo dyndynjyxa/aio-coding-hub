@@ -13,7 +13,7 @@ export function TagsField(props: {
 
   return (
     <FormField label="标签" hint="按 Enter 添加标签">
-      <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 shadow-sm dark:border-slate-600 dark:bg-slate-800 dark:shadow-none">
+      <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-lg border border-border bg-white px-3 shadow-sm dark:border-border dark:bg-secondary dark:shadow-none">
         {tags.map((tag) => (
           <span key={tag} className={tagBadgeClassName(tag)}>
             {tag}
@@ -45,7 +45,7 @@ export function TagsField(props: {
             setTagInput("");
           }}
           placeholder={tags.length === 0 ? "输入标签后按 Enter" : ""}
-          className="min-w-[80px] flex-1 border-none bg-transparent text-sm outline-none placeholder:text-slate-400"
+          className="min-w-[80px] flex-1 border-none bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           disabled={saving}
         />
       </div>

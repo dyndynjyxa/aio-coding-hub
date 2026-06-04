@@ -24,10 +24,10 @@ export function ModelCombobox({
           type="button"
           disabled={disabled}
           className={cn(
-            "flex h-10 w-full items-center justify-between rounded-md border border-slate-200 dark:border-slate-700",
-            "bg-white/80 dark:bg-slate-900/80 px-3 text-xs font-mono shadow-sm",
+            "flex h-10 w-full items-center justify-between rounded-md border border-border",
+            "bg-white/80 dark:bg-card/80 px-3 text-xs font-mono shadow-sm",
             "focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50",
-            !value.trim() && "text-slate-400 dark:text-slate-500"
+            !value.trim() && "text-muted-foreground"
           )}
         >
           <span className="truncate">{value.trim() || "选择或输入模型..."}</span>
@@ -35,7 +35,7 @@ export function ModelCombobox({
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0">
-        <div className="border-b border-slate-100 dark:border-slate-700 px-2 py-1.5">
+        <div className="border-b border-border px-2 py-1.5">
           <input
             ref={inputRef}
             value={value}
@@ -45,7 +45,7 @@ export function ModelCombobox({
             }}
             placeholder="输入模型名称..."
             autoFocus
-            className="h-8 w-full rounded-md border-0 bg-transparent px-1 text-xs font-mono focus:outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500"
+            className="h-8 w-full rounded-md border-0 bg-transparent px-1 text-xs font-mono focus:outline-none placeholder:text-muted-foreground dark:placeholder:text-muted-foreground"
           />
         </div>
         <div className="max-h-48 overflow-y-auto py-1">
@@ -55,8 +55,8 @@ export function ModelCombobox({
               type="button"
               className={cn(
                 "flex w-full items-center gap-2 px-3 py-1.5 text-xs font-mono text-left",
-                "hover:bg-slate-100 dark:hover:bg-slate-700/60 transition-colors",
-                m === value && "bg-slate-50 dark:bg-slate-700/40"
+                "hover:bg-secondary dark:hover:bg-secondary/60 transition-colors",
+                m === value && "bg-secondary dark:bg-secondary/40"
               )}
               onClick={() => {
                 onChange(m);

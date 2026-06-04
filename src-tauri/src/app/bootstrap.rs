@@ -9,6 +9,7 @@ pub(crate) fn setup(app: &mut tauri::App<tauri::Wry>) -> Result<(), Box<dyn std:
     crate::app::heartbeat_watchdog::install(app.handle());
     install_panic_hook();
     init_desktop_integrations(app);
+    init_main_window_chrome(app);
     log_dev_diagnostics(app);
     crate::app::startup_tasks::spawn(app.handle().clone());
     Ok(())
@@ -53,6 +54,14 @@ fn init_desktop_integrations(app: &mut tauri::App<tauri::Wry>) {
         if let Err(err) = resident::setup_tray(app.handle()) {
             tracing::error!("system tray initialization failed: {}", err);
         }
+    }
+}
+
+fn init_main_window_chrome(app: &tauri::App<tauri::Wry>) {
+    use tauri::Manager;
+
+    if let Some(window) = app.get_webview_window("main") {
+        crate::app::window_chrome::apply_main_window_chrome(&window);
     }
 }
 

@@ -243,6 +243,205 @@ fn failures_older_than_window_not_counted() {
 }
 
 #[test]
+fn should_allow_prunes_expired_closed_failures_and_removes_inert_entry() {
+    let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+    let cb = CircuitBreaker::new(
+        CircuitBreakerConfig {
+            failure_threshold: 3,
+            open_duration_secs: 60,
+        },
+        HashMap::new(),
+        Some(tx),
+    );
+    let provider_id = 1;
+    let now = 1_000;
+
+    cb.record_failure(provider_id, now);
+    let _ = rx.try_recv().expect("failure state persisted");
+    assert_eq!(cb.health.lock().expect("health lock").len(), 1);
+
+    let later = now + (FAILURE_WINDOW_SECS as i64) + 1;
+    let check = cb.should_allow(provider_id, later);
+
+    assert!(check.allow);
+    assert_eq!(check.after.state, CircuitState::Closed);
+    assert_eq!(check.after.failure_count, 0);
+    assert_eq!(cb.health.lock().expect("health lock").len(), 0);
+
+    let persisted = rx.try_recv().expect("pruned state persisted");
+    assert_eq!(persisted.provider_id, provider_id);
+    assert_eq!(persisted.state, CircuitState::Closed);
+    assert!(persisted.failure_timestamps.is_empty());
+}
+
+#[test]
+fn persist_queue_full_keeps_latest_state_in_bounded_backlog_and_flushes_later() {
+    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+    let cb = CircuitBreaker::new(
+        CircuitBreakerConfig {
+            failure_threshold: 3,
+            open_duration_secs: 60,
+        },
+        HashMap::new(),
+        Some(tx),
+    );
+    let now = 1_000;
+
+    cb.record_failure(1, now);
+    cb.record_failure(2, now);
+
+    {
+        let backlog = cb.persist_backlog.lock().expect("backlog lock");
+        assert!(backlog.contains_key(&2));
+    }
+
+    let first = rx.try_recv().expect("first state queued");
+    assert_eq!(first.provider_id, 1);
+
+    cb.record_failure(3, now);
+
+    let flushed = rx.try_recv().expect("backlog state flushed first");
+    assert_eq!(flushed.provider_id, 2);
+
+    let backlog = cb.persist_backlog.lock().expect("backlog lock");
+    assert!(!backlog.contains_key(&2));
+    assert!(backlog.contains_key(&3));
+}
+
+#[tokio::test]
+async fn persist_backlog_flushes_in_background_without_future_state_changes() {
+    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+    let cb = CircuitBreaker::new(
+        CircuitBreakerConfig {
+            failure_threshold: 3,
+            open_duration_secs: 60,
+        },
+        HashMap::new(),
+        Some(tx),
+    );
+    let now = 1_000;
+
+    cb.record_failure(1, now);
+    cb.record_failure(2, now);
+
+    {
+        let backlog = cb.persist_backlog.lock().expect("backlog lock");
+        assert!(backlog.contains_key(&2));
+    }
+
+    let first = rx.recv().await.expect("first state queued");
+    assert_eq!(first.provider_id, 1);
+
+    let flushed = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv())
+        .await
+        .expect("background backlog flush should not require another circuit update")
+        .expect("backlog state queued");
+    assert_eq!(flushed.provider_id, 2);
+
+    let backlog = cb.persist_backlog.lock().expect("backlog lock");
+    assert!(backlog.is_empty());
+}
+
+#[tokio::test]
+async fn persist_backlog_background_flush_sends_latest_state_after_waiting_for_capacity() {
+    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+    let cb = CircuitBreaker::new(
+        CircuitBreakerConfig {
+            failure_threshold: 3,
+            open_duration_secs: 60,
+        },
+        HashMap::new(),
+        Some(tx),
+    );
+    let now = 1_000;
+
+    cb.record_failure(1, now);
+    cb.record_failure(2, now);
+    cb.record_failure(2, now + 1);
+
+    let first = rx.recv().await.expect("first state queued");
+    assert_eq!(first.provider_id, 1);
+
+    let flushed = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv())
+        .await
+        .expect("background backlog flush should resume when capacity is available")
+        .expect("backlog state queued");
+    assert_eq!(flushed.provider_id, 2);
+    assert_eq!(flushed.updated_at, now + 1);
+    assert_eq!(
+        flushed.failure_timestamps,
+        vec![now as u64, (now + 1) as u64]
+    );
+}
+
+fn persisted_state(provider_id: i64, updated_at: i64) -> CircuitPersistedState {
+    CircuitPersistedState {
+        provider_id,
+        state: CircuitState::Closed,
+        failure_timestamps: vec![updated_at as u64],
+        half_open_success_count: 0,
+        open_until: None,
+        updated_at,
+    }
+}
+
+#[test]
+fn persist_backlog_flushes_oldest_updated_state_first() {
+    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+    let cb = CircuitBreaker::new(
+        CircuitBreakerConfig {
+            failure_threshold: 3,
+            open_duration_secs: 60,
+        },
+        HashMap::new(),
+        Some(tx),
+    );
+
+    cb.record_failure(1, 1_000);
+    {
+        let mut backlog = cb.persist_backlog.lock().expect("backlog lock");
+        backlog.insert(3, persisted_state(3, 3_000));
+        backlog.insert(2, persisted_state(2, 2_000));
+    }
+
+    let first = rx.try_recv().expect("first state queued");
+    assert_eq!(first.provider_id, 1);
+
+    cb.record_failure(4, 4_000);
+
+    let flushed = rx.try_recv().expect("oldest backlog state flushed first");
+    assert_eq!(flushed.provider_id, 2);
+
+    let backlog = cb.persist_backlog.lock().expect("backlog lock");
+    assert!(backlog.contains_key(&3));
+    assert!(backlog.contains_key(&4));
+}
+
+#[test]
+fn persist_backlog_evicts_oldest_updated_state_at_capacity() {
+    let cb = breaker();
+
+    {
+        let mut backlog = cb.persist_backlog.lock().expect("backlog lock");
+        for index in 0..MAX_PERSIST_BACKLOG {
+            let provider_id = (index + 1) as i64;
+            backlog.insert(
+                provider_id,
+                persisted_state(provider_id, 1_000 + index as i64),
+            );
+        }
+    }
+
+    cb.enqueue_persist_backlog(persisted_state(9_999, 9_999));
+
+    let backlog = cb.persist_backlog.lock().expect("backlog lock");
+    assert_eq!(backlog.len(), MAX_PERSIST_BACKLOG);
+    assert!(!backlog.contains_key(&1));
+    assert!(backlog.contains_key(&2));
+    assert!(backlog.contains_key(&9_999));
+}
+
+#[test]
 fn reset_clears_open_and_cooldown() {
     let cb = breaker();
     let pid = 1;
@@ -354,6 +553,77 @@ fn failure_timestamps_capped_at_max() {
     );
     // Circuit should still be Closed because threshold is set very high
     assert_eq!(snap.state, CircuitState::Closed);
+}
+
+#[test]
+fn healthy_read_success_and_missing_reset_do_not_create_closed_entries() {
+    let cb = breaker();
+    let now = 1_000;
+
+    let check = cb.should_allow(10, now);
+    assert!(check.allow);
+    assert_eq!(check.after.state, CircuitState::Closed);
+
+    let snap = cb.snapshot(11, now);
+    assert_eq!(snap.state, CircuitState::Closed);
+
+    let success = cb.record_success(12, now);
+    assert_eq!(success.before.state, CircuitState::Closed);
+    assert_eq!(success.after.state, CircuitState::Closed);
+    assert!(success.transition.is_none());
+
+    let reset = cb.reset(13, now);
+    assert_eq!(reset.state, CircuitState::Closed);
+
+    assert_eq!(cb.health.lock().expect("health lock").len(), 0);
+}
+
+#[test]
+fn reset_removes_runtime_health_entry_after_failure() {
+    let cb = breaker();
+    let provider_id = 1;
+    let now = 1_000;
+
+    cb.record_failure(provider_id, now);
+    assert_eq!(cb.health.lock().expect("health lock").len(), 1);
+
+    let reset = cb.reset(provider_id, now + 1);
+    assert_eq!(reset.state, CircuitState::Closed);
+    assert_eq!(reset.failure_count, 0);
+    assert_eq!(cb.health.lock().expect("health lock").len(), 0);
+}
+
+#[test]
+fn initial_inert_closed_state_is_not_loaded_into_runtime_health() {
+    let mut initial = HashMap::new();
+    initial.insert(
+        1,
+        CircuitPersistedState {
+            provider_id: 1,
+            state: CircuitState::Closed,
+            failure_timestamps: Vec::new(),
+            half_open_success_count: 0,
+            open_until: None,
+            updated_at: 1_000,
+        },
+    );
+    initial.insert(
+        2,
+        CircuitPersistedState {
+            provider_id: 2,
+            state: CircuitState::Closed,
+            failure_timestamps: vec![1_000],
+            half_open_success_count: 0,
+            open_until: None,
+            updated_at: 1_000,
+        },
+    );
+
+    let cb = CircuitBreaker::new(CircuitBreakerConfig::default(), initial, None);
+    let guard = cb.health.lock().expect("health lock");
+
+    assert!(!guard.contains_key(&1));
+    assert!(guard.contains_key(&2));
 }
 
 #[test]

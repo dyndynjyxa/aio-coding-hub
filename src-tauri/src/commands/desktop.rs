@@ -634,6 +634,13 @@ pub(crate) fn desktop_notification_notify(
 
 #[tauri::command]
 #[specta::specta]
+pub(crate) fn desktop_notification_play_sound() -> Result<bool, String> {
+    crate::app::notification_sound::play_notification_sound()?;
+    Ok(true)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub(crate) async fn desktop_updater_check(
     app: tauri::AppHandle,
     timeout: Option<u64>,

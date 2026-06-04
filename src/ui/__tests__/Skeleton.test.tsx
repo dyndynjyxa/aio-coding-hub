@@ -7,7 +7,7 @@ describe("ui/Skeleton", () => {
     const { container } = render(<Skeleton />);
     const el = container.firstElementChild;
     expect(el).toBeInTheDocument();
-    expect(el).toHaveClass("h-4", "w-full", "rounded");
+    expect(el).toHaveClass("h-4", "w-full", "rounded-md");
   });
 
   it("renders circular variant", () => {

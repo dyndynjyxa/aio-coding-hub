@@ -2,6 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
 import {
+  COST_BACKFILL_MAX_ROWS,
+  COST_BREAKDOWN_MAX_LIMIT,
+  COST_LIMIT_MIN,
+  COST_MODEL_FILTER_MAX_CHARS,
+  COST_SCATTER_MAX_LIMIT,
   type CostBackfillReportV1,
   type CostModelBreakdownRowV1,
   type CostProviderBreakdownRowV1,
@@ -16,6 +21,11 @@ import {
   costSummaryV1,
   costTopRequestsV1,
   costTrendV1,
+  normalizeCostQueryInput,
+  normalizeCostBackfillMaxRows,
+  normalizeCostBreakdownLimit,
+  normalizeCostScatterLimit,
+  validateCostCliKey,
 } from "../cost";
 
 vi.mock("../../../generated/bindings", async () => {
@@ -285,5 +295,157 @@ describe("services/usage/cost", () => {
       }),
       999
     );
+  });
+
+  it("normalizes cost filters before ipc", async () => {
+    vi.mocked(commands.costSummaryV1).mockClear();
+    vi.mocked(commands.costSummaryV1).mockResolvedValue({ status: "ok", data: makeCostSummary() });
+
+    expect(validateCostCliKey(" claude ")).toBe("claude");
+    expect(validateCostCliKey("   ")).toBeNull();
+    expect(
+      normalizeCostQueryInput({
+        startTs: 1,
+        endTs: 2,
+        cliKey: " codex " as never,
+        providerId: 3,
+        model: " gpt-test ",
+      })
+    ).toEqual({
+      startTs: 1,
+      endTs: 2,
+      cliKey: "codex",
+      providerId: 3,
+      model: "gpt-test",
+    });
+    expect(
+      normalizeCostQueryInput({
+        cliKey: " " as never,
+        model: " ",
+      })
+    ).toEqual({
+      startTs: null,
+      endTs: null,
+      cliKey: null,
+      providerId: null,
+      model: null,
+    });
+
+    await costSummaryV1("custom", {
+      startTs: 1,
+      endTs: 2,
+      cliKey: " claude " as never,
+      providerId: 3,
+      model: " m1 ",
+    });
+
+    expect(commands.costSummaryV1).toHaveBeenCalledWith({
+      period: "custom",
+      startTs: 1,
+      endTs: 2,
+      cliKey: "claude",
+      providerId: 3,
+      model: "m1",
+    });
+  });
+
+  it("rejects invalid cost filters before ipc", async () => {
+    vi.mocked(commands.costSummaryV1).mockClear();
+
+    await expect(costSummaryV1("daily", { cliKey: "opencode" as never })).rejects.toThrow(
+      "SEC_INVALID_INPUT"
+    );
+    await expect(costSummaryV1("daily", { providerId: 0 })).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(costSummaryV1("daily", { startTs: Number.NaN })).rejects.toThrow(
+      "SEC_INVALID_INPUT"
+    );
+    await expect(costSummaryV1("daily", { endTs: -1 })).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(
+      costSummaryV1("daily", { model: "x".repeat(COST_MODEL_FILTER_MAX_CHARS + 1) })
+    ).rejects.toThrow("SEC_INVALID_INPUT");
+
+    expect(commands.costSummaryV1).not.toHaveBeenCalled();
+  });
+
+  it("normalizes cost limits before ipc", async () => {
+    vi.mocked(commands.costBreakdownProviderV1).mockClear();
+    vi.mocked(commands.costBreakdownModelV1).mockClear();
+    vi.mocked(commands.costTopRequestsV1).mockClear();
+    vi.mocked(commands.costScatterCliProviderModelV1).mockClear();
+    vi.mocked(commands.costBackfillMissingV1).mockClear();
+
+    vi.mocked(commands.costBreakdownProviderV1).mockResolvedValue({
+      status: "ok",
+      data: [makeCostProviderBreakdownRow()],
+    });
+    vi.mocked(commands.costBreakdownModelV1).mockResolvedValue({
+      status: "ok",
+      data: [makeCostModelBreakdownRow()],
+    });
+    vi.mocked(commands.costTopRequestsV1).mockResolvedValue({
+      status: "ok",
+      data: [makeCostTopRequestRow()],
+    });
+    vi.mocked(commands.costScatterCliProviderModelV1).mockResolvedValue({
+      status: "ok",
+      data: [makeCostScatterRow()],
+    });
+    vi.mocked(commands.costBackfillMissingV1).mockResolvedValue({
+      status: "ok",
+      data: makeCostBackfillReport(),
+    });
+
+    expect(normalizeCostBreakdownLimit(null)).toBeNull();
+    expect(normalizeCostBreakdownLimit(0)).toBe(COST_LIMIT_MIN);
+    expect(normalizeCostBreakdownLimit(999)).toBe(COST_BREAKDOWN_MAX_LIMIT);
+    expect(normalizeCostScatterLimit(99_999)).toBe(COST_SCATTER_MAX_LIMIT);
+    expect(normalizeCostBackfillMaxRows(99_999)).toBe(COST_BACKFILL_MAX_ROWS);
+
+    await costBreakdownProviderV1("daily", { limit: 0 });
+    await costBreakdownModelV1("daily", { limit: 999 });
+    await costTopRequestsV1("daily", { limit: 999 });
+    await costScatterCliProviderModelV1("daily", { limit: 99_999 });
+    await costBackfillMissingV1("daily", { maxRows: 99_999 });
+
+    expect(commands.costBreakdownProviderV1).toHaveBeenCalledWith(
+      expect.objectContaining({ period: "daily" }),
+      COST_LIMIT_MIN
+    );
+    expect(commands.costBreakdownModelV1).toHaveBeenCalledWith(
+      expect.objectContaining({ period: "daily" }),
+      COST_BREAKDOWN_MAX_LIMIT
+    );
+    expect(commands.costTopRequestsV1).toHaveBeenCalledWith(
+      expect.objectContaining({ period: "daily" }),
+      COST_BREAKDOWN_MAX_LIMIT
+    );
+    expect(commands.costScatterCliProviderModelV1).toHaveBeenCalledWith(
+      expect.objectContaining({ period: "daily" }),
+      COST_SCATTER_MAX_LIMIT
+    );
+    expect(commands.costBackfillMissingV1).toHaveBeenCalledWith(
+      expect.objectContaining({ period: "daily" }),
+      COST_BACKFILL_MAX_ROWS
+    );
+  });
+
+  it("rejects invalid cost limits before ipc", async () => {
+    vi.mocked(commands.costBreakdownProviderV1).mockClear();
+    vi.mocked(commands.costScatterCliProviderModelV1).mockClear();
+    vi.mocked(commands.costBackfillMissingV1).mockClear();
+
+    await expect(costBreakdownProviderV1("daily", { limit: Number.NaN })).rejects.toThrow(
+      "SEC_INVALID_INPUT"
+    );
+    await expect(costScatterCliProviderModelV1("daily", { limit: 1.5 })).rejects.toThrow(
+      "SEC_INVALID_INPUT"
+    );
+    await expect(
+      costBackfillMissingV1("daily", { maxRows: Number.POSITIVE_INFINITY })
+    ).rejects.toThrow("SEC_INVALID_INPUT");
+
+    expect(commands.costBreakdownProviderV1).not.toHaveBeenCalled();
+    expect(commands.costScatterCliProviderModelV1).not.toHaveBeenCalled();
+    expect(commands.costBackfillMissingV1).not.toHaveBeenCalled();
   });
 });

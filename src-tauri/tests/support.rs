@@ -86,6 +86,10 @@ impl TestApp {
 
         env.set_var("HOME", home_os.clone());
         env.set_var("AIO_CODING_HUB_HOME_DIR", home_os.clone());
+        env.set_var(
+            "XDG_STATE_HOME",
+            home.path().join(".state").as_os_str().to_os_string(),
+        );
         // Windows fallback env for `dirs`/tauri path resolution.
         env.set_var("USERPROFILE", home_os);
         env.set_var(TEST_HOME_DIR_ENV, home.path().as_os_str().to_os_string());

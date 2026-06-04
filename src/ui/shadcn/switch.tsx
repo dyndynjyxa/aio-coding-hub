@@ -22,11 +22,11 @@ export const Switch = forwardRef<React.ElementRef<typeof SwitchPrimitive.Root>, 
         type={type ?? "button"}
         className={cn(
           [
-            "inline-flex shrink-0 items-center rounded-full border-2 transition-colors",
+            "inline-flex shrink-0 items-center rounded-full border-2 border-transparent transition-colors",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
             "disabled:cursor-not-allowed disabled:opacity-50",
-            "data-[state=checked]:border-transparent data-[state=checked]:bg-accent",
-            "data-[state=unchecked]:border-border data-[state=unchecked]:bg-muted",
+            "data-[state=checked]:bg-accent",
+            "data-[state=unchecked]:bg-muted",
           ].join(" "),
           isSmall ? "h-5 w-9" : "h-6 w-11",
           className
@@ -35,7 +35,7 @@ export const Switch = forwardRef<React.ElementRef<typeof SwitchPrimitive.Root>, 
       >
         <SwitchPrimitive.Thumb
           className={cn(
-            "pointer-events-none block rounded-full bg-white shadow-sm transition-transform dark:bg-slate-200",
+            "pointer-events-none block rounded-full bg-white shadow-sm transition-transform",
             isSmall
               ? "h-4 w-4 data-[state=checked]:translate-x-4"
               : "h-5 w-5 data-[state=checked]:translate-x-5"

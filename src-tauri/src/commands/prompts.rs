@@ -20,6 +20,21 @@ pub(crate) async fn prompts_list(
 
 #[tauri::command]
 #[specta::specta]
+pub(crate) async fn prompts_list_summary(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    workspace_id: i64,
+) -> Result<Vec<prompts::PromptListSummary>, String> {
+    let db = ensure_db_ready(app, db_state.inner()).await?;
+    blocking::run("prompts_list_summary", move || {
+        prompts::list_summaries_by_workspace(&db, workspace_id)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub(crate) async fn prompts_default_sync_from_files(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,

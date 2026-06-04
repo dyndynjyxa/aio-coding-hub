@@ -9,7 +9,7 @@ const ACCENT_COLORS = {
   orange: "bg-orange-500",
   green: "bg-emerald-500",
   purple: "bg-violet-500",
-  slate: "bg-slate-400 dark:bg-slate-500",
+  slate: "bg-muted dark:bg-muted",
 } as const;
 
 export type StatCardAccent = keyof typeof ACCENT_COLORS;
@@ -31,14 +31,10 @@ export function StatCard({
     <Card padding="md" className={cn("relative flex h-full flex-col overflow-hidden", className)}>
       {/* 顶部色条 */}
       <div className={cn("absolute inset-x-0 top-0 h-0.5", ACCENT_COLORS[accent])} />
-      <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{title}</div>
-      <div className="mt-1.5 text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-        {value}
-      </div>
+      <div className="text-xs font-medium text-muted-foreground">{title}</div>
+      <div className="mt-1.5 text-xl font-semibold tracking-tight text-foreground">{value}</div>
       {hint ? (
-        <div className="mt-auto pt-1.5 text-[11px] leading-4 text-slate-500 dark:text-slate-400">
-          {hint}
-        </div>
+        <div className="mt-auto pt-1.5 text-[11px] leading-4 text-muted-foreground">{hint}</div>
       ) : null}
     </Card>
   );
@@ -47,9 +43,9 @@ export function StatCard({
 export function StatCardSkeleton({ className }: { className?: string }) {
   return (
     <Card padding="md" className={cn("h-full animate-pulse", className)}>
-      <div className="h-3 w-16 rounded bg-slate-200 dark:bg-slate-700" />
-      <div className="mt-2 h-6 w-20 rounded bg-slate-200 dark:bg-slate-700" />
-      <div className="mt-2 h-3 w-28 rounded bg-slate-100 dark:bg-slate-600" />
+      <div className="h-3 w-16 rounded bg-muted dark:bg-secondary" />
+      <div className="mt-2 h-6 w-20 rounded bg-muted dark:bg-secondary" />
+      <div className="mt-2 h-3 w-28 rounded bg-secondary dark:bg-secondary" />
     </Card>
   );
 }

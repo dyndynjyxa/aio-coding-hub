@@ -2,8 +2,10 @@ use super::encoding::EncodingFixer;
 use super::json::JsonFixer;
 use super::sse::SseFixer;
 use super::{
-    process_non_stream, ResponseFixerConfig, ResponseFixerStream, DEFAULT_MAX_FIX_SIZE,
-    DEFAULT_MAX_JSON_DEPTH,
+    process_non_stream, push_special_setting, special_settings_json, ResponseFixerConfig,
+    ResponseFixerStream, DEFAULT_MAX_FIX_SIZE, DEFAULT_MAX_JSON_DEPTH,
+    SPECIAL_SETTINGS_JSON_MAX_BYTES, SPECIAL_SETTINGS_MAX_ENTRIES,
+    SPECIAL_SETTINGS_STRING_PREVIEW_BYTES,
 };
 use axum::body::Bytes;
 use futures_core::Stream;
@@ -12,6 +14,85 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
+
+#[test]
+fn special_settings_push_caps_entries_and_marks_truncation() {
+    let special_settings = Arc::new(Mutex::new(Vec::new()));
+
+    for index in 0..(SPECIAL_SETTINGS_MAX_ENTRIES + 3) {
+        push_special_setting(
+            &special_settings,
+            serde_json::json!({
+                "type": "entry",
+                "index": index,
+            }),
+        );
+    }
+
+    let settings = special_settings.lock().unwrap();
+    assert_eq!(settings.len(), SPECIAL_SETTINGS_MAX_ENTRIES);
+    assert_eq!(
+        settings.first().and_then(|entry| entry.get("index")),
+        Some(&serde_json::json!(0))
+    );
+    assert_eq!(
+        settings
+            .last()
+            .and_then(|entry| entry.get("type"))
+            .and_then(serde_json::Value::as_str),
+        Some("special_settings_truncated")
+    );
+    drop(settings);
+
+    let encoded = special_settings_json(&special_settings).expect("special settings json");
+    let decoded: serde_json::Value = serde_json::from_str(&encoded).expect("valid json");
+    assert_eq!(
+        decoded.as_array().map(Vec::len),
+        Some(SPECIAL_SETTINGS_MAX_ENTRIES)
+    );
+}
+
+#[test]
+fn special_settings_push_bounds_large_string_values() {
+    let special_settings = Arc::new(Mutex::new(Vec::new()));
+    let large_value = "x".repeat(SPECIAL_SETTINGS_STRING_PREVIEW_BYTES + 2048);
+
+    push_special_setting(
+        &special_settings,
+        serde_json::json!({
+            "type": "large_debug",
+            "scope": "request",
+            "detail": large_value,
+        }),
+    );
+
+    let encoded = special_settings_json(&special_settings).expect("special settings json");
+    assert!(encoded.contains("truncated at"));
+    assert!(encoded.contains("hash="));
+    assert!(!encoded.contains(&"x".repeat(SPECIAL_SETTINGS_STRING_PREVIEW_BYTES + 1)));
+}
+
+#[test]
+fn special_settings_json_caps_total_encoded_bytes() {
+    let special_settings = Arc::new(Mutex::new(Vec::new()));
+
+    for index in 0..SPECIAL_SETTINGS_MAX_ENTRIES {
+        push_special_setting(
+            &special_settings,
+            serde_json::json!({
+                "type": "large_entry",
+                "scope": "request",
+                "index": index,
+                "parts": vec!["x".repeat(SPECIAL_SETTINGS_STRING_PREVIEW_BYTES + 2048); 5],
+            }),
+        );
+    }
+
+    let encoded = special_settings_json(&special_settings).expect("special settings json");
+    assert!(encoded.len() <= SPECIAL_SETTINGS_JSON_MAX_BYTES);
+    assert!(encoded.contains("special_settings_truncated"));
+    assert!(encoded.contains("encoded_json_too_large"));
+}
 
 #[test]
 fn encoding_fixer_valid_utf8_passthrough() {
@@ -204,6 +285,24 @@ fn response_fixer_non_stream_writes_special_setting_when_hit() {
     assert!(out.special_setting.is_some());
 }
 
+#[test]
+fn response_fixer_non_stream_skips_oversized_body_before_encoding_fix() {
+    let config = ResponseFixerConfig {
+        fix_encoding: true,
+        fix_sse_format: true,
+        fix_truncated_json: true,
+        max_json_depth: DEFAULT_MAX_JSON_DEPTH,
+        max_fix_size: 4,
+    };
+    let input = Bytes::from_static(&[0x48, 0x00, 0x65, 0x00, 0x6c]);
+
+    let out = process_non_stream(input.clone(), config);
+
+    assert_eq!(out.body, input);
+    assert_eq!(out.header_value, "skipped-too-large");
+    assert!(out.special_setting.is_none());
+}
+
 struct VecBytesStream {
     items: VecDeque<Result<Bytes, reqwest::Error>>,
 }
@@ -321,6 +420,43 @@ async fn response_fixer_stream_degrades_when_exceeding_max_fix_size_without_newl
 
     // 清理：拉取到结束，确保 finalize 运行
     while let Some(_item) = next_item(&mut stream).await {}
+
+    let settings = special_settings.lock().unwrap();
+    assert!(settings.is_empty());
+}
+
+#[tokio::test]
+async fn response_fixer_stream_collapses_buffered_chunks_when_degrading_to_passthrough() {
+    let special_settings = Arc::new(Mutex::new(Vec::new()));
+    let config = ResponseFixerConfig {
+        fix_encoding: true,
+        fix_sse_format: true,
+        fix_truncated_json: true,
+        max_json_depth: DEFAULT_MAX_JSON_DEPTH,
+        max_fix_size: 4,
+    };
+
+    let upstream = VecBytesStream::new(vec![
+        Ok(Bytes::from_static(b"a")),
+        Ok(Bytes::from_static(b"b")),
+        Ok(Bytes::from_static(b"c")),
+        Ok(Bytes::from_static(b"d")),
+        Ok(Bytes::from_static(b"e")),
+    ]);
+
+    let mut stream = ResponseFixerStream::new(upstream, config, special_settings.clone());
+    let first = next_item(&mut stream)
+        .await
+        .expect("should produce buffered output")
+        .expect("should be ok");
+    let second = next_item(&mut stream)
+        .await
+        .expect("should produce passthrough output")
+        .expect("should be ok");
+
+    assert_eq!(first, Bytes::from_static(b"abcd"));
+    assert_eq!(second, Bytes::from_static(b"e"));
+    assert!(next_item(&mut stream).await.is_none());
 
     let settings = special_settings.lock().unwrap();
     assert!(settings.is_empty());

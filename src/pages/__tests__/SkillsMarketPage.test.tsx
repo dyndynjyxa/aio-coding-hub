@@ -7,10 +7,10 @@ import { toast } from "sonner";
 import { SkillsMarketPage } from "../SkillsMarketPage";
 import {
   useSkillInstallToLocalMutation,
+  useSkillRepoDiscoverAvailableMutation,
   useSkillRepoDeleteMutation,
   useSkillRepoUpsertMutation,
   useSkillReposListQuery,
-  useSkillsDiscoverAvailableMutation,
   useSkillsDiscoverAvailableQuery,
   useSkillsInstalledListQuery,
   useSkillsLocalListQuery,
@@ -52,7 +52,7 @@ vi.mock("../../query/skills", async () => {
     useSkillsInstalledListQuery: vi.fn(),
     useSkillsLocalListQuery: vi.fn(),
     useSkillsDiscoverAvailableQuery: vi.fn(),
-    useSkillsDiscoverAvailableMutation: vi.fn(),
+    useSkillRepoDiscoverAvailableMutation: vi.fn(),
     useSkillRepoUpsertMutation: vi.fn(),
     useSkillRepoDeleteMutation: vi.fn(),
     useSkillInstallToLocalMutation: vi.fn(),
@@ -106,7 +106,7 @@ function mockCommonState() {
     data: [],
     isLoading: false,
   } as any);
-  vi.mocked(useSkillsDiscoverAvailableMutation).mockReturnValue({
+  vi.mocked(useSkillRepoDiscoverAvailableMutation).mockReturnValue({
     isPending: false,
     mutateAsync: vi.fn().mockResolvedValue([]),
   } as any);
@@ -183,7 +183,7 @@ describe("pages/SkillsMarketPage", () => {
     } as any);
 
     const discover = { isPending: false, mutateAsync: vi.fn().mockResolvedValue([{ name: "x" }]) };
-    vi.mocked(useSkillsDiscoverAvailableMutation).mockReturnValue(discover as any);
+    vi.mocked(useSkillRepoDiscoverAvailableMutation).mockReturnValue(discover as any);
 
     const install = {
       mutateAsync: vi.fn().mockResolvedValue({
@@ -204,10 +204,18 @@ describe("pages/SkillsMarketPage", () => {
     expect(screen.getAllByText("acme/repo-two")[0]).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "刷新发现" }));
-    await waitFor(() => expect(discover.mutateAsync).toHaveBeenCalledWith(true));
+    await waitFor(() => expect(discover.mutateAsync).toHaveBeenCalledTimes(2));
+    expect(discover.mutateAsync).toHaveBeenNthCalledWith(1, {
+      repo: expect.objectContaining({ id: 1, git_url: "https://github.com/acme/repo-one" }),
+      refresh: true,
+    });
+    expect(discover.mutateAsync).toHaveBeenNthCalledWith(2, {
+      repo: expect.objectContaining({ id: 2, git_url: "https://github.com/acme/repo-two" }),
+      refresh: true,
+    });
     expect(logToConsole).toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "安装到 Claude Code" }));
+    fireEvent.click(screen.getByRole("button", { name: "安装到 Claude" }));
     await waitFor(() => {
       expect(install.mutateAsync).toHaveBeenCalledWith({
         gitUrl: "https://github.com/acme/repo-one",
@@ -215,7 +223,7 @@ describe("pages/SkillsMarketPage", () => {
         sourceSubdir: "skills/alpha",
       });
     });
-    expect(toast).toHaveBeenCalledWith("已安装到 Claude Code");
+    expect(toast).toHaveBeenCalledWith("已安装到 Claude");
   });
 
   it("falls back to the global CLI priority when localStorage is missing", () => {
@@ -358,7 +366,7 @@ describe("pages/SkillsMarketPage", () => {
       branch: "main",
       sourceSubdir: "skills/alpha",
     });
-    expect(toast).toHaveBeenCalledWith("已安装 1 个技能到 Claude Code");
+    expect(toast).toHaveBeenCalledWith("已安装 1 个技能到 Claude");
 
     fireEvent.click(screen.getByRole("switch"));
     const repoTwoSection = screen.getAllByText("acme/repo-two")[0]?.closest("section");
@@ -450,7 +458,7 @@ describe("pages/SkillsMarketPage", () => {
     expect(repoTwoSection).not.toBeNull();
     fireEvent.click(within(repoTwoSection as HTMLElement).getByRole("button", { name: "展开" }));
     expect(
-      within(repoTwoSection as HTMLElement).getByRole("button", { name: "安装到 Claude Code" })
+      within(repoTwoSection as HTMLElement).getByRole("button", { name: "安装到 Claude" })
     ).toBeInTheDocument();
     expect(
       within(repoTwoSection as HTMLElement).queryByRole("button", { name: "去通用技能" })

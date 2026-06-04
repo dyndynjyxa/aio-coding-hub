@@ -33,7 +33,7 @@ export function SuiteSummaryCard({
     }
     return {
       text: "协议：未知",
-      cls: "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400",
+      cls: "bg-secondary text-muted-foreground dark:bg-secondary dark:text-muted-foreground",
     };
   })();
 
@@ -106,19 +106,15 @@ export function SuiteSummaryCard({
                 <div className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded-full border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/30" />
               )}
               <div className="min-w-0">
-                <div className="text-slate-800 dark:text-slate-200">{p.label}</div>
+                <div className="text-foreground">{p.label}</div>
                 {p.detail ? (
-                  <div className="mt-0.5 text-[10px] text-slate-600 dark:text-slate-400">
-                    {p.detail}
-                  </div>
+                  <div className="mt-0.5 text-[10px] text-muted-foreground">{p.detail}</div>
                 ) : null}
               </div>
             </div>
           ))}
           {rest > 0 ? (
-            <div className="text-[10px] text-slate-600 dark:text-slate-400">
-              其余 {rest} 项详见"调试"页。
-            </div>
+            <div className="text-[10px] text-muted-foreground">其余 {rest} 项详见"调试"页。</div>
           ) : null}
         </div>
       </div>
@@ -178,19 +174,15 @@ export function SuiteSummaryCard({
                 <div className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded-full border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/30" />
               )}
               <div className="min-w-0">
-                <div className="text-slate-800 dark:text-slate-200">{p.label}</div>
+                <div className="text-foreground">{p.label}</div>
                 {p.detail ? (
-                  <div className="mt-0.5 text-[10px] text-slate-600 dark:text-slate-400">
-                    {p.detail}
-                  </div>
+                  <div className="mt-0.5 text-[10px] text-muted-foreground">{p.detail}</div>
                 ) : null}
               </div>
             </div>
           ))}
           {rest > 0 ? (
-            <div className="text-[10px] text-slate-600 dark:text-slate-400">
-              其余 {rest} 项详见"调试"页。
-            </div>
+            <div className="text-[10px] text-muted-foreground">其余 {rest} 项详见"调试"页。</div>
           ) : null}
         </div>
       </div>
@@ -213,11 +205,11 @@ export function SuiteSummaryCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+            <div className="text-sm font-semibold text-foreground">
               综合结论（Anthropic /v1/messages）
             </div>
           </div>
-          <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">{metaLine}</div>
+          <div className="mt-1 text-[11px] text-muted-foreground">{metaLine}</div>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
@@ -240,13 +232,13 @@ export function SuiteSummaryCard({
       </div>
 
       {evidenceGrade ? (
-        <div className="text-[11px] text-slate-600 dark:text-slate-400">
-          证据解释：{evidenceGrade.title}
-        </div>
+        <div className="text-[11px] text-muted-foreground">证据解释：{evidenceGrade.title}</div>
       ) : null}
 
       {interpretLine ? (
-        <div className="text-[11px] text-slate-500 dark:text-slate-500">{interpretLine}</div>
+        <div className="text-[11px] text-muted-foreground dark:text-muted-foreground">
+          {interpretLine}
+        </div>
       ) : null}
 
       <div className={cn("grid gap-3", evidenceBox ? "sm:grid-cols-2" : "sm:grid-cols-1")}>
@@ -254,7 +246,7 @@ export function SuiteSummaryCard({
         {evidenceBox}
       </div>
 
-      <div className="text-[10px] text-slate-400 dark:text-slate-500">
+      <div className="text-[10px] text-muted-foreground">
         更多步骤明细请切到"步骤"，更多诊断信息请切到"调试"页。
       </div>
     </Card>

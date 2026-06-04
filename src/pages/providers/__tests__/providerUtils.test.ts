@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { normalizeBaseUrlRows, providerBaseUrlSummary, providerPrimaryBaseUrl } from "../baseUrl";
+import {
+  MAX_PROVIDER_BASE_URLS,
+  MAX_PROVIDER_BASE_URL_CHARS,
+  normalizeBaseUrlRows,
+  providerBaseUrlSummary,
+  providerPrimaryBaseUrl,
+} from "../baseUrl";
 import { validateProviderClaudeModels } from "../../../schemas/providerEditorDialog";
 
 describe("pages/providers/baseUrl helpers", () => {
@@ -39,6 +45,27 @@ describe("pages/providers/baseUrl helpers", () => {
     ] as any);
     expect(ok.ok).toBe(true);
     if (ok.ok) expect(ok.baseUrls).toEqual(["https://a", "https://b"]);
+  });
+
+  it("rejects base url boundary overflows before submit", () => {
+    const tooManyRows = Array.from({ length: MAX_PROVIDER_BASE_URLS + 1 }, (_, index) => ({
+      id: String(index),
+      url: `https://api-${index}.example.com`,
+      ping: { status: "idle" },
+    }));
+    const tooMany = normalizeBaseUrlRows(tooManyRows as any);
+    expect(tooMany.ok).toBe(false);
+    if (!tooMany.ok) expect(tooMany.message).toMatch(/最多支持/);
+
+    const tooLong = normalizeBaseUrlRows([
+      {
+        id: "long",
+        url: `https://example.com/${"a".repeat(MAX_PROVIDER_BASE_URL_CHARS)}`,
+        ping: { status: "idle" },
+      },
+    ] as any);
+    expect(tooLong.ok).toBe(false);
+    if (!tooLong.ok) expect(tooLong.message).toMatch(/不能超过/);
   });
 });
 

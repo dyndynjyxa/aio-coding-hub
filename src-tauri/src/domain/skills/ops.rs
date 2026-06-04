@@ -1,7 +1,7 @@
 use super::fs_ops::{
     copy_dir_recursive, create_skill_link, exists_or_is_link, has_skill_md, is_managed_dir,
     is_managed_link_to_ssot, is_symlink, is_symlink_or_junction, remove_managed_dir, remove_marker,
-    write_source_metadata, SkillSourceMetadata,
+    skill_dir_content_hash, write_source_metadata, SkillSourceMetadata,
 };
 use super::installed::{generate_unique_skill_key, get_skill_by_id, get_skill_by_id_for_workspace};
 use super::paths::{cli_skills_root, ensure_skills_roots, ssot_skills_root, validate_cli_key};
@@ -181,7 +181,7 @@ fn delete_skill_row(conn: &Connection, skill_id: i64) -> crate::shared::error::A
 
 #[allow(clippy::too_many_arguments)]
 pub fn install(
-    app: &tauri::AppHandle,
+    app: &tauri::AppHandle<impl tauri::Runtime>,
     db: &db::Db,
     workspace_id: i64,
     git_url: &str,
@@ -260,9 +260,10 @@ INSERT INTO skills(
   source_branch,
   source_subdir,
   installed_commit,
+  installed_content_hash,
   created_at,
   updated_at
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, ?10)
 "#,
         params![
             skill_key,
@@ -299,6 +300,25 @@ ON CONFLICT(workspace_id, skill_id) DO UPDATE SET
         let _ = std::fs::remove_dir_all(&ssot_dir);
         let _ = tx.execute("DELETE FROM skills WHERE id = ?1", params![skill_id]);
         return Err(err);
+    }
+
+    let installed_content_hash = match skill_dir_content_hash(&ssot_dir) {
+        Ok(hash) => hash,
+        Err(err) => {
+            let _ = std::fs::remove_dir_all(&ssot_dir);
+            let _ = tx.execute("DELETE FROM skills WHERE id = ?1", params![skill_id]);
+            return Err(err);
+        }
+    };
+    if let Err(err) = tx.execute(
+        "UPDATE skills SET installed_content_hash = ?1 WHERE id = ?2",
+        params![installed_content_hash, skill_id],
+    ) {
+        let _ = std::fs::remove_dir_all(&ssot_dir);
+        let _ = tx.execute("DELETE FROM skills WHERE id = ?1", params![skill_id]);
+        return Err(db_err!(
+            "failed to update installed skill content hash: {err}"
+        ));
     }
 
     // FS: sync to CLI only when enabled in the active workspace.

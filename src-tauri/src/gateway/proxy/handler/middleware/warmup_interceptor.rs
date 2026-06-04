@@ -18,7 +18,9 @@ impl WarmupInterceptorMiddleware {
     /// Intercepts Anthropic warmup requests and responds locally.
     ///
     /// Requires `ctx.runtime_settings` to be populated (by `RuntimeSettingsMiddleware`).
-    pub(in crate::gateway::proxy::handler) fn run(ctx: ProxyContext) -> MiddlewareAction {
+    pub(in crate::gateway::proxy::handler) fn run<R: tauri::Runtime>(
+        ctx: ProxyContext<R>,
+    ) -> MiddlewareAction<R> {
         let intercept_warmup = ctx
             .runtime_settings
             .as_ref()
@@ -54,7 +56,10 @@ pub(in crate::gateway::proxy::handler) fn should_intercept_warmup_request(
     warmup::is_anthropic_warmup_request(forwarded_path, introspection_json)
 }
 
-fn respond_warmup_intercept(ctx: &ProxyContext, duration_ms: u128) -> axum::response::Response {
+fn respond_warmup_intercept<R: tauri::Runtime>(
+    ctx: &ProxyContext<R>,
+    duration_ms: u128,
+) -> axum::response::Response {
     let response_body =
         warmup::build_warmup_response_body(ctx.requested_model.as_deref(), &ctx.trace_id);
     let special_settings_json = warmup_intercept_special_settings_json();

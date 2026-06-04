@@ -22,13 +22,13 @@ export function CostBar({
       aria-valuemax={100}
       aria-label={`费用占比 ${displayPct}%`}
     >
-      <div className="h-1.5 flex-1 rounded-full bg-slate-100 dark:bg-slate-700">
+      <div className="h-1.5 flex-1 rounded-full bg-secondary">
         <div
           className="h-full rounded-full bg-orange-400 dark:bg-orange-500 transition-all duration-300"
           style={{ width: `${pct * 100}%` }}
         />
       </div>
-      <span className="w-10 text-right tabular-nums text-[10px] text-slate-500 dark:text-slate-400">
+      <span className="w-10 text-right tabular-nums text-[10px] text-muted-foreground">
         {displayPct}%
       </span>
     </div>

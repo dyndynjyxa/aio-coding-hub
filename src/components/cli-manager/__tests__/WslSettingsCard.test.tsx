@@ -719,11 +719,81 @@ describe("components/cli-manager/WslSettingsCard", () => {
     fireEvent.blur(input);
 
     await waitFor(() => {
-      expect(toast).toHaveBeenCalledWith("宿主机地址不支持端口；请只填写 IP（例如 172.20.0.1）");
+      expect(toast).toHaveBeenCalledWith(
+        "宿主机地址不支持端口；请只填写 host/IP（IPv6 可直接填写 ::1）"
+      );
     });
     expect(settingsSetMutation.mutateAsync).not.toHaveBeenCalledWith(
       expect.objectContaining({ wsl_custom_host_address: "172.20.0.1:123" })
     );
+  });
+
+  it("accepts hostname and bare IPv6 custom host addresses", async () => {
+    const settingsSetMutation = { isPending: false, mutateAsync: vi.fn() };
+    settingsSetMutation.mutateAsync.mockResolvedValue({});
+    vi.mocked(useSettingsPatchMutation).mockReturnValue(settingsSetMutation as any);
+
+    vi.mocked(useAppAboutQuery).mockReturnValue({ data: { os: "windows" } } as any);
+    vi.mocked(useWslOverviewQuery).mockReturnValue({
+      data: {
+        detection: { detected: true, distros: ["Ubuntu"] },
+        hostIp: "172.20.0.1",
+        statusRows: [],
+      },
+      isFetched: true,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useWslConfigureClientsMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+    } as any);
+
+    const settings = {
+      gateway_listen_mode: "wsl_auto",
+      wsl_host_address_mode: "custom",
+      wsl_custom_host_address: "127.0.0.1",
+      preferred_port: 37123,
+      auto_start: false,
+      log_retention_days: 7,
+      failover_max_attempts_per_provider: 5,
+      failover_max_providers_to_try: 5,
+    } as any;
+
+    const { rerender } = render(
+      <WslSettingsCard available={true} saving={false} settings={settings} />
+    );
+
+    fireEvent.click(screen.getByText("高级选项（地址兜底）"));
+    const input = screen.getByDisplayValue("127.0.0.1");
+    fireEvent.change(input, { target: { value: "devbox.internal" } });
+    fireEvent.blur(input);
+
+    await waitFor(() => {
+      expect(settingsSetMutation.mutateAsync).toHaveBeenCalledWith({
+        wsl_host_address_mode: "custom",
+        wsl_custom_host_address: "devbox.internal",
+      });
+    });
+
+    rerender(
+      <WslSettingsCard
+        available={true}
+        saving={false}
+        settings={{ ...settings, wsl_custom_host_address: "devbox.internal" }}
+      />
+    );
+
+    const hostnameInput = screen.getByDisplayValue("devbox.internal");
+    fireEvent.change(hostnameInput, { target: { value: "::1" } });
+    fireEvent.blur(hostnameInput);
+
+    await waitFor(() => {
+      expect(settingsSetMutation.mutateAsync).toHaveBeenCalledWith({
+        wsl_host_address_mode: "custom",
+        wsl_custom_host_address: "::1",
+      });
+    });
   });
 
   it("disables listen-mode confirmation while settings are saving", async () => {

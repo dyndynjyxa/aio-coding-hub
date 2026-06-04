@@ -3,6 +3,8 @@
 const MANIFEST_SCHEMA_VERSION: u32 = 1;
 const MANAGED_BY: &str = "aio-coding-hub";
 const LEGACY_APP_DOTDIR_NAMES: &[&str] = &[".aio-gateway", ".aio_gateway"];
+const MCP_SYNC_TARGET_MAX_BYTES: usize = 1024 * 1024;
+const MCP_SYNC_MANIFEST_MAX_BYTES: usize = 256 * 1024;
 
 mod claude_json;
 mod codex_toml;

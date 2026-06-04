@@ -1,23 +1,21 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { logToConsole } from "../../../../services/consoleLog";
-import { envConflictsCheck } from "../../../../services/cli/envConflicts";
-import { useCliProxy } from "../../../../hooks/useCliProxy";
-import { useHomeCliProxy } from "../useHomeCliProxy";
+import { envConflictsCheck } from "../../services/cli/envConflicts";
+import { logToConsole } from "../../services/consoleLog";
+import { useCliProxy } from "../useCliProxy";
+import { useCliProxyControls } from "../useCliProxyControls";
 
-vi.mock("../../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
+vi.mock("../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
 
-vi.mock("../../../../services/cli/envConflicts", async () => {
-  const actual = await vi.importActual<typeof import("../../../../services/cli/envConflicts")>(
-    "../../../../services/cli/envConflicts"
+vi.mock("../../services/cli/envConflicts", async () => {
+  const actual = await vi.importActual<typeof import("../../services/cli/envConflicts")>(
+    "../../services/cli/envConflicts"
   );
   return { ...actual, envConflictsCheck: vi.fn() };
 });
 
-vi.mock("../../../../hooks/useCliProxy", async () => {
-  const actual = await vi.importActual<typeof import("../../../../hooks/useCliProxy")>(
-    "../../../../hooks/useCliProxy"
-  );
+vi.mock("../useCliProxy", async () => {
+  const actual = await vi.importActual<typeof import("../useCliProxy")>("../useCliProxy");
   return { ...actual, useCliProxy: vi.fn() };
 });
 
@@ -32,7 +30,7 @@ function makeCliProxyState() {
   };
 }
 
-describe("pages/home/hooks/useHomeCliProxy", () => {
+describe("hooks/useCliProxyControls", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -41,7 +39,7 @@ describe("pages/home/hooks/useHomeCliProxy", () => {
     const cliProxyState = makeCliProxyState();
     vi.mocked(useCliProxy).mockReturnValue(cliProxyState as any);
 
-    const { result } = renderHook(() => useHomeCliProxy());
+    const { result } = renderHook(() => useCliProxyControls());
 
     act(() => {
       result.current.requestCliProxyEnabledSwitch("codex", false);
@@ -63,7 +61,7 @@ describe("pages/home/hooks/useHomeCliProxy", () => {
         })
     );
 
-    const { result } = renderHook(() => useHomeCliProxy());
+    const { result } = renderHook(() => useCliProxyControls());
 
     act(() => {
       result.current.requestCliProxyEnabledSwitch("codex", true);
@@ -88,12 +86,47 @@ describe("pages/home/hooks/useHomeCliProxy", () => {
     expect(result.current.cliProxyToggling.codex).toBe(false);
   });
 
+  it("prompts for confirmation when env conflicts are found before enabling", async () => {
+    const cliProxyState = makeCliProxyState();
+    vi.mocked(useCliProxy).mockReturnValue(cliProxyState as any);
+    vi.mocked(envConflictsCheck).mockResolvedValueOnce([
+      { var_name: "OPENAI_API_KEY", source_type: "system", source_path: "Process Environment" },
+    ]);
+
+    const { result } = renderHook(() => useCliProxyControls());
+
+    act(() => {
+      result.current.requestCliProxyEnabledSwitch("codex", true);
+    });
+
+    await waitFor(() =>
+      expect(result.current.pendingCliProxyEnablePrompt).toEqual({
+        cliKey: "codex",
+        conflicts: [
+          {
+            var_name: "OPENAI_API_KEY",
+            source_type: "system",
+            source_path: "Process Environment",
+          },
+        ],
+      })
+    );
+    expect(cliProxyState.setCliProxyEnabled).not.toHaveBeenCalled();
+
+    act(() => {
+      result.current.confirmPendingCliProxyEnable();
+    });
+
+    expect(cliProxyState.setCliProxyEnabled).toHaveBeenCalledWith("codex", true);
+    expect(result.current.pendingCliProxyEnablePrompt).toBeNull();
+  });
+
   it("logs and still enables the cli when env conflict checks fail", async () => {
     const cliProxyState = makeCliProxyState();
     vi.mocked(useCliProxy).mockReturnValue(cliProxyState as any);
     vi.mocked(envConflictsCheck).mockRejectedValueOnce(new Error("env check boom"));
 
-    const { result } = renderHook(() => useHomeCliProxy());
+    const { result } = renderHook(() => useCliProxyControls());
 
     act(() => {
       result.current.requestCliProxyEnabledSwitch("codex", true);

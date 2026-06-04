@@ -124,3 +124,51 @@ fn parse_response_error_type_marks_terminal_error_seen() {
     tracker.ingest_chunk(sse);
     assert!(tracker.terminal_error_seen());
 }
+
+#[test]
+fn sse_usage_tracker_drops_oversized_pending_line() {
+    let mut tracker = SseUsageTracker::new("codex");
+    let oversized = vec![b'a'; MAX_SSE_USAGE_TRACKER_PENDING_BYTES + 1];
+
+    tracker.ingest_chunk(&oversized);
+
+    assert!(tracker.buffer.is_empty());
+    assert!(tracker.current_event.is_empty());
+    assert!(tracker.current_data.is_empty());
+    assert!(tracker.finalize().is_none());
+}
+
+#[test]
+fn sse_usage_tracker_recovers_after_oversized_pending_line() {
+    let mut tracker = SseUsageTracker::new("codex");
+    let oversized = vec![b'a'; MAX_SSE_USAGE_TRACKER_PENDING_BYTES + 1];
+
+    tracker.ingest_chunk(&oversized);
+    tracker.ingest_chunk(b"\n\n");
+    tracker.ingest_chunk(
+        b"data: {\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}\n\n",
+    );
+    let extract = tracker.finalize().expect("should parse later valid usage");
+
+    assert_eq!(extract.metrics.input_tokens, Some(1));
+    assert_eq!(extract.metrics.output_tokens, Some(2));
+    assert_eq!(extract.metrics.total_tokens, Some(3));
+}
+
+#[test]
+fn sse_usage_tracker_drops_oversized_event_data() {
+    let mut tracker = SseUsageTracker::new("codex");
+    let half = vec![b'a'; (MAX_SSE_USAGE_TRACKER_PENDING_BYTES / 2) + 1];
+
+    tracker.ingest_chunk(b"data: ");
+    tracker.ingest_chunk(&half);
+    tracker.ingest_chunk(b"\n");
+    tracker.ingest_chunk(b"data: ");
+    tracker.ingest_chunk(&half);
+    tracker.ingest_chunk(b"\n\n");
+
+    assert!(tracker.buffer.is_empty());
+    assert!(tracker.current_event.is_empty());
+    assert!(tracker.current_data.is_empty());
+    assert!(tracker.finalize().is_none());
+}

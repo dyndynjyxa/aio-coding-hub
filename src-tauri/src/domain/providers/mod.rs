@@ -31,6 +31,8 @@ use types::{claude_models_from_json, normalize_model_slot, MAX_MODEL_NAME_LEN};
 use validation::{
     base_urls_from_row, normalize_base_urls, normalize_reset_time_hms_lossy,
     normalize_reset_time_hms_strict, parse_reset_time_hms, validate_limit_usd, MAX_LIMIT_USD,
+    MAX_PROVIDER_BASE_URLS, MAX_PROVIDER_BASE_URL_CHARS, MAX_PROVIDER_NOTE_CHARS,
+    MAX_PROVIDER_ORDER_IDS,
 };
 
 #[cfg(test)]

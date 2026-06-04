@@ -158,11 +158,11 @@ export function ModelPriceAliasesDialog({
     >
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
-            <span className="inline-flex items-center rounded-md bg-slate-100 dark:bg-slate-700 px-2 py-1 font-medium">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="inline-flex items-center rounded-md border border-line-subtle bg-surface-inset px-2 py-1 font-medium">
               启用 {enabledRuleCount} 条
             </span>
-            <span className="text-slate-400 dark:text-slate-500">|</span>
+            <span className="text-muted-foreground">|</span>
             <span>
               模型数：Claude {modelCountsByCli.claude} · Codex {modelCountsByCli.codex} · Gemini{" "}
               {modelCountsByCli.gemini}
@@ -200,10 +200,10 @@ export function ModelPriceAliasesDialog({
         </datalist>
 
         {loading ? (
-          <div className="flex items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 p-8">
-            <div className="flex items-center gap-3 text-sm text-slate-500 dark:text-slate-400">
+          <div className="flex items-center justify-center rounded-2xl border border-line-subtle bg-surface-inset p-8">
+            <div className="flex items-center gap-3 text-sm text-muted-foreground">
               <svg
-                className="h-5 w-5 animate-spin text-slate-400 dark:text-slate-500"
+                className="h-5 w-5 animate-spin text-muted-foreground"
                 xmlns="http://www.w3.org/2000/svg"
                 fill="none"
                 viewBox="0 0 24 24"
@@ -226,8 +226,8 @@ export function ModelPriceAliasesDialog({
             </div>
           </div>
         ) : aliases.rules.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-600 bg-slate-50/50 dark:bg-slate-800/50 p-8 text-center">
-            <div className="mx-auto mb-2 h-10 w-10 rounded-full bg-slate-100 dark:bg-slate-700 p-2.5 text-slate-400 dark:text-slate-500">
+          <div className="rounded-2xl border border-dashed border-line bg-surface-inset p-8 text-center">
+            <div className="mx-auto mb-2 h-10 w-10 rounded-full bg-surface-muted p-2.5 text-muted-foreground">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 fill="none"
@@ -238,14 +238,14 @@ export function ModelPriceAliasesDialog({
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
               </svg>
             </div>
-            <div className="text-sm font-medium text-slate-700 dark:text-slate-300">暂无规则</div>
-            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            <div className="text-sm font-medium text-secondary-foreground">暂无规则</div>
+            <div className="mt-1 text-xs text-muted-foreground">
               示例：Gemini 配置{" "}
-              <code className="rounded bg-slate-200 dark:bg-slate-700 px-1 py-0.5 font-mono text-[11px]">
+              <code className="rounded bg-surface-muted px-1 py-0.5 font-mono text-[11px]">
                 prefix gemini-3-flash
               </code>{" "}
               →{" "}
-              <code className="rounded bg-slate-200 dark:bg-slate-700 px-1 py-0.5 font-mono text-[11px]">
+              <code className="rounded bg-surface-muted px-1 py-0.5 font-mono text-[11px]">
                 gemini-3-flash-preview
               </code>
             </div>
@@ -260,20 +260,18 @@ export function ModelPriceAliasesDialog({
                 <div
                   key={`rule-${idx}`}
                   className={cn(
-                    "group rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 shadow-sm",
+                    "group rounded-2xl border border-line bg-surface-panel p-4",
                     "transition-all duration-200 ease-in-out",
                     disabled
                       ? "opacity-60 grayscale-[30%]"
-                      : "hover:border-slate-300 dark:hover:border-slate-600 hover:shadow-md"
+                      : "hover:border-line-strong hover:bg-surface-raised"
                   )}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
-                      <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-                        规则 #{idx + 1}
-                      </div>
+                      <div className="text-xs font-semibold text-foreground">规则 #{idx + 1}</div>
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-600 dark:text-slate-400">启用</span>
+                        <span className="text-xs text-muted-foreground">启用</span>
                         <Switch
                           size="sm"
                           checked={!!rule?.enabled}
@@ -295,7 +293,7 @@ export function ModelPriceAliasesDialog({
 
                   <div className="mt-4 grid items-start gap-4 lg:grid-cols-12">
                     <div className="lg:col-span-2">
-                      <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-slate-300">
+                      <label className="mb-1.5 block text-xs font-medium text-secondary-foreground">
                         CLI
                       </label>
                       <Select
@@ -314,7 +312,7 @@ export function ModelPriceAliasesDialog({
                     </div>
 
                     <div className="lg:col-span-2">
-                      <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-slate-300">
+                      <label className="mb-1.5 block text-xs font-medium text-secondary-foreground">
                         匹配类型
                       </label>
                       <Select
@@ -335,7 +333,7 @@ export function ModelPriceAliasesDialog({
                     </div>
 
                     <div className="lg:col-span-4">
-                      <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-slate-300">
+                      <label className="mb-1.5 block text-xs font-medium text-secondary-foreground">
                         Pattern
                       </label>
                       <Input
@@ -351,7 +349,7 @@ export function ModelPriceAliasesDialog({
                         }
                         disabled={saving}
                       />
-                      <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+                      <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
                         {matchType === "wildcard"
                           ? "wildcard：仅支持单个 *"
                           : matchType === "prefix"
@@ -361,7 +359,7 @@ export function ModelPriceAliasesDialog({
                     </div>
 
                     <div className="lg:col-span-4">
-                      <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-slate-300">
+                      <label className="mb-1.5 block text-xs font-medium text-secondary-foreground">
                         目标模型
                       </label>
                       <Input
@@ -372,7 +370,7 @@ export function ModelPriceAliasesDialog({
                         placeholder="输入或从建议中选择…"
                         disabled={saving}
                       />
-                      <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+                      <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
                         下拉列表选择具体模型
                       </p>
                     </div>
@@ -383,7 +381,7 @@ export function ModelPriceAliasesDialog({
           </div>
         )}
 
-        <div className="flex items-center justify-end gap-3 border-t border-slate-200 dark:border-slate-700 pt-4">
+        <div className="flex items-center justify-end gap-3 border-t border-line-subtle pt-4">
           <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={saving}>
             取消
           </Button>

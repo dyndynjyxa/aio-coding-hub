@@ -119,7 +119,7 @@ function main() {
   logger.info("[pnpm-audit] 开始执行依赖审计...");
 
   // 1.1 运行 pnpm audit，并捕获 stdout / stderr 供后续解析
-  const result = spawnSync("pnpm", ["audit", "--audit-level=high", "--json"], {
+  const result = spawnSync("pnpm", ["audit", "--prod", "--audit-level=high", "--json"], {
     cwd: repoRoot,
     encoding: "utf8",
     env: process.env,

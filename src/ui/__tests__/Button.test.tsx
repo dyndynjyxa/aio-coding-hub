@@ -33,13 +33,13 @@ describe("ui/Button", () => {
 
   it("applies variant classes", () => {
     const { rerender } = render(<Button variant="primary">Primary</Button>);
-    expect(screen.getByRole("button")).toHaveClass("bg-gradient-to-br");
+    expect(screen.getByRole("button")).toHaveClass("bg-state-selected");
 
     rerender(<Button variant="ghost">Ghost</Button>);
-    expect(screen.getByRole("button")).toHaveClass("hover:bg-secondary");
+    expect(screen.getByRole("button")).toHaveClass("hover:bg-state-hover");
 
     rerender(<Button variant="danger">Danger</Button>);
-    expect(screen.getByRole("button")).toHaveClass("text-rose-700");
+    expect(screen.getByRole("button")).toHaveClass("text-destructive");
 
     rerender(<Button variant="warning">Warning</Button>);
     expect(screen.getByRole("button")).toHaveClass("text-amber-800");
@@ -77,7 +77,7 @@ describe("ui/Button", () => {
     render(<Button>Default</Button>);
     const btn = screen.getByRole("button");
     // secondary variant class
-    expect(btn).toHaveClass("border-border");
+    expect(btn).toHaveClass("bg-surface-panel");
     // md size class
     expect(btn).toHaveClass("text-sm");
   });

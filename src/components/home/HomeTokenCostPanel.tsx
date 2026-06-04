@@ -70,10 +70,10 @@ const TOKEN_COST_RANGE_ITEMS = [
 ] as const satisfies ReadonlyArray<{ key: Exclude<TokenCostRange, "custom">; label: string }>;
 
 const TABLE_TH_CLASS =
-  "border-b border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/70 px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400";
-const TABLE_TD_CLASS = "border-b border-slate-100 dark:border-slate-700 px-3 py-3";
+  "border-b border-border bg-secondary/70 dark:bg-secondary/70 px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground";
+const TABLE_TD_CLASS = "border-b border-border px-3 py-3";
 const TABLE_MONO_TD_CLASS =
-  "border-b border-slate-100 dark:border-slate-700 px-3 py-3 font-mono text-xs tabular-nums text-slate-700 dark:text-slate-300";
+  "border-b border-border px-3 py-3 font-mono text-xs tabular-nums text-secondary-foreground";
 
 const SUMMARY_SKELETON_KEYS = [0, 1, 2, 3, 4, 5, 6];
 const EMPTY_LEADERBOARD_ROWS: UsageLeaderboardRow[] = [];
@@ -456,7 +456,7 @@ function TableHeaderLabel({ label, note }: { label: string; note?: string }) {
     <div className="inline-flex items-baseline gap-1 whitespace-nowrap normal-case">
       <span>{label}</span>
       {note ? (
-        <span className="text-[10px] font-normal tracking-normal text-slate-400 dark:text-slate-500">
+        <span className="text-[10px] font-normal tracking-normal text-muted-foreground">
           （{note}）
         </span>
       ) : null}
@@ -496,7 +496,7 @@ function SortableColumnHeader<T extends string>({
         type="button"
         onClick={() => onSort(sortKey)}
         className={cn(
-          "-mx-1 inline-flex items-center gap-1 rounded px-1 py-0.5 text-left transition hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-accent/30 dark:hover:text-slate-100",
+          "-mx-1 inline-flex items-center gap-1 rounded px-1 py-0.5 text-left transition hover:text-foreground focus:outline-none focus:ring-2 focus:ring-accent/30 dark:hover:text-foreground",
           active && "text-sky-700 dark:text-sky-300"
         )}
       >
@@ -505,7 +505,7 @@ function SortableColumnHeader<T extends string>({
           aria-hidden="true"
           className={cn(
             "h-3.5 w-3.5 shrink-0",
-            active ? "text-sky-600 dark:text-sky-300" : "text-slate-400 dark:text-slate-500"
+            active ? "text-sky-600 dark:text-sky-300" : "text-muted-foreground"
           )}
         />
       </button>
@@ -519,7 +519,7 @@ function TokenBreakdownInline({ parts }: { parts: string[] }) {
       {parts.map((part, index) => (
         <span key={`${part}-${index}`} className="inline-flex items-baseline gap-0.5">
           {index > 0 ? (
-            <span className="text-slate-400 dark:text-slate-500" aria-hidden="true">
+            <span className="text-muted-foreground" aria-hidden="true">
               /
             </span>
           ) : null}
@@ -576,13 +576,13 @@ function TokenShareBar({ percent }: { percent: number }) {
       aria-valuemax={100}
       aria-label={`Token 占比 ${displayPct}%`}
     >
-      <div className="h-1.5 flex-1 rounded-full bg-slate-100 dark:bg-slate-700">
+      <div className="h-1.5 flex-1 rounded-full bg-secondary">
         <div
           className="h-full rounded-full bg-sky-500 transition-all duration-300"
           style={{ width: `${pct * 100}%` }}
         />
       </div>
-      <span className="w-10 text-right text-[10px] tabular-nums text-slate-500 dark:text-slate-400">
+      <span className="w-10 text-right text-[10px] tabular-nums text-muted-foreground">
         {displayPct}%
       </span>
     </div>
@@ -591,7 +591,7 @@ function TokenShareBar({ percent }: { percent: number }) {
 
 function DayDetailLoading() {
   return (
-    <div className="flex items-center justify-center gap-2 py-8 text-sm text-slate-600 dark:text-slate-400">
+    <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
       <Spinner size="sm" />
       <span>加载日期详情中…</span>
     </div>
@@ -607,7 +607,7 @@ function DayFolderUsageTable({ folders }: { folders: UsageDayFolderRow[] }) {
 
   if (folders.length === 0) {
     return (
-      <div className="py-8 text-center text-sm text-slate-600 dark:text-slate-400">
+      <div className="py-8 text-center text-sm text-muted-foreground">
         当天暂无可展示的文件夹用量。
       </div>
     );
@@ -656,14 +656,12 @@ function DayFolderUsageTable({ folders }: { folders: UsageDayFolderRow[] }) {
             <tr key={folder.key} className="align-top">
               <td className={TABLE_TD_CLASS}>
                 <div className="flex min-w-[180px] items-start gap-2">
-                  <FolderOpen className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500" />
+                  <FolderOpen className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <div className="min-w-0">
-                    <div className="truncate font-medium text-slate-900 dark:text-slate-100">
-                      {folder.name}
-                    </div>
+                    <div className="truncate font-medium text-foreground">{folder.name}</div>
                     {folder.folder_path ? (
                       <div
-                        className="mt-0.5 truncate font-mono text-[10px] text-slate-500 dark:text-slate-400"
+                        className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground"
                         title={folder.folder_path}
                       >
                         {folder.folder_path}
@@ -710,17 +708,15 @@ function DayHourlyMiniBarChart({ hours }: { hours: UsageDayHourRow[] }) {
     <div>
       <div className="mb-3 flex items-baseline justify-between gap-3">
         <div>
-          <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-            24 小时分布
-          </div>
-          <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+          <div className="text-sm font-semibold text-foreground">24 小时分布</div>
+          <div className="mt-0.5 text-xs text-muted-foreground">
             {formatTokenValue(totalTokens)} · {formatInteger(totalRequests)} 次请求
           </div>
-          <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{activeRangeText}</div>
+          <div className="mt-0.5 text-xs text-muted-foreground">{activeRangeText}</div>
         </div>
       </div>
       <div
-        className="flex h-28 items-end gap-1 rounded-md border border-slate-200 bg-white px-2 py-2 dark:border-slate-700 dark:bg-slate-900/50"
+        className="flex h-28 items-end gap-1 rounded-md border border-border bg-white px-2 py-2 dark:border-border dark:bg-card/50"
         role="img"
         aria-label="24 小时 Token 分布"
       >
@@ -739,7 +735,7 @@ function DayHourlyMiniBarChart({ hours }: { hours: UsageDayHourRow[] }) {
                   "w-full rounded-sm transition-colors",
                   row.total_tokens > 0
                     ? "bg-sky-500 hover:bg-sky-600 dark:bg-sky-400 dark:hover:bg-sky-300"
-                    : "bg-slate-200 dark:bg-slate-700"
+                    : "bg-muted dark:bg-secondary"
                 )}
                 style={{ height: `${height}%` }}
               />
@@ -747,7 +743,7 @@ function DayHourlyMiniBarChart({ hours }: { hours: UsageDayHourRow[] }) {
           );
         })}
       </div>
-      <div className="mt-2 grid grid-cols-5 text-[10px] tabular-nums text-slate-400 dark:text-slate-500">
+      <div className="mt-2 grid grid-cols-5 text-[10px] tabular-nums text-muted-foreground">
         <span>00</span>
         <span className="text-center">06</span>
         <span className="text-center">12</span>
@@ -778,15 +774,13 @@ function DayDetailPanel({
   }
 
   if (!detail) {
-    return <div className="py-6 text-sm text-slate-600 dark:text-slate-400">暂无日期详情。</div>;
+    return <div className="py-6 text-sm text-muted-foreground">暂无日期详情。</div>;
   }
 
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.85fr)]">
       <div className="min-w-0">
-        <div className="mb-3 text-sm font-semibold text-slate-900 dark:text-slate-100">
-          文件夹 Token 明细
-        </div>
+        <div className="mb-3 text-sm font-semibold text-foreground">文件夹 Token 明细</div>
         <DayFolderUsageTable folders={detail.folders} />
       </div>
       <DayHourlyMiniBarChart hours={detail.hours} />
@@ -884,7 +878,7 @@ function TokenLeaderboardTable({
 
   if (loading && rows.length === 0) {
     return (
-      <div className="flex items-center justify-center gap-3 px-6 py-14 text-sm text-slate-600 dark:text-slate-400">
+      <div className="flex items-center justify-center gap-3 px-6 py-14 text-sm text-muted-foreground">
         <Spinner />
         <span>加载用量中…</span>
       </div>
@@ -893,7 +887,7 @@ function TokenLeaderboardTable({
 
   if (rows.length === 0) {
     return (
-      <div className="px-6 py-14 text-center text-sm text-slate-600 dark:text-slate-400">
+      <div className="px-6 py-14 text-center text-sm text-muted-foreground">
         {customPending ? "请选择开始日期和结束日期后点击“自定义”。" : "当前时间范围暂无用量数据。"}
       </div>
     );
@@ -972,13 +966,11 @@ function TokenLeaderboardTable({
               <Fragment key={row.key}>
                 <tr
                   className={cn(
-                    "align-top transition-colors hover:bg-slate-50/60 dark:hover:bg-slate-800/50",
-                    expanded && "bg-slate-50/80 dark:bg-slate-800/60"
+                    "align-top transition-colors hover:bg-secondary/60 dark:hover:bg-secondary/50",
+                    expanded && "bg-secondary/80 dark:bg-secondary/60"
                   )}
                 >
-                  <td
-                    className={`${TABLE_TD_CLASS} text-xs tabular-nums text-slate-400 dark:text-slate-500`}
-                  >
+                  <td className={`${TABLE_TD_CLASS} text-xs tabular-nums text-muted-foreground`}>
                     {index + 1}
                   </td>
                   <td className={TABLE_TD_CLASS}>
@@ -993,18 +985,16 @@ function TokenLeaderboardTable({
                         <ChevronRight
                           aria-hidden="true"
                           className={cn(
-                            "h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform dark:text-slate-500",
+                            "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform dark:text-muted-foreground",
                             expanded && "rotate-90 text-sky-500 dark:text-sky-300"
                           )}
                         />
-                        <span className="font-medium text-slate-900 group-hover:text-sky-700 dark:text-slate-100 dark:group-hover:text-sky-300">
+                        <span className="font-medium text-foreground group-hover:text-sky-700 dark:text-foreground dark:group-hover:text-sky-300">
                           {row.name}
                         </span>
                       </button>
                     ) : (
-                      <div className="font-medium text-slate-900 dark:text-slate-100">
-                        {row.name}
-                      </div>
+                      <div className="font-medium text-foreground">{row.name}</div>
                     )}
                   </td>
                   <td className={TABLE_MONO_TD_CLASS}>
@@ -1030,7 +1020,7 @@ function TokenLeaderboardTable({
                   <tr>
                     <td
                       colSpan={10}
-                      className="border-b border-slate-100 bg-slate-50/70 px-4 py-4 dark:border-slate-700 dark:bg-slate-900/40"
+                      className="border-b border-border bg-secondary/70 px-4 py-4 dark:border-border dark:bg-card/40"
                     >
                       <DayDetailPanel
                         detail={dayDetail?.day === row.key ? dayDetail : null}
@@ -1071,15 +1061,15 @@ function CustomRangeForm({
         value={customStartDate}
         onChange={(event) => onCustomStartDateChange(event.currentTarget.value)}
         aria-label="开始日期"
-        className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900 outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+        className="h-8 rounded-md border border-border bg-white px-2 text-xs text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-border dark:bg-secondary dark:text-foreground"
       />
-      <span className="text-xs text-slate-400">→</span>
+      <span className="text-xs text-muted-foreground">→</span>
       <input
         type="date"
         value={customEndDate}
         onChange={(event) => onCustomEndDateChange(event.currentTarget.value)}
         aria-label="结束日期"
-        className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900 outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+        className="h-8 rounded-md border border-border bg-white px-2 text-xs text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-border dark:bg-secondary dark:text-foreground"
       />
       <Button
         size="sm"
@@ -1140,7 +1130,7 @@ function FolderMultiSelect({
         disabled && "cursor-not-allowed opacity-50"
       )}
     >
-      <FolderOpen className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />
+      <FolderOpen className="h-3.5 w-3.5 text-muted-foreground" />
       <span className="max-w-[150px] truncate">{selectedLabel}</span>
       {loading ? <Spinner size="sm" /> : <ChevronDown className="h-3.5 w-3.5" />}
     </span>
@@ -1162,9 +1152,9 @@ function FolderMultiSelect({
       contentClassName="w-80 p-0"
       className="whitespace-nowrap"
     >
-      <div className="border-b border-slate-200 px-3 py-2 dark:border-slate-700">
+      <div className="border-b border-border px-3 py-2 dark:border-border">
         <div className="flex items-center justify-between gap-2">
-          <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">文件夹</div>
+          <div className="text-sm font-semibold text-foreground">文件夹</div>
           <Button
             size="sm"
             variant="ghost"
@@ -1180,13 +1170,13 @@ function FolderMultiSelect({
       </div>
       <div className="max-h-72 overflow-y-auto py-1">
         {loading && displayOptions.length === 0 ? (
-          <div className="flex items-center justify-center gap-2 px-3 py-6 text-sm text-slate-600 dark:text-slate-400">
+          <div className="flex items-center justify-center gap-2 px-3 py-6 text-sm text-muted-foreground">
             <Spinner size="sm" />
             <span>加载文件夹中…</span>
           </div>
         ) : null}
         {!loading && displayOptions.length === 0 ? (
-          <div className="px-3 py-6 text-center text-sm text-slate-600 dark:text-slate-400">
+          <div className="px-3 py-6 text-center text-sm text-muted-foreground">
             当前范围暂无文件夹。
           </div>
         ) : null}
@@ -1199,21 +1189,21 @@ function FolderMultiSelect({
               role="checkbox"
               aria-checked={selected}
               onClick={() => onToggleKey(option.key)}
-              className="flex w-full items-start gap-2 px-3 py-2 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800"
+              className="flex w-full items-start gap-2 px-3 py-2 text-left transition hover:bg-secondary dark:hover:bg-secondary"
             >
               <span
                 className={cn(
-                  "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border border-slate-300 dark:border-slate-600",
+                  "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border border-border dark:border-border",
                   selected && "border-sky-500 bg-sky-500 text-white"
                 )}
               >
                 {selected ? <Check className="h-3 w-3" /> : null}
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium text-slate-900 dark:text-slate-100">
+                <span className="block truncate text-sm font-medium text-foreground">
                   {option.name}
                 </span>
-                <span className="mt-0.5 block truncate font-mono text-[10px] text-slate-500 dark:text-slate-400">
+                <span className="mt-0.5 block truncate font-mono text-[10px] text-muted-foreground">
                   {option.folder_path ?? "未知文件夹"} · {formatTokenValue(option.total_tokens)}
                 </span>
               </span>
@@ -1392,7 +1382,7 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
             onToggleKey={handleToggleFolderKey}
             onClear={handleClearFolderKeys}
           />
-          <label className="flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+          <label className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-white px-2.5 text-xs text-muted-foreground shadow-sm dark:border-border dark:bg-card dark:text-secondary-foreground">
             <span className="whitespace-nowrap">转接去重</span>
             <Switch
               checked={excludeCx2CcGatewayBridge}
@@ -1451,10 +1441,8 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
       />
 
       <Card padding="none" className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="shrink-0 border-b border-slate-200 px-6 pb-4 pt-5 dark:border-slate-700">
-          <div className="text-base font-semibold text-slate-900 dark:text-slate-100">
-            {scopeLabel(scope)}排行
-          </div>
+        <div className="shrink-0 border-b border-border px-6 pb-4 pt-5 dark:border-border">
+          <div className="text-base font-semibold text-foreground">{scopeLabel(scope)}排行</div>
         </div>
         <TokenLeaderboardTable
           scope={scope}

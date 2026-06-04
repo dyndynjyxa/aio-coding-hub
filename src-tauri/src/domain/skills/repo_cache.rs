@@ -1,13 +1,23 @@
 use super::git_url::{normalize_repo_branch, parse_github_owner_repo};
 use super::paths::repos_root;
 use super::util::now_unix_nanos;
-use std::io::{Cursor, Write};
+use crate::shared::fs::{read_file_with_max_len, write_file_atomic};
+use crate::shared::http_body::read_text_with_limit;
+use std::io::{Cursor, Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime};
 
 const REPO_BRANCH_FILE: &str = ".aio-coding-hub.repo-branch";
 const REPO_SNAPSHOT_MARKER_FILE: &str = ".aio-coding-hub.repo-snapshot";
+const REPO_BRANCH_FILE_MAX_BYTES: usize = 1024;
+const GIT_OUTPUT_STREAM_LIMIT: usize = 32 * 1024;
+const GIT_OUTPUT_READ_CHUNK_SIZE: usize = 8 * 1024;
+const GITHUB_JSON_RESPONSE_BODY_LIMIT: usize = 2 * 1024 * 1024;
+const GITHUB_ZIP_DOWNLOAD_LIMIT: usize = 256 * 1024 * 1024;
+const REPO_ZIP_MAX_ENTRIES: usize = 100_000;
+const REPO_ZIP_EXTRACTED_BYTES_LIMIT: u64 = 512 * 1024 * 1024;
 
 fn fnv1a64(input: &str) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
@@ -120,42 +130,182 @@ fn remove_path_if_exists(path: &Path) -> crate::shared::error::AppResult<()> {
         .map_err(|e| format!("failed to remove {}: {e}", path.display()).into())
 }
 
-fn run_git(mut cmd: Command) -> crate::shared::error::AppResult<()> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LimitedGitOutput {
+    bytes: Vec<u8>,
+    truncated: bool,
+    limit: usize,
+}
+
+impl LimitedGitOutput {
+    fn empty(limit: usize) -> Self {
+        Self {
+            bytes: Vec::new(),
+            truncated: false,
+            limit,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct LimitedGitProcessOutput {
+    status: std::process::ExitStatus,
+    stdout: LimitedGitOutput,
+    stderr: LimitedGitOutput,
+}
+
+fn read_limited_git_output<R: Read>(
+    mut reader: R,
+    limit: usize,
+) -> std::io::Result<LimitedGitOutput> {
+    let mut bytes = Vec::with_capacity(limit.min(GIT_OUTPUT_READ_CHUNK_SIZE));
+    let mut truncated = false;
+    let mut chunk = [0_u8; GIT_OUTPUT_READ_CHUNK_SIZE];
+
+    loop {
+        let read = reader.read(&mut chunk)?;
+        if read == 0 {
+            break;
+        }
+
+        let remaining = limit.saturating_sub(bytes.len());
+        if remaining > 0 {
+            let keep = read.min(remaining);
+            bytes.extend_from_slice(&chunk[..keep]);
+            if keep < read {
+                truncated = true;
+            }
+        } else {
+            truncated = true;
+        }
+    }
+
+    Ok(LimitedGitOutput {
+        bytes,
+        truncated,
+        limit,
+    })
+}
+
+fn spawn_limited_git_output_reader<R>(reader: R) -> JoinHandle<std::io::Result<LimitedGitOutput>>
+where
+    R: Read + Send + 'static,
+{
+    std::thread::spawn(move || read_limited_git_output(reader, GIT_OUTPUT_STREAM_LIMIT))
+}
+
+fn collect_git_output_reader(
+    task: Option<JoinHandle<std::io::Result<LimitedGitOutput>>>,
+    stream_name: &str,
+) -> crate::shared::error::AppResult<LimitedGitOutput> {
+    let Some(task) = task else {
+        return Ok(LimitedGitOutput::empty(GIT_OUTPUT_STREAM_LIMIT));
+    };
+
+    match task.join() {
+        Ok(Ok(output)) => Ok(output),
+        Ok(Err(error)) => {
+            Err(format!("SKILL_GIT_ERROR: failed to read git {stream_name}: {error}").into())
+        }
+        Err(_) => Err(format!("SKILL_GIT_ERROR: failed to join git {stream_name} reader").into()),
+    }
+}
+
+fn collect_limited_git_process_output(
+    status: std::process::ExitStatus,
+    stdout_task: Option<JoinHandle<std::io::Result<LimitedGitOutput>>>,
+    stderr_task: Option<JoinHandle<std::io::Result<LimitedGitOutput>>>,
+) -> crate::shared::error::AppResult<LimitedGitProcessOutput> {
+    let stdout = collect_git_output_reader(stdout_task, "stdout")?;
+    let stderr = collect_git_output_reader(stderr_task, "stderr")?;
+    Ok(LimitedGitProcessOutput {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+fn drain_git_output_readers(
+    stdout_task: Option<JoinHandle<std::io::Result<LimitedGitOutput>>>,
+    stderr_task: Option<JoinHandle<std::io::Result<LimitedGitOutput>>>,
+) {
+    let _ = collect_git_output_reader(stdout_task, "stdout");
+    let _ = collect_git_output_reader(stderr_task, "stderr");
+}
+
+fn limited_git_output_to_string(output: &LimitedGitOutput, stream_name: &str) -> String {
+    let mut rendered = String::from_utf8_lossy(&output.bytes).trim().to_string();
+    if output.truncated {
+        if !rendered.is_empty() {
+            rendered.push('\n');
+        }
+        rendered.push_str(&format!(
+            "[git {stream_name} truncated after {} bytes]",
+            output.limit
+        ));
+    }
+    rendered
+}
+
+fn command_limited_git_output(
+    mut cmd: Command,
+) -> crate::shared::error::AppResult<LimitedGitProcessOutput> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    let out = cmd
-        .output()
+
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let mut child = cmd
+        .spawn()
         .map_err(|e| format!("SKILL_GIT_NOT_FOUND: failed to execute git: {e}"))?;
+    let stdout_task = child.stdout.take().map(spawn_limited_git_output_reader);
+    let stderr_task = child.stderr.take().map(spawn_limited_git_output_reader);
+
+    let status = match child.wait() {
+        Ok(status) => status,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            drain_git_output_readers(stdout_task, stderr_task);
+            return Err(format!("SKILL_GIT_ERROR: failed to wait for git: {error}").into());
+        }
+    };
+
+    collect_limited_git_process_output(status, stdout_task, stderr_task)
+}
+
+fn git_error_message(out: &LimitedGitProcessOutput) -> String {
+    let stderr = limited_git_output_to_string(&out.stderr, "stderr");
+    let stdout = limited_git_output_to_string(&out.stdout, "stdout");
+    if !stderr.is_empty() {
+        return stderr;
+    }
+    if !stdout.is_empty() {
+        return stdout;
+    }
+    format!("git exited with status {}", out.status)
+}
+
+fn run_git(cmd: Command) -> crate::shared::error::AppResult<()> {
+    let out = command_limited_git_output(cmd)?;
     if out.status.success() {
         return Ok(());
     }
-    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
-    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    let msg = if !stderr.is_empty() { stderr } else { stdout };
-    Err(format!("SKILL_GIT_ERROR: {msg}").into())
+    Err(format!("SKILL_GIT_ERROR: {}", git_error_message(&out)).into())
 }
 
-fn run_git_capture(mut cmd: Command) -> crate::shared::error::AppResult<String> {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    let out = cmd
-        .output()
-        .map_err(|e| format!("SKILL_GIT_NOT_FOUND: failed to execute git: {e}"))?;
+fn run_git_capture(cmd: Command) -> crate::shared::error::AppResult<String> {
+    let out = command_limited_git_output(cmd)?;
     if out.status.success() {
-        return Ok(String::from_utf8_lossy(&out.stdout).trim().to_string());
+        return Ok(limited_git_output_to_string(&out.stdout, "stdout"));
     }
-    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
-    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    let msg = if !stderr.is_empty() { stderr } else { stdout };
-    Err(format!("SKILL_GIT_ERROR: {msg}").into())
+    Err(format!("SKILL_GIT_ERROR: {}", git_error_message(&out)).into())
 }
 
 fn is_remote_branch_not_found(err: &str) -> bool {
@@ -167,7 +317,8 @@ fn is_remote_branch_not_found(err: &str) -> bool {
 
 fn read_repo_branch(dir: &Path) -> Option<String> {
     let path = dir.join(REPO_BRANCH_FILE);
-    let text = std::fs::read_to_string(&path).ok()?;
+    let bytes = read_file_with_max_len(&path, REPO_BRANCH_FILE_MAX_BYTES).ok()?;
+    let text = String::from_utf8(bytes).ok()?;
     let branch = text.trim().to_string();
     if branch.is_empty() {
         return None;
@@ -177,8 +328,7 @@ fn read_repo_branch(dir: &Path) -> Option<String> {
 
 fn write_repo_branch(dir: &Path, branch: &str) -> crate::shared::error::AppResult<()> {
     let path = dir.join(REPO_BRANCH_FILE);
-    std::fs::write(&path, format!("{}\n", branch.trim()))
-        .map_err(|e| format!("failed to write {}: {e}", path.display()))?;
+    write_file_atomic(&path, format!("{}\n", branch.trim()).as_bytes())?;
     Ok(())
 }
 
@@ -230,6 +380,46 @@ fn build_github_client() -> crate::shared::error::AppResult<reqwest::Client> {
         .map_err(|e| format!("SKILL_HTTP_ERROR: failed to build http client: {e}").into())
 }
 
+fn github_zip_too_large_error(limit: usize) -> String {
+    format!("SKILL_HTTP_ERROR: github zip body exceeds {limit} bytes")
+}
+
+fn append_github_zip_body_chunk(
+    bytes: &mut Vec<u8>,
+    chunk: &[u8],
+    limit: usize,
+) -> Result<(), String> {
+    if chunk.len() > limit.saturating_sub(bytes.len()) {
+        return Err(github_zip_too_large_error(limit));
+    }
+    bytes.extend_from_slice(chunk);
+    Ok(())
+}
+
+async fn read_github_zip_body_with_limit(
+    mut resp: reqwest::Response,
+    limit: usize,
+) -> Result<Vec<u8>, String> {
+    let content_length = resp.content_length();
+    if content_length.is_some_and(|len| len > limit as u64) {
+        return Err(github_zip_too_large_error(limit));
+    }
+
+    let capacity = content_length
+        .and_then(|len| usize::try_from(len).ok())
+        .unwrap_or_default()
+        .min(limit);
+    let mut bytes = Vec::with_capacity(capacity);
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| format!("SKILL_HTTP_ERROR: failed to read github zip body: {e}"))?
+    {
+        append_github_zip_body_chunk(&mut bytes, chunk.as_ref(), limit)?;
+    }
+    Ok(bytes)
+}
+
 pub(super) fn github_api_url(segments: &[&str]) -> crate::shared::error::AppResult<reqwest::Url> {
     let mut url = reqwest::Url::parse("https://api.github.com")
         .map_err(|e| format!("SKILL_GITHUB_URL_ERROR: {e}"))?;
@@ -260,11 +450,6 @@ fn github_default_branch(
             .map_err(|e| format!("SKILL_HTTP_ERROR: github request failed: {e}"))?;
 
         let status = resp.status();
-        let body = resp
-            .text()
-            .await
-            .map_err(|e| format!("SKILL_HTTP_ERROR: failed to read github response: {e}"))?;
-
         if status == reqwest::StatusCode::NOT_FOUND {
             return Err("SKILL_GITHUB_REPO_NOT_FOUND: repository not found".to_string());
         }
@@ -280,6 +465,13 @@ fn github_default_branch(
             ));
         }
 
+        let body = read_text_with_limit(
+            resp,
+            GITHUB_JSON_RESPONSE_BODY_LIMIT,
+            "github repo response",
+        )
+        .await
+        .map_err(|e| format!("SKILL_HTTP_ERROR: {e}"))?;
         let root: serde_json::Value = serde_json::from_str(&body)
             .map_err(|e| format!("SKILL_GITHUB_PARSE_ERROR: github json parse failed: {e}"))?;
         let branch = root
@@ -327,11 +519,7 @@ fn github_download_zipball(
             ));
         }
 
-        let bytes = resp
-            .bytes()
-            .await
-            .map_err(|e| format!("SKILL_HTTP_ERROR: failed to read github zip body: {e}"))?;
-        Ok(bytes.to_vec())
+        read_github_zip_body_with_limit(resp, GITHUB_ZIP_DOWNLOAD_LIMIT).await
     })
     .map_err(Into::into)
 }
@@ -353,11 +541,6 @@ pub(super) fn github_get_branch_commit(
             .map_err(|e| format!("SKILL_HTTP_ERROR: github request failed: {e}"))?;
 
         let status = resp.status();
-        let body = resp
-            .text()
-            .await
-            .map_err(|e| format!("SKILL_HTTP_ERROR: failed to read github response: {e}"))?;
-
         if status == reqwest::StatusCode::NOT_FOUND {
             return Err("SKILL_GITHUB_REF_NOT_FOUND: branch/commit not found".to_string());
         }
@@ -373,6 +556,13 @@ pub(super) fn github_get_branch_commit(
             ));
         }
 
+        let body = read_text_with_limit(
+            resp,
+            GITHUB_JSON_RESPONSE_BODY_LIMIT,
+            "github commit response",
+        )
+        .await
+        .map_err(|e| format!("SKILL_HTTP_ERROR: {e}"))?;
         let root: serde_json::Value = serde_json::from_str(&body)
             .map_err(|e| format!("SKILL_GITHUB_PARSE_ERROR: github json parse failed: {e}"))?;
         let sha = root
@@ -388,18 +578,32 @@ pub(super) fn github_get_branch_commit(
     .map_err(Into::into)
 }
 
-pub(super) fn unzip_repo_zip(
+fn zip_too_many_entries_error(max_entries: usize) -> String {
+    format!("SKILL_ZIP_ERROR: zip has too many entries (max {max_entries})")
+}
+
+fn zip_extracted_too_large_error(max_extracted_bytes: u64) -> String {
+    format!("SKILL_ZIP_ERROR: extracted zip content exceeds {max_extracted_bytes} bytes")
+}
+
+fn unzip_repo_zip_with_limits(
     zip_bytes: &[u8],
     dst_dir: &Path,
+    max_entries: usize,
+    max_extracted_bytes: u64,
 ) -> crate::shared::error::AppResult<PathBuf> {
     std::fs::create_dir_all(dst_dir)
         .map_err(|e| format!("failed to create {}: {e}", dst_dir.display()))?;
 
     let mut archive = zip::ZipArchive::new(Cursor::new(zip_bytes))
         .map_err(|e| format!("SKILL_ZIP_ERROR: failed to open zip archive: {e}"))?;
+    if archive.len() > max_entries {
+        return Err(zip_too_many_entries_error(max_entries).into());
+    }
 
+    let mut extracted_bytes = 0_u64;
     for i in 0..archive.len() {
-        let mut file = archive
+        let file = archive
             .by_index(i)
             .map_err(|e| format!("SKILL_ZIP_ERROR: failed to read zip entry: {e}"))?;
         let name = file.name().replace('\\', "/");
@@ -432,10 +636,22 @@ pub(super) fn unzip_repo_zip(
                 .map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
         }
 
+        let remaining = max_extracted_bytes.saturating_sub(extracted_bytes);
+        if file.size() > remaining {
+            return Err(zip_extracted_too_large_error(max_extracted_bytes).into());
+        }
+
         let mut out_file = std::fs::File::create(&out_path)
             .map_err(|e| format!("failed to create {}: {e}", out_path.display()))?;
-        std::io::copy(&mut file, &mut out_file)
-            .map_err(|e| format!("failed to write {}: {e}", out_path.display()))?;
+        let copied = {
+            let mut limited_file = file.take(remaining + 1);
+            std::io::copy(&mut limited_file, &mut out_file)
+        }
+        .map_err(|e| format!("failed to write {}: {e}", out_path.display()))?;
+        if copied > remaining {
+            return Err(zip_extracted_too_large_error(max_extracted_bytes).into());
+        }
+        extracted_bytes = extracted_bytes.saturating_add(copied);
     }
 
     let mut top_dirs = Vec::new();
@@ -463,6 +679,18 @@ pub(super) fn unzip_repo_zip(
     }
 
     Ok(top_dirs.remove(0))
+}
+
+pub(super) fn unzip_repo_zip(
+    zip_bytes: &[u8],
+    dst_dir: &Path,
+) -> crate::shared::error::AppResult<PathBuf> {
+    unzip_repo_zip_with_limits(
+        zip_bytes,
+        dst_dir,
+        REPO_ZIP_MAX_ENTRIES,
+        REPO_ZIP_EXTRACTED_BYTES_LIMIT,
+    )
 }
 
 fn repo_snapshot_marker_path(dir: &Path) -> PathBuf {
@@ -809,4 +1037,118 @@ pub(super) fn ensure_repo_cache(
     }
 
     ensure_git_repo_cache(app, git_url, &branch, refresh)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn make_temp_dir(prefix: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("{prefix}-{}", now_unix_nanos()));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    #[test]
+    fn read_limited_git_output_keeps_bounded_prefix() {
+        let output =
+            read_limited_git_output(Cursor::new(b"abcdefghijklmnop".to_vec()), 8).expect("read");
+
+        assert_eq!(output.bytes, b"abcdefgh");
+        assert!(output.truncated);
+        assert_eq!(output.limit, 8);
+    }
+
+    #[test]
+    fn limited_git_output_to_string_marks_truncated_stream() {
+        let rendered = limited_git_output_to_string(
+            &LimitedGitOutput {
+                bytes: b"first lines\n".to_vec(),
+                truncated: true,
+                limit: 11,
+            },
+            "stderr",
+        );
+
+        assert_eq!(
+            rendered,
+            "first lines\n[git stderr truncated after 11 bytes]"
+        );
+    }
+
+    #[test]
+    fn append_github_zip_body_chunk_accepts_exact_limit() {
+        let mut bytes = b"abcd".to_vec();
+
+        append_github_zip_body_chunk(&mut bytes, b"ef", 6).expect("append");
+
+        assert_eq!(bytes, b"abcdef");
+    }
+
+    #[test]
+    fn append_github_zip_body_chunk_rejects_limit_overflow_without_mutating() {
+        let mut bytes = b"abcd".to_vec();
+        let err = append_github_zip_body_chunk(&mut bytes, b"ef", 5).expect_err("reject");
+
+        assert_eq!(err, "SKILL_HTTP_ERROR: github zip body exceeds 5 bytes");
+        assert_eq!(bytes, b"abcd");
+    }
+
+    #[test]
+    fn read_repo_branch_rejects_oversized_marker() {
+        let dir = make_temp_dir("aio-repo-branch-large");
+        std::fs::write(
+            dir.join(REPO_BRANCH_FILE),
+            vec![b'x'; REPO_BRANCH_FILE_MAX_BYTES + 1],
+        )
+        .expect("write branch marker");
+
+        let branch = read_repo_branch(&dir);
+
+        assert!(branch.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unzip_repo_zip_with_limits_rejects_too_many_entries() {
+        let mut buf = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(&mut buf);
+        let opts = zip::write::FileOptions::<()>::default();
+        zip.add_directory("repo/", opts).expect("add root");
+        zip.add_directory("repo/nested/", opts).expect("add nested");
+        zip.finish().expect("finish zip");
+
+        let out_dir = make_temp_dir("aio-unzip-entry-limit");
+        let err = unzip_repo_zip_with_limits(&buf.into_inner(), &out_dir, 1, 1024)
+            .expect_err("entry limit")
+            .to_string();
+
+        assert_eq!(err, "SKILL_ZIP_ERROR: zip has too many entries (max 1)");
+
+        let _ = std::fs::remove_dir_all(&out_dir);
+    }
+
+    #[test]
+    fn unzip_repo_zip_with_limits_rejects_extracted_size_overflow() {
+        let mut buf = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(&mut buf);
+        let opts = zip::write::FileOptions::<()>::default();
+        zip.add_directory("repo/", opts).expect("add root");
+        zip.start_file("repo/SKILL.md", opts).expect("start file");
+        zip.write_all(b"abcdef").expect("write file");
+        zip.finish().expect("finish zip");
+
+        let out_dir = make_temp_dir("aio-unzip-byte-limit");
+        let err = unzip_repo_zip_with_limits(&buf.into_inner(), &out_dir, 4, 5)
+            .expect_err("byte limit")
+            .to_string();
+
+        assert_eq!(
+            err,
+            "SKILL_ZIP_ERROR: extracted zip content exceeds 5 bytes"
+        );
+
+        let _ = std::fs::remove_dir_all(&out_dir);
+    }
 }

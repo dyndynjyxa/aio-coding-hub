@@ -134,6 +134,14 @@ pub(super) fn sanitize_circuit_breaker_settings(settings: &mut AppSettings) -> b
     changed
 }
 
+pub(super) fn sanitize_log_retention_days(settings: &mut AppSettings) -> bool {
+    if settings.log_retention_days > MAX_LOG_RETENTION_DAYS {
+        settings.log_retention_days = MAX_LOG_RETENTION_DAYS;
+        return true;
+    }
+    false
+}
+
 pub(super) fn sanitize_provider_cooldown_seconds(settings: &mut AppSettings) -> bool {
     if settings.provider_cooldown_seconds > MAX_PROVIDER_COOLDOWN_SECONDS {
         settings.provider_cooldown_seconds = MAX_PROVIDER_COOLDOWN_SECONDS;
@@ -608,9 +616,21 @@ fn migrate_add_upstream_proxy_credentials(
     )
 }
 
+fn migrate_add_codex_oauth_compatible_proxy_mode(
+    settings: &mut AppSettings,
+    schema_version_present: bool,
+) -> bool {
+    // v33: Add Codex OAuth compatible CLI proxy mode (default disabled).
+    migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_CODEX_OAUTH_COMPATIBLE_PROXY_MODE,
+    )
+}
+
 type SettingsMigration = fn(&mut AppSettings, bool) -> bool;
 
-const SETTINGS_MIGRATIONS: [SettingsMigration; 26] = [
+const SETTINGS_MIGRATIONS: [SettingsMigration; 27] = [
     migrate_disable_upstream_timeouts,
     migrate_add_gateway_rectifiers,
     migrate_add_circuit_breaker_notice,
@@ -637,6 +657,7 @@ const SETTINGS_MIGRATIONS: [SettingsMigration; 26] = [
     migrate_raise_stream_idle_timeout_default,
     migrate_add_upstream_proxy,
     migrate_add_upstream_proxy_credentials,
+    migrate_add_codex_oauth_compatible_proxy_mode,
 ];
 
 fn apply_settings_migrations(settings: &mut AppSettings, schema_version_present: bool) -> bool {
@@ -653,6 +674,7 @@ pub(super) fn repair_settings(
     raw_settings_json: &serde_json::Value,
 ) -> AppResult<bool> {
     let mut repaired = apply_settings_migrations(settings, schema_version_present);
+    repaired |= sanitize_log_retention_days(settings);
     repaired |= sanitize_failover_settings(settings);
     repaired |= sanitize_circuit_breaker_settings(settings);
     repaired |= sanitize_provider_cooldown_seconds(settings);
@@ -766,6 +788,28 @@ mod tests {
     fn sanitize_circuit_breaker_no_change_for_valid_values() {
         let mut s = AppSettings::default();
         assert!(!sanitize_circuit_breaker_settings(&mut s));
+    }
+
+    // -- sanitize_log_retention_days --
+
+    #[test]
+    fn sanitize_log_retention_days_clamps_excessive_value() {
+        let mut s = AppSettings {
+            log_retention_days: MAX_LOG_RETENTION_DAYS + 1,
+            ..Default::default()
+        };
+        assert!(sanitize_log_retention_days(&mut s));
+        assert_eq!(s.log_retention_days, MAX_LOG_RETENTION_DAYS);
+    }
+
+    #[test]
+    fn sanitize_log_retention_days_leaves_valid_value() {
+        let mut s = AppSettings {
+            log_retention_days: 30,
+            ..Default::default()
+        };
+        assert!(!sanitize_log_retention_days(&mut s));
+        assert_eq!(s.log_retention_days, 30);
     }
 
     // -- sanitize_provider_cooldown_seconds --
@@ -1070,6 +1114,26 @@ mod tests {
     fn app_settings_default_cache_anomaly_monitor_disabled() {
         let s = AppSettings::default();
         assert!(!s.enable_cache_anomaly_monitor);
+    }
+
+    #[test]
+    fn app_settings_default_codex_oauth_compatible_proxy_mode_disabled() {
+        let s = AppSettings::default();
+        assert!(!s.codex_oauth_compatible_proxy_mode);
+    }
+
+    #[test]
+    fn migrate_add_codex_oauth_compatible_proxy_mode_bumps_schema_version() {
+        let mut s = AppSettings {
+            schema_version: 32,
+            ..Default::default()
+        };
+        assert!(migrate_add_codex_oauth_compatible_proxy_mode(&mut s, true));
+        assert_eq!(
+            s.schema_version,
+            SCHEMA_VERSION_ADD_CODEX_OAUTH_COMPATIBLE_PROXY_MODE
+        );
+        assert!(!s.codex_oauth_compatible_proxy_mode);
     }
 
     #[test]

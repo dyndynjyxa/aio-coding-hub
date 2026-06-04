@@ -169,7 +169,7 @@ sudo xattr -cr /Applications/"AIO Coding Hub.app"
 **Linux (Ubuntu/Debian)：**
 ```bash
 sudo apt-get update
-sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+sudo apt-get install -y libasound2-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 ```
 
 </details>

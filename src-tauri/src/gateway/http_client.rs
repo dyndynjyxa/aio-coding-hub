@@ -29,6 +29,7 @@ const UPSTREAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const PROXY_TEST_TIMEOUT: Duration = Duration::from_secs(8);
 const PROXY_TEST_URL: &str = "https://ifconfig.me/";
 const PROXY_EXIT_IP_URL: &str = "https://ifconfig.me/ip";
+const PROXY_EXIT_IP_RESPONSE_BODY_LIMIT: usize = 4 * 1024;
 
 #[cfg(test)]
 static TEST_PROXY_TEST_URL_OVERRIDE: OnceLock<RwLock<Option<String>>> = OnceLock::new();
@@ -95,17 +96,23 @@ pub fn init(proxy_url: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn runtime_self_check_context(
+    port: u16,
+    bind_host: &str,
+    base_host: &str,
+) -> GatewaySelfCheckContext {
+    build_self_check_context(port, &[bind_host.to_string(), base_host.to_string()])
+}
+
 pub(crate) fn sync_runtime_context(port: u16, bind_host: &str, base_host: &str) {
-    set_gateway_self_context(build_self_check_context(
-        port,
-        &[bind_host.to_string(), base_host.to_string()],
-    ));
+    set_gateway_self_context(runtime_self_check_context(port, bind_host, base_host));
 }
 
 pub(crate) fn sync_from_settings(settings: &AppSettings) -> Result<(), String> {
     let context = self_check_context_from_settings(settings).map_err(|err| err.to_string())?;
-    set_gateway_self_context(context);
     let proxy_url = effective_proxy_url(settings)?;
+    validate_proxy_with_context(proxy_url.as_deref(), &context)?;
+    set_gateway_self_context(context);
     apply_proxy(proxy_url.as_deref())
 }
 
@@ -302,20 +309,74 @@ pub(crate) async fn detect_proxy_exit_ip_with_context(
         ));
     }
 
-    let body = response.text().await.map_err(|err| {
-        format!(
-            "Proxy exit IP detection failed for '{}': failed to read probe response: {}",
-            mask_url(effective_url),
-            format_error_chain(&err)
-        )
-    })?;
+    let body = read_limited_probe_body(response, PROXY_EXIT_IP_RESPONSE_BODY_LIMIT)
+        .await
+        .map_err(|err| {
+            format!(
+                "Proxy exit IP detection failed for '{}': failed to read probe response: {}",
+                mask_url(effective_url),
+                err
+            )
+        })?;
 
-    parse_exit_ip_response(&body).ok_or_else(|| {
+    parse_exit_ip_response(&body.text).ok_or_else(|| {
         format!(
             "Proxy exit IP detection failed for '{}': probe response is not a valid IP address ({})",
             mask_url(effective_url),
             summarize_probe_body(&body)
         )
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LimitedProbeBody {
+    text: String,
+    truncated: bool,
+    limit: usize,
+}
+
+fn append_limited_probe_body_chunk(bytes: &mut Vec<u8>, chunk: &[u8], limit: usize) -> bool {
+    let remaining = limit.saturating_sub(bytes.len());
+    if remaining == 0 {
+        return !chunk.is_empty();
+    }
+
+    let keep = chunk.len().min(remaining);
+    bytes.extend_from_slice(&chunk[..keep]);
+    keep < chunk.len()
+}
+
+async fn read_limited_probe_body(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> Result<LimitedProbeBody, String> {
+    let content_length = response.content_length();
+    let mut truncated = content_length.is_some_and(|len| len > limit as u64);
+    let capacity = content_length
+        .and_then(|len| usize::try_from(len).ok())
+        .unwrap_or_default()
+        .min(limit);
+    let mut bytes = Vec::with_capacity(capacity);
+
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|err| format_error_chain(&err))?
+    {
+        if append_limited_probe_body_chunk(&mut bytes, chunk.as_ref(), limit) {
+            truncated = true;
+            break;
+        }
+        if bytes.len() >= limit && content_length != Some(limit as u64) {
+            truncated = true;
+            break;
+        }
+    }
+
+    Ok(LimitedProbeBody {
+        text: String::from_utf8_lossy(&bytes).to_string(),
+        truncated,
+        limit,
     })
 }
 
@@ -463,15 +524,18 @@ fn parse_exit_ip_response(body: &str) -> Option<String> {
     }
 }
 
-fn summarize_probe_body(body: &str) -> String {
-    let normalized = body.split_whitespace().collect::<Vec<_>>().join(" ");
-    if normalized.is_empty() {
-        return "<empty>".to_string();
-    }
-
-    let mut snippet = normalized.chars().take(80).collect::<String>();
+fn summarize_probe_body(body: &LimitedProbeBody) -> String {
+    let normalized = body.text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut snippet = if normalized.is_empty() {
+        "<empty>".to_string()
+    } else {
+        normalized.chars().take(80).collect::<String>()
+    };
     if normalized.chars().count() > 80 {
         snippet.push_str("...");
+    }
+    if body.truncated {
+        snippet.push_str(&format!("; truncated after {} bytes", body.limit));
     }
     snippet
 }
@@ -815,13 +879,8 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, TcpListener};
-    use std::sync::{mpsc, Mutex, MutexGuard, OnceLock};
+    use std::sync::{mpsc, MutexGuard};
     use std::thread;
-
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
 
     fn settings_with_listen_mode(listen_mode: GatewayListenMode) -> AppSettings {
         AppSettings {
@@ -843,13 +902,13 @@ mod tests {
     }
 
     fn use_http_proxy_test_url() -> ProxyTestUrlGuard<'static> {
-        let guard = env_lock().lock().unwrap();
+        let guard = crate::test_support::test_env_lock();
         set_proxy_test_url_for_tests(Some("http://example.com/"));
         ProxyTestUrlGuard { _guard: guard }
     }
 
     fn use_http_proxy_exit_ip_test_url() -> ProxyTestUrlGuard<'static> {
-        let guard = env_lock().lock().unwrap();
+        let guard = crate::test_support::test_env_lock();
         set_proxy_exit_ip_url_for_tests(Some("http://ifconfig.me/ip"));
         ProxyTestUrlGuard { _guard: guard }
     }
@@ -1006,7 +1065,7 @@ mod tests {
 
     #[test]
     fn test_system_proxy_points_to_gateway() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = crate::test_support::test_env_lock();
 
         set_gateway_self_context(build_self_check_context(
             37123,
@@ -1186,6 +1245,26 @@ mod tests {
     fn test_parse_exit_ip_response_rejects_non_ip_body() {
         assert_eq!(parse_exit_ip_response("<html>not an ip</html>"), None);
         assert_eq!(parse_exit_ip_response(""), None);
+    }
+
+    #[test]
+    fn test_append_limited_probe_body_chunk_keeps_bounded_prefix() {
+        let mut bytes = b"abcd".to_vec();
+        let truncated = append_limited_probe_body_chunk(&mut bytes, b"efgh", 6);
+
+        assert_eq!(bytes, b"abcdef");
+        assert!(truncated);
+    }
+
+    #[test]
+    fn test_summarize_probe_body_marks_truncated_payload() {
+        let summary = summarize_probe_body(&LimitedProbeBody {
+            text: "<html>not an ip</html>".to_string(),
+            truncated: true,
+            limit: 12,
+        });
+
+        assert_eq!(summary, "<html>not an ip</html>; truncated after 12 bytes");
     }
 
     #[tokio::test(flavor = "current_thread")]

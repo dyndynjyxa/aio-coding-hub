@@ -1,4 +1,5 @@
 import { writeDesktopClipboardText } from "./desktop/clipboard";
+import { normalizeClipboardText } from "./clipboardText";
 
 async function copyTextFallback(text: string) {
   const textarea = document.createElement("textarea");
@@ -20,8 +21,10 @@ async function copyTextFallback(text: string) {
 }
 
 export async function copyText(text: string) {
+  const normalizedText = normalizeClipboardText(text);
+
   try {
-    await writeDesktopClipboardText(text);
+    await writeDesktopClipboardText(normalizedText);
     return;
   } catch {
     // fallback below
@@ -29,12 +32,12 @@ export async function copyText(text: string) {
 
   try {
     if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(normalizedText);
       return;
     }
   } catch {
     // fallback below
   }
 
-  await copyTextFallback(text);
+  await copyTextFallback(normalizedText);
 }

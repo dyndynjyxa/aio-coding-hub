@@ -50,7 +50,7 @@ export function RequestLogDetailSummaryTab({
       {auditMeta && auditMeta.tags.length > 0 ? (
         <Card padding="sm">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">审计语义</div>
+            <div className="text-sm font-semibold text-foreground">审计语义</div>
             <div className="flex flex-wrap items-center gap-2">
               {auditMeta.tags.map((tag) => (
                 <span
@@ -64,7 +64,7 @@ export function RequestLogDetailSummaryTab({
             </div>
           </div>
           {auditMeta.summary ? (
-            <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">
+            <div className="mt-3 text-sm text-muted-foreground dark:text-secondary-foreground">
               {auditMeta.summary}
             </div>
           ) : null}
@@ -75,7 +75,7 @@ export function RequestLogDetailSummaryTab({
       {hasTokens ? (
         <Card padding="sm">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">关键指标</div>
+            <div className="text-sm font-semibold text-foreground">关键指标</div>
             <div className="flex flex-wrap items-center gap-2">
               {isPriorityServiceTier ? <FastModeBadge showCustomTooltip={false} /> : null}
               {statusBadge ? (
@@ -133,9 +133,9 @@ function MetricCard({
   value: string | number | null | undefined;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200/80 bg-slate-50/80 px-3 py-3 dark:border-slate-700 dark:bg-slate-800/70">
-      <div className="text-xs text-slate-500 dark:text-slate-400">{label}</div>
-      <div className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
+    <div className="rounded-xl border border-border/80 bg-secondary/80 px-3 py-3 dark:border-border dark:bg-secondary/70">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1 text-lg font-semibold text-foreground">
         {value == null || value === "" ? "—" : value}
       </div>
     </div>

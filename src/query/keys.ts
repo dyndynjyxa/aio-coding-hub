@@ -131,6 +131,7 @@ export const usageKeys = {
       normalizeKeyParts(input.folderKeys ?? []),
       input.excludeCx2CcGatewayBridge ?? null,
     ] as const,
+  dayDetailV1Disabled: () => [...usageAllKey, "dayDetailV1", "disabled"] as const,
   folderOptionsV1: (
     period: UsagePeriod,
     input: {
@@ -213,6 +214,7 @@ export const promptsKeys = {
   all: promptsAllKey,
   lists: () => [...promptsAllKey, "list"] as const,
   list: (workspaceId: number | null) => [...promptsAllKey, "list", workspaceId] as const,
+  summary: (workspaceId: number | null) => [...promptsAllKey, "summary", workspaceId] as const,
 };
 
 const mcpAllKey = ["mcp"] as const;

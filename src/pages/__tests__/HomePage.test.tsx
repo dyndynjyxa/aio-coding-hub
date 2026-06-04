@@ -9,7 +9,6 @@ import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { mergeSettingsState, resetMswState } from "../../test/msw/state";
 import { HomePage } from "../HomePage";
 import { logToConsole } from "../../services/consoleLog";
-import { envConflictsCheck } from "../../services/cli/envConflicts";
 import { gatewayKeys } from "../../query/keys";
 import {
   useGatewayCircuitResetProviderMutation,
@@ -29,11 +28,14 @@ import {
 } from "../../query/sortModes";
 import { useUsageHourlySeriesQuery } from "../../query/usage";
 import { useProviderLimitUsageV1Query } from "../../query/providerLimitUsage";
-import { useCliProxy } from "../../hooks/useCliProxy";
 import { useHomeWorkspaceConfigs } from "../home/hooks/useHomeWorkspaceConfigs";
 import { emitBackgroundTaskVisibilityTrigger } from "../../services/backgroundTasks";
 import { backgroundTaskVisibilityTriggers } from "../../constants/backgroundTaskContracts";
 import { writeHomeOverviewLogsPrimaryLayoutToStorage } from "../../services/home/homeOverviewLayout";
+
+const homeOverviewPanelMock = vi.hoisted(() => ({
+  latestProps: null as Record<string, unknown> | null,
+}));
 
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
@@ -44,62 +46,60 @@ vi.mock("../../services/backgroundTasks", () => ({
 }));
 
 vi.mock("../../components/home/HomeOverviewPanel", () => ({
-  HomeOverviewPanel: ({
-    sortModesLoading,
-    onSetCliActiveMode,
-    onSetCliProxyEnabled,
-    onRefreshUsageHeatmap,
-    onRefreshRequestLogs,
-    onSelectLogId,
-    devPreviewEnabled,
-    showHomeHeatmap,
-    showHomeUsage,
-    personalizedUsageView,
-    openCircuits,
-    onResetCircuitProvider,
-  }: any) => (
-    <div>
-      <div>sort-loading:{String(sortModesLoading)}</div>
-      <div>dev-preview:{String(devPreviewEnabled)}</div>
-      <div>show-heatmap:{String(showHomeHeatmap)}</div>
-      <div>show-usage:{String(showHomeUsage)}</div>
-      <div>personalized-usage-view:{String(personalizedUsageView)}</div>
-      <div>open-circuits:{openCircuits.length}</div>
-      <button type="button" onClick={() => onResetCircuitProvider(1)}>
-        reset-1
-      </button>
-      <button type="button" onClick={() => onResetCircuitProvider(2)}>
-        reset-2
-      </button>
-      <button type="button" onClick={() => onResetCircuitProvider(3)}>
-        reset-3
-      </button>
-      <button type="button" onClick={() => onSetCliActiveMode("claude", 1)}>
-        request-switch-same
-      </button>
-      <button type="button" onClick={() => onSetCliActiveMode("claude", 2)}>
-        request-switch-claude-2
-      </button>
-      <button type="button" onClick={() => onSetCliActiveMode("codex", 1)}>
-        request-switch-codex-1
-      </button>
-      <button type="button" onClick={() => onRefreshUsageHeatmap()}>
-        refresh-heatmap
-      </button>
-      <button type="button" onClick={() => onRefreshRequestLogs()}>
-        refresh-logs
-      </button>
-      <button type="button" onClick={() => onSetCliProxyEnabled("codex", true)}>
-        enable-cli-proxy-codex
-      </button>
-      <button type="button" onClick={() => onSetCliProxyEnabled("codex", true)}>
-        repair-cli-proxy-codex
-      </button>
-      <button type="button" onClick={() => onSelectLogId(123)}>
-        select-log
-      </button>
-    </div>
-  ),
+  HomeOverviewPanel: (props: any) => {
+    homeOverviewPanelMock.latestProps = props;
+    const {
+      sortModesLoading,
+      onSetCliActiveMode,
+      onRefreshUsageHeatmap,
+      onRefreshRequestLogs,
+      onSelectLogId,
+      devPreviewEnabled,
+      showHomeHeatmap,
+      showHomeUsage,
+      personalizedUsageView,
+      openCircuits,
+      onResetCircuitProvider,
+    } = props;
+
+    return (
+      <div>
+        <div>sort-loading:{String(sortModesLoading)}</div>
+        <div>dev-preview:{String(devPreviewEnabled)}</div>
+        <div>show-heatmap:{String(showHomeHeatmap)}</div>
+        <div>show-usage:{String(showHomeUsage)}</div>
+        <div>personalized-usage-view:{String(personalizedUsageView)}</div>
+        <div>open-circuits:{openCircuits.length}</div>
+        <button type="button" onClick={() => onResetCircuitProvider(1)}>
+          reset-1
+        </button>
+        <button type="button" onClick={() => onResetCircuitProvider(2)}>
+          reset-2
+        </button>
+        <button type="button" onClick={() => onResetCircuitProvider(3)}>
+          reset-3
+        </button>
+        <button type="button" onClick={() => onSetCliActiveMode("claude", 1)}>
+          request-switch-same
+        </button>
+        <button type="button" onClick={() => onSetCliActiveMode("claude", 2)}>
+          request-switch-claude-2
+        </button>
+        <button type="button" onClick={() => onSetCliActiveMode("codex", 1)}>
+          request-switch-codex-1
+        </button>
+        <button type="button" onClick={() => onRefreshUsageHeatmap()}>
+          refresh-heatmap
+        </button>
+        <button type="button" onClick={() => onRefreshRequestLogs()}>
+          refresh-logs
+        </button>
+        <button type="button" onClick={() => onSelectLogId(123)}>
+          select-log
+        </button>
+      </div>
+    );
+  },
 }));
 
 vi.mock("../../components/home/HomeCostPanel", () => ({
@@ -138,22 +138,9 @@ vi.mock("../../hooks/useWindowForeground", () => ({
 
 vi.mock("../../services/gateway/traceStore", () => ({ useTraceStore: () => ({ traces: [] }) }));
 
-vi.mock("../../hooks/useCliProxy", async () => {
-  const actual =
-    await vi.importActual<typeof import("../../hooks/useCliProxy")>("../../hooks/useCliProxy");
-  return { ...actual, useCliProxy: vi.fn() };
-});
-
 vi.mock("../home/hooks/useHomeWorkspaceConfigs", () => ({
   useHomeWorkspaceConfigs: vi.fn(),
 }));
-
-vi.mock("../../services/cli/envConflicts", async () => {
-  const actual = await vi.importActual<typeof import("../../services/cli/envConflicts")>(
-    "../../services/cli/envConflicts"
-  );
-  return { ...actual, envConflictsCheck: vi.fn() };
-});
 
 vi.mock("../../query/gateway", async () => {
   const actual = await vi.importActual<typeof import("../../query/gateway")>("../../query/gateway");
@@ -280,6 +267,7 @@ function mockHomePageBaseQueries() {
 
 describe("pages/HomePage", () => {
   beforeEach(() => {
+    homeOverviewPanelMock.latestProps = null;
     localStorage.removeItem("devPreview.enabled");
     localStorage.removeItem("aio-home-overview-logs-primary-layout");
     resetMswState();
@@ -315,6 +303,23 @@ describe("pages/HomePage", () => {
         items: [],
       },
     ] as any);
+  });
+
+  it("does not pass CLI proxy state into the home overview panel", () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    mockHomePageBaseQueries();
+
+    renderWithProviders(client, <HomePage />);
+
+    expect(homeOverviewPanelMock.latestProps).not.toBeNull();
+    expect(homeOverviewPanelMock.latestProps).not.toHaveProperty("cliProxyLoading");
+    expect(homeOverviewPanelMock.latestProps).not.toHaveProperty("cliProxyAvailable");
+    expect(homeOverviewPanelMock.latestProps).not.toHaveProperty("cliProxyEnabled");
+    expect(homeOverviewPanelMock.latestProps).not.toHaveProperty("cliProxyAppliedToCurrentGateway");
+    expect(homeOverviewPanelMock.latestProps).not.toHaveProperty("cliProxyToggling");
+    expect(homeOverviewPanelMock.latestProps).not.toHaveProperty("onSetCliProxyEnabled");
   });
 
   it("covers circuits auto refresh, reset provider, mode switching, and refetch flows", async () => {
@@ -410,13 +415,6 @@ describe("pages/HomePage", () => {
       vi.mocked(useRequestAttemptLogsByTraceIdQuery).mockReturnValue({
         data: [],
         isFetching: true,
-      } as any);
-
-      vi.mocked(useCliProxy).mockReturnValue({
-        enabled: false,
-        appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
-        toggling: false,
-        setCliProxyEnabled: vi.fn(),
       } as any);
 
       renderWithProviders(client, <HomePage />);
@@ -521,47 +519,9 @@ describe("pages/HomePage", () => {
       return { data: [] } as any;
     });
 
-    vi.mocked(useCliProxy).mockReturnValue({
-      enabled: { claude: false, codex: false, gemini: false },
-      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
-      toggling: { claude: false, codex: false, gemini: false },
-      setCliProxyEnabled: vi.fn(),
-    } as any);
-
     renderWithProviders(client, <HomePage />);
 
     expect(screen.getByText("open-circuits:0")).toBeInTheDocument();
-  });
-
-  it("prompts env conflicts before enabling CLI proxy", async () => {
-    setTauriRuntime();
-
-    const client = createTestQueryClient();
-    mockHomePageBaseQueries();
-    vi.mocked(envConflictsCheck).mockResolvedValue([
-      { var_name: "OPENAI_API_KEY", source_type: "system", source_path: "Process Environment" },
-    ]);
-
-    const setCliProxyEnabled = vi.fn();
-    vi.mocked(useCliProxy).mockReturnValue({
-      enabled: { claude: false, codex: false, gemini: false },
-      appliedToCurrentGateway: { claude: null, codex: false, gemini: null },
-      toggling: { claude: false, codex: false, gemini: false },
-      setCliProxyEnabled,
-    } as any);
-
-    renderWithProviders(client, <HomePage />);
-
-    fireEvent.click(screen.getByRole("button", { name: "enable-cli-proxy-codex" }));
-
-    await waitFor(() => expect(envConflictsCheck).toHaveBeenCalledWith("codex"));
-
-    const dialog = await screen.findByRole("dialog");
-    expect(setCliProxyEnabled).not.toHaveBeenCalled();
-    expect(within(dialog).getByText("OPENAI_API_KEY")).toBeInTheDocument();
-
-    fireEvent.click(within(dialog).getByRole("button", { name: "继续启用" }));
-    expect(setCliProxyEnabled).toHaveBeenCalledWith("codex", true);
   });
 
   it("emits home overview visible trigger on mount and when returning to overview tab", async () => {
@@ -569,12 +529,6 @@ describe("pages/HomePage", () => {
 
     const client = createTestQueryClient();
     mockHomePageBaseQueries();
-    vi.mocked(useCliProxy).mockReturnValue({
-      enabled: { claude: false, codex: false, gemini: false },
-      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
-      toggling: { claude: false, codex: false, gemini: false },
-      setCliProxyEnabled: vi.fn(),
-    } as any);
 
     renderWithProviders(client, <HomePage />);
 
@@ -600,12 +554,6 @@ describe("pages/HomePage", () => {
 
     const client = createTestQueryClient();
     mockHomePageBaseQueries();
-    vi.mocked(useCliProxy).mockReturnValue({
-      enabled: { claude: false, codex: false, gemini: false },
-      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
-      toggling: { claude: false, codex: false, gemini: false },
-      setCliProxyEnabled: vi.fn(),
-    } as any);
 
     renderWithProviders(client, <HomePage />);
 
@@ -619,12 +567,6 @@ describe("pages/HomePage", () => {
 
     const client = createTestQueryClient();
     mockHomePageBaseQueries();
-    vi.mocked(useCliProxy).mockReturnValue({
-      enabled: { claude: false, codex: false, gemini: false },
-      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
-      toggling: { claude: false, codex: false, gemini: false },
-      setCliProxyEnabled: vi.fn(),
-    } as any);
 
     window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
 
@@ -645,12 +587,6 @@ describe("pages/HomePage", () => {
 
     const client = createTestQueryClient();
     mockHomePageBaseQueries();
-    vi.mocked(useCliProxy).mockReturnValue({
-      enabled: { claude: false, codex: false, gemini: false },
-      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
-      toggling: { claude: false, codex: false, gemini: false },
-      setCliProxyEnabled: vi.fn(),
-    } as any);
 
     window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
 
@@ -673,29 +609,6 @@ describe("pages/HomePage", () => {
       15,
       expect.objectContaining({ enabled: true })
     );
-  });
-
-  it("enables CLI proxy directly when no env conflicts are found", async () => {
-    setTauriRuntime();
-
-    const client = createTestQueryClient();
-    mockHomePageBaseQueries();
-    vi.mocked(envConflictsCheck).mockResolvedValue([]);
-
-    const setCliProxyEnabled = vi.fn();
-    vi.mocked(useCliProxy).mockReturnValue({
-      enabled: { claude: false, codex: false, gemini: false },
-      appliedToCurrentGateway: { claude: null, codex: false, gemini: null },
-      toggling: { claude: false, codex: false, gemini: false },
-      setCliProxyEnabled,
-    } as any);
-
-    renderWithProviders(client, <HomePage />);
-
-    fireEvent.click(screen.getByRole("button", { name: "enable-cli-proxy-codex" }));
-    await waitFor(() => expect(setCliProxyEnabled).toHaveBeenCalledWith("codex", true));
-
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("covers null-data branches with the default home tabs", () => {
@@ -731,13 +644,6 @@ describe("pages/HomePage", () => {
       isFetching: false,
     } as any);
 
-    vi.mocked(useCliProxy).mockReturnValue({
-      enabled: false,
-      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
-      toggling: false,
-      setCliProxyEnabled: vi.fn(),
-    } as any);
-
     renderWithProviders(client, <HomePage />);
 
     expect(screen.getByText("open-circuits:0")).toBeInTheDocument();
@@ -750,12 +656,6 @@ describe("pages/HomePage", () => {
 
     const client = createTestQueryClient();
     mockHomePageBaseQueries();
-    vi.mocked(useCliProxy).mockReturnValue({
-      enabled: { claude: false, codex: false, gemini: false },
-      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
-      toggling: { claude: false, codex: false, gemini: false },
-      setCliProxyEnabled: vi.fn(),
-    } as any);
 
     renderWithProviders(client, <HomePage />);
 
@@ -787,12 +687,6 @@ describe("pages/HomePage", () => {
 
     const client = createTestQueryClient();
     mockHomePageBaseQueries();
-    vi.mocked(useCliProxy).mockReturnValue({
-      enabled: { claude: false, codex: false, gemini: false },
-      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
-      toggling: { claude: false, codex: false, gemini: false },
-      setCliProxyEnabled: vi.fn(),
-    } as any);
 
     renderWithProviders(client, <HomePage />);
 
@@ -822,12 +716,6 @@ describe("pages/HomePage", () => {
 
     const client = createTestQueryClient();
     mockHomePageBaseQueries();
-    vi.mocked(useCliProxy).mockReturnValue({
-      enabled: { claude: false, codex: false, gemini: false },
-      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
-      toggling: { claude: false, codex: false, gemini: false },
-      setCliProxyEnabled: vi.fn(),
-    } as any);
 
     mergeSettingsState({ show_home_heatmap: false, show_home_usage: true });
 
@@ -891,13 +779,6 @@ describe("pages/HomePage", () => {
     vi.mocked(useRequestAttemptLogsByTraceIdQuery).mockReturnValue({
       data: [],
       isFetching: false,
-    } as any);
-
-    vi.mocked(useCliProxy).mockReturnValue({
-      enabled: false,
-      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
-      toggling: false,
-      setCliProxyEnabled: vi.fn(),
     } as any);
 
     renderWithProviders(client, <HomePage />);
@@ -984,13 +865,6 @@ describe("pages/HomePage", () => {
       isFetching: false,
     } as any);
 
-    vi.mocked(useCliProxy).mockReturnValue({
-      enabled: false,
-      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
-      toggling: false,
-      setCliProxyEnabled: vi.fn(),
-    } as any);
-
     renderWithProviders(client, <HomePage />);
 
     // start switching codex and keep promise pending
@@ -1057,13 +931,6 @@ describe("pages/HomePage", () => {
     vi.mocked(useRequestAttemptLogsByTraceIdQuery).mockReturnValue({
       data: [],
       isFetching: false,
-    } as any);
-
-    vi.mocked(useCliProxy).mockReturnValue({
-      enabled: false,
-      appliedToCurrentGateway: { claude: null, codex: null, gemini: null },
-      toggling: false,
-      setCliProxyEnabled: vi.fn(),
     } as any);
 
     renderWithProviders(client, <HomePage />);

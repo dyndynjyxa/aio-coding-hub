@@ -40,7 +40,9 @@ export function UsagePage() {
 
   useUsagePageErrorToast(model.errorText, table.tableTab);
 
-  return <UsagePageView filters={filters} table={table} model={model} availability={availability} />;
+  return (
+    <UsagePageView filters={filters} table={table} model={model} availability={availability} />
+  );
 }
 
 type UsagePageFiltersState = ReturnType<typeof useUsagePageFiltersState> &
@@ -84,7 +86,7 @@ function TauriUnavailableHint({ open }: { open: boolean }) {
 
   return (
     <Card padding="md" className="shrink-0">
-      <div className="text-sm text-slate-600 dark:text-slate-400">
+      <div className="text-sm text-muted-foreground">
         当前环境未检测到 Tauri Runtime。请通过桌面端运行（`pnpm tauri dev`）后查看用量。
       </div>
     </Card>
@@ -182,7 +184,7 @@ function UsagePageView({
   availability: UsageAvailabilityState;
 }) {
   return (
-    <div className="flex flex-col gap-5 h-full overflow-hidden">
+    <div className="flex flex-col gap-6 h-full overflow-hidden">
       <div className="shrink-0">
         <UsagePageHeader loading={model.loading} filters={filters} />
       </div>
@@ -202,7 +204,12 @@ function UsagePageView({
         onRetry={model.handleRetry}
       />
       <TauriUnavailableHint open={model.tauriAvailable === false} />
-      <UsageDataPanelSection filters={filters} table={table} model={model} availability={availability} />
+      <UsageDataPanelSection
+        filters={filters}
+        table={table}
+        model={model}
+        availability={availability}
+      />
     </div>
   );
 }

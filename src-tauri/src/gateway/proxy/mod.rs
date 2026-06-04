@@ -1,6 +1,6 @@
 //! Usage: Gateway proxy module facade (exports the proxy handler + shared types).
 
-use axum::http::{HeaderMap, HeaderValue};
+use axum::http::HeaderMap;
 
 mod abort_guard;
 mod caches;
@@ -9,6 +9,7 @@ pub(super) mod cx2cc;
 mod error_code;
 mod errors;
 mod failover;
+mod fake_200;
 mod forwarder;
 mod gemini_oauth;
 mod handler;
@@ -21,10 +22,11 @@ mod request_context;
 mod request_end;
 pub(in crate::gateway) mod status_override;
 mod types;
-mod upstream_client_error_rules;
+pub(in crate::gateway) mod upstream_client_error_rules;
 
 pub(super) use caches::{ProviderBaseUrlPingCache, RecentErrorCache};
 pub(super) use error_code::GatewayErrorCode;
+pub(in crate::gateway) use fake_200::is_fake_200_non_stream_body;
 pub(in crate::gateway) use logging::spawn_enqueue_request_log_with_backpressure;
 pub(super) use types::ErrorCategory;
 
@@ -40,7 +42,18 @@ fn is_claude_count_tokens_request(cli_key: &str, forwarded_path: &str) -> bool {
 }
 
 fn should_observe_request(cli_key: &str, forwarded_path: &str) -> bool {
+    if cli_key == "codex" && is_codex_model_discovery_request(forwarded_path) {
+        return false;
+    }
+
     cli_key != "claude" || forwarded_path == CLAUDE_LOGGED_MESSAGES_PATH
+}
+
+fn is_codex_model_discovery_request(forwarded_path: &str) -> bool {
+    matches!(
+        forwarded_path.trim_end_matches('/'),
+        "/v1/models" | "/models"
+    )
 }
 
 fn is_claude_probe_request(
@@ -88,19 +101,16 @@ pub(super) fn is_internal_forwarded_request(headers: &HeaderMap) -> bool {
         .unwrap_or(false)
 }
 
-pub(super) fn mark_internal_forwarded_request(headers: &mut HeaderMap) {
-    headers.insert(
-        AIO_INTERNAL_FORWARD_HEADER,
-        HeaderValue::from_static(AIO_INTERNAL_FORWARD_VALUE),
-    );
-}
-
 fn compute_observe_request(
     cli_key: &str,
     forwarded_path: &str,
     headers: &HeaderMap,
     introspection_json: Option<&serde_json::Value>,
 ) -> bool {
+    if is_internal_forwarded_request(headers) {
+        return false;
+    }
+
     if !should_observe_request(cli_key, forwarded_path) {
         return false;
     }
@@ -109,8 +119,7 @@ fn compute_observe_request(
         return true;
     }
 
-    !is_internal_forwarded_request(headers)
-        && !is_claude_probe_request(forwarded_path, introspection_json)
+    !is_claude_probe_request(forwarded_path, introspection_json)
 }
 
 fn should_seed_in_progress_request_log(cli_key: &str, forwarded_path: &str, observe: bool) -> bool {

@@ -29,17 +29,17 @@ export class AppErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-800 p-6 text-slate-900 dark:text-slate-100">
-          <div className="max-w-md rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-5 shadow-sm">
+        <div className="flex min-h-screen items-center justify-center bg-secondary p-6 text-foreground">
+          <div className="max-w-md rounded-xl border border-border bg-white dark:bg-secondary p-5 shadow-sm">
             <div className="text-base font-semibold">页面渲染异常</div>
-            <div className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+            <div className="mt-2 text-sm text-muted-foreground">
               已记录错误日志，请重启应用后重试。如果问题重复出现，请在"设置 →
               数据管理"打开数据目录并提供 logs 文件。
             </div>
             <button
               type="button"
               onClick={this.handleReload}
-              className="mt-4 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
+              className="mt-4 rounded-lg bg-card px-4 py-2 text-sm font-medium text-white transition hover:bg-secondary dark:bg-secondary dark:text-foreground dark:hover:bg-muted"
             >
               重新加载
             </button>

@@ -437,6 +437,19 @@ export function useCliManagerPageDataModel() {
     return true;
   }
 
+  async function persistCodexOauthCompatibleProxyMode(enabled: boolean) {
+    const updated = await persistCommonSettings({
+      codex_oauth_compatible_proxy_mode: enabled,
+    });
+    if (!updated) {
+      return false;
+    }
+
+    await refreshCodex();
+    toast(enabled ? "已开启 Codex OAuth 兼容代理模式" : "已关闭 Codex OAuth 兼容代理模式");
+    return true;
+  }
+
   async function pickCodexHomeDirectory(initialPath?: string): Promise<string | null> {
     try {
       return await openDesktopSinglePath({
@@ -618,6 +631,7 @@ export function useCliManagerPageDataModel() {
       persistCodexConfig,
       persistCodexConfigToml,
       persistCodexHomeSettings,
+      persistCodexOauthCompatibleProxyMode,
       pickCodexHomeDirectory,
     },
     cx2ccTabProps: {

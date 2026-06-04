@@ -181,6 +181,32 @@ describe("hooks/useUpdateMeta", () => {
     vi.useRealTimers();
   });
 
+  it("keeps UI state subscribers isolated when one listener throws", async () => {
+    vi.resetModules();
+    clearTauriRuntime();
+
+    const mod = await import("../useUpdateMeta");
+    const { logToConsole } = await import("../../services/consoleLog");
+    const failingListener = vi.fn(() => {
+      throw new Error("listener boom");
+    });
+    const healthyListener = vi.fn();
+
+    const unsubscribeFailing = mod.subscribeUpdateMeta(failingListener);
+    const unsubscribeHealthy = mod.subscribeUpdateMeta(healthyListener);
+
+    expect(() => mod.updateDialogSetOpen(true)).not.toThrow();
+    expect(failingListener).toHaveBeenCalledTimes(1);
+    expect(healthyListener).toHaveBeenCalledTimes(1);
+    expect(logToConsole).toHaveBeenCalledWith("warn", "更新状态订阅处理失败", {
+      error: "Error: listener boom",
+    });
+
+    unsubscribeFailing();
+    unsubscribeHealthy();
+    mod.updateDialogSetOpen(false);
+  });
+
   it("logs and toasts when update check fails even if localStorage write also throws", async () => {
     vi.resetModules();
     setTauriRuntime();

@@ -40,18 +40,12 @@ export function RequestLogErrorObservationCard({
                     : observation.displayErrorCode}
                 </span>
               ) : null}
-              {desc ? (
-                <span className="text-sm font-medium text-slate-800 dark:text-slate-200">
-                  {desc}
-                </span>
-              ) : null}
+              {desc ? <span className="text-sm font-medium text-foreground">{desc}</span> : null}
             </div>
 
             {/* Reason text (if no desc available, show reason as primary text) */}
             {!desc && observation.reason ? (
-              <p className="mt-1 text-sm text-slate-700 dark:text-slate-300">
-                {observation.reason}
-              </p>
+              <p className="mt-1 text-sm text-secondary-foreground">{observation.reason}</p>
             ) : null}
           </div>
         </div>
@@ -74,10 +68,8 @@ export function RequestLogErrorObservationCard({
 
               {observation.upstreamBodyPreview ? (
                 <div>
-                  <div className="mb-1 text-xs font-medium text-slate-500 dark:text-slate-400">
-                    上游响应预览
-                  </div>
-                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-slate-100 px-2.5 py-2 text-xs font-mono text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                  <div className="mb-1 text-xs font-medium text-muted-foreground">上游响应预览</div>
+                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-secondary px-2.5 py-2 text-xs font-mono text-secondary-foreground dark:bg-secondary dark:text-secondary-foreground">
                     {observation.upstreamBodyPreview.length > 500
                       ? `${observation.upstreamBodyPreview.slice(0, 500)}…`
                       : observation.upstreamBodyPreview}
@@ -87,10 +79,8 @@ export function RequestLogErrorObservationCard({
 
               {observation.rawDetailsText && !observation.upstreamBodyPreview ? (
                 <div>
-                  <div className="mb-1 text-xs font-medium text-slate-500 dark:text-slate-400">
-                    原始错误信息
-                  </div>
-                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-slate-100 px-2.5 py-2 text-xs font-mono text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                  <div className="mb-1 text-xs font-medium text-muted-foreground">原始错误信息</div>
+                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-secondary px-2.5 py-2 text-xs font-mono text-secondary-foreground dark:bg-secondary dark:text-secondary-foreground">
                     {observation.rawDetailsText.length > 500
                       ? `${observation.rawDetailsText.slice(0, 500)}…`
                       : observation.rawDetailsText}
@@ -108,8 +98,8 @@ export function RequestLogErrorObservationCard({
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline gap-2 text-xs">
-      <span className="shrink-0 text-slate-500 dark:text-slate-400">{label}:</span>
-      <span className="font-mono text-slate-700 dark:text-slate-300">{value}</span>
+      <span className="shrink-0 text-muted-foreground">{label}:</span>
+      <span className="font-mono text-secondary-foreground">{value}</span>
     </div>
   );
 }

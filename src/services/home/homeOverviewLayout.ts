@@ -1,3 +1,5 @@
+import { emitListenerSnapshot } from "../../utils/listeners";
+
 export const HOME_OVERVIEW_LOGS_PRIMARY_LAYOUT_STORAGE_KEY =
   "aio-home-overview-logs-primary-layout";
 
@@ -6,11 +8,25 @@ type Listener = () => void;
 const listeners = new Set<Listener>();
 
 function emit() {
-  for (const listener of listeners) listener();
+  emitListenerSnapshot(listeners, (listener) => listener());
+}
+
+function isLocalStorageEvent(event: StorageEvent) {
+  if (typeof window === "undefined" || event.storageArea == null) {
+    return true;
+  }
+
+  try {
+    return event.storageArea === window.localStorage;
+  } catch {
+    return false;
+  }
 }
 
 function handleStorageEvent(event: StorageEvent) {
-  if (event.key === HOME_OVERVIEW_LOGS_PRIMARY_LAYOUT_STORAGE_KEY) {
+  if (!isLocalStorageEvent(event)) return;
+
+  if (event.key === HOME_OVERVIEW_LOGS_PRIMARY_LAYOUT_STORAGE_KEY || event.key === null) {
     emit();
   }
 }

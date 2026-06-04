@@ -18,17 +18,12 @@ export function PageHeader({ title, subtitle, actions }: PageHeaderProps) {
       )}
     >
       <div className="flex items-center gap-2 sm:gap-3">
-        {/* Accent bar - smaller on mobile */}
-        <div className="h-6 w-1 shrink-0 rounded-full bg-gradient-to-b from-accent to-accent-secondary sm:h-8" />
         <div className="min-w-0">
-          {/* Responsive title size */}
-          <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
+          <h1 className="font-display text-[22px] font-semibold tracking-[-0.02em] text-foreground">
             {title}
           </h1>
           {subtitle ? (
-            <p className="mt-0.5 text-xs text-muted-foreground sm:mt-1 sm:text-sm">
-              {subtitle}
-            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground sm:mt-1 sm:text-sm">{subtitle}</p>
           ) : null}
         </div>
       </div>

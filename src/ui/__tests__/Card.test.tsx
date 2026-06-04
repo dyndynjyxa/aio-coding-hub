@@ -35,7 +35,15 @@ describe("ui/Card", () => {
   it("applies base styling classes", () => {
     const { container } = render(<Card>Base</Card>);
     const card = container.firstElementChild;
-    expect(card).toHaveClass("overflow-hidden", "border", "border-border", "bg-card");
+    expect(card).toHaveClass("overflow-hidden", "bg-surface-panel", "rounded-2xl");
+  });
+
+  it("applies visual variants", () => {
+    const { container, rerender } = render(<Card variant="raised">Raised</Card>);
+    expect(container.firstElementChild).toHaveClass("bg-surface-raised", "border-line");
+
+    rerender(<Card variant="inset">Inset</Card>);
+    expect(container.firstElementChild).toHaveClass("bg-surface-inset", "border-line-subtle");
   });
 
   it("passes through HTML div attributes", () => {

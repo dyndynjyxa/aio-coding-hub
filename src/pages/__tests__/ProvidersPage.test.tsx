@@ -60,12 +60,12 @@ describe("pages/ProvidersPage", () => {
 
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
       "Codex",
-      "Claude Code",
+      "Claude",
       "Gemini",
       "排序模板",
     ]);
 
-    fireEvent.click(screen.getByRole("tab", { name: "Claude Code" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Claude" }));
 
     expect(screen.getByRole("heading", { level: 1, name: "供应商" })).toBeInTheDocument();
     expect(screen.getByText("providers:claude")).toBeInTheDocument();

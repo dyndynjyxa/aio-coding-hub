@@ -13,6 +13,7 @@ import {
 } from "../../generated/bindings";
 import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
 import { type OptionalNullableGeneratedFields } from "../generatedTypeUtils";
+import { validateSettingsSetInput } from "./settingsValidation";
 
 export type {
   CodexHomeMode,
@@ -83,6 +84,7 @@ const SETTINGS_VIEW_TO_UPDATE_FIELD_MAP = {
   wslCustomHostAddress: "wsl_custom_host_address",
   codexHomeMode: "codex_home_mode",
   codexHomeOverride: "codex_home_override",
+  codexOauthCompatibleProxyMode: "codex_oauth_compatible_proxy_mode",
   cx2CcFallbackModelOpus: "cx2cc_fallback_model_opus",
   cx2CcFallbackModelSonnet: "cx2cc_fallback_model_sonnet",
   cx2CcFallbackModelHaiku: "cx2cc_fallback_model_haiku",
@@ -126,6 +128,21 @@ export type __AssertNoStaleHandledSettingsViewKeys = AssertNever<
     keyof GeneratedAppSettings
   >
 >;
+
+function validateRequiredSettingsSetInput(input: SettingsSetInput): string | null {
+  for (const [fieldLabel, value] of [
+    ["preferredPort", input.preferredPort],
+    ["autoStart", input.autoStart],
+    ["logRetentionDays", input.logRetentionDays],
+    ["failoverMaxAttemptsPerProvider", input.failoverMaxAttemptsPerProvider],
+    ["failoverMaxProvidersToTry", input.failoverMaxProvidersToTry],
+  ] as const) {
+    if (value == null) {
+      return `SEC_INVALID_INPUT: ${fieldLabel} is required`;
+    }
+  }
+  return null;
+}
 
 export function pickSettingsSetInputFieldsFromView<
   const TKeys extends readonly SettingsViewBackedInputKey[],
@@ -191,6 +208,7 @@ function toGeneratedSettingsUpdate(input: SettingsSetInput): GeneratedSettingsUp
     wslCustomHostAddress: input.wslCustomHostAddress ?? null,
     codexHomeMode: input.codexHomeMode ?? null,
     codexHomeOverride: input.codexHomeOverride ?? null,
+    codexOauthCompatibleProxyMode: input.codexOauthCompatibleProxyMode ?? null,
     cx2CcFallbackModelOpus: input.cx2CcFallbackModelOpus ?? null,
     cx2CcFallbackModelSonnet: input.cx2CcFallbackModelSonnet ?? null,
     cx2CcFallbackModelHaiku: input.cx2CcFallbackModelHaiku ?? null,
@@ -230,6 +248,16 @@ export async function settingsGet() {
 }
 
 export async function settingsSet(input: SettingsSetInput) {
+  const requiredMessage = validateRequiredSettingsSetInput(input);
+  if (requiredMessage) {
+    throw new Error(requiredMessage);
+  }
+
+  const validationMessage = validateSettingsSetInput(input);
+  if (validationMessage) {
+    throw new Error(validationMessage);
+  }
+
   const update = toGeneratedSettingsUpdate(input);
   return invokeGeneratedIpc<SettingsMutationResult>({
     title: "更新设置失败",
