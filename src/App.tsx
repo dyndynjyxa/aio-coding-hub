@@ -18,7 +18,7 @@ export default function App() {
   return (
     <>
       <Toaster richColors closeButton position="top-center" style={TOASTER_STYLE} />
-      <HashRouter unstable_useTransitions={false}>
+      <HashRouter>
         <AppRoutes />
       </HashRouter>
     </>
