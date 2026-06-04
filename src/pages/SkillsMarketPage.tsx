@@ -434,7 +434,10 @@ export function SkillsMarketPage() {
               repos.map((repo) => {
                 const repoUrl = repositoryWebUrl(repo.git_url);
                 return (
-                  <div key={repo.id} className="rounded-lg border border-line-subtle bg-card p-3">
+                  <div
+                    key={repo.id}
+                    className="rounded-lg border border-line-subtle bg-card p-3"
+                  >
                     <div className="flex items-center gap-2">
                       <span className="min-w-0 truncate text-sm font-medium">{repo.git_url}</span>
                       {repoUrl ? (

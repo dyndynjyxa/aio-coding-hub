@@ -616,7 +616,10 @@ export function SkillsView({
                 const repoPrefix = repoPrefixFromGitUrl(skill.source_git_url);
                 const repoUrl = repositoryWebUrl(skill.source_git_url);
                 return (
-                  <div key={skill.id} className="rounded-lg border border-line-subtle bg-card p-3">
+                  <div
+                    key={skill.id}
+                    className="rounded-lg border border-line-subtle bg-card p-3"
+                  >
                     <div className="flex items-start gap-3">
                       <input
                         type="checkbox"
@@ -953,7 +956,10 @@ export function SkillsView({
       >
         <div className="max-h-48 space-y-2 overflow-auto text-xs text-muted-foreground">
           {localDeleteTargets.slice(0, 10).map((skill) => (
-            <div key={skill.path} className="rounded-lg border border-line-subtle bg-secondary p-3">
+            <div
+              key={skill.path}
+              className="rounded-lg border border-line-subtle bg-secondary p-3"
+            >
               <div className="font-medium text-foreground">{skill.name || skill.dir_name}</div>
               <div className="mt-1 break-all font-mono">{skill.path}</div>
             </div>

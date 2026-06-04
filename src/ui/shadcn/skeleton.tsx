@@ -17,7 +17,11 @@ export function Skeleton({ variant = "text", className }: SkeletonProps) {
   return (
     <div
       aria-hidden="true"
-      className={cn("animate-pulse bg-muted", VARIANT_CLASS[variant], className)}
+      className={cn(
+        "animate-pulse bg-muted",
+        VARIANT_CLASS[variant],
+        className
+      )}
     />
   );
 }
