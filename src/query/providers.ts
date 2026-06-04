@@ -215,18 +215,19 @@ export function useProviderDuplicateMutation() {
       // Insert the duplicated provider right after the source in the cache
       queryClient.setQueryData<ProviderSummary[] | null>(providersKeys.list(cliKey), (prev) => {
         if (!prev) return [duplicated];
-        if (prev.some((row) => row.id === duplicated.id)) return prev;
+
+        const rows = prev.filter((row) => row.id !== duplicated.id);
 
         if (sourceId != null) {
-          const sourceIndex = prev.findIndex((row) => row.id === sourceId);
+          const sourceIndex = rows.findIndex((row) => row.id === sourceId);
           if (sourceIndex !== -1) {
-            const next = [...prev];
+            const next = [...rows];
             next.splice(sourceIndex + 1, 0, duplicated);
             return next;
           }
         }
 
-        return [...prev, duplicated];
+        return [...rows, duplicated];
       });
 
       // Persist the new order to the backend
@@ -242,12 +243,12 @@ export function useProviderDuplicateMutation() {
           if (reordered) {
             queryClient.setQueryData(providersKeys.list(cliKey), reordered);
           }
-        } catch {
-          // Best-effort: if reorder fails, the list still shows correctly in the UI
-          queryClient.invalidateQueries({ queryKey: providersKeys.list(cliKey) });
+        } catch (error) {
+          await queryClient.invalidateQueries({ queryKey: providersKeys.list(cliKey) });
+          throw error;
         }
       } else {
-        queryClient.invalidateQueries({ queryKey: providersKeys.list(cliKey) });
+        await queryClient.invalidateQueries({ queryKey: providersKeys.list(cliKey) });
       }
     },
   });

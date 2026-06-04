@@ -4,6 +4,7 @@ import type { ProviderSummary } from "../../services/providers/providers";
 import {
   providerClaudeTerminalLaunchCommand,
   providerDelete,
+  providerDuplicate,
   providerTestAvailability,
   providerUpsert,
   providerSetEnabled,
@@ -13,6 +14,7 @@ import {
 import {
   useProviderClaudeTerminalLaunchCommandMutation,
   useProviderDeleteMutation,
+  useProviderDuplicateMutation,
   useProviderSetEnabledMutation,
   useProviderTestAvailabilityMutation,
   useProviderUpsertMutation,
@@ -33,6 +35,7 @@ vi.mock("../../services/providers/providers", async () => {
     providerUpsert: vi.fn(),
     providerSetEnabled: vi.fn(),
     providerDelete: vi.fn(),
+    providerDuplicate: vi.fn(),
     providerTestAvailability: vi.fn(),
     providersReorder: vi.fn(),
     providerClaudeTerminalLaunchCommand: vi.fn(),
@@ -339,6 +342,87 @@ describe("query/providers", () => {
     });
 
     expect(client.getQueryData(providersKeys.list("claude"))).toEqual(providers);
+  });
+
+  it("useProviderDuplicateMutation inserts duplicate after source and persists order", async () => {
+    setTauriRuntime();
+
+    const providers: ProviderSummary[] = [
+      makeProvider({ id: 1, cli_key: "claude", name: "P1" }),
+      makeProvider({ id: 2, cli_key: "claude", name: "P2" }),
+    ];
+    const duplicated = makeProvider({ id: 3, cli_key: "claude", name: "P1 副本" });
+    const reordered = [providers[0], duplicated, providers[1]];
+
+    vi.mocked(providerDuplicate).mockClear();
+    vi.mocked(providersReorder).mockClear();
+    vi.mocked(providerDuplicate).mockResolvedValue(duplicated);
+    vi.mocked(providersReorder).mockResolvedValue(reordered);
+
+    const client = createTestQueryClient();
+    client.setQueryData(providersKeys.list("claude"), providers);
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useProviderDuplicateMutation(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ providerId: 1 });
+    });
+
+    expect(providerDuplicate).toHaveBeenCalledWith(1);
+    expect(providersReorder).toHaveBeenCalledWith("claude", [1, 3, 2]);
+    expect(client.getQueryData(providersKeys.list("claude"))).toEqual(reordered);
+  });
+
+  it("useProviderDuplicateMutation repositions duplicate already present in cache", async () => {
+    setTauriRuntime();
+
+    const source = makeProvider({ id: 1, cli_key: "claude", name: "P1" });
+    const other = makeProvider({ id: 2, cli_key: "claude", name: "P2" });
+    const duplicated = makeProvider({ id: 3, cli_key: "claude", name: "P1 副本" });
+    const reordered = [source, duplicated, other];
+
+    vi.mocked(providerDuplicate).mockClear();
+    vi.mocked(providersReorder).mockClear();
+    vi.mocked(providerDuplicate).mockResolvedValue(duplicated);
+    vi.mocked(providersReorder).mockResolvedValue(reordered);
+
+    const client = createTestQueryClient();
+    client.setQueryData(providersKeys.list("claude"), [source, other, duplicated]);
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useProviderDuplicateMutation(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ providerId: 1 });
+    });
+
+    expect(providersReorder).toHaveBeenCalledWith("claude", [1, 3, 2]);
+    expect(client.getQueryData(providersKeys.list("claude"))).toEqual(reordered);
+  });
+
+  it("useProviderDuplicateMutation propagates reorder failures after invalidating list", async () => {
+    setTauriRuntime();
+
+    const providers: ProviderSummary[] = [
+      makeProvider({ id: 1, cli_key: "claude", name: "P1" }),
+      makeProvider({ id: 2, cli_key: "claude", name: "P2" }),
+    ];
+    const duplicated = makeProvider({ id: 3, cli_key: "claude", name: "P1 副本" });
+
+    vi.mocked(providerDuplicate).mockClear();
+    vi.mocked(providersReorder).mockClear();
+    vi.mocked(providerDuplicate).mockResolvedValue(duplicated);
+    vi.mocked(providersReorder).mockRejectedValue(new Error("reorder failed"));
+
+    const client = createTestQueryClient();
+    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
+    client.setQueryData(providersKeys.list("claude"), providers);
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useProviderDuplicateMutation(), { wrapper });
+    await expect(result.current.mutateAsync({ providerId: 1 })).rejects.toThrow("reorder failed");
+
+    expect(providersReorder).toHaveBeenCalledWith("claude", [1, 3, 2]);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: providersKeys.list("claude") });
   });
 
   it("useProviderClaudeTerminalLaunchCommandMutation calls service with provider id", async () => {
