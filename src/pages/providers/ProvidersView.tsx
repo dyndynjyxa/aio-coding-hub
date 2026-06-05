@@ -1,5 +1,6 @@
 // Usage: Rendered by ProvidersPage when `view === "providers"`.
 
+import { useEffect, useRef } from "react";
 import { Search } from "lucide-react";
 import { DndContext, closestCenter } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -18,6 +19,12 @@ import { useProvidersViewDataModel } from "./hooks/useProvidersViewDataModel";
 export type ProvidersViewProps = {
   activeCli: CliKey;
   setActiveCli: (cliKey: CliKey) => void;
+};
+
+type PendingProvidersScrollRestore = {
+  cliKey: CliKey;
+  scrollTop: number;
+  observedRefresh: boolean;
 };
 
 export function ProvidersView({ activeCli }: ProvidersViewProps) {
@@ -68,6 +75,47 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
     testingByProviderId,
   } = model;
   const enabledProviders = providers.filter((provider) => provider.enabled);
+  const providersListScrollRef = useRef<HTMLDivElement | null>(null);
+  const pendingProvidersScrollRestoreRef = useRef<PendingProvidersScrollRestore | null>(null);
+
+  useEffect(() => {
+    const pendingRestore = pendingProvidersScrollRestoreRef.current;
+    if (!pendingRestore) return;
+
+    if (pendingRestore.cliKey !== activeCli) {
+      pendingProvidersScrollRestoreRef.current = null;
+      return;
+    }
+
+    if (providersLoading) {
+      pendingProvidersScrollRestoreRef.current = {
+        ...pendingRestore,
+        observedRefresh: true,
+      };
+      return;
+    }
+
+    // 等待保存后的刷新确实开始并结束，再恢复位置，避免过早清掉待恢复记录。
+    if (!pendingRestore.observedRefresh) return;
+
+    const providersListElement = providersListScrollRef.current;
+    if (!providersListElement) return;
+
+    providersListElement.scrollTop = pendingRestore.scrollTop;
+    pendingProvidersScrollRestoreRef.current = null;
+  }, [activeCli, providersLoading, providers.length, filteredProviders.length]);
+
+  function captureProvidersListScrollPosition(cliKey: CliKey) {
+    const providersListElement = providersListScrollRef.current;
+    if (!providersListElement) return;
+
+    // 保存前先记录滚动位置，便于编辑成功后的后台刷新完成后恢复原视口。
+    pendingProvidersScrollRestoreRef.current = {
+      cliKey,
+      scrollTop: providersListElement.scrollTop,
+      observedRefresh: false,
+    };
+  }
 
   return (
     <>
@@ -173,7 +221,10 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
         </div>
 
         <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_280px] xl:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="lg:min-h-0 lg:overflow-auto lg:pr-1 scrollbar-overlay">
+          <div
+            ref={providersListScrollRef}
+            className="lg:min-h-0 lg:overflow-auto lg:pr-1 scrollbar-overlay"
+          >
             {providersLoading ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Spinner size="sm" />
@@ -298,7 +349,9 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
           cliKey={createDialogState.cliKey}
           initialValues={createDialogState.initialValues}
           codexProviders={codexProviders}
-          onSaved={() => {}}
+          onSaved={(cliKey) => {
+            captureProvidersListScrollPosition(cliKey);
+          }}
         />
       ) : null}
 
@@ -311,7 +364,9 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
           }}
           provider={editTarget}
           codexProviders={codexProviders}
-          onSaved={() => {}}
+          onSaved={(cliKey) => {
+            captureProvidersListScrollPosition(cliKey);
+          }}
         />
       ) : null}
 
