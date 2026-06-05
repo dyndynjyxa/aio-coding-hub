@@ -3,41 +3,32 @@
 use super::defaults::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum GatewayListenMode {
+    #[default]
     Localhost,
     WslAuto,
     Lan,
     Custom,
 }
 
-impl Default for GatewayListenMode {
-    fn default() -> Self {
-        Self::Localhost
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum WslHostAddressMode {
+    #[default]
     Auto,
     Custom,
 }
 
-impl Default for WslHostAddressMode {
-    fn default() -> Self {
-        Self::Auto
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, Default)]
 pub enum HomeUsagePeriod {
     #[serde(rename = "last7")]
     #[specta(rename = "last7")]
     Last7,
     #[serde(rename = "last15")]
     #[specta(rename = "last15")]
+    #[default]
     Last15,
     #[serde(rename = "last30")]
     #[specta(rename = "last30")]
@@ -47,24 +38,13 @@ pub enum HomeUsagePeriod {
     Month,
 }
 
-impl Default for HomeUsagePeriod {
-    fn default() -> Self {
-        Self::Last15
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum CodexHomeMode {
+    #[default]
     UserHomeDefault,
     FollowCodexHome,
     Custom,
-}
-
-impl Default for CodexHomeMode {
-    fn default() -> Self {
-        Self::UserHomeDefault
-    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, PartialEq, Eq)]

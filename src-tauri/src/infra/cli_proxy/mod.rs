@@ -673,7 +673,7 @@ fn manifest_target_paths_changed<R: tauri::Runtime>(
         else {
             continue;
         };
-        if PathBuf::from(&entry.path) != target.path {
+        if Path::new(&entry.path) != target.path {
             return Ok(true);
         }
     }
