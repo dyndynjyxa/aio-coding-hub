@@ -67,6 +67,21 @@ impl Default for CodexHomeMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum AssociationAuditMode {
+    Off,
+    Sampled,
+    Prefiltered,
+    All,
+}
+
+impl Default for AssociationAuditMode {
+    fn default() -> Self {
+        Self::Prefiltered
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
 #[serde(default)]
 pub struct WslTargetCli {
@@ -157,6 +172,23 @@ pub struct AppSettings {
     pub response_fixer_fix_truncated_json: bool,
     pub response_fixer_max_json_depth: u32,
     pub response_fixer_max_fix_size: u32,
+    // Passive LLM sidecar audit. It records association/risk signals only and never gates traffic.
+    #[serde(default = "default_enable_association_audit")]
+    pub enable_association_audit: bool,
+    #[serde(default)]
+    pub association_audit_provider_id: Option<i64>,
+    #[serde(default)]
+    pub association_audit_model: String,
+    #[serde(default)]
+    pub association_audit_mode: AssociationAuditMode,
+    #[serde(default = "default_association_audit_sample_rate")]
+    pub association_audit_sample_rate: u8,
+    #[serde(default = "default_association_audit_timeout_seconds")]
+    pub association_audit_timeout_seconds: u32,
+    #[serde(default = "default_association_audit_max_input_chars")]
+    pub association_audit_max_input_chars: u32,
+    #[serde(default = "default_association_audit_max_output_chars")]
+    pub association_audit_max_output_chars: u32,
     // CX2CC bridge settings.
     pub cx2cc_fallback_model_opus: String,
     pub cx2cc_fallback_model_sonnet: String,
@@ -229,6 +261,14 @@ impl Default for AppSettings {
             response_fixer_fix_truncated_json: DEFAULT_RESPONSE_FIXER_FIX_TRUNCATED_JSON,
             response_fixer_max_json_depth: DEFAULT_RESPONSE_FIXER_MAX_JSON_DEPTH,
             response_fixer_max_fix_size: DEFAULT_RESPONSE_FIXER_MAX_FIX_SIZE,
+            enable_association_audit: DEFAULT_ENABLE_ASSOCIATION_AUDIT,
+            association_audit_provider_id: None,
+            association_audit_model: String::new(),
+            association_audit_mode: AssociationAuditMode::default(),
+            association_audit_sample_rate: DEFAULT_ASSOCIATION_AUDIT_SAMPLE_RATE,
+            association_audit_timeout_seconds: DEFAULT_ASSOCIATION_AUDIT_TIMEOUT_SECONDS,
+            association_audit_max_input_chars: DEFAULT_ASSOCIATION_AUDIT_MAX_INPUT_CHARS,
+            association_audit_max_output_chars: DEFAULT_ASSOCIATION_AUDIT_MAX_OUTPUT_CHARS,
             cx2cc_fallback_model_opus: DEFAULT_CX2CC_FALLBACK_MODEL.to_string(),
             cx2cc_fallback_model_sonnet: DEFAULT_CX2CC_FALLBACK_MODEL.to_string(),
             cx2cc_fallback_model_haiku: DEFAULT_CX2CC_FALLBACK_MODEL.to_string(),
@@ -254,6 +294,26 @@ fn default_show_home_heatmap() -> bool {
 
 fn default_show_home_usage() -> bool {
     DEFAULT_SHOW_HOME_USAGE
+}
+
+fn default_enable_association_audit() -> bool {
+    DEFAULT_ENABLE_ASSOCIATION_AUDIT
+}
+
+fn default_association_audit_sample_rate() -> u8 {
+    DEFAULT_ASSOCIATION_AUDIT_SAMPLE_RATE
+}
+
+fn default_association_audit_timeout_seconds() -> u32 {
+    DEFAULT_ASSOCIATION_AUDIT_TIMEOUT_SECONDS
+}
+
+fn default_association_audit_max_input_chars() -> u32 {
+    DEFAULT_ASSOCIATION_AUDIT_MAX_INPUT_CHARS
+}
+
+fn default_association_audit_max_output_chars() -> u32 {
+    DEFAULT_ASSOCIATION_AUDIT_MAX_OUTPUT_CHARS
 }
 
 pub(super) fn default_cli_priority_order() -> Vec<String> {

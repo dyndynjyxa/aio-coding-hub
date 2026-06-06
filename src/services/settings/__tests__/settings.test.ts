@@ -116,9 +116,78 @@ describe("services/settings/settings", () => {
       gatewayListenMode: "localhost",
       wslTargetCli: { claude: true, codex: true, gemini: true },
       cx2CcFallbackModelMain: "gpt-5.4",
+      enableAssociationAudit: false,
+      associationAuditProviderId: null,
+      associationAuditModel: "",
+      associationAuditMode: "prefiltered",
+      associationAuditSampleRate: 10,
+      associationAuditTimeoutSeconds: 8,
+      associationAuditMaxInputChars: 6000,
+      associationAuditMaxOutputChars: 12000,
       upstreamProxyPassword: { mode: "clear" },
     });
     expect(input).not.toHaveProperty("cx2ccFallbackModelMain");
+  });
+
+  it("preserves or clears association audit provider id based on explicit input presence", async () => {
+    setTauriRuntime();
+    vi.resetModules();
+    vi.mocked(tauriInvoke).mockResolvedValue({ schema_version: 1 } as any);
+
+    const { settingsSet } = await import("../settings");
+    const required = {
+      preferredPort: 37123,
+      autoStart: false,
+      logRetentionDays: 30,
+      failoverMaxAttemptsPerProvider: 5,
+      failoverMaxProvidersToTry: 5,
+    };
+
+    await settingsSet({
+      ...required,
+      enableAssociationAudit: true,
+      associationAuditModel: "claude-sonnet-4-5",
+      associationAuditMode: "prefiltered",
+      associationAuditSampleRate: 10,
+      associationAuditTimeoutSeconds: 8,
+      associationAuditMaxInputChars: 6000,
+      associationAuditMaxOutputChars: 12000,
+    });
+
+    expect(tauriInvoke).toHaveBeenCalledWith(
+      "settings_set",
+      expect.objectContaining({
+        update: expect.objectContaining({
+          enableAssociationAudit: true,
+          associationAuditModel: "claude-sonnet-4-5",
+          associationAuditMode: "prefiltered",
+          associationAuditSampleRate: 10,
+          associationAuditTimeoutSeconds: 8,
+          associationAuditMaxInputChars: 6000,
+          associationAuditMaxOutputChars: 12000,
+        }),
+      })
+    );
+    const firstCallArgs = vi.mocked(tauriInvoke).mock.calls[0]?.[1] as
+      | { update?: Record<string, unknown> }
+      | undefined;
+    expect(firstCallArgs?.update).not.toHaveProperty("associationAuditProviderId");
+
+    vi.mocked(tauriInvoke).mockClear();
+
+    await settingsSet({
+      ...required,
+      associationAuditProviderId: null,
+    });
+
+    expect(tauriInvoke).toHaveBeenCalledWith(
+      "settings_set",
+      expect.objectContaining({
+        update: expect.objectContaining({
+          associationAuditProviderId: null,
+        }),
+      })
+    );
   });
 
   it("rejects invalid settings at the frontend boundary before IPC", async () => {

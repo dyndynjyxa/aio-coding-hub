@@ -18,6 +18,7 @@ pub(in crate::gateway) struct StreamFinalizeCtx<R: tauri::Runtime = tauri::Wry> 
     pub(in crate::gateway) cli_key: String,
     pub(in crate::gateway) method: String,
     pub(in crate::gateway) path: String,
+    pub(in crate::gateway) request_body: Vec<u8>,
     pub(in crate::gateway) observe: bool,
     pub(in crate::gateway) query: Option<String>,
     pub(in crate::gateway) excluded_from_stats: bool,

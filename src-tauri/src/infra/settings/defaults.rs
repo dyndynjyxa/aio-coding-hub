@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-pub const SCHEMA_VERSION: u32 = 32;
+pub const SCHEMA_VERSION: u32 = 33;
 pub const DEFAULT_GATEWAY_PORT: u16 = 37123;
 pub const MAX_GATEWAY_PORT: u16 = 37199;
 pub const DEFAULT_PROVIDER_COOLDOWN_SECONDS: u32 = 30;
@@ -39,6 +39,7 @@ pub(super) const SCHEMA_VERSION_ADD_CLI_PRIORITY_ORDER: u32 = 29;
 pub(super) const SCHEMA_VERSION_RAISE_STREAM_IDLE_TIMEOUT_DEFAULT: u32 = 30;
 pub(super) const SCHEMA_VERSION_ADD_UPSTREAM_PROXY: u32 = 31;
 pub(super) const SCHEMA_VERSION_ADD_UPSTREAM_PROXY_CREDENTIALS: u32 = 32;
+pub(super) const SCHEMA_VERSION_ADD_ASSOCIATION_AUDIT: u32 = 33;
 
 pub(super) const DEFAULT_LOG_RETENTION_DAYS: u32 = 7;
 pub(super) const MAX_LOG_RETENTION_DAYS: u32 = 3650;
@@ -59,6 +60,11 @@ pub(super) const DEFAULT_ENABLE_DEBUG_LOG: bool = false;
 pub(super) const DEFAULT_ENABLE_TASK_COMPLETE_NOTIFY: bool = true;
 pub(super) const DEFAULT_ENABLE_NOTIFICATION_SOUND: bool = true;
 pub(super) const DEFAULT_ENABLE_RESPONSE_FIXER: bool = true;
+pub(super) const DEFAULT_ENABLE_ASSOCIATION_AUDIT: bool = false;
+pub(super) const DEFAULT_ASSOCIATION_AUDIT_SAMPLE_RATE: u8 = 10;
+pub(super) const DEFAULT_ASSOCIATION_AUDIT_TIMEOUT_SECONDS: u32 = 8;
+pub(super) const DEFAULT_ASSOCIATION_AUDIT_MAX_INPUT_CHARS: u32 = 6_000;
+pub(super) const DEFAULT_ASSOCIATION_AUDIT_MAX_OUTPUT_CHARS: u32 = 12_000;
 pub(super) const DEFAULT_ENABLE_CLI_PROXY_STARTUP_RECOVERY: bool = true;
 pub(super) const DEFAULT_SHOW_HOME_HEATMAP: bool = true;
 pub(super) const DEFAULT_SHOW_HOME_USAGE: bool = true;
@@ -86,6 +92,11 @@ pub(super) const MAX_UPSTREAM_PROXY_USERNAME_LEN: usize = 256;
 pub(super) const MAX_UPSTREAM_PROXY_PASSWORD_LEN: usize = 4096;
 pub(super) const MAX_CX2CC_MODEL_NAME_LEN: usize = 128;
 pub(super) const MAX_CX2CC_OPTIONAL_FIELD_LEN: usize = 64;
+pub(super) const MAX_ASSOCIATION_AUDIT_MODEL_LEN: usize = 128;
+pub(super) const MAX_ASSOCIATION_AUDIT_SAMPLE_RATE: u8 = 100;
+pub(super) const MAX_ASSOCIATION_AUDIT_TIMEOUT_SECONDS: u32 = 60;
+pub(super) const MIN_ASSOCIATION_AUDIT_CAPTURE_CHARS: u32 = 256;
+pub(super) const MAX_ASSOCIATION_AUDIT_CAPTURE_CHARS: u32 = 50_000;
 pub(super) const SETTINGS_FILE_MAX_BYTES: usize = 1024 * 1024;
 
 pub(super) const LEGACY_IDENTIFIER: &str = "io.aio.gateway";

@@ -231,6 +231,87 @@ describe("home/RequestLogDetailDialog", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders association audit signals on summary and raw tabs", () => {
+    setRequestLogQueryState({
+      selectedLog: createSelectedLog({
+        association_audit_json: JSON.stringify({
+          status: "completed",
+          provider_id: 12,
+          provider_name: "Audit Provider",
+          provider_cli_key: "claude",
+          model: "claude-sonnet-4-5",
+          started_at_ms: 10,
+          finished_at_ms: 1230,
+          duration_ms: 1220,
+          input_chars: 3200,
+          output_chars: 900,
+          package_truncated: false,
+          association_score: 0.68,
+          overall_risk: "high",
+          signals: [
+            {
+              code: "ungrounded_script_or_mutation",
+              severity: "high",
+              confidence: 0.92,
+              event_index: 3,
+              event_kind: "tool_call",
+              reason: "用户请求日志分析，但输出中出现未被请求支撑的脚本写入。",
+              evidence: "write malicious.sh",
+            },
+            {
+              code: "unrelated_promotional_content",
+              severity: "medium",
+              confidence: 0.81,
+              event_index: 5,
+              event_kind: "assistant_text",
+              reason: "广告内容与日志修复无关。",
+              evidence: "使用 xx 服务器线路速度更快",
+            },
+          ],
+          insufficient_context: false,
+          notes: "audit complete",
+        }),
+      }),
+    });
+    setTraceStoreState({ traces: [] });
+
+    render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
+
+    expect(screen.getByText("旁路关联审核")).toBeInTheDocument();
+    expect(screen.getByText("已完成")).toBeInTheDocument();
+    expect(screen.getByText("高风险")).toBeInTheDocument();
+    expect(screen.getByText("68%")).toBeInTheDocument();
+    expect(screen.getByText("Audit Provider · claude-sonnet-4-5")).toBeInTheDocument();
+    expect(screen.getByText("ungrounded_script_or_mutation")).toBeInTheDocument();
+    expect(screen.getByText("unrelated_promotional_content")).toBeInTheDocument();
+    expect(screen.getByText("write malicious.sh")).toBeInTheDocument();
+
+    switchToTab("原始数据");
+    expect(screen.getByText("association_audit_json")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "association_audit_json" }));
+    expect(screen.getByText(/claude-sonnet-4-5/)).toBeInTheDocument();
+  });
+
+  it("renders malformed association audit json as a non-fatal summary warning", () => {
+    setRequestLogQueryState({
+      selectedLog: createSelectedLog({
+        association_audit_json: "not-json",
+      }),
+    });
+    setTraceStoreState({ traces: [] });
+
+    render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
+
+    expect(screen.getByText("旁路关联审核")).toBeInTheDocument();
+    expect(screen.getByText("解析失败")).toBeInTheDocument();
+    expect(screen.getByText("审核结果不是可解析的 JSON 对象。")).toBeInTheDocument();
+
+    switchToTab("原始数据");
+    expect(screen.getByText("association_audit_json")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "association_audit_json" }));
+    expect(screen.getByText("not-json")).toBeInTheDocument();
+  });
+
   it("renders not-found state when the selected log detail is unavailable", () => {
     setRequestLogQueryState({ selectedLog: null, selectedLogLoading: false });
     setTraceStoreState({ traces: [] });

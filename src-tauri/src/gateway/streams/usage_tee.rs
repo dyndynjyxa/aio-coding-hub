@@ -1,5 +1,6 @@
 //! Usage: Streaming tee wrappers that emit usage/cost and enqueue request logs.
 
+use crate::gateway::association_audit::{AssociationAuditInput, AuditResponseCollector};
 use crate::gateway::response_fixer;
 use crate::usage;
 use axum::body::{Body, Bytes};
@@ -136,6 +137,7 @@ where
     idle_sleep: Option<Pin<Box<tokio::time::Sleep>>>,
     finalized: bool,
     defer_terminal_error: bool,
+    audit_response: AuditResponseCollector,
 }
 
 impl<S, B, R> UsageSseTeeStream<S, B, R>
@@ -160,6 +162,7 @@ where
             idle_sleep: idle_timeout.map(|d| Box::pin(tokio::time::sleep(d))),
             finalized: false,
             defer_terminal_error: false,
+            audit_response: AuditResponseCollector::new(),
         }
     }
 
@@ -217,6 +220,7 @@ where
                     )
                 });
                 let was_terminal_error = self.tracker.terminal_error_seen();
+                self.audit_response.ingest(chunk.as_ref());
                 self.tracker.ingest_chunk(chunk.as_ref());
                 if self.tracker.terminal_error_seen() {
                     if !was_terminal_error {
@@ -289,6 +293,9 @@ where
             .requested_model
             .clone()
             .or_else(|| self.tracker.best_effort_model());
+        let audit_requested_model = requested_model.clone();
+        let audit_response =
+            std::mem::replace(&mut self.audit_response, AuditResponseCollector::new());
 
         emit_request_event_and_spawn_request_log(
             &self.ctx,
@@ -300,6 +307,25 @@ where
                 usage,
             ),
         );
+
+        if error_code.is_none() && (200..300).contains(&self.ctx.status) {
+            let (response_body, response_truncated) = audit_response.into_parts();
+            crate::gateway::association_audit::maybe_spawn_association_audit(
+                self.ctx.app.clone(),
+                self.ctx.db.clone(),
+                AssociationAuditInput {
+                    trace_id: self.ctx.trace_id.clone(),
+                    cli_key: self.ctx.cli_key.clone(),
+                    method: self.ctx.method.clone(),
+                    path: self.ctx.path.clone(),
+                    requested_model: audit_requested_model,
+                    request_body: self.ctx.request_body.clone(),
+                    response_body,
+                    response_truncated,
+                    status: Some(self.ctx.status),
+                },
+            );
+        }
     }
 }
 
@@ -634,6 +660,7 @@ where
     ctx: StreamFinalizeCtx<R>,
     first_byte_ms: Option<u128>,
     buffer: Vec<u8>,
+    audit_response: AuditResponseCollector,
     max_bytes: usize,
     truncated: bool,
     total_timeout: Option<Duration>,
@@ -660,6 +687,7 @@ where
             ctx,
             first_byte_ms: None,
             buffer: Vec::new(),
+            audit_response: AuditResponseCollector::new(),
             max_bytes,
             truncated: false,
             total_timeout,
@@ -700,6 +728,9 @@ where
                 usage::parse_model_from_json_or_sse_bytes(&self.ctx.cli_key, &self.buffer)
             }
         });
+        let audit_requested_model = requested_model.clone();
+        let audit_response =
+            std::mem::replace(&mut self.audit_response, AuditResponseCollector::new());
 
         emit_request_event_and_spawn_request_log(
             &self.ctx,
@@ -711,6 +742,25 @@ where
                 usage,
             ),
         );
+
+        if effective_error_code.is_none() && (200..300).contains(&self.ctx.status) {
+            let (response_body, response_truncated) = audit_response.into_parts();
+            crate::gateway::association_audit::maybe_spawn_association_audit(
+                self.ctx.app.clone(),
+                self.ctx.db.clone(),
+                AssociationAuditInput {
+                    trace_id: self.ctx.trace_id.clone(),
+                    cli_key: self.ctx.cli_key.clone(),
+                    method: self.ctx.method.clone(),
+                    path: self.ctx.path.clone(),
+                    requested_model: audit_requested_model,
+                    request_body: self.ctx.request_body.clone(),
+                    response_body,
+                    response_truncated,
+                    status: Some(self.ctx.status),
+                },
+            );
+        }
     }
 }
 
@@ -752,6 +802,7 @@ where
                 if this.first_byte_ms.is_none() {
                     this.first_byte_ms = Some(this.ctx.started.elapsed().as_millis());
                 }
+                this.audit_response.ingest(chunk.as_ref());
                 if !this.truncated {
                     let bytes = chunk.as_ref();
                     if this.buffer.len().saturating_add(bytes.len()) <= this.max_bytes {
@@ -837,6 +888,7 @@ mod tests {
             cli_key: "codex".to_string(),
             method: "POST".to_string(),
             path: "/v1/responses".to_string(),
+            request_body: br#"{"input":"hello"}"#.to_vec(),
             observe: true,
             query: None,
             excluded_from_stats: false,

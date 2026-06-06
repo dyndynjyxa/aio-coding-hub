@@ -16,6 +16,13 @@ describe("services/settings/settingsValidation", () => {
         failoverMaxProvidersToTry: 5,
         circuitBreakerFailureThreshold: 50,
         circuitBreakerOpenDurationMinutes: 1440,
+        associationAuditProviderId: 1,
+        associationAuditModel: "claude-sonnet-4-5",
+        associationAuditMode: "sampled",
+        associationAuditSampleRate: 1,
+        associationAuditTimeoutSeconds: 60,
+        associationAuditMaxInputChars: 256,
+        associationAuditMaxOutputChars: 50_000,
       })
     ).toBeNull();
 
@@ -45,6 +52,21 @@ describe("services/settings/settingsValidation", () => {
     expect(validateSettingsSetInput({ circuitBreakerOpenDurationMinutes: 1441 })).toContain(
       "熔断打开时长必须 <= 1440"
     );
+    expect(validateSettingsSetInput({ associationAuditProviderId: 0 })).toContain(
+      "旁路审核 Provider ID 必须是正整数"
+    );
+    expect(validateSettingsSetInput({ associationAuditSampleRate: 101 })).toContain(
+      "旁路审核采样率必须 <= 100"
+    );
+    expect(validateSettingsSetInput({ associationAuditTimeoutSeconds: 0 })).toContain(
+      "旁路审核超时必须 >= 1"
+    );
+    expect(validateSettingsSetInput({ associationAuditMaxInputChars: 255 })).toContain(
+      "旁路审核输入捕获上限必须 >= 256"
+    );
+    expect(validateSettingsSetInput({ associationAuditMaxOutputChars: 50_001 })).toContain(
+      "旁路审核输出捕获上限必须 <= 50000"
+    );
   });
 
   it("rejects fractional values and stream idle timeout values in the forbidden gap", () => {
@@ -55,6 +77,9 @@ describe("services/settings/settingsValidation", () => {
     expect(validateSettingsSetInput({ upstreamStreamIdleTimeoutSeconds: 3601 })).toContain(
       "流式空闲超时必须 <= 3600"
     );
+    expect(validateSettingsSetInput({ associationAuditSampleRate: 1.5 })).toContain(
+      "旁路审核采样率必须是整数"
+    );
   });
 
   it("rejects failover product overflow when both dimensions are present", () => {
@@ -64,5 +89,22 @@ describe("services/settings/settingsValidation", () => {
         failoverMaxProvidersToTry: 6,
       })
     ).toContain("Failover 总尝试次数必须 <= 100");
+  });
+
+  it("validates association audit semantic fields before IPC", () => {
+    expect(
+      validateSettingsSetInput({
+        associationAuditMode: "sampled",
+        associationAuditSampleRate: 0,
+      })
+    ).toContain("旁路审核采样模式下采样率必须 >= 1");
+
+    expect(validateSettingsSetInput({ associationAuditModel: "x".repeat(129) })).toContain(
+      "旁路审核模型必须 <= 128 字符"
+    );
+
+    expect(validateSettingsSetInput({ associationAuditModel: "model\nname" })).toContain(
+      "旁路审核模型不能包含控制字符"
+    );
   });
 });

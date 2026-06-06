@@ -40,6 +40,54 @@ describe("pages/settings/settingsPersistenceModel", () => {
         enumerable: true,
         writable: true,
       },
+      enable_association_audit: {
+        value: undefined,
+        configurable: true,
+        enumerable: true,
+        writable: true,
+      },
+      association_audit_provider_id: {
+        value: undefined,
+        configurable: true,
+        enumerable: true,
+        writable: true,
+      },
+      association_audit_model: {
+        value: undefined,
+        configurable: true,
+        enumerable: true,
+        writable: true,
+      },
+      association_audit_mode: {
+        value: undefined,
+        configurable: true,
+        enumerable: true,
+        writable: true,
+      },
+      association_audit_sample_rate: {
+        value: undefined,
+        configurable: true,
+        enumerable: true,
+        writable: true,
+      },
+      association_audit_timeout_seconds: {
+        value: undefined,
+        configurable: true,
+        enumerable: true,
+        writable: true,
+      },
+      association_audit_max_input_chars: {
+        value: undefined,
+        configurable: true,
+        enumerable: true,
+        writable: true,
+      },
+      association_audit_max_output_chars: {
+        value: undefined,
+        configurable: true,
+        enumerable: true,
+        writable: true,
+      },
     });
 
     const snapshot = buildPersistedSettingsSnapshot(settings);
@@ -48,6 +96,30 @@ describe("pages/settings/settingsPersistenceModel", () => {
     expect(snapshot.show_home_usage).toBe(DEFAULT_PERSISTED_SETTINGS.show_home_usage);
     expect(snapshot.start_minimized).toBe(DEFAULT_PERSISTED_SETTINGS.start_minimized);
     expect(snapshot.tray_enabled).toBe(DEFAULT_PERSISTED_SETTINGS.tray_enabled);
+    expect(snapshot.enable_association_audit).toBe(
+      DEFAULT_PERSISTED_SETTINGS.enable_association_audit
+    );
+    expect(snapshot.association_audit_provider_id).toBe(
+      DEFAULT_PERSISTED_SETTINGS.association_audit_provider_id
+    );
+    expect(snapshot.association_audit_model).toBe(
+      DEFAULT_PERSISTED_SETTINGS.association_audit_model
+    );
+    expect(snapshot.association_audit_mode).toBe(
+      DEFAULT_PERSISTED_SETTINGS.association_audit_mode
+    );
+    expect(snapshot.association_audit_sample_rate).toBe(
+      DEFAULT_PERSISTED_SETTINGS.association_audit_sample_rate
+    );
+    expect(snapshot.association_audit_timeout_seconds).toBe(
+      DEFAULT_PERSISTED_SETTINGS.association_audit_timeout_seconds
+    );
+    expect(snapshot.association_audit_max_input_chars).toBe(
+      DEFAULT_PERSISTED_SETTINGS.association_audit_max_input_chars
+    );
+    expect(snapshot.association_audit_max_output_chars).toBe(
+      DEFAULT_PERSISTED_SETTINGS.association_audit_max_output_chars
+    );
     expect(snapshot.cli_priority_order).toEqual(["gemini", "claude", "codex"]);
   });
 
@@ -103,6 +175,34 @@ describe("pages/settings/settingsPersistenceModel", () => {
         ["circuit_breaker_failure_threshold"]
       )
     ).toBeNull();
+
+    expect(
+      validatePersistedSettings(
+        applyPersistedSettingsPatch(DEFAULT_PERSISTED_SETTINGS, {
+          association_audit_sample_rate: 0,
+          association_audit_mode: "sampled",
+        }),
+        ["association_audit_sample_rate", "association_audit_mode"]
+      )
+    ).toBe("旁路审核采样模式下采样率必须 >= 1");
+
+    expect(
+      validatePersistedSettings(
+        applyPersistedSettingsPatch(DEFAULT_PERSISTED_SETTINGS, {
+          association_audit_timeout_seconds: 61,
+        }),
+        ["association_audit_timeout_seconds"]
+      )
+    ).toBe("旁路审核超时必须为 1-60 秒");
+
+    expect(
+      validatePersistedSettings(
+        applyPersistedSettingsPatch(DEFAULT_PERSISTED_SETTINGS, {
+          association_audit_max_input_chars: 255,
+        }),
+        ["association_audit_max_input_chars"]
+      )
+    ).toBe("旁路审核输入捕获上限必须为 256-50000 字符");
   });
 
   it("validates failover bounds and total attempt product", () => {
@@ -166,6 +266,14 @@ describe("pages/settings/settingsPersistenceModel", () => {
       responseFixerFixEncoding: true,
       responseFixerFixSseFormat: true,
       responseFixerFixTruncatedJson: true,
+      enableAssociationAudit: false,
+      associationAuditProviderId: null,
+      associationAuditModel: "",
+      associationAuditMode: "prefiltered",
+      associationAuditSampleRate: 10,
+      associationAuditTimeoutSeconds: 8,
+      associationAuditMaxInputChars: 6000,
+      associationAuditMaxOutputChars: 12000,
       failoverMaxAttemptsPerProvider: 5,
       failoverMaxProvidersToTry: 5,
       circuitBreakerFailureThreshold: 5,

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { useTheme } from "../../../hooks/useTheme";
 import { gatewayKeys } from "../../../query/keys";
+import { useProvidersListQuery } from "../../../query/providers";
 import { logToConsole } from "../../../services/consoleLog";
 import { gatewayStart, gatewayStop } from "../../../services/gateway/gateway";
 import { createTestQueryClient } from "../../../test/utils/reactQuery";
@@ -50,6 +51,11 @@ vi.mock("@dnd-kit/utilities", () => ({
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
 vi.mock("../../../hooks/useTheme", () => ({ useTheme: vi.fn() }));
+vi.mock("../../../query/providers", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../../query/providers")>("../../../query/providers");
+  return { ...actual, useProvidersListQuery: vi.fn() };
+});
 vi.mock("../../../services/gateway/gateway", async () => {
   const actual = await vi.importActual<typeof import("../../../services/gateway/gateway")>(
     "../../../services/gateway/gateway"
@@ -89,6 +95,22 @@ function renderSettingsMainColumn(
     setLogRetentionDays: vi.fn(),
     enableDebugLog: false,
     setEnableDebugLog: vi.fn(),
+    enableAssociationAudit: false,
+    setEnableAssociationAudit: vi.fn(),
+    associationAuditProviderId: null,
+    setAssociationAuditProviderId: vi.fn(),
+    associationAuditModel: "",
+    setAssociationAuditModel: vi.fn(),
+    associationAuditMode: "prefiltered",
+    setAssociationAuditMode: vi.fn(),
+    associationAuditSampleRate: 10,
+    setAssociationAuditSampleRate: vi.fn(),
+    associationAuditTimeoutSeconds: 8,
+    setAssociationAuditTimeoutSeconds: vi.fn(),
+    associationAuditMaxInputChars: 6000,
+    setAssociationAuditMaxInputChars: vi.fn(),
+    associationAuditMaxOutputChars: 12000,
+    setAssociationAuditMaxOutputChars: vi.fn(),
     requestPersist: vi.fn(),
     noticePermissionStatus: "checking",
     requestingNoticePermission: false,
@@ -112,6 +134,10 @@ describe("pages/settings/SettingsMainColumn", () => {
     window.localStorage.clear();
     latestOnDragEnds = [];
     sortableIsDragging = false;
+    vi.mocked(useProvidersListQuery).mockReturnValue({
+      data: [],
+      isLoading: false,
+    } as any);
   });
 
   it("switches theme from settings", () => {
@@ -221,6 +247,57 @@ describe("pages/settings/SettingsMainColumn", () => {
     fireEvent.click(within(row as HTMLElement).getByRole("switch"));
     expect(setShowHomeUsage).toHaveBeenCalledWith(false);
     expect(requestPersist).toHaveBeenCalledWith({ show_home_usage: false });
+  });
+
+  it("persists association audit toggle and numeric fields", () => {
+    const setEnableAssociationAudit = vi.fn();
+    const setAssociationAuditTimeoutSeconds = vi.fn();
+    const commitNumberField = vi.fn();
+    const requestPersist = vi.fn();
+    vi.mocked(useTheme).mockReturnValue({
+      theme: "system",
+      resolvedTheme: "light",
+      setTheme: vi.fn(),
+    } as any);
+
+    const view = renderSettingsMainColumn({
+      enableAssociationAudit: false,
+      setEnableAssociationAudit,
+      associationAuditTimeoutSeconds: 8,
+      setAssociationAuditTimeoutSeconds,
+      requestPersist,
+      commitNumberField,
+    });
+
+    const enableRow = screen.getByText("启用审核").parentElement?.parentElement;
+    expect(enableRow).toBeTruthy();
+    fireEvent.click(within(enableRow as HTMLElement).getByRole("switch"));
+    expect(setEnableAssociationAudit).toHaveBeenCalledWith(true);
+    expect(requestPersist).toHaveBeenCalledWith({ enable_association_audit: true });
+
+    view.unmount();
+
+    renderSettingsMainColumn({
+      enableAssociationAudit: true,
+      associationAuditTimeoutSeconds: 8,
+      setAssociationAuditTimeoutSeconds,
+      requestPersist,
+      commitNumberField,
+    });
+
+    const timeoutRow = screen.getByText("超时").parentElement?.parentElement;
+    expect(timeoutRow).toBeTruthy();
+    const timeoutInput = within(timeoutRow as HTMLElement).getByRole("spinbutton");
+    fireEvent.change(timeoutInput, { target: { value: "12" } });
+    expect(setAssociationAuditTimeoutSeconds).toHaveBeenCalledWith(12);
+    fireEvent.blur(timeoutInput);
+    expect(commitNumberField).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: "association_audit_timeout_seconds",
+        min: 1,
+        max: 60,
+      })
+    );
   });
 
   it("persists homepage usage period setting", () => {

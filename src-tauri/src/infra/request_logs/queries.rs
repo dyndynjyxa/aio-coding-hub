@@ -40,7 +40,8 @@ const REQUEST_LOG_SUMMARY_FIELDS: &str = "
   created_at_ms,
   created_at,
   provider_chain_json,
-  error_details_json
+  error_details_json,
+  association_audit_json
 ";
 
 /// Common SELECT fields for request_logs queries (detail view).
@@ -73,7 +74,8 @@ const REQUEST_LOG_DETAIL_FIELDS: &str = "
   created_at_ms,
   created_at,
   provider_chain_json,
-  error_details_json
+  error_details_json,
+  association_audit_json
 ";
 
 pub(super) fn validate_cli_key(cli_key: &str) -> Result<(), String> {
@@ -346,6 +348,7 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<RequestLogSummary, rusqlite
         created_at: row.get("created_at")?,
         provider_chain_json: row.get("provider_chain_json").unwrap_or(None),
         error_details_json: row.get("error_details_json").unwrap_or(None),
+        association_audit_json: row.get("association_audit_json").unwrap_or(None),
     })
 }
 
@@ -389,6 +392,7 @@ fn row_to_detail(row: &rusqlite::Row<'_>) -> Result<RequestLogDetail, rusqlite::
         created_at: row.get("created_at")?,
         provider_chain_json: row.get("provider_chain_json").unwrap_or(None),
         error_details_json: row.get("error_details_json").unwrap_or(None),
+        association_audit_json: row.get("association_audit_json").unwrap_or(None),
     })
 }
 

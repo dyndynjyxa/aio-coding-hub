@@ -289,7 +289,13 @@ export function useSettingsPersistRunner(input: UseSettingsPersistRunnerInput) {
 
   const commitNumberField = useCallback(
     (options: {
-      key: "preferred_port" | "log_retention_days";
+      key:
+        | "preferred_port"
+        | "log_retention_days"
+        | "association_audit_sample_rate"
+        | "association_audit_timeout_seconds"
+        | "association_audit_max_input_chars"
+        | "association_audit_max_output_chars";
       next: number;
       min: number;
       max: number;

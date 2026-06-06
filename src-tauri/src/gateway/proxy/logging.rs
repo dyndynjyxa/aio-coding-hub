@@ -181,6 +181,7 @@ fn request_log_insert_from_args(
         created_at,
         provider_chain_json: bound_optional_json_array(provider_chain_json, "provider_chain_json"),
         error_details_json: bound_optional_json_object(error_details_json, "error_details_json"),
+        association_audit_json: None,
     })
 }
 

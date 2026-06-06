@@ -113,6 +113,54 @@ export function useSettingsPersistence(options: {
     },
     [setField]
   );
+  const setEnableAssociationAudit = useCallback(
+    (next: boolean) => {
+      setField("enable_association_audit", next);
+    },
+    [setField]
+  );
+  const setAssociationAuditProviderId = useCallback(
+    (next: number | null) => {
+      setField("association_audit_provider_id", next);
+    },
+    [setField]
+  );
+  const setAssociationAuditModel = useCallback(
+    (next: string) => {
+      setField("association_audit_model", next);
+    },
+    [setField]
+  );
+  const setAssociationAuditMode = useCallback(
+    (next: PersistedSettings["association_audit_mode"]) => {
+      setField("association_audit_mode", next);
+    },
+    [setField]
+  );
+  const setAssociationAuditSampleRate = useCallback(
+    (next: number) => {
+      setField("association_audit_sample_rate", next);
+    },
+    [setField]
+  );
+  const setAssociationAuditTimeoutSeconds = useCallback(
+    (next: number) => {
+      setField("association_audit_timeout_seconds", next);
+    },
+    [setField]
+  );
+  const setAssociationAuditMaxInputChars = useCallback(
+    (next: number) => {
+      setField("association_audit_max_input_chars", next);
+    },
+    [setField]
+  );
+  const setAssociationAuditMaxOutputChars = useCallback(
+    (next: number) => {
+      setField("association_audit_max_output_chars", next);
+    },
+    [setField]
+  );
 
   return {
     settingsReady,
@@ -140,6 +188,22 @@ export function useSettingsPersistence(options: {
     setLogRetentionDays,
     enableDebugLog: draft.enable_debug_log,
     setEnableDebugLog,
+    enableAssociationAudit: draft.enable_association_audit,
+    setEnableAssociationAudit,
+    associationAuditProviderId: draft.association_audit_provider_id,
+    setAssociationAuditProviderId,
+    associationAuditModel: draft.association_audit_model,
+    setAssociationAuditModel,
+    associationAuditMode: draft.association_audit_mode,
+    setAssociationAuditMode,
+    associationAuditSampleRate: draft.association_audit_sample_rate,
+    setAssociationAuditSampleRate,
+    associationAuditTimeoutSeconds: draft.association_audit_timeout_seconds,
+    setAssociationAuditTimeoutSeconds,
+    associationAuditMaxInputChars: draft.association_audit_max_input_chars,
+    setAssociationAuditMaxInputChars,
+    associationAuditMaxOutputChars: draft.association_audit_max_output_chars,
+    setAssociationAuditMaxOutputChars,
 
     requestPersist,
     commitNumberField,

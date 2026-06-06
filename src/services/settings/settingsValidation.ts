@@ -1,4 +1,5 @@
 import type {
+  AssociationAuditMode,
   GatewayListenMode,
   SensitiveStringUpdate,
   WslHostAddressMode,
@@ -10,6 +11,11 @@ export const MAX_UPSTREAM_PROXY_USERNAME_LEN = 256;
 export const MAX_UPSTREAM_PROXY_PASSWORD_LEN = 4096;
 export const MAX_CX2CC_MODEL_NAME_LEN = 128;
 export const MAX_CX2CC_OPTIONAL_FIELD_LEN = 64;
+export const MAX_ASSOCIATION_AUDIT_MODEL_LEN = 128;
+export const MAX_ASSOCIATION_AUDIT_SAMPLE_RATE = 100;
+export const MAX_ASSOCIATION_AUDIT_TIMEOUT_SECONDS = 60;
+export const MIN_ASSOCIATION_AUDIT_CAPTURE_CHARS = 256;
+export const MAX_ASSOCIATION_AUDIT_CAPTURE_CHARS = 50_000;
 export const MIN_PREFERRED_PORT = 1024;
 export const MAX_PREFERRED_PORT = 65535;
 export const MIN_LOG_RETENTION_DAYS = 1;
@@ -318,6 +324,13 @@ export type SettingsSetValidationInput = {
   cx2CcFallbackModelMain?: string | null;
   cx2CcModelReasoningEffort?: string | null;
   cx2CcServiceTier?: string | null;
+  associationAuditProviderId?: number | null;
+  associationAuditModel?: string | null;
+  associationAuditMode?: AssociationAuditMode | null;
+  associationAuditSampleRate?: number | null;
+  associationAuditTimeoutSeconds?: number | null;
+  associationAuditMaxInputChars?: number | null;
+  associationAuditMaxOutputChars?: number | null;
 };
 
 export function validateSettingsSetInput(input: SettingsSetValidationInput): string | null {
@@ -367,8 +380,57 @@ export function validateSettingsSetInput(input: SettingsSetValidationInput): str
       MIN_CIRCUIT_BREAKER_OPEN_DURATION_MINUTES,
       MAX_CIRCUIT_BREAKER_OPEN_DURATION_MINUTES,
     ],
+    [
+      "旁路审核采样率",
+      input.associationAuditSampleRate,
+      0,
+      MAX_ASSOCIATION_AUDIT_SAMPLE_RATE,
+    ],
+    [
+      "旁路审核超时",
+      input.associationAuditTimeoutSeconds,
+      1,
+      MAX_ASSOCIATION_AUDIT_TIMEOUT_SECONDS,
+    ],
+    [
+      "旁路审核输入捕获上限",
+      input.associationAuditMaxInputChars,
+      MIN_ASSOCIATION_AUDIT_CAPTURE_CHARS,
+      MAX_ASSOCIATION_AUDIT_CAPTURE_CHARS,
+    ],
+    [
+      "旁路审核输出捕获上限",
+      input.associationAuditMaxOutputChars,
+      MIN_ASSOCIATION_AUDIT_CAPTURE_CHARS,
+      MAX_ASSOCIATION_AUDIT_CAPTURE_CHARS,
+    ],
   ] as const) {
     const message = validateIntegerRange(fieldLabel, value, min, max);
+    if (message) return message;
+  }
+
+  if (
+    input.associationAuditProviderId != null &&
+    (!Number.isSafeInteger(input.associationAuditProviderId) ||
+      input.associationAuditProviderId <= 0)
+  ) {
+    return "旁路审核 Provider ID 必须是正整数";
+  }
+
+  if (
+    input.associationAuditMode === "sampled" &&
+    input.associationAuditSampleRate != null &&
+    input.associationAuditSampleRate < 1
+  ) {
+    return "旁路审核采样模式下采样率必须 >= 1";
+  }
+
+  if (input.associationAuditModel != null) {
+    const raw = input.associationAuditModel.trim();
+    if (utf8Length(raw) > MAX_ASSOCIATION_AUDIT_MODEL_LEN) {
+      return `旁路审核模型必须 <= ${MAX_ASSOCIATION_AUDIT_MODEL_LEN} 字符`;
+    }
+    const message = validateNoControlChars("旁路审核模型", raw);
     if (message) return message;
   }
 

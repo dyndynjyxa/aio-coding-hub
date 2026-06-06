@@ -69,7 +69,8 @@ CREATE TABLE IF NOT EXISTS request_logs (
   special_settings_json TEXT,
   created_at_ms INTEGER NOT NULL DEFAULT 0,
   session_id TEXT,
-  final_provider_id INTEGER
+  final_provider_id INTEGER,
+  association_audit_json TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_request_logs_cli_created_at ON request_logs(cli_key, created_at);

@@ -85,6 +85,24 @@ describe("pages/settings/SettingsPage", () => {
       setTrayEnabled: vi.fn(),
       logRetentionDays: 7,
       setLogRetentionDays: vi.fn(),
+      enableDebugLog: false,
+      setEnableDebugLog: vi.fn(),
+      enableAssociationAudit: true,
+      setEnableAssociationAudit: vi.fn(),
+      associationAuditProviderId: 12,
+      setAssociationAuditProviderId: vi.fn(),
+      associationAuditModel: "claude-sonnet-4-5",
+      setAssociationAuditModel: vi.fn(),
+      associationAuditMode: "prefiltered",
+      setAssociationAuditMode: vi.fn(),
+      associationAuditSampleRate: 10,
+      setAssociationAuditSampleRate: vi.fn(),
+      associationAuditTimeoutSeconds: 8,
+      setAssociationAuditTimeoutSeconds: vi.fn(),
+      associationAuditMaxInputChars: 6000,
+      setAssociationAuditMaxInputChars: vi.fn(),
+      associationAuditMaxOutputChars: 12000,
+      setAssociationAuditMaxOutputChars: vi.fn(),
       requestPersist: vi.fn(),
     } as any);
 
@@ -104,6 +122,11 @@ describe("pages/settings/SettingsPage", () => {
 
     expect(lastMainColumnProps?.gatewayAvailable).toBe(true);
     expect(lastMainColumnProps?.settingsWriteBlocked).toBe(false);
+    expect(lastMainColumnProps?.enableAssociationAudit).toBe(true);
+    expect(lastMainColumnProps?.associationAuditProviderId).toBe(12);
+    expect(lastMainColumnProps?.associationAuditModel).toBe("claude-sonnet-4-5");
+    expect(lastMainColumnProps?.associationAuditMode).toBe("prefiltered");
+    expect(lastMainColumnProps?.associationAuditMaxOutputChars).toBe(12000);
     expect(lastSidebarProps?.updateMeta).toBeTruthy();
   });
 });

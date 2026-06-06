@@ -1023,6 +1023,10 @@ where
             usage::parse_model_from_json_or_sse_bytes(common.cli_key.as_str(), &body_bytes)
         }
     });
+    let audit_requested_model = requested_model_for_log.clone();
+    let mut audit_response = crate::gateway::association_audit::AuditResponseCollector::new();
+    audit_response.ingest(body_bytes.as_ref());
+    let (audit_response_body, audit_response_truncated) = audit_response.into_parts();
 
     let body = Body::from(body_bytes);
     let mut builder = Response::builder().status(status);
@@ -1107,6 +1111,23 @@ where
         )),
     )
     .await;
+    if (200..300).contains(&status.as_u16()) {
+        crate::gateway::association_audit::maybe_spawn_association_audit(
+            state.app.clone(),
+            state.db.clone(),
+            crate::gateway::association_audit::AssociationAuditInput {
+                trace_id: common.trace_id.clone(),
+                cli_key: common.cli_key.clone(),
+                method: common.method_hint.clone(),
+                path: common.forwarded_path.clone(),
+                requested_model: audit_requested_model,
+                request_body: common.introspection_body.clone(),
+                response_body: audit_response_body,
+                response_truncated: audit_response_truncated,
+                status: Some(status.as_u16()),
+            },
+        );
+    }
     abort_guard.disarm();
     LoopControl::Return(out)
 }

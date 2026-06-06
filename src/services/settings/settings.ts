@@ -1,5 +1,6 @@
 import {
   commands,
+  type AssociationAuditMode,
   type CodexHomeMode,
   type GatewayListenMode,
   type HomeUsagePeriod,
@@ -19,6 +20,7 @@ export type {
   CodexHomeMode,
   GatewayListenMode,
   HomeUsagePeriod,
+  AssociationAuditMode,
   SensitiveStringUpdate,
   WslHostAddressMode,
   WslTargetCli,
@@ -72,6 +74,14 @@ const SETTINGS_VIEW_TO_UPDATE_FIELD_MAP = {
   responseFixerFixEncoding: "response_fixer_fix_encoding",
   responseFixerFixSseFormat: "response_fixer_fix_sse_format",
   responseFixerFixTruncatedJson: "response_fixer_fix_truncated_json",
+  enableAssociationAudit: "enable_association_audit",
+  associationAuditProviderId: "association_audit_provider_id",
+  associationAuditModel: "association_audit_model",
+  associationAuditMode: "association_audit_mode",
+  associationAuditSampleRate: "association_audit_sample_rate",
+  associationAuditTimeoutSeconds: "association_audit_timeout_seconds",
+  associationAuditMaxInputChars: "association_audit_max_input_chars",
+  associationAuditMaxOutputChars: "association_audit_max_output_chars",
   updateReleasesUrl: "update_releases_url",
   failoverMaxAttemptsPerProvider: "failover_max_attempts_per_provider",
   failoverMaxProvidersToTry: "failover_max_providers_to_try",
@@ -194,6 +204,13 @@ function toGeneratedSettingsUpdate(input: SettingsSetInput): GeneratedSettingsUp
     responseFixerFixEncoding: input.responseFixerFixEncoding ?? null,
     responseFixerFixSseFormat: input.responseFixerFixSseFormat ?? null,
     responseFixerFixTruncatedJson: input.responseFixerFixTruncatedJson ?? null,
+    enableAssociationAudit: input.enableAssociationAudit ?? null,
+    associationAuditModel: input.associationAuditModel ?? null,
+    associationAuditMode: input.associationAuditMode ?? null,
+    associationAuditSampleRate: input.associationAuditSampleRate ?? null,
+    associationAuditTimeoutSeconds: input.associationAuditTimeoutSeconds ?? null,
+    associationAuditMaxInputChars: input.associationAuditMaxInputChars ?? null,
+    associationAuditMaxOutputChars: input.associationAuditMaxOutputChars ?? null,
     verboseProviderError: input.verboseProviderError ?? null,
     failoverMaxAttemptsPerProvider: input.failoverMaxAttemptsPerProvider,
     failoverMaxProvidersToTry: input.failoverMaxProvidersToTry,
@@ -223,6 +240,9 @@ function toGeneratedSettingsUpdate(input: SettingsSetInput): GeneratedSettingsUp
     upstreamProxyUsername: input.upstreamProxyUsername ?? null,
     upstreamProxyPassword: input.upstreamProxyPassword ?? null,
   };
+  if (Object.prototype.hasOwnProperty.call(input, "associationAuditProviderId")) {
+    update.associationAuditProviderId = input.associationAuditProviderId ?? null;
+  }
   return update;
 }
 

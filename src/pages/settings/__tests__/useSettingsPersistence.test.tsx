@@ -134,6 +134,14 @@ describe("settings/useSettingsPersistence", () => {
         response_fixer_fix_encoding: undefined,
         response_fixer_fix_sse_format: undefined,
         response_fixer_fix_truncated_json: undefined,
+        enable_association_audit: undefined,
+        association_audit_provider_id: undefined,
+        association_audit_model: undefined,
+        association_audit_mode: undefined,
+        association_audit_sample_rate: undefined,
+        association_audit_timeout_seconds: undefined,
+        association_audit_max_input_chars: undefined,
+        association_audit_max_output_chars: undefined,
         failover_max_attempts_per_provider: undefined,
         failover_max_providers_to_try: undefined,
         circuit_breaker_failure_threshold: undefined,
@@ -152,6 +160,14 @@ describe("settings/useSettingsPersistence", () => {
     expect(result.current.showHomeUsage).toBe(true);
     expect(result.current.homeUsagePeriod).toBe("last15");
     expect(result.current.cliPriorityOrder).toEqual(["claude", "codex", "gemini"]);
+    expect(result.current.enableAssociationAudit).toBe(false);
+    expect(result.current.associationAuditProviderId).toBeNull();
+    expect(result.current.associationAuditModel).toBe("");
+    expect(result.current.associationAuditMode).toBe("prefiltered");
+    expect(result.current.associationAuditSampleRate).toBe(10);
+    expect(result.current.associationAuditTimeoutSeconds).toBe(8);
+    expect(result.current.associationAuditMaxInputChars).toBe(6000);
+    expect(result.current.associationAuditMaxOutputChars).toBe(12000);
   });
 
   it("marks ready and toasts when settings query errors", async () => {
@@ -544,6 +560,75 @@ describe("settings/useSettingsPersistence", () => {
       )
     );
     expect(result.current.homeUsagePeriod).toBe("month");
+  });
+
+  it("persists association audit settings changes", async () => {
+    vi.mocked(useSettingsQuery).mockReturnValue({
+      data: createSettings(),
+      isLoading: false,
+      isError: false,
+      error: null,
+    } as any);
+
+    const mutation = { mutateAsync: vi.fn() };
+    mutation.mutateAsync.mockResolvedValue(
+      createSettingsMutationResult({
+        enable_association_audit: true,
+        association_audit_provider_id: 12,
+        association_audit_model: "claude-sonnet-4-5",
+        association_audit_mode: "all",
+        association_audit_sample_rate: 100,
+        association_audit_timeout_seconds: 12,
+        association_audit_max_input_chars: 7000,
+        association_audit_max_output_chars: 14000,
+      })
+    );
+    vi.mocked(useSettingsSetMutation).mockReturnValue(mutation as any);
+
+    const { result } = renderHook(() => useSettingsPersistence({ gateway: null, about: null }));
+    await waitFor(() => expect(result.current.settingsReady).toBe(true));
+
+    act(() => {
+      result.current.setEnableAssociationAudit(true);
+      result.current.setAssociationAuditProviderId(12);
+      result.current.setAssociationAuditModel("claude-sonnet-4-5");
+      result.current.setAssociationAuditMode("all");
+      result.current.setAssociationAuditSampleRate(100);
+      result.current.setAssociationAuditTimeoutSeconds(12);
+      result.current.setAssociationAuditMaxInputChars(7000);
+      result.current.setAssociationAuditMaxOutputChars(14000);
+      result.current.requestPersist({
+        enable_association_audit: true,
+        association_audit_provider_id: 12,
+        association_audit_model: "claude-sonnet-4-5",
+        association_audit_mode: "all",
+        association_audit_sample_rate: 100,
+        association_audit_timeout_seconds: 12,
+        association_audit_max_input_chars: 7000,
+        association_audit_max_output_chars: 14000,
+      });
+    });
+
+    await waitFor(() =>
+      expect(mutation.mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          enableAssociationAudit: true,
+          associationAuditProviderId: 12,
+          associationAuditModel: "claude-sonnet-4-5",
+          associationAuditMode: "all",
+          associationAuditSampleRate: 100,
+          associationAuditTimeoutSeconds: 12,
+          associationAuditMaxInputChars: 7000,
+          associationAuditMaxOutputChars: 14000,
+        })
+      )
+    );
+
+    expect(result.current.enableAssociationAudit).toBe(true);
+    expect(result.current.associationAuditProviderId).toBe(12);
+    expect(result.current.associationAuditModel).toBe("claude-sonnet-4-5");
+    expect(result.current.associationAuditMode).toBe("all");
+    expect(result.current.associationAuditMaxOutputChars).toBe(14000);
   });
 
   it("no-ops when requestPersist does not change any keys", async () => {

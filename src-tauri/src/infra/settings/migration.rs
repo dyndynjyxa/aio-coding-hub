@@ -1,7 +1,7 @@
 //! Usage: Schema migrations and input sanitization for settings upgrades.
 
 use super::defaults::*;
-use super::types::{AppSettings, CodexHomeMode};
+use super::types::{AppSettings, AssociationAuditMode, CodexHomeMode};
 use crate::shared::error::AppResult;
 
 pub(super) fn normalize_cli_priority_order(input: &[String]) -> Vec<String> {
@@ -219,6 +219,68 @@ pub(super) fn sanitize_response_fixer_limits(settings: &mut AppSettings) -> bool
     if settings.response_fixer_max_fix_size > MAX_RESPONSE_FIXER_MAX_FIX_SIZE {
         settings.response_fixer_max_fix_size = MAX_RESPONSE_FIXER_MAX_FIX_SIZE;
         changed = true;
+    }
+
+    changed
+}
+
+pub(super) fn sanitize_association_audit_settings(settings: &mut AppSettings) -> bool {
+    let mut changed = false;
+
+    if settings
+        .association_audit_provider_id
+        .is_some_and(|provider_id| provider_id <= 0)
+    {
+        settings.association_audit_provider_id = None;
+        changed = true;
+    }
+
+    let trimmed_model = settings.association_audit_model.trim().to_string();
+    if settings.association_audit_model != trimmed_model {
+        settings.association_audit_model = trimmed_model;
+        changed = true;
+    }
+    if settings.association_audit_model.len() > MAX_ASSOCIATION_AUDIT_MODEL_LEN {
+        settings
+            .association_audit_model
+            .truncate(MAX_ASSOCIATION_AUDIT_MODEL_LEN);
+        changed = true;
+    }
+
+    if settings.association_audit_sample_rate > MAX_ASSOCIATION_AUDIT_SAMPLE_RATE {
+        settings.association_audit_sample_rate = MAX_ASSOCIATION_AUDIT_SAMPLE_RATE;
+        changed = true;
+    }
+    if matches!(
+        settings.association_audit_mode,
+        AssociationAuditMode::Sampled
+    ) && settings.association_audit_sample_rate == 0
+    {
+        settings.association_audit_sample_rate = DEFAULT_ASSOCIATION_AUDIT_SAMPLE_RATE;
+        changed = true;
+    }
+
+    if settings.association_audit_timeout_seconds == 0 {
+        settings.association_audit_timeout_seconds = DEFAULT_ASSOCIATION_AUDIT_TIMEOUT_SECONDS;
+        changed = true;
+    }
+    if settings.association_audit_timeout_seconds > MAX_ASSOCIATION_AUDIT_TIMEOUT_SECONDS {
+        settings.association_audit_timeout_seconds = MAX_ASSOCIATION_AUDIT_TIMEOUT_SECONDS;
+        changed = true;
+    }
+
+    for value in [
+        &mut settings.association_audit_max_input_chars,
+        &mut settings.association_audit_max_output_chars,
+    ] {
+        if *value < MIN_ASSOCIATION_AUDIT_CAPTURE_CHARS {
+            *value = MIN_ASSOCIATION_AUDIT_CAPTURE_CHARS;
+            changed = true;
+        }
+        if *value > MAX_ASSOCIATION_AUDIT_CAPTURE_CHARS {
+            *value = MAX_ASSOCIATION_AUDIT_CAPTURE_CHARS;
+            changed = true;
+        }
     }
 
     changed
@@ -616,9 +678,18 @@ fn migrate_add_upstream_proxy_credentials(
     )
 }
 
+fn migrate_add_association_audit(settings: &mut AppSettings, schema_version_present: bool) -> bool {
+    // v33: Add passive LLM sidecar association audit settings (default disabled).
+    migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_ASSOCIATION_AUDIT,
+    )
+}
+
 type SettingsMigration = fn(&mut AppSettings, bool) -> bool;
 
-const SETTINGS_MIGRATIONS: [SettingsMigration; 26] = [
+const SETTINGS_MIGRATIONS: [SettingsMigration; 27] = [
     migrate_disable_upstream_timeouts,
     migrate_add_gateway_rectifiers,
     migrate_add_circuit_breaker_notice,
@@ -645,6 +716,7 @@ const SETTINGS_MIGRATIONS: [SettingsMigration; 26] = [
     migrate_raise_stream_idle_timeout_default,
     migrate_add_upstream_proxy,
     migrate_add_upstream_proxy_credentials,
+    migrate_add_association_audit,
 ];
 
 fn apply_settings_migrations(settings: &mut AppSettings, schema_version_present: bool) -> bool {
@@ -668,6 +740,7 @@ pub(super) fn repair_settings(
     repaired |= sanitize_provider_base_url_ping_cache_ttl_seconds(settings);
     repaired |= sanitize_upstream_timeouts(settings);
     repaired |= sanitize_response_fixer_limits(settings);
+    repaired |= sanitize_association_audit_settings(settings);
     repaired |= sanitize_codex_home_override(settings);
     repaired |= sanitize_cli_priority_order(settings);
     let canonical = super::persistence::canonical_settings_json(settings)?;

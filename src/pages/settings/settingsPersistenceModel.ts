@@ -1,5 +1,6 @@
 import type {
   AppSettings,
+  AssociationAuditMode,
   HomeUsagePeriod,
   SettingsSetInput,
   SettingsViewBackedInputKey,
@@ -34,6 +35,14 @@ export type PersistedSettings = {
   response_fixer_fix_encoding: boolean;
   response_fixer_fix_sse_format: boolean;
   response_fixer_fix_truncated_json: boolean;
+  enable_association_audit: boolean;
+  association_audit_provider_id: number | null;
+  association_audit_model: string;
+  association_audit_mode: AssociationAuditMode;
+  association_audit_sample_rate: number;
+  association_audit_timeout_seconds: number;
+  association_audit_max_input_chars: number;
+  association_audit_max_output_chars: number;
   failover_max_attempts_per_provider: number;
   failover_max_providers_to_try: number;
   circuit_breaker_failure_threshold: number;
@@ -65,6 +74,14 @@ export const DEFAULT_PERSISTED_SETTINGS: PersistedSettings = {
   response_fixer_fix_encoding: true,
   response_fixer_fix_sse_format: true,
   response_fixer_fix_truncated_json: true,
+  enable_association_audit: false,
+  association_audit_provider_id: null,
+  association_audit_model: "",
+  association_audit_mode: "prefiltered",
+  association_audit_sample_rate: 10,
+  association_audit_timeout_seconds: 8,
+  association_audit_max_input_chars: 6_000,
+  association_audit_max_output_chars: 12_000,
   failover_max_attempts_per_provider: 5,
   failover_max_providers_to_try: 5,
   circuit_breaker_failure_threshold: 5,
@@ -97,6 +114,14 @@ const PERSISTED_SETTINGS_INPUT_KEYS = [
   "responseFixerFixEncoding",
   "responseFixerFixSseFormat",
   "responseFixerFixTruncatedJson",
+  "enableAssociationAudit",
+  "associationAuditProviderId",
+  "associationAuditModel",
+  "associationAuditMode",
+  "associationAuditSampleRate",
+  "associationAuditTimeoutSeconds",
+  "associationAuditMaxInputChars",
+  "associationAuditMaxOutputChars",
   "failoverMaxAttemptsPerProvider",
   "failoverMaxProvidersToTry",
   "circuitBreakerFailureThreshold",
@@ -199,6 +224,23 @@ export function buildPersistedSettingsSnapshot(
       settingsValue.response_fixer_fix_sse_format ?? fallback.response_fixer_fix_sse_format,
     response_fixer_fix_truncated_json:
       settingsValue.response_fixer_fix_truncated_json ?? fallback.response_fixer_fix_truncated_json,
+    enable_association_audit:
+      settingsValue.enable_association_audit ?? fallback.enable_association_audit,
+    association_audit_provider_id:
+      settingsValue.association_audit_provider_id ?? fallback.association_audit_provider_id,
+    association_audit_model:
+      settingsValue.association_audit_model ?? fallback.association_audit_model,
+    association_audit_mode:
+      settingsValue.association_audit_mode ?? fallback.association_audit_mode,
+    association_audit_sample_rate:
+      settingsValue.association_audit_sample_rate ?? fallback.association_audit_sample_rate,
+    association_audit_timeout_seconds:
+      settingsValue.association_audit_timeout_seconds ?? fallback.association_audit_timeout_seconds,
+    association_audit_max_input_chars:
+      settingsValue.association_audit_max_input_chars ?? fallback.association_audit_max_input_chars,
+    association_audit_max_output_chars:
+      settingsValue.association_audit_max_output_chars ??
+      fallback.association_audit_max_output_chars,
     failover_max_attempts_per_provider:
       settingsValue.failover_max_attempts_per_provider ??
       fallback.failover_max_attempts_per_provider,
@@ -305,6 +347,56 @@ export function validatePersistedSettings(desired: PersistedSettings, keys: Pers
   if (keys.includes("circuit_breaker_open_duration_minutes")) {
     if (!isIntegerInRange(desired.circuit_breaker_open_duration_minutes, 1, 1440)) {
       return "熔断时长必须为 1-1440 分钟";
+    }
+  }
+
+  if (keys.includes("association_audit_provider_id")) {
+    if (
+      desired.association_audit_provider_id != null &&
+      !isIntegerInRange(desired.association_audit_provider_id, 1, Number.MAX_SAFE_INTEGER)
+    ) {
+      return "旁路审核 Provider ID 必须是正整数";
+    }
+  }
+
+  if (keys.includes("association_audit_model")) {
+    const model = desired.association_audit_model.trim();
+    if (model.length > 128) {
+      return "旁路审核模型必须 <= 128 字符";
+    }
+    if (/[\u0000-\u001f\u007f-\u009f]/u.test(model)) {
+      return "旁路审核模型不能包含控制字符";
+    }
+  }
+
+  if (
+    keys.includes("association_audit_sample_rate") ||
+    keys.includes("association_audit_mode")
+  ) {
+    if (!isIntegerInRange(desired.association_audit_sample_rate, 0, 100)) {
+      return "旁路审核采样率必须为 0-100";
+    }
+    if (
+      desired.association_audit_mode === "sampled" &&
+      desired.association_audit_sample_rate === 0
+    ) {
+      return "旁路审核采样模式下采样率必须 >= 1";
+    }
+  }
+
+  if (keys.includes("association_audit_timeout_seconds")) {
+    if (!isIntegerInRange(desired.association_audit_timeout_seconds, 1, 60)) {
+      return "旁路审核超时必须为 1-60 秒";
+    }
+  }
+
+  for (const [key, label] of [
+    ["association_audit_max_input_chars", "旁路审核输入捕获上限"],
+    ["association_audit_max_output_chars", "旁路审核输出捕获上限"],
+  ] as const) {
+    if (!keys.includes(key)) continue;
+    if (!isIntegerInRange(desired[key], 256, 50_000)) {
+      return `${label}必须为 256-50000 字符`;
     }
   }
 

@@ -4,7 +4,9 @@ use super::defaults::*;
 use super::migration::{
     normalize_cli_priority_order, normalize_codex_home_override, repair_settings,
 };
-use super::types::{AppSettings, CodexHomeMode, GatewayListenMode, WslHostAddressMode};
+use super::types::{
+    AppSettings, AssociationAuditMode, CodexHomeMode, GatewayListenMode, WslHostAddressMode,
+};
 use crate::app_paths;
 use crate::shared::error::AppResult;
 use crate::shared::fs::read_file_with_max_len;
@@ -318,6 +320,63 @@ pub(crate) fn validate_bounds(settings: &AppSettings) -> AppResult<()> {
         &settings.cx2cc_service_tier,
         MAX_CX2CC_OPTIONAL_FIELD_LEN,
     )?;
+    validate_optional_bounded_string(
+        "association_audit_model",
+        &settings.association_audit_model,
+        MAX_ASSOCIATION_AUDIT_MODEL_LEN,
+    )?;
+    if let Some(provider_id) = settings.association_audit_provider_id {
+        if provider_id <= 0 {
+            return Err("SEC_INVALID_INPUT: association_audit_provider_id must be positive".into());
+        }
+    }
+    if matches!(
+        settings.association_audit_mode,
+        AssociationAuditMode::Sampled
+    ) && settings.association_audit_sample_rate == 0
+    {
+        return Err(
+            "SEC_INVALID_INPUT: association_audit_sample_rate must be >= 1 in sampled mode".into(),
+        );
+    }
+    if settings.association_audit_sample_rate > MAX_ASSOCIATION_AUDIT_SAMPLE_RATE {
+        return Err(format!(
+            "SEC_INVALID_INPUT: association_audit_sample_rate must be <= {MAX_ASSOCIATION_AUDIT_SAMPLE_RATE}"
+        )
+        .into());
+    }
+    if settings.association_audit_timeout_seconds == 0 {
+        return Err("SEC_INVALID_INPUT: association_audit_timeout_seconds must be >= 1".into());
+    }
+    if settings.association_audit_timeout_seconds > MAX_ASSOCIATION_AUDIT_TIMEOUT_SECONDS {
+        return Err(format!(
+            "SEC_INVALID_INPUT: association_audit_timeout_seconds must be <= {MAX_ASSOCIATION_AUDIT_TIMEOUT_SECONDS}"
+        )
+        .into());
+    }
+    for (field, value) in [
+        (
+            "association_audit_max_input_chars",
+            settings.association_audit_max_input_chars,
+        ),
+        (
+            "association_audit_max_output_chars",
+            settings.association_audit_max_output_chars,
+        ),
+    ] {
+        if value < MIN_ASSOCIATION_AUDIT_CAPTURE_CHARS {
+            return Err(format!(
+                "SEC_INVALID_INPUT: {field} must be >= {MIN_ASSOCIATION_AUDIT_CAPTURE_CHARS}"
+            )
+            .into());
+        }
+        if value > MAX_ASSOCIATION_AUDIT_CAPTURE_CHARS {
+            return Err(format!(
+                "SEC_INVALID_INPUT: {field} must be <= {MAX_ASSOCIATION_AUDIT_CAPTURE_CHARS}"
+            )
+            .into());
+        }
+    }
     validate_update_releases_url(&settings.update_releases_url)?;
     if settings.log_retention_days == 0 {
         return Err("SEC_INVALID_INPUT: log_retention_days must be >= 1".into());
@@ -460,6 +519,13 @@ pub fn write<R: tauri::Runtime>(
     settings.cx2cc_model_reasoning_effort =
         settings.cx2cc_model_reasoning_effort.trim().to_string();
     settings.cx2cc_service_tier = settings.cx2cc_service_tier.trim().to_string();
+    settings.association_audit_model = settings.association_audit_model.trim().to_string();
+    if settings
+        .association_audit_provider_id
+        .is_some_and(|provider_id| provider_id <= 0)
+    {
+        settings.association_audit_provider_id = None;
+    }
     settings.codex_home_override = normalize_codex_home_override(&settings.codex_home_override);
     if settings.codex_home_mode != CodexHomeMode::Custom {
         settings.codex_home_override.clear();

@@ -91,6 +91,7 @@ function makeRequestLog(
     cost_usd: partial.cost_usd ?? null,
     provider_chain_json: partial.provider_chain_json ?? null,
     error_details_json: partial.error_details_json ?? null,
+    association_audit_json: partial.association_audit_json ?? null,
     cost_multiplier: partial.cost_multiplier ?? 1,
     created_at_ms: partial.created_at_ms ?? (partial.created_at ?? 0) * 1000,
     created_at: partial.created_at ?? 0,

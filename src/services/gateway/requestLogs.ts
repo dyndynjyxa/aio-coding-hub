@@ -41,6 +41,82 @@ export type RequestAttemptLog = Override<
   }
 >;
 
+export type AssociationAuditStatus =
+  | "pending"
+  | "completed"
+  | "skipped"
+  | "failed"
+  | "timeout"
+  | "invalid_response"
+  | "not_configured"
+  | "unsupported";
+
+export type AssociationAuditRisk = "none" | "low" | "medium" | "high" | "critical" | "unknown";
+
+export type AssociationAuditSeverity = "info" | "low" | "medium" | "high" | "critical";
+
+export type AssociationAuditSignal = {
+  code: string;
+  severity: AssociationAuditSeverity;
+  confidence: number | null;
+  event_index: number | null;
+  event_kind: string | null;
+  reason: string;
+  evidence: string | null;
+};
+
+export type AssociationAuditResult = {
+  status: AssociationAuditStatus;
+  reason: string | null;
+  provider_id: number | null;
+  provider_name: string | null;
+  provider_cli_key: string | null;
+  model: string | null;
+  started_at_ms: number | null;
+  finished_at_ms: number | null;
+  duration_ms: number | null;
+  input_chars: number | null;
+  output_chars: number | null;
+  package_truncated: boolean;
+  association_score: number | null;
+  overall_risk: AssociationAuditRisk;
+  signals: AssociationAuditSignal[];
+  insufficient_context: boolean;
+  notes: string | null;
+};
+
+export type ParsedAssociationAudit =
+  | { result: AssociationAuditResult | null; malformed: false }
+  | { result: null; malformed: true; raw: string };
+
+const ASSOCIATION_AUDIT_STATUS_VALUES = [
+  "pending",
+  "completed",
+  "skipped",
+  "failed",
+  "timeout",
+  "invalid_response",
+  "not_configured",
+  "unsupported",
+] as const satisfies readonly AssociationAuditStatus[];
+
+const ASSOCIATION_AUDIT_RISK_VALUES = [
+  "none",
+  "low",
+  "medium",
+  "high",
+  "critical",
+  "unknown",
+] as const satisfies readonly AssociationAuditRisk[];
+
+const ASSOCIATION_AUDIT_SEVERITY_VALUES = [
+  "info",
+  "low",
+  "medium",
+  "high",
+  "critical",
+] as const satisfies readonly AssociationAuditSeverity[];
+
 function toCliKey(value: string, label: string): CliKey {
   return narrowGeneratedStringUnion(value, CLI_KEY_VALUES, label);
 }
@@ -99,6 +175,95 @@ export function normalizeRequestLogTraceIdOrNull(
     return normalizeRequestLogTraceId(traceId);
   } catch {
     return null;
+  }
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function readFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readClampedUnitNumber(value: unknown): number | null {
+  const number = readFiniteNumber(value);
+  if (number == null) return null;
+  return Math.min(Math.max(number, 0), 1);
+}
+
+function readBoolean(value: unknown): boolean {
+  return value === true;
+}
+
+function readLiteral<const TAllowed extends readonly string[]>(
+  value: unknown,
+  allowed: TAllowed,
+  fallback: TAllowed[number]
+): TAllowed[number] {
+  return typeof value === "string" && (allowed as readonly string[]).includes(value)
+    ? (value as TAllowed[number])
+    : fallback;
+}
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function normalizeAssociationAuditSignals(value: unknown): AssociationAuditSignal[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item): AssociationAuditSignal | null => {
+      const record = readRecord(item);
+      if (!record) return null;
+      const code = readString(record.code)?.trim() || "unknown";
+      const reason = readString(record.reason)?.trim() || "";
+      return {
+        code,
+        severity: readLiteral(record.severity, ASSOCIATION_AUDIT_SEVERITY_VALUES, "info"),
+        confidence: readClampedUnitNumber(record.confidence),
+        event_index: readFiniteNumber(record.event_index),
+        event_kind: readString(record.event_kind),
+        reason,
+        evidence: readString(record.evidence),
+      };
+    })
+    .filter((item): item is AssociationAuditSignal => item !== null);
+}
+
+export function parseAssociationAuditJson(
+  raw: string | null | undefined
+): ParsedAssociationAudit {
+  if (!raw) return { result: null, malformed: false };
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    const record = readRecord(parsed);
+    if (!record) return { result: null, malformed: true, raw };
+
+    const result: AssociationAuditResult = {
+      status: readLiteral(record.status, ASSOCIATION_AUDIT_STATUS_VALUES, "failed"),
+      reason: readString(record.reason),
+      provider_id: readFiniteNumber(record.provider_id),
+      provider_name: readString(record.provider_name),
+      provider_cli_key: readString(record.provider_cli_key),
+      model: readString(record.model),
+      started_at_ms: readFiniteNumber(record.started_at_ms),
+      finished_at_ms: readFiniteNumber(record.finished_at_ms),
+      duration_ms: readFiniteNumber(record.duration_ms),
+      input_chars: readFiniteNumber(record.input_chars),
+      output_chars: readFiniteNumber(record.output_chars),
+      package_truncated: readBoolean(record.package_truncated),
+      association_score: readClampedUnitNumber(record.association_score),
+      overall_risk: readLiteral(record.overall_risk, ASSOCIATION_AUDIT_RISK_VALUES, "unknown"),
+      signals: normalizeAssociationAuditSignals(record.signals),
+      insufficient_context: readBoolean(record.insufficient_context),
+      notes: readString(record.notes),
+    };
+    return { result, malformed: false };
+  } catch {
+    return { result: null, malformed: true, raw };
   }
 }
 

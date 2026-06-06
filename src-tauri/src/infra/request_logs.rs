@@ -32,6 +32,7 @@ const WRITE_THROUGH_MAX_CONCURRENT: usize = 4;
 const INSERT_RETRY_MAX_ATTEMPTS: u32 = 8;
 const INSERT_RETRY_BASE_DELAY_MS: u64 = 20;
 const INSERT_RETRY_MAX_DELAY_MS: u64 = 500;
+const REQUEST_LOG_AUDIT_JSON_MAX_BYTES: usize = 128 * 1024;
 
 const COST_MULTIPLIER_CACHE_MAX_ENTRIES: usize = 256;
 const MODEL_PRICE_CACHE_MAX_ENTRIES: usize = 512;
@@ -486,8 +487,9 @@ fn insert_batch_once(
 		  created_at,
 		  final_provider_id,
 		  provider_chain_json,
-		  error_details_json
-		) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)
+		  error_details_json,
+		  association_audit_json
+		) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)
 		ON CONFLICT(trace_id) DO UPDATE SET
 		  method = excluded.method,
 		  path = excluded.path,
@@ -518,7 +520,8 @@ fn insert_batch_once(
 		  created_at = CASE WHEN request_logs.created_at = 0 THEN excluded.created_at ELSE request_logs.created_at END,
 		  final_provider_id = excluded.final_provider_id,
 		  provider_chain_json = excluded.provider_chain_json,
-		  error_details_json = excluded.error_details_json
+		  error_details_json = excluded.error_details_json,
+		  association_audit_json = COALESCE(excluded.association_audit_json, request_logs.association_audit_json)
 		"#,
             )
             .map_err(|e| DbWriteError::from_rusqlite("failed to prepare insert", e))?;
@@ -650,6 +653,7 @@ fn insert_batch_once(
                 final_provider_id_db,
                 item.provider_chain_json,
                 item.error_details_json,
+                item.association_audit_json,
             ])
             .map_err(|e| DbWriteError::from_rusqlite("failed to insert request_log", e))?;
         }
@@ -659,6 +663,41 @@ fn insert_batch_once(
         .map_err(|e| DbWriteError::from_rusqlite("failed to commit transaction", e))?;
 
     Ok(())
+}
+
+pub fn update_association_audit_json_by_trace_id(
+    db: &db::Db,
+    trace_id: &str,
+    association_audit_json: String,
+) -> crate::shared::error::AppResult<bool> {
+    let trace_id = trace_id.trim();
+    if trace_id.is_empty() {
+        return Err("SEC_INVALID_INPUT: trace_id is required".to_string().into());
+    }
+    if association_audit_json.len() > REQUEST_LOG_AUDIT_JSON_MAX_BYTES {
+        return Err(format!(
+            "SEC_INVALID_INPUT: association_audit_json must be <= {REQUEST_LOG_AUDIT_JSON_MAX_BYTES} bytes"
+        )
+        .into());
+    }
+    let parsed: serde_json::Value = serde_json::from_str(&association_audit_json)
+        .map_err(|err| format!("SEC_INVALID_INPUT: invalid association_audit_json: {err}"))?;
+    if !parsed.is_object() {
+        return Err(
+            "SEC_INVALID_INPUT: association_audit_json must be an object"
+                .to_string()
+                .into(),
+        );
+    }
+
+    let conn = db.open_connection()?;
+    let changed = conn
+        .execute(
+            "UPDATE request_logs SET association_audit_json = ?1 WHERE trace_id = ?2",
+            params![association_audit_json, trace_id],
+        )
+        .map_err(|e| db_err!("failed to update request_log association audit: {e}"))?;
+    Ok(changed > 0)
 }
 
 pub fn aggregate_by_session_ids(
@@ -786,6 +825,7 @@ mod tests {
             requested_model: None,
             provider_chain_json: None,
             error_details_json: None,
+            association_audit_json: None,
             created_at_ms: 1_770_000_000_000,
             created_at: 1_770_000_000,
         }

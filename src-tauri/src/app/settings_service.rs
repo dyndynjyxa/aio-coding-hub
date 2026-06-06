@@ -7,6 +7,7 @@ use crate::gateway_control::{
 };
 use crate::gateway_runtime_access::app_gateway_status;
 use crate::{blocking, cli_proxy, resident, settings};
+use serde::Deserialize;
 use tauri::Manager;
 
 fn read_settings_for_update<R: tauri::Runtime>(
@@ -67,6 +68,15 @@ pub(crate) struct SettingsUpdate {
     pub response_fixer_fix_encoding: Option<bool>,
     pub response_fixer_fix_sse_format: Option<bool>,
     pub response_fixer_fix_truncated_json: Option<bool>,
+    pub enable_association_audit: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_nullable_i64_update")]
+    pub association_audit_provider_id: Option<Option<i64>>,
+    pub association_audit_model: Option<String>,
+    pub association_audit_mode: Option<settings::AssociationAuditMode>,
+    pub association_audit_sample_rate: Option<u8>,
+    pub association_audit_timeout_seconds: Option<u32>,
+    pub association_audit_max_input_chars: Option<u32>,
+    pub association_audit_max_output_chars: Option<u32>,
     pub verbose_provider_error: Option<bool>,
     pub failover_max_attempts_per_provider: u32,
     pub failover_max_providers_to_try: u32,
@@ -117,6 +127,13 @@ pub(crate) struct SettingsUpdate {
     pub upstream_proxy_url: Option<String>,
     pub upstream_proxy_username: Option<String>,
     pub upstream_proxy_password: Option<SensitiveStringUpdate>,
+}
+
+fn deserialize_nullable_i64_update<'de, D>(deserializer: D) -> Result<Option<Option<i64>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<i64>::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Clone, serde::Deserialize, specta::Type)]
@@ -176,6 +193,14 @@ pub(crate) struct SettingsView {
     pub response_fixer_fix_truncated_json: bool,
     pub response_fixer_max_json_depth: u32,
     pub response_fixer_max_fix_size: u32,
+    pub enable_association_audit: bool,
+    pub association_audit_provider_id: Option<i64>,
+    pub association_audit_model: String,
+    pub association_audit_mode: settings::AssociationAuditMode,
+    pub association_audit_sample_rate: u8,
+    pub association_audit_timeout_seconds: u32,
+    pub association_audit_max_input_chars: u32,
+    pub association_audit_max_output_chars: u32,
     pub cx2cc_fallback_model_opus: String,
     pub cx2cc_fallback_model_sonnet: String,
     pub cx2cc_fallback_model_haiku: String,
@@ -297,6 +322,14 @@ impl From<&settings::AppSettings> for SettingsView {
             response_fixer_fix_truncated_json: value.response_fixer_fix_truncated_json,
             response_fixer_max_json_depth: value.response_fixer_max_json_depth,
             response_fixer_max_fix_size: value.response_fixer_max_fix_size,
+            enable_association_audit: value.enable_association_audit,
+            association_audit_provider_id: value.association_audit_provider_id,
+            association_audit_model: value.association_audit_model.clone(),
+            association_audit_mode: value.association_audit_mode,
+            association_audit_sample_rate: value.association_audit_sample_rate,
+            association_audit_timeout_seconds: value.association_audit_timeout_seconds,
+            association_audit_max_input_chars: value.association_audit_max_input_chars,
+            association_audit_max_output_chars: value.association_audit_max_output_chars,
             cx2cc_fallback_model_opus: value.cx2cc_fallback_model_opus.clone(),
             cx2cc_fallback_model_sonnet: value.cx2cc_fallback_model_sonnet.clone(),
             cx2cc_fallback_model_haiku: value.cx2cc_fallback_model_haiku.clone(),
@@ -557,6 +590,14 @@ pub(crate) async fn settings_set_impl(
         response_fixer_fix_encoding,
         response_fixer_fix_sse_format,
         response_fixer_fix_truncated_json,
+        enable_association_audit,
+        association_audit_provider_id,
+        association_audit_model,
+        association_audit_mode,
+        association_audit_sample_rate,
+        association_audit_timeout_seconds,
+        association_audit_max_input_chars,
+        association_audit_max_output_chars,
         verbose_provider_error,
         failover_max_attempts_per_provider,
         failover_max_providers_to_try,
@@ -721,6 +762,24 @@ pub(crate) async fn settings_set_impl(
                 response_fixer_fix_sse_format.unwrap_or(previous.response_fixer_fix_sse_format);
             let response_fixer_fix_truncated_json = response_fixer_fix_truncated_json
                 .unwrap_or(previous.response_fixer_fix_truncated_json);
+            let enable_association_audit =
+                enable_association_audit.unwrap_or(previous.enable_association_audit);
+            let association_audit_provider_id =
+                association_audit_provider_id.unwrap_or(previous.association_audit_provider_id);
+            let association_audit_model = association_audit_model
+                .unwrap_or(previous.association_audit_model.clone())
+                .trim()
+                .to_string();
+            let association_audit_mode =
+                association_audit_mode.unwrap_or(previous.association_audit_mode);
+            let association_audit_sample_rate =
+                association_audit_sample_rate.unwrap_or(previous.association_audit_sample_rate);
+            let association_audit_timeout_seconds = association_audit_timeout_seconds
+                .unwrap_or(previous.association_audit_timeout_seconds);
+            let association_audit_max_input_chars =
+                association_audit_max_input_chars.unwrap_or(previous.association_audit_max_input_chars);
+            let association_audit_max_output_chars = association_audit_max_output_chars
+                .unwrap_or(previous.association_audit_max_output_chars);
             let verbose_provider_error =
                 verbose_provider_error.unwrap_or(previous.verbose_provider_error);
             let circuit_breaker_failure_threshold = circuit_breaker_failure_threshold
@@ -782,6 +841,14 @@ pub(crate) async fn settings_set_impl(
                 response_fixer_fix_truncated_json,
                 response_fixer_max_json_depth: previous.response_fixer_max_json_depth,
                 response_fixer_max_fix_size: previous.response_fixer_max_fix_size,
+                enable_association_audit,
+                association_audit_provider_id,
+                association_audit_model,
+                association_audit_mode,
+                association_audit_sample_rate,
+                association_audit_timeout_seconds,
+                association_audit_max_input_chars,
+                association_audit_max_output_chars,
                 cx2cc_fallback_model_opus,
                 cx2cc_fallback_model_sonnet,
                 cx2cc_fallback_model_haiku,

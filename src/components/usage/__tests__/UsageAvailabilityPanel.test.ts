@@ -38,10 +38,11 @@ function makeLog(overrides: Partial<RequestLogSummary> & { final_provider_id: nu
     cost_usd: null,
     provider_chain_json: null,
     error_details_json: null,
-    cost_multiplier: 1,
-    created_at_ms: 0,
-    created_at: 0,
     ...overrides,
+    association_audit_json: overrides.association_audit_json ?? null,
+    cost_multiplier: overrides.cost_multiplier ?? 1,
+    created_at_ms: overrides.created_at_ms ?? 0,
+    created_at: overrides.created_at ?? 0,
   };
 }
 

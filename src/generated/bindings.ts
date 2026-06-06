@@ -2215,6 +2215,7 @@ export type DesktopOpenPathRequest = { path: string; with: string | null };
 export type DesktopOpenUrlRequest = { url: string; with: string | null };
 export type DesktopRevealItemRequest = { path: string };
 export type DesktopThemeMode = "light" | "dark" | "system";
+export type AssociationAuditMode = "off" | "sampled" | "prefiltered" | "all";
 export type DesktopUpdaterMetadata = {
   rid: number;
   currentVersion: string;
@@ -2616,6 +2617,7 @@ export type RequestLogDetail = {
   cost_usd: number | null;
   provider_chain_json: string | null;
   error_details_json: string | null;
+  association_audit_json: string | null;
   cost_multiplier: number;
   created_at_ms: number;
   created_at: number;
@@ -2668,6 +2670,7 @@ export type RequestLogSummary = {
   cost_usd: number | null;
   provider_chain_json: string | null;
   error_details_json: string | null;
+  association_audit_json: string | null;
   cost_multiplier: number;
   created_at_ms: number;
   created_at: number;
@@ -2717,6 +2720,14 @@ export type SettingsUpdate = {
   responseFixerFixEncoding: boolean | null;
   responseFixerFixSseFormat: boolean | null;
   responseFixerFixTruncatedJson: boolean | null;
+  enableAssociationAudit: boolean | null;
+  associationAuditProviderId?: number | null;
+  associationAuditModel: string | null;
+  associationAuditMode: AssociationAuditMode | null;
+  associationAuditSampleRate: number | null;
+  associationAuditTimeoutSeconds: number | null;
+  associationAuditMaxInputChars: number | null;
+  associationAuditMaxOutputChars: number | null;
   verboseProviderError: boolean | null;
   failoverMaxAttemptsPerProvider: number;
   failoverMaxProvidersToTry: number;
@@ -2794,6 +2805,14 @@ export type SettingsView = {
   response_fixer_fix_truncated_json: boolean;
   response_fixer_max_json_depth: number;
   response_fixer_max_fix_size: number;
+  enable_association_audit: boolean;
+  association_audit_provider_id: number | null;
+  association_audit_model: string;
+  association_audit_mode: AssociationAuditMode;
+  association_audit_sample_rate: number;
+  association_audit_timeout_seconds: number;
+  association_audit_max_input_chars: number;
+  association_audit_max_output_chars: number;
   cx2cc_fallback_model_opus: string;
   cx2cc_fallback_model_sonnet: string;
   cx2cc_fallback_model_haiku: string;

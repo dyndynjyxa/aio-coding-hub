@@ -235,6 +235,7 @@ pub(super) fn build_stream_finalize_ctx<R: tauri::Runtime>(
         cli_key: ctx.cli_key.clone(),
         method: ctx.method_hint.clone(),
         path: ctx.forwarded_path.clone(),
+        request_body: ctx.introspection_body.clone(),
         observe: ctx.observe,
         query: ctx.query.clone(),
         excluded_from_stats: false,

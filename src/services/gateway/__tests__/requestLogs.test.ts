@@ -13,6 +13,7 @@ import {
   normalizeRequestLogId,
   normalizeRequestLogTraceId,
   normalizeRequestLogsLimit,
+  parseAssociationAuditJson,
   requestAttemptLogsByTraceId,
   requestLogGet,
   requestLogGetByTraceId,
@@ -326,5 +327,124 @@ describe("services/gateway/requestLogs", () => {
     expect(commands.requestLogsListAfterId).toHaveBeenCalledWith("claude", 10, null);
     expect(commands.requestLogsListAfterIdAll).toHaveBeenCalledWith(10, null);
     expect(commands.requestAttemptLogsByTraceId).toHaveBeenCalledWith("trace-2", null);
+  });
+
+  it("parses completed association audit json with normalized signals", () => {
+    const parsed = parseAssociationAuditJson(
+      JSON.stringify({
+        status: "completed",
+        provider_id: 12,
+        provider_name: "Audit Provider",
+        provider_cli_key: "claude",
+        model: "claude-sonnet-4-5",
+        started_at_ms: 10,
+        finished_at_ms: 30,
+        duration_ms: 20,
+        input_chars: 1200,
+        output_chars: 800,
+        package_truncated: true,
+        association_score: 1.4,
+        overall_risk: "high",
+        signals: [
+          {
+            code: "ungrounded_script_or_mutation",
+            severity: "critical",
+            confidence: 2,
+            event_index: 3,
+            event_kind: "tool_call",
+            reason: "写入脚本未被用户请求支撑。",
+            evidence: "write malicious.sh",
+          },
+          {
+            code: "",
+            severity: "unexpected",
+            confidence: -1,
+            reason: null,
+          },
+          "bad-row",
+        ],
+        insufficient_context: false,
+        notes: "bounded package",
+      })
+    );
+
+    expect(parsed.malformed).toBe(false);
+    expect(parsed.result).toMatchObject({
+      status: "completed",
+      provider_id: 12,
+      provider_name: "Audit Provider",
+      provider_cli_key: "claude",
+      model: "claude-sonnet-4-5",
+      duration_ms: 20,
+      input_chars: 1200,
+      output_chars: 800,
+      package_truncated: true,
+      association_score: 1,
+      overall_risk: "high",
+      insufficient_context: false,
+      notes: "bounded package",
+    });
+    expect(parsed.result?.signals).toEqual([
+      {
+        code: "ungrounded_script_or_mutation",
+        severity: "critical",
+        confidence: 1,
+        event_index: 3,
+        event_kind: "tool_call",
+        reason: "写入脚本未被用户请求支撑。",
+        evidence: "write malicious.sh",
+      },
+      {
+        code: "unknown",
+        severity: "info",
+        confidence: 0,
+        event_index: null,
+        event_kind: null,
+        reason: "",
+        evidence: null,
+      },
+    ]);
+  });
+
+  it("parses skipped and missing association audit json without malformed state", () => {
+    expect(parseAssociationAuditJson(null)).toEqual({ result: null, malformed: false });
+    expect(parseAssociationAuditJson("")).toEqual({ result: null, malformed: false });
+
+    expect(
+      parseAssociationAuditJson(
+        JSON.stringify({
+          status: "skipped",
+          reason: "prefilter_no_signal",
+          started_at_ms: 0,
+          finished_at_ms: 0,
+          duration_ms: 0,
+          input_chars: 0,
+          output_chars: 0,
+          package_truncated: false,
+        })
+      )
+    ).toEqual({
+      malformed: false,
+      result: expect.objectContaining({
+        status: "skipped",
+        reason: "prefilter_no_signal",
+        overall_risk: "unknown",
+        signals: [],
+      }),
+    });
+  });
+
+  it("marks malformed association audit json without throwing", () => {
+    expect(parseAssociationAuditJson("not-json")).toEqual({
+      result: null,
+      malformed: true,
+      raw: "not-json",
+    });
+
+    expect(parseAssociationAuditJson("[]")).toEqual({
+      result: null,
+      malformed: true,
+      raw: "[]",
+    });
   });
 });
