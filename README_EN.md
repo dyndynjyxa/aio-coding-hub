@@ -220,6 +220,64 @@ curl http://127.0.0.1:37123/health
 # {"status":"ok"}
 ```
 
+## Association Audit (Optional)
+
+Association Audit records advisory signals about whether the model output is related to the user input. It runs as a passive sidecar after the main request finishes. It does **not** block, rewrite, retry, reroute, or cancel the main request.
+
+### Enable it
+
+1. Open **Settings** and find **Association Audit**.
+2. Turn it on.
+3. Select the provider and model used for audit calls.
+   - The current backend supports direct API-key Claude / Codex providers.
+   - OAuth, bridge, Gemini, CX2CC, disabled providers, missing API keys, or missing base URLs are recorded as not-configured or unsupported audit states.
+4. Choose mode, sample rate, timeout, and input/output capture limits.
+
+### View results
+
+Audit results are stored in request logs:
+
+1. Open **Recent proxy records** on Home, or go to the **Proxy Records** page.
+2. Click a request to open **Proxy Record Details**.
+3. In the **Overview** tab, look for the **Association Audit** card.
+   - It shows status, risk, association score, signal count, duration, signal reasons, and evidence.
+4. In the **Raw Data** tab, expand `association_audit_json` to inspect the full JSON.
+
+If the audit card is missing, the request may have happened before the feature was enabled, the feature may be off, no audit result may have been produced, or the async audit write may not have finished yet. Wait a few seconds and refresh the proxy records to confirm.
+
+### Modes
+
+| Mode | Behavior |
+| --- | --- |
+| `off` | Does not trigger association audit and does not change main request behavior. |
+| `all` | Attempts an audit LLM call for every eligible completed request. |
+| `sampled` | Uses the sample rate to decide whether to call the audit LLM; skipped requests are recorded as `skipped` / `sampled_out`. |
+| `prefiltered` | Runs a local prefilter first. It calls the audit LLM only when suspicious markers or long low-overlap output are detected; skipped requests are recorded as `skipped` / `prefilter_no_signal`. |
+
+### Sampling logic
+
+`sampled` mode uses deterministic sampling, not per-run randomness:
+
+- `sample_rate >= 100`: every request is selected.
+- `sample_rate == 0`: every request is skipped.
+- Other values: hash the request `trace_id`, then check `hash % 100 < sample_rate`.
+
+This makes the sampling result stable for the same `trace_id`, while different requests are distributed according to the configured sample rate.
+
+### Prefilter logic
+
+`prefiltered` mode only decides whether an audit LLM call is worth making. It does not emit the final risk judgment. Semantic judgment still belongs to the selected audit model.
+
+The local prefilter checks the redacted and bounded response snapshot:
+
+- It calls the audit LLM when high-risk or unrelated-content markers appear, such as command execution, scripts, credentials, prompt injection, callbacks, or promotional content.
+- Current marker examples include: `curl`, `wget`, `powershell`, `bash`, `chmod`, `ssh `, `scp `, `eval(`, `document.cookie`, `<script`, `api_key`, `access_token`, `refresh_token`, `password`, `secret`, `ignore previous`, `system prompt`, `role:`, `bypass`, `callback`, `webhook`, `广告`, `服务器线路`, `优惠`, `购买`, `加群`, `推广`.
+- It also calls the audit LLM when the output is at least 1000 characters long and the rough token overlap between request and response is below 8%.
+
+Rough token overlap is computed by splitting text on non-alphanumeric characters, keeping tokens with at least 4 characters, taking up to 200 tokens, and checking how many request tokens also appear in the response.
+
+Prefiltering is a cost and latency control mechanism, not a security decision engine. Its purpose is to skip obviously low-risk outputs while still sending suspicious or low-association outputs to the audit LLM.
+
 ---
 
 ## Tech Stack
