@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.60.1](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.0...aio-coding-hub-v0.60.1) (2026-06-15)
+
+
+### Features
+
+* **app:** 优化升级检测以支持GitHub发布内容回退 ([8fa895f](https://github.com/dyndynjyxa/aio-coding-hub/commit/8fa895fe8a9cb0cb6b40622c3fd770faeef9bc9d))
+
+
+### Bug Fixes
+
+* **providers:** enable provider card drag handle ([560db46](https://github.com/dyndynjyxa/aio-coding-hub/commit/560db46793c409418eb5d18b2f40ea3666febdb8))
+* **release:** keep pre-1.0 features as patch releases ([1e9d19e](https://github.com/dyndynjyxa/aio-coding-hub/commit/1e9d19e0b72f0906a922a7d6c16437b66bac62dd))
+* **release:** patch-bump pre-1.0 features ([519b8f5](https://github.com/dyndynjyxa/aio-coding-hub/commit/519b8f5b8fca0ad94c570743e22361823fe79ab6))
+* **release:** prepare 0.60.1 patch ([97d59e6](https://github.com/dyndynjyxa/aio-coding-hub/commit/97d59e65ae63bca7c9946a5e3333f2ee7a631f32))
+
 ## [0.60.0](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.56.0...aio-coding-hub-v0.60.0) (2026-06-14)
 
 
