@@ -609,9 +609,18 @@ fn run_version(exe: &Path) -> crate::shared::error::AppResult<String> {
     // GUI-launched processes on macOS/Linux inherit a minimal PATH that often
     // lacks Homebrew / nvm / system dirs. Prepend the standard locations so that
     // shebang-based CLIs (#!/usr/bin/env node) can resolve their runtime.
+    //
+    // Crucially, include the executable's own parent directory: version managers
+    // (nvm, volta, fnm, asdf) place both `node` and global npm packages in the
+    // same bin dir, so adding it ensures `#!/usr/bin/env node` resolves.
     #[cfg(not(windows))]
     {
-        let extra = platform_extra_path_dirs().join(":");
+        let mut extra_dirs: Vec<&str> = platform_extra_path_dirs().to_vec();
+        let exe_parent = exe.parent().map(|p| p.to_string_lossy().to_string());
+        if let Some(ref dir) = exe_parent {
+            extra_dirs.insert(0, dir.as_str());
+        }
+        let extra = extra_dirs.join(":");
         cmd.env(
             "PATH",
             format!("{}:{}", extra, std::env::var("PATH").unwrap_or_default()),
@@ -841,5 +850,36 @@ mod tests {
             .to_string();
 
         assert!(err.contains("claude/settings.json too large"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_version_resolves_shebang_interpreter_from_exe_parent_dir() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().expect("tempdir");
+        let bin_dir = dir.path().join("bin");
+        fs::create_dir(&bin_dir).expect("create bin dir");
+
+        // Create a fake "node" interpreter that just prints a version string.
+        let node_path = bin_dir.join("node");
+        fs::write(&node_path, "#!/bin/sh\necho \"v20.0.0\"\n").expect("write fake node");
+        fs::set_permissions(&node_path, fs::Permissions::from_mode(0o755))
+            .expect("chmod fake node");
+
+        // Create a fake CLI script with #!/usr/bin/env node shebang.
+        let cli_path = bin_dir.join("fakecli");
+        fs::write(&cli_path, "#!/usr/bin/env node\nconsole.log(\"1.2.3\")\n")
+            .expect("write fake cli");
+        fs::set_permissions(&cli_path, fs::Permissions::from_mode(0o755)).expect("chmod fake cli");
+
+        // run_version should succeed because it adds exe's parent dir to PATH,
+        // allowing `#!/usr/bin/env node` to find the fake node in the same dir.
+        let result = run_version(&cli_path);
+        assert!(
+            result.is_ok(),
+            "run_version should resolve shebang interpreter from exe's parent dir, got: {:?}",
+            result.err()
+        );
     }
 }
