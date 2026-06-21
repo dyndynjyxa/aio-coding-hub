@@ -1,15 +1,20 @@
 // Usage: Dashboard / overview page. Backend commands: `request_logs_*`, `request_attempt_logs_*`, `usage_*`, `gateway_*`, `providers_*`, `sort_modes_*`, `provider_limit_usage_*`.
 
 import { lazy, Suspense, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { CLIS } from "../constants/clis";
 import {
   HomeOverviewPanel,
   type HomeOverviewUsageView,
 } from "../components/home/HomeOverviewPanel";
+import type { HomeWorkspaceConfigItem } from "../components/home/homeWorkspaceConfigTypes";
 import { useDevPreviewData } from "../hooks/useDevPreviewData";
 import { useDocumentVisibility } from "../hooks/useDocumentVisibility";
 import { useGatewaySessionsListQuery } from "../query/gateway";
+import { mcpKeys, promptsKeys, skillsKeys, workspacesKeys } from "../query/keys";
 import { useSettingsQuery } from "../query/settings";
+import { useWorkspaceApplyMutation } from "../query/workspaces";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Dialog } from "../ui/Dialog";
@@ -22,6 +27,15 @@ import {
   readHomeOverviewLogsPrimaryLayoutFromStorage,
   subscribeHomeOverviewLogsPrimaryLayout,
 } from "../services/home/homeOverviewLayout";
+import {
+  readHomeWorkspaceConfigShowAllFromStorage,
+  subscribeHomeWorkspaceConfigShowAll,
+} from "../services/home/homeWorkspaceConfigDisplay";
+import { promptSetEnabled } from "../services/workspace/prompts";
+import { mcpServerSetEnabled } from "../services/workspace/mcp";
+import { skillSetEnabled } from "../services/workspace/skills";
+import { logToConsole } from "../services/consoleLog";
+import type { CliKey } from "../services/providers/providers";
 import { DEFAULT_HOME_USAGE_PERIOD } from "../utils/homeUsagePeriod";
 import { resolveHomeUsageWindowDays } from "../utils/homeUsagePeriod";
 import { useHomeCircuitState } from "./home/hooks/useHomeCircuitState";
@@ -64,6 +78,7 @@ const LazyRequestLogDetailDialog = lazy(() =>
 );
 
 export function HomePage() {
+  const queryClient = useQueryClient();
   const { traces } = useTraceStore();
   const showCustomTooltip = true;
   const foregroundActive = useDocumentVisibility();
@@ -81,6 +96,11 @@ export function HomePage() {
     readHomeOverviewLogsPrimaryLayoutFromStorage,
     () => false
   );
+  const showAllWorkspaceConfigItems = useSyncExternalStore(
+    subscribeHomeWorkspaceConfigShowAll,
+    readHomeWorkspaceConfigShowAllFromStorage,
+    () => false
+  );
   const homeTabs = useMemo(
     () => buildHomeTabs(personalizedLayoutEnabled),
     [personalizedLayoutEnabled]
@@ -88,6 +108,10 @@ export function HomePage() {
 
   const [tab, setTab] = useState<HomeTabKey>("overview");
   const [selectedLogId, setSelectedLogId] = useState<number | null>(null);
+  const [togglingWorkspaceConfigItemId, setTogglingWorkspaceConfigItemId] = useState<string | null>(
+    null
+  );
+  const [switchingWorkspaceKey, setSwitchingWorkspaceKey] = useState<string | null>(null);
   const [personalizedUsageView, setPersonalizedUsageView] =
     useState<HomeOverviewUsageView>("summary");
   const personalizedUsageChartVisible =
@@ -136,13 +160,97 @@ export function HomePage() {
     providerLimitEnabled: !personalizedLayoutEnabled,
   });
   const sortMode = useHomeSortMode(activeSessions);
-  const workspaceConfigs = useHomeWorkspaceConfigs({ enabled: tab === "overview" });
+  const workspaceConfigs = useHomeWorkspaceConfigs({
+    enabled: tab === "overview",
+    showAllItems: showAllWorkspaceConfigItems,
+  });
+  const workspaceApplyMutation = useWorkspaceApplyMutation();
+  const workspaceConfigToggleMutation = useMutation({
+    mutationFn: async (input: {
+      workspaceId: number;
+      item: HomeWorkspaceConfigItem;
+      enabled: boolean;
+    }) => {
+      if (input.item.type === "prompts") {
+        return promptSetEnabled(input.item.resourceId, input.enabled);
+      }
+      if (input.item.type === "mcp") {
+        return mcpServerSetEnabled({
+          workspaceId: input.workspaceId,
+          serverId: input.item.resourceId,
+          enabled: input.enabled,
+        });
+      }
+      return skillSetEnabled({
+        workspaceId: input.workspaceId,
+        skillId: input.item.resourceId,
+        enabled: input.enabled,
+      });
+    },
+    onSettled: async (_result, _error, input) => {
+      if (!input) return;
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: promptsKeys.summary(input.workspaceId) }),
+        queryClient.invalidateQueries({ queryKey: promptsKeys.list(input.workspaceId) }),
+        queryClient.invalidateQueries({ queryKey: mcpKeys.serversList(input.workspaceId) }),
+        queryClient.invalidateQueries({ queryKey: skillsKeys.installedList(input.workspaceId) }),
+      ]);
+      setTogglingWorkspaceConfigItemId(null);
+    },
+  });
   const oauthQuota = useHomeOAuthQuota({
     cliPriorityOrder,
     requestLogs,
     enabled: tab === "overview",
   });
   const { pendingSortModeSwitch } = sortMode;
+  const togglingWorkspaceConfigItemIds = useMemo(
+    () => new Set(togglingWorkspaceConfigItemId ? [togglingWorkspaceConfigItemId] : []),
+    [togglingWorkspaceConfigItemId]
+  );
+
+  function toggleWorkspaceConfigItem(
+    workspaceId: number,
+    item: HomeWorkspaceConfigItem,
+    enabled: boolean
+  ) {
+    if (workspaceConfigToggleMutation.isPending) return;
+    setTogglingWorkspaceConfigItemId(item.id);
+    workspaceConfigToggleMutation.mutate({ workspaceId, item, enabled });
+  }
+
+  async function switchWorkspace(cliKey: CliKey, workspaceId: number) {
+    if (switchingWorkspaceKey != null || workspaceApplyMutation.isPending) return;
+
+    const config = workspaceConfigs.find((row) => row.cliKey === cliKey);
+    if (config?.workspaceId === workspaceId) return;
+
+    const nextSwitchingWorkspaceKey = `${cliKey}:${workspaceId}`;
+    setSwitchingWorkspaceKey(nextSwitchingWorkspaceKey);
+
+    try {
+      const report = await workspaceApplyMutation.mutateAsync({ cliKey, workspaceId });
+      if (report) {
+        toast("已切换为当前工作区");
+      }
+    } catch (error) {
+      logToConsole("error", "首页切换工作区失败", {
+        cliKey,
+        workspaceId,
+        error: String(error),
+      });
+      toast(`切换失败：${String(error)}`);
+    } finally {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: workspacesKeys.list(cliKey) }),
+        queryClient.invalidateQueries({ queryKey: promptsKeys.summary(workspaceId) }),
+        queryClient.invalidateQueries({ queryKey: promptsKeys.list(workspaceId) }),
+        queryClient.invalidateQueries({ queryKey: mcpKeys.serversList(workspaceId) }),
+        queryClient.invalidateQueries({ queryKey: skillsKeys.installedList(workspaceId) }),
+      ]);
+      setSwitchingWorkspaceKey(null);
+    }
+  }
 
   useEffect(() => {
     if (personalizedLayoutEnabled && tab === "cost") setTab("tokenCost");
@@ -205,6 +313,13 @@ export function HomePage() {
             activeSessionsLoading={activeSessionsLoading}
             activeSessionsAvailable={activeSessionsAvailable}
             workspaceConfigs={workspaceConfigs}
+            showWorkspaceConfigQuickToggle={showAllWorkspaceConfigItems}
+            togglingWorkspaceConfigItemIds={togglingWorkspaceConfigItemIds}
+            switchingWorkspaceKey={switchingWorkspaceKey}
+            onSwitchWorkspace={(cliKey, workspaceId) => {
+              void switchWorkspace(cliKey, workspaceId);
+            }}
+            onToggleWorkspaceConfigItemEnabled={toggleWorkspaceConfigItem}
             providerLimitRows={providerLimitRows}
             providerLimitLoading={providerLimitLoading}
             providerLimitAvailable={providerLimitAvailable}

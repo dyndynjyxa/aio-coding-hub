@@ -627,16 +627,16 @@ export function HomeTodayProviderUsageOverview({
                     <TableHeaderLabel label="总Token" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
-                    <TableHeaderLabel label="缓存命中率" />
-                  </th>
-                  <th scope="col" className={TABLE_TH_CLASS}>
                     <TableHeaderLabel label="输入+输出Token" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
-                    总花费
+                    <TableHeaderLabel label="缓存命中率" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
                     成功率
+                  </th>
+                  <th scope="col" className={TABLE_TH_CLASS}>
+                    总花费
                   </th>
                 </tr>
               </thead>
@@ -664,16 +664,16 @@ export function HomeTodayProviderUsageOverview({
                     <TableHeaderLabel label="总Token" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
-                    <TableHeaderLabel label="缓存命中率" />
-                  </th>
-                  <th scope="col" className={TABLE_TH_CLASS}>
                     <TableHeaderLabel label="输入+输出Token" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
-                    总花费
+                    <TableHeaderLabel label="缓存命中率" />
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
                     成功率
+                  </th>
+                  <th scope="col" className={TABLE_TH_CLASS}>
+                    总花费
                   </th>
                 </tr>
               </thead>
@@ -703,16 +703,16 @@ export function HomeTodayProviderUsageOverview({
                       {isSynthetic ? "—" : formatTokenValue(row.total_tokens)}
                     </td>
                     <td className={TABLE_MONO_TD_CLASS}>
-                      {isSynthetic ? "—" : rowCacheHitRate(row)}
-                    </td>
-                    <td className={TABLE_MONO_TD_CLASS}>
                       {isSynthetic ? "—" : formatTokenValue(row.io_total_tokens)}
                     </td>
                     <td className={TABLE_MONO_TD_CLASS}>
-                      {isSynthetic ? "—" : formatUsdCompact(row.cost_usd)}
+                      {isSynthetic ? "—" : rowCacheHitRate(row)}
                     </td>
                     <td className={TABLE_MONO_TD_CLASS}>
                       {isSynthetic ? "—" : formatPercent(successRate(row))}
+                    </td>
+                    <td className={TABLE_MONO_TD_CLASS}>
+                      {isSynthetic ? "—" : formatUsdCompact(row.cost_usd)}
                     </td>
                   </tr>
                 ))}

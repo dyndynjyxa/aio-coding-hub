@@ -283,6 +283,24 @@ describe("pages/settings/SettingsMainColumn", () => {
     expect(window.localStorage.getItem("aio-home-overview-logs-primary-layout")).toBe("true");
   });
 
+  it("toggles homepage workspace config display preference in localStorage", () => {
+    vi.mocked(useTheme).mockReturnValue({
+      theme: "system",
+      resolvedTheme: "light",
+      setTheme: vi.fn(),
+    } as any);
+
+    renderSettingsMainColumn();
+
+    const row = screen.getByText("配置信息显示全部").closest(".min-w-0")?.parentElement;
+    expect(row).toBeTruthy();
+    expect(within(row as HTMLElement).getByRole("switch")).not.toBeChecked();
+
+    fireEvent.click(within(row as HTMLElement).getByRole("switch"));
+
+    expect(window.localStorage.getItem("aio-home-workspace-config-show-all")).toBe("true");
+  });
+
   it("keeps heatmap and usage toggles enabled when personalized layout is enabled", () => {
     vi.mocked(useTheme).mockReturnValue({
       theme: "system",

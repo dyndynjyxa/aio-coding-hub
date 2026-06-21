@@ -31,7 +31,7 @@ import type { HomeOAuthQuotaRow } from "./homeOAuthQuotaTypes";
 import { HomeRequestLogsPanel } from "./HomeRequestLogsPanel";
 import { HomeTodayProviderUsageOverview } from "./HomeTodayProviderUsageOverview";
 import { HomeUsageSection } from "./HomeUsageSection";
-import type { HomeCliWorkspaceConfig } from "./homeWorkspaceConfigTypes";
+import type { HomeCliWorkspaceConfig, HomeWorkspaceConfigItem } from "./homeWorkspaceConfigTypes";
 
 export type HomeOverviewUsageView = "summary" | "usageChart";
 
@@ -283,6 +283,15 @@ export type HomeOverviewPanelProps = {
   activeSessionsAvailable: boolean | null;
 
   workspaceConfigs: HomeCliWorkspaceConfig[];
+  showWorkspaceConfigQuickToggle?: boolean;
+  togglingWorkspaceConfigItemIds?: Set<string>;
+  switchingWorkspaceKey?: string | null;
+  onSwitchWorkspace?: (cliKey: CliKey, workspaceId: number) => void;
+  onToggleWorkspaceConfigItemEnabled?: (
+    workspaceId: number,
+    item: HomeWorkspaceConfigItem,
+    enabled: boolean
+  ) => void;
 
   providerLimitRows: ProviderLimitUsageRow[];
   providerLimitLoading: boolean;
@@ -319,13 +328,49 @@ const PREVIEW_WORKSPACE_CONFIGS: HomeCliWorkspaceConfig[] = [
     cliLabel: "Claude",
     workspaceId: 1001,
     workspaceName: "工作区 Alpha",
+    workspaces: [{ id: 1001, name: "工作区 Alpha", isActive: true }],
     loading: false,
     items: [
-      { id: "prompt:1001", type: "prompts", label: "Prompt", name: "PR Review" },
-      { id: "mcp:1001", type: "mcp", label: "MCP", name: "filesystem" },
-      { id: "mcp:1002", type: "mcp", label: "MCP", name: "browser-tools" },
-      { id: "skill:1001", type: "skills", label: "Skill", name: "repo-auditor" },
-      { id: "skill:1002", type: "skills", label: "Skill", name: "incident-helper" },
+      {
+        id: "prompt:1001",
+        resourceId: 1001,
+        type: "prompts",
+        label: "Prompt",
+        name: "PR Review",
+        enabled: true,
+      },
+      {
+        id: "mcp:1001",
+        resourceId: 1001,
+        type: "mcp",
+        label: "MCP",
+        name: "filesystem",
+        enabled: true,
+      },
+      {
+        id: "mcp:1002",
+        resourceId: 1002,
+        type: "mcp",
+        label: "MCP",
+        name: "browser-tools",
+        enabled: false,
+      },
+      {
+        id: "skill:1001",
+        resourceId: 1001,
+        type: "skills",
+        label: "Skill",
+        name: "repo-auditor",
+        enabled: true,
+      },
+      {
+        id: "skill:1002",
+        resourceId: 1002,
+        type: "skills",
+        label: "Skill",
+        name: "incident-helper",
+        enabled: false,
+      },
     ],
   },
   {
@@ -333,13 +378,49 @@ const PREVIEW_WORKSPACE_CONFIGS: HomeCliWorkspaceConfig[] = [
     cliLabel: "Codex",
     workspaceId: 1002,
     workspaceName: "Default",
+    workspaces: [{ id: 1002, name: "Default", isActive: true }],
     loading: false,
     items: [
-      { id: "prompt:1002", type: "prompts", label: "Prompt", name: "Fix First" },
-      { id: "mcp:1003", type: "mcp", label: "MCP", name: "filesystem" },
-      { id: "mcp:1004", type: "mcp", label: "MCP", name: "github" },
-      { id: "skill:1002", type: "skills", label: "Skill", name: "code-review" },
-      { id: "skill:1003", type: "skills", label: "Skill", name: "test-writer" },
+      {
+        id: "prompt:1002",
+        resourceId: 1002,
+        type: "prompts",
+        label: "Prompt",
+        name: "Fix First",
+        enabled: true,
+      },
+      {
+        id: "mcp:1003",
+        resourceId: 1003,
+        type: "mcp",
+        label: "MCP",
+        name: "filesystem",
+        enabled: true,
+      },
+      {
+        id: "mcp:1004",
+        resourceId: 1004,
+        type: "mcp",
+        label: "MCP",
+        name: "github",
+        enabled: true,
+      },
+      {
+        id: "skill:1002",
+        resourceId: 1002,
+        type: "skills",
+        label: "Skill",
+        name: "code-review",
+        enabled: true,
+      },
+      {
+        id: "skill:1003",
+        resourceId: 1003,
+        type: "skills",
+        label: "Skill",
+        name: "test-writer",
+        enabled: true,
+      },
     ],
   },
   {
@@ -347,12 +428,41 @@ const PREVIEW_WORKSPACE_CONFIGS: HomeCliWorkspaceConfig[] = [
     cliLabel: "Gemini",
     workspaceId: 1003,
     workspaceName: "工作区 Beta",
+    workspaces: [{ id: 1003, name: "工作区 Beta", isActive: true }],
     loading: false,
     items: [
-      { id: "mcp:1005", type: "mcp", label: "MCP", name: "browser-tools" },
-      { id: "mcp:1006", type: "mcp", label: "MCP", name: "figma" },
-      { id: "skill:1004", type: "skills", label: "Skill", name: "ux-auditor" },
-      { id: "skill:1005", type: "skills", label: "Skill", name: "spec-writer" },
+      {
+        id: "mcp:1005",
+        resourceId: 1005,
+        type: "mcp",
+        label: "MCP",
+        name: "browser-tools",
+        enabled: true,
+      },
+      {
+        id: "mcp:1006",
+        resourceId: 1006,
+        type: "mcp",
+        label: "MCP",
+        name: "figma",
+        enabled: false,
+      },
+      {
+        id: "skill:1004",
+        resourceId: 1004,
+        type: "skills",
+        label: "Skill",
+        name: "ux-auditor",
+        enabled: true,
+      },
+      {
+        id: "skill:1005",
+        resourceId: 1005,
+        type: "skills",
+        label: "Skill",
+        name: "spec-writer",
+        enabled: false,
+      },
     ],
   },
 ];
@@ -377,6 +487,11 @@ export function HomeOverviewPanel({
   activeSessionsLoading,
   activeSessionsAvailable,
   workspaceConfigs,
+  showWorkspaceConfigQuickToggle = false,
+  togglingWorkspaceConfigItemIds = new Set<string>(),
+  switchingWorkspaceKey = null,
+  onSwitchWorkspace,
+  onToggleWorkspaceConfigItemEnabled,
   providerLimitRows,
   providerLimitLoading,
   providerLimitAvailable,
@@ -508,18 +623,23 @@ export function HomeOverviewPanel({
       null,
     [displayedWorkspaceConfigs, effectiveSelectedWorkspaceConfigCliKey]
   );
-  const legacyWorkspaceRouteStrategyControl = effectiveSelectedWorkspaceConfig ? (
-    <HomeCliRouteStrategyControl
-      cliKey={effectiveSelectedWorkspaceConfig.cliKey}
-      cliLabel={effectiveSelectedWorkspaceConfig.cliLabel}
-      sortModes={sortModes}
-      sortModesLoading={sortModesLoading}
-      sortModesAvailable={sortModesAvailable}
-      activeModeByCli={activeModeByCli}
-      activeModeToggling={activeModeToggling}
-      onSetCliActiveMode={onSetCliActiveMode}
-      orientation="horizontal"
-    />
+  const workspaceRouteStrategyControl = effectiveSelectedWorkspaceConfig ? (
+    <div className="flex min-w-0 items-center gap-1.5 rounded-lg border border-border bg-secondary/70 px-2.5 py-1 text-sm dark:border-border dark:bg-secondary/50">
+      <span className="shrink-0 font-medium text-muted-foreground">路由策略：</span>
+      <HomeCliRouteStrategyControl
+        cliKey={effectiveSelectedWorkspaceConfig.cliKey}
+        cliLabel={effectiveSelectedWorkspaceConfig.cliLabel}
+        sortModes={sortModes}
+        sortModesLoading={sortModesLoading}
+        sortModesAvailable={sortModesAvailable}
+        activeModeByCli={activeModeByCli}
+        activeModeToggling={activeModeToggling}
+        onSetCliActiveMode={onSetCliActiveMode}
+        orientation="horizontal"
+        className="min-w-0 flex-1"
+        selectClassName="h-7 min-w-0 flex-1 border-0 bg-transparent px-0 py-0 text-sm font-semibold text-secondary-foreground shadow-none outline-none focus:border-transparent focus:bg-transparent focus:ring-0 focus:ring-offset-0 disabled:bg-transparent dark:bg-transparent dark:text-foreground dark:disabled:bg-transparent"
+      />
+    </div>
   ) : null;
 
   useEffect(() => {
@@ -621,7 +741,12 @@ export function HomeOverviewPanel({
               configs={displayedWorkspaceConfigs}
               selectedCliKey={effectiveSelectedWorkspaceConfigCliKey}
               onSelectCliKey={setSelectedWorkspaceConfigCliKey}
-              headerAddon={legacyWorkspaceRouteStrategyControl}
+              headerAddon={workspaceRouteStrategyControl}
+              showQuickToggle={showWorkspaceConfigQuickToggle}
+              togglingItemIds={togglingWorkspaceConfigItemIds}
+              switchingWorkspaceKey={switchingWorkspaceKey}
+              onSwitchWorkspace={onSwitchWorkspace}
+              onToggleItemEnabled={onToggleWorkspaceConfigItemEnabled}
             />
           </Suspense>
         ) : sessionsTab === "providerLimit" ? (
@@ -766,6 +891,12 @@ export function HomeOverviewPanel({
               configs={displayedWorkspaceConfigs}
               selectedCliKey={effectiveSelectedWorkspaceConfigCliKey}
               onSelectCliKey={setSelectedWorkspaceConfigCliKey}
+              headerAddon={workspaceRouteStrategyControl}
+              showQuickToggle={showWorkspaceConfigQuickToggle}
+              togglingItemIds={togglingWorkspaceConfigItemIds}
+              switchingWorkspaceKey={switchingWorkspaceKey}
+              onSwitchWorkspace={onSwitchWorkspace}
+              onToggleItemEnabled={onToggleWorkspaceConfigItemEnabled}
             />
           </Suspense>
         )}

@@ -2,6 +2,11 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { useState, type ComponentProps, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeOverviewPanel } from "../HomeOverviewPanel";
+import type {
+  HomeCliWorkspaceConfig,
+  HomeWorkspaceConfigItem,
+  HomeWorkspaceConfigItemType,
+} from "../homeWorkspaceConfigTypes";
 
 const { homeRequestLogsPanelMock } = vi.hoisted(() => ({
   homeRequestLogsPanelMock: vi.fn(() => <div>request-logs</div>),
@@ -76,6 +81,8 @@ vi.mock("../HomeWorkspaceConfigPanel", () => ({
       cliKey: "claude" | "codex" | "gemini";
       cliLabel: string;
       workspaceName: string | null;
+      workspaceId: number | null;
+      workspaces: Array<{ id: number; name: string; isActive: boolean }>;
       items: Array<{ id: string; name: string }>;
     }>;
     selectedCliKey: "claude" | "codex" | "gemini" | null;
@@ -117,6 +124,48 @@ vi.mock("../HomeRequestLogsPanel", () => ({
   HomeRequestLogsPanel: homeRequestLogsPanelMock,
 }));
 
+function makeWorkspaceItem(
+  id: number,
+  type: HomeWorkspaceConfigItemType,
+  label: string,
+  name: string,
+  enabled = true
+): HomeWorkspaceConfigItem {
+  const prefix = type === "prompts" ? "prompt" : type === "mcp" ? "mcp" : "skill";
+  return {
+    id: `${prefix}:${id}`,
+    resourceId: id,
+    type,
+    label,
+    name,
+    enabled,
+  };
+}
+
+function makeWorkspaceConfig(input: {
+  cliKey: "claude" | "codex" | "gemini";
+  cliLabel: string;
+  workspaceId: number | null;
+  workspaceName: string | null;
+  items?: HomeWorkspaceConfigItem[];
+}): HomeCliWorkspaceConfig {
+  return {
+    ...input,
+    workspaces:
+      input.workspaceId == null
+        ? []
+        : [
+            {
+              id: input.workspaceId,
+              name: input.workspaceName?.trim() || "默认",
+              isActive: true,
+            },
+          ],
+    loading: false,
+    items: input.items ?? [],
+  };
+}
+
 function renderPanel(overrides: Partial<ComponentProps<typeof HomeOverviewPanel>> = {}) {
   const onResetCircuitProvider = vi.fn();
   const onSetCliActiveMode = vi.fn();
@@ -139,30 +188,24 @@ function renderPanel(overrides: Partial<ComponentProps<typeof HomeOverviewPanel>
       activeSessionsLoading={false}
       activeSessionsAvailable={true}
       workspaceConfigs={[
-        {
+        makeWorkspaceConfig({
           cliKey: "claude",
           cliLabel: "Claude",
           workspaceId: 1,
           workspaceName: "默认",
-          loading: false,
-          items: [],
-        },
-        {
+        }),
+        makeWorkspaceConfig({
           cliKey: "codex",
           cliLabel: "Codex",
           workspaceId: 2,
           workspaceName: "Default",
-          loading: false,
-          items: [],
-        },
-        {
+        }),
+        makeWorkspaceConfig({
           cliKey: "gemini",
           cliLabel: "Gemini",
           workspaceId: 3,
           workspaceName: "工作区 2",
-          loading: false,
-          items: [],
-        },
+        }),
       ]}
       providerLimitRows={[]}
       providerLimitLoading={false}
@@ -248,33 +291,30 @@ describe("components/home/HomeOverviewPanel", () => {
       sortModes: [{ id: 1, name: "工作策略", created_at: 1, updated_at: 1 }],
       activeModeByCli: { claude: 1, codex: null, gemini: null },
       workspaceConfigs: [
-        {
+        makeWorkspaceConfig({
           cliKey: "claude",
           cliLabel: "Claude",
           workspaceId: 1,
           workspaceName: "工作区 A",
-          loading: false,
           items: [
-            { id: "prompt:1", type: "prompts", label: "Prompt", name: "默认提示词" },
-            { id: "mcp:1", type: "mcp", label: "MCP", name: "filesystem" },
+            makeWorkspaceItem(1, "prompts", "Prompt", "默认提示词"),
+            makeWorkspaceItem(1, "mcp", "MCP", "filesystem"),
           ],
-        },
-        {
+        }),
+        makeWorkspaceConfig({
           cliKey: "codex",
           cliLabel: "Codex",
           workspaceId: 2,
           workspaceName: "Default",
-          loading: false,
-          items: [{ id: "skill:1", type: "skills", label: "Skill", name: "code-review" }],
-        },
-        {
+          items: [makeWorkspaceItem(1, "skills", "Skill", "code-review")],
+        }),
+        makeWorkspaceConfig({
           cliKey: "gemini",
           cliLabel: "Gemini",
           workspaceId: 3,
           workspaceName: "工作区 B",
-          loading: false,
           items: [],
-        },
+        }),
       ],
     });
 
@@ -296,48 +336,53 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(onSetCliActiveMode).toHaveBeenCalledWith("codex", 1);
   });
 
-  it("keeps route strategy out of the workspace header in logs-primary layout", async () => {
+  it("renders route strategy in the workspace header in logs-primary layout", async () => {
     window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
 
-    renderPanel({
+    const { onSetCliActiveMode } = renderPanel({
       sortModes: [{ id: 1, name: "工作策略", created_at: 1, updated_at: 1 }],
       activeModeByCli: { claude: 1, codex: null, gemini: null },
     });
 
     fireEvent.click(screen.getByRole("tab", { name: "配置信息" }));
     expect(await screen.findByText("工作区：")).toBeInTheDocument();
-    expect(screen.queryByText("路由策略：")).not.toBeInTheDocument();
-    expect(screen.queryByRole("combobox", { name: "Claude 路由策略" })).not.toBeInTheDocument();
+    expect(screen.getByText("路由策略：")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Claude 路由策略" })).toHaveValue("1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
+    expect(screen.getByRole("combobox", { name: "Codex 路由策略" })).toHaveValue("");
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Codex 路由策略" }), {
+      target: { value: "1" },
+    });
+    expect(onSetCliActiveMode).toHaveBeenCalledWith("codex", 1);
   });
 
   it("uses CLI priority order for workspace config button order and default selection", async () => {
     renderPanel({
       cliPriorityOrder: ["gemini", "codex", "claude"],
       workspaceConfigs: [
-        {
+        makeWorkspaceConfig({
           cliKey: "claude",
           cliLabel: "Claude",
           workspaceId: 1,
           workspaceName: "工作区 A",
-          loading: false,
-          items: [{ id: "prompt:1", type: "prompts", label: "Prompt", name: "Claude Prompt" }],
-        },
-        {
+          items: [makeWorkspaceItem(1, "prompts", "Prompt", "Claude Prompt")],
+        }),
+        makeWorkspaceConfig({
           cliKey: "codex",
           cliLabel: "Codex",
           workspaceId: 2,
           workspaceName: "工作区 B",
-          loading: false,
-          items: [{ id: "prompt:2", type: "prompts", label: "Prompt", name: "Codex Prompt" }],
-        },
-        {
+          items: [makeWorkspaceItem(2, "prompts", "Prompt", "Codex Prompt")],
+        }),
+        makeWorkspaceConfig({
           cliKey: "gemini",
           cliLabel: "Gemini",
           workspaceId: 3,
           workspaceName: "工作区 C",
-          loading: false,
-          items: [{ id: "prompt:3", type: "prompts", label: "Prompt", name: "Gemini Prompt" }],
-        },
+          items: [makeWorkspaceItem(3, "prompts", "Prompt", "Gemini Prompt")],
+        }),
       ],
     });
 
@@ -365,30 +410,27 @@ describe("components/home/HomeOverviewPanel", () => {
     renderPanel({
       devPreviewEnabled: true,
       workspaceConfigs: [
-        {
+        makeWorkspaceConfig({
           cliKey: "claude",
           cliLabel: "Claude",
           workspaceId: 1,
           workspaceName: "工作区 A",
-          loading: false,
-          items: [{ id: "prompt:1", type: "prompts", label: "Prompt", name: "默认提示词" }],
-        },
-        {
+          items: [makeWorkspaceItem(1, "prompts", "Prompt", "默认提示词")],
+        }),
+        makeWorkspaceConfig({
           cliKey: "codex",
           cliLabel: "Codex",
           workspaceId: 2,
           workspaceName: "Default",
-          loading: false,
           items: [],
-        },
-        {
+        }),
+        makeWorkspaceConfig({
           cliKey: "gemini",
           cliLabel: "Gemini",
           workspaceId: 3,
           workspaceName: "工作区 B",
-          loading: false,
           items: [],
-        },
+        }),
       ],
     });
 
@@ -553,14 +595,13 @@ describe("components/home/HomeOverviewPanel", () => {
       oauthQuotaVisible: true,
       oauthQuotaRows: [{ providerId: 9 } as any],
       workspaceConfigs: [
-        {
+        makeWorkspaceConfig({
           cliKey: "claude",
           cliLabel: "Claude",
           workspaceId: 1,
           workspaceName: "工作区 A",
-          loading: false,
-          items: [{ id: "prompt:1", type: "prompts", label: "Prompt", name: "Claude Prompt" }],
-        },
+          items: [makeWorkspaceItem(1, "prompts", "Prompt", "Claude Prompt")],
+        }),
       ],
     });
 
@@ -586,14 +627,13 @@ describe("components/home/HomeOverviewPanel", () => {
         activeSessionsLoading={false}
         activeSessionsAvailable={true}
         workspaceConfigs={[
-          {
+          makeWorkspaceConfig({
             cliKey: "claude",
             cliLabel: "Claude",
             workspaceId: 1,
             workspaceName: "工作区 A",
-            loading: false,
-            items: [{ id: "prompt:1", type: "prompts", label: "Prompt", name: "Claude Prompt" }],
-          },
+            items: [makeWorkspaceItem(1, "prompts", "Prompt", "Claude Prompt")],
+          }),
         ]}
         providerLimitRows={[]}
         providerLimitLoading={false}
@@ -634,14 +674,13 @@ describe("components/home/HomeOverviewPanel", () => {
 
     renderPanel({
       workspaceConfigs: [
-        {
+        makeWorkspaceConfig({
           cliKey: "claude",
           cliLabel: "Claude",
           workspaceId: 1,
           workspaceName: "工作区 A",
-          loading: false,
-          items: [{ id: "prompt:1", type: "prompts", label: "Prompt", name: "Claude Prompt" }],
-        },
+          items: [makeWorkspaceItem(1, "prompts", "Prompt", "Claude Prompt")],
+        }),
       ],
     });
 
@@ -679,30 +718,27 @@ describe("components/home/HomeOverviewPanel", () => {
             activeSessionsLoading={false}
             activeSessionsAvailable={true}
             workspaceConfigs={[
-              {
+              makeWorkspaceConfig({
                 cliKey: "claude",
                 cliLabel: "Claude",
                 workspaceId: 1,
                 workspaceName: "默认",
-                loading: false,
                 items: [],
-              },
-              {
+              }),
+              makeWorkspaceConfig({
                 cliKey: "codex",
                 cliLabel: "Codex",
                 workspaceId: 2,
                 workspaceName: "Default",
-                loading: false,
                 items: [],
-              },
-              {
+              }),
+              makeWorkspaceConfig({
                 cliKey: "gemini",
                 cliLabel: "Gemini",
                 workspaceId: 3,
                 workspaceName: "工作区 2",
-                loading: false,
                 items: [],
-              },
+              }),
             ]}
             providerLimitRows={[]}
             providerLimitLoading={false}
@@ -922,14 +958,13 @@ describe("components/home/HomeOverviewPanel", () => {
         },
       ],
       workspaceConfigs: [
-        {
+        makeWorkspaceConfig({
           cliKey: "claude",
           cliLabel: "Claude",
           workspaceId: 1,
           workspaceName: "工作区 A",
-          loading: false,
-          items: [{ id: "prompt:1", type: "prompts", label: "Prompt", name: "Claude Prompt" }],
-        },
+          items: [makeWorkspaceItem(1, "prompts", "Prompt", "Claude Prompt")],
+        }),
       ],
     });
 
@@ -955,14 +990,13 @@ describe("components/home/HomeOverviewPanel", () => {
         activeSessionsLoading={false}
         activeSessionsAvailable={true}
         workspaceConfigs={[
-          {
+          makeWorkspaceConfig({
             cliKey: "claude",
             cliLabel: "Claude",
             workspaceId: 1,
             workspaceName: "工作区 A",
-            loading: false,
-            items: [{ id: "prompt:1", type: "prompts", label: "Prompt", name: "Claude Prompt" }],
-          },
+            items: [makeWorkspaceItem(1, "prompts", "Prompt", "Claude Prompt")],
+          }),
         ]}
         providerLimitRows={[]}
         providerLimitLoading={false}

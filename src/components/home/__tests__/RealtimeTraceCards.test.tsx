@@ -215,9 +215,12 @@ describe("components/home/RealtimeTraceCards", () => {
       expect(card).not.toBeNull();
       return card as HTMLElement;
     });
-    expect(liveMetricCards[0].parentElement).toHaveClass("grid-cols-1", "sm:grid-cols-9");
+    expect(liveMetricCards[0].parentElement).toHaveClass("grid-cols-1", "sm:grid-cols-12");
+    expect(liveMetricCards[0]).toHaveClass("sm:col-span-3");
+    expect(liveMetricCards[1]).toHaveClass("sm:col-span-2");
+    expect(liveMetricCards[2]).toHaveClass("sm:col-span-7");
     for (const card of liveMetricCards) {
-      expect(card).toHaveClass("sm:col-span-3", "rounded-lg", "px-2.5", "py-1.5");
+      expect(card).toHaveClass("rounded-lg", "px-2.5", "py-1.5");
     }
     expect(screen.getByText("workspace-alpha")).toBeInTheDocument();
     expect(screen.getAllByText("未知").length).toBeGreaterThan(0); // model/provider fallback

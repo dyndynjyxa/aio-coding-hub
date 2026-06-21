@@ -122,14 +122,14 @@ describe("pages/home/hooks/useHomeWorkspaceConfigs", () => {
           2,
           {
             data: [
-              { id: 2, name: "Z Prompt" },
-              { id: 1, name: "A Prompt" },
+              { id: 2, name: "Z Prompt", enabled: true },
+              { id: 1, name: "A Prompt", enabled: false },
             ],
             isLoading: true,
           },
         ],
         [9, { data: null, isLoading: false }],
-        [77, { data: [{ id: 7, name: "Gemini Prompt" }], isLoading: false }],
+        [77, { data: [{ id: 7, name: "Gemini Prompt", enabled: true }], isLoading: false }],
       ],
       mcp: [
         [
@@ -171,14 +171,52 @@ describe("pages/home/hooks/useHomeWorkspaceConfigs", () => {
         cliLabel: "Claude",
         workspaceId: 2,
         workspaceName: "Claude Workspace",
+        workspaces: [
+          { id: 1, name: "Other Workspace", isActive: false },
+          { id: 2, name: "Claude Workspace", isActive: true },
+        ],
         loading: true,
         items: [
-          { id: "prompt:1", type: "prompts", label: "Prompt", name: "A Prompt" },
-          { id: "prompt:2", type: "prompts", label: "Prompt", name: "Z Prompt" },
-          { id: "mcp:12", type: "mcp", label: "MCP", name: "A MCP" },
-          { id: "mcp:11", type: "mcp", label: "MCP", name: "B MCP" },
-          { id: "skill:22", type: "skills", label: "Skill", name: "A Skill" },
-          { id: "skill:21", type: "skills", label: "Skill", name: "B Skill" },
+          {
+            id: "prompt:2",
+            resourceId: 2,
+            type: "prompts",
+            label: "Prompt",
+            name: "Z Prompt",
+            enabled: true,
+          },
+          {
+            id: "skill:22",
+            resourceId: 22,
+            type: "skills",
+            label: "Skill",
+            name: "A Skill",
+            enabled: true,
+          },
+          {
+            id: "skill:21",
+            resourceId: 21,
+            type: "skills",
+            label: "Skill",
+            name: "B Skill",
+            enabled: true,
+          },
+          {
+            id: "mcp:12",
+            resourceId: 12,
+            type: "mcp",
+            label: "MCP",
+            name: "A MCP",
+            enabled: true,
+          },
+          {
+            id: "mcp:11",
+            resourceId: 11,
+            type: "mcp",
+            label: "MCP",
+            name: "B MCP",
+            enabled: true,
+          },
         ],
       },
       {
@@ -186,6 +224,7 @@ describe("pages/home/hooks/useHomeWorkspaceConfigs", () => {
         cliLabel: "Codex",
         workspaceId: 9,
         workspaceName: "Codex Workspace",
+        workspaces: [{ id: 9, name: "Codex Workspace", isActive: true }],
         loading: false,
         items: [],
       },
@@ -194,12 +233,124 @@ describe("pages/home/hooks/useHomeWorkspaceConfigs", () => {
         cliLabel: "Gemini",
         workspaceId: 77,
         workspaceName: null,
+        workspaces: [],
         loading: false,
         items: [
-          { id: "prompt:7", type: "prompts", label: "Prompt", name: "Gemini Prompt" },
-          { id: "skill:71", type: "skills", label: "Skill", name: "Gemini Skill" },
+          {
+            id: "prompt:7",
+            resourceId: 7,
+            type: "prompts",
+            label: "Prompt",
+            name: "Gemini Prompt",
+            enabled: true,
+          },
+          {
+            id: "skill:71",
+            resourceId: 71,
+            type: "skills",
+            label: "Skill",
+            name: "Gemini Skill",
+            enabled: true,
+          },
         ],
       },
+    ]);
+  });
+
+  it("includes disabled rows when showAllItems is true", () => {
+    setQueryState({
+      workspaces: {
+        claude: {
+          data: {
+            active_id: 2,
+            items: [{ id: 2, name: "Claude Workspace" }],
+          },
+          isLoading: false,
+        },
+        codex: {
+          data: { active_id: null, items: [] },
+          isLoading: false,
+        },
+        gemini: {
+          data: { active_id: null, items: [] },
+          isLoading: false,
+        },
+      },
+      prompts: [
+        [
+          2,
+          {
+            data: [
+              { id: 2, name: "Z Prompt", enabled: true },
+              { id: 1, name: "A Prompt", enabled: false },
+            ],
+            isLoading: false,
+          },
+        ],
+      ],
+      mcp: [
+        [
+          2,
+          {
+            data: [
+              { id: 11, name: "B MCP", enabled: true },
+              { id: 12, name: "A MCP", enabled: false },
+            ],
+            isLoading: false,
+          },
+        ],
+      ],
+      skills: [
+        [
+          2,
+          {
+            data: [
+              { id: 21, name: "B Skill", enabled: true },
+              { id: 22, name: "A Skill", enabled: false },
+            ],
+            isLoading: false,
+          },
+        ],
+      ],
+    });
+
+    const { result } = renderHook(() => useHomeWorkspaceConfigs({ showAllItems: true }));
+
+    expect(result.current[0].items).toEqual([
+      {
+        id: "prompt:1",
+        resourceId: 1,
+        type: "prompts",
+        label: "Prompt",
+        name: "A Prompt",
+        enabled: false,
+      },
+      {
+        id: "prompt:2",
+        resourceId: 2,
+        type: "prompts",
+        label: "Prompt",
+        name: "Z Prompt",
+        enabled: true,
+      },
+      {
+        id: "skill:22",
+        resourceId: 22,
+        type: "skills",
+        label: "Skill",
+        name: "A Skill",
+        enabled: false,
+      },
+      {
+        id: "skill:21",
+        resourceId: 21,
+        type: "skills",
+        label: "Skill",
+        name: "B Skill",
+        enabled: true,
+      },
+      { id: "mcp:12", resourceId: 12, type: "mcp", label: "MCP", name: "A MCP", enabled: false },
+      { id: "mcp:11", resourceId: 11, type: "mcp", label: "MCP", name: "B MCP", enabled: true },
     ]);
   });
 
@@ -221,7 +372,7 @@ describe("pages/home/hooks/useHomeWorkspaceConfigs", () => {
       },
       prompts: [
         [null, { data: null, isLoading: true }],
-        [3, { data: [{ id: 30, name: "Codex Prompt" }], isLoading: true }],
+        [3, { data: [{ id: 30, name: "Codex Prompt", enabled: true }], isLoading: true }],
       ],
       mcp: [
         [null, { data: null, isLoading: true }],
@@ -245,9 +396,30 @@ describe("pages/home/hooks/useHomeWorkspaceConfigs", () => {
       workspaceId: 3,
       workspaceName: "Codex WS",
       items: [
-        { id: "prompt:30", type: "prompts", label: "Prompt", name: "Codex Prompt" },
-        { id: "mcp:31", type: "mcp", label: "MCP", name: "Codex MCP" },
-        { id: "skill:32", type: "skills", label: "Skill", name: "Codex Skill" },
+        {
+          id: "prompt:30",
+          resourceId: 30,
+          type: "prompts",
+          label: "Prompt",
+          name: "Codex Prompt",
+          enabled: true,
+        },
+        {
+          id: "skill:32",
+          resourceId: 32,
+          type: "skills",
+          label: "Skill",
+          name: "Codex Skill",
+          enabled: true,
+        },
+        {
+          id: "mcp:31",
+          resourceId: 31,
+          type: "mcp",
+          label: "MCP",
+          name: "Codex MCP",
+          enabled: true,
+        },
       ],
     });
 

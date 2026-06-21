@@ -312,7 +312,7 @@ export function Sidebar({ className }: SidebarProps) {
                           "flex flex-col items-center justify-between rounded-lg p-1.5 border transition-all duration-200",
                           isEnabled
                             ? "bg-emerald-500/5 border-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                            : "bg-sidebar-control-muted/30 border-sidebar-control-border/40 text-sidebar-foreground/70"
+                            : "bg-sidebar-control-muted/30 border-slate-300/20 text-sidebar-foreground/70 dark:border-slate-500/15"
                         )}
                       >
                         <span className="text-[10px] font-bold tracking-tight truncate max-w-full">
@@ -349,6 +349,7 @@ export function Sidebar({ className }: SidebarProps) {
                               cliProxyState.requestCliProxyEnabledSwitch(cliKey, next)
                             }
                             size="sm"
+                            className="border-0"
                             aria-label={`${SIDEBAR_CLI_LABELS[cliKey]} 代理开关`}
                           />
                         </div>
@@ -359,7 +360,7 @@ export function Sidebar({ className }: SidebarProps) {
               )}
 
               {/* Row 5: Seamless Integrated Theme Switcher */}
-              <div className="flex items-center justify-between gap-2 px-1 py-0.5 border-t border-sidebar-control-border/60 pt-2.5 mt-1">
+              <div className="flex items-center justify-between gap-2 px-1 py-0.5 pt-2.5 mt-1">
                 <div className="flex items-center gap-2 min-w-0">
                   {(() => {
                     const ActiveIcon = theme === "light" ? Sun : theme === "dark" ? Moon : Monitor;

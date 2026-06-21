@@ -9,7 +9,7 @@ import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { mergeSettingsState, resetMswState } from "../../test/msw/state";
 import { HomePage } from "../HomePage";
 import { logToConsole } from "../../services/consoleLog";
-import { gatewayKeys } from "../../query/keys";
+import { gatewayKeys, mcpKeys, promptsKeys, skillsKeys, workspacesKeys } from "../../query/keys";
 import {
   useGatewayCircuitResetProviderMutation,
   useGatewayCircuitStatusQuery,
@@ -29,6 +29,7 @@ import {
 import { useUsageHourlySeriesQuery } from "../../query/usage";
 import { useProviderLimitUsageV1Query } from "../../query/providerLimitUsage";
 import { useHomeWorkspaceConfigs } from "../home/hooks/useHomeWorkspaceConfigs";
+import { useWorkspaceApplyMutation } from "../../query/workspaces";
 import { emitBackgroundTaskVisibilityTrigger } from "../../services/backgroundTasks";
 import { backgroundTaskVisibilityTriggers } from "../../constants/backgroundTaskContracts";
 import { writeHomeOverviewLogsPrimaryLayoutToStorage } from "../../services/home/homeOverviewLayout";
@@ -58,6 +59,9 @@ vi.mock("../../components/home/HomeOverviewPanel", () => ({
       showHomeHeatmap,
       showHomeUsage,
       personalizedUsageView,
+      showWorkspaceConfigQuickToggle,
+      switchingWorkspaceKey,
+      onSwitchWorkspace,
       openCircuits,
       onResetCircuitProvider,
     } = props;
@@ -69,7 +73,15 @@ vi.mock("../../components/home/HomeOverviewPanel", () => ({
         <div>show-heatmap:{String(showHomeHeatmap)}</div>
         <div>show-usage:{String(showHomeUsage)}</div>
         <div>personalized-usage-view:{String(personalizedUsageView)}</div>
+        <div>workspace-config-quick-toggle:{String(showWorkspaceConfigQuickToggle)}</div>
+        <div>switching-workspace-key:{String(switchingWorkspaceKey)}</div>
         <div>open-circuits:{openCircuits.length}</div>
+        <button type="button" onClick={() => onSwitchWorkspace?.("claude", 4)}>
+          switch-workspace-claude-4
+        </button>
+        <button type="button" onClick={() => onSwitchWorkspace?.("claude", 1)}>
+          switch-workspace-current
+        </button>
         <button type="button" onClick={() => onResetCircuitProvider(1)}>
           reset-1
         </button>
@@ -141,6 +153,15 @@ vi.mock("../../services/gateway/traceStore", () => ({ useTraceStore: () => ({ tr
 vi.mock("../home/hooks/useHomeWorkspaceConfigs", () => ({
   useHomeWorkspaceConfigs: vi.fn(),
 }));
+
+vi.mock("../../query/workspaces", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../query/workspaces")>("../../query/workspaces");
+  return {
+    ...actual,
+    useWorkspaceApplyMutation: vi.fn(),
+  };
+});
 
 vi.mock("../../query/gateway", async () => {
   const actual = await vi.importActual<typeof import("../../query/gateway")>("../../query/gateway");
@@ -223,6 +244,7 @@ function mockHomePageBaseQueries() {
   vi.mocked(useSortModesListQuery).mockReturnValue({ data: [], isLoading: false } as any);
   vi.mocked(useSortModeActiveListQuery).mockReturnValue({ data: [], isLoading: false } as any);
   vi.mocked(useSortModeActiveSetMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+  vi.mocked(useWorkspaceApplyMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
 
   vi.mocked(useRequestLogDetailQuery).mockReturnValue({ data: null, isFetching: false } as any);
   vi.mocked(useRequestAttemptLogsByTraceIdQuery).mockReturnValue({
@@ -243,6 +265,7 @@ function mockHomePageBaseQueries() {
       cliLabel: "Claude Code",
       workspaceId: 1,
       workspaceName: "默认",
+      workspaces: [{ id: 1, name: "默认", isActive: true }],
       loading: false,
       items: [],
     },
@@ -251,6 +274,7 @@ function mockHomePageBaseQueries() {
       cliLabel: "Codex",
       workspaceId: 2,
       workspaceName: "Default",
+      workspaces: [{ id: 2, name: "Default", isActive: true }],
       loading: false,
       items: [],
     },
@@ -259,6 +283,7 @@ function mockHomePageBaseQueries() {
       cliLabel: "Gemini",
       workspaceId: 3,
       workspaceName: "工作区 2",
+      workspaces: [{ id: 3, name: "工作区 2", isActive: true }],
       loading: false,
       items: [],
     },
@@ -270,6 +295,7 @@ describe("pages/HomePage", () => {
     homeOverviewPanelMock.latestProps = null;
     localStorage.removeItem("devPreview.enabled");
     localStorage.removeItem("aio-home-overview-logs-primary-layout");
+    localStorage.removeItem("aio-home-workspace-config-show-all");
     resetMswState();
     vi.mocked(useProviderLimitUsageV1Query).mockReturnValue({
       data: null,
@@ -283,6 +309,7 @@ describe("pages/HomePage", () => {
         cliLabel: "Claude Code",
         workspaceId: 1,
         workspaceName: "默认",
+        workspaces: [{ id: 1, name: "默认", isActive: true }],
         loading: false,
         items: [],
       },
@@ -291,6 +318,7 @@ describe("pages/HomePage", () => {
         cliLabel: "Codex",
         workspaceId: 2,
         workspaceName: "Default",
+        workspaces: [{ id: 2, name: "Default", isActive: true }],
         loading: false,
         items: [],
       },
@@ -299,6 +327,7 @@ describe("pages/HomePage", () => {
         cliLabel: "Gemini",
         workspaceId: 3,
         workspaceName: "工作区 2",
+        workspaces: [{ id: 3, name: "工作区 2", isActive: true }],
         loading: false,
         items: [],
       },
@@ -582,6 +611,30 @@ describe("pages/HomePage", () => {
       15,
       expect.objectContaining({ enabled: false })
     );
+  });
+
+  it("passes workspace config display preference into overview data and panel", () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    mockHomePageBaseQueries();
+
+    renderWithProviders(client, <HomePage />);
+
+    expect(vi.mocked(useHomeWorkspaceConfigs)).toHaveBeenLastCalledWith(
+      expect.objectContaining({ showAllItems: false })
+    );
+    expect(screen.getByText("workspace-config-quick-toggle:false")).toBeInTheDocument();
+
+    vi.mocked(useHomeWorkspaceConfigs).mockClear();
+    window.localStorage.setItem("aio-home-workspace-config-show-all", "true");
+
+    renderWithProviders(client, <HomePage />);
+
+    expect(vi.mocked(useHomeWorkspaceConfigs)).toHaveBeenLastCalledWith(
+      expect.objectContaining({ showAllItems: true })
+    );
+    expect(screen.getByText("workspace-config-quick-toggle:true")).toBeInTheDocument();
   });
 
   it("places the personalized usage toggle in the page header and enables the chart query after switching", async () => {
@@ -951,5 +1004,60 @@ describe("pages/HomePage", () => {
       "切换排序模板失败",
       expect.objectContaining({ cli: "codex", mode_id: 1 })
     );
+  });
+
+  it("switches the home workspace config directly and refreshes related queries", async () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
+    mockHomePageBaseQueries();
+
+    const applyMutation = {
+      mutateAsync: vi.fn().mockResolvedValue({ cli_key: "claude", to_workspace_id: 4 }),
+      isPending: false,
+    };
+    vi.mocked(useWorkspaceApplyMutation).mockReturnValue(applyMutation as any);
+
+    renderWithProviders(client, <HomePage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "switch-workspace-current" }));
+    expect(applyMutation.mutateAsync).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "switch-workspace-claude-4" }));
+
+    await waitFor(() =>
+      expect(applyMutation.mutateAsync).toHaveBeenCalledWith({ cliKey: "claude", workspaceId: 4 })
+    );
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("已切换为当前工作区"));
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: workspacesKeys.list("claude") });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: promptsKeys.summary(4) });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: promptsKeys.list(4) });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: mcpKeys.serversList(4) });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: skillsKeys.installedList(4) });
+  });
+
+  it("logs and toasts when the home workspace config switch fails", async () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    mockHomePageBaseQueries();
+
+    const applyMutation = {
+      mutateAsync: vi.fn().mockRejectedValue(new Error("apply boom")),
+      isPending: false,
+    };
+    vi.mocked(useWorkspaceApplyMutation).mockReturnValue(applyMutation as any);
+
+    renderWithProviders(client, <HomePage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "switch-workspace-claude-4" }));
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("切换失败：Error: apply boom"));
+    expect(logToConsole).toHaveBeenCalledWith("error", "首页切换工作区失败", {
+      cliKey: "claude",
+      workspaceId: 4,
+      error: "Error: apply boom",
+    });
   });
 });

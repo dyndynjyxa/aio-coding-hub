@@ -8,6 +8,10 @@ import {
   readHomeOverviewLogsPrimaryLayoutFromStorage,
   writeHomeOverviewLogsPrimaryLayoutToStorage,
 } from "../../services/home/homeOverviewLayout";
+import {
+  readHomeWorkspaceConfigShowAllFromStorage,
+  writeHomeWorkspaceConfigShowAllToStorage,
+} from "../../services/home/homeWorkspaceConfigDisplay";
 import type { HomeUsagePeriod } from "../../services/settings/settings";
 import { useGatewayStartMutation, useGatewayStopMutation } from "../../query/gateway";
 import { Button } from "../../ui/Button";
@@ -136,6 +140,9 @@ export function SettingsMainColumn({
   const gatewayStopMutation = useGatewayStopMutation();
   const [homeOverviewLogsPrimaryLayout, setHomeOverviewLogsPrimaryLayout] = useState(() =>
     readHomeOverviewLogsPrimaryLayoutFromStorage()
+  );
+  const [homeWorkspaceConfigShowAll, setHomeWorkspaceConfigShowAll] = useState(() =>
+    readHomeWorkspaceConfigShowAllFromStorage()
   );
   const settingsInputsDisabled = !settingsReady || settingsWriteBlocked || settingsSaving;
   const gatewayRestartDisabled =
@@ -524,6 +531,18 @@ export function SettingsMainColumn({
                   onCheckedChange={(next) => {
                     setHomeOverviewLogsPrimaryLayout(next);
                     writeHomeOverviewLogsPrimaryLayoutToStorage(next);
+                  }}
+                />
+              </SettingsRow>
+              <SettingsRow
+                label="配置信息显示全部"
+                subtitle="关闭后只显示已启用配置；开启后显示全部并提供快捷开关"
+              >
+                <Switch
+                  checked={homeWorkspaceConfigShowAll}
+                  onCheckedChange={(next) => {
+                    setHomeWorkspaceConfigShowAll(next);
+                    writeHomeWorkspaceConfigShowAllToStorage(next);
                   }}
                 />
               </SettingsRow>

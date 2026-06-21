@@ -297,10 +297,10 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(headerTexts).toEqual([
       "供应商（前 3 个）",
       "总Token",
-      "缓存命中率",
       "输入+输出Token",
-      "总花费",
+      "缓存命中率",
       "成功率",
+      "总花费",
     ]);
     expect(totalTokenHeader).toBeTruthy();
     expect(cacheHitRateHeader).toBeTruthy();
@@ -323,10 +323,10 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(rowCellTexts(geminiRow as HTMLElement)).toEqual([
       "Gemini Mirror",
       "10.2K",
-      "20.9%",
       "8.0K",
-      "$0.90",
+      "20.9%",
       "85.7%",
+      "$0.90",
     ]);
     expect(within(geminiRow as HTMLElement).getByText("$0.90")).toBeInTheDocument();
     expect(within(geminiRow as HTMLElement).getByText("85.7%")).toBeInTheDocument();
@@ -334,18 +334,18 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(rowCellTexts(claudeRow as HTMLElement)).toEqual([
       "Claude Main",
       "6.2K",
-      "16.7%",
       "5.0K",
-      "$0.50",
+      "16.7%",
       "100.0%",
+      "$0.50",
     ]);
     expect(rowCellTexts(openaiRow as HTMLElement)).toEqual([
       "OpenAI Primary",
       "5.8K",
-      "31.6%",
       "4.0K",
-      "$0.70",
+      "31.6%",
       "100.0%",
+      "$0.70",
     ]);
   });
 
@@ -422,10 +422,10 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(rowCellTexts(deepseekRow as HTMLElement)).toEqual([
       "DeepSeek Relay",
       "3.5K",
-      "27.6%",
       "2.0K",
-      "—",
+      "27.6%",
       "100.0%",
+      "—",
     ]);
   });
 
@@ -680,10 +680,10 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(rowCellTexts(providerRow as HTMLElement)).toEqual([
       "claude/Runtime Fresh",
       "9.2K",
-      "1.9%",
       "8.0K",
-      "$0.10",
+      "1.9%",
       "100.0%",
+      "$0.10",
     ]);
   });
 
@@ -714,8 +714,8 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(rowCellTexts(providerRow as HTMLElement)).toEqual([
       "Zero Request Relay",
       "1.2K",
-      "—",
       "1.0K",
+      "—",
       "—",
       "—",
     ]);
