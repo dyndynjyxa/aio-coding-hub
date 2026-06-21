@@ -97,6 +97,81 @@ INSERT INTO providers(
 }
 
 #[test]
+fn ensure_patches_do_not_repopulate_default_route_members() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+    apply_migrations(&mut conn).expect("apply migrations");
+
+    for (id, name, sort_order) in [
+        (1_i64, "p1", 0_i64),
+        (2_i64, "p2", 1_i64),
+        (3_i64, "p3", 2_i64),
+    ] {
+        conn.execute(
+            r#"
+INSERT INTO providers(
+  id,
+  cli_key,
+  name,
+  base_url,
+  api_key_plaintext,
+  enabled,
+  created_at,
+  updated_at,
+  sort_order
+) VALUES (?1, 'claude', ?2, 'https://example.com', 'sk', 1, 1, 1, ?3)
+"#,
+            rusqlite::params![id, name, sort_order],
+        )
+        .expect("insert provider");
+    }
+
+    for (provider_id, sort_order) in [(1_i64, 0_i64), (2_i64, 1_i64), (3_i64, 2_i64)] {
+        conn.execute(
+            r#"
+INSERT INTO default_route_providers(
+  cli_key,
+  provider_id,
+  sort_order,
+  created_at,
+  updated_at
+) VALUES ('claude', ?1, ?2, 1, 1)
+"#,
+            rusqlite::params![provider_id, sort_order],
+        )
+        .expect("insert default route provider");
+    }
+    conn.execute(
+        "DELETE FROM default_route_providers WHERE cli_key = 'claude' AND provider_id = 2",
+        [],
+    )
+    .expect("simulate removing provider from default route");
+
+    ensure::apply_ensure_patches(&mut conn).expect("apply ensure patches");
+
+    let default_ids: Vec<i64> = {
+        let mut stmt = conn
+            .prepare("SELECT provider_id FROM default_route_providers ORDER BY sort_order ASC")
+            .expect("prepare default");
+        stmt.query_map([], |row| row.get(0))
+            .expect("query default")
+            .map(|row| row.expect("default row"))
+            .collect()
+    };
+    assert_eq!(default_ids, vec![1, 3]);
+
+    let pool_ids: Vec<i64> = {
+        let mut stmt = conn
+            .prepare("SELECT provider_id FROM provider_pool_order ORDER BY sort_order ASC")
+            .expect("prepare pool");
+        stmt.query_map([], |row| row.get(0))
+            .expect("query pool")
+            .map(|row| row.expect("pool row"))
+            .collect()
+    };
+    assert_eq!(pool_ids, vec![1, 2, 3]);
+}
+
+#[test]
 fn migrate_v25_to_v26_backfills_claude_models_json_from_legacy_mapping() {
     let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
 

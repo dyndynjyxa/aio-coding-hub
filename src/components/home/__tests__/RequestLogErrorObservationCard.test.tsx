@@ -106,4 +106,22 @@ describe("components/home/RequestLogErrorObservationCard", () => {
     expect(screen.getByText("原始错误信息")).toBeInTheDocument();
     expect(screen.getByText("raw error details")).toBeInTheDocument();
   });
+
+  it("renders a fallback title when only an upstream status is available", () => {
+    render(
+      <RequestLogErrorObservationCard
+        observation={{
+          ...baseObservation,
+          upstreamStatus: 502,
+        }}
+      />
+    );
+
+    expect(screen.getByText("HTTP 502 响应异常")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "详细信息" }));
+
+    expect(screen.getByText("上游状态码:")).toBeInTheDocument();
+    expect(screen.getByText("502")).toBeInTheDocument();
+  });
 });

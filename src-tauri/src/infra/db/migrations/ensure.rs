@@ -702,29 +702,6 @@ ORDER BY cli_key ASC, sort_order ASC, id DESC
     )
     .map_err(|e| format!("failed to ensure provider_pool_order rows: {e}"))?;
 
-    conn.execute(
-        r#"
-INSERT OR IGNORE INTO default_route_providers(
-  cli_key,
-  provider_id,
-  sort_order,
-  created_at,
-  updated_at
-)
-SELECT
-  cli_key,
-  id,
-  sort_order,
-  ?1,
-  ?1
-FROM providers
-WHERE enabled = 1
-ORDER BY cli_key ASC, sort_order ASC, id DESC
-"#,
-        [now],
-    )
-    .map_err(|e| format!("failed to ensure default_route_providers rows: {e}"))?;
-
     Ok(())
 }
 

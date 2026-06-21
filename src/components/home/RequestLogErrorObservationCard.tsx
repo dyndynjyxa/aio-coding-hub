@@ -18,6 +18,7 @@ export function RequestLogErrorObservationCard({
     : null;
   const desc = observation.gwDescription?.desc ?? null;
   const suggestion = observation.gwDescription?.suggestion ?? null;
+  const fallbackTitle = resolveFallbackTitle(observation);
 
   const detailFields = buildDetailFields(observation);
   const hasDetails =
@@ -46,6 +47,9 @@ export function RequestLogErrorObservationCard({
             {/* Reason text (if no desc available, show reason as primary text) */}
             {!desc && observation.reason ? (
               <p className="mt-1 text-sm text-secondary-foreground">{observation.reason}</p>
+            ) : null}
+            {!desc && !observation.reason && fallbackTitle ? (
+              <p className="text-sm font-medium text-foreground">{fallbackTitle}</p>
             ) : null}
           </div>
         </div>
@@ -105,6 +109,24 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 }
 
 type DetailField = { label: string; value: string };
+
+function resolveFallbackTitle(obs: RequestLogErrorObservation): string | null {
+  if (obs.upstreamStatus != null) {
+    return `HTTP ${obs.upstreamStatus} 响应异常`;
+  }
+  if (
+    obs.errorCategory ||
+    obs.decision ||
+    obs.selectionMethod ||
+    obs.reasonCode ||
+    obs.matchedRule ||
+    obs.outcome ||
+    obs.rawDetailsText
+  ) {
+    return "请求异常详情";
+  }
+  return null;
+}
 
 function buildDetailFields(obs: RequestLogErrorObservation): DetailField[] {
   const fields: DetailField[] = [];
