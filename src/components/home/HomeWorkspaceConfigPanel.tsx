@@ -123,7 +123,6 @@ export function HomeWorkspaceConfigPanel({
               workspaceOptions.map((workspace) => (
                 <option key={workspace.id} value={String(workspace.id)}>
                   {workspace.name.trim() || "默认"}
-                  {workspace.isActive ? "（当前）" : ""}
                 </option>
               ))
             )}

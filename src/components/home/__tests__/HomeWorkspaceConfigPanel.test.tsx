@@ -66,6 +66,8 @@ describe("components/home/HomeWorkspaceConfigPanel", () => {
 
     expect(screen.getByText("工作区：")).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Claude 工作区" })).toHaveValue("1");
+    expect(screen.getByRole("option", { name: "工作区 A" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "工作区 A（当前）" })).not.toBeInTheDocument();
     expect(screen.getByText("默认提示词")).toBeInTheDocument();
     expect(screen.getByText("filesystem")).toBeInTheDocument();
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
