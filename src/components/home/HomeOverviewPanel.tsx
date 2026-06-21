@@ -196,6 +196,7 @@ const PREVIEW_OAUTH_QUOTA_ROWS: HomeOAuthQuotaRow[] = [
       limit_weekly_text: "83%",
       limit_5h_reset_at: Math.floor(Date.now() / 1000) + 2 * 3600 + 34 * 60,
       limit_weekly_reset_at: Math.floor(Date.now() / 1000) + 3 * 86400 + 2 * 3600 + 29 * 60,
+      reset_credit_available_count: null,
     },
     error: null,
   },
@@ -211,6 +212,7 @@ const PREVIEW_OAUTH_QUOTA_ROWS: HomeOAuthQuotaRow[] = [
       limit_weekly_text: null,
       limit_5h_reset_at: null,
       limit_weekly_reset_at: null,
+      reset_credit_available_count: 2,
     },
     error: null,
   },
@@ -304,6 +306,7 @@ export type HomeOverviewPanelProps = {
   oauthQuotaHasRefreshed: boolean;
   onRefreshOAuthQuota: () => Promise<void>;
   onRefreshOAuthQuotaRow: (providerId: number) => Promise<void>;
+  onResetOAuthQuotaRow?: (providerId: number) => Promise<void>;
 
   openCircuits: OpenCircuitRow[];
   onResetCircuitProvider: (providerId: number) => void;
@@ -503,6 +506,7 @@ export function HomeOverviewPanel({
   oauthQuotaHasRefreshed,
   onRefreshOAuthQuota,
   onRefreshOAuthQuotaRow,
+  onResetOAuthQuotaRow,
   openCircuits,
   onResetCircuitProvider,
   resettingCircuitProviderIds,
@@ -703,6 +707,11 @@ export function HomeOverviewPanel({
         onRefreshRow={(providerId) => {
           if (oauthQuotaPreviewActive) return;
           void onRefreshOAuthQuotaRow(providerId);
+        }}
+        onResetRow={(providerId) => {
+          if (oauthQuotaPreviewActive) return;
+          if (!onResetOAuthQuotaRow) return;
+          return onResetOAuthQuotaRow(providerId);
         }}
       />
     </Suspense>
@@ -948,6 +957,7 @@ export function HomeOverviewPanel({
                   <HomeTodayProviderUsageOverview
                     devPreviewEnabled={devPreviewEnabled}
                     activeSessions={displayedActiveSessions}
+                    requestLogs={requestLogs}
                     traces={traces}
                   />
                 </div>

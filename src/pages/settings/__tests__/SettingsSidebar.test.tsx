@@ -331,7 +331,7 @@ describe("pages/settings/SettingsSidebar", () => {
     const clearMutation = { mutateAsync: vi.fn() };
     clearMutation.mutateAsync
       .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ request_logs_deleted: 1, request_attempt_logs_deleted: 2 })
+      .mockResolvedValueOnce({ request_logs_deleted: 1 })
       .mockRejectedValueOnce(new Error("clear boom"));
     vi.mocked(useRequestLogsClearAllMutation).mockReturnValue(clearMutation as any);
 
@@ -405,9 +405,7 @@ describe("pages/settings/SettingsSidebar", () => {
       await Promise.resolve();
     });
     expect(clearMutation.mutateAsync).toHaveBeenCalledTimes(2);
-    expect(toast).toHaveBeenCalledWith(
-      "已清理请求日志：request_logs 1 条；legacy request_attempt_logs 2 条"
-    );
+    expect(toast).toHaveBeenCalledWith("已清理请求日志：request_logs 1 条");
 
     fireEvent.click(screen.getByRole("button", { name: "confirm-clear-logs" }));
     await act(async () => {
@@ -577,7 +575,7 @@ describe("pages/settings/SettingsSidebar", () => {
     });
 
     await act(async () => {
-      resolveClear({ request_logs_deleted: 0, request_attempt_logs_deleted: 0 });
+      resolveClear({ request_logs_deleted: 0 });
       resolveReset(false);
       resolveSync(null);
       resolveImport(null);

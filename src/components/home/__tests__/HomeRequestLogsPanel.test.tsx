@@ -395,6 +395,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
     expect(screen.getAllByText("claude-3-opus")).toHaveLength(1);
     expect(screen.getByText("gpt-5")).toBeInTheDocument();
     expect(screen.getAllByText("进行中")).toHaveLength(2);
+    expect(screen.queryByText("当前没有最近使用记录")).not.toBeInTheDocument();
   });
 
   it("hides folder labels for unsupported cli keys and missing session ids", () => {
@@ -495,7 +496,10 @@ describe("components/home/HomeRequestLogsPanel", () => {
     expect(screen.queryByText("gemini-session-1")).not.toBeInTheDocument();
   });
 
-  it("shows status-null logs without active trace as abandoned, not in-progress", () => {
+  it("shows status-null logs without active trace as in-progress fallback rows", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-29T12:00:00.000Z"));
+
     useCliSessionsFolderLookupByIdsQueryMock.mockReturnValue({
       data: [
         {
@@ -538,7 +542,8 @@ describe("components/home/HomeRequestLogsPanel", () => {
         cache_creation_1h_input_tokens: null,
         cost_usd: null,
         cost_multiplier: 1,
-        created_at: Math.floor(Date.now() / 1000),
+        created_at_ms: Date.now() - 11 * 60 * 1000,
+        created_at: Math.floor((Date.now() - 11 * 60 * 1000) / 1000),
       },
     ]);
 
@@ -558,8 +563,8 @@ describe("components/home/HomeRequestLogsPanel", () => {
       </MemoryRouter>
     );
 
-    // Without a live trace, log appears as a regular card, not as a realtime card.
-    expect(screen.queryByText("进行中")).not.toBeInTheDocument();
+    // Without a live trace, log appears as a regular fallback card, not as a realtime card.
+    expect(screen.getByText("进行中")).toBeInTheDocument();
     expect(screen.queryByText("当前阶段")).not.toBeInTheDocument();
     // The log renders as a clickable card in the list.
     expect(screen.getByRole("button", { name: /claude-3-opus/ })).toBeInTheDocument();
@@ -681,20 +686,20 @@ describe("components/home/HomeRequestLogsPanel", () => {
     );
 
     // Without a live trace the status-null log is NOT promoted to realtime cards.
-    // It stays in the regular list as an abandoned entry.
+    // It stays in the regular list as an in-progress fallback row.
     expect(screen.getByText("pending-model")).toBeInTheDocument();
     expect(screen.queryByText("当前阶段")).not.toBeInTheDocument();
+    expect(screen.getByText("进行中")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /pending-model/ })).toBeInTheDocument();
     const completedNewerButton = screen.getByRole("button", { name: /done-newer-model/ });
     const pendingButton = screen.getByRole("button", { name: /pending-model/ });
     const completedOlderButton = screen.getByRole("button", { name: /done-older-model/ });
 
-    // Without a live trace, the orphaned log is no longer prioritised to the
-    // top — all three entries are sorted strictly by timestamp (newest first).
-    expect(completedNewerButton.compareDocumentPosition(pendingButton)).toBe(
+    // Pending rows stay above completed rows even when the live trace is missing.
+    expect(pendingButton.compareDocumentPosition(completedNewerButton)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING
     );
-    expect(pendingButton.compareDocumentPosition(completedOlderButton)).toBe(
+    expect(completedNewerButton.compareDocumentPosition(completedOlderButton)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING
     );
   });

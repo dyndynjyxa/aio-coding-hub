@@ -398,6 +398,7 @@ pub(super) async fn enqueue_request_log_with_backpressure_and_plugins<R: tauri::
 
 pub(super) async fn enqueue_request_log_placeholder<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
+    db: &db::Db,
     log_tx: &tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
     args: super::RequestLogEnqueueArgs,
 ) {
@@ -418,10 +419,11 @@ pub(super) async fn enqueue_request_log_placeholder<R: tauri::Runtime>(
                 "warn",
                 GatewayErrorCode::RequestLogChannelClosed.as_str(),
                 format!(
-                    "request log placeholder dropped; channel closed trace_id={} cli={}",
+                    "request log placeholder channel closed; using write-through fallback trace_id={} cli={}",
                     trace_id, cli_key
                 ),
             );
+            request_logs::spawn_write_through(app.clone(), db.clone(), insert);
         }
         Err(_) => match log_tx.try_send(insert) {
             Ok(()) => {
@@ -437,18 +439,31 @@ pub(super) async fn enqueue_request_log_placeholder<R: tauri::Runtime>(
                     ),
                 );
             }
-            Err(_) => {
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(insert)) => {
                 emit_gateway_log(
                     app,
                     "warn",
-                    GatewayErrorCode::RequestLogDropped.as_str(),
+                    GatewayErrorCode::RequestLogChannelClosed.as_str(),
                     format!(
-                        "request log placeholder dropped (queue full after {}ms) trace_id={} cli={}",
+                        "request log placeholder enqueue timed out and channel closed; using write-through fallback trace_id={} cli={}",
+                        trace_id, cli_key
+                    ),
+                );
+                request_logs::spawn_write_through(app.clone(), db.clone(), insert);
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Full(insert)) => {
+                emit_gateway_log(
+                    app,
+                    "warn",
+                    GatewayErrorCode::RequestLogWriteThroughOnBackpressure.as_str(),
+                    format!(
+                        "request log placeholder enqueue timed out and channel full after {}ms; using write-through fallback trace_id={} cli={}",
                         LOG_ENQUEUE_MAX_WAIT.as_millis(),
                         trace_id,
                         cli_key
                     ),
                 );
+                request_logs::spawn_write_through(app.clone(), db.clone(), insert);
             }
         },
     }
@@ -553,6 +568,47 @@ fn enqueue_request_log_when_spawn_saturated<R: tauri::Runtime>(
 mod tests {
     use super::*;
     use crate::usage::{UsageExtract, UsageMetrics};
+    use rusqlite::{params, OptionalExtension};
+    use tempfile::TempDir;
+
+    fn init_placeholder_test_db() -> (tauri::App<tauri::test::MockRuntime>, db::Db, TempDir) {
+        let app = tauri::test::mock_app();
+        let dir = TempDir::new().expect("temp dir");
+        let db_path = dir.path().join("request-log-placeholder.sqlite");
+        let db = db::init_for_tests(&db_path).expect("init db");
+        (app, db, dir)
+    }
+
+    fn fetch_placeholder_lifecycle_row(
+        db: &db::Db,
+        trace_id: &str,
+    ) -> Option<(Option<i64>, Option<String>, i64)> {
+        let conn = db.open_connection().expect("open connection");
+        conn.query_row(
+            r#"
+SELECT status, error_code, excluded_from_stats
+FROM request_logs
+WHERE trace_id = ?1
+"#,
+            params![trace_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .expect("query placeholder row")
+    }
+
+    async fn wait_for_placeholder_lifecycle_row(
+        db: &db::Db,
+        trace_id: &str,
+    ) -> Option<(Option<i64>, Option<String>, i64)> {
+        for _ in 0..50 {
+            if let Some(row) = fetch_placeholder_lifecycle_row(db, trace_id) {
+                return Some(row);
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        None
+    }
 
     #[test]
     fn request_log_enqueue_task_permit_returns_none_when_full() {
@@ -712,6 +768,56 @@ mod tests {
         assert_eq!(insert.error_code, None);
         assert_eq!(insert.duration_ms, 0);
         assert_eq!(insert.requested_model.as_deref(), Some("claude-sonnet"));
+    }
+
+    #[tokio::test]
+    async fn request_log_placeholder_uses_write_through_when_channel_closed() {
+        let (app, db, _dir) = init_placeholder_test_db();
+        let app_handle = app.handle().clone();
+        let (log_tx, log_rx) = tokio::sync::mpsc::channel(1);
+        drop(log_rx);
+
+        let mut args = base_args();
+        args.trace_id = "placeholder-closed".to_string();
+        args.status = None;
+        args.error_code = None;
+        args.duration_ms = 0;
+        args.created_at_ms = 1_770_000_000_000;
+        args.created_at = 1_770_000_000;
+
+        enqueue_request_log_placeholder(&app_handle, &db, &log_tx, args).await;
+
+        let row = wait_for_placeholder_lifecycle_row(&db, "placeholder-closed")
+            .await
+            .expect("placeholder should be written through");
+        assert_eq!(row, (None, None, 0));
+    }
+
+    #[tokio::test]
+    async fn request_log_placeholder_uses_write_through_when_channel_full() {
+        let (app, db, _dir) = init_placeholder_test_db();
+        let app_handle = app.handle().clone();
+        let (log_tx, _log_rx) = tokio::sync::mpsc::channel(1);
+
+        log_tx
+            .send(request_log_insert_from_args(base_args()).expect("queued insert"))
+            .await
+            .expect("fill log channel");
+
+        let mut args = base_args();
+        args.trace_id = "placeholder-full".to_string();
+        args.status = None;
+        args.error_code = None;
+        args.duration_ms = 0;
+        args.created_at_ms = 1_770_000_000_000;
+        args.created_at = 1_770_000_000;
+
+        enqueue_request_log_placeholder(&app_handle, &db, &log_tx, args).await;
+
+        let row = wait_for_placeholder_lifecycle_row(&db, "placeholder-full")
+            .await
+            .expect("placeholder should be written through");
+        assert_eq!(row, (None, None, 0));
     }
 
     #[test]

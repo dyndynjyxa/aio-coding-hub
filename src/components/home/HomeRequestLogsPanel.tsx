@@ -17,6 +17,11 @@ import {
   isPersistedRequestLogInProgress,
   requestLogCreatedAtMs,
 } from "../../services/gateway/requestLogState";
+import {
+  buildRequestActivityProjection,
+  type ProjectedRealtimeCard,
+  type ProjectedRequestLogRow,
+} from "../../services/gateway/requestActivityProjection";
 import type { RequestLogSummary } from "../../services/gateway/requestLogs";
 import type { TraceSession } from "../../services/gateway/traceStore";
 import { Button } from "../../ui/Button";
@@ -46,7 +51,6 @@ import {
   FolderBadge,
   FreeBadge,
   getErrorCodeLabel,
-  hasClaudeModelMappingSpecialSetting,
   hasPriorityServiceTierSpecialSetting,
   resolveClaudeModelMappingFromSpecialSettings,
   resolveLiveTraceDurationMs,
@@ -90,87 +94,6 @@ function sessionFolderLookupKey(cliKey: string, sessionId: string | null | undef
   return `${cliKey}:${normalized}`;
 }
 
-function makeSortRequestLogsForDisplay(liveTraceIds: ReadonlySet<string>) {
-  return (a: RequestLogSummary, b: RequestLogSummary) => {
-    // Only treat a log as in-progress when the trace store still tracks it.
-    const aInProgress = isPersistedRequestLogInProgress(a) && liveTraceIds.has(a.trace_id);
-    const bInProgress = isPersistedRequestLogInProgress(b) && liveTraceIds.has(b.trace_id);
-    if (aInProgress !== bInProgress) return aInProgress ? -1 : 1;
-
-    const aTsMs = requestLogCreatedAtMs(a);
-    const bTsMs = requestLogCreatedAtMs(b);
-    if (aTsMs !== bTsMs) return bTsMs - aTsMs;
-    return b.id - a.id;
-  };
-}
-
-function mergeTraceWithRequestLog(
-  trace: TraceSession,
-  requestLog: RequestLogSummary | undefined
-): TraceSession {
-  if (!requestLog) return trace;
-
-  const summary = trace.summary;
-  // Intentionally checks only DB status here — the trace already exists, so
-  // we just need to know whether the request log is still pending to decide
-  // which fields to backfill from the persisted record.
-  const requestLogInProgress = isPersistedRequestLogInProgress(requestLog);
-  if (!summary && requestLogInProgress) {
-    const claudeModelMapping = resolveClaudeModelMappingFromSpecialSettings(
-      requestLog.special_settings_json,
-      requestLog.final_provider_id
-    );
-    return {
-      ...trace,
-      session_id: trace.session_id ?? requestLog.session_id ?? null,
-      requested_model: trace.requested_model ?? requestLog.requested_model ?? null,
-      claude_model_mapping: trace.claude_model_mapping ?? claudeModelMapping,
-      last_seen_ms: Math.max(trace.last_seen_ms, requestLogCreatedAtMs(requestLog)),
-    };
-  }
-
-  const mergedSummary = {
-    trace_id: trace.trace_id,
-    cli_key: trace.cli_key,
-    method: trace.method,
-    path: trace.path,
-    query: trace.query,
-    status: summary?.status ?? requestLog.status ?? null,
-    error_category: summary?.error_category ?? null,
-    error_code: summary?.error_code ?? requestLog.error_code ?? null,
-    duration_ms: summary?.duration_ms ?? requestLog.duration_ms ?? 0,
-    ttfb_ms: summary?.ttfb_ms ?? requestLog.ttfb_ms ?? null,
-    attempts: summary?.attempts ?? [],
-    input_tokens: summary?.input_tokens ?? requestLog.input_tokens ?? null,
-    output_tokens: summary?.output_tokens ?? requestLog.output_tokens ?? null,
-    total_tokens: summary?.total_tokens ?? requestLog.total_tokens ?? null,
-    cache_read_input_tokens:
-      summary?.cache_read_input_tokens ?? requestLog.cache_read_input_tokens ?? null,
-    cache_creation_input_tokens:
-      summary?.cache_creation_input_tokens ?? requestLog.cache_creation_input_tokens ?? null,
-    cache_creation_5m_input_tokens:
-      summary?.cache_creation_5m_input_tokens ?? requestLog.cache_creation_5m_input_tokens ?? null,
-    cache_creation_1h_input_tokens:
-      summary?.cache_creation_1h_input_tokens ?? requestLog.cache_creation_1h_input_tokens ?? null,
-    cost_usd: summary?.cost_usd ?? requestLog.cost_usd ?? null,
-    cost_multiplier: summary?.cost_multiplier ?? requestLog.cost_multiplier ?? null,
-  };
-
-  return {
-    ...trace,
-    session_id: trace.session_id ?? requestLog.session_id ?? null,
-    requested_model: trace.requested_model ?? requestLog.requested_model ?? null,
-    claude_model_mapping: hasClaudeModelMappingSpecialSetting(requestLog.special_settings_json)
-      ? resolveClaudeModelMappingFromSpecialSettings(
-          requestLog.special_settings_json,
-          requestLog.final_provider_id
-        )
-      : (trace.claude_model_mapping ?? null),
-    summary: mergedSummary,
-    last_seen_ms: Math.max(trace.last_seen_ms, requestLogCreatedAtMs(requestLog)),
-  };
-}
-
 type RequestLogCardProps = {
   compactMode: boolean;
   log: RequestLogSummary;
@@ -195,14 +118,19 @@ const RequestLogCard = memo(function RequestLogCard({
   formatUnixSeconds,
 }: RequestLogCardProps) {
   const auditMeta = buildRequestLogAuditMeta(log);
-  // A log is only "in progress" if the trace store still has an active trace.
-  // Without a live trace the request is completed or orphaned.
-  const isInProgress = isPersistedRequestLogInProgress(log) && liveTrace != null;
+  const isInProgress = isPersistedRequestLogInProgress(log);
   const liveProvider = resolveLiveTraceProvider(liveTrace);
+  const persistedRunningMs = (() => {
+    const createdAtMs = requestLogCreatedAtMs(log);
+    if (createdAtMs <= 0) return log.duration_ms;
+    return Math.max(0, nowMs - createdAtMs);
+  })();
   const displayDurationMs =
     isInProgress && liveTrace
-      ? (resolveLiveTraceDurationMs(liveTrace, nowMs) ?? log.duration_ms)
-      : log.duration_ms;
+      ? (resolveLiveTraceDurationMs(liveTrace, nowMs) ?? persistedRunningMs)
+      : isInProgress
+        ? persistedRunningMs
+        : log.duration_ms;
   const statusBadge = computeStatusBadge({
     status: log.status,
     errorCode: log.error_code,
@@ -637,54 +565,33 @@ export function HomeRequestLogsPanel({
   );
   const displayedTraces = traces.length > 0 ? traces : previewTraces;
   const displayedRequestLogs = requestLogs.length > 0 ? requestLogs : previewRequestLogs;
-  const displayedTraceIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const t of displayedTraces) {
-      const id = t.trace_id?.trim();
-      if (id) ids.add(id);
-    }
-    return ids;
-  }, [displayedTraces]);
-  const sortedRequestLogs = useMemo(() => {
-    if (displayedRequestLogs.length <= 1) return displayedRequestLogs;
-    return displayedRequestLogs.slice().sort(makeSortRequestLogsForDisplay(displayedTraceIds));
-  }, [displayedRequestLogs, displayedTraceIds]);
+  const clockEnabled = useMemo(
+    () =>
+      displayedTraces.length > 0 ||
+      displayedRequestLogs.some((log) => isPersistedRequestLogInProgress(log)),
+    [displayedRequestLogs, displayedTraces.length]
+  );
+  const nowMs = useNowMs(clockEnabled, 250);
+  const activityProjection = useMemo(
+    () =>
+      buildRequestActivityProjection({
+        requestLogs: displayedRequestLogs,
+        traces: displayedTraces,
+        nowMs,
+        realtimeCardLimit: 5,
+        realtimeCandidateLimit: 20,
+      }),
+    [displayedRequestLogs, displayedTraces, nowMs]
+  );
   const summaryText =
     summaryTextOverride ??
     (requestLogsAvailable === false
       ? "数据不可用"
-      : sortedRequestLogs.length === 0 && requestLogsLoading
+      : activityProjection.summaryCount === 0 && requestLogsLoading
         ? "加载中…"
         : requestLogsLoading || requestLogsRefreshing
-          ? `更新中… · 共 ${sortedRequestLogs.length} 条`
-          : `共 ${sortedRequestLogs.length} 条`);
-  const realtimeTraceCandidates = useMemo(() => {
-    const logsByTraceId = new Map<string, RequestLogSummary>();
-    for (const log of sortedRequestLogs) {
-      const traceId = log.trace_id?.trim();
-      if (!traceId) continue;
-      if (!logsByTraceId.has(traceId)) {
-        logsByTraceId.set(traceId, log);
-      }
-    }
-
-    const mergedTraceMap = new Map<string, TraceSession>();
-    for (const trace of displayedTraces) {
-      const traceId = trace.trace_id?.trim();
-      if (!traceId || mergedTraceMap.has(traceId)) continue;
-      mergedTraceMap.set(traceId, mergeTraceWithRequestLog(trace, logsByTraceId.get(traceId)));
-    }
-    // NOTE: We intentionally do NOT create synthetic traces from in-progress
-    // logs that lack a real trace.  The trace store is the authority on whether
-    // a request is still alive.  Without a real trace the request is either
-    // completed or orphaned – synthesizing a fake trace would mask that.
-
-    const nowMs = Date.now();
-    return Array.from(mergedTraceMap.values())
-      .filter((t) => nowMs - t.first_seen_ms < 15 * 60 * 1000)
-      .sort((a, b) => b.first_seen_ms - a.first_seen_ms)
-      .slice(0, 20);
-  }, [displayedTraces, sortedRequestLogs]);
+          ? `更新中… · 共 ${activityProjection.summaryCount} 条`
+          : `共 ${activityProjection.summaryCount} 条`);
   const sessionFolderLookupItems = useMemo(() => {
     const seen = new Set<string>();
     const out: CliSessionsFolderLookupInput[] = [];
@@ -699,15 +606,15 @@ export function HomeRequestLogsPanel({
       out.push({ source: cliKey, session_id: normalized });
     };
 
-    for (const log of sortedRequestLogs) {
-      pushIfNeeded(log.cli_key, log.session_id);
+    for (const row of activityProjection.requestRows) {
+      pushIfNeeded(row.log.cli_key, row.log.session_id ?? row.liveTrace?.session_id);
     }
-    for (const trace of realtimeTraceCandidates) {
-      pushIfNeeded(trace.cli_key, trace.session_id);
+    for (const card of activityProjection.realtimeCards) {
+      pushIfNeeded(card.trace.cli_key, card.trace.session_id);
     }
 
     return out;
-  }, [realtimeTraceCandidates, sortedRequestLogs]);
+  }, [activityProjection]);
   const sessionFolderLookupQuery = useCliSessionsFolderLookupByIdsQuery(sessionFolderLookupItems);
   const sessionFolderLookupBySessionKey = useMemo(() => {
     const map = new Map<string, CliSessionsFolderLookupEntry>();
@@ -723,24 +630,6 @@ export function HomeRequestLogsPanel({
     }
     return map;
   }, [previewSessionFolderLookups, sessionFolderLookupQuery.data]);
-  const liveTracesByTraceId = useMemo(() => {
-    const map = new Map<string, TraceSession>();
-    for (const trace of realtimeTraceCandidates) {
-      const traceId = trace.trace_id?.trim();
-      if (!traceId || map.has(traceId)) continue;
-      map.set(traceId, trace);
-    }
-    return map;
-  }, [realtimeTraceCandidates]);
-  const hasLiveInProgressRequestLogs = useMemo(
-    () =>
-      sortedRequestLogs.some((log) => {
-        if (!isPersistedRequestLogInProgress(log)) return false;
-        return liveTracesByTraceId.has(log.trace_id);
-      }),
-    [liveTracesByTraceId, sortedRequestLogs]
-  );
-  const nowMs = useNowMs(hasLiveInProgressRequestLogs, 250);
 
   return (
     <Card padding="sm" className="flex flex-col gap-3 lg:col-span-7 h-full">
@@ -801,15 +690,14 @@ export function HomeRequestLogsPanel({
 
       <div className="overflow-hidden flex-1 min-h-0 flex flex-col">
         <RequestLogsList
-          realtimeTraceCandidates={realtimeTraceCandidates}
+          realtimeCards={activityProjection.realtimeCards}
           formatUnixSeconds={formatUnixSecondsStable}
           showCustomTooltip={showCustomTooltip}
           compactMode={effectiveCompactMode}
           folderLookupBySessionKey={sessionFolderLookupBySessionKey}
-          tracesByTraceId={liveTracesByTraceId}
           nowMs={nowMs}
           requestLogsAvailable={requestLogsAvailable}
-          requestLogs={sortedRequestLogs}
+          requestRows={activityProjection.requestRows}
           requestLogsLoading={requestLogsLoading}
           emptyStateTitle={emptyStateTitle}
           selectedLogId={selectedLogId}
@@ -822,15 +710,14 @@ export function HomeRequestLogsPanel({
 
 // Inner list component that conditionally applies virtualization
 type RequestLogsListProps = {
-  realtimeTraceCandidates: TraceSession[];
+  realtimeCards: ProjectedRealtimeCard[];
   formatUnixSeconds: (ts: number) => string;
   showCustomTooltip: boolean;
   compactMode: boolean;
   folderLookupBySessionKey: Map<string, CliSessionsFolderLookupEntry>;
-  tracesByTraceId: Map<string, TraceSession>;
   nowMs: number;
   requestLogsAvailable: boolean | null;
-  requestLogs: RequestLogSummary[];
+  requestRows: ProjectedRequestLogRow[];
   requestLogsLoading: boolean;
   emptyStateTitle: string;
   selectedLogId: number | null;
@@ -838,39 +725,25 @@ type RequestLogsListProps = {
 };
 
 const RequestLogsList = memo(function RequestLogsList({
-  realtimeTraceCandidates,
+  realtimeCards,
   formatUnixSeconds,
   showCustomTooltip,
   compactMode,
   folderLookupBySessionKey,
-  tracesByTraceId,
   nowMs,
   requestLogsAvailable,
-  requestLogs,
+  requestRows,
   requestLogsLoading,
   emptyStateTitle,
   selectedLogId,
   onSelectLogId,
 }: RequestLogsListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const renderedRequestLogs = useMemo(() => {
-    if (realtimeTraceCandidates.length === 0) return requestLogs;
-    const realtimeTraceIds = new Set(
-      realtimeTraceCandidates.map((trace) => trace.trace_id?.trim()).filter(Boolean)
-    );
-    return requestLogs.filter((log) => {
-      if (!isPersistedRequestLogInProgress(log)) return true;
-      const traceId = log.trace_id?.trim();
-      if (!traceId) return true;
-      // Orphaned logs (status=null, no live trace) fall through here because
-      // realtimeTraceIds won't contain their trace_id — they stay in the list.
-      return !realtimeTraceIds.has(traceId);
-    });
-  }, [realtimeTraceCandidates, requestLogs]);
-  const useVirtual = renderedRequestLogs.length >= VIRTUALIZATION_THRESHOLD;
+  const hasRealtimeCards = realtimeCards.length > 0;
+  const useVirtual = requestRows.length >= VIRTUALIZATION_THRESHOLD;
 
   const virtualizer = useVirtualizer({
-    count: renderedRequestLogs.length,
+    count: requestRows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ESTIMATED_LOG_CARD_HEIGHT,
     overscan: 8,
@@ -880,11 +753,11 @@ const RequestLogsList = memo(function RequestLogsList({
   const virtualItems = virtualizer.getVirtualItems();
 
   // Non-virtualized fallback for small lists
-  const plainList = !useVirtual && renderedRequestLogs.length > 0 && (
+  const plainList = !useVirtual && requestRows.length > 0 && (
     <>
-      {renderedRequestLogs.map((log) => {
-        const trace = tracesByTraceId.get(log.trace_id);
-        const liveNow = trace && isPersistedRequestLogInProgress(log) ? nowMs : 0;
+      {requestRows.map((row) => {
+        const { log, liveTrace: trace } = row;
+        const liveNow = isPersistedRequestLogInProgress(log) ? nowMs : 0;
         const sessionFolder = (() => {
           const key = sessionFolderLookupKey(log.cli_key, log.session_id ?? trace?.session_id);
           return key ? (folderLookupBySessionKey.get(key) ?? null) : null;
@@ -894,7 +767,7 @@ const RequestLogsList = memo(function RequestLogsList({
             compactMode={compactMode}
             key={log.id}
             log={log}
-            liveTrace={trace}
+            liveTrace={trace ?? undefined}
             nowMs={liveNow}
             isSelected={selectedLogId === log.id}
             sessionFolder={sessionFolder}
@@ -914,7 +787,8 @@ const RequestLogsList = memo(function RequestLogsList({
       <div className="will-change-[height]">
         <RealtimeTraceCards
           folderLookupBySessionKey={folderLookupBySessionKey}
-          traces={realtimeTraceCandidates}
+          cards={realtimeCards}
+          nowMs={nowMs}
           formatUnixSeconds={formatUnixSeconds}
           showCustomTooltip={showCustomTooltip}
         />
@@ -922,13 +796,13 @@ const RequestLogsList = memo(function RequestLogsList({
 
       {requestLogsAvailable === false ? (
         <div className="p-4 text-sm text-muted-foreground">数据不可用</div>
-      ) : renderedRequestLogs.length === 0 ? (
+      ) : requestRows.length === 0 ? (
         requestLogsLoading ? (
           <div className="flex items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
             <Spinner size="sm" />
             加载中…
           </div>
-        ) : (
+        ) : hasRealtimeCards ? null : (
           <EmptyState title={emptyStateTitle} />
         )
       ) : useVirtual ? (
@@ -949,9 +823,10 @@ const RequestLogsList = memo(function RequestLogsList({
             }}
           >
             {virtualItems.map((virtualRow) => {
-              const vLog = renderedRequestLogs[virtualRow.index];
-              const vTrace = tracesByTraceId.get(vLog.trace_id);
-              const vNow = vTrace && isPersistedRequestLogInProgress(vLog) ? nowMs : 0;
+              const vRow = requestRows[virtualRow.index];
+              const vLog = vRow.log;
+              const vTrace = vRow.liveTrace;
+              const vNow = isPersistedRequestLogInProgress(vLog) ? nowMs : 0;
               const sessionFolder = (() => {
                 const key = sessionFolderLookupKey(
                   vLog.cli_key,
@@ -964,7 +839,7 @@ const RequestLogsList = memo(function RequestLogsList({
                   <RequestLogCard
                     compactMode={compactMode}
                     log={vLog}
-                    liveTrace={vTrace}
+                    liveTrace={vTrace ?? undefined}
                     nowMs={vNow}
                     isSelected={selectedLogId === vLog.id}
                     sessionFolder={sessionFolder}

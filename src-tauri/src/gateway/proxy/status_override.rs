@@ -3,7 +3,10 @@ use super::GatewayErrorCode;
 pub(in crate::gateway) fn status_override_for_error_code(error_code: Option<&str>) -> Option<u16> {
     let code = error_code.and_then(GatewayErrorCode::from_str)?;
     match code {
-        GatewayErrorCode::RequestAborted | GatewayErrorCode::StreamAborted => Some(499),
+        GatewayErrorCode::RequestAborted
+        | GatewayErrorCode::StreamAborted
+        | GatewayErrorCode::RequestInterruptedByRestart
+        | GatewayErrorCode::RequestInterruptedByGatewayStop => Some(499),
         GatewayErrorCode::UpstreamTimeout | GatewayErrorCode::StreamIdleTimeout => Some(524),
         GatewayErrorCode::StreamError
         | GatewayErrorCode::Fake200
@@ -52,6 +55,18 @@ mod tests {
         );
         assert_eq!(
             status_override_for_error_code(Some(GatewayErrorCode::StreamAborted.as_str())),
+            Some(499)
+        );
+        assert_eq!(
+            status_override_for_error_code(Some(
+                GatewayErrorCode::RequestInterruptedByRestart.as_str()
+            )),
+            Some(499)
+        );
+        assert_eq!(
+            status_override_for_error_code(Some(
+                GatewayErrorCode::RequestInterruptedByGatewayStop.as_str()
+            )),
             Some(499)
         );
         assert_eq!(
@@ -115,6 +130,12 @@ mod tests {
         )));
         assert!(!is_client_abort(Some(
             GatewayErrorCode::UpstreamTimeout.as_str()
+        )));
+        assert!(!is_client_abort(Some(
+            GatewayErrorCode::RequestInterruptedByRestart.as_str()
+        )));
+        assert!(!is_client_abort(Some(
+            GatewayErrorCode::RequestInterruptedByGatewayStop.as_str()
         )));
         assert!(!is_client_abort(None));
     }

@@ -463,7 +463,7 @@ export const handlers = [
   // ---- Data Management ----
   http.post(`${TAURI_ENDPOINT}/db_disk_usage_get`, () => HttpResponse.json(getDbDiskUsageState())),
   http.post(`${TAURI_ENDPOINT}/request_logs_clear_all`, () =>
-    HttpResponse.json({ request_logs_deleted: 0, request_attempt_logs_deleted: 0 })
+    HttpResponse.json({ request_logs_deleted: 0 })
   ),
   http.post(`${TAURI_ENDPOINT}/app_data_reset`, () => HttpResponse.json(true)),
   http.post(`${TAURI_ENDPOINT}/app_data_dir_get`, () => HttpResponse.json("/tmp/aio-test-data")),

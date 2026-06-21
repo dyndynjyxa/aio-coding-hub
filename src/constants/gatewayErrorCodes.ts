@@ -16,6 +16,8 @@ export const GatewayErrorCodes = {
   STREAM_ABORTED: "GW_STREAM_ABORTED",
   STREAM_IDLE_TIMEOUT: "GW_STREAM_IDLE_TIMEOUT",
   REQUEST_ABORTED: "GW_REQUEST_ABORTED",
+  REQUEST_INTERRUPTED_BY_RESTART: "GW_REQUEST_INTERRUPTED_BY_RESTART",
+  REQUEST_INTERRUPTED_BY_GATEWAY_STOP: "GW_REQUEST_INTERRUPTED_BY_GATEWAY_STOP",
   INTERNAL_ERROR: "GW_INTERNAL_ERROR",
   BODY_TOO_LARGE: "GW_BODY_TOO_LARGE",
   LARGE_BODY_MISSING_MODEL: "GW_LARGE_BODY_MISSING_MODEL",
@@ -57,6 +59,8 @@ export const GatewayErrorShortLabels = {
   [GatewayErrorCodes.STREAM_ABORTED]: "流中断",
   [GatewayErrorCodes.STREAM_IDLE_TIMEOUT]: "流空闲超时",
   [GatewayErrorCodes.REQUEST_ABORTED]: "请求中断",
+  [GatewayErrorCodes.REQUEST_INTERRUPTED_BY_RESTART]: "重启中断",
+  [GatewayErrorCodes.REQUEST_INTERRUPTED_BY_GATEWAY_STOP]: "网关停止",
   [GatewayErrorCodes.INTERNAL_ERROR]: "内部错误",
   [GatewayErrorCodes.BODY_TOO_LARGE]: "请求过大",
   [GatewayErrorCodes.LARGE_BODY_MISSING_MODEL]: "缺少 model",
@@ -137,6 +141,14 @@ export const GatewayErrorDescriptions = {
   GW_REQUEST_ABORTED: {
     desc: "请求被中断",
     suggestion: "客户端（CLI 工具）主动取消了请求，或因总超时被网关主动终止。",
+  },
+  GW_REQUEST_INTERRUPTED_BY_RESTART: {
+    desc: "请求因应用重启被中断",
+    suggestion: "AIO 重启或异常退出时该请求尚未写入终态，已在启动恢复时标记为中断。",
+  },
+  GW_REQUEST_INTERRUPTED_BY_GATEWAY_STOP: {
+    desc: "请求因网关停止被中断",
+    suggestion: "网关停止、应用关闭或设置触发重启时该请求尚未写入终态，已标记为中断。",
   },
   GW_INTERNAL_ERROR: {
     desc: "网关内部错误",

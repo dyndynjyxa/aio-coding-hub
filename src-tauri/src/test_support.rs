@@ -336,7 +336,7 @@ pub fn provider_delete<R: tauri::Runtime>(
     provider_id: i64,
 ) -> crate::shared::error::AppResult<bool> {
     let db = crate::infra::db::init(app)?;
-    crate::providers::delete(&db, provider_id)?;
+    crate::providers::delete(&db, provider_id, false)?;
     Ok(true)
 }
 

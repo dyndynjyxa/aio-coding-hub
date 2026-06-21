@@ -647,9 +647,15 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
-  async providerDelete(providerId: number): Promise<Result<boolean, string>> {
+  async providerDelete(
+    providerId: number,
+    clearUsageStats: boolean
+  ): Promise<Result<boolean, string>> {
     try {
-      return { status: "ok", data: await TAURI_INVOKE("provider_delete", { providerId }) };
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("provider_delete", { providerId, clearUsageStats }),
+      };
     } catch (e) {
       if (e instanceof Error) throw e;
       else return { status: "error", error: e as any };
@@ -833,6 +839,20 @@ export const commands = {
       return {
         status: "ok",
         data: await TAURI_INVOKE("provider_oauth_fetch_limits", { providerId }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async providerOauthResetCodexQuota(
+    providerId: number,
+    confirm: RiskyIpcConfirm | null
+  ): Promise<Result<ProviderOAuthResetCodexQuotaResult, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("provider_oauth_reset_codex_quota", { providerId, confirm }),
       };
     } catch (e) {
       if (e instanceof Error) throw e;
@@ -2160,10 +2180,7 @@ export type ClaudeSettingsState = {
   env_claude_code_proxy_resolves_hosts: boolean;
   env_claude_code_skip_prompt_history: boolean;
 };
-export type ClearRequestLogsResult = {
-  request_logs_deleted: number;
-  request_attempt_logs_deleted: number;
-};
+export type ClearRequestLogsResult = { request_logs_deleted: number };
 export type CliProxyResult = {
   trace_id: string;
   cli_key: string;
@@ -2857,8 +2874,16 @@ export type ProviderOAuthLimitsResult = {
   limit_weekly_text: string | null;
   limit_5h_reset_at: number | null;
   limit_weekly_reset_at: number | null;
+  reset_credit_available_count: number | null;
 };
 export type ProviderOAuthRefreshResult = { success: boolean; expires_at: number | null };
+export type ProviderOAuthResetCodexQuotaResult = {
+  success: boolean;
+  code: string | null;
+  windows_reset: number | null;
+  refreshed_limits: ProviderOAuthLimitsResult | null;
+  refresh_error: string | null;
+};
 export type ProviderOAuthStartFlowResult = {
   success: boolean;
   provider_id: number;

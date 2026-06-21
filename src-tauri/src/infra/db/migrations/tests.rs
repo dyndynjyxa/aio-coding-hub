@@ -310,6 +310,139 @@ fn ensure_plugin_tables_is_idempotent() {
 }
 
 #[test]
+fn ensure_patch_drops_legacy_request_attempt_logs_table() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+    apply_migrations(&mut conn).expect("create current schema");
+
+    conn.execute_batch(
+        r#"
+CREATE TABLE request_attempt_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  trace_id TEXT NOT NULL,
+  provider_id INTEGER NOT NULL
+);
+"#,
+    )
+    .expect("create legacy request_attempt_logs table");
+
+    assert!(test_has_table(&conn, "request_attempt_logs"));
+
+    apply_migrations(&mut conn).expect("apply migrations");
+
+    assert!(!test_has_table(&conn, "request_attempt_logs"));
+
+    apply_migrations(&mut conn).expect("apply migrations twice");
+    assert!(!test_has_table(&conn, "request_attempt_logs"));
+}
+
+#[test]
+fn ensure_patch_adds_reset_credit_count_to_existing_oauth_snapshot_table() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+    conn.execute_batch(
+        r#"
+CREATE TABLE providers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cli_key TEXT NOT NULL,
+  name TEXT NOT NULL,
+  base_url TEXT NOT NULL,
+  base_urls_json TEXT NOT NULL DEFAULT '[]',
+  base_url_mode TEXT NOT NULL DEFAULT 'order',
+  claude_models_json TEXT NOT NULL DEFAULT '{}',
+  api_key_plaintext TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  priority INTEGER NOT NULL DEFAULT 100,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  cost_multiplier REAL NOT NULL DEFAULT 1.0,
+  supported_models_json TEXT NOT NULL DEFAULT '{}',
+  model_mapping_json TEXT NOT NULL DEFAULT '{}',
+  UNIQUE(cli_key, name)
+);
+
+CREATE TABLE provider_oauth_limit_snapshots (
+  provider_id INTEGER PRIMARY KEY,
+  limit_short_label TEXT,
+  limit_5h_text TEXT,
+  limit_weekly_text TEXT,
+  limit_5h_reset_at INTEGER,
+  limit_weekly_reset_at INTEGER,
+  checked_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(provider_id) REFERENCES providers(id) ON DELETE CASCADE
+);
+
+CREATE TABLE prompts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  workspace_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  content TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+INSERT INTO providers(
+  id,
+  cli_key,
+  name,
+  base_url,
+  base_urls_json,
+  base_url_mode,
+  claude_models_json,
+  api_key_plaintext,
+  enabled,
+  priority,
+  created_at,
+  updated_at,
+  sort_order,
+  cost_multiplier,
+  supported_models_json,
+  model_mapping_json
+) VALUES (1, 'codex', 'legacy oauth', 'https://example.com', '[]', 'order', '{}', '', 1, 100, 1, 1, 0, 1.0, '{}', '{}');
+
+INSERT INTO provider_oauth_limit_snapshots(
+  provider_id,
+  limit_short_label,
+  limit_5h_text,
+  limit_weekly_text,
+  limit_5h_reset_at,
+  limit_weekly_reset_at,
+  checked_at,
+  updated_at
+) VALUES (1, '5h', '25%', '80%', 10, 20, 30, 30);
+
+PRAGMA user_version = 32;
+"#,
+    )
+    .expect("create legacy snapshot schema");
+
+    assert!(!test_has_column(
+        &conn,
+        "provider_oauth_limit_snapshots",
+        "reset_credit_available_count"
+    ));
+
+    apply_migrations(&mut conn).expect("apply migrations");
+
+    assert!(test_has_column(
+        &conn,
+        "provider_oauth_limit_snapshots",
+        "reset_credit_available_count"
+    ));
+    let row: (String, Option<i64>) = conn
+        .query_row(
+            "SELECT limit_5h_text, reset_credit_available_count FROM provider_oauth_limit_snapshots WHERE provider_id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("read migrated snapshot");
+    assert_eq!(row, ("25%".to_string(), None));
+
+    apply_migrations(&mut conn).expect("apply migrations twice");
+}
+
+#[test]
 fn migrate_v27_to_v28_drops_provider_mode_and_deletes_official_providers() {
     let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
     conn.execute_batch("PRAGMA foreign_keys = ON;")

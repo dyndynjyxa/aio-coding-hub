@@ -74,7 +74,6 @@ describe("query/dataManagement", () => {
 
     vi.mocked(requestLogsClearAll).mockResolvedValue({
       request_logs_deleted: 1,
-      request_attempt_logs_deleted: 2,
     });
 
     const client = createTestQueryClient();
@@ -163,18 +162,9 @@ describe("query/dataManagement", () => {
   it("isClearRequestLogsResult validates result shape", () => {
     expect(isClearRequestLogsResult(null)).toBe(false);
     expect(isClearRequestLogsResult({} as any)).toBe(false);
-    expect(
-      isClearRequestLogsResult({ request_logs_deleted: -1, request_attempt_logs_deleted: 2 } as any)
-    ).toBe(false);
-    expect(
-      isClearRequestLogsResult({
-        request_logs_deleted: 1,
-        request_attempt_logs_deleted: Number.NaN,
-      } as any)
-    ).toBe(false);
-    expect(
-      isClearRequestLogsResult({ request_logs_deleted: 1, request_attempt_logs_deleted: 2 })
-    ).toBe(true);
+    expect(isClearRequestLogsResult({ request_logs_deleted: -1 } as any)).toBe(false);
+    expect(isClearRequestLogsResult({ request_logs_deleted: Number.NaN } as any)).toBe(false);
+    expect(isClearRequestLogsResult({ request_logs_deleted: 1 })).toBe(true);
   });
 
   it("formatDbDiskUsageAvailable returns total_bytes or null", () => {

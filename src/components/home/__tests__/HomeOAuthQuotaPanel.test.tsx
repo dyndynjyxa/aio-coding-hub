@@ -17,6 +17,7 @@ function makeRow(partial: Partial<HomeOAuthQuotaRow>): HomeOAuthQuotaRow {
       limit_weekly_text: "92%",
       limit_5h_reset_at: nowUnix + 2 * 3600 + 34 * 60,
       limit_weekly_reset_at: nowUnix + 3 * 86400 + 2 * 3600 + 29 * 60,
+      reset_credit_available_count: 4,
     },
     error: null,
     ...partial,
@@ -63,7 +64,9 @@ describe("components/home/HomeOAuthQuotaPanel", () => {
 
     expect(screen.getByText("TG 合租账号")).toBeInTheDocument();
     expect(screen.queryByText("OAuth")).not.toBeInTheDocument();
-    expect(screen.getByText("5h: 61%·2h34m / 7d: 92%·3d2h29m")).toBeInTheDocument();
+    expect(screen.getByText("5h: 61%(重置时间: 2h 34m)")).toBeInTheDocument();
+    expect(screen.getByText("周: 92%(重置时间: 3d 2h 29m)")).toBeInTheDocument();
+    expect(screen.getByText("可重置次数: 4")).toBeInTheDocument();
   });
 
   it("shows insufficient quota when either quota window is exhausted", () => {
@@ -77,6 +80,7 @@ describe("components/home/HomeOAuthQuotaPanel", () => {
               limit_weekly_text: "0%",
               limit_5h_reset_at: null,
               limit_weekly_reset_at: null,
+              reset_credit_available_count: 1,
             },
           }),
         ]}
@@ -100,6 +104,7 @@ describe("components/home/HomeOAuthQuotaPanel", () => {
               limit_weekly_text: "92%",
               limit_5h_reset_at: null,
               limit_weekly_reset_at: null,
+              reset_credit_available_count: 1,
             },
           }),
         ]}
@@ -125,6 +130,7 @@ describe("components/home/HomeOAuthQuotaPanel", () => {
               limit_weekly_text: "1%",
               limit_5h_reset_at: null,
               limit_weekly_reset_at: null,
+              reset_credit_available_count: 1,
             },
           }),
         ]}
@@ -151,6 +157,7 @@ describe("components/home/HomeOAuthQuotaPanel", () => {
               limit_weekly_text: "3",
               limit_5h_reset_at: null,
               limit_weekly_reset_at: null,
+              reset_credit_available_count: 1,
             },
           }),
         ]}
@@ -191,6 +198,7 @@ describe("components/home/HomeOAuthQuotaPanel", () => {
               limit_weekly_text: null,
               limit_5h_reset_at: null,
               limit_weekly_reset_at: null,
+              reset_credit_available_count: null,
             },
           }),
         ]}
@@ -245,5 +253,55 @@ describe("components/home/HomeOAuthQuotaPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "刷新 TG 合租账号 OAuth 配额" }));
     expect(onRefreshRow).toHaveBeenCalledWith(1);
+  });
+
+  it("confirms before forwarding row reset actions", async () => {
+    const onResetRow = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <HomeOAuthQuotaPanelContent
+        rows={[makeRow({ providerId: 31, providerName: "Codex A" })]}
+        hasProviders={true}
+        hasRefreshed={true}
+        refreshing={false}
+        onRefresh={vi.fn()}
+        onRefreshRow={vi.fn()}
+        onResetRow={onResetRow}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "可重置次数: 4(点击重置)" }));
+    expect(screen.getByText("使用 1 次 Codex 重置次数刷新该账号额度？")).toBeInTheDocument();
+    expect(onResetRow).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "确认重置" }));
+
+    expect(onResetRow).toHaveBeenCalledWith(31);
+  });
+
+  it("does not render reset action for non-Codex rows or unknown counts", () => {
+    render(
+      <HomeOAuthQuotaPanelContent
+        rows={[
+          makeRow({
+            cliKey: "gemini",
+            limits: { ...makeRow({}).limits!, reset_credit_available_count: 4 },
+          }),
+          makeRow({
+            providerId: 2,
+            providerName: "Codex B",
+            limits: { ...makeRow({}).limits!, reset_credit_available_count: null },
+          }),
+        ]}
+        hasProviders={true}
+        hasRefreshed={true}
+        refreshing={false}
+        onRefresh={vi.fn()}
+        onRefreshRow={vi.fn()}
+        onResetRow={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText(/可重置次数/)).not.toBeInTheDocument();
   });
 });

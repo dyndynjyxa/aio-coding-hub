@@ -347,6 +347,7 @@ pub(crate) async fn provider_delete(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
     provider_id: i64,
+    clear_usage_stats: bool,
 ) -> Result<bool, String> {
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
     let result = blocking::run(
@@ -355,7 +356,7 @@ pub(crate) async fn provider_delete(
             let cli_key = providers::cli_key_by_id(&db, provider_id)?.ok_or_else(|| {
                 crate::shared::error::AppError::from("DB_NOT_FOUND: provider not found")
             })?;
-            providers::delete(&db, provider_id)?;
+            providers::delete(&db, provider_id, clear_usage_stats)?;
             Ok((true, cli_key))
         },
     )
@@ -367,6 +368,7 @@ pub(crate) async fn provider_delete(
         tracing::info!(
             provider_id = provider_id,
             cli_key = %cli_key,
+            clear_usage_stats = clear_usage_stats,
             cleared_sessions = cleared.cleared_sessions,
             cleared_recent_errors = cleared.cleared_recent_errors,
             "provider deleted"

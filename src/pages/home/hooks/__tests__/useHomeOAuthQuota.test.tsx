@@ -2,7 +2,11 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RequestLogSummary } from "../../../../services/gateway/requestLogs";
 import type { ProviderSummary } from "../../../../services/providers/providers";
-import { providerOAuthFetchLimits, providersList } from "../../../../services/providers/providers";
+import {
+  providerOAuthFetchLimits,
+  providerOAuthResetCodexQuota,
+  providersList,
+} from "../../../../services/providers/providers";
 import { gatewayCircuitResetProvider } from "../../../../services/gateway/gateway";
 import { oauthLimitsKeys } from "../../../../query/keys";
 import { createQueryWrapper, createTestQueryClient } from "../../../../test/utils/reactQuery";
@@ -16,6 +20,7 @@ vi.mock("../../../../services/providers/providers", async () => {
     ...actual,
     providersList: vi.fn(),
     providerOAuthFetchLimits: vi.fn(),
+    providerOAuthResetCodexQuota: vi.fn(),
   };
 });
 
@@ -148,6 +153,7 @@ describe("pages/home/hooks/useHomeOAuthQuota", () => {
       limit_weekly_text: "92%",
       limit_5h_reset_at: null,
       limit_weekly_reset_at: null,
+      reset_credit_available_count: 3,
     });
     const wrapper = createQueryWrapper(client);
 
@@ -170,6 +176,7 @@ describe("pages/home/hooks/useHomeOAuthQuota", () => {
       limit_weekly_text: "88%",
       limit_5h_reset_at: null,
       limit_weekly_reset_at: null,
+      reset_credit_available_count: 2,
     });
 
     const { result } = renderHook(
@@ -192,6 +199,7 @@ describe("pages/home/hooks/useHomeOAuthQuota", () => {
       limit_weekly_text: "88%",
       limit_5h_reset_at: null,
       limit_weekly_reset_at: null,
+      reset_credit_available_count: 2,
     });
   });
 
@@ -228,6 +236,7 @@ describe("pages/home/hooks/useHomeOAuthQuota", () => {
       limit_weekly_text: providerId === 11 ? "88%" : "63%",
       limit_5h_reset_at: null,
       limit_weekly_reset_at: null,
+      reset_credit_available_count: providerId === 11 ? 2 : null,
     }));
 
     const { result } = renderHook(
@@ -251,6 +260,7 @@ describe("pages/home/hooks/useHomeOAuthQuota", () => {
       limit_weekly_text: "63%",
       limit_5h_reset_at: null,
       limit_weekly_reset_at: null,
+      reset_credit_available_count: null,
     });
   });
 
@@ -284,6 +294,7 @@ describe("pages/home/hooks/useHomeOAuthQuota", () => {
       limit_weekly_text: "88%",
       limit_5h_reset_at: null,
       limit_weekly_reset_at: null,
+      reset_credit_available_count: null,
     });
 
     const { result } = renderHook(
@@ -303,6 +314,86 @@ describe("pages/home/hooks/useHomeOAuthQuota", () => {
     expect(gatewayCircuitResetProvider).toHaveBeenCalledWith(11);
     expect(gatewayCircuitResetProvider).not.toHaveBeenCalledWith(12);
     expect(result.current.oauthQuotaRows.find((row) => row.providerId === 12)?.state).toBe("idle");
+  });
+
+  it("resets only the selected Codex OAuth provider and keeps other OAuth caches intact", async () => {
+    vi.mocked(providersList).mockImplementation(async (cliKey) => {
+      if (cliKey === "codex") {
+        return [
+          makeProvider({
+            id: 11,
+            cli_key: "codex",
+            name: "Codex A",
+            auth_mode: "oauth",
+          }),
+          makeProvider({
+            id: 12,
+            cli_key: "codex",
+            name: "Codex B",
+            auth_mode: "oauth",
+          }),
+        ];
+      }
+      return [];
+    });
+
+    const client = createTestQueryClient();
+    const oldA = {
+      limit_short_label: "5h",
+      limit_5h_text: "0%",
+      limit_weekly_text: "10%",
+      limit_5h_reset_at: null,
+      limit_weekly_reset_at: null,
+      reset_credit_available_count: 1,
+    };
+    const oldB = {
+      limit_short_label: "5h",
+      limit_5h_text: "40%",
+      limit_weekly_text: "60%",
+      limit_5h_reset_at: null,
+      limit_weekly_reset_at: null,
+      reset_credit_available_count: 5,
+    };
+    const refreshedA = {
+      limit_short_label: "5h",
+      limit_5h_text: "100%",
+      limit_weekly_text: "100%",
+      limit_5h_reset_at: null,
+      limit_weekly_reset_at: null,
+      reset_credit_available_count: 0,
+    };
+    client.setQueryData(oauthLimitsKeys.detail(11), oldA);
+    client.setQueryData(oauthLimitsKeys.detail(12), oldB);
+    vi.mocked(providerOAuthResetCodexQuota).mockResolvedValueOnce({
+      success: true,
+      code: "ok",
+      windows_reset: 2,
+      refreshed_limits: refreshedA,
+      refresh_error: null,
+    });
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(
+      () => useHomeOAuthQuota({ cliPriorityOrder: ["claude", "codex", "gemini"] }),
+      { wrapper }
+    );
+
+    await waitFor(() => expect(result.current.oauthQuotaRows).toHaveLength(2));
+
+    await act(async () => {
+      await result.current.resetOAuthQuotaRow(11);
+    });
+
+    expect(providerOAuthResetCodexQuota).toHaveBeenCalledWith(11);
+    expect(gatewayCircuitResetProvider).toHaveBeenCalledWith(11);
+    expect(client.getQueryData(oauthLimitsKeys.detail(11))).toEqual(refreshedA);
+    expect(client.getQueryData(oauthLimitsKeys.detail(12))).toEqual(oldB);
+    expect(result.current.oauthQuotaRows.find((row) => row.providerId === 11)?.limits).toEqual(
+      refreshedA
+    );
+    expect(result.current.oauthQuotaRows.find((row) => row.providerId === 12)?.limits).toEqual(
+      oldB
+    );
   });
 
   it("sorts OAuth providers by recent usage from request logs", async () => {

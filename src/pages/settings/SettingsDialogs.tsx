@@ -41,7 +41,7 @@ export function SettingsDialogs({
           clearRequestLogs.setOpen(open);
         }}
         title="确认清理请求日志"
-        description="将清空 request_logs（兼容旧版本时也会清理 request_attempt_logs）。此操作不可撤销。"
+        description="将清空 request_logs。此操作不可撤销。"
         className="max-w-lg"
       >
         <div className="space-y-4">

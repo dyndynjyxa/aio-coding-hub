@@ -14,6 +14,8 @@ export type HomeOAuthQuotaRow = {
   state: HomeOAuthQuotaRowState;
   limits: OAuthLimitsResult | null;
   error: string | null;
+  resetting?: boolean;
+  resetError?: string | null;
 };
 
 export function hasHomeOAuthQuotaText(limits: OAuthLimitsResult | null): boolean {

@@ -20,10 +20,19 @@ pub(super) fn apply_ensure_patches(conn: &mut Connection) -> crate::shared::erro
     ensure_provider_note(conn)?;
     ensure_provider_source_provider_id(conn)?;
     ensure_provider_bridge_type(conn)?;
+    drop_legacy_request_attempt_logs_table(conn)?;
     ensure_request_logs_extended_columns(conn)?;
     ensure_provider_stream_idle_timeout(conn)?;
     ensure_skills_update_columns(conn)?;
     ensure_plugin_tables(conn)?;
+    Ok(())
+}
+
+fn drop_legacy_request_attempt_logs_table(
+    conn: &mut Connection,
+) -> crate::shared::error::AppResult<()> {
+    conn.execute_batch("DROP TABLE IF EXISTS request_attempt_logs;")
+        .map_err(|e| format!("failed to drop legacy request_attempt_logs table: {e}"))?;
     Ok(())
 }
 
@@ -561,6 +570,7 @@ CREATE TABLE IF NOT EXISTS provider_oauth_limit_snapshots (
   limit_weekly_text TEXT,
   limit_5h_reset_at INTEGER,
   limit_weekly_reset_at INTEGER,
+  reset_credit_available_count INTEGER,
   checked_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   FOREIGN KEY(provider_id) REFERENCES providers(id) ON DELETE CASCADE
@@ -569,7 +579,20 @@ CREATE INDEX IF NOT EXISTS idx_provider_oauth_limit_snapshots_checked_at
   ON provider_oauth_limit_snapshots(checked_at);
 "#,
     )
-    .map_err(|e| format!("failed to ensure provider OAuth limit snapshots table: {e}").into())
+    .map_err(|e| format!("failed to ensure provider OAuth limit snapshots table: {e}"))?;
+
+    if !column_exists(
+        conn,
+        "provider_oauth_limit_snapshots",
+        "reset_credit_available_count",
+    )? {
+        conn.execute_batch(
+            "ALTER TABLE provider_oauth_limit_snapshots ADD COLUMN reset_credit_available_count INTEGER;",
+        )
+        .map_err(|e| format!("failed to add provider OAuth reset credit count column: {e}"))?;
+    }
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

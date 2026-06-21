@@ -108,6 +108,7 @@ macro_rules! generated_command_registry {
             provider_oauth_disconnect => crate::commands::providers::provider_oauth_disconnect,
             provider_oauth_status => crate::commands::providers::provider_oauth_status,
             provider_oauth_fetch_limits => crate::commands::providers::provider_oauth_fetch_limits,
+            provider_oauth_reset_codex_quota => crate::commands::providers::provider_oauth_reset_codex_quota,
             // ── claude_model_validation ──
             claude_provider_validate_model => crate::commands::claude_model_validation::claude_provider_validate_model,
             claude_validation_history_list => crate::commands::claude_model_validation::claude_validation_history_list,

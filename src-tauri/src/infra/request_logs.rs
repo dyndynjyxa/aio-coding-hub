@@ -1,6 +1,6 @@
 //! Usage: Request log persistence (sqlite buffered writer and queries).
 
-use crate::shared::error::db_err;
+use crate::shared::error::{db_err, AppResult};
 use crate::shared::time::now_unix_seconds;
 use crate::{cost, db, model_price_aliases};
 use rusqlite::{params, params_from_iter, ErrorCode, OptionalExtension, TransactionBehavior};
@@ -36,6 +36,9 @@ const INSERT_RETRY_MAX_DELAY_MS: u64 = 500;
 const COST_MULTIPLIER_CACHE_MAX_ENTRIES: usize = 256;
 const MODEL_PRICE_CACHE_MAX_ENTRIES: usize = 512;
 const CACHE_TTL_SECS: i64 = 5 * 60;
+const REQUEST_INTERRUPTED_BY_RESTART_ERROR_CODE: &str = "GW_REQUEST_INTERRUPTED_BY_RESTART";
+const REQUEST_INTERRUPTED_BY_GATEWAY_STOP_ERROR_CODE: &str =
+    "GW_REQUEST_INTERRUPTED_BY_GATEWAY_STOP";
 const EFFECTIVE_COST_MULTIPLIER_SQL: &str = r#"
 SELECT COALESCE(source.cost_multiplier, bridge.cost_multiplier)
 FROM providers bridge
@@ -44,6 +47,28 @@ WHERE bridge.id = ?1
 "#;
 
 static WRITE_THROUGH_LIMITER: OnceLock<Arc<Semaphore>> = OnceLock::new();
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RequestLogReconcileReason {
+    StartupRecovery,
+    GatewayStop,
+}
+
+impl RequestLogReconcileReason {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::StartupRecovery => "startup_recovery",
+            Self::GatewayStop => "gateway_stop",
+        }
+    }
+
+    const fn error_code(self) -> &'static str {
+        match self {
+            Self::StartupRecovery => REQUEST_INTERRUPTED_BY_RESTART_ERROR_CODE,
+            Self::GatewayStop => REQUEST_INTERRUPTED_BY_GATEWAY_STOP_ERROR_CODE,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DbWriteErrorKind {
@@ -363,6 +388,41 @@ pub fn spawn_write_through<R: tauri::Runtime>(
         }
     });
     true
+}
+
+pub(crate) fn reconcile_unresolved_pending(
+    db: &db::Db,
+    reason: RequestLogReconcileReason,
+    now_ms: i64,
+) -> AppResult<usize> {
+    let now_ms = now_ms.max(0);
+    let conn = db.open_connection()?;
+    let pending_age_expr =
+        "CASE WHEN created_at_ms > 0 AND ?1 > created_at_ms THEN ?1 - created_at_ms ELSE 0 END";
+    let sql = format!(
+        r#"
+UPDATE request_logs
+SET
+  status = 499,
+  error_code = ?2,
+  duration_ms = CASE
+    WHEN COALESCE(duration_ms, 0) > {pending_age_expr} THEN COALESCE(duration_ms, 0)
+    ELSE {pending_age_expr}
+  END,
+  excluded_from_stats = 1,
+  error_details_json = json_object(
+    'reason', ?3,
+    'reconciled_at_ms', ?1,
+    'pending_age_ms', {pending_age_expr}
+  )
+WHERE status IS NULL
+  AND error_code IS NULL
+"#
+    );
+    let affected = conn
+        .execute(&sql, params![now_ms, reason.error_code(), reason.as_str()])
+        .map_err(|e| db_err!("failed to reconcile pending request_logs: {e}"))?;
+    Ok(affected)
 }
 
 fn writer_loop<R: tauri::Runtime>(
@@ -751,8 +811,9 @@ GROUP BY cli_key, session_id
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_cx2cc_cost_basis, try_acquire_write_through_permit, writer_loop, InsertBatchCache,
-        RequestLogInsert, COST_MULTIPLIER_CACHE_MAX_ENTRIES, EFFECTIVE_COST_MULTIPLIER_SQL,
+        parse_cx2cc_cost_basis, reconcile_unresolved_pending, try_acquire_write_through_permit,
+        writer_loop, InsertBatchCache, RequestLogInsert, RequestLogReconcileReason,
+        COST_MULTIPLIER_CACHE_MAX_ENTRIES, EFFECTIVE_COST_MULTIPLIER_SQL,
         MODEL_PRICE_CACHE_MAX_ENTRIES, WRITE_BATCH_MAX,
     };
     use rusqlite::{params, Connection};
@@ -803,6 +864,59 @@ mod tests {
         let conn = db.open_connection().expect("open connection");
         conn.query_row("SELECT COUNT(1) FROM request_logs", [], |row| row.get(0))
             .expect("count request logs")
+    }
+
+    fn insert_request_log_row(
+        db: &crate::db::Db,
+        trace_id: &str,
+        status: Option<i64>,
+        error_code: Option<&str>,
+        duration_ms: i64,
+        created_at_ms: i64,
+    ) {
+        let conn = db.open_connection().expect("open connection");
+        conn.execute(
+            r#"
+INSERT INTO request_logs (
+  trace_id, cli_key, method, path, status, error_code, duration_ms, attempts_json,
+  created_at, created_at_ms, excluded_from_stats
+) VALUES (?1, 'claude', 'POST', '/v1/messages', ?2, ?3, ?4, '[]', ?5, ?6, 0)
+"#,
+            params![
+                trace_id,
+                status,
+                error_code,
+                duration_ms,
+                created_at_ms.saturating_div(1000),
+                created_at_ms,
+            ],
+        )
+        .expect("insert request log row");
+    }
+
+    fn fetch_lifecycle_row(
+        db: &crate::db::Db,
+        trace_id: &str,
+    ) -> (Option<i64>, Option<String>, i64, i64, Option<String>) {
+        let conn = db.open_connection().expect("open connection");
+        conn.query_row(
+            r#"
+SELECT status, error_code, duration_ms, excluded_from_stats, error_details_json
+FROM request_logs
+WHERE trace_id = ?1
+"#,
+            params![trace_id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .expect("fetch lifecycle row")
     }
 
     #[test]
@@ -861,6 +975,98 @@ mod tests {
         drop(first);
         assert!(try_acquire_write_through_permit(limiter).is_some());
         drop(second);
+    }
+
+    #[test]
+    fn reconcile_unresolved_pending_marks_only_pending_rows() {
+        let (_app, db, _dir) = init_test_db();
+        insert_request_log_row(&db, "trace-pending", None, None, 10, 1_000);
+        insert_request_log_row(&db, "trace-success", Some(200), None, 20, 2_000);
+        insert_request_log_row(
+            &db,
+            "trace-failed",
+            None,
+            Some("GW_UPSTREAM_TIMEOUT"),
+            30,
+            3_000,
+        );
+
+        let affected =
+            reconcile_unresolved_pending(&db, RequestLogReconcileReason::StartupRecovery, 11_000)
+                .expect("reconcile pending rows");
+
+        assert_eq!(affected, 1);
+        assert_eq!(
+            fetch_lifecycle_row(&db, "trace-pending"),
+            (
+                Some(499),
+                Some("GW_REQUEST_INTERRUPTED_BY_RESTART".to_string()),
+                10_000,
+                1,
+                Some(
+                    r#"{"reason":"startup_recovery","reconciled_at_ms":11000,"pending_age_ms":10000}"#
+                        .to_string()
+                )
+            )
+        );
+        assert_eq!(
+            fetch_lifecycle_row(&db, "trace-success"),
+            (Some(200), None, 20, 0, None)
+        );
+        assert_eq!(
+            fetch_lifecycle_row(&db, "trace-failed"),
+            (None, Some("GW_UPSTREAM_TIMEOUT".to_string()), 30, 0, None)
+        );
+    }
+
+    #[test]
+    fn reconcile_unresolved_pending_uses_gateway_stop_code_and_never_decreases_duration() {
+        let (_app, db, _dir) = init_test_db();
+        insert_request_log_row(&db, "trace-longer-duration", None, None, 20_000, 10_000);
+
+        let affected =
+            reconcile_unresolved_pending(&db, RequestLogReconcileReason::GatewayStop, 15_000)
+                .expect("reconcile pending rows");
+
+        assert_eq!(affected, 1);
+        assert_eq!(
+            fetch_lifecycle_row(&db, "trace-longer-duration"),
+            (
+                Some(499),
+                Some("GW_REQUEST_INTERRUPTED_BY_GATEWAY_STOP".to_string()),
+                20_000,
+                1,
+                Some(
+                    r#"{"reason":"gateway_stop","reconciled_at_ms":15000,"pending_age_ms":5000}"#
+                        .to_string()
+                )
+            )
+        );
+    }
+
+    #[test]
+    fn reconcile_unresolved_pending_does_not_use_duration_as_terminal_predicate() {
+        let (_app, db, _dir) = init_test_db();
+        insert_request_log_row(&db, "trace-nonzero-duration", None, None, 123, 0);
+
+        let affected =
+            reconcile_unresolved_pending(&db, RequestLogReconcileReason::StartupRecovery, 20_000)
+                .expect("reconcile pending rows");
+
+        assert_eq!(affected, 1);
+        assert_eq!(
+            fetch_lifecycle_row(&db, "trace-nonzero-duration"),
+            (
+                Some(499),
+                Some("GW_REQUEST_INTERRUPTED_BY_RESTART".to_string()),
+                123,
+                1,
+                Some(
+                    r#"{"reason":"startup_recovery","reconciled_at_ms":20000,"pending_age_ms":0}"#
+                        .to_string()
+                )
+            )
+        );
     }
 
     #[test]

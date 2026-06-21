@@ -4,6 +4,7 @@ import { tauriOpenUrl } from "../../../test/mocks/tauri";
 import { SortableProviderCard, type SortableProviderCardProps } from "../SortableProviderCard";
 import {
   providerOAuthFetchLimits,
+  providerOAuthResetCodexQuota,
   type ProviderSummary,
 } from "../../../services/providers/providers";
 import { createTestQueryClient, createQueryWrapper } from "../../../test/utils/reactQuery";
@@ -15,7 +16,7 @@ vi.mock("../../../services/providers/providers", async () => {
   const actual = await vi.importActual<typeof import("../../../services/providers/providers")>(
     "../../../services/providers/providers"
   );
-  return { ...actual, providerOAuthFetchLimits: vi.fn() };
+  return { ...actual, providerOAuthFetchLimits: vi.fn(), providerOAuthResetCodexQuota: vi.fn() };
 });
 
 vi.mock("../../../services/gateway/gateway", async () => {
@@ -164,6 +165,7 @@ describe("pages/providers/SortableProviderCard", () => {
       limit_weekly_text: "200",
       limit_5h_reset_at: null,
       limit_weekly_reset_at: null,
+      reset_credit_available_count: null,
     });
 
     renderCard({
@@ -181,6 +183,7 @@ describe("pages/providers/SortableProviderCard", () => {
       limit_weekly_text: "300",
       limit_5h_reset_at: null,
       limit_weekly_reset_at: null,
+      reset_credit_available_count: null,
     });
 
     renderCard({
@@ -201,6 +204,7 @@ describe("pages/providers/SortableProviderCard", () => {
       limit_weekly_text: "300",
       limit_5h_reset_at: null,
       limit_weekly_reset_at: null,
+      reset_credit_available_count: null,
     });
 
     renderCard({
@@ -226,6 +230,74 @@ describe("pages/providers/SortableProviderCard", () => {
     await waitFor(() => expect(vi.mocked(providerOAuthFetchLimits)).toHaveBeenCalled());
     // React Query queryFn maps null to empty limits; no toast is shown
     expect(screen.queryByText(/5h:/)).not.toBeInTheDocument();
+  });
+
+  it("renders Codex OAuth reset count and confirms before resetting", async () => {
+    vi.mocked(providerOAuthFetchLimits).mockResolvedValue({
+      limit_short_label: "5h",
+      limit_5h_text: "0%",
+      limit_weekly_text: "50%",
+      limit_5h_reset_at: null,
+      limit_weekly_reset_at: null,
+      reset_credit_available_count: 3,
+    });
+    vi.mocked(providerOAuthResetCodexQuota).mockResolvedValue({
+      success: true,
+      code: "ok",
+      windows_reset: 2,
+      refreshed_limits: {
+        limit_short_label: "5h",
+        limit_5h_text: "100%",
+        limit_weekly_text: "100%",
+        limit_5h_reset_at: null,
+        limit_weekly_reset_at: null,
+        reset_credit_available_count: 2,
+      },
+      refresh_error: null,
+    });
+
+    renderCard({
+      id: 88,
+      cli_key: "codex",
+      auth_mode: "oauth",
+      oauth_email: "codex@example.com",
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "可重置次数: 3(点击重置)" })).toBeInTheDocument()
+    );
+    expect(providerOAuthResetCodexQuota).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "可重置次数: 3(点击重置)" }));
+
+    expect(screen.getByText("使用 1 次 Codex 重置次数刷新该账号额度？")).toBeInTheDocument();
+    expect(providerOAuthResetCodexQuota).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "确认重置" }));
+
+    await waitFor(() => expect(providerOAuthResetCodexQuota).toHaveBeenCalledWith(88));
+    await waitFor(() => expect(screen.getByText("5h: 100%")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "可重置次数: 2(点击重置)" })).toBeInTheDocument();
+  });
+
+  it("does not render reset action for non-Codex OAuth providers", async () => {
+    vi.mocked(providerOAuthFetchLimits).mockResolvedValue({
+      limit_short_label: "短窗",
+      limit_5h_text: "88",
+      limit_weekly_text: "300",
+      limit_5h_reset_at: null,
+      limit_weekly_reset_at: null,
+      reset_credit_available_count: 3,
+    });
+
+    renderCard({
+      id: 89,
+      cli_key: "gemini",
+      auth_mode: "oauth",
+    });
+
+    await waitFor(() => expect(screen.getByText("短窗: 88")).toBeInTheDocument());
+    expect(screen.queryByText(/可重置次数/)).not.toBeInTheDocument();
   });
 
   it("handles fetchLimits error", async () => {
@@ -527,17 +599,6 @@ describe("pages/providers/SortableProviderCard", () => {
     );
 
     expect(screen.getByText("终端启动")).toBeInTheDocument();
-  });
-
-  it("shows validate model button when callback provided", () => {
-    renderCard(
-      {},
-      {
-        onValidateModel: vi.fn(),
-      }
-    );
-
-    expect(screen.getByText("模型验证")).toBeInTheDocument();
   });
 
   it("renders limit chips with fixed daily reset", () => {

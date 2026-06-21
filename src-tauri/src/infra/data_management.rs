@@ -3,7 +3,7 @@
 use crate::app_paths;
 use crate::db;
 use crate::shared::error::db_err;
-use rusqlite::{OptionalExtension, TransactionBehavior};
+use rusqlite::TransactionBehavior;
 use serde::Serialize;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -19,7 +19,6 @@ pub struct DbDiskUsage {
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct ClearRequestLogsResult {
     pub request_logs_deleted: u64,
-    pub request_attempt_logs_deleted: u64,
 }
 
 fn file_len_or_zero(path: &Path) -> Result<u64, String> {
@@ -82,23 +81,6 @@ pub fn request_logs_clear_all(
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|e| db_err!("failed to start transaction: {e}"))?;
 
-    let has_request_attempt_logs_table = tx
-        .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'request_attempt_logs' LIMIT 1",
-            [],
-            |_| Ok(true),
-        )
-        .optional()
-        .map_err(|e| db_err!("failed to query sqlite_master for request_attempt_logs: {e}"))?
-        .unwrap_or(false);
-
-    let request_attempt_logs_deleted = if has_request_attempt_logs_table {
-        tx.execute("DELETE FROM request_attempt_logs", [])
-            .map_err(|e| db_err!("failed to clear request_attempt_logs: {e}"))?
-    } else {
-        0
-    };
-
     let request_logs_deleted = tx
         .execute("DELETE FROM request_logs", [])
         .map_err(|e| db_err!("failed to clear request_logs: {e}"))?;
@@ -108,7 +90,6 @@ pub fn request_logs_clear_all(
 
     tracing::warn!(
         request_logs_deleted = request_logs_deleted,
-        request_attempt_logs_deleted = request_attempt_logs_deleted,
         "request logs cleared"
     );
 
@@ -119,7 +100,6 @@ pub fn request_logs_clear_all(
 
     Ok(ClearRequestLogsResult {
         request_logs_deleted: request_logs_deleted as u64,
-        request_attempt_logs_deleted: request_attempt_logs_deleted as u64,
     })
 }
 

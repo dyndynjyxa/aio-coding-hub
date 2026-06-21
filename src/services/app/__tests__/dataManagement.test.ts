@@ -69,7 +69,7 @@ describe("services/app/dataManagement", () => {
     });
     vi.mocked(commands.requestLogsClearAll).mockResolvedValueOnce({
       status: "ok",
-      data: { request_logs_deleted: 0, request_attempt_logs_deleted: 0 } as any,
+      data: { request_logs_deleted: 0 } as any,
     });
     vi.mocked(commands.appDataReset).mockResolvedValueOnce({ status: "ok", data: true });
     vi.mocked(commands.appDataDirGet).mockResolvedValueOnce({ status: "ok", data: "/tmp" as any });
@@ -113,20 +113,13 @@ describe("services/app/dataManagement", () => {
 
     vi.mocked(commands.requestLogsClearAll).mockResolvedValueOnce({
       status: "ok",
-      data: { request_logs_deleted: -1, request_attempt_logs_deleted: 2 } as any,
+      data: { request_logs_deleted: -1 } as any,
     });
 
     await expect(requestLogsClearAll()).rejects.toThrow("IPC_INVALID_RESULT");
 
     expect(isClearRequestLogsResult(null)).toBe(false);
-    expect(
-      isClearRequestLogsResult({ request_logs_deleted: 1, request_attempt_logs_deleted: 2 })
-    ).toBe(true);
-    expect(
-      isClearRequestLogsResult({
-        request_logs_deleted: 1.5,
-        request_attempt_logs_deleted: 2,
-      } as any)
-    ).toBe(false);
+    expect(isClearRequestLogsResult({ request_logs_deleted: 1 })).toBe(true);
+    expect(isClearRequestLogsResult({ request_logs_deleted: 1.5 } as any)).toBe(false);
   });
 });

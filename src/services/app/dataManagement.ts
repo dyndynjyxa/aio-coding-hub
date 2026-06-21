@@ -37,11 +37,7 @@ export function isClearRequestLogsResult(
   value: ClearRequestLogsResult | null | undefined
 ): value is ClearRequestLogsResult {
   return (
-    !!value &&
-    Number.isSafeInteger(value.request_logs_deleted) &&
-    value.request_logs_deleted >= 0 &&
-    Number.isSafeInteger(value.request_attempt_logs_deleted) &&
-    value.request_attempt_logs_deleted >= 0
+    !!value && Number.isSafeInteger(value.request_logs_deleted) && value.request_logs_deleted >= 0
   );
 }
 

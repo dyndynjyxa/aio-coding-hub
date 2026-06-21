@@ -17,9 +17,8 @@ describe("pages/settings/settingsSidebarModel", () => {
     expect(
       buildRequestLogsClearedMessage({
         request_logs_deleted: 3,
-        request_attempt_logs_deleted: 4,
       })
-    ).toBe("已清理请求日志：request_logs 3 条；legacy request_attempt_logs 4 条");
+    ).toBe("已清理请求日志：request_logs 3 条");
   });
 
   it("builds config import success message", () => {

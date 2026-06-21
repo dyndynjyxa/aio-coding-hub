@@ -14,6 +14,7 @@ pub(crate) struct ProviderOAuthLimitsResult {
     pub limit_weekly_text: Option<String>,
     pub limit_5h_reset_at: Option<i64>,
     pub limit_weekly_reset_at: Option<i64>,
+    pub reset_credit_available_count: Option<i64>,
 }
 
 #[tauri::command]
@@ -65,8 +66,8 @@ pub(crate) async fn provider_oauth_fetch_limits(
     }
 
     let token = effective_oauth_access_token(&details, adapter)?;
-    let limits = match adapter.fetch_limits(&client, &token).await {
-        Ok(limits) => limits,
+    let result = match fetch_limits_result_for_details(&client, &details, adapter, &token).await {
+        Ok(result) => result,
         Err(err) => {
             let err_str = format!("fetch_limits failed: {err}");
             if should_retry_oauth_limits_after_refresh(&err_str)
@@ -75,53 +76,13 @@ pub(crate) async fn provider_oauth_fetch_limits(
                 let refreshed =
                     refresh_oauth_details_for_limits(&db, &client, &details, adapter).await?;
                 let refreshed_token = effective_oauth_access_token(&refreshed, adapter)?;
-                adapter
-                    .fetch_limits(&client, &refreshed_token)
+                fetch_limits_result_for_details(&client, &refreshed, adapter, &refreshed_token)
                     .await
                     .map_err(|retry_err| format!("fetch_limits failed: {retry_err}"))?
             } else {
                 return Err(err_str);
             }
         }
-    };
-
-    let limit_short_label =
-        normalize_oauth_short_window_label(adapter.cli_key(), limits.limit_short_label.as_deref());
-
-    // If the adapter already parsed limit texts, use them directly.
-    // Otherwise, try to parse from raw_json based on cli_key.
-    let (limit_5h_text, limit_weekly_text, limit_5h_reset_at, limit_weekly_reset_at) =
-        if limits.limit_5h_text.is_some() || limits.limit_weekly_text.is_some() {
-            let resets = limits
-                .raw_json
-                .as_ref()
-                .map(extract_reset_timestamps)
-                .unwrap_or((None, None));
-            (
-                limits.limit_5h_text.clone(),
-                limits.limit_weekly_text.clone(),
-                resets.0,
-                resets.1,
-            )
-        } else if let Some(ref raw) = limits.raw_json {
-            let cli_key = adapter.cli_key();
-            let (text_5h, text_weekly) = match cli_key {
-                "codex" => parse_codex_limits(raw),
-                "claude" => parse_claude_limits(raw),
-                _ => (None, None),
-            };
-            let resets = extract_reset_timestamps(raw);
-            (text_5h, text_weekly, resets.0, resets.1)
-        } else {
-            (None, None, None, None)
-        };
-
-    let result = ProviderOAuthLimitsResult {
-        limit_short_label,
-        limit_5h_text,
-        limit_weekly_text,
-        limit_5h_reset_at,
-        limit_weekly_reset_at,
     };
 
     blocking::run("provider_oauth_fetch_limits_save_snapshot", {
@@ -137,6 +98,7 @@ pub(crate) async fn provider_oauth_fetch_limits(
                     limit_weekly_text: result.limit_weekly_text.as_deref(),
                     limit_5h_reset_at: result.limit_5h_reset_at,
                     limit_weekly_reset_at: result.limit_weekly_reset_at,
+                    reset_credit_available_count: result.reset_credit_available_count,
                 },
             )
         }
@@ -167,6 +129,79 @@ fn normalize_oauth_short_window_label(
         "gemini" => Some("短窗".to_string()),
         _ => adapter_label.or_else(|| default_oauth_short_window_label(cli_key)),
     }
+}
+
+pub(super) fn provider_oauth_limits_result_from_parts(
+    cli_key: &str,
+    adapter_limit_short_label: Option<&str>,
+    parsed_limit_5h_text: Option<String>,
+    parsed_limit_weekly_text: Option<String>,
+    raw_json: Option<&serde_json::Value>,
+) -> ProviderOAuthLimitsResult {
+    let limit_short_label = normalize_oauth_short_window_label(cli_key, adapter_limit_short_label);
+    let resets = raw_json
+        .map(extract_reset_timestamps)
+        .unwrap_or((None, None));
+    let reset_credit_available_count = (cli_key == "codex")
+        .then(|| raw_json.and_then(extract_reset_credit_available_count))
+        .flatten();
+
+    // If the adapter already parsed limit texts, use them directly.
+    // Otherwise, try to parse from raw_json based on cli_key.
+    let (limit_5h_text, limit_weekly_text) =
+        if parsed_limit_5h_text.is_some() || parsed_limit_weekly_text.is_some() {
+            (parsed_limit_5h_text, parsed_limit_weekly_text)
+        } else if let Some(raw) = raw_json {
+            match cli_key {
+                "codex" => parse_codex_limits(raw),
+                "claude" => parse_claude_limits(raw),
+                _ => (None, None),
+            }
+        } else {
+            (None, None)
+        };
+
+    ProviderOAuthLimitsResult {
+        limit_short_label,
+        limit_5h_text,
+        limit_weekly_text,
+        limit_5h_reset_at: resets.0,
+        limit_weekly_reset_at: resets.1,
+        reset_credit_available_count,
+    }
+}
+
+async fn fetch_limits_result_for_details(
+    client: &reqwest::Client,
+    details: &crate::providers::ProviderOAuthDetails,
+    adapter: &'static dyn crate::gateway::oauth::provider_trait::OAuthProvider,
+    token: &str,
+) -> Result<ProviderOAuthLimitsResult, String> {
+    if adapter.cli_key() == "codex" {
+        let (account_id, _) =
+            super::oauth::extract_codex_identity(details.oauth_id_token.as_deref());
+        if let Some(account_id) = account_id
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+        {
+            return super::oauth_reset::fetch_codex_usage_limits(
+                client,
+                &super::oauth_reset::CodexQuotaEndpoints::default(),
+                token,
+                &account_id,
+            )
+            .await;
+        }
+    }
+
+    let limits = adapter.fetch_limits(client, token).await?;
+    Ok(provider_oauth_limits_result_from_parts(
+        adapter.cli_key(),
+        limits.limit_short_label.as_deref(),
+        limits.limit_5h_text,
+        limits.limit_weekly_text,
+        limits.raw_json.as_ref(),
+    ))
 }
 
 fn parse_remaining_percent_from_window(window: &serde_json::Value) -> Option<f64> {
@@ -320,6 +355,13 @@ fn extract_reset_timestamps(body: &serde_json::Value) -> (Option<i64>, Option<i6
     extract_bucket_reset_timestamps(body)
 }
 
+fn extract_reset_credit_available_count(body: &serde_json::Value) -> Option<i64> {
+    body.get("rate_limit_reset_credits")
+        .and_then(|value| value.get("available_count"))
+        .and_then(serde_json::Value::as_i64)
+        .filter(|value| *value >= 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,6 +428,33 @@ mod tests {
 
         assert_eq!(limit_5h.as_deref(), Some("50%"));
         assert_eq!(limit_weekly.as_deref(), Some("75%"));
+    }
+
+    #[test]
+    fn extract_reset_credit_available_count_supports_codex_usage_payload() {
+        let body = serde_json::json!({
+            "rate_limit": {
+                "primary_window": { "used_percent": 25.0 },
+                "secondary_window": { "used_percent": 10.0 }
+            },
+            "rate_limit_reset_credits": {
+                "available_count": 3
+            }
+        });
+
+        assert_eq!(extract_reset_credit_available_count(&body), Some(3));
+    }
+
+    #[test]
+    fn extract_reset_credit_available_count_ignores_invalid_values() {
+        for body in [
+            serde_json::json!({}),
+            serde_json::json!({ "rate_limit_reset_credits": null }),
+            serde_json::json!({ "rate_limit_reset_credits": { "available_count": -1 } }),
+            serde_json::json!({ "rate_limit_reset_credits": { "available_count": "3" } }),
+        ] {
+            assert_eq!(extract_reset_credit_available_count(&body), None);
+        }
     }
 
     #[test]

@@ -177,6 +177,57 @@ INSERT INTO request_logs (
     .expect("insert usage log");
 }
 
+#[test]
+fn lifecycle_interruption_rows_are_excluded_from_usage_summary_and_leaderboard() {
+    let conn = setup_conn();
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            provider_id: 1,
+            provider_name: "Included Provider",
+            input_tokens: Some(80),
+            output_tokens: Some(20),
+            total_tokens: Some(100),
+            cost_usd_femto: Some(1_000_000_000_000_000),
+            ..base_usage_log(1_000)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            provider_id: 2,
+            provider_name: "Interrupted Provider",
+            status: Some(499),
+            error_code: Some("GW_REQUEST_INTERRUPTED_BY_RESTART"),
+            input_tokens: Some(8_000),
+            output_tokens: Some(2_000),
+            total_tokens: Some(10_000),
+            cost_usd_femto: Some(99_000_000_000_000_000),
+            excluded_from_stats: 1,
+            ..base_usage_log(1_001)
+        },
+    );
+
+    let summary = summary_query(&conn, None, None, None, None, false).expect("summary");
+    assert_eq!(summary.requests_total, 1);
+    assert_eq!(summary.total_tokens, 100);
+
+    let rows = leaderboard_v2_with_conn(
+        &conn,
+        UsageScopeV2::Provider,
+        None,
+        None,
+        None,
+        None,
+        Some(50),
+        false,
+    )
+    .expect("leaderboard");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].key, "codex:1");
+    assert_eq!(rows[0].total_tokens, 100);
+}
+
 fn insert_migrated_provider(
     conn: &Connection,
     id: i64,

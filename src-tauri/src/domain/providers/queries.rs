@@ -1163,15 +1163,32 @@ pub fn set_enabled(
     get_by_id(&conn, provider_id)
 }
 
-pub fn delete(db: &db::Db, provider_id: i64) -> crate::shared::error::AppResult<()> {
-    let conn = db.open_connection()?;
-    let changed = conn
+pub fn delete(
+    db: &db::Db,
+    provider_id: i64,
+    clear_usage_stats: bool,
+) -> crate::shared::error::AppResult<()> {
+    let mut conn = db.open_connection()?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| db_err!("failed to start transaction: {e}"))?;
+    let changed = tx
         .execute("DELETE FROM providers WHERE id = ?1", params![provider_id])
         .map_err(|e| db_err!("failed to delete provider: {e}"))?;
 
     if changed == 0 {
         return Err("DB_NOT_FOUND: provider not found".to_string().into());
     }
+
+    if clear_usage_stats {
+        tx.execute(
+            "DELETE FROM request_logs WHERE final_provider_id = ?1",
+            params![provider_id],
+        )
+        .map_err(|e| db_err!("failed to delete provider request logs: {e}"))?;
+    }
+
+    tx.commit().map_err(|e| db_err!("failed to commit: {e}"))?;
 
     Ok(())
 }

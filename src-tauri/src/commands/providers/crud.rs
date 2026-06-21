@@ -52,8 +52,9 @@ pub(crate) async fn provider_delete(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
     provider_id: i64,
+    clear_usage_stats: bool,
 ) -> Result<bool, String> {
-    provider_service::provider_delete(app, db_state, provider_id).await
+    provider_service::provider_delete(app, db_state, provider_id, clear_usage_stats).await
 }
 
 #[tauri::command]

@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { RealtimeTraceCards } from "../RealtimeTraceCards";
 
@@ -17,13 +17,18 @@ function traceBase(overrides: Partial<any> = {}) {
   };
 }
 
+function cards(traces: any[]) {
+  return traces.map((trace) => ({ trace }));
+}
+
 describe("components/home/RealtimeTraceCards", () => {
-  it("does not start timer when traces list is empty", () => {
+  it("does not start its own timer when cards list is empty", () => {
     const setIntervalSpy = vi.spyOn(window, "setInterval");
     render(
       <RealtimeTraceCards
         folderLookupBySessionKey={new Map()}
-        traces={[]}
+        cards={[]}
+        nowMs={1_700_000_000_000}
         formatUnixSeconds={(ts) => String(ts)}
         showCustomTooltip={false}
       />
@@ -32,12 +37,11 @@ describe("components/home/RealtimeTraceCards", () => {
     setIntervalSpy.mockRestore();
   });
 
-  it("shares the live clock interval across active realtime card mounts", () => {
+  it("does not own a live clock for active realtime cards", () => {
     vi.useFakeTimers();
     const baseTime = 1_700_000_000_000;
     vi.setSystemTime(baseTime);
     const setIntervalSpy = vi.spyOn(window, "setInterval");
-    const clearIntervalSpy = vi.spyOn(window, "clearInterval");
     const activeTrace = traceBase({
       trace_id: "t-active",
       first_seen_ms: baseTime - 100,
@@ -48,7 +52,8 @@ describe("components/home/RealtimeTraceCards", () => {
     const first = render(
       <RealtimeTraceCards
         folderLookupBySessionKey={new Map()}
-        traces={[activeTrace] as any}
+        cards={cards([activeTrace])}
+        nowMs={baseTime}
         formatUnixSeconds={(ts) => String(ts)}
         showCustomTooltip={false}
       />
@@ -56,65 +61,83 @@ describe("components/home/RealtimeTraceCards", () => {
     const second = render(
       <RealtimeTraceCards
         folderLookupBySessionKey={new Map()}
-        traces={[activeTrace] as any}
+        cards={cards([activeTrace])}
+        nowMs={baseTime}
         formatUnixSeconds={(ts) => String(ts)}
         showCustomTooltip={false}
       />
     );
 
-    expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+    expect(setIntervalSpy).not.toHaveBeenCalled();
     first.unmount();
-    expect(clearIntervalSpy).not.toHaveBeenCalled();
     second.unmount();
-    expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
 
     setIntervalSpy.mockRestore();
-    clearIntervalSpy.mockRestore();
     vi.useRealTimers();
   });
 
-  it("stops the shared live clock when visible traces age out", () => {
+  it("renders projected completed cards without applying another age filter", () => {
     vi.useFakeTimers();
     const baseTime = 1_700_000_000_000;
     vi.setSystemTime(baseTime);
-    const clearIntervalSpy = vi.spyOn(window, "clearInterval");
 
     render(
       <RealtimeTraceCards
         folderLookupBySessionKey={new Map()}
-        traces={
-          [
-            traceBase({
+        cards={cards([
+          traceBase({
+            trace_id: "t-completed",
+            first_seen_ms: baseTime - 1000,
+            last_seen_ms: baseTime,
+            summary: {
               trace_id: "t-completed",
-              first_seen_ms: baseTime - 1000,
-              last_seen_ms: baseTime,
-              summary: {
-                trace_id: "t-completed",
-                cli_key: "claude",
-                method: "POST",
-                path: "/v1/messages",
-                query: null,
-                status: 200,
-                error_code: null,
-                duration_ms: 100,
-                ttfb_ms: 10,
-              },
-            }),
-          ] as any
-        }
+              cli_key: "claude",
+              method: "POST",
+              path: "/v1/messages",
+              query: null,
+              status: 200,
+              error_code: null,
+              duration_ms: 100,
+              ttfb_ms: 10,
+            },
+          }),
+        ])}
+        nowMs={baseTime + 2_000}
         formatUnixSeconds={(ts) => String(ts)}
         showCustomTooltip={false}
       />
     );
 
-    act(() => {
-      vi.setSystemTime(baseTime + 2_000);
-      vi.advanceTimersByTime(250);
-    });
+    expect(screen.getByText("200 成功")).toBeInTheDocument();
 
-    expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
 
-    clearIntervalSpy.mockRestore();
+  it("keeps in-progress traces visible after five minutes without new events", () => {
+    vi.useFakeTimers();
+    const baseTime = 1_700_000_000_000;
+    vi.setSystemTime(baseTime);
+
+    render(
+      <RealtimeTraceCards
+        folderLookupBySessionKey={new Map()}
+        cards={cards([
+          traceBase({
+            trace_id: "t-long-stream",
+            first_seen_ms: baseTime - 10 * 60 * 1000,
+            last_seen_ms: baseTime - 5 * 60 * 1000 - 1,
+            summary: undefined,
+          }),
+        ])}
+        nowMs={baseTime}
+        formatUnixSeconds={(ts) => String(ts)}
+        showCustomTooltip={false}
+      />
+    );
+
+    expect(screen.getByText("进行中")).toBeInTheDocument();
+    expect(screen.getByText("当前阶段")).toBeInTheDocument();
+
     vi.useRealTimers();
   });
 
@@ -199,7 +222,8 @@ describe("components/home/RealtimeTraceCards", () => {
             ],
           ])
         }
-        traces={[inProgress, completedError, completedOk] as any}
+        cards={cards([inProgress, completedError, completedOk])}
+        nowMs={baseTime}
         formatUnixSeconds={(ts) => `ts:${ts}`}
         showCustomTooltip={false}
       />
@@ -243,23 +267,22 @@ describe("components/home/RealtimeTraceCards", () => {
     render(
       <RealtimeTraceCards
         folderLookupBySessionKey={new Map()}
-        traces={
-          [
-            traceBase({
-              requested_model: "claude-sonnet",
-              first_seen_ms: baseTime - 1000,
-              last_seen_ms: baseTime - 1000,
-              claude_model_mapping: {
-                requestedModel: "claude-sonnet",
-                effectiveModel: "gpt-5.4",
-                mappingKind: "sonnet",
-                providerId: 1,
-                providerName: "Provider A",
-                applied: true,
-              },
-            }),
-          ] as any
-        }
+        cards={cards([
+          traceBase({
+            requested_model: "claude-sonnet",
+            first_seen_ms: baseTime - 1000,
+            last_seen_ms: baseTime - 1000,
+            claude_model_mapping: {
+              requestedModel: "claude-sonnet",
+              effectiveModel: "gpt-5.4",
+              mappingKind: "sonnet",
+              providerId: 1,
+              providerName: "Provider A",
+              applied: true,
+            },
+          }),
+        ])}
+        nowMs={baseTime}
         formatUnixSeconds={(ts) => String(ts)}
         showCustomTooltip={false}
       />

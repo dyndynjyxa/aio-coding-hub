@@ -1,14 +1,14 @@
 // Usage:
 // - Render in Home page "概览 / 使用记录" area to show up-to-date in-flight traces.
-// - Accepts a list of `TraceSession` candidates; component applies its own visibility + exit animation logic.
+// - Accepts projected realtime cards; visibility is decided by requestActivityProjection.
 
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useMemo } from "react";
 import { cliShortLabel } from "../../constants/clis";
 import { GatewayErrorCodes } from "../../constants/gatewayErrorCodes";
-import { useNowMs } from "../../hooks/useNowMs";
 import type { CliSessionsFolderLookupEntry } from "../../services/cli/cliSessions";
 import type { CliKey } from "../../services/providers/providers";
-import type { TraceSession } from "../../services/gateway/traceStore";
+import type { ProjectedRealtimeCard } from "../../services/gateway/requestActivityProjection";
+import { REALTIME_TRACE_EXIT_START_MS } from "../../services/gateway/requestActivityProjection";
 import { cn } from "../../utils/cn";
 import {
   computeOutputTokensPerSecond,
@@ -33,7 +33,8 @@ import { CliBrandIcon } from "./CliBrandIcon";
 
 export type RealtimeTraceCardsProps = {
   folderLookupBySessionKey: Map<string, CliSessionsFolderLookupEntry>;
-  traces: TraceSession[];
+  cards: ProjectedRealtimeCard[];
+  nowMs: number;
   formatUnixSeconds: (ts: number) => string;
   showCustomTooltip: boolean;
 };
@@ -43,17 +44,6 @@ function sessionFolderLookupKey(cliKey: string, sessionId: string | null | undef
   if (!normalized) return null;
   return `${cliKey}:${normalized}`;
 }
-
-const REALTIME_TRACE_EXIT_START_MS = 600;
-const REALTIME_TRACE_EXIT_ANIM_MS = 400;
-const REALTIME_TRACE_EXIT_TOTAL_MS =
-  REALTIME_TRACE_EXIT_START_MS + REALTIME_TRACE_EXIT_ANIM_MS + 100;
-
-/**
- * UI-level safety net: hide traces stuck in "in progress" beyond this threshold.
- * Works independently of traceStore pruning for defense-in-depth.
- */
-const STALE_TRACE_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
  * When multiple traces complete within this window, they batch-exit together
@@ -71,44 +61,14 @@ const LIVE_METRIC_VALUE =
 const LIVE_METRIC_STAGE_VALUE =
   "mt-1.5 truncate font-extrabold leading-none text-page-accent drop-shadow-page-accent";
 
-function shouldKeepRealtimeTraceVisible(trace: TraceSession, nowMs: number): boolean {
-  if (!trace.summary) {
-    return nowMs - trace.last_seen_ms < STALE_TRACE_TIMEOUT_MS;
-  }
-  return Math.max(0, nowMs - trace.last_seen_ms) < REALTIME_TRACE_EXIT_TOTAL_MS;
-}
-
-function shouldUseRealtimeTraceClock(traces: TraceSession[], nowMs: number): boolean {
-  return traces.some((trace) => shouldKeepRealtimeTraceVisible(trace, nowMs));
-}
-
 export const RealtimeTraceCards = memo(function RealtimeTraceCards({
   folderLookupBySessionKey,
-  traces,
+  cards,
+  nowMs,
   formatUnixSeconds,
   showCustomTooltip,
 }: RealtimeTraceCardsProps) {
-  const [clockEnabled, setClockEnabled] = useState(() =>
-    shouldUseRealtimeTraceClock(traces, Date.now())
-  );
-  const clockNowMs = useNowMs(clockEnabled, 250);
-  const nowMs = clockEnabled ? clockNowMs : Date.now();
-
-  useEffect(() => {
-    const nextEnabled = shouldUseRealtimeTraceClock(traces, Date.now());
-    setClockEnabled((current) => (current === nextEnabled ? current : nextEnabled));
-  }, [traces]);
-
-  useEffect(() => {
-    if (!clockEnabled) return;
-    if (shouldUseRealtimeTraceClock(traces, clockNowMs)) return;
-    setClockEnabled(false);
-  }, [clockEnabled, clockNowMs, traces]);
-
-  const visibleTraces = useMemo(() => {
-    const kept = traces.filter((trace) => shouldKeepRealtimeTraceVisible(trace, nowMs));
-    return kept.slice(0, 5);
-  }, [traces, nowMs]);
+  const visibleTraces = useMemo(() => cards.map((card) => card.trace), [cards]);
 
   // Compute a batch-aligned exit threshold: if multiple traces completed within
   // BATCH_EXIT_WINDOW_MS of each other, they all exit when the earliest one would.

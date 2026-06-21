@@ -1057,6 +1057,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
       limit_weekly_text: "1000 req",
       limit_5h_reset_at: null,
       limit_weekly_reset_at: null,
+      reset_credit_available_count: null,
     });
 
     const onSaved = vi.fn();
@@ -1135,6 +1136,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
       limit_weekly_text: "1000 req",
       limit_5h_reset_at: null,
       limit_weekly_reset_at: null,
+      reset_credit_available_count: null,
     });
 
     const onSaved = vi.fn();
@@ -1226,7 +1228,9 @@ describe("pages/providers/ProviderEditorDialog", () => {
       })
     );
 
-    await waitFor(() => expect(vi.mocked(providerDelete)).toHaveBeenCalledWith(119));
+    await waitFor(() =>
+      expect(vi.mocked(providerDelete)).toHaveBeenCalledWith(119, { clearUsageStats: false })
+    );
     expect(vi.mocked(providerOAuthStatus)).not.toHaveBeenCalled();
     expect(vi.mocked(providerOAuthFetchLimits)).not.toHaveBeenCalled();
     expect(vi.mocked(toast)).not.toHaveBeenCalledWith("OAuth 登录成功");
@@ -1296,6 +1300,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
       limit_weekly_text: "1000 req",
       limit_5h_reset_at: null,
       limit_weekly_reset_at: null,
+      reset_credit_available_count: null,
     });
 
     const onSaved = vi.fn();
@@ -1416,7 +1421,9 @@ describe("pages/providers/ProviderEditorDialog", () => {
       expires_at: 1700000000,
     });
 
-    await waitFor(() => expect(vi.mocked(providerDelete)).toHaveBeenCalledWith(301));
+    await waitFor(() =>
+      expect(vi.mocked(providerDelete)).toHaveBeenCalledWith(301, { clearUsageStats: false })
+    );
     expect(vi.mocked(providerOAuthStatus)).not.toHaveBeenCalled();
     expect(vi.mocked(providerOAuthFetchLimits)).not.toHaveBeenCalled();
     expect(vi.mocked(toast)).not.toHaveBeenCalledWith("设备码登录成功");
@@ -1576,6 +1583,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
       limit_weekly_text: "300",
       limit_5h_reset_at: null,
       limit_weekly_reset_at: null,
+      reset_credit_available_count: null,
     });
 
     const onSaved = vi.fn();
@@ -1694,7 +1702,9 @@ describe("pages/providers/ProviderEditorDialog", () => {
     await waitFor(() =>
       expect(vi.mocked(providerOAuthStartFlow)).toHaveBeenCalledWith("codex", 99)
     );
-    await waitFor(() => expect(vi.mocked(providerDelete)).toHaveBeenCalledWith(99));
+    await waitFor(() =>
+      expect(vi.mocked(providerDelete)).toHaveBeenCalledWith(99, { clearUsageStats: false })
+    );
     expect(onSaved).not.toHaveBeenCalled();
     expect(onOpenChange).not.toHaveBeenCalled();
     expect(vi.mocked(toast)).toHaveBeenCalledWith("OAuth 登录失败");
@@ -1736,7 +1746,9 @@ describe("pages/providers/ProviderEditorDialog", () => {
 
     fireEvent.click(dialog.getByRole("button", { name: "OAuth 登录" }));
 
-    await waitFor(() => expect(vi.mocked(providerDelete)).toHaveBeenCalledWith(102));
+    await waitFor(() =>
+      expect(vi.mocked(providerDelete)).toHaveBeenCalledWith(102, { clearUsageStats: false })
+    );
     await waitFor(() =>
       expect(vi.mocked(logToConsole)).toHaveBeenCalledWith(
         "warn",
@@ -1788,7 +1800,9 @@ describe("pages/providers/ProviderEditorDialog", () => {
 
     fireEvent.click(dialog.getByRole("button", { name: "OAuth 登录" }));
 
-    await waitFor(() => expect(vi.mocked(providerDelete)).toHaveBeenCalledWith(103));
+    await waitFor(() =>
+      expect(vi.mocked(providerDelete)).toHaveBeenCalledWith(103, { clearUsageStats: false })
+    );
     await waitFor(() =>
       expect(vi.mocked(logToConsole)).toHaveBeenCalledWith(
         "error",
@@ -2000,7 +2014,9 @@ describe("pages/providers/ProviderEditorDialog", () => {
 
     fireEvent.click(dialog.getByRole("button", { name: "OAuth 登录" }));
 
-    await waitFor(() => expect(vi.mocked(providerDelete)).toHaveBeenCalledWith(101));
+    await waitFor(() =>
+      expect(vi.mocked(providerDelete)).toHaveBeenCalledWith(101, { clearUsageStats: false })
+    );
     await waitFor(() =>
       expect(vi.mocked(toast)).toHaveBeenCalledWith(expect.stringContaining("OAuth 登录失败"))
     );

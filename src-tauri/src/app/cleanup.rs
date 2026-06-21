@@ -1,14 +1,18 @@
 //! Usage: Best-effort cleanup hooks for app lifecycle events (exit/restart).
 
+use super::app_state::{ensure_db_ready, DbInitState};
 use super::gateway_control::app_take_running_gateway;
 use crate::blocking;
 use crate::cli_proxy;
 use crate::gateway::events::GATEWAY_STATUS_EVENT_NAME;
 #[cfg(windows)]
 use crate::infra::wsl;
+use crate::request_logs::{reconcile_unresolved_pending, RequestLogReconcileReason};
+use crate::shared::time::now_unix_millis;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::OnceLock;
 use std::time::Duration;
+use tauri::Manager;
 use tokio::sync::Notify;
 
 const CLEANUP_STATE_IDLE: u8 = 0;
@@ -206,6 +210,49 @@ pub(crate) async fn stop_gateway_best_effort_unlocked<R: tauri::Runtime>(
         GATEWAY_STOP_TIMEOUTS,
     )
     .await;
+
+    reconcile_gateway_stop_pending_logs_best_effort(app).await;
+}
+
+async fn reconcile_gateway_stop_pending_logs_best_effort<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) {
+    let Some(db_state) = app.try_state::<DbInitState>() else {
+        tracing::warn!(
+            "exit cleanup: DB state unavailable while reconciling pending request logs; startup recovery will retry"
+        );
+        return;
+    };
+
+    let db = match ensure_db_ready(app.clone(), db_state.inner()).await {
+        Ok(db) => db,
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                "exit cleanup: DB unavailable while reconciling pending request logs; startup recovery will retry"
+            );
+            return;
+        }
+    };
+
+    match reconcile_unresolved_pending(
+        &db,
+        RequestLogReconcileReason::GatewayStop,
+        now_unix_millis(),
+    ) {
+        Ok(count) => {
+            if count > 0 {
+                tracing::info!(
+                    reconciled_count = count,
+                    "exit cleanup reconciled gateway-stop pending request logs"
+                );
+            }
+        }
+        Err(err) => tracing::warn!(
+            error = %err,
+            "exit cleanup: failed to reconcile pending request logs; startup recovery will retry"
+        ),
+    }
 }
 
 async fn stop_gateway_tasks_best_effort(

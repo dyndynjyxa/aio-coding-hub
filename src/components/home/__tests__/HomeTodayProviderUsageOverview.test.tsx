@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeTodayProviderUsageOverview } from "../HomeTodayProviderUsageOverview";
 import { useHomeTokenCostDataModel } from "../useHomeTokenCostDataModel";
+import type { RequestLogSummary } from "../../../services/gateway/requestLogs";
 import type { TraceSession } from "../../../services/gateway/traceStore";
 import type { UsageLeaderboardRow } from "../../../services/usage/usage";
 
@@ -91,6 +92,41 @@ function createLeaderboardRow(
     cost_usd: 0.1,
     ...rest,
   };
+}
+
+function createRequestLog(overrides: Partial<RequestLogSummary> = {}): RequestLogSummary {
+  return {
+    id: 1,
+    trace_id: "trace-Claude Main",
+    cli_key: "claude",
+    session_id: null,
+    method: "POST",
+    path: "/v1/messages",
+    query: null,
+    status: null,
+    error_code: null,
+    duration_ms: 0,
+    ttfb_ms: null,
+    attempts_json: "[]",
+    input_tokens: null,
+    output_tokens: null,
+    total_tokens: null,
+    cache_read_input_tokens: null,
+    cache_creation_input_tokens: null,
+    cache_creation_5m_input_tokens: null,
+    cache_creation_1h_input_tokens: null,
+    usage_json: null,
+    requested_model: "claude-sonnet",
+    cost_usd: null,
+    cost_multiplier: 1,
+    special_settings_json: null,
+    provider_chain_json: null,
+    error_details_json: null,
+    final_provider_id: null,
+    created_at_ms: Date.now(),
+    created_at: Math.floor(Date.now() / 1000),
+    ...overrides,
+  } as RequestLogSummary;
 }
 
 function mockDataModel(overrides: Partial<ReturnType<typeof useHomeTokenCostDataModel>> = {}) {
@@ -544,6 +580,31 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(screen.getAllByLabelText("进行中")).toHaveLength(3);
   });
 
+  it("keeps backend active sessions as the primary running-provider source when traces are empty", () => {
+    mockDataModel({
+      rows: [
+        createLeaderboardRow({
+          key: "claude:5",
+          name: "claude/Backend Active",
+        }),
+      ],
+    });
+
+    render(
+      <HomeTodayProviderUsageOverview
+        activeSessions={[
+          createActiveSession("Backend Active", { providerId: 5, cliKey: "claude" }),
+        ]}
+        requestLogs={[]}
+        traces={[]}
+      />
+    );
+
+    const providerRow = screen.getByText("claude/Backend Active").closest("tr");
+    expect(providerRow).toBeTruthy();
+    expect(within(providerRow as HTMLElement).getByLabelText("进行中")).toBeInTheDocument();
+  });
+
   it("matches active sessions by scoped or unscoped names when provider ids are absent", () => {
     mockDataModel({
       rows: [
@@ -578,7 +639,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(screen.getAllByLabelText("进行中")).toHaveLength(3);
   });
 
-  it("ignores completed, stale, unnamed, unknown, and duplicate live traces", () => {
+  it("keeps quiet no-summary traces while ignoring completed, unnamed, unknown, and duplicate traces", () => {
     mockDataModel({ rows: [] });
     const now = Date.now();
     const completedTrace = {
@@ -641,11 +702,11 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
 
     expect(screen.getByText("claude/Trace Fresh")).toBeInTheDocument();
     expect(screen.queryByText("claude/Completed Trace")).not.toBeInTheDocument();
-    expect(screen.queryByText("claude/Old Trace")).not.toBeInTheDocument();
-    expect(screen.queryByText("claude/Stale Trace")).not.toBeInTheDocument();
+    expect(screen.getByText("claude/Old Trace")).toBeInTheDocument();
+    expect(screen.getByText("claude/Stale Trace")).toBeInTheDocument();
     expect(screen.queryByText("claude/Unknown")).not.toBeInTheDocument();
     expect(screen.queryByText("claude/Missing Attempts Trace")).not.toBeInTheDocument();
-    expect(screen.getAllByLabelText("进行中")).toHaveLength(1);
+    expect(screen.getAllByLabelText("进行中")).toHaveLength(3);
   });
 
   it("matches active sessions by scoped name when provider id is invalid", () => {
@@ -800,7 +861,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(within(claudeRow as HTMLElement).queryByLabelText("进行中")).not.toBeInTheDocument();
   });
 
-  it("does not keep showing a running badge when traces are gone", () => {
+  it("does not keep showing a trace-derived running badge when traces are gone", () => {
     mockDataModel({
       rows: [
         {
@@ -823,12 +884,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
       ],
     });
 
-    render(
-      <HomeTodayProviderUsageOverview
-        activeSessions={[createActiveSession("Claude Main", { providerId: 1, cliKey: "claude" })]}
-        traces={[]}
-      />
-    );
+    render(<HomeTodayProviderUsageOverview traces={[]} />);
 
     const providerRow = screen.getByText("Claude Main").closest("tr");
     expect(providerRow).toBeTruthy();
@@ -863,6 +919,43 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     const providerRow = screen.getByText("Claude Main").closest("tr");
     expect(providerRow).toBeTruthy();
     expect(within(providerRow as HTMLElement).getByLabelText("进行中")).toBeInTheDocument();
+  });
+
+  it("keeps running provider hints for long pending traces backed by request logs", () => {
+    vi.useFakeTimers();
+    const baseTime = 1_700_000_000_000;
+    vi.setSystemTime(baseTime);
+    mockDataModel({
+      rows: [
+        createLeaderboardRow({
+          key: "claude:1",
+          name: "Claude Main",
+        }),
+      ],
+    });
+
+    const longTrace = createRunningTrace("Claude Main", { providerId: 1 });
+    longTrace.first_seen_ms = baseTime - 11 * 60 * 1000;
+    longTrace.last_seen_ms = baseTime - 6 * 60 * 1000;
+
+    render(
+      <HomeTodayProviderUsageOverview
+        traces={[longTrace]}
+        requestLogs={[
+          createRequestLog({
+            trace_id: longTrace.trace_id,
+            created_at_ms: baseTime - 11 * 60 * 1000,
+            created_at: Math.floor((baseTime - 11 * 60 * 1000) / 1000),
+          }),
+        ]}
+      />
+    );
+
+    const providerRow = screen.getByText("Claude Main").closest("tr");
+    expect(providerRow).toBeTruthy();
+    expect(within(providerRow as HTMLElement).getByLabelText("进行中")).toBeInTheDocument();
+
+    vi.useRealTimers();
   });
 
   it("shows a dash for cache hit rate when the summary has no denominator", () => {

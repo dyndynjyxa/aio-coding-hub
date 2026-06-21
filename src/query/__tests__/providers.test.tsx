@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ProviderSummary } from "../../services/providers/providers";
 import {
   providerOAuthFetchLimits,
+  providerOAuthResetCodexQuota,
   providerOAuthStatus,
   providerClaudeTerminalLaunchCommand,
   providerDelete,
@@ -18,6 +19,7 @@ import {
   fetchProviderOAuthStatus,
   readProviderOAuthLimitsCache,
   refreshProviderOAuthLimits,
+  resetProviderOAuthCodexQuota,
   useOAuthLimitsQuery,
   useProviderClaudeTerminalLaunchCommandMutation,
   useProviderDeleteMutation,
@@ -42,6 +44,7 @@ vi.mock("../../services/providers/providers", async () => {
     providersList: vi.fn(),
     providerOAuthStatus: vi.fn(),
     providerOAuthFetchLimits: vi.fn(),
+    providerOAuthResetCodexQuota: vi.fn(),
     providerUpsert: vi.fn(),
     providerSetEnabled: vi.fn(),
     providerDelete: vi.fn(),
@@ -244,6 +247,7 @@ describe("query/providers", () => {
       limit_weekly_text: null,
       limit_5h_reset_at: 1700000000,
       limit_weekly_reset_at: null,
+      reset_credit_available_count: null,
     };
     vi.mocked(providerOAuthFetchLimits).mockResolvedValue(limits);
 
@@ -280,6 +284,7 @@ describe("query/providers", () => {
       limit_weekly_text: null,
       limit_5h_reset_at: null,
       limit_weekly_reset_at: null,
+      reset_credit_available_count: 1,
     };
     vi.mocked(providerOAuthFetchLimits).mockResolvedValueOnce(availableLimits);
     vi.mocked(gatewayCircuitResetProvider).mockResolvedValue(true);
@@ -299,6 +304,7 @@ describe("query/providers", () => {
       limit_weekly_text: null,
       limit_5h_reset_at: 1_700_100_000,
       limit_weekly_reset_at: null,
+      reset_credit_available_count: 0,
     });
 
     await expect(
@@ -317,6 +323,7 @@ describe("query/providers", () => {
       limit_weekly_text: null,
       limit_5h_reset_at: null,
       limit_weekly_reset_at: null,
+      reset_credit_available_count: 2,
     };
     vi.mocked(providerOAuthFetchLimits).mockResolvedValueOnce(limits);
     vi.mocked(gatewayCircuitResetProvider).mockRejectedValueOnce(new Error("reset boom"));
@@ -329,6 +336,89 @@ describe("query/providers", () => {
 
     expect(gatewayCircuitResetProvider).toHaveBeenCalledWith(11);
     expect(client.getQueryData(oauthLimitsKeys.detail(11))).toEqual(limits);
+  });
+
+  it("resetProviderOAuthCodexQuota writes refreshed limits only for the target provider", async () => {
+    setTauriRuntime();
+
+    const oldTargetLimits = {
+      limit_short_label: "5h",
+      limit_5h_text: "0%",
+      limit_weekly_text: "10%",
+      limit_5h_reset_at: null,
+      limit_weekly_reset_at: null,
+      reset_credit_available_count: 1,
+    };
+    const otherLimits = {
+      limit_short_label: "5h",
+      limit_5h_text: "80%",
+      limit_weekly_text: "90%",
+      limit_5h_reset_at: null,
+      limit_weekly_reset_at: null,
+      reset_credit_available_count: 5,
+    };
+    const refreshedLimits = {
+      limit_short_label: "5h",
+      limit_5h_text: "100%",
+      limit_weekly_text: "100%",
+      limit_5h_reset_at: 1_700_000_000,
+      limit_weekly_reset_at: 1_700_100_000,
+      reset_credit_available_count: 0,
+    };
+    vi.mocked(providerOAuthResetCodexQuota).mockResolvedValueOnce({
+      success: true,
+      code: "ok",
+      windows_reset: 2,
+      refreshed_limits: refreshedLimits,
+      refresh_error: null,
+    });
+    vi.mocked(gatewayCircuitResetProvider).mockResolvedValue(true);
+
+    const client = createTestQueryClient();
+    client.setQueryData(oauthLimitsKeys.detail(11), oldTargetLimits);
+    client.setQueryData(oauthLimitsKeys.detail(22), otherLimits);
+
+    await expect(
+      resetProviderOAuthCodexQuota(client, 11, { resetCircuitAfterRefresh: true })
+    ).resolves.toMatchObject({ success: true, refreshed_limits: refreshedLimits });
+
+    expect(providerOAuthResetCodexQuota).toHaveBeenCalledWith(11);
+    expect(gatewayCircuitResetProvider).toHaveBeenCalledWith(11);
+    expect(client.getQueryData(oauthLimitsKeys.detail(11))).toEqual(refreshedLimits);
+    expect(client.getQueryData(oauthLimitsKeys.detail(22))).toEqual(otherLimits);
+  });
+
+  it("resetProviderOAuthCodexQuota preserves cached limits on partial success", async () => {
+    setTauriRuntime();
+    vi.mocked(gatewayCircuitResetProvider).mockClear();
+
+    const oldLimits = {
+      limit_short_label: "5h",
+      limit_5h_text: "0%",
+      limit_weekly_text: "10%",
+      limit_5h_reset_at: null,
+      limit_weekly_reset_at: null,
+      reset_credit_available_count: 1,
+    };
+    vi.mocked(providerOAuthResetCodexQuota).mockResolvedValueOnce({
+      success: true,
+      code: "ok",
+      windows_reset: 2,
+      refreshed_limits: null,
+      refresh_error: "usage refresh failed",
+    });
+
+    const client = createTestQueryClient();
+    client.setQueryData(oauthLimitsKeys.detail(11), oldLimits);
+
+    await expect(resetProviderOAuthCodexQuota(client, 11)).resolves.toMatchObject({
+      success: true,
+      refreshed_limits: null,
+      refresh_error: "usage refresh failed",
+    });
+
+    expect(client.getQueryData(oauthLimitsKeys.detail(11))).toEqual(oldLimits);
+    expect(gatewayCircuitResetProvider).not.toHaveBeenCalled();
   });
 
   it("useProviderSetEnabledMutation updates cached providers list", async () => {
@@ -471,9 +561,29 @@ describe("query/providers", () => {
       await result.current.mutateAsync({ cliKey: " claude " as never, providerId: 1 });
     });
 
-    expect(providerDelete).toHaveBeenCalledWith(1);
+    expect(providerDelete).toHaveBeenCalledWith(1, { clearUsageStats: false });
     expect(client.getQueryData(providersKeys.list("claude"))).toEqual([providers[1]]);
     expect(client.getQueryData(providersKeys.list(" claude " as never))).toBeUndefined();
+  });
+
+  it("useProviderDeleteMutation forwards usage stats cleanup choice", async () => {
+    setTauriRuntime();
+
+    vi.mocked(providerDelete).mockResolvedValue(true);
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useProviderDeleteMutation(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({
+        cliKey: "claude",
+        providerId: 1,
+        clearUsageStats: true,
+      });
+    });
+
+    expect(providerDelete).toHaveBeenCalledWith(1, { clearUsageStats: true });
   });
 
   it("useProviderDeleteMutation is a no-op when service returns false", async () => {

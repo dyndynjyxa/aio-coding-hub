@@ -331,6 +331,7 @@ export function HomePage() {
             oauthQuotaHasRefreshed={oauthQuota.oauthQuotaHasRefreshed}
             onRefreshOAuthQuota={oauthQuota.refreshOAuthQuota}
             onRefreshOAuthQuotaRow={oauthQuota.refreshOAuthQuotaRow}
+            onResetOAuthQuotaRow={oauthQuota.resetOAuthQuotaRow}
             openCircuits={circuit.openCircuits}
             onResetCircuitProvider={circuit.handleResetProvider}
             resettingCircuitProviderIds={circuit.resettingProviderIds}

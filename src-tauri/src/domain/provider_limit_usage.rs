@@ -550,25 +550,46 @@ mod tests {
         .id
     }
 
-    fn insert_log(conn: &Connection, provider_id: i64, created_at: i64, cost_femto: i64) {
+    fn insert_log_with_exclusion(
+        conn: &Connection,
+        provider_id: i64,
+        created_at: i64,
+        cost_femto: i64,
+        excluded_from_stats: i64,
+    ) {
         conn.execute(
             r#"
 INSERT INTO request_logs(
   trace_id, cli_key, method, path, status, error_code, duration_ms,
   attempts_json, created_at, created_at_ms, cost_usd_femto,
   excluded_from_stats, final_provider_id
-) VALUES (?1, 'codex', 'POST', '/v1/chat/completions', 200, NULL, 10,
-  '[]', ?2, ?3, ?4, 0, ?5)
+) VALUES (?1, 'codex', 'POST', '/v1/chat/completions', ?2, ?3, 10,
+  '[]', ?4, ?5, ?6, ?7, ?8)
 "#,
             params![
                 format!("trace-{provider_id}-{created_at}-{cost_femto}"),
+                if excluded_from_stats == 0 {
+                    200i64
+                } else {
+                    499i64
+                },
+                if excluded_from_stats == 0 {
+                    None
+                } else {
+                    Some("GW_REQUEST_INTERRUPTED_BY_GATEWAY_STOP")
+                },
                 created_at,
                 created_at.saturating_mul(1000),
                 cost_femto,
+                excluded_from_stats,
                 provider_id
             ],
         )
         .expect("insert request log");
+    }
+
+    fn insert_log(conn: &Connection, provider_id: i64, created_at: i64, cost_femto: i64) {
+        insert_log_with_exclusion(conn, provider_id, created_at, cost_femto, 0);
     }
 
     #[test]
@@ -602,6 +623,27 @@ INSERT INTO request_logs(
         assert_eq!(row.provider_id, provider_id);
         assert_eq!(row.window_5h_start_ts, start_5h);
         assert!((row.usage_5h_usd - 0.0).abs() < f64::EPSILON);
+        assert!((row.usage_daily_usd - 1.0).abs() < f64::EPSILON);
+        assert!((row.usage_total_usd - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn list_v1_excludes_lifecycle_interruption_rows_from_provider_usage() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = db::init_for_tests(&dir.path().join("test.db")).expect("init db");
+        let provider_id = create_limited_provider(&db, "limited");
+        let conn = db.open_connection().expect("open db");
+        let now = current_unix_seconds(&conn).expect("now");
+
+        insert_log(&conn, provider_id, now.saturating_sub(60), FEMTO);
+        insert_log_with_exclusion(&conn, provider_id, now.saturating_sub(30), 99 * FEMTO, 1);
+        drop(conn);
+
+        let rows = list_v1(&db, Some("codex")).expect("list usage");
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert_eq!(row.provider_id, provider_id);
+        assert!((row.usage_5h_usd - 1.0).abs() < f64::EPSILON);
         assert!((row.usage_daily_usd - 1.0).abs() < f64::EPSILON);
         assert!((row.usage_total_usd - 1.0).abs() < f64::EPSILON);
     }

@@ -16,7 +16,7 @@ export function resolveAvailableStatus<TValue>(
 }
 
 export function buildRequestLogsClearedMessage(result: ClearRequestLogsResult) {
-  return `已清理请求日志：request_logs ${result.request_logs_deleted} 条；legacy request_attempt_logs ${result.request_attempt_logs_deleted} 条`;
+  return `已清理请求日志：request_logs ${result.request_logs_deleted} 条`;
 }
 
 export function buildConfigImportSuccessMessage(result: ConfigImportResult) {

@@ -171,7 +171,7 @@ fn decode_codex_id_token_claims(id_token: &str) -> Option<CodexIdTokenClaims> {
     serde_json::from_slice::<CodexIdTokenClaims>(&decoded).ok()
 }
 
-fn extract_codex_identity(id_token: Option<&str>) -> (Option<String>, Option<String>) {
+pub(super) fn extract_codex_identity(id_token: Option<&str>) -> (Option<String>, Option<String>) {
     let claims = id_token.and_then(decode_codex_id_token_claims);
     let account_id = claims.as_ref().and_then(|value| {
         value.chatgpt_account_id.clone().or_else(|| {

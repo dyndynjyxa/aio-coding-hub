@@ -27,3 +27,17 @@ pub(crate) fn create_builder() -> tauri::Builder<tauri::Wry> {
 
     builder
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn desktop_builder_keeps_single_instance_registration() {
+        let source = std::fs::read_to_string(file!()).expect("read plugin registry source");
+        let needle = ["tauri_plugin_", "single_", "instance::", "init"].concat();
+
+        assert!(
+            source.contains("#[cfg(desktop)]") && source.contains(&needle),
+            "startup request-log reconciliation relies on desktop single-instance ownership"
+        );
+    }
+}

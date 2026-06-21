@@ -9,8 +9,6 @@ export type RequestSignalLike = {
   phase?: string | null;
 };
 
-const STALE_IN_PROGRESS_THRESHOLD_MS = 10 * 60 * 1000;
-
 export function requestLogCreatedAtMs(
   log: Pick<RequestLogProgressInput, "created_at" | "created_at_ms">
 ) {
@@ -21,12 +19,6 @@ export function requestLogCreatedAtMs(
 
 export function isPersistedRequestLogInProgress(log: RequestLogProgressInput) {
   if (log.status != null || (log.error_code ?? null) != null) return false;
-
-  const createdAtMs = requestLogCreatedAtMs(log);
-  if (createdAtMs > 0 && Date.now() - createdAtMs > STALE_IN_PROGRESS_THRESHOLD_MS) {
-    return false;
-  }
-
   return true;
 }
 

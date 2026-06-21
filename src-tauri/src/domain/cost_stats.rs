@@ -928,6 +928,37 @@ LIMIT ?6
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::params;
+
+    const TEST_FEMTO_USD: i64 = 1_000_000_000_000_000;
+
+    fn insert_cost_log(
+        conn: &Connection,
+        trace_id: &str,
+        status: i64,
+        error_code: Option<&str>,
+        cost_usd_femto: i64,
+        excluded_from_stats: i64,
+    ) {
+        conn.execute(
+            r#"
+INSERT INTO request_logs (
+  trace_id, cli_key, method, path, status, error_code, duration_ms,
+  attempts_json, created_at, created_at_ms, cost_usd_femto,
+  excluded_from_stats, final_provider_id, requested_model
+) VALUES (?1, 'codex', 'POST', '/v1/chat/completions', ?2, ?3, 10,
+  '[]', 1000, 1000000, ?4, ?5, 1, 'gpt-test')
+"#,
+            params![
+                trace_id,
+                status,
+                error_code,
+                cost_usd_femto,
+                excluded_from_stats
+            ],
+        )
+        .expect("insert cost log");
+    }
 
     #[test]
     fn normalize_model_filter_trims_blanks_and_truncates_on_char_boundary() {
@@ -942,5 +973,41 @@ mod tests {
 
         assert_eq!(normalized.chars().count(), MODEL_FILTER_MAX_CHARS);
         assert!(normalized.is_char_boundary(normalized.len()));
+    }
+
+    #[test]
+    fn lifecycle_interruption_rows_are_excluded_from_cost_summary() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = db::init_for_tests(&dir.path().join("cost-stats-test.db")).expect("init db");
+        let conn = db.open_connection().expect("open db");
+        insert_cost_log(&conn, "included-cost", 200, None, TEST_FEMTO_USD, 0);
+        insert_cost_log(
+            &conn,
+            "interrupted-cost",
+            499,
+            Some("GW_REQUEST_INTERRUPTED_BY_RESTART"),
+            99 * TEST_FEMTO_USD,
+            1,
+        );
+        drop(conn);
+
+        let summary = summary_v1(
+            &db,
+            &CostQueryParams {
+                period: "allTime".to_string(),
+                start_ts: None,
+                end_ts: None,
+                cli_key: None,
+                provider_id: None,
+                model: None,
+            },
+        )
+        .expect("cost summary");
+
+        assert_eq!(summary.requests_total, 1);
+        assert_eq!(summary.requests_success, 1);
+        assert_eq!(summary.requests_failed, 0);
+        assert_eq!(summary.cost_covered_success, 1);
+        assert!((summary.total_cost_usd - 1.0).abs() < f64::EPSILON);
     }
 }

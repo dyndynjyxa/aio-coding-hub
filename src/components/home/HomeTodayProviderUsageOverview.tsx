@@ -4,6 +4,11 @@ import { useDocumentVisibility } from "../../hooks/useDocumentVisibility";
 import { useNowMs } from "../../hooks/useNowMs";
 import { useWindowForeground } from "../../hooks/useWindowForeground";
 import type { GatewayActiveSession } from "../../services/gateway/gateway";
+import {
+  buildRequestActivityProjection,
+  type ProjectedRealtimeCard,
+} from "../../services/gateway/requestActivityProjection";
+import type { RequestLogSummary } from "../../services/gateway/requestLogs";
 import type { TraceSession } from "../../services/gateway/traceStore";
 import type { UsageLeaderboardRow, UsageSummary } from "../../services/usage/usage";
 import { Card } from "../../ui/Card";
@@ -20,8 +25,7 @@ import {
 const SUMMARY_SKELETON_KEYS = [0, 1, 2, 3, 4];
 const PROVIDER_SKELETON_KEYS = [0, 1, 2];
 const MAX_PROVIDER_ROWS = 3;
-const LIVE_TRACE_MAX_AGE_MS = 15 * 60 * 1000;
-const STALE_TRACE_TIMEOUT_MS = 5 * 60 * 1000;
+const REALTIME_PROVIDER_HINT_LIMIT = 20;
 const OVERVIEW_REFRESH_INTERVAL_MS = 60 * 1000;
 const TABLE_TH_CLASS =
   "border-b border-border bg-secondary/70 px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground dark:border-border dark:bg-secondary/70 dark:text-muted-foreground";
@@ -201,19 +205,15 @@ function buildActiveProviders(
   return entries;
 }
 
-function buildRunningProvidersFromTraces(
-  traces: TraceSession[],
-  nowMs: number,
+function buildRunningProvidersFromRealtimeCards(
+  cards: ProjectedRealtimeCard[],
   options: { preferCliPrefix: boolean }
 ) {
   const seen = new Set<string>();
   const entries: ActiveProviderEntry[] = [];
 
-  for (const trace of traces) {
+  for (const { trace } of cards) {
     if (trace.summary) continue;
-    if (nowMs - trace.first_seen_ms >= LIVE_TRACE_MAX_AGE_MS) continue;
-    if (nowMs - trace.last_seen_ms >= STALE_TRACE_TIMEOUT_MS) continue;
-
     const latestAttempt = (trace.attempts ?? [])
       .slice()
       .sort((left, right) => right.attempt_index - left.attempt_index)[0];
@@ -241,6 +241,23 @@ function buildRunningProvidersFromTraces(
       ...entry,
       displayName: formatSyntheticProviderName(entry, options),
     });
+  }
+
+  return entries;
+}
+
+function mergeActiveProviderEntries(
+  primary: ActiveProviderEntry[],
+  secondary: ActiveProviderEntry[]
+) {
+  const seen = new Set<string>();
+  const entries: ActiveProviderEntry[] = [];
+
+  for (const entry of [...primary, ...secondary]) {
+    const key = providerIdentityKey(entry);
+    if (!entry.normalizedName || seen.has(key)) continue;
+    seen.add(key);
+    entries.push(entry);
   }
 
   return entries;
@@ -544,10 +561,12 @@ function ProviderUsageSkeleton() {
 export function HomeTodayProviderUsageOverview({
   devPreviewEnabled = false,
   activeSessions = [],
+  requestLogs = [],
   traces,
 }: {
   devPreviewEnabled?: boolean;
   activeSessions?: GatewayActiveSession[];
+  requestLogs?: RequestLogSummary[];
   traces?: TraceSession[];
 }) {
   const documentVisible = useDocumentVisibility();
@@ -581,17 +600,27 @@ export function HomeTodayProviderUsageOverview({
   });
 
   const nowMs = useNowMs(Boolean(traces && traces.length > 0), 1000);
-  const activeProviders = useMemo(
-    () =>
-      traces != null
-        ? buildRunningProvidersFromTraces(traces, nowMs, {
-            preferCliPrefix: !model.previewActive,
-          })
-        : buildActiveProviders(activeSessions, {
-            preferCliPrefix: !model.previewActive,
-          }),
-    [activeSessions, model.previewActive, nowMs, traces]
-  );
+  const activeProviders = useMemo(() => {
+    const activeSessionProviders = buildActiveProviders(activeSessions, {
+      preferCliPrefix: !model.previewActive,
+    });
+
+    if (traces != null) {
+      const projection = buildRequestActivityProjection({
+        requestLogs,
+        traces,
+        nowMs,
+        realtimeCardLimit: REALTIME_PROVIDER_HINT_LIMIT,
+        realtimeCandidateLimit: REALTIME_PROVIDER_HINT_LIMIT,
+      });
+      const realtimeProviders = buildRunningProvidersFromRealtimeCards(projection.realtimeCards, {
+        preferCliPrefix: !model.previewActive,
+      });
+      return mergeActiveProviderEntries(activeSessionProviders, realtimeProviders);
+    }
+
+    return activeSessionProviders;
+  }, [activeSessions, model.previewActive, nowMs, requestLogs, traces]);
 
   const topRows = useMemo(
     () => selectProviderRows(model.rows, activeProviders),

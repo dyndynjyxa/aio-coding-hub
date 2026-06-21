@@ -250,7 +250,8 @@ where
     });
 
     if let Some(args) = build_in_progress_request_log_args(&ctx) {
-        enqueue_request_log_placeholder(&ctx.state.app, &ctx.state.log_tx, args).await;
+        enqueue_request_log_placeholder(&ctx.state.app, &ctx.state.db, &ctx.state.log_tx, args)
+            .await;
     }
 
     super::forwarder::forward(RequestContext::from_handler_parts(

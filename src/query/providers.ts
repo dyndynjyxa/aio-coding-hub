@@ -9,12 +9,14 @@ import {
   providerDelete,
   providerOAuthStatus,
   providerOAuthFetchLimits,
+  providerOAuthResetCodexQuota,
   providerSetEnabled,
   providersList,
   providersReorder,
   providerTestAvailability,
   type CliKey,
   type OAuthLimitsResult,
+  type ProviderOAuthResetCodexQuotaResult,
   type ProviderAvailabilityResult,
   type ProviderRouteRow,
   type ProviderUpsertInput,
@@ -85,6 +87,7 @@ const EMPTY_OAUTH_LIMITS_RESULT: OAuthLimitsResult = {
   limit_weekly_text: null,
   limit_5h_reset_at: null,
   limit_weekly_reset_at: null,
+  reset_credit_available_count: null,
 };
 
 export function normalizeProviderOAuthLimitsResult(
@@ -130,6 +133,37 @@ export async function refreshProviderOAuthLimits(
     void queryClient.invalidateQueries({ queryKey: gatewayKeys.circuits() });
   }
   return next;
+}
+
+export async function resetProviderOAuthCodexQuota(
+  queryClient: QueryClient,
+  providerId: number,
+  options?: { resetCircuitAfterRefresh?: boolean }
+): Promise<ProviderOAuthResetCodexQuotaResult> {
+  const normalizedProviderId = validateProviderId(providerId);
+  const result = await providerOAuthResetCodexQuota(normalizedProviderId);
+  const refreshedLimits = result.refreshed_limits;
+
+  if (refreshedLimits) {
+    const next = normalizeProviderOAuthLimitsResult(refreshedLimits);
+    queryClient.setQueryData(oauthLimitsKeys.detail(normalizedProviderId), next);
+    try {
+      if (options?.resetCircuitAfterRefresh) {
+        try {
+          await gatewayCircuitResetProvider(normalizedProviderId);
+        } catch (error) {
+          logToConsole("warn", "Codex 重置成功，但重置熔断器失败", {
+            provider_id: normalizedProviderId,
+            error: formatUnknownError(error),
+          });
+        }
+      }
+    } finally {
+      void queryClient.invalidateQueries({ queryKey: gatewayKeys.circuits() });
+    }
+  }
+
+  return result;
 }
 
 export function useProviderSetEnabledMutation() {
@@ -184,7 +218,8 @@ export function useProviderDeleteMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (input: { cliKey: CliKey; providerId: number }) => providerDelete(input.providerId),
+    mutationFn: (input: { cliKey: CliKey; providerId: number; clearUsageStats?: boolean }) =>
+      providerDelete(input.providerId, { clearUsageStats: input.clearUsageStats === true }),
     onSuccess: (ok, input) => {
       if (!ok) return;
       const cliKey = validateProviderCliKey(input.cliKey);

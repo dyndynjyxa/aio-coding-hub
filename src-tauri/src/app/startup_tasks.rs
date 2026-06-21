@@ -32,6 +32,30 @@ async fn run(app_handle: tauri::AppHandle) {
         }
     };
 
+    match crate::request_logs::reconcile_unresolved_pending(
+        &db,
+        crate::request_logs::RequestLogReconcileReason::StartupRecovery,
+        crate::shared::time::now_unix_millis(),
+    ) {
+        Ok(count) => {
+            if count > 0 {
+                tracing::info!(
+                    reconciled_count = count,
+                    "startup reconciled previous-process pending request logs"
+                );
+            }
+        }
+        Err(err) => {
+            tracing::error!("startup request-log reconciliation failed: {}", err);
+            fail_startup_run(
+                &app_handle,
+                AppStartupStage::InitializingDb,
+                format!("请求日志恢复失败：{err}"),
+            );
+            return;
+        }
+    }
+
     set_startup_stage(&app_handle, AppStartupStage::ReadingSettings);
     let settings = match crate::app::startup_settings::read(&app_handle).await {
         Ok(settings) => settings,

@@ -1,10 +1,9 @@
 // Usage: Rendered by ProvidersPage when `view === "providers"`.
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { DndContext, closestCenter } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { ClaudeModelValidationDialog } from "../../components/ClaudeModelValidationDialog";
 import { CLIS } from "../../constants/clis";
 import type { CliKey } from "../../services/providers/providers";
 import { Button } from "../../ui/Button";
@@ -92,7 +91,6 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
     resetCircuit,
     copyTerminalLaunchCommand,
     duplicateProvider,
-    requestValidateProviderModel,
     handleProviderCardDragEnd,
     sensors,
     createDialogState,
@@ -103,10 +101,6 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
     setDeleteTarget,
     deleting,
     confirmRemoveProvider,
-    validateDialogOpen,
-    setValidateDialogOpen,
-    validateProvider,
-    setValidateProvider,
     sourceProviderNamesById,
     sourceProvidersById,
     terminalCopyingByProviderId,
@@ -119,6 +113,7 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
   const routeDraftValue =
     routeDraftSelection.kind === "default" ? "default" : `mode:${routeDraftSelection.modeId}`;
   const selectedCliName = CLIS.find((cli) => cli.key === activeCli)?.name ?? activeCli;
+  const [clearUsageStatsOnDelete, setClearUsageStatsOnDelete] = useState(false);
 
   useEffect(() => {
     const pendingRestore = pendingProvidersScrollRestoreRef.current;
@@ -157,6 +152,16 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
       scrollTop: providersListElement.scrollTop,
       observedRefresh: false,
     };
+  }
+
+  function openDeleteDialog(provider: (typeof providers)[number]) {
+    setClearUsageStatsOnDelete(false);
+    setDeleteTarget(provider);
+  }
+
+  function closeDeleteDialog() {
+    setClearUsageStatsOnDelete(false);
+    setDeleteTarget(null);
   }
 
   return (
@@ -344,15 +349,12 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
                             provider.cli_key === "claude" ? copyTerminalLaunchCommand : undefined
                           }
                           terminalLaunchCopying={Boolean(terminalCopyingByProviderId[provider.id])}
-                          onValidateModel={
-                            activeCli === "claude" ? requestValidateProviderModel : undefined
-                          }
                           onTestAvailability={testProviderAvailability}
                           testAvailabilityLoading={Boolean(testingByProviderId[provider.id])}
                           onDuplicate={duplicateProvider}
                           duplicateLoading={Boolean(duplicatingByProviderId[provider.id])}
                           onEdit={setEditTarget}
-                          onDelete={setDeleteTarget}
+                          onDelete={openDeleteDialog}
                         />
                       );
                     })}
@@ -496,15 +498,6 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
         </div>
       </div>
 
-      <ClaudeModelValidationDialog
-        open={validateDialogOpen}
-        onOpenChange={(open) => {
-          setValidateDialogOpen(open);
-          if (!open) setValidateProvider(null);
-        }}
-        provider={validateProvider}
-      />
-
       {createDialogState ? (
         <ProviderEditorDialog
           mode="create"
@@ -540,19 +533,45 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
         open={!!deleteTarget}
         onOpenChange={(nextOpen) => {
           if (!nextOpen && deleting) return;
-          if (!nextOpen) setDeleteTarget(null);
+          if (!nextOpen) closeDeleteDialog();
         }}
         title="确认删除 Provider"
         description={deleteTarget ? `将删除：${deleteTarget.name}` : undefined}
         className="max-w-lg"
       >
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <Button onClick={() => setDeleteTarget(null)} variant="secondary" disabled={deleting}>
-            取消
-          </Button>
-          <Button onClick={confirmRemoveProvider} variant="primary" disabled={deleting}>
-            {deleting ? "删除中…" : "确认删除"}
-          </Button>
+        <div className="space-y-3">
+          <label className="flex items-start gap-2 rounded-lg border border-border bg-muted p-3">
+            <input
+              type="checkbox"
+              aria-label="同时删除该 Provider 的用量统计和请求日志"
+              checked={clearUsageStatsOnDelete}
+              onChange={(event) => setClearUsageStatsOnDelete(event.currentTarget.checked)}
+              disabled={deleting}
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-border bg-background text-primary accent-primary focus:ring-ring"
+            />
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-foreground">
+                同时删除该 Provider 的用量统计和请求日志
+              </span>
+              <span className="mt-1 block text-xs text-muted-foreground">
+                删除后该 Provider 的历史请求日志和用量统计都将移除。
+              </span>
+            </span>
+          </label>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button onClick={closeDeleteDialog} variant="secondary" disabled={deleting}>
+              取消
+            </Button>
+            <Button
+              onClick={() =>
+                void confirmRemoveProvider({ clearUsageStats: clearUsageStatsOnDelete })
+              }
+              variant="primary"
+              disabled={deleting}
+            >
+              {deleting ? "删除中…" : "确认删除"}
+            </Button>
+          </div>
         </div>
       </Dialog>
 

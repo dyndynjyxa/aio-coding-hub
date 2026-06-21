@@ -47,14 +47,9 @@ fn clear_request_logs_on_empty_db() {
         aio_coding_hub_lib::test_support::request_logs_clear_all_json(&handle).expect("clear logs");
 
     let logs_deleted = json_u64(&result, "request_logs_deleted");
-    let attempts_deleted = json_u64(&result, "request_attempt_logs_deleted");
 
     // On a fresh DB, there should be nothing to delete.
     assert_eq!(logs_deleted, 0, "no request logs to delete in fresh DB");
-    assert_eq!(
-        attempts_deleted, 0,
-        "no request attempt logs to delete in fresh DB"
-    );
 }
 
 #[test]

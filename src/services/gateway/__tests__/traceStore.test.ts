@@ -623,7 +623,7 @@ describe("services/gateway/traceStore", () => {
     vi.useRealTimers();
   });
 
-  it("pruneStaleTraces removes old traces without summary", async () => {
+  it("keeps long-running traces without summary after newer traces arrive", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
 
@@ -645,10 +645,10 @@ describe("services/gateway/traceStore", () => {
     expect(result.current.traces).toHaveLength(1);
     expect(result.current.traces[0]?.trace_id).toBe("stale-trace");
 
-    // Advance time past STALE_TRACE_TIMEOUT_MS (5 minutes = 300000ms)
+    // Advance time past the previous stale threshold (5 minutes = 300000ms).
     vi.setSystemTime(300_001);
 
-    // Ingest another trace; pruneStaleTraces runs and removes the stale one
+    // Ingest another trace; the older in-progress trace must remain visible until completion.
     act(() => {
       ingestTraceStart({
         trace_id: "fresh-trace",
@@ -661,11 +661,13 @@ describe("services/gateway/traceStore", () => {
       });
     });
 
-    expect(result.current.traces).toHaveLength(1);
+    expect(result.current.traces).toHaveLength(2);
     expect(result.current.traces[0]?.trace_id).toBe("fresh-trace");
+    expect(result.current.traces[1]?.trace_id).toBe("stale-trace");
+    expect(result.current.traces[1]?.summary).toBeUndefined();
   });
 
-  it("ingestTraceRequest prune-then-upsert: stale trace pruned and re-inserted via idx === -1 branch", async () => {
+  it("ingestTraceRequest updates a long-running trace when summary arrives later", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
 
@@ -675,7 +677,7 @@ describe("services/gateway/traceStore", () => {
     // Create a trace at time 0 (no summary)
     act(() => {
       ingestTraceStart({
-        trace_id: "will-be-pruned",
+        trace_id: "long-running-trace",
         cli_key: "claude",
         method: "GET",
         path: "/v1/stale",
@@ -686,16 +688,13 @@ describe("services/gateway/traceStore", () => {
     });
     expect(result.current.traces).toHaveLength(1);
 
-    // Advance past stale threshold
+    // Advance past the previous stale threshold.
     vi.setSystemTime(300_001);
 
-    // ingestTraceRequest for the same trace_id:
-    // 1. findTraceIndex finds the trace (idx !== -1)
-    // 2. pruneStaleTraces removes it (no summary + stale)
-    // 3. prunedIdx === -1 => re-inserted via unshift
+    // ingestTraceRequest for the same trace_id should update the existing trace.
     act(() => {
       ingestTraceRequest({
-        trace_id: "will-be-pruned",
+        trace_id: "long-running-trace",
         cli_key: "claude",
         method: "GET",
         path: "/v1/stale",
@@ -708,9 +707,9 @@ describe("services/gateway/traceStore", () => {
       });
     });
 
-    // The trace should exist with summary (re-inserted after pruning)
+    // The trace should exist with summary.
     expect(result.current.traces).toHaveLength(1);
-    expect(result.current.traces[0]?.trace_id).toBe("will-be-pruned");
+    expect(result.current.traces[0]?.trace_id).toBe("long-running-trace");
     expect(result.current.traces[0]?.summary).toBeDefined();
     expect(result.current.traces[0]?.summary?.status).toBe(200);
 

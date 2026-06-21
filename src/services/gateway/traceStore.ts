@@ -38,13 +38,6 @@ type Listener = () => void;
 
 const MAX_TRACES = 50;
 
-/**
- * Traces without summary older than this threshold are considered stale
- * and will be pruned during the next store mutation.
- * Mirrors claude-code-hub's Redis TTL (600s) safety-net strategy.
- */
-const STALE_TRACE_TIMEOUT_MS = 5 * 60 * 1000;
-
 type TraceStoreState = {
   traces: TraceSession[];
 };
@@ -107,14 +100,6 @@ function trimSummary(payload: GatewayRequestEvent): TraceSummary {
   };
 }
 
-/**
- * Remove traces stuck in "in progress" (no summary) beyond the stale threshold.
- * Called piggy-back on every store mutation to avoid a dedicated timer.
- */
-function pruneStaleTraces(traces: TraceSession[], now: number): TraceSession[] {
-  return traces.filter((t) => t.summary || now - t.last_seen_ms < STALE_TRACE_TIMEOUT_MS);
-}
-
 function moveTraceToFront(nextTraces: TraceSession[], traceId: string) {
   const index = nextTraces.findIndex((t) => t.trace_id === traceId);
   if (index <= 0) return nextTraces;
@@ -138,7 +123,7 @@ function upsertTrace(
 
   if (idx === -1) {
     const created = createSession(now);
-    const nextTraces = pruneStaleTraces([created, ...state.traces], now).slice(0, MAX_TRACES);
+    const nextTraces = [created, ...state.traces].slice(0, MAX_TRACES);
     setState({ traces: nextTraces });
     return;
   }
@@ -146,10 +131,10 @@ function upsertTrace(
   const existing = state.traces[idx];
   const updated = updateSession(existing, now);
 
-  const nextTraces = pruneStaleTraces(state.traces.slice(), now);
-  const prunedIdx = nextTraces.findIndex((t) => t.trace_id === updated.trace_id);
-  if (prunedIdx !== -1) {
-    nextTraces[prunedIdx] = updated;
+  const nextTraces = state.traces.slice();
+  const existingIdx = nextTraces.findIndex((t) => t.trace_id === updated.trace_id);
+  if (existingIdx !== -1) {
+    nextTraces[existingIdx] = updated;
   } else {
     nextTraces.unshift(updated);
   }

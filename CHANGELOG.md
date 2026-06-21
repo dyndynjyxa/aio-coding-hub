@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.60.2](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.1...aio-coding-hub-v0.60.2) (2026-06-21)
+
+
+### Features
+
+* add Codex OAuth reset quota controls ([3bc184b](https://github.com/dyndynjyxa/aio-coding-hub/commit/3bc184b0da93f6edf212d0cfc4a1665c7ca000f8))
+
+
+### Bug Fixes
+
+* keep long-running request logs visible ([6c4e3aa](https://github.com/dyndynjyxa/aio-coding-hub/commit/6c4e3aa7a56b4c26a7c9bb78cbe590cc3439ce34))
+* **providers:** delete request logs with usage cleanup ([a6b1705](https://github.com/dyndynjyxa/aio-coding-hub/commit/a6b170509ca9e4010410c346b2bff076d2749044))
+
+
+### Code Refactoring
+
+* **claude-validation:** 移除Claude模型验证相关组件和实现 ([dfde520](https://github.com/dyndynjyxa/aio-coding-hub/commit/dfde520166d1d79f8961de8af730316a2c00fa73))
+* **providers:** 删除 Provider 时支持清理用量统计 ([0393a75](https://github.com/dyndynjyxa/aio-coding-hub/commit/0393a758065f0107646205b869ce4638bed595e0))
+
 ## [0.60.1](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.0...aio-coding-hub-v0.60.1) (2026-06-15)
 
 

@@ -83,18 +83,6 @@ vi.mock("../../../services/providers/providers", async () => {
   };
 });
 
-vi.mock("../../../components/ClaudeModelValidationDialog", () => ({
-  ClaudeModelValidationDialog: ({ open, onOpenChange }: any) =>
-    open ? (
-      <div>
-        validate
-        <button type="button" onClick={() => onOpenChange?.(false)}>
-          close-validate
-        </button>
-      </div>
-    ) : null,
-}));
-
 vi.mock("../ProviderEditorDialog", () => ({
   ProviderEditorDialog: ({ mode, cliKey, provider, initialValues, onSaved, onOpenChange }: any) => (
     <div
@@ -475,9 +463,19 @@ describe("pages/providers/ProvidersView", () => {
 
     // Delete provider 1.
     fireEvent.click(screen.getAllByTitle("删除")[0]!);
+    expect(
+      screen.getByRole("checkbox", { name: "同时删除该 Provider 的用量统计和请求日志" })
+    ).not.toBeChecked();
+    expect(
+      screen.getByText("删除后该 Provider 的历史请求日志和用量统计都将移除。")
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
     await waitFor(() =>
-      expect(deleteMutation.mutateAsync).toHaveBeenCalledWith({ cliKey: "claude", providerId: 1 })
+      expect(deleteMutation.mutateAsync).toHaveBeenCalledWith({
+        cliKey: "claude",
+        providerId: 1,
+        clearUsageStats: false,
+      })
     );
 
     // Drag reorder resource-pool providers (1 -> 3) across the full provider list.
@@ -491,6 +489,61 @@ describe("pages/providers/ProvidersView", () => {
           expect.objectContaining({ id: 3, name: "P3", enabled: true }),
           expect.objectContaining({ id: 1, name: "P1", enabled: true }),
         ],
+      })
+    );
+  });
+
+  it("passes usage stats cleanup when checked in provider delete dialog", async () => {
+    vi.mocked(useProvidersListQuery).mockReturnValue({
+      data: [
+        {
+          id: 1,
+          cli_key: "claude",
+          name: "P1",
+          enabled: true,
+          base_urls: ["https://a"],
+          base_url_mode: "order",
+          cost_multiplier: 1,
+          claude_models: {},
+        },
+      ],
+      isFetching: false,
+      error: null,
+    } as any);
+    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      error: null,
+      refetch: vi.fn().mockResolvedValue({ data: [] }),
+    } as any);
+
+    const deleteMutation = { isPending: false, mutateAsync: vi.fn().mockResolvedValue(true) };
+    vi.mocked(useProviderDeleteMutation).mockReturnValue(deleteMutation as any);
+    vi.mocked(useProviderSetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProvidersReorderMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+      variables: null,
+    } as any);
+    vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+      variables: null,
+    } as any);
+
+    renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
+
+    fireEvent.click(screen.getByTitle("删除"));
+    const cleanupCheckbox = screen.getByRole("checkbox", {
+      name: "同时删除该 Provider 的用量统计和请求日志",
+    });
+    fireEvent.click(cleanupCheckbox);
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() =>
+      expect(deleteMutation.mutateAsync).toHaveBeenCalledWith({
+        cliKey: "claude",
+        providerId: 1,
+        clearUsageStats: true,
       })
     );
   });
@@ -1340,69 +1393,6 @@ describe("pages/providers/ProvidersView", () => {
       </QueryClientProvider>
     );
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-  });
-
-  it("opens validate dialog and closes it when switching activeCli", async () => {
-    vi.mocked(toast).mockClear();
-    vi.mocked(logToConsole).mockClear();
-
-    const providers = [
-      {
-        id: 1,
-        cli_key: "claude",
-        name: "P1",
-        enabled: true,
-        base_urls: ["https://a"],
-        base_url_mode: "order",
-        cost_multiplier: 1,
-        claude_models: { main_model: "claude-3" },
-      },
-    ] as any[];
-
-    vi.mocked(useProvidersListQuery).mockReturnValue({ data: providers, isFetching: false } as any);
-    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
-      data: [],
-      isFetching: false,
-      refetch: vi.fn().mockResolvedValue({ data: [] }),
-    } as any);
-
-    vi.mocked(useProviderSetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-    vi.mocked(useProviderDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-    vi.mocked(useProvidersReorderMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-    vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
-      mutateAsync: vi.fn(),
-    } as any);
-    vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-
-    const client = createTestQueryClient();
-    const { rerender } = render(
-      <QueryClientProvider client={client}>
-        <ProvidersView activeCli="claude" setActiveCli={vi.fn()} />
-      </QueryClientProvider>
-    );
-
-    fireEvent.pointerDown(screen.getByText("已启用"));
-    fireEvent.click(screen.getByTitle("模型验证"));
-    expect(screen.getByText("validate")).toBeInTheDocument();
-
-    rerender(
-      <QueryClientProvider client={client}>
-        <ProvidersView activeCli="codex" setActiveCli={vi.fn()} />
-      </QueryClientProvider>
-    );
-
-    await waitFor(() => expect(screen.queryByText("validate")).not.toBeInTheDocument());
-
-    rerender(
-      <QueryClientProvider client={client}>
-        <ProvidersView activeCli="claude" setActiveCli={vi.fn()} />
-      </QueryClientProvider>
-    );
-    fireEvent.click(screen.getByTitle("模型验证"));
-    expect(screen.getByText("validate")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "close-validate" }));
-    await waitFor(() => expect(screen.queryByText("validate")).not.toBeInTheDocument());
   });
 
   it("covers dialog onOpenChange/onSaved callbacks and delete dialog close gating", async () => {

@@ -4,6 +4,7 @@ import type { HomeOAuthQuotaRow } from "../../../components/home/homeOAuthQuotaT
 import {
   readProviderOAuthLimitsCache,
   refreshProviderOAuthLimits,
+  resetProviderOAuthCodexQuota,
   useProvidersListQuery,
 } from "../../../query/providers";
 import type { RequestLogSummary } from "../../../services/gateway/requestLogs";
@@ -22,6 +23,7 @@ export type UseHomeOAuthQuotaResult = {
   oauthQuotaHasRefreshed: boolean;
   refreshOAuthQuota: () => Promise<void>;
   refreshOAuthQuotaRow: (providerId: number) => Promise<void>;
+  resetOAuthQuotaRow: (providerId: number) => Promise<void>;
 };
 
 type OAuthProviderSummary = {
@@ -47,6 +49,12 @@ function formatRefreshError(error: unknown): string {
   if (error instanceof Error && error.message.trim()) return error.message;
   if (typeof error === "string" && error.trim()) return error;
   return "读取 OAuth 配额失败";
+}
+
+function formatResetError(error: unknown): string {
+  const message = formatRefreshError(error);
+  if (message === "读取 OAuth 配额失败") return "重置失败";
+  return `重置失败：${message}`;
 }
 
 function removeProviderErrors(
@@ -102,7 +110,9 @@ export function useHomeOAuthQuota({
   const codexProvidersQuery = useProvidersListQuery("codex", { enabled });
   const geminiProvidersQuery = useProvidersListQuery("gemini", { enabled });
   const [refreshingProviderIds, setRefreshingProviderIds] = useState<Set<number>>(new Set());
+  const [resettingProviderIds, setResettingProviderIds] = useState<Set<number>>(new Set());
   const [providerErrors, setProviderErrors] = useState<Record<number, string>>({});
+  const [resetErrors, setResetErrors] = useState<Record<number, string>>({});
   const [oauthQuotaHasRefreshed, setOauthQuotaHasRefreshed] = useState(false);
   const recentUsedAtByProvider = useMemo(() => {
     const timestamps = new Map<number, number>();
@@ -159,14 +169,18 @@ export function useHomeOAuthQuota({
   const oauthQuotaRows = useMemo<HomeOAuthQuotaRow[]>(() => {
     return oauthProviders.map((provider) => {
       const error = providerErrors[provider.providerId] ?? null;
+      const resetError = resetErrors[provider.providerId] ?? null;
+      const resetting = resettingProviderIds.has(provider.providerId);
       const limits = readProviderOAuthLimitsCache(queryClient, provider.providerId);
 
       if (error) {
         return {
           ...provider,
           state: "error",
-          limits: null,
+          limits,
           error,
+          resetting,
+          resetError,
         };
       }
 
@@ -176,6 +190,8 @@ export function useHomeOAuthQuota({
           state: "loading",
           limits,
           error: null,
+          resetting,
+          resetError,
         };
       }
 
@@ -185,6 +201,8 @@ export function useHomeOAuthQuota({
           state: "success",
           limits,
           error: null,
+          resetting,
+          resetError,
         };
       }
 
@@ -193,9 +211,18 @@ export function useHomeOAuthQuota({
         state: "idle",
         limits: null,
         error: null,
+        resetting,
+        resetError,
       };
     });
-  }, [oauthProviders, providerErrors, queryClient, refreshingProviderIds]);
+  }, [
+    oauthProviders,
+    providerErrors,
+    queryClient,
+    refreshingProviderIds,
+    resetErrors,
+    resettingProviderIds,
+  ]);
 
   const refreshOAuthProviders = useCallback(
     async (providers: OAuthProviderSummary[]) => {
@@ -208,6 +235,7 @@ export function useHomeOAuthQuota({
         return next;
       });
       setProviderErrors((current) => removeProviderErrors(current, providerIds));
+      setResetErrors((current) => removeProviderErrors(current, providerIds));
       setOauthQuotaHasRefreshed(true);
 
       const settled = await Promise.allSettled(
@@ -256,6 +284,45 @@ export function useHomeOAuthQuota({
     [oauthProviders, refreshOAuthProviders]
   );
 
+  const resetOAuthQuotaRow = useCallback(
+    async (providerId: number) => {
+      const target = oauthProviders.find((provider) => provider.providerId === providerId);
+      if (!target || target.cliKey !== "codex") return;
+
+      setResettingProviderIds((current) => {
+        const next = new Set(current);
+        next.add(target.providerId);
+        return next;
+      });
+      setResetErrors((current) => removeProviderErrors(current, [target.providerId]));
+      setOauthQuotaHasRefreshed(true);
+
+      try {
+        const result = await resetProviderOAuthCodexQuota(queryClient, target.providerId, {
+          resetCircuitAfterRefresh: true,
+        });
+        if (result.refresh_error) {
+          setResetErrors((current) => ({
+            ...current,
+            [target.providerId]: `已重置，但刷新用量失败：${result.refresh_error}`,
+          }));
+        }
+      } catch (error) {
+        setResetErrors((current) => ({
+          ...current,
+          [target.providerId]: formatResetError(error),
+        }));
+      } finally {
+        setResettingProviderIds((current) => {
+          const next = new Set(current);
+          next.delete(target.providerId);
+          return next;
+        });
+      }
+    },
+    [oauthProviders, queryClient]
+  );
+
   return {
     oauthQuotaRows,
     oauthQuotaVisible: oauthProviders.length > 0,
@@ -263,5 +330,6 @@ export function useHomeOAuthQuota({
     oauthQuotaHasRefreshed,
     refreshOAuthQuota,
     refreshOAuthQuotaRow,
+    resetOAuthQuotaRow,
   };
 }
