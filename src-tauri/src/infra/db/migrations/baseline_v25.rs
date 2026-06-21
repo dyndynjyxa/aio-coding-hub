@@ -141,6 +141,7 @@ CREATE TABLE IF NOT EXISTS skills (
   source_git_url TEXT NOT NULL,
   source_branch TEXT NOT NULL,
   source_subdir TEXT NOT NULL,
+  installed_commit TEXT DEFAULT NULL,
   enabled_claude INTEGER NOT NULL DEFAULT 0,
   enabled_codex INTEGER NOT NULL DEFAULT 0,
   enabled_gemini INTEGER NOT NULL DEFAULT 0,

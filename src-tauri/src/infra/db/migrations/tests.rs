@@ -1046,6 +1046,7 @@ fn baseline_v25_creates_complete_schema_for_fresh_install() {
     assert!(test_has_column(&conn, "providers", "limit_5h_usd"));
     assert!(test_has_column(&conn, "providers", "limit_daily_usd"));
     assert!(test_has_column(&conn, "providers", "tags_json"));
+    assert!(test_has_column(&conn, "skills", "installed_commit"));
     assert!(test_has_column(&conn, "skills", "installed_content_hash"));
 
     // Verify v25->v26 migration ran (claude_models_json)
