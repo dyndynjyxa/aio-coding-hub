@@ -43,7 +43,7 @@ function renderWithProviders(element: ReactElement) {
 }
 
 describe("pages/ProvidersPage", () => {
-  it("uses top tabs to switch CLI providers view and sort modes view", () => {
+  it("uses top tabs to switch CLI providers view", () => {
     vi.mocked(useSettingsQuery).mockReturnValue({
       data: createTestAppSettings({ cli_priority_order: ["codex", "claude", "gemini"] }),
     } as any);
@@ -62,18 +62,12 @@ describe("pages/ProvidersPage", () => {
       "Codex",
       "Claude",
       "Gemini",
-      "排序模板",
     ]);
 
     fireEvent.click(screen.getByRole("tab", { name: "Claude" }));
 
     expect(screen.getByRole("heading", { level: 1, name: "供应商" })).toBeInTheDocument();
     expect(screen.getByText("providers:claude")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("tab", { name: "排序模板" }));
-
-    expect(screen.getByRole("heading", { level: 1, name: "排序模板" })).toBeInTheDocument();
-    expect(screen.getByTestId("sort-modes-view")).toBeInTheDocument();
-    expect(screen.getByText("sort-modes:claude")).toBeInTheDocument();
+    expect(screen.queryByTestId("sort-modes-view")).not.toBeInTheDocument();
   });
 });

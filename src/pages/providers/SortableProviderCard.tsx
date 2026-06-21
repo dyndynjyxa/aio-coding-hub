@@ -125,6 +125,7 @@ export type SortableProviderCardProps = {
   provider: ProviderSummary;
   sourceProviderName?: string | null;
   sourceProvider?: ProviderSummary | null;
+  trailing?: ReactNode;
   circuit: GatewayProviderCircuitStatus | null;
   circuitResetting: boolean;
   onToggleEnabled: (provider: ProviderSummary) => void;
@@ -148,6 +149,7 @@ export const ProviderCard = memo(function ProviderCard({
   provider,
   sourceProviderName = null,
   sourceProvider = null,
+  trailing = null,
   circuit,
   circuitResetting,
   onToggleEnabled,
@@ -491,6 +493,8 @@ export const ProviderCard = memo(function ProviderCard({
               {terminalLaunchCopying ? "复制中…" : "终端启动"}
             </Button>
           ) : null}
+
+          {trailing}
 
           {onTestAvailability ? (
             <Button

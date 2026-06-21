@@ -94,6 +94,8 @@ macro_rules! generated_command_registry {
             provider_set_enabled => crate::commands::providers::provider_set_enabled,
             provider_delete => crate::commands::providers::provider_delete,
             providers_reorder => crate::commands::providers::providers_reorder,
+            default_route_providers_list => crate::commands::providers::default_route_providers_list,
+            default_route_providers_set_order => crate::commands::providers::default_route_providers_set_order,
             provider_claude_terminal_launch_command => crate::commands::providers::provider_claude_terminal_launch_command,
             provider_copy_api_key_to_clipboard => crate::commands::providers::provider_copy_api_key_to_clipboard,
             base_url_ping_ms => crate::commands::providers::base_url_ping_ms,

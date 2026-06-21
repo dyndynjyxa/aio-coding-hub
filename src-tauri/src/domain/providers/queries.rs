@@ -388,7 +388,16 @@ SELECT
   CASE WHEN COALESCE(api_key_plaintext, '') = '' THEN 0 ELSE 1 END AS api_key_configured
 FROM providers
 WHERE cli_key = ?1
-ORDER BY sort_order ASC, id DESC
+ORDER BY
+  COALESCE(
+    (SELECT po.sort_order
+     FROM provider_pool_order po
+     WHERE po.cli_key = providers.cli_key
+       AND po.provider_id = providers.id),
+    9223372036854775807
+  ) ASC,
+  sort_order ASC,
+  id DESC
 "#,
         )
         .map_err(|e| db_err!("failed to prepare query: {e}"))?;
@@ -521,7 +530,17 @@ SELECT
 FROM providers
 WHERE cli_key = ?1
   AND enabled = 1
-ORDER BY sort_order ASC, id DESC
+  AND EXISTS (
+    SELECT 1
+    FROM default_route_providers drp
+    WHERE drp.cli_key = providers.cli_key
+      AND drp.provider_id = providers.id
+  )
+ORDER BY
+  (SELECT drp.sort_order
+   FROM default_route_providers drp
+   WHERE drp.cli_key = providers.cli_key
+     AND drp.provider_id = providers.id) ASC
 "#,
         )
         .map_err(|e| db_err!("failed to prepare gateway provider query: {e}"))?;
@@ -1162,8 +1181,48 @@ pub fn reorder(
     cli_key: &str,
     ordered_provider_ids: Vec<i64>,
 ) -> crate::shared::error::AppResult<Vec<ProviderSummary>> {
-    validate_cli_key(cli_key)?;
+    pool_order_set(db, cli_key, ordered_provider_ids)
+}
 
+fn existing_provider_ids_for_cli(
+    tx: &rusqlite::Transaction<'_>,
+    cli_key: &str,
+) -> crate::shared::error::AppResult<Vec<i64>> {
+    let mut existing_ids = Vec::new();
+    let mut stmt = tx
+        .prepare_cached(
+            r#"
+SELECT
+  id
+FROM providers
+WHERE cli_key = ?1
+ORDER BY
+  COALESCE(
+    (SELECT po.sort_order
+     FROM provider_pool_order po
+     WHERE po.cli_key = providers.cli_key
+       AND po.provider_id = providers.id),
+    9223372036854775807
+  ) ASC,
+  sort_order ASC,
+  id DESC
+"#,
+        )
+        .map_err(|e| db_err!("failed to prepare existing id list: {e}"))?;
+    let rows = stmt
+        .query_map(params![cli_key], |row| row.get::<_, i64>(0))
+        .map_err(|e| db_err!("failed to query existing id list: {e}"))?;
+    for row in rows {
+        existing_ids.push(row.map_err(|e| db_err!("failed to read existing id: {e}"))?);
+    }
+    Ok(existing_ids)
+}
+
+fn validate_ordered_provider_ids(
+    cli_key: &str,
+    ordered_provider_ids: &[i64],
+    existing_ids: &[i64],
+) -> crate::shared::error::AppResult<HashSet<i64>> {
     if ordered_provider_ids.len() > MAX_PROVIDER_ORDER_IDS {
         return Err(format!(
             "SEC_INVALID_INPUT: ordered_provider_ids must contain at most {MAX_PROVIDER_ORDER_IDS} entries"
@@ -1172,7 +1231,7 @@ pub fn reorder(
     }
 
     let mut seen = HashSet::new();
-    for id in &ordered_provider_ids {
+    for id in ordered_provider_ids {
         if *id <= 0 {
             return Err(format!("SEC_INVALID_INPUT: invalid provider_id={id}").into());
         }
@@ -1181,28 +1240,8 @@ pub fn reorder(
         }
     }
 
-    let mut conn = db.open_connection()?;
-    let tx = conn
-        .transaction()
-        .map_err(|e| db_err!("failed to start transaction: {e}"))?;
-
-    let mut existing_ids = Vec::new();
-    {
-        let mut stmt = tx
-            .prepare_cached(
-                "SELECT id FROM providers WHERE cli_key = ?1 ORDER BY sort_order ASC, id DESC",
-            )
-            .map_err(|e| db_err!("failed to prepare existing id list: {e}"))?;
-        let rows = stmt
-            .query_map(params![cli_key], |row| row.get::<_, i64>(0))
-            .map_err(|e| db_err!("failed to query existing id list: {e}"))?;
-        for row in rows {
-            existing_ids.push(row.map_err(|e| db_err!("failed to read existing id: {e}"))?);
-        }
-    }
-
     let existing_set: HashSet<i64> = existing_ids.iter().copied().collect();
-    for id in &ordered_provider_ids {
+    for id in ordered_provider_ids {
         if !existing_set.contains(id) {
             return Err(format!(
                 "SEC_INVALID_INPUT: provider_id does not belong to cli_key={cli_key}: {id}"
@@ -1210,6 +1249,24 @@ pub fn reorder(
             .into());
         }
     }
+
+    Ok(seen)
+}
+
+pub fn pool_order_set(
+    db: &db::Db,
+    cli_key: &str,
+    ordered_provider_ids: Vec<i64>,
+) -> crate::shared::error::AppResult<Vec<ProviderSummary>> {
+    validate_cli_key(cli_key)?;
+
+    let mut conn = db.open_connection()?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| db_err!("failed to start transaction: {e}"))?;
+
+    let existing_ids = existing_provider_ids_for_cli(&tx, cli_key)?;
+    let seen = validate_ordered_provider_ids(cli_key, &ordered_provider_ids, &existing_ids)?;
 
     let mut final_ids = Vec::with_capacity(existing_ids.len());
     final_ids.extend(ordered_provider_ids);
@@ -1220,19 +1277,109 @@ pub fn reorder(
     }
 
     let now = now_unix_seconds();
+    tx.execute(
+        "DELETE FROM provider_pool_order WHERE cli_key = ?1",
+        params![cli_key],
+    )
+    .map_err(|e| db_err!("failed to clear provider_pool_order: {e}"))?;
     for (idx, id) in final_ids.iter().enumerate() {
         let sort_order = idx as i64;
         tx.execute(
-            "UPDATE providers SET sort_order = ?1, updated_at = ?2 WHERE id = ?3",
-            params![sort_order, now, id],
+            r#"
+INSERT INTO provider_pool_order(
+  cli_key,
+  provider_id,
+  sort_order,
+  created_at,
+  updated_at
+) VALUES (?1, ?2, ?3, ?4, ?5)
+"#,
+            params![cli_key, id, sort_order, now, now],
         )
-        .map_err(|e| db_err!("failed to update sort_order for provider {id}: {e}"))?;
+        .map_err(|e| db_err!("failed to insert provider_pool_order for provider {id}: {e}"))?;
     }
 
     tx.commit()
         .map_err(|e| db_err!("failed to commit transaction: {e}"))?;
+    drop(conn);
 
     list_by_cli(db, cli_key)
+}
+
+pub fn default_route_list(
+    db: &db::Db,
+    cli_key: &str,
+) -> crate::shared::error::AppResult<Vec<ProviderRouteRow>> {
+    validate_cli_key(cli_key)?;
+    let conn = db.open_connection()?;
+    let mut stmt = conn
+        .prepare_cached(
+            r#"
+SELECT
+  provider_id
+FROM default_route_providers
+WHERE cli_key = ?1
+ORDER BY sort_order ASC
+"#,
+        )
+        .map_err(|e| db_err!("failed to prepare default_route_providers query: {e}"))?;
+    let rows = stmt
+        .query_map(params![cli_key], |row| {
+            Ok(ProviderRouteRow {
+                provider_id: row.get(0)?,
+            })
+        })
+        .map_err(|e| db_err!("failed to query default_route_providers: {e}"))?;
+
+    let mut items = Vec::new();
+    for row in rows {
+        items.push(row.map_err(|e| db_err!("failed to read default_route_provider row: {e}"))?);
+    }
+    Ok(items)
+}
+
+pub fn default_route_set_order(
+    db: &db::Db,
+    cli_key: &str,
+    ordered_provider_ids: Vec<i64>,
+) -> crate::shared::error::AppResult<Vec<ProviderRouteRow>> {
+    validate_cli_key(cli_key)?;
+    let mut conn = db.open_connection()?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| db_err!("failed to start transaction: {e}"))?;
+
+    let existing_ids = existing_provider_ids_for_cli(&tx, cli_key)?;
+    validate_ordered_provider_ids(cli_key, &ordered_provider_ids, &existing_ids)?;
+
+    let now = now_unix_seconds();
+    tx.execute(
+        "DELETE FROM default_route_providers WHERE cli_key = ?1",
+        params![cli_key],
+    )
+    .map_err(|e| db_err!("failed to clear default_route_providers: {e}"))?;
+
+    for (idx, id) in ordered_provider_ids.iter().enumerate() {
+        tx.execute(
+            r#"
+INSERT INTO default_route_providers(
+  cli_key,
+  provider_id,
+  sort_order,
+  created_at,
+  updated_at
+) VALUES (?1, ?2, ?3, ?4, ?5)
+"#,
+            params![cli_key, id, idx as i64, now, now],
+        )
+        .map_err(|e| db_err!("failed to insert default_route_provider for provider {id}: {e}"))?;
+    }
+
+    tx.commit()
+        .map_err(|e| db_err!("failed to commit transaction: {e}"))?;
+    drop(conn);
+
+    default_route_list(db, cli_key)
 }
 
 #[allow(clippy::too_many_arguments)]

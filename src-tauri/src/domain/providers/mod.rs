@@ -12,10 +12,13 @@ pub use types::{
 #[allow(unused_imports)]
 pub(crate) use types::{
     ClaudeTerminalLaunchContext, GatewayProvidersSelection, ProviderForGateway,
-    ProviderOAuthDetails,
+    ProviderOAuthDetails, ProviderRouteRow,
 };
 
-pub use queries::{delete, get_api_key_plaintext, list_by_cli, names_by_id, reorder, upsert};
+pub use queries::{
+    default_route_list, default_route_set_order, delete, get_api_key_plaintext, list_by_cli,
+    names_by_id, reorder, upsert,
+};
 
 pub(crate) use queries::{
     active_sort_mode_id_for_gateway, claude_terminal_launch_context, clear_oauth, cli_key_by_id,

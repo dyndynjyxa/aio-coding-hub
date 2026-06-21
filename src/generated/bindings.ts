@@ -669,6 +669,31 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async defaultRouteProvidersList(cliKey: string): Promise<Result<ProviderRouteRow[], string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("default_route_providers_list", { cliKey }) };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async defaultRouteProvidersSetOrder(
+    cliKey: string,
+    orderedProviderIds: number[]
+  ): Promise<Result<ProviderRouteRow[], string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("default_route_providers_set_order", {
+          cliKey,
+          orderedProviderIds,
+        }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async providerClaudeTerminalLaunchCommand(providerId: number): Promise<Result<string, string>> {
     try {
       return {
@@ -2591,6 +2616,7 @@ export type ProviderOAuthStatusResult = {
   expires_at: number | null;
   has_refresh_token: boolean | null;
 };
+export type ProviderRouteRow = { provider_id: number };
 export type ProviderSummary = {
   id: number;
   cli_key: string;

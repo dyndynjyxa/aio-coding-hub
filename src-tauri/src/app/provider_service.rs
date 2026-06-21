@@ -391,14 +391,51 @@ pub(crate) async fn providers_reorder(
     .map_err(Into::into);
 
     if let Ok(ref providers) = result {
-        // Provider order changes must invalidate session-bound provider_order (default TTL=300s).
-        let cleared = app_gateway_clear_cli_route_runtime_state(&app, &cli_key_for_log);
         tracing::info!(
             cli_key = %cli_key_for_log,
             count = providers.len(),
+            "provider pool display order updated"
+        );
+    }
+
+    result
+}
+
+pub(crate) async fn default_route_providers_list(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    cli_key: String,
+) -> Result<Vec<providers::ProviderRouteRow>, String> {
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    blocking::run("default_route_providers_list", move || {
+        providers::default_route_list(&db, &cli_key)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+pub(crate) async fn default_route_providers_set_order(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    cli_key: String,
+    ordered_provider_ids: Vec<i64>,
+) -> Result<Vec<providers::ProviderRouteRow>, String> {
+    let cli_key_for_log = cli_key.clone();
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    let result = blocking::run("default_route_providers_set_order", move || {
+        providers::default_route_set_order(&db, &cli_key, ordered_provider_ids)
+    })
+    .await
+    .map_err(Into::into);
+
+    if let Ok(ref rows) = result {
+        let cleared = app_gateway_clear_cli_route_runtime_state(&app, &cli_key_for_log);
+        tracing::info!(
+            cli_key = %cli_key_for_log,
+            count = rows.len(),
             cleared_sessions = cleared.cleared_sessions,
             cleared_recent_errors = cleared.cleared_recent_errors,
-            "providers reordered"
+            "default route provider order updated"
         );
     }
 

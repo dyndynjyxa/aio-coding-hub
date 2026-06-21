@@ -14,6 +14,7 @@ pub(super) fn apply_ensure_patches(conn: &mut Connection) -> crate::shared::erro
     ensure_provider_oauth_columns(conn)?;
     ensure_provider_oauth_limit_snapshots(conn)?;
     ensure_sort_mode_providers_enabled(conn)?;
+    ensure_provider_route_order_tables(conn)?;
     ensure_usage_indexes(conn)?;
     ensure_provider_tags(conn)?;
     ensure_provider_note(conn)?;
@@ -622,6 +623,107 @@ fn ensure_sort_mode_providers_enabled(conn: &mut Connection) -> Result<(), Strin
 
     tx.commit()
         .map_err(|e| format!("failed to commit sqlite transaction: {e}"))?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// ensure_provider_route_order_tables (from v32_to_v33.rs)
+// ---------------------------------------------------------------------------
+fn ensure_provider_route_order_tables(conn: &mut Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+CREATE TABLE IF NOT EXISTS provider_pool_order (
+  cli_key TEXT NOT NULL,
+  provider_id INTEGER NOT NULL,
+  sort_order INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY(cli_key, provider_id),
+  FOREIGN KEY(provider_id) REFERENCES providers(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_pool_order_cli_sort_order
+  ON provider_pool_order(cli_key, sort_order);
+CREATE INDEX IF NOT EXISTS idx_provider_pool_order_provider_id
+  ON provider_pool_order(provider_id);
+
+CREATE TABLE IF NOT EXISTS default_route_providers (
+  cli_key TEXT NOT NULL,
+  provider_id INTEGER NOT NULL,
+  sort_order INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY(cli_key, provider_id),
+  FOREIGN KEY(provider_id) REFERENCES providers(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_default_route_providers_cli_sort_order
+  ON default_route_providers(cli_key, sort_order);
+CREATE INDEX IF NOT EXISTS idx_default_route_providers_provider_id
+  ON default_route_providers(provider_id);
+"#,
+    )
+    .map_err(|e| format!("failed to ensure provider route order tables: {e}"))?;
+
+    let providers_table_exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'providers')",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|e| format!("failed to inspect providers table: {e}"))?
+        != 0;
+
+    if !providers_table_exists {
+        return Ok(());
+    }
+
+    let now = now_unix_seconds();
+    conn.execute(
+        r#"
+INSERT OR IGNORE INTO provider_pool_order(
+  cli_key,
+  provider_id,
+  sort_order,
+  created_at,
+  updated_at
+)
+SELECT
+  cli_key,
+  id,
+  sort_order,
+  ?1,
+  ?1
+FROM providers
+ORDER BY cli_key ASC, sort_order ASC, id DESC
+"#,
+        [now],
+    )
+    .map_err(|e| format!("failed to ensure provider_pool_order rows: {e}"))?;
+
+    conn.execute(
+        r#"
+INSERT OR IGNORE INTO default_route_providers(
+  cli_key,
+  provider_id,
+  sort_order,
+  created_at,
+  updated_at
+)
+SELECT
+  cli_key,
+  id,
+  sort_order,
+  ?1,
+  ?1
+FROM providers
+WHERE enabled = 1
+ORDER BY cli_key ASC, sort_order ASC, id DESC
+"#,
+        [now],
+    )
+    .map_err(|e| format!("failed to ensure default_route_providers rows: {e}"))?;
+
     Ok(())
 }
 

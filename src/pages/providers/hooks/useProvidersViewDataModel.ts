@@ -12,18 +12,26 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { PointerSensor, type DragEndEvent, useSensor, useSensors } from "@dnd-kit/core";
+import { arrayMove } from "@dnd-kit/sortable";
 import { logToConsole } from "../../../services/consoleLog";
 import { copyText } from "../../../services/clipboard";
 import type { GatewayProviderCircuitStatus } from "../../../services/gateway/gateway";
-import { type CliKey, type ProviderSummary } from "../../../services/providers/providers";
+import {
+  type CliKey,
+  type ProviderRouteRow,
+  type ProviderSummary,
+} from "../../../services/providers/providers";
 import {
   summarizeGatewayCircuitRows,
   useGatewayCircuitAutoRefresh,
   useGatewayCircuitResetCliMutation,
   useGatewayCircuitResetProviderMutation,
+  useGatewaySessionsListQuery,
   useGatewayCircuitStatusQuery,
 } from "../../../query/gateway";
 import {
+  useDefaultRouteProvidersQuery,
+  useDefaultRouteProvidersSetOrderMutation,
   useProviderClaudeTerminalLaunchCommandMutation,
   useProviderDeleteMutation,
   useProviderDuplicateMutation,
@@ -32,6 +40,21 @@ import {
   useProvidersListQuery,
   useProvidersReorderMutation,
 } from "../../../query/providers";
+import {
+  useSortModeActiveListQuery,
+  useSortModeActiveSetMutation,
+  useSortModeCreateMutation,
+  useSortModeDeleteMutation,
+  useSortModeProvidersListQuery,
+  useSortModeProvidersSetOrderMutation,
+  useSortModeRenameMutation,
+  useSortModesListQuery,
+} from "../../../query/sortModes";
+import type {
+  SortModeActiveRow,
+  SortModeProviderRow,
+  SortModeSummary,
+} from "../../../services/providers/sortModes";
 import type { ProviderEditorInitialValues } from "../providerDuplicate";
 import { reorderVisibleItems } from "../reorderVisibleItems";
 
@@ -43,6 +66,39 @@ type CreateDialogState = {
 type ProviderRefreshResult = { error: unknown | null };
 type ProviderActionMap = Record<number, boolean>;
 type ProviderActionMapSetter = Dispatch<SetStateAction<ProviderActionMap>>;
+
+type RouteDraftSelection = { kind: "default"; modeId: null } | { kind: "mode"; modeId: number };
+
+type PendingRouteActivation = {
+  cliKey: CliKey;
+  modeId: number | null;
+  label: string;
+  activeSessionCount: number;
+};
+
+const EMPTY_SORT_MODES: SortModeSummary[] = [];
+const EMPTY_MODE_PROVIDERS: SortModeProviderRow[] = [];
+const EMPTY_ROUTE_ROWS: ProviderRouteRow[] = [];
+
+function emptyActiveModeByCli(): Record<CliKey, number | null> {
+  return {
+    claude: null,
+    codex: null,
+    gemini: null,
+  };
+}
+
+function buildActiveModeByCli(rows: SortModeActiveRow[]) {
+  const next = emptyActiveModeByCli();
+  for (const row of rows) {
+    next[row.cli_key] = row.mode_id ?? null;
+  }
+  return next;
+}
+
+function routeDraftKey(selection: RouteDraftSelection) {
+  return selection.kind === "default" ? "default" : `mode:${selection.modeId}`;
+}
 
 function beginProviderAction(ref: MutableRefObject<ProviderActionMap>, providerId: number) {
   if (ref.current[providerId]) {
@@ -119,6 +175,9 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
     [codexProvidersQuery.data]
   );
   const providersLoading = providersQuery.isFetching;
+  const defaultRouteQuery = useDefaultRouteProvidersQuery(activeCli);
+  const sortModesQuery = useSortModesListQuery();
+  const sortModeActiveQuery = useSortModeActiveListQuery();
 
   const sourceProvidersById = useMemo(
     () => Object.fromEntries(codexProviders.map((provider) => [provider.id, provider])),
@@ -137,8 +196,33 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
   const providersRefreshNextTokenRef = useRef(0);
   const providerReorderSaveTokenByCliRef = useRef<Partial<Record<CliKey, number>>>({});
   const providerReorderNextSaveTokenRef = useRef(0);
+  const [routeDraftSelection, setRouteDraftSelection] = useState<RouteDraftSelection>({
+    kind: "default",
+    modeId: null,
+  });
+  const routeDraftSelectionRef = useRef(routeDraftSelection);
+  const [modeProviders, setModeProviders] = useState<SortModeProviderRow[]>(EMPTY_MODE_PROVIDERS);
+  const modeProvidersRef = useRef(modeProviders);
+  const [routeSaving, setRouteSaving] = useState(false);
+  const routeSavingRef = useRef(false);
+  const [createModeDialogOpen, setCreateModeDialogOpen] = useState(false);
+  const [createModeName, setCreateModeName] = useState("");
+  const [createModeSaving, setCreateModeSaving] = useState(false);
+  const [renameModeDialogOpen, setRenameModeDialogOpen] = useState(false);
+  const [renameModeName, setRenameModeName] = useState("");
+  const [renameModeSaving, setRenameModeSaving] = useState(false);
+  const [deleteModeTarget, setDeleteModeTarget] = useState<SortModeSummary | null>(null);
+  const [deleteModeDeleting, setDeleteModeDeleting] = useState(false);
+  const [activatingRoute, setActivatingRoute] = useState(false);
+  const activatingRouteRef = useRef(false);
+  const [pendingRouteActivation, setPendingRouteActivation] =
+    useState<PendingRouteActivation | null>(null);
 
   const circuitQuery = useGatewayCircuitStatusQuery(activeCli);
+  const activeSessionsQuery = useGatewaySessionsListQuery(50, {
+    refetchIntervalMs: 5000,
+  });
+  const activeSessions = activeSessionsQuery.data ?? [];
   const circuitRows = useMemo<GatewayProviderCircuitStatus[]>(
     () => circuitQuery.data ?? [],
     [circuitQuery.data]
@@ -182,8 +266,50 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
   const providerDeleteMutation = useProviderDeleteMutation();
   const providerDuplicateMutation = useProviderDuplicateMutation();
   const providersReorderMutation = useProvidersReorderMutation();
+  const defaultRouteSetOrderMutation = useDefaultRouteProvidersSetOrderMutation();
+  const sortModeCreateMutation = useSortModeCreateMutation();
+  const sortModeRenameMutation = useSortModeRenameMutation();
+  const sortModeDeleteMutation = useSortModeDeleteMutation();
+  const sortModeActiveSetMutation = useSortModeActiveSetMutation();
+  const sortModeProvidersSetOrderMutation = useSortModeProvidersSetOrderMutation();
   const terminalLaunchCommandMutation = useProviderClaudeTerminalLaunchCommandMutation();
   const testAvailabilityMutation = useProviderTestAvailabilityMutation();
+
+  const sortModes = sortModesQuery.data ?? EMPTY_SORT_MODES;
+  const sortModesLoading = sortModesQuery.isLoading || sortModeActiveQuery.isLoading;
+  const sortModesAvailable =
+    sortModesQuery.data != null && sortModeActiveQuery.data != null ? true : null;
+  const activeModeByCli = useMemo(
+    () => buildActiveModeByCli(sortModeActiveQuery.data ?? []),
+    [sortModeActiveQuery.data]
+  );
+  const activeModeId = activeModeByCli[activeCli] ?? null;
+  const selectedSortMode = useMemo(
+    () =>
+      routeDraftSelection.kind === "mode"
+        ? (sortModes.find((mode) => mode.id === routeDraftSelection.modeId) ?? null)
+        : null,
+    [routeDraftSelection, sortModes]
+  );
+  const selectedRouteLabel =
+    routeDraftSelection.kind === "default"
+      ? "Default"
+      : (selectedSortMode?.name ?? `#${routeDraftSelection.modeId}`);
+  const currentRouteActive =
+    routeDraftSelection.kind === "default"
+      ? activeModeId == null
+      : activeModeId === routeDraftSelection.modeId;
+  const providersById = useMemo(
+    () => Object.fromEntries(providers.map((provider) => [provider.id, provider])),
+    [providers]
+  );
+  const defaultRouteRows = defaultRouteQuery.data ?? EMPTY_ROUTE_ROWS;
+  const activeModeForQuery =
+    routeDraftSelection.kind === "mode" ? routeDraftSelection.modeId : null;
+  const modeProvidersQuery = useSortModeProvidersListQuery(
+    { modeId: activeModeForQuery, cliKey: activeCli },
+    { enabled: routeDraftSelection.kind === "mode" && activeModeForQuery != null }
+  );
 
   const tagCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -206,6 +332,41 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
       return provider.name.toLowerCase().includes(normalizedSearch);
     });
   }, [providerSearch, providers, selectedTags]);
+
+  useEffect(() => {
+    routeDraftSelectionRef.current = routeDraftSelection;
+  }, [routeDraftSelection]);
+
+  useEffect(() => {
+    modeProvidersRef.current = modeProviders;
+  }, [modeProviders]);
+
+  useEffect(() => {
+    if (routeDraftSelection.kind !== "mode") {
+      setModeProviders(EMPTY_MODE_PROVIDERS);
+      modeProvidersRef.current = EMPTY_MODE_PROVIDERS;
+      return;
+    }
+    const rows = modeProvidersQuery.data ?? EMPTY_MODE_PROVIDERS;
+    setModeProviders(rows);
+    modeProvidersRef.current = rows;
+  }, [modeProvidersQuery.data, routeDraftSelection.kind, routeDraftSelection.modeId]);
+
+  useEffect(() => {
+    if (routeDraftSelection.kind !== "mode") return;
+    if (sortModes.some((mode) => mode.id === routeDraftSelection.modeId)) return;
+    setRouteDraftSelection({ kind: "default", modeId: null });
+  }, [routeDraftSelection, sortModes]);
+
+  useEffect(() => {
+    if (!createModeDialogOpen) return;
+    setCreateModeName("");
+  }, [createModeDialogOpen]);
+
+  useEffect(() => {
+    if (!renameModeDialogOpen) return;
+    setRenameModeName(selectedSortMode?.name ?? "");
+  }, [renameModeDialogOpen, selectedSortMode]);
 
   const beginProvidersRefresh = useCallback((cliKey: CliKey) => {
     if (providersRefreshTokenByCliRef.current[cliKey] != null) {
@@ -273,6 +434,7 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
     setCreateDialogState(null);
     setEditTarget(null);
     setDeleteTarget(null);
+    setRouteDraftSelection({ kind: "default", modeId: null });
   }, [activeCli]);
 
   useEffect(() => {
@@ -617,7 +779,7 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
         cli: cliKey,
         order: saved.map((provider) => provider.id),
       });
-      toast("顺序已更新");
+      toast("资源池展示顺序已更新");
     } catch (error) {
       logToConsole("error", "更新 Provider 顺序失败", {
         cli: cliKey,
@@ -640,7 +802,14 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
       activeId: active.id,
       overId: over.id,
       getId: (provider) => provider.id,
-      isVisible: (provider) => provider.enabled,
+      isVisible: (provider) => {
+        const normalizedSearch = providerSearch.trim().toLowerCase();
+        const matchesTags =
+          selectedTags.size === 0 || (provider.tags ?? []).some((tag) => selectedTags.has(tag));
+        if (!matchesTags) return false;
+        if (!normalizedSearch) return true;
+        return provider.name.toLowerCase().includes(normalizedSearch);
+      },
     });
     if (!nextProviders) return;
 
@@ -650,11 +819,259 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
     void persistProvidersOrder(cliKey, saveToken, nextProviders);
   }
 
+  const routeRows = routeDraftSelection.kind === "default" ? defaultRouteRows : modeProviders;
+  const routeProviderIds = useMemo(() => routeRows.map((row) => row.provider_id), [routeRows]);
+  const routeProviderIdSet = useMemo(() => new Set(routeProviderIds), [routeProviderIds]);
+  const callableRouteCount = useMemo(
+    () =>
+      routeRows.filter((row) => {
+        const provider = providersById[row.provider_id] ?? null;
+        const rowEnabled = "enabled" in row ? row.enabled : true;
+        return Boolean(provider?.enabled && rowEnabled);
+      }).length,
+    [providersById, routeRows]
+  );
+  const routeLoading =
+    routeDraftSelection.kind === "default"
+      ? defaultRouteQuery.isFetching
+      : modeProvidersQuery.isFetching;
+
+  function selectRouteDraft(value: string) {
+    if (value === "default") {
+      setRouteDraftSelection({ kind: "default", modeId: null });
+      return;
+    }
+    const modeId = Number(value.replace("mode:", ""));
+    if (!Number.isSafeInteger(modeId) || modeId <= 0) return;
+    setRouteDraftSelection({ kind: "mode", modeId });
+  }
+
+  async function persistRouteRows(nextRows: Array<ProviderRouteRow | SortModeProviderRow>) {
+    if (routeSavingRef.current) return;
+    const selection = routeDraftSelectionRef.current;
+    const cliKey = activeCliRef.current;
+    routeSavingRef.current = true;
+    setRouteSaving(true);
+
+    try {
+      if (selection.kind === "default") {
+        await defaultRouteSetOrderMutation.mutateAsync({
+          cliKey,
+          orderedProviderIds: nextRows.map((row) => row.provider_id),
+          optimisticRows: nextRows.map((row) => ({ provider_id: row.provider_id })),
+        });
+        toast("Default 调用顺序已更新");
+      } else {
+        const saved = await sortModeProvidersSetOrderMutation.mutateAsync({
+          modeId: selection.modeId,
+          cliKey,
+          orderedProviderIds: nextRows.map((row) => row.provider_id),
+        });
+        if (
+          routeDraftSelectionRef.current.kind === "mode" &&
+          routeDraftSelectionRef.current.modeId === selection.modeId
+        ) {
+          setModeProviders(saved);
+          modeProvidersRef.current = saved;
+        }
+        toast("模板调用顺序已更新");
+      }
+    } catch (error) {
+      logToConsole("error", "更新调用顺序失败", {
+        cli: cliKey,
+        route: routeDraftKey(selection),
+        error: String(error),
+      });
+      toast(`调用顺序更新失败：${String(error)}`);
+    } finally {
+      routeSavingRef.current = false;
+      setRouteSaving(false);
+    }
+  }
+
+  function addProviderToCurrentRoute(providerId: number) {
+    if (routeProviderIdSet.has(providerId)) return;
+    const nextRows =
+      routeDraftSelection.kind === "default"
+        ? [...defaultRouteRows, { provider_id: providerId }]
+        : [...modeProvidersRef.current, { provider_id: providerId, enabled: true }];
+    void persistRouteRows(nextRows);
+  }
+
+  function removeProviderFromCurrentRoute(providerId: number) {
+    if (!routeProviderIdSet.has(providerId)) return;
+    const nextRows =
+      routeDraftSelection.kind === "default"
+        ? defaultRouteRows.filter((row) => row.provider_id !== providerId)
+        : modeProvidersRef.current.filter((row) => row.provider_id !== providerId);
+    void persistRouteRows(nextRows);
+  }
+
+  function handleRouteDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const rows =
+      routeDraftSelectionRef.current.kind === "default"
+        ? defaultRouteRows
+        : modeProvidersRef.current;
+    const oldIndex = rows.findIndex((row) => row.provider_id === active.id);
+    const newIndex = rows.findIndex((row) => row.provider_id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+    void persistRouteRows(arrayMove(rows, oldIndex, newIndex));
+  }
+
+  async function createSortMode() {
+    const name = createModeName.trim();
+    if (!name || createModeSaving) return;
+    setCreateModeSaving(true);
+    try {
+      const saved = await sortModeCreateMutation.mutateAsync({ name });
+      setRouteDraftSelection({ kind: "mode", modeId: saved.id });
+      setCreateModeDialogOpen(false);
+      toast("排序模板已创建");
+    } catch (error) {
+      toast(`创建失败：${String(error)}`);
+    } finally {
+      setCreateModeSaving(false);
+    }
+  }
+
+  async function renameSortMode() {
+    if (!selectedSortMode || renameModeSaving) return;
+    const name = renameModeName.trim();
+    if (!name) return;
+    setRenameModeSaving(true);
+    try {
+      await sortModeRenameMutation.mutateAsync({ modeId: selectedSortMode.id, name });
+      setRenameModeDialogOpen(false);
+      toast("排序模板已更新");
+    } catch (error) {
+      toast(`重命名失败：${String(error)}`);
+    } finally {
+      setRenameModeSaving(false);
+    }
+  }
+
+  async function deleteSortMode() {
+    if (!deleteModeTarget || deleteModeDeleting) return;
+    setDeleteModeDeleting(true);
+    try {
+      await sortModeDeleteMutation.mutateAsync({ modeId: deleteModeTarget.id });
+      if (
+        routeDraftSelectionRef.current.kind === "mode" &&
+        routeDraftSelectionRef.current.modeId === deleteModeTarget.id
+      ) {
+        setRouteDraftSelection({ kind: "default", modeId: null });
+      }
+      setDeleteModeTarget(null);
+      toast("排序模板已删除");
+    } catch (error) {
+      toast(`删除失败：${String(error)}`);
+    } finally {
+      setDeleteModeDeleting(false);
+    }
+  }
+
+  async function applyCurrentRouteActive(input: {
+    cliKey: CliKey;
+    modeId: number | null;
+    label: string;
+  }) {
+    if (activatingRouteRef.current) return;
+    activatingRouteRef.current = true;
+    setActivatingRoute(true);
+    try {
+      await sortModeActiveSetMutation.mutateAsync({
+        cliKey: input.cliKey,
+        modeId: input.modeId,
+      });
+      toast(input.modeId == null ? "已切回：Default" : `已激活：${input.label}`);
+    } catch (error) {
+      toast(`切换排序模板失败：${String(error)}`);
+      logToConsole("error", "切换排序模板失败", {
+        cli: input.cliKey,
+        mode_id: input.modeId,
+        error: String(error),
+      });
+    } finally {
+      activatingRouteRef.current = false;
+      setActivatingRoute(false);
+    }
+  }
+
+  function setCurrentRouteActive() {
+    const selection = routeDraftSelectionRef.current;
+    const cliKey = activeCliRef.current;
+    const modeId = selection.kind === "default" ? null : selection.modeId;
+    if ((activeModeByCli[cliKey] ?? null) === modeId) return;
+
+    const label = selection.kind === "default" ? "Default" : selectedRouteLabel;
+    const activeSessionCount = activeSessions.filter((row) => row.cli_key === cliKey).length;
+    if (activeSessionCount > 0) {
+      setPendingRouteActivation({ cliKey, modeId, label, activeSessionCount });
+      return;
+    }
+
+    void applyCurrentRouteActive({ cliKey, modeId, label });
+  }
+
+  function confirmPendingRouteActivation() {
+    const pending = pendingRouteActivation;
+    if (!pending) return;
+    setPendingRouteActivation(null);
+    void applyCurrentRouteActive({
+      cliKey: pending.cliKey,
+      modeId: pending.modeId,
+      label: pending.label,
+    });
+  }
+
   return {
     providers,
     codexProviders,
     providersLoading,
     providersRefreshing: Boolean(providersRefreshingByCli[activeCli]),
+    defaultRouteRows,
+    sortModes,
+    sortModesLoading,
+    sortModesAvailable,
+    activeModeId,
+    activeModeByCli,
+    routeDraftSelection,
+    selectedSortMode,
+    selectedRouteLabel,
+    currentRouteActive,
+    activatingRoute,
+    pendingRouteActivation,
+    setPendingRouteActivation,
+    confirmPendingRouteActivation,
+    providersById,
+    routeRows,
+    routeProviderIdSet,
+    callableRouteCount,
+    routeLoading,
+    routeSaving,
+    createModeDialogOpen,
+    setCreateModeDialogOpen,
+    createModeName,
+    setCreateModeName,
+    createModeSaving,
+    renameModeDialogOpen,
+    setRenameModeDialogOpen,
+    renameModeName,
+    setRenameModeName,
+    renameModeSaving,
+    deleteModeTarget,
+    setDeleteModeTarget,
+    deleteModeDeleting,
+    selectRouteDraft,
+    addProviderToCurrentRoute,
+    removeProviderFromCurrentRoute,
+    handleRouteDragEnd,
+    createSortMode,
+    renameSortMode,
+    deleteSortMode,
+    setCurrentRouteActive,
     filteredProviders,
     tagCounts,
     selectedTags,

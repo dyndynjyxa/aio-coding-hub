@@ -28,6 +28,7 @@ export const providersKeys = {
   all: providersAllKey,
   lists: () => [...providersAllKey, "list"] as const,
   list: (cliKey: CliKey) => [...providersAllKey, "list", cliKey] as const,
+  defaultRoute: (cliKey: CliKey) => [...providersAllKey, "defaultRoute", cliKey] as const,
   oauthStatus: (providerId: number | null) =>
     [...providersAllKey, "oauthStatus", providerId] as const,
 };

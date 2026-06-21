@@ -1,10 +1,9 @@
-import { memo, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { memo, type HTMLAttributes, type ReactNode } from "react";
 import { GripVertical } from "lucide-react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { ProviderSummary } from "../../services/providers/providers";
 import { cn } from "../../utils/cn";
-import { providerBaseUrlSummary } from "./baseUrl";
 
 export type ProviderOrderItemProps = {
   provider: ProviderSummary | null;
@@ -12,7 +11,7 @@ export type ProviderOrderItemProps = {
   index: number;
   trailing?: ReactNode;
   className?: string;
-  dragHandleProps?: ButtonHTMLAttributes<HTMLButtonElement>;
+  dragProps?: HTMLAttributes<HTMLDivElement>;
   showProviderDisabledBadge?: boolean;
 };
 
@@ -22,7 +21,7 @@ export const ProviderOrderItem = memo(function ProviderOrderItem({
   index,
   trailing = null,
   className,
-  dragHandleProps,
+  dragProps,
   showProviderDisabledBadge = true,
 }: ProviderOrderItemProps) {
   const label = provider?.name?.trim()
@@ -33,8 +32,10 @@ export const ProviderOrderItem = memo(function ProviderOrderItem({
     <div
       className={cn(
         "flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-2 text-sm shadow-sm transition-shadow duration-200",
+        dragProps && "cursor-grab active:cursor-grabbing",
         className
       )}
+      {...dragProps}
     >
       <div
         aria-label={`第 ${index + 1} 位`}
@@ -44,9 +45,6 @@ export const ProviderOrderItem = memo(function ProviderOrderItem({
       </div>
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium text-foreground">{label}</div>
-        <div className="truncate text-xs text-muted-foreground">
-          {providerBaseUrlSummary(provider)}
-        </div>
       </div>
       {showProviderDisabledBadge && provider && !provider.enabled ? (
         <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
@@ -54,16 +52,14 @@ export const ProviderOrderItem = memo(function ProviderOrderItem({
         </span>
       ) : null}
       {trailing}
-      {dragHandleProps ? (
-        <button
-          type="button"
-          className="inline-flex h-7 w-7 shrink-0 cursor-grab items-center justify-center rounded-md text-muted-foreground hover:bg-secondary active:cursor-grabbing"
-          title="拖拽排序"
-          aria-label={`拖拽调整 ${label} 顺序`}
-          {...dragHandleProps}
+      {dragProps ? (
+        <div
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground"
+          title="可拖拽排序"
+          aria-hidden="true"
         >
-          <GripVertical className="h-4 w-4" aria-hidden="true" />
-        </button>
+          <GripVertical className="h-4 w-4" />
+        </div>
       ) : null}
     </div>
   );
@@ -106,7 +102,7 @@ export const SortableProviderOrderItem = memo(function SortableProviderOrderItem
           isDragging && "z-10 scale-[1.02] opacity-95 shadow-lg ring-2 ring-ring/30",
           disabled && "opacity-70"
         )}
-        dragHandleProps={disabled ? undefined : { ...attributes, ...listeners }}
+        dragProps={disabled ? undefined : { ...attributes, ...listeners }}
       />
     </div>
   );

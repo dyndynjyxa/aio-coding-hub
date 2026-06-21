@@ -229,6 +229,11 @@ pub struct ProviderSummary {
     pub api_key_configured: bool,
 }
 
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct ProviderRouteRow {
+    pub provider_id: i64,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ProviderForGateway {
     pub id: i64,

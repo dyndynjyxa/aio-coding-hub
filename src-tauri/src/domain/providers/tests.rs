@@ -1,3 +1,4 @@
+use super::queries::pool_order_set;
 use super::*;
 
 // -- ClaudeModels::map_model --
@@ -499,6 +500,70 @@ fn reorder_rejects_invalid_duplicate_and_oversized_provider_ids() {
     assert!(oversized
         .to_string()
         .contains("ordered_provider_ids must contain at most"));
+}
+
+#[test]
+fn pool_order_is_independent_from_default_route_order() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("providers_pool_order.db");
+    let db = crate::db::init_for_tests(&db_path).expect("init db");
+
+    let (p1_id, p2_id, p3_id) = {
+        let p1 = upsert(&db, default_provider_params("pool-p1")).expect("save p1");
+        let p2 = upsert(&db, default_provider_params("pool-p2")).expect("save p2");
+        let p3 = upsert(&db, default_provider_params("pool-p3")).expect("save p3");
+        (p1.id, p2.id, p3.id)
+    };
+
+    default_route_set_order(&db, "claude", vec![p1_id, p2_id]).expect("set default route");
+    pool_order_set(&db, "claude", vec![p3_id, p1_id]).expect("set pool order");
+
+    let pool_ids: Vec<i64> = list_by_cli(&db, "claude")
+        .expect("list providers")
+        .into_iter()
+        .map(|p| p.id)
+        .collect();
+    assert_eq!(pool_ids, vec![p3_id, p1_id, p2_id]);
+
+    let default_ids: Vec<i64> = default_route_list(&db, "claude")
+        .expect("list default route")
+        .into_iter()
+        .map(|row| row.provider_id)
+        .collect();
+    assert_eq!(default_ids, vec![p1_id, p2_id]);
+}
+
+#[test]
+fn default_route_gateway_uses_membership_and_global_enabled() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("providers_default_route_gateway.db");
+    let db = crate::db::init_for_tests(&db_path).expect("init db");
+
+    let (p1_id, p2_id, p3_enabled) = {
+        let p1 = upsert(&db, default_provider_params("default-p1")).expect("save p1");
+        let mut p2_params = default_provider_params("default-p2");
+        p2_params.enabled = false;
+        let p2 = upsert(&db, p2_params).expect("save p2");
+        let p3 = upsert(&db, default_provider_params("default-p3")).expect("save p3");
+        (p1.id, p2.id, p3.enabled)
+    };
+
+    default_route_set_order(&db, "claude", vec![p2_id, p1_id]).expect("set default route");
+
+    let selection =
+        list_enabled_for_gateway_using_active_mode(&db, "claude").expect("list gateway providers");
+    assert_eq!(selection.sort_mode_id, None);
+    assert_eq!(
+        selection
+            .providers
+            .into_iter()
+            .map(|provider| provider.id)
+            .collect::<Vec<_>>(),
+        vec![p1_id]
+    );
+
+    // p3 remains globally enabled but is not a Default member, so it is not routed.
+    assert!(p3_enabled);
 }
 
 fn create_oauth_provider_for_cas_test(db: &crate::db::Db, name: &str) -> i64 {

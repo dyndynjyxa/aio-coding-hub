@@ -63,6 +63,10 @@ export type ProviderSummary = Override<
   }
 >;
 
+export type ProviderRouteRow = {
+  provider_id: number;
+};
+
 type ProviderUpsertFieldMap = {
   providerId: "providerId";
   cliKey: "cliKey";
@@ -292,6 +296,35 @@ export async function providersReorder(
         await commands.providersReorder(normalizedCliKey, orderedProviderIds),
         (rows) => rows.map(toProviderSummary)
       ),
+  });
+}
+
+export async function defaultRouteProvidersList(cliKey: CliKey) {
+  const normalizedCliKey = validateProviderCliKey(cliKey);
+
+  return invokeGeneratedIpc<ProviderRouteRow[]>({
+    title: "读取 Default 调用顺序失败",
+    cmd: "default_route_providers_list",
+    args: { cliKey: normalizedCliKey },
+    invoke: () =>
+      commands.defaultRouteProvidersList(normalizedCliKey) as Promise<
+        GeneratedCommandResult<ProviderRouteRow[]>
+      >,
+  });
+}
+
+export async function defaultRouteProvidersSetOrder(cliKey: CliKey, orderedProviderIds: number[]) {
+  const normalizedCliKey = validateProviderCliKey(cliKey);
+  validateOrderedProviderIds(orderedProviderIds);
+
+  return invokeGeneratedIpc<ProviderRouteRow[]>({
+    title: "更新 Default 调用顺序失败",
+    cmd: "default_route_providers_set_order",
+    args: { cliKey: normalizedCliKey, orderedProviderIds },
+    invoke: () =>
+      commands.defaultRouteProvidersSetOrder(normalizedCliKey, orderedProviderIds) as Promise<
+        GeneratedCommandResult<ProviderRouteRow[]>
+      >,
   });
 }
 

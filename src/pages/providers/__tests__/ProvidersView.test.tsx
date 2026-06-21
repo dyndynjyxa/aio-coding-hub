@@ -24,6 +24,8 @@ import {
   useGatewayCircuitStatusQuery,
 } from "../../../query/gateway";
 import {
+  useDefaultRouteProvidersQuery,
+  useDefaultRouteProvidersSetOrderMutation,
   useProviderClaudeTerminalLaunchCommandMutation,
   useProviderDeleteMutation,
   useProviderSetEnabledMutation,
@@ -31,12 +33,12 @@ import {
   useProvidersReorderMutation,
 } from "../../../query/providers";
 
-let latestOnDragEnd: ((event: any) => void) | null = null;
+let dndContextDragHandlers: Array<((event: any) => void) | null> = [];
 let sortableIsDragging = false;
 
 vi.mock("@dnd-kit/core", () => ({
   DndContext: ({ children, onDragEnd }: any) => {
-    latestOnDragEnd = onDragEnd ?? null;
+    dndContextDragHandlers.push(onDragEnd ?? null);
     return <div data-testid="dnd">{children}</div>;
   },
   PointerSensor: function PointerSensor() {},
@@ -130,6 +132,8 @@ vi.mock("../../../query/providers", async () => {
   return {
     ...actual,
     useProvidersListQuery: vi.fn(),
+    useDefaultRouteProvidersQuery: vi.fn(),
+    useDefaultRouteProvidersSetOrderMutation: vi.fn(),
     useProviderClaudeTerminalLaunchCommandMutation: vi.fn(),
     useProviderSetEnabledMutation: vi.fn(),
     useProviderDeleteMutation: vi.fn(),
@@ -149,7 +153,12 @@ function queryWrapper() {
   };
 }
 
+function dragProviderPool(event: any) {
+  dndContextDragHandlers[0]?.(event);
+}
+
 beforeEach(() => {
+  dndContextDragHandlers = [];
   vi.mocked(copyText).mockResolvedValue(undefined);
   vi.mocked(providerDuplicate).mockResolvedValue({
     id: 999,
@@ -158,6 +167,13 @@ beforeEach(() => {
   } as any);
   vi.mocked(useProviderClaudeTerminalLaunchCommandMutation).mockReturnValue({
     mutateAsync: vi.fn().mockResolvedValue("bash '/tmp/aio.sh'"),
+  } as any);
+  vi.mocked(useDefaultRouteProvidersQuery).mockReturnValue({
+    data: [],
+    isFetching: false,
+  } as any);
+  vi.mocked(useDefaultRouteProvidersSetOrderMutation).mockReturnValue({
+    mutateAsync: vi.fn().mockResolvedValue([]),
   } as any);
 });
 
@@ -388,6 +404,10 @@ describe("pages/providers/ProvidersView", () => {
     const reorderMutation = { isPending: false, mutateAsync: vi.fn() };
     reorderMutation.mutateAsync.mockResolvedValue([providers[2], providers[1], providers[0]]);
     vi.mocked(useProvidersReorderMutation).mockReturnValue(reorderMutation as any);
+    vi.mocked(useDefaultRouteProvidersQuery).mockReturnValue({
+      data: [{ provider_id: 1 }, { provider_id: 3 }],
+      isFetching: false,
+    } as any);
 
     const resetProviderMutation = { isPending: false, mutateAsync: vi.fn(), variables: null };
     resetProviderMutation.mutateAsync.mockResolvedValue(true);
@@ -406,7 +426,7 @@ describe("pages/providers/ProvidersView", () => {
     renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
 
     expect(screen.getByText("调用顺序")).toBeInTheDocument();
-    expect(screen.getByText("调用顺序按照从上到下依次调用")).toBeInTheDocument();
+    expect(screen.getByText("Default 按照从上到下依次调用")).toBeInTheDocument();
     const orderPanel = within(screen.getByRole("complementary", { name: "供应商调用顺序" }));
     expect(orderPanel.getByText("P1")).toBeInTheDocument();
     expect(orderPanel.getByText("P3")).toBeInTheDocument();
@@ -460,15 +480,15 @@ describe("pages/providers/ProvidersView", () => {
       expect(deleteMutation.mutateAsync).toHaveBeenCalledWith({ cliKey: "claude", providerId: 1 })
     );
 
-    // Drag reorder enabled providers (1 -> 3), preserving hidden disabled provider 2 slot.
-    latestOnDragEnd?.({ active: { id: 1 }, over: { id: 3 } });
+    // Drag reorder resource-pool providers (1 -> 3) across the full provider list.
+    dragProviderPool({ active: { id: 1 }, over: { id: 3 } });
     await waitFor(() =>
       expect(reorderMutation.mutateAsync).toHaveBeenCalledWith({
         cliKey: "claude",
-        orderedProviderIds: [3, 2, 1],
+        orderedProviderIds: [2, 3, 1],
         optimisticProviders: [
-          expect.objectContaining({ id: 3, name: "P3", enabled: true }),
           expect.objectContaining({ id: 2, name: "P2", enabled: false }),
+          expect.objectContaining({ id: 3, name: "P3", enabled: true }),
           expect.objectContaining({ id: 1, name: "P1", enabled: true }),
         ],
       })
@@ -538,8 +558,8 @@ describe("pages/providers/ProvidersView", () => {
 
     renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
 
-    latestOnDragEnd?.({ active: { id: 1 }, over: { id: 2 } });
-    latestOnDragEnd?.({ active: { id: 2 }, over: { id: 3 } });
+    dragProviderPool({ active: { id: 1 }, over: { id: 2 } });
+    dragProviderPool({ active: { id: 2 }, over: { id: 3 } });
 
     expect(reorderMutation.mutateAsync).toHaveBeenCalledTimes(1);
     expect(reorderMutation.mutateAsync).toHaveBeenCalledWith({
@@ -880,6 +900,10 @@ describe("pages/providers/ProvidersView", () => {
     vi.mocked(useProviderSetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
     vi.mocked(useProviderDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
     vi.mocked(useProvidersReorderMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useDefaultRouteProvidersQuery).mockReturnValue({
+      data: [{ provider_id: 1 }, { provider_id: 2 }],
+      isFetching: false,
+    } as any);
     vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
       mutateAsync: vi.fn(),
     } as any);
@@ -888,7 +912,7 @@ describe("pages/providers/ProvidersView", () => {
     renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
 
     expect(screen.getByText("共 2 / 2 条")).toBeInTheDocument();
-    expect(screen.getByText("调用顺序按照从上到下依次调用")).toBeInTheDocument();
+    expect(screen.getByText("Default 按照从上到下依次调用")).toBeInTheDocument();
 
     const searchInput = screen.getByRole("textbox", { name: "搜索供应商名称" });
     fireEvent.change(searchInput, { target: { value: "beta" } });
@@ -1505,7 +1529,7 @@ describe("pages/providers/ProvidersView", () => {
         <ProvidersView activeCli="claude" setActiveCli={vi.fn()} />
       </QueryClientProvider>
     );
-    expect(screen.getByText("暂无 Provider")).toBeInTheDocument();
+    expect(screen.getByText("暂无供应商")).toBeInTheDocument();
   });
 
   it("covers mutation null/error branches and drag end edge cases", async () => {
@@ -1626,13 +1650,13 @@ describe("pages/providers/ProvidersView", () => {
     await waitFor(() => expect(deleteMutation.mutateAsync).toHaveBeenCalledTimes(2));
 
     // drag end edge cases
-    latestOnDragEnd?.({ active: { id: 1 }, over: null });
-    latestOnDragEnd?.({ active: { id: 1 }, over: { id: 1 } });
-    latestOnDragEnd?.({ active: { id: 999 }, over: { id: 2 } });
-    latestOnDragEnd?.({ active: { id: 1 }, over: { id: 3 } });
+    dragProviderPool({ active: { id: 1 }, over: null });
+    dragProviderPool({ active: { id: 1 }, over: { id: 1 } });
+    dragProviderPool({ active: { id: 999 }, over: { id: 2 } });
+    dragProviderPool({ active: { id: 1 }, over: { id: 3 } });
     await waitFor(() => expect(reorderMutation.mutateAsync).toHaveBeenCalledTimes(1));
     await Promise.resolve();
-    latestOnDragEnd?.({ active: { id: 1 }, over: { id: 3 } });
+    dragProviderPool({ active: { id: 1 }, over: { id: 3 } });
     await waitFor(() => expect(reorderMutation.mutateAsync).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(toast).toHaveBeenCalledWith("顺序更新失败：Error: boom"));
 
@@ -1663,6 +1687,10 @@ describe("pages/providers/ProvidersView", () => {
     ] as any[];
 
     vi.mocked(useProvidersListQuery).mockReturnValue({ data: providers, isFetching: false } as any);
+    vi.mocked(useDefaultRouteProvidersQuery).mockReturnValue({
+      data: [{ provider_id: 1 }],
+      isFetching: false,
+    } as any);
 
     vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
       data: [
@@ -1689,7 +1717,9 @@ describe("pages/providers/ProvidersView", () => {
 
     expect(screen.getByText("模型映射 1/5")).toBeInTheDocument();
     expect(screen.getByText(/^熔断\s*00:10$/)).toBeInTheDocument();
-    expect(screen.getByText("调用顺序").closest("aside")?.querySelector(".shadow-lg")).toBeTruthy();
+    expect(
+      screen.getByText("调用顺序").closest("aside")?.querySelector(".cursor-grab")
+    ).toBeTruthy();
   });
 
   it("clears circuit auto-refresh timer when circuits recover", () => {
@@ -1889,7 +1919,7 @@ describe("pages/providers/ProvidersView", () => {
       </QueryClientProvider>
     );
 
-    latestOnDragEnd?.({ active: { id: 1 }, over: { id: 3 } });
+    dragProviderPool({ active: { id: 1 }, over: { id: 3 } });
     await waitFor(() => expect(reorderMutation.mutateAsync).toHaveBeenCalled());
 
     rerender(
