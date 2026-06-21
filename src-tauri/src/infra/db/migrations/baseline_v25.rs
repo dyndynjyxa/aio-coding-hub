@@ -172,6 +172,8 @@ CREATE TABLE IF NOT EXISTS provider_circuit_breakers (
   provider_id INTEGER PRIMARY KEY,
   state TEXT NOT NULL,
   failure_count INTEGER NOT NULL DEFAULT 0,
+  failure_timestamps_json TEXT NOT NULL DEFAULT '[]',
+  half_open_success_count INTEGER NOT NULL DEFAULT 0,
   open_until INTEGER,
   updated_at INTEGER NOT NULL,
   FOREIGN KEY(provider_id) REFERENCES providers(id) ON DELETE CASCADE

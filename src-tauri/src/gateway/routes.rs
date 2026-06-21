@@ -603,7 +603,7 @@ mod tests {
         base_url: String,
         priority: i64,
     ) -> i64 {
-        providers::upsert(
+        let provider_id = providers::upsert(
             db,
             providers::ProviderUpsertParams {
                 provider_id: None,
@@ -632,7 +632,20 @@ mod tests {
             },
         )
         .expect("insert provider")
-        .id
+        .id;
+        append_default_route_provider(db, cli_key, provider_id);
+        provider_id
+    }
+
+    fn append_default_route_provider(db: &db::Db, cli_key: &str, provider_id: i64) {
+        let mut provider_ids: Vec<i64> = providers::default_route_list(db, cli_key)
+            .expect("list default route")
+            .into_iter()
+            .map(|row| row.provider_id)
+            .collect();
+        provider_ids.push(provider_id);
+        providers::default_route_set_order(db, cli_key, provider_ids)
+            .expect("append default route provider");
     }
 
     fn insert_codex_provider_with_priority(
@@ -649,7 +662,7 @@ mod tests {
     }
 
     fn insert_codex_oauth_provider_with_priority(db: &db::Db, name: &str, priority: i64) -> i64 {
-        providers::upsert(
+        let provider_id = providers::upsert(
             db,
             providers::ProviderUpsertParams {
                 provider_id: None,
@@ -678,11 +691,13 @@ mod tests {
             },
         )
         .expect("insert oauth provider")
-        .id
+        .id;
+        append_default_route_provider(db, "codex", provider_id);
+        provider_id
     }
 
     fn insert_cx2cc_bridge_provider(db: &db::Db, source_provider_id: i64, priority: i64) -> i64 {
-        providers::upsert(
+        let provider_id = providers::upsert(
             db,
             providers::ProviderUpsertParams {
                 provider_id: None,
@@ -711,7 +726,9 @@ mod tests {
             },
         )
         .expect("insert cx2cc bridge provider")
-        .id
+        .id;
+        append_default_route_provider(db, "claude", provider_id);
+        provider_id
     }
 
     async fn recv_terminal_request_log(

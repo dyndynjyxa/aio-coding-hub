@@ -8,7 +8,7 @@ fn ids(items: &[providers::ProviderForGateway]) -> Vec<i64> {
 }
 
 fn insert_provider(db: &crate::db::Db, name: &str, enabled: bool) -> providers::ProviderSummary {
-    providers::upsert(
+    let provider = providers::upsert(
         db,
         providers::ProviderUpsertParams {
             provider_id: None,
@@ -36,7 +36,18 @@ fn insert_provider(db: &crate::db::Db, name: &str, enabled: bool) -> providers::
             stream_idle_timeout_seconds: None,
         },
     )
-    .expect("insert provider")
+    .expect("insert provider");
+
+    let mut provider_ids: Vec<i64> = providers::default_route_list(db, "claude")
+        .expect("list default route")
+        .into_iter()
+        .map(|row| row.provider_id)
+        .collect();
+    provider_ids.push(provider.id);
+    providers::default_route_set_order(db, "claude", provider_ids)
+        .expect("append default route provider");
+
+    provider
 }
 
 fn insert_sort_mode_with_providers(db: &crate::db::Db, provider_ids: &[i64]) -> i64 {
