@@ -242,8 +242,9 @@ export function useHomeOAuthQuota({
   );
 
   const refreshOAuthQuota = useCallback(async () => {
-    if (!oauthProviders.length) return;
-    await refreshOAuthProviders(oauthProviders);
+    const enabledProviders = oauthProviders.filter((provider) => provider.enabled);
+    if (!enabledProviders.length) return;
+    await refreshOAuthProviders(enabledProviders);
   }, [oauthProviders, refreshOAuthProviders]);
 
   const refreshOAuthQuotaRow = useCallback(

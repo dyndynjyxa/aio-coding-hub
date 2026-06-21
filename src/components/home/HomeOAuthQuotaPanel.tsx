@@ -103,11 +103,6 @@ function OAuthQuotaProviderCard({
                 已禁用
               </span>
             ) : null}
-            {row.state === "error" ? (
-              <span className="rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] text-rose-700 dark:bg-rose-900/30 dark:text-rose-400">
-                刷新失败
-              </span>
-            ) : null}
             {onRefreshRow ? (
               <button
                 type="button"
@@ -131,16 +126,27 @@ function OAuthQuotaProviderCard({
             刷新中...
           </div>
         ) : row.state === "error" ? (
-          <div className="flex items-start gap-2 text-xs text-rose-600 dark:text-rose-400">
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>刷新失败，请重试</span>
+          <div
+            className="flex items-start justify-between gap-2 text-xs text-rose-600 dark:text-rose-400"
+            data-testid={`oauth-quota-status-${row.providerId}`}
+          >
+            <div className="flex min-w-0 items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0">刷新失败，请重试</span>
+            </div>
+            <span className="shrink-0 rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] text-rose-700 dark:bg-rose-900/30 dark:text-rose-400">
+              刷新失败
+            </span>
           </div>
         ) : row.state === "idle" ? (
           <div className="text-xs text-muted-foreground">点击右上角刷新获取 OAuth 配额</div>
         ) : !hasHomeOAuthQuotaText(row.limits) ? (
           <div className="text-xs text-muted-foreground">暂无 OAuth 配额信息</div>
         ) : (
-          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+          <div
+            className="flex items-center justify-between gap-2 text-xs text-muted-foreground"
+            data-testid={`oauth-quota-status-${row.providerId}`}
+          >
             <span className="min-w-0 truncate font-mono" title={quotaSummary}>
               {quotaSummary}
             </span>

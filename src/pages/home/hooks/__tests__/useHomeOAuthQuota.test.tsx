@@ -254,6 +254,57 @@ describe("pages/home/hooks/useHomeOAuthQuota", () => {
     });
   });
 
+  it("skips disabled OAuth providers during bulk refresh", async () => {
+    vi.mocked(providersList).mockImplementation(async (cliKey) => {
+      if (cliKey === "codex") {
+        return [
+          makeProvider({
+            id: 11,
+            cli_key: "codex",
+            name: "Codex OAuth",
+            auth_mode: "oauth",
+          }),
+          makeProvider({
+            id: 12,
+            cli_key: "codex",
+            name: "Disabled Codex OAuth",
+            auth_mode: "oauth",
+            enabled: false,
+          }),
+        ];
+      }
+      return [];
+    });
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+    vi.mocked(providerOAuthFetchLimits).mockResolvedValue({
+      limit_short_label: "5h",
+      limit_5h_text: "44%",
+      limit_weekly_text: "88%",
+      limit_5h_reset_at: null,
+      limit_weekly_reset_at: null,
+    });
+
+    const { result } = renderHook(
+      () => useHomeOAuthQuota({ cliPriorityOrder: ["claude", "codex", "gemini"] }),
+      { wrapper }
+    );
+
+    await waitFor(() => expect(result.current.oauthQuotaRows).toHaveLength(2));
+
+    await act(async () => {
+      await result.current.refreshOAuthQuota();
+    });
+
+    expect(providerOAuthFetchLimits).toHaveBeenCalledTimes(1);
+    expect(providerOAuthFetchLimits).toHaveBeenCalledWith(11);
+    expect(providerOAuthFetchLimits).not.toHaveBeenCalledWith(12);
+    expect(gatewayCircuitResetProvider).toHaveBeenCalledWith(11);
+    expect(gatewayCircuitResetProvider).not.toHaveBeenCalledWith(12);
+    expect(result.current.oauthQuotaRows.find((row) => row.providerId === 12)?.state).toBe("idle");
+  });
+
   it("sorts OAuth providers by recent usage from request logs", async () => {
     vi.mocked(providersList).mockImplementation(async (cliKey) => {
       if (cliKey === "codex") {

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HomeOAuthQuotaRow } from "../homeOAuthQuotaTypes";
 import { HomeOAuthQuotaPanelContent } from "../HomeOAuthQuotaPanel";
@@ -218,6 +218,9 @@ describe("components/home/HomeOAuthQuotaPanel", () => {
 
     expect(screen.getByText("刷新失败")).toBeInTheDocument();
     expect(screen.getByText("刷新失败，请重试")).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("oauth-quota-status-1")).getByText("刷新失败")
+    ).toBeInTheDocument();
     expect(screen.queryByText("fetch boom")).not.toBeInTheDocument();
     expect(screen.queryByText("配额不足")).not.toBeInTheDocument();
   });
