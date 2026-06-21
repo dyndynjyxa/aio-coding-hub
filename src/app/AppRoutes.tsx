@@ -13,6 +13,9 @@ const ConsolePage = lazy(() =>
 );
 const LogsPage = lazy(() => import("../pages/LogsPage").then((m) => ({ default: m.LogsPage })));
 const McpPage = lazy(() => import("../pages/McpPage").then((m) => ({ default: m.McpPage })));
+const PluginsPage = lazy(() =>
+  import("../pages/PluginsPage").then((m) => ({ default: m.PluginsPage }))
+);
 const PromptsPage = lazy(() =>
   import("../pages/PromptsPage").then((m) => ({ default: m.PromptsPage }))
 );
@@ -73,6 +76,7 @@ export function AppRoutes() {
         <Route path="/workspaces" element={renderLazyPage(WorkspacesPage)} />
         <Route path="/prompts" element={renderLazyPage(PromptsPage)} />
         <Route path="/mcp" element={renderLazyPage(McpPage)} />
+        <Route path="/plugins" element={renderLazyPage(PluginsPage)} />
         <Route path="/logs" element={renderLazyPage(LogsPage)} />
         <Route path="/console" element={renderLazyPage(ConsolePage)} />
         <Route path="/usage" element={renderLazyPage(UsagePage)} />

@@ -8,7 +8,9 @@ use super::{
 use crate::gateway::events::FailoverAttempt;
 use crate::gateway::proxy::abort_guard::RequestAbortGuard;
 use crate::gateway::proxy::caches::CachedGatewayError;
-use crate::gateway::proxy::errors::{error_response, error_response_with_retry_after};
+use crate::gateway::proxy::errors::{
+    apply_gateway_error_hook, error_response, error_response_with_retry_after,
+};
 use crate::gateway::proxy::request_end::RequestCompletion;
 use crate::gateway::proxy::GatewayErrorCode;
 use crate::gateway::response_fixer;
@@ -119,7 +121,7 @@ pub(super) async fn all_providers_unavailable<R: tauri::Runtime>(
     let duration_ms = started.elapsed().as_millis();
     emit_request_event_and_enqueue_request_log(
         RequestEndArgs::from_context(RequestEndContextArgs {
-            deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx),
+            deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx, &state.plugin_pipeline),
             trace_id: trace_id.as_str(),
             cli_key: cli_key.as_str(),
             method: method_hint.as_str(),
@@ -174,7 +176,7 @@ pub(super) async fn all_providers_unavailable<R: tauri::Runtime>(
     }
 
     abort_guard.disarm();
-    resp
+    apply_gateway_error_hook(&state.db, state.plugin_pipeline.clone(), trace_id, resp).await
 }
 
 pub(super) struct AllFailedInput<'a, R: tauri::Runtime = tauri::Wry> {
@@ -250,7 +252,7 @@ pub(super) async fn all_providers_failed<R: tauri::Runtime>(
     let duration_ms = started.elapsed().as_millis();
     emit_request_event_and_enqueue_request_log(
         RequestEndArgs::from_context(RequestEndContextArgs {
-            deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx),
+            deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx, &state.plugin_pipeline),
             trace_id: trace_id.as_str(),
             cli_key: cli_key.as_str(),
             method: method_hint.as_str(),
@@ -275,5 +277,5 @@ pub(super) async fn all_providers_failed<R: tauri::Runtime>(
     .await;
 
     abort_guard.disarm();
-    resp
+    apply_gateway_error_hook(&state.db, state.plugin_pipeline.clone(), trace_id, resp).await
 }

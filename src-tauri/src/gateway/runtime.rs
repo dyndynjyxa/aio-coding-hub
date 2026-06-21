@@ -7,6 +7,7 @@ use tokio::sync::oneshot;
 
 use super::background_tasks::GatewayBackgroundTasks;
 use super::codex_session_id::CodexSessionIdCache;
+use super::plugins::pipeline::GatewayPluginPipeline;
 use super::proxy::{ProviderBaseUrlPingCache, RecentErrorCache};
 use super::{GatewayProviderCircuitStatus, GatewayStatus};
 
@@ -19,6 +20,7 @@ pub(in crate::gateway) struct GatewayAppState<R: tauri::Runtime = tauri::Wry> {
     pub(super) codex_session_cache: Arc<Mutex<CodexSessionIdCache>>,
     pub(super) recent_errors: Arc<Mutex<RecentErrorCache>>,
     pub(super) latency_cache: Arc<Mutex<ProviderBaseUrlPingCache>>,
+    pub(super) plugin_pipeline: Arc<GatewayPluginPipeline>,
 }
 
 impl<R: tauri::Runtime> Clone for GatewayAppState<R> {
@@ -32,6 +34,7 @@ impl<R: tauri::Runtime> Clone for GatewayAppState<R> {
             codex_session_cache: self.codex_session_cache.clone(),
             recent_errors: self.recent_errors.clone(),
             latency_cache: self.latency_cache.clone(),
+            plugin_pipeline: self.plugin_pipeline.clone(),
         }
     }
 }
@@ -72,6 +75,7 @@ pub(super) struct GatewayRuntimeInit {
     pub(super) circuit: Arc<circuit_breaker::CircuitBreaker>,
     pub(super) session: Arc<session_manager::SessionManager>,
     pub(super) recent_errors: Arc<Mutex<RecentErrorCache>>,
+    pub(super) plugin_pipeline: Arc<GatewayPluginPipeline>,
     pub(super) shutdown: oneshot::Sender<()>,
     pub(super) task: tauri::async_runtime::JoinHandle<()>,
     pub(super) background_tasks: GatewayBackgroundTasks,
@@ -84,6 +88,7 @@ pub(crate) struct GatewayRuntime {
     circuit: Arc<circuit_breaker::CircuitBreaker>,
     session: Arc<session_manager::SessionManager>,
     recent_errors: Arc<Mutex<RecentErrorCache>>,
+    plugin_pipeline: Arc<GatewayPluginPipeline>,
     shutdown: oneshot::Sender<()>,
     task: tauri::async_runtime::JoinHandle<()>,
     background_tasks: GatewayBackgroundTasks,
@@ -98,6 +103,7 @@ impl GatewayRuntime {
             circuit: init.circuit,
             session: init.session,
             recent_errors: init.recent_errors,
+            plugin_pipeline: init.plugin_pipeline,
             shutdown: init.shutdown,
             task: init.task,
             background_tasks: init.background_tasks,
@@ -182,6 +188,10 @@ impl GatewayRuntime {
             });
     }
 
+    pub(crate) fn refresh_plugin_pipeline(&self, plugins: Vec<crate::plugins::PluginDetail>) {
+        self.plugin_pipeline.replace_plugins(plugins);
+    }
+
     pub(super) fn into_handles(self) -> GatewayRuntimeHandles {
         let (log_task, circuit_task, oauth_refresh_shutdown, oauth_refresh_task) =
             self.background_tasks.into_handles();
@@ -215,6 +225,7 @@ impl GatewayRuntime {
             circuit,
             session,
             recent_errors,
+            plugin_pipeline: GatewayPluginPipeline::empty_shared(),
             shutdown,
             task: tauri::async_runtime::JoinHandle::Tokio(rt.spawn(async {})),
             background_tasks: GatewayBackgroundTasks::for_tests(rt),

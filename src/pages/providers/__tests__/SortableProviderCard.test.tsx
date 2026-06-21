@@ -8,6 +8,8 @@ import {
 } from "../../../services/providers/providers";
 import { createTestQueryClient, createQueryWrapper } from "../../../test/utils/reactQuery";
 
+const sortablePointerDownMock = vi.hoisted(() => vi.fn());
+
 vi.mock("../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
 vi.mock("../../../services/providers/providers", async () => {
   const actual = await vi.importActual<typeof import("../../../services/providers/providers")>(
@@ -26,7 +28,7 @@ vi.mock("../../../services/gateway/gateway", async () => {
 vi.mock("@dnd-kit/sortable", () => ({
   useSortable: () => ({
     attributes: {},
-    listeners: {},
+    listeners: { onPointerDown: sortablePointerDownMock },
     setNodeRef: () => {},
     transform: null,
     transition: undefined,
@@ -97,6 +99,19 @@ function renderCard(
 describe("pages/providers/SortableProviderCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("binds sortable listeners to the provider name drag handle", () => {
+    renderCard();
+
+    const dragHandle = screen.getByRole("button", {
+      name: "拖拽调整 Test Provider 顺序",
+    });
+    expect(dragHandle).toHaveAttribute("title", "拖拽排序");
+
+    fireEvent.pointerDown(dragHandle);
+
+    expect(sortablePointerDownMock).toHaveBeenCalledTimes(1);
   });
 
   it("renders OAuth badge with email", () => {

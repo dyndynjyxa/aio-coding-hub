@@ -235,6 +235,15 @@ export const skillsKeys = {
   paths: (cliKey: CliKey | null) => [...skillsAllKey, "paths", cliKey] as const,
 };
 
+const pluginsAllKey = ["plugins"] as const;
+export const pluginKeys = {
+  all: pluginsAllKey,
+  list: () => [...pluginsAllKey, "list"] as const,
+  detail: (pluginId: string | null) => [...pluginsAllKey, "detail", pluginId] as const,
+  auditLogs: (pluginId: string | null, limit: number | null) =>
+    [...pluginsAllKey, "auditLogs", pluginId, limit] as const,
+};
+
 const settingsAllKey = ["settings"] as const;
 export const settingsKeys = {
   all: settingsAllKey,

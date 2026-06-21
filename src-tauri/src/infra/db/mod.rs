@@ -254,6 +254,12 @@ pub(crate) fn init_for_tests(path: &std::path::Path) -> AppResult<Db> {
     Ok(Db { pool })
 }
 
+pub(crate) fn ensure_runtime_schema(db: &Db) -> AppResult<()> {
+    let mut conn = db.open_connection()?;
+    migrations::apply_runtime_ensure_patches(&mut conn)
+        .map_err(|e| format!("sqlite runtime schema ensure failed: {e}").into())
+}
+
 fn db_optimize_enabled() -> bool {
     env::var("AIO_DB_ENABLE_OPTIMIZE")
         .ok()

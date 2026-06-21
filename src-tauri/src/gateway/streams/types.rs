@@ -1,5 +1,6 @@
 //! Usage: Stream finalization context for gateway body relays.
 
+use crate::gateway::plugins::pipeline::GatewayPluginPipeline;
 use crate::{circuit_breaker, db, request_logs, session_manager};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -10,6 +11,7 @@ pub(in crate::gateway) struct StreamFinalizeCtx<R: tauri::Runtime = tauri::Wry> 
     pub(in crate::gateway) app: tauri::AppHandle<R>,
     pub(in crate::gateway) db: db::Db,
     pub(in crate::gateway) log_tx: tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
+    pub(in crate::gateway) plugin_pipeline: Arc<GatewayPluginPipeline>,
     pub(in crate::gateway) circuit: Arc<circuit_breaker::CircuitBreaker>,
     pub(in crate::gateway) session: Arc<session_manager::SessionManager>,
     pub(in crate::gateway) session_id: Option<String>,

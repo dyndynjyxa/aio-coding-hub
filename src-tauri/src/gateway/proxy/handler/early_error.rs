@@ -4,6 +4,7 @@
 //! the request reaches the failover/forwarder stage.
 
 use super::SpecialSettings;
+use crate::gateway::proxy::errors;
 use crate::gateway::proxy::errors::error_response;
 use crate::gateway::proxy::request_end::{
     emit_request_event_and_enqueue_request_log, emit_request_event_and_spawn_request_log,
@@ -171,6 +172,21 @@ fn build_early_error_response(
     )
 }
 
+async fn build_early_error_response_with_plugins<R: tauri::Runtime>(
+    ctx: &EarlyErrorLogCtx<'_, R>,
+    contract: EarlyErrorContract,
+    message: String,
+) -> Response {
+    let resp = build_early_error_response(ctx.trace_id, contract, message);
+    errors::apply_gateway_error_hook(
+        &ctx.state.db,
+        ctx.state.plugin_pipeline.clone(),
+        ctx.trace_id.to_string(),
+        resp,
+    )
+    .await
+}
+
 fn early_error_request_end_args<'a, R: tauri::Runtime>(
     ctx: &'a EarlyErrorLogCtx<'a, R>,
     contract: EarlyErrorContract,
@@ -179,7 +195,12 @@ fn early_error_request_end_args<'a, R: tauri::Runtime>(
     requested_model: Option<String>,
 ) -> RequestEndArgs<'a, R> {
     RequestEndArgs::from_context(RequestEndContextArgs {
-        deps: RequestEndDeps::new(&ctx.state.app, &ctx.state.db, &ctx.state.log_tx),
+        deps: RequestEndDeps::new(
+            &ctx.state.app,
+            &ctx.state.db,
+            &ctx.state.log_tx,
+            &ctx.state.plugin_pipeline,
+        ),
         trace_id: ctx.trace_id,
         cli_key: ctx.cli_key,
         method: ctx.method_hint,
@@ -210,7 +231,7 @@ pub(super) async fn respond_early_error_with_enqueue<R: tauri::Runtime>(
     session_id: Option<String>,
     requested_model: Option<String>,
 ) -> Response {
-    let resp = build_early_error_response(ctx.trace_id, contract, message);
+    let resp = build_early_error_response_with_plugins(ctx, contract, message).await;
     emit_request_event_and_enqueue_request_log(early_error_request_end_args(
         ctx,
         contract,

@@ -1,0 +1,12 @@
+[package]
+name = "aio-plugin-wasm-redactor-example"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+aio-plugin-wasm-sdk = { path = "../.." }
+serde_json = "1"

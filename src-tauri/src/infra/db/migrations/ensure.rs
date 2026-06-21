@@ -23,6 +23,7 @@ pub(super) fn apply_ensure_patches(conn: &mut Connection) -> crate::shared::erro
     ensure_request_logs_extended_columns(conn)?;
     ensure_provider_stream_idle_timeout(conn)?;
     ensure_skills_update_columns(conn)?;
+    ensure_plugin_tables(conn)?;
     Ok(())
 }
 
@@ -995,6 +996,121 @@ fn ensure_request_logs_extended_columns(conn: &mut Connection) -> Result<(), Str
         conn.execute_batch("ALTER TABLE request_logs ADD COLUMN error_details_json TEXT;")
             .map_err(|e| format!("failed to ensure request_logs.error_details_json: {e}"))?;
     }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// ensure_plugin_tables
+// ---------------------------------------------------------------------------
+
+fn ensure_plugin_tables(conn: &mut Connection) -> crate::shared::error::AppResult<()> {
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("failed to start sqlite transaction: {e}"))?;
+
+    tx.execute_batch(
+        r#"
+CREATE TABLE IF NOT EXISTS plugins (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  plugin_id TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  current_version TEXT,
+  install_source TEXT NOT NULL,
+  status TEXT NOT NULL,
+  manifest_json TEXT NOT NULL,
+  config_json TEXT NOT NULL DEFAULT '{}',
+  granted_permissions_json TEXT NOT NULL DEFAULT '[]',
+  last_error TEXT,
+  installed_dir TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_plugins_status_updated_at
+  ON plugins(status, updated_at);
+
+CREATE TABLE IF NOT EXISTS plugin_versions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  plugin_id TEXT NOT NULL,
+  version TEXT NOT NULL,
+  manifest_json TEXT NOT NULL,
+  package_checksum TEXT,
+  signature TEXT,
+  installed_dir TEXT,
+  created_at INTEGER NOT NULL,
+  UNIQUE(plugin_id, version),
+  FOREIGN KEY(plugin_id) REFERENCES plugins(plugin_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_plugin_versions_plugin_id_created_at
+  ON plugin_versions(plugin_id, created_at);
+
+CREATE TABLE IF NOT EXISTS plugin_configs (
+  plugin_id TEXT PRIMARY KEY,
+  config_version INTEGER NOT NULL DEFAULT 1,
+  config_json TEXT NOT NULL DEFAULT '{}',
+  sensitive_keys_json TEXT NOT NULL DEFAULT '[]',
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(plugin_id) REFERENCES plugins(plugin_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS plugin_permissions (
+  plugin_id TEXT PRIMARY KEY,
+  permissions_json TEXT NOT NULL DEFAULT '[]',
+  pending_permissions_json TEXT NOT NULL DEFAULT '[]',
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(plugin_id) REFERENCES plugins(plugin_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS plugin_audit_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  plugin_id TEXT,
+  trace_id TEXT,
+  event_type TEXT NOT NULL,
+  risk_level TEXT NOT NULL DEFAULT 'low',
+  message TEXT NOT NULL,
+  details_json TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(plugin_id) REFERENCES plugins(plugin_id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_plugin_audit_logs_plugin_created_at
+  ON plugin_audit_logs(plugin_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_plugin_audit_logs_trace_id
+  ON plugin_audit_logs(trace_id);
+
+CREATE TABLE IF NOT EXISTS plugin_market_sources (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  index_url TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  trusted_public_key TEXT,
+  last_checked_at INTEGER,
+  last_error TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS plugin_runtime_failures (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  plugin_id TEXT NOT NULL,
+  hook_name TEXT,
+  failure_kind TEXT NOT NULL,
+  message TEXT NOT NULL,
+  trace_id TEXT,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(plugin_id) REFERENCES plugins(plugin_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_plugin_runtime_failures_plugin_created_at
+  ON plugin_runtime_failures(plugin_id, created_at);
+"#,
+    )
+    .map_err(|e| format!("failed to ensure plugin tables: {e}"))?;
+
+    tx.commit()
+        .map_err(|e| format!("failed to commit plugin table ensure patch: {e}"))?;
 
     Ok(())
 }

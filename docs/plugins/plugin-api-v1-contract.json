@@ -1,0 +1,135 @@
+{
+  "apiVersion": "1.0.0",
+  "defaultHookTimeoutMs": 150,
+  "defaultFailurePolicy": "fail-open",
+  "activeHooks": [
+    "gateway.request.afterBodyRead",
+    "gateway.request.beforeSend",
+    "gateway.response.chunk",
+    "gateway.response.after",
+    "gateway.error",
+    "log.beforePersist"
+  ],
+  "reservedHooks": [
+    "gateway.request.received",
+    "gateway.request.beforeProviderResolution",
+    "gateway.response.headers"
+  ],
+  "activeMutationFields": [
+    "requestBody",
+    "responseBody",
+    "streamChunk",
+    "logMessage",
+    "headers"
+  ],
+  "configSchemaTypes": ["object", "array", "string", "password", "number", "integer", "boolean"],
+  "activePermissions": [
+    "request.meta.read",
+    "request.header.read",
+    "request.header.readSensitive",
+    "request.header.write",
+    "request.body.read",
+    "request.body.write",
+    "response.header.read",
+    "response.header.write",
+    "response.body.read",
+    "response.body.write",
+    "stream.inspect",
+    "stream.modify",
+    "log.redact"
+  ],
+  "reservedPermissions": [
+    "plugin.storage",
+    "network.fetch",
+    "file.read",
+    "file.write",
+    "secret.read"
+  ],
+  "hookMatrix": {
+    "gateway.request.afterBodyRead": {
+      "phase": "after request body read and before upstream provider send",
+      "readPermissions": [
+        "request.meta.read",
+        "request.header.read",
+        "request.header.readSensitive",
+        "request.body.read"
+      ],
+      "writePermissions": ["request.header.write", "request.body.write"],
+      "mutationFields": ["headers", "requestBody"],
+      "contextFields": [
+        "traceId",
+        "request.cliKey",
+        "request.method",
+        "request.path",
+        "request.query",
+        "request.headers",
+        "request.body",
+        "request.requestedModel",
+        "request.normalizedMessages"
+      ]
+    },
+    "gateway.request.beforeSend": {
+      "phase": "after provider resolution and before upstream provider send",
+      "readPermissions": [
+        "request.meta.read",
+        "request.header.read",
+        "request.header.readSensitive",
+        "request.body.read"
+      ],
+      "writePermissions": ["request.header.write", "request.body.write"],
+      "mutationFields": ["headers", "requestBody"],
+      "contextFields": [
+        "traceId",
+        "request.cliKey",
+        "request.method",
+        "request.path",
+        "request.query",
+        "request.headers",
+        "request.body",
+        "request.requestedModel",
+        "request.normalizedMessages"
+      ]
+    },
+    "gateway.response.chunk": {
+      "phase": "for each bounded streaming response chunk",
+      "readPermissions": ["stream.inspect"],
+      "writePermissions": ["stream.modify"],
+      "mutationFields": ["streamChunk"],
+      "contextFields": ["traceId", "stream.sequence", "stream.chunk"]
+    },
+    "gateway.response.after": {
+      "phase": "after a complete non-streaming upstream response body is available",
+      "readPermissions": ["response.header.read", "response.body.read"],
+      "writePermissions": ["response.header.write", "response.body.write"],
+      "mutationFields": ["headers", "responseBody"],
+      "contextFields": [
+        "traceId",
+        "response.status",
+        "response.headers",
+        "response.body"
+      ]
+    },
+    "gateway.error": {
+      "phase": "after gateway error response materialization and before it is sent",
+      "readPermissions": ["response.header.read", "response.body.read"],
+      "writePermissions": ["response.header.write", "response.body.write"],
+      "mutationFields": ["headers", "responseBody"],
+      "contextFields": [
+        "traceId",
+        "response.status",
+        "response.headers",
+        "response.body"
+      ]
+    },
+    "log.beforePersist": {
+      "phase": "before gateway request log persistence",
+      "readPermissions": ["log.redact"],
+      "writePermissions": ["log.redact"],
+      "mutationFields": ["logMessage"],
+      "contextFields": ["traceId", "log.message"]
+    }
+  },
+  "communityRuntimes": ["declarativeRules"],
+  "policyGatedRuntimes": ["wasm"],
+  "officialRuntimes": ["native:privacyFilter"]
+}

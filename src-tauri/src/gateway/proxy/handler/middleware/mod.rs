@@ -30,6 +30,7 @@ pub(super) use request_fingerprint::RequestFingerprintMiddleware;
 pub(super) use runtime_settings_reader::RuntimeSettingsMiddleware;
 pub(super) use warmup_interceptor::WarmupInterceptorMiddleware;
 
+use crate::gateway::proxy::request_body::GatewayRequestBody;
 use crate::gateway::proxy::request_context::RequestContextParts;
 use crate::gateway::runtime::GatewayAppState;
 use crate::gateway::util::RequestedModelLocation;
@@ -69,6 +70,7 @@ pub(super) struct ProxyContext<R: tauri::Runtime = tauri::Wry> {
     pub(super) request_body: Option<Body>,
     pub(super) headers: HeaderMap,
     pub(super) body_bytes: Bytes,
+    pub(super) request_body_state: Option<GatewayRequestBody>,
     pub(super) introspection_json: Option<serde_json::Value>,
     pub(super) observe_request: bool,
     pub(super) strip_request_content_encoding_seed: bool,
@@ -104,6 +106,11 @@ impl<R: tauri::Runtime> ProxyContext<R> {
         let rs = self
             .runtime_settings
             .expect("runtime_settings must be populated before forwarding");
+        let request_body_state = reconcile_request_body_state(
+            self.request_body_state
+                .expect("request_body_state must be set by BodyReaderMiddleware"),
+            self.body_bytes.clone(),
+        );
 
         RequestContextParts {
             state: self.state,
@@ -125,6 +132,7 @@ impl<R: tauri::Runtime> ProxyContext<R> {
             session_bound_provider_id: self.session_bound_provider_id,
             headers: self.headers,
             body_bytes: self.body_bytes,
+            request_body_state,
             introspection_json: self.introspection_json,
             strip_request_content_encoding_seed: self.strip_request_content_encoding_seed,
             special_settings: self.special_settings,
@@ -150,5 +158,63 @@ impl<R: tauri::Runtime> ProxyContext<R> {
             response_fixer_stream_config: rs.response_fixer_stream_config,
             response_fixer_non_stream_config: rs.response_fixer_non_stream_config,
         }
+    }
+}
+
+fn reconcile_request_body_state(
+    mut request_body_state: GatewayRequestBody,
+    body_bytes: Bytes,
+) -> GatewayRequestBody {
+    request_body_state.replace_decoded(body_bytes);
+    request_body_state
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gateway::proxy::request_body::GatewayRequestBody;
+    use axum::http::header;
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use std::io::{Read, Write};
+
+    fn gzip_bytes(input: &[u8]) -> Vec<u8> {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(input).expect("gzip write");
+        encoder.finish().expect("gzip finish")
+    }
+
+    fn gunzip_bytes(input: &[u8]) -> Vec<u8> {
+        let mut decoder = flate2::read::GzDecoder::new(input);
+        let mut out = Vec::new();
+        decoder.read_to_end(&mut out).expect("gzip read");
+        out
+    }
+
+    #[test]
+    fn reconcile_request_body_state_marks_late_body_mutations() {
+        let decoded = Bytes::from_static(br#"{"input":"hello 13344441520"}"#);
+        let redacted = Bytes::from(r#"{"input":"hello [电话]"}"#);
+        let raw = Bytes::from(gzip_bytes(decoded.as_ref()));
+        let mut headers = HeaderMap::new();
+        headers.insert(header::CONTENT_ENCODING, "gzip".parse().unwrap());
+        headers.insert(
+            header::CONTENT_LENGTH,
+            raw.len().to_string().parse().unwrap(),
+        );
+        let request_body_state = GatewayRequestBody::from_wire(raw, &headers, 1024 * 1024);
+
+        let request_body_state = reconcile_request_body_state(request_body_state, redacted.clone());
+        let mut upstream_headers = request_body_state.semantic_headers(&headers);
+        let upstream_body =
+            request_body_state.finalize_for_upstream(&mut upstream_headers, 1024 * 1024);
+
+        assert_eq!(request_body_state.decoded(), &redacted);
+        assert!(request_body_state.is_mutated());
+        assert_eq!(
+            upstream_headers.get(header::CONTENT_ENCODING).unwrap(),
+            "gzip"
+        );
+        assert_eq!(gunzip_bytes(upstream_body.as_ref()), redacted.as_ref());
     }
 }

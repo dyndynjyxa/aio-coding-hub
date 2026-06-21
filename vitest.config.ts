@@ -10,6 +10,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.join(ROOT_DIR, "src"),
+      "@aio-coding-hub/plugin-sdk": path.join(ROOT_DIR, "packages/plugin-sdk/src/index.ts"),
     },
   },
   test: {

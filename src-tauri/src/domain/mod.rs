@@ -10,6 +10,7 @@ pub(crate) mod cli_sessions;
 pub(crate) mod cost;
 pub(crate) mod cost_stats;
 pub(crate) mod mcp;
+pub(crate) mod plugins;
 pub(crate) mod prompts;
 pub(crate) mod provider_availability;
 pub(crate) mod provider_limit_usage;

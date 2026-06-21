@@ -127,6 +127,7 @@ where
         request_body: Some(body),
         headers,
         body_bytes: Bytes::new(),
+        request_body_state: None,
         introspection_json: None,
         observe_request: false,
         strip_request_content_encoding_seed: false,

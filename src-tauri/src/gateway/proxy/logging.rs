@@ -1,6 +1,9 @@
 //! Usage: Best-effort enqueue to DB log tasks with backpressure and fallbacks.
 
+use crate::gateway::plugins::context::GatewayLogHookInput;
+use crate::gateway::plugins::pipeline::GatewayPluginPipeline;
 use crate::{db, request_logs};
+use serde_json::Value;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -184,12 +187,121 @@ fn request_log_insert_from_args(
     })
 }
 
-pub(super) async fn enqueue_request_log_with_backpressure<R: tauri::Runtime>(
+fn log_hook_message_from_args(args: &super::RequestLogEnqueueArgs) -> String {
+    serde_json::json!({
+        "traceId": args.trace_id,
+        "cliKey": args.cli_key,
+        "sessionId": args.session_id,
+        "method": args.method,
+        "path": args.path,
+        "query": args.query,
+        "specialSettingsJson": args.special_settings_json,
+        "status": args.status,
+        "errorCode": args.error_code,
+        "attemptsJson": args.attempts_json,
+        "requestedModel": args.requested_model,
+        "providerChainJson": args.provider_chain_json,
+        "errorDetailsJson": args.error_details_json,
+    })
+    .to_string()
+}
+
+fn apply_log_hook_message_to_args(args: &mut super::RequestLogEnqueueArgs, message: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(message) else {
+        return false;
+    };
+    let Some(obj) = value.as_object() else {
+        return false;
+    };
+
+    args.session_id = obj
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    args.method = obj
+        .get("method")
+        .and_then(Value::as_str)
+        .unwrap_or(args.method.as_str())
+        .to_string();
+    args.path = obj
+        .get("path")
+        .and_then(Value::as_str)
+        .unwrap_or(args.path.as_str())
+        .to_string();
+    args.query = obj.get("query").and_then(Value::as_str).map(str::to_string);
+    args.special_settings_json = obj
+        .get("specialSettingsJson")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    args.attempts_json = obj
+        .get("attemptsJson")
+        .and_then(Value::as_str)
+        .unwrap_or(args.attempts_json.as_str())
+        .to_string();
+    args.requested_model = obj
+        .get("requestedModel")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    args.provider_chain_json = obj
+        .get("providerChainJson")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    args.error_details_json = obj
+        .get("errorDetailsJson")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    true
+}
+
+async fn apply_log_before_persist_hook(
+    db: &db::Db,
+    plugin_pipeline: Option<Arc<GatewayPluginPipeline>>,
+    args: &mut super::RequestLogEnqueueArgs,
+) {
+    let Some(plugin_pipeline) = plugin_pipeline else {
+        return;
+    };
+    let input = GatewayLogHookInput {
+        trace_id: args.trace_id.clone(),
+        message: log_hook_message_from_args(args),
+    };
+    match plugin_pipeline.run_log_hook(input).await {
+        Ok(output) => {
+            crate::gateway::plugins::audit::persist_gateway_plugin_audit_events(
+                db,
+                &args.trace_id,
+                output.audit_events.clone(),
+            );
+            if !apply_log_hook_message_to_args(args, output.message.as_str()) {
+                tracing::warn!(
+                    trace_id = %args.trace_id,
+                    "plugin log hook returned invalid request log payload; keeping original log"
+                );
+            }
+        }
+        Err(mut err) => {
+            crate::gateway::plugins::audit::persist_gateway_plugin_error_audit_events(
+                db,
+                &args.trace_id,
+                &mut err,
+            );
+            tracing::warn!(
+                trace_id = %args.trace_id,
+                error = %err,
+                "plugin log hook failed before request log persistence; keeping original log"
+            );
+        }
+    }
+}
+
+pub(super) async fn enqueue_request_log_with_backpressure_and_plugins<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     db: &db::Db,
     log_tx: &tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
-    args: super::RequestLogEnqueueArgs,
+    plugin_pipeline: Option<Arc<GatewayPluginPipeline>>,
+    mut args: super::RequestLogEnqueueArgs,
 ) {
+    apply_log_before_persist_hook(db, plugin_pipeline, &mut args).await;
     let trace_id = args.trace_id.clone();
     let cli_key = args.cli_key.clone();
     let Some(insert) = request_log_insert_from_args(args) else {
@@ -347,6 +459,7 @@ pub(in crate::gateway) fn spawn_enqueue_request_log_with_backpressure<R: tauri::
     db: db::Db,
     log_tx: tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
     args: super::RequestLogEnqueueArgs,
+    plugin_pipeline: Option<Arc<GatewayPluginPipeline>>,
 ) {
     let Some(permit) =
         try_acquire_request_log_enqueue_task_permit(request_log_enqueue_task_limiter())
@@ -357,7 +470,14 @@ pub(in crate::gateway) fn spawn_enqueue_request_log_with_backpressure<R: tauri::
 
     tauri::async_runtime::spawn(async move {
         let _permit = permit;
-        enqueue_request_log_with_backpressure(&app, &db, &log_tx, args).await;
+        enqueue_request_log_with_backpressure_and_plugins(
+            &app,
+            &db,
+            &log_tx,
+            plugin_pipeline,
+            args,
+        )
+        .await;
     });
 }
 

@@ -59,3 +59,72 @@ pub fn app_data_dir<R: tauri::Runtime>(
 
     Ok(dir)
 }
+
+pub(crate) fn plugin_id_path_segment(plugin_id: &str) -> crate::shared::error::AppResult<&str> {
+    let value = plugin_id.trim();
+    if value.is_empty() || value == "." || value == ".." {
+        return Err("SEC_INVALID_INPUT: invalid plugin id path segment".into());
+    }
+    if value.contains('/') || value.contains('\\') || value.contains("..") {
+        return Err("SEC_INVALID_INPUT: invalid plugin id path segment".into());
+    }
+    if value.split('.').any(|segment| segment.is_empty()) {
+        return Err("SEC_INVALID_INPUT: invalid plugin id path segment".into());
+    }
+    if !value
+        .chars()
+        .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-' || ch == '.')
+    {
+        return Err("SEC_INVALID_INPUT: invalid plugin id path segment".into());
+    }
+    Ok(value)
+}
+
+pub(crate) fn plugins_root<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<PathBuf> {
+    Ok(app_data_dir(app)?.join("plugins"))
+}
+
+pub(crate) fn plugins_installed_dir<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<PathBuf> {
+    Ok(plugins_root(app)?.join("installed"))
+}
+
+pub(crate) fn plugins_cache_dir<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<PathBuf> {
+    Ok(plugins_root(app)?.join("cache"))
+}
+
+pub(crate) fn plugins_data_dir<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<PathBuf> {
+    Ok(plugins_root(app)?.join("data"))
+}
+
+pub(crate) fn plugins_logs_dir<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<PathBuf> {
+    Ok(plugins_root(app)?.join("logs"))
+}
+
+pub(crate) fn plugin_data_dir<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    plugin_id: &str,
+) -> crate::shared::error::AppResult<PathBuf> {
+    Ok(plugins_data_dir(app)?.join(plugin_id_path_segment(plugin_id)?))
+}
+
+#[cfg(test)]
+mod plugin_path_tests {
+    #[test]
+    fn plugin_id_path_segment_rejects_traversal() {
+        assert!(super::plugin_id_path_segment("../evil").is_err());
+        assert!(super::plugin_id_path_segment("official/evil").is_err());
+        assert!(super::plugin_id_path_segment("official\\evil").is_err());
+        assert!(super::plugin_id_path_segment(".").is_err());
+        assert!(super::plugin_id_path_segment("community.prompt-helper").is_ok());
+    }
+}

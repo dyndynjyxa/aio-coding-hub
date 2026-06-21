@@ -12,6 +12,9 @@ pub(super) use relay::{FirstChunkStream, RelayBodyStream};
 mod gunzip;
 pub(super) use gunzip::GunzipStream;
 
+mod plugin_chunk;
+pub(super) use plugin_chunk::MaybePluginChunkStream;
+
 mod usage_tee;
 pub(super) use usage_tee::{
     spawn_usage_sse_relay_body, UsageBodyBufferTeeStream, UsageSseTeeStream,

@@ -60,9 +60,6 @@ pub(super) fn inject_auth<R: tauri::Runtime>(
     if prepared.use_codex_chatgpt_backend {
         maybe_inject_codex_chatgpt_headers(headers, prepared.codex_chatgpt_account_id.as_deref());
     }
-    if prepared.strip_request_content_encoding {
-        headers.remove(header::CONTENT_ENCODING);
-    }
 
     Ok(())
 }

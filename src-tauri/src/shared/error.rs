@@ -32,6 +32,10 @@ impl AppError {
             source: None,
         }
     }
+
+    pub fn code(&self) -> &str {
+        &self.code
+    }
 }
 
 fn split_code_message(raw: &str) -> Option<(&str, &str)> {

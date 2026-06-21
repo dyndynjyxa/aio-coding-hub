@@ -1,0 +1,210 @@
+{
+  "id": "official.privacy-filter",
+  "name": "Privacy Filter",
+  "version": "1.0.0",
+  "apiVersion": "1.0.0",
+  "configVersion": 3,
+  "category": "privacy",
+  "description": "Official native privacy filter aligned with packyme/privacy-filter for pre-upstream prompt and log redaction.",
+  "homepage": "https://github.com/packyme/privacy-filter",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/packyme/privacy-filter.git"
+  },
+  "license": "MIT",
+  "runtime": {
+    "kind": "native",
+    "engine": "privacyFilter"
+  },
+  "hooks": [
+    {
+      "name": "gateway.request.afterBodyRead",
+      "priority": 5,
+      "failurePolicy": "fail-closed"
+    },
+    {
+      "name": "gateway.request.beforeSend",
+      "priority": 5,
+      "failurePolicy": "fail-closed"
+    },
+    {
+      "name": "log.beforePersist",
+      "priority": 1,
+      "failurePolicy": "fail-closed"
+    }
+  ],
+  "permissions": ["request.body.read", "request.body.write", "log.redact"],
+  "hostCompatibility": {
+    "app": ">=0.56.0 <1.0.0",
+    "pluginApi": "^1.0.0",
+    "platforms": ["macos", "windows", "linux"]
+  },
+  "configSchema": {
+    "type": "object",
+    "required": ["redactBeforeUpstream", "redactLogs", "profile"],
+    "x-aio-ui": {
+      "sections": [
+        {
+          "id": "routing",
+          "title": "处理位置",
+          "description": "选择隐私过滤在哪些阶段生效。",
+          "order": 10
+        },
+        {
+          "id": "content",
+          "title": "检测策略",
+          "description": "这里展示的是可配置的策略大类；密钥类检测由打包的 200+ Gitleaks 规则、上下文规则和熵检测共同支撑。",
+          "order": 20
+        }
+      ]
+    },
+    "properties": {
+      "redactBeforeUpstream": {
+        "type": "boolean",
+        "title": "发送给模型前处理",
+        "description": "在请求离开本机前替换你选择的敏感信息。",
+        "default": true,
+        "x-aio-ui": { "section": "routing", "widget": "switch", "order": 10 }
+      },
+      "redactLogs": {
+        "type": "boolean",
+        "title": "保存日志前处理",
+        "description": "在本地日志写入前替换你选择的敏感信息。",
+        "default": true,
+        "x-aio-ui": { "section": "routing", "widget": "switch", "order": 20 }
+      },
+      "profile": {
+        "type": "string",
+        "title": "保护强度",
+        "description": "平衡模式会覆盖常见个人信息、200+ Gitleaks 密钥规则、上下文密钥和高熵密钥候选。",
+        "default": "balanced",
+        "enum": ["balanced"],
+        "x-aio-ui": {
+          "section": "routing",
+          "widget": "select",
+          "order": 30,
+          "enumLabels": { "balanced": "平衡" }
+        }
+      },
+      "sensitiveTypes": {
+        "type": "array",
+        "title": "策略大类",
+        "description": "这些不是全部底层规则。密钥相关选项会控制打包的 200+ Gitleaks 规则以及上下文/熵检测结果是否生效。",
+        "default": [
+          "email",
+          "cn_phone",
+          "cn_id_card",
+          "bank_card_candidate",
+          "ipv4",
+          "openai_key",
+          "aws_access_key",
+          "github_token",
+          "google_api_key",
+          "slack_token",
+          "jwt",
+          "private_key",
+          "context_secret"
+        ],
+        "items": {
+          "type": "string",
+          "enum": [
+            "email",
+            "cn_phone",
+            "cn_id_card",
+            "bank_card_candidate",
+            "ipv4",
+            "openai_key",
+            "aws_access_key",
+            "github_token",
+            "google_api_key",
+            "slack_token",
+            "jwt",
+            "private_key",
+            "context_secret"
+          ],
+          "x-aio-ui": {
+            "enumLabels": {
+              "email": "邮箱地址",
+              "cn_phone": "中国手机号",
+              "cn_id_card": "身份证号",
+              "bank_card_candidate": "银行卡号",
+              "ipv4": "IP 地址",
+              "openai_key": "OpenAI Key",
+              "aws_access_key": "AWS Access Key",
+              "github_token": "GitHub Token",
+              "google_api_key": "Google API Key",
+              "slack_token": "Slack Token",
+              "jwt": "JWT",
+              "private_key": "私钥片段",
+              "context_secret": "上下文密钥"
+            },
+            "enumDescriptions": {
+              "email": "例如 name@example.com。",
+              "cn_phone": "例如 13344441520。",
+              "cn_id_card": "中国大陆居民身份证号码。",
+              "bank_card_candidate": "通过校验规则识别常见银行卡号。",
+              "ipv4": "例如 192.168.1.10。",
+              "openai_key": "常见 sk- 开头的 OpenAI 密钥。",
+              "aws_access_key": "常见 AKIA 开头的访问密钥。",
+              "github_token": "ghp、github_pat 等令牌。",
+              "google_api_key": "常见 AIza 开头的 Google API Key。",
+              "slack_token": "Slack bot、user、app token。",
+              "jwt": "常见 JSON Web Token。",
+              "private_key": "PEM 私钥内容。",
+              "context_secret": "password、api_key、token 等上下文中的敏感值。"
+            }
+          }
+        },
+        "x-aio-ui": {
+          "section": "content",
+          "widget": "checkboxGroup",
+          "order": 10,
+          "warningWhenPartial": "关闭后，这类内容会原样发送给模型，也可能出现在本地日志中。"
+        }
+      },
+      "redactionScopes": {
+        "type": "array",
+        "title": "请求处理范围",
+        "description": "选择发送给模型前需要脱敏的协议文本字段。工具定义、工具调用参数、元数据、推理块和文件/图片引用不会被处理。",
+        "default": [
+          "system_instructions",
+          "user_prompts",
+          "tool_results",
+          "legacy_prompt"
+        ],
+        "items": {
+          "type": "string",
+          "enum": [
+            "system_instructions",
+            "user_prompts",
+            "assistant_context",
+            "tool_results",
+            "legacy_prompt"
+          ],
+          "x-aio-ui": {
+            "enumLabels": {
+              "system_instructions": "系统/开发者指令",
+              "user_prompts": "用户输入",
+              "assistant_context": "历史 assistant 文本",
+              "tool_results": "工具返回结果",
+              "legacy_prompt": "旧版 prompt / 原始文本"
+            },
+            "enumDescriptions": {
+              "system_instructions": "Claude system、OpenAI instructions、Chat system/developer content。",
+              "user_prompts": "Claude/OpenAI/Chat 的用户消息文本。",
+              "assistant_context": "默认关闭。开启后会处理历史 assistant 文本，可能改变模型上下文。",
+              "tool_results": "Claude tool_result 和 OpenAI function/tool output 文本。",
+              "legacy_prompt": "旧版 prompt 字段，以及非 JSON 请求体。"
+            }
+          }
+        },
+        "x-aio-ui": {
+          "section": "content",
+          "widget": "checkboxGroup",
+          "order": 20,
+          "warningWhenPartial": "关闭后，对应请求内容会原样发送给模型。"
+        }
+      }
+    }
+  }
+}

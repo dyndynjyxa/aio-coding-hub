@@ -60,8 +60,6 @@ jobs:
 
       - name: Install pnpm
         uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4.2.0
-        with:
-          version: 10
 
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -79,14 +77,27 @@ jobs:
 
       - name: Install pnpm
         uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4.2.0
-        with:
-          version: 10
 
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
+
+      - name: Install system deps (Tauri/Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev librsvg2-dev patchelf
+
+          # AppIndicator (Ubuntu 22.04 typically uses ayatana; some images still provide appindicator)
+          if ! sudo apt-get install -y libayatana-appindicator3-dev; then
+            sudo apt-get install -y libappindicator3-dev
+          fi
+
+          # WebKit2GTK + libsoup (Ubuntu images vary: 4.1/4.0 + soup3/soup2)
+          if ! sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev; then
+            sudo apt-get install -y libwebkit2gtk-4.0-dev libsoup2.4-dev
+          fi
 
       - name: Install deps
         run: pnpm install --frozen-lockfile
@@ -102,6 +113,24 @@ jobs:
 
       - name: Gateway error codes sync check
         run: pnpm check:gateway-error-codes
+
+      - name: Plugin docs contract
+        run: pnpm check:plugin-system-docs
+
+      - name: Plugin API contract
+        run: pnpm check:plugin-api-contract
+
+      - name: Generated IPC bindings contract
+        run: pnpm check:generated-bindings
+
+      - name: Plugin TypeScript SDK typecheck
+        run: pnpm plugin-sdk:typecheck
+
+      - name: Plugin scaffolder tests
+        run: pnpm create-aio-plugin:test
+
+      - name: Plugin GUI E2E smoke
+        run: pnpm test:e2e
 
       - name: Unit tests (Vitest + coverage gate)
         run: pnpm test:unit:coverage
@@ -170,6 +199,11 @@ jobs:
       - name: Rust clippy
         working-directory: src-tauri
         run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Plugin WASM SDK tests
+        run: |
+          cargo test --manifest-path packages/plugin-wasm-sdk/Cargo.toml
+          cargo test --manifest-path packages/plugin-wasm-sdk/examples/redactor/Cargo.toml
 
       - name: Rust test
         working-directory: src-tauri

@@ -1,5 +1,6 @@
 import {
   memo,
+  type ButtonHTMLAttributes,
   type HTMLAttributes,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -8,7 +9,16 @@ import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Copy, FlaskConical, Pencil, RefreshCw, Terminal, Trash2, Zap } from "lucide-react";
+import {
+  Copy,
+  FlaskConical,
+  GripVertical,
+  Pencil,
+  RefreshCw,
+  Terminal,
+  Trash2,
+  Zap,
+} from "lucide-react";
 import { FREE_TAG } from "../../constants/providers";
 import type { GatewayProviderCircuitStatus } from "../../services/gateway/gateway";
 import { getGatewayCircuitDerivedState } from "../../query/gateway";
@@ -143,6 +153,7 @@ export type SortableProviderCardProps = {
 
 type ProviderCardProps = SortableProviderCardProps & {
   className?: string;
+  dragHandleProps?: ButtonHTMLAttributes<HTMLButtonElement>;
 } & HTMLAttributes<HTMLDivElement>;
 
 export const ProviderCard = memo(function ProviderCard({
@@ -164,6 +175,7 @@ export const ProviderCard = memo(function ProviderCard({
   onEdit,
   onDelete,
   className,
+  dragHandleProps,
   ...cardProps
 }: ProviderCardProps) {
   const claudeModelMappings = getConfiguredClaudeModelMappings(provider.claude_models);
@@ -254,9 +266,17 @@ export const ProviderCard = memo(function ProviderCard({
       {...cardProps}
     >
       <div className="flex min-w-0 items-center gap-3">
-        <div className="inline-flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-lg border border-border bg-white text-muted-foreground dark:border-border dark:bg-secondary dark:text-muted-foreground">
-          ⠿
-        </div>
+        {dragHandleProps ? (
+          <button
+            type="button"
+            className="inline-flex h-8 w-8 shrink-0 cursor-grab items-center justify-center rounded-lg border border-border bg-white text-muted-foreground transition-colors hover:bg-secondary active:cursor-grabbing dark:border-border dark:bg-secondary dark:text-muted-foreground"
+            title="拖拽排序"
+            aria-label={`拖拽调整 ${provider.name} 顺序`}
+            {...dragHandleProps}
+          >
+            <GripVertical className="h-4 w-4" aria-hidden="true" />
+          </button>
+        ) : null}
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
             <div className="truncate text-base font-semibold">{provider.name}</div>
@@ -569,12 +589,8 @@ export const SortableProviderCard = memo(function SortableProviderCard(
     <div ref={setNodeRef} style={style} className="relative">
       <ProviderCard
         {...props}
-        className={cn(
-          "cursor-grab active:cursor-grabbing",
-          isDragging && "z-10 scale-[1.02] shadow-lg ring-2 ring-accent/30"
-        )}
-        {...attributes}
-        {...listeners}
+        className={cn(isDragging && "z-10 scale-[1.02] shadow-lg ring-2 ring-accent/30")}
+        dragHandleProps={{ ...attributes, ...listeners }}
       />
     </div>
   );

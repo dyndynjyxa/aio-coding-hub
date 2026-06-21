@@ -162,7 +162,19 @@ describe("ui/Sidebar", () => {
       NAV_SECTIONS.map((section) => [section.label, section.items.map((item) => item.to)])
     ).toEqual([
       ["MAIN", ["/", "/providers", "/sessions"]],
-      ["TOOLS", ["/workspaces", "/prompts", "/mcp", "/skills", "/usage", "/logs", "/cli-manager"]],
+      [
+        "TOOLS",
+        [
+          "/workspaces",
+          "/prompts",
+          "/mcp",
+          "/skills",
+          "/plugins",
+          "/usage",
+          "/logs",
+          "/cli-manager",
+        ],
+      ],
       ["SETTING", ["/console", "/settings"]],
     ]);
     expect(NAV.map((item) => item.to)).toEqual(

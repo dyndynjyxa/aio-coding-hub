@@ -162,6 +162,23 @@ macro_rules! generated_command_registry {
             skills_paths_get => crate::commands::skills::skills_paths_get,
             skill_check_updates => crate::commands::skills::skill_check_updates,
             skill_update => crate::commands::skills::skill_update,
+            // ── plugins ──
+            plugin_list => crate::commands::plugins::plugin_list,
+            plugin_get => crate::commands::plugins::plugin_get,
+            plugin_install_from_file => crate::commands::plugins::plugin_install_from_file,
+            plugin_update_from_file => crate::commands::plugins::plugin_update_from_file,
+            plugin_rollback => crate::commands::plugins::plugin_rollback,
+            plugin_parse_market_index => crate::commands::plugins::plugin_parse_market_index,
+            plugin_install_remote => crate::commands::plugins::plugin_install_remote,
+            plugin_install_official => crate::commands::plugins::plugin_install_official,
+            plugin_quarantine_revoked => crate::commands::plugins::plugin_quarantine_revoked,
+            plugin_enable => crate::commands::plugins::plugin_enable,
+            plugin_disable => crate::commands::plugins::plugin_disable,
+            plugin_uninstall => crate::commands::plugins::plugin_uninstall,
+            plugin_save_config => crate::commands::plugins::plugin_save_config,
+            plugin_grant_permissions => crate::commands::plugins::plugin_grant_permissions,
+            plugin_revoke_permission => crate::commands::plugins::plugin_revoke_permission,
+            plugin_list_audit_logs => crate::commands::plugins::plugin_list_audit_logs,
             // ── request_logs ──
             request_logs_list => crate::commands::request_logs::request_logs_list,
             request_logs_list_all => crate::commands::request_logs::request_logs_list_all,
@@ -290,5 +307,32 @@ mod tests {
             generated_command_names().contains(&"model_price_upsert"),
             "model_price_upsert should stay in the shared generated command registry"
         );
+    }
+
+    #[test]
+    fn includes_plugin_commands_in_generated_command_registry() {
+        for command in [
+            "plugin_list",
+            "plugin_get",
+            "plugin_install_from_file",
+            "plugin_update_from_file",
+            "plugin_rollback",
+            "plugin_parse_market_index",
+            "plugin_install_remote",
+            "plugin_install_official",
+            "plugin_quarantine_revoked",
+            "plugin_enable",
+            "plugin_disable",
+            "plugin_uninstall",
+            "plugin_save_config",
+            "plugin_grant_permissions",
+            "plugin_revoke_permission",
+            "plugin_list_audit_logs",
+        ] {
+            assert!(
+                generated_command_names().contains(&command),
+                "{command} should be exported through the shared generated command registry"
+            );
+        }
     }
 }

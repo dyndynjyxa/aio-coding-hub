@@ -103,7 +103,12 @@ fn respond_warmup_intercept<R: tauri::Runtime>(
 
     emit_request_event_and_spawn_request_log(
         RequestEndArgs::from_context(RequestEndContextArgs {
-            deps: RequestEndDeps::new(&ctx.state.app, &ctx.state.db, &ctx.state.log_tx),
+            deps: RequestEndDeps::new(
+                &ctx.state.app,
+                &ctx.state.db,
+                &ctx.state.log_tx,
+                &ctx.state.plugin_pipeline,
+            ),
             trace_id: &ctx.trace_id,
             cli_key: &ctx.cli_key,
             method: &ctx.method_hint,

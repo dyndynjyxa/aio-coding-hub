@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::domain::provider_oauth_limits;
+use crate::gateway::plugins::context::{GatewayPluginHookName, GatewayResponseHookInput};
 use crate::gateway::proxy::{
     gemini_oauth, is_fake_200_non_stream_body, protocol_bridge, provider_router,
     upstream_client_error_rules, GatewayErrorCode,
@@ -984,7 +985,12 @@ where
 
         emit_request_event_and_enqueue_request_log(
             RequestEndArgs::from_context(RequestEndContextArgs {
-                deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx),
+                deps: RequestEndDeps::new(
+                    &state.app,
+                    &state.db,
+                    &state.log_tx,
+                    &state.plugin_pipeline,
+                ),
                 trace_id: common.trace_id.as_str(),
                 cli_key: common.cli_key.as_str(),
                 method: common.method_hint.as_str(),
@@ -1026,6 +1032,64 @@ where
         Some(body_bytes.as_ref()),
         &common.special_settings,
     );
+
+    let hook_input = GatewayResponseHookInput {
+        hook_name: GatewayPluginHookName::ResponseAfter,
+        trace_id: common.trace_id.clone(),
+        status: status.as_u16(),
+        headers: response_headers.clone(),
+        body: body_bytes.clone(),
+    };
+    match state.plugin_pipeline.run_response_hook(hook_input).await {
+        Ok(output) => {
+            crate::gateway::plugins::audit::persist_gateway_plugin_audit_events(
+                &state.db,
+                &common.trace_id,
+                output.audit_events.clone(),
+            );
+            if let Some(blocked) = output.blocked {
+                tracing::warn!(
+                    trace_id = %common.trace_id,
+                    provider_id,
+                    status = blocked.status,
+                    reason = %blocked.reason,
+                    "plugin blocked gateway response after upstream success"
+                );
+                abort_guard.disarm();
+                return LoopControl::Return(error_response(
+                    StatusCode::BAD_GATEWAY,
+                    common.trace_id.clone(),
+                    GatewayErrorCode::InternalError.as_str(),
+                    blocked.reason,
+                    attempts.clone(),
+                ));
+            }
+            response_headers = output.headers;
+            body_bytes = output.body;
+            response_headers.remove(header::CONTENT_LENGTH);
+        }
+        Err(mut err) => {
+            crate::gateway::plugins::audit::persist_gateway_plugin_error_audit_events(
+                &state.db,
+                &common.trace_id,
+                &mut err,
+            );
+            tracing::warn!(
+                trace_id = %common.trace_id,
+                provider_id,
+                "plugin response.after hook failed: {}",
+                err
+            );
+            abort_guard.disarm();
+            return LoopControl::Return(error_response(
+                StatusCode::BAD_GATEWAY,
+                common.trace_id.clone(),
+                GatewayErrorCode::InternalError.as_str(),
+                format!("gateway plugin response hook failed: {err}"),
+                attempts.clone(),
+            ));
+        }
+    }
 
     let usage = usage::parse_usage_from_json_or_sse_bytes(common.cli_key.as_str(), &body_bytes);
     let usage_metrics = usage.as_ref().map(|u| u.metrics.clone());
@@ -1095,7 +1159,7 @@ where
     let duration_ms = started.elapsed().as_millis();
     emit_request_event_and_enqueue_request_log(
         RequestEndArgs::from_context(RequestEndContextArgs {
-            deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx),
+            deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx, &state.plugin_pipeline),
             trace_id: common.trace_id.as_str(),
             cli_key: common.cli_key.as_str(),
             method: common.method_hint.as_str(),

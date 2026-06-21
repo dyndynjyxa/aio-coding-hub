@@ -10,6 +10,7 @@ pub(crate) mod http_client;
 pub(crate) mod listen;
 pub(crate) mod manager;
 pub(crate) mod oauth;
+pub(crate) mod plugins;
 mod proxy;
 mod response_fixer;
 mod routes;

@@ -14,6 +14,7 @@ use super::super::proxy::{
     is_fake_200_non_stream_body, upstream_client_error_rules, GatewayErrorCode,
 };
 use super::super::util::{lossy_utf8_preview, now_unix_seconds, MAX_DEBUG_BODY_PREVIEW_BYTES};
+use super::plugin_chunk::PLUGIN_STREAM_ERROR_MARKER;
 use super::request_end::{emit_request_event_and_spawn_request_log, StreamRequestCompletion};
 use super::{RelayBodyStream, StreamFinalizeCtx};
 
@@ -109,6 +110,12 @@ fn is_codex_body_buffer_drop_successish(
         && usage_seen
 }
 
+fn is_plugin_stream_error_chunk(chunk: &[u8]) -> bool {
+    chunk
+        .windows(PLUGIN_STREAM_ERROR_MARKER.len())
+        .any(|window| window == PLUGIN_STREAM_ERROR_MARKER.as_bytes())
+}
+
 struct NextFuture<'a, S: Stream + Unpin>(&'a mut S);
 
 impl<'a, S: Stream + Unpin> Future for NextFuture<'a, S> {
@@ -138,6 +145,7 @@ where
     idle_sleep: Option<Pin<Box<tokio::time::Sleep>>>,
     finalized: bool,
     defer_terminal_error: bool,
+    stop_after_terminal_error: bool,
 }
 
 impl<S, B, R> UsageSseTeeStream<S, B, R>
@@ -162,6 +170,7 @@ where
             idle_sleep: idle_timeout.map(|d| Box::pin(tokio::time::sleep(d))),
             finalized: false,
             defer_terminal_error: false,
+            stop_after_terminal_error: false,
         }
     }
 
@@ -175,6 +184,10 @@ where
         cx: &mut Context<'_>,
         enforce_idle_timeout: bool,
     ) -> Poll<Option<Result<B, reqwest::Error>>> {
+        if self.stop_after_terminal_error {
+            return Poll::Ready(None);
+        }
+
         let next = Pin::new(&mut self.upstream).poll_next(cx);
 
         match next {
@@ -240,6 +253,10 @@ where
                             GatewayErrorCode::StreamError.as_str()
                         };
                         self.finalize(Some(code));
+                        if is_plugin_stream_error_chunk(chunk.as_ref()) {
+                            self.stop_after_terminal_error = true;
+                            return Poll::Ready(Some(Ok(chunk)));
+                        }
                         return Poll::Ready(None);
                     }
                 }
@@ -831,6 +848,8 @@ mod tests {
             app,
             db,
             log_tx,
+            plugin_pipeline: crate::gateway::plugins::pipeline::GatewayPluginPipeline::empty_shared(
+            ),
             circuit: Arc::new(circuit_breaker::CircuitBreaker::new(
                 circuit_breaker::CircuitBreakerConfig::default(),
                 HashMap::new(),

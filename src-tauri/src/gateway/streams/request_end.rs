@@ -178,6 +178,7 @@ pub(super) fn emit_request_event_and_spawn_request_log<R: tauri::Runtime>(
         ctx.db.clone(),
         ctx.log_tx.clone(),
         log_args,
+        Some(ctx.plugin_pipeline.clone()),
     );
 }
 

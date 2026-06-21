@@ -1,11 +1,13 @@
 //! Usage: Shared helpers to emit request-end events and enqueue request logs consistently.
 
-use super::logging::enqueue_request_log_with_backpressure;
+use super::logging::enqueue_request_log_with_backpressure_and_plugins;
 use super::status_override;
 use super::{spawn_enqueue_request_log_with_backpressure, RequestLogEnqueueArgs};
 use crate::gateway::events::{emit_request_event, ClaudeModelMapping, FailoverAttempt};
+use crate::gateway::plugins::pipeline::GatewayPluginPipeline;
 use crate::{db, request_logs};
 use serde_json::Value;
+use std::sync::Arc;
 
 const REQUEST_END_LOG_MAX_ATTEMPTS: usize = 100;
 const REQUEST_END_LOG_SHORT_TEXT_MAX_CHARS: usize = 512;
@@ -16,6 +18,7 @@ pub(super) struct RequestEndDeps<'a, R: tauri::Runtime = tauri::Wry> {
     pub(super) app: &'a tauri::AppHandle<R>,
     pub(super) db: &'a db::Db,
     pub(super) log_tx: &'a tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
+    pub(super) plugin_pipeline: &'a Arc<GatewayPluginPipeline>,
 }
 
 impl<'a, R: tauri::Runtime> RequestEndDeps<'a, R> {
@@ -23,8 +26,14 @@ impl<'a, R: tauri::Runtime> RequestEndDeps<'a, R> {
         app: &'a tauri::AppHandle<R>,
         db: &'a db::Db,
         log_tx: &'a tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
+        plugin_pipeline: &'a Arc<GatewayPluginPipeline>,
     ) -> Self {
-        Self { app, db, log_tx }
+        Self {
+            app,
+            db,
+            log_tx,
+            plugin_pipeline,
+        }
     }
 }
 
@@ -820,7 +829,14 @@ pub(super) async fn emit_request_event_and_enqueue_request_log<R: tauri::Runtime
         usage_metrics,
     );
 
-    enqueue_request_log_with_backpressure(deps.app, deps.db, deps.log_tx, log_args).await;
+    enqueue_request_log_with_backpressure_and_plugins(
+        deps.app,
+        deps.db,
+        deps.log_tx,
+        Some(deps.plugin_pipeline.clone()),
+        log_args,
+    )
+    .await;
 }
 
 pub(super) fn emit_request_event_and_spawn_request_log<R: tauri::Runtime>(
@@ -864,6 +880,7 @@ pub(super) fn emit_request_event_and_spawn_request_log<R: tauri::Runtime>(
         deps.db.clone(),
         deps.log_tx.clone(),
         log_args,
+        Some(deps.plugin_pipeline.clone()),
     );
 }
 

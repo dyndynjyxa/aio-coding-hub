@@ -791,7 +791,10 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
     }
   }
 
-  function handleDragEnd(event: DragEndEvent) {
+  function reorderProvidersByVisibility(
+    event: DragEndEvent,
+    isVisible: (provider: ProviderSummary) => boolean
+  ) {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
@@ -802,14 +805,7 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
       activeId: active.id,
       overId: over.id,
       getId: (provider) => provider.id,
-      isVisible: (provider) => {
-        const normalizedSearch = providerSearch.trim().toLowerCase();
-        const matchesTags =
-          selectedTags.size === 0 || (provider.tags ?? []).some((tag) => selectedTags.has(tag));
-        if (!matchesTags) return false;
-        if (!normalizedSearch) return true;
-        return provider.name.toLowerCase().includes(normalizedSearch);
-      },
+      isVisible,
     });
     if (!nextProviders) return;
 
@@ -1026,6 +1022,22 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
     });
   }
 
+  function handleDragEnd(event: DragEndEvent) {
+    reorderProvidersByVisibility(event, (provider) => {
+      const normalizedSearch = providerSearch.trim().toLowerCase();
+      const matchesTags =
+        selectedTags.size === 0 || (provider.tags ?? []).some((tag) => selectedTags.has(tag));
+      if (!matchesTags) return false;
+      if (!normalizedSearch) return true;
+      return provider.name.toLowerCase().includes(normalizedSearch);
+    });
+  }
+
+  function handleProviderCardDragEnd(event: DragEndEvent) {
+    const visibleProviderIds = new Set(filteredProviders.map((provider) => provider.id));
+    reorderProvidersByVisibility(event, (provider) => visibleProviderIds.has(provider.id));
+  }
+
   return {
     providers,
     codexProviders,
@@ -1092,6 +1104,7 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
     duplicateProvider,
     requestValidateProviderModel,
     handleDragEnd,
+    handleProviderCardDragEnd,
     sensors,
     createDialogState,
     setCreateDialogState,

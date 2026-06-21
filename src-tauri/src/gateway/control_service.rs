@@ -1,6 +1,9 @@
 //! Usage: Gateway start and circuit-control orchestration.
 
-use crate::{circuit_breaker, db, provider_circuit_breakers, providers, session_manager, settings};
+use crate::{
+    app::plugin_service, app::plugins::runtime_executor::RuntimeGatewayPluginExecutor,
+    circuit_breaker, db, provider_circuit_breakers, providers, session_manager, settings,
+};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
@@ -78,6 +81,8 @@ impl GatewayControlService {
         let circuit = build_circuit_breaker(&db, cfg, background_tasks.circuit_persist_tx());
         let session = Arc::new(session_manager::SessionManager::new());
         let recent_errors = Arc::new(Mutex::new(RecentErrorCache::default()));
+        let plugin_pipeline = load_gateway_plugin_pipeline(&db);
+
         let state = GatewayAppState {
             app: app.clone(),
             db: db.clone(),
@@ -87,6 +92,7 @@ impl GatewayControlService {
             codex_session_cache: Arc::new(Mutex::new(CodexSessionIdCache::default())),
             recent_errors: recent_errors.clone(),
             latency_cache: Arc::new(Mutex::new(ProviderBaseUrlPingCache::default())),
+            plugin_pipeline: plugin_pipeline.clone(),
         };
         let router = build_router(state);
         let (shutdown, shutdown_rx) = oneshot::channel::<()>();
@@ -122,6 +128,7 @@ impl GatewayControlService {
             shutdown,
             task,
             background_tasks,
+            plugin_pipeline: plugin_pipeline.clone(),
         });
         let status = runtime.status();
         *running = Some(runtime);
@@ -193,6 +200,25 @@ impl GatewayControlService {
             .collect())
     }
 
+    pub(crate) fn refresh_plugins(running: Option<&GatewayRuntime>, db: &db::Db) {
+        let Some(runtime) = running else {
+            return;
+        };
+        match plugin_service::enabled_plugins_for_gateway(db) {
+            Ok(plugins) => {
+                let plugin_count = plugins.len();
+                runtime.refresh_plugin_pipeline(plugins);
+                tracing::info!(plugin_count, "refreshed gateway plugin pipeline");
+            }
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "failed to refresh gateway plugin pipeline; keeping previous snapshot"
+                );
+            }
+        }
+    }
+
     pub(crate) fn circuit_reset_provider(
         running: Option<&GatewayRuntime>,
         db: &db::Db,
@@ -228,6 +254,36 @@ impl GatewayControlService {
 
         let _ = provider_circuit_breakers::delete_by_provider_ids(db, &provider_ids)?;
         Ok(provider_ids.len())
+    }
+}
+
+fn load_gateway_plugin_pipeline(
+    db: &db::Db,
+) -> Arc<super::plugins::pipeline::GatewayPluginPipeline> {
+    match plugin_service::enabled_plugins_for_gateway(db) {
+        Ok(plugins) if plugins.is_empty() => {
+            super::plugins::pipeline::GatewayPluginPipeline::empty_shared()
+        }
+        Ok(plugins) => {
+            tracing::info!(
+                plugin_count = plugins.len(),
+                "loaded enabled gateway plugins"
+            );
+            Arc::new(
+                super::plugins::pipeline::GatewayPluginPipeline::for_runtime(
+                    plugins,
+                    Arc::new(RuntimeGatewayPluginExecutor::default()),
+                    super::plugins::pipeline::GatewayPluginPipelineConfig::default(),
+                ),
+            )
+        }
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                "failed to load gateway plugins; continuing with empty plugin pipeline"
+            );
+            super::plugins::pipeline::GatewayPluginPipeline::empty_shared()
+        }
     }
 }
 

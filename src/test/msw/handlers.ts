@@ -10,6 +10,8 @@ import {
   getDbDiskUsageState,
   getEnvConflictsState,
   getGatewayStatusState,
+  getPluginDetailState,
+  getPluginSummariesState,
   getProvidersState,
   getSettingsState,
   setProvidersState,
@@ -17,6 +19,7 @@ import {
   getSortModesState,
   getUsageSummaryState,
   getWorkspacesState,
+  installOfficialPluginState,
   mergeSettingsState,
 } from "./state";
 
@@ -29,6 +32,14 @@ const withJson = async <T>(request: Request): Promise<T> => {
     return {} as T;
   }
 };
+
+type PluginCommandPayload = {
+  pluginId?: string;
+  input?: { pluginId?: string } | null;
+};
+
+const pluginIdFromPayload = (payload: PluginCommandPayload): string =>
+  payload.input?.pluginId ?? payload.pluginId ?? "";
 
 export const handlers = [
   // ---- CLI Proxy ----
@@ -134,6 +145,42 @@ export const handlers = [
   http.post(`${TAURI_ENDPOINT}/gateway_circuit_reset_provider`, () => HttpResponse.json(true)),
 
   http.post(`${TAURI_ENDPOINT}/gateway_circuit_reset_cli`, () => HttpResponse.json(0)),
+
+  // ---- Plugins ----
+  http.post(`${TAURI_ENDPOINT}/plugin_list`, () => HttpResponse.json(getPluginSummariesState())),
+
+  http.post(`${TAURI_ENDPOINT}/plugin_get`, async ({ request }) => {
+    const payload = await withJson<PluginCommandPayload>(request);
+    const detail = getPluginDetailState(pluginIdFromPayload(payload));
+    if (!detail) {
+      return HttpResponse.json({ error: "plugin not found" }, { status: 404 });
+    }
+    return HttpResponse.json(detail);
+  }),
+
+  http.post(`${TAURI_ENDPOINT}/plugin_install_official`, async ({ request }) => {
+    const payload = await withJson<PluginCommandPayload>(request);
+    try {
+      return HttpResponse.json(installOfficialPluginState(pluginIdFromPayload(payload)));
+    } catch (error) {
+      return HttpResponse.json(
+        { error: error instanceof Error ? error.message : "unknown official plugin" },
+        { status: 404 }
+      );
+    }
+  }),
+
+  http.post(`${TAURI_ENDPOINT}/plugin_enable`, async ({ request }) => {
+    const payload = await withJson<PluginCommandPayload>(request);
+    const detail = getPluginDetailState(pluginIdFromPayload(payload));
+    if (!detail) {
+      return HttpResponse.json({ error: "plugin not found" }, { status: 404 });
+    }
+    return HttpResponse.json({
+      ...detail,
+      summary: { ...detail.summary, status: "enabled", updated_at: Date.now() },
+    });
+  }),
 
   // ---- Providers ----
   http.post(`${TAURI_ENDPOINT}/providers_list`, async ({ request }) => {

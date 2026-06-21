@@ -178,25 +178,39 @@ where
     };
 
     // --- Non-success upstream error handling ---
-    upstream_error::handle_non_success_response(upstream_error::HandleNonSuccessResponseInput {
-        ctx,
-        provider_ctx,
-        attempt_ctx,
-        loop_state: loop_state.reborrow(),
-        enable_thinking_signature_rectifier: input.enable_thinking_signature_rectifier,
-        enable_thinking_budget_rectifier: input.enable_thinking_budget_rectifier,
-        resp,
-        upstream: upstream_error::UpstreamRequestState {
-            upstream_body_bytes: &mut prepared.upstream_body_bytes,
-            strip_request_content_encoding: &mut prepared.strip_request_content_encoding,
-            codex_previous_response_id_rectifier_retried: &mut retry_state
-                .codex_previous_response_id_rectifier_retried,
-            thinking_signature_rectifier_retried: &mut retry_state
-                .thinking_signature_rectifier_retried,
-            thinking_budget_rectifier_retried: &mut retry_state.thinking_budget_rectifier_retried,
+    let upstream_body_before_error_handler = prepared.upstream_body_bytes.clone();
+    let strip_encoding_before_error_handler = prepared.strip_request_content_encoding;
+    let control = upstream_error::handle_non_success_response(
+        upstream_error::HandleNonSuccessResponseInput {
+            ctx,
+            provider_ctx,
+            attempt_ctx,
+            loop_state: loop_state.reborrow(),
+            enable_thinking_signature_rectifier: input.enable_thinking_signature_rectifier,
+            enable_thinking_budget_rectifier: input.enable_thinking_budget_rectifier,
+            resp,
+            upstream: upstream_error::UpstreamRequestState {
+                upstream_body_bytes: &mut prepared.upstream_body_bytes,
+                strip_request_content_encoding: &mut prepared.strip_request_content_encoding,
+                codex_previous_response_id_rectifier_retried: &mut retry_state
+                    .codex_previous_response_id_rectifier_retried,
+                thinking_signature_rectifier_retried: &mut retry_state
+                    .thinking_signature_rectifier_retried,
+                thinking_budget_rectifier_retried: &mut retry_state
+                    .thinking_budget_rectifier_retried,
+            },
         },
-    })
-    .await
+    )
+    .await;
+    if retry_repair_changed_request_body(
+        &prepared.upstream_body_bytes,
+        upstream_body_before_error_handler.as_ref(),
+        prepared.strip_request_content_encoding,
+        strip_encoding_before_error_handler,
+    ) {
+        prepared.request_body_mutated_before_attempt = true;
+    }
+    control
 }
 
 // ---------------------------------------------------------------------------
@@ -216,6 +230,16 @@ fn should_try_claude_auth_fallback<R: tauri::Runtime>(
         && !retry_state.claude_api_key_bearer_fallback
         && retry_index < prepared.provider_max_attempts
         && matches!(status.as_u16(), 401 | 403)
+}
+
+fn retry_repair_changed_request_body(
+    current_body: &Bytes,
+    previous_body: &[u8],
+    current_strip_content_encoding: bool,
+    previous_strip_content_encoding: bool,
+) -> bool {
+    current_body.as_ref() != previous_body
+        || current_strip_content_encoding != previous_strip_content_encoding
 }
 
 async fn try_oauth_reactive_refresh<R: tauri::Runtime>(
@@ -315,4 +339,33 @@ fn emit_cx2cc_upstream_log<R: tauri::Runtime>(
             prepared.anthropic_stream_requested
         ),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retry_repair_changed_request_body_detects_body_or_encoding_changes() {
+        let original = Bytes::from_static(br#"{"previous_response_id":"resp_1"}"#);
+
+        assert!(!retry_repair_changed_request_body(
+            &original,
+            original.as_ref(),
+            false,
+            false,
+        ));
+        assert!(retry_repair_changed_request_body(
+            &Bytes::from_static(br#"{}"#),
+            original.as_ref(),
+            false,
+            false,
+        ));
+        assert!(retry_repair_changed_request_body(
+            &original,
+            original.as_ref(),
+            true,
+            false,
+        ));
+    }
 }

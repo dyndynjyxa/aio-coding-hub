@@ -26,6 +26,7 @@ pub(super) struct PreparedProvider {
     pub(super) upstream_query: Option<String>,
     pub(super) upstream_body_bytes: Bytes,
     pub(super) strip_request_content_encoding: bool,
+    pub(super) request_body_mutated_before_attempt: bool,
     pub(super) gemini_oauth_response_mode: Option<GeminiOAuthResponseMode>,
     pub(super) use_codex_chatgpt_backend: bool,
     pub(super) codex_chatgpt_account_id: Option<String>,
@@ -175,7 +176,7 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
 
     let mut upstream_forwarded_path = input.forwarded_path.clone();
     let mut upstream_query = input.query.clone();
-    let mut upstream_body_bytes = input.body_bytes.clone();
+    let mut upstream_body_bytes = input.request_body_state.decoded_clone();
     let mut strip_request_content_encoding = input.strip_request_content_encoding_seed;
     let mut gemini_oauth_response_mode = None;
 
@@ -316,6 +317,10 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
         );
     }
 
+    let request_body_mutated_before_attempt = input.request_body_state.is_mutated()
+        || upstream_body_bytes != input.request_body_state.decoded_clone()
+        || strip_request_content_encoding;
+
     PreparationOutcome::Ready(Box::new(PreparedProvider {
         provider_id,
         provider_name_base,
@@ -331,6 +336,7 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
         upstream_query,
         upstream_body_bytes,
         strip_request_content_encoding,
+        request_body_mutated_before_attempt,
         gemini_oauth_response_mode,
         use_codex_chatgpt_backend,
         codex_chatgpt_account_id,

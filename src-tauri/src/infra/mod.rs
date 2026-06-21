@@ -18,6 +18,7 @@ pub(crate) mod mcp_sync;
 pub(crate) mod model_price_aliases;
 pub(crate) mod model_prices;
 pub(crate) mod model_prices_sync;
+pub(crate) mod plugins;
 pub(crate) mod prompt_sync;
 pub(crate) mod provider_circuit_breakers;
 pub(crate) mod request_attempt_logs;

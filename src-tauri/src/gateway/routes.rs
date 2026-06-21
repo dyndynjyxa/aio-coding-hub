@@ -122,16 +122,29 @@ where
 #[allow(clippy::await_holding_lock, clippy::field_reassign_with_default)]
 mod tests {
     use super::build_router;
+    use crate::app::plugins::{official, runtime_executor::RuntimeGatewayPluginExecutor};
+    use crate::domain::plugins::{
+        PluginDetail, PluginHook, PluginHostCompatibility, PluginInstallSource, PluginManifest,
+        PluginPermissionRisk, PluginRuntime, PluginStatus, PluginSummary,
+    };
     use crate::gateway::codex_session_id::CodexSessionIdCache;
+    use crate::gateway::plugins::context::{GatewayHookResult, GatewayPluginHookName};
+    use crate::gateway::plugins::pipeline::{
+        GatewayPluginPipeline, GatewayPluginPipelineConfig, InMemoryGatewayPluginExecutor,
+    };
     use crate::gateway::proxy::{ProviderBaseUrlPingCache, RecentErrorCache};
     use crate::gateway::runtime::GatewayAppState;
+    use crate::infra::plugins::repository;
     use crate::{circuit_breaker, db, providers, request_logs, session_manager, settings};
     use axum::body::HttpBody;
     use axum::body::{to_bytes, Body};
     use axum::http::{header, Method, Request, StatusCode};
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
     use serde_json::Value;
     use std::collections::HashMap;
     use std::ffi::OsString;
+    use std::io::Write;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -221,6 +234,208 @@ mod tests {
         });
 
         (format!("http://{addr}"), task)
+    }
+
+    #[derive(Debug)]
+    struct CapturedRawRequest {
+        head: String,
+        body: Vec<u8>,
+    }
+
+    impl CapturedRawRequest {
+        fn text(&self) -> String {
+            let mut out = self.head.clone();
+            out.push_str("\r\n\r\n");
+            out.push_str(&String::from_utf8_lossy(&self.body));
+            out
+        }
+
+        fn has_header_line(&self, needle: &str) -> bool {
+            self.head
+                .to_ascii_lowercase()
+                .contains(&needle.to_ascii_lowercase())
+        }
+    }
+
+    fn find_http_head_split(bytes: &[u8]) -> Option<(usize, usize)> {
+        let marker = b"\r\n\r\n";
+        bytes
+            .windows(marker.len())
+            .position(|window| window == marker)
+            .map(|idx| (idx, idx + marker.len()))
+    }
+
+    async fn read_complete_http_request_bytes(socket: &mut tokio::net::TcpStream) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let mut chunk = [0_u8; 1024];
+        loop {
+            let Ok(size) = socket.read(&mut chunk).await else {
+                break;
+            };
+            if size == 0 {
+                break;
+            }
+            buf.extend_from_slice(&chunk[..size]);
+            if buf.len() > 64 * 1024 {
+                break;
+            }
+
+            let Some((head_start, body_start)) = find_http_head_split(&buf) else {
+                continue;
+            };
+            let headers = String::from_utf8_lossy(&buf[..head_start]);
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    if name.eq_ignore_ascii_case("content-length") {
+                        value.trim().parse::<usize>().ok()
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(0);
+            if buf.len().saturating_sub(body_start) >= content_length {
+                break;
+            }
+        }
+        buf
+    }
+
+    fn split_raw_http_request(bytes: Vec<u8>) -> CapturedRawRequest {
+        let Some((head_start, body_start)) = find_http_head_split(&bytes) else {
+            return CapturedRawRequest {
+                head: String::from_utf8_lossy(&bytes).to_string(),
+                body: Vec::new(),
+            };
+        };
+        CapturedRawRequest {
+            head: String::from_utf8_lossy(&bytes[..head_start]).to_string(),
+            body: bytes[body_start..].to_vec(),
+        }
+    }
+
+    async fn read_complete_http_request(socket: &mut tokio::net::TcpStream) -> String {
+        let buf = read_complete_http_request_bytes(socket).await;
+        String::from_utf8_lossy(&buf).to_string()
+    }
+
+    async fn spawn_capturing_json_upstream(
+        body: &'static str,
+    ) -> (
+        String,
+        tokio::sync::oneshot::Receiver<String>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind capturing json upstream stub");
+        let addr = listener.local_addr().expect("capturing upstream addr");
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let request = read_complete_http_request(&mut socket).await;
+                let captured_body = request
+                    .split_once("\r\n\r\n")
+                    .map(|(_, body)| body.to_string())
+                    .unwrap_or_default();
+                let _ = tx.send(captured_body);
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+
+        (format!("http://{addr}"), rx, task)
+    }
+
+    async fn spawn_capturing_raw_upstream(
+        body: &'static str,
+    ) -> (
+        String,
+        tokio::sync::oneshot::Receiver<CapturedRawRequest>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind capturing raw upstream stub");
+        let addr = listener.local_addr().expect("capturing raw upstream addr");
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let request =
+                    split_raw_http_request(read_complete_http_request_bytes(&mut socket).await);
+                let _ = tx.send(request);
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+
+        (format!("http://{addr}"), rx, task)
+    }
+
+    async fn spawn_codex_previous_response_retry_upstream() -> (
+        String,
+        tokio::sync::mpsc::Receiver<CapturedRawRequest>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind retry upstream stub");
+        let addr = listener.local_addr().expect("retry upstream addr");
+        let (tx, rx) = tokio::sync::mpsc::channel(2);
+        let task = tokio::spawn(async move {
+            for index in 0..2 {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                let request =
+                    split_raw_http_request(read_complete_http_request_bytes(&mut socket).await);
+                let _ = tx.send(request).await;
+                let (status_line, body) = if index == 0 {
+                    (
+                        "400 Bad Request",
+                        r#"{"error":{"message":"No response found for previous_response_id resp_old","param":"previous_response_id"}}"#,
+                    )
+                } else {
+                    (
+                        "200 OK",
+                        r#"{"id":"stub-ok","object":"response","output":[]}"#,
+                    )
+                };
+                let response = format!(
+                    "HTTP/1.1 {status_line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+
+        (format!("http://{addr}"), rx, task)
+    }
+
+    fn gzip_bytes(input: &[u8]) -> Vec<u8> {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(input).expect("gzip write");
+        encoder.finish().expect("gzip finish")
+    }
+
+    fn gunzip_bytes(input: &[u8]) -> Vec<u8> {
+        let mut decoder = flate2::read::GzDecoder::new(input);
+        let mut out = Vec::new();
+        std::io::Read::read_to_end(&mut decoder, &mut out).expect("gzip read");
+        out
     }
 
     async fn spawn_status_json_upstream(
@@ -548,7 +763,231 @@ mod tests {
             codex_session_cache: Arc::new(Mutex::new(CodexSessionIdCache::default())),
             recent_errors: Arc::new(Mutex::new(RecentErrorCache::default())),
             latency_cache: Arc::new(Mutex::new(ProviderBaseUrlPingCache::default())),
+            plugin_pipeline: GatewayPluginPipeline::empty_shared(),
         }
+    }
+
+    fn gateway_state_with_plugin_pipeline(
+        app: tauri::AppHandle<tauri::test::MockRuntime>,
+        db: db::Db,
+        log_tx: tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
+        plugin_pipeline: Arc<GatewayPluginPipeline>,
+    ) -> GatewayAppState<tauri::test::MockRuntime> {
+        let mut state = gateway_state(app, db, log_tx);
+        state.plugin_pipeline = plugin_pipeline;
+        state
+    }
+
+    fn request_rewrite_plugin() -> PluginDetail {
+        PluginDetail {
+            summary: PluginSummary {
+                id: 1,
+                plugin_id: "test.request-rewrite".to_string(),
+                name: "Request Rewrite".to_string(),
+                current_version: Some("1.0.0".to_string()),
+                status: PluginStatus::Enabled,
+                runtime: "declarativeRules".to_string(),
+                permission_risk: PluginPermissionRisk::High,
+                update_available: false,
+                last_error: None,
+                created_at: 1,
+                updated_at: 1,
+            },
+            manifest: PluginManifest {
+                id: "test.request-rewrite".to_string(),
+                name: "Request Rewrite".to_string(),
+                version: "1.0.0".to_string(),
+                api_version: "1.0.0".to_string(),
+                runtime: PluginRuntime::DeclarativeRules {
+                    rules: vec!["rules/main.json".to_string()],
+                },
+                hooks: vec![PluginHook {
+                    name: GatewayPluginHookName::RequestAfterBodyRead
+                        .as_str()
+                        .to_string(),
+                    priority: 10,
+                    failure_policy: Some("fail-open".to_string()),
+                }],
+                permissions: vec![
+                    "request.body.read".to_string(),
+                    "request.body.write".to_string(),
+                ],
+                host_compatibility: PluginHostCompatibility {
+                    app: ">=0.56.0 <1.0.0".to_string(),
+                    plugin_api: "^1.0.0".to_string(),
+                    platforms: vec![],
+                },
+                entry: None,
+                config_schema: None,
+                config_version: None,
+                description: None,
+                author: None,
+                homepage: None,
+                repository: None,
+                license: None,
+                checksum: None,
+                signature: None,
+                category: None,
+            },
+            install_source: PluginInstallSource::Official,
+            installed_dir: None,
+            config: serde_json::json!({}),
+            granted_permissions: vec![
+                "request.body.read".to_string(),
+                "request.body.write".to_string(),
+            ],
+            pending_permissions: vec![],
+            audit_logs: vec![],
+            runtime_failures: vec![],
+        }
+    }
+
+    fn fail_closed(mut plugin: PluginDetail) -> PluginDetail {
+        plugin.manifest.hooks[0].failure_policy = Some("fail-closed".to_string());
+        plugin
+    }
+
+    fn before_send_header_plugin() -> PluginDetail {
+        let mut plugin = request_rewrite_plugin();
+        plugin.summary.plugin_id = "test.before-send".to_string();
+        plugin.summary.name = "Before Send".to_string();
+        plugin.manifest.id = "test.before-send".to_string();
+        plugin.manifest.name = "Before Send".to_string();
+        plugin.manifest.hooks[0].name = GatewayPluginHookName::RequestBeforeSend
+            .as_str()
+            .to_string();
+        plugin.manifest.permissions = vec![
+            "request.meta.read".to_string(),
+            "request.header.write".to_string(),
+        ];
+        plugin.granted_permissions = plugin.manifest.permissions.clone();
+        plugin
+    }
+
+    fn response_after_plugin() -> PluginDetail {
+        let mut plugin = request_rewrite_plugin();
+        plugin.summary.plugin_id = "test.response-after".to_string();
+        plugin.summary.name = "Response After".to_string();
+        plugin.manifest.id = "test.response-after".to_string();
+        plugin.manifest.name = "Response After".to_string();
+        plugin.manifest.hooks[0].name = GatewayPluginHookName::ResponseAfter.as_str().to_string();
+        plugin.manifest.permissions = vec![
+            "response.body.read".to_string(),
+            "response.body.write".to_string(),
+        ];
+        plugin.granted_permissions = plugin.manifest.permissions.clone();
+        plugin
+    }
+
+    fn stream_chunk_plugin() -> PluginDetail {
+        let mut plugin = request_rewrite_plugin();
+        plugin.summary.plugin_id = "test.stream-chunk".to_string();
+        plugin.summary.name = "Stream Chunk".to_string();
+        plugin.manifest.id = "test.stream-chunk".to_string();
+        plugin.manifest.name = "Stream Chunk".to_string();
+        plugin.manifest.hooks[0].name = GatewayPluginHookName::ResponseChunk.as_str().to_string();
+        plugin.manifest.permissions =
+            vec!["stream.inspect".to_string(), "stream.modify".to_string()];
+        plugin.granted_permissions = plugin.manifest.permissions.clone();
+        plugin
+    }
+
+    fn log_redaction_plugin() -> PluginDetail {
+        let mut plugin = request_rewrite_plugin();
+        plugin.summary.plugin_id = "test.log-redaction".to_string();
+        plugin.summary.name = "Log Redaction".to_string();
+        plugin.manifest.id = "test.log-redaction".to_string();
+        plugin.manifest.name = "Log Redaction".to_string();
+        plugin.manifest.hooks[0].name =
+            GatewayPluginHookName::LogBeforePersist.as_str().to_string();
+        plugin.manifest.permissions = vec!["log.redact".to_string()];
+        plugin.granted_permissions = plugin.manifest.permissions.clone();
+        plugin
+    }
+
+    fn official_privacy_filter_for_tests() -> PluginDetail {
+        let fixture = official::official_plugin("official.privacy-filter")
+            .expect("official privacy filter fixture");
+        let permissions = fixture.manifest.permissions.clone();
+        PluginDetail {
+            summary: PluginSummary {
+                id: 1,
+                plugin_id: fixture.manifest.id.clone(),
+                name: fixture.manifest.name.clone(),
+                current_version: Some(fixture.manifest.version.clone()),
+                status: PluginStatus::Enabled,
+                runtime: "native:privacyFilter".to_string(),
+                permission_risk: PluginPermissionRisk::High,
+                update_available: false,
+                last_error: None,
+                created_at: 1,
+                updated_at: 1,
+            },
+            manifest: fixture.manifest,
+            install_source: PluginInstallSource::Official,
+            installed_dir: Some(fixture.root_dir.to_string_lossy().to_string()),
+            config: fixture.default_config,
+            granted_permissions: permissions,
+            pending_permissions: vec![],
+            audit_logs: vec![],
+            runtime_failures: vec![],
+        }
+    }
+
+    fn gateway_error_plugin() -> PluginDetail {
+        let mut plugin = request_rewrite_plugin();
+        plugin.summary.plugin_id = "test.gateway-error".to_string();
+        plugin.summary.name = "Gateway Error".to_string();
+        plugin.manifest.id = "test.gateway-error".to_string();
+        plugin.manifest.name = "Gateway Error".to_string();
+        plugin.manifest.hooks[0].name = GatewayPluginHookName::Error.as_str().to_string();
+        plugin.manifest.permissions = vec![
+            "response.body.read".to_string(),
+            "response.body.write".to_string(),
+            "response.header.write".to_string(),
+        ];
+        plugin.granted_permissions = plugin.manifest.permissions.clone();
+        plugin
+    }
+
+    fn persist_test_plugin(db: &db::Db, plugin: &PluginDetail) {
+        repository::insert_plugin(
+            db,
+            repository::InsertPluginInput {
+                manifest: plugin.manifest.clone(),
+                install_source: PluginInstallSource::Official,
+                status: PluginStatus::Enabled,
+                installed_dir: None,
+            },
+        )
+        .expect("insert test plugin");
+        repository::save_plugin_permissions(
+            db,
+            &plugin.summary.plugin_id,
+            &plugin.granted_permissions,
+            &[],
+        )
+        .expect("grant test plugin permissions");
+    }
+
+    fn persist_plugin_detail(db: &db::Db, plugin: &PluginDetail) {
+        repository::insert_plugin(
+            db,
+            repository::InsertPluginInput {
+                manifest: plugin.manifest.clone(),
+                install_source: plugin.install_source,
+                status: plugin.summary.status,
+                installed_dir: plugin.installed_dir.clone(),
+            },
+        )
+        .expect("insert plugin detail");
+        repository::save_plugin_permissions(
+            db,
+            &plugin.summary.plugin_id,
+            &plugin.granted_permissions,
+            &plugin.pending_permissions,
+        )
+        .expect("save plugin detail permissions");
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -646,6 +1085,1347 @@ mod tests {
         );
 
         upstream_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn gateway_plugin_request_after_body_read_rewrites_upstream_body() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("gateway-plugin-request-test.sqlite"))
+            .expect("init test db");
+        let (upstream_base_url, captured_rx, upstream_task) = spawn_capturing_json_upstream(
+            r#"{"id":"stub-ok","object":"chat.completion","choices":[]}"#,
+        )
+        .await;
+        let provider_id = insert_codex_provider(&db, upstream_base_url);
+
+        let executor = InMemoryGatewayPluginExecutor::new().with_request_handler(
+            "test.request-rewrite",
+            |_ctx| GatewayHookResult {
+                request_body: Some(
+                    r#"{"model":"gpt-plugin","messages":[{"role":"user","content":"rewritten"}]}"#
+                        .to_string(),
+                ),
+                ..GatewayHookResult::continue_unchanged()
+            },
+        );
+        let plugin = request_rewrite_plugin();
+        persist_test_plugin(&db, &plugin);
+        let plugin_pipeline = GatewayPluginPipeline::for_tests_shared(
+            vec![plugin.clone()],
+            Arc::new(executor),
+            GatewayPluginPipelineConfig::default(),
+        );
+
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state_with_plugin_pipeline(
+            app_handle,
+            db.clone(),
+            log_tx,
+            plugin_pipeline,
+        ));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(format!(
+                "/codex/_aio/provider/{provider_id}/v1/chat/completions"
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"gpt-plugin","messages":[{"role":"user","content":"original"}]}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let captured = tokio::time::timeout(Duration::from_secs(2), captured_rx)
+            .await
+            .expect("captured upstream request")
+            .expect("captured body");
+        assert!(captured.contains(r#""content":"rewritten""#));
+        assert!(!captured.contains(r#""content":"original""#));
+
+        let request_log = recv_terminal_request_log(&mut log_rx).await;
+        assert_eq!(request_log.status, Some(200));
+        let plugin_detail = repository::get_plugin(&db, &plugin.summary.plugin_id)
+            .expect("read persisted plugin detail");
+        assert!(plugin_detail.audit_logs.iter().any(|audit| {
+            audit.trace_id.as_deref() == Some(request_log.trace_id.as_str())
+                && audit.event_type == "plugin.hook.completed"
+        }));
+        upstream_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn official_privacy_filter_redacts_gzipped_codex_responses_before_upstream() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        app_settings.enable_codex_session_id_completion = false;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("privacy-filter-gzip-test.sqlite"))
+            .expect("init test db");
+        let fixture = official::official_plugin("official.privacy-filter")
+            .expect("official privacy filter fixture");
+        let permissions = fixture.manifest.permissions.clone();
+        let plugin = PluginDetail {
+            summary: PluginSummary {
+                id: 1,
+                plugin_id: fixture.manifest.id.clone(),
+                name: fixture.manifest.name.clone(),
+                current_version: Some(fixture.manifest.version.clone()),
+                status: PluginStatus::Enabled,
+                runtime: "native:privacyFilter".to_string(),
+                permission_risk: PluginPermissionRisk::High,
+                update_available: false,
+                last_error: None,
+                created_at: 1,
+                updated_at: 1,
+            },
+            manifest: fixture.manifest,
+            install_source: PluginInstallSource::Official,
+            installed_dir: Some(fixture.root_dir.to_string_lossy().to_string()),
+            config: fixture.default_config,
+            granted_permissions: permissions.clone(),
+            pending_permissions: vec![],
+            audit_logs: vec![],
+            runtime_failures: vec![],
+        };
+        repository::insert_plugin(
+            &db,
+            repository::InsertPluginInput {
+                manifest: plugin.manifest.clone(),
+                install_source: PluginInstallSource::Official,
+                status: PluginStatus::Enabled,
+                installed_dir: plugin.installed_dir.clone(),
+            },
+        )
+        .expect("insert official privacy filter");
+        repository::save_plugin_permissions(&db, &plugin.summary.plugin_id, &permissions, &[])
+            .expect("grant official privacy filter permissions");
+
+        let (upstream_base_url, captured_rx, upstream_task) =
+            spawn_capturing_raw_upstream(r#"{"id":"stub-ok","object":"response","output":[]}"#)
+                .await;
+        let provider_id = insert_codex_provider(&db, upstream_base_url);
+        let plugin_pipeline = GatewayPluginPipeline::for_tests_shared(
+            vec![plugin],
+            Arc::new(RuntimeGatewayPluginExecutor::default()),
+            GatewayPluginPipelineConfig::default(),
+        );
+
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state_with_plugin_pipeline(
+            app_handle,
+            db,
+            log_tx,
+            plugin_pipeline,
+        ));
+        let plain_body = serde_json::json!({
+            "model": "gpt-plugin",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": "你知道 13344441520 是哪里的手机号嘛"
+                }]
+            }]
+        })
+        .to_string();
+        let compressed_body = gzip_bytes(plain_body.as_bytes());
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(format!("/codex/_aio/provider/{provider_id}/v1/responses"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::CONTENT_ENCODING, "gzip")
+            .body(Body::from(compressed_body))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let captured = tokio::time::timeout(Duration::from_secs(2), captured_rx)
+            .await
+            .expect("captured upstream request")
+            .expect("captured request");
+
+        assert!(captured.has_header_line("content-encoding: gzip"));
+        let decoded_body = gunzip_bytes(&captured.body);
+        let decoded_body_text = String::from_utf8_lossy(&decoded_body);
+        assert!(decoded_body_text.contains("[电话]"));
+        assert!(!decoded_body_text.contains("13344441520"));
+
+        let request_log = recv_terminal_request_log(&mut log_rx).await;
+        assert_eq!(request_log.status, Some(200));
+        assert!(!request_log.attempts_json.contains("13344441520"));
+
+        upstream_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn official_privacy_filter_redacts_full_codex_responses_payload_before_upstream_and_logs()
+    {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        app_settings.enable_codex_session_id_completion = false;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(
+            &db_dir
+                .path()
+                .join("privacy-filter-full-codex-payload-test.sqlite"),
+        )
+        .expect("init test db");
+        let fixture = official::official_plugin("official.privacy-filter")
+            .expect("official privacy filter fixture");
+        let permissions = fixture.manifest.permissions.clone();
+        let plugin = PluginDetail {
+            summary: PluginSummary {
+                id: 1,
+                plugin_id: fixture.manifest.id.clone(),
+                name: fixture.manifest.name.clone(),
+                current_version: Some(fixture.manifest.version.clone()),
+                status: PluginStatus::Enabled,
+                runtime: "native:privacyFilter".to_string(),
+                permission_risk: PluginPermissionRisk::High,
+                update_available: false,
+                last_error: None,
+                created_at: 1,
+                updated_at: 1,
+            },
+            manifest: fixture.manifest,
+            install_source: PluginInstallSource::Official,
+            installed_dir: Some(fixture.root_dir.to_string_lossy().to_string()),
+            config: fixture.default_config,
+            granted_permissions: permissions.clone(),
+            pending_permissions: vec![],
+            audit_logs: vec![],
+            runtime_failures: vec![],
+        };
+        repository::insert_plugin(
+            &db,
+            repository::InsertPluginInput {
+                manifest: plugin.manifest.clone(),
+                install_source: PluginInstallSource::Official,
+                status: PluginStatus::Enabled,
+                installed_dir: plugin.installed_dir.clone(),
+            },
+        )
+        .expect("insert official privacy filter");
+        repository::save_plugin_permissions(&db, &plugin.summary.plugin_id, &permissions, &[])
+            .expect("grant official privacy filter permissions");
+
+        let (upstream_base_url, captured_rx, upstream_task) =
+            spawn_capturing_raw_upstream(r#"{"id":"stub-ok","object":"response","output":[]}"#)
+                .await;
+        let provider_id = insert_codex_provider(&db, upstream_base_url);
+        let plugin_pipeline = GatewayPluginPipeline::for_tests_shared(
+            vec![plugin],
+            Arc::new(RuntimeGatewayPluginExecutor::default()),
+            GatewayPluginPipelineConfig::default(),
+        );
+
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state_with_plugin_pipeline(
+            app_handle,
+            db,
+            log_tx,
+            plugin_pipeline,
+        ));
+        let plain_body = serde_json::json!({
+            "model": "gpt-plugin",
+            "instructions": "developer prompt with sys@example.com",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "developer",
+                    "content": [{
+                        "type": "input_text",
+                        "text": "developer-visible phone 13344441521"
+                    }]
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{
+                        "type": "input_text",
+                        "text": "你知道 13344441520 是哪里的手机号嘛"
+                    }]
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_123",
+                    "name": "lookup_phone",
+                    "arguments": "{\"phone\":\"13344441522\"}"
+                }
+            ],
+            "tools": [{
+                "type": "function",
+                "name": "lookup_phone",
+                "description": "Lookup 13344441523",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "phone": {
+                            "type": "string",
+                            "description": "Phone like 13344441524"
+                        }
+                    }
+                }
+            }],
+            "tool_choice": "auto",
+            "reasoning": { "effort": "xhigh" },
+            "client_metadata": {
+                "x-codex-window-id": "13344441525"
+            }
+        })
+        .to_string();
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(format!("/codex/_aio/provider/{provider_id}/v1/responses"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(plain_body))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let captured = tokio::time::timeout(Duration::from_secs(2), captured_rx)
+            .await
+            .expect("captured upstream request")
+            .expect("captured request");
+
+        let body_text = String::from_utf8_lossy(&captured.body);
+        assert!(body_text.contains("[电话]"));
+        assert!(body_text.contains("[邮箱]"));
+        assert!(!body_text.contains("13344441520"));
+        assert!(!body_text.contains("13344441521"));
+        assert!(
+            body_text.contains("13344441522"),
+            "function_call.arguments should remain unchanged: {body_text}"
+        );
+        assert!(
+            body_text.contains("13344441523"),
+            "tool description should remain unchanged: {body_text}"
+        );
+        assert!(
+            body_text.contains("13344441524"),
+            "tool parameters should remain unchanged: {body_text}"
+        );
+        assert!(
+            body_text.contains("13344441525"),
+            "client_metadata should remain unchanged: {body_text}"
+        );
+
+        let request_log = recv_terminal_request_log(&mut log_rx).await;
+        assert_eq!(request_log.status, Some(200));
+        assert!(!request_log.attempts_json.contains("13344441520"));
+        assert!(!request_log.attempts_json.contains("13344441521"));
+        assert!(!request_log
+            .provider_chain_json
+            .as_deref()
+            .unwrap_or_default()
+            .contains("13344441520"));
+        assert!(!request_log
+            .error_details_json
+            .as_deref()
+            .unwrap_or_default()
+            .contains("13344441520"));
+
+        upstream_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn official_privacy_filter_before_send_redacts_final_upstream_body() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        app_settings.enable_codex_session_id_completion = false;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("privacy-filter-before-send.sqlite"))
+            .expect("init test db");
+        let mut plugin = official_privacy_filter_for_tests();
+        plugin
+            .manifest
+            .hooks
+            .retain(|hook| hook.name != "gateway.request.afterBodyRead");
+        persist_plugin_detail(&db, &plugin);
+
+        let (upstream_base_url, captured_rx, upstream_task) =
+            spawn_capturing_raw_upstream(r#"{"id":"stub-ok","object":"response","output":[]}"#)
+                .await;
+        let provider_id = insert_codex_provider(&db, upstream_base_url);
+        let plugin_pipeline = GatewayPluginPipeline::for_tests_shared(
+            vec![plugin],
+            Arc::new(RuntimeGatewayPluginExecutor::default()),
+            GatewayPluginPipelineConfig::default(),
+        );
+
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state_with_plugin_pipeline(
+            app_handle,
+            db,
+            log_tx,
+            plugin_pipeline,
+        ));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(format!("/codex/_aio/provider/{provider_id}/v1/responses"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::json!({
+                    "model": "gpt-plugin",
+                    "input": [{
+                        "type": "message",
+                        "role": "user",
+                        "content": [{
+                            "type": "input_text",
+                            "text": "你知道 13344441520 是哪里的手机号嘛"
+                        }]
+                    }]
+                })
+                .to_string(),
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let captured = tokio::time::timeout(Duration::from_secs(2), captured_rx)
+            .await
+            .expect("captured upstream request")
+            .expect("captured request");
+
+        let body_text = String::from_utf8_lossy(&captured.body);
+        assert!(body_text.contains("[电话]"));
+        assert!(!body_text.contains("13344441520"));
+
+        let request_log = recv_terminal_request_log(&mut log_rx).await;
+        assert_eq!(request_log.status, Some(200));
+        assert!(!request_log.attempts_json.contains("13344441520"));
+
+        upstream_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn request_before_send_mutation_survives_codex_internal_retry() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        app_settings.enable_codex_session_id_completion = false;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("privacy-filter-retry.sqlite"))
+            .expect("init test db");
+        let mut plugin = before_send_header_plugin();
+        plugin.manifest.permissions = vec![
+            "request.body.read".to_string(),
+            "request.body.write".to_string(),
+        ];
+        plugin.granted_permissions = plugin.manifest.permissions.clone();
+        persist_plugin_detail(&db, &plugin);
+
+        let (upstream_base_url, mut captured_rx, upstream_task) =
+            spawn_codex_previous_response_retry_upstream().await;
+        let provider_id = insert_codex_provider(&db, upstream_base_url);
+        let call_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let executor =
+            InMemoryGatewayPluginExecutor::new().with_request_handler("test.before-send", {
+                let call_count = Arc::clone(&call_count);
+                move |ctx| {
+                    let call = call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let mut result = GatewayHookResult::continue_unchanged();
+                    if call == 0 {
+                        let body = ctx.request.body.expect("request body visible");
+                        result.request_body = Some(body.replace("13344441520", "[电话]"));
+                    }
+                    result
+                }
+            });
+        let plugin_pipeline = GatewayPluginPipeline::for_tests_shared(
+            vec![plugin],
+            Arc::new(executor),
+            GatewayPluginPipelineConfig::default(),
+        );
+
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state_with_plugin_pipeline(
+            app_handle,
+            db,
+            log_tx,
+            plugin_pipeline,
+        ));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(format!("/codex/_aio/provider/{provider_id}/v1/responses"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::json!({
+                    "model": "gpt-plugin",
+                    "previous_response_id": "resp_old",
+                    "input": [{
+                        "type": "message",
+                        "role": "user",
+                        "content": [{
+                            "type": "input_text",
+                            "text": "你知道 13344441520 是哪里的手机号嘛"
+                        }]
+                    }]
+                })
+                .to_string(),
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let first = tokio::time::timeout(Duration::from_secs(2), captured_rx.recv())
+            .await
+            .expect("first captured request")
+            .expect("first request");
+        let second = tokio::time::timeout(Duration::from_secs(2), captured_rx.recv())
+            .await
+            .expect("second captured request")
+            .expect("second request");
+        assert!(!String::from_utf8_lossy(&first.body).contains("13344441520"));
+        assert!(String::from_utf8_lossy(&first.body).contains("[电话]"));
+
+        let second_body = String::from_utf8_lossy(&second.body);
+        assert!(
+            second_body.contains("[电话]"),
+            "retry request should keep the beforeSend redaction: {second_body}"
+        );
+        assert!(
+            !second_body.contains("13344441520"),
+            "retry request leaked the original phone number: {second_body}"
+        );
+        assert!(!second_body.contains("previous_response_id"));
+
+        let request_log = recv_terminal_request_log(&mut log_rx).await;
+        assert_eq!(request_log.status, Some(200));
+        assert!(!request_log.attempts_json.contains("13344441520"));
+
+        upstream_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn gateway_preserves_gzipped_codex_request_when_plugins_do_not_mutate_body() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        app_settings.enable_codex_session_id_completion = false;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("gateway-gzip-passthrough-test.sqlite"))
+            .expect("init test db");
+        let (upstream_base_url, captured_rx, upstream_task) =
+            spawn_capturing_raw_upstream(r#"{"id":"stub-ok","object":"response","output":[]}"#)
+                .await;
+        let provider_id = insert_codex_provider(&db, upstream_base_url);
+
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state(app_handle, db, log_tx));
+        let plain_body = serde_json::json!({
+            "model": "gpt-plugin",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": "你知道 13344441520 是哪里的手机号嘛"
+                }]
+            }]
+        })
+        .to_string();
+        let compressed_body = gzip_bytes(plain_body.as_bytes());
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(format!("/codex/_aio/provider/{provider_id}/v1/responses"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::CONTENT_ENCODING, "gzip")
+            .body(Body::from(compressed_body.clone()))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let captured = tokio::time::timeout(Duration::from_secs(2), captured_rx)
+            .await
+            .expect("captured upstream request")
+            .expect("captured request");
+
+        assert!(captured.has_header_line("content-encoding: gzip"));
+        assert_eq!(captured.body, compressed_body);
+        assert!(!captured.text().contains("13344441520"));
+        assert!(!captured.text().contains("[电话]"));
+
+        let request_log = recv_terminal_request_log(&mut log_rx).await;
+        assert_eq!(request_log.status, Some(200));
+
+        upstream_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn gateway_plugin_request_after_body_read_fail_closed_error_stops_request() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(
+            &db_dir
+                .path()
+                .join("gateway-plugin-after-body-fail-closed-test.sqlite"),
+        )
+        .expect("init test db");
+        let (upstream_base_url, captured_rx, upstream_task) = spawn_capturing_json_upstream(
+            r#"{"id":"stub-ok","object":"chat.completion","choices":[]}"#,
+        )
+        .await;
+        let provider_id = insert_codex_provider(&db, upstream_base_url);
+
+        let executor = InMemoryGatewayPluginExecutor::new().with_request_handler(
+            "test.request-rewrite",
+            |_ctx| {
+                let mut result = GatewayHookResult::continue_unchanged();
+                result
+                    .headers
+                    .insert("x-aio-forbidden".to_string(), "1".to_string());
+                result
+            },
+        );
+        let plugin_pipeline = GatewayPluginPipeline::for_tests_shared(
+            vec![fail_closed(request_rewrite_plugin())],
+            Arc::new(executor),
+            GatewayPluginPipelineConfig::default(),
+        );
+
+        let (log_tx, _log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state_with_plugin_pipeline(
+            app_handle,
+            db,
+            log_tx,
+            plugin_pipeline,
+        ));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(format!(
+                "/codex/_aio/provider/{provider_id}/v1/chat/completions"
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"gpt-plugin","messages":[{"role":"user","content":"original"}]}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        let payload: Value = serde_json::from_slice(&body).expect("json body");
+        assert_eq!(
+            payload.get("error_code").and_then(Value::as_str),
+            Some(crate::gateway::proxy::GatewayErrorCode::InternalError.as_str())
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), captured_rx)
+                .await
+                .is_err(),
+            "fail-closed afterBodyRead should not send the request upstream"
+        );
+        upstream_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn gateway_plugin_request_before_send_adds_upstream_header() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("gateway-plugin-before-send-test.sqlite"))
+            .expect("init test db");
+        let (upstream_base_url, captured_rx, upstream_task) = spawn_capturing_raw_upstream(
+            r#"{"id":"stub-ok","object":"chat.completion","choices":[]}"#,
+        )
+        .await;
+        let provider_id = insert_codex_provider(&db, upstream_base_url);
+
+        let executor =
+            InMemoryGatewayPluginExecutor::new().with_request_handler("test.before-send", |_ctx| {
+                let mut result = GatewayHookResult::continue_unchanged();
+                result
+                    .headers
+                    .insert("x-plugin-before-send".to_string(), "applied".to_string());
+                result
+            });
+        let plugin_pipeline = GatewayPluginPipeline::for_tests_shared(
+            vec![before_send_header_plugin()],
+            Arc::new(executor),
+            GatewayPluginPipelineConfig::default(),
+        );
+
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state_with_plugin_pipeline(
+            app_handle,
+            db,
+            log_tx,
+            plugin_pipeline,
+        ));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(format!(
+                "/codex/_aio/provider/{provider_id}/v1/chat/completions"
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"gpt-plugin","messages":[{"role":"user","content":"hello"}]}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let captured = tokio::time::timeout(Duration::from_secs(2), captured_rx)
+            .await
+            .expect("captured upstream request")
+            .expect("captured raw request");
+        assert!(
+            captured
+                .text()
+                .to_ascii_lowercase()
+                .contains("x-plugin-before-send: applied"),
+            "captured upstream request did not include plugin header:\n{}",
+            captured.text()
+        );
+
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        assert_eq!(log.status, Some(200));
+        upstream_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn gateway_plugin_request_before_send_fail_closed_error_stops_request() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(
+            &db_dir
+                .path()
+                .join("gateway-plugin-before-send-fail-closed-test.sqlite"),
+        )
+        .expect("init test db");
+        let (upstream_base_url, captured_rx, upstream_task) = spawn_capturing_raw_upstream(
+            r#"{"id":"stub-ok","object":"chat.completion","choices":[]}"#,
+        )
+        .await;
+        let provider_id = insert_codex_provider(&db, upstream_base_url);
+
+        let executor =
+            InMemoryGatewayPluginExecutor::new().with_request_handler("test.before-send", |_ctx| {
+                let mut result = GatewayHookResult::continue_unchanged();
+                result
+                    .headers
+                    .insert("x-aio-forbidden".to_string(), "1".to_string());
+                result
+            });
+        let plugin_pipeline = GatewayPluginPipeline::for_tests_shared(
+            vec![fail_closed(before_send_header_plugin())],
+            Arc::new(executor),
+            GatewayPluginPipelineConfig::default(),
+        );
+
+        let (log_tx, _log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state_with_plugin_pipeline(
+            app_handle,
+            db,
+            log_tx,
+            plugin_pipeline,
+        ));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(format!(
+                "/codex/_aio/provider/{provider_id}/v1/chat/completions"
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"gpt-plugin","messages":[{"role":"user","content":"hello"}]}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        let payload: Value = serde_json::from_slice(&body).expect("json body");
+        assert_eq!(
+            payload.get("error_code").and_then(Value::as_str),
+            Some(crate::gateway::proxy::GatewayErrorCode::InternalError.as_str())
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), captured_rx)
+                .await
+                .is_err(),
+            "fail-closed beforeSend should not send the request upstream"
+        );
+        upstream_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn gateway_plugin_response_after_rewrites_non_stream_body() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("gateway-plugin-response-test.sqlite"))
+            .expect("init test db");
+        let (upstream_base_url, upstream_task) =
+            spawn_json_upstream(r#"{"id":"original","object":"chat.completion","choices":[]}"#)
+                .await;
+        let provider_id = insert_codex_provider(&db, upstream_base_url);
+
+        let executor = InMemoryGatewayPluginExecutor::new().with_response_handler(
+            "test.response-after",
+            |_ctx| GatewayHookResult {
+                response_body: Some(
+                    r#"{"id":"rewritten","object":"chat.completion","choices":[]}"#.to_string(),
+                ),
+                ..GatewayHookResult::continue_unchanged()
+            },
+        );
+        let plugin_pipeline = GatewayPluginPipeline::for_tests_shared(
+            vec![response_after_plugin()],
+            Arc::new(executor),
+            GatewayPluginPipelineConfig::default(),
+        );
+
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state_with_plugin_pipeline(
+            app_handle,
+            db,
+            log_tx,
+            plugin_pipeline,
+        ));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(format!(
+                "/codex/_aio/provider/{provider_id}/v1/chat/completions"
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"gpt-plugin","messages":[{"role":"user","content":"hello"}]}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        let payload: Value = serde_json::from_slice(&body).expect("json body");
+        assert_eq!(payload.get("id").and_then(Value::as_str), Some("rewritten"));
+
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        assert_eq!(log.status, Some(200));
+        upstream_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn gateway_plugin_response_after_fail_closed_error_replaces_upstream_success() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(
+            &db_dir
+                .path()
+                .join("gateway-plugin-response-fail-closed-test.sqlite"),
+        )
+        .expect("init test db");
+        let (upstream_base_url, upstream_task) =
+            spawn_json_upstream(r#"{"id":"original","object":"chat.completion","choices":[]}"#)
+                .await;
+        let provider_id = insert_codex_provider(&db, upstream_base_url);
+
+        let executor = InMemoryGatewayPluginExecutor::new().with_response_handler(
+            "test.response-after",
+            |_ctx| {
+                let mut result = GatewayHookResult::continue_unchanged();
+                result
+                    .headers
+                    .insert("x-aio-forbidden".to_string(), "1".to_string());
+                result
+            },
+        );
+        let plugin_pipeline = GatewayPluginPipeline::for_tests_shared(
+            vec![fail_closed(response_after_plugin())],
+            Arc::new(executor),
+            GatewayPluginPipelineConfig::default(),
+        );
+
+        let (log_tx, _log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state_with_plugin_pipeline(
+            app_handle,
+            db,
+            log_tx,
+            plugin_pipeline,
+        ));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(format!(
+                "/codex/_aio/provider/{provider_id}/v1/chat/completions"
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"gpt-plugin","messages":[{"role":"user","content":"hello"}]}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        let payload: Value = serde_json::from_slice(&body).expect("json body");
+        assert_eq!(
+            payload.get("error_code").and_then(Value::as_str),
+            Some(crate::gateway::proxy::GatewayErrorCode::InternalError.as_str())
+        );
+        assert_ne!(payload.get("id").and_then(Value::as_str), Some("original"));
+        upstream_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn gateway_plugin_response_chunk_rewrites_stream_body() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("gateway-plugin-stream-test.sqlite"))
+            .expect("init test db");
+        let (upstream_base_url, upstream_task) =
+            spawn_sse_upstream("data: secret-stream\n\n").await;
+        let provider_id = insert_codex_provider(&db, upstream_base_url);
+
+        let executor =
+            InMemoryGatewayPluginExecutor::new().with_stream_handler("test.stream-chunk", |ctx| {
+                let chunk = ctx.stream.chunk.expect("visible stream chunk");
+                assert!(chunk.contains("secret-stream"));
+                GatewayHookResult {
+                    stream_chunk: Some(chunk.replace("secret-stream", "redacted-stream")),
+                    ..GatewayHookResult::continue_unchanged()
+                }
+            });
+        let plugin_pipeline = GatewayPluginPipeline::for_tests_shared(
+            vec![stream_chunk_plugin()],
+            Arc::new(executor),
+            GatewayPluginPipelineConfig::default(),
+        );
+
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state_with_plugin_pipeline(
+            app_handle,
+            db,
+            log_tx,
+            plugin_pipeline,
+        ));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(format!(
+                "/codex/_aio/provider/{provider_id}/v1/chat/completions"
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"gpt-plugin","stream":true,"messages":[{"role":"user","content":"hello"}]}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("text/event-stream")));
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        let body = String::from_utf8_lossy(&body);
+        assert!(
+            body.contains("redacted-stream"),
+            "stream body was not rewritten: {body}"
+        );
+        assert!(
+            !body.contains("secret-stream"),
+            "stream body leaked secret: {body}"
+        );
+
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        assert_eq!(log.status, Some(200));
+        upstream_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn gateway_plugin_response_chunk_block_emits_stream_error_event() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(
+            &db_dir
+                .path()
+                .join("gateway-plugin-stream-block-test.sqlite"),
+        )
+        .expect("init test db");
+        let (upstream_base_url, upstream_task) =
+            spawn_sse_upstream("data: dangerous-command\n\n").await;
+        let provider_id = insert_codex_provider(&db, upstream_base_url);
+
+        let executor =
+            InMemoryGatewayPluginExecutor::new().with_stream_handler("test.stream-chunk", |ctx| {
+                assert!(ctx
+                    .stream
+                    .chunk
+                    .as_deref()
+                    .is_some_and(|chunk| chunk.contains("dangerous-command")));
+                let mut result = GatewayHookResult::continue_unchanged();
+                result.action = crate::gateway::plugins::context::GatewayHookAction::Block;
+                result.reason = Some("dangerous command detected".to_string());
+                result
+            });
+        let plugin_pipeline = GatewayPluginPipeline::for_tests_shared(
+            vec![stream_chunk_plugin()],
+            Arc::new(executor),
+            GatewayPluginPipelineConfig::default(),
+        );
+
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state_with_plugin_pipeline(
+            app_handle,
+            db,
+            log_tx,
+            plugin_pipeline,
+        ));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(format!(
+                "/codex/_aio/provider/{provider_id}/v1/chat/completions"
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"gpt-plugin","stream":true,"messages":[{"role":"user","content":"hello"}]}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        let body = String::from_utf8_lossy(&body);
+        assert!(
+            body.contains("event: error"),
+            "stream block did not emit error event: {body}"
+        );
+        assert!(
+            body.contains("plugin_blocked"),
+            "stream block reason missing: {body}"
+        );
+        assert!(
+            !body.contains("dangerous-command"),
+            "blocked stream leaked chunk: {body}"
+        );
+
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        assert_eq!(log.status, Some(502));
+        assert_eq!(
+            log.error_code.as_deref(),
+            Some(crate::gateway::proxy::GatewayErrorCode::Fake200.as_str())
+        );
+        upstream_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn plugin_log_redaction_rewrites_request_log_before_enqueue() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(
+            &db_dir
+                .path()
+                .join("gateway-plugin-log-redaction-test.sqlite"),
+        )
+        .expect("init test db");
+        let (upstream_base_url, upstream_task) =
+            spawn_json_upstream(r#"{"id":"stub-ok","object":"chat.completion","choices":[]}"#)
+                .await;
+        let provider_id = insert_codex_provider(&db, upstream_base_url);
+
+        let executor =
+            InMemoryGatewayPluginExecutor::new().with_log_handler("test.log-redaction", |ctx| {
+                let message = ctx.log.message.expect("visible log message");
+                assert!(message.contains("secret-query"));
+                GatewayHookResult {
+                    log_message: Some(message.replace("secret-query", "[REDACTED]")),
+                    ..GatewayHookResult::continue_unchanged()
+                }
+            });
+        let plugin_pipeline = GatewayPluginPipeline::for_tests_shared(
+            vec![log_redaction_plugin()],
+            Arc::new(executor),
+            GatewayPluginPipelineConfig::default(),
+        );
+
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state_with_plugin_pipeline(
+            app_handle,
+            db,
+            log_tx,
+            plugin_pipeline,
+        ));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(format!(
+                "/codex/_aio/provider/{provider_id}/v1/chat/completions?token=secret-query"
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"gpt-plugin","messages":[{"role":"user","content":"hello"}]}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        assert_eq!(log.status, Some(200));
+        assert_eq!(log.query.as_deref(), Some("token=[REDACTED]"));
+        assert_ne!(log.query.as_deref(), Some("token=secret-query"));
+        upstream_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn gateway_plugin_error_hook_rewrites_gateway_error_response() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let app_settings = settings::AppSettings::default();
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("gateway-plugin-error-test.sqlite"))
+            .expect("init test db");
+
+        let executor = InMemoryGatewayPluginExecutor::new().with_response_handler(
+            "test.gateway-error",
+            |ctx| {
+                assert_eq!(ctx.hook_name, "gateway.error");
+                assert_eq!(ctx.response.status, Some(503));
+                assert!(ctx
+                    .response
+                    .body
+                    .as_deref()
+                    .is_some_and(|body| body.contains("GW_NO_ENABLED_PROVIDER")));
+                let mut result = GatewayHookResult {
+                    response_body: Some(
+                        r#"{"error_code":"GW_NO_ENABLED_PROVIDER","message":"plugin-friendly error","attempts":[]}"#
+                            .to_string(),
+                    ),
+                    ..GatewayHookResult::continue_unchanged()
+                };
+                result
+                    .headers
+                    .insert("x-plugin-error".to_string(), "rewritten".to_string());
+                result
+            },
+        );
+        let plugin_pipeline = GatewayPluginPipeline::for_tests_shared(
+            vec![gateway_error_plugin()],
+            Arc::new(executor),
+            GatewayPluginPipelineConfig::default(),
+        );
+
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state_with_plugin_pipeline(
+            app_handle,
+            db,
+            log_tx,
+            plugin_pipeline,
+        ));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/v1/chat/completions")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"gpt-plugin","messages":[{"role":"user","content":"hello"}]}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            response
+                .headers()
+                .get("x-plugin-error")
+                .and_then(|value| value.to_str().ok()),
+            Some("rewritten")
+        );
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        let payload: Value = serde_json::from_slice(&body).expect("json body");
+        assert_eq!(
+            payload.get("message").and_then(Value::as_str),
+            Some("plugin-friendly error")
+        );
+
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        assert_eq!(log.status, Some(503));
+        assert_eq!(
+            log.error_code.as_deref(),
+            Some(crate::gateway::proxy::GatewayErrorCode::NoEnabledProvider.as_str())
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]

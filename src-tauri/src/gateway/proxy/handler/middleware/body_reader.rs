@@ -6,13 +6,17 @@
 //! cannot be inferred. See `model_inference.rs` for that heuristic.
 
 use super::{MiddlewareAction, ProxyContext};
+use crate::gateway::plugins::context::{GatewayPluginHookName, GatewayRequestHookInput};
 use crate::gateway::proxy::compute_observe_request;
 use crate::gateway::proxy::handler::early_error::{
     build_early_error_log_ctx, early_error_contract, respond_early_error_with_enqueue,
     EarlyErrorKind,
 };
-use crate::gateway::util::{body_for_introspection, max_request_body_bytes};
+use crate::gateway::proxy::request_body::GatewayRequestBody;
+use crate::gateway::proxy::{errors::error_response, GatewayErrorCode};
+use crate::gateway::util::max_request_body_bytes;
 use axum::body::to_bytes;
+use axum::http::StatusCode;
 
 pub(in crate::gateway::proxy::handler) struct BodyReaderMiddleware;
 
@@ -52,11 +56,78 @@ impl BodyReaderMiddleware {
                 return MiddlewareAction::ShortCircuit(resp);
             }
         }
-
-        let introspection_body = body_for_introspection(&ctx.headers, &ctx.body_bytes);
+        let mut request_body_state =
+            GatewayRequestBody::from_wire(ctx.body_bytes.clone(), &ctx.headers, request_body_limit);
+        ctx.body_bytes = request_body_state.decoded_clone();
         ctx.introspection_json =
-            serde_json::from_slice::<serde_json::Value>(introspection_body.as_ref()).ok();
+            serde_json::from_slice::<serde_json::Value>(request_body_state.decoded().as_ref()).ok();
 
+        let hook_input = GatewayRequestHookInput {
+            hook_name: GatewayPluginHookName::RequestAfterBodyRead,
+            trace_id: ctx.trace_id.clone(),
+            cli_key: ctx.cli_key.clone(),
+            method: ctx.req_method.clone(),
+            path: ctx.forwarded_path.clone(),
+            query: ctx.query.clone(),
+            headers: request_body_state.semantic_headers(&ctx.headers),
+            body: request_body_state.decoded_clone(),
+            requested_model: ctx.requested_model.clone(),
+        };
+        match ctx.state.plugin_pipeline.run_request_hook(hook_input).await {
+            Ok(output) => {
+                crate::gateway::plugins::audit::persist_gateway_plugin_audit_events(
+                    &ctx.state.db,
+                    &ctx.trace_id,
+                    output.audit_events.clone(),
+                );
+                if let Some(blocked) = output.blocked {
+                    tracing::warn!(
+                        trace_id = %ctx.trace_id,
+                        status = blocked.status,
+                        reason = %blocked.reason,
+                        "plugin blocked gateway request after body read"
+                    );
+                    let mut resp = axum::response::IntoResponse::into_response((
+                        axum::http::StatusCode::FORBIDDEN,
+                        blocked.reason,
+                    ));
+                    resp.headers_mut().insert(
+                        "x-trace-id",
+                        axum::http::HeaderValue::from_str(&ctx.trace_id)
+                            .unwrap_or_else(|_| axum::http::HeaderValue::from_static("unknown")),
+                    );
+                    return MiddlewareAction::ShortCircuit(resp);
+                }
+                ctx.headers = output.headers;
+                request_body_state.replace_decoded(output.body);
+                ctx.body_bytes = request_body_state.decoded_clone();
+                ctx.introspection_json = serde_json::from_slice::<serde_json::Value>(
+                    request_body_state.decoded().as_ref(),
+                )
+                .ok();
+            }
+            Err(mut err) => {
+                crate::gateway::plugins::audit::persist_gateway_plugin_error_audit_events(
+                    &ctx.state.db,
+                    &ctx.trace_id,
+                    &mut err,
+                );
+                tracing::warn!(
+                    trace_id = %ctx.trace_id,
+                    "plugin afterBodyRead hook failed: {}",
+                    err
+                );
+                return MiddlewareAction::ShortCircuit(error_response(
+                    StatusCode::BAD_GATEWAY,
+                    ctx.trace_id,
+                    GatewayErrorCode::InternalError.as_str(),
+                    format!("gateway plugin request hook failed: {err}"),
+                    vec![],
+                ));
+            }
+        }
+
+        ctx.request_body_state = Some(request_body_state);
         MiddlewareAction::Continue(Box::new(ctx))
     }
 }

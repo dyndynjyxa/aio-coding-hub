@@ -1,6 +1,7 @@
 //! Usage: Request context (SSOT) for gateway proxy forwarding.
 
 use super::abort_guard::RequestAbortGuard;
+use super::request_body::GatewayRequestBody;
 use crate::gateway::response_fixer;
 use crate::gateway::runtime::GatewayAppState;
 use crate::gateway::util::{strip_hop_headers, RequestedModelLocation};
@@ -31,6 +32,7 @@ pub(super) struct RequestContext<R: tauri::Runtime = tauri::Wry> {
     pub(super) session_bound_provider_id: Option<i64>,
     pub(super) base_headers: HeaderMap,
     pub(super) body_bytes: Bytes,
+    pub(super) request_body_state: GatewayRequestBody,
     pub(super) introspection_json: Option<serde_json::Value>,
     pub(super) strip_request_content_encoding_seed: bool,
     pub(super) special_settings: Arc<Mutex<Vec<serde_json::Value>>>,
@@ -81,6 +83,7 @@ impl<R: tauri::Runtime> RequestContext<R> {
             session_bound_provider_id,
             headers,
             body_bytes,
+            request_body_state,
             introspection_json,
             strip_request_content_encoding_seed,
             special_settings,
@@ -126,6 +129,7 @@ impl<R: tauri::Runtime> RequestContext<R> {
             state.app.clone(),
             state.db.clone(),
             state.log_tx.clone(),
+            state.plugin_pipeline.clone(),
             trace_id.clone(),
             cli_key.clone(),
             method_hint.clone(),
@@ -161,6 +165,7 @@ impl<R: tauri::Runtime> RequestContext<R> {
             session_bound_provider_id,
             base_headers,
             body_bytes,
+            request_body_state,
             introspection_json,
             strip_request_content_encoding_seed,
             special_settings,
@@ -262,6 +267,7 @@ pub(super) struct RequestContextParts<R: tauri::Runtime = tauri::Wry> {
     pub(super) session_bound_provider_id: Option<i64>,
     pub(super) headers: HeaderMap,
     pub(super) body_bytes: Bytes,
+    pub(super) request_body_state: GatewayRequestBody,
     pub(super) introspection_json: Option<serde_json::Value>,
     pub(super) strip_request_content_encoding_seed: bool,
     pub(super) special_settings: Arc<Mutex<Vec<serde_json::Value>>>,

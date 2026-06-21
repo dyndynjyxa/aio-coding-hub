@@ -101,6 +101,15 @@ pub(crate) fn app_gateway_clear_cli_route_runtime_state<R: tauri::Runtime>(
     })
 }
 
+pub(crate) fn app_refresh_gateway_plugins<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    db: &db::Db,
+) {
+    super::gateway_state::with_app_running_gateway(app, |running| {
+        gateway::control_service::GatewayControlService::refresh_plugins(running, db);
+    });
+}
+
 pub(crate) fn try_app_gateway_update_circuit_config<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     failure_threshold: u32,

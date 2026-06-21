@@ -1,7 +1,9 @@
 //! Usage: Best-effort drop guard to log client-aborted requests.
 
 use crate::gateway::events::FailoverAttempt;
+use crate::gateway::plugins::pipeline::GatewayPluginPipeline;
 use crate::{db, request_logs};
+use std::sync::Arc;
 use std::time::Instant;
 
 use super::request_end::{
@@ -13,6 +15,7 @@ pub(super) struct RequestAbortGuard<R: tauri::Runtime = tauri::Wry> {
     app: tauri::AppHandle<R>,
     db: db::Db,
     log_tx: tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
+    plugin_pipeline: Arc<GatewayPluginPipeline>,
     trace_id: String,
     cli_key: String,
     method: String,
@@ -34,6 +37,7 @@ impl<R: tauri::Runtime> RequestAbortGuard<R> {
         app: tauri::AppHandle<R>,
         db: db::Db,
         log_tx: tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
+        plugin_pipeline: Arc<GatewayPluginPipeline>,
         trace_id: String,
         cli_key: String,
         method: String,
@@ -50,6 +54,7 @@ impl<R: tauri::Runtime> RequestAbortGuard<R> {
             app,
             db,
             log_tx,
+            plugin_pipeline,
             trace_id,
             cli_key,
             method,
@@ -78,6 +83,7 @@ impl<R: tauri::Runtime> RequestAbortGuard<R> {
             app: self.app.clone(),
             db: self.db.clone(),
             log_tx: self.log_tx.clone(),
+            plugin_pipeline: self.plugin_pipeline.clone(),
             trace_id: std::mem::take(&mut self.trace_id),
             cli_key: std::mem::take(&mut self.cli_key),
             method: std::mem::take(&mut self.method),
@@ -114,7 +120,7 @@ impl<R: tauri::Runtime> Drop for RequestAbortGuard<R> {
         let abort_attempts: Vec<FailoverAttempt> = self.in_flight_attempt.iter().cloned().collect();
         emit_request_event_and_spawn_request_log(
             RequestEndArgs::from_context(RequestEndContextArgs {
-                deps: RequestEndDeps::new(&self.app, &self.db, &self.log_tx),
+                deps: RequestEndDeps::new(&self.app, &self.db, &self.log_tx, &self.plugin_pipeline),
                 trace_id: self.trace_id.as_str(),
                 cli_key: self.cli_key.as_str(),
                 method: self.method.as_str(),

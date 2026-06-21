@@ -99,6 +99,12 @@ pub(super) fn apply_migrations(conn: &mut Connection) -> crate::shared::error::A
     Ok(())
 }
 
+pub(super) fn apply_runtime_ensure_patches(
+    conn: &mut Connection,
+) -> crate::shared::error::AppResult<()> {
+    ensure::apply_ensure_patches(conn)
+}
+
 fn read_user_version(conn: &Connection) -> crate::shared::error::AppResult<i64> {
     conn.pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(|e| format!("failed to read sqlite user_version: {e}").into())

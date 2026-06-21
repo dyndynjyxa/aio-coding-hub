@@ -10,7 +10,7 @@ type ClockListener = (nowMs: number) => void;
 
 type ClockBucket = {
   listeners: Set<ClockListener>;
-  intervalHandle: ReturnType<typeof window.setInterval> | null;
+  intervalHandle: number | null;
 };
 
 const clockBuckets = new Map<number, ClockBucket>();

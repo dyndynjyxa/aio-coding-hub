@@ -5,6 +5,7 @@ import type { CliProxyResult, CliProxyStatus } from "../../services/cli/cliProxy
 import type { DbDiskUsage } from "../../services/app/dataManagement";
 import type { EnvConflict } from "../../services/cli/envConflicts";
 import type { GatewayStatus } from "../../services/gateway/gateway";
+import type { PluginDetail, PluginSummary } from "../../services/plugins";
 import type { CliKey, ProviderSummary } from "../../services/providers/providers";
 import type { AppSettings } from "../../services/settings/settings";
 import type { SortModeActiveRow, SortModeSummary } from "../../services/providers/sortModes";
@@ -140,6 +141,7 @@ let dbDiskUsageState: DbDiskUsage = clone(DEFAULT_DB_DISK_USAGE);
 let sortModesState: SortModeSummary[] = [];
 let sortModeActiveState: SortModeActiveRow[] = [];
 let workspacesState: Map<CliKey, WorkspacesListResult> = new Map();
+let pluginState: Map<string, PluginDetail> = new Map();
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -163,6 +165,7 @@ export function resetMswState() {
   sortModesState = [];
   sortModeActiveState = [];
   workspacesState = new Map();
+  pluginState = new Map();
 }
 
 export function getCliProxyStatusAllState(): CliProxyStatus[] {
@@ -204,6 +207,229 @@ export function getGatewayStatusState(): GatewayStatus {
 
 export function setGatewayStatusState(next: GatewayStatus) {
   gatewayStatusState = clone(next);
+}
+
+// -- Plugins --
+
+function officialPrivacyFilterDetail(): PluginDetail {
+  const summary: PluginSummary = {
+    id: 1,
+    plugin_id: "official.privacy-filter",
+    name: "Privacy Filter",
+    current_version: "1.0.0",
+    status: "disabled",
+    runtime: "native:privacyFilter",
+    permission_risk: "high",
+    update_available: false,
+    last_error: null,
+    created_at: 1,
+    updated_at: 1,
+  };
+
+  return {
+    summary,
+    manifest: {
+      id: "official.privacy-filter",
+      name: "Privacy Filter",
+      version: "1.0.0",
+      apiVersion: "1.0.0",
+      runtime: { kind: "native", engine: "privacyFilter" },
+      hooks: [
+        { name: "gateway.request.afterBodyRead", priority: 10, failurePolicy: "fail-open" },
+        { name: "log.beforePersist", priority: 10, failurePolicy: "fail-open" },
+      ],
+      permissions: ["request.body.read", "request.body.write", "log.redact"],
+      hostCompatibility: {
+        app: ">=0.56.0 <1.0.0",
+        pluginApi: "^1.0.0",
+        platforms: ["macos", "windows", "linux"],
+      },
+      configSchema: {
+        type: "object",
+        required: ["redactBeforeUpstream", "redactLogs", "profile"],
+        "x-aio-ui": {
+          sections: [
+            {
+              id: "routing",
+              title: "处理位置",
+              description: "选择隐私过滤在哪些阶段生效。",
+              order: 10,
+            },
+            {
+              id: "content",
+              title: "检测策略",
+              description:
+                "这里展示的是可配置的策略大类；密钥类检测由打包的 200+ Gitleaks 规则、上下文规则和熵检测共同支撑。",
+              order: 20,
+            },
+          ],
+        },
+        properties: {
+          redactBeforeUpstream: {
+            type: "boolean",
+            title: "发送给模型前处理",
+            description: "在请求离开本机前替换你选择的敏感信息。",
+            default: true,
+            "x-aio-ui": { section: "routing", widget: "switch", order: 10 },
+          },
+          redactLogs: {
+            type: "boolean",
+            title: "保存日志前处理",
+            description: "在本地日志写入前替换你选择的敏感信息。",
+            default: true,
+            "x-aio-ui": { section: "routing", widget: "switch", order: 20 },
+          },
+          profile: {
+            type: "string",
+            title: "保护强度",
+            description:
+              "平衡模式会覆盖常见个人信息、200+ Gitleaks 密钥规则、上下文密钥和高熵密钥候选。",
+            default: "balanced",
+            enum: ["balanced"],
+            "x-aio-ui": {
+              section: "routing",
+              widget: "select",
+              order: 30,
+              enumLabels: { balanced: "平衡" },
+            },
+          },
+          sensitiveTypes: {
+            type: "array",
+            title: "策略大类",
+            description:
+              "这些不是全部底层规则。密钥相关选项会控制打包的 200+ Gitleaks 规则以及上下文/熵检测结果是否生效。",
+            default: [
+              "email",
+              "cn_phone",
+              "cn_id_card",
+              "bank_card_candidate",
+              "ipv4",
+              "openai_key",
+              "aws_access_key",
+              "github_token",
+              "google_api_key",
+              "slack_token",
+              "jwt",
+              "private_key",
+              "context_secret",
+            ],
+            items: {
+              type: "string",
+              enum: [
+                "email",
+                "cn_phone",
+                "cn_id_card",
+                "bank_card_candidate",
+                "ipv4",
+                "openai_key",
+                "aws_access_key",
+                "github_token",
+                "google_api_key",
+                "slack_token",
+                "jwt",
+                "private_key",
+                "context_secret",
+              ],
+              "x-aio-ui": {
+                enumLabels: {
+                  email: "邮箱地址",
+                  cn_phone: "中国手机号",
+                  cn_id_card: "身份证号",
+                  bank_card_candidate: "银行卡号",
+                  ipv4: "IP 地址",
+                  openai_key: "OpenAI Key",
+                  aws_access_key: "AWS Access Key",
+                  github_token: "GitHub Token",
+                  google_api_key: "Google API Key",
+                  slack_token: "Slack Token",
+                  jwt: "JWT",
+                  private_key: "私钥片段",
+                  context_secret: "上下文密钥",
+                },
+                enumDescriptions: {
+                  email: "例如 name@example.com。",
+                  cn_phone: "例如 13344441520。",
+                  cn_id_card: "中国大陆居民身份证号码。",
+                  bank_card_candidate: "通过校验规则识别常见银行卡号。",
+                  ipv4: "例如 192.168.1.10。",
+                  openai_key: "常见 sk- 开头的 OpenAI 密钥。",
+                  aws_access_key: "常见 AKIA 开头的访问密钥。",
+                  github_token: "ghp、github_pat 等令牌。",
+                  google_api_key: "常见 AIza 开头的 Google API Key。",
+                  slack_token: "Slack bot、user、app token。",
+                  jwt: "常见 JSON Web Token。",
+                  private_key: "PEM 私钥内容。",
+                  context_secret: "password、api_key、token 等上下文中的敏感值。",
+                },
+              },
+            },
+            "x-aio-ui": {
+              section: "content",
+              widget: "checkboxGroup",
+              order: 10,
+              warningWhenPartial: "关闭后，这类内容会原样发送给模型，也可能出现在本地日志中。",
+            },
+          },
+        },
+      },
+      description: "Official privacy filter for PII and secrets.",
+      homepage: "https://github.com/packyme/privacy-filter",
+    },
+    install_source: "official",
+    installed_dir: null,
+    config: {
+      redactBeforeUpstream: true,
+      redactLogs: true,
+      profile: "balanced",
+      sensitiveTypes: [
+        "email",
+        "cn_phone",
+        "cn_id_card",
+        "bank_card_candidate",
+        "ipv4",
+        "openai_key",
+        "aws_access_key",
+        "github_token",
+        "google_api_key",
+        "slack_token",
+        "jwt",
+        "private_key",
+        "context_secret",
+      ],
+    },
+    granted_permissions: ["request.body.read", "request.body.write", "log.redact"],
+    pending_permissions: [],
+    audit_logs: [
+      {
+        id: 1,
+        plugin_id: "official.privacy-filter",
+        trace_id: null,
+        event_type: "plugin.installed",
+        risk_level: "low",
+        message: "Plugin installed",
+        details: { source: "official" },
+        created_at: 1,
+      },
+    ],
+    runtime_failures: [],
+  };
+}
+
+export function getPluginSummariesState(): PluginSummary[] {
+  return Array.from(pluginState.values()).map((detail) => clone(detail.summary));
+}
+
+export function getPluginDetailState(pluginId: string): PluginDetail | null {
+  return pluginState.has(pluginId) ? clone(pluginState.get(pluginId)!) : null;
+}
+
+export function installOfficialPluginState(pluginId: string): PluginDetail {
+  if (pluginId !== "official.privacy-filter") {
+    throw new Error(`unknown official plugin: ${pluginId}`);
+  }
+  const detail = officialPrivacyFilterDetail();
+  pluginState.set(pluginId, clone(detail));
+  return clone(detail);
 }
 
 // -- Providers --

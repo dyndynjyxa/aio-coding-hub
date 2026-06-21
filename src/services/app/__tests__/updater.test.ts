@@ -1,10 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { tauriInvoke } from "../../../test/mocks/tauri";
 import { setTauriRuntime } from "../../../test/utils/tauriRuntime";
 
 describe("services/app/updater", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("parseUpdaterCheckResult rejects invalid values and keeps optional fields", async () => {
@@ -51,6 +55,68 @@ describe("services/app/updater", () => {
       currentVersion: undefined,
       date: undefined,
       body: undefined,
+    });
+  });
+
+  it("updaterCheck replaces GitHub release fallback notes with release body", async () => {
+    const { updaterCheck } = await import("../updater");
+
+    setTauriRuntime();
+
+    vi.mocked(tauriInvoke).mockResolvedValueOnce({
+      rid: 3,
+      version: "0.60.0",
+      currentVersion: "0.59.0",
+      date: "2026-06-14T15:58:48Z",
+      body: "See release: https://github.com/dyndynjyxa/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.0",
+    } as any);
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        body: "## 0.60.0\n\n- 具体更新内容",
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(updaterCheck()).resolves.toEqual({
+      rid: 3,
+      version: "0.60.0",
+      currentVersion: "0.59.0",
+      date: "2026-06-14T15:58:48Z",
+      body: "## 0.60.0\n\n- 具体更新内容",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/dyndynjyxa/aio-coding-hub/releases/tags/aio-coding-hub-v0.60.0",
+      expect.objectContaining({
+        headers: expect.objectContaining({ accept: "application/vnd.github+json" }),
+      })
+    );
+  });
+
+  it("updaterCheck keeps fallback notes when GitHub release body cannot be loaded", async () => {
+    const { updaterCheck } = await import("../updater");
+
+    setTauriRuntime();
+
+    const fallbackBody =
+      "See release: https://github.com/dyndynjyxa/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.0";
+    vi.mocked(tauriInvoke).mockResolvedValueOnce({
+      rid: 4,
+      version: "0.60.0",
+      body: fallbackBody,
+    } as any);
+
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(updaterCheck()).resolves.toEqual({
+      rid: 4,
+      version: "0.60.0",
+      currentVersion: undefined,
+      date: undefined,
+      body: fallbackBody,
     });
   });
 

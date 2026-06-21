@@ -230,6 +230,7 @@ pub(super) fn build_stream_finalize_ctx<R: tauri::Runtime>(
         app: ctx.state.app.clone(),
         db: ctx.state.db.clone(),
         log_tx: ctx.state.log_tx.clone(),
+        plugin_pipeline: ctx.state.plugin_pipeline.clone(),
         circuit: ctx.state.circuit.clone(),
         session: ctx.state.session.clone(),
         session_id: ctx.session_id.clone(),

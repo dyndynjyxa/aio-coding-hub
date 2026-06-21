@@ -5,7 +5,7 @@ use axum::{
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
-use std::io::Read;
+use std::io::{Read, Write};
 
 use super::GatewayErrorCode;
 
@@ -90,6 +90,49 @@ pub(super) fn maybe_gunzip_response_body_bytes_with_limit(
     Bytes::from(out)
 }
 
+pub(super) fn gunzip_bytes_with_limit(
+    input: &[u8],
+    max_output_bytes: usize,
+) -> Result<Bytes, String> {
+    let mut decoder = flate2::read::GzDecoder::new(input);
+    let mut out: Vec<u8> = Vec::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = decoder
+            .read(&mut buf)
+            .map_err(|err| format!("failed to decode gzip body: {err}"))?;
+        if n == 0 {
+            break;
+        }
+        if out.len().saturating_add(n) > max_output_bytes {
+            return Err(format!(
+                "gzip decoded body exceeded limit: limit={max_output_bytes} bytes"
+            ));
+        }
+        out.extend_from_slice(&buf[..n]);
+    }
+    Ok(Bytes::from(out))
+}
+
+pub(super) fn gzip_bytes_with_limit(
+    input: &[u8],
+    max_output_bytes: usize,
+) -> Result<Bytes, String> {
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder
+        .write_all(input)
+        .map_err(|err| format!("failed to encode gzip body: {err}"))?;
+    let out = encoder
+        .finish()
+        .map_err(|err| format!("failed to finish gzip body: {err}"))?;
+    if out.len() > max_output_bytes {
+        return Err(format!(
+            "gzip encoded body exceeded limit: limit={max_output_bytes} bytes"
+        ));
+    }
+    Ok(Bytes::from(out))
+}
+
 pub(super) fn build_response(
     status: StatusCode,
     headers: &HeaderMap,
@@ -170,5 +213,35 @@ mod tests {
         assert_eq!(output, compressed);
         assert_eq!(headers.get(header::CONTENT_ENCODING).unwrap(), "gzip");
         assert!(headers.get(header::CONTENT_LENGTH).is_some());
+    }
+
+    #[test]
+    fn gzip_round_trip_helpers_preserve_body() {
+        let plain = Bytes::from_static(br#"{"input":"hello"}"#);
+
+        let encoded = super::gzip_bytes_with_limit(plain.as_ref(), 1024).expect("encode");
+        let decoded = super::gunzip_bytes_with_limit(encoded.as_ref(), 1024).expect("decode");
+
+        assert_eq!(decoded, plain);
+    }
+
+    #[test]
+    fn gzip_decode_helper_rejects_oversized_output() {
+        let plain = Bytes::from(vec![b'a'; 128 * 1024]);
+        let encoded = gzip_bytes(plain.as_ref());
+
+        let err = super::gunzip_bytes_with_limit(encoded.as_ref(), 1024)
+            .expect_err("should exceed output limit");
+
+        assert!(err.contains("gzip decoded body exceeded limit"));
+    }
+
+    #[test]
+    fn gzip_encode_helper_rejects_oversized_output() {
+        let plain = vec![b'a'; 128 * 1024];
+
+        let err = super::gzip_bytes_with_limit(&plain, 4).expect_err("should exceed tiny limit");
+
+        assert!(err.contains("gzip encoded body exceeded limit"));
     }
 }

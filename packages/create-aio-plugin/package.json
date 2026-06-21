@@ -1,0 +1,21 @@
+{
+  "name": "create-aio-plugin",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "create-aio-plugin": "./src/cli.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aio-coding-hub/plugin-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "~5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

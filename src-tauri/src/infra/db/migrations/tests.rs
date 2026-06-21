@@ -201,6 +201,40 @@ INSERT INTO providers(
 }
 
 #[test]
+fn ensure_plugin_tables_is_idempotent() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+    apply_migrations(&mut conn).expect("apply migrations once");
+    apply_migrations(&mut conn).expect("apply migrations twice");
+
+    for table in [
+        "plugins",
+        "plugin_versions",
+        "plugin_configs",
+        "plugin_permissions",
+        "plugin_audit_logs",
+        "plugin_market_sources",
+        "plugin_runtime_failures",
+    ] {
+        assert!(
+            test_has_table(&conn, table),
+            "missing plugin table after ensure patches: {table}"
+        );
+    }
+
+    assert!(test_has_column(&conn, "plugins", "plugin_id"));
+    assert!(test_has_column(&conn, "plugins", "current_version"));
+    assert!(test_has_column(&conn, "plugins", "status"));
+    assert!(test_has_column(&conn, "plugins", "manifest_json"));
+    assert!(test_has_column(&conn, "plugins", "last_error"));
+    assert!(test_has_column(&conn, "plugin_configs", "config_json"));
+    assert!(test_has_column(
+        &conn,
+        "plugin_permissions",
+        "permissions_json"
+    ));
+}
+
+#[test]
 fn migrate_v27_to_v28_drops_provider_mode_and_deletes_official_providers() {
     let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
     conn.execute_batch("PRAGMA foreign_keys = ON;")
@@ -468,6 +502,15 @@ fn test_has_column(conn: &Connection, table: &str, column: &str) -> bool {
         }
     }
     false
+}
+
+fn test_has_table(conn: &Connection, table: &str) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1",
+        [table],
+        |_| Ok(true),
+    )
+    .unwrap_or(false)
 }
 
 fn test_has_index(conn: &Connection, index: &str) -> bool {

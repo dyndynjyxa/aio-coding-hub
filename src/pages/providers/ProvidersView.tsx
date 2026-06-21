@@ -93,7 +93,7 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
     copyTerminalLaunchCommand,
     duplicateProvider,
     requestValidateProviderModel,
-    handleDragEnd,
+    handleProviderCardDragEnd,
     sensors,
     createDialogState,
     setCreateDialogState,
@@ -287,7 +287,7 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
               <DndContext
                 sensors={sensors}
                 collisionDetection={closestCenter}
-                onDragEnd={handleDragEnd}
+                onDragEnd={handleProviderCardDragEnd}
               >
                 <SortableContext
                   items={filteredProviders.map((provider) => provider.id)}

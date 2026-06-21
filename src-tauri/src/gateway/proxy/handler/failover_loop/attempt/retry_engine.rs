@@ -88,6 +88,13 @@ where
     match send_outcome {
         AttemptSendOutcome::UrlBuildFailed(ctrl) => ctrl,
         AttemptSendOutcome::OAuthInjectFailed => LoopControl::BreakRetry,
+        AttemptSendOutcome::PluginBlocked(reason) => LoopControl::Return(error_response(
+            StatusCode::FORBIDDEN,
+            input.trace_id.clone(),
+            GatewayErrorCode::InternalError.as_str(),
+            reason,
+            loop_state.attempts.clone(),
+        )),
         AttemptSendOutcome::Response(resp, timing) => {
             response_router::route_response(
                 ctx,

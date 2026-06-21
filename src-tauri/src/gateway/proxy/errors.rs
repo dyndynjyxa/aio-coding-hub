@@ -1,6 +1,7 @@
 //! Usage: Error classification + standardized gateway error responses.
 
 use axum::{
+    body::{to_bytes, Bytes},
     http::{header, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
@@ -10,6 +11,9 @@ use serde::Serialize;
 use super::failover::FailoverDecision;
 use super::{ErrorCategory, GatewayErrorCode};
 use crate::gateway::events::FailoverAttempt;
+use crate::gateway::plugins::context::{GatewayPluginHookName, GatewayResponseHookInput};
+use crate::gateway::plugins::pipeline::GatewayPluginPipeline;
+use std::sync::Arc;
 
 #[derive(Debug, Serialize)]
 struct GatewayErrorResponse {
@@ -130,6 +134,113 @@ pub(super) fn error_response_with_retry_after(
     }
 
     resp
+}
+
+pub(super) async fn apply_gateway_error_hook(
+    db: &crate::db::Db,
+    pipeline: Arc<GatewayPluginPipeline>,
+    trace_id: String,
+    response: Response,
+) -> Response {
+    let status = response.status();
+    let mut headers = response.headers().clone();
+    let body = match to_bytes(response.into_body(), usize::MAX).await {
+        Ok(body) => body,
+        Err(err) => {
+            tracing::warn!(
+                trace_id = %trace_id,
+                error = %err,
+                "failed to read gateway error response body for plugin hook"
+            );
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                trace_id,
+                GatewayErrorCode::ResponseBuildError.as_str(),
+                "failed to read gateway error response body".to_string(),
+                vec![],
+            );
+        }
+    };
+
+    let input = GatewayResponseHookInput {
+        hook_name: GatewayPluginHookName::Error,
+        trace_id: trace_id.clone(),
+        status: status.as_u16(),
+        headers: headers.clone(),
+        body: body.clone(),
+    };
+
+    let output = match pipeline.run_response_hook(input).await {
+        Ok(output) => {
+            crate::gateway::plugins::audit::persist_gateway_plugin_audit_events(
+                db,
+                &trace_id,
+                output.audit_events.clone(),
+            );
+            output
+        }
+        Err(mut err) => {
+            crate::gateway::plugins::audit::persist_gateway_plugin_error_audit_events(
+                db, &trace_id, &mut err,
+            );
+            tracing::warn!(
+                trace_id = %trace_id,
+                error = %err,
+                "plugin gateway.error hook failed; keeping original error response"
+            );
+            let mut builder = Response::builder().status(status);
+            for (name, value) in headers.iter() {
+                builder = builder.header(name, value);
+            }
+            return builder
+                .body(axum::body::Body::from(body))
+                .unwrap_or_else(|_| {
+                    error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        trace_id,
+                        GatewayErrorCode::ResponseBuildError.as_str(),
+                        "failed to rebuild gateway error response".to_string(),
+                        vec![],
+                    )
+                });
+        }
+    };
+
+    if let Some(blocked) = output.blocked {
+        tracing::warn!(
+            trace_id = %trace_id,
+            status = blocked.status,
+            reason = %blocked.reason,
+            "plugin blocked gateway error response"
+        );
+        return error_response(
+            StatusCode::from_u16(blocked.status).unwrap_or(StatusCode::BAD_GATEWAY),
+            trace_id,
+            GatewayErrorCode::InternalError.as_str(),
+            blocked.reason,
+            vec![],
+        );
+    }
+
+    headers = output.headers;
+    headers.remove(header::CONTENT_LENGTH);
+    let mut builder = Response::builder().status(status);
+    for (name, value) in headers.iter() {
+        builder = builder.header(name, value);
+    }
+    builder
+        .body(axum::body::Body::from(Bytes::copy_from_slice(
+            output.body.as_ref(),
+        )))
+        .unwrap_or_else(|_| {
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                trace_id,
+                GatewayErrorCode::ResponseBuildError.as_str(),
+                "failed to rebuild gateway error response".to_string(),
+                vec![],
+            )
+        })
 }
 
 #[cfg(test)]

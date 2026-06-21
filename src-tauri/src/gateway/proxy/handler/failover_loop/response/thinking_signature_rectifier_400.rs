@@ -108,7 +108,12 @@ pub(super) async fn handle_thinking_rectifiers_400<R: tauri::Runtime>(
                     );
                     emit_request_event_and_enqueue_request_log(
                         RequestEndArgs::from_context(RequestEndContextArgs {
-                            deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx),
+                            deps: RequestEndDeps::new(
+                                &state.app,
+                                &state.db,
+                                &state.log_tx,
+                                &state.plugin_pipeline,
+                            ),
                             trace_id: trace_id.as_str(),
                             cli_key: cli_key.as_str(),
                             method: method_hint.as_str(),
@@ -461,7 +466,12 @@ pub(super) async fn handle_thinking_rectifiers_400<R: tauri::Runtime>(
 
                 emit_request_event_and_enqueue_request_log(
                     RequestEndArgs::from_context(RequestEndContextArgs {
-                        deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx),
+                        deps: RequestEndDeps::new(
+                            &state.app,
+                            &state.db,
+                            &state.log_tx,
+                            &state.plugin_pipeline,
+                        ),
                         trace_id: trace_id.as_str(),
                         cli_key: cli_key.as_str(),
                         method: method_hint.as_str(),
