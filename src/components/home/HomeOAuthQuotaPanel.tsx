@@ -1,10 +1,11 @@
 import { AlertTriangle, RefreshCw } from "lucide-react";
-import { cliBadgeTone, cliShortLabel } from "../../constants/clis";
+import { cliLongLabel } from "../../constants/clis";
 import { useNowUnix } from "../../hooks/useNowUnix";
 import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";
 import { Spinner } from "../../ui/Spinner";
 import { cn } from "../../utils/cn";
+import { CliBrandIcon } from "./CliBrandIcon";
 import {
   hasHomeOAuthQuotaText,
   hasInsufficientHomeOAuthQuota,
@@ -87,19 +88,20 @@ function OAuthQuotaProviderCard({
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2 text-xs text-secondary-foreground">
             <span
-              className={cn(
-                "shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium",
-                cliBadgeTone(row.cliKey)
-              )}
+              className="inline-flex h-5 w-5 shrink-0 items-center justify-center text-secondary-foreground"
+              title={cliLongLabel(row.cliKey)}
             >
-              {cliShortLabel(row.cliKey)}
+              <CliBrandIcon
+                cliKey={row.cliKey}
+                className="h-3.5 w-3.5 rounded-[3px] object-contain"
+              />
             </span>
             <span className="truncate font-medium">{row.providerName}</span>
           </div>
 
-          <div className="flex items-center gap-1">
+          <div className="flex shrink-0 items-center gap-1">
             {!row.enabled ? (
-              <span className="rounded-full bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground dark:bg-secondary dark:text-muted-foreground">
+              <span className="whitespace-nowrap rounded-full bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground dark:bg-secondary dark:text-muted-foreground">
                 已禁用
               </span>
             ) : null}
