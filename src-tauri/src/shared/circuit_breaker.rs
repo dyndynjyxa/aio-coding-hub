@@ -521,11 +521,7 @@ impl CircuitBreaker {
 
     fn flush_persist_backlog(&self, tx: &tokio::sync::mpsc::Sender<CircuitPersistedState>) {
         let mut backlog = self.persist_backlog.lock_or_recover();
-        loop {
-            let Some((provider_id, item)) = pop_oldest_persist_backlog(&mut backlog) else {
-                break;
-            };
-
+        while let Some((provider_id, item)) = pop_oldest_persist_backlog(&mut backlog) {
             match tx.try_send(item) {
                 Ok(()) => {}
                 Err(TrySendError::Full(item)) => {

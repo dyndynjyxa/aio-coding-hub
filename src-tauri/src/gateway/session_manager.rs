@@ -373,7 +373,7 @@ impl SessionManager {
             })
             .collect();
 
-        rows.sort_by(|a, b| b.expires_at.cmp(&a.expires_at));
+        rows.sort_by_key(|row| std::cmp::Reverse(row.expires_at));
         rows.truncate(limit);
         rows
     }

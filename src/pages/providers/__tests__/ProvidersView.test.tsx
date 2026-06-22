@@ -32,6 +32,17 @@ import {
   useProvidersListQuery,
   useProvidersReorderMutation,
 } from "../../../query/providers";
+import {
+  useSortModeActiveListQuery,
+  useSortModeActiveSetMutation,
+  useSortModeCreateMutation,
+  useSortModeDeleteMutation,
+  useSortModeProviderSetEnabledMutation,
+  useSortModeProvidersListQuery,
+  useSortModeProvidersSetOrderMutation,
+  useSortModeRenameMutation,
+  useSortModesListQuery,
+} from "../../../query/sortModes";
 
 let dndContextDragHandlers: Array<((event: any) => void) | null> = [];
 let sortableIsDragging = false;
@@ -129,6 +140,24 @@ vi.mock("../../../query/providers", async () => {
   };
 });
 
+vi.mock("../../../query/sortModes", async () => {
+  const actual = await vi.importActual<typeof import("../../../query/sortModes")>(
+    "../../../query/sortModes"
+  );
+  return {
+    ...actual,
+    useSortModesListQuery: vi.fn(),
+    useSortModeActiveListQuery: vi.fn(),
+    useSortModeProvidersListQuery: vi.fn(),
+    useSortModeCreateMutation: vi.fn(),
+    useSortModeRenameMutation: vi.fn(),
+    useSortModeDeleteMutation: vi.fn(),
+    useSortModeActiveSetMutation: vi.fn(),
+    useSortModeProvidersSetOrderMutation: vi.fn(),
+    useSortModeProviderSetEnabledMutation: vi.fn(),
+  };
+});
+
 function renderWithQuery(element: ReactElement) {
   const client = createTestQueryClient();
   return render(<QueryClientProvider client={client}>{element}</QueryClientProvider>);
@@ -162,6 +191,32 @@ beforeEach(() => {
   } as any);
   vi.mocked(useDefaultRouteProvidersSetOrderMutation).mockReturnValue({
     mutateAsync: vi.fn().mockResolvedValue([]),
+  } as any);
+  vi.mocked(useSortModesListQuery).mockReturnValue({
+    data: [],
+    isLoading: false,
+  } as any);
+  vi.mocked(useSortModeActiveListQuery).mockReturnValue({
+    data: [],
+    isLoading: false,
+  } as any);
+  vi.mocked(useSortModeProvidersListQuery).mockReturnValue({
+    data: null,
+    isFetching: false,
+  } as any);
+  vi.mocked(useSortModeCreateMutation).mockReturnValue({
+    mutateAsync: vi
+      .fn()
+      .mockResolvedValue({ id: 10, name: "新模板", created_at: 1, updated_at: 1 }),
+  } as any);
+  vi.mocked(useSortModeRenameMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+  vi.mocked(useSortModeDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+  vi.mocked(useSortModeActiveSetMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+  vi.mocked(useSortModeProvidersSetOrderMutation).mockReturnValue({
+    mutateAsync: vi.fn().mockResolvedValue([]),
+  } as any);
+  vi.mocked(useSortModeProviderSetEnabledMutation).mockReturnValue({
+    mutateAsync: vi.fn(),
   } as any);
 });
 
@@ -1054,8 +1109,8 @@ describe("pages/providers/ProvidersView", () => {
     expect(screen.getAllByText("Beta Gateway").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Alpha Relay")).toHaveLength(1);
     const orderPanel = within(screen.getByRole("complementary", { name: "供应商调用顺序" }));
-    expect(orderPanel.getByLabelText("第 1 位")).toBeInTheDocument();
-    expect(orderPanel.getByLabelText("第 2 位")).toBeInTheDocument();
+    expect(orderPanel.queryByLabelText("第 1 位")).not.toBeInTheDocument();
+    expect(orderPanel.queryByLabelText("第 2 位")).not.toBeInTheDocument();
     expect(screen.getByText("共 1 / 2 条")).toBeInTheDocument();
 
     fireEvent.change(searchInput, { target: { value: "" } });
@@ -1063,6 +1118,92 @@ describe("pages/providers/ProvidersView", () => {
     expect(screen.getAllByText("Alpha Relay").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Beta Gateway").length).toBeGreaterThan(0);
     expect(screen.getByText("共 2 / 2 条")).toBeInTheDocument();
+  });
+
+  it("lets sort mode providers be re-enabled from the route order switch", async () => {
+    const providers = [
+      {
+        id: 1,
+        cli_key: "claude",
+        name: "P1",
+        enabled: true,
+        base_urls: ["https://a"],
+        base_url_mode: "order",
+        cost_multiplier: 1,
+        claude_models: {},
+      },
+      {
+        id: 2,
+        cli_key: "claude",
+        name: "P2",
+        enabled: true,
+        base_urls: ["https://b"],
+        base_url_mode: "order",
+        cost_multiplier: 1,
+        claude_models: {},
+      },
+    ] as any[];
+
+    vi.mocked(useProvidersListQuery).mockReturnValue({ data: providers, isFetching: false } as any);
+    vi.mocked(useDefaultRouteProvidersQuery).mockReturnValue({
+      data: [{ provider_id: 1 }, { provider_id: 2 }],
+      isFetching: false,
+    } as any);
+    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useProviderSetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProviderDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProvidersReorderMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+    } as any);
+    vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useSortModesListQuery).mockReturnValue({
+      data: [{ id: 10, name: "Review Mode", created_at: 1, updated_at: 1 }],
+      isLoading: false,
+    } as any);
+    vi.mocked(useSortModeProvidersListQuery).mockReturnValue({
+      data: [
+        { provider_id: 1, enabled: false },
+        { provider_id: 2, enabled: true },
+      ],
+      isFetching: false,
+    } as any);
+    const setModeProviderEnabled = vi.fn().mockResolvedValue({ provider_id: 1, enabled: true });
+    vi.mocked(useSortModeProviderSetEnabledMutation).mockReturnValue({
+      mutateAsync: setModeProviderEnabled,
+    } as any);
+
+    renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "选择调用顺序" }), {
+      target: { value: "mode:10" },
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText("Review Mode 按照从上到下依次调用")).toBeInTheDocument()
+    );
+    const orderPanel = within(screen.getByRole("complementary", { name: "供应商调用顺序" }));
+    expect(orderPanel.queryByLabelText("第 1 位")).not.toBeInTheDocument();
+    expect(orderPanel.queryByLabelText("第 2 位")).not.toBeInTheDocument();
+    expect(orderPanel.getByText("1/2")).toBeInTheDocument();
+
+    const p1Switch = orderPanel.getByRole("switch", { name: "P1 在模板中启用" });
+    expect(p1Switch).not.toBeChecked();
+    fireEvent.click(p1Switch);
+
+    await waitFor(() =>
+      expect(setModeProviderEnabled).toHaveBeenCalledWith({
+        modeId: 10,
+        cliKey: "claude",
+        providerId: 1,
+        enabled: true,
+      })
+    );
+    expect(orderPanel.getByText("2/2")).toBeInTheDocument();
   });
 
   it("always shows the 全部 tag even when providers have no custom tags", () => {

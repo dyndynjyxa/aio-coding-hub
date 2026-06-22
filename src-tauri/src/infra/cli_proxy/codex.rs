@@ -366,10 +366,7 @@ pub(super) fn remove_model_provider_section(lines: &mut Vec<String>, provider_ke
     }
 
     // Remove nested tables
-    loop {
-        let Some(start) = find_model_provider_nested_table_index(lines, provider_key) else {
-            break;
-        };
+    while let Some(start) = find_model_provider_nested_table_index(lines, provider_key) {
         let end = find_next_table_header(lines, start.saturating_add(1));
         lines.drain(start..end);
     }

@@ -90,7 +90,7 @@ fn top_files_insert(
     item: AppMemoryDiagnosticsFileStat,
 ) {
     top_files.push(item);
-    top_files.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    top_files.sort_by_key(|item| std::cmp::Reverse(item.bytes));
     if top_files.len() > TOP_FILE_LIMIT {
         top_files.truncate(TOP_FILE_LIMIT);
     }

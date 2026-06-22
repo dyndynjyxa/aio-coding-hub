@@ -268,10 +268,7 @@ mod tests {
     async fn read_complete_http_request_bytes(socket: &mut tokio::net::TcpStream) -> Vec<u8> {
         let mut buf = Vec::new();
         let mut chunk = [0_u8; 1024];
-        loop {
-            let Ok(size) = socket.read(&mut chunk).await else {
-                break;
-            };
+        while let Ok(size) = socket.read(&mut chunk).await {
             if size == 0 {
                 break;
             }

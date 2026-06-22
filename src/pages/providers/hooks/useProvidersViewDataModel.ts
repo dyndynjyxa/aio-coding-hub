@@ -46,6 +46,7 @@ import {
   useSortModeCreateMutation,
   useSortModeDeleteMutation,
   useSortModeProvidersListQuery,
+  useSortModeProviderSetEnabledMutation,
   useSortModeProvidersSetOrderMutation,
   useSortModeRenameMutation,
   useSortModesListQuery,
@@ -270,6 +271,7 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
   const sortModeDeleteMutation = useSortModeDeleteMutation();
   const sortModeActiveSetMutation = useSortModeActiveSetMutation();
   const sortModeProvidersSetOrderMutation = useSortModeProvidersSetOrderMutation();
+  const sortModeProviderSetEnabledMutation = useSortModeProviderSetEnabledMutation();
   const terminalLaunchCommandMutation = useProviderClaudeTerminalLaunchCommandMutation();
   const testAvailabilityMutation = useProviderTestAvailabilityMutation();
 
@@ -879,6 +881,65 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
     }
   }
 
+  async function setModeProviderEnabled(providerId: number, enabled: boolean) {
+    const selection = routeDraftSelectionRef.current;
+    const cliKey = activeCliRef.current;
+    if (selection.kind !== "mode" || routeSavingRef.current) return;
+
+    const previousRows = modeProvidersRef.current;
+    const currentRow = previousRows.find((row) => row.provider_id === providerId);
+    if (!currentRow || currentRow.enabled === enabled) return;
+
+    const nextRows = previousRows.map((row) =>
+      row.provider_id === providerId ? { ...row, enabled } : row
+    );
+    routeSavingRef.current = true;
+    setRouteSaving(true);
+    setModeProviders(nextRows);
+    modeProvidersRef.current = nextRows;
+
+    try {
+      const saved = await sortModeProviderSetEnabledMutation.mutateAsync({
+        modeId: selection.modeId,
+        cliKey,
+        providerId,
+        enabled,
+      });
+      if (
+        routeDraftSelectionRef.current.kind === "mode" &&
+        routeDraftSelectionRef.current.modeId === selection.modeId &&
+        activeCliRef.current === cliKey
+      ) {
+        const savedRows = modeProvidersRef.current.map((row) =>
+          row.provider_id === saved.provider_id ? saved : row
+        );
+        setModeProviders(savedRows);
+        modeProvidersRef.current = savedRows;
+      }
+      toast(enabled ? "模板成员已启用" : "模板成员已关闭");
+    } catch (error) {
+      if (
+        routeDraftSelectionRef.current.kind === "mode" &&
+        routeDraftSelectionRef.current.modeId === selection.modeId &&
+        activeCliRef.current === cliKey
+      ) {
+        setModeProviders(previousRows);
+        modeProvidersRef.current = previousRows;
+      }
+      logToConsole("error", "更新模板成员状态失败", {
+        cli: cliKey,
+        route: routeDraftKey(selection),
+        provider_id: providerId,
+        enabled,
+        error: String(error),
+      });
+      toast(`模板成员状态更新失败：${String(error)}`);
+    } finally {
+      routeSavingRef.current = false;
+      setRouteSaving(false);
+    }
+  }
+
   function addProviderToCurrentRoute(providerId: number) {
     if (routeProviderIdSet.has(providerId)) return;
     const nextRows =
@@ -1073,6 +1134,7 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
     selectRouteDraft,
     addProviderToCurrentRoute,
     removeProviderFromCurrentRoute,
+    setModeProviderEnabled,
     handleRouteDragEnd,
     createSortMode,
     renameSortMode,

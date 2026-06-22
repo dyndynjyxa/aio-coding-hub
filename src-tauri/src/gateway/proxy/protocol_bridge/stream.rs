@@ -409,8 +409,6 @@ fn upsert_output_item(output: &mut Vec<Value>, item: Value) {
 mod tests {
     use super::*;
     use std::collections::VecDeque;
-    use std::sync::Arc;
-    use std::task::Wake;
 
     #[test]
     fn find_sse_event_end_basic() {
@@ -501,12 +499,6 @@ mod tests {
         }
     }
 
-    struct NoopWaker;
-
-    impl Wake for NoopWaker {
-        fn wake(self: Arc<Self>) {}
-    }
-
     #[test]
     fn bridge_stream_emits_error_and_stops_when_frame_buffer_exceeds_limit() {
         let oversized = Bytes::from(vec![b'a'; MAX_BRIDGE_SSE_FRAME_BUFFER_BYTES + 1]);
@@ -516,8 +508,8 @@ mod tests {
             None,
             crate::gateway::proxy::cx2cc::settings::Cx2ccSettings::default(),
         );
-        let waker = std::task::Waker::from(Arc::new(NoopWaker));
-        let mut cx = Context::from_waker(&waker);
+        let waker = std::task::Waker::noop();
+        let mut cx = Context::from_waker(waker);
 
         let first = Pin::new(&mut stream).poll_next(&mut cx);
         let Poll::Ready(Some(Ok(frame))) = first else {

@@ -18,7 +18,6 @@ export type ProviderOrderItemProps = {
 export const ProviderOrderItem = memo(function ProviderOrderItem({
   provider,
   providerId,
-  index,
   trailing = null,
   className,
   dragProps,
@@ -32,17 +31,19 @@ export const ProviderOrderItem = memo(function ProviderOrderItem({
     <div
       className={cn(
         "flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-2 text-sm shadow-sm transition-shadow duration-200",
-        dragProps && "cursor-grab active:cursor-grabbing",
         className
       )}
-      {...dragProps}
     >
-      <div
-        aria-label={`第 ${index + 1} 位`}
-        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-muted font-mono text-[11px] text-muted-foreground"
-      >
-        {index + 1}
-      </div>
+      {dragProps ? (
+        <div
+          className="inline-flex h-7 w-7 shrink-0 cursor-grab items-center justify-center rounded-md text-muted-foreground hover:bg-secondary active:cursor-grabbing"
+          title="拖拽调整顺序"
+          aria-label={`拖拽调整 ${label} 顺序`}
+          {...dragProps}
+        >
+          <GripVertical className="h-4 w-4" aria-hidden="true" />
+        </div>
+      ) : null}
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium text-foreground">{label}</div>
       </div>
@@ -52,22 +53,13 @@ export const ProviderOrderItem = memo(function ProviderOrderItem({
         </span>
       ) : null}
       {trailing}
-      {dragProps ? (
-        <div
-          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground"
-          title="可拖拽排序"
-          aria-hidden="true"
-        >
-          <GripVertical className="h-4 w-4" />
-        </div>
-      ) : null}
     </div>
   );
 });
 
 export type SortableProviderOrderItemProps = Omit<
   ProviderOrderItemProps,
-  "dragHandleProps" | "className"
+  "dragProps" | "className"
 > & {
   disabled?: boolean;
 };

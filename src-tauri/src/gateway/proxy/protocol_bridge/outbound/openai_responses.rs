@@ -279,11 +279,9 @@ fn response_to_ir(body: Value, settings: &Cx2ccSettings) -> Result<InternalRespo
                 has_tool_use = true;
             }
 
-            "reasoning" => {
-                if settings.enable_reasoning_to_thinking {
-                    if let Some(text) = reasoning_text_from_item(item) {
-                        content.push(IRContentBlock::Thinking { thinking: text });
-                    }
+            "reasoning" if settings.enable_reasoning_to_thinking => {
+                if let Some(text) = reasoning_text_from_item(item) {
+                    content.push(IRContentBlock::Thinking { thinking: text });
                 }
             }
 

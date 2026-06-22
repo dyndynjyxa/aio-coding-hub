@@ -612,8 +612,8 @@ mod tests {
         );
 
         // When inactive, should pass through unchanged — verify via direct poll
-        let waker = std::task::Waker::from(std::sync::Arc::new(NoopWaker));
-        let mut cx = Context::from_waker(&waker);
+        let waker = std::task::Waker::noop();
+        let mut cx = Context::from_waker(waker);
         let mut stream = stream;
         match Pin::new(&mut stream).poll_next(&mut cx) {
             Poll::Ready(Some(Ok(chunk))) => {
@@ -621,11 +621,6 @@ mod tests {
             }
             other => panic!("expected Ready(Some(Ok)), got {other:?}"),
         }
-    }
-
-    struct NoopWaker;
-    impl std::task::Wake for NoopWaker {
-        fn wake(self: std::sync::Arc<Self>) {}
     }
 
     // ── Cache token preservation ────────────────────────────────────────

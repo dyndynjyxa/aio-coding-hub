@@ -705,11 +705,9 @@ fn redact_message_content_part(
                 redact_tool_result_content(map.get_mut("content"), filter, options, matched);
             }
         }
-        Some("text") => {
-            if scopes.message_content_enabled(role) {
-                if let Some(text) = map.get_mut("text") {
-                    redact_text_value(text, filter, options, matched);
-                }
+        Some("text") if scopes.message_content_enabled(role) => {
+            if let Some(text) = map.get_mut("text") {
+                redact_text_value(text, filter, options, matched);
             }
         }
         _ => {}

@@ -12,6 +12,7 @@ import { EmptyState } from "../../ui/EmptyState";
 import { Input } from "../../ui/Input";
 import { Select } from "../../ui/Select";
 import { Spinner } from "../../ui/Spinner";
+import { Switch } from "../../ui/Switch";
 import { ProviderEditorDialog } from "./ProviderEditorDialog";
 import { SortableProviderCard } from "./SortableProviderCard";
 import { SortableProviderOrderItem } from "./SortableProviderOrderItem";
@@ -27,6 +28,11 @@ type PendingProvidersScrollRestore = {
   scrollTop: number;
   observedRefresh: boolean;
 };
+
+function getRouteRowEnabled(row: unknown) {
+  if (!row || typeof row !== "object" || !("enabled" in row)) return true;
+  return typeof row.enabled === "boolean" ? row.enabled : true;
+}
 
 export function ProvidersView({ activeCli }: ProvidersViewProps) {
   const model = useProvidersViewDataModel(activeCli);
@@ -68,6 +74,7 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
     selectRouteDraft,
     addProviderToCurrentRoute,
     removeProviderFromCurrentRoute,
+    setModeProviderEnabled,
     handleRouteDragEnd,
     createSortMode,
     renameSortMode,
@@ -464,6 +471,11 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
                       <div className="space-y-2">
                         {routeRows.map((row, index) => {
                           const provider = providersById[row.provider_id] ?? null;
+                          const providerLabel = provider?.name?.trim()
+                            ? provider.name
+                            : `未知 Provider #${provider?.id ?? row.provider_id}`;
+                          const routeRowEnabled = getRouteRowEnabled(row);
+                          const showModeProviderSwitch = routeDraftSelection.kind === "mode";
                           return (
                             <SortableProviderOrderItem
                               key={row.provider_id}
@@ -473,6 +485,25 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
                               disabled={routeSaving}
                               trailing={
                                 <div className="flex shrink-0 items-center gap-2">
+                                  {showModeProviderSwitch ? (
+                                    <div
+                                      className="flex shrink-0 items-center gap-1.5"
+                                      onPointerDown={(event) => event.stopPropagation()}
+                                    >
+                                      <span className="text-[11px] text-muted-foreground">
+                                        {routeRowEnabled ? "启用" : "关闭"}
+                                      </span>
+                                      <Switch
+                                        checked={routeRowEnabled}
+                                        onCheckedChange={(checked) =>
+                                          void setModeProviderEnabled(row.provider_id, checked)
+                                        }
+                                        size="sm"
+                                        disabled={routeSaving}
+                                        aria-label={`${providerLabel} 在模板中启用`}
+                                      />
+                                    </div>
+                                  ) : null}
                                   <Button
                                     variant="secondary"
                                     size="sm"

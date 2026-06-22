@@ -55,15 +55,16 @@ pub(crate) async fn sort_mode_delete(
     mode_id: i64,
 ) -> Result<bool, String> {
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    blocking::run(
-        "sort_mode_delete",
-        move || -> crate::shared::error::AppResult<bool> {
-            sort_modes::delete_mode(&db, mode_id)?;
-            Ok(true)
-        },
-    )
-    .await
-    .map_err(Into::into)
+    let affected_cli_keys = blocking::run("sort_mode_delete", move || {
+        sort_modes::delete_mode_with_affected_cli_keys(&db, mode_id)
+    })
+    .await?;
+
+    for cli_key in affected_cli_keys {
+        app_gateway_clear_cli_route_runtime_state(&app, &cli_key);
+    }
+
+    Ok(true)
 }
 
 #[tauri::command]
