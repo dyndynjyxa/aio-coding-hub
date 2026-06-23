@@ -31,6 +31,7 @@ describe("services/settings/settingsGatewayRectifier", () => {
   const input = {
     verbose_provider_error: true,
     intercept_anthropic_warmup_requests: false,
+    intercept_web_search: false,
     enable_thinking_signature_rectifier: true,
     enable_thinking_budget_rectifier: false,
     enable_billing_header_rectifier: true,
@@ -75,6 +76,7 @@ describe("services/settings/settingsGatewayRectifier", () => {
     expect(commands.settingsGatewayRectifierSet).toHaveBeenCalledWith({
       verboseProviderError: true,
       interceptAnthropicWarmupRequests: false,
+      interceptWebSearch: false,
       enableThinkingSignatureRectifier: true,
       enableThinkingBudgetRectifier: false,
       enableBillingHeaderRectifier: true,

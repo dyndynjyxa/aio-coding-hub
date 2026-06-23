@@ -11,7 +11,11 @@ import { logToConsole } from "../../services/consoleLog";
 import { openDesktopSinglePath } from "../../services/desktop/dialog";
 import { openDesktopPath } from "../../services/desktop/opener";
 import { type GatewayRectifierSettingsPatch } from "../../services/settings/settingsGatewayRectifier";
-import type { AppSettings, SensitiveStringUpdate } from "../../services/settings/settings";
+import type {
+  AppSettings,
+  SensitiveStringUpdate,
+  WebSearchSettingsInput,
+} from "../../services/settings/settings";
 import {
   getSettingsReadProtection,
   SETTINGS_READONLY_MESSAGE,
@@ -20,6 +24,7 @@ import {
   useSettingsGatewayRectifierSetMutation,
   useSettingsPatchMutation,
   useSettingsQuery,
+  useSettingsWebSearchSetMutation,
 } from "../../query/settings";
 import { useProvidersListQuery } from "../../query/providers";
 import {
@@ -50,6 +55,7 @@ export const CLI_MANAGER_TABS: Array<{ key: CliManagerTabKey; label: string }> =
 const DEFAULT_RECTIFIER: GatewayRectifierSettingsPatch = {
   verbose_provider_error: true,
   intercept_anthropic_warmup_requests: true,
+  intercept_web_search: false,
   enable_thinking_signature_rectifier: true,
   enable_thinking_budget_rectifier: true,
   enable_billing_header_rectifier: true,
@@ -79,11 +85,13 @@ export function useCliManagerPageDataModel() {
   const rectifierMutation = useSettingsGatewayRectifierSetMutation();
   const circuitBreakerNoticeMutation = useSettingsCircuitBreakerNoticeSetMutation();
   const codexSessionIdCompletionMutation = useSettingsCodexSessionIdCompletionSetMutation();
+  const webSearchMutation = useSettingsWebSearchSetMutation();
   const commonSettingsMutation = useSettingsPatchMutation();
 
   const rectifierSaving = rectifierMutation.isPending;
   const circuitBreakerNoticeSaving = circuitBreakerNoticeMutation.isPending;
   const codexSessionIdCompletionSaving = codexSessionIdCompletionMutation.isPending;
+  const webSearchSaving = webSearchMutation.isPending;
   const commonSettingsSaving = commonSettingsMutation.isPending;
 
   const [rectifier, setRectifier] = useState<GatewayRectifierSettingsPatch>(DEFAULT_RECTIFIER);
@@ -163,6 +171,7 @@ export function useCliManagerPageDataModel() {
     setRectifier({
       verbose_provider_error: appSettings.verbose_provider_error,
       intercept_anthropic_warmup_requests: appSettings.intercept_anthropic_warmup_requests,
+      intercept_web_search: appSettings.intercept_web_search ?? false,
       enable_thinking_signature_rectifier: appSettings.enable_thinking_signature_rectifier,
       enable_thinking_budget_rectifier: appSettings.enable_thinking_budget_rectifier,
       enable_billing_header_rectifier: appSettings.enable_billing_header_rectifier,
@@ -209,6 +218,7 @@ export function useCliManagerPageDataModel() {
       setRectifier({
         verbose_provider_error: updated.verbose_provider_error,
         intercept_anthropic_warmup_requests: updated.intercept_anthropic_warmup_requests,
+        intercept_web_search: updated.intercept_web_search ?? false,
         enable_thinking_signature_rectifier: updated.enable_thinking_signature_rectifier,
         enable_thinking_budget_rectifier: updated.enable_thinking_budget_rectifier,
         enable_billing_header_rectifier: updated.enable_billing_header_rectifier,
@@ -276,6 +286,24 @@ export function useCliManagerPageDataModel() {
       logToConsole("error", "更新 Codex Session ID 补全配置失败", { error: String(err) });
       toast("更新 Codex Session ID 补全配置失败：请稍后重试");
       setCodexSessionIdCompletionEnabled(prev);
+    }
+  }
+
+  async function persistWebSearch(input: WebSearchSettingsInput) {
+    if (settingsWriteBlocked) {
+      blockSettingsWrite();
+      return;
+    }
+    if (webSearchSaving) return;
+    if (rectifierAvailable !== "available") return;
+
+    try {
+      const updated = await webSearchMutation.mutateAsync(input);
+      if (!updated) return;
+      toast.success("Web 搜索配置已更新");
+    } catch (err) {
+      logToConsole("error", "更新 Web 搜索配置失败", { error: String(err) });
+      toast(formatActionFailureToast("更新 Web 搜索配置", err).toast);
     }
   }
 
@@ -574,6 +602,8 @@ export function useCliManagerPageDataModel() {
       codexSessionIdCompletionEnabled,
       codexSessionIdCompletionSaving,
       onPersistCodexSessionIdCompletion: persistCodexSessionIdCompletion,
+      webSearchSaving: webSearchSaving || commonSettingsSaving || settingsWriteBlocked,
+      onPersistWebSearch: persistWebSearch,
       cacheAnomalyMonitorEnabled,
       cacheAnomalyMonitorSaving: commonSettingsSaving || settingsWriteBlocked,
       onPersistCacheAnomalyMonitor: persistCacheAnomalyMonitor,

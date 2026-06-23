@@ -9,6 +9,7 @@ import {
 export type GatewayRectifierSettingsPatch = {
   verbose_provider_error: boolean;
   intercept_anthropic_warmup_requests: boolean;
+  intercept_web_search: boolean;
   enable_thinking_signature_rectifier: boolean;
   enable_thinking_budget_rectifier: boolean;
   enable_billing_header_rectifier: boolean;
@@ -35,6 +36,10 @@ export function normalizeGatewayRectifierSettingsPatch(
     intercept_anthropic_warmup_requests: normalizeBooleanSetting(
       input.intercept_anthropic_warmup_requests,
       "intercept_anthropic_warmup_requests"
+    ),
+    intercept_web_search: normalizeBooleanSetting(
+      input.intercept_web_search,
+      "intercept_web_search"
     ),
     enable_thinking_signature_rectifier: normalizeBooleanSetting(
       input.enable_thinking_signature_rectifier,
@@ -86,6 +91,7 @@ export async function settingsGatewayRectifierSet(input: GatewayRectifierSetting
   const update = {
     verboseProviderError: normalizedInput.verbose_provider_error,
     interceptAnthropicWarmupRequests: normalizedInput.intercept_anthropic_warmup_requests,
+    interceptWebSearch: normalizedInput.intercept_web_search,
     enableThinkingSignatureRectifier: normalizedInput.enable_thinking_signature_rectifier,
     enableThinkingBudgetRectifier: normalizedInput.enable_thinking_budget_rectifier,
     enableBillingHeaderRectifier: normalizedInput.enable_billing_header_rectifier,

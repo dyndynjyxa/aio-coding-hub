@@ -36,7 +36,7 @@ use middleware::{
     CodexSessionCompletionMiddleware, Cx2ccCountTokensInterceptorMiddleware, MiddlewareAction,
     ModelInferenceMiddleware, ProbeInterceptorMiddleware, ProviderResolutionMiddleware,
     ProxyContext, RecursionGuardMiddleware, RequestFingerprintMiddleware,
-    RuntimeSettingsMiddleware, WarmupInterceptorMiddleware,
+    RuntimeSettingsMiddleware, WarmupInterceptorMiddleware, WebSearchInterceptorMiddleware,
 };
 
 type SpecialSettings = Arc<Mutex<Vec<serde_json::Value>>>;
@@ -204,6 +204,13 @@ where
 
     // 10. Provider resolution (session routing + provider selection).
     let ctx = match ProviderResolutionMiddleware::run(ctx).await {
+        MiddlewareAction::Continue(ctx) => *ctx,
+        MiddlewareAction::ShortCircuit(resp) => return resp,
+    };
+
+    // 10b. Web search interceptor (requires runtime_settings + the resolved
+    //      provider list, used by the LLM-backed backend).
+    let ctx = match WebSearchInterceptorMiddleware::run(ctx) {
         MiddlewareAction::Continue(ctx) => *ctx,
         MiddlewareAction::ShortCircuit(resp) => return resp,
     };

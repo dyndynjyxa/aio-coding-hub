@@ -23,6 +23,7 @@ mod upstream_fingerprint;
 mod upstream_identity;
 pub(crate) mod util;
 mod warmup;
+pub(crate) mod web_search;
 
 use crate::settings;
 use serde::Serialize;

@@ -8,17 +8,24 @@ import {
   gatewayUpstreamProxyTest,
 } from "../../../services/gateway/gateway";
 import { logToConsole } from "../../../services/consoleLog";
-import type { AppSettings, SensitiveStringUpdate } from "../../../services/settings/settings";
+import type {
+  AppSettings,
+  SearchBackendKind,
+  SensitiveStringUpdate,
+  WebSearchSettingsInput,
+} from "../../../services/settings/settings";
 import type { GatewayRectifierSettingsPatch } from "../../../services/settings/settingsGatewayRectifier";
 import { validateUpstreamProxyFields } from "../../../services/settings/settingsValidation";
 import { Button } from "../../../ui/Button";
 import { Card } from "../../../ui/Card";
 import { Input } from "../../../ui/Input";
+import { RadioGroup } from "../../../ui/RadioGroup";
 import { SettingsRow } from "../../../ui/SettingsRow";
 import { Switch } from "../../../ui/Switch";
+import { formatActionFailureToast } from "../../../utils/errors";
 import { NetworkSettingsCard } from "../NetworkSettingsCard";
 import { WslSettingsCard } from "../WslSettingsCard";
-import { Bell, Shield, TrendingDown, Globe } from "lucide-react";
+import { Bell, Shield, TrendingDown, Globe, Search } from "lucide-react";
 
 export type CliManagerAvailability = "checking" | "available" | "unavailable";
 
@@ -37,6 +44,9 @@ export type CliManagerGeneralTabProps = {
   codexSessionIdCompletionEnabled: boolean;
   codexSessionIdCompletionSaving: boolean;
   onPersistCodexSessionIdCompletion: (enable: boolean) => Promise<void> | void;
+
+  webSearchSaving: boolean;
+  onPersistWebSearch: (input: WebSearchSettingsInput) => Promise<void> | void;
 
   cacheAnomalyMonitorEnabled: boolean;
   cacheAnomalyMonitorSaving: boolean;
@@ -88,6 +98,8 @@ export function CliManagerGeneralTab({
   codexSessionIdCompletionEnabled,
   codexSessionIdCompletionSaving,
   onPersistCodexSessionIdCompletion,
+  webSearchSaving,
+  onPersistWebSearch,
   cacheAnomalyMonitorEnabled,
   cacheAnomalyMonitorSaving,
   onPersistCacheAnomalyMonitor,
@@ -129,6 +141,7 @@ export function CliManagerGeneralTab({
     notificationSoundSaving || settingsUnavailable || settingsWriteBlocked;
   const cacheMonitorDisabled =
     cacheAnomalyMonitorSaving || settingsUnavailable || settingsWriteBlocked;
+  const webSearchDisabled = webSearchSaving || settingsUnavailable || settingsWriteBlocked;
   const commonSettingsDisabled =
     commonSettingsSaving || settingsUnavailable || settingsWriteBlocked;
 
@@ -173,6 +186,18 @@ export function CliManagerGeneralTab({
                     checked={rectifier.intercept_anthropic_warmup_requests}
                     onCheckedChange={(checked) =>
                       void onPersistRectifier({ intercept_anthropic_warmup_requests: checked })
+                    }
+                    disabled={rectifierDisabled}
+                  />
+                </SettingsRow>
+                <SettingsRow
+                  label="Web Search 拦截"
+                  subtitle="启用后,网关会拦截 Claude Code 内部的 WebSearchTool 调用,改用本机配置的搜索后端(Brave / Tavily / LLM-backed)应答。关闭时按原样转发到上游。"
+                >
+                  <Switch
+                    checked={rectifier.intercept_web_search}
+                    onCheckedChange={(checked) =>
+                      void onPersistRectifier({ intercept_web_search: checked })
                     }
                     disabled={rectifierDisabled}
                   />
@@ -667,6 +692,16 @@ export function CliManagerGeneralTab({
                 </SettingsRow>
               </div>
             </div>
+
+            {appSettings ? (
+              <WebSearchSettingsCard
+                available={rectifierAvailable === "available"}
+                saving={webSearchDisabled}
+                settings={appSettings}
+                onPersistSettings={onPersistWebSearch}
+                blurOnEnter={blurOnEnter}
+              />
+            ) : null}
           </div>
         )}
       </Card>
@@ -996,6 +1031,449 @@ function UpstreamProxySettingsCard({
               </button>
             </div>
           ) : null}
+        </SettingsRow>
+      </div>
+    </div>
+  );
+}
+
+type WebSearchSettingsCardProps = {
+  available: boolean;
+  saving: boolean;
+  settings: AppSettings;
+  onPersistSettings: (input: WebSearchSettingsInput) => Promise<void> | void;
+  blurOnEnter: (e: ReactKeyboardEvent<HTMLInputElement>) => void;
+};
+
+const WEB_SEARCH_BACKEND_OPTIONS: Array<{ value: SearchBackendKind; label: string }> = [
+  { value: "brave", label: "Brave" },
+  { value: "tavily", label: "Tavily" },
+  { value: "metaso", label: "Metaso" },
+  { value: "llm_backed", label: "LLM-backed" },
+];
+
+const WEB_SEARCH_MAX_RESULTS_MIN = 1;
+const WEB_SEARCH_API_KEY_MAX_LEN = 512;
+
+function WebSearchSettingsCard({
+  available,
+  saving,
+  settings,
+  onPersistSettings,
+  blurOnEnter,
+}: WebSearchSettingsCardProps) {
+  const [backendKind, setBackendKind] = useState<SearchBackendKind>(
+    settings.web_search_backend_kind
+  );
+  const [braveApiKey, setBraveApiKey] = useState("");
+  const [tavilyApiKey, setTavilyApiKey] = useState("");
+  const [metasoApiKey, setMetasoApiKey] = useState("");
+  const [metasoIncludeSummary, setMetasoIncludeSummary] = useState(
+    settings.web_search_metaso_include_summary
+  );
+  const [metasoConciseSnippet, setMetasoConciseSnippet] = useState(
+    settings.web_search_metaso_concise_snippet
+  );
+  const [maxResults, setMaxResults] = useState<number>(settings.web_search_max_results);
+  const [llmProviderId, setLlmProviderId] = useState<number | null>(
+    settings.web_search_llm_provider_id
+  );
+  const [clearBraveKey, setClearBraveKey] = useState(false);
+  const [clearTavilyKey, setClearTavilyKey] = useState(false);
+  const [clearMetasoKey, setClearMetasoKey] = useState(false);
+  const disabled = !available || saving;
+
+  useEffect(() => {
+    setBackendKind(settings.web_search_backend_kind);
+    setBraveApiKey("");
+    setTavilyApiKey("");
+    setMetasoApiKey("");
+    setMetasoIncludeSummary(settings.web_search_metaso_include_summary);
+    setMetasoConciseSnippet(settings.web_search_metaso_concise_snippet);
+    setMaxResults(settings.web_search_max_results);
+    setLlmProviderId(settings.web_search_llm_provider_id);
+    setClearBraveKey(false);
+    setClearTavilyKey(false);
+    setClearMetasoKey(false);
+  }, [
+    settings.web_search_backend_kind,
+    settings.web_search_brave_api_key_configured,
+    settings.web_search_tavily_api_key_configured,
+    settings.web_search_metaso_api_key_configured,
+    settings.web_search_metaso_include_summary,
+    settings.web_search_metaso_concise_snippet,
+    settings.web_search_max_results,
+    settings.web_search_llm_provider_id,
+  ]);
+
+  const showBraveKey = backendKind === "brave";
+  const showTavilyKey = backendKind === "tavily";
+  const showMetasoKey = backendKind === "metaso";
+  const showLlmProvider = backendKind === "llm_backed";
+
+  function buildInput(
+    overrides: {
+      backendKind?: SearchBackendKind;
+      braveKey?: SensitiveStringUpdate;
+      tavilyKey?: SensitiveStringUpdate;
+      metasoKey?: SensitiveStringUpdate;
+      metasoIncludeSummary?: boolean;
+      metasoConciseSnippet?: boolean;
+      maxResults?: number;
+      llmProviderId?: number | null;
+    } = {}
+  ): WebSearchSettingsInput {
+    return {
+      webSearchBackendKind: overrides.backendKind ?? backendKind,
+      webSearchBraveApiKey:
+        overrides.braveKey ??
+        (clearBraveKey
+          ? { mode: "clear" }
+          : braveApiKey.trim()
+            ? { mode: "replace", value: braveApiKey }
+            : { mode: "preserve" }),
+      webSearchTavilyApiKey:
+        overrides.tavilyKey ??
+        (clearTavilyKey
+          ? { mode: "clear" }
+          : tavilyApiKey.trim()
+            ? { mode: "replace", value: tavilyApiKey }
+            : { mode: "preserve" }),
+      webSearchMetasoApiKey:
+        overrides.metasoKey ??
+        (clearMetasoKey
+          ? { mode: "clear" }
+          : metasoApiKey.trim()
+            ? { mode: "replace", value: metasoApiKey }
+            : { mode: "preserve" }),
+      webSearchMetasoIncludeSummary: overrides.metasoIncludeSummary ?? metasoIncludeSummary,
+      webSearchMetasoConciseSnippet: overrides.metasoConciseSnippet ?? metasoConciseSnippet,
+      webSearchMaxResults: overrides.maxResults ?? maxResults,
+      webSearchLlmProviderId:
+        overrides.llmProviderId !== undefined ? overrides.llmProviderId : llmProviderId,
+    };
+  }
+
+  function firePatch(overrides: Parameters<typeof buildInput>[0] = {}) {
+    if (disabled) return;
+    for (const [label, value] of [
+      ["Brave API Key", braveApiKey],
+      ["Tavily API Key", tavilyApiKey],
+      ["Metaso API Key", metasoApiKey],
+    ] as const) {
+      if (value.length > WEB_SEARCH_API_KEY_MAX_LEN) {
+        toast(`${label} 长度必须 <= ${WEB_SEARCH_API_KEY_MAX_LEN} 字符`);
+        return;
+      }
+    }
+    const input = buildInput(overrides);
+    if (
+      !Number.isInteger(input.webSearchMaxResults) ||
+      input.webSearchMaxResults < WEB_SEARCH_MAX_RESULTS_MIN
+    ) {
+      toast("Web 搜索结果数必须为正整数");
+      return;
+    }
+    Promise.resolve(onPersistSettings(input)).catch((err) => {
+      logToConsole("error", "保存 Web 搜索配置失败", { error: String(err) });
+      toast(formatActionFailureToast("更新 Web 搜索配置", err).toast);
+    });
+  }
+
+  function persistBackend(next: SearchBackendKind) {
+    if (next === backendKind) return;
+    setBackendKind(next);
+    firePatch({ backendKind: next });
+  }
+
+  function persistBraveKey() {
+    if (!braveApiKey.trim()) return;
+    firePatch();
+    setBraveApiKey("");
+  }
+
+  function persistTavilyKey() {
+    if (!tavilyApiKey.trim()) return;
+    firePatch();
+    setTavilyApiKey("");
+  }
+
+  function persistMetasoKey() {
+    if (!metasoApiKey.trim()) return;
+    firePatch();
+    setMetasoApiKey("");
+  }
+
+  function toggleClearBraveKey() {
+    const nextClear = !clearBraveKey;
+    setClearBraveKey(nextClear);
+    setBraveApiKey("");
+    firePatch({
+      braveKey: nextClear ? { mode: "clear" } : { mode: "preserve" },
+    });
+  }
+
+  function toggleClearTavilyKey() {
+    const nextClear = !clearTavilyKey;
+    setClearTavilyKey(nextClear);
+    setTavilyApiKey("");
+    firePatch({
+      tavilyKey: nextClear ? { mode: "clear" } : { mode: "preserve" },
+    });
+  }
+
+  function toggleClearMetasoKey() {
+    const nextClear = !clearMetasoKey;
+    setClearMetasoKey(nextClear);
+    setMetasoApiKey("");
+    firePatch({
+      metasoKey: nextClear ? { mode: "clear" } : { mode: "preserve" },
+    });
+  }
+
+  function persistMetasoIncludeSummary(next: boolean) {
+    if (next === metasoIncludeSummary) return;
+    setMetasoIncludeSummary(next);
+    firePatch({ metasoIncludeSummary: next });
+  }
+
+  function persistMetasoConciseSnippet(next: boolean) {
+    if (next === metasoConciseSnippet) return;
+    setMetasoConciseSnippet(next);
+    firePatch({ metasoConciseSnippet: next });
+  }
+
+  function persistMaxResults() {
+    const trimmed = Math.max(WEB_SEARCH_MAX_RESULTS_MIN, Math.floor(maxResults));
+    if (trimmed === settings.web_search_max_results) {
+      setMaxResults(settings.web_search_max_results);
+      return;
+    }
+    setMaxResults(trimmed);
+    firePatch({ maxResults: trimmed });
+  }
+
+  function persistLlmProviderId() {
+    if (llmProviderId === settings.web_search_llm_provider_id) return;
+    firePatch({ llmProviderId });
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-white dark:bg-secondary p-5">
+      <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-1">
+        <Search className="h-4 w-4 text-muted-foreground" />
+        Web Search 后端
+      </h3>
+      <p className="text-xs text-muted-foreground mb-3">
+        选择在「Web Search 拦截」开启时实际承担搜索请求的后端；切换后端后 API Key
+        仍然保留，可随时再切回。
+      </p>
+      <div className="divide-y divide-border">
+        <SettingsRow
+          label="搜索后端"
+          subtitle="Brave / Tavily / Metaso / LLM-backed (使用已配置 LLM 提供商自带的 web_search 工具)。"
+        >
+          <RadioGroup
+            name="web-search-backend-kind"
+            value={backendKind}
+            onChange={(value) => persistBackend(value as SearchBackendKind)}
+            options={WEB_SEARCH_BACKEND_OPTIONS}
+            disabled={disabled}
+          />
+        </SettingsRow>
+
+        {showBraveKey ? (
+          <SettingsRow
+            label="Brave API Key"
+            subtitle="在 https://api.search.brave.com 获取。留空保留已保存 Key。"
+          >
+            <div className="flex flex-col gap-2">
+              <Input
+                type="password"
+                value={braveApiKey}
+                onChange={(e) => {
+                  setBraveApiKey(e.currentTarget.value);
+                  setClearBraveKey(false);
+                }}
+                onBlur={persistBraveKey}
+                onKeyDown={blurOnEnter}
+                placeholder={
+                  settings.web_search_brave_api_key_configured
+                    ? "留空表示保留已保存 Key"
+                    : "BSA-xxxxxxxxxxxxxxxx"
+                }
+                style={{ width: "20rem" }}
+                disabled={disabled}
+              />
+              {settings.web_search_brave_api_key_configured ? (
+                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <span>{clearBraveKey ? "保存后会删除已保存 Key" : "已保存 Brave API Key"}</span>
+                  <button
+                    type="button"
+                    className="text-accent hover:text-accent/80"
+                    disabled={disabled}
+                    onClick={toggleClearBraveKey}
+                  >
+                    {clearBraveKey ? "取消清空" : "清空已保存 Key"}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </SettingsRow>
+        ) : null}
+
+        {showTavilyKey ? (
+          <SettingsRow
+            label="Tavily API Key"
+            subtitle="在 https://tavily.com 获取。留空保留已保存 Key。"
+          >
+            <div className="flex flex-col gap-2">
+              <Input
+                type="password"
+                value={tavilyApiKey}
+                onChange={(e) => {
+                  setTavilyApiKey(e.currentTarget.value);
+                  setClearTavilyKey(false);
+                }}
+                onBlur={persistTavilyKey}
+                onKeyDown={blurOnEnter}
+                placeholder={
+                  settings.web_search_tavily_api_key_configured
+                    ? "留空表示保留已保存 Key"
+                    : "tvly-xxxxxxxxxxxxxxxx"
+                }
+                style={{ width: "20rem" }}
+                disabled={disabled}
+              />
+              {settings.web_search_tavily_api_key_configured ? (
+                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <span>{clearTavilyKey ? "保存后会删除已保存 Key" : "已保存 Tavily API Key"}</span>
+                  <button
+                    type="button"
+                    className="text-accent hover:text-accent/80"
+                    disabled={disabled}
+                    onClick={toggleClearTavilyKey}
+                  >
+                    {clearTavilyKey ? "取消清空" : "清空已保存 Key"}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </SettingsRow>
+        ) : null}
+
+        {showMetasoKey ? (
+          <>
+            <SettingsRow
+              label="Metaso API Key"
+              subtitle="在 https://metaso.cn 控制台获取。留空保留已保存 Key。"
+            >
+              <div className="flex flex-col gap-2">
+                <Input
+                  type="password"
+                  value={metasoApiKey}
+                  onChange={(e) => {
+                    setMetasoApiKey(e.currentTarget.value);
+                    setClearMetasoKey(false);
+                  }}
+                  onBlur={persistMetasoKey}
+                  onKeyDown={blurOnEnter}
+                  placeholder={
+                    settings.web_search_metaso_api_key_configured
+                      ? "留空表示保留已保存 Key"
+                      : "mk-xxxxxxxxxxxxxxxx"
+                  }
+                  style={{ width: "20rem" }}
+                  disabled={disabled}
+                />
+                {settings.web_search_metaso_api_key_configured ? (
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    <span>
+                      {clearMetasoKey ? "保存后会删除已保存 Key" : "已保存 Metaso API Key"}
+                    </span>
+                    <button
+                      type="button"
+                      className="text-accent hover:text-accent/80"
+                      disabled={disabled}
+                      onClick={toggleClearMetasoKey}
+                    >
+                      {clearMetasoKey ? "取消清空" : "清空已保存 Key"}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </SettingsRow>
+            <SettingsRow
+              label="包含 AI 摘要 (includeSummary)"
+              subtitle="开启后，每条结果附带由 Metaso 生成的 AI 摘要（更丰富，但 token/费用更高）。"
+            >
+              <Switch
+                checked={metasoIncludeSummary}
+                onCheckedChange={persistMetasoIncludeSummary}
+                disabled={disabled}
+              />
+            </SettingsRow>
+            <SettingsRow
+              label="短摘要 (conciseSnippet)"
+              subtitle="开启后，要求 Metaso 返回更短的 search snippet，节省下游模型上下文。"
+            >
+              <Switch
+                checked={metasoConciseSnippet}
+                onCheckedChange={persistMetasoConciseSnippet}
+                disabled={disabled}
+              />
+            </SettingsRow>
+          </>
+        ) : null}
+
+        {showLlmProvider ? (
+          <SettingsRow
+            label="LLM 提供商 (web_search_llm_provider_id)"
+            subtitle="由所选 LLM 提供商自带 web_search 工具执行搜索；需要该提供商已配置 API Key 并支持 web_search_20250305。"
+          >
+            <div className="flex flex-col gap-2 text-xs text-muted-foreground">
+              <Input
+                type="number"
+                value={llmProviderId ?? ""}
+                onChange={(e) => {
+                  const next = e.currentTarget.valueAsNumber;
+                  setLlmProviderId(Number.isFinite(next) ? next : null);
+                }}
+                onBlur={persistLlmProviderId}
+                onKeyDown={blurOnEnter}
+                placeholder="LLM 提供商 ID"
+                style={{ width: "10rem" }}
+                disabled={disabled}
+                min={1}
+              />
+              <span>
+                当前值：
+                {llmProviderId == null ? "未选择（需在 Provider 管理中选择）" : `#${llmProviderId}`}
+              </span>
+            </div>
+          </SettingsRow>
+        ) : null}
+
+        <SettingsRow
+          label="最大结果数"
+          subtitle="单次搜索最多返回的结果条数（必须为正整数，无上限）。"
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              value={maxResults}
+              onChange={(e) => {
+                const next = e.currentTarget.valueAsNumber;
+                if (Number.isFinite(next)) setMaxResults(next);
+              }}
+              onBlur={persistMaxResults}
+              onKeyDown={blurOnEnter}
+              style={{ width: "5rem" }}
+              min={WEB_SEARCH_MAX_RESULTS_MIN}
+              disabled={disabled}
+            />
+            <span className="w-8 text-sm text-muted-foreground">条</span>
+          </div>
         </SettingsRow>
       </div>
     </div>

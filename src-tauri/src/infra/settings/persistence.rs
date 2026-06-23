@@ -319,6 +319,9 @@ pub(crate) fn validate_bounds(settings: &AppSettings) -> AppResult<()> {
         MAX_CX2CC_OPTIONAL_FIELD_LEN,
     )?;
     validate_update_releases_url(&settings.update_releases_url)?;
+    if settings.web_search_max_results == 0 {
+        return Err("SEC_INVALID_INPUT: web_search_max_results must be >= 1".into());
+    }
     if settings.log_retention_days == 0 {
         return Err("SEC_INVALID_INPUT: log_retention_days must be >= 1".into());
     }

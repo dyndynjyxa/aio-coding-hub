@@ -21,6 +21,7 @@ macro_rules! generated_command_registry {
             settings_gateway_rectifier_set => crate::commands::settings::settings_gateway_rectifier_set,
             settings_circuit_breaker_notice_set => crate::commands::settings::settings_circuit_breaker_notice_set,
             settings_codex_session_id_completion_set => crate::commands::settings::settings_codex_session_id_completion_set,
+            settings_web_search_set => crate::commands::settings::settings_web_search_set,
             config_export => crate::commands::config_migrate::config_export,
             config_import => crate::commands::config_migrate::config_import,
             // ── app ──

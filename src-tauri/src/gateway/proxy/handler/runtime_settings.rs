@@ -10,6 +10,7 @@ pub(super) const DEFAULT_FAILOVER_MAX_PROVIDERS_TO_TRY: u32 = 5;
 pub(super) struct HandlerRuntimeSettings {
     pub(super) verbose_provider_error: bool,
     pub(super) intercept_warmup: bool,
+    pub(super) web_search_settings: WebSearchRuntimeSettings,
     pub(super) enable_thinking_signature_rectifier: bool,
     pub(super) enable_thinking_budget_rectifier: bool,
     pub(super) enable_billing_header_rectifier: bool,
@@ -26,6 +27,13 @@ pub(super) struct HandlerRuntimeSettings {
     pub(super) upstream_first_byte_timeout_secs: u32,
     pub(super) upstream_stream_idle_timeout_secs: u32,
     pub(super) upstream_request_timeout_non_streaming_secs: u32,
+}
+
+/// Web-search interception settings snapshot taken at handler entry.
+#[derive(Debug, Clone)]
+pub(super) struct WebSearchRuntimeSettings {
+    pub(super) intercept: bool,
+    pub(super) backend_settings: crate::gateway::web_search::factory::BackendSettings,
 }
 
 pub(super) fn handler_runtime_settings(
@@ -88,6 +96,38 @@ pub(super) fn handler_runtime_settings(
         intercept_warmup: settings_cfg
             .map(|cfg| cfg.intercept_anthropic_warmup_requests)
             .unwrap_or(false),
+        web_search_settings: WebSearchRuntimeSettings {
+            intercept: settings_cfg
+                .map(|cfg| cfg.intercept_web_search)
+                .unwrap_or(false),
+            backend_settings: crate::gateway::web_search::factory::BackendSettings {
+                kind: settings_cfg
+                    .map(|cfg| cfg.web_search_backend_kind)
+                    .unwrap_or_default(),
+                brave_api_key: settings_cfg
+                    .map(|cfg| cfg.web_search_brave_api_key.clone())
+                    .unwrap_or_default(),
+                tavily_api_key: settings_cfg
+                    .map(|cfg| cfg.web_search_tavily_api_key.clone())
+                    .unwrap_or_default(),
+                metaso_api_key: settings_cfg
+                    .map(|cfg| cfg.web_search_metaso_api_key.clone())
+                    .unwrap_or_default(),
+                metaso_include_summary: settings_cfg
+                    .map(|cfg| cfg.web_search_metaso_include_summary)
+                    .unwrap_or(false),
+                metaso_concise_snippet: settings_cfg
+                    .map(|cfg| cfg.web_search_metaso_concise_snippet)
+                    .unwrap_or(false),
+                max_results: settings_cfg
+                    .map(|cfg| cfg.web_search_max_results)
+                    .unwrap_or(10),
+                llm_provider_id: settings_cfg.and_then(|cfg| cfg.web_search_llm_provider_id),
+                proxy_url: settings_cfg
+                    .map(|cfg| cfg.upstream_proxy_url.clone())
+                    .unwrap_or_default(),
+            },
+        },
         enable_thinking_signature_rectifier,
         enable_thinking_budget_rectifier,
         enable_billing_header_rectifier,

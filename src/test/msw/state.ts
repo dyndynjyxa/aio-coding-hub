@@ -55,6 +55,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   enable_circuit_breaker_notice: false,
   verbose_provider_error: true,
   intercept_anthropic_warmup_requests: true,
+  intercept_web_search: false,
   enable_thinking_signature_rectifier: true,
   enable_thinking_budget_rectifier: true,
   enable_billing_header_rectifier: true,
@@ -85,6 +86,14 @@ const DEFAULT_SETTINGS: AppSettings = {
   upstream_proxy_url: "",
   upstream_proxy_username: "",
   upstream_proxy_password_configured: false,
+  web_search_backend_kind: "brave",
+  web_search_brave_api_key_configured: false,
+  web_search_tavily_api_key_configured: false,
+  web_search_metaso_api_key_configured: false,
+  web_search_metaso_include_summary: false,
+  web_search_metaso_concise_snippet: false,
+  web_search_max_results: 10,
+  web_search_llm_provider_id: null,
 };
 
 const DEFAULT_GATEWAY_STATUS: GatewayStatus = {

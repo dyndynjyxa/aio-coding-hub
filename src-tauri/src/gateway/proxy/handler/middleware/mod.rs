@@ -16,6 +16,7 @@ pub(super) mod recursion_guard;
 pub(super) mod request_fingerprint;
 pub(super) mod runtime_settings_reader;
 pub(super) mod warmup_interceptor;
+pub(super) mod web_search_interceptor;
 
 pub(super) use billing_header_rectifier::BillingHeaderRectifierMiddleware;
 pub(super) use body_reader::BodyReaderMiddleware;
@@ -29,6 +30,7 @@ pub(super) use recursion_guard::RecursionGuardMiddleware;
 pub(super) use request_fingerprint::RequestFingerprintMiddleware;
 pub(super) use runtime_settings_reader::RuntimeSettingsMiddleware;
 pub(super) use warmup_interceptor::WarmupInterceptorMiddleware;
+pub(super) use web_search_interceptor::WebSearchInterceptorMiddleware;
 
 use crate::gateway::proxy::request_body::GatewayRequestBody;
 use crate::gateway::proxy::request_context::RequestContextParts;

@@ -61,6 +61,16 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async settingsWebSearchSet(
+    update: WebSearchSettingsUpdate
+  ): Promise<Result<SettingsView, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("settings_web_search_set", { update }) };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async configExport(filePath: string): Promise<Result<boolean, string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("config_export", { filePath }) };
@@ -2493,6 +2503,7 @@ export type GatewayProviderCircuitStatus = {
 export type GatewayRectifierSettingsUpdate = {
   verboseProviderError: boolean;
   interceptAnthropicWarmupRequests: boolean;
+  interceptWebSearch: boolean;
   enableThinkingSignatureRectifier: boolean;
   enableThinkingBudgetRectifier: boolean;
   enableBillingHeaderRectifier: boolean;
@@ -3056,6 +3067,28 @@ export type RequestLogSummary = {
   created_at: number;
 };
 export type RiskyIpcConfirm = { confirm: IpcConfirm };
+/**
+ * Search backend kinds, used in settings to drive factory selection.
+ */
+export type SearchBackendKind =
+  /**
+   * Built-in: queries the Brave Search Web API.
+   */
+  | "brave"
+  /**
+   * Built-in: queries the Tavily Search API (LLM-friendly results).
+   */
+  | "tavily"
+  /**
+   * Built-in: queries the Metaso Search API (LLM-friendly results with
+   * optional AI-generated summaries).
+   */
+  | "metaso"
+  /**
+   * Recursive: invokes another configured LLM provider that natively
+   * supports `web_search_20250305`, then unwraps the search results.
+   */
+  | "llm_backed";
 export type SensitiveStringUpdate =
   | { mode: "preserve" }
   | { mode: "clear" }
@@ -3129,6 +3162,9 @@ export type SettingsUpdate = {
   upstreamProxyUrl: string | null;
   upstreamProxyUsername: string | null;
   upstreamProxyPassword: SensitiveStringUpdate | null;
+  webSearchBackendKind: SearchBackendKind | null;
+  webSearchMaxResults: number | null;
+  webSearchLlmProviderId: number | null;
 };
 export type SettingsView = {
   schema_version: number;
@@ -3164,6 +3200,7 @@ export type SettingsView = {
   enable_circuit_breaker_notice: boolean;
   verbose_provider_error: boolean;
   intercept_anthropic_warmup_requests: boolean;
+  intercept_web_search: boolean;
   enable_thinking_signature_rectifier: boolean;
   enable_thinking_budget_rectifier: boolean;
   enable_billing_header_rectifier: boolean;
@@ -3194,6 +3231,14 @@ export type SettingsView = {
   upstream_proxy_url: string;
   upstream_proxy_username: string;
   upstream_proxy_password_configured: boolean;
+  web_search_backend_kind: SearchBackendKind;
+  web_search_brave_api_key_configured: boolean;
+  web_search_tavily_api_key_configured: boolean;
+  web_search_metaso_api_key_configured: boolean;
+  web_search_metaso_include_summary: boolean;
+  web_search_metaso_concise_snippet: boolean;
+  web_search_max_results: number;
+  web_search_llm_provider_id: number | null;
 };
 export type SimpleCliInfo = {
   found: boolean;
@@ -3361,6 +3406,16 @@ export type UsageSummary = {
   cache_creation_input_tokens: number;
   cache_creation_5m_input_tokens: number;
   cache_creation_1h_input_tokens: number;
+};
+export type WebSearchSettingsUpdate = {
+  webSearchBackendKind: SearchBackendKind;
+  webSearchBraveApiKey: SensitiveStringUpdate;
+  webSearchTavilyApiKey: SensitiveStringUpdate;
+  webSearchMetasoApiKey: SensitiveStringUpdate;
+  webSearchMetasoIncludeSummary: boolean;
+  webSearchMetasoConciseSnippet: boolean;
+  webSearchMaxResults: number;
+  webSearchLlmProviderId: number | null;
 };
 export type WorkspaceApplyReport = {
   cli_key: string;

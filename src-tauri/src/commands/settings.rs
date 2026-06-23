@@ -6,7 +6,7 @@ use crate::app_state::DbInitState;
 pub(crate) use crate::app::settings_service::{
     CircuitBreakerNoticeUpdate, CodexSessionIdCompletionUpdate, GatewayRectifierSettingsUpdate,
     SensitiveStringUpdate, SettingsMutationResult, SettingsMutationRuntime, SettingsUpdate,
-    SettingsView,
+    SettingsView, WebSearchSettingsUpdate,
 };
 
 #[tauri::command]
@@ -50,4 +50,13 @@ pub(crate) async fn settings_codex_session_id_completion_set(
     update: CodexSessionIdCompletionUpdate,
 ) -> Result<SettingsView, String> {
     settings_service::settings_codex_session_id_completion_set(app, update).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn settings_web_search_set(
+    app: tauri::AppHandle,
+    update: WebSearchSettingsUpdate,
+) -> Result<SettingsView, String> {
+    settings_service::settings_web_search_set(app, update).await
 }

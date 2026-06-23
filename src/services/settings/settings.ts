@@ -3,6 +3,7 @@ import {
   type CodexHomeMode,
   type GatewayListenMode,
   type HomeUsagePeriod,
+  type SearchBackendKind,
   type SensitiveStringUpdate,
   type SettingsMutationResult as GeneratedSettingsMutationResult,
   type SettingsMutationRuntime as GeneratedSettingsMutationRuntime,
@@ -19,6 +20,7 @@ export type {
   CodexHomeMode,
   GatewayListenMode,
   HomeUsagePeriod,
+  SearchBackendKind,
   SensitiveStringUpdate,
   WslHostAddressMode,
   WslTargetCli,
@@ -60,6 +62,9 @@ const SETTINGS_VIEW_TO_UPDATE_FIELD_MAP = {
   upstreamRequestTimeoutNonStreamingSeconds: "upstream_request_timeout_non_streaming_seconds",
   verboseProviderError: "verbose_provider_error",
   interceptAnthropicWarmupRequests: "intercept_anthropic_warmup_requests",
+  webSearchBackendKind: "web_search_backend_kind",
+  webSearchMaxResults: "web_search_max_results",
+  webSearchLlmProviderId: "web_search_llm_provider_id",
   enableThinkingSignatureRectifier: "enable_thinking_signature_rectifier",
   enableThinkingBudgetRectifier: "enable_thinking_budget_rectifier",
   enableBillingHeaderRectifier: "enable_billing_header_rectifier",
@@ -114,7 +119,13 @@ type SettingsViewKeysHandledOutsideCreateInput =
   | "enable_codex_session_id_completion"
   | "response_fixer_max_json_depth"
   | "response_fixer_max_fix_size"
-  | "upstream_proxy_password_configured";
+  | "upstream_proxy_password_configured"
+  | "intercept_web_search"
+  | "web_search_brave_api_key_configured"
+  | "web_search_tavily_api_key_configured"
+  | "web_search_metaso_api_key_configured"
+  | "web_search_metaso_include_summary"
+  | "web_search_metaso_concise_snippet";
 
 export type __AssertNoUnhandledSettingsViewKeys = AssertNever<
   Exclude<
@@ -224,6 +235,9 @@ function toGeneratedSettingsUpdate(input: SettingsSetInput): GeneratedSettingsUp
     upstreamProxyUrl: input.upstreamProxyUrl ?? null,
     upstreamProxyUsername: input.upstreamProxyUsername ?? null,
     upstreamProxyPassword: input.upstreamProxyPassword ?? null,
+    webSearchBackendKind: input.webSearchBackendKind ?? null,
+    webSearchMaxResults: input.webSearchMaxResults ?? null,
+    webSearchLlmProviderId: input.webSearchLlmProviderId ?? null,
   };
   return update;
 }
@@ -265,5 +279,34 @@ export async function settingsSet(input: SettingsSetInput) {
     args: { update },
     invoke: () =>
       commands.settingsSet(update) as Promise<GeneratedCommandResult<SettingsMutationResult>>,
+  });
+}
+
+export type WebSearchSettingsInput = {
+  webSearchBackendKind: SearchBackendKind;
+  webSearchBraveApiKey: SensitiveStringUpdate;
+  webSearchTavilyApiKey: SensitiveStringUpdate;
+  webSearchMetasoApiKey: SensitiveStringUpdate;
+  webSearchMetasoIncludeSummary: boolean;
+  webSearchMetasoConciseSnippet: boolean;
+  webSearchMaxResults: number;
+  webSearchLlmProviderId: number | null;
+};
+
+const WEB_SEARCH_MAX_RESULTS_MIN = 1;
+
+export async function settingsWebSearchSet(input: WebSearchSettingsInput) {
+  if (
+    !Number.isInteger(input.webSearchMaxResults) ||
+    input.webSearchMaxResults < WEB_SEARCH_MAX_RESULTS_MIN
+  ) {
+    throw new Error(`Web 搜索结果数必须为正整数`);
+  }
+  return invokeGeneratedIpc<AppSettings>({
+    title: "保存 Web 搜索配置失败",
+    cmd: "settings_web_search_set",
+    args: { update: input },
+    invoke: () =>
+      commands.settingsWebSearchSet(input) as Promise<GeneratedCommandResult<AppSettings>>,
   });
 }

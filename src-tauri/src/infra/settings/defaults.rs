@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-pub const SCHEMA_VERSION: u32 = 33;
+pub const SCHEMA_VERSION: u32 = 35;
 pub const DEFAULT_GATEWAY_PORT: u16 = 37123;
 pub const MAX_GATEWAY_PORT: u16 = 37199;
 pub const DEFAULT_PROVIDER_COOLDOWN_SECONDS: u32 = 30;
@@ -40,6 +40,8 @@ pub(super) const SCHEMA_VERSION_RAISE_STREAM_IDLE_TIMEOUT_DEFAULT: u32 = 30;
 pub(super) const SCHEMA_VERSION_ADD_UPSTREAM_PROXY: u32 = 31;
 pub(super) const SCHEMA_VERSION_ADD_UPSTREAM_PROXY_CREDENTIALS: u32 = 32;
 pub(super) const SCHEMA_VERSION_ADD_CODEX_OAUTH_COMPATIBLE_PROXY_MODE: u32 = 33;
+pub(super) const SCHEMA_VERSION_ADD_WEB_SEARCH_INTERCEPT: u32 = 34;
+pub(super) const SCHEMA_VERSION_ADD_WEB_SEARCH_METASO: u32 = 35;
 
 pub(super) const DEFAULT_LOG_RETENTION_DAYS: u32 = 7;
 pub(super) const MAX_LOG_RETENTION_DAYS: u32 = 3650;
@@ -50,6 +52,10 @@ pub(super) const DEFAULT_CIRCUIT_BREAKER_OPEN_DURATION_MINUTES: u32 = 30;
 pub(super) const DEFAULT_ENABLE_CIRCUIT_BREAKER_NOTICE: bool = false;
 pub(super) const DEFAULT_VERBOSE_PROVIDER_ERROR: bool = true;
 pub(super) const DEFAULT_INTERCEPT_ANTHROPIC_WARMUP_REQUESTS: bool = true;
+pub(super) const DEFAULT_INTERCEPT_WEB_SEARCH: bool = false;
+pub(super) const DEFAULT_WEB_SEARCH_MAX_RESULTS: u32 = 10;
+pub(super) const DEFAULT_WEB_SEARCH_METASO_INCLUDE_SUMMARY: bool = false;
+pub(super) const DEFAULT_WEB_SEARCH_METASO_CONCISE_SNIPPET: bool = false;
 pub(super) const DEFAULT_ENABLE_THINKING_SIGNATURE_RECTIFIER: bool = true;
 pub(super) const DEFAULT_ENABLE_THINKING_BUDGET_RECTIFIER: bool = true;
 pub(super) const DEFAULT_ENABLE_BILLING_HEADER_RECTIFIER: bool = false;

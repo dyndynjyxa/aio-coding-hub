@@ -28,6 +28,15 @@ export type PersistedSettings = {
   upstream_stream_idle_timeout_seconds: number;
   upstream_request_timeout_non_streaming_seconds: number;
   intercept_anthropic_warmup_requests: boolean;
+  intercept_web_search: boolean;
+  web_search_backend_kind: "brave" | "tavily" | "metaso" | "llm_backed";
+  web_search_brave_api_key_configured: boolean;
+  web_search_tavily_api_key_configured: boolean;
+  web_search_metaso_api_key_configured: boolean;
+  web_search_metaso_include_summary: boolean;
+  web_search_metaso_concise_snippet: boolean;
+  web_search_max_results: number;
+  web_search_llm_provider_id: number | null;
   enable_thinking_signature_rectifier: boolean;
   enable_debug_log: boolean;
   enable_response_fixer: boolean;
@@ -59,6 +68,15 @@ export const DEFAULT_PERSISTED_SETTINGS: PersistedSettings = {
   upstream_stream_idle_timeout_seconds: 0,
   upstream_request_timeout_non_streaming_seconds: 0,
   intercept_anthropic_warmup_requests: false,
+  intercept_web_search: false,
+  web_search_backend_kind: "brave",
+  web_search_brave_api_key_configured: false,
+  web_search_tavily_api_key_configured: false,
+  web_search_metaso_api_key_configured: false,
+  web_search_metaso_include_summary: false,
+  web_search_metaso_concise_snippet: false,
+  web_search_max_results: 10,
+  web_search_llm_provider_id: null,
   enable_thinking_signature_rectifier: true,
   enable_debug_log: false,
   enable_response_fixer: true,
@@ -91,6 +109,9 @@ const PERSISTED_SETTINGS_INPUT_KEYS = [
   "upstreamStreamIdleTimeoutSeconds",
   "upstreamRequestTimeoutNonStreamingSeconds",
   "interceptAnthropicWarmupRequests",
+  "webSearchBackendKind",
+  "webSearchMaxResults",
+  "webSearchLlmProviderId",
   "enableThinkingSignatureRectifier",
   "enableDebugLog",
   "enableResponseFixer",
@@ -188,6 +209,25 @@ export function buildPersistedSettingsSnapshot(
     intercept_anthropic_warmup_requests:
       settingsValue.intercept_anthropic_warmup_requests ??
       fallback.intercept_anthropic_warmup_requests,
+    intercept_web_search: settingsValue.intercept_web_search ?? fallback.intercept_web_search,
+    web_search_backend_kind:
+      settingsValue.web_search_backend_kind ?? fallback.web_search_backend_kind,
+    web_search_brave_api_key_configured:
+      settingsValue.web_search_brave_api_key_configured ??
+      fallback.web_search_brave_api_key_configured,
+    web_search_tavily_api_key_configured:
+      settingsValue.web_search_tavily_api_key_configured ??
+      fallback.web_search_tavily_api_key_configured,
+    web_search_metaso_api_key_configured:
+      settingsValue.web_search_metaso_api_key_configured ??
+      fallback.web_search_metaso_api_key_configured,
+    web_search_metaso_include_summary:
+      settingsValue.web_search_metaso_include_summary ?? fallback.web_search_metaso_include_summary,
+    web_search_metaso_concise_snippet:
+      settingsValue.web_search_metaso_concise_snippet ?? fallback.web_search_metaso_concise_snippet,
+    web_search_max_results: settingsValue.web_search_max_results ?? fallback.web_search_max_results,
+    web_search_llm_provider_id:
+      settingsValue.web_search_llm_provider_id ?? fallback.web_search_llm_provider_id,
     enable_thinking_signature_rectifier:
       settingsValue.enable_thinking_signature_rectifier ??
       fallback.enable_thinking_signature_rectifier,

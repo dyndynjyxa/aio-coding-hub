@@ -3,10 +3,12 @@ import {
   createSettingsSetInput,
   settingsGet,
   settingsSet,
+  settingsWebSearchSet,
   type AppSettingsPatch,
   type AppSettings,
   type SettingsMutationResult,
   type SettingsSetInput,
+  type WebSearchSettingsInput,
 } from "../services/settings/settings";
 import { settingsCircuitBreakerNoticeSet } from "../services/settings/settingsCircuitBreakerNotice";
 import { settingsCodexSessionIdCompletionSet } from "../services/settings/settingsCodexSessionIdCompletion";
@@ -134,6 +136,21 @@ export function useSettingsCodexSessionIdCompletionSetMutation() {
 
   return useMutation({
     mutationFn: (enable: boolean) => settingsCodexSessionIdCompletionSet(enable),
+    onSuccess: (updated) => {
+      if (!updated) return;
+      queryClient.setQueryData<AppSettings | null>(settingsKeys.get(), updated);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: settingsKeys.get() });
+    },
+  });
+}
+
+export function useSettingsWebSearchSetMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: WebSearchSettingsInput) => settingsWebSearchSet(input),
     onSuccess: (updated) => {
       if (!updated) return;
       queryClient.setQueryData<AppSettings | null>(settingsKeys.get(), updated);
