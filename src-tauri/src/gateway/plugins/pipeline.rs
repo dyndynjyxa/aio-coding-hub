@@ -304,6 +304,11 @@ impl GatewayPluginPipeline {
             }
 
             self.record_success(&plugin.summary.plugin_id);
+            audit_events.extend(plugin_returned_audit_events(
+                plugin,
+                input.hook_name,
+                &result.audit,
+            ));
             apply_header_patch(&mut headers, &result.headers)
                 .map_err(|err| err.with_audit_events(audit_events.clone()))?;
             if let Some(next_body) = result.request_body {
@@ -417,6 +422,11 @@ impl GatewayPluginPipeline {
             }
 
             self.record_success(&plugin.summary.plugin_id);
+            audit_events.extend(plugin_returned_audit_events(
+                plugin,
+                input.hook_name,
+                &result.audit,
+            ));
             apply_header_patch(&mut headers, &result.headers)
                 .map_err(|err| err.with_audit_events(audit_events.clone()))?;
             if let Some(next_body) = result.response_body {
@@ -520,6 +530,11 @@ impl GatewayPluginPipeline {
             }
 
             self.record_success(&plugin.summary.plugin_id);
+            audit_events.extend(plugin_returned_audit_events(
+                plugin,
+                hook_name,
+                &result.audit,
+            ));
             if let Some(next_chunk) = result.stream_chunk {
                 chunk = Bytes::from(next_chunk);
             }
@@ -618,6 +633,11 @@ impl GatewayPluginPipeline {
             }
 
             self.record_success(&plugin.summary.plugin_id);
+            audit_events.extend(plugin_returned_audit_events(
+                plugin,
+                hook_name,
+                &result.audit,
+            ));
             if let Some(next_message) = result.log_message {
                 message = next_message;
             }
@@ -838,6 +858,45 @@ fn audit_event(
         message: message.to_string(),
         details,
     }
+}
+
+fn plugin_returned_audit_events(
+    plugin: &PluginDetail,
+    hook_name: GatewayPluginHookName,
+    records: &[serde_json::Value],
+) -> Vec<GatewayPluginAuditEvent> {
+    records
+        .iter()
+        .map(|record| plugin_returned_audit_event(plugin, hook_name, record))
+        .collect()
+}
+
+fn plugin_returned_audit_event(
+    plugin: &PluginDetail,
+    hook_name: GatewayPluginHookName,
+    record: &serde_json::Value,
+) -> GatewayPluginAuditEvent {
+    let event_type = record
+        .get("eventType")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("plugin.audit.recorded");
+    let risk_level = record
+        .get("riskLevel")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("low");
+    let message = record
+        .get("message")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("Plugin audit record");
+    let details = record
+        .get("details")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({ "record": record }));
+
+    audit_event(plugin, hook_name, event_type, risk_level, message, details)
 }
 
 fn completed_event(
@@ -1326,6 +1385,12 @@ mod tests {
                 assert_eq!(ctx.request.body.as_deref(), Some("hello"));
                 GatewayHookResult {
                     request_body: Some("hello a".to_string()),
+                    audit: vec![serde_json::json!({
+                        "eventType": "plugin.audit.custom",
+                        "riskLevel": "medium",
+                        "message": "plugin audit from test",
+                        "details": { "source": "test" }
+                    })],
                     ..GatewayHookResult::continue_unchanged()
                 }
             })
@@ -1367,6 +1432,17 @@ mod tests {
         assert_eq!(calls.lock().unwrap().as_slice(), ["a", "b"]);
         assert!(output.audit_events.iter().any(|event| {
             event.plugin_id == "plugin.a" && event.event_type == "plugin.hook.completed"
+        }));
+        assert!(output.audit_events.iter().any(|event| {
+            event.plugin_id == "plugin.a"
+                && event.event_type == "plugin.audit.custom"
+                && event.risk_level == "medium"
+                && event.message == "plugin audit from test"
+                && event
+                    .details
+                    .get("source")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("test")
         }));
     }
 

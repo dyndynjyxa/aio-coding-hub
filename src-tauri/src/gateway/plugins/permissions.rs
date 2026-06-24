@@ -80,6 +80,12 @@ pub(crate) fn permission_allows_hook_access(
         }
         "log.redact" => matches!(hook_name, GatewayPluginHookName::LogBeforePersist),
         "plugin.storage" => true,
+        "model.invoke" => !matches!(
+            hook_name,
+            GatewayPluginHookName::RequestReceived
+                | GatewayPluginHookName::RequestBeforeProviderResolution
+                | GatewayPluginHookName::ResponseHeaders
+        ),
         "network.fetch" | "file.read" | "file.write" | "secret.read" => false,
         _ => false,
     }
@@ -204,6 +210,7 @@ mod tests {
             headers: Default::default(),
             log_message: None,
             reason: None,
+            audit: Vec::new(),
         };
         let err = enforce_hook_result_permissions(
             GatewayPluginHookName::RequestBeforeSend,

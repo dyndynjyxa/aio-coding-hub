@@ -236,6 +236,7 @@ pub(crate) struct GatewayHookResult {
     pub(crate) headers: BTreeMap<String, String>,
     pub(crate) log_message: Option<String>,
     pub(crate) reason: Option<String>,
+    pub(crate) audit: Vec<serde_json::Value>,
 }
 
 impl GatewayHookResult {
@@ -248,6 +249,7 @@ impl GatewayHookResult {
             headers: BTreeMap::new(),
             log_message: None,
             reason: None,
+            audit: Vec::new(),
         }
     }
 }

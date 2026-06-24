@@ -498,7 +498,7 @@ pub(super) fn strip_hop_headers(headers: &mut HeaderMap) {
     headers.remove(header::UPGRADE);
 }
 
-pub(super) fn build_target_url(
+pub(crate) fn build_target_url(
     base_url: &str,
     forwarded_path: &str,
     query: Option<&str>,
@@ -545,7 +545,7 @@ pub(super) fn clear_all_auth_headers(headers: &mut HeaderMap) {
     headers.remove("x-goog-api-client");
 }
 
-pub(super) fn inject_provider_auth(cli_key: &str, api_key: &str, headers: &mut HeaderMap) {
+pub(crate) fn inject_provider_auth(cli_key: &str, api_key: &str, headers: &mut HeaderMap) {
     clear_all_auth_headers(headers);
 
     if let Some(strategy) = crate::gateway::cli_auth::global_cli_auth_registry().get(cli_key) {
@@ -553,7 +553,7 @@ pub(super) fn inject_provider_auth(cli_key: &str, api_key: &str, headers: &mut H
     }
 }
 
-pub(super) fn ensure_cli_required_headers(cli_key: &str, headers: &mut HeaderMap) {
+pub(crate) fn ensure_cli_required_headers(cli_key: &str, headers: &mut HeaderMap) {
     if let Some(strategy) = crate::gateway::cli_auth::global_cli_auth_registry().get(cli_key) {
         strategy.ensure_required_headers(headers);
     }

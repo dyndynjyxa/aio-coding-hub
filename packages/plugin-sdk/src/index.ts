@@ -30,6 +30,7 @@ export type PluginPermission =
   | "stream.modify"
   | "log.redact"
   | "plugin.storage"
+  | "model.invoke"
   | "network.fetch"
   | "file.read"
   | "file.write"
@@ -160,6 +161,7 @@ const PERMISSION_RISKS: Record<PluginPermission, PluginPermissionRisk> = {
   "stream.modify": "high",
   "log.redact": "medium",
   "plugin.storage": "medium",
+  "model.invoke": "high",
   "network.fetch": "high",
   "file.read": "high",
   "file.write": "high",
@@ -315,7 +317,9 @@ function hookAllowsPermission(hookName: GatewayHookName, permission: PluginPermi
     permission === "request.body.read" ||
     permission === "request.body.write"
   ) {
-    return hookName === "gateway.request.afterBodyRead" || hookName === "gateway.request.beforeSend";
+    return (
+      hookName === "gateway.request.afterBodyRead" || hookName === "gateway.request.beforeSend"
+    );
   }
   if (
     permission === "response.header.read" ||
@@ -329,6 +333,7 @@ function hookAllowsPermission(hookName: GatewayHookName, permission: PluginPermi
     return hookName === "gateway.response.chunk";
   }
   if (permission === "log.redact") return hookName === "log.beforePersist";
+  if (permission === "model.invoke") return !RESERVED_HOOKS.has(hookName);
   return false;
 }
 
