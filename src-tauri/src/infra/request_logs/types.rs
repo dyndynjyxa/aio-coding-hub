@@ -1,5 +1,6 @@
 //! Usage: Request log DTOs and insertion payloads.
 
+use crate::plugins::PluginAuditLog;
 use serde::Serialize;
 
 #[derive(Debug, Clone)]
@@ -127,6 +128,7 @@ pub struct RequestLogDetail {
     pub cost_usd: Option<f64>,
     pub provider_chain_json: Option<String>,
     pub error_details_json: Option<String>,
+    pub plugin_audit_logs: Vec<PluginAuditLog>,
     pub cost_multiplier: f64,
     pub created_at_ms: i64,
     pub created_at: i64,

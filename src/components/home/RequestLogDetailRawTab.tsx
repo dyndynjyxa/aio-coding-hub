@@ -9,8 +9,15 @@ export function RequestLogDetailRawTab({ selectedLog }: RequestLogDetailRawTabPr
   const errorDetailsJson = tryPrettyPrint(selectedLog.error_details_json);
   const attemptsJson = tryPrettyPrint(selectedLog.attempts_json);
   const usageJson = tryPrettyPrint(selectedLog.usage_json);
+  const pluginAuditLogsJson = selectedLog.plugin_audit_logs.length
+    ? JSON.stringify(selectedLog.plugin_audit_logs, null, 2)
+    : null;
 
-  const hasAny = errorDetailsJson != null || attemptsJson != null || usageJson != null;
+  const hasAny =
+    errorDetailsJson != null ||
+    attemptsJson != null ||
+    usageJson != null ||
+    pluginAuditLogsJson != null;
 
   if (!hasAny) {
     return <div className="text-sm text-muted-foreground">无原始数据。</div>;
@@ -38,6 +45,14 @@ export function RequestLogDetailRawTab({ selectedLog }: RequestLogDetailRawTabPr
         <DisclosureSection label="usage_json">
           <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs font-mono text-secondary-foreground">
             {usageJson}
+          </pre>
+        </DisclosureSection>
+      ) : null}
+
+      {pluginAuditLogsJson != null ? (
+        <DisclosureSection label="plugin_audit_logs">
+          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs font-mono text-secondary-foreground">
+            {pluginAuditLogsJson}
           </pre>
         </DisclosureSection>
       ) : null}
