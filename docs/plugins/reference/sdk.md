@@ -111,7 +111,7 @@ SDK 是契约包。它不执行插件代码，也不会授予宿主能力。
 
 Rust/WASM SDK 遵循同样边界。它只负责序列化 ABI-compatible JSON、定义 hook result helpers，并提供 `aio_plugin_entrypoint!` macro 用于导出 `aio_plugin_handle`。
 
-`PluginHookResult` 使用与 gateway host 相同的 active mutation envelope：
+`PluginHookResult` 使用与 gateway host 相同的 active mutation envelope，并可附带 `audit` 数组让宿主持久化为插件审计记录：
 
 ```ts
 const result = {
@@ -121,7 +121,7 @@ const result = {
 } satisfies PluginHookResult;
 ```
 
-替换内容时使用 `requestBody`、`responseBody`、`streamChunk`、`logMessage` 和 `headers`。`contextPatch` 不是 active vNext gateway mutation field。
+替换内容时使用 `requestBody`、`responseBody`、`streamChunk`、`logMessage` 和 `headers`。`audit` 只用于宿主审计记录，不参与主响应 mutation。`contextPatch` 不是 active vNext gateway mutation field。
 
 真正的宿主强制检查仍发生在 Rust application 中：
 

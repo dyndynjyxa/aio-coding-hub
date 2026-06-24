@@ -37,4 +37,4 @@
 
 `configSchema` 可以包含标准 JSON Schema 展示字段和 AIO `x-aio-ui` 元数据。详见 [Config Schema](./config-schema.md)。
 
-plugin API v1 的 active hooks 见 [Hooks](./hooks.md)。Reserved hooks 和 reserved permissions 只是为未来兼容命名保留；在宿主真正实现前，manifest 校验会拒绝它们。
+plugin API v1 的 active hooks 见 [Hooks](./hooks.md)。`model.invoke` 是 active 的 host-mediated permission。Reserved hooks 和 reserved permissions 只是为未来兼容命名保留；在宿主真正实现前，manifest 校验会拒绝它们。
