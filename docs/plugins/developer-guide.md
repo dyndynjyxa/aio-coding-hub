@@ -266,7 +266,7 @@ pnpm create-aio-plugin pack ./acme.redactor
 
 ## 官方 Privacy Filter 示例
 
-`official.privacy-filter` 和 `official.association-audit` 是当前 bundled official plugins。前者对齐 [packyme/privacy-filter](https://github.com/packyme/privacy-filter) 的核心脱敏能力，用于请求发往上游前和日志持久化前的不可逆脱敏；后者是默认关闭的被动关联审计插件，借助 `model.invoke` 将审计结果写入插件审计日志。完整说明分别见 [Privacy Filter 示例](./examples/privacy-filter.md) 和 [Association Audit 示例](./examples/association-audit.md)。
+`official.privacy-filter` 和 `official.association-audit` 是当前 bundled official plugins。前者对齐 [packyme/privacy-filter](https://github.com/packyme/privacy-filter) 的核心脱敏能力；后者是默认关闭的被动关联审计插件，需要用户先配置 provider/model 后再启用，通过 `model.invoke` 由宿主代管凭据发起后台审计调用，结果写入 `plugin_audit_logs` 并在请求日志详情中展示。完整说明见 [Privacy Filter 示例](./examples/privacy-filter.md) 和 [Association Audit 示例](./examples/association-audit.md)。
 
 这两个示例说明了三件事：
 
