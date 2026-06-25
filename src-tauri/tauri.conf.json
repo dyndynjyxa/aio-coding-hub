@@ -36,7 +36,8 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "resources/plugins/official/privacy-filter/**/*"
+      "resources/plugins/official/privacy-filter/**/*",
+      "resources/plugins/official/association-audit/**/*"
     ]
   },
   "plugins": {

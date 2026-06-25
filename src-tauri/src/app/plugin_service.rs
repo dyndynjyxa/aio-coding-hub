@@ -807,7 +807,9 @@ fn ensure_runtime_enabled(manifest: &PluginManifest) -> AppResult<()> {
     match &manifest.runtime {
         PluginRuntime::DeclarativeRules { .. } => Ok(()),
         PluginRuntime::Native { engine }
-            if manifest.id == "official.privacy-filter" && engine == "privacyFilter" =>
+            if (manifest.id == "official.privacy-filter" && engine == "privacyFilter")
+                || (manifest.id == "official.association-audit"
+                    && engine == "associationAudit") =>
         {
             Ok(())
         }
@@ -843,7 +845,8 @@ fn detail_with_config_defaults(
 
 fn merge_packaged_official_manifest(mut detail: PluginDetail) -> PluginDetail {
     if detail.install_source != PluginInstallSource::Official
-        || detail.summary.plugin_id != OFFICIAL_PRIVACY_FILTER_ID
+        || !crate::app::plugins::official::official_plugin_ids()
+            .contains(&detail.summary.plugin_id.as_str())
     {
         return detail;
     }
@@ -1486,6 +1489,36 @@ mod tests {
 
         let uninstalled = uninstall_plugin(&db, "official.privacy-filter").unwrap();
         assert_eq!(uninstalled.summary.status, PluginStatus::Uninstalled);
+    }
+
+    #[test]
+    fn official_association_audit_installs_disabled_with_default_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let db =
+            crate::db::init_for_tests(&dir.path().join("official-association-audit.db")).unwrap();
+        let installed_root = dir.path().join("installed");
+        let official_root = crate::app::plugins::official::official_resource_root_for_tests();
+
+        let installed = install_official_plugin(
+            &db,
+            "official.association-audit",
+            &official_root,
+            env!("CARGO_PKG_VERSION"),
+            &installed_root,
+        )
+        .unwrap();
+
+        assert_eq!(installed.install_source, PluginInstallSource::Official);
+        assert_eq!(installed.summary.status, PluginStatus::Disabled);
+        assert!(installed
+            .installed_dir
+            .as_deref()
+            .is_some_and(|path| { path.contains("official.association-audit") }));
+        assert_eq!(installed.config["mode"], "off");
+        assert_eq!(installed.config["sampleRate"], 10);
+        assert!(installed
+            .granted_permissions
+            .contains(&"model.invoke".to_string()));
     }
 
     #[test]

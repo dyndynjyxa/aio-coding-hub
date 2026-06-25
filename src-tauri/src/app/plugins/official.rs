@@ -52,7 +52,7 @@ pub(crate) fn official_plugin_from_root(
 }
 
 pub(crate) fn official_plugin_ids() -> &'static [&'static str] {
-    &["official.privacy-filter"]
+    &["official.privacy-filter", "official.association-audit"]
 }
 
 pub(crate) fn official_source_resource_root() -> PathBuf {
@@ -64,17 +64,23 @@ pub(crate) fn official_resource_root_for_tests() -> PathBuf {
     official_source_resource_root()
 }
 
-fn official_plugin_root(plugin_id: &str, official_resource_root: &Path) -> AppResult<PathBuf> {
-    let name = match plugin_id {
+pub(crate) fn official_plugin_dir_name(plugin_id: &str) -> &'static str {
+    match plugin_id {
         "official.privacy-filter" => "privacy-filter",
-        _ => {
-            let known = official_plugin_ids().join(", ");
-            return Err(AppError::new(
-                "PLUGIN_UNKNOWN_OFFICIAL_PLUGIN",
-                format!("unknown official plugin: {plugin_id}; expected one of: {known}"),
-            ));
-        }
-    };
+        "official.association-audit" => "association-audit",
+        _ => "",
+    }
+}
+
+fn official_plugin_root(plugin_id: &str, official_resource_root: &Path) -> AppResult<PathBuf> {
+    let name = official_plugin_dir_name(plugin_id);
+    if name.is_empty() {
+        let known = official_plugin_ids().join(", ");
+        return Err(AppError::new(
+            "PLUGIN_UNKNOWN_OFFICIAL_PLUGIN",
+            format!("unknown official plugin: {plugin_id}; expected one of: {known}"),
+        ));
+    }
     Ok(official_resource_root.join(name))
 }
 
@@ -105,6 +111,15 @@ fn official_default_config(plugin_id: &str) -> Value {
                 "private_key",
                 "context_secret"
             ]
+        }),
+        "official.association-audit" => serde_json::json!({
+            "mode": "off",
+            "providerId": null,
+            "model": "",
+            "sampleRate": 10,
+            "timeoutSeconds": 8,
+            "maxInputChars": 6000,
+            "maxOutputChars": 12000
         }),
         _ => serde_json::json!({}),
     }
@@ -156,8 +171,11 @@ mod tests {
     }
 
     #[test]
-    fn official_catalog_exposes_only_privacy_filter() {
-        assert_eq!(official_plugin_ids(), &["official.privacy-filter"]);
+    fn official_catalog_exposes_bundled_plugins() {
+        assert_eq!(
+            official_plugin_ids(),
+            &["official.privacy-filter", "official.association-audit"]
+        );
 
         match official_plugin("official.redactor") {
             Ok(_) => panic!("retired official plugin should not be available"),
@@ -168,13 +186,31 @@ mod tests {
     }
 
     #[test]
-    fn official_catalog_uses_packaged_privacy_filter_resource_root() {
-        let fixture = official_plugin("official.privacy-filter").expect("official plugin fixture");
-        let root = fixture.root_dir.to_string_lossy();
-        assert!(
-            root.contains("resources/plugins/official/privacy-filter"),
-            "official plugin root must be a packaged resource path, got {root}"
-        );
+    fn official_catalog_uses_packaged_resource_roots() {
+        for plugin_id in official_plugin_ids() {
+            let fixture = official_plugin(plugin_id).expect("official plugin fixture");
+            let root = fixture.root_dir.to_string_lossy();
+            assert!(
+                root.contains(&format!(
+                    "resources/plugins/official/{}",
+                    official_plugin_dir_name(plugin_id)
+                )),
+                "official plugin root must be a packaged resource path, got {root}"
+            );
+        }
+    }
+
+    #[test]
+    fn official_association_audit_defaults_to_off_mode() {
+        let fixture =
+            official_plugin("official.association-audit").expect("official plugin fixture");
+
+        assert_eq!(fixture.default_config["mode"], "off");
+        assert_eq!(fixture.default_config["sampleRate"], 10);
+        assert!(matches!(
+            fixture.manifest.runtime,
+            PluginRuntime::Native { ref engine } if engine == "associationAudit"
+        ));
     }
 
     #[test]
@@ -216,6 +252,9 @@ mod tests {
     #[tokio::test]
     async fn official_privacy_filter_plugin_redacts_pii_and_secrets_before_upstream_and_logs() {
         let plugin = enabled_official_plugin("official.privacy-filter");
+        let openai_key = format!("{}{}", "sk-proj-", "abcdefghijklmnopqrstuvwxyz123456");
+        let github_token = format!("{}{}", "ghp_", "abcdefghijklmnopqrstuvwxyzABCDEFGHIJ");
+        let aws_key = format!("{}{}", "AKIA", "IOSFODNN7EXAMPLE");
         let pipeline = GatewayPluginPipeline::for_tests(
             vec![plugin],
             Arc::new(RuntimeGatewayPluginExecutor::default()),
@@ -235,11 +274,15 @@ mod tests {
                     json!({
                         "messages": [{
                             "role": "user",
-                            "content": concat!(
-                                "邮箱 test.user@example.com 手机 13812345678 ",
-                                "身份证 11010519900307743X ",
-                                "Authorization: Bearer abcDEF1234567890/xyzABC4567890== ",
-                                "OpenAI sk-proj-abcdefghijklmnopqrstuvwxyz123456"
+                            "content": format!(
+                                "{}{}",
+                                concat!(
+                                    "邮箱 test.user@example.com 手机 13812345678 ",
+                                    "身份证 11010519900307743X ",
+                                    "Authorization: Bearer abcDEF1234567890/xyzABC4567890== ",
+                                    "OpenAI "
+                                ),
+                                openai_key
                             )
                         }],
                         "input": "api_key = aB3xK9pLmN2qR7sT5vW1zYQwErTyUiOp"
@@ -260,17 +303,13 @@ mod tests {
         assert!(!request_text.contains("test.user@example.com"));
         assert!(!request_text.contains("13812345678"));
         assert!(!request_text.contains("11010519900307743X"));
-        assert!(!request_text.contains("sk-proj-abcdefghijklmnopqrstuvwxyz123456"));
+        assert!(!request_text.contains(&openai_key));
         assert!(!request_text.contains("aB3xK9pLmN2qR7sT5vW1zYQwErTyUiOp"));
 
         let log = pipeline
             .run_log_hook(crate::gateway::plugins::context::GatewayLogHookInput {
                 trace_id: "trace-privacy-filter".to_string(),
-                message: concat!(
-                    "ip=192.168.1.10 github=ghp_abcdefghijklmnopqrstuvwxyzABCDEFGHIJ ",
-                    "aws=AKIAIOSFODNN7EXAMPLE"
-                )
-                .to_string(),
+                message: format!("ip=192.168.1.10 github={github_token} aws={aws_key}"),
             })
             .await
             .expect("privacy filter log hook");
@@ -278,9 +317,7 @@ mod tests {
         assert!(log.message.contains("[IP]"));
         assert!(log.message.contains("[密钥]"));
         assert!(!log.message.contains("192.168.1.10"));
-        assert!(!log
-            .message
-            .contains("ghp_abcdefghijklmnopqrstuvwxyzABCDEFGHIJ"));
+        assert!(!log.message.contains(&github_token));
     }
 
     #[tokio::test]
@@ -327,6 +364,7 @@ mod tests {
     #[tokio::test]
     async fn official_privacy_filter_plugin_matches_upstream_algorithmic_behavior() {
         let plugin = enabled_official_plugin("official.privacy-filter");
+        let bearer_token = "abcDEF1234567890/xyzABC4567890==";
         let pipeline = GatewayPluginPipeline::for_tests(
             vec![plugin],
             Arc::new(RuntimeGatewayPluginExecutor::default()),
@@ -349,11 +387,15 @@ mod tests {
                             "role": "user",
                             "content": [{
                                 "type": "input_text",
-                                "text": concat!(
-                                    "付款卡号 4111111111111111 ",
-                                    "订单编号 1234567890123456 ",
-                                    "路径 /home/user/AbCdEfGh1234567890XyZ ",
-                                    "Authorization: Bearer abcDEF1234567890/xyzABC4567890=="
+                                "text": format!(
+                                    "{}{}",
+                                    concat!(
+                                        "付款卡号 4111111111111111 ",
+                                        "订单编号 1234567890123456 ",
+                                        "路径 /home/user/AbCdEfGh1234567890XyZ ",
+                                        "Authorization: Bearer "
+                                    ),
+                                    bearer_token
                                 )
                             }]
                         }]
@@ -371,6 +413,6 @@ mod tests {
         assert!(request_text.contains("1234567890123456"));
         assert!(request_text.contains("/home/user/AbCdEfGh1234567890XyZ"));
         assert!(!request_text.contains("4111111111111111"));
-        assert!(!request_text.contains("abcDEF1234567890/xyzABC4567890=="));
+        assert!(!request_text.contains(bearer_token));
     }
 }

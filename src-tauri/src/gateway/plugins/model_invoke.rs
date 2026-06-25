@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::{Duration, Instant};
 
-const MODEL_INVOKE_PATH: &str = "/v1/responses";
+const MODEL_RESPONSES_PATH: &str = "/v1/responses";
+const MODEL_MESSAGES_PATH: &str = "/v1/messages";
 const MAX_MODEL_BYTES: usize = 256;
 const MAX_REQUEST_BYTES: usize = 128 * 1024;
 const DEFAULT_TIMEOUT_MS: u64 = 15_000;
@@ -78,7 +79,7 @@ pub(crate) async fn invoke_model(
         Ok(body_bytes) => body_bytes,
         Err(err) => return error_output_for_provider(&input, &provider, started, err.0, err.1),
     };
-    let url = match build_target_url(&provider.base_url, MODEL_INVOKE_PATH, None) {
+    let url = match build_target_url(&provider.base_url, request_path_for_body(&input.body), None) {
         Ok(url) => url,
         Err(message) => {
             return error_output_for_provider(
@@ -237,6 +238,14 @@ fn load_provider(
         base_url,
         api_key,
     })
+}
+
+fn request_path_for_body(body: &Value) -> &'static str {
+    if body.get("messages").is_some() {
+        MODEL_MESSAGES_PATH
+    } else {
+        MODEL_RESPONSES_PATH
+    }
 }
 
 fn build_request_body(input: &ModelInvokeInput) -> Result<Vec<u8>, (&'static str, String)> {

@@ -1,5 +1,6 @@
 //! Usage: Application-level plugin runtimes and official plugin catalog.
 
+pub(crate) mod association_audit;
 pub(crate) mod official;
 pub(crate) mod official_assets;
 pub(crate) mod privacy_filter;

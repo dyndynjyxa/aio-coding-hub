@@ -336,7 +336,12 @@ fn validate_runtime(manifest: &PluginManifest) -> Result<(), PluginValidationErr
             }
         }
         PluginRuntime::Native { engine } => {
-            if manifest.id != "official.privacy-filter" || engine != "privacyFilter" {
+            let supported = matches!(
+                (manifest.id.as_str(), engine.as_str()),
+                ("official.privacy-filter", "privacyFilter")
+                    | ("official.association-audit", "associationAudit")
+            );
+            if !supported {
                 return Err(PluginValidationError::new(
                     "PLUGIN_UNSUPPORTED_RUNTIME",
                     "native runtime is reserved for official plugins",
