@@ -31,7 +31,7 @@
 { "kind": "native", "engine": "privacyFilter" }
 ```
 
-`official.privacy-filter` 和 `official.association-audit` 都属于官方 native 插件。只有从官方源安装的内置官方插件可以使用 `native`。
+`official.privacy-filter` 是官方 native 插件。`community.association-audit` 以社区 `.aio-plugin` 包形式提供；两者都使用 `native` runtime，只有宿主信任的 native engine 可以通过相应渠道安装和启用。
 
 `hostCompatibility` 必须包含 `app` 和 `pluginApi`；`platforms` 可以限制支持的操作系统。
 

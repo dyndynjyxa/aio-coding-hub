@@ -39,7 +39,7 @@ Plugin IDs 使用 `publisher.plugin-name` 格式。
 - 每个 segment 可以包含字母、数字和 hyphen。
 - 使用 dots 分隔 namespace segments。
 - Path separators、`..`、spaces、shell metacharacters 和 empty segments 都是非法的。
-- `official.privacy-filter` 和 `official.association-audit` 是 bundled official plugin ID。
+- `official.privacy-filter` 是 bundled official plugin ID。
 - `official.*` namespace 只能通过 built-in official plugin source 安装；local、marketplace 和 GitHub packages 必须使用自己的 publisher namespace。
 
 Versions 必须遵循 SemVer。Pre-release versions 可用于本地开发和 unsigned packages；marketplace stable releases 应使用 release versions。
@@ -87,7 +87,7 @@ Official-only native runtime：
 }
 ```
 
-`native` 只保留给从 built-in official source 安装的 built-in official plugins。第三方包不能声明 host-native engines。`official.association-audit` 默认关闭，只在用户显式启用并配置 provider/model 后执行。
+`native` 只保留给从 built-in official source 安装的 built-in official plugins。第三方包不能声明 host-native engines。`community.association-audit` 作为社区 `.aio-plugin` 包提供，默认关闭，需要用户安装并配置 provider/model 后启用。
 
 ## 5. Host Compatibility
 

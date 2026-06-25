@@ -1,11 +1,11 @@
 {
-  "id": "official.association-audit",
+  "id": "community.association-audit",
   "name": "Association Audit",
   "version": "1.0.0",
   "apiVersion": "1.0.0",
-  "description": "Passive official audit plugin that records advisory request/response association signals in plugin audit logs.",
+  "description": "Community passive audit plugin that records advisory request/response association signals in plugin audit logs. Requires a configured api_key provider with claude or codex CLI key before enabling.",
   "author": {
-    "name": "AIO Coding Hub"
+    "name": "AIO Coding Hub Community"
   },
   "runtime": {
     "kind": "native",
@@ -60,14 +60,14 @@
       "providerId": {
         "type": "integer",
         "title": "Provider ID",
-        "description": "Host provider id used for model.invoke. Empty or non-positive values keep audit calls disabled.",
+        "description": "Host provider id used for model.invoke. Must be an enabled api_key provider with claude or codex CLI key. Empty or non-positive values keep audit calls disabled.",
         "default": 0,
         "minimum": 0
       },
       "model": {
         "type": "string",
         "title": "Model",
-        "description": "Provider model name used by the host-mediated audit call.",
+        "description": "Provider model name used by the host-mediated audit call. Uses the raw model name, not provider aliases.",
         "default": ""
       },
       "sampleRate": {

@@ -7,9 +7,8 @@
 ## 当前官方 ID
 
 - `official.privacy-filter`
-- `official.association-audit`
 
-用户可以在 Plugins 页面通过官方插件安装入口安装它们。
+用户可以在 Plugins 页面通过官方插件安装入口安装它。
 
 ## Privacy Filter
 
@@ -82,7 +81,6 @@ Gateway boundary note：Privacy Filter 会接收原始 client-to-gateway body，
 
 ```text
 src-tauri/resources/plugins/official/privacy-filter/
-src-tauri/resources/plugins/official/association-audit/
 ```
 
 宿主在这里注册它：

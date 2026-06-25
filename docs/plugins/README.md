@@ -48,4 +48,4 @@
 - 不支持任意 JavaScript 或 TypeScript 插件直接运行。
 - WASM 和进程运行时文档描述的是隔离契约；是否允许执行仍由宿主策略控制。
 - Manifest 校验只接受已激活 hooks 和 permissions；保留项仅用于未来兼容命名。
-- 当前内置官方 `native` 插件只包含 `official.privacy-filter` 和默认关闭的 `official.association-audit`。社区扩展应使用 `declarativeRules`、WASM，或未来隔离进程运行时。
+- 当前内置官方 `native` 插件只包含 `official.privacy-filter`。`community.association-audit` 以社区 `.aio-plugin` 包形式提供。社区扩展应使用 `declarativeRules`、WASM，或未来隔离进程运行时。

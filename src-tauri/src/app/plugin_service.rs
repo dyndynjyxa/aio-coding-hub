@@ -808,7 +808,7 @@ fn ensure_runtime_enabled(manifest: &PluginManifest) -> AppResult<()> {
         PluginRuntime::DeclarativeRules { .. } => Ok(()),
         PluginRuntime::Native { engine }
             if (manifest.id == "official.privacy-filter" && engine == "privacyFilter")
-                || (manifest.id == "official.association-audit"
+                || (manifest.id == "community.association-audit"
                     && engine == "associationAudit") =>
         {
             Ok(())
@@ -1492,28 +1492,25 @@ mod tests {
     }
 
     #[test]
-    fn official_association_audit_installs_disabled_with_default_config() {
+    fn community_association_audit_installs_disabled_from_local_package() {
         let dir = tempfile::tempdir().unwrap();
         let db =
-            crate::db::init_for_tests(&dir.path().join("official-association-audit.db")).unwrap();
+            crate::db::init_for_tests(&dir.path().join("community-association-audit.db")).unwrap();
+        let cache_dir = dir.path().join("cache");
         let installed_root = dir.path().join("installed");
-        let official_root = crate::app::plugins::official::official_resource_root_for_tests();
+        let manifest_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../plugins/association-audit/plugin.json");
 
-        let installed = install_official_plugin(
+        let installed = install_plugin_from_local_package(
             &db,
-            "official.association-audit",
-            &official_root,
-            env!("CARGO_PKG_VERSION"),
+            &manifest_path,
+            &cache_dir,
             &installed_root,
+            env!("CARGO_PKG_VERSION"),
         )
         .unwrap();
 
-        assert_eq!(installed.install_source, PluginInstallSource::Official);
         assert_eq!(installed.summary.status, PluginStatus::Disabled);
-        assert!(installed
-            .installed_dir
-            .as_deref()
-            .is_some_and(|path| { path.contains("official.association-audit") }));
         assert_eq!(installed.config["mode"], "off");
         assert_eq!(installed.config["sampleRate"], 10);
         assert!(installed

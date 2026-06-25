@@ -56,7 +56,7 @@ impl RuntimeGatewayPluginExecutor {
                     .execute_official_privacy_filter_plugin(plugin, context)
             }
             PluginRuntime::Native { engine }
-                if plugin.summary.plugin_id == "official.association-audit"
+                if plugin.summary.plugin_id == "community.association-audit"
                     && engine == "associationAudit" =>
             {
                 self.association_audit

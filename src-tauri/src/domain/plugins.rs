@@ -339,7 +339,7 @@ fn validate_runtime(manifest: &PluginManifest) -> Result<(), PluginValidationErr
             let supported = matches!(
                 (manifest.id.as_str(), engine.as_str()),
                 ("official.privacy-filter", "privacyFilter")
-                    | ("official.association-audit", "associationAudit")
+                    | ("community.association-audit", "associationAudit")
             );
             if !supported {
                 return Err(PluginValidationError::new(

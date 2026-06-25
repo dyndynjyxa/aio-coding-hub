@@ -1,10 +1,10 @@
 # 插件架构审计
 
-本文记录当前官方 catalog 的审计结论：`official.privacy-filter` 和 `official.association-audit` 都是 bundled official plugins。
+本文记录当前官方 catalog 的审计结论：`official.privacy-filter` 是 bundled official plugin；`community.association-audit` 以社区 `.aio-plugin` 包形式提供。
 
 ## 决策
 
-`official.privacy-filter` 负责 irreversible pre-upstream privacy redaction 和 log redaction；`official.association-audit` 负责被动关联审计并将结果写入插件审计日志。
+`official.privacy-filter` 负责 irreversible pre-upstream privacy redaction 和 log redaction；`community.association-audit` 是社区被动审计插件，借助 `model.invoke` 将结果写入插件审计日志。
 
 早期官方 catalog 中的 built-in prompt optimizer、safety detector 和 generic redactor examples 已不再作为 bundled official plugins。它们仍然是有效扩展场景，但应通过 `declarativeRules`、WASM 或未来隔离进程运行时作为社区插件实现。
 
@@ -68,7 +68,7 @@ AIO Coding Hub 采用同样形态：
 Bundled official plugins：
 
 - `official.privacy-filter`：与 `packyme/privacy-filter` 对齐的 native host engine，用于 irreversible pre-upstream privacy redaction 和 log redaction。
-- `official.association-audit`：默认关闭的 native host engine，用于被动关联审计和 plugin audit log 持久化。
+- `community.association-audit`：社区 native host engine `.aio-plugin` 包，用于被动关联审计和 plugin audit log 持久化。
 
 开放给社区的能力：
 
