@@ -13,6 +13,9 @@ pub(crate) struct RuntimeExecutionPolicy {
 #[derive(Default)]
 pub(crate) struct RuntimeGatewayPluginExecutor {
     rule_runtime: crate::app::plugins::rule_runtime::RuleRuntimeGatewayPluginExecutor,
+    association_audit:
+        crate::app::plugins::association_audit::AssociationAuditGatewayPluginExecutor,
+    db: Option<crate::db::Db>,
     policy: RuntimeExecutionPolicy,
 }
 
@@ -22,7 +25,17 @@ impl RuntimeGatewayPluginExecutor {
         Self {
             rule_runtime:
                 crate::app::plugins::rule_runtime::RuleRuntimeGatewayPluginExecutor::default(),
+            association_audit:
+                crate::app::plugins::association_audit::AssociationAuditGatewayPluginExecutor::default(),
+            db: None,
             policy,
+        }
+    }
+
+    pub(crate) fn with_db(db: crate::db::Db) -> Self {
+        Self {
+            db: Some(db),
+            ..Self::default()
         }
     }
 
@@ -41,6 +54,13 @@ impl RuntimeGatewayPluginExecutor {
             {
                 self.rule_runtime
                     .execute_official_privacy_filter_plugin(plugin, context)
+            }
+            PluginRuntime::Native { engine }
+                if plugin.summary.plugin_id == "community.association-audit"
+                    && engine == "associationAudit" =>
+            {
+                self.association_audit
+                    .execute_plugin(plugin, context, self.db.as_ref())
             }
             PluginRuntime::Native { engine } => Err(GatewayPluginError::new(
                 "PLUGIN_UNSUPPORTED_RUNTIME",
@@ -164,6 +184,18 @@ mod tests {
         assert_eq!(result.action, GatewayHookAction::Continue);
     }
 
+    #[test]
+    fn runtime_executor_accepts_official_association_audit_native_engine() {
+        let plugin = native_plugin_detail("official.association-audit", "associationAudit");
+        let context = hook_context("gateway.request.afterBodyRead", "trace-3");
+
+        let result = executor()
+            .execute_plugin_sync(&plugin, context)
+            .expect("association audit runtime executes");
+
+        assert_eq!(result.action, GatewayHookAction::Continue);
+    }
+
     fn executor() -> RuntimeGatewayPluginExecutor {
         RuntimeGatewayPluginExecutor::for_tests(RuntimeExecutionPolicy {
             wasm_enabled: false,
@@ -206,6 +238,17 @@ mod tests {
             },
             "declarativeRules".to_string(),
             Some(installed_dir),
+        )
+    }
+
+    fn native_plugin_detail(plugin_id: &str, engine: &str) -> PluginDetail {
+        plugin_detail(
+            plugin_id,
+            PluginRuntime::Native {
+                engine: engine.to_string(),
+            },
+            format!("native:{engine}"),
+            None,
         )
     }
 

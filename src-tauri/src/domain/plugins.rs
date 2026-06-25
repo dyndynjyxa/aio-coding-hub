@@ -268,6 +268,7 @@ pub fn permission_risk(permission: &str) -> Option<PluginPermissionRisk> {
         "stream.modify" => Some(PluginPermissionRisk::High),
         "log.redact" => Some(PluginPermissionRisk::Medium),
         "plugin.storage" => Some(PluginPermissionRisk::Medium),
+        "model.invoke" => Some(PluginPermissionRisk::High),
         "network.fetch" => Some(PluginPermissionRisk::High),
         "file.read" => Some(PluginPermissionRisk::High),
         "file.write" => Some(PluginPermissionRisk::High),
@@ -335,7 +336,12 @@ fn validate_runtime(manifest: &PluginManifest) -> Result<(), PluginValidationErr
             }
         }
         PluginRuntime::Native { engine } => {
-            if manifest.id != "official.privacy-filter" || engine != "privacyFilter" {
+            let supported = matches!(
+                (manifest.id.as_str(), engine.as_str()),
+                ("official.privacy-filter", "privacyFilter")
+                    | ("community.association-audit", "associationAudit")
+            );
+            if !supported {
                 return Err(PluginValidationError::new(
                     "PLUGIN_UNSUPPORTED_RUNTIME",
                     "native runtime is reserved for official plugins",
@@ -461,6 +467,7 @@ fn hook_allows_permission(hook_name: &str, permission: &str) -> bool {
         }
         "stream.inspect" | "stream.modify" => hook_name == "gateway.response.chunk",
         "log.redact" => hook_name == "log.beforePersist",
+        "model.invoke" => is_active_gateway_hook(hook_name),
         _ => false,
     }
 }

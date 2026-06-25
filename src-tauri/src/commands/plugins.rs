@@ -107,7 +107,15 @@ fn official_resource_root_from_resource_dir(resource_dir: &std::path::Path) -> P
 }
 
 fn official_resource_root_exists(root: &std::path::Path) -> bool {
-    root.join("privacy-filter").join("plugin.json").exists()
+    crate::app::plugins::official::official_plugin_ids()
+        .iter()
+        .all(|plugin_id| {
+            root.join(crate::app::plugins::official::official_plugin_dir_name(
+                plugin_id,
+            ))
+            .join("plugin.json")
+            .exists()
+        })
 }
 
 #[tauri::command]

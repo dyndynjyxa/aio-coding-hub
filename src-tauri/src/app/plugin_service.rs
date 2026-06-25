@@ -807,7 +807,9 @@ fn ensure_runtime_enabled(manifest: &PluginManifest) -> AppResult<()> {
     match &manifest.runtime {
         PluginRuntime::DeclarativeRules { .. } => Ok(()),
         PluginRuntime::Native { engine }
-            if manifest.id == "official.privacy-filter" && engine == "privacyFilter" =>
+            if (manifest.id == "official.privacy-filter" && engine == "privacyFilter")
+                || (manifest.id == "community.association-audit"
+                    && engine == "associationAudit") =>
         {
             Ok(())
         }
@@ -843,7 +845,8 @@ fn detail_with_config_defaults(
 
 fn merge_packaged_official_manifest(mut detail: PluginDetail) -> PluginDetail {
     if detail.install_source != PluginInstallSource::Official
-        || detail.summary.plugin_id != OFFICIAL_PRIVACY_FILTER_ID
+        || !crate::app::plugins::official::official_plugin_ids()
+            .contains(&detail.summary.plugin_id.as_str())
     {
         return detail;
     }
@@ -1486,6 +1489,33 @@ mod tests {
 
         let uninstalled = uninstall_plugin(&db, "official.privacy-filter").unwrap();
         assert_eq!(uninstalled.summary.status, PluginStatus::Uninstalled);
+    }
+
+    #[test]
+    fn community_association_audit_installs_disabled_from_local_package() {
+        let dir = tempfile::tempdir().unwrap();
+        let db =
+            crate::db::init_for_tests(&dir.path().join("community-association-audit.db")).unwrap();
+        let cache_dir = dir.path().join("cache");
+        let installed_root = dir.path().join("installed");
+        let manifest_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../plugins/association-audit/plugin.json");
+
+        let installed = install_plugin_from_local_package(
+            &db,
+            &manifest_path,
+            &cache_dir,
+            &installed_root,
+            env!("CARGO_PKG_VERSION"),
+        )
+        .unwrap();
+
+        assert_eq!(installed.summary.status, PluginStatus::Disabled);
+        assert_eq!(installed.config["mode"], "off");
+        assert_eq!(installed.config["sampleRate"], 10);
+        assert!(installed
+            .granted_permissions
+            .contains(&"model.invoke".to_string()));
     }
 
     #[test]

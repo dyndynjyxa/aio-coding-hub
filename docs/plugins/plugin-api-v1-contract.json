@@ -15,13 +15,7 @@
     "gateway.request.beforeProviderResolution",
     "gateway.response.headers"
   ],
-  "activeMutationFields": [
-    "requestBody",
-    "responseBody",
-    "streamChunk",
-    "logMessage",
-    "headers"
-  ],
+  "activeMutationFields": ["requestBody", "responseBody", "streamChunk", "logMessage", "headers"],
   "configSchemaTypes": ["object", "array", "string", "password", "number", "integer", "boolean"],
   "activePermissions": [
     "request.meta.read",
@@ -36,7 +30,8 @@
     "response.body.write",
     "stream.inspect",
     "stream.modify",
-    "log.redact"
+    "log.redact",
+    "model.invoke"
   ],
   "reservedPermissions": [
     "plugin.storage",
@@ -52,7 +47,8 @@
         "request.meta.read",
         "request.header.read",
         "request.header.readSensitive",
-        "request.body.read"
+        "request.body.read",
+        "model.invoke"
       ],
       "writePermissions": ["request.header.write", "request.body.write"],
       "mutationFields": ["headers", "requestBody"],
@@ -74,7 +70,8 @@
         "request.meta.read",
         "request.header.read",
         "request.header.readSensitive",
-        "request.body.read"
+        "request.body.read",
+        "model.invoke"
       ],
       "writePermissions": ["request.header.write", "request.body.write"],
       "mutationFields": ["headers", "requestBody"],
@@ -92,38 +89,28 @@
     },
     "gateway.response.chunk": {
       "phase": "for each bounded streaming response chunk",
-      "readPermissions": ["stream.inspect"],
+      "readPermissions": ["stream.inspect", "model.invoke"],
       "writePermissions": ["stream.modify"],
       "mutationFields": ["streamChunk"],
       "contextFields": ["traceId", "stream.sequence", "stream.chunk"]
     },
     "gateway.response.after": {
       "phase": "after a complete non-streaming upstream response body is available",
-      "readPermissions": ["response.header.read", "response.body.read"],
+      "readPermissions": ["response.header.read", "response.body.read", "model.invoke"],
       "writePermissions": ["response.header.write", "response.body.write"],
       "mutationFields": ["headers", "responseBody"],
-      "contextFields": [
-        "traceId",
-        "response.status",
-        "response.headers",
-        "response.body"
-      ]
+      "contextFields": ["traceId", "response.status", "response.headers", "response.body"]
     },
     "gateway.error": {
       "phase": "after gateway error response materialization and before it is sent",
-      "readPermissions": ["response.header.read", "response.body.read"],
+      "readPermissions": ["response.header.read", "response.body.read", "model.invoke"],
       "writePermissions": ["response.header.write", "response.body.write"],
       "mutationFields": ["headers", "responseBody"],
-      "contextFields": [
-        "traceId",
-        "response.status",
-        "response.headers",
-        "response.body"
-      ]
+      "contextFields": ["traceId", "response.status", "response.headers", "response.body"]
     },
     "log.beforePersist": {
       "phase": "before gateway request log persistence",
-      "readPermissions": ["log.redact"],
+      "readPermissions": ["log.redact", "model.invoke"],
       "writePermissions": ["log.redact"],
       "mutationFields": ["logMessage"],
       "contextFields": ["traceId", "log.message"]

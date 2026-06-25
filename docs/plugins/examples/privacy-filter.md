@@ -1,6 +1,6 @@
 # 官方示例插件
 
-官方 catalog 会刻意保持很小。`official.privacy-filter` 是当前唯一 bundled official plugin。
+官方 catalog 会刻意保持很小。`official.privacy-filter` 是 bundled official privacy plugin。
 
 这样可以让 trusted host surface 保持收敛，同时继续通过 `declarativeRules`、WASM 和默认关闭的进程运行时 PoC 提供开放扩展能力。
 

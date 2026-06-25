@@ -1,12 +1,12 @@
 # 插件架构审计
 
-本文记录将官方 catalog 收敛到 `official.privacy-filter` 后，当前插件系统架构的审计结论。
+本文记录当前官方 catalog 的审计结论：`official.privacy-filter` 是 bundled official plugin；`community.association-audit` 以社区 `.aio-plugin` 包形式提供。
 
 ## 决策
 
-只保留 `official.privacy-filter` 作为 bundled official plugin。
+`official.privacy-filter` 负责 irreversible pre-upstream privacy redaction 和 log redaction；`community.association-audit` 是社区被动审计插件，借助 `model.invoke` 将结果写入插件审计日志。
 
-移除之前官方 catalog 中的 built-in prompt optimizer、safety detector 和 generic redactor examples。它们仍然是有效扩展场景，但应通过 `declarativeRules`、WASM 或未来隔离进程运行时作为社区插件实现。
+早期官方 catalog 中的 built-in prompt optimizer、safety detector 和 generic redactor examples 已不再作为 bundled official plugins。它们仍然是有效扩展场景，但应通过 `declarativeRules`、WASM 或未来隔离进程运行时作为社区插件实现。
 
 ## 架构依据
 
@@ -27,7 +27,7 @@ AIO Coding Hub 采用同样形态：
 
 当前 host trust boundary：
 
-- Trusted：Rust host、gateway pipeline、database、packaged official native privacy engine。
+- Trusted：Rust host、gateway pipeline、database、packaged official native privacy engine、packaged official native audit engine。
 - Semi-trusted：signed marketplace metadata 和 package checksums。
 - Untrusted by default：local packages、marketplace packages、GitHub release packages、rule files、WASM bytecode、process runtime binaries。
 
@@ -65,9 +65,10 @@ AIO Coding Hub 采用同样形态：
 
 ## 当前形态
 
-Bundled official plugin：
+Bundled official plugins：
 
 - `official.privacy-filter`：与 `packyme/privacy-filter` 对齐的 native host engine，用于 irreversible pre-upstream privacy redaction 和 log redaction。
+- `community.association-audit`：社区 native host engine `.aio-plugin` 包，用于被动关联审计和 plugin audit log 持久化。
 
 开放给社区的能力：
 
@@ -84,6 +85,7 @@ Bundled official plugin：
 - 确认 hook names 和 permission names 已足够稳定，可以进入 semantic versioning。
 - 补充 WASM enablement 和 package signing 的 marketplace policy。
 - 把 official examples 保留为文档中的 community patterns，而不是 bundled host plugins。
+- 为 bundled official plugins 保持最小数量和清晰边界，避免把可复用能力重新塞回 host-owned examples。
 - 增加 plugin hook overhead 和 Privacy Filter 在大型但允许 payload 上 redaction latency 的 benchmarks。
 - 增加 telemetry-safe counters，记录 plugin timeouts、skips 和 quarantines，但不记录 sensitive payloads。
 

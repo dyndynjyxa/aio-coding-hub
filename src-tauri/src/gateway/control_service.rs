@@ -272,7 +272,7 @@ fn load_gateway_plugin_pipeline(
             Arc::new(
                 super::plugins::pipeline::GatewayPluginPipeline::for_runtime(
                     plugins,
-                    Arc::new(RuntimeGatewayPluginExecutor::default()),
+                    Arc::new(RuntimeGatewayPluginExecutor::with_db(db.clone())),
                     super::plugins::pipeline::GatewayPluginPipelineConfig::default(),
                 ),
             )

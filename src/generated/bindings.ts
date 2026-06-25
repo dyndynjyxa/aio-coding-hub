@@ -2999,6 +2999,7 @@ export type RequestLogDetail = {
   cost_usd: number | null;
   provider_chain_json: string | null;
   error_details_json: string | null;
+  plugin_audit_logs: PluginAuditLog[];
   cost_multiplier: number;
   created_at_ms: number;
   created_at: number;

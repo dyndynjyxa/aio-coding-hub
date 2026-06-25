@@ -166,9 +166,7 @@ Claude 和 Codex/OpenAI Responses 的请求结构不同。插件应避免只适�
 
 ```json
 {
-  "messages": [
-    { "role": "user", "content": [{ "type": "text", "text": "hello claude" }] }
-  ]
+  "messages": [{ "role": "user", "content": [{ "type": "text", "text": "hello claude" }] }]
 }
 ```
 
@@ -268,9 +266,9 @@ pnpm create-aio-plugin pack ./acme.redactor
 
 ## 官方 Privacy Filter 示例
 
-`official.privacy-filter` 是当前唯一内置官方插件。它对齐 [packyme/privacy-filter](https://github.com/packyme/privacy-filter) 的核心脱敏能力，用于请求发往上游前和日志持久化前的不可逆脱敏。完整说明见 [Privacy Filter 示例](./examples/privacy-filter.md)。
+`official.privacy-filter` 是 bundled official plugin；`community.association-audit` 是社区被动关联审计插件，以 `.aio-plugin` 包形式分发，需要用户先安装并配置 provider/model 后再启用，通过 `model.invoke` 由宿主代管凭据发起后台审计调用，结果写入 `plugin_audit_logs` 并在请求日志详情中展示。完整说明见 [Privacy Filter 示例](./examples/privacy-filter.md) 和 [Association Audit 示例](./examples/association-audit.md)。
 
-这个示例说明了三件事：
+这两个示例说明了三件事：
 
 - 插件页面可以完全根据 `configSchema` 和 `x-aio-ui` 渲染配置，而不是写专用页面。
 - 官方 `native` 引擎应少而聚焦，避免扩大宿主维护面。

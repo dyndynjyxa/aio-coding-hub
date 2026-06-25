@@ -123,6 +123,7 @@ export function createRequestLogDetail(
     cost_usd: null,
     provider_chain_json: null,
     error_details_json: null,
+    plugin_audit_logs: [],
     cost_multiplier: 1,
     created_at_ms: createdAtMs,
     created_at: createdAt,

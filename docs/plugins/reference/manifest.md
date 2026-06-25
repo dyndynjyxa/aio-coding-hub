@@ -31,10 +31,10 @@
 { "kind": "native", "engine": "privacyFilter" }
 ```
 
-只有从官方源安装的内置官方插件可以使用 `native`。
+`official.privacy-filter` 是官方 native 插件。`community.association-audit` 以社区 `.aio-plugin` 包形式提供；两者都使用 `native` runtime，只有宿主信任的 native engine 可以通过相应渠道安装和启用。
 
 `hostCompatibility` 必须包含 `app` 和 `pluginApi`；`platforms` 可以限制支持的操作系统。
 
 `configSchema` 可以包含标准 JSON Schema 展示字段和 AIO `x-aio-ui` 元数据。详见 [Config Schema](./config-schema.md)。
 
-plugin API v1 的 active hooks 见 [Hooks](./hooks.md)。Reserved hooks 和 reserved permissions 只是为未来兼容命名保留；在宿主真正实现前，manifest 校验会拒绝它们。
+plugin API v1 的 active hooks 见 [Hooks](./hooks.md)。`model.invoke` 是 active 的 host-mediated permission。Reserved hooks 和 reserved permissions 只是为未来兼容命名保留；在宿主真正实现前，manifest 校验会拒绝它们。

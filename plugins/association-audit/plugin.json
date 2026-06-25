@@ -1,0 +1,113 @@
+{
+  "id": "community.association-audit",
+  "name": "Association Audit",
+  "version": "1.0.0",
+  "apiVersion": "1.0.0",
+  "description": "Community passive audit plugin that records advisory request/response association signals in plugin audit logs. Requires a configured api_key provider with claude or codex CLI key before enabling.",
+  "author": {
+    "name": "AIO Coding Hub Community"
+  },
+  "runtime": {
+    "kind": "native",
+    "engine": "associationAudit"
+  },
+  "hooks": [
+    {
+      "name": "gateway.request.afterBodyRead",
+      "priority": 90,
+      "failurePolicy": "fail-open"
+    },
+    {
+      "name": "gateway.response.chunk",
+      "priority": 90,
+      "failurePolicy": "fail-open"
+    },
+    {
+      "name": "gateway.response.after",
+      "priority": 90,
+      "failurePolicy": "fail-open"
+    },
+    {
+      "name": "gateway.error",
+      "priority": 90,
+      "failurePolicy": "fail-open"
+    },
+    {
+      "name": "log.beforePersist",
+      "priority": 90,
+      "failurePolicy": "fail-open"
+    }
+  ],
+  "permissions": [
+    "request.meta.read",
+    "request.body.read",
+    "response.body.read",
+    "stream.inspect",
+    "log.redact",
+    "model.invoke"
+  ],
+  "configVersion": 1,
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "mode": {
+        "type": "string",
+        "title": "Mode",
+        "description": "Controls whether passive association audit runs for gateway traces.",
+        "default": "off",
+        "enum": ["off", "sampled", "prefiltered", "all"]
+      },
+      "providerId": {
+        "type": "integer",
+        "title": "Provider ID",
+        "description": "Host provider id used for model.invoke. Must be an enabled api_key provider with claude or codex CLI key. Empty or non-positive values keep audit calls disabled.",
+        "default": 0,
+        "minimum": 0
+      },
+      "model": {
+        "type": "string",
+        "title": "Model",
+        "description": "Provider model name used by the host-mediated audit call. Uses the raw model name, not provider aliases.",
+        "default": ""
+      },
+      "sampleRate": {
+        "type": "integer",
+        "title": "Sample Rate",
+        "description": "Percentage of traces selected when mode is sampled.",
+        "default": 10,
+        "minimum": 1,
+        "maximum": 100
+      },
+      "timeoutSeconds": {
+        "type": "integer",
+        "title": "Timeout Seconds",
+        "description": "Maximum duration for the host-mediated audit model call.",
+        "default": 8,
+        "minimum": 1,
+        "maximum": 60
+      },
+      "maxInputChars": {
+        "type": "integer",
+        "title": "Max Input Chars",
+        "description": "Maximum redacted request characters included in the audit package.",
+        "default": 6000,
+        "minimum": 256,
+        "maximum": 50000
+      },
+      "maxOutputChars": {
+        "type": "integer",
+        "title": "Max Output Chars",
+        "description": "Maximum redacted response characters included in the audit package.",
+        "default": 12000,
+        "minimum": 256,
+        "maximum": 50000
+      }
+    }
+  },
+  "hostCompatibility": {
+    "app": ">=0.60.0 <1.0.0",
+    "pluginApi": "^1.0.0",
+    "platforms": ["windows", "macos", "linux"]
+  },
+  "category": "security"
+}
