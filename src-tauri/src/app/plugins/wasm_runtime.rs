@@ -281,6 +281,7 @@ fn gateway_hook_result_from_wasm_output(value: Value) -> AppResult<GatewayHookRe
             ));
         }
     }
+    result.audit = optional_value_array(object, "audit")?.unwrap_or_default();
     Ok(result)
 }
 
@@ -296,6 +297,25 @@ fn optional_string(
             format!("WASM plugin output field {key} must be a string"),
         )),
     }
+}
+
+fn optional_value_array(
+    object: &serde_json::Map<String, Value>,
+    key: &'static str,
+) -> AppResult<Option<Vec<Value>>> {
+    let Some(value) = object.get(key) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let Some(items) = value.as_array() else {
+        return Err(AppError::new(
+            "PLUGIN_WASM_INVALID_OUTPUT",
+            format!("WASM plugin output field {key} must be an array"),
+        ));
+    };
+    Ok(Some(items.clone()))
 }
 
 fn optional_string_map(

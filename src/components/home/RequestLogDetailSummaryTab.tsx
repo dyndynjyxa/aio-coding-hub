@@ -37,6 +37,7 @@ export function RequestLogDetailSummaryTab({
   attemptCount: _attemptCount,
 }: RequestLogDetailSummaryTabProps) {
   const auditMeta = buildRequestLogAuditMeta(selectedLog);
+  const pluginAuditLogs = selectedLog.plugin_audit_logs ?? [];
   const isPriorityServiceTier =
     selectedLog.cli_key === "codex" &&
     hasPriorityServiceTierSpecialSetting(selectedLog.special_settings_json);
@@ -70,6 +71,8 @@ export function RequestLogDetailSummaryTab({
           ) : null}
         </Card>
       ) : null}
+
+      {pluginAuditLogs.length > 0 ? <PluginAuditLogsCard logs={pluginAuditLogs} /> : null}
 
       {/* Key metrics */}
       {hasTokens ? (
@@ -123,6 +126,84 @@ export function RequestLogDetailSummaryTab({
       ) : null}
     </div>
   );
+}
+
+function PluginAuditLogsCard({ logs }: { logs: RequestLogDetail["plugin_audit_logs"] }) {
+  const visibleLogs = logs.slice(0, 5);
+
+  return (
+    <Card padding="sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-foreground">插件审计</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            与当前 trace 关联的通用插件审计记录
+          </div>
+        </div>
+        <span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-medium text-muted-foreground ring-1 ring-inset ring-border">
+          {logs.length} 条
+        </span>
+      </div>
+
+      <div className="mt-3 space-y-2">
+        {visibleLogs.map((log) => {
+          const detailsPreview = formatPluginAuditDetailsPreview(log.details);
+          return (
+            <div
+              key={log.id}
+              className="rounded-xl border border-border/80 bg-secondary/60 px-3 py-3 dark:border-border dark:bg-secondary/50"
+            >
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="font-medium text-foreground">{log.plugin_id ?? "unknown"}</span>
+                <span
+                  className={cn(
+                    "rounded-full px-2 py-0.5 font-medium",
+                    riskLevelClassName(log.risk_level)
+                  )}
+                >
+                  {log.risk_level || "low"}
+                </span>
+                <span className="text-muted-foreground">{log.event_type}</span>
+              </div>
+              <div className="mt-2 text-sm text-foreground">{log.message || log.event_type}</div>
+              {detailsPreview ? (
+                <pre className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-background/80 p-2 text-xs font-mono text-muted-foreground">
+                  {detailsPreview}
+                </pre>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+
+      {logs.length > visibleLogs.length ? (
+        <div className="mt-2 text-xs text-muted-foreground">
+          仅显示前 {visibleLogs.length} 条，其余记录可在原始数据页查看。
+        </div>
+      ) : null}
+    </Card>
+  );
+}
+
+function riskLevelClassName(riskLevel: string | null | undefined) {
+  switch ((riskLevel ?? "").toLowerCase()) {
+    case "critical":
+    case "high":
+      return "bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-500/15 dark:bg-rose-500/15 dark:text-rose-200 dark:ring-rose-400/20";
+    case "medium":
+      return "bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-500/15 dark:bg-amber-500/15 dark:text-amber-200 dark:ring-amber-400/20";
+    default:
+      return "bg-sky-50 text-sky-700 ring-1 ring-inset ring-sky-500/15 dark:bg-sky-500/15 dark:text-sky-200 dark:ring-sky-400/20";
+  }
+}
+
+function formatPluginAuditDetailsPreview(details: unknown): string | null {
+  if (details == null) return null;
+  try {
+    return JSON.stringify(details, null, 2);
+  } catch {
+    return String(details);
+  }
 }
 
 function MetricCard({

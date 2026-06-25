@@ -755,6 +755,38 @@ describe("home/RequestLogDetailDialog", () => {
     expect(screen.getByText("关键指标")).toBeInTheDocument();
   });
 
+  it("shows plugin audit logs on summary and raw tabs", () => {
+    setRequestLogQueryState({
+      selectedLog: createSelectedLog({
+        plugin_audit_logs: [
+          {
+            id: 1,
+            plugin_id: "acme.audit",
+            trace_id: "trace-1",
+            event_type: "plugin.audit.recorded",
+            risk_level: "medium",
+            message: "Plugin recorded audit metadata",
+            details: { signal: "matched" },
+            created_at: 1000,
+          },
+        ],
+      }),
+    });
+    setTraceStoreState({ traces: [] });
+
+    render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
+
+    expect(screen.getByText("插件审计")).toBeInTheDocument();
+    expect(screen.getByText("acme.audit")).toBeInTheDocument();
+    expect(screen.getByText("Plugin recorded audit metadata")).toBeInTheDocument();
+
+    switchToTab("原始数据");
+    expect(screen.getByText("plugin_audit_logs")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "plugin_audit_logs" }));
+    expect(screen.getByText(/plugin\.audit\.recorded/)).toBeInTheDocument();
+    expect(screen.getByText(/matched/)).toBeInTheDocument();
+  });
+
   it("shows raw error_details_json on raw tab when available", () => {
     const errorJson = { gateway_error_code: "GW_UPSTREAM_ALL_FAILED", upstream_status: 502 };
     setRequestLogQueryState({

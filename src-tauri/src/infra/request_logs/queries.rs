@@ -1,6 +1,7 @@
 //! Usage: Request log queries and attempts decoding.
 
 use crate::db;
+use crate::plugins::PluginAuditLog;
 use crate::shared::error::db_err;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use serde::Deserialize;
@@ -11,6 +12,7 @@ use super::{RequestLogDetail, RequestLogRouteHop, RequestLogSummary};
 
 const CLAUDE_VISIBLE_LOG_PATH: &str = "/v1/messages";
 const CLAUDE_VISIBLE_LOG_CONDITION: &str = "(cli_key != 'claude' OR path = '/v1/messages')";
+const REQUEST_LOG_DETAIL_PLUGIN_AUDIT_LIMIT: i64 = 100;
 
 /// Common SELECT fields for request_logs queries (summary view).
 const REQUEST_LOG_SUMMARY_FIELDS: &str = "
@@ -389,7 +391,80 @@ fn row_to_detail(row: &rusqlite::Row<'_>) -> Result<RequestLogDetail, rusqlite::
         created_at: row.get("created_at")?,
         provider_chain_json: row.get("provider_chain_json").unwrap_or(None),
         error_details_json: row.get("error_details_json").unwrap_or(None),
+        plugin_audit_logs: Vec::new(),
     })
+}
+
+fn plugin_audit_log_from_row(row: &rusqlite::Row<'_>) -> Result<PluginAuditLog, rusqlite::Error> {
+    let details_json: String = row.get("details_json")?;
+    let details = serde_json::from_str::<serde_json::Value>(&details_json)
+        .unwrap_or_else(|_| serde_json::json!({ "raw": details_json }));
+    Ok(PluginAuditLog {
+        id: row.get("id")?,
+        plugin_id: row.get("plugin_id")?,
+        trace_id: row.get("trace_id")?,
+        event_type: row.get("event_type")?,
+        risk_level: row.get("risk_level")?,
+        message: row.get("message")?,
+        details,
+        created_at: row.get("created_at")?,
+    })
+}
+
+fn load_plugin_audit_logs_for_trace(
+    conn: &Connection,
+    trace_id: &str,
+) -> crate::shared::error::AppResult<Vec<PluginAuditLog>> {
+    let mut stmt = conn
+        .prepare_cached(
+            r#"
+SELECT
+  id,
+  plugin_id,
+  trace_id,
+  event_type,
+  risk_level,
+  message,
+  details_json,
+  created_at
+FROM (
+  SELECT
+    id,
+    plugin_id,
+    trace_id,
+    event_type,
+    risk_level,
+    message,
+    details_json,
+    created_at
+  FROM plugin_audit_logs
+  WHERE trace_id = ?1
+  ORDER BY created_at DESC, id DESC
+  LIMIT ?2
+)
+ORDER BY created_at ASC, id ASC
+"#,
+        )
+        .map_err(|e| db_err!("failed to prepare plugin audit detail query: {e}"))?;
+    let rows = stmt
+        .query_map(
+            params![trace_id, REQUEST_LOG_DETAIL_PLUGIN_AUDIT_LIMIT],
+            plugin_audit_log_from_row,
+        )
+        .map_err(|e| db_err!("failed to query plugin audit detail logs: {e}"))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| db_err!("failed to read plugin audit detail log: {e}"))?);
+    }
+    Ok(out)
+}
+
+fn attach_plugin_audit_logs_to_detail(
+    conn: &Connection,
+    item: &mut RequestLogDetail,
+) -> crate::shared::error::AppResult<()> {
+    item.plugin_audit_logs = load_plugin_audit_logs_for_trace(conn, &item.trace_id)?;
+    Ok(())
 }
 
 fn attach_source_provider_info_to_detail(
@@ -556,6 +631,7 @@ pub fn get_by_id(db: &db::Db, log_id: i64) -> crate::shared::error::AppResult<Re
             crate::shared::error::AppError::from("DB_NOT_FOUND: request_log not found".to_string())
         })?;
     attach_source_provider_info_to_detail(&conn, &mut item)?;
+    attach_plugin_audit_logs_to_detail(&conn, &mut item)?;
     Ok(item)
 }
 
@@ -578,6 +654,7 @@ pub fn get_by_trace_id(
         .map_err(|e| db_err!("failed to query request_log: {e}"))?;
     if let Some(detail) = item.as_mut() {
         attach_source_provider_info_to_detail(&conn, detail)?;
+        attach_plugin_audit_logs_to_detail(&conn, detail)?;
     }
     Ok(item)
 }
@@ -843,6 +920,50 @@ INSERT INTO providers (id, name, source_provider_id) VALUES (12, 'Claude Bridge'
 
         let visible_by_trace = get_by_trace_id(&db, "trace-codex").unwrap();
         assert_eq!(visible_by_trace.as_ref().map(|item| item.id), Some(3));
+    }
+
+    #[test]
+    fn detail_queries_include_trace_linked_plugin_audit_logs() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("request-logs.db");
+        let db = db::init_for_tests(&db_path).unwrap();
+        let conn = db.open_connection().unwrap();
+
+        seed_request_log(&conn, 1, "trace-plugin-audit", "codex", "/v1/responses");
+        conn.execute(
+            r#"
+INSERT INTO plugin_audit_logs (
+  plugin_id, trace_id, event_type, risk_level, message, details_json, created_at
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+"#,
+            rusqlite::params![
+                "acme.audit",
+                "trace-plugin-audit",
+                "plugin.audit.recorded",
+                "medium",
+                "Plugin recorded audit metadata",
+                r#"{"signal":"matched"}"#,
+                99_i64,
+            ],
+        )
+        .unwrap();
+        drop(conn);
+
+        let detail = get_by_id(&db, 1).unwrap();
+
+        assert_eq!(detail.plugin_audit_logs.len(), 1);
+        let audit = &detail.plugin_audit_logs[0];
+        assert_eq!(audit.plugin_id.as_deref(), Some("acme.audit"));
+        assert_eq!(audit.trace_id.as_deref(), Some("trace-plugin-audit"));
+        assert_eq!(audit.event_type, "plugin.audit.recorded");
+        assert_eq!(audit.risk_level, "medium");
+        assert_eq!(
+            audit
+                .details
+                .get("signal")
+                .and_then(serde_json::Value::as_str),
+            Some("matched")
+        );
     }
 
     #[test]

@@ -68,6 +68,15 @@ describe("validateManifest", () => {
     });
   });
 
+  it("allows model invocation permission on active hooks", () => {
+    expect(
+      validateManifest({
+        ...manifest,
+        permissions: ["request.body.read", "model.invoke"],
+      })
+    ).toEqual({ ok: true });
+  });
+
   it("rejects write permissions without their required read permissions", () => {
     expect(
       validateManifest({
@@ -160,6 +169,7 @@ describe("PluginHookResult", () => {
       requestBody: '{"messages":[]}',
       responseBody: '{"ok":true}',
       headers: { "x-plugin-redacted": "1" },
+      audit: [{ eventType: "plugin.audit.test", message: "recorded" }],
     };
 
     expect(result).toEqual({
@@ -167,6 +177,7 @@ describe("PluginHookResult", () => {
       requestBody: '{"messages":[]}',
       responseBody: '{"ok":true}',
       headers: { "x-plugin-redacted": "1" },
+      audit: [{ eventType: "plugin.audit.test", message: "recorded" }],
     });
     expect("contextPatch" in result).toBe(false);
   });

@@ -102,12 +102,12 @@ Active hooks in plugin API v1 是当前已经接入 gateway 或 log pipeline 的
 
 | Hook | 触发时机 | 可修改内容 | 默认超时 | 默认失败策略 | 匹配权限 |
 | --- | --- | --- | --- | --- | --- |
-| `gateway.request.afterBodyRead` | Body reader 完成 allowed body buffering 后 | JSON body、raw body metadata | 200 ms | fail-open | `request.body.read`, `request.body.write` |
-| `gateway.request.beforeSend` | reqwest 发送 upstream request 前 | headers 和 body | 300 ms | fail-open 或 security fail-closed | `request.header.write`, `request.body.write` |
-| `gateway.response.chunk` | CLI output 前的 stream chunk | chunk pass、replace、block、warn | 20 ms | security fail-closed、non-security fail-open | `stream.inspect`, `stream.modify` |
-| `gateway.response.after` | 大小预算内的完整 non-stream response | body pass、replace、block、warn | 300 ms | security fail-closed、non-security fail-open | `response.body.read`, `response.body.write` |
-| `gateway.error` | 观察到 host 或 upstream error 后 | 不隐藏 host error | 100 ms | fail-open | `request.meta.read` |
-| `log.beforePersist` | Request 或 audit log 持久化前 | redacted log fields | 100 ms | fail-closed-to-host-redaction | `log.redact` |
+| `gateway.request.afterBodyRead` | Body reader 完成 allowed body buffering 后 | JSON body、raw body metadata | 200 ms | fail-open | `request.body.read`, `request.body.write`, `model.invoke` |
+| `gateway.request.beforeSend` | reqwest 发送 upstream request 前 | headers 和 body | 300 ms | fail-open 或 security fail-closed | `request.header.write`, `request.body.write`, `model.invoke` |
+| `gateway.response.chunk` | CLI output 前的 stream chunk | chunk pass、replace、block、warn | 20 ms | security fail-closed、non-security fail-open | `stream.inspect`, `stream.modify`, `model.invoke` |
+| `gateway.response.after` | 大小预算内的完整 non-stream response | body pass、replace、block、warn | 300 ms | security fail-closed、non-security fail-open | `response.body.read`, `response.body.write`, `model.invoke` |
+| `gateway.error` | 观察到 host 或 upstream error 后 | 不隐藏 host error | 100 ms | fail-open | `request.meta.read`, `model.invoke` |
+| `log.beforePersist` | Request 或 audit log 持久化前 | redacted log fields | 100 ms | fail-closed-to-host-redaction | `log.redact`, `model.invoke` |
 
 Streaming hooks 接收 bounded chunks 和固定大小 sliding window，不会接收无限制完整响应。
 
@@ -136,6 +136,7 @@ Reserved permissions for future host-mediated APIs 会被记录下来以稳定�
 | `stream.inspect` | high | 检查 streamed chunks 和 sliding window。 |
 | `stream.modify` | high | 替换或阻断 streamed chunks。 |
 | `log.redact` | medium | 持久化前脱敏 log fields。 |
+| `model.invoke` | high | 通过宿主控制的 provider/model 通道发起有界模型调用，不暴露 provider credentials。 |
 
 Reserved permissions：
 
@@ -164,6 +165,8 @@ Validation 会拒绝：
 - 没有匹配 body read/write permission 却写 body。
 - 没有 `stream.modify` 却执行 `stream.modify` actions。
 - 在 host 提供对应 API 前请求 `network.fetch`、`file.read`、`file.write` 或 `secret.read`。
+
+`model.invoke` 是 active high-risk permission。宿主负责 provider credential lookup、timeout、request/response size caps、错误归一化和 failure isolation；插件不能直接访问 API keys 或任意网络能力。
 
 ## 9. Config Schema 子集
 
