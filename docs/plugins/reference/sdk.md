@@ -82,7 +82,7 @@ const manifest: PluginManifest = {
   hostCompatibility: {
     app: ">=0.56.0 <1.0.0",
     pluginApi: "^1.0.0",
-    platforms: ["macos", "windows", "linux"]
+    platforms: ["macos", "windows", "linux"],
   },
   configSchema: {
     type: "object",
@@ -93,10 +93,10 @@ const manifest: PluginManifest = {
         title: "启用处理",
         description: "关闭后插件不会修改请求内容。",
         default: true,
-        "x-aio-ui": { widget: "switch", order: 10 }
-      }
-    }
-  }
+        "x-aio-ui": { widget: "switch", order: 10 },
+      },
+    },
+  },
 };
 
 const result = validateManifest(manifest);
@@ -111,13 +111,13 @@ SDK 是契约包。它不执行插件代码，也不会授予宿主能力。
 
 Rust/WASM SDK 遵循同样边界。它只负责序列化 ABI-compatible JSON、定义 hook result helpers，并提供 `aio_plugin_entrypoint!` macro 用于导出 `aio_plugin_handle`。
 
-`PluginHookResult` 使用与 gateway host 相同的 active mutation envelope，并可附带 `audit` 数组让宿主持久化为插件审计记录：
+`PluginHookResult` 使用与 gateway host 相同的 active mutation envelope，并可附带 `audit` 数组让宿主持久化为插件审计记录；这类审计项会进入 `plugin_audit_logs`，不会修改主响应：
 
 ```ts
 const result = {
   action: "replace",
-  requestBody: "{\"messages\":[]}",
-  headers: { "x-plugin-redacted": "1" }
+  requestBody: '{"messages":[]}',
+  headers: { "x-plugin-redacted": "1" },
 } satisfies PluginHookResult;
 ```
 

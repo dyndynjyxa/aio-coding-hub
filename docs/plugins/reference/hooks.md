@@ -1,6 +1,6 @@
 # 插件 Hooks
 
-Hooks 是网关和日志 pipeline 中稳定的扩展点。Plugin API v1 刻意保持 active surface 小而明确，让社区插件能清楚判断调用时机、权限边界和 mutation 行为。
+Hooks 是网关和日志 pipeline 中稳定的扩展点。Plugin API v1 刻意保持 active surface 小而明确，让社区插件能清楚判断调用时机、权限边界和 mutation 行为。`model.invoke` 是 host-mediated capability，不授予插件直接网络或 secret 访问。
 
 默认 vNext hook timeout: 150 ms.
 默认 vNext failure policy: `fail-open`.
@@ -13,14 +13,14 @@ Reserved hooks 在宿主实现对应调用点前，会被 manifest validation �
 
 ## Hook 矩阵
 
-| Hook | 阶段 | 读权限 | 写权限 | Mutation fields | Context fields |
-| --- | --- | --- | --- | --- | --- |
-| `gateway.request.afterBodyRead` | 读取 request body 后、发送 upstream provider 前。 | `request.meta.read`, `request.header.read`, `request.header.readSensitive`, `request.body.read`, `model.invoke` | `request.header.write`, `request.body.write` | `headers`, `requestBody` | `traceId`, `request.cliKey`, `request.method`, `request.path`, `request.query`, `request.headers`, `request.body`, `request.requestedModel`, `request.normalizedMessages` |
-| `gateway.request.beforeSend` | provider resolution 后、发送 upstream provider 前。 | `request.meta.read`, `request.header.read`, `request.header.readSensitive`, `request.body.read`, `model.invoke` | `request.header.write`, `request.body.write` | `headers`, `requestBody` | `traceId`, `request.cliKey`, `request.method`, `request.path`, `request.query`, `request.headers`, `request.body`, `request.requestedModel`, `request.normalizedMessages` |
-| `gateway.response.chunk` | 每个有边界的 streaming response chunk。 | `stream.inspect`, `model.invoke` | `stream.modify` | `streamChunk` | `traceId`, `stream.sequence`, `stream.chunk` |
-| `gateway.response.after` | 完整 non-streaming upstream response body 可用后。 | `response.header.read`, `response.body.read`, `model.invoke` | `response.header.write`, `response.body.write` | `headers`, `responseBody` | `traceId`, `response.status`, `response.headers`, `response.body` |
-| `gateway.error` | gateway error response materialization 后、发送前。 | `response.header.read`, `response.body.read`, `model.invoke` | `response.header.write`, `response.body.write` | `headers`, `responseBody` | `traceId`, `response.status`, `response.headers`, `response.body` |
-| `log.beforePersist` | gateway request log persistence 前。 | `log.redact`, `model.invoke` | `log.redact` | `logMessage` | `traceId`, `log.message` |
+| Hook                            | 阶段                                                | 读权限                                                                                                          | 写权限                                         | Mutation fields           | Context fields                                                                                                                                                            |
+| ------------------------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gateway.request.afterBodyRead` | 读取 request body 后、发送 upstream provider 前。   | `request.meta.read`, `request.header.read`, `request.header.readSensitive`, `request.body.read`, `model.invoke` | `request.header.write`, `request.body.write`   | `headers`, `requestBody`  | `traceId`, `request.cliKey`, `request.method`, `request.path`, `request.query`, `request.headers`, `request.body`, `request.requestedModel`, `request.normalizedMessages` |
+| `gateway.request.beforeSend`    | provider resolution 后、发送 upstream provider 前。 | `request.meta.read`, `request.header.read`, `request.header.readSensitive`, `request.body.read`, `model.invoke` | `request.header.write`, `request.body.write`   | `headers`, `requestBody`  | `traceId`, `request.cliKey`, `request.method`, `request.path`, `request.query`, `request.headers`, `request.body`, `request.requestedModel`, `request.normalizedMessages` |
+| `gateway.response.chunk`        | 每个有边界的 streaming response chunk。             | `stream.inspect`, `model.invoke`                                                                                | `stream.modify`                                | `streamChunk`             | `traceId`, `stream.sequence`, `stream.chunk`                                                                                                                              |
+| `gateway.response.after`        | 完整 non-streaming upstream response body 可用后。  | `response.header.read`, `response.body.read`, `model.invoke`                                                    | `response.header.write`, `response.body.write` | `headers`, `responseBody` | `traceId`, `response.status`, `response.headers`, `response.body`                                                                                                         |
+| `gateway.error`                 | gateway error response materialization 后、发送前。 | `response.header.read`, `response.body.read`, `model.invoke`                                                    | `response.header.write`, `response.body.write` | `headers`, `responseBody` | `traceId`, `response.status`, `response.headers`, `response.body`                                                                                                         |
+| `log.beforePersist`             | gateway request log persistence 前。                | `log.redact`, `model.invoke`                                                                                    | `log.redact`                                   | `logMessage`              | `traceId`, `log.message`                                                                                                                                                  |
 
 ## gateway.request.afterBodyRead
 

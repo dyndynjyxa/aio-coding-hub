@@ -1,14 +1,15 @@
 # 官方示例插件
 
-官方 catalog 会刻意保持很小。`official.privacy-filter` 是当前唯一 bundled official plugin。
+官方 catalog 会刻意保持很小。`official.privacy-filter` 是 bundled official privacy plugin。
 
 这样可以让 trusted host surface 保持收敛，同时继续通过 `declarativeRules`、WASM 和默认关闭的进程运行时 PoC 提供开放扩展能力。
 
 ## 当前官方 ID
 
 - `official.privacy-filter`
+- `official.association-audit`
 
-用户可以在 Plugins 页面通过官方插件安装入口安装它。
+用户可以在 Plugins 页面通过官方插件安装入口安装它们。
 
 ## Privacy Filter
 
@@ -81,6 +82,7 @@ Gateway boundary note：Privacy Filter 会接收原始 client-to-gateway body，
 
 ```text
 src-tauri/resources/plugins/official/privacy-filter/
+src-tauri/resources/plugins/official/association-audit/
 ```
 
 宿主在这里注册它：

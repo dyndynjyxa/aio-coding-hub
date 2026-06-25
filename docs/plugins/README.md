@@ -8,21 +8,22 @@
 
 - [插件开发总指南](./developer-guide.md)：唯一主线入口，从创建插件到本地回放、配置表单、打包和发布。
 - [Privacy Filter 示例](./examples/privacy-filter.md)：查看官方示例插件如何组织 manifest、配置和隐私过滤边界。
+- [Association Audit 示例](./examples/association-audit.md)：查看官方被动审计插件如何使用 `model.invoke` 与插件审计日志。
 - [插件 API 参考](./reference/README.md)：查 `plugin.json`、hooks、permissions、config schema、SDK 和发布规则。
 
 ## 按目标查找
 
-| 我想做什么 | 阅读 |
-| --- | --- |
-| 开发第一个插件 | [插件开发总指南](./developer-guide.md) |
-| 给插件加配置项 | [Config Schema](./reference/config-schema.md) |
+| 我想做什么                 | 阅读                                                                      |
+| -------------------------- | ------------------------------------------------------------------------- |
+| 开发第一个插件             | [插件开发总指南](./developer-guide.md)                                    |
+| 给插件加配置项             | [Config Schema](./reference/config-schema.md)                             |
 | 处理 Claude/Codex 请求结构 | [插件开发总指南：Hooks 与请求形态](./developer-guide.md#hooks-与请求形态) |
-| 查 hook 触发时机 | [Hooks](./reference/hooks.md) |
-| 查权限和风险等级 | [Permissions](./reference/permissions.md) |
-| 写声明式规则 | [Declarative Rules](./reference/declarative-rules.md) |
-| 打包发布 `.aio-plugin` | [Publishing](./reference/publishing.md) |
-| 理解 WASM 限制 | [WASM 运行时](./runtime/wasm.md) |
-| 理解架构和边界 | [插件架构说明](./architecture/README.md) |
+| 查 hook 触发时机           | [Hooks](./reference/hooks.md)                                             |
+| 查权限和风险等级           | [Permissions](./reference/permissions.md)                                 |
+| 写声明式规则               | [Declarative Rules](./reference/declarative-rules.md)                     |
+| 打包发布 `.aio-plugin`     | [Publishing](./reference/publishing.md)                                   |
+| 理解 WASM 限制             | [WASM 运行时](./runtime/wasm.md)                                          |
+| 理解架构和边界             | [插件架构说明](./architecture/README.md)                                  |
 
 ## 目录结构
 
@@ -47,4 +48,4 @@
 - 不支持任意 JavaScript 或 TypeScript 插件直接运行。
 - WASM 和进程运行时文档描述的是隔离契约；是否允许执行仍由宿主策略控制。
 - Manifest 校验只接受已激活 hooks 和 permissions；保留项仅用于未来兼容命名。
-- 当前只有 `official.privacy-filter` 是内置官方 `native` 插件。社区扩展应使用 `declarativeRules`、WASM，或未来隔离进程运行时。
+- 当前内置官方 `native` 插件只包含 `official.privacy-filter` 和默认关闭的 `official.association-audit`。社区扩展应使用 `declarativeRules`、WASM，或未来隔离进程运行时。

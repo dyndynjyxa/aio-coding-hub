@@ -17,7 +17,7 @@ Permissions 必须显式声明，并按风险分级。宿主在调用插件前�
 - `stream.inspect`：高风险，读取流式响应 chunk 和 sliding window。
 - `stream.modify`：高风险，替换或阻断流式响应 chunk。
 - `log.redact`：中风险，在日志持久化前脱敏。
-- `model.invoke`：高风险，通过宿主控制的 provider/model 通道发起有界模型调用；插件不能读取 provider credentials。
+- `model.invoke`：高风险，通过宿主控制的 provider/model 通道发起有界模型调用；插件不能读取 provider credentials，也不能绕过 host 的 timeout、size cap 和 failure isolation。
 
 为未来 host-mediated APIs 保留的权限：
 
