@@ -255,12 +255,14 @@ export const cliManagerKeys = {
   all: cliManagerAllKey,
   claudeInfo: () => [...cliManagerAllKey, "claude", "info"] as const,
   claudeSettings: () => [...cliManagerAllKey, "claude", "settings"] as const,
+  claudeSettingsJson: () => [...cliManagerAllKey, "claude", "settingsJson"] as const,
   claudeHooks: () => [...cliManagerAllKey, "claude", "hooks"] as const,
   codexInfo: () => [...cliManagerAllKey, "codex", "info"] as const,
   codexConfig: () => [...cliManagerAllKey, "codex", "config"] as const,
   codexConfigToml: () => [...cliManagerAllKey, "codex", "configToml"] as const,
   geminiInfo: () => [...cliManagerAllKey, "gemini", "info"] as const,
   geminiConfig: () => [...cliManagerAllKey, "gemini", "config"] as const,
+  geminiSettingsJson: () => [...cliManagerAllKey, "gemini", "settingsJson"] as const,
 };
 
 const modelPricesAllKey = ["modelPrices"] as const;

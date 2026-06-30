@@ -11,6 +11,11 @@ import { ProvidersView } from "./providers/ProvidersView";
 
 export function ProvidersPage() {
   const settingsQuery = useSettingsQuery();
+  const oauthQuotaAutoRefreshByCli = settingsQuery.data?.auto_refresh_oauth_quota_on_startup ?? {
+    claude: false,
+    codex: false,
+    gemini: false,
+  };
   const orderedCliTabs = getOrderedClis(settingsQuery.data?.cli_priority_order);
   const orderedCliKeys = orderedCliTabs.map((cli) => cli.key);
   const defaultCli =
@@ -36,7 +41,11 @@ export function ProvidersPage() {
         }
       />
 
-      <ProvidersView activeCli={effectiveCli} setActiveCli={setActiveCli} />
+      <ProvidersView
+        activeCli={effectiveCli}
+        setActiveCli={setActiveCli}
+        autoRefreshOAuthQuotaOnStartup={oauthQuotaAutoRefreshByCli[effectiveCli] ?? false}
+      />
     </div>
   );
 }

@@ -127,6 +127,43 @@ pub(crate) async fn cli_manager_gemini_config_set(
 
 #[tauri::command]
 #[specta::specta]
+pub(crate) async fn cli_manager_gemini_settings_json_get(
+    app: tauri::AppHandle,
+) -> Result<gemini_config::GeminiSettingsJsonState, String> {
+    blocking::run("cli_manager_gemini_settings_json_get", move || {
+        gemini_config::gemini_settings_json_get_raw(&app)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn cli_manager_gemini_settings_json_validate(
+    json: String,
+) -> Result<gemini_config::GeminiSettingsJsonValidationResult, String> {
+    blocking::run("cli_manager_gemini_settings_json_validate", move || {
+        gemini_config::validate_gemini_settings_json_raw(json)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn cli_manager_gemini_settings_json_set(
+    app: tauri::AppHandle,
+    json: String,
+) -> Result<gemini_config::GeminiSettingsJsonState, String> {
+    blocking::run("cli_manager_gemini_settings_json_set", move || {
+        gemini_config::gemini_settings_json_set_raw(&app, json)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_manager_claude_env_set(
     app: tauri::AppHandle,
     mcp_timeout_ms: Option<u64>,
@@ -159,6 +196,43 @@ pub(crate) async fn cli_manager_claude_settings_set(
 ) -> Result<claude_settings::ClaudeSettingsState, String> {
     blocking::run("cli_manager_claude_settings_set", move || {
         claude_settings::claude_settings_set(&app, patch)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn cli_manager_claude_settings_json_get(
+    app: tauri::AppHandle,
+) -> Result<claude_settings::ClaudeSettingsJsonState, String> {
+    blocking::run("cli_manager_claude_settings_json_get", move || {
+        claude_settings::claude_settings_json_get_raw(&app)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn cli_manager_claude_settings_json_validate(
+    json: String,
+) -> Result<claude_settings::ClaudeSettingsJsonValidationResult, String> {
+    blocking::run("cli_manager_claude_settings_json_validate", move || {
+        claude_settings::validate_claude_settings_json_raw(json)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn cli_manager_claude_settings_json_set(
+    app: tauri::AppHandle,
+    json: String,
+) -> Result<claude_settings::ClaudeSettingsJsonState, String> {
+    blocking::run("cli_manager_claude_settings_json_set", move || {
+        claude_settings::claude_settings_json_set_raw(&app, json)
     })
     .await
     .map_err(Into::into)

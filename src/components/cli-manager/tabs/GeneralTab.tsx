@@ -9,6 +9,7 @@ import {
 } from "../../../services/gateway/gateway";
 import { logToConsole } from "../../../services/consoleLog";
 import type { AppSettings, SensitiveStringUpdate } from "../../../services/settings/settings";
+import type { CliKey } from "../../../services/providers/providers";
 import type { GatewayRectifierSettingsPatch } from "../../../services/settings/settingsGatewayRectifier";
 import { validateUpstreamProxyFields } from "../../../services/settings/settingsValidation";
 import { Button } from "../../../ui/Button";
@@ -49,6 +50,13 @@ export type CliManagerGeneralTabProps = {
   notificationSoundEnabled: boolean;
   notificationSoundSaving: boolean;
   onPersistNotificationSound: (enable: boolean) => Promise<void> | void;
+
+  autoRefreshOAuthQuotaOnStartupEnabled: AppSettings["auto_refresh_oauth_quota_on_startup"];
+  autoRefreshOAuthQuotaOnStartupSaving: boolean;
+  onPersistAutoRefreshOAuthQuotaOnStartup: (
+    cliKey: CliKey,
+    enable: boolean
+  ) => Promise<void> | void;
 
   appSettings: AppSettings | null;
   commonSettingsSaving: boolean;
@@ -97,6 +105,9 @@ export function CliManagerGeneralTab({
   notificationSoundEnabled,
   notificationSoundSaving,
   onPersistNotificationSound,
+  autoRefreshOAuthQuotaOnStartupEnabled,
+  autoRefreshOAuthQuotaOnStartupSaving,
+  onPersistAutoRefreshOAuthQuotaOnStartup,
   appSettings,
   commonSettingsSaving,
   onPersistCommonSettings,
@@ -127,6 +138,8 @@ export function CliManagerGeneralTab({
     taskCompleteNotifySaving || settingsUnavailable || settingsWriteBlocked;
   const notificationSoundDisabled =
     notificationSoundSaving || settingsUnavailable || settingsWriteBlocked;
+  const autoRefreshOAuthQuotaOnStartupDisabled =
+    autoRefreshOAuthQuotaOnStartupSaving || settingsUnavailable || settingsWriteBlocked;
   const cacheMonitorDisabled =
     cacheAnomalyMonitorSaving || settingsUnavailable || settingsWriteBlocked;
   const commonSettingsDisabled =
@@ -380,6 +393,45 @@ export function CliManagerGeneralTab({
                         })
                       }
                       disabled={commonSettingsDisabled}
+                    />
+                  </SettingsRow>
+                  <SettingsRow
+                    label="Claude OAuth quota auto-refresh"
+                    subtitle="Only fetches OAuth Provider remaining quota automatically on app startup. Manual refresh still works."
+                  >
+                    <Switch
+                      aria-label="Claude OAuth quota auto-refresh"
+                      checked={autoRefreshOAuthQuotaOnStartupEnabled.claude}
+                      onCheckedChange={(checked) =>
+                        void onPersistAutoRefreshOAuthQuotaOnStartup("claude", checked)
+                      }
+                      disabled={autoRefreshOAuthQuotaOnStartupDisabled}
+                    />
+                  </SettingsRow>
+                  <SettingsRow
+                    label="Codex OAuth quota auto-refresh"
+                    subtitle="应用启动后自动读取 OAuth Provider 剩余额度。关闭后仍可手动刷新。"
+                  >
+                    <Switch
+                      aria-label="Codex OAuth quota auto-refresh"
+                      checked={autoRefreshOAuthQuotaOnStartupEnabled.codex}
+                      onCheckedChange={(checked) =>
+                        void onPersistAutoRefreshOAuthQuotaOnStartup("codex", checked)
+                      }
+                      disabled={autoRefreshOAuthQuotaOnStartupDisabled}
+                    />
+                  </SettingsRow>
+                  <SettingsRow
+                    label="Gemini OAuth quota auto-refresh"
+                    subtitle="Only fetches OAuth Provider remaining quota automatically on app startup. Manual refresh still works."
+                  >
+                    <Switch
+                      aria-label="Gemini OAuth quota auto-refresh"
+                      checked={autoRefreshOAuthQuotaOnStartupEnabled.gemini}
+                      onCheckedChange={(checked) =>
+                        void onPersistAutoRefreshOAuthQuotaOnStartup("gemini", checked)
+                      }
+                      disabled={autoRefreshOAuthQuotaOnStartupDisabled}
                     />
                   </SettingsRow>
                 </div>

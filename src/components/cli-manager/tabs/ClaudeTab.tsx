@@ -1,13 +1,16 @@
 // Usage: UI for configuring Claude Code global settings (settings.json) and safe env toggles.
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import type {
   ClaudeCliInfo,
   ClaudeHookGroup,
+  ClaudeSettingsJsonState,
+  ClaudeSettingsJsonValidationResult,
   ClaudeSettingsPatch,
   ClaudeSettingsState,
 } from "../../../services/cli/cliManager";
+import { cliManagerClaudeSettingsJsonValidate } from "../../../services/cli/cliManager";
 import type { ProviderSummary } from "../../../services/providers/providers";
 import {
   useCliManagerClaudeHooksQuery,
@@ -43,6 +46,10 @@ import {
   Zap,
 } from "lucide-react";
 
+const LazyCodeEditor = lazy(() =>
+  import("../../../ui/CodeEditor").then((m) => ({ default: m.CodeEditor }))
+);
+
 export type CliManagerAvailability = "checking" | "available" | "unavailable";
 
 export type CliManagerClaudeTabProps = {
@@ -52,10 +59,14 @@ export type CliManagerClaudeTabProps = {
   claudeSettingsLoading: boolean;
   claudeSettingsSaving: boolean;
   claudeSettings: ClaudeSettingsState | null;
+  claudeSettingsJson?: ClaudeSettingsJsonState | null;
+  claudeSettingsJsonLoading?: boolean;
+  claudeSettingsJsonSaving?: boolean;
   providers: ProviderSummary[] | null;
   refreshClaude: () => Promise<void> | void;
   openClaudeConfigDir: () => Promise<void> | void;
   persistClaudeSettings: (patch: ClaudeSettingsPatch) => Promise<void> | void;
+  persistClaudeSettingsJson?: (json: string) => Promise<boolean> | boolean;
 };
 
 function SettingItem({
@@ -87,6 +98,146 @@ function SettingItem({
 
 function boolOrDefault(value: boolean | null | undefined, fallback: boolean) {
   return value ?? fallback;
+}
+
+function AdvancedSettingsJsonSection({
+  state,
+  loading,
+  saving,
+  persist,
+}: {
+  state: ClaudeSettingsJsonState | null | undefined;
+  loading?: boolean;
+  saving?: boolean;
+  persist?: (json: string) => Promise<boolean> | boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [validation, setValidation] = useState<ClaudeSettingsJsonValidationResult | null>(null);
+
+  useEffect(() => {
+    if (dirty) return;
+    setDraft(state?.json ?? "");
+  }, [dirty, state?.configPath, state?.json]);
+
+  async function saveDraft() {
+    if (!persist || saving) return;
+    const result = await cliManagerClaudeSettingsJsonValidate(draft);
+    setValidation(result);
+    if (!result || result.ok !== true) return;
+
+    const saved = await persist(draft);
+    if (!saved) return;
+    setEditing(false);
+    setDirty(false);
+  }
+
+  return (
+    <details
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+      className="rounded-lg border border-border bg-white dark:bg-secondary p-5"
+    >
+      <summary className="cursor-pointer text-sm font-semibold text-foreground flex items-center gap-2">
+        <FileJson className="h-4 w-4 text-muted-foreground" />
+        Advanced settings.json
+      </summary>
+
+      <div className="mt-4 space-y-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="text-xs text-muted-foreground">Path</div>
+            <div className="mt-1 font-mono text-xs text-secondary-foreground truncate">
+              {state?.configPath ?? "—"}
+            </div>
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            {!editing ? (
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => {
+                  setEditing(true);
+                  setDraft(state?.json ?? "");
+                  setDirty(false);
+                  setValidation(null);
+                }}
+                disabled={loading || saving || !persist}
+              >
+                Edit
+              </Button>
+            ) : (
+              <>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setEditing(false);
+                    setDraft(state?.json ?? "");
+                    setDirty(false);
+                    setValidation(null);
+                  }}
+                  disabled={saving}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => void saveDraft()}
+                  disabled={saving || !dirty}
+                >
+                  Save
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="text-sm text-muted-foreground py-6 text-center">Loading...</div>
+        ) : (
+          <Suspense
+            fallback={
+              <div className="text-sm text-muted-foreground py-6 text-center">
+                Loading editor...
+              </div>
+            }
+          >
+            <LazyCodeEditor
+              value={draft}
+              onChange={
+                editing
+                  ? (next) => {
+                      setDraft(next);
+                      setDirty(true);
+                      setValidation(null);
+                    }
+                  : undefined
+              }
+              readOnly={!editing || saving}
+              language="text"
+              minHeight="260px"
+              placeholder='{"model": "claude-sonnet"}'
+            />
+          </Suspense>
+        )}
+
+        {validation?.ok === false && validation.error ? (
+          <div className="rounded-lg bg-rose-50 dark:bg-rose-900/30 p-3 text-xs text-rose-700 dark:text-rose-400 flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+            <div className="min-w-0">
+              <div className="font-semibold">JSON validation failed</div>
+              <div className="mt-1 break-words">{validation.error.message}</div>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </details>
+  );
 }
 
 function parseLines(text: string): string[] {
@@ -637,9 +788,13 @@ export function CliManagerClaudeTab({
   claudeSettingsLoading,
   claudeSettingsSaving,
   claudeSettings,
+  claudeSettingsJson,
+  claudeSettingsJsonLoading,
+  claudeSettingsJsonSaving,
   refreshClaude,
   openClaudeConfigDir,
   persistClaudeSettings,
+  persistClaudeSettingsJson,
 }: CliManagerClaudeTabProps) {
   const [versionRefreshToken, setVersionRefreshToken] = useState(0);
   const [modelText, setModelText] = useState("");
@@ -693,7 +848,7 @@ export function CliManagerClaudeTab({
   }, [claudeSettings]);
 
   const loading = claudeLoading || claudeSettingsLoading;
-  const saving = claudeSettingsSaving;
+  const saving = claudeSettingsSaving || Boolean(claudeSettingsJsonSaving);
 
   const configDir = claudeSettings?.config_dir ?? claudeInfo?.config_dir;
   const settingsPath = claudeSettings?.settings_path ?? claudeInfo?.settings_path;
@@ -1335,6 +1490,12 @@ export function CliManagerClaudeTab({
                 </SettingItem>
               </div>
             </div>
+            <AdvancedSettingsJsonSection
+              state={claudeSettingsJson}
+              loading={claudeSettingsJsonLoading}
+              saving={claudeSettingsJsonSaving}
+              persist={persistClaudeSettingsJson}
+            />
           </div>
         )}
 

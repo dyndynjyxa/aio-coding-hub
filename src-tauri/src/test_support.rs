@@ -551,6 +551,9 @@ pub fn settings_set_via_command_json<R: tauri::Runtime>(
     if let Some(value) = update.upstream_proxy_username {
         next.upstream_proxy_username = value;
     }
+    if let Some(value) = update.auto_refresh_oauth_quota_on_startup {
+        next.auto_refresh_oauth_quota_on_startup = value;
+    }
 
     next.update_releases_url = next.update_releases_url.trim().to_string();
     next.gateway_custom_listen_address = next.gateway_custom_listen_address.trim().to_string();

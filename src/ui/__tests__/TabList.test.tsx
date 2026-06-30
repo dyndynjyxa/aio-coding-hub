@@ -66,6 +66,43 @@ describe("ui/TabList", () => {
     expect(onChange).toHaveBeenCalledWith("tab1");
   });
 
+  it("supports reverse and end keyboard navigation", () => {
+    const onChange = vi.fn();
+    render(<TabList ariaLabel="tabs" items={[...defaultItems]} value="tab1" onChange={onChange} />);
+
+    fireEvent.keyDown(screen.getByRole("tablist"), { key: "ArrowLeft" });
+    expect(onChange).toHaveBeenCalledWith("tab3");
+
+    fireEvent.keyDown(screen.getByRole("tablist"), { key: "End" });
+    expect(onChange).toHaveBeenCalledWith("tab3");
+  });
+
+  it("ignores non-navigation keys and skips disabled tabs", () => {
+    const onChange = vi.fn();
+    const items = [
+      { key: "a", label: "A" },
+      { key: "b", label: "B", disabled: true },
+      { key: "c", label: "C" },
+    ] as const;
+    render(<TabList ariaLabel="tabs" items={[...items]} value="a" onChange={onChange} />);
+
+    fireEvent.keyDown(screen.getByRole("tablist"), { key: "Enter" });
+    expect(onChange).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(screen.getByRole("tablist"), { key: "ArrowRight" });
+    expect(onChange).toHaveBeenCalledWith("c");
+  });
+
+  it("does not change tabs when every item is disabled", () => {
+    const onChange = vi.fn();
+    const items = [{ key: "a", label: "A", disabled: true }] as const;
+    render(<TabList ariaLabel="tabs" items={[...items]} value="a" onChange={onChange} />);
+
+    fireEvent.keyDown(screen.getByRole("tablist"), { key: "ArrowRight" });
+
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it("merges custom className on the container", () => {
     render(
       <TabList

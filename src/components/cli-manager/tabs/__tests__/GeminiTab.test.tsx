@@ -1,10 +1,32 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { cliManagerGeminiSettingsJsonValidate } from "../../../../services/cli/cliManager";
 import { CliManagerGeminiTab } from "../GeminiTab";
 
 vi.mock("../../CliVersionBadge", () => ({
   CliVersionBadge: ({ cliKey }: { cliKey: string }) => <div>version-badge-{cliKey}</div>,
 }));
+
+vi.mock("../../../../ui/CodeEditor", () => ({
+  CodeEditor: ({ value, onChange, readOnly }: any) => (
+    <textarea
+      aria-label="mock-gemini-settings-json-editor"
+      value={value}
+      readOnly={readOnly}
+      onChange={(e) => onChange?.(e.currentTarget.value)}
+    />
+  ),
+}));
+
+vi.mock("../../../../services/cli/cliManager", async () => {
+  const actual = await vi.importActual<typeof import("../../../../services/cli/cliManager")>(
+    "../../../../services/cli/cliManager"
+  );
+  return {
+    ...actual,
+    cliManagerGeminiSettingsJsonValidate: vi.fn().mockResolvedValue({ ok: true, error: null }),
+  };
+});
 
 function createGeminiInfo(overrides: Partial<any> = {}) {
   return {
@@ -154,5 +176,47 @@ describe("components/cli-manager/tabs/GeminiTab", () => {
     );
     expect(screen.getByText("检测失败：")).toBeInTheDocument();
     expect(screen.getByText("boom")).toBeInTheDocument();
+  });
+
+  it("saves advanced raw settings.json edits after validation", async () => {
+    vi.mocked(cliManagerGeminiSettingsJsonValidate).mockResolvedValue({ ok: true, error: null });
+    const persistGeminiSettingsJson = vi.fn().mockResolvedValue(true);
+
+    render(
+      <CliManagerGeminiTab
+        geminiAvailable="available"
+        geminiLoading={false}
+        geminiInfo={createGeminiInfo()}
+        geminiConfigLoading={false}
+        geminiConfigSaving={false}
+        geminiConfig={createGeminiConfig()}
+        geminiSettingsJson={{
+          configPath: "/home/user/.gemini/settings.json",
+          exists: true,
+          json: '{\n  "general": {}\n}\n',
+        }}
+        geminiSettingsJsonLoading={false}
+        geminiSettingsJsonSaving={false}
+        refreshGeminiInfo={vi.fn()}
+        persistGeminiConfig={vi.fn()}
+        persistGeminiSettingsJson={persistGeminiSettingsJson}
+      />
+    );
+
+    fireEvent.click(screen.getByText("Advanced settings.json"));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(await screen.findByLabelText("mock-gemini-settings-json-editor"), {
+      target: { value: '{\n  "model": { "name": "gemini-2.5-pro" }\n}\n' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(cliManagerGeminiSettingsJsonValidate).toHaveBeenCalledWith(
+      '{\n  "model": { "name": "gemini-2.5-pro" }\n}\n'
+    );
+    await waitFor(() =>
+      expect(persistGeminiSettingsJson).toHaveBeenCalledWith(
+        '{\n  "model": { "name": "gemini-2.5-pro" }\n}\n'
+      )
+    );
   });
 });

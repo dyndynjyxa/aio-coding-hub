@@ -48,6 +48,7 @@ export function createTestAppSettings(overrides?: Partial<AppSettings>): AppSett
     enable_debug_log: false,
     enable_task_complete_notify: true,
     enable_notification_sound: true,
+    auto_refresh_oauth_quota_on_startup: { claude: false, codex: false, gemini: false },
     enable_response_fixer: true,
     response_fixer_fix_encoding: true,
     response_fixer_fix_sse_format: true,

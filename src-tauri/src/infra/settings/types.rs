@@ -65,6 +65,14 @@ impl Default for WslTargetCli {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
+#[serde(default)]
+pub struct OAuthQuotaAutoRefreshTargetCli {
+    pub claude: bool,
+    pub codex: bool,
+    pub gemini: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(default)]
 pub struct AppSettings {
@@ -133,6 +141,8 @@ pub struct AppSettings {
     pub enable_task_complete_notify: bool,
     // Notification sound toggle - play custom sound when notifications fire (default enabled).
     pub enable_notification_sound: bool,
+    // OAuth quota auto-refresh on startup per CLI (default disabled to avoid risky provider calls).
+    pub auto_refresh_oauth_quota_on_startup: OAuthQuotaAutoRefreshTargetCli,
     // Response fixer (default enabled).
     pub enable_response_fixer: bool,
     pub response_fixer_fix_encoding: bool,
@@ -207,6 +217,7 @@ impl Default for AppSettings {
             enable_debug_log: DEFAULT_ENABLE_DEBUG_LOG,
             enable_task_complete_notify: DEFAULT_ENABLE_TASK_COMPLETE_NOTIFY,
             enable_notification_sound: DEFAULT_ENABLE_NOTIFICATION_SOUND,
+            auto_refresh_oauth_quota_on_startup: OAuthQuotaAutoRefreshTargetCli::default(),
             enable_response_fixer: DEFAULT_ENABLE_RESPONSE_FIXER,
             response_fixer_fix_encoding: DEFAULT_RESPONSE_FIXER_FIX_ENCODING,
             response_fixer_fix_sse_format: DEFAULT_RESPONSE_FIXER_FIX_SSE_FORMAT,

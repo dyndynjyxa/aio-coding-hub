@@ -65,6 +65,29 @@ pub struct ClaudeSettingsState {
     pub env_claude_code_skip_prompt_history: bool,
 }
 
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeSettingsJsonState {
+    pub config_path: String,
+    pub exists: bool,
+    pub json: String,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeSettingsJsonValidationError {
+    pub message: String,
+    pub line: Option<u32>,
+    pub column: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeSettingsJsonValidationResult {
+    pub ok: bool,
+    pub error: Option<ClaudeSettingsJsonValidationError>,
+}
+
 #[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct ClaudeSettingsPatch {
     pub model: Option<String>,
@@ -168,6 +191,83 @@ fn json_to_bytes(
     out.push(b'\n');
     ensure_claude_settings_len(&out, hint)?;
     Ok(out)
+}
+
+fn json_validation_error(message: impl Into<String>) -> ClaudeSettingsJsonValidationResult {
+    ClaudeSettingsJsonValidationResult {
+        ok: false,
+        error: Some(ClaudeSettingsJsonValidationError {
+            message: message.into(),
+            line: None,
+            column: None,
+        }),
+    }
+}
+
+fn json_parse_validation_error(error: serde_json::Error) -> ClaudeSettingsJsonValidationResult {
+    ClaudeSettingsJsonValidationResult {
+        ok: false,
+        error: Some(ClaudeSettingsJsonValidationError {
+            message: error.to_string(),
+            line: Some(error.line() as u32),
+            column: Some(error.column() as u32),
+        }),
+    }
+}
+
+fn parse_claude_settings_json_raw(
+    json: &str,
+) -> Result<serde_json::Value, ClaudeSettingsJsonValidationResult> {
+    if json.len() > CLAUDE_SETTINGS_MAX_BYTES {
+        return Err(json_validation_error(format!(
+            "settings.json too large (max {CLAUDE_SETTINGS_MAX_BYTES} bytes)"
+        )));
+    }
+
+    let root =
+        serde_json::from_str::<serde_json::Value>(json).map_err(json_parse_validation_error)?;
+    if !root.is_object() {
+        return Err(json_validation_error(
+            "settings.json root must be a JSON object",
+        ));
+    }
+    Ok(root)
+}
+
+pub fn validate_claude_settings_json_raw(
+    json: String,
+) -> crate::shared::error::AppResult<ClaudeSettingsJsonValidationResult> {
+    Ok(match parse_claude_settings_json_raw(&json) {
+        Ok(_) => ClaudeSettingsJsonValidationResult {
+            ok: true,
+            error: None,
+        },
+        Err(result) => result,
+    })
+}
+
+pub fn normalize_claude_settings_json_raw(
+    json: String,
+) -> crate::shared::error::AppResult<Vec<u8>> {
+    match parse_claude_settings_json_raw(&json) {
+        Ok(root) => json_to_bytes(&root, "claude/settings.json"),
+        Err(result) => {
+            let err = result.error.unwrap_or(ClaudeSettingsJsonValidationError {
+                message: "invalid JSON".to_string(),
+                line: None,
+                column: None,
+            });
+            let mut msg = format!("SEC_INVALID_INPUT: invalid settings.json: {}", err.message);
+            match (err.line, err.column) {
+                (Some(line), Some(column)) => {
+                    msg.push_str(&format!(" (line {line}, column {column})"))
+                }
+                (Some(line), None) => msg.push_str(&format!(" (line {line})")),
+                _ => {}
+            }
+            Err(msg.into())
+        }
+    }
 }
 
 fn ensure_claude_settings_len(bytes: &[u8], label: &str) -> crate::shared::error::AppResult<()> {
@@ -382,6 +482,54 @@ pub fn claude_settings_get<R: tauri::Runtime>(
         env_claude_code_proxy_resolves_hosts,
         env_claude_code_skip_prompt_history,
     })
+}
+
+pub fn claude_settings_json_get_raw<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<ClaudeSettingsJsonState> {
+    let path = claude_settings_path(app)?;
+    let bytes = read_optional_claude_settings_file(&path)?;
+    let exists = bytes.is_some();
+    let json = match bytes {
+        Some(bytes) => String::from_utf8(bytes).map_err(|_| {
+            "SEC_INVALID_INPUT: claude settings.json must be valid UTF-8".to_string()
+        })?,
+        None => String::new(),
+    };
+
+    Ok(ClaudeSettingsJsonState {
+        config_path: path.to_string_lossy().to_string(),
+        exists,
+        json,
+    })
+}
+
+pub fn claude_settings_json_set_raw<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    json: String,
+) -> crate::shared::error::AppResult<ClaudeSettingsJsonState> {
+    let path = claude_settings_path(app)?;
+    if path.exists() && is_symlink(&path)? {
+        return Err(format!(
+            "SEC_INVALID_INPUT: refusing to modify symlink path={}",
+            path.display()
+        )
+        .into());
+    }
+
+    let bytes = normalize_claude_settings_json_raw(json)?;
+    let _ = write_file_atomic_if_changed(&path, &bytes)?;
+
+    if let Some(backup_path) = super::cli_proxy::backup_file_path_for_enabled_manifest(
+        app,
+        "claude",
+        "claude_settings_json",
+        "settings.json",
+    )? {
+        let _ = write_file_atomic_if_changed(&backup_path, &bytes)?;
+    }
+
+    claude_settings_json_get_raw(app)
 }
 
 fn sanitize_lines(lines: Vec<String>) -> Vec<String> {

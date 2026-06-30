@@ -158,7 +158,7 @@ describe("pages/providers/SortableProviderCard", () => {
     expect(oauthButton.tagName).toBe("BUTTON");
   });
 
-  it("auto-fetches OAuth limits on mount for oauth providers", async () => {
+  it("does not auto-fetch OAuth limits on mount when startup auto-refresh is disabled", async () => {
     vi.mocked(providerOAuthFetchLimits).mockResolvedValue({
       limit_short_label: null,
       limit_5h_text: "auto",
@@ -172,7 +172,50 @@ describe("pages/providers/SortableProviderCard", () => {
       auth_mode: "oauth",
     });
 
-    // React Query auto-fetches because enabled=true for OAuth providers
+    await Promise.resolve();
+
+    expect(vi.mocked(providerOAuthFetchLimits)).not.toHaveBeenCalled();
+  });
+
+  it("auto-fetches OAuth limits on mount when startup auto-refresh is enabled", async () => {
+    vi.mocked(providerOAuthFetchLimits).mockResolvedValue({
+      limit_short_label: null,
+      limit_5h_text: "auto",
+      limit_weekly_text: "200",
+      limit_5h_reset_at: null,
+      limit_weekly_reset_at: null,
+      reset_credit_available_count: null,
+    });
+
+    renderCard(
+      {
+        auth_mode: "oauth",
+      },
+      { autoRefreshOAuthQuotaOnStartup: true }
+    );
+
+    await waitFor(() => expect(vi.mocked(providerOAuthFetchLimits)).toHaveBeenCalled());
+  });
+
+  it("manual OAuth limits refresh works when startup auto-refresh is disabled", async () => {
+    vi.mocked(providerOAuthFetchLimits).mockResolvedValue({
+      limit_short_label: "5h",
+      limit_5h_text: "42%",
+      limit_weekly_text: null,
+      limit_5h_reset_at: null,
+      limit_weekly_reset_at: null,
+      reset_credit_available_count: null,
+    });
+
+    renderCard({
+      auth_mode: "oauth",
+    });
+
+    await Promise.resolve();
+    expect(vi.mocked(providerOAuthFetchLimits)).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText("OAuth"));
+
     await waitFor(() => expect(vi.mocked(providerOAuthFetchLimits)).toHaveBeenCalled());
   });
 
@@ -256,12 +299,15 @@ describe("pages/providers/SortableProviderCard", () => {
       refresh_error: null,
     });
 
-    renderCard({
-      id: 88,
-      cli_key: "codex",
-      auth_mode: "oauth",
-      oauth_email: "codex@example.com",
-    });
+    renderCard(
+      {
+        id: 88,
+        cli_key: "codex",
+        auth_mode: "oauth",
+        oauth_email: "codex@example.com",
+      },
+      { autoRefreshOAuthQuotaOnStartup: true }
+    );
 
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "可重置次数: 3(点击重置)" })).toBeInTheDocument()
@@ -290,11 +336,14 @@ describe("pages/providers/SortableProviderCard", () => {
       reset_credit_available_count: 3,
     });
 
-    renderCard({
-      id: 89,
-      cli_key: "gemini",
-      auth_mode: "oauth",
-    });
+    renderCard(
+      {
+        id: 89,
+        cli_key: "gemini",
+        auth_mode: "oauth",
+      },
+      { autoRefreshOAuthQuotaOnStartup: true }
+    );
 
     await waitFor(() => expect(screen.getByText("短窗: 88")).toBeInTheDocument());
     expect(screen.queryByText(/可重置次数/)).not.toBeInTheDocument();

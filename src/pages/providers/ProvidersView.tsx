@@ -21,6 +21,7 @@ import { useProvidersViewDataModel } from "./hooks/useProvidersViewDataModel";
 export type ProvidersViewProps = {
   activeCli: CliKey;
   setActiveCli: (cliKey: CliKey) => void;
+  autoRefreshOAuthQuotaOnStartup?: boolean;
 };
 
 type PendingProvidersScrollRestore = {
@@ -34,7 +35,10 @@ function getRouteRowEnabled(row: unknown) {
   return typeof row.enabled === "boolean" ? row.enabled : true;
 }
 
-export function ProvidersView({ activeCli }: ProvidersViewProps) {
+export function ProvidersView({
+  activeCli,
+  autoRefreshOAuthQuotaOnStartup = false,
+}: ProvidersViewProps) {
   const model = useProvidersViewDataModel(activeCli);
   const {
     providers,
@@ -312,6 +316,7 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
                         <SortableProviderCard
                           key={provider.id}
                           provider={provider}
+                          autoRefreshOAuthQuotaOnStartup={autoRefreshOAuthQuotaOnStartup}
                           trailing={
                             joined ? (
                               <Button

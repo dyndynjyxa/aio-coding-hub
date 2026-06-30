@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { settingsGet } from "../settings";
+import { createSettingsSetInput, settingsGet } from "../settings";
 import { logToConsole } from "../../consoleLog";
 import { commands } from "../../../generated/bindings";
+import { createTestAppSettings } from "../../../test/fixtures/settings";
 
 vi.mock("../../../generated/bindings", async () => {
   const actual = await vi.importActual<typeof import("../../../generated/bindings")>(
@@ -43,5 +44,20 @@ describe("services/settings (error semantics)", () => {
     vi.mocked(commands.settingsGet).mockResolvedValueOnce({ status: "ok", data: null as any });
 
     await expect(settingsGet()).rejects.toThrow("IPC_NULL_RESULT: settings_get");
+  });
+
+  it("includes OAuth quota auto-refresh in generated settings input", () => {
+    const input = createSettingsSetInput(
+      createTestAppSettings({
+        auto_refresh_oauth_quota_on_startup: { claude: false, codex: false, gemini: false },
+      }),
+      { auto_refresh_oauth_quota_on_startup: { claude: true, codex: false, gemini: true } }
+    );
+
+    expect(input.autoRefreshOauthQuotaOnStartup).toEqual({
+      claude: true,
+      codex: false,
+      gemini: true,
+    });
   });
 });

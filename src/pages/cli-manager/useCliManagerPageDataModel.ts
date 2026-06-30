@@ -12,6 +12,7 @@ import { openDesktopSinglePath } from "../../services/desktop/dialog";
 import { openDesktopPath } from "../../services/desktop/opener";
 import { type GatewayRectifierSettingsPatch } from "../../services/settings/settingsGatewayRectifier";
 import type { AppSettings, SensitiveStringUpdate } from "../../services/settings/settings";
+import type { CliKey } from "../../services/providers/providers";
 import {
   getSettingsReadProtection,
   SETTINGS_READONLY_MESSAGE,
@@ -24,6 +25,8 @@ import {
 import { useProvidersListQuery } from "../../query/providers";
 import {
   useCliManagerClaudeInfoQuery,
+  useCliManagerClaudeSettingsJsonQuery,
+  useCliManagerClaudeSettingsJsonSetMutation,
   useCliManagerClaudeSettingsQuery,
   useCliManagerClaudeSettingsSetMutation,
   useCliManagerCodexConfigQuery,
@@ -34,6 +37,8 @@ import {
   useCliManagerGeminiConfigQuery,
   useCliManagerGeminiConfigSetMutation,
   useCliManagerGeminiInfoQuery,
+  useCliManagerGeminiSettingsJsonQuery,
+  useCliManagerGeminiSettingsJsonSetMutation,
 } from "../../query/cliManager";
 import { formatActionFailureToast } from "../../utils/errors";
 
@@ -60,6 +65,12 @@ const DEFAULT_RECTIFIER: GatewayRectifierSettingsPatch = {
   response_fixer_fix_truncated_json: true,
   response_fixer_max_json_depth: 200,
   response_fixer_max_fix_size: 1024 * 1024,
+};
+
+const DEFAULT_OAUTH_QUOTA_AUTO_REFRESH: AppSettings["auto_refresh_oauth_quota_on_startup"] = {
+  claude: false,
+  codex: false,
+  gemini: false,
 };
 
 export function useCliManagerPageDataModel() {
@@ -103,6 +114,8 @@ export function useCliManagerPageDataModel() {
   const cacheAnomalyMonitorEnabled = appSettings?.enable_cache_anomaly_monitor ?? false;
   const taskCompleteNotifyEnabled = appSettings?.enable_task_complete_notify ?? true;
   const notificationSoundEnabled = appSettings?.enable_notification_sound ?? true;
+  const autoRefreshOAuthQuotaOnStartupEnabled =
+    appSettings?.auto_refresh_oauth_quota_on_startup ?? DEFAULT_OAUTH_QUOTA_AUTO_REFRESH;
 
   function blockSettingsWrite() {
     toast(settingsReadErrorMessage ?? SETTINGS_READONLY_MESSAGE);
@@ -110,11 +123,16 @@ export function useCliManagerPageDataModel() {
 
   const claudeInfoQuery = useCliManagerClaudeInfoQuery({ enabled: tab === "claude" });
   const claudeSettingsQuery = useCliManagerClaudeSettingsQuery({ enabled: tab === "claude" });
+  const claudeSettingsJsonQuery = useCliManagerClaudeSettingsJsonQuery({
+    enabled: tab === "claude",
+  });
   const claudeSettingsSetMutation = useCliManagerClaudeSettingsSetMutation();
+  const claudeSettingsJsonSetMutation = useCliManagerClaudeSettingsJsonSetMutation();
   const claudeProvidersQuery = useProvidersListQuery("claude", { enabled: tab === "claude" });
 
   const claudeInfo = claudeInfoQuery.data ?? null;
   const claudeSettings = claudeSettingsQuery.data ?? null;
+  const claudeSettingsJson = claudeSettingsJsonQuery.data ?? null;
   const claudeProviders = claudeProvidersQuery.data ?? null;
   const claudeAvailable: "checking" | "available" | "unavailable" =
     claudeInfoQuery.isFetching && !claudeInfo
@@ -125,6 +143,8 @@ export function useCliManagerPageDataModel() {
   const claudeLoading = claudeInfoQuery.isFetching;
   const claudeSettingsLoading = claudeSettingsQuery.isFetching;
   const claudeSettingsSaving = claudeSettingsSetMutation.isPending;
+  const claudeSettingsJsonLoading = claudeSettingsJsonQuery.isFetching;
+  const claudeSettingsJsonSaving = claudeSettingsJsonSetMutation.isPending;
 
   const codexInfoQuery = useCliManagerCodexInfoQuery({ enabled: tab === "codex" });
   const codexConfigQuery = useCliManagerCodexConfigQuery({ enabled: tab === "codex" });
@@ -145,9 +165,14 @@ export function useCliManagerPageDataModel() {
 
   const geminiInfoQuery = useCliManagerGeminiInfoQuery({ enabled: tab === "gemini" });
   const geminiConfigQuery = useCliManagerGeminiConfigQuery({ enabled: tab === "gemini" });
+  const geminiSettingsJsonQuery = useCliManagerGeminiSettingsJsonQuery({
+    enabled: tab === "gemini",
+  });
   const geminiConfigSetMutation = useCliManagerGeminiConfigSetMutation();
+  const geminiSettingsJsonSetMutation = useCliManagerGeminiSettingsJsonSetMutation();
   const geminiInfo = geminiInfoQuery.data ?? null;
   const geminiConfig = geminiConfigQuery.data ?? null;
+  const geminiSettingsJson = geminiSettingsJsonQuery.data ?? null;
   const geminiAvailable: "checking" | "available" | "unavailable" =
     geminiInfoQuery.isFetching && !geminiInfo
       ? "checking"
@@ -157,6 +182,8 @@ export function useCliManagerPageDataModel() {
   const geminiLoading = geminiInfoQuery.isFetching;
   const geminiConfigLoading = geminiConfigQuery.isFetching;
   const geminiConfigSaving = geminiConfigSetMutation.isPending;
+  const geminiSettingsJsonLoading = geminiSettingsJsonQuery.isFetching;
+  const geminiSettingsJsonSaving = geminiSettingsJsonSetMutation.isPending;
 
   useEffect(() => {
     if (!appSettings) return;
@@ -327,6 +354,31 @@ export function useCliManagerPageDataModel() {
     } catch {}
   }
 
+  async function persistAutoRefreshOAuthQuotaOnStartup(cliKey: CliKey, enable: boolean) {
+    if (settingsWriteBlocked) {
+      blockSettingsWrite();
+      return;
+    }
+    if (commonSettingsSaving) return;
+    if (rectifierAvailable !== "available") return;
+
+    try {
+      const current =
+        appSettings?.auto_refresh_oauth_quota_on_startup ?? DEFAULT_OAUTH_QUOTA_AUTO_REFRESH;
+      const nextTarget = {
+        ...DEFAULT_OAUTH_QUOTA_AUTO_REFRESH,
+        ...current,
+        [cliKey]: enable,
+      };
+      const updated = await persistCommonSettings({
+        auto_refresh_oauth_quota_on_startup: nextTarget,
+      });
+      if (!updated) return;
+      const next = updated.auto_refresh_oauth_quota_on_startup?.[cliKey] ?? enable;
+      toast(next ? "OAuth quota auto-refresh enabled" : "OAuth quota auto-refresh disabled");
+    } catch {}
+  }
+
   async function persistCommonSettings(
     patch: Partial<AppSettings> & { upstream_proxy_password?: SensitiveStringUpdate }
   ): Promise<AppSettings | null> {
@@ -384,7 +436,11 @@ export function useCliManagerPageDataModel() {
   }
 
   async function refreshClaude() {
-    await Promise.all([claudeSettingsQuery.refetch(), claudeInfoQuery.refetch()]);
+    await Promise.all([
+      claudeSettingsQuery.refetch(),
+      claudeSettingsJsonQuery.refetch(),
+      claudeInfoQuery.refetch(),
+    ]);
   }
 
   async function refreshCodex() {
@@ -396,7 +452,11 @@ export function useCliManagerPageDataModel() {
   }
 
   async function refreshGeminiInfo() {
-    await Promise.all([geminiInfoQuery.refetch(), geminiConfigQuery.refetch()]);
+    await Promise.all([
+      geminiInfoQuery.refetch(),
+      geminiConfigQuery.refetch(),
+      geminiSettingsJsonQuery.refetch(),
+    ]);
   }
 
   async function persistGeminiConfig(patch: GeminiConfigPatch) {
@@ -417,6 +477,26 @@ export function useCliManagerPageDataModel() {
         patch,
       });
       toast(formatted.toast);
+    }
+  }
+
+  async function persistGeminiSettingsJson(json: string): Promise<boolean> {
+    if (geminiSettingsJsonSaving) return false;
+    if (geminiAvailable !== "available") return false;
+
+    try {
+      const updated = await geminiSettingsJsonSetMutation.mutateAsync({ json });
+      if (!updated) return false;
+      toast("Saved settings.json");
+      return true;
+    } catch (err) {
+      const formatted = formatActionFailureToast("Save Gemini settings.json", err);
+      logToConsole("error", "保存 Gemini settings.json 失败", {
+        error: formatted.raw,
+        error_code: formatted.error_code ?? undefined,
+      });
+      toast(formatted.toast);
+      return false;
     }
   }
 
@@ -529,6 +609,26 @@ export function useCliManagerPageDataModel() {
     }
   }
 
+  async function persistClaudeSettingsJson(json: string): Promise<boolean> {
+    if (claudeSettingsJsonSaving) return false;
+    if (claudeAvailable !== "available") return false;
+
+    try {
+      const updated = await claudeSettingsJsonSetMutation.mutateAsync({ json });
+      if (!updated) return false;
+      toast("Saved settings.json");
+      return true;
+    } catch (err) {
+      const formatted = formatActionFailureToast("Save Claude settings.json", err);
+      logToConsole("error", "保存 Claude Code settings.json 失败", {
+        error: formatted.raw,
+        error_code: formatted.error_code ?? undefined,
+      });
+      toast(formatted.toast);
+      return false;
+    }
+  }
+
   async function openClaudeConfigDir() {
     const dir = claudeInfo?.config_dir ?? claudeSettings?.config_dir;
     if (!dir) return;
@@ -583,6 +683,9 @@ export function useCliManagerPageDataModel() {
       notificationSoundEnabled,
       notificationSoundSaving: commonSettingsSaving || settingsWriteBlocked,
       onPersistNotificationSound: persistNotificationSound,
+      autoRefreshOAuthQuotaOnStartupEnabled,
+      autoRefreshOAuthQuotaOnStartupSaving: commonSettingsSaving || settingsWriteBlocked,
+      onPersistAutoRefreshOAuthQuotaOnStartup: persistAutoRefreshOAuthQuotaOnStartup,
       appSettings,
       commonSettingsSaving: commonSettingsSaving || settingsWriteBlocked,
       onPersistCommonSettings: persistCommonSettings,
@@ -609,10 +712,14 @@ export function useCliManagerPageDataModel() {
       claudeSettingsLoading,
       claudeSettingsSaving,
       claudeSettings,
+      claudeSettingsJson,
+      claudeSettingsJsonLoading,
+      claudeSettingsJsonSaving,
       providers: claudeProviders,
       refreshClaude,
       openClaudeConfigDir,
       persistClaudeSettings,
+      persistClaudeSettingsJson,
     },
     codexTabProps: {
       codexAvailable,
@@ -646,8 +753,12 @@ export function useCliManagerPageDataModel() {
       geminiConfigLoading,
       geminiConfigSaving,
       geminiConfig,
+      geminiSettingsJson,
+      geminiSettingsJsonLoading,
+      geminiSettingsJsonSaving,
       refreshGeminiInfo,
       persistGeminiConfig,
+      persistGeminiSettingsJson,
     },
   };
 }

@@ -27,6 +27,14 @@ fn settings_read_defaults() {
     // Verify key default values.
     assert_eq!(json_i64(&settings, "preferred_port"), 37123);
     assert!(!json_bool(&settings, "auto_start"));
+    assert_eq!(
+        settings["auto_refresh_oauth_quota_on_startup"],
+        serde_json::json!({
+            "claude": false,
+            "codex": false,
+            "gemini": false
+        })
+    );
     assert!(json_bool(&settings, "tray_enabled"));
     assert_eq!(settings["home_usage_period"], serde_json::json!("last15"));
     assert_eq!(json_i64(&settings, "log_retention_days"), 7);
@@ -36,6 +44,31 @@ fn settings_read_defaults() {
     assert_eq!(
         json_i64(&settings, "circuit_breaker_open_duration_minutes"),
         30
+    );
+}
+
+#[test]
+fn settings_set_via_command_updates_oauth_quota_auto_refresh() {
+    let app = support::TestApp::new();
+    let handle = app.handle();
+
+    let mut update = settings_command_update_json(38000);
+    update["autoRefreshOauthQuotaOnStartup"] = serde_json::json!({
+        "claude": true,
+        "codex": false,
+        "gemini": true
+    });
+
+    let updated = aio_coding_hub_lib::test_support::settings_set_via_command_json(&handle, update)
+        .expect("enable oauth quota auto-refresh");
+
+    assert_eq!(
+        command_settings(&updated)["auto_refresh_oauth_quota_on_startup"],
+        serde_json::json!({
+            "claude": true,
+            "codex": false,
+            "gemini": true
+        })
     );
 }
 

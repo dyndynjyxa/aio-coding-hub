@@ -134,6 +134,7 @@ export type SortableProviderCardProps = {
   testAvailabilityLoading?: boolean;
   onDuplicate?: (provider: ProviderSummary) => void;
   duplicateLoading?: boolean;
+  autoRefreshOAuthQuotaOnStartup?: boolean;
   onEdit: (provider: ProviderSummary) => void;
   onDelete: (provider: ProviderSummary) => void;
 };
@@ -158,6 +159,7 @@ export const ProviderCard = memo(function ProviderCard({
   testAvailabilityLoading = false,
   onDuplicate,
   duplicateLoading = false,
+  autoRefreshOAuthQuotaOnStartup = false,
   onEdit,
   onDelete,
   className,
@@ -194,7 +196,7 @@ export const ProviderCard = memo(function ProviderCard({
   const queryClient = useQueryClient();
   const { data: oauthLimits = null, isLoading: limitsQueryLoading } = useOAuthLimitsQuery(
     provider.id,
-    isOAuth
+    isOAuth && autoRefreshOAuthQuotaOnStartup
   );
   const limitsLoading = limitsQueryLoading || limitsRefreshing;
   const shouldTrackNowUnix =

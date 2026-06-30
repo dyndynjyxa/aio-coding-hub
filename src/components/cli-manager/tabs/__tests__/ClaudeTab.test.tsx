@@ -2,7 +2,11 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { CliManagerClaudeTab } from "../ClaudeTab";
-import type { ClaudeCliInfo, ClaudeSettingsState } from "../../../../services/cli/cliManager";
+import {
+  cliManagerClaudeSettingsJsonValidate,
+  type ClaudeCliInfo,
+  type ClaudeSettingsState,
+} from "../../../../services/cli/cliManager";
 import {
   useCliManagerClaudeHooksQuery,
   useCliManagerClaudeHooksSetMutation,
@@ -36,9 +40,30 @@ vi.mock("../../CliVersionBadge", () => ({
   CliVersionBadge: ({ cliKey }: { cliKey: string }) => <div>version-badge-{cliKey}</div>,
 }));
 
+vi.mock("../../../../ui/CodeEditor", () => ({
+  CodeEditor: ({ value, onChange, readOnly }: any) => (
+    <textarea
+      aria-label="mock-claude-settings-json-editor"
+      value={value}
+      readOnly={readOnly}
+      onChange={(e) => onChange?.(e.currentTarget.value)}
+    />
+  ),
+}));
+
 vi.mock("../ClaudeOAuthCard", () => ({
   ClaudeOAuthCard: () => <div>claude-oauth-card</div>,
 }));
+
+vi.mock("../../../../services/cli/cliManager", async () => {
+  const actual = await vi.importActual<typeof import("../../../../services/cli/cliManager")>(
+    "../../../../services/cli/cliManager"
+  );
+  return {
+    ...actual,
+    cliManagerClaudeSettingsJsonValidate: vi.fn().mockResolvedValue({ ok: true, error: null }),
+  };
+});
 
 vi.mock("../../../../query/cliManager", async () => {
   const actual = await vi.importActual<typeof import("../../../../query/cliManager")>(
@@ -515,6 +540,50 @@ describe("components/cli-manager/tabs/ClaudeTab", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     expect(refetch).toHaveBeenCalled();
+  });
+
+  it("saves advanced raw settings.json edits after validation", async () => {
+    vi.mocked(cliManagerClaudeSettingsJsonValidate).mockResolvedValue({ ok: true, error: null });
+    const persistClaudeSettingsJson = vi.fn().mockResolvedValue(true);
+
+    render(
+      <CliManagerClaudeTab
+        claudeAvailable="available"
+        claudeLoading={false}
+        claudeInfo={createClaudeInfo()}
+        claudeSettingsLoading={false}
+        claudeSettingsSaving={false}
+        claudeSettings={createClaudeSettings()}
+        claudeSettingsJson={{
+          configPath: "/home/user/.claude/settings.json",
+          exists: true,
+          json: '{\n  "model": "claude-sonnet"\n}\n',
+        }}
+        claudeSettingsJsonLoading={false}
+        claudeSettingsJsonSaving={false}
+        providers={null}
+        refreshClaude={vi.fn()}
+        openClaudeConfigDir={vi.fn()}
+        persistClaudeSettings={vi.fn()}
+        persistClaudeSettingsJson={persistClaudeSettingsJson}
+      />
+    );
+
+    fireEvent.click(screen.getByText("Advanced settings.json"));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(await screen.findByLabelText("mock-claude-settings-json-editor"), {
+      target: { value: '{\n  "outputStyle": "Explanatory"\n}\n' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(cliManagerClaudeSettingsJsonValidate).toHaveBeenCalledWith(
+      '{\n  "outputStyle": "Explanatory"\n}\n'
+    );
+    await waitFor(() =>
+      expect(persistClaudeSettingsJson).toHaveBeenCalledWith(
+        '{\n  "outputStyle": "Explanatory"\n}\n'
+      )
+    );
   });
 
   it("keeps the hook editor open when saving hooks fails", async () => {

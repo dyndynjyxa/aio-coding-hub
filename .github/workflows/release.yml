@@ -14,7 +14,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  fork-release-disabled:
+    if: github.repository != 'dyndynjyxa/aio-coding-hub'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip release automation in forks
+        run: echo "Release automation is disabled outside dyndynjyxa/aio-coding-hub."
+
   release-please:
+    if: github.repository == 'dyndynjyxa/aio-coding-hub'
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}

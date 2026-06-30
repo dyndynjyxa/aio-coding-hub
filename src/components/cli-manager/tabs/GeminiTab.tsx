@@ -1,10 +1,13 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import type {
   GeminiConfigPatch,
   GeminiConfigState,
+  GeminiSettingsJsonState,
+  GeminiSettingsJsonValidationResult,
   SimpleCliInfo,
 } from "../../../services/cli/cliManager";
+import { cliManagerGeminiSettingsJsonValidate } from "../../../services/cli/cliManager";
 import { cn } from "../../../utils/cn";
 import { Button } from "../../../ui/Button";
 import { Card } from "../../../ui/Card";
@@ -22,6 +25,10 @@ import {
   Settings,
 } from "lucide-react";
 
+const LazyCodeEditor = lazy(() =>
+  import("../../../ui/CodeEditor").then((m) => ({ default: m.CodeEditor }))
+);
+
 export type CliManagerAvailability = "checking" | "available" | "unavailable";
 
 export type CliManagerGeminiTabProps = {
@@ -31,8 +38,12 @@ export type CliManagerGeminiTabProps = {
   geminiConfigLoading: boolean;
   geminiConfigSaving: boolean;
   geminiConfig: GeminiConfigState | null;
+  geminiSettingsJson?: GeminiSettingsJsonState | null;
+  geminiSettingsJsonLoading?: boolean;
+  geminiSettingsJsonSaving?: boolean;
   refreshGeminiInfo: () => Promise<void> | void;
   persistGeminiConfig: (patch: GeminiConfigPatch) => Promise<void> | void;
+  persistGeminiSettingsJson?: (json: string) => Promise<boolean> | boolean;
 };
 
 function SettingItem({
@@ -74,6 +85,146 @@ function formatNumberInput(value: number | null) {
   return value == null ? "" : String(value);
 }
 
+function AdvancedSettingsJsonSection({
+  state,
+  loading,
+  saving,
+  persist,
+}: {
+  state: GeminiSettingsJsonState | null | undefined;
+  loading?: boolean;
+  saving?: boolean;
+  persist?: (json: string) => Promise<boolean> | boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [validation, setValidation] = useState<GeminiSettingsJsonValidationResult | null>(null);
+
+  useEffect(() => {
+    if (dirty) return;
+    setDraft(state?.json ?? "");
+  }, [dirty, state?.configPath, state?.json]);
+
+  async function saveDraft() {
+    if (!persist || saving) return;
+    const result = await cliManagerGeminiSettingsJsonValidate(draft);
+    setValidation(result);
+    if (!result || result.ok !== true) return;
+
+    const saved = await persist(draft);
+    if (!saved) return;
+    setEditing(false);
+    setDirty(false);
+  }
+
+  return (
+    <details
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+      className="rounded-lg border border-border bg-white dark:bg-secondary p-5"
+    >
+      <summary className="cursor-pointer text-sm font-semibold text-foreground flex items-center gap-2">
+        <FileJson className="h-4 w-4 text-muted-foreground" />
+        Advanced settings.json
+      </summary>
+
+      <div className="mt-4 space-y-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="text-xs text-muted-foreground">Path</div>
+            <div className="mt-1 font-mono text-xs text-secondary-foreground truncate">
+              {state?.configPath ?? "—"}
+            </div>
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            {!editing ? (
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => {
+                  setEditing(true);
+                  setDraft(state?.json ?? "");
+                  setDirty(false);
+                  setValidation(null);
+                }}
+                disabled={loading || saving || !persist}
+              >
+                Edit
+              </Button>
+            ) : (
+              <>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setEditing(false);
+                    setDraft(state?.json ?? "");
+                    setDirty(false);
+                    setValidation(null);
+                  }}
+                  disabled={saving}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => void saveDraft()}
+                  disabled={saving || !dirty}
+                >
+                  Save
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="text-sm text-muted-foreground py-6 text-center">Loading...</div>
+        ) : (
+          <Suspense
+            fallback={
+              <div className="text-sm text-muted-foreground py-6 text-center">
+                Loading editor...
+              </div>
+            }
+          >
+            <LazyCodeEditor
+              value={draft}
+              onChange={
+                editing
+                  ? (next) => {
+                      setDraft(next);
+                      setDirty(true);
+                      setValidation(null);
+                    }
+                  : undefined
+              }
+              readOnly={!editing || saving}
+              language="text"
+              minHeight="260px"
+              placeholder='{"general": {}}'
+            />
+          </Suspense>
+        )}
+
+        {validation?.ok === false && validation.error ? (
+          <div className="rounded-lg bg-rose-50 dark:bg-rose-900/30 p-3 text-xs text-rose-700 dark:text-rose-400 flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+            <div className="min-w-0">
+              <div className="font-semibold">JSON validation failed</div>
+              <div className="mt-1 break-words">{validation.error.message}</div>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
 export function CliManagerGeminiTab({
   geminiAvailable,
   geminiLoading,
@@ -81,8 +232,12 @@ export function CliManagerGeminiTab({
   geminiConfigLoading,
   geminiConfigSaving,
   geminiConfig,
+  geminiSettingsJson,
+  geminiSettingsJsonLoading,
+  geminiSettingsJsonSaving,
   refreshGeminiInfo,
   persistGeminiConfig,
+  persistGeminiSettingsJson,
 }: CliManagerGeminiTabProps) {
   const [versionRefreshToken, setVersionRefreshToken] = useState(0);
   const [modelNameText, setModelNameText] = useState("");
@@ -109,7 +264,7 @@ export function CliManagerGeminiTab({
   }, [geminiConfig]);
 
   const loading = geminiLoading || geminiConfigLoading;
-  const saving = geminiConfigSaving;
+  const saving = geminiConfigSaving || Boolean(geminiSettingsJsonSaving);
   const configDir = geminiConfig?.configDir ?? "—";
   const configPath = geminiConfig?.configPath ?? "—";
 
@@ -601,6 +756,12 @@ export function CliManagerGeminiTab({
                     </SettingItem>
                   </div>
                 </div>
+                <AdvancedSettingsJsonSection
+                  state={geminiSettingsJson}
+                  loading={geminiSettingsJsonLoading}
+                  saving={geminiSettingsJsonSaving}
+                  persist={persistGeminiSettingsJson}
+                />
               </>
             ) : (
               <div className="text-sm text-muted-foreground text-center py-8">

@@ -1,6 +1,8 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   cliManagerClaudeInfoGet,
+  cliManagerClaudeSettingsJsonGet,
+  cliManagerClaudeSettingsJsonSet,
   cliManagerClaudeSettingsGet,
   cliManagerClaudeSettingsSet,
   cliManagerClaudeHooksGet,
@@ -13,15 +15,19 @@ import {
   cliManagerGeminiConfigGet,
   cliManagerGeminiConfigSet,
   cliManagerGeminiInfoGet,
+  cliManagerGeminiSettingsJsonGet,
+  cliManagerGeminiSettingsJsonSet,
   type ClaudeCliInfo,
   type ClaudeHooksSetInput,
   type ClaudeHooksState,
+  type ClaudeSettingsJsonState,
   type ClaudeSettingsPatch,
   type ClaudeSettingsState,
   type CodexConfigPatch,
   type CodexConfigState,
   type GeminiConfigPatch,
   type GeminiConfigState,
+  type GeminiSettingsJsonState,
   type SimpleCliInfo,
 } from "../services/cli/cliManager";
 import { cliManagerKeys } from "./keys";
@@ -39,6 +45,15 @@ export function useCliManagerClaudeSettingsQuery(options?: { enabled?: boolean }
   return useQuery({
     queryKey: cliManagerKeys.claudeSettings(),
     queryFn: () => cliManagerClaudeSettingsGet(),
+    enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useCliManagerClaudeSettingsJsonQuery(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: cliManagerKeys.claudeSettingsJson(),
+    queryFn: () => cliManagerClaudeSettingsJsonGet(),
     enabled: options?.enabled ?? true,
     placeholderData: keepPreviousData,
   });
@@ -89,6 +104,15 @@ export function useCliManagerGeminiConfigQuery(options?: { enabled?: boolean }) 
   });
 }
 
+export function useCliManagerGeminiSettingsJsonQuery(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: cliManagerKeys.geminiSettingsJson(),
+    queryFn: () => cliManagerGeminiSettingsJsonGet(),
+    enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
+  });
+}
+
 export function useCliManagerClaudeSettingsSetMutation() {
   const queryClient = useQueryClient();
 
@@ -100,6 +124,25 @@ export function useCliManagerClaudeSettingsSetMutation() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: cliManagerKeys.claudeSettings() });
+    },
+  });
+}
+
+export function useCliManagerClaudeSettingsJsonSetMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: { json: string }) => cliManagerClaudeSettingsJsonSet(input.json),
+    onSuccess: (next) => {
+      if (!next) return;
+      queryClient.setQueryData<ClaudeSettingsJsonState | null>(
+        cliManagerKeys.claudeSettingsJson(),
+        next
+      );
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: cliManagerKeys.claudeSettings() });
+      queryClient.invalidateQueries({ queryKey: cliManagerKeys.claudeSettingsJson() });
     },
   });
 }
@@ -147,6 +190,25 @@ export function useCliManagerGeminiConfigSetMutation() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: cliManagerKeys.geminiConfig() });
+    },
+  });
+}
+
+export function useCliManagerGeminiSettingsJsonSetMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: { json: string }) => cliManagerGeminiSettingsJsonSet(input.json),
+    onSuccess: (next) => {
+      if (!next) return;
+      queryClient.setQueryData<GeminiSettingsJsonState | null>(
+        cliManagerKeys.geminiSettingsJson(),
+        next
+      );
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: cliManagerKeys.geminiConfig() });
+      queryClient.invalidateQueries({ queryKey: cliManagerKeys.geminiSettingsJson() });
     },
   });
 }

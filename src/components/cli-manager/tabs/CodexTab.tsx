@@ -42,24 +42,16 @@ const LazyCodeEditor = lazy(() =>
   import("../../../ui/CodeEditor").then((m) => ({ default: m.CodeEditor }))
 );
 
-const GPT_54_MODEL = "gpt-5.4";
-const GPT_54_CONTEXT_WINDOW = 1_000_000;
-const GPT_54_AUTO_COMPACT_TOKEN_LIMIT = 900_000;
+const DEFAULT_CONTEXT_WINDOW = 1_000_000;
+const DEFAULT_AUTO_COMPACT_TOKEN_LIMIT = 900_000;
 const FAST_SERVICE_TIER = "fast";
 type PersistConfigLocationResult = "saved" | "validation_failed" | "persist_failed";
 
-function buildModelPatch(
-  model: string,
-  contextWindow?: string,
-  autoCompactLimit?: string
-): CodexConfigPatch {
+function buildModelPatch(model: string): CodexConfigPatch {
   const trimmed = model.trim();
-  const isGpt54 = trimmed === GPT_54_MODEL;
 
   return {
     model: trimmed,
-    model_context_window: isGpt54 ? parsePositiveInt(contextWindow) : null,
-    model_auto_compact_token_limit: isGpt54 ? parsePositiveInt(autoCompactLimit) : null,
   };
 }
 
@@ -82,10 +74,6 @@ function buildPersonalityPatch(value: string): CodexConfigPatch {
   return {
     personality: value === "none" ? "" : value,
   };
-}
-
-function isGpt54Model(model: string | null | undefined) {
-  return (model ?? "").trim() === GPT_54_MODEL;
 }
 
 function validateCustomCodexHome(value: string): string | null {
@@ -323,9 +311,7 @@ export function CliManagerCodexTab({
     );
   }, [codexConfig]);
 
-  const showsGpt54LinkedSettings = useMemo(() => {
-    return isGpt54Model(modelText);
-  }, [modelText]);
+  const showContextLimitSettings = Boolean(codexConfig);
 
   const configLocationPreviewPath = useMemo(() => {
     return buildConfigTomlPath(customHomeText);
@@ -965,27 +951,23 @@ export function CliManagerCodexTab({
               <div className="divide-y divide-border">
                 <SettingItem
                   label="默认模型 (model)"
-                  subtitle="设置 Codex 默认使用的模型（例如 gpt-5-codex）。留空表示不设置（交由 Codex 默认/上层配置决定）。"
+                  subtitle="设置 Codex 默认使用的模型（例如 gpt-5.5）。留空表示不设置（交由 Codex 默认/上层配置决定）。"
                 >
                   <Input
                     value={modelText}
                     onChange={(e) => setModelText(e.currentTarget.value)}
-                    onBlur={() =>
-                      void persistCodexConfig(
-                        buildModelPatch(modelText, contextWindowText, autoCompactLimitText)
-                      )
-                    }
-                    placeholder="例如：gpt-5-codex"
+                    onBlur={() => void persistCodexConfig(buildModelPatch(modelText))}
+                    placeholder="例如：gpt-5.5"
                     className="font-mono w-[280px] max-w-full"
                     disabled={saving}
                   />
                 </SettingItem>
 
-                {showsGpt54LinkedSettings ? (
+                {showContextLimitSettings ? (
                   <>
                     <SettingItem
                       label="model_context_window"
-                      subtitle={`模型上下文窗口大小。仅当 model=${GPT_54_MODEL} 时生效；切换到其他模型时自动删除。留空则不写入配置，默认参考值 ${GPT_54_CONTEXT_WINDOW.toLocaleString()}。`}
+                      subtitle={`可选的 Codex 上下文窗口覆盖值。留空则不写入配置，参考值 ${DEFAULT_CONTEXT_WINDOW.toLocaleString()}。`}
                     >
                       <Input
                         type="number"
@@ -996,7 +978,7 @@ export function CliManagerCodexTab({
                             model_context_window: parsePositiveInt(contextWindowText),
                           })
                         }
-                        placeholder={String(GPT_54_CONTEXT_WINDOW)}
+                        placeholder={String(DEFAULT_CONTEXT_WINDOW)}
                         className="font-mono w-[220px] max-w-full"
                         disabled={saving}
                       />
@@ -1004,7 +986,7 @@ export function CliManagerCodexTab({
 
                     <SettingItem
                       label="model_auto_compact_token_limit"
-                      subtitle={`自动压缩 token 上限。仅当 model=${GPT_54_MODEL} 时生效；切换到其他模型时自动删除。留空则不写入配置，默认参考值 ${GPT_54_AUTO_COMPACT_TOKEN_LIMIT.toLocaleString()}。`}
+                      subtitle={`可选的 Codex 自动压缩 token 上限。留空则不写入配置，参考值 ${DEFAULT_AUTO_COMPACT_TOKEN_LIMIT.toLocaleString()}。`}
                     >
                       <Input
                         type="number"
@@ -1015,7 +997,7 @@ export function CliManagerCodexTab({
                             model_auto_compact_token_limit: parsePositiveInt(autoCompactLimitText),
                           })
                         }
-                        placeholder={String(GPT_54_AUTO_COMPACT_TOKEN_LIMIT)}
+                        placeholder={String(DEFAULT_AUTO_COMPACT_TOKEN_LIMIT)}
                         className="font-mono w-[220px] max-w-full"
                         disabled={saving}
                       />
@@ -1025,7 +1007,7 @@ export function CliManagerCodexTab({
 
                 <SettingItem
                   label="审批策略 (approval_policy)"
-                  subtitle="控制何时需要你确认才会执行命令。推荐 on-request（默认）或 on-failure。"
+                  subtitle="控制 Codex 何时在执行命令前询问。当前文档化选项包括 untrusted、on-request 和 never。"
                 >
                   <Select
                     value={codexConfig.approval_policy ?? ""}
@@ -1037,7 +1019,11 @@ export function CliManagerCodexTab({
                   >
                     <option value="">默认（不设置）</option>
                     <option value="untrusted">不信任（untrusted）</option>
-                    <option value="on-failure">失败时（on-failure）</option>
+                    {codexConfig.approval_policy === "on-failure" ? (
+                      <option value="on-failure" disabled>
+                        已弃用的现有值（on-failure）
+                      </option>
+                    ) : null}
                     <option value="on-request">请求时（on-request）</option>
                     <option value="never">从不询问（never）</option>
                   </Select>

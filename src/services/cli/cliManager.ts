@@ -6,6 +6,9 @@ import {
   type ClaudeHooksSetInput as GeneratedClaudeHooksSetInput,
   type ClaudeHooksState as GeneratedClaudeHooksState,
   type ClaudeSettingsPatch as GeneratedClaudeSettingsPatch,
+  type ClaudeSettingsJsonState as GeneratedClaudeSettingsJsonState,
+  type ClaudeSettingsJsonValidationError as GeneratedClaudeSettingsJsonValidationError,
+  type ClaudeSettingsJsonValidationResult as GeneratedClaudeSettingsJsonValidationResult,
   type ClaudeSettingsState as GeneratedClaudeSettingsState,
   type CodexConfigPatch as GeneratedCodexConfigPatch,
   type CodexConfigState as GeneratedCodexConfigState,
@@ -14,6 +17,9 @@ import {
   type CodexConfigTomlValidationResult as GeneratedCodexConfigTomlValidationResult,
   type GeminiConfigPatch as GeneratedGeminiConfigPatch,
   type GeminiConfigState as GeneratedGeminiConfigState,
+  type GeminiSettingsJsonState as GeneratedGeminiSettingsJsonState,
+  type GeminiSettingsJsonValidationError as GeneratedGeminiSettingsJsonValidationError,
+  type GeminiSettingsJsonValidationResult as GeneratedGeminiSettingsJsonValidationResult,
   type SimpleCliInfo as GeneratedSimpleCliInfo,
 } from "../../generated/bindings";
 import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
@@ -23,6 +29,9 @@ export type SimpleCliInfo = GeneratedSimpleCliInfo;
 export type ClaudeEnvState = GeneratedClaudeEnvState;
 export type ClaudeSettingsState = GeneratedClaudeSettingsState;
 export type ClaudeSettingsPatch = Partial<GeneratedClaudeSettingsPatch>;
+export type ClaudeSettingsJsonState = GeneratedClaudeSettingsJsonState;
+export type ClaudeSettingsJsonValidationError = GeneratedClaudeSettingsJsonValidationError;
+export type ClaudeSettingsJsonValidationResult = GeneratedClaudeSettingsJsonValidationResult;
 export type ClaudeHooksState = GeneratedClaudeHooksState;
 export type ClaudeHookGroup = GeneratedClaudeHookGroup;
 export type ClaudeHooksSetInput = GeneratedClaudeHooksSetInput;
@@ -33,6 +42,9 @@ export type CodexConfigTomlValidationError = GeneratedCodexConfigTomlValidationE
 export type CodexConfigTomlValidationResult = GeneratedCodexConfigTomlValidationResult;
 export type GeminiConfigState = GeneratedGeminiConfigState;
 export type GeminiConfigPatch = Partial<GeneratedGeminiConfigPatch>;
+export type GeminiSettingsJsonState = GeneratedGeminiSettingsJsonState;
+export type GeminiSettingsJsonValidationError = GeneratedGeminiSettingsJsonValidationError;
+export type GeminiSettingsJsonValidationResult = GeneratedGeminiSettingsJsonValidationResult;
 export type ClaudeEnvSetInput = {
   mcpTimeoutMs: number | null;
   disableErrorReporting: boolean;
@@ -243,6 +255,41 @@ export async function cliManagerGeminiConfigSet(patch: GeminiConfigPatch) {
   });
 }
 
+export async function cliManagerGeminiSettingsJsonGet() {
+  return invokeGeneratedIpc<GeminiSettingsJsonState>({
+    title: "读取 Gemini settings.json 失败",
+    cmd: "cli_manager_gemini_settings_json_get",
+    invoke: () =>
+      commands.cliManagerGeminiSettingsJsonGet() as Promise<
+        GeneratedCommandResult<GeminiSettingsJsonState>
+      >,
+  });
+}
+
+export async function cliManagerGeminiSettingsJsonValidate(json: string) {
+  return invokeGeneratedIpc<GeminiSettingsJsonValidationResult>({
+    title: "校验 Gemini settings.json 失败",
+    cmd: "cli_manager_gemini_settings_json_validate",
+    args: { json },
+    invoke: () =>
+      commands.cliManagerGeminiSettingsJsonValidate(json) as Promise<
+        GeneratedCommandResult<GeminiSettingsJsonValidationResult>
+      >,
+  });
+}
+
+export async function cliManagerGeminiSettingsJsonSet(json: string) {
+  return invokeGeneratedIpc<GeminiSettingsJsonState>({
+    title: "保存 Gemini settings.json 失败",
+    cmd: "cli_manager_gemini_settings_json_set",
+    args: { json },
+    invoke: () =>
+      commands.cliManagerGeminiSettingsJsonSet(json) as Promise<
+        GeneratedCommandResult<GeminiSettingsJsonState>
+      >,
+  });
+}
+
 export async function cliManagerClaudeEnvSet(input: ClaudeEnvSetInput) {
   return invokeGeneratedIpc<ClaudeEnvState>({
     title: "保存 Claude 环境变量失败",
@@ -278,6 +325,41 @@ export async function cliManagerClaudeSettingsSet(patch: ClaudeSettingsPatch) {
     invoke: () =>
       commands.cliManagerClaudeSettingsSet(normalizedPatch) as Promise<
         GeneratedCommandResult<ClaudeSettingsState>
+      >,
+  });
+}
+
+export async function cliManagerClaudeSettingsJsonGet() {
+  return invokeGeneratedIpc<ClaudeSettingsJsonState>({
+    title: "读取 Claude settings.json 失败",
+    cmd: "cli_manager_claude_settings_json_get",
+    invoke: () =>
+      commands.cliManagerClaudeSettingsJsonGet() as Promise<
+        GeneratedCommandResult<ClaudeSettingsJsonState>
+      >,
+  });
+}
+
+export async function cliManagerClaudeSettingsJsonValidate(json: string) {
+  return invokeGeneratedIpc<ClaudeSettingsJsonValidationResult>({
+    title: "校验 Claude settings.json 失败",
+    cmd: "cli_manager_claude_settings_json_validate",
+    args: { json },
+    invoke: () =>
+      commands.cliManagerClaudeSettingsJsonValidate(json) as Promise<
+        GeneratedCommandResult<ClaudeSettingsJsonValidationResult>
+      >,
+  });
+}
+
+export async function cliManagerClaudeSettingsJsonSet(json: string) {
+  return invokeGeneratedIpc<ClaudeSettingsJsonState>({
+    title: "保存 Claude settings.json 失败",
+    cmd: "cli_manager_claude_settings_json_set",
+    args: { json },
+    invoke: () =>
+      commands.cliManagerClaudeSettingsJsonSet(json) as Promise<
+        GeneratedCommandResult<ClaudeSettingsJsonState>
       >,
   });
 }

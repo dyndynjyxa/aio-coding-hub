@@ -169,17 +169,13 @@ describe("components/cli-manager/tabs/CodexTab", () => {
     );
     expect(persistCodexConfig).toHaveBeenCalledWith({ personality: "" });
 
-    // Model input blur persists trimmed value and clears gpt-5.4-only linked keys.
+    // Model input blur persists trimmed value without touching independent context-limit keys.
     const modelItem = screen.getByText("默认模型 (model)").parentElement?.parentElement;
     expect(modelItem).toBeTruthy();
     const modelInput = within(modelItem as HTMLElement).getByRole("textbox");
     fireEvent.change(modelInput, { target: { value: "  gpt-5-codex  " } });
     fireEvent.blur(modelInput);
-    expect(persistCodexConfig).toHaveBeenCalledWith({
-      model: "gpt-5-codex",
-      model_context_window: null,
-      model_auto_compact_token_limit: null,
-    });
+    expect(persistCodexConfig).toHaveBeenCalledWith({ model: "gpt-5-codex" });
 
     // Approval policy select persists.
     const approvalItem =
@@ -661,7 +657,7 @@ describe("components/cli-manager/tabs/CodexTab", () => {
     ).toBeChecked();
   });
 
-  it("shows gpt-5.4 linked settings and persists their defaults", () => {
+  it("shows generic context-limit settings and does not persist them on model blur", () => {
     const persistCodexConfig = vi.fn();
 
     render(
@@ -673,7 +669,7 @@ describe("components/cli-manager/tabs/CodexTab", () => {
         codexConfigTomlLoading={false}
         codexConfigTomlSaving={false}
         codexInfo={createCodexInfo()}
-        codexConfig={createCodexConfig({ model: "gpt-5.4" })}
+        codexConfig={createCodexConfig({ model: "gpt-5.5" })}
         codexConfigToml={null}
         refreshCodex={vi.fn()}
         openCodexConfigDir={vi.fn()}
@@ -690,14 +686,35 @@ describe("components/cli-manager/tabs/CodexTab", () => {
     const modelInput = within(modelItem as HTMLElement).getByRole("textbox");
     fireEvent.blur(modelInput);
 
-    expect(persistCodexConfig).toHaveBeenCalledWith({
-      model: "gpt-5.4",
-      model_context_window: null,
-      model_auto_compact_token_limit: null,
-    });
+    expect(persistCodexConfig).toHaveBeenCalledWith({ model: "gpt-5.5" });
   });
 
-  it("persists null for gpt-5.4 linked settings when input is zero or cleared", () => {
+  it("matches current Codex docs for default model guidance and approval policy options", () => {
+    render(
+      <CliManagerCodexTab
+        codexAvailable="available"
+        codexLoading={false}
+        codexConfigLoading={false}
+        codexConfigSaving={false}
+        codexConfigTomlLoading={false}
+        codexConfigTomlSaving={false}
+        codexInfo={createCodexInfo()}
+        codexConfig={createCodexConfig({ model: "gpt-5.5", approval_policy: "on-request" })}
+        codexConfigToml={null}
+        refreshCodex={vi.fn()}
+        openCodexConfigDir={vi.fn()}
+        persistCodexConfig={vi.fn()}
+        persistCodexConfigToml={vi.fn().mockResolvedValue(false)}
+      />
+    );
+
+    expect(screen.getByPlaceholderText("例如：gpt-5.5")).toBeInTheDocument();
+    expect(screen.getByText("model_context_window")).toBeInTheDocument();
+    expect(screen.getByText("model_auto_compact_token_limit")).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /on-failure/ })).not.toBeInTheDocument();
+  });
+
+  it("persists null for generic context-limit settings when input is zero or cleared", () => {
     const persistCodexConfig = vi.fn();
 
     render(

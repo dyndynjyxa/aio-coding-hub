@@ -51,7 +51,7 @@ export function RadioButtonGroup<T extends string>({
               index < items.length - 1 ? "border-r border-border dark:border-border" : null,
               active ? "bg-gradient-to-br from-accent to-accent-secondary text-white" : null,
               !active
-                ? "bg-white text-secondary-foreground hover:bg-secondary dark:text-secondary-foreground dark:hover:bg-secondary"
+                ? "bg-white text-secondary-foreground hover:bg-secondary dark:bg-secondary dark:text-secondary-foreground dark:hover:bg-muted"
                 : null,
               disabled ? "cursor-not-allowed" : null
             )}

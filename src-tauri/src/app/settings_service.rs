@@ -63,6 +63,7 @@ pub(crate) struct SettingsUpdate {
     pub enable_debug_log: Option<bool>,
     pub enable_task_complete_notify: Option<bool>,
     pub enable_notification_sound: Option<bool>,
+    pub auto_refresh_oauth_quota_on_startup: Option<settings::OAuthQuotaAutoRefreshTargetCli>,
     pub enable_response_fixer: Option<bool>,
     pub response_fixer_fix_encoding: Option<bool>,
     pub response_fixer_fix_sse_format: Option<bool>,
@@ -172,6 +173,7 @@ pub(crate) struct SettingsView {
     pub enable_debug_log: bool,
     pub enable_task_complete_notify: bool,
     pub enable_notification_sound: bool,
+    pub auto_refresh_oauth_quota_on_startup: settings::OAuthQuotaAutoRefreshTargetCli,
     pub enable_response_fixer: bool,
     pub response_fixer_fix_encoding: bool,
     pub response_fixer_fix_sse_format: bool,
@@ -294,6 +296,7 @@ impl From<&settings::AppSettings> for SettingsView {
             enable_debug_log: value.enable_debug_log,
             enable_task_complete_notify: value.enable_task_complete_notify,
             enable_notification_sound: value.enable_notification_sound,
+            auto_refresh_oauth_quota_on_startup: value.auto_refresh_oauth_quota_on_startup,
             enable_response_fixer: value.enable_response_fixer,
             response_fixer_fix_encoding: value.response_fixer_fix_encoding,
             response_fixer_fix_sse_format: value.response_fixer_fix_sse_format,
@@ -559,6 +562,7 @@ pub(crate) async fn settings_set_impl(
         enable_debug_log,
         enable_task_complete_notify,
         enable_notification_sound,
+        auto_refresh_oauth_quota_on_startup,
         enable_response_fixer,
         response_fixer_fix_encoding,
         response_fixer_fix_sse_format,
@@ -722,6 +726,8 @@ pub(crate) async fn settings_set_impl(
                 enable_task_complete_notify.unwrap_or(previous.enable_task_complete_notify);
             let enable_notification_sound =
                 enable_notification_sound.unwrap_or(previous.enable_notification_sound);
+            let auto_refresh_oauth_quota_on_startup = auto_refresh_oauth_quota_on_startup
+                .unwrap_or(previous.auto_refresh_oauth_quota_on_startup);
             let enable_response_fixer =
                 enable_response_fixer.unwrap_or(previous.enable_response_fixer);
             let response_fixer_fix_encoding =
@@ -786,6 +792,7 @@ pub(crate) async fn settings_set_impl(
                 enable_debug_log,
                 enable_task_complete_notify,
                 enable_notification_sound,
+                auto_refresh_oauth_quota_on_startup,
                 enable_response_fixer,
                 response_fixer_fix_encoding,
                 response_fixer_fix_sse_format,

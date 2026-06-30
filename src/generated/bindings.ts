@@ -351,6 +351,40 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async cliManagerGeminiSettingsJsonGet(): Promise<Result<GeminiSettingsJsonState, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("cli_manager_gemini_settings_json_get") };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async cliManagerGeminiSettingsJsonValidate(
+    json: string
+  ): Promise<Result<GeminiSettingsJsonValidationResult, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("cli_manager_gemini_settings_json_validate", { json }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async cliManagerGeminiSettingsJsonSet(
+    json: string
+  ): Promise<Result<GeminiSettingsJsonState, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("cli_manager_gemini_settings_json_set", { json }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async cliManagerClaudeEnvSet(
     mcpTimeoutMs: number | null,
     disableErrorReporting: boolean
@@ -383,6 +417,40 @@ export const commands = {
       return {
         status: "ok",
         data: await TAURI_INVOKE("cli_manager_claude_settings_set", { patch }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async cliManagerClaudeSettingsJsonGet(): Promise<Result<ClaudeSettingsJsonState, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("cli_manager_claude_settings_json_get") };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async cliManagerClaudeSettingsJsonValidate(
+    json: string
+  ): Promise<Result<ClaudeSettingsJsonValidationResult, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("cli_manager_claude_settings_json_validate", { json }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async cliManagerClaudeSettingsJsonSet(
+    json: string
+  ): Promise<Result<ClaudeSettingsJsonState, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("cli_manager_claude_settings_json_set", { json }),
       };
     } catch (e) {
       if (e instanceof Error) throw e;
@@ -2115,6 +2183,16 @@ export type ClaudeModels = {
   sonnet_model?: string | null;
   opus_model?: string | null;
 };
+export type ClaudeSettingsJsonState = { configPath: string; exists: boolean; json: string };
+export type ClaudeSettingsJsonValidationError = {
+  message: string;
+  line: number | null;
+  column: number | null;
+};
+export type ClaudeSettingsJsonValidationResult = {
+  ok: boolean;
+  error: ClaudeSettingsJsonValidationError | null;
+};
 export type ClaudeSettingsPatch = {
   model: string | null;
   output_style: string | null;
@@ -2560,6 +2638,16 @@ export type GeminiConfigState = {
   planModelRouting: boolean | null;
   securityAuthSelectedType: string | null;
 };
+export type GeminiSettingsJsonState = { configPath: string; exists: boolean; json: string };
+export type GeminiSettingsJsonValidationError = {
+  message: string;
+  line: number | null;
+  column: number | null;
+};
+export type GeminiSettingsJsonValidationResult = {
+  ok: boolean;
+  error: GeminiSettingsJsonValidationError | null;
+};
 export type HomeUsagePeriod = "last7" | "last15" | "last30" | "month";
 export type InstalledSkillSummary = {
   id: number;
@@ -2675,6 +2763,7 @@ export type ModelPricesSyncReport = {
 };
 export type NoticeLevel = "info" | "success" | "warning" | "error";
 export type NoticeSendInput = { level: NoticeLevel; title: string | null; body: string };
+export type OAuthQuotaAutoRefreshTargetCli = { claude: boolean; codex: boolean; gemini: boolean };
 export type PluginAuditLog = {
   id: number;
   plugin_id: string | null;
@@ -3096,6 +3185,7 @@ export type SettingsUpdate = {
   enableDebugLog: boolean | null;
   enableTaskCompleteNotify: boolean | null;
   enableNotificationSound: boolean | null;
+  autoRefreshOauthQuotaOnStartup: OAuthQuotaAutoRefreshTargetCli | null;
   enableResponseFixer: boolean | null;
   responseFixerFixEncoding: boolean | null;
   responseFixerFixSseFormat: boolean | null;
@@ -3173,6 +3263,7 @@ export type SettingsView = {
   enable_debug_log: boolean;
   enable_task_complete_notify: boolean;
   enable_notification_sound: boolean;
+  auto_refresh_oauth_quota_on_startup: OAuthQuotaAutoRefreshTargetCli;
   enable_response_fixer: boolean;
   response_fixer_fix_encoding: boolean;
   response_fixer_fix_sse_format: boolean;

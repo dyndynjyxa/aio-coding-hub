@@ -43,6 +43,7 @@ vi.mock("../../components/cli-manager/tabs/GeneralTab", () => ({
     onPersistCircuitBreakerNotice,
     onPersistCodexSessionIdCompletion,
     onPersistCacheAnomalyMonitor,
+    onPersistAutoRefreshOAuthQuotaOnStartup,
     onPersistCommonSettings,
     blurOnEnter,
   }: any) => (
@@ -68,6 +69,9 @@ vi.mock("../../components/cli-manager/tabs/GeneralTab", () => ({
       </button>
       <button type="button" onClick={() => onPersistCacheAnomalyMonitor(false)}>
         disable-cache-monitor
+      </button>
+      <button type="button" onClick={() => onPersistAutoRefreshOAuthQuotaOnStartup("codex", true)}>
+        enable-oauth-quota-auto-refresh
       </button>
       <button
         type="button"
@@ -273,6 +277,11 @@ describe("pages/CliManagerPage", () => {
     const commonMutation = { isPending: false, mutateAsync: vi.fn() };
     commonMutation.mutateAsync
       .mockResolvedValueOnce(createSettingsMutationResult({ provider_cooldown_seconds: 99 }))
+      .mockResolvedValueOnce(
+        createSettingsMutationResult({
+          auto_refresh_oauth_quota_on_startup: { claude: false, codex: true, gemini: false },
+        })
+      )
       .mockRejectedValueOnce(new Error("common boom"));
     vi.mocked(useSettingsPatchMutation).mockReturnValue(commonMutation as any);
 
@@ -354,6 +363,16 @@ describe("pages/CliManagerPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "persist-common" }));
     await waitFor(() => expect(commonMutation.mutateAsync).toHaveBeenCalled());
     expect(toast).toHaveBeenCalledWith("已保存");
+
+    fireEvent.click(screen.getByRole("button", { name: "enable-oauth-quota-auto-refresh" }));
+    await waitFor(() =>
+      expect(commonMutation.mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          auto_refresh_oauth_quota_on_startup: { claude: false, codex: true, gemini: false },
+          upstream_proxy_password: { mode: "preserve" },
+        })
+      )
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "persist-common" }));
     await waitFor(() => expect(toast).toHaveBeenCalledWith("更新通用网关参数失败：common boom"));

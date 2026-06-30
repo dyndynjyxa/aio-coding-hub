@@ -10,8 +10,10 @@ import { useSettingsQuery } from "../../query/settings";
 import { createTestAppSettings } from "../../test/fixtures/settings";
 
 vi.mock("../providers/ProvidersView", () => ({
-  ProvidersView: ({ activeCli }: any) => (
-    <div data-testid="providers-view">providers:{activeCli}</div>
+  ProvidersView: ({ activeCli, autoRefreshOAuthQuotaOnStartup }: any) => (
+    <div data-testid="providers-view">
+      providers:{activeCli}:auto-refresh:{String(autoRefreshOAuthQuotaOnStartup)}
+    </div>
   ),
 }));
 
@@ -45,7 +47,10 @@ function renderWithProviders(element: ReactElement) {
 describe("pages/ProvidersPage", () => {
   it("uses top tabs to switch CLI providers view", () => {
     vi.mocked(useSettingsQuery).mockReturnValue({
-      data: createTestAppSettings({ cli_priority_order: ["codex", "claude", "gemini"] }),
+      data: createTestAppSettings({
+        cli_priority_order: ["codex", "claude", "gemini"],
+        auto_refresh_oauth_quota_on_startup: { claude: false, codex: true, gemini: false },
+      }),
     } as any);
     vi.mocked(useProvidersListQuery).mockReturnValue({
       data: [],
@@ -56,7 +61,7 @@ describe("pages/ProvidersPage", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "供应商" })).toBeInTheDocument();
     expect(screen.getByTestId("providers-view")).toBeInTheDocument();
-    expect(screen.getByText("providers:codex")).toBeInTheDocument();
+    expect(screen.getByText("providers:codex:auto-refresh:true")).toBeInTheDocument();
 
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
       "Codex",
@@ -67,7 +72,7 @@ describe("pages/ProvidersPage", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Claude" }));
 
     expect(screen.getByRole("heading", { level: 1, name: "供应商" })).toBeInTheDocument();
-    expect(screen.getByText("providers:claude")).toBeInTheDocument();
+    expect(screen.getByText("providers:claude:auto-refresh:false")).toBeInTheDocument();
     expect(screen.queryByTestId("sort-modes-view")).not.toBeInTheDocument();
   });
 });

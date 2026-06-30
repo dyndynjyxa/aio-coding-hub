@@ -628,9 +628,21 @@ fn migrate_add_codex_oauth_compatible_proxy_mode(
     )
 }
 
+fn migrate_add_oauth_quota_auto_refresh(
+    settings: &mut AppSettings,
+    schema_version_present: bool,
+) -> bool {
+    // v34: Add per-CLI OAuth quota startup auto-refresh toggles (default disabled).
+    migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_OAUTH_QUOTA_AUTO_REFRESH,
+    )
+}
+
 type SettingsMigration = fn(&mut AppSettings, bool) -> bool;
 
-const SETTINGS_MIGRATIONS: [SettingsMigration; 27] = [
+const SETTINGS_MIGRATIONS: [SettingsMigration; 28] = [
     migrate_disable_upstream_timeouts,
     migrate_add_gateway_rectifiers,
     migrate_add_circuit_breaker_notice,
@@ -658,6 +670,7 @@ const SETTINGS_MIGRATIONS: [SettingsMigration; 27] = [
     migrate_add_upstream_proxy,
     migrate_add_upstream_proxy_credentials,
     migrate_add_codex_oauth_compatible_proxy_mode,
+    migrate_add_oauth_quota_auto_refresh,
 ];
 
 fn apply_settings_migrations(settings: &mut AppSettings, schema_version_present: bool) -> bool {
@@ -1123,6 +1136,14 @@ mod tests {
     }
 
     #[test]
+    fn app_settings_default_oauth_quota_auto_refresh_disabled_for_all_clis() {
+        let s = AppSettings::default();
+        assert!(!s.auto_refresh_oauth_quota_on_startup.claude);
+        assert!(!s.auto_refresh_oauth_quota_on_startup.codex);
+        assert!(!s.auto_refresh_oauth_quota_on_startup.gemini);
+    }
+
+    #[test]
     fn migrate_add_codex_oauth_compatible_proxy_mode_bumps_schema_version() {
         let mut s = AppSettings {
             schema_version: 32,
@@ -1134,6 +1155,22 @@ mod tests {
             SCHEMA_VERSION_ADD_CODEX_OAUTH_COMPATIBLE_PROXY_MODE
         );
         assert!(!s.codex_oauth_compatible_proxy_mode);
+    }
+
+    #[test]
+    fn migrate_add_oauth_quota_auto_refresh_bumps_schema_version() {
+        let mut s = AppSettings {
+            schema_version: 33,
+            ..Default::default()
+        };
+        assert!(migrate_add_oauth_quota_auto_refresh(&mut s, true));
+        assert_eq!(
+            s.schema_version,
+            SCHEMA_VERSION_ADD_OAUTH_QUOTA_AUTO_REFRESH
+        );
+        assert!(!s.auto_refresh_oauth_quota_on_startup.claude);
+        assert!(!s.auto_refresh_oauth_quota_on_startup.codex);
+        assert!(!s.auto_refresh_oauth_quota_on_startup.gemini);
     }
 
     #[test]

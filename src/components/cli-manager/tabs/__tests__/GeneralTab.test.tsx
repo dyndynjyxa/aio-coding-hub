@@ -87,6 +87,9 @@ function createDefaultTabProps(overrides: DefaultPropsOverrides = {}) {
     notificationSoundEnabled: true,
     notificationSoundSaving: false,
     onPersistNotificationSound: vi.fn(),
+    autoRefreshOAuthQuotaOnStartupEnabled: { claude: false, codex: false, gemini: false },
+    autoRefreshOAuthQuotaOnStartupSaving: false,
+    onPersistAutoRefreshOAuthQuotaOnStartup: vi.fn(),
     appSettings:
       overrides.appSettings ??
       createTestAppSettings({ upstream_proxy_enabled: false, upstream_proxy_url: "" }),
@@ -135,6 +138,9 @@ describe("cli-manager/GeneralTab", () => {
         notificationSoundEnabled={true}
         notificationSoundSaving={false}
         onPersistNotificationSound={vi.fn()}
+        autoRefreshOAuthQuotaOnStartupEnabled={{ claude: false, codex: false, gemini: false }}
+        autoRefreshOAuthQuotaOnStartupSaving={false}
+        onPersistAutoRefreshOAuthQuotaOnStartup={vi.fn()}
         appSettings={null}
         commonSettingsSaving={false}
         onPersistCommonSettings={vi.fn()}
@@ -205,6 +211,9 @@ describe("cli-manager/GeneralTab", () => {
         notificationSoundEnabled={true}
         notificationSoundSaving={false}
         onPersistNotificationSound={vi.fn()}
+        autoRefreshOAuthQuotaOnStartupEnabled={{ claude: false, codex: false, gemini: false }}
+        autoRefreshOAuthQuotaOnStartupSaving={false}
+        onPersistAutoRefreshOAuthQuotaOnStartup={vi.fn()}
         appSettings={createTestAppSettings({
           wsl_target_cli: { claude: true, codex: false, gemini: false },
         })}
@@ -315,6 +324,9 @@ describe("cli-manager/GeneralTab", () => {
         notificationSoundEnabled={true}
         notificationSoundSaving={false}
         onPersistNotificationSound={vi.fn()}
+        autoRefreshOAuthQuotaOnStartupEnabled={{ claude: false, codex: false, gemini: false }}
+        autoRefreshOAuthQuotaOnStartupSaving={false}
+        onPersistAutoRefreshOAuthQuotaOnStartup={vi.fn()}
         appSettings={createTestAppSettings()}
         commonSettingsSaving={false}
         onPersistCommonSettings={vi.fn()}
@@ -367,6 +379,24 @@ describe("cli-manager/GeneralTab", () => {
       });
     });
     expect(toast.success).toHaveBeenCalledWith("代理连接测试成功");
+  });
+
+  it("persists the per-CLI OAuth quota startup auto-refresh toggle", async () => {
+    const onPersistAutoRefreshOAuthQuotaOnStartup = vi.fn();
+
+    renderTab(
+      <CliManagerGeneralTab
+        {...createDefaultTabProps({
+          onPersistCommonSettings: vi.fn(),
+        })}
+        autoRefreshOAuthQuotaOnStartupEnabled={{ claude: true, codex: false, gemini: false }}
+        onPersistAutoRefreshOAuthQuotaOnStartup={onPersistAutoRefreshOAuthQuotaOnStartup}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("switch", { name: "Codex OAuth quota auto-refresh" }));
+
+    expect(onPersistAutoRefreshOAuthQuotaOnStartup).toHaveBeenCalledWith("codex", true);
   });
 
   it("detects proxy exit ip with the backend command", async () => {

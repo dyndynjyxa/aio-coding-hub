@@ -412,3 +412,27 @@ fn json_to_bytes_rejects_oversized_claude_settings() {
 
     assert!(err.contains("claude/settings.json too large"));
 }
+
+#[test]
+fn validate_claude_settings_json_raw_rejects_non_object_json() {
+    let result = validate_claude_settings_json_raw("[]".to_string()).expect("validation result");
+
+    assert!(!result.ok);
+    assert!(
+        result
+            .error
+            .as_ref()
+            .is_some_and(|err| err.message.contains("root must be a JSON object")),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn normalize_claude_settings_json_raw_pretty_prints_object() {
+    let bytes = normalize_claude_settings_json_raw("{\"model\":\"claude-sonnet\"}".to_string())
+        .expect("raw json");
+    let rendered = String::from_utf8(bytes).expect("utf8");
+
+    assert!(rendered.ends_with('\n'));
+    assert!(rendered.contains("\"model\": \"claude-sonnet\""));
+}
