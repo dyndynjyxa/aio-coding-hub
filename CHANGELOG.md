@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.60.4](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.3...aio-coding-hub-v0.60.4) (2026-07-03)
+
+
+### Bug Fixes
+
+* **gateway:** derive in-progress request logs from active request registry ([be0d772](https://github.com/dyndynjyxa/aio-coding-hub/commit/be0d7725e91134a90574e61c943e6de98547b63e)), closes [#323](https://github.com/dyndynjyxa/aio-coding-hub/issues/323)
+
+
+### Code Refactoring
+
+* single-source cross-layer contracts, hot-path DB offload, request-log retention ([0f1d8d8](https://github.com/dyndynjyxa/aio-coding-hub/commit/0f1d8d8984651e14d76837892b431c4a3bf546bc))
+
 ## [0.60.3](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.2...aio-coding-hub-v0.60.3) (2026-07-01)
 
 
