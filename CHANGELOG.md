@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.60.6](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.5...aio-coding-hub-v0.60.6) (2026-07-03)
+
+
+### Bug Fixes
+
+* **release:** 以 0.60.6 重新发布 0.60.5 的全部内容 ([b4378f1](https://github.com/dyndynjyxa/aio-coding-hub/commit/b4378f135ae72afc87bd56aa72723df0c9e1c327))
+
 ## [0.60.5](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.4...aio-coding-hub-v0.60.5) (2026-07-03)
 
 
