@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.60.5](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.4...aio-coding-hub-v0.60.5) (2026-07-03)
+
+
+### Bug Fixes
+
+* **home:** unify in-progress request rendering as realtime cards ([faaa440](https://github.com/dyndynjyxa/aio-coding-hub/commit/faaa4406d6892c6f16c2bf7239b2be7ef3c2bede))
+* **watchdog:** 后台修复死亡 WebView,重构白屏恢复状态机 ([edeb28e](https://github.com/dyndynjyxa/aio-coding-hub/commit/edeb28e994b1ea6d8b7cccdd21027fd4176ac1e5))
+
+
+### Code Refactoring
+
+* single-source check stages, add Homebrew cask release pipeline ([e873103](https://github.com/dyndynjyxa/aio-coding-hub/commit/e873103a331c2a153acc59223038bfd52ca192d7))
+
 ## [0.60.4](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.3...aio-coding-hub-v0.60.4) (2026-07-03)
 
 
