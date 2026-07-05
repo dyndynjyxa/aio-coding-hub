@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.60.7](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.6...aio-coding-hub-v0.60.7) (2026-07-05)
+
+
+### Features
+
+* **ui:** 请求日志错误卡片展示失败尝试归因摘要 ([bdca955](https://github.com/dyndynjyxa/aio-coding-hub/commit/bdca955f9ce48c2abfd1a1ae33a29aeace322f2b))
+
+
+### Bug Fixes
+
+* **gateway:** 识别 compact 请求并放宽首字节超时至 300 秒 ([bbbdeaf](https://github.com/dyndynjyxa/aio-coding-hub/commit/bbbdeaf019f93b3069d8a554647c24ef5813fd8c))
+
 ## [0.60.6](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.5...aio-coding-hub-v0.60.6) (2026-07-03)
 
 
