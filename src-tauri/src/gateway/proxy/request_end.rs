@@ -397,19 +397,18 @@ fn select_claude_model_mapping(
     mappings.pop()
 }
 
+fn is_error_attempt(attempt: &FailoverAttempt) -> bool {
+    attempt.error_code.is_some()
+        || attempt.error_category.is_some()
+        || attempt.reason.as_deref().and_then(non_empty_text).is_some()
+}
+
 fn select_error_observation_attempt(attempts: &[FailoverAttempt]) -> Option<&FailoverAttempt> {
+    // decision/reason_code/status are also set on success — key off real error signals only.
     attempts
         .iter()
         .rev()
-        .find(|attempt| {
-            attempt.error_code.is_some()
-                || attempt.error_category.is_some()
-                || attempt.reason.as_deref().and_then(non_empty_text).is_some()
-                || attempt.decision.is_some()
-                || attempt.reason_code.is_some()
-                || attempt.status.is_some()
-        })
-        .or_else(|| attempts.last())
+        .find(|attempt| is_error_attempt(attempt))
 }
 
 fn split_attempt_reason(reason: &str) -> (Option<&str>, Option<&str>, Option<&str>) {
@@ -458,6 +457,11 @@ fn build_error_details_json(
     error_code: Option<&str>,
     attempts: &[FailoverAttempt],
 ) -> Option<String> {
+    // Short-circuit pure-success requests; otherwise success attempts leak status=200 etc.
+    if error_code.is_none() && !attempts.iter().any(is_error_attempt) {
+        return None;
+    }
+
     let mut obj = serde_json::Map::new();
 
     if let Some(gateway_error_code) = error_code {
@@ -1629,5 +1633,31 @@ mod tests {
             Some(&json!("status=502, rule=bad_gateway"))
         );
         assert_eq!(value.get("matched_rule"), Some(&json!("bad_gateway")));
+    }
+
+    #[test]
+    fn build_error_details_json_returns_none_for_success_only_attempts() {
+        // A pure-success attempt must not surface as "HTTP 200 响应异常" in the UI.
+        let mut attempt = sample_attempt();
+        attempt.decision = Some("success");
+        attempt.reason_code = Some("ok");
+        attempt.circuit_state_before = Some("closed");
+        attempt.circuit_failure_count = Some(0);
+        attempt.circuit_failure_threshold = Some(3);
+
+        assert!(build_error_details_json(None, &[attempt]).is_none());
+    }
+
+    #[test]
+    fn select_error_observation_attempt_ignores_pure_success_attempts() {
+        let mut first = sample_attempt();
+        first.decision = Some("success");
+        first.reason_code = Some("ok");
+        let mut second = sample_attempt();
+        second.provider_id = 8;
+        second.decision = Some("success");
+        second.reason_code = Some("ok");
+
+        assert!(select_error_observation_attempt(&[first, second]).is_none());
     }
 }
