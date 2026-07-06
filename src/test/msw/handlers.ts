@@ -272,6 +272,9 @@ export const handlers = [
             updatedAt: now,
           }))
         : (existing?.extension_values ?? []),
+      custom_headers: Array.isArray(input.customHeaders)
+        ? (input.customHeaders as ProviderSummary["custom_headers"])
+        : (existing?.custom_headers ?? []),
     };
 
     setProvidersState(

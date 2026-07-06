@@ -605,6 +605,7 @@ mod tests {
         let provider_id = providers::upsert(
             db,
             providers::ProviderUpsertParams {
+                custom_headers: None,
                 provider_id: None,
                 cli_key: cli_key.to_string(),
                 name: name.to_string(),
@@ -665,6 +666,7 @@ mod tests {
         let provider_id = providers::upsert(
             db,
             providers::ProviderUpsertParams {
+                custom_headers: None,
                 provider_id: None,
                 cli_key: "codex".to_string(),
                 name: name.to_string(),
@@ -701,6 +703,7 @@ mod tests {
         let provider_id = providers::upsert(
             db,
             providers::ProviderUpsertParams {
+                custom_headers: None,
                 provider_id: None,
                 cli_key: "claude".to_string(),
                 name: "CX2CC Bridge Stub".to_string(),

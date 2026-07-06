@@ -108,6 +108,7 @@ function makeProvider(partial: Partial<ProviderSummary> = {}): ProviderSummary {
     api_key_configured: partial.api_key_configured ?? false,
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,
     extension_values: partial.extension_values ?? [],
+    custom_headers: partial.custom_headers ?? [],
   };
 }
 
@@ -148,6 +149,7 @@ function makeCtx(overrides: Partial<OAuthActionContext> = {}) {
     isCodexGatewaySource: false,
     sourceProviderId: null,
     selectedCx2ccSourceProvider: null,
+    customHeaders: [],
     form: {
       getValues: vi.fn(() => values),
       setValue: vi.fn(),

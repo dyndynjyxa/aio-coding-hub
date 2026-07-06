@@ -40,6 +40,7 @@ pub(super) struct PreparedProvider {
     pub(super) anthropic_stream_requested: bool,
     pub(super) stream_idle_timeout_seconds: Option<u32>,
     pub(super) claude_model_mapping: Option<ClaudeModelMapping>,
+    pub(super) custom_headers: Vec<crate::providers::ProviderCustomHeader>,
 }
 
 /// Counters accumulated across all providers in the iteration loop.
@@ -353,6 +354,7 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
         anthropic_stream_requested,
         stream_idle_timeout_seconds: provider.stream_idle_timeout_seconds,
         claude_model_mapping,
+        custom_headers: provider.custom_headers.clone(),
     }))
 }
 

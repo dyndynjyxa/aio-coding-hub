@@ -5,6 +5,7 @@ import type { ActiveUiContribution, JsonValue } from "../../generated/bindings";
 import type {
   ClaudeModels,
   ProviderExtensionValuesInput,
+  ProviderCustomHeader,
   ProviderOAuthDeviceCodeStartResult,
   ProviderSummary,
 } from "../../services/providers/providers";
@@ -219,6 +220,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
   const [streamIdleTimeoutSeconds, setStreamIdleTimeoutSeconds] = useState("");
+  const [customHeaders, setCustomHeaders] = useState<ProviderCustomHeader[]>([]);
   const [saving, setSaving] = useState(false);
   const [copyingApiKey, setCopyingApiKey] = useState(false);
 
@@ -486,6 +488,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     setTags,
     setTagInput,
     setStreamIdleTimeoutSeconds,
+    setCustomHeaders,
     setAuthMode,
     setCx2ccSourceValue,
     setOauthStatus,
@@ -521,6 +524,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       tags,
       claudeModels,
       streamIdleTimeoutSeconds,
+      customHeaders,
       apiKeyConfigured,
       isCodexGatewaySource,
       sourceProviderId,
@@ -542,6 +546,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       tags,
       claudeModels,
       streamIdleTimeoutSeconds,
+      customHeaders,
       apiKeyConfigured,
       isCodexGatewaySource,
       sourceProviderId,
@@ -706,6 +711,8 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     claudeModelCount,
     streamIdleTimeoutSeconds,
     setStreamIdleTimeoutSeconds,
+    customHeaders,
+    setCustomHeaders,
     oauthStatus,
     oauthLoading,
     oauthDeviceFlow,

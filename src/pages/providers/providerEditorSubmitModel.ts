@@ -9,6 +9,7 @@ import type {
 } from "./providerEditorActionContext";
 import { normalizeBaseUrlRows } from "./baseUrl";
 import { resolveStreamIdleTimeoutSeconds } from "./providerEditorTimeout";
+import { normalizeCustomHeaders, validateCustomHeaders } from "./providerCustomHeaders";
 
 export function buildProviderEditorUpsertInput(
   ctx: ProviderEditorPayloadContext
@@ -40,6 +41,17 @@ export function buildProviderEditorUpsertInput(
       error: {
         kind: "message",
         message: "流式空闲超时必须为 0-3600 秒",
+      },
+    };
+  }
+
+  const customHeadersError = validateCustomHeaders(ctx.customHeaders);
+  if (customHeadersError) {
+    return {
+      ok: false,
+      error: {
+        kind: "message",
+        message: customHeadersError,
       },
     };
   }
@@ -137,6 +149,7 @@ export function buildProviderEditorUpsertInput(
       ctx.authMode === "cx2cc" && !ctx.isCodexGatewaySource ? ctx.sourceProviderId : null,
     bridgeType: ctx.authMode === "cx2cc" ? "cx2cc" : null,
     extensionValues: ctx.extensionValues ?? null,
+    customHeaders: normalizeCustomHeaders(ctx.customHeaders),
   };
 
   return {

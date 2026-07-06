@@ -5,7 +5,7 @@ mod types;
 mod validation;
 
 pub use types::{
-    ClaudeModels, DailyResetMode, ProviderAuthMode, ProviderBaseUrlMode,
+    ClaudeModels, DailyResetMode, ProviderAuthMode, ProviderBaseUrlMode, ProviderCustomHeader,
     ProviderExtensionValuesInput, ProviderSummary, ProviderUpsertParams,
 };
 

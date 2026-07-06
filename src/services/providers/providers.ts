@@ -15,6 +15,7 @@ import {
   type ProviderOAuthResetCodexQuotaResult,
   type ProviderOAuthStartFlowResult,
   type ProviderOAuthStatusResult,
+  type ProviderCustomHeader,
   type ProviderSummary as GeneratedProviderSummary,
   type ProviderUpsertInput as GeneratedProviderUpsertInput,
 } from "../../generated/bindings";
@@ -45,6 +46,8 @@ export type {
   ProviderOAuthStartFlowResult,
   ProviderOAuthStatusResult,
 };
+
+export type { ProviderCustomHeader };
 
 export type CliKey = "claude" | "codex" | "gemini";
 
@@ -103,6 +106,7 @@ type ProviderUpsertFieldMap = {
   bridgeType: "bridgeType";
   streamIdleTimeoutSeconds: "streamIdleTimeoutSeconds";
   extensionValues: "extensionValues";
+  customHeaders: "customHeaders";
 };
 
 type ProviderUpsertAuthority = RemapGeneratedKeys<
@@ -192,6 +196,7 @@ function toProviderUpsertPayload(input: ProviderUpsertInput): ProviderUpsertTran
     sourceProviderId,
     bridgeType: input.bridgeType ?? null,
     extensionValues: input.extensionValues ?? null,
+    customHeaders: input.customHeaders ?? null,
   } satisfies Omit<GeneratedProviderUpsertInput, "streamIdleTimeoutSeconds">;
 
   if (Object.prototype.hasOwnProperty.call(input, "streamIdleTimeoutSeconds")) {

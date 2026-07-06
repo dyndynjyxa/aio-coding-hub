@@ -225,6 +225,7 @@ mod tests {
         providers::upsert(
             db,
             providers::ProviderUpsertParams {
+                custom_headers: None,
                 provider_id: None,
                 cli_key: cli_key.to_string(),
                 name: name.to_string(),

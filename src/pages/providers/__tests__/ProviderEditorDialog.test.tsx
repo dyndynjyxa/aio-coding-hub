@@ -99,6 +99,7 @@ function makeProvider(partial: Partial<ProviderSummary> = {}): ProviderSummary {
     ...partial,
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,
     extension_values: partial.extension_values ?? [],
+    custom_headers: partial.custom_headers ?? [],
   };
 }
 
@@ -127,6 +128,7 @@ function makeInitialValues(
     bridge_type: null,
     ...partial,
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,
+    custom_headers: partial.custom_headers ?? [],
   };
 }
 
@@ -337,6 +339,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
         cli_key: "claude",
         name: "Timeout Provider",
         stream_idle_timeout_seconds: 120,
+        custom_headers: [],
       })
     );
 
@@ -601,6 +604,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
         cli_key: "claude",
         name: "Existing",
         stream_idle_timeout_seconds: null,
+        custom_headers: [],
       })
     );
 

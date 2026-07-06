@@ -67,6 +67,7 @@ function makeProvider(
     bridge_type: partial.bridge_type ?? null,
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,
     extension_values: partial.extension_values ?? [],
+    custom_headers: partial.custom_headers ?? [],
     api_key_configured: partial.api_key_configured ?? false,
   };
 }
