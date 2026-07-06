@@ -372,3 +372,207 @@ fn sanitize_deterministic_part_removes_log_injection_controls_before_truncating(
     assert_eq!(sanitized.len(), MAX_SESSION_ID_LEN);
     assert!(!sanitized.contains('\n'));
 }
+
+// ---------------------------------------------------------------------------
+// Claude Code session identification (Phase 0)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn extract_session_id_uses_claude_code_session_header() {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "x-claude-code-session-id",
+        HeaderValue::from_static("a679f21c-4ac5-46bf-8901-902c40e91cec"),
+    );
+
+    let id = SessionManager::extract_session_id_from_json(&headers, None).expect("sid");
+    assert_eq!(id, "a679f21c-4ac5-46bf-8901-902c40e91cec");
+}
+
+#[test]
+fn extract_session_id_distinguishes_claude_code_processes() {
+    let mut h1 = HeaderMap::new();
+    h1.insert(
+        "x-claude-code-session-id",
+        HeaderValue::from_static("a679f21c-4ac5-46bf-8901-902c40e91cec"),
+    );
+    let mut h2 = HeaderMap::new();
+    h2.insert(
+        "x-claude-code-session-id",
+        HeaderValue::from_static("b2851212-db11-4d49-a615-3ac436e7f2eb"),
+    );
+
+    let id1 = SessionManager::extract_session_id_from_json(&h1, None).expect("sid 1");
+    let id2 = SessionManager::extract_session_id_from_json(&h2, None).expect("sid 2");
+    assert_ne!(id1, id2);
+}
+
+#[test]
+fn extract_session_id_parses_claude_code_user_id_json() {
+    let headers = HeaderMap::new();
+    let body = serde_json::json!({
+        "metadata": {
+            "user_id": "{\"device_id\":\"dev-1\",\"account_uuid\":\"\",\"session_id\":\"a679f21c-4ac5-46bf-8901-902c40e91cec\"}"
+        }
+    });
+
+    let id = SessionManager::extract_session_id_from_json(&headers, Some(&body)).expect("sid");
+    assert_eq!(id, "a679f21c-4ac5-46bf-8901-902c40e91cec");
+}
+
+#[test]
+fn extract_session_id_user_id_marker_still_supported() {
+    let headers = HeaderMap::new();
+    let body = serde_json::json!({
+        "metadata": { "user_id": "acct-x_session_legacy-sid-123" }
+    });
+
+    let id = SessionManager::extract_session_id_from_json(&headers, Some(&body)).expect("sid");
+    assert_eq!(id, "legacy-sid-123");
+}
+
+#[test]
+fn extract_session_id_header_precedes_fingerprint_fallback() {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "x-claude-code-session-id",
+        HeaderValue::from_static("a679f21c-4ac5-46bf-8901-902c40e91cec"),
+    );
+    headers.insert(
+        header::USER_AGENT,
+        HeaderValue::from_static("claude-cli/2.1.191"),
+    );
+    // A body that would otherwise trigger the message-fingerprint fallback.
+    let body = serde_json::json!({ "messages": [{ "role": "user", "content": "hi" }] });
+
+    let id = SessionManager::extract_session_id_from_json(&headers, Some(&body)).expect("sid");
+    assert_eq!(id, "a679f21c-4ac5-46bf-8901-902c40e91cec");
+    assert!(!id.starts_with("sess_"));
+}
+
+// ---------------------------------------------------------------------------
+// Manual sort_mode pin (Path A — template level)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn bind_and_get_pinned_sort_mode_roundtrips() {
+    let manager = SessionManager::new();
+    let t0 = 1000;
+
+    assert!(manager.bind_pinned_sort_mode("claude", "s1", Some(7), t0));
+    assert_eq!(
+        manager.get_bound_pinned_sort_mode_id("claude", "s1", t0 + 10),
+        Some(Some(7))
+    );
+}
+
+#[test]
+fn bind_pinned_sort_mode_default_is_some_none() {
+    let manager = SessionManager::new();
+    let t0 = 1000;
+
+    // Pinning Default mode is represented as Some(None) (pinned, to Default).
+    assert!(manager.bind_pinned_sort_mode("claude", "s1", None, t0));
+    assert_eq!(
+        manager.get_bound_pinned_sort_mode_id("claude", "s1", t0 + 10),
+        Some(None)
+    );
+}
+
+#[test]
+fn unpinned_session_returns_none() {
+    let manager = SessionManager::new();
+    let t0 = 1000;
+
+    manager.bind_success("claude", "s1", 3, Some(5), t0);
+    // Auto-bound sort_mode exists, but no manual pin.
+    assert_eq!(
+        manager.get_bound_pinned_sort_mode_id("claude", "s1", t0 + 5),
+        None
+    );
+}
+
+#[test]
+fn bind_pinned_sort_mode_rejects_invalid_input() {
+    let manager = SessionManager::new();
+    let t0 = 1000;
+
+    assert!(!manager.bind_pinned_sort_mode("", "s1", Some(7), t0));
+    assert!(!manager.bind_pinned_sort_mode("claude", "", Some(7), t0));
+    assert_eq!(
+        manager.get_bound_pinned_sort_mode_id("claude", "s1", t0),
+        None
+    );
+}
+
+#[test]
+fn pinned_sort_mode_expires_with_ttl() {
+    let manager = SessionManager::new(); // TTL = 300s
+    let t0 = 1000;
+
+    manager.bind_pinned_sort_mode("claude", "s1", Some(7), t0);
+    assert_eq!(
+        manager.get_bound_pinned_sort_mode_id("claude", "s1", t0 + 301),
+        None
+    );
+}
+
+#[test]
+fn pin_sort_mode_preserves_existing_auto_binding() {
+    let manager = SessionManager::new();
+    let t0 = 1000;
+
+    manager.bind_success("claude", "s1", 3, Some(5), t0);
+    manager.bind_pinned_sort_mode("claude", "s1", Some(9), t0 + 5);
+
+    // Auto-bound provider/sort_mode preserved; manual pin recorded separately.
+    assert_eq!(manager.get_bound_provider("claude", "s1", t0 + 10), Some(3));
+    assert_eq!(
+        manager.get_bound_pinned_sort_mode_id("claude", "s1", t0 + 10),
+        Some(Some(9))
+    );
+}
+
+#[test]
+fn pinned_sort_mode_surfaces_in_active_snapshot() {
+    let manager = SessionManager::new();
+    let t0 = 1000;
+
+    manager.bind_success("claude", "s1", 3, Some(5), t0);
+    manager.bind_pinned_sort_mode("claude", "s1", Some(9), t0 + 1);
+
+    let rows = manager.list_active(t0 + 10, 50);
+    let row = rows
+        .iter()
+        .find(|r| r.session_id == "s1")
+        .expect("session row");
+    assert_eq!(row.pinned_sort_mode_id, Some(Some(9)));
+}
+
+#[test]
+fn clear_pinned_sort_mode_reverts_to_auto() {
+    let manager = SessionManager::new();
+    let t0 = 1000;
+
+    manager.bind_pinned_sort_mode("claude", "s1", Some(9), t0);
+    assert_eq!(
+        manager.get_bound_pinned_sort_mode_id("claude", "s1", t0 + 5),
+        Some(Some(9))
+    );
+
+    assert!(manager.clear_pinned_sort_mode("claude", "s1", t0 + 6));
+    // After clearing, the session is unpinned again.
+    assert_eq!(
+        manager.get_bound_pinned_sort_mode_id("claude", "s1", t0 + 7),
+        None
+    );
+}
+
+#[test]
+fn clear_pinned_sort_mode_no_binding_is_noop() {
+    let manager = SessionManager::new();
+    let t0 = 1000;
+
+    assert!(!manager.clear_pinned_sort_mode("claude", "missing", t0));
+    assert!(!manager.clear_pinned_sort_mode("", "s1", t0));
+}

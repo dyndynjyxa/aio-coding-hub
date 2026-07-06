@@ -42,6 +42,40 @@ pub(crate) fn app_gateway_active_requests_snapshot<R: tauri::Runtime>(
     .unwrap_or_default()
 }
 
+/// Manually pin a sort_mode to a `(cli_key, session_id)` binding.
+/// `sort_mode_id == None` pins to Default. Returns `false` when the gateway is
+/// not running or the input is rejected.
+pub(crate) fn app_gateway_pin_session_sort_mode<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    cli_key: &str,
+    session_id: &str,
+    sort_mode_id: Option<i64>,
+    now_unix: i64,
+) -> bool {
+    super::gateway_state::with_app_running_gateway(app, |running| {
+        running
+            .map(|runtime| {
+                runtime.pin_session_sort_mode(cli_key, session_id, sort_mode_id, now_unix)
+            })
+            .unwrap_or(false)
+    })
+}
+
+/// Clear a session's manual sort_mode pin, reverting to the auto-inherited mode.
+/// Returns `false` when the gateway is not running or there is no live binding.
+pub(crate) fn app_gateway_unpin_session_sort_mode<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    cli_key: &str,
+    session_id: &str,
+    now_unix: i64,
+) -> bool {
+    super::gateway_state::with_app_running_gateway(app, |running| {
+        running
+            .map(|runtime| runtime.unpin_session_sort_mode(cli_key, session_id, now_unix))
+            .unwrap_or(false)
+    })
+}
+
 pub(crate) fn app_gateway_circuit_status(
     app: &tauri::AppHandle,
     db: &db::Db,

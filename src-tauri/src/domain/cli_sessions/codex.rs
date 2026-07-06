@@ -3,8 +3,8 @@
 use super::{
     folder_name_from_path, truncate_string, validate_path_under_root,
     CliSessionsDisplayContentBlock, CliSessionsDisplayMessage, CliSessionsFolderLookupEntry,
-    CliSessionsPaginatedMessages, CliSessionsProjectSummary, CliSessionsSessionSummary,
-    MessagePageAccumulator,
+    CliSessionsMetadataEntry, CliSessionsPaginatedMessages, CliSessionsProjectSummary,
+    CliSessionsSessionSummary, MessagePageAccumulator,
 };
 use crate::shared::error::{AppError, AppResult};
 use serde_json::Value;
@@ -686,6 +686,103 @@ pub fn folder_lookup_by_session_ids(
     ))
 }
 
+/// Shared core: walk codex session files, parse display metadata (cwd, title,
+/// timestamps) for the requested session_ids. Codex title is 2-tier:
+/// first user prompt → cwd basename (no custom-title concept in codex).
+fn metadata_lookup_in_files(
+    files: Vec<PathBuf>,
+    sessions_dir: &Path,
+    source: &str,
+    target_session_ids: &[String],
+) -> Vec<CliSessionsMetadataEntry> {
+    if files.is_empty() || target_session_ids.is_empty() {
+        return Vec::new();
+    }
+
+    let mut pending: HashSet<String> = target_session_ids
+        .iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect();
+    let mut out = Vec::new();
+
+    for file_path in files {
+        if pending.is_empty() {
+            break;
+        }
+        if validate_path_under_root(&file_path, sessions_dir).is_err() {
+            continue;
+        }
+        let meta = extract_session_meta(&file_path);
+        let session_id = meta
+            .as_ref()
+            .map(|value| value.id.clone())
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                file_path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+            });
+        let Some(session_id) = session_id else {
+            continue;
+        };
+        if !pending.contains(&session_id) {
+            continue;
+        }
+
+        let cwd = meta
+            .as_ref()
+            .and_then(|value| value.cwd.clone())
+            .or_else(|| meta.as_ref().and_then(|value| value.project_path.clone()))
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+
+        let title = extract_first_prompt(&file_path)
+            .filter(|t| !t.trim().is_empty())
+            .or_else(|| {
+                cwd.as_deref()
+                    .and_then(|p| p.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next())
+                    .map(str::to_string)
+                    .filter(|v| !v.is_empty())
+            })
+            .unwrap_or_default();
+
+        let (created_at, last_active_at) = file_times(&file_path);
+        // codex stores seconds; the rest of aio expects ms for these fields.
+        let created_at = created_at.map(|s| s.saturating_mul(1000));
+        let last_active_at = last_active_at.map(|s| s.saturating_mul(1000));
+
+        pending.remove(&session_id);
+        out.push(CliSessionsMetadataEntry {
+            source: source.to_string(),
+            session_id,
+            cwd,
+            title,
+            created_at,
+            last_active_at,
+        });
+    }
+
+    out
+}
+
+pub fn metadata_lookup_by_session_ids(
+    app: &tauri::AppHandle,
+    target_session_ids: &[String],
+) -> AppResult<Vec<CliSessionsMetadataEntry>> {
+    let sessions_dir = crate::codex_paths::codex_sessions_dir(app)?;
+    let files = scan_all_session_files(app)?;
+    Ok(metadata_lookup_in_files(
+        files,
+        &sessions_dir,
+        "codex",
+        target_session_ids,
+    ))
+}
+
 pub fn messages_get(
     app: &tauri::AppHandle,
     file_path: &str,
@@ -893,6 +990,20 @@ pub fn wsl_folder_lookup_by_session_ids(
     let sessions_dir = wsl_codex_sessions_dir(distro)?;
     let files = wsl_scan_all_session_files(distro)?;
     Ok(folder_lookup_in_files(
+        files,
+        &sessions_dir,
+        "codex",
+        target_session_ids,
+    ))
+}
+
+pub fn wsl_metadata_lookup_by_session_ids(
+    distro: &str,
+    target_session_ids: &[String],
+) -> AppResult<Vec<CliSessionsMetadataEntry>> {
+    let sessions_dir = wsl_codex_sessions_dir(distro)?;
+    let files = wsl_scan_all_session_files(distro)?;
+    Ok(metadata_lookup_in_files(
         files,
         &sessions_dir,
         "codex",

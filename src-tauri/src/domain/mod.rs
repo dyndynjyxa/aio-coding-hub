@@ -17,6 +17,7 @@ pub(crate) mod provider_availability;
 pub(crate) mod provider_limit_usage;
 pub(crate) mod provider_oauth_limits;
 pub(crate) mod providers;
+pub(crate) mod session_pins;
 pub(crate) mod skills;
 pub(crate) mod sort_modes;
 pub(crate) mod usage;

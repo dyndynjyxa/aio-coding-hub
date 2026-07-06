@@ -3,15 +3,15 @@
 use super::{
     folder_name_from_path, truncate_string, validate_path_under_root,
     CliSessionsDisplayContentBlock, CliSessionsDisplayMessage, CliSessionsFolderLookupEntry,
-    CliSessionsPaginatedMessages, CliSessionsProjectSummary, CliSessionsSessionSummary,
-    MessagePageAccumulator,
+    CliSessionsMetadataEntry, CliSessionsPaginatedMessages, CliSessionsProjectSummary,
+    CliSessionsSessionSummary, MessagePageAccumulator,
 };
 use crate::shared::error::{AppError, AppResult};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -833,6 +833,412 @@ pub fn folder_lookup_by_session_ids(
     )
 }
 
+// ── session metadata (title / cwd / timestamps) ─────────────────────────────
+//
+// Adapted from a reference implementation of Claude session parsing
+// (three-tier title priority), adapted to reuse aio's existing path-validation
+// and cwd-decoding. Reads only head 10 + tail 30 lines (not the whole file) so
+// it stays cheap even for large sessions.
+
+const TITLE_MAX_CHARS: usize = 80;
+
+/// Read the first `head_n` and last `tail_n` lines of a file. For small files
+/// (< 16 KB) reads once to avoid a needless seek. Adapted from a reference implementation.
+fn read_head_tail_lines(
+    path: &Path,
+    head_n: usize,
+    tail_n: usize,
+) -> Option<(Vec<String>, Vec<String>)> {
+    let file = fs::File::open(path).ok()?;
+    let file_len = file.metadata().ok()?.len();
+
+    // Small file: read all and split.
+    if file_len < 16_384 {
+        let reader = BufReader::new(file);
+        let all: Vec<String> = reader.lines().map_while(Result::ok).collect();
+        let head = all.iter().take(head_n).cloned().collect();
+        let skip = all.len().saturating_sub(tail_n);
+        let tail = all.into_iter().skip(skip).collect();
+        return Some((head, tail));
+    }
+
+    // Head from the beginning.
+    let head: Vec<String> = BufReader::new(file)
+        .lines()
+        .take(head_n)
+        .map_while(Result::ok)
+        .collect();
+
+    // Tail from the last ~16 KB (skip the first partial line after the seek).
+    let seek_pos = file_len.saturating_sub(16_384);
+    let mut file2 = fs::File::open(path).ok()?;
+    file2.seek(SeekFrom::Start(seek_pos)).ok()?;
+    let all_tail: Vec<String> = BufReader::new(file2)
+        .lines()
+        .map_while(Result::ok)
+        .collect();
+    let skip_first = if seek_pos > 0 { 1 } else { 0 };
+    let usable: Vec<String> = all_tail.into_iter().skip(skip_first).collect();
+    let skip = usable.len().saturating_sub(tail_n);
+    let tail = usable.into_iter().skip(skip).collect();
+
+    Some((head, tail))
+}
+
+/// Parse a timestamp value (int ms / int s / f64 / RFC3339 string) to unix ms.
+fn parse_timestamp_to_ms(value: &Value) -> Option<i64> {
+    if let Some(n) = value.as_i64() {
+        return Some(if n > 1_000_000_000_000 { n } else { n * 1000 });
+    }
+    if let Some(n) = value.as_f64() {
+        let n = n as i64;
+        return Some(if n > 1_000_000_000_000 { n } else { n * 1000 });
+    }
+    let raw = value.as_str()?;
+    chrono::DateTime::parse_from_rfc3339(raw)
+        .ok()
+        .map(|dt| dt.timestamp_millis())
+}
+
+/// Extract visible text from a message `content` value (string or array of
+/// blocks). Adapted from a reference implementation; only used for title candidates, so tool_use /
+/// tool_result are summarized rather than fully expanded.
+fn extract_text_for_title(content: &Value) -> String {
+    match content {
+        Value::String(text) => text.to_string(),
+        Value::Array(items) => items
+            .iter()
+            .filter_map(|item| {
+                let item_type = item.get("type").and_then(Value::as_str).unwrap_or("");
+                if item_type == "tool_use" {
+                    let name = item
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown");
+                    return Some(format!("[Tool: {name}]"));
+                }
+                if item_type == "tool_result" {
+                    if let Some(content) = item.get("content") {
+                        let text = extract_text_for_title(content);
+                        if !text.is_empty() {
+                            return Some(text);
+                        }
+                    }
+                    return None;
+                }
+                if let Some(text) = item.get("text").and_then(Value::as_str) {
+                    return Some(text.to_string());
+                }
+                if let Some(text) = item.get("input_text").and_then(Value::as_str) {
+                    return Some(text.to_string());
+                }
+                if let Some(text) = item.get("output_text").and_then(Value::as_str) {
+                    return Some(text.to_string());
+                }
+                if let Some(content) = item.get("content") {
+                    let text = extract_text_for_title(content);
+                    if !text.is_empty() {
+                        return Some(text);
+                    }
+                }
+                None
+            })
+            .filter(|text| !text.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Value::Object(map) => map
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        _ => String::new(),
+    }
+}
+
+fn truncate_title(text: &str, max_chars: usize) -> String {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if trimmed.chars().count() <= max_chars {
+        return trimmed.to_string();
+    }
+    let mut result = trimmed.chars().take(max_chars).collect::<String>();
+    result.push_str("...");
+    result
+}
+
+fn path_basename_str(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let normalized = trimmed.trim_end_matches(['/', '\\']);
+    let last = normalized
+        .split(['/', '\\'])
+        .next_back()
+        .filter(|segment| !segment.is_empty())?;
+    Some(last.to_string())
+}
+
+/// Parsed display fields for a single jsonl session file (used internally before
+/// being folded into a `CliSessionsMetadataEntry`). Extracted as a struct so the
+/// return type stays simple.
+#[derive(Debug, Clone, Default)]
+struct ParsedSessionMetadata {
+    cwd: Option<String>,
+    title: String,
+    created_at: Option<i64>,
+    last_active_at: Option<i64>,
+}
+
+/// Parse a single jsonl session file into `(cwd, title, created_at, last_active_at)`.
+/// Mirrors a reference `parse_session` implementation, minus the bits aio already handles elsewhere
+/// (session_id-from-filename, source_path, resume_command).
+fn parse_session_metadata(path: &Path) -> Option<ParsedSessionMetadata> {
+    let (head, tail) = read_head_tail_lines(path, 10, 30)?;
+
+    let mut project_dir: Option<String> = None;
+    let mut created_at: Option<i64> = None;
+    let mut first_user_message: Option<String> = None;
+
+    for line in &head {
+        let value: Value = match serde_json::from_str(line) {
+            Ok(parsed) => parsed,
+            Err(_) => continue,
+        };
+        if project_dir.is_none() {
+            project_dir = value
+                .get("cwd")
+                .and_then(Value::as_str)
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+        }
+        if created_at.is_none() {
+            created_at = value.get("timestamp").and_then(parse_timestamp_to_ms);
+        }
+        if first_user_message.is_none() {
+            let is_user = value.get("type").and_then(Value::as_str) == Some("user")
+                || value
+                    .get("message")
+                    .and_then(|m| m.get("role"))
+                    .and_then(Value::as_str)
+                    == Some("user");
+            if is_user {
+                if let Some(message) = value.get("message") {
+                    let text = message
+                        .get("content")
+                        .map(extract_text_for_title)
+                        .unwrap_or_default();
+                    let trimmed = text.trim();
+                    if !trimmed.is_empty()
+                        && !trimmed.contains("<local-command-caveat>")
+                        && !trimmed.starts_with("<command-name>")
+                    {
+                        first_user_message = Some(trimmed.to_string());
+                    }
+                }
+            }
+        }
+        if project_dir.is_some() && created_at.is_some() && first_user_message.is_some() {
+            break;
+        }
+    }
+
+    let mut last_active_at: Option<i64> = None;
+    let mut custom_title: Option<String> = None;
+
+    for line in tail.iter().rev() {
+        let value: Value = match serde_json::from_str(line) {
+            Ok(parsed) => parsed,
+            Err(_) => continue,
+        };
+        if last_active_at.is_none() {
+            last_active_at = value.get("timestamp").and_then(parse_timestamp_to_ms);
+        }
+        if custom_title.is_none()
+            && value.get("type").and_then(Value::as_str) == Some("custom-title")
+        {
+            custom_title = value
+                .get("customTitle")
+                .and_then(Value::as_str)
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+        }
+        if last_active_at.is_some() && custom_title.is_some() {
+            break;
+        }
+    }
+
+    // Title priority: custom-title > first real user message > cwd basename.
+    let title = custom_title
+        .as_deref()
+        .map(|t| truncate_title(t, TITLE_MAX_CHARS))
+        .filter(|t| !t.is_empty())
+        .or_else(|| {
+            first_user_message
+                .as_deref()
+                .map(|t| truncate_title(t, TITLE_MAX_CHARS))
+        })
+        .or_else(|| project_dir.as_deref().and_then(path_basename_str))
+        .unwrap_or_default();
+
+    Some(ParsedSessionMetadata {
+        cwd: project_dir,
+        title,
+        created_at,
+        last_active_at,
+    })
+}
+
+/// Shared core: walk `projects_dir`, for each target session_id locate its jsonl
+/// (via sessions-index.json then on-disk fallback) and parse display metadata.
+fn metadata_lookup_in_projects_dir(
+    projects_dir: &Path,
+    decode_project_path: fn(&str) -> String,
+    source: &str,
+    target_session_ids: &[String],
+) -> AppResult<Vec<CliSessionsMetadataEntry>> {
+    if target_session_ids.is_empty() || !projects_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut pending: HashSet<String> = target_session_ids
+        .iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect();
+    if pending.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut out: Vec<CliSessionsMetadataEntry> = Vec::new();
+    let entries = fs::read_dir(projects_dir).map_err(|e| {
+        AppError::new(
+            "INTERNAL_ERROR",
+            format!("failed to read claude projects dir: {e}"),
+        )
+    })?;
+
+    for entry in entries.flatten() {
+        if pending.is_empty() {
+            break;
+        }
+
+        let project_dir = entry.path();
+        if !project_dir.is_dir() {
+            continue;
+        }
+
+        let encoded_name = match project_dir.file_name().and_then(|name| name.to_str()) {
+            Some(name) if !name.trim().is_empty() => name.to_string(),
+            _ => continue,
+        };
+
+        let index = read_sessions_index(&project_dir);
+        let index_original_path = index.as_ref().and_then(|idx| idx.original_path.clone());
+        let cwd_from_sessions = extract_cwd_from_sessions(&project_dir);
+        let default_project_path = index_original_path
+            .clone()
+            .or(cwd_from_sessions.clone())
+            .unwrap_or_else(|| decode_project_path(&encoded_name));
+
+        // Map session_id → file_path for the indexed entries we care about.
+        let mut wanted_files: Vec<(String, PathBuf)> = Vec::new();
+
+        if let Some(index) = &index {
+            for item in &index.entries {
+                if !pending.contains(&item.session_id) {
+                    continue;
+                }
+                let file_path = item
+                    .full_path
+                    .clone()
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| project_dir.join(format!("{}.jsonl", item.session_id)));
+                if validate_path_under_root(&file_path, projects_dir).is_err() {
+                    continue;
+                }
+                if !file_path.exists() {
+                    continue;
+                }
+                wanted_files.push((item.session_id.clone(), file_path));
+            }
+        }
+
+        // On-disk fallback for session_ids not in the index.
+        let mut indexed_ids: HashSet<String> =
+            wanted_files.iter().map(|(id, _)| id.clone()).collect();
+        let mut found_all = pending.iter().all(|id| indexed_ids.contains(id));
+        if !found_all {
+            if let Ok(rd) = fs::read_dir(&project_dir) {
+                for file in rd.flatten() {
+                    if found_all {
+                        break;
+                    }
+                    let file_path = file.path();
+                    if file_path
+                        .extension()
+                        .map(|ext| ext == "jsonl")
+                        .unwrap_or(false)
+                    {
+                        let Some(session_id) = file_path
+                            .file_stem()
+                            .and_then(|stem| stem.to_str())
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())
+                            .map(str::to_string)
+                        else {
+                            continue;
+                        };
+                        if !pending.contains(&session_id) || indexed_ids.contains(&session_id) {
+                            continue;
+                        }
+                        indexed_ids.insert(session_id.clone());
+                        wanted_files.push((session_id, file_path));
+                        found_all = pending.iter().all(|id| indexed_ids.contains(id));
+                    }
+                }
+            }
+        }
+
+        for (session_id, file_path) in wanted_files {
+            let parsed = parse_session_metadata(&file_path).unwrap_or_default();
+            // Prefer index/sessions cwd over a jsonl-parsed one when available,
+            // since the index records the original (un-encoded) project path.
+            let cwd = parsed
+                .cwd
+                .or_else(|| index_original_path.clone())
+                .or_else(|| cwd_from_sessions.clone())
+                .or_else(|| Some(default_project_path.clone()));
+            pending.remove(&session_id);
+            out.push(CliSessionsMetadataEntry {
+                source: source.to_string(),
+                session_id,
+                cwd,
+                title: parsed.title,
+                created_at: parsed.created_at,
+                last_active_at: parsed.last_active_at,
+            });
+        }
+    }
+
+    Ok(out)
+}
+
+pub fn metadata_lookup_by_session_ids(
+    app: &tauri::AppHandle,
+    target_session_ids: &[String],
+) -> AppResult<Vec<CliSessionsMetadataEntry>> {
+    let projects_dir = claude_projects_dir(app)?;
+    metadata_lookup_in_projects_dir(
+        &projects_dir,
+        decode_project_path,
+        "claude",
+        target_session_ids,
+    )
+}
+
 pub fn messages_get(
     app: &tauri::AppHandle,
     file_path: &str,
@@ -1058,6 +1464,19 @@ pub fn wsl_folder_lookup_by_session_ids(
     )
 }
 
+pub fn wsl_metadata_lookup_by_session_ids(
+    distro: &str,
+    target_session_ids: &[String],
+) -> AppResult<Vec<CliSessionsMetadataEntry>> {
+    let projects_dir = wsl_claude_projects_dir(distro)?;
+    metadata_lookup_in_projects_dir(
+        &projects_dir,
+        decode_project_path_unix,
+        "claude",
+        target_session_ids,
+    )
+}
+
 pub fn wsl_messages_get(
     distro: &str,
     file_path: &str,
@@ -1100,6 +1519,7 @@ pub fn wsl_session_delete(distro: &str, file_path: &str) -> AppResult<bool> {
 #[cfg(test)]
 mod tests {
     use super::folder_lookup_in_projects_dir;
+    use super::{metadata_lookup_in_projects_dir, parse_session_metadata};
     use std::fs;
     use tempfile::tempdir;
 
@@ -1151,5 +1571,164 @@ mod tests {
             .unwrap();
         assert_eq!(disk_entry.folder_name, "default-root");
         assert_eq!(disk_entry.folder_path, "/Users/demo/default-root");
+    }
+
+    fn write_jsonl(path: &std::path::Path, lines: &[&str]) {
+        let body = lines.join("\n");
+        fs::write(path, body).unwrap();
+    }
+
+    #[test]
+    fn parse_metadata_uses_first_user_message_as_title() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("session-abc.jsonl");
+        write_jsonl(
+            &path,
+            &[
+                r#"{"sessionId":"session-abc","cwd":"/tmp/project","timestamp":"2026-03-06T10:00:00Z"}"#,
+                r#"{"type":"user","message":{"role":"user","content":"How do I deploy?"},"sessionId":"session-abc","timestamp":"2026-03-06T10:01:00Z"}"#,
+                r#"{"type":"assistant","message":{"role":"assistant","content":"Here is how..."},"timestamp":"2026-03-06T10:02:00Z"}"#,
+            ],
+        );
+
+        let meta = parse_session_metadata(&path).unwrap();
+        assert_eq!(meta.cwd.as_deref(), Some("/tmp/project"));
+        assert_eq!(meta.title, "How do I deploy?");
+        assert_eq!(meta.created_at, Some(1_772_791_200_000));
+        assert_eq!(meta.last_active_at, Some(1_772_791_320_000));
+    }
+
+    #[test]
+    fn parse_metadata_custom_title_overrides_first_message() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("session-def.jsonl");
+        write_jsonl(
+            &path,
+            &[
+                r#"{"sessionId":"session-def","cwd":"/tmp/project","timestamp":"2026-03-06T10:00:00Z"}"#,
+                r#"{"type":"user","message":{"role":"user","content":"fix something"},"sessionId":"session-def","timestamp":"2026-03-06T10:01:00Z"}"#,
+                r#"{"type":"assistant","message":{"role":"assistant","content":"Done."},"timestamp":"2026-03-06T10:02:00Z"}"#,
+                r#"{"type":"custom-title","customTitle":"fix-login-bug","sessionId":"session-def"}"#,
+            ],
+        );
+
+        let meta = parse_session_metadata(&path).unwrap();
+        assert_eq!(meta.cwd.as_deref(), Some("/tmp/project"));
+        assert_eq!(meta.title, "fix-login-bug");
+    }
+
+    #[test]
+    fn parse_metadata_falls_back_to_dir_basename() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("session-ghi.jsonl");
+        write_jsonl(
+            &path,
+            &[
+                r#"{"sessionId":"session-ghi","cwd":"/tmp/my-project","timestamp":"2026-03-06T10:00:00Z"}"#,
+                r#"{"type":"assistant","message":{"role":"assistant","content":"Hello"},"timestamp":"2026-03-06T10:01:00Z"}"#,
+            ],
+        );
+
+        let meta = parse_session_metadata(&path).unwrap();
+        assert_eq!(meta.cwd.as_deref(), Some("/tmp/my-project"));
+        assert_eq!(meta.title, "my-project");
+    }
+
+    #[test]
+    fn parse_metadata_truncates_long_title() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("session-trunc.jsonl");
+        let long_msg = "a".repeat(200);
+        write_jsonl(
+            &path,
+            &[
+                r#"{"sessionId":"session-trunc","cwd":"/tmp/p","timestamp":"2026-03-06T10:00:00Z"}"#,
+                &format!(
+                    r#"{{"type":"user","message":{{"role":"user","content":"{long_msg}"}},"sessionId":"session-trunc","timestamp":"2026-03-06T10:01:00Z"}}"#
+                ),
+            ],
+        );
+
+        let meta = parse_session_metadata(&path).unwrap();
+        assert!(meta.title.len() <= super::TITLE_MAX_CHARS + 3);
+        assert!(meta.title.ends_with("..."));
+    }
+
+    #[test]
+    fn parse_metadata_skips_command_caveat_and_slash_commands() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("session-clear.jsonl");
+        write_jsonl(
+            &path,
+            &[
+                r#"{"type":"file-history-snapshot","messageId":"msg-1","snapshot":{},"isSnapshotUpdate":false}"#,
+                r#"{"type":"user","message":{"role":"user","content":"<local-command-caveat>Caveat: The messages below were generated by the user while running local commands.</local-command-caveat>"},"sessionId":"session-clear","timestamp":"2026-03-06T10:00:00Z","cwd":"/tmp/project"}"#,
+                r#"{"type":"user","message":{"role":"user","content":"<command-name>/clear</command-name>\n<command-message>clear</command-message>"},"sessionId":"session-clear","timestamp":"2026-03-06T10:00:01Z","cwd":"/tmp/project"}"#,
+                r#"{"type":"assistant","message":{"role":"assistant","content":"Done."},"timestamp":"2026-03-06T10:00:02Z","cwd":"/tmp/project"}"#,
+                r#"{"type":"user","message":{"role":"user","content":"帮我看看工作区的改动"},"sessionId":"session-clear","timestamp":"2026-03-06T10:01:00Z","cwd":"/tmp/project"}"#,
+            ],
+        );
+
+        let meta = parse_session_metadata(&path).unwrap();
+        assert_eq!(meta.title, "帮我看看工作区的改动");
+    }
+
+    #[test]
+    fn metadata_lookup_resolves_indexed_and_disk_sessions() {
+        let dir = tempdir().unwrap();
+        let project_dir = dir.path().join("users-demo-default-root");
+        fs::create_dir_all(&project_dir).unwrap();
+
+        fs::write(
+            project_dir.join("sessions-index.json"),
+            r#"{
+  "originalPath": "/Users/demo/default-root",
+  "entries": [
+    {
+      "sessionId": "indexed-1",
+      "projectPath": "/Users/demo/feature-a"
+    }
+  ]
+}"#,
+        )
+        .unwrap();
+        // Indexed entry with a real jsonl file.
+        write_jsonl(
+            &project_dir.join("indexed-1.jsonl"),
+            &[
+                r#"{"sessionId":"indexed-1","cwd":"/Users/demo/feature-a","timestamp":"2026-03-06T10:00:00Z"}"#,
+                r#"{"type":"user","message":{"role":"user","content":"indexed title"},"sessionId":"indexed-1","timestamp":"2026-03-06T10:01:00Z"}"#,
+            ],
+        );
+        // On-disk-only entry (not in the index).
+        write_jsonl(
+            &project_dir.join("disk-1.jsonl"),
+            &[
+                r#"{"sessionId":"disk-1","cwd":"/Users/demo/default-root","timestamp":"2026-03-06T11:00:00Z"}"#,
+                r#"{"type":"custom-title","customTitle":"disk-custom","sessionId":"disk-1"}"#,
+            ],
+        );
+
+        let out = metadata_lookup_in_projects_dir(
+            dir.path(),
+            |encoded| encoded.replace('-', "/"),
+            "claude",
+            &[
+                "indexed-1".to_string(),
+                "disk-1".to_string(),
+                "missing".to_string(),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(out.len(), 2);
+
+        let indexed = out.iter().find(|e| e.session_id == "indexed-1").unwrap();
+        assert_eq!(indexed.cwd.as_deref(), Some("/Users/demo/feature-a"));
+        assert_eq!(indexed.title, "indexed title");
+
+        let disk = out.iter().find(|e| e.session_id == "disk-1").unwrap();
+        assert_eq!(disk.title, "disk-custom");
+        assert_eq!(disk.cwd.as_deref(), Some("/Users/demo/default-root"));
     }
 }

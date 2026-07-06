@@ -8,4 +8,7 @@ mod sessions;
 pub(crate) use circuit::{circuit_reset_cli, circuit_reset_provider, circuit_status};
 pub(crate) use lifecycle::{start_and_sync, stop_and_restore, sync_cli_proxy_to_gateway};
 pub(crate) use port_check::check_port_available;
-pub(crate) use sessions::{list_active_sessions, GatewayActiveSessionSummary};
+pub(crate) use sessions::{
+    list_active_sessions, list_persistent_pins, persist_session_sort_mode, pin_session_sort_mode,
+    unpersist_session_sort_mode, unpin_session_sort_mode, GatewayActiveSessionSummary,
+};

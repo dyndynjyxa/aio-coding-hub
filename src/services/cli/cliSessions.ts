@@ -4,6 +4,7 @@ import {
   type CliSessionsDisplayMessage,
   type CliSessionsFolderLookupEntry as GeneratedCliSessionsFolderLookupEntry,
   type CliSessionsFolderLookupInput as GeneratedCliSessionsFolderLookupInput,
+  type CliSessionsMetadataEntry as GeneratedCliSessionsMetadataEntry,
   type CliSessionsPaginatedMessages,
   type CliSessionsProjectSummary as GeneratedCliSessionsProjectSummary,
   type CliSessionsSessionSummary as GeneratedCliSessionsSessionSummary,
@@ -46,6 +47,13 @@ export type CliSessionsFolderLookupInput = Override<
 
 export type CliSessionsFolderLookupEntry = Override<
   GeneratedCliSessionsFolderLookupEntry,
+  {
+    source: CliSessionsSource;
+  }
+>;
+
+export type CliSessionsMetadataEntry = Override<
+  GeneratedCliSessionsMetadataEntry,
   {
     source: CliSessionsSource;
   }
@@ -206,6 +214,15 @@ function toCliSessionsFolderLookupEntry(
   };
 }
 
+function toCliSessionsMetadataEntry(
+  value: GeneratedCliSessionsMetadataEntry
+): CliSessionsMetadataEntry {
+  return {
+    ...value,
+    source: toCliSessionsSource(value.source, "cli_sessions_metadata_lookup_by_ids.source"),
+  };
+}
+
 export async function cliSessionsProjectsList(source: CliSessionsSource, wslDistro?: string) {
   const normalizedWslDistro = normalizeCliSessionsWslDistro(wslDistro);
 
@@ -313,6 +330,35 @@ export async function cliSessionsFolderLookupByIds(
       mapGeneratedCommandResponse(
         await commands.cliSessionsFolderLookupByIds(normalizedItems, normalizedWslDistro),
         (rows) => rows.map(toCliSessionsFolderLookupEntry)
+      ),
+  });
+}
+
+/**
+ * Batch-resolve display metadata (cwd, title, timestamps) for a set of sessions.
+ * Used by pin UIs to show readable names instead of raw session ids. Missing
+ * sessions are omitted from the result. Title uses a 3-tier priority
+ * (custom-title > first real user message > cwd basename).
+ */
+export async function cliSessionsMetadataLookupByIds(
+  items: CliSessionsFolderLookupInput[],
+  wslDistro?: string
+) {
+  const normalizedItems = normalizeCliSessionsFolderLookupItems(items);
+  if (normalizedItems.length === 0) return [];
+  const normalizedWslDistro = normalizeCliSessionsWslDistro(wslDistro);
+
+  return invokeGeneratedIpc<CliSessionsMetadataEntry[]>({
+    title: "读取会话元数据失败",
+    cmd: "cli_sessions_metadata_lookup_by_ids",
+    args: {
+      items: normalizedItems,
+      wslDistro: normalizedWslDistro,
+    },
+    invoke: async () =>
+      mapGeneratedCommandResponse(
+        await commands.cliSessionsMetadataLookupByIds(normalizedItems, normalizedWslDistro),
+        (rows) => rows.map(toCliSessionsMetadataEntry)
       ),
   });
 }

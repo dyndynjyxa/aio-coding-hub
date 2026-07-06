@@ -67,6 +67,78 @@ pub(crate) async fn gateway_sessions_list(
 
 #[tauri::command]
 #[specta::specta]
+pub(crate) async fn gateway_session_pin_sort_mode(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    cli_key: String,
+    session_id: String,
+    sort_mode_id: Option<i64>,
+) -> Result<bool, String> {
+    let cli_key = normalize_gateway_cli_key(&cli_key)?;
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    gateway_service::pin_session_sort_mode(app, db, cli_key, session_id, sort_mode_id)
+        .await
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn gateway_session_unpin_sort_mode(
+    app: tauri::AppHandle,
+    cli_key: String,
+    session_id: String,
+) -> Result<bool, String> {
+    let cli_key = normalize_gateway_cli_key(&cli_key)?;
+    gateway_service::unpin_session_sort_mode(app, cli_key, session_id)
+        .await
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn gateway_session_persist_sort_mode(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    cli_key: String,
+    session_id: String,
+    sort_mode_id: Option<i64>,
+) -> Result<bool, String> {
+    let cli_key = normalize_gateway_cli_key(&cli_key)?;
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    gateway_service::persist_session_sort_mode(db, cli_key, session_id, sort_mode_id)
+        .await
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn gateway_session_unpersist_sort_mode(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    cli_key: String,
+    session_id: String,
+) -> Result<bool, String> {
+    let cli_key = normalize_gateway_cli_key(&cli_key)?;
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    gateway_service::unpersist_session_sort_mode(db, cli_key, session_id)
+        .await
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn gateway_persistent_pins_list(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+) -> Result<Vec<crate::session_pins::PersistentPinRow>, String> {
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    gateway_service::list_persistent_pins(db)
+        .await
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub(crate) async fn gateway_circuit_status(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,

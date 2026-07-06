@@ -75,6 +75,7 @@ type PendingRouteActivation = {
   modeId: number | null;
   label: string;
   activeSessionCount: number;
+  pinnedSessionCount: number;
 };
 
 type ProviderUiState = {
@@ -1259,9 +1260,17 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
     if ((activeModeByCli[cliKey] ?? null) === modeId) return;
 
     const label = selection.kind === "default" ? "Default" : selectedRouteLabel;
-    const activeSessionCount = activeSessions.filter((row) => row.cli_key === cliKey).length;
+    const cliSessions = activeSessions.filter((row) => row.cli_key === cliKey);
+    const activeSessionCount = cliSessions.length;
+    const pinnedSessionCount = cliSessions.filter((row) => row.sort_mode_pinned).length;
     if (activeSessionCount > 0) {
-      setPendingRouteActivation({ cliKey, modeId, label, activeSessionCount });
+      setPendingRouteActivation({
+        cliKey,
+        modeId,
+        label,
+        activeSessionCount,
+        pinnedSessionCount,
+      });
       return;
     }
 

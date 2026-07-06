@@ -460,6 +460,80 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async gatewaySessionPinSortMode(
+    cliKey: string,
+    sessionId: string,
+    sortModeId: number | null
+  ): Promise<Result<boolean, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("gateway_session_pin_sort_mode", {
+          cliKey,
+          sessionId,
+          sortModeId,
+        }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async gatewaySessionUnpinSortMode(
+    cliKey: string,
+    sessionId: string
+  ): Promise<Result<boolean, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("gateway_session_unpin_sort_mode", { cliKey, sessionId }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async gatewaySessionPersistSortMode(
+    cliKey: string,
+    sessionId: string,
+    sortModeId: number | null
+  ): Promise<Result<boolean, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("gateway_session_persist_sort_mode", {
+          cliKey,
+          sessionId,
+          sortModeId,
+        }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async gatewaySessionUnpersistSortMode(
+    cliKey: string,
+    sessionId: string
+  ): Promise<Result<boolean, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("gateway_session_unpersist_sort_mode", { cliKey, sessionId }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async gatewayPersistentPinsList(): Promise<Result<PersistentPinRow[], string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("gateway_persistent_pins_list") };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async gatewayCircuitStatus(
     cliKey: string
   ): Promise<Result<GatewayProviderCircuitStatus[], string>> {
@@ -1744,6 +1818,20 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async cliSessionsMetadataLookupByIds(
+    items: CliSessionsFolderLookupInput[],
+    wslDistro: string | null
+  ): Promise<Result<CliSessionsMetadataEntry[], string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("cli_sessions_metadata_lookup_by_ids", { items, wslDistro }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async dbDiskUsageGet(): Promise<Result<DbDiskUsage, string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("db_disk_usage_get") };
@@ -2394,6 +2482,35 @@ export type CliSessionsFolderLookupEntry = {
   folder_path: string;
 };
 export type CliSessionsFolderLookupInput = { source: string; session_id: string };
+/**
+ * Lightweight per-session metadata for display in pin UIs (active-session card,
+ * persistent-pin list, session list). Resolved from the `.jsonl` session file.
+ *
+ * `title` uses a 3-tier priority: `custom-title` (user `/rename`)
+ * → first real user message (skipping `<local-command-caveat>` /
+ * `<command-name>` injections) → cwd basename. Empty string only when the
+ * jsonl could not yield any candidate.
+ */
+export type CliSessionsMetadataEntry = {
+  source: string;
+  session_id: string;
+  /**
+   * Decoded working directory (cwd) from the jsonl, or decoded project dir.
+   */
+  cwd: string | null;
+  /**
+   * Human-readable name (3-tier priority). Empty if nothing resolved.
+   */
+  title: string;
+  /**
+   * Unix milliseconds of the first record's timestamp.
+   */
+  created_at: number | null;
+  /**
+   * Unix milliseconds of the last record's timestamp.
+   */
+  last_active_at: number | null;
+};
 export type CliSessionsPaginatedMessages = {
   messages: CliSessionsDisplayMessage[];
   total: number;
@@ -2677,6 +2794,22 @@ export type GatewayActiveSessionSummary = {
   session_suffix: string;
   provider_id: number;
   provider_name: string;
+  /**
+   * Whether this session has an in-memory (ephemeral) sort_mode pin.
+   */
+  sort_mode_pinned: boolean;
+  /**
+   * The ephemeral pinned sort_mode id. `null` while `sort_mode_pinned` is true means Default.
+   */
+  pinned_sort_mode_id: number | null;
+  /**
+   * Whether this session has a persistent (disk-backed) sort_mode pin.
+   */
+  persistent_pinned: boolean;
+  /**
+   * The persistent pinned sort_mode id. `null` while `persistent_pinned` is true means Default.
+   */
+  persistent_pinned_sort_mode_id: number | null;
   expires_at: number;
   request_count: number | null;
   total_input_tokens: number | null;
@@ -3002,6 +3135,16 @@ export type ModelPricesSyncReport = {
 };
 export type NoticeLevel = "info" | "success" | "warning" | "error";
 export type NoticeSendInput = { level: NoticeLevel; title: string | null; body: string };
+export type PersistentPinRow = {
+  cli_key: string;
+  session_id: string;
+  /**
+   * `None` = pinned to Default; `Some(id)` = pinned to that custom mode.
+   */
+  sort_mode_id: number | null;
+  created_at: number;
+  updated_at: number;
+};
 export type PluginAuditLog = {
   id: number;
   plugin_id: string | null;

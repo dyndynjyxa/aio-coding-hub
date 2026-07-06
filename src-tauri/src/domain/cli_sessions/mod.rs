@@ -6,7 +6,8 @@ mod types;
 
 pub use types::{
     CliSessionsDisplayContentBlock, CliSessionsDisplayMessage, CliSessionsFolderLookupEntry,
-    CliSessionsPaginatedMessages, CliSessionsProjectSummary, CliSessionsSessionSummary,
+    CliSessionsMetadataEntry, CliSessionsPaginatedMessages, CliSessionsProjectSummary,
+    CliSessionsSessionSummary,
 };
 
 use crate::shared::error::{AppError, AppResult};
@@ -256,6 +257,58 @@ pub fn folder_lookup_by_ids(
         out.extend(match wsl_distro.as_deref() {
             Some(distro) => codex::wsl_folder_lookup_by_session_ids(distro, &codex_ids)?,
             None => codex::folder_lookup_by_session_ids(app, &codex_ids)?,
+        });
+    }
+
+    Ok(out)
+}
+
+/// Batch-resolve session display metadata (cwd, title, timestamps) for a set of
+/// `(source, session_id)` keys. Used by pin UIs to show readable names instead of
+/// raw session ids. Missing sessions are simply omitted from the result.
+pub fn metadata_lookup_by_session_ids(
+    app: &tauri::AppHandle,
+    items: &[CliSessionsFolderLookupKey],
+    wsl_distro: Option<&str>,
+) -> AppResult<Vec<CliSessionsMetadataEntry>> {
+    if items.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let wsl_distro = wsl_distro.map(crate::wsl::normalize_distro).transpose()?;
+
+    let mut claude_ids: Vec<String> = Vec::new();
+    let mut codex_ids: Vec<String> = Vec::new();
+    let mut seen = HashSet::new();
+
+    for item in items {
+        let session_id = item.session_id.trim();
+        if session_id.is_empty() {
+            continue;
+        }
+        let dedupe_key = format!("{}:{session_id}", item.source.as_str());
+        if !seen.insert(dedupe_key) {
+            continue;
+        }
+        match item.source {
+            CliSessionsSource::Claude => claude_ids.push(session_id.to_string()),
+            CliSessionsSource::Codex => codex_ids.push(session_id.to_string()),
+        }
+    }
+
+    let mut out = Vec::new();
+
+    if !claude_ids.is_empty() {
+        out.extend(match wsl_distro.as_deref() {
+            Some(distro) => claude::wsl_metadata_lookup_by_session_ids(distro, &claude_ids)?,
+            None => claude::metadata_lookup_by_session_ids(app, &claude_ids)?,
+        });
+    }
+
+    if !codex_ids.is_empty() {
+        out.extend(match wsl_distro.as_deref() {
+            Some(distro) => codex::wsl_metadata_lookup_by_session_ids(distro, &codex_ids)?,
+            None => codex::metadata_lookup_by_session_ids(app, &codex_ids)?,
         });
     }
 

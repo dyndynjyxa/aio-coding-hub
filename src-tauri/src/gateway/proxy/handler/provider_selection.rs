@@ -18,13 +18,39 @@ pub(super) fn select_providers_with_session_binding<R: tauri::Runtime>(
     session_id: Option<&str>,
     created_at: i64,
 ) -> crate::shared::error::AppResult<ProviderSelection> {
+    // Manual sort_mode pin wins over the auto-inherited active/bound mode.
+    // `Some(mode_opt)` = pinned (mode_opt == None means Default).
+    let pinned_sort_mode_id = session_id.and_then(|sid| {
+        state
+            .session
+            .get_bound_pinned_sort_mode_id(cli_key, sid, created_at)
+    });
+
+    // Persistent (disk-backed) pin: only consulted when there is no in-memory
+    // ephemeral pin. Re-applies across restarts / TTL expiry / session resume.
+    // Fails open (DB error => treated as no persistent pin).
+    let persistent_pin = if pinned_sort_mode_id.is_none() {
+        session_id.and_then(|sid| {
+            crate::session_pins::get_persistent_pin(&state.db, cli_key, sid)
+                .ok()
+                .flatten()
+        })
+    } else {
+        None
+    };
+
     let bound_sort_mode_id = session_id.and_then(|sid| {
         state
             .session
             .get_bound_sort_mode_id(cli_key, sid, created_at)
     });
 
-    let (active_sort_mode_id, effective_sort_mode_id, mut providers) = match bound_sort_mode_id {
+    // Effective source priority: ephemeral pin > persistent pin > auto-bound > active.
+    let effective_source = pinned_sort_mode_id
+        .or(persistent_pin)
+        .or(bound_sort_mode_id);
+
+    let (active_sort_mode_id, effective_sort_mode_id, mut providers) = match effective_source {
         Some(sort_mode_id) => {
             let active_sort_mode_id =
                 providers::active_sort_mode_id_for_gateway(&state.db, cli_key)?;
@@ -68,7 +94,7 @@ pub(super) fn select_providers_with_session_binding<R: tauri::Runtime>(
         providers,
         bound_provider_order,
         active_sort_mode_id,
-        session_bound_sort_mode_id: bound_sort_mode_id,
+        session_bound_sort_mode_id: effective_source,
     })
 }
 

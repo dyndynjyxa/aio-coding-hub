@@ -39,6 +39,7 @@ export const gatewayKeys = {
   status: () => [...gatewayAllKey, "status"] as const,
   sessions: () => [...gatewayAllKey, "sessions"] as const,
   sessionsList: (limit: number | null) => [...gatewayAllKey, "sessions", limit] as const,
+  persistentPins: () => [...gatewayAllKey, "persistentPins"] as const,
   circuits: () => [...gatewayAllKey, "circuitStatus"] as const,
   circuitStatus: (cliKey: CliKey) => [...gatewayAllKey, "circuitStatus", cliKey] as const,
 };
@@ -356,6 +357,13 @@ export const cliSessionsKeys = {
     [...cliSessionsAllKey, "sessions", source, projectId, wslDistro ?? null] as const,
   folderLookup: (keys: string[], wslDistro?: string) =>
     [...cliSessionsAllKey, "folderLookup", ...normalizeKeyParts(keys), wslDistro ?? null] as const,
+  metadataLookup: (keys: string[], wslDistro?: string) =>
+    [
+      ...cliSessionsAllKey,
+      "metadataLookup",
+      ...normalizeKeyParts(keys),
+      wslDistro ?? null,
+    ] as const,
   messages: (source: CliSessionsSource, filePath: string, fromEnd = true, wslDistro?: string) =>
     [...cliSessionsAllKey, "messages", source, filePath, fromEnd, wslDistro ?? null] as const,
 };

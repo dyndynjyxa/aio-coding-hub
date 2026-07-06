@@ -25,6 +25,7 @@ import { Input } from "../ui/Input";
 import { PageHeader } from "../ui/PageHeader";
 import { Select } from "../ui/Select";
 import { Spinner } from "../ui/Spinner";
+import { SessionRowPinControl } from "../components/sessions/SessionRowPinControl";
 import { cn } from "../utils/cn";
 import { formatRelativeTimeFromUnixSeconds, formatUnixSeconds } from "../utils/formatters";
 
@@ -311,7 +312,7 @@ function SessionsProjectRow({
         aria-label={`打开会话 ${title}`}
         onClick={() => onOpen(navUrl, session)}
       />
-      <div className="pointer-events-none relative z-10 grid gap-2 sm:grid-cols-[32px_1fr_90px_140px_120px] sm:items-center sm:gap-3">
+      <div className="pointer-events-none relative z-10 grid gap-2 sm:grid-cols-[32px_1fr_70px_90px_220px_60px] sm:items-center sm:gap-3">
         <div className="pointer-events-auto hidden sm:flex items-center justify-center">
           <input
             type="checkbox"
@@ -340,19 +341,23 @@ function SessionsProjectRow({
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-1 text-xs text-muted-foreground dark:text-secondary-foreground">
+        <div className="flex items-center justify-center gap-1 text-xs text-muted-foreground dark:text-secondary-foreground">
           <span className="font-semibold">{session.message_count}</span>
         </div>
 
         <div
-          className="flex items-center justify-end gap-1 text-xs text-muted-foreground dark:text-secondary-foreground"
+          className="flex items-center justify-center gap-1 text-xs text-muted-foreground dark:text-secondary-foreground"
           title={modifiedTitle}
         >
           <Clock className="h-3.5 w-3.5 text-muted-foreground" />
           <span className="font-semibold">{modifiedLabel}</span>
         </div>
 
-        <div className="pointer-events-auto flex items-center justify-end gap-1">
+        <div className="pointer-events-auto flex items-center justify-center gap-1">
+          <SessionRowPinControl cliKey={source} sessionId={session.session_id} />
+        </div>
+
+        <div className="pointer-events-auto flex items-center justify-center gap-1">
           <Button
             size="sm"
             variant="primary"
@@ -460,8 +465,8 @@ function SessionsProjectListCard({
         </div>
       </div>
 
-      <div className="mt-3 hidden grid-cols-[32px_1fr_90px_140px_120px] gap-3 px-3 text-[11px] font-semibold text-muted-foreground sm:grid">
-        <span>
+      <div className="mt-3 hidden grid-cols-[32px_1fr_70px_90px_220px_60px] gap-3 pl-4 pr-5 text-[11px] font-semibold text-muted-foreground sm:grid">
+        <span className="flex items-center justify-center">
           <input
             type="checkbox"
             checked={allVisibleSelected}
@@ -471,9 +476,10 @@ function SessionsProjectListCard({
           />
         </span>
         <span>会话</span>
-        <span className="text-right">消息</span>
-        <span className="text-right">更新</span>
-        <span className="text-right">操作</span>
+        <span className="text-center">消息</span>
+        <span className="text-center">更新</span>
+        <span className="text-center">路由策略</span>
+        <span className="text-center">操作</span>
       </div>
 
       <div

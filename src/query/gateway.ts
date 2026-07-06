@@ -8,6 +8,11 @@ import {
   gatewayCircuitStatus,
   GATEWAY_SESSIONS_DEFAULT_LIMIT,
   gatewaySessionsList,
+  gatewaySessionPinSortMode,
+  gatewaySessionUnpinSortMode,
+  gatewaySessionPersistSortMode,
+  gatewaySessionUnpersistSortMode,
+  gatewayPersistentPinsList,
   gatewayStatus,
   normalizeGatewaySessionsLimit,
   validateGatewayCliKey,
@@ -173,6 +178,65 @@ export function useGatewaySessionsListQuery(
     placeholderData: keepPreviousData,
     refetchInterval: documentVisible ? (options?.refetchIntervalMs ?? false) : false,
     refetchIntervalInBackground: true,
+  });
+}
+
+export function useGatewayPersistentPinsListQuery(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: gatewayKeys.persistentPins(),
+    queryFn: () => gatewayPersistentPinsList(),
+    enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useGatewaySessionPinSortModeMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: { cliKey: CliKey; sessionId: string; sortModeId: number | null }) =>
+      gatewaySessionPinSortMode(input.cliKey, input.sessionId, input.sortModeId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: gatewayKeys.sessions() });
+    },
+  });
+}
+
+export function useGatewaySessionUnpinSortModeMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: { cliKey: CliKey; sessionId: string }) =>
+      gatewaySessionUnpinSortMode(input.cliKey, input.sessionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: gatewayKeys.sessions() });
+    },
+  });
+}
+
+export function useGatewaySessionPersistSortModeMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: { cliKey: CliKey; sessionId: string; sortModeId: number | null }) =>
+      gatewaySessionPersistSortMode(input.cliKey, input.sessionId, input.sortModeId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: gatewayKeys.sessions() });
+      queryClient.invalidateQueries({ queryKey: gatewayKeys.persistentPins() });
+    },
+  });
+}
+
+export function useGatewaySessionUnpersistSortModeMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: { cliKey: CliKey; sessionId: string }) =>
+      gatewaySessionUnpersistSortMode(input.cliKey, input.sessionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: gatewayKeys.sessions() });
+      queryClient.invalidateQueries({ queryKey: gatewayKeys.persistentPins() });
+    },
   });
 }
 

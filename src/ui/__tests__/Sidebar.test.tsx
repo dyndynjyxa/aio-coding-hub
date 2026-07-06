@@ -56,6 +56,10 @@ vi.mock("../../hooks/useGatewayMeta", () => ({
   useGatewayMeta: () => gatewayMetaRef.current,
 }));
 
+vi.mock("../../query/gateway", () => ({
+  useGatewaySessionsListQuery: () => ({ data: [] }),
+}));
+
 vi.mock("../../hooks/useUpdateMeta", () => ({
   useUpdateMeta: () => updateMetaRef.current,
   updateDialogSetOpen: updateDialogSetOpenMock,
