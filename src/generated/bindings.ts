@@ -1837,6 +1837,17 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async usageLeaderboardCsvExport(filePath: string, csv: string): Promise<Result<boolean, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("usage_leaderboard_csv_export", { filePath, csv }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async usageHourlySeries(days: number): Promise<Result<UsageHourlyRow[], string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("usage_hourly_series", { days }) };

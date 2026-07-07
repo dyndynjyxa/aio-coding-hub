@@ -1,5 +1,6 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { toast } from "sonner";
 import { HomeTokenCostPanel } from "../HomeTokenCostPanel";
 import {
   useUsageDayDetailV1Query,
@@ -7,6 +8,12 @@ import {
   useUsageLeaderboardV2Query,
   useUsageSummaryV2Query,
 } from "../../../query/usage";
+import { saveDesktopFilePath } from "../../../services/desktop/dialog";
+import { usageLeaderboardCsvExport } from "../../../services/usage/usage";
+
+vi.mock("sonner", () => ({
+  toast: vi.fn(),
+}));
 
 vi.mock("../../../query/usage", async () => {
   const actual =
@@ -17,6 +24,20 @@ vi.mock("../../../query/usage", async () => {
     useUsageFolderOptionsV1Query: vi.fn(),
     useUsageSummaryV2Query: vi.fn(),
     useUsageLeaderboardV2Query: vi.fn(),
+  };
+});
+
+vi.mock("../../../services/desktop/dialog", () => ({
+  saveDesktopFilePath: vi.fn(),
+}));
+
+vi.mock("../../../services/usage/usage", async () => {
+  const actual = await vi.importActual<typeof import("../../../services/usage/usage")>(
+    "../../../services/usage/usage"
+  );
+  return {
+    ...actual,
+    usageLeaderboardCsvExport: vi.fn(),
   };
 });
 
@@ -143,20 +164,71 @@ function clickSortableHeader(table: HTMLElement, name: RegExp | string) {
   return header;
 }
 
-function localTimeMs(
-  year: number,
-  monthIndex: number,
-  day: number,
-  hour: number,
-  minute: number
-) {
+function localTimeMs(year: number, monthIndex: number, day: number, hour: number, minute: number) {
   return new Date(year, monthIndex, day, hour, minute, 0, 0).getTime();
+}
+
+function mockSingleProviderUsageForExport() {
+  vi.mocked(useUsageSummaryV2Query).mockReturnValue({
+    data: {
+      requests_total: 1,
+      requests_with_usage: 1,
+      requests_success: 1,
+      requests_failed: 0,
+      cost_covered_success: 1,
+      total_duration_ms: 1000,
+      avg_duration_ms: 1000,
+      avg_ttfb_ms: 200,
+      avg_output_tokens_per_second: 80,
+      input_tokens: 100,
+      output_tokens: 50,
+      io_total_tokens: 150,
+      total_tokens: 150,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_creation_5m_input_tokens: 0,
+    },
+    isLoading: false,
+    isFetching: false,
+    error: null,
+    refetch: vi.fn(),
+  } as any);
+  vi.mocked(useUsageLeaderboardV2Query).mockReturnValue({
+    data: [
+      {
+        key: "provider",
+        name: "Provider",
+        requests_total: 1,
+        requests_success: 1,
+        requests_failed: 0,
+        total_tokens: 150,
+        io_total_tokens: 150,
+        input_tokens: 100,
+        output_tokens: 50,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        total_duration_ms: 1000,
+        first_request_created_at_ms: null,
+        last_request_created_at_ms: null,
+        avg_duration_ms: 1000,
+        avg_ttfb_ms: 200,
+        avg_output_tokens_per_second: 80,
+        cost_usd: 0.01,
+      },
+    ],
+    isLoading: false,
+    isFetching: false,
+    error: null,
+    refetch: vi.fn(),
+  } as any);
 }
 
 describe("components/home/HomeTokenCostPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.removeItem("homeUsageDayStartHour");
+    vi.mocked(saveDesktopFilePath).mockResolvedValue("/tmp/home-usage.csv");
+    vi.mocked(usageLeaderboardCsvExport).mockResolvedValue(true);
     vi.mocked(useUsageDayDetailV1Query).mockReturnValue({
       data: null,
       isLoading: false,
@@ -353,18 +425,14 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(
       within(screen.getByRole("table", { name: "用量排行榜" })).queryByRole("progressbar")
     ).not.toBeInTheDocument();
-    expect(
-      within(providerRow as HTMLElement).queryByLabelText("2K/16.7%")
-    ).not.toBeInTheDocument();
+    expect(within(providerRow as HTMLElement).queryByLabelText("2K/16.7%")).not.toBeInTheDocument();
     expect(screen.getByText("18.2%")).toBeInTheDocument();
     expect(screen.queryByText("成本覆盖率")).not.toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /总Token/ })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /输入\+出\/缓存率/ })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /总耗时/ })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /请求数\/成功率/ })).toBeInTheDocument();
-    expect(
-      screen.getByRole("columnheader", { name: /最早最晚\/请求占比/ })
-    ).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: /最早最晚\/请求占比/ })).toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: /缓存情况/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "成功率" })).not.toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: /平均输出速度/ })).not.toBeInTheDocument();
@@ -773,6 +841,137 @@ describe("components/home/HomeTokenCostPanel", () => {
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
+    );
+  });
+
+  it("exports the current sorted leaderboard rows as split-column csv", async () => {
+    vi.mocked(useUsageSummaryV2Query).mockReturnValue({
+      data: {
+        requests_total: 6,
+        requests_with_usage: 6,
+        requests_success: 5,
+        requests_failed: 1,
+        cost_covered_success: 5,
+        total_duration_ms: 120_000,
+        avg_duration_ms: 1000,
+        avg_ttfb_ms: 240,
+        avg_output_tokens_per_second: 75,
+        input_tokens: 2600,
+        output_tokens: 1200,
+        io_total_tokens: 3800,
+        total_tokens: 5000,
+        cache_read_input_tokens: 800,
+        cache_creation_input_tokens: 600,
+        cache_creation_5m_input_tokens: 0,
+      },
+      isLoading: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useUsageLeaderboardV2Query).mockReturnValue({
+      data: [
+        {
+          key: "alpha",
+          name: "Alpha",
+          requests_total: 2,
+          requests_success: 2,
+          requests_failed: 0,
+          total_tokens: 1000,
+          io_total_tokens: 800,
+          input_tokens: 600,
+          output_tokens: 200,
+          cache_creation_input_tokens: 100,
+          cache_read_input_tokens: 300,
+          total_duration_ms: 30_000,
+          first_request_created_at_ms: null,
+          last_request_created_at_ms: null,
+          avg_duration_ms: 1000,
+          avg_ttfb_ms: 200,
+          avg_output_tokens_per_second: 10,
+          cost_usd: 0.01,
+        },
+        {
+          key: "beta",
+          name: "Beta",
+          requests_total: 4,
+          requests_success: 3,
+          requests_failed: 1,
+          total_tokens: 4000,
+          io_total_tokens: 3000,
+          input_tokens: 2000,
+          output_tokens: 1000,
+          cache_creation_input_tokens: 500,
+          cache_read_input_tokens: 500,
+          total_duration_ms: 90_000,
+          first_request_created_at_ms: null,
+          last_request_created_at_ms: null,
+          avg_duration_ms: 1000,
+          avg_ttfb_ms: 200,
+          avg_output_tokens_per_second: 10,
+          cost_usd: 0.02,
+        },
+      ],
+      isLoading: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any);
+
+    render(<HomeTokenCostPanel />);
+
+    const table = screen.getByRole("table", { name: "用量排行榜" });
+    clickSortableHeader(table, /总Token/);
+    fireEvent.click(screen.getByRole("button", { name: "导出 CSV" }));
+
+    await waitFor(() => {
+      expect(saveDesktopFilePath).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "导出用量排行 CSV",
+          defaultPath: expect.stringMatching(
+            /^aio-coding-hub-home-usage-provider-\d{8}-\d{6}\.csv$/
+          ),
+          filters: [{ name: "CSV", extensions: ["csv"] }],
+          canCreateDirectories: true,
+        })
+      );
+    });
+    await waitFor(() => expect(usageLeaderboardCsvExport).toHaveBeenCalledTimes(1));
+
+    const [filePath, csv] = vi.mocked(usageLeaderboardCsvExport).mock.calls[0] ?? [];
+    expect(filePath).toBe("/tmp/home-usage.csv");
+    expect(csv).toContain(
+      "\uFEFF排名,供应商,总Token,输入+出,缓存率,总花费,总耗时,请求数,成功率,Token 占比,最早最晚,请求占比\r\n"
+    );
+    expect(csv).not.toContain("输入+出/缓存率");
+    expect(csv).not.toContain("请求数/成功率");
+    expect(csv).not.toContain("最早最晚/请求占比");
+    expect(csv).toContain("1,Beta,4K,3K,16.7%,$0.02,1m30s,4,75%,78.9%,-,-\r\n");
+    expect(csv).toContain("2,Alpha,1K,800,30%,$0.01,30s,2,100%,21.1%,-,-\r\n");
+    expect(String(csv).indexOf("1,Beta")).toBeLessThan(String(csv).indexOf("2,Alpha"));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("用量排行 CSV 已导出"));
+  });
+
+  it("does not export csv when the save dialog is cancelled", async () => {
+    mockSingleProviderUsageForExport();
+    vi.mocked(saveDesktopFilePath).mockResolvedValueOnce(null);
+
+    render(<HomeTokenCostPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "导出 CSV" }));
+
+    await waitFor(() => expect(saveDesktopFilePath).toHaveBeenCalledTimes(1));
+    expect(usageLeaderboardCsvExport).not.toHaveBeenCalled();
+  });
+
+  it("shows a toast when csv export fails", async () => {
+    mockSingleProviderUsageForExport();
+    vi.mocked(usageLeaderboardCsvExport).mockRejectedValueOnce(new Error("disk denied"));
+
+    render(<HomeTokenCostPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "导出 CSV" }));
+
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(expect.stringContaining("导出 CSV 失败：disk denied"))
     );
   });
 
@@ -1331,6 +1530,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(screen.queryByText("含缓存总 Token")).not.toBeInTheDocument();
     expect(screen.getByText("加载用量中…")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /全部文件夹/ })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "导出 CSV" })).toBeDisabled();
 
     vi.mocked(useUsageFolderOptionsV1Query).mockReturnValue({
       data: [],
@@ -1358,6 +1558,7 @@ describe("components/home/HomeTokenCostPanel", () => {
 
     expect(screen.getByRole("button", { name: /全部文件夹/ })).toBeDisabled();
     expect(screen.getByText("当前时间范围暂无用量数据。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导出 CSV" })).toBeDisabled();
   });
 
   it("shows pending custom range copy and invalid range toast without querying", () => {

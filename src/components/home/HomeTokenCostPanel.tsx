@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useReducer, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -6,10 +6,12 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Download,
   FolderOpen,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { usageLeaderboardCsvExport } from "../../services/usage/usage";
 import type {
   UsageDayDetailV1,
   UsageDayFolderRow,
@@ -21,6 +23,7 @@ import type {
 } from "../../services/usage/usage";
 import { useCustomDateRange, type CustomDateRangeApplied } from "../../hooks/useCustomDateRange";
 import { useUsageDayDetailV1Query, useUsageFolderOptionsV1Query } from "../../query/usage";
+import { saveDesktopFilePath } from "../../services/desktop/dialog";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Popover } from "../../ui/Popover";
@@ -250,15 +253,7 @@ function startOfLocalWorkday(date: Date, dayStartHour: number) {
     0
   );
   if (date.getTime() < start.getTime()) {
-    return new Date(
-      date.getFullYear(),
-      date.getMonth(),
-      date.getDate() - 1,
-      dayStartHour,
-      0,
-      0,
-      0
-    );
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate() - 1, dayStartHour, 0, 0, 0);
   }
   return start;
 }
@@ -594,7 +589,11 @@ function TokenBreakdownInline({ parts }: { parts: string[] }) {
   );
 }
 
-function InputOutputCacheValue({ row }: { row: UsageTokenMetricRow }) {
+function inputOutputTokenText(row: Pick<UsageTokenMetricRow, "io_total_tokens">) {
+  return trimCompactZero(formatTokensMillions(row.io_total_tokens));
+}
+
+function cacheHitRateText(row: UsageTokenMetricRow) {
   const totalWithCache = row.total_tokens;
   const hasValidTotal = Number.isFinite(totalWithCache) && totalWithCache > 0;
   const hitRate = computeCacheHitRate(
@@ -602,19 +601,32 @@ function InputOutputCacheValue({ row }: { row: UsageTokenMetricRow }) {
     row.cache_creation_input_tokens,
     row.cache_read_input_tokens
   );
-  const ioText = trimCompactZero(formatTokensMillions(row.io_total_tokens));
-  const hitRateText =
-    hasValidTotal && Number.isFinite(hitRate) ? trimCompactZero(formatPercent(hitRate)) : "—";
+  return hasValidTotal && Number.isFinite(hitRate) ? trimCompactZero(formatPercent(hitRate)) : "—";
+}
 
-  return <TokenBreakdownInline parts={[ioText, hitRateText]} />;
+function requestCountText(row: UsageRequestMetricRow) {
+  return formatInteger(row.requests_total);
+}
+
+function successRateText(row: UsageRequestMetricRow) {
+  return trimCompactZero(formatPercent(successRate(row)));
+}
+
+function tokenShareText(percent: number) {
+  const pct = Number.isFinite(percent) ? Math.max(0, Math.min(1, percent)) : 0;
+  return trimCompactZero(formatPercent(pct));
+}
+
+function totalTokenText(row: Pick<UsageTokenMetricRow, "total_tokens">) {
+  return trimCompactZero(formatTokensMillions(row.total_tokens));
+}
+
+function InputOutputCacheValue({ row }: { row: UsageTokenMetricRow }) {
+  return <TokenBreakdownInline parts={[inputOutputTokenText(row), cacheHitRateText(row)]} />;
 }
 
 function RequestSuccessRateValue({ row }: { row: UsageRequestMetricRow }) {
-  return (
-    <TokenBreakdownInline
-      parts={[formatInteger(row.requests_total), trimCompactZero(formatPercent(successRate(row)))]}
-    />
-  );
+  return <TokenBreakdownInline parts={[requestCountText(row), successRateText(row)]} />;
 }
 
 function formatLocalHourMinuteFromMs(value: number) {
@@ -647,40 +659,40 @@ function formatWorkdayHourMinuteFromMs(value: number, dayKey: string) {
   return timeText;
 }
 
-function RequestWindowValue({ row, scope }: { row: UsageLeaderboardRow; scope: TokenCostScope }) {
+function requestWindowTexts(row: UsageLeaderboardRow, scope: TokenCostScope) {
   if (scope !== "day") {
-    return <span className="text-muted-foreground">-</span>;
+    return { windowText: "-", ratioText: "-" };
   }
   const first = row.first_request_created_at_ms;
   const last = row.last_request_created_at_ms;
   if (first == null || last == null || !Number.isFinite(first) || !Number.isFinite(last)) {
-    return <span className="text-muted-foreground">-</span>;
+    return { windowText: "-", ratioText: "-" };
   }
   const firstText = formatWorkdayHourMinuteFromMs(first, row.key);
   const lastText = formatWorkdayHourMinuteFromMs(last, row.key);
   if (!firstText || !lastText) {
-    return <span className="text-muted-foreground">-</span>;
+    return { windowText: "-", ratioText: "-" };
   }
   const spanMs = last - first;
   const ratioText =
     spanMs > 0 ? trimCompactZero(formatPercent(row.total_duration_ms / spanMs)) : "-";
-  return <TokenBreakdownInline parts={[`${firstText}-${lastText}`, ratioText]} />;
+  return { windowText: `${firstText}-${lastText}`, ratioText };
+}
+
+function RequestWindowValue({ row, scope }: { row: UsageLeaderboardRow; scope: TokenCostScope }) {
+  const { windowText, ratioText } = requestWindowTexts(row, scope);
+  if (windowText === "-" && ratioText === "-") {
+    return <span className="text-muted-foreground">-</span>;
+  }
+  return <TokenBreakdownInline parts={[windowText, ratioText]} />;
 }
 
 function InputOutputTokenValue({ row }: { row: Pick<UsageTokenMetricRow, "io_total_tokens"> }) {
-  return (
-    <span className="whitespace-nowrap tabular-nums">
-      {trimCompactZero(formatTokensMillions(row.io_total_tokens))}
-    </span>
-  );
+  return <span className="whitespace-nowrap tabular-nums">{inputOutputTokenText(row)}</span>;
 }
 
 function TotalTokenValue({ row }: { row: Pick<UsageTokenMetricRow, "total_tokens"> }) {
-  return (
-    <span className="whitespace-nowrap tabular-nums">
-      {trimCompactZero(formatTokensMillions(row.total_tokens))}
-    </span>
-  );
+  return <span className="whitespace-nowrap tabular-nums">{totalTokenText(row)}</span>;
 }
 
 function CacheHitRateBreakdown({ row }: { row: UsageTokenMetricRow }) {
@@ -701,11 +713,75 @@ function CacheHitRateBreakdown({ row }: { row: UsageTokenMetricRow }) {
 }
 
 function TokenShareValue({ percent }: { percent: number }) {
-  const pct = Number.isFinite(percent) ? Math.max(0, Math.min(1, percent)) : 0;
+  return <span className="whitespace-nowrap tabular-nums">{tokenShareText(percent)}</span>;
+}
 
-  return (
-    <span className="whitespace-nowrap tabular-nums">{trimCompactZero(formatPercent(pct))}</span>
-  );
+function csvCell(value: string | number | null | undefined) {
+  const text = value == null ? "" : String(value);
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  if (!/[",\n]/.test(normalized)) return normalized;
+  return `"${normalized.replace(/"/g, '""')}"`;
+}
+
+function buildCsvContent(headers: string[], rows: string[][]) {
+  const lines = [headers, ...rows].map((row) => row.map(csvCell).join(","));
+  return `\uFEFF${lines.join("\r\n")}\r\n`;
+}
+
+function timestampForCsvFileName(now = new Date()) {
+  const pad2 = (value: number) => String(value).padStart(2, "0");
+  return [
+    now.getFullYear(),
+    pad2(now.getMonth() + 1),
+    pad2(now.getDate()),
+    "-",
+    pad2(now.getHours()),
+    pad2(now.getMinutes()),
+    pad2(now.getSeconds()),
+  ].join("");
+}
+
+function homeUsageCsvDefaultFileName(scope: TokenCostScope, now = new Date()) {
+  return `aio-coding-hub-home-usage-${scope}-${timestampForCsvFileName(now)}.csv`;
+}
+
+function buildHomeUsageLeaderboardCsv(
+  scope: TokenCostScope,
+  sortedRows: IndexedLeaderboardRow[],
+  summary: UsageSummary | null
+) {
+  const headers = [
+    "排名",
+    scopeLabel(scope),
+    "总Token",
+    "输入+出",
+    "缓存率",
+    "总花费",
+    "总耗时",
+    "请求数",
+    "成功率",
+    "Token 占比",
+    "最早最晚",
+    "请求占比",
+  ];
+  const rows = sortedRows.map(({ row }, index) => {
+    const { windowText, ratioText } = requestWindowTexts(row, scope);
+    return [
+      String(index + 1),
+      row.name,
+      totalTokenText(row),
+      inputOutputTokenText(row),
+      cacheHitRateText(row),
+      formatCostValue(row.cost_usd),
+      formatCompactDurationMs(row.total_duration_ms),
+      requestCountText(row),
+      successRateText(row),
+      tokenShareText(tokenShare(row, summary)),
+      windowText,
+      ratioText,
+    ];
+  });
+  return buildCsvContent(headers, rows);
 }
 
 function DayDetailLoading() {
@@ -963,6 +1039,7 @@ function TokenSummaryCards({
 function TokenLeaderboardTable({
   scope,
   rows,
+  sortedRows,
   summary,
   loading,
   customPending,
@@ -970,10 +1047,13 @@ function TokenLeaderboardTable({
   dayDetail,
   dayDetailLoading,
   dayDetailErrorText,
+  sortState,
+  onSort,
   onToggleDay,
 }: {
   scope: TokenCostScope;
   rows: UsageLeaderboardRow[];
+  sortedRows: IndexedLeaderboardRow[];
   summary: UsageSummary | null;
   loading: boolean;
   customPending: boolean;
@@ -981,17 +1061,10 @@ function TokenLeaderboardTable({
   dayDetail: UsageDayDetailV1 | null;
   dayDetailLoading: boolean;
   dayDetailErrorText: string | null;
+  sortState: SortState<LeaderboardSortKey> | null;
+  onSort: (key: LeaderboardSortKey) => void;
   onToggleDay: (day: string) => void;
 }) {
-  const [sortState, setSortState] = useState<SortState<LeaderboardSortKey> | null>(null);
-  const sortedRows = useMemo(
-    () => sortLeaderboardRows(rows, sortState, summary),
-    [rows, sortState, summary]
-  );
-  const handleSort = useCallback((key: LeaderboardSortKey) => {
-    setSortState((current) => nextSortState(current, key));
-  }, []);
-
   if (loading && rows.length === 0) {
     return (
       <div className="flex items-center justify-center gap-3 px-6 py-14 text-sm text-muted-foreground">
@@ -1022,43 +1095,43 @@ function TokenLeaderboardTable({
               label={scopeLabel(scope)}
               sortKey="name"
               sortState={sortState}
-              onSort={handleSort}
+              onSort={onSort}
             />
             <SortableColumnHeader
               label="总Token"
               sortKey="totalTokens"
               sortState={sortState}
-              onSort={handleSort}
+              onSort={onSort}
             />
             <SortableColumnHeader
               label="输入+出/缓存率"
               sortKey="ioTokens"
               sortState={sortState}
-              onSort={handleSort}
+              onSort={onSort}
             />
             <SortableColumnHeader
               label="总花费"
               sortKey="cost"
               sortState={sortState}
-              onSort={handleSort}
+              onSort={onSort}
             />
             <SortableColumnHeader
               label="总耗时"
               sortKey="totalDuration"
               sortState={sortState}
-              onSort={handleSort}
+              onSort={onSort}
             />
             <SortableColumnHeader
               label="请求数/成功率"
               sortKey="requests"
               sortState={sortState}
-              onSort={handleSort}
+              onSort={onSort}
             />
             <SortableColumnHeader
               label="Token 占比"
               sortKey="tokenShare"
               sortState={sortState}
-              onSort={handleSort}
+              onSort={onSort}
             />
             <th scope="col" className={TABLE_TH_CLASS}>
               <TableHeaderLabel label="最早最晚/请求占比" />
@@ -1394,6 +1467,10 @@ function homeTokenCostPanelReducer(
 export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostPanelProps) {
   const initialState = useMemo(createInitialHomeTokenCostPanelState, []);
   const [state, dispatch] = useReducer(homeTokenCostPanelReducer, initialState);
+  const [leaderboardSortState, setLeaderboardSortState] =
+    useState<SortState<LeaderboardSortKey> | null>(null);
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const exportingCsvRef = useRef(false);
   const { scope, range, expandedDay, selectedFolderKeys, dayStartHour, excludeCx2CcGatewayBridge } =
     state;
   useEffect(() => {
@@ -1472,6 +1549,12 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
   const displayRows = customPending ? EMPTY_LEADERBOARD_ROWS : model.rows;
   const displayTotalCostUsd = customPending ? null : model.totalCostUsd;
   const displayLoading = customPending ? false : model.loading;
+  const sortedDisplayRows = useMemo(
+    () => sortLeaderboardRows(displayRows, leaderboardSortState, displaySummary),
+    [displayRows, displaySummary, leaderboardSortState]
+  );
+  const exportCsvDisabled =
+    customPending || displayLoading || sortedDisplayRows.length === 0 || exportingCsv;
   const expandedVisibleDay = useMemo(() => {
     if (scope !== "day" || customPending || !expandedDay) return null;
     return displayRows.some((row) => row.key === expandedDay) ? expandedDay : null;
@@ -1540,6 +1623,43 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
       dispatch({ type: "setRange", range: "custom" });
     }
   }, [applyCustomRange]);
+  const handleLeaderboardSort = useCallback((key: LeaderboardSortKey) => {
+    setLeaderboardSortState((current) => nextSortState(current, key));
+  }, []);
+  const handleExportCsv = useCallback(async () => {
+    if (
+      exportingCsvRef.current ||
+      customPending ||
+      displayLoading ||
+      sortedDisplayRows.length === 0
+    ) {
+      return;
+    }
+
+    exportingCsvRef.current = true;
+    setExportingCsv(true);
+
+    try {
+      const filePath = await saveDesktopFilePath({
+        title: "导出用量排行 CSV",
+        defaultPath: homeUsageCsvDefaultFileName(scope),
+        filters: [{ name: "CSV", extensions: ["csv"] }],
+        canCreateDirectories: true,
+      });
+      if (!filePath) {
+        return;
+      }
+
+      const csv = buildHomeUsageLeaderboardCsv(scope, sortedDisplayRows, displaySummary);
+      await usageLeaderboardCsvExport(filePath, csv);
+      toast("用量排行 CSV 已导出");
+    } catch (error) {
+      toast(`导出 CSV 失败：${formatUnknownError(error)}`);
+    } finally {
+      exportingCsvRef.current = false;
+      setExportingCsv(false);
+    }
+  }, [customPending, displayLoading, displaySummary, scope, sortedDisplayRows]);
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-5 overflow-hidden">
@@ -1648,11 +1768,28 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
 
       <Card padding="none" className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="shrink-0 border-b border-border px-6 pb-4 pt-5 dark:border-border">
-          <div className="text-base font-semibold text-foreground">{scopeLabel(scope)}排行</div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-base font-semibold text-foreground">{scopeLabel(scope)}排行</div>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={exportCsvDisabled}
+              onClick={() => void handleExportCsv()}
+              className="whitespace-nowrap"
+            >
+              {exportingCsv ? (
+                <Spinner size="sm" />
+              ) : (
+                <Download aria-hidden="true" className="h-3.5 w-3.5" />
+              )}
+              导出 CSV
+            </Button>
+          </div>
         </div>
         <TokenLeaderboardTable
           scope={scope}
           rows={displayRows}
+          sortedRows={sortedDisplayRows}
           summary={displaySummary}
           loading={displayLoading}
           customPending={customPending}
@@ -1660,6 +1797,8 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
           dayDetail={displayDayDetail}
           dayDetailLoading={dayDetailLoading}
           dayDetailErrorText={dayDetailErrorText}
+          sortState={leaderboardSortState}
+          onSort={handleLeaderboardSort}
           onToggleDay={handleToggleDay}
         />
       </Card>

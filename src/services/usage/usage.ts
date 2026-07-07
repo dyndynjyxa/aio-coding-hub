@@ -13,7 +13,11 @@ import {
   type UsageQueryParams as GeneratedUsageQueryParams,
   type UsageSummary,
 } from "../../generated/bindings";
-import { invokeGeneratedIpc, mapGeneratedCommandResponse } from "../generatedIpc";
+import {
+  invokeGeneratedIpc,
+  mapGeneratedCommandResponse,
+  type GeneratedCommandResult,
+} from "../generatedIpc";
 import {
   narrowGeneratedStringUnion,
   type OptionalNullableGeneratedFields,
@@ -75,6 +79,26 @@ export type NormalizedUsageDayDetailInput = {
   dayStartHour: number | null;
   excludeCx2CcGatewayBridge: boolean | null;
 };
+
+export function normalizeUsageLeaderboardCsvExportFilePath(filePath: string): string {
+  const normalized = filePath.trim();
+  if (!normalized) {
+    throw new Error("SEC_INVALID_INPUT: filePath is required");
+  }
+  return normalized;
+}
+
+export function normalizeUsageLeaderboardCsvExportContent(csv: string): string {
+  if (
+    !csv
+      .trimStart()
+      .replace(/^\uFEFF/, "")
+      .trim()
+  ) {
+    throw new Error("SEC_INVALID_INPUT: csv is required");
+  }
+  return csv;
+}
 
 function normalizeBoundedInteger(
   label: string,
@@ -427,6 +451,24 @@ export async function usageProviderCacheRateTrendV1(
       limit,
     },
     invoke: () => commands.usageProviderCacheRateTrendV1(params, limit),
+  });
+}
+
+export async function usageLeaderboardCsvExport(filePath: string, csv: string) {
+  const normalizedFilePath = normalizeUsageLeaderboardCsvExportFilePath(filePath);
+  const normalizedCsv = normalizeUsageLeaderboardCsvExportContent(csv);
+
+  return invokeGeneratedIpc<boolean>({
+    title: "导出用量排行 CSV 失败",
+    cmd: "usage_leaderboard_csv_export",
+    args: {
+      filePath: normalizedFilePath,
+      csv: normalizedCsv,
+    },
+    invoke: () =>
+      commands.usageLeaderboardCsvExport(normalizedFilePath, normalizedCsv) as Promise<
+        GeneratedCommandResult<boolean>
+      >,
   });
 }
 
