@@ -84,6 +84,7 @@ pub(super) fn summary_query(
 	      cost_usd_femto IS NOT NULL
 	    ) THEN 1 ELSE 0 END
 	  ) AS cost_covered_success,
+	  SUM(duration_ms) AS total_duration_ms,
 	  SUM(CASE WHEN status >= 200 AND status < 300 AND error_code IS NULL THEN duration_ms ELSE 0 END) AS success_duration_ms_sum,
 	  SUM(
 	    CASE WHEN (
@@ -181,6 +182,7 @@ pub(super) fn summary_query(
             cost_covered_success: row
                 .get::<_, Option<i64>>("cost_covered_success")?
                 .unwrap_or(0),
+            total_duration_ms: row.get::<_, Option<i64>>("total_duration_ms")?.unwrap_or(0),
             avg_duration_ms,
             avg_ttfb_ms,
             avg_output_tokens_per_second,
@@ -251,6 +253,7 @@ fn summary_from_event_rows(rows: &[UsageEventAgg]) -> UsageSummary {
         requests_success: agg.requests_success,
         requests_failed: agg.requests_failed,
         cost_covered_success: agg.cost_covered_success,
+        total_duration_ms: agg.total_duration_ms,
         avg_duration_ms,
         avg_ttfb_ms,
         avg_output_tokens_per_second,

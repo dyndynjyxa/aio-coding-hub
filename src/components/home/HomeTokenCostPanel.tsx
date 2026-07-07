@@ -32,6 +32,7 @@ import { computeCacheHitRate } from "../../utils/cacheRateMetrics";
 import { cn } from "../../utils/cn";
 import { formatUnknownError } from "../../utils/errors";
 import {
+  formatCompactDurationMs,
   formatInteger,
   formatPercent,
   formatTokensPerSecond,
@@ -75,7 +76,7 @@ const TABLE_TD_CLASS = "border-b border-border px-3 py-3";
 const TABLE_MONO_TD_CLASS =
   "border-b border-border px-3 py-3 font-mono text-xs tabular-nums text-secondary-foreground";
 
-const SUMMARY_SKELETON_KEYS = [0, 1, 2, 3, 4, 5, 6];
+const SUMMARY_SKELETON_KEYS = [0, 1, 2, 3, 4, 5, 6, 7];
 const EMPTY_LEADERBOARD_ROWS: UsageLeaderboardRow[] = [];
 
 type TokenCostQueryInput = {
@@ -112,6 +113,7 @@ type LeaderboardSortKey =
   | "ioTokens"
   | "cacheTokens"
   | "cost"
+  | "totalDuration"
   | "requests"
   | "successRate"
   | "tokenShare"
@@ -377,6 +379,12 @@ function sortLeaderboardRows(
           );
         case "cost":
           return compareNumberValue(left.row.cost_usd, right.row.cost_usd, sortState.direction);
+        case "totalDuration":
+          return compareNumberValue(
+            left.row.total_duration_ms,
+            right.row.total_duration_ms,
+            sortState.direction
+          );
         case "requests":
           return compareNumberValue(
             left.row.requests_total,
@@ -799,7 +807,7 @@ function TokenSummaryCards({
 }) {
   if (loading && !summary) {
     return (
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-7">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-8">
         {SUMMARY_SKELETON_KEYS.map((key) => (
           <StatCardSkeleton key={key} />
         ))}
@@ -808,7 +816,7 @@ function TokenSummaryCards({
   }
 
   return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-7">
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-8">
       <StatCard
         title="含缓存总 Token"
         value={formatTokenValue(summary?.total_tokens)}
@@ -820,6 +828,11 @@ function TokenSummaryCards({
         accent="blue"
       />
       <StatCard title="总花费" value={formatCostValue(totalCostUsd)} accent="orange" />
+      <StatCard
+        title="请求总耗时"
+        value={formatCompactDurationMs(summary?.total_duration_ms)}
+        accent="cyan"
+      />
       <StatCard
         title="成本覆盖率"
         value={formatPercent(summaryCostCoverage(summary))}
@@ -930,6 +943,12 @@ function TokenLeaderboardTable({
               onSort={handleSort}
             />
             <SortableColumnHeader
+              label="总耗时"
+              sortKey="totalDuration"
+              sortState={sortState}
+              onSort={handleSort}
+            />
+            <SortableColumnHeader
               label="请求数"
               sortKey="requests"
               sortState={sortState}
@@ -1003,6 +1022,9 @@ function TokenLeaderboardTable({
                     <CacheHitRateBreakdown row={row} />
                   </td>
                   <td className={TABLE_MONO_TD_CLASS}>{formatCostValue(row.cost_usd)}</td>
+                  <td className={TABLE_MONO_TD_CLASS}>
+                    {formatCompactDurationMs(row.total_duration_ms)}
+                  </td>
                   <td className={TABLE_MONO_TD_CLASS}>{formatInteger(row.requests_total)}</td>
                   <td className={TABLE_MONO_TD_CLASS}>{formatPercent(successRate(row))}</td>
                   <td className={`${TABLE_TD_CLASS} min-w-[120px]`}>
@@ -1015,7 +1037,7 @@ function TokenLeaderboardTable({
                 {expanded ? (
                   <tr>
                     <td
-                      colSpan={10}
+                      colSpan={11}
                       className="border-b border-border bg-secondary/70 px-4 py-4 dark:border-border dark:bg-card/40"
                     >
                       <DayDetailPanel

@@ -3906,6 +3906,7 @@ export type UsageLeaderboardRow = {
   requests_total: number;
   requests_success: number;
   requests_failed: number;
+  total_duration_ms: number;
   total_tokens: number;
   io_total_tokens: number;
   input_tokens: number;
@@ -3959,6 +3960,7 @@ export type UsageSummary = {
   requests_success: number;
   requests_failed: number;
   cost_covered_success: number;
+  total_duration_ms: number;
   avg_duration_ms: number | null;
   avg_ttfb_ms: number | null;
   avg_output_tokens_per_second: number | null;

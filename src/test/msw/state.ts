@@ -119,6 +119,7 @@ const DEFAULT_USAGE_SUMMARY: UsageSummary = {
   requests_success: 0,
   requests_failed: 0,
   cost_covered_success: 0,
+  total_duration_ms: 0,
   avg_duration_ms: null,
   avg_ttfb_ms: null,
   avg_output_tokens_per_second: null,

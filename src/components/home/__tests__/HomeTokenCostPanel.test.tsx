@@ -189,6 +189,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         requests_success: 21,
         requests_failed: 3,
         cost_covered_success: 17,
+        total_duration_ms: 125_000,
         avg_duration_ms: 1200,
         avg_ttfb_ms: 320,
         avg_output_tokens_per_second: 88.4,
@@ -224,6 +225,7 @@ describe("components/home/HomeTokenCostPanel", () => {
                     output_tokens: 3000,
                     cache_creation_input_tokens: 500,
                     cache_read_input_tokens: 1500,
+                    total_duration_ms: 62_000,
                     avg_duration_ms: 1000,
                     avg_ttfb_ms: 260,
                     avg_output_tokens_per_second: 96.2,
@@ -244,6 +246,7 @@ describe("components/home/HomeTokenCostPanel", () => {
                       output_tokens: 2800,
                       cache_creation_input_tokens: 300,
                       cache_read_input_tokens: 1100,
+                      total_duration_ms: 44_000,
                       avg_duration_ms: 920,
                       avg_ttfb_ms: 240,
                       avg_output_tokens_per_second: 101.5,
@@ -263,6 +266,7 @@ describe("components/home/HomeTokenCostPanel", () => {
                       output_tokens: 1800,
                       cache_creation_input_tokens: 200,
                       cache_read_input_tokens: 800,
+                      total_duration_ms: 22_000,
                       avg_duration_ms: 880,
                       avg_ttfb_ms: 210,
                       avg_output_tokens_per_second: 102.4,
@@ -298,6 +302,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     const cachedTotalCard = screen.getByText("含缓存总 Token");
     const inputOutputTokenCard = screen.getAllByText("输入+输出 Token")[0];
     const totalCostCard = screen.getAllByText("总花费")[0];
+    const totalDurationCard = screen.getByText("请求总耗时");
     const costCoverageCard = screen.getByText("成本覆盖率");
     const successCard = screen.getByText("成功请求");
     const cacheHitRateCard = screen.getByText("缓存命中率");
@@ -306,11 +311,13 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(screen.getAllByText("总花费")).toHaveLength(2);
     expect(screen.getByText("OpenAI 主供应商")).toBeInTheDocument();
     expect(screen.getByText("18.0K")).toBeInTheDocument();
+    expect(screen.getByText("2m5s")).toBeInTheDocument();
     expect(screen.getAllByText("$1.20")).toHaveLength(2);
     const providerRow = screen.getByText("OpenAI 主供应商").closest("tr");
     expect(providerRow).toBeTruthy();
     expect(within(providerRow as HTMLElement).getByText("12K")).toBeInTheDocument();
     expect(within(providerRow as HTMLElement).getByText("10K")).toBeInTheDocument();
+    expect(within(providerRow as HTMLElement).getByText("1m2s")).toBeInTheDocument();
     expect(within(providerRow as HTMLElement).getByLabelText("2K/16.7%")).toBeInTheDocument();
     expect(
       within(providerRow as HTMLElement).queryByLabelText("12K/2K/16.7%")
@@ -319,6 +326,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(screen.getByText("18.2%")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /总Token/ })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /输入\+输出 Token/ })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: /总耗时/ })).toBeInTheDocument();
     const cacheHeader = screen.getByRole("columnheader", { name: /缓存情况/ });
     expect(within(cacheHeader).getByText("（缓存/命中率）")).toBeInTheDocument();
     expect(screen.queryByText("（含缓存/缓存/命中率）")).not.toBeInTheDocument();
@@ -334,6 +342,13 @@ describe("components/home/HomeTokenCostPanel", () => {
     ).toBeTruthy();
     expect(
       totalCostCard.compareDocumentPosition(costCoverageCard) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      totalCostCard.compareDocumentPosition(totalDurationCard) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      totalDurationCard.compareDocumentPosition(costCoverageCard) &
+        Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
     expect(
       costCoverageCard.compareDocumentPosition(successCard) & Node.DOCUMENT_POSITION_FOLLOWING
@@ -396,6 +411,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         requests_success: 16,
         requests_failed: 2,
         cost_covered_success: 16,
+        total_duration_ms: 12_000,
         avg_duration_ms: 1000,
         avg_ttfb_ms: 240,
         avg_output_tokens_per_second: 75,
@@ -427,6 +443,7 @@ describe("components/home/HomeTokenCostPanel", () => {
           output_tokens: 30,
           cache_creation_input_tokens: 50,
           cache_read_input_tokens: 150,
+          total_duration_ms: 3_000,
           avg_duration_ms: 1000,
           avg_ttfb_ms: 200,
           avg_output_tokens_per_second: 10,
@@ -444,6 +461,7 @@ describe("components/home/HomeTokenCostPanel", () => {
           output_tokens: 890,
           cache_creation_input_tokens: 0,
           cache_read_input_tokens: 10,
+          total_duration_ms: 10_000,
           avg_duration_ms: 900,
           avg_ttfb_ms: 180,
           avg_output_tokens_per_second: 20,
@@ -461,6 +479,7 @@ describe("components/home/HomeTokenCostPanel", () => {
           output_tokens: 80,
           cache_creation_input_tokens: 300,
           cache_read_input_tokens: 200,
+          total_duration_ms: 5_000,
           avg_duration_ms: 1100,
           avg_ttfb_ms: 260,
           avg_output_tokens_per_second: 5,
@@ -1502,6 +1521,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         requests_success: 6,
         requests_failed: 1,
         cost_covered_success: 6,
+        total_duration_ms: 4_000,
         avg_duration_ms: 1000,
         avg_ttfb_ms: 200,
         avg_output_tokens_per_second: 100,
@@ -1532,6 +1552,7 @@ describe("components/home/HomeTokenCostPanel", () => {
           output_tokens: 0,
           cache_creation_input_tokens: 0,
           cache_read_input_tokens: 0,
+          total_duration_ms: 0,
           avg_duration_ms: 0,
           avg_ttfb_ms: 0,
           avg_output_tokens_per_second: null,
@@ -1549,6 +1570,7 @@ describe("components/home/HomeTokenCostPanel", () => {
           output_tokens: 50,
           cache_creation_input_tokens: 20,
           cache_read_input_tokens: 80,
+          total_duration_ms: 5_000,
           avg_duration_ms: 900,
           avg_ttfb_ms: 180,
           avg_output_tokens_per_second: 40,
@@ -1566,6 +1588,7 @@ describe("components/home/HomeTokenCostPanel", () => {
           output_tokens: 50,
           cache_creation_input_tokens: 0,
           cache_read_input_tokens: 0,
+          total_duration_ms: 2_000,
           avg_duration_ms: 700,
           avg_ttfb_ms: 120,
           avg_output_tokens_per_second: 80,
@@ -1587,6 +1610,9 @@ describe("components/home/HomeTokenCostPanel", () => {
     expectTableRowsInOrder(table, ["Charlie Provider", "Bravo Provider", "Alpha Provider"]);
 
     clickSortableHeader(table, /总花费/);
+    expectTableRowsInOrder(table, ["Bravo Provider", "Charlie Provider", "Alpha Provider"]);
+
+    clickSortableHeader(table, /总耗时/);
     expectTableRowsInOrder(table, ["Bravo Provider", "Charlie Provider", "Alpha Provider"]);
 
     clickSortableHeader(table, /请求数/);

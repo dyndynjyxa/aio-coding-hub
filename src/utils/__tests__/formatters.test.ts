@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeOutputTokensPerSecond,
   formatBytes,
+  formatCompactDurationMs,
   formatCountdownSeconds,
   formatDurationMs,
   formatDurationMsShort,
@@ -32,6 +33,17 @@ describe("utils/formatters", () => {
     expect(formatDurationMsShort(1200)).toBe("1.2s");
     expect(formatDurationMsShort(61_000)).toBe("1m");
     expect(formatDurationMsShort(3_660_000)).toBe("1h1m");
+  });
+
+  it("formatCompactDurationMs", () => {
+    expect(formatCompactDurationMs(null)).toBe("—");
+    expect(formatCompactDurationMs(0)).toBe("0s");
+    expect(formatCompactDurationMs(999)).toBe("<1s");
+    expect(formatCompactDurationMs(1000)).toBe("1s");
+    expect(formatCompactDurationMs(42_000)).toBe("42s");
+    expect(formatCompactDurationMs(5 * 60_000 + 8_000)).toBe("5m8s");
+    expect(formatCompactDurationMs(3 * 3_600_000 + 23_000)).toBe("3h23s");
+    expect(formatCompactDurationMs(3_720_000 + 3_000)).toBe("1h2m3s");
   });
 
   it("sanitizeTtfbMs", () => {

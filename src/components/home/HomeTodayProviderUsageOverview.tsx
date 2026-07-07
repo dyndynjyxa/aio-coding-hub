@@ -15,7 +15,12 @@ import type { UsageLeaderboardRow, UsageSummary } from "../../services/usage/usa
 import { Card } from "../../ui/Card";
 import { computeCacheHitRate } from "../../utils/cacheRateMetrics";
 import { formatTokensMillions } from "../../utils/chartHelpers";
-import { formatInteger, formatPercent, formatUsdCompact } from "../../utils/formatters";
+import {
+  formatCompactDurationMs,
+  formatInteger,
+  formatPercent,
+  formatUsdCompact,
+} from "../../utils/formatters";
 import { computeStatusBadge } from "./requestLogPresentation";
 import { QueryErrorCard } from "../shared/QueryErrorCard";
 import {
@@ -23,7 +28,7 @@ import {
   type HomeTokenCostDataModelQueryRefreshConfig,
 } from "./useHomeTokenCostDataModel";
 
-const SUMMARY_SKELETON_KEYS = [0, 1, 2, 3, 4];
+const SUMMARY_SKELETON_KEYS = [0, 1, 2, 3, 4, 5];
 const PROVIDER_SKELETON_KEYS = [0, 1, 2];
 const MAX_PROVIDER_ROWS = 3;
 const REALTIME_PROVIDER_HINT_LIMIT = 20;
@@ -69,7 +74,7 @@ function summaryCacheHitRate(summary: UsageSummary | null) {
   );
 }
 
-type SummaryMetricAccent = "blue" | "purple" | "green" | "orange" | "slate";
+type SummaryMetricAccent = "blue" | "purple" | "green" | "orange" | "cyan";
 type DisplayProviderRow = {
   row: UsageLeaderboardRow;
   isRunning: boolean;
@@ -89,7 +94,7 @@ const SUMMARY_METRIC_ACCENT_CLASS: Record<SummaryMetricAccent, string> = {
   purple: "bg-violet-500",
   green: "bg-emerald-500",
   orange: "bg-orange-500",
-  slate: "bg-muted dark:bg-muted",
+  cyan: "bg-cyan-500",
 };
 
 function successRate(row: UsageLeaderboardRow) {
@@ -287,6 +292,7 @@ function createSyntheticProviderRow(entry: ActiveProviderEntry): UsageLeaderboar
     output_tokens: 0,
     cache_creation_input_tokens: 0,
     cache_read_input_tokens: 0,
+    total_duration_ms: 0,
     avg_duration_ms: null,
     avg_ttfb_ms: null,
     avg_output_tokens_per_second: null,
@@ -514,7 +520,7 @@ function SummaryCards({
   }
 
   return (
-    <div className="grid grid-cols-2 gap-2 xl:grid-cols-5">
+    <div className="grid grid-cols-2 gap-2 lg:grid-cols-3 xl:grid-cols-6">
       <SummaryMetricCard
         title="含缓存总 Token"
         value={formatTokenValue(summary?.total_tokens)}
@@ -531,11 +537,16 @@ function SummaryCards({
         accent="purple"
       />
       <SummaryMetricCard
-        title="今日请求数"
+        title="总请求数"
         value={formatInteger(summary?.requests_total)}
         accent="green"
       />
-      <SummaryMetricCard title="今日花费" value={formatUsdCompact(totalCostUsd)} accent="orange" />
+      <SummaryMetricCard
+        title="请求总耗时"
+        value={formatCompactDurationMs(summary?.total_duration_ms)}
+        accent="cyan"
+      />
+      <SummaryMetricCard title="总花费" value={formatUsdCompact(totalCostUsd)} accent="orange" />
     </div>
   );
 }
@@ -548,23 +559,27 @@ function ProviderUsageSkeleton() {
         <div className="h-4 w-28 rounded bg-muted dark:bg-secondary" />
       </td>
       <td className={TABLE_MONO_TD_CLASS}>
-        <span className="sr-only">请求数加载中</span>
+        <span className="sr-only">总 Token 加载中</span>
         <div className="h-3 w-16 rounded bg-secondary dark:bg-secondary" />
       </td>
       <td className={TABLE_MONO_TD_CLASS}>
-        <span className="sr-only">缓存命中率加载中</span>
+        <span className="sr-only">输入输出 Token 加载中</span>
         <div className="h-3 w-14 rounded bg-secondary dark:bg-secondary" />
       </td>
       <td className={TABLE_MONO_TD_CLASS}>
-        <span className="sr-only">Token 加载中</span>
+        <span className="sr-only">缓存命中率加载中</span>
         <div className="h-3 w-12 rounded bg-secondary dark:bg-secondary" />
       </td>
       <td className={TABLE_MONO_TD_CLASS}>
-        <span className="sr-only">费用加载中</span>
+        <span className="sr-only">成功率加载中</span>
         <div className="h-3 w-12 rounded bg-secondary dark:bg-secondary" />
       </td>
       <td className={TABLE_MONO_TD_CLASS}>
-        <span className="sr-only">状态加载中</span>
+        <span className="sr-only">总耗时加载中</span>
+        <div className="h-3 w-12 rounded bg-secondary dark:bg-secondary" />
+      </td>
+      <td className={TABLE_MONO_TD_CLASS}>
+        <span className="sr-only">总花费加载中</span>
         <div className="h-3 w-12 rounded bg-secondary dark:bg-secondary" />
       </td>
     </tr>
@@ -681,6 +696,9 @@ export function HomeTodayProviderUsageOverview({
                     成功率
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
+                    总耗时
+                  </th>
+                  <th scope="col" className={TABLE_TH_CLASS}>
                     总花费
                   </th>
                 </tr>
@@ -716,6 +734,9 @@ export function HomeTodayProviderUsageOverview({
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
                     成功率
+                  </th>
+                  <th scope="col" className={TABLE_TH_CLASS}>
+                    总耗时
                   </th>
                   <th scope="col" className={TABLE_TH_CLASS}>
                     总花费
@@ -755,6 +776,9 @@ export function HomeTodayProviderUsageOverview({
                     </td>
                     <td className={TABLE_MONO_TD_CLASS}>
                       {isSynthetic ? "—" : formatPercent(successRate(row))}
+                    </td>
+                    <td className={TABLE_MONO_TD_CLASS}>
+                      {isSynthetic ? "—" : formatCompactDurationMs(row.total_duration_ms)}
                     </td>
                     <td className={TABLE_MONO_TD_CLASS}>
                       {isSynthetic ? "—" : formatUsdCompact(row.cost_usd)}

@@ -90,6 +90,7 @@ SELECT
 	      cost_usd_femto IS NOT NULL AND cost_usd_femto > 0
 	    ) THEN cost_usd_femto ELSE 0 END
 	  ) AS total_cost_usd_femto,
+	  SUM(duration_ms) AS total_duration_ms,
 	  SUM(CASE WHEN status >= 200 AND status < 300 AND error_code IS NULL THEN duration_ms ELSE 0 END) AS success_duration_ms_sum,
 	  SUM(
 	    CASE WHEN (
@@ -145,6 +146,9 @@ GROUP BY cli_key
                             .get::<_, Option<i64>>("requests_success")?
                             .unwrap_or(0),
                         requests_failed: row.get::<_, Option<i64>>("requests_failed")?.unwrap_or(0),
+                        total_duration_ms: row
+                            .get::<_, Option<i64>>("total_duration_ms")?
+                            .unwrap_or(0),
                         success_duration_ms_sum: row
                             .get::<_, Option<i64>>("success_duration_ms_sum")?
                             .unwrap_or(0),
@@ -221,6 +225,7 @@ SELECT
 	      cost_usd_femto IS NOT NULL AND cost_usd_femto > 0
 	    ) THEN cost_usd_femto ELSE 0 END
 	  ) AS total_cost_usd_femto,
+	  SUM(duration_ms) AS total_duration_ms,
 	  SUM(CASE WHEN status >= 200 AND status < 300 AND error_code IS NULL THEN duration_ms ELSE 0 END) AS success_duration_ms_sum,
 	  SUM(
 	    CASE WHEN (
@@ -276,6 +281,9 @@ GROUP BY COALESCE(NULLIF(requested_model, ''), 'Unknown')
                             .get::<_, Option<i64>>("requests_success")?
                             .unwrap_or(0),
                         requests_failed: row.get::<_, Option<i64>>("requests_failed")?.unwrap_or(0),
+                        total_duration_ms: row
+                            .get::<_, Option<i64>>("total_duration_ms")?
+                            .unwrap_or(0),
                         success_duration_ms_sum: row
                             .get::<_, Option<i64>>("success_duration_ms_sum")?
                             .unwrap_or(0),
@@ -352,6 +360,7 @@ SELECT
       cost_usd_femto IS NOT NULL AND cost_usd_femto > 0
     ) THEN cost_usd_femto ELSE 0 END
   ) AS total_cost_usd_femto,
+  SUM(duration_ms) AS total_duration_ms,
   SUM(CASE WHEN status >= 200 AND status < 300 AND error_code IS NULL THEN duration_ms ELSE 0 END) AS success_duration_ms_sum,
   SUM(
     CASE WHEN (
@@ -407,6 +416,9 @@ GROUP BY key
                             .get::<_, Option<i64>>("requests_success")?
                             .unwrap_or(0),
                         requests_failed: row.get::<_, Option<i64>>("requests_failed")?.unwrap_or(0),
+                        total_duration_ms: row
+                            .get::<_, Option<i64>>("total_duration_ms")?
+                            .unwrap_or(0),
                         success_duration_ms_sum: row
                             .get::<_, Option<i64>>("success_duration_ms_sum")?
                             .unwrap_or(0),
@@ -490,6 +502,7 @@ SELECT
       r.cost_usd_femto IS NOT NULL AND r.cost_usd_femto > 0
     ) THEN r.cost_usd_femto ELSE 0 END
   ) AS total_cost_usd_femto,
+  SUM(r.duration_ms) AS total_duration_ms,
   SUM(CASE WHEN r.status >= 200 AND r.status < 300 AND r.error_code IS NULL THEN r.duration_ms ELSE 0 END) AS success_duration_ms_sum,
   SUM(
     CASE WHEN (
@@ -552,6 +565,9 @@ GROUP BY r.cli_key, r.final_provider_id
                             .get::<_, Option<i64>>("requests_success")?
                             .unwrap_or(0),
                         requests_failed: row.get::<_, Option<i64>>("requests_failed")?.unwrap_or(0),
+                        total_duration_ms: row
+                            .get::<_, Option<i64>>("total_duration_ms")?
+                            .unwrap_or(0),
                         success_duration_ms_sum: row
                             .get::<_, Option<i64>>("success_duration_ms_sum")?
                             .unwrap_or(0),

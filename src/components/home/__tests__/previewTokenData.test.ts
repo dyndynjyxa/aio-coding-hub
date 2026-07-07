@@ -39,6 +39,7 @@ describe("components/home/previewTokenData", () => {
     expect(scaledZero.requests_success).toBe(0);
     expect(scaledZero.requests_failed).toBe(0);
     expect(scaledZero.total_tokens).toBe(0);
+    expect(scaledZero.total_duration_ms).toBe(0);
     expect(scaledZero.cost_usd).toBeNull();
 
     const scaledUp = mod.scalePreviewTokenRows([baseRow], 1.5)[0];
@@ -46,6 +47,7 @@ describe("components/home/previewTokenData", () => {
     expect(scaledUp.requests_failed).toBe(2);
     expect(scaledUp.requests_success).toBe(25);
     expect(scaledUp.total_tokens).toBe(73_800);
+    expect(scaledUp.total_duration_ms).toBe(26_460);
     expect(scaledUp.cost_usd).toBeCloseTo(2.07);
   });
 
@@ -54,6 +56,7 @@ describe("components/home/previewTokenData", () => {
 
     const emptySummary = mod.buildPreviewTokenSummary([]);
     expect(emptySummary.requests_total).toBe(0);
+    expect(emptySummary.total_duration_ms).toBe(0);
     expect(emptySummary.avg_duration_ms).toBeNull();
     expect(emptySummary.avg_ttfb_ms).toBeNull();
     expect(emptySummary.avg_output_tokens_per_second).toBeNull();
@@ -70,6 +73,7 @@ describe("components/home/previewTokenData", () => {
         total_tokens: 30,
         cache_creation_input_tokens: 4,
         cache_read_input_tokens: 6,
+        total_duration_ms: 100,
         avg_duration_ms: null,
         avg_ttfb_ms: 100,
         avg_output_tokens_per_second: 50,
@@ -86,6 +90,7 @@ describe("components/home/previewTokenData", () => {
         total_tokens: 60,
         cache_creation_input_tokens: 8,
         cache_read_input_tokens: 12,
+        total_duration_ms: 200,
         avg_duration_ms: 200,
         avg_ttfb_ms: null,
         avg_output_tokens_per_second: null,
@@ -99,6 +104,7 @@ describe("components/home/previewTokenData", () => {
     expect(summary.requests_success).toBe(3);
     expect(summary.requests_failed).toBe(0);
     expect(summary.cost_covered_success).toBe(2);
+    expect(summary.total_duration_ms).toBe(300);
     expect(summary.avg_duration_ms).toBeCloseTo(133.333, 2);
     expect(summary.avg_ttfb_ms).toBeCloseTo(33.333, 2);
     expect(summary.avg_output_tokens_per_second).toBeCloseTo(16.667, 2);

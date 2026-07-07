@@ -92,6 +92,7 @@ function createLeaderboardRow(
     output_tokens: 300,
     cache_creation_input_tokens: 100,
     cache_read_input_tokens: 100,
+    total_duration_ms: 900,
     avg_duration_ms: 900,
     avg_ttfb_ms: 200,
     avg_output_tokens_per_second: 90,
@@ -143,6 +144,7 @@ function mockDataModel(overrides: Partial<ReturnType<typeof useHomeTokenCostData
       requests_success: 18,
       requests_failed: 2,
       cost_covered_success: 18,
+      total_duration_ms: 425_800,
       avg_duration_ms: 1100,
       avg_ttfb_ms: 260,
       avg_output_tokens_per_second: 95.2,
@@ -168,6 +170,7 @@ function mockDataModel(overrides: Partial<ReturnType<typeof useHomeTokenCostData
         output_tokens: 2_000,
         cache_creation_input_tokens: 500,
         cache_read_input_tokens: 700,
+        total_duration_ms: 62_000,
         avg_duration_ms: 900,
         avg_ttfb_ms: 220,
         avg_output_tokens_per_second: 90,
@@ -185,6 +188,7 @@ function mockDataModel(overrides: Partial<ReturnType<typeof useHomeTokenCostData
         output_tokens: 3_500,
         cache_creation_input_tokens: 800,
         cache_read_input_tokens: 1_400,
+        total_duration_ms: 308_000,
         avg_duration_ms: 1200,
         avg_ttfb_ms: 320,
         avg_output_tokens_per_second: 86,
@@ -202,6 +206,7 @@ function mockDataModel(overrides: Partial<ReturnType<typeof useHomeTokenCostData
         output_tokens: 2_000,
         cache_creation_input_tokens: 600,
         cache_read_input_tokens: 1_200,
+        total_duration_ms: 42_000,
         avg_duration_ms: 880,
         avg_ttfb_ms: 210,
         avg_output_tokens_per_second: 110,
@@ -219,6 +224,7 @@ function mockDataModel(overrides: Partial<ReturnType<typeof useHomeTokenCostData
         output_tokens: 600,
         cache_creation_input_tokens: 700,
         cache_read_input_tokens: 800,
+        total_duration_ms: 12_000,
         avg_duration_ms: 760,
         avg_ttfb_ms: 180,
         avg_output_tokens_per_second: 120,
@@ -236,6 +242,7 @@ function mockDataModel(overrides: Partial<ReturnType<typeof useHomeTokenCostData
         output_tokens: 300,
         cache_creation_input_tokens: 200,
         cache_read_input_tokens: 600,
+        total_duration_ms: 1_200,
         avg_duration_ms: 1500,
         avg_ttfb_ms: 400,
         avg_output_tokens_per_second: 40,
@@ -253,6 +260,7 @@ function mockDataModel(overrides: Partial<ReturnType<typeof useHomeTokenCostData
         output_tokens: 80,
         cache_creation_input_tokens: 20,
         cache_read_input_tokens: 80,
+        total_duration_ms: 600,
         avg_duration_ms: 600,
         avg_ttfb_ms: 150,
         avg_output_tokens_per_second: 60,
@@ -315,15 +323,18 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     const totalWithCacheCard = screen.getByText("含缓存总 Token").parentElement;
     const inputOutputTokenCard = screen.getAllByText("输入+输出 Token")[0]?.parentElement;
     const cacheHitRateCard = screen.getAllByText("缓存命中率")[0]?.parentElement;
+    const totalDurationCard = screen.getByText("请求总耗时").parentElement;
     expect(totalWithCacheCard).toBeTruthy();
     expect(inputOutputTokenCard).toBeTruthy();
     expect(cacheHitRateCard).toBeTruthy();
+    expect(totalDurationCard).toBeTruthy();
     expect(within(totalWithCacheCard as HTMLElement).getByText("25.0K")).toBeInTheDocument();
     expect(within(inputOutputTokenCard as HTMLElement).getByText("20.0K")).toBeInTheDocument();
     expect(within(cacheHitRateCard as HTMLElement).getByText("18.8%")).toBeInTheDocument();
-    expect(screen.getByText("今日请求数")).toBeInTheDocument();
+    expect(within(totalDurationCard as HTMLElement).getByText("7m6s")).toBeInTheDocument();
+    expect(screen.getByText("总请求数")).toBeInTheDocument();
     expect(screen.getByText("20")).toBeInTheDocument();
-    expect(screen.getByText("今日花费")).toBeInTheDocument();
+    expect(screen.getAllByText("总花费").length).toBeGreaterThan(0);
     expect(screen.getByText("$2.21")).toBeInTheDocument();
     const providerHeader = screen.getByText("供应商").closest("th");
     const usageTable = screen.getByRole("table", { name: "今日供应商用量" });
@@ -342,6 +353,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
       "输入+输出Token",
       "缓存命中率",
       "成功率",
+      "总耗时",
       "总花费",
     ]);
     expect(totalTokenHeader).toBeTruthy();
@@ -368,6 +380,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
       "8.0K",
       "20.9%",
       "85.7%",
+      "5m8s",
       "$0.90",
     ]);
     expect(within(geminiRow as HTMLElement).getByText("$0.90")).toBeInTheDocument();
@@ -379,6 +392,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
       "5.0K",
       "16.7%",
       "100.0%",
+      "1m2s",
       "$0.50",
     ]);
     expect(rowCellTexts(openaiRow as HTMLElement)).toEqual([
@@ -387,6 +401,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
       "4.0K",
       "31.6%",
       "100.0%",
+      "42s",
       "$0.70",
     ]);
   });
@@ -467,6 +482,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
       "2.0K",
       "27.6%",
       "100.0%",
+      "12s",
       "—",
     ]);
   });
@@ -524,6 +540,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(within(runtimeRow as HTMLElement).getByLabelText("进行中")).toBeInTheDocument();
     expect(rowCellTexts(runtimeRow as HTMLElement)).toEqual([
       "claude/Runtime Fresh",
+      "—",
       "—",
       "—",
       "—",
@@ -750,6 +767,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
       "8.0K",
       "1.9%",
       "100.0%",
+      "<1s",
       "$0.10",
     ]);
   });
@@ -769,6 +787,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
           output_tokens: 1_000,
           cache_creation_input_tokens: 0,
           cache_read_input_tokens: 0,
+          total_duration_ms: 0,
           cost_usd: null,
         }),
       ],
@@ -784,6 +803,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
       "1.0K",
       "—",
       "—",
+      "0s",
       "—",
     ]);
   });
@@ -803,6 +823,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
           output_tokens: 4_000,
           cache_creation_input_tokens: 700,
           cache_read_input_tokens: 1_300,
+          total_duration_ms: 7_380,
           avg_duration_ms: 820,
           avg_ttfb_ms: 210,
           avg_output_tokens_per_second: 108,
@@ -882,6 +903,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
           output_tokens: 2_000,
           cache_creation_input_tokens: 500,
           cache_read_input_tokens: 700,
+          total_duration_ms: 4_500,
           avg_duration_ms: 900,
           avg_ttfb_ms: 220,
           avg_output_tokens_per_second: 90,
@@ -912,6 +934,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
           output_tokens: 2_000,
           cache_creation_input_tokens: 500,
           cache_read_input_tokens: 700,
+          total_duration_ms: 4_500,
           avg_duration_ms: 900,
           avg_ttfb_ms: 220,
           avg_output_tokens_per_second: 90,
@@ -985,6 +1008,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
         requests_success: 0,
         requests_failed: 0,
         cost_covered_success: 0,
+        total_duration_ms: 0,
         avg_duration_ms: null,
         avg_ttfb_ms: null,
         avg_output_tokens_per_second: null,
@@ -1004,7 +1028,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
 
     expect(screen.getByText("缓存命中率")).toBeInTheDocument();
     expect(screen.getByText("—")).toBeInTheDocument();
-    expect(screen.getByText("今日花费")).toBeInTheDocument();
+    expect(screen.getByText("总花费")).toBeInTheDocument();
   });
 
   it("renders the error card and retries refresh when loading failed", () => {

@@ -185,6 +185,7 @@ fn lifecycle_interruption_rows_are_excluded_from_usage_summary_and_leaderboard()
         TestUsageLog {
             provider_id: 1,
             provider_name: "Included Provider",
+            duration_ms: 1000,
             input_tokens: Some(80),
             output_tokens: Some(20),
             total_tokens: Some(100),
@@ -195,21 +196,39 @@ fn lifecycle_interruption_rows_are_excluded_from_usage_summary_and_leaderboard()
     insert_usage_log(
         &conn,
         TestUsageLog {
+            provider_id: 1,
+            provider_name: "Included Provider",
+            status: Some(500),
+            error_code: Some("UPSTREAM_ERROR"),
+            duration_ms: 2500,
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            cost_usd_femto: None,
+            ..base_usage_log(1_001)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
             provider_id: 2,
             provider_name: "Interrupted Provider",
             status: Some(499),
             error_code: Some("GW_REQUEST_INTERRUPTED_BY_RESTART"),
+            duration_ms: 99_000,
             input_tokens: Some(8_000),
             output_tokens: Some(2_000),
             total_tokens: Some(10_000),
             cost_usd_femto: Some(99_000_000_000_000_000),
             excluded_from_stats: 1,
-            ..base_usage_log(1_001)
+            ..base_usage_log(1_002)
         },
     );
 
     let summary = summary_query(&conn, None, None, None, None, false).expect("summary");
-    assert_eq!(summary.requests_total, 1);
+    assert_eq!(summary.requests_total, 2);
+    assert_eq!(summary.requests_failed, 1);
+    assert_eq!(summary.total_duration_ms, 3500);
     assert_eq!(summary.total_tokens, 100);
 
     let rows = leaderboard_v2_with_conn(
@@ -225,6 +244,9 @@ fn lifecycle_interruption_rows_are_excluded_from_usage_summary_and_leaderboard()
     .expect("leaderboard");
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].key, "codex:1");
+    assert_eq!(rows[0].requests_total, 2);
+    assert_eq!(rows[0].requests_failed, 1);
+    assert_eq!(rows[0].total_duration_ms, 3500);
     assert_eq!(rows[0].total_tokens, 100);
 }
 

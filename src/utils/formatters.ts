@@ -34,6 +34,25 @@ const USD_SHORT_FORMATTER = new Intl.NumberFormat(undefined, {
   minimumFractionDigits: 2,
 });
 
+export function formatCompactDurationMs(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return "—";
+  const ms = Math.max(0, value);
+  if (ms === 0) return "0s";
+  if (ms < 1000) return "<1s";
+
+  const totalSeconds = Math.round(ms / 1000);
+  if (totalSeconds <= 0) return "<1s";
+
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const parts: string[] = [];
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0) parts.push(`${minutes}m`);
+  if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
+  return parts.join("");
+}
+
 export function sanitizeTtfbMs(
   ttfbMs: number | null | undefined,
   durationMs: number | null | undefined
