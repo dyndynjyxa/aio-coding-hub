@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.60.9](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.8...aio-coding-hub-v0.60.9) (2026-07-07)
+
+
+### Bug Fixes
+
+* **home:** refresh stale request log activity ([dc30559](https://github.com/dyndynjyxa/aio-coding-hub/commit/dc30559e63ed37d3946ca2f6b8061bc5d3cc6c33))
+
 ## [0.60.8](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.7...aio-coding-hub-v0.60.8) (2026-07-05)
 
 
