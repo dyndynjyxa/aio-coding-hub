@@ -35,7 +35,6 @@ import {
   formatCompactDurationMs,
   formatInteger,
   formatPercent,
-  formatTokensPerSecond,
   formatUsdCompact,
 } from "../../utils/formatters";
 import { StatCard, StatCardSkeleton } from "../usage/StatCard";
@@ -111,13 +110,10 @@ type LeaderboardSortKey =
   | "name"
   | "totalTokens"
   | "ioTokens"
-  | "cacheTokens"
   | "cost"
   | "totalDuration"
   | "requests"
-  | "successRate"
-  | "tokenShare"
-  | "outputSpeed";
+  | "tokenShare";
 type DayFolderSortKey = "folder" | "totalTokens" | "ioTokens" | "cacheTokens" | "cost";
 type IndexedLeaderboardRow = { row: UsageLeaderboardRow; originalIndex: number };
 
@@ -362,12 +358,6 @@ function sortLeaderboardRows(
             right.row.io_total_tokens,
             sortState.direction
           );
-        case "cacheTokens":
-          return compareNumberValue(
-            cacheTokens(left.row),
-            cacheTokens(right.row),
-            sortState.direction
-          );
         case "cost":
           return compareNumberValue(left.row.cost_usd, right.row.cost_usd, sortState.direction);
         case "totalDuration":
@@ -382,22 +372,10 @@ function sortLeaderboardRows(
             right.row.requests_total,
             sortState.direction
           );
-        case "successRate":
-          return compareNumberValue(
-            successRate(left.row),
-            successRate(right.row),
-            sortState.direction
-          );
         case "tokenShare":
           return compareNumberValue(
             tokenShare(left.row, summary),
             tokenShare(right.row, summary),
-            sortState.direction
-          );
-        case "outputSpeed":
-          return compareNumberValue(
-            left.row.avg_output_tokens_per_second,
-            right.row.avg_output_tokens_per_second,
             sortState.direction
           );
       }
@@ -529,6 +507,55 @@ function TokenBreakdownInline({ parts }: { parts: string[] }) {
   );
 }
 
+function InputOutputCacheValue({ row }: { row: UsageTokenMetricRow }) {
+  const totalWithCache = row.total_tokens;
+  const hasValidTotal = Number.isFinite(totalWithCache) && totalWithCache > 0;
+  const hitRate = computeCacheHitRate(
+    row.input_tokens,
+    row.cache_creation_input_tokens,
+    row.cache_read_input_tokens
+  );
+  const ioText = trimCompactZero(formatTokensMillions(row.io_total_tokens));
+  const hitRateText =
+    hasValidTotal && Number.isFinite(hitRate) ? trimCompactZero(formatPercent(hitRate)) : "—";
+
+  return <TokenBreakdownInline parts={[ioText, hitRateText]} />;
+}
+
+function RequestSuccessRateValue({ row }: { row: UsageRequestMetricRow }) {
+  return (
+    <TokenBreakdownInline
+      parts={[formatInteger(row.requests_total), trimCompactZero(formatPercent(successRate(row)))]}
+    />
+  );
+}
+
+function formatLocalHourMinuteFromMs(value: number) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function RequestWindowValue({ row, scope }: { row: UsageLeaderboardRow; scope: TokenCostScope }) {
+  if (scope !== "day") {
+    return <span className="text-muted-foreground">-</span>;
+  }
+  const first = row.first_request_created_at_ms;
+  const last = row.last_request_created_at_ms;
+  if (first == null || last == null || !Number.isFinite(first) || !Number.isFinite(last)) {
+    return <span className="text-muted-foreground">-</span>;
+  }
+  const firstText = formatLocalHourMinuteFromMs(first);
+  const lastText = formatLocalHourMinuteFromMs(last);
+  if (!firstText || !lastText) {
+    return <span className="text-muted-foreground">-</span>;
+  }
+  const spanMs = last - first;
+  const ratioText =
+    spanMs > 0 ? trimCompactZero(formatPercent(row.total_duration_ms / spanMs)) : "-";
+  return <TokenBreakdownInline parts={[`${firstText}-${lastText}`, ratioText]} />;
+}
+
 function InputOutputTokenValue({ row }: { row: Pick<UsageTokenMetricRow, "io_total_tokens"> }) {
   return (
     <span className="whitespace-nowrap tabular-nums">
@@ -562,28 +589,11 @@ function CacheHitRateBreakdown({ row }: { row: UsageTokenMetricRow }) {
   return <TokenBreakdownInline parts={[cacheText, hitRateText]} />;
 }
 
-function TokenShareBar({ percent }: { percent: number }) {
+function TokenShareValue({ percent }: { percent: number }) {
   const pct = Number.isFinite(percent) ? Math.max(0, Math.min(1, percent)) : 0;
-  const displayPct = (pct * 100).toFixed(1);
 
   return (
-    <div className="flex items-center gap-1.5">
-      <progress className="sr-only" value={Number(displayPct)} max={100}>
-        Token 占比 {displayPct}%
-      </progress>
-      <div className="h-1.5 flex-1 rounded-full bg-secondary" aria-hidden="true">
-        <div
-          className="h-full rounded-full bg-sky-500 transition-all duration-300"
-          style={{ width: `${pct * 100}%` }}
-        />
-      </div>
-      <span
-        className="w-10 text-right text-[10px] tabular-nums text-muted-foreground"
-        aria-hidden="true"
-      >
-        {displayPct}%
-      </span>
-    </div>
+    <span className="whitespace-nowrap tabular-nums">{trimCompactZero(formatPercent(pct))}</span>
   );
 }
 
@@ -910,15 +920,8 @@ function TokenLeaderboardTable({
               onSort={handleSort}
             />
             <SortableColumnHeader
-              label="输入+输出 Token"
+              label="输入+出/缓存率"
               sortKey="ioTokens"
-              sortState={sortState}
-              onSort={handleSort}
-            />
-            <SortableColumnHeader
-              label="缓存情况"
-              note="缓存/命中率"
-              sortKey="cacheTokens"
               sortState={sortState}
               onSort={handleSort}
             />
@@ -935,14 +938,8 @@ function TokenLeaderboardTable({
               onSort={handleSort}
             />
             <SortableColumnHeader
-              label="请求数"
+              label="请求数/成功率"
               sortKey="requests"
-              sortState={sortState}
-              onSort={handleSort}
-            />
-            <SortableColumnHeader
-              label="成功率"
-              sortKey="successRate"
               sortState={sortState}
               onSort={handleSort}
             />
@@ -952,12 +949,9 @@ function TokenLeaderboardTable({
               sortState={sortState}
               onSort={handleSort}
             />
-            <SortableColumnHeader
-              label="平均输出速度"
-              sortKey="outputSpeed"
-              sortState={sortState}
-              onSort={handleSort}
-            />
+            <th scope="col" className={TABLE_TH_CLASS}>
+              <TableHeaderLabel label="最早最晚/请求占比" />
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -1002,28 +996,26 @@ function TokenLeaderboardTable({
                     <TotalTokenValue row={row} />
                   </td>
                   <td className={TABLE_MONO_TD_CLASS}>
-                    <InputOutputTokenValue row={row} />
-                  </td>
-                  <td className={TABLE_MONO_TD_CLASS}>
-                    <CacheHitRateBreakdown row={row} />
+                    <InputOutputCacheValue row={row} />
                   </td>
                   <td className={TABLE_MONO_TD_CLASS}>{formatCostValue(row.cost_usd)}</td>
                   <td className={TABLE_MONO_TD_CLASS}>
                     {formatCompactDurationMs(row.total_duration_ms)}
                   </td>
-                  <td className={TABLE_MONO_TD_CLASS}>{formatInteger(row.requests_total)}</td>
-                  <td className={TABLE_MONO_TD_CLASS}>{formatPercent(successRate(row))}</td>
-                  <td className={`${TABLE_TD_CLASS} min-w-[120px]`}>
-                    <TokenShareBar percent={tokenShare(row, summary)} />
+                  <td className={TABLE_MONO_TD_CLASS}>
+                    <RequestSuccessRateValue row={row} />
                   </td>
                   <td className={TABLE_MONO_TD_CLASS}>
-                    {formatTokensPerSecond(row.avg_output_tokens_per_second)}
+                    <TokenShareValue percent={tokenShare(row, summary)} />
+                  </td>
+                  <td className={TABLE_MONO_TD_CLASS}>
+                    <RequestWindowValue row={row} scope={scope} />
                   </td>
                 </tr>
                 {expanded ? (
                   <tr>
                     <td
-                      colSpan={11}
+                      colSpan={9}
                       className="border-b border-border bg-secondary/70 px-4 py-4 dark:border-border dark:bg-card/40"
                     >
                       <DayDetailPanel

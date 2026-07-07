@@ -3907,6 +3907,8 @@ export type UsageLeaderboardRow = {
   requests_success: number;
   requests_failed: number;
   total_duration_ms: number;
+  first_request_created_at_ms: number | null;
+  last_request_created_at_ms: number | null;
   total_tokens: number;
   io_total_tokens: number;
   input_tokens: number;

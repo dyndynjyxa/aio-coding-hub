@@ -149,6 +149,8 @@ GROUP BY cli_key
                         total_duration_ms: row
                             .get::<_, Option<i64>>("total_duration_ms")?
                             .unwrap_or(0),
+                        first_request_created_at_ms: None,
+                        last_request_created_at_ms: None,
                         success_duration_ms_sum: row
                             .get::<_, Option<i64>>("success_duration_ms_sum")?
                             .unwrap_or(0),
@@ -284,6 +286,8 @@ GROUP BY COALESCE(NULLIF(requested_model, ''), 'Unknown')
                         total_duration_ms: row
                             .get::<_, Option<i64>>("total_duration_ms")?
                             .unwrap_or(0),
+                        first_request_created_at_ms: None,
+                        last_request_created_at_ms: None,
                         success_duration_ms_sum: row
                             .get::<_, Option<i64>>("success_duration_ms_sum")?
                             .unwrap_or(0),
@@ -361,6 +365,8 @@ SELECT
     ) THEN cost_usd_femto ELSE 0 END
   ) AS total_cost_usd_femto,
   SUM(duration_ms) AS total_duration_ms,
+  MIN(CASE WHEN created_at_ms > 0 THEN created_at_ms ELSE created_at * 1000 END) AS first_request_created_at_ms,
+  MAX(CASE WHEN created_at_ms > 0 THEN created_at_ms ELSE created_at * 1000 END) AS last_request_created_at_ms,
   SUM(CASE WHEN status >= 200 AND status < 300 AND error_code IS NULL THEN duration_ms ELSE 0 END) AS success_duration_ms_sum,
   SUM(
     CASE WHEN (
@@ -419,6 +425,8 @@ GROUP BY key
                         total_duration_ms: row
                             .get::<_, Option<i64>>("total_duration_ms")?
                             .unwrap_or(0),
+                        first_request_created_at_ms: row.get("first_request_created_at_ms")?,
+                        last_request_created_at_ms: row.get("last_request_created_at_ms")?,
                         success_duration_ms_sum: row
                             .get::<_, Option<i64>>("success_duration_ms_sum")?
                             .unwrap_or(0),
@@ -568,6 +576,8 @@ GROUP BY r.cli_key, r.final_provider_id
                         total_duration_ms: row
                             .get::<_, Option<i64>>("total_duration_ms")?
                             .unwrap_or(0),
+                        first_request_created_at_ms: None,
+                        last_request_created_at_ms: None,
                         success_duration_ms_sum: row
                             .get::<_, Option<i64>>("success_duration_ms_sum")?
                             .unwrap_or(0),
@@ -817,7 +827,12 @@ where
         let entry = by_key
             .entry(key)
             .or_insert_with(|| (name, ProviderAgg::default()));
-        entry.1.merge(row.agg);
+        let mut agg = row.agg;
+        if !matches!(params.scope, UsageScopeV2::Day) {
+            agg.first_request_created_at_ms = None;
+            agg.last_request_created_at_ms = None;
+        }
+        entry.1.merge(agg);
     }
 
     let mut out: Vec<UsageLeaderboardRow> = by_key

@@ -130,6 +130,8 @@ pub(super) fn row_to_agg(row: &Row<'_>) -> rusqlite::Result<ProviderAgg> {
         requests_success: row.get::<_, Option<i64>>("requests_success")?.unwrap_or(0),
         requests_failed: row.get::<_, Option<i64>>("requests_failed")?.unwrap_or(0),
         total_duration_ms: row.get::<_, Option<i64>>("total_duration_ms")?.unwrap_or(0),
+        first_request_created_at_ms: row.get("first_request_created_at_ms")?,
+        last_request_created_at_ms: row.get("last_request_created_at_ms")?,
         success_duration_ms_sum: row
             .get::<_, Option<i64>>("success_duration_ms_sum")?
             .unwrap_or(0),
@@ -260,6 +262,8 @@ SELECT
     ) THEN r.cost_usd_femto ELSE 0 END
   ) AS total_cost_usd_femto,
   SUM(r.duration_ms) AS total_duration_ms,
+  MIN(CASE WHEN r.created_at_ms > 0 THEN r.created_at_ms ELSE r.created_at * 1000 END) AS first_request_created_at_ms,
+  MAX(CASE WHEN r.created_at_ms > 0 THEN r.created_at_ms ELSE r.created_at * 1000 END) AS last_request_created_at_ms,
   SUM(CASE WHEN r.status >= 200 AND r.status < 300 AND r.error_code IS NULL THEN r.duration_ms ELSE 0 END) AS success_duration_ms_sum,
   SUM(
     CASE WHEN (

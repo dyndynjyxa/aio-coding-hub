@@ -44,7 +44,8 @@ fn setup_conn() -> Connection {
 	  usage_json TEXT,
 	  excluded_from_stats INTEGER NOT NULL DEFAULT 0,
 	  session_id TEXT,
-	  created_at INTEGER NOT NULL
+	  created_at INTEGER NOT NULL,
+	  created_at_ms INTEGER NOT NULL DEFAULT 0
 	);
 	"#,
     )
@@ -1469,6 +1470,8 @@ INSERT INTO request_logs (
     assert_eq!(rows[0].output_tokens, 30);
     assert_eq!(rows[0].total_tokens, 330);
     assert_eq!(rows[0].cost_usd, Some(3.0));
+    assert_eq!(rows[0].first_request_created_at_ms, Some(day_two_ts * 1000));
+    assert_eq!(rows[0].last_request_created_at_ms, Some(day_two_ts * 1000));
 
     assert_eq!(rows[1].key, day_one);
     assert_eq!(rows[1].name, day_one);
@@ -1477,6 +1480,11 @@ INSERT INTO request_logs (
     assert_eq!(rows[1].output_tokens, 90);
     assert_eq!(rows[1].total_tokens, 390);
     assert_eq!(rows[1].cost_usd, Some(3.0));
+    assert_eq!(rows[1].first_request_created_at_ms, Some(day_one_ts * 1000));
+    assert_eq!(
+        rows[1].last_request_created_at_ms,
+        Some((day_one_ts + 3600) * 1000)
+    );
 
     let cli_filtered = leaderboard_v2_with_conn(
         &conn,
@@ -1492,6 +1500,10 @@ INSERT INTO request_logs (
     assert_eq!(cli_filtered.len(), 1);
     assert_eq!(cli_filtered[0].key, day_one);
     assert_eq!(cli_filtered[0].requests_total, 2);
+    assert_eq!(
+        cli_filtered[0].last_request_created_at_ms,
+        Some((day_one_ts + 3600) * 1000)
+    );
 
     let provider_filtered = leaderboard_v2_with_conn(
         &conn,
@@ -1507,6 +1519,22 @@ INSERT INTO request_logs (
     assert_eq!(provider_filtered.len(), 1);
     assert_eq!(provider_filtered[0].key, day_two);
     assert_eq!(provider_filtered[0].requests_total, 1);
+
+    let model_rows = leaderboard_v2_with_conn(
+        &conn,
+        UsageScopeV2::Model,
+        Some(day_one_ts),
+        Some(end_ts),
+        None,
+        None,
+        Some(50),
+        false,
+    )
+    .expect("model leaderboard");
+    assert!(model_rows
+        .iter()
+        .all(|row| row.first_request_created_at_ms.is_none()
+            && row.last_request_created_at_ms.is_none()));
 }
 
 #[test]
@@ -1971,6 +1999,14 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
     assert_eq!(alpha_day_rows.len(), 1);
     assert_eq!(alpha_day_rows[0].key, day);
     assert_eq!(alpha_day_rows[0].total_tokens, 120);
+    assert_eq!(
+        alpha_day_rows[0].first_request_created_at_ms,
+        Some((start_ts + 2 * 3600) * 1000)
+    );
+    assert_eq!(
+        alpha_day_rows[0].last_request_created_at_ms,
+        Some((start_ts + 2 * 3600) * 1000)
+    );
 
     let alpha_model_rows = leaderboard_v2_folder_filtered_with_conn(
         &conn,
@@ -1989,6 +2025,8 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
     .expect("model leaderboard");
     assert_eq!(alpha_model_rows.len(), 1);
     assert_eq!(alpha_model_rows[0].key, "gpt-alpha");
+    assert_eq!(alpha_model_rows[0].first_request_created_at_ms, None);
+    assert_eq!(alpha_model_rows[0].last_request_created_at_ms, None);
 
     let unknown_summary = summary_v2_with_conn(
         &conn,

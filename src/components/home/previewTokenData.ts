@@ -34,7 +34,38 @@ function weightedAverage(
   return totalValue / totalWeight;
 }
 
-export const PREVIEW_TOKEN_PROVIDER_ROWS: UsageLeaderboardRow[] = [
+type PreviewLeaderboardRowInput = Omit<
+  UsageLeaderboardRow,
+  "first_request_created_at_ms" | "last_request_created_at_ms"
+>;
+
+function withoutRequestBounds(row: PreviewLeaderboardRowInput): UsageLeaderboardRow {
+  return {
+    ...row,
+    first_request_created_at_ms: null,
+    last_request_created_at_ms: null,
+  };
+}
+
+function localDayTimeMs(dayKey: string, hour: number, minute: number) {
+  const [year, month, day] = dayKey.split("-").map(Number);
+  return new Date(year, month - 1, day, hour, minute, 0, 0).getTime();
+}
+
+function withPreviewDayBounds(
+  row: PreviewLeaderboardRowInput,
+  firstHour: number,
+  lastHour: number,
+  lastMinute: number
+): UsageLeaderboardRow {
+  return {
+    ...row,
+    first_request_created_at_ms: localDayTimeMs(row.key, firstHour, 0),
+    last_request_created_at_ms: localDayTimeMs(row.key, lastHour, lastMinute),
+  };
+}
+
+const PREVIEW_TOKEN_PROVIDER_BASE_ROWS: PreviewLeaderboardRowInput[] = [
   {
     key: "provider:201",
     name: "OpenAI Primary",
@@ -91,7 +122,10 @@ export const PREVIEW_TOKEN_PROVIDER_ROWS: UsageLeaderboardRow[] = [
   },
 ];
 
-export const PREVIEW_TOKEN_MODEL_ROWS: UsageLeaderboardRow[] = [
+export const PREVIEW_TOKEN_PROVIDER_ROWS: UsageLeaderboardRow[] =
+  PREVIEW_TOKEN_PROVIDER_BASE_ROWS.map(withoutRequestBounds);
+
+const PREVIEW_TOKEN_MODEL_BASE_ROWS: PreviewLeaderboardRowInput[] = [
   {
     key: "model:gpt-5.4",
     name: "gpt-5.4",
@@ -202,11 +236,14 @@ export const PREVIEW_TOKEN_MODEL_ROWS: UsageLeaderboardRow[] = [
   },
 ];
 
+export const PREVIEW_TOKEN_MODEL_ROWS: UsageLeaderboardRow[] =
+  PREVIEW_TOKEN_MODEL_BASE_ROWS.map(withoutRequestBounds);
+
 const PREVIEW_TODAY_KEY = previewDayKey(0);
 const PREVIEW_YESTERDAY_KEY = previewDayKey(-1);
 const PREVIEW_TWO_DAYS_AGO_KEY = previewDayKey(-2);
 
-export const PREVIEW_TOKEN_DAY_ROWS: UsageLeaderboardRow[] = [
+const PREVIEW_TOKEN_DAY_BASE_ROWS: PreviewLeaderboardRowInput[] = [
   {
     key: PREVIEW_TODAY_KEY,
     name: PREVIEW_TODAY_KEY,
@@ -262,6 +299,10 @@ export const PREVIEW_TOKEN_DAY_ROWS: UsageLeaderboardRow[] = [
     cost_usd: 0.78,
   },
 ];
+
+export const PREVIEW_TOKEN_DAY_ROWS: UsageLeaderboardRow[] = PREVIEW_TOKEN_DAY_BASE_ROWS.map(
+  (row, index) => withPreviewDayBounds(row, 8 + index, 23 - index, 34)
+);
 
 const PREVIEW_DAY_FOLDER_SPECS = [
   {

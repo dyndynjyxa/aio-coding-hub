@@ -293,6 +293,8 @@ function createSyntheticProviderRow(entry: ActiveProviderEntry): UsageLeaderboar
     cache_creation_input_tokens: 0,
     cache_read_input_tokens: 0,
     total_duration_ms: 0,
+    first_request_created_at_ms: null,
+    last_request_created_at_ms: null,
     avg_duration_ms: null,
     avg_ttfb_ms: null,
     avg_output_tokens_per_second: null,

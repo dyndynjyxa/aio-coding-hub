@@ -143,6 +143,16 @@ function clickSortableHeader(table: HTMLElement, name: RegExp | string) {
   return header;
 }
 
+function localTimeMs(
+  year: number,
+  monthIndex: number,
+  day: number,
+  hour: number,
+  minute: number
+) {
+  return new Date(year, monthIndex, day, hour, minute, 0, 0).getTime();
+}
+
 describe("components/home/HomeTokenCostPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -266,7 +276,9 @@ describe("components/home/HomeTokenCostPanel", () => {
                       output_tokens: 1800,
                       cache_creation_input_tokens: 200,
                       cache_read_input_tokens: 800,
-                      total_duration_ms: 22_000,
+                      total_duration_ms: 15_691_200,
+                      first_request_created_at_ms: localTimeMs(2026, 3, 16, 8, 0),
+                      last_request_created_at_ms: localTimeMs(2026, 3, 16, 23, 34),
                       avg_duration_ms: 880,
                       avg_ttfb_ms: 210,
                       avg_output_tokens_per_second: 102.4,
@@ -317,17 +329,27 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(within(providerRow as HTMLElement).getByText("12K")).toBeInTheDocument();
     expect(within(providerRow as HTMLElement).getByText("10K")).toBeInTheDocument();
     expect(within(providerRow as HTMLElement).getByText("1m2s")).toBeInTheDocument();
-    expect(within(providerRow as HTMLElement).getByLabelText("2K/16.7%")).toBeInTheDocument();
+    expect(within(providerRow as HTMLElement).getByLabelText("10K/16.7%")).toBeInTheDocument();
+    expect(within(providerRow as HTMLElement).getByText("55.6%")).toBeInTheDocument();
+    expect(within(providerRow as HTMLElement).getByText("-")).toBeInTheDocument();
     expect(
-      within(providerRow as HTMLElement).queryByLabelText("12K/2K/16.7%")
+      within(screen.getByRole("table", { name: "用量排行榜" })).queryByRole("progressbar")
+    ).not.toBeInTheDocument();
+    expect(
+      within(providerRow as HTMLElement).queryByLabelText("2K/16.7%")
     ).not.toBeInTheDocument();
     expect(screen.getByText("18.2%")).toBeInTheDocument();
     expect(screen.queryByText("成本覆盖率")).not.toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /总Token/ })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: /输入\+输出 Token/ })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: /输入\+出\/缓存率/ })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /总耗时/ })).toBeInTheDocument();
-    const cacheHeader = screen.getByRole("columnheader", { name: /缓存情况/ });
-    expect(within(cacheHeader).getByText("（缓存/命中率）")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: /请求数\/成功率/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole("columnheader", { name: /最早最晚\/请求占比/ })
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: /缓存情况/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "成功率" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: /平均输出速度/ })).not.toBeInTheDocument();
     expect(screen.queryByText("（含缓存/缓存/命中率）")).not.toBeInTheDocument();
     expect(screen.queryByText("Token 明细")).not.toBeInTheDocument();
     expect(screen.queryByText("含缓存总量 / 缓存量 / 缓存命中率")).not.toBeInTheDocument();
@@ -361,6 +383,9 @@ describe("components/home/HomeTokenCostPanel", () => {
 
     expect(screen.getByText("gpt-5.4")).toBeInTheDocument();
     expect(screen.getAllByText("$0.90")).toHaveLength(2);
+    const modelRow = screen.getByText("gpt-5.4").closest("tr");
+    expect(modelRow).toBeTruthy();
+    expect(within(modelRow as HTMLElement).getByText("-")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /日期详情/ })).not.toBeInTheDocument();
     expect(vi.mocked(useUsageLeaderboardV2Query)).toHaveBeenLastCalledWith(
       "model",
@@ -379,6 +404,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     fireEvent.click(screen.getByRole("tab", { name: "日期" }));
 
     expect(screen.getByText("2026-04-16")).toBeInTheDocument();
+    expect(screen.getByLabelText("08:00-23:34/28%")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "展开 2026-04-16 日期详情" })).toBeInTheDocument();
     expect(vi.mocked(useUsageLeaderboardV2Query)).toHaveBeenLastCalledWith(
       "day",
@@ -508,9 +534,9 @@ describe("components/home/HomeTokenCostPanel", () => {
       "ascending"
     );
 
-    clickSortableHeader(table, /缓存情况/);
-    expectTableRowsInOrder(table, ["Charlie Provider", "Alpha Provider", "Bravo Provider"]);
-    expect(within(table).getByRole("columnheader", { name: /缓存情况/ })).toHaveAttribute(
+    clickSortableHeader(table, /输入\+出\/缓存率/);
+    expectTableRowsInOrder(table, ["Bravo Provider", "Charlie Provider", "Alpha Provider"]);
+    expect(within(table).getByRole("columnheader", { name: /输入\+出\/缓存率/ })).toHaveAttribute(
       "aria-sort",
       "descending"
     );
@@ -1598,7 +1624,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     const table = screen.getByRole("table", { name: "用量排行榜" });
     expectTableRowsInOrder(table, ["Alpha Provider", "Bravo Provider", "Charlie Provider"]);
 
-    clickSortableHeader(table, /输入\+输出 Token/);
+    clickSortableHeader(table, /输入\+出\/缓存率/);
     expectTableRowsInOrder(table, ["Charlie Provider", "Bravo Provider", "Alpha Provider"]);
 
     clickSortableHeader(table, /总花费/);
@@ -1610,13 +1636,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     clickSortableHeader(table, /请求数/);
     expectTableRowsInOrder(table, ["Bravo Provider", "Charlie Provider", "Alpha Provider"]);
 
-    clickSortableHeader(table, /成功率/);
-    expectTableRowsInOrder(table, ["Charlie Provider", "Bravo Provider", "Alpha Provider"]);
-
     clickSortableHeader(table, /Token 占比/);
-    expectTableRowsInOrder(table, ["Charlie Provider", "Bravo Provider", "Alpha Provider"]);
-
-    clickSortableHeader(table, /平均输出速度/);
     expectTableRowsInOrder(table, ["Charlie Provider", "Bravo Provider", "Alpha Provider"]);
 
     clickSortableHeader(table, "供应商");
@@ -1821,7 +1841,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(within(previewProviderRow as HTMLElement).getByText("49.2K")).toBeInTheDocument();
     expect(within(previewProviderRow as HTMLElement).getByText("42K")).toBeInTheDocument();
     expect(
-      within(previewProviderRow as HTMLElement).getByLabelText("7.2K/13.1%")
+      within(previewProviderRow as HTMLElement).getByLabelText("42K/13.1%")
     ).toBeInTheDocument();
     expect(screen.getByText("17.0%")).toBeInTheDocument();
 
@@ -1874,9 +1894,7 @@ describe("components/home/HomeTokenCostPanel", () => {
   });
 
   it("renders cache hit-rate per row (not the old token-share ratio)", () => {
-    // Row picked so the two formulas diverge sharply:
-    //   old 占比 = (creation + read) / total_with_cache = 9000 / 16000 = 56.3%
-    //   new 命中率 = read / (input + creation + read) = 9000 / 10000 = 90.0%
+    // Row picked so the cache-token ratio and cache hit-rate diverge sharply.
     vi.mocked(useUsageSummaryV2Query).mockReturnValue({
       data: {
         requests_total: 5,
@@ -1929,11 +1947,8 @@ describe("components/home/HomeTokenCostPanel", () => {
 
     render(<HomeTokenCostPanel />);
 
-    // Row cell renders trimmed compact form: "9K/90%"
-    expect(screen.getByLabelText("9K/90%")).toBeInTheDocument();
-    // Old "占比" 56.3% must NOT be rendered for this row
+    expect(screen.getByLabelText("7K/90%")).toBeInTheDocument();
     expect(screen.queryByText(/56\.3%/)).not.toBeInTheDocument();
-    // KPI card uses the same hit-rate formula → also 90.0% (untrimmed)
     expect(screen.getByText("90.0%")).toBeInTheDocument();
   });
 
@@ -1990,7 +2005,7 @@ describe("components/home/HomeTokenCostPanel", () => {
 
     render(<HomeTokenCostPanel />);
 
-    expect(screen.getByLabelText("—/—")).toBeInTheDocument();
+    expect(screen.getByLabelText("0/—")).toBeInTheDocument();
   });
 
   it("retries summary and leaderboard queries from the error card", () => {

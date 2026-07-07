@@ -128,6 +128,8 @@ pub struct UsageLeaderboardRow {
     pub requests_success: i64,
     pub requests_failed: i64,
     pub total_duration_ms: i64,
+    pub first_request_created_at_ms: Option<i64>,
+    pub last_request_created_at_ms: Option<i64>,
     pub total_tokens: i64,
     pub io_total_tokens: i64,
     pub input_tokens: i64,

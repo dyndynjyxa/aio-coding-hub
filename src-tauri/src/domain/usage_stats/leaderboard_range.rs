@@ -23,6 +23,8 @@ pub(super) struct ProviderAgg {
     pub(super) requests_success: i64,
     pub(super) requests_failed: i64,
     pub(super) total_duration_ms: i64,
+    pub(super) first_request_created_at_ms: Option<i64>,
+    pub(super) last_request_created_at_ms: Option<i64>,
     pub(super) success_duration_ms_sum: i64,
     pub(super) success_ttfb_ms_sum: i64,
     pub(super) success_ttfb_ms_count: i64,
@@ -45,6 +47,22 @@ impl ProviderAgg {
         self.requests_success = self.requests_success.saturating_add(add.requests_success);
         self.requests_failed = self.requests_failed.saturating_add(add.requests_failed);
         self.total_duration_ms = self.total_duration_ms.saturating_add(add.total_duration_ms);
+        self.first_request_created_at_ms = match (
+            self.first_request_created_at_ms,
+            add.first_request_created_at_ms,
+        ) {
+            (Some(current), Some(next)) => Some(current.min(next)),
+            (None, Some(next)) => Some(next),
+            (current, None) => current,
+        };
+        self.last_request_created_at_ms = match (
+            self.last_request_created_at_ms,
+            add.last_request_created_at_ms,
+        ) {
+            (Some(current), Some(next)) => Some(current.max(next)),
+            (None, Some(next)) => Some(next),
+            (current, None) => current,
+        };
         self.success_duration_ms_sum = self
             .success_duration_ms_sum
             .saturating_add(add.success_duration_ms_sum);
@@ -121,6 +139,8 @@ impl ProviderAgg {
             requests_success: self.requests_success,
             requests_failed: self.requests_failed,
             total_duration_ms: self.total_duration_ms,
+            first_request_created_at_ms: self.first_request_created_at_ms,
+            last_request_created_at_ms: self.last_request_created_at_ms,
             total_tokens: self.total_tokens,
             io_total_tokens: self.input_tokens.saturating_add(self.output_tokens),
             input_tokens: self.input_tokens,
@@ -271,6 +291,8 @@ pub fn leaderboard_provider(
                     requests_success: if success { 1 } else { 0 },
                     requests_failed: if success { 0 } else { 1 },
                     total_duration_ms: duration_ms,
+                    first_request_created_at_ms: None,
+                    last_request_created_at_ms: None,
                     success_duration_ms_sum: if success { duration_ms } else { 0 },
                     success_ttfb_ms_sum: if success { ttfb_ms.unwrap_or(0) } else { 0 },
                     success_ttfb_ms_count: if success && ttfb_ms.is_some() { 1 } else { 0 },

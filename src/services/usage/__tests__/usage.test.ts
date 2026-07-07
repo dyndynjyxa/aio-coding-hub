@@ -154,6 +154,8 @@ function makeUsageLeaderboardRow(
     cache_creation_input_tokens: 0,
     cache_read_input_tokens: 0,
     total_duration_ms: 120,
+    first_request_created_at_ms: null,
+    last_request_created_at_ms: null,
     avg_duration_ms: 120,
     avg_ttfb_ms: 30,
     avg_output_tokens_per_second: 10,
