@@ -303,7 +303,6 @@ describe("components/home/HomeTokenCostPanel", () => {
     const inputOutputTokenCard = screen.getAllByText("输入+输出 Token")[0];
     const totalCostCard = screen.getAllByText("总花费")[0];
     const totalDurationCard = screen.getByText("请求总耗时");
-    const costCoverageCard = screen.getByText("成本覆盖率");
     const successCard = screen.getByText("成功请求");
     const cacheHitRateCard = screen.getByText("缓存命中率");
     const providerCountCard = screen.getByText("供应商数");
@@ -322,8 +321,8 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(
       within(providerRow as HTMLElement).queryByLabelText("12K/2K/16.7%")
     ).not.toBeInTheDocument();
-    expect(screen.getByText("81.0%")).toBeInTheDocument();
     expect(screen.getByText("18.2%")).toBeInTheDocument();
+    expect(screen.queryByText("成本覆盖率")).not.toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /总Token/ })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /输入\+输出 Token/ })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /总耗时/ })).toBeInTheDocument();
@@ -341,17 +340,10 @@ describe("components/home/HomeTokenCostPanel", () => {
       inputOutputTokenCard.compareDocumentPosition(totalCostCard) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
     expect(
-      totalCostCard.compareDocumentPosition(costCoverageCard) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy();
-    expect(
       totalCostCard.compareDocumentPosition(totalDurationCard) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
     expect(
-      totalDurationCard.compareDocumentPosition(costCoverageCard) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy();
-    expect(
-      costCoverageCard.compareDocumentPosition(successCard) & Node.DOCUMENT_POSITION_FOLLOWING
+      totalDurationCard.compareDocumentPosition(successCard) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
     expect(
       successCard.compareDocumentPosition(cacheHitRateCard) & Node.DOCUMENT_POSITION_FOLLOWING
@@ -1831,7 +1823,6 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(
       within(previewProviderRow as HTMLElement).getByLabelText("7.2K/13.1%")
     ).toBeInTheDocument();
-    expect(screen.getByText("100.0%")).toBeInTheDocument();
     expect(screen.getByText("17.0%")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "模型" }));

@@ -76,7 +76,7 @@ const TABLE_TD_CLASS = "border-b border-border px-3 py-3";
 const TABLE_MONO_TD_CLASS =
   "border-b border-border px-3 py-3 font-mono text-xs tabular-nums text-secondary-foreground";
 
-const SUMMARY_SKELETON_KEYS = [0, 1, 2, 3, 4, 5, 6, 7];
+const SUMMARY_SKELETON_KEYS = [0, 1, 2, 3, 4, 5, 6];
 const EMPTY_LEADERBOARD_ROWS: UsageLeaderboardRow[] = [];
 
 type TokenCostQueryInput = {
@@ -330,15 +330,6 @@ function summaryCacheHitRate(summary: UsageSummary | null) {
     summary.cache_creation_input_tokens,
     summary.cache_read_input_tokens
   );
-}
-
-function summaryCostCoverage(summary: UsageSummary | null) {
-  if (!summary) return null;
-  const denom = summary.requests_success;
-  if (!Number.isFinite(denom) || denom <= 0) return null;
-  const covered = summary.cost_covered_success;
-  if (!Number.isFinite(covered) || covered < 0) return null;
-  return covered / denom;
 }
 
 function trimCompactZero(value: string) {
@@ -807,7 +798,7 @@ function TokenSummaryCards({
 }) {
   if (loading && !summary) {
     return (
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-8">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-7">
         {SUMMARY_SKELETON_KEYS.map((key) => (
           <StatCardSkeleton key={key} />
         ))}
@@ -816,7 +807,7 @@ function TokenSummaryCards({
   }
 
   return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-8">
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-7">
       <StatCard
         title="含缓存总 Token"
         value={formatTokenValue(summary?.total_tokens)}
@@ -832,11 +823,6 @@ function TokenSummaryCards({
         title="请求总耗时"
         value={formatCompactDurationMs(summary?.total_duration_ms)}
         accent="cyan"
-      />
-      <StatCard
-        title="成本覆盖率"
-        value={formatPercent(summaryCostCoverage(summary))}
-        accent="orange"
       />
       <StatCard title="成功请求" value={formatInteger(summary?.requests_success)} accent="green" />
       <StatCard
