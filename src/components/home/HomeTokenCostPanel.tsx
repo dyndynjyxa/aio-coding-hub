@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useMemo, useReducer, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useReducer, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -24,6 +24,7 @@ import { useUsageDayDetailV1Query, useUsageFolderOptionsV1Query } from "../../qu
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Popover } from "../../ui/Popover";
+import { Select } from "../../ui/Select";
 import { Spinner } from "../../ui/Spinner";
 import { Switch } from "../../ui/Switch";
 import { TabList, type TabListItem } from "../../ui/TabList";
@@ -77,6 +78,9 @@ const TABLE_MONO_TD_CLASS =
 
 const SUMMARY_SKELETON_KEYS = [0, 1, 2, 3, 4, 5, 6];
 const EMPTY_LEADERBOARD_ROWS: UsageLeaderboardRow[] = [];
+const HOME_USAGE_DAY_START_HOUR_STORAGE_KEY = "homeUsageDayStartHour";
+const HOME_USAGE_DEFAULT_DAY_START_HOUR = 5;
+const HOME_USAGE_DAY_START_HOUR_OPTIONS = Array.from({ length: 10 }, (_, hour) => hour);
 
 type TokenCostQueryInput = {
   startTs: number | null;
@@ -84,6 +88,7 @@ type TokenCostQueryInput = {
   cliKey: null;
   providerId: null;
   folderKeys?: string[] | null;
+  dayStartHour?: number | null;
   excludeCx2CcGatewayBridge?: boolean | null;
 };
 
@@ -204,12 +209,81 @@ function unixSecondsFromDate(date: Date) {
   return Math.floor(date.getTime() / 1000);
 }
 
-function startOfLocalDay(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+function normalizeHomeUsageDayStartHour(value: number | null | undefined) {
+  if (value == null || !Number.isSafeInteger(value)) return HOME_USAGE_DEFAULT_DAY_START_HOUR;
+  if (value < 0 || value > 9) return HOME_USAGE_DEFAULT_DAY_START_HOUR;
+  return value;
+}
+
+function dayStartHourLabel(hour: number) {
+  return `${String(hour).padStart(2, "0")}:00`;
+}
+
+function readStoredHomeUsageDayStartHour() {
+  if (typeof window === "undefined") return HOME_USAGE_DEFAULT_DAY_START_HOUR;
+  try {
+    const raw = window.localStorage.getItem(HOME_USAGE_DAY_START_HOUR_STORAGE_KEY);
+    if (raw == null) return HOME_USAGE_DEFAULT_DAY_START_HOUR;
+    return normalizeHomeUsageDayStartHour(Number(raw));
+  } catch {
+    return HOME_USAGE_DEFAULT_DAY_START_HOUR;
+  }
+}
+
+function writeStoredHomeUsageDayStartHour(hour: number) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(HOME_USAGE_DAY_START_HOUR_STORAGE_KEY, String(hour));
+  } catch {
+    // Ignore localStorage failures; the in-memory state is still valid.
+  }
+}
+
+function startOfLocalWorkday(date: Date, dayStartHour: number) {
+  const start = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    dayStartHour,
+    0,
+    0,
+    0
+  );
+  if (date.getTime() < start.getTime()) {
+    return new Date(
+      date.getFullYear(),
+      date.getMonth(),
+      date.getDate() - 1,
+      dayStartHour,
+      0,
+      0,
+      0
+    );
+  }
+  return start;
 }
 
 function addLocalDays(date: Date, days: number) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 0, 0, 0, 0);
+  return new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate() + days,
+    date.getHours(),
+    date.getMinutes(),
+    date.getSeconds(),
+    date.getMilliseconds()
+  );
+}
+
+function localDateHour(dateValue: string, hour: number, dayOffset = 0) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateValue);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day + dayOffset, hour, 0, 0, 0);
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
 }
 
 function emptyTokenCostQueryInput(): TokenCostQueryInput {
@@ -231,10 +305,18 @@ function customPreviewFactor(customApplied: CustomDateRangeApplied | null) {
 function buildTokenCostQueryConfig(
   range: TokenCostRange,
   customApplied: CustomDateRangeApplied | null,
+  dayStartHour = HOME_USAGE_DEFAULT_DAY_START_HOUR,
   now = new Date()
 ): TokenCostQueryConfig {
-  const todayStart = startOfLocalDay(now);
+  const normalizedDayStartHour = normalizeHomeUsageDayStartHour(dayStartHour);
+  const todayStart = startOfLocalWorkday(now, normalizedDayStartHour);
   const tomorrowStart = addLocalDays(todayStart, 1);
+  const customStart = customApplied
+    ? localDateHour(customApplied.startDate, normalizedDayStartHour)
+    : null;
+  const customEnd = customApplied
+    ? localDateHour(customApplied.endDate, normalizedDayStartHour, 1)
+    : null;
 
   switch (range) {
     case "custom":
@@ -245,8 +327,9 @@ function buildTokenCostQueryConfig(
         period: "custom",
         input: {
           ...emptyTokenCostQueryInput(),
-          startTs: customApplied?.startTs ?? null,
-          endTs: customApplied?.endTs ?? null,
+          startTs: customStart ? unixSecondsFromDate(customStart) : null,
+          endTs: customEnd ? unixSecondsFromDate(customEnd) : null,
+          dayStartHour: normalizedDayStartHour,
         },
         previewFactor: customPreviewFactor(customApplied),
       };
@@ -258,6 +341,7 @@ function buildTokenCostQueryConfig(
           ...emptyTokenCostQueryInput(),
           startTs: unixSecondsFromDate(addLocalDays(todayStart, -1)),
           endTs: unixSecondsFromDate(todayStart),
+          dayStartHour: normalizedDayStartHour,
         },
         previewFactor: 1,
       };
@@ -269,6 +353,7 @@ function buildTokenCostQueryConfig(
           ...emptyTokenCostQueryInput(),
           startTs: unixSecondsFromDate(addLocalDays(todayStart, -2)),
           endTs: unixSecondsFromDate(tomorrowStart),
+          dayStartHour: normalizedDayStartHour,
         },
         previewFactor: 3,
       };
@@ -276,7 +361,7 @@ function buildTokenCostQueryConfig(
       return {
         label: rangeLabel(range),
         period: "weekly",
-        input: emptyTokenCostQueryInput(),
+        input: { ...emptyTokenCostQueryInput(), dayStartHour: normalizedDayStartHour },
         previewFactor: 7,
       };
     case "last15":
@@ -287,6 +372,7 @@ function buildTokenCostQueryConfig(
           ...emptyTokenCostQueryInput(),
           startTs: unixSecondsFromDate(addLocalDays(todayStart, -14)),
           endTs: unixSecondsFromDate(tomorrowStart),
+          dayStartHour: normalizedDayStartHour,
         },
         previewFactor: 15,
       };
@@ -298,6 +384,7 @@ function buildTokenCostQueryConfig(
           ...emptyTokenCostQueryInput(),
           startTs: unixSecondsFromDate(addLocalDays(todayStart, -29)),
           endTs: unixSecondsFromDate(tomorrowStart),
+          dayStartHour: normalizedDayStartHour,
         },
         previewFactor: 30,
       };
@@ -305,7 +392,7 @@ function buildTokenCostQueryConfig(
       return {
         label: rangeLabel(range),
         period: "monthly",
-        input: emptyTokenCostQueryInput(),
+        input: { ...emptyTokenCostQueryInput(), dayStartHour: normalizedDayStartHour },
         previewFactor: Math.max(1, now.getDate()),
       };
     case "today":
@@ -313,7 +400,7 @@ function buildTokenCostQueryConfig(
       return {
         label: rangeLabel("today"),
         period: "daily",
-        input: emptyTokenCostQueryInput(),
+        input: { ...emptyTokenCostQueryInput(), dayStartHour: normalizedDayStartHour },
         previewFactor: 1,
       };
   }
@@ -536,6 +623,30 @@ function formatLocalHourMinuteFromMs(value: number) {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
+function localDateKeyFromDate(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate()
+  ).padStart(2, "0")}`;
+}
+
+function nextLocalDateKey(dayKey: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayKey);
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + 1, 0, 0, 0, 0);
+  if (Number.isNaN(date.getTime())) return null;
+  return localDateKeyFromDate(date);
+}
+
+function formatWorkdayHourMinuteFromMs(value: number, dayKey: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const timeText = formatLocalHourMinuteFromMs(value);
+  if (!timeText) return null;
+  const valueDayKey = localDateKeyFromDate(date);
+  if (valueDayKey === nextLocalDateKey(dayKey)) return `次日${timeText}`;
+  return timeText;
+}
+
 function RequestWindowValue({ row, scope }: { row: UsageLeaderboardRow; scope: TokenCostScope }) {
   if (scope !== "day") {
     return <span className="text-muted-foreground">-</span>;
@@ -545,8 +656,8 @@ function RequestWindowValue({ row, scope }: { row: UsageLeaderboardRow; scope: T
   if (first == null || last == null || !Number.isFinite(first) || !Number.isFinite(last)) {
     return <span className="text-muted-foreground">-</span>;
   }
-  const firstText = formatLocalHourMinuteFromMs(first);
-  const lastText = formatLocalHourMinuteFromMs(last);
+  const firstText = formatWorkdayHourMinuteFromMs(first, row.key);
+  const lastText = formatWorkdayHourMinuteFromMs(last, row.key);
   if (!firstText || !lastText) {
     return <span className="text-muted-foreground">-</span>;
   }
@@ -1222,6 +1333,7 @@ type HomeTokenCostPanelState = {
   range: TokenCostRange;
   expandedDay: string | null;
   selectedFolderKeys: string[];
+  dayStartHour: number;
   excludeCx2CcGatewayBridge: boolean;
 };
 
@@ -1231,15 +1343,19 @@ type HomeTokenCostPanelAction =
   | { type: "toggleExpandedDay"; day: string }
   | { type: "toggleFolderKey"; key: string }
   | { type: "clearFolderKeys" }
+  | { type: "setDayStartHour"; dayStartHour: number }
   | { type: "setExcludeCx2CcGatewayBridge"; exclude: boolean };
 
-const initialHomeTokenCostPanelState: HomeTokenCostPanelState = {
-  scope: "provider",
-  range: "today",
-  expandedDay: null,
-  selectedFolderKeys: [],
-  excludeCx2CcGatewayBridge: true,
-};
+function createInitialHomeTokenCostPanelState(): HomeTokenCostPanelState {
+  return {
+    scope: "provider",
+    range: "today",
+    expandedDay: null,
+    selectedFolderKeys: [],
+    dayStartHour: readStoredHomeUsageDayStartHour(),
+    excludeCx2CcGatewayBridge: true,
+  };
+}
 
 function homeTokenCostPanelReducer(
   state: HomeTokenCostPanelState,
@@ -1264,14 +1380,25 @@ function homeTokenCostPanelReducer(
       };
     case "clearFolderKeys":
       return { ...state, selectedFolderKeys: [] };
+    case "setDayStartHour":
+      return {
+        ...state,
+        dayStartHour: normalizeHomeUsageDayStartHour(action.dayStartHour),
+        expandedDay: null,
+      };
     case "setExcludeCx2CcGatewayBridge":
       return { ...state, excludeCx2CcGatewayBridge: action.exclude };
   }
 }
 
 export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostPanelProps) {
-  const [state, dispatch] = useReducer(homeTokenCostPanelReducer, initialHomeTokenCostPanelState);
-  const { scope, range, expandedDay, selectedFolderKeys, excludeCx2CcGatewayBridge } = state;
+  const initialState = useMemo(createInitialHomeTokenCostPanelState, []);
+  const [state, dispatch] = useReducer(homeTokenCostPanelReducer, initialState);
+  const { scope, range, expandedDay, selectedFolderKeys, dayStartHour, excludeCx2CcGatewayBridge } =
+    state;
+  useEffect(() => {
+    writeStoredHomeUsageDayStartHour(dayStartHour);
+  }, [dayStartHour]);
   const onInvalidCustomRange = useCallback((message: string) => toast(message), []);
   const customDateRangeOptions = useMemo(
     () => ({ onInvalid: onInvalidCustomRange }),
@@ -1287,8 +1414,8 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
   } = useCustomDateRange(range, customDateRangeOptions);
 
   const queryConfig = useMemo(
-    () => buildTokenCostQueryConfig(range, customApplied),
-    [customApplied, range]
+    () => buildTokenCostQueryConfig(range, customApplied, dayStartHour),
+    [customApplied, dayStartHour, range]
   );
   const customPending = range === "custom" && !customApplied;
   const selectedFolderKeysForQuery = selectedFolderKeys.length > 0 ? selectedFolderKeys : null;
@@ -1356,9 +1483,11 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
       providerId: filteredQueryConfig.input.providerId,
       folderLimit: 8,
       folderKeys: selectedFolderKeysForQuery,
+      dayStartHour,
       excludeCx2CcGatewayBridge,
     }),
     [
+      dayStartHour,
       excludeCx2CcGatewayBridge,
       expandedVisibleDay,
       filteredQueryConfig.input.cliKey,
@@ -1414,51 +1543,83 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-5 overflow-hidden">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <fieldset className="flex flex-wrap items-center gap-1.5 border-0 p-0">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <fieldset className="flex min-w-0 flex-col gap-2 border-0 p-0">
           <legend className="sr-only">用量筛选</legend>
-          <FolderMultiSelect
-            options={folderOptions}
-            selectedKeys={selectedFolderKeys}
-            loading={folderOptionsLoading}
-            disabled={folderSelectDisabled}
-            onToggleKey={handleToggleFolderKey}
-            onClear={handleClearFolderKeys}
-          />
-          <div className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-white px-2.5 text-xs text-muted-foreground shadow-sm dark:border-border dark:bg-card dark:text-secondary-foreground">
-            <span className="whitespace-nowrap">转接去重</span>
-            <Switch
-              checked={excludeCx2CcGatewayBridge}
-              onCheckedChange={(exclude) =>
-                dispatch({ type: "setExcludeCx2CcGatewayBridge", exclude })
-              }
-              size="sm"
-              aria-label="过滤转接重复用量"
+          <div
+            role="group"
+            aria-label="用量筛选设置"
+            className="flex flex-wrap items-center gap-1.5"
+          >
+            <FolderMultiSelect
+              options={folderOptions}
+              selectedKeys={selectedFolderKeys}
+              loading={folderOptionsLoading}
+              disabled={folderSelectDisabled}
+              onToggleKey={handleToggleFolderKey}
+              onClear={handleClearFolderKeys}
+            />
+            <div className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-white px-2.5 text-xs text-muted-foreground shadow-sm dark:border-border dark:bg-card dark:text-secondary-foreground">
+              <span className="whitespace-nowrap">转接去重</span>
+              <Switch
+                checked={excludeCx2CcGatewayBridge}
+                onCheckedChange={(exclude) =>
+                  dispatch({ type: "setExcludeCx2CcGatewayBridge", exclude })
+                }
+                size="sm"
+                aria-label="过滤转接重复用量"
+              />
+            </div>
+            <label className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-white px-2.5 text-xs text-muted-foreground shadow-sm dark:border-border dark:bg-card dark:text-secondary-foreground">
+              <span className="whitespace-nowrap">工作日开始</span>
+              <Select
+                aria-label="工作日开始"
+                value={String(dayStartHour)}
+                onChange={(event) =>
+                  dispatch({
+                    type: "setDayStartHour",
+                    dayStartHour: Number(event.currentTarget.value),
+                  })
+                }
+                className="h-6 w-auto rounded border-0 bg-transparent px-1 py-0 text-xs shadow-none focus:bg-transparent focus:ring-0 focus:ring-offset-0"
+              >
+                {HOME_USAGE_DAY_START_HOUR_OPTIONS.map((hour) => (
+                  <option key={hour} value={hour}>
+                    {dayStartHourLabel(hour)}
+                  </option>
+                ))}
+              </Select>
+            </label>
+          </div>
+          <div
+            role="group"
+            aria-label="用量时间范围"
+            className="flex flex-wrap items-center gap-1.5"
+          >
+            {TOKEN_COST_RANGE_ITEMS.map((item) => {
+              const active = range === item.key;
+              return (
+                <Button
+                  key={item.key}
+                  size="sm"
+                  variant={active ? "primary" : "secondary"}
+                  aria-pressed={active}
+                  onClick={() => dispatch({ type: "setRange", range: item.key })}
+                  className="whitespace-nowrap"
+                >
+                  {item.label}
+                </Button>
+              );
+            })}
+            <CustomRangeForm
+              customStartDate={customStartDate}
+              customEndDate={customEndDate}
+              onCustomStartDateChange={setCustomStartDate}
+              onCustomEndDateChange={setCustomEndDate}
+              onApplyCustomRange={handleApplyCustomRange}
+              active={range === "custom" && Boolean(customApplied)}
             />
           </div>
-          {TOKEN_COST_RANGE_ITEMS.map((item) => {
-            const active = range === item.key;
-            return (
-              <Button
-                key={item.key}
-                size="sm"
-                variant={active ? "primary" : "secondary"}
-                aria-pressed={active}
-                onClick={() => dispatch({ type: "setRange", range: item.key })}
-                className="whitespace-nowrap"
-              >
-                {item.label}
-              </Button>
-            );
-          })}
-          <CustomRangeForm
-            customStartDate={customStartDate}
-            customEndDate={customEndDate}
-            onCustomStartDateChange={setCustomStartDate}
-            onCustomEndDateChange={setCustomEndDate}
-            onApplyCustomRange={handleApplyCustomRange}
-            active={range === "custom" && Boolean(customApplied)}
-          />
         </fieldset>
         <div className="flex flex-wrap items-center gap-3 lg:justify-end">
           <TabList

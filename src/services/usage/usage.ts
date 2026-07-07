@@ -57,6 +57,7 @@ export type NormalizedUsageQueryInputV2 = {
   cliKey: CliKey | null;
   providerId: number | null;
   folderKeys: string[] | null;
+  dayStartHour: number | null;
   excludeCx2CcGatewayBridge: boolean | null;
 };
 export type UsageDayDetailInput = Override<
@@ -71,6 +72,7 @@ export type NormalizedUsageDayDetailInput = {
   providerId: number | null;
   folderLimit: number | null;
   folderKeys: string[] | null;
+  dayStartHour: number | null;
   excludeCx2CcGatewayBridge: boolean | null;
 };
 
@@ -149,6 +151,14 @@ function normalizeUsageProviderId(providerId?: number | null): number | null {
   return providerId;
 }
 
+function normalizeUsageDayStartHour(value?: number | null): number | null {
+  if (value == null) return null;
+  if (!Number.isSafeInteger(value) || value < 0 || value > 9) {
+    throw new Error(`SEC_INVALID_INPUT: invalid dayStartHour=${value}`);
+  }
+  return value;
+}
+
 function normalizeUsageBoolean(label: string, value: boolean | null | undefined): boolean | null {
   if (value == null) return null;
   if (typeof value !== "boolean") {
@@ -192,6 +202,7 @@ export function normalizeUsageQueryInputV2(input?: UsageQueryInputV2): Normalize
     cliKey: validateUsageCliKey(input?.cliKey),
     providerId: normalizeUsageProviderId(input?.providerId),
     folderKeys: normalizeUsageFolderKeys(input?.folderKeys),
+    dayStartHour: normalizeUsageDayStartHour(input?.dayStartHour),
     excludeCx2CcGatewayBridge: normalizeUsageBoolean(
       "excludeCx2CcGatewayBridge",
       input?.excludeCx2CcGatewayBridge
@@ -230,6 +241,7 @@ export function normalizeUsageDayDetailInput(
     providerId: normalizeUsageProviderId(input.providerId),
     folderLimit: normalizeUsageDayDetailFolderLimit(input.folderLimit),
     folderKeys: normalizeUsageFolderKeys(input.folderKeys),
+    dayStartHour: normalizeUsageDayStartHour(input.dayStartHour),
     excludeCx2CcGatewayBridge: normalizeUsageBoolean(
       "excludeCx2CcGatewayBridge",
       input.excludeCx2CcGatewayBridge
@@ -249,6 +261,7 @@ function buildQueryParamsV2(
     cliKey: normalizedInput.cliKey,
     providerId: normalizedInput.providerId,
     folderKeys: normalizedInput.folderKeys,
+    dayStartHour: normalizedInput.dayStartHour,
     excludeCx2CcGatewayBridge: normalizedInput.excludeCx2CcGatewayBridge,
   };
 }
@@ -261,6 +274,7 @@ function buildUsageDayDetailParams(input: UsageDayDetailInput): GeneratedUsageDa
     providerId: normalizedInput.providerId,
     folderLimit: normalizedInput.folderLimit,
     folderKeys: normalizedInput.folderKeys,
+    dayStartHour: normalizedInput.dayStartHour,
     excludeCx2CcGatewayBridge: normalizedInput.excludeCx2CcGatewayBridge,
   };
 }

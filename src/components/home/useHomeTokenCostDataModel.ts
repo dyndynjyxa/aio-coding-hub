@@ -26,6 +26,7 @@ type TokenCostQueryInput = {
   cliKey: null;
   providerId: null;
   folderKeys?: string[] | null;
+  dayStartHour?: number | null;
   excludeCx2CcGatewayBridge?: boolean | null;
 };
 

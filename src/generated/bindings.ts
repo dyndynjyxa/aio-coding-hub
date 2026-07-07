@@ -3842,6 +3842,7 @@ export type UsageDayDetailParams = {
   providerId: number | null;
   folderLimit: number | null;
   folderKeys: string[] | null;
+  dayStartHour: number | null;
   excludeCx2CcGatewayBridge: boolean | null;
 };
 export type UsageDayDetailV1 = {
@@ -3954,6 +3955,7 @@ export type UsageQueryParams = {
   cliKey: string | null;
   providerId: number | null;
   folderKeys: string[] | null;
+  dayStartHour: number | null;
   excludeCx2CcGatewayBridge: boolean | null;
 };
 export type UsageSummary = {

@@ -20,6 +20,7 @@ use super::{
 };
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 pub(super) fn leaderboard_v2_with_conn(
     conn: &Connection,
     scope: UsageScopeV2,
@@ -30,8 +31,34 @@ pub(super) fn leaderboard_v2_with_conn(
     limit: Option<usize>,
     exclude_cx2cc_gateway_bridge: bool,
 ) -> Result<Vec<UsageLeaderboardRow>, String> {
+    leaderboard_v2_with_conn_day_start(
+        conn,
+        scope,
+        start_ts,
+        end_ts,
+        cli_key,
+        provider_id,
+        limit,
+        exclude_cx2cc_gateway_bridge,
+        0,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn leaderboard_v2_with_conn_day_start(
+    conn: &Connection,
+    scope: UsageScopeV2,
+    start_ts: Option<i64>,
+    end_ts: Option<i64>,
+    cli_key: Option<&str>,
+    provider_id: Option<i64>,
+    limit: Option<usize>,
+    exclude_cx2cc_gateway_bridge: bool,
+    day_start_hour: i64,
+) -> Result<Vec<UsageLeaderboardRow>, String> {
     let effective_input_expr = SQL_EFFECTIVE_INPUT_TOKENS_EXPR;
     let effective_total_expr = sql_effective_total_tokens_expr();
+    let day_start_offset_seconds = day_start_hour.saturating_mul(3600);
     let (where_clause, where_params) = build_optional_range_cli_provider_filters(
         "created_at",
         "cli_key",
@@ -336,7 +363,7 @@ GROUP BY COALESCE(NULLIF(requested_model, ''), 'Unknown')
             let sql = format!(
                 r#"
 SELECT
-  strftime('%Y-%m-%d', created_at, 'unixepoch', 'localtime') AS key,
+  strftime('%Y-%m-%d', created_at - {day_start_offset_seconds}, 'unixepoch', 'localtime') AS key,
   COUNT(*) AS requests_total,
   SUM(CASE WHEN status >= 200 AND status < 300 AND error_code IS NULL THEN 1 ELSE 0 END) AS requests_success,
   SUM(
@@ -407,7 +434,8 @@ GROUP BY key
                 effective_input_expr = effective_input_expr,
                 effective_total_expr = effective_total_expr.as_str(),
                 where_clause = where_clause,
-                cx2cc_filter_clause = cx2cc_filter_clause
+                cx2cc_filter_clause = cx2cc_filter_clause,
+                day_start_offset_seconds = day_start_offset_seconds
             );
             let mut stmt = conn
                 .prepare(&sql)
@@ -760,6 +788,7 @@ pub(super) struct FolderFilteredLeaderboardParams<'a> {
     pub(super) folder_keys: &'a [String],
     pub(super) limit: Option<usize>,
     pub(super) exclude_cx2cc_gateway_bridge: bool,
+    pub(super) day_start_hour: i64,
 }
 
 pub(super) fn leaderboard_v2_folder_filtered_with_conn<F>(
@@ -770,15 +799,17 @@ pub(super) fn leaderboard_v2_folder_filtered_with_conn<F>(
 where
     F: FnOnce(&[UsageSessionLookupKey]) -> Vec<UsageResolvedFolder>,
 {
+    let day_start_offset_seconds = params.day_start_hour.saturating_mul(3600);
+    let day_bucket_sql = format!(
+        "strftime('%Y-%m-%d', r.created_at - {day_start_offset_seconds}, 'unixepoch', 'localtime')"
+    );
     let bucket_sql = match params.scope {
         UsageScopeV2::Cli => None,
         UsageScopeV2::Provider => {
             Some("CASE WHEN r.final_provider_id IS NULL THEN NULL ELSE CAST(r.final_provider_id AS TEXT) END")
         }
         UsageScopeV2::Model => Some("COALESCE(NULLIF(r.requested_model, ''), 'Unknown')"),
-        UsageScopeV2::Day => {
-            Some("strftime('%Y-%m-%d', r.created_at, 'unixepoch', 'localtime')")
-        }
+        UsageScopeV2::Day => Some(day_bucket_sql.as_str()),
     };
 
     let rows = usage_event_rows(
@@ -884,12 +915,13 @@ where
                 folder_keys,
                 limit,
                 exclude_cx2cc_gateway_bridge: resolved.exclude_cx2cc_gateway_bridge,
+                day_start_hour: resolved.day_start_hour,
             },
             folder_lookup,
         )?);
     }
 
-    Ok(leaderboard_v2_with_conn(
+    Ok(leaderboard_v2_with_conn_day_start(
         &conn,
         scope,
         resolved.start_ts,
@@ -898,5 +930,6 @@ where
         resolved.provider_id,
         limit,
         resolved.exclude_cx2cc_gateway_bridge,
+        resolved.day_start_hour,
     )?)
 }

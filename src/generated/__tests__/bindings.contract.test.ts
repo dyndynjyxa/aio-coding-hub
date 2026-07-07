@@ -112,6 +112,12 @@ describe("generated/bindings.ts contract", () => {
 
   it("pins acronym casing for usage bridge filter DTO fields", () => {
     expect(extractTypeBody(bindingsSource, "UsageQueryParams")).toContain(
+      "dayStartHour: number | null"
+    );
+    expect(extractTypeBody(bindingsSource, "UsageDayDetailParams")).toContain(
+      "dayStartHour: number | null"
+    );
+    expect(extractTypeBody(bindingsSource, "UsageQueryParams")).toContain(
       "excludeCx2CcGatewayBridge: boolean | null"
     );
     expect(extractTypeBody(bindingsSource, "UsageDayDetailParams")).toContain(

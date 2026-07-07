@@ -295,6 +295,7 @@ describe("services/usage/usage", () => {
       providerId: null,
       folderLimit: 8,
       folderKeys: ["/tmp/project"],
+      dayStartHour: 5,
       excludeCx2CcGatewayBridge: true,
     });
 
@@ -305,6 +306,7 @@ describe("services/usage/usage", () => {
       cliKey: "gemini",
       providerId: 7,
       folderKeys: ["/tmp/project"],
+      dayStartHour: 5,
       excludeCx2CcGatewayBridge: true,
     });
 
@@ -316,6 +318,7 @@ describe("services/usage/usage", () => {
       providerId: 9,
       limit: null,
       folderKeys: ["/tmp/project"],
+      dayStartHour: 6,
       excludeCx2CcGatewayBridge: true,
     });
     const folderOptions = await usageFolderOptionsV1("custom", {
@@ -323,6 +326,7 @@ describe("services/usage/usage", () => {
       endTs: 2,
       cliKey: "claude",
       providerId: 9,
+      dayStartHour: 7,
       excludeCx2CcGatewayBridge: true,
     });
 
@@ -332,6 +336,7 @@ describe("services/usage/usage", () => {
       cliKey: "claude",
       providerId: 11,
       limit: 20,
+      dayStartHour: 8,
       excludeCx2CcGatewayBridge: true,
     });
 
@@ -359,6 +364,7 @@ describe("services/usage/usage", () => {
       providerId: null,
       folderLimit: 8,
       folderKeys: ["/tmp/project"],
+      dayStartHour: 5,
       excludeCx2CcGatewayBridge: true,
     });
     expect(commands.usageSummaryV2).toHaveBeenNthCalledWith(1, {
@@ -368,6 +374,7 @@ describe("services/usage/usage", () => {
       cliKey: null,
       providerId: null,
       folderKeys: null,
+      dayStartHour: null,
       excludeCx2CcGatewayBridge: null,
     });
     expect(commands.usageSummaryV2).toHaveBeenNthCalledWith(2, {
@@ -377,6 +384,7 @@ describe("services/usage/usage", () => {
       cliKey: "gemini",
       providerId: 7,
       folderKeys: ["/tmp/project"],
+      dayStartHour: 5,
       excludeCx2CcGatewayBridge: true,
     });
     expect(commands.usageLeaderboardV2).toHaveBeenNthCalledWith(
@@ -389,6 +397,7 @@ describe("services/usage/usage", () => {
         cliKey: null,
         providerId: null,
         folderKeys: null,
+        dayStartHour: null,
         excludeCx2CcGatewayBridge: null,
       },
       null
@@ -403,6 +412,7 @@ describe("services/usage/usage", () => {
         cliKey: "claude",
         providerId: 9,
         folderKeys: ["/tmp/project"],
+        dayStartHour: 6,
         excludeCx2CcGatewayBridge: true,
       },
       null
@@ -414,6 +424,7 @@ describe("services/usage/usage", () => {
       cliKey: "claude",
       providerId: 9,
       folderKeys: null,
+      dayStartHour: 7,
       excludeCx2CcGatewayBridge: true,
     });
     expect(commands.usageProviderCacheRateTrendV1).toHaveBeenCalledWith(
@@ -424,6 +435,7 @@ describe("services/usage/usage", () => {
         cliKey: "claude",
         providerId: 11,
         folderKeys: null,
+        dayStartHour: 8,
         excludeCx2CcGatewayBridge: true,
       },
       20
@@ -454,6 +466,7 @@ describe("services/usage/usage", () => {
         cliKey: " gemini " as never,
         providerId: 7,
         folderKeys: [" /b ", "/a", "/a", " "],
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: true,
       })
     ).toEqual({
@@ -462,6 +475,7 @@ describe("services/usage/usage", () => {
       cliKey: "gemini",
       providerId: 7,
       folderKeys: ["/a", "/b"],
+      dayStartHour: 5,
       excludeCx2CcGatewayBridge: true,
     });
     expect(normalizeUsageDay(" 2026-04-22 ")).toBe("2026-04-22");
@@ -472,6 +486,7 @@ describe("services/usage/usage", () => {
         providerId: 9,
         folderLimit: 999,
         folderKeys: [" /tmp/project ", "/tmp/project"],
+        dayStartHour: 6,
         excludeCx2CcGatewayBridge: false,
       })
     ).toEqual({
@@ -480,6 +495,7 @@ describe("services/usage/usage", () => {
       providerId: 9,
       folderLimit: USAGE_DAY_DETAIL_FOLDER_MAX_LIMIT,
       folderKeys: ["/tmp/project"],
+      dayStartHour: 6,
       excludeCx2CcGatewayBridge: false,
     });
 
@@ -490,6 +506,7 @@ describe("services/usage/usage", () => {
       cliKey: " gemini " as never,
       providerId: 7,
       folderKeys: [" /b ", "/a", "/a", " "],
+      dayStartHour: 5,
       excludeCx2CcGatewayBridge: true,
     });
     await usageDayDetailV1({
@@ -498,6 +515,7 @@ describe("services/usage/usage", () => {
       providerId: 9,
       folderLimit: 999,
       folderKeys: [" /tmp/project ", "/tmp/project"],
+      dayStartHour: 6,
       excludeCx2CcGatewayBridge: false,
     });
 
@@ -509,6 +527,7 @@ describe("services/usage/usage", () => {
       cliKey: "gemini",
       providerId: 7,
       folderKeys: ["/a", "/b"],
+      dayStartHour: 5,
       excludeCx2CcGatewayBridge: true,
     });
     expect(commands.usageDayDetailV1).toHaveBeenCalledWith({
@@ -517,6 +536,7 @@ describe("services/usage/usage", () => {
       providerId: 9,
       folderLimit: USAGE_DAY_DETAIL_FOLDER_MAX_LIMIT,
       folderKeys: ["/tmp/project"],
+      dayStartHour: 6,
       excludeCx2CcGatewayBridge: false,
     });
   });
@@ -540,6 +560,12 @@ describe("services/usage/usage", () => {
     await expect(
       usageSummaryV2("daily", { excludeCx2CcGatewayBridge: "yes" as never })
     ).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(usageSummaryV2("daily", { dayStartHour: 10 })).rejects.toThrow(
+      "SEC_INVALID_INPUT"
+    );
+    await expect(usageDayDetailV1({ day: "2026-04-22", dayStartHour: -1 })).rejects.toThrow(
+      "SEC_INVALID_INPUT"
+    );
     await expect(usageDayDetailV1({ day: "2026-02-31" })).rejects.toThrow("SEC_INVALID_INPUT");
 
     expect(commands.usageSummary).not.toHaveBeenCalled();

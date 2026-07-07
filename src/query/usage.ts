@@ -124,6 +124,7 @@ export function useUsageDayDetailV1Query(input: UsageDayDetailInput, options?: U
           providerId: normalizedInput.providerId ?? null,
           folderLimit: normalizedInput.folderLimit,
           folderKeys: normalizedInput.folderKeys ?? null,
+          dayStartHour: normalizedInput.dayStartHour ?? null,
           excludeCx2CcGatewayBridge: normalizedInput.excludeCx2CcGatewayBridge ?? null,
         })
       : usageKeys.dayDetailV1Disabled(),

@@ -144,6 +144,10 @@ describe("pages/UsagePage (ui)", () => {
     expect(screen.getAllByText("$1.230000").length).toBeGreaterThan(0);
     expect(screen.getByText("总计")).toBeInTheDocument();
     expect(screen.getByText("缓存 / 命中率")).toBeInTheDocument();
+    const summaryCalls = vi.mocked(useUsageSummaryV2Query).mock.calls;
+    const leaderboardCalls = vi.mocked(useUsageLeaderboardV2Query).mock.calls;
+    expect(summaryCalls[summaryCalls.length - 1]?.[1]).not.toHaveProperty("dayStartHour");
+    expect(leaderboardCalls[leaderboardCalls.length - 1]?.[2]).not.toHaveProperty("dayStartHour");
   });
 
   it("switches to cache trend tab, locks provider scope, and restores previous scope", () => {

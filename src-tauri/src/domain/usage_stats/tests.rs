@@ -5,7 +5,7 @@ use super::day_detail::{day_detail_v1_with_conn, UsageDayResolvedFolder};
 use super::folder_options::folder_options_v1_with_conn;
 use super::leaderboard_v2::{
     leaderboard_v2_folder_filtered_with_conn, leaderboard_v2_with_conn,
-    FolderFilteredLeaderboardParams,
+    leaderboard_v2_with_conn_day_start, FolderFilteredLeaderboardParams,
 };
 use super::summary::{summary_query, summary_v2_with_conn};
 use super::*;
@@ -76,6 +76,16 @@ fn local_day_start_ts(conn: &Connection, day: &str) -> i64 {
         |row| row.get(0),
     )
     .expect("query local day start ts")
+}
+
+fn local_workday_start_ts(conn: &Connection, day: &str, day_start_hour: i64) -> i64 {
+    let time = format!("{day_start_hour:02}:00:00");
+    conn.query_row(
+        "SELECT CAST(strftime('%s', ?1 || ' ' || ?2, 'utc') AS INTEGER)",
+        params![day, time],
+        |row| row.get(0),
+    )
+    .expect("query local workday start ts")
 }
 
 #[derive(Clone)]
@@ -396,10 +406,12 @@ fn usage_params_accept_generated_and_legacy_cx2cc_filter_keys() {
         "cliKey": null,
         "providerId": null,
         "folderKeys": null,
+        "dayStartHour": 5,
         "excludeCx2CcGatewayBridge": true
     }))
     .expect("deserialize usage query params");
     assert_eq!(params.exclude_cx2cc_gateway_bridge, Some(true));
+    assert_eq!(params.day_start_hour, Some(5));
 
     let legacy_params: UsageQueryParams = serde_json::from_value(serde_json::json!({
         "period": "daily",
@@ -419,10 +431,12 @@ fn usage_params_accept_generated_and_legacy_cx2cc_filter_keys() {
         "providerId": null,
         "folderLimit": 8,
         "folderKeys": null,
+        "dayStartHour": 5,
         "excludeCx2CcGatewayBridge": true
     }))
     .expect("deserialize usage day detail params");
     assert_eq!(detail_params.exclude_cx2cc_gateway_bridge, Some(true));
+    assert_eq!(detail_params.day_start_hour, Some(5));
 
     let legacy_detail_params: UsageDayDetailParams = serde_json::from_value(serde_json::json!({
         "day": "2026-04-22",
@@ -568,6 +582,7 @@ fn cx2cc_gateway_bridge_filter_covers_overview_and_home_usage_queries() {
             cli_key: None,
             provider_id: None,
             folder_keys: None,
+            day_start_hour: None,
             exclude_cx2cc_gateway_bridge: Some(true),
         },
         fixture_folder_lookup,
@@ -585,6 +600,7 @@ fn cx2cc_gateway_bridge_filter_covers_overview_and_home_usage_queries() {
             cli_key: None,
             provider_id: None,
             folder_keys: None,
+            day_start_hour: None,
             exclude_cx2cc_gateway_bridge: Some(false),
         },
         fixture_folder_lookup,
@@ -602,6 +618,7 @@ fn cx2cc_gateway_bridge_filter_covers_overview_and_home_usage_queries() {
             cli_key: None,
             provider_id: None,
             folder_keys: None,
+            day_start_hour: None,
             exclude_cx2cc_gateway_bridge: Some(true),
         },
         fixture_folder_lookup,
@@ -622,6 +639,7 @@ fn cx2cc_gateway_bridge_filter_covers_overview_and_home_usage_queries() {
             provider_id: None,
             folder_limit: None,
             folder_keys: Some(vec!["/work/alpha".to_string()]),
+            day_start_hour: None,
             exclude_cx2cc_gateway_bridge: Some(true),
         },
         fixture_folder_lookup,
@@ -1538,6 +1556,184 @@ INSERT INTO request_logs (
 }
 
 #[test]
+fn v2_day_leaderboard_respects_workday_start_hour() {
+    let conn = setup_conn();
+    let day_one = "2026-04-16";
+    let day_two = "2026-04-17";
+    let day_start_hour = 5;
+    let workday_one_start = local_workday_start_ts(&conn, day_one, day_start_hour);
+    let workday_two_start = local_workday_start_ts(&conn, day_two, day_start_hour);
+    let query_end = local_workday_start_ts(&conn, "2026-04-18", day_start_hour);
+
+    for (provider_id, provider_name) in [(123, "OpenAI"), (456, "Gemini Upstream")] {
+        conn.execute(
+            "INSERT INTO providers (id, name) VALUES (?1, ?2)",
+            params![provider_id, provider_name],
+        )
+        .expect("insert provider");
+    }
+
+    for (cli_key, provider_id, provider_name, session_id, created_at, input_tokens) in [
+        (
+            "codex",
+            123,
+            "OpenAI",
+            "codex-alpha-1",
+            workday_one_start + 4 * 3600,
+            100i64,
+        ),
+        (
+            "codex",
+            123,
+            "OpenAI",
+            "codex-alpha-2",
+            workday_one_start + 21 * 3600,
+            200i64,
+        ),
+        (
+            "codex",
+            456,
+            "Gemini Upstream",
+            "codex-beta-1",
+            workday_two_start + 4 * 3600,
+            300i64,
+        ),
+        (
+            "claude",
+            123,
+            "OpenAI",
+            "claude-alpha-1",
+            workday_two_start + 15 * 3600,
+            400i64,
+        ),
+    ] {
+        insert_usage_log(
+            &conn,
+            TestUsageLog {
+                cli_key,
+                provider_id,
+                provider_name,
+                requested_model: "model-test",
+                input_tokens: Some(input_tokens),
+                output_tokens: Some(10),
+                session_id: Some(session_id),
+                created_at,
+                ..base_usage_log(created_at)
+            },
+        );
+    }
+
+    let workday_rows = leaderboard_v2_with_conn_day_start(
+        &conn,
+        UsageScopeV2::Day,
+        Some(workday_one_start),
+        Some(query_end),
+        None,
+        None,
+        Some(50),
+        false,
+        day_start_hour,
+    )
+    .expect("workday leaderboard");
+    assert_eq!(workday_rows.len(), 2);
+    assert_eq!(workday_rows[0].key, day_two);
+    assert_eq!(workday_rows[0].requests_total, 2);
+    assert_eq!(
+        workday_rows[0].first_request_created_at_ms,
+        Some((workday_two_start + 4 * 3600) * 1000)
+    );
+    assert_eq!(
+        workday_rows[0].last_request_created_at_ms,
+        Some((workday_two_start + 15 * 3600) * 1000)
+    );
+    assert_eq!(workday_rows[1].key, day_one);
+    assert_eq!(workday_rows[1].requests_total, 2);
+    assert_eq!(
+        workday_rows[1].first_request_created_at_ms,
+        Some((workday_one_start + 4 * 3600) * 1000)
+    );
+    assert_eq!(
+        workday_rows[1].last_request_created_at_ms,
+        Some((workday_one_start + 21 * 3600) * 1000)
+    );
+
+    let natural_rows = leaderboard_v2_with_conn(
+        &conn,
+        UsageScopeV2::Day,
+        Some(workday_one_start),
+        Some(query_end),
+        None,
+        None,
+        Some(50),
+        false,
+    )
+    .expect("natural day leaderboard");
+    assert_eq!(natural_rows.len(), 2);
+    assert_eq!(natural_rows[0].key, day_two);
+    assert_eq!(natural_rows[0].requests_total, 3);
+    assert_eq!(
+        natural_rows[0].first_request_created_at_ms,
+        Some((workday_one_start + 21 * 3600) * 1000)
+    );
+    assert_eq!(
+        natural_rows[0].last_request_created_at_ms,
+        Some((workday_two_start + 15 * 3600) * 1000)
+    );
+    assert_eq!(natural_rows[1].key, day_one);
+    assert_eq!(natural_rows[1].requests_total, 1);
+
+    let folder_rows = leaderboard_v2_folder_filtered_with_conn(
+        &conn,
+        FolderFilteredLeaderboardParams {
+            scope: UsageScopeV2::Day,
+            start_ts: Some(workday_one_start),
+            end_ts: Some(query_end),
+            cli_key: None,
+            provider_id: None,
+            folder_keys: &["/work/alpha".to_string()],
+            limit: Some(50),
+            exclude_cx2cc_gateway_bridge: false,
+            day_start_hour,
+        },
+        fixture_folder_lookup,
+    )
+    .expect("folder filtered workday leaderboard");
+    assert_eq!(folder_rows.len(), 2);
+    assert_eq!(folder_rows[0].key, day_two);
+    assert_eq!(folder_rows[0].requests_total, 1);
+    assert_eq!(folder_rows[1].key, day_one);
+    assert_eq!(folder_rows[1].requests_total, 2);
+
+    let day_one_detail = day_detail_v1_with_conn(
+        &conn,
+        &UsageDayDetailParams {
+            day: day_one.to_string(),
+            cli_key: None,
+            provider_id: None,
+            folder_limit: None,
+            folder_keys: Some(vec!["/work/alpha".to_string()]),
+            day_start_hour: Some(day_start_hour),
+            exclude_cx2cc_gateway_bridge: None,
+        },
+        fixture_folder_lookup,
+    )
+    .expect("workday day detail");
+    assert_eq!(
+        day_one_detail
+            .hours
+            .iter()
+            .map(|row| row.requests_total)
+            .sum::<i64>(),
+        2
+    );
+    assert_eq!(day_one_detail.hours[2].requests_total, 1);
+    assert_eq!(day_one_detail.hours[9].requests_total, 1);
+    assert_eq!(day_one_detail.folders.len(), 1);
+    assert_eq!(day_one_detail.folders[0].key, "/work/alpha");
+    assert_eq!(day_one_detail.folders[0].requests_total, 2);
+}
+
+#[test]
 fn day_detail_v1_filters_by_local_day_and_returns_hour_buckets() {
     let conn = setup_conn();
     let day = "2026-04-16";
@@ -1614,6 +1810,7 @@ fn day_detail_v1_filters_by_local_day_and_returns_hour_buckets() {
             provider_id: None,
             folder_limit: None,
             folder_keys: None,
+            day_start_hour: None,
             exclude_cx2cc_gateway_bridge: None,
         },
         |_| Vec::new(),
@@ -1644,6 +1841,7 @@ fn day_detail_v1_filters_by_local_day_and_returns_hour_buckets() {
             provider_id: Some(456),
             folder_limit: None,
             folder_keys: None,
+            day_start_hour: None,
             exclude_cx2cc_gateway_bridge: None,
         },
         |_| Vec::new(),
@@ -1662,6 +1860,7 @@ fn day_detail_v1_filters_by_local_day_and_returns_hour_buckets() {
             provider_id: None,
             folder_limit: None,
             folder_keys: None,
+            day_start_hour: None,
             exclude_cx2cc_gateway_bridge: None,
         },
         |_| Vec::new(),
@@ -1758,6 +1957,7 @@ fn day_detail_v1_groups_resolved_folders_and_unknown_sessions() {
             provider_id: None,
             folder_limit: None,
             folder_keys: None,
+            day_start_hour: None,
             exclude_cx2cc_gateway_bridge: None,
         },
         |keys| {
@@ -1888,6 +2088,7 @@ fn folder_options_v1_groups_resolved_folders_and_keeps_unknown_selectable() {
             cli_key: None,
             provider_id: None,
             folder_keys: Some(vec!["/work/alpha".to_string()]),
+            day_start_hour: None,
             exclude_cx2cc_gateway_bridge: None,
         },
         fixture_folder_lookup,
@@ -1961,6 +2162,7 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
         cli_key: None,
         provider_id: None,
         folder_keys: Some(vec!["/work/alpha".to_string()]),
+        day_start_hour: None,
         exclude_cx2cc_gateway_bridge: None,
     };
     let unfiltered_summary = summary_v2_with_conn(
@@ -1992,6 +2194,7 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
             folder_keys: &["/work/alpha".to_string()],
             limit: Some(50),
             exclude_cx2cc_gateway_bridge: false,
+            day_start_hour: 0,
         },
         fixture_folder_lookup,
     )
@@ -2019,6 +2222,7 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
             folder_keys: &["/work/alpha".to_string()],
             limit: Some(50),
             exclude_cx2cc_gateway_bridge: false,
+            day_start_hour: 0,
         },
         fixture_folder_lookup,
     )
@@ -2063,6 +2267,7 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
             provider_id: None,
             folder_limit: None,
             folder_keys: Some(vec!["/work/alpha".to_string()]),
+            day_start_hour: None,
             exclude_cx2cc_gateway_bridge: None,
         },
         fixture_folder_lookup,

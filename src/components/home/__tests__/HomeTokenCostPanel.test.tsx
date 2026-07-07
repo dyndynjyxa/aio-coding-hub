@@ -156,6 +156,7 @@ function localTimeMs(
 describe("components/home/HomeTokenCostPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.removeItem("homeUsageDayStartHour");
     vi.mocked(useUsageDayDetailV1Query).mockReturnValue({
       data: null,
       isLoading: false,
@@ -294,11 +295,28 @@ describe("components/home/HomeTokenCostPanel", () => {
 
     render(<HomeTokenCostPanel devPreviewEnabled={true} />);
 
-    const filterGroup = screen.getByRole("group", { name: "用量筛选" });
-    const filterLabels = Array.from(filterGroup.querySelectorAll("button,input")).map(controlLabel);
-    expect(filterLabels).toEqual([
-      "全部文件夹",
-      "过滤转接重复用量",
+    const settingsGroup = screen.getByRole("group", { name: "用量筛选设置" });
+    const settingLabels = Array.from(settingsGroup.querySelectorAll("button,input,select")).map(
+      controlLabel
+    );
+    expect(settingLabels).toEqual(["全部文件夹", "过滤转接重复用量", "工作日开始"]);
+    const dayStartSelect = screen.getByLabelText("工作日开始") as HTMLSelectElement;
+    expect(dayStartSelect.value).toBe("5");
+    expect(Array.from(dayStartSelect.options).map((option) => option.textContent)).toEqual([
+      "00:00",
+      "01:00",
+      "02:00",
+      "03:00",
+      "04:00",
+      "05:00",
+      "06:00",
+      "07:00",
+      "08:00",
+      "09:00",
+    ]);
+    const rangeGroup = screen.getByRole("group", { name: "用量时间范围" });
+    const rangeLabels = Array.from(rangeGroup.querySelectorAll("button,input")).map(controlLabel);
+    expect(rangeLabels).toEqual([
       "今天",
       "昨天",
       "最近 3 天",
@@ -396,6 +414,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         limit: null,
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -415,10 +434,202 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         limit: null,
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
     );
+  });
+
+  it("persists the home usage workday start hour and passes it to queries", () => {
+    vi.mocked(useUsageSummaryV2Query).mockReturnValue({
+      data: {
+        requests_total: 1,
+        requests_with_usage: 1,
+        requests_success: 1,
+        requests_failed: 0,
+        cost_covered_success: 1,
+        total_duration_ms: 1_000,
+        avg_duration_ms: 1_000,
+        avg_ttfb_ms: 200,
+        avg_output_tokens_per_second: 80,
+        input_tokens: 100,
+        output_tokens: 50,
+        io_total_tokens: 150,
+        total_tokens: 180,
+        cache_read_input_tokens: 30,
+        cache_creation_input_tokens: 0,
+        cache_creation_5m_input_tokens: 0,
+      },
+      isLoading: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useUsageLeaderboardV2Query).mockImplementation(
+      (scope) =>
+        ({
+          data:
+            scope === "day"
+              ? [
+                  {
+                    key: "2026-04-16",
+                    name: "2026-04-16",
+                    requests_total: 1,
+                    requests_success: 1,
+                    requests_failed: 0,
+                    total_tokens: 180,
+                    io_total_tokens: 150,
+                    input_tokens: 100,
+                    output_tokens: 50,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 30,
+                    total_duration_ms: 1_000,
+                    first_request_created_at_ms: localTimeMs(2026, 3, 16, 9, 0),
+                    last_request_created_at_ms: localTimeMs(2026, 3, 16, 9, 1),
+                    avg_duration_ms: 1_000,
+                    avg_ttfb_ms: 200,
+                    avg_output_tokens_per_second: 80,
+                    cost_usd: 0.1,
+                  },
+                ]
+              : [],
+          isLoading: false,
+          isFetching: false,
+          error: null,
+          refetch: vi.fn(),
+        }) as any
+    );
+
+    render(<HomeTokenCostPanel />);
+
+    const dayStartSelect = screen.getByLabelText("工作日开始") as HTMLSelectElement;
+    expect(dayStartSelect.value).toBe("5");
+    expect(vi.mocked(useUsageSummaryV2Query)).toHaveBeenLastCalledWith(
+      "daily",
+      expect.objectContaining({ dayStartHour: 5 }),
+      undefined
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "日期" }));
+    fireEvent.click(screen.getByRole("button", { name: "展开 2026-04-16 日期详情" }));
+    expect(vi.mocked(useUsageDayDetailV1Query)).toHaveBeenLastCalledWith(
+      expect.objectContaining({ day: "2026-04-16", dayStartHour: 5 }),
+      expect.objectContaining({ enabled: true })
+    );
+
+    fireEvent.change(dayStartSelect, { target: { value: "7" } });
+
+    expect(dayStartSelect.value).toBe("7");
+    expect(window.localStorage.getItem("homeUsageDayStartHour")).toBe("7");
+    expect(vi.mocked(useUsageSummaryV2Query)).toHaveBeenLastCalledWith(
+      "daily",
+      expect.objectContaining({ dayStartHour: 7 }),
+      undefined
+    );
+    expect(vi.mocked(useUsageLeaderboardV2Query)).toHaveBeenLastCalledWith(
+      "day",
+      "daily",
+      expect.objectContaining({ dayStartHour: 7 }),
+      undefined
+    );
+    expect(vi.mocked(useUsageFolderOptionsV1Query)).toHaveBeenLastCalledWith(
+      "daily",
+      expect.objectContaining({ dayStartHour: 7 }),
+      expect.objectContaining({ enabled: true })
+    );
+    expect(vi.mocked(useUsageDayDetailV1Query)).toHaveBeenLastCalledWith(
+      expect.objectContaining({ day: "", dayStartHour: 7 }),
+      expect.objectContaining({ enabled: false })
+    );
+  });
+
+  it("formats date request windows across midnight with next-day text", () => {
+    vi.mocked(useUsageSummaryV2Query).mockReturnValue({
+      data: {
+        requests_total: 2,
+        requests_with_usage: 2,
+        requests_success: 2,
+        requests_failed: 0,
+        cost_covered_success: 2,
+        total_duration_ms: 26_388_000,
+        avg_duration_ms: 1_000,
+        avg_ttfb_ms: 200,
+        avg_output_tokens_per_second: 80,
+        input_tokens: 100,
+        output_tokens: 50,
+        io_total_tokens: 150,
+        total_tokens: 180,
+        cache_read_input_tokens: 30,
+        cache_creation_input_tokens: 0,
+        cache_creation_5m_input_tokens: 0,
+      },
+      isLoading: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useUsageLeaderboardV2Query).mockImplementation(
+      (scope) =>
+        ({
+          data:
+            scope === "day"
+              ? [
+                  {
+                    key: "2026-04-17",
+                    name: "2026-04-17",
+                    requests_total: 1,
+                    requests_success: 1,
+                    requests_failed: 0,
+                    total_tokens: 180,
+                    io_total_tokens: 150,
+                    input_tokens: 100,
+                    output_tokens: 50,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 30,
+                    total_duration_ms: 11_088_000,
+                    first_request_created_at_ms: localTimeMs(2026, 3, 17, 9, 0),
+                    last_request_created_at_ms: localTimeMs(2026, 3, 17, 20, 0),
+                    avg_duration_ms: 1_000,
+                    avg_ttfb_ms: 200,
+                    avg_output_tokens_per_second: 80,
+                    cost_usd: 0.1,
+                  },
+                  {
+                    key: "2026-04-16",
+                    name: "2026-04-16",
+                    requests_total: 1,
+                    requests_success: 1,
+                    requests_failed: 0,
+                    total_tokens: 180,
+                    io_total_tokens: 150,
+                    input_tokens: 100,
+                    output_tokens: 50,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 30,
+                    total_duration_ms: 15_300_000,
+                    first_request_created_at_ms: localTimeMs(2026, 3, 16, 9, 0),
+                    last_request_created_at_ms: localTimeMs(2026, 3, 17, 2, 0),
+                    avg_duration_ms: 1_000,
+                    avg_ttfb_ms: 200,
+                    avg_output_tokens_per_second: 80,
+                    cost_usd: 0.1,
+                  },
+                ]
+              : [],
+          isLoading: false,
+          isFetching: false,
+          error: null,
+          refetch: vi.fn(),
+        }) as any
+    );
+
+    render(<HomeTokenCostPanel />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "日期" }));
+
+    expect(screen.getByLabelText("09:00-20:00/28%")).toBeInTheDocument();
+    expect(screen.getByLabelText("09:00-次日02:00/25%")).toBeInTheDocument();
   });
 
   it("sorts the leaderboard by clicked headers without changing usage query params", () => {
@@ -558,6 +769,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         limit: null,
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -640,6 +852,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         providerId: null,
         folderLimit: 8,
         folderKeys: null,
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: true,
       },
       expect.objectContaining({ enabled: true })
@@ -858,6 +1071,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         endTs: null,
         cliKey: null,
         providerId: null,
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: true,
       },
       expect.objectContaining({ enabled: true })
@@ -870,6 +1084,7 @@ describe("components/home/HomeTokenCostPanel", () => {
       "daily",
       expect.objectContaining({
         folderKeys: ["/Users/demo/aio-coding-hub"],
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -879,6 +1094,7 @@ describe("components/home/HomeTokenCostPanel", () => {
       "daily",
       expect.objectContaining({
         folderKeys: ["/Users/demo/aio-coding-hub"],
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -891,6 +1107,7 @@ describe("components/home/HomeTokenCostPanel", () => {
       expect.objectContaining({
         day: "2026-04-16",
         folderKeys: ["/Users/demo/aio-coding-hub"],
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: true,
       }),
       expect.objectContaining({ enabled: true })
@@ -986,6 +1203,7 @@ describe("components/home/HomeTokenCostPanel", () => {
       "daily",
       expect.objectContaining({
         excludeCx2CcGatewayBridge: false,
+        dayStartHour: 5,
       }),
       undefined
     );
@@ -994,6 +1212,7 @@ describe("components/home/HomeTokenCostPanel", () => {
       "daily",
       expect.objectContaining({
         excludeCx2CcGatewayBridge: false,
+        dayStartHour: 5,
       }),
       undefined
     );
@@ -1001,6 +1220,7 @@ describe("components/home/HomeTokenCostPanel", () => {
       "daily",
       expect.objectContaining({
         excludeCx2CcGatewayBridge: false,
+        dayStartHour: 5,
       }),
       expect.objectContaining({ enabled: true })
     );
@@ -1011,6 +1231,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(vi.mocked(useUsageDayDetailV1Query)).toHaveBeenLastCalledWith(
       expect.objectContaining({
         day: "2026-04-16",
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: false,
       }),
       expect.objectContaining({ enabled: true })
@@ -1299,10 +1520,11 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(vi.mocked(useUsageSummaryV2Query)).toHaveBeenLastCalledWith(
       "custom",
       expect.objectContaining({
-        startTs: Math.floor(new Date(2026, 3, 15, 0, 0, 0).getTime() / 1000),
-        endTs: Math.floor(new Date(2026, 3, 16, 0, 0, 0).getTime() / 1000),
+        startTs: Math.floor(new Date(2026, 3, 15, 5, 0, 0).getTime() / 1000),
+        endTs: Math.floor(new Date(2026, 3, 16, 5, 0, 0).getTime() / 1000),
         cliKey: null,
         providerId: null,
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -1311,11 +1533,12 @@ describe("components/home/HomeTokenCostPanel", () => {
       "provider",
       "custom",
       expect.objectContaining({
-        startTs: Math.floor(new Date(2026, 3, 15, 0, 0, 0).getTime() / 1000),
-        endTs: Math.floor(new Date(2026, 3, 16, 0, 0, 0).getTime() / 1000),
+        startTs: Math.floor(new Date(2026, 3, 15, 5, 0, 0).getTime() / 1000),
+        endTs: Math.floor(new Date(2026, 3, 16, 5, 0, 0).getTime() / 1000),
         cliKey: null,
         providerId: null,
         limit: null,
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -1326,10 +1549,11 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(vi.mocked(useUsageSummaryV2Query)).toHaveBeenLastCalledWith(
       "custom",
       expect.objectContaining({
-        startTs: Math.floor(new Date(2026, 3, 14, 0, 0, 0).getTime() / 1000),
-        endTs: Math.floor(new Date(2026, 3, 17, 0, 0, 0).getTime() / 1000),
+        startTs: Math.floor(new Date(2026, 3, 14, 5, 0, 0).getTime() / 1000),
+        endTs: Math.floor(new Date(2026, 3, 17, 5, 0, 0).getTime() / 1000),
         cliKey: null,
         providerId: null,
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -1338,11 +1562,12 @@ describe("components/home/HomeTokenCostPanel", () => {
       "provider",
       "custom",
       expect.objectContaining({
-        startTs: Math.floor(new Date(2026, 3, 14, 0, 0, 0).getTime() / 1000),
-        endTs: Math.floor(new Date(2026, 3, 17, 0, 0, 0).getTime() / 1000),
+        startTs: Math.floor(new Date(2026, 3, 14, 5, 0, 0).getTime() / 1000),
+        endTs: Math.floor(new Date(2026, 3, 17, 5, 0, 0).getTime() / 1000),
         cliKey: null,
         providerId: null,
         limit: null,
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -1353,10 +1578,11 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(vi.mocked(useUsageSummaryV2Query)).toHaveBeenLastCalledWith(
       "custom",
       expect.objectContaining({
-        startTs: Math.floor(new Date(2026, 3, 2, 0, 0, 0).getTime() / 1000),
-        endTs: Math.floor(new Date(2026, 3, 17, 0, 0, 0).getTime() / 1000),
+        startTs: Math.floor(new Date(2026, 3, 2, 5, 0, 0).getTime() / 1000),
+        endTs: Math.floor(new Date(2026, 3, 17, 5, 0, 0).getTime() / 1000),
         cliKey: null,
         providerId: null,
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -1365,11 +1591,12 @@ describe("components/home/HomeTokenCostPanel", () => {
       "provider",
       "custom",
       expect.objectContaining({
-        startTs: Math.floor(new Date(2026, 3, 2, 0, 0, 0).getTime() / 1000),
-        endTs: Math.floor(new Date(2026, 3, 17, 0, 0, 0).getTime() / 1000),
+        startTs: Math.floor(new Date(2026, 3, 2, 5, 0, 0).getTime() / 1000),
+        endTs: Math.floor(new Date(2026, 3, 17, 5, 0, 0).getTime() / 1000),
         cliKey: null,
         providerId: null,
         limit: null,
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -1385,6 +1612,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         folderKeys: null,
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: true,
       },
       undefined
@@ -1400,6 +1628,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         folderKeys: null,
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: true,
       },
       undefined
@@ -1474,6 +1703,7 @@ describe("components/home/HomeTokenCostPanel", () => {
       expect.objectContaining({
         startTs: null,
         endTs: null,
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: true,
       }),
       expect.objectContaining({ enabled: true })
@@ -1484,6 +1714,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         folderLimit: 8,
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: true,
       }),
       expect.objectContaining({ enabled: false })
@@ -1493,6 +1724,7 @@ describe("components/home/HomeTokenCostPanel", () => {
       expect.objectContaining({
         startTs: null,
         endTs: null,
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -1505,10 +1737,11 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(vi.mocked(useUsageSummaryV2Query)).toHaveBeenLastCalledWith(
       "custom",
       expect.objectContaining({
-        startTs: Math.floor(new Date(2026, 3, 1, 0, 0, 0).getTime() / 1000),
-        endTs: Math.floor(new Date(2026, 4, 1, 0, 0, 0).getTime() / 1000),
+        startTs: Math.floor(new Date(2026, 3, 1, 5, 0, 0).getTime() / 1000),
+        endTs: Math.floor(new Date(2026, 4, 1, 5, 0, 0).getTime() / 1000),
         cliKey: null,
         providerId: null,
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -1517,11 +1750,12 @@ describe("components/home/HomeTokenCostPanel", () => {
       "provider",
       "custom",
       expect.objectContaining({
-        startTs: Math.floor(new Date(2026, 3, 1, 0, 0, 0).getTime() / 1000),
-        endTs: Math.floor(new Date(2026, 4, 1, 0, 0, 0).getTime() / 1000),
+        startTs: Math.floor(new Date(2026, 3, 1, 5, 0, 0).getTime() / 1000),
+        endTs: Math.floor(new Date(2026, 4, 1, 5, 0, 0).getTime() / 1000),
         cliKey: null,
         providerId: null,
         limit: null,
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -1883,6 +2117,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         folderLimit: 8,
+        dayStartHour: 5,
         excludeCx2CcGatewayBridge: true,
       }),
       expect.objectContaining({ enabled: false })

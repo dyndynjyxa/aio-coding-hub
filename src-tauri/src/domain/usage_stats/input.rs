@@ -11,6 +11,7 @@ pub struct UsageQueryParams {
     pub cli_key: Option<String>,
     pub provider_id: Option<i64>,
     pub folder_keys: Option<Vec<String>>,
+    pub day_start_hour: Option<i64>,
     #[serde(
         rename = "excludeCx2CcGatewayBridge",
         alias = "excludeCx2ccGatewayBridge"
@@ -27,6 +28,7 @@ pub struct UsageDayDetailParams {
     pub provider_id: Option<i64>,
     pub folder_limit: Option<u32>,
     pub folder_keys: Option<Vec<String>>,
+    pub day_start_hour: Option<i64>,
     #[serde(
         rename = "excludeCx2CcGatewayBridge",
         alias = "excludeCx2ccGatewayBridge"
@@ -151,6 +153,16 @@ pub(super) fn normalize_folder_keys(
     Ok(Some(out))
 }
 
+pub(super) fn normalize_day_start_hour(value: Option<i64>) -> crate::shared::error::AppResult<i64> {
+    let Some(hour) = value else {
+        return Ok(0);
+    };
+    if !(0..=9).contains(&hour) {
+        return Err("SEC_INVALID_INPUT: day_start_hour must be between 0 and 9".into());
+    }
+    Ok(hour)
+}
+
 /// Validated and resolved query parameters ready for SQL execution.
 pub(super) struct ResolvedQueryParams<'a> {
     pub period: UsagePeriodV2,
@@ -159,6 +171,7 @@ pub(super) struct ResolvedQueryParams<'a> {
     pub cli_key: Option<&'a str>,
     pub provider_id: Option<i64>,
     pub folder_keys: Option<Vec<String>>,
+    pub day_start_hour: i64,
     pub exclude_cx2cc_gateway_bridge: bool,
 }
 
@@ -172,8 +185,9 @@ pub(super) fn resolve_query_params<'a>(
     params: &'a UsageQueryParams,
 ) -> crate::shared::error::AppResult<ResolvedQueryParams<'a>> {
     let period = parse_period_v2(&params.period)?;
+    let day_start_hour = normalize_day_start_hour(params.day_start_hour)?;
     let (start_ts, end_ts) =
-        super::compute_bounds_v2(conn, period, params.start_ts, params.end_ts)?;
+        super::compute_bounds_v2(conn, period, params.start_ts, params.end_ts, day_start_hour)?;
     let cli_key = normalize_cli_filter(params.cli_key.as_deref())?;
     let provider_id = normalize_provider_id_filter(params.provider_id)?;
     let folder_keys = normalize_folder_keys(params.folder_keys.as_deref())?;
@@ -185,6 +199,7 @@ pub(super) fn resolve_query_params<'a>(
         cli_key,
         provider_id,
         folder_keys,
+        day_start_hour,
         exclude_cx2cc_gateway_bridge,
     })
 }

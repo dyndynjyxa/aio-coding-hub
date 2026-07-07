@@ -8,7 +8,7 @@ use super::folders::{
     filter_rows_by_folder_keys, folder_identity_for_row, resolved_folder_map, session_lookup_keys,
     usage_event_rows, UsageEventAgg,
 };
-use super::input::{normalize_day, normalize_provider_id_filter};
+use super::input::{normalize_day, normalize_day_start_hour, normalize_provider_id_filter};
 use super::{
     normalize_cli_filter, normalize_folder_keys, ProviderAgg, UsageDayDetailParams,
     UsageDayDetailV1, UsageDayFolderRow, UsageDayHourRow,
@@ -19,11 +19,12 @@ pub use super::folders::{
     UsageSessionLookupKey as UsageDaySessionLookupKey,
 };
 
-fn local_start_ts(conn: &Connection, day: &str) -> Result<i64, String> {
+fn local_start_ts(conn: &Connection, day: &str, day_start_hour: i64) -> Result<i64, String> {
+    let time = format!("{day_start_hour:02}:00:00");
     let ts = conn
         .query_row(
-            "SELECT CAST(strftime('%s', ?1 || ' 00:00:00', 'utc') AS INTEGER)",
-            params![day],
+            "SELECT CAST(strftime('%s', ?1 || ' ' || ?2, 'utc') AS INTEGER)",
+            params![day, time],
             |row| row.get::<_, Option<i64>>(0),
         )
         .map_err(|e| db_err!("failed to compute local day start ts: {e}"))?
@@ -31,7 +32,11 @@ fn local_start_ts(conn: &Connection, day: &str) -> Result<i64, String> {
     Ok(ts)
 }
 
-fn local_day_bounds(conn: &Connection, day: &str) -> Result<(String, i64, i64), String> {
+fn local_day_bounds(
+    conn: &Connection,
+    day: &str,
+    day_start_hour: i64,
+) -> Result<(String, i64, i64), String> {
     let normalized = normalize_day(day)?;
     let date = NaiveDate::parse_from_str(&normalized, "%Y-%m-%d")
         .map_err(|_| format!("SEC_INVALID_INPUT: invalid day={normalized}"))?;
@@ -40,8 +45,8 @@ fn local_day_bounds(conn: &Connection, day: &str) -> Result<(String, i64, i64), 
         .ok_or_else(|| "SEC_INVALID_INPUT: day out of range".to_string())?
         .format("%Y-%m-%d")
         .to_string();
-    let start_ts = local_start_ts(conn, &normalized)?;
-    let end_ts = local_start_ts(conn, &next_day)?;
+    let start_ts = local_start_ts(conn, &normalized, day_start_hour)?;
+    let end_ts = local_start_ts(conn, &next_day, day_start_hour)?;
     if start_ts >= end_ts {
         return Err("SEC_INVALID_INPUT: invalid local day bounds".to_string());
     }
@@ -143,7 +148,8 @@ pub(super) fn day_detail_v1_with_conn<F>(
 where
     F: FnOnce(&[UsageDaySessionLookupKey]) -> Vec<UsageDayResolvedFolder>,
 {
-    let (day, start_ts, end_ts) = local_day_bounds(conn, &params.day)?;
+    let day_start_hour = normalize_day_start_hour(params.day_start_hour)?;
+    let (day, start_ts, end_ts) = local_day_bounds(conn, &params.day, day_start_hour)?;
     let cli_key = normalize_cli_filter(params.cli_key.as_deref())?;
     let provider_id = normalize_provider_id_filter(params.provider_id)?;
     let folder_limit = params.folder_limit.map(|value| value.clamp(1, 50) as usize);

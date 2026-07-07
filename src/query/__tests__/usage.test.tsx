@@ -221,6 +221,7 @@ describe("query/usage", () => {
       cliKey: "claude" as const,
       providerId: 7,
       folderKeys: ["/tmp/project"],
+      dayStartHour: null,
       excludeCx2CcGatewayBridge: true,
     };
 
@@ -264,6 +265,7 @@ describe("query/usage", () => {
       cliKey: "gemini" as const,
       providerId: 7,
       folderKeys: ["/a", "/b"],
+      dayStartHour: null,
       excludeCx2CcGatewayBridge: true,
     };
 
@@ -324,6 +326,7 @@ describe("query/usage", () => {
       providerId: 9,
       limit: null,
       folderKeys: ["/tmp/project"],
+      dayStartHour: null,
       excludeCx2CcGatewayBridge: true,
     };
     const normalizedInput = { ...input, limit: USAGE_LEADERBOARD_V2_DEFAULT_LIMIT };
@@ -372,6 +375,7 @@ describe("query/usage", () => {
       providerId: 9,
       limit: USAGE_LEADERBOARD_V2_MAX_LIMIT,
       folderKeys: ["/tmp/project"],
+      dayStartHour: null,
       excludeCx2CcGatewayBridge: true,
     };
 
@@ -441,6 +445,7 @@ describe("query/usage", () => {
       providerId: null,
       folderLimit: 8,
       folderKeys: ["/tmp/project"],
+      dayStartHour: null,
       excludeCx2CcGatewayBridge: true,
     };
 
@@ -480,6 +485,7 @@ describe("query/usage", () => {
       providerId: 7,
       folderLimit: USAGE_DAY_DETAIL_FOLDER_MAX_LIMIT,
       folderKeys: ["/tmp/project"],
+      dayStartHour: null,
       excludeCx2CcGatewayBridge: true,
     };
 
@@ -563,7 +569,7 @@ describe("query/usage", () => {
       providerId: 11,
       excludeCx2CcGatewayBridge: true,
     };
-    const normalizedInput = { ...input, folderKeys: null };
+    const normalizedInput = { ...input, folderKeys: null, dayStartHour: null };
 
     renderHook(() => useUsageFolderOptionsV1Query("daily", input), { wrapper });
 
@@ -598,6 +604,7 @@ describe("query/usage", () => {
       cliKey: "claude" as const,
       providerId: 11,
       folderKeys: null,
+      dayStartHour: null,
       excludeCx2CcGatewayBridge: true,
     };
 
@@ -641,6 +648,7 @@ describe("query/usage", () => {
         providerId: 11,
         folderKeys: null,
         limit: 20,
+        dayStartHour: null,
         excludeCx2CcGatewayBridge: true,
       });
     });
@@ -668,6 +676,7 @@ describe("query/usage", () => {
       providerId: 11,
       folderKeys: null,
       limit: USAGE_PROVIDER_CACHE_RATE_TREND_MAX_LIMIT,
+      dayStartHour: null,
       excludeCx2CcGatewayBridge: true,
     };
 
