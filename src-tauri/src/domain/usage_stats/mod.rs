@@ -10,6 +10,7 @@ mod hourly;
 mod input;
 mod leaderboard_range;
 mod leaderboard_v2;
+mod metrics_trend_v1;
 mod summary;
 mod tokens;
 mod types;
@@ -22,11 +23,12 @@ pub use hourly::hourly_series;
 pub use input::{UsageDayDetailParams, UsageQueryParams};
 pub use leaderboard_range::{leaderboard_day, leaderboard_provider};
 pub use leaderboard_v2::leaderboard_v2;
+pub use metrics_trend_v1::provider_metrics_trend_v1;
 pub use summary::{summary, summary_v2};
 pub use types::{
     UsageDayDetailV1, UsageDayFolderRow, UsageDayHourRow, UsageDayRow, UsageFolderOptionV1,
-    UsageHourlyRow, UsageLeaderboardRow, UsageProviderCacheRateTrendRowV1, UsageProviderRow,
-    UsageSummary,
+    UsageHourlyRow, UsageLeaderboardRow, UsageProviderCacheRateTrendRowV1,
+    UsageProviderMetricsTrendRowV1, UsageProviderRow, UsageSummary,
 };
 
 use bounds::{compute_bounds_v2, compute_start_ts, compute_start_ts_last_n_days};

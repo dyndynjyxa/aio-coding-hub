@@ -9,6 +9,7 @@ import {
   type UsageHourlyRow,
   type UsageLeaderboardRow,
   type UsageProviderCacheRateTrendRowV1,
+  type UsageProviderMetricsTrendRowV1,
   type UsageProviderRow as GeneratedUsageProviderRow,
   type UsageQueryParams as GeneratedUsageQueryParams,
   type UsageSummary,
@@ -416,6 +417,24 @@ export async function usageProviderCacheRateTrendV1(
   });
 }
 
+export async function usageProviderMetricsTrendV1(
+  period: UsagePeriod,
+  input?: UsageQueryInputV2 & { limit?: number | null }
+) {
+  const params = buildQueryParamsV2(period, input);
+  const limit = normalizeUsageProviderCacheRateTrendLimit(input?.limit);
+
+  return invokeGeneratedIpc<UsageProviderMetricsTrendRowV1[]>({
+    title: "读取供应商指标趋势失败",
+    cmd: "usage_provider_metrics_trend_v1",
+    args: {
+      params,
+      limit,
+    },
+    invoke: () => commands.usageProviderMetricsTrendV1(params, limit),
+  });
+}
+
 export type {
   UsageDayDetailV1,
   UsageDayFolderRow,
@@ -425,5 +444,6 @@ export type {
   UsageHourlyRow,
   UsageLeaderboardRow,
   UsageProviderCacheRateTrendRowV1,
+  UsageProviderMetricsTrendRowV1,
   UsageSummary,
 };

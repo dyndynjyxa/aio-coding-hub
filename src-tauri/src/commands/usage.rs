@@ -183,3 +183,21 @@ pub(crate) async fn usage_provider_cache_rate_trend_v1(
     .await
     .map_err(Into::into)
 }
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn usage_provider_metrics_trend_v1(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    params: usage_stats::UsageQueryParams,
+    limit: Option<u32>,
+) -> Result<Vec<usage_stats::UsageProviderMetricsTrendRowV1>, String> {
+    let db = ensure_db_ready(app, db_state.inner()).await?;
+    let limit = limit.map(|v| v as usize);
+
+    blocking::run("usage_provider_metrics_trend_v1", move || {
+        usage_stats::provider_metrics_trend_v1(&db, &params, limit)
+    })
+    .await
+    .map_err(Into::into)
+}

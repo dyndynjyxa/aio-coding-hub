@@ -7,6 +7,7 @@ use super::leaderboard_v2::{
     leaderboard_v2_folder_filtered_with_conn, leaderboard_v2_with_conn,
     FolderFilteredLeaderboardParams,
 };
+use super::metrics_trend_v1::{provider_metrics_trend_v1_with_conn, ProviderMetricsTrendQuery};
 use super::summary::{summary_query, summary_v2_with_conn};
 use super::*;
 use crate::db;
@@ -1118,6 +1119,124 @@ INSERT INTO request_logs (
     assert_eq!(rows_day[0].denom_tokens, 630);
     assert_eq!(rows_day[0].cache_read_input_tokens, 250);
     assert_eq!(rows_day[0].requests_success, 2);
+}
+
+#[test]
+fn v1_provider_metrics_trend_averages_duration_ttfb_and_rate() {
+    let conn = setup_conn();
+    conn.execute(
+        r#"INSERT INTO providers (id, name) VALUES (?1, ?2);"#,
+        params![123, "OpenAI"],
+    )
+    .expect("insert provider");
+
+    let start_ts_today = compute_start_ts(&conn, UsageRange::Today)
+        .expect("compute_start_ts today")
+        .expect("start ts exists");
+    let hour1 = start_ts_today + 3600;
+
+    // Three success logs in the same hour bucket:
+    //  - valid ttfb (ttfb < duration): counts toward duration + ttfb + rate
+    //  - invalid ttfb (ttfb >= duration): counts toward duration only
+    //  - null ttfb: counts toward duration only
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            duration_ms: 1000,
+            ttfb_ms: Some(200),
+            output_tokens: Some(300), // generation_ms = 800 -> 300/0.8 = 375 tok/s
+            ..base_usage_log(hour1)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            duration_ms: 2000,
+            ttfb_ms: Some(5000), // invalid: ttfb >= duration
+            output_tokens: Some(999),
+            ..base_usage_log(hour1 + 1)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            duration_ms: 3000,
+            ttfb_ms: None, // null: excluded from ttfb/rate
+            output_tokens: Some(999),
+            ..base_usage_log(hour1 + 2)
+        },
+    );
+
+    let rows = provider_metrics_trend_v1_with_conn(
+        &conn,
+        ProviderMetricsTrendQuery {
+            period: UsagePeriodV2::Daily,
+            start_ts: Some(start_ts_today),
+            end_ts: Some(start_ts_today + 86_400),
+            cli_key: None,
+            provider_id: None,
+            limit: None,
+            exclude_cx2cc_gateway_bridge: false,
+        },
+    )
+    .expect("provider_metrics_trend_v1_with_conn");
+
+    assert_eq!(rows.len(), 1);
+    let row = &rows[0];
+    assert_eq!(row.name, "codex/OpenAI");
+    assert_eq!(row.hour, Some(1));
+    assert_eq!(row.requests_success, 3);
+    // duration averaged over all 3 success rows: (1000+2000+3000)/3 = 2000
+    assert_eq!(row.avg_duration_ms, Some(2000));
+    // ttfb averaged over only the 1 valid row: 200/1 = 200
+    assert_eq!(row.avg_ttfb_ms, Some(200));
+    // rate uses only valid row: 300 tokens / (800ms/1000) = 375 tok/s
+    let rate = row.avg_output_tokens_per_second.expect("rate present");
+    assert!((rate - 375.0).abs() < 1e-6, "rate={rate}");
+}
+
+#[test]
+fn v1_provider_metrics_trend_returns_none_when_no_valid_ttfb() {
+    let conn = setup_conn();
+    conn.execute(
+        r#"INSERT INTO providers (id, name) VALUES (?1, ?2);"#,
+        params![123, "OpenAI"],
+    )
+    .expect("insert provider");
+
+    let start_ts_today = compute_start_ts(&conn, UsageRange::Today)
+        .expect("compute_start_ts today")
+        .expect("start ts exists");
+
+    // Single success row with null ttfb -> duration present, ttfb/rate None.
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            duration_ms: 1500,
+            ttfb_ms: None,
+            output_tokens: Some(100),
+            ..base_usage_log(start_ts_today + 3600)
+        },
+    );
+
+    let rows = provider_metrics_trend_v1_with_conn(
+        &conn,
+        ProviderMetricsTrendQuery {
+            period: UsagePeriodV2::Daily,
+            start_ts: Some(start_ts_today),
+            end_ts: Some(start_ts_today + 86_400),
+            cli_key: None,
+            provider_id: None,
+            limit: None,
+            exclude_cx2cc_gateway_bridge: false,
+        },
+    )
+    .expect("provider_metrics_trend_v1_with_conn");
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].avg_duration_ms, Some(1500));
+    assert_eq!(rows[0].avg_ttfb_ms, None);
+    assert_eq!(rows[0].avg_output_tokens_per_second, None);
 }
 
 #[test]

@@ -5,6 +5,7 @@ import type {
   UsageLeaderboardRow,
   UsagePeriod,
   UsageProviderCacheRateTrendRowV1,
+  UsageProviderMetricsTrendRowV1,
   UsageScope,
   UsageSummary,
 } from "../../services/usage/usage";
@@ -22,8 +23,10 @@ export type UsageDataPanelProps = {
   loading: boolean;
   dataLoading: boolean;
   cacheTrendLoading: boolean;
+  metricsTrendLoading: boolean;
   dataStale: boolean;
   cacheTrendStale: boolean;
+  metricsTrendStale: boolean;
   errorText: string | null;
   tableTitle: string;
   summary: UsageSummary | null;
@@ -31,6 +34,8 @@ export type UsageDataPanelProps = {
   totalCostUsd: number;
   cacheTrendRows: UsageProviderCacheRateTrendRowV1[];
   cacheTrendProviderCount: number;
+  metricsTrendRows: UsageProviderMetricsTrendRowV1[];
+  metricsTrendProviderCount: number;
   providerSelectValue: string;
   providerOptions: readonly { id: number; label: string }[];
   onProviderIdChange: (providerId: number | null) => void;
@@ -50,13 +55,21 @@ function overlayOpenForCustomPending({
   rows,
   summary,
   cacheTrendRows,
+  metricsTrendRows,
   availabilityData,
 }: Pick<
   UsageDataPanelProps,
-  "customPending" | "tableTab" | "rows" | "summary" | "cacheTrendRows" | "availabilityData"
+  | "customPending"
+  | "tableTab"
+  | "rows"
+  | "summary"
+  | "cacheTrendRows"
+  | "metricsTrendRows"
+  | "availabilityData"
 >) {
   if (!customPending) return false;
   if (tableTab === "cacheTrend") return cacheTrendRows.length > 0;
+  if (tableTab === "metricsTrend") return metricsTrendRows.length > 0;
   if (tableTab === "availability")
     return availabilityData != null && availabilityData.providers.length > 0;
   return rows.length > 0 || summary != null;
@@ -95,14 +108,17 @@ export function UsageDataPanel(props: UsageDataPanelProps) {
     rows: props.rows,
     summary: props.summary,
     cacheTrendRows: props.cacheTrendRows,
+    metricsTrendRows: props.metricsTrendRows,
     availabilityData: props.availabilityData,
   });
   const activeStale =
     props.tableTab === "cacheTrend"
       ? props.cacheTrendStale
-      : props.tableTab === "availability"
-        ? props.availabilityRefreshing
-        : props.dataStale;
+      : props.tableTab === "metricsTrend"
+        ? props.metricsTrendStale
+        : props.tableTab === "availability"
+          ? props.availabilityRefreshing
+          : props.dataStale;
 
   const contentRef = useRef<HTMLDivElement | null>(null);
   const overlayRef = useRef<HTMLOutputElement | null>(null);

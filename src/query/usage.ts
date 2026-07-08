@@ -7,6 +7,7 @@ import {
   usageFolderOptionsV1,
   usageLeaderboardV2,
   usageProviderCacheRateTrendV1,
+  usageProviderMetricsTrendV1,
   usageSummary,
   usageSummaryV2,
   normalizeUsageDayDetailInput,
@@ -168,6 +169,24 @@ export function useUsageProviderCacheRateTrendV1Query(
   return useQuery({
     queryKey: usageKeys.providerCacheRateTrendV1(period, normalizedInput),
     queryFn: () => usageProviderCacheRateTrendV1(period, normalizedInput),
+    enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useUsageProviderMetricsTrendV1Query(
+  period: UsagePeriod,
+  input: UsageProviderCacheRateTrendQueryInput,
+  options?: { enabled?: boolean }
+) {
+  const normalizedInput = {
+    ...normalizeUsageQueryInputV2({ ...input, folderKeys: null }),
+    limit: normalizeUsageProviderCacheRateTrendLimit(input.limit),
+  };
+
+  return useQuery({
+    queryKey: usageKeys.providerMetricsTrendV1(period, normalizedInput),
+    queryFn: () => usageProviderMetricsTrendV1(period, normalizedInput),
     enabled: options?.enabled ?? true,
     placeholderData: keepPreviousData,
   });

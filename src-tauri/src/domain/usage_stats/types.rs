@@ -76,6 +76,18 @@ pub struct UsageProviderCacheRateTrendRowV1 {
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct UsageProviderMetricsTrendRowV1 {
+    pub day: String,
+    pub hour: Option<i64>,
+    pub key: String,
+    pub name: String,
+    pub avg_duration_ms: Option<i64>,
+    pub avg_ttfb_ms: Option<i64>,
+    pub avg_output_tokens_per_second: Option<f64>,
+    pub requests_success: i64,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct UsageDayHourRow {
     pub hour: i64,
     pub requests_total: i64,
