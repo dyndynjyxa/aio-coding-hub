@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.60.11](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.10...aio-coding-hub-v0.60.11) (2026-07-09)
+
+
+### Bug Fixes
+
+* **plugins:** stabilize extension host process CI ([ea4001a](https://github.com/dyndynjyxa/aio-coding-hub/commit/ea4001a5e7ff92f6e204322b3340d0427d014632))
+
 ## [0.60.10](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.9...aio-coding-hub-v0.60.10) (2026-07-09)
 
 
