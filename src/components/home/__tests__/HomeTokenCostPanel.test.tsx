@@ -432,7 +432,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(screen.getByRole("columnheader", { name: /输入\+出\/缓存率/ })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /总耗时/ })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /请求数\/成功率/ })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: /最早最晚\/请求占比/ })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: /首末请求\/工作日占比/ })).toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: /缓存情况/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "成功率" })).not.toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: /平均输出速度/ })).not.toBeInTheDocument();
@@ -491,7 +491,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     fireEvent.click(screen.getByRole("tab", { name: "日期" }));
 
     expect(screen.getByText("2026-04-16")).toBeInTheDocument();
-    expect(screen.getByLabelText("08:00-23:34/28%")).toBeInTheDocument();
+    expect(screen.getByLabelText("08:00-23:34/18.2%")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "展开 2026-04-16 日期详情" })).toBeInTheDocument();
     expect(vi.mocked(useUsageLeaderboardV2Query)).toHaveBeenLastCalledWith(
       "day",
@@ -696,8 +696,8 @@ describe("components/home/HomeTokenCostPanel", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "日期" }));
 
-    expect(screen.getByLabelText("09:00-20:00/28%")).toBeInTheDocument();
-    expect(screen.getByLabelText("09:00-次日02:00/25%")).toBeInTheDocument();
+    expect(screen.getByLabelText("09:00-20:00/12.8%")).toBeInTheDocument();
+    expect(screen.getByLabelText("09:00-次日02:00/17.7%")).toBeInTheDocument();
   });
 
   it("sorts the leaderboard by clicked headers without changing usage query params", () => {
@@ -941,7 +941,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     const [filePath, csv] = vi.mocked(usageLeaderboardCsvExport).mock.calls[0] ?? [];
     expect(filePath).toBe("/tmp/home-usage.csv");
     expect(csv).toContain(
-      "\uFEFF排名,供应商,总Token,输入+出,缓存率,总花费,总耗时,请求数,成功率,Token 占比,最早最晚,请求占比\r\n"
+      "\uFEFF排名,供应商,总Token,输入+出,缓存率,总花费,总耗时,请求数,成功率,Token 占比,首末请求,工作日占比\r\n"
     );
     expect(csv).not.toContain("输入+出/缓存率");
     expect(csv).not.toContain("请求数/成功率");
@@ -1079,6 +1079,98 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(screen.getByText("24 小时分布")).toBeInTheDocument();
     expect(screen.getByText("最早 13:00 · 最晚 13:00")).toBeInTheDocument();
     expect(screen.getAllByTestId("day-hour-bar")).toHaveLength(24);
+  });
+
+  it("orders expanded day hourly buckets by the configured workday boundary", () => {
+    vi.mocked(useUsageSummaryV2Query).mockReturnValue({
+      data: {
+        requests_total: 2,
+        requests_with_usage: 2,
+        requests_success: 2,
+        requests_failed: 0,
+        cost_covered_success: 2,
+        total_duration_ms: 4_000,
+        avg_duration_ms: 1000,
+        avg_ttfb_ms: 200,
+        avg_output_tokens_per_second: 100,
+        input_tokens: 200,
+        output_tokens: 100,
+        io_total_tokens: 300,
+        total_tokens: 400,
+        cache_read_input_tokens: 100,
+        cache_creation_input_tokens: 0,
+        cache_creation_5m_input_tokens: 0,
+      },
+      isLoading: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useUsageLeaderboardV2Query).mockImplementation(
+      (scope) =>
+        ({
+          data:
+            scope === "day"
+              ? [
+                  {
+                    key: "2026-04-16",
+                    name: "2026-04-16",
+                    requests_total: 2,
+                    requests_success: 2,
+                    requests_failed: 0,
+                    total_tokens: 400,
+                    io_total_tokens: 300,
+                    input_tokens: 200,
+                    output_tokens: 100,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 100,
+                    total_duration_ms: 4_000,
+                    first_request_created_at_ms: localTimeMs(2026, 3, 16, 9, 0),
+                    last_request_created_at_ms: localTimeMs(2026, 3, 17, 2, 0),
+                    avg_duration_ms: 1000,
+                    avg_ttfb_ms: 200,
+                    avg_output_tokens_per_second: 100,
+                    cost_usd: 0.1,
+                  },
+                ]
+              : [],
+          isLoading: false,
+          isFetching: false,
+          error: null,
+          refetch: vi.fn(),
+        }) as any
+    );
+    vi.mocked(useUsageDayDetailV1Query).mockReturnValue({
+      data: {
+        day: "2026-04-16",
+        folders: [],
+        hours: Array.from({ length: 24 }, (_, hour) => ({
+          hour,
+          requests_total: hour === 2 || hour === 9 ? 1 : 0,
+          total_tokens: hour === 2 ? 100 : hour === 9 ? 300 : 0,
+          io_total_tokens: hour === 2 ? 80 : hour === 9 ? 220 : 0,
+        })),
+      },
+      isLoading: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any);
+
+    render(<HomeTokenCostPanel />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "日期" }));
+    fireEvent.click(screen.getByRole("button", { name: "展开 2026-04-16 日期详情" }));
+
+    expect(screen.getByText("最早 09:00 · 最晚 次日02:00")).toBeInTheDocument();
+    expect(screen.getByText("05")).toBeInTheDocument();
+    expect(screen.getByText("11")).toBeInTheDocument();
+    expect(screen.getByText("17")).toBeInTheDocument();
+    expect(screen.getByText("23")).toBeInTheDocument();
+    expect(screen.getByText("次日04")).toBeInTheDocument();
+    const hourBars = screen.getAllByTestId("day-hour-bar");
+    expect(hourBars[4].parentElement).toHaveAttribute("title", "09:00 · 300 · 1 次请求");
+    expect(hourBars[21].parentElement).toHaveAttribute("title", "次日02:00 · 100 · 1 次请求");
   });
 
   it("sorts day detail folders independently by clicked headers", () => {

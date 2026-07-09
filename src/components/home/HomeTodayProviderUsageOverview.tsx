@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { Loader2 } from "lucide-react";
 import { useDocumentVisibility } from "../../hooks/useDocumentVisibility";
 import { useNowMs } from "../../hooks/useNowMs";
@@ -11,6 +11,11 @@ import {
 } from "../../services/gateway/requestActivityProjection";
 import type { RequestLogSummary } from "../../services/gateway/requestLogs";
 import type { TraceSession } from "../../services/gateway/traceStore";
+import {
+  HOME_USAGE_DEFAULT_DAY_START_HOUR,
+  readHomeUsageDayStartHourFromStorage,
+  subscribeHomeUsageDayStartHour,
+} from "../../services/home/homeUsageDayBoundary";
 import type { UsageLeaderboardRow, UsageSummary } from "../../services/usage/usage";
 import { Card } from "../../ui/Card";
 import { computeCacheHitRate } from "../../utils/cacheRateMetrics";
@@ -40,16 +45,12 @@ const TABLE_MONO_TD_CLASS =
   "border-b border-border px-3 py-2 font-mono text-xs tabular-nums text-secondary-foreground dark:border-border dark:text-secondary-foreground";
 const TABLE_TH_MAIN_CLASS = "text-[11px] font-medium tracking-normal text-muted-foreground";
 const TABLE_TH_NOTE_CLASS = "text-[9px] font-normal tracking-normal text-muted-foreground";
-const TODAY_PROVIDER_QUERY_CONFIG = {
-  period: "daily" as const,
-  input: {
-    startTs: null,
-    endTs: null,
-    cliKey: null,
-    providerId: null,
-    excludeCx2CcGatewayBridge: true,
-  },
-  previewFactor: 1,
+const TODAY_PROVIDER_QUERY_BASE_INPUT = {
+  startTs: null,
+  endTs: null,
+  cliKey: null,
+  providerId: null,
+  excludeCx2CcGatewayBridge: true,
 };
 const IN_PROGRESS_BADGE = computeStatusBadge({
   status: null,
@@ -602,6 +603,11 @@ export function HomeTodayProviderUsageOverview({
   traces?: TraceSession[];
 }) {
   const documentVisible = useDocumentVisibility();
+  const dayStartHour = useSyncExternalStore(
+    subscribeHomeUsageDayStartHour,
+    readHomeUsageDayStartHourFromStorage,
+    () => HOME_USAGE_DEFAULT_DAY_START_HOUR
+  );
   const queryRefreshConfig = useMemo<HomeTokenCostDataModelQueryRefreshConfig>(() => {
     const refetchIntervalMs: number | false = documentVisible
       ? OVERVIEW_REFRESH_INTERVAL_MS
@@ -618,9 +624,20 @@ export function HomeTodayProviderUsageOverview({
       },
     };
   }, [documentVisible]);
+  const queryConfig = useMemo(
+    () => ({
+      period: "daily" as const,
+      input: {
+        ...TODAY_PROVIDER_QUERY_BASE_INPUT,
+        dayStartHour,
+      },
+      previewFactor: 1,
+    }),
+    [dayStartHour]
+  );
   const model = useHomeTokenCostDataModel({
     scope: "provider",
-    queryConfig: TODAY_PROVIDER_QUERY_CONFIG,
+    queryConfig,
     devPreviewEnabled,
     queryRefreshConfig,
   });

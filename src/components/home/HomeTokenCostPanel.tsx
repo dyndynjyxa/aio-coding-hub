@@ -1,4 +1,13 @@
-import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -24,6 +33,23 @@ import type {
 import { useCustomDateRange, type CustomDateRangeApplied } from "../../hooks/useCustomDateRange";
 import { useUsageDayDetailV1Query, useUsageFolderOptionsV1Query } from "../../query/usage";
 import { saveDesktopFilePath } from "../../services/desktop/dialog";
+import {
+  HOME_USAGE_DAY_START_HOUR_OPTIONS,
+  HOME_USAGE_DEFAULT_DAY_START_HOUR,
+  HOME_USAGE_WORKDAY_WINDOW_MS,
+  addLocalDays,
+  dayStartHourLabel,
+  formatWorkdayHourLabel,
+  formatWorkdayHourMinuteFromMs,
+  formatWorkdayHourTickLabel,
+  localDateHour,
+  normalizeHomeUsageDayStartHour,
+  orderedWorkdayHours,
+  readHomeUsageDayStartHourFromStorage,
+  startOfLocalWorkday,
+  subscribeHomeUsageDayStartHour,
+  writeHomeUsageDayStartHourToStorage,
+} from "../../services/home/homeUsageDayBoundary";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Popover } from "../../ui/Popover";
@@ -81,9 +107,6 @@ const TABLE_MONO_TD_CLASS =
 
 const SUMMARY_SKELETON_KEYS = [0, 1, 2, 3, 4, 5, 6];
 const EMPTY_LEADERBOARD_ROWS: UsageLeaderboardRow[] = [];
-const HOME_USAGE_DAY_START_HOUR_STORAGE_KEY = "homeUsageDayStartHour";
-const HOME_USAGE_DEFAULT_DAY_START_HOUR = 5;
-const HOME_USAGE_DAY_START_HOUR_OPTIONS = Array.from({ length: 10 }, (_, hour) => hour);
 
 type TokenCostQueryInput = {
   startTs: number | null;
@@ -210,75 +233,6 @@ function stableSort<T>(
 
 function unixSecondsFromDate(date: Date) {
   return Math.floor(date.getTime() / 1000);
-}
-
-function normalizeHomeUsageDayStartHour(value: number | null | undefined) {
-  if (value == null || !Number.isSafeInteger(value)) return HOME_USAGE_DEFAULT_DAY_START_HOUR;
-  if (value < 0 || value > 9) return HOME_USAGE_DEFAULT_DAY_START_HOUR;
-  return value;
-}
-
-function dayStartHourLabel(hour: number) {
-  return `${String(hour).padStart(2, "0")}:00`;
-}
-
-function readStoredHomeUsageDayStartHour() {
-  if (typeof window === "undefined") return HOME_USAGE_DEFAULT_DAY_START_HOUR;
-  try {
-    const raw = window.localStorage.getItem(HOME_USAGE_DAY_START_HOUR_STORAGE_KEY);
-    if (raw == null) return HOME_USAGE_DEFAULT_DAY_START_HOUR;
-    return normalizeHomeUsageDayStartHour(Number(raw));
-  } catch {
-    return HOME_USAGE_DEFAULT_DAY_START_HOUR;
-  }
-}
-
-function writeStoredHomeUsageDayStartHour(hour: number) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(HOME_USAGE_DAY_START_HOUR_STORAGE_KEY, String(hour));
-  } catch {
-    // Ignore localStorage failures; the in-memory state is still valid.
-  }
-}
-
-function startOfLocalWorkday(date: Date, dayStartHour: number) {
-  const start = new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-    dayStartHour,
-    0,
-    0,
-    0
-  );
-  if (date.getTime() < start.getTime()) {
-    return new Date(date.getFullYear(), date.getMonth(), date.getDate() - 1, dayStartHour, 0, 0, 0);
-  }
-  return start;
-}
-
-function addLocalDays(date: Date, days: number) {
-  return new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate() + days,
-    date.getHours(),
-    date.getMinutes(),
-    date.getSeconds(),
-    date.getMilliseconds()
-  );
-}
-
-function localDateHour(dateValue: string, hour: number, dayOffset = 0) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateValue);
-  if (!match) return null;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const date = new Date(year, month - 1, day + dayOffset, hour, 0, 0, 0);
-  if (Number.isNaN(date.getTime())) return null;
-  return date;
 }
 
 function emptyTokenCostQueryInput(): TokenCostQueryInput {
@@ -629,37 +583,7 @@ function RequestSuccessRateValue({ row }: { row: UsageRequestMetricRow }) {
   return <TokenBreakdownInline parts={[requestCountText(row), successRateText(row)]} />;
 }
 
-function formatLocalHourMinuteFromMs(value: number) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-}
-
-function localDateKeyFromDate(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
-    date.getDate()
-  ).padStart(2, "0")}`;
-}
-
-function nextLocalDateKey(dayKey: string) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayKey);
-  if (!match) return null;
-  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + 1, 0, 0, 0, 0);
-  if (Number.isNaN(date.getTime())) return null;
-  return localDateKeyFromDate(date);
-}
-
-function formatWorkdayHourMinuteFromMs(value: number, dayKey: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  const timeText = formatLocalHourMinuteFromMs(value);
-  if (!timeText) return null;
-  const valueDayKey = localDateKeyFromDate(date);
-  if (valueDayKey === nextLocalDateKey(dayKey)) return `次日${timeText}`;
-  return timeText;
-}
-
-function requestWindowTexts(row: UsageLeaderboardRow, scope: TokenCostScope) {
+function requestWindowTexts(row: UsageLeaderboardRow, scope: TokenCostScope, dayStartHour: number) {
   if (scope !== "day") {
     return { windowText: "-", ratioText: "-" };
   }
@@ -668,19 +592,29 @@ function requestWindowTexts(row: UsageLeaderboardRow, scope: TokenCostScope) {
   if (first == null || last == null || !Number.isFinite(first) || !Number.isFinite(last)) {
     return { windowText: "-", ratioText: "-" };
   }
-  const firstText = formatWorkdayHourMinuteFromMs(first, row.key);
-  const lastText = formatWorkdayHourMinuteFromMs(last, row.key);
+  const firstText = formatWorkdayHourMinuteFromMs(first, row.key, dayStartHour);
+  const lastText = formatWorkdayHourMinuteFromMs(last, row.key, dayStartHour);
   if (!firstText || !lastText) {
     return { windowText: "-", ratioText: "-" };
   }
-  const spanMs = last - first;
-  const ratioText =
-    spanMs > 0 ? trimCompactZero(formatPercent(row.total_duration_ms / spanMs)) : "-";
+  const ratioText = Number.isFinite(row.total_duration_ms)
+    ? trimCompactZero(
+        formatPercent(Math.max(0, row.total_duration_ms) / HOME_USAGE_WORKDAY_WINDOW_MS)
+      )
+    : "-";
   return { windowText: `${firstText}-${lastText}`, ratioText };
 }
 
-function RequestWindowValue({ row, scope }: { row: UsageLeaderboardRow; scope: TokenCostScope }) {
-  const { windowText, ratioText } = requestWindowTexts(row, scope);
+function RequestWindowValue({
+  row,
+  scope,
+  dayStartHour,
+}: {
+  row: UsageLeaderboardRow;
+  scope: TokenCostScope;
+  dayStartHour: number;
+}) {
+  const { windowText, ratioText } = requestWindowTexts(row, scope, dayStartHour);
   if (windowText === "-" && ratioText === "-") {
     return <span className="text-muted-foreground">-</span>;
   }
@@ -748,7 +682,8 @@ function homeUsageCsvDefaultFileName(scope: TokenCostScope, now = new Date()) {
 function buildHomeUsageLeaderboardCsv(
   scope: TokenCostScope,
   sortedRows: IndexedLeaderboardRow[],
-  summary: UsageSummary | null
+  summary: UsageSummary | null,
+  dayStartHour: number
 ) {
   const headers = [
     "排名",
@@ -761,11 +696,11 @@ function buildHomeUsageLeaderboardCsv(
     "请求数",
     "成功率",
     "Token 占比",
-    "最早最晚",
-    "请求占比",
+    "首末请求",
+    "工作日占比",
   ];
   const rows = sortedRows.map(({ row }, index) => {
-    const { windowText, ratioText } = requestWindowTexts(row, scope);
+    const { windowText, ratioText } = requestWindowTexts(row, scope, dayStartHour);
     return [
       String(index + 1),
       row.name,
@@ -883,21 +818,48 @@ function DayFolderUsageTable({ folders }: { folders: UsageDayFolderRow[] }) {
   );
 }
 
-function hourLabel(hour: number) {
-  return `${String(hour).padStart(2, "0")}:00`;
+type DisplayDayHourRow = UsageDayHourRow & {
+  label: string;
+  tickLabel: string;
+};
+
+function buildDisplayDayHours(hours: UsageDayHourRow[], dayStartHour: number): DisplayDayHourRow[] {
+  const hoursByHour = new Map(hours.map((row) => [row.hour, row] as const));
+  return orderedWorkdayHours(dayStartHour).map((hour) => {
+    const row = hoursByHour.get(hour);
+    return {
+      hour,
+      requests_total: row?.requests_total ?? 0,
+      total_tokens: row?.total_tokens ?? 0,
+      io_total_tokens: row?.io_total_tokens ?? 0,
+      label: formatWorkdayHourLabel(hour, dayStartHour),
+      tickLabel: formatWorkdayHourTickLabel(hour, dayStartHour),
+    };
+  });
 }
 
-function DayHourlyMiniBarChart({ hours }: { hours: UsageDayHourRow[] }) {
-  const maxTokens = Math.max(1, ...hours.map((row) => row.total_tokens));
-  const totalTokens = hours.reduce((sum, row) => sum + row.total_tokens, 0);
-  const totalRequests = hours.reduce((sum, row) => sum + row.requests_total, 0);
-  const activeHours = hours.filter((row) => row.total_tokens > 0 || row.requests_total > 0);
-  const firstActiveHour = activeHours[0]?.hour ?? null;
-  const lastActiveHour = activeHours[activeHours.length - 1]?.hour ?? null;
+function DayHourlyMiniBarChart({
+  hours,
+  dayStartHour,
+}: {
+  hours: UsageDayHourRow[];
+  dayStartHour: number;
+}) {
+  const displayHours = useMemo(
+    () => buildDisplayDayHours(hours, dayStartHour),
+    [dayStartHour, hours]
+  );
+  const maxTokens = Math.max(1, ...displayHours.map((row) => row.total_tokens));
+  const totalTokens = displayHours.reduce((sum, row) => sum + row.total_tokens, 0);
+  const totalRequests = displayHours.reduce((sum, row) => sum + row.requests_total, 0);
+  const activeHours = displayHours.filter((row) => row.total_tokens > 0 || row.requests_total > 0);
+  const firstActiveHour = activeHours[0] ?? null;
+  const lastActiveHour = activeHours[activeHours.length - 1] ?? null;
   const activeRangeText =
     firstActiveHour == null || lastActiveHour == null
       ? "最早 — · 最晚 —"
-      : `最早 ${hourLabel(firstActiveHour)} · 最晚 ${hourLabel(lastActiveHour)}`;
+      : `最早 ${firstActiveHour.label} · 最晚 ${lastActiveHour.label}`;
+  const tickLabels = [0, 6, 12, 18, 23].map((index) => displayHours[index]?.tickLabel ?? "");
 
   return (
     <div>
@@ -912,14 +874,14 @@ function DayHourlyMiniBarChart({ hours }: { hours: UsageDayHourRow[] }) {
       </div>
       <figure className="flex h-28 items-end gap-1 rounded-md border border-border bg-white px-2 py-2 dark:border-border dark:bg-card/50">
         <figcaption className="sr-only">24 小时 Token 分布</figcaption>
-        {hours.map((row) => {
+        {displayHours.map((row) => {
           const ratio = maxTokens > 0 ? row.total_tokens / maxTokens : 0;
           const height = row.total_tokens > 0 ? Math.max(8, Math.round(ratio * 100)) : 2;
           return (
             <div
               key={row.hour}
               className="flex h-full min-w-[5px] flex-1 items-end"
-              title={`${hourLabel(row.hour)} · ${formatTokenValue(row.total_tokens)} · ${formatInteger(row.requests_total)} 次请求`}
+              title={`${row.label} · ${formatTokenValue(row.total_tokens)} · ${formatInteger(row.requests_total)} 次请求`}
             >
               <div
                 data-testid="day-hour-bar"
@@ -936,11 +898,11 @@ function DayHourlyMiniBarChart({ hours }: { hours: UsageDayHourRow[] }) {
         })}
       </figure>
       <div className="mt-2 grid grid-cols-5 text-[10px] tabular-nums text-muted-foreground">
-        <span>00</span>
-        <span className="text-center">06</span>
-        <span className="text-center">12</span>
-        <span className="text-center">18</span>
-        <span className="text-right">23</span>
+        <span>{tickLabels[0]}</span>
+        <span className="text-center">{tickLabels[1]}</span>
+        <span className="text-center">{tickLabels[2]}</span>
+        <span className="text-center">{tickLabels[3]}</span>
+        <span className="text-right">{tickLabels[4]}</span>
       </div>
     </div>
   );
@@ -950,10 +912,12 @@ function DayDetailPanel({
   detail,
   loading,
   errorText,
+  dayStartHour,
 }: {
   detail: UsageDayDetailV1 | null;
   loading: boolean;
   errorText: string | null;
+  dayStartHour: number;
 }) {
   if (loading) return <DayDetailLoading />;
 
@@ -975,7 +939,7 @@ function DayDetailPanel({
         <div className="mb-3 text-sm font-semibold text-foreground">文件夹 Token 明细</div>
         <DayFolderUsageTable folders={detail.folders} />
       </div>
-      <DayHourlyMiniBarChart hours={detail.hours} />
+      <DayHourlyMiniBarChart hours={detail.hours} dayStartHour={dayStartHour} />
     </div>
   );
 }
@@ -1047,6 +1011,7 @@ function TokenLeaderboardTable({
   dayDetail,
   dayDetailLoading,
   dayDetailErrorText,
+  dayStartHour,
   sortState,
   onSort,
   onToggleDay,
@@ -1061,6 +1026,7 @@ function TokenLeaderboardTable({
   dayDetail: UsageDayDetailV1 | null;
   dayDetailLoading: boolean;
   dayDetailErrorText: string | null;
+  dayStartHour: number;
   sortState: SortState<LeaderboardSortKey> | null;
   onSort: (key: LeaderboardSortKey) => void;
   onToggleDay: (day: string) => void;
@@ -1134,7 +1100,7 @@ function TokenLeaderboardTable({
               onSort={onSort}
             />
             <th scope="col" className={TABLE_TH_CLASS}>
-              <TableHeaderLabel label="最早最晚/请求占比" />
+              <TableHeaderLabel label="首末请求/工作日占比" />
             </th>
           </tr>
         </thead>
@@ -1193,7 +1159,7 @@ function TokenLeaderboardTable({
                     <TokenShareValue percent={tokenShare(row, summary)} />
                   </td>
                   <td className={TABLE_MONO_TD_CLASS}>
-                    <RequestWindowValue row={row} scope={scope} />
+                    <RequestWindowValue row={row} scope={scope} dayStartHour={dayStartHour} />
                   </td>
                 </tr>
                 {expanded ? (
@@ -1206,6 +1172,7 @@ function TokenLeaderboardTable({
                         detail={dayDetail?.day === row.key ? dayDetail : null}
                         loading={dayDetailLoading}
                         errorText={dayDetailErrorText}
+                        dayStartHour={dayStartHour}
                       />
                     </td>
                   </tr>
@@ -1406,7 +1373,6 @@ type HomeTokenCostPanelState = {
   range: TokenCostRange;
   expandedDay: string | null;
   selectedFolderKeys: string[];
-  dayStartHour: number;
   excludeCx2CcGatewayBridge: boolean;
 };
 
@@ -1414,9 +1380,9 @@ type HomeTokenCostPanelAction =
   | { type: "setScope"; scope: TokenCostScope }
   | { type: "setRange"; range: TokenCostRange }
   | { type: "toggleExpandedDay"; day: string }
+  | { type: "clearExpandedDay" }
   | { type: "toggleFolderKey"; key: string }
   | { type: "clearFolderKeys" }
-  | { type: "setDayStartHour"; dayStartHour: number }
   | { type: "setExcludeCx2CcGatewayBridge"; exclude: boolean };
 
 function createInitialHomeTokenCostPanelState(): HomeTokenCostPanelState {
@@ -1425,7 +1391,6 @@ function createInitialHomeTokenCostPanelState(): HomeTokenCostPanelState {
     range: "today",
     expandedDay: null,
     selectedFolderKeys: [],
-    dayStartHour: readStoredHomeUsageDayStartHour(),
     excludeCx2CcGatewayBridge: true,
   };
 }
@@ -1444,6 +1409,8 @@ function homeTokenCostPanelReducer(
         ...state,
         expandedDay: state.expandedDay === action.day ? null : action.day,
       };
+    case "clearExpandedDay":
+      return state.expandedDay == null ? state : { ...state, expandedDay: null };
     case "toggleFolderKey":
       return {
         ...state,
@@ -1453,12 +1420,6 @@ function homeTokenCostPanelReducer(
       };
     case "clearFolderKeys":
       return { ...state, selectedFolderKeys: [] };
-    case "setDayStartHour":
-      return {
-        ...state,
-        dayStartHour: normalizeHomeUsageDayStartHour(action.dayStartHour),
-        expandedDay: null,
-      };
     case "setExcludeCx2CcGatewayBridge":
       return { ...state, excludeCx2CcGatewayBridge: action.exclude };
   }
@@ -1471,10 +1432,14 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
     useState<SortState<LeaderboardSortKey> | null>(null);
   const [exportingCsv, setExportingCsv] = useState(false);
   const exportingCsvRef = useRef(false);
-  const { scope, range, expandedDay, selectedFolderKeys, dayStartHour, excludeCx2CcGatewayBridge } =
-    state;
+  const { scope, range, expandedDay, selectedFolderKeys, excludeCx2CcGatewayBridge } = state;
+  const dayStartHour = useSyncExternalStore(
+    subscribeHomeUsageDayStartHour,
+    readHomeUsageDayStartHourFromStorage,
+    () => HOME_USAGE_DEFAULT_DAY_START_HOUR
+  );
   useEffect(() => {
-    writeStoredHomeUsageDayStartHour(dayStartHour);
+    dispatch({ type: "clearExpandedDay" });
   }, [dayStartHour]);
   const onInvalidCustomRange = useCallback((message: string) => toast(message), []);
   const customDateRangeOptions = useMemo(
@@ -1618,6 +1583,10 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
   const handleClearFolderKeys = useCallback(() => {
     dispatch({ type: "clearFolderKeys" });
   }, []);
+  const handleDayStartHourChange = useCallback((dayStartHour: number) => {
+    writeHomeUsageDayStartHourToStorage(dayStartHour);
+    dispatch({ type: "clearExpandedDay" });
+  }, []);
   const handleApplyCustomRange = useCallback(() => {
     if (applyCustomRange()) {
       dispatch({ type: "setRange", range: "custom" });
@@ -1650,7 +1619,12 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
         return;
       }
 
-      const csv = buildHomeUsageLeaderboardCsv(scope, sortedDisplayRows, displaySummary);
+      const csv = buildHomeUsageLeaderboardCsv(
+        scope,
+        sortedDisplayRows,
+        displaySummary,
+        dayStartHour
+      );
       await usageLeaderboardCsvExport(filePath, csv);
       toast("用量排行 CSV 已导出");
     } catch (error) {
@@ -1659,7 +1633,7 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
       exportingCsvRef.current = false;
       setExportingCsv(false);
     }
-  }, [customPending, displayLoading, displaySummary, scope, sortedDisplayRows]);
+  }, [customPending, dayStartHour, displayLoading, displaySummary, scope, sortedDisplayRows]);
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-5 overflow-hidden">
@@ -1695,12 +1669,7 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
               <Select
                 aria-label="工作日开始"
                 value={String(dayStartHour)}
-                onChange={(event) =>
-                  dispatch({
-                    type: "setDayStartHour",
-                    dayStartHour: Number(event.currentTarget.value),
-                  })
-                }
+                onChange={(event) => handleDayStartHourChange(Number(event.currentTarget.value))}
                 className="h-6 w-auto rounded border-0 bg-transparent px-1 py-0 text-xs shadow-none focus:bg-transparent focus:ring-0 focus:ring-offset-0"
               >
                 {HOME_USAGE_DAY_START_HOUR_OPTIONS.map((hour) => (
@@ -1797,6 +1766,7 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
           dayDetail={displayDayDetail}
           dayDetailLoading={dayDetailLoading}
           dayDetailErrorText={dayDetailErrorText}
+          dayStartHour={dayStartHour}
           sortState={leaderboardSortState}
           onSort={handleLeaderboardSort}
           onToggleDay={handleToggleDay}

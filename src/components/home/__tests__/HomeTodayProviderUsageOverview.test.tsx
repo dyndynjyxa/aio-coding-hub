@@ -300,6 +300,7 @@ function rowCellTexts(row: HTMLElement) {
 describe("components/home/HomeTodayProviderUsageOverview", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.removeItem("homeUsageDayStartHour");
     Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
   });
 
@@ -317,6 +318,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
           endTs: null,
           cliKey: null,
           providerId: null,
+          dayStartHour: 5,
           excludeCx2CcGatewayBridge: true,
         },
         previewFactor: 1,
@@ -420,6 +422,29 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     ]);
   });
 
+  it("uses the shared stored workday start hour for today overview queries", () => {
+    window.localStorage.setItem("homeUsageDayStartHour", "7");
+    mockDataModel();
+
+    render(<HomeTodayProviderUsageOverview activeSessions={[]} />);
+
+    expect(vi.mocked(useHomeTokenCostDataModel)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        queryConfig: expect.objectContaining({
+          period: "daily",
+          input: expect.objectContaining({
+            startTs: null,
+            endTs: null,
+            cliKey: null,
+            providerId: null,
+            dayStartHour: 7,
+            excludeCx2CcGatewayBridge: true,
+          }),
+        }),
+      })
+    );
+  });
+
   it("disables polling while the page is hidden", () => {
     mockDataModel();
     Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
@@ -435,6 +460,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
           endTs: null,
           cliKey: null,
           providerId: null,
+          dayStartHour: 5,
           excludeCx2CcGatewayBridge: true,
         },
         previewFactor: 1,
