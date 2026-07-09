@@ -1,7 +1,7 @@
 {
   "name": "aio-coding-hub",
   "private": true,
-  "version": "0.60.9",
+  "version": "0.60.10",
   "packageManager": "pnpm@10.34.3",
   "type": "module",
   "scripts": {

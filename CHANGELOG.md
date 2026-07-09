@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.60.10](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.9...aio-coding-hub-v0.60.10) (2026-07-09)
+
+
+### Bug Fixes
+
+* **gateway:** arm request abort guard before active-request registration ([49d590c](https://github.com/dyndynjyxa/aio-coding-hub/commit/49d590c4df63a4cd9a1428cb5cbacb58b1d0f080))
+* **home:** keep freshness watchdog alive while a recent log row lacks terminal state ([46ce59e](https://github.com/dyndynjyxa/aio-coding-hub/commit/46ce59eebce5ad962592db6121c9e77ae8cc0044))
+* **home:** keep signal-driven request log refresh alive while backgrounded ([4ed3b4b](https://github.com/dyndynjyxa/aio-coding-hub/commit/4ed3b4b4d89ef840813e3f32e2ccc0a6ccd1e432))
+
 ## [0.60.9](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.8...aio-coding-hub-v0.60.9) (2026-07-07)
 
 
