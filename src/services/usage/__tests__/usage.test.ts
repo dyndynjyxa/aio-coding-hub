@@ -346,7 +346,7 @@ describe("services/usage/usage", () => {
       limit: 20,
       dayStartHour: 8,
       excludeCx2CcGatewayBridge: true,
-    });
+    } as never);
     const csvExported = await usageLeaderboardCsvExport(
       " /tmp/usage.csv ",
       "\uFEFF排名,供应商\r\n1,OpenAI\r\n"
@@ -448,7 +448,7 @@ describe("services/usage/usage", () => {
         cliKey: "claude",
         providerId: 11,
         folderKeys: null,
-        dayStartHour: 8,
+        dayStartHour: null,
         excludeCx2CcGatewayBridge: true,
       },
       20

@@ -3,7 +3,7 @@ import { emitListenerSnapshot } from "../../utils/listeners";
 export const HOME_USAGE_DAY_START_HOUR_STORAGE_KEY = "homeUsageDayStartHour";
 export const HOME_USAGE_DEFAULT_DAY_START_HOUR = 0;
 export const HOME_USAGE_DAY_START_HOUR_OPTIONS = Array.from({ length: 10 }, (_, hour) => hour);
-export const HOME_USAGE_WORKDAY_WINDOW_MS = 24 * 60 * 60 * 1000;
+export const HOME_USAGE_DAY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 type Listener = () => void;
 
@@ -94,7 +94,7 @@ export function subscribeHomeUsageDayStartHour(listener: Listener) {
   };
 }
 
-export function startOfLocalWorkday(date: Date, dayStartHour: number) {
+export function startOfLocalUsageDay(date: Date, dayStartHour: number) {
   const normalizedDayStartHour = normalizeHomeUsageDayStartHour(dayStartHour);
   const start = new Date(
     date.getFullYear(),
@@ -150,19 +150,19 @@ export function localDateHour(dateValue: string, hour: number, dayOffset = 0) {
   return date;
 }
 
-export function orderedWorkdayHours(dayStartHour: number) {
+export function orderedUsageDayHours(dayStartHour: number) {
   const normalizedDayStartHour = normalizeHomeUsageDayStartHour(dayStartHour);
   return Array.from({ length: 24 }, (_, index) => (normalizedDayStartHour + index) % 24);
 }
 
-export function formatWorkdayHourLabel(hour: number, dayStartHour: number) {
+export function formatUsageDayHourLabel(hour: number, dayStartHour: number) {
   const normalizedDayStartHour = normalizeHomeUsageDayStartHour(dayStartHour);
   const normalizedHour = normalizedHourOfDay(hour);
   const prefix = normalizedHour < normalizedDayStartHour ? "次日" : "";
   return `${prefix}${formatHour(normalizedHour)}:00`;
 }
 
-export function formatWorkdayHourTickLabel(hour: number, dayStartHour: number) {
+export function formatUsageDayHourTickLabel(hour: number, dayStartHour: number) {
   const normalizedDayStartHour = normalizeHomeUsageDayStartHour(dayStartHour);
   const normalizedHour = normalizedHourOfDay(hour);
   const prefix = normalizedHour < normalizedDayStartHour ? "次日" : "";
@@ -175,7 +175,7 @@ function formatLocalHourMinuteFromMs(value: number) {
   return `${formatHour(date.getHours())}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
-export function formatWorkdayHourMinuteFromMs(
+export function formatUsageDayHourMinuteFromMs(
   value: number,
   dayKey: string,
   dayStartHour = HOME_USAGE_DEFAULT_DAY_START_HOUR
@@ -185,12 +185,12 @@ export function formatWorkdayHourMinuteFromMs(
   const timeText = formatLocalHourMinuteFromMs(value);
   if (!timeText) return null;
 
-  const workdayStart = localDateHour(dayKey, dayStartHour);
-  if (!workdayStart) return timeText;
-  const workdayEnd = addLocalDays(workdayStart, 1);
-  const insideWorkday =
-    date.getTime() >= workdayStart.getTime() && date.getTime() < workdayEnd.getTime();
-  if (insideWorkday && localDateKeyFromDate(date) !== localDateKeyFromDate(workdayStart)) {
+  const usageDayStart = localDateHour(dayKey, dayStartHour);
+  if (!usageDayStart) return timeText;
+  const usageDayEnd = addLocalDays(usageDayStart, 1);
+  const insideUsageDay =
+    date.getTime() >= usageDayStart.getTime() && date.getTime() < usageDayEnd.getTime();
+  if (insideUsageDay && localDateKeyFromDate(date) !== localDateKeyFromDate(usageDayStart)) {
     return `次日${timeText}`;
   }
 

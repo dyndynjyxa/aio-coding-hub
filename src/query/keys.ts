@@ -170,7 +170,6 @@ export const usageKeys = {
       cliKey: CliKey | null;
       providerId: number | null;
       limit: number | null;
-      dayStartHour?: number | null;
       excludeCx2CcGatewayBridge?: boolean | null;
     }
   ) =>
@@ -183,7 +182,6 @@ export const usageKeys = {
       input.cliKey,
       input.providerId,
       input.limit,
-      input.dayStartHour ?? null,
       input.excludeCx2CcGatewayBridge ?? null,
     ] as const,
 };

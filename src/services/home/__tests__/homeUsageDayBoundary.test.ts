@@ -2,11 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   HOME_USAGE_DAY_START_HOUR_STORAGE_KEY,
   HOME_USAGE_DEFAULT_DAY_START_HOUR,
-  formatWorkdayHourLabel,
-  formatWorkdayHourMinuteFromMs,
-  formatWorkdayHourTickLabel,
+  formatUsageDayHourLabel,
+  formatUsageDayHourMinuteFromMs,
+  formatUsageDayHourTickLabel,
   normalizeHomeUsageDayStartHour,
-  orderedWorkdayHours,
+  orderedUsageDayHours,
   readHomeUsageDayStartHourFromStorage,
   subscribeHomeUsageDayStartHour,
   writeHomeUsageDayStartHourToStorage,
@@ -68,21 +68,21 @@ describe("services/home/homeUsageDayBoundary", () => {
     expect(listener).toHaveBeenCalledTimes(2);
   });
 
-  it("orders workday hours from the configured boundary", () => {
-    expect(orderedWorkdayHours(5)).toEqual([
+  it("orders usage day hours from the configured boundary", () => {
+    expect(orderedUsageDayHours(5)).toEqual([
       5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4,
     ]);
-    expect(formatWorkdayHourLabel(2, 5)).toBe("次日02:00");
-    expect(formatWorkdayHourTickLabel(4, 5)).toBe("次日04");
-    expect(formatWorkdayHourLabel(9, 5)).toBe("09:00");
+    expect(formatUsageDayHourLabel(2, 5)).toBe("次日02:00");
+    expect(formatUsageDayHourTickLabel(4, 5)).toBe("次日04");
+    expect(formatUsageDayHourLabel(9, 5)).toBe("09:00");
   });
 
-  it("formats timestamps against the configured workday window", () => {
+  it("formats timestamps against the configured usage day window", () => {
     const first = new Date(2026, 3, 16, 9, 0).getTime();
     const nextDay = new Date(2026, 3, 17, 2, 0).getTime();
 
-    expect(formatWorkdayHourMinuteFromMs(first, "2026-04-16", 5)).toBe("09:00");
-    expect(formatWorkdayHourMinuteFromMs(nextDay, "2026-04-16", 5)).toBe("次日02:00");
-    expect(formatWorkdayHourMinuteFromMs(nextDay, "2026-04-16", 0)).toBe("02:00");
+    expect(formatUsageDayHourMinuteFromMs(first, "2026-04-16", 5)).toBe("09:00");
+    expect(formatUsageDayHourMinuteFromMs(nextDay, "2026-04-16", 5)).toBe("次日02:00");
+    expect(formatUsageDayHourMinuteFromMs(nextDay, "2026-04-16", 0)).toBe("02:00");
   });
 });

@@ -78,14 +78,14 @@ fn local_day_start_ts(conn: &Connection, day: &str) -> i64 {
     .expect("query local day start ts")
 }
 
-fn local_workday_start_ts(conn: &Connection, day: &str, day_start_hour: i64) -> i64 {
+fn local_usage_day_start_ts(conn: &Connection, day: &str, day_start_hour: i64) -> i64 {
     let time = format!("{day_start_hour:02}:00:00");
     conn.query_row(
         "SELECT CAST(strftime('%s', ?1 || ' ' || ?2, 'utc') AS INTEGER)",
         params![day, time],
         |row| row.get(0),
     )
-    .expect("query local workday start ts")
+    .expect("query local usage day start ts")
 }
 
 #[derive(Clone)]
@@ -1556,14 +1556,14 @@ INSERT INTO request_logs (
 }
 
 #[test]
-fn v2_day_leaderboard_respects_workday_start_hour() {
+fn v2_day_leaderboard_respects_usage_day_start_hour() {
     let conn = setup_conn();
     let day_one = "2026-04-16";
     let day_two = "2026-04-17";
     let day_start_hour = 5;
-    let workday_one_start = local_workday_start_ts(&conn, day_one, day_start_hour);
-    let workday_two_start = local_workday_start_ts(&conn, day_two, day_start_hour);
-    let query_end = local_workday_start_ts(&conn, "2026-04-18", day_start_hour);
+    let usage_day_one_start = local_usage_day_start_ts(&conn, day_one, day_start_hour);
+    let usage_day_two_start = local_usage_day_start_ts(&conn, day_two, day_start_hour);
+    let query_end = local_usage_day_start_ts(&conn, "2026-04-18", day_start_hour);
 
     for (provider_id, provider_name) in [(123, "OpenAI"), (456, "Gemini Upstream")] {
         conn.execute(
@@ -1579,7 +1579,7 @@ fn v2_day_leaderboard_respects_workday_start_hour() {
             123,
             "OpenAI",
             "codex-alpha-1",
-            workday_one_start + 4 * 3600,
+            usage_day_one_start + 4 * 3600,
             100i64,
         ),
         (
@@ -1587,7 +1587,7 @@ fn v2_day_leaderboard_respects_workday_start_hour() {
             123,
             "OpenAI",
             "codex-alpha-2",
-            workday_one_start + 21 * 3600,
+            usage_day_one_start + 21 * 3600,
             200i64,
         ),
         (
@@ -1595,7 +1595,7 @@ fn v2_day_leaderboard_respects_workday_start_hour() {
             456,
             "Gemini Upstream",
             "codex-beta-1",
-            workday_two_start + 4 * 3600,
+            usage_day_two_start + 4 * 3600,
             300i64,
         ),
         (
@@ -1603,7 +1603,7 @@ fn v2_day_leaderboard_respects_workday_start_hour() {
             123,
             "OpenAI",
             "claude-alpha-1",
-            workday_two_start + 15 * 3600,
+            usage_day_two_start + 15 * 3600,
             400i64,
         ),
     ] {
@@ -1623,10 +1623,10 @@ fn v2_day_leaderboard_respects_workday_start_hour() {
         );
     }
 
-    let workday_rows = leaderboard_v2_with_conn_day_start(
+    let usage_day_rows = leaderboard_v2_with_conn_day_start(
         &conn,
         UsageScopeV2::Day,
-        Some(workday_one_start),
+        Some(usage_day_one_start),
         Some(query_end),
         None,
         None,
@@ -1634,33 +1634,33 @@ fn v2_day_leaderboard_respects_workday_start_hour() {
         false,
         day_start_hour,
     )
-    .expect("workday leaderboard");
-    assert_eq!(workday_rows.len(), 2);
-    assert_eq!(workday_rows[0].key, day_two);
-    assert_eq!(workday_rows[0].requests_total, 2);
+    .expect("usage day leaderboard");
+    assert_eq!(usage_day_rows.len(), 2);
+    assert_eq!(usage_day_rows[0].key, day_two);
+    assert_eq!(usage_day_rows[0].requests_total, 2);
     assert_eq!(
-        workday_rows[0].first_request_created_at_ms,
-        Some((workday_two_start + 4 * 3600) * 1000)
+        usage_day_rows[0].first_request_created_at_ms,
+        Some((usage_day_two_start + 4 * 3600) * 1000)
     );
     assert_eq!(
-        workday_rows[0].last_request_created_at_ms,
-        Some((workday_two_start + 15 * 3600) * 1000)
+        usage_day_rows[0].last_request_created_at_ms,
+        Some((usage_day_two_start + 15 * 3600) * 1000)
     );
-    assert_eq!(workday_rows[1].key, day_one);
-    assert_eq!(workday_rows[1].requests_total, 2);
+    assert_eq!(usage_day_rows[1].key, day_one);
+    assert_eq!(usage_day_rows[1].requests_total, 2);
     assert_eq!(
-        workday_rows[1].first_request_created_at_ms,
-        Some((workday_one_start + 4 * 3600) * 1000)
+        usage_day_rows[1].first_request_created_at_ms,
+        Some((usage_day_one_start + 4 * 3600) * 1000)
     );
     assert_eq!(
-        workday_rows[1].last_request_created_at_ms,
-        Some((workday_one_start + 21 * 3600) * 1000)
+        usage_day_rows[1].last_request_created_at_ms,
+        Some((usage_day_one_start + 21 * 3600) * 1000)
     );
 
     let natural_rows = leaderboard_v2_with_conn(
         &conn,
         UsageScopeV2::Day,
-        Some(workday_one_start),
+        Some(usage_day_one_start),
         Some(query_end),
         None,
         None,
@@ -1673,11 +1673,11 @@ fn v2_day_leaderboard_respects_workday_start_hour() {
     assert_eq!(natural_rows[0].requests_total, 3);
     assert_eq!(
         natural_rows[0].first_request_created_at_ms,
-        Some((workday_one_start + 21 * 3600) * 1000)
+        Some((usage_day_one_start + 21 * 3600) * 1000)
     );
     assert_eq!(
         natural_rows[0].last_request_created_at_ms,
-        Some((workday_two_start + 15 * 3600) * 1000)
+        Some((usage_day_two_start + 15 * 3600) * 1000)
     );
     assert_eq!(natural_rows[1].key, day_one);
     assert_eq!(natural_rows[1].requests_total, 1);
@@ -1686,7 +1686,7 @@ fn v2_day_leaderboard_respects_workday_start_hour() {
         &conn,
         FolderFilteredLeaderboardParams {
             scope: UsageScopeV2::Day,
-            start_ts: Some(workday_one_start),
+            start_ts: Some(usage_day_one_start),
             end_ts: Some(query_end),
             cli_key: None,
             provider_id: None,
@@ -1697,7 +1697,7 @@ fn v2_day_leaderboard_respects_workday_start_hour() {
         },
         fixture_folder_lookup,
     )
-    .expect("folder filtered workday leaderboard");
+    .expect("folder filtered usage day leaderboard");
     assert_eq!(folder_rows.len(), 2);
     assert_eq!(folder_rows[0].key, day_two);
     assert_eq!(folder_rows[0].requests_total, 1);
@@ -1717,7 +1717,7 @@ fn v2_day_leaderboard_respects_workday_start_hour() {
         },
         fixture_folder_lookup,
     )
-    .expect("workday day detail");
+    .expect("usage day detail");
     assert_eq!(
         day_one_detail
             .hours

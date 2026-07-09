@@ -282,7 +282,9 @@ pub fn provider_cache_rate_trend_v1(
     limit: Option<usize>,
 ) -> crate::shared::error::AppResult<Vec<UsageProviderCacheRateTrendRowV1>> {
     let conn = db.open_connection()?;
-    let resolved = resolve_query_params(&conn, params)?;
+    let mut params = params.clone();
+    params.day_start_hour = None;
+    let resolved = resolve_query_params(&conn, &params)?;
     Ok(provider_cache_rate_trend_v1_with_conn(
         &conn,
         ProviderCacheRateTrendQuery {

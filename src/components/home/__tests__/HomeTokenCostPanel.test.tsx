@@ -371,8 +371,8 @@ describe("components/home/HomeTokenCostPanel", () => {
     const settingLabels = Array.from(settingsGroup.querySelectorAll("button,input,select")).map(
       controlLabel
     );
-    expect(settingLabels).toEqual(["全部文件夹", "过滤转接重复用量", "工作日开始"]);
-    const dayStartSelect = screen.getByLabelText("工作日开始") as HTMLSelectElement;
+    expect(settingLabels).toEqual(["全部文件夹", "过滤转接重复用量", "统计日开始"]);
+    const dayStartSelect = screen.getByLabelText("统计日开始") as HTMLSelectElement;
     expect(dayStartSelect.value).toBe("0");
     expect(Array.from(dayStartSelect.options).map((option) => option.textContent)).toEqual([
       "00:00",
@@ -432,7 +432,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(screen.getByRole("columnheader", { name: /输入\+出\/缓存率/ })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /总耗时/ })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /请求数\/成功率/ })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: /首末请求\/工作日占比/ })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: /首末请求\/统计日占比/ })).toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: /缓存情况/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "成功率" })).not.toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: /平均输出速度/ })).not.toBeInTheDocument();
@@ -509,7 +509,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     );
   });
 
-  it("persists the home usage workday start hour and passes it to queries", () => {
+  it("persists the home usage statistics day start hour and passes it to queries", () => {
     vi.mocked(useUsageSummaryV2Query).mockReturnValue({
       data: {
         requests_total: 1,
@@ -571,7 +571,7 @@ describe("components/home/HomeTokenCostPanel", () => {
 
     render(<HomeTokenCostPanel />);
 
-    const dayStartSelect = screen.getByLabelText("工作日开始") as HTMLSelectElement;
+    const dayStartSelect = screen.getByLabelText("统计日开始") as HTMLSelectElement;
     expect(dayStartSelect.value).toBe("0");
     expect(vi.mocked(useUsageSummaryV2Query)).toHaveBeenLastCalledWith(
       "daily",
@@ -942,7 +942,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     const [filePath, csv] = vi.mocked(usageLeaderboardCsvExport).mock.calls[0] ?? [];
     expect(filePath).toBe("/tmp/home-usage.csv");
     expect(csv).toContain(
-      "\uFEFF排名,供应商,总Token,输入+出,缓存率,总花费,总耗时,请求数,成功率,Token 占比,首末请求,工作日占比\r\n"
+      "\uFEFF排名,供应商,总Token,输入+出,缓存率,总花费,总耗时,请求数,成功率,Token 占比,首末请求,统计日占比\r\n"
     );
     expect(csv).not.toContain("输入+出/缓存率");
     expect(csv).not.toContain("请求数/成功率");
@@ -1082,7 +1082,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(screen.getAllByTestId("day-hour-bar")).toHaveLength(24);
   });
 
-  it("orders expanded day hourly buckets by an explicitly configured non-midnight boundary", () => {
+  it("orders expanded day hourly buckets by an explicitly configured non-midnight statistics day boundary", () => {
     window.localStorage.setItem("homeUsageDayStartHour", "5");
     vi.mocked(useUsageSummaryV2Query).mockReturnValue({
       data: {

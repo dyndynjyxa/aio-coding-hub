@@ -35,18 +35,18 @@ import { useUsageDayDetailV1Query, useUsageFolderOptionsV1Query } from "../../qu
 import { saveDesktopFilePath } from "../../services/desktop/dialog";
 import {
   HOME_USAGE_DAY_START_HOUR_OPTIONS,
+  HOME_USAGE_DAY_WINDOW_MS,
   HOME_USAGE_DEFAULT_DAY_START_HOUR,
-  HOME_USAGE_WORKDAY_WINDOW_MS,
   addLocalDays,
   dayStartHourLabel,
-  formatWorkdayHourLabel,
-  formatWorkdayHourMinuteFromMs,
-  formatWorkdayHourTickLabel,
+  formatUsageDayHourLabel,
+  formatUsageDayHourMinuteFromMs,
+  formatUsageDayHourTickLabel,
   localDateHour,
   normalizeHomeUsageDayStartHour,
-  orderedWorkdayHours,
+  orderedUsageDayHours,
   readHomeUsageDayStartHourFromStorage,
-  startOfLocalWorkday,
+  startOfLocalUsageDay,
   subscribeHomeUsageDayStartHour,
   writeHomeUsageDayStartHourToStorage,
 } from "../../services/home/homeUsageDayBoundary";
@@ -258,7 +258,7 @@ function buildTokenCostQueryConfig(
   now = new Date()
 ): TokenCostQueryConfig {
   const normalizedDayStartHour = normalizeHomeUsageDayStartHour(dayStartHour);
-  const todayStart = startOfLocalWorkday(now, normalizedDayStartHour);
+  const todayStart = startOfLocalUsageDay(now, normalizedDayStartHour);
   const tomorrowStart = addLocalDays(todayStart, 1);
   const customStart = customApplied
     ? localDateHour(customApplied.startDate, normalizedDayStartHour)
@@ -592,15 +592,13 @@ function requestWindowTexts(row: UsageLeaderboardRow, scope: TokenCostScope, day
   if (first == null || last == null || !Number.isFinite(first) || !Number.isFinite(last)) {
     return { windowText: "-", ratioText: "-" };
   }
-  const firstText = formatWorkdayHourMinuteFromMs(first, row.key, dayStartHour);
-  const lastText = formatWorkdayHourMinuteFromMs(last, row.key, dayStartHour);
+  const firstText = formatUsageDayHourMinuteFromMs(first, row.key, dayStartHour);
+  const lastText = formatUsageDayHourMinuteFromMs(last, row.key, dayStartHour);
   if (!firstText || !lastText) {
     return { windowText: "-", ratioText: "-" };
   }
   const ratioText = Number.isFinite(row.total_duration_ms)
-    ? trimCompactZero(
-        formatPercent(Math.max(0, row.total_duration_ms) / HOME_USAGE_WORKDAY_WINDOW_MS)
-      )
+    ? trimCompactZero(formatPercent(Math.max(0, row.total_duration_ms) / HOME_USAGE_DAY_WINDOW_MS))
     : "-";
   return { windowText: `${firstText}-${lastText}`, ratioText };
 }
@@ -697,7 +695,7 @@ function buildHomeUsageLeaderboardCsv(
     "成功率",
     "Token 占比",
     "首末请求",
-    "工作日占比",
+    "统计日占比",
   ];
   const rows = sortedRows.map(({ row }, index) => {
     const { windowText, ratioText } = requestWindowTexts(row, scope, dayStartHour);
@@ -825,15 +823,15 @@ type DisplayDayHourRow = UsageDayHourRow & {
 
 function buildDisplayDayHours(hours: UsageDayHourRow[], dayStartHour: number): DisplayDayHourRow[] {
   const hoursByHour = new Map(hours.map((row) => [row.hour, row] as const));
-  return orderedWorkdayHours(dayStartHour).map((hour) => {
+  return orderedUsageDayHours(dayStartHour).map((hour) => {
     const row = hoursByHour.get(hour);
     return {
       hour,
       requests_total: row?.requests_total ?? 0,
       total_tokens: row?.total_tokens ?? 0,
       io_total_tokens: row?.io_total_tokens ?? 0,
-      label: formatWorkdayHourLabel(hour, dayStartHour),
-      tickLabel: formatWorkdayHourTickLabel(hour, dayStartHour),
+      label: formatUsageDayHourLabel(hour, dayStartHour),
+      tickLabel: formatUsageDayHourTickLabel(hour, dayStartHour),
     };
   });
 }
@@ -1100,7 +1098,7 @@ function TokenLeaderboardTable({
               onSort={onSort}
             />
             <th scope="col" className={TABLE_TH_CLASS}>
-              <TableHeaderLabel label="首末请求/工作日占比" />
+              <TableHeaderLabel label="首末请求/统计日占比" />
             </th>
           </tr>
         </thead>
@@ -1665,9 +1663,9 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
               />
             </div>
             <label className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-white px-2.5 text-xs text-muted-foreground shadow-sm dark:border-border dark:bg-card dark:text-secondary-foreground">
-              <span className="whitespace-nowrap">工作日开始</span>
+              <span className="whitespace-nowrap">统计日开始</span>
               <Select
-                aria-label="工作日开始"
+                aria-label="统计日开始"
                 value={String(dayStartHour)}
                 onChange={(event) => handleDayStartHourChange(Number(event.currentTarget.value))}
                 className="h-6 w-auto rounded border-0 bg-transparent px-1 py-0 text-xs shadow-none focus:bg-transparent focus:ring-0 focus:ring-offset-0"

@@ -646,9 +646,7 @@ describe("query/usage", () => {
         endTs: 2,
         cliKey: "claude",
         providerId: 11,
-        folderKeys: null,
         limit: 20,
-        dayStartHour: null,
         excludeCx2CcGatewayBridge: true,
       });
     });
@@ -674,9 +672,7 @@ describe("query/usage", () => {
       endTs: 2,
       cliKey: "claude" as const,
       providerId: 11,
-      folderKeys: null,
       limit: USAGE_PROVIDER_CACHE_RATE_TREND_MAX_LIMIT,
-      dayStartHour: null,
       excludeCx2CcGatewayBridge: true,
     };
 

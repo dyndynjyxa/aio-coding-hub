@@ -70,18 +70,7 @@ describe("query/keys", () => {
         providerId: 3,
         folderKeys: [" /tmp/b ", "", "/tmp/a", "/tmp/a"],
       })
-    ).toEqual([
-      "usage",
-      "summaryV2",
-      "daily",
-      1,
-      2,
-      "claude",
-      3,
-      ["/tmp/a", "/tmp/b"],
-      null,
-      null,
-    ]);
+    ).toEqual(["usage", "summaryV2", "daily", 1, 2, "claude", 3, ["/tmp/a", "/tmp/b"], null, null]);
     expect(
       usageKeys.leaderboardV2("provider", "weekly", {
         startTs: 1,
@@ -113,18 +102,7 @@ describe("query/keys", () => {
         limit: 20,
         excludeCx2CcGatewayBridge: true,
       })
-    ).toEqual([
-      "usage",
-      "providerCacheRateTrendV1",
-      "daily",
-      1,
-      2,
-      "claude",
-      3,
-      20,
-      null,
-      true,
-    ]);
+    ).toEqual(["usage", "providerCacheRateTrendV1", "daily", 1, 2, "claude", 3, 20, true]);
   });
 
   it("builds cost keys", () => {

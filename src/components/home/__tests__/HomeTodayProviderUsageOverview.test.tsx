@@ -422,7 +422,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     ]);
   });
 
-  it("uses the shared stored workday start hour for today overview queries", () => {
+  it("uses the shared stored statistics day start hour for today overview queries", () => {
     window.localStorage.setItem("homeUsageDayStartHour", "7");
     mockDataModel();
 

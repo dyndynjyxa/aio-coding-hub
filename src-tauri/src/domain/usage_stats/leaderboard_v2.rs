@@ -19,6 +19,15 @@ use super::{
     SQL_EFFECTIVE_INPUT_TOKENS_EXPR,
 };
 
+fn local_day_bucket_sql(timestamp_expr: &str, day_start_hour: i64) -> String {
+    if day_start_hour == 0 {
+        return format!("strftime('%Y-%m-%d', {timestamp_expr}, 'unixepoch', 'localtime')");
+    }
+    format!(
+        "strftime('%Y-%m-%d', {timestamp_expr}, 'unixepoch', 'localtime', '-{day_start_hour} hours')"
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 #[cfg(test)]
 pub(super) fn leaderboard_v2_with_conn(
@@ -58,7 +67,7 @@ pub(super) fn leaderboard_v2_with_conn_day_start(
 ) -> Result<Vec<UsageLeaderboardRow>, String> {
     let effective_input_expr = SQL_EFFECTIVE_INPUT_TOKENS_EXPR;
     let effective_total_expr = sql_effective_total_tokens_expr();
-    let day_start_offset_seconds = day_start_hour.saturating_mul(3600);
+    let day_bucket_sql = local_day_bucket_sql("created_at", day_start_hour);
     let (where_clause, where_params) = build_optional_range_cli_provider_filters(
         "created_at",
         "cli_key",
@@ -363,7 +372,7 @@ GROUP BY COALESCE(NULLIF(requested_model, ''), 'Unknown')
             let sql = format!(
                 r#"
 SELECT
-  strftime('%Y-%m-%d', created_at - {day_start_offset_seconds}, 'unixepoch', 'localtime') AS key,
+  {day_bucket_sql} AS key,
   COUNT(*) AS requests_total,
   SUM(CASE WHEN status >= 200 AND status < 300 AND error_code IS NULL THEN 1 ELSE 0 END) AS requests_success,
   SUM(
@@ -435,7 +444,7 @@ GROUP BY key
                 effective_total_expr = effective_total_expr.as_str(),
                 where_clause = where_clause,
                 cx2cc_filter_clause = cx2cc_filter_clause,
-                day_start_offset_seconds = day_start_offset_seconds
+                day_bucket_sql = day_bucket_sql
             );
             let mut stmt = conn
                 .prepare(&sql)
@@ -799,10 +808,7 @@ pub(super) fn leaderboard_v2_folder_filtered_with_conn<F>(
 where
     F: FnOnce(&[UsageSessionLookupKey]) -> Vec<UsageResolvedFolder>,
 {
-    let day_start_offset_seconds = params.day_start_hour.saturating_mul(3600);
-    let day_bucket_sql = format!(
-        "strftime('%Y-%m-%d', r.created_at - {day_start_offset_seconds}, 'unixepoch', 'localtime')"
-    );
+    let day_bucket_sql = local_day_bucket_sql("r.created_at", params.day_start_hour);
     let bucket_sql = match params.scope {
         UsageScopeV2::Cli => None,
         UsageScopeV2::Provider => {
@@ -932,4 +938,25 @@ where
         resolved.exclude_cx2cc_gateway_bridge,
         resolved.day_start_hour,
     )?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::local_day_bucket_sql;
+
+    #[test]
+    fn local_day_bucket_sql_shifts_after_localtime_for_wall_clock_day_boundaries() {
+        assert_eq!(
+            local_day_bucket_sql("created_at", 0),
+            "strftime('%Y-%m-%d', created_at, 'unixepoch', 'localtime')"
+        );
+        assert_eq!(
+            local_day_bucket_sql("created_at", 5),
+            "strftime('%Y-%m-%d', created_at, 'unixepoch', 'localtime', '-5 hours')"
+        );
+        assert_eq!(
+            local_day_bucket_sql("r.created_at", 5),
+            "strftime('%Y-%m-%d', r.created_at, 'unixepoch', 'localtime', '-5 hours')"
+        );
+    }
 }

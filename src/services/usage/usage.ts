@@ -70,6 +70,12 @@ export type UsageDayDetailInput = Override<
     cliKey?: CliKey | null;
   }
 >;
+export type UsageProviderCacheRateTrendInput = Omit<
+  UsageQueryInputV2,
+  "folderKeys" | "dayStartHour"
+> & {
+  limit?: number | null;
+};
 export type NormalizedUsageDayDetailInput = {
   day: string;
   cliKey: CliKey | null;
@@ -438,9 +444,9 @@ export async function usageFolderOptionsV1(period: UsagePeriod, input?: UsageQue
 
 export async function usageProviderCacheRateTrendV1(
   period: UsagePeriod,
-  input?: UsageQueryInputV2 & { limit?: number | null }
+  input?: UsageProviderCacheRateTrendInput
 ) {
-  const params = buildQueryParamsV2(period, input);
+  const params = buildQueryParamsV2(period, { ...input, folderKeys: null, dayStartHour: null });
   const limit = normalizeUsageProviderCacheRateTrendLimit(input?.limit);
 
   return invokeGeneratedIpc<UsageProviderCacheRateTrendRowV1[]>({

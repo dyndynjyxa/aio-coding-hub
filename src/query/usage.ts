@@ -37,8 +37,19 @@ type UsageLeaderboardV2QueryInput = UsageQueryInputV2 & {
   limit: number | null;
 };
 type UsageQueryInputV2WithoutFolderKeys = Omit<UsageQueryInputV2, "folderKeys">;
-type UsageProviderCacheRateTrendQueryInput = UsageQueryInputV2WithoutFolderKeys & {
+type UsageProviderCacheRateTrendQueryInput = Omit<
+  UsageQueryInputV2,
+  "folderKeys" | "dayStartHour"
+> & {
   limit: number | null;
+};
+type NormalizedUsageProviderCacheRateTrendQueryInput = {
+  startTs: number | null;
+  endTs: number | null;
+  cliKey: CliKey | null;
+  providerId: number | null;
+  limit: number | null;
+  excludeCx2CcGatewayBridge: boolean | null;
 };
 
 export function useUsageSummaryQuery(
@@ -162,13 +173,21 @@ export function useUsageProviderCacheRateTrendV1Query(
   options?: { enabled?: boolean }
 ) {
   const normalizedInput = {
-    ...normalizeUsageQueryInputV2({ ...input, folderKeys: null }),
+    ...normalizeUsageQueryInputV2({ ...input, folderKeys: null, dayStartHour: null }),
     limit: normalizeUsageProviderCacheRateTrendLimit(input.limit),
+  };
+  const queryInput: NormalizedUsageProviderCacheRateTrendQueryInput = {
+    startTs: normalizedInput.startTs,
+    endTs: normalizedInput.endTs,
+    cliKey: normalizedInput.cliKey,
+    providerId: normalizedInput.providerId,
+    limit: normalizedInput.limit,
+    excludeCx2CcGatewayBridge: normalizedInput.excludeCx2CcGatewayBridge,
   };
 
   return useQuery({
-    queryKey: usageKeys.providerCacheRateTrendV1(period, normalizedInput),
-    queryFn: () => usageProviderCacheRateTrendV1(period, normalizedInput),
+    queryKey: usageKeys.providerCacheRateTrendV1(period, queryInput),
+    queryFn: () => usageProviderCacheRateTrendV1(period, queryInput),
     enabled: options?.enabled ?? true,
     placeholderData: keepPreviousData,
   });
