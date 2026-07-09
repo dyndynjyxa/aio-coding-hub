@@ -1,7 +1,7 @@
 import { emitListenerSnapshot } from "../../utils/listeners";
 
 export const HOME_USAGE_DAY_START_HOUR_STORAGE_KEY = "homeUsageDayStartHour";
-export const HOME_USAGE_DEFAULT_DAY_START_HOUR = 5;
+export const HOME_USAGE_DEFAULT_DAY_START_HOUR = 0;
 export const HOME_USAGE_DAY_START_HOUR_OPTIONS = Array.from({ length: 10 }, (_, hour) => hour);
 export const HOME_USAGE_WORKDAY_WINDOW_MS = 24 * 60 * 60 * 1000;
 

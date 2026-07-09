@@ -19,6 +19,7 @@ describe("services/home/homeUsageDayBoundary", () => {
   });
 
   it("normalizes, reads, and writes the shared day start hour preference", () => {
+    expect(HOME_USAGE_DEFAULT_DAY_START_HOUR).toBe(0);
     expect(normalizeHomeUsageDayStartHour(null)).toBe(HOME_USAGE_DEFAULT_DAY_START_HOUR);
     expect(normalizeHomeUsageDayStartHour(7)).toBe(7);
     expect(normalizeHomeUsageDayStartHour(10)).toBe(HOME_USAGE_DEFAULT_DAY_START_HOUR);
@@ -30,7 +31,7 @@ describe("services/home/homeUsageDayBoundary", () => {
     expect(readHomeUsageDayStartHourFromStorage()).toBe(7);
 
     writeHomeUsageDayStartHourToStorage(12);
-    expect(window.localStorage.getItem(HOME_USAGE_DAY_START_HOUR_STORAGE_KEY)).toBe("5");
+    expect(window.localStorage.getItem(HOME_USAGE_DAY_START_HOUR_STORAGE_KEY)).toBe("0");
     expect(readHomeUsageDayStartHourFromStorage()).toBe(HOME_USAGE_DEFAULT_DAY_START_HOUR);
   });
 

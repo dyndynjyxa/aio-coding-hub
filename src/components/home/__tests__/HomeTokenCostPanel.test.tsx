@@ -373,7 +373,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     );
     expect(settingLabels).toEqual(["全部文件夹", "过滤转接重复用量", "工作日开始"]);
     const dayStartSelect = screen.getByLabelText("工作日开始") as HTMLSelectElement;
-    expect(dayStartSelect.value).toBe("5");
+    expect(dayStartSelect.value).toBe("0");
     expect(Array.from(dayStartSelect.options).map((option) => option.textContent)).toEqual([
       "00:00",
       "01:00",
@@ -482,7 +482,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         limit: null,
-        dayStartHour: 5,
+        dayStartHour: 0,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -502,7 +502,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         limit: null,
-        dayStartHour: 5,
+        dayStartHour: 0,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -572,17 +572,17 @@ describe("components/home/HomeTokenCostPanel", () => {
     render(<HomeTokenCostPanel />);
 
     const dayStartSelect = screen.getByLabelText("工作日开始") as HTMLSelectElement;
-    expect(dayStartSelect.value).toBe("5");
+    expect(dayStartSelect.value).toBe("0");
     expect(vi.mocked(useUsageSummaryV2Query)).toHaveBeenLastCalledWith(
       "daily",
-      expect.objectContaining({ dayStartHour: 5 }),
+      expect.objectContaining({ dayStartHour: 0 }),
       undefined
     );
 
     fireEvent.click(screen.getByRole("tab", { name: "日期" }));
     fireEvent.click(screen.getByRole("button", { name: "展开 2026-04-16 日期详情" }));
     expect(vi.mocked(useUsageDayDetailV1Query)).toHaveBeenLastCalledWith(
-      expect.objectContaining({ day: "2026-04-16", dayStartHour: 5 }),
+      expect.objectContaining({ day: "2026-04-16", dayStartHour: 0 }),
       expect.objectContaining({ enabled: true })
     );
 
@@ -612,7 +612,8 @@ describe("components/home/HomeTokenCostPanel", () => {
     );
   });
 
-  it("formats date request windows across midnight with next-day text", () => {
+  it("formats date request windows across midnight with next-day text for non-midnight boundaries", () => {
+    window.localStorage.setItem("homeUsageDayStartHour", "5");
     vi.mocked(useUsageSummaryV2Query).mockReturnValue({
       data: {
         requests_total: 2,
@@ -837,7 +838,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         limit: null,
-        dayStartHour: 5,
+        dayStartHour: 0,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -1051,7 +1052,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         providerId: null,
         folderLimit: 8,
         folderKeys: null,
-        dayStartHour: 5,
+        dayStartHour: 0,
         excludeCx2CcGatewayBridge: true,
       },
       expect.objectContaining({ enabled: true })
@@ -1081,7 +1082,8 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(screen.getAllByTestId("day-hour-bar")).toHaveLength(24);
   });
 
-  it("orders expanded day hourly buckets by the configured workday boundary", () => {
+  it("orders expanded day hourly buckets by an explicitly configured non-midnight boundary", () => {
+    window.localStorage.setItem("homeUsageDayStartHour", "5");
     vi.mocked(useUsageSummaryV2Query).mockReturnValue({
       data: {
         requests_total: 2,
@@ -1362,7 +1364,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         endTs: null,
         cliKey: null,
         providerId: null,
-        dayStartHour: 5,
+        dayStartHour: 0,
         excludeCx2CcGatewayBridge: true,
       },
       expect.objectContaining({ enabled: true })
@@ -1375,7 +1377,7 @@ describe("components/home/HomeTokenCostPanel", () => {
       "daily",
       expect.objectContaining({
         folderKeys: ["/Users/demo/aio-coding-hub"],
-        dayStartHour: 5,
+        dayStartHour: 0,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -1385,7 +1387,7 @@ describe("components/home/HomeTokenCostPanel", () => {
       "daily",
       expect.objectContaining({
         folderKeys: ["/Users/demo/aio-coding-hub"],
-        dayStartHour: 5,
+        dayStartHour: 0,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -1398,7 +1400,7 @@ describe("components/home/HomeTokenCostPanel", () => {
       expect.objectContaining({
         day: "2026-04-16",
         folderKeys: ["/Users/demo/aio-coding-hub"],
-        dayStartHour: 5,
+        dayStartHour: 0,
         excludeCx2CcGatewayBridge: true,
       }),
       expect.objectContaining({ enabled: true })
@@ -1494,7 +1496,7 @@ describe("components/home/HomeTokenCostPanel", () => {
       "daily",
       expect.objectContaining({
         excludeCx2CcGatewayBridge: false,
-        dayStartHour: 5,
+        dayStartHour: 0,
       }),
       undefined
     );
@@ -1503,7 +1505,7 @@ describe("components/home/HomeTokenCostPanel", () => {
       "daily",
       expect.objectContaining({
         excludeCx2CcGatewayBridge: false,
-        dayStartHour: 5,
+        dayStartHour: 0,
       }),
       undefined
     );
@@ -1511,7 +1513,7 @@ describe("components/home/HomeTokenCostPanel", () => {
       "daily",
       expect.objectContaining({
         excludeCx2CcGatewayBridge: false,
-        dayStartHour: 5,
+        dayStartHour: 0,
       }),
       expect.objectContaining({ enabled: true })
     );
@@ -1522,7 +1524,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(vi.mocked(useUsageDayDetailV1Query)).toHaveBeenLastCalledWith(
       expect.objectContaining({
         day: "2026-04-16",
-        dayStartHour: 5,
+        dayStartHour: 0,
         excludeCx2CcGatewayBridge: false,
       }),
       expect.objectContaining({ enabled: true })
@@ -1813,11 +1815,11 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(vi.mocked(useUsageSummaryV2Query)).toHaveBeenLastCalledWith(
       "custom",
       expect.objectContaining({
-        startTs: Math.floor(new Date(2026, 3, 15, 5, 0, 0).getTime() / 1000),
-        endTs: Math.floor(new Date(2026, 3, 16, 5, 0, 0).getTime() / 1000),
+        startTs: Math.floor(new Date(2026, 3, 15, 0, 0, 0).getTime() / 1000),
+        endTs: Math.floor(new Date(2026, 3, 16, 0, 0, 0).getTime() / 1000),
         cliKey: null,
         providerId: null,
-        dayStartHour: 5,
+        dayStartHour: 0,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -1826,12 +1828,12 @@ describe("components/home/HomeTokenCostPanel", () => {
       "provider",
       "custom",
       expect.objectContaining({
-        startTs: Math.floor(new Date(2026, 3, 15, 5, 0, 0).getTime() / 1000),
-        endTs: Math.floor(new Date(2026, 3, 16, 5, 0, 0).getTime() / 1000),
+        startTs: Math.floor(new Date(2026, 3, 15, 0, 0, 0).getTime() / 1000),
+        endTs: Math.floor(new Date(2026, 3, 16, 0, 0, 0).getTime() / 1000),
         cliKey: null,
         providerId: null,
         limit: null,
-        dayStartHour: 5,
+        dayStartHour: 0,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -1842,11 +1844,11 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(vi.mocked(useUsageSummaryV2Query)).toHaveBeenLastCalledWith(
       "custom",
       expect.objectContaining({
-        startTs: Math.floor(new Date(2026, 3, 14, 5, 0, 0).getTime() / 1000),
-        endTs: Math.floor(new Date(2026, 3, 17, 5, 0, 0).getTime() / 1000),
+        startTs: Math.floor(new Date(2026, 3, 14, 0, 0, 0).getTime() / 1000),
+        endTs: Math.floor(new Date(2026, 3, 17, 0, 0, 0).getTime() / 1000),
         cliKey: null,
         providerId: null,
-        dayStartHour: 5,
+        dayStartHour: 0,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -1855,12 +1857,12 @@ describe("components/home/HomeTokenCostPanel", () => {
       "provider",
       "custom",
       expect.objectContaining({
-        startTs: Math.floor(new Date(2026, 3, 14, 5, 0, 0).getTime() / 1000),
-        endTs: Math.floor(new Date(2026, 3, 17, 5, 0, 0).getTime() / 1000),
+        startTs: Math.floor(new Date(2026, 3, 14, 0, 0, 0).getTime() / 1000),
+        endTs: Math.floor(new Date(2026, 3, 17, 0, 0, 0).getTime() / 1000),
         cliKey: null,
         providerId: null,
         limit: null,
-        dayStartHour: 5,
+        dayStartHour: 0,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -1871,11 +1873,11 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(vi.mocked(useUsageSummaryV2Query)).toHaveBeenLastCalledWith(
       "custom",
       expect.objectContaining({
-        startTs: Math.floor(new Date(2026, 3, 2, 5, 0, 0).getTime() / 1000),
-        endTs: Math.floor(new Date(2026, 3, 17, 5, 0, 0).getTime() / 1000),
+        startTs: Math.floor(new Date(2026, 3, 2, 0, 0, 0).getTime() / 1000),
+        endTs: Math.floor(new Date(2026, 3, 17, 0, 0, 0).getTime() / 1000),
         cliKey: null,
         providerId: null,
-        dayStartHour: 5,
+        dayStartHour: 0,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -1884,12 +1886,12 @@ describe("components/home/HomeTokenCostPanel", () => {
       "provider",
       "custom",
       expect.objectContaining({
-        startTs: Math.floor(new Date(2026, 3, 2, 5, 0, 0).getTime() / 1000),
-        endTs: Math.floor(new Date(2026, 3, 17, 5, 0, 0).getTime() / 1000),
+        startTs: Math.floor(new Date(2026, 3, 2, 0, 0, 0).getTime() / 1000),
+        endTs: Math.floor(new Date(2026, 3, 17, 0, 0, 0).getTime() / 1000),
         cliKey: null,
         providerId: null,
         limit: null,
-        dayStartHour: 5,
+        dayStartHour: 0,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -1905,7 +1907,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         folderKeys: null,
-        dayStartHour: 5,
+        dayStartHour: 0,
         excludeCx2CcGatewayBridge: true,
       },
       undefined
@@ -1921,7 +1923,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         folderKeys: null,
-        dayStartHour: 5,
+        dayStartHour: 0,
         excludeCx2CcGatewayBridge: true,
       },
       undefined
@@ -1996,7 +1998,7 @@ describe("components/home/HomeTokenCostPanel", () => {
       expect.objectContaining({
         startTs: null,
         endTs: null,
-        dayStartHour: 5,
+        dayStartHour: 0,
         excludeCx2CcGatewayBridge: true,
       }),
       expect.objectContaining({ enabled: true })
@@ -2007,7 +2009,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         folderLimit: 8,
-        dayStartHour: 5,
+        dayStartHour: 0,
         excludeCx2CcGatewayBridge: true,
       }),
       expect.objectContaining({ enabled: false })
@@ -2017,7 +2019,7 @@ describe("components/home/HomeTokenCostPanel", () => {
       expect.objectContaining({
         startTs: null,
         endTs: null,
-        dayStartHour: 5,
+        dayStartHour: 0,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -2030,11 +2032,11 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(vi.mocked(useUsageSummaryV2Query)).toHaveBeenLastCalledWith(
       "custom",
       expect.objectContaining({
-        startTs: Math.floor(new Date(2026, 3, 1, 5, 0, 0).getTime() / 1000),
-        endTs: Math.floor(new Date(2026, 4, 1, 5, 0, 0).getTime() / 1000),
+        startTs: Math.floor(new Date(2026, 3, 1, 0, 0, 0).getTime() / 1000),
+        endTs: Math.floor(new Date(2026, 4, 1, 0, 0, 0).getTime() / 1000),
         cliKey: null,
         providerId: null,
-        dayStartHour: 5,
+        dayStartHour: 0,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -2043,12 +2045,12 @@ describe("components/home/HomeTokenCostPanel", () => {
       "provider",
       "custom",
       expect.objectContaining({
-        startTs: Math.floor(new Date(2026, 3, 1, 5, 0, 0).getTime() / 1000),
-        endTs: Math.floor(new Date(2026, 4, 1, 5, 0, 0).getTime() / 1000),
+        startTs: Math.floor(new Date(2026, 3, 1, 0, 0, 0).getTime() / 1000),
+        endTs: Math.floor(new Date(2026, 4, 1, 0, 0, 0).getTime() / 1000),
         cliKey: null,
         providerId: null,
         limit: null,
-        dayStartHour: 5,
+        dayStartHour: 0,
         excludeCx2CcGatewayBridge: true,
       }),
       undefined
@@ -2410,7 +2412,7 @@ describe("components/home/HomeTokenCostPanel", () => {
         cliKey: null,
         providerId: null,
         folderLimit: 8,
-        dayStartHour: 5,
+        dayStartHour: 0,
         excludeCx2CcGatewayBridge: true,
       }),
       expect.objectContaining({ enabled: false })
