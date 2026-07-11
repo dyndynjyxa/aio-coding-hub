@@ -256,6 +256,18 @@ CREATE TABLE IF NOT EXISTS sort_mode_active (
 
 CREATE INDEX IF NOT EXISTS idx_sort_mode_active_mode_id ON sort_mode_active(mode_id);
 
+CREATE TABLE IF NOT EXISTS gateway_session_persistent_pins (
+  cli_key TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  sort_mode_id INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY(cli_key, session_id),
+  FOREIGN KEY(sort_mode_id) REFERENCES sort_modes(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_gw_session_persistent_pins_sort_mode_id ON gateway_session_persistent_pins(sort_mode_id);
+
 CREATE TABLE IF NOT EXISTS claude_model_validation_runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   provider_id INTEGER NOT NULL,

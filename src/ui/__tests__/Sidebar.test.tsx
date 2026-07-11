@@ -9,6 +9,8 @@ const gatewayMetaRef = vi.hoisted(() => ({
   current: { gatewayAvailable: "checking", gateway: null, preferredPort: 37123 } as any,
 }));
 
+const sessionsRef = vi.hoisted(() => ({ current: [] as any[] }));
+
 const updateMetaRef = vi.hoisted(() => ({
   current: {
     about: null,
@@ -56,6 +58,10 @@ vi.mock("../../hooks/useGatewayMeta", () => ({
   useGatewayMeta: () => gatewayMetaRef.current,
 }));
 
+vi.mock("../../query/gateway", () => ({
+  useGatewaySessionsListQuery: () => ({ data: sessionsRef.current }),
+}));
+
 vi.mock("../../hooks/useUpdateMeta", () => ({
   useUpdateMeta: () => updateMetaRef.current,
   updateDialogSetOpen: updateDialogSetOpenMock,
@@ -73,6 +79,7 @@ vi.mock("../../hooks/useCliProxyControls", () => ({
 describe("ui/Sidebar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionsRef.current = [];
     devPreviewRef.current = { enabled: false, setEnabled: vi.fn(), toggle: vi.fn() };
     themeRef.current = { theme: "system", resolvedTheme: "light", setTheme: vi.fn() };
     cliProxyMocks.current = {
@@ -184,6 +191,22 @@ describe("ui/Sidebar", () => {
     for (const item of NAV) {
       expect(screen.getByRole("link", { name: item.label })).toBeInTheDocument();
     }
+  });
+
+  it("shows a pinned-session count badge on the home nav item when sessions are pinned", () => {
+    sessionsRef.current = [
+      { cli_key: "claude", session_id: "s1", sort_mode_pinned: true, persistent_pinned: false },
+      { cli_key: "codex", session_id: "s2", sort_mode_pinned: true, persistent_pinned: false },
+      { cli_key: "codex", session_id: "s3", sort_mode_pinned: false, persistent_pinned: false },
+    ];
+    render(
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>
+    );
+    // 2 sessions pinned → badge text "2", aria-label on the home ("首页") link group.
+    expect(screen.getByLabelText("2 个会话已手动指派路由策略")).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
   });
 
   it("renders the GitHub link when no update candidate exists", () => {

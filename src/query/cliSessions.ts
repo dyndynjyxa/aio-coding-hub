@@ -8,6 +8,7 @@ import {
 import {
   cliSessionsFolderLookupByIds,
   cliSessionsMessagesGet,
+  cliSessionsMetadataLookupByIds,
   cliSessionsProjectsList,
   cliSessionsSessionDelete,
   cliSessionsSessionsList,
@@ -18,6 +19,7 @@ import {
   normalizeCliSessionsWslDistro,
   type CliSessionsFolderLookupEntry,
   type CliSessionsFolderLookupInput,
+  type CliSessionsMetadataEntry,
   type CliSessionsSessionSummary,
   type CliSessionsSource,
 } from "../services/cli/cliSessions";
@@ -77,6 +79,33 @@ export function useCliSessionsFolderLookupByIdsQuery(
     queryKey: cliSessionsKeys.folderLookup(lookupKeys, wslDistro),
     queryFn: async () => (await cliSessionsFolderLookupByIds(normalizedItems, wslDistro)) ?? [],
     enabled: normalizedItems.length > 0 && (options?.enabled ?? true),
+  });
+}
+
+/**
+ * Batch-resolve display metadata (cwd, title, timestamps) for sessions, keyed by
+ * `(source, session_id)`. Result is a `Map` keyed `source:session_id` for O(1)
+ * join in pin UIs. Missing sessions are simply absent from the map.
+ */
+export function useCliSessionsMetadataLookupByIdsQuery(
+  items: CliSessionsFolderLookupInput[],
+  options?: { enabled?: boolean; wslDistro?: string }
+) {
+  const wslDistro = normalizeCliSessionsWslDistro(options?.wslDistro) ?? undefined;
+  const normalizedItems = normalizeCliSessionsFolderLookupItems(items);
+  const lookupKeys = normalizedItems.map((item) => `${item.source}:${item.session_id}`);
+  return useQuery<Map<string, CliSessionsMetadataEntry>>({
+    queryKey: cliSessionsKeys.metadataLookup(lookupKeys, wslDistro),
+    queryFn: async () => {
+      const rows = (await cliSessionsMetadataLookupByIds(normalizedItems, wslDistro)) ?? [];
+      const map = new Map<string, CliSessionsMetadataEntry>();
+      for (const row of rows) {
+        map.set(`${row.source}:${row.session_id}`, row);
+      }
+      return map;
+    },
+    enabled: normalizedItems.length > 0 && (options?.enabled ?? true),
+    staleTime: 60_000,
   });
 }
 

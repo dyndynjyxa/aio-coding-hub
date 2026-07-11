@@ -1,4 +1,4 @@
-import type { MouseEvent as ReactMouseEvent } from "react";
+import { useMemo, type MouseEvent as ReactMouseEvent } from "react";
 import { NavLink } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -23,6 +23,7 @@ import { CLIS } from "../constants/clis";
 import { AIO_REPO_URL } from "../constants/urls";
 import { useDevPreviewData } from "../hooks/useDevPreviewData";
 import { useGatewayStatus, openReleasesUrl } from "../hooks/useGatewayStatus";
+import { useGatewaySessionsListQuery } from "../query/gateway";
 import { useTheme } from "../hooks/useTheme";
 import { updateDialogSetOpen } from "../hooks/useUpdateMeta";
 import { useCliProxyControls } from "../hooks/useCliProxyControls";
@@ -156,7 +157,7 @@ function SidebarHeader({
   );
 }
 
-function SidebarNavigation() {
+function SidebarNavigation({ pinnedSessionCount = 0 }: { pinnedSessionCount?: number }) {
   return (
     <nav
       aria-label="Main navigation"
@@ -200,6 +201,20 @@ function SidebarNavigation() {
                         )}
                       />
                       <span className="truncate">{item.label}</span>
+                      {item.to === "/" && pinnedSessionCount > 0 ? (
+                        <span
+                          className={cn(
+                            "ml-auto inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full px-1 text-[10px] font-bold tabular-nums",
+                            isActive
+                              ? "bg-primary-foreground/20 text-primary-foreground"
+                              : "bg-indigo-500/15 text-indigo-600 dark:text-indigo-300"
+                          )}
+                          aria-label={`${pinnedSessionCount} 个会话已手动指派路由策略`}
+                          title={`${pinnedSessionCount} 个会话已手动指派路由策略（在首页「活跃 Session」管理）`}
+                        >
+                          {pinnedSessionCount}
+                        </span>
+                      ) : null}
                     </>
                   )}
                 </NavLink>
@@ -512,6 +527,16 @@ export function Sidebar({ className }: SidebarProps) {
   const devPreview = useDevPreviewData();
   const cliProxyState = useCliProxyControls();
   const { pendingCliProxyEnablePrompt } = cliProxyState;
+
+  // Count sessions with a manual routing-template pin so the home nav can badge it.
+  const sessionsQuery = useGatewaySessionsListQuery(50, {
+    enabled: isGatewayRunning,
+    refetchIntervalMs: isGatewayRunning ? 5000 : false,
+  });
+  const pinnedSessionCount = useMemo(
+    () => (sessionsQuery.data ?? []).filter((row) => row.sort_mode_pinned).length,
+    [sessionsQuery.data]
+  );
   const gatewayAriaLabel = `网关状态：${statusText}，端口 ${portText}`;
   const repoLinkLabel = hasUpdate
     ? isPortable && !devPreview.enabled
@@ -554,7 +579,7 @@ export function Sidebar({ className }: SidebarProps) {
           handleRepoClick={handleRepoClick}
         />
 
-        <SidebarNavigation />
+        <SidebarNavigation pinnedSessionCount={pinnedSessionCount} />
 
         <SidebarControlCenter
           gatewayAriaLabel={gatewayAriaLabel}

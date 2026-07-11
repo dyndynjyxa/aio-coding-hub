@@ -40,6 +40,27 @@ pub struct CliSessionsFolderLookupEntry {
     pub folder_path: String,
 }
 
+/// Lightweight per-session metadata for display in pin UIs (active-session card,
+/// persistent-pin list, session list). Resolved from the `.jsonl` session file.
+///
+/// `title` uses a 3-tier priority: `custom-title` (user `/rename`)
+/// → first real user message (skipping `<local-command-caveat>` /
+/// `<command-name>` injections) → cwd basename. Empty string only when the
+/// jsonl could not yield any candidate.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct CliSessionsMetadataEntry {
+    pub source: String,
+    pub session_id: String,
+    /// Decoded working directory (cwd) from the jsonl, or decoded project dir.
+    pub cwd: Option<String>,
+    /// Human-readable name (3-tier priority). Empty if nothing resolved.
+    pub title: String,
+    /// Unix milliseconds of the first record's timestamp.
+    pub created_at: Option<i64>,
+    /// Unix milliseconds of the last record's timestamp.
+    pub last_active_at: Option<i64>,
+}
+
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct CliSessionsPaginatedMessages {
     pub messages: Vec<CliSessionsDisplayMessage>,

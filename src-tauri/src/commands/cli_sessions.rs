@@ -196,6 +196,26 @@ pub(crate) async fn cli_sessions_folder_lookup_by_ids(
     .map_err(Into::into)
 }
 
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn cli_sessions_metadata_lookup_by_ids(
+    app: tauri::AppHandle,
+    items: Vec<CliSessionsFolderLookupInput>,
+    wsl_distro: Option<String>,
+) -> Result<Vec<cli_sessions::CliSessionsMetadataEntry>, String> {
+    let normalized = normalize_folder_lookup_items(items)?;
+
+    if normalized.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    blocking::run("cli_sessions_metadata_lookup_by_ids", move || {
+        cli_sessions::metadata_lookup_by_session_ids(&app, &normalized, wsl_distro.as_deref())
+    })
+    .await
+    .map_err(Into::into)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

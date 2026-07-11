@@ -22,6 +22,9 @@ pub struct ActiveSessionSnapshot {
     pub session_id: String,
     pub session_suffix: String,
     pub provider_id: i64,
+    /// Manual sort_mode pin for this session.
+    /// `None` = not pinned; `Some(None)` = pinned to Default; `Some(Some(id))` = pinned to a custom mode.
+    pub pinned_sort_mode_id: Option<Option<i64>>,
     pub expires_at: i64,
 }
 
@@ -35,6 +38,9 @@ pub struct SessionManager {
 struct SessionBinding {
     provider_id: i64,
     sort_mode_id: Option<i64>,
+    /// Manually pinned sort_mode (outer `Option` = pinned?, inner = mode id or `None` for Default).
+    /// Takes priority over the auto-inherited active sort_mode.
+    pinned_sort_mode_id: Option<Option<i64>>,
     provider_order: Option<Vec<i64>>,
     expires_at: i64,
     ttl_secs: i64,
@@ -94,6 +100,12 @@ impl SessionManager {
                 return Some(id);
             }
         }
+        // Claude Code sends a dedicated, stable per-session header.
+        if let Some(v) = header_string(headers, "x-claude-code-session-id") {
+            if let Some(id) = sanitize_session_id(&v) {
+                return Some(id);
+            }
+        }
 
         // 2) best-effort JSON extraction
         if let Some(root) = root {
@@ -131,6 +143,16 @@ impl SessionManager {
                 }
 
                 if let Some(user_id) = meta.get("user_id").and_then(|v| v.as_str()) {
+                    // Claude Code packs session_id into a JSON string:
+                    // {"device_id":"...","account_uuid":"","session_id":"<uuid>"}
+                    if let Ok(parsed) = serde_json::from_str::<Value>(user_id) {
+                        if let Some(sid) = parsed.get("session_id").and_then(|v| v.as_str()) {
+                            if let Some(id) = sanitize_session_id(sid) {
+                                return Some(id);
+                            }
+                        }
+                    }
+
                     let marker = "_session_";
                     if let Some(idx) = user_id.find(marker) {
                         let extracted = &user_id[idx + marker.len()..];
@@ -248,6 +270,7 @@ impl SessionManager {
             SessionBinding {
                 provider_id: 0,
                 sort_mode_id,
+                pinned_sort_mode_id: None,
                 provider_order,
                 expires_at: now_unix.saturating_add(self.ttl_secs.max(1)),
                 ttl_secs: self.ttl_secs,
@@ -323,6 +346,7 @@ impl SessionManager {
             SessionBinding {
                 provider_id,
                 sort_mode_id,
+                pinned_sort_mode_id: None,
                 provider_order: None,
                 expires_at,
                 ttl_secs: self.ttl_secs,
@@ -354,6 +378,117 @@ impl SessionManager {
         }
     }
 
+    /// Manually pin (or refresh) the session's sort_mode. Takes priority over the
+    /// auto-inherited active sort_mode. `sort_mode_id == None` pins to Default.
+    /// Creates the binding if absent. Refreshes TTL.
+    pub fn bind_pinned_sort_mode(
+        &self,
+        cli_key: &str,
+        session_id: &str,
+        sort_mode_id: Option<i64>,
+        now_unix: i64,
+    ) -> bool {
+        if cli_key.trim().is_empty() || session_id.trim().is_empty() {
+            return false;
+        }
+
+        let key = SessionKey {
+            cli_key: cli_key.to_string(),
+            session_id: session_id.to_string(),
+        };
+
+        let mut guard = self.bindings.lock_or_recover();
+        if guard.len() >= MAX_BINDINGS {
+            drop_expired(&mut guard, now_unix);
+            if guard.len() >= MAX_BINDINGS {
+                evict_oldest_quarter(&mut guard);
+            }
+        }
+
+        let expires_at = now_unix.saturating_add(self.ttl_secs.max(1));
+        if let Some(existing) = guard.get_mut(&key) {
+            if existing.expires_at > now_unix {
+                existing.pinned_sort_mode_id = Some(sort_mode_id);
+                // Mode changed: drop the recorded provider order so failover order
+                // is rebuilt for the newly pinned mode on the next request.
+                existing.provider_order = None;
+                existing.expires_at = expires_at;
+                return true;
+            }
+            guard.remove(&key);
+        }
+
+        guard.insert(
+            key,
+            SessionBinding {
+                provider_id: 0,
+                sort_mode_id: None,
+                pinned_sort_mode_id: Some(sort_mode_id),
+                provider_order: None,
+                expires_at,
+                ttl_secs: self.ttl_secs,
+            },
+        );
+        true
+    }
+
+    /// Returns the manual sort_mode pin for this session, if any.
+    /// `Some(None)` = pinned to Default; `Some(Some(id))` = pinned to a custom mode.
+    pub fn get_bound_pinned_sort_mode_id(
+        &self,
+        cli_key: &str,
+        session_id: &str,
+        now_unix: i64,
+    ) -> Option<Option<i64>> {
+        let key = SessionKey {
+            cli_key: cli_key.to_string(),
+            session_id: session_id.to_string(),
+        };
+
+        let mut guard = self.bindings.lock_or_recover();
+        match guard.get_mut(&key) {
+            Some(binding) if binding.expires_at > now_unix => {
+                binding.expires_at = now_unix.saturating_add(binding.ttl_secs.max(1));
+                binding.pinned_sort_mode_id
+            }
+            Some(_) => {
+                guard.remove(&key);
+                None
+            }
+            None => None,
+        }
+    }
+
+    /// Clear a session's manual sort_mode pin, returning it to the auto-inherited
+    /// active mode. Also drops the recorded provider order so failover order is
+    /// rebuilt for the reverted mode. Returns `true` when a live binding was
+    /// updated. No-op (returns `false`) when there is no live binding.
+    pub fn clear_pinned_sort_mode(&self, cli_key: &str, session_id: &str, now_unix: i64) -> bool {
+        if cli_key.trim().is_empty() || session_id.trim().is_empty() {
+            return false;
+        }
+
+        let key = SessionKey {
+            cli_key: cli_key.to_string(),
+            session_id: session_id.to_string(),
+        };
+
+        let mut guard = self.bindings.lock_or_recover();
+        match guard.get_mut(&key) {
+            Some(binding) if binding.expires_at > now_unix => {
+                binding.pinned_sort_mode_id = None;
+                binding.provider_order = None;
+                binding.expires_at = now_unix.saturating_add(binding.ttl_secs.max(1));
+                true
+            }
+            Some(_) => {
+                guard.remove(&key);
+                false
+            }
+            None => false,
+        }
+    }
+
     pub fn list_active(&self, now_unix: i64, limit: usize) -> Vec<ActiveSessionSnapshot> {
         if limit == 0 {
             return Vec::new();
@@ -369,6 +504,7 @@ impl SessionManager {
                 session_id: k.session_id.clone(),
                 session_suffix: session_suffix(&k.session_id),
                 provider_id: v.provider_id,
+                pinned_sort_mode_id: v.pinned_sort_mode_id,
                 expires_at: v.expires_at,
             })
             .collect();

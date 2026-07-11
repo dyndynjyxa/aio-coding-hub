@@ -14,6 +14,7 @@ import { Select } from "../../ui/Select";
 import { Spinner } from "../../ui/Spinner";
 import { Switch } from "../../ui/Switch";
 import { ProviderEditorDialog } from "./ProviderEditorDialog";
+import { PersistentPinsCard } from "./PersistentPinsCard";
 import { SortableProviderCard } from "./SortableProviderCard";
 import { SortableProviderOrderItem } from "./SortableProviderOrderItem";
 import { useProvidersViewDataModel } from "./hooks/useProvidersViewDataModel";
@@ -512,6 +513,8 @@ function ProvidersRouteSidebar({ model }: { model: ProvidersViewModel }) {
           </DndContext>
         )}
       </div>
+
+      <PersistentPinsCard />
     </aside>
   );
 }
@@ -763,7 +766,9 @@ function PendingRouteActivationDialog({
       title={`确认切换 ${selectedCliName} 路由策略？`}
       description={
         pendingRouteActivation
-          ? `目前还有 ${pendingRouteActivation.activeSessionCount} 个活跃 Session，切换策略可能导致会话中断，是否确认？`
+          ? pendingRouteActivation.pinnedSessionCount > 0
+            ? `目前还有 ${pendingRouteActivation.activeSessionCount} 个活跃 Session，切换策略可能导致会话中断，是否确认？其中 ${pendingRouteActivation.pinnedSessionCount} 个已手动指派路由策略，不受本次全局切换影响。`
+            : `目前还有 ${pendingRouteActivation.activeSessionCount} 个活跃 Session，切换策略可能导致会话中断，是否确认？`
           : undefined
       }
       className="max-w-lg"

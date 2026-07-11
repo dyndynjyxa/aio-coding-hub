@@ -171,6 +171,27 @@ impl GatewayRuntime {
         self.session.clear_cli_bindings(cli_key)
     }
 
+    pub(crate) fn pin_session_sort_mode(
+        &self,
+        cli_key: &str,
+        session_id: &str,
+        sort_mode_id: Option<i64>,
+        now_unix: i64,
+    ) -> bool {
+        self.session
+            .bind_pinned_sort_mode(cli_key, session_id, sort_mode_id, now_unix)
+    }
+
+    pub(crate) fn unpin_session_sort_mode(
+        &self,
+        cli_key: &str,
+        session_id: &str,
+        now_unix: i64,
+    ) -> bool {
+        self.session
+            .clear_pinned_sort_mode(cli_key, session_id, now_unix)
+    }
+
     pub(crate) fn clear_recent_errors(&self) -> usize {
         self.recent_errors.lock_or_recover().clear()
     }

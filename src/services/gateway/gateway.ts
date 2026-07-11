@@ -4,11 +4,12 @@ import {
   type GatewayUpstreamProxyInput,
   type GatewayProviderCircuitStatus,
   type GatewayStatus,
+  type PersistentPinRow,
 } from "../../generated/bindings";
 import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
 import type { CliKey } from "../providers/providers";
 
-export type { GatewayProviderCircuitStatus, GatewayStatus };
+export type { GatewayProviderCircuitStatus, GatewayStatus, PersistentPinRow };
 export type GatewayActiveSession = GatewayActiveSessionSummary;
 
 const CLI_KEY_VALUES = ["claude", "codex", "gemini"] as const satisfies readonly CliKey[];
@@ -122,6 +123,134 @@ export async function gatewaySessionsList(limit?: number | null) {
       commands.gatewaySessionsList(normalizedLimit) as Promise<
         GeneratedCommandResult<GatewayActiveSession[]>
       >,
+  });
+}
+
+/**
+ * Pin a sort_mode (routing template) to a session.
+ * `sortModeId === null` pins to Default.
+ */
+export async function gatewaySessionPinSortMode(
+  cliKey: string,
+  sessionId: string,
+  sortModeId: number | null
+) {
+  const normalizedCliKey = validateGatewayCliKey(cliKey);
+  const normalizedSessionId = sessionId.trim();
+  if (normalizedSessionId.length === 0) {
+    throw new Error("SEC_INVALID_INPUT: sessionId is empty");
+  }
+  let normalizedSortModeId: number | null = null;
+  if (sortModeId != null) {
+    assertSafeInteger("sortModeId", sortModeId);
+    if (sortModeId <= 0) {
+      throw new Error(`SEC_INVALID_INPUT: invalid sortModeId=${sortModeId}`);
+    }
+    normalizedSortModeId = sortModeId;
+  }
+
+  return invokeGeneratedIpc<boolean>({
+    title: "指派会话路由策略失败",
+    cmd: "gateway_session_pin_sort_mode",
+    args: {
+      cliKey: normalizedCliKey,
+      sessionId: normalizedSessionId,
+      sortModeId: normalizedSortModeId,
+    },
+    invoke: () =>
+      commands.gatewaySessionPinSortMode(
+        normalizedCliKey,
+        normalizedSessionId,
+        normalizedSortModeId
+      ) as Promise<GeneratedCommandResult<boolean>>,
+  });
+}
+
+/** Clear a session's sort_mode pin, reverting it to the auto-inherited strategy. */
+export async function gatewaySessionUnpinSortMode(cliKey: string, sessionId: string) {
+  const normalizedCliKey = validateGatewayCliKey(cliKey);
+  const normalizedSessionId = sessionId.trim();
+  if (normalizedSessionId.length === 0) {
+    throw new Error("SEC_INVALID_INPUT: sessionId is empty");
+  }
+
+  return invokeGeneratedIpc<boolean>({
+    title: "取消会话路由策略失败",
+    cmd: "gateway_session_unpin_sort_mode",
+    args: { cliKey: normalizedCliKey, sessionId: normalizedSessionId },
+    invoke: () =>
+      commands.gatewaySessionUnpinSortMode(normalizedCliKey, normalizedSessionId) as Promise<
+        GeneratedCommandResult<boolean>
+      >,
+  });
+}
+
+/**
+ * Persist a session's sort_mode pin to disk (survives restart / TTL / resume).
+ * `sortModeId === null` persists Default.
+ */
+export async function gatewaySessionPersistSortMode(
+  cliKey: string,
+  sessionId: string,
+  sortModeId: number | null
+) {
+  const normalizedCliKey = validateGatewayCliKey(cliKey);
+  const normalizedSessionId = sessionId.trim();
+  if (normalizedSessionId.length === 0) {
+    throw new Error("SEC_INVALID_INPUT: sessionId is empty");
+  }
+  let normalizedSortModeId: number | null = null;
+  if (sortModeId != null) {
+    assertSafeInteger("sortModeId", sortModeId);
+    if (sortModeId <= 0) {
+      throw new Error(`SEC_INVALID_INPUT: invalid sortModeId=${sortModeId}`);
+    }
+    normalizedSortModeId = sortModeId;
+  }
+
+  return invokeGeneratedIpc<boolean>({
+    title: "持久化会话路由策略失败",
+    cmd: "gateway_session_persist_sort_mode",
+    args: {
+      cliKey: normalizedCliKey,
+      sessionId: normalizedSessionId,
+      sortModeId: normalizedSortModeId,
+    },
+    invoke: () =>
+      commands.gatewaySessionPersistSortMode(
+        normalizedCliKey,
+        normalizedSessionId,
+        normalizedSortModeId
+      ) as Promise<GeneratedCommandResult<boolean>>,
+  });
+}
+
+/** Remove a session's persistent (disk-backed) sort_mode pin. */
+export async function gatewaySessionUnpersistSortMode(cliKey: string, sessionId: string) {
+  const normalizedCliKey = validateGatewayCliKey(cliKey);
+  const normalizedSessionId = sessionId.trim();
+  if (normalizedSessionId.length === 0) {
+    throw new Error("SEC_INVALID_INPUT: sessionId is empty");
+  }
+
+  return invokeGeneratedIpc<boolean>({
+    title: "取消持久化会话路由策略失败",
+    cmd: "gateway_session_unpersist_sort_mode",
+    args: { cliKey: normalizedCliKey, sessionId: normalizedSessionId },
+    invoke: () =>
+      commands.gatewaySessionUnpersistSortMode(normalizedCliKey, normalizedSessionId) as Promise<
+        GeneratedCommandResult<boolean>
+      >,
+  });
+}
+
+/** List all persistent (disk-backed) sort_mode pins, regardless of session activity. */
+export async function gatewayPersistentPinsList() {
+  return invokeGeneratedIpc<PersistentPinRow[]>({
+    title: "获取持久路由策略列表失败",
+    cmd: "gateway_persistent_pins_list",
+    invoke: () =>
+      commands.gatewayPersistentPinsList() as Promise<GeneratedCommandResult<PersistentPinRow[]>>,
   });
 }
 
