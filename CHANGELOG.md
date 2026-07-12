@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.60.12](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.11...aio-coding-hub-v0.60.12) (2026-07-12)
+
+
+### Features
+
+* consolidate usage and Codex capability flows ([50db2a1](https://github.com/dyndynjyxa/aio-coding-hub/commit/50db2a181af685c6342d3c7d3e0e425352b172d0))
+* **ui:** 增加用量总耗时展示 ([#334](https://github.com/dyndynjyxa/aio-coding-hub/issues/334)) ([5a67eb2](https://github.com/dyndynjyxa/aio-coding-hub/commit/5a67eb2a2e0048204a56d0396c171bdc24aed525))
+
+
+### Bug Fixes
+
+* **gateway:** 为后台请求保留尝试进度 ([57198a0](https://github.com/dyndynjyxa/aio-coding-hub/commit/57198a00937d1991923c832294d81e3d61b2221c))
+* **home:** 收敛请求日志生命周期投影 ([5860eda](https://github.com/dyndynjyxa/aio-coding-hub/commit/5860edad6950c49421c62aaac6da463c3a397aa1))
+
+
+### Code Refactoring
+
+* **cli-manager:** 优化推理努力级描述和单选按钮样式 ([3db9a55](https://github.com/dyndynjyxa/aio-coding-hub/commit/3db9a553bc7188b0cc25e502673041d6cdc6fc14))
+
 ## [0.60.11](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.10...aio-coding-hub-v0.60.11) (2026-07-09)
 
 
