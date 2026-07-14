@@ -55,6 +55,64 @@ describe("components/home/HomeRequestLogsPanel", () => {
     useCliSessionsFolderLookupByIdsQueryMock.mockReset();
     useCliSessionsFolderLookupByIdsQueryMock.mockReturnValue({ data: [], isLoading: false });
   });
+
+  it("shows the Codex system request badge only for a valid structured marker", () => {
+    render(
+      <MemoryRouter>
+        <HomeRequestLogsPanel
+          traces={[]}
+          requestLogs={makeRequestLogs([
+            {
+              id: 1,
+              trace_id: "codex-system",
+              cli_key: "codex",
+              path: "/v1/responses",
+              requested_model: "gpt-5.4-mini",
+              special_settings_json: JSON.stringify([
+                { type: "codex_system_request", threadSource: "system" },
+              ]),
+            },
+            {
+              id: 2,
+              trace_id: "codex-user",
+              cli_key: "codex",
+              path: "/v1/responses",
+              requested_model: "gpt-5.4-mini",
+              special_settings_json: null,
+            },
+            {
+              id: 3,
+              trace_id: "codex-malformed",
+              cli_key: "codex",
+              path: "/v1/responses",
+              requested_model: "gpt-5.4-mini",
+              special_settings_json: "bad-json",
+            },
+            {
+              id: 4,
+              trace_id: "claude-spoofed-marker",
+              cli_key: "claude",
+              special_settings_json: JSON.stringify([
+                { type: "codex_system_request", threadSource: "system" },
+              ]),
+            },
+          ])}
+          requestLogsLoading={false}
+          requestLogsRefreshing={false}
+          requestLogsAvailable={true}
+          onRefreshRequestLogs={vi.fn()}
+          selectedLogId={null}
+          onSelectLogId={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    expect(screen.getAllByText("Codex 系统请求")).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("switch", { name: "最近使用记录简洁模式" }));
+    expect(screen.getAllByText("Codex 系统请求")).toHaveLength(1);
+  });
+
   it("renders traces + logs and supports refresh/select", () => {
     useCliSessionsFolderLookupByIdsQueryMock.mockReturnValue({
       data: [
@@ -285,6 +343,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
       renderPanel(
         createRequestLogSummary({
           ...baseLog,
+          output_tokens: null,
           cache_creation_input_tokens: null,
           cache_creation_5m_input_tokens: null,
           cache_creation_1h_input_tokens: null,
@@ -294,6 +353,8 @@ describe("components/home/HomeRequestLogsPanel", () => {
     expect(
       within(screen.getByRole("button", { name: /gpt-5\.6-sol/ })).queryByText("缓存创建")
     ).not.toBeInTheDocument();
+    const outputMetric = expectMetric("输出", "—");
+    expect(outputMetric).toHaveClass("col-start-1", "row-start-2");
   });
 
   it("renders Claude model mapping from historical request logs", () => {

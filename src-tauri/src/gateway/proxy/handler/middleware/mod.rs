@@ -7,6 +7,7 @@
 pub(super) mod billing_header_rectifier;
 pub(super) mod body_reader;
 pub(super) mod cli_proxy_guard;
+pub(super) mod codex_request_classifier;
 pub(super) mod codex_session_completion;
 pub(super) mod cx2cc_count_tokens_interceptor;
 pub(super) mod model_inference;
@@ -20,6 +21,7 @@ pub(super) mod warmup_interceptor;
 pub(super) use billing_header_rectifier::BillingHeaderRectifierMiddleware;
 pub(super) use body_reader::BodyReaderMiddleware;
 pub(super) use cli_proxy_guard::CliProxyGuardMiddleware;
+pub(super) use codex_request_classifier::CodexRequestClassifierMiddleware;
 pub(super) use codex_session_completion::CodexSessionCompletionMiddleware;
 pub(super) use cx2cc_count_tokens_interceptor::Cx2ccCountTokensInterceptorMiddleware;
 pub(super) use model_inference::ModelInferenceMiddleware;
@@ -67,6 +69,7 @@ pub(super) struct ProxyContext<R: tauri::Runtime = tauri::Wry> {
     pub(super) created_at_ms: i64,
     pub(super) created_at: i64,
     pub(super) is_claude_count_tokens: bool,
+    pub(super) is_codex_model_discovery: bool,
 
     // -- mutable request data (enriched by middlewares) --
     pub(super) request_body: Option<Body>,
@@ -77,6 +80,7 @@ pub(super) struct ProxyContext<R: tauri::Runtime = tauri::Wry> {
     pub(super) observe_request: bool,
     pub(super) strip_request_content_encoding_seed: bool,
     pub(super) special_settings: Arc<Mutex<Vec<serde_json::Value>>>,
+    pub(super) provider_health_neutral: bool,
 
     // -- model inference results --
     pub(super) requested_model: Option<String>,
@@ -141,6 +145,8 @@ impl<R: tauri::Runtime> ProxyContext<R> {
             introspection_json: self.introspection_json,
             strip_request_content_encoding_seed: self.strip_request_content_encoding_seed,
             special_settings: self.special_settings,
+            provider_health_neutral: self.provider_health_neutral,
+            is_codex_model_discovery: self.is_codex_model_discovery,
             provider_base_url_ping_cache_ttl_seconds: rs.provider_base_url_ping_cache_ttl_seconds,
             verbose_provider_error: rs.verbose_provider_error,
             enable_codex_session_id_completion: rs.enable_codex_session_id_completion,

@@ -5,6 +5,11 @@ export type ParsedRequestLogSpecialSetting = {
   reason?: string;
 } & Record<string, unknown>;
 
+export const CODEX_SYSTEM_REQUEST_SPECIAL_SETTING = {
+  type: "codex_system_request",
+  threadSource: "system",
+} as const;
+
 export function parseRequestLogSpecialSettings(
   specialSettingsJson: string | null | undefined
 ): ParsedRequestLogSpecialSetting[] {
@@ -78,4 +83,14 @@ export function hasClaudeModelMappingSpecialSetting(
     return true;
   }
   return false;
+}
+
+export function hasCodexSystemRequestSpecialSetting(
+  specialSettingsJson: string | null | undefined
+): boolean {
+  return parseRequestLogSpecialSettings(specialSettingsJson).some(
+    (setting) =>
+      setting.type === CODEX_SYSTEM_REQUEST_SPECIAL_SETTING.type &&
+      setting.threadSource === CODEX_SYSTEM_REQUEST_SPECIAL_SETTING.threadSource
+  );
 }

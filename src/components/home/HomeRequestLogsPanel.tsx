@@ -22,6 +22,7 @@ import {
   type ProjectedRequestLogRow,
 } from "../../services/gateway/requestActivityProjection";
 import type { RequestLogSummary } from "../../services/gateway/requestLogs";
+import { hasCodexSystemRequestSpecialSetting } from "../../services/gateway/requestLogSpecialSettings";
 import type { TraceSession } from "../../services/gateway/traceStore";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
@@ -146,6 +147,8 @@ const RequestLogCard = memo(function RequestLogCard({
 
   const cliLabel = cliShortLabel(log.cli_key);
   const cliTone = cliBadgeToneStatic(log.cli_key);
+  const isCodexSystemRequest =
+    log.cli_key === "codex" && hasCodexSystemRequestSpecialSetting(log.special_settings_json);
   const compactTextClass = compactMode ? "whitespace-normal break-all" : "truncate";
 
   const ttfbMs = sanitizeTtfbMs(log.ttfb_ms, log.duration_ms);
@@ -241,6 +244,12 @@ const RequestLogCard = memo(function RequestLogCard({
                 <span className="shrink-0">{cliLabel} /</span>
                 <span className={compactTextClass}>{modelText}</span>
               </span>
+
+              {isCodexSystemRequest ? (
+                <span className="shrink-0 whitespace-nowrap rounded-md border border-border/60 bg-muted px-2 py-0.5 text-[11px] font-semibold text-foreground">
+                  Codex 系统请求
+                </span>
+              ) : null}
 
               {sessionFolder && (
                 <FolderBadge
@@ -340,7 +349,10 @@ const RequestLogCard = memo(function RequestLogCard({
               </div>
 
               <div className="grid grid-cols-4 gap-x-3 gap-y-0.5 flex-1 text-muted-foreground">
-                <div className="flex items-center gap-1 h-4" title="Input Tokens">
+                <div
+                  className="col-start-1 row-start-1 flex items-center gap-1 h-4"
+                  title="Input Tokens"
+                >
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/75 select-none shrink-0">
                     输入
                   </span>
@@ -349,7 +361,10 @@ const RequestLogCard = memo(function RequestLogCard({
                   </span>
                 </div>
                 {cacheWrite ? (
-                  <div className="flex items-center gap-1 h-4" title="Cache Write">
+                  <div
+                    className="col-start-2 row-start-1 flex items-center gap-1 h-4"
+                    title="Cache Write"
+                  >
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/75 select-none shrink-0">
                       缓存创建
                     </span>
@@ -363,7 +378,7 @@ const RequestLogCard = memo(function RequestLogCard({
                     ) : null}
                   </div>
                 ) : null}
-                <div className="flex items-center gap-1 h-4" title="TTFB">
+                <div className="col-start-3 row-start-1 flex items-center gap-1 h-4" title="TTFB">
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/75 select-none shrink-0">
                     首字
                   </span>
@@ -372,7 +387,7 @@ const RequestLogCard = memo(function RequestLogCard({
                   </span>
                 </div>
                 <div
-                  className="flex items-center gap-1 h-4"
+                  className="col-start-4 row-start-1 flex items-center gap-1 h-4"
                   title={costUsdText === "—" ? undefined : costUsdText}
                 >
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/75 select-none shrink-0">
@@ -384,7 +399,10 @@ const RequestLogCard = memo(function RequestLogCard({
                   {isPriorityServiceTier && <FastModeBadge showCustomTooltip={showCustomTooltip} />}
                 </div>
 
-                <div className="flex items-center gap-1 h-4" title="Output Tokens">
+                <div
+                  className="col-start-1 row-start-2 flex items-center gap-1 h-4"
+                  title="Output Tokens"
+                >
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/75 select-none shrink-0">
                     输出
                   </span>
@@ -392,7 +410,10 @@ const RequestLogCard = memo(function RequestLogCard({
                     {formatInteger(log.output_tokens)}
                   </span>
                 </div>
-                <div className="flex items-center gap-1 h-4" title="Cache Read">
+                <div
+                  className="col-start-2 row-start-2 flex items-center gap-1 h-4"
+                  title="Cache Read"
+                >
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/75 select-none shrink-0">
                     缓存读取
                   </span>
@@ -406,7 +427,10 @@ const RequestLogCard = memo(function RequestLogCard({
                     </span>
                   )}
                 </div>
-                <div className="flex items-center gap-1 h-4" title="Duration">
+                <div
+                  className="col-start-3 row-start-2 flex items-center gap-1 h-4"
+                  title="Duration"
+                >
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/75 select-none shrink-0">
                     耗时
                   </span>
@@ -415,7 +439,7 @@ const RequestLogCard = memo(function RequestLogCard({
                   </span>
                 </div>
                 <div
-                  className="flex items-center gap-1 h-4"
+                  className="col-start-4 row-start-2 flex items-center gap-1 h-4"
                   title={
                     outputTokensPerSecond != null
                       ? formatTokensPerSecond(outputTokensPerSecond)

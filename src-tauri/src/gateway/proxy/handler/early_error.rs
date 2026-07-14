@@ -277,20 +277,36 @@ pub(super) fn respond_early_error_with_spawn<R: tauri::Runtime>(
 
 pub(super) fn respond_invalid_cli_key_with_spawn<R: tauri::Runtime>(
     ctx: &EarlyErrorLogCtx<'_, R>,
+    special_settings_json: Option<String>,
     session_id: Option<String>,
     requested_model: Option<String>,
     err: String,
 ) -> Response {
     let contract = early_error_contract(EarlyErrorKind::InvalidCliKey);
-    respond_early_error_with_spawn(ctx, contract, err, None, session_id, requested_model)
+    respond_early_error_with_spawn(
+        ctx,
+        contract,
+        err,
+        special_settings_json,
+        session_id,
+        requested_model,
+    )
 }
 
 pub(super) fn respond_provider_selection_failed_with_spawn<R: tauri::Runtime>(
     ctx: &EarlyErrorLogCtx<'_, R>,
+    special_settings_json: Option<String>,
     session_id: Option<String>,
     requested_model: Option<String>,
     err: String,
 ) -> Response {
     let contract = early_error_contract(EarlyErrorKind::ProviderSelectionFailed);
-    respond_early_error_with_spawn(ctx, contract, err, None, session_id, requested_model)
+    respond_early_error_with_spawn(
+        ctx,
+        contract,
+        err,
+        special_settings_json,
+        session_id,
+        requested_model,
+    )
 }

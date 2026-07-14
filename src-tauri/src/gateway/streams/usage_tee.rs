@@ -920,6 +920,7 @@ mod tests {
             query: None,
             excluded_from_stats: false,
             special_settings: Arc::new(Mutex::new(Vec::new())),
+            provider_health_neutral: false,
             status: 200,
             error_category: None,
             error_code: None,

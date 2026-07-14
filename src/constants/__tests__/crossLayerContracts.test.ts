@@ -7,6 +7,7 @@ import { GatewayErrorCodes } from "../gatewayErrorCodes";
 import { HOME_USAGE_PERIOD_VALUES } from "../homeUsagePeriods";
 import { MAX_MODEL_NAME_LEN } from "../../schemas/providerEditorDialog";
 import { DEFAULT_ENABLE_CIRCUIT_BREAKER_NOTICE } from "../../services/gateway/circuitNotice";
+import { CODEX_SYSTEM_REQUEST_SPECIAL_SETTING } from "../../services/gateway/requestLogSpecialSettings";
 import { MAX_ATTEMPTS_PER_TRACE } from "../../services/gateway/traceLimits";
 import { SETTINGS_VALIDATION_LIMITS } from "../../services/settings/settingsValidation";
 import { getSettingsState, resetMswState } from "../../test/msw/state";
@@ -20,6 +21,7 @@ import providersValidationSource from "../../../src-tauri/src/domain/providers/v
 import workspacesSource from "../../../src-tauri/src/domain/workspaces.rs?raw";
 import providersTypesSource from "../../../src-tauri/src/domain/providers/types.rs?raw";
 import gatewayEventsSource from "../../../src-tauri/src/gateway/events.rs?raw";
+import codexRequestClassifierSource from "../../../src-tauri/src/gateway/proxy/handler/middleware/codex_request_classifier.rs?raw";
 import gatewayErrorCodeSource from "../../../src-tauri/src/gateway/proxy/error_code.rs?raw";
 import settingsDefaultsSource from "../../../src-tauri/src/infra/settings/defaults.rs?raw";
 import settingsPersistenceSource from "../../../src-tauri/src/infra/settings/persistence.rs?raw";
@@ -102,6 +104,18 @@ describe("cross-layer contracts", () => {
   it("keeps gateway error codes aligned with Rust definitions", () => {
     expect(extractRustGatewayErrorCodes(gatewayErrorCodeSource)).toEqual(
       Object.values(GatewayErrorCodes)
+    );
+  });
+
+  it("keeps the Codex system request marker aligned with Rust", () => {
+    expect(
+      extractRustStringConst(codexRequestClassifierSource, "CODEX_SYSTEM_REQUEST_SETTING_TYPE")
+    ).toBe(CODEX_SYSTEM_REQUEST_SPECIAL_SETTING.type);
+    expect(
+      extractRustStringConst(codexRequestClassifierSource, "CODEX_SYSTEM_REQUEST_THREAD_SOURCE")
+    ).toBe(CODEX_SYSTEM_REQUEST_SPECIAL_SETTING.threadSource);
+    expect(codexRequestClassifierSource).toContain(
+      '"threadSource": CODEX_SYSTEM_REQUEST_THREAD_SOURCE'
     );
   });
 

@@ -5,9 +5,9 @@
 //! short-circuits with a Response.
 
 use super::abort_guard::RequestAbortGuard;
-use super::is_claude_count_tokens_request;
 use super::logging::enqueue_request_log_placeholder;
 use super::request_context::RequestContext;
+use super::{is_claude_count_tokens_request, is_codex_model_discovery_request};
 
 use crate::gateway::active_requests::ActiveRequestStart;
 use crate::gateway::events::{emit_gateway_debug_log_lazy, emit_request_start_event};
@@ -35,10 +35,11 @@ mod runtime_settings;
 use early_error::extract_forced_provider_id;
 use middleware::{
     BillingHeaderRectifierMiddleware, BodyReaderMiddleware, CliProxyGuardMiddleware,
-    CodexSessionCompletionMiddleware, Cx2ccCountTokensInterceptorMiddleware, MiddlewareAction,
-    ModelInferenceMiddleware, ProbeInterceptorMiddleware, ProviderResolutionMiddleware,
-    ProxyContext, RecursionGuardMiddleware, RequestFingerprintMiddleware,
-    RuntimeSettingsMiddleware, WarmupInterceptorMiddleware,
+    CodexRequestClassifierMiddleware, CodexSessionCompletionMiddleware,
+    Cx2ccCountTokensInterceptorMiddleware, MiddlewareAction, ModelInferenceMiddleware,
+    ProbeInterceptorMiddleware, ProviderResolutionMiddleware, ProxyContext,
+    RecursionGuardMiddleware, RequestFingerprintMiddleware, RuntimeSettingsMiddleware,
+    WarmupInterceptorMiddleware,
 };
 
 type SpecialSettings = Arc<Mutex<Vec<serde_json::Value>>>;
@@ -125,6 +126,7 @@ fn abort_guard_from_proxy_context<R: tauri::Runtime>(
         ctx.query.clone(),
         ctx.session_id.clone(),
         ctx.requested_model.clone(),
+        Arc::clone(&ctx.special_settings),
         ctx.created_at_ms,
         ctx.created_at,
         ctx.started,
@@ -153,6 +155,8 @@ where
     let method_hint = method.to_string();
     let query = req.uri().query().map(str::to_string);
     let is_claude_count_tokens = is_claude_count_tokens_request(&cli_key, &forwarded_path);
+    let is_codex_model_discovery =
+        is_codex_model_discovery_request(&cli_key, &method, &forwarded_path);
 
     let (headers, body) = {
         let (parts, b) = req.into_parts();
@@ -174,6 +178,7 @@ where
         created_at_ms,
         created_at,
         is_claude_count_tokens,
+        is_codex_model_discovery,
         request_body: Some(body),
         headers,
         body_bytes: Bytes::new(),
@@ -182,6 +187,7 @@ where
         observe_request: false,
         strip_request_content_encoding_seed: false,
         special_settings: new_special_settings(),
+        provider_health_neutral: is_codex_model_discovery,
         requested_model: None,
         requested_model_location: None,
         is_compact_request: false,
@@ -217,55 +223,61 @@ where
         MiddlewareAction::ShortCircuit(resp) => return resp,
     };
 
-    // 4. Model inference (from path/query/JSON).
+    // 4. Codex request-origin classification.
+    let ctx = match CodexRequestClassifierMiddleware::run(ctx) {
+        MiddlewareAction::Continue(ctx) => *ctx,
+        MiddlewareAction::ShortCircuit(resp) => return resp,
+    };
+
+    // 5. Model inference (from path/query/JSON).
     let ctx = match ModelInferenceMiddleware::run(ctx) {
         MiddlewareAction::Continue(ctx) => *ctx,
         MiddlewareAction::ShortCircuit(resp) => return resp,
     };
 
-    // 5. Probe interceptor (Claude probe requests).
+    // 6. Probe interceptor (Claude probe requests).
     let ctx = match ProbeInterceptorMiddleware::run(ctx) {
         MiddlewareAction::Continue(ctx) => *ctx,
         MiddlewareAction::ShortCircuit(resp) => return resp,
     };
 
-    // 6. Runtime settings reader.
+    // 7. Runtime settings reader.
     let ctx = match RuntimeSettingsMiddleware::run(ctx) {
         MiddlewareAction::Continue(ctx) => *ctx,
         MiddlewareAction::ShortCircuit(resp) => return resp,
     };
 
-    // 7. Warmup interceptor (requires runtime_settings).
+    // 8. Warmup interceptor (requires runtime_settings).
     let ctx = match WarmupInterceptorMiddleware::run(ctx) {
         MiddlewareAction::Continue(ctx) => *ctx,
         MiddlewareAction::ShortCircuit(resp) => return resp,
     };
 
-    // 8. Codex session ID completion.
+    // 9. Codex session ID completion.
     let ctx = match CodexSessionCompletionMiddleware::run(ctx) {
         MiddlewareAction::Continue(ctx) => *ctx,
         MiddlewareAction::ShortCircuit(resp) => return resp,
     };
 
-    // 9. Billing header rectifier.
+    // 10. Billing header rectifier.
     let ctx = match BillingHeaderRectifierMiddleware::run(ctx) {
         MiddlewareAction::Continue(ctx) => *ctx,
         MiddlewareAction::ShortCircuit(resp) => return resp,
     };
 
-    // 10. Provider resolution (session routing + provider selection).
+    // 11. Provider resolution (session routing + provider selection).
     let ctx = match ProviderResolutionMiddleware::run(ctx).await {
         MiddlewareAction::Continue(ctx) => *ctx,
         MiddlewareAction::ShortCircuit(resp) => return resp,
     };
 
-    // 11. CX2CC count_tokens compatibility.
+    // 12. CX2CC count_tokens compatibility.
     let ctx = match Cx2ccCountTokensInterceptorMiddleware::run(ctx) {
         MiddlewareAction::Continue(ctx) => *ctx,
         MiddlewareAction::ShortCircuit(resp) => return resp,
     };
 
-    // 12. Request fingerprinting + recent error cache gate.
+    // 13. Request fingerprinting + recent error cache gate.
     let ctx = match RequestFingerprintMiddleware::run(ctx) {
         MiddlewareAction::Continue(ctx) => *ctx,
         MiddlewareAction::ShortCircuit(resp) => return resp,
@@ -329,7 +341,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::abort_guard_from_proxy_context;
-    use super::early_error::early_error_contract;
+    use super::early_error::{
+        build_early_error_log_ctx, early_error_contract,
+        respond_provider_selection_failed_with_spawn,
+    };
     use super::middleware;
     use super::middleware::body_reader::body_too_large_message;
     use super::middleware::cli_proxy_guard::{
@@ -340,6 +355,7 @@ mod tests {
         should_intercept_warmup_request, warmup_intercept_special_settings_json,
         warmup_log_usage_metrics,
     };
+    use super::middleware::{CodexRequestClassifierMiddleware, MiddlewareAction};
     use super::provider_selection::resolve_session_routing_decision;
     use super::register_active_request_from_proxy_context;
     use super::request_fingerprint::build_request_fingerprints;
@@ -349,6 +365,7 @@ mod tests {
     use crate::gateway::plugins::pipeline::GatewayPluginPipeline;
     use crate::gateway::proxy::{ErrorCategory, GatewayErrorCode};
     use crate::gateway::proxy::{ProviderBaseUrlPingCache, RecentErrorCache};
+    use crate::gateway::response_fixer;
     use crate::gateway::runtime::GatewayAppState;
     use crate::{circuit_breaker, db, session_manager, settings};
     use axum::body::{Body, Bytes};
@@ -434,6 +451,7 @@ mod tests {
             created_at_ms: 1_700_000_000_000,
             created_at: 1_700_000_000,
             is_claude_count_tokens: false,
+            is_codex_model_discovery: false,
             request_body: Some(Body::empty()),
             headers: HeaderMap::new(),
             body_bytes: Bytes::new(),
@@ -442,6 +460,7 @@ mod tests {
             observe_request: true,
             strip_request_content_encoding_seed: false,
             special_settings: Arc::new(Mutex::new(Vec::new())),
+            provider_health_neutral: false,
             requested_model: Some("claude-sonnet-4".to_string()),
             requested_model_location: None,
             is_compact_request: false,
@@ -495,6 +514,7 @@ mod tests {
             created_at_ms: 1_700_000_000_000,
             created_at: 1_700_000_000,
             is_claude_count_tokens: false,
+            is_codex_model_discovery: false,
             request_body: Some(Body::empty()),
             headers: HeaderMap::new(),
             body_bytes: Bytes::new(),
@@ -503,6 +523,7 @@ mod tests {
             observe_request: false,
             strip_request_content_encoding_seed: false,
             special_settings: Arc::new(Mutex::new(Vec::new())),
+            provider_health_neutral: false,
             requested_model: Some("claude-sonnet-4".to_string()),
             requested_model_location: None,
             is_compact_request: false,
@@ -547,6 +568,7 @@ mod tests {
             created_at_ms: 1_700_000_000_000,
             created_at: 1_700_000_000,
             is_claude_count_tokens: false,
+            is_codex_model_discovery: false,
             request_body: Some(Body::empty()),
             headers: HeaderMap::new(),
             body_bytes: Bytes::new(),
@@ -555,6 +577,7 @@ mod tests {
             observe_request: true,
             strip_request_content_encoding_seed: false,
             special_settings: Arc::new(Mutex::new(Vec::new())),
+            provider_health_neutral: false,
             requested_model: Some("claude-sonnet-4".to_string()),
             requested_model_location: None,
             is_compact_request: false,
@@ -572,16 +595,125 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn codex_system_metadata_flows_to_terminal_and_provider_failure_logs() {
+        let app = tauri::test::mock_app();
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = crate::db::init_for_tests(&db_dir.path().join("handler-system-marker.db"))
+            .expect("init db");
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(1);
+        let active_requests = Arc::new(ActiveRequestRegistry::default());
+        let mut ctx = observed_guard_test_proxy_context(
+            app.handle().clone(),
+            db,
+            log_tx,
+            active_requests,
+            "trace-system-marker",
+        );
+        let body = serde_json::json!({
+            "model": "gpt-5.4-mini",
+            "client_metadata": {
+                "x-codex-turn-metadata": serde_json::json!({
+                    "thread_source": "system"
+                }).to_string()
+            }
+        });
+        ctx.cli_key = "codex".to_string();
+        ctx.forwarded_path = "/v1/responses".to_string();
+        ctx.req_method = Method::POST;
+        ctx.method_hint = "POST".to_string();
+        ctx.body_bytes = Bytes::from(serde_json::to_vec(&body).expect("request body json"));
+        ctx.introspection_json = Some(body);
+        ctx.requested_model = Some("gpt-5.4-mini".to_string());
+        let original_body = ctx.body_bytes.clone();
+
+        let ctx = match CodexRequestClassifierMiddleware::run(ctx) {
+            MiddlewareAction::Continue(ctx) => *ctx,
+            MiddlewareAction::ShortCircuit(_) => panic!("classifier must not short circuit"),
+        };
+        assert_eq!(ctx.body_bytes, original_body);
+        assert!(ctx.provider_health_neutral);
+
+        let special_settings_json =
+            response_fixer::special_settings_json(&ctx.special_settings).expect("system marker");
+        let (log_args, _) =
+            crate::gateway::proxy::RequestLogEnqueueArgs::from_proxy_request_end_parts(
+                &ctx.trace_id,
+                &ctx.cli_key,
+                ctx.session_id.clone(),
+                &ctx.method_hint,
+                &ctx.forwarded_path,
+                ctx.query.as_deref(),
+                false,
+                Some(special_settings_json),
+                Some(200),
+                None,
+                10,
+                Some(1),
+                &[],
+                Some("gpt-5.4-mini".to_string()),
+                ctx.created_at_ms,
+                ctx.created_at,
+                None,
+                None,
+            );
+        let settings: serde_json::Value = serde_json::from_str(
+            log_args
+                .special_settings_json
+                .as_deref()
+                .expect("terminal special settings"),
+        )
+        .expect("valid terminal special settings");
+
+        assert!(!log_args.excluded_from_stats);
+        assert!(settings.as_array().is_some_and(|entries| {
+            entries.iter().any(|entry| {
+                entry.get("type").and_then(serde_json::Value::as_str)
+                    == Some("codex_system_request")
+                    && entry
+                        .get("threadSource")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("system")
+            })
+        }));
+
+        let log_ctx = build_early_error_log_ctx(&ctx);
+        let response = respond_provider_selection_failed_with_spawn(
+            &log_ctx,
+            response_fixer::special_settings_json(&ctx.special_settings),
+            ctx.session_id.clone(),
+            ctx.requested_model.clone(),
+            "provider selection failed".to_string(),
+        );
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let failure_log = tokio::time::timeout(std::time::Duration::from_secs(5), log_rx.recv())
+            .await
+            .expect("provider failure log timeout")
+            .expect("provider failure log");
+        assert_eq!(failure_log.status, Some(500));
+        assert_eq!(
+            failure_log.error_code.as_deref(),
+            Some(GatewayErrorCode::InternalError.as_str())
+        );
+        assert!(!failure_log.excluded_from_stats);
+        assert_eq!(failure_log.requested_model.as_deref(), Some("gpt-5.4-mini"));
+        assert_eq!(
+            failure_log.special_settings_json,
+            log_args.special_settings_json
+        );
+    }
+
     // 取消安全契约：guard 在登记前武装。handler future 在之后任意 await 点被
     // 取消（drop）时，guard 的 Drop 必须终结注册表条目，否则条目永久泄漏、
     // 前端永远显示"进行中"合成卡片。
-    #[test]
-    fn dropping_armed_abort_guard_finishes_registered_active_request() {
+    #[tokio::test]
+    async fn dropping_armed_abort_guard_finishes_request_and_preserves_special_settings() {
         let app = tauri::test::mock_app();
         let db_dir = tempfile::tempdir().expect("db dir");
         let db = crate::db::init_for_tests(&db_dir.path().join("handler-guard-drop.db"))
             .expect("init db");
-        let (log_tx, _log_rx) = tokio::sync::mpsc::channel(4);
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
         let active_requests = Arc::new(ActiveRequestRegistry::default());
         let ctx = observed_guard_test_proxy_context(
             app.handle().clone(),
@@ -590,6 +722,15 @@ mod tests {
             active_requests.clone(),
             "trace-guard-drop",
         );
+        response_fixer::push_special_setting(
+            &ctx.special_settings,
+            serde_json::json!({
+                "type": "codex_system_request",
+                "threadSource": "system",
+            }),
+        );
+        let expected_special_settings =
+            response_fixer::special_settings_json(&ctx.special_settings);
 
         let guard = abort_guard_from_proxy_context(&ctx);
         register_active_request_from_proxy_context(&ctx);
@@ -598,6 +739,15 @@ mod tests {
         drop(guard);
 
         assert!(active_requests.snapshot().is_empty());
+        let abort_log = tokio::time::timeout(std::time::Duration::from_secs(5), log_rx.recv())
+            .await
+            .expect("abort log timeout")
+            .expect("abort log");
+        assert_eq!(
+            abort_log.error_code.as_deref(),
+            Some(GatewayErrorCode::RequestAborted.as_str())
+        );
+        assert_eq!(abort_log.special_settings_json, expected_special_settings);
     }
 
     #[test]
@@ -746,7 +896,7 @@ mod tests {
 
     #[test]
     fn handler_runtime_settings_defaults_match_expected() {
-        let runtime = handler_runtime_settings(None, false);
+        let runtime = handler_runtime_settings(None, false, false);
 
         assert!(runtime.verbose_provider_error);
         assert!(!runtime.intercept_warmup);
@@ -779,7 +929,7 @@ mod tests {
             ..Default::default()
         };
 
-        let runtime = handler_runtime_settings(Some(&cfg), true);
+        let runtime = handler_runtime_settings(Some(&cfg), true, false);
 
         assert!(!runtime.enable_thinking_signature_rectifier);
         assert_eq!(runtime.max_attempts_per_provider, 1);
@@ -789,6 +939,21 @@ mod tests {
             runtime.cx2cc_settings.service_tier.as_deref(),
             Some("priority")
         );
+    }
+
+    #[test]
+    fn handler_runtime_settings_limits_codex_model_discovery_per_provider_only() {
+        let cfg = settings::AppSettings {
+            failover_max_attempts_per_provider: 9,
+            failover_max_providers_to_try: 7,
+            ..Default::default()
+        };
+
+        let runtime = handler_runtime_settings(Some(&cfg), false, true);
+
+        assert_eq!(runtime.max_attempts_per_provider, 1);
+        assert_eq!(runtime.max_providers_to_try, 7);
+        assert!(runtime.enable_thinking_signature_rectifier);
     }
 
     #[test]

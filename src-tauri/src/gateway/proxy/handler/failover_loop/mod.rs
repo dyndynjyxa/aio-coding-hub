@@ -186,6 +186,7 @@ where
         cx2cc_settings: &input.cx2cc_settings,
         effective_sort_mode_id: input.effective_sort_mode_id,
         special_settings: &input.special_settings,
+        provider_health_neutral: input.provider_health_neutral,
         provider_cooldown_secs: input.provider_cooldown_secs,
         upstream_first_byte_timeout_secs: input.upstream_first_byte_timeout_secs,
         upstream_first_byte_timeout: input.upstream_first_byte_timeout,

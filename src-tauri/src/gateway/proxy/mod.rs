@@ -1,6 +1,6 @@
 //! Usage: Gateway proxy module facade (exports the proxy handler + shared types).
 
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, Method};
 
 mod abort_guard;
 mod caches;
@@ -43,19 +43,21 @@ fn is_claude_count_tokens_request(cli_key: &str, forwarded_path: &str) -> bool {
     cli_key == "claude" && forwarded_path == CLAUDE_COUNT_TOKENS_PATH
 }
 
-fn should_observe_request(cli_key: &str, forwarded_path: &str) -> bool {
-    if cli_key == "codex" && is_codex_model_discovery_request(forwarded_path) {
+fn should_observe_request(cli_key: &str, method: &Method, forwarded_path: &str) -> bool {
+    if is_codex_model_discovery_request(cli_key, method, forwarded_path) {
         return false;
     }
 
     cli_key != "claude" || forwarded_path == CLAUDE_LOGGED_MESSAGES_PATH
 }
 
-fn is_codex_model_discovery_request(forwarded_path: &str) -> bool {
-    matches!(
-        forwarded_path.trim_end_matches('/'),
-        "/v1/models" | "/models"
-    )
+fn is_codex_model_discovery_request(cli_key: &str, method: &Method, forwarded_path: &str) -> bool {
+    cli_key == "codex"
+        && method == Method::GET
+        && matches!(
+            forwarded_path.trim_end_matches('/'),
+            "/v1/models" | "/models"
+        )
 }
 
 fn is_claude_probe_request(
@@ -105,6 +107,7 @@ pub(super) fn is_internal_forwarded_request(headers: &HeaderMap) -> bool {
 
 fn compute_observe_request(
     cli_key: &str,
+    method: &Method,
     forwarded_path: &str,
     headers: &HeaderMap,
     introspection_json: Option<&serde_json::Value>,
@@ -113,7 +116,7 @@ fn compute_observe_request(
         return false;
     }
 
-    if !should_observe_request(cli_key, forwarded_path) {
+    if !should_observe_request(cli_key, method, forwarded_path) {
         return false;
     }
 

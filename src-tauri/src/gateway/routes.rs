@@ -238,6 +238,42 @@ mod tests {
         (format!("http://{addr}"), task)
     }
 
+    async fn spawn_counting_status_upstream(
+        status: StatusCode,
+        body: &'static str,
+    ) -> (
+        String,
+        Arc<std::sync::atomic::AtomicUsize>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind counting status upstream stub");
+        let addr = listener
+            .local_addr()
+            .expect("counting status upstream addr");
+        let call_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let task_call_count = Arc::clone(&call_count);
+        let task = tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let mut buf = [0_u8; 1024];
+                let _ = socket.read(&mut buf).await;
+                task_call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let response = format!(
+                    "HTTP/1.1 {} {}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    status.as_u16(),
+                    status.canonical_reason().unwrap_or("Unknown"),
+                    body.len(),
+                    body
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+
+        (format!("http://{addr}"), call_count, task)
+    }
+
     #[derive(Debug)]
     struct CapturedRawRequest {
         head: String,
@@ -3991,6 +4027,184 @@ module.exports.activate = function activate(api) {
             .expect("query request log")
             .is_none());
 
+        success_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn mock_runtime_router_codex_models_failure_is_single_attempt_and_circuit_neutral() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 5;
+        app_settings.failover_max_providers_to_try = 1;
+        app_settings.circuit_breaker_failure_threshold = 5;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(
+            &db_dir
+                .path()
+                .join("gateway-route-codex-models-failure-test.sqlite"),
+        )
+        .expect("init test db");
+        let (failure_base_url, call_count, upstream_task) = spawn_counting_status_upstream(
+            StatusCode::BAD_GATEWAY,
+            r#"{"error":"account has no Codex backend access token"}"#,
+        )
+        .await;
+        let provider_id =
+            insert_codex_provider_with_priority(&db, "Models Failure Stub", failure_base_url, 0);
+
+        let (log_tx, writer_task) =
+            request_logs::start_buffered_writer(app_handle.clone(), db.clone());
+        let circuit = Arc::new(circuit_breaker::CircuitBreaker::new(
+            circuit_breaker::CircuitBreakerConfig {
+                failure_threshold: 5,
+                ..circuit_breaker::CircuitBreakerConfig::default()
+            },
+            HashMap::new(),
+            None,
+        ));
+        let router = build_router(gateway_state_with_parts(
+            app_handle,
+            db,
+            log_tx,
+            Arc::clone(&circuit),
+            Arc::new(session_manager::SessionManager::new()),
+        ));
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri("/v1/models?client_version=0.144.2")
+            .body(Body::empty())
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(
+            call_count.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "Codex model discovery must not retry the same provider"
+        );
+
+        let circuit_snapshot =
+            circuit.snapshot(provider_id, crate::gateway::util::now_unix_seconds() as i64);
+        assert_eq!(
+            circuit_snapshot.state,
+            circuit_breaker::CircuitState::Closed
+        );
+        assert_eq!(circuit_snapshot.failure_count, 0);
+        assert_eq!(circuit_snapshot.cooldown_until, None);
+
+        tokio::time::timeout(Duration::from_secs(2), writer_task)
+            .await
+            .expect("writer drain timeout")
+            .expect("writer task joins");
+        upstream_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn mock_runtime_router_codex_models_fails_over_once_without_mutating_circuits() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 5;
+        app_settings.failover_max_providers_to_try = 2;
+        app_settings.circuit_breaker_failure_threshold = 2;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(
+            &db_dir
+                .path()
+                .join("gateway-route-codex-models-failover-test.sqlite"),
+        )
+        .expect("init test db");
+        let (failure_base_url, failure_call_count, failure_task) = spawn_counting_status_upstream(
+            StatusCode::BAD_GATEWAY,
+            r#"{"error":"account has no Codex backend access token"}"#,
+        )
+        .await;
+        let success_body = r#"{"object":"list","data":[{"id":"gpt-5.5","object":"model"}]}"#;
+        let (success_base_url, success_call_count, success_task) =
+            spawn_counting_status_upstream(StatusCode::OK, success_body).await;
+        let failure_provider_id =
+            insert_codex_provider_with_priority(&db, "Models Failure Stub", failure_base_url, 0);
+        let success_provider_id =
+            insert_codex_provider_with_priority(&db, "Models Success Stub", success_base_url, 1);
+
+        let (log_tx, writer_task) =
+            request_logs::start_buffered_writer(app_handle.clone(), db.clone());
+        let circuit = Arc::new(circuit_breaker::CircuitBreaker::new(
+            circuit_breaker::CircuitBreakerConfig {
+                failure_threshold: 2,
+                ..circuit_breaker::CircuitBreakerConfig::default()
+            },
+            HashMap::new(),
+            None,
+        ));
+        let seeded_at = crate::gateway::util::now_unix_seconds() as i64;
+        circuit.record_failure(failure_provider_id, seeded_at, None);
+        circuit.record_failure(success_provider_id, seeded_at, None);
+
+        let router = build_router(gateway_state_with_parts(
+            app_handle,
+            db.clone(),
+            log_tx,
+            Arc::clone(&circuit),
+            Arc::new(session_manager::SessionManager::new()),
+        ));
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri("/v1/models?client_version=0.144.2")
+            .body(Body::empty())
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let trace_id = response
+            .headers()
+            .get("x-trace-id")
+            .and_then(|value| value.to_str().ok())
+            .expect("trace header")
+            .to_string();
+        assert_eq!(
+            failure_call_count.load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+        assert_eq!(
+            success_call_count.load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+
+        let checked_at = crate::gateway::util::now_unix_seconds() as i64;
+        for provider_id in [failure_provider_id, success_provider_id] {
+            let snapshot = circuit.snapshot(provider_id, checked_at);
+            assert_eq!(snapshot.state, circuit_breaker::CircuitState::Closed);
+            assert_eq!(snapshot.failure_count, 1);
+            assert_eq!(snapshot.cooldown_until, None);
+        }
+
+        tokio::time::timeout(Duration::from_secs(2), writer_task)
+            .await
+            .expect("writer drain timeout")
+            .expect("writer task joins");
+        assert!(request_logs::get_by_trace_id(&db, &trace_id)
+            .expect("query request log")
+            .is_none());
+
+        failure_task.abort();
         success_task.abort();
     }
 

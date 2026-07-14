@@ -3,8 +3,9 @@
 use crate::gateway::active_requests::ActiveRequestRegistry;
 use crate::gateway::events::FailoverAttempt;
 use crate::gateway::plugins::pipeline::GatewayPluginPipeline;
+use crate::gateway::response_fixer;
 use crate::{db, request_logs};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use super::request_end::{
@@ -26,6 +27,7 @@ pub(super) struct RequestAbortGuard<R: tauri::Runtime = tauri::Wry> {
     query: Option<String>,
     session_id: Option<String>,
     requested_model: Option<String>,
+    special_settings: Arc<Mutex<Vec<serde_json::Value>>>,
     in_flight_attempt: Option<FailoverAttempt>,
     created_at_ms: i64,
     created_at: i64,
@@ -49,6 +51,7 @@ impl<R: tauri::Runtime> RequestAbortGuard<R> {
         query: Option<String>,
         session_id: Option<String>,
         requested_model: Option<String>,
+        special_settings: Arc<Mutex<Vec<serde_json::Value>>>,
         created_at_ms: i64,
         created_at: i64,
         started: Instant,
@@ -67,6 +70,7 @@ impl<R: tauri::Runtime> RequestAbortGuard<R> {
             query,
             session_id,
             requested_model,
+            special_settings,
             in_flight_attempt: None,
             created_at_ms,
             created_at,
@@ -97,6 +101,7 @@ impl<R: tauri::Runtime> RequestAbortGuard<R> {
             query: self.query.take(),
             session_id: self.session_id.take(),
             requested_model: self.requested_model.take(),
+            special_settings: Arc::clone(&self.special_settings),
             in_flight_attempt: self.in_flight_attempt.take(),
             created_at_ms: self.created_at_ms,
             created_at: self.created_at,
@@ -141,7 +146,9 @@ impl<R: tauri::Runtime> Drop for RequestAbortGuard<R> {
                 excluded_from_stats: false,
                 duration_ms,
                 attempts: abort_attempts.as_slice(),
-                special_settings_json: None,
+                special_settings_json: response_fixer::special_settings_json(
+                    &self.special_settings,
+                ),
                 session_id: self.session_id.clone(),
                 requested_model: self.requested_model.clone(),
                 created_at_ms: self.created_at_ms,

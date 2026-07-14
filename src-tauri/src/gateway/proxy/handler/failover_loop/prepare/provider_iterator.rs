@@ -142,6 +142,7 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
         gate_allow.circuit_after.failure_threshold,
         provider.auth_mode == "oauth",
         codex_request_has_previous_response_id(input),
+        input.is_codex_model_discovery,
     );
 
     let mut provider_base_url_base = match provider_checks::resolve_base_url(
@@ -381,7 +382,12 @@ fn provider_max_attempts_for_request(
     circuit_failure_threshold: u32,
     needs_oauth_reactive_refresh_retry: bool,
     needs_codex_previous_response_id_retry: bool,
+    strict_configured_limit: bool,
 ) -> u32 {
+    if strict_configured_limit {
+        return configured_max_attempts.max(1);
+    }
+
     let required_internal_retries = u32::from(needs_oauth_reactive_refresh_retry)
         + u32::from(needs_codex_previous_response_id_retry);
     configured_max_attempts
@@ -425,17 +431,46 @@ mod tests {
 
     #[test]
     fn provider_max_attempts_reserves_budget_for_internal_retries() {
-        assert_eq!(provider_max_attempts_for_request(1, 1, false, false), 1);
-        assert_eq!(provider_max_attempts_for_request(1, 1, true, false), 2);
-        assert_eq!(provider_max_attempts_for_request(1, 1, false, true), 2);
-        assert_eq!(provider_max_attempts_for_request(1, 1, true, true), 3);
-        assert_eq!(provider_max_attempts_for_request(5, 1, true, true), 5);
+        assert_eq!(
+            provider_max_attempts_for_request(1, 1, false, false, false),
+            1
+        );
+        assert_eq!(
+            provider_max_attempts_for_request(1, 1, true, false, false),
+            2
+        );
+        assert_eq!(
+            provider_max_attempts_for_request(1, 1, false, true, false),
+            2
+        );
+        assert_eq!(
+            provider_max_attempts_for_request(1, 1, true, true, false),
+            3
+        );
+        assert_eq!(
+            provider_max_attempts_for_request(5, 1, true, true, false),
+            5
+        );
     }
 
     #[test]
     fn provider_max_attempts_respects_circuit_failure_threshold() {
-        assert_eq!(provider_max_attempts_for_request(1, 5, false, false), 5);
-        assert_eq!(provider_max_attempts_for_request(3, 5, true, true), 5);
-        assert_eq!(provider_max_attempts_for_request(10, 5, false, false), 10);
+        assert_eq!(
+            provider_max_attempts_for_request(1, 5, false, false, false),
+            5
+        );
+        assert_eq!(
+            provider_max_attempts_for_request(3, 5, true, true, false),
+            5
+        );
+        assert_eq!(
+            provider_max_attempts_for_request(10, 5, false, false, false),
+            10
+        );
+    }
+
+    #[test]
+    fn provider_max_attempts_honors_strict_request_limit() {
+        assert_eq!(provider_max_attempts_for_request(1, 5, true, true, true), 1);
     }
 }

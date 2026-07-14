@@ -51,12 +51,15 @@ impl ProviderResolutionMiddleware {
             Ok(s) => s,
             Err(err) => {
                 let log_ctx = build_early_error_log_ctx(&ctx);
+                let special_settings_json =
+                    response_fixer::special_settings_json(&ctx.special_settings);
                 // A rejected cli key is the caller's fault (400); everything
                 // else here is infrastructure (DB pool / blocking pool) and
                 // must not be misfiled as a client error.
                 let resp = if err.code() == "SEC_INVALID_INPUT" {
                     respond_invalid_cli_key_with_spawn(
                         &log_ctx,
+                        special_settings_json,
                         ctx.session_id.clone(),
                         ctx.requested_model.clone(),
                         err.to_string(),
@@ -64,6 +67,7 @@ impl ProviderResolutionMiddleware {
                 } else {
                     respond_provider_selection_failed_with_spawn(
                         &log_ctx,
+                        special_settings_json,
                         ctx.session_id.clone(),
                         ctx.requested_model.clone(),
                         err.to_string(),

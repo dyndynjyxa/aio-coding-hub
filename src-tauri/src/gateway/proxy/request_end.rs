@@ -1086,6 +1086,65 @@ mod tests {
     }
 
     #[test]
+    fn codex_system_marker_survives_terminal_logs_without_excluding_stats() {
+        let marker = json!([{
+            "type": "codex_system_request",
+            "threadSource": "system"
+        }])
+        .to_string();
+
+        let (proxy_log, _) = RequestLogEnqueueArgs::from_proxy_request_end_parts(
+            "trace-system-proxy",
+            "codex",
+            None,
+            "POST",
+            "/v1/responses",
+            None,
+            false,
+            Some(marker.clone()),
+            Some(200),
+            None,
+            345,
+            Some(12),
+            &[],
+            Some("gpt-5.4-mini".to_string()),
+            100,
+            200,
+            None,
+            None,
+        );
+        let (stream_log, _) = RequestLogEnqueueArgs::from_stream_request_end_parts(
+            "trace-system-stream".to_string(),
+            "codex".to_string(),
+            None,
+            "POST".to_string(),
+            "/v1/responses".to_string(),
+            None,
+            false,
+            Some(marker.clone()),
+            200,
+            None,
+            345,
+            Some(12),
+            vec![],
+            "[]".to_string(),
+            Some("gpt-5.4-mini".to_string()),
+            100,
+            None,
+            None,
+            200,
+            None,
+        );
+
+        for log in [proxy_log, stream_log] {
+            assert!(!log.excluded_from_stats);
+            assert_eq!(log.special_settings_json.as_deref(), Some(marker.as_str()));
+            assert_eq!(log.status, Some(200));
+            assert_eq!(log.requested_model.as_deref(), Some("gpt-5.4-mini"));
+        }
+    }
+
+    #[test]
     fn serialize_attempts_encodes_timeout_secs_only_for_timeout_attempts() {
         let mut timeout = timeout_attempt(10, 1, Some(true));
         timeout.timeout_secs = Some(30);
@@ -1491,15 +1550,22 @@ mod tests {
     fn should_not_observe_non_messages_claude_request_end() {
         assert!(!super::super::should_observe_request(
             "claude",
+            &axum::http::Method::POST,
             "/v1/messages/count_tokens"
         ));
-        assert!(!super::super::should_observe_request("claude", "/v1/other"));
+        assert!(!super::super::should_observe_request(
+            "claude",
+            &axum::http::Method::POST,
+            "/v1/other"
+        ));
         assert!(super::super::should_observe_request(
             "claude",
+            &axum::http::Method::POST,
             "/v1/messages"
         ));
         assert!(super::super::should_observe_request(
             "codex",
+            &axum::http::Method::POST,
             "/v1/messages/count_tokens"
         ));
     }
