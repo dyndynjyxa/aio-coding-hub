@@ -31,6 +31,8 @@ const MIN_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 1;
 const MAX_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 50;
 const MIN_CIRCUIT_BREAKER_OPEN_DURATION_MINUTES = 1;
 const MAX_CIRCUIT_BREAKER_OPEN_DURATION_MINUTES = 24 * 60;
+const MIN_ROUTER_MODE_MAX_ROUNDS = 1;
+const MAX_ROUTER_MODE_MAX_ROUNDS = 100000;
 
 /**
  * Frontend copies of the backend validation limits (src-tauri/src/infra/settings/defaults.rs).
@@ -66,6 +68,8 @@ export const SETTINGS_VALIDATION_LIMITS = {
   MAX_CIRCUIT_BREAKER_FAILURE_THRESHOLD,
   MIN_CIRCUIT_BREAKER_OPEN_DURATION_MINUTES,
   MAX_CIRCUIT_BREAKER_OPEN_DURATION_MINUTES,
+  MIN_ROUTER_MODE_MAX_ROUNDS,
+  MAX_ROUTER_MODE_MAX_ROUNDS,
 } as const;
 
 const CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
@@ -341,6 +345,8 @@ export type SettingsSetValidationInput = {
   failoverMaxProvidersToTry?: number | null;
   circuitBreakerFailureThreshold?: number | null;
   circuitBreakerOpenDurationMinutes?: number | null;
+  routerModeEnabled?: boolean | null;
+  routerModeMaxRounds?: number | null;
   gatewayListenMode?: GatewayListenMode | null;
   gatewayCustomListenAddress?: string | null;
   wslHostAddressMode?: WslHostAddressMode | null;
@@ -405,6 +411,12 @@ export function validateSettingsSetInput(input: SettingsSetValidationInput): str
       input.circuitBreakerOpenDurationMinutes,
       MIN_CIRCUIT_BREAKER_OPEN_DURATION_MINUTES,
       MAX_CIRCUIT_BREAKER_OPEN_DURATION_MINUTES,
+    ],
+    [
+      "Router 模式最大轮询轮数",
+      input.routerModeMaxRounds,
+      MIN_ROUTER_MODE_MAX_ROUNDS,
+      MAX_ROUTER_MODE_MAX_ROUNDS,
     ],
   ] as const) {
     const message = validateIntegerRange(fieldLabel, value, min, max);

@@ -5,6 +5,7 @@ use crate::settings;
 
 pub(super) const DEFAULT_FAILOVER_MAX_ATTEMPTS_PER_PROVIDER: u32 = 5;
 pub(super) const DEFAULT_FAILOVER_MAX_PROVIDERS_TO_TRY: u32 = 5;
+pub(super) const DEFAULT_ROUTER_MODE_MAX_ROUNDS: u32 = 100;
 
 #[derive(Debug, Clone)]
 pub(super) struct HandlerRuntimeSettings {
@@ -22,6 +23,8 @@ pub(super) struct HandlerRuntimeSettings {
     pub(super) enable_claude_metadata_user_id_injection: bool,
     pub(super) max_attempts_per_provider: u32,
     pub(super) max_providers_to_try: u32,
+    pub(super) router_mode_enabled: bool,
+    pub(super) router_mode_max_rounds: u32,
     pub(super) provider_cooldown_secs: i64,
     pub(super) upstream_first_byte_timeout_secs: u32,
     pub(super) upstream_stream_idle_timeout_secs: u32,
@@ -79,9 +82,19 @@ pub(super) fn handler_runtime_settings(
         .map(|cfg| cfg.failover_max_providers_to_try.max(1))
         .unwrap_or(DEFAULT_FAILOVER_MAX_PROVIDERS_TO_TRY);
 
+    // Router mode keeps cycling through providers ignoring the circuit breaker.
+    // Count-tokens probes must stay single-shot, so router mode is forced off there.
+    let mut router_mode_enabled = settings_cfg
+        .map(|cfg| cfg.router_mode_enabled)
+        .unwrap_or(false);
+    let router_mode_max_rounds = settings_cfg
+        .map(|cfg| cfg.router_mode_max_rounds.max(1))
+        .unwrap_or(DEFAULT_ROUTER_MODE_MAX_ROUNDS);
+
     if is_claude_count_tokens {
         max_attempts_per_provider = 1;
         max_providers_to_try = 1;
+        router_mode_enabled = false;
     } else if is_codex_model_discovery {
         max_attempts_per_provider = 1;
     }
@@ -122,6 +135,8 @@ pub(super) fn handler_runtime_settings(
             && !is_claude_count_tokens,
         max_attempts_per_provider,
         max_providers_to_try,
+        router_mode_enabled,
+        router_mode_max_rounds,
         provider_cooldown_secs: settings_cfg
             .map(|cfg| cfg.provider_cooldown_seconds as i64)
             .unwrap_or(settings::DEFAULT_PROVIDER_COOLDOWN_SECONDS as i64),

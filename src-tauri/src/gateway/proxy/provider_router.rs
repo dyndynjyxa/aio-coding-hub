@@ -12,6 +12,9 @@ pub(super) struct GateProviderArgs<'a, R: tauri::Runtime = tauri::Wry> {
     pub(super) provider_name: &'a str,
     pub(super) provider_base_url_display: &'a str,
     pub(super) now_unix: i64,
+    /// Router mode: bypass circuit-open / cooldown denials so every provider is
+    /// attempted regardless of breaker state. State bookkeeping still runs.
+    pub(super) router_mode: bool,
     pub(super) earliest_available_unix: &'a mut Option<i64>,
     pub(super) skipped_open: &'a mut usize,
     pub(super) skipped_cooldown: &'a mut usize,
@@ -32,6 +35,7 @@ pub(super) fn gate_provider<R: tauri::Runtime>(
         provider_name,
         provider_base_url_display,
         now_unix,
+        router_mode,
         earliest_available_unix,
         skipped_open,
         skipped_cooldown,
@@ -54,7 +58,10 @@ pub(super) fn gate_provider<R: tauri::Runtime>(
         );
     }
 
-    if allow.allow {
+    // Router mode ignores the breaker verdict: still let `should_allow` run its
+    // state transitions (Open -> HalfOpen on expiry, pruning) above, but always
+    // route to the provider so the caller keeps cycling until one connects.
+    if allow.allow || router_mode {
         return Some(allow.after.clone());
     }
 
@@ -352,6 +359,7 @@ mod tests {
             provider_id: pid,
             provider_name: "p1",
             provider_base_url_display: "https://example.invalid",
+            router_mode: false,
             now_unix: now,
             earliest_available_unix: &mut earliest,
             skipped_open: &mut skipped_open,
@@ -393,6 +401,7 @@ mod tests {
             provider_id: pid,
             provider_name: "p1",
             provider_base_url_display: "https://example.invalid",
+            router_mode: false,
             now_unix: now,
             earliest_available_unix: &mut earliest,
             skipped_open: &mut skipped_open,
@@ -432,6 +441,7 @@ mod tests {
             provider_id: pid,
             provider_name: "p1",
             provider_base_url_display: "https://example.invalid",
+            router_mode: false,
             now_unix: now,
             earliest_available_unix: &mut earliest,
             skipped_open: &mut skipped_open,
@@ -469,6 +479,7 @@ mod tests {
             provider_id: pid,
             provider_name: "p1",
             provider_base_url_display: "https://example.invalid",
+            router_mode: false,
             now_unix: open_until,
             earliest_available_unix: &mut earliest,
             skipped_open: &mut skipped_open,

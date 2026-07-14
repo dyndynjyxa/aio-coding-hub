@@ -17,6 +17,7 @@ pub(super) const MAX_NON_SSE_BODY_BYTES: usize = 20 * 1024 * 1024;
 
 pub(super) struct CommonCtxArgs<'a, R: tauri::Runtime = tauri::Wry> {
     pub(super) state: &'a GatewayAppState<R>,
+    pub(super) router_mode: bool,
     pub(super) cli_key: &'a String,
     pub(super) forwarded_path: &'a String,
     pub(super) observe: bool,
@@ -47,6 +48,7 @@ pub(super) struct CommonCtxArgs<'a, R: tauri::Runtime = tauri::Wry> {
 
 pub(super) struct CommonCtx<'a, R: tauri::Runtime = tauri::Wry> {
     pub(super) state: &'a GatewayAppState<R>,
+    pub(super) router_mode: bool,
     pub(super) cli_key: &'a String,
     pub(super) forwarded_path: &'a String,
     pub(super) observe: bool,
@@ -87,6 +89,7 @@ impl<'a, R: tauri::Runtime> CommonCtx<'a, R> {
     pub(super) fn new(args: CommonCtxArgs<'a, R>) -> Self {
         Self {
             state: args.state,
+            router_mode: args.router_mode,
             cli_key: args.cli_key,
             forwarded_path: args.forwarded_path,
             observe: args.observe,

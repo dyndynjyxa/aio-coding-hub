@@ -71,6 +71,10 @@ export type CliManagerGeneralTabProps = {
   setCircuitBreakerFailureThreshold: (value: number) => void;
   circuitBreakerOpenDurationMinutes: number;
   setCircuitBreakerOpenDurationMinutes: (value: number) => void;
+  routerModeEnabled: boolean;
+  setRouterModeEnabled: (value: boolean) => void;
+  routerModeMaxRounds: number;
+  setRouterModeMaxRounds: (value: number) => void;
 
   blurOnEnter: (e: ReactKeyboardEvent<HTMLInputElement>) => void;
 };
@@ -537,6 +541,10 @@ function CircuitBreakerSettingsSection({
   setCircuitBreakerFailureThreshold,
   circuitBreakerOpenDurationMinutes,
   setCircuitBreakerOpenDurationMinutes,
+  routerModeEnabled,
+  setRouterModeEnabled,
+  routerModeMaxRounds,
+  setRouterModeMaxRounds,
   blurOnEnter,
   onPersistSettings,
 }: {
@@ -550,6 +558,10 @@ function CircuitBreakerSettingsSection({
   setCircuitBreakerFailureThreshold: (value: number) => void;
   circuitBreakerOpenDurationMinutes: number;
   setCircuitBreakerOpenDurationMinutes: (value: number) => void;
+  routerModeEnabled: boolean;
+  setRouterModeEnabled: (value: boolean) => void;
+  routerModeMaxRounds: number;
+  setRouterModeMaxRounds: (value: number) => void;
   blurOnEnter: (e: ReactKeyboardEvent<HTMLInputElement>) => void;
   onPersistSettings: PersistCommonSettings;
 }) {
@@ -650,6 +662,45 @@ function CircuitBreakerSettingsSection({
             }}
           />
         </SettingsRow>
+
+        <SettingsRow
+          label="Router 模式（无视熔断轮询）"
+          subtitle="开启后忽略熔断阈值：请求失败即在所有已添加供应商间持续轮询，直到某个连接成功、客户端取消，或达到最大轮数。"
+        >
+          <Switch
+            checked={routerModeEnabled}
+            onCheckedChange={(checked) => {
+              if (!settings) return;
+              setRouterModeEnabled(checked);
+              void onPersistSettings({ router_mode_enabled: checked });
+            }}
+            disabled={disabled}
+          />
+        </SettingsRow>
+
+        <SettingsRow
+          label="Router 最大轮数"
+          subtitle="Router 模式下最多完整轮询所有供应商的次数；每轮之间会短暂退避。超过后返回错误。"
+        >
+          <NumberSettingInput
+            value={routerModeMaxRounds}
+            min={1}
+            max={100000}
+            unit="轮"
+            disabled={disabled || !routerModeEnabled}
+            onValueChange={setRouterModeMaxRounds}
+            onKeyDown={blurOnEnter}
+            onBlur={(next) => {
+              if (!settings) return;
+              if (!Number.isFinite(next) || next < 1 || next > 100000) {
+                toast("Router 最大轮数必须为 1-100000");
+                setRouterModeMaxRounds(settings.router_mode_max_rounds);
+                return;
+              }
+              void onPersistSettings({ router_mode_max_rounds: next });
+            }}
+          />
+        </SettingsRow>
       </div>
     </div>
   );
@@ -694,6 +745,10 @@ export function CliManagerGeneralTab({
   setCircuitBreakerFailureThreshold,
   circuitBreakerOpenDurationMinutes,
   setCircuitBreakerOpenDurationMinutes,
+  routerModeEnabled,
+  setRouterModeEnabled,
+  routerModeMaxRounds,
+  setRouterModeMaxRounds,
   blurOnEnter,
 }: CliManagerGeneralTabProps) {
   const settingsUnavailable = rectifierAvailable !== "available";
@@ -812,6 +867,10 @@ export function CliManagerGeneralTab({
               setCircuitBreakerFailureThreshold={setCircuitBreakerFailureThreshold}
               circuitBreakerOpenDurationMinutes={circuitBreakerOpenDurationMinutes}
               setCircuitBreakerOpenDurationMinutes={setCircuitBreakerOpenDurationMinutes}
+              routerModeEnabled={routerModeEnabled}
+              setRouterModeEnabled={setRouterModeEnabled}
+              routerModeMaxRounds={routerModeMaxRounds}
+              setRouterModeMaxRounds={setRouterModeMaxRounds}
               blurOnEnter={blurOnEnter}
               onPersistSettings={onPersistCommonSettings}
             />

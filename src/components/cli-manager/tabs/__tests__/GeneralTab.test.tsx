@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import type { ReactElement } from "react";
@@ -40,6 +40,13 @@ beforeEach(() => {
 
 function renderTab(element: ReactElement) {
   return render(<MemoryRouter>{element}</MemoryRouter>);
+}
+
+// Robustly grab the "启用上游代理" toggle by scoping to the 上游代理 card, so
+// adding switches elsewhere (e.g. the router-mode toggle) can't displace it.
+function getProxyEnableSwitch(): HTMLElement {
+  const card = screen.getByRole("heading", { name: "上游代理" }).closest("div");
+  return within(card as HTMLElement).getAllByRole("switch")[0];
 }
 
 function createRectifierPatch(): GatewayRectifierSettingsPatch {
@@ -106,6 +113,10 @@ function createDefaultTabProps(overrides: DefaultPropsOverrides = {}) {
     setCircuitBreakerFailureThreshold: vi.fn(),
     circuitBreakerOpenDurationMinutes: 30,
     setCircuitBreakerOpenDurationMinutes: vi.fn(),
+    routerModeEnabled: false,
+    setRouterModeEnabled: vi.fn(),
+    routerModeMaxRounds: 100,
+    setRouterModeMaxRounds: vi.fn(),
     blurOnEnter: vi.fn(),
   };
 }
@@ -152,6 +163,10 @@ describe("cli-manager/GeneralTab", () => {
         setCircuitBreakerFailureThreshold={vi.fn()}
         circuitBreakerOpenDurationMinutes={30}
         setCircuitBreakerOpenDurationMinutes={vi.fn()}
+        routerModeEnabled={false}
+        setRouterModeEnabled={vi.fn()}
+        routerModeMaxRounds={100}
+        setRouterModeMaxRounds={vi.fn()}
         blurOnEnter={vi.fn()}
       />
     );
@@ -224,6 +239,10 @@ describe("cli-manager/GeneralTab", () => {
         setCircuitBreakerFailureThreshold={setCircuitBreakerFailureThreshold}
         circuitBreakerOpenDurationMinutes={30}
         setCircuitBreakerOpenDurationMinutes={setCircuitBreakerOpenDurationMinutes}
+        routerModeEnabled={false}
+        setRouterModeEnabled={vi.fn()}
+        routerModeMaxRounds={100}
+        setRouterModeMaxRounds={vi.fn()}
         blurOnEnter={blurOnEnter}
       />
     );
@@ -291,6 +310,31 @@ describe("cli-manager/GeneralTab", () => {
     expect(setCircuitBreakerOpenDurationMinutes).toHaveBeenCalled();
   });
 
+  it("persists router mode toggle and max rounds", () => {
+    const onPersistCommonSettings = vi.fn().mockResolvedValue(createTestAppSettings());
+    const setRouterModeMaxRounds = vi.fn();
+    renderTab(
+      <CliManagerGeneralTab
+        {...createDefaultTabProps({ onPersistCommonSettings })}
+        routerModeEnabled={true}
+        setRouterModeMaxRounds={setRouterModeMaxRounds}
+      />
+    );
+
+    // The 熔断与重试 card holds exactly one switch (router mode) plus the
+    // Router 最大轮数 input as its last spinbutton (enabled while router mode is on).
+    const card = screen.getByRole("heading", { name: "熔断与重试" }).closest("div") as HTMLElement;
+    fireEvent.click(within(card).getByRole("switch"));
+    expect(onPersistCommonSettings).toHaveBeenCalledWith({ router_mode_enabled: false });
+
+    const cardInputs = within(card).getAllByRole("spinbutton");
+    const maxRoundsInput = cardInputs[cardInputs.length - 1];
+    fireEvent.change(maxRoundsInput, { target: { value: "500" } });
+    fireEvent.blur(maxRoundsInput, { target: { value: "500" } });
+    expect(setRouterModeMaxRounds).toHaveBeenCalled();
+    expect(onPersistCommonSettings).toHaveBeenCalledWith({ router_mode_max_rounds: 500 });
+  });
+
   it("shows readonly banner and disables settings controls", () => {
     renderTab(
       <CliManagerGeneralTab
@@ -332,6 +376,10 @@ describe("cli-manager/GeneralTab", () => {
         setCircuitBreakerFailureThreshold={vi.fn()}
         circuitBreakerOpenDurationMinutes={30}
         setCircuitBreakerOpenDurationMinutes={vi.fn()}
+        routerModeEnabled={false}
+        setRouterModeEnabled={vi.fn()}
+        routerModeMaxRounds={100}
+        setRouterModeMaxRounds={vi.fn()}
         blurOnEnter={vi.fn()}
       />
     );
@@ -397,11 +445,7 @@ describe("cli-manager/GeneralTab", () => {
   it("shows error when enabling proxy without URL", async () => {
     renderTab(<CliManagerGeneralTab {...createDefaultTabProps()} />);
 
-    const switches = screen.getAllByRole("switch");
-    const proxySwitch =
-      switches.find((s) => s.closest("[data-testid]")?.textContent?.includes("上游代理")) ??
-      switches[switches.length - 1];
-    fireEvent.click(proxySwitch);
+    fireEvent.click(getProxyEnableSwitch());
 
     await waitFor(() => {
       expect(toast).toHaveBeenCalledWith("请先输入代理地址");
@@ -423,8 +467,7 @@ describe("cli-manager/GeneralTab", () => {
       />
     );
 
-    const switches = screen.getAllByRole("switch");
-    fireEvent.click(switches[switches.length - 1]);
+    fireEvent.click(getProxyEnableSwitch());
 
     await waitFor(() => {
       expect(toast).toHaveBeenCalledWith("代理地址协议仅支持 http/https/socks5/socks5h");
@@ -621,8 +664,7 @@ describe("cli-manager/GeneralTab", () => {
       />
     );
 
-    const switches = screen.getAllByRole("switch");
-    const proxySwitch = switches[switches.length - 1];
+    const proxySwitch = getProxyEnableSwitch();
     fireEvent.click(proxySwitch);
 
     await waitFor(() => {
@@ -656,8 +698,7 @@ describe("cli-manager/GeneralTab", () => {
       />
     );
 
-    const switches = screen.getAllByRole("switch");
-    const proxySwitch = switches[switches.length - 1];
+    const proxySwitch = getProxyEnableSwitch();
     fireEvent.click(proxySwitch);
 
     await waitFor(() => {

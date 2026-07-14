@@ -37,6 +37,8 @@ export function createTestAppSettings(overrides?: Partial<AppSettings>): AppSett
     failover_max_providers_to_try: 5,
     circuit_breaker_failure_threshold: 5,
     circuit_breaker_open_duration_minutes: 30,
+    router_mode_enabled: false,
+    router_mode_max_rounds: 100,
     enable_circuit_breaker_notice: false,
     verbose_provider_error: true,
     intercept_anthropic_warmup_requests: false,
