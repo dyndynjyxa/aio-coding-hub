@@ -14,7 +14,7 @@ enum UsageSemantics {
 impl UsageSemantics {
     fn from_cli_key(cli_key: &str) -> Self {
         match CliKey::parse(cli_key) {
-            Ok(CliKey::Codex) => Self::OpenAi,
+            Ok(CliKey::Codex | CliKey::Grok) => Self::OpenAi,
             Ok(CliKey::Claude) => Self::Claude,
             Ok(CliKey::Gemini) => Self::Gemini,
             Err(_) => Self::Other,

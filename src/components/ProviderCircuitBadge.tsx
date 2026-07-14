@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { cliBadgeTone, cliShortLabel } from "../constants/clis";
+import { cliBadgeTone, cliShortLabel, createCliRecord } from "../constants/clis";
 import { useNowUnix } from "../hooks/useNowUnix";
 import type { CliKey } from "../services/providers/providers";
 import { Button } from "../ui/Button";
@@ -39,11 +39,7 @@ export function ProviderCircuitBadge({
   const nowUnix = useNowUnix(popoverOpen);
 
   const groupedByCli = useMemo(() => {
-    const grouped: Record<CliKey, OpenCircuitRow[]> = {
-      claude: [],
-      codex: [],
-      gemini: [],
-    };
+    const grouped = createCliRecord<OpenCircuitRow[]>(() => []);
 
     for (const row of rows) {
       if (grouped[row.cli_key]) {

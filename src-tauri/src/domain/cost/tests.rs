@@ -103,7 +103,7 @@ fn calculates_cost_with_basellm_exponent_price_json() {
 }
 
 #[test]
-fn codex_does_not_double_charge_cache_read_or_creation_with_explicit_price() {
+fn openai_semantics_clis_do_not_double_charge_cache_read_or_creation_with_explicit_price() {
     let usage = CostUsage {
         input_tokens: 1_000,
         output_tokens: 50,
@@ -119,8 +119,6 @@ fn codex_does_not_double_charge_cache_read_or_creation_with_explicit_price() {
       "cache_creation_input_token_cost": 0.006
     }"#;
 
-    let cost = calculate_cost_usd_femto(&usage, price_json, 1.0, "codex", "gpt").expect("cost");
-
     let input = 4_000_000_000_000i128;
     let output = 20_000_000_000_000i128;
     let cache_read = 1_000_000_000_000i128;
@@ -128,7 +126,10 @@ fn codex_does_not_double_charge_cache_read_or_creation_with_explicit_price() {
 
     let expected =
         (700i128 * input) + (50i128 * output) + (100i128 * cache_read) + (200i128 * cache_creation);
-    assert_eq!(cost as i128, expected);
+    for (cli_key, model) in [("codex", "gpt"), ("grok", "grok-build")] {
+        let cost = calculate_cost_usd_femto(&usage, price_json, 1.0, cli_key, model).expect("cost");
+        assert_eq!(cost as i128, expected, "unexpected cost for {cli_key}");
+    }
 }
 
 #[test]

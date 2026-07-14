@@ -648,9 +648,20 @@ fn migrate_add_request_log_retention(
     )
 }
 
+fn migrate_add_grok_proxy_preferences(
+    settings: &mut AppSettings,
+    schema_version_present: bool,
+) -> bool {
+    migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_GROK_PROXY_PREFERENCES,
+    )
+}
+
 type SettingsMigration = fn(&mut AppSettings, bool) -> bool;
 
-const SETTINGS_MIGRATIONS: [SettingsMigration; 28] = [
+const SETTINGS_MIGRATIONS: [SettingsMigration; 29] = [
     migrate_disable_upstream_timeouts,
     migrate_add_gateway_rectifiers,
     migrate_add_circuit_breaker_notice,
@@ -679,6 +690,7 @@ const SETTINGS_MIGRATIONS: [SettingsMigration; 28] = [
     migrate_add_upstream_proxy_credentials,
     migrate_add_codex_oauth_compatible_proxy_mode,
     migrate_add_request_log_retention,
+    migrate_add_grok_proxy_preferences,
 ];
 
 fn apply_settings_migrations(settings: &mut AppSettings, schema_version_present: bool) -> bool {
@@ -1257,7 +1269,8 @@ mod tests {
             vec![
                 "codex".to_string(),
                 "claude".to_string(),
-                "gemini".to_string()
+                "gemini".to_string(),
+                "grok".to_string()
             ]
         );
     }
@@ -1272,6 +1285,21 @@ mod tests {
         assert!(migrate_add_cli_priority_order(&mut s, true));
         assert_eq!(s.schema_version, SCHEMA_VERSION_ADD_CLI_PRIORITY_ORDER);
         assert_eq!(s.cli_priority_order, default_cli_priority_order());
+    }
+
+    #[test]
+    fn migrate_add_grok_proxy_preferences_bumps_schema_without_initializing_preferences() {
+        let mut settings = AppSettings {
+            schema_version: SCHEMA_VERSION_ADD_REQUEST_LOG_RETENTION,
+            ..Default::default()
+        };
+
+        assert!(migrate_add_grok_proxy_preferences(&mut settings, true));
+        assert_eq!(
+            settings.schema_version,
+            SCHEMA_VERSION_ADD_GROK_PROXY_PREFERENCES
+        );
+        assert_eq!(settings.grok_proxy_preferences, None);
     }
 
     #[test]

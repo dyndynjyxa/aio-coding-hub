@@ -25,6 +25,30 @@ vi.mock("../../../query/prompts", async () => {
 });
 
 describe("pages/prompts/PromptsView", () => {
+  it("shows the Grok prompt target path", () => {
+    vi.mocked(usePromptsListQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      error: null,
+    } as any);
+    vi.mocked(usePromptUpsertMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+    } as any);
+    vi.mocked(usePromptSetEnabledMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+    } as any);
+    vi.mocked(usePromptDeleteMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+    } as any);
+
+    render(<PromptsView workspaceId={1} cliKey="grok" isActiveWorkspace />);
+
+    expect(screen.getByText("启用后会写入 ~/.grok/AGENTS.md")).toBeInTheDocument();
+  });
+
   it("creates, toggles, edits and deletes prompts", async () => {
     const prompt = { id: 1, name: "P1", content: "hello ".repeat(80), enabled: false } as any;
 

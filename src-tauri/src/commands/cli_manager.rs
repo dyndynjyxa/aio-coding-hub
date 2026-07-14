@@ -2,7 +2,7 @@
 
 use crate::{
     blocking, claude_hooks, claude_settings, cli_manager, codex_config, codex_model_catalog,
-    gemini_config,
+    gemini_config, grok_config,
 };
 
 #[tauri::command]
@@ -135,6 +135,43 @@ pub(crate) async fn cli_manager_gemini_config_set(
 ) -> Result<gemini_config::GeminiConfigState, String> {
     blocking::run("cli_manager_gemini_config_set", move || {
         gemini_config::gemini_config_set(&app, patch)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn cli_manager_grok_info_get(
+    app: tauri::AppHandle,
+) -> Result<cli_manager::SimpleCliInfo, String> {
+    blocking::run("cli_manager_grok_info_get", move || {
+        cli_manager::simple_cli_info_get(&app, "grok")
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn cli_manager_grok_config_get(
+    app: tauri::AppHandle,
+) -> Result<grok_config::GrokConfigState, String> {
+    blocking::run("cli_manager_grok_config_get", move || {
+        grok_config::get(&app)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn cli_manager_grok_config_set(
+    app: tauri::AppHandle,
+    preferences: grok_config::GrokProxyPreferences,
+) -> Result<grok_config::GrokConfigState, String> {
+    blocking::run("cli_manager_grok_config_set", move || {
+        crate::cli_proxy::set_grok_preferences(&app, preferences)
     })
     .await
     .map_err(Into::into)

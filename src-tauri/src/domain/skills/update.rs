@@ -10,7 +10,6 @@ use super::skill_md::parse_skill_md;
 use super::types::{InstalledSkillSummary, SkillUpdateInfo};
 use super::util::validate_relative_subdir;
 use crate::db;
-use crate::shared::cli_key::SUPPORTED_CLI_KEYS;
 use crate::shared::error::db_err;
 use crate::shared::text::normalize_name;
 use crate::shared::time::now_unix_seconds;
@@ -322,7 +321,10 @@ WHERE id = ?7
         return Err(db_err!("failed to commit: {err}"));
     }
 
-    for cli_key in SUPPORTED_CLI_KEYS {
+    let skill_cli_keys: Vec<_> =
+        crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Skills)
+            .collect();
+    for cli_key in skill_cli_keys.iter().copied() {
         if let Err(err) = sync_one_cli(app, &conn, cli_key) {
             let rollback_suffix = restore_committed_update(
                 &conn,
@@ -333,7 +335,7 @@ WHERE id = ?7
             )
             .map(|message| format!("; rollback failed: {message}"))
             .unwrap_or_default();
-            for repair_cli_key in SUPPORTED_CLI_KEYS {
+            for repair_cli_key in skill_cli_keys.iter().copied() {
                 if let Err(repair_err) = sync_one_cli(app, &conn, repair_cli_key) {
                     tracing::warn!(
                         cli_key = %repair_cli_key,

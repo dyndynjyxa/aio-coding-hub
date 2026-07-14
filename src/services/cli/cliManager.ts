@@ -17,6 +17,9 @@ import {
   type CodexReasoningEffortOption as GeneratedCodexReasoningEffortOption,
   type GeminiConfigPatch as GeneratedGeminiConfigPatch,
   type GeminiConfigState as GeneratedGeminiConfigState,
+  type GrokApiBackend as GeneratedGrokApiBackend,
+  type GrokConfigState as GeneratedGrokConfigState,
+  type GrokProxyPreferences as GeneratedGrokProxyPreferences,
   type SimpleCliInfo as GeneratedSimpleCliInfo,
 } from "../../generated/bindings";
 import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
@@ -39,6 +42,9 @@ export type CodexModelCapability = GeneratedCodexModelCapability;
 export type CodexReasoningEffortOption = GeneratedCodexReasoningEffortOption;
 export type GeminiConfigState = GeneratedGeminiConfigState;
 export type GeminiConfigPatch = Partial<GeneratedGeminiConfigPatch>;
+export type GrokApiBackend = GeneratedGrokApiBackend;
+export type GrokConfigState = GeneratedGrokConfigState;
+export type GrokProxyPreferences = GeneratedGrokProxyPreferences;
 export type ClaudeEnvSetInput = {
   mcpTimeoutMs: number | null;
   disableErrorReporting: boolean;
@@ -257,6 +263,36 @@ export async function cliManagerGeminiConfigSet(patch: GeminiConfigPatch) {
     invoke: () =>
       commands.cliManagerGeminiConfigSet(normalizedPatch) as Promise<
         GeneratedCommandResult<GeminiConfigState>
+      >,
+  });
+}
+
+export async function cliManagerGrokInfoGet() {
+  return invokeGeneratedIpc<SimpleCliInfo>({
+    title: "获取 Grok CLI 信息失败",
+    cmd: "cli_manager_grok_info_get",
+    invoke: () =>
+      commands.cliManagerGrokInfoGet() as Promise<GeneratedCommandResult<SimpleCliInfo>>,
+  });
+}
+
+export async function cliManagerGrokConfigGet() {
+  return invokeGeneratedIpc<GrokConfigState>({
+    title: "读取 Grok 配置失败",
+    cmd: "cli_manager_grok_config_get",
+    invoke: () =>
+      commands.cliManagerGrokConfigGet() as Promise<GeneratedCommandResult<GrokConfigState>>,
+  });
+}
+
+export async function cliManagerGrokConfigSet(preferences: GrokProxyPreferences) {
+  return invokeGeneratedIpc<GrokConfigState>({
+    title: "保存 Grok 配置失败",
+    cmd: "cli_manager_grok_config_set",
+    args: { preferences },
+    invoke: () =>
+      commands.cliManagerGrokConfigSet(preferences) as Promise<
+        GeneratedCommandResult<GrokConfigState>
       >,
   });
 }

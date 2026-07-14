@@ -30,6 +30,7 @@ tauri-plugin-fs = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
+toml_edit = "0.23.10"
 sha2 = "0.10"
 base64 = "0.22"
 ed25519-dalek = "2"
@@ -68,7 +69,7 @@ tauri-plugin-notification = "2"
 tauri-plugin-window-state = "2"
 
 [target."cfg(windows)".dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
 junction = "1"
 
 [dev-dependencies]

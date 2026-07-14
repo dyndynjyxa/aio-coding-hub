@@ -10,7 +10,7 @@ fn uses_openai_input_semantics(
     persisted_openai_semantics: Option<bool>,
     legacy_provider_bridged: bool,
 ) -> bool {
-    if cli_key == "codex" {
+    if matches!(cli_key, "codex" | "grok") {
         return true;
     }
     if let Some(openai_semantics) = persisted_openai_semantics {
@@ -118,7 +118,7 @@ fn build_sql_effective_input_tokens_expr(alias: Option<&str>) -> String {
         "CASE WHEN EXISTS (SELECT 1 FROM providers p WHERE p.id = {final_provider_id} AND (p.source_provider_id IS NOT NULL OR p.bridge_type = 'cx2cc')) THEN 1 ELSE 0 END"
     );
     let openai_semantics = format!(
-        "({cli_key} = 'codex' OR COALESCE({persisted_marker_semantics}, {legacy_provider_semantics}) = 1)"
+        "({cli_key} IN ('codex', 'grok') OR COALESCE({persisted_marker_semantics}, {legacy_provider_semantics}) = 1)"
     );
 
     format!(
@@ -157,6 +157,10 @@ mod tests {
         );
         assert_eq!(
             effective_input_tokens_display("codex", None, false, Some(1000), Some(100), Some(200)),
+            Some(700)
+        );
+        assert_eq!(
+            effective_input_tokens_display("grok", None, false, Some(1000), Some(100), Some(200)),
             Some(700)
         );
         assert_eq!(
@@ -266,7 +270,7 @@ CREATE TABLE r (
             "SELECT {} FROM r",
             sql_effective_input_tokens_expr_with_alias("r")
         );
-        for cli_key in ["claude", "codex", "gemini"] {
+        for cli_key in ["claude", "codex", "gemini", "grok"] {
             for (provider_id, source_provider_id, bridge_type) in provider_cases {
                 for special_settings_json in marker_cases {
                     for (input, cache_read, cache_creation) in token_cases {

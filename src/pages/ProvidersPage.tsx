@@ -1,7 +1,7 @@
 // Usage: Main page for managing providers and route orders. Backend commands: `providers_*`, `sort_modes_*`.
 
 import { useState } from "react";
-import { CLIS } from "../constants/clis";
+import { cliKeysWith } from "../constants/clis";
 import type { CliKey } from "../services/providers/providers";
 import { useSettingsQuery } from "../query/settings";
 import { getOrderedClis, pickDefaultCliByPriority } from "../services/cli/cliPriorityOrder";
@@ -11,10 +11,12 @@ import { ProvidersView } from "./providers/ProvidersView";
 
 export function ProvidersPage() {
   const settingsQuery = useSettingsQuery();
-  const orderedCliTabs = getOrderedClis(settingsQuery.data?.cli_priority_order);
+  const providerCliKeys = cliKeysWith("provider");
+  const orderedCliTabs = getOrderedClis(settingsQuery.data?.cli_priority_order, providerCliKeys);
   const orderedCliKeys = orderedCliTabs.map((cli) => cli.key);
   const defaultCli =
-    pickDefaultCliByPriority(settingsQuery.data?.cli_priority_order, orderedCliKeys) ?? CLIS[0].key;
+    pickDefaultCliByPriority(settingsQuery.data?.cli_priority_order, orderedCliKeys) ??
+    providerCliKeys[0];
   const [activeCli, setActiveCli] = useState<CliKey | null>(null);
   const effectiveCli = activeCli ?? defaultCli;
   const viewTabs: Array<{ key: CliKey; label: string }> = orderedCliTabs.map((cli) => ({

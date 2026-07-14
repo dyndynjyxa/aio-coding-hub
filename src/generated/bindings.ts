@@ -359,6 +359,35 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async cliManagerGrokInfoGet(): Promise<Result<SimpleCliInfo, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("cli_manager_grok_info_get") };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async cliManagerGrokConfigGet(): Promise<Result<GrokConfigState, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("cli_manager_grok_config_get") };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async cliManagerGrokConfigSet(
+    preferences: GrokProxyPreferences
+  ): Promise<Result<GrokConfigState, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("cli_manager_grok_config_set", { preferences }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async cliManagerClaudeEnvSet(
     mcpTimeoutMs: number | null,
     disableErrorReporting: boolean
@@ -2745,6 +2774,28 @@ export type GeminiConfigState = {
   planModelRouting: boolean | null;
   securityAuthSelectedType: string | null;
 };
+export type GrokApiBackend = "responses" | "chat_completions";
+export type GrokConfigState = {
+  config_path: string;
+  file_exists: boolean;
+  preferences: GrokProxyPreferences;
+  aio_preferences: GrokProxyPreferences | null;
+  effective_preferences: GrokProxyPreferences;
+  preference_source: GrokPreferenceSource;
+  default_profile: string | null;
+  session_summary_profile: string | null;
+  web_search_profile: string | null;
+  image_description_profile: string | null;
+  policy_files: GrokPolicyFileState[];
+};
+export type GrokPolicyFileState = { kind: GrokPolicyKind; path: string; exists: boolean };
+export type GrokPolicyKind =
+  | "managed_system"
+  | "managed_user"
+  | "requirements_user"
+  | "requirements_system";
+export type GrokPreferenceSource = "existing_config" | "fallback" | "aio_settings";
+export type GrokProxyPreferences = { model_id: string; api_backend: GrokApiBackend };
 export type HomeUsagePeriod = "last7" | "last15" | "last30" | "month";
 export type HostRenderedBadgeTone = "neutral" | "success" | "warning" | "danger";
 export type HostRenderedField =

@@ -33,6 +33,7 @@ import {
   useCliManagerGeminiInfoQuery,
 } from "../../query/cliManager";
 import { useProvidersListQuery } from "../../query/providers";
+import { useGrokTabDataModel } from "../../components/cli-manager/tabs/useGrokTabDataModel";
 
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
@@ -162,6 +163,14 @@ vi.mock("../../components/cli-manager/tabs/GeminiTab", () => ({
   ),
 }));
 
+vi.mock("../../components/cli-manager/tabs/GrokTab", () => ({
+  CliManagerGrokTab: () => <div>grok-tab</div>,
+}));
+
+vi.mock("../../components/cli-manager/tabs/useGrokTabDataModel", () => ({
+  useGrokTabDataModel: vi.fn(),
+}));
+
 vi.mock("../../query/settings", async () => {
   const actual =
     await vi.importActual<typeof import("../../query/settings")>("../../query/settings");
@@ -246,6 +255,72 @@ function createSettingsMutationResult(
 beforeEach(() => {
   vi.clearAllMocks();
 
+  vi.mocked(useGrokTabDataModel).mockReturnValue({} as never);
+
+  vi.mocked(useSettingsQuery).mockReturnValue({
+    data: createAppSettings(),
+    isLoading: false,
+  } as any);
+  vi.mocked(useSettingsGatewayRectifierSetMutation).mockReturnValue({
+    isPending: false,
+    mutateAsync: vi.fn(),
+  } as any);
+  vi.mocked(useSettingsCircuitBreakerNoticeSetMutation).mockReturnValue({
+    isPending: false,
+    mutateAsync: vi.fn(),
+  } as any);
+  vi.mocked(useSettingsCodexSessionIdCompletionSetMutation).mockReturnValue({
+    isPending: false,
+    mutateAsync: vi.fn(),
+  } as any);
+  vi.mocked(useSettingsPatchMutation).mockReturnValue({
+    isPending: false,
+    mutateAsync: vi.fn(),
+  } as any);
+
+  vi.mocked(useCliManagerClaudeInfoQuery).mockReturnValue({
+    data: null,
+    isFetching: false,
+    refetch: vi.fn(),
+  } as any);
+  vi.mocked(useCliManagerClaudeSettingsQuery).mockReturnValue({
+    data: null,
+    isFetching: false,
+    refetch: vi.fn(),
+  } as any);
+  vi.mocked(useCliManagerClaudeSettingsSetMutation).mockReturnValue({
+    isPending: false,
+    mutateAsync: vi.fn(),
+  } as any);
+  vi.mocked(useCliManagerCodexInfoQuery).mockReturnValue({
+    data: null,
+    isFetching: false,
+    refetch: vi.fn(),
+  } as any);
+  vi.mocked(useCliManagerCodexConfigQuery).mockReturnValue({
+    data: null,
+    isFetching: false,
+    refetch: vi.fn(),
+  } as any);
+  vi.mocked(useCliManagerCodexConfigSetMutation).mockReturnValue({
+    isPending: false,
+    mutateAsync: vi.fn(),
+  } as any);
+  vi.mocked(useCliManagerCodexConfigTomlQuery).mockReturnValue({
+    data: null,
+    isFetching: false,
+    refetch: vi.fn(),
+  } as any);
+  vi.mocked(useCliManagerCodexConfigTomlSetMutation).mockReturnValue({
+    isPending: false,
+    mutateAsync: vi.fn(),
+  } as any);
+  vi.mocked(useCliManagerGeminiInfoQuery).mockReturnValue({
+    data: null,
+    isFetching: false,
+    refetch: vi.fn(),
+  } as any);
+
   vi.mocked(useCliManagerGeminiConfigQuery).mockReturnValue({
     data: null,
     isFetching: false,
@@ -272,6 +347,29 @@ beforeEach(() => {
 });
 
 describe("pages/CliManagerPage", () => {
+  it("以独立数据模型延迟编排 Grok Tab", async () => {
+    renderWithProviders(<CliManagerPage />);
+
+    expect(screen.getByRole("tab", { name: "Grok" })).toBeInTheDocument();
+    expect(useGrokTabDataModel).toHaveBeenCalledWith({ enabled: false });
+
+    fireEvent.click(screen.getByRole("tab", { name: "Grok" }));
+
+    expect(await screen.findByText("grok-tab")).toBeInTheDocument();
+    expect(useGrokTabDataModel).toHaveBeenLastCalledWith({ enabled: true });
+  });
+
+  it("在窄窗口为 CLI Tab 提供横向滚动且不压缩标签", () => {
+    renderWithProviders(<CliManagerPage />);
+
+    const tabList = screen.getByRole("tablist", { name: "CLI 管理视图切换" });
+    expect(tabList.parentElement).toHaveClass("overflow-x-auto", "scrollbar-none");
+    expect(tabList).toHaveClass("w-max");
+    for (const tab of screen.getAllByRole("tab")) {
+      expect(tab).toHaveClass("shrink-0", "whitespace-nowrap");
+    }
+  });
+
   it("drives general tab persistence and handles tauri unavailable/errors", async () => {
     vi.mocked(useSettingsQuery).mockReturnValue({
       data: createAppSettings(),

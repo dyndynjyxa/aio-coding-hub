@@ -1,4 +1,5 @@
 use super::queries::pool_order_set;
+use super::types::CX2CC_BRIDGE_TYPE;
 use super::*;
 use rusqlite::OptionalExtension;
 
@@ -680,6 +681,77 @@ fn upsert_oauth_provider_drops_submitted_base_urls() {
 
     let saved = upsert(&db, params).expect("save oauth provider");
     assert!(saved.base_urls.is_empty());
+}
+
+#[test]
+fn upsert_accepts_grok_api_key_provider() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("providers_grok_api_key.db");
+    let db = crate::db::init_for_tests(&db_path).expect("init db");
+
+    let mut params = default_provider_params("grok-api-key");
+    params.cli_key = "grok".to_string();
+
+    let saved = upsert(&db, params).expect("save Grok API key provider");
+
+    assert_eq!(saved.cli_key, "grok");
+    assert_eq!(saved.auth_mode, ProviderAuthMode::ApiKey.as_str());
+    assert_eq!(saved.base_urls, vec!["https://api.example.com"]);
+}
+
+#[test]
+fn upsert_rejects_grok_oauth_provider() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("providers_grok_oauth.db");
+    let db = crate::db::init_for_tests(&db_path).expect("init db");
+
+    let mut params = default_provider_params("grok-oauth");
+    params.cli_key = "grok".to_string();
+    params.auth_mode = Some(ProviderAuthMode::Oauth);
+    params.api_key = None;
+
+    let error = upsert(&db, params).expect_err("Grok OAuth must be rejected");
+
+    assert!(error
+        .to_string()
+        .contains("oauth is not supported for cli_key=grok"));
+}
+
+#[test]
+fn upsert_rejects_grok_cx2cc_provider() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("providers_grok_cx2cc.db");
+    let db = crate::db::init_for_tests(&db_path).expect("init db");
+
+    let mut params = default_provider_params("grok-cx2cc");
+    params.cli_key = "grok".to_string();
+    params.bridge_type = Some(CX2CC_BRIDGE_TYPE.to_string());
+
+    let error = upsert(&db, params).expect_err("Grok CX2CC must be rejected");
+
+    assert!(error
+        .to_string()
+        .contains("cx2cc bridge is only supported for claude"));
+}
+
+#[test]
+fn upsert_rejects_grok_claude_model_fields() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("providers_grok_claude_models.db");
+    let db = crate::db::init_for_tests(&db_path).expect("init db");
+
+    let mut params = default_provider_params("grok-claude-models");
+    params.cli_key = "grok".to_string();
+    params.claude_models = Some(ClaudeModels {
+        main_model: Some("not-applicable".to_string()),
+        ..ClaudeModels::default()
+    });
+
+    let error = upsert(&db, params).expect_err("Grok Claude model fields must be rejected");
+
+    assert!(error
+        .to_string()
+        .contains("claude_models is only supported for cli_key=claude"));
 }
 
 #[test]

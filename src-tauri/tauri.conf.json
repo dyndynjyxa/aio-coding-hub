@@ -35,9 +35,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": [
-      "resources/plugins/official/privacy-filter/**/*"
-    ]
+    "resources": ["resources/plugins/official/privacy-filter/**/*"]
   },
   "plugins": {
     "updater": {

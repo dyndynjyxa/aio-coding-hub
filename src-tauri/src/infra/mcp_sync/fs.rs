@@ -12,6 +12,9 @@ pub fn read_target_bytes<R: tauri::Runtime>(
     cli_key: &str,
 ) -> Result<Option<Vec<u8>>, String> {
     let path = paths::mcp_target_path(app, cli_key)?;
+    if cli_key == "grok" {
+        return Ok(crate::grok_config::read_bytes_path(&path)?);
+    }
     Ok(read_optional_file_with_max_len(
         &path,
         super::MCP_SYNC_TARGET_MAX_BYTES,
@@ -24,6 +27,9 @@ pub fn restore_target_bytes<R: tauri::Runtime>(
     bytes: Option<Vec<u8>>,
 ) -> Result<(), String> {
     let path = paths::mcp_target_path(app, cli_key)?;
+    if cli_key == "grok" {
+        return Ok(crate::grok_config::restore_bytes_path(&path, bytes)?);
+    }
     match bytes {
         Some(content) => {
             if content.len() > super::MCP_SYNC_TARGET_MAX_BYTES {

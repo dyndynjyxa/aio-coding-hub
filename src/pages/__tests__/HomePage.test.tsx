@@ -374,6 +374,7 @@ describe("pages/HomePage", () => {
             ],
           } as any;
         }
+        if (cliKey === "grok") return { data: [] } as any;
         return {
           data: [
             { provider_id: 3, state: "OPEN", open_until: nowUnix + 1, cooldown_until: nowUnix + 2 },
@@ -384,6 +385,7 @@ describe("pages/HomePage", () => {
       vi.mocked(useProvidersListQuery).mockImplementation((cliKey: any) => {
         if (cliKey === "claude") return { data: [{ id: 1, name: " P1 " }] } as any;
         if (cliKey === "codex") return { data: [{ id: 2, name: "" }] } as any;
+        if (cliKey === "grok") return { data: [] } as any;
         return { data: [{ id: 3, name: "P3" }] } as any;
       });
 

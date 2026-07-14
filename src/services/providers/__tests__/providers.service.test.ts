@@ -380,6 +380,7 @@ describe("services/providers/providers", () => {
     });
 
     expect(validateProviderCliKey(" claude ")).toBe("claude");
+    expect(validateProviderCliKey(" grok ")).toBe("grok");
 
     await providersList(" claude " as never);
     await providerUpsert({

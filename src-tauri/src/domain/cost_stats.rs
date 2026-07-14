@@ -280,6 +280,47 @@ INSERT INTO request_logs (
     }
 
     #[test]
+    fn backfill_uses_default_grok_build_price_alias() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db =
+            db::init_for_tests(&dir.path().join("cost-backfill-grok-alias.db")).expect("init db");
+        crate::model_prices::upsert(
+            &db,
+            "grok",
+            "grok-build-0.1",
+            r#"{"input_cost_per_token":0.01}"#,
+        )
+        .expect("insert Grok model price");
+
+        let conn = db.open_connection().expect("open db");
+        insert_backfill_candidate(&conn, "backfill-grok-build", "grok");
+        conn.execute(
+            "UPDATE request_logs SET requested_model = 'grok-build' WHERE trace_id = 'backfill-grok-build'",
+            [],
+        )
+        .expect("set Grok request model");
+        drop(conn);
+
+        backfill_missing_for_cli_with_aliases(
+            &db,
+            "grok",
+            5000,
+            &model_price_aliases::ModelPriceAliasesV1::default(),
+        )
+        .expect("backfill Grok cost");
+
+        let conn = db.open_connection().expect("reopen db");
+        let cost = conn
+            .query_row(
+                "SELECT cost_usd_femto FROM request_logs WHERE trace_id = 'backfill-grok-build'",
+                [],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .expect("read Grok backfilled cost");
+        assert_eq!(cost, Some(TEST_FEMTO_USD));
+    }
+
+    #[test]
     fn backfill_zero_multiplier_does_not_require_a_model_price() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db = db::init_for_tests(&dir.path().join("cost-backfill-free.db")).expect("init db");

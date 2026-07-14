@@ -12,6 +12,7 @@ import {
 import { Button } from "../../../ui/Button";
 import { Dialog } from "../../../ui/Dialog";
 import { cn } from "../../../utils/cn";
+import { cliKeysWith } from "../../../constants/clis";
 
 export type McpServerDialogProps = {
   workspaceId: number;
@@ -253,7 +254,7 @@ function selectCandidate(
       }
     }
 
-    for (const cliKey of ["claude", "codex", "gemini"] as const) {
+    for (const cliKey of cliKeysWith("mcp")) {
       const cliSection = asObject(rootObj[cliKey]);
       const cliServers = asObject(cliSection?.servers);
       if (!cliServers) continue;

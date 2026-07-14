@@ -83,7 +83,16 @@ impl SessionManager {
         headers: &HeaderMap,
         root: Option<&Value>,
     ) -> Option<String> {
-        // 1) client headers
+        // 1) Grok stable session headers
+        for key in ["x-grok-session-id", "x-grok-conv-id"] {
+            if let Some(v) = header_string(headers, key) {
+                if let Some(id) = sanitize_session_id(&v) {
+                    return Some(id);
+                }
+            }
+        }
+
+        // 2) generic client headers
         if let Some(v) = header_string(headers, "session_id") {
             if let Some(id) = sanitize_session_id(&v) {
                 return Some(id);
@@ -95,7 +104,7 @@ impl SessionManager {
             }
         }
 
-        // 2) best-effort JSON extraction
+        // 3) best-effort JSON extraction
         if let Some(root) = root {
             // Common: { "session_id": "..." }
             if let Some(id) = root.get("session_id").and_then(|v| v.as_str()) {

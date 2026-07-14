@@ -291,6 +291,8 @@ export const cliManagerKeys = {
     ] as const,
   geminiInfo: () => [...cliManagerAllKey, "gemini", "info"] as const,
   geminiConfig: () => [...cliManagerAllKey, "gemini", "config"] as const,
+  grokInfo: () => [...cliManagerAllKey, "grok", "info"] as const,
+  grokConfig: () => [...cliManagerAllKey, "grok", "config"] as const,
 };
 
 const modelPricesAllKey = ["modelPrices"] as const;
@@ -311,6 +313,7 @@ const cliProxyAllKey = ["cliProxy"] as const;
 export const cliProxyKeys = {
   all: cliProxyAllKey,
   statusAll: () => [...cliProxyAllKey, "statusAll"] as const,
+  envConflicts: (cliKey: CliKey) => [...cliProxyAllKey, "envConflicts", cliKey] as const,
 };
 
 const appAboutAllKey = ["appAbout"] as const;

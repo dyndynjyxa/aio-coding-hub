@@ -95,6 +95,7 @@ pub struct AppSettings {
     // Codex CLI proxy OAuth compatible mode. When enabled, proxy takeover
     // manages config.toml only and leaves auth.json untouched.
     pub codex_oauth_compatible_proxy_mode: bool,
+    pub grok_proxy_preferences: Option<crate::grok_config::GrokProxyPreferences>,
     pub auto_start: bool,
     // Start with window hidden when auto-starting (silent startup).
     pub start_minimized: bool,
@@ -179,6 +180,7 @@ impl Default for AppSettings {
             codex_home_mode: CodexHomeMode::default(),
             codex_home_override: String::new(),
             codex_oauth_compatible_proxy_mode: DEFAULT_CODEX_OAUTH_COMPATIBLE_PROXY_MODE,
+            grok_proxy_preferences: None,
             auto_start: false,
             start_minimized: false,
             tray_enabled: true,

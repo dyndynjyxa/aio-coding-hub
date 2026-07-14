@@ -31,6 +31,7 @@ import {
 } from "../generatedTypeUtils";
 import { createRiskyIpcConfirm } from "../ipcConfirm";
 import { FeValidationError } from "../../utils/errors";
+import { CLI_KEYS, type CliKey } from "../../constants/clis";
 
 export type {
   ProviderAvailabilityResult,
@@ -46,14 +47,14 @@ export type {
   ProviderOAuthStatusResult,
 };
 
-export type CliKey = "claude" | "codex" | "gemini";
+export type { CliKey } from "../../constants/clis";
 
 export type ClaudeModels = GeneratedClaudeModels;
 export type DailyResetMode = GeneratedDailyResetMode;
 export type ProviderAuthMode = GeneratedProviderAuthMode;
 export type ProviderBaseUrlMode = GeneratedProviderBaseUrlMode;
 
-const CLI_KEY_VALUES = ["claude", "codex", "gemini"] as const satisfies readonly CliKey[];
+const CLI_KEY_VALUES = CLI_KEYS;
 const PROVIDER_AUTH_MODE_VALUES = [
   "api_key",
   "oauth",

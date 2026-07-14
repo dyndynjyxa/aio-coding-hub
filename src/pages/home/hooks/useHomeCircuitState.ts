@@ -29,9 +29,11 @@ export function useHomeCircuitState(): HomeCircuitState {
   const claudeCircuitsQuery = useGatewayCircuitStatusQuery("claude");
   const codexCircuitsQuery = useGatewayCircuitStatusQuery("codex");
   const geminiCircuitsQuery = useGatewayCircuitStatusQuery("gemini");
+  const grokCircuitsQuery = useGatewayCircuitStatusQuery("grok");
   const claudeProvidersQuery = useProvidersListQuery("claude");
   const codexProvidersQuery = useProvidersListQuery("codex");
   const geminiProvidersQuery = useProvidersListQuery("gemini");
+  const grokProvidersQuery = useProvidersListQuery("grok");
   const claudeCircuitSummary = useMemo(
     () => summarizeGatewayCircuitRows(claudeCircuitsQuery.data),
     [claudeCircuitsQuery.data]
@@ -44,10 +46,15 @@ export function useHomeCircuitState(): HomeCircuitState {
     () => summarizeGatewayCircuitRows(geminiCircuitsQuery.data),
     [geminiCircuitsQuery.data]
   );
+  const grokCircuitSummary = useMemo(
+    () => summarizeGatewayCircuitRows(grokCircuitsQuery.data),
+    [grokCircuitsQuery.data]
+  );
 
   useGatewayCircuitAutoRefresh("claude", claudeCircuitSummary);
   useGatewayCircuitAutoRefresh("codex", codexCircuitSummary);
   useGatewayCircuitAutoRefresh("gemini", geminiCircuitSummary);
+  useGatewayCircuitAutoRefresh("grok", grokCircuitSummary);
 
   const openCircuits = useMemo<OpenCircuitRow[]>(() => {
     const specs = [
@@ -65,6 +72,11 @@ export function useHomeCircuitState(): HomeCircuitState {
         cliKey: "gemini" as const,
         unavailableRows: geminiCircuitSummary.unavailableRows,
         providers: geminiProvidersQuery.data ?? [],
+      },
+      {
+        cliKey: "grok" as const,
+        unavailableRows: grokCircuitSummary.unavailableRows,
+        providers: grokProvidersQuery.data ?? [],
       },
     ];
 
@@ -105,6 +117,8 @@ export function useHomeCircuitState(): HomeCircuitState {
     codexProvidersQuery.data,
     geminiCircuitSummary.unavailableRows,
     geminiProvidersQuery.data,
+    grokCircuitSummary.unavailableRows,
+    grokProvidersQuery.data,
   ]);
 
   const handleResetProvider = useCallback(

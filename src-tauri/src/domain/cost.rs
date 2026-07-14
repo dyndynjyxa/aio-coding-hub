@@ -366,7 +366,7 @@ pub fn calculate_cost_usd_femto_with_options(
     // OpenAI reports cache reads and writes as subsets of total input. Gemini only reports cache
     // reads as a subset, while Claude bills cache buckets in addition to its input count.
     let billable_input_tokens = match cli_key {
-        "codex" => input_tokens
+        "codex" | "grok" => input_tokens
             .saturating_sub(cache_read_input_tokens)
             .saturating_sub(priced_cache_creation_input_tokens),
         "gemini" => input_tokens.saturating_sub(cache_read_input_tokens),

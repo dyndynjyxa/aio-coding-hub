@@ -336,8 +336,11 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
             status,
             resp.as_ref().and_then(|r| r.content_length()),
         ) || matches!(status.as_u16(), 402 | 429));
-    let need_5xx_body_preview =
-        !is_count_tokens && status.is_server_error() && !need_client_error_scan;
+    // Error classification and diagnostic capture are separate concerns: statuses such as 401
+    // intentionally skip rule matching, but their bounded body is still useful in request logs.
+    let need_error_body_preview = !is_count_tokens
+        && (status.is_client_error() || status.is_server_error())
+        && !need_client_error_scan;
     let need_codex_previous_response_id_scan = !is_count_tokens
         && should_scan_codex_previous_response_id_error(
             ctx.cli_key.as_str(),
@@ -345,7 +348,7 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
             *upstream.codex_previous_response_id_rectifier_retried,
             upstream.upstream_body_bytes,
         );
-    if need_client_error_scan || need_5xx_body_preview || need_codex_previous_response_id_scan {
+    if need_client_error_scan || need_error_body_preview || need_codex_previous_response_id_scan {
         if let Some(r) = resp.take() {
             let read_result = read_response_body_for_error_scan(r).await;
             if let Ok(bytes) = read_result {
@@ -372,7 +375,7 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
                         ),
                     );
                 }
-                // Extract body preview for diagnostics on 5xx and catch-all 4xx.
+                // Extract a bounded body preview for diagnostics on upstream errors.
                 if status.is_server_error() || status.is_client_error() {
                     let preview = String::from_utf8_lossy(&body_for_scan);
                     let truncated: String = preview.chars().take(500).collect();

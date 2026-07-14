@@ -39,8 +39,9 @@ import {
   useCliManagerGeminiInfoQuery,
 } from "../../query/cliManager";
 import { formatActionFailureToast } from "../../utils/errors";
+import { useGrokTabDataModel } from "../../components/cli-manager/tabs/useGrokTabDataModel";
 
-export type CliManagerTabKey = "general" | "claude" | "codex" | "cx2cc" | "gemini";
+export type CliManagerTabKey = "general" | "claude" | "codex" | "cx2cc" | "gemini" | "grok";
 
 export const CLI_MANAGER_TABS: Array<{ key: CliManagerTabKey; label: string }> = [
   { key: "general", label: "通用" },
@@ -48,6 +49,7 @@ export const CLI_MANAGER_TABS: Array<{ key: CliManagerTabKey; label: string }> =
   { key: "codex", label: "Codex" },
   { key: "cx2cc", label: "CX2CC" },
   { key: "gemini", label: "Gemini" },
+  { key: "grok", label: "Grok" },
 ];
 
 const DEFAULT_RECTIFIER: GatewayRectifierSettingsPatch = {
@@ -151,6 +153,7 @@ function blurOnEnter(e: ReactKeyboardEvent<HTMLInputElement>) {
 
 export function useCliManagerPageDataModel() {
   const [tab, setTab] = useState<CliManagerTabKey>("general");
+  const grokTabProps = useGrokTabDataModel({ enabled: tab === "grok" });
 
   const settingsQuery = useSettingsQuery();
   const appSettings = settingsQuery.data ?? null;
@@ -749,5 +752,6 @@ export function useCliManagerPageDataModel() {
       refreshGeminiInfo,
       persistGeminiConfig,
     },
+    grokTabProps,
   };
 }

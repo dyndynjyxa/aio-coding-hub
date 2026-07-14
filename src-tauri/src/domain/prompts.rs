@@ -188,8 +188,8 @@ pub fn list_summaries_by_workspace(
     Ok(items)
 }
 
-fn list_cli_keys() -> [&'static str; 3] {
-    crate::shared::cli_key::SUPPORTED_CLI_KEYS
+fn list_cli_keys() -> impl Iterator<Item = &'static str> {
+    crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Prompts)
 }
 
 fn read_prompt_file_utf8(

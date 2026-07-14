@@ -437,20 +437,21 @@ mod tests {
         out
     }
 
-    async fn spawn_status_json_upstream(
+    async fn spawn_status_upstream(
         status_line: &'static str,
+        content_type: &'static str,
         body: &'static str,
     ) -> (String, tokio::task::JoinHandle<()>) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
-            .expect("bind status json upstream stub");
-        let addr = listener.local_addr().expect("status json upstream addr");
+            .expect("bind status upstream stub");
+        let addr = listener.local_addr().expect("status upstream addr");
         let task = tokio::spawn(async move {
-            if let Ok((mut socket, _)) = listener.accept().await {
+            while let Ok((mut socket, _)) = listener.accept().await {
                 let mut buf = [0_u8; 1024];
                 let _ = socket.read(&mut buf).await;
                 let response = format!(
-                    "HTTP/1.1 {status_line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    "HTTP/1.1 {status_line}\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
                     body.len(),
                     body
                 );
@@ -460,6 +461,13 @@ mod tests {
         });
 
         (format!("http://{addr}"), task)
+    }
+
+    async fn spawn_status_json_upstream(
+        status_line: &'static str,
+        body: &'static str,
+    ) -> (String, tokio::task::JoinHandle<()>) {
+        spawn_status_upstream(status_line, "application/json", body).await
     }
 
     async fn spawn_large_known_length_error_upstream(
@@ -787,6 +795,613 @@ mod tests {
                 crate::gateway::active_requests::ActiveRequestRegistry::default(),
             ),
         }
+    }
+
+    struct GrokJsonRouteObservation {
+        captured: CapturedRawRequest,
+        response: Value,
+        log: request_logs::RequestLogInsert,
+        provider_id: i64,
+    }
+
+    struct GrokErrorRouteObservation {
+        response: Value,
+        log: request_logs::RequestLogInsert,
+        provider_id: i64,
+    }
+
+    async fn run_grok_json_route(
+        route_path: &'static str,
+        request_body: &'static str,
+        response_body: &'static str,
+    ) -> GrokJsonRouteObservation {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        settings::write(&app_handle, &settings::AppSettings::default()).expect("write settings");
+        let proxy_result =
+            crate::cli_proxy::set_enabled(&app_handle, "grok", true, "http://127.0.0.1:37123")
+                .expect("enable Grok CLI proxy");
+        assert!(proxy_result.ok, "{}", proxy_result.message);
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("gateway-route-grok-json.sqlite"))
+            .expect("init test db");
+        let (upstream_base_url, captured_rx, upstream_task) =
+            spawn_capturing_raw_upstream(response_body).await;
+        let provider_id =
+            insert_provider_with_priority(&db, "grok", "Grok JSON Stub", upstream_base_url, 0);
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(8);
+        let router = build_router(gateway_state(app_handle, db, log_tx));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(route_path)
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, "Bearer client-placeholder")
+            .header("x-api-key", "client-placeholder")
+            .header("x-grok-session-id", "grok-session-route")
+            .header("x-grok-conv-id", "grok-conversation-route")
+            .header("x-grok-req-id", "grok-request-route")
+            .body(Body::from(request_body))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let response = serde_json::from_slice::<Value>(
+            &to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("response body"),
+        )
+        .expect("JSON response");
+        let captured = captured_rx.await.expect("captured upstream request");
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        upstream_task.abort();
+
+        GrokJsonRouteObservation {
+            captured,
+            response,
+            log,
+            provider_id,
+        }
+    }
+
+    async fn run_grok_error_route(
+        status_line: &'static str,
+        content_type: &'static str,
+        upstream_body: &'static str,
+    ) -> GrokErrorRouteObservation {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        app_settings.circuit_breaker_failure_threshold = 1;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        let proxy_result =
+            crate::cli_proxy::set_enabled(&app_handle, "grok", true, "http://127.0.0.1:37123")
+                .expect("enable Grok CLI proxy");
+        assert!(proxy_result.ok, "{}", proxy_result.message);
+        assert_eq!(
+            settings::read(&app_handle)
+                .expect("read settings after enabling Grok proxy")
+                .failover_max_attempts_per_provider,
+            1,
+            "enabling Grok proxy must preserve unrelated gateway settings"
+        );
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("gateway-route-grok-error.sqlite"))
+            .expect("init test db");
+        let (upstream_base_url, upstream_task) =
+            spawn_status_upstream(status_line, content_type, upstream_body).await;
+        let provider_id =
+            insert_provider_with_priority(&db, "grok", "Grok Error Stub", upstream_base_url, 0);
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(8);
+        let router = build_router(gateway_state_with_parts(
+            app_handle,
+            db,
+            log_tx,
+            Arc::new(circuit_breaker::CircuitBreaker::new(
+                circuit_breaker::CircuitBreakerConfig {
+                    failure_threshold: 1,
+                    ..circuit_breaker::CircuitBreakerConfig::default()
+                },
+                HashMap::new(),
+                None,
+            )),
+            Arc::new(session_manager::SessionManager::new()),
+        ));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/grok/v1/responses")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"grok-error-model","input":"hello","stream":false}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let response = serde_json::from_slice::<Value>(
+            &to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("response body"),
+        )
+        .expect("gateway error JSON");
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        upstream_task.abort();
+
+        GrokErrorRouteObservation {
+            response,
+            log,
+            provider_id,
+        }
+    }
+
+    fn assert_grok_error_observation(
+        observation: &GrokErrorRouteObservation,
+        expected_error_code: &'static str,
+        expected_preview: &str,
+    ) {
+        assert_eq!(
+            observation
+                .response
+                .get("error_code")
+                .and_then(Value::as_str),
+            Some(expected_error_code)
+        );
+        assert_eq!(observation.log.cli_key, "grok");
+        assert_eq!(observation.log.status, Some(502));
+        assert_eq!(
+            observation.log.error_code.as_deref(),
+            Some(expected_error_code)
+        );
+
+        let attempts: Value =
+            serde_json::from_str(&observation.log.attempts_json).expect("attempts JSON");
+        let attempts = attempts.as_array().expect("attempt array");
+        assert_eq!(
+            attempts.len(),
+            1,
+            "unexpected Grok error attempts: {}",
+            observation.log.attempts_json
+        );
+        assert_eq!(
+            attempts[0].get("provider_id").and_then(Value::as_i64),
+            Some(observation.provider_id)
+        );
+        assert!(attempts[0]
+            .get("reason")
+            .and_then(Value::as_str)
+            .is_some_and(|reason| reason.contains(expected_preview)));
+
+        let error_details: Value = serde_json::from_str(
+            observation
+                .log
+                .error_details_json
+                .as_deref()
+                .expect("error details JSON"),
+        )
+        .expect("valid error details JSON");
+        assert!(error_details
+            .get("upstream_body_preview")
+            .and_then(Value::as_str)
+            .is_some_and(|preview| preview.contains(expected_preview)));
+    }
+
+    async fn run_grok_sse_route(
+        route_path: &'static str,
+        request_body: &'static str,
+        response_body: &'static str,
+    ) -> (String, request_logs::RequestLogInsert, i64) {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        settings::write(&app_handle, &settings::AppSettings::default()).expect("write settings");
+        let proxy_result =
+            crate::cli_proxy::set_enabled(&app_handle, "grok", true, "http://127.0.0.1:37123")
+                .expect("enable Grok CLI proxy");
+        assert!(proxy_result.ok, "{}", proxy_result.message);
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("gateway-route-grok-sse.sqlite"))
+            .expect("init test db");
+        let (upstream_base_url, upstream_task) = spawn_sse_upstream(response_body).await;
+        let provider_id =
+            insert_provider_with_priority(&db, "grok", "Grok SSE Stub", upstream_base_url, 0);
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(8);
+        let router = build_router(gateway_state(app_handle, db, log_tx));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(route_path)
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("x-grok-session-id", "grok-session-stream")
+            .body(Body::from(request_body))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("text/event-stream")));
+        let body = String::from_utf8(
+            to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("response body")
+                .to_vec(),
+        )
+        .expect("UTF-8 SSE body");
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        upstream_task.abort();
+        (body, log, provider_id)
+    }
+
+    fn assert_single_success_attempt(log: &request_logs::RequestLogInsert, provider_id: i64) {
+        let attempts: Value = serde_json::from_str(&log.attempts_json).expect("attempts JSON");
+        let attempts = attempts.as_array().expect("attempt array");
+        assert_eq!(attempts.len(), 1);
+        assert_eq!(
+            attempts[0].get("provider_id").and_then(Value::as_i64),
+            Some(provider_id)
+        );
+        assert_eq!(
+            attempts[0].get("outcome").and_then(Value::as_str),
+            Some("success")
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn mock_runtime_router_grok_responses_json_is_transparent_and_logged() {
+        let request_body =
+            r#"{"model":"grok-json-responses","input":"hello","store":false,"stream":false}"#;
+        let response_body = r#"{"id":"resp-grok-json","object":"response","model":"grok-json-responses","output":[],"usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18}}"#;
+        let observation = run_grok_json_route(
+            "/grok/v1/responses?source=grok-test",
+            request_body,
+            response_body,
+        )
+        .await;
+
+        assert!(observation
+            .captured
+            .head
+            .starts_with("POST /v1/responses?source=grok-test HTTP/1.1"));
+        assert!(observation
+            .captured
+            .has_header_line("authorization: bearer "));
+        assert!(!observation.captured.has_header_line("x-api-key:"));
+        assert!(!observation.captured.text().contains("client-placeholder"));
+        assert!(observation
+            .captured
+            .has_header_line("x-grok-session-id: grok-session-route"));
+        assert!(observation
+            .captured
+            .has_header_line("x-grok-conv-id: grok-conversation-route"));
+        assert!(observation
+            .captured
+            .has_header_line("x-grok-req-id: grok-request-route"));
+        assert_eq!(
+            serde_json::from_slice::<Value>(&observation.captured.body).expect("request JSON"),
+            serde_json::from_str::<Value>(request_body).expect("expected request JSON")
+        );
+        assert_eq!(
+            observation.response.get("id").and_then(Value::as_str),
+            Some("resp-grok-json")
+        );
+        assert_eq!(observation.log.cli_key, "grok");
+        assert_eq!(observation.log.path, "/v1/responses");
+        assert_eq!(observation.log.query.as_deref(), Some("source=grok-test"));
+        assert_eq!(
+            observation.log.session_id.as_deref(),
+            Some("grok-session-route")
+        );
+        assert_eq!(
+            observation.log.requested_model.as_deref(),
+            Some("grok-json-responses")
+        );
+        assert_eq!(observation.log.status, Some(200));
+        assert_eq!(observation.log.input_tokens, Some(11));
+        assert_eq!(observation.log.output_tokens, Some(7));
+        assert_eq!(observation.log.total_tokens, Some(18));
+        assert_single_success_attempt(&observation.log, observation.provider_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn mock_runtime_router_grok_chat_completions_json_is_transparent_and_logged() {
+        let request_body = r#"{"model":"grok-json-chat","messages":[{"role":"user","content":"hello"}],"stream":false}"#;
+        let response_body = r#"{"id":"chatcmpl-grok-json","object":"chat.completion","model":"grok-json-chat","choices":[],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}"#;
+        let observation =
+            run_grok_json_route("/grok/v1/chat/completions", request_body, response_body).await;
+
+        assert!(observation
+            .captured
+            .head
+            .starts_with("POST /v1/chat/completions HTTP/1.1"));
+        assert_eq!(
+            serde_json::from_slice::<Value>(&observation.captured.body).expect("request JSON"),
+            serde_json::from_str::<Value>(request_body).expect("expected request JSON")
+        );
+        assert_eq!(observation.log.cli_key, "grok");
+        assert_eq!(observation.log.path, "/v1/chat/completions");
+        assert_eq!(
+            observation.log.requested_model.as_deref(),
+            Some("grok-json-chat")
+        );
+        assert_eq!(observation.log.input_tokens, Some(5));
+        assert_eq!(observation.log.output_tokens, Some(3));
+        assert_eq!(observation.log.total_tokens, Some(8));
+        assert_single_success_attempt(&observation.log, observation.provider_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn mock_runtime_router_grok_responses_sse_is_transparent_and_logged() {
+        let sse_body = concat!(
+            "event: response.created\n",
+            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-grok-sse\",\"status\":\"in_progress\",\"model\":\"grok-sse-responses\",\"usage\":{\"input_tokens\":9,\"output_tokens\":0,\"total_tokens\":9}}}\n\n",
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-grok-sse\",\"status\":\"completed\",\"model\":\"grok-sse-responses\",\"output\":[],\"usage\":{\"input_tokens\":9,\"output_tokens\":4,\"total_tokens\":13}}}\n\n"
+        );
+        let (body, log, provider_id) = run_grok_sse_route(
+            "/grok/v1/responses",
+            r#"{"model":"grok-sse-responses","input":"hello","stream":true,"store":false}"#,
+            sse_body,
+        )
+        .await;
+
+        assert!(body.contains("event: response.completed"));
+        assert_eq!(log.cli_key, "grok");
+        assert_eq!(log.path, "/v1/responses");
+        assert_eq!(log.session_id.as_deref(), Some("grok-session-stream"));
+        assert_eq!(log.input_tokens, Some(9));
+        assert_eq!(log.output_tokens, Some(4));
+        assert_eq!(log.total_tokens, Some(13));
+        assert_single_success_attempt(&log, provider_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn mock_runtime_router_grok_chat_completions_sse_is_transparent_and_logged() {
+        let sse_body = concat!(
+            "data: {\"id\":\"chatcmpl-grok-sse\",\"object\":\"chat.completion.chunk\",\"model\":\"grok-sse-chat\",\"choices\":[],\"usage\":{\"prompt_tokens\":6,\"completion_tokens\":2,\"total_tokens\":8}}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let (body, log, provider_id) = run_grok_sse_route(
+            "/grok/v1/chat/completions",
+            r#"{"model":"grok-sse-chat","messages":[{"role":"user","content":"hello"}],"stream":true}"#,
+            sse_body,
+        )
+        .await;
+
+        assert!(body.contains("data: [DONE]"));
+        assert_eq!(log.cli_key, "grok");
+        assert_eq!(log.path, "/v1/chat/completions");
+        assert_eq!(log.session_id.as_deref(), Some("grok-session-stream"));
+        assert_eq!(log.input_tokens, Some(6));
+        assert_eq!(log.output_tokens, Some(2));
+        assert_eq!(log.total_tokens, Some(8));
+        assert_single_success_attempt(&log, provider_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn mock_runtime_router_grok_top_level_error_preserves_status_and_preview() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        let proxy_result =
+            crate::cli_proxy::set_enabled(&app_handle, "grok", true, "http://127.0.0.1:37123")
+                .expect("enable Grok CLI proxy");
+        assert!(proxy_result.ok, "{}", proxy_result.message);
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("gateway-route-grok-error.sqlite"))
+            .expect("init test db");
+        let upstream_body =
+            r#"{"code":"unauthenticated:no-credentials","error":"No credentials presented."}"#;
+        let (upstream_base_url, upstream_task) =
+            spawn_status_json_upstream("401 Unauthorized", upstream_body).await;
+        let provider_id =
+            insert_provider_with_priority(&db, "grok", "Grok 401 Stub", upstream_base_url, 0);
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(8);
+        let router = build_router(gateway_state(app_handle, db, log_tx));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/grok/v1/responses")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"grok-error-model","input":"hello","stream":false}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let payload: Value = serde_json::from_slice(
+            &to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("response body"),
+        )
+        .expect("gateway error JSON");
+        assert_eq!(
+            payload.get("error_code").and_then(Value::as_str),
+            Some(crate::gateway::proxy::GatewayErrorCode::Upstream4xx.as_str())
+        );
+
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        assert_eq!(log.cli_key, "grok");
+        assert_eq!(log.status, Some(502));
+        assert_eq!(
+            log.error_code.as_deref(),
+            Some(crate::gateway::proxy::GatewayErrorCode::Upstream4xx.as_str())
+        );
+        let attempts: Value = serde_json::from_str(&log.attempts_json).expect("attempts JSON");
+        let attempts = attempts.as_array().expect("attempt array");
+        assert_eq!(attempts.len(), 1);
+        assert_eq!(
+            attempts[0].get("provider_id").and_then(Value::as_i64),
+            Some(provider_id)
+        );
+        assert_eq!(attempts[0].get("status").and_then(Value::as_i64), Some(401));
+        assert_eq!(
+            attempts[0].get("error_code").and_then(Value::as_str),
+            Some(crate::gateway::proxy::GatewayErrorCode::Upstream4xx.as_str())
+        );
+        assert!(attempts[0]
+            .get("reason")
+            .and_then(Value::as_str)
+            .is_some_and(|reason| reason.contains("No credentials presented.")));
+        let error_details: Value = serde_json::from_str(
+            log.error_details_json
+                .as_deref()
+                .expect("error details JSON"),
+        )
+        .expect("valid error details JSON");
+        assert!(error_details
+            .get("upstream_body_preview")
+            .and_then(Value::as_str)
+            .is_some_and(|preview| preview.contains("No credentials presented.")));
+        upstream_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn mock_runtime_router_grok_nested_json_error_preserves_preview() {
+        let observation = run_grok_error_route(
+            "500 Internal Server Error",
+            "application/json",
+            r#"{"error":{"message":"nested Grok upstream failure","type":"server_error"}}"#,
+        )
+        .await;
+
+        assert_grok_error_observation(
+            &observation,
+            crate::gateway::proxy::GatewayErrorCode::Upstream5xx.as_str(),
+            "nested Grok upstream failure",
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn mock_runtime_router_grok_non_json_error_preserves_preview() {
+        let observation = run_grok_error_route(
+            "502 Bad Gateway",
+            "text/plain; charset=utf-8",
+            "plain Grok upstream failure",
+        )
+        .await;
+
+        assert_grok_error_observation(
+            &observation,
+            crate::gateway::proxy::GatewayErrorCode::Upstream5xx.as_str(),
+            "plain Grok upstream failure",
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn mock_runtime_router_grok_fails_over_and_binds_stable_session() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 2;
+        app_settings.circuit_breaker_failure_threshold = 1;
+        app_settings.provider_cooldown_seconds = 0;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        let proxy_result =
+            crate::cli_proxy::set_enabled(&app_handle, "grok", true, "http://127.0.0.1:37123")
+                .expect("enable Grok CLI proxy");
+        assert!(proxy_result.ok, "{}", proxy_result.message);
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("gateway-route-grok-failover.sqlite"))
+            .expect("init test db");
+        let (failed_base_url, failed_task) = spawn_status_json_upstream(
+            "401 Unauthorized",
+            r#"{"code":"unauthenticated:no-credentials","error":"No credentials presented."}"#,
+        )
+        .await;
+        let (success_base_url, success_task) = spawn_json_upstream(
+            r#"{"id":"resp-grok-failover","object":"response","model":"grok-failover-model","output":[],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}"#,
+        )
+        .await;
+        let failed_provider_id =
+            insert_provider_with_priority(&db, "grok", "Grok Failed Stub", failed_base_url, 0);
+        let success_provider_id =
+            insert_provider_with_priority(&db, "grok", "Grok Success Stub", success_base_url, 1);
+        let session = Arc::new(session_manager::SessionManager::new());
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(8);
+        let router = build_router(gateway_state_with_parts(
+            app_handle,
+            db,
+            log_tx,
+            Arc::new(circuit_breaker::CircuitBreaker::new(
+                circuit_breaker::CircuitBreakerConfig {
+                    failure_threshold: 1,
+                    ..circuit_breaker::CircuitBreakerConfig::default()
+                },
+                HashMap::new(),
+                None,
+            )),
+            Arc::clone(&session),
+        ));
+        let session_id = "grok-session-failover";
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/grok/v1/responses")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("x-grok-session-id", session_id)
+            .header("x-grok-req-id", "request-id-must-not-bind")
+            .body(Body::from(
+                r#"{"model":"grok-failover-model","input":"hello","stream":false}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        assert_eq!(log.status, Some(200));
+        assert_eq!(log.session_id.as_deref(), Some(session_id));
+        assert_eq!(log.input_tokens, Some(3));
+        assert_eq!(log.output_tokens, Some(2));
+        let attempts: Value = serde_json::from_str(&log.attempts_json).expect("attempts JSON");
+        let attempts = attempts.as_array().expect("attempt array");
+        assert_eq!(attempts.len(), 2);
+        assert_eq!(
+            attempts[0].get("provider_id").and_then(Value::as_i64),
+            Some(failed_provider_id)
+        );
+        assert_eq!(
+            attempts[1].get("provider_id").and_then(Value::as_i64),
+            Some(success_provider_id)
+        );
+        assert_eq!(
+            session
+                .get_bound_provider("grok", session_id, crate::shared::time::now_unix_seconds(),),
+            Some(success_provider_id)
+        );
+        assert_eq!(
+            session.get_bound_provider(
+                "grok",
+                "request-id-must-not-bind",
+                crate::shared::time::now_unix_seconds(),
+            ),
+            None
+        );
+        failed_task.abort();
+        success_task.abort();
     }
 
     fn gateway_state_with_plugin_pipeline(
@@ -3623,6 +4238,153 @@ module.exports.activate = function activate(api) {
             session.get_bound_provider("codex", logged_session_id, 0),
             None
         );
+
+        sse_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn mock_runtime_router_grok_responses_abort_does_not_drain_completion() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        settings::write(&app_handle, &settings::AppSettings::default()).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "grok", true, "http://127.0.0.1:37123")
+            .expect("enable Grok CLI proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(
+            &db_dir
+                .path()
+                .join("gateway-route-grok-responses-abort-test.sqlite"),
+        )
+        .expect("init test db");
+        let first_chunk = concat!(
+            "event: response.output_text.delta\n",
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
+        );
+        let completion_chunk = concat!(
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-grok-abort\",\"status\":\"completed\",\"model\":\"grok-abort-model\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n"
+        );
+        let (sse_base_url, sse_task) = spawn_delayed_chunked_sse_upstream(
+            first_chunk,
+            completion_chunk,
+            Duration::from_millis(100),
+        )
+        .await;
+        let provider_id =
+            insert_provider_with_priority(&db, "grok", "Grok Abort Stub", sse_base_url, 0);
+
+        let circuit = Arc::new(circuit_breaker::CircuitBreaker::new(
+            circuit_breaker::CircuitBreakerConfig::default(),
+            HashMap::new(),
+            None,
+        ));
+        let session = Arc::new(session_manager::SessionManager::new());
+        let (log_tx, writer_task) =
+            request_logs::start_buffered_writer(app_handle.clone(), db.clone());
+        let router = build_router(gateway_state_with_parts(
+            app_handle,
+            db.clone(),
+            log_tx,
+            Arc::clone(&circuit),
+            Arc::clone(&session),
+        ));
+        let session_id = "grok-session-abort";
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/grok/v1/responses")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("x-grok-session-id", session_id)
+            .body(Body::from(
+                r#"{"model":"grok-abort-model","stream":true,"input":"hello"}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let trace_id = response
+            .headers()
+            .get("x-trace-id")
+            .and_then(|value| value.to_str().ok())
+            .expect("trace header")
+            .to_string();
+
+        let mut body = Box::pin(response.into_body());
+        let first_frame = tokio::time::timeout(
+            Duration::from_secs(2),
+            std::future::poll_fn(|cx| body.as_mut().poll_frame(cx)),
+        )
+        .await
+        .expect("first Grok frame timeout")
+        .expect("first Grok frame")
+        .expect("first Grok frame ok");
+        let first_chunk = first_frame.into_data().expect("data frame");
+        assert!(String::from_utf8_lossy(&first_chunk).contains("hello"));
+        drop(body);
+
+        tokio::time::timeout(Duration::from_secs(2), writer_task)
+            .await
+            .expect("writer drain timeout")
+            .expect("writer task joins");
+
+        let detail = request_logs::get_by_trace_id(&db, &trace_id)
+            .expect("query request log")
+            .expect("persisted request log");
+        assert_eq!(detail.cli_key, "grok");
+        assert_eq!(detail.path, "/v1/responses");
+        assert_eq!(detail.status, Some(499));
+        assert_eq!(
+            detail.error_code.as_deref(),
+            Some(crate::gateway::proxy::GatewayErrorCode::StreamAborted.as_str())
+        );
+        assert!(detail.excluded_from_stats);
+        assert_eq!(detail.final_provider_id, provider_id);
+        assert_eq!(detail.input_tokens, None);
+        assert_eq!(detail.output_tokens, None);
+
+        let attempts: Value = serde_json::from_str(&detail.attempts_json).expect("attempts JSON");
+        let attempts = attempts.as_array().expect("attempt array");
+        assert_eq!(attempts.len(), 1);
+        assert_eq!(
+            attempts[0].get("outcome").and_then(Value::as_str),
+            Some("stream_error: code=GW_STREAM_ABORTED")
+        );
+
+        let special_settings: Value = serde_json::from_str(
+            detail
+                .special_settings_json
+                .as_deref()
+                .expect("special settings JSON"),
+        )
+        .expect("special settings JSON parses");
+        let abort_entry = special_settings
+            .as_array()
+            .expect("special settings array")
+            .iter()
+            .find(|entry| {
+                entry.get("type").and_then(Value::as_str) == Some("client_abort")
+                    && entry.get("scope").and_then(Value::as_str) == Some("stream")
+            })
+            .expect("client abort diagnostics");
+        assert_eq!(
+            abort_entry.get("reason").and_then(Value::as_str),
+            Some("stream_finalized_aborted")
+        );
+        assert_eq!(
+            abort_entry.get("detected_by").and_then(Value::as_str),
+            Some("stream_finalize")
+        );
+        assert!(abort_entry.get("completion_seen").is_none());
+        assert!(abort_entry.get("drained_chunks").is_none());
+        assert_eq!(
+            circuit.snapshot(provider_id, 0).state,
+            circuit_breaker::CircuitState::Closed
+        );
+        assert_eq!(session.get_bound_provider("grok", session_id, 0), None);
 
         sse_task.abort();
     }

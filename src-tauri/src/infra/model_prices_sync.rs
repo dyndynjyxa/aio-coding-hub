@@ -121,8 +121,25 @@ fn cli_key_from_basellm_provider(provider: &str) -> Option<&'static str> {
         "anthropic" => Some("claude"),
         // basellm historically used "google"; future-proof in case it switches to "gemini".
         "google" | "gemini" => Some("gemini"),
+        "xai" => Some("grok"),
         _ => None,
     }
+}
+
+fn supports_text_output(model: &Value) -> bool {
+    let Some(output_modalities) = model
+        .get("modalities")
+        .and_then(|value| value.get("output"))
+        .and_then(Value::as_array)
+    else {
+        return true;
+    };
+
+    output_modalities.iter().any(|value| {
+        value
+            .as_str()
+            .is_some_and(|modality| modality.eq_ignore_ascii_case("text"))
+    })
 }
 
 fn json_scalar_to_string(v: &Value) -> Option<String> {
@@ -268,6 +285,9 @@ fn parse_basellm_all_json(root: &Value) -> crate::shared::error::AppResult<Vec<M
             .ok_or_else(|| format!("SYNC_ERROR: basellm provider {provider_key} missing models"))?;
 
         for (model_name, model_value) in models {
+            if !supports_text_output(model_value) {
+                continue;
+            }
             let Some(cost) = model_value.get("cost").and_then(|v| v.as_object()) else {
                 continue;
             };
@@ -320,7 +340,7 @@ fn parse_basellm_all_json(root: &Value) -> crate::shared::error::AppResult<Vec<M
                 );
             }
 
-            if !has_input && !has_output {
+            if !has_input || !has_output {
                 continue;
             }
 

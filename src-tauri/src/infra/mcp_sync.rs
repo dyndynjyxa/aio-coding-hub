@@ -10,6 +10,7 @@ mod claude_json;
 mod codex_toml;
 mod fs;
 mod gemini_json;
+mod grok_toml;
 mod json_patch;
 mod legacy;
 mod manifest;
@@ -21,5 +22,5 @@ pub(crate) use types::McpServerForSync;
 
 pub use fs::{read_target_bytes, restore_target_bytes};
 pub use manifest::{read_manifest_bytes, restore_manifest_bytes};
-pub(crate) use sync::build_next_bytes;
 pub use sync::sync_cli;
+pub(crate) use sync::{build_next_bytes, swap_grok_local_servers_for_workspace};

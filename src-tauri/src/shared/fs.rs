@@ -4,6 +4,42 @@ use std::path::Path;
 
 const WRITE_IF_CHANGED_COMPARE_MAX_BYTES: usize = 16 * 1024 * 1024;
 
+#[cfg(not(windows))]
+fn replace_file_atomic(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::rename(from, to)
+}
+
+#[cfg(windows)]
+fn replace_file_atomic(from: &Path, to: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let from = from
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let to = to
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let result = unsafe {
+        MoveFileExW(
+            from.as_ptr(),
+            to.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
 /// Check whether the given path is a symbolic link.
 /// Returns an error when metadata cannot be read so callers can fail-closed.
 pub(crate) fn is_symlink(path: &Path) -> crate::shared::error::AppResult<bool> {
@@ -108,7 +144,11 @@ pub(crate) fn read_file_with_max_len(
     })
 }
 
-pub(crate) fn write_file_atomic(path: &Path, bytes: &[u8]) -> crate::shared::error::AppResult<()> {
+fn write_file_atomic_with_replacer(
+    path: &Path,
+    bytes: &[u8],
+    replace: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+) -> crate::shared::error::AppResult<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("failed to create dir {}: {e}", parent.display()))?;
@@ -120,15 +160,16 @@ pub(crate) fn write_file_atomic(path: &Path, bytes: &[u8]) -> crate::shared::err
     std::fs::write(&tmp_path, bytes)
         .map_err(|e| format!("failed to write temp file {}: {e}", tmp_path.display()))?;
 
-    // Windows rename requires target not to exist.
-    if path.exists() {
-        let _ = std::fs::remove_file(path);
+    if let Err(error) = replace(&tmp_path, path) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(format!("failed to finalize file {}: {error}", path.display()).into());
     }
 
-    std::fs::rename(&tmp_path, path)
-        .map_err(|e| format!("failed to finalize file {}: {e}", path.display()))?;
-
     Ok(())
+}
+
+pub(crate) fn write_file_atomic(path: &Path, bytes: &[u8]) -> crate::shared::error::AppResult<()> {
+    write_file_atomic_with_replacer(path, bytes, replace_file_atomic)
 }
 
 pub(crate) fn write_file_atomic_if_changed(
@@ -212,6 +253,23 @@ mod tests {
         write_file_atomic(&path, b"hello").expect("write_file_atomic");
         let got = read_file_with_max_len(&path, 16).expect("read_file_with_max_len");
         assert_eq!(got, b"hello");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_file_atomic_preserves_existing_target_when_replace_fails() {
+        let dir = unique_tmp_dir();
+        let path = dir.join("config.toml");
+        std::fs::write(&path, b"original").expect("write original");
+
+        let error = write_file_atomic_with_replacer(&path, b"replacement", |_, _| {
+            Err(std::io::Error::other("injected replace failure"))
+        })
+        .expect_err("replace must fail");
+
+        assert!(error.to_string().contains("injected replace failure"));
+        assert_eq!(std::fs::read(&path).expect("read original"), b"original");
+        assert!(!dir.join("config.toml.aio-tmp").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

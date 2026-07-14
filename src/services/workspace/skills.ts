@@ -12,8 +12,9 @@ import {
 import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
 import { createRiskyIpcConfirm } from "../ipcConfirm";
 import type { CliKey } from "../providers/providers";
+import { CLI_KEYS } from "../../constants/clis";
 
-const CLI_KEY_VALUES = ["claude", "codex", "gemini"] as const satisfies readonly CliKey[];
+const CLI_KEY_VALUES = CLI_KEYS;
 
 export type SkillRepoSummary = GeneratedSkillRepoSummary;
 export type InstalledSkillSummary = GeneratedInstalledSkillSummary;

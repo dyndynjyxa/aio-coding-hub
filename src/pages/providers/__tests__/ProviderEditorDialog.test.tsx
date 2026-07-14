@@ -214,6 +214,24 @@ describe("pages/providers/ProviderEditorDialog", () => {
     } as any);
   });
 
+  it("limits Grok providers to API key configuration", () => {
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="grok"
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByPlaceholderText("sk-…")).toBeInTheDocument();
+    expect(dialog.queryByText("OAuth 登录")).not.toBeInTheDocument();
+    expect(dialog.queryByText("CX2CC 转译")).not.toBeInTheDocument();
+    expect(dialog.queryByText("Claude 模型映射")).not.toBeInTheDocument();
+  });
+
   it("validates create form and saves provider", async () => {
     vi.mocked(providerUpsert).mockResolvedValue(
       makeProvider({

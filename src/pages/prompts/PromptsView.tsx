@@ -33,6 +33,8 @@ function promptFileHint(cliKey: CliKey) {
       return "~/.codex/AGENTS.md";
     case "gemini":
       return "~/.gemini/GEMINI.md";
+    case "grok":
+      return "~/.grok/AGENTS.md";
     default:
       return "~";
   }

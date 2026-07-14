@@ -146,7 +146,7 @@ pub(super) fn sync_all_cli<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     conn: &Connection,
 ) -> crate::shared::error::AppResult<()> {
-    for cli_key in MCP_CLI_KEYS {
+    for cli_key in MCP_CLI_KEYS.iter().copied() {
         sync_one_cli(app, conn, cli_key)?;
     }
 

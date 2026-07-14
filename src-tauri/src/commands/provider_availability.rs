@@ -10,8 +10,8 @@ pub(crate) async fn provider_test_availability(
     db_state: tauri::State<'_, DbInitState>,
     provider_id: i64,
 ) -> Result<provider_availability::ProviderAvailabilityResult, String> {
-    let db = ensure_db_ready(app, db_state.inner()).await?;
-    provider_availability::test_provider_availability(db, provider_id)
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    provider_availability::test_provider_availability(&app, db, provider_id)
         .await
         .map_err(Into::into)
 }

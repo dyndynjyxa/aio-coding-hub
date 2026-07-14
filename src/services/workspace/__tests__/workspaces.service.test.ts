@@ -137,6 +137,7 @@ describe("services/workspace/workspaces", () => {
 
   it("rejects invalid cli keys, ids, and blank names before generated commands", async () => {
     expect(validateWorkspaceCliKey(" claude ")).toBe("claude");
+    expect(validateWorkspaceCliKey(" grok ")).toBe("grok");
     expect(validateWorkspaceId(2)).toBe(2);
     expect(normalizeWorkspaceName("  Work  ")).toBe("Work");
     expect(() => validateWorkspaceCliKey("unknown")).toThrow("SEC_INVALID_INPUT");

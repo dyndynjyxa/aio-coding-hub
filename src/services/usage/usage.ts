@@ -24,8 +24,9 @@ import {
   type Override,
 } from "../generatedTypeUtils";
 import type { CliKey } from "../providers/providers";
+import { CLI_KEYS } from "../../constants/clis";
 
-const CLI_KEY_VALUES = ["claude", "codex", "gemini"] as const satisfies readonly CliKey[];
+const CLI_KEY_VALUES = CLI_KEYS;
 
 export const USAGE_LIMIT_MIN = 1;
 export const USAGE_LEADERBOARD_DEFAULT_LIMIT = 10;

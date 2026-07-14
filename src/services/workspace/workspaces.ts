@@ -12,8 +12,9 @@ import {
 } from "../generatedIpc";
 import type { CliKey } from "../providers/providers";
 import { narrowGeneratedStringUnion, type Override } from "../generatedTypeUtils";
+import { CLI_KEYS } from "../../constants/clis";
 
-const CLI_KEY_VALUES = ["claude", "codex", "gemini"] as const satisfies readonly CliKey[];
+const CLI_KEY_VALUES = CLI_KEYS;
 export const MAX_WORKSPACE_NAME_CHARS = 128;
 
 export type WorkspaceSummary = Override<

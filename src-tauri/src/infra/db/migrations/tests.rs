@@ -1321,6 +1321,63 @@ fn baseline_v25_creates_complete_schema_for_fresh_install() {
 }
 
 #[test]
+fn ensure_patches_seed_grok_workspace_once_without_resetting_active_workspace() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+    conn.execute_batch("PRAGMA foreign_keys = ON;")
+        .expect("enable foreign_keys");
+
+    apply_migrations(&mut conn).expect("apply migrations on fresh db");
+
+    let default_id: i64 = conn
+        .query_row(
+            "SELECT id FROM workspaces WHERE cli_key = 'grok' AND name = '默认'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read Grok default workspace");
+    let initial_active_id: i64 = conn
+        .query_row(
+            "SELECT workspace_id FROM workspace_active WHERE cli_key = 'grok'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read Grok active workspace");
+    assert_eq!(initial_active_id, default_id);
+
+    conn.execute(
+        "INSERT INTO workspaces(cli_key, name, normalized_name, created_at, updated_at) VALUES ('grok', 'Custom', 'custom', 1, 1)",
+        [],
+    )
+    .expect("insert custom Grok workspace");
+    let custom_id = conn.last_insert_rowid();
+    conn.execute(
+        "UPDATE workspace_active SET workspace_id = ?1, updated_at = 2 WHERE cli_key = 'grok'",
+        [custom_id],
+    )
+    .expect("activate custom Grok workspace");
+
+    apply_migrations(&mut conn).expect("apply migrations twice");
+
+    let default_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(1) FROM workspaces WHERE cli_key = 'grok' AND name = '默认'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count Grok default workspaces");
+    let active_id: i64 = conn
+        .query_row(
+            "SELECT workspace_id FROM workspace_active WHERE cli_key = 'grok'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read preserved Grok active workspace");
+
+    assert_eq!(default_count, 1);
+    assert_eq!(active_id, custom_id);
+}
+
+#[test]
 fn rejects_unsupported_old_schema_version() {
     let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
     conn.execute_batch("PRAGMA user_version = 10;")

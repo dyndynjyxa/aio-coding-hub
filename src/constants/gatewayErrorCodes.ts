@@ -166,7 +166,7 @@ export const GatewayErrorDescriptions = {
   },
   GW_INVALID_CLI_KEY: {
     desc: "无效的 CLI Key",
-    suggestion: "请求中的 CLI Key 无法识别。支持的 CLI Key 包括 claude、codex、gemini。",
+    suggestion: "请求中的 CLI Key 无法识别。支持的 CLI Key 包括 claude、codex、gemini、grok。",
   },
   GW_INVALID_BASE_URL: {
     desc: "无效的 Base URL",

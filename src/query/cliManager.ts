@@ -14,6 +14,9 @@ import {
   cliManagerGeminiConfigGet,
   cliManagerGeminiConfigSet,
   cliManagerGeminiInfoGet,
+  cliManagerGrokConfigGet,
+  cliManagerGrokConfigSet,
+  cliManagerGrokInfoGet,
   type ClaudeCliInfo,
   type ClaudeHooksSetInput,
   type ClaudeHooksState,
@@ -24,6 +27,8 @@ import {
   type CodexModelCatalogState,
   type GeminiConfigPatch,
   type GeminiConfigState,
+  type GrokConfigState,
+  type GrokProxyPreferences,
   type SimpleCliInfo,
 } from "../services/cli/cliManager";
 import { cliManagerKeys } from "./keys";
@@ -140,6 +145,39 @@ export function useCliManagerGeminiConfigQuery(options?: { enabled?: boolean }) 
     queryFn: () => cliManagerGeminiConfigGet(),
     enabled: options?.enabled ?? true,
     placeholderData: keepPreviousData,
+  });
+}
+
+export function useCliManagerGrokInfoQuery(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: cliManagerKeys.grokInfo(),
+    queryFn: () => cliManagerGrokInfoGet(),
+    enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useCliManagerGrokConfigQuery(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: cliManagerKeys.grokConfig(),
+    queryFn: () => cliManagerGrokConfigGet(),
+    enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useCliManagerGrokConfigSetMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (preferences: GrokProxyPreferences) => cliManagerGrokConfigSet(preferences),
+    onSuccess: (next) => {
+      if (!next) return;
+      queryClient.setQueryData<GrokConfigState | null>(cliManagerKeys.grokConfig(), next);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: cliManagerKeys.grokConfig() });
+    },
   });
 }
 

@@ -13,6 +13,7 @@ mod paths;
 mod repo_cache;
 mod repos;
 mod skill_md;
+mod sync_manifest;
 mod types;
 mod update;
 mod util;

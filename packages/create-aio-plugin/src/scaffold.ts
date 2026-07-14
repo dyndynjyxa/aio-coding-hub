@@ -50,15 +50,10 @@ function commandTemplate(id: string, name: string): ScaffoldFiles {
   return {
     "plugin.json": jsonFile(manifest),
     "dist/extension.js": commandExtensionSource(command, name),
-    "README.md": readme(
-      name,
-      id,
-      "This scaffold registers one Extension Host command.",
-      [
-        "pnpm --filter create-aio-plugin cli validate --strict .",
-        "pnpm --filter create-aio-plugin cli pack .",
-      ]
-    ),
+    "README.md": readme(name, id, "This scaffold registers one Extension Host command.", [
+      "pnpm --filter create-aio-plugin cli validate --strict .",
+      "pnpm --filter create-aio-plugin cli pack .",
+    ]),
   };
 }
 
@@ -278,12 +273,7 @@ function exampleReadme(name: string, id: string, summary: string): string {
   ]);
 }
 
-function readme(
-  name: string,
-  id: string,
-  summary: string,
-  commands: readonly string[]
-): string {
+function readme(name: string, id: string, summary: string, commands: readonly string[]): string {
   const commandList = commands.map((command) => `- \`${command}\``).join("\n");
   return `# ${name}
 

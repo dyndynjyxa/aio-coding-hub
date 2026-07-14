@@ -157,6 +157,8 @@ describe("query/keys", () => {
       "0.0.0",
     ]);
     expect(cliManagerKeys.geminiInfo()).toEqual(["cliManager", "gemini", "info"]);
+    expect(cliManagerKeys.grokInfo()).toEqual(["cliManager", "grok", "info"]);
+    expect(cliManagerKeys.grokConfig()).toEqual(["cliManager", "grok", "config"]);
   });
 
   it("builds modelPrices keys", () => {
@@ -174,6 +176,7 @@ describe("query/keys", () => {
   it("builds cliProxy keys", () => {
     expect(cliProxyKeys.all).toEqual(["cliProxy"]);
     expect(cliProxyKeys.statusAll()).toEqual(["cliProxy", "statusAll"]);
+    expect(cliProxyKeys.envConflicts("grok")).toEqual(["cliProxy", "envConflicts", "grok"]);
   });
 
   it("builds appAbout keys", () => {

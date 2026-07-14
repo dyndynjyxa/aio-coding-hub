@@ -87,7 +87,9 @@ CREATE INDEX IF NOT EXISTS idx_workspace_active_workspace_id ON workspace_active
     let default_name = "默认";
     let default_normalized = normalize_name(default_name);
 
-    for cli_key in crate::shared::cli_key::SUPPORTED_CLI_KEYS {
+    for cli_key in
+        crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Workspaces)
+    {
         conn.execute(
             r#"
 INSERT OR IGNORE INTO workspaces(

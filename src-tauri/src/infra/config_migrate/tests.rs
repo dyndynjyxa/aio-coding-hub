@@ -495,6 +495,129 @@ fn config_import_v2_restores_full_prompt_and_skill_payload() {
 }
 
 #[test]
+fn config_import_failure_restores_grok_runtime_and_skill_files() {
+    let test_app = ConfigMigrateTestApp::new();
+    let app = test_app.handle();
+    let config_path = crate::grok_config::config_path(&app).expect("Grok config path");
+    std::fs::create_dir_all(config_path.parent().expect("Grok config parent"))
+        .expect("create Grok home");
+    std::fs::write(
+        &config_path,
+        b"# original\n[model.aio]\nmodel = \"grok-build\"\n",
+    )
+    .expect("write initial Grok config");
+    crate::mcp_sync::sync_cli(&app, "grok", &[]).expect("seed Grok MCP manifest");
+    crate::prompt_sync::apply_enabled_prompt(&app, "grok", 42, "original instructions")
+        .expect("seed Grok prompt runtime");
+
+    let invalid_config = b"[mcp_servers\ninvalid = true\n";
+    std::fs::write(&config_path, invalid_config).expect("write invalid Grok config");
+    let prompt_target_before =
+        crate::prompt_sync::read_target_bytes(&app, "grok").expect("read Grok prompt target");
+    let prompt_manifest_before =
+        crate::prompt_sync::read_manifest_bytes(&app, "grok").expect("read Grok prompt manifest");
+    let mcp_manifest_before =
+        crate::mcp_sync::read_manifest_bytes(&app, "grok").expect("read Grok MCP manifest");
+
+    let ssot_root = ssot_skills_root(&app).expect("SSOT root");
+    write_skill_md(
+        &ssot_root.join("existing-installed"),
+        "Existing Installed",
+        "Existing installed skill",
+    );
+    let grok_skills_root = cli_skills_root(&app, "grok").expect("Grok skills root");
+    write_skill_md(
+        &grok_skills_root.join("existing-local"),
+        "Existing Local",
+        "Existing local skill",
+    );
+    std::fs::write(
+        grok_skills_root.join("existing-local").join("notes.txt"),
+        "keep me",
+    )
+    .expect("write existing local skill file");
+
+    let bundle = ConfigBundle {
+        installed_skills: Some(vec![InstalledSkillExport {
+            skill_key: "imported-installed".to_string(),
+            name: "Imported Installed".to_string(),
+            description: "Imported installed skill".to_string(),
+            source_git_url: "https://example.test/imported.git".to_string(),
+            source_branch: "main".to_string(),
+            source_subdir: "skills/imported".to_string(),
+            enabled_in_workspaces: Vec::new(),
+            files: vec![SkillFileExport {
+                relative_path: "SKILL.md".to_string(),
+                content_base64: BASE64_STANDARD.encode(
+                    b"---\nname: Imported Installed\ndescription: Imported installed skill\n---\n",
+                ),
+            }],
+        }]),
+        local_skills: Some(vec![LocalSkillExport {
+            cli_key: "grok".to_string(),
+            dir_name: "imported-local".to_string(),
+            name: "Imported Local".to_string(),
+            description: "Imported local skill".to_string(),
+            source_git_url: None,
+            source_branch: None,
+            source_subdir: None,
+            files: vec![SkillFileExport {
+                relative_path: "SKILL.md".to_string(),
+                content_base64: BASE64_STANDARD
+                    .encode(b"---\nname: Imported Local\ndescription: Imported local skill\n---\n"),
+            }],
+        }]),
+        ..make_test_bundle(CONFIG_BUNDLE_SCHEMA_VERSION)
+    };
+
+    let Err(error) = config_import(&app, &test_app.db, bundle) else {
+        panic!("invalid Grok TOML must fail runtime sync");
+    };
+
+    assert!(error.to_string().contains("GROK_CONFIG_INVALID_TOML"));
+    assert_eq!(
+        std::fs::read(&config_path).expect("read restored Grok config"),
+        invalid_config
+    );
+    assert_eq!(
+        crate::prompt_sync::read_target_bytes(&app, "grok")
+            .expect("read restored Grok prompt target"),
+        prompt_target_before
+    );
+    assert_eq!(
+        crate::prompt_sync::read_manifest_bytes(&app, "grok")
+            .expect("read restored Grok prompt manifest"),
+        prompt_manifest_before
+    );
+    assert_eq!(
+        crate::mcp_sync::read_manifest_bytes(&app, "grok")
+            .expect("read restored Grok MCP manifest"),
+        mcp_manifest_before
+    );
+    assert!(ssot_root
+        .join("existing-installed")
+        .join("SKILL.md")
+        .exists());
+    assert!(!ssot_root.join("imported-installed").exists());
+    assert_eq!(
+        std::fs::read_to_string(grok_skills_root.join("existing-local").join("notes.txt"))
+            .expect("read restored local skill"),
+        "keep me"
+    );
+    assert!(!grok_skills_root.join("imported-local").exists());
+
+    let conn = test_app.db.open_connection().expect("open restored db");
+    let imported_workspace_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(1) FROM workspaces WHERE name = 'Imported'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count imported workspaces");
+    assert_eq!(imported_workspace_count, 0);
+}
+
+#[test]
 fn config_import_v1_keeps_existing_skill_state() {
     let test_app = ConfigMigrateTestApp::new();
     let app = test_app.handle();

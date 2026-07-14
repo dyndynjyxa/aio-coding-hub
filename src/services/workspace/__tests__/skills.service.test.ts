@@ -276,6 +276,7 @@ describe("services/workspace/skills", () => {
     });
 
     expect(validateSkillsCliKey(" claude ")).toBe("claude");
+    expect(validateSkillsCliKey(" grok ")).toBe("grok");
     await skillsPathsGet(" codex " as Parameters<typeof skillsPathsGet>[0]);
     expect(commands.skillsPathsGet).toHaveBeenCalledWith("codex");
   });

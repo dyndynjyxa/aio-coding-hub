@@ -127,6 +127,7 @@ describe("settings/ModelPriceAliasesDialog", () => {
     const claudeRefetch = vi.fn().mockResolvedValue({ data: {} });
     const codexRefetch = vi.fn().mockResolvedValue({ data: {} });
     const geminiRefetch = vi.fn().mockResolvedValue({ data: {} });
+    const grokRefetch = vi.fn().mockResolvedValue({ data: {} });
 
     vi.mocked(useModelPriceAliasesQuery).mockReturnValue({
       data: { version: 1, rules: [] },
@@ -136,7 +137,13 @@ describe("settings/ModelPriceAliasesDialog", () => {
 
     vi.mocked(useModelPricesListQuery).mockImplementation((cliKey: any) => {
       const refetch =
-        cliKey === "claude" ? claudeRefetch : cliKey === "codex" ? codexRefetch : geminiRefetch;
+        cliKey === "claude"
+          ? claudeRefetch
+          : cliKey === "codex"
+            ? codexRefetch
+            : cliKey === "gemini"
+              ? geminiRefetch
+              : grokRefetch;
       return {
         data: [{ model: `${cliKey}-model` }],
         isFetching: false,
@@ -192,6 +199,7 @@ describe("settings/ModelPriceAliasesDialog", () => {
       expect(claudeRefetch).toHaveBeenCalled();
       expect(codexRefetch).toHaveBeenCalled();
       expect(geminiRefetch).toHaveBeenCalled();
+      expect(grokRefetch).toHaveBeenCalled();
     });
 
     fireEvent.click(screen.getByRole("button", { name: "保存" }));

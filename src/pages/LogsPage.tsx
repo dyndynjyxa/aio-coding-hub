@@ -5,7 +5,7 @@
 import { useMemo, useReducer } from "react";
 import { HomeRequestLogsPanel } from "../components/home/HomeRequestLogsPanel";
 import { RequestLogDetailDialog } from "../components/home/RequestLogDetailDialog";
-import { CLI_FILTER_ITEMS, type CliFilterKey } from "../constants/clis";
+import { cliFilterItemsWith, type CliFilterKey } from "../constants/clis";
 import { GatewayErrorCodes } from "../constants/gatewayErrorCodes";
 import { useRequestLogsFeed } from "../hooks/useRequestLogsFeed";
 import { Button } from "../ui/Button";
@@ -18,6 +18,7 @@ import { useTraceStore } from "../services/gateway/traceStore";
 
 const LOGS_PAGE_LIMIT = 200;
 const AUTO_REFRESH_INTERVAL_MS = 2000;
+const LOG_CLI_FILTER_ITEMS = cliFilterItemsWith("logs");
 
 type StatusPredicate = (status: number | null) => boolean;
 
@@ -217,7 +218,7 @@ export function LogsPage() {
             </div>
             <TabList
               ariaLabel="CLI 过滤"
-              items={CLI_FILTER_ITEMS}
+              items={LOG_CLI_FILTER_ITEMS}
               value={cliKey}
               onChange={(cliKey) => dispatch({ type: "setCliKey", cliKey })}
               size="sm"

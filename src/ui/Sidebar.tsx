@@ -19,17 +19,15 @@ import {
   TrendingDown,
   Wrench,
 } from "lucide-react";
-import { CLIS } from "../constants/clis";
+import { cliShortLabel, clisWith } from "../constants/clis";
 import { AIO_REPO_URL } from "../constants/urls";
 import { useDevPreviewData } from "../hooks/useDevPreviewData";
 import { useGatewayStatus, openReleasesUrl } from "../hooks/useGatewayStatus";
 import { useTheme } from "../hooks/useTheme";
 import { updateDialogSetOpen } from "../hooks/useUpdateMeta";
 import { useCliProxyControls } from "../hooks/useCliProxyControls";
+import { CliProxyConflictDialog } from "../components/cli-proxy/CliProxyConflictDialog";
 import { openDesktopUrl } from "../services/desktop/opener";
-import type { CliKey } from "../services/providers/providers";
-import { Button } from "./Button";
-import { Dialog } from "./Dialog";
 import { Switch } from "./Switch";
 import { cn } from "../utils/cn";
 
@@ -87,12 +85,6 @@ const THEME_OPTIONS = [
   { value: "dark", label: "Dark", icon: Moon },
   { value: "system", label: "System", icon: Monitor },
 ] as const;
-
-const SIDEBAR_CLI_LABELS: Record<CliKey, string> = {
-  claude: "Claude",
-  codex: "Codex",
-  gemini: "Gemini",
-};
 
 export type SidebarProps = {
   className?: string;
@@ -283,8 +275,8 @@ function CliProxyGrid({ cliProxyState }: { cliProxyState: CliProxyState }) {
   }
 
   return (
-    <div className="grid grid-cols-3 gap-2">
-      {CLIS.map((cli) => {
+    <div className="grid grid-cols-4 gap-2">
+      {clisWith("cliProxy").map((cli) => {
         const cliKey = cli.key;
         const isEnabled = cliProxyState.cliProxyEnabled[cliKey];
         const drifted =
@@ -301,7 +293,7 @@ function CliProxyGrid({ cliProxyState }: { cliProxyState: CliProxyState }) {
             )}
           >
             <span className="text-[10px] font-bold tracking-tight truncate max-w-full">
-              {SIDEBAR_CLI_LABELS[cliKey]}
+              {cliShortLabel(cliKey)}
             </span>
             <div className="flex items-center gap-1 mt-1">
               {drifted ? (
@@ -310,8 +302,8 @@ function CliProxyGrid({ cliProxyState }: { cliProxyState: CliProxyState }) {
                   disabled={cliProxyState.cliProxyToggling[cliKey]}
                   onClick={() => cliProxyState.requestCliProxyEnabledSwitch(cliKey, true)}
                   className="text-[9px] text-rose-500 font-bold hover:underline"
-                  aria-label={`修复 ${SIDEBAR_CLI_LABELS[cliKey]} 代理`}
-                  title={`修复 ${SIDEBAR_CLI_LABELS[cliKey]} 代理`}
+                  aria-label={`修复 ${cliShortLabel(cliKey)} 代理`}
+                  title={`修复 ${cliShortLabel(cliKey)} 代理`}
                 >
                   修复
                 </button>
@@ -331,7 +323,7 @@ function CliProxyGrid({ cliProxyState }: { cliProxyState: CliProxyState }) {
                 onCheckedChange={(next) => cliProxyState.requestCliProxyEnabledSwitch(cliKey, next)}
                 size="sm"
                 className="border-0"
-                aria-label={`${SIDEBAR_CLI_LABELS[cliKey]} 代理开关`}
+                aria-label={`${cliShortLabel(cliKey)} 代理开关`}
               />
             </div>
           </div>
@@ -441,63 +433,6 @@ function SidebarControlCenter({
   );
 }
 
-function CliProxyConflictDialog({
-  pendingCliProxyEnablePrompt,
-  cliProxyState,
-}: {
-  pendingCliProxyEnablePrompt: CliProxyState["pendingCliProxyEnablePrompt"];
-  cliProxyState: CliProxyState;
-}) {
-  return (
-    <Dialog
-      open={pendingCliProxyEnablePrompt != null}
-      onOpenChange={(open) => {
-        if (!open) cliProxyState.setPendingCliProxyEnablePrompt(null);
-      }}
-      title={
-        pendingCliProxyEnablePrompt
-          ? `检测到 ${SIDEBAR_CLI_LABELS[pendingCliProxyEnablePrompt.cliKey]} 代理相关环境变量冲突`
-          : "检测到环境变量冲突"
-      }
-      description="继续启用可能会被这些环境变量覆盖（不会显示变量值）。是否继续？"
-      className="max-w-lg"
-    >
-      {pendingCliProxyEnablePrompt ? (
-        <div className="space-y-4">
-          <ul className="space-y-2">
-            {pendingCliProxyEnablePrompt.conflicts.map((row) => (
-              <li
-                key={`${row.var_name}:${row.source_type}:${row.source_path}`}
-                className="rounded-lg border border-border bg-secondary px-3 py-2"
-              >
-                <div className="font-mono text-xs text-foreground">{row.var_name}</div>
-                <div className="mt-1 text-xs text-muted-foreground">{row.source_path}</div>
-              </li>
-            ))}
-          </ul>
-
-          <div className="flex items-center justify-end gap-2">
-            <Button
-              variant="secondary"
-              size="md"
-              onClick={() => cliProxyState.setPendingCliProxyEnablePrompt(null)}
-            >
-              取消
-            </Button>
-            <Button
-              variant="primary"
-              size="md"
-              onClick={cliProxyState.confirmPendingCliProxyEnable}
-            >
-              继续启用
-            </Button>
-          </div>
-        </div>
-      ) : null}
-    </Dialog>
-  );
-}
-
 export function Sidebar({ className }: SidebarProps) {
   const {
     gatewayAvailable,
@@ -570,8 +505,9 @@ export function Sidebar({ className }: SidebarProps) {
       </div>
 
       <CliProxyConflictDialog
-        pendingCliProxyEnablePrompt={pendingCliProxyEnablePrompt}
-        cliProxyState={cliProxyState}
+        prompt={pendingCliProxyEnablePrompt}
+        onCancel={() => cliProxyState.setPendingCliProxyEnablePrompt(null)}
+        onConfirm={cliProxyState.confirmPendingCliProxyEnable}
       />
     </aside>
   );

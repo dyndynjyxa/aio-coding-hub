@@ -525,7 +525,9 @@ pub(super) fn export_local_skills<R: tauri::Runtime>(
 ) -> AppResult<Vec<LocalSkillExport>> {
     let mut items = Vec::new();
 
-    for cli_key in crate::shared::cli_key::SUPPORTED_CLI_KEYS {
+    for cli_key in
+        crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Skills)
+    {
         let root = cli_skills_root(app, cli_key)?;
         if !root.exists() {
             continue;
