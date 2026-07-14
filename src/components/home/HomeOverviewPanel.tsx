@@ -424,19 +424,16 @@ function OverviewInfoPanel({
 
   return (
     <Card padding="sm" className="flex h-full min-h-0 flex-1 flex-col">
-      <div className="shrink-0 overflow-x-auto scrollbar-none">
-        <TabList
-          ariaLabel="概览状态切换"
-          items={tabs}
-          value={tabValue}
-          onChange={onTabChange}
-          size="sm"
-          className="w-max min-w-full"
-          buttonClassName="whitespace-nowrap flex-1 text-xs font-semibold md:text-sm px-2.5 md:px-3"
-        />
-      </div>
+      <TabList
+        ariaLabel="概览状态切换"
+        items={tabs}
+        value={tabValue}
+        onChange={onTabChange}
+        variant="compact"
+        className="shrink-0 -mt-1"
+      />
 
-      <div className="flex-1 min-h-0 mt-3">
+      <div className="flex-1 min-h-0 mt-2">
         {tab === "sessions" ? (
           <Suspense fallback={<OverviewPanelFallback />}>
             <LazyHomeActiveSessionsCardContent
@@ -492,19 +489,16 @@ function LogsPrimaryInfoPanel({
 
   return (
     <Card padding="sm" className="flex h-full min-h-0 flex-1 flex-col">
-      <div className="shrink-0 overflow-x-auto scrollbar-none">
-        <TabList
-          ariaLabel="新布局信息切换"
-          items={tabs}
-          value={tabValue}
-          onChange={onTabChange}
-          size="sm"
-          className="w-max min-w-full"
-          buttonClassName="whitespace-nowrap flex-1 text-xs font-semibold md:text-sm px-2.5 md:px-3"
-        />
-      </div>
+      <TabList
+        ariaLabel="新布局信息切换"
+        items={tabs}
+        value={tabValue}
+        onChange={onTabChange}
+        variant="compact"
+        className="shrink-0 -mt-1"
+      />
 
-      <div className="mt-3 min-h-0 flex-1">
+      <div className="mt-2 min-h-0 flex-1">
         {tab === "circuit" ? (
           <CircuitProvidersPanel
             rows={circuit.rows}

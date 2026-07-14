@@ -41,9 +41,9 @@ const cliProxyMocks = vi.hoisted(() => {
     current: {
       cliProxyLoading: false,
       cliProxyAvailable: true,
-      cliProxyEnabled: { claude: true, codex: false, gemini: false },
-      cliProxyAppliedToCurrentGateway: { claude: true, codex: null, gemini: null },
-      cliProxyToggling: { claude: false, codex: false, gemini: false },
+      cliProxyEnabled: { claude: true, codex: false, gemini: false, grok: false },
+      cliProxyAppliedToCurrentGateway: { claude: true, codex: null, gemini: null, grok: null },
+      cliProxyToggling: { claude: false, codex: false, gemini: false, grok: false },
       pendingCliProxyEnablePrompt: null,
       requestCliProxyEnabledSwitch,
       setPendingCliProxyEnablePrompt,
@@ -78,9 +78,9 @@ describe("ui/Sidebar", () => {
     cliProxyMocks.current = {
       cliProxyLoading: false,
       cliProxyAvailable: true,
-      cliProxyEnabled: { claude: true, codex: false, gemini: false },
-      cliProxyAppliedToCurrentGateway: { claude: true, codex: null, gemini: null },
-      cliProxyToggling: { claude: false, codex: false, gemini: false },
+      cliProxyEnabled: { claude: true, codex: false, gemini: false, grok: false },
+      cliProxyAppliedToCurrentGateway: { claude: true, codex: null, gemini: null, grok: null },
+      cliProxyToggling: { claude: false, codex: false, gemini: false, grok: false },
       pendingCliProxyEnablePrompt: null,
       requestCliProxyEnabledSwitch: cliProxyMocks.requestCliProxyEnabledSwitch,
       setPendingCliProxyEnablePrompt: cliProxyMocks.setPendingCliProxyEnablePrompt,
@@ -330,7 +330,7 @@ describe("ui/Sidebar", () => {
     expect(screen.getByText("Port: 37123")).toBeInTheDocument();
   });
 
-  it("renders gateway status and Claude/Codex/Gemini proxy switches in the bottom panel", () => {
+  it("renders gateway status and all proxy switches with brand icons", () => {
     gatewayMetaRef.current = {
       gatewayAvailable: "available",
       gateway: { running: true, port: 37124 },
@@ -357,10 +357,8 @@ describe("ui/Sidebar", () => {
       "data-state",
       "unchecked"
     );
-    expect(screen.getByRole("switch", { name: "Gemini 代理开关" })).toHaveAttribute(
-      "data-state",
-      "unchecked"
-    );
+    expect(screen.getByRole("switch", { name: "Grok 代理开关" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Gemini 代理开关" })).toBeInTheDocument();
   });
 
   it("forwards proxy switch requests through useCliProxyControls", () => {
@@ -380,11 +378,26 @@ describe("ui/Sidebar", () => {
     expect(cliProxyMocks.requestCliProxyEnabledSwitch).toHaveBeenCalledWith("gemini", true);
   });
 
+  it("orders brand icons above switches as Claude, Codex, Grok, Gemini", () => {
+    render(
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>
+    );
+
+    const controls = screen.getByLabelText("CLI 代理控制");
+    const items = Array.from(controls.querySelectorAll<HTMLElement>("[data-cli-key]"));
+
+    expect(items.map((item) => item.dataset.cliKey)).toEqual(["claude", "codex", "grok", "gemini"]);
+    expect(items.every((item) => item.querySelector("img") != null)).toBe(true);
+    expect(within(controls).getAllByRole("switch")).toHaveLength(4);
+  });
+
   it("shows repair for drifted proxy rows and requests enable on repair", () => {
     cliProxyMocks.current = {
       ...cliProxyMocks.current,
-      cliProxyEnabled: { claude: true, codex: true, gemini: false },
-      cliProxyAppliedToCurrentGateway: { claude: true, codex: false, gemini: null },
+      cliProxyEnabled: { claude: true, codex: true, gemini: false, grok: false },
+      cliProxyAppliedToCurrentGateway: { claude: true, codex: false, gemini: null, grok: null },
     };
 
     render(

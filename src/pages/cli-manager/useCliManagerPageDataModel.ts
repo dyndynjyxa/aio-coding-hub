@@ -47,9 +47,9 @@ export const CLI_MANAGER_TABS: Array<{ key: CliManagerTabKey; label: string }> =
   { key: "general", label: "通用" },
   { key: "claude", label: "Claude Code" },
   { key: "codex", label: "Codex" },
-  { key: "cx2cc", label: "CX2CC" },
   { key: "gemini", label: "Gemini" },
   { key: "grok", label: "Grok" },
+  { key: "cx2cc", label: "CX2CC" },
 ];
 
 const DEFAULT_RECTIFIER: GatewayRectifierSettingsPatch = {

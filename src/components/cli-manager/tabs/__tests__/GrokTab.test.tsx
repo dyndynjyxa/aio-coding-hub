@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import type {
@@ -23,11 +23,17 @@ const DEFAULT_CONFIG: GrokConfigState = {
   preferences: {
     model_id: "grok-4-fast",
     api_backend: "chat_completions",
+    context_window: null,
+    telemetry: null,
+    supports_backend_search: null,
   },
   aio_preferences: null,
   effective_preferences: {
     model_id: "grok-4-fast",
     api_backend: "chat_completions",
+    context_window: null,
+    telemetry: null,
+    supports_backend_search: null,
   },
   preference_source: "existing_config",
   default_profile: "grok-fast",
@@ -41,6 +47,9 @@ function createProps(overrides: Partial<CliManagerGrokTabProps> = {}): CliManage
   const preferencesDraft: GrokProxyPreferences = {
     model_id: "grok-4-fast",
     api_backend: "chat_completions",
+    context_window: null,
+    telemetry: null,
+    supports_backend_search: null,
   };
 
   return {
@@ -52,29 +61,21 @@ function createProps(overrides: Partial<CliManagerGrokTabProps> = {}): CliManage
     grokConfig: DEFAULT_CONFIG,
     grokConfigError: null,
     preferencesDraft,
-    providers: [
-      { id: 1, enabled: true },
-      { id: 2, enabled: true },
-      { id: 3, enabled: false },
-    ] as CliManagerGrokTabProps["providers"],
-    providersLoading: false,
     envConflicts: [],
     envConflictsLoading: false,
     envConflictsError: null,
-    cliProxyLoading: false,
-    cliProxyAvailable: true,
-    cliProxyEnabled: false,
-    cliProxyAppliedToCurrentGateway: null,
-    cliProxyToggling: false,
-    pendingCliProxyEnablePrompt: null,
     refreshGrok: vi.fn(),
     openGrokConfigDir: vi.fn(),
     setModelIdDraft: vi.fn(),
     setApiBackendDraft: vi.fn(),
-    persistPreferences: vi.fn(),
-    requestCliProxyEnabledSwitch: vi.fn(),
-    clearPendingCliProxyEnablePrompt: vi.fn(),
-    confirmPendingCliProxyEnable: vi.fn(),
+    setContextWindowDraft: vi.fn(),
+    setTelemetryDraft: vi.fn(),
+    setSupportsBackendSearchDraft: vi.fn(),
+    persistModelId: vi.fn(),
+    persistApiBackend: vi.fn(),
+    persistContextWindow: vi.fn(),
+    persistTelemetry: vi.fn(),
+    persistSupportsBackendSearch: vi.fn(),
     ...overrides,
   };
 }
@@ -83,18 +84,16 @@ describe("components/cli-manager/tabs/GrokTab", () => {
   it("展示安装、现有配置、供应商和保守接管诊断，且不暴露更新或 WSL 操作", () => {
     render(<CliManagerGrokTab {...createProps()} />);
 
-    expect(screen.getByRole("heading", { name: "Grok CLI" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Grok" })).toBeInTheDocument();
     expect(screen.getByText("已安装 0.2.93")).toBeInTheDocument();
     expect(screen.getByText("/usr/local/bin/grok")).toBeInTheDocument();
     expect(screen.getByText("/Users/test/.grok/config.toml")).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "模型 ID" })).toHaveValue("grok-4-fast");
+    expect(screen.getByRole("textbox", { name: "模型 ID (model_id)" })).toHaveValue("grok-4-fast");
     expect(screen.getByRole("radio", { name: "Chat Completions" })).toBeChecked();
     expect(screen.getByText("现有 Grok 配置")).toBeInTheDocument();
-    expect(screen.getByText("2 个已启用 / 3 个供应商")).toBeInTheDocument();
     expect(screen.getByText("grok-fast")).toBeInTheDocument();
     expect(screen.getByText("grok-summary")).toBeInTheDocument();
     expect(screen.getByText("grok-search")).toBeInTheDocument();
-    expect(screen.getByText("可能绕过网关")).toBeInTheDocument();
     expect(screen.getByText("未检测到企业策略文件")).toBeInTheDocument();
 
     expect(screen.queryByRole("button", { name: /安装/i })).not.toBeInTheDocument();
@@ -103,34 +102,25 @@ describe("components/cli-manager/tabs/GrokTab", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("CLI 未安装时仍允许保存偏好，但禁用代理和配置目录操作", () => {
-    const persistPreferences = vi.fn();
+  it("CLI 未安装时仍可编辑模型，配置目录操作被禁用", () => {
+    const persistModelId = vi.fn();
     const openGrokConfigDir = vi.fn();
-    const requestCliProxyEnabledSwitch = vi.fn();
 
     render(
       <CliManagerGrokTab
         {...createProps({
           grokAvailable: "unavailable",
           grokInfo: { ...DEFAULT_INFO, found: false, executable_path: null, version: null },
-          persistPreferences,
+          persistModelId,
           openGrokConfigDir,
-          requestCliProxyEnabledSwitch,
         })}
       />
     );
 
     expect(screen.getByText("未检测到")).toBeInTheDocument();
 
-    const saveButton = screen.getByRole("button", { name: "保存偏好" });
-    expect(saveButton).toBeEnabled();
-    fireEvent.click(saveButton);
-    expect(persistPreferences).toHaveBeenCalledTimes(1);
-
-    expect(screen.getByRole("button", { name: "打开 Grok 配置目录" })).toBeDisabled();
-    expect(screen.getByRole("switch", { name: "Grok CLI 代理" })).toBeDisabled();
+    expect(screen.getByTitle("打开当前生效目录")).toBeDisabled();
     expect(openGrokConfigDir).not.toHaveBeenCalled();
-    expect(requestCliProxyEnabledSwitch).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: /安装 Grok/i })).not.toBeInTheDocument();
   });
 
@@ -140,7 +130,13 @@ describe("components/cli-manager/tabs/GrokTab", () => {
         {...createProps({
           grokConfig: null,
           grokConfigError: "GROK_CONFIG_INVALID: config.toml 第 7 行语法错误",
-          preferencesDraft: { model_id: "", api_backend: "responses" },
+          preferencesDraft: {
+            model_id: "",
+            api_backend: "responses",
+            context_window: null,
+            telemetry: null,
+            supports_backend_search: null,
+          },
         })}
       />
     );
@@ -148,10 +144,8 @@ describe("components/cli-manager/tabs/GrokTab", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "GROK_CONFIG_INVALID: config.toml 第 7 行语法错误"
     );
-    expect(screen.getByRole("textbox", { name: "模型 ID" })).toHaveValue("");
+    expect(screen.getByRole("textbox", { name: "模型 ID (model_id)" })).toHaveValue("");
     expect(screen.queryByDisplayValue("grok-build")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "保存偏好" })).toBeDisabled();
-    expect(screen.getByRole("switch", { name: "Grok CLI 代理" })).toBeDisabled();
   });
 
   it("加载期间显示检测状态并锁定所有写操作", () => {
@@ -163,46 +157,66 @@ describe("components/cli-manager/tabs/GrokTab", () => {
           grokInfo: null,
           grokConfigLoading: true,
           grokConfig: null,
-          preferencesDraft: { model_id: "", api_backend: "responses" },
+          preferencesDraft: {
+            model_id: "",
+            api_backend: "responses",
+            context_window: null,
+            telemetry: null,
+            supports_backend_search: null,
+          },
         })}
       />
     );
 
-    expect(screen.getByText("检测中...")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "刷新 Grok 状态" })).toBeDisabled();
-    expect(screen.getByRole("textbox", { name: "模型 ID" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "保存偏好" })).toBeDisabled();
-    expect(screen.getByRole("switch", { name: "Grok CLI 代理" })).toBeDisabled();
+    expect(screen.getByText("加载中...")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "刷新" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "模型 ID (model_id)" })).toBeDisabled();
   });
 
-  it("区分供应商加载、配置文件尚未创建和 CLI 探测失败", () => {
+  it("保存期间禁用刷新并展示 AIO 偏好来源", () => {
     render(
       <CliManagerGrokTab
         {...createProps({
-          providers: null,
-          providersLoading: true,
+          grokConfigSaving: true,
+          grokConfig: {
+            ...DEFAULT_CONFIG,
+            preference_source: "aio_settings",
+          },
+        })}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "刷新" })).toBeDisabled();
+    expect(screen.getByText("AIO 已保存偏好")).toBeInTheDocument();
+  });
+
+  it("配置文件尚未创建和 CLI 探测失败时正确展示", () => {
+    render(
+      <CliManagerGrokTab
+        {...createProps({
           grokInfo: { ...DEFAULT_INFO, error: "version command failed" },
           grokConfig: { ...DEFAULT_CONFIG, file_exists: false },
         })}
       />
     );
 
-    expect(screen.getByText("正在读取供应商...")).toBeInTheDocument();
-    expect(screen.queryByText("0 个已启用 / 0 个供应商")).not.toBeInTheDocument();
-    expect(screen.getByText("配置文件尚未创建")).toBeInTheDocument();
+    expect(screen.getByText("不存在（将自动创建）")).toBeInTheDocument();
     expect(screen.getByText("检测失败：version command failed")).toBeInTheDocument();
   });
 
-  it("只在用户显式保存时提交当前模型和协议，并转发刷新、目录与代理操作", () => {
-    const persistPreferences = vi.fn();
+  it("变更后立即自动保存（模型 onBlur、协议 onChange），并转发刷新与目录操作", () => {
+    const persistModelId = vi.fn();
+    const persistApiBackend = vi.fn();
     const refreshGrok = vi.fn();
     const openGrokConfigDir = vi.fn();
-    const requestCliProxyEnabledSwitch = vi.fn();
 
     function Harness() {
       const [preferencesDraft, setPreferencesDraft] = useState<GrokProxyPreferences>({
         model_id: "grok-4-fast",
         api_backend: "chat_completions",
+        context_window: null,
+        telemetry: null,
+        supports_backend_search: null,
       });
 
       return (
@@ -211,12 +225,20 @@ describe("components/cli-manager/tabs/GrokTab", () => {
             preferencesDraft,
             refreshGrok,
             openGrokConfigDir,
-            requestCliProxyEnabledSwitch,
             setModelIdDraft: (modelId) =>
               setPreferencesDraft((current) => ({ ...current, model_id: modelId })),
             setApiBackendDraft: (apiBackend) =>
               setPreferencesDraft((current) => ({ ...current, api_backend: apiBackend })),
-            persistPreferences: () => persistPreferences(preferencesDraft),
+            persistModelId: (m) => {
+              persistModelId(m);
+              setPreferencesDraft((current) => ({ ...current, model_id: m.trim() }));
+              return Promise.resolve();
+            },
+            persistApiBackend: (b) => {
+              persistApiBackend(b);
+              setPreferencesDraft((current) => ({ ...current, api_backend: b }));
+              return Promise.resolve();
+            },
           })}
         />
       );
@@ -224,30 +246,76 @@ describe("components/cli-manager/tabs/GrokTab", () => {
 
     render(<Harness />);
 
-    fireEvent.change(screen.getByRole("textbox", { name: "模型 ID" }), {
+    fireEvent.change(screen.getByRole("textbox", { name: "模型 ID (model_id)" }), {
       target: { value: "grok-4.1-fast" },
     });
+    fireEvent.blur(screen.getByRole("textbox", { name: "模型 ID (model_id)" }));
+
+    expect(persistModelId).toHaveBeenCalledWith("grok-4.1-fast");
+
     fireEvent.click(screen.getByRole("radio", { name: "Responses" }));
+    expect(persistApiBackend).toHaveBeenCalledWith("responses");
 
-    expect(persistPreferences).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "保存偏好" }));
-    expect(persistPreferences).toHaveBeenCalledWith({
-      model_id: "grok-4.1-fast",
-      api_backend: "responses",
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "刷新 Grok 状态" }));
-    fireEvent.click(screen.getByRole("button", { name: "打开 Grok 配置目录" }));
-    fireEvent.click(screen.getByRole("switch", { name: "Grok CLI 代理" }));
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    fireEvent.click(screen.getByTitle("打开当前生效目录"));
 
     expect(refreshGrok).toHaveBeenCalledTimes(1);
     expect(openGrokConfigDir).toHaveBeenCalledTimes(1);
-    expect(requestCliProxyEnabledSwitch).toHaveBeenCalledWith(true);
   });
 
-  it("展示接管、环境变量和企业策略诊断，并通过共享弹窗确认代理冲突", () => {
-    const clearPendingCliProxyEnablePrompt = vi.fn();
-    const confirmPendingCliProxyEnable = vi.fn();
+  it("自动保存 context_window、遥测和服务端搜索设置", () => {
+    const persistContextWindow = vi.fn();
+    const persistTelemetry = vi.fn();
+    const persistSupportsBackendSearch = vi.fn();
+
+    function Harness() {
+      const [preferencesDraft, setPreferencesDraft] = useState<GrokProxyPreferences>({
+        model_id: "grok-4-fast",
+        api_backend: "responses",
+        context_window: null,
+        telemetry: null,
+        supports_backend_search: null,
+      });
+
+      return (
+        <CliManagerGrokTab
+          {...createProps({
+            preferencesDraft,
+            setContextWindowDraft: (contextWindow) =>
+              setPreferencesDraft((current) => ({
+                ...current,
+                context_window: contextWindow,
+              })),
+            setTelemetryDraft: (telemetry) =>
+              setPreferencesDraft((current) => ({ ...current, telemetry })),
+            setSupportsBackendSearchDraft: (supportsBackendSearch) =>
+              setPreferencesDraft((current) => ({
+                ...current,
+                supports_backend_search: supportsBackendSearch,
+              })),
+            persistContextWindow,
+            persistTelemetry,
+            persistSupportsBackendSearch,
+          })}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    const contextWindow = screen.getByRole("spinbutton", { name: "context_window" });
+    fireEvent.change(contextWindow, { target: { value: "500000" } });
+    fireEvent.blur(contextWindow);
+    expect(persistContextWindow).toHaveBeenCalledWith(500_000);
+
+    fireEvent.click(screen.getByRole("switch", { name: "关闭客户端遥测" }));
+    expect(persistTelemetry).toHaveBeenCalledWith(false);
+
+    fireEvent.click(screen.getByRole("switch", { name: "服务端搜索" }));
+    expect(persistSupportsBackendSearch).toHaveBeenCalledWith(false);
+  });
+
+  it("展示接管、环境变量和企业策略诊断", () => {
     const conflict = {
       var_name: "XAI_API_KEY",
       source_type: "system" as const,
@@ -270,11 +338,6 @@ describe("components/cli-manager/tabs/GrokTab", () => {
             ],
           },
           envConflicts: [conflict],
-          cliProxyEnabled: true,
-          cliProxyAppliedToCurrentGateway: true,
-          pendingCliProxyEnablePrompt: { cliKey: "grok", conflicts: [conflict] },
-          clearPendingCliProxyEnablePrompt,
-          confirmPendingCliProxyEnable,
         })}
       />
     );
@@ -283,15 +346,5 @@ describe("components/cli-manager/tabs/GrokTab", () => {
     expect(screen.getByText("检测到 1 个企业策略文件")).toBeInTheDocument();
     expect(screen.getByText("/Users/test/.grok/requirements.toml")).toBeInTheDocument();
     expect(screen.getByText("检测到 1 个相关环境变量")).toBeInTheDocument();
-
-    const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByText("XAI_API_KEY")).toBeInTheDocument();
-    expect(within(dialog).getByText("Process Environment")).toBeInTheDocument();
-
-    fireEvent.click(within(dialog).getByRole("button", { name: "继续启用" }));
-    expect(confirmPendingCliProxyEnable).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
-    expect(clearPendingCliProxyEnablePrompt).toHaveBeenCalledTimes(1);
   });
 });

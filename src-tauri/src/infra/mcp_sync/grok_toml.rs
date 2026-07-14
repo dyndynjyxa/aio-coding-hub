@@ -308,6 +308,7 @@ session_summary = "aio"
 [model.aio]
 model = "grok-build"
 base_url = "http://127.0.0.1:37123/grok/v1"
+supports_backend_search = true
 
 [mcp_servers.local]
 url = "https://local.example.test"

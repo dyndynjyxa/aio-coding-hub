@@ -150,9 +150,21 @@ function makeGrokConfigState(overrides: Partial<GrokConfigState> = {}): GrokConf
   return {
     config_path: "/tmp/.grok/config.toml",
     file_exists: true,
-    preferences: { model_id: "grok-build", api_backend: "responses" },
+    preferences: {
+      model_id: "grok-build",
+      api_backend: "responses",
+      context_window: null,
+      telemetry: null,
+      supports_backend_search: null,
+    },
     aio_preferences: null,
-    effective_preferences: { model_id: "grok-build", api_backend: "responses" },
+    effective_preferences: {
+      model_id: "grok-build",
+      api_backend: "responses",
+      context_window: null,
+      telemetry: null,
+      supports_backend_search: null,
+    },
     preference_source: "existing_config",
     default_profile: "grok-build",
     session_summary_profile: null,
@@ -302,7 +314,13 @@ describe("services/cli/cliManager", () => {
     vi.mocked(commands.cliManagerGrokConfigSet).mockResolvedValue({
       status: "ok",
       data: makeGrokConfigState({
-        aio_preferences: { model_id: "grok-4-fast", api_backend: "chat_completions" },
+        aio_preferences: {
+          model_id: "grok-4-fast",
+          api_backend: "chat_completions",
+          context_window: null,
+          telemetry: null,
+          supports_backend_search: null,
+        },
       }),
     });
 
@@ -370,7 +388,11 @@ describe("services/cli/cliManager", () => {
     await cliManagerGrokConfigGet();
     expect(commands.cliManagerGrokConfigGet).toHaveBeenCalledWith();
 
-    const preferences = { model_id: "grok-4-fast", api_backend: "chat_completions" } as const;
+    const preferences = {
+      model_id: "grok-4-fast",
+      api_backend: "chat_completions",
+      context_window: null,
+    } as const;
     await cliManagerGrokConfigSet(preferences);
     expect(commands.cliManagerGrokConfigSet).toHaveBeenCalledWith(preferences);
   });

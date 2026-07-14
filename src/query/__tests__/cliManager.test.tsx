@@ -209,9 +209,21 @@ function makeGrokConfigState(overrides: Partial<GrokConfigState> = {}): GrokConf
   return {
     config_path: "/tmp/.grok/config.toml",
     file_exists: false,
-    preferences: { model_id: "grok-build", api_backend: "responses" },
+    preferences: {
+      model_id: "grok-build",
+      api_backend: "responses",
+      context_window: null,
+      telemetry: null,
+      supports_backend_search: null,
+    },
     aio_preferences: null,
-    effective_preferences: { model_id: "grok-build", api_backend: "responses" },
+    effective_preferences: {
+      model_id: "grok-build",
+      api_backend: "responses",
+      context_window: null,
+      telemetry: null,
+      supports_backend_search: null,
+    },
     preference_source: "fallback",
     default_profile: null,
     session_summary_profile: null,
@@ -381,8 +393,16 @@ describe("query/cliManager", () => {
     setTauriRuntime();
 
     const updated = makeGrokConfigState({
-      aio_preferences: { model_id: "grok-4-fast", api_backend: "chat_completions" },
-      effective_preferences: { model_id: "grok-4-fast", api_backend: "chat_completions" },
+      aio_preferences: {
+        model_id: "grok-4-fast",
+        api_backend: "chat_completions",
+        context_window: null,
+      },
+      effective_preferences: {
+        model_id: "grok-4-fast",
+        api_backend: "chat_completions",
+        context_window: null,
+      },
       preference_source: "aio_settings",
     });
     vi.mocked(cliManagerGrokConfigSet).mockResolvedValue(updated);
@@ -397,6 +417,7 @@ describe("query/cliManager", () => {
       await result.current.mutateAsync({
         model_id: "grok-4-fast",
         api_backend: "chat_completions",
+        context_window: null,
       });
     });
 

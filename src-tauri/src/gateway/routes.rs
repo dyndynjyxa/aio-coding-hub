@@ -1440,6 +1440,141 @@ mod tests {
         success_task.abort();
     }
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn single_session_bound_provider_circuit_open_persists_final_diagnostics() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        settings::write(&app_handle, &settings::AppSettings::default()).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable Codex CLI proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(
+            &db_dir
+                .path()
+                .join("gateway-route-session-bound-circuit-open.sqlite"),
+        )
+        .expect("init test db");
+        let provider_id = insert_codex_provider_with_priority(
+            &db,
+            "Circuit Open Stub",
+            "http://127.0.0.1:9".to_string(),
+            0,
+        );
+        let now = crate::gateway::util::now_unix_seconds() as i64;
+        let circuit = Arc::new(circuit_breaker::CircuitBreaker::new(
+            circuit_breaker::CircuitBreakerConfig {
+                failure_threshold: 1,
+                open_duration_secs: 3_600,
+            },
+            HashMap::new(),
+            None,
+        ));
+        circuit.record_failure(
+            provider_id,
+            now,
+            Some(crate::gateway::proxy::GatewayErrorCode::UpstreamTimeout.as_str()),
+        );
+        let session = Arc::new(session_manager::SessionManager::new());
+        let session_id = "session-bound-circuit-open";
+        session.bind_success("codex", session_id, provider_id, None, now);
+
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state_with_parts(
+            app_handle,
+            db,
+            log_tx,
+            Arc::clone(&circuit),
+            Arc::clone(&session),
+        ));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/v1/chat/completions")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("x-session-id", session_id)
+            .body(Body::from(
+                r#"{"model":"gpt-circuit-open","messages":[{"role":"user","content":"hello"},{"role":"assistant","content":"hi"}]}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        let payload: Value = serde_json::from_slice(&body).expect("JSON error response");
+        assert_eq!(
+            payload.get("error_code").and_then(Value::as_str),
+            Some(crate::gateway::proxy::GatewayErrorCode::NoEnabledProvider.as_str())
+        );
+
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        assert_eq!(log.status, Some(503));
+        assert_eq!(
+            log.error_code.as_deref(),
+            Some(crate::gateway::proxy::GatewayErrorCode::NoEnabledProvider.as_str())
+        );
+        let special_settings: Value = serde_json::from_str(
+            log.special_settings_json
+                .as_deref()
+                .expect("special settings JSON"),
+        )
+        .expect("valid special settings JSON");
+        let settings = special_settings.as_array().expect("special settings array");
+        let circuit_denied = settings
+            .iter()
+            .find(|item| {
+                item.get("type").and_then(Value::as_str)
+                    == Some("session_bound_provider_circuit_denied")
+            })
+            .expect("session-bound circuit diagnostic");
+        assert_eq!(
+            circuit_denied
+                .pointer("/denied/providerId")
+                .and_then(Value::as_i64),
+            Some(provider_id)
+        );
+        assert_eq!(
+            circuit_denied
+                .pointer("/denied/state")
+                .and_then(Value::as_str),
+            Some("OPEN")
+        );
+        assert_eq!(
+            circuit_denied
+                .pointer("/denied/lastTriggerErrorCode")
+                .and_then(Value::as_str),
+            Some(crate::gateway::proxy::GatewayErrorCode::UpstreamTimeout.as_str())
+        );
+
+        let selection = settings
+            .iter()
+            .find(|item| {
+                item.get("type").and_then(Value::as_str) == Some("provider_selection_diagnostic")
+            })
+            .expect("provider selection diagnostic");
+        assert_eq!(
+            selection.get("clearedReason").and_then(Value::as_str),
+            Some("session_bound_provider_circuit_open")
+        );
+        assert_eq!(
+            selection
+                .get("sessionBoundCircuitDenied")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            selection
+                .get("deniedBoundProviderId")
+                .and_then(Value::as_i64),
+            Some(provider_id)
+        );
+    }
+
     fn gateway_state_with_plugin_pipeline(
         app: tauri::AppHandle<tauri::test::MockRuntime>,
         db: db::Db,

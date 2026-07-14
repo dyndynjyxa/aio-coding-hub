@@ -357,7 +357,7 @@ const RequestLogCard = memo(function RequestLogCard({
                     输入
                   </span>
                   <span className="font-mono tabular-nums text-xs font-semibold text-foreground/90 truncate">
-                    {formatInteger(effectiveInputTokens)}
+                    {effectiveInputTokens != null ? formatInteger(effectiveInputTokens) : "—"}
                   </span>
                 </div>
                 {cacheWrite ? (
@@ -407,7 +407,7 @@ const RequestLogCard = memo(function RequestLogCard({
                     输出
                   </span>
                   <span className="font-mono tabular-nums text-xs font-semibold text-foreground/90 truncate">
-                    {formatInteger(log.output_tokens)}
+                    {log.output_tokens != null ? formatInteger(log.output_tokens) : "—"}
                   </span>
                 </div>
                 <div
@@ -417,15 +417,11 @@ const RequestLogCard = memo(function RequestLogCard({
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/75 select-none shrink-0">
                     缓存读取
                   </span>
-                  {log.cache_read_input_tokens != null ? (
-                    <span className="font-mono tabular-nums text-xs font-semibold text-foreground/90 truncate">
-                      {formatInteger(log.cache_read_input_tokens)}
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground/40 text-xs font-mono select-none">
-                      —
-                    </span>
-                  )}
+                  <span className="font-mono tabular-nums text-xs font-semibold text-foreground/90 truncate">
+                    {log.cache_read_input_tokens != null
+                      ? formatInteger(log.cache_read_input_tokens)
+                      : "—"}
+                  </span>
                 </div>
                 <div
                   className="col-start-3 row-start-2 flex items-center gap-1 h-4"

@@ -19,7 +19,11 @@ import {
   TrendingDown,
   Wrench,
 } from "lucide-react";
-import { cliShortLabel, clisWith } from "../constants/clis";
+import claudeFavicon from "../assets/brand/claude-favicon.png";
+import codexLogo from "../assets/brand/codex-logo.svg";
+import geminiLogo from "../assets/brand/gemini-sparkle-aurora.svg";
+import grokLogo from "../assets/brand/grok-logo.svg";
+import { cliShortLabel, clisWith, type CliKey } from "../constants/clis";
 import { AIO_REPO_URL } from "../constants/urls";
 import { useDevPreviewData } from "../hooks/useDevPreviewData";
 import { useGatewayStatus, openReleasesUrl } from "../hooks/useGatewayStatus";
@@ -79,6 +83,16 @@ const NAV_SECTIONS: NavSection[] = [
 ];
 
 const NAV: NavItem[] = NAV_SECTIONS.flatMap((section) => section.items);
+const CLI_PROXY_ORDER: readonly CliKey[] = ["claude", "codex", "grok", "gemini"];
+const CLI_PROXY_ITEMS = [...clisWith("cliProxy")].sort(
+  (left, right) => CLI_PROXY_ORDER.indexOf(left.key) - CLI_PROXY_ORDER.indexOf(right.key)
+);
+const CLI_PROXY_LOGOS: Record<CliKey, string> = {
+  claude: claudeFavicon,
+  codex: codexLogo,
+  grok: grokLogo,
+  gemini: geminiLogo,
+};
 
 const THEME_OPTIONS = [
   { value: "light", label: "Light", icon: Sun },
@@ -275,57 +289,55 @@ function CliProxyGrid({ cliProxyState }: { cliProxyState: CliProxyState }) {
   }
 
   return (
-    <div className="grid grid-cols-4 gap-2">
-      {clisWith("cliProxy").map((cli) => {
-        const cliKey = cli.key;
-        const isEnabled = cliProxyState.cliProxyEnabled[cliKey];
+    <div className="grid w-full grid-cols-4 gap-1" aria-label="CLI 代理控制">
+      {CLI_PROXY_ITEMS.map(({ key: cliKey }) => {
+        const isEnabled = !!cliProxyState.cliProxyEnabled[cliKey];
         const drifted =
           isEnabled && cliProxyState.cliProxyAppliedToCurrentGateway[cliKey] === false;
+        const toggling = !!cliProxyState.cliProxyToggling[cliKey];
+        const label = cliShortLabel(cliKey);
 
         return (
           <div
             key={cliKey}
+            data-cli-key={cliKey}
             className={cn(
-              "flex flex-col items-center justify-between rounded-lg p-1.5 border transition-all duration-200",
+              "relative flex min-w-0 flex-col items-center gap-1 rounded-md border px-1 py-1.5 transition-colors",
               isEnabled
                 ? "bg-emerald-500/5 border-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                : "bg-sidebar-control-muted/30 border-slate-300/20 text-sidebar-foreground/70 dark:border-slate-500/15"
+                : "border-sidebar-control-border bg-sidebar-control-muted/30 text-sidebar-foreground/70"
             )}
+            title={label}
           >
-            <span className="text-[10px] font-bold tracking-tight truncate max-w-full">
-              {cliShortLabel(cliKey)}
-            </span>
-            <div className="flex items-center gap-1 mt-1">
-              {drifted ? (
-                <button
-                  type="button"
-                  disabled={cliProxyState.cliProxyToggling[cliKey]}
-                  onClick={() => cliProxyState.requestCliProxyEnabledSwitch(cliKey, true)}
-                  className="text-[9px] text-rose-500 font-bold hover:underline"
-                  aria-label={`修复 ${cliShortLabel(cliKey)} 代理`}
-                  title={`修复 ${cliShortLabel(cliKey)} 代理`}
-                >
-                  修复
-                </button>
-              ) : (
-                <span
-                  className={cn(
-                    "h-1 w-1 shrink-0 rounded-full transition-all duration-300",
-                    isEnabled
-                      ? "bg-emerald-500 shadow-status-dot shadow-emerald-500/70"
-                      : "bg-muted-foreground/20"
-                  )}
-                />
+            <img
+              src={CLI_PROXY_LOGOS[cliKey]}
+              alt=""
+              aria-hidden="true"
+              className={cn(
+                "h-4 w-4 object-contain",
+                (cliKey === "codex" || cliKey === "grok") && "dark:invert"
               )}
-              <Switch
-                checked={isEnabled}
-                disabled={cliProxyState.cliProxyToggling[cliKey]}
-                onCheckedChange={(next) => cliProxyState.requestCliProxyEnabledSwitch(cliKey, next)}
-                size="sm"
-                className="border-0"
-                aria-label={`${cliShortLabel(cliKey)} 代理开关`}
-              />
-            </div>
+            />
+            <Switch
+              checked={isEnabled}
+              disabled={toggling}
+              onCheckedChange={(next) => cliProxyState.requestCliProxyEnabledSwitch(cliKey, next)}
+              size="sm"
+              className="border-0"
+              aria-label={`${label} 代理开关`}
+            />
+            {drifted ? (
+              <button
+                type="button"
+                disabled={toggling}
+                onClick={() => cliProxyState.requestCliProxyEnabledSwitch(cliKey, true)}
+                className="absolute right-0.5 top-0.5 text-[8px] font-bold text-rose-500 hover:underline"
+                aria-label={`修复 ${label} 代理`}
+                title={`修复 ${label} 代理`}
+              >
+                修复
+              </button>
+            ) : null}
           </div>
         );
       })}

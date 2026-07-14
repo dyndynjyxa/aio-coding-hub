@@ -35,6 +35,12 @@ impl GrokApiBackend {
 pub struct GrokProxyPreferences {
     pub model_id: String,
     pub api_backend: GrokApiBackend,
+    #[serde(default)]
+    pub context_window: Option<u64>,
+    #[serde(default)]
+    pub telemetry: Option<bool>,
+    #[serde(default)]
+    pub supports_backend_search: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
@@ -66,6 +72,9 @@ impl Default for GrokProxyPreferences {
         Self {
             model_id: DEFAULT_GROK_MODEL.to_string(),
             api_backend: GrokApiBackend::Responses,
+            context_window: None,
+            telemetry: None,
+            supports_backend_search: None,
         }
     }
 }
@@ -97,6 +106,16 @@ pub(crate) fn validate_preferences(
             "SEC_INVALID_INPUT: Grok model_id must be 1-{GROK_MODEL_ID_MAX_CHARS} characters without control characters"
         )
         .into());
+    }
+    // Treat non-positive context_window as "not set" (delete override), matching Codex null=delete semantics
+    if let Some(cw) = preferences.context_window {
+        if cw == 0 {
+            preferences.context_window = None;
+        } else if cw > i64::MAX as u64 {
+            return Err(
+                "SEC_INVALID_INPUT: Grok context_window exceeds TOML integer maximum".into(),
+            );
+        }
     }
     Ok(preferences)
 }
@@ -290,6 +309,14 @@ fn table_string(document: &DocumentMut, table: &str, key: &str) -> Option<String
         .map(str::to_string)
 }
 
+fn table_bool(document: &DocumentMut, table: &str, key: &str) -> Option<bool> {
+    document
+        .get(table)
+        .and_then(toml_edit::Item::as_table_like)
+        .and_then(|table| table.get(key))
+        .and_then(toml_edit::Item::as_bool)
+}
+
 fn model_profile_string(document: &DocumentMut, profile: &str, key: &str) -> Option<String> {
     document
         .get("model")
@@ -410,10 +437,20 @@ fn inspect_document(path: &Path, file_exists: bool, document: &DocumentMut) -> G
             _ => None,
         })
         .unwrap_or_default();
+    let context_window = default_profile
+        .as_deref()
+        .and_then(|profile| model_profile_u64(document, profile, "context_window"));
+    let supports_backend_search = default_profile
+        .as_deref()
+        .and_then(|profile| model_profile_bool(document, profile, "supports_backend_search"));
+    let telemetry = table_bool(document, "features", "telemetry");
 
     let preferences = GrokProxyPreferences {
         model_id,
         api_backend,
+        context_window,
+        telemetry,
+        supports_backend_search,
     };
     let has_existing_profile = default_profile.is_some();
     let (effective_preferences, preference_source) =
@@ -545,11 +582,35 @@ pub(crate) fn apply_proxy_profile<R: tauri::Runtime>(
                 "api_backend",
                 preferences.api_backend.as_config_value(),
             );
+            // For the managed aio gateway profile, default to true when not explicitly disabled.
+            // This preserves prior behavior (we always advertised backend search for the gateway)
+            // while allowing the UI switch to set explicit false.
+            let search_flag = preferences.supports_backend_search.unwrap_or(true);
+            set_table_like_bool(profile, "supports_backend_search", search_flag);
+            // null (or <=0) means delete the override, same as Codex model_context_window: null
+            match preferences.context_window.filter(|&cw| cw > 0) {
+                Some(cw) => set_table_like_u64(profile, "context_window", cw)?,
+                None => {
+                    profile.remove("context_window");
+                }
+            }
         }
         {
             let models = ensure_root_table(document, "models", false)?;
             set_table_like_string(models, "default", "aio");
             set_table_like_string(models, "session_summary", "aio");
+            set_table_like_string(models, "web_search", "aio");
+            set_table_like_string(models, "image_description", "aio");
+        }
+        // features.telemetry (optional client telemetry control at root)
+        if let Some(tel) = preferences.telemetry {
+            let features = ensure_root_table(document, "features", true)?;
+            set_table_like_bool(features, "telemetry", tel);
+        } else if let Some(features) = document
+            .get_mut("features")
+            .and_then(toml_edit::Item::as_table_like_mut)
+        {
+            features.remove("telemetry");
         }
         Ok(())
     })
@@ -576,6 +637,8 @@ pub(crate) fn is_proxy_profile_applied<R: tauri::Runtime>(
     Ok(
         table_string(&document, "models", "default").as_deref() == Some("aio")
             && table_string(&document, "models", "session_summary").as_deref() == Some("aio")
+            && table_string(&document, "models", "web_search").as_deref() == Some("aio")
+            && table_string(&document, "models", "image_description").as_deref() == Some("aio")
             && model_profile_string(&document, "aio", "model").as_deref()
                 == Some(preferences.model_id.as_str())
             && model_profile_string(&document, "aio", "base_url").as_deref()
@@ -583,7 +646,19 @@ pub(crate) fn is_proxy_profile_applied<R: tauri::Runtime>(
             && model_profile_string(&document, "aio", "api_key").as_deref()
                 == Some(placeholder_key)
             && model_profile_string(&document, "aio", "api_backend").as_deref()
-                == Some(preferences.api_backend.as_config_value()),
+                == Some(preferences.api_backend.as_config_value())
+            && model_profile_bool(&document, "aio", "supports_backend_search")
+                == Some(preferences.supports_backend_search.unwrap_or(true))
+            && (match preferences.context_window {
+                Some(expected) => {
+                    model_profile_u64(&document, "aio", "context_window") == Some(expected)
+                }
+                None => model_profile_item(&document, "aio", "context_window").is_none(),
+            })
+            && (match preferences.telemetry {
+                Some(expected) => table_bool(&document, "features", "telemetry") == Some(expected),
+                None => table_item(&document, "features", "telemetry").is_none(),
+            }),
     )
 }
 
@@ -616,7 +691,12 @@ pub(crate) fn restore_proxy_fields_path(
         .map_err(|_| "GROK_CONFIG_LOCK_POISONED: config path")?;
     let (mut document, _, original) = read_document_unlocked(path)?;
 
-    for key in ["default", "session_summary"] {
+    for key in [
+        "default",
+        "session_summary",
+        "web_search",
+        "image_description",
+    ] {
         restore_table_item(
             &mut document,
             "models",
@@ -624,7 +704,14 @@ pub(crate) fn restore_proxy_fields_path(
             table_item(&baseline, "models", key),
         );
     }
-    for key in ["model", "base_url", "api_key", "api_backend"] {
+    for key in [
+        "model",
+        "base_url",
+        "api_key",
+        "api_backend",
+        "supports_backend_search",
+        "context_window",
+    ] {
         restore_model_profile_item(
             &mut document,
             "aio",
@@ -632,6 +719,13 @@ pub(crate) fn restore_proxy_fields_path(
             model_profile_item(&baseline, "aio", key),
         );
     }
+    // telemetry lives under [features] at root (client telemetry opt-out)
+    restore_table_item(
+        &mut document,
+        "features",
+        "telemetry",
+        table_item(&baseline, "features", "telemetry"),
+    );
     remove_proxy_created_empty_tables(&mut document, &baseline);
 
     let bytes = document.to_string().into_bytes();
@@ -719,6 +813,58 @@ fn set_table_like_string(table: &mut dyn toml_edit::TableLike, key: &str, value:
     }
 }
 
+fn set_table_like_bool(table: &mut dyn toml_edit::TableLike, key: &str, value: bool) {
+    if let Some(item) = table.get_mut(key) {
+        let decor = item.as_value().map(|existing| existing.decor().clone());
+        *item = toml_edit::value(value);
+        if let (Some(decor), Some(next)) = (decor, item.as_value_mut()) {
+            *next.decor_mut() = decor;
+        }
+    } else {
+        table.insert(key, toml_edit::value(value));
+    }
+}
+
+fn model_profile_bool(document: &DocumentMut, profile: &str, key: &str) -> Option<bool> {
+    document
+        .get("model")
+        .and_then(toml_edit::Item::as_table_like)
+        .and_then(|models| models.get(profile))
+        .and_then(toml_edit::Item::as_table_like)
+        .and_then(|profile| profile.get(key))
+        .and_then(toml_edit::Item::as_bool)
+}
+
+fn set_table_like_u64(
+    table: &mut dyn toml_edit::TableLike,
+    key: &str,
+    value: u64,
+) -> crate::shared::error::AppResult<()> {
+    let int_value = i64::try_from(value)
+        .map_err(|_| "SEC_INVALID_INPUT: Grok context_window exceeds TOML integer maximum")?;
+    if let Some(item) = table.get_mut(key) {
+        let decor = item.as_value().map(|existing| existing.decor().clone());
+        *item = toml_edit::value(int_value);
+        if let (Some(decor), Some(next)) = (decor, item.as_value_mut()) {
+            *next.decor_mut() = decor;
+        }
+    } else {
+        table.insert(key, toml_edit::value(int_value));
+    }
+    Ok(())
+}
+
+fn model_profile_u64(document: &DocumentMut, profile: &str, key: &str) -> Option<u64> {
+    document
+        .get("model")
+        .and_then(toml_edit::Item::as_table_like)
+        .and_then(|models| models.get(profile))
+        .and_then(toml_edit::Item::as_table_like)
+        .and_then(|profile| profile.get(key))
+        .and_then(toml_edit::Item::as_integer)
+        .and_then(|i| u64::try_from(i).ok())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -771,6 +917,11 @@ image_description = "vision"
 [model.custom]
 model = "grok-4-fast"
 api_backend = "chat_completions"
+context_window = 500000
+supports_backend_search = false
+
+[features]
+telemetry = false
 "#,
         )
         .expect("write fixture");
@@ -787,6 +938,9 @@ api_backend = "chat_completions"
             state.preferences.api_backend,
             GrokApiBackend::ChatCompletions
         );
+        assert_eq!(state.preferences.context_window, Some(500_000));
+        assert_eq!(state.preferences.telemetry, Some(false));
+        assert_eq!(state.preferences.supports_backend_search, Some(false));
     }
 
     #[test]
@@ -908,6 +1062,7 @@ api_backend = "messages"
         let saved = GrokProxyPreferences {
             model_id: "grok-4-fast".to_string(),
             api_backend: GrokApiBackend::ChatCompletions,
+            ..Default::default()
         };
 
         let (effective, source) = merge_aio_preferences(&candidate, Some(saved.clone()), true);
@@ -937,6 +1092,7 @@ api_backend = "messages"
             validate_preferences(GrokProxyPreferences {
                 model_id: "  grok-4-fast  ".to_string(),
                 api_backend: GrokApiBackend::Responses,
+                ..Default::default()
             })
             .expect("valid preferences")
             .model_id,
@@ -947,8 +1103,45 @@ api_backend = "messages"
             assert!(validate_preferences(GrokProxyPreferences {
                 model_id: invalid.to_string(),
                 api_backend: GrokApiBackend::Responses,
+                ..Default::default()
             })
             .is_err());
         }
+
+        let max_context_window = i64::MAX as u64;
+        assert_eq!(
+            validate_preferences(GrokProxyPreferences {
+                context_window: Some(max_context_window),
+                ..Default::default()
+            })
+            .expect("i64::MAX context window")
+            .context_window,
+            Some(max_context_window)
+        );
+        assert!(validate_preferences(GrokProxyPreferences {
+            context_window: Some(max_context_window + 1),
+            ..Default::default()
+        })
+        .is_err());
+        assert_eq!(
+            validate_preferences(GrokProxyPreferences {
+                context_window: Some(0),
+                ..Default::default()
+            })
+            .expect("zero removes context window")
+            .context_window,
+            None
+        );
+    }
+
+    #[test]
+    fn toml_integer_writer_rejects_values_above_i64_max() {
+        let mut table = toml_edit::Table::new();
+        let max_context_window = i64::MAX as u64;
+
+        set_table_like_u64(&mut table, "context_window", max_context_window)
+            .expect("write i64::MAX");
+        assert_eq!(table["context_window"].as_integer(), Some(i64::MAX));
+        assert!(set_table_like_u64(&mut table, "context_window", max_context_window + 1).is_err());
     }
 }

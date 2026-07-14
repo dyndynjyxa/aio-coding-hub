@@ -490,6 +490,7 @@ mod tests {
         let preferences = crate::grok_config::GrokProxyPreferences {
             model_id: "grok-responses-custom".to_string(),
             api_backend: crate::grok_config::GrokApiBackend::Responses,
+            ..Default::default()
         };
         let (url, headers, body) = build_probe_request(
             "grok",
@@ -515,6 +516,7 @@ mod tests {
         let preferences = crate::grok_config::GrokProxyPreferences {
             model_id: "grok-chat-custom".to_string(),
             api_backend: crate::grok_config::GrokApiBackend::ChatCompletions,
+            ..Default::default()
         };
 
         let (url, headers, body) = build_probe_request(

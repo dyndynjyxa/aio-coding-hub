@@ -2795,7 +2795,13 @@ export type GrokPolicyKind =
   | "requirements_user"
   | "requirements_system";
 export type GrokPreferenceSource = "existing_config" | "fallback" | "aio_settings";
-export type GrokProxyPreferences = { model_id: string; api_backend: GrokApiBackend };
+export type GrokProxyPreferences = {
+  model_id: string;
+  api_backend: GrokApiBackend;
+  context_window?: number | null;
+  telemetry?: boolean | null;
+  supports_backend_search?: boolean | null;
+};
 export type HomeUsagePeriod = "last7" | "last15" | "last30" | "month";
 export type HostRenderedBadgeTone = "neutral" | "success" | "warning" | "danger";
 export type HostRenderedField =

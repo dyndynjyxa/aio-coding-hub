@@ -203,6 +203,9 @@ command = "npx"
     app_settings.grok_proxy_preferences = Some(crate::grok_config::GrokProxyPreferences {
         model_id: "grok-test-model".to_string(),
         api_backend: crate::grok_config::GrokApiBackend::ChatCompletions,
+        context_window: Some(500_000),
+        telemetry: Some(false),
+        supports_backend_search: Some(false),
     });
     settings::write(&handle, &app_settings).expect("write preferences");
 
@@ -218,10 +221,10 @@ command = "npx"
     assert!(updated.starts_with("# preserve top comment"));
     assert_eq!(document["models"]["default"].as_str(), Some("aio"));
     assert_eq!(document["models"]["session_summary"].as_str(), Some("aio"));
-    assert_eq!(document["models"]["web_search"].as_str(), Some("search"));
+    assert_eq!(document["models"]["web_search"].as_str(), Some("aio"));
     assert_eq!(
         document["models"]["image_description"].as_str(),
-        Some("vision")
+        Some("aio")
     );
     assert_eq!(
         document["model"]["aio"]["model"].as_str(),
@@ -239,6 +242,15 @@ command = "npx"
         document["model"]["aio"]["api_backend"].as_str(),
         Some("chat_completions")
     );
+    assert_eq!(
+        document["model"]["aio"]["supports_backend_search"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        document["model"]["aio"]["context_window"].as_integer(),
+        Some(500_000)
+    );
+    assert_eq!(document["features"]["telemetry"].as_bool(), Some(false));
     assert_eq!(
         document["mcp_servers"]["keep"]["command"].as_str(),
         Some("npx")
@@ -274,7 +286,11 @@ model = "original-aio-model"
 base_url = "https://original.example/v1"
 api_key = "original-placeholder"
 api_backend = "responses"
+supports_backend_search = false
 context_window = 131072
+
+[features]
+telemetry = true
 "#,
     )
     .expect("write direct config");
@@ -282,6 +298,7 @@ context_window = 131072
     app_settings.grok_proxy_preferences = Some(crate::grok_config::GrokProxyPreferences {
         model_id: "managed-model".to_string(),
         api_backend: crate::grok_config::GrokApiBackend::ChatCompletions,
+        ..Default::default()
     });
     settings::write(&handle, &app_settings).expect("write preferences");
 
@@ -317,10 +334,7 @@ context_window = 131072
         document["models"]["session_summary"].as_str(),
         Some("summary")
     );
-    assert_eq!(
-        document["models"]["web_search"].as_str(),
-        Some("new-search")
-    );
+    assert_eq!(document["models"]["web_search"].as_str(), Some("search"));
     assert_eq!(
         document["model"]["aio"]["model"].as_str(),
         Some("original-aio-model")
@@ -342,6 +356,11 @@ context_window = 131072
         Some(131072)
     );
     assert_eq!(
+        document["model"]["aio"]["supports_backend_search"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(document["features"]["telemetry"].as_bool(), Some(true));
+    assert_eq!(
         document["model"]["aio"]["user_setting"].as_str(),
         Some("keep-me")
     );
@@ -359,6 +378,9 @@ fn grok_proxy_status_and_port_sync_track_exact_managed_state() {
     let preferences = crate::grok_config::GrokProxyPreferences {
         model_id: "grok-port-model".to_string(),
         api_backend: crate::grok_config::GrokApiBackend::Responses,
+        context_window: Some(500_000),
+        telemetry: Some(false),
+        supports_backend_search: None,
     };
     let mut app_settings = settings::read(&handle).expect("read settings");
     app_settings.grok_proxy_preferences = Some(preferences);
@@ -394,6 +416,18 @@ fn grok_proxy_status_and_port_sync_track_exact_managed_state() {
         initial_document["model"]["aio"]["api_backend"].as_str(),
         Some("responses")
     );
+    assert_eq!(
+        initial_document["model"]["aio"]["supports_backend_search"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        initial_document["model"]["aio"]["context_window"].as_integer(),
+        Some(500_000)
+    );
+    assert_eq!(
+        initial_document["features"]["telemetry"].as_bool(),
+        Some(false)
+    );
     assert!(
         initial_document
             .get("models")
@@ -427,6 +461,36 @@ fn grok_proxy_status_and_port_sync_track_exact_managed_state() {
     .expect("inspect Grok proxy profile"));
     assert!(grok::is_proxy_config_applied(&handle, first_origin));
 
+    crate::grok_config::mutate_path(&config_path, |document| {
+        document["model"]["aio"]["supports_backend_search"] = toml_edit::value(false);
+        document["model"]["aio"]["context_window"] = toml_edit::value(100_000);
+        document["features"]["telemetry"] = toml_edit::value(true);
+        Ok(())
+    })
+    .expect("drift managed Grok fields");
+    assert!(!crate::grok_config::is_proxy_profile_applied(
+        &handle,
+        first_origin,
+        &saved_preferences,
+        PLACEHOLDER_KEY,
+    )
+    .expect("inspect drifted Grok proxy profile"));
+
+    crate::grok_config::apply_proxy_profile(
+        &handle,
+        first_origin,
+        &saved_preferences,
+        PLACEHOLDER_KEY,
+    )
+    .expect("reapply Grok proxy profile");
+    assert!(crate::grok_config::is_proxy_profile_applied(
+        &handle,
+        first_origin,
+        &saved_preferences,
+        PLACEHOLDER_KEY,
+    )
+    .expect("inspect reapplied Grok proxy profile"));
+
     let initial_status = status_all(&handle, Some(first_origin)).expect("initial status");
     let grok_status = initial_status
         .iter()
@@ -458,6 +522,10 @@ fn grok_proxy_status_and_port_sync_track_exact_managed_state() {
         document["model"]["aio"]["api_backend"].as_str(),
         Some("responses")
     );
+    assert_eq!(
+        document["model"]["aio"]["supports_backend_search"].as_bool(),
+        Some(true)
+    );
 
     let synced_status = status_all(&handle, Some(next_origin)).expect("synced status");
     let grok_status = synced_status
@@ -475,6 +543,7 @@ fn updating_grok_preferences_while_proxy_enabled_updates_settings_and_toml() {
     app_settings.grok_proxy_preferences = Some(crate::grok_config::GrokProxyPreferences {
         model_id: "initial-model".to_string(),
         api_backend: crate::grok_config::GrokApiBackend::Responses,
+        ..Default::default()
     });
     settings::write(&handle, &app_settings).expect("write initial preferences");
     let enabled =
@@ -484,6 +553,7 @@ fn updating_grok_preferences_while_proxy_enabled_updates_settings_and_toml() {
     let updated = crate::grok_config::GrokProxyPreferences {
         model_id: "updated-model".to_string(),
         api_backend: crate::grok_config::GrokApiBackend::ChatCompletions,
+        ..Default::default()
     };
     let state = set_grok_preferences(&handle, updated.clone()).expect("update preferences");
 
@@ -503,6 +573,10 @@ fn updating_grok_preferences_while_proxy_enabled_updates_settings_and_toml() {
         Some("chat_completions")
     );
     assert_eq!(
+        document["model"]["aio"]["supports_backend_search"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
         document["model"]["aio"]["base_url"].as_str(),
         Some("http://127.0.0.1:26543/grok/v1")
     );
@@ -515,6 +589,7 @@ fn updating_grok_preferences_rolls_back_settings_when_toml_update_fails() {
     let initial_preferences = crate::grok_config::GrokProxyPreferences {
         model_id: "initial-model".to_string(),
         api_backend: crate::grok_config::GrokApiBackend::Responses,
+        ..Default::default()
     };
     let mut app_settings = settings::read(&handle).expect("read settings");
     app_settings.grok_proxy_preferences = Some(initial_preferences.clone());
@@ -533,6 +608,7 @@ fn updating_grok_preferences_rolls_back_settings_when_toml_update_fails() {
         crate::grok_config::GrokProxyPreferences {
             model_id: "new-model".to_string(),
             api_backend: crate::grok_config::GrokApiBackend::ChatCompletions,
+            ..Default::default()
         },
     )
     .expect_err("TOML schema update must fail");
@@ -557,6 +633,7 @@ fn updating_grok_preferences_while_proxy_disabled_rejects_invalid_toml_without_s
     let initial_preferences = crate::grok_config::GrokProxyPreferences {
         model_id: "initial-model".to_string(),
         api_backend: crate::grok_config::GrokApiBackend::Responses,
+        ..Default::default()
     };
     let mut app_settings = settings::read(&handle).expect("read settings");
     app_settings.grok_proxy_preferences = Some(initial_preferences.clone());
@@ -573,6 +650,7 @@ fn updating_grok_preferences_while_proxy_disabled_rejects_invalid_toml_without_s
         crate::grok_config::GrokProxyPreferences {
             model_id: "new-model".to_string(),
             api_backend: crate::grok_config::GrokApiBackend::ChatCompletions,
+            ..Default::default()
         },
     )
     .expect_err("invalid Grok TOML must block preference updates");
@@ -642,6 +720,7 @@ web_search = "old-search"
     app_settings.grok_proxy_preferences = Some(crate::grok_config::GrokProxyPreferences {
         model_id: "managed-model".to_string(),
         api_backend: crate::grok_config::GrokApiBackend::Responses,
+        ..Default::default()
     });
     settings::write(&handle, &app_settings).expect("write preferences");
     let base_origin = "http://127.0.0.1:26543";
@@ -701,10 +780,7 @@ web_search = "new-search"
         new_document["models"]["session_summary"].as_str(),
         Some("aio")
     );
-    assert_eq!(
-        new_document["models"]["web_search"].as_str(),
-        Some("new-search")
-    );
+    assert_eq!(new_document["models"]["web_search"].as_str(), Some("aio"));
     let manifest = read_manifest(&handle, "grok")
         .expect("read rebound manifest")
         .expect("grok manifest");
@@ -744,6 +820,11 @@ default = "custom-profile"
 [model.custom-profile]
 model = "existing-model"
 api_backend = "chat_completions"
+context_window = 262144
+supports_backend_search = false
+
+[features]
+telemetry = false
 "#,
     )
     .expect("write existing config");
@@ -759,6 +840,9 @@ api_backend = "chat_completions"
         Some(crate::grok_config::GrokProxyPreferences {
             model_id: "existing-model".to_string(),
             api_backend: crate::grok_config::GrokApiBackend::ChatCompletions,
+            context_window: Some(262_144),
+            telemetry: Some(false),
+            supports_backend_search: Some(false),
         })
     );
 }
@@ -796,7 +880,7 @@ fn grok_proxy_round_trip_preserves_unmanaged_inline_tables() {
         .expect("create config parent");
     std::fs::write(
         &config_path,
-        "models = { web_search = \"search\" }\nmodel = { custom = { model = \"keep\" } }\n",
+        "models = { custom_search = \"search\" }\nmodel = { custom = { model = \"keep\" } }\n",
     )
     .expect("write inline config");
     let original = std::fs::read(&config_path).expect("read original inline config");

@@ -8,7 +8,7 @@ use crate::gateway::proxy::handler::early_error::{
 };
 use crate::gateway::proxy::handler::provider_selection::{
     resolve_session_bound_provider_id, resolve_session_routing_decision,
-    select_providers_with_session_binding,
+    select_providers_with_session_binding, SessionBoundResult,
 };
 use crate::gateway::response_fixer;
 
@@ -89,7 +89,9 @@ impl ProviderResolutionMiddleware {
         );
 
         // --- session bound provider ---
-        ctx.session_bound_provider_id = resolve_session_bound_provider_id(
+        // The function now returns an explicit outcome so callers can observe *why*
+        // a bound provider was not used (especially the single-provider + circuit-open case).
+        let binding_outcome = resolve_session_bound_provider_id(
             ctx.state.session.as_ref(),
             ctx.state.circuit.as_ref(),
             &ctx.cli_key,
@@ -101,9 +103,53 @@ impl ProviderResolutionMiddleware {
             selection.bound_provider_order.as_deref(),
         );
 
+        ctx.session_bound_provider_id = match &binding_outcome {
+            SessionBoundResult::Preferred(id) => Some(*id),
+            _ => None,
+        };
+
         // --- no enabled provider guard ---
         if ctx.providers.is_empty() {
             let final_provider_ids = provider_ids(&ctx.providers);
+
+            // Use the explicit outcome from resolve_session_bound_provider_id.
+            // This is now the single source of truth for "why the bound provider was not used".
+            let (session_bound_circuit_denied, denied_circuit_info) = match &binding_outcome {
+                SessionBoundResult::DeniedByCircuit {
+                    provider_id,
+                    snapshot,
+                } => {
+                    let info = serde_json::json!({
+                        "providerId": provider_id,
+                        "state": snapshot.state.as_str(),
+                        "failureCount": snapshot.failure_count,
+                        "failureThreshold": snapshot.failure_threshold,
+                        "openUntil": snapshot.open_until,
+                        "cooldownUntil": snapshot.cooldown_until,
+                        "lastTriggerErrorCode": snapshot.last_trigger_error_code,
+                    });
+                    (true, Some(info))
+                }
+                _ => (false, None),
+            };
+
+            if session_bound_circuit_denied {
+                if let Some(ref info) = denied_circuit_info {
+                    push_special_setting(
+                        &ctx.special_settings,
+                        serde_json::json!({
+                            "type": "session_bound_provider_circuit_denied",
+                            "scope": "request",
+                            "hit": true,
+                            "reason": "bound_provider_circuit_open_or_cooldown",
+                            "cliKey": &ctx.cli_key,
+                            "sessionIdSuffix": ctx.session_id.as_deref().map(diagnostic_session_suffix),
+                            "denied": info,
+                        }),
+                    );
+                }
+            }
+
             push_special_setting(
                 &ctx.special_settings,
                 no_enabled_provider_diagnostic(&NoEnabledProviderDiagnosticArgs {
@@ -117,10 +163,22 @@ impl ProviderResolutionMiddleware {
                     initial_provider_ids: &initial_provider_ids,
                     final_provider_ids: &final_provider_ids,
                     forced_provider_missing,
+                    session_bound_circuit_denied,
+                    denied_bound_provider_id: denied_circuit_info
+                        .as_ref()
+                        .and_then(|v| v.get("providerId").and_then(|x| x.as_i64())),
+                    denied_circuit_snapshot: denied_circuit_info,
                 }),
             );
             let contract = early_error_contract(EarlyErrorKind::NoEnabledProvider);
-            let message = no_enabled_provider_message(&ctx.cli_key);
+            let message = if session_bound_circuit_denied {
+                format!(
+                    "no enabled provider for cli_key={} (session-bound provider circuit open)",
+                    &ctx.cli_key
+                )
+            } else {
+                no_enabled_provider_message(&ctx.cli_key)
+            };
             let session_id = ctx.session_id.take();
             let requested_model = ctx.requested_model.take();
             let special_settings_json =
@@ -158,6 +216,11 @@ struct NoEnabledProviderDiagnosticArgs<'a> {
     initial_provider_ids: &'a [i64],
     final_provider_ids: &'a [i64],
     forced_provider_missing: bool,
+    // When the (last) session-bound provider was removed because its circuit was open/cooldown.
+    // This is the main observability signal for "single provider + session reuse + sudden 503 无供应商".
+    session_bound_circuit_denied: bool,
+    denied_bound_provider_id: Option<i64>,
+    denied_circuit_snapshot: Option<serde_json::Value>,
 }
 
 fn no_enabled_provider_diagnostic(args: &NoEnabledProviderDiagnosticArgs<'_>) -> serde_json::Value {
@@ -167,13 +230,15 @@ fn no_enabled_provider_diagnostic(args: &NoEnabledProviderDiagnosticArgs<'_>) ->
     };
     let cleared_reason = if args.forced_provider_missing {
         "forced_provider_not_in_candidates"
+    } else if args.session_bound_circuit_denied {
+        "session_bound_provider_circuit_open"
     } else if args.effective_sort_mode_id.is_some() {
         "empty_sort_mode_candidates"
     } else {
         "empty_default_candidates"
     };
 
-    serde_json::json!({
+    let mut diag = serde_json::json!({
         "type": "provider_selection_diagnostic",
         "scope": "request",
         "hit": true,
@@ -198,7 +263,17 @@ fn no_enabled_provider_diagnostic(args: &NoEnabledProviderDiagnosticArgs<'_>) ->
         "candidateProviderCountBeforeForce": args.initial_provider_ids.len(),
         "candidateProviderIdsAfterForce": args.final_provider_ids,
         "candidateProviderCountAfterForce": args.final_provider_ids.len(),
-    })
+        "sessionBoundCircuitDenied": args.session_bound_circuit_denied,
+    });
+
+    if let Some(pid) = args.denied_bound_provider_id {
+        diag["deniedBoundProviderId"] = serde_json::json!(pid);
+    }
+    if let Some(snap) = &args.denied_circuit_snapshot {
+        diag["deniedCircuitSnapshot"] = snap.clone();
+    }
+
+    diag
 }
 
 fn provider_ids(providers: &[crate::providers::ProviderForGateway]) -> Vec<i64> {
@@ -239,6 +314,9 @@ mod tests {
             initial_provider_ids: &[],
             final_provider_ids: &[],
             forced_provider_missing: false,
+            session_bound_circuit_denied: false,
+            denied_bound_provider_id: None,
+            denied_circuit_snapshot: None,
         });
 
         assert_eq!(
@@ -295,6 +373,9 @@ mod tests {
             initial_provider_ids: &[11, 22],
             final_provider_ids: &[],
             forced_provider_missing: true,
+            session_bound_circuit_denied: false,
+            denied_bound_provider_id: None,
+            denied_circuit_snapshot: None,
         });
 
         assert_eq!(
@@ -328,5 +409,50 @@ mod tests {
             value.get("forcedProviderMissing").and_then(|v| v.as_bool()),
             Some(true)
         );
+    }
+
+    #[test]
+    fn no_enabled_provider_diagnostic_marks_session_bound_circuit_denied() {
+        let snap = serde_json::json!({
+            "providerId": 42,
+            "state": "OPEN",
+            "failureCount": 5,
+            "failureThreshold": 5,
+            "openUntil": 1750000000,
+            "cooldownUntil": null,
+            "lastTriggerErrorCode": null,
+        });
+
+        let value = no_enabled_provider_diagnostic(&NoEnabledProviderDiagnosticArgs {
+            cli_key: "grok",
+            active_sort_mode_id: None,
+            effective_sort_mode_id: None,
+            session_bound_sort_mode_id: None,
+            session_id: Some("sess-xyz"),
+            session_bound_provider_id: None,
+            forced_provider_id: None,
+            initial_provider_ids: &[42],
+            final_provider_ids: &[],
+            forced_provider_missing: false,
+            session_bound_circuit_denied: true,
+            denied_bound_provider_id: Some(42),
+            denied_circuit_snapshot: Some(snap.clone()),
+        });
+
+        assert_eq!(
+            value.get("clearedReason").and_then(|v| v.as_str()),
+            Some("session_bound_provider_circuit_open")
+        );
+        assert_eq!(
+            value
+                .get("sessionBoundCircuitDenied")
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            value.get("deniedBoundProviderId").and_then(|v| v.as_i64()),
+            Some(42)
+        );
+        assert!(value.get("deniedCircuitSnapshot").is_some());
     }
 }

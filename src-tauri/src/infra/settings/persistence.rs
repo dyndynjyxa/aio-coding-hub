@@ -582,6 +582,7 @@ mod tests {
             Some(crate::grok_config::GrokProxyPreferences {
                 model_id: "grok-4-fast".to_string(),
                 api_backend: crate::grok_config::GrokApiBackend::ChatCompletions,
+                ..Default::default()
             })
         );
     }
