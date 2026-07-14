@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.60.13](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.12...aio-coding-hub-v0.60.13) (2026-07-14)
+
+
+### Features
+
+* **gateway:** 增加Codex系统请求标记识别与处理 ([fa1f0e2](https://github.com/dyndynjyxa/aio-coding-hub/commit/fa1f0e261975020195e964e651a5c4eefe74c562))
+
+
+### Bug Fixes
+
+* **gateway:** 标记 Codex 系统请求并隔离熔断 ([8b82182](https://github.com/dyndynjyxa/aio-coding-hub/commit/8b82182504d95acb6743567044a5c1a1acd2013d))
+
 ## [0.60.12](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.11...aio-coding-hub-v0.60.12) (2026-07-12)
 
 
