@@ -57,3 +57,4 @@ src-tauri/target*/
 .pnpm-store/
 .codegraph/
 subagent.md
+.unknowns/
