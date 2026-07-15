@@ -3303,6 +3303,12 @@ export type ProviderExtensionValuesInput = {
   namespace: string;
   values: JsonValue;
 };
+/**
+ * A single custom HTTP header injected into upstream requests for a provider.
+ * Used for gateways that require non-standard identity/auth headers beyond the
+ * CLI's built-in auth (e.g. `X-User-Id`, `X-Domain`).
+ */
+export type ProviderCustomHeader = { name: string; value: string };
 export type ProviderLimitUsageRow = {
   cli_key: string;
   provider_id: number;
@@ -3409,6 +3415,7 @@ export type ProviderSummary = {
   bridge_type: string | null;
   stream_idle_timeout_seconds: number | null;
   extension_values: ProviderExtensionValues[];
+  custom_headers: ProviderCustomHeader[];
   api_key_configured: boolean;
 };
 export type ProviderUpsertInput = {
@@ -3436,6 +3443,7 @@ export type ProviderUpsertInput = {
   bridgeType: string | null;
   streamIdleTimeoutSeconds: number | null;
   extensionValues: ProviderExtensionValuesInput[] | null;
+  customHeaders: ProviderCustomHeader[] | null;
 };
 export type RequestAttemptLog = {
   id: number;

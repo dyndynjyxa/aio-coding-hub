@@ -58,6 +58,15 @@ fn take_first_chars(value: &str, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
 }
 
+/// A single custom HTTP header injected into upstream requests for a provider.
+/// Used for gateways that require non-standard identity/auth headers beyond the
+/// CLI's built-in auth (e.g. `X-User-Id`, `X-Domain`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ProviderCustomHeader {
+    pub name: String,
+    pub value: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct ProviderUpsertParams {
     pub provider_id: Option<i64>,
@@ -84,6 +93,7 @@ pub struct ProviderUpsertParams {
     pub bridge_type: Option<String>,
     pub stream_idle_timeout_seconds: Option<u32>,
     pub extension_values: Option<Vec<ProviderExtensionValuesInput>>,
+    pub custom_headers: Option<Vec<ProviderCustomHeader>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
@@ -245,6 +255,7 @@ pub struct ProviderSummary {
     pub bridge_type: Option<String>,
     pub stream_idle_timeout_seconds: Option<u32>,
     pub extension_values: Vec<ProviderExtensionValues>,
+    pub custom_headers: Vec<ProviderCustomHeader>,
     pub api_key_configured: bool,
 }
 
@@ -275,6 +286,7 @@ pub(crate) struct ProviderForGateway {
     pub bridge_type: Option<String>,
     pub stream_idle_timeout_seconds: Option<u32>,
     pub extension_values: Vec<ProviderExtensionValues>,
+    pub custom_headers: Vec<ProviderCustomHeader>,
 }
 
 #[derive(Debug, Clone)]
@@ -322,6 +334,7 @@ pub(super) struct DecodedProviderRow {
     pub oauth_provider_type: Option<String>,
     pub source_provider_id: Option<i64>,
     pub bridge_type: Option<String>,
+    pub custom_headers: Vec<ProviderCustomHeader>,
 }
 
 #[derive(Debug, Clone)]
@@ -365,4 +378,38 @@ pub(super) fn normalize_tags(tags: Vec<String>) -> Vec<String> {
         .filter(|v| !v.is_empty())
         .filter(|v| seen.insert(v.clone()))
         .collect()
+}
+
+/// Parse the stored `custom_headers_json` column into a list of headers.
+/// Tolerates malformed JSON by returning an empty list.
+pub(super) fn custom_headers_from_json(raw: &str) -> Vec<ProviderCustomHeader> {
+    serde_json::from_str::<Vec<ProviderCustomHeader>>(raw)
+        .ok()
+        .map(normalize_custom_headers)
+        .unwrap_or_default()
+}
+
+/// Clean custom headers before persistence: trim, drop entries with an empty
+/// name, and de-duplicate by case-insensitive header name (last write wins).
+pub(super) fn normalize_custom_headers(
+    headers: Vec<ProviderCustomHeader>,
+) -> Vec<ProviderCustomHeader> {
+    let mut by_name: Vec<ProviderCustomHeader> = Vec::new();
+    for header in headers {
+        let name = header.name.trim().to_string();
+        if name.is_empty() {
+            continue;
+        }
+        let value = header.value.trim().to_string();
+        let lower = name.to_ascii_lowercase();
+        if let Some(existing) = by_name
+            .iter_mut()
+            .find(|h| h.name.to_ascii_lowercase() == lower)
+        {
+            existing.value = value;
+        } else {
+            by_name.push(ProviderCustomHeader { name, value });
+        }
+    }
+    by_name
 }

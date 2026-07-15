@@ -74,6 +74,7 @@ describe("pages/providers/providerDuplicate", () => {
       source_provider_id: null,
       bridge_type: null,
       stream_idle_timeout_seconds: null,
+      custom_headers: [],
     });
     expect(duplicated.base_urls).toEqual(["https://a.example.com", "https://b.example.com"]);
     expect(duplicated.tags).toEqual(["tag-a", "tag-b"]);

@@ -31,6 +31,7 @@ pub(crate) struct ProviderUpsertInput {
     pub bridge_type: Option<String>,
     pub stream_idle_timeout_seconds: Option<u32>,
     pub extension_values: Option<Vec<providers::ProviderExtensionValuesInput>>,
+    pub custom_headers: Option<Vec<providers::ProviderCustomHeader>>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -151,6 +152,7 @@ pub(crate) async fn provider_upsert(
         bridge_type,
         stream_idle_timeout_seconds,
         extension_values,
+        custom_headers,
     } = input;
 
     let is_create = provider_id.is_none();
@@ -198,6 +200,7 @@ pub(crate) async fn provider_upsert(
                 bridge_type,
                 stream_idle_timeout_seconds,
                 extension_values,
+                custom_headers,
             },
         )?;
 
@@ -294,6 +297,7 @@ pub(crate) async fn provider_duplicate(
                 bridge_type: source.bridge_type.clone(),
                 stream_idle_timeout_seconds: source.stream_idle_timeout_seconds,
                 extension_values: None,
+                custom_headers: Some(source.custom_headers.clone()),
             },
         )
     })
@@ -523,6 +527,7 @@ mod tests {
     #[test]
     fn provider_runtime_reset_decision_handles_create_and_non_sensitive_edits() {
         let next = providers::ProviderSummary {
+            custom_headers: Vec::new(),
             id: 1,
             cli_key: "claude".to_string(),
             name: "Provider A".to_string(),
@@ -608,6 +613,7 @@ mod tests {
     #[test]
     fn provider_runtime_reset_decision_detects_sensitive_claude_changes() {
         let previous = providers::ProviderSummary {
+            custom_headers: Vec::new(),
             id: 1,
             cli_key: "claude".to_string(),
             name: "Provider A".to_string(),

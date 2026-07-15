@@ -61,7 +61,48 @@ pub(super) fn inject_auth<R: tauri::Runtime>(
         maybe_inject_codex_chatgpt_headers(headers, prepared.codex_chatgpt_account_id.as_deref());
     }
 
+    // Inject provider-configured custom headers last so they are not removed by
+    // the auth-header clearing above. These carry non-standard identity/auth
+    // headers some upstream gateways require (e.g. tenant/user identity).
+    inject_custom_headers(&prepared.custom_headers, headers);
+
     Ok(())
+}
+
+/// Header names the gateway manages itself; provider custom headers must not
+/// clobber transport framing or routing.
+fn is_protected_custom_header(name: &str) -> bool {
+    let lower = name.trim().to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "host" | "content-length" | "content-encoding" | "transfer-encoding" | "connection"
+    )
+}
+
+/// Apply provider-configured custom headers to the outgoing request. Invalid
+/// header names/values and protected transport headers are skipped rather than
+/// failing the request.
+fn inject_custom_headers(
+    custom_headers: &[crate::providers::ProviderCustomHeader],
+    headers: &mut HeaderMap,
+) {
+    use axum::http::header::{HeaderName, HeaderValue};
+
+    for header in custom_headers {
+        let name = header.name.trim();
+        if name.is_empty() || is_protected_custom_header(name) {
+            continue;
+        }
+        let Ok(header_name) = HeaderName::from_bytes(name.as_bytes()) else {
+            tracing::warn!(header = %name, "skipping provider custom header with invalid name");
+            continue;
+        };
+        let Ok(header_value) = HeaderValue::from_str(&header.value) else {
+            tracing::warn!(header = %name, "skipping provider custom header with invalid value");
+            continue;
+        };
+        headers.insert(header_name, header_value);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -190,5 +231,49 @@ fn inject_standard_auth<R: tauri::Runtime>(
                 }),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod custom_header_tests {
+    use super::{inject_custom_headers, is_protected_custom_header};
+    use crate::providers::ProviderCustomHeader;
+    use axum::http::HeaderMap;
+
+    fn header(name: &str, value: &str) -> ProviderCustomHeader {
+        ProviderCustomHeader {
+            name: name.to_string(),
+            value: value.to_string(),
+        }
+    }
+
+    #[test]
+    fn injects_valid_headers() {
+        let mut headers = HeaderMap::new();
+        inject_custom_headers(
+            &[header("X-User-Id", "42"), header("X-Domain", "corp")],
+            &mut headers,
+        );
+        assert_eq!(headers.get("x-user-id").unwrap(), "42");
+        assert_eq!(headers.get("x-domain").unwrap(), "corp");
+    }
+
+    #[test]
+    fn skips_protected_transport_headers() {
+        assert!(is_protected_custom_header("Host"));
+        assert!(is_protected_custom_header("content-length"));
+        let mut headers = HeaderMap::new();
+        inject_custom_headers(&[header("Host", "evil.example.com")], &mut headers);
+        assert!(headers.get("host").is_none());
+    }
+
+    #[test]
+    fn skips_invalid_names_and_values() {
+        let mut headers = HeaderMap::new();
+        inject_custom_headers(
+            &[header("bad name", "v"), header("X-Valid", "ok\ninjected")],
+            &mut headers,
+        );
+        assert!(headers.is_empty());
     }
 }

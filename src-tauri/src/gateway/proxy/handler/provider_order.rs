@@ -74,6 +74,7 @@ mod tests {
 
     fn provider(id: i64) -> providers::ProviderForGateway {
         providers::ProviderForGateway {
+            custom_headers: Vec::new(),
             id,
             name: format!("p{id}"),
             base_urls: vec!["https://example.com".to_string()],

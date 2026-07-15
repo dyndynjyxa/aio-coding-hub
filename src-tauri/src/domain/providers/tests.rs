@@ -414,6 +414,7 @@ fn claude_models_from_json_empty_object() {
 
 fn default_provider_params(name: &str) -> ProviderUpsertParams {
     ProviderUpsertParams {
+        custom_headers: None,
         provider_id: None,
         cli_key: "claude".to_string(),
         name: name.to_string(),
@@ -576,6 +577,7 @@ fn provider_duplicate_copies_extension_values() {
             bridge_type: source_summary.bridge_type.clone(),
             stream_idle_timeout_seconds: source_summary.stream_idle_timeout_seconds,
             extension_values: None,
+            custom_headers: None,
         },
     )
     .expect("duplicate provider");
@@ -830,6 +832,7 @@ fn create_oauth_provider_for_cas_test(db: &crate::db::Db, name: &str) -> i64 {
     upsert(
         db,
         ProviderUpsertParams {
+            custom_headers: None,
             provider_id: None,
             cli_key: "codex".to_string(),
             name: name.to_string(),
@@ -977,4 +980,57 @@ fn update_oauth_tokens_cas_allows_initial_null_then_blocks_repeat_null() {
     let after = get_oauth_details(&db, provider_id).expect("get oauth details after null cas");
     assert_eq!(after.oauth_access_token, "null_first_access");
     assert!(after.oauth_last_refreshed_at.is_some());
+}
+
+// -- custom headers normalization / decode --
+
+#[test]
+fn custom_headers_normalize_trims_and_drops_empty_names() {
+    let out = super::types::normalize_custom_headers(vec![
+        ProviderCustomHeader {
+            name: "  X-User-Id  ".to_string(),
+            value: "  42  ".to_string(),
+        },
+        ProviderCustomHeader {
+            name: "   ".to_string(),
+            value: "ignored".to_string(),
+        },
+    ]);
+    assert_eq!(
+        out,
+        vec![ProviderCustomHeader {
+            name: "X-User-Id".to_string(),
+            value: "42".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn custom_headers_normalize_dedupes_case_insensitive_last_value_wins() {
+    let out = super::types::normalize_custom_headers(vec![
+        ProviderCustomHeader {
+            name: "X-User-Id".to_string(),
+            value: "first".to_string(),
+        },
+        ProviderCustomHeader {
+            name: "x-user-id".to_string(),
+            value: "second".to_string(),
+        },
+    ]);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].value, "second");
+}
+
+#[test]
+fn custom_headers_from_json_tolerates_malformed_input() {
+    assert!(super::types::custom_headers_from_json("not json").is_empty());
+    assert!(super::types::custom_headers_from_json("{}").is_empty());
+    let parsed = super::types::custom_headers_from_json(r#"[{"name":"X-Domain","value":"corp"}]"#);
+    assert_eq!(
+        parsed,
+        vec![ProviderCustomHeader {
+            name: "X-Domain".to_string(),
+            value: "corp".to_string(),
+        }]
+    );
 }

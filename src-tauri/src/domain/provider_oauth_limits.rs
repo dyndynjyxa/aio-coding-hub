@@ -372,6 +372,7 @@ INSERT INTO provider_oauth_limit_snapshots(
         crate::providers::upsert(
             db,
             crate::providers::ProviderUpsertParams {
+                custom_headers: None,
                 provider_id: None,
                 cli_key: "codex".to_string(),
                 name: name.to_string(),

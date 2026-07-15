@@ -13,6 +13,7 @@ import { ApiKeySection } from "./ApiKeySection";
 import { LimitsSection } from "./LimitsSection";
 import { ClaudeModelSection } from "./ClaudeModelSection";
 import { ContributionSlot } from "../../plugins/contributions/ContributionSlot";
+import { CustomHeadersField } from "./CustomHeadersField";
 
 type ProviderEditorDialogBaseProps = {
   open: boolean;
@@ -111,6 +112,12 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
             disabled={f.saving}
           />
         </FormField>
+
+        <CustomHeadersField
+          headers={f.customHeaders}
+          setHeaders={f.setCustomHeaders}
+          saving={f.saving}
+        />
 
         <LimitsSection form={f} />
         <ClaudeModelSection form={f} />
