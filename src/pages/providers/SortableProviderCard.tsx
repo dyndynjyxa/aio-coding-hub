@@ -196,7 +196,7 @@ const ProviderCard = memo(function ProviderCard({
   const hasLimits = limitChips.length > 0;
 
   const circuitState = useMemo(() => getGatewayCircuitDerivedState(circuit), [circuit]);
-  const { isUnavailable, unavailableUntil } = circuitState;
+  const { displayState, isUnavailable, unavailableUntil } = circuitState;
   const { isOAuth, isCx2cc, isCx2ccGateway } = getProviderTypeInfo(provider);
   const [apiKeyDetailsVisible, setApiKeyDetailsVisible] = useState(false);
   const [limitsRefreshing, setLimitsRefreshing] = useState(false);
@@ -219,6 +219,31 @@ const ProviderCard = memo(function ProviderCard({
     unavailableUntil != null ? Math.max(0, unavailableUntil - nowUnix) : null;
   const unavailableCountdown =
     unavailableRemaining != null ? formatCountdownSeconds(unavailableRemaining) : null;
+  // 四态徽章：open 红“熔断”、cooldown 中性“冷却中”（正名，不再误称熔断）、
+  // half_open 琥珀“试探恢复中”（无倒计时）、healthy 不渲染。
+  const circuitBadge =
+    displayState === "open"
+      ? {
+          label: `熔断${unavailableCountdown ? ` ${unavailableCountdown}` : ""}`,
+          title:
+            unavailableUntil != null ? `熔断至 ${formatUnixSeconds(unavailableUntil)}` : "熔断",
+          className: "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400",
+        }
+      : displayState === "cooldown"
+        ? {
+            label: `冷却中${unavailableCountdown ? ` ${unavailableCountdown}` : ""}`,
+            title:
+              unavailableUntil != null ? `冷却至 ${formatUnixSeconds(unavailableUntil)}` : "冷却中",
+            className:
+              "bg-secondary text-muted-foreground dark:bg-secondary dark:text-secondary-foreground",
+          }
+        : displayState === "half_open"
+          ? {
+              label: "试探恢复中",
+              title: "试探恢复中（半开试探，成功后自动恢复）",
+              className: "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+            }
+          : null;
   const cx2ccSourceName =
     sourceProviderName ??
     sourceProvider?.name ??
@@ -282,16 +307,15 @@ const ProviderCard = memo(function ProviderCard({
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-2">
               <div className="truncate text-base font-semibold">{provider.name}</div>
-              {isUnavailable ? (
+              {circuitBadge ? (
                 <span
-                  className="shrink-0 rounded-full bg-rose-50 px-2 py-0.5 font-mono text-[10px] text-rose-700 dark:bg-rose-900/30 dark:text-rose-400"
-                  title={
-                    unavailableUntil != null
-                      ? `熔断至 ${formatUnixSeconds(unavailableUntil)}`
-                      : "熔断"
-                  }
+                  className={cn(
+                    "shrink-0 rounded-full px-2 py-0.5 font-mono text-[10px]",
+                    circuitBadge.className
+                  )}
+                  title={circuitBadge.title}
                 >
-                  熔断{unavailableCountdown ? ` ${unavailableCountdown}` : ""}
+                  {circuitBadge.label}
                 </span>
               ) : null}
             </div>
@@ -469,7 +493,8 @@ const ProviderCard = memo(function ProviderCard({
             className="flex flex-col items-end gap-2"
           >
             <div className="flex flex-wrap items-center justify-end gap-2">
-              {isUnavailable ? (
+              {displayState !== "healthy" ? (
+                // 半开态语义：跳过试探直接恢复。
                 <Button
                   onClick={() => onResetCircuit(provider)}
                   variant="secondary"

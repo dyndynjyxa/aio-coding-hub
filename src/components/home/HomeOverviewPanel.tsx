@@ -12,7 +12,7 @@ import {
   type SetStateAction,
 } from "react";
 import { useNowUnix } from "../../hooks/useNowUnix";
-import type { OpenCircuitRow } from "../ProviderCircuitBadge";
+import { CIRCUIT_ROW_STATUS, type OpenCircuitRow } from "../ProviderCircuitBadge";
 import type { GatewayActiveSession } from "../../services/gateway/gateway";
 import { readHomeOverviewLogsPrimaryLayoutFromStorage } from "../../services/home/homeOverviewLayout";
 import {
@@ -65,18 +65,21 @@ const PREVIEW_CIRCUITS: OpenCircuitRow[] = [
     cli_key: "claude",
     provider_id: 10001,
     provider_name: "Claude Main",
+    displayState: "open",
     open_until: Math.floor(Date.now() / 1000) + 12 * 60,
   },
   {
     cli_key: "codex",
     provider_id: 10002,
     provider_name: "Codex Fallback",
+    displayState: "cooldown",
     open_until: Math.floor(Date.now() / 1000) + 5 * 60,
   },
   {
     cli_key: "gemini",
     provider_id: 10003,
     provider_name: "Gemini Mirror",
+    displayState: "half_open",
     open_until: null,
   },
 ];
@@ -302,10 +305,14 @@ function CircuitProvidersPanel({
     <div className="h-full overflow-y-auto pr-1 scrollbar-overlay">
       <div className="space-y-3">
         {rows.map((row) => {
+          const status = CIRCUIT_ROW_STATUS[row.displayState];
+          // half_open 无 until 语义，不渲染倒计时。
           const remaining =
-            row.open_until != null && Number.isFinite(row.open_until)
+            row.displayState !== "half_open" &&
+            row.open_until != null &&
+            Number.isFinite(row.open_until)
               ? formatCountdownSeconds(row.open_until - nowUnix)
-              : "—";
+              : null;
           const isResetting = resettingProviderIds.has(row.provider_id);
 
           return (
@@ -325,7 +332,12 @@ function CircuitProvidersPanel({
                   {row.provider_name || "未知"}
                 </div>
               </div>
-              <div className="shrink-0 font-mono text-xs text-muted-foreground">{remaining}</div>
+              <div className="shrink-0 text-xs">
+                <span className={`font-medium ${status.className}`}>{status.label}</span>
+                {remaining != null ? (
+                  <span className="ml-1 font-mono text-muted-foreground">{remaining}</span>
+                ) : null}
+              </div>
               <Button
                 variant="secondary"
                 size="sm"

@@ -14,10 +14,14 @@ import {
   type GatewayProviderCircuitStatus,
 } from "../services/gateway/gateway";
 import type { CliKey } from "../services/providers/providers";
+import { normalizeCircuitState } from "../services/gateway/circuitState";
 import { useDocumentVisibility } from "../hooks/useDocumentVisibility";
 import { gatewayKeys } from "./keys";
 
+export type CircuitDisplayState = "healthy" | "open" | "cooldown" | "half_open";
+
 export type GatewayCircuitDerivedState = {
+  displayState: CircuitDisplayState;
   isOpen: boolean;
   isUnavailable: boolean;
   unavailableUntil: number | null;
@@ -29,6 +33,9 @@ export type GatewayCircuitDerivedRow = GatewayCircuitDerivedState & {
 
 export type GatewayCircuitRowsSummary = {
   byProviderId: Record<number, GatewayProviderCircuitStatus>;
+  /** 全部非健康行（open / cooldown / half_open），供展示层按四态渲染。 */
+  attentionRows: GatewayCircuitDerivedRow[];
+  /** 仅 open / cooldown 行（半开不算不可用），存量语义不变。 */
   unavailableRows: GatewayCircuitDerivedRow[];
   hasUnavailable: boolean;
   hasUnavailableWithoutUntil: boolean;
@@ -42,10 +49,10 @@ function normalizeGatewayCircuitUnix(value: number | null | undefined) {
 export function getGatewayCircuitDerivedState(
   row: GatewayProviderCircuitStatus | null | undefined
 ): GatewayCircuitDerivedState {
-  // HALF_OPEN 表示已允许试探请求，不应继续作为“当前熔断/不可用”展示。
-  const isOpen = row?.state === "OPEN";
+  const state = normalizeCircuitState(row?.state);
+  const isOpen = state === "OPEN";
   const cooldownUntil = normalizeGatewayCircuitUnix(row?.cooldown_until);
-  const openUntil = row?.state === "OPEN" ? normalizeGatewayCircuitUnix(row?.open_until) : null;
+  const openUntil = isOpen ? normalizeGatewayCircuitUnix(row?.open_until) : null;
   const unavailableUntil =
     openUntil == null
       ? cooldownUntil
@@ -53,9 +60,21 @@ export function getGatewayCircuitDerivedState(
         ? openUntil
         : Math.max(openUntil, cooldownUntil);
 
+  // 判定优先级：open > cooldown > half_open > healthy。
+  // cooldown 沿用现状“非空即算”（依赖后端轮询清除过期值），不引入前端时钟比对。
+  // HALF_OPEN 表示已允许试探请求，不计入“当前熔断/不可用”（isUnavailable 存量语义不变）。
+  const displayState: CircuitDisplayState = isOpen
+    ? "open"
+    : cooldownUntil != null
+      ? "cooldown"
+      : state === "HALF_OPEN"
+        ? "half_open"
+        : "healthy";
+
   return {
+    displayState,
     isOpen,
-    isUnavailable: isOpen || cooldownUntil != null,
+    isUnavailable: displayState === "open" || displayState === "cooldown",
     unavailableUntil,
   };
 }
@@ -64,6 +83,7 @@ export function summarizeGatewayCircuitRows(
   rows: readonly GatewayProviderCircuitStatus[] | null | undefined
 ): GatewayCircuitRowsSummary {
   const byProviderId: Record<number, GatewayProviderCircuitStatus> = {};
+  const attentionRows: GatewayCircuitDerivedRow[] = [];
   const unavailableRows: GatewayCircuitDerivedRow[] = [];
   let earliestUnavailableUntil: number | null = null;
   let hasUnavailableWithoutUntil = false;
@@ -72,9 +92,14 @@ export function summarizeGatewayCircuitRows(
     byProviderId[row.provider_id] = row;
 
     const derived = getGatewayCircuitDerivedState(row);
+    if (derived.displayState === "healthy") continue;
+
+    const derivedRow = { row, ...derived };
+    attentionRows.push(derivedRow);
+
     if (!derived.isUnavailable) continue;
 
-    unavailableRows.push({ row, ...derived });
+    unavailableRows.push(derivedRow);
 
     if (derived.unavailableUntil == null) {
       hasUnavailableWithoutUntil = true;
@@ -88,6 +113,7 @@ export function summarizeGatewayCircuitRows(
 
   return {
     byProviderId,
+    attentionRows,
     unavailableRows,
     hasUnavailable: unavailableRows.length > 0,
     hasUnavailableWithoutUntil,

@@ -516,7 +516,7 @@ describe("pages/HomePage", () => {
     }
   });
 
-  it("does not count HALF_OPEN rows as open circuits", () => {
+  it("surfaces HALF_OPEN rows as attention circuits on the home overview", () => {
     setTauriRuntime();
 
     const client = createTestQueryClient();
@@ -545,7 +545,9 @@ describe("pages/HomePage", () => {
 
     renderWithProviders(client, <HomePage />);
 
-    expect(screen.getByText("open-circuits:0")).toBeInTheDocument();
+    // 半开行进入主页非健康行列表（displayState=half_open），
+    // 但不计入不可用（isUnavailable 语义见 useHomeCircuitState 测试）。
+    expect(screen.getByText("open-circuits:1")).toBeInTheDocument();
   });
 
   it("emits home overview visible trigger on mount and when returning to overview tab", async () => {
