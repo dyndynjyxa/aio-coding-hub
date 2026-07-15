@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.60.14](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.13...aio-coding-hub-v0.60.14) (2026-07-15)
+
+
+### Features
+
+* **grok:** 接入 Grok CLI 网关 ([#342](https://github.com/dyndynjyxa/aio-coding-hub/issues/342)) ([2deb7e8](https://github.com/dyndynjyxa/aio-coding-hub/commit/2deb7e82ca8672cefd994327990fda4d5ccd9419))
+
 ## [0.60.13](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.12...aio-coding-hub-v0.60.13) (2026-07-14)
 
 
