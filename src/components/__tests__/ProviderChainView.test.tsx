@@ -197,6 +197,45 @@ describe("components/ProviderChainView", () => {
     expect(screen.queryByText("熔断器:")).not.toBeInTheDocument();
   });
 
+  it("colors circuit badges by normalized uppercase backend states", () => {
+    render(
+      <ProviderChainView
+        attemptLogs={[]}
+        attemptLogsLoading={false}
+        attemptsJson={JSON.stringify([
+          {
+            provider_id: 1,
+            provider_name: "A",
+            base_url: "https://a",
+            outcome: "failed",
+            status: 500,
+            circuit_state_after: "OPEN",
+          },
+          {
+            provider_id: 2,
+            provider_name: "B",
+            base_url: "https://b",
+            outcome: "failed",
+            status: 500,
+            circuit_state_after: "HALF_OPEN",
+          },
+          {
+            provider_id: 3,
+            provider_name: "C",
+            base_url: "https://c",
+            outcome: "success",
+            status: 200,
+            circuit_state_after: "CLOSED",
+          },
+        ])}
+      />
+    );
+
+    expect(screen.getByText("OPEN").className).toContain("bg-rose-500");
+    expect(screen.getByText("HALF_OPEN").className).toContain("bg-amber-500");
+    expect(screen.getByText("CLOSED").className).toContain("bg-emerald-500");
+  });
+
   it("renders structured failures with circuit transitions and gateway labels", () => {
     render(
       <ProviderChainView

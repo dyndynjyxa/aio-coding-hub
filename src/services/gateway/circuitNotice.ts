@@ -12,6 +12,7 @@
 import { GatewayErrorCodes, getGatewayErrorShortLabel } from "../../constants/gatewayErrorCodes";
 import { logToConsole } from "../consoleLog";
 import { noticeSend, type NoticeLevel } from "../notification/notice";
+import { parseCircuitState, type CircuitState } from "./circuitState";
 import type { GatewayCircuitEvent } from "./gatewayEvents";
 
 // 兜底默认值与 Rust 侧一致：
@@ -28,13 +29,6 @@ export function setCircuitBreakerNoticeEnabled(value: boolean) {
 
 export function getCircuitBreakerNoticeEnabled(): boolean {
   return enabled;
-}
-
-type CircuitState = "CLOSED" | "OPEN" | "HALF_OPEN";
-
-function normalizeState(state: string | null | undefined): CircuitState | null {
-  if (state === "CLOSED" || state === "OPEN" || state === "HALF_OPEN") return state;
-  return null;
 }
 
 function stateText(state: CircuitState): string {
@@ -68,8 +62,8 @@ export type CircuitNoticeContent = {
  * 组装熔断通知内容（纯函数）。非跃迁（prev == next）或状态无法识别时返回 null。
  */
 export function buildCircuitNoticeContent(event: GatewayCircuitEvent): CircuitNoticeContent | null {
-  const prev = normalizeState(event.prev_state);
-  const next = normalizeState(event.next_state);
+  const prev = parseCircuitState(event.prev_state);
+  const next = parseCircuitState(event.next_state);
   if (prev == null || next == null || prev === next) return null;
 
   const provider = event.provider_name;

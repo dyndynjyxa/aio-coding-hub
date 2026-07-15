@@ -3,6 +3,7 @@ import { GATEWAY_EVENT_TEXT_LIMITS, gatewayEventNames } from "../../constants/ga
 import { computeOutputTokensPerSecond as computeOutputTokensPerSecondRaw } from "../../utils/formatters";
 import { logToConsole, shouldLogToConsole } from "../consoleLog";
 import { maybeSendCircuitBreakerNotice } from "./circuitNotice";
+import { parseCircuitState } from "./circuitState";
 import { subscribeGatewayEvent } from "./gatewayEventBus";
 import { ingestTraceAttempt, ingestTraceRequest, ingestTraceStart } from "./traceStore";
 import { ingestCacheAnomalyRequest, ingestCacheAnomalyRequestStart } from "./cacheAnomalyMonitor";
@@ -49,14 +50,8 @@ function normalizeLogLevel(level: unknown): "debug" | "info" | "warn" | "error" 
   return "info";
 }
 
-function normalizeCircuitState(state: string | null | undefined) {
-  if (!state) return null;
-  if (state === "OPEN" || state === "CLOSED" || state === "HALF_OPEN") return state;
-  return null;
-}
-
 function circuitStateText(state: string | null | undefined) {
-  const normalized = normalizeCircuitState(state);
+  const normalized = parseCircuitState(state);
   if (normalized === "OPEN") return "熔断";
   if (normalized === "HALF_OPEN") return "半开";
   if (normalized === "CLOSED") return "正常";
@@ -649,8 +644,8 @@ export async function listenGatewayEvents(): Promise<() => void> {
     // 状态跃迁时按开关发送系统通知（内部含 prev != next 与开关判断）。
     void maybeSendCircuitBreakerNotice(payload);
 
-    const prevNormalized = normalizeCircuitState(payload.prev_state);
-    const nextNormalized = normalizeCircuitState(payload.next_state);
+    const prevNormalized = parseCircuitState(payload.prev_state);
+    const nextNormalized = parseCircuitState(payload.next_state);
     const from = circuitStateText(prevNormalized);
     const to = circuitStateText(nextNormalized);
     const provider = payload.provider_name || "未知";

@@ -5,6 +5,7 @@ import { Globe, AlertTriangle, Zap, ChevronDown, ArrowRight } from "lucide-react
 import { getGatewayErrorShortLabel } from "../constants/gatewayErrorCodes";
 import { DisclosureSection } from "./home/DisclosureSection";
 import { parseAttemptsJson, type AttemptJsonEntry } from "../services/gateway/attemptsJson";
+import { normalizeCircuitState } from "../services/gateway/circuitState";
 import { formatCircuitRecovery } from "../utils/formatters";
 
 export type ProviderChainAttemptLog = {
@@ -513,14 +514,16 @@ function DecisionTags({ attempt }: { attempt: ProviderChainAttempt }) {
 
 function CircuitBadge({ attempt }: { attempt: ProviderChainAttempt }) {
   const state = attempt.circuit_state_after ?? attempt.circuit_state_before;
+  // 后端写入大写状态（"OPEN"/"HALF_OPEN"），配色比较必须经归一化。
+  const normalized = normalizeCircuitState(state);
   return (
     <>
       <span
         className={cn(
           "rounded-md px-2 py-0.5 text-xs font-bold text-white",
-          state === "open"
+          normalized === "OPEN"
             ? "bg-rose-500"
-            : state === "half_open"
+            : normalized === "HALF_OPEN"
               ? "bg-amber-500"
               : "bg-emerald-500"
         )}
