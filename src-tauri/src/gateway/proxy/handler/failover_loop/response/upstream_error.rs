@@ -175,7 +175,9 @@ fn should_scan_codex_previous_response_id_error(
     already_retried: bool,
     upstream_body: &[u8],
 ) -> bool {
-    cli_key == "codex"
+    // grok 与 codex 同走 OpenAI Responses API：failover 切换供应商后
+    // previous_response_id 在新供应商侧不存在，同样需要摘除后重试。
+    matches!(cli_key, "codex" | "grok")
         && !already_retried
         && matches!(
             status,
@@ -958,6 +960,24 @@ mod tests {
             reqwest::StatusCode::NOT_FOUND,
             false,
             body,
+        ));
+        assert!(should_scan_codex_previous_response_id_error(
+            "grok",
+            reqwest::StatusCode::BAD_REQUEST,
+            false,
+            body,
+        ));
+        assert!(!should_scan_codex_previous_response_id_error(
+            "grok",
+            reqwest::StatusCode::BAD_REQUEST,
+            true,
+            body,
+        ));
+        assert!(!should_scan_codex_previous_response_id_error(
+            "grok",
+            reqwest::StatusCode::BAD_REQUEST,
+            false,
+            br#"{"model":"grok-build"}"#,
         ));
         assert!(!should_scan_codex_previous_response_id_error(
             "claude",
