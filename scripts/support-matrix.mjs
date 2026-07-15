@@ -505,7 +505,10 @@ function checkPackageScripts() {
     throw new Error("package.json must expose check:support-matrix.");
   }
 
-  if (scripts["audit:deps"] !== "node scripts/check-pnpm-audit.mjs") {
+  if (
+    scripts["audit:deps"] !==
+    "node scripts/check-pnpm-audit.selftest.mjs && node scripts/check-pnpm-audit.mjs"
+  ) {
     throw new Error("package.json must expose a fail-close audit:deps script.");
   }
 }
