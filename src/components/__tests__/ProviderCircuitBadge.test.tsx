@@ -86,6 +86,11 @@ describe("components/ProviderCircuitBadge", () => {
     fireEvent.click(screen.getByRole("button", { name: "试探恢复 1" }));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
 
+    // 仅半开行时 popover 头部与分组不再称"熔断"，与触发器状态词一致。
+    expect(screen.getByText("试探恢复列表 (1)")).toBeInTheDocument();
+    expect(screen.queryByText(/个熔断/)).not.toBeInTheDocument();
+    expect(screen.getByText("1 个供应商")).toBeInTheDocument();
+
     const status = screen.getByText("试探恢复中");
     expect(status.className).toContain("amber");
     // 半开行无倒计时。

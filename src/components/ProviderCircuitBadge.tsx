@@ -112,7 +112,10 @@ export function ProviderCircuitBadge({
       contentClassName="w-[480px] overflow-hidden rounded-2xl border border-border bg-white dark:bg-secondary shadow-card"
     >
       <div className="border-b border-border px-4 py-3">
-        <span className="text-sm font-semibold text-foreground">熔断列表 ({count})</span>
+        <span className="text-sm font-semibold text-foreground">
+          {/* 仅半开行时不再称"熔断"，与触发器状态词保持一致。 */}
+          {unavailableCount > 0 ? `熔断列表 (${count})` : `试探恢复列表 (${count})`}
+        </span>
       </div>
       <div className="max-h-[400px] overflow-y-auto p-3">
         {visibleCliKeys.map((cliKey) => (
@@ -127,7 +130,7 @@ export function ProviderCircuitBadge({
                 {cliShortLabel(cliKey)}
               </span>
               <span className="text-xs text-muted-foreground">
-                {groupedByCli[cliKey].length} 个熔断
+                {groupedByCli[cliKey].length} 个供应商
               </span>
             </div>
             <div className="space-y-2">
