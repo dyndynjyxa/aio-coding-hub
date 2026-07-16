@@ -133,6 +133,23 @@ export function validateReferenceAddition(
   return null;
 }
 
+/** 剪贴板数据的结构化子集（测试可用普通对象构造，jsdom 无真 DataTransfer）。 */
+export type ClipboardImageSource = {
+  items?: ArrayLike<DataTransferItem>;
+  files?: ArrayLike<File>;
+} | null;
+
+/** 从剪贴板提取图片 File：优先 items（macOS 截图粘贴走这里），无命中再回退 files。 */
+export function extractClipboardImageFiles(data: ClipboardImageSource): File[] {
+  if (!data) return [];
+  const fromItems = Array.from(data.items ?? [])
+    .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file !== null);
+  if (fromItems.length > 0) return fromItems;
+  return Array.from(data.files ?? []).filter((file) => file.type.startsWith("image/"));
+}
+
 export function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -289,6 +306,19 @@ export function useImageGenController() {
       toast.error(formatUnknownError(err));
     }
   }, []);
+
+  // Ctrl+V 粘贴剪贴板图片 → 参考图。addReferenceFiles 为空依赖 useCallback（引用稳定），
+  // 监听器只在页面挂载期间存在一份；无图片时不拦截，普通文本粘贴不受影响。
+  useEffect(() => {
+    const onPaste = (event: ClipboardEvent) => {
+      const files = extractClipboardImageFiles(event.clipboardData);
+      if (files.length === 0) return;
+      event.preventDefault();
+      void addReferenceFiles(files);
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [addReferenceFiles]);
 
   const removeReferenceImage = useCallback((id: string) => {
     updateImageGenSession((prev) => {

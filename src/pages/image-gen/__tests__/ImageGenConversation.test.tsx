@@ -170,6 +170,48 @@ describe("pages/image-gen/ImageGenConversation", () => {
     expect(screen.getByRole("button", { name: "生成" })).toBeDisabled();
   });
 
+  it("highlights the drop zone on file drag over and clears on leave", () => {
+    render(<ImageGenConversation controller={makeController()} />);
+    const zone = screen.getByTestId("image-gen-drop-zone");
+
+    fireEvent.dragOver(zone, { dataTransfer: { types: ["Files"] } });
+    expect(zone.className).toContain("ring-1");
+
+    fireEvent.dragLeave(zone);
+    expect(zone.className).not.toContain("ring-1");
+  });
+
+  it("does not highlight when the drag carries no files", () => {
+    render(<ImageGenConversation controller={makeController()} />);
+    const zone = screen.getByTestId("image-gen-drop-zone");
+    fireEvent.dragOver(zone, { dataTransfer: { types: ["text/plain"] } });
+    expect(zone.className).not.toContain("ring-1");
+  });
+
+  it("forwards dropped image files to addReferenceFiles and clears the highlight", () => {
+    const controller = makeController();
+    render(<ImageGenConversation controller={controller} />);
+    const zone = screen.getByTestId("image-gen-drop-zone");
+    const image = new File(["x"], "drop.png", { type: "image/png" });
+    const text = new File(["x"], "note.txt", { type: "text/plain" });
+
+    fireEvent.dragOver(zone, { dataTransfer: { types: ["Files"] } });
+    fireEvent.drop(zone, { dataTransfer: { types: ["Files"], files: [image, text] } });
+
+    expect(controller.addReferenceFiles).toHaveBeenCalledWith([image]);
+    expect(zone.className).not.toContain("ring-1");
+  });
+
+  it("ignores drops without image files", () => {
+    const controller = makeController();
+    render(<ImageGenConversation controller={controller} />);
+    const zone = screen.getByTestId("image-gen-drop-zone");
+    const text = new File(["x"], "note.txt", { type: "text/plain" });
+
+    fireEvent.drop(zone, { dataTransfer: { types: ["Files"], files: [text] } });
+    expect(controller.addReferenceFiles).not.toHaveBeenCalled();
+  });
+
   it("forwards selected files to addReferenceFiles", () => {
     const controller = makeController();
     render(<ImageGenConversation controller={controller} />);

@@ -1,4 +1,4 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, fireEvent, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { gptImageAdapter } from "../../../services/image-gen/gptImageAdapter";
@@ -13,6 +13,7 @@ import { getImageGenSession, resetImageGenSessionForTests } from "../imageGenSes
 import {
   base64ToBlob,
   DEFAULT_IMAGE_GEN_PARAMS,
+  extractClipboardImageFiles,
   readParamsFromStorage,
   useImageGenController,
   validateReferenceAddition,
@@ -588,6 +589,80 @@ describe("pages/image-gen/useImageGenController", () => {
       result.current.closePreview();
     });
     expect(result.current.preview).toBeNull();
+  });
+
+  it("adds a pasted clipboard image as a reference image (items path, macOS 截图)", async () => {
+    const file = makePngFile("paste.png");
+    const { result } = await renderController();
+    let notPrevented = true;
+    act(() => {
+      // jsdom 无真 DataTransfer，clipboardData 用普通对象构造即可。
+      notPrevented = fireEvent.paste(document, {
+        clipboardData: {
+          items: [{ kind: "file", type: "image/png", getAsFile: () => file }],
+          files: [],
+        },
+      });
+    });
+    expect(notPrevented).toBe(false); // 含图片时 preventDefault
+    await waitFor(() => {
+      expect(result.current.referenceImages).toHaveLength(1);
+    });
+    expect(result.current.referenceImages[0].mime).toBe("image/png");
+  });
+
+  it("falls back to clipboard files when items carry no image", async () => {
+    const file = makePngFile("paste-file.png");
+    const { result } = await renderController();
+    act(() => {
+      fireEvent.paste(document, { clipboardData: { items: [], files: [file] } });
+    });
+    await waitFor(() => {
+      expect(result.current.referenceImages).toHaveLength(1);
+    });
+  });
+
+  it("ignores text-only paste without intercepting the event", async () => {
+    const { result } = await renderController();
+    let notPrevented = false;
+    act(() => {
+      notPrevented = fireEvent.paste(document, {
+        clipboardData: {
+          items: [{ kind: "string", type: "text/plain", getAsFile: () => null }],
+          files: [],
+        },
+      });
+    });
+    expect(notPrevented).toBe(true); // 无图片不拦截，文本粘贴不受影响
+    expect(result.current.referenceImages).toHaveLength(0);
+  });
+
+  it("removes the paste listener on unmount", async () => {
+    const file = makePngFile("late.png");
+    const { unmount } = await renderController();
+    unmount();
+    let notPrevented = false;
+    act(() => {
+      notPrevented = fireEvent.paste(document, {
+        clipboardData: {
+          items: [{ kind: "file", type: "image/png", getAsFile: () => file }],
+          files: [],
+        },
+      });
+    });
+    // 监听器已摘除：事件未被拦截，模块 store 不变。
+    expect(notPrevented).toBe(true);
+    expect(getImageGenSession().referenceImages).toHaveLength(0);
+  });
+
+  it("extractClipboardImageFiles handles null and non-image data", () => {
+    expect(extractClipboardImageFiles(null)).toEqual([]);
+    expect(extractClipboardImageFiles({})).toEqual([]);
+    expect(
+      extractClipboardImageFiles({
+        files: [new File(["x"], "a.txt", { type: "text/plain" })],
+      })
+    ).toEqual([]);
   });
 
   it("stepPreview is a no-op when no preview is open", async () => {

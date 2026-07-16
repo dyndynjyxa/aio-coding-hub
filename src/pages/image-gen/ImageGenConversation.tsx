@@ -1,7 +1,8 @@
 // Usage: 生图页右栏哑组件：消息流（用户/助手）+ 底部输入区。所有状态与逻辑来自 useImageGenController。
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Download, ImagePlus, X } from "lucide-react";
+import { cn } from "../../utils/cn";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";
@@ -115,6 +116,8 @@ export function ImageGenConversation({ controller, className }: ImageGenConversa
     stepPreview,
   } = controller;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // 拖拽悬停高亮：纯视图局部态。
+  const [isDragOver, setIsDragOver] = useState(false);
 
   return (
     <Card padding="sm" className={className}>
@@ -170,7 +173,26 @@ export function ImageGenConversation({ controller, className }: ImageGenConversa
           )}
         </div>
 
-        <div className="space-y-2 border-t border-line pt-3">
+        <div
+          data-testid="image-gen-drop-zone"
+          className={cn(
+            "space-y-2 border-t border-line pt-3",
+            isDragOver && "rounded-lg ring-1 ring-primary"
+          )}
+          onDragOver={(event) => {
+            event.preventDefault();
+            if (event.dataTransfer.types.includes("Files")) setIsDragOver(true);
+          }}
+          onDragLeave={() => setIsDragOver(false)}
+          onDrop={(event) => {
+            event.preventDefault();
+            setIsDragOver(false);
+            const files = Array.from(event.dataTransfer.files).filter((file) =>
+              file.type.startsWith("image/")
+            );
+            if (files.length > 0) void addReferenceFiles(files);
+          }}
+        >
           {referenceImages.length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {referenceImages.map((image, index) => (
