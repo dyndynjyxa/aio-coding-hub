@@ -26,6 +26,10 @@ export function makeController(overrides: Partial<ImageGenController> = {}): Ima
     retry: vi.fn(async () => {}),
     setAsReference: vi.fn(async () => {}),
     downloadImage: vi.fn(async () => {}),
+    preview: null,
+    openPreview: vi.fn(),
+    closePreview: vi.fn(),
+    stepPreview: vi.fn(),
     ...overrides,
   };
 }

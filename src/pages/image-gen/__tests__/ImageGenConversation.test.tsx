@@ -126,6 +126,24 @@ describe("pages/image-gen/ImageGenConversation", () => {
     expect(screen.queryByText(/tokens：/)).not.toBeInTheDocument();
   });
 
+  it("opens the preview when a generated image is clicked", () => {
+    const controller = makeController({
+      messages: [assistantMessage({ images: [makeImage()] })],
+    });
+    render(<ImageGenConversation controller={controller} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "预览生成图片 1" }));
+    expect(controller.openPreview).toHaveBeenCalledWith(["blob:generated-1"], 0);
+  });
+
+  it("renders the lightbox when a preview is active", () => {
+    const controller = makeController({
+      preview: { urls: ["blob:generated-1"], index: 0 },
+    });
+    render(<ImageGenConversation controller={controller} />);
+    expect(screen.getByAltText("预览图片 1")).toHaveAttribute("src", "blob:generated-1");
+  });
+
   it("lists pending reference images and removes one", () => {
     const controller = makeController({ referenceImages: [referenceImage()] });
     render(<ImageGenConversation controller={controller} />);

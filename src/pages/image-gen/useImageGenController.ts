@@ -72,6 +72,11 @@ export type ImageGenAssistantMessage = {
 
 export type ImageGenMessage = ImageGenUserMessage | ImageGenAssistantMessage;
 
+export type ImageGenPreview = {
+  urls: string[];
+  index: number;
+};
+
 export type ImageGenReferenceImage = {
   id: string;
   mime: string;
@@ -169,6 +174,20 @@ export function useImageGenController() {
   const [prompt, setPrompt] = useState("");
   const [referenceImages, setReferenceImages] = useState<ImageGenReferenceImage[]>([]);
   const [generating, setGenerating] = useState(false);
+
+  // 点击预览：同组 objectURL + 当前下标；null = 关闭。
+  const [preview, setPreview] = useState<ImageGenPreview | null>(null);
+  const openPreview = useCallback((urls: string[], index: number) => {
+    setPreview({ urls, index });
+  }, []);
+  const closePreview = useCallback(() => setPreview(null), []);
+  const stepPreview = useCallback((delta: number) => {
+    setPreview((prev) => {
+      if (!prev) return prev;
+      const index = (prev.index + delta + prev.urls.length) % prev.urls.length;
+      return { ...prev, index };
+    });
+  }, []);
 
   // objectURL 生命周期：统一登记，卸载时全量 revoke。
   const createdUrlsRef = useRef<Set<string>>(new Set());
@@ -454,6 +473,11 @@ export function useImageGenController() {
     retry,
     setAsReference,
     downloadImage,
+    // 点击预览
+    preview,
+    openPreview,
+    closePreview,
+    stepPreview,
   };
 }
 

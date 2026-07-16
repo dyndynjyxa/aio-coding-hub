@@ -7,6 +7,7 @@ import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";
 import { Spinner } from "../../ui/Spinner";
 import { Textarea } from "../../ui/Textarea";
+import { ImageGenLightbox } from "./ImageGenLightbox";
 import type { ImageGenUsage } from "../../services/image-gen/types";
 import type {
   ImageGenAssistantMessage,
@@ -32,11 +33,13 @@ function AssistantMessageView({
   onRetry,
   onDownload,
   onUseAsReference,
+  onPreview,
 }: {
   message: ImageGenAssistantMessage;
   onRetry: (id: string) => void;
   onDownload: (image: ImageGenGeneratedImage) => void;
   onUseAsReference: (image: ImageGenGeneratedImage) => void;
+  onPreview: (index: number) => void;
 }) {
   if (message.status === "loading") {
     return (
@@ -63,11 +66,18 @@ function AssistantMessageView({
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {message.images.map((image, index) => (
           <div key={image.objectUrl} className="space-y-1.5">
-            <img
-              src={image.objectUrl}
-              alt={`生成图片 ${index + 1}`}
-              className="w-full rounded-lg border border-line"
-            />
+            <button
+              type="button"
+              aria-label={`预览生成图片 ${index + 1}`}
+              className="block w-full cursor-zoom-in"
+              onClick={() => onPreview(index)}
+            >
+              <img
+                src={image.objectUrl}
+                alt={`生成图片 ${index + 1}`}
+                className="w-full rounded-lg border border-line"
+              />
+            </button>
             <div className="flex flex-wrap gap-2">
               <Button size="sm" onClick={() => onDownload(image)}>
                 <Download className="h-3.5 w-3.5" />
@@ -100,6 +110,10 @@ export function ImageGenConversation({ controller, className }: ImageGenConversa
     retry,
     downloadImage,
     setAsReference,
+    preview,
+    openPreview,
+    closePreview,
+    stepPreview,
   } = controller;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -143,6 +157,12 @@ export function ImageGenConversation({ controller, className }: ImageGenConversa
                     }}
                     onUseAsReference={(image) => {
                       void setAsReference(image);
+                    }}
+                    onPreview={(index) => {
+                      openPreview(
+                        message.images.map((image) => image.objectUrl),
+                        index
+                      );
                     }}
                   />
                 </div>
@@ -211,6 +231,7 @@ export function ImageGenConversation({ controller, className }: ImageGenConversa
           </div>
         </div>
       </div>
+      <ImageGenLightbox preview={preview} onClose={closePreview} onStep={stepPreview} />
     </Card>
   );
 }

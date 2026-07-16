@@ -434,4 +434,36 @@ describe("pages/image-gen/useImageGenController", () => {
     unmount();
     expect(URL.revokeObjectURL).toHaveBeenCalledWith(url);
   });
+
+  it("opens, steps (wrapping) and closes the preview", async () => {
+    const { result } = await renderController();
+
+    act(() => {
+      result.current.openPreview(["blob:a", "blob:b", "blob:c"], 2);
+    });
+    expect(result.current.preview).toEqual({ urls: ["blob:a", "blob:b", "blob:c"], index: 2 });
+
+    // 向后越界回绕到第一张，向前越界回绕到最后一张。
+    act(() => {
+      result.current.stepPreview(1);
+    });
+    expect(result.current.preview?.index).toBe(0);
+    act(() => {
+      result.current.stepPreview(-1);
+    });
+    expect(result.current.preview?.index).toBe(2);
+
+    act(() => {
+      result.current.closePreview();
+    });
+    expect(result.current.preview).toBeNull();
+  });
+
+  it("stepPreview is a no-op when no preview is open", async () => {
+    const { result } = await renderController();
+    act(() => {
+      result.current.stepPreview(1);
+    });
+    expect(result.current.preview).toBeNull();
+  });
 });
