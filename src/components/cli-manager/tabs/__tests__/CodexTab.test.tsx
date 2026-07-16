@@ -1089,6 +1089,8 @@ describe("components/cli-manager/tabs/CodexTab", () => {
         error: { message: "invalid toml", line: 2, column: 3 },
       })
       .mockResolvedValueOnce({ ok: true, error: null })
+      // 每次点击「保存」都会先同步校验一次；两次保存各消耗一次 mock
+      .mockResolvedValueOnce({ ok: true, error: null })
       .mockResolvedValueOnce({ ok: true, error: null });
 
     render(
