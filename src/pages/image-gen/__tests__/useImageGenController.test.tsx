@@ -14,11 +14,13 @@ import {
   base64ToBlob,
   DEFAULT_IMAGE_GEN_PARAMS,
   extractClipboardImageFiles,
+  filterTasks,
   readParamsFromStorage,
   useImageGenController,
   validateReferenceAddition,
-  type ImageGenAssistantMessage,
+  type ImageGenTask,
 } from "../useImageGenController";
+import { makeTask } from "./testUtils";
 
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
@@ -111,7 +113,7 @@ describe("pages/image-gen/useImageGenController", () => {
     expect(result.current.model).toBe("gpt-image-2");
   });
 
-  it("submits a text-to-image request and appends a done assistant message", async () => {
+  it("submits a text-to-image request as a single task that transitions to done", async () => {
     vi.mocked(gptImageAdapter.generate).mockResolvedValue({
       images: [{ mime: "image/png", b64: btoa("img") }],
       usage: { totalTokens: 42 },
@@ -134,12 +136,13 @@ describe("pages/image-gen/useImageGenController", () => {
         options: expect.objectContaining({ model: "gpt-image-2", quality: "auto" }),
       })
     );
-    expect(result.current.messages).toHaveLength(2);
-    expect(result.current.messages[0]).toMatchObject({ role: "user", prompt: "一只猫" });
-    const assistant = result.current.messages[1] as ImageGenAssistantMessage;
-    expect(assistant.status).toBe("done");
-    expect(assistant.images).toHaveLength(1);
-    expect(assistant.usage).toEqual({ totalTokens: 42 });
+    expect(result.current.tasks).toHaveLength(1);
+    const task = result.current.tasks[0];
+    expect(task).toMatchObject({ prompt: "一只猫", status: "done" });
+    expect(task.images).toHaveLength(1);
+    expect(task.usage).toEqual({ totalTokens: 42 });
+    expect(task.createdAt).toBe(task.startedAt);
+    expect(task.elapsedMs).toBeGreaterThanOrEqual(0);
     expect(result.current.prompt).toBe("");
   });
 
@@ -149,7 +152,7 @@ describe("pages/image-gen/useImageGenController", () => {
       await result.current.submit();
     });
     expect(gptImageAdapter.generate).not.toHaveBeenCalled();
-    expect(result.current.messages).toHaveLength(0);
+    expect(result.current.tasks).toHaveLength(0);
   });
 
   it("shows a readable error and retries with the request snapshot", async () => {
@@ -163,7 +166,7 @@ describe("pages/image-gen/useImageGenController", () => {
       await result.current.submit();
     });
 
-    const failed = result.current.messages[1] as ImageGenAssistantMessage;
+    const failed = result.current.tasks[0];
     expect(failed.status).toBe("error");
     expect(failed.error).toContain("HTTP 500: boom");
 
@@ -183,9 +186,240 @@ describe("pages/image-gen/useImageGenController", () => {
     const calls = vi.mocked(gptImageAdapter.generate).mock.calls;
     expect(calls).toHaveLength(2);
     expect(calls[1][0]).toBe(calls[0][0]);
-    const retried = result.current.messages[1] as ImageGenAssistantMessage;
+    const retried = result.current.tasks[0];
     expect(retried.status).toBe("done");
     expect(retried.error).toBeUndefined();
+  });
+
+  it("retry resets startedAt while keeping createdAt", async () => {
+    vi.mocked(gptImageAdapter.generate).mockRejectedValueOnce(new Error("boom"));
+    const { result } = await renderController();
+    act(() => {
+      result.current.setPrompt("失败");
+    });
+    await act(async () => {
+      await result.current.submit();
+    });
+    const failed = result.current.tasks[0];
+    const { createdAt, startedAt } = failed;
+
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(startedAt + 5000);
+    vi.mocked(gptImageAdapter.generate).mockResolvedValueOnce({
+      images: [{ mime: "image/png", b64: btoa("ok") }],
+    });
+    await act(async () => {
+      await result.current.retry(failed.id);
+    });
+    nowSpy.mockRestore();
+
+    const retried = result.current.tasks[0];
+    expect(retried.createdAt).toBe(createdAt);
+    expect(retried.startedAt).toBe(startedAt + 5000);
+    // Date.now 被固定：完成时刻 - startedAt = 0。
+    expect(retried.elapsedMs).toBe(0);
+    expect(retried.status).toBe("done");
+  });
+
+  it("deletes a done task and releases its object urls (refThumbs + images)", async () => {
+    vi.mocked(gptImageAdapter.generate).mockResolvedValue({
+      images: [{ mime: "image/png", b64: btoa("img") }],
+    });
+    const { result } = await renderController();
+    await act(async () => {
+      await result.current.addReferenceFiles([makePngFile()]);
+    });
+    const refUrl = result.current.referenceImages[0].objectUrl;
+    act(() => {
+      result.current.setPrompt("待删除");
+    });
+    await act(async () => {
+      await result.current.submit();
+    });
+    const task = result.current.tasks[0];
+    const generatedUrl = task.images[0].objectUrl;
+    expect(task.refThumbs).toEqual([refUrl]);
+
+    act(() => {
+      result.current.deleteTask(task.id);
+    });
+    expect(result.current.tasks).toHaveLength(0);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(refUrl);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(generatedUrl);
+  });
+
+  it("drops the in-flight result after the loading task is deleted (no resurrection, no leak)", async () => {
+    let resolveGen!: (value: ImageGenResult) => void;
+    vi.mocked(gptImageAdapter.generate).mockImplementation(
+      () =>
+        new Promise<ImageGenResult>((resolve) => {
+          resolveGen = resolve;
+        })
+    );
+    const { result } = await renderController();
+    act(() => {
+      result.current.setPrompt("删我");
+    });
+    await act(async () => {
+      void result.current.submit();
+    });
+    const taskId = result.current.tasks[0].id;
+
+    act(() => {
+      result.current.deleteTask(taskId);
+    });
+    expect(result.current.tasks).toHaveLength(0);
+    const urlsCreatedBefore = vi.mocked(URL.createObjectURL).mock.calls.length;
+
+    await act(async () => {
+      resolveGen({ images: [{ mime: "image/png", b64: btoa("late") }] });
+    });
+    // 任务不复活，且迟到结果未创建任何 objectURL（无泄漏）。
+    expect(getImageGenSession().tasks.some((task) => task.id === taskId)).toBe(false);
+    expect(vi.mocked(URL.createObjectURL).mock.calls.length).toBe(urlsCreatedBefore);
+  });
+
+  it("reuses a task config: prompt, params, model and rebuilt reference images", async () => {
+    vi.mocked(gptImageAdapter.generate).mockResolvedValue({
+      images: [{ mime: "image/png", b64: btoa("img") }],
+    });
+    const { result } = await renderController();
+
+    await act(async () => {
+      await result.current.addReferenceFiles([makePngFile()]);
+    });
+    const refB64 = result.current.referenceImages[0].b64;
+    act(() => {
+      result.current.updateParams({ n: 2, size: "1024x1024", quality: "high" });
+      result.current.setModel("gpt-image-2-2026-04-21");
+      result.current.setPrompt("原始提示词");
+    });
+    await act(async () => {
+      await result.current.submit();
+    });
+    const task = result.current.tasks[0];
+
+    // 改动面板与输入，证明复用回填的是快照值。
+    act(() => {
+      result.current.updateParams({ n: 9, size: "auto", quality: "low" });
+      result.current.setModel("other-model");
+      result.current.setPrompt("新草稿");
+    });
+
+    act(() => {
+      result.current.reuseTask(task.id);
+    });
+
+    expect(result.current.prompt).toBe("原始提示词");
+    expect(result.current.params).toMatchObject({ n: 2, size: "1024x1024", quality: "high" });
+    expect(result.current.model).toBe("gpt-image-2-2026-04-21");
+    expect(result.current.referenceImages).toHaveLength(1);
+    expect(result.current.referenceImages[0].b64).toBe(refB64);
+    expect(toast.success).toHaveBeenCalledWith("已复用配置");
+  });
+
+  it("reuseTask ignores unknown task ids", async () => {
+    const { result } = await renderController();
+    act(() => {
+      result.current.reuseTask("missing");
+    });
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("clears all tasks and releases every object url", async () => {
+    vi.mocked(gptImageAdapter.generate).mockResolvedValue({
+      images: [{ mime: "image/png", b64: btoa("img") }],
+    });
+    const { result } = await renderController();
+    act(() => {
+      result.current.setPrompt("第一张");
+    });
+    await act(async () => {
+      await result.current.submit();
+    });
+    act(() => {
+      result.current.setPrompt("第二张");
+    });
+    await act(async () => {
+      await result.current.submit();
+    });
+    const urls = result.current.tasks.flatMap((task) =>
+      task.images.map((image) => image.objectUrl)
+    );
+    expect(urls).toHaveLength(2);
+
+    act(() => {
+      result.current.clearTasks();
+    });
+    expect(result.current.tasks).toHaveLength(0);
+    for (const url of urls) {
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith(url);
+    }
+    expect(result.current.preview).toBeNull();
+    expect(toast.success).toHaveBeenCalledWith("已清空任务");
+  });
+
+  it("clears the stored connection config", async () => {
+    vi.mocked(imageGenConfigGet).mockResolvedValue({
+      adapterId: "gpt-image",
+      baseUrl: "https://api.example.com/v1",
+      model: "gpt-image-2",
+      apiKeyConfigured: true,
+    });
+    vi.mocked(imageGenConfigSet).mockResolvedValue(EMPTY_CONFIG);
+    const { result } = await renderController();
+    await waitFor(() => {
+      expect(result.current.apiKeyConfigured).toBe(true);
+    });
+
+    await act(async () => {
+      await result.current.clearConfig();
+    });
+
+    expect(imageGenConfigSet).toHaveBeenCalledWith("gpt-image", "", "", "");
+    expect(result.current.baseUrl).toBe("");
+    expect(result.current.model).toBe("gpt-image-2");
+    expect(result.current.apiKeyConfigured).toBe(false);
+    expect(toast.success).toHaveBeenCalledWith("生图配置已清空");
+  });
+
+  it("toasts when clearing config fails", async () => {
+    vi.mocked(imageGenConfigSet).mockRejectedValue(new Error("db"));
+    const { result } = await renderController();
+    await act(async () => {
+      await result.current.clearConfig();
+    });
+    expect(toast.error).toHaveBeenCalledWith("清空生图配置失败：请查看控制台日志");
+    expect(result.current.savingConfig).toBe(false);
+  });
+
+  it("opens and closes the task detail, deriving the task from the store", async () => {
+    vi.mocked(gptImageAdapter.generate).mockResolvedValue({
+      images: [{ mime: "image/png", b64: btoa("img") }],
+    });
+    const { result } = await renderController();
+    act(() => {
+      result.current.setPrompt("详情");
+    });
+    await act(async () => {
+      await result.current.submit();
+    });
+    const task = result.current.tasks[0];
+
+    act(() => {
+      result.current.openDetail(task.id);
+    });
+    expect(result.current.detailTask?.id).toBe(task.id);
+
+    // 详情打开期间任务被删除 → detailTask 变 null（弹窗不渲染）。
+    act(() => {
+      result.current.deleteTask(task.id);
+    });
+    expect(result.current.detailTask).toBeNull();
+
+    act(() => {
+      result.current.closeDetail();
+    });
+    expect(result.current.detailTask).toBeNull();
   });
 
   it("rejects more than 16 reference images", async () => {
@@ -257,10 +491,10 @@ describe("pages/image-gen/useImageGenController", () => {
     await act(async () => {
       await result.current.submit();
     });
-    const assistant = result.current.messages[1] as ImageGenAssistantMessage;
+    const task = result.current.tasks[0];
 
     await act(async () => {
-      await result.current.setAsReference(assistant.images[0]);
+      await result.current.setAsReference(task.images[0]);
     });
     expect(result.current.referenceImages).toHaveLength(1);
     expect(result.current.referenceImages[0].mime).toBe("image/png");
@@ -429,6 +663,26 @@ describe("pages/image-gen/useImageGenController", () => {
     );
   });
 
+  it("filterTasks matches prompt case-insensitively, filters by status and returns newest first", () => {
+    const tasks: ImageGenTask[] = [
+      makeTask({ id: "t1", prompt: "A Cat", status: "done" }),
+      makeTask({ id: "t2", prompt: "a dog", status: "error" }),
+      makeTask({ id: "t3", prompt: "Cat and dog", status: "loading" }),
+    ];
+
+    // 空 query + all：全量，新的在前（store 追加序反转）。
+    expect(filterTasks(tasks, "", "all").map((task) => task.id)).toEqual(["t3", "t2", "t1"]);
+    // 大小写不敏感子串匹配。
+    expect(filterTasks(tasks, "CAT", "all").map((task) => task.id)).toEqual(["t3", "t1"]);
+    // 状态过滤。
+    expect(filterTasks(tasks, "", "error").map((task) => task.id)).toEqual(["t2"]);
+    // 组合：query + 状态。
+    expect(filterTasks(tasks, "cat", "loading").map((task) => task.id)).toEqual(["t3"]);
+    expect(filterTasks(tasks, "无命中", "all")).toEqual([]);
+    // 纯函数：不改写入参顺序。
+    expect(tasks.map((task) => task.id)).toEqual(["t1", "t2", "t3"]);
+  });
+
   it("keeps the session across unmount/remount without revoking urls (regression: 路由懒加载卸载)", async () => {
     vi.mocked(gptImageAdapter.generate).mockResolvedValue({
       images: [{ mime: "image/png", b64: btoa("img") }],
@@ -448,18 +702,16 @@ describe("pages/image-gen/useImageGenController", () => {
       result.current.setPrompt("草稿");
     });
     const refUrl = result.current.referenceImages[0].objectUrl;
-    const generatedUrl = (result.current.messages[1] as ImageGenAssistantMessage).images[0]
-      .objectUrl;
+    const generatedUrl = result.current.tasks[0].images[0].objectUrl;
 
     unmount();
     // 卸载不再全量 revoke（URL 生命周期为应用会话级）。
     expect(URL.revokeObjectURL).not.toHaveBeenCalled();
 
     const { result: restored } = await renderController();
-    expect(restored.current.messages).toHaveLength(2);
-    const assistant = restored.current.messages[1] as ImageGenAssistantMessage;
-    expect(assistant.status).toBe("done");
-    expect(assistant.images[0].objectUrl).toBe(generatedUrl);
+    expect(restored.current.tasks).toHaveLength(1);
+    expect(restored.current.tasks[0].status).toBe("done");
+    expect(restored.current.tasks[0].images[0].objectUrl).toBe(generatedUrl);
     expect(restored.current.prompt).toBe("草稿");
     expect(restored.current.referenceImages).toHaveLength(1);
     expect(restored.current.referenceImages[0].objectUrl).toBe(refUrl);
@@ -488,12 +740,12 @@ describe("pages/image-gen/useImageGenController", () => {
       void result.current.submit();
     });
 
-    // 两条 loading assistant 消息共存。
-    expect(result.current.messages).toHaveLength(4);
-    const firstId = result.current.messages[1].id;
-    const secondId = result.current.messages[3].id;
-    expect((result.current.messages[1] as ImageGenAssistantMessage).status).toBe("loading");
-    expect((result.current.messages[3] as ImageGenAssistantMessage).status).toBe("loading");
+    // 两条 loading 任务共存。
+    expect(result.current.tasks).toHaveLength(2);
+    const firstId = result.current.tasks[0].id;
+    const secondId = result.current.tasks[1].id;
+    expect(result.current.tasks[0].status).toBe("loading");
+    expect(result.current.tasks[1].status).toBe("loading");
     expect(deferreds).toHaveLength(2);
 
     // 先完成第二个：第一条仍 loading，互不阻塞。
@@ -503,8 +755,8 @@ describe("pages/image-gen/useImageGenController", () => {
         usage: { totalTokens: 2 },
       });
     });
-    let first = result.current.messages.find((m) => m.id === firstId) as ImageGenAssistantMessage;
-    let second = result.current.messages.find((m) => m.id === secondId) as ImageGenAssistantMessage;
+    let first = result.current.tasks.find((task) => task.id === firstId)!;
+    let second = result.current.tasks.find((task) => task.id === secondId)!;
     expect(first.status).toBe("loading");
     expect(second.status).toBe("done");
     expect(second.usage).toEqual({ totalTokens: 2 });
@@ -515,8 +767,8 @@ describe("pages/image-gen/useImageGenController", () => {
         usage: { totalTokens: 1 },
       });
     });
-    first = result.current.messages.find((m) => m.id === firstId) as ImageGenAssistantMessage;
-    second = result.current.messages.find((m) => m.id === secondId) as ImageGenAssistantMessage;
+    first = result.current.tasks.find((task) => task.id === firstId)!;
+    second = result.current.tasks.find((task) => task.id === secondId)!;
     expect(first.status).toBe("done");
     expect(first.usage).toEqual({ totalTokens: 1 });
     expect(second.usage).toEqual({ totalTokens: 2 });
@@ -543,12 +795,12 @@ describe("pages/image-gen/useImageGenController", () => {
     await act(async () => {
       resolveGen({ images: [{ mime: "image/png", b64: btoa("bg") }] });
     });
-    const assistant = getImageGenSession().messages[1] as ImageGenAssistantMessage;
-    expect(assistant.status).toBe("done");
-    expect(assistant.images).toHaveLength(1);
+    const task = getImageGenSession().tasks[0];
+    expect(task.status).toBe("done");
+    expect(task.images).toHaveLength(1);
   });
 
-  it("ignores retry while the target message is still loading", async () => {
+  it("ignores retry while the target task is still loading", async () => {
     vi.mocked(gptImageAdapter.generate).mockImplementation(
       () => new Promise<ImageGenResult>(() => {})
     );
@@ -559,10 +811,10 @@ describe("pages/image-gen/useImageGenController", () => {
     await act(async () => {
       void result.current.submit();
     });
-    const assistantId = result.current.messages[1].id;
+    const taskId = result.current.tasks[0].id;
 
     await act(async () => {
-      await result.current.retry(assistantId);
+      await result.current.retry(taskId);
     });
     expect(gptImageAdapter.generate).toHaveBeenCalledTimes(1);
   });

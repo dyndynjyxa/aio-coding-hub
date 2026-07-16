@@ -1,4 +1,4 @@
-// Usage: 生图页控制器。持有连接配置与生成参数；会话（消息流/参考图/prompt）经 imageGenSessionStore
+// Usage: 生图页控制器。持有连接配置与生成参数；会话（任务列表/参考图/prompt）经 imageGenSessionStore
 // 模块级保留（跨路由卸载），页面组件保持哑渲染。
 
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
@@ -61,24 +61,24 @@ export type ImageGenGeneratedImage = {
   blob: Blob;
 };
 
-export type ImageGenUserMessage = {
+export type ImageGenTaskStatus = "loading" | "done" | "error";
+
+/** 一次生成 = 一条任务（原 user/assistant 消息对合并）。 */
+export type ImageGenTask = {
   id: string;
-  role: "user";
   prompt: string;
   refThumbs: string[];
-};
-
-export type ImageGenAssistantMessage = {
-  id: string;
-  role: "assistant";
-  status: "loading" | "done" | "error";
+  request: GptImageRequest;
+  status: ImageGenTaskStatus;
   images: ImageGenGeneratedImage[];
   usage?: ImageGenUsage;
   error?: string;
-  request: GptImageRequest;
+  createdAt: number;
+  startedAt: number;
+  elapsedMs?: number;
 };
 
-export type ImageGenMessage = ImageGenUserMessage | ImageGenAssistantMessage;
+export type ImageGenStatusFilter = "all" | ImageGenTaskStatus;
 
 export type ImageGenPreview = {
   urls: string[];
@@ -115,6 +115,22 @@ export function writeParamsToStorage(params: ImageGenParams) {
   } catch {
     // 忽略持久化失败（仅影响默认值记忆）。
   }
+}
+
+/** 搜索/筛选纯函数：query 忽略大小写子串匹配 prompt；store 为追加序，反转后新的在前。 */
+export function filterTasks(
+  tasks: ImageGenTask[],
+  query: string,
+  filter: ImageGenStatusFilter
+): ImageGenTask[] {
+  const q = query.trim().toLowerCase();
+  return tasks
+    .filter(
+      (task) =>
+        (filter === "all" || task.status === filter) &&
+        (q === "" || task.prompt.toLowerCase().includes(q))
+    )
+    .reverse();
 }
 
 /** 校验追加参考图是否超限，超限时返回中文错误文案。 */
@@ -195,13 +211,26 @@ export function useImageGenController() {
   }, [params]);
 
   // 会话：模块级 store（跨路由卸载保留），页面组件只读快照。
-  const { messages, prompt, referenceImages } = useSyncExternalStore(
+  const { tasks, prompt, referenceImages } = useSyncExternalStore(
     subscribeImageGenSession,
     getImageGenSession
   );
   const setPrompt = useCallback((value: string) => {
     updateImageGenSession((prev) => ({ ...prev, prompt: value }));
   }, []);
+
+  // 搜索/筛选：组件态即可（不进 store）。
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<ImageGenStatusFilter>("all");
+
+  // 任务详情弹窗：持 id，派生 task（任务被删时自动关闭渲染）。
+  const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
+  const openDetail = useCallback((taskId: string) => setDetailTaskId(taskId), []);
+  const closeDetail = useCallback(() => setDetailTaskId(null), []);
+  const detailTask = useMemo(
+    () => (detailTaskId ? (tasks.find((task) => task.id === detailTaskId) ?? null) : null),
+    [detailTaskId, tasks]
+  );
 
   // 点击预览：同组 objectURL + 当前下标；null = 关闭。
   const [preview, setPreview] = useState<ImageGenPreview | null>(null);
@@ -271,6 +300,23 @@ export function useImageGenController() {
     }
   }, [apiKeyDraft, baseUrl, model]);
 
+  // 清空连接配置：base_url/model/api_key 全清（apiKey 传 "" = 后端清空语义）。
+  const clearConfig = useCallback(async () => {
+    setSavingConfig(true);
+    try {
+      await imageGenConfigSet(IMAGE_GEN_ADAPTER_ID, "", "", "");
+      setBaseUrl("");
+      setModel(DEFAULT_IMAGE_GEN_MODEL);
+      setApiKeyDraft("");
+      setApiKeyConfigured(false);
+      toast.success("生图配置已清空");
+    } catch {
+      toast.error("清空生图配置失败：请查看控制台日志");
+    } finally {
+      setSavingConfig(false);
+    }
+  }, []);
+
   const updateParams = useCallback((patch: Partial<ImageGenParams>) => {
     setParams((prev) => ({ ...prev, ...patch }));
   }, []);
@@ -329,41 +375,51 @@ export function useImageGenController() {
   }, []);
 
   // 完成回调写模块 store：页面卸载后任务继续完成，回来即见结果。
-  const runGeneration = useCallback(async (assistantId: string, request: GptImageRequest) => {
+  const runGeneration = useCallback(async (taskId: string, request: GptImageRequest) => {
     try {
       const result = await gptImageAdapter.generate(request);
+      // 任务在生成中被删除：丢弃结果。此处到下方 updater 全程同步，
+      // objectURL 尚未创建即返回，天然无泄漏。
+      if (!getImageGenSession().tasks.some((task) => task.id === taskId)) return;
       const images = result.images.map((image) => {
         const blob = base64ToBlob(image.b64, image.mime);
         return { blob, mime: image.mime, objectUrl: trackImageGenObjectUrl(blob) };
       });
       updateImageGenSession((prev) => ({
         ...prev,
-        messages: prev.messages.map((message) =>
-          message.id === assistantId && message.role === "assistant"
-            ? {
-                ...message,
-                status: "done" as const,
-                images,
-                usage: result.usage,
-                error: undefined,
-              }
-            : message
-        ),
+        tasks: prev.tasks.map((task) => {
+          if (task.id !== taskId) return task;
+          // 重试覆盖旧结果时释放被替换图片的 objectURL。
+          for (const old of task.images) releaseImageGenObjectUrl(old.objectUrl);
+          return {
+            ...task,
+            status: "done" as const,
+            images,
+            usage: result.usage,
+            error: undefined,
+            elapsedMs: Date.now() - task.startedAt,
+          };
+        }),
       }));
     } catch (err) {
       const error = formatUnknownError(err);
       updateImageGenSession((prev) => ({
         ...prev,
-        messages: prev.messages.map((message) =>
-          message.id === assistantId && message.role === "assistant"
-            ? { ...message, status: "error" as const, error }
-            : message
+        tasks: prev.tasks.map((task) =>
+          task.id === taskId
+            ? {
+                ...task,
+                status: "error" as const,
+                error,
+                elapsedMs: Date.now() - task.startedAt,
+              }
+            : task
         ),
       }));
     }
   }, []);
 
-  // 每次提交独立创建消息对并各自生成，互不阻塞。
+  // 每次提交独立创建任务并各自生成，互不阻塞。
   const submit = useCallback(async () => {
     const session = getImageGenSession();
     const trimmedPrompt = session.prompt.trim();
@@ -381,42 +437,103 @@ export function useImageGenController() {
         moderation: params.moderation,
       },
     };
-    const userMessage: ImageGenUserMessage = {
-      id: nextId(),
-      role: "user",
-      prompt: trimmedPrompt,
-      refThumbs: session.referenceImages.map((image) => image.objectUrl),
-    };
-    const assistantId = nextId();
+    const now = Date.now();
+    const taskId = nextId();
     updateImageGenSession((prev) => ({
-      messages: [
-        ...prev.messages,
-        userMessage,
-        { id: assistantId, role: "assistant", status: "loading", images: [], request },
+      tasks: [
+        ...prev.tasks,
+        {
+          id: taskId,
+          prompt: trimmedPrompt,
+          refThumbs: session.referenceImages.map((image) => image.objectUrl),
+          request,
+          status: "loading" as const,
+          images: [],
+          createdAt: now,
+          startedAt: now,
+        },
       ],
       referenceImages: [],
       prompt: "",
     }));
-    await runGeneration(assistantId, request);
+    await runGeneration(taskId, request);
   }, [model, params, runGeneration]);
 
-  // 重试使用消息内的参数快照，不读面板当前值；目标消息生成中时忽略。
+  // 重试使用任务内的参数快照，不读面板当前值；目标任务生成中时忽略。
+  // startedAt 重置计时，createdAt 保持创建时间不变。
   const retry = useCallback(
-    async (assistantId: string) => {
-      const message = getImageGenSession().messages.find((item) => item.id === assistantId);
-      if (!message || message.role !== "assistant" || message.status === "loading") return;
+    async (taskId: string) => {
+      const target = getImageGenSession().tasks.find((task) => task.id === taskId);
+      if (!target || target.status === "loading") return;
       updateImageGenSession((prev) => ({
         ...prev,
-        messages: prev.messages.map((item) =>
-          item.id === assistantId && item.role === "assistant"
-            ? { ...item, status: "loading" as const, error: undefined }
-            : item
+        tasks: prev.tasks.map((task) =>
+          task.id === taskId
+            ? { ...task, status: "loading" as const, error: undefined, startedAt: Date.now() }
+            : task
         ),
       }));
-      await runGeneration(assistantId, message.request);
+      await runGeneration(taskId, target.request);
     },
     [runGeneration]
   );
+
+  // 删除任务：释放全部 objectURL（refThumbs + 生成图）后移出 store；loading 中也允许删除，
+  // 在途完成回调会因任务不存在而丢弃结果（见 runGeneration）。
+  const deleteTask = useCallback((taskId: string) => {
+    updateImageGenSession((prev) => {
+      const target = prev.tasks.find((task) => task.id === taskId);
+      if (!target) return prev;
+      for (const url of target.refThumbs) releaseImageGenObjectUrl(url);
+      for (const image of target.images) releaseImageGenObjectUrl(image.objectUrl);
+      return { ...prev, tasks: prev.tasks.filter((task) => task.id !== taskId) };
+    });
+  }, []);
+
+  // 清空全部任务（含生成图片）：释放所有任务 objectURL；在途生成完成后因任务不存在而丢弃结果。
+  // 详情弹窗因 detailTask 派生自动关闭；预览可能持有已 revoke 的 URL，一并关闭。
+  const clearTasks = useCallback(() => {
+    updateImageGenSession((prev) => {
+      for (const task of prev.tasks) {
+        for (const url of task.refThumbs) releaseImageGenObjectUrl(url);
+        for (const image of task.images) releaseImageGenObjectUrl(image.objectUrl);
+      }
+      return { ...prev, tasks: [] };
+    });
+    setPreview(null);
+    toast.success("已清空任务");
+  }, []);
+
+  // 复用配置：从任务的 request 快照回填 prompt/参数/模型/参考图（替换当前输入区参考图）。
+  const reuseTask = useCallback((taskId: string) => {
+    const target = getImageGenSession().tasks.find((task) => task.id === taskId);
+    if (!target) return;
+    const { request } = target;
+    setParams({
+      size: request.size,
+      n: request.n,
+      quality: request.options.quality,
+      outputFormat: request.options.outputFormat,
+      outputCompression: request.options.outputCompression,
+      moderation: request.options.moderation,
+    });
+    setModel(request.options.model);
+    const rebuilt: ImageGenReferenceImage[] = request.referenceImages.map((ref) => {
+      const blob = base64ToBlob(ref.b64, ref.mime);
+      return {
+        id: nextId(),
+        mime: ref.mime,
+        b64: ref.b64,
+        sizeBytes: blob.size,
+        objectUrl: trackImageGenObjectUrl(blob),
+      };
+    });
+    updateImageGenSession((prev) => {
+      for (const image of prev.referenceImages) releaseImageGenObjectUrl(image.objectUrl);
+      return { ...prev, prompt: request.prompt, referenceImages: rebuilt };
+    });
+    toast.success("已复用配置");
+  }, []);
 
   const setAsReference = useCallback(async (image: ImageGenGeneratedImage) => {
     const current = getImageGenSession().referenceImages;
@@ -474,11 +591,12 @@ export function useImageGenController() {
     savingConfig,
     requestUrlPreview,
     saveConfig,
+    clearConfig,
     // 生成参数
     params,
     updateParams,
     // 会话
-    messages,
+    tasks,
     prompt,
     setPrompt,
     referenceImages,
@@ -486,8 +604,20 @@ export function useImageGenController() {
     removeReferenceImage,
     submit,
     retry,
+    deleteTask,
+    clearTasks,
+    reuseTask,
     setAsReference,
     downloadImage,
+    // 搜索/筛选
+    searchQuery,
+    setSearchQuery,
+    statusFilter,
+    setStatusFilter,
+    // 任务详情
+    detailTask,
+    openDetail,
+    closeDetail,
     // 点击预览
     preview,
     openPreview,

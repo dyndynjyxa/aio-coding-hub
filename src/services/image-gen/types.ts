@@ -13,6 +13,7 @@ export type ImageGenUsage = {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
+  inputTokensDetails?: { textTokens?: number; imageTokens?: number };
 };
 
 export type ImageGenResult = {

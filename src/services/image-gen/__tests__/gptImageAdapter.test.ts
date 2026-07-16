@@ -4,6 +4,7 @@ import {
   buildGenerationsBody,
   buildRequestUrlPreview,
   EDITS_PATH,
+  estimateGptImageCostUsd,
   extFromMime,
   extractApiErrorMessage,
   GENERATIONS_PATH,
@@ -245,6 +246,60 @@ describe("services/image-gen/gptImageAdapter", () => {
       expect(parseUsage(undefined)).toBeUndefined();
       expect(parseUsage("nope")).toBeUndefined();
       expect(parseUsage({})).toBeUndefined();
+    });
+
+    it("extracts input token details", () => {
+      expect(
+        parseUsage({
+          input_tokens: 10,
+          input_tokens_details: { text_tokens: 6, image_tokens: 4 },
+        })
+      ).toEqual({ inputTokens: 10, inputTokensDetails: { textTokens: 6, imageTokens: 4 } });
+    });
+
+    it("tolerates partial or invalid input token details", () => {
+      expect(parseUsage({ input_tokens: 10, input_tokens_details: { text_tokens: 6 } })).toEqual({
+        inputTokens: 10,
+        inputTokensDetails: { textTokens: 6 },
+      });
+      // 非对象 / 空对象明细被忽略，不产生 inputTokensDetails 字段。
+      expect(parseUsage({ input_tokens: 10, input_tokens_details: "nope" })).toEqual({
+        inputTokens: 10,
+      });
+      expect(parseUsage({ input_tokens: 10, input_tokens_details: { text_tokens: "x" } })).toEqual({
+        inputTokens: 10,
+      });
+    });
+  });
+
+  describe("estimateGptImageCostUsd", () => {
+    it("prices with input details: text*$5 + image*$8 + output*$30 per 1M", () => {
+      expect(
+        estimateGptImageCostUsd({
+          inputTokens: 100,
+          outputTokens: 1000,
+          inputTokensDetails: { textTokens: 60, imageTokens: 40 },
+        })
+      ).toBeCloseTo((60 * 5 + 40 * 8 + 1000 * 30) / 1_000_000, 10);
+    });
+
+    it("falls back to input*$5 + output*$30 without details", () => {
+      expect(estimateGptImageCostUsd({ inputTokens: 100, outputTokens: 1000 })).toBeCloseTo(
+        (100 * 5 + 1000 * 30) / 1_000_000,
+        10
+      );
+      // 明细缺项容忍：只有 textTokens 也走明细分支。
+      expect(estimateGptImageCostUsd({ inputTokensDetails: { textTokens: 200 } })).toBeCloseTo(
+        (200 * 5) / 1_000_000,
+        10
+      );
+    });
+
+    it("returns null for missing usage or no billable fields", () => {
+      expect(estimateGptImageCostUsd(undefined)).toBeNull();
+      expect(estimateGptImageCostUsd({})).toBeNull();
+      // 只有 totalTokens 无法拆分计价。
+      expect(estimateGptImageCostUsd({ totalTokens: 100 })).toBeNull();
     });
   });
 

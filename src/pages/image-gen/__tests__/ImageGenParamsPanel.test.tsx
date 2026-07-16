@@ -52,6 +52,26 @@ describe("pages/image-gen/ImageGenParamsPanel", () => {
     expect(screen.getByRole("button", { name: "保存中…" })).toBeDisabled();
   });
 
+  it("clears the config after confirmation", () => {
+    const controller = makeController();
+    render(<ImageGenParamsPanel controller={controller} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "清空配置" }));
+    expect(controller.clearConfig).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "清空" }));
+    expect(controller.clearConfig).toHaveBeenCalled();
+  });
+
+  it("cancels config clearing from the confirm dialog", () => {
+    const controller = makeController();
+    render(<ImageGenParamsPanel controller={controller} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "清空配置" }));
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(controller.clearConfig).not.toHaveBeenCalled();
+  });
+
   it("disables compression for png and updates it for jpeg", () => {
     const pngController = makeController();
     const { unmount } = render(<ImageGenParamsPanel controller={pngController} />);

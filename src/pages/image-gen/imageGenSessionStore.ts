@@ -2,17 +2,18 @@
 // 生命周期因此提升到应用会话级；controller 经 useSyncExternalStore 订阅读取。
 
 import { emitListenerSnapshot } from "../../utils/listeners";
-import type { ImageGenMessage, ImageGenReferenceImage } from "./useImageGenController";
+import type { ImageGenReferenceImage, ImageGenTask } from "./useImageGenController";
 
 export type ImageGenSessionState = {
-  messages: ImageGenMessage[];
+  /** 追加序（创建时间序）；展示层经 filterTasks 反转为"新的在前"。 */
+  tasks: ImageGenTask[];
   referenceImages: ImageGenReferenceImage[];
   prompt: string;
 };
 
 type Listener = () => void;
 
-const EMPTY_STATE: ImageGenSessionState = { messages: [], referenceImages: [], prompt: "" };
+const EMPTY_STATE: ImageGenSessionState = { tasks: [], referenceImages: [], prompt: "" };
 
 let snapshot: ImageGenSessionState = EMPTY_STATE;
 const listeners = new Set<Listener>();

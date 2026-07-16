@@ -158,7 +158,43 @@ export function parseUsage(value: unknown): ImageGenUsage | undefined {
   if (typeof record.input_tokens === "number") usage.inputTokens = record.input_tokens;
   if (typeof record.output_tokens === "number") usage.outputTokens = record.output_tokens;
   if (typeof record.total_tokens === "number") usage.totalTokens = record.total_tokens;
+  const detailsRaw = record.input_tokens_details;
+  if (detailsRaw && typeof detailsRaw === "object") {
+    const raw = detailsRaw as Record<string, unknown>;
+    const details: { textTokens?: number; imageTokens?: number } = {};
+    if (typeof raw.text_tokens === "number") details.textTokens = raw.text_tokens;
+    if (typeof raw.image_tokens === "number") details.imageTokens = raw.image_tokens;
+    if (Object.keys(details).length > 0) usage.inputTokensDetails = details;
+  }
   return Object.keys(usage).length > 0 ? usage : undefined;
+}
+
+// gpt-image-2 官方费率（$/1M token）：文本输入 $5、图像输入 $8、图像输出 $30。
+const COST_TEXT_INPUT_USD_PER_M = 5;
+const COST_IMAGE_INPUT_USD_PER_M = 8;
+const COST_OUTPUT_USD_PER_M = 30;
+
+/**
+ * 预估费用（美元）：有输入明细按 文本×$5 + 图像×$8 + 输出×$30 计；
+ * 无明细退化为 input×$5 + 输出×$30；usage 缺失或无可计费字段返回 null。
+ */
+export function estimateGptImageCostUsd(usage: ImageGenUsage | undefined): number | null {
+  if (!usage) return null;
+  const output = usage.outputTokens ?? 0;
+  const details = usage.inputTokensDetails;
+  if (details && (details.textTokens != null || details.imageTokens != null)) {
+    return (
+      ((details.textTokens ?? 0) * COST_TEXT_INPUT_USD_PER_M +
+        (details.imageTokens ?? 0) * COST_IMAGE_INPUT_USD_PER_M +
+        output * COST_OUTPUT_USD_PER_M) /
+      1_000_000
+    );
+  }
+  if (usage.inputTokens == null && usage.outputTokens == null) return null;
+  return (
+    ((usage.inputTokens ?? 0) * COST_TEXT_INPUT_USD_PER_M + output * COST_OUTPUT_USD_PER_M) /
+    1_000_000
+  );
 }
 
 export type FetchImageByUrl = (url: string) => Promise<{ mime: string; b64: string }>;

@@ -1,7 +1,9 @@
 // Usage: 生图页左栏哑组件：连接配置卡 + 生成参数卡。所有状态与逻辑来自 useImageGenController。
 
+import { useState } from "react";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
+import { ConfirmDialog } from "../../ui/ConfirmDialog";
 import { FormField } from "../../ui/FormField";
 import { Input } from "../../ui/Input";
 import { Select } from "../../ui/Select";
@@ -27,10 +29,13 @@ export function ImageGenParamsPanel({ controller, className }: ImageGenParamsPan
     savingConfig,
     requestUrlPreview,
     saveConfig,
+    clearConfig,
     params,
     updateParams,
   } = controller;
 
+  // 清空配置二次确认：纯视图局部态。
+  const [confirmClear, setConfirmClear] = useState(false);
   const compressionEnabled = params.outputFormat !== "png";
 
   return (
@@ -78,17 +83,41 @@ export function ImageGenParamsPanel({ controller, className }: ImageGenParamsPan
                 请求 URL：{requestUrlPreview}
               </div>
             ) : null}
-            <Button
-              variant="primary"
-              disabled={savingConfig}
-              onClick={() => {
-                void saveConfig();
-              }}
-            >
-              {savingConfig ? "保存中…" : "保存配置"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="primary"
+                disabled={savingConfig}
+                onClick={() => {
+                  void saveConfig();
+                }}
+              >
+                {savingConfig ? "保存中…" : "保存配置"}
+              </Button>
+              <Button
+                variant="danger"
+                disabled={savingConfig}
+                onClick={() => setConfirmClear(true)}
+              >
+                清空配置
+              </Button>
+            </div>
           </div>
         </Card>
+
+        <ConfirmDialog
+          open={confirmClear}
+          title="清空生图配置"
+          description="将清除已保存的 Base URL、模型与 API Key。"
+          onClose={() => setConfirmClear(false)}
+          onConfirm={() => {
+            setConfirmClear(false);
+            void clearConfig();
+          }}
+          confirmLabel="清空"
+          confirmingLabel="清空中…"
+          confirming={false}
+          confirmVariant="danger"
+        />
 
         <Card padding="sm">
           <h2 className="mb-3 text-sm font-semibold text-foreground">生成参数</h2>
