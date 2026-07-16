@@ -214,7 +214,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
     } as any);
   });
 
-  it("limits Grok providers to API key configuration", () => {
+  it("supports Grok API key and OAuth modes without CX2CC", () => {
     render(
       <ProviderEditorDialog
         mode="create"
@@ -227,9 +227,15 @@ describe("pages/providers/ProviderEditorDialog", () => {
 
     const dialog = within(screen.getByRole("dialog"));
     expect(dialog.getByPlaceholderText("sk-…")).toBeInTheDocument();
-    expect(dialog.queryByText("OAuth 登录")).not.toBeInTheDocument();
+    // Auth mode tab label
+    expect(dialog.getByText("OAuth 登录")).toBeInTheDocument();
     expect(dialog.queryByText("CX2CC 转译")).not.toBeInTheDocument();
     expect(dialog.queryByText("Claude 模型映射")).not.toBeInTheDocument();
+
+    fireEvent.click(dialog.getByText("OAuth 登录"));
+    expect(dialog.getByText("未连接 OAuth")).toBeInTheDocument();
+    expect(dialog.getByRole("button", { name: "OAuth 登录" })).toBeInTheDocument();
+    expect(dialog.getByRole("button", { name: "设备码登录" })).toBeInTheDocument();
   });
 
   it("validates create form and saves provider", async () => {
@@ -1516,6 +1522,79 @@ describe("pages/providers/ProviderEditorDialog", () => {
     fireEvent.click(dialog.getByRole("button", { name: "保存" }));
 
     await waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalledWith("请先完成 OAuth 登录"));
+  });
+
+  it("supports Grok device code login in create mode", async () => {
+    vi.mocked(providerUpsert).mockResolvedValueOnce(
+      makeProvider({
+        id: 346,
+        cli_key: "grok",
+        name: "Grok Device OAuth",
+      })
+    );
+    vi.mocked(providerOAuthStartDeviceFlow).mockResolvedValueOnce(
+      makeOAuthDeviceStartResult({
+        provider_id: 346,
+        provider_type: "grok_oauth",
+        device_code: "grok_device_123",
+        user_code: "WXYZ-1234",
+        verification_uri: "https://accounts.x.ai/device",
+        expires_in: 900,
+        interval: 0,
+      })
+    );
+    vi.mocked(providerOAuthPollDeviceFlow).mockResolvedValueOnce({
+      completed: true,
+      provider_id: 346,
+      provider_type: "grok_oauth",
+      expires_at: 1700000000,
+    });
+    vi.mocked(providerOAuthStatus).mockResolvedValueOnce(
+      makeOAuthStatus({
+        connected: true,
+        provider_type: "grok_oauth",
+        email: "grok@example.com",
+        expires_at: 1700000000,
+        has_refresh_token: true,
+      })
+    );
+
+    const onSaved = vi.fn();
+    const onOpenChange = vi.fn();
+
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="grok"
+        onSaved={onSaved}
+        onOpenChange={onOpenChange}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByText("OAuth 登录"));
+    fireEvent.change(dialog.getByPlaceholderText("default"), {
+      target: { value: "Grok Device OAuth" },
+    });
+
+    fireEvent.click(dialog.getByRole("button", { name: "设备码登录" }));
+
+    await waitFor(() => expect(vi.mocked(providerOAuthStartDeviceFlow)).toHaveBeenCalledWith(346));
+    await waitFor(() =>
+      expect(vi.mocked(openDesktopUrl)).toHaveBeenCalledWith("https://accounts.x.ai/device")
+    );
+    await waitFor(() =>
+      expect(vi.mocked(providerOAuthPollDeviceFlow)).toHaveBeenCalledWith(
+        346,
+        "flow_123",
+        "grok_device_123",
+        "WXYZ-1234"
+      )
+    );
+    await waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalledWith("设备码登录成功"));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith("grok"));
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
 
   it("supports Codex device code login in create mode", async () => {

@@ -78,9 +78,14 @@ pub(crate) async fn exchange_authorization_code(
             form.push(("client_secret", &secret_ref));
         }
 
-        client
-            .post(&req.token_uri)
-            .form(&form)
+        // grok-build attaches x-grok-client-version on authorization_code exchange.
+        let mut request = client.post(&req.token_uri).form(&form);
+        if is_xai_oauth_token_uri(&req.token_uri) {
+            let version = crate::gateway::oauth::adapters::grok::grok_client_version();
+            request = request.header("x-grok-client-version", version);
+        }
+
+        request
             .send()
             .await
             .map_err(|e| format!("token exchange request failed: {e}"))?
@@ -175,6 +180,11 @@ fn is_anthropic_oauth_token_uri(token_uri: &str) -> bool {
         || uri.contains("platform.claude.com/v1/oauth/token")
         || (uri.contains("/v1/oauth/token")
             && (uri.contains("anthropic.com") || uri.contains("claude.com")))
+}
+
+fn is_xai_oauth_token_uri(token_uri: &str) -> bool {
+    let uri = token_uri.trim().to_ascii_lowercase();
+    uri.contains("auth.x.ai/oauth2/token") || uri.contains("://auth.x.ai/")
 }
 
 async fn parse_token_response(resp: reqwest::Response) -> Result<OAuthTokenSet, String> {

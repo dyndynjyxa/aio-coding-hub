@@ -700,7 +700,7 @@ fn upsert_accepts_grok_api_key_provider() {
 }
 
 #[test]
-fn upsert_rejects_grok_oauth_provider() {
+fn upsert_accepts_grok_oauth_provider() {
     let dir = tempfile::tempdir().expect("tempdir");
     let db_path = dir.path().join("providers_grok_oauth.db");
     let db = crate::db::init_for_tests(&db_path).expect("init db");
@@ -709,12 +709,14 @@ fn upsert_rejects_grok_oauth_provider() {
     params.cli_key = "grok".to_string();
     params.auth_mode = Some(ProviderAuthMode::Oauth);
     params.api_key = None;
+    // OAuth providers discard base_urls (empty list) to avoid stale transport values.
+    params.base_urls = vec!["https://should-be-cleared.example".to_string()];
 
-    let error = upsert(&db, params).expect_err("Grok OAuth must be rejected");
+    let saved = upsert(&db, params).expect("save Grok OAuth provider");
 
-    assert!(error
-        .to_string()
-        .contains("oauth is not supported for cli_key=grok"));
+    assert_eq!(saved.cli_key, "grok");
+    assert_eq!(saved.auth_mode, ProviderAuthMode::Oauth.as_str());
+    assert!(saved.base_urls.is_empty());
 }
 
 #[test]
