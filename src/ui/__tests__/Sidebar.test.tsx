@@ -161,7 +161,7 @@ describe("ui/Sidebar", () => {
     expect(
       NAV_SECTIONS.map((section) => [section.label, section.items.map((item) => item.to)])
     ).toEqual([
-      ["MAIN", ["/", "/providers", "/sessions"]],
+      ["MAIN", ["/", "/image-gen", "/providers", "/sessions"]],
       [
         "TOOLS",
         [

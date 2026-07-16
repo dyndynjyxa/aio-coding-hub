@@ -1275,6 +1275,7 @@ fn baseline_v25_creates_complete_schema_for_fresh_install() {
     assert!(tables.contains(&"sort_mode_providers".to_string()));
     assert!(tables.contains(&"sort_mode_active".to_string()));
     assert!(tables.contains(&"claude_model_validation_runs".to_string()));
+    assert!(tables.contains(&"image_gen_configs".to_string()));
     assert!(tables.contains(&"plugin_hook_execution_reports".to_string()));
     assert!(tables.contains(&"schema_migrations".to_string()));
 
@@ -1375,6 +1376,60 @@ fn ensure_patches_seed_grok_workspace_once_without_resetting_active_workspace() 
 
     assert_eq!(default_count, 1);
     assert_eq!(active_id, custom_id);
+}
+
+#[test]
+fn migrate_v35_to_v36_creates_image_gen_configs_and_is_idempotent() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+
+    v35_to_v36::migrate_v35_to_v36(&mut conn).expect("migrate v35->v36");
+
+    assert!(test_has_table(&conn, "image_gen_configs"));
+    for column in [
+        "adapter_id",
+        "base_url",
+        "api_key_plaintext",
+        "model",
+        "created_at",
+        "updated_at",
+    ] {
+        assert!(
+            test_has_column(&conn, "image_gen_configs", column),
+            "missing image_gen_configs column: {column}"
+        );
+    }
+
+    let user_version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read user_version");
+    assert_eq!(user_version, 36);
+
+    // Idempotent: second run should succeed.
+    v35_to_v36::migrate_v35_to_v36(&mut conn).expect("migrate v35->v36 twice");
+}
+
+#[test]
+fn apply_migrations_upgrades_v35_schema_to_v36() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+    apply_migrations(&mut conn).expect("create current schema");
+
+    // Simulate a v35 database (before image_gen_configs existed).
+    conn.execute_batch(
+        r#"
+DROP TABLE image_gen_configs;
+PRAGMA user_version = 35;
+"#,
+    )
+    .expect("simulate v35 schema");
+    assert!(!test_has_table(&conn, "image_gen_configs"));
+
+    apply_migrations(&mut conn).expect("apply migrations from v35");
+
+    assert!(test_has_table(&conn, "image_gen_configs"));
+    let user_version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read user_version");
+    assert_eq!(user_version, LATEST_SCHEMA_VERSION);
 }
 
 #[test]

@@ -7,6 +7,7 @@ import {
   Command,
   Cpu,
   FileText,
+  ImagePlus,
   Layers,
   Monitor,
   Moon,
@@ -54,6 +55,7 @@ const NAV_SECTIONS: NavSection[] = [
     label: "MAIN",
     items: [
       { to: "/", label: "首页", icon: Activity, theme: "blue" },
+      { to: "/image-gen", label: "生图", icon: ImagePlus, theme: "pink" },
       { to: "/providers", label: "供应商", icon: Boxes, theme: "cyan" },
       { to: "/sessions", label: "Session 会话", icon: MessageSquare, theme: "violet" },
     ],

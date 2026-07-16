@@ -41,7 +41,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "proces
 rusqlite = { version = "0.31", features = ["bundled"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.24"
-reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls-native-roots", "stream", "socks", "macos-system-configuration"] }
+reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls-native-roots", "stream", "socks", "macos-system-configuration", "multipart"] }
 if-addrs = "0.13"
 hostname = "0.4"
 futures-core = "0.3"

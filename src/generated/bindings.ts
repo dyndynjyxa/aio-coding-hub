@@ -1925,6 +1925,91 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async imageGenConfigGet(adapterId: string): Promise<Result<ImageGenConfigView, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("image_gen_config_get", { adapterId }) };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async imageGenConfigSet(
+    adapterId: string,
+    baseUrl: string,
+    model: string,
+    apiKey: string | null
+  ): Promise<Result<ImageGenConfigView, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("image_gen_config_set", { adapterId, baseUrl, model, apiKey }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async imageGenPostJson(
+    adapterId: string,
+    path: string,
+    body: JsonValue,
+    timeoutSecs: number | null
+  ): Promise<Result<ImageGenHttpResponse, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("image_gen_post_json", { adapterId, path, body, timeoutSecs }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async imageGenPostMultipart(
+    adapterId: string,
+    path: string,
+    fields: [string, string][],
+    files: ImageGenMultipartFile[],
+    timeoutSecs: number | null
+  ): Promise<Result<ImageGenHttpResponse, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("image_gen_post_multipart", {
+          adapterId,
+          path,
+          fields,
+          files,
+          timeoutSecs,
+        }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async imageGenFetchImage(
+    url: string,
+    timeoutSecs: number | null
+  ): Promise<Result<ImageGenFetchedImage, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("image_gen_fetch_image", { url, timeoutSecs }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async imageGenSaveImage(path: string, dataB64: string): Promise<Result<boolean, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("image_gen_save_image", { path, dataB64 }) };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async envConflictsCheck(cliKey: string): Promise<Result<EnvConflict[], string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("env_conflicts_check", { cliKey }) };
@@ -2837,6 +2922,23 @@ export type HostRenderedSchema =
   | { type: "panel"; fields: HostRenderedField[] }
   | { type: "badge"; label: string; tone?: HostRenderedBadgeTone | null };
 export type HostRenderedSelectOption = { value: string; label: string };
+/**
+ * IPC-facing view: intentionally has no api_key field, only a configured flag.
+ */
+export type ImageGenConfigView = {
+  adapterId: string;
+  baseUrl: string;
+  model: string;
+  apiKeyConfigured: boolean;
+};
+export type ImageGenFetchedImage = { mime: string; dataB64: string };
+export type ImageGenHttpResponse = { status: number; bodyText: string };
+export type ImageGenMultipartFile = {
+  field: string;
+  filename: string;
+  mime: string;
+  dataB64: string;
+};
 export type InstalledSkillSummary = {
   id: number;
   skill_key: string;

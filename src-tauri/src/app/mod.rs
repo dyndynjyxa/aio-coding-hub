@@ -11,6 +11,7 @@ pub(crate) mod gateway_runtime_access;
 pub(crate) mod gateway_service;
 pub(crate) mod gateway_state;
 pub(crate) mod heartbeat_watchdog;
+pub(crate) mod image_gen_service;
 pub(crate) mod lifecycle;
 pub(crate) mod linux_webkit_compat;
 pub(crate) mod logging;

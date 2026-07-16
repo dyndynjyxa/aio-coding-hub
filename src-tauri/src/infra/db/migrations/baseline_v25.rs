@@ -266,6 +266,15 @@ CREATE TABLE IF NOT EXISTS claude_model_validation_runs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_claude_model_validation_runs_provider_id_id ON claude_model_validation_runs(provider_id, id);
+
+CREATE TABLE IF NOT EXISTS image_gen_configs (
+  adapter_id TEXT PRIMARY KEY,
+  base_url TEXT NOT NULL DEFAULT '',
+  api_key_plaintext TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
 "#,
     )
     .map_err(|e| format!("failed to create baseline v25 schema: {e}"))?;
