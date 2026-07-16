@@ -629,6 +629,37 @@ ON CONFLICT(workspace_id, skill_id) DO UPDATE SET
     Ok(imported)
 }
 
+/// Full-replace posture (same as providers): wipe the table, then insert the
+/// bundle rows including the plaintext api key.
+pub(super) fn replace_image_gen_configs(
+    tx: &Connection,
+    now: i64,
+    configs: &[super::ImageGenConfigExport],
+) -> AppResult<u32> {
+    tx.execute("DELETE FROM image_gen_configs", [])
+        .map_err(|e| db_err!("failed to clear image_gen_configs: {e}"))?;
+
+    let mut imported = 0_u32;
+    for config in configs {
+        tx.execute(
+            r#"
+INSERT INTO image_gen_configs(adapter_id, base_url, model, api_key_plaintext, created_at, updated_at)
+VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+"#,
+            params![
+                config.adapter_id,
+                config.base_url,
+                config.model,
+                config.api_key_plaintext,
+                now
+            ],
+        )
+        .map_err(|e| db_err!("failed to insert image_gen_config: {e}"))?;
+        imported += 1;
+    }
+    Ok(imported)
+}
+
 pub(super) fn clear_existing_config_data(conn: &Connection, clear_skills: bool) -> AppResult<()> {
     let mut statements = vec![
         "DELETE FROM workspace_mcp_enabled",

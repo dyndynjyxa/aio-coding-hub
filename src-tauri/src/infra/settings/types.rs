@@ -96,6 +96,9 @@ pub struct AppSettings {
     // manages config.toml only and leaves auth.json untouched.
     pub codex_oauth_compatible_proxy_mode: bool,
     pub grok_proxy_preferences: Option<crate::grok_config::GrokProxyPreferences>,
+    // Image generation storage directory override. None/empty = default
+    // `<app data dir>/image-gen`.
+    pub image_gen_storage_dir: Option<String>,
     pub auto_start: bool,
     // Start with window hidden when auto-starting (silent startup).
     pub start_minimized: bool,
@@ -181,6 +184,7 @@ impl Default for AppSettings {
             codex_home_override: String::new(),
             codex_oauth_compatible_proxy_mode: DEFAULT_CODEX_OAUTH_COMPATIBLE_PROXY_MODE,
             grok_proxy_preferences: None,
+            image_gen_storage_dir: None,
             auto_start: false,
             start_minimized: false,
             tray_enabled: true,

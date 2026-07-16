@@ -226,6 +226,14 @@ macro_rules! generated_command_registry {
             image_gen_post_multipart => crate::commands::image_gen::image_gen_post_multipart,
             image_gen_fetch_image => crate::commands::image_gen::image_gen_fetch_image,
             image_gen_save_image => crate::commands::image_gen::image_gen_save_image,
+            image_gen_task_persist => crate::commands::image_gen::image_gen_task_persist,
+            image_gen_tasks_list => crate::commands::image_gen::image_gen_tasks_list,
+            image_gen_task_delete => crate::commands::image_gen::image_gen_task_delete,
+            image_gen_tasks_clear => crate::commands::image_gen::image_gen_tasks_clear,
+            image_gen_read_image => crate::commands::image_gen::image_gen_read_image,
+            image_gen_storage_get => crate::commands::image_gen::image_gen_storage_get,
+            image_gen_storage_set_dir => crate::commands::image_gen::image_gen_storage_set_dir,
+            image_gen_storage_cleanup => crate::commands::image_gen::image_gen_storage_cleanup,
             // ── env_conflicts ──
             env_conflicts_check => crate::commands::env_conflicts::env_conflicts_check,
             // ── cli_proxy ──

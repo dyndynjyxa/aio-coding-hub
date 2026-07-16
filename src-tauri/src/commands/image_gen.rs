@@ -6,6 +6,7 @@ use crate::app_state::DbInitState;
 use crate::blocking;
 use crate::domain::image_gen::{
     ImageGenConfigView, ImageGenFetchedImage, ImageGenHttpResponse, ImageGenMultipartFile,
+    ImageGenStorageView, ImageGenTaskPersistPayload, ImageGenTaskRow,
 };
 use base64::Engine as _;
 
@@ -104,6 +105,85 @@ pub(crate) async fn image_gen_save_image(path: String, data_b64: String) -> Resu
     })
     .await
     .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn image_gen_task_persist(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    payload: ImageGenTaskPersistPayload,
+) -> Result<ImageGenTaskRow, String> {
+    image_gen_service::task_persist(app, db_state, payload).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn image_gen_tasks_list(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    before_created_at: Option<i64>,
+    limit: u32,
+) -> Result<Vec<ImageGenTaskRow>, String> {
+    image_gen_service::tasks_list(app, db_state, before_created_at, limit).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn image_gen_task_delete(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    id: String,
+) -> Result<(), String> {
+    image_gen_service::task_delete(app, db_state, id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn image_gen_tasks_clear(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+) -> Result<u32, String> {
+    image_gen_service::tasks_clear(app, db_state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn image_gen_read_image(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    path: String,
+) -> Result<ImageGenFetchedImage, String> {
+    image_gen_service::read_image(app, db_state, path).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn image_gen_storage_get(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+) -> Result<ImageGenStorageView, String> {
+    image_gen_service::storage_get(app, db_state).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn image_gen_storage_set_dir(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    dir: String,
+) -> Result<ImageGenStorageView, String> {
+    image_gen_service::storage_set_dir(app, db_state, dir).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn image_gen_storage_cleanup(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    keep_count: u32,
+) -> Result<u32, String> {
+    image_gen_service::storage_cleanup(app, db_state, keep_count).await
 }
 
 #[cfg(test)]

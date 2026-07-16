@@ -2010,6 +2010,78 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async imageGenTaskPersist(
+    payload: ImageGenTaskPersistPayload
+  ): Promise<Result<ImageGenTaskRow, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("image_gen_task_persist", { payload }) };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async imageGenTasksList(
+    beforeCreatedAt: number | null,
+    limit: number
+  ): Promise<Result<ImageGenTaskRow[], string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("image_gen_tasks_list", { beforeCreatedAt, limit }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async imageGenTaskDelete(id: string): Promise<Result<null, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("image_gen_task_delete", { id }) };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async imageGenTasksClear(): Promise<Result<number, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("image_gen_tasks_clear") };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async imageGenReadImage(path: string): Promise<Result<ImageGenFetchedImage, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("image_gen_read_image", { path }) };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async imageGenStorageGet(): Promise<Result<ImageGenStorageView, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("image_gen_storage_get") };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async imageGenStorageSetDir(dir: string): Promise<Result<ImageGenStorageView, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("image_gen_storage_set_dir", { dir }) };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async imageGenStorageCleanup(keepCount: number): Promise<Result<number, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("image_gen_storage_cleanup", { keepCount }) };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async envConflictsCheck(cliKey: string): Promise<Result<EnvConflict[], string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("env_conflicts_check", { cliKey }) };
@@ -2938,6 +3010,51 @@ export type ImageGenMultipartFile = {
   filename: string;
   mime: string;
   dataB64: string;
+};
+export type ImageGenStorageView = { dir: string; totalBytes: number; taskCount: number };
+export type ImageGenTaskFilePayload = { mime: string; dataB64: string };
+export type ImageGenTaskFileRow = {
+  /**
+   * Absolute path of the stored file.
+   */
+  path: string;
+  /**
+   * Absolute path of the thumbnail (generated images only).
+   */
+  thumbPath: string | null;
+  mime: string;
+};
+export type ImageGenTaskPersistPayload = {
+  id: string;
+  adapterId: string | null;
+  prompt: string;
+  requestJson: string;
+  status: string;
+  error: string | null;
+  usageJson: string | null;
+  createdAt: number;
+  elapsedMs: number | null;
+  images: ImageGenTaskFilePayload[];
+  /**
+   * Frontend-generated thumbnails, paired with `images` by index. Fewer
+   * thumbs than images is tolerated (missing thumb -> no thumb path).
+   */
+  thumbs: ImageGenTaskFilePayload[];
+  refImages: ImageGenTaskFilePayload[];
+};
+export type ImageGenTaskRow = {
+  id: string;
+  adapterId: string;
+  prompt: string;
+  requestJson: string;
+  status: string;
+  error: string | null;
+  usageJson: string | null;
+  images: ImageGenTaskFileRow[];
+  refImages: ImageGenTaskFileRow[];
+  dir: string;
+  createdAt: number;
+  elapsedMs: number | null;
 };
 export type InstalledSkillSummary = {
   id: number;

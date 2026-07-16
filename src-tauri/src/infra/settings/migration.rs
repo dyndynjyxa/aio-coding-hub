@@ -659,9 +659,21 @@ fn migrate_add_grok_proxy_preferences(
     )
 }
 
+fn migrate_add_image_gen_storage_dir(
+    settings: &mut AppSettings,
+    schema_version_present: bool,
+) -> bool {
+    // v36: Add image gen storage dir override (default None = app data dir/image-gen).
+    migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_IMAGE_GEN_STORAGE_DIR,
+    )
+}
+
 type SettingsMigration = fn(&mut AppSettings, bool) -> bool;
 
-const SETTINGS_MIGRATIONS: [SettingsMigration; 29] = [
+const SETTINGS_MIGRATIONS: [SettingsMigration; 30] = [
     migrate_disable_upstream_timeouts,
     migrate_add_gateway_rectifiers,
     migrate_add_circuit_breaker_notice,
@@ -691,6 +703,7 @@ const SETTINGS_MIGRATIONS: [SettingsMigration; 29] = [
     migrate_add_codex_oauth_compatible_proxy_mode,
     migrate_add_request_log_retention,
     migrate_add_grok_proxy_preferences,
+    migrate_add_image_gen_storage_dir,
 ];
 
 fn apply_settings_migrations(settings: &mut AppSettings, schema_version_present: bool) -> bool {
@@ -1300,6 +1313,21 @@ mod tests {
             SCHEMA_VERSION_ADD_GROK_PROXY_PREFERENCES
         );
         assert_eq!(settings.grok_proxy_preferences, None);
+    }
+
+    #[test]
+    fn migrate_add_image_gen_storage_dir_bumps_schema_without_initializing_dir() {
+        let mut settings = AppSettings {
+            schema_version: SCHEMA_VERSION_ADD_GROK_PROXY_PREFERENCES,
+            ..Default::default()
+        };
+
+        assert!(migrate_add_image_gen_storage_dir(&mut settings, true));
+        assert_eq!(
+            settings.schema_version,
+            SCHEMA_VERSION_ADD_IMAGE_GEN_STORAGE_DIR
+        );
+        assert_eq!(settings.image_gen_storage_dir, None);
     }
 
     #[test]

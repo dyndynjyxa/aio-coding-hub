@@ -1276,6 +1276,7 @@ fn baseline_v25_creates_complete_schema_for_fresh_install() {
     assert!(tables.contains(&"sort_mode_active".to_string()));
     assert!(tables.contains(&"claude_model_validation_runs".to_string()));
     assert!(tables.contains(&"image_gen_configs".to_string()));
+    assert!(tables.contains(&"image_gen_tasks".to_string()));
     assert!(tables.contains(&"plugin_hook_execution_reports".to_string()));
     assert!(tables.contains(&"schema_migrations".to_string()));
 
@@ -1426,6 +1427,68 @@ PRAGMA user_version = 35;
     apply_migrations(&mut conn).expect("apply migrations from v35");
 
     assert!(test_has_table(&conn, "image_gen_configs"));
+    let user_version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read user_version");
+    assert_eq!(user_version, LATEST_SCHEMA_VERSION);
+}
+
+#[test]
+fn migrate_v36_to_v37_creates_image_gen_tasks_and_is_idempotent() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+
+    v36_to_v37::migrate_v36_to_v37(&mut conn).expect("migrate v36->v37");
+
+    assert!(test_has_table(&conn, "image_gen_tasks"));
+    for column in [
+        "id",
+        "adapter_id",
+        "prompt",
+        "request_json",
+        "status",
+        "error",
+        "usage_json",
+        "images_json",
+        "ref_images_json",
+        "dir",
+        "created_at",
+        "elapsed_ms",
+    ] {
+        assert!(
+            test_has_column(&conn, "image_gen_tasks", column),
+            "missing image_gen_tasks column: {column}"
+        );
+    }
+    assert!(test_has_index(&conn, "idx_image_gen_tasks_created"));
+
+    let user_version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read user_version");
+    assert_eq!(user_version, 37);
+
+    // Idempotent: second run should succeed.
+    v36_to_v37::migrate_v36_to_v37(&mut conn).expect("migrate v36->v37 twice");
+}
+
+#[test]
+fn apply_migrations_upgrades_v36_schema_to_v37() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+    apply_migrations(&mut conn).expect("create current schema");
+
+    // Simulate a v36 database (before image_gen_tasks existed).
+    conn.execute_batch(
+        r#"
+DROP TABLE image_gen_tasks;
+PRAGMA user_version = 36;
+"#,
+    )
+    .expect("simulate v36 schema");
+    assert!(!test_has_table(&conn, "image_gen_tasks"));
+
+    apply_migrations(&mut conn).expect("apply migrations from v36");
+
+    assert!(test_has_table(&conn, "image_gen_tasks"));
+    assert!(test_has_index(&conn, "idx_image_gen_tasks_created"));
     let user_version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("read user_version");
