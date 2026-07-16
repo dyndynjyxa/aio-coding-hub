@@ -197,8 +197,8 @@ export function ImageGenTaskPanel({ controller, className }: ImageGenTaskPanelPr
   const visibleTasks = filterTasks(tasks, searchQuery, statusFilter);
 
   return (
-    <Card padding="sm" className={className}>
-      <div className="flex flex-col gap-4">
+    <Card padding="sm" className={cn("lg:flex lg:flex-col", className)}>
+      <div className="flex flex-col gap-4 lg:min-h-0 lg:flex-1">
         {tasks.length > 0 || searchQuery ? (
           <div className="flex items-center gap-2">
             <Input
@@ -231,42 +231,45 @@ export function ImageGenTaskPanel({ controller, className }: ImageGenTaskPanelPr
           </div>
         ) : null}
 
-        {tasks.length === 0 ? (
-          <EmptyState
-            variant="dashed"
-            title="还没有生成记录"
-            description="在下方输入提示词开始生成图片"
-          />
-        ) : visibleTasks.length === 0 ? (
-          <EmptyState variant="dashed" title="没有匹配的任务" />
-        ) : (
-          <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-            {visibleTasks.map((task) => (
-              <ImageGenTaskCard
-                key={task.id}
-                task={task}
-                onOpenDetail={() => openDetail(task.id)}
-                onRetry={() => {
-                  void retry(task.id);
-                }}
-                onDelete={() => setConfirmDeleteTaskId(task.id)}
-                onCancel={() => deleteTask(task.id)}
-              />
-            ))}
-          </div>
-        )}
+        {/* 任务区独占剩余高度并独立滚动（lg 起），输入栏因此常驻底部。 */}
+        <div className="scrollbar-overlay flex flex-col gap-4 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+          {tasks.length === 0 ? (
+            <EmptyState
+              variant="dashed"
+              title="还没有生成记录"
+              description="在下方输入提示词开始生成图片"
+            />
+          ) : visibleTasks.length === 0 ? (
+            <EmptyState variant="dashed" title="没有匹配的任务" />
+          ) : (
+            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+              {visibleTasks.map((task) => (
+                <ImageGenTaskCard
+                  key={task.id}
+                  task={task}
+                  onOpenDetail={() => openDetail(task.id)}
+                  onRetry={() => {
+                    void retry(task.id);
+                  }}
+                  onDelete={() => setConfirmDeleteTaskId(task.id)}
+                  onCancel={() => deleteTask(task.id)}
+                />
+              ))}
+            </div>
+          )}
 
-        {hasMore && tasks.length > 0 ? (
-          <Button
-            size="sm"
-            className="self-center"
-            onClick={() => {
-              void loadMoreTasks();
-            }}
-          >
-            加载更多
-          </Button>
-        ) : null}
+          {hasMore && tasks.length > 0 ? (
+            <Button
+              size="sm"
+              className="self-center"
+              onClick={() => {
+                void loadMoreTasks();
+              }}
+            >
+              加载更多
+            </Button>
+          ) : null}
+        </div>
 
         <div
           data-testid="image-gen-drop-zone"
