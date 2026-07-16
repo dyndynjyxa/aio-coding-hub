@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ImageGenParamsPanel } from "../ImageGenParamsPanel";
 import { DEFAULT_IMAGE_GEN_PARAMS } from "../useImageGenController";
@@ -108,5 +108,62 @@ describe("pages/image-gen/ImageGenParamsPanel", () => {
 
     fireEvent.change(screen.getByLabelText("数量"), { target: { value: "99" } });
     expect(controller.updateParams).toHaveBeenCalledWith({ n: 10 });
+  });
+
+  it("renders the storage card with directory, usage and task count", () => {
+    const controller = makeController({
+      storage: { dir: "/Users/tester/.aio-coding-hub/image-gen", totalBytes: 1536, taskCount: 3 },
+    });
+    render(<ImageGenParamsPanel controller={controller} />);
+
+    expect(screen.getByRole("heading", { name: "存储" })).toBeInTheDocument();
+    const dir = screen.getByText("/Users/tester/.aio-coding-hub/image-gen");
+    expect(dir).toHaveAttribute("title", "/Users/tester/.aio-coding-hub/image-gen");
+    expect(screen.getByText("占用 1.5 KB · 3 条任务")).toBeInTheDocument();
+  });
+
+  it("renders storage placeholders and disables reveal before stats load", () => {
+    render(<ImageGenParamsPanel controller={makeController({ storage: null })} />);
+    expect(screen.getByText("占用 — · 0 条任务")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "在 Finder 中显示" })).toBeDisabled();
+  });
+
+  it("invokes the storage actions: change directory and reveal in Finder", () => {
+    const controller = makeController({
+      storage: { dir: "/store", totalBytes: 0, taskCount: 0 },
+    });
+    render(<ImageGenParamsPanel controller={controller} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "更改目录" }));
+    expect(controller.changeStorageDir).toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "在 Finder 中显示" }));
+    expect(controller.revealStorageDir).toHaveBeenCalled();
+  });
+
+  it("cleans up history only after confirmation", () => {
+    const controller = makeController({
+      storage: { dir: "/store", totalBytes: 0, taskCount: 60 },
+    });
+    render(<ImageGenParamsPanel controller={controller} />);
+
+    // 点卡片清理只开确认弹窗。
+    fireEvent.click(screen.getByRole("button", { name: "清理" }));
+    expect(controller.cleanupStorage).not.toHaveBeenCalled();
+    expect(screen.getByText("清理历史任务")).toBeInTheDocument();
+
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "清理" }));
+    expect(controller.cleanupStorage).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels the cleanup from the confirm dialog", () => {
+    const controller = makeController({
+      storage: { dir: "/store", totalBytes: 0, taskCount: 60 },
+    });
+    render(<ImageGenParamsPanel controller={controller} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "清理" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "取消" }));
+    expect(controller.cleanupStorage).not.toHaveBeenCalled();
   });
 });

@@ -3,8 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { copyText } from "../../../services/clipboard";
 import { ImageGenTaskDetail } from "../ImageGenTaskDetail";
-import type { ImageGenGeneratedImage } from "../useImageGenController";
-import { makeController, makeTask, TEST_REQUEST } from "./testUtils";
+import {
+  makeController,
+  makeDiskImage,
+  makeMemoryImage,
+  makeTask,
+  TEST_REQUEST,
+} from "./testUtils";
 
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
@@ -14,13 +19,7 @@ vi.mock("../../../services/clipboard", () => ({
   copyText: vi.fn(async () => {}),
 }));
 
-function makeImage(objectUrl: string): ImageGenGeneratedImage {
-  return {
-    objectUrl,
-    mime: "image/png",
-    blob: new Blob(["x"], { type: "image/png" }),
-  };
-}
+const makeImage = makeMemoryImage;
 
 describe("pages/image-gen/ImageGenTaskDetail", () => {
   it("renders nothing when no detail task is open", () => {
@@ -181,6 +180,39 @@ describe("pages/image-gen/ImageGenTaskDetail", () => {
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(controller.deleteTask).not.toHaveBeenCalled();
     expect(controller.closeDetail).not.toHaveBeenCalled();
+  });
+
+  it("renders disk images with the full-size src and thumbnail switchers", () => {
+    const task = makeTask({
+      images: [makeDiskImage("/store/t1/image-1.png"), makeDiskImage("/store/t1/image-2.png")],
+    });
+    const controller = makeController({ detailTask: task });
+    render(<ImageGenTaskDetail controller={controller} />);
+
+    expect(screen.getByAltText("生成图片 1")).toHaveAttribute(
+      "src",
+      "asset://localhost//store/t1/image-1.png"
+    );
+    // 切换缩略图用低成本 thumbSrc。
+    expect(screen.getByAltText("缩略图 2")).toHaveAttribute(
+      "src",
+      "asset://localhost//store/t1/thumb-2.png"
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "预览大图" }));
+    expect(controller.openPreview).toHaveBeenCalledWith(
+      ["asset://localhost//store/t1/image-1.png", "asset://localhost//store/t1/image-2.png"],
+      0
+    );
+  });
+
+  it("shows a placeholder for the main image when the disk file is missing", () => {
+    const task = makeTask({ images: [makeDiskImage("/store/t1/image-1.png")] });
+    render(<ImageGenTaskDetail controller={makeController({ detailTask: task })} />);
+
+    fireEvent.error(screen.getByAltText("生成图片 1"));
+    expect(screen.getByText("文件缺失")).toBeInTheDocument();
+    expect(screen.queryByAltText("生成图片 1")).not.toBeInTheDocument();
   });
 
   it("copies the prompt and renders reference thumbnails", async () => {

@@ -6,6 +6,9 @@ import type {
   ImageGenFetchedImage,
   ImageGenHttpResponse,
   ImageGenMultipartFile,
+  ImageGenStorageView,
+  ImageGenTaskPersistPayload,
+  ImageGenTaskRow,
   JsonValue,
 } from "../../generated/bindings";
 import { invokeGeneratedIpc } from "../generatedIpc";
@@ -17,6 +20,9 @@ export type {
   ImageGenFetchedImage,
   ImageGenHttpResponse,
   ImageGenMultipartFile,
+  ImageGenStorageView,
+  ImageGenTaskPersistPayload,
+  ImageGenTaskRow,
 };
 
 export async function imageGenConfigGet(adapterId: string): Promise<ImageGenConfigView> {
@@ -93,5 +99,91 @@ export async function imageGenSaveImage(path: string, dataB64: string): Promise<
     // dataB64 体量大，不进日志。
     args: { path },
     invoke: () => commands.imageGenSaveImage(path, dataB64),
+  });
+}
+
+// ---------- 历史持久化（二期） ----------
+
+export async function imageGenTaskPersist(
+  payload: ImageGenTaskPersistPayload
+): Promise<ImageGenTaskRow> {
+  return invokeGeneratedIpc<ImageGenTaskRow>({
+    title: "保存生成记录失败",
+    cmd: "image_gen_task_persist",
+    // 图片/缩略图/参考图均为 base64 大 payload，不进日志：仅记录计数。
+    args: {
+      id: payload.id,
+      status: payload.status,
+      imageCount: payload.images.length,
+      thumbCount: payload.thumbs.length,
+      refImageCount: payload.refImages.length,
+    },
+    invoke: () => commands.imageGenTaskPersist(payload),
+  });
+}
+
+export async function imageGenTasksList(
+  beforeCreatedAt: number | null,
+  limit: number
+): Promise<ImageGenTaskRow[]> {
+  return invokeGeneratedIpc<ImageGenTaskRow[]>({
+    title: "读取生成记录失败",
+    cmd: "image_gen_tasks_list",
+    args: { beforeCreatedAt, limit },
+    invoke: () => commands.imageGenTasksList(beforeCreatedAt, limit),
+  });
+}
+
+export async function imageGenTaskDelete(id: string): Promise<null> {
+  return invokeGeneratedIpc<null, null>({
+    title: "删除生成记录失败",
+    cmd: "image_gen_task_delete",
+    args: { id },
+    invoke: () => commands.imageGenTaskDelete(id),
+    nullResultBehavior: "return_fallback",
+    fallback: null,
+  });
+}
+
+export async function imageGenTasksClear(): Promise<number> {
+  return invokeGeneratedIpc<number>({
+    title: "清空生成记录失败",
+    cmd: "image_gen_tasks_clear",
+    invoke: () => commands.imageGenTasksClear(),
+  });
+}
+
+export async function imageGenReadImage(path: string): Promise<ImageGenFetchedImage> {
+  return invokeGeneratedIpc<ImageGenFetchedImage>({
+    title: "读取本地图片失败",
+    cmd: "image_gen_read_image",
+    args: { path },
+    invoke: () => commands.imageGenReadImage(path),
+  });
+}
+
+export async function imageGenStorageGet(): Promise<ImageGenStorageView> {
+  return invokeGeneratedIpc<ImageGenStorageView>({
+    title: "读取存储信息失败",
+    cmd: "image_gen_storage_get",
+    invoke: () => commands.imageGenStorageGet(),
+  });
+}
+
+export async function imageGenStorageSetDir(dir: string): Promise<ImageGenStorageView> {
+  return invokeGeneratedIpc<ImageGenStorageView>({
+    title: "更改存储目录失败",
+    cmd: "image_gen_storage_set_dir",
+    args: { dir },
+    invoke: () => commands.imageGenStorageSetDir(dir),
+  });
+}
+
+export async function imageGenStorageCleanup(keepCount: number): Promise<number> {
+  return invokeGeneratedIpc<number>({
+    title: "清理生成记录失败",
+    cmd: "image_gen_storage_cleanup",
+    args: { keepCount },
+    invoke: () => commands.imageGenStorageCleanup(keepCount),
   });
 }

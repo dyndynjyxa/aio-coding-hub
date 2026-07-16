@@ -1,5 +1,6 @@
 // Usage: 生图页控制器。持有连接配置与生成参数；会话（任务列表/参考图/prompt）经 imageGenSessionStore
-// 模块级保留（跨路由卸载），页面组件保持哑渲染。
+// 模块级保留（跨路由卸载），页面组件保持哑渲染。任务历史持久化：完成后异步落盘（imageGenPersistence），
+// 挂载时从 DB 恢复；loading 任务为会话态不落盘。
 
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
@@ -19,9 +20,28 @@ import {
   IMAGE_GEN_ADAPTER_ID,
   imageGenConfigGet,
   imageGenConfigSet,
+  imageGenReadImage,
   imageGenSaveImage,
+  imageGenStorageCleanup,
+  imageGenStorageGet,
+  imageGenStorageSetDir,
+  imageGenTaskDelete,
+  imageGenTaskPersist,
+  imageGenTasksClear,
+  imageGenTasksList,
+  type ImageGenStorageView,
 } from "../../services/image-gen/service";
 import type { ImageGenUsage } from "../../services/image-gen/types";
+import {
+  base64ToBlob,
+  blobToBase64,
+  buildPersistPayload,
+  mergeTasksByCreatedAt,
+  pruneTasksForCleanup,
+  readBackReferenceImages,
+  taskFromRow,
+  taskImageSrc,
+} from "./imageGenPersistence";
 import {
   getImageGenSession,
   releaseImageGenObjectUrl,
@@ -29,11 +49,19 @@ import {
   trackImageGenObjectUrl,
   updateImageGenSession,
 } from "./imageGenSessionStore";
-import { saveDesktopFilePath } from "../../services/desktop/dialog";
+import { openDesktopSinglePath, saveDesktopFilePath } from "../../services/desktop/dialog";
+import { openDesktopPath } from "../../services/desktop/opener";
 import { formatUnknownError } from "../../utils/errors";
+
+export { base64ToBlob, blobToBase64 };
 
 export const MAX_REFERENCE_IMAGES = 16;
 export const MAX_REFERENCE_TOTAL_BYTES = 30 * 1024 * 1024;
+
+/** 历史分页每页条数（与首屏拉取一致）。 */
+export const HISTORY_PAGE_SIZE = 50;
+/** 一键清理保留的最近任务条数。 */
+export const CLEANUP_KEEP_COUNT = 50;
 
 const PARAMS_STORAGE_KEY = "aio-image-gen-params";
 
@@ -55,11 +83,13 @@ export const DEFAULT_IMAGE_GEN_PARAMS: ImageGenParams = {
   n: 1,
 };
 
-export type ImageGenGeneratedImage = {
-  objectUrl: string;
-  mime: string;
-  blob: Blob;
-};
+/** 任务图片双形态：memory（刚生成/落盘失败，持 Blob）/ disk（已落盘，asset 协议展示）。 */
+export type ImageGenTaskImage =
+  | { kind: "memory"; objectUrl: string; mime: string; blob: Blob }
+  | { kind: "disk"; src: string; thumbSrc: string; path: string; mime: string };
+
+/** 落盘参考图的读回地址（memory 任务为空数组）。 */
+export type ImageGenTaskRefPath = { path: string; mime: string };
 
 export type ImageGenTaskStatus = "loading" | "done" | "error";
 
@@ -68,14 +98,17 @@ export type ImageGenTask = {
   id: string;
   prompt: string;
   refThumbs: string[];
+  refPaths: ImageGenTaskRefPath[];
   request: GptImageRequest;
   status: ImageGenTaskStatus;
-  images: ImageGenGeneratedImage[];
+  images: ImageGenTaskImage[];
   usage?: ImageGenUsage;
   error?: string;
   createdAt: number;
   startedAt: number;
   elapsedMs?: number;
+  /** 已落盘（DB 行 + 磁盘文件）；删除/清空需先走后端命令。 */
+  persisted: boolean;
 };
 
 export type ImageGenStatusFilter = "all" | ImageGenTaskStatus;
@@ -166,32 +199,20 @@ export function extractClipboardImageFiles(data: ClipboardImageSource): File[] {
   return Array.from(data.files ?? []).filter((file) => file.type.startsWith("image/"));
 }
 
-export function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = String(reader.result ?? "");
-      const commaIndex = result.indexOf(",");
-      resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
-    };
-    reader.onerror = () => reject(new Error("读取图片文件失败"));
-    reader.readAsDataURL(blob);
-  });
-}
-
-export function base64ToBlob(b64: string, mime: string): Blob {
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return new Blob([bytes], { type: mime });
-}
-
 let idCounter = 0;
 function nextId(): string {
   idCounter += 1;
   return `imggen-${Date.now()}-${idCounter}`;
+}
+
+/** 释放任务持有的全部 objectURL（disk 形态的 asset URL 无需释放）。 */
+function releaseTaskObjectUrls(task: ImageGenTask) {
+  for (const url of task.refThumbs) {
+    if (url.startsWith("blob:")) releaseImageGenObjectUrl(url);
+  }
+  for (const image of task.images) {
+    if (image.kind === "memory") releaseImageGenObjectUrl(image.objectUrl);
+  }
 }
 
 // ---------- 控制器 ----------
@@ -210,7 +231,7 @@ export function useImageGenController() {
   }, [params]);
 
   // 会话：模块级 store（跨路由卸载保留），页面组件只读快照。
-  const { tasks, prompt, referenceImages } = useSyncExternalStore(
+  const { tasks, prompt, referenceImages, hasMore } = useSyncExternalStore(
     subscribeImageGenSession,
     getImageGenSession
   );
@@ -231,7 +252,7 @@ export function useImageGenController() {
     [detailTaskId, tasks]
   );
 
-  // 点击预览：同组 objectURL + 当前下标；null = 关闭。
+  // 点击预览：同组显示 URL + 当前下标；null = 关闭。
   const [preview, setPreview] = useState<ImageGenPreview | null>(null);
   const openPreview = useCallback((urls: string[], index: number) => {
     setPreview({ urls, index });
@@ -259,6 +280,57 @@ export function useImageGenController() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // 存储视图：挂载拉取；persist/删除/清空/清理/改目录后刷新。
+  const [storage, setStorage] = useState<ImageGenStorageView | null>(null);
+  const refreshStorage = useCallback(async () => {
+    try {
+      setStorage(await imageGenStorageGet());
+    } catch {
+      // 失败静默（已记日志），存储卡显示占位。
+    }
+  }, []);
+  useEffect(() => {
+    void refreshStorage();
+  }, [refreshStorage]);
+
+  // 历史恢复：store 未 hydrate 时拉取最近一页；失败保持未 hydrate，下次挂载重试。
+  useEffect(() => {
+    if (getImageGenSession().hydrated) return;
+    void imageGenTasksList(null, HISTORY_PAGE_SIZE)
+      .then((rows) => {
+        const restored = rows
+          .map((row) => taskFromRow(row))
+          .filter((task): task is ImageGenTask => task !== null);
+        updateImageGenSession((prev) => ({
+          ...prev,
+          hydrated: true,
+          hasMore: rows.length === HISTORY_PAGE_SIZE,
+          tasks: mergeTasksByCreatedAt(prev.tasks, restored),
+        }));
+      })
+      .catch(() => undefined);
+  }, []);
+
+  // 加载更早的历史：以 store 内最早的 persisted 任务 createdAt 为游标。
+  const loadMoreTasks = useCallback(async () => {
+    const persisted = getImageGenSession().tasks.filter((task) => task.persisted);
+    const before =
+      persisted.length > 0 ? Math.min(...persisted.map((task) => task.createdAt)) : null;
+    try {
+      const rows = await imageGenTasksList(before, HISTORY_PAGE_SIZE);
+      const restored = rows
+        .map((row) => taskFromRow(row))
+        .filter((task): task is ImageGenTask => task !== null);
+      updateImageGenSession((prev) => ({
+        ...prev,
+        hasMore: rows.length === HISTORY_PAGE_SIZE,
+        tasks: mergeTasksByCreatedAt(prev.tasks, restored),
+      }));
+    } catch {
+      toast.error("加载更多失败：请查看控制台日志");
+    }
   }, []);
 
   const requestUrlPreview = useMemo(
@@ -346,50 +418,101 @@ export function useImageGenController() {
     });
   }, []);
 
-  // 完成回调写模块 store：页面卸载后任务继续完成，回来即见结果。
-  const runGeneration = useCallback(async (taskId: string, request: GptImageRequest) => {
-    try {
-      const result = await gptImageAdapter.generate(request);
-      // 任务在生成中被删除：丢弃结果。此处到下方 updater 全程同步，
-      // objectURL 尚未创建即返回，天然无泄漏。
-      if (!getImageGenSession().tasks.some((task) => task.id === taskId)) return;
-      const images = result.images.map((image) => {
-        const blob = base64ToBlob(image.b64, image.mime);
-        return { blob, mime: image.mime, objectUrl: trackImageGenObjectUrl(blob) };
-      });
-      updateImageGenSession((prev) => ({
-        ...prev,
-        tasks: prev.tasks.map((task) => {
-          if (task.id !== taskId) return task;
-          // 重试覆盖旧结果时释放被替换图片的 objectURL。
-          for (const old of task.images) releaseImageGenObjectUrl(old.objectUrl);
+  // 异步落盘：done/error 任务写入 DB + 磁盘（loading 为会话态不落盘），成功后 store 内
+  // 切换为 disk 形态并释放全部 objectURL/Blob；失败保持 memory 形态（仅本次会话可见）。
+  const persistTask = useCallback(
+    async (taskId: string) => {
+      const task = getImageGenSession().tasks.find((item) => item.id === taskId);
+      if (!task || task.status === "loading") return;
+      // 已落盘 done 任务重试失败：不回写。否则空 images 的 error 行会 upsert 覆盖
+      // 上一次成功结果（重启后图片丢失）。DB 保留最后一次成功状态，错误仅本次会话可见。
+      if (task.status === "error" && task.images.some((image) => image.kind === "disk")) return;
+      try {
+        const payload = await buildPersistPayload(task);
+        const row = await imageGenTaskPersist(payload);
+        const current = getImageGenSession().tasks.find((item) => item.id === taskId);
+        if (!current) {
+          // 落盘期间任务被删除：回收刚写入的行与文件（失败留给清理机制兜底）。
+          void imageGenTaskDelete(taskId).catch(() => undefined);
+          return;
+        }
+        // 落盘期间被重试：等重试完成后按新结果重新落盘（同 id upsert）。
+        if (current.status === "loading") return;
+        const restored = taskFromRow(row);
+        if (!restored) return;
+        updateImageGenSession((prev) => ({
+          ...prev,
+          tasks: prev.tasks.map((item) => {
+            if (item.id !== taskId) return item;
+            releaseTaskObjectUrls(item);
+            return restored;
+          }),
+        }));
+        void refreshStorage();
+      } catch {
+        toast.error("已生成但保存到本地失败，本条记录仅本次会话可见");
+      }
+    },
+    [refreshStorage]
+  );
+
+  // 完成回调写模块 store：页面卸载后任务继续完成，回来即见结果。完成后异步落盘。
+  const runGeneration = useCallback(
+    async (taskId: string, request: GptImageRequest) => {
+      try {
+        const result = await gptImageAdapter.generate(request);
+        // 任务在生成中被删除：丢弃结果。此处到下方 updater 全程同步，
+        // objectURL 尚未创建即返回，天然无泄漏。
+        if (!getImageGenSession().tasks.some((task) => task.id === taskId)) return;
+        const images = result.images.map((image): ImageGenTaskImage => {
+          const blob = base64ToBlob(image.b64, image.mime);
           return {
-            ...task,
-            status: "done" as const,
-            images,
-            usage: result.usage,
-            error: undefined,
-            elapsedMs: Date.now() - task.startedAt,
+            kind: "memory",
+            blob,
+            mime: image.mime,
+            objectUrl: trackImageGenObjectUrl(blob),
           };
-        }),
-      }));
-    } catch (err) {
-      const error = formatUnknownError(err);
-      updateImageGenSession((prev) => ({
-        ...prev,
-        tasks: prev.tasks.map((task) =>
-          task.id === taskId
-            ? {
-                ...task,
-                status: "error" as const,
-                error,
-                elapsedMs: Date.now() - task.startedAt,
-              }
-            : task
-        ),
-      }));
-    }
-  }, []);
+        });
+        updateImageGenSession((prev) => ({
+          ...prev,
+          tasks: prev.tasks.map((task) => {
+            if (task.id !== taskId) return task;
+            // 重试覆盖旧结果时释放被替换图片的 objectURL（disk 图无 URL 可释放）。
+            for (const old of task.images) {
+              if (old.kind === "memory") releaseImageGenObjectUrl(old.objectUrl);
+            }
+            return {
+              ...task,
+              status: "done" as const,
+              images,
+              usage: result.usage,
+              error: undefined,
+              elapsedMs: Date.now() - task.startedAt,
+            };
+          }),
+        }));
+        void persistTask(taskId);
+      } catch (err) {
+        const error = formatUnknownError(err);
+        updateImageGenSession((prev) => ({
+          ...prev,
+          tasks: prev.tasks.map((task) =>
+            task.id === taskId
+              ? {
+                  ...task,
+                  status: "error" as const,
+                  error,
+                  elapsedMs: Date.now() - task.startedAt,
+                }
+              : task
+          ),
+        }));
+        // 失败任务同样落盘（含错误与参数快照，供排障）。
+        void persistTask(taskId);
+      }
+    },
+    [persistTask]
+  );
 
   // 每次提交独立创建任务并各自生成，互不阻塞。
   const submit = useCallback(async () => {
@@ -417,17 +540,20 @@ export function useImageGenController() {
     const now = Date.now();
     const taskId = nextId();
     updateImageGenSession((prev) => ({
+      ...prev,
       tasks: [
         ...prev.tasks,
         {
           id: taskId,
           prompt: trimmedPrompt,
           refThumbs: session.referenceImages.map((image) => image.objectUrl),
+          refPaths: [],
           request,
           status: "loading" as const,
           images: [],
           createdAt: now,
           startedAt: now,
+          persisted: false,
         },
       ],
       referenceImages: [],
@@ -437,59 +563,109 @@ export function useImageGenController() {
   }, [apiKeyConfigured, apiKeyDraft, baseUrl, model, params, runGeneration]);
 
   // 重试使用任务内的参数快照，不读面板当前值；目标任务生成中时忽略。
+  // 落盘任务的快照不含参考图字节：先从磁盘读回重建请求（缺文件则中止）。
   // startedAt 重置计时，createdAt 保持创建时间不变。
   const retry = useCallback(
     async (taskId: string) => {
       const target = getImageGenSession().tasks.find((task) => task.id === taskId);
       if (!target || target.status === "loading") return;
+      let request = target.request;
+      if (target.refPaths.length > 0) {
+        try {
+          const refs = await readBackReferenceImages(target.refPaths);
+          request = { ...target.request, referenceImages: refs };
+        } catch {
+          toast.error("图片文件缺失");
+          return;
+        }
+      }
       updateImageGenSession((prev) => ({
         ...prev,
         tasks: prev.tasks.map((task) =>
           task.id === taskId
-            ? { ...task, status: "loading" as const, error: undefined, startedAt: Date.now() }
+            ? {
+                ...task,
+                status: "loading" as const,
+                error: undefined,
+                startedAt: Date.now(),
+                request,
+              }
             : task
         ),
       }));
-      await runGeneration(taskId, target.request);
+      await runGeneration(taskId, request);
     },
     [runGeneration]
   );
 
-  // 删除任务：释放全部 objectURL（refThumbs + 生成图）后移出 store；loading 中也允许删除
-  // （即"取消"），在途完成回调会因任务不存在而丢弃结果（见 runGeneration）。
-  const deleteTask = useCallback((taskId: string) => {
-    const target = getImageGenSession().tasks.find((task) => task.id === taskId);
-    if (!target) return;
-    // 预览正持有被删任务的图片 URL 时同步关闭（与 clearTasks 对齐）。
-    setPreview((prev) =>
-      prev && target.images.some((image) => prev.urls.includes(image.objectUrl)) ? null : prev
-    );
-    updateImageGenSession((prev) => {
-      for (const url of target.refThumbs) releaseImageGenObjectUrl(url);
-      for (const image of target.images) releaseImageGenObjectUrl(image.objectUrl);
-      return { ...prev, tasks: prev.tasks.filter((task) => task.id !== taskId) };
-    });
-  }, []);
-
-  // 清空全部任务（含生成图片）：释放所有任务 objectURL；在途生成完成后因任务不存在而丢弃结果。
-  // 详情弹窗因 detailTask 派生自动关闭；预览可能持有已 revoke 的 URL，一并关闭。
-  const clearTasks = useCallback(() => {
-    updateImageGenSession((prev) => {
-      for (const task of prev.tasks) {
-        for (const url of task.refThumbs) releaseImageGenObjectUrl(url);
-        for (const image of task.images) releaseImageGenObjectUrl(image.objectUrl);
+  // 删除任务：persisted 任务先删 DB 行 + 磁盘文件，成功后再动 store（失败 toast 不动 store）；
+  // memory 任务只动 store。loading 中也允许删除（即"取消"），在途完成回调会因任务不存在而
+  // 丢弃结果（见 runGeneration）。
+  const deleteTask = useCallback(
+    (taskId: string) => {
+      const target = getImageGenSession().tasks.find((task) => task.id === taskId);
+      if (!target) return;
+      const removeFromStore = () => {
+        // 预览正持有被删任务的图片 URL 时同步关闭（与 clearTasks 对齐）。
+        setPreview((prev) =>
+          prev && target.images.some((image) => prev.urls.includes(taskImageSrc(image)))
+            ? null
+            : prev
+        );
+        updateImageGenSession((prev) => {
+          releaseTaskObjectUrls(target);
+          return { ...prev, tasks: prev.tasks.filter((task) => task.id !== taskId) };
+        });
+      };
+      if (!target.persisted) {
+        removeFromStore();
+        return;
       }
-      return { ...prev, tasks: [] };
+      void imageGenTaskDelete(taskId)
+        .then(() => {
+          removeFromStore();
+          void refreshStorage();
+        })
+        .catch(() => {
+          toast.error("删除任务失败：请查看控制台日志");
+        });
+    },
+    [refreshStorage]
+  );
+
+  // 清空全部任务：先清 DB 全部行 + 磁盘文件（含未加载进 store 的更早历史），成功后清 store；
+  // 失败 toast 不动 store。在途生成完成后因任务不存在而丢弃结果。
+  const clearTasks = useCallback(async () => {
+    try {
+      await imageGenTasksClear();
+    } catch {
+      toast.error("清空任务失败：请查看控制台日志");
+      return;
+    }
+    updateImageGenSession((prev) => {
+      for (const task of prev.tasks) releaseTaskObjectUrls(task);
+      return { ...prev, tasks: [], hasMore: false };
     });
     setPreview(null);
     toast.success("已清空任务");
-  }, []);
+    void refreshStorage();
+  }, [refreshStorage]);
 
   // 复用配置：从任务的 request 快照回填 prompt/参数/模型/参考图（替换当前输入区参考图）。
-  const reuseTask = useCallback((taskId: string) => {
+  // 落盘任务的参考图从磁盘读回（缺文件则中止，不动输入区）。
+  const reuseTask = useCallback(async (taskId: string) => {
     const target = getImageGenSession().tasks.find((task) => task.id === taskId);
     if (!target) return;
     const { request } = target;
+    let refs = request.referenceImages;
+    if (target.refPaths.length > 0) {
+      try {
+        refs = await readBackReferenceImages(target.refPaths);
+      } catch {
+        toast.error("图片文件缺失");
+        return;
+      }
+    }
     setParams({
       size: request.size,
       n: request.n,
@@ -499,7 +675,7 @@ export function useImageGenController() {
       moderation: request.options.moderation,
     });
     setModel(request.options.model);
-    const rebuilt: ImageGenReferenceImage[] = request.referenceImages.map((ref) => {
+    const rebuilt: ImageGenReferenceImage[] = refs.map((ref) => {
       const blob = base64ToBlob(ref.b64, ref.mime);
       return {
         id: nextId(),
@@ -516,26 +692,42 @@ export function useImageGenController() {
     toast.success("已复用配置");
   }, []);
 
-  const setAsReference = useCallback(async (image: ImageGenGeneratedImage) => {
-    const current = getImageGenSession().referenceImages;
-    const currentBytes = current.reduce((sum, item) => sum + item.sizeBytes, 0);
-    const error = validateReferenceAddition(current.length, currentBytes, 1, image.blob.size);
-    if (error) {
-      toast.error(error);
-      return;
-    }
+  const setAsReference = useCallback(async (image: ImageGenTaskImage) => {
     try {
-      const b64 = await blobToBase64(image.blob);
+      let mime = image.mime;
+      let b64: string;
+      let blob: Blob;
+      if (image.kind === "memory") {
+        blob = image.blob;
+        b64 = await blobToBase64(blob);
+      } else {
+        try {
+          const fetched = await imageGenReadImage(image.path);
+          mime = fetched.mime;
+          b64 = fetched.dataB64;
+        } catch {
+          toast.error("图片文件缺失");
+          return;
+        }
+        blob = base64ToBlob(b64, mime);
+      }
+      const current = getImageGenSession().referenceImages;
+      const currentBytes = current.reduce((sum, item) => sum + item.sizeBytes, 0);
+      const error = validateReferenceAddition(current.length, currentBytes, 1, blob.size);
+      if (error) {
+        toast.error(error);
+        return;
+      }
       updateImageGenSession((prev) => ({
         ...prev,
         referenceImages: [
           ...prev.referenceImages,
           {
             id: nextId(),
-            mime: image.mime,
+            mime,
             b64,
-            sizeBytes: image.blob.size,
-            objectUrl: trackImageGenObjectUrl(image.blob),
+            sizeBytes: blob.size,
+            objectUrl: trackImageGenObjectUrl(blob),
           },
         ],
       }));
@@ -545,20 +737,74 @@ export function useImageGenController() {
     }
   }, []);
 
-  const downloadImage = useCallback(async (image: ImageGenGeneratedImage) => {
+  // 下载 =「另存为」：memory 直接取 Blob；disk 经受限命令读回字节（缺文件则中止）。
+  const downloadImage = useCallback(async (image: ImageGenTaskImage) => {
     try {
       const path = await saveDesktopFilePath({
         title: "保存图片",
         defaultPath: `image-${Date.now()}.${extFromMime(image.mime)}`,
       });
       if (!path) return;
-      const b64 = await blobToBase64(image.blob);
+      let b64: string;
+      if (image.kind === "memory") {
+        b64 = await blobToBase64(image.blob);
+      } else {
+        try {
+          b64 = (await imageGenReadImage(image.path)).dataB64;
+        } catch {
+          toast.error("图片文件缺失");
+          return;
+        }
+      }
       await imageGenSaveImage(path, b64);
       toast.success("图片已保存");
     } catch {
       toast.error("保存图片失败：请查看控制台日志");
     }
   }, []);
+
+  // ---------- 存储管理 ----------
+
+  // 更改存储目录：只影响新任务（老任务元数据存绝对路径，仍可寻址）。
+  const changeStorageDir = useCallback(async () => {
+    try {
+      const dir = await openDesktopSinglePath({
+        title: "选择图片存储目录",
+        directory: true,
+        canCreateDirectories: true,
+      });
+      if (!dir) return;
+      setStorage(await imageGenStorageSetDir(dir));
+      toast.success("存储目录已更新");
+    } catch {
+      toast.error("更改存储目录失败：请查看控制台日志");
+    }
+  }, []);
+
+  const revealStorageDir = useCallback(async () => {
+    const dir = storage?.dir;
+    if (!dir) return;
+    try {
+      await openDesktopPath(dir);
+    } catch {
+      toast.error("打开存储目录失败：请查看控制台日志");
+    }
+  }, [storage]);
+
+  // 一键清理：保留最近 CLEANUP_KEEP_COUNT 条，其余 DB 行与磁盘文件删除，store 同步收敛。
+  const cleanupStorage = useCallback(async () => {
+    try {
+      const removed = await imageGenStorageCleanup(CLEANUP_KEEP_COUNT);
+      updateImageGenSession((prev) => ({
+        ...prev,
+        tasks: pruneTasksForCleanup(prev.tasks, CLEANUP_KEEP_COUNT),
+      }));
+      toast.success(`已清理 ${removed} 条历史任务`);
+      void refreshStorage();
+    } catch {
+      toast.error("清理失败：请查看控制台日志");
+    }
+  }, [refreshStorage]);
 
   return {
     // 连接配置
@@ -588,6 +834,14 @@ export function useImageGenController() {
     reuseTask,
     setAsReference,
     downloadImage,
+    // 历史分页
+    hasMore,
+    loadMoreTasks,
+    // 存储管理
+    storage,
+    changeStorageDir,
+    revealStorageDir,
+    cleanupStorage,
     // 搜索/筛选
     searchQuery,
     setSearchQuery,

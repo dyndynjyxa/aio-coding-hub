@@ -1,11 +1,15 @@
-// Usage: 生图页左栏哑组件：连接配置卡（输入框 blur 自动保存）+ 生成参数卡。
+// Usage: 生图页左栏哑组件：连接配置卡（输入框 blur 自动保存）+ 生成参数卡 + 存储管理卡。
 // 所有状态与逻辑来自 useImageGenController。
 
+import { useState } from "react";
+import { formatBytes } from "../../utils/formatters";
+import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
+import { ConfirmDialog } from "../../ui/ConfirmDialog";
 import { FormField } from "../../ui/FormField";
 import { Input } from "../../ui/Input";
 import { Select } from "../../ui/Select";
-import type { ImageGenController } from "./useImageGenController";
+import { CLEANUP_KEEP_COUNT, type ImageGenController } from "./useImageGenController";
 
 // 官方支持的预设：auto + 三档官方尺寸（非官方尺寸会被上游 400 拒绝）。
 const SIZE_OPTIONS = ["auto", "1024x1024", "1536x1024", "1024x1536"] as const;
@@ -28,9 +32,15 @@ export function ImageGenParamsPanel({ controller, className }: ImageGenParamsPan
     autoSaveConfig,
     params,
     updateParams,
+    storage,
+    changeStorageDir,
+    revealStorageDir,
+    cleanupStorage,
   } = controller;
 
   const compressionEnabled = params.outputFormat !== "png";
+  // 清理二次确认：纯视图局部态。
+  const [confirmCleanup, setConfirmCleanup] = useState(false);
 
   return (
     <div className={className}>
@@ -192,7 +202,61 @@ export function ImageGenParamsPanel({ controller, className }: ImageGenParamsPan
             </FormField>
           </div>
         </Card>
+
+        <Card padding="sm">
+          <h2 className="mb-3 text-sm font-semibold text-foreground">存储</h2>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">图片目录</div>
+              <div
+                className="truncate font-mono text-xs text-foreground"
+                title={storage?.dir ?? undefined}
+              >
+                {storage?.dir ?? "—"}
+              </div>
+            </div>
+            <div className="text-xs tabular-nums text-muted-foreground">
+              占用 {formatBytes(storage?.totalBytes ?? null)} · {storage?.taskCount ?? 0} 条任务
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                onClick={() => {
+                  void changeStorageDir();
+                }}
+              >
+                更改目录
+              </Button>
+              <Button
+                size="sm"
+                disabled={!storage}
+                onClick={() => {
+                  void revealStorageDir();
+                }}
+              >
+                在 Finder 中显示
+              </Button>
+              <Button size="sm" variant="danger" onClick={() => setConfirmCleanup(true)}>
+                清理
+              </Button>
+            </div>
+          </div>
+        </Card>
       </div>
+      <ConfirmDialog
+        open={confirmCleanup}
+        title="清理历史任务"
+        description={`将保留最近 ${CLEANUP_KEEP_COUNT} 条任务，更早的任务记录与图片文件将被删除，不可恢复。`}
+        onClose={() => setConfirmCleanup(false)}
+        onConfirm={() => {
+          setConfirmCleanup(false);
+          void cleanupStorage();
+        }}
+        confirmLabel="清理"
+        confirmingLabel="清理中…"
+        confirming={false}
+        confirmVariant="danger"
+      />
     </div>
   );
 }

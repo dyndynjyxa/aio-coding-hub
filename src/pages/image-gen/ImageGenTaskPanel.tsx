@@ -15,6 +15,7 @@ import { Spinner } from "../../ui/Spinner";
 import { Textarea } from "../../ui/Textarea";
 import { ConfirmDialog } from "../../ui/ConfirmDialog";
 import { ImageGenLightbox } from "./ImageGenLightbox";
+import { taskImageThumbSrc } from "./imageGenPersistence";
 import {
   filterTasks,
   type ImageGenController,
@@ -42,6 +43,32 @@ export function ImageGenElapsed({ startedAt }: { startedAt: number }) {
       {formatDurationMs(nowMs - startedAt)}
     </span>
   );
+}
+
+/** 带缺失占位的图片：文件被外部删除时显示"文件缺失"而非裂图。使用处以 key={src} 重置失败态。 */
+export function ImageGenImage({
+  src,
+  alt,
+  className,
+}: {
+  src: string;
+  alt: string;
+  className?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <div
+        className={cn(
+          "flex items-center justify-center rounded bg-muted text-xs text-muted-foreground",
+          className
+        )}
+      >
+        文件缺失
+      </div>
+    );
+  }
+  return <img src={src} alt={alt} className={className} onError={() => setFailed(true)} />;
 }
 
 function TaskChips({ task }: { task: ImageGenTask }) {
@@ -80,8 +107,9 @@ function ImageGenTaskCard({
       >
         {task.status === "done" && task.images.length > 0 ? (
           <div className="relative h-24 w-24 shrink-0">
-            <img
-              src={task.images[0].objectUrl}
+            <ImageGenImage
+              key={taskImageThumbSrc(task.images[0])}
+              src={taskImageThumbSrc(task.images[0])}
               alt={`任务缩略图：${task.prompt.slice(0, 30)}`}
               className="h-24 w-24 rounded object-cover"
             />
@@ -154,6 +182,8 @@ export function ImageGenTaskPanel({ controller, className }: ImageGenTaskPanelPr
     retry,
     deleteTask,
     clearTasks,
+    hasMore,
+    loadMoreTasks,
     preview,
     closePreview,
     stepPreview,
@@ -201,10 +231,6 @@ export function ImageGenTaskPanel({ controller, className }: ImageGenTaskPanelPr
           </div>
         ) : null}
 
-        {tasks.length > 0 ? (
-          <div className="text-xs text-muted-foreground">生成记录仅本次运行保留，重启后清空</div>
-        ) : null}
-
         {tasks.length === 0 ? (
           <EmptyState
             variant="dashed"
@@ -229,6 +255,18 @@ export function ImageGenTaskPanel({ controller, className }: ImageGenTaskPanelPr
             ))}
           </div>
         )}
+
+        {hasMore && tasks.length > 0 ? (
+          <Button
+            size="sm"
+            className="self-center"
+            onClick={() => {
+              void loadMoreTasks();
+            }}
+          >
+            加载更多
+          </Button>
+        ) : null}
 
         <div
           data-testid="image-gen-drop-zone"
@@ -319,7 +357,7 @@ export function ImageGenTaskPanel({ controller, className }: ImageGenTaskPanelPr
       <ConfirmDialog
         open={confirmDeleteTaskId !== null}
         title="删除任务"
-        description="删除后不可恢复（会话仅保存在内存中）。"
+        description="将同时删除本地图片文件，删除后不可恢复。"
         onClose={() => setConfirmDeleteTaskId(null)}
         onConfirm={() => {
           if (confirmDeleteTaskId !== null) deleteTask(confirmDeleteTaskId);
@@ -333,11 +371,11 @@ export function ImageGenTaskPanel({ controller, className }: ImageGenTaskPanelPr
       <ConfirmDialog
         open={confirmClear}
         title="清空任务"
-        description="将删除全部任务及生成图片（会话仅保存在内存中，不可恢复）。"
+        description="将删除全部任务记录与本地图片文件（含未加载的更早历史），不可恢复。"
         onClose={() => setConfirmClear(false)}
         onConfirm={() => {
           setConfirmClear(false);
-          clearTasks();
+          void clearTasks();
         }}
         confirmLabel="清空"
         confirmingLabel="清空中…"

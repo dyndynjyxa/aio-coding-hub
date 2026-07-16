@@ -9,11 +9,21 @@ export type ImageGenSessionState = {
   tasks: ImageGenTask[];
   referenceImages: ImageGenReferenceImage[];
   prompt: string;
+  /** 是否已从 DB 拉取过首屏历史（模块级记忆，跨路由挂载只拉一次）。 */
+  hydrated: boolean;
+  /** DB 中是否还有更早的历史任务（上次拉取返回满页）。 */
+  hasMore: boolean;
 };
 
 type Listener = () => void;
 
-const EMPTY_STATE: ImageGenSessionState = { tasks: [], referenceImages: [], prompt: "" };
+const EMPTY_STATE: ImageGenSessionState = {
+  tasks: [],
+  referenceImages: [],
+  prompt: "",
+  hydrated: false,
+  hasMore: false,
+};
 
 let snapshot: ImageGenSessionState = EMPTY_STATE;
 const listeners = new Set<Listener>();
@@ -37,8 +47,8 @@ export function updateImageGenSession(
   emitListenerSnapshot(listeners, (listener) => listener());
 }
 
-// ponytail: objectURL 生命周期为应用会话级（上限 = 本次会话累计生成/参考图的内存驻留）；
-// 二期落盘持久化后消息改存磁盘路径，内存驻留自然消失。
+// objectURL 生命周期为应用会话级；落盘成功的任务切换为 asset 协议路径并释放 URL，
+// 内存驻留仅剩 memory 形态（生成中 / 落盘失败）任务与输入区参考图。
 const trackedUrls = new Set<string>();
 
 export function trackImageGenObjectUrl(blob: Blob): string {

@@ -26,7 +26,7 @@ const DEFAULT_CLI_PROXY_STATUS: CliProxyStatus[] = [
 // schema_version and the historically drift-prone fields below are guarded by
 // src/constants/__tests__/crossLayerContracts.test.ts.
 const DEFAULT_SETTINGS: AppSettings = {
-  schema_version: 35,
+  schema_version: 36,
   preferred_port: 37123,
   show_home_heatmap: true,
   show_home_usage: true,

@@ -1,16 +1,10 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ImageGenTaskPanel } from "../ImageGenTaskPanel";
-import type { ImageGenGeneratedImage, ImageGenReferenceImage } from "../useImageGenController";
-import { makeController, makeTask } from "./testUtils";
+import type { ImageGenReferenceImage } from "../useImageGenController";
+import { makeController, makeDiskImage, makeMemoryImage, makeTask } from "./testUtils";
 
-function makeImage(objectUrl = "blob:generated-1"): ImageGenGeneratedImage {
-  return {
-    objectUrl,
-    mime: "image/png",
-    blob: new Blob(["x"], { type: "image/png" }),
-  };
-}
+const makeImage = makeMemoryImage;
 
 function referenceImage(overrides: Partial<ImageGenReferenceImage> = {}): ImageGenReferenceImage {
   return {
@@ -219,13 +213,32 @@ describe("pages/image-gen/ImageGenTaskPanel", () => {
     expect(screen.getByRole("button", { name: "生成" })).toBeDisabled();
   });
 
-  it("shows the in-memory retention hint only when tasks exist", () => {
-    const { unmount } = render(<ImageGenTaskPanel controller={makeController()} />);
-    expect(screen.queryByText("生成记录仅本次运行保留，重启后清空")).not.toBeInTheDocument();
-    unmount();
+  it("renders a disk-task thumbnail and falls back to a placeholder when the file is missing", () => {
+    const controller = makeController({
+      tasks: [makeTask({ images: [makeDiskImage("/store/t1/image-1.png")] })],
+    });
+    render(<ImageGenTaskPanel controller={controller} />);
 
+    const img = screen.getByAltText("任务缩略图：一只猫");
+    expect(img).toHaveAttribute("src", "asset://localhost//store/t1/thumb-1.png");
+
+    // 文件被外部删除：显示占位而非裂图。
+    fireEvent.error(img);
+    expect(screen.getByText("文件缺失")).toBeInTheDocument();
+    expect(screen.queryByAltText("任务缩略图：一只猫")).not.toBeInTheDocument();
+  });
+
+  it("loads more history from the grid bottom when more is available", () => {
+    const controller = makeController({ tasks: [makeTask()], hasMore: true });
+    render(<ImageGenTaskPanel controller={controller} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "加载更多" }));
+    expect(controller.loadMoreTasks).toHaveBeenCalled();
+  });
+
+  it("hides the load-more button when all history is loaded", () => {
     render(<ImageGenTaskPanel controller={makeController({ tasks: [makeTask()] })} />);
-    expect(screen.getByText("生成记录仅本次运行保留，重启后清空")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "加载更多" })).not.toBeInTheDocument();
   });
 
   it("advertises paste/drag and the Ctrl+Enter shortcut in the prompt placeholder", () => {

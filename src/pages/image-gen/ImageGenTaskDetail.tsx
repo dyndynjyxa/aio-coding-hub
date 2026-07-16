@@ -13,7 +13,8 @@ import { Button } from "../../ui/Button";
 import { ConfirmDialog } from "../../ui/ConfirmDialog";
 import { Dialog } from "../../ui/Dialog";
 import { Spinner } from "../../ui/Spinner";
-import { ImageGenElapsed } from "./ImageGenTaskPanel";
+import { ImageGenElapsed, ImageGenImage } from "./ImageGenTaskPanel";
+import { taskImageSrc, taskImageThumbSrc } from "./imageGenPersistence";
 import type { ImageGenController, ImageGenTask } from "./useImageGenController";
 
 export type ImageGenTaskDetailProps = {
@@ -126,13 +127,14 @@ function TaskDetailContent({
                 className="block w-full cursor-zoom-in"
                 onClick={() =>
                   openPreview(
-                    task.images.map((image) => image.objectUrl),
+                    task.images.map((image) => taskImageSrc(image)),
                     safeIndex
                   )
                 }
               >
-                <img
-                  src={currentImage.objectUrl}
+                <ImageGenImage
+                  key={taskImageSrc(currentImage)}
+                  src={taskImageSrc(currentImage)}
                   alt={`生成图片 ${safeIndex + 1}`}
                   className="max-h-[55vh] w-full rounded-lg border border-line object-contain"
                 />
@@ -141,7 +143,7 @@ function TaskDetailContent({
                 <div className="flex flex-wrap gap-2">
                   {task.images.map((image, index) => (
                     <button
-                      key={image.objectUrl}
+                      key={taskImageSrc(image)}
                       type="button"
                       aria-label={`切换到第 ${index + 1} 张`}
                       className={cn(
@@ -151,7 +153,7 @@ function TaskDetailContent({
                       onClick={() => setImageIndex(index)}
                     >
                       <img
-                        src={image.objectUrl}
+                        src={taskImageThumbSrc(image)}
                         alt={`缩略图 ${index + 1}`}
                         className="h-14 w-14 rounded-md object-cover"
                       />
@@ -228,7 +230,7 @@ function TaskDetailContent({
                   setConfirmReuse(true);
                   return;
                 }
-                reuseTask(task.id);
+                void reuseTask(task.id);
                 closeDetail();
               }}
             >
@@ -266,7 +268,7 @@ function TaskDetailContent({
         onClose={() => setConfirmReuse(false)}
         onConfirm={() => {
           setConfirmReuse(false);
-          reuseTask(task.id);
+          void reuseTask(task.id);
           closeDetail();
         }}
         confirmLabel="覆盖"
@@ -277,7 +279,7 @@ function TaskDetailContent({
       <ConfirmDialog
         open={confirmDelete}
         title="删除任务"
-        description="删除后不可恢复（会话仅保存在内存中）。"
+        description="将同时删除本地图片文件，删除后不可恢复。"
         onClose={() => setConfirmDelete(false)}
         onConfirm={() => {
           setConfirmDelete(false);
