@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.60.15](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.14...aio-coding-hub-v0.60.15) (2026-07-16)
+
+
+### Features
+
+* **grok:** 支持供应商 OAuth 登录 ([#348](https://github.com/dyndynjyxa/aio-coding-hub/issues/348)) ([9e19e7c](https://github.com/dyndynjyxa/aio-coding-hub/commit/9e19e7c1b0bb2f1656b806757c7b23c7e0c412d4))
+* **image-gen:** 生图页面、并发生成与历史持久化 ([#351](https://github.com/dyndynjyxa/aio-coding-hub/issues/351)) ([656b077](https://github.com/dyndynjyxa/aio-coding-hub/commit/656b07780016b3ed25a7059bbcafbb5a7cc2d531))
+
 ## [0.60.14](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.13...aio-coding-hub-v0.60.14) (2026-07-15)
 
 
