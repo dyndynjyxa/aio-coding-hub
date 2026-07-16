@@ -37,9 +37,15 @@ pub(super) fn is_grok_upstream_model(model: Option<&str>) -> bool {
     model
         .map(|m| {
             let m = m.trim().to_ascii_lowercase();
-            m.starts_with("grok") || m.contains("grok-") || m.contains("grok.")
+            // `grok-4.5`, `grok.4`, or mid-proxy aliases containing `grok-`.
+            m.starts_with("grok") || m.contains("grok-")
         })
         .unwrap_or(false)
+}
+
+/// Whether to inject Build-equivalent `x-grok-*` headers on CX2CC outbound.
+pub(super) fn needs_grok_build_wire(source_cli_key: Option<&str>, model: Option<&str>) -> bool {
+    source_cli_key == Some("grok") || is_grok_upstream_model(model)
 }
 
 /// Whether CX2CC should complete sticky session fields for this source CLI / model.
@@ -48,22 +54,15 @@ fn should_complete_session_identifiers(
     codex_setting_enabled: bool,
     model: Option<&str>,
 ) -> bool {
-    // Grok wire path: always on (cli_key=grok OR mapped model is grok-*).
-    if source_cli_key == "grok" || is_grok_upstream_model(model) {
+    // Grok wire path (cli_key or mapped model): always on.
+    if needs_grok_build_wire(Some(source_cli_key), model) {
         return true;
     }
-    match source_cli_key {
-        "codex" => codex_setting_enabled,
-        _ => false,
-    }
+    source_cli_key == "codex" && codex_setting_enabled
 }
 
-/// Whether to inject Build-equivalent `x-grok-*` headers on CX2CC outbound.
-pub(super) fn needs_grok_build_wire(source_cli_key: Option<&str>, model: Option<&str>) -> bool {
-    source_cli_key == Some("grok") || is_grok_upstream_model(model)
-}
-
-fn model_from_body_bytes(body: &[u8]) -> Option<String> {
+/// Parse Responses/Chat body `model` field from raw JSON bytes.
+pub(super) fn model_from_body_bytes(body: &[u8]) -> Option<String> {
     serde_json::from_slice::<Value>(body).ok().and_then(|v| {
         v.get("model")
             .and_then(|m| m.as_str())
@@ -331,26 +330,15 @@ fn complete_translated_codex_request(
     upstream_body_bytes: &[u8],
 ) -> Option<BridgeCodexSessionCompletion> {
     let mut headers = base_headers.clone();
-    // Prefer model-aware inject so codex-labeled Grok mid-proxies still get x-grok-*.
+    // Model-aware inject covers codex-labeled Grok mid-proxies (x-grok-* via
+    // needs_grok_build_wire). Do not call inject_grok_build_wire_headers again —
+    // that would re-mint x-grok-req-id for no gain.
     inject_session_headers_with_model(
         &mut headers,
         session_id,
         Some(source_cli_key),
         if use_grok_wire { model_id } else { None },
     );
-    // When source_cli_key is codex but model is grok, force grok wire with model.
-    if use_grok_wire {
-        if let Some(sid) = session_id.map(str::trim).filter(|v| !v.is_empty()) {
-            inject_grok_build_wire_headers(
-                &mut headers,
-                GrokBuildWireHeaders {
-                    session_id: sid,
-                    model_id,
-                    turn_idx: None,
-                },
-            );
-        }
-    }
 
     let mut request_body = serde_json::from_slice::<Value>(upstream_body_bytes).ok()?;
     let result = codex_session_id::complete_codex_session_identifiers(

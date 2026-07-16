@@ -215,33 +215,29 @@ where
 
     headers = semantic_headers;
 
-    // Last-mile stickiness for CX2CC→Grok: plugins/auth must not leave us without
-    // prompt_cache_key + Build-equivalent x-grok-* headers (affinity + IC routing).
-    //
-    // IMPORTANT: users often register Grok mid-proxies as cli_key=codex (OpenAI-
-    // compatible). Detect Grok by mapped model as well as source cli_key.
+    // Last-mile stickiness for CX2CC→Grok: only repair if plugins/auth stripped
+    // sticky fields. Detect Grok by mapped model as well as source cli_key.
     if cx2cc_active {
         let sticky = cx2cc_sticky_session.as_deref();
         let mut body_bytes = body_state_for_attempt.decoded_clone();
-        let body_json: Option<serde_json::Value> = serde_json::from_slice(body_bytes.as_ref()).ok();
-        let model_id = body_json
-            .as_ref()
-            .and_then(|v| v.get("model"))
-            .and_then(|m| m.as_str())
-            .map(str::to_string);
+        let model_id = codex_session_id_completion::model_from_body_bytes(body_bytes.as_ref());
 
-        if !codex_session_id_completion::needs_grok_build_wire(
+        if codex_session_id_completion::needs_grok_build_wire(
             cx2cc_source_cli_key.as_deref(),
             model_id.as_deref(),
         ) {
-            // not a Grok upstream — skip Build-wire path
-        } else {
-            codex_session_id_completion::inject_session_headers_with_model(
-                &mut headers,
-                sticky,
-                cx2cc_source_cli_key.as_deref().or(Some("grok")),
-                model_id.as_deref(),
-            );
+            let missing_wire_headers = !headers.contains_key("x-grok-conv-id")
+                || !headers.contains_key("x-grok-session-id")
+                || (model_id.is_some() && !headers.contains_key("x-grok-model-override"));
+            if missing_wire_headers {
+                codex_session_id_completion::inject_session_headers_with_model(
+                    &mut headers,
+                    sticky,
+                    cx2cc_source_cli_key.as_deref().or(Some("grok")),
+                    model_id.as_deref(),
+                );
+            }
+            // No-op when prompt_cache_key already matches session.
             let body_rewritten = codex_session_id_completion::ensure_prompt_cache_key_on_body(
                 &mut body_bytes,
                 sticky,
@@ -252,6 +248,7 @@ where
                 prepared.strip_request_content_encoding = true;
                 prepared.request_body_mutated_before_attempt = true;
             }
+
             let has_prompt_cache_key = serde_json::from_slice::<serde_json::Value>(
                 body_state_for_attempt.decoded_clone().as_ref(),
             )
@@ -269,7 +266,7 @@ where
             let has_x_grok_session_id = headers.contains_key("x-grok-session-id");
             let has_x_grok_agent_id = headers.contains_key("x-grok-agent-id");
 
-            // Always surface in the in-app gateway console (tracing::info is not shown there).
+            // In-app console + special_settings (skip duplicate tracing::info).
             response_fixer::push_special_setting(
                 ctx.special_settings,
                 serde_json::json!({
@@ -280,6 +277,7 @@ where
                     "sessionId": sticky,
                     "modelId": model_id,
                     "bodyRewritten": body_rewritten,
+                    "headersRepaired": missing_wire_headers,
                     "hasPromptCacheKey": has_prompt_cache_key,
                     "hasXGrokConvId": has_x_grok_conv_id,
                     "hasXGrokSessionId": has_x_grok_session_id,
@@ -292,37 +290,26 @@ where
                 }),
             );
             emit_gateway_log(
-            &input.state.app,
-            "info",
-            "CX2CC_GROK_BUILD_WIRE",
-            format!(
-                "[CX2CC] grok Build-wire stickiness source_cli_key={} session={} model={} prompt_cache_key={} conv={} session_hdr={} model_override={} client_version={} req_id={} agent_id={}",
-                cx2cc_source_cli_key.as_deref().unwrap_or(""),
-                sticky.unwrap_or(""),
-                model_id.as_deref().unwrap_or(""),
-                has_prompt_cache_key,
-                has_x_grok_conv_id,
-                has_x_grok_session_id,
-                has_x_grok_model_override,
-                has_x_grok_client_version,
-                has_x_grok_req_id,
-                has_x_grok_agent_id,
-            ),
-        );
-            tracing::info!(
-                trace_id = %input.trace_id,
-                provider_id = prepared.provider_id,
-                source_cli_key = cx2cc_source_cli_key.as_deref().unwrap_or(""),
-                session_id = sticky.unwrap_or(""),
-                model_id = model_id.as_deref().unwrap_or(""),
-                has_prompt_cache_key,
-                has_x_grok_conv_id,
-                has_x_grok_model_override,
-                has_x_grok_client_version,
-                has_x_grok_req_id,
-                "cx2cc→grok Build-wire stickiness asserted before upstream send"
+                &input.state.app,
+                "info",
+                "CX2CC_GROK_BUILD_WIRE",
+                format!(
+                    "[CX2CC] grok Build-wire stickiness source_cli_key={} session={} model={} prompt_cache_key={} conv={} session_hdr={} model_override={} client_version={} req_id={} agent_id={} repaired_headers={} body_rewritten={}",
+                    cx2cc_source_cli_key.as_deref().unwrap_or(""),
+                    sticky.unwrap_or(""),
+                    model_id.as_deref().unwrap_or(""),
+                    has_prompt_cache_key,
+                    has_x_grok_conv_id,
+                    has_x_grok_session_id,
+                    has_x_grok_model_override,
+                    has_x_grok_client_version,
+                    has_x_grok_req_id,
+                    has_x_grok_agent_id,
+                    missing_wire_headers,
+                    body_rewritten,
+                ),
             );
-        } // end needs_grok_build_wire
+        }
     }
 
     let upstream_body = body_state_for_attempt
