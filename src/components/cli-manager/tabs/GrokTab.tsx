@@ -348,7 +348,7 @@ export function CliManagerGrokTab(props: CliManagerGrokTabProps) {
               value={preferencesDraft.model_id}
               onChange={(e) => props.setModelIdDraft(e.currentTarget.value)}
               onBlur={() => void props.persistModelId(preferencesDraft.model_id)}
-              placeholder="例如 grok-build"
+              placeholder="例如 grok-4.5"
               aria-label="模型 ID (model_id)"
               className="font-mono w-[280px] max-w-full"
               disabled={configControlsDisabled}

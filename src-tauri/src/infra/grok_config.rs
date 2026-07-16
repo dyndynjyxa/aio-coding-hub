@@ -9,7 +9,7 @@ use toml_edit::DocumentMut;
 
 const GROK_HOME_ENV: &str = "GROK_HOME";
 pub(crate) const GROK_CONFIG_MAX_BYTES: usize = 1024 * 1024;
-pub(crate) const DEFAULT_GROK_MODEL: &str = "grok-build";
+pub(crate) const DEFAULT_GROK_MODEL: &str = "grok-4.5";
 const GROK_MODEL_ID_MAX_CHARS: usize = 256;
 
 static PATH_LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
@@ -890,14 +890,15 @@ mod tests {
     }
 
     #[test]
-    fn missing_config_uses_grok_build_responses_candidate() {
+    fn missing_config_uses_default_model_responses_candidate() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("config.toml");
 
         let state = inspect_path(&path).expect("inspect missing config");
 
         assert!(!state.file_exists);
-        assert_eq!(state.preferences.model_id, "grok-build");
+        assert_eq!(state.preferences.model_id, DEFAULT_GROK_MODEL);
+        assert_eq!(state.preferences.model_id, "grok-4.5");
         assert_eq!(state.preferences.api_backend, GrokApiBackend::Responses);
         assert_eq!(state.default_profile, None);
     }
