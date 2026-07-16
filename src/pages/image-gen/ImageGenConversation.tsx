@@ -103,7 +103,6 @@ export function ImageGenConversation({ controller, className }: ImageGenConversa
     prompt,
     setPrompt,
     referenceImages,
-    generating,
     addReferenceFiles,
     removeReferenceImage,
     submit,
@@ -221,12 +220,12 @@ export function ImageGenConversation({ controller, className }: ImageGenConversa
             </Button>
             <Button
               variant="primary"
-              disabled={generating || !prompt.trim()}
+              disabled={!prompt.trim()}
               onClick={() => {
                 void submit();
               }}
             >
-              {generating ? "生成中…" : "生成"}
+              生成
             </Button>
           </div>
         </div>

@@ -1,6 +1,7 @@
-// Usage: 生图页控制器。持有连接配置、生成参数、消息流与参考图状态；页面组件保持哑渲染。
+// Usage: 生图页控制器。持有连接配置与生成参数；会话（消息流/参考图/prompt）经 imageGenSessionStore
+// 模块级保留（跨路由卸载），页面组件保持哑渲染。
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import {
   buildRequestUrlPreview,
@@ -21,6 +22,13 @@ import {
   imageGenSaveImage,
 } from "../../services/image-gen/service";
 import type { ImageGenUsage } from "../../services/image-gen/types";
+import {
+  getImageGenSession,
+  releaseImageGenObjectUrl,
+  subscribeImageGenSession,
+  trackImageGenObjectUrl,
+  updateImageGenSession,
+} from "./imageGenSessionStore";
 import { saveDesktopFilePath } from "../../services/desktop/dialog";
 import { formatUnknownError } from "../../utils/errors";
 
@@ -169,11 +177,14 @@ export function useImageGenController() {
     writeParamsToStorage(params);
   }, [params]);
 
-  // 会话（仅内存态）
-  const [messages, setMessages] = useState<ImageGenMessage[]>([]);
-  const [prompt, setPrompt] = useState("");
-  const [referenceImages, setReferenceImages] = useState<ImageGenReferenceImage[]>([]);
-  const [generating, setGenerating] = useState(false);
+  // 会话：模块级 store（跨路由卸载保留），页面组件只读快照。
+  const { messages, prompt, referenceImages } = useSyncExternalStore(
+    subscribeImageGenSession,
+    getImageGenSession
+  );
+  const setPrompt = useCallback((value: string) => {
+    updateImageGenSession((prev) => ({ ...prev, prompt: value }));
+  }, []);
 
   // 点击预览：同组 objectURL + 当前下标；null = 关闭。
   const [preview, setPreview] = useState<ImageGenPreview | null>(null);
@@ -187,21 +198,6 @@ export function useImageGenController() {
       const index = (prev.index + delta + prev.urls.length) % prev.urls.length;
       return { ...prev, index };
     });
-  }, []);
-
-  // objectURL 生命周期：统一登记，卸载时全量 revoke。
-  const createdUrlsRef = useRef<Set<string>>(new Set());
-  const trackObjectUrl = useCallback((blob: Blob): string => {
-    const url = URL.createObjectURL(blob);
-    createdUrlsRef.current.add(url);
-    return url;
-  }, []);
-  useEffect(() => {
-    const created = createdUrlsRef.current;
-    return () => {
-      for (const url of created) URL.revokeObjectURL(url);
-      created.clear();
-    };
   }, []);
 
   // 配置加载：失败静默（invokeGeneratedIpc 已记日志），页面保持默认可编辑。
@@ -262,97 +258,89 @@ export function useImageGenController() {
     setParams((prev) => ({ ...prev, ...patch }));
   }, []);
 
-  const addReferenceFiles = useCallback(
-    async (files: FileList | File[]) => {
-      const list = Array.from(files);
-      if (list.length === 0) return;
-      const currentBytes = referenceImages.reduce((sum, image) => sum + image.sizeBytes, 0);
-      const addedBytes = list.reduce((sum, file) => sum + file.size, 0);
-      const error = validateReferenceAddition(
-        referenceImages.length,
-        currentBytes,
-        list.length,
-        addedBytes
-      );
-      if (error) {
-        toast.error(error);
-        return;
+  const addReferenceFiles = useCallback(async (files: FileList | File[]) => {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+    const current = getImageGenSession().referenceImages;
+    const currentBytes = current.reduce((sum, image) => sum + image.sizeBytes, 0);
+    const addedBytes = list.reduce((sum, file) => sum + file.size, 0);
+    const error = validateReferenceAddition(current.length, currentBytes, list.length, addedBytes);
+    if (error) {
+      toast.error(error);
+      return;
+    }
+    try {
+      const added: ImageGenReferenceImage[] = [];
+      for (const file of list) {
+        const b64 = await blobToBase64(file);
+        added.push({
+          id: nextId(),
+          mime: file.type || "image/png",
+          b64,
+          sizeBytes: file.size,
+          objectUrl: trackImageGenObjectUrl(file),
+        });
       }
-      try {
-        const added: ImageGenReferenceImage[] = [];
-        for (const file of list) {
-          const b64 = await blobToBase64(file);
-          added.push({
-            id: nextId(),
-            mime: file.type || "image/png",
-            b64,
-            sizeBytes: file.size,
-            objectUrl: trackObjectUrl(file),
-          });
-        }
-        setReferenceImages((prev) => [...prev, ...added]);
-      } catch (err) {
-        toast.error(formatUnknownError(err));
-      }
-    },
-    [referenceImages, trackObjectUrl]
-  );
+      updateImageGenSession((prev) => ({
+        ...prev,
+        referenceImages: [...prev.referenceImages, ...added],
+      }));
+    } catch (err) {
+      toast.error(formatUnknownError(err));
+    }
+  }, []);
 
   const removeReferenceImage = useCallback((id: string) => {
-    setReferenceImages((prev) => {
-      const target = prev.find((image) => image.id === id);
-      if (target) {
-        URL.revokeObjectURL(target.objectUrl);
-        createdUrlsRef.current.delete(target.objectUrl);
-      }
-      return prev.filter((image) => image.id !== id);
+    updateImageGenSession((prev) => {
+      const target = prev.referenceImages.find((image) => image.id === id);
+      if (target) releaseImageGenObjectUrl(target.objectUrl);
+      return { ...prev, referenceImages: prev.referenceImages.filter((image) => image.id !== id) };
     });
   }, []);
 
-  const runGeneration = useCallback(
-    async (assistantId: string, request: GptImageRequest) => {
-      setGenerating(true);
-      try {
-        const result = await gptImageAdapter.generate(request);
-        const images = result.images.map((image) => {
-          const blob = base64ToBlob(image.b64, image.mime);
-          return { blob, mime: image.mime, objectUrl: trackObjectUrl(blob) };
-        });
-        setMessages((prev) =>
-          prev.map((message) =>
-            message.id === assistantId && message.role === "assistant"
-              ? {
-                  ...message,
-                  status: "done" as const,
-                  images,
-                  usage: result.usage,
-                  error: undefined,
-                }
-              : message
-          )
-        );
-      } catch (err) {
-        const error = formatUnknownError(err);
-        setMessages((prev) =>
-          prev.map((message) =>
-            message.id === assistantId && message.role === "assistant"
-              ? { ...message, status: "error" as const, error }
-              : message
-          )
-        );
-      } finally {
-        setGenerating(false);
-      }
-    },
-    [trackObjectUrl]
-  );
+  // 完成回调写模块 store：页面卸载后任务继续完成，回来即见结果。
+  const runGeneration = useCallback(async (assistantId: string, request: GptImageRequest) => {
+    try {
+      const result = await gptImageAdapter.generate(request);
+      const images = result.images.map((image) => {
+        const blob = base64ToBlob(image.b64, image.mime);
+        return { blob, mime: image.mime, objectUrl: trackImageGenObjectUrl(blob) };
+      });
+      updateImageGenSession((prev) => ({
+        ...prev,
+        messages: prev.messages.map((message) =>
+          message.id === assistantId && message.role === "assistant"
+            ? {
+                ...message,
+                status: "done" as const,
+                images,
+                usage: result.usage,
+                error: undefined,
+              }
+            : message
+        ),
+      }));
+    } catch (err) {
+      const error = formatUnknownError(err);
+      updateImageGenSession((prev) => ({
+        ...prev,
+        messages: prev.messages.map((message) =>
+          message.id === assistantId && message.role === "assistant"
+            ? { ...message, status: "error" as const, error }
+            : message
+        ),
+      }));
+    }
+  }, []);
 
+  // 每次提交独立创建消息对并各自生成，互不阻塞。
   const submit = useCallback(async () => {
-    const trimmedPrompt = prompt.trim();
-    if (!trimmedPrompt || generating) return;
+    const session = getImageGenSession();
+    const trimmedPrompt = session.prompt.trim();
+    if (!trimmedPrompt) return;
     const request: GptImageRequest = {
       prompt: trimmedPrompt,
-      referenceImages: referenceImages.map(({ mime, b64 }) => ({ mime, b64 })),
+      referenceImages: session.referenceImages.map(({ mime, b64 }) => ({ mime, b64 })),
       n: params.n,
       size: params.size,
       options: {
@@ -367,69 +355,67 @@ export function useImageGenController() {
       id: nextId(),
       role: "user",
       prompt: trimmedPrompt,
-      refThumbs: referenceImages.map((image) => image.objectUrl),
+      refThumbs: session.referenceImages.map((image) => image.objectUrl),
     };
     const assistantId = nextId();
-    setMessages((prev) => [
-      ...prev,
-      userMessage,
-      { id: assistantId, role: "assistant", status: "loading", images: [], request },
-    ]);
-    setPrompt("");
-    setReferenceImages([]);
+    updateImageGenSession((prev) => ({
+      messages: [
+        ...prev.messages,
+        userMessage,
+        { id: assistantId, role: "assistant", status: "loading", images: [], request },
+      ],
+      referenceImages: [],
+      prompt: "",
+    }));
     await runGeneration(assistantId, request);
-  }, [generating, model, params, prompt, referenceImages, runGeneration]);
+  }, [model, params, runGeneration]);
 
-  // 重试使用消息内的参数快照，不读面板当前值。
+  // 重试使用消息内的参数快照，不读面板当前值；目标消息生成中时忽略。
   const retry = useCallback(
     async (assistantId: string) => {
-      if (generating) return;
-      const message = messages.find((item) => item.id === assistantId);
-      if (!message || message.role !== "assistant") return;
-      setMessages((prev) =>
-        prev.map((item) =>
+      const message = getImageGenSession().messages.find((item) => item.id === assistantId);
+      if (!message || message.role !== "assistant" || message.status === "loading") return;
+      updateImageGenSession((prev) => ({
+        ...prev,
+        messages: prev.messages.map((item) =>
           item.id === assistantId && item.role === "assistant"
             ? { ...item, status: "loading" as const, error: undefined }
             : item
-        )
-      );
+        ),
+      }));
       await runGeneration(assistantId, message.request);
     },
-    [generating, messages, runGeneration]
+    [runGeneration]
   );
 
-  const setAsReference = useCallback(
-    async (image: ImageGenGeneratedImage) => {
-      const currentBytes = referenceImages.reduce((sum, item) => sum + item.sizeBytes, 0);
-      const error = validateReferenceAddition(
-        referenceImages.length,
-        currentBytes,
-        1,
-        image.blob.size
-      );
-      if (error) {
-        toast.error(error);
-        return;
-      }
-      try {
-        const b64 = await blobToBase64(image.blob);
-        setReferenceImages((prev) => [
-          ...prev,
+  const setAsReference = useCallback(async (image: ImageGenGeneratedImage) => {
+    const current = getImageGenSession().referenceImages;
+    const currentBytes = current.reduce((sum, item) => sum + item.sizeBytes, 0);
+    const error = validateReferenceAddition(current.length, currentBytes, 1, image.blob.size);
+    if (error) {
+      toast.error(error);
+      return;
+    }
+    try {
+      const b64 = await blobToBase64(image.blob);
+      updateImageGenSession((prev) => ({
+        ...prev,
+        referenceImages: [
+          ...prev.referenceImages,
           {
             id: nextId(),
             mime: image.mime,
             b64,
             sizeBytes: image.blob.size,
-            objectUrl: trackObjectUrl(image.blob),
+            objectUrl: trackImageGenObjectUrl(image.blob),
           },
-        ]);
-        toast.success("已设为参考图");
-      } catch (err) {
-        toast.error(formatUnknownError(err));
-      }
-    },
-    [referenceImages, trackObjectUrl]
-  );
+        ],
+      }));
+      toast.success("已设为参考图");
+    } catch (err) {
+      toast.error(formatUnknownError(err));
+    }
+  }, []);
 
   const downloadImage = useCallback(async (image: ImageGenGeneratedImage) => {
     try {
@@ -466,7 +452,6 @@ export function useImageGenController() {
     prompt,
     setPrompt,
     referenceImages,
-    generating,
     addReferenceFiles,
     removeReferenceImage,
     submit,

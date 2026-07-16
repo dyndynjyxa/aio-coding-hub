@@ -75,15 +75,17 @@ describe("pages/image-gen/ImageGenConversation", () => {
     expect(screen.getByAltText("参考图 1")).toHaveAttribute("src", "blob:thumb-1");
   });
 
-  it("shows the loading state and disables submit while generating", () => {
+  it("keeps submit enabled while a message is generating", () => {
     const controller = makeController({
       messages: [assistantMessage({ status: "loading" })],
-      generating: true,
       prompt: "下一张",
     });
     render(<ImageGenConversation controller={controller} />);
     expect(screen.getByLabelText("Loading")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "生成中…" })).toBeDisabled();
+    const submitButton = screen.getByRole("button", { name: "生成" });
+    expect(submitButton).toBeEnabled();
+    fireEvent.click(submitButton);
+    expect(controller.submit).toHaveBeenCalled();
   });
 
   it("shows the error message and retries the failed message", () => {

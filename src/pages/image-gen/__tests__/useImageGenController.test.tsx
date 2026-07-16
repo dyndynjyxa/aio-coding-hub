@@ -8,6 +8,8 @@ import {
   imageGenSaveImage,
 } from "../../../services/image-gen/service";
 import { saveDesktopFilePath } from "../../../services/desktop/dialog";
+import type { ImageGenResult } from "../../../services/image-gen/types";
+import { getImageGenSession, resetImageGenSessionForTests } from "../imageGenSessionStore";
 import {
   base64ToBlob,
   DEFAULT_IMAGE_GEN_PARAMS,
@@ -72,6 +74,8 @@ async function renderController() {
 
 describe("pages/image-gen/useImageGenController", () => {
   beforeEach(() => {
+    // 模块 store 跨测试泄漏，必须先重置（会 revoke 上个测试登记的 URL）。
+    resetImageGenSessionForTests();
     vi.clearAllMocks();
     window.localStorage.clear();
     let urlCounter = 0;
@@ -136,7 +140,6 @@ describe("pages/image-gen/useImageGenController", () => {
     expect(assistant.images).toHaveLength(1);
     expect(assistant.usage).toEqual({ totalTokens: 42 });
     expect(result.current.prompt).toBe("");
-    expect(result.current.generating).toBe(false);
   });
 
   it("does nothing for an empty prompt", async () => {
@@ -425,14 +428,142 @@ describe("pages/image-gen/useImageGenController", () => {
     );
   });
 
-  it("revokes all created object urls on unmount", async () => {
+  it("keeps the session across unmount/remount without revoking urls (regression: 路由懒加载卸载)", async () => {
+    vi.mocked(gptImageAdapter.generate).mockResolvedValue({
+      images: [{ mime: "image/png", b64: btoa("img") }],
+    });
     const { result, unmount } = await renderController();
+
+    act(() => {
+      result.current.setPrompt("一只猫");
+    });
+    await act(async () => {
+      await result.current.submit();
+    });
     await act(async () => {
       await result.current.addReferenceFiles([makePngFile()]);
     });
-    const url = result.current.referenceImages[0].objectUrl;
+    act(() => {
+      result.current.setPrompt("草稿");
+    });
+    const refUrl = result.current.referenceImages[0].objectUrl;
+    const generatedUrl = (result.current.messages[1] as ImageGenAssistantMessage).images[0]
+      .objectUrl;
+
     unmount();
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith(url);
+    // 卸载不再全量 revoke（URL 生命周期为应用会话级）。
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+
+    const { result: restored } = await renderController();
+    expect(restored.current.messages).toHaveLength(2);
+    const assistant = restored.current.messages[1] as ImageGenAssistantMessage;
+    expect(assistant.status).toBe("done");
+    expect(assistant.images[0].objectUrl).toBe(generatedUrl);
+    expect(restored.current.prompt).toBe("草稿");
+    expect(restored.current.referenceImages).toHaveLength(1);
+    expect(restored.current.referenceImages[0].objectUrl).toBe(refUrl);
+  });
+
+  it("runs two submissions concurrently without cross-talk", async () => {
+    const deferreds: Array<(value: ImageGenResult) => void> = [];
+    vi.mocked(gptImageAdapter.generate).mockImplementation(
+      () =>
+        new Promise<ImageGenResult>((resolve) => {
+          deferreds.push(resolve);
+        })
+    );
+    const { result } = await renderController();
+
+    act(() => {
+      result.current.setPrompt("第一张");
+    });
+    await act(async () => {
+      void result.current.submit();
+    });
+    act(() => {
+      result.current.setPrompt("第二张");
+    });
+    await act(async () => {
+      void result.current.submit();
+    });
+
+    // 两条 loading assistant 消息共存。
+    expect(result.current.messages).toHaveLength(4);
+    const firstId = result.current.messages[1].id;
+    const secondId = result.current.messages[3].id;
+    expect((result.current.messages[1] as ImageGenAssistantMessage).status).toBe("loading");
+    expect((result.current.messages[3] as ImageGenAssistantMessage).status).toBe("loading");
+    expect(deferreds).toHaveLength(2);
+
+    // 先完成第二个：第一条仍 loading，互不阻塞。
+    await act(async () => {
+      deferreds[1]({
+        images: [{ mime: "image/png", b64: btoa("two") }],
+        usage: { totalTokens: 2 },
+      });
+    });
+    let first = result.current.messages.find((m) => m.id === firstId) as ImageGenAssistantMessage;
+    let second = result.current.messages.find((m) => m.id === secondId) as ImageGenAssistantMessage;
+    expect(first.status).toBe("loading");
+    expect(second.status).toBe("done");
+    expect(second.usage).toEqual({ totalTokens: 2 });
+
+    await act(async () => {
+      deferreds[0]({
+        images: [{ mime: "image/png", b64: btoa("one") }],
+        usage: { totalTokens: 1 },
+      });
+    });
+    first = result.current.messages.find((m) => m.id === firstId) as ImageGenAssistantMessage;
+    second = result.current.messages.find((m) => m.id === secondId) as ImageGenAssistantMessage;
+    expect(first.status).toBe("done");
+    expect(first.usage).toEqual({ totalTokens: 1 });
+    expect(second.usage).toEqual({ totalTokens: 2 });
+    expect(first.images[0].objectUrl).not.toBe(second.images[0].objectUrl);
+  });
+
+  it("finishes an in-flight generation after unmount and writes the result to the store", async () => {
+    let resolveGen!: (value: ImageGenResult) => void;
+    vi.mocked(gptImageAdapter.generate).mockImplementation(
+      () =>
+        new Promise<ImageGenResult>((resolve) => {
+          resolveGen = resolve;
+        })
+    );
+    const { result, unmount } = await renderController();
+    act(() => {
+      result.current.setPrompt("后台完成");
+    });
+    await act(async () => {
+      void result.current.submit();
+    });
+    unmount();
+
+    await act(async () => {
+      resolveGen({ images: [{ mime: "image/png", b64: btoa("bg") }] });
+    });
+    const assistant = getImageGenSession().messages[1] as ImageGenAssistantMessage;
+    expect(assistant.status).toBe("done");
+    expect(assistant.images).toHaveLength(1);
+  });
+
+  it("ignores retry while the target message is still loading", async () => {
+    vi.mocked(gptImageAdapter.generate).mockImplementation(
+      () => new Promise<ImageGenResult>(() => {})
+    );
+    const { result } = await renderController();
+    act(() => {
+      result.current.setPrompt("生成中");
+    });
+    await act(async () => {
+      void result.current.submit();
+    });
+    const assistantId = result.current.messages[1].id;
+
+    await act(async () => {
+      await result.current.retry(assistantId);
+    });
+    expect(gptImageAdapter.generate).toHaveBeenCalledTimes(1);
   });
 
   it("opens, steps (wrapping) and closes the preview", async () => {

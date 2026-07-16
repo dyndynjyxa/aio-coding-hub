@@ -19,7 +19,6 @@ export function makeController(overrides: Partial<ImageGenController> = {}): Ima
     prompt: "",
     setPrompt: vi.fn(),
     referenceImages: [],
-    generating: false,
     addReferenceFiles: vi.fn(async () => {}),
     removeReferenceImage: vi.fn(),
     submit: vi.fn(async () => {}),
