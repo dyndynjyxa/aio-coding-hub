@@ -85,6 +85,12 @@ pub(super) fn maybe_inject_codex_chatgpt_headers(
     }
 }
 
+pub(super) fn strip_client_codex_account_header(cli_key: &str, headers: &mut HeaderMap) {
+    if cli_key == "codex" {
+        headers.remove("chatgpt-account-id");
+    }
+}
+
 fn strip_headers_where(headers: &mut HeaderMap, should_strip: impl Fn(&str) -> bool) {
     let keys_to_remove: Vec<HeaderName> = headers
         .keys()
@@ -163,7 +169,8 @@ mod tests {
     use super::{
         codex_chatgpt_request_compat_value, maybe_apply_codex_chatgpt_request_compat,
         maybe_inject_codex_chatgpt_headers, normalize_codex_chatgpt_forwarded_path,
-        should_apply_claude_model_mapping, strip_incompatible_protocol_headers,
+        should_apply_claude_model_mapping, strip_client_codex_account_header,
+        strip_incompatible_protocol_headers,
     };
     use axum::body::Bytes;
     use axum::http::{header, HeaderMap, HeaderValue};
@@ -305,6 +312,45 @@ mod tests {
                 .get(header::ACCEPT)
                 .and_then(|value| value.to_str().ok()),
             Some("text/event-stream")
+        );
+    }
+
+    #[test]
+    fn strips_client_codex_account_header_for_api_key_upstream() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "chatgpt-account-id",
+            HeaderValue::from_static("acct_client"),
+        );
+        headers.insert("originator", HeaderValue::from_static("codex_cli_rs"));
+
+        strip_client_codex_account_header("codex", &mut headers);
+
+        assert!(!headers.contains_key("chatgpt-account-id"));
+        assert_eq!(
+            headers
+                .get("originator")
+                .and_then(|value| value.to_str().ok()),
+            Some("codex_cli_rs")
+        );
+    }
+
+    #[test]
+    fn reinjects_provider_account_header_for_codex_chatgpt_oauth_upstream() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "chatgpt-account-id",
+            HeaderValue::from_static("acct_client"),
+        );
+
+        strip_client_codex_account_header("codex", &mut headers);
+        maybe_inject_codex_chatgpt_headers(&mut headers, Some("acct_provider"));
+
+        assert_eq!(
+            headers
+                .get("chatgpt-account-id")
+                .and_then(|value| value.to_str().ok()),
+            Some("acct_provider")
         );
     }
 
