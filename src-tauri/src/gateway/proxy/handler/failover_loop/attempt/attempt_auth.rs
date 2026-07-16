@@ -161,10 +161,17 @@ fn inject_standard_auth<R: tauri::Runtime>(
     retry_index: u32,
     headers: &mut HeaderMap,
 ) {
+    // CX2CC must authenticate as the *source* CLI (codex/grok/...), not the
+    // bridge client (claude). Previously this was hard-coded to "codex", which
+    // breaks Grok-specific auth header strategies for CX2CC→Grok.
     let auth_cli_key = if prepared.cx2cc_active {
-        "codex"
+        prepared
+            .cx2cc_source
+            .as_ref()
+            .map(|(_, source_cli_key)| source_cli_key.as_str())
+            .unwrap_or("codex")
     } else {
-        &input.cli_key
+        input.cli_key.as_str()
     };
     inject_provider_auth(auth_cli_key, prepared.effective_credential.trim(), headers);
 

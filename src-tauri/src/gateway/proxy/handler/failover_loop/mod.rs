@@ -26,6 +26,8 @@ mod codex_chatgpt;
 mod codex_service_tier;
 #[path = "prepare/codex_session_id_completion.rs"]
 mod codex_session_id_completion;
+#[path = "prepare/cx2cc_prefix_freeze.rs"]
+mod cx2cc_prefix_freeze;
 #[path = "prepare/cx2cc_preparation.rs"]
 mod cx2cc_preparation;
 #[path = "prepare/oauth.rs"]

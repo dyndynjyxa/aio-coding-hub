@@ -250,6 +250,59 @@ pub(super) async fn prepare<R: tauri::Runtime>(args: Cx2ccPreparationInput<'_, R
         },
     );
 
+    // Phase-1 / 1.5 prefix freeze for Grok-mapped models: pin instructions/tools,
+    // control fields (reasoning/tool_choice/max_output_tokens/…), and reuse
+    // append-only input prefix so xAI prompt cache can hit across turns.
+    {
+        let sticky_session = cx2cc_codex_session_id
+            .as_deref()
+            .or(args.input.session_id.as_deref());
+        let mut body_val: serde_json::Value =
+            serde_json::from_slice(upstream_body_bytes.as_ref()).unwrap_or_default();
+        let model_for_freeze = body_val
+            .get("model")
+            .and_then(|m| m.as_str())
+            .map(str::to_string);
+        let freeze = super::cx2cc_prefix_freeze::apply_grok_prefix_freeze(
+            &mut body_val,
+            sticky_session,
+            model_for_freeze.as_deref(),
+        );
+        if freeze.applied {
+            if let Ok(encoded) = serde_json::to_vec(&body_val) {
+                upstream_body_bytes = Bytes::from(encoded);
+                strip_request_content_encoding = true;
+            }
+            response_fixer::push_special_setting(
+                &args.input.special_settings,
+                serde_json::json!({
+                    "type": "cx2cc_grok_prefix_freeze",
+                    "scope": "request",
+                    "hit": true,
+                    "sessionId": freeze.session_id,
+                    "model": freeze.model,
+                    "instructions": freeze.instructions,
+                    "tools": freeze.tools,
+                    "input": freeze.input,
+                    "extras": freeze.extras,
+                    "instructionsSha16": freeze.instructions_sha16,
+                    "toolsSha16": freeze.tools_sha16,
+                    "inputLen": freeze.input_len,
+                    "inputPrefixLen": freeze.input_prefix_len,
+                    "maxOutputTokens": freeze.max_output_tokens,
+                    "toolChoiceSha16": freeze.tool_choice_sha16,
+                    "reasoningSha16": freeze.reasoning_sha16,
+                }),
+            );
+            emit_gateway_log(
+                &args.input.state.app,
+                "info",
+                "CX2CC_GROK_PREFIX_FREEZE",
+                format!("[CX2CC] grok prefix freeze {}", freeze.log_line()),
+            );
+        }
+    }
+
     // Re-detect Codex ChatGPT backend using source provider.
     if let Some(source) = source.as_ref() {
         let cx2cc_is_chatgpt =
