@@ -85,6 +85,19 @@ describe("services/image-gen/service", () => {
     expect(JSON.stringify(vi.mocked(logToConsole).mock.calls)).not.toContain("sk-secret");
   });
 
+  it("imageGenConfigSet never logs the api key value on the success path either", async () => {
+    vi.mocked(commands.imageGenConfigSet).mockResolvedValue({ status: "ok", data: CONFIG_VIEW });
+    await expect(
+      imageGenConfigSet(
+        IMAGE_GEN_ADAPTER_ID,
+        "https://api.example.com/v1",
+        "gpt-image-2",
+        "sk-secret"
+      )
+    ).resolves.toEqual(CONFIG_VIEW);
+    expect(JSON.stringify(vi.mocked(logToConsole).mock.calls)).not.toContain("sk-secret");
+  });
+
   it("imageGenConfigSet passes null through to preserve the stored key", async () => {
     vi.mocked(commands.imageGenConfigSet).mockResolvedValue({ status: "ok", data: CONFIG_VIEW });
     await imageGenConfigSet(

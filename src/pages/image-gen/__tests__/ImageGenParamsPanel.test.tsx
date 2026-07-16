@@ -25,9 +25,20 @@ describe("pages/image-gen/ImageGenParamsPanel", () => {
       target: { value: "gpt-image-2-2026-04-21" },
     });
     expect(controller.setModel).toHaveBeenCalledWith("gpt-image-2-2026-04-21");
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
-    expect(controller.saveConfig).toHaveBeenCalled();
+  it("auto-saves the config when any connection input loses focus", () => {
+    const controller = makeController();
+    render(<ImageGenParamsPanel controller={controller} />);
+
+    fireEvent.blur(screen.getByLabelText("Base URL"));
+    expect(controller.autoSaveConfig).toHaveBeenCalledTimes(1);
+
+    fireEvent.blur(screen.getByLabelText("API Key"));
+    expect(controller.autoSaveConfig).toHaveBeenCalledTimes(2);
+
+    fireEvent.blur(screen.getByLabelText("模型"));
+    expect(controller.autoSaveConfig).toHaveBeenCalledTimes(3);
   });
 
   it("shows the configured state and the request url preview", () => {
@@ -45,31 +56,6 @@ describe("pages/image-gen/ImageGenParamsPanel", () => {
     expect(
       screen.getByText("请求 URL：https://api.example.com/v1/images/generations")
     ).toBeInTheDocument();
-  });
-
-  it("disables the save button while saving", () => {
-    render(<ImageGenParamsPanel controller={makeController({ savingConfig: true })} />);
-    expect(screen.getByRole("button", { name: "保存中…" })).toBeDisabled();
-  });
-
-  it("clears the config after confirmation", () => {
-    const controller = makeController();
-    render(<ImageGenParamsPanel controller={controller} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "清空配置" }));
-    expect(controller.clearConfig).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole("button", { name: "清空" }));
-    expect(controller.clearConfig).toHaveBeenCalled();
-  });
-
-  it("cancels config clearing from the confirm dialog", () => {
-    const controller = makeController();
-    render(<ImageGenParamsPanel controller={controller} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "清空配置" }));
-    fireEvent.click(screen.getByRole("button", { name: "取消" }));
-    expect(controller.clearConfig).not.toHaveBeenCalled();
   });
 
   it("disables compression for png and updates it for jpeg", () => {

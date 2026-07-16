@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ImageGenTaskPanel } from "../ImageGenTaskPanel";
 import type { ImageGenGeneratedImage, ImageGenReferenceImage } from "../useImageGenController";
@@ -50,7 +50,7 @@ describe("pages/image-gen/ImageGenTaskPanel", () => {
     expect(screen.getByText("一只猫")).toBeInTheDocument();
     // chips：尺寸 + 质量（默认参数均为 auto，两枚 chip）
     expect(screen.getAllByText("auto")).toHaveLength(2);
-    expect(screen.getByText("耗时 03:06")).toBeInTheDocument();
+    expect(screen.getByText("耗时 3m6.0s")).toBeInTheDocument();
   });
 
   it("opens the detail dialog when a card is clicked", () => {
@@ -66,15 +66,27 @@ describe("pages/image-gen/ImageGenTaskPanel", () => {
       tasks: [makeTask({ status: "loading", startedAt: Date.now(), images: [] })],
     });
     render(<ImageGenTaskPanel controller={controller} />);
-    expect(screen.getByText("00:00")).toBeInTheDocument();
+    expect(screen.getByText("0ms")).toBeInTheDocument();
 
     act(() => {
       vi.advanceTimersByTime(61_000);
     });
-    expect(screen.getByText("01:01")).toBeInTheDocument();
+    expect(screen.getByText("1m1.0s")).toBeInTheDocument();
   });
 
-  it("renders an error card with truncated message, retry and delete", () => {
+  it("cancels a loading task directly without confirmation", () => {
+    const controller = makeController({
+      tasks: [makeTask({ id: "l1", status: "loading", images: [] })],
+    });
+    render(<ImageGenTaskPanel controller={controller} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    // 直删无确认弹窗。
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(controller.deleteTask).toHaveBeenCalledWith("l1");
+  });
+
+  it("renders an error card and deletes only after confirmation", () => {
     const controller = makeController({
       tasks: [makeTask({ id: "e1", status: "error", error: "HTTP 500: boom", images: [] })],
     });
@@ -83,11 +95,28 @@ describe("pages/image-gen/ImageGenTaskPanel", () => {
     expect(screen.getByText("HTTP 500: boom")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     expect(controller.retry).toHaveBeenCalledWith("e1");
+
+    // 删除需二次确认：点卡片删除只开弹窗。
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    expect(controller.deleteTask).not.toHaveBeenCalled();
+    expect(screen.getByText("删除任务")).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "删除" }));
     expect(controller.deleteTask).toHaveBeenCalledWith("e1");
+
     // error 卡也可点开详情
     fireEvent.click(screen.getByRole("button", { name: "查看任务详情：一只猫" }));
     expect(controller.openDetail).toHaveBeenCalledWith("e1");
+  });
+
+  it("cancels the error-card deletion from the confirm dialog", () => {
+    const controller = makeController({
+      tasks: [makeTask({ id: "e1", status: "error", error: "boom", images: [] })],
+    });
+    render(<ImageGenTaskPanel controller={controller} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "取消" }));
+    expect(controller.deleteTask).not.toHaveBeenCalled();
   });
 
   it("filters rendered cards by search query (case-insensitive) and shows newest first", () => {
@@ -188,6 +217,46 @@ describe("pages/image-gen/ImageGenTaskPanel", () => {
   it("disables submit when the prompt is empty", () => {
     render(<ImageGenTaskPanel controller={makeController({ prompt: "  " })} />);
     expect(screen.getByRole("button", { name: "生成" })).toBeDisabled();
+  });
+
+  it("shows the in-memory retention hint only when tasks exist", () => {
+    const { unmount } = render(<ImageGenTaskPanel controller={makeController()} />);
+    expect(screen.queryByText("生成记录仅本次运行保留，重启后清空")).not.toBeInTheDocument();
+    unmount();
+
+    render(<ImageGenTaskPanel controller={makeController({ tasks: [makeTask()] })} />);
+    expect(screen.getByText("生成记录仅本次运行保留，重启后清空")).toBeInTheDocument();
+  });
+
+  it("advertises paste/drag and the Ctrl+Enter shortcut in the prompt placeholder", () => {
+    render(<ImageGenTaskPanel controller={makeController()} />);
+    expect(screen.getByLabelText("提示词")).toHaveAttribute(
+      "placeholder",
+      "描述你想生成的图片…（支持粘贴 / 拖拽参考图，Ctrl+Enter 生成）"
+    );
+  });
+
+  it("submits on Ctrl+Enter and Cmd+Enter when the prompt is non-empty", () => {
+    const controller = makeController({ prompt: "一只猫" });
+    render(<ImageGenTaskPanel controller={controller} />);
+    const textarea = screen.getByLabelText("提示词");
+
+    fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+    expect(controller.submit).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
+    expect(controller.submit).toHaveBeenCalledTimes(2);
+
+    // 普通 Enter 不提交（保留换行）。
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(controller.submit).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores Ctrl+Enter when the prompt is blank", () => {
+    const controller = makeController({ prompt: "  " });
+    render(<ImageGenTaskPanel controller={controller} />);
+    fireEvent.keyDown(screen.getByLabelText("提示词"), { key: "Enter", ctrlKey: true });
+    expect(controller.submit).not.toHaveBeenCalled();
   });
 
   it("highlights the drop zone on file drag over and clears on leave", () => {

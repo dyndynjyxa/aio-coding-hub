@@ -401,5 +401,34 @@ describe("services/image-gen/gptImageAdapter", () => {
       expect(imageGenFetchImage).toHaveBeenCalledWith("https://cdn.example.com/a.png");
       expect(result.images).toEqual([{ mime: "image/png", b64: "DL" }]);
     });
+
+    it("resolves mixed b64_json and url entries in order within one response", async () => {
+      vi.mocked(imageGenPostJson).mockResolvedValue({
+        status: 200,
+        bodyText: JSON.stringify({
+          data: [{ b64_json: "AAA" }, { url: "https://cdn.example.com/b.jpg" }],
+        }),
+      });
+      vi.mocked(imageGenFetchImage).mockResolvedValue({ mime: "image/jpeg", dataB64: "BBB" });
+
+      const result = await gptImageAdapter.generate(makeRequest());
+
+      expect(imageGenFetchImage).toHaveBeenCalledTimes(1);
+      expect(imageGenFetchImage).toHaveBeenCalledWith("https://cdn.example.com/b.jpg");
+      expect(result.images).toEqual([
+        { mime: "image/png", b64: "AAA" },
+        { mime: "image/jpeg", b64: "BBB" },
+      ]);
+    });
+
+    it("rejects the whole generate with a readable error when the url fallback download fails", async () => {
+      vi.mocked(imageGenPostJson).mockResolvedValue({
+        status: 200,
+        bodyText: JSON.stringify({ data: [{ url: "https://cdn.example.com/a.png" }] }),
+      });
+      vi.mocked(imageGenFetchImage).mockRejectedValue(new Error("下载生成图片失败"));
+
+      await expect(gptImageAdapter.generate(makeRequest())).rejects.toThrow("下载生成图片失败");
+    });
   });
 });

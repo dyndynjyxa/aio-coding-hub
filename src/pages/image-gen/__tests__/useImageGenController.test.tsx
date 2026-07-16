@@ -59,6 +59,13 @@ const EMPTY_CONFIG = {
   apiKeyConfigured: false,
 };
 
+const CONFIGURED_CONFIG = {
+  adapterId: "gpt-image",
+  baseUrl: "https://api.example.com/v1",
+  model: "gpt-image-2",
+  apiKeyConfigured: true,
+};
+
 function makePngFile(name = "ref.png", sizeBytes?: number): File {
   const file = new File(["fake-image-bytes"], name, { type: "image/png" });
   if (sizeBytes != null) {
@@ -67,11 +74,21 @@ function makePngFile(name = "ref.png", sizeBytes?: number): File {
   return file;
 }
 
+function makeGeneratedImage() {
+  return {
+    objectUrl: "blob:external",
+    mime: "image/png",
+    blob: new Blob(["x"], { type: "image/png" }),
+  };
+}
+
 async function renderController() {
   const rendered = renderHook(() => useImageGenController());
   await waitFor(() => {
     expect(imageGenConfigGet).toHaveBeenCalled();
   });
+  // 冲刷配置加载 promise，保证提交守卫读到已回填的连接配置。
+  await act(async () => {});
   return rendered;
 }
 
@@ -87,7 +104,8 @@ describe("pages/image-gen/useImageGenController", () => {
       return `blob:mock-${urlCounter}`;
     });
     URL.revokeObjectURL = vi.fn();
-    vi.mocked(imageGenConfigGet).mockResolvedValue(EMPTY_CONFIG);
+    // 默认返回已配置视图：提交守卫（Base URL + API Key）在多数用例中应放行。
+    vi.mocked(imageGenConfigGet).mockResolvedValue(CONFIGURED_CONFIG);
   });
 
   it("hydrates connection config from the backend", async () => {
@@ -358,40 +376,6 @@ describe("pages/image-gen/useImageGenController", () => {
     expect(toast.success).toHaveBeenCalledWith("已清空任务");
   });
 
-  it("clears the stored connection config", async () => {
-    vi.mocked(imageGenConfigGet).mockResolvedValue({
-      adapterId: "gpt-image",
-      baseUrl: "https://api.example.com/v1",
-      model: "gpt-image-2",
-      apiKeyConfigured: true,
-    });
-    vi.mocked(imageGenConfigSet).mockResolvedValue(EMPTY_CONFIG);
-    const { result } = await renderController();
-    await waitFor(() => {
-      expect(result.current.apiKeyConfigured).toBe(true);
-    });
-
-    await act(async () => {
-      await result.current.clearConfig();
-    });
-
-    expect(imageGenConfigSet).toHaveBeenCalledWith("gpt-image", "", "", "");
-    expect(result.current.baseUrl).toBe("");
-    expect(result.current.model).toBe("gpt-image-2");
-    expect(result.current.apiKeyConfigured).toBe(false);
-    expect(toast.success).toHaveBeenCalledWith("生图配置已清空");
-  });
-
-  it("toasts when clearing config fails", async () => {
-    vi.mocked(imageGenConfigSet).mockRejectedValue(new Error("db"));
-    const { result } = await renderController();
-    await act(async () => {
-      await result.current.clearConfig();
-    });
-    expect(toast.error).toHaveBeenCalledWith("清空生图配置失败：请查看控制台日志");
-    expect(result.current.savingConfig).toBe(false);
-  });
-
   it("opens and closes the task detail, deriving the task from the store", async () => {
     vi.mocked(gptImageAdapter.generate).mockResolvedValue({
       images: [{ mime: "image/png", b64: btoa("img") }],
@@ -501,6 +485,137 @@ describe("pages/image-gen/useImageGenController", () => {
     expect(toast.success).toHaveBeenCalledWith("已设为参考图");
   });
 
+  it("blocks setAsReference at the 16-image limit", async () => {
+    const { result } = await renderController();
+    const files = Array.from({ length: 16 }, (_, index) => makePngFile(`f${index}.png`));
+    await act(async () => {
+      await result.current.addReferenceFiles(files);
+    });
+    expect(result.current.referenceImages).toHaveLength(16);
+    const before = result.current.referenceImages;
+
+    await act(async () => {
+      await result.current.setAsReference(makeGeneratedImage());
+    });
+    expect(toast.error).toHaveBeenCalledWith("参考图最多 16 张");
+    expect(result.current.referenceImages).toBe(before);
+    expect(toast.success).not.toHaveBeenCalledWith("已设为参考图");
+  });
+
+  it("blocks setAsReference above the 30MB total budget", async () => {
+    const { result } = await renderController();
+    await act(async () => {
+      await result.current.addReferenceFiles([makePngFile("big.png", 30 * 1024 * 1024)]);
+    });
+    expect(result.current.referenceImages).toHaveLength(1);
+
+    await act(async () => {
+      await result.current.setAsReference(makeGeneratedImage());
+    });
+    expect(toast.error).toHaveBeenCalledWith("参考图合计不能超过 30MB");
+    expect(result.current.referenceImages).toHaveLength(1);
+  });
+
+  it("updates error and elapsed across consecutive failed retries without leaking urls", async () => {
+    vi.mocked(gptImageAdapter.generate).mockRejectedValueOnce(new Error("第一次失败"));
+    const { result } = await renderController();
+    act(() => {
+      result.current.setPrompt("连续失败");
+    });
+    await act(async () => {
+      await result.current.submit();
+    });
+    const first = result.current.tasks[0];
+    expect(first.status).toBe("error");
+    expect(first.error).toContain("第一次失败");
+    const urlsAfterSubmit = vi.mocked(URL.createObjectURL).mock.calls.length;
+
+    // 第二次失败：固定时钟证明 startedAt/elapsedMs 随重试更新。
+    const base = first.startedAt;
+    vi.mocked(gptImageAdapter.generate).mockRejectedValueOnce(new Error("第二次失败"));
+    const nowSpy = vi
+      .spyOn(Date, "now")
+      .mockReturnValueOnce(base + 5000)
+      .mockReturnValue(base + 6234);
+    await act(async () => {
+      await result.current.retry(first.id);
+    });
+    nowSpy.mockRestore();
+    const second = result.current.tasks[0];
+    expect(second.status).toBe("error");
+    expect(second.error).toContain("第二次失败");
+    expect(second.startedAt).toBe(base + 5000);
+    expect(second.elapsedMs).toBe(1234);
+
+    // 第三次失败：错误继续更新，三次调用共享同一份请求快照。
+    vi.mocked(gptImageAdapter.generate).mockRejectedValueOnce(new Error("第三次失败"));
+    await act(async () => {
+      await result.current.retry(second.id);
+    });
+    const third = result.current.tasks[0];
+    expect(third.error).toContain("第三次失败");
+    const calls = vi.mocked(gptImageAdapter.generate).mock.calls;
+    expect(calls).toHaveLength(3);
+    expect(calls[1][0]).toBe(calls[0][0]);
+    expect(calls[2][0]).toBe(calls[0][0]);
+    // 失败路径从不创建生成图 objectURL（无泄漏）。
+    expect(vi.mocked(URL.createObjectURL).mock.calls.length).toBe(urlsAfterSubmit);
+  });
+
+  it("closes the preview when the deleted task owns the previewed image", async () => {
+    vi.mocked(gptImageAdapter.generate).mockResolvedValue({
+      images: [{ mime: "image/png", b64: btoa("img") }],
+    });
+    const { result } = await renderController();
+    act(() => {
+      result.current.setPrompt("预览中删除");
+    });
+    await act(async () => {
+      await result.current.submit();
+    });
+    const task = result.current.tasks[0];
+    act(() => {
+      result.current.openPreview(
+        task.images.map((image) => image.objectUrl),
+        0
+      );
+    });
+    expect(result.current.preview).not.toBeNull();
+
+    act(() => {
+      result.current.deleteTask(task.id);
+    });
+    expect(result.current.preview).toBeNull();
+  });
+
+  it("keeps the preview open when deleting an unrelated task", async () => {
+    vi.mocked(gptImageAdapter.generate).mockResolvedValue({
+      images: [{ mime: "image/png", b64: btoa("img") }],
+    });
+    const { result } = await renderController();
+    act(() => {
+      result.current.setPrompt("第一张");
+    });
+    await act(async () => {
+      await result.current.submit();
+    });
+    act(() => {
+      result.current.setPrompt("第二张");
+    });
+    await act(async () => {
+      await result.current.submit();
+    });
+    const [taskA, taskB] = result.current.tasks;
+    act(() => {
+      result.current.openPreview([taskB.images[0].objectUrl], 0);
+    });
+
+    act(() => {
+      result.current.deleteTask(taskA.id);
+    });
+    expect(result.current.preview).toEqual({ urls: [taskB.images[0].objectUrl], index: 0 });
+  });
+
   it("downloads a generated image through the save dialog", async () => {
     vi.mocked(saveDesktopFilePath).mockResolvedValue("/tmp/out.png");
     vi.mocked(imageGenSaveImage).mockResolvedValue(true);
@@ -548,32 +663,9 @@ describe("pages/image-gen/useImageGenController", () => {
     expect(toast.error).toHaveBeenCalledWith("保存图片失败：请查看控制台日志");
   });
 
-  it("validates required fields before saving config", async () => {
-    const { result } = await renderController();
-    await act(async () => {
-      await result.current.saveConfig();
-    });
-    expect(toast.error).toHaveBeenCalledWith("请填写 Base URL");
-    expect(imageGenConfigSet).not.toHaveBeenCalled();
-
-    act(() => {
-      result.current.setBaseUrl("api.example.com");
-      result.current.setModel("  ");
-    });
-    await act(async () => {
-      await result.current.saveConfig();
-    });
-    expect(toast.error).toHaveBeenCalledWith("请填写模型 ID");
-    expect(imageGenConfigSet).not.toHaveBeenCalled();
-  });
-
-  it("saves config with a normalized base url and a new api key", async () => {
-    vi.mocked(imageGenConfigSet).mockResolvedValue({
-      adapterId: "gpt-image",
-      baseUrl: "https://api.example.com/v1",
-      model: "gpt-image-2",
-      apiKeyConfigured: true,
-    });
+  it("auto-saves on blur with a normalized base url and a new api key, silently on success", async () => {
+    vi.mocked(imageGenConfigGet).mockResolvedValue(EMPTY_CONFIG);
+    vi.mocked(imageGenConfigSet).mockResolvedValue(CONFIGURED_CONFIG);
     const { result } = await renderController();
 
     act(() => {
@@ -581,7 +673,7 @@ describe("pages/image-gen/useImageGenController", () => {
       result.current.setApiKeyDraft("sk-new");
     });
     await act(async () => {
-      await result.current.saveConfig();
+      await result.current.autoSaveConfig();
     });
 
     expect(imageGenConfigSet).toHaveBeenCalledWith(
@@ -590,24 +682,32 @@ describe("pages/image-gen/useImageGenController", () => {
       "gpt-image-2",
       "sk-new"
     );
+    // 成功回填规整后的视图并清空草稿，且静默无 toast。
+    expect(result.current.baseUrl).toBe("https://api.example.com/v1");
     expect(result.current.apiKeyConfigured).toBe(true);
     expect(result.current.apiKeyDraft).toBe("");
-    expect(toast.success).toHaveBeenCalledWith("生图配置已保存");
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
   });
 
-  it("preserves the stored key by passing null when the draft is empty", async () => {
-    vi.mocked(imageGenConfigSet).mockResolvedValue({
-      adapterId: "gpt-image",
-      baseUrl: "https://api.example.com/v1",
-      model: "gpt-image-2",
-      apiKeyConfigured: true,
+  it("skips auto-save silently when the base url is empty", async () => {
+    vi.mocked(imageGenConfigGet).mockResolvedValue(EMPTY_CONFIG);
+    const { result } = await renderController();
+    await act(async () => {
+      await result.current.autoSaveConfig();
     });
+    expect(imageGenConfigSet).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("auto-save preserves the stored key with null and falls back to the default model", async () => {
+    vi.mocked(imageGenConfigSet).mockResolvedValue(CONFIGURED_CONFIG);
     const { result } = await renderController();
     act(() => {
-      result.current.setBaseUrl("https://api.example.com/v1");
+      result.current.setModel("   ");
     });
     await act(async () => {
-      await result.current.saveConfig();
+      await result.current.autoSaveConfig();
     });
     expect(imageGenConfigSet).toHaveBeenCalledWith(
       "gpt-image",
@@ -617,17 +717,67 @@ describe("pages/image-gen/useImageGenController", () => {
     );
   });
 
-  it("toasts when saving config fails", async () => {
+  it("toasts when auto-save fails", async () => {
     vi.mocked(imageGenConfigSet).mockRejectedValue(new Error("db"));
     const { result } = await renderController();
     act(() => {
       result.current.setBaseUrl("https://api.example.com/v1");
     });
     await act(async () => {
-      await result.current.saveConfig();
+      await result.current.autoSaveConfig();
     });
     expect(toast.error).toHaveBeenCalledWith("保存生图配置失败：请查看控制台日志");
-    expect(result.current.savingConfig).toBe(false);
+  });
+
+  it("blocks submit with a toast when the connection config is missing", async () => {
+    vi.mocked(imageGenConfigGet).mockResolvedValue(EMPTY_CONFIG);
+    const { result } = await renderController();
+    act(() => {
+      result.current.setPrompt("一只猫");
+    });
+    await act(async () => {
+      await result.current.submit();
+    });
+    expect(toast.error).toHaveBeenCalledWith("请先在左侧完成连接配置（Base URL 与 API Key）");
+    expect(gptImageAdapter.generate).not.toHaveBeenCalled();
+    expect(result.current.tasks).toHaveLength(0);
+  });
+
+  it("blocks submit when the base url exists but no api key is configured or drafted", async () => {
+    vi.mocked(imageGenConfigGet).mockResolvedValue({
+      ...EMPTY_CONFIG,
+      baseUrl: "https://api.example.com/v1",
+    });
+    const { result } = await renderController();
+    act(() => {
+      result.current.setPrompt("一只猫");
+    });
+    await act(async () => {
+      await result.current.submit();
+    });
+    expect(toast.error).toHaveBeenCalledWith("请先在左侧完成连接配置（Base URL 与 API Key）");
+    expect(gptImageAdapter.generate).not.toHaveBeenCalled();
+    expect(result.current.tasks).toHaveLength(0);
+  });
+
+  it("allows submit with an unsaved api key draft", async () => {
+    vi.mocked(imageGenConfigGet).mockResolvedValue({
+      ...EMPTY_CONFIG,
+      baseUrl: "https://api.example.com/v1",
+    });
+    vi.mocked(gptImageAdapter.generate).mockResolvedValue({
+      images: [{ mime: "image/png", b64: btoa("img") }],
+    });
+    const { result } = await renderController();
+    act(() => {
+      result.current.setApiKeyDraft("sk-draft");
+      result.current.setPrompt("一只猫");
+    });
+    await act(async () => {
+      await result.current.submit();
+    });
+    expect(gptImageAdapter.generate).toHaveBeenCalled();
+    expect(result.current.tasks).toHaveLength(1);
   });
 
   it("persists generation params to localStorage and restores them", async () => {

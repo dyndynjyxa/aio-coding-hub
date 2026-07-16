@@ -55,6 +55,7 @@ fn config_set_replace_clear_preserve_semantics() {
     .expect("set preserve");
     assert!(view.api_key_configured);
     assert_eq!(view.base_url, "https://api2.example.com");
+    assert_eq!(view.model, "gpt-image-2-2026-04-21");
     let (base_url, api_key) = config_connection(&db, "gpt-image").expect("connection");
     assert_eq!(base_url, "https://api2.example.com");
     assert_eq!(api_key, "sk-secret");
@@ -63,7 +64,7 @@ fn config_set_replace_clear_preserve_semantics() {
     let view = config_set(
         &db,
         "gpt-image",
-        "https://api2.example.com",
+        "https://api3.example.com",
         "gpt-image-2",
         Some(""),
     )
@@ -71,6 +72,11 @@ fn config_set_replace_clear_preserve_semantics() {
     assert!(!view.api_key_configured);
     let (_base_url, api_key) = config_connection(&db, "gpt-image").expect("connection");
     assert_eq!(api_key, "");
+    // clear 只清 key：base_url/model 同请求值一并落库。
+    let persisted = config_get(&db, "gpt-image").expect("config_get after clear");
+    assert_eq!(persisted.base_url, "https://api3.example.com");
+    assert_eq!(persisted.model, "gpt-image-2");
+    assert!(!persisted.api_key_configured);
 }
 
 #[test]

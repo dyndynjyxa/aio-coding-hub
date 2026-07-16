@@ -202,7 +202,6 @@ export function useImageGenController() {
   const [model, setModel] = useState(DEFAULT_IMAGE_GEN_MODEL);
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
-  const [savingConfig, setSavingConfig] = useState(false);
 
   // 生成参数（localStorage 记忆默认值）
   const [params, setParams] = useState<ImageGenParams>(() => readParamsFromStorage());
@@ -267,55 +266,28 @@ export function useImageGenController() {
     [baseUrl]
   );
 
-  const saveConfig = useCallback(async () => {
+  // 连接配置自动保存：三个输入框 blur 触发；baseUrl 为空时静默跳过；成功静默回填规整值，
+  // 失败 toast。blur 天然去抖；连续 blur 的并发写以最后一次完成为准（简单 async，无需队列）。
+  const autoSaveConfig = useCallback(async () => {
     const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
-    const trimmedModel = model.trim();
-    if (!normalizedBaseUrl) {
-      toast.error("请填写 Base URL");
-      return;
-    }
-    if (!trimmedModel) {
-      toast.error("请填写模型 ID");
-      return;
-    }
-    setSavingConfig(true);
+    if (!normalizedBaseUrl) return;
     try {
       const trimmedKey = apiKeyDraft.trim();
       // 仅在用户输入了新值时传值；null = 保留现有 key。
       const view = await imageGenConfigSet(
         IMAGE_GEN_ADAPTER_ID,
         normalizedBaseUrl,
-        trimmedModel,
+        model.trim() || DEFAULT_IMAGE_GEN_MODEL,
         trimmedKey ? trimmedKey : null
       );
       setBaseUrl(view.baseUrl);
       setModel(view.model);
       setApiKeyConfigured(view.apiKeyConfigured);
       setApiKeyDraft("");
-      toast.success("生图配置已保存");
     } catch {
       toast.error("保存生图配置失败：请查看控制台日志");
-    } finally {
-      setSavingConfig(false);
     }
   }, [apiKeyDraft, baseUrl, model]);
-
-  // 清空连接配置：base_url/model/api_key 全清（apiKey 传 "" = 后端清空语义）。
-  const clearConfig = useCallback(async () => {
-    setSavingConfig(true);
-    try {
-      await imageGenConfigSet(IMAGE_GEN_ADAPTER_ID, "", "", "");
-      setBaseUrl("");
-      setModel(DEFAULT_IMAGE_GEN_MODEL);
-      setApiKeyDraft("");
-      setApiKeyConfigured(false);
-      toast.success("生图配置已清空");
-    } catch {
-      toast.error("清空生图配置失败：请查看控制台日志");
-    } finally {
-      setSavingConfig(false);
-    }
-  }, []);
 
   const updateParams = useCallback((patch: Partial<ImageGenParams>) => {
     setParams((prev) => ({ ...prev, ...patch }));
@@ -421,6 +393,11 @@ export function useImageGenController() {
 
   // 每次提交独立创建任务并各自生成，互不阻塞。
   const submit = useCallback(async () => {
+    // 配置守卫：Base URL 或 API Key（已存 / 草稿）缺失时提示，不创建任务。
+    if (!normalizeBaseUrl(baseUrl) || (!apiKeyConfigured && !apiKeyDraft.trim())) {
+      toast.error("请先在左侧完成连接配置（Base URL 与 API Key）");
+      return;
+    }
     const session = getImageGenSession();
     const trimmedPrompt = session.prompt.trim();
     if (!trimmedPrompt) return;
@@ -457,7 +434,7 @@ export function useImageGenController() {
       prompt: "",
     }));
     await runGeneration(taskId, request);
-  }, [model, params, runGeneration]);
+  }, [apiKeyConfigured, apiKeyDraft, baseUrl, model, params, runGeneration]);
 
   // 重试使用任务内的参数快照，不读面板当前值；目标任务生成中时忽略。
   // startedAt 重置计时，createdAt 保持创建时间不变。
@@ -478,12 +455,16 @@ export function useImageGenController() {
     [runGeneration]
   );
 
-  // 删除任务：释放全部 objectURL（refThumbs + 生成图）后移出 store；loading 中也允许删除，
-  // 在途完成回调会因任务不存在而丢弃结果（见 runGeneration）。
+  // 删除任务：释放全部 objectURL（refThumbs + 生成图）后移出 store；loading 中也允许删除
+  // （即"取消"），在途完成回调会因任务不存在而丢弃结果（见 runGeneration）。
   const deleteTask = useCallback((taskId: string) => {
+    const target = getImageGenSession().tasks.find((task) => task.id === taskId);
+    if (!target) return;
+    // 预览正持有被删任务的图片 URL 时同步关闭（与 clearTasks 对齐）。
+    setPreview((prev) =>
+      prev && target.images.some((image) => prev.urls.includes(image.objectUrl)) ? null : prev
+    );
     updateImageGenSession((prev) => {
-      const target = prev.tasks.find((task) => task.id === taskId);
-      if (!target) return prev;
       for (const url of target.refThumbs) releaseImageGenObjectUrl(url);
       for (const image of target.images) releaseImageGenObjectUrl(image.objectUrl);
       return { ...prev, tasks: prev.tasks.filter((task) => task.id !== taskId) };
@@ -588,10 +569,8 @@ export function useImageGenController() {
     apiKeyDraft,
     setApiKeyDraft,
     apiKeyConfigured,
-    savingConfig,
     requestUrlPreview,
-    saveConfig,
-    clearConfig,
+    autoSaveConfig,
     // 生成参数
     params,
     updateParams,

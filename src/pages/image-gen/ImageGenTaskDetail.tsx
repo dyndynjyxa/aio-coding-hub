@@ -1,5 +1,6 @@
 // Usage: 生图任务详情弹窗（哑组件，由页面挂载）。左侧大图（n>1 缩略图切换、点击开灯箱），
-// 右侧输入内容/参数快照/创建时间与耗时/tokens 与预估费用；操作：复用配置/下载/设为参考图/删除（二次确认）。
+// 右侧输入内容/参数快照/创建时间与耗时/tokens 与预估费用；操作：复用配置（输入区非空时二次确认）/
+// 下载/设为参考图/删除（二次确认）。
 
 import { useState } from "react";
 import { toast } from "sonner";
@@ -7,7 +8,7 @@ import { copyText } from "../../services/clipboard";
 import { estimateGptImageCostUsd } from "../../services/image-gen/gptImageAdapter";
 import type { ImageGenUsage } from "../../services/image-gen/types";
 import { cn } from "../../utils/cn";
-import { formatCountdownSeconds } from "../../utils/formatters";
+import { formatDurationMs, formatUsdCompact } from "../../utils/formatters";
 import { Button } from "../../ui/Button";
 import { ConfirmDialog } from "../../ui/ConfirmDialog";
 import { Dialog } from "../../ui/Dialog";
@@ -57,10 +58,21 @@ function TaskDetailContent({
   task: ImageGenTask;
   controller: ImageGenController;
 }) {
-  const { closeDetail, reuseTask, deleteTask, downloadImage, setAsReference, openPreview } =
-    controller;
+  const {
+    closeDetail,
+    reuseTask,
+    deleteTask,
+    downloadImage,
+    setAsReference,
+    openPreview,
+    prompt,
+    referenceImages,
+  } = controller;
   const [imageIndex, setImageIndex] = useState(0);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmReuse, setConfirmReuse] = useState(false);
+  // 输入区有内容（提示词草稿或参考图）时，复用配置需二次确认防覆盖。
+  const inputDirty = prompt.trim() !== "" || referenceImages.length > 0;
   // 任务在弹窗打开期间完成会追加图片：下标越界时收敛到最后一张。
   const safeIndex = Math.min(imageIndex, Math.max(0, task.images.length - 1));
   const currentImage = task.images[safeIndex] ?? null;
@@ -198,15 +210,13 @@ function TaskDetailContent({
 
           <div className="text-xs text-muted-foreground">
             创建于 {new Date(task.createdAt).toLocaleString()}
-            {task.elapsedMs != null
-              ? ` · 耗时 ${formatCountdownSeconds(task.elapsedMs / 1000)}`
-              : ""}
+            {task.elapsedMs != null ? ` · 耗时 ${formatDurationMs(task.elapsedMs)}` : ""}
           </div>
 
           {task.usage ? (
             <div className="space-y-0.5 text-xs text-muted-foreground">
               <div>{formatUsageLine(task.usage)}</div>
-              {cost != null ? <div>预估 ${cost.toFixed(4)}</div> : null}
+              {cost != null ? <div>预估 {formatUsdCompact(cost)}</div> : null}
             </div>
           ) : null}
 
@@ -214,6 +224,10 @@ function TaskDetailContent({
             <Button
               size="sm"
               onClick={() => {
+                if (inputDirty) {
+                  setConfirmReuse(true);
+                  return;
+                }
                 reuseTask(task.id);
                 closeDetail();
               }}
@@ -244,6 +258,21 @@ function TaskDetailContent({
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmReuse}
+        title="覆盖当前输入？"
+        description="复用配置将替换输入区当前的提示词与参考图。"
+        onClose={() => setConfirmReuse(false)}
+        onConfirm={() => {
+          setConfirmReuse(false);
+          reuseTask(task.id);
+          closeDetail();
+        }}
+        confirmLabel="覆盖"
+        confirmingLabel="覆盖中…"
+        confirming={false}
+      />
 
       <ConfirmDialog
         open={confirmDelete}

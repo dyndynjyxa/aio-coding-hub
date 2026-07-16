@@ -4,7 +4,7 @@
 import { useRef, useState } from "react";
 import { CircleAlert, ImagePlus, X } from "lucide-react";
 import { cn } from "../../utils/cn";
-import { formatCountdownSeconds } from "../../utils/formatters";
+import { formatDurationMs } from "../../utils/formatters";
 import { useNowMs } from "../../hooks/useNowMs";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
@@ -34,12 +34,12 @@ const STATUS_FILTER_OPTIONS: { value: ImageGenStatusFilter; label: string }[] = 
   { value: "error", label: "失败" },
 ];
 
-/** 逐秒计时（mm:ss，超 1h 为 h:mm:ss）。复用共享 interval bucket，卸载自动清理。 */
+/** 逐秒计时（formatDurationMs 耗时语义）。复用共享 interval bucket，卸载自动清理。 */
 export function ImageGenElapsed({ startedAt }: { startedAt: number }) {
   const nowMs = useNowMs(true, 1000);
   return (
     <span className="text-xs tabular-nums text-muted-foreground">
-      {formatCountdownSeconds((nowMs - startedAt) / 1000)}
+      {formatDurationMs(nowMs - startedAt)}
     </span>
   );
 }
@@ -62,11 +62,13 @@ function ImageGenTaskCard({
   onOpenDetail,
   onRetry,
   onDelete,
+  onCancel,
 }: {
   task: ImageGenTask;
   onOpenDetail: () => void;
   onRetry: () => void;
   onDelete: () => void;
+  onCancel: () => void;
 }) {
   return (
     <article className="rounded-lg border border-line p-3">
@@ -109,12 +111,19 @@ function ImageGenTaskCard({
           ) : null}
           {task.status === "done" && task.elapsedMs != null ? (
             <div className="text-xs tabular-nums text-muted-foreground">
-              耗时 {formatCountdownSeconds(task.elapsedMs / 1000)}
+              耗时 {formatDurationMs(task.elapsedMs)}
             </div>
           ) : null}
         </div>
       </button>
-      {task.status === "error" ? (
+      {task.status === "loading" ? (
+        <div className="mt-2 flex gap-2">
+          {/* 取消无产出损失，直删无需确认；在途回调会丢弃结果。 */}
+          <Button size="sm" onClick={onCancel}>
+            取消
+          </Button>
+        </div>
+      ) : task.status === "error" ? (
         <div className="mt-2 flex gap-2">
           <Button size="sm" onClick={onRetry}>
             重试
@@ -150,9 +159,10 @@ export function ImageGenTaskPanel({ controller, className }: ImageGenTaskPanelPr
     stepPreview,
   } = controller;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  // 拖拽悬停高亮 / 清空任务二次确认：纯视图局部态。
+  // 拖拽悬停高亮 / 清空任务与错误卡删除二次确认：纯视图局部态。
   const [isDragOver, setIsDragOver] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [confirmDeleteTaskId, setConfirmDeleteTaskId] = useState<string | null>(null);
 
   const visibleTasks = filterTasks(tasks, searchQuery, statusFilter);
 
@@ -191,6 +201,10 @@ export function ImageGenTaskPanel({ controller, className }: ImageGenTaskPanelPr
           </div>
         ) : null}
 
+        {tasks.length > 0 ? (
+          <div className="text-xs text-muted-foreground">生成记录仅本次运行保留，重启后清空</div>
+        ) : null}
+
         {tasks.length === 0 ? (
           <EmptyState
             variant="dashed"
@@ -209,7 +223,8 @@ export function ImageGenTaskPanel({ controller, className }: ImageGenTaskPanelPr
                 onRetry={() => {
                   void retry(task.id);
                 }}
-                onDelete={() => deleteTask(task.id)}
+                onDelete={() => setConfirmDeleteTaskId(task.id)}
+                onCancel={() => deleteTask(task.id)}
               />
             ))}
           </div>
@@ -258,10 +273,16 @@ export function ImageGenTaskPanel({ controller, className }: ImageGenTaskPanelPr
           ) : null}
           <Textarea
             rows={3}
-            placeholder="描述你想生成的图片…"
+            placeholder="描述你想生成的图片…（支持粘贴 / 拖拽参考图，Ctrl+Enter 生成）"
             aria-label="提示词"
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
+            onKeyDown={(event) => {
+              if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && prompt.trim()) {
+                event.preventDefault();
+                void submit();
+              }
+            }}
           />
           <div className="flex items-center justify-between gap-2">
             <input
@@ -295,6 +316,20 @@ export function ImageGenTaskPanel({ controller, className }: ImageGenTaskPanelPr
         </div>
       </div>
       <ImageGenLightbox preview={preview} onClose={closePreview} onStep={stepPreview} />
+      <ConfirmDialog
+        open={confirmDeleteTaskId !== null}
+        title="删除任务"
+        description="删除后不可恢复（会话仅保存在内存中）。"
+        onClose={() => setConfirmDeleteTaskId(null)}
+        onConfirm={() => {
+          if (confirmDeleteTaskId !== null) deleteTask(confirmDeleteTaskId);
+          setConfirmDeleteTaskId(null);
+        }}
+        confirmLabel="删除"
+        confirmingLabel="删除中…"
+        confirming={false}
+        confirmVariant="danger"
+      />
       <ConfirmDialog
         open={confirmClear}
         title="清空任务"

@@ -59,12 +59,12 @@ describe("pages/image-gen/ImageGenTaskDetail", () => {
     expect(screen.getByText("jpeg")).toBeInTheDocument();
     expect(screen.getByText("80")).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
-    expect(screen.getByText(/创建于 .+ · 耗时 03:06/)).toBeInTheDocument();
+    expect(screen.getByText(/创建于 .+ · 耗时 3m6\.0s/)).toBeInTheDocument();
     expect(
       screen.getByText("tokens：输入 100（文本 60 / 图像 40） · 输出 1000 · 合计 1100")
     ).toBeInTheDocument();
-    // (60*5 + 40*8 + 1000*30) / 1e6 = 0.0306
-    expect(screen.getByText("预估 $0.0306")).toBeInTheDocument();
+    // (60*5 + 40*8 + 1000*30) / 1e6 = 0.0306 → formatUsdCompact 两位小数
+    expect(screen.getByText("预估 $0.03")).toBeInTheDocument();
   });
 
   it("hides the compression row for png and omits usage when missing", () => {
@@ -88,14 +88,47 @@ describe("pages/image-gen/ImageGenTaskDetail", () => {
     expect(controller.openPreview).toHaveBeenCalledWith(["blob:a", "blob:b"], 1);
   });
 
-  it("reuses the task config and closes the detail", () => {
+  it("reuses the task config directly and closes the detail when the input area is empty", () => {
     const task = makeTask({ id: "t7", images: [makeImage("blob:a")] });
     const controller = makeController({ detailTask: task });
     render(<ImageGenTaskDetail controller={controller} />);
 
     fireEvent.click(screen.getByRole("button", { name: "复用配置" }));
+    expect(screen.queryByText("覆盖当前输入？")).not.toBeInTheDocument();
     expect(controller.reuseTask).toHaveBeenCalledWith("t7");
     expect(controller.closeDetail).toHaveBeenCalled();
+  });
+
+  it("asks for confirmation before reusing when the prompt draft is non-empty", () => {
+    const task = makeTask({ id: "t7", images: [makeImage("blob:a")] });
+    const controller = makeController({ detailTask: task, prompt: "输入区草稿" });
+    render(<ImageGenTaskDetail controller={controller} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "复用配置" }));
+    expect(controller.reuseTask).not.toHaveBeenCalled();
+    expect(screen.getByText("覆盖当前输入？")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "覆盖" }));
+    expect(controller.reuseTask).toHaveBeenCalledWith("t7");
+    expect(controller.closeDetail).toHaveBeenCalled();
+  });
+
+  it("asks for confirmation when reference images are pending and cancel keeps everything", () => {
+    const task = makeTask({ id: "t7", images: [makeImage("blob:a")] });
+    const controller = makeController({
+      detailTask: task,
+      referenceImages: [
+        { id: "r1", mime: "image/png", b64: "AAA", sizeBytes: 3, objectUrl: "blob:ref-1" },
+      ],
+    });
+    render(<ImageGenTaskDetail controller={controller} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "复用配置" }));
+    expect(screen.getByText("覆盖当前输入？")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(controller.reuseTask).not.toHaveBeenCalled();
+    expect(controller.closeDetail).not.toHaveBeenCalled();
   });
 
   it("downloads and sets the current image as reference", () => {
@@ -122,7 +155,8 @@ describe("pages/image-gen/ImageGenTaskDetail", () => {
     const task = makeTask({ status: "loading", startedAt: Date.now(), images: [] });
     render(<ImageGenTaskDetail controller={makeController({ detailTask: task })} />);
     expect(screen.getByLabelText("Loading")).toBeInTheDocument();
-    expect(screen.getByText("00:00")).toBeInTheDocument();
+    // 真实时钟：渲染与 startedAt 间可能流逝若干毫秒。
+    expect(screen.getByText(/^\d+ms$/)).toBeInTheDocument();
   });
 
   it("deletes the task after confirmation and closes the detail", () => {
