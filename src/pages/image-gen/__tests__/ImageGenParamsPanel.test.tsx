@@ -122,13 +122,13 @@ describe("pages/image-gen/ImageGenParamsPanel", () => {
     expect(screen.getByText("占用 1.5 KB · 3 条任务")).toBeInTheDocument();
   });
 
-  it("renders storage placeholders and disables reveal before stats load", () => {
+  it("renders storage placeholders before stats load", () => {
     render(<ImageGenParamsPanel controller={makeController({ storage: null })} />);
     expect(screen.getByText("占用 — · 0 条任务")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "在 Finder 中显示" })).toBeDisabled();
+    expect(screen.getByText("—")).toBeInTheDocument();
   });
 
-  it("invokes the storage actions: change directory and reveal in Finder", () => {
+  it("invokes the change-directory storage action", () => {
     const controller = makeController({
       storage: { dir: "/store", totalBytes: 0, taskCount: 0 },
     });
@@ -136,9 +136,6 @@ describe("pages/image-gen/ImageGenParamsPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "更改目录" }));
     expect(controller.changeStorageDir).toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole("button", { name: "在 Finder 中显示" }));
-    expect(controller.revealStorageDir).toHaveBeenCalled();
   });
 
   it("cleans up history only after confirmation", () => {

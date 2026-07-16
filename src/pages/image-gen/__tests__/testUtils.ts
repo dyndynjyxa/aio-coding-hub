@@ -87,7 +87,6 @@ export function makeController(overrides: Partial<ImageGenController> = {}): Ima
     loadMoreTasks: vi.fn(async () => {}),
     storage: null,
     changeStorageDir: vi.fn(async () => {}),
-    revealStorageDir: vi.fn(async () => {}),
     cleanupStorage: vi.fn(async () => {}),
     searchQuery: "",
     setSearchQuery: vi.fn(),

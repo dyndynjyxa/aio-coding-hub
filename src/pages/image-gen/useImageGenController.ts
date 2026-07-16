@@ -50,7 +50,6 @@ import {
   updateImageGenSession,
 } from "./imageGenSessionStore";
 import { openDesktopSinglePath, saveDesktopFilePath } from "../../services/desktop/dialog";
-import { openDesktopPath } from "../../services/desktop/opener";
 import { formatUnknownError } from "../../utils/errors";
 
 export { base64ToBlob, blobToBase64 };
@@ -781,16 +780,6 @@ export function useImageGenController() {
     }
   }, []);
 
-  const revealStorageDir = useCallback(async () => {
-    const dir = storage?.dir;
-    if (!dir) return;
-    try {
-      await openDesktopPath(dir);
-    } catch {
-      toast.error("打开存储目录失败：请查看控制台日志");
-    }
-  }, [storage]);
-
   // 一键清理：保留最近 CLEANUP_KEEP_COUNT 条，其余 DB 行与磁盘文件删除，store 同步收敛。
   const cleanupStorage = useCallback(async () => {
     try {
@@ -840,7 +829,6 @@ export function useImageGenController() {
     // 存储管理
     storage,
     changeStorageDir,
-    revealStorageDir,
     cleanupStorage,
     // 搜索/筛选
     searchQuery,

@@ -18,7 +18,6 @@ import {
   type ImageGenTaskRow,
 } from "../../../services/image-gen/service";
 import { openDesktopSinglePath, saveDesktopFilePath } from "../../../services/desktop/dialog";
-import { openDesktopPath } from "../../../services/desktop/opener";
 import type { ImageGenResult } from "../../../services/image-gen/types";
 import { getImageGenSession, resetImageGenSessionForTests } from "../imageGenSessionStore";
 import {
@@ -72,10 +71,6 @@ vi.mock("../../../services/image-gen/gptImageAdapter", async () => {
 vi.mock("../../../services/desktop/dialog", () => ({
   saveDesktopFilePath: vi.fn(),
   openDesktopSinglePath: vi.fn(),
-}));
-
-vi.mock("../../../services/desktop/opener", () => ({
-  openDesktopPath: vi.fn(),
 }));
 
 const EMPTY_CONFIG = {
@@ -1702,11 +1697,6 @@ describe("pages/image-gen/useImageGenController", () => {
     vi.mocked(imageGenStorageGet).mockRejectedValue(new Error("db"));
     const { result } = await renderController();
     expect(result.current.storage).toBeNull();
-    // storage 未知时"在 Finder 中显示"静默跳过。
-    await act(async () => {
-      await result.current.revealStorageDir();
-    });
-    expect(openDesktopPath).not.toHaveBeenCalled();
   });
 
   it("changes the storage directory through the directory picker", async () => {
@@ -1747,30 +1737,6 @@ describe("pages/image-gen/useImageGenController", () => {
     });
     expect(toast.error).toHaveBeenCalledWith("更改存储目录失败：请查看控制台日志");
     expect(result.current.storage).toEqual(STORAGE_VIEW);
-  });
-
-  it("reveals the storage directory in the file manager", async () => {
-    vi.mocked(openDesktopPath).mockResolvedValue(true);
-    const { result } = await renderController();
-    await waitFor(() => {
-      expect(result.current.storage).toEqual(STORAGE_VIEW);
-    });
-    await act(async () => {
-      await result.current.revealStorageDir();
-    });
-    expect(openDesktopPath).toHaveBeenCalledWith(STORAGE_VIEW.dir);
-  });
-
-  it("toasts when revealing the storage directory fails", async () => {
-    vi.mocked(openDesktopPath).mockRejectedValue(new Error("denied"));
-    const { result } = await renderController();
-    await waitFor(() => {
-      expect(result.current.storage).toEqual(STORAGE_VIEW);
-    });
-    await act(async () => {
-      await result.current.revealStorageDir();
-    });
-    expect(toast.error).toHaveBeenCalledWith("打开存储目录失败：请查看控制台日志");
   });
 
   it("cleans up old history and reports the removed count", async () => {

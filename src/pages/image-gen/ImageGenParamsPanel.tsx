@@ -34,7 +34,6 @@ export function ImageGenParamsPanel({ controller, className }: ImageGenParamsPan
     updateParams,
     storage,
     changeStorageDir,
-    revealStorageDir,
     cleanupStorage,
   } = controller;
 
@@ -226,15 +225,6 @@ export function ImageGenParamsPanel({ controller, className }: ImageGenParamsPan
                 }}
               >
                 更改目录
-              </Button>
-              <Button
-                size="sm"
-                disabled={!storage}
-                onClick={() => {
-                  void revealStorageDir();
-                }}
-              >
-                在 Finder 中显示
               </Button>
               <Button size="sm" variant="danger" onClick={() => setConfirmCleanup(true)}>
                 清理

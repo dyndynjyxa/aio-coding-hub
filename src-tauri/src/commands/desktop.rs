@@ -390,8 +390,6 @@ fn desktop_open_allowed_roots<R: tauri::Runtime>(
     let configured_codex_home_dir = crate::infra::codex_paths::configured_codex_home_dir(app);
     let grok_home_dir =
         crate::infra::grok_config::grok_home_dir(app).map_err(|error| error.to_string())?;
-    let image_gen_storage_dir = crate::domain::image_gen::storage_dir_from_settings(app)
-        .map_err(|error| error.to_string())?;
 
     let mut roots = Vec::new();
     push_desktop_open_root(&mut roots, app_data_dir);
@@ -401,7 +399,6 @@ fn desktop_open_allowed_roots<R: tauri::Runtime>(
     push_desktop_open_root(&mut roots, follow_codex_home_dir);
     push_desktop_open_root(&mut roots, effective_codex_home_dir);
     push_desktop_open_root(&mut roots, grok_home_dir);
-    push_desktop_open_root(&mut roots, image_gen_storage_dir);
     if let Some(configured_codex_home_dir) = configured_codex_home_dir {
         push_desktop_open_root(&mut roots, configured_codex_home_dir);
     }
@@ -843,23 +840,6 @@ mod tests {
         let config_path = custom_home.join("config.toml");
 
         assert!(ensure_desktop_open_path_allowed(&app_handle, &config_path).is_ok());
-    }
-
-    #[test]
-    fn desktop_open_allowed_roots_include_configured_image_gen_storage_dir() {
-        let test_app = DesktopCommandTestApp::new();
-        let app_handle = test_app.handle();
-        let custom_storage = test_app.home_dir.path().join("custom-image-gen");
-        let settings = AppSettings {
-            image_gen_storage_dir: Some(custom_storage.display().to_string()),
-            ..AppSettings::default()
-        };
-        settings::write(&app_handle, &settings).expect("write settings");
-
-        let allowed_roots = desktop_open_allowed_roots(&app_handle).expect("allowed roots");
-
-        assert!(allowed_roots.contains(&normalize_existing_path(custom_storage.clone())));
-        assert!(ensure_desktop_open_path_allowed(&app_handle, &custom_storage.join("t1")).is_ok());
     }
 
     #[test]
