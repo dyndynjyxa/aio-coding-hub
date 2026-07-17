@@ -319,6 +319,7 @@ pub(super) fn ensure_prompt_cache_key_on_body(body: &mut Bytes, session_id: Opti
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn complete_translated_codex_request(
     cache: &mut CodexSessionIdCache,
     now_unix: i64,
