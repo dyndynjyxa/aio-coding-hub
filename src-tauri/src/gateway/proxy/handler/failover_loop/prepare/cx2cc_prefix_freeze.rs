@@ -32,10 +32,12 @@ const EXTRA_PIN_KEYS: &[&str] = &[
 
 #[derive(Debug, Clone)]
 struct PrefixEntry {
-    /// Pinned top-level JSON fields (`instructions`, `tools`, EXTRA_PIN_KEYS).
-    fields: HashMap<String, Value>,
+    instructions: Option<String>,
+    tools: Option<Value>,
     /// Full input array from the last accepted turn (grows append-only when prefix matches).
     input_prefix: Option<Vec<Value>>,
+    /// First-seen values for EXTRA_PIN_KEYS.
+    extras: HashMap<String, Value>,
     expires_at_unix: i64,
 }
 
@@ -175,18 +177,20 @@ pub(super) fn apply_grok_prefix_freeze(
         };
         purge_expired(&mut guard, now);
 
-        let actions = {
+        let (instructions_action, tools_action, input_action, extras_actions, input_prefix_len) = {
             let entry = guard.entries.entry(key).or_insert_with(|| PrefixEntry {
-                fields: HashMap::new(),
+                instructions: None,
+                tools: None,
                 input_prefix: None,
+                extras: HashMap::new(),
                 expires_at_unix: now + DEFAULT_TTL_SECS,
             });
             entry.expires_at_unix = now + DEFAULT_TTL_SECS;
 
-            let instructions_action = freeze_json_field(&mut entry.fields, obj, "instructions");
-            let tools_action = freeze_json_field(&mut entry.fields, obj, "tools");
+            let instructions_action = freeze_instructions(entry, obj);
+            let tools_action = freeze_tools(entry, obj);
             let input_action = freeze_input(entry, obj);
-            let extras_actions = freeze_extra_keys(entry, obj);
+            let extras_actions = freeze_extras(entry, obj);
             let input_prefix_len = entry.input_prefix.as_ref().map(|a| a.len()).unwrap_or(0);
             (
                 instructions_action,
@@ -201,7 +205,13 @@ pub(super) fn apply_grok_prefix_freeze(
             evict_oldest(&mut guard, now);
         }
 
-        actions
+        (
+            instructions_action,
+            tools_action,
+            input_action,
+            extras_actions,
+            input_prefix_len,
+        )
     };
 
     let input_len = obj
@@ -234,21 +244,40 @@ pub(super) fn apply_grok_prefix_freeze(
     }
 }
 
-/// Pin first-seen JSON value for a top-level body key (seed / reuse_exact / reuse_forced).
-fn freeze_json_field(
-    stored: &mut HashMap<String, Value>,
+fn freeze_instructions(
+    entry: &mut PrefixEntry,
     obj: &mut serde_json::Map<String, Value>,
-    key: &str,
 ) -> &'static str {
-    let current = obj.get(key).cloned();
-    match (stored.get(key), current) {
+    let current = obj
+        .get("instructions")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    match (&entry.instructions, current) {
         (Some(frozen), Some(cur)) if frozen == &cur => "reuse_exact",
         (Some(frozen), Some(_)) | (Some(frozen), None) => {
-            obj.insert(key.to_string(), frozen.clone());
+            obj.insert("instructions".to_string(), Value::String(frozen.clone()));
             "reuse_forced"
         }
         (None, Some(cur)) => {
-            stored.insert(key.to_string(), cur);
+            entry.instructions = Some(cur);
+            "seed"
+        }
+        (None, None) => "absent",
+    }
+}
+
+fn freeze_tools(entry: &mut PrefixEntry, obj: &mut serde_json::Map<String, Value>) -> &'static str {
+    let current = obj.get("tools").cloned();
+
+    match (&entry.tools, current) {
+        (Some(frozen), Some(cur)) if frozen == &cur => "reuse_exact",
+        (Some(frozen), Some(_)) | (Some(frozen), None) => {
+            obj.insert("tools".to_string(), frozen.clone());
+            "reuse_forced"
+        }
+        (None, Some(cur)) => {
+            entry.tools = Some(cur);
             "seed"
         }
         (None, None) => "absent",
@@ -291,15 +320,35 @@ fn freeze_input(entry: &mut PrefixEntry, obj: &mut serde_json::Map<String, Value
     }
 }
 
-/// Pin first-seen control fields so Claude thinking budget / tool_choice churn
-/// does not invalidate the xAI prefix.
-fn freeze_extra_keys(entry: &mut PrefixEntry, obj: &mut serde_json::Map<String, Value>) -> String {
+/// Pin first-seen top-level control fields so Claude thinking budget / tool_choice
+/// churn does not invalidate the xAI prefix.
+fn freeze_extras(entry: &mut PrefixEntry, obj: &mut serde_json::Map<String, Value>) -> String {
     let mut parts: Vec<String> = Vec::with_capacity(EXTRA_PIN_KEYS.len());
     for key in EXTRA_PIN_KEYS {
-        let action = freeze_json_field(&mut entry.fields, obj, key);
+        let action = freeze_extra_field(entry, obj, key);
         parts.push(format!("{key}={action}"));
     }
     parts.join(",")
+}
+
+fn freeze_extra_field(
+    entry: &mut PrefixEntry,
+    obj: &mut serde_json::Map<String, Value>,
+    key: &str,
+) -> &'static str {
+    let current = obj.get(key).cloned();
+    match (entry.extras.get(key), current) {
+        (Some(frozen), Some(cur)) if frozen == &cur => "reuse_exact",
+        (Some(frozen), Some(_)) | (Some(frozen), None) => {
+            obj.insert(key.to_string(), frozen.clone());
+            "reuse_forced"
+        }
+        (None, Some(cur)) => {
+            entry.extras.insert(key.to_string(), cur);
+            "seed"
+        }
+        (None, None) => "absent",
+    }
 }
 
 fn purge_expired(cache: &mut PrefixFreezeCache, now: i64) {
