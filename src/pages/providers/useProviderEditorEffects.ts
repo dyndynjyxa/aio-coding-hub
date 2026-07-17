@@ -44,7 +44,7 @@ export type EffectDeps = {
   setStreamIdleTimeoutSeconds: (v: string) => void;
   setAuthMode: (v: "api_key" | "oauth" | "cx2cc") => void;
   setCx2ccSourceValue: (v: string) => void;
-  setOauthStatus: (v: ProviderOAuthStatusResult | null) => void;
+  setOauthStatus: React.Dispatch<React.SetStateAction<ProviderOAuthStatusResult | null>>;
   setOauthLoading: (v: boolean) => void;
   setCx2ccFallbackModels: (
     v: {
@@ -249,7 +249,22 @@ export function useProviderEditorEffects(d: EffectDeps) {
     if (!open || editProvider?.auth_mode !== "oauth") return;
     if (oauthStatusSnapshot === undefined) return;
     oauthStatusErrorRef.current = null;
-    setOauthStatus(oauthStatusSnapshot);
+    // Never regress a fresher access-token expiry that login/refresh just wrote
+    // into local state while React Query still holds a pre-refresh snapshot.
+    setOauthStatus((prev) => {
+      if (
+        prev?.connected &&
+        oauthStatusSnapshot?.connected &&
+        prev.expires_at != null &&
+        Number.isFinite(prev.expires_at) &&
+        oauthStatusSnapshot.expires_at != null &&
+        Number.isFinite(oauthStatusSnapshot.expires_at) &&
+        prev.expires_at > oauthStatusSnapshot.expires_at
+      ) {
+        return { ...oauthStatusSnapshot, expires_at: prev.expires_at };
+      }
+      return oauthStatusSnapshot;
+    });
   }, [editProvider?.auth_mode, oauthStatusSnapshot, open, setOauthStatus]);
 
   useEffect(() => {

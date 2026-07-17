@@ -8,10 +8,52 @@ import {
   providerOAuthRefresh,
   providerOAuthDisconnect,
   providerOAuthFetchLimits,
+  type ProviderOAuthStatusResult,
 } from "../../services/providers/providers";
 import type { OAuthActionContext } from "./providerEditorActionContext";
 import { presentProviderEditorPayloadBuildError } from "./providerEditorFeedback";
 import { buildProviderEditorUpsertInput } from "./providerEditorSubmitModel";
+
+/** Prefer the later absolute expiry when both sides have a value. */
+function pickFresherExpiresAt(
+  a: number | null | undefined,
+  b: number | null | undefined
+): number | null {
+  if (a != null && Number.isFinite(a) && b != null && Number.isFinite(b)) {
+    return Math.max(a, b);
+  }
+  if (a != null && Number.isFinite(a)) return a;
+  if (b != null && Number.isFinite(b)) return b;
+  return null;
+}
+
+/**
+ * Prefer freshly minted auth timestamps over a sticky/stale status snapshot.
+ *
+ * Important: after "刷新 Token", the IPC result carries the new `expires_at`
+ * while a status re-fetch (or React Query snapshot) can still briefly hold the
+ * pre-refresh value. Always take the newer absolute timestamp.
+ */
+function mergeOAuthStatusAfterAuth(
+  status: ProviderOAuthStatusResult | null | undefined,
+  auth: { provider_type?: string | null; expires_at?: number | null; email?: string | null }
+): ProviderOAuthStatusResult {
+  if (status?.connected) {
+    return {
+      ...status,
+      expires_at: pickFresherExpiresAt(auth.expires_at, status.expires_at),
+      provider_type: auth.provider_type ?? status.provider_type,
+      email: auth.email ?? status.email,
+    };
+  }
+  return {
+    connected: true,
+    provider_type: auth.provider_type ?? status?.provider_type ?? null,
+    email: auth.email ?? status?.email ?? null,
+    expires_at: pickFresherExpiresAt(auth.expires_at, status?.expires_at),
+    has_refresh_token: status?.has_refresh_token ?? true,
+  };
+}
 
 class OAuthAttemptStaleError extends Error {
   constructor() {
@@ -144,8 +186,13 @@ export async function handleOAuthLogin(ctx: OAuthActionContext) {
           ctx.refreshOauthStatus(targetProviderId),
           isCurrentAttempt
         );
-        status = nextStatus;
+        // Prefer server status; if expires_at is missing/stale, trust login result.
+        status = mergeOAuthStatusAfterAuth(nextStatus, {
+          provider_type: result.provider_type,
+          expires_at: result.expires_at,
+        });
         ctx.setOauthStatus(status);
+        ctx.writeOauthStatusCache(status, targetProviderId);
       } catch (statusErr) {
         if (isOAuthAttemptStaleError(statusErr)) {
           return;
@@ -153,6 +200,13 @@ export async function handleOAuthLogin(ctx: OAuthActionContext) {
         if (!isCurrentAttempt()) {
           return;
         }
+        // Status fetch failed but tokens were saved — still show login result expiry.
+        status = mergeOAuthStatusAfterAuth(null, {
+          provider_type: result.provider_type,
+          expires_at: result.expires_at,
+        });
+        ctx.setOauthStatus(status);
+        ctx.writeOauthStatusCache(status, targetProviderId);
         toast("OAuth 登录成功，但读取连接状态失败，可稍后重试");
         logToConsole(
           "warn",
@@ -355,11 +409,16 @@ export async function handleOAuthDeviceLogin(ctx: OAuthActionContext) {
         ctx.setOauthDeviceFlow(null);
         ctx.setOauthDeviceError(null);
 
-        const status = await whenOAuthAttemptCurrent(
+        const nextStatus = await whenOAuthAttemptCurrent(
           ctx.refreshOauthStatus(targetProviderId),
           isCurrentAttempt
         );
-        ctx.setOauthStatus(status);
+        const mergedStatus = mergeOAuthStatusAfterAuth(nextStatus, {
+          provider_type: result.provider_type,
+          expires_at: result.expires_at,
+        });
+        ctx.setOauthStatus(mergedStatus);
+        ctx.writeOauthStatusCache(mergedStatus, targetProviderId);
 
         try {
           await whenOAuthAttemptCurrent(
@@ -442,12 +501,18 @@ export async function handleOAuthRefresh(ctx: OAuthActionContext) {
   try {
     const result = await providerOAuthRefresh(ctx.editingProviderId);
     if (result.success) {
-      const status = await ctx.refreshOauthStatus(ctx.editingProviderId);
-      ctx.setOauthStatus(status);
+      const nextStatus = await ctx.refreshOauthStatus(ctx.editingProviderId);
+      const mergedStatus = mergeOAuthStatusAfterAuth(nextStatus, {
+        expires_at: result.expires_at,
+      });
+      // Write cache first so the oauthStatusQuery effect cannot re-apply a stale
+      // pre-refresh expires_at after setOauthStatus.
+      ctx.writeOauthStatusCache(mergedStatus, ctx.editingProviderId);
+      ctx.setOauthStatus(mergedStatus);
       toast("Token 刷新成功");
       logToConsole("info", `OAuth Token 刷新成功：${ctx.form.getValues().name}`, {
         provider_id: ctx.editingProviderId,
-        expires_at: result.expires_at,
+        expires_at: mergedStatus.expires_at,
       });
     } else {
       toast("Token 刷新失败");
@@ -472,7 +537,11 @@ export async function handleOAuthDisconnect(ctx: OAuthActionContext) {
   try {
     const result = await providerOAuthDisconnect(ctx.editingProviderId);
     if (result.success) {
-      ctx.setOauthStatus(null);
+      // Force cache + UI to disconnected (avoid sticky pre-disconnect snapshot).
+      const status = await ctx.refreshOauthStatus(ctx.editingProviderId);
+      const disconnected = status?.connected ? null : status;
+      ctx.writeOauthStatusCache(disconnected, ctx.editingProviderId);
+      ctx.setOauthStatus(disconnected);
       toast("已断开 OAuth 连接");
       logToConsole("info", `OAuth 已断开连接：${ctx.form.getValues().name}`, {
         provider_id: ctx.editingProviderId,

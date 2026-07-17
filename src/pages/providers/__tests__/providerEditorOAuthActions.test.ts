@@ -155,6 +155,7 @@ function makeCtx(overrides: Partial<OAuthActionContext> = {}) {
     oauthStatus: null,
     setOauthStatus: vi.fn(),
     refreshOauthStatus: vi.fn().mockResolvedValue(makeStatus()),
+    writeOauthStatusCache: vi.fn(),
     setOauthLoading: vi.fn(),
     oauthDeviceFlow: null,
     setOauthDeviceFlow: vi.fn(),
@@ -215,7 +216,7 @@ describe("providerEditorOAuthActions", () => {
       expect.objectContaining({ cliKey: "claude", name: "OAuth Provider", authMode: "oauth" })
     );
     expect(providerOAuthStartFlow).toHaveBeenCalledWith("claude", 9);
-    expect(ctx.setOauthStatus).toHaveBeenCalledWith(makeStatus());
+    expect(ctx.setOauthStatus).toHaveBeenCalledWith(makeStatus({ expires_at: 123 }));
     expect(providerOAuthFetchLimits).toHaveBeenCalledWith(9);
     expect(toast).toHaveBeenCalledWith("OAuth 登录成功");
     expect(ctx.onSaved).toHaveBeenCalledWith("claude");
@@ -480,7 +481,8 @@ describe("providerEditorOAuthActions", () => {
     await handleOAuthDisconnect(ctx);
     await handleOAuthDisconnect(ctx);
 
-    expect(ctx.setOauthStatus).toHaveBeenCalledWith(makeStatus());
+    expect(ctx.setOauthStatus).toHaveBeenCalledWith(makeStatus({ expires_at: 456 }));
+    expect(ctx.writeOauthStatusCache).toHaveBeenCalledWith(makeStatus({ expires_at: 456 }), 7);
     expect(ctx.setOauthStatus).toHaveBeenCalledWith(null);
     expect(toast).toHaveBeenCalledWith("Token 刷新成功");
     expect(toast).toHaveBeenCalledWith("Token 刷新失败");

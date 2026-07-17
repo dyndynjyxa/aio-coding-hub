@@ -239,6 +239,33 @@ describe("query/providers", () => {
     expect(client.getQueryState(providersKeys.oauthStatus(Number.NaN))).toBeUndefined();
   });
 
+  it("fetchProviderOAuthStatus always hits network and overwrites stale expires_at cache", async () => {
+    setTauriRuntime();
+
+    const stale = {
+      connected: true,
+      provider_type: "grok_oauth",
+      email: "old@example.com",
+      expires_at: 1_700_000_000,
+      has_refresh_token: true,
+    };
+    const fresh = {
+      connected: true,
+      provider_type: "grok_oauth",
+      email: "new@example.com",
+      expires_at: 1_800_000_000,
+      has_refresh_token: true,
+    };
+
+    const client = createTestQueryClient();
+    client.setQueryData(providersKeys.oauthStatus(9), stale);
+    vi.mocked(providerOAuthStatus).mockResolvedValue(fresh);
+
+    await expect(fetchProviderOAuthStatus(client as never, 9)).resolves.toEqual(fresh);
+    expect(providerOAuthStatus).toHaveBeenCalledWith(9);
+    expect(client.getQueryData(providersKeys.oauthStatus(9))).toEqual(fresh);
+  });
+
   it("normalizes OAuth limits providerId before cache reads, refreshes, and query calls", async () => {
     setTauriRuntime();
 

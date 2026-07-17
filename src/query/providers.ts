@@ -70,16 +70,33 @@ export function useProviderOAuthStatusQuery(
   });
 }
 
+/**
+ * Always hit the network for OAuth connection status (email / expires_at).
+ *
+ * Do **not** use `fetchQuery` alone here: after login/refresh the cache often
+ * still holds the pre-login `expires_at`, so the editor keeps showing a stale
+ * "到期" time even though the DB was updated.
+ */
 export async function fetchProviderOAuthStatus(
-  queryClient: ReturnType<typeof useQueryClient>,
+  queryClient: QueryClient,
   providerId: number | null
 ) {
   if (providerId == null) return null;
   const normalizedProviderId = validateProviderId(providerId);
-  return queryClient.fetchQuery({
-    queryKey: providersKeys.oauthStatus(normalizedProviderId),
-    queryFn: () => providerOAuthStatus(normalizedProviderId),
-  });
+  const status = await providerOAuthStatus(normalizedProviderId);
+  queryClient.setQueryData(providersKeys.oauthStatus(normalizedProviderId), status);
+  return status;
+}
+
+/** Write OAuth status into the React Query cache (keeps editor effects in sync). */
+export function writeProviderOAuthStatusCache(
+  queryClient: QueryClient,
+  providerId: number | null,
+  status: Awaited<ReturnType<typeof providerOAuthStatus>> | null
+) {
+  if (providerId == null) return;
+  const normalizedProviderId = validateProviderId(providerId);
+  queryClient.setQueryData(providersKeys.oauthStatus(normalizedProviderId), status);
 }
 
 const EMPTY_OAUTH_LIMITS_RESULT: OAuthLimitsResult = {
