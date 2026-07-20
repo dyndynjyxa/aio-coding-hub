@@ -36,14 +36,21 @@ function weightedAverage(
 
 type PreviewLeaderboardRowInput = Omit<
   UsageLeaderboardRow,
-  "first_request_created_at_ms" | "last_request_created_at_ms"
+  | "folder_path"
+  | "first_request_created_at_ms"
+  | "last_request_created_at_ms"
+  | "last_request_completed_at_ms"
+  | "estimated_development_time_ms"
 >;
 
 function withoutRequestBounds(row: PreviewLeaderboardRowInput): UsageLeaderboardRow {
   return {
     ...row,
+    folder_path: null,
     first_request_created_at_ms: null,
     last_request_created_at_ms: null,
+    last_request_completed_at_ms: null,
+    estimated_development_time_ms: null,
   };
 }
 
@@ -56,12 +63,17 @@ function withPreviewDayBounds(
   row: PreviewLeaderboardRowInput,
   firstHour: number,
   lastHour: number,
-  lastMinute: number
+  lastMinute: number,
+  estimatedDevelopmentTimeMs: number
 ): UsageLeaderboardRow {
+  const lastRequestCreatedAtMs = localDayTimeMs(row.key, lastHour, lastMinute);
   return {
     ...row,
+    folder_path: null,
     first_request_created_at_ms: localDayTimeMs(row.key, firstHour, 0),
-    last_request_created_at_ms: localDayTimeMs(row.key, lastHour, lastMinute),
+    last_request_created_at_ms: lastRequestCreatedAtMs,
+    last_request_completed_at_ms: lastRequestCreatedAtMs + 6 * 60 * 1000,
+    estimated_development_time_ms: estimatedDevelopmentTimeMs,
   };
 }
 
@@ -301,7 +313,7 @@ const PREVIEW_TOKEN_DAY_BASE_ROWS: PreviewLeaderboardRowInput[] = [
 ];
 
 export const PREVIEW_TOKEN_DAY_ROWS: UsageLeaderboardRow[] = PREVIEW_TOKEN_DAY_BASE_ROWS.map(
-  (row, index) => withPreviewDayBounds(row, 8 + index, 23 - index, 34)
+  (row, index) => withPreviewDayBounds(row, 8 + index, 23 - index, 34, (5 - index) * 3_600_000)
 );
 
 const PREVIEW_DAY_FOLDER_SPECS = [
@@ -335,6 +347,20 @@ export const PREVIEW_TOKEN_FOLDER_OPTIONS: UsageFolderOptionV1[] = PREVIEW_DAY_F
     folder_path: spec.folder_path,
     requests_total: Math.round(45 * spec.share),
     total_tokens: Math.round(97_200 * spec.share),
+  })
+);
+
+const PREVIEW_FOLDER_ESTIMATED_DEVELOPMENT_TIME_MS = [12.6, 7.4, 2.1].map(
+  (hours) => hours * 60 * 60 * 1000
+);
+
+export const PREVIEW_TOKEN_FOLDER_ROWS: UsageLeaderboardRow[] = PREVIEW_DAY_FOLDER_SPECS.map(
+  (spec, index) => ({
+    ...PREVIEW_TOKEN_PROVIDER_ROWS[index],
+    key: spec.key,
+    name: spec.name,
+    folder_path: spec.folder_path,
+    estimated_development_time_ms: PREVIEW_FOLDER_ESTIMATED_DEVELOPMENT_TIME_MS[index],
   })
 );
 

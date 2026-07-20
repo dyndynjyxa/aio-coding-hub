@@ -267,8 +267,8 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(screen.getByText("Gemini Mirror")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "预览熔断样式" })).not.toBeInTheDocument();
 
-    expect(screen.getAllByRole("button", { name: "解除熔断" })[0]).toBeDisabled();
-    fireEvent.click(screen.getAllByRole("button", { name: "解除熔断" })[0]);
+    expect(screen.getAllByRole("button", { name: "解除" })[0]).toBeDisabled();
+    fireEvent.click(screen.getAllByRole("button", { name: "解除" })[0]);
     expect(screen.getByText("Claude Main")).toBeInTheDocument();
     expect(onResetCircuitProvider).not.toHaveBeenCalled();
   });
@@ -290,7 +290,7 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(screen.getByText("Real Claude Provider")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "预览熔断样式" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "解除熔断" }));
+    fireEvent.click(screen.getByRole("button", { name: "解除" }));
     expect(onResetCircuitProvider).toHaveBeenCalledWith(7);
   });
 

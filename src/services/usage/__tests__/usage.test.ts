@@ -160,11 +160,14 @@ function makeUsageLeaderboardRow(
     total_duration_ms: 120,
     first_request_created_at_ms: null,
     last_request_created_at_ms: null,
+    last_request_completed_at_ms: null,
+    estimated_development_time_ms: null,
     avg_duration_ms: 120,
     avg_ttfb_ms: 30,
     avg_output_tokens_per_second: 10,
     cost_usd: 1.23,
     ...overrides,
+    folder_path: overrides.folder_path ?? null,
   };
 }
 
@@ -329,6 +332,7 @@ describe("services/usage/usage", () => {
       dayStartHour: 6,
       excludeCx2CcGatewayBridge: true,
     });
+    await usageLeaderboardV2("folder", "custom");
     const folderOptions = await usageFolderOptionsV1("custom", {
       startTs: 1,
       endTs: 2,
@@ -427,6 +431,21 @@ describe("services/usage/usage", () => {
         folderKeys: ["/tmp/project"],
         dayStartHour: 6,
         excludeCx2CcGatewayBridge: true,
+      },
+      null
+    );
+    expect(commands.usageLeaderboardV2).toHaveBeenNthCalledWith(
+      3,
+      "folder",
+      {
+        period: "custom",
+        startTs: null,
+        endTs: null,
+        cliKey: null,
+        providerId: null,
+        folderKeys: null,
+        dayStartHour: null,
+        excludeCx2CcGatewayBridge: null,
       },
       null
     );

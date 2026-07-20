@@ -146,7 +146,7 @@ function HomePageHeaderActions({
       ) : null}
       {personalizedLayoutEnabled && tab === "overview" ? (
         <Button variant="secondary" size="md" onClick={onTogglePersonalizedUsageView}>
-          {personalizedUsageView === "summary" ? "查看曲线" : "查看总览"}
+          {personalizedUsageView === "summary" ? "今日总览" : "用量趋势"}
         </Button>
       ) : null}
       <TabList ariaLabel="首页视图切换" items={tabs} value={tab} onChange={onTabChange} />

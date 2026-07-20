@@ -347,7 +347,7 @@ function CircuitProvidersPanel({
                   onResetProvider(row.provider_id);
                 }}
               >
-                {isResetting ? "解除中..." : "解除熔断"}
+                {isResetting ? "解除中..." : "解除"}
               </Button>
             </div>
           );

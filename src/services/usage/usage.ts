@@ -39,7 +39,7 @@ export const USAGE_DAY_DETAIL_FOLDER_MAX_LIMIT = 50;
 export const USAGE_PROVIDER_CACHE_RATE_TREND_MAX_LIMIT = 200;
 
 export type UsageRange = "today" | "last7" | "last30" | "month" | "all";
-export type UsageScope = "cli" | "provider" | "model" | "day";
+export type UsageScope = "cli" | "provider" | "model" | "folder" | "day";
 export type UsagePeriod = "daily" | "weekly" | "monthly" | "allTime" | "custom";
 
 export type UsageProviderRow = Override<

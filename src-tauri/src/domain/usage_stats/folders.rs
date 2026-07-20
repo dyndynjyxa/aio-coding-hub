@@ -102,13 +102,21 @@ pub(super) fn folder_identity_for_row(
     row: &UsageEventAgg,
     resolved: &HashMap<String, UsageResolvedFolder>,
 ) -> FolderIdentity {
-    let Some(session_id) = row.session_id.as_deref() else {
+    folder_identity_for_session(&row.cli_key, row.session_id.as_deref(), resolved)
+}
+
+pub(super) fn folder_identity_for_session(
+    cli_key: &str,
+    session_id: Option<&str>,
+    resolved: &HashMap<String, UsageResolvedFolder>,
+) -> FolderIdentity {
+    let Some(session_id) = session_id else {
         return unknown_folder_identity();
     };
-    if !can_lookup_folder(&row.cli_key) {
+    if !can_lookup_folder(cli_key) {
         return unknown_folder_identity();
     }
-    let key = lookup_key(&row.cli_key, session_id);
+    let key = lookup_key(cli_key, session_id);
     let Some(folder) = resolved.get(&key) else {
         return unknown_folder_identity();
     };

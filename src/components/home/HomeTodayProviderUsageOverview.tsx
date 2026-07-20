@@ -1,5 +1,5 @@
-import { useMemo, useSyncExternalStore } from "react";
-import { Loader2 } from "lucide-react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { CircleHelp, Loader2 } from "lucide-react";
 import { useDocumentVisibility } from "../../hooks/useDocumentVisibility";
 import { useWindowForeground } from "../../hooks/useWindowForeground";
 import type { GatewayActiveSession } from "../../services/gateway/gateway";
@@ -16,21 +16,21 @@ import {
   subscribeHomeUsageDayStartHour,
 } from "../../services/home/homeUsageDayBoundary";
 import type { UsageLeaderboardRow, UsageSummary } from "../../services/usage/usage";
+import { useUsageLeaderboardV2Query } from "../../query/usage";
 import { Card } from "../../ui/Card";
+import { Tooltip } from "../../ui/Tooltip";
 import { computeCacheHitRate } from "../../utils/cacheRateMetrics";
 import { formatTokensMillions } from "../../utils/chartHelpers";
-import {
-  formatCompactDurationMs,
-  formatInteger,
-  formatPercent,
-  formatUsdCompact,
-} from "../../utils/formatters";
+import { formatCompactDurationMs, formatPercent, formatUsdCompact } from "../../utils/formatters";
+import { formatUnknownError } from "../../utils/errors";
 import { computeStatusBadge } from "./requestLogPresentation";
 import { QueryErrorCard } from "../shared/QueryErrorCard";
 import {
   useHomeTokenCostDataModel,
   type HomeTokenCostDataModelQueryRefreshConfig,
 } from "./useHomeTokenCostDataModel";
+import { PREVIEW_TOKEN_DAY_ROWS } from "./previewTokenData";
+import { DEVELOPMENT_TIME_ESTIMATE_TOOLTIP } from "./developmentTimeEstimate";
 
 const SUMMARY_SKELETON_KEYS = [0, 1, 2, 3, 4, 5];
 const PROVIDER_SKELETON_KEYS = [0, 1, 2];
@@ -284,6 +284,7 @@ function createSyntheticProviderRow(entry: ActiveProviderEntry): UsageLeaderboar
         ? `running:${entry.cliKey ?? "provider"}:${entry.providerId}`
         : `running:${normalized || "unknown"}`,
     name: entry.displayName,
+    folder_path: null,
     requests_total: 0,
     requests_success: 0,
     requests_failed: 0,
@@ -296,6 +297,8 @@ function createSyntheticProviderRow(entry: ActiveProviderEntry): UsageLeaderboar
     total_duration_ms: 0,
     first_request_created_at_ms: null,
     last_request_created_at_ms: null,
+    last_request_completed_at_ms: null,
+    estimated_development_time_ms: null,
     avg_duration_ms: null,
     avg_ttfb_ms: null,
     avg_output_tokens_per_second: null,
@@ -478,15 +481,31 @@ function SummaryMetricCard({
   title,
   value,
   accent,
+  tooltip,
 }: {
   title: string;
   value: string;
   accent: SummaryMetricAccent;
+  tooltip?: string;
 }) {
+  const titleNode = tooltip ? (
+    <div className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+      <span>{title}</span>
+      <CircleHelp aria-hidden="true" className="h-3 w-3 shrink-0" />
+    </div>
+  ) : (
+    <div className="text-[11px] font-medium text-muted-foreground">{title}</div>
+  );
   return (
     <Card padding="sm" className="relative h-full overflow-hidden">
       <div className={`absolute inset-x-0 top-0 h-0.5 ${SUMMARY_METRIC_ACCENT_CLASS[accent]}`} />
-      <div className="text-[11px] font-medium text-muted-foreground">{title}</div>
+      {tooltip ? (
+        <Tooltip content={tooltip} contentClassName="max-w-[320px] leading-5">
+          {titleNode}
+        </Tooltip>
+      ) : (
+        titleNode
+      )}
       <div className="mt-1 font-mono text-sm font-semibold tracking-tight text-foreground">
         {value}
       </div>
@@ -506,10 +525,12 @@ function SummaryMetricCardSkeleton() {
 function SummaryCards({
   summary,
   totalCostUsd,
+  estimatedDevelopmentTimeMs,
   loading,
 }: {
   summary: UsageSummary | null;
   totalCostUsd: number | null;
+  estimatedDevelopmentTimeMs: number | null;
   loading: boolean;
 }) {
   if (loading && !summary) {
@@ -540,16 +561,17 @@ function SummaryCards({
         accent="purple"
       />
       <SummaryMetricCard
-        title="总请求数"
-        value={formatInteger(summary?.requests_total)}
-        accent="green"
-      />
-      <SummaryMetricCard
         title="请求总耗时"
         value={formatCompactDurationMs(summary?.total_duration_ms)}
         accent="cyan"
       />
       <SummaryMetricCard title="总花费" value={formatUsdCompact(totalCostUsd)} accent="orange" />
+      <SummaryMetricCard
+        title="预估开发时间"
+        value={formatCompactDurationMs(estimatedDevelopmentTimeMs)}
+        accent="green"
+        tooltip={DEVELOPMENT_TIME_ESTIMATE_TOOLTIP}
+      />
     </div>
   );
 }
@@ -641,10 +663,35 @@ export function HomeTodayProviderUsageOverview({
     devPreviewEnabled,
     queryRefreshConfig,
   });
+  const dayLeaderboardQuery = useUsageLeaderboardV2Query(
+    "day",
+    queryConfig.period,
+    {
+      ...queryConfig.input,
+      limit: null,
+    },
+    queryRefreshConfig.leaderboard
+  );
+  const estimatedDevelopmentTimeMs = useMemo(() => {
+    const rows = model.previewActive ? PREVIEW_TOKEN_DAY_ROWS : (dayLeaderboardQuery.data ?? []);
+    return (
+      rows.find((row) => row.estimated_development_time_ms != null)
+        ?.estimated_development_time_ms ?? null
+    );
+  }, [dayLeaderboardQuery.data, model.previewActive]);
+  const refreshProviderUsage = model.refresh;
+  const refetchDayLeaderboard = dayLeaderboardQuery.refetch;
+  const refresh = useCallback(() => {
+    refreshProviderUsage();
+    void refetchDayLeaderboard();
+  }, [refetchDayLeaderboard, refreshProviderUsage]);
+  const errorText =
+    model.errorText ??
+    (dayLeaderboardQuery.error ? formatUnknownError(dayLeaderboardQuery.error) : null);
 
   useWindowForeground({
     enabled: true,
-    onForeground: model.refresh,
+    onForeground: refresh,
     throttleMs: 1000,
   });
 
@@ -680,13 +727,14 @@ export function HomeTodayProviderUsageOverview({
       <SummaryCards
         summary={model.summary}
         totalCostUsd={model.totalCostUsd}
-        loading={model.loading}
+        estimatedDevelopmentTimeMs={estimatedDevelopmentTimeMs}
+        loading={model.loading || dayLeaderboardQuery.isLoading}
       />
 
       <QueryErrorCard
-        errorText={model.errorText}
-        loading={model.fetching}
-        onRetry={model.refresh}
+        errorText={errorText}
+        loading={model.fetching || dayLeaderboardQuery.isFetching}
+        onRetry={refresh}
         message="读取今日供应商用量失败，请重试；必要时查看 Console 日志。"
       />
 

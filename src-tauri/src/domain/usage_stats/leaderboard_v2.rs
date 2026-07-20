@@ -8,8 +8,8 @@ use super::filters::{
     sql_exclude_cx2cc_gateway_bridge_clause, SqlValues,
 };
 use super::folders::{
-    filter_rows_by_folder_keys, resolved_folder_map, session_lookup_keys, usage_event_rows,
-    UsageEventAgg,
+    filter_rows_by_folder_keys, folder_identity_for_row, folder_identity_for_session,
+    resolved_folder_map, session_lookup_keys, usage_event_rows, UsageEventAgg,
 };
 use super::{
     effective_total_from_buckets, extract_final_provider, has_valid_provider_key, parse_scope_v2,
@@ -36,6 +36,208 @@ fn local_day_bucket_sql(timestamp_expr: &str, day_start_hour: i64) -> String {
     format!(
         "strftime('%Y-%m-%d', {timestamp_expr}, 'unixepoch', 'localtime', '-{day_start_hour} hours')"
     )
+}
+
+const FULL_IDLE_GAP_MS: i64 = 15 * 60 * 1000;
+const SESSION_BREAK_GAP_MS: i64 = 30 * 60 * 1000;
+const MAX_ESTIMATED_DEVELOPMENT_TIME_MS: i64 = 24 * 60 * 60 * 1000;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct UsageActivityRow {
+    cli_key: String,
+    session_id: Option<String>,
+    day_key: String,
+    start_ms: i64,
+    duration_ms: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DayActivityMetrics {
+    last_request_completed_at_ms: i64,
+    estimated_development_time_ms: i64,
+}
+
+fn weighted_idle_gap_ms(gap_ms: i64) -> i64 {
+    if gap_ms <= FULL_IDLE_GAP_MS {
+        return gap_ms.max(0);
+    }
+    if gap_ms >= SESSION_BREAK_GAP_MS {
+        return 0;
+    }
+    let remaining_weight = SESSION_BREAK_GAP_MS - gap_ms;
+    ((gap_ms as i128 * remaining_weight as i128)
+        / (SESSION_BREAK_GAP_MS - FULL_IDLE_GAP_MS) as i128) as i64
+}
+
+fn summarize_day_activity(rows: &[UsageActivityRow]) -> Option<DayActivityMetrics> {
+    let last_request_completed_at_ms = rows
+        .iter()
+        .map(|row| row.start_ms.saturating_add(row.duration_ms.max(0)))
+        .max()?;
+    let mut intervals: Vec<(i64, i64)> = rows
+        .iter()
+        .filter_map(|row| {
+            let duration_ms = row.duration_ms.max(0);
+            (duration_ms > 0).then(|| (row.start_ms, row.start_ms.saturating_add(duration_ms)))
+        })
+        .collect();
+    intervals.sort_unstable_by_key(|(start_ms, end_ms)| (*start_ms, *end_ms));
+
+    let mut merged: Vec<(i64, i64)> = Vec::with_capacity(intervals.len());
+    for (start_ms, end_ms) in intervals {
+        if let Some((_, current_end_ms)) = merged.last_mut() {
+            if start_ms <= *current_end_ms {
+                *current_end_ms = (*current_end_ms).max(end_ms);
+                continue;
+            }
+        }
+        merged.push((start_ms, end_ms));
+    }
+
+    let mut estimated_ms: i128 = 0;
+    let mut previous_end_ms: Option<i64> = None;
+    for (start_ms, end_ms) in merged {
+        if let Some(previous_end_ms) = previous_end_ms {
+            estimated_ms += weighted_idle_gap_ms(start_ms.saturating_sub(previous_end_ms)) as i128;
+        }
+        estimated_ms += end_ms.saturating_sub(start_ms) as i128;
+        previous_end_ms = Some(end_ms);
+    }
+
+    Some(DayActivityMetrics {
+        last_request_completed_at_ms,
+        estimated_development_time_ms: estimated_ms
+            .clamp(0, MAX_ESTIMATED_DEVELOPMENT_TIME_MS as i128)
+            as i64,
+    })
+}
+
+fn summarize_activity_by_day(
+    rows: impl IntoIterator<Item = UsageActivityRow>,
+) -> HashMap<String, DayActivityMetrics> {
+    let mut by_day: HashMap<String, Vec<UsageActivityRow>> = HashMap::new();
+    for row in rows {
+        by_day.entry(row.day_key.clone()).or_default().push(row);
+    }
+    by_day
+        .into_iter()
+        .filter_map(|(day_key, rows)| {
+            summarize_day_activity(&rows).map(|metrics| (day_key, metrics))
+        })
+        .collect()
+}
+
+fn summarize_activity_by_folder(
+    rows: impl IntoIterator<Item = UsageActivityRow>,
+    resolved: &HashMap<String, UsageResolvedFolder>,
+) -> HashMap<String, i64> {
+    let mut by_folder_day: HashMap<(String, String), Vec<UsageActivityRow>> = HashMap::new();
+    for row in rows {
+        let folder = folder_identity_for_session(&row.cli_key, row.session_id.as_deref(), resolved);
+        by_folder_day
+            .entry((folder.key, row.day_key.clone()))
+            .or_default()
+            .push(row);
+    }
+
+    let mut by_folder = HashMap::new();
+    for ((folder_key, _), rows) in by_folder_day {
+        let Some(metrics) = summarize_day_activity(&rows) else {
+            continue;
+        };
+        let total = by_folder.entry(folder_key).or_insert(0_i64);
+        *total = total.saturating_add(metrics.estimated_development_time_ms);
+    }
+    by_folder
+}
+
+#[allow(clippy::too_many_arguments)]
+fn day_activity_rows_with_conn(
+    conn: &Connection,
+    start_ts: Option<i64>,
+    end_ts: Option<i64>,
+    cli_key: Option<&str>,
+    provider_id: Option<i64>,
+    exclude_cx2cc_gateway_bridge: bool,
+    day_start_hour: i64,
+) -> Result<Vec<UsageActivityRow>, String> {
+    let day_bucket_sql = local_day_bucket_sql("r.created_at", day_start_hour);
+    let (where_clause, where_params) = build_optional_range_cli_provider_filters(
+        "r.created_at",
+        "r.cli_key",
+        "r.final_provider_id",
+        start_ts,
+        end_ts,
+        cli_key,
+        provider_id,
+    );
+    let cx2cc_filter_clause =
+        sql_exclude_cx2cc_gateway_bridge_clause(Some("r"), exclude_cx2cc_gateway_bridge);
+    let sql = format!(
+        r#"
+SELECT
+  r.cli_key,
+  NULLIF(TRIM(COALESCE(r.session_id, '')), '') AS session_id,
+  {day_bucket_sql} AS day_key,
+  r.created_at_ms,
+  r.created_at,
+  COALESCE(r.duration_ms, 0) AS duration_ms
+FROM request_logs r
+WHERE r.excluded_from_stats = 0
+{where_clause}
+{cx2cc_filter_clause}
+"#,
+    );
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| db_err!("failed to prepare day activity query: {e}"))?;
+    let rows = stmt
+        .query_map(params_from_iter(where_params), |row| {
+            let created_at_ms = row.get::<_, Option<i64>>("created_at_ms")?.unwrap_or(0);
+            let created_at = row.get::<_, i64>("created_at")?;
+            Ok(UsageActivityRow {
+                cli_key: row.get("cli_key")?,
+                session_id: row.get("session_id")?,
+                day_key: row.get("day_key")?,
+                start_ms: if created_at_ms > 0 {
+                    created_at_ms
+                } else {
+                    created_at.saturating_mul(1000)
+                },
+                duration_ms: row.get("duration_ms")?,
+            })
+        })
+        .map_err(|e| db_err!("failed to run day activity query: {e}"))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| db_err!("failed to read day activity row: {e}"))?);
+    }
+    Ok(out)
+}
+
+fn apply_day_activity_metrics(
+    rows: &mut [UsageLeaderboardRow],
+    metrics_by_day: HashMap<String, DayActivityMetrics>,
+) {
+    for row in rows {
+        let Some(metrics) = metrics_by_day.get(&row.key) else {
+            continue;
+        };
+        row.last_request_completed_at_ms = Some(metrics.last_request_completed_at_ms);
+        row.estimated_development_time_ms = Some(metrics.estimated_development_time_ms);
+    }
+}
+
+fn apply_folder_activity_metrics(
+    rows: &mut [UsageLeaderboardRow],
+    metrics_by_folder: HashMap<String, i64>,
+) {
+    for row in rows {
+        let Some(estimated_ms) = metrics_by_folder.get(&row.key) else {
+            continue;
+        };
+        row.estimated_development_time_ms = Some(*estimated_ms);
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -103,6 +305,9 @@ pub(super) fn leaderboard_v2_with_conn_day_start(
         sql_exclude_cx2cc_gateway_bridge_clause(Some("r"), exclude_cx2cc_gateway_bridge);
 
     let mut out: Vec<UsageLeaderboardRow> = match scope {
+        UsageScopeV2::Folder => {
+            return Err("folder leaderboard requires folder metadata lookup".to_string());
+        }
         UsageScopeV2::Cli => {
             let sql = format!(
                 r#"
@@ -731,6 +936,16 @@ LIMIT 1
     };
 
     if matches!(scope, UsageScopeV2::Day) {
+        let activity_rows = day_activity_rows_with_conn(
+            conn,
+            start_ts,
+            end_ts,
+            cli_key,
+            provider_id,
+            exclude_cx2cc_gateway_bridge,
+            day_start_hour,
+        )?;
+        apply_day_activity_metrics(&mut out, summarize_activity_by_day(activity_rows));
         out.sort_by(|a, b| b.key.cmp(&a.key));
     } else {
         out.sort_by(|a, b| {
@@ -809,7 +1024,7 @@ where
 {
     let day_bucket_sql = local_day_bucket_sql("r.created_at", params.day_start_hour);
     let bucket_sql = match params.scope {
-        UsageScopeV2::Cli => None,
+        UsageScopeV2::Cli | UsageScopeV2::Folder => None,
         UsageScopeV2::Provider => {
             Some("CASE WHEN r.final_provider_id IS NULL THEN NULL ELSE CAST(r.final_provider_id AS TEXT) END")
         }
@@ -827,16 +1042,29 @@ where
         false,
         params.exclude_cx2cc_gateway_bridge,
     )?;
+    let activity_rows = if matches!(params.scope, UsageScopeV2::Day | UsageScopeV2::Folder) {
+        Some(day_activity_rows_with_conn(
+            conn,
+            params.start_ts,
+            params.end_ts,
+            params.cli_key,
+            params.provider_id,
+            params.exclude_cx2cc_gateway_bridge,
+            params.day_start_hour,
+        )?)
+    } else {
+        None
+    };
     let lookup_keys = session_lookup_keys(&rows);
     let resolved = resolved_folder_map(folder_lookup(&lookup_keys));
     let rows = filter_rows_by_folder_keys(rows, &resolved, Some(params.folder_keys));
 
-    let mut by_key: HashMap<String, (String, ProviderAgg)> = HashMap::new();
+    let mut by_key: HashMap<String, (String, Option<String>, ProviderAgg)> = HashMap::new();
     for row in rows {
         let item = match params.scope {
             UsageScopeV2::Cli => {
                 let key = row.cli_key.clone();
-                Some((key.clone(), key))
+                Some((key.clone(), key, None))
             }
             UsageScopeV2::Provider => {
                 let Some(provider_id) = row.bucket_provider_id else {
@@ -848,44 +1076,81 @@ where
                 Some((
                     format!("{}:{}", row.cli_key, provider_id),
                     format!("{}/{}", row.cli_key, provider_name),
+                    None,
                 ))
+            }
+            UsageScopeV2::Folder => {
+                let folder = folder_identity_for_row(&row, &resolved);
+                Some((folder.key, folder.name, folder.folder_path))
             }
             UsageScopeV2::Model | UsageScopeV2::Day => {
                 let Some(key) = row.bucket_key.clone() else {
                     continue;
                 };
-                Some((key.clone(), key))
+                Some((key.clone(), key, None))
             }
         };
-        let Some((key, name)) = item else {
+        let Some((key, name, folder_path)) = item else {
             continue;
         };
         let entry = by_key
             .entry(key)
-            .or_insert_with(|| (name, ProviderAgg::default()));
+            .or_insert_with(|| (name, folder_path, ProviderAgg::default()));
         let mut agg = row.agg;
         if !matches!(params.scope, UsageScopeV2::Day) {
             agg.first_request_created_at_ms = None;
             agg.last_request_created_at_ms = None;
         }
-        entry.1.merge(agg);
+        entry.2.merge(agg);
     }
 
     let mut out: Vec<UsageLeaderboardRow> = by_key
         .into_iter()
-        .map(|(key, (name, agg))| agg.into_leaderboard_row(key, name))
+        .map(|(key, (name, folder_path, agg))| {
+            let mut row = agg.into_leaderboard_row(key, name);
+            row.folder_path = folder_path;
+            row
+        })
         .collect();
 
-    if matches!(params.scope, UsageScopeV2::Day) {
-        out.sort_by(|a, b| b.key.cmp(&a.key));
-    } else {
-        out.sort_by(|a, b| {
+    let filtered_activity_rows: Vec<UsageActivityRow> = activity_rows
+        .into_iter()
+        .flatten()
+        .filter(|row| {
+            params.folder_keys.is_empty()
+                || params.folder_keys.iter().any(|folder_key| {
+                    folder_identity_for_session(&row.cli_key, row.session_id.as_deref(), &resolved)
+                        .key
+                        == *folder_key
+                })
+        })
+        .collect();
+
+    match params.scope {
+        UsageScopeV2::Day => {
+            apply_day_activity_metrics(&mut out, summarize_activity_by_day(filtered_activity_rows));
+            out.sort_by(|a, b| b.key.cmp(&a.key));
+        }
+        UsageScopeV2::Folder => {
+            apply_folder_activity_metrics(
+                &mut out,
+                summarize_activity_by_folder(filtered_activity_rows, &resolved),
+            );
+            out.sort_by(|a, b| {
+                b.total_tokens
+                    .cmp(&a.total_tokens)
+                    .then_with(|| b.requests_total.cmp(&a.requests_total))
+                    .then_with(|| a.name.cmp(&b.name))
+                    .then_with(|| a.key.cmp(&b.key))
+            });
+        }
+        UsageScopeV2::Cli | UsageScopeV2::Provider | UsageScopeV2::Model => out.sort_by(|a, b| {
             b.requests_total
                 .cmp(&a.requests_total)
                 .then_with(|| b.total_tokens.cmp(&a.total_tokens))
                 .then_with(|| a.name.cmp(&b.name))
                 .then_with(|| a.key.cmp(&b.key))
-        });
+        }),
     }
     if let Some(limit) = params.limit {
         out.truncate(limit.clamp(1, 200));
@@ -908,7 +1173,8 @@ where
     let conn = db.open_connection()?;
     let scope = parse_scope_v2(scope)?;
     let resolved = resolve_query_params(&conn, params)?;
-    if let Some(folder_keys) = resolved.folder_keys.as_deref() {
+    if matches!(scope, UsageScopeV2::Folder) || resolved.folder_keys.is_some() {
+        let folder_keys = resolved.folder_keys.as_deref().unwrap_or_default();
         return Ok(leaderboard_v2_folder_filtered_with_conn(
             &conn,
             FolderFilteredLeaderboardParams {
@@ -941,7 +1207,20 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::local_day_bucket_sql;
+    use super::{
+        local_day_bucket_sql, summarize_day_activity, weighted_idle_gap_ms, UsageActivityRow,
+        FULL_IDLE_GAP_MS, MAX_ESTIMATED_DEVELOPMENT_TIME_MS, SESSION_BREAK_GAP_MS,
+    };
+
+    fn activity(start_ms: i64, duration_ms: i64, session_id: Option<&str>) -> UsageActivityRow {
+        UsageActivityRow {
+            cli_key: "codex".to_string(),
+            session_id: session_id.map(str::to_string),
+            day_key: "2026-07-20".to_string(),
+            start_ms,
+            duration_ms,
+        }
+    }
 
     #[test]
     fn local_day_bucket_sql_shifts_after_localtime_for_wall_clock_day_boundaries() {
@@ -956,6 +1235,101 @@ mod tests {
         assert_eq!(
             local_day_bucket_sql("r.created_at", 5),
             "strftime('%Y-%m-%d', r.created_at, 'unixepoch', 'localtime', '-5 hours')"
+        );
+    }
+
+    #[test]
+    fn single_request_has_no_fixed_tail_compensation() {
+        let metrics = summarize_day_activity(&[activity(1_000, 90_000, None)]).unwrap();
+        assert_eq!(metrics.last_request_completed_at_ms, 91_000);
+        assert_eq!(metrics.estimated_development_time_ms, 90_000);
+    }
+
+    #[test]
+    fn overlapping_and_concurrent_requests_are_merged_by_interval_only() {
+        let rows = [
+            activity(0, 20_000, Some("reused")),
+            activity(10_000, 20_000, Some("reused")),
+            activity(10_000, 5_000, Some("different")),
+        ];
+        let metrics = summarize_day_activity(&rows).unwrap();
+        assert_eq!(rows.iter().map(|row| row.duration_ms).sum::<i64>(), 45_000);
+        assert_eq!(metrics.estimated_development_time_ms, 30_000);
+        assert_eq!(metrics.last_request_completed_at_ms, 30_000);
+    }
+
+    #[test]
+    fn reused_session_does_not_merge_non_overlapping_requests() {
+        let rows = [
+            activity(0, 60_000, Some("same-session")),
+            activity(SESSION_BREAK_GAP_MS + 60_000, 60_000, Some("same-session")),
+        ];
+        let metrics = summarize_day_activity(&rows).unwrap();
+        assert_eq!(metrics.estimated_development_time_ms, 120_000);
+    }
+
+    #[test]
+    fn idle_gap_weighting_honors_boundaries_and_soft_decay() {
+        let minute_ms = 60 * 1000;
+
+        assert_eq!(
+            weighted_idle_gap_ms(FULL_IDLE_GAP_MS - 1),
+            FULL_IDLE_GAP_MS - 1
+        );
+        assert_eq!(weighted_idle_gap_ms(FULL_IDLE_GAP_MS), FULL_IDLE_GAP_MS);
+        assert_eq!(
+            weighted_idle_gap_ms(FULL_IDLE_GAP_MS + 1),
+            FULL_IDLE_GAP_MS - 1
+        );
+        assert_eq!(
+            weighted_idle_gap_ms(20 * minute_ms),
+            13 * minute_ms + 20 * 1000
+        );
+        assert_eq!(
+            weighted_idle_gap_ms(25 * minute_ms),
+            8 * minute_ms + 20 * 1000
+        );
+        assert_eq!(weighted_idle_gap_ms(SESSION_BREAK_GAP_MS - 1), 1);
+        assert_eq!(weighted_idle_gap_ms(SESSION_BREAK_GAP_MS), 0);
+        assert_eq!(weighted_idle_gap_ms(SESSION_BREAK_GAP_MS + 1), 0);
+
+        let fifteen_minute_gap = summarize_day_activity(&[
+            activity(0, 60_000, None),
+            activity(60_000 + FULL_IDLE_GAP_MS, 60_000, None),
+        ])
+        .unwrap();
+        assert_eq!(
+            fifteen_minute_gap.estimated_development_time_ms,
+            17 * minute_ms
+        );
+
+        let thirty_minute_gap = summarize_day_activity(&[
+            activity(0, 60_000, None),
+            activity(60_000 + SESSION_BREAK_GAP_MS, 60_000, None),
+        ])
+        .unwrap();
+        assert_eq!(
+            thirty_minute_gap.estimated_development_time_ms,
+            2 * minute_ms
+        );
+    }
+
+    #[test]
+    fn zero_negative_overflowing_and_long_durations_are_bounded() {
+        let inactive =
+            summarize_day_activity(&[activity(1_000, 0, None), activity(2_000, -500, None)])
+                .unwrap();
+        assert_eq!(inactive.estimated_development_time_ms, 0);
+        assert_eq!(inactive.last_request_completed_at_ms, 2_000);
+
+        let overflowing = summarize_day_activity(&[activity(i64::MAX - 5, 100, None)]).unwrap();
+        assert_eq!(overflowing.last_request_completed_at_ms, i64::MAX);
+        assert!(overflowing.estimated_development_time_ms >= 0);
+
+        let long = summarize_day_activity(&[activity(0, i64::MAX, None)]).unwrap();
+        assert_eq!(
+            long.estimated_development_time_ms,
+            MAX_ESTIMATED_DEVELOPMENT_TIME_MS
         );
     }
 }

@@ -1,7 +1,9 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeTodayProviderUsageOverview } from "../HomeTodayProviderUsageOverview";
 import { useHomeTokenCostDataModel } from "../useHomeTokenCostDataModel";
+import { useUsageLeaderboardV2Query } from "../../../query/usage";
 import type { RequestLogSummary } from "../../../services/gateway/requestLogs";
 import type { TraceSession } from "../../../services/gateway/traceStore";
 import type { UsageLeaderboardRow } from "../../../services/usage/usage";
@@ -9,6 +11,15 @@ import type { UsageLeaderboardRow } from "../../../services/usage/usage";
 vi.mock("../useHomeTokenCostDataModel", () => ({
   useHomeTokenCostDataModel: vi.fn(),
 }));
+
+vi.mock("../../../query/usage", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../../query/usage")>("../../../query/usage");
+  return {
+    ...actual,
+    useUsageLeaderboardV2Query: vi.fn(),
+  };
+});
 
 function createActiveSession(
   providerName: string,
@@ -94,10 +105,11 @@ function createLeaderboardRow(
   overrides: Pick<UsageLeaderboardRow, "key" | "name"> &
     Partial<Omit<UsageLeaderboardRow, "key" | "name">>
 ): UsageLeaderboardRow {
-  const { key, name, ...rest } = overrides;
+  const { key, name, folder_path = null, ...rest } = overrides;
   return {
     key,
     name,
+    folder_path,
     requests_total: 1,
     requests_success: 1,
     requests_failed: 0,
@@ -110,6 +122,8 @@ function createLeaderboardRow(
     total_duration_ms: 900,
     first_request_created_at_ms: null,
     last_request_created_at_ms: null,
+    last_request_completed_at_ms: null,
+    estimated_development_time_ms: null,
     avg_duration_ms: 900,
     avg_ttfb_ms: 200,
     avg_output_tokens_per_second: 90,
@@ -317,9 +331,17 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     vi.clearAllMocks();
     window.localStorage.removeItem("homeUsageDayStartHour");
     Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+    vi.mocked(useUsageLeaderboardV2Query).mockReturnValue({
+      data: [{ estimated_development_time_ms: 12_600_000 }],
+      isLoading: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any);
   });
 
-  it("uses the fixed today provider query config and renders summary plus top providers", () => {
+  it("uses the fixed today provider query config and renders summary plus top providers", async () => {
+    const user = userEvent.setup();
     mockDataModel();
 
     render(<HomeTodayProviderUsageOverview devPreviewEnabled={true} activeSessions={[]} />);
@@ -350,6 +372,21 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
         },
       },
     });
+    expect(vi.mocked(useUsageLeaderboardV2Query)).toHaveBeenCalledWith(
+      "day",
+      "daily",
+      expect.objectContaining({
+        startTs: null,
+        endTs: null,
+        dayStartHour: 0,
+        limit: null,
+        excludeCx2CcGatewayBridge: true,
+      }),
+      expect.objectContaining({
+        refetchIntervalMs: 60_000,
+        refetchOnMount: "always",
+      })
+    );
 
     const totalWithCacheCard = screen.getByText("含缓存总 Token").parentElement;
     const inputOutputTokenCard = screen.getAllByText("输入+输出 Token")[0]?.parentElement;
@@ -363,9 +400,21 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(within(inputOutputTokenCard as HTMLElement).getByText("20.0K")).toBeInTheDocument();
     expect(within(cacheHitRateCard as HTMLElement).getByText("18.8%")).toBeInTheDocument();
     expect(within(totalDurationCard as HTMLElement).getByText("7m6s")).toBeInTheDocument();
-    expect(screen.getByText("总请求数")).toBeInTheDocument();
-    expect(screen.getByText("20")).toBeInTheDocument();
-    expect(screen.getAllByText("总花费").length).toBeGreaterThan(0);
+    const estimatedDevelopmentTimeCard = screen.getByText("预估开发时间").closest(".relative");
+    expect(estimatedDevelopmentTimeCard).toBeTruthy();
+    expect(
+      within(estimatedDevelopmentTimeCard as HTMLElement).getByText("3h30m")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("总请求数")).not.toBeInTheDocument();
+    const totalCostCard = screen.getAllByText("总花费")[0]?.parentElement;
+    expect(totalCostCard).toBeTruthy();
+    expect(
+      (totalCostCard as HTMLElement).compareDocumentPosition(
+        estimatedDevelopmentTimeCard as HTMLElement
+      ) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    await user.hover(screen.getByText("预估开发时间").parentElement as HTMLElement);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("15–30 分钟逐步减少");
     expect(screen.getByText("$2.21")).toBeInTheDocument();
     const providerHeader = screen.getByText("供应商").closest("th");
     const usageTable = screen.getByRole("table", { name: "今日供应商用量" });
@@ -870,6 +919,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
         {
           key: "codex:88",
           name: "codex/鹿森",
+          folder_path: null,
           requests_total: 9,
           requests_success: 9,
           requests_failed: 0,
@@ -882,6 +932,8 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
           total_duration_ms: 7_380,
           first_request_created_at_ms: null,
           last_request_created_at_ms: null,
+          last_request_completed_at_ms: null,
+          estimated_development_time_ms: null,
           avg_duration_ms: 820,
           avg_ttfb_ms: 210,
           avg_output_tokens_per_second: 108,
@@ -954,6 +1006,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
         {
           key: "claude:1",
           name: "Claude Main",
+          folder_path: null,
           requests_total: 5,
           requests_success: 5,
           requests_failed: 0,
@@ -966,6 +1019,8 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
           total_duration_ms: 4_500,
           first_request_created_at_ms: null,
           last_request_created_at_ms: null,
+          last_request_completed_at_ms: null,
+          estimated_development_time_ms: null,
           avg_duration_ms: 900,
           avg_ttfb_ms: 220,
           avg_output_tokens_per_second: 90,
@@ -987,6 +1042,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
         {
           key: "claude:1",
           name: "Claude Main",
+          folder_path: null,
           requests_total: 5,
           requests_success: 5,
           requests_failed: 0,
@@ -999,6 +1055,8 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
           total_duration_ms: 4_500,
           first_request_created_at_ms: null,
           last_request_created_at_ms: null,
+          last_request_completed_at_ms: null,
+          estimated_development_time_ms: null,
           avg_duration_ms: 900,
           avg_ttfb_ms: 220,
           avg_output_tokens_per_second: 90,

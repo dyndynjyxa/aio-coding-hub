@@ -4072,12 +4072,15 @@ export type UsageHourlyRow = {
 export type UsageLeaderboardRow = {
   key: string;
   name: string;
+  folder_path: string | null;
   requests_total: number;
   requests_success: number;
   requests_failed: number;
   total_duration_ms: number;
   first_request_created_at_ms: number | null;
   last_request_created_at_ms: number | null;
+  last_request_completed_at_ms: number | null;
+  estimated_development_time_ms: number | null;
   total_tokens: number;
   io_total_tokens: number;
   input_tokens: number;

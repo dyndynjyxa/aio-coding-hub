@@ -602,7 +602,7 @@ describe("pages/HomePage", () => {
     expect(screen.queryByRole("tab", { name: "花费" })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "用量" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "更多" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "查看曲线" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "今日总览" })).toBeInTheDocument();
     expect(vi.mocked(useUsageHourlySeriesQuery)).toHaveBeenLastCalledWith(
       15,
       expect.objectContaining({ enabled: false })
@@ -644,17 +644,17 @@ describe("pages/HomePage", () => {
     renderWithProviders(client, <HomePage />);
 
     expect(screen.getByText("personalized-usage-view:summary")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "查看曲线" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "今日总览" })).toBeInTheDocument();
     expect(vi.mocked(useUsageHourlySeriesQuery)).toHaveBeenLastCalledWith(
       15,
       expect.objectContaining({ enabled: false })
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "查看曲线" }));
+    fireEvent.click(screen.getByRole("button", { name: "今日总览" }));
 
     await waitFor(() => {
       expect(screen.getByText("personalized-usage-view:usageChart")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "查看总览" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "用量趋势" })).toBeInTheDocument();
     });
     expect(vi.mocked(useUsageHourlySeriesQuery)).toHaveBeenLastCalledWith(
       15,

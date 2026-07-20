@@ -62,6 +62,7 @@ pub(super) enum UsageScopeV2 {
     Cli,
     Provider,
     Model,
+    Folder,
     Day,
 }
 
@@ -70,6 +71,7 @@ pub(super) fn parse_scope_v2(input: &str) -> crate::shared::error::AppResult<Usa
         "cli" => Ok(UsageScopeV2::Cli),
         "provider" => Ok(UsageScopeV2::Provider),
         "model" => Ok(UsageScopeV2::Model),
+        "folder" => Ok(UsageScopeV2::Folder),
         "day" => Ok(UsageScopeV2::Day),
         _ => Err(format!("SEC_INVALID_INPUT: unknown scope={input}").into()),
     }

@@ -10,6 +10,7 @@ const ACCENT_COLORS = {
   green: "bg-emerald-500",
   purple: "bg-violet-500",
   cyan: "bg-cyan-500",
+  rose: "bg-rose-500",
   slate: "bg-muted dark:bg-muted",
 } as const;
 

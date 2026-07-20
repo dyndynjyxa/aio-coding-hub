@@ -46,7 +46,8 @@ fn setup_conn() -> Connection {
 	  excluded_from_stats INTEGER NOT NULL DEFAULT 0,
 	  session_id TEXT,
 	  created_at INTEGER NOT NULL,
-	  created_at_ms INTEGER NOT NULL DEFAULT 0
+	  created_at_ms INTEGER NOT NULL DEFAULT 0,
+	  last_activity_ms INTEGER
 	);
 	"#,
     )
@@ -480,6 +481,134 @@ fn fixture_folder_lookup(keys: &[UsageSessionLookupKey]) -> Vec<UsageResolvedFol
             },
         )
         .collect()
+}
+
+#[test]
+fn folder_leaderboard_groups_by_path_and_sums_daily_activity_without_cross_day_gaps() {
+    assert!(matches!(
+        parse_scope_v2("folder").expect("parse folder scope"),
+        UsageScopeV2::Folder
+    ));
+    let conn = setup_conn();
+    let day_start = local_day_start_ts(&conn, "2026-07-18");
+    let alpha_before_midnight = day_start + 23 * 3600 + 58 * 60;
+    let alpha_after_midnight = day_start + 24 * 3600 + 5 * 60;
+
+    for created_at in [alpha_before_midnight, alpha_after_midnight] {
+        insert_usage_log(
+            &conn,
+            TestUsageLog {
+                session_id: Some("alpha-session"),
+                duration_ms: 60_000,
+                input_tokens: Some(100),
+                output_tokens: Some(20),
+                created_at,
+                ..base_usage_log(created_at)
+            },
+        );
+    }
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            session_id: Some("beta-session"),
+            duration_ms: 2_000,
+            input_tokens: Some(500),
+            output_tokens: Some(50),
+            created_at: day_start + 12 * 3600,
+            ..base_usage_log(day_start)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            session_id: Some("missing-session"),
+            duration_ms: 3_000,
+            input_tokens: Some(30),
+            output_tokens: Some(5),
+            created_at: day_start + 14 * 3600,
+            ..base_usage_log(day_start)
+        },
+    );
+
+    let lookup = |keys: &[UsageSessionLookupKey]| {
+        let requested: std::collections::HashSet<&str> =
+            keys.iter().map(|key| key.session_id.as_str()).collect();
+        [
+            ("alpha-session", "/work/alpha"),
+            ("beta-session", "/archive/alpha"),
+        ]
+        .into_iter()
+        .filter(|(session_id, _)| requested.contains(session_id))
+        .map(|(session_id, folder_path)| UsageResolvedFolder {
+            cli_key: "codex".to_string(),
+            session_id: session_id.to_string(),
+            folder_name: "alpha".to_string(),
+            folder_path: folder_path.to_string(),
+        })
+        .collect()
+    };
+
+    let rows = leaderboard_v2_folder_filtered_with_conn(
+        &conn,
+        FolderFilteredLeaderboardParams {
+            scope: UsageScopeV2::Folder,
+            start_ts: Some(day_start),
+            end_ts: Some(day_start + 2 * 86_400),
+            cli_key: None,
+            provider_id: None,
+            folder_keys: &[],
+            limit: None,
+            exclude_cx2cc_gateway_bridge: false,
+            day_start_hour: 0,
+        },
+        lookup,
+    )
+    .expect("folder leaderboard");
+
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0].key, "/archive/alpha");
+    let alpha = rows
+        .iter()
+        .find(|row| row.key == "/work/alpha")
+        .expect("alpha folder row");
+    assert_eq!(alpha.name, "alpha");
+    assert_eq!(alpha.folder_path.as_deref(), Some("/work/alpha"));
+    assert_eq!(alpha.total_duration_ms, 120_000);
+    assert_eq!(alpha.estimated_development_time_ms, Some(120_000));
+    assert_eq!(alpha.first_request_created_at_ms, None);
+    assert_eq!(alpha.last_request_completed_at_ms, None);
+
+    let same_name = rows
+        .iter()
+        .filter(|row| row.name == "alpha")
+        .collect::<Vec<_>>();
+    assert_eq!(same_name.len(), 2);
+    let unknown = rows
+        .iter()
+        .find(|row| row.key == "__unknown__")
+        .expect("unknown folder row");
+    assert_eq!(unknown.name, "未知文件夹");
+    assert_eq!(unknown.folder_path, None);
+    assert_eq!(unknown.estimated_development_time_ms, Some(3_000));
+
+    let filtered = leaderboard_v2_folder_filtered_with_conn(
+        &conn,
+        FolderFilteredLeaderboardParams {
+            scope: UsageScopeV2::Folder,
+            start_ts: Some(day_start),
+            end_ts: Some(day_start + 2 * 86_400),
+            cli_key: None,
+            provider_id: None,
+            folder_keys: &["/work/alpha".to_string()],
+            limit: None,
+            exclude_cx2cc_gateway_bridge: false,
+            day_start_hour: 0,
+        },
+        lookup,
+    )
+    .expect("filtered folder leaderboard");
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].key, "/work/alpha");
 }
 
 #[test]
@@ -1620,6 +1749,11 @@ INSERT INTO request_logs (
     assert_eq!(rows[0].cost_usd, Some(3.0));
     assert_eq!(rows[0].first_request_created_at_ms, Some(day_two_ts * 1000));
     assert_eq!(rows[0].last_request_created_at_ms, Some(day_two_ts * 1000));
+    assert_eq!(
+        rows[0].last_request_completed_at_ms,
+        Some(day_two_ts * 1000 + 1000)
+    );
+    assert_eq!(rows[0].estimated_development_time_ms, Some(1000));
 
     assert_eq!(rows[1].key, day_one);
     assert_eq!(rows[1].name, day_one);
@@ -1633,6 +1767,11 @@ INSERT INTO request_logs (
         rows[1].last_request_created_at_ms,
         Some((day_one_ts + 3600) * 1000)
     );
+    assert_eq!(
+        rows[1].last_request_completed_at_ms,
+        Some((day_one_ts + 3600) * 1000 + 1000)
+    );
+    assert_eq!(rows[1].estimated_development_time_ms, Some(2000));
 
     let cli_filtered = leaderboard_v2_with_conn(
         &conn,
@@ -1682,7 +1821,58 @@ INSERT INTO request_logs (
     assert!(model_rows
         .iter()
         .all(|row| row.first_request_created_at_ms.is_none()
-            && row.last_request_created_at_ms.is_none()));
+            && row.last_request_created_at_ms.is_none()
+            && row.last_request_completed_at_ms.is_none()
+            && row.estimated_development_time_ms.is_none()));
+}
+
+#[test]
+fn v2_day_activity_uses_created_at_ms_and_duration_only_across_midnight() {
+    let conn = setup_conn();
+    conn.execute(
+        "INSERT INTO providers (id, name) VALUES (1, 'Provider')",
+        [],
+    )
+    .expect("insert provider");
+    let day_start = local_day_start_ts(&conn, "2026-04-16");
+    let request_start = day_start + 23 * 3600 + 59 * 60;
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            provider_id: 1,
+            provider_name: "Provider",
+            duration_ms: 120_000,
+            created_at: request_start,
+            ..base_usage_log(request_start)
+        },
+    );
+    let precise_start_ms = request_start * 1000 + 321;
+    conn.execute(
+        "UPDATE request_logs SET created_at_ms = ?1, last_activity_ms = ?2",
+        params![precise_start_ms, precise_start_ms + 9_999_999],
+    )
+    .expect("update activity timestamps");
+
+    let rows = leaderboard_v2_with_conn(
+        &conn,
+        UsageScopeV2::Day,
+        Some(day_start),
+        Some(day_start + 86_400),
+        None,
+        None,
+        Some(50),
+        false,
+    )
+    .expect("day leaderboard");
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].total_duration_ms, 120_000);
+    assert_eq!(rows[0].first_request_created_at_ms, Some(precise_start_ms));
+    assert_eq!(
+        rows[0].last_request_completed_at_ms,
+        Some(precise_start_ms + 120_000)
+    );
+    assert_eq!(rows[0].estimated_development_time_ms, Some(120_000));
 }
 
 #[test]
@@ -1831,8 +2021,10 @@ fn v2_day_leaderboard_respects_usage_day_start_hour() {
     assert_eq!(folder_rows.len(), 2);
     assert_eq!(folder_rows[0].key, day_two);
     assert_eq!(folder_rows[0].requests_total, 1);
+    assert_eq!(folder_rows[0].estimated_development_time_ms, Some(1000));
     assert_eq!(folder_rows[1].key, day_one);
     assert_eq!(folder_rows[1].requests_total, 2);
+    assert_eq!(folder_rows[1].estimated_development_time_ms, Some(2000));
 
     let day_one_detail = day_detail_v1_with_conn(
         &conn,
@@ -2340,6 +2532,7 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
         alpha_day_rows[0].last_request_created_at_ms,
         Some((start_ts + 2 * 3600) * 1000)
     );
+    assert_eq!(alpha_day_rows[0].estimated_development_time_ms, Some(1000));
 
     let alpha_model_rows = leaderboard_v2_folder_filtered_with_conn(
         &conn,
@@ -2361,6 +2554,8 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
     assert_eq!(alpha_model_rows[0].key, "gpt-alpha");
     assert_eq!(alpha_model_rows[0].first_request_created_at_ms, None);
     assert_eq!(alpha_model_rows[0].last_request_created_at_ms, None);
+    assert_eq!(alpha_model_rows[0].last_request_completed_at_ms, None);
+    assert_eq!(alpha_model_rows[0].estimated_development_time_ms, None);
 
     let unknown_summary = summary_v2_with_conn(
         &conn,

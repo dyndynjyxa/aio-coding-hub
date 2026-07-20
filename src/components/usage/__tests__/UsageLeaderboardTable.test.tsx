@@ -26,6 +26,7 @@ const SUMMARY: UsageSummary = {
 const ROW_A: UsageLeaderboardRow = {
   key: "row-a",
   name: "Row A",
+  folder_path: null,
   requests_total: 0,
   requests_success: 0,
   requests_failed: 0,
@@ -38,6 +39,8 @@ const ROW_A: UsageLeaderboardRow = {
   total_duration_ms: 0,
   first_request_created_at_ms: null,
   last_request_created_at_ms: null,
+  last_request_completed_at_ms: null,
+  estimated_development_time_ms: null,
   avg_duration_ms: null,
   avg_ttfb_ms: null,
   avg_output_tokens_per_second: null,
@@ -47,6 +50,7 @@ const ROW_A: UsageLeaderboardRow = {
 const ROW_B: UsageLeaderboardRow = {
   key: "row-b",
   name: "Row B",
+  folder_path: null,
   requests_total: 10,
   requests_success: 7,
   requests_failed: 3,
@@ -59,6 +63,8 @@ const ROW_B: UsageLeaderboardRow = {
   total_duration_ms: 12_340,
   first_request_created_at_ms: null,
   last_request_created_at_ms: null,
+  last_request_completed_at_ms: null,
+  estimated_development_time_ms: null,
   avg_duration_ms: 1234,
   avg_ttfb_ms: 120,
   avg_output_tokens_per_second: 45.6,
