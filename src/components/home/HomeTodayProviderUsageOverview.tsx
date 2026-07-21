@@ -12,6 +12,7 @@ import type { RequestLogSummary } from "../../services/gateway/requestLogs";
 import type { TraceSession } from "../../services/gateway/traceStore";
 import {
   HOME_USAGE_DEFAULT_DAY_START_HOUR,
+  formatUsageDayHourMinuteFromMs,
   readHomeUsageDayStartHourFromStorage,
   subscribeHomeUsageDayStartHour,
 } from "../../services/home/homeUsageDayBoundary";
@@ -39,7 +40,7 @@ import {
 import { PREVIEW_TOKEN_DAY_ROWS } from "./previewTokenData";
 import { developmentTimeEstimateTooltip } from "./developmentTimeEstimate";
 
-const SUMMARY_SKELETON_KEYS = [0, 1, 2, 3, 4, 5];
+const SUMMARY_SKELETON_KEYS = [0, 1, 2, 3, 4];
 const PROVIDER_SKELETON_KEYS = [0, 1, 2];
 const MAX_PROVIDER_ROWS = 3;
 const REALTIME_PROVIDER_HINT_LIMIT = 20;
@@ -70,15 +71,6 @@ const EMPTY_ACTIVE_REQUESTS: ActiveRequestSnapshotItem[] = [];
 function formatTokenValue(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value)) return "—";
   return formatTokensMillions(value);
-}
-
-function summaryCacheHitRate(summary: UsageSummary | null) {
-  if (!summary) return NaN;
-  return computeCacheHitRate(
-    summary.input_tokens,
-    summary.cache_creation_input_tokens,
-    summary.cache_read_input_tokens
-  );
 }
 
 type SummaryMetricAccent = "blue" | "purple" | "green" | "orange" | "cyan";
@@ -475,6 +467,30 @@ function rowCacheHitRate(row: UsageLeaderboardRow) {
   );
 }
 
+function activityRangeText(row: UsageLeaderboardRow | null, dayStartHour: number) {
+  if (!row) return "—";
+  const first = row.first_request_created_at_ms;
+  const last = row.last_request_completed_at_ms;
+  if (first == null || last == null || !Number.isFinite(first) || !Number.isFinite(last)) {
+    return "—";
+  }
+  const firstText = formatUsageDayHourMinuteFromMs(first, row.key, dayStartHour);
+  let lastText = formatUsageDayHourMinuteFromMs(last, row.key, dayStartHour);
+  if (!firstText || !lastText) return "—";
+
+  const firstDate = new Date(first);
+  const lastDate = new Date(last);
+  if (
+    !lastText.startsWith("次日") &&
+    (firstDate.getFullYear() !== lastDate.getFullYear() ||
+      firstDate.getMonth() !== lastDate.getMonth() ||
+      firstDate.getDate() !== lastDate.getDate())
+  ) {
+    lastText = `次日${lastText}`;
+  }
+  return `${firstText}–${lastText}`;
+}
+
 function TableHeaderLabel({ label, note }: { label: string; note?: string }) {
   return (
     <div className="inline-flex items-baseline gap-1 whitespace-nowrap normal-case">
@@ -495,13 +511,15 @@ function SummaryMetricCard({
   accent: SummaryMetricAccent;
   tooltip?: string;
 }) {
+  const titleClassName =
+    "flex h-4 items-center gap-1 text-[11px] font-medium leading-4 text-muted-foreground";
   const titleNode = tooltip ? (
-    <div className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+    <div className={titleClassName}>
       <span>{title}</span>
       <CircleHelp aria-hidden="true" className="h-3 w-3 shrink-0" />
     </div>
   ) : (
-    <div className="text-[11px] font-medium text-muted-foreground">{title}</div>
+    <div className={titleClassName}>{title}</div>
   );
   return (
     <Card padding="sm" className="relative h-full overflow-hidden">
@@ -532,12 +550,14 @@ function SummaryMetricCardSkeleton() {
 function SummaryCards({
   summary,
   totalCostUsd,
+  activityRange,
   estimatedDevelopmentTimeMs,
   developmentTimeTooltip,
   loading,
 }: {
   summary: UsageSummary | null;
   totalCostUsd: number | null;
+  activityRange: string;
   estimatedDevelopmentTimeMs: number | null;
   developmentTimeTooltip: string;
   loading: boolean;
@@ -553,20 +573,10 @@ function SummaryCards({
   }
 
   return (
-    <div className="grid grid-cols-2 gap-2 lg:grid-cols-3 xl:grid-cols-6">
+    <div className="grid grid-cols-2 gap-2 lg:grid-cols-3 xl:grid-cols-5">
       <SummaryMetricCard
         title="含缓存总 Token"
         value={formatTokenValue(summary?.total_tokens)}
-        accent="purple"
-      />
-      <SummaryMetricCard
-        title="输入+输出 Token"
-        value={formatTokenValue(summary?.io_total_tokens)}
-        accent="blue"
-      />
-      <SummaryMetricCard
-        title="缓存命中率"
-        value={formatPercent(summaryCacheHitRate(summary))}
         accent="purple"
       />
       <SummaryMetricCard
@@ -574,13 +584,14 @@ function SummaryCards({
         value={formatCompactDurationMs(summary?.total_duration_ms)}
         accent="cyan"
       />
-      <SummaryMetricCard title="总花费" value={formatUsdCompact(totalCostUsd)} accent="orange" />
+      <SummaryMetricCard title="活动范围" value={activityRange} accent="blue" />
       <SummaryMetricCard
         title="预估开发时间"
         value={formatCompactDurationMs(estimatedDevelopmentTimeMs)}
         accent="green"
         tooltip={developmentTimeTooltip}
       />
+      <SummaryMetricCard title="总花费" value={formatUsdCompact(totalCostUsd)} accent="orange" />
     </div>
   );
 }
@@ -693,13 +704,11 @@ export function HomeTodayProviderUsageOverview({
     },
     queryRefreshConfig.leaderboard
   );
-  const estimatedDevelopmentTimeMs = useMemo(() => {
+  const todayUsageRow = useMemo(() => {
     const rows = model.previewActive ? PREVIEW_TOKEN_DAY_ROWS : (dayLeaderboardQuery.data ?? []);
-    return (
-      rows.find((row) => row.estimated_development_time_ms != null)
-        ?.estimated_development_time_ms ?? null
-    );
+    return rows[0] ?? null;
   }, [dayLeaderboardQuery.data, model.previewActive]);
+  const estimatedDevelopmentTimeMs = todayUsageRow?.estimated_development_time_ms ?? null;
   const refreshProviderUsage = model.refresh;
   const refetchDayLeaderboard = dayLeaderboardQuery.refetch;
   const refresh = useCallback(() => {
@@ -748,6 +757,7 @@ export function HomeTodayProviderUsageOverview({
       <SummaryCards
         summary={model.summary}
         totalCostUsd={model.totalCostUsd}
+        activityRange={activityRangeText(todayUsageRow, dayStartHour)}
         estimatedDevelopmentTimeMs={estimatedDevelopmentTimeMs}
         developmentTimeTooltip={developmentTimeEstimateTooltip(
           fullIdleGapMinutes,
