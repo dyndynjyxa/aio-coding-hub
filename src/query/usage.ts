@@ -39,7 +39,7 @@ type UsageLeaderboardV2QueryInput = UsageQueryInputV2 & {
 type UsageQueryInputV2WithoutFolderKeys = Omit<UsageQueryInputV2, "folderKeys">;
 type UsageProviderCacheRateTrendQueryInput = Omit<
   UsageQueryInputV2,
-  "folderKeys" | "dayStartHour"
+  "folderKeys" | "dayStartHour" | "fullIdleGapMinutes" | "sessionBreakGapMinutes"
 > & {
   limit: number | null;
 };

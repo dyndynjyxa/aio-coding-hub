@@ -1,7 +1,8 @@
 use crate::db;
 use crate::shared::error::db_err;
+use chrono::{Duration, NaiveDate};
 use rusqlite::{params_from_iter, Connection, OptionalExtension, Row};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::filters::{
     build_optional_range_cli_provider_filters, build_optional_range_filters_with_offset,
@@ -14,9 +15,12 @@ use super::folders::{
 use super::{
     effective_total_from_buckets, extract_final_provider, has_valid_provider_key, parse_scope_v2,
     resolve_query_params, sql_effective_input_tokens_expr,
-    sql_effective_input_tokens_expr_with_alias, ProviderAgg, ProviderKey, UsageLeaderboardRow,
-    UsageQueryParams, UsageResolvedFolder, UsageScopeV2, UsageSessionLookupKey,
+    sql_effective_input_tokens_expr_with_alias, DevelopmentTimeGapThresholds, ProviderAgg,
+    ProviderKey, UsageLeaderboardRow, UsageQueryParams, UsageResolvedFolder, UsageScopeV2,
+    UsageSessionLookupKey,
 };
+
+const MAX_LEADERBOARD_ROWS: usize = 200;
 
 fn aggregated_total_tokens(row: &Row<'_>) -> rusqlite::Result<i64> {
     Ok(effective_total_from_buckets(
@@ -38,8 +42,86 @@ fn local_day_bucket_sql(timestamp_expr: &str, day_start_hour: i64) -> String {
     )
 }
 
-const FULL_IDLE_GAP_MS: i64 = 15 * 60 * 1000;
-const SESSION_BREAK_GAP_MS: i64 = 30 * 60 * 1000;
+fn local_day_key_for_timestamp(
+    conn: &Connection,
+    timestamp: i64,
+    day_start_hour: i64,
+) -> Result<Option<String>, String> {
+    let sql = format!("SELECT {}", local_day_bucket_sql("?1", day_start_hour));
+    let key = conn
+        .query_row(&sql, [timestamp], |row| row.get(0))
+        .map_err(|e| db_err!("failed to resolve usage day key: {e}"))?;
+    Ok(key)
+}
+
+fn expected_day_keys(
+    conn: &Connection,
+    start_ts: Option<i64>,
+    end_ts: Option<i64>,
+    day_start_hour: i64,
+) -> Result<Vec<String>, String> {
+    let Some(start_ts) = start_ts else {
+        return Ok(Vec::new());
+    };
+    let end_ts = match end_ts {
+        Some(end_ts) => end_ts.saturating_sub(1),
+        None => conn
+            .query_row("SELECT CAST(strftime('%s', 'now') AS INTEGER)", [], |row| {
+                row.get(0)
+            })
+            .map_err(|e| db_err!("failed to resolve current usage timestamp: {e}"))?,
+    };
+    let Some(start_key) = local_day_key_for_timestamp(conn, start_ts, day_start_hour)? else {
+        return Ok(Vec::new());
+    };
+    let Some(end_key) = local_day_key_for_timestamp(conn, end_ts, day_start_hour)? else {
+        return Ok(Vec::new());
+    };
+    let Ok(mut current) = NaiveDate::parse_from_str(&start_key, "%Y-%m-%d") else {
+        return Ok(Vec::new());
+    };
+    let Ok(end) = NaiveDate::parse_from_str(&end_key, "%Y-%m-%d") else {
+        return Ok(Vec::new());
+    };
+    if current > end {
+        return Ok(Vec::new());
+    }
+    if let Some(latest_start) =
+        end.checked_sub_signed(Duration::days((MAX_LEADERBOARD_ROWS - 1) as i64))
+    {
+        current = current.max(latest_start);
+    }
+
+    let mut keys = Vec::new();
+    while current <= end {
+        keys.push(current.format("%Y-%m-%d").to_string());
+        let Some(next) = current.succ_opt() else {
+            break;
+        };
+        current = next;
+    }
+    Ok(keys)
+}
+
+fn fill_missing_day_rows(
+    conn: &Connection,
+    rows: &mut Vec<UsageLeaderboardRow>,
+    start_ts: Option<i64>,
+    end_ts: Option<i64>,
+    day_start_hour: i64,
+) -> Result<(), String> {
+    let mut existing_keys: HashSet<String> = rows.iter().map(|row| row.key.clone()).collect();
+    for key in expected_day_keys(conn, start_ts, end_ts, day_start_hour)? {
+        if !existing_keys.insert(key.clone()) {
+            continue;
+        }
+        let mut row = ProviderAgg::default().into_leaderboard_row(key.clone(), key);
+        row.estimated_development_time_ms = Some(0);
+        rows.push(row);
+    }
+    Ok(())
+}
+
 const MAX_ESTIMATED_DEVELOPMENT_TIME_MS: i64 = 24 * 60 * 60 * 1000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,19 +139,22 @@ struct DayActivityMetrics {
     estimated_development_time_ms: i64,
 }
 
-fn weighted_idle_gap_ms(gap_ms: i64) -> i64 {
-    if gap_ms <= FULL_IDLE_GAP_MS {
+fn weighted_idle_gap_ms(gap_ms: i64, thresholds: DevelopmentTimeGapThresholds) -> i64 {
+    if gap_ms <= thresholds.full_idle_gap_ms {
         return gap_ms.max(0);
     }
-    if gap_ms >= SESSION_BREAK_GAP_MS {
+    if gap_ms > thresholds.session_break_gap_ms {
         return 0;
     }
-    let remaining_weight = SESSION_BREAK_GAP_MS - gap_ms;
+    let remaining_weight = thresholds.session_break_gap_ms - gap_ms;
     ((gap_ms as i128 * remaining_weight as i128)
-        / (SESSION_BREAK_GAP_MS - FULL_IDLE_GAP_MS) as i128) as i64
+        / (thresholds.session_break_gap_ms - thresholds.full_idle_gap_ms) as i128) as i64
 }
 
-fn summarize_day_activity(rows: &[UsageActivityRow]) -> Option<DayActivityMetrics> {
+fn summarize_day_activity(
+    rows: &[UsageActivityRow],
+    thresholds: DevelopmentTimeGapThresholds,
+) -> Option<DayActivityMetrics> {
     let last_request_completed_at_ms = rows
         .iter()
         .map(|row| row.start_ms.saturating_add(row.duration_ms.max(0)))
@@ -98,7 +183,8 @@ fn summarize_day_activity(rows: &[UsageActivityRow]) -> Option<DayActivityMetric
     let mut previous_end_ms: Option<i64> = None;
     for (start_ms, end_ms) in merged {
         if let Some(previous_end_ms) = previous_end_ms {
-            estimated_ms += weighted_idle_gap_ms(start_ms.saturating_sub(previous_end_ms)) as i128;
+            estimated_ms +=
+                weighted_idle_gap_ms(start_ms.saturating_sub(previous_end_ms), thresholds) as i128;
         }
         estimated_ms += end_ms.saturating_sub(start_ms) as i128;
         previous_end_ms = Some(end_ms);
@@ -114,6 +200,7 @@ fn summarize_day_activity(rows: &[UsageActivityRow]) -> Option<DayActivityMetric
 
 fn summarize_activity_by_day(
     rows: impl IntoIterator<Item = UsageActivityRow>,
+    thresholds: DevelopmentTimeGapThresholds,
 ) -> HashMap<String, DayActivityMetrics> {
     let mut by_day: HashMap<String, Vec<UsageActivityRow>> = HashMap::new();
     for row in rows {
@@ -122,7 +209,7 @@ fn summarize_activity_by_day(
     by_day
         .into_iter()
         .filter_map(|(day_key, rows)| {
-            summarize_day_activity(&rows).map(|metrics| (day_key, metrics))
+            summarize_day_activity(&rows, thresholds).map(|metrics| (day_key, metrics))
         })
         .collect()
 }
@@ -130,6 +217,7 @@ fn summarize_activity_by_day(
 fn summarize_activity_by_folder(
     rows: impl IntoIterator<Item = UsageActivityRow>,
     resolved: &HashMap<String, UsageResolvedFolder>,
+    thresholds: DevelopmentTimeGapThresholds,
 ) -> HashMap<String, i64> {
     let mut by_folder_day: HashMap<(String, String), Vec<UsageActivityRow>> = HashMap::new();
     for row in rows {
@@ -142,7 +230,7 @@ fn summarize_activity_by_folder(
 
     let mut by_folder = HashMap::new();
     for ((folder_key, _), rows) in by_folder_day {
-        let Some(metrics) = summarize_day_activity(&rows) else {
+        let Some(metrics) = summarize_day_activity(&rows, thresholds) else {
             continue;
         };
         let total = by_folder.entry(folder_key).or_insert(0_i64);
@@ -266,6 +354,7 @@ pub(super) fn leaderboard_v2_with_conn(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 pub(super) fn leaderboard_v2_with_conn_day_start(
     conn: &Connection,
     scope: UsageScopeV2,
@@ -276,6 +365,33 @@ pub(super) fn leaderboard_v2_with_conn_day_start(
     limit: Option<usize>,
     exclude_cx2cc_gateway_bridge: bool,
     day_start_hour: i64,
+) -> Result<Vec<UsageLeaderboardRow>, String> {
+    leaderboard_v2_with_conn_day_start_and_thresholds(
+        conn,
+        scope,
+        start_ts,
+        end_ts,
+        cli_key,
+        provider_id,
+        limit,
+        exclude_cx2cc_gateway_bridge,
+        day_start_hour,
+        DevelopmentTimeGapThresholds::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn leaderboard_v2_with_conn_day_start_and_thresholds(
+    conn: &Connection,
+    scope: UsageScopeV2,
+    start_ts: Option<i64>,
+    end_ts: Option<i64>,
+    cli_key: Option<&str>,
+    provider_id: Option<i64>,
+    limit: Option<usize>,
+    exclude_cx2cc_gateway_bridge: bool,
+    day_start_hour: i64,
+    development_time_gap_thresholds: DevelopmentTimeGapThresholds,
 ) -> Result<Vec<UsageLeaderboardRow>, String> {
     let effective_input_expr = sql_effective_input_tokens_expr();
     let day_bucket_sql = local_day_bucket_sql("created_at", day_start_hour);
@@ -945,7 +1061,11 @@ LIMIT 1
             exclude_cx2cc_gateway_bridge,
             day_start_hour,
         )?;
-        apply_day_activity_metrics(&mut out, summarize_activity_by_day(activity_rows));
+        apply_day_activity_metrics(
+            &mut out,
+            summarize_activity_by_day(activity_rows, development_time_gap_thresholds),
+        );
+        fill_missing_day_rows(conn, &mut out, start_ts, end_ts, day_start_hour)?;
         out.sort_by(|a, b| b.key.cmp(&a.key));
     } else {
         out.sort_by(|a, b| {
@@ -957,9 +1077,9 @@ LIMIT 1
         });
     }
     if let Some(limit) = limit {
-        out.truncate(limit.clamp(1, 200));
+        out.truncate(limit.clamp(1, MAX_LEADERBOARD_ROWS));
     } else {
-        out.truncate(200);
+        out.truncate(MAX_LEADERBOARD_ROWS);
     }
     Ok(out)
 }
@@ -1012,6 +1132,7 @@ pub(super) struct FolderFilteredLeaderboardParams<'a> {
     pub(super) limit: Option<usize>,
     pub(super) exclude_cx2cc_gateway_bridge: bool,
     pub(super) day_start_hour: i64,
+    pub(super) development_time_gap_thresholds: DevelopmentTimeGapThresholds,
 }
 
 pub(super) fn leaderboard_v2_folder_filtered_with_conn<F>(
@@ -1128,13 +1249,30 @@ where
 
     match params.scope {
         UsageScopeV2::Day => {
-            apply_day_activity_metrics(&mut out, summarize_activity_by_day(filtered_activity_rows));
+            apply_day_activity_metrics(
+                &mut out,
+                summarize_activity_by_day(
+                    filtered_activity_rows,
+                    params.development_time_gap_thresholds,
+                ),
+            );
+            fill_missing_day_rows(
+                conn,
+                &mut out,
+                params.start_ts,
+                params.end_ts,
+                params.day_start_hour,
+            )?;
             out.sort_by(|a, b| b.key.cmp(&a.key));
         }
         UsageScopeV2::Folder => {
             apply_folder_activity_metrics(
                 &mut out,
-                summarize_activity_by_folder(filtered_activity_rows, &resolved),
+                summarize_activity_by_folder(
+                    filtered_activity_rows,
+                    &resolved,
+                    params.development_time_gap_thresholds,
+                ),
             );
             out.sort_by(|a, b| {
                 b.total_tokens
@@ -1153,9 +1291,9 @@ where
         }),
     }
     if let Some(limit) = params.limit {
-        out.truncate(limit.clamp(1, 200));
+        out.truncate(limit.clamp(1, MAX_LEADERBOARD_ROWS));
     } else {
-        out.truncate(200);
+        out.truncate(MAX_LEADERBOARD_ROWS);
     }
     Ok(out)
 }
@@ -1187,12 +1325,13 @@ where
                 limit,
                 exclude_cx2cc_gateway_bridge: resolved.exclude_cx2cc_gateway_bridge,
                 day_start_hour: resolved.day_start_hour,
+                development_time_gap_thresholds: resolved.development_time_gap_thresholds,
             },
             folder_lookup,
         )?);
     }
 
-    Ok(leaderboard_v2_with_conn_day_start(
+    Ok(leaderboard_v2_with_conn_day_start_and_thresholds(
         &conn,
         scope,
         resolved.start_ts,
@@ -1202,15 +1341,28 @@ where
         limit,
         resolved.exclude_cx2cc_gateway_bridge,
         resolved.day_start_hour,
+        resolved.development_time_gap_thresholds,
     )?)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        local_day_bucket_sql, summarize_day_activity, weighted_idle_gap_ms, UsageActivityRow,
-        FULL_IDLE_GAP_MS, MAX_ESTIMATED_DEVELOPMENT_TIME_MS, SESSION_BREAK_GAP_MS,
+        local_day_bucket_sql, summarize_day_activity as calculate_day_activity,
+        weighted_idle_gap_ms as calculate_weighted_idle_gap_ms, DevelopmentTimeGapThresholds,
+        UsageActivityRow, MAX_ESTIMATED_DEVELOPMENT_TIME_MS,
     };
+
+    const FULL_IDLE_GAP_MS: i64 = 15 * 60 * 1000;
+    const SESSION_BREAK_GAP_MS: i64 = 30 * 60 * 1000;
+
+    fn summarize_day_activity(rows: &[UsageActivityRow]) -> Option<super::DayActivityMetrics> {
+        calculate_day_activity(rows, DevelopmentTimeGapThresholds::default())
+    }
+
+    fn weighted_idle_gap_ms(gap_ms: i64) -> i64 {
+        calculate_weighted_idle_gap_ms(gap_ms, DevelopmentTimeGapThresholds::default())
+    }
 
     fn activity(start_ms: i64, duration_ms: i64, session_id: Option<&str>) -> UsageActivityRow {
         UsageActivityRow {
@@ -1311,6 +1463,45 @@ mod tests {
         assert_eq!(
             thirty_minute_gap.estimated_development_time_ms,
             2 * minute_ms
+        );
+    }
+
+    #[test]
+    fn custom_idle_gap_thresholds_change_the_soft_decay_window() {
+        let minute_ms = 60 * 1000;
+        let thresholds = DevelopmentTimeGapThresholds {
+            full_idle_gap_ms: 10 * minute_ms,
+            session_break_gap_ms: 30 * minute_ms,
+        };
+
+        assert_eq!(
+            calculate_weighted_idle_gap_ms(10 * minute_ms, thresholds),
+            10 * minute_ms
+        );
+        assert_eq!(
+            calculate_weighted_idle_gap_ms(15 * minute_ms, thresholds),
+            11 * minute_ms + 15 * 1000
+        );
+        assert_eq!(
+            calculate_weighted_idle_gap_ms(30 * minute_ms, thresholds),
+            0
+        );
+        assert_eq!(
+            calculate_weighted_idle_gap_ms(30 * minute_ms + 1, thresholds),
+            0
+        );
+
+        let metrics = calculate_day_activity(
+            &[
+                activity(0, minute_ms, None),
+                activity(16 * minute_ms, minute_ms, None),
+            ],
+            thresholds,
+        )
+        .unwrap();
+        assert_eq!(
+            metrics.estimated_development_time_ms,
+            13 * minute_ms + 15 * 1000
         );
     }
 

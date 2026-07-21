@@ -318,6 +318,8 @@ describe("services/usage/usage", () => {
       providerId: 7,
       folderKeys: ["/tmp/project"],
       dayStartHour: 5,
+      fullIdleGapMinutes: 10,
+      sessionBreakGapMinutes: 30,
       excludeCx2CcGatewayBridge: true,
     });
 
@@ -330,6 +332,8 @@ describe("services/usage/usage", () => {
       limit: null,
       folderKeys: ["/tmp/project"],
       dayStartHour: 6,
+      fullIdleGapMinutes: 10,
+      sessionBreakGapMinutes: 30,
       excludeCx2CcGatewayBridge: true,
     });
     await usageLeaderboardV2("folder", "custom");
@@ -392,6 +396,8 @@ describe("services/usage/usage", () => {
       providerId: null,
       folderKeys: null,
       dayStartHour: null,
+      fullIdleGapMinutes: null,
+      sessionBreakGapMinutes: null,
       excludeCx2CcGatewayBridge: null,
     });
     expect(commands.usageSummaryV2).toHaveBeenNthCalledWith(2, {
@@ -402,6 +408,8 @@ describe("services/usage/usage", () => {
       providerId: 7,
       folderKeys: ["/tmp/project"],
       dayStartHour: 5,
+      fullIdleGapMinutes: 10,
+      sessionBreakGapMinutes: 30,
       excludeCx2CcGatewayBridge: true,
     });
     expect(commands.usageLeaderboardV2).toHaveBeenNthCalledWith(
@@ -415,6 +423,8 @@ describe("services/usage/usage", () => {
         providerId: null,
         folderKeys: null,
         dayStartHour: null,
+        fullIdleGapMinutes: null,
+        sessionBreakGapMinutes: null,
         excludeCx2CcGatewayBridge: null,
       },
       null
@@ -430,6 +440,8 @@ describe("services/usage/usage", () => {
         providerId: 9,
         folderKeys: ["/tmp/project"],
         dayStartHour: 6,
+        fullIdleGapMinutes: 10,
+        sessionBreakGapMinutes: 30,
         excludeCx2CcGatewayBridge: true,
       },
       null
@@ -445,6 +457,8 @@ describe("services/usage/usage", () => {
         providerId: null,
         folderKeys: null,
         dayStartHour: null,
+        fullIdleGapMinutes: null,
+        sessionBreakGapMinutes: null,
         excludeCx2CcGatewayBridge: null,
       },
       null
@@ -457,6 +471,8 @@ describe("services/usage/usage", () => {
       providerId: 9,
       folderKeys: null,
       dayStartHour: 7,
+      fullIdleGapMinutes: null,
+      sessionBreakGapMinutes: null,
       excludeCx2CcGatewayBridge: true,
     });
     expect(commands.usageProviderCacheRateTrendV1).toHaveBeenCalledWith(
@@ -468,6 +484,8 @@ describe("services/usage/usage", () => {
         providerId: 11,
         folderKeys: null,
         dayStartHour: null,
+        fullIdleGapMinutes: null,
+        sessionBreakGapMinutes: null,
         excludeCx2CcGatewayBridge: true,
       },
       20
@@ -504,6 +522,8 @@ describe("services/usage/usage", () => {
         providerId: 7,
         folderKeys: [" /b ", "/a", "/a", " "],
         dayStartHour: 5,
+        fullIdleGapMinutes: 10,
+        sessionBreakGapMinutes: 45,
         excludeCx2CcGatewayBridge: true,
       })
     ).toEqual({
@@ -513,6 +533,8 @@ describe("services/usage/usage", () => {
       providerId: 7,
       folderKeys: ["/a", "/b"],
       dayStartHour: 5,
+      fullIdleGapMinutes: 10,
+      sessionBreakGapMinutes: 45,
       excludeCx2CcGatewayBridge: true,
     });
     expect(normalizeUsageDay(" 2026-04-22 ")).toBe("2026-04-22");
@@ -546,6 +568,8 @@ describe("services/usage/usage", () => {
       providerId: 7,
       folderKeys: [" /b ", "/a", "/a", " "],
       dayStartHour: 5,
+      fullIdleGapMinutes: 10,
+      sessionBreakGapMinutes: 45,
       excludeCx2CcGatewayBridge: true,
     });
     await usageDayDetailV1({
@@ -567,6 +591,8 @@ describe("services/usage/usage", () => {
       providerId: 7,
       folderKeys: ["/a", "/b"],
       dayStartHour: 5,
+      fullIdleGapMinutes: 10,
+      sessionBreakGapMinutes: 45,
       excludeCx2CcGatewayBridge: true,
     });
     expect(commands.usageDayDetailV1).toHaveBeenCalledWith({
@@ -603,6 +629,15 @@ describe("services/usage/usage", () => {
     await expect(usageSummaryV2("daily", { dayStartHour: 10 })).rejects.toThrow(
       "SEC_INVALID_INPUT"
     );
+    await expect(usageSummaryV2("daily", { fullIdleGapMinutes: 0 })).rejects.toThrow(
+      "SEC_INVALID_INPUT"
+    );
+    await expect(usageSummaryV2("daily", { sessionBreakGapMinutes: 61 })).rejects.toThrow(
+      "SEC_INVALID_INPUT"
+    );
+    await expect(
+      usageSummaryV2("daily", { fullIdleGapMinutes: 30, sessionBreakGapMinutes: 30 })
+    ).rejects.toThrow("SEC_INVALID_INPUT");
     await expect(usageDayDetailV1({ day: "2026-04-22", dayStartHour: -1 })).rejects.toThrow(
       "SEC_INVALID_INPUT"
     );

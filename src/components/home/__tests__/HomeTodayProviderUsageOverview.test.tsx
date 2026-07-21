@@ -7,6 +7,7 @@ import { useUsageLeaderboardV2Query } from "../../../query/usage";
 import type { RequestLogSummary } from "../../../services/gateway/requestLogs";
 import type { TraceSession } from "../../../services/gateway/traceStore";
 import type { UsageLeaderboardRow } from "../../../services/usage/usage";
+import { HOME_USAGE_DEVELOPMENT_TIME_STORAGE_KEY } from "../../../services/home/homeUsageDevelopmentTime";
 
 vi.mock("../useHomeTokenCostDataModel", () => ({
   useHomeTokenCostDataModel: vi.fn(),
@@ -330,6 +331,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.removeItem("homeUsageDayStartHour");
+    window.localStorage.removeItem(HOME_USAGE_DEVELOPMENT_TIME_STORAGE_KEY);
     Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
     vi.mocked(useUsageLeaderboardV2Query).mockReturnValue({
       data: [{ estimated_development_time_ms: 12_600_000 }],
@@ -356,6 +358,8 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
           cliKey: null,
           providerId: null,
           dayStartHour: 0,
+          fullIdleGapMinutes: 15,
+          sessionBreakGapMinutes: 30,
           excludeCx2CcGatewayBridge: true,
         },
         previewFactor: 1,
@@ -379,6 +383,8 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
         startTs: null,
         endTs: null,
         dayStartHour: 0,
+        fullIdleGapMinutes: 15,
+        sessionBreakGapMinutes: 30,
         limit: null,
         excludeCx2CcGatewayBridge: true,
       }),
@@ -509,6 +515,30 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     );
   });
 
+  it("uses shared development time thresholds for the top card query and tooltip", async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem(
+      HOME_USAGE_DEVELOPMENT_TIME_STORAGE_KEY,
+      JSON.stringify({ fullIdleGapMinutes: 10, sessionBreakGapMinutes: 45 })
+    );
+    mockDataModel();
+
+    render(<HomeTodayProviderUsageOverview activeSessions={[]} />);
+
+    expect(vi.mocked(useUsageLeaderboardV2Query)).toHaveBeenCalledWith(
+      "day",
+      "daily",
+      expect.objectContaining({
+        fullIdleGapMinutes: 10,
+        sessionBreakGapMinutes: 45,
+      }),
+      expect.anything()
+    );
+
+    await user.hover(screen.getByText("预估开发时间").parentElement as HTMLElement);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("10–45 分钟逐步减少");
+  });
+
   it("disables polling while the page is hidden", () => {
     mockDataModel();
     Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
@@ -525,6 +555,8 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
           cliKey: null,
           providerId: null,
           dayStartHour: 0,
+          fullIdleGapMinutes: 15,
+          sessionBreakGapMinutes: 30,
           excludeCx2CcGatewayBridge: true,
         },
         previewFactor: 1,

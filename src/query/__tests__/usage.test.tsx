@@ -224,6 +224,11 @@ describe("query/usage", () => {
       dayStartHour: null,
       excludeCx2CcGatewayBridge: true,
     };
+    const normalizedInput = {
+      ...input,
+      fullIdleGapMinutes: null,
+      sessionBreakGapMinutes: null,
+    };
 
     renderHook(
       () =>
@@ -235,10 +240,12 @@ describe("query/usage", () => {
     );
 
     await waitFor(() => {
-      expect(usageSummaryV2).toHaveBeenCalledWith("daily", input);
+      expect(usageSummaryV2).toHaveBeenCalledWith("daily", normalizedInput);
     });
 
-    const query = client.getQueryCache().find({ queryKey: usageKeys.summaryV2("daily", input) });
+    const query = client
+      .getQueryCache()
+      .find({ queryKey: usageKeys.summaryV2("daily", normalizedInput) });
     const options = queryRefreshOptions(query);
     expect(options.refetchInterval).toBe(60_000);
     expect(options.refetchOnMount).toBe("always");
@@ -266,6 +273,8 @@ describe("query/usage", () => {
       providerId: 7,
       folderKeys: ["/a", "/b"],
       dayStartHour: null,
+      fullIdleGapMinutes: null,
+      sessionBreakGapMinutes: null,
       excludeCx2CcGatewayBridge: true,
     };
 
@@ -327,6 +336,8 @@ describe("query/usage", () => {
       limit: null,
       folderKeys: ["/tmp/project"],
       dayStartHour: null,
+      fullIdleGapMinutes: 10,
+      sessionBreakGapMinutes: 30,
       excludeCx2CcGatewayBridge: true,
     };
     const normalizedInput = { ...input, limit: USAGE_LEADERBOARD_V2_DEFAULT_LIMIT };
@@ -376,6 +387,8 @@ describe("query/usage", () => {
       limit: USAGE_LEADERBOARD_V2_MAX_LIMIT,
       folderKeys: ["/tmp/project"],
       dayStartHour: null,
+      fullIdleGapMinutes: null,
+      sessionBreakGapMinutes: null,
       excludeCx2CcGatewayBridge: true,
     };
 
@@ -569,7 +582,13 @@ describe("query/usage", () => {
       providerId: 11,
       excludeCx2CcGatewayBridge: true,
     };
-    const normalizedInput = { ...input, folderKeys: null, dayStartHour: null };
+    const normalizedInput = {
+      ...input,
+      folderKeys: null,
+      dayStartHour: null,
+      fullIdleGapMinutes: null,
+      sessionBreakGapMinutes: null,
+    };
 
     renderHook(() => useUsageFolderOptionsV1Query("daily", input), { wrapper });
 
@@ -605,6 +624,8 @@ describe("query/usage", () => {
       providerId: 11,
       folderKeys: null,
       dayStartHour: null,
+      fullIdleGapMinutes: null,
+      sessionBreakGapMinutes: null,
       excludeCx2CcGatewayBridge: true,
     };
 

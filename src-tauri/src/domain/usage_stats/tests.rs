@@ -3,6 +3,7 @@ use super::cache_rate_trend_v1::{
 };
 use super::day_detail::{day_detail_v1_with_conn, UsageDayResolvedFolder};
 use super::folder_options::folder_options_v1_with_conn;
+use super::input::normalize_development_time_gap_thresholds;
 use super::leaderboard_v2::{
     leaderboard_v2_folder_filtered_with_conn, leaderboard_v2_with_conn,
     leaderboard_v2_with_conn_day_start, FolderFilteredLeaderboardParams,
@@ -409,11 +410,15 @@ fn usage_params_accept_generated_and_legacy_cx2cc_filter_keys() {
         "providerId": null,
         "folderKeys": null,
         "dayStartHour": 5,
+        "fullIdleGapMinutes": 10,
+        "sessionBreakGapMinutes": 30,
         "excludeCx2CcGatewayBridge": true
     }))
     .expect("deserialize usage query params");
     assert_eq!(params.exclude_cx2cc_gateway_bridge, Some(true));
     assert_eq!(params.day_start_hour, Some(5));
+    assert_eq!(params.full_idle_gap_minutes, Some(10));
+    assert_eq!(params.session_break_gap_minutes, Some(30));
 
     let legacy_params: UsageQueryParams = serde_json::from_value(serde_json::json!({
         "period": "daily",
@@ -426,6 +431,8 @@ fn usage_params_accept_generated_and_legacy_cx2cc_filter_keys() {
     }))
     .expect("deserialize legacy usage query params");
     assert_eq!(legacy_params.exclude_cx2cc_gateway_bridge, Some(true));
+    assert_eq!(legacy_params.full_idle_gap_minutes, None);
+    assert_eq!(legacy_params.session_break_gap_minutes, None);
 
     let detail_params: UsageDayDetailParams = serde_json::from_value(serde_json::json!({
         "day": "2026-04-22",
@@ -453,6 +460,21 @@ fn usage_params_accept_generated_and_legacy_cx2cc_filter_keys() {
         legacy_detail_params.exclude_cx2cc_gateway_bridge,
         Some(true)
     );
+}
+
+#[test]
+fn development_time_gap_thresholds_validate_defaults_ranges_and_order() {
+    let defaults = normalize_development_time_gap_thresholds(None, None).expect("defaults");
+    assert_eq!(defaults.full_idle_gap_ms, 15 * 60 * 1000);
+    assert_eq!(defaults.session_break_gap_ms, 30 * 60 * 1000);
+
+    let custom = normalize_development_time_gap_thresholds(Some(10), Some(45)).expect("custom");
+    assert_eq!(custom.full_idle_gap_ms, 10 * 60 * 1000);
+    assert_eq!(custom.session_break_gap_ms, 45 * 60 * 1000);
+
+    assert!(normalize_development_time_gap_thresholds(Some(0), Some(30)).is_err());
+    assert!(normalize_development_time_gap_thresholds(Some(15), Some(61)).is_err());
+    assert!(normalize_development_time_gap_thresholds(Some(30), Some(30)).is_err());
 }
 
 fn fixture_folder_lookup(keys: &[UsageSessionLookupKey]) -> Vec<UsageResolvedFolder> {
@@ -560,6 +582,7 @@ fn folder_leaderboard_groups_by_path_and_sums_daily_activity_without_cross_day_g
             limit: None,
             exclude_cx2cc_gateway_bridge: false,
             day_start_hour: 0,
+            development_time_gap_thresholds: DevelopmentTimeGapThresholds::default(),
         },
         lookup,
     )
@@ -603,6 +626,7 @@ fn folder_leaderboard_groups_by_path_and_sums_daily_activity_without_cross_day_g
             limit: None,
             exclude_cx2cc_gateway_bridge: false,
             day_start_hour: 0,
+            development_time_gap_thresholds: DevelopmentTimeGapThresholds::default(),
         },
         lookup,
     )
@@ -713,6 +737,8 @@ fn cx2cc_gateway_bridge_filter_covers_overview_and_home_usage_queries() {
             provider_id: None,
             folder_keys: None,
             day_start_hour: None,
+            full_idle_gap_minutes: None,
+            session_break_gap_minutes: None,
             exclude_cx2cc_gateway_bridge: Some(true),
         },
         fixture_folder_lookup,
@@ -731,6 +757,8 @@ fn cx2cc_gateway_bridge_filter_covers_overview_and_home_usage_queries() {
             provider_id: None,
             folder_keys: None,
             day_start_hour: None,
+            full_idle_gap_minutes: None,
+            session_break_gap_minutes: None,
             exclude_cx2cc_gateway_bridge: Some(false),
         },
         fixture_folder_lookup,
@@ -749,6 +777,8 @@ fn cx2cc_gateway_bridge_filter_covers_overview_and_home_usage_queries() {
             provider_id: None,
             folder_keys: None,
             day_start_hour: None,
+            full_idle_gap_minutes: None,
+            session_break_gap_minutes: None,
             exclude_cx2cc_gateway_bridge: Some(true),
         },
         fixture_folder_lookup,
@@ -1611,7 +1641,7 @@ fn v2_day_leaderboard_groups_by_local_day_and_applies_filters() {
         .expect("insert provider");
     }
 
-    let day_one_ts = 1_704_108_800i64;
+    let day_one_ts = local_day_start_ts(&conn, "2024-01-01");
     let day_two_ts = day_one_ts + 86_400;
     let end_ts = day_one_ts + 172_800;
 
@@ -1784,11 +1814,14 @@ INSERT INTO request_logs (
         false,
     )
     .expect("day leaderboard cli filter");
-    assert_eq!(cli_filtered.len(), 1);
-    assert_eq!(cli_filtered[0].key, day_one);
-    assert_eq!(cli_filtered[0].requests_total, 2);
+    assert_eq!(cli_filtered.len(), 2);
+    assert_eq!(cli_filtered[0].key, day_two);
+    assert_eq!(cli_filtered[0].requests_total, 0);
+    assert_eq!(cli_filtered[0].estimated_development_time_ms, Some(0));
+    assert_eq!(cli_filtered[1].key, day_one);
+    assert_eq!(cli_filtered[1].requests_total, 2);
     assert_eq!(
-        cli_filtered[0].last_request_created_at_ms,
+        cli_filtered[1].last_request_created_at_ms,
         Some((day_one_ts + 3600) * 1000)
     );
 
@@ -1803,9 +1836,12 @@ INSERT INTO request_logs (
         false,
     )
     .expect("day leaderboard provider filter");
-    assert_eq!(provider_filtered.len(), 1);
+    assert_eq!(provider_filtered.len(), 2);
     assert_eq!(provider_filtered[0].key, day_two);
     assert_eq!(provider_filtered[0].requests_total, 1);
+    assert_eq!(provider_filtered[1].key, day_one);
+    assert_eq!(provider_filtered[1].requests_total, 0);
+    assert_eq!(provider_filtered[1].estimated_development_time_ms, Some(0));
 
     let model_rows = leaderboard_v2_with_conn(
         &conn,
@@ -1824,6 +1860,54 @@ INSERT INTO request_logs (
             && row.last_request_created_at_ms.is_none()
             && row.last_request_completed_at_ms.is_none()
             && row.estimated_development_time_ms.is_none()));
+}
+
+#[test]
+fn v2_day_leaderboard_fills_every_day_in_the_selected_range() {
+    let conn = setup_conn();
+    let start_ts = local_day_start_ts(&conn, "2026-04-10");
+    let end_ts = local_day_start_ts(&conn, "2026-04-17");
+
+    let rows = leaderboard_v2_with_conn(
+        &conn,
+        UsageScopeV2::Day,
+        Some(start_ts),
+        Some(end_ts),
+        None,
+        None,
+        Some(50),
+        false,
+    )
+    .expect("complete day leaderboard");
+
+    assert_eq!(rows.len(), 7);
+    assert_eq!(rows.first().map(|row| row.key.as_str()), Some("2026-04-16"));
+    assert_eq!(rows.last().map(|row| row.key.as_str()), Some("2026-04-10"));
+    assert!(rows.iter().all(|row| {
+        row.requests_total == 0
+            && row.total_tokens == 0
+            && row.total_duration_ms == 0
+            && row.first_request_created_at_ms.is_none()
+            && row.last_request_completed_at_ms.is_none()
+            && row.estimated_development_time_ms == Some(0)
+    }));
+
+    let long_range_rows = leaderboard_v2_with_conn(
+        &conn,
+        UsageScopeV2::Day,
+        Some(local_day_start_ts(&conn, "2025-01-01")),
+        Some(local_day_start_ts(&conn, "2026-01-01")),
+        None,
+        None,
+        None,
+        false,
+    )
+    .expect("bounded complete day leaderboard");
+    assert_eq!(long_range_rows.len(), 200);
+    assert_eq!(
+        long_range_rows.first().map(|row| row.key.as_str()),
+        Some("2025-12-31")
+    );
 }
 
 #[test]
@@ -1988,19 +2072,22 @@ fn v2_day_leaderboard_respects_usage_day_start_hour() {
         false,
     )
     .expect("natural day leaderboard");
-    assert_eq!(natural_rows.len(), 2);
-    assert_eq!(natural_rows[0].key, day_two);
-    assert_eq!(natural_rows[0].requests_total, 3);
+    assert_eq!(natural_rows.len(), 3);
+    assert_eq!(natural_rows[0].key, "2026-04-18");
+    assert_eq!(natural_rows[0].requests_total, 0);
+    assert_eq!(natural_rows[0].estimated_development_time_ms, Some(0));
+    assert_eq!(natural_rows[1].key, day_two);
+    assert_eq!(natural_rows[1].requests_total, 3);
     assert_eq!(
-        natural_rows[0].first_request_created_at_ms,
+        natural_rows[1].first_request_created_at_ms,
         Some((usage_day_one_start + 21 * 3600) * 1000)
     );
     assert_eq!(
-        natural_rows[0].last_request_created_at_ms,
+        natural_rows[1].last_request_created_at_ms,
         Some((usage_day_two_start + 15 * 3600) * 1000)
     );
-    assert_eq!(natural_rows[1].key, day_one);
-    assert_eq!(natural_rows[1].requests_total, 1);
+    assert_eq!(natural_rows[2].key, day_one);
+    assert_eq!(natural_rows[2].requests_total, 1);
 
     let folder_rows = leaderboard_v2_folder_filtered_with_conn(
         &conn,
@@ -2014,6 +2101,7 @@ fn v2_day_leaderboard_respects_usage_day_start_hour() {
             limit: Some(50),
             exclude_cx2cc_gateway_bridge: false,
             day_start_hour,
+            development_time_gap_thresholds: DevelopmentTimeGapThresholds::default(),
         },
         fixture_folder_lookup,
     )
@@ -2411,6 +2499,8 @@ fn folder_options_v1_groups_resolved_folders_and_keeps_unknown_selectable() {
             provider_id: None,
             folder_keys: Some(vec!["/work/alpha".to_string()]),
             day_start_hour: None,
+            full_idle_gap_minutes: None,
+            session_break_gap_minutes: None,
             exclude_cx2cc_gateway_bridge: None,
         },
         fixture_folder_lookup,
@@ -2485,6 +2575,8 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
         provider_id: None,
         folder_keys: Some(vec!["/work/alpha".to_string()]),
         day_start_hour: None,
+        full_idle_gap_minutes: None,
+        session_break_gap_minutes: None,
         exclude_cx2cc_gateway_bridge: None,
     };
     let unfiltered_summary = summary_v2_with_conn(
@@ -2517,6 +2609,7 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
             limit: Some(50),
             exclude_cx2cc_gateway_bridge: false,
             day_start_hour: 0,
+            development_time_gap_thresholds: DevelopmentTimeGapThresholds::default(),
         },
         fixture_folder_lookup,
     )
@@ -2546,6 +2639,7 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
             limit: Some(50),
             exclude_cx2cc_gateway_bridge: false,
             day_start_hour: 0,
+            development_time_gap_thresholds: DevelopmentTimeGapThresholds::default(),
         },
         fixture_folder_lookup,
     )

@@ -11,6 +11,7 @@ import {
 } from "../../../query/usage";
 import { saveDesktopFilePath } from "../../../services/desktop/dialog";
 import { usageLeaderboardCsvExport } from "../../../services/usage/usage";
+import { HOME_USAGE_DEVELOPMENT_TIME_STORAGE_KEY } from "../../../services/home/homeUsageDevelopmentTime";
 
 vi.mock("sonner", () => ({
   toast: vi.fn(),
@@ -133,6 +134,7 @@ describe("components/home/HomeTokenCostPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.removeItem("homeUsageDayStartHour");
+    window.localStorage.removeItem(HOME_USAGE_DEVELOPMENT_TIME_STORAGE_KEY);
     vi.mocked(saveDesktopFilePath).mockResolvedValue("/tmp/home-usage.csv");
     vi.mocked(usageLeaderboardCsvExport).mockResolvedValue(true);
     vi.mocked(useUsageFolderOptionsV1Query).mockReturnValue({
@@ -291,7 +293,13 @@ describe("components/home/HomeTokenCostPanel", () => {
     const settingLabels = Array.from(settingsGroup.querySelectorAll("button,input,select")).map(
       controlLabel
     );
-    expect(settingLabels).toEqual(["全部文件夹", "过滤转接重复用量", "统计日开始"]);
+    expect(settingLabels).toEqual([
+      "全部文件夹",
+      "过滤转接重复用量",
+      "统计日开始",
+      "完整计入时间",
+      "停止计入时间",
+    ]);
     const dayStartSelect = screen.getByLabelText("统计日开始") as HTMLSelectElement;
     expect(dayStartSelect.value).toBe("0");
     expect(Array.from(dayStartSelect.options).map((option) => option.textContent)).toEqual([
@@ -553,6 +561,47 @@ describe("components/home/HomeTokenCostPanel", () => {
       expect.objectContaining({ dayStartHour: 7 }),
       expect.objectContaining({ enabled: true })
     );
+  });
+
+  it("configures development time thresholds, explains both controls, and resolves conflicts", async () => {
+    const user = userEvent.setup();
+    mockSingleProviderUsageForExport();
+
+    render(<HomeTokenCostPanel />);
+
+    const fullIdleGapSelect = screen.getByLabelText("完整计入时间") as HTMLSelectElement;
+    const sessionBreakGapSelect = screen.getByLabelText("停止计入时间") as HTMLSelectElement;
+    expect(fullIdleGapSelect.value).toBe("15");
+    expect(sessionBreakGapSelect.value).toBe("30");
+    expect(within(fullIdleGapSelect).getAllByRole("option")).toHaveLength(30);
+    expect(within(sessionBreakGapSelect).getAllByRole("option")).toHaveLength(46);
+
+    await user.hover(screen.getByLabelText("完整计入说明"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("间隔会全部计入预估开发时间");
+    await user.unhover(screen.getByLabelText("完整计入说明"));
+
+    fireEvent.change(fullIdleGapSelect, { target: { value: "30" } });
+    expect(fullIdleGapSelect.value).toBe("30");
+    expect(sessionBreakGapSelect.value).toBe("31");
+    expect(vi.mocked(useUsageLeaderboardV2Query)).toHaveBeenLastCalledWith(
+      "day",
+      "weekly",
+      expect.objectContaining({
+        fullIdleGapMinutes: 30,
+        sessionBreakGapMinutes: 31,
+      }),
+      undefined
+    );
+
+    fireEvent.change(sessionBreakGapSelect, { target: { value: "15" } });
+    expect(fullIdleGapSelect.value).toBe("14");
+    expect(sessionBreakGapSelect.value).toBe("15");
+    expect(
+      JSON.parse(window.localStorage.getItem(HOME_USAGE_DEVELOPMENT_TIME_STORAGE_KEY) ?? "")
+    ).toEqual({ fullIdleGapMinutes: 14, sessionBreakGapMinutes: 15 });
+
+    await user.hover(screen.getByLabelText("停止计入说明"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("超过这个值的间隔不计入");
   });
 
   it("formats activity ranges across midnight with next-day text for non-midnight boundaries", () => {
@@ -1471,6 +1520,60 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(screen.getByRole("button", { name: "导出 CSV" })).toBeDisabled();
   });
 
+  it("renders dates without usage as zero-value rows", () => {
+    vi.mocked(useUsageSummaryV2Query).mockReturnValue({
+      data: null,
+      isLoading: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useUsageLeaderboardV2Query).mockReturnValue({
+      data: [
+        {
+          key: "2026-04-16",
+          name: "2026-04-16",
+          folder_path: null,
+          requests_total: 0,
+          requests_success: 0,
+          requests_failed: 0,
+          total_duration_ms: 0,
+          first_request_created_at_ms: null,
+          last_request_created_at_ms: null,
+          last_request_completed_at_ms: null,
+          estimated_development_time_ms: 0,
+          total_tokens: 0,
+          io_total_tokens: 0,
+          input_tokens: 0,
+          output_tokens: 0,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+          avg_duration_ms: null,
+          avg_ttfb_ms: null,
+          avg_output_tokens_per_second: null,
+          cost_usd: null,
+        },
+      ],
+      isLoading: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any);
+
+    render(<HomeTokenCostPanel />);
+
+    const row = screen.getByText("2026-04-16").closest("tr");
+    expect(row).toBeTruthy();
+    expect(within(row as HTMLElement).getByLabelText("0/0%")).toBeInTheDocument();
+    expect(within(row as HTMLElement).getAllByLabelText("0/—")).toHaveLength(2);
+    expect(within(row as HTMLElement).getAllByText("0s")).toHaveLength(2);
+    expect(
+      Array.from((row as HTMLElement).querySelectorAll("td")).map((cell) =>
+        cell.textContent?.trim()
+      )
+    ).toEqual(["1", "2026-04-16", "0/0%", "0/—", "—", "0/—", "0s", "—", "0s"]);
+  });
+
   it("shows pending custom range copy and invalid range toast without querying", () => {
     vi.mocked(useUsageSummaryV2Query).mockReturnValue({
       data: {
@@ -1653,6 +1756,8 @@ describe("components/home/HomeTokenCostPanel", () => {
         providerId: null,
         folderKeys: null,
         dayStartHour: 0,
+        fullIdleGapMinutes: 15,
+        sessionBreakGapMinutes: 30,
         excludeCx2CcGatewayBridge: true,
       },
       undefined
@@ -1669,6 +1774,8 @@ describe("components/home/HomeTokenCostPanel", () => {
         providerId: null,
         folderKeys: null,
         dayStartHour: 0,
+        fullIdleGapMinutes: 15,
+        sessionBreakGapMinutes: 30,
         excludeCx2CcGatewayBridge: true,
       },
       undefined

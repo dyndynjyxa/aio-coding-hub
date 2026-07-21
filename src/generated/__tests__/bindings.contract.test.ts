@@ -124,6 +124,12 @@ describe("generated/bindings.ts contract", () => {
     expect(extractTypeBody(bindingsSource, "UsageQueryParams")).toContain(
       "dayStartHour: number | null"
     );
+    expect(extractTypeBody(bindingsSource, "UsageQueryParams")).toContain(
+      "fullIdleGapMinutes: number | null"
+    );
+    expect(extractTypeBody(bindingsSource, "UsageQueryParams")).toContain(
+      "sessionBreakGapMinutes: number | null"
+    );
     expect(extractTypeBody(bindingsSource, "UsageDayDetailParams")).toContain(
       "dayStartHour: number | null"
     );

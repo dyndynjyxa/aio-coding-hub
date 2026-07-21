@@ -75,6 +75,8 @@ export const usageKeys = {
       providerId: number | null;
       folderKeys?: readonly string[] | null;
       dayStartHour?: number | null;
+      fullIdleGapMinutes?: number | null;
+      sessionBreakGapMinutes?: number | null;
       excludeCx2CcGatewayBridge?: boolean | null;
     }
   ) =>
@@ -88,6 +90,8 @@ export const usageKeys = {
       input.providerId,
       normalizeKeyParts(input.folderKeys ?? []),
       input.dayStartHour ?? null,
+      input.fullIdleGapMinutes ?? null,
+      input.sessionBreakGapMinutes ?? null,
       input.excludeCx2CcGatewayBridge ?? null,
     ] as const,
   leaderboardV2: (
@@ -101,6 +105,8 @@ export const usageKeys = {
       limit: number | null;
       folderKeys?: readonly string[] | null;
       dayStartHour?: number | null;
+      fullIdleGapMinutes?: number | null;
+      sessionBreakGapMinutes?: number | null;
       excludeCx2CcGatewayBridge?: boolean | null;
     }
   ) =>
@@ -116,6 +122,8 @@ export const usageKeys = {
       input.limit,
       normalizeKeyParts(input.folderKeys ?? []),
       input.dayStartHour ?? null,
+      input.fullIdleGapMinutes ?? null,
+      input.sessionBreakGapMinutes ?? null,
       input.excludeCx2CcGatewayBridge ?? null,
     ] as const,
   dayDetailV1: (input: {

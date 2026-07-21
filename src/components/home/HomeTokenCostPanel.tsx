@@ -34,6 +34,17 @@ import {
   subscribeHomeUsageDayStartHour,
   writeHomeUsageDayStartHourToStorage,
 } from "../../services/home/homeUsageDayBoundary";
+import {
+  HOME_USAGE_DEFAULT_FULL_IDLE_GAP_MINUTES,
+  HOME_USAGE_DEFAULT_SESSION_BREAK_GAP_MINUTES,
+  HOME_USAGE_FULL_IDLE_GAP_MINUTES_OPTIONS,
+  HOME_USAGE_SESSION_BREAK_GAP_MINUTES_OPTIONS,
+  readHomeUsageFullIdleGapMinutesFromStorage,
+  readHomeUsageSessionBreakGapMinutesFromStorage,
+  subscribeHomeUsageDevelopmentTimeThresholds,
+  writeHomeUsageFullIdleGapMinutesToStorage,
+  writeHomeUsageSessionBreakGapMinutesToStorage,
+} from "../../services/home/homeUsageDevelopmentTime";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Popover } from "../../ui/Popover";
@@ -56,7 +67,11 @@ import { StatCard, StatCardSkeleton } from "../usage/StatCard";
 import { QueryErrorCard } from "../shared/QueryErrorCard";
 import { PREVIEW_TOKEN_FOLDER_OPTIONS } from "./previewTokenData";
 import { useHomeTokenCostDataModel } from "./useHomeTokenCostDataModel";
-import { DEVELOPMENT_TIME_ESTIMATE_TOOLTIP } from "./developmentTimeEstimate";
+import {
+  developmentTimeEstimateTooltip,
+  FULL_IDLE_GAP_TOOLTIP,
+  SESSION_BREAK_GAP_TOOLTIP,
+} from "./developmentTimeEstimate";
 
 type TokenCostScope = "provider" | "model" | "folder" | "day";
 type TokenCostRange =
@@ -102,6 +117,8 @@ type TokenCostQueryInput = {
   providerId: null;
   folderKeys?: string[] | null;
   dayStartHour?: number | null;
+  fullIdleGapMinutes?: number | null;
+  sessionBreakGapMinutes?: number | null;
   excludeCx2CcGatewayBridge?: boolean | null;
 };
 
@@ -805,6 +822,7 @@ function TokenLeaderboardTable({
   loading,
   customPending,
   dayStartHour,
+  developmentTimeTooltip,
   sortState,
   onSort,
 }: {
@@ -815,6 +833,7 @@ function TokenLeaderboardTable({
   loading: boolean;
   customPending: boolean;
   dayStartHour: number;
+  developmentTimeTooltip: string;
   sortState: SortState<LeaderboardSortKey> | null;
   onSort: (key: LeaderboardSortKey) => void;
 }) {
@@ -893,7 +912,7 @@ function TokenLeaderboardTable({
             {developmentTimeScope ? (
               <SortableColumnHeader
                 label="预估开发时间"
-                tooltip={DEVELOPMENT_TIME_ESTIMATE_TOOLTIP}
+                tooltip={developmentTimeTooltip}
                 sortKey="estimatedDevelopmentTime"
                 sortState={sortState}
                 onSort={onSort}
@@ -1191,6 +1210,16 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
     readHomeUsageDayStartHourFromStorage,
     () => HOME_USAGE_DEFAULT_DAY_START_HOUR
   );
+  const fullIdleGapMinutes = useSyncExternalStore(
+    subscribeHomeUsageDevelopmentTimeThresholds,
+    readHomeUsageFullIdleGapMinutesFromStorage,
+    () => HOME_USAGE_DEFAULT_FULL_IDLE_GAP_MINUTES
+  );
+  const sessionBreakGapMinutes = useSyncExternalStore(
+    subscribeHomeUsageDevelopmentTimeThresholds,
+    readHomeUsageSessionBreakGapMinutesFromStorage,
+    () => HOME_USAGE_DEFAULT_SESSION_BREAK_GAP_MINUTES
+  );
   const onInvalidCustomRange = useCallback((message: string) => toast(message), []);
   const customDateRangeOptions = useMemo(
     () => ({ onInvalid: onInvalidCustomRange }),
@@ -1217,10 +1246,18 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
       input: {
         ...queryConfig.input,
         folderKeys: selectedFolderKeysForQuery,
+        fullIdleGapMinutes,
+        sessionBreakGapMinutes,
         excludeCx2CcGatewayBridge,
       },
     }),
-    [excludeCx2CcGatewayBridge, queryConfig, selectedFolderKeysForQuery]
+    [
+      excludeCx2CcGatewayBridge,
+      fullIdleGapMinutes,
+      queryConfig,
+      selectedFolderKeysForQuery,
+      sessionBreakGapMinutes,
+    ]
   );
   const queryRefreshConfig = useMemo(
     () =>
@@ -1279,6 +1316,16 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
   const handleDayStartHourChange = useCallback((dayStartHour: number) => {
     writeHomeUsageDayStartHourToStorage(dayStartHour);
   }, []);
+  const handleFullIdleGapMinutesChange = useCallback((minutes: number) => {
+    writeHomeUsageFullIdleGapMinutesToStorage(minutes);
+  }, []);
+  const handleSessionBreakGapMinutesChange = useCallback((minutes: number) => {
+    writeHomeUsageSessionBreakGapMinutesToStorage(minutes);
+  }, []);
+  const developmentTimeTooltip = developmentTimeEstimateTooltip(
+    fullIdleGapMinutes,
+    sessionBreakGapMinutes
+  );
   const handleApplyCustomRange = useCallback(() => {
     if (applyCustomRange()) {
       dispatch({ type: "setRange", range: "custom" });
@@ -1335,7 +1382,7 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-5 overflow-y-auto lg:overflow-hidden">
-      <div className="flex shrink-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+      <div className="flex shrink-0 flex-col gap-3 2xl:flex-row 2xl:items-start 2xl:justify-between">
         <fieldset className="flex min-w-0 flex-col gap-2 border-0 p-0">
           <legend className="sr-only">用量筛选</legend>
           <div
@@ -1377,6 +1424,59 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
                 ))}
               </Select>
             </label>
+            <label className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-white px-2.5 text-xs text-muted-foreground shadow-sm dark:border-border dark:bg-card dark:text-secondary-foreground">
+              <span className="whitespace-nowrap">完整计入</span>
+              <Tooltip content={FULL_IDLE_GAP_TOOLTIP} contentClassName="max-w-[320px] leading-5">
+                <span
+                  aria-label="完整计入说明"
+                  className="inline-flex cursor-help items-center text-muted-foreground"
+                >
+                  <CircleHelp aria-hidden="true" className="h-3.5 w-3.5" />
+                </span>
+              </Tooltip>
+              <Select
+                aria-label="完整计入时间"
+                value={String(fullIdleGapMinutes)}
+                onChange={(event) =>
+                  handleFullIdleGapMinutesChange(Number(event.currentTarget.value))
+                }
+                className="h-6 w-auto rounded border-0 bg-transparent px-1 py-0 text-xs shadow-none focus:bg-transparent focus:ring-0 focus:ring-offset-0"
+              >
+                {HOME_USAGE_FULL_IDLE_GAP_MINUTES_OPTIONS.map((minutes) => (
+                  <option key={minutes} value={minutes}>
+                    {minutes} 分钟
+                  </option>
+                ))}
+              </Select>
+            </label>
+            <label className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-white px-2.5 text-xs text-muted-foreground shadow-sm dark:border-border dark:bg-card dark:text-secondary-foreground">
+              <span className="whitespace-nowrap">停止计入</span>
+              <Tooltip
+                content={SESSION_BREAK_GAP_TOOLTIP}
+                contentClassName="max-w-[320px] leading-5"
+              >
+                <span
+                  aria-label="停止计入说明"
+                  className="inline-flex cursor-help items-center text-muted-foreground"
+                >
+                  <CircleHelp aria-hidden="true" className="h-3.5 w-3.5" />
+                </span>
+              </Tooltip>
+              <Select
+                aria-label="停止计入时间"
+                value={String(sessionBreakGapMinutes)}
+                onChange={(event) =>
+                  handleSessionBreakGapMinutesChange(Number(event.currentTarget.value))
+                }
+                className="h-6 w-auto rounded border-0 bg-transparent px-1 py-0 text-xs shadow-none focus:bg-transparent focus:ring-0 focus:ring-offset-0"
+              >
+                {HOME_USAGE_SESSION_BREAK_GAP_MINUTES_OPTIONS.map((minutes) => (
+                  <option key={minutes} value={minutes}>
+                    {minutes} 分钟
+                  </option>
+                ))}
+              </Select>
+            </label>
           </div>
           <div
             role="group"
@@ -1408,7 +1508,7 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
             />
           </div>
         </fieldset>
-        <div className="flex flex-wrap items-center gap-3 lg:justify-end">
+        <div className="flex flex-wrap items-center gap-3 2xl:justify-end">
           <TabList
             ariaLabel="用量维度切换"
             items={TOKEN_COST_SCOPE_ITEMS}
@@ -1464,6 +1564,7 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
           loading={displayLoading}
           customPending={customPending}
           dayStartHour={dayStartHour}
+          developmentTimeTooltip={developmentTimeTooltip}
           sortState={leaderboardSortState}
           onSort={handleLeaderboardSort}
         />

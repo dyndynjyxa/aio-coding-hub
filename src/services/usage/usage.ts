@@ -25,6 +25,23 @@ import {
 } from "../generatedTypeUtils";
 import type { CliKey } from "../providers/providers";
 import { CLI_KEYS } from "../../constants/clis";
+import {
+  USAGE_DEFAULT_FULL_IDLE_GAP_MINUTES,
+  USAGE_DEFAULT_SESSION_BREAK_GAP_MINUTES,
+  USAGE_FULL_IDLE_GAP_MINUTES_MAX,
+  USAGE_FULL_IDLE_GAP_MINUTES_MIN,
+  USAGE_SESSION_BREAK_GAP_MINUTES_MAX,
+  USAGE_SESSION_BREAK_GAP_MINUTES_MIN,
+} from "../../constants/usageDevelopmentTime";
+
+export {
+  USAGE_DEFAULT_FULL_IDLE_GAP_MINUTES,
+  USAGE_DEFAULT_SESSION_BREAK_GAP_MINUTES,
+  USAGE_FULL_IDLE_GAP_MINUTES_MAX,
+  USAGE_FULL_IDLE_GAP_MINUTES_MIN,
+  USAGE_SESSION_BREAK_GAP_MINUTES_MAX,
+  USAGE_SESSION_BREAK_GAP_MINUTES_MIN,
+} from "../../constants/usageDevelopmentTime";
 
 const CLI_KEY_VALUES = CLI_KEYS;
 
@@ -63,6 +80,8 @@ export type NormalizedUsageQueryInputV2 = {
   providerId: number | null;
   folderKeys: string[] | null;
   dayStartHour: number | null;
+  fullIdleGapMinutes: number | null;
+  sessionBreakGapMinutes: number | null;
   excludeCx2CcGatewayBridge: boolean | null;
 };
 export type UsageDayDetailInput = Override<
@@ -73,7 +92,7 @@ export type UsageDayDetailInput = Override<
 >;
 export type UsageProviderCacheRateTrendInput = Omit<
   UsageQueryInputV2,
-  "folderKeys" | "dayStartHour"
+  "folderKeys" | "dayStartHour" | "fullIdleGapMinutes" | "sessionBreakGapMinutes"
 > & {
   limit?: number | null;
 };
@@ -190,6 +209,19 @@ function normalizeUsageDayStartHour(value?: number | null): number | null {
   return value;
 }
 
+function normalizeDevelopmentTimeGapMinutes(
+  label: string,
+  value: number | null | undefined,
+  min: number,
+  max: number
+): number | null {
+  if (value == null) return null;
+  if (!Number.isSafeInteger(value) || value < min || value > max) {
+    throw new Error(`SEC_INVALID_INPUT: invalid ${label}=${value}`);
+  }
+  return value;
+}
+
 function normalizeUsageBoolean(label: string, value: boolean | null | undefined): boolean | null {
   if (value == null) return null;
   if (typeof value !== "boolean") {
@@ -227,6 +259,26 @@ export function normalizeUsageSummaryInput(input?: {
 }
 
 export function normalizeUsageQueryInputV2(input?: UsageQueryInputV2): NormalizedUsageQueryInputV2 {
+  const fullIdleGapMinutes = normalizeDevelopmentTimeGapMinutes(
+    "fullIdleGapMinutes",
+    input?.fullIdleGapMinutes,
+    USAGE_FULL_IDLE_GAP_MINUTES_MIN,
+    USAGE_FULL_IDLE_GAP_MINUTES_MAX
+  );
+  const sessionBreakGapMinutes = normalizeDevelopmentTimeGapMinutes(
+    "sessionBreakGapMinutes",
+    input?.sessionBreakGapMinutes,
+    USAGE_SESSION_BREAK_GAP_MINUTES_MIN,
+    USAGE_SESSION_BREAK_GAP_MINUTES_MAX
+  );
+  if (
+    (fullIdleGapMinutes ?? USAGE_DEFAULT_FULL_IDLE_GAP_MINUTES) >=
+    (sessionBreakGapMinutes ?? USAGE_DEFAULT_SESSION_BREAK_GAP_MINUTES)
+  ) {
+    throw new Error(
+      "SEC_INVALID_INPUT: fullIdleGapMinutes must be less than sessionBreakGapMinutes"
+    );
+  }
   return {
     startTs: normalizeUsageTimestamp("startTs", input?.startTs),
     endTs: normalizeUsageTimestamp("endTs", input?.endTs),
@@ -234,6 +286,8 @@ export function normalizeUsageQueryInputV2(input?: UsageQueryInputV2): Normalize
     providerId: normalizeUsageProviderId(input?.providerId),
     folderKeys: normalizeUsageFolderKeys(input?.folderKeys),
     dayStartHour: normalizeUsageDayStartHour(input?.dayStartHour),
+    fullIdleGapMinutes,
+    sessionBreakGapMinutes,
     excludeCx2CcGatewayBridge: normalizeUsageBoolean(
       "excludeCx2CcGatewayBridge",
       input?.excludeCx2CcGatewayBridge
@@ -293,6 +347,8 @@ function buildQueryParamsV2(
     providerId: normalizedInput.providerId,
     folderKeys: normalizedInput.folderKeys,
     dayStartHour: normalizedInput.dayStartHour,
+    fullIdleGapMinutes: normalizedInput.fullIdleGapMinutes,
+    sessionBreakGapMinutes: normalizedInput.sessionBreakGapMinutes,
     excludeCx2CcGatewayBridge: normalizedInput.excludeCx2CcGatewayBridge,
   };
 }

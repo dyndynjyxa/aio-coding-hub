@@ -15,6 +15,13 @@ import {
   readHomeUsageDayStartHourFromStorage,
   subscribeHomeUsageDayStartHour,
 } from "../../services/home/homeUsageDayBoundary";
+import {
+  HOME_USAGE_DEFAULT_FULL_IDLE_GAP_MINUTES,
+  HOME_USAGE_DEFAULT_SESSION_BREAK_GAP_MINUTES,
+  readHomeUsageFullIdleGapMinutesFromStorage,
+  readHomeUsageSessionBreakGapMinutesFromStorage,
+  subscribeHomeUsageDevelopmentTimeThresholds,
+} from "../../services/home/homeUsageDevelopmentTime";
 import type { UsageLeaderboardRow, UsageSummary } from "../../services/usage/usage";
 import { useUsageLeaderboardV2Query } from "../../query/usage";
 import { Card } from "../../ui/Card";
@@ -30,7 +37,7 @@ import {
   type HomeTokenCostDataModelQueryRefreshConfig,
 } from "./useHomeTokenCostDataModel";
 import { PREVIEW_TOKEN_DAY_ROWS } from "./previewTokenData";
-import { DEVELOPMENT_TIME_ESTIMATE_TOOLTIP } from "./developmentTimeEstimate";
+import { developmentTimeEstimateTooltip } from "./developmentTimeEstimate";
 
 const SUMMARY_SKELETON_KEYS = [0, 1, 2, 3, 4, 5];
 const PROVIDER_SKELETON_KEYS = [0, 1, 2];
@@ -526,11 +533,13 @@ function SummaryCards({
   summary,
   totalCostUsd,
   estimatedDevelopmentTimeMs,
+  developmentTimeTooltip,
   loading,
 }: {
   summary: UsageSummary | null;
   totalCostUsd: number | null;
   estimatedDevelopmentTimeMs: number | null;
+  developmentTimeTooltip: string;
   loading: boolean;
 }) {
   if (loading && !summary) {
@@ -570,7 +579,7 @@ function SummaryCards({
         title="预估开发时间"
         value={formatCompactDurationMs(estimatedDevelopmentTimeMs)}
         accent="green"
-        tooltip={DEVELOPMENT_TIME_ESTIMATE_TOOLTIP}
+        tooltip={developmentTimeTooltip}
       />
     </div>
   );
@@ -630,6 +639,16 @@ export function HomeTodayProviderUsageOverview({
     readHomeUsageDayStartHourFromStorage,
     () => HOME_USAGE_DEFAULT_DAY_START_HOUR
   );
+  const fullIdleGapMinutes = useSyncExternalStore(
+    subscribeHomeUsageDevelopmentTimeThresholds,
+    readHomeUsageFullIdleGapMinutesFromStorage,
+    () => HOME_USAGE_DEFAULT_FULL_IDLE_GAP_MINUTES
+  );
+  const sessionBreakGapMinutes = useSyncExternalStore(
+    subscribeHomeUsageDevelopmentTimeThresholds,
+    readHomeUsageSessionBreakGapMinutesFromStorage,
+    () => HOME_USAGE_DEFAULT_SESSION_BREAK_GAP_MINUTES
+  );
   const queryRefreshConfig = useMemo<HomeTokenCostDataModelQueryRefreshConfig>(() => {
     const refetchIntervalMs: number | false = documentVisible
       ? OVERVIEW_REFRESH_INTERVAL_MS
@@ -652,10 +671,12 @@ export function HomeTodayProviderUsageOverview({
       input: {
         ...TODAY_PROVIDER_QUERY_BASE_INPUT,
         dayStartHour,
+        fullIdleGapMinutes,
+        sessionBreakGapMinutes,
       },
       previewFactor: 1,
     }),
-    [dayStartHour]
+    [dayStartHour, fullIdleGapMinutes, sessionBreakGapMinutes]
   );
   const model = useHomeTokenCostDataModel({
     scope: "provider",
@@ -728,6 +749,10 @@ export function HomeTodayProviderUsageOverview({
         summary={model.summary}
         totalCostUsd={model.totalCostUsd}
         estimatedDevelopmentTimeMs={estimatedDevelopmentTimeMs}
+        developmentTimeTooltip={developmentTimeEstimateTooltip(
+          fullIdleGapMinutes,
+          sessionBreakGapMinutes
+        )}
         loading={model.loading || dayLeaderboardQuery.isLoading}
       />
 

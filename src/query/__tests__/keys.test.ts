@@ -60,7 +60,7 @@ describe("query/keys", () => {
     expect(usageKeys.hourlySeries(7)).toEqual(["usage", "hourlySeries", 7]);
     expect(
       usageKeys.summaryV2("daily", { startTs: 1, endTs: 2, cliKey: "claude", providerId: 3 })
-    ).toEqual(["usage", "summaryV2", "daily", 1, 2, "claude", 3, [], null, null]);
+    ).toEqual(["usage", "summaryV2", "daily", 1, 2, "claude", 3, [], null, null, null, null]);
     expect(
       usageKeys.summaryV2("daily", {
         startTs: 1,
@@ -69,7 +69,20 @@ describe("query/keys", () => {
         providerId: 3,
         folderKeys: [" /tmp/b ", "", "/tmp/a", "/tmp/a"],
       })
-    ).toEqual(["usage", "summaryV2", "daily", 1, 2, "claude", 3, ["/tmp/a", "/tmp/b"], null, null]);
+    ).toEqual([
+      "usage",
+      "summaryV2",
+      "daily",
+      1,
+      2,
+      "claude",
+      3,
+      ["/tmp/a", "/tmp/b"],
+      null,
+      null,
+      null,
+      null,
+    ]);
     expect(
       usageKeys.leaderboardV2("provider", "weekly", {
         startTs: 1,
@@ -89,6 +102,8 @@ describe("query/keys", () => {
       3,
       null,
       [],
+      null,
+      null,
       null,
       null,
     ]);

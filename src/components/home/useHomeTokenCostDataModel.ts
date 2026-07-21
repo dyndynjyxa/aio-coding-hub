@@ -28,6 +28,8 @@ type TokenCostQueryInput = {
   providerId: null;
   folderKeys?: string[] | null;
   dayStartHour?: number | null;
+  fullIdleGapMinutes?: number | null;
+  sessionBreakGapMinutes?: number | null;
   excludeCx2CcGatewayBridge?: boolean | null;
 };
 
