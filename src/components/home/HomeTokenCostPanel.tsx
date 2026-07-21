@@ -921,48 +921,65 @@ function TokenLeaderboardTable({
           </tr>
         </thead>
         <tbody>
-          {sortedRows.map(({ row }, index) => (
-            <tr
-              key={row.key}
-              className="align-top transition-colors hover:bg-secondary/60 dark:hover:bg-secondary/50"
-            >
-              <td className={`${TABLE_TD_CLASS} text-xs tabular-nums text-muted-foreground`}>
-                {index + 1}
-              </td>
-              <td className={TABLE_TD_CLASS}>
-                <div className="min-w-[130px] font-medium text-foreground">{row.name}</div>
-                {folderScope ? (
-                  <div
-                    className="mt-0.5 max-w-[280px] truncate font-mono text-[10px] text-muted-foreground"
-                    title={row.folder_path ?? undefined}
-                  >
-                    {row.folder_path ?? "—"}
-                  </div>
-                ) : null}
-              </td>
-              <td className={TABLE_MONO_TD_CLASS}>
-                <TotalTokenShareValue row={row} summary={summary} />
-              </td>
-              <td className={TABLE_MONO_TD_CLASS}>
-                <InputOutputCacheValue row={row} />
-              </td>
-              <td className={TABLE_MONO_TD_CLASS}>{formatCostValue(row.cost_usd)}</td>
-              <td className={TABLE_MONO_TD_CLASS}>
-                <RequestSuccessRateValue row={row} />
-              </td>
-              <td className={TABLE_MONO_TD_CLASS}>
-                {formatCompactDurationMs(row.total_duration_ms)}
-              </td>
-              {dayScope ? (
-                <td className={TABLE_MONO_TD_CLASS}>{activityRangeText(row, dayStartHour)}</td>
-              ) : null}
-              {developmentTimeScope ? (
-                <td className={TABLE_MONO_TD_CLASS}>
-                  {formatCompactDurationMs(row.estimated_development_time_ms)}
+          {sortedRows.map(({ row }, index) => {
+            const emptyDay = dayScope && row.requests_total === 0;
+            return (
+              <tr
+                key={row.key}
+                className="align-top transition-colors hover:bg-secondary/60 dark:hover:bg-secondary/50"
+              >
+                <td className={`${TABLE_TD_CLASS} text-xs tabular-nums text-muted-foreground`}>
+                  {index + 1}
                 </td>
-              ) : null}
-            </tr>
-          ))}
+                <td className={TABLE_TD_CLASS}>
+                  <div className="min-w-[130px] font-medium text-foreground">{row.name}</div>
+                  {folderScope ? (
+                    <div
+                      className="mt-0.5 max-w-[280px] truncate font-mono text-[10px] text-muted-foreground"
+                      title={row.folder_path ?? undefined}
+                    >
+                      {row.folder_path ?? "—"}
+                    </div>
+                  ) : null}
+                </td>
+                <td className={TABLE_MONO_TD_CLASS}>
+                  {emptyDay ? (
+                    <TokenBreakdownInline parts={["—", "—"]} />
+                  ) : (
+                    <TotalTokenShareValue row={row} summary={summary} />
+                  )}
+                </td>
+                <td className={TABLE_MONO_TD_CLASS}>
+                  {emptyDay ? (
+                    <TokenBreakdownInline parts={["—", "—"]} />
+                  ) : (
+                    <InputOutputCacheValue row={row} />
+                  )}
+                </td>
+                <td className={TABLE_MONO_TD_CLASS}>
+                  {emptyDay ? "—" : formatCostValue(row.cost_usd)}
+                </td>
+                <td className={TABLE_MONO_TD_CLASS}>
+                  {emptyDay ? (
+                    <TokenBreakdownInline parts={["—", "—"]} />
+                  ) : (
+                    <RequestSuccessRateValue row={row} />
+                  )}
+                </td>
+                <td className={TABLE_MONO_TD_CLASS}>
+                  {emptyDay ? "—" : formatCompactDurationMs(row.total_duration_ms)}
+                </td>
+                {dayScope ? (
+                  <td className={TABLE_MONO_TD_CLASS}>{activityRangeText(row, dayStartHour)}</td>
+                ) : null}
+                {developmentTimeScope ? (
+                  <td className={TABLE_MONO_TD_CLASS}>
+                    {emptyDay ? "—" : formatCompactDurationMs(row.estimated_development_time_ms)}
+                  </td>
+                ) : null}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

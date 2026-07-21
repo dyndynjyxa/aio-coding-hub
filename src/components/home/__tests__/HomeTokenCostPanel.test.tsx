@@ -1520,7 +1520,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(screen.getByRole("button", { name: "导出 CSV" })).toBeDisabled();
   });
 
-  it("renders dates without usage as zero-value rows", () => {
+  it("renders dates without usage with empty metric placeholders", () => {
     vi.mocked(useUsageSummaryV2Query).mockReturnValue({
       data: null,
       isLoading: false,
@@ -1564,14 +1564,12 @@ describe("components/home/HomeTokenCostPanel", () => {
 
     const row = screen.getByText("2026-04-16").closest("tr");
     expect(row).toBeTruthy();
-    expect(within(row as HTMLElement).getByLabelText("0/0%")).toBeInTheDocument();
-    expect(within(row as HTMLElement).getAllByLabelText("0/—")).toHaveLength(2);
-    expect(within(row as HTMLElement).getAllByText("0s")).toHaveLength(2);
+    expect(within(row as HTMLElement).getAllByLabelText("—/—")).toHaveLength(3);
     expect(
       Array.from((row as HTMLElement).querySelectorAll("td")).map((cell) =>
         cell.textContent?.trim()
       )
-    ).toEqual(["1", "2026-04-16", "0/0%", "0/—", "—", "0/—", "0s", "—", "0s"]);
+    ).toEqual(["1", "2026-04-16", "—/—", "—/—", "—", "—/—", "—", "—", "—"]);
   });
 
   it("shows pending custom range copy and invalid range toast without querying", () => {
