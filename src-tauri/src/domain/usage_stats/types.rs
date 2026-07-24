@@ -133,6 +133,7 @@ pub struct UsageLeaderboardRow {
     pub last_request_created_at_ms: Option<i64>,
     pub last_request_completed_at_ms: Option<i64>,
     pub estimated_development_time_ms: Option<i64>,
+    pub hourly_estimated_development_time_ms: Option<Vec<i64>>,
     pub total_tokens: i64,
     pub io_total_tokens: i64,
     pub input_tokens: i64,

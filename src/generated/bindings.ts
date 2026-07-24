@@ -4081,6 +4081,7 @@ export type UsageLeaderboardRow = {
   last_request_created_at_ms: number | null;
   last_request_completed_at_ms: number | null;
   estimated_development_time_ms: number | null;
+  hourly_estimated_development_time_ms: number[] | null;
   total_tokens: number;
   io_total_tokens: number;
   input_tokens: number;

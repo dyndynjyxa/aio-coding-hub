@@ -162,6 +162,7 @@ function makeUsageLeaderboardRow(
     last_request_created_at_ms: null,
     last_request_completed_at_ms: null,
     estimated_development_time_ms: null,
+    hourly_estimated_development_time_ms: null,
     avg_duration_ms: 120,
     avg_ttfb_ms: 30,
     avg_output_tokens_per_second: 10,

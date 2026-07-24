@@ -105,9 +105,17 @@ function createActiveRequestFromTrace(trace: TraceSession) {
 
 function createLeaderboardRow(
   overrides: Pick<UsageLeaderboardRow, "key" | "name"> &
-    Partial<Omit<UsageLeaderboardRow, "key" | "name">>
+    Partial<Omit<UsageLeaderboardRow, "key" | "name" | "hourly_estimated_development_time_ms">> & {
+      hourly_estimated_development_time_ms?: number[] | null;
+    }
 ): UsageLeaderboardRow {
-  const { key, name, folder_path = null, ...rest } = overrides;
+  const {
+    key,
+    name,
+    folder_path = null,
+    hourly_estimated_development_time_ms = null,
+    ...rest
+  } = overrides;
   return {
     key,
     name,
@@ -126,6 +134,7 @@ function createLeaderboardRow(
     last_request_created_at_ms: null,
     last_request_completed_at_ms: null,
     estimated_development_time_ms: null,
+    hourly_estimated_development_time_ms,
     avg_duration_ms: 900,
     avg_ttfb_ms: 200,
     avg_output_tokens_per_second: 90,
@@ -377,6 +386,10 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
         first_request_created_at_ms: new Date(2026, 3, 16, 8, 15).getTime(),
         last_request_completed_at_ms: new Date(2026, 3, 16, 23, 34).getTime(),
         estimated_development_time_ms: 12_600_000,
+        hourly_estimated_development_time_ms: [
+          0, 0, 0, 0, 0, 0, 0, 0, 3_600_000, 1_800_000, 1_200_000, 0, 0, 0, 0, 0, 0, 0, 3_000_000,
+          0, 0, 0, 0, 3_000_000,
+        ],
       },
     ]);
   });
@@ -442,6 +455,13 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     expect(within(totalWithCacheCard as HTMLElement).getByText("25.0K")).toBeInTheDocument();
     expect(within(totalDurationCard as HTMLElement).getByText("7m6s")).toBeInTheDocument();
     expect(within(activityRangeCard as HTMLElement).getByText("08:15–23:34")).toBeInTheDocument();
+    fireEvent.click(activityRangeCard as HTMLElement);
+    expect(within(activityRangeCard as HTMLElement).queryByText("活动范围")).toBeNull();
+    expect(within(activityRangeCard as HTMLElement).getByLabelText("逐小时活动趋势")).toHaveClass(
+      "h-5"
+    );
+    fireEvent.keyDown(activityRangeCard as HTMLElement, { key: "Enter" });
+    expect(within(activityRangeCard as HTMLElement).getByText("活动范围")).toBeInTheDocument();
     const estimatedDevelopmentTimeCard = screen.getByText("预估开发时间").closest(".relative");
     expect(estimatedDevelopmentTimeCard).toBeTruthy();
     expect(screen.getByText("预估开发时间").parentElement).toHaveClass("flex", "h-4", "leading-4");
@@ -552,6 +572,10 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
         first_request_created_at_ms: new Date(2026, 3, 16, 20, 0).getTime(),
         last_request_completed_at_ms: new Date(2026, 3, 17, 2, 5).getTime(),
         estimated_development_time_ms: 12_600_000,
+        hourly_estimated_development_time_ms: [
+          3_000_000, 0, 4_200_000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3_600_000,
+          1_800_000, 0, 0,
+        ],
       },
     ]);
 
@@ -1026,6 +1050,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
           last_request_created_at_ms: null,
           last_request_completed_at_ms: null,
           estimated_development_time_ms: null,
+          hourly_estimated_development_time_ms: null,
           avg_duration_ms: 820,
           avg_ttfb_ms: 210,
           avg_output_tokens_per_second: 108,
@@ -1113,6 +1138,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
           last_request_created_at_ms: null,
           last_request_completed_at_ms: null,
           estimated_development_time_ms: null,
+          hourly_estimated_development_time_ms: null,
           avg_duration_ms: 900,
           avg_ttfb_ms: 220,
           avg_output_tokens_per_second: 90,
@@ -1149,6 +1175,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
           last_request_created_at_ms: null,
           last_request_completed_at_ms: null,
           estimated_development_time_ms: null,
+          hourly_estimated_development_time_ms: null,
           avg_duration_ms: 900,
           avg_ttfb_ms: 220,
           avg_output_tokens_per_second: 90,

@@ -41,6 +41,7 @@ type PreviewLeaderboardRowInput = Omit<
   | "last_request_created_at_ms"
   | "last_request_completed_at_ms"
   | "estimated_development_time_ms"
+  | "hourly_estimated_development_time_ms"
 >;
 
 function withoutRequestBounds(row: PreviewLeaderboardRowInput): UsageLeaderboardRow {
@@ -51,12 +52,33 @@ function withoutRequestBounds(row: PreviewLeaderboardRowInput): UsageLeaderboard
     last_request_created_at_ms: null,
     last_request_completed_at_ms: null,
     estimated_development_time_ms: null,
+    hourly_estimated_development_time_ms: null,
   };
 }
 
 function localDayTimeMs(dayKey: string, hour: number, minute: number) {
   const [year, month, day] = dayKey.split("-").map(Number);
   return new Date(year, month - 1, day, hour, minute, 0, 0).getTime();
+}
+
+function previewHourlyDevelopmentTime(
+  firstHour: number,
+  lastHour: number,
+  estimatedDevelopmentTimeMs: number
+) {
+  const hourly = Array<number>(24).fill(0);
+  const activeHours = [firstHour, (firstHour + 1) % 24, (firstHour + 2) % 24, lastHour];
+  const weights = [0.32, 0.18, 0.16, 0.34];
+  let allocatedMs = 0;
+  activeHours.forEach((hour, index) => {
+    const amount =
+      index === activeHours.length - 1
+        ? estimatedDevelopmentTimeMs - allocatedMs
+        : Math.floor(estimatedDevelopmentTimeMs * weights[index]);
+    hourly[hour] = Math.max(0, amount);
+    allocatedMs += amount;
+  });
+  return hourly;
 }
 
 function withPreviewDayBounds(
@@ -74,6 +96,11 @@ function withPreviewDayBounds(
     last_request_created_at_ms: lastRequestCreatedAtMs,
     last_request_completed_at_ms: lastRequestCreatedAtMs + 6 * 60 * 1000,
     estimated_development_time_ms: estimatedDevelopmentTimeMs,
+    hourly_estimated_development_time_ms: previewHourlyDevelopmentTime(
+      firstHour,
+      lastHour,
+      estimatedDevelopmentTimeMs
+    ),
   };
 }
 

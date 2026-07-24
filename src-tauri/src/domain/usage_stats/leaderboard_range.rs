@@ -149,6 +149,7 @@ impl ProviderAgg {
             last_request_created_at_ms: self.last_request_created_at_ms,
             last_request_completed_at_ms: None,
             estimated_development_time_ms: None,
+            hourly_estimated_development_time_ms: None,
             total_tokens: self.total_tokens,
             io_total_tokens: self.input_tokens.saturating_add(self.output_tokens),
             input_tokens: self.input_tokens,

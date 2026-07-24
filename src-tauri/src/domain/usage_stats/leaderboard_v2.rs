@@ -123,6 +123,7 @@ fn fill_missing_day_rows(
 }
 
 const MAX_ESTIMATED_DEVELOPMENT_TIME_MS: i64 = 24 * 60 * 60 * 1000;
+const HOURS_PER_DAY: usize = 24;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct UsageActivityRow {
@@ -133,10 +134,11 @@ struct UsageActivityRow {
     duration_ms: i64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct DayActivityMetrics {
     last_request_completed_at_ms: i64,
     estimated_development_time_ms: i64,
+    hourly_estimated_development_time_ms: Option<Vec<i64>>,
 }
 
 fn weighted_idle_gap_ms(gap_ms: i64, thresholds: DevelopmentTimeGapThresholds) -> i64 {
@@ -151,14 +153,7 @@ fn weighted_idle_gap_ms(gap_ms: i64, thresholds: DevelopmentTimeGapThresholds) -
         / (thresholds.session_break_gap_ms - thresholds.full_idle_gap_ms) as i128) as i64
 }
 
-fn summarize_day_activity(
-    rows: &[UsageActivityRow],
-    thresholds: DevelopmentTimeGapThresholds,
-) -> Option<DayActivityMetrics> {
-    let last_request_completed_at_ms = rows
-        .iter()
-        .map(|row| row.start_ms.saturating_add(row.duration_ms.max(0)))
-        .max()?;
+fn merged_activity_intervals(rows: &[UsageActivityRow]) -> Vec<(i64, i64)> {
     let mut intervals: Vec<(i64, i64)> = rows
         .iter()
         .filter_map(|row| {
@@ -179,6 +174,18 @@ fn summarize_day_activity(
         merged.push((start_ms, end_ms));
     }
 
+    merged
+}
+
+fn summarize_day_activity(
+    rows: &[UsageActivityRow],
+    thresholds: DevelopmentTimeGapThresholds,
+) -> Option<DayActivityMetrics> {
+    let last_request_completed_at_ms = rows
+        .iter()
+        .map(|row| row.start_ms.saturating_add(row.duration_ms.max(0)))
+        .max()?;
+    let merged = merged_activity_intervals(rows);
     let mut estimated_ms: i128 = 0;
     let mut previous_end_ms: Option<i64> = None;
     for (start_ms, end_ms) in merged {
@@ -195,23 +202,135 @@ fn summarize_day_activity(
         estimated_development_time_ms: estimated_ms
             .clamp(0, MAX_ESTIMATED_DEVELOPMENT_TIME_MS as i128)
             as i64,
+        hourly_estimated_development_time_ms: None,
     })
 }
 
+fn local_hour_index(conn: &Connection, timestamp_ms: i64) -> Result<usize, String> {
+    let timestamp_seconds = timestamp_ms.div_euclid(1_000);
+    let hour = conn
+        .query_row(
+            "SELECT CAST(strftime('%H', ?1, 'unixepoch', 'localtime') AS INTEGER)",
+            [timestamp_seconds],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|e| db_err!("failed to resolve local activity hour: {e}"))?;
+    Ok(hour.clamp(0, (HOURS_PER_DAY - 1) as i64) as usize)
+}
+
+fn next_local_hour_boundary_ms(conn: &Connection, timestamp_ms: i64) -> Result<i64, String> {
+    let timestamp_seconds = timestamp_ms.div_euclid(1_000);
+    let boundary_seconds = conn
+        .query_row(
+            "SELECT CAST(strftime('%s', strftime('%Y-%m-%d %H:00:00', ?1, 'unixepoch', 'localtime'), '+1 hour', 'utc') AS INTEGER)",
+            [timestamp_seconds],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|e| db_err!("failed to resolve next local activity hour: {e}"))?;
+    Ok(boundary_seconds.saturating_mul(1_000))
+}
+
+fn distribute_estimated_time_by_hour(
+    conn: &Connection,
+    start_ms: i64,
+    end_ms: i64,
+    estimated_ms: i64,
+    hourly: &mut [i64],
+) -> Result<(), String> {
+    if estimated_ms <= 0 || end_ms <= start_ms {
+        return Ok(());
+    }
+    let mut current_ms = start_ms;
+    let mut remaining_span_ms = end_ms.saturating_sub(start_ms) as i128;
+    let mut remaining_estimated_ms = estimated_ms as i128;
+    while current_ms < end_ms && remaining_estimated_ms > 0 {
+        let boundary_ms = next_local_hour_boundary_ms(conn, current_ms)?;
+        let next_ms = if boundary_ms <= current_ms {
+            end_ms
+        } else {
+            boundary_ms.min(end_ms)
+        };
+        let span_ms = next_ms.saturating_sub(current_ms) as i128;
+        if span_ms <= 0 {
+            break;
+        }
+        let estimated_part_ms = if next_ms == end_ms {
+            remaining_estimated_ms
+        } else {
+            remaining_estimated_ms * span_ms / remaining_span_ms
+        };
+        let hour = local_hour_index(conn, current_ms)?;
+        hourly[hour] = hourly[hour].saturating_add(estimated_part_ms as i64);
+        remaining_estimated_ms = remaining_estimated_ms.saturating_sub(estimated_part_ms);
+        remaining_span_ms = remaining_span_ms.saturating_sub(span_ms);
+        current_ms = next_ms;
+    }
+    Ok(())
+}
+
+fn summarize_day_activity_with_hours(
+    conn: &Connection,
+    rows: &[UsageActivityRow],
+    thresholds: DevelopmentTimeGapThresholds,
+) -> Result<Option<DayActivityMetrics>, String> {
+    let Some(mut metrics) = summarize_day_activity(rows, thresholds) else {
+        return Ok(None);
+    };
+    let merged = merged_activity_intervals(rows);
+    if merged.is_empty() {
+        return Ok(Some(metrics));
+    }
+    let mut hourly = vec![0_i64; HOURS_PER_DAY];
+    let mut allocated_ms = 0_i64;
+    let mut previous_end_ms: Option<i64> = None;
+    for (start_ms, end_ms) in merged {
+        if let Some(previous_end_ms) = previous_end_ms {
+            let weighted_gap_ms =
+                weighted_idle_gap_ms(start_ms.saturating_sub(previous_end_ms), thresholds);
+            let allowed_gap_ms =
+                weighted_gap_ms.min(MAX_ESTIMATED_DEVELOPMENT_TIME_MS.saturating_sub(allocated_ms));
+            distribute_estimated_time_by_hour(
+                conn,
+                previous_end_ms,
+                start_ms,
+                allowed_gap_ms,
+                &mut hourly,
+            )?;
+            allocated_ms = allocated_ms.saturating_add(allowed_gap_ms);
+        }
+        let allowed_duration_ms = end_ms
+            .saturating_sub(start_ms)
+            .min(MAX_ESTIMATED_DEVELOPMENT_TIME_MS.saturating_sub(allocated_ms));
+        distribute_estimated_time_by_hour(
+            conn,
+            start_ms,
+            end_ms,
+            allowed_duration_ms,
+            &mut hourly,
+        )?;
+        allocated_ms = allocated_ms.saturating_add(allowed_duration_ms);
+        previous_end_ms = Some(end_ms);
+    }
+    metrics.hourly_estimated_development_time_ms = Some(hourly);
+    Ok(Some(metrics))
+}
+
 fn summarize_activity_by_day(
+    conn: &Connection,
     rows: impl IntoIterator<Item = UsageActivityRow>,
     thresholds: DevelopmentTimeGapThresholds,
-) -> HashMap<String, DayActivityMetrics> {
+) -> Result<HashMap<String, DayActivityMetrics>, String> {
     let mut by_day: HashMap<String, Vec<UsageActivityRow>> = HashMap::new();
     for row in rows {
         by_day.entry(row.day_key.clone()).or_default().push(row);
     }
-    by_day
-        .into_iter()
-        .filter_map(|(day_key, rows)| {
-            summarize_day_activity(&rows, thresholds).map(|metrics| (day_key, metrics))
-        })
-        .collect()
+    let mut metrics_by_day = HashMap::new();
+    for (day_key, rows) in by_day {
+        if let Some(metrics) = summarize_day_activity_with_hours(conn, &rows, thresholds)? {
+            metrics_by_day.insert(day_key, metrics);
+        }
+    }
+    Ok(metrics_by_day)
 }
 
 fn summarize_activity_by_folder(
@@ -313,6 +432,8 @@ fn apply_day_activity_metrics(
         };
         row.last_request_completed_at_ms = Some(metrics.last_request_completed_at_ms);
         row.estimated_development_time_ms = Some(metrics.estimated_development_time_ms);
+        row.hourly_estimated_development_time_ms =
+            metrics.hourly_estimated_development_time_ms.clone();
     }
 }
 
@@ -1063,7 +1184,7 @@ LIMIT 1
         )?;
         apply_day_activity_metrics(
             &mut out,
-            summarize_activity_by_day(activity_rows, development_time_gap_thresholds),
+            summarize_activity_by_day(conn, activity_rows, development_time_gap_thresholds)?,
         );
         fill_missing_day_rows(conn, &mut out, start_ts, end_ts, day_start_hour)?;
         out.sort_by(|a, b| b.key.cmp(&a.key));
@@ -1252,9 +1373,10 @@ where
             apply_day_activity_metrics(
                 &mut out,
                 summarize_activity_by_day(
+                    conn,
                     filtered_activity_rows,
                     params.development_time_gap_thresholds,
-                ),
+                )?,
             );
             fill_missing_day_rows(
                 conn,

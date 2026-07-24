@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { CircleHelp, Loader2 } from "lucide-react";
 import { useDocumentVisibility } from "../../hooks/useDocumentVisibility";
 import { useWindowForeground } from "../../hooks/useWindowForeground";
@@ -298,6 +298,7 @@ function createSyntheticProviderRow(entry: ActiveProviderEntry): UsageLeaderboar
     last_request_created_at_ms: null,
     last_request_completed_at_ms: null,
     estimated_development_time_ms: null,
+    hourly_estimated_development_time_ms: null,
     avg_duration_ms: null,
     avg_ttfb_ms: null,
     avg_output_tokens_per_second: null,
@@ -491,6 +492,42 @@ function activityRangeText(row: UsageLeaderboardRow | null, dayStartHour: number
   return `${firstText}–${lastText}`;
 }
 
+type ActivityTrendHour = {
+  hour: number;
+  estimatedDevelopmentTimeMs: number;
+};
+
+function activityTrendHours(row: UsageLeaderboardRow | null): ActivityTrendHour[] {
+  const hourly = row?.hourly_estimated_development_time_ms;
+  const first = row?.first_request_created_at_ms;
+  const last = row?.last_request_completed_at_ms;
+  if (
+    first == null ||
+    last == null ||
+    !Number.isFinite(first) ||
+    !Number.isFinite(last) ||
+    !Array.isArray(hourly) ||
+    hourly.length !== 24
+  ) {
+    return [];
+  }
+  const startHour = new Date(first).getHours();
+  const endHour = new Date(last).getHours();
+  const hours: ActivityTrendHour[] = [];
+  for (let hour = startHour; hours.length < 24; hour = (hour + 1) % 24) {
+    hours.push({ hour, estimatedDevelopmentTimeMs: Math.max(0, Number(hourly[hour]) || 0) });
+    if (hour === endHour) break;
+  }
+  return hours;
+}
+
+function activityTrendBarClass(estimatedDevelopmentTimeMs: number) {
+  if (estimatedDevelopmentTimeMs <= 0) return "h-0.5 bg-slate-300 dark:bg-slate-600";
+  if (estimatedDevelopmentTimeMs >= 3_600_000) return "bg-blue-600";
+  if (estimatedDevelopmentTimeMs >= 1_800_000) return "bg-blue-500";
+  return "bg-blue-300 dark:bg-blue-400";
+}
+
 function TableHeaderLabel({ label, note }: { label: string; note?: string }) {
   return (
     <div className="inline-flex items-baseline gap-1 whitespace-nowrap normal-case">
@@ -538,6 +575,83 @@ function SummaryMetricCard({
   );
 }
 
+function ActivityRangeCard({
+  row,
+  dayStartHour,
+}: {
+  row: UsageLeaderboardRow | null;
+  dayStartHour: number;
+}) {
+  const rangeText = activityRangeText(row, dayStartHour);
+  const hours = activityTrendHours(row);
+  const [showTrend, setShowTrend] = useState(false);
+  const canShowTrend = hours.length > 0;
+  const toggleTrend = () => {
+    if (canShowTrend) setShowTrend((current) => !current);
+  };
+
+  return (
+    <Card
+      padding="sm"
+      role={canShowTrend ? "button" : undefined}
+      tabIndex={canShowTrend ? 0 : undefined}
+      onClick={toggleTrend}
+      onKeyDown={(event) => {
+        if (!canShowTrend || (event.key !== "Enter" && event.key !== " ")) return;
+        event.preventDefault();
+        toggleTrend();
+      }}
+      aria-label={canShowTrend ? `${showTrend ? "收起" : "展开"}活动趋势` : undefined}
+      className="relative h-full overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-blue-500/70"
+    >
+      <div className="absolute inset-x-0 top-0 h-0.5 bg-blue-500" />
+      {showTrend ? (
+        <>
+          <div className="flex h-4 items-center font-mono text-[11px] font-medium leading-4 tabular-nums text-muted-foreground">
+            {rangeText}
+          </div>
+          <div className="mt-1 flex h-5 items-end gap-px" aria-label="逐小时活动趋势">
+            {hours.map(({ hour, estimatedDevelopmentTimeMs }) => {
+              const height = Math.min(100, (estimatedDevelopmentTimeMs / 3_600_000) * 100);
+              const hourLabel = `${String(hour).padStart(2, "0")}:00–${String(
+                (hour + 1) % 24
+              ).padStart(2, "0")}:00`;
+              const tooltip = `${hourLabel}，预估开发时间 ${formatCompactDurationMs(
+                estimatedDevelopmentTimeMs
+              )}`;
+              return (
+                <Tooltip key={hour} content={tooltip} contentClassName="max-w-[240px] leading-5">
+                  <span className="flex h-full min-w-0 flex-1 cursor-help items-end">
+                    <span
+                      className={`w-full rounded-sm ${activityTrendBarClass(
+                        estimatedDevelopmentTimeMs
+                      )}`}
+                      style={
+                        estimatedDevelopmentTimeMs > 0
+                          ? { height: `${Math.max(4, height)}%` }
+                          : undefined
+                      }
+                    />
+                  </span>
+                </Tooltip>
+              );
+            })}
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="flex h-4 items-center text-[11px] font-medium leading-4 text-muted-foreground">
+            活动范围
+          </div>
+          <div className="mt-1 font-mono text-sm font-semibold tracking-tight text-foreground">
+            {rangeText}
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
 function SummaryMetricCardSkeleton() {
   return (
     <Card padding="sm" className="h-full animate-pulse">
@@ -550,14 +664,16 @@ function SummaryMetricCardSkeleton() {
 function SummaryCards({
   summary,
   totalCostUsd,
-  activityRange,
+  activityRow,
+  dayStartHour,
   estimatedDevelopmentTimeMs,
   developmentTimeTooltip,
   loading,
 }: {
   summary: UsageSummary | null;
   totalCostUsd: number | null;
-  activityRange: string;
+  activityRow: UsageLeaderboardRow | null;
+  dayStartHour: number;
   estimatedDevelopmentTimeMs: number | null;
   developmentTimeTooltip: string;
   loading: boolean;
@@ -584,7 +700,7 @@ function SummaryCards({
         value={formatCompactDurationMs(summary?.total_duration_ms)}
         accent="cyan"
       />
-      <SummaryMetricCard title="活动范围" value={activityRange} accent="blue" />
+      <ActivityRangeCard row={activityRow} dayStartHour={dayStartHour} />
       <SummaryMetricCard
         title="预估开发时间"
         value={formatCompactDurationMs(estimatedDevelopmentTimeMs)}
@@ -757,7 +873,8 @@ export function HomeTodayProviderUsageOverview({
       <SummaryCards
         summary={model.summary}
         totalCostUsd={model.totalCostUsd}
-        activityRange={activityRangeText(todayUsageRow, dayStartHour)}
+        activityRow={todayUsageRow}
+        dayStartHour={dayStartHour}
         estimatedDevelopmentTimeMs={estimatedDevelopmentTimeMs}
         developmentTimeTooltip={developmentTimeEstimateTooltip(
           fullIdleGapMinutes,
