@@ -447,13 +447,15 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     );
 
     const totalWithCacheCard = screen.getByText("含缓存总 Token").parentElement;
-    const totalDurationCard = screen.getByText("请求总耗时").parentElement;
+    const inputOutputCacheCard = screen.getByText("输入+出/缓存率").parentElement;
     const activityRangeCard = screen.getByText("活动范围").parentElement;
     expect(totalWithCacheCard).toBeTruthy();
-    expect(totalDurationCard).toBeTruthy();
+    expect(inputOutputCacheCard).toBeTruthy();
     expect(activityRangeCard).toBeTruthy();
     expect(within(totalWithCacheCard as HTMLElement).getByText("25.0K")).toBeInTheDocument();
-    expect(within(totalDurationCard as HTMLElement).getByText("7m6s")).toBeInTheDocument();
+    expect(
+      within(inputOutputCacheCard as HTMLElement).getByText("20.0K/18.8%")
+    ).toBeInTheDocument();
     expect(within(activityRangeCard as HTMLElement).getByText("08:15–23:34")).toBeInTheDocument();
     fireEvent.click(activityRangeCard as HTMLElement);
     expect(within(activityRangeCard as HTMLElement).queryByText("活动范围")).toBeNull();
@@ -478,7 +480,7 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
       Array.from((summaryCards as HTMLElement).children).map((card) => card.textContent)
     ).toEqual([
       "含缓存总 Token25.0K",
-      "请求总耗时7m6s",
+      "输入+出/缓存率20.0K/18.8%",
       "活动范围08:15–23:34",
       "预估开发时间3h30m",
       "总花费$2.21",
@@ -492,6 +494,19 @@ describe("components/home/HomeTodayProviderUsageOverview", () => {
     ).toBeTruthy();
     await user.hover(screen.getByText("预估开发时间").parentElement as HTMLElement);
     expect(await screen.findByRole("tooltip")).toHaveTextContent("15–30 分钟逐步减少");
+    fireEvent.click(estimatedDevelopmentTimeCard as HTMLElement);
+    expect(
+      within(estimatedDevelopmentTimeCard as HTMLElement).getByText("请求总耗时")
+    ).toBeInTheDocument();
+    expect(
+      within(estimatedDevelopmentTimeCard as HTMLElement).getByText("7m6s")
+    ).toBeInTheDocument();
+    expect(estimatedDevelopmentTimeCard).toHaveAttribute("aria-pressed", "true");
+    fireEvent.keyDown(estimatedDevelopmentTimeCard as HTMLElement, { key: "Enter" });
+    expect(
+      within(estimatedDevelopmentTimeCard as HTMLElement).getByText("预估开发时间")
+    ).toBeInTheDocument();
+    expect(estimatedDevelopmentTimeCard).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByText("$2.21")).toBeInTheDocument();
     const providerHeader = screen.getByText("供应商").closest("th");
     const usageTable = screen.getByRole("table", { name: "今日供应商用量" });

@@ -542,12 +542,19 @@ function SummaryMetricCard({
   value,
   accent,
   tooltip,
+  onClick,
+  ariaLabel,
+  ariaPressed,
 }: {
   title: string;
   value: string;
   accent: SummaryMetricAccent;
   tooltip?: string;
+  onClick?: () => void;
+  ariaLabel?: string;
+  ariaPressed?: boolean;
 }) {
+  const interactive = onClick != null;
   const titleClassName =
     "flex h-4 items-center gap-1 text-[11px] font-medium leading-4 text-muted-foreground";
   const titleNode = tooltip ? (
@@ -559,7 +566,24 @@ function SummaryMetricCard({
     <div className={titleClassName}>{title}</div>
   );
   return (
-    <Card padding="sm" className="relative h-full overflow-hidden">
+    <Card
+      padding="sm"
+      role={interactive ? "button" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      aria-label={ariaLabel}
+      aria-pressed={interactive ? ariaPressed : undefined}
+      onClick={onClick}
+      onKeyDown={(event) => {
+        if (!interactive || (event.key !== "Enter" && event.key !== " ")) return;
+        event.preventDefault();
+        onClick?.();
+      }}
+      className={`relative h-full overflow-hidden ${
+        interactive
+          ? "cursor-pointer outline-none transition-colors hover:bg-secondary/50 focus-visible:ring-2 focus-visible:ring-blue-500/70"
+          : ""
+      }`}
+    >
       <div className={`absolute inset-x-0 top-0 h-0.5 ${SUMMARY_METRIC_ACCENT_CLASS[accent]}`} />
       {tooltip ? (
         <Tooltip content={tooltip} contentClassName="max-w-[320px] leading-5">
@@ -678,6 +702,15 @@ function SummaryCards({
   developmentTimeTooltip: string;
   loading: boolean;
 }) {
+  const [showRequestDuration, setShowRequestDuration] = useState(false);
+  const inputOutputCacheValue = `${formatTokenValue(summary?.io_total_tokens)}/${formatPercent(
+    computeCacheHitRate(
+      summary?.input_tokens,
+      summary?.cache_creation_input_tokens,
+      summary?.cache_read_input_tokens
+    )
+  )}`;
+
   if (loading && !summary) {
     return (
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -695,17 +728,20 @@ function SummaryCards({
         value={formatTokenValue(summary?.total_tokens)}
         accent="purple"
       />
-      <SummaryMetricCard
-        title="请求总耗时"
-        value={formatCompactDurationMs(summary?.total_duration_ms)}
-        accent="cyan"
-      />
+      <SummaryMetricCard title="输入+出/缓存率" value={inputOutputCacheValue} accent="blue" />
       <ActivityRangeCard row={activityRow} dayStartHour={dayStartHour} />
       <SummaryMetricCard
-        title="预估开发时间"
-        value={formatCompactDurationMs(estimatedDevelopmentTimeMs)}
+        title={showRequestDuration ? "请求总耗时" : "预估开发时间"}
+        value={
+          showRequestDuration
+            ? formatCompactDurationMs(summary?.total_duration_ms)
+            : formatCompactDurationMs(estimatedDevelopmentTimeMs)
+        }
         accent="green"
-        tooltip={developmentTimeTooltip}
+        tooltip={showRequestDuration ? undefined : developmentTimeTooltip}
+        onClick={() => setShowRequestDuration((current) => !current)}
+        ariaLabel={showRequestDuration ? "显示预估开发时间" : "显示请求总耗时"}
+        ariaPressed={showRequestDuration}
       />
       <SummaryMetricCard title="总花费" value={formatUsdCompact(totalCostUsd)} accent="orange" />
     </div>

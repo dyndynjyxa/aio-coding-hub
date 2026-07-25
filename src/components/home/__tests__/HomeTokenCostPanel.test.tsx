@@ -371,9 +371,9 @@ describe("components/home/HomeTokenCostPanel", () => {
       "供应商",
       "总 Token/占比",
       "输入+出/缓存率",
-      "总花费",
       "请求数/成功率",
       "请求总耗时",
+      "总花费",
     ]);
     expect(screen.queryByRole("columnheader", { name: /缓存情况/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "成功率" })).not.toBeInTheDocument();
@@ -445,11 +445,11 @@ describe("components/home/HomeTokenCostPanel", () => {
       "日期",
       "总 Token/占比",
       "输入+出/缓存率",
-      "总花费",
       "请求数/成功率",
       "请求总耗时",
       "活动范围",
       "预估开发时间",
+      "总花费",
     ]);
     expect(vi.mocked(useUsageLeaderboardV2Query)).toHaveBeenLastCalledWith(
       "day",
@@ -942,11 +942,11 @@ describe("components/home/HomeTokenCostPanel", () => {
     const [filePath, csv] = vi.mocked(usageLeaderboardCsvExport).mock.calls[0] ?? [];
     expect(filePath).toBe("/tmp/home-usage.csv");
     expect(csv).toContain(
-      "\uFEFF排名,供应商,总 Token/占比,输入+出/缓存率,总花费,请求数/成功率,请求总耗时\r\n"
+      "\uFEFF排名,供应商,总 Token/占比,输入+出/缓存率,请求数/成功率,请求总耗时,总花费\r\n"
     );
     expect(csv).not.toContain("最早最晚/请求占比");
-    expect(csv).toContain("1,Beta,4K/78.9%,3K/16.7%,$0.02,4/75%,1m30s\r\n");
-    expect(csv).toContain("2,Alpha,1K/21.1%,800/30%,$0.01,2/100%,30s\r\n");
+    expect(csv).toContain("1,Beta,4K/78.9%,3K/16.7%,4/75%,1m30s,$0.02\r\n");
+    expect(csv).toContain("2,Alpha,1K/21.1%,800/30%,2/100%,30s,$0.01\r\n");
     expect(String(csv).indexOf("1,Beta")).toBeLessThan(String(csv).indexOf("2,Alpha"));
     await waitFor(() => expect(toast).toHaveBeenCalledWith("用量排行 CSV 已导出"));
   });
@@ -1068,10 +1068,10 @@ describe("components/home/HomeTokenCostPanel", () => {
       "文件夹",
       "总 Token/占比",
       "输入+出/缓存率",
-      "总花费",
       "请求数/成功率",
       "请求总耗时",
       "预估开发时间",
+      "总花费",
     ]);
 
     clickSortableHeader(table, "预估开发时间");
@@ -1084,7 +1084,7 @@ describe("components/home/HomeTokenCostPanel", () => {
     await waitFor(() => expect(usageLeaderboardCsvExport).toHaveBeenCalledTimes(1));
     const csv = vi.mocked(usageLeaderboardCsvExport).mock.calls[0]?.[1];
     expect(csv).toContain(
-      "\uFEFF排名,文件夹名称,完整路径,总 Token/占比,输入+出/缓存率,总花费,请求数/成功率,请求总耗时,预估开发时间\r\n"
+      "\uFEFF排名,文件夹名称,完整路径,总 Token/占比,输入+出/缓存率,请求数/成功率,请求总耗时,预估开发时间,总花费\r\n"
     );
     expect(csv).toContain("1,workspace,/projects/alpha,");
     expect(csv).toContain("3,未知文件夹,,");
@@ -1206,9 +1206,9 @@ describe("components/home/HomeTokenCostPanel", () => {
     await waitFor(() => expect(usageLeaderboardCsvExport).toHaveBeenCalledTimes(1));
     const csv = vi.mocked(usageLeaderboardCsvExport).mock.calls[0]?.[1];
     expect(csv).toContain(
-      "\uFEFF排名,日期,总 Token/占比,输入+出/缓存率,总花费,请求数/成功率,请求总耗时,活动范围,预估开发时间\r\n"
+      "\uFEFF排名,日期,总 Token/占比,输入+出/缓存率,请求数/成功率,请求总耗时,活动范围,预估开发时间,总花费\r\n"
     );
-    expect(csv).toContain("1,2026-04-17,200/66.7%,200/0%,$0.20,2/100%,2m,08:00–次日01:00,3h\r\n");
+    expect(csv).toContain("1,2026-04-17,200/66.7%,200/0%,2/100%,2m,08:00–次日01:00,3h,$0.20\r\n");
     expect(csv).not.toContain("首末请求");
     expect(csv).not.toContain("统计日占比");
   });
@@ -1569,7 +1569,7 @@ describe("components/home/HomeTokenCostPanel", () => {
       Array.from((row as HTMLElement).querySelectorAll("td")).map((cell) =>
         cell.textContent?.trim()
       )
-    ).toEqual(["1", "2026-04-16", "—/—", "—/—", "—", "—/—", "—", "—", "—"]);
+    ).toEqual(["1", "2026-04-16", "—/—", "—/—", "—/—", "—", "—", "—", "—"]);
   });
 
   it("shows pending custom range copy and invalid range toast without querying", () => {

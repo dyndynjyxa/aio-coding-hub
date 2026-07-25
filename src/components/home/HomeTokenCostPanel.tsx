@@ -695,22 +695,22 @@ function buildHomeUsageLeaderboardCsv(
       "日期",
       "总 Token/占比",
       "输入+出/缓存率",
-      "总花费",
       "请求数/成功率",
       "请求总耗时",
       "活动范围",
       "预估开发时间",
+      "总花费",
     ];
     const rows = sortedRows.map(({ row }, index) => [
       String(index + 1),
       row.name,
       `${totalTokenText(row)}/${tokenShareText(tokenShare(row, summary))}`,
       `${inputOutputTokenText(row)}/${cacheHitRateText(row)}`,
-      formatCostValue(row.cost_usd),
       `${requestCountText(row)}/${successRateText(row)}`,
       formatCompactDurationMs(row.total_duration_ms),
       activityRangeText(row, dayStartHour),
       formatCompactDurationMs(row.estimated_development_time_ms),
+      formatCostValue(row.cost_usd),
     ]);
     return buildCsvContent(headers, rows);
   }
@@ -722,10 +722,10 @@ function buildHomeUsageLeaderboardCsv(
       "完整路径",
       "总 Token/占比",
       "输入+出/缓存率",
-      "总花费",
       "请求数/成功率",
       "请求总耗时",
       "预估开发时间",
+      "总花费",
     ];
     const rows = sortedRows.map(({ row }, index) => [
       String(index + 1),
@@ -733,10 +733,10 @@ function buildHomeUsageLeaderboardCsv(
       row.folder_path ?? "",
       `${totalTokenText(row)}/${tokenShareText(tokenShare(row, summary))}`,
       `${inputOutputTokenText(row)}/${cacheHitRateText(row)}`,
-      formatCostValue(row.cost_usd),
       `${requestCountText(row)}/${successRateText(row)}`,
       formatCompactDurationMs(row.total_duration_ms),
       formatCompactDurationMs(row.estimated_development_time_ms),
+      formatCostValue(row.cost_usd),
     ]);
     return buildCsvContent(headers, rows);
   }
@@ -746,18 +746,18 @@ function buildHomeUsageLeaderboardCsv(
     scopeLabel(scope),
     "总 Token/占比",
     "输入+出/缓存率",
-    "总花费",
     "请求数/成功率",
     "请求总耗时",
+    "总花费",
   ];
   const rows = sortedRows.map(({ row }, index) => [
     String(index + 1),
     row.name,
     `${totalTokenText(row)}/${tokenShareText(tokenShare(row, summary))}`,
     `${inputOutputTokenText(row)}/${cacheHitRateText(row)}`,
-    formatCostValue(row.cost_usd),
     `${requestCountText(row)}/${successRateText(row)}`,
     formatCompactDurationMs(row.total_duration_ms),
+    formatCostValue(row.cost_usd),
   ]);
   return buildCsvContent(headers, rows);
 }
@@ -891,12 +891,6 @@ function TokenLeaderboardTable({
               onSort={onSort}
             />
             <SortableColumnHeader
-              label="总花费"
-              sortKey="cost"
-              sortState={sortState}
-              onSort={onSort}
-            />
-            <SortableColumnHeader
               label="请求数/成功率"
               sortKey="requests"
               sortState={sortState}
@@ -918,6 +912,12 @@ function TokenLeaderboardTable({
                 onSort={onSort}
               />
             ) : null}
+            <SortableColumnHeader
+              label="总花费"
+              sortKey="cost"
+              sortState={sortState}
+              onSort={onSort}
+            />
           </tr>
         </thead>
         <tbody>
@@ -957,9 +957,6 @@ function TokenLeaderboardTable({
                   )}
                 </td>
                 <td className={TABLE_MONO_TD_CLASS}>
-                  {emptyDay ? "—" : formatCostValue(row.cost_usd)}
-                </td>
-                <td className={TABLE_MONO_TD_CLASS}>
                   {emptyDay ? (
                     <TokenBreakdownInline parts={["—", "—"]} />
                   ) : (
@@ -977,6 +974,9 @@ function TokenLeaderboardTable({
                     {emptyDay ? "—" : formatCompactDurationMs(row.estimated_development_time_ms)}
                   </td>
                 ) : null}
+                <td className={TABLE_MONO_TD_CLASS}>
+                  {emptyDay ? "—" : formatCostValue(row.cost_usd)}
+                </td>
               </tr>
             );
           })}
