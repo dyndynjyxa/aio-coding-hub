@@ -23,5 +23,6 @@ overrides:
   minimatch@9.0.5: 9.0.7
   picomatch@2.3.1: 2.3.2
   picomatch@4.0.3: 4.0.4
+  react-router: 8.3.0
   rollup: ^4.60.1
   semver@6.3.1: 7.8.5
