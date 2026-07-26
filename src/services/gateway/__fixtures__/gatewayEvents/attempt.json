@@ -1,0 +1,30 @@
+{
+  "trace_id": "trace-fixture-001",
+  "cli_key": "claude",
+  "session_id": "sess-fixture-001",
+  "method": "POST",
+  "path": "/v1/messages",
+  "query": "beta=true",
+  "requested_model": "claude-sonnet-4-5",
+  "attempt_index": 1,
+  "provider_id": 7,
+  "session_reuse": false,
+  "provider_name": "Provider A",
+  "base_url": "https://provider-a.example",
+  "outcome": "success",
+  "status": 200,
+  "attempt_started_ms": 1750000000123,
+  "attempt_duration_ms": 458,
+  "circuit_state_before": "CLOSED",
+  "circuit_state_after": "CLOSED",
+  "circuit_failure_count": 0,
+  "circuit_failure_threshold": 5,
+  "claude_model_mapping": {
+    "requestedModel": "claude-sonnet-4-5",
+    "effectiveModel": "gpt-5.4",
+    "mappingKind": "sonnet",
+    "providerId": 7,
+    "providerName": "Provider A",
+    "applied": true
+  }
+}

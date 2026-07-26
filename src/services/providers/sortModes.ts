@@ -1,4 +1,5 @@
 import { commands } from "../../generated/bindings";
+import { FeValidationError } from "../../utils/errors";
 import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
 import { validateProviderCliKey, type CliKey } from "./providers";
 
@@ -41,7 +42,7 @@ function normalizeSortModeName(name: string) {
 
 function validatePositiveId(field: string, value: number) {
   if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new Error(`SEC_INVALID_INPUT: invalid ${field}=${value}`);
+    throw new FeValidationError(`SEC_INVALID_INPUT: invalid ${field}=${value}`);
   }
 }
 

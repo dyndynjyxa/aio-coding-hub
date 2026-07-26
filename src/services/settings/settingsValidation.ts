@@ -14,6 +14,7 @@ const MIN_PREFERRED_PORT = 1024;
 const MAX_PREFERRED_PORT = 65535;
 const MIN_LOG_RETENTION_DAYS = 1;
 const MAX_LOG_RETENTION_DAYS = 3650;
+const MAX_REQUEST_LOG_RETENTION_DAYS = 3650;
 const MAX_PROVIDER_COOLDOWN_SECONDS = 60 * 60;
 const MIN_PROVIDER_BASE_URL_PING_CACHE_TTL_SECONDS = 1;
 const MAX_PROVIDER_BASE_URL_PING_CACHE_TTL_SECONDS = 60 * 60;
@@ -30,6 +31,42 @@ const MIN_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 1;
 const MAX_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 50;
 const MIN_CIRCUIT_BREAKER_OPEN_DURATION_MINUTES = 1;
 const MAX_CIRCUIT_BREAKER_OPEN_DURATION_MINUTES = 24 * 60;
+
+/**
+ * Frontend copies of the backend validation limits (src-tauri/src/infra/settings/defaults.rs).
+ * Kept in sync by src/constants/__tests__/crossLayerContracts.test.ts — update both sides together.
+ * MIN_* entries without a Rust const mirror hardcoded backend checks in
+ * src-tauri/src/infra/settings/persistence.rs; every limit here is anchored by the contract test.
+ */
+export const SETTINGS_VALIDATION_LIMITS = {
+  MAX_UPDATE_RELEASES_URL_LEN,
+  MAX_UPSTREAM_PROXY_URL_LEN,
+  MAX_UPSTREAM_PROXY_USERNAME_LEN,
+  MAX_UPSTREAM_PROXY_PASSWORD_LEN,
+  MAX_CX2CC_MODEL_NAME_LEN,
+  MAX_CX2CC_OPTIONAL_FIELD_LEN,
+  MIN_PREFERRED_PORT,
+  MAX_PREFERRED_PORT,
+  MIN_LOG_RETENTION_DAYS,
+  MAX_LOG_RETENTION_DAYS,
+  MAX_REQUEST_LOG_RETENTION_DAYS,
+  MAX_PROVIDER_COOLDOWN_SECONDS,
+  MIN_PROVIDER_BASE_URL_PING_CACHE_TTL_SECONDS,
+  MAX_PROVIDER_BASE_URL_PING_CACHE_TTL_SECONDS,
+  MAX_UPSTREAM_FIRST_BYTE_TIMEOUT_SECONDS,
+  MIN_UPSTREAM_STREAM_IDLE_TIMEOUT_SECONDS,
+  MAX_UPSTREAM_STREAM_IDLE_TIMEOUT_SECONDS,
+  MAX_UPSTREAM_REQUEST_TIMEOUT_NON_STREAMING_SECONDS,
+  MIN_FAILOVER_MAX_ATTEMPTS_PER_PROVIDER,
+  MAX_FAILOVER_MAX_ATTEMPTS_PER_PROVIDER,
+  MIN_FAILOVER_MAX_PROVIDERS_TO_TRY,
+  MAX_FAILOVER_MAX_PROVIDERS_TO_TRY,
+  MAX_FAILOVER_TOTAL_ATTEMPTS,
+  MIN_CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+  MAX_CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+  MIN_CIRCUIT_BREAKER_OPEN_DURATION_MINUTES,
+  MAX_CIRCUIT_BREAKER_OPEN_DURATION_MINUTES,
+} as const;
 
 const CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 const DECIMAL_INTEGER_PATTERN = /^\d+$/u;
@@ -294,6 +331,7 @@ function validateUpstreamStreamIdleTimeout(value: number | null | undefined): st
 export type SettingsSetValidationInput = {
   preferredPort?: number | null;
   logRetentionDays?: number | null;
+  requestLogRetentionDays?: number | null;
   providerCooldownSeconds?: number | null;
   providerBaseUrlPingCacheTtlSeconds?: number | null;
   upstreamFirstByteTimeoutSeconds?: number | null;
@@ -324,6 +362,7 @@ export function validateSettingsSetInput(input: SettingsSetValidationInput): str
   for (const [fieldLabel, value, min, max] of [
     ["首选端口", input.preferredPort, MIN_PREFERRED_PORT, MAX_PREFERRED_PORT],
     ["日志保留天数", input.logRetentionDays, MIN_LOG_RETENTION_DAYS, MAX_LOG_RETENTION_DAYS],
+    ["请求记录保留天数", input.requestLogRetentionDays, 0, MAX_REQUEST_LOG_RETENTION_DAYS],
     ["Provider 冷却时间", input.providerCooldownSeconds, 0, MAX_PROVIDER_COOLDOWN_SECONDS],
     [
       "Provider Base URL 探测缓存 TTL",

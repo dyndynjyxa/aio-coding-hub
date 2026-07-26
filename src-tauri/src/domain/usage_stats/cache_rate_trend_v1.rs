@@ -56,17 +56,17 @@ pub(super) fn provider_cache_rate_trend_v1_with_conn(
         TrendBucketV1::Hour => (
             "strftime('%Y-%m-%d', r.created_at, 'unixepoch','localtime') AS day, CAST(strftime('%H', r.created_at, 'unixepoch','localtime') AS INTEGER) AS hour",
             "day, hour",
-            "day ASC, hour ASC",
+            "b.day ASC, b.hour ASC",
         ),
         TrendBucketV1::Day => (
             "strftime('%Y-%m-%d', r.created_at, 'unixepoch','localtime') AS day, NULL AS hour",
             "day",
-            "day ASC",
+            "b.day ASC",
         ),
         TrendBucketV1::Month => (
             "strftime('%Y-%m', r.created_at, 'unixepoch','localtime') AS day, NULL AS hour",
             "day",
-            "day ASC",
+            "b.day ASC",
         ),
     };
 
@@ -91,43 +91,49 @@ pub(super) fn provider_cache_rate_trend_v1_with_conn(
 
     let sql = format!(
         r#"
-WITH top_providers AS (
+WITH bucketed AS (
   SELECT
+    {select_fields},
     r.cli_key AS cli_key,
     r.final_provider_id AS provider_id,
-    SUM({denom_expr}) AS denom_tokens
+    MAX(p.name) AS provider_name,
+    SUM({denom_expr}) AS denom_tokens,
+    SUM(COALESCE(r.cache_read_input_tokens, 0)) AS cache_read_input_tokens,
+    COUNT(*) AS requests_success
   FROM request_logs r
+  LEFT JOIN providers p ON p.id = r.final_provider_id
   WHERE r.excluded_from_stats = 0
   AND r.status >= 200 AND r.status < 300 AND r.error_code IS NULL
   AND r.final_provider_id IS NOT NULL
   AND r.final_provider_id > 0
   {where_clause}
   {cx2cc_filter_clause}
-  GROUP BY r.cli_key, r.final_provider_id
+  GROUP BY {group_by_fields}, r.cli_key, r.final_provider_id
+),
+top_providers AS (
+  SELECT
+    cli_key,
+    provider_id,
+    SUM(denom_tokens) AS denom_tokens
+  FROM bucketed
+  GROUP BY cli_key, provider_id
   ORDER BY denom_tokens DESC
   LIMIT ?{limit_bind_idx}
 )
 SELECT
-  {select_fields},
-  r.cli_key AS cli_key,
-  r.final_provider_id AS provider_id,
-  MAX(p.name) AS provider_name,
-  SUM({denom_expr}) AS denom_tokens,
-  SUM(COALESCE(r.cache_read_input_tokens, 0)) AS cache_read_input_tokens,
-  COUNT(*) AS requests_success
-FROM request_logs r
+  b.day,
+  b.hour,
+  b.cli_key,
+  b.provider_id,
+  b.provider_name,
+  b.denom_tokens,
+  b.cache_read_input_tokens,
+  b.requests_success
+FROM bucketed b
 JOIN top_providers tp
-  ON tp.cli_key = r.cli_key
- AND tp.provider_id = r.final_provider_id
-LEFT JOIN providers p ON p.id = r.final_provider_id
-WHERE r.excluded_from_stats = 0
-AND r.status >= 200 AND r.status < 300 AND r.error_code IS NULL
-AND r.final_provider_id IS NOT NULL
-AND r.final_provider_id > 0
-{where_clause}
-{cx2cc_filter_clause}
-GROUP BY {group_by_fields}, r.cli_key, r.final_provider_id
-ORDER BY {order_by_fields}, denom_tokens DESC
+  ON tp.cli_key = b.cli_key
+ AND tp.provider_id = b.provider_id
+ORDER BY {order_by_fields}, b.denom_tokens DESC
 "#,
         denom_expr = denom_expr,
         select_fields = select_fields,
@@ -282,7 +288,9 @@ pub fn provider_cache_rate_trend_v1(
     limit: Option<usize>,
 ) -> crate::shared::error::AppResult<Vec<UsageProviderCacheRateTrendRowV1>> {
     let conn = db.open_connection()?;
-    let resolved = resolve_query_params(&conn, params)?;
+    let mut params = params.clone();
+    params.day_start_hour = None;
+    let resolved = resolve_query_params(&conn, &params)?;
     Ok(provider_cache_rate_trend_v1_with_conn(
         &conn,
         ProviderCacheRateTrendQuery {

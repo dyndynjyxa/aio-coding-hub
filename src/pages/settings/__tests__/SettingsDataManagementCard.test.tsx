@@ -31,8 +31,11 @@ describe("pages/settings/SettingsDataManagementCard", () => {
     about: createAboutInfo(),
     dbDiskUsageAvailable: "available" as const,
     dbDiskUsage: createDbDiskUsage(),
+    requestLogRetentionDays: 0,
     refreshDbDiskUsage: vi.fn().mockResolvedValue(undefined),
     openAppDataDir: vi.fn().mockResolvedValue(undefined),
+    onCompactDb: vi.fn().mockResolvedValue(undefined),
+    compactingDb: false,
     openClearRequestLogsDialog: vi.fn(),
     openResetAllDialog: vi.fn(),
     onExportConfig: vi.fn().mockResolvedValue(undefined),
@@ -81,6 +84,45 @@ describe("pages/settings/SettingsDataManagementCard", () => {
 
     fireEvent.click(screen.getByText("刷新"));
     expect(refreshDbDiskUsage).toHaveBeenCalled();
+  });
+
+  it("shows permanent retention label when retention days is 0", () => {
+    render(<SettingsDataManagementCard {...defaultProps} requestLogRetentionDays={0} />);
+    expect(screen.getByText("永久保留")).toBeInTheDocument();
+  });
+
+  it("shows day-count retention label when retention days is positive", () => {
+    render(<SettingsDataManagementCard {...defaultProps} requestLogRetentionDays={30} />);
+    expect(screen.getByText("30 天")).toBeInTheDocument();
+  });
+
+  it("shows dash when retention days is unknown", () => {
+    render(
+      <SettingsDataManagementCard
+        {...defaultProps}
+        requestLogRetentionDays={null}
+        dbDiskUsage={null}
+      />
+    );
+    expect(screen.getByText("—")).toBeInTheDocument();
+  });
+
+  it("calls onCompactDb when clicking compact button", () => {
+    const onCompactDb = vi.fn().mockResolvedValue(undefined);
+    render(<SettingsDataManagementCard {...defaultProps} onCompactDb={onCompactDb} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "压缩" }));
+    expect(onCompactDb).toHaveBeenCalled();
+  });
+
+  it("shows compacting state and disables compact button while compacting", () => {
+    render(<SettingsDataManagementCard {...defaultProps} compactingDb={true} />);
+    expect(screen.getByRole("button", { name: "压缩中…" })).toBeDisabled();
+  });
+
+  it("disables compact button when about is null", () => {
+    render(<SettingsDataManagementCard {...defaultProps} about={null} />);
+    expect(screen.getByRole("button", { name: "压缩" })).toBeDisabled();
   });
 
   it("calls openClearRequestLogsDialog when clicking clear logs button", () => {

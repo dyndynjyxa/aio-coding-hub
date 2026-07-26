@@ -47,6 +47,11 @@ export function createRequestLogSummary(
 ): RequestLogSummary {
   const { createdAtMs, createdAt } = resolveCreatedAt(overrides);
   const cliKey = (overrides.cli_key ?? "claude") as RequestLogSummary["cli_key"];
+  // Mirror the backend derivation (row never resolved => interrupted) so tests
+  // building status-null rows get realistic backend-shaped data.
+  const status = "status" in overrides ? (overrides.status ?? null) : 200;
+  const errorCode = overrides.error_code ?? null;
+  const isInterrupted = overrides.is_interrupted ?? (status == null && errorCode == null);
   return {
     id: 1,
     trace_id: "trace-1",
@@ -76,6 +81,7 @@ export function createRequestLogSummary(
     cache_creation_input_tokens: null,
     cache_creation_5m_input_tokens: null,
     cache_creation_1h_input_tokens: null,
+    effective_input_tokens: null,
     cost_usd: null,
     provider_chain_json: null,
     error_details_json: null,
@@ -84,6 +90,7 @@ export function createRequestLogSummary(
     activity_details_json: null,
     ...overrides,
     cli_key: cliKey,
+    is_interrupted: isInterrupted,
     created_at_ms: createdAtMs,
     created_at: createdAt,
     route: (overrides.route ?? []).map((routeItem) => createRequestLogRouteHop(routeItem)),
@@ -94,6 +101,10 @@ export function createRequestLogDetail(
   overrides: Partial<RequestLogDetail> = {}
 ): RequestLogDetail {
   const { createdAtMs, createdAt } = resolveCreatedAt(overrides);
+  // Mirror the backend derivation (row never resolved => interrupted).
+  const status = "status" in overrides ? (overrides.status ?? null) : 200;
+  const isInterrupted =
+    overrides.is_interrupted ?? (status == null && (overrides.error_code ?? null) == null);
   return {
     id: 1,
     trace_id: "trace-1",
@@ -116,6 +127,7 @@ export function createRequestLogDetail(
     cache_creation_input_tokens: null,
     cache_creation_5m_input_tokens: null,
     cache_creation_1h_input_tokens: null,
+    effective_input_tokens: null,
     usage_json: null,
     requested_model: "claude-3-7-sonnet",
     final_provider_id: 1,
@@ -131,5 +143,6 @@ export function createRequestLogDetail(
     activity_details_json: null,
     created_at: createdAt,
     ...overrides,
+    is_interrupted: isInterrupted,
   };
 }

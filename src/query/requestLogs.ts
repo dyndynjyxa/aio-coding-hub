@@ -11,10 +11,12 @@ import {
   normalizeRequestLogsLimit,
   type RequestLogSummary,
 } from "../services/gateway/requestLogs";
+import { activeRequestLogsSnapshot, type ActiveRequest } from "../services/gateway/activeRequests";
 import {
-  isPersistedRequestLogInProgress,
+  isPersistedRequestLogIncomplete,
   requestLogCreatedAtMs,
 } from "../services/gateway/requestLogState";
+import { logToConsole } from "../services/consoleLog";
 import { requestLogsKeys } from "./keys";
 
 type RequestLogsIncrementalRefreshResult = {
@@ -46,7 +48,7 @@ function computeRequestLogsCursorId(rows: RequestLogSummary[]) {
 
 function shouldUseFullRefresh(prev: RequestLogSummary[] | null | undefined) {
   if (!prev?.length) return true;
-  return prev.some(isPersistedRequestLogInProgress);
+  return prev.some(isPersistedRequestLogIncomplete);
 }
 
 function mergeRequestLogs(prev: RequestLogSummary[], incoming: RequestLogSummary[], limit: number) {
@@ -80,6 +82,24 @@ export function useRequestLogsListAllQuery(
     enabled,
     placeholderData: keepPreviousData,
     refetchInterval: options?.refetchIntervalMs ?? false,
+  });
+}
+
+export function useActiveRequestLogsSnapshotQuery(options?: { enabled?: boolean }) {
+  const enabled = isRequestLogsQueryEnabled(options?.enabled);
+
+  return useQuery<ActiveRequest[]>({
+    queryKey: requestLogsKeys.activeSnapshot(),
+    queryFn: async () => {
+      try {
+        return await activeRequestLogsSnapshot();
+      } catch (error) {
+        logToConsole("warn", "读取进行中请求快照失败", { error: String(error) });
+        return [];
+      }
+    },
+    enabled,
+    placeholderData: keepPreviousData,
   });
 }
 

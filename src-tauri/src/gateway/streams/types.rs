@@ -1,5 +1,6 @@
 //! Usage: Stream finalization context for gateway body relays.
 
+use crate::gateway::active_requests::ActiveRequestRegistry;
 use crate::gateway::plugins::pipeline::GatewayPluginPipeline;
 use crate::{circuit_breaker, db, request_logs, session_manager};
 use std::sync::{Arc, Mutex};
@@ -77,6 +78,7 @@ pub(in crate::gateway) struct StreamFinalizeCtx<R: tauri::Runtime = tauri::Wry> 
     pub(in crate::gateway) query: Option<String>,
     pub(in crate::gateway) excluded_from_stats: bool,
     pub(in crate::gateway) special_settings: Arc<Mutex<Vec<serde_json::Value>>>,
+    pub(in crate::gateway) provider_health_neutral: bool,
     pub(in crate::gateway) status: u16,
     pub(in crate::gateway) error_category: Option<&'static str>,
     pub(in crate::gateway) error_code: Option<&'static str>,
@@ -94,4 +96,5 @@ pub(in crate::gateway) struct StreamFinalizeCtx<R: tauri::Runtime = tauri::Wry> 
     pub(in crate::gateway) fake_200_detected: bool,
     pub(in crate::gateway) fake_200_quota_exhausted: bool,
     pub(in crate::gateway) activity: Arc<Mutex<StreamActivityTracker>>,
+    pub(in crate::gateway) active_requests: Arc<ActiveRequestRegistry>,
 }

@@ -153,6 +153,17 @@ export async function handleOAuthLogin(ctx: OAuthActionContext) {
         if (!isCurrentAttempt()) {
           return;
         }
+        // Token 已保存成功，只是状态读取失败：用登录结果兜底展示，
+        // 并同步写入缓存，避免编辑器 effect 用旧快照盖回去。
+        status = {
+          connected: true,
+          provider_type: result.provider_type,
+          email: null,
+          expires_at: result.expires_at,
+          has_refresh_token: null,
+        };
+        ctx.setOauthStatus(status);
+        ctx.writeOauthStatusCache(status, targetProviderId);
         toast("OAuth 登录成功，但读取连接状态失败，可稍后重试");
         logToConsole(
           "warn",
@@ -473,6 +484,8 @@ export async function handleOAuthDisconnect(ctx: OAuthActionContext) {
     const result = await providerOAuthDisconnect(ctx.editingProviderId);
     if (result.success) {
       ctx.setOauthStatus(null);
+      // 缓存也写为未连接：否则 5 分钟内重开弹窗会命中"仍已连接"的旧快照。
+      ctx.writeOauthStatusCache(null, ctx.editingProviderId);
       toast("已断开 OAuth 连接");
       logToConsole("info", `OAuth 已断开连接：${ctx.form.getValues().name}`, {
         provider_id: ctx.editingProviderId,

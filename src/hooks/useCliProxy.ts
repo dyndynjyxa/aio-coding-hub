@@ -3,24 +3,13 @@ import { toast } from "sonner";
 import { logToConsole } from "../services/consoleLog";
 import type { CliKey } from "../services/providers/providers";
 import { useCliProxySetEnabledMutation, useCliProxyStatusAllQuery } from "../query/cliProxy";
+import { createCliRecord } from "../constants/clis";
 
-const DEFAULT_ENABLED: Record<CliKey, boolean> = {
-  claude: true,
-  codex: false,
-  gemini: false,
-};
+const DEFAULT_ENABLED = createCliRecord((cliKey) => cliKey === "claude");
 
-const DEFAULT_TOGGLING: Record<CliKey, boolean> = {
-  claude: false,
-  codex: false,
-  gemini: false,
-};
+const DEFAULT_TOGGLING = createCliRecord(() => false);
 
-const DEFAULT_APPLIED_TO_CURRENT_GATEWAY: Record<CliKey, boolean | null> = {
-  claude: null,
-  codex: null,
-  gemini: null,
-};
+const DEFAULT_APPLIED_TO_CURRENT_GATEWAY = createCliRecord<boolean | null>(() => null);
 
 export function useCliProxy() {
   const [toggling, setToggling] = useState<Record<CliKey, boolean>>(DEFAULT_TOGGLING);

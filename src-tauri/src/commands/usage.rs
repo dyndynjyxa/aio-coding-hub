@@ -3,6 +3,8 @@
 use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::{blocking, cli_sessions, usage_stats};
 
+const USAGE_LEADERBOARD_CSV_EXPORT_MAX_BYTES: usize = 1024 * 1024;
+
 fn usage_folder_lookup(
     app: &tauri::AppHandle,
     items: &[usage_stats::UsageSessionLookupKey],
@@ -31,6 +33,38 @@ fn usage_folder_lookup(
             folder_path: item.folder_path,
         })
         .collect()
+}
+
+fn normalize_usage_leaderboard_csv_export_input(
+    file_path: String,
+    csv: String,
+) -> Result<(String, String), String> {
+    let file_path = file_path.trim().to_string();
+    if file_path.is_empty() {
+        return Err("SEC_INVALID_INPUT: file_path is required".to_string());
+    }
+
+    if csv.trim_matches('\u{feff}').trim().is_empty() {
+        return Err("SEC_INVALID_INPUT: csv is required".to_string());
+    }
+
+    let byte_len = csv.len();
+    if byte_len > USAGE_LEADERBOARD_CSV_EXPORT_MAX_BYTES {
+        return Err(format!(
+            "SEC_INVALID_INPUT: csv is too large (max {} bytes)",
+            USAGE_LEADERBOARD_CSV_EXPORT_MAX_BYTES
+        ));
+    }
+
+    Ok((file_path, csv))
+}
+
+fn write_usage_leaderboard_csv_export(file_path: String, csv: String) -> Result<bool, String> {
+    let (file_path, csv) = normalize_usage_leaderboard_csv_export_input(file_path, csv)?;
+    std::fs::write(&file_path, csv).map_err(|err| {
+        format!("SYSTEM_ERROR: failed to write usage leaderboard csv file: {err}")
+    })?;
+    Ok(true)
 }
 
 #[tauri::command]
@@ -122,6 +156,19 @@ pub(crate) async fn usage_leaderboard_v2(
 
 #[tauri::command]
 #[specta::specta]
+pub(crate) async fn usage_leaderboard_csv_export(
+    file_path: String,
+    csv: String,
+) -> Result<bool, String> {
+    blocking::run("usage_leaderboard_csv_export", move || {
+        write_usage_leaderboard_csv_export(file_path, csv)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub(crate) async fn usage_hourly_series(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -134,6 +181,55 @@ pub(crate) async fn usage_hourly_series(
     })
     .await
     .map_err(Into::into)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn usage_leaderboard_csv_export_writes_valid_csv() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("usage.csv");
+        let content = "\u{feff}排名,供应商\r\n1,OpenAI\r\n".to_string();
+
+        let ok =
+            write_usage_leaderboard_csv_export(path.to_string_lossy().to_string(), content.clone())
+                .expect("csv export should succeed");
+
+        assert!(ok);
+        assert_eq!(std::fs::read_to_string(path).expect("read csv"), content);
+    }
+
+    #[test]
+    fn usage_leaderboard_csv_export_rejects_empty_path() {
+        let err = write_usage_leaderboard_csv_export("   ".to_string(), "排名\r\n".to_string())
+            .expect_err("empty path should fail");
+
+        assert!(err.contains("SEC_INVALID_INPUT: file_path is required"));
+    }
+
+    #[test]
+    fn usage_leaderboard_csv_export_rejects_empty_csv() {
+        let err = write_usage_leaderboard_csv_export(
+            "/tmp/usage.csv".to_string(),
+            "\u{feff}  ".to_string(),
+        )
+        .expect_err("empty csv should fail");
+
+        assert!(err.contains("SEC_INVALID_INPUT: csv is required"));
+    }
+
+    #[test]
+    fn usage_leaderboard_csv_export_rejects_oversized_csv() {
+        let err = write_usage_leaderboard_csv_export(
+            "/tmp/usage.csv".to_string(),
+            "x".repeat(USAGE_LEADERBOARD_CSV_EXPORT_MAX_BYTES + 1),
+        )
+        .expect_err("oversized csv should fail");
+
+        assert!(err.contains("SEC_INVALID_INPUT: csv is too large"));
+    }
 }
 
 #[tauri::command]

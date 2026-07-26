@@ -5,16 +5,9 @@ function normalizeTokenCount(value: MaybeNumber) {
   return Math.max(0, value);
 }
 
-export function computeEffectiveInputTokens(
-  cliKey: string,
-  inputTokens: MaybeNumber,
-  cacheReadTokens: MaybeNumber
-) {
-  const input = normalizeTokenCount(inputTokens);
-  const read = normalizeTokenCount(cacheReadTokens);
-  if (cliKey === "codex" || cliKey === "gemini") return Math.max(input - read, 0);
-  return input;
-}
+// NOTE: effective input tokens are computed by the BACKEND
+// (src-tauri/src/domain/usage_stats/tokens.rs) and shipped on request-log rows
+// and gateway:request events — the frontend must not re-derive the formula.
 
 export function computeCacheHitRateDenomTokens(
   effectiveInputTokens: MaybeNumber,

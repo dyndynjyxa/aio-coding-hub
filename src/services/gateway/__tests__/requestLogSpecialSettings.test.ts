@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   hasClaudeModelMappingSpecialSetting,
+  hasCodexSystemRequestSpecialSetting,
   resolveClaudeModelMappingFromSpecialSettings,
 } from "../requestLogSpecialSettings";
 
@@ -68,5 +69,37 @@ describe("services/gateway/requestLogSpecialSettings", () => {
       )
     ).toBeNull();
     expect(hasClaudeModelMappingSpecialSetting("bad-json")).toBe(false);
+  });
+
+  it("identifies only the structured Codex system request marker", () => {
+    expect(
+      hasCodexSystemRequestSpecialSetting(
+        JSON.stringify([{ type: "noop" }, { type: "codex_system_request", threadSource: "system" }])
+      )
+    ).toBe(true);
+    expect(
+      hasCodexSystemRequestSpecialSetting(
+        JSON.stringify({ type: "codex_system_request", threadSource: "system" })
+      )
+    ).toBe(true);
+  });
+
+  it("rejects incomplete or mismatched Codex system request markers", () => {
+    for (const settings of [
+      [{ type: "codex_system_request" }],
+      [{ type: "codex_system_request", threadSource: "user" }],
+      [{ type: "other", threadSource: "system" }],
+      [{ type: "codex_system_request", threadSource: true }],
+    ]) {
+      expect(hasCodexSystemRequestSpecialSetting(JSON.stringify(settings))).toBe(false);
+    }
+  });
+
+  it("fails closed for missing or malformed special settings", () => {
+    expect(hasCodexSystemRequestSpecialSetting(null)).toBe(false);
+    expect(hasCodexSystemRequestSpecialSetting("bad-json")).toBe(false);
+    expect(hasCodexSystemRequestSpecialSetting(JSON.stringify([null, false, "marker"]))).toBe(
+      false
+    );
   });
 });

@@ -118,8 +118,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::gateway::events::{
-    decision_chain as dc, emit_attempt_event, emit_gateway_debug_log_lazy, emit_gateway_log,
-    FailoverAttempt, GatewayAttemptEvent,
+    bound_attempt_event, decision_chain as dc, emit_attempt_event, emit_gateway_debug_log_lazy,
+    emit_gateway_log, FailoverAttempt, GatewayAttemptEvent,
 };
 use crate::gateway::response_fixer;
 use crate::gateway::streams::{
@@ -186,6 +186,7 @@ where
         cx2cc_settings: &input.cx2cc_settings,
         effective_sort_mode_id: input.effective_sort_mode_id,
         special_settings: &input.special_settings,
+        provider_health_neutral: input.provider_health_neutral,
         provider_cooldown_secs: input.provider_cooldown_secs,
         upstream_first_byte_timeout_secs: input.upstream_first_byte_timeout_secs,
         upstream_first_byte_timeout: input.upstream_first_byte_timeout,

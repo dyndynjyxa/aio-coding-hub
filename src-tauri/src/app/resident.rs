@@ -159,6 +159,10 @@ pub fn show_main_window(app: &tauri::AppHandle) {
 
     #[cfg(target_os = "macos")]
     set_dock_visibility(app, true);
+
+    // A WebView that died while the window was hidden should be repaired the
+    // moment the user opens the window, not on the next watchdog tick.
+    crate::app::heartbeat_watchdog::on_main_window_shown(app);
 }
 
 /// Called on startup when `start_minimized` is enabled.
@@ -212,6 +216,14 @@ fn toggle_main_window(app: &tauri::AppHandle) {
 #[cfg(desktop)]
 pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     if window.label() != MAIN_WINDOW_LABEL {
+        return;
+    }
+
+    // OS-level restore paths (taskbar unminimize, Mission Control) never go
+    // through show_main_window; the focus event covers them so a WebView that
+    // died while minimized is repaired the moment the user comes back.
+    if matches!(event, tauri::WindowEvent::Focused(true)) {
+        crate::app::heartbeat_watchdog::on_main_window_shown(window.app_handle());
         return;
     }
 

@@ -16,6 +16,8 @@ pub(super) struct RecordSystemFailureArgs<'a, R: tauri::Runtime = tauri::Wry> {
     pub(super) decision: FailoverDecision,
     pub(super) outcome: String,
     pub(super) reason: String,
+    /// First-byte timeout seconds in effect; `Some` only for timeout-class failures.
+    pub(super) timeout_secs: Option<u32>,
 }
 
 pub(super) async fn record_system_failure_and_decide<R: tauri::Runtime>(
@@ -50,6 +52,7 @@ async fn record_system_failure_and_decide_impl<R: tauri::Runtime>(
         mut decision,
         mut outcome,
         reason,
+        timeout_secs,
     } = args;
     let ProviderCtx {
         provider_id,
@@ -99,7 +102,12 @@ async fn record_system_failure_and_decide_impl<R: tauri::Runtime>(
                 provider_name_base.as_str(),
                 provider_base_url_base.as_str(),
                 now_unix,
-            ),
+            )
+            .with_provider_health_neutral(ctx.provider_health_neutral)
+            // Attribute the circuit-open notice to this failure (D3): always
+            // pass the effective first-byte timeout; the notice builder only
+            // uses it when the trigger code is GW_UPSTREAM_TIMEOUT.
+            .with_trigger(Some(error_code), Some(ctx.upstream_first_byte_timeout_secs)),
         );
         *circuit_snapshot = change.after.clone();
         circuit_state_before = Some(change.before.state.as_str());
@@ -134,6 +142,10 @@ async fn record_system_failure_and_decide_impl<R: tauri::Runtime>(
         circuit_state_after,
         circuit_failure_count,
         circuit_failure_threshold,
+        circuit_recover_at_unix: None,
+        circuit_trigger_error_code: None,
+        provider_bridged: Some(provider_ctx.provider_bridged),
+        timeout_secs,
     });
 
     emit_attempt_event_and_log_with_circuit_before(
@@ -164,6 +176,7 @@ async fn record_system_failure_and_decide_impl<R: tauri::Runtime>(
                 provider_id,
                 now_unix,
                 provider_cooldown_secs,
+                ctx.provider_health_neutral,
             );
             *circuit_snapshot = snap;
         }

@@ -1275,6 +1275,8 @@ fn baseline_v25_creates_complete_schema_for_fresh_install() {
     assert!(tables.contains(&"sort_mode_providers".to_string()));
     assert!(tables.contains(&"sort_mode_active".to_string()));
     assert!(tables.contains(&"claude_model_validation_runs".to_string()));
+    assert!(tables.contains(&"image_gen_configs".to_string()));
+    assert!(tables.contains(&"image_gen_tasks".to_string()));
     assert!(tables.contains(&"plugin_hook_execution_reports".to_string()));
     assert!(tables.contains(&"schema_migrations".to_string()));
 
@@ -1318,6 +1320,179 @@ fn baseline_v25_creates_complete_schema_for_fresh_install() {
 
     // Idempotent: second run should succeed
     apply_migrations(&mut conn).expect("apply migrations twice");
+}
+
+#[test]
+fn ensure_patches_seed_grok_workspace_once_without_resetting_active_workspace() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+    conn.execute_batch("PRAGMA foreign_keys = ON;")
+        .expect("enable foreign_keys");
+
+    apply_migrations(&mut conn).expect("apply migrations on fresh db");
+
+    let default_id: i64 = conn
+        .query_row(
+            "SELECT id FROM workspaces WHERE cli_key = 'grok' AND name = '默认'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read Grok default workspace");
+    let initial_active_id: i64 = conn
+        .query_row(
+            "SELECT workspace_id FROM workspace_active WHERE cli_key = 'grok'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read Grok active workspace");
+    assert_eq!(initial_active_id, default_id);
+
+    conn.execute(
+        "INSERT INTO workspaces(cli_key, name, normalized_name, created_at, updated_at) VALUES ('grok', 'Custom', 'custom', 1, 1)",
+        [],
+    )
+    .expect("insert custom Grok workspace");
+    let custom_id = conn.last_insert_rowid();
+    conn.execute(
+        "UPDATE workspace_active SET workspace_id = ?1, updated_at = 2 WHERE cli_key = 'grok'",
+        [custom_id],
+    )
+    .expect("activate custom Grok workspace");
+
+    apply_migrations(&mut conn).expect("apply migrations twice");
+
+    let default_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(1) FROM workspaces WHERE cli_key = 'grok' AND name = '默认'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count Grok default workspaces");
+    let active_id: i64 = conn
+        .query_row(
+            "SELECT workspace_id FROM workspace_active WHERE cli_key = 'grok'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read preserved Grok active workspace");
+
+    assert_eq!(default_count, 1);
+    assert_eq!(active_id, custom_id);
+}
+
+#[test]
+fn migrate_v35_to_v36_creates_image_gen_configs_and_is_idempotent() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+
+    v35_to_v36::migrate_v35_to_v36(&mut conn).expect("migrate v35->v36");
+
+    assert!(test_has_table(&conn, "image_gen_configs"));
+    for column in [
+        "adapter_id",
+        "base_url",
+        "api_key_plaintext",
+        "model",
+        "created_at",
+        "updated_at",
+    ] {
+        assert!(
+            test_has_column(&conn, "image_gen_configs", column),
+            "missing image_gen_configs column: {column}"
+        );
+    }
+
+    let user_version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read user_version");
+    assert_eq!(user_version, 36);
+
+    // Idempotent: second run should succeed.
+    v35_to_v36::migrate_v35_to_v36(&mut conn).expect("migrate v35->v36 twice");
+}
+
+#[test]
+fn apply_migrations_upgrades_v35_schema_to_v36() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+    apply_migrations(&mut conn).expect("create current schema");
+
+    // Simulate a v35 database (before image_gen_configs existed).
+    conn.execute_batch(
+        r#"
+DROP TABLE image_gen_configs;
+PRAGMA user_version = 35;
+"#,
+    )
+    .expect("simulate v35 schema");
+    assert!(!test_has_table(&conn, "image_gen_configs"));
+
+    apply_migrations(&mut conn).expect("apply migrations from v35");
+
+    assert!(test_has_table(&conn, "image_gen_configs"));
+    let user_version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read user_version");
+    assert_eq!(user_version, LATEST_SCHEMA_VERSION);
+}
+
+#[test]
+fn migrate_v36_to_v37_creates_image_gen_tasks_and_is_idempotent() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+
+    v36_to_v37::migrate_v36_to_v37(&mut conn).expect("migrate v36->v37");
+
+    assert!(test_has_table(&conn, "image_gen_tasks"));
+    for column in [
+        "id",
+        "adapter_id",
+        "prompt",
+        "request_json",
+        "status",
+        "error",
+        "usage_json",
+        "images_json",
+        "ref_images_json",
+        "dir",
+        "created_at",
+        "elapsed_ms",
+    ] {
+        assert!(
+            test_has_column(&conn, "image_gen_tasks", column),
+            "missing image_gen_tasks column: {column}"
+        );
+    }
+    assert!(test_has_index(&conn, "idx_image_gen_tasks_created"));
+
+    let user_version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read user_version");
+    assert_eq!(user_version, 37);
+
+    // Idempotent: second run should succeed.
+    v36_to_v37::migrate_v36_to_v37(&mut conn).expect("migrate v36->v37 twice");
+}
+
+#[test]
+fn apply_migrations_upgrades_v36_schema_to_v37() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+    apply_migrations(&mut conn).expect("create current schema");
+
+    // Simulate a v36 database (before image_gen_tasks existed).
+    conn.execute_batch(
+        r#"
+DROP TABLE image_gen_tasks;
+PRAGMA user_version = 36;
+"#,
+    )
+    .expect("simulate v36 schema");
+    assert!(!test_has_table(&conn, "image_gen_tasks"));
+
+    apply_migrations(&mut conn).expect("apply migrations from v36");
+
+    assert!(test_has_table(&conn, "image_gen_tasks"));
+    assert!(test_has_index(&conn, "idx_image_gen_tasks_created"));
+    let user_version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read user_version");
+    assert_eq!(user_version, LATEST_SCHEMA_VERSION);
 }
 
 #[test]

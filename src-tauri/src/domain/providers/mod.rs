@@ -11,7 +11,7 @@ pub use types::{
 
 #[allow(unused_imports)]
 pub(crate) use types::{
-    ClaudeTerminalLaunchContext, GatewayProvidersSelection, ProviderForGateway,
+    is_cx2cc_bridge, ClaudeTerminalLaunchContext, GatewayProvidersSelection, ProviderForGateway,
     ProviderOAuthDetails, ProviderRouteRow,
 };
 

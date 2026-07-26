@@ -118,6 +118,11 @@ fn spawn_touch_activity<R: tauri::Runtime>(
     last_activity_ms: i64,
     details: Option<String>,
 ) {
+    if ctx.observe {
+        ctx.active_requests
+            .touch(ctx.trace_id.as_str(), last_activity_ms);
+    }
+
     let db = ctx.db.clone();
     let trace_id = ctx.trace_id.clone();
     let cli_key = ctx.cli_key.clone();
@@ -201,7 +206,7 @@ where
     fn poll_next_inner(
         &mut self,
         cx: &mut Context<'_>,
-        _enforce_idle_timeout: bool,
+        enforce_idle_timeout: bool,
     ) -> Poll<Option<Result<B, reqwest::Error>>> {
         if self.stop_after_terminal_error {
             return Poll::Ready(None);
@@ -210,7 +215,19 @@ where
         let next = Pin::new(&mut self.upstream).poll_next(cx);
 
         match next {
-            Poll::Pending => Poll::Pending,
+            Poll::Pending => {
+                // Upstream has no data right now; only then check the idle timer.
+                // Drain path (enforce_idle_timeout=false) keeps its own deadline.
+                if enforce_idle_timeout {
+                    if let Some(sleep) = self.idle_sleep.as_mut() {
+                        if sleep.as_mut().poll(cx).is_ready() {
+                            self.finalize(Some(GatewayErrorCode::StreamIdleTimeout.as_str()));
+                            return Poll::Ready(None);
+                        }
+                    }
+                }
+                Poll::Pending
+            }
             Poll::Ready(None) => {
                 // When defer_terminal_error is set and the tracker saw a terminal
                 // error, skip finalization here — the relay task will decide the
@@ -864,8 +881,10 @@ mod tests {
         is_codex_body_buffer_drop_successish, is_codex_client_abort_successish,
         is_codex_drop_successish, is_codex_responses_path, is_codex_stream_tail_error_successish,
         is_codex_stream_terminal_error_successish, is_plugin_stream_error_chunk, next_item,
-        spawn_usage_sse_relay_body, RelayBodyStream, StreamFinalizeCtx,
+        spawn_touch_activity, spawn_usage_sse_relay_body, RelayBodyStream, StreamFinalizeCtx,
     };
+    use crate::gateway::active_requests::{ActiveRequestRegistry, ActiveRequestStart};
+    use crate::gateway::proxy::GatewayErrorCode;
     use crate::gateway::streams::StreamActivityTracker;
     use crate::{circuit_breaker, db, request_logs, session_manager};
     use axum::body::Bytes;
@@ -877,6 +896,7 @@ mod tests {
         app: tauri::AppHandle<tauri::test::MockRuntime>,
         db: db::Db,
         log_tx: tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
+        active_requests: Arc<ActiveRequestRegistry>,
     ) -> StreamFinalizeCtx<tauri::test::MockRuntime> {
         StreamFinalizeCtx {
             app,
@@ -900,6 +920,7 @@ mod tests {
             query: None,
             excluded_from_stats: false,
             special_settings: Arc::new(Mutex::new(Vec::new())),
+            provider_health_neutral: false,
             status: 200,
             error_category: None,
             error_code: None,
@@ -921,6 +942,20 @@ mod tests {
                 "codex",
                 1_700_000_000_000,
             ))),
+            active_requests,
+        }
+    }
+
+    fn active_request_start(trace_id: &str) -> ActiveRequestStart {
+        ActiveRequestStart {
+            trace_id: trace_id.to_string(),
+            cli_key: "codex".to_string(),
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            query: None,
+            session_id: Some("sess-usage-tee-drain".to_string()),
+            requested_model: Some("gpt-5".to_string()),
+            created_at_ms: 1_700_000_000_000,
         }
     }
 
@@ -941,6 +976,26 @@ mod tests {
         assert!(tracker.observe_chunk_at(31_000));
         assert!(!tracker.observe_chunk_at(45_000));
         assert!(tracker.observe_chunk_at(61_000));
+    }
+
+    #[test]
+    fn spawn_touch_activity_updates_active_registry_immediately() {
+        let app = tauri::test::mock_app();
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("usage-tee-touch.sqlite"))
+            .expect("init test db");
+        let (log_tx, _log_rx) = tokio::sync::mpsc::channel(4);
+        let active_requests = Arc::new(ActiveRequestRegistry::default());
+        active_requests.register(active_request_start("trace-usage-tee-drain"));
+        let ctx =
+            test_stream_finalize_ctx(app.handle().clone(), db, log_tx, active_requests.clone());
+
+        spawn_touch_activity(&ctx, 1_700_000_045_000, None);
+
+        assert_eq!(
+            active_requests.snapshot()[0].last_activity_ms,
+            1_700_000_045_000
+        );
     }
 
     #[test]
@@ -1222,7 +1277,9 @@ mod tests {
         let db = db::init_for_tests(&db_dir.path().join("usage-tee-drain.sqlite"))
             .expect("init test db");
         let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
-        let ctx = test_stream_finalize_ctx(app_handle, db, log_tx);
+        let active_requests = Arc::new(ActiveRequestRegistry::default());
+        active_requests.register(active_request_start("trace-usage-tee-drain"));
+        let ctx = test_stream_finalize_ctx(app_handle, db, log_tx, active_requests.clone());
         let (upstream_tx, upstream_rx) =
             tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(4);
 
@@ -1275,5 +1332,125 @@ mod tests {
             .special_settings_json
             .as_deref()
             .is_some_and(|value| value.contains("\"client_abort\"")));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn stream_idle_timeout_fires_after_configured_silence() {
+        let app = tauri::test::mock_app();
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("usage-tee-idle-timeout.sqlite"))
+            .expect("init test db");
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let active_requests = Arc::new(ActiveRequestRegistry::default());
+        active_requests.register(active_request_start("trace-usage-tee-drain"));
+        let ctx = test_stream_finalize_ctx(app.handle().clone(), db, log_tx, active_requests);
+        let (upstream_tx, upstream_rx) =
+            tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(4);
+
+        let body = spawn_usage_sse_relay_body(
+            RelayBodyStream::new(upstream_rx),
+            ctx,
+            Some(Duration::from_millis(500)),
+            None,
+        );
+        let mut body_stream = body.into_data_stream();
+
+        // Chunk gaps (100ms) are below the idle window (500ms) but sum above
+        // it: all chunks arriving proves each chunk resets the timer. The 5x
+        // margin absorbs scheduler hiccups on loaded CI runners; tokio::time
+        // pause is not an option because the request log is delivered from
+        // tauri's separate real-time runtime.
+        for _ in 0..3 {
+            upstream_tx
+                .send(Ok(Bytes::from_static(
+                    b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n",
+                )))
+                .await
+                .expect("send output chunk");
+            let chunk = tokio::time::timeout(Duration::from_secs(1), next_item(&mut body_stream))
+                .await
+                .expect("output chunk should arrive")
+                .expect("body should yield output chunk")
+                .expect("output chunk should be ok");
+            assert!(chunk.as_ref().starts_with(b"data:"));
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        // Upstream goes silent without closing; downstream stays connected.
+        // The idle timeout must end the body stream.
+        let end = tokio::time::timeout(Duration::from_secs(2), next_item(&mut body_stream))
+            .await
+            .expect("idle timeout should end the body stream");
+        assert!(end.is_none());
+
+        let log = tokio::time::timeout(Duration::from_secs(2), log_rx.recv())
+            .await
+            .expect("request log should be enqueued")
+            .expect("request log channel should stay open");
+        assert_eq!(
+            log.error_code,
+            Some(GatewayErrorCode::StreamIdleTimeout.as_str().to_string())
+        );
+        drop(upstream_tx);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn stream_idle_timeout_disabled_keeps_stream_open() {
+        let app = tauri::test::mock_app();
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("usage-tee-idle-disabled.sqlite"))
+            .expect("init test db");
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let active_requests = Arc::new(ActiveRequestRegistry::default());
+        active_requests.register(active_request_start("trace-usage-tee-drain"));
+        let ctx = test_stream_finalize_ctx(app.handle().clone(), db, log_tx, active_requests);
+        let (upstream_tx, upstream_rx) =
+            tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(4);
+
+        let body = spawn_usage_sse_relay_body(RelayBodyStream::new(upstream_rx), ctx, None, None);
+        let mut body_stream = body.into_data_stream();
+
+        upstream_tx
+            .send(Ok(Bytes::from_static(
+                b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n",
+            )))
+            .await
+            .expect("send first output chunk");
+        let first = tokio::time::timeout(Duration::from_secs(1), next_item(&mut body_stream))
+            .await
+            .expect("first output chunk should arrive")
+            .expect("body should yield first output")
+            .expect("first output should be ok");
+        assert!(first.as_ref().starts_with(b"data:"));
+
+        // Silence longer than any small idle window; disabled timeout must not
+        // interrupt the stream.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        upstream_tx
+            .send(Ok(Bytes::from_static(
+                b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"world\"}\n\n",
+            )))
+            .await
+            .expect("send second output chunk");
+        let second = tokio::time::timeout(Duration::from_secs(1), next_item(&mut body_stream))
+            .await
+            .expect("second output chunk should arrive")
+            .expect("body should yield second output")
+            .expect("second output should be ok");
+        assert!(second.as_ref().starts_with(b"data:"));
+
+        // Let the stream end normally.
+        drop(upstream_tx);
+        let end = tokio::time::timeout(Duration::from_secs(1), next_item(&mut body_stream))
+            .await
+            .expect("body stream should end after upstream closes");
+        assert!(end.is_none());
+
+        let log = tokio::time::timeout(Duration::from_secs(2), log_rx.recv())
+            .await
+            .expect("request log should be enqueued")
+            .expect("request log channel should stay open");
+        assert_eq!(log.error_code, None);
     }
 }

@@ -4,6 +4,9 @@ pub(crate) const CODEX_CLI_ORIGINATOR: &str = "codex_cli_rs";
 pub(crate) const CODEX_CLI_USER_AGENT: &str = "codex_cli_rs/0.137.0";
 
 pub(crate) const CLAUDE_CODE_USER_AGENT: &str = "claude-code/2.1.168";
+/// UA for Anthropic OAuth token exchange/refresh requests (Claude Code performs
+/// these via axios; sending a codex UA to this endpoint is a fingerprint mismatch).
+pub(crate) const CLAUDE_OAUTH_TOKEN_USER_AGENT: &str = "axios/1.13.6";
 pub(crate) const CLAUDE_STAINLESS_PACKAGE_VERSION: &str = "0.70.0";
 pub(crate) const CLAUDE_STAINLESS_RUNTIME: &str = "node";
 pub(crate) const CLAUDE_STAINLESS_LANG: &str = "js";

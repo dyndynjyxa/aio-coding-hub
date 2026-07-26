@@ -12,7 +12,7 @@ fn closed_to_open_after_threshold() {
     let pid = 1;
     let now = 1_000;
     for i in 1..=DEFAULT_FAILURE_THRESHOLD {
-        let change = cb.record_failure(pid, now + i as i64);
+        let change = cb.record_failure(pid, now + i as i64, None);
         if i < DEFAULT_FAILURE_THRESHOLD {
             assert_eq!(change.after.state, CircuitState::Closed);
         }
@@ -29,7 +29,7 @@ fn open_expires_to_half_open() {
     let pid = 1;
     let now = 1_000;
     for i in 1..=DEFAULT_FAILURE_THRESHOLD {
-        cb.record_failure(pid, now + i as i64);
+        cb.record_failure(pid, now + i as i64, None);
     }
 
     let snap = cb.snapshot(pid, now + 10);
@@ -52,7 +52,7 @@ fn half_open_one_success_stays_half_open() {
     let pid = 1;
     let now = 1_000;
     for i in 1..=DEFAULT_FAILURE_THRESHOLD {
-        cb.record_failure(pid, now + i as i64);
+        cb.record_failure(pid, now + i as i64, None);
     }
 
     let open_until = cb.snapshot(pid, now + 10).open_until.expect("open_until");
@@ -69,7 +69,7 @@ fn half_open_two_successes_stays_half_open() {
     let pid = 1;
     let now = 1_000;
     for i in 1..=DEFAULT_FAILURE_THRESHOLD {
-        cb.record_failure(pid, now + i as i64);
+        cb.record_failure(pid, now + i as i64, None);
     }
 
     let open_until = cb.snapshot(pid, now + 10).open_until.expect("open_until");
@@ -87,7 +87,7 @@ fn half_open_three_successes_transitions_to_closed() {
     let pid = 1;
     let now = 1_000;
     for i in 1..=DEFAULT_FAILURE_THRESHOLD {
-        cb.record_failure(pid, now + i as i64);
+        cb.record_failure(pid, now + i as i64, None);
     }
 
     let open_until = cb.snapshot(pid, now + 10).open_until.expect("open_until");
@@ -111,7 +111,7 @@ fn half_open_two_successes_then_failure_resets_to_open() {
     let pid = 1;
     let now = 1_000;
     for i in 1..=DEFAULT_FAILURE_THRESHOLD {
-        cb.record_failure(pid, now + i as i64);
+        cb.record_failure(pid, now + i as i64, None);
     }
 
     let open_until = cb.snapshot(pid, now + 10).open_until.expect("open_until");
@@ -119,7 +119,7 @@ fn half_open_two_successes_then_failure_resets_to_open() {
 
     cb.record_success(pid, open_until + 1);
     cb.record_success(pid, open_until + 2);
-    let change = cb.record_failure(pid, open_until + 3);
+    let change = cb.record_failure(pid, open_until + 3, None);
     assert_eq!(change.after.state, CircuitState::Open);
     assert!(change.after.open_until.is_some());
     assert!(change.transition.is_some());
@@ -146,13 +146,13 @@ fn half_open_failure_transitions_back_to_open() {
     let pid = 1;
     let now = 1_000;
     for i in 1..=DEFAULT_FAILURE_THRESHOLD {
-        cb.record_failure(pid, now + i as i64);
+        cb.record_failure(pid, now + i as i64, None);
     }
 
     let open_until = cb.snapshot(pid, now + 10).open_until.expect("open_until");
     cb.should_allow(pid, open_until); // transitions to HalfOpen
 
-    let change = cb.record_failure(pid, open_until + 1);
+    let change = cb.record_failure(pid, open_until + 1, None);
     assert_eq!(change.after.state, CircuitState::Open);
     assert!(change.after.open_until.is_some());
     assert!(change.transition.is_some());
@@ -167,7 +167,7 @@ fn success_clears_failure_timestamps() {
     let cb = breaker();
     let pid = 1;
     let now = 1_000;
-    cb.record_failure(pid, now);
+    cb.record_failure(pid, now, None);
     let before = cb.snapshot(pid, now + 1);
     assert_eq!(before.failure_count, 1);
 
@@ -191,15 +191,15 @@ fn failures_within_window_counted_correctly() {
     let now = 1_000;
 
     // Record 2 failures within the window
-    cb.record_failure(pid, now);
-    cb.record_failure(pid, now + 10);
+    cb.record_failure(pid, now, None);
+    cb.record_failure(pid, now + 10, None);
 
     let snap = cb.snapshot(pid, now + 20);
     assert_eq!(snap.state, CircuitState::Closed);
     assert_eq!(snap.failure_count, 2);
 
     // Third failure within window trips the breaker
-    let change = cb.record_failure(pid, now + 20);
+    let change = cb.record_failure(pid, now + 20, None);
     assert_eq!(change.after.state, CircuitState::Open);
 }
 
@@ -217,8 +217,8 @@ fn failures_older_than_window_not_counted() {
     let now: i64 = 1_000;
 
     // Record 2 failures
-    cb.record_failure(pid, now);
-    cb.record_failure(pid, now + 1);
+    cb.record_failure(pid, now, None);
+    cb.record_failure(pid, now + 1, None);
 
     // Jump forward past the window (300s)
     let later = now + (FAILURE_WINDOW_SECS as i64) + 10;
@@ -228,17 +228,17 @@ fn failures_older_than_window_not_counted() {
     assert_eq!(snap.failure_count, 0);
 
     // Need 3 fresh failures to trip, not 1
-    cb.record_failure(pid, later);
+    cb.record_failure(pid, later, None);
     let snap = cb.snapshot(pid, later + 1);
     assert_eq!(snap.state, CircuitState::Closed);
     assert_eq!(snap.failure_count, 1);
 
-    cb.record_failure(pid, later + 2);
+    cb.record_failure(pid, later + 2, None);
     let snap = cb.snapshot(pid, later + 3);
     assert_eq!(snap.state, CircuitState::Closed);
     assert_eq!(snap.failure_count, 2);
 
-    let change = cb.record_failure(pid, later + 3);
+    let change = cb.record_failure(pid, later + 3, None);
     assert_eq!(change.after.state, CircuitState::Open);
 }
 
@@ -256,7 +256,7 @@ fn should_allow_prunes_expired_closed_failures_and_removes_inert_entry() {
     let provider_id = 1;
     let now = 1_000;
 
-    cb.record_failure(provider_id, now);
+    cb.record_failure(provider_id, now, None);
     let _ = rx.try_recv().expect("failure state persisted");
     assert_eq!(cb.health.lock().expect("health lock").len(), 1);
 
@@ -287,8 +287,8 @@ fn persist_queue_full_keeps_latest_state_in_bounded_backlog_and_flushes_later() 
     );
     let now = 1_000;
 
-    cb.record_failure(1, now);
-    cb.record_failure(2, now);
+    cb.record_failure(1, now, None);
+    cb.record_failure(2, now, None);
 
     {
         let backlog = cb.persist_backlog.lock().expect("backlog lock");
@@ -298,7 +298,7 @@ fn persist_queue_full_keeps_latest_state_in_bounded_backlog_and_flushes_later() 
     let first = rx.try_recv().expect("first state queued");
     assert_eq!(first.provider_id, 1);
 
-    cb.record_failure(3, now);
+    cb.record_failure(3, now, None);
 
     let flushed = rx.try_recv().expect("backlog state flushed first");
     assert_eq!(flushed.provider_id, 2);
@@ -321,8 +321,8 @@ async fn persist_backlog_flushes_in_background_without_future_state_changes() {
     );
     let now = 1_000;
 
-    cb.record_failure(1, now);
-    cb.record_failure(2, now);
+    cb.record_failure(1, now, None);
+    cb.record_failure(2, now, None);
 
     {
         let backlog = cb.persist_backlog.lock().expect("backlog lock");
@@ -355,9 +355,9 @@ async fn persist_backlog_background_flush_sends_latest_state_after_waiting_for_c
     );
     let now = 1_000;
 
-    cb.record_failure(1, now);
-    cb.record_failure(2, now);
-    cb.record_failure(2, now + 1);
+    cb.record_failure(1, now, None);
+    cb.record_failure(2, now, None);
+    cb.record_failure(2, now + 1, None);
 
     let first = rx.recv().await.expect("first state queued");
     assert_eq!(first.provider_id, 1);
@@ -397,7 +397,7 @@ fn persist_backlog_flushes_oldest_updated_state_first() {
         Some(tx),
     );
 
-    cb.record_failure(1, 1_000);
+    cb.record_failure(1, 1_000, None);
     {
         let mut backlog = cb.persist_backlog.lock().expect("backlog lock");
         backlog.insert(3, persisted_state(3, 3_000));
@@ -407,7 +407,7 @@ fn persist_backlog_flushes_oldest_updated_state_first() {
     let first = rx.try_recv().expect("first state queued");
     assert_eq!(first.provider_id, 1);
 
-    cb.record_failure(4, 4_000);
+    cb.record_failure(4, 4_000, None);
 
     let flushed = rx.try_recv().expect("oldest backlog state flushed first");
     assert_eq!(flushed.provider_id, 2);
@@ -447,7 +447,7 @@ fn reset_clears_open_and_cooldown() {
     let pid = 1;
     let now = 1_000;
     for i in 1..=DEFAULT_FAILURE_THRESHOLD {
-        cb.record_failure(pid, now + i as i64);
+        cb.record_failure(pid, now + i as i64, None);
     }
 
     let open = cb.snapshot(pid, now + 10);
@@ -469,7 +469,7 @@ fn reset_clears_half_open() {
     let pid = 1;
     let now = 1_000;
     for i in 1..=DEFAULT_FAILURE_THRESHOLD {
-        cb.record_failure(pid, now + i as i64);
+        cb.record_failure(pid, now + i as i64, None);
     }
 
     let open_until = cb.snapshot(pid, now + 10).open_until.expect("open_until");
@@ -491,7 +491,7 @@ fn update_config_recalculates_open_until() {
 
     // Trip the circuit breaker
     for i in 1..=DEFAULT_FAILURE_THRESHOLD {
-        cb.record_failure(pid, now + i as i64);
+        cb.record_failure(pid, now + i as i64, None);
     }
 
     let snap = cb.snapshot(pid, now + 10);
@@ -540,7 +540,7 @@ fn failure_timestamps_capped_at_max() {
 
     // Record more failures than the hard cap, all within the window
     for i in 0..(MAX_FAILURE_TIMESTAMPS + 50) {
-        cb.record_failure(pid, now + i as i64);
+        cb.record_failure(pid, now + i as i64, None);
     }
 
     let snap = cb.snapshot(pid, now + (MAX_FAILURE_TIMESTAMPS + 50) as i64);
@@ -584,7 +584,7 @@ fn reset_removes_runtime_health_entry_after_failure() {
     let provider_id = 1;
     let now = 1_000;
 
-    cb.record_failure(provider_id, now);
+    cb.record_failure(provider_id, now, None);
     assert_eq!(cb.health.lock().expect("health lock").len(), 1);
 
     let reset = cb.reset(provider_id, now + 1);
@@ -646,12 +646,69 @@ fn update_config_new_failures_use_new_duration() {
     });
 
     // Trip the circuit
-    cb.record_failure(pid, now);
-    cb.record_failure(pid, now + 1);
+    cb.record_failure(pid, now, None);
+    cb.record_failure(pid, now + 1, None);
 
     let snap = cb.snapshot(pid, now + 2);
     assert_eq!(snap.state, CircuitState::Open);
     // open_until should use the new 30s duration, not the original 600s
     let open_until = snap.open_until.expect("open_until");
     assert_eq!(open_until, (now + 1) + 30);
+}
+
+#[test]
+fn record_failure_remembers_trigger_error_code_until_closed() {
+    let cb = breaker();
+    let pid = 1;
+    let now = 1_000;
+
+    // Attributed failures trip the circuit and remember the trigger.
+    for i in 1..=DEFAULT_FAILURE_THRESHOLD {
+        cb.record_failure(pid, now + i as i64, Some("GW_UPSTREAM_TIMEOUT"));
+    }
+    let snap = cb.snapshot(pid, now + 10);
+    assert_eq!(snap.state, CircuitState::Open);
+    assert_eq!(snap.last_trigger_error_code, Some("GW_UPSTREAM_TIMEOUT"));
+
+    // Recover: Open -> HalfOpen keeps the trigger for attribution.
+    let open_until = snap.open_until.expect("open_until");
+    let check = cb.should_allow(pid, open_until);
+    assert_eq!(check.after.state, CircuitState::HalfOpen);
+    assert_eq!(
+        check.after.last_trigger_error_code,
+        Some("GW_UPSTREAM_TIMEOUT")
+    );
+
+    // HalfOpen -> Closed clears the trigger (no longer meaningful).
+    cb.record_success(pid, open_until + 1);
+    cb.record_success(pid, open_until + 2);
+    let change = cb.record_success(pid, open_until + 3);
+    assert_eq!(change.after.state, CircuitState::Closed);
+    assert_eq!(change.after.last_trigger_error_code, None);
+}
+
+#[test]
+fn unattributed_failure_keeps_known_trigger_error_code() {
+    let cb = breaker();
+    let pid = 1;
+    let now = 1_000;
+
+    cb.record_failure(pid, now, Some("GW_UPSTREAM_5XX"));
+    let change = cb.record_failure(pid, now + 1, None);
+    assert_eq!(
+        change.after.last_trigger_error_code,
+        Some("GW_UPSTREAM_5XX")
+    );
+}
+
+#[test]
+fn closed_success_clears_trigger_error_code() {
+    let cb = breaker();
+    let pid = 1;
+    let now = 1_000;
+
+    cb.record_failure(pid, now, Some("GW_UPSTREAM_5XX"));
+    let change = cb.record_success(pid, now + 1);
+    assert_eq!(change.after.state, CircuitState::Closed);
+    assert_eq!(change.after.last_trigger_error_code, None);
 }

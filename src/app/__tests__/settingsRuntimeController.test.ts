@@ -5,11 +5,16 @@ import {
   type SettingsRuntimeSnapshot,
 } from "../settingsRuntimeController";
 import { setCacheAnomalyMonitorEnabled } from "../../services/gateway/cacheAnomalyMonitor";
+import { setCircuitBreakerNoticeEnabled } from "../../services/gateway/circuitNotice";
 import { setNotificationSoundEnabled } from "../../services/notification/notificationSound";
 import { setTaskCompleteNotifyEnabled } from "../../services/notification/taskCompleteNotifyEvents";
 
 vi.mock("../../services/gateway/cacheAnomalyMonitor", () => ({
   setCacheAnomalyMonitorEnabled: vi.fn(),
+}));
+
+vi.mock("../../services/gateway/circuitNotice", () => ({
+  setCircuitBreakerNoticeEnabled: vi.fn(),
 }));
 
 vi.mock("../../services/notification/notificationSound", () => ({
@@ -24,6 +29,7 @@ const runtimeSnapshot: SettingsRuntimeSnapshot = {
   enableCacheAnomalyMonitor: true,
   enableTaskCompleteNotify: false,
   enableNotificationSound: true,
+  enableCircuitBreakerNotice: true,
 };
 
 describe("app/settingsRuntimeController", () => {
@@ -36,6 +42,7 @@ describe("app/settingsRuntimeController", () => {
       enable_cache_anomaly_monitor: true,
       enable_task_complete_notify: false,
       enable_notification_sound: true,
+      enable_circuit_breaker_notice: true,
     } as any);
     applySettingsRuntimeSnapshot({ ...runtimeSnapshot });
 
@@ -45,6 +52,8 @@ describe("app/settingsRuntimeController", () => {
     expect(setTaskCompleteNotifyEnabled).toHaveBeenCalledWith(false);
     expect(setNotificationSoundEnabled).toHaveBeenCalledTimes(1);
     expect(setNotificationSoundEnabled).toHaveBeenCalledWith(true);
+    expect(setCircuitBreakerNoticeEnabled).toHaveBeenCalledTimes(1);
+    expect(setCircuitBreakerNoticeEnabled).toHaveBeenCalledWith(true);
   });
 
   it("ignores empty settings and reapplies after reset", () => {
@@ -59,6 +68,7 @@ describe("app/settingsRuntimeController", () => {
     expect(setCacheAnomalyMonitorEnabled).toHaveBeenCalledTimes(2);
     expect(setTaskCompleteNotifyEnabled).toHaveBeenCalledTimes(2);
     expect(setNotificationSoundEnabled).toHaveBeenCalledTimes(2);
+    expect(setCircuitBreakerNoticeEnabled).toHaveBeenCalledTimes(2);
   });
 
   it("applies changes when any runtime value differs", () => {
@@ -66,10 +76,12 @@ describe("app/settingsRuntimeController", () => {
     applySettingsRuntimeSnapshot({
       ...runtimeSnapshot,
       enableNotificationSound: false,
+      enableCircuitBreakerNotice: false,
     });
 
     expect(setCacheAnomalyMonitorEnabled).toHaveBeenLastCalledWith(true);
     expect(setTaskCompleteNotifyEnabled).toHaveBeenLastCalledWith(false);
     expect(setNotificationSoundEnabled).toHaveBeenLastCalledWith(false);
+    expect(setCircuitBreakerNoticeEnabled).toHaveBeenLastCalledWith(false);
   });
 });

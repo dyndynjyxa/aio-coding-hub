@@ -283,7 +283,9 @@ describe("pages/providers/ProvidersView", () => {
     renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
 
     expect(screen.getByRole("button", { name: "解除熔断（全部）" })).toBeInTheDocument();
-    expect(screen.getByText(/^熔断\s*00:30$/)).toBeInTheDocument();
+    // 冷却正名：卡片显示“冷却中”而非“熔断”。
+    expect(screen.getByText(/^冷却中\s*00:30$/)).toBeInTheDocument();
+    expect(screen.queryByText(/^熔断\s*00:30$/)).not.toBeInTheDocument();
   });
 
   it("does not show reset-all visibility for HALF_OPEN probe state", () => {
@@ -330,8 +332,10 @@ describe("pages/providers/ProvidersView", () => {
 
     renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
 
+    // 仅半开：全局“解除熔断（全部）”不显示，但卡片级徽章与解除按钮可见。
     expect(screen.queryByRole("button", { name: "解除熔断（全部）" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "解除熔断" })).not.toBeInTheDocument();
+    expect(screen.getByText("试探恢复中")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "解除熔断" })).toBeInTheDocument();
   });
 
   it("shows cx2cc source provider name on claude cards", () => {

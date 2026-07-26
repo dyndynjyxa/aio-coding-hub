@@ -26,6 +26,22 @@ fn keywords_for_cli(cli_key: &str) -> Vec<&'static str> {
     }
 }
 
+fn variable_matches_cli(cli_key: &str, var_name_upper: &str) -> bool {
+    if cli_key == "grok" {
+        return matches!(
+            var_name_upper,
+            "GROK_MODELS_BASE_URL"
+                | "XAI_API_KEY"
+                | "GROK_CODE_XAI_API_KEY"
+                | "GROK_WEB_SEARCH_MODEL"
+        );
+    }
+
+    keywords_for_cli(cli_key)
+        .iter()
+        .any(|keyword| var_name_upper.contains(keyword))
+}
+
 fn conflict_dedupe_key(conflict: &EnvConflict) -> String {
     let var_name = conflict.var_name.trim().to_ascii_uppercase();
     let source_path = if conflict.source_type == "file" {
@@ -50,7 +66,7 @@ fn strip_trailing_line_number(source_path: &str) -> &str {
 #[cfg(not(target_os = "windows"))]
 fn check_shell_configs<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
-    keywords: &[&str],
+    cli_key: &str,
     out: &mut Vec<EnvConflict>,
     seen: &mut HashSet<String>,
 ) -> crate::shared::error::AppResult<()> {
@@ -102,7 +118,7 @@ fn check_shell_configs<R: tauri::Runtime>(
             }
 
             let var_name_upper = var_name.to_ascii_uppercase();
-            if !keywords.iter().any(|k| var_name_upper.contains(k)) {
+            if !variable_matches_cli(cli_key, &var_name_upper) {
                 continue;
             }
 
@@ -126,7 +142,6 @@ pub fn check_env_conflicts<R: tauri::Runtime>(
     cli_key: &str,
 ) -> crate::shared::error::AppResult<Vec<EnvConflict>> {
     validate_cli_key(cli_key)?;
-    let keywords = keywords_for_cli(cli_key);
 
     let mut out = Vec::new();
     let mut seen = HashSet::<String>::new();
@@ -134,7 +149,7 @@ pub fn check_env_conflicts<R: tauri::Runtime>(
     for (key, _value) in std::env::vars_os() {
         let key = key.to_string_lossy().into_owned();
         let key_upper = key.to_ascii_uppercase();
-        if !keywords.iter().any(|k| key_upper.contains(k)) {
+        if !variable_matches_cli(cli_key, &key_upper) {
             continue;
         }
 
@@ -152,7 +167,7 @@ pub fn check_env_conflicts<R: tauri::Runtime>(
     let _ = &app;
 
     #[cfg(not(target_os = "windows"))]
-    check_shell_configs(app, &keywords, &mut out, &mut seen)?;
+    check_shell_configs(app, cli_key, &mut out, &mut seen)?;
 
     out.sort_by(|a, b| {
         let a_type = a.source_type.as_str();
@@ -176,6 +191,34 @@ pub fn check_env_conflicts<R: tauri::Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::test_env_lock;
+    use std::ffi::OsString;
+
+    struct EnvRestore(Vec<(&'static str, Option<OsString>)>);
+
+    impl EnvRestore {
+        fn set(keys: &[&'static str]) -> Self {
+            let saved = keys
+                .iter()
+                .map(|key| (*key, std::env::var_os(key)))
+                .collect();
+            for key in keys {
+                std::env::set_var(key, "test-value");
+            }
+            Self(saved)
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (key, value) in self.0.drain(..).rev() {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
 
     #[test]
     fn dedupe_key_for_file_strips_line_number() {
@@ -203,5 +246,47 @@ mod tests {
             conflict_dedupe_key(&conflict),
             "ANTHROPIC_API_KEY|system|Process Environment"
         );
+    }
+
+    #[test]
+    fn grok_conflicts_match_only_inference_relevant_exact_variable_names() {
+        let _lock = test_env_lock();
+        let expected = [
+            "GROK_MODELS_BASE_URL",
+            "XAI_API_KEY",
+            "GROK_CODE_XAI_API_KEY",
+            "GROK_WEB_SEARCH_MODEL",
+        ];
+        let ignored = [
+            "GROK_HOME",
+            "GROK_TELEMETRY_ENABLED",
+            "GROK_LOG_FILE",
+            "MY_XAI_API_KEY_BACKUP",
+            "GROK_MODELS_BASE_URL_BACKUP",
+        ];
+        let keys = expected
+            .iter()
+            .chain(ignored.iter())
+            .copied()
+            .collect::<Vec<_>>();
+        let _restore = EnvRestore::set(&keys);
+        let app = tauri::test::mock_app();
+
+        let conflicts = check_env_conflicts(app.handle(), "grok").expect("check conflicts");
+        let process_vars = conflicts
+            .iter()
+            .filter(|conflict| conflict.source_type == "system")
+            .map(|conflict| conflict.var_name.as_str())
+            .collect::<HashSet<_>>();
+
+        for key in expected {
+            assert!(
+                process_vars.contains(key),
+                "missing expected conflict {key}"
+            );
+        }
+        for key in ignored {
+            assert!(!process_vars.contains(key), "unexpected conflict {key}");
+        }
     }
 }

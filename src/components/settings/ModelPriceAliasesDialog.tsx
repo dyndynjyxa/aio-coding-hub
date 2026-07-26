@@ -4,7 +4,7 @@
 
 import { useCallback, useId, useMemo, useState, type SetStateAction } from "react";
 import { toast } from "sonner";
-import { CLI_SHORT_ITEMS } from "../../constants/clis";
+import { cliShortItemsWith } from "../../constants/clis";
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
 import { Input } from "../../ui/Input";
@@ -22,6 +22,8 @@ import {
   useModelPriceAliasesSetMutation,
   useModelPricesListQuery,
 } from "../../query/modelPrices";
+
+const PRICING_CLI_SHORT_ITEMS = cliShortItemsWith("pricing");
 
 const MATCH_TYPE_ITEMS: Array<{ key: ModelPriceAliasMatchType; label: string }> = [
   { key: "exact", label: "精确 (exact)" },
@@ -103,7 +105,7 @@ function ModelPriceAliasesToolbar({
         <span className="text-muted-foreground">|</span>
         <span>
           模型数：Claude {modelCountsByCli.claude} · Codex {modelCountsByCli.codex} · Gemini{" "}
-          {modelCountsByCli.gemini}
+          {modelCountsByCli.gemini} · Grok {modelCountsByCli.grok}
         </span>
       </div>
       <div className="flex items-center gap-2">
@@ -138,6 +140,13 @@ function ModelPriceAliasesDatalists({ modelsByCli }: { modelsByCli: Record<CliKe
       <datalist id={modelsDatalistId("gemini")}>
         {modelsByCli.gemini.map((m) => (
           <option key={`gemini:${m}`} value={m}>
+            {m}
+          </option>
+        ))}
+      </datalist>
+      <datalist id={modelsDatalistId("grok")}>
+        {modelsByCli.grok.map((m) => (
+          <option key={`grok:${m}`} value={m}>
             {m}
           </option>
         ))}
@@ -275,7 +284,7 @@ function ModelPriceAliasRuleCard({
             onChange={(e) => updateRule(index, { cli_key: e.currentTarget.value as CliKey })}
             disabled={saving}
           >
-            {CLI_SHORT_ITEMS.map((it) => (
+            {PRICING_CLI_SHORT_ITEMS.map((it) => (
               <option key={it.key} value={it.key}>
                 {it.label}
               </option>
@@ -459,6 +468,7 @@ export function ModelPriceAliasesDialog({
   const claudeModelsQuery = useModelPricesListQuery("claude", { enabled: open });
   const codexModelsQuery = useModelPricesListQuery("codex", { enabled: open });
   const geminiModelsQuery = useModelPricesListQuery("gemini", { enabled: open });
+  const grokModelsQuery = useModelPricesListQuery("grok", { enabled: open });
   const aliasesSetMutation = useModelPriceAliasesSetMutation();
 
   const saving = aliasesSetMutation.isPending;
@@ -466,15 +476,17 @@ export function ModelPriceAliasesDialog({
     aliasesQuery.isFetching ||
     claudeModelsQuery.isFetching ||
     codexModelsQuery.isFetching ||
-    geminiModelsQuery.isFetching;
+    geminiModelsQuery.isFetching ||
+    grokModelsQuery.isFetching;
 
   const modelsByCli = useMemo(
     () => ({
       claude: (claudeModelsQuery.data ?? []).map((row) => row.model),
       codex: (codexModelsQuery.data ?? []).map((row) => row.model),
       gemini: (geminiModelsQuery.data ?? []).map((row) => row.model),
+      grok: (grokModelsQuery.data ?? []).map((row) => row.model),
     }),
-    [claudeModelsQuery.data, codexModelsQuery.data, geminiModelsQuery.data]
+    [claudeModelsQuery.data, codexModelsQuery.data, geminiModelsQuery.data, grokModelsQuery.data]
   );
 
   const modelCountsByCli = useMemo(
@@ -482,6 +494,7 @@ export function ModelPriceAliasesDialog({
       claude: modelsByCli.claude.length,
       codex: modelsByCli.codex.length,
       gemini: modelsByCli.gemini.length,
+      grok: modelsByCli.grok.length,
     }),
     [modelsByCli]
   );
@@ -492,8 +505,9 @@ export function ModelPriceAliasesDialog({
       claudeModelsQuery.refetch(),
       codexModelsQuery.refetch(),
       geminiModelsQuery.refetch(),
+      grokModelsQuery.refetch(),
     ]);
-  }, [aliasesQuery, claudeModelsQuery, codexModelsQuery, geminiModelsQuery]);
+  }, [aliasesQuery, claudeModelsQuery, codexModelsQuery, geminiModelsQuery, grokModelsQuery]);
 
   const sourceAliases = open ? (aliasesQuery.data ?? null) : null;
   let effectiveAliasesState = aliasesState;

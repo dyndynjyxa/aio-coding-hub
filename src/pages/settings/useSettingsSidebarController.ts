@@ -4,7 +4,7 @@ import type { UpdateMeta } from "../../hooks/useUpdateMeta";
 import { AIO_RELEASES_URL } from "../../constants/urls";
 import { runBackgroundTask } from "../../services/backgroundTasks";
 import type { ConfigImportResult } from "../../services/app/configMigrate";
-import { appDataDirGet, appDataReset, appExit } from "../../services/app/dataManagement";
+import { appDataDirGet, appDataReset, appExit, dbCompact } from "../../services/app/dataManagement";
 import type { ClearRequestLogsResult } from "../../services/app/dataManagement";
 import { openDesktopSinglePath, saveDesktopFilePath } from "../../services/desktop/dialog";
 import { openDesktopPath, openDesktopUrl } from "../../services/desktop/opener";
@@ -17,6 +17,7 @@ import { useModelPricesUpdatedSubscription } from "../../query/modelPrices";
 import {
   presentConfigExported,
   presentConfigImported,
+  presentDbCompacted,
   presentModelPricesSynced,
   presentRequestLogsCleared,
   presentResetAllSuccess,
@@ -88,6 +89,8 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
   const [importingConfig, setImportingConfig] = useState(false);
   const syncingModelPricesRef = useRef(false);
   const [syncingModelPrices, setSyncingModelPrices] = useState(false);
+  const compactingDbRef = useRef(false);
+  const [compactingDb, setCompactingDb] = useState(false);
   const [lastModelPricesSyncState, setLastModelPricesSyncState] = useState(() => {
     const initialSync = getLastModelPricesSync();
     return {
@@ -200,6 +203,34 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
       setClearingRequestLogs(false);
     }
   }, [clearRequestLogsMutation]);
+
+  const compactDb = useCallback(async () => {
+    if (compactingDbRef.current) {
+      return;
+    }
+
+    compactingDbRef.current = true;
+    setCompactingDb(true);
+
+    try {
+      const result = await dbCompact();
+      if (!result) {
+        return;
+      }
+
+      presentDbCompacted(result);
+      await refreshDbDiskUsage();
+    } catch (error) {
+      presentSettingsSidebarFailure({
+        logTitle: "压缩数据库失败",
+        toastMessage: "压缩数据库失败：请稍后重试",
+        error,
+      });
+    } finally {
+      compactingDbRef.current = false;
+      setCompactingDb(false);
+    }
+  }, [refreshDbDiskUsage]);
 
   const resetAllData = useCallback(async () => {
     if (resettingAllRef.current) {
@@ -431,6 +462,8 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
     refreshDbDiskUsage: refreshDbDiskUsageAction,
     openClearRequestLogsDialog,
     openResetAllDialog,
+    compactDb,
+    compactingDb,
     exportConfig,
     openConfigImport,
     syncModelPrices,

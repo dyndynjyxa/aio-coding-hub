@@ -1,6 +1,6 @@
 [package]
 name = "aio-coding-hub"
-version = "0.60.3"
+version = "0.60.15"
 description = "AIO Coding Hub"
 authors = ["dyndynjyxa"]
 edition = "2021"
@@ -23,13 +23,14 @@ doctest = false
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri = { version = "2", features = ["tray-icon", "image-png", "protocol-asset"] }
 tauri-plugin-opener = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-fs = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
+toml_edit = "0.23.10"
 sha2 = "0.10"
 base64 = "0.22"
 ed25519-dalek = "2"
@@ -40,7 +41,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "proces
 rusqlite = { version = "0.31", features = ["bundled"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.24"
-reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls-native-roots", "stream", "socks", "macos-system-configuration"] }
+reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls-native-roots", "stream", "socks", "macos-system-configuration", "multipart"] }
 if-addrs = "0.13"
 hostname = "0.4"
 futures-core = "0.3"
@@ -68,7 +69,7 @@ tauri-plugin-notification = "2"
 tauri-plugin-window-state = "2"
 
 [target."cfg(windows)".dependencies]
-windows-sys = { version = "0.59", features = ["Win32_System_Registry", "Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
 junction = "1"
 
 [dev-dependencies]

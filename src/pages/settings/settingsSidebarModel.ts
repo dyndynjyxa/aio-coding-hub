@@ -1,6 +1,7 @@
 import type { ConfigImportResult } from "../../services/app/configMigrate";
-import type { ClearRequestLogsResult } from "../../services/app/dataManagement";
+import type { ClearRequestLogsResult, DbCompactResult } from "../../services/app/dataManagement";
 import type { ModelPricesSyncReport } from "../../services/usage/modelPrices";
+import { formatBytes } from "../../utils/formatters";
 
 export type AvailableStatus = "checking" | "available" | "unavailable";
 
@@ -17,6 +18,11 @@ export function resolveAvailableStatus<TValue>(
 
 export function buildRequestLogsClearedMessage(result: ClearRequestLogsResult) {
   return `已清理请求日志：request_logs ${result.request_logs_deleted} 条`;
+}
+
+export function buildDbCompactedMessage(result: DbCompactResult) {
+  const freedBytes = Math.max(0, result.before_bytes - result.after_bytes);
+  return `数据库压缩完成：已释放 ${formatBytes(freedBytes)}`;
 }
 
 export function buildConfigImportSuccessMessage(result: ConfigImportResult) {

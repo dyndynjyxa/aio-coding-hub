@@ -23,7 +23,11 @@ impl ClaudeOAuthProvider {
 
         Self {
             endpoints: OAuthEndpoints {
-                auth_url: "https://platform.claude.com/oauth/authorize",
+                // Subscription (Pro/Max) login must go through the claude.ai OAuth app
+                // (same as official Claude Code CLI and sub2api); the
+                // platform.claude.com/oauth/authorize Console entry stopped redirecting
+                // back to the localhost callback (~2026-07), hanging the login flow.
+                auth_url: "https://claude.ai/oauth/authorize",
                 token_url: "https://platform.claude.com/v1/oauth/token",
                 client_id,
                 client_secret,
@@ -195,6 +199,20 @@ impl OAuthProvider for ClaudeOAuthProvider {
 mod tests {
     use super::*;
     use axum::http::header;
+
+    #[test]
+    fn endpoints_use_claude_ai_authorize_and_platform_token() {
+        let provider = ClaudeOAuthProvider::new();
+        let endpoints = provider.endpoints();
+
+        // Authorize must stay on claude.ai: the platform.claude.com Console entry
+        // stopped redirecting back to the localhost callback (login hangs).
+        assert_eq!(endpoints.auth_url, "https://claude.ai/oauth/authorize");
+        assert_eq!(
+            endpoints.token_url,
+            "https://platform.claude.com/v1/oauth/token"
+        );
+    }
 
     #[test]
     fn inject_upstream_headers_uses_centralized_identity_markers() {

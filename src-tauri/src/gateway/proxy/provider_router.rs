@@ -15,6 +15,9 @@ pub(super) struct GateProviderArgs<'a, R: tauri::Runtime = tauri::Wry> {
     pub(super) earliest_available_unix: &'a mut Option<i64>,
     pub(super) skipped_open: &'a mut usize,
     pub(super) skipped_cooldown: &'a mut usize,
+    /// Filled with the circuit snapshot when the gate denies, so callers can
+    /// attach circuit attribution to the skipped attempt.
+    pub(super) deny_snapshot: &'a mut Option<circuit_breaker::CircuitSnapshot>,
 }
 
 pub(super) fn gate_provider<R: tauri::Runtime>(
@@ -32,6 +35,7 @@ pub(super) fn gate_provider<R: tauri::Runtime>(
         earliest_available_unix,
         skipped_open,
         skipped_cooldown,
+        deny_snapshot,
     } = args;
 
     let allow = circuit.should_allow(provider_id, now_unix);
@@ -45,6 +49,8 @@ pub(super) fn gate_provider<R: tauri::Runtime>(
             provider_base_url_display,
             t,
             now_unix,
+            None,
+            None,
         );
     }
 
@@ -53,6 +59,7 @@ pub(super) fn gate_provider<R: tauri::Runtime>(
     }
 
     let snap = allow.after;
+    *deny_snapshot = Some(snap.clone());
     let reason = match snap.state {
         circuit_breaker::CircuitState::Open => {
             *skipped_open = skipped_open.saturating_add(1);
@@ -91,6 +98,9 @@ pub(super) fn gate_provider<R: tauri::Runtime>(
                 cooldown_until: snap.cooldown_until,
                 reason,
                 ts: now_unix,
+                // Non-transition skip event: no trigger-failure attribution.
+                trigger_error_code: None,
+                first_byte_timeout_secs: None,
             },
         );
     }
@@ -107,6 +117,15 @@ pub(in crate::gateway) struct RecordCircuitArgs<'a, R: tauri::Runtime = tauri::W
     pub(in crate::gateway) provider_name: &'a str,
     pub(in crate::gateway) provider_base_url: &'a str,
     pub(in crate::gateway) now_unix: i64,
+    /// Error code of the failure being recorded; feeds the "触发失败" line of
+    /// the circuit-open notice. `None` for call sites without attribution.
+    pub(in crate::gateway) trigger_error_code: Option<&'static str>,
+    /// Effective first-byte timeout (seconds); the notice builder only uses it
+    /// when `trigger_error_code` is `GW_UPSTREAM_TIMEOUT`.
+    pub(in crate::gateway) first_byte_timeout_secs: Option<u32>,
+    /// Trusted background requests still route normally but must not mutate
+    /// circuit success, failure, or cooldown state.
+    pub(in crate::gateway) provider_health_neutral: bool,
 }
 
 impl<'a, R: tauri::Runtime> RecordCircuitArgs<'a, R> {
@@ -130,7 +149,28 @@ impl<'a, R: tauri::Runtime> RecordCircuitArgs<'a, R> {
             provider_name,
             provider_base_url,
             now_unix,
+            trigger_error_code: None,
+            first_byte_timeout_secs: None,
+            provider_health_neutral: false,
         }
+    }
+
+    pub(in crate::gateway) fn with_trigger(
+        mut self,
+        trigger_error_code: Option<&'static str>,
+        first_byte_timeout_secs: Option<u32>,
+    ) -> Self {
+        self.trigger_error_code = trigger_error_code;
+        self.first_byte_timeout_secs = first_byte_timeout_secs;
+        self
+    }
+
+    pub(in crate::gateway) fn with_provider_health_neutral(
+        mut self,
+        provider_health_neutral: bool,
+    ) -> Self {
+        self.provider_health_neutral = provider_health_neutral;
+        self
     }
 }
 
@@ -170,6 +210,20 @@ impl<'a, R: tauri::Runtime> RecordCircuitArgs<'a, R> {
             ctx.base_url.as_str(),
             now_unix,
         )
+        .with_provider_health_neutral(ctx.provider_health_neutral)
+    }
+}
+
+fn unchanged_circuit_change(
+    circuit: &circuit_breaker::CircuitBreaker,
+    provider_id: i64,
+    now_unix: i64,
+) -> circuit_breaker::CircuitChange {
+    let snapshot = circuit.snapshot(provider_id, now_unix);
+    circuit_breaker::CircuitChange {
+        before: snapshot.clone(),
+        after: snapshot,
+        transition: None,
     }
 }
 
@@ -185,9 +239,15 @@ pub(in crate::gateway) fn record_success_and_emit_transition(
         provider_name,
         provider_base_url,
         now_unix,
+        provider_health_neutral,
+        ..
     } = args;
 
-    let change = circuit.record_success(provider_id, now_unix);
+    let change = if provider_health_neutral {
+        unchanged_circuit_change(circuit, provider_id, now_unix)
+    } else {
+        circuit.record_success(provider_id, now_unix)
+    };
     if let (Some(app), Some(t)) = (app, change.transition.as_ref()) {
         emit_circuit_transition(
             app,
@@ -198,6 +258,8 @@ pub(in crate::gateway) fn record_success_and_emit_transition(
             provider_base_url,
             t,
             now_unix,
+            None,
+            None,
         );
     }
     change
@@ -215,9 +277,16 @@ pub(in crate::gateway) fn record_failure_and_emit_transition(
         provider_name,
         provider_base_url,
         now_unix,
+        trigger_error_code,
+        first_byte_timeout_secs,
+        provider_health_neutral,
     } = args;
 
-    let change = circuit.record_failure(provider_id, now_unix);
+    let change = if provider_health_neutral {
+        unchanged_circuit_change(circuit, provider_id, now_unix)
+    } else {
+        circuit.record_failure(provider_id, now_unix, trigger_error_code)
+    };
     if let (Some(app), Some(t)) = (app, change.transition.as_ref()) {
         emit_circuit_transition(
             app,
@@ -228,6 +297,8 @@ pub(in crate::gateway) fn record_failure_and_emit_transition(
             provider_base_url,
             t,
             now_unix,
+            trigger_error_code,
+            first_byte_timeout_secs,
         );
     }
     change
@@ -238,8 +309,13 @@ pub(in crate::gateway) fn trigger_cooldown(
     provider_id: i64,
     now_unix: i64,
     cooldown_secs: i64,
+    provider_health_neutral: bool,
 ) -> circuit_breaker::CircuitSnapshot {
-    circuit.trigger_cooldown(provider_id, now_unix, cooldown_secs)
+    if provider_health_neutral {
+        circuit.snapshot(provider_id, now_unix)
+    } else {
+        circuit.trigger_cooldown(provider_id, now_unix, cooldown_secs)
+    }
 }
 
 #[cfg(test)]
@@ -266,6 +342,7 @@ mod tests {
         let mut earliest: Option<i64> = None;
         let mut skipped_open = 0usize;
         let mut skipped_cooldown = 0usize;
+        let mut deny_snapshot = None;
 
         let snap = gate_provider(TestGateProviderArgs {
             app: None,
@@ -279,6 +356,7 @@ mod tests {
             earliest_available_unix: &mut earliest,
             skipped_open: &mut skipped_open,
             skipped_cooldown: &mut skipped_cooldown,
+            deny_snapshot: &mut deny_snapshot,
         })
         .expect("should allow");
 
@@ -297,7 +375,7 @@ mod tests {
         let pid = 1;
         let now = 1_000;
 
-        cb.record_failure(pid, now);
+        cb.record_failure(pid, now, None);
         let open = cb.snapshot(pid, now);
         assert_eq!(open.state, circuit_breaker::CircuitState::Open);
         let open_until = open.open_until.expect("open_until");
@@ -305,6 +383,7 @@ mod tests {
         let mut earliest: Option<i64> = None;
         let mut skipped_open = 0usize;
         let mut skipped_cooldown = 0usize;
+        let mut deny_snapshot = None;
 
         let allowed = gate_provider(TestGateProviderArgs {
             app: None,
@@ -318,6 +397,7 @@ mod tests {
             earliest_available_unix: &mut earliest,
             skipped_open: &mut skipped_open,
             skipped_cooldown: &mut skipped_cooldown,
+            deny_snapshot: &mut deny_snapshot,
         });
 
         assert!(allowed.is_none());
@@ -342,6 +422,7 @@ mod tests {
         let mut earliest: Option<i64> = None;
         let mut skipped_open = 0usize;
         let mut skipped_cooldown = 0usize;
+        let mut deny_snapshot = None;
 
         let allowed = gate_provider(TestGateProviderArgs {
             app: None,
@@ -355,6 +436,7 @@ mod tests {
             earliest_available_unix: &mut earliest,
             skipped_open: &mut skipped_open,
             skipped_cooldown: &mut skipped_cooldown,
+            deny_snapshot: &mut deny_snapshot,
         });
 
         assert!(allowed.is_none());
@@ -371,12 +453,13 @@ mod tests {
         });
         let pid = 1;
         let now = 1_000;
-        cb.record_failure(pid, now);
+        cb.record_failure(pid, now, None);
         let open_until = cb.snapshot(pid, now).open_until.expect("open_until");
 
         let mut earliest: Option<i64> = None;
         let mut skipped_open = 0usize;
         let mut skipped_cooldown = 0usize;
+        let mut deny_snapshot = None;
 
         let snap = gate_provider(TestGateProviderArgs {
             app: None,
@@ -390,6 +473,7 @@ mod tests {
             earliest_available_unix: &mut earliest,
             skipped_open: &mut skipped_open,
             skipped_cooldown: &mut skipped_cooldown,
+            deny_snapshot: &mut deny_snapshot,
         })
         .expect("should allow after expiry");
 
@@ -425,6 +509,35 @@ mod tests {
     }
 
     #[test]
+    fn record_circuit_args_default_to_no_trigger_and_with_trigger_sets_fields() {
+        let cb = breaker(circuit_breaker::CircuitBreakerConfig {
+            failure_threshold: 5,
+            open_duration_secs: 60,
+        });
+
+        let args = TestRecordCircuitArgs::new(
+            None,
+            &cb,
+            "t",
+            "claude",
+            1,
+            "p1",
+            "https://example.invalid",
+            1_000,
+        );
+        assert_eq!(args.trigger_error_code, None);
+        assert_eq!(args.first_byte_timeout_secs, None);
+        assert!(!args.provider_health_neutral);
+
+        let args = args.with_trigger(Some("GW_UPSTREAM_TIMEOUT"), Some(300));
+        assert_eq!(args.trigger_error_code, Some("GW_UPSTREAM_TIMEOUT"));
+        assert_eq!(args.first_byte_timeout_secs, Some(300));
+
+        let args = args.with_provider_health_neutral(true);
+        assert!(args.provider_health_neutral);
+    }
+
+    #[test]
     fn record_success_clears_failure_count() {
         let cb = breaker(circuit_breaker::CircuitBreakerConfig {
             failure_threshold: 5,
@@ -432,7 +545,7 @@ mod tests {
         });
         let pid = 1;
         let now = 1_000;
-        cb.record_failure(pid, now);
+        cb.record_failure(pid, now, None);
         assert!(cb.snapshot(pid, now).failure_count > 0);
 
         let change = record_success_and_emit_transition(TestRecordCircuitArgs::new(
@@ -447,5 +560,60 @@ mod tests {
         ));
 
         assert_eq!(change.after.failure_count, 0);
+    }
+
+    #[test]
+    fn provider_health_neutral_outcomes_do_not_mutate_circuit() {
+        let cb = breaker(circuit_breaker::CircuitBreakerConfig {
+            failure_threshold: 2,
+            open_duration_secs: 60,
+        });
+        let pid = 1;
+        let now = 1_000;
+        cb.record_failure(pid, now, None);
+
+        let neutral_failure = record_failure_and_emit_transition(
+            TestRecordCircuitArgs::new(
+                None,
+                &cb,
+                "system-request",
+                "codex",
+                pid,
+                "p1",
+                "https://example.invalid",
+                now + 1,
+            )
+            .with_provider_health_neutral(true),
+        );
+        assert_eq!(
+            neutral_failure.after.state,
+            circuit_breaker::CircuitState::Closed
+        );
+        assert_eq!(neutral_failure.after.failure_count, 1);
+        assert!(neutral_failure.transition.is_none());
+
+        let neutral_success = record_success_and_emit_transition(
+            TestRecordCircuitArgs::new(
+                None,
+                &cb,
+                "system-request",
+                "codex",
+                pid,
+                "p1",
+                "https://example.invalid",
+                now + 2,
+            )
+            .with_provider_health_neutral(true),
+        );
+        assert_eq!(
+            neutral_success.after.state,
+            circuit_breaker::CircuitState::Closed
+        );
+        assert_eq!(neutral_success.after.failure_count, 1);
+        assert!(neutral_success.transition.is_none());
+
+        let neutral_cooldown = trigger_cooldown(&cb, pid, now + 3, 60, true);
+        assert_eq!(neutral_cooldown.failure_count, 1);
+        assert_eq!(neutral_cooldown.cooldown_until, None);
     }
 }

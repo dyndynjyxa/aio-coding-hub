@@ -12,8 +12,14 @@ import {
   type CodexConfigTomlState as GeneratedCodexConfigTomlState,
   type CodexConfigTomlValidationError as GeneratedCodexConfigTomlValidationError,
   type CodexConfigTomlValidationResult as GeneratedCodexConfigTomlValidationResult,
+  type CodexModelCatalogState as GeneratedCodexModelCatalogState,
+  type CodexModelCapability as GeneratedCodexModelCapability,
+  type CodexReasoningEffortOption as GeneratedCodexReasoningEffortOption,
   type GeminiConfigPatch as GeneratedGeminiConfigPatch,
   type GeminiConfigState as GeneratedGeminiConfigState,
+  type GrokApiBackend as GeneratedGrokApiBackend,
+  type GrokConfigState as GeneratedGrokConfigState,
+  type GrokProxyPreferences as GeneratedGrokProxyPreferences,
   type SimpleCliInfo as GeneratedSimpleCliInfo,
 } from "../../generated/bindings";
 import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
@@ -31,8 +37,14 @@ export type CodexConfigPatch = Partial<GeneratedCodexConfigPatch>;
 export type CodexConfigTomlState = GeneratedCodexConfigTomlState;
 export type CodexConfigTomlValidationError = GeneratedCodexConfigTomlValidationError;
 export type CodexConfigTomlValidationResult = GeneratedCodexConfigTomlValidationResult;
+export type CodexModelCatalogState = GeneratedCodexModelCatalogState;
+export type CodexModelCapability = GeneratedCodexModelCapability;
+export type CodexReasoningEffortOption = GeneratedCodexReasoningEffortOption;
 export type GeminiConfigState = GeneratedGeminiConfigState;
 export type GeminiConfigPatch = Partial<GeneratedGeminiConfigPatch>;
+export type GrokApiBackend = GeneratedGrokApiBackend;
+export type GrokConfigState = GeneratedGrokConfigState;
+export type GrokProxyPreferences = GeneratedGrokProxyPreferences;
 export type ClaudeEnvSetInput = {
   mcpTimeoutMs: number | null;
   disableErrorReporting: boolean;
@@ -46,8 +58,6 @@ const DEFAULT_CODEX_CONFIG_PATCH = {
   plan_mode_reasoning_effort: null,
   web_search: null,
   personality: null,
-  model_context_window: null,
-  model_auto_compact_token_limit: null,
   service_tier: null,
   sandbox_workspace_write_network_access: null,
   features_unified_exec: null,
@@ -126,7 +136,10 @@ function withGeneratedPatchDefaults<TPatch extends object>(
 }
 
 function toCodexConfigPatch(patch: CodexConfigPatch): GeneratedCodexConfigPatch {
-  return withGeneratedPatchDefaults(DEFAULT_CODEX_CONFIG_PATCH, patch);
+  return {
+    ...DEFAULT_CODEX_CONFIG_PATCH,
+    ...patch,
+  };
 }
 
 function toGeminiConfigPatch(patch: GeminiConfigPatch): GeneratedGeminiConfigPatch {
@@ -152,6 +165,17 @@ export async function cliManagerCodexInfoGet() {
     cmd: "cli_manager_codex_info_get",
     invoke: () =>
       commands.cliManagerCodexInfoGet() as Promise<GeneratedCommandResult<SimpleCliInfo>>,
+  });
+}
+
+export async function cliManagerCodexModelCatalogGet() {
+  return invokeGeneratedIpc<CodexModelCatalogState>({
+    title: "读取 Codex 模型能力失败",
+    cmd: "cli_manager_codex_model_catalog_get",
+    invoke: () =>
+      commands.cliManagerCodexModelCatalogGet() as Promise<
+        GeneratedCommandResult<CodexModelCatalogState>
+      >,
   });
 }
 
@@ -239,6 +263,36 @@ export async function cliManagerGeminiConfigSet(patch: GeminiConfigPatch) {
     invoke: () =>
       commands.cliManagerGeminiConfigSet(normalizedPatch) as Promise<
         GeneratedCommandResult<GeminiConfigState>
+      >,
+  });
+}
+
+export async function cliManagerGrokInfoGet() {
+  return invokeGeneratedIpc<SimpleCliInfo>({
+    title: "获取 Grok CLI 信息失败",
+    cmd: "cli_manager_grok_info_get",
+    invoke: () =>
+      commands.cliManagerGrokInfoGet() as Promise<GeneratedCommandResult<SimpleCliInfo>>,
+  });
+}
+
+export async function cliManagerGrokConfigGet() {
+  return invokeGeneratedIpc<GrokConfigState>({
+    title: "读取 Grok 配置失败",
+    cmd: "cli_manager_grok_config_get",
+    invoke: () =>
+      commands.cliManagerGrokConfigGet() as Promise<GeneratedCommandResult<GrokConfigState>>,
+  });
+}
+
+export async function cliManagerGrokConfigSet(preferences: GrokProxyPreferences) {
+  return invokeGeneratedIpc<GrokConfigState>({
+    title: "保存 Grok 配置失败",
+    cmd: "cli_manager_grok_config_set",
+    args: { preferences },
+    invoke: () =>
+      commands.cliManagerGrokConfigSet(preferences) as Promise<
+        GeneratedCommandResult<GrokConfigState>
       >,
   });
 }

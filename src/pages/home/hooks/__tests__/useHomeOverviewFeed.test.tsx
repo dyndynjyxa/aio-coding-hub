@@ -52,6 +52,7 @@ describe("pages/home/hooks/useHomeOverviewFeed", () => {
       requestLogsLoading: false,
       requestLogsRefreshing: false,
       requestLogsAvailable: true,
+      refreshActiveRequests: vi.fn().mockResolvedValue({ error: null }),
       refreshRequestLogs: vi.fn().mockResolvedValue({ error: null }),
     } as any);
     vi.mocked(useHomeFreshnessOwner).mockReturnValue({
@@ -201,5 +202,121 @@ describe("pages/home/hooks/useHomeOverviewFeed", () => {
 
     expect(ownerRefresh).toHaveBeenCalledTimes(1);
     expect(requestLogsRefresh).not.toHaveBeenCalled();
+  });
+
+  it("passes active snapshots and their refresh action to the home freshness owner", async () => {
+    const refreshActiveRequests = vi.fn().mockResolvedValue({ error: null });
+    vi.mocked(useRequestLogsFeed).mockReturnValue({
+      requestLogs: [],
+      activeRequests: [{ trace_id: "trace-active" }],
+      requestLogsLoading: false,
+      requestLogsRefreshing: false,
+      requestLogsAvailable: true,
+      refreshActiveRequests,
+      refreshRequestLogs: vi.fn().mockResolvedValue({ error: null }),
+    } as any);
+
+    renderHook(() =>
+      useHomeOverviewFeed({
+        overviewActive: true,
+        foregroundActive: true,
+        overviewUsageSeriesEnabled: true,
+        shouldRefetchOverviewUsageSeries: true,
+        homeUsageWindowDays: 7,
+      })
+    );
+
+    expect(useHomeFreshnessOwner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestActivityPending: true,
+        onRefreshActiveRequests: expect.any(Function),
+      })
+    );
+
+    const ownerCalls = vi.mocked(useHomeFreshnessOwner).mock.calls;
+    const ownerOptions = ownerCalls[ownerCalls.length - 1]?.[0];
+    await act(async () => {
+      await ownerOptions?.onRefreshActiveRequests();
+    });
+    expect(refreshActiveRequests).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the watchdog pending while a recent log row still lacks a terminal state", () => {
+    // 终态落库是异步批量写：complete 信号触发的拉取可能读到仍无终态的占位行。
+    // 此时注册表已空，watchdog 必须继续轮询直到读到终态。
+    vi.mocked(useRequestLogsFeed).mockReturnValue({
+      requestLogs: [
+        {
+          id: 1,
+          trace_id: "trace-stale",
+          is_interrupted: true,
+          created_at_ms: Date.now() - 5_000,
+          created_at: Math.floor((Date.now() - 5_000) / 1000),
+        },
+      ],
+      activeRequests: [],
+      requestLogsLoading: false,
+      requestLogsRefreshing: false,
+      requestLogsAvailable: true,
+      refreshRequestLogs: vi.fn().mockResolvedValue({ error: null }),
+    } as any);
+
+    renderHook(() =>
+      useHomeOverviewFeed({
+        overviewActive: true,
+        foregroundActive: true,
+        overviewUsageSeriesEnabled: true,
+        shouldRefetchOverviewUsageSeries: true,
+        homeUsageWindowDays: 7,
+      })
+    );
+
+    expect(useHomeFreshnessOwner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestActivityPending: true,
+      })
+    );
+  });
+
+  it("stops the watchdog for unresolved rows outside the watch window and for terminal rows", () => {
+    vi.mocked(useRequestLogsFeed).mockReturnValue({
+      requestLogs: [
+        {
+          id: 1,
+          trace_id: "trace-lost",
+          is_interrupted: true,
+          created_at_ms: Date.now() - 11 * 60 * 1000,
+          created_at: Math.floor((Date.now() - 11 * 60 * 1000) / 1000),
+        },
+        {
+          id: 2,
+          trace_id: "trace-done",
+          is_interrupted: false,
+          created_at_ms: Date.now() - 1_000,
+          created_at: Math.floor((Date.now() - 1_000) / 1000),
+        },
+      ],
+      activeRequests: [],
+      requestLogsLoading: false,
+      requestLogsRefreshing: false,
+      requestLogsAvailable: true,
+      refreshRequestLogs: vi.fn().mockResolvedValue({ error: null }),
+    } as any);
+
+    renderHook(() =>
+      useHomeOverviewFeed({
+        overviewActive: true,
+        foregroundActive: true,
+        overviewUsageSeriesEnabled: true,
+        shouldRefetchOverviewUsageSeries: true,
+        homeUsageWindowDays: 7,
+      })
+    );
+
+    expect(useHomeFreshnessOwner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestActivityPending: false,
+      })
+    );
   });
 });

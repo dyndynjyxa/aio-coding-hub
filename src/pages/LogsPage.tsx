@@ -5,7 +5,7 @@
 import { useMemo, useReducer } from "react";
 import { HomeRequestLogsPanel } from "../components/home/HomeRequestLogsPanel";
 import { RequestLogDetailDialog } from "../components/home/RequestLogDetailDialog";
-import { CLI_FILTER_ITEMS, type CliFilterKey } from "../constants/clis";
+import { cliFilterItemsWith, type CliFilterKey } from "../constants/clis";
 import { GatewayErrorCodes } from "../constants/gatewayErrorCodes";
 import { useRequestLogsFeed } from "../hooks/useRequestLogsFeed";
 import { Button } from "../ui/Button";
@@ -18,6 +18,7 @@ import { useTraceStore } from "../services/gateway/traceStore";
 
 const LOGS_PAGE_LIMIT = 200;
 const AUTO_REFRESH_INTERVAL_MS = 2000;
+const LOG_CLI_FILTER_ITEMS = cliFilterItemsWith("logs");
 
 type StatusPredicate = (status: number | null) => boolean;
 
@@ -114,6 +115,7 @@ export function LogsPage() {
     dispatch({ type: "setSelectedLogId", selectedLogId });
   const {
     requestLogs,
+    activeRequests,
     requestLogsLoading,
     requestLogsRefreshing,
     requestLogsAvailable,
@@ -152,6 +154,21 @@ export function LogsPage() {
       return true;
     });
   }, [cliKey, errorCodeFilter, pathFilter, requestLogs, statusPredicate]);
+  const filteredActiveRequests = useMemo(() => {
+    const errorNeedle = errorCodeFilter.trim().toLowerCase();
+    const pathNeedle = pathFilter.trim().toLowerCase();
+
+    return activeRequests.filter((request) => {
+      if (cliKey !== "all" && request.cli_key !== cliKey) return false;
+      if (statusPredicate) return false;
+      if (errorNeedle) return false;
+      if (pathNeedle) {
+        const haystack = `${request.method} ${request.path}`.toLowerCase();
+        if (!haystack.includes(pathNeedle)) return false;
+      }
+      return true;
+    });
+  }, [activeRequests, cliKey, errorCodeFilter, pathFilter, statusPredicate]);
   const logsSummaryText =
     requestLogsAvailable === false
       ? undefined
@@ -201,7 +218,7 @@ export function LogsPage() {
             </div>
             <TabList
               ariaLabel="CLI 过滤"
-              items={CLI_FILTER_ITEMS}
+              items={LOG_CLI_FILTER_ITEMS}
               value={cliKey}
               onChange={(cliKey) => dispatch({ type: "setCliKey", cliKey })}
               size="sm"
@@ -278,6 +295,7 @@ export function LogsPage() {
         compactModeOverride={false}
         emptyStateTitle={activeFilterCount > 0 ? "没有符合筛选条件的代理记录" : "当前没有代理记录"}
         traces={traces}
+        activeRequests={filteredActiveRequests}
         requestLogs={filteredLogs}
         requestLogsLoading={requestLogsLoading}
         requestLogsRefreshing={requestLogsRefreshing}

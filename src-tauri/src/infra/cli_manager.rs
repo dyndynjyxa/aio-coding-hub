@@ -3,7 +3,8 @@
 use crate::shared::fs::{read_optional_file_with_max_len, write_file_atomic_if_changed};
 use serde::Serialize;
 #[cfg(not(windows))]
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -43,6 +44,13 @@ pub struct SimpleCliInfo {
     pub error: Option<String>,
     pub shell: Option<String>,
     pub resolved_via: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CodexLaunchSpec {
+    pub(crate) executable: PathBuf,
+    pub(crate) runtime_path: OsString,
+    pub(crate) version: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -641,6 +649,7 @@ fn run_version(exe: &Path) -> crate::shared::error::AppResult<String> {
 
     #[cfg(windows)]
     {
+        cmd.env("PATH", runtime_path_for_executable(exe)?);
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         cmd.creation_flags(CREATE_NO_WINDOW);
@@ -670,6 +679,59 @@ fn run_version(exe: &Path) -> crate::shared::error::AppResult<String> {
     }
     .to_string()
     .into())
+}
+
+fn runtime_path_for_executable(exe: &Path) -> crate::shared::error::AppResult<OsString> {
+    #[cfg(not(windows))]
+    {
+        let current_path = std::env::var_os("PATH");
+        version_probe_path(exe, current_path.as_deref())
+    }
+
+    #[cfg(windows)]
+    {
+        let mut paths = Vec::new();
+        if let Some(parent) = exe.parent().filter(|path| !path.as_os_str().is_empty()) {
+            paths.push(parent.to_path_buf());
+        }
+
+        for variable in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
+            if let Some(root) = std::env::var_os(variable) {
+                let root = PathBuf::from(root);
+                paths.push(root.join("nodejs"));
+                if variable == "LOCALAPPDATA" {
+                    paths.push(root.join("Programs").join("nodejs"));
+                }
+            }
+        }
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            paths.push(PathBuf::from(appdata).join("npm"));
+        }
+        if let Some(current_path) = std::env::var_os("PATH") {
+            paths.extend(std::env::split_paths(&current_path));
+        }
+
+        std::env::join_paths(paths)
+            .map_err(|err| format!("failed to build Windows PATH for Codex: {err}").into())
+    }
+}
+
+pub(crate) fn codex_launch_spec(
+    app: &tauri::AppHandle,
+) -> crate::shared::error::AppResult<Option<CodexLaunchSpec>> {
+    let exe = match resolve_executable_via_login_shell("codex") {
+        Ok(Some(path)) => Some(path),
+        Ok(None) | Err(_) => scan_executable(app, "codex")?,
+    };
+    let Some(executable) = exe else {
+        return Ok(None);
+    };
+
+    Ok(Some(CodexLaunchSpec {
+        runtime_path: runtime_path_for_executable(&executable)?,
+        version: run_version(&executable).ok(),
+        executable,
+    }))
 }
 
 fn cli_probe(app: &tauri::AppHandle, cmd: &str) -> crate::shared::error::AppResult<CliProbeResult> {

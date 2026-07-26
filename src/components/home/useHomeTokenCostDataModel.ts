@@ -15,10 +15,11 @@ import {
   scalePreviewTokenRows,
   PREVIEW_TOKEN_PROVIDER_ROWS,
   PREVIEW_TOKEN_MODEL_ROWS,
+  PREVIEW_TOKEN_FOLDER_ROWS,
   PREVIEW_TOKEN_DAY_ROWS,
 } from "./previewTokenData";
 
-type TokenCostScope = "provider" | "model" | "day";
+type TokenCostScope = "provider" | "model" | "folder" | "day";
 
 type TokenCostQueryInput = {
   startTs: number | null;
@@ -26,6 +27,9 @@ type TokenCostQueryInput = {
   cliKey: null;
   providerId: null;
   folderKeys?: string[] | null;
+  dayStartHour?: number | null;
+  fullIdleGapMinutes?: number | null;
+  sessionBreakGapMinutes?: number | null;
   excludeCx2CcGatewayBridge?: boolean | null;
 };
 
@@ -97,14 +101,19 @@ export function useHomeTokenCostDataModel({
     [queryConfig.input.folderKeys, queryConfig.previewFactor]
   );
 
-  const previewRowsByScope = useMemo(
-    () => ({
+  const previewRowsByScope = useMemo(() => {
+    const selectedFolderKeys = queryConfig.input.folderKeys;
+    const selectedFolderRows =
+      selectedFolderKeys && selectedFolderKeys.length > 0
+        ? PREVIEW_TOKEN_FOLDER_ROWS.filter((row) => selectedFolderKeys.includes(row.key))
+        : PREVIEW_TOKEN_FOLDER_ROWS;
+    return {
       provider: scalePreviewTokenRows(PREVIEW_TOKEN_PROVIDER_ROWS, previewFactor),
       model: scalePreviewTokenRows(PREVIEW_TOKEN_MODEL_ROWS, previewFactor),
+      folder: scalePreviewTokenRows(selectedFolderRows, queryConfig.previewFactor),
       day: scalePreviewTokenRows(PREVIEW_TOKEN_DAY_ROWS, previewFactor),
-    }),
-    [previewFactor]
-  );
+    };
+  }, [previewFactor, queryConfig.input.folderKeys, queryConfig.previewFactor]);
   const previewSummary = useMemo(
     () => buildPreviewTokenSummary(previewRowsByScope.provider),
     [previewRowsByScope.provider]

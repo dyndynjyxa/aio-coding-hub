@@ -13,6 +13,7 @@ function createObservation(
 ): RequestLogErrorObservation {
   return {
     attemptDurationMs: null,
+    attemptFailureSummary: null,
     circuitFailureCount: null,
     circuitFailureThreshold: null,
     circuitStateAfter: null,

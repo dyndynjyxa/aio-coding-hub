@@ -1,7 +1,7 @@
 //! Usage: Lightweight provider availability probe.
 //!
 //! Sends a minimal API request to verify that a provider's base URL + credentials
-//! are reachable and functional. Supports all CLI types (claude, codex, gemini).
+//! are reachable and functional. Supports all recognized provider CLI types.
 
 use crate::shared::error::AppResult;
 use crate::{blocking, db};
@@ -175,12 +175,11 @@ fn build_probe_request(
     cli_key: &str,
     base_url: &str,
     api_key: &str,
+    grok_preferences: Option<&crate::grok_config::GrokProxyPreferences>,
 ) -> AppResult<(String, HeaderMap, serde_json::Value)> {
-    let base = base_url.trim_end_matches('/');
-
     match cli_key {
         "claude" => {
-            let url = format!("{base}/v1/messages");
+            let url = build_probe_url(base_url, "/v1/messages", None)?;
             let mut headers = HeaderMap::new();
             if let Ok(v) = HeaderValue::from_str(api_key) {
                 headers.insert("x-api-key", v);
@@ -195,7 +194,7 @@ fn build_probe_request(
             Ok((url, headers, body))
         }
         "codex" => {
-            let url = format!("{base}/v1/chat/completions");
+            let url = build_probe_url(base_url, "/v1/chat/completions", None)?;
             let mut headers = HeaderMap::new();
             let bearer = format!("Bearer {api_key}");
             if let Ok(v) = HeaderValue::from_str(&bearer) {
@@ -209,9 +208,46 @@ fn build_probe_request(
             });
             Ok((url, headers, body))
         }
+        "grok" => {
+            let preferences = crate::grok_config::validate_preferences(
+                grok_preferences.cloned().unwrap_or_default(),
+            )?;
+            let mut headers = HeaderMap::new();
+            let bearer = format!("Bearer {api_key}");
+            if let Ok(v) = HeaderValue::from_str(&bearer) {
+                headers.insert("authorization", v);
+            }
+            headers.insert("content-type", HeaderValue::from_static("application/json"));
+            let (url, body) = match preferences.api_backend {
+                crate::grok_config::GrokApiBackend::Responses => (
+                    build_probe_url(base_url, "/v1/responses", None)?,
+                    serde_json::json!({
+                        "model": preferences.model_id,
+                        "input": "ping",
+                        "max_output_tokens": 1,
+                        "store": false,
+                        "stream": false
+                    }),
+                ),
+                crate::grok_config::GrokApiBackend::ChatCompletions => (
+                    build_probe_url(base_url, "/v1/chat/completions", None)?,
+                    serde_json::json!({
+                        "model": preferences.model_id,
+                        "messages": [{"role": "user", "content": "ping"}],
+                        "max_tokens": 1,
+                        "stream": false
+                    }),
+                ),
+            };
+            Ok((url, headers, body))
+        }
         "gemini" => {
-            let url =
-                format!("{base}/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}");
+            let query = format!("key={api_key}");
+            let url = build_probe_url(
+                base_url,
+                "/v1beta/models/gemini-2.0-flash:generateContent",
+                Some(&query),
+            )?;
             let mut headers = HeaderMap::new();
             headers.insert("content-type", HeaderValue::from_static("application/json"));
             let body = serde_json::json!({
@@ -222,6 +258,10 @@ fn build_probe_request(
         }
         _ => Err(format!("UNSUPPORTED_CLI_KEY: {cli_key}").into()),
     }
+}
+
+fn build_probe_url(base_url: &str, path: &str, query: Option<&str>) -> AppResult<String> {
+    Ok(crate::gateway::util::build_target_url(base_url, path, query)?.to_string())
 }
 
 fn redact_key_param(msg: &str) -> String {
@@ -253,7 +293,8 @@ fn is_probe_available_status(status: u16, response_text: &str) -> bool {
     status < 500 && !looks_like_auth_failure(status, response_text)
 }
 
-pub async fn test_provider_availability(
+pub async fn test_provider_availability<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     db: db::Db,
     provider_id: i64,
 ) -> AppResult<ProviderAvailabilityResult> {
@@ -314,8 +355,17 @@ pub async fn test_provider_availability(
         });
     }
 
-    let (url, headers, body) =
-        build_probe_request(&provider.cli_key, &base_url, &provider.api_key_plaintext)?;
+    let grok_preferences = if provider.cli_key == "grok" {
+        Some(crate::grok_config::get(app)?.effective_preferences)
+    } else {
+        None
+    };
+    let (url, headers, body) = build_probe_request(
+        &provider.cli_key,
+        &base_url,
+        &provider.api_key_plaintext,
+        grok_preferences.as_ref(),
+    )?;
 
     let client = reqwest::Client::builder()
         .user_agent(format!(
@@ -415,7 +465,7 @@ mod tests {
     #[test]
     fn build_probe_request_for_claude_uses_messages_endpoint_and_x_api_key() {
         let (url, headers, body) =
-            build_probe_request("claude", "https://api.example.com/", "sk-claude")
+            build_probe_request("claude", "https://api.example.com/", "sk-claude", None)
                 .expect("claude request");
 
         assert_eq!(url, "https://api.example.com/v1/messages");
@@ -427,7 +477,7 @@ mod tests {
     #[test]
     fn build_probe_request_for_codex_uses_chat_completions_and_bearer_auth() {
         let (url, headers, body) =
-            build_probe_request("codex", "https://api.example.com", "sk-openai")
+            build_probe_request("codex", "https://api.example.com", "sk-openai", None)
                 .expect("codex request");
 
         assert_eq!(url, "https://api.example.com/v1/chat/completions");
@@ -436,11 +486,98 @@ mod tests {
     }
 
     #[test]
+    fn build_probe_request_for_grok_uses_effective_responses_model_and_bearer_auth() {
+        let preferences = crate::grok_config::GrokProxyPreferences {
+            model_id: "grok-responses-custom".to_string(),
+            api_backend: crate::grok_config::GrokApiBackend::Responses,
+            ..Default::default()
+        };
+        let (url, headers, body) = build_probe_request(
+            "grok",
+            "https://api.example.com/",
+            "test-grok-key",
+            Some(&preferences),
+        )
+        .expect("Grok request");
+
+        assert_eq!(url, "https://api.example.com/v1/responses");
+        assert_eq!(
+            header_value(&headers, "authorization"),
+            "Bearer test-grok-key"
+        );
+        assert_eq!(body["model"], preferences.model_id);
+        assert_eq!(body["input"], "ping");
+        assert_eq!(body["store"], false);
+        assert_eq!(body["stream"], false);
+    }
+
+    #[test]
+    fn build_probe_request_for_grok_uses_effective_chat_completions_model_and_body() {
+        let preferences = crate::grok_config::GrokProxyPreferences {
+            model_id: "grok-chat-custom".to_string(),
+            api_backend: crate::grok_config::GrokApiBackend::ChatCompletions,
+            ..Default::default()
+        };
+
+        let (url, headers, body) = build_probe_request(
+            "grok",
+            "https://api.example.com/v1",
+            "test-grok-key",
+            Some(&preferences),
+        )
+        .expect("Grok Chat request");
+
+        assert_eq!(url, "https://api.example.com/v1/chat/completions");
+        assert_eq!(
+            header_value(&headers, "authorization"),
+            "Bearer test-grok-key"
+        );
+        assert_eq!(body["model"], preferences.model_id);
+        assert_eq!(body["messages"][0]["role"], "user");
+        assert_eq!(body["messages"][0]["content"], "ping");
+        assert_eq!(body["stream"], false);
+    }
+
+    #[test]
+    fn build_probe_request_deduplicates_versioned_base_paths_for_all_clis() {
+        let cases = [
+            (
+                "claude",
+                "https://api.example.com/v1/",
+                "https://api.example.com/v1/messages",
+            ),
+            (
+                "codex",
+                "https://api.example.com/v1",
+                "https://api.example.com/v1/chat/completions",
+            ),
+            (
+                "grok",
+                "https://api.example.com/v1/",
+                "https://api.example.com/v1/responses",
+            ),
+            (
+                "gemini",
+                "https://api.example.com/v1beta/",
+                "https://api.example.com/v1beta/models/gemini-2.0-flash:generateContent?key=test-key",
+            ),
+        ];
+
+        for (cli_key, base_url, expected_url) in cases {
+            let (url, _, _) = build_probe_request(cli_key, base_url, "test-key", None)
+                .unwrap_or_else(|err| panic!("{cli_key} probe request failed: {err}"));
+
+            assert_eq!(url, expected_url, "unexpected {cli_key} probe URL");
+        }
+    }
+
+    #[test]
     fn build_probe_request_for_gemini_uses_generate_content_key_param() {
         let (url, headers, body) = build_probe_request(
             "gemini",
             "https://generativelanguage.googleapis.com/",
             "sk-google",
+            None,
         )
         .expect("gemini request");
 
@@ -454,7 +591,7 @@ mod tests {
 
     #[test]
     fn build_probe_request_rejects_unsupported_cli_key() {
-        let err = build_probe_request("unknown", "https://api.example.com", "secret")
+        let err = build_probe_request("unknown", "https://api.example.com", "secret", None)
             .unwrap_err()
             .to_string();
 

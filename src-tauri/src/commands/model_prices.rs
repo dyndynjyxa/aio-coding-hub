@@ -3,6 +3,8 @@
 use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::{blocking, cost_stats, model_price_aliases, model_prices, model_prices_sync};
 
+const MODEL_PRICE_SYNC_BACKFILL_CLI_KEYS: [&str; 3] = ["claude", "codex", "grok"];
+
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn model_prices_list(
@@ -48,20 +50,15 @@ pub(crate) async fn model_prices_sync_basellm(
         .map_err(|e| e.to_string())?;
 
     let db_for_backfill = db.clone();
+    let app_for_backfill = app.clone();
     let backfill_result = blocking::run(
         "model_prices_sync_basellm_backfill_missing_cost",
         move || {
-            for cli_key in ["claude", "codex"] {
-                cost_stats::backfill_missing_v1(
+            for cli_key in MODEL_PRICE_SYNC_BACKFILL_CLI_KEYS {
+                cost_stats::backfill_missing_for_cli(
+                    &app_for_backfill,
                     &db_for_backfill,
-                    &cost_stats::CostQueryParams {
-                        period: "allTime".to_string(),
-                        start_ts: None,
-                        end_ts: None,
-                        cli_key: Some(cli_key.to_string()),
-                        provider_id: None,
-                        model: None,
-                    },
+                    cli_key,
                     5000,
                 )?;
             }
@@ -90,6 +87,16 @@ pub(crate) async fn model_price_aliases_get(
     )
     .await
     .map_err(Into::into)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MODEL_PRICE_SYNC_BACKFILL_CLI_KEYS;
+
+    #[test]
+    fn model_price_sync_backfill_includes_grok() {
+        assert!(MODEL_PRICE_SYNC_BACKFILL_CLI_KEYS.contains(&"grok"));
+    }
 }
 
 #[tauri::command]

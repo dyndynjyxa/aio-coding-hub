@@ -250,6 +250,21 @@ model_auto_compact_token_limit = 900000
 }
 
 #[test]
+fn patch_accepts_future_model_reasoning_effort_values() {
+    let out = patch_config_toml(
+        None,
+        CodexConfigPatch {
+            model_reasoning_effort: Some("future-max".to_string()),
+            ..empty_patch()
+        },
+    )
+    .expect("patch_config_toml");
+
+    let s = String::from_utf8(out).expect("utf8");
+    assert!(s.contains("model_reasoning_effort = \"future-max\""), "{s}");
+}
+
+#[test]
 fn patch_deletes_fast_mode_and_service_tier_when_disabled() {
     let input = r#"service_tier = "fast"
 
@@ -468,6 +483,29 @@ fn validate_raw_rejects_invalid_enum_values() {
     let err = out.error.expect("error");
     assert!(err.message.contains("approval_policy"), "{err:?}");
     assert!(err.message.contains("allowed:"), "{err:?}");
+}
+
+#[test]
+fn validate_raw_accepts_future_model_reasoning_effort_values() {
+    let out = validate_codex_config_toml_raw("model_reasoning_effort = \"future-max\"");
+    assert!(out.ok, "{out:?}");
+}
+
+#[test]
+fn validate_raw_rejects_empty_or_non_string_model_reasoning_effort() {
+    for input in [
+        "model_reasoning_effort = \"\"",
+        "model_reasoning_effort = 123",
+    ] {
+        let out = validate_codex_config_toml_raw(input);
+        assert!(!out.ok, "{input}: {out:?}");
+        assert!(
+            out.error
+                .as_ref()
+                .is_some_and(|error| error.message.contains("model_reasoning_effort")),
+            "{input}: {out:?}"
+        );
+    }
 }
 
 #[test]

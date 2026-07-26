@@ -5,6 +5,7 @@ use crate::{circuit_breaker, db, request_logs, session_manager};
 use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 
+use super::active_requests::{ActiveRequestFinishReason, ActiveRequestRegistry};
 use super::background_tasks::GatewayBackgroundTasks;
 use super::codex_session_id::CodexSessionIdCache;
 use super::plugins::pipeline::GatewayPluginPipeline;
@@ -21,6 +22,7 @@ pub(in crate::gateway) struct GatewayAppState<R: tauri::Runtime = tauri::Wry> {
     pub(super) recent_errors: Arc<Mutex<RecentErrorCache>>,
     pub(super) latency_cache: Arc<Mutex<ProviderBaseUrlPingCache>>,
     pub(super) plugin_pipeline: Arc<GatewayPluginPipeline>,
+    pub(super) active_requests: Arc<ActiveRequestRegistry>,
 }
 
 impl<R: tauri::Runtime> Clone for GatewayAppState<R> {
@@ -35,7 +37,42 @@ impl<R: tauri::Runtime> Clone for GatewayAppState<R> {
             recent_errors: self.recent_errors.clone(),
             latency_cache: self.latency_cache.clone(),
             plugin_pipeline: self.plugin_pipeline.clone(),
+            active_requests: self.active_requests.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gateway::active_requests::ActiveRequestStart;
+
+    fn active_request_start(trace_id: &str) -> ActiveRequestStart {
+        ActiveRequestStart {
+            trace_id: trace_id.to_string(),
+            cli_key: "codex".to_string(),
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            query: None,
+            session_id: Some("sess-runtime".to_string()),
+            requested_model: Some("gpt-5".to_string()),
+            created_at_ms: 1_700_000_000_000,
+        }
+    }
+
+    #[test]
+    fn into_handles_finishes_active_requests() {
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let session = Arc::new(session_manager::SessionManager::new());
+        let recent_errors = Arc::new(Mutex::new(RecentErrorCache::default()));
+        let runtime = GatewayRuntime::for_tests(&rt, session, recent_errors);
+        let active_requests = runtime.active_requests.clone();
+        active_requests.register(active_request_start("trace-runtime-active"));
+
+        assert_eq!(active_requests.snapshot().len(), 1);
+        let _handles = runtime.into_handles();
+
+        assert!(active_requests.snapshot().is_empty());
     }
 }
 
@@ -76,6 +113,7 @@ pub(super) struct GatewayRuntimeInit {
     pub(super) session: Arc<session_manager::SessionManager>,
     pub(super) recent_errors: Arc<Mutex<RecentErrorCache>>,
     pub(super) plugin_pipeline: Arc<GatewayPluginPipeline>,
+    pub(super) active_requests: Arc<ActiveRequestRegistry>,
     pub(super) shutdown: oneshot::Sender<()>,
     pub(super) task: tauri::async_runtime::JoinHandle<()>,
     pub(super) background_tasks: GatewayBackgroundTasks,
@@ -89,6 +127,7 @@ pub(crate) struct GatewayRuntime {
     session: Arc<session_manager::SessionManager>,
     recent_errors: Arc<Mutex<RecentErrorCache>>,
     plugin_pipeline: Arc<GatewayPluginPipeline>,
+    active_requests: Arc<ActiveRequestRegistry>,
     shutdown: oneshot::Sender<()>,
     task: tauri::async_runtime::JoinHandle<()>,
     background_tasks: GatewayBackgroundTasks,
@@ -104,6 +143,7 @@ impl GatewayRuntime {
             session: init.session,
             recent_errors: init.recent_errors,
             plugin_pipeline: init.plugin_pipeline,
+            active_requests: init.active_requests,
             shutdown: init.shutdown,
             task: init.task,
             background_tasks: init.background_tasks,
@@ -143,6 +183,12 @@ impl GatewayRuntime {
             cleared_sessions: self.clear_cli_session_bindings(cli_key),
             cleared_recent_errors: self.clear_recent_errors(),
         }
+    }
+
+    pub(crate) fn active_requests_snapshot(
+        &self,
+    ) -> Vec<super::active_requests::ActiveRequestSnapshotItem> {
+        self.active_requests.snapshot()
     }
 
     pub(crate) fn circuit_status(
@@ -193,6 +239,8 @@ impl GatewayRuntime {
     }
 
     pub(super) fn into_handles(self) -> GatewayRuntimeHandles {
+        self.active_requests
+            .finish_all(ActiveRequestFinishReason::GatewayStopped);
         let (log_task, circuit_task, oauth_refresh_shutdown, oauth_refresh_task) =
             self.background_tasks.into_handles();
         (
@@ -226,6 +274,7 @@ impl GatewayRuntime {
             session,
             recent_errors,
             plugin_pipeline: GatewayPluginPipeline::empty_shared(),
+            active_requests: Arc::new(ActiveRequestRegistry::default()),
             shutdown,
             task: tauri::async_runtime::JoinHandle::Tokio(rt.spawn(async {})),
             background_tasks: GatewayBackgroundTasks::for_tests(rt),

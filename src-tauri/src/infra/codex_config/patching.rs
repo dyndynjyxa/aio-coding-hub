@@ -638,11 +638,6 @@ pub(super) fn patch_config_toml(
         &["read-only", "workspace-write", "danger-full-access"],
     )?;
     validate_enum_or_empty(
-        "model_reasoning_effort",
-        patch.model_reasoning_effort.as_deref().unwrap_or(""),
-        &["minimal", "low", "medium", "high", "xhigh"],
-    )?;
-    validate_enum_or_empty(
         "plan_mode_reasoning_effort",
         patch.plan_mode_reasoning_effort.as_deref().unwrap_or(""),
         &["low", "medium", "high", "xhigh"],

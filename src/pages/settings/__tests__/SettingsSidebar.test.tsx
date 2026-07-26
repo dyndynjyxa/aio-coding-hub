@@ -17,7 +17,12 @@ import {
   useDbDiskUsageQuery,
   useRequestLogsClearAllMutation,
 } from "../../../query/dataManagement";
-import { appDataDirGet, appDataReset, appExit } from "../../../services/app/dataManagement";
+import {
+  appDataDirGet,
+  appDataReset,
+  appExit,
+  dbCompact,
+} from "../../../services/app/dataManagement";
 import { runBackgroundTask } from "../../../services/backgroundTasks";
 import { logToConsole } from "../../../services/consoleLog";
 import { tauriDialogOpen, tauriOpenPath, tauriOpenUrl } from "../../../test/mocks/tauri";
@@ -66,6 +71,7 @@ vi.mock("../../../services/app/dataManagement", async () => {
     appDataDirGet: vi.fn(),
     appDataReset: vi.fn(),
     appExit: vi.fn(),
+    dbCompact: vi.fn(),
   };
 });
 
@@ -123,6 +129,7 @@ vi.mock("../SettingsDataManagementCard", () => ({
   SettingsDataManagementCard: ({
     openAppDataDir,
     refreshDbDiskUsage,
+    onCompactDb,
     openClearRequestLogsDialog,
     openResetAllDialog,
     onImportConfig,
@@ -130,6 +137,9 @@ vi.mock("../SettingsDataManagementCard", () => ({
     <div>
       <button type="button" onClick={() => openAppDataDir()}>
         open-data-dir
+      </button>
+      <button type="button" onClick={() => onCompactDb()}>
+        compact-db
       </button>
       <button type="button" onClick={() => refreshDbDiskUsage()}>
         refresh-db
@@ -485,6 +495,78 @@ describe("pages/settings/SettingsSidebar", () => {
     notifyModelPricesUpdated();
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: modelPricesKeys.all });
     vi.useRealTimers();
+  });
+
+  it("compacts database, toasts freed space, and refreshes disk usage", async () => {
+    mockSidebarQueries();
+
+    const refetchDb = vi.fn().mockResolvedValue({ data: {} });
+    vi.mocked(useDbDiskUsageQuery).mockReturnValue({
+      data: null,
+      isLoading: false,
+      refetch: refetchDb,
+    } as any);
+
+    vi.mocked(dbCompact)
+      .mockResolvedValueOnce({ before_bytes: 2048, after_bytes: 1024 })
+      .mockResolvedValueOnce({ before_bytes: 1024, after_bytes: 1024 })
+      .mockRejectedValueOnce(new Error("compact boom"));
+
+    renderWithProviders(
+      <SettingsSidebar updateMeta={createUpdateMeta({ about: { run_mode: "desktop" } })} />
+    );
+
+    // success: toast freed space then refresh disk usage
+    fireEvent.click(screen.getByRole("button", { name: "compact-db" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(dbCompact).toHaveBeenCalledTimes(1);
+    expect(toast).toHaveBeenCalledWith("数据库压缩完成：已释放 1.0 KB");
+    expect(refetchDb).toHaveBeenCalledTimes(1);
+
+    // zero bytes freed is still reported honestly
+    fireEvent.click(screen.getByRole("button", { name: "compact-db" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(toast).toHaveBeenCalledWith("数据库压缩完成：已释放 0 B");
+    expect(refetchDb).toHaveBeenCalledTimes(2);
+
+    // failure: error toast, no extra refresh
+    fireEvent.click(screen.getByRole("button", { name: "compact-db" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(dbCompact).toHaveBeenCalledTimes(3);
+    expect(toast).toHaveBeenCalledWith("压缩数据库失败：请稍后重试");
+    expect(refetchDb).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores rapid compact clicks while a compaction is in flight", async () => {
+    mockSidebarQueries();
+
+    let resolveCompact: (result: any) => void = () => {
+      throw new Error("resolveCompact not set");
+    };
+    const compactPromise = new Promise<any>((resolve) => {
+      resolveCompact = resolve;
+    });
+    vi.mocked(dbCompact).mockImplementation(() => compactPromise as any);
+
+    renderWithProviders(<SettingsSidebar updateMeta={createUpdateMeta()} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "compact-db" }));
+      fireEvent.click(screen.getByRole("button", { name: "compact-db" }));
+      await Promise.resolve();
+    });
+    expect(dbCompact).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveCompact(null);
+      await compactPromise;
+    });
   });
 
   it("serializes rapid sidebar actions before mutation pending props update", async () => {

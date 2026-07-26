@@ -266,6 +266,32 @@ CREATE TABLE IF NOT EXISTS claude_model_validation_runs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_claude_model_validation_runs_provider_id_id ON claude_model_validation_runs(provider_id, id);
+
+CREATE TABLE IF NOT EXISTS image_gen_configs (
+  adapter_id TEXT PRIMARY KEY,
+  base_url TEXT NOT NULL DEFAULT '',
+  api_key_plaintext TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS image_gen_tasks (
+  id TEXT PRIMARY KEY,
+  adapter_id TEXT NOT NULL DEFAULT 'gpt-image',
+  prompt TEXT NOT NULL DEFAULT '',
+  request_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'done',
+  error TEXT,
+  usage_json TEXT,
+  images_json TEXT NOT NULL DEFAULT '[]',
+  ref_images_json TEXT NOT NULL DEFAULT '[]',
+  dir TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  elapsed_ms INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_image_gen_tasks_created ON image_gen_tasks(created_at DESC);
 "#,
     )
     .map_err(|e| format!("failed to create baseline v25 schema: {e}"))?;

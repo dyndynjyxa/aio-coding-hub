@@ -1,6 +1,6 @@
 use crate::app_paths;
 use crate::mcp_sync;
-use crate::shared::fs::read_file_with_max_len;
+use crate::shared::fs::{read_file_with_max_len, read_optional_file_with_max_len};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -31,7 +31,7 @@ fn stash_file_path<R: tauri::Runtime>(
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("failed to create {}: {e}", dir.display()))?;
     let ext = match cli_key {
-        "codex" => "toml",
+        "codex" | "grok" => "toml",
         _ => "json",
     };
     Ok(dir.join(format!("mcpServers.{ext}")))
@@ -214,8 +214,6 @@ pub(crate) fn swap_local_mcp_servers_for_workspace_switch<R: tauri::Runtime>(
 ) -> crate::shared::error::AppResult<()> {
     crate::shared::cli_key::validate_cli_key(cli_key)?;
 
-    let current_bytes = mcp_sync::read_target_bytes(app, cli_key)?;
-
     let from_bucket = stash_bucket_name(from_workspace_id);
     let to_bucket = to_workspace_id.to_string();
 
@@ -223,7 +221,18 @@ pub(crate) fn swap_local_mcp_servers_for_workspace_switch<R: tauri::Runtime>(
     let to_path = stash_file_path(app, cli_key, &to_bucket)?;
 
     match cli_key {
+        "grok" => {
+            let target_stash =
+                read_optional_file_with_max_len(&to_path, MCP_LOCAL_STASH_MAX_BYTES)?;
+            mcp_sync::swap_grok_local_servers_for_workspace(
+                app,
+                managed_server_keys,
+                &from_path,
+                target_stash,
+            )?;
+        }
         "codex" => {
+            let current_bytes = mcp_sync::read_target_bytes(app, cli_key)?;
             let input = current_bytes
                 .as_deref()
                 .map(|b| String::from_utf8_lossy(b).to_string())
@@ -244,6 +253,7 @@ pub(crate) fn swap_local_mcp_servers_for_workspace_switch<R: tauri::Runtime>(
             mcp_sync::restore_target_bytes(app, cli_key, Some(out.into_bytes()))?;
         }
         _ => {
+            let current_bytes = mcp_sync::read_target_bytes(app, cli_key)?;
             let mut root = json_root_from_bytes(current_bytes);
             let local_current = {
                 let servers_obj = json_mcp_servers_obj_mut(&mut root);

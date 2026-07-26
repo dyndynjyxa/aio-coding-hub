@@ -8,7 +8,9 @@ import {
   type CodexConfigState,
   type CodexConfigTomlState,
   type CodexConfigTomlValidationResult,
+  type CodexModelCatalogState,
   type SimpleCliInfo,
+  type GrokConfigState,
   cliManagerClaudeEnvSet,
   cliManagerClaudeHooksGet,
   cliManagerClaudeHooksSet,
@@ -20,6 +22,10 @@ import {
   cliManagerCodexConfigTomlSet,
   cliManagerCodexConfigTomlValidate,
   cliManagerCodexInfoGet,
+  cliManagerCodexModelCatalogGet,
+  cliManagerGrokConfigGet,
+  cliManagerGrokConfigSet,
+  cliManagerGrokInfoGet,
 } from "../cliManager";
 
 vi.mock("../../../generated/bindings", async () => {
@@ -32,10 +38,14 @@ vi.mock("../../../generated/bindings", async () => {
       ...actual.commands,
       cliManagerClaudeInfoGet: vi.fn(),
       cliManagerCodexInfoGet: vi.fn(),
+      cliManagerCodexModelCatalogGet: vi.fn(),
       cliManagerCodexConfigSet: vi.fn(),
       cliManagerCodexConfigTomlGet: vi.fn(),
       cliManagerCodexConfigTomlValidate: vi.fn(),
       cliManagerCodexConfigTomlSet: vi.fn(),
+      cliManagerGrokInfoGet: vi.fn(),
+      cliManagerGrokConfigGet: vi.fn(),
+      cliManagerGrokConfigSet: vi.fn(),
       cliManagerClaudeEnvSet: vi.fn(),
       cliManagerClaudeHooksGet: vi.fn(),
       cliManagerClaudeHooksSet: vi.fn(),
@@ -99,6 +109,22 @@ function makeCodexConfigState(overrides: Partial<CodexConfigState> = {}): CodexC
   };
 }
 
+function makeCodexModelCatalogState(
+  overrides: Partial<CodexModelCatalogState> = {}
+): CodexModelCatalogState {
+  return {
+    status: "ready",
+    issue: null,
+    snapshot: {
+      config_path: "/tmp/.codex/config.toml",
+      executable_path: "/usr/bin/codex",
+      cli_version: "0.0.0",
+    },
+    models: [],
+    ...overrides,
+  };
+}
+
 function makeCodexConfigTomlState(
   overrides: Partial<CodexConfigTomlState> = {}
 ): CodexConfigTomlState {
@@ -116,6 +142,35 @@ function makeCodexConfigTomlValidationResult(
   return {
     ok: true,
     error: null,
+    ...overrides,
+  };
+}
+
+function makeGrokConfigState(overrides: Partial<GrokConfigState> = {}): GrokConfigState {
+  return {
+    config_path: "/tmp/.grok/config.toml",
+    file_exists: true,
+    preferences: {
+      model_id: "grok-build",
+      api_backend: "responses",
+      context_window: null,
+      telemetry: null,
+      supports_backend_search: null,
+    },
+    aio_preferences: null,
+    effective_preferences: {
+      model_id: "grok-build",
+      api_backend: "responses",
+      context_window: null,
+      telemetry: null,
+      supports_backend_search: null,
+    },
+    preference_source: "existing_config",
+    default_profile: "grok-build",
+    session_summary_profile: null,
+    web_search_profile: null,
+    image_description_profile: null,
+    policy_files: [],
     ...overrides,
   };
 }
@@ -208,6 +263,10 @@ describe("services/cli/cliManager", () => {
       status: "ok",
       data: makeSimpleCliInfo(),
     });
+    vi.mocked(commands.cliManagerCodexModelCatalogGet).mockResolvedValue({
+      status: "ok",
+      data: makeCodexModelCatalogState(),
+    });
     vi.mocked(commands.cliManagerCodexConfigSet).mockResolvedValue({
       status: "ok",
       data: makeCodexConfigState(),
@@ -244,14 +303,49 @@ describe("services/cli/cliManager", () => {
       status: "ok",
       data: makeClaudeSettingsState(),
     });
+    vi.mocked(commands.cliManagerGrokInfoGet).mockResolvedValue({
+      status: "ok",
+      data: makeSimpleCliInfo({ executable_path: "/usr/bin/grok" }),
+    });
+    vi.mocked(commands.cliManagerGrokConfigGet).mockResolvedValue({
+      status: "ok",
+      data: makeGrokConfigState(),
+    });
+    vi.mocked(commands.cliManagerGrokConfigSet).mockResolvedValue({
+      status: "ok",
+      data: makeGrokConfigState({
+        aio_preferences: {
+          model_id: "grok-4-fast",
+          api_backend: "chat_completions",
+          context_window: null,
+          telemetry: null,
+          supports_backend_search: null,
+        },
+      }),
+    });
 
     await cliManagerCodexInfoGet();
     expect(commands.cliManagerCodexInfoGet).toHaveBeenCalledWith();
+
+    await cliManagerCodexModelCatalogGet();
+    expect(commands.cliManagerCodexModelCatalogGet).toHaveBeenCalledWith();
 
     await cliManagerCodexConfigSet({ model: "gpt-5" });
     expect(commands.cliManagerCodexConfigSet).toHaveBeenCalledWith(
       expect.objectContaining({ model: "gpt-5" })
     );
+    const ordinaryPatch = vi.mocked(commands.cliManagerCodexConfigSet).mock.calls[0]?.[0];
+    expect(ordinaryPatch).not.toHaveProperty("model_context_window");
+    expect(ordinaryPatch).not.toHaveProperty("model_auto_compact_token_limit");
+
+    vi.mocked(commands.cliManagerCodexConfigSet).mockClear();
+    await cliManagerCodexConfigSet({
+      model_context_window: null,
+      model_auto_compact_token_limit: 900_000,
+    });
+    const tokenPatch = vi.mocked(commands.cliManagerCodexConfigSet).mock.calls[0]?.[0];
+    expect(tokenPatch).toHaveProperty("model_context_window", null);
+    expect(tokenPatch).toHaveProperty("model_auto_compact_token_limit", 900_000);
 
     await cliManagerCodexConfigTomlGet();
     expect(commands.cliManagerCodexConfigTomlGet).toHaveBeenCalledWith();
@@ -287,5 +381,19 @@ describe("services/cli/cliManager", () => {
     expect(commands.cliManagerClaudeSettingsSet).toHaveBeenCalledWith(
       expect.objectContaining({ model: "claude-3" })
     );
+
+    await cliManagerGrokInfoGet();
+    expect(commands.cliManagerGrokInfoGet).toHaveBeenCalledWith();
+
+    await cliManagerGrokConfigGet();
+    expect(commands.cliManagerGrokConfigGet).toHaveBeenCalledWith();
+
+    const preferences = {
+      model_id: "grok-4-fast",
+      api_backend: "chat_completions",
+      context_window: null,
+    } as const;
+    await cliManagerGrokConfigSet(preferences);
+    expect(commands.cliManagerGrokConfigSet).toHaveBeenCalledWith(preferences);
   });
 });

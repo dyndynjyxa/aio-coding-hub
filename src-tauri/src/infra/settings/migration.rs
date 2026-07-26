@@ -142,6 +142,14 @@ pub(super) fn sanitize_log_retention_days(settings: &mut AppSettings) -> bool {
     false
 }
 
+pub(super) fn sanitize_request_log_retention_days(settings: &mut AppSettings) -> bool {
+    if settings.request_log_retention_days > MAX_REQUEST_LOG_RETENTION_DAYS {
+        settings.request_log_retention_days = MAX_REQUEST_LOG_RETENTION_DAYS;
+        return true;
+    }
+    false
+}
+
 pub(super) fn sanitize_provider_cooldown_seconds(settings: &mut AppSettings) -> bool {
     if settings.provider_cooldown_seconds > MAX_PROVIDER_COOLDOWN_SECONDS {
         settings.provider_cooldown_seconds = MAX_PROVIDER_COOLDOWN_SECONDS;
@@ -628,9 +636,44 @@ fn migrate_add_codex_oauth_compatible_proxy_mode(
     )
 }
 
+fn migrate_add_request_log_retention(
+    settings: &mut AppSettings,
+    schema_version_present: bool,
+) -> bool {
+    // v34: Add request-log DB retention days (default 0 = keep forever).
+    migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_REQUEST_LOG_RETENTION,
+    )
+}
+
+fn migrate_add_grok_proxy_preferences(
+    settings: &mut AppSettings,
+    schema_version_present: bool,
+) -> bool {
+    migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_GROK_PROXY_PREFERENCES,
+    )
+}
+
+fn migrate_add_image_gen_storage_dir(
+    settings: &mut AppSettings,
+    schema_version_present: bool,
+) -> bool {
+    // v36: Add image gen storage dir override (default None = app data dir/image-gen).
+    migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_IMAGE_GEN_STORAGE_DIR,
+    )
+}
+
 type SettingsMigration = fn(&mut AppSettings, bool) -> bool;
 
-const SETTINGS_MIGRATIONS: [SettingsMigration; 27] = [
+const SETTINGS_MIGRATIONS: [SettingsMigration; 30] = [
     migrate_disable_upstream_timeouts,
     migrate_add_gateway_rectifiers,
     migrate_add_circuit_breaker_notice,
@@ -658,6 +701,9 @@ const SETTINGS_MIGRATIONS: [SettingsMigration; 27] = [
     migrate_add_upstream_proxy,
     migrate_add_upstream_proxy_credentials,
     migrate_add_codex_oauth_compatible_proxy_mode,
+    migrate_add_request_log_retention,
+    migrate_add_grok_proxy_preferences,
+    migrate_add_image_gen_storage_dir,
 ];
 
 fn apply_settings_migrations(settings: &mut AppSettings, schema_version_present: bool) -> bool {
@@ -675,6 +721,7 @@ pub(super) fn repair_settings(
 ) -> AppResult<bool> {
     let mut repaired = apply_settings_migrations(settings, schema_version_present);
     repaired |= sanitize_log_retention_days(settings);
+    repaired |= sanitize_request_log_retention_days(settings);
     repaired |= sanitize_failover_settings(settings);
     repaired |= sanitize_circuit_breaker_settings(settings);
     repaired |= sanitize_provider_cooldown_seconds(settings);
@@ -1235,7 +1282,8 @@ mod tests {
             vec![
                 "codex".to_string(),
                 "claude".to_string(),
-                "gemini".to_string()
+                "gemini".to_string(),
+                "grok".to_string()
             ]
         );
     }
@@ -1250,6 +1298,36 @@ mod tests {
         assert!(migrate_add_cli_priority_order(&mut s, true));
         assert_eq!(s.schema_version, SCHEMA_VERSION_ADD_CLI_PRIORITY_ORDER);
         assert_eq!(s.cli_priority_order, default_cli_priority_order());
+    }
+
+    #[test]
+    fn migrate_add_grok_proxy_preferences_bumps_schema_without_initializing_preferences() {
+        let mut settings = AppSettings {
+            schema_version: SCHEMA_VERSION_ADD_REQUEST_LOG_RETENTION,
+            ..Default::default()
+        };
+
+        assert!(migrate_add_grok_proxy_preferences(&mut settings, true));
+        assert_eq!(
+            settings.schema_version,
+            SCHEMA_VERSION_ADD_GROK_PROXY_PREFERENCES
+        );
+        assert_eq!(settings.grok_proxy_preferences, None);
+    }
+
+    #[test]
+    fn migrate_add_image_gen_storage_dir_bumps_schema_without_initializing_dir() {
+        let mut settings = AppSettings {
+            schema_version: SCHEMA_VERSION_ADD_GROK_PROXY_PREFERENCES,
+            ..Default::default()
+        };
+
+        assert!(migrate_add_image_gen_storage_dir(&mut settings, true));
+        assert_eq!(
+            settings.schema_version,
+            SCHEMA_VERSION_ADD_IMAGE_GEN_STORAGE_DIR
+        );
+        assert_eq!(settings.image_gen_storage_dir, None);
     }
 
     #[test]

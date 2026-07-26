@@ -1,114 +1,48 @@
 import { GatewayErrorCodes } from "../../constants/gatewayErrorCodes";
-import { gatewayEventNames } from "../../constants/gatewayEvents";
+import { GATEWAY_EVENT_TEXT_LIMITS, gatewayEventNames } from "../../constants/gatewayEvents";
 import { computeOutputTokensPerSecond as computeOutputTokensPerSecondRaw } from "../../utils/formatters";
 import { logToConsole, shouldLogToConsole } from "../consoleLog";
+import { maybeSendCircuitBreakerNotice } from "./circuitNotice";
+import { parseCircuitState } from "./circuitState";
 import { subscribeGatewayEvent } from "./gatewayEventBus";
 import { ingestTraceAttempt, ingestTraceRequest, ingestTraceStart } from "./traceStore";
 import { ingestCacheAnomalyRequest, ingestCacheAnomalyRequestStart } from "./cacheAnomalyMonitor";
 import type { ClaudeModelMapping } from "./claudeModelMapping";
 import { MAX_ATTEMPTS_PER_TRACE } from "./traceLimits";
+import type {
+  FailoverAttempt,
+  GatewayAttemptEvent,
+  GatewayCircuitEvent,
+  GatewayLogEvent,
+  GatewayRequestEvent as GeneratedGatewayRequestEvent,
+  GatewayRequestSignalEvent as GeneratedGatewayRequestSignalEvent,
+  GatewayRequestStartEvent,
+} from "../../generated/bindings";
 
 export type { ClaudeModelMapping } from "./claudeModelMapping";
 
-export type GatewayAttempt = {
-  provider_id: number;
-  provider_name: string;
-  base_url: string;
-  outcome: string;
-  status: number | null;
-};
+// 事件 payload 类型以生成 bindings 为唯一基准（Rust 改字段 → 前端 typecheck 翻红）。
+// 运行时 guard/normalizer 保留：payload 仍需运行时校验，类型基准为生成类型。
+export type {
+  GatewayAttemptEvent,
+  GatewayCircuitEvent,
+  GatewayLogEvent,
+  GatewayRequestStartEvent,
+} from "../../generated/bindings";
 
-export type GatewayRequestEvent = {
-  trace_id: string;
-  cli_key: string;
-  session_id?: string | null;
-  method: string;
-  path: string;
-  query: string | null;
-  requested_model?: string | null;
-  status: number | null;
-  error_category: string | null;
-  error_code: string | null;
-  duration_ms: number;
-  ttfb_ms?: number | null;
+// normalizeGatewayAttempt 仅保留核心字段，attempts 收窄为 FailoverAttempt 的子集。
+export type GatewayAttempt = Pick<
+  FailoverAttempt,
+  "provider_id" | "provider_name" | "base_url" | "outcome" | "status"
+>;
+
+export type GatewayRequestEvent = Omit<GeneratedGatewayRequestEvent, "attempts"> & {
   attempts: GatewayAttempt[];
-  input_tokens?: number | null;
-  output_tokens?: number | null;
-  total_tokens?: number | null;
-  cache_read_input_tokens?: number | null;
-  cache_creation_input_tokens?: number | null;
-  cache_creation_5m_input_tokens?: number | null;
-  cache_creation_1h_input_tokens?: number | null;
-  claude_model_mapping?: ClaudeModelMapping | null;
 };
 
-export type GatewayRequestStartEvent = {
-  trace_id: string;
-  cli_key: string;
-  session_id?: string | null;
-  method: string;
-  path: string;
-  query: string | null;
-  requested_model?: string | null;
-  ts: number;
-};
-
-export type GatewayRequestSignalEvent = {
-  trace_id: string;
-  cli_key: string;
-  session_id?: string | null;
-  requested_model?: string | null;
+// phase 在 Rust 侧是 &'static str（生成为 string），由运行时 normalizer 收窄为字面量联合。
+export type GatewayRequestSignalEvent = Omit<GeneratedGatewayRequestSignalEvent, "phase"> & {
   phase: "start" | "complete";
-  ts: number;
-};
-
-export type GatewayAttemptEvent = {
-  trace_id: string;
-  cli_key: string;
-  session_id?: string | null;
-  method: string;
-  path: string;
-  query: string | null;
-  requested_model?: string | null;
-  attempt_index: number;
-  provider_id: number;
-  session_reuse?: boolean | null;
-  provider_name: string;
-  base_url: string;
-  outcome: string;
-  status: number | null;
-  attempt_started_ms: number;
-  attempt_duration_ms: number;
-  circuit_state_before?: string | null;
-  circuit_state_after?: string | null;
-  circuit_failure_count?: number | null;
-  circuit_failure_threshold?: number | null;
-  claude_model_mapping?: ClaudeModelMapping | null;
-};
-
-export type GatewayLogEvent = {
-  level: string;
-  error_code: string;
-  message: string;
-  requested_port: number;
-  bound_port: number;
-  base_url: string;
-};
-
-export type GatewayCircuitEvent = {
-  trace_id: string;
-  cli_key: string;
-  provider_id: number;
-  provider_name: string;
-  base_url: string;
-  prev_state: string;
-  next_state: string;
-  failure_count: number;
-  failure_threshold: number;
-  open_until: number | null;
-  cooldown_until?: number | null;
-  reason: string;
-  ts: number;
 };
 
 function normalizeLogLevel(level: unknown): "debug" | "info" | "warn" | "error" {
@@ -116,14 +50,8 @@ function normalizeLogLevel(level: unknown): "debug" | "info" | "warn" | "error" 
   return "info";
 }
 
-function normalizeCircuitState(state: string | null | undefined) {
-  if (!state) return null;
-  if (state === "OPEN" || state === "CLOSED" || state === "HALF_OPEN") return state;
-  return null;
-}
-
 function circuitStateText(state: string | null | undefined) {
-  const normalized = normalizeCircuitState(state);
+  const normalized = parseCircuitState(state);
   if (normalized === "OPEN") return "熔断";
   if (normalized === "HALF_OPEN") return "半开";
   if (normalized === "CLOSED") return "正常";
@@ -171,13 +99,15 @@ function computeOutputTokensPerSecond(payload: GatewayRequestEvent) {
 
 type GatewayEventGuard<TPayload> = (payload: unknown) => payload is TPayload;
 
-const EVENT_ID_MAX_LENGTH = 256;
-const EVENT_METHOD_MAX_LENGTH = 32;
-const EVENT_STATE_MAX_LENGTH = 64;
-const EVENT_SHORT_TEXT_MAX_LENGTH = 512;
-const EVENT_PATH_MAX_LENGTH = 2048;
-const EVENT_QUERY_MAX_LENGTH = 4096;
-const EVENT_URL_MAX_LENGTH = 2048;
+const {
+  ID_MAX_LENGTH: EVENT_ID_MAX_LENGTH,
+  METHOD_MAX_LENGTH: EVENT_METHOD_MAX_LENGTH,
+  STATE_MAX_LENGTH: EVENT_STATE_MAX_LENGTH,
+  SHORT_TEXT_MAX_LENGTH: EVENT_SHORT_TEXT_MAX_LENGTH,
+  PATH_MAX_LENGTH: EVENT_PATH_MAX_LENGTH,
+  QUERY_MAX_LENGTH: EVENT_QUERY_MAX_LENGTH,
+  URL_MAX_LENGTH: EVENT_URL_MAX_LENGTH,
+} = GATEWAY_EVENT_TEXT_LIMITS;
 
 const CIRCUIT_NON_TRANSITION_DEDUP_WINDOW_MS = 3000;
 const CIRCUIT_NON_TRANSITION_DEDUP_MAX_ENTRIES = 500;
@@ -309,7 +239,9 @@ function normalizeGatewayAttempt(payload: unknown): GatewayAttempt | null {
   };
 }
 
-function normalizeGatewayRequestStartEvent(payload: unknown): GatewayRequestStartEvent | null {
+export function normalizeGatewayRequestStartEvent(
+  payload: unknown
+): GatewayRequestStartEvent | null {
   if (!isRecord(payload)) return null;
   if (
     !isStringWithin(payload.trace_id, EVENT_ID_MAX_LENGTH) ||
@@ -327,11 +259,12 @@ function normalizeGatewayRequestStartEvent(payload: unknown): GatewayRequestStar
   return {
     trace_id: payload.trace_id,
     cli_key: payload.cli_key,
-    session_id: truncateNullableString(payload.session_id, EVENT_ID_MAX_LENGTH),
+    session_id: truncateNullableString(payload.session_id, EVENT_ID_MAX_LENGTH) ?? null,
     method: truncateString(payload.method, EVENT_METHOD_MAX_LENGTH),
     path: truncateString(payload.path, EVENT_PATH_MAX_LENGTH),
     query: truncateNullableString(payload.query, EVENT_QUERY_MAX_LENGTH) ?? null,
-    requested_model: truncateNullableString(payload.requested_model, EVENT_SHORT_TEXT_MAX_LENGTH),
+    requested_model:
+      truncateNullableString(payload.requested_model, EVENT_SHORT_TEXT_MAX_LENGTH) ?? null,
     ts: payload.ts,
   };
 }
@@ -364,14 +297,15 @@ export function normalizeGatewayRequestSignalEvent(
   return {
     trace_id: payload.trace_id,
     cli_key: payload.cli_key,
-    session_id: truncateNullableString(payload.session_id, EVENT_ID_MAX_LENGTH),
-    requested_model: truncateNullableString(payload.requested_model, EVENT_SHORT_TEXT_MAX_LENGTH),
+    session_id: truncateNullableString(payload.session_id, EVENT_ID_MAX_LENGTH) ?? null,
+    requested_model:
+      truncateNullableString(payload.requested_model, EVENT_SHORT_TEXT_MAX_LENGTH) ?? null,
     phase: payload.phase,
     ts: payload.ts,
   };
 }
 
-function normalizeGatewayAttemptEvent(payload: unknown): GatewayAttemptEvent | null {
+export function normalizeGatewayAttemptEvent(payload: unknown): GatewayAttemptEvent | null {
   if (!isRecord(payload)) return null;
   if (
     !isStringWithin(payload.trace_id, EVENT_ID_MAX_LENGTH) ||
@@ -402,35 +336,32 @@ function normalizeGatewayAttemptEvent(payload: unknown): GatewayAttemptEvent | n
   return {
     trace_id: payload.trace_id,
     cli_key: payload.cli_key,
-    session_id: truncateNullableString(payload.session_id, EVENT_ID_MAX_LENGTH),
+    session_id: truncateNullableString(payload.session_id, EVENT_ID_MAX_LENGTH) ?? null,
     method: truncateString(payload.method, EVENT_METHOD_MAX_LENGTH),
     path: truncateString(payload.path, EVENT_PATH_MAX_LENGTH),
     query: truncateNullableString(payload.query, EVENT_QUERY_MAX_LENGTH) ?? null,
-    requested_model: truncateNullableString(payload.requested_model, EVENT_SHORT_TEXT_MAX_LENGTH),
+    requested_model:
+      truncateNullableString(payload.requested_model, EVENT_SHORT_TEXT_MAX_LENGTH) ?? null,
     attempt_index: payload.attempt_index,
     provider_id: payload.provider_id,
-    session_reuse: payload.session_reuse,
+    session_reuse: payload.session_reuse ?? null,
     provider_name: truncateString(payload.provider_name, EVENT_SHORT_TEXT_MAX_LENGTH),
     base_url: truncateString(payload.base_url, EVENT_URL_MAX_LENGTH),
     outcome: truncateString(payload.outcome, EVENT_STATE_MAX_LENGTH),
     status: payload.status ?? null,
     attempt_started_ms: payload.attempt_started_ms,
     attempt_duration_ms: payload.attempt_duration_ms,
-    circuit_state_before: truncateNullableString(
-      payload.circuit_state_before,
-      EVENT_STATE_MAX_LENGTH
-    ),
-    circuit_state_after: truncateNullableString(
-      payload.circuit_state_after,
-      EVENT_STATE_MAX_LENGTH
-    ),
-    circuit_failure_count: payload.circuit_failure_count,
-    circuit_failure_threshold: payload.circuit_failure_threshold,
-    claude_model_mapping: payload.claude_model_mapping,
+    circuit_state_before:
+      truncateNullableString(payload.circuit_state_before, EVENT_STATE_MAX_LENGTH) ?? null,
+    circuit_state_after:
+      truncateNullableString(payload.circuit_state_after, EVENT_STATE_MAX_LENGTH) ?? null,
+    circuit_failure_count: payload.circuit_failure_count ?? null,
+    circuit_failure_threshold: payload.circuit_failure_threshold ?? null,
+    claude_model_mapping: payload.claude_model_mapping ?? null,
   };
 }
 
-function normalizeGatewayRequestEvent(payload: unknown): GatewayRequestEvent | null {
+export function normalizeGatewayRequestEvent(payload: unknown): GatewayRequestEvent | null {
   if (!isRecord(payload)) return null;
   const attempts = payload.attempts;
   if (!Array.isArray(attempts)) return null;
@@ -462,38 +393,41 @@ function normalizeGatewayRequestEvent(payload: unknown): GatewayRequestEvent | n
     isNullableNumber(payload.cache_creation_input_tokens) &&
     isNullableNumber(payload.cache_creation_5m_input_tokens) &&
     isNullableNumber(payload.cache_creation_1h_input_tokens) &&
+    isNullableNumber(payload.effective_input_tokens) &&
     isNullableClaudeModelMapping(payload.claude_model_mapping)
   ) {
     return {
       trace_id: payload.trace_id,
       cli_key: payload.cli_key,
-      session_id: truncateNullableString(payload.session_id, EVENT_ID_MAX_LENGTH),
+      session_id: truncateNullableString(payload.session_id, EVENT_ID_MAX_LENGTH) ?? null,
       method: truncateString(payload.method, EVENT_METHOD_MAX_LENGTH),
       path: truncateString(payload.path, EVENT_PATH_MAX_LENGTH),
       query: truncateNullableString(payload.query, EVENT_QUERY_MAX_LENGTH) ?? null,
-      requested_model: truncateNullableString(payload.requested_model, EVENT_SHORT_TEXT_MAX_LENGTH),
+      requested_model:
+        truncateNullableString(payload.requested_model, EVENT_SHORT_TEXT_MAX_LENGTH) ?? null,
       status: payload.status ?? null,
       error_category:
         truncateNullableString(payload.error_category, EVENT_SHORT_TEXT_MAX_LENGTH) ?? null,
       error_code: truncateNullableString(payload.error_code, EVENT_SHORT_TEXT_MAX_LENGTH) ?? null,
       duration_ms: payload.duration_ms,
-      ttfb_ms: payload.ttfb_ms,
+      ttfb_ms: payload.ttfb_ms ?? null,
       attempts: validAttempts,
-      input_tokens: payload.input_tokens,
-      output_tokens: payload.output_tokens,
-      total_tokens: payload.total_tokens,
-      cache_read_input_tokens: payload.cache_read_input_tokens,
-      cache_creation_input_tokens: payload.cache_creation_input_tokens,
-      cache_creation_5m_input_tokens: payload.cache_creation_5m_input_tokens,
-      cache_creation_1h_input_tokens: payload.cache_creation_1h_input_tokens,
-      claude_model_mapping: payload.claude_model_mapping,
+      input_tokens: payload.input_tokens ?? null,
+      output_tokens: payload.output_tokens ?? null,
+      total_tokens: payload.total_tokens ?? null,
+      cache_read_input_tokens: payload.cache_read_input_tokens ?? null,
+      cache_creation_input_tokens: payload.cache_creation_input_tokens ?? null,
+      cache_creation_5m_input_tokens: payload.cache_creation_5m_input_tokens ?? null,
+      cache_creation_1h_input_tokens: payload.cache_creation_1h_input_tokens ?? null,
+      effective_input_tokens: payload.effective_input_tokens ?? null,
+      claude_model_mapping: payload.claude_model_mapping ?? null,
     };
   }
 
   return null;
 }
 
-function isGatewayLogEvent(payload: unknown): payload is GatewayLogEvent {
+export function isGatewayLogEvent(payload: unknown): payload is GatewayLogEvent {
   if (!isRecord(payload)) return false;
   return (
     isStringWithin(payload.level, EVENT_STATE_MAX_LENGTH) &&
@@ -505,7 +439,7 @@ function isGatewayLogEvent(payload: unknown): payload is GatewayLogEvent {
   );
 }
 
-function isGatewayCircuitEvent(payload: unknown): payload is GatewayCircuitEvent {
+export function isGatewayCircuitEvent(payload: unknown): payload is GatewayCircuitEvent {
   if (!isRecord(payload)) return false;
   return (
     isStringWithin(payload.trace_id, EVENT_ID_MAX_LENGTH) &&
@@ -520,7 +454,9 @@ function isGatewayCircuitEvent(payload: unknown): payload is GatewayCircuitEvent
     isNullableNumber(payload.open_until) &&
     isNullableNumber(payload.cooldown_until) &&
     isStringWithin(payload.reason, EVENT_SHORT_TEXT_MAX_LENGTH) &&
-    isNumber(payload.ts)
+    isNumber(payload.ts) &&
+    isNullableStringWithin(payload.trigger_error_code, EVENT_SHORT_TEXT_MAX_LENGTH) &&
+    isNullableNumber(payload.first_byte_timeout_secs)
   );
 }
 
@@ -705,8 +641,11 @@ export async function listenGatewayEvents(): Promise<() => void> {
     );
     if (!payload) return;
 
-    const prevNormalized = normalizeCircuitState(payload.prev_state);
-    const nextNormalized = normalizeCircuitState(payload.next_state);
+    // 状态跃迁时按开关发送系统通知（内部含 prev != next 与开关判断）。
+    void maybeSendCircuitBreakerNotice(payload);
+
+    const prevNormalized = parseCircuitState(payload.prev_state);
+    const nextNormalized = parseCircuitState(payload.next_state);
     const from = circuitStateText(prevNormalized);
     const to = circuitStateText(nextNormalized);
     const provider = payload.provider_name || "未知";

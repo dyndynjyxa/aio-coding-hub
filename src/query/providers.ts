@@ -71,15 +71,34 @@ export function useProviderOAuthStatusQuery(
 }
 
 export async function fetchProviderOAuthStatus(
-  queryClient: ReturnType<typeof useQueryClient>,
+  queryClient: QueryClient,
   providerId: number | null
 ) {
   if (providerId == null) return null;
   const normalizedProviderId = validateProviderId(providerId);
+  const queryKey = providersKeys.oauthStatus(normalizedProviderId);
+  // 登录/刷新 Token 后必须拿到服务端最新状态：全局 staleTime 为 5 分钟，
+  // 默认 fetchQuery 会直接返回刷新前的缓存。先取消在途请求（它可能带着
+  // 旧 expires_at 稍后落地覆盖缓存），再以 staleTime: 0 强制重新拉取。
+  await queryClient.cancelQueries({ queryKey });
   return queryClient.fetchQuery({
-    queryKey: providersKeys.oauthStatus(normalizedProviderId),
+    queryKey,
     queryFn: () => providerOAuthStatus(normalizedProviderId),
+    staleTime: 0,
   });
+}
+
+/** 将 OAuth 状态直接写入缓存（断开连接、登录后状态读取失败等本地已知结论的场景）。 */
+export function writeProviderOAuthStatusCache(
+  queryClient: QueryClient,
+  providerId: number | null,
+  status: Awaited<ReturnType<typeof providerOAuthStatus>> | null
+) {
+  if (providerId == null) return;
+  const queryKey = providersKeys.oauthStatus(validateProviderId(providerId));
+  // 同样先取消在途请求，避免旧响应稍后覆盖这次写入。
+  void queryClient.cancelQueries({ queryKey });
+  queryClient.setQueryData(queryKey, status);
 }
 
 const EMPTY_OAUTH_LIMITS_RESULT: OAuthLimitsResult = {

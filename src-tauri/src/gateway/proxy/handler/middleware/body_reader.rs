@@ -39,8 +39,13 @@ impl BodyReaderMiddleware {
                 ctx.body_bytes = bytes;
             }
             Err(err) => {
-                ctx.observe_request =
-                    compute_observe_request(&ctx.cli_key, &ctx.forwarded_path, &ctx.headers, None);
+                ctx.observe_request = compute_observe_request(
+                    &ctx.cli_key,
+                    &ctx.req_method,
+                    &ctx.forwarded_path,
+                    &ctx.headers,
+                    None,
+                );
                 let contract = early_error_contract(EarlyErrorKind::BodyTooLarge);
                 let log_ctx = build_early_error_log_ctx(&ctx);
 

@@ -1,6 +1,37 @@
 //! Usage: Parse upstream usage/model information from JSON and SSE streams.
 
+use crate::shared::cli_key::CliKey;
 use serde_json::{json, Value};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UsageSemantics {
+    OpenAi,
+    Claude,
+    Gemini,
+    Other,
+}
+
+impl UsageSemantics {
+    fn from_cli_key(cli_key: &str) -> Self {
+        match CliKey::parse(cli_key) {
+            Ok(CliKey::Codex | CliKey::Grok) => Self::OpenAi,
+            Ok(CliKey::Claude) => Self::Claude,
+            Ok(CliKey::Gemini) => Self::Gemini,
+            Err(_) => Self::Other,
+        }
+    }
+}
+
+const OPENAI_CACHE_CREATION_ALIASES: [&str; 8] = [
+    "/cache_creation_input_tokens",
+    "/cache_write_input_tokens",
+    "/cache_creation_tokens",
+    "/cache_write_tokens",
+    "/input_tokens_details/cache_creation_tokens",
+    "/input_tokens_details/cache_write_tokens",
+    "/prompt_tokens_details/cache_creation_tokens",
+    "/prompt_tokens_details/cache_write_tokens",
+];
 
 #[derive(Debug, Clone, Default)]
 pub struct UsageMetrics {
@@ -26,6 +57,22 @@ fn as_i64(value: Option<&Value>) -> Option<i64> {
             .or_else(|| n.as_u64().and_then(|v| i64::try_from(v).ok())),
         _ => None,
     }
+}
+
+pub(crate) fn extract_openai_cache_creation_input_tokens(value: &Value) -> Option<i64> {
+    let mut saw_zero = false;
+
+    for pointer in OPENAI_CACHE_CREATION_ALIASES {
+        let Some(tokens) = as_i64(value.pointer(pointer)).filter(|tokens| *tokens >= 0) else {
+            continue;
+        };
+        if tokens > 0 {
+            return Some(tokens);
+        }
+        saw_zero = true;
+    }
+
+    saw_zero.then_some(0)
 }
 
 fn has_any_metric(metrics: &UsageMetrics) -> bool {
@@ -126,7 +173,7 @@ pub fn parse_model_from_json_bytes(body: &[u8]) -> Option<String> {
     None
 }
 
-fn extract_usage_metrics(value: &Value) -> Option<UsageMetrics> {
+fn extract_usage_metrics(value: &Value, semantics: UsageSemantics) -> Option<UsageMetrics> {
     let obj = value.as_object()?;
 
     let mut metrics = UsageMetrics::default();
@@ -170,9 +217,11 @@ fn extract_usage_metrics(value: &Value) -> Option<UsageMetrics> {
         .cache_read_input_tokens
         .or_else(|| as_i64(obj.get("cache_read_input_tokens")));
 
-    metrics.cache_creation_input_tokens = metrics
-        .cache_creation_input_tokens
-        .or_else(|| as_i64(obj.get("cache_creation_input_tokens")));
+    metrics.cache_creation_input_tokens = if semantics == UsageSemantics::OpenAi {
+        extract_openai_cache_creation_input_tokens(value)
+    } else {
+        as_i64(obj.get("cache_creation_input_tokens"))
+    };
 
     metrics.cache_creation_5m_input_tokens = metrics.cache_creation_5m_input_tokens.or_else(|| {
         as_i64(obj.get("cache_creation_5m_input_tokens"))
@@ -228,33 +277,48 @@ fn extract_usage_metrics(value: &Value) -> Option<UsageMetrics> {
     }
 }
 
-fn extract_from_json_value(value: &Value) -> Option<UsageMetrics> {
+fn extract_from_json_value(value: &Value, semantics: UsageSemantics) -> Option<UsageMetrics> {
     // The input `value` might be a full response, a partial wrapper, or already a usage object.
-    if let Some(metrics) = extract_usage_metrics(value) {
+    if let Some(metrics) = extract_usage_metrics(value, semantics) {
         return Some(metrics);
     }
 
     // Object root: prioritize well-known usage containers.
     if let Some(obj) = value.as_object() {
-        if let Some(usage) = obj.get("usage").and_then(extract_usage_metrics) {
+        if let Some(usage) = obj
+            .get("usage")
+            .and_then(|value| extract_usage_metrics(value, semantics))
+        {
             return Some(usage);
         }
-        if let Some(usage_meta) = obj.get("usageMetadata").and_then(extract_usage_metrics) {
+        if let Some(usage_meta) = obj
+            .get("usageMetadata")
+            .and_then(|value| extract_usage_metrics(value, semantics))
+        {
             return Some(usage_meta);
         }
 
         if let Some(resp) = obj.get("response") {
-            if let Some(usage) = resp.get("usage").and_then(extract_usage_metrics) {
+            if let Some(usage) = resp
+                .get("usage")
+                .and_then(|value| extract_usage_metrics(value, semantics))
+            {
                 return Some(usage);
             }
-            if let Some(usage_meta) = resp.get("usageMetadata").and_then(extract_usage_metrics) {
+            if let Some(usage_meta) = resp
+                .get("usageMetadata")
+                .and_then(|value| extract_usage_metrics(value, semantics))
+            {
                 return Some(usage_meta);
             }
         }
 
         if let Some(output) = obj.get("output").and_then(|v| v.as_array()) {
             for item in output {
-                if let Some(usage) = item.get("usage").and_then(extract_usage_metrics) {
+                if let Some(usage) = item
+                    .get("usage")
+                    .and_then(|value| extract_usage_metrics(value, semantics))
+                {
                     return Some(usage);
                 }
             }
@@ -264,13 +328,16 @@ fn extract_from_json_value(value: &Value) -> Option<UsageMetrics> {
     // Array root: scan items (best-effort).
     if let Some(arr) = value.as_array() {
         for item in arr {
-            if let Some(usage) = item.get("usage").and_then(extract_usage_metrics) {
+            if let Some(usage) = item
+                .get("usage")
+                .and_then(|value| extract_usage_metrics(value, semantics))
+            {
                 return Some(usage);
             }
             if let Some(data_usage) = item
                 .get("data")
                 .and_then(|v| v.get("usage"))
-                .and_then(extract_usage_metrics)
+                .and_then(|value| extract_usage_metrics(value, semantics))
             {
                 return Some(data_usage);
             }
@@ -280,9 +347,9 @@ fn extract_from_json_value(value: &Value) -> Option<UsageMetrics> {
     None
 }
 
-pub fn parse_usage_from_json_bytes(body: &[u8]) -> Option<UsageExtract> {
+pub fn parse_usage_from_json_bytes(cli_key: &str, body: &[u8]) -> Option<UsageExtract> {
     let value: Value = serde_json::from_slice(body).ok()?;
-    let metrics = extract_from_json_value(&value)?;
+    let metrics = extract_from_json_value(&value, UsageSemantics::from_cli_key(cli_key))?;
     Some(UsageExtract {
         usage_json: normalize_usage_json(&metrics),
         metrics,
@@ -290,7 +357,7 @@ pub fn parse_usage_from_json_bytes(body: &[u8]) -> Option<UsageExtract> {
 }
 
 pub fn parse_usage_from_json_or_sse_bytes(cli_key: &str, body: &[u8]) -> Option<UsageExtract> {
-    parse_usage_from_json_bytes(body).or_else(|| {
+    parse_usage_from_json_bytes(cli_key, body).or_else(|| {
         let mut tracker = SseUsageTracker::new(cli_key);
         tracker.ingest_chunk(body);
         tracker.finalize()
@@ -328,7 +395,7 @@ fn merge_metrics(base: &UsageMetrics, patch: &UsageMetrics) -> UsageMetrics {
 
 #[derive(Debug)]
 pub struct SseUsageTracker {
-    is_claude: bool,
+    semantics: UsageSemantics,
     buffer: Vec<u8>,
     current_event: Vec<u8>,
     current_data: Vec<u8>,
@@ -431,7 +498,7 @@ fn is_non_empty_marker_value(value: &Value) -> bool {
 impl SseUsageTracker {
     pub fn new(cli_key: &str) -> Self {
         Self {
-            is_claude: cli_key == "claude",
+            semantics: UsageSemantics::from_cli_key(cli_key),
             buffer: Vec::new(),
             current_event: Vec::new(),
             current_data: Vec::new(),
@@ -693,13 +760,15 @@ impl SseUsageTracker {
         }
 
         // Claude SSE: merge message_start + message_delta usage
-        if self.is_claude {
+        if self.semantics == UsageSemantics::Claude {
             if event == b"message_start" {
                 let usage_value = data
                     .get("message")
                     .and_then(|m| m.get("usage"))
                     .or_else(|| data.get("usage"));
-                if let Some(metrics) = usage_value.and_then(extract_usage_metrics) {
+                if let Some(metrics) =
+                    usage_value.and_then(|value| extract_usage_metrics(value, self.semantics))
+                {
                     self.claude_message_start = Some(match &self.claude_message_start {
                         Some(prev) => merge_metrics(prev, &metrics),
                         None => metrics,
@@ -712,7 +781,9 @@ impl SseUsageTracker {
                 let usage_value = data
                     .get("usage")
                     .or_else(|| data.get("delta").and_then(|d| d.get("usage")));
-                if let Some(metrics) = usage_value.and_then(extract_usage_metrics) {
+                if let Some(metrics) =
+                    usage_value.and_then(|value| extract_usage_metrics(value, self.semantics))
+                {
                     self.claude_message_delta = Some(match &self.claude_message_delta {
                         Some(prev) => merge_metrics(prev, &metrics),
                         None => metrics,
@@ -728,7 +799,9 @@ impl SseUsageTracker {
                 .and_then(|m| m.get("usage"))
                 .or_else(|| data.get("usage"))
                 .or_else(|| data.get("delta").and_then(|d| d.get("usage")));
-            if let Some(metrics) = usage_value.and_then(extract_usage_metrics) {
+            if let Some(metrics) =
+                usage_value.and_then(|value| extract_usage_metrics(value, self.semantics))
+            {
                 self.last_generic = Some(match &self.last_generic {
                     Some(prev) => merge_metrics(prev, &metrics),
                     None => metrics,
@@ -738,7 +811,7 @@ impl SseUsageTracker {
         }
 
         // Generic SSE: attempt to extract usage/usageMetadata from the event payload.
-        if let Some(metrics) = extract_from_json_value(data) {
+        if let Some(metrics) = extract_from_json_value(data, self.semantics) {
             self.last_generic = Some(metrics);
         }
     }
@@ -760,7 +833,7 @@ impl SseUsageTracker {
         // Flush any trailing buffered event if the stream ended without a blank line.
         self.flush_event();
 
-        let merged = if self.is_claude {
+        let merged = if self.semantics == UsageSemantics::Claude {
             match (&self.claude_message_start, &self.claude_message_delta) {
                 (Some(start), Some(delta)) => Some(merge_metrics(start, delta)),
                 (Some(start), None) => Some(start.clone()),

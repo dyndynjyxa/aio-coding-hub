@@ -55,6 +55,37 @@ describe("ui/TabList", () => {
     expect(tabs[1]).not.toHaveClass("bg-primary");
   });
 
+  it("keeps the default size compact and uses semantic container tokens", () => {
+    render(<TabList ariaLabel="tabs" items={[...defaultItems]} value="tab1" onChange={() => {}} />);
+
+    expect(screen.getByRole("tablist")).toHaveClass("rounded-lg", "border-border", "bg-secondary");
+    expect(screen.getByRole("tab", { name: "Tab One" })).toHaveClass("text-sm", "px-3", "py-1.5");
+    expect(screen.getByRole("tab", { name: "Tab One" })).not.toHaveClass("text-base");
+  });
+
+  it("renders the compact variant with semantic borders and equal columns", () => {
+    render(
+      <TabList
+        ariaLabel="compact tabs"
+        items={[...defaultItems]}
+        value="tab1"
+        onChange={() => {}}
+        variant="compact"
+      />
+    );
+
+    expect(screen.getByRole("tablist")).toHaveClass(
+      "grid",
+      "rounded-lg",
+      "border-border",
+      "bg-secondary"
+    );
+    expect(screen.getByRole("tablist")).toHaveStyle({
+      gridTemplateColumns: "repeat(3, 1fr)",
+    });
+    expect(screen.getByRole("tab", { name: "Tab One" })).toHaveClass("border-border");
+  });
+
   it("supports keyboard tab navigation", () => {
     const onChange = vi.fn();
     render(<TabList ariaLabel="tabs" items={[...defaultItems]} value="tab2" onChange={onChange} />);

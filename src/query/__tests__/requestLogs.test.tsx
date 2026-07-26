@@ -12,6 +12,7 @@ import {
   requestLogsListAll,
   type RequestLogSummary,
 } from "../../services/gateway/requestLogs";
+import { activeRequestLogsSnapshot } from "../../services/gateway/activeRequests";
 import {
   createRequestLogDetail,
   createRequestLogSummary as createRequestLogSummaryFixture,
@@ -23,6 +24,7 @@ import {
   REQUEST_LOG_DETAIL_GC_TIME_MS,
   REQUEST_LOG_DETAIL_STALE_TIME_MS,
   useRequestAttemptLogsByTraceIdQuery,
+  useActiveRequestLogsSnapshotQuery,
   useRequestLogDetailQuery,
   useRequestLogsIncrementalRefreshMutation,
   useRequestLogsListAllQuery,
@@ -40,6 +42,10 @@ vi.mock("../../services/gateway/requestLogs", async () => {
     requestAttemptLogsByTraceId: vi.fn(),
   };
 });
+
+vi.mock("../../services/gateway/activeRequests", () => ({
+  activeRequestLogsSnapshot: vi.fn(),
+}));
 
 function makeRequestLogSummary(
   overrides: Parameters<typeof createRequestLogSummaryFixture>[0] = {}
@@ -173,6 +179,51 @@ describe("query/requestLogs", () => {
     await Promise.resolve();
 
     expect(requestLogsListAll).not.toHaveBeenCalled();
+  });
+
+  it("loads active request snapshots into their own query bucket", async () => {
+    setTauriRuntime();
+
+    vi.mocked(activeRequestLogsSnapshot).mockResolvedValue([
+      {
+        trace_id: "trace-active",
+        cli_key: "codex",
+        method: "POST",
+        path: "/v1/responses",
+        query: null,
+        session_id: "sess-1",
+        requested_model: "gpt-5",
+        created_at_ms: 1_000,
+        last_activity_ms: 2_000,
+        current_attempt: null,
+      },
+    ]);
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useActiveRequestLogsSnapshotQuery(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.data?.map((row) => row.trace_id)).toEqual(["trace-active"]);
+    });
+    expect(client.getQueryState(requestLogsKeys.activeSnapshot())).toBeTruthy();
+  });
+
+  it("fails closed to no active requests when active snapshot loading rejects", async () => {
+    setTauriRuntime();
+
+    vi.mocked(activeRequestLogsSnapshot).mockRejectedValue(new Error("snapshot unavailable"));
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useActiveRequestLogsSnapshotQuery(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+    });
+    expect(result.current.data).toEqual([]);
   });
 
   it("does not call requestLogGet when logId is null (even on manual refetch)", async () => {

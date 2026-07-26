@@ -110,6 +110,12 @@ export function useSettingsPersistence(options: {
     },
     [setField]
   );
+  const setRequestLogRetentionDays = useCallback(
+    (next: number) => {
+      setField("request_log_retention_days", next);
+    },
+    [setField]
+  );
   const setEnableDebugLog = useCallback(
     (next: boolean) => {
       setField("enable_debug_log", next);
@@ -141,6 +147,8 @@ export function useSettingsPersistence(options: {
     setTrayEnabled,
     logRetentionDays: draft.log_retention_days,
     setLogRetentionDays,
+    requestLogRetentionDays: draft.request_log_retention_days,
+    setRequestLogRetentionDays,
     enableDebugLog: draft.enable_debug_log,
     setEnableDebugLog,
 

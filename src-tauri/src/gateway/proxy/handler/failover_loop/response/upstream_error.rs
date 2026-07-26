@@ -175,7 +175,9 @@ fn should_scan_codex_previous_response_id_error(
     already_retried: bool,
     upstream_body: &[u8],
 ) -> bool {
-    cli_key == "codex"
+    // grok 与 codex 同走 OpenAI Responses API：failover 切换供应商后
+    // previous_response_id 在新供应商侧不存在，同样需要摘除后重试。
+    matches!(cli_key, "codex" | "grok")
         && !already_retried
         && matches!(
             status,
@@ -336,8 +338,11 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
             status,
             resp.as_ref().and_then(|r| r.content_length()),
         ) || matches!(status.as_u16(), 402 | 429));
-    let need_5xx_body_preview =
-        !is_count_tokens && status.is_server_error() && !need_client_error_scan;
+    // Error classification and diagnostic capture are separate concerns: statuses such as 401
+    // intentionally skip rule matching, but their bounded body is still useful in request logs.
+    let need_error_body_preview = !is_count_tokens
+        && (status.is_client_error() || status.is_server_error())
+        && !need_client_error_scan;
     let need_codex_previous_response_id_scan = !is_count_tokens
         && should_scan_codex_previous_response_id_error(
             ctx.cli_key.as_str(),
@@ -345,7 +350,7 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
             *upstream.codex_previous_response_id_rectifier_retried,
             upstream.upstream_body_bytes,
         );
-    if need_client_error_scan || need_5xx_body_preview || need_codex_previous_response_id_scan {
+    if need_client_error_scan || need_error_body_preview || need_codex_previous_response_id_scan {
         if let Some(r) = resp.take() {
             let read_result = read_response_body_for_error_scan(r).await;
             if let Ok(bytes) = read_result {
@@ -372,7 +377,7 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
                         ),
                     );
                 }
-                // Extract body preview for diagnostics on 5xx and catch-all 4xx.
+                // Extract a bounded body preview for diagnostics on upstream errors.
                 if status.is_server_error() || status.is_client_error() {
                     let preview = String::from_utf8_lossy(&body_for_scan);
                     let truncated: String = preview.chars().take(500).collect();
@@ -490,7 +495,8 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
                 provider_name_base.as_str(),
                 provider_base_url_base.as_str(),
                 now_unix,
-            ),
+            )
+            .with_provider_health_neutral(ctx.provider_health_neutral),
         );
         *circuit_snapshot = change.after.clone();
         circuit_state_before = Some(change.before.state.as_str());
@@ -516,6 +522,7 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
             provider_id,
             now_unix,
             provider_cooldown_secs,
+            ctx.provider_health_neutral,
         );
         *circuit_snapshot = snap;
     }
@@ -563,6 +570,10 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
         circuit_state_after,
         circuit_failure_count,
         circuit_failure_threshold,
+        circuit_recover_at_unix: None,
+        circuit_trigger_error_code: None,
+        provider_bridged: Some(provider_ctx.provider_bridged),
+        timeout_secs: None,
     });
 
     emit_attempt_event_and_log(
@@ -645,6 +656,7 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
                             &state.db,
                             &state.log_tx,
                             &state.plugin_pipeline,
+                            &state.active_requests,
                         ),
                         trace_id: trace_id.as_str(),
                         cli_key: cli_key.as_str(),
@@ -690,6 +702,7 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
                         &state.db,
                         &state.log_tx,
                         &state.plugin_pipeline,
+                        &state.active_requests,
                     ),
                     trace_id: trace_id.as_str(),
                     cli_key: cli_key.as_str(),
@@ -808,6 +821,7 @@ pub(super) async fn handle_reqwest_error<R: tauri::Runtime>(
             decision,
             outcome,
             reason: reason.to_string(),
+            timeout_secs: None,
         })
         .await;
     }
@@ -822,6 +836,7 @@ pub(super) async fn handle_reqwest_error<R: tauri::Runtime>(
         decision,
         outcome,
         reason: reason.to_string(),
+        timeout_secs: None,
     })
     .await
 }
@@ -945,6 +960,24 @@ mod tests {
             reqwest::StatusCode::NOT_FOUND,
             false,
             body,
+        ));
+        assert!(should_scan_codex_previous_response_id_error(
+            "grok",
+            reqwest::StatusCode::BAD_REQUEST,
+            false,
+            body,
+        ));
+        assert!(!should_scan_codex_previous_response_id_error(
+            "grok",
+            reqwest::StatusCode::BAD_REQUEST,
+            true,
+            body,
+        ));
+        assert!(!should_scan_codex_previous_response_id_error(
+            "grok",
+            reqwest::StatusCode::BAD_REQUEST,
+            false,
+            br#"{"model":"grok-build"}"#,
         ));
         assert!(!should_scan_codex_previous_response_id_error(
             "claude",

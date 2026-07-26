@@ -1,5 +1,140 @@
 # Changelog
 
+## [0.60.15](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.14...aio-coding-hub-v0.60.15) (2026-07-16)
+
+
+### Features
+
+* **grok:** 支持供应商 OAuth 登录 ([#348](https://github.com/dyndynjyxa/aio-coding-hub/issues/348)) ([9e19e7c](https://github.com/dyndynjyxa/aio-coding-hub/commit/9e19e7c1b0bb2f1656b806757c7b23c7e0c412d4))
+* **image-gen:** 生图页面、并发生成与历史持久化 ([#351](https://github.com/dyndynjyxa/aio-coding-hub/issues/351)) ([656b077](https://github.com/dyndynjyxa/aio-coding-hub/commit/656b07780016b3ed25a7059bbcafbb5a7cc2d531))
+
+## [0.60.14](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.13...aio-coding-hub-v0.60.14) (2026-07-15)
+
+
+### Features
+
+* **grok:** 接入 Grok CLI 网关 ([#342](https://github.com/dyndynjyxa/aio-coding-hub/issues/342)) ([2deb7e8](https://github.com/dyndynjyxa/aio-coding-hub/commit/2deb7e82ca8672cefd994327990fda4d5ccd9419))
+
+## [0.60.13](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.12...aio-coding-hub-v0.60.13) (2026-07-14)
+
+
+### Features
+
+* **gateway:** 增加Codex系统请求标记识别与处理 ([fa1f0e2](https://github.com/dyndynjyxa/aio-coding-hub/commit/fa1f0e261975020195e964e651a5c4eefe74c562))
+
+
+### Bug Fixes
+
+* **gateway:** 标记 Codex 系统请求并隔离熔断 ([8b82182](https://github.com/dyndynjyxa/aio-coding-hub/commit/8b82182504d95acb6743567044a5c1a1acd2013d))
+
+## [0.60.12](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.11...aio-coding-hub-v0.60.12) (2026-07-12)
+
+
+### Features
+
+* consolidate usage and Codex capability flows ([50db2a1](https://github.com/dyndynjyxa/aio-coding-hub/commit/50db2a181af685c6342d3c7d3e0e425352b172d0))
+* **ui:** 增加用量总耗时展示 ([#334](https://github.com/dyndynjyxa/aio-coding-hub/issues/334)) ([5a67eb2](https://github.com/dyndynjyxa/aio-coding-hub/commit/5a67eb2a2e0048204a56d0396c171bdc24aed525))
+
+
+### Bug Fixes
+
+* **gateway:** 为后台请求保留尝试进度 ([57198a0](https://github.com/dyndynjyxa/aio-coding-hub/commit/57198a00937d1991923c832294d81e3d61b2221c))
+* **home:** 收敛请求日志生命周期投影 ([5860eda](https://github.com/dyndynjyxa/aio-coding-hub/commit/5860edad6950c49421c62aaac6da463c3a397aa1))
+
+
+### Code Refactoring
+
+* **cli-manager:** 优化推理努力级描述和单选按钮样式 ([3db9a55](https://github.com/dyndynjyxa/aio-coding-hub/commit/3db9a553bc7188b0cc25e502673041d6cdc6fc14))
+
+## [0.60.11](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.10...aio-coding-hub-v0.60.11) (2026-07-09)
+
+
+### Bug Fixes
+
+* **plugins:** stabilize extension host process CI ([ea4001a](https://github.com/dyndynjyxa/aio-coding-hub/commit/ea4001a5e7ff92f6e204322b3340d0427d014632))
+
+## [0.60.10](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.9...aio-coding-hub-v0.60.10) (2026-07-09)
+
+
+### Bug Fixes
+
+* **gateway:** arm request abort guard before active-request registration ([49d590c](https://github.com/dyndynjyxa/aio-coding-hub/commit/49d590c4df63a4cd9a1428cb5cbacb58b1d0f080))
+* **home:** keep freshness watchdog alive while a recent log row lacks terminal state ([46ce59e](https://github.com/dyndynjyxa/aio-coding-hub/commit/46ce59eebce5ad962592db6121c9e77ae8cc0044))
+* **home:** keep signal-driven request log refresh alive while backgrounded ([4ed3b4b](https://github.com/dyndynjyxa/aio-coding-hub/commit/4ed3b4b4d89ef840813e3f32e2ccc0a6ccd1e432))
+
+## [0.60.9](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.8...aio-coding-hub-v0.60.9) (2026-07-07)
+
+
+### Bug Fixes
+
+* **home:** refresh stale request log activity ([dc30559](https://github.com/dyndynjyxa/aio-coding-hub/commit/dc30559e63ed37d3946ca2f6b8061bc5d3cc6c33))
+
+## [0.60.8](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.7...aio-coding-hub-v0.60.8) (2026-07-05)
+
+
+### Features
+
+* **gateway:** 熔断跳过归因落库并在日志详情展示原因与冷却时间 ([530e6d3](https://github.com/dyndynjyxa/aio-coding-hub/commit/530e6d3b16815b67bf5fe036fc356cfab267b2c8))
+* **settings:** 请求日志留存策略可见并提供数据库压缩入口 ([c23e4bd](https://github.com/dyndynjyxa/aio-coding-hub/commit/c23e4bd7f19355dba75afa63bec19666ae613c7f))
+
+
+### Bug Fixes
+
+* **gateway:** 流式空闲超时在流式转发路径真正生效 ([6197e81](https://github.com/dyndynjyxa/aio-coding-hub/commit/6197e81046867e229f0e1dfe0a98f1bf311a484a))
+* **ui:** failover 徽章推导与落库语义收敛并清理状态死代码 ([5b5eae8](https://github.com/dyndynjyxa/aio-coding-hub/commit/5b5eae8ee0088b0be407e64acd2a36426768976b))
+
+
+### Code Refactoring
+
+* **gateway:** 熔断通知文案迁移前端渲染并删除后端文本构造 ([5cd4915](https://github.com/dyndynjyxa/aio-coding-hub/commit/5cd49151d1ea93034d0e371a3d68aa09800f10f7))
+* **ui:** 拆分 HomeLogShared 杂物间为三个单一职责模块 ([8590f3f](https://github.com/dyndynjyxa/aio-coding-hub/commit/8590f3f04fdbfc2529d754ac90e93c189af81540))
+* **ui:** 清理 review 发现的 P2 项并移除 traceRoute skipped 死分支 ([ddf131f](https://github.com/dyndynjyxa/aio-coding-hub/commit/ddf131fe735a4459d4ed0e177dd1b4c82063bb93))
+* **ui:** 网关事件 payload 类型改由 Specta 生成派生 ([85b4007](https://github.com/dyndynjyxa/aio-coding-hub/commit/85b40072327181f00e2efe7020353dbcf4fbe9ab))
+
+## [0.60.7](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.6...aio-coding-hub-v0.60.7) (2026-07-05)
+
+
+### Features
+
+* **ui:** 请求日志错误卡片展示失败尝试归因摘要 ([bdca955](https://github.com/dyndynjyxa/aio-coding-hub/commit/bdca955f9ce48c2abfd1a1ae33a29aeace322f2b))
+
+
+### Bug Fixes
+
+* **gateway:** 识别 compact 请求并放宽首字节超时至 300 秒 ([bbbdeaf](https://github.com/dyndynjyxa/aio-coding-hub/commit/bbbdeaf019f93b3069d8a554647c24ef5813fd8c))
+
+## [0.60.6](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.5...aio-coding-hub-v0.60.6) (2026-07-03)
+
+
+### Bug Fixes
+
+* **release:** 以 0.60.6 重新发布 0.60.5 的全部内容 ([b4378f1](https://github.com/dyndynjyxa/aio-coding-hub/commit/b4378f135ae72afc87bd56aa72723df0c9e1c327))
+
+## [0.60.5](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.4...aio-coding-hub-v0.60.5) (2026-07-03)
+
+
+### Bug Fixes
+
+* **home:** unify in-progress request rendering as realtime cards ([faaa440](https://github.com/dyndynjyxa/aio-coding-hub/commit/faaa4406d6892c6f16c2bf7239b2be7ef3c2bede))
+* **watchdog:** 后台修复死亡 WebView,重构白屏恢复状态机 ([edeb28e](https://github.com/dyndynjyxa/aio-coding-hub/commit/edeb28e994b1ea6d8b7cccdd21027fd4176ac1e5))
+
+
+### Code Refactoring
+
+* single-source check stages, add Homebrew cask release pipeline ([e873103](https://github.com/dyndynjyxa/aio-coding-hub/commit/e873103a331c2a153acc59223038bfd52ca192d7))
+
+## [0.60.4](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.3...aio-coding-hub-v0.60.4) (2026-07-03)
+
+
+### Bug Fixes
+
+* **gateway:** derive in-progress request logs from active request registry ([be0d772](https://github.com/dyndynjyxa/aio-coding-hub/commit/be0d7725e91134a90574e61c943e6de98547b63e)), closes [#323](https://github.com/dyndynjyxa/aio-coding-hub/issues/323)
+
+
+### Code Refactoring
+
+* single-source cross-layer contracts, hot-path DB offload, request-log retention ([0f1d8d8](https://github.com/dyndynjyxa/aio-coding-hub/commit/0f1d8d8984651e14d76837892b431c4a3bf546bc))
+
 ## [0.60.3](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.2...aio-coding-hub-v0.60.3) (2026-07-01)
 
 

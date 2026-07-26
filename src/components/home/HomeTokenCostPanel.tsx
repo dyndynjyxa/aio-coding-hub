@@ -1,48 +1,80 @@
-import { Fragment, useCallback, useMemo, useReducer, useState } from "react";
+import { useCallback, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
   Check,
   ChevronDown,
-  ChevronRight,
+  CircleHelp,
+  Download,
   FolderOpen,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { usageLeaderboardCsvExport } from "../../services/usage/usage";
 import type {
-  UsageDayDetailV1,
-  UsageDayFolderRow,
-  UsageDayHourRow,
   UsageFolderOptionV1,
   UsageLeaderboardRow,
   UsagePeriod,
   UsageSummary,
 } from "../../services/usage/usage";
 import { useCustomDateRange, type CustomDateRangeApplied } from "../../hooks/useCustomDateRange";
-import { useUsageDayDetailV1Query, useUsageFolderOptionsV1Query } from "../../query/usage";
+import { useUsageFolderOptionsV1Query } from "../../query/usage";
+import { saveDesktopFilePath } from "../../services/desktop/dialog";
+import {
+  HOME_USAGE_DAY_START_HOUR_OPTIONS,
+  HOME_USAGE_DEFAULT_DAY_START_HOUR,
+  addLocalDays,
+  dayStartHourLabel,
+  formatUsageDayHourMinuteFromMs,
+  localDateHour,
+  normalizeHomeUsageDayStartHour,
+  readHomeUsageDayStartHourFromStorage,
+  startOfLocalUsageDay,
+  subscribeHomeUsageDayStartHour,
+  writeHomeUsageDayStartHourToStorage,
+} from "../../services/home/homeUsageDayBoundary";
+import {
+  HOME_USAGE_DEFAULT_FULL_IDLE_GAP_MINUTES,
+  HOME_USAGE_DEFAULT_SESSION_BREAK_GAP_MINUTES,
+  HOME_USAGE_FULL_IDLE_GAP_MINUTES_OPTIONS,
+  HOME_USAGE_SESSION_BREAK_GAP_MINUTES_OPTIONS,
+  readHomeUsageFullIdleGapMinutesFromStorage,
+  readHomeUsageSessionBreakGapMinutesFromStorage,
+  subscribeHomeUsageDevelopmentTimeThresholds,
+  writeHomeUsageFullIdleGapMinutesToStorage,
+  writeHomeUsageSessionBreakGapMinutesToStorage,
+} from "../../services/home/homeUsageDevelopmentTime";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { Popover } from "../../ui/Popover";
+import { Select } from "../../ui/Select";
 import { Spinner } from "../../ui/Spinner";
 import { Switch } from "../../ui/Switch";
 import { TabList, type TabListItem } from "../../ui/TabList";
+import { Tooltip } from "../../ui/Tooltip";
 import { formatTokensMillions } from "../../utils/chartHelpers";
 import { computeCacheHitRate } from "../../utils/cacheRateMetrics";
 import { cn } from "../../utils/cn";
 import { formatUnknownError } from "../../utils/errors";
 import {
+  formatCompactDurationMs,
   formatInteger,
   formatPercent,
-  formatTokensPerSecond,
   formatUsdCompact,
 } from "../../utils/formatters";
 import { StatCard, StatCardSkeleton } from "../usage/StatCard";
 import { QueryErrorCard } from "../shared/QueryErrorCard";
-import { buildPreviewTokenDayDetail, PREVIEW_TOKEN_FOLDER_OPTIONS } from "./previewTokenData";
+import { PREVIEW_TOKEN_FOLDER_OPTIONS } from "./previewTokenData";
 import { useHomeTokenCostDataModel } from "./useHomeTokenCostDataModel";
+import {
+  developmentTimeEstimateTooltip,
+  FOLDER_DEVELOPMENT_TIME_NOTE,
+  FULL_IDLE_GAP_TOOLTIP,
+  SESSION_BREAK_GAP_TOOLTIP,
+} from "./developmentTimeEstimate";
 
-type TokenCostScope = "provider" | "model" | "day";
+type TokenCostScope = "provider" | "model" | "folder" | "day";
 type TokenCostRange =
   | "today"
   | "yesterday"
@@ -56,6 +88,7 @@ type TokenCostRange =
 const TOKEN_COST_SCOPE_ITEMS = [
   { key: "provider", label: "供应商" },
   { key: "model", label: "模型" },
+  { key: "folder", label: "文件夹" },
   { key: "day", label: "日期" },
 ] satisfies Array<TabListItem<TokenCostScope>>;
 
@@ -84,6 +117,9 @@ type TokenCostQueryInput = {
   cliKey: null;
   providerId: null;
   folderKeys?: string[] | null;
+  dayStartHour?: number | null;
+  fullIdleGapMinutes?: number | null;
+  sessionBreakGapMinutes?: number | null;
   excludeCx2CcGatewayBridge?: boolean | null;
 };
 
@@ -110,18 +146,18 @@ type LeaderboardSortKey =
   | "name"
   | "totalTokens"
   | "ioTokens"
-  | "cacheTokens"
   | "cost"
+  | "totalDuration"
   | "requests"
-  | "successRate"
-  | "tokenShare"
-  | "outputSpeed";
-type DayFolderSortKey = "folder" | "totalTokens" | "ioTokens" | "cacheTokens" | "cost";
+  | "activityStart"
+  | "activityEnd"
+  | "estimatedDevelopmentTime";
 type IndexedLeaderboardRow = { row: UsageLeaderboardRow; originalIndex: number };
 
 function scopeLabel(scope: TokenCostScope) {
   if (scope === "provider") return "供应商";
   if (scope === "model") return "模型";
+  if (scope === "folder") return "文件夹";
   return "日期";
 }
 
@@ -147,10 +183,6 @@ function successRate(row: UsageRequestMetricRow) {
 function tokenShare(row: UsageLeaderboardRow, summary: UsageSummary | null) {
   if (!summary || summary.io_total_tokens <= 0) return 0;
   return row.io_total_tokens / summary.io_total_tokens;
-}
-
-function cacheTokens(row: UsageTokenMetricRow) {
-  return row.cache_creation_input_tokens + row.cache_read_input_tokens;
 }
 
 function nextSortState<T extends string>(current: SortState<T> | null, key: T): SortState<T> {
@@ -206,14 +238,6 @@ function unixSecondsFromDate(date: Date) {
   return Math.floor(date.getTime() / 1000);
 }
 
-function startOfLocalDay(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
-}
-
-function addLocalDays(date: Date, days: number) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, 0, 0, 0, 0);
-}
-
 function emptyTokenCostQueryInput(): TokenCostQueryInput {
   return {
     startTs: null,
@@ -233,10 +257,18 @@ function customPreviewFactor(customApplied: CustomDateRangeApplied | null) {
 function buildTokenCostQueryConfig(
   range: TokenCostRange,
   customApplied: CustomDateRangeApplied | null,
+  dayStartHour = HOME_USAGE_DEFAULT_DAY_START_HOUR,
   now = new Date()
 ): TokenCostQueryConfig {
-  const todayStart = startOfLocalDay(now);
+  const normalizedDayStartHour = normalizeHomeUsageDayStartHour(dayStartHour);
+  const todayStart = startOfLocalUsageDay(now, normalizedDayStartHour);
   const tomorrowStart = addLocalDays(todayStart, 1);
+  const customStart = customApplied
+    ? localDateHour(customApplied.startDate, normalizedDayStartHour)
+    : null;
+  const customEnd = customApplied
+    ? localDateHour(customApplied.endDate, normalizedDayStartHour, 1)
+    : null;
 
   switch (range) {
     case "custom":
@@ -247,8 +279,9 @@ function buildTokenCostQueryConfig(
         period: "custom",
         input: {
           ...emptyTokenCostQueryInput(),
-          startTs: customApplied?.startTs ?? null,
-          endTs: customApplied?.endTs ?? null,
+          startTs: customStart ? unixSecondsFromDate(customStart) : null,
+          endTs: customEnd ? unixSecondsFromDate(customEnd) : null,
+          dayStartHour: normalizedDayStartHour,
         },
         previewFactor: customPreviewFactor(customApplied),
       };
@@ -260,6 +293,7 @@ function buildTokenCostQueryConfig(
           ...emptyTokenCostQueryInput(),
           startTs: unixSecondsFromDate(addLocalDays(todayStart, -1)),
           endTs: unixSecondsFromDate(todayStart),
+          dayStartHour: normalizedDayStartHour,
         },
         previewFactor: 1,
       };
@@ -271,6 +305,7 @@ function buildTokenCostQueryConfig(
           ...emptyTokenCostQueryInput(),
           startTs: unixSecondsFromDate(addLocalDays(todayStart, -2)),
           endTs: unixSecondsFromDate(tomorrowStart),
+          dayStartHour: normalizedDayStartHour,
         },
         previewFactor: 3,
       };
@@ -278,7 +313,7 @@ function buildTokenCostQueryConfig(
       return {
         label: rangeLabel(range),
         period: "weekly",
-        input: emptyTokenCostQueryInput(),
+        input: { ...emptyTokenCostQueryInput(), dayStartHour: normalizedDayStartHour },
         previewFactor: 7,
       };
     case "last15":
@@ -289,6 +324,7 @@ function buildTokenCostQueryConfig(
           ...emptyTokenCostQueryInput(),
           startTs: unixSecondsFromDate(addLocalDays(todayStart, -14)),
           endTs: unixSecondsFromDate(tomorrowStart),
+          dayStartHour: normalizedDayStartHour,
         },
         previewFactor: 15,
       };
@@ -300,6 +336,7 @@ function buildTokenCostQueryConfig(
           ...emptyTokenCostQueryInput(),
           startTs: unixSecondsFromDate(addLocalDays(todayStart, -29)),
           endTs: unixSecondsFromDate(tomorrowStart),
+          dayStartHour: normalizedDayStartHour,
         },
         previewFactor: 30,
       };
@@ -307,7 +344,7 @@ function buildTokenCostQueryConfig(
       return {
         label: rangeLabel(range),
         period: "monthly",
-        input: emptyTokenCostQueryInput(),
+        input: { ...emptyTokenCostQueryInput(), dayStartHour: normalizedDayStartHour },
         previewFactor: Math.max(1, now.getDate()),
       };
     case "today":
@@ -315,7 +352,7 @@ function buildTokenCostQueryConfig(
       return {
         label: rangeLabel("today"),
         period: "daily",
-        input: emptyTokenCostQueryInput(),
+        input: { ...emptyTokenCostQueryInput(), dayStartHour: normalizedDayStartHour },
         previewFactor: 1,
       };
   }
@@ -330,23 +367,25 @@ function summaryCacheHitRate(summary: UsageSummary | null) {
   );
 }
 
-function summaryCostCoverage(summary: UsageSummary | null) {
-  if (!summary) return null;
-  const denom = summary.requests_success;
-  if (!Number.isFinite(denom) || denom <= 0) return null;
-  const covered = summary.cost_covered_success;
-  if (!Number.isFinite(covered) || covered < 0) return null;
-  return covered / denom;
-}
-
 function trimCompactZero(value: string) {
   return value.replace(/\.0([KM])$/, "$1").replace(/\.0%$/, "%");
+}
+
+function activityTimeOffsetMs(
+  row: UsageLeaderboardRow,
+  value: number | null | undefined,
+  dayStartHour: number
+) {
+  if (value == null || !Number.isFinite(value)) return null;
+  const dayStart = localDateHour(row.key, dayStartHour);
+  if (!dayStart) return null;
+  return value - dayStart.getTime();
 }
 
 function sortLeaderboardRows(
   rows: UsageLeaderboardRow[],
   sortState: SortState<LeaderboardSortKey> | null,
-  summary: UsageSummary | null
+  dayStartHour: number
 ): IndexedLeaderboardRow[] {
   const indexedRows = rows.map((row, originalIndex) => ({ row, originalIndex }));
   if (!sortState) return indexedRows;
@@ -369,86 +408,42 @@ function sortLeaderboardRows(
             right.row.io_total_tokens,
             sortState.direction
           );
-        case "cacheTokens":
-          return compareNumberValue(
-            cacheTokens(left.row),
-            cacheTokens(right.row),
-            sortState.direction
-          );
         case "cost":
           return compareNumberValue(left.row.cost_usd, right.row.cost_usd, sortState.direction);
+        case "totalDuration":
+          return compareNumberValue(
+            left.row.total_duration_ms,
+            right.row.total_duration_ms,
+            sortState.direction
+          );
         case "requests":
           return compareNumberValue(
             left.row.requests_total,
             right.row.requests_total,
             sortState.direction
           );
-        case "successRate":
+        case "estimatedDevelopmentTime":
           return compareNumberValue(
-            successRate(left.row),
-            successRate(right.row),
+            left.row.estimated_development_time_ms,
+            right.row.estimated_development_time_ms,
             sortState.direction
           );
-        case "tokenShare":
+        case "activityStart":
           return compareNumberValue(
-            tokenShare(left.row, summary),
-            tokenShare(right.row, summary),
+            activityTimeOffsetMs(left.row, left.row.first_request_created_at_ms, dayStartHour),
+            activityTimeOffsetMs(right.row, right.row.first_request_created_at_ms, dayStartHour),
             sortState.direction
           );
-        case "outputSpeed":
+        case "activityEnd":
           return compareNumberValue(
-            left.row.avg_output_tokens_per_second,
-            right.row.avg_output_tokens_per_second,
+            activityTimeOffsetMs(left.row, left.row.last_request_completed_at_ms, dayStartHour),
+            activityTimeOffsetMs(right.row, right.row.last_request_completed_at_ms, dayStartHour),
             sortState.direction
           );
       }
     },
     (item) => item.originalIndex
   );
-}
-
-function sortDayFolderRows(
-  folders: UsageDayFolderRow[],
-  sortState: SortState<DayFolderSortKey> | null
-) {
-  const indexedFolders = folders.map((folder, originalIndex) => ({ folder, originalIndex }));
-  const sorted = sortState
-    ? stableSort(
-        indexedFolders,
-        (left, right) => {
-          switch (sortState.key) {
-            case "folder":
-              return compareTextValue(left.folder.name, right.folder.name, sortState.direction);
-            case "totalTokens":
-              return compareNumberValue(
-                left.folder.total_tokens,
-                right.folder.total_tokens,
-                sortState.direction
-              );
-            case "ioTokens":
-              return compareNumberValue(
-                left.folder.io_total_tokens,
-                right.folder.io_total_tokens,
-                sortState.direction
-              );
-            case "cacheTokens":
-              return compareNumberValue(
-                cacheTokens(left.folder),
-                cacheTokens(right.folder),
-                sortState.direction
-              );
-            case "cost":
-              return compareNumberValue(
-                left.folder.cost_usd,
-                right.folder.cost_usd,
-                sortState.direction
-              );
-          }
-        },
-        (item) => item.originalIndex
-      )
-    : indexedFolders;
-  return sorted.map((item) => item.folder);
 }
 
 function TableHeaderLabel({ label, note }: { label: string; note?: string }) {
@@ -467,12 +462,14 @@ function TableHeaderLabel({ label, note }: { label: string; note?: string }) {
 function SortableColumnHeader<T extends string>({
   label,
   note,
+  tooltip,
   sortKey,
   sortState,
   onSort,
 }: {
   label: string;
   note?: string;
+  tooltip?: string;
   sortKey: T;
   sortState: SortState<T> | null;
   onSort: (key: T) => void;
@@ -490,25 +487,77 @@ function SortableColumnHeader<T extends string>({
       : ArrowDown
     : ArrowUpDown;
 
+  const button = (
+    <button
+      type="button"
+      onClick={() => onSort(sortKey)}
+      className={cn(
+        "-mx-1 inline-flex items-center gap-1 rounded px-1 py-0.5 text-left transition hover:text-foreground focus:outline-none focus:ring-2 focus:ring-accent/30 dark:hover:text-foreground",
+        active && "text-sky-700 dark:text-sky-300"
+      )}
+    >
+      <TableHeaderLabel label={label} note={note} />
+      {tooltip ? <CircleHelp aria-hidden="true" className="h-3.5 w-3.5 shrink-0" /> : null}
+      <SortIcon
+        aria-hidden="true"
+        className={cn(
+          "h-3.5 w-3.5 shrink-0",
+          active ? "text-sky-600 dark:text-sky-300" : "text-muted-foreground"
+        )}
+      />
+    </button>
+  );
+
   return (
     <th scope="col" className={TABLE_TH_CLASS} aria-sort={ariaSort}>
+      {tooltip ? (
+        <Tooltip content={tooltip} contentClassName="max-w-[320px] normal-case leading-5">
+          {button}
+        </Tooltip>
+      ) : (
+        button
+      )}
+    </th>
+  );
+}
+
+function ActivityRangeColumnHeader({
+  sortState,
+  onSort,
+}: {
+  sortState: SortState<LeaderboardSortKey> | null;
+  onSort: (key: LeaderboardSortKey) => void;
+}) {
+  const sortControl = (key: "activityStart" | "activityEnd", label: string) => {
+    const activeDirection = sortState?.key === key ? sortState.direction : null;
+    const SortIcon = activeDirection
+      ? activeDirection === "asc"
+        ? ArrowUp
+        : ArrowDown
+      : ArrowUpDown;
+    return (
       <button
         type="button"
-        onClick={() => onSort(sortKey)}
+        aria-label={label}
+        title={label}
+        onClick={() => onSort(key)}
         className={cn(
-          "-mx-1 inline-flex items-center gap-1 rounded px-1 py-0.5 text-left transition hover:text-foreground focus:outline-none focus:ring-2 focus:ring-accent/30 dark:hover:text-foreground",
-          active && "text-sky-700 dark:text-sky-300"
+          "rounded p-0.5 transition hover:text-foreground focus:outline-none focus:ring-2 focus:ring-accent/30 dark:hover:text-foreground",
+          activeDirection && "text-sky-700 dark:text-sky-300"
         )}
       >
-        <TableHeaderLabel label={label} note={note} />
-        <SortIcon
-          aria-hidden="true"
-          className={cn(
-            "h-3.5 w-3.5 shrink-0",
-            active ? "text-sky-600 dark:text-sky-300" : "text-muted-foreground"
-          )}
-        />
+        <SortIcon aria-hidden="true" className="h-3.5 w-3.5" />
       </button>
+    );
+  };
+
+  return (
+    <th scope="col" className={TABLE_TH_CLASS}>
+      <div className="inline-flex items-center gap-1 whitespace-nowrap normal-case">
+        {sortControl("activityStart", "按活动开始时间排序")}
+        <span>活动范围</span>
+        {sortControl("activityEnd", "按活动结束时间排序")}
+      </div>
     </th>
   );
 }
@@ -530,258 +579,188 @@ function TokenBreakdownInline({ parts }: { parts: string[] }) {
   );
 }
 
-function InputOutputTokenValue({ row }: { row: Pick<UsageTokenMetricRow, "io_total_tokens"> }) {
-  return (
-    <span className="whitespace-nowrap tabular-nums">
-      {trimCompactZero(formatTokensMillions(row.io_total_tokens))}
-    </span>
-  );
+function inputOutputTokenText(row: Pick<UsageTokenMetricRow, "io_total_tokens">) {
+  return trimCompactZero(formatTokensMillions(row.io_total_tokens));
 }
 
-function TotalTokenValue({ row }: { row: Pick<UsageTokenMetricRow, "total_tokens"> }) {
-  return (
-    <span className="whitespace-nowrap tabular-nums">
-      {trimCompactZero(formatTokensMillions(row.total_tokens))}
-    </span>
-  );
-}
-
-function CacheHitRateBreakdown({ row }: { row: UsageTokenMetricRow }) {
+function cacheHitRateText(row: UsageTokenMetricRow) {
   const totalWithCache = row.total_tokens;
   const hasValidTotal = Number.isFinite(totalWithCache) && totalWithCache > 0;
-  const cacheTokens = row.cache_creation_input_tokens + row.cache_read_input_tokens;
   const hitRate = computeCacheHitRate(
     row.input_tokens,
     row.cache_creation_input_tokens,
     row.cache_read_input_tokens
   );
-
-  const cacheText = hasValidTotal ? trimCompactZero(formatTokensMillions(cacheTokens)) : "—";
-  const hitRateText =
-    hasValidTotal && Number.isFinite(hitRate) ? trimCompactZero(formatPercent(hitRate)) : "—";
-
-  return <TokenBreakdownInline parts={[cacheText, hitRateText]} />;
+  return hasValidTotal && Number.isFinite(hitRate) ? trimCompactZero(formatPercent(hitRate)) : "—";
 }
 
-function TokenShareBar({ percent }: { percent: number }) {
+function requestCountText(row: UsageRequestMetricRow) {
+  return formatInteger(row.requests_total);
+}
+
+function successRateText(row: UsageRequestMetricRow) {
+  return trimCompactZero(formatPercent(successRate(row)));
+}
+
+function tokenShareText(percent: number) {
   const pct = Number.isFinite(percent) ? Math.max(0, Math.min(1, percent)) : 0;
-  const displayPct = (pct * 100).toFixed(1);
-
-  return (
-    <div className="flex items-center gap-1.5">
-      <progress className="sr-only" value={Number(displayPct)} max={100}>
-        Token 占比 {displayPct}%
-      </progress>
-      <div className="h-1.5 flex-1 rounded-full bg-secondary" aria-hidden="true">
-        <div
-          className="h-full rounded-full bg-sky-500 transition-all duration-300"
-          style={{ width: `${pct * 100}%` }}
-        />
-      </div>
-      <span
-        className="w-10 text-right text-[10px] tabular-nums text-muted-foreground"
-        aria-hidden="true"
-      >
-        {displayPct}%
-      </span>
-    </div>
-  );
+  return trimCompactZero(formatPercent(pct));
 }
 
-function DayDetailLoading() {
-  return (
-    <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
-      <Spinner size="sm" />
-      <span>加载日期详情中…</span>
-    </div>
-  );
+function totalTokenText(row: Pick<UsageTokenMetricRow, "total_tokens">) {
+  return trimCompactZero(formatTokensMillions(row.total_tokens));
 }
 
-function DayFolderUsageTable({ folders }: { folders: UsageDayFolderRow[] }) {
-  const [sortState, setSortState] = useState<SortState<DayFolderSortKey> | null>(null);
-  const sortedFolders = useMemo(() => sortDayFolderRows(folders, sortState), [folders, sortState]);
-  const handleSort = useCallback((key: DayFolderSortKey) => {
-    setSortState((current) => nextSortState(current, key));
-  }, []);
+function InputOutputCacheValue({ row }: { row: UsageTokenMetricRow }) {
+  return <TokenBreakdownInline parts={[inputOutputTokenText(row), cacheHitRateText(row)]} />;
+}
 
-  if (folders.length === 0) {
-    return (
-      <div className="py-8 text-center text-sm text-muted-foreground">
-        当天暂无可展示的文件夹用量。
-      </div>
-    );
+function RequestSuccessRateValue({ row }: { row: UsageRequestMetricRow }) {
+  return <TokenBreakdownInline parts={[requestCountText(row), successRateText(row)]} />;
+}
+
+function activityRangeText(row: UsageLeaderboardRow, dayStartHour: number) {
+  const first = row.first_request_created_at_ms;
+  const last = row.last_request_completed_at_ms;
+  if (first == null || last == null || !Number.isFinite(first) || !Number.isFinite(last)) {
+    return "—";
   }
-
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full border-separate border-spacing-0 text-left text-xs">
-        <caption className="sr-only">日期文件夹用量明细</caption>
-        <thead>
-          <tr>
-            <SortableColumnHeader
-              label="文件夹"
-              sortKey="folder"
-              sortState={sortState}
-              onSort={handleSort}
-            />
-            <SortableColumnHeader
-              label="总Token"
-              sortKey="totalTokens"
-              sortState={sortState}
-              onSort={handleSort}
-            />
-            <SortableColumnHeader
-              label="输入+输出"
-              sortKey="ioTokens"
-              sortState={sortState}
-              onSort={handleSort}
-            />
-            <SortableColumnHeader
-              label="缓存情况"
-              sortKey="cacheTokens"
-              sortState={sortState}
-              onSort={handleSort}
-            />
-            <SortableColumnHeader
-              label="花费"
-              sortKey="cost"
-              sortState={sortState}
-              onSort={handleSort}
-            />
-          </tr>
-        </thead>
-        <tbody>
-          {sortedFolders.map((folder) => (
-            <tr key={folder.key} className="align-top">
-              <td className={TABLE_TD_CLASS}>
-                <div className="flex min-w-[180px] items-start gap-2">
-                  <FolderOpen className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  <div className="min-w-0">
-                    <div className="truncate font-medium text-foreground">{folder.name}</div>
-                    {folder.folder_path ? (
-                      <div
-                        className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground"
-                        title={folder.folder_path}
-                      >
-                        {folder.folder_path}
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              </td>
-              <td className={TABLE_MONO_TD_CLASS}>
-                <TotalTokenValue row={folder} />
-              </td>
-              <td className={TABLE_MONO_TD_CLASS}>
-                <InputOutputTokenValue row={folder} />
-              </td>
-              <td className={TABLE_MONO_TD_CLASS}>
-                <CacheHitRateBreakdown row={folder} />
-              </td>
-              <td className={TABLE_MONO_TD_CLASS}>{formatCostValue(folder.cost_usd)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+  const firstText = formatUsageDayHourMinuteFromMs(first, row.key, dayStartHour);
+  let lastText = formatUsageDayHourMinuteFromMs(last, row.key, dayStartHour);
+  if (!firstText || !lastText) {
+    return "—";
+  }
+  const firstDate = new Date(first);
+  const lastDate = new Date(last);
+  if (
+    !lastText.startsWith("次日") &&
+    (firstDate.getFullYear() !== lastDate.getFullYear() ||
+      firstDate.getMonth() !== lastDate.getMonth() ||
+      firstDate.getDate() !== lastDate.getDate())
+  ) {
+    lastText = `次日${lastText}`;
+  }
+  return `${firstText}–${lastText}`;
 }
 
-function hourLabel(hour: number) {
-  return `${String(hour).padStart(2, "0")}:00`;
-}
-
-function DayHourlyMiniBarChart({ hours }: { hours: UsageDayHourRow[] }) {
-  const maxTokens = Math.max(1, ...hours.map((row) => row.total_tokens));
-  const totalTokens = hours.reduce((sum, row) => sum + row.total_tokens, 0);
-  const totalRequests = hours.reduce((sum, row) => sum + row.requests_total, 0);
-  const activeHours = hours.filter((row) => row.total_tokens > 0 || row.requests_total > 0);
-  const firstActiveHour = activeHours[0]?.hour ?? null;
-  const lastActiveHour = activeHours[activeHours.length - 1]?.hour ?? null;
-  const activeRangeText =
-    firstActiveHour == null || lastActiveHour == null
-      ? "最早 — · 最晚 —"
-      : `最早 ${hourLabel(firstActiveHour)} · 最晚 ${hourLabel(lastActiveHour)}`;
-
-  return (
-    <div>
-      <div className="mb-3 flex items-baseline justify-between gap-3">
-        <div>
-          <div className="text-sm font-semibold text-foreground">24 小时分布</div>
-          <div className="mt-0.5 text-xs text-muted-foreground">
-            {formatTokenValue(totalTokens)} · {formatInteger(totalRequests)} 次请求
-          </div>
-          <div className="mt-0.5 text-xs text-muted-foreground">{activeRangeText}</div>
-        </div>
-      </div>
-      <figure className="flex h-28 items-end gap-1 rounded-md border border-border bg-white px-2 py-2 dark:border-border dark:bg-card/50">
-        <figcaption className="sr-only">24 小时 Token 分布</figcaption>
-        {hours.map((row) => {
-          const ratio = maxTokens > 0 ? row.total_tokens / maxTokens : 0;
-          const height = row.total_tokens > 0 ? Math.max(8, Math.round(ratio * 100)) : 2;
-          return (
-            <div
-              key={row.hour}
-              className="flex h-full min-w-[5px] flex-1 items-end"
-              title={`${hourLabel(row.hour)} · ${formatTokenValue(row.total_tokens)} · ${formatInteger(row.requests_total)} 次请求`}
-            >
-              <div
-                data-testid="day-hour-bar"
-                className={cn(
-                  "w-full rounded-sm transition-colors",
-                  row.total_tokens > 0
-                    ? "bg-sky-500 hover:bg-sky-600 dark:bg-sky-400 dark:hover:bg-sky-300"
-                    : "bg-muted dark:bg-secondary"
-                )}
-                style={{ height: `${height}%` }}
-              />
-            </div>
-          );
-        })}
-      </figure>
-      <div className="mt-2 grid grid-cols-5 text-[10px] tabular-nums text-muted-foreground">
-        <span>00</span>
-        <span className="text-center">06</span>
-        <span className="text-center">12</span>
-        <span className="text-center">18</span>
-        <span className="text-right">23</span>
-      </div>
-    </div>
-  );
-}
-
-function DayDetailPanel({
-  detail,
-  loading,
-  errorText,
+function TotalTokenShareValue({
+  row,
+  summary,
 }: {
-  detail: UsageDayDetailV1 | null;
-  loading: boolean;
-  errorText: string | null;
+  row: UsageLeaderboardRow;
+  summary: UsageSummary | null;
 }) {
-  if (loading) return <DayDetailLoading />;
-
-  if (errorText) {
-    return (
-      <div className="py-6 text-sm text-rose-600 dark:text-rose-300">
-        日期详情加载失败：{errorText}
-      </div>
-    );
-  }
-
-  if (!detail) {
-    return <div className="py-6 text-sm text-muted-foreground">暂无日期详情。</div>;
-  }
-
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.85fr)]">
-      <div className="min-w-0">
-        <div className="mb-3 text-sm font-semibold text-foreground">文件夹 Token 明细</div>
-        <DayFolderUsageTable folders={detail.folders} />
-      </div>
-      <DayHourlyMiniBarChart hours={detail.hours} />
-    </div>
+    <TokenBreakdownInline parts={[totalTokenText(row), tokenShareText(tokenShare(row, summary))]} />
   );
+}
+
+function csvCell(value: string | number | null | undefined) {
+  const text = value == null ? "" : String(value);
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  if (!/[",\n]/.test(normalized)) return normalized;
+  return `"${normalized.replace(/"/g, '""')}"`;
+}
+
+function buildCsvContent(headers: string[], rows: string[][]) {
+  const lines = [headers, ...rows].map((row) => row.map(csvCell).join(","));
+  return `\uFEFF${lines.join("\r\n")}\r\n`;
+}
+
+function timestampForCsvFileName(now = new Date()) {
+  const pad2 = (value: number) => String(value).padStart(2, "0");
+  return [
+    now.getFullYear(),
+    pad2(now.getMonth() + 1),
+    pad2(now.getDate()),
+    "-",
+    pad2(now.getHours()),
+    pad2(now.getMinutes()),
+    pad2(now.getSeconds()),
+  ].join("");
+}
+
+function homeUsageCsvDefaultFileName(scope: TokenCostScope, now = new Date()) {
+  return `aio-coding-hub-home-usage-${scope}-${timestampForCsvFileName(now)}.csv`;
+}
+
+function buildHomeUsageLeaderboardCsv(
+  scope: TokenCostScope,
+  sortedRows: IndexedLeaderboardRow[],
+  summary: UsageSummary | null,
+  dayStartHour: number
+) {
+  if (scope === "day") {
+    const headers = [
+      "排名",
+      "日期",
+      "总 Token/占比",
+      "输入+出/缓存率",
+      "请求数/成功率",
+      "请求总耗时",
+      "活动范围",
+      "预估开发时间",
+      "总花费",
+    ];
+    const rows = sortedRows.map(({ row }, index) => [
+      String(index + 1),
+      row.name,
+      `${totalTokenText(row)}/${tokenShareText(tokenShare(row, summary))}`,
+      `${inputOutputTokenText(row)}/${cacheHitRateText(row)}`,
+      `${requestCountText(row)}/${successRateText(row)}`,
+      formatCompactDurationMs(row.total_duration_ms),
+      activityRangeText(row, dayStartHour),
+      formatCompactDurationMs(row.estimated_development_time_ms),
+      formatCostValue(row.cost_usd),
+    ]);
+    return buildCsvContent(headers, rows);
+  }
+
+  if (scope === "folder") {
+    const headers = [
+      "排名",
+      "文件夹名称",
+      "完整路径",
+      "总 Token/占比",
+      "输入+出/缓存率",
+      "请求数/成功率",
+      "请求总耗时",
+      "预估开发时间",
+      "总花费",
+    ];
+    const rows = sortedRows.map(({ row }, index) => [
+      String(index + 1),
+      row.name,
+      row.folder_path ?? "",
+      `${totalTokenText(row)}/${tokenShareText(tokenShare(row, summary))}`,
+      `${inputOutputTokenText(row)}/${cacheHitRateText(row)}`,
+      `${requestCountText(row)}/${successRateText(row)}`,
+      formatCompactDurationMs(row.total_duration_ms),
+      formatCompactDurationMs(row.estimated_development_time_ms),
+      formatCostValue(row.cost_usd),
+    ]);
+    return buildCsvContent(headers, rows);
+  }
+
+  const headers = [
+    "排名",
+    scopeLabel(scope),
+    "总 Token/占比",
+    "输入+出/缓存率",
+    "请求数/成功率",
+    "请求总耗时",
+    "总花费",
+  ];
+  const rows = sortedRows.map(({ row }, index) => [
+    String(index + 1),
+    row.name,
+    `${totalTokenText(row)}/${tokenShareText(tokenShare(row, summary))}`,
+    `${inputOutputTokenText(row)}/${cacheHitRateText(row)}`,
+    `${requestCountText(row)}/${successRateText(row)}`,
+    formatCompactDurationMs(row.total_duration_ms),
+    formatCostValue(row.cost_usd),
+  ]);
+  return buildCsvContent(headers, rows);
 }
 
 function TokenSummaryCards({
@@ -799,7 +778,7 @@ function TokenSummaryCards({
 }) {
   if (loading && !summary) {
     return (
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-7">
+      <div className="grid shrink-0 grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-7">
         {SUMMARY_SKELETON_KEYS.map((key) => (
           <StatCardSkeleton key={key} />
         ))}
@@ -808,7 +787,7 @@ function TokenSummaryCards({
   }
 
   return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-7">
+    <div className="grid shrink-0 grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-7">
       <StatCard
         title="含缓存总 Token"
         value={formatTokenValue(summary?.total_tokens)}
@@ -821,9 +800,9 @@ function TokenSummaryCards({
       />
       <StatCard title="总花费" value={formatCostValue(totalCostUsd)} accent="orange" />
       <StatCard
-        title="成本覆盖率"
-        value={formatPercent(summaryCostCoverage(summary))}
-        accent="orange"
+        title="请求总耗时"
+        value={formatCompactDurationMs(summary?.total_duration_ms)}
+        accent="cyan"
       />
       <StatCard title="成功请求" value={formatInteger(summary?.requests_success)} accent="green" />
       <StatCard
@@ -831,11 +810,7 @@ function TokenSummaryCards({
         value={formatPercent(summaryCacheHitRate(summary))}
         accent="purple"
       />
-      <StatCard
-        title={`${scopeLabel(scope)}数`}
-        value={formatInteger(rows.length)}
-        accent="slate"
-      />
+      <StatCard title={`${scopeLabel(scope)}数`} value={formatInteger(rows.length)} accent="rose" />
     </div>
   );
 }
@@ -843,35 +818,26 @@ function TokenSummaryCards({
 function TokenLeaderboardTable({
   scope,
   rows,
+  sortedRows,
   summary,
   loading,
   customPending,
-  expandedDay,
-  dayDetail,
-  dayDetailLoading,
-  dayDetailErrorText,
-  onToggleDay,
+  dayStartHour,
+  developmentTimeTooltip,
+  sortState,
+  onSort,
 }: {
   scope: TokenCostScope;
   rows: UsageLeaderboardRow[];
+  sortedRows: IndexedLeaderboardRow[];
   summary: UsageSummary | null;
   loading: boolean;
   customPending: boolean;
-  expandedDay: string | null;
-  dayDetail: UsageDayDetailV1 | null;
-  dayDetailLoading: boolean;
-  dayDetailErrorText: string | null;
-  onToggleDay: (day: string) => void;
+  dayStartHour: number;
+  developmentTimeTooltip: string;
+  sortState: SortState<LeaderboardSortKey> | null;
+  onSort: (key: LeaderboardSortKey) => void;
 }) {
-  const [sortState, setSortState] = useState<SortState<LeaderboardSortKey> | null>(null);
-  const sortedRows = useMemo(
-    () => sortLeaderboardRows(rows, sortState, summary),
-    [rows, sortState, summary]
-  );
-  const handleSort = useCallback((key: LeaderboardSortKey) => {
-    setSortState((current) => nextSortState(current, key));
-  }, []);
-
   if (loading && rows.length === 0) {
     return (
       <div className="flex items-center justify-center gap-3 px-6 py-14 text-sm text-muted-foreground">
@@ -889,9 +855,18 @@ function TokenLeaderboardTable({
     );
   }
 
+  const dayScope = scope === "day";
+  const folderScope = scope === "folder";
+  const developmentTimeScope = dayScope || folderScope;
+
   return (
     <div className="min-h-0 flex-1 overflow-auto scrollbar-overlay">
-      <table className="w-full border-separate border-spacing-0 text-left text-sm">
+      <table
+        className={cn(
+          "w-full border-separate border-spacing-0 text-left text-sm",
+          dayScope ? "min-w-[980px]" : developmentTimeScope ? "min-w-[880px]" : "min-w-[760px]"
+        )}
+      >
         <caption className="sr-only">用量排行榜</caption>
         <thead className="sticky top-0 z-10">
           <tr>
@@ -902,131 +877,112 @@ function TokenLeaderboardTable({
               label={scopeLabel(scope)}
               sortKey="name"
               sortState={sortState}
-              onSort={handleSort}
+              onSort={onSort}
             />
             <SortableColumnHeader
-              label="总Token"
+              label="总 Token/占比"
               sortKey="totalTokens"
               sortState={sortState}
-              onSort={handleSort}
+              onSort={onSort}
             />
             <SortableColumnHeader
-              label="输入+输出 Token"
+              label="输入+出/缓存率"
               sortKey="ioTokens"
               sortState={sortState}
-              onSort={handleSort}
+              onSort={onSort}
             />
             <SortableColumnHeader
-              label="缓存情况"
-              note="缓存/命中率"
-              sortKey="cacheTokens"
+              label="请求数/成功率"
+              sortKey="requests"
               sortState={sortState}
-              onSort={handleSort}
+              onSort={onSort}
             />
+            <SortableColumnHeader
+              label="请求总耗时"
+              sortKey="totalDuration"
+              sortState={sortState}
+              onSort={onSort}
+            />
+            {dayScope ? <ActivityRangeColumnHeader sortState={sortState} onSort={onSort} /> : null}
+            {developmentTimeScope ? (
+              <SortableColumnHeader
+                label="预估开发时间"
+                tooltip={
+                  folderScope
+                    ? `${developmentTimeTooltip}${FOLDER_DEVELOPMENT_TIME_NOTE}`
+                    : developmentTimeTooltip
+                }
+                sortKey="estimatedDevelopmentTime"
+                sortState={sortState}
+                onSort={onSort}
+              />
+            ) : null}
             <SortableColumnHeader
               label="总花费"
               sortKey="cost"
               sortState={sortState}
-              onSort={handleSort}
-            />
-            <SortableColumnHeader
-              label="请求数"
-              sortKey="requests"
-              sortState={sortState}
-              onSort={handleSort}
-            />
-            <SortableColumnHeader
-              label="成功率"
-              sortKey="successRate"
-              sortState={sortState}
-              onSort={handleSort}
-            />
-            <SortableColumnHeader
-              label="Token 占比"
-              sortKey="tokenShare"
-              sortState={sortState}
-              onSort={handleSort}
-            />
-            <SortableColumnHeader
-              label="平均输出速度"
-              sortKey="outputSpeed"
-              sortState={sortState}
-              onSort={handleSort}
+              onSort={onSort}
             />
           </tr>
         </thead>
         <tbody>
           {sortedRows.map(({ row }, index) => {
-            const expanded = scope === "day" && expandedDay === row.key;
+            const emptyDay = dayScope && row.requests_total === 0;
             return (
-              <Fragment key={row.key}>
-                <tr
-                  className={cn(
-                    "align-top transition-colors hover:bg-secondary/60 dark:hover:bg-secondary/50",
-                    expanded && "bg-secondary/80 dark:bg-secondary/60"
-                  )}
-                >
-                  <td className={`${TABLE_TD_CLASS} text-xs tabular-nums text-muted-foreground`}>
-                    {index + 1}
-                  </td>
-                  <td className={TABLE_TD_CLASS}>
-                    {scope === "day" ? (
-                      <button
-                        type="button"
-                        aria-expanded={expanded}
-                        aria-label={`${expanded ? "收起" : "展开"} ${row.name} 日期详情`}
-                        onClick={() => onToggleDay(row.key)}
-                        className="group flex min-w-[130px] items-center gap-1.5 text-left"
-                      >
-                        <ChevronRight
-                          aria-hidden="true"
-                          className={cn(
-                            "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform dark:text-muted-foreground",
-                            expanded && "rotate-90 text-sky-500 dark:text-sky-300"
-                          )}
-                        />
-                        <span className="font-medium text-foreground group-hover:text-sky-700 dark:text-foreground dark:group-hover:text-sky-300">
-                          {row.name}
-                        </span>
-                      </button>
-                    ) : (
-                      <div className="font-medium text-foreground">{row.name}</div>
-                    )}
-                  </td>
-                  <td className={TABLE_MONO_TD_CLASS}>
-                    <TotalTokenValue row={row} />
-                  </td>
-                  <td className={TABLE_MONO_TD_CLASS}>
-                    <InputOutputTokenValue row={row} />
-                  </td>
-                  <td className={TABLE_MONO_TD_CLASS}>
-                    <CacheHitRateBreakdown row={row} />
-                  </td>
-                  <td className={TABLE_MONO_TD_CLASS}>{formatCostValue(row.cost_usd)}</td>
-                  <td className={TABLE_MONO_TD_CLASS}>{formatInteger(row.requests_total)}</td>
-                  <td className={TABLE_MONO_TD_CLASS}>{formatPercent(successRate(row))}</td>
-                  <td className={`${TABLE_TD_CLASS} min-w-[120px]`}>
-                    <TokenShareBar percent={tokenShare(row, summary)} />
-                  </td>
-                  <td className={TABLE_MONO_TD_CLASS}>
-                    {formatTokensPerSecond(row.avg_output_tokens_per_second)}
-                  </td>
-                </tr>
-                {expanded ? (
-                  <tr>
-                    <td
-                      colSpan={10}
-                      className="border-b border-border bg-secondary/70 px-4 py-4 dark:border-border dark:bg-card/40"
+              <tr
+                key={row.key}
+                className="align-top transition-colors hover:bg-secondary/60 dark:hover:bg-secondary/50"
+              >
+                <td className={`${TABLE_TD_CLASS} text-xs tabular-nums text-muted-foreground`}>
+                  {index + 1}
+                </td>
+                <td className={TABLE_TD_CLASS}>
+                  <div className="min-w-[130px] font-medium text-foreground">{row.name}</div>
+                  {folderScope ? (
+                    <div
+                      className="mt-0.5 max-w-[280px] truncate font-mono text-[10px] text-muted-foreground"
+                      title={row.folder_path ?? undefined}
                     >
-                      <DayDetailPanel
-                        detail={dayDetail?.day === row.key ? dayDetail : null}
-                        loading={dayDetailLoading}
-                        errorText={dayDetailErrorText}
-                      />
-                    </td>
-                  </tr>
+                      {row.folder_path ?? "—"}
+                    </div>
+                  ) : null}
+                </td>
+                <td className={TABLE_MONO_TD_CLASS}>
+                  {emptyDay ? (
+                    <TokenBreakdownInline parts={["—", "—"]} />
+                  ) : (
+                    <TotalTokenShareValue row={row} summary={summary} />
+                  )}
+                </td>
+                <td className={TABLE_MONO_TD_CLASS}>
+                  {emptyDay ? (
+                    <TokenBreakdownInline parts={["—", "—"]} />
+                  ) : (
+                    <InputOutputCacheValue row={row} />
+                  )}
+                </td>
+                <td className={TABLE_MONO_TD_CLASS}>
+                  {emptyDay ? (
+                    <TokenBreakdownInline parts={["—", "—"]} />
+                  ) : (
+                    <RequestSuccessRateValue row={row} />
+                  )}
+                </td>
+                <td className={TABLE_MONO_TD_CLASS}>
+                  {emptyDay ? "—" : formatCompactDurationMs(row.total_duration_ms)}
+                </td>
+                {dayScope ? (
+                  <td className={TABLE_MONO_TD_CLASS}>{activityRangeText(row, dayStartHour)}</td>
                 ) : null}
-              </Fragment>
+                {developmentTimeScope ? (
+                  <td className={TABLE_MONO_TD_CLASS}>
+                    {emptyDay ? "—" : formatCompactDurationMs(row.estimated_development_time_ms)}
+                  </td>
+                ) : null}
+                <td className={TABLE_MONO_TD_CLASS}>
+                  {emptyDay ? "—" : formatCostValue(row.cost_usd)}
+                </td>
+              </tr>
             );
           })}
         </tbody>
@@ -1220,7 +1176,6 @@ type HomeTokenCostPanelProps = {
 type HomeTokenCostPanelState = {
   scope: TokenCostScope;
   range: TokenCostRange;
-  expandedDay: string | null;
   selectedFolderKeys: string[];
   excludeCx2CcGatewayBridge: boolean;
 };
@@ -1228,18 +1183,18 @@ type HomeTokenCostPanelState = {
 type HomeTokenCostPanelAction =
   | { type: "setScope"; scope: TokenCostScope }
   | { type: "setRange"; range: TokenCostRange }
-  | { type: "toggleExpandedDay"; day: string }
   | { type: "toggleFolderKey"; key: string }
   | { type: "clearFolderKeys" }
   | { type: "setExcludeCx2CcGatewayBridge"; exclude: boolean };
 
-const initialHomeTokenCostPanelState: HomeTokenCostPanelState = {
-  scope: "provider",
-  range: "today",
-  expandedDay: null,
-  selectedFolderKeys: [],
-  excludeCx2CcGatewayBridge: true,
-};
+function createInitialHomeTokenCostPanelState(): HomeTokenCostPanelState {
+  return {
+    scope: "day",
+    range: "last7",
+    selectedFolderKeys: [],
+    excludeCx2CcGatewayBridge: true,
+  };
+}
 
 function homeTokenCostPanelReducer(
   state: HomeTokenCostPanelState,
@@ -1250,11 +1205,6 @@ function homeTokenCostPanelReducer(
       return { ...state, scope: action.scope };
     case "setRange":
       return { ...state, range: action.range };
-    case "toggleExpandedDay":
-      return {
-        ...state,
-        expandedDay: state.expandedDay === action.day ? null : action.day,
-      };
     case "toggleFolderKey":
       return {
         ...state,
@@ -1270,8 +1220,28 @@ function homeTokenCostPanelReducer(
 }
 
 export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostPanelProps) {
-  const [state, dispatch] = useReducer(homeTokenCostPanelReducer, initialHomeTokenCostPanelState);
-  const { scope, range, expandedDay, selectedFolderKeys, excludeCx2CcGatewayBridge } = state;
+  const initialState = useMemo(createInitialHomeTokenCostPanelState, []);
+  const [state, dispatch] = useReducer(homeTokenCostPanelReducer, initialState);
+  const [leaderboardSortState, setLeaderboardSortState] =
+    useState<SortState<LeaderboardSortKey> | null>(null);
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const exportingCsvRef = useRef(false);
+  const { scope, range, selectedFolderKeys, excludeCx2CcGatewayBridge } = state;
+  const dayStartHour = useSyncExternalStore(
+    subscribeHomeUsageDayStartHour,
+    readHomeUsageDayStartHourFromStorage,
+    () => HOME_USAGE_DEFAULT_DAY_START_HOUR
+  );
+  const fullIdleGapMinutes = useSyncExternalStore(
+    subscribeHomeUsageDevelopmentTimeThresholds,
+    readHomeUsageFullIdleGapMinutesFromStorage,
+    () => HOME_USAGE_DEFAULT_FULL_IDLE_GAP_MINUTES
+  );
+  const sessionBreakGapMinutes = useSyncExternalStore(
+    subscribeHomeUsageDevelopmentTimeThresholds,
+    readHomeUsageSessionBreakGapMinutesFromStorage,
+    () => HOME_USAGE_DEFAULT_SESSION_BREAK_GAP_MINUTES
+  );
   const onInvalidCustomRange = useCallback((message: string) => toast(message), []);
   const customDateRangeOptions = useMemo(
     () => ({ onInvalid: onInvalidCustomRange }),
@@ -1287,8 +1257,8 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
   } = useCustomDateRange(range, customDateRangeOptions);
 
   const queryConfig = useMemo(
-    () => buildTokenCostQueryConfig(range, customApplied),
-    [customApplied, range]
+    () => buildTokenCostQueryConfig(range, customApplied, dayStartHour),
+    [customApplied, dayStartHour, range]
   );
   const customPending = range === "custom" && !customApplied;
   const selectedFolderKeysForQuery = selectedFolderKeys.length > 0 ? selectedFolderKeys : null;
@@ -1298,10 +1268,18 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
       input: {
         ...queryConfig.input,
         folderKeys: selectedFolderKeysForQuery,
+        fullIdleGapMinutes,
+        sessionBreakGapMinutes,
         excludeCx2CcGatewayBridge,
       },
     }),
-    [excludeCx2CcGatewayBridge, queryConfig, selectedFolderKeysForQuery]
+    [
+      excludeCx2CcGatewayBridge,
+      fullIdleGapMinutes,
+      queryConfig,
+      selectedFolderKeysForQuery,
+      sessionBreakGapMinutes,
+    ]
   );
   const queryRefreshConfig = useMemo(
     () =>
@@ -1345,127 +1323,219 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
   const displayRows = customPending ? EMPTY_LEADERBOARD_ROWS : model.rows;
   const displayTotalCostUsd = customPending ? null : model.totalCostUsd;
   const displayLoading = customPending ? false : model.loading;
-  const expandedVisibleDay = useMemo(() => {
-    if (scope !== "day" || customPending || !expandedDay) return null;
-    return displayRows.some((row) => row.key === expandedDay) ? expandedDay : null;
-  }, [customPending, displayRows, expandedDay, scope]);
-  const dayDetailParams = useMemo(
-    () => ({
-      day: expandedVisibleDay ?? "",
-      cliKey: filteredQueryConfig.input.cliKey,
-      providerId: filteredQueryConfig.input.providerId,
-      folderLimit: 8,
-      folderKeys: selectedFolderKeysForQuery,
-      excludeCx2CcGatewayBridge,
-    }),
-    [
-      excludeCx2CcGatewayBridge,
-      expandedVisibleDay,
-      filteredQueryConfig.input.cliKey,
-      filteredQueryConfig.input.providerId,
-      selectedFolderKeysForQuery,
-    ]
+  const sortedDisplayRows = useMemo(
+    () => sortLeaderboardRows(displayRows, leaderboardSortState, dayStartHour),
+    [dayStartHour, displayRows, leaderboardSortState]
   );
-  const dayDetailQueryEnabled = Boolean(expandedVisibleDay) && !model.previewActive;
-  const dayDetailQuery = useUsageDayDetailV1Query(dayDetailParams, {
-    enabled: dayDetailQueryEnabled,
-  });
-  const previewDayDetail = useMemo(
-    () =>
-      expandedVisibleDay && model.previewActive
-        ? buildPreviewTokenDayDetail(
-            expandedVisibleDay,
-            queryConfig.previewFactor,
-            selectedFolderKeysForQuery
-          )
-        : null,
-    [expandedVisibleDay, model.previewActive, queryConfig.previewFactor, selectedFolderKeysForQuery]
-  );
-  const fetchedDayDetail =
-    dayDetailQuery.data?.day === expandedVisibleDay ? dayDetailQuery.data : null;
-  const displayDayDetail = previewDayDetail ?? fetchedDayDetail;
-  const dayDetailLoading =
-    Boolean(expandedVisibleDay) &&
-    !displayDayDetail &&
-    dayDetailQueryEnabled &&
-    (dayDetailQuery.isLoading || dayDetailQuery.isFetching);
-  const dayDetailErrorText =
-    dayDetailQueryEnabled && !displayDayDetail && dayDetailQuery.error
-      ? formatUnknownError(dayDetailQuery.error)
-      : null;
-  const handleToggleDay = useCallback(
-    (day: string) => {
-      if (customPending) return;
-      dispatch({ type: "toggleExpandedDay", day });
-    },
-    [customPending]
-  );
+  const exportCsvDisabled =
+    customPending || displayLoading || sortedDisplayRows.length === 0 || exportingCsv;
   const handleToggleFolderKey = useCallback((key: string) => {
     dispatch({ type: "toggleFolderKey", key });
   }, []);
   const handleClearFolderKeys = useCallback(() => {
     dispatch({ type: "clearFolderKeys" });
   }, []);
+  const handleDayStartHourChange = useCallback((dayStartHour: number) => {
+    writeHomeUsageDayStartHourToStorage(dayStartHour);
+  }, []);
+  const handleFullIdleGapMinutesChange = useCallback((minutes: number) => {
+    writeHomeUsageFullIdleGapMinutesToStorage(minutes);
+  }, []);
+  const handleSessionBreakGapMinutesChange = useCallback((minutes: number) => {
+    writeHomeUsageSessionBreakGapMinutesToStorage(minutes);
+  }, []);
+  const developmentTimeTooltip = developmentTimeEstimateTooltip(
+    fullIdleGapMinutes,
+    sessionBreakGapMinutes
+  );
   const handleApplyCustomRange = useCallback(() => {
     if (applyCustomRange()) {
       dispatch({ type: "setRange", range: "custom" });
     }
   }, [applyCustomRange]);
+  const handleLeaderboardSort = useCallback((key: LeaderboardSortKey) => {
+    setLeaderboardSortState((current) => nextSortState(current, key));
+  }, []);
+  const handleScopeChange = useCallback((nextScope: TokenCostScope) => {
+    dispatch({ type: "setScope", scope: nextScope });
+    setLeaderboardSortState(
+      nextScope === "folder" ? { key: "totalTokens", direction: "desc" } : null
+    );
+  }, []);
+  const handleExportCsv = useCallback(async () => {
+    if (
+      exportingCsvRef.current ||
+      customPending ||
+      displayLoading ||
+      sortedDisplayRows.length === 0
+    ) {
+      return;
+    }
+
+    exportingCsvRef.current = true;
+    setExportingCsv(true);
+
+    try {
+      const filePath = await saveDesktopFilePath({
+        title: "导出用量排行 CSV",
+        defaultPath: homeUsageCsvDefaultFileName(scope),
+        filters: [{ name: "CSV", extensions: ["csv"] }],
+        canCreateDirectories: true,
+      });
+      if (!filePath) {
+        return;
+      }
+
+      const csv = buildHomeUsageLeaderboardCsv(
+        scope,
+        sortedDisplayRows,
+        displaySummary,
+        dayStartHour
+      );
+      await usageLeaderboardCsvExport(filePath, csv);
+      toast("用量排行 CSV 已导出");
+    } catch (error) {
+      toast(`导出 CSV 失败：${formatUnknownError(error)}`);
+    } finally {
+      exportingCsvRef.current = false;
+      setExportingCsv(false);
+    }
+  }, [customPending, dayStartHour, displayLoading, displaySummary, scope, sortedDisplayRows]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-5 overflow-hidden">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <fieldset className="flex flex-wrap items-center gap-1.5 border-0 p-0">
+    <div className="flex h-full min-h-0 flex-col gap-5 overflow-y-auto lg:overflow-hidden">
+      <div className="flex shrink-0 flex-col gap-3 2xl:flex-row 2xl:items-start 2xl:justify-between">
+        <fieldset className="flex min-w-0 flex-col gap-2 border-0 p-0">
           <legend className="sr-only">用量筛选</legend>
-          <FolderMultiSelect
-            options={folderOptions}
-            selectedKeys={selectedFolderKeys}
-            loading={folderOptionsLoading}
-            disabled={folderSelectDisabled}
-            onToggleKey={handleToggleFolderKey}
-            onClear={handleClearFolderKeys}
-          />
-          <div className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-white px-2.5 text-xs text-muted-foreground shadow-sm dark:border-border dark:bg-card dark:text-secondary-foreground">
-            <span className="whitespace-nowrap">转接去重</span>
-            <Switch
-              checked={excludeCx2CcGatewayBridge}
-              onCheckedChange={(exclude) =>
-                dispatch({ type: "setExcludeCx2CcGatewayBridge", exclude })
-              }
-              size="sm"
-              aria-label="过滤转接重复用量"
+          <div
+            role="group"
+            aria-label="用量筛选设置"
+            className="flex flex-wrap items-center gap-1.5"
+          >
+            <FolderMultiSelect
+              options={folderOptions}
+              selectedKeys={selectedFolderKeys}
+              loading={folderOptionsLoading}
+              disabled={folderSelectDisabled}
+              onToggleKey={handleToggleFolderKey}
+              onClear={handleClearFolderKeys}
+            />
+            <div className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-white px-2.5 text-xs text-muted-foreground shadow-sm dark:border-border dark:bg-card dark:text-secondary-foreground">
+              <span className="whitespace-nowrap">转接去重</span>
+              <Switch
+                checked={excludeCx2CcGatewayBridge}
+                onCheckedChange={(exclude) =>
+                  dispatch({ type: "setExcludeCx2CcGatewayBridge", exclude })
+                }
+                size="sm"
+                aria-label="过滤转接重复用量"
+              />
+            </div>
+            <label className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-white px-2.5 text-xs text-muted-foreground shadow-sm dark:border-border dark:bg-card dark:text-secondary-foreground">
+              <span className="whitespace-nowrap">统计日开始</span>
+              <Select
+                aria-label="统计日开始"
+                value={String(dayStartHour)}
+                onChange={(event) => handleDayStartHourChange(Number(event.currentTarget.value))}
+                className="h-6 w-auto rounded border-0 bg-transparent px-1 py-0 text-xs shadow-none focus:bg-transparent focus:ring-0 focus:ring-offset-0"
+              >
+                {HOME_USAGE_DAY_START_HOUR_OPTIONS.map((hour) => (
+                  <option key={hour} value={hour}>
+                    {dayStartHourLabel(hour)}
+                  </option>
+                ))}
+              </Select>
+            </label>
+            <label className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-white px-2.5 text-xs text-muted-foreground shadow-sm dark:border-border dark:bg-card dark:text-secondary-foreground">
+              <span className="whitespace-nowrap">完整计入</span>
+              <Tooltip content={FULL_IDLE_GAP_TOOLTIP} contentClassName="max-w-[320px] leading-5">
+                <span
+                  aria-label="完整计入说明"
+                  className="inline-flex cursor-help items-center text-muted-foreground"
+                >
+                  <CircleHelp aria-hidden="true" className="h-3.5 w-3.5" />
+                </span>
+              </Tooltip>
+              <Select
+                aria-label="完整计入时间"
+                value={String(fullIdleGapMinutes)}
+                onChange={(event) =>
+                  handleFullIdleGapMinutesChange(Number(event.currentTarget.value))
+                }
+                className="h-6 w-auto rounded border-0 bg-transparent px-1 py-0 text-xs shadow-none focus:bg-transparent focus:ring-0 focus:ring-offset-0"
+              >
+                {HOME_USAGE_FULL_IDLE_GAP_MINUTES_OPTIONS.map((minutes) => (
+                  <option key={minutes} value={minutes}>
+                    {minutes} 分钟
+                  </option>
+                ))}
+              </Select>
+            </label>
+            <label className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-white px-2.5 text-xs text-muted-foreground shadow-sm dark:border-border dark:bg-card dark:text-secondary-foreground">
+              <span className="whitespace-nowrap">停止计入</span>
+              <Tooltip
+                content={SESSION_BREAK_GAP_TOOLTIP}
+                contentClassName="max-w-[320px] leading-5"
+              >
+                <span
+                  aria-label="停止计入说明"
+                  className="inline-flex cursor-help items-center text-muted-foreground"
+                >
+                  <CircleHelp aria-hidden="true" className="h-3.5 w-3.5" />
+                </span>
+              </Tooltip>
+              <Select
+                aria-label="停止计入时间"
+                value={String(sessionBreakGapMinutes)}
+                onChange={(event) =>
+                  handleSessionBreakGapMinutesChange(Number(event.currentTarget.value))
+                }
+                className="h-6 w-auto rounded border-0 bg-transparent px-1 py-0 text-xs shadow-none focus:bg-transparent focus:ring-0 focus:ring-offset-0"
+              >
+                {HOME_USAGE_SESSION_BREAK_GAP_MINUTES_OPTIONS.map((minutes) => (
+                  <option key={minutes} value={minutes}>
+                    {minutes} 分钟
+                  </option>
+                ))}
+              </Select>
+            </label>
+          </div>
+          <div
+            role="group"
+            aria-label="用量时间范围"
+            className="flex flex-wrap items-center gap-1.5"
+          >
+            {TOKEN_COST_RANGE_ITEMS.map((item) => {
+              const active = range === item.key;
+              return (
+                <Button
+                  key={item.key}
+                  size="sm"
+                  variant={active ? "primary" : "secondary"}
+                  aria-pressed={active}
+                  onClick={() => dispatch({ type: "setRange", range: item.key })}
+                  className="whitespace-nowrap"
+                >
+                  {item.label}
+                </Button>
+              );
+            })}
+            <CustomRangeForm
+              customStartDate={customStartDate}
+              customEndDate={customEndDate}
+              onCustomStartDateChange={setCustomStartDate}
+              onCustomEndDateChange={setCustomEndDate}
+              onApplyCustomRange={handleApplyCustomRange}
+              active={range === "custom" && Boolean(customApplied)}
             />
           </div>
-          {TOKEN_COST_RANGE_ITEMS.map((item) => {
-            const active = range === item.key;
-            return (
-              <Button
-                key={item.key}
-                size="sm"
-                variant={active ? "primary" : "secondary"}
-                aria-pressed={active}
-                onClick={() => dispatch({ type: "setRange", range: item.key })}
-                className="whitespace-nowrap"
-              >
-                {item.label}
-              </Button>
-            );
-          })}
-          <CustomRangeForm
-            customStartDate={customStartDate}
-            customEndDate={customEndDate}
-            onCustomStartDateChange={setCustomStartDate}
-            onCustomEndDateChange={setCustomEndDate}
-            onApplyCustomRange={handleApplyCustomRange}
-            active={range === "custom" && Boolean(customApplied)}
-          />
         </fieldset>
-        <div className="flex flex-wrap items-center gap-3 lg:justify-end">
+        <div className="flex flex-wrap items-center gap-3 2xl:justify-end">
           <TabList
             ariaLabel="用量维度切换"
             items={TOKEN_COST_SCOPE_ITEMS}
             value={scope}
-            onChange={(scope) => dispatch({ type: "setScope", scope })}
+            onChange={handleScopeChange}
             size="sm"
           />
         </div>
@@ -1485,21 +1555,40 @@ export function HomeTokenCostPanel({ devPreviewEnabled = false }: HomeTokenCostP
         onRetry={model.refresh}
       />
 
-      <Card padding="none" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <Card
+        padding="none"
+        className="flex min-h-[280px] shrink-0 flex-col overflow-hidden lg:min-h-0 lg:flex-1"
+      >
         <div className="shrink-0 border-b border-border px-6 pb-4 pt-5 dark:border-border">
-          <div className="text-base font-semibold text-foreground">{scopeLabel(scope)}排行</div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-base font-semibold text-foreground">{scopeLabel(scope)}排行</div>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={exportCsvDisabled}
+              onClick={() => void handleExportCsv()}
+              className="whitespace-nowrap"
+            >
+              {exportingCsv ? (
+                <Spinner size="sm" />
+              ) : (
+                <Download aria-hidden="true" className="h-3.5 w-3.5" />
+              )}
+              导出 CSV
+            </Button>
+          </div>
         </div>
         <TokenLeaderboardTable
           scope={scope}
           rows={displayRows}
+          sortedRows={sortedDisplayRows}
           summary={displaySummary}
           loading={displayLoading}
           customPending={customPending}
-          expandedDay={expandedVisibleDay}
-          dayDetail={displayDayDetail}
-          dayDetailLoading={dayDetailLoading}
-          dayDetailErrorText={dayDetailErrorText}
-          onToggleDay={handleToggleDay}
+          dayStartHour={dayStartHour}
+          developmentTimeTooltip={developmentTimeTooltip}
+          sortState={leaderboardSortState}
+          onSort={handleLeaderboardSort}
         />
       </Card>
     </div>

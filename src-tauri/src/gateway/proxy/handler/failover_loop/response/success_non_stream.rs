@@ -434,6 +434,10 @@ where
                     circuit_state_after: None,
                     circuit_failure_count: Some(circuit_before.failure_count),
                     circuit_failure_threshold: Some(circuit_before.failure_threshold),
+                    circuit_recover_at_unix: None,
+                    circuit_trigger_error_code: None,
+                    provider_bridged: Some(provider_ctx_owned.provider_bridged),
+                    timeout_secs: None,
                 });
 
                 emit_attempt_event_and_log_with_circuit_before(
@@ -522,6 +526,10 @@ where
                     circuit_state_after: None,
                     circuit_failure_count: Some(circuit_before.failure_count),
                     circuit_failure_threshold: Some(circuit_before.failure_threshold),
+                    circuit_recover_at_unix: None,
+                    circuit_trigger_error_code: None,
+                    provider_bridged: Some(provider_ctx_owned.provider_bridged),
+                    timeout_secs: None,
                 });
 
                 emit_attempt_event_and_log_with_circuit_before(
@@ -650,6 +658,7 @@ where
                 decision,
                 outcome,
                 reason: kind.reason(MAX_NON_SSE_BODY_BYTES),
+                timeout_secs: None,
             })
             .await;
         }
@@ -678,6 +687,10 @@ where
         circuit_state_after: None,
         circuit_failure_count: Some(circuit_before.failure_count),
         circuit_failure_threshold: Some(circuit_before.failure_threshold),
+        circuit_recover_at_unix: None,
+        circuit_trigger_error_code: None,
+        provider_bridged: Some(provider_ctx_owned.provider_bridged),
+        timeout_secs: None,
     });
 
     emit_attempt_event_and_log_with_circuit_before(
@@ -732,6 +745,7 @@ where
                     decision,
                     outcome,
                     reason: format!("cx2cc event-stream aggregation failed: {err}"),
+                    timeout_secs: None,
                 })
                 .await;
             }
@@ -887,6 +901,7 @@ where
                 decision,
                 outcome,
                 reason: format!("cx2cc response translation failed: {err}"),
+                timeout_secs: None,
             })
             .await;
         }
@@ -956,7 +971,8 @@ where
                     provider_ctx_owned.provider_name_base.as_str(),
                     provider_ctx_owned.provider_base_url_base.as_str(),
                     now_unix,
-                ),
+                )
+                .with_provider_health_neutral(common.provider_health_neutral),
             );
             if let Some(last) = attempts.last_mut() {
                 last.circuit_state_after = Some(change.after.state.as_str());
@@ -973,6 +989,7 @@ where
                     provider_id,
                     now_unix,
                     common.provider_cooldown_secs,
+                    common.provider_health_neutral,
                 );
                 *circuit_snapshot = snap;
             }
@@ -991,6 +1008,7 @@ where
                     &state.db,
                     &state.log_tx,
                     &state.plugin_pipeline,
+                    &state.active_requests,
                 ),
                 trace_id: common.trace_id.as_str(),
                 cli_key: common.cli_key.as_str(),
@@ -1138,7 +1156,8 @@ where
                 provider_ctx_owned.provider_name_base.as_str(),
                 provider_ctx_owned.provider_base_url_base.as_str(),
                 now_unix,
-            ),
+            )
+            .with_provider_health_neutral(common.provider_health_neutral),
         );
         if let Some(last) = attempts.last_mut() {
             last.circuit_state_after = Some(change.after.state.as_str());
@@ -1161,7 +1180,13 @@ where
     let duration_ms = started.elapsed().as_millis();
     emit_request_event_and_enqueue_request_log(
         RequestEndArgs::from_context(RequestEndContextArgs {
-            deps: RequestEndDeps::new(&state.app, &state.db, &state.log_tx, &state.plugin_pipeline),
+            deps: RequestEndDeps::new(
+                &state.app,
+                &state.db,
+                &state.log_tx,
+                &state.plugin_pipeline,
+                &state.active_requests,
+            ),
             trace_id: common.trace_id.as_str(),
             cli_key: common.cli_key.as_str(),
             method: common.method_hint.as_str(),

@@ -8,11 +8,21 @@ pub(super) fn compute_bounds_v2(
     period: UsagePeriodV2,
     start_ts: Option<i64>,
     end_ts: Option<i64>,
+    day_start_hour: i64,
 ) -> Result<(Option<i64>, Option<i64>), String> {
     match period {
-        UsagePeriodV2::Daily => Ok((compute_start_ts(conn, UsageRange::Today)?, None)),
-        UsagePeriodV2::Weekly => Ok((compute_start_ts(conn, UsageRange::Last7)?, None)),
-        UsagePeriodV2::Monthly => Ok((compute_start_ts(conn, UsageRange::Month)?, None)),
+        UsagePeriodV2::Daily => Ok((
+            compute_start_ts_with_day_start(conn, UsageRange::Today, day_start_hour)?,
+            None,
+        )),
+        UsagePeriodV2::Weekly => Ok((
+            compute_start_ts_with_day_start(conn, UsageRange::Last7, day_start_hour)?,
+            None,
+        )),
+        UsagePeriodV2::Monthly => Ok((
+            compute_start_ts_with_day_start(conn, UsageRange::Month, day_start_hour)?,
+            None,
+        )),
         UsagePeriodV2::AllTime => Ok((None, None)),
         UsagePeriodV2::Custom => {
             let start_ts = start_ts
@@ -52,6 +62,39 @@ pub(super) fn compute_start_ts(
     let ts = conn
         .query_row(sql, [], |row| row.get::<_, i64>(0))
         .map_err(|e| db_err!("failed to compute range start ts: {e}"))?;
+
+    Ok(Some(ts))
+}
+
+fn compute_start_ts_with_day_start(
+    conn: &Connection,
+    range: UsageRange,
+    day_start_hour: i64,
+) -> Result<Option<i64>, String> {
+    if day_start_hour == 0 {
+        return compute_start_ts(conn, range);
+    }
+    let offset = format!("-{day_start_hour} hours");
+    let restore = format!("+{day_start_hour} hours");
+    let sql = match range {
+        UsageRange::All => return Ok(None),
+        UsageRange::Today => {
+            "SELECT CAST(strftime('%s','now','localtime', ?1,'start of day', ?2,'utc') AS INTEGER)"
+        }
+        UsageRange::Last7 => {
+            "SELECT CAST(strftime('%s','now','localtime', ?1,'start of day','-6 days', ?2,'utc') AS INTEGER)"
+        }
+        UsageRange::Last30 => {
+            "SELECT CAST(strftime('%s','now','localtime', ?1,'start of day','-29 days', ?2,'utc') AS INTEGER)"
+        }
+        UsageRange::Month => {
+            "SELECT CAST(strftime('%s','now','localtime', ?1,'start of month', ?2,'utc') AS INTEGER)"
+        }
+    };
+
+    let ts = conn
+        .query_row(sql, params![offset, restore], |row| row.get::<_, i64>(0))
+        .map_err(|e| db_err!("failed to compute shifted range start ts: {e}"))?;
 
     Ok(Some(ts))
 }

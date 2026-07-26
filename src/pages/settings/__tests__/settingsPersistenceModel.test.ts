@@ -48,7 +48,7 @@ describe("pages/settings/settingsPersistenceModel", () => {
     expect(snapshot.show_home_usage).toBe(DEFAULT_PERSISTED_SETTINGS.show_home_usage);
     expect(snapshot.start_minimized).toBe(DEFAULT_PERSISTED_SETTINGS.start_minimized);
     expect(snapshot.tray_enabled).toBe(DEFAULT_PERSISTED_SETTINGS.tray_enabled);
-    expect(snapshot.cli_priority_order).toEqual(["gemini", "claude", "codex"]);
+    expect(snapshot.cli_priority_order).toEqual(["gemini", "claude", "codex", "grok"]);
   });
 
   it("diffs and selectively replaces persisted keys", () => {
@@ -154,6 +154,7 @@ describe("pages/settings/settingsPersistenceModel", () => {
       startMinimized: false,
       trayEnabled: true,
       logRetentionDays: 7,
+      requestLogRetentionDays: 0,
       providerCooldownSeconds: 30,
       providerBaseUrlPingCacheTtlSeconds: 60,
       upstreamFirstByteTimeoutSeconds: 0,

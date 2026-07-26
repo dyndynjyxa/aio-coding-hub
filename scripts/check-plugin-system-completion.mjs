@@ -46,7 +46,6 @@ requireScript(
   "check:plugin-api-contract",
   "node scripts/check-plugin-api-contract.mjs"
 );
-requireScript(rootPackage, "create-aio-plugin:test", "pnpm --filter create-aio-plugin test");
 requireScript(rootPackage, "test:e2e", "vitest run src/e2e");
 
 const workspace = readText("pnpm-workspace.yaml");
@@ -63,7 +62,7 @@ for (const phrase of [
   "pnpm check:plugin-api-contract",
   "pnpm check:plugin-system-docs",
   "pnpm check:generated-bindings",
-  "pnpm plugin-sdk:typecheck",
+  "pnpm --filter @aio-coding-hub/plugin-sdk typecheck",
   "pnpm --filter create-aio-plugin test",
   "pnpm test:e2e",
 ]) {

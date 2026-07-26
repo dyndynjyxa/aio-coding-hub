@@ -28,11 +28,17 @@ describe("hooks/useCliProxy", () => {
     const { result } = renderHook(() => useCliProxy());
     expect(result.current.loading).toBe(false);
     expect(result.current.available).toBe(true);
-    expect(result.current.enabled).toEqual({ claude: false, codex: true, gemini: false });
+    expect(result.current.enabled).toEqual({
+      claude: false,
+      codex: true,
+      gemini: false,
+      grok: false,
+    });
     expect(result.current.appliedToCurrentGateway).toEqual({
       claude: null,
       codex: false,
       gemini: null,
+      grok: null,
     });
   });
 

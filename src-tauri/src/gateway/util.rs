@@ -498,7 +498,7 @@ pub(super) fn strip_hop_headers(headers: &mut HeaderMap) {
     headers.remove(header::UPGRADE);
 }
 
-pub(super) fn build_target_url(
+pub(crate) fn build_target_url(
     base_url: &str,
     forwarded_path: &str,
     query: Option<&str>,
@@ -832,5 +832,30 @@ mod tests {
             .unwrap_or("")
             .starts_with("Bearer "));
         assert!(!headers.contains_key("x-api-key"));
+    }
+
+    #[test]
+    fn inject_provider_auth_grok_replaces_client_credentials_with_bearer() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer client-secret"),
+        );
+        headers.insert("x-api-key", HeaderValue::from_static("client-api-key"));
+        headers.insert(
+            "x-goog-api-key",
+            HeaderValue::from_static("client-google-key"),
+        );
+
+        inject_provider_auth("grok", "provider-test-key", &mut headers);
+
+        assert_eq!(
+            headers
+                .get(header::AUTHORIZATION)
+                .and_then(|value| value.to_str().ok()),
+            Some("Bearer provider-test-key")
+        );
+        assert!(!headers.contains_key("x-api-key"));
+        assert!(!headers.contains_key("x-goog-api-key"));
     }
 }

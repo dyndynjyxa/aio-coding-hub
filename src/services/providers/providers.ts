@@ -30,6 +30,8 @@ import {
   type Override,
 } from "../generatedTypeUtils";
 import { createRiskyIpcConfirm } from "../ipcConfirm";
+import { FeValidationError } from "../../utils/errors";
+import { CLI_KEYS, type CliKey } from "../../constants/clis";
 
 export type {
   ProviderAvailabilityResult,
@@ -45,14 +47,14 @@ export type {
   ProviderOAuthStatusResult,
 };
 
-export type CliKey = "claude" | "codex" | "gemini";
+export type { CliKey } from "../../constants/clis";
 
 export type ClaudeModels = GeneratedClaudeModels;
 export type DailyResetMode = GeneratedDailyResetMode;
 export type ProviderAuthMode = GeneratedProviderAuthMode;
 export type ProviderBaseUrlMode = GeneratedProviderBaseUrlMode;
 
-const CLI_KEY_VALUES = ["claude", "codex", "gemini"] as const satisfies readonly CliKey[];
+const CLI_KEY_VALUES = CLI_KEYS;
 const PROVIDER_AUTH_MODE_VALUES = [
   "api_key",
   "oauth",
@@ -137,7 +139,7 @@ export function validateProviderCliKey(cliKey: string): CliKey {
   if ((CLI_KEY_VALUES as readonly string[]).includes(normalizedCliKey)) {
     return normalizedCliKey as CliKey;
   }
-  throw new Error(`SEC_INVALID_INPUT: invalid cliKey=${cliKey}`);
+  throw new FeValidationError(`SEC_INVALID_INPUT: invalid cliKey=${cliKey}`);
 }
 
 function toProviderAuthMode(value: string, label: string): ProviderAuthMode {

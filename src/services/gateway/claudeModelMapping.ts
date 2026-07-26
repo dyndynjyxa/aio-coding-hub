@@ -1,11 +1,7 @@
-export type ClaudeModelMapping = {
-  requestedModel: string;
-  effectiveModel: string;
-  mappingKind: string;
-  providerId: number;
-  providerName: string;
-  applied: boolean;
-};
+// 类型以生成 bindings 为唯一基准（Rust ClaudeModelMapping 改字段 → 前端 typecheck 翻红）。
+import type { ClaudeModelMapping } from "../../generated/bindings";
+
+export type { ClaudeModelMapping } from "../../generated/bindings";
 
 export function normalizeClaudeModelMapping(
   mapping: ClaudeModelMapping | null | undefined

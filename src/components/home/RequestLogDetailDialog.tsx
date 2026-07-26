@@ -5,7 +5,7 @@
 import { useCallback, useState } from "react";
 import { useNowMs } from "../../hooks/useNowMs";
 import { useRequestLogDetailSignalRefresh } from "../../hooks/useRequestLogDetailSignalRefresh";
-import { isPersistedRequestLogInProgress } from "../../services/gateway/requestLogState";
+import { isPersistedRequestLogIncomplete } from "../../services/gateway/requestLogState";
 import { useTraceStore } from "../../services/gateway/traceStore";
 import {
   useRequestAttemptLogsByTraceIdQuery,
@@ -20,7 +20,7 @@ import {
   computeStatusBadge,
   resolveLiveTraceDurationMs,
   resolveLiveTraceProvider,
-} from "./HomeLogShared";
+} from "./requestLogPresentation";
 import { RequestLogDetailSummaryTab } from "./RequestLogDetailSummaryTab";
 import { RequestLogDetailChainTab } from "./RequestLogDetailChainTab";
 import { RequestLogDetailRawTab } from "./RequestLogDetailRawTab";
@@ -78,7 +78,7 @@ export function RequestLogDetailDialog({
     ? (traces.find((trace) => trace.trace_id === selectedLog.trace_id) ?? null)
     : null;
   const isInProgress =
-    selectedLog != null && isPersistedRequestLogInProgress(selectedLog) && matchingTrace != null;
+    selectedLog != null && isPersistedRequestLogIncomplete(selectedLog) && matchingTrace != null;
   const liveTrace = isInProgress ? matchingTrace : null;
   const nowMs = useNowMs(isInProgress && liveTrace != null, 250);
   const liveProvider = resolveLiveTraceProvider(liveTrace);

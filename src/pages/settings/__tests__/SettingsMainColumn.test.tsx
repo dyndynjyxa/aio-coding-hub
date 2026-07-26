@@ -99,6 +99,8 @@ function renderSettingsMainColumn(
     setTrayEnabled: vi.fn(),
     logRetentionDays: 30,
     setLogRetentionDays: vi.fn(),
+    requestLogRetentionDays: 0,
+    setRequestLogRetentionDays: vi.fn(),
     enableDebugLog: false,
     setEnableDebugLog: vi.fn(),
     requestPersist: vi.fn(),
@@ -384,7 +386,7 @@ describe("pages/settings/SettingsMainColumn", () => {
     } as any);
 
     renderSettingsMainColumn({
-      cliPriorityOrder: ["claude", "codex", "gemini"],
+      cliPriorityOrder: ["claude", "codex", "gemini", "grok"],
       setCliPriorityOrder,
       requestPersist,
     });
@@ -398,9 +400,9 @@ describe("pages/settings/SettingsMainColumn", () => {
       );
     });
 
-    expect(setCliPriorityOrder).toHaveBeenCalledWith(["gemini", "claude", "codex"]);
+    expect(setCliPriorityOrder).toHaveBeenCalledWith(["gemini", "claude", "codex", "grok"]);
     expect(requestPersist).toHaveBeenCalledWith({
-      cli_priority_order: ["gemini", "claude", "codex"],
+      cli_priority_order: ["gemini", "claude", "codex", "grok"],
     });
   });
 

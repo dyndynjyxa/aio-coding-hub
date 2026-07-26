@@ -22,6 +22,10 @@ jobs:
         with:
           ref: ${{ github.head_ref }}
           fetch-depth: 0
+          # Push with a PAT instead of GITHUB_TOKEN: runs re-triggered by a
+          # GITHUB_TOKEN push get stuck in action_required, leaving the
+          # release PR with its pre-sync red ci run forever.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
 
       - name: Install Rust 1.90.0
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9

@@ -242,6 +242,57 @@ describe("services/gateway/gatewayEvents", () => {
     vi.useRealTimers();
   });
 
+  it("routes valid circuit payloads to maybeSendCircuitBreakerNotice", async () => {
+    setTauriRuntime();
+    vi.resetModules();
+    vi.clearAllMocks();
+    clearTauriEventListeners();
+
+    vi.doMock("../circuitNotice", () => ({
+      maybeSendCircuitBreakerNotice: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.mocked(tauriListen).mockResolvedValue(tauriUnlisten);
+
+    const { listenGatewayEvents } = await import("../gatewayEvents");
+    const { maybeSendCircuitBreakerNotice } = await import("../circuitNotice");
+    const unlisten = await listenGatewayEvents();
+
+    const circuit = vi
+      .mocked(tauriListen)
+      .mock.calls.slice()
+      .reverse()
+      .find((call) => call[0] === gatewayEventNames.circuit)?.[1];
+
+    const payload = {
+      trace_id: "t-circuit",
+      cli_key: "claude",
+      provider_id: 1,
+      provider_name: "P1",
+      base_url: "https://p1",
+      prev_state: "CLOSED",
+      next_state: "OPEN",
+      failure_count: 5,
+      failure_threshold: 5,
+      open_until: 123,
+      cooldown_until: null,
+      reason: "FAILURE_THRESHOLD_REACHED",
+      ts: 0,
+      trigger_error_code: "GW_UPSTREAM_TIMEOUT",
+      first_byte_timeout_secs: 300,
+    };
+
+    circuit?.({ payload } as any);
+    expect(maybeSendCircuitBreakerNotice).toHaveBeenCalledTimes(1);
+    expect(maybeSendCircuitBreakerNotice).toHaveBeenCalledWith(payload);
+
+    // 无效 payload 被守卫丢弃，不应触达通知编排。
+    circuit?.({ payload: null } as any);
+    expect(maybeSendCircuitBreakerNotice).toHaveBeenCalledTimes(1);
+
+    unlisten();
+    vi.doUnmock("../circuitNotice");
+  });
+
   it("accepts valid trace payloads and drops invalid payloads observably", async () => {
     setTauriRuntime();
     vi.resetModules();

@@ -6,6 +6,7 @@ import {
   appDataReset,
   appExit,
   appRestart,
+  dbCompact,
   dbDiskUsageGet,
   isClearRequestLogsResult,
   requestLogsClearAll,
@@ -20,6 +21,7 @@ vi.mock("../../../generated/bindings", async () => {
     commands: {
       ...actual.commands,
       dbDiskUsageGet: vi.fn(),
+      dbCompact: vi.fn(),
       requestLogsClearAll: vi.fn(),
       appDataReset: vi.fn(),
       appDataDirGet: vi.fn(),
@@ -82,6 +84,13 @@ describe("services/app/dataManagement", () => {
     await requestLogsClearAll();
     expect(commands.requestLogsClearAll).toHaveBeenCalledWith();
 
+    vi.mocked(commands.dbCompact).mockResolvedValueOnce({
+      status: "ok",
+      data: { before_bytes: 2048, after_bytes: 1024 } as any,
+    });
+    await expect(dbCompact()).resolves.toEqual({ before_bytes: 2048, after_bytes: 1024 });
+    expect(commands.dbCompact).toHaveBeenCalledWith();
+
     await appDataReset();
     expect(commands.appDataReset).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -117,6 +126,20 @@ describe("services/app/dataManagement", () => {
     });
 
     await expect(requestLogsClearAll()).rejects.toThrow("IPC_INVALID_RESULT");
+
+    vi.mocked(commands.dbCompact).mockResolvedValueOnce({
+      status: "ok",
+      data: { before_bytes: 10, after_bytes: -1 } as any,
+    });
+
+    await expect(dbCompact()).rejects.toThrow("IPC_INVALID_RESULT");
+
+    vi.mocked(commands.dbCompact).mockResolvedValueOnce({
+      status: "ok",
+      data: { before_bytes: 1.5, after_bytes: 1 } as any,
+    });
+
+    await expect(dbCompact()).rejects.toThrow("IPC_INVALID_RESULT");
 
     expect(isClearRequestLogsResult(null)).toBe(false);
     expect(isClearRequestLogsResult({ request_logs_deleted: 1 })).toBe(true);

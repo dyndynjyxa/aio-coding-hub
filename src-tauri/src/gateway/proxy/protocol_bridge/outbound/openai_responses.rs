@@ -367,9 +367,8 @@ fn parse_usage(usage: Option<&Value>) -> IRUsage {
                 .and_then(|v| v.as_u64())
         });
 
-    let cache_creation_input_tokens = u
-        .get("cache_creation_input_tokens")
-        .and_then(|v| v.as_u64())
+    let cache_creation_input_tokens = crate::usage::extract_openai_cache_creation_input_tokens(u)
+        .and_then(|tokens| u64::try_from(tokens).ok())
         .or_else(|| {
             match (
                 cache_creation_5m_input_tokens,
@@ -1487,6 +1486,30 @@ mod tests {
 
         let ir = response_to_ir(body, &default_settings()).unwrap();
         assert_eq!(ir.usage.cache_creation_input_tokens, Some(25));
+    }
+
+    #[test]
+    fn response_to_ir_openai_cache_creation_alias_preserves_positive_and_zero() {
+        for expected in [200, 0] {
+            let body = json!({
+                "id": format!("resp_cache_write_{expected}"),
+                "status": "completed",
+                "model": "gpt-5.6-sol",
+                "output": [{"type": "message", "content": [{"type": "output_text", "text": "Hi"}]}],
+                "usage": {
+                    "input_tokens": 1000,
+                    "output_tokens": 50,
+                    "input_tokens_details": {
+                        "cached_tokens": 100,
+                        "cache_write_tokens": expected
+                    }
+                }
+            });
+
+            let ir = response_to_ir(body, &default_settings()).unwrap();
+            assert_eq!(ir.usage.cache_read_input_tokens, Some(100));
+            assert_eq!(ir.usage.cache_creation_input_tokens, Some(expected));
+        }
     }
 
     #[test]

@@ -1,5 +1,9 @@
 use super::context::{AttemptOutcome, FailoverRunState};
-use super::loop_helpers::should_finalize_as_all_providers_unavailable;
+use super::loop_helpers::{
+    push_skipped_provider_attempt, should_finalize_as_all_providers_unavailable,
+    SkippedProviderAttempt,
+};
+use crate::circuit_breaker;
 use crate::gateway::events::{decision_chain as dc, FailoverAttempt};
 use crate::gateway::proxy::GatewayErrorCode;
 
@@ -25,6 +29,10 @@ fn skipped_attempt(reason_code: Option<&'static str>) -> FailoverAttempt {
         circuit_state_after: None,
         circuit_failure_count: None,
         circuit_failure_threshold: None,
+        circuit_recover_at_unix: None,
+        circuit_trigger_error_code: None,
+        provider_bridged: None,
+        timeout_secs: None,
     }
 }
 
@@ -50,6 +58,10 @@ fn real_attempt() -> FailoverAttempt {
         circuit_state_after: None,
         circuit_failure_count: Some(0),
         circuit_failure_threshold: Some(5),
+        circuit_recover_at_unix: None,
+        circuit_trigger_error_code: None,
+        provider_bridged: Some(false),
+        timeout_secs: None,
     }
 }
 
@@ -79,6 +91,10 @@ fn timeout_attempt(
         circuit_state_after: Some("OPEN"),
         circuit_failure_count: Some(5),
         circuit_failure_threshold: Some(5),
+        circuit_recover_at_unix: None,
+        circuit_trigger_error_code: None,
+        provider_bridged: Some(false),
+        timeout_secs: None,
     }
 }
 
@@ -182,4 +198,137 @@ fn stream_flag_from_raw_body_only_scans_first_two_kb() {
 #[test]
 fn stream_flag_from_raw_body_ignores_non_utf8_payloads() {
     assert!(!super::stream_flag_from_raw_body(&[0xff, 0xfe, b'{']));
+}
+
+// --- Circuit attribution on gate-skip attempts (attempts_json contract) ---
+
+fn gate_skip_attempt_json(circuit: Option<circuit_breaker::CircuitSnapshot>) -> serde_json::Value {
+    let mut attempts = Vec::new();
+    push_skipped_provider_attempt(
+        &mut attempts,
+        SkippedProviderAttempt {
+            provider_id: 7,
+            provider_name: "Provider A",
+            base_url: "https://provider-a.example",
+            error_category: "circuit_breaker",
+            error_code: GatewayErrorCode::ProviderCircuitOpen.as_str(),
+            reason: "provider skipped by circuit breaker (open)".to_string(),
+            reason_code: Some(dc::REASON_CIRCUIT_OPEN),
+            attempt_started_ms: 1,
+            circuit,
+        },
+    );
+    serde_json::to_value(&attempts[0]).expect("serialize skip attempt")
+}
+
+#[test]
+fn gate_skip_attempt_carries_circuit_attribution() {
+    let value = gate_skip_attempt_json(Some(circuit_breaker::CircuitSnapshot {
+        state: circuit_breaker::CircuitState::Open,
+        failure_count: 5,
+        failure_threshold: 5,
+        open_until: Some(1_750_001_800),
+        cooldown_until: None,
+        last_trigger_error_code: Some("GW_UPSTREAM_TIMEOUT"),
+    }));
+
+    assert_eq!(value["circuit_state_before"], serde_json::json!("OPEN"));
+    assert_eq!(value["circuit_state_after"], serde_json::json!("OPEN"));
+    assert_eq!(value["circuit_failure_count"], serde_json::json!(5));
+    assert_eq!(value["circuit_failure_threshold"], serde_json::json!(5));
+    assert_eq!(
+        value["circuit_recover_at_unix"],
+        serde_json::json!(1_750_001_800i64)
+    );
+    assert_eq!(
+        value["circuit_trigger_error_code"],
+        serde_json::json!("GW_UPSTREAM_TIMEOUT")
+    );
+}
+
+#[test]
+fn gate_skip_attempt_without_trigger_omits_trigger_key_but_keeps_state() {
+    let value = gate_skip_attempt_json(Some(circuit_breaker::CircuitSnapshot {
+        state: circuit_breaker::CircuitState::Closed,
+        failure_count: 2,
+        failure_threshold: 5,
+        open_until: None,
+        cooldown_until: Some(1_750_000_060),
+        last_trigger_error_code: None,
+    }));
+
+    let obj = value.as_object().expect("attempt object");
+    assert!(!obj.contains_key("circuit_trigger_error_code"));
+    assert_eq!(value["circuit_state_before"], serde_json::json!("CLOSED"));
+    assert_eq!(value["circuit_failure_count"], serde_json::json!(2));
+    assert_eq!(value["circuit_failure_threshold"], serde_json::json!(5));
+    assert_eq!(
+        value["circuit_recover_at_unix"],
+        serde_json::json!(1_750_000_060i64)
+    );
+}
+
+#[test]
+fn non_circuit_attempts_serialize_without_new_attribution_keys() {
+    // Baseline key set before this feature: the two new keys must be absent
+    // when None so successful requests' attempts_json gains zero bytes.
+    let expected_keys = [
+        "provider_id",
+        "provider_name",
+        "base_url",
+        "outcome",
+        "status",
+        "provider_index",
+        "retry_index",
+        "session_reuse",
+        "error_category",
+        "error_code",
+        "decision",
+        "reason",
+        "selection_method",
+        "reason_code",
+        "attempt_started_ms",
+        "attempt_duration_ms",
+        "circuit_state_before",
+        "circuit_state_after",
+        "circuit_failure_count",
+        "circuit_failure_threshold",
+        "provider_bridged",
+        "timeout_secs",
+    ];
+
+    let mut success = real_attempt();
+    success.outcome = "success".to_string();
+    for attempt in [success, gate_skip_attempt_json_input_none()] {
+        let value = serde_json::to_value(&attempt).expect("serialize attempt");
+        let mut keys: Vec<&str> = value
+            .as_object()
+            .expect("attempt object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        let mut expected = expected_keys.to_vec();
+        expected.sort_unstable();
+        assert_eq!(keys, expected);
+    }
+}
+
+fn gate_skip_attempt_json_input_none() -> FailoverAttempt {
+    let mut attempts = Vec::new();
+    push_skipped_provider_attempt(
+        &mut attempts,
+        SkippedProviderAttempt {
+            provider_id: 7,
+            provider_name: "Provider A",
+            base_url: "https://provider-a.example",
+            error_category: "auth",
+            error_code: GatewayErrorCode::InternalError.as_str(),
+            reason: "provider skipped by credential resolution".to_string(),
+            reason_code: None,
+            attempt_started_ms: 1,
+            circuit: None,
+        },
+    );
+    attempts.remove(0)
 }

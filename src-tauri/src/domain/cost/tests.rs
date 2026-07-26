@@ -85,9 +85,9 @@ fn calculates_cost_with_basellm_exponent_price_json() {
         input_tokens: 100,
         output_tokens: 20,
         cache_read_input_tokens: 50,
+        cache_creation_input_tokens: 15,
         cache_creation_5m_input_tokens: 10,
         cache_creation_1h_input_tokens: 5,
-        ..Default::default()
     };
 
     let price_json = r#"{
@@ -99,47 +99,104 @@ fn calculates_cost_with_basellm_exponent_price_json() {
     }"#;
 
     let cost = calculate_cost_usd_femto(&usage, price_json, 1.0, "codex", "gpt").expect("cost");
-    assert_eq!(cost, 521_250_000_000);
+    assert_eq!(cost, 476_250_000_000);
 }
 
 #[test]
-fn codex_does_not_double_charge_cached_input_tokens() {
+fn openai_semantics_clis_do_not_double_charge_cache_read_or_creation_with_explicit_price() {
     let usage = CostUsage {
-        input_tokens: 100,
-        output_tokens: 10,
-        cache_read_input_tokens: 80,
+        input_tokens: 1_000,
+        output_tokens: 50,
+        cache_read_input_tokens: 100,
+        cache_creation_input_tokens: 200,
         ..Default::default()
     };
 
     let price_json = r#"{
-      "input_cost_per_token": 0.01,
+      "input_cost_per_token": 0.004,
+      "output_cost_per_token": 0.02,
+      "cache_read_input_token_cost": 0.001,
+      "cache_creation_input_token_cost": 0.006
+    }"#;
+
+    let input = 4_000_000_000_000i128;
+    let output = 20_000_000_000_000i128;
+    let cache_read = 1_000_000_000_000i128;
+    let cache_creation = 6_000_000_000_000i128;
+
+    let expected =
+        (700i128 * input) + (50i128 * output) + (100i128 * cache_read) + (200i128 * cache_creation);
+    for (cli_key, model) in [("codex", "gpt"), ("grok", "grok-build")] {
+        let cost = calculate_cost_usd_femto(&usage, price_json, 1.0, cli_key, model).expect("cost");
+        assert_eq!(cost as i128, expected, "unexpected cost for {cli_key}");
+    }
+}
+
+#[test]
+fn codex_cache_creation_price_falls_back_to_one_point_two_five_times_input() {
+    let usage = CostUsage {
+        input_tokens: 1_000,
+        output_tokens: 50,
+        cache_read_input_tokens: 100,
+        cache_creation_input_tokens: 200,
+        ..Default::default()
+    };
+
+    let price_json = r#"{
+      "input_cost_per_token": 0.004,
       "output_cost_per_token": 0.02,
       "cache_read_input_token_cost": 0.001
     }"#;
 
-    let cost = calculate_cost_usd_femto(&usage, price_json, 1.0, "codex", "gpt-5.2").expect("cost");
+    let cost = calculate_cost_usd_femto(&usage, price_json, 1.0, "codex", "gpt").expect("cost");
 
-    let input = 10_000_000_000_000i128;
+    let input = 4_000_000_000_000i128;
     let output = 20_000_000_000_000i128;
     let cache_read = 1_000_000_000_000i128;
+    let cache_creation_fallback = 5_000_000_000_000i128;
 
-    let expected = (20i128 * input) + (10i128 * output) + (80i128 * cache_read);
+    let expected = (700i128 * input)
+        + (50i128 * output)
+        + (100i128 * cache_read)
+        + (200i128 * cache_creation_fallback);
     assert_eq!(cost as i128, expected);
 }
 
 #[test]
-fn gemini_does_not_double_charge_cached_input_tokens() {
+fn codex_oversubscribed_cache_buckets_clamp_ordinary_input_to_zero() {
+    let usage = CostUsage {
+        input_tokens: 100,
+        cache_read_input_tokens: 80,
+        cache_creation_input_tokens: 50,
+        ..Default::default()
+    };
+
+    let price_json = r#"{
+      "input_cost_per_token": 0.004,
+      "cache_read_input_token_cost": 0.001,
+      "cache_creation_input_token_cost": 0.006
+    }"#;
+
+    let cost = calculate_cost_usd_femto(&usage, price_json, 1.0, "codex", "gpt").expect("cost");
+    let expected = (80i128 * 1_000_000_000_000i128) + (50i128 * 6_000_000_000_000i128);
+    assert_eq!(cost as i128, expected);
+}
+
+#[test]
+fn gemini_only_subtracts_cache_read_from_input() {
     let usage = CostUsage {
         input_tokens: 100,
         output_tokens: 10,
         cache_read_input_tokens: 80,
+        cache_creation_input_tokens: 10,
         ..Default::default()
     };
 
     let price_json = r#"{
       "input_cost_per_token": 0.01,
       "output_cost_per_token": 0.02,
-      "cache_read_input_token_cost": 0.001
+      "cache_read_input_token_cost": 0.001,
+      "cache_creation_input_token_cost": 0.005
     }"#;
 
     let cost =
@@ -148,22 +205,26 @@ fn gemini_does_not_double_charge_cached_input_tokens() {
     let input = 10_000_000_000_000i128;
     let output = 20_000_000_000_000i128;
     let cache_read = 1_000_000_000_000i128;
+    let cache_creation = 5_000_000_000_000i128;
 
-    let expected = (20i128 * input) + (10i128 * output) + (80i128 * cache_read);
+    let expected =
+        (20i128 * input) + (10i128 * output) + (80i128 * cache_read) + (10i128 * cache_creation);
     assert_eq!(cost as i128, expected);
 }
 
 #[test]
-fn claude_keeps_cache_read_additive_cost() {
+fn claude_keeps_cache_buckets_additive_cost() {
     let usage = CostUsage {
         input_tokens: 100,
         cache_read_input_tokens: 80,
+        cache_creation_input_tokens: 10,
         ..Default::default()
     };
 
     let price_json = r#"{
       "input_cost_per_token": 0.01,
-      "cache_read_input_token_cost": 0.001
+      "cache_read_input_token_cost": 0.001,
+      "cache_creation_input_token_cost": 0.005
     }"#;
 
     let cost =
@@ -171,8 +232,9 @@ fn claude_keeps_cache_read_additive_cost() {
 
     let input = 10_000_000_000_000i128;
     let cache_read = 1_000_000_000_000i128;
+    let cache_creation = 5_000_000_000_000i128;
 
-    let expected = (100i128 * input) + (80i128 * cache_read);
+    let expected = (100i128 * input) + (80i128 * cache_read) + (10i128 * cache_creation);
     assert_eq!(cost as i128, expected);
 }
 

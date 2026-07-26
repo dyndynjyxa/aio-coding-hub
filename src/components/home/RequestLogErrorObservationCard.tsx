@@ -1,8 +1,12 @@
 import { AlertTriangle, Lightbulb } from "lucide-react";
 import { Card } from "../../ui/Card";
-import { getGatewayErrorShortLabel } from "../../constants/gatewayErrorCodes";
+import {
+  GatewayErrorDescriptions,
+  getGatewayErrorShortLabel,
+} from "../../constants/gatewayErrorCodes";
 import type { RequestLogErrorObservation } from "./requestLogErrorDetails";
 import { DisclosureSection } from "./DisclosureSection";
+import { formatCircuitRecovery } from "../../utils/formatters";
 
 export type RequestLogErrorObservationCardProps = {
   observation: RequestLogErrorObservation | null;
@@ -19,6 +23,17 @@ export function RequestLogErrorObservationCard({
   const desc = observation.gwDescription?.desc ?? null;
   const suggestion = observation.gwDescription?.suggestion ?? null;
   const fallbackTitle = resolveFallbackTitle(observation);
+
+  const failureSummary =
+    observation.attemptFailureSummary && observation.attemptFailureSummary.length > 0
+      ? observation.attemptFailureSummary
+      : null;
+  const dominantGroup = failureSummary?.[0] ?? null;
+  const dominantSuggestion =
+    dominantGroup && dominantGroup.errorCode !== observation.displayErrorCode
+      ? (GatewayErrorDescriptions[dominantGroup.errorCode as keyof typeof GatewayErrorDescriptions]
+          ?.suggestion ?? null)
+      : null;
 
   const detailFields = buildDetailFields(observation);
   const hasDetails =
@@ -59,6 +74,34 @@ export function RequestLogErrorObservationCard({
           <div className="flex items-start gap-2 rounded-lg bg-amber-50/60 px-3 py-2 dark:bg-amber-900/15">
             <Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
             <p className="text-xs text-amber-800 dark:text-amber-300">{suggestion}</p>
+          </div>
+        ) : null}
+
+        {/* Failure attempt summary (grouped by structured error_code) */}
+        {failureSummary ? (
+          <div className="space-y-1">
+            <div className="text-xs font-medium text-muted-foreground">失败尝试</div>
+            {failureSummary.map((group) => (
+              <div key={group.errorCode} className="text-xs text-secondary-foreground">
+                {getGatewayErrorShortLabel(group.errorCode)} ×{group.count}（
+                {group.providerNames.join("、")}
+                {group.timeoutSecs != null ? `，${group.timeoutSecs} 秒` : ""}）
+                {group.circuitTriggerErrorCode
+                  ? ` 触发：${getGatewayErrorShortLabel(group.circuitTriggerErrorCode)}`
+                  : ""}
+                {group.circuitRecoverAtUnix != null
+                  ? `，${formatCircuitRecovery(group.circuitRecoverAtUnix)}`
+                  : ""}
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {/* Dominant failure-code suggestion when it differs from the displayed terminal code */}
+        {dominantSuggestion ? (
+          <div className="flex items-start gap-2 rounded-lg bg-amber-50/60 px-3 py-2 dark:bg-amber-900/15">
+            <Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+            <p className="text-xs text-amber-800 dark:text-amber-300">{dominantSuggestion}</p>
           </div>
         ) : null}
 

@@ -9,9 +9,9 @@ use super::folders::{
     UsageEventAgg,
 };
 use super::{
-    compute_start_ts, normalize_cli_filter, parse_range, resolve_query_params,
-    sql_effective_total_tokens_expr, ProviderAgg, UsageQueryParams, UsageResolvedFolder,
-    UsageSessionLookupKey, UsageSummary, SQL_EFFECTIVE_INPUT_TOKENS_EXPR,
+    compute_start_ts, effective_total_from_buckets, normalize_cli_filter, parse_range,
+    resolve_query_params, sql_effective_input_tokens_expr, ProviderAgg, UsageQueryParams,
+    UsageResolvedFolder, UsageSessionLookupKey, UsageSummary,
 };
 
 fn build_summary_where_clause(
@@ -44,8 +44,7 @@ pub(super) fn summary_query(
     provider_id: Option<i64>,
     exclude_cx2cc_gateway_bridge: bool,
 ) -> Result<UsageSummary, String> {
-    let effective_input_expr = SQL_EFFECTIVE_INPUT_TOKENS_EXPR;
-    let effective_total_expr = sql_effective_total_tokens_expr();
+    let effective_input_expr = sql_effective_input_tokens_expr();
     let (where_sql, params_vec) = build_summary_where_clause(
         start_ts,
         end_ts,
@@ -84,6 +83,7 @@ pub(super) fn summary_query(
 	      cost_usd_femto IS NOT NULL
 	    ) THEN 1 ELSE 0 END
 	  ) AS cost_covered_success,
+	  SUM(duration_ms) AS total_duration_ms,
 	  SUM(CASE WHEN status >= 200 AND status < 300 AND error_code IS NULL THEN duration_ms ELSE 0 END) AS success_duration_ms_sum,
 	  SUM(
 	    CASE WHEN (
@@ -117,8 +117,7 @@ pub(super) fn summary_query(
 	  ) AS success_output_tokens_for_rate_sum,
 	  SUM({effective_input_expr}) AS input_tokens,
 	  SUM(COALESCE(output_tokens, 0)) AS output_tokens,
-	  SUM({effective_total_expr}) AS total_tokens,
-	  SUM(COALESCE(cache_read_input_tokens, 0)) AS cache_read_input_tokens,
+		  SUM(COALESCE(cache_read_input_tokens, 0)) AS cache_read_input_tokens,
   SUM(COALESCE(cache_creation_input_tokens, 0)) AS cache_creation_input_tokens,
   SUM(COALESCE(cache_creation_5m_input_tokens, 0)) AS cache_creation_5m_input_tokens,
   SUM(COALESCE(cache_creation_1h_input_tokens, 0)) AS cache_creation_1h_input_tokens
@@ -126,7 +125,6 @@ pub(super) fn summary_query(
 	WHERE {where_sql}
 	"#,
         effective_input_expr = effective_input_expr,
-        effective_total_expr = effective_total_expr.as_str(),
         where_sql = where_sql
     );
 
@@ -169,7 +167,19 @@ pub(super) fn summary_query(
 
         let input_tokens = row.get::<_, Option<i64>>("input_tokens")?.unwrap_or(0);
         let output_tokens = row.get::<_, Option<i64>>("output_tokens")?.unwrap_or(0);
+        let cache_read_input_tokens = row
+            .get::<_, Option<i64>>("cache_read_input_tokens")?
+            .unwrap_or(0);
+        let cache_creation_input_tokens = row
+            .get::<_, Option<i64>>("cache_creation_input_tokens")?
+            .unwrap_or(0);
         let io_total_tokens = input_tokens.saturating_add(output_tokens);
+        let total_tokens = effective_total_from_buckets(
+            input_tokens,
+            output_tokens,
+            cache_creation_input_tokens,
+            cache_read_input_tokens,
+        );
 
         Ok(UsageSummary {
             requests_total: row.get::<_, i64>("requests_total")?,
@@ -181,19 +191,16 @@ pub(super) fn summary_query(
             cost_covered_success: row
                 .get::<_, Option<i64>>("cost_covered_success")?
                 .unwrap_or(0),
+            total_duration_ms: row.get::<_, Option<i64>>("total_duration_ms")?.unwrap_or(0),
             avg_duration_ms,
             avg_ttfb_ms,
             avg_output_tokens_per_second,
             input_tokens,
             output_tokens,
             io_total_tokens,
-            total_tokens: row.get::<_, Option<i64>>("total_tokens")?.unwrap_or(0),
-            cache_read_input_tokens: row
-                .get::<_, Option<i64>>("cache_read_input_tokens")?
-                .unwrap_or(0),
-            cache_creation_input_tokens: row
-                .get::<_, Option<i64>>("cache_creation_input_tokens")?
-                .unwrap_or(0),
+            total_tokens,
+            cache_read_input_tokens,
+            cache_creation_input_tokens,
             cache_creation_5m_input_tokens: row
                 .get::<_, Option<i64>>("cache_creation_5m_input_tokens")?
                 .unwrap_or(0),
@@ -251,6 +258,7 @@ fn summary_from_event_rows(rows: &[UsageEventAgg]) -> UsageSummary {
         requests_success: agg.requests_success,
         requests_failed: agg.requests_failed,
         cost_covered_success: agg.cost_covered_success,
+        total_duration_ms: agg.total_duration_ms,
         avg_duration_ms,
         avg_ttfb_ms,
         avg_output_tokens_per_second,

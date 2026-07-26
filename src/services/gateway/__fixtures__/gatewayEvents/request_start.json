@@ -1,0 +1,10 @@
+{
+  "trace_id": "trace-fixture-001",
+  "cli_key": "claude",
+  "session_id": "sess-fixture-001",
+  "method": "POST",
+  "path": "/v1/messages",
+  "query": "beta=true",
+  "requested_model": "claude-sonnet-4-5",
+  "ts": 1750000000
+}

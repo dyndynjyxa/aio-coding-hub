@@ -245,6 +245,7 @@ pub struct CostCalculationOptions {
     pub priority_service_tier_applied: bool,
 }
 
+#[cfg(test)]
 pub fn calculate_cost_usd_femto(
     usage: &CostUsage,
     price_json: &str,
@@ -352,19 +353,25 @@ pub fn calculate_cost_usd_femto_with_options(
     let input_tokens = clamp_token_count(usage.input_tokens);
     let output_tokens = clamp_token_count(usage.output_tokens);
     let cache_read_input_tokens = clamp_token_count(usage.cache_read_input_tokens);
-
-    // For Codex (OpenAI) and Gemini, cached input tokens are a subset of the overall input token
-    // count. We bill them at `cache_read_cost`, so subtract them from the input bucket to avoid
-    // double-charging. For Claude, cache reads are billed as an additional bucket.
-    let billable_input_tokens = if matches!(cli_key, "codex" | "gemini") {
-        input_tokens.saturating_sub(cache_read_input_tokens).max(0)
-    } else {
-        input_tokens
-    };
-
     let cache_creation_5m_input_tokens = clamp_token_count(usage.cache_creation_5m_input_tokens);
     let cache_creation_1h_input_tokens = clamp_token_count(usage.cache_creation_1h_input_tokens);
     let cache_creation_input_tokens = clamp_token_count(usage.cache_creation_input_tokens);
+    let priced_cache_creation_input_tokens =
+        if cache_creation_5m_input_tokens > 0 || cache_creation_1h_input_tokens > 0 {
+            cache_creation_5m_input_tokens.saturating_add(cache_creation_1h_input_tokens)
+        } else {
+            cache_creation_input_tokens
+        };
+
+    // OpenAI reports cache reads and writes as subsets of total input. Gemini only reports cache
+    // reads as a subset, while Claude bills cache buckets in addition to its input count.
+    let billable_input_tokens = match cli_key {
+        "codex" | "grok" => input_tokens
+            .saturating_sub(cache_read_input_tokens)
+            .saturating_sub(priced_cache_creation_input_tokens),
+        "gemini" => input_tokens.saturating_sub(cache_read_input_tokens),
+        _ => input_tokens,
+    };
 
     let context_1m_applied = contains_context_1m(cli_key, model);
 

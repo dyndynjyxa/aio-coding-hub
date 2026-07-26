@@ -6,10 +6,7 @@ import type {
   GatewayRequestEvent,
   GatewayRequestStartEvent,
 } from "./gatewayEvents";
-import {
-  computeCacheHitRateDenomTokens,
-  computeEffectiveInputTokens,
-} from "../../utils/cacheRateMetrics";
+import { computeCacheHitRateDenomTokens } from "../../utils/cacheRateMetrics";
 import {
   CACHE_ANOMALY_MONITOR_BASELINE_MINUTES,
   CACHE_ANOMALY_MONITOR_COLD_START_MINUTES,
@@ -292,12 +289,7 @@ function pickFinalProvider(attempts: GatewayAttempt[] | null | undefined): Gatew
   return list[list.length - 1] ?? null;
 }
 
-function extractSample(
-  cliKey: SupportedCliKey,
-  payload: GatewayRequestEvent,
-  nowMs: number
-): Sample {
-  const inputTokens = normalizeTokenCount(payload.input_tokens ?? null);
+function extractSample(payload: GatewayRequestEvent, nowMs: number): Sample {
   const cacheReadTokens = normalizeTokenCount(payload.cache_read_input_tokens ?? null);
 
   const createRaw = normalizeTokenCount(payload.cache_creation_input_tokens ?? null);
@@ -305,7 +297,8 @@ function extractSample(
   const create1h = normalizeTokenCount(payload.cache_creation_1h_input_tokens ?? null);
   const cacheCreateTokens = create5m + create1h > 0 ? create5m + create1h : createRaw;
 
-  const effectiveInput = computeEffectiveInputTokens(cliKey, inputTokens, cacheReadTokens);
+  // Backend-computed effective input (single source of truth shared with usage stats).
+  const effectiveInput = normalizeTokenCount(payload.effective_input_tokens ?? null);
   const denomTokens = computeCacheHitRateDenomTokens(
     effectiveInput,
     cacheCreateTokens,
@@ -670,7 +663,7 @@ export function ingestCacheAnomalyRequest(payload: GatewayRequestEvent) {
   if (traceEntry?.ignore) return;
   const model = traceEntry && !traceEntry.ignore ? traceEntry.model : "Unknown";
 
-  const sampleBase = extractSample(payload.cli_key, payload, nowMs);
+  const sampleBase = extractSample(payload, nowMs);
   if (sampleBase.successRequest === 0) return;
   if (sampleBase.denomTokens <= 0) return;
 

@@ -1,0 +1,8 @@
+{
+  "trace_id": "trace-fixture-001",
+  "cli_key": "claude",
+  "session_id": "sess-fixture-001",
+  "requested_model": "claude-sonnet-4-5",
+  "phase": "complete",
+  "ts": 1750000001
+}

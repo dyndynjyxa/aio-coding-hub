@@ -196,8 +196,8 @@ function renderPanel(overrides: HomeOverviewPanelTestOverrides = {}) {
       sortModes={[]}
       sortModesLoading={false}
       sortModesAvailable={true}
-      activeModeByCli={{ claude: null, codex: null, gemini: null }}
-      activeModeToggling={{ claude: false, codex: false, gemini: false }}
+      activeModeByCli={{ claude: null, codex: null, gemini: null, grok: null }}
+      activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
       onSetCliActiveMode={onSetCliActiveMode}
       activeSessions={[]}
       activeSessionsLoading={false}
@@ -267,8 +267,8 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(screen.getByText("Gemini Mirror")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "预览熔断样式" })).not.toBeInTheDocument();
 
-    expect(screen.getAllByRole("button", { name: "解除熔断" })[0]).toBeDisabled();
-    fireEvent.click(screen.getAllByRole("button", { name: "解除熔断" })[0]);
+    expect(screen.getAllByRole("button", { name: "解除" })[0]).toBeDisabled();
+    fireEvent.click(screen.getAllByRole("button", { name: "解除" })[0]);
     expect(screen.getByText("Claude Main")).toBeInTheDocument();
     expect(onResetCircuitProvider).not.toHaveBeenCalled();
   });
@@ -280,6 +280,7 @@ describe("components/home/HomeOverviewPanel", () => {
           cli_key: "claude",
           provider_id: 7,
           provider_name: "Real Claude Provider",
+          displayState: "open" as const,
           open_until: Math.floor(Date.now() / 1000) + 60,
         },
       ],
@@ -289,7 +290,7 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(screen.getByText("Real Claude Provider")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "预览熔断样式" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "解除熔断" }));
+    fireEvent.click(screen.getByRole("button", { name: "解除" }));
     expect(onResetCircuitProvider).toHaveBeenCalledWith(7);
   });
 
@@ -304,7 +305,7 @@ describe("components/home/HomeOverviewPanel", () => {
   it("shows workspace config pills and allows switching sort mode for the selected cli", async () => {
     const { onSetCliActiveMode } = renderPanel({
       sortModes: [{ id: 1, name: "工作策略", created_at: 1, updated_at: 1 }],
-      activeModeByCli: { claude: 1, codex: null, gemini: null },
+      activeModeByCli: { claude: 1, codex: null, gemini: null, grok: null },
       workspaceConfigs: [
         makeWorkspaceConfig({
           cliKey: "claude",
@@ -356,7 +357,7 @@ describe("components/home/HomeOverviewPanel", () => {
 
     const { onSetCliActiveMode } = renderPanel({
       sortModes: [{ id: 1, name: "工作策略", created_at: 1, updated_at: 1 }],
-      activeModeByCli: { claude: 1, codex: null, gemini: null },
+      activeModeByCli: { claude: 1, codex: null, gemini: null, grok: null },
     });
 
     fireEvent.click(screen.getByRole("tab", { name: "配置信息" }));
@@ -639,8 +640,8 @@ describe("components/home/HomeOverviewPanel", () => {
         sortModes={[]}
         sortModesLoading={false}
         sortModesAvailable={true}
-        activeModeByCli={{ claude: null, codex: null, gemini: null }}
-        activeModeToggling={{ claude: false, codex: false, gemini: false }}
+        activeModeByCli={{ claude: null, codex: null, gemini: null, grok: null }}
+        activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
         onSetCliActiveMode={vi.fn()}
         activeSessions={[]}
         activeSessionsLoading={false}
@@ -734,8 +735,8 @@ describe("components/home/HomeOverviewPanel", () => {
             sortModes={[]}
             sortModesLoading={false}
             sortModesAvailable={true}
-            activeModeByCli={{ claude: null, codex: null, gemini: null }}
-            activeModeToggling={{ claude: false, codex: false, gemini: false }}
+            activeModeByCli={{ claude: null, codex: null, gemini: null, grok: null }}
+            activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
             onSetCliActiveMode={vi.fn()}
             activeSessions={[]}
             activeSessionsLoading={false}
@@ -866,8 +867,8 @@ describe("components/home/HomeOverviewPanel", () => {
         sortModes={[]}
         sortModesLoading={false}
         sortModesAvailable={true}
-        activeModeByCli={{ claude: null, codex: null, gemini: null }}
-        activeModeToggling={{ claude: false, codex: false, gemini: false }}
+        activeModeByCli={{ claude: null, codex: null, gemini: null, grok: null }}
+        activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
         onSetCliActiveMode={vi.fn()}
         activeSessions={[]}
         activeSessionsLoading={false}
@@ -889,6 +890,7 @@ describe("components/home/HomeOverviewPanel", () => {
             cli_key: "claude",
             provider_id: 9,
             provider_name: "Claude New Circuit",
+            displayState: "open" as const,
             open_until: TEST_NOW_SECONDS + 60,
           },
         ]}
@@ -909,20 +911,21 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(screen.getByText("Claude New Circuit")).toBeInTheDocument();
   });
 
-  it("auto-switches to 配置信息 when open circuits are removed", () => {
+  it("keeps 活跃 Session selected when open circuits are removed", async () => {
     const { rerender } = renderPanel({
       openCircuits: [
         {
           cli_key: "claude",
           provider_id: 9,
           provider_name: "Claude New Circuit",
+          displayState: "open" as const,
           open_until: Math.floor(Date.now() / 1000) + 60,
         },
       ],
     });
 
-    fireEvent.click(screen.getByRole("tab", { name: "供应商限额" }));
-    expect(screen.getByText("provider-limit:0")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "活跃 Session" }));
+    expect(await screen.findByText("active-sessions:0")).toBeInTheDocument();
 
     rerender(
       <HomeOverviewPanel
@@ -940,8 +943,8 @@ describe("components/home/HomeOverviewPanel", () => {
         sortModes={[]}
         sortModesLoading={false}
         sortModesAvailable={true}
-        activeModeByCli={{ claude: null, codex: null, gemini: null }}
-        activeModeToggling={{ claude: false, codex: false, gemini: false }}
+        activeModeByCli={{ claude: null, codex: null, gemini: null, grok: null }}
+        activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
         onSetCliActiveMode={vi.fn()}
         activeSessions={[]}
         activeSessionsLoading={false}
@@ -973,7 +976,11 @@ describe("components/home/HomeOverviewPanel", () => {
       />
     );
 
-    expect(screen.getByText("workspace-config:empty")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "活跃 Session" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
+    expect(await screen.findByText("active-sessions:0")).toBeInTheDocument();
   });
 
   it("switches back to 配置信息 when circuits become empty in logs-primary layout", async () => {
@@ -985,6 +992,7 @@ describe("components/home/HomeOverviewPanel", () => {
           cli_key: "claude",
           provider_id: 9,
           provider_name: "Claude New Circuit",
+          displayState: "open" as const,
           open_until: Math.floor(Date.now() / 1000) + 60,
         },
       ],
@@ -1018,8 +1026,8 @@ describe("components/home/HomeOverviewPanel", () => {
         sortModes={[]}
         sortModesLoading={false}
         sortModesAvailable={true}
-        activeModeByCli={{ claude: null, codex: null, gemini: null }}
-        activeModeToggling={{ claude: false, codex: false, gemini: false }}
+        activeModeByCli={{ claude: null, codex: null, gemini: null, grok: null }}
+        activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
         onSetCliActiveMode={vi.fn()}
         activeSessions={[]}
         activeSessionsLoading={false}

@@ -61,6 +61,9 @@ pub struct CircuitSnapshot {
     pub failure_threshold: u32,
     pub open_until: Option<i64>,
     pub cooldown_until: Option<i64>,
+    /// Error code of the most recent attributed failure (in-memory only;
+    /// intentionally not persisted, lost across restart).
+    pub last_trigger_error_code: Option<&'static str>,
 }
 
 #[derive(Debug, Clone)]
@@ -103,6 +106,9 @@ pub(super) struct ProviderHealth {
     pub(super) open_until: Option<i64>,
     pub(super) cooldown_until: Option<i64>,
     pub(super) updated_at: i64,
+    /// Most recent attributed failure error code; cleared when the circuit
+    /// returns to Closed. Never persisted.
+    pub(super) last_trigger_error_code: Option<&'static str>,
 }
 
 impl ProviderHealth {
@@ -116,6 +122,7 @@ impl ProviderHealth {
                 open_until: None,
                 cooldown_until: None,
                 updated_at: now_unix,
+                last_trigger_error_code: None,
             },
         )
     }

@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-pub const SCHEMA_VERSION: u32 = 33;
+pub const SCHEMA_VERSION: u32 = 36;
 pub const DEFAULT_GATEWAY_PORT: u16 = 37123;
 pub const MAX_GATEWAY_PORT: u16 = 37199;
 pub const DEFAULT_PROVIDER_COOLDOWN_SECONDS: u32 = 30;
@@ -40,9 +40,17 @@ pub(super) const SCHEMA_VERSION_RAISE_STREAM_IDLE_TIMEOUT_DEFAULT: u32 = 30;
 pub(super) const SCHEMA_VERSION_ADD_UPSTREAM_PROXY: u32 = 31;
 pub(super) const SCHEMA_VERSION_ADD_UPSTREAM_PROXY_CREDENTIALS: u32 = 32;
 pub(super) const SCHEMA_VERSION_ADD_CODEX_OAUTH_COMPATIBLE_PROXY_MODE: u32 = 33;
+pub(super) const SCHEMA_VERSION_ADD_REQUEST_LOG_RETENTION: u32 = 34;
+pub(super) const SCHEMA_VERSION_ADD_GROK_PROXY_PREFERENCES: u32 = 35;
+pub(super) const SCHEMA_VERSION_ADD_IMAGE_GEN_STORAGE_DIR: u32 = 36;
 
 pub(super) const DEFAULT_LOG_RETENTION_DAYS: u32 = 7;
 pub(super) const MAX_LOG_RETENTION_DAYS: u32 = 3650;
+// Request-log DB retention: 0 = keep forever. Deliberately NOT sharing
+// log_retention_days — request_logs feed long-horizon usage/cost stats and
+// must never be silently trimmed by the file-log default.
+pub(super) const DEFAULT_REQUEST_LOG_RETENTION_DAYS: u32 = 0;
+pub(super) const MAX_REQUEST_LOG_RETENTION_DAYS: u32 = 3650;
 pub(super) const DEFAULT_FAILOVER_MAX_ATTEMPTS_PER_PROVIDER: u32 = 5;
 pub(super) const DEFAULT_FAILOVER_MAX_PROVIDERS_TO_TRY: u32 = 5;
 pub(super) const DEFAULT_CIRCUIT_BREAKER_FAILURE_THRESHOLD: u32 = 5;

@@ -201,6 +201,43 @@ fn extract_session_id_fallback_uses_message_fingerprint_and_ignores_user_agent()
 }
 
 #[test]
+fn grok_stable_headers_take_priority_and_request_id_is_ignored() {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "x-grok-session-id",
+        HeaderValue::from_static("grok-session-stable"),
+    );
+    headers.insert(
+        "x-grok-conv-id",
+        HeaderValue::from_static("grok-conversation-stable"),
+    );
+    headers.insert(
+        "x-grok-req-id",
+        HeaderValue::from_static("grok-request-unique"),
+    );
+    headers.insert("session_id", HeaderValue::from_static("generic-session"));
+    let body = serde_json::json!({ "session_id": "json-session" });
+
+    assert_eq!(
+        SessionManager::extract_session_id_from_json(&headers, Some(&body)).as_deref(),
+        Some("grok-session-stable")
+    );
+
+    headers.remove("x-grok-session-id");
+    assert_eq!(
+        SessionManager::extract_session_id_from_json(&headers, Some(&body)).as_deref(),
+        Some("grok-conversation-stable")
+    );
+
+    headers.remove("x-grok-conv-id");
+    headers.remove("session_id");
+    assert_eq!(
+        SessionManager::extract_session_id_from_json(&headers, Some(&body)).as_deref(),
+        Some("json-session")
+    );
+}
+
+#[test]
 fn extract_session_id_fallback_changes_when_message_fingerprint_changes() {
     let mut headers = HeaderMap::new();
     headers.insert(header::USER_AGENT, HeaderValue::from_static("ua"));

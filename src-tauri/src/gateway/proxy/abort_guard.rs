@@ -1,9 +1,11 @@
 //! Usage: Best-effort drop guard to log client-aborted requests.
 
+use crate::gateway::active_requests::ActiveRequestRegistry;
 use crate::gateway::events::FailoverAttempt;
 use crate::gateway::plugins::pipeline::GatewayPluginPipeline;
+use crate::gateway::response_fixer;
 use crate::{db, request_logs};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use super::request_end::{
@@ -16,6 +18,7 @@ pub(super) struct RequestAbortGuard<R: tauri::Runtime = tauri::Wry> {
     db: db::Db,
     log_tx: tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
     plugin_pipeline: Arc<GatewayPluginPipeline>,
+    active_requests: Arc<ActiveRequestRegistry>,
     trace_id: String,
     cli_key: String,
     method: String,
@@ -24,6 +27,7 @@ pub(super) struct RequestAbortGuard<R: tauri::Runtime = tauri::Wry> {
     query: Option<String>,
     session_id: Option<String>,
     requested_model: Option<String>,
+    special_settings: Arc<Mutex<Vec<serde_json::Value>>>,
     in_flight_attempt: Option<FailoverAttempt>,
     created_at_ms: i64,
     created_at: i64,
@@ -38,6 +42,7 @@ impl<R: tauri::Runtime> RequestAbortGuard<R> {
         db: db::Db,
         log_tx: tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
         plugin_pipeline: Arc<GatewayPluginPipeline>,
+        active_requests: Arc<ActiveRequestRegistry>,
         trace_id: String,
         cli_key: String,
         method: String,
@@ -46,6 +51,7 @@ impl<R: tauri::Runtime> RequestAbortGuard<R> {
         query: Option<String>,
         session_id: Option<String>,
         requested_model: Option<String>,
+        special_settings: Arc<Mutex<Vec<serde_json::Value>>>,
         created_at_ms: i64,
         created_at: i64,
         started: Instant,
@@ -55,6 +61,7 @@ impl<R: tauri::Runtime> RequestAbortGuard<R> {
             db,
             log_tx,
             plugin_pipeline,
+            active_requests,
             trace_id,
             cli_key,
             method,
@@ -63,6 +70,7 @@ impl<R: tauri::Runtime> RequestAbortGuard<R> {
             query,
             session_id,
             requested_model,
+            special_settings,
             in_flight_attempt: None,
             created_at_ms,
             created_at,
@@ -84,6 +92,7 @@ impl<R: tauri::Runtime> RequestAbortGuard<R> {
             db: self.db.clone(),
             log_tx: self.log_tx.clone(),
             plugin_pipeline: self.plugin_pipeline.clone(),
+            active_requests: self.active_requests.clone(),
             trace_id: std::mem::take(&mut self.trace_id),
             cli_key: std::mem::take(&mut self.cli_key),
             method: std::mem::take(&mut self.method),
@@ -92,6 +101,7 @@ impl<R: tauri::Runtime> RequestAbortGuard<R> {
             query: self.query.take(),
             session_id: self.session_id.take(),
             requested_model: self.requested_model.take(),
+            special_settings: Arc::clone(&self.special_settings),
             in_flight_attempt: self.in_flight_attempt.take(),
             created_at_ms: self.created_at_ms,
             created_at: self.created_at,
@@ -120,7 +130,13 @@ impl<R: tauri::Runtime> Drop for RequestAbortGuard<R> {
         let abort_attempts: Vec<FailoverAttempt> = self.in_flight_attempt.iter().cloned().collect();
         emit_request_event_and_spawn_request_log(
             RequestEndArgs::from_context(RequestEndContextArgs {
-                deps: RequestEndDeps::new(&self.app, &self.db, &self.log_tx, &self.plugin_pipeline),
+                deps: RequestEndDeps::new(
+                    &self.app,
+                    &self.db,
+                    &self.log_tx,
+                    &self.plugin_pipeline,
+                    &self.active_requests,
+                ),
                 trace_id: self.trace_id.as_str(),
                 cli_key: self.cli_key.as_str(),
                 method: self.method.as_str(),
@@ -130,7 +146,9 @@ impl<R: tauri::Runtime> Drop for RequestAbortGuard<R> {
                 excluded_from_stats: false,
                 duration_ms,
                 attempts: abort_attempts.as_slice(),
-                special_settings_json: None,
+                special_settings_json: response_fixer::special_settings_json(
+                    &self.special_settings,
+                ),
                 session_id: self.session_id.clone(),
                 requested_model: self.requested_model.clone(),
                 created_at_ms: self.created_at_ms,
@@ -168,6 +186,10 @@ mod tests {
             circuit_state_after: None,
             circuit_failure_count: Some(0),
             circuit_failure_threshold: Some(5),
+            circuit_recover_at_unix: None,
+            circuit_trigger_error_code: None,
+            provider_bridged: Some(true),
+            timeout_secs: None,
         };
 
         let logged_attempts: Vec<FailoverAttempt> = Some(attempt.clone()).iter().cloned().collect();

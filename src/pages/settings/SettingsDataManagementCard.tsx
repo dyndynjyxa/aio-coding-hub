@@ -11,8 +11,11 @@ export function SettingsDataManagementCard({
   about,
   dbDiskUsageAvailable,
   dbDiskUsage,
+  requestLogRetentionDays,
   refreshDbDiskUsage,
   openAppDataDir,
+  onCompactDb,
+  compactingDb,
   openClearRequestLogsDialog,
   openResetAllDialog,
   onExportConfig,
@@ -22,8 +25,11 @@ export function SettingsDataManagementCard({
   about: AppAboutInfo | null;
   dbDiskUsageAvailable: AvailableStatus;
   dbDiskUsage: DbDiskUsage | null;
+  requestLogRetentionDays: number | null;
   refreshDbDiskUsage: () => Promise<void>;
   openAppDataDir: () => Promise<void>;
+  onCompactDb: () => Promise<void>;
+  compactingDb: boolean;
   openClearRequestLogsDialog: () => void;
   openResetAllDialog: () => void;
   onExportConfig: () => Promise<void>;
@@ -59,6 +65,25 @@ export function SettingsDataManagementCard({
             disabled={!about || dbDiskUsageAvailable === "checking"}
           >
             刷新
+          </Button>
+        </SettingsRow>
+        <SettingsRow label="请求日志留存" subtitle="可在「系统设置 → 请求记录保留」中调整">
+          <span className="font-mono text-sm text-foreground">
+            {requestLogRetentionDays === null
+              ? "—"
+              : requestLogRetentionDays === 0
+                ? "永久保留"
+                : `${requestLogRetentionDays} 天`}
+          </span>
+        </SettingsRow>
+        <SettingsRow label="压缩数据库" subtitle="回收已删除记录占用的磁盘空间，不删除数据">
+          <Button
+            onClick={() => void onCompactDb()}
+            variant="secondary"
+            size="sm"
+            disabled={!about || compactingDb}
+          >
+            {compactingDb ? "压缩中…" : "压缩"}
           </Button>
         </SettingsRow>
         <SettingsRow label="清理请求日志">

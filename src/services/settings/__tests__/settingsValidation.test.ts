@@ -145,6 +145,71 @@ describe("services/settings/settingsValidation", () => {
     expect(validateCx2ccOptionalField("推理强度", "x".repeat(65))).toContain("推理强度必须 <=");
   });
 
+  it("parses host-only and IPv6 listen addresses with strict formats", () => {
+    expect(parseCustomListenAddress("localhost")).toEqual({ host: "localhost", port: null });
+    expect(parseCustomListenAddress("[::1]")).toEqual({ host: "::1", port: null });
+    expect(parseCustomListenAddress("[::1")).toBeNull();
+    expect(parseCustomListenAddress("[]")).toBeNull();
+    expect(parseCustomListenAddress("[::1]8080")).toBeNull();
+    expect(parseCustomListenAddress("[::1]:abc")).toBeNull();
+    expect(parseCustomListenAddress(":8080")).toBeNull();
+    expect(parseCustomListenAddress("1:2:3")).toBeNull();
+    expect(parseCustomListenAddress("127.0.0.1:70000")).toBeNull();
+    expect(parseCustomListenAddress(`127.0.0.1:${"9".repeat(400)}`)).toBeNull();
+    expect(validateGatewayCustomListenAddress("[::1]:80")).toContain("端口必须 >= 1024");
+  });
+
+  it("validates WSL host edge cases: blank input and malformed brackets", () => {
+    expect(validateWslCustomHostAddress("  ")).toBeNull();
+    expect(validateWslCustomHostAddress("[]")).toContain("IPv6 宿主机地址请使用");
+    expect(validateWslCustomHostAddress("::1]")).toContain("IPv6 宿主机地址请使用");
+    expect(validateWslCustomHostAddress("a[b")).toContain("IPv6 宿主机地址请使用");
+  });
+
+  it("validates update URL emptiness, length, and format", () => {
+    expect(validateSettingsSetInput({ updateReleasesUrl: "  " })).toBeNull();
+    expect(
+      validateSettingsSetInput({ updateReleasesUrl: `https://example.com/${"a".repeat(2050)}` })
+    ).toContain("更新地址必须 <= 2048");
+    expect(validateSettingsSetInput({ updateReleasesUrl: "not a url" })).toContain(
+      "更新地址不是有效 URL"
+    );
+  });
+
+  it("rejects oversized proxy URL and password", () => {
+    expect(
+      validateUpstreamProxyFields({ url: `http://example.com/${"a".repeat(2050)}` })
+    ).toContain("代理地址必须 <= 2048");
+    expect(validateUpstreamProxyFields({ username: "u", password: "a".repeat(4097) })).toContain(
+      "代理密码必须 <= 4096"
+    );
+  });
+
+  it("covers stream idle integer check, valid custom WSL host, and CX2CC branches", () => {
+    expect(validateSettingsSetInput({ upstreamStreamIdleTimeoutSeconds: 30.5 })).toContain(
+      "流式空闲超时必须是整数"
+    );
+    expect(
+      validateSettingsSetInput({
+        wslHostAddressMode: "custom",
+        wslCustomHostAddress: "host.docker.internal",
+      })
+    ).toBeNull();
+    expect(validateSettingsSetInput({ cx2CcFallbackModelOpus: "" })).toContain(
+      "CX2CC Opus 默认模型不能为空"
+    );
+    expect(validateSettingsSetInput({ cx2CcServiceTier: "x".repeat(65) })).toContain(
+      "CX2CC 服务层级必须 <="
+    );
+    expect(
+      validateSettingsSetInput({
+        cx2CcFallbackModelSonnet: "claude-sonnet-4",
+        cx2CcModelReasoningEffort: "high",
+        cx2CcServiceTier: "flex",
+      })
+    ).toBeNull();
+  });
+
   it("runs composite settings validation only for enabled custom modes", () => {
     expect(
       validateSettingsSetInput({

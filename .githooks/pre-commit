@@ -85,6 +85,7 @@ prettier_targets=()
 rust_tauri_targets=()
 has_src_changes=false
 has_tauri_changes=false
+has_support_matrix_changes=false
 
 while IFS= read -r file; do
   case "$file" in
@@ -105,10 +106,18 @@ while IFS= read -r file; do
       esac
       ;;
   esac
+
+  # These files are the inputs of CI's support-contract job
+  # (scripts/support-matrix.mjs check + homebrew-cask selftest).
+  case "$file" in
+    scripts/support-matrix*|README.md|README_EN.md|.github/workflows/ci.yml|.github/workflows/release.yml|package.json)
+      has_support_matrix_changes=true
+      ;;
+  esac
 done < <(git diff --cached --name-only --diff-filter=ACMR)
 
-if [ "$has_src_changes" = false ] && [ "$has_tauri_changes" = false ]; then
-  echo "[pre-commit] No src/ or src-tauri/ changes, skipping checks."
+if [ "$has_src_changes" = false ] && [ "$has_tauri_changes" = false ] && [ "$has_support_matrix_changes" = false ]; then
+  echo "[pre-commit] No src/, src-tauri/ or support-matrix changes, skipping checks."
   exit 0
 fi
 
@@ -158,7 +167,13 @@ fi
 
 if [ "$has_src_changes" = true ]; then
   echo "[pre-commit] Running frontend checks..."
-  pnpm run check:precommit:src
+  node scripts/run-checks.mjs precommit-src
+fi
+
+if [ "$has_support_matrix_changes" = true ]; then
+  echo "[pre-commit] Running support matrix checks..."
+  pnpm run check:support-matrix
+  pnpm run check:homebrew-cask
 fi
 
 if [ "$has_tauri_changes" = true ]; then
@@ -167,7 +182,7 @@ if [ "$has_tauri_changes" = true ]; then
   # cargo --locked 会直接失败，问题常常被拖到 pre-push 才暴露。
   # 这里在检测到典型报错后自动更新 Cargo.lock 并重新校验，减少反复踩坑。
   tauri_log="$(mktemp -t aio-precommit-tauri.XXXXXX)"
-  if pnpm run check:precommit:tauri 2>&1 | tee "$tauri_log"; then
+  if node scripts/run-checks.mjs precommit-tauri 2>&1 | tee "$tauri_log"; then
     rm -f "$tauri_log"
   else
     if grep -q "needs to be updated but --locked was passed" "$tauri_log"; then
@@ -188,7 +203,7 @@ if [ "$has_tauri_changes" = true ]; then
       git add -- "src-tauri/Cargo.lock"
 
       echo "[pre-commit] Re-running Rust fast checks with --locked..."
-      pnpm run check:precommit:tauri
+      node scripts/run-checks.mjs precommit-tauri
       rm -f "$tauri_log"
     else
       rm -f "$tauri_log"

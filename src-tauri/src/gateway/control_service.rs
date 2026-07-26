@@ -8,6 +8,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 
+use super::active_requests::ActiveRequestRegistry;
 use super::background_tasks::GatewayBackgroundTasks;
 use super::binder::{bind_exact, bind_first_available, resolve_gateway_binding};
 use super::codex_session_id::CodexSessionIdCache;
@@ -82,6 +83,7 @@ impl GatewayControlService {
         let session = Arc::new(session_manager::SessionManager::new());
         let recent_errors = Arc::new(Mutex::new(RecentErrorCache::default()));
         let plugin_pipeline = load_gateway_plugin_pipeline(&db);
+        let active_requests = Arc::new(ActiveRequestRegistry::default());
 
         let state = GatewayAppState {
             app: app.clone(),
@@ -93,6 +95,7 @@ impl GatewayControlService {
             recent_errors: recent_errors.clone(),
             latency_cache: Arc::new(Mutex::new(ProviderBaseUrlPingCache::default())),
             plugin_pipeline: plugin_pipeline.clone(),
+            active_requests: active_requests.clone(),
         };
         let router = build_router(state);
         let (shutdown, shutdown_rx) = oneshot::channel::<()>();
@@ -125,6 +128,7 @@ impl GatewayControlService {
             circuit,
             session,
             recent_errors,
+            active_requests,
             shutdown,
             task,
             background_tasks,

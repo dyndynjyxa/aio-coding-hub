@@ -40,12 +40,16 @@ pub(super) struct SkippedProviderAttempt<'a> {
     pub(super) reason: String,
     pub(super) reason_code: Option<&'static str>,
     pub(super) attempt_started_ms: u128,
+    /// Circuit snapshot at gate-deny time; `Some` only for circuit-gate skips
+    /// so non-circuit skip paths keep their serialized shape unchanged.
+    pub(super) circuit: Option<crate::circuit_breaker::CircuitSnapshot>,
 }
 
 pub(super) fn push_skipped_provider_attempt(
     attempts: &mut Vec<FailoverAttempt>,
     skipped: SkippedProviderAttempt<'_>,
 ) {
+    let circuit = skipped.circuit.as_ref();
     attempts.push(FailoverAttempt {
         provider_id: skipped.provider_id,
         provider_name: skipped.provider_name.to_string(),
@@ -63,10 +67,15 @@ pub(super) fn push_skipped_provider_attempt(
         reason_code: skipped.reason_code,
         attempt_started_ms: Some(skipped.attempt_started_ms),
         attempt_duration_ms: Some(0),
-        circuit_state_before: None,
-        circuit_state_after: None,
-        circuit_failure_count: None,
-        circuit_failure_threshold: None,
+        // Gate skip did not change the circuit state; before == after.
+        circuit_state_before: circuit.map(|s| s.state.as_str()),
+        circuit_state_after: circuit.map(|s| s.state.as_str()),
+        circuit_failure_count: circuit.map(|s| s.failure_count),
+        circuit_failure_threshold: circuit.map(|s| s.failure_threshold),
+        circuit_recover_at_unix: circuit.and_then(|s| s.open_until.or(s.cooldown_until)),
+        circuit_trigger_error_code: circuit.and_then(|s| s.last_trigger_error_code),
+        provider_bridged: None,
+        timeout_secs: None,
     });
 }
 

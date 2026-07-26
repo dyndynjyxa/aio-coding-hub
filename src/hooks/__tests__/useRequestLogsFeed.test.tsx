@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { gatewayEventNames } from "../../constants/gatewayEvents";
 import { useRequestLogsFeed } from "../useRequestLogsFeed";
 import {
+  useActiveRequestLogsSnapshotQuery,
   useRequestLogsIncrementalRefreshMutation,
   useRequestLogsListAllQuery,
 } from "../../query/requestLogs";
@@ -11,6 +12,7 @@ import { useDocumentVisibility } from "../useDocumentVisibility";
 import { useWindowForeground } from "../useWindowForeground";
 
 vi.mock("../../query/requestLogs", () => ({
+  useActiveRequestLogsSnapshotQuery: vi.fn(),
   useRequestLogsListAllQuery: vi.fn(),
   useRequestLogsIncrementalRefreshMutation: vi.fn(),
 }));
@@ -35,6 +37,12 @@ describe("hooks/useRequestLogsFeed", () => {
     vi.mocked(useRequestLogsIncrementalRefreshMutation).mockReturnValue({
       mutateAsync: vi.fn().mockResolvedValue(null),
       isPending: false,
+    } as any);
+    vi.mocked(useActiveRequestLogsSnapshotQuery).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn().mockResolvedValue({ data: [] }),
     } as any);
     vi.mocked(subscribeGatewayEvent).mockReturnValue({
       ready: Promise.resolve(),
@@ -71,6 +79,7 @@ describe("hooks/useRequestLogsFeed", () => {
     expect(result.current.requestLogs).toEqual([]);
     expect(result.current.requestLogsLoading).toBe(true);
     expect(result.current.requestLogsAvailable).toBeNull();
+    expect(result.current.activeRequests).toEqual([]);
 
     act(() => {
       void result.current.refreshRequestLogs();
@@ -78,10 +87,89 @@ describe("hooks/useRequestLogsFeed", () => {
     expect(requestRefetch).toHaveBeenCalledTimes(1);
   });
 
+  it("exposes active request snapshots from the feed", () => {
+    vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
+      data: [{ id: 1 }],
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useActiveRequestLogsSnapshotQuery).mockReturnValue({
+      data: [
+        {
+          trace_id: "trace-active",
+          cli_key: "codex",
+          method: "POST",
+          path: "/v1/responses",
+          query: null,
+          session_id: "sess-1",
+          requested_model: "gpt-5",
+          created_at_ms: 1_000,
+          last_activity_ms: 2_000,
+        },
+      ],
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+
+    const { result } = renderHook(() => useRequestLogsFeed({ limit: 20 }));
+
+    expect(useActiveRequestLogsSnapshotQuery).toHaveBeenCalledWith({ enabled: true });
+    expect(result.current.activeRequests.map((row) => row.trace_id)).toEqual(["trace-active"]);
+  });
+
+  it("falls closed to no active requests when active snapshot data is unavailable", () => {
+    vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
+      data: [{ id: 1 }],
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useActiveRequestLogsSnapshotQuery).mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+
+    const { result } = renderHook(() => useRequestLogsFeed({ limit: 20 }));
+
+    expect(result.current.activeRequests).toEqual([]);
+  });
+
+  it("refreshRequestLogs reloads request logs and active request snapshots together", async () => {
+    const requestRefetch = vi.fn().mockResolvedValue({ data: [] });
+    const activeRefetch = vi.fn().mockResolvedValue({ data: [] });
+
+    vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isFetching: false,
+      refetch: requestRefetch,
+    } as any);
+    vi.mocked(useActiveRequestLogsSnapshotQuery).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isFetching: false,
+      refetch: activeRefetch,
+    } as any);
+
+    const { result } = renderHook(() => useRequestLogsFeed({ limit: 20 }));
+
+    await act(async () => {
+      await result.current.refreshRequestLogs();
+    });
+
+    expect(requestRefetch).toHaveBeenCalledTimes(1);
+    expect(activeRefetch).toHaveBeenCalledTimes(1);
+  });
+
   it("subscribes to request signals and coalesces complete events into incremental refreshes", async () => {
     vi.useFakeTimers();
     const requestRefetch = vi.fn();
     const incrementalRefresh = vi.fn().mockResolvedValue(null);
+    const activeRefetch = vi.fn().mockResolvedValue({ data: [] });
     let eventHandler:
       | ((payload: {
           trace_id: string;
@@ -100,6 +188,12 @@ describe("hooks/useRequestLogsFeed", () => {
     vi.mocked(useRequestLogsIncrementalRefreshMutation).mockReturnValue({
       mutateAsync: incrementalRefresh,
       isPending: true,
+    } as any);
+    vi.mocked(useActiveRequestLogsSnapshotQuery).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isFetching: false,
+      refetch: activeRefetch,
     } as any);
     vi.mocked(subscribeGatewayEvent).mockImplementation((event: string, handler: any) => {
       expect(event).toBe(gatewayEventNames.requestSignal);
@@ -137,7 +231,79 @@ describe("hooks/useRequestLogsFeed", () => {
     });
 
     expect(incrementalRefresh).toHaveBeenCalledTimes(1);
+    expect(activeRefetch).toHaveBeenCalledTimes(2);
     expect(requestRefetch).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("queues a fresh active snapshot after complete arrives during a start refresh", async () => {
+    vi.useFakeTimers();
+    let resolveFirstRefresh: (() => void) | null = null;
+    const activeRefetch = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirstRefresh = () => resolve({ data: [{ trace_id: "stale" }] });
+          })
+      )
+      .mockResolvedValueOnce({ data: [] });
+    let eventHandler:
+      | ((payload: {
+          trace_id: string;
+          cli_key: string;
+          phase: "start" | "complete";
+          ts: number;
+        }) => void)
+      | null = null;
+
+    vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useActiveRequestLogsSnapshotQuery).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isFetching: false,
+      refetch: activeRefetch,
+    } as any);
+    vi.mocked(subscribeGatewayEvent).mockImplementation((_event: string, handler: any) => {
+      eventHandler = handler;
+      return { ready: Promise.resolve(), unsubscribe: vi.fn() };
+    });
+
+    renderHook(() =>
+      useRequestLogsFeed({
+        limit: 10,
+        liveUpdatesEnabled: true,
+        liveUpdateIntervalMs: 2_000,
+      })
+    );
+
+    act(() => {
+      eventHandler?.({ trace_id: "t-1", cli_key: "claude", phase: "start", ts: 1 });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(activeRefetch).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      eventHandler?.({ trace_id: "t-1", cli_key: "claude", phase: "complete", ts: 2 });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(activeRefetch).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveFirstRefresh?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(activeRefetch).toHaveBeenCalledTimes(2);
     vi.useRealTimers();
   });
 

@@ -11,6 +11,7 @@ import type { AppSettings } from "../../services/settings/settings";
 import type { SortModeActiveRow, SortModeSummary } from "../../services/providers/sortModes";
 import type { UsageSummary } from "../../services/usage/usage";
 import type { WorkspacesListResult } from "../../services/workspace/workspaces";
+import { isCliKey } from "../../constants/clis";
 
 const DEFAULT_BASE_ORIGIN = "http://127.0.0.1:37123";
 
@@ -18,11 +19,14 @@ const DEFAULT_CLI_PROXY_STATUS: CliProxyStatus[] = [
   { cli_key: "claude", enabled: false, base_origin: null, applied_to_current_gateway: null },
   { cli_key: "codex", enabled: false, base_origin: null, applied_to_current_gateway: null },
   { cli_key: "gemini", enabled: false, base_origin: null, applied_to_current_gateway: null },
+  { cli_key: "grok", enabled: false, base_origin: null, applied_to_current_gateway: null },
 ];
 
-// Default settings matching the Rust backend defaults.
+// Default settings matching the Rust backend defaults (src-tauri/src/infra/settings/defaults.rs).
+// schema_version and the historically drift-prone fields below are guarded by
+// src/constants/__tests__/crossLayerContracts.test.ts.
 const DEFAULT_SETTINGS: AppSettings = {
-  schema_version: 32,
+  schema_version: 36,
   preferred_port: 37123,
   show_home_heatmap: true,
   show_home_usage: true,
@@ -31,7 +35,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   gateway_custom_listen_address: "",
   wsl_auto_config: false,
   wsl_target_cli: { claude: true, codex: true, gemini: true },
-  cli_priority_order: ["claude", "codex", "gemini"],
+  cli_priority_order: ["claude", "codex", "gemini", "grok"],
   wsl_host_address_mode: "auto",
   wsl_custom_host_address: "127.0.0.1",
   codex_home_mode: "user_home_default",
@@ -42,10 +46,11 @@ const DEFAULT_SETTINGS: AppSettings = {
   tray_enabled: true,
   enable_cli_proxy_startup_recovery: true,
   log_retention_days: 7,
+  request_log_retention_days: 0,
   provider_cooldown_seconds: 30,
   provider_base_url_ping_cache_ttl_seconds: 60,
   upstream_first_byte_timeout_seconds: 30,
-  upstream_stream_idle_timeout_seconds: 120,
+  upstream_stream_idle_timeout_seconds: 300,
   upstream_request_timeout_non_streaming_seconds: 0,
   update_releases_url: "https://github.com/dyndynjyxa/aio-coding-hub/releases",
   failover_max_attempts_per_provider: 5,
@@ -57,7 +62,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   intercept_anthropic_warmup_requests: true,
   enable_thinking_signature_rectifier: true,
   enable_thinking_budget_rectifier: true,
-  enable_billing_header_rectifier: true,
+  enable_billing_header_rectifier: false,
   enable_codex_session_id_completion: true,
   enable_claude_metadata_user_id_injection: true,
   enable_cache_anomaly_monitor: false,
@@ -116,6 +121,7 @@ const DEFAULT_USAGE_SUMMARY: UsageSummary = {
   requests_success: 0,
   requests_failed: 0,
   cost_covered_success: 0,
+  total_duration_ms: 0,
   avg_duration_ms: null,
   avg_ttfb_ms: null,
   avg_output_tokens_per_second: null,
@@ -523,7 +529,7 @@ export function buildCliProxySetEnabledResult(input: {
   const cliKey = input.cli_key;
   const enabled = input.enabled;
 
-  if (cliKey !== "claude" && cliKey !== "codex" && cliKey !== "gemini") {
+  if (!isCliKey(cliKey)) {
     return {
       trace_id: nextTraceId(),
       cli_key: cliKey as CliKey,
@@ -535,7 +541,7 @@ export function buildCliProxySetEnabledResult(input: {
     };
   }
 
-  const cli_key = cliKey as CliKey;
+  const cli_key = cliKey;
   const base_origin = enabled ? DEFAULT_BASE_ORIGIN : null;
   setCliProxyEnabledState(cli_key, enabled);
 

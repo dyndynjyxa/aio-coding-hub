@@ -42,7 +42,13 @@ function withContractDefaults(value) {
       ...(value.extensionHostContract ?? {}),
     },
     capabilities: mergeUnique(
-      ["gateway.hooks", "protocol.bridge", "commands.execute", "provider.extensionValues", "privacy.redact"],
+      [
+        "gateway.hooks",
+        "protocol.bridge",
+        "commands.execute",
+        "provider.extensionValues",
+        "privacy.redact",
+      ],
       value.capabilities
     ),
     contributionPoints: mergeUnique(
@@ -83,11 +89,14 @@ function makeRoot(name) {
   );
   writeFileSync(
     join(root, "src-tauri/Cargo.toml"),
-    "[dependencies]\nrquickjs = \"0.12.0\"\n[dev-dependencies]\ntempfile = \"3\"\n"
+    '[dependencies]\nrquickjs = "0.12.0"\n[dev-dependencies]\ntempfile = "3"\n'
   );
-  writeFileSync(join(root, "package.json"), "{ \"scripts\": {} }\n");
+  writeFileSync(join(root, "package.json"), '{ "scripts": {} }\n');
   writeFileSync(join(root, "src/services/plugins.ts"), "export function pluginEnable() {}\n");
-  writeFileSync(join(root, "src/query/plugins.ts"), "export function usePluginEnableMutation() {}\n");
+  writeFileSync(
+    join(root, "src/query/plugins.ts"),
+    "export function usePluginEnableMutation() {}\n"
+  );
   return root;
 }
 
@@ -247,6 +256,9 @@ function writePassingScaffold(root) {
   writeFileSync(
     join(root, "src-tauri/src/gateway/plugins/contract.rs"),
     [
+      "pub(crate) const DEFAULT_HOOK_TIMEOUT_MS: u64 = 150;",
+      'pub(crate) const DEFAULT_FAILURE_POLICY: &str = "fail-open";',
+      "timeout_ms: DEFAULT_HOOK_TIMEOUT_MS default_failure_policy: DEFAULT_FAILURE_POLICY",
       [
         "gateway.request.afterBodyRead",
         "gateway.request.beforeSend",
@@ -310,7 +322,7 @@ function writePassingScaffold(root) {
   );
   writeFileSync(
     join(root, "src-tauri/src/gateway/plugins/pipeline.rs"),
-    "Duration::from_millis(150) FailurePolicy::FailOpen"
+    "Duration::from_millis(DEFAULT_HOOK_TIMEOUT_MS) FailurePolicy::FailOpen"
   );
   writeFileSync(
     join(root, "docs/plugin-manifest-v1.md"),

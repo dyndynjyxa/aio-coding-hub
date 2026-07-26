@@ -7,11 +7,12 @@ import {
 } from "../../generated/bindings";
 import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
 import type { CliKey } from "../providers/providers";
+import { CLI_KEYS } from "../../constants/clis";
 
 export type { GatewayProviderCircuitStatus, GatewayStatus };
 export type GatewayActiveSession = GatewayActiveSessionSummary;
 
-const CLI_KEY_VALUES = ["claude", "codex", "gemini"] as const satisfies readonly CliKey[];
+const CLI_KEY_VALUES = CLI_KEYS;
 
 export const GATEWAY_SESSIONS_DEFAULT_LIMIT = 50;
 export const GATEWAY_SESSIONS_MIN_LIMIT = 1;

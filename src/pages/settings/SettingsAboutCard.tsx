@@ -28,14 +28,18 @@ export function SettingsAboutCard({ about, checkingUpdate, checkUpdate }: Settin
               {about.os}/{about.arch}
             </span>
           </div>
-          <div className="flex items-center justify-between gap-4">
-            <span className="text-muted-foreground">Bundle</span>
-            <span className="font-mono">{about.bundle_type ?? "—"}</span>
-          </div>
-          <div className="flex items-center justify-between gap-4">
-            <span className="text-muted-foreground">运行模式</span>
-            <span className="font-mono">{about.run_mode}</span>
-          </div>
+          {about.bundle_type ? (
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-muted-foreground">Bundle</span>
+              <span className="font-mono">{about.bundle_type}</span>
+            </div>
+          ) : null}
+          {about.run_mode !== "unknown" ? (
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-muted-foreground">运行模式</span>
+              <span className="font-mono">{about.run_mode}</span>
+            </div>
+          ) : null}
           <div className="flex items-center justify-between gap-4">
             <span className="text-muted-foreground">
               {about.run_mode === "portable" ? "获取新版本" : "检查更新"}

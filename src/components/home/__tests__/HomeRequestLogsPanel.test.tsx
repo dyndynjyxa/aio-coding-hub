@@ -1,9 +1,10 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type { CliSessionsFolderLookupEntry } from "../../../services/cli/cliSessions";
 import type { RequestLogSummary } from "../../../services/gateway/requestLogs";
+import type { ActiveRequestSnapshotItem } from "../../../services/gateway/requestActivityProjection";
 import {
   createRequestLogRouteHop,
   createRequestLogSummary,
@@ -29,6 +30,24 @@ function makeRequestLogs(
   return items.map((item) => createRequestLogSummary(item));
 }
 
+function activeRequest(
+  overrides: Partial<ActiveRequestSnapshotItem> = {}
+): ActiveRequestSnapshotItem {
+  return {
+    trace_id: "trace-active",
+    cli_key: "claude",
+    session_id: null,
+    method: "POST",
+    path: "/v1/messages",
+    query: null,
+    requested_model: "claude-3-opus",
+    created_at_ms: Date.now(),
+    last_activity_ms: Date.now(),
+    ...overrides,
+    current_attempt: overrides.current_attempt ?? null,
+  };
+}
+
 describe("components/home/HomeRequestLogsPanel", () => {
   afterEach(() => {
     localStorage.removeItem("home_request_logs_compact");
@@ -36,6 +55,64 @@ describe("components/home/HomeRequestLogsPanel", () => {
     useCliSessionsFolderLookupByIdsQueryMock.mockReset();
     useCliSessionsFolderLookupByIdsQueryMock.mockReturnValue({ data: [], isLoading: false });
   });
+
+  it("shows the Codex system request badge only for a valid structured marker", () => {
+    render(
+      <MemoryRouter>
+        <HomeRequestLogsPanel
+          traces={[]}
+          requestLogs={makeRequestLogs([
+            {
+              id: 1,
+              trace_id: "codex-system",
+              cli_key: "codex",
+              path: "/v1/responses",
+              requested_model: "gpt-5.4-mini",
+              special_settings_json: JSON.stringify([
+                { type: "codex_system_request", threadSource: "system" },
+              ]),
+            },
+            {
+              id: 2,
+              trace_id: "codex-user",
+              cli_key: "codex",
+              path: "/v1/responses",
+              requested_model: "gpt-5.4-mini",
+              special_settings_json: null,
+            },
+            {
+              id: 3,
+              trace_id: "codex-malformed",
+              cli_key: "codex",
+              path: "/v1/responses",
+              requested_model: "gpt-5.4-mini",
+              special_settings_json: "bad-json",
+            },
+            {
+              id: 4,
+              trace_id: "claude-spoofed-marker",
+              cli_key: "claude",
+              special_settings_json: JSON.stringify([
+                { type: "codex_system_request", threadSource: "system" },
+              ]),
+            },
+          ])}
+          requestLogsLoading={false}
+          requestLogsRefreshing={false}
+          requestLogsAvailable={true}
+          onRefreshRequestLogs={vi.fn()}
+          selectedLogId={null}
+          onSelectLogId={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    expect(screen.getAllByText("Codex 系统请求")).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("switch", { name: "最近使用记录简洁模式" }));
+    expect(screen.getAllByText("Codex 系统请求")).toHaveLength(1);
+  });
+
   it("renders traces + logs and supports refresh/select", () => {
     useCliSessionsFolderLookupByIdsQueryMock.mockReturnValue({
       data: [
@@ -139,6 +216,20 @@ describe("components/home/HomeRequestLogsPanel", () => {
           displayOptions={{ customTooltip: true }}
           compactModeOverride={false}
           traces={traces}
+          activeRequests={[
+            activeRequest({
+              trace_id: "t-live",
+              session_id: "claude-live-session",
+              requested_model: "claude-3-opus",
+            }),
+            activeRequest({ trace_id: "t-log-claude", requested_model: "claude-3-opus" }),
+            activeRequest({
+              trace_id: "t-live-codex",
+              cli_key: "codex",
+              path: "/v1/responses",
+              requested_model: "gpt-5",
+            }),
+          ]}
           requestLogs={requestLogs}
           requestLogsLoading={false}
           requestLogsRefreshing={false}
@@ -163,8 +254,107 @@ describe("components/home/HomeRequestLogsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "刷新" }));
     expect(onRefreshRequestLogs).toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: /claude-3-opus/ }));
+    const historicalLogButton = screen.getByText("$0.123456").closest("button");
+    expect(historicalLogButton).not.toBeNull();
+    fireEvent.click(historicalLogButton!);
     expect(onSelectLogId).toHaveBeenCalledWith(1);
+  });
+
+  it("shows canonical cache buckets, preserves zero, and hides missing cache creation", () => {
+    const renderPanel = (requestLog: RequestLogSummary) => (
+      <MemoryRouter>
+        <HomeRequestLogsPanel
+          displayOptions={{ customTooltip: false }}
+          compactModeOverride={false}
+          traces={[]}
+          requestLogs={[requestLog]}
+          requestLogsLoading={false}
+          requestLogsRefreshing={false}
+          requestLogsAvailable={true}
+          onRefreshRequestLogs={vi.fn()}
+          selectedLogId={null}
+          onSelectLogId={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+    const baseLog = createRequestLogSummary({
+      id: 51,
+      trace_id: "trace-cache-creation",
+      cli_key: "codex",
+      path: "/v1/responses",
+      requested_model: "gpt-5.6-sol",
+      input_tokens: 1000,
+      effective_input_tokens: 700,
+      output_tokens: 50,
+      total_tokens: 1050,
+      cache_read_input_tokens: 100,
+      cache_creation_input_tokens: 200,
+    });
+    const view = render(renderPanel(baseLog));
+
+    const expectMetric = (label: string, value: string) => {
+      const card = screen.getByRole("button", { name: /gpt-5\.6-sol/ });
+      const metric = within(card).getByText(label).parentElement;
+      expect(metric).not.toBeNull();
+      expect(within(metric as HTMLElement).getByText(value)).toBeInTheDocument();
+      return metric as HTMLElement;
+    };
+
+    expectMetric("输入", "700");
+    expectMetric("缓存创建", "200");
+    expectMetric("缓存读取", "100");
+
+    view.rerender(
+      renderPanel(
+        createRequestLogSummary({
+          ...baseLog,
+          cache_creation_5m_input_tokens: 25,
+          cache_creation_1h_input_tokens: 50,
+        })
+      )
+    );
+    expect(within(expectMetric("缓存创建", "25")).getByText("(5m)")).toBeInTheDocument();
+
+    view.rerender(
+      renderPanel(
+        createRequestLogSummary({
+          ...baseLog,
+          cache_creation_input_tokens: 0,
+          cache_creation_5m_input_tokens: null,
+          cache_creation_1h_input_tokens: null,
+        })
+      )
+    );
+    expectMetric("缓存创建", "0");
+
+    view.rerender(
+      renderPanel(
+        createRequestLogSummary({
+          ...baseLog,
+          cache_creation_input_tokens: null,
+          cache_creation_5m_input_tokens: 0,
+          cache_creation_1h_input_tokens: null,
+        })
+      )
+    );
+    expect(within(expectMetric("缓存创建", "0")).queryByText("(5m)")).not.toBeInTheDocument();
+
+    view.rerender(
+      renderPanel(
+        createRequestLogSummary({
+          ...baseLog,
+          output_tokens: null,
+          cache_creation_input_tokens: null,
+          cache_creation_5m_input_tokens: null,
+          cache_creation_1h_input_tokens: null,
+        })
+      )
+    );
+    expect(
+      within(screen.getByRole("button", { name: /gpt-5\.6-sol/ })).queryByText("缓存创建")
+    ).not.toBeInTheDocument();
+    const outputMetric = expectMetric("输出", "—");
+    expect(outputMetric).toHaveClass("col-start-1", "row-start-2");
   });
 
   it("renders Claude model mapping from historical request logs", () => {
@@ -383,6 +573,15 @@ describe("components/home/HomeRequestLogsPanel", () => {
           displayOptions={{ customTooltip: true }}
           compactModeOverride={false}
           traces={traces}
+          activeRequests={[
+            activeRequest({ trace_id: "t-log-claude", requested_model: "claude-3-opus" }),
+            activeRequest({
+              trace_id: "t-live-codex",
+              cli_key: "codex",
+              path: "/v1/responses",
+              requested_model: "gpt-5",
+            }),
+          ]}
           requestLogs={requestLogs}
           requestLogsLoading={false}
           requestLogsRefreshing={false}
@@ -498,9 +697,10 @@ describe("components/home/HomeRequestLogsPanel", () => {
     expect(screen.queryByText("gemini-session-1")).not.toBeInTheDocument();
   });
 
-  it("shows status-null logs without active trace as in-progress fallback rows", () => {
+  it("shows status-null logs without active registry entry as interrupted history rows", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-29T12:00:00.000Z"));
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
 
     useCliSessionsFolderLookupByIdsQueryMock.mockReturnValue({
       data: [
@@ -554,6 +754,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
         <HomeRequestLogsPanel
           displayOptions={{ customTooltip: true }}
           traces={[]}
+          activeRequests={[]}
           requestLogs={requestLogs}
           requestLogsLoading={false}
           requestLogsRefreshing={false}
@@ -565,12 +766,172 @@ describe("components/home/HomeRequestLogsPanel", () => {
       </MemoryRouter>
     );
 
-    // Without a live trace, log appears as a regular fallback card, not as a realtime card.
-    expect(screen.getByText("进行中")).toBeInTheDocument();
+    // A persisted placeholder alone is historical/incomplete, not a live request.
+    expect(screen.queryByText("进行中")).not.toBeInTheDocument();
+    expect(screen.getByText("未完成")).toBeInTheDocument();
     expect(screen.queryByText("当前阶段")).not.toBeInTheDocument();
     // The log renders as a clickable card in the list.
     expect(screen.getByRole("button", { name: /claude-3-opus/ })).toBeInTheDocument();
     expect(screen.getAllByText("workspace-live-fallback")).toHaveLength(1);
+    expect(setIntervalSpy).not.toHaveBeenCalled();
+    setIntervalSpy.mockRestore();
+  });
+
+  it("uses wall-clock time when an already-expired terminal trace arrives while idle", () => {
+    vi.useFakeTimers();
+    const baseTime = new Date("2026-03-29T12:00:00.000Z").getTime();
+    vi.setSystemTime(baseTime);
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
+    const commonProps = {
+      requestLogsLoading: false,
+      requestLogsRefreshing: false,
+      requestLogsAvailable: true,
+      onRefreshRequestLogs: vi.fn(),
+      selectedLogId: null,
+      onSelectLogId: vi.fn(),
+    };
+    const view = render(
+      <MemoryRouter>
+        <HomeRequestLogsPanel traces={[]} activeRequests={[]} requestLogs={[]} {...commonProps} />
+      </MemoryRouter>
+    );
+
+    vi.setSystemTime(baseTime + 10_000);
+    const expiredTrace: TraceSession = {
+      trace_id: "expired-terminal",
+      cli_key: "claude",
+      session_id: null,
+      method: "POST",
+      path: "/v1/messages",
+      query: null,
+      requested_model: "expired-model",
+      first_seen_ms: baseTime - 500,
+      last_seen_ms: baseTime,
+      attempts: [],
+    };
+    const completedLog = makeRequestLogs([
+      {
+        id: 12,
+        trace_id: "expired-terminal",
+        cli_key: "claude",
+        method: "POST",
+        path: "/v1/messages",
+        requested_model: "expired-model",
+        status: 200,
+        error_code: null,
+        duration_ms: 500,
+        created_at_ms: baseTime,
+        created_at: Math.floor(baseTime / 1000),
+      },
+    ]);
+
+    view.rerender(
+      <MemoryRouter>
+        <HomeRequestLogsPanel
+          traces={[expiredTrace]}
+          activeRequests={[]}
+          requestLogs={completedLog}
+          {...commonProps}
+        />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByRole("button", { name: /expired-model/ })).toBeInTheDocument();
+    expect(setIntervalSpy).not.toHaveBeenCalled();
+    setIntervalSpy.mockRestore();
+  });
+
+  it("shows active registry requests before a persisted request log row exists", () => {
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
+    render(
+      <MemoryRouter>
+        <HomeRequestLogsPanel
+          displayOptions={{ customTooltip: true }}
+          traces={[]}
+          activeRequests={[
+            activeRequest({
+              trace_id: "t-active-only",
+              cli_key: "codex",
+              method: "POST",
+              path: "/v1/responses",
+              requested_model: "gpt-5",
+            }),
+          ]}
+          requestLogs={[]}
+          requestLogsLoading={false}
+          requestLogsRefreshing={false}
+          requestLogsAvailable={true}
+          onRefreshRequestLogs={vi.fn()}
+          selectedLogId={null}
+          onSelectLogId={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    // Registry-only requests render with the same realtime card style as
+    // trace-backed in-progress requests — never as a log-row fallback.
+    expect(screen.getByText("进行中")).toBeInTheDocument();
+    expect(screen.getByText("当前阶段")).toBeInTheDocument();
+    expect(setIntervalSpy).toHaveBeenCalled();
+    setIntervalSpy.mockRestore();
+    expect(screen.getByText("gpt-5")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /gpt-5/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("当前没有最近使用记录")).not.toBeInTheDocument();
+  });
+
+  it("places interrupted audit rows after terminal history even when they are newer", () => {
+    const nowMs = Date.now();
+    const requestLogs = makeRequestLogs([
+      {
+        id: 61,
+        trace_id: "t-interrupted-newer",
+        cli_key: "claude",
+        method: "POST",
+        path: "/v1/messages",
+        requested_model: "interrupted-newer-model",
+        status: null,
+        error_code: null,
+        created_at_ms: nowMs,
+        created_at: Math.floor(nowMs / 1000),
+      },
+      {
+        id: 62,
+        trace_id: "t-completed-older",
+        cli_key: "codex",
+        method: "POST",
+        path: "/v1/responses",
+        requested_model: "completed-older-model",
+        status: 200,
+        error_code: null,
+        created_at_ms: nowMs - 60_000,
+        created_at: Math.floor((nowMs - 60_000) / 1000),
+      },
+    ]);
+
+    render(
+      <MemoryRouter>
+        <HomeRequestLogsPanel
+          displayOptions={{ customTooltip: false }}
+          traces={[]}
+          activeRequests={[]}
+          requestLogs={requestLogs}
+          requestLogsLoading={false}
+          requestLogsRefreshing={false}
+          requestLogsAvailable={true}
+          onRefreshRequestLogs={vi.fn()}
+          selectedLogId={null}
+          onSelectLogId={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    const completedButton = screen.getByRole("button", { name: /completed-older-model/ });
+    const interruptedButton = screen.getByRole("button", { name: /interrupted-newer-model/ });
+    expect(screen.queryByText("进行中")).not.toBeInTheDocument();
+    expect(screen.getByText("未完成")).toBeInTheDocument();
+    expect(completedButton.compareDocumentPosition(interruptedButton)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
   });
 
   it("keeps in-progress request logs at the top while preserving time order for the rest", () => {
@@ -676,6 +1037,14 @@ describe("components/home/HomeRequestLogsPanel", () => {
         <HomeRequestLogsPanel
           displayOptions={{ customTooltip: false }}
           traces={[]}
+          activeRequests={[
+            activeRequest({
+              trace_id: "t-pending-older",
+              created_at_ms: nowMs - 10_000,
+              last_activity_ms: nowMs - 500,
+              requested_model: "pending-model",
+            }),
+          ]}
           requestLogs={requestLogs}
           requestLogsLoading={false}
           requestLogsRefreshing={false}
@@ -687,18 +1056,18 @@ describe("components/home/HomeRequestLogsPanel", () => {
       </MemoryRouter>
     );
 
-    // Without a live trace the status-null log is NOT promoted to realtime cards.
-    // It stays in the regular list as an in-progress fallback row.
+    // Even without a live trace, the registry-active log is promoted to a
+    // realtime card above the list instead of an in-progress log-row fork.
     expect(screen.getByText("pending-model")).toBeInTheDocument();
-    expect(screen.queryByText("当前阶段")).not.toBeInTheDocument();
+    expect(screen.getByText("当前阶段")).toBeInTheDocument();
     expect(screen.getByText("进行中")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /pending-model/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /pending-model/ })).not.toBeInTheDocument();
+    const pendingCard = screen.getByText("pending-model");
     const completedNewerButton = screen.getByRole("button", { name: /done-newer-model/ });
-    const pendingButton = screen.getByRole("button", { name: /pending-model/ });
     const completedOlderButton = screen.getByRole("button", { name: /done-older-model/ });
 
-    // Pending rows stay above completed rows even when the live trace is missing.
-    expect(pendingButton.compareDocumentPosition(completedNewerButton)).toBe(
+    // The pending card stays above completed rows, which keep time order.
+    expect(pendingCard.compareDocumentPosition(completedNewerButton)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING
     );
     expect(completedNewerButton.compareDocumentPosition(completedOlderButton)).toBe(
@@ -733,6 +1102,14 @@ describe("components/home/HomeRequestLogsPanel", () => {
           displayOptions={{ customTooltip: true }}
           compactModeOverride={false}
           traces={[]}
+          activeRequests={[
+            activeRequest({
+              trace_id: "t-idle-pending",
+              created_at_ms: Date.now() - 20 * 60 * 1000,
+              last_activity_ms: Date.now() - 12 * 60 * 1000,
+              requested_model: "idle-model",
+            }),
+          ]}
           requestLogs={requestLogs}
           requestLogsLoading={false}
           requestLogsRefreshing={false}
@@ -744,7 +1121,9 @@ describe("components/home/HomeRequestLogsPanel", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText("进行中 · 已静默 12 分钟")).toBeInTheDocument();
+    // The idle notice now lives in the realtime card's stage slot.
+    expect(screen.getByText("已静默 12 分钟")).toBeInTheDocument();
+    expect(screen.getByText("进行中")).toBeInTheDocument();
   });
 
   it("uses live trace data to show current provider and elapsed duration for in-progress logs", () => {
@@ -765,6 +1144,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
           {
             trace_id: "t-live-provider",
             cli_key: "claude",
+            session_id: null,
             method: "POST",
             path: "/v1/messages",
             query: null,
@@ -778,6 +1158,11 @@ describe("components/home/HomeRequestLogsPanel", () => {
             status: null,
             attempt_started_ms: 0,
             attempt_duration_ms: 0,
+            circuit_state_before: null,
+            circuit_state_after: null,
+            circuit_failure_count: null,
+            circuit_failure_threshold: null,
+            claude_model_mapping: null,
           },
         ],
       },
@@ -822,6 +1207,14 @@ describe("components/home/HomeRequestLogsPanel", () => {
           displayOptions={{ customTooltip: true }}
           compactModeOverride={false}
           traces={traces}
+          activeRequests={[
+            activeRequest({
+              trace_id: "t-live-provider",
+              created_at_ms: Date.now() - 6500,
+              last_activity_ms: Date.now() - 100,
+              requested_model: "claude-3-opus",
+            }),
+          ]}
           requestLogs={requestLogs}
           requestLogsLoading={false}
           requestLogsRefreshing={false}

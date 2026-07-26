@@ -36,7 +36,7 @@ function extractGeneratedCommand(source: string, commandName: string) {
 describe("generated/bindings.ts contract", () => {
   it("documents the generated IPC ownership surface", () => {
     expect(bindingsSource).toContain(
-      "NOTE: Generated IPC contract for settings, config migration, desktop, app management, gateway, request-log, CLI update, CLI proxy, provider, WSL, sort-mode, provider-limit, usage, cost, model-price, prompt, workspace, skills, MCP, CLI manager, CLI sessions, Claude validation, notice, and env-conflict command families."
+      "NOTE: Generated IPC contract for settings, config migration, desktop, app management, gateway, request-log, CLI update, CLI proxy, provider, WSL, sort-mode, provider-limit, usage, model-price, prompt, workspace, skills, MCP, CLI manager, CLI sessions, Claude validation, notice, and env-conflict command families."
     );
     expect(bindingsSource).toContain("settings_get");
     expect(bindingsSource).toContain("settings_gateway_rectifier_set");
@@ -69,7 +69,17 @@ describe("generated/bindings.ts contract", () => {
     expect(bindingsSource).toContain("sort_modes_list");
     expect(bindingsSource).toContain("provider_limit_usage_v1");
     expect(bindingsSource).toContain("usage_summary_v2");
-    expect(bindingsSource).toContain("cost_summary_v1");
+    for (const removedCostCommand of [
+      "cost_summary_v1",
+      "cost_trend_v1",
+      "cost_breakdown_provider_v1",
+      "cost_breakdown_model_v1",
+      "cost_scatter_cli_provider_model_v1",
+      "cost_top_requests_v1",
+      "cost_backfill_missing_v1",
+    ]) {
+      expect(bindingsSource).not.toContain(removedCostCommand);
+    }
     expect(bindingsSource).toContain("model_prices_list");
     expect(bindingsSource).toContain("model_price_upsert");
     expect(bindingsSource).toContain("prompts_list");
@@ -111,6 +121,18 @@ describe("generated/bindings.ts contract", () => {
   });
 
   it("pins acronym casing for usage bridge filter DTO fields", () => {
+    expect(extractTypeBody(bindingsSource, "UsageQueryParams")).toContain(
+      "dayStartHour: number | null"
+    );
+    expect(extractTypeBody(bindingsSource, "UsageQueryParams")).toContain(
+      "fullIdleGapMinutes: number | null"
+    );
+    expect(extractTypeBody(bindingsSource, "UsageQueryParams")).toContain(
+      "sessionBreakGapMinutes: number | null"
+    );
+    expect(extractTypeBody(bindingsSource, "UsageDayDetailParams")).toContain(
+      "dayStartHour: number | null"
+    );
     expect(extractTypeBody(bindingsSource, "UsageQueryParams")).toContain(
       "excludeCx2CcGatewayBridge: boolean | null"
     );

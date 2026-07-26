@@ -1,10 +1,11 @@
 import { toast } from "sonner";
 import type { ConfigImportResult } from "../../services/app/configMigrate";
-import type { ClearRequestLogsResult } from "../../services/app/dataManagement";
+import type { ClearRequestLogsResult, DbCompactResult } from "../../services/app/dataManagement";
 import { logToConsole } from "../../services/consoleLog";
 import type { ModelPricesSyncReport } from "../../services/usage/modelPrices";
 import {
   buildConfigImportSuccessMessage,
+  buildDbCompactedMessage,
   buildModelPricesSyncMessage,
   buildRequestLogsClearedMessage,
 } from "./settingsSidebarModel";
@@ -28,6 +29,11 @@ export function presentSettingsSidebarFailure(input: SidebarFailureInput) {
 export function presentRequestLogsCleared(result: ClearRequestLogsResult) {
   logToConsole("info", "清理请求日志", result);
   toast(buildRequestLogsClearedMessage(result));
+}
+
+export function presentDbCompacted(result: DbCompactResult) {
+  logToConsole("info", "压缩数据库", result);
+  toast(buildDbCompactedMessage(result));
 }
 
 export function presentResetAllSuccess() {

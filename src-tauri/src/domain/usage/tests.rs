@@ -1,10 +1,52 @@
 use super::*;
 
+const EXPECTED_OPENAI_CACHE_CREATION_ALIASES: [&str; 8] = [
+    "/cache_creation_input_tokens",
+    "/cache_write_input_tokens",
+    "/cache_creation_tokens",
+    "/cache_write_tokens",
+    "/input_tokens_details/cache_creation_tokens",
+    "/input_tokens_details/cache_write_tokens",
+    "/prompt_tokens_details/cache_creation_tokens",
+    "/prompt_tokens_details/cache_write_tokens",
+];
+
+fn openai_usage_with_alias(pointer: &str, value: Value) -> Value {
+    let mut usage = serde_json::json!({
+        "input_tokens": 1000,
+        "output_tokens": 50,
+        "total_tokens": 1050,
+        "input_tokens_details": {},
+        "prompt_tokens_details": {},
+    });
+    let segments = pointer
+        .trim_start_matches('/')
+        .split('/')
+        .collect::<Vec<_>>();
+    match segments.as_slice() {
+        [field] => {
+            usage
+                .as_object_mut()
+                .expect("usage object")
+                .insert((*field).to_string(), value);
+        }
+        [parent, field] => {
+            usage
+                .get_mut(*parent)
+                .and_then(Value::as_object_mut)
+                .expect("usage detail object")
+                .insert((*field).to_string(), value);
+        }
+        _ => panic!("unsupported test pointer: {pointer}"),
+    }
+    usage
+}
+
 #[test]
 fn parse_openai_chatcompletions_usage() {
     let body =
         br#"{"id":"x","usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}"#;
-    let extract = parse_usage_from_json_bytes(body).expect("should parse usage");
+    let extract = parse_usage_from_json_bytes("codex", body).expect("should parse usage");
     assert_eq!(extract.metrics.input_tokens, Some(10));
     assert_eq!(extract.metrics.output_tokens, Some(5));
     assert_eq!(extract.metrics.total_tokens, Some(15));
@@ -14,17 +56,193 @@ fn parse_openai_chatcompletions_usage() {
 #[test]
 fn parse_openai_responses_usage_with_cached_tokens() {
     let body = br#"{"usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18,"input_tokens_details":{"cached_tokens":3}}}"#;
-    let extract = parse_usage_from_json_bytes(body).expect("should parse usage");
+    let extract = parse_usage_from_json_bytes("codex", body).expect("should parse usage");
     assert_eq!(extract.metrics.input_tokens, Some(11));
     assert_eq!(extract.metrics.output_tokens, Some(7));
     assert_eq!(extract.metrics.total_tokens, Some(18));
     assert_eq!(extract.metrics.cache_read_input_tokens, Some(3));
+    assert_eq!(extract.metrics.cache_creation_input_tokens, None);
+}
+
+#[test]
+fn parse_openai_cache_creation_aliases_in_json_and_sse() {
+    for pointer in EXPECTED_OPENAI_CACHE_CREATION_ALIASES {
+        for expected in [200, 0] {
+            let usage = openai_usage_with_alias(pointer, serde_json::json!(expected));
+            let json_body = serde_json::to_vec(&serde_json::json!({ "usage": usage.clone() }))
+                .expect("serialize JSON response");
+            let json_extract = parse_usage_from_json_bytes("codex", &json_body)
+                .unwrap_or_else(|| panic!("JSON alias should parse: {pointer}"));
+            assert_eq!(
+                json_extract.metrics.cache_creation_input_tokens,
+                Some(expected),
+                "JSON alias={pointer}"
+            );
+            assert_canonical_cache_creation_usage(&json_extract.usage_json, expected, pointer);
+
+            let sse_payload = serde_json::json!({
+                "type": "response.completed",
+                "response": { "usage": usage },
+            });
+            let sse = format!("data: {sse_payload}\n\n");
+            let sse_extract = parse_usage_from_json_or_sse_bytes("codex", sse.as_bytes())
+                .unwrap_or_else(|| panic!("SSE alias should parse: {pointer}"));
+            assert_eq!(
+                sse_extract.metrics.cache_creation_input_tokens,
+                Some(expected),
+                "SSE alias={pointer}"
+            );
+            assert_canonical_cache_creation_usage(&sse_extract.usage_json, expected, pointer);
+        }
+    }
+}
+
+fn assert_canonical_cache_creation_usage(usage_json: &str, expected: i64, pointer: &str) {
+    let normalized: Value = serde_json::from_str(usage_json).expect("normalized usage JSON");
+    assert_eq!(
+        normalized.get("cache_creation_input_tokens"),
+        Some(&serde_json::json!(expected)),
+        "canonical value alias={pointer}"
+    );
+    for alias in [
+        "cache_write_input_tokens",
+        "cache_creation_tokens",
+        "cache_write_tokens",
+        "input_tokens_details",
+        "prompt_tokens_details",
+    ] {
+        assert!(
+            normalized.get(alias).is_none(),
+            "alias leaked into canonical JSON: alias={pointer} key={alias}"
+        );
+    }
+}
+
+#[test]
+fn openai_cache_creation_alias_selection_preserves_explicit_zero() {
+    let mut usage = openai_usage_with_alias("/cache_creation_input_tokens", serde_json::json!(0));
+    usage["input_tokens_details"]["cache_write_tokens"] = serde_json::json!(200);
+    assert_eq!(
+        extract_openai_cache_creation_input_tokens(&usage),
+        Some(200),
+        "a leading zero must not mask a later positive value"
+    );
+
+    usage["cache_creation_input_tokens"] = serde_json::json!(100);
+    assert_eq!(
+        extract_openai_cache_creation_input_tokens(&usage),
+        Some(100),
+        "the first positive alias wins"
+    );
+
+    let mut zero_usage = openai_usage_with_alias(
+        "/prompt_tokens_details/cache_write_tokens",
+        serde_json::json!(0),
+    );
+    zero_usage["cache_creation_input_tokens"] = serde_json::json!(0);
+    let body = serde_json::to_vec(&serde_json::json!({ "usage": zero_usage.clone() }))
+        .expect("serialize zero usage");
+    let extract = parse_usage_from_json_bytes("codex", &body).expect("parse explicit zero");
+    assert_eq!(extract.metrics.cache_creation_input_tokens, Some(0));
+    let normalized: Value = serde_json::from_str(&extract.usage_json).expect("normalized usage");
+    assert_eq!(
+        normalized.get("cache_creation_input_tokens"),
+        Some(&serde_json::json!(0))
+    );
+    for alias in [
+        "cache_write_input_tokens",
+        "cache_creation_tokens",
+        "cache_write_tokens",
+        "input_tokens_details",
+        "prompt_tokens_details",
+    ] {
+        assert!(
+            normalized.get(alias).is_none(),
+            "alias leaked into canonical JSON: {alias}"
+        );
+    }
+
+    let sse_payload = serde_json::json!({
+        "type": "response.completed",
+        "response": { "usage": zero_usage },
+    });
+    let sse = format!("data: {sse_payload}\n\n");
+    let sse_extract =
+        parse_usage_from_json_or_sse_bytes("codex", sse.as_bytes()).expect("parse SSE zero");
+    assert_eq!(sse_extract.metrics.cache_creation_input_tokens, Some(0));
+    assert_eq!(
+        serde_json::from_str::<Value>(&sse_extract.usage_json)
+            .expect("normalized SSE usage")
+            .get("cache_creation_input_tokens"),
+        Some(&serde_json::json!(0))
+    );
+}
+
+#[test]
+fn openai_cache_creation_aliases_ignore_invalid_values() {
+    for invalid in [
+        serde_json::json!(-1),
+        serde_json::json!("2"),
+        serde_json::json!(2.5),
+        serde_json::json!(true),
+        serde_json::json!({ "tokens": 2 }),
+        serde_json::json!([2]),
+        serde_json::json!(u64::MAX),
+    ] {
+        let usage = openai_usage_with_alias("/cache_write_tokens", invalid.clone());
+        assert_eq!(
+            extract_openai_cache_creation_input_tokens(&usage),
+            None,
+            "invalid alias value should be ignored: {invalid}"
+        );
+    }
+
+    let mut usage = openai_usage_with_alias("/cache_creation_input_tokens", serde_json::json!(-1));
+    usage["prompt_tokens_details"]["cache_write_tokens"] = serde_json::json!(200);
+    assert_eq!(
+        extract_openai_cache_creation_input_tokens(&usage),
+        Some(200)
+    );
+}
+
+#[test]
+fn new_openai_cache_creation_aliases_are_protocol_scoped() {
+    let usage = openai_usage_with_alias("/cache_write_tokens", serde_json::json!(200));
+    let body = serde_json::to_vec(&serde_json::json!({ "usage": usage }))
+        .expect("serialize protocol fixture");
+
+    assert_eq!(
+        parse_usage_from_json_bytes("codex", &body)
+            .expect("codex usage")
+            .metrics
+            .cache_creation_input_tokens,
+        Some(200)
+    );
+    for cli_key in ["gemini", "claude", "unknown"] {
+        assert_eq!(
+            parse_usage_from_json_bytes(cli_key, &body)
+                .expect("base usage should still parse")
+                .metrics
+                .cache_creation_input_tokens,
+            None,
+            "cli_key={cli_key}"
+        );
+    }
+
+    let claude_body = br#"{"usage":{"input_tokens":1,"cache_creation_input_tokens":0}}"#;
+    assert_eq!(
+        parse_usage_from_json_bytes("claude", claude_body)
+            .expect("claude canonical usage")
+            .metrics
+            .cache_creation_input_tokens,
+        Some(0)
+    );
 }
 
 #[test]
 fn parse_gemini_usage_metadata() {
     let body = br#"{"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":9,"thoughtsTokenCount":2,"totalTokenCount":19,"cachedContentTokenCount":4}}"#;
-    let extract = parse_usage_from_json_bytes(body).expect("should parse usage");
+    let extract = parse_usage_from_json_bytes("gemini", body).expect("should parse usage");
     assert_eq!(extract.metrics.input_tokens, Some(8));
     assert_eq!(extract.metrics.output_tokens, Some(11));
     assert_eq!(extract.metrics.total_tokens, Some(19));

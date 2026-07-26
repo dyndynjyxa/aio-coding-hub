@@ -15,17 +15,28 @@ export async function appHeartbeatPong() {
   });
 }
 
+// A pong invoke that neither resolves nor rejects (stuck IPC) must not block
+// heartbeats forever — after this long the in-flight guard is considered stale
+// and the next heartbeat sends a fresh pong.
+export const PONG_IN_FLIGHT_STALE_MS = 10_000;
+
 export async function listenAppHeartbeat(): Promise<() => void> {
-  let inFlight = false;
+  let inFlightSinceMs = 0;
 
   const unlisten = await listenDesktopEvent<AppHeartbeatPayload>(appEventNames.heartbeat, () => {
-    if (inFlight) return;
-    inFlight = true;
+    const now = Date.now();
+    if (inFlightSinceMs !== 0 && now - inFlightSinceMs < PONG_IN_FLIGHT_STALE_MS) return;
+    const startedAtMs = now;
+    inFlightSinceMs = startedAtMs;
 
     appHeartbeatPong()
       .catch(() => null)
       .finally(() => {
-        inFlight = false;
+        // A stale invoke that settles late must not clear a guard that has
+        // since been taken over by a newer in-flight pong.
+        if (inFlightSinceMs === startedAtMs) {
+          inFlightSinceMs = 0;
+        }
       });
   });
 

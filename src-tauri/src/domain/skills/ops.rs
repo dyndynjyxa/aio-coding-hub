@@ -11,7 +11,6 @@ use super::skill_md::parse_skill_md;
 use super::types::InstalledSkillSummary;
 use super::util::validate_relative_subdir;
 use crate::db;
-use crate::shared::cli_key::SUPPORTED_CLI_KEYS;
 use crate::shared::error::db_err;
 use crate::shared::text::normalize_name;
 use crate::shared::time::now_unix_seconds;
@@ -28,6 +27,15 @@ fn is_external_local_skill_dir(path: &Path) -> crate::shared::error::AppResult<b
         return Ok(true);
     }
     Ok(path.is_dir() && has_skill_md(path))
+}
+
+fn is_aio_managed_skill_target(
+    conn: &Connection,
+    path: &Path,
+    ssot_root: &Path,
+) -> crate::shared::error::AppResult<bool> {
+    Ok(managed_marker_belongs_to_installed_skill(conn, path)?
+        || is_managed_link_to_ssot(path, ssot_root))
 }
 
 fn local_source_cli_key(source_git_url: &str) -> Option<&str> {
@@ -152,7 +160,9 @@ fn remove_managed_targets_except<R: tauri::Runtime>(
     keep_target: &Path,
 ) -> crate::shared::error::AppResult<()> {
     let ssot_root = ssot_skills_root(app)?;
-    for cli_key in SUPPORTED_CLI_KEYS {
+    for cli_key in
+        crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Skills)
+    {
         let root = cli_skills_root(app, cli_key)?;
         let target = root.join(skill_key);
         if target == keep_target || !exists_or_is_link(&target) {
@@ -428,7 +438,9 @@ pub fn uninstall<R: tauri::Runtime>(
 
     // Safety: ensure we will only delete managed dirs.
     let ssot_root = ssot_skills_root(app)?;
-    for cli_key in SUPPORTED_CLI_KEYS {
+    for cli_key in
+        crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Skills)
+    {
         let root = cli_skills_root(app, cli_key)?;
         let target = root.join(&skill.skill_key);
         if exists_or_is_link(&target)
@@ -440,7 +452,9 @@ pub fn uninstall<R: tauri::Runtime>(
         }
     }
 
-    for cli_key in SUPPORTED_CLI_KEYS {
+    for cli_key in
+        crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Skills)
+    {
         remove_from_cli(app, cli_key, &skill.skill_key)?;
     }
 
@@ -504,6 +518,17 @@ fn sync_enabled_skill_keys_for_cli<R: tauri::Runtime>(
     ensure_skills_roots(app)?;
     validate_cli_key(cli_key)?;
 
+    let _grok_sync_guard = if cli_key == "grok" {
+        Some(super::sync_manifest::lock()?)
+    } else {
+        None
+    };
+    let previous_grok_manifest = if cli_key == "grok" {
+        super::sync_manifest::read(app)?
+    } else {
+        None
+    };
+
     let enabled_set: HashSet<String> = enabled_list.iter().cloned().collect();
 
     let cli_root = cli_skills_root(app, cli_key)?;
@@ -520,10 +545,7 @@ fn sync_enabled_skill_keys_for_cli<R: tauri::Runtime>(
             if !path.is_dir() && !is_symlink_or_junction(&path) {
                 continue;
             }
-            let managed_marker_belongs_to_installed =
-                managed_marker_belongs_to_installed_skill(conn, &path)?;
-            let managed_link_to_ssot = is_managed_link_to_ssot(&path, &ssot_root);
-            if !managed_marker_belongs_to_installed && !managed_link_to_ssot {
+            if !is_aio_managed_skill_target(conn, &path, &ssot_root)? {
                 continue;
             }
             let dir_name = path
@@ -541,12 +563,38 @@ fn sync_enabled_skill_keys_for_cli<R: tauri::Runtime>(
         }
     }
 
-    for skill_key in enabled_list {
-        let ssot_dir = ssot_root.join(&skill_key);
+    for skill_key in &enabled_list {
+        let ssot_dir = ssot_root.join(skill_key);
         if !ssot_dir.exists() {
             return Err(format!("SKILL_SSOT_MISSING: {}", ssot_dir.display()).into());
         }
-        sync_to_cli(app, cli_key, &skill_key, &ssot_dir)?;
+        sync_to_cli(app, cli_key, skill_key, &ssot_dir)?;
+    }
+
+    if cli_key == "grok" {
+        if let Some(previous) = previous_grok_manifest {
+            let previous_root = Path::new(&previous.root_path);
+            if !crate::grok_config::paths_equivalent(previous_root, &cli_root)? {
+                for skill_key in previous.managed_keys {
+                    let target = previous_root.join(skill_key);
+                    if exists_or_is_link(&target)
+                        && is_aio_managed_skill_target(conn, &target, &ssot_root)?
+                    {
+                        remove_managed_dir(&target)?;
+                    }
+                }
+            }
+        }
+
+        let mut managed_keys = Vec::new();
+        for skill_key in &enabled_list {
+            let target = cli_root.join(skill_key);
+            if exists_or_is_link(&target) && is_aio_managed_skill_target(conn, &target, &ssot_root)?
+            {
+                managed_keys.push(skill_key.clone());
+            }
+        }
+        super::sync_manifest::write(app, &cli_root, managed_keys)?;
     }
 
     Ok(())
@@ -605,4 +653,79 @@ pub fn sync_cli_for_workspace<R: tauri::Runtime>(
     enabled_list.sort();
 
     sync_enabled_skill_keys_for_cli(app, conn, &cli_key, enabled_list)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+
+    #[derive(Default)]
+    struct EnvRestore(Vec<(&'static str, Option<OsString>)>);
+
+    impl EnvRestore {
+        fn set(&mut self, key: &'static str, value: impl Into<OsString>) {
+            if !self.0.iter().any(|(saved, _)| *saved == key) {
+                self.0.push((key, std::env::var_os(key)));
+            }
+            std::env::set_var(key, value.into());
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (key, value) in self.0.drain(..).rev() {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn grok_skill_sync_rebinds_home_and_preserves_unmanaged_old_targets() {
+        let _lock = crate::test_support::test_env_lock();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let old_home = temp.path().join("grok-old");
+        let new_home = temp.path().join("grok-new");
+        let mut env = EnvRestore::default();
+        env.set(
+            "AIO_CODING_HUB_HOME_DIR",
+            temp.path().as_os_str().to_os_string(),
+        );
+        env.set("AIO_CODING_HUB_DOTDIR_NAME", ".aio-skills-rebind-test");
+        env.set("GROK_HOME", old_home.as_os_str().to_os_string());
+        let app = tauri::test::mock_app();
+        let conn = Connection::open_in_memory().expect("open in-memory database");
+
+        let ssot_dir = ssot_skills_root(app.handle())
+            .expect("resolve SSOT root")
+            .join("demo");
+        std::fs::create_dir_all(&ssot_dir).expect("create SSOT skill");
+        std::fs::write(ssot_dir.join("SKILL.md"), "---\nname: Demo\n---\n")
+            .expect("write SSOT skill");
+
+        sync_enabled_skill_keys_for_cli(app.handle(), &conn, "grok", vec!["demo".to_string()])
+            .expect("sync old Grok skills root");
+        let old_skills_root = old_home.join("skills");
+        let old_managed = old_skills_root.join("demo");
+        assert!(exists_or_is_link(&old_managed));
+
+        let old_unmanaged = old_skills_root.join("local-only");
+        std::fs::create_dir_all(&old_unmanaged).expect("create unmanaged old skill");
+        std::fs::write(
+            old_unmanaged.join("SKILL.md"),
+            "---\nname: Local only\n---\n",
+        )
+        .expect("write unmanaged old skill");
+        env.set("GROK_HOME", new_home.as_os_str().to_os_string());
+
+        sync_enabled_skill_keys_for_cli(app.handle(), &conn, "grok", vec!["demo".to_string()])
+            .expect("sync rebound Grok skills root");
+
+        assert!(!exists_or_is_link(&old_managed));
+        assert!(old_unmanaged.is_dir());
+        assert!(exists_or_is_link(&new_home.join("skills").join("demo")));
+    }
 }

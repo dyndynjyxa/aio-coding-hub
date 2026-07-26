@@ -98,6 +98,8 @@ impl CircuitBreaker {
                 open_until: item.open_until,
                 cooldown_until: None,
                 updated_at: item.updated_at,
+                // Trigger attribution is in-memory only; lost across restart.
+                last_trigger_error_code: None,
             };
             if Self::is_inert_closed_health(&health) {
                 continue;
@@ -125,6 +127,7 @@ impl CircuitBreaker {
             failure_threshold: cfg.failure_threshold,
             open_until: None,
             cooldown_until: None,
+            last_trigger_error_code: None,
         }
     }
 
@@ -294,6 +297,7 @@ impl CircuitBreaker {
             match entry.state {
                 CircuitState::Closed => {
                     entry.cooldown_until = None;
+                    entry.last_trigger_error_code = None;
                     if !entry.failure_timestamps.is_empty() {
                         entry.failure_timestamps.clear();
                         entry.updated_at = now_unix;
@@ -309,6 +313,7 @@ impl CircuitBreaker {
                         entry.failure_timestamps.clear();
                         entry.half_open_success_count = 0;
                         entry.cooldown_until = None;
+                        entry.last_trigger_error_code = None;
                         entry.updated_at = now_unix;
 
                         transition = Some(CircuitTransition {
@@ -340,7 +345,12 @@ impl CircuitBreaker {
         }
     }
 
-    pub fn record_failure(&self, provider_id: i64, now_unix: i64) -> CircuitChange {
+    pub fn record_failure(
+        &self,
+        provider_id: i64,
+        now_unix: i64,
+        trigger_error_code: Option<&'static str>,
+    ) -> CircuitChange {
         let cfg = self.read_config();
         if provider_id <= 0 {
             let snap = Self::closed_snapshot(&cfg);
@@ -362,6 +372,12 @@ impl CircuitBreaker {
                 .or_insert_with(|| ProviderHealth::closed(provider_id, now_unix).1);
 
             let before = Self::snapshot_from_health(&cfg, entry, now_u64);
+
+            // Remember the most recent attributed failure; an unattributed
+            // failure must not erase a known trigger.
+            if trigger_error_code.is_some() && entry.state != CircuitState::Open {
+                entry.last_trigger_error_code = trigger_error_code;
+            }
 
             match entry.state {
                 CircuitState::Closed => {
@@ -432,6 +448,7 @@ impl CircuitBreaker {
             failure_threshold: cfg.failure_threshold,
             open_until: health.open_until,
             cooldown_until: health.cooldown_until,
+            last_trigger_error_code: health.last_trigger_error_code,
         }
     }
 

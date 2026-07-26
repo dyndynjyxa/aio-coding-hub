@@ -45,6 +45,8 @@ const EMPTY_CX2CC_DRAFT_VALUES: Record<Cx2ccDraftKey, string> = {
   cx2cc_service_tier: "",
 };
 
+const CX2CC_REASONING_EFFORT_LABEL = "推理强度";
+
 function createCx2ccDraftState(appSettings: AppSettings | null): Cx2ccDraftState {
   if (!appSettings) {
     return { sourceKey: "empty", values: EMPTY_CX2CC_DRAFT_VALUES };
@@ -278,11 +280,12 @@ export function CliManagerCx2ccTab({
         </h3>
         <div className="divide-y divide-border">
           <SettingItem
-            label="推理强度"
+            label={CX2CC_REASONING_EFFORT_LABEL}
             subtitle="注入 reasoning.effort 到上游请求；默认表示不注入。"
           >
             <RadioGroup
               name="cx2cc_model_reasoning_effort"
+              ariaLabel={CX2CC_REASONING_EFFORT_LABEL}
               value={reasoningEffortText}
               onChange={(value) => {
                 void persistReasoningEffort(value);

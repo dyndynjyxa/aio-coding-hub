@@ -9,6 +9,13 @@ on:
 permissions:
   contents: read
 
+# A new push to the same PR/branch supersedes the in-flight run. This also
+# cancels the doomed pre-sync run on release-please PRs once
+# sync-release-pr-cargo-lock pushes the updated Cargo.lock.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   pr-title:
     if: github.event_name == 'pull_request'
@@ -47,6 +54,9 @@ jobs:
 
       - name: Validate support matrix contract
         run: node scripts/support-matrix.mjs check
+
+      - name: Validate Homebrew Cask generator
+        run: node scripts/support-matrix.homebrew-cask.selftest.mjs
 
   desktop-support-contract:
     needs: support-contract
@@ -124,13 +134,13 @@ jobs:
         run: pnpm check:generated-bindings
 
       - name: Plugin TypeScript SDK typecheck
-        run: pnpm plugin-sdk:typecheck
+        run: pnpm --filter @aio-coding-hub/plugin-sdk typecheck
 
       - name: Plugin TypeScript SDK tests
-        run: pnpm plugin-sdk:test
+        run: pnpm --filter @aio-coding-hub/plugin-sdk test
 
       - name: Plugin scaffolder tests
-        run: pnpm create-aio-plugin:test
+        run: pnpm --filter create-aio-plugin test
 
       - name: Plugin GUI E2E smoke
         run: pnpm test:e2e

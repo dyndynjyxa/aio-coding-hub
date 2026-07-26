@@ -11,11 +11,12 @@ import { narrowGeneratedStringUnion, type Override } from "../generatedTypeUtils
 import type { CliKey } from "../providers/providers";
 import { observePromiseLikeRejection, type MaybePromiseLike } from "../../utils/promiseLike";
 import { logToConsole } from "../consoleLog";
+import { CLI_KEYS } from "../../constants/clis";
 
 type Listener = () => MaybePromiseLike<void>;
 
 const listeners = new Set<Listener>();
-const CLI_KEY_VALUES = ["claude", "codex", "gemini"] as const satisfies readonly CliKey[];
+const CLI_KEY_VALUES = CLI_KEYS;
 const MODEL_PRICE_ALIAS_MATCH_TYPE_VALUES = [
   "exact",
   "prefix",

@@ -45,12 +45,17 @@ import { useHomeOverviewFeed } from "./home/hooks/useHomeOverviewFeed";
 import { useHomeOAuthQuota } from "./home/hooks/useHomeOAuthQuota";
 import { useHomeWorkspaceConfigs } from "./home/hooks/useHomeWorkspaceConfigs";
 
-type HomeTabKey = "overview" | "cost" | "tokenCost";
+type HomeTabKey = "overview" | "tokenCost";
 
 type HomeTabItem = {
   key: HomeTabKey;
   label: string;
 };
+
+const HOME_TABS: HomeTabItem[] = [
+  { key: "overview", label: "概览" },
+  { key: "tokenCost", label: "用量" },
+];
 
 type HomeUiState = {
   tab: HomeTabKey;
@@ -92,27 +97,6 @@ function homeUiReducer(state: HomeUiState, action: HomeUiAction): HomeUiState {
       };
   }
 }
-
-function resolveHomeTab(tab: HomeTabKey, personalizedLayoutEnabled: boolean): HomeTabKey {
-  return personalizedLayoutEnabled && tab === "cost" ? "tokenCost" : tab;
-}
-
-function buildHomeTabs(personalizedLayoutEnabled: boolean): HomeTabItem[] {
-  return personalizedLayoutEnabled
-    ? [
-        { key: "overview", label: "概览" },
-        { key: "tokenCost", label: "用量" },
-      ]
-    : [
-        { key: "overview", label: "概览" },
-        { key: "cost", label: "花费" },
-        { key: "tokenCost", label: "用量" },
-      ];
-}
-
-const LazyHomeCostPanel = lazy(() =>
-  import("../components/home/HomeCostPanel").then((m) => ({ default: m.HomeCostPanel }))
-);
 
 const LazyHomeTokenCostPanel = lazy(() =>
   import("../components/home/HomeTokenCostPanel").then((m) => ({
@@ -162,7 +146,7 @@ function HomePageHeaderActions({
       ) : null}
       {personalizedLayoutEnabled && tab === "overview" ? (
         <Button variant="secondary" size="md" onClick={onTogglePersonalizedUsageView}>
-          {personalizedUsageView === "summary" ? "查看曲线" : "查看总览"}
+          {personalizedUsageView === "summary" ? "今日总览" : "用量趋势"}
         </Button>
       ) : null}
       <TabList ariaLabel="首页视图切换" items={tabs} value={tab} onChange={onTabChange} />
@@ -192,23 +176,11 @@ function HomePageTabContent({
 }) {
   if (tab === "overview") return overviewPanel;
 
-  if (tab === "cost") {
-    return (
-      <Suspense fallback={<HomeTabLoadingFallback label="加载花费面板中…" />}>
-        <LazyHomeCostPanel devPreviewEnabled={devPreviewEnabled} />
-      </Suspense>
-    );
-  }
-
-  if (tab === "tokenCost") {
-    return (
-      <Suspense fallback={<HomeTabLoadingFallback label="加载用量面板中…" />}>
-        <LazyHomeTokenCostPanel devPreviewEnabled={devPreviewEnabled} />
-      </Suspense>
-    );
-  }
-
-  return <div />;
+  return (
+    <Suspense fallback={<HomeTabLoadingFallback label="加载用量面板中…" />}>
+      <LazyHomeTokenCostPanel devPreviewEnabled={devPreviewEnabled} />
+    </Suspense>
+  );
 }
 
 function SortModeConfirmDialog({
@@ -343,13 +315,8 @@ export function HomePage() {
     readHomeWorkspaceConfigShowAllFromStorage,
     () => false
   );
-  const homeTabs = useMemo(
-    () => buildHomeTabs(personalizedLayoutEnabled),
-    [personalizedLayoutEnabled]
-  );
-
   const [homeUiState, dispatchHomeUi] = useReducer(homeUiReducer, initialHomeUiState);
-  const tab = resolveHomeTab(homeUiState.tab, personalizedLayoutEnabled);
+  const tab = homeUiState.tab;
   const {
     selectedLogId,
     togglingWorkspaceConfigItemId,
@@ -389,6 +356,7 @@ export function HomePage() {
     providerLimitRefreshing,
     providerLimitAvailable,
     requestLogs,
+    activeRequests,
     requestLogsLoading,
     requestLogsRefreshing,
     requestLogsAvailable,
@@ -542,6 +510,7 @@ export function HomePage() {
     resettingCircuitProviderIds: circuit.resettingProviderIds,
     traces,
     requestLogs,
+    activeRequests,
     requestLogsLoading,
     requestLogsRefreshing,
     requestLogsAvailable,
@@ -557,7 +526,7 @@ export function HomePage() {
       personalizedLayoutEnabled={personalizedLayoutEnabled}
       personalizedUsageView={personalizedUsageView}
       tab={tab}
-      tabs={homeTabs}
+      tabs={HOME_TABS}
       onTabChange={(tab) => dispatchHomeUi({ type: "setTab", tab })}
       onToggleDevPreview={() => devPreview.toggle()}
       onTogglePersonalizedUsageView={() => dispatchHomeUi({ type: "togglePersonalizedUsageView" })}

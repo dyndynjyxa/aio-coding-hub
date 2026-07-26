@@ -15,7 +15,9 @@ pub use defaults::{
     MIN_UPSTREAM_STREAM_IDLE_TIMEOUT_SECONDS, SCHEMA_VERSION,
 };
 pub(crate) use persistence::validate_bounds;
-pub use persistence::{clear_cache, log_retention_days_fail_open, read, write};
+pub use persistence::{
+    clear_cache, log_retention_days_fail_open, read, request_log_retention_days_fail_open, write,
+};
 pub use types::{
     AppSettings, CodexHomeMode, GatewayListenMode, HomeUsagePeriod, WslHostAddressMode,
     WslTargetCli,

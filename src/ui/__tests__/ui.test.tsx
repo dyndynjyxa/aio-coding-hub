@@ -58,6 +58,7 @@ describe("ui components", () => {
     const { rerender } = render(
       <RadioGroup
         name="t"
+        ariaLabel="测试选项"
         value="a"
         onChange={onChange}
         options={[
@@ -74,6 +75,7 @@ describe("ui components", () => {
     rerender(
       <RadioGroup
         name="t"
+        ariaLabel="测试选项"
         value="a"
         onChange={onChange}
         disabled

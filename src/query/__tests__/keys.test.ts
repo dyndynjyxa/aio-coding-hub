@@ -3,7 +3,6 @@ import {
   appAboutKeys,
   cliManagerKeys,
   cliProxyKeys,
-  costKeys,
   dataManagementKeys,
   gatewayKeys,
   mcpKeys,
@@ -40,6 +39,7 @@ describe("query/keys", () => {
     expect(requestLogsKeys.all).toEqual(["requestLogs"]);
     expect(requestLogsKeys.lists()).toEqual(["requestLogs", "list"]);
     expect(requestLogsKeys.listAll(10)).toEqual(["requestLogs", "list", "all", 10]);
+    expect(requestLogsKeys.activeSnapshot()).toEqual(["requestLogs", "activeSnapshot"]);
     expect(requestLogsKeys.detail(1)).toEqual(["requestLogs", "detail", 1]);
     expect(requestLogsKeys.attemptsByTrace("trace-1", 10)).toEqual([
       "requestLogs",
@@ -60,7 +60,7 @@ describe("query/keys", () => {
     expect(usageKeys.hourlySeries(7)).toEqual(["usage", "hourlySeries", 7]);
     expect(
       usageKeys.summaryV2("daily", { startTs: 1, endTs: 2, cliKey: "claude", providerId: 3 })
-    ).toEqual(["usage", "summaryV2", "daily", 1, 2, "claude", 3, [], null]);
+    ).toEqual(["usage", "summaryV2", "daily", 1, 2, "claude", 3, [], null, null, null, null]);
     expect(
       usageKeys.summaryV2("daily", {
         startTs: 1,
@@ -69,7 +69,20 @@ describe("query/keys", () => {
         providerId: 3,
         folderKeys: [" /tmp/b ", "", "/tmp/a", "/tmp/a"],
       })
-    ).toEqual(["usage", "summaryV2", "daily", 1, 2, "claude", 3, ["/tmp/a", "/tmp/b"], null]);
+    ).toEqual([
+      "usage",
+      "summaryV2",
+      "daily",
+      1,
+      2,
+      "claude",
+      3,
+      ["/tmp/a", "/tmp/b"],
+      null,
+      null,
+      null,
+      null,
+    ]);
     expect(
       usageKeys.leaderboardV2("provider", "weekly", {
         startTs: 1,
@@ -78,7 +91,22 @@ describe("query/keys", () => {
         providerId: 3,
         limit: null,
       })
-    ).toEqual(["usage", "leaderboardV2", "provider", "weekly", 1, 2, "claude", 3, null, [], null]);
+    ).toEqual([
+      "usage",
+      "leaderboardV2",
+      "provider",
+      "weekly",
+      1,
+      2,
+      "claude",
+      3,
+      null,
+      [],
+      null,
+      null,
+      null,
+      null,
+    ]);
     expect(
       usageKeys.providerCacheRateTrendV1("daily", {
         startTs: 1,
@@ -89,19 +117,6 @@ describe("query/keys", () => {
         excludeCx2CcGatewayBridge: true,
       })
     ).toEqual(["usage", "providerCacheRateTrendV1", "daily", 1, 2, "claude", 3, 20, true]);
-  });
-
-  it("builds cost keys", () => {
-    expect(costKeys.all).toEqual(["cost"]);
-    expect(
-      costKeys.analyticsV1("daily", {
-        startTs: 1,
-        endTs: 2,
-        cliKey: "claude",
-        providerId: 3,
-        model: "gpt-4.1",
-      })
-    ).toEqual(["cost", "analyticsV1", "daily", 1, 2, "claude", 3, "gpt-4.1"]);
   });
 
   it("builds workspaces keys", () => {
@@ -142,7 +157,23 @@ describe("query/keys", () => {
     expect(cliManagerKeys.claudeSettings()).toEqual(["cliManager", "claude", "settings"]);
     expect(cliManagerKeys.codexInfo()).toEqual(["cliManager", "codex", "info"]);
     expect(cliManagerKeys.codexConfig()).toEqual(["cliManager", "codex", "config"]);
+    expect(
+      cliManagerKeys.codexModelCatalog({
+        configPath: "/tmp/.codex/config.toml",
+        executablePath: "/usr/bin/codex",
+        cliVersion: "0.0.0",
+      })
+    ).toEqual([
+      "cliManager",
+      "codex",
+      "modelCatalog",
+      "/tmp/.codex/config.toml",
+      "/usr/bin/codex",
+      "0.0.0",
+    ]);
     expect(cliManagerKeys.geminiInfo()).toEqual(["cliManager", "gemini", "info"]);
+    expect(cliManagerKeys.grokInfo()).toEqual(["cliManager", "grok", "info"]);
+    expect(cliManagerKeys.grokConfig()).toEqual(["cliManager", "grok", "config"]);
   });
 
   it("builds modelPrices keys", () => {
@@ -160,6 +191,7 @@ describe("query/keys", () => {
   it("builds cliProxy keys", () => {
     expect(cliProxyKeys.all).toEqual(["cliProxy"]);
     expect(cliProxyKeys.statusAll()).toEqual(["cliProxy", "statusAll"]);
+    expect(cliProxyKeys.envConflicts("grok")).toEqual(["cliProxy", "envConflicts", "grok"]);
   });
 
   it("builds appAbout keys", () => {

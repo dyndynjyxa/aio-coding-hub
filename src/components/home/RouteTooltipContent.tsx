@@ -1,6 +1,6 @@
 // Usage:
 // - 链路 tooltip 的富文本内容组件，展示请求路径概览 + 每个 provider 的尝试详情。
-// - 由 `buildRequestRouteMeta` 在 HomeLogShared.tsx 中调用。
+// - 由 `buildRequestRouteMeta` 在 requestLogPresentation.ts 中调用。
 // - skipped 的 provider 不在 hops 中，仅通过标签 [跳过*N] 提示。
 
 import type { RequestLogRouteHop } from "../../services/gateway/requestLogs";

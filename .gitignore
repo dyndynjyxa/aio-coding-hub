@@ -32,6 +32,7 @@ docs/*
 !docs/plugin-system-development-plan.md
 !docs/plugin-system-rfc.md
 !docs/plugin-manifest-v1.md
+!docs/release-homebrew.md
 !docs/plugins/
 !docs/plugins/**
 docs/superpowers/
@@ -41,6 +42,7 @@ docs/superpowers/
 check-doc/
 AGENTS.md
 coverage*/
+.vitest-reports/
 .cursor/
 .trellis/
 .agents/
@@ -55,3 +57,4 @@ src-tauri/target*/
 .pnpm-store/
 .codegraph/
 subagent.md
+.unknowns/

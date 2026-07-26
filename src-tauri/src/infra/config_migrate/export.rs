@@ -10,8 +10,8 @@ use super::skill_fs::{
     read_local_skill_source_metadata, ssot_skills_root,
 };
 use super::{
-    InstalledSkillExport, LocalSkillExport, McpServerExport, PromptExport, ProviderExport,
-    SkillRepoExport, SortModeExport, SortModeProviderExport, WorkspaceExport,
+    ImageGenConfigExport, InstalledSkillExport, LocalSkillExport, McpServerExport, PromptExport,
+    ProviderExport, SkillRepoExport, SortModeExport, SortModeProviderExport, WorkspaceExport,
 };
 
 pub(super) fn query_exported_at(conn: &Connection) -> AppResult<String> {
@@ -417,6 +417,34 @@ ORDER BY w.cli_key ASC, w.name ASC, w.id ASC
     Ok(items)
 }
 
+pub(super) fn export_image_gen_configs(conn: &Connection) -> AppResult<Vec<ImageGenConfigExport>> {
+    let mut stmt = conn
+        .prepare_cached(
+            r#"
+SELECT adapter_id, base_url, model, api_key_plaintext
+FROM image_gen_configs
+ORDER BY adapter_id ASC
+"#,
+        )
+        .map_err(|e| db_err!("failed to prepare image_gen_configs export query: {e}"))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(ImageGenConfigExport {
+                adapter_id: row.get(0)?,
+                base_url: row.get(1)?,
+                model: row.get(2)?,
+                api_key_plaintext: row.get(3)?,
+            })
+        })
+        .map_err(|e| db_err!("failed to query image_gen_configs for export: {e}"))?;
+
+    let mut items = Vec::new();
+    for row in rows {
+        items.push(row.map_err(|e| db_err!("failed to read image_gen_config export row: {e}"))?);
+    }
+    Ok(items)
+}
+
 pub(super) fn export_skill_repos(conn: &Connection) -> AppResult<Vec<SkillRepoExport>> {
     let mut stmt = conn
         .prepare_cached("SELECT git_url, branch, enabled FROM skill_repos ORDER BY id ASC")
@@ -525,7 +553,9 @@ pub(super) fn export_local_skills<R: tauri::Runtime>(
 ) -> AppResult<Vec<LocalSkillExport>> {
     let mut items = Vec::new();
 
-    for cli_key in crate::shared::cli_key::SUPPORTED_CLI_KEYS {
+    for cli_key in
+        crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Skills)
+    {
         let root = cli_skills_root(app, cli_key)?;
         if !root.exists() {
             continue;

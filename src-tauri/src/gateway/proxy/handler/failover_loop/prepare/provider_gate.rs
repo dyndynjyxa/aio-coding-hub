@@ -13,6 +13,9 @@ pub(super) struct ProviderGateInput<'a, R: tauri::Runtime = tauri::Wry> {
     pub(super) earliest_available_unix: &'a mut Option<i64>,
     pub(super) skipped_open: &'a mut usize,
     pub(super) skipped_cooldown: &'a mut usize,
+    /// Filled with the circuit snapshot when the gate denies (see
+    /// `provider_router::GateProviderArgs::deny_snapshot`).
+    pub(super) deny_snapshot: &'a mut Option<circuit_breaker::CircuitSnapshot>,
 }
 
 pub(super) struct ProviderGateAllow {
@@ -30,6 +33,7 @@ pub(super) fn gate_provider<R: tauri::Runtime>(
         earliest_available_unix,
         skipped_open,
         skipped_cooldown,
+        deny_snapshot,
     } = input;
 
     let now_unix = now_unix_seconds() as i64;
@@ -45,6 +49,7 @@ pub(super) fn gate_provider<R: tauri::Runtime>(
         earliest_available_unix,
         skipped_open,
         skipped_cooldown,
+        deny_snapshot,
     })
     .map(|circuit_after| ProviderGateAllow { circuit_after })
 }

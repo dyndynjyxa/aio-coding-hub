@@ -3,6 +3,7 @@
 mod claude;
 mod codex;
 mod gemini;
+mod grok;
 
 use crate::app_paths;
 use crate::shared::fs::{
@@ -290,6 +291,11 @@ fn target_files<R: tauri::Runtime>(
             path: gemini::gemini_env_path(app)?,
             backup_name: ".env",
         }]),
+        "grok" => Ok(vec![TargetFile {
+            kind: "grok_config_toml",
+            path: grok::grok_config_path(app)?,
+            backup_name: "config.toml",
+        }]),
         _ => Err(format!("SEC_INVALID_INPUT: unknown cli_key={cli_key}").into()),
     }
 }
@@ -305,6 +311,7 @@ fn is_proxy_config_applied<R: tauri::Runtime>(
         "claude" => claude::is_proxy_config_applied(app, base_origin),
         "codex" => codex::is_proxy_config_applied(app, base_origin),
         "gemini" => gemini::is_proxy_config_applied(app, base_origin),
+        "grok" => grok::is_proxy_config_applied(app, base_origin),
         _ => false,
     }
 }
@@ -384,6 +391,10 @@ fn apply_proxy_config<R: tauri::Runtime>(
                 }
             }
             "gemini" => gemini::build_gemini_env(current, &format!("{base_origin}/gemini"))?,
+            "grok" => {
+                grok::apply_proxy_config(app, base_origin)?;
+                continue;
+            }
             _ => return Err(format!("SEC_INVALID_INPUT: unknown cli_key={cli_key}").into()),
         };
 
@@ -425,6 +436,11 @@ fn restore_from_manifest<R: tauri::Runtime>(
         }
 
         let target_path = PathBuf::from(&entry.path);
+        if entry.kind == "grok_config_toml" {
+            let backup_path = entry.backup_rel.as_ref().map(|rel| files_dir.join(rel));
+            grok::merge_restore_grok_config(&target_path, backup_path.as_deref())?;
+            continue;
+        }
         if entry.existed {
             let Some(rel) = entry.backup_rel.as_ref() else {
                 return Err(format!("missing backup_rel for {}", entry.kind).into());
@@ -673,7 +689,12 @@ fn manifest_target_paths_changed<R: tauri::Runtime>(
         else {
             continue;
         };
-        if Path::new(&entry.path) != target.path {
+        let changed = if manifest.cli_key == "grok" {
+            !crate::grok_config::paths_equivalent(Path::new(&entry.path), &target.path)?
+        } else {
+            Path::new(&entry.path) != target.path
+        };
+        if changed {
             return Ok(true);
         }
     }
@@ -877,7 +898,9 @@ pub fn status_all<R: tauri::Runtime>(
     current_base_origin: Option<&str>,
 ) -> crate::shared::error::AppResult<Vec<CliProxyStatus>> {
     let mut out = Vec::new();
-    for cli_key in crate::shared::cli_key::SUPPORTED_CLI_KEYS {
+    for cli_key in
+        crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::CliProxy)
+    {
         let manifest = read_manifest(app, cli_key)?;
         let enabled = manifest.as_ref().map(|m| m.enabled).unwrap_or(false);
         let manifest_base_origin = manifest.as_ref().and_then(|m| m.base_origin.clone());
@@ -909,6 +932,13 @@ pub fn is_enabled<R: tauri::Runtime>(
     Ok(manifest.enabled)
 }
 
+pub fn set_grok_preferences<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    preferences: crate::grok_config::GrokProxyPreferences,
+) -> crate::shared::error::AppResult<crate::grok_config::GrokConfigState> {
+    grok::set_preferences(app, preferences)
+}
+
 pub fn set_enabled<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     cli_key: &str,
@@ -919,6 +949,11 @@ pub fn set_enabled<R: tauri::Runtime>(
     if !base_origin.starts_with("http://") && !base_origin.starts_with("https://") {
         return Err("SEC_INVALID_INPUT: base_origin must start with http:// or https://".into());
     }
+    let _grok_transaction = if cli_key == "grok" {
+        Some(grok::transaction_lock()?)
+    } else {
+        None
+    };
 
     let trace_id = new_trace_id("cli-proxy");
     let existing = read_manifest(app, cli_key)?;
@@ -995,7 +1030,9 @@ pub fn set_enabled<R: tauri::Runtime>(
                 ))
             }
             Err(err) => {
-                let is_parse_error = err.to_string().contains("CLI_PROXY_INVALID_");
+                let error_message = err.to_string();
+                let is_parse_error = error_message.contains("CLI_PROXY_INVALID_")
+                    || error_message.contains("GROK_CONFIG_INVALID_");
 
                 // Only rollback if we actually wrote proxy config (not on parse
                 // failure where the file was never modified). On parse failure
@@ -1061,7 +1098,9 @@ pub fn startup_repair_incomplete_enable<R: tauri::Runtime>(
 ) -> crate::shared::error::AppResult<Vec<CliProxyResult>> {
     let mut out = Vec::new();
 
-    for cli_key in crate::shared::cli_key::SUPPORTED_CLI_KEYS {
+    for cli_key in
+        crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::CliProxy)
+    {
         let Some(mut manifest) = read_manifest(app, cli_key)? else {
             continue;
         };
@@ -1113,7 +1152,9 @@ pub fn sync_enabled<R: tauri::Runtime>(
     }
 
     let mut out = Vec::new();
-    for cli_key in crate::shared::cli_key::SUPPORTED_CLI_KEYS {
+    for cli_key in
+        crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::CliProxy)
+    {
         let Some(mut manifest) = read_manifest(app, cli_key)? else {
             continue;
         };
@@ -1121,18 +1162,34 @@ pub fn sync_enabled<R: tauri::Runtime>(
             continue;
         }
 
+        let _grok_transaction = if cli_key == "grok" {
+            Some(grok::transaction_lock()?)
+        } else {
+            None
+        };
+
         let trace_id = new_trace_id("cli-proxy-sync");
         let needs_target_rebind =
-            cli_key == "codex" && manifest_target_paths_changed(app, &manifest)?;
+            matches!(cli_key, "codex" | "grok") && manifest_target_paths_changed(app, &manifest)?;
 
         if needs_target_rebind {
-            out.push(codex::rebind_codex_manifest_after_home_change(
-                app,
-                manifest,
-                base_origin,
-                apply_live,
-                trace_id,
-            )?);
+            out.push(match cli_key {
+                "codex" => codex::rebind_codex_manifest_after_home_change(
+                    app,
+                    manifest,
+                    base_origin,
+                    apply_live,
+                    trace_id,
+                )?,
+                "grok" => grok::rebind_grok_manifest_after_home_change(
+                    app,
+                    manifest,
+                    base_origin,
+                    apply_live,
+                    trace_id,
+                )?,
+                _ => unreachable!("rebind capability checked above"),
+            });
             continue;
         }
 
@@ -1217,13 +1274,21 @@ pub fn restore_enabled_keep_state<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> crate::shared::error::AppResult<Vec<CliProxyResult>> {
     let mut out = Vec::new();
-    for cli_key in crate::shared::cli_key::SUPPORTED_CLI_KEYS {
+    for cli_key in
+        crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::CliProxy)
+    {
         let Some(manifest) = read_manifest(app, cli_key)? else {
             continue;
         };
         if !manifest.enabled {
             continue;
         }
+
+        let _grok_transaction = if cli_key == "grok" {
+            Some(grok::transaction_lock()?)
+        } else {
+            None
+        };
 
         let trace_id = new_trace_id("cli-proxy-restore");
 

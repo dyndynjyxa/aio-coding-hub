@@ -134,7 +134,7 @@ describe("services/workspace/prompts", () => {
         content: "hello",
         enabled: true,
       })
-    ).rejects.toThrow("SEC_INVALID_INPUT");
+    ).rejects.toThrow("PROMPT_NAME_REQUIRED");
     await expect(promptSetEnabled(-1, true)).rejects.toThrow("SEC_INVALID_INPUT");
     await expect(promptDelete(Number.NaN)).rejects.toThrow("SEC_INVALID_INPUT");
 

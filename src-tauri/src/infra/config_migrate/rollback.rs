@@ -73,7 +73,9 @@ pub(super) fn capture_cli_runtime_backups<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> AppResult<Vec<CliRuntimeBackup>> {
     let mut backups = Vec::new();
-    for cli_key in crate::shared::cli_key::SUPPORTED_CLI_KEYS {
+    for cli_key in
+        crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Workspaces)
+    {
         backups.push(CliRuntimeBackup {
             cli_key,
             prompt_target: crate::prompt_sync::read_target_bytes(app, cli_key)?,
@@ -117,7 +119,9 @@ pub(super) fn sync_all_cli_runtime<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     conn: &Connection,
 ) -> AppResult<()> {
-    for cli_key in crate::shared::cli_key::SUPPORTED_CLI_KEYS {
+    for cli_key in
+        crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Workspaces)
+    {
         crate::prompts::sync_one_cli(app, conn, cli_key)?;
         crate::mcp::sync_one_cli(app, conn, cli_key)?;
         crate::skills::sync_one_cli(app, conn, cli_key)?;
@@ -227,7 +231,9 @@ pub(super) fn apply_skill_fs_import<R: tauri::Runtime>(
             )
         })?;
 
-        for cli_key in crate::shared::cli_key::SUPPORTED_CLI_KEYS {
+        for cli_key in
+            crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Skills)
+        {
             let root = cli_skills_root(app, cli_key)?;
             std::fs::create_dir_all(&root)
                 .map_err(|e| format!("failed to create {}: {e}", root.display()))?;

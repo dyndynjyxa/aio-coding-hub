@@ -1,712 +1,11 @@
-//! Usage: Cost analytics queries and backfill jobs backed by sqlite.
+//! Usage: Cost backfill jobs backed by sqlite.
 
 use crate::cost;
 use crate::db;
+use crate::model_price_aliases;
 use crate::request_logs;
 use crate::shared::error::db_err;
-use rusqlite::{params, Connection, OptionalExtension};
-use serde::{Deserialize, Serialize};
-
-const USD_FEMTO_DENOM: f64 = 1_000_000_000_000_000.0;
-const SQL_MODEL_KEY_EXPR: &str = "COALESCE(NULLIF(TRIM(requested_model), ''), 'Unknown')";
-const MODEL_FILTER_MAX_CHARS: usize = 200;
-
-/// Common query parameters shared by all cost analytics endpoints.
-#[derive(Debug, Clone, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct CostQueryParams {
-    pub period: String,
-    pub start_ts: Option<i64>,
-    pub end_ts: Option<i64>,
-    pub cli_key: Option<String>,
-    pub provider_id: Option<i64>,
-    pub model: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, specta::Type)]
-pub struct CostSummaryV1 {
-    pub requests_total: i64,
-    pub requests_success: i64,
-    pub requests_failed: i64,
-    pub cost_covered_success: i64,
-    pub total_cost_usd: f64,
-    pub avg_cost_usd_per_covered_success: Option<f64>,
-}
-
-#[derive(Debug, Clone, Serialize, specta::Type)]
-pub struct CostTrendRowV1 {
-    pub day: String,
-    pub hour: Option<i64>,
-    pub cost_usd: f64,
-    pub requests_success: i64,
-    pub cost_covered_success: i64,
-}
-
-#[derive(Debug, Clone, Serialize, specta::Type)]
-pub struct CostProviderBreakdownRowV1 {
-    pub cli_key: String,
-    pub provider_id: i64,
-    pub provider_name: String,
-    pub requests_success: i64,
-    pub cost_covered_success: i64,
-    pub cost_usd: f64,
-}
-
-#[derive(Debug, Clone, Serialize, specta::Type)]
-pub struct CostModelBreakdownRowV1 {
-    pub model: String,
-    pub requests_success: i64,
-    pub cost_covered_success: i64,
-    pub cost_usd: f64,
-}
-
-#[derive(Debug, Clone, Serialize, specta::Type)]
-pub struct CostTopRequestRowV1 {
-    pub log_id: i64,
-    pub trace_id: String,
-    pub cli_key: String,
-    pub method: String,
-    pub path: String,
-    pub requested_model: Option<String>,
-    pub provider_id: i64,
-    pub provider_name: String,
-    pub duration_ms: i64,
-    pub ttfb_ms: Option<i64>,
-    pub cost_usd: f64,
-    pub cost_multiplier: f64,
-    pub created_at: i64,
-}
-
-#[derive(Debug, Clone, Serialize, specta::Type)]
-pub struct CostScatterCliProviderModelRowV1 {
-    pub cli_key: String,
-    pub provider_name: String,
-    pub model: String,
-    pub requests_success: i64,
-    pub total_cost_usd: f64,
-    pub total_duration_ms: i64,
-}
-
-#[derive(Debug, Clone, Serialize, specta::Type)]
-pub struct CostBackfillReportV1 {
-    pub scanned: i64,
-    pub updated: i64,
-    pub skipped_no_model: i64,
-    pub skipped_no_usage: i64,
-    pub skipped_no_price: i64,
-    pub skipped_other: i64,
-    pub capped: bool,
-    pub max_rows: i64,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum CostPeriodV1 {
-    Daily,
-    Weekly,
-    Monthly,
-    AllTime,
-    Custom,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum TrendBucket {
-    Hour,
-    Day,
-}
-
-fn parse_period_v1(input: &str) -> Result<CostPeriodV1, String> {
-    match input {
-        "daily" => Ok(CostPeriodV1::Daily),
-        "weekly" => Ok(CostPeriodV1::Weekly),
-        "monthly" => Ok(CostPeriodV1::Monthly),
-        "allTime" | "all_time" | "all" => Ok(CostPeriodV1::AllTime),
-        "custom" => Ok(CostPeriodV1::Custom),
-        _ => Err(format!("SEC_INVALID_INPUT: unknown period={input}")),
-    }
-}
-
-fn validate_cli_key(cli_key: &str) -> Result<(), String> {
-    crate::shared::cli_key::validate_cli_key(cli_key)?;
-    Ok(())
-}
-
-fn normalize_cli_filter(cli_key: Option<&str>) -> Result<Option<&str>, String> {
-    if let Some(k) = cli_key {
-        validate_cli_key(k)?;
-        return Ok(Some(k));
-    }
-    Ok(None)
-}
-
-fn normalize_provider_id_filter(provider_id: Option<i64>) -> Result<Option<i64>, String> {
-    if let Some(id) = provider_id {
-        if id <= 0 {
-            return Err("SEC_INVALID_INPUT: provider_id must be > 0".to_string());
-        }
-        return Ok(Some(id));
-    }
-    Ok(None)
-}
-
-fn normalize_model_filter(model: Option<&str>) -> Option<String> {
-    let raw = model?.trim();
-    if raw.is_empty() {
-        return None;
-    }
-    Some(if raw.chars().count() > MODEL_FILTER_MAX_CHARS {
-        raw.chars().take(MODEL_FILTER_MAX_CHARS).collect()
-    } else {
-        raw.to_string()
-    })
-}
-
-fn compute_start_ts(conn: &Connection, period: CostPeriodV1) -> Result<Option<i64>, String> {
-    let sql = match period {
-        CostPeriodV1::AllTime | CostPeriodV1::Custom => return Ok(None),
-        CostPeriodV1::Daily => {
-            "SELECT CAST(strftime('%s','now','localtime','start of day','utc') AS INTEGER)"
-        }
-        CostPeriodV1::Weekly => {
-            "SELECT CAST(strftime('%s','now','localtime','start of day','-6 days','utc') AS INTEGER)"
-        }
-        CostPeriodV1::Monthly => {
-            "SELECT CAST(strftime('%s','now','localtime','start of month','utc') AS INTEGER)"
-        }
-    };
-
-    let ts = conn
-        .query_row(sql, [], |row| row.get::<_, i64>(0))
-        .map_err(|e| db_err!("failed to compute period start ts: {e}"))?;
-    Ok(Some(ts))
-}
-
-fn compute_bounds_v1(
-    conn: &Connection,
-    period: CostPeriodV1,
-    start_ts: Option<i64>,
-    end_ts: Option<i64>,
-) -> Result<(Option<i64>, Option<i64>, TrendBucket), String> {
-    let bucket = match period {
-        CostPeriodV1::Daily => TrendBucket::Hour,
-        _ => TrendBucket::Day,
-    };
-
-    match period {
-        CostPeriodV1::Custom => {
-            let start_ts = start_ts
-                .ok_or_else(|| "SEC_INVALID_INPUT: custom period requires start_ts".to_string())?;
-            let end_ts = end_ts
-                .ok_or_else(|| "SEC_INVALID_INPUT: custom period requires end_ts".to_string())?;
-            if start_ts >= end_ts {
-                return Err(
-                    "SEC_INVALID_INPUT: custom range requires start_ts < end_ts".to_string()
-                );
-            }
-            Ok((Some(start_ts), Some(end_ts), bucket))
-        }
-        _ => Ok((compute_start_ts(conn, period)?, None, bucket)),
-    }
-}
-
-fn cost_usd_from_femto(v: i64) -> f64 {
-    (v.max(0) as f64) / USD_FEMTO_DENOM
-}
-
-pub fn summary_v1(
-    db: &db::Db,
-    p: &CostQueryParams,
-) -> crate::shared::error::AppResult<CostSummaryV1> {
-    let conn = db.open_connection()?;
-
-    let period = parse_period_v1(&p.period)?;
-    let (start_ts, end_ts, _) = compute_bounds_v1(&conn, period, p.start_ts, p.end_ts)?;
-    let cli_key = normalize_cli_filter(p.cli_key.as_deref())?;
-    let provider_id = normalize_provider_id_filter(p.provider_id)?;
-    let model = normalize_model_filter(p.model.as_deref());
-    let model = model.as_deref();
-
-    let sql = format!(
-        r#"
-SELECT
-  COUNT(*) AS requests_total,
-  SUM(CASE WHEN status >= 200 AND status < 300 AND error_code IS NULL THEN 1 ELSE 0 END) AS requests_success,
-  SUM(
-    CASE WHEN (
-      status IS NULL OR
-      status < 200 OR
-      status >= 300 OR
-      error_code IS NOT NULL
-    ) THEN 1 ELSE 0 END
-  ) AS requests_failed,
-  SUM(
-    CASE WHEN (
-      status >= 200 AND status < 300 AND error_code IS NULL AND
-      cost_usd_femto IS NOT NULL
-    ) THEN 1 ELSE 0 END
-  ) AS cost_covered_success,
-  SUM(COALESCE(cost_usd_femto, 0)) AS total_cost_usd_femto
-FROM request_logs
-WHERE excluded_from_stats = 0
-AND (?1 IS NULL OR created_at >= ?1)
-AND (?2 IS NULL OR created_at < ?2)
-AND (?3 IS NULL OR cli_key = ?3)
-AND (?4 IS NULL OR final_provider_id = ?4)
-AND (?5 IS NULL OR {model_key_expr} = ?5)
-"#,
-        model_key_expr = SQL_MODEL_KEY_EXPR
-    );
-
-    conn.query_row(
-        &sql,
-        params![start_ts, end_ts, cli_key, provider_id, model],
-        |row| {
-            let requests_total: i64 = row.get("requests_total")?;
-            let requests_success: i64 = row.get::<_, Option<i64>>("requests_success")?.unwrap_or(0);
-            let requests_failed: i64 = row.get::<_, Option<i64>>("requests_failed")?.unwrap_or(0);
-            let cost_covered_success: i64 = row
-                .get::<_, Option<i64>>("cost_covered_success")?
-                .unwrap_or(0);
-            let total_cost_usd_femto: i64 = row
-                .get::<_, Option<i64>>("total_cost_usd_femto")?
-                .unwrap_or(0)
-                .max(0);
-
-            let total_cost_usd = cost_usd_from_femto(total_cost_usd_femto);
-            let avg_cost_usd_per_covered_success = if cost_covered_success > 0 {
-                Some(total_cost_usd / (cost_covered_success as f64))
-            } else {
-                None
-            };
-
-            Ok(CostSummaryV1 {
-                requests_total: requests_total.max(0),
-                requests_success: requests_success.max(0),
-                requests_failed: requests_failed.max(0),
-                cost_covered_success: cost_covered_success.max(0),
-                total_cost_usd,
-                avg_cost_usd_per_covered_success,
-            })
-        },
-    )
-    .map_err(|e| db_err!("failed to query cost summary: {e}"))
-}
-
-pub fn trend_v1(
-    db: &db::Db,
-    p: &CostQueryParams,
-) -> crate::shared::error::AppResult<Vec<CostTrendRowV1>> {
-    let conn = db.open_connection()?;
-
-    let period = parse_period_v1(&p.period)?;
-    let (start_ts, end_ts, bucket) = compute_bounds_v1(&conn, period, p.start_ts, p.end_ts)?;
-    let cli_key = normalize_cli_filter(p.cli_key.as_deref())?;
-    let provider_id = normalize_provider_id_filter(p.provider_id)?;
-    let model = normalize_model_filter(p.model.as_deref());
-    let model = model.as_deref();
-
-    let (select_fields, group_by_fields, order_by_fields) = match bucket {
-        TrendBucket::Hour => (
-            "strftime('%Y-%m-%d', created_at, 'unixepoch','localtime') AS day, CAST(strftime('%H', created_at, 'unixepoch','localtime') AS INTEGER) AS hour",
-            "day, hour",
-            "day ASC, hour ASC",
-        ),
-        TrendBucket::Day => (
-            "strftime('%Y-%m-%d', created_at, 'unixepoch','localtime') AS day, NULL AS hour",
-            "day",
-            "day ASC",
-        ),
-    };
-
-    let sql = format!(
-        r#"
-SELECT
-  {select_fields},
-  COUNT(*) AS requests_success,
-  SUM(CASE WHEN cost_usd_femto IS NOT NULL THEN 1 ELSE 0 END) AS cost_covered_success,
-  SUM(COALESCE(cost_usd_femto, 0)) AS total_cost_usd_femto
-FROM request_logs
-WHERE excluded_from_stats = 0
-AND status >= 200 AND status < 300 AND error_code IS NULL
-AND (?1 IS NULL OR created_at >= ?1)
-AND (?2 IS NULL OR created_at < ?2)
-AND (?3 IS NULL OR cli_key = ?3)
-AND (?4 IS NULL OR final_provider_id = ?4)
-AND (?5 IS NULL OR {model_key_expr} = ?5)
-GROUP BY {group_by_fields}
-ORDER BY {order_by_fields}
-"#,
-        select_fields = select_fields,
-        group_by_fields = group_by_fields,
-        order_by_fields = order_by_fields,
-        model_key_expr = SQL_MODEL_KEY_EXPR
-    );
-
-    let mut stmt = conn
-        .prepare(&sql)
-        .map_err(|e| db_err!("failed to prepare cost trend query: {e}"))?;
-    let rows = stmt
-        .query_map(
-            params![start_ts, end_ts, cli_key, provider_id, model],
-            |row| {
-                let day: String = row.get("day")?;
-                let hour: Option<i64> = row.get("hour")?;
-                let requests_success: i64 =
-                    row.get::<_, Option<i64>>("requests_success")?.unwrap_or(0);
-                let cost_covered_success: i64 = row
-                    .get::<_, Option<i64>>("cost_covered_success")?
-                    .unwrap_or(0);
-                let total_cost_usd_femto: i64 = row
-                    .get::<_, Option<i64>>("total_cost_usd_femto")?
-                    .unwrap_or(0)
-                    .max(0);
-
-                Ok(CostTrendRowV1 {
-                    day,
-                    hour,
-                    cost_usd: cost_usd_from_femto(total_cost_usd_femto),
-                    requests_success: requests_success.max(0),
-                    cost_covered_success: cost_covered_success.max(0),
-                })
-            },
-        )
-        .map_err(|e| db_err!("failed to run cost trend query: {e}"))?;
-
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row.map_err(|e| db_err!("failed to read cost trend row: {e}"))?);
-    }
-    Ok(out)
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn breakdown_provider_v1(
-    db: &db::Db,
-    p: &CostQueryParams,
-    limit: usize,
-) -> crate::shared::error::AppResult<Vec<CostProviderBreakdownRowV1>> {
-    let conn = db.open_connection()?;
-
-    let period = parse_period_v1(&p.period)?;
-    let (start_ts, end_ts, _) = compute_bounds_v1(&conn, period, p.start_ts, p.end_ts)?;
-    let cli_key = normalize_cli_filter(p.cli_key.as_deref())?;
-    let provider_id = normalize_provider_id_filter(p.provider_id)?;
-    let model = normalize_model_filter(p.model.as_deref());
-    let model = model.as_deref();
-    let limit = limit.clamp(1, 200) as i64;
-
-    let sql = format!(
-        r#"
-SELECT
-  r.cli_key AS cli_key,
-  COALESCE(r.final_provider_id, 0) AS provider_id,
-  COALESCE(p.name, 'Unknown') AS provider_name,
-  COUNT(*) AS requests_success,
-  SUM(CASE WHEN r.cost_usd_femto IS NOT NULL THEN 1 ELSE 0 END) AS cost_covered_success,
-  SUM(COALESCE(r.cost_usd_femto, 0)) AS total_cost_usd_femto
-FROM request_logs r
-LEFT JOIN providers p ON p.id = r.final_provider_id
-WHERE r.excluded_from_stats = 0
-AND r.status >= 200 AND r.status < 300 AND r.error_code IS NULL
-AND (?1 IS NULL OR r.created_at >= ?1)
-AND (?2 IS NULL OR r.created_at < ?2)
-AND (?3 IS NULL OR r.cli_key = ?3)
-AND (?4 IS NULL OR r.final_provider_id = ?4)
-AND (?5 IS NULL OR {model_key_expr} = ?5)
-GROUP BY r.cli_key, provider_id, provider_name
-ORDER BY total_cost_usd_femto DESC, requests_success DESC, provider_name ASC
-LIMIT ?6
-"#,
-        model_key_expr = SQL_MODEL_KEY_EXPR
-    );
-
-    let mut stmt = conn
-        .prepare(&sql)
-        .map_err(|e| db_err!("failed to prepare provider breakdown query: {e}"))?;
-    let rows = stmt
-        .query_map(
-            params![start_ts, end_ts, cli_key, provider_id, model, limit],
-            |row| {
-                let cli_key: String = row.get("cli_key")?;
-                let provider_id: i64 = row.get("provider_id")?;
-                let provider_name: String = row.get("provider_name")?;
-                let requests_success: i64 =
-                    row.get::<_, Option<i64>>("requests_success")?.unwrap_or(0);
-                let cost_covered_success: i64 = row
-                    .get::<_, Option<i64>>("cost_covered_success")?
-                    .unwrap_or(0);
-                let total_cost_usd_femto: i64 = row
-                    .get::<_, Option<i64>>("total_cost_usd_femto")?
-                    .unwrap_or(0)
-                    .max(0);
-
-                Ok(CostProviderBreakdownRowV1 {
-                    cli_key,
-                    provider_id: provider_id.max(0),
-                    provider_name,
-                    requests_success: requests_success.max(0),
-                    cost_covered_success: cost_covered_success.max(0),
-                    cost_usd: cost_usd_from_femto(total_cost_usd_femto),
-                })
-            },
-        )
-        .map_err(|e| db_err!("failed to run provider breakdown query: {e}"))?;
-
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row.map_err(|e| db_err!("failed to read provider row: {e}"))?);
-    }
-    Ok(out)
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn breakdown_model_v1(
-    db: &db::Db,
-    p: &CostQueryParams,
-    limit: usize,
-) -> crate::shared::error::AppResult<Vec<CostModelBreakdownRowV1>> {
-    let conn = db.open_connection()?;
-
-    let period = parse_period_v1(&p.period)?;
-    let (start_ts, end_ts, _) = compute_bounds_v1(&conn, period, p.start_ts, p.end_ts)?;
-    let cli_key = normalize_cli_filter(p.cli_key.as_deref())?;
-    let provider_id = normalize_provider_id_filter(p.provider_id)?;
-    let model = normalize_model_filter(p.model.as_deref());
-    let model = model.as_deref();
-    let limit = limit.clamp(1, 200) as i64;
-
-    let sql = format!(
-        r#"
-SELECT
-  {model_key_expr} AS model_key,
-  COUNT(*) AS requests_success,
-  SUM(CASE WHEN cost_usd_femto IS NOT NULL THEN 1 ELSE 0 END) AS cost_covered_success,
-  SUM(COALESCE(cost_usd_femto, 0)) AS total_cost_usd_femto
-FROM request_logs
-WHERE excluded_from_stats = 0
-AND status >= 200 AND status < 300 AND error_code IS NULL
-AND (?1 IS NULL OR created_at >= ?1)
-AND (?2 IS NULL OR created_at < ?2)
-AND (?3 IS NULL OR cli_key = ?3)
-AND (?4 IS NULL OR final_provider_id = ?4)
-AND (?5 IS NULL OR {model_key_expr} = ?5)
-GROUP BY model_key
-ORDER BY total_cost_usd_femto DESC, requests_success DESC, model_key ASC
-LIMIT ?6
-"#,
-        model_key_expr = SQL_MODEL_KEY_EXPR
-    );
-
-    let mut stmt = conn
-        .prepare(&sql)
-        .map_err(|e| db_err!("failed to prepare model breakdown query: {e}"))?;
-    let rows = stmt
-        .query_map(
-            params![start_ts, end_ts, cli_key, provider_id, model, limit],
-            |row| {
-                let model: String = row.get("model_key")?;
-                let requests_success: i64 =
-                    row.get::<_, Option<i64>>("requests_success")?.unwrap_or(0);
-                let cost_covered_success: i64 = row
-                    .get::<_, Option<i64>>("cost_covered_success")?
-                    .unwrap_or(0);
-                let total_cost_usd_femto: i64 = row
-                    .get::<_, Option<i64>>("total_cost_usd_femto")?
-                    .unwrap_or(0)
-                    .max(0);
-
-                Ok(CostModelBreakdownRowV1 {
-                    model,
-                    requests_success: requests_success.max(0),
-                    cost_covered_success: cost_covered_success.max(0),
-                    cost_usd: cost_usd_from_femto(total_cost_usd_femto),
-                })
-            },
-        )
-        .map_err(|e| db_err!("failed to run model breakdown query: {e}"))?;
-
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row.map_err(|e| db_err!("failed to read model row: {e}"))?);
-    }
-    Ok(out)
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn scatter_cli_provider_model_v1(
-    db: &db::Db,
-    p: &CostQueryParams,
-    limit: usize,
-) -> crate::shared::error::AppResult<Vec<CostScatterCliProviderModelRowV1>> {
-    let conn = db.open_connection()?;
-
-    let period = parse_period_v1(&p.period)?;
-    let (start_ts, end_ts, _) = compute_bounds_v1(&conn, period, p.start_ts, p.end_ts)?;
-    let cli_key = normalize_cli_filter(p.cli_key.as_deref())?;
-    let provider_id = normalize_provider_id_filter(p.provider_id)?;
-    let model = normalize_model_filter(p.model.as_deref());
-    let model = model.as_deref();
-    let limit = limit.clamp(1, 5000) as i64;
-
-    let sql = format!(
-        r#"
-SELECT
-  r.cli_key AS cli_key,
-  COALESCE(p.name, 'Unknown') AS provider_name,
-  {model_key_expr} AS model_key,
-  COUNT(*) AS requests_success,
-  SUM(r.cost_usd_femto) AS total_cost_usd_femto,
-  SUM(CASE WHEN r.duration_ms IS NULL OR r.duration_ms < 0 THEN 0 ELSE r.duration_ms END) AS total_duration_ms
-FROM request_logs r
-LEFT JOIN providers p ON p.id = r.final_provider_id
-WHERE r.excluded_from_stats = 0
-AND r.status >= 200 AND r.status < 300 AND r.error_code IS NULL
-AND r.cost_usd_femto IS NOT NULL
-AND (?1 IS NULL OR r.created_at >= ?1)
-AND (?2 IS NULL OR r.created_at < ?2)
-AND (?3 IS NULL OR r.cli_key = ?3)
-AND (?4 IS NULL OR r.final_provider_id = ?4)
-AND (?5 IS NULL OR {model_key_expr} = ?5)
-GROUP BY r.cli_key, provider_name, model_key
-ORDER BY total_cost_usd_femto DESC, total_duration_ms DESC, requests_success DESC, cli_key ASC, provider_name ASC, model_key ASC
-LIMIT ?6
-"#,
-        model_key_expr = SQL_MODEL_KEY_EXPR
-    );
-
-    let mut stmt = conn
-        .prepare(&sql)
-        .map_err(|e| db_err!("failed to prepare cost scatter query: {e}"))?;
-    let rows = stmt
-        .query_map(
-            params![start_ts, end_ts, cli_key, provider_id, model, limit],
-            |row| {
-                let cli_key: String = row.get("cli_key")?;
-                let provider_name: String = row.get("provider_name")?;
-                let model: String = row.get("model_key")?;
-                let requests_success: i64 =
-                    row.get::<_, Option<i64>>("requests_success")?.unwrap_or(0);
-                let total_cost_usd_femto: i64 = row
-                    .get::<_, Option<i64>>("total_cost_usd_femto")?
-                    .unwrap_or(0)
-                    .max(0);
-                let total_duration_ms: i64 = row
-                    .get::<_, Option<i64>>("total_duration_ms")?
-                    .unwrap_or(0)
-                    .max(0);
-
-                Ok(CostScatterCliProviderModelRowV1 {
-                    cli_key,
-                    provider_name,
-                    model,
-                    requests_success: requests_success.max(0),
-                    total_cost_usd: cost_usd_from_femto(total_cost_usd_femto),
-                    total_duration_ms: total_duration_ms.max(0),
-                })
-            },
-        )
-        .map_err(|e| db_err!("failed to run cost scatter query: {e}"))?;
-
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row.map_err(|e| db_err!("failed to read cost scatter row: {e}"))?);
-    }
-    Ok(out)
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn top_requests_v1(
-    db: &db::Db,
-    p: &CostQueryParams,
-    limit: usize,
-) -> crate::shared::error::AppResult<Vec<CostTopRequestRowV1>> {
-    let conn = db.open_connection()?;
-
-    let period = parse_period_v1(&p.period)?;
-    let (start_ts, end_ts, _) = compute_bounds_v1(&conn, period, p.start_ts, p.end_ts)?;
-    let cli_key = normalize_cli_filter(p.cli_key.as_deref())?;
-    let provider_id = normalize_provider_id_filter(p.provider_id)?;
-    let model = normalize_model_filter(p.model.as_deref());
-    let model = model.as_deref();
-    let limit = limit.clamp(1, 200) as i64;
-
-    let sql = format!(
-        r#"
-SELECT
-  r.id AS log_id,
-  r.trace_id AS trace_id,
-  r.cli_key AS cli_key,
-  r.method AS method,
-  r.path AS path,
-  r.requested_model AS requested_model,
-  COALESCE(r.final_provider_id, 0) AS provider_id,
-  COALESCE(p.name, 'Unknown') AS provider_name,
-  r.duration_ms AS duration_ms,
-  r.ttfb_ms AS ttfb_ms,
-  r.cost_usd_femto AS cost_usd_femto,
-  r.cost_multiplier AS cost_multiplier,
-  r.created_at AS created_at
-FROM request_logs r
-LEFT JOIN providers p ON p.id = r.final_provider_id
-WHERE r.excluded_from_stats = 0
-AND r.status >= 200 AND r.status < 300 AND r.error_code IS NULL
-AND r.cost_usd_femto IS NOT NULL
-AND (?1 IS NULL OR r.created_at >= ?1)
-AND (?2 IS NULL OR r.created_at < ?2)
-AND (?3 IS NULL OR r.cli_key = ?3)
-AND (?4 IS NULL OR r.final_provider_id = ?4)
-AND (?5 IS NULL OR {model_key_expr} = ?5)
-ORDER BY r.cost_usd_femto DESC, r.created_at_ms DESC, r.id DESC
-LIMIT ?6
-"#,
-        model_key_expr = SQL_MODEL_KEY_EXPR
-    );
-
-    let mut stmt = conn
-        .prepare(&sql)
-        .map_err(|e| db_err!("failed to prepare top requests query: {e}"))?;
-    let rows = stmt
-        .query_map(
-            params![start_ts, end_ts, cli_key, provider_id, model, limit],
-            |row| {
-                let log_id: i64 = row.get("log_id")?;
-                let trace_id: String = row.get("trace_id")?;
-                let cli_key: String = row.get("cli_key")?;
-                let method: String = row.get("method")?;
-                let path: String = row.get("path")?;
-                let requested_model: Option<String> = row.get("requested_model")?;
-                let provider_id: i64 = row.get("provider_id")?;
-                let provider_name: String = row.get("provider_name")?;
-                let duration_ms: i64 = row.get("duration_ms")?;
-                let ttfb_ms: Option<i64> = row.get("ttfb_ms")?;
-                let cost_usd_femto: i64 = row.get("cost_usd_femto")?;
-                let cost_multiplier: f64 = row.get("cost_multiplier")?;
-                let created_at: i64 = row.get("created_at")?;
-
-                Ok(CostTopRequestRowV1 {
-                    log_id,
-                    trace_id,
-                    cli_key,
-                    method,
-                    path,
-                    requested_model,
-                    provider_id: provider_id.max(0),
-                    provider_name,
-                    duration_ms: duration_ms.max(0),
-                    ttfb_ms,
-                    cost_usd: cost_usd_from_femto(cost_usd_femto),
-                    cost_multiplier,
-                    created_at,
-                })
-            },
-        )
-        .map_err(|e| db_err!("failed to run top requests query: {e}"))?;
-
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row.map_err(|e| db_err!("failed to read top request row: {e}"))?);
-    }
-    Ok(out)
-}
+use rusqlite::{params, OptionalExtension};
 
 fn has_any_cost_usage(usage: &cost::CostUsage) -> bool {
     usage.input_tokens > 0
@@ -717,47 +16,40 @@ fn has_any_cost_usage(usage: &cost::CostUsage) -> bool {
         || usage.cache_creation_1h_input_tokens > 0
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn backfill_missing_v1(
+pub fn backfill_missing_for_cli<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     db: &db::Db,
-    p: &CostQueryParams,
+    cli_key: &str,
     max_rows: usize,
-) -> crate::shared::error::AppResult<CostBackfillReportV1> {
+) -> crate::shared::error::AppResult<()> {
+    let price_aliases = model_price_aliases::read_fail_open(app);
+    backfill_missing_for_cli_with_aliases(db, cli_key, max_rows, &price_aliases)
+}
+
+fn backfill_missing_for_cli_with_aliases(
+    db: &db::Db,
+    cli_key: &str,
+    max_rows: usize,
+    price_aliases: &model_price_aliases::ModelPriceAliasesV1,
+) -> crate::shared::error::AppResult<()> {
     let mut conn = db.open_connection()?;
-
-    let period = parse_period_v1(&p.period)?;
-    let (start_ts, end_ts, _) = compute_bounds_v1(&conn, period, p.start_ts, p.end_ts)?;
-    let cli_key = normalize_cli_filter(p.cli_key.as_deref())?;
-    let provider_id = normalize_provider_id_filter(p.provider_id)?;
-    let model = normalize_model_filter(p.model.as_deref());
-    let model = model.as_deref();
-
+    crate::shared::cli_key::validate_cli_key(cli_key)?;
     let max_rows = max_rows.clamp(1, 10_000) as i64;
 
     let tx = conn
         .transaction()
         .map_err(|e| db_err!("failed to start sqlite transaction: {e}"))?;
 
-    let mut report = CostBackfillReportV1 {
-        scanned: 0,
-        updated: 0,
-        skipped_no_model: 0,
-        skipped_no_usage: 0,
-        skipped_no_price: 0,
-        skipped_other: 0,
-        capped: false,
-        max_rows,
-    };
-
     {
         let mut stmt_candidates = tx
-            .prepare(&format!(
+            .prepare(
                 r#"
 SELECT
   id,
   cli_key,
   requested_model,
   special_settings_json,
+  final_provider_id,
   cost_multiplier,
   input_tokens,
   output_tokens,
@@ -769,16 +61,11 @@ FROM request_logs
 WHERE excluded_from_stats = 0
 AND status >= 200 AND status < 300 AND error_code IS NULL
 AND cost_usd_femto IS NULL
-AND (?1 IS NULL OR created_at >= ?1)
-AND (?2 IS NULL OR created_at < ?2)
-AND (?3 IS NULL OR cli_key = ?3)
-AND (?4 IS NULL OR final_provider_id = ?4)
-AND (?5 IS NULL OR {model_key_expr} = ?5)
+AND cli_key = ?1
 ORDER BY created_at_ms DESC, id DESC
-LIMIT ?6
+LIMIT ?2
 "#,
-                model_key_expr = SQL_MODEL_KEY_EXPR
-            ))
+            )
             .map_err(|e| db_err!("failed to prepare backfill candidates query: {e}"))?;
 
         let mut stmt_price = tx
@@ -792,28 +79,26 @@ LIMIT ?6
             .map_err(|e| db_err!("failed to prepare backfill update: {e}"))?;
 
         let rows = stmt_candidates
-            .query_map(
-                params![start_ts, end_ts, cli_key, provider_id, model, max_rows],
-                |row| {
-                    Ok((
-                        row.get::<_, i64>("id")?,
-                        row.get::<_, String>("cli_key")?,
-                        row.get::<_, Option<String>>("requested_model")?,
-                        row.get::<_, f64>("cost_multiplier")?,
-                        row.get::<_, Option<i64>>("input_tokens")?.unwrap_or(0),
-                        row.get::<_, Option<i64>>("output_tokens")?.unwrap_or(0),
-                        row.get::<_, Option<i64>>("cache_read_input_tokens")?
-                            .unwrap_or(0),
-                        row.get::<_, Option<i64>>("cache_creation_input_tokens")?
-                            .unwrap_or(0),
-                        row.get::<_, Option<i64>>("cache_creation_5m_input_tokens")?
-                            .unwrap_or(0),
-                        row.get::<_, Option<i64>>("cache_creation_1h_input_tokens")?
-                            .unwrap_or(0),
-                        row.get::<_, Option<String>>("special_settings_json")?,
-                    ))
-                },
-            )
+            .query_map(params![cli_key, max_rows], |row| {
+                Ok((
+                    row.get::<_, i64>("id")?,
+                    row.get::<_, String>("cli_key")?,
+                    row.get::<_, Option<String>>("requested_model")?,
+                    row.get::<_, f64>("cost_multiplier")?,
+                    row.get::<_, Option<i64>>("input_tokens")?.unwrap_or(0),
+                    row.get::<_, Option<i64>>("output_tokens")?.unwrap_or(0),
+                    row.get::<_, Option<i64>>("cache_read_input_tokens")?
+                        .unwrap_or(0),
+                    row.get::<_, Option<i64>>("cache_creation_input_tokens")?
+                        .unwrap_or(0),
+                    row.get::<_, Option<i64>>("cache_creation_5m_input_tokens")?
+                        .unwrap_or(0),
+                    row.get::<_, Option<i64>>("cache_creation_1h_input_tokens")?
+                        .unwrap_or(0),
+                    row.get::<_, Option<String>>("special_settings_json")?,
+                    row.get::<_, Option<i64>>("final_provider_id")?,
+                ))
+            })
             .map_err(|e| db_err!("failed to run backfill candidates query: {e}"))?;
 
         for row in rows {
@@ -829,26 +114,19 @@ LIMIT ?6
                 cache_creation_5m_input_tokens,
                 cache_creation_1h_input_tokens,
                 special_settings_json,
+                final_provider_id,
             ) = row.map_err(|e| db_err!("failed to read backfill candidate row: {e}"))?;
 
-            report.scanned = report.scanned.saturating_add(1);
-
-            let (effective_cli_key, model) = if let Some((basis_cli_key, basis_model)) =
-                request_logs::parse_cx2cc_cost_basis(special_settings_json.as_deref())
-            {
-                let Some(model) = normalize_model_filter(Some(&basis_model)) else {
-                    report.skipped_no_model = report.skipped_no_model.saturating_add(1);
-                    continue;
-                };
-                (basis_cli_key, model)
-            } else {
-                let Some(model) = normalize_model_filter(requested_model.as_deref()) else {
-                    report.skipped_no_model = report.skipped_no_model.saturating_add(1);
-                    continue;
-                };
-
-                (cli_key.clone(), model)
+            let Some(cost_basis) = request_logs::effective_cost_basis(
+                &cli_key,
+                requested_model.as_deref(),
+                special_settings_json.as_deref(),
+                final_provider_id,
+            ) else {
+                continue;
             };
+            let effective_cli_key = cost_basis.cli_key;
+            let mut model = cost_basis.model;
 
             let usage = cost::CostUsage {
                 input_tokens,
@@ -860,21 +138,8 @@ LIMIT ?6
             };
 
             if !has_any_cost_usage(&usage) {
-                report.skipped_no_usage = report.skipped_no_usage.saturating_add(1);
                 continue;
             }
-
-            let price_json: Option<String> = stmt_price
-                .query_row(params![&effective_cli_key, &model], |row| {
-                    row.get::<_, String>(0)
-                })
-                .optional()
-                .unwrap_or(None);
-
-            let Some(price_json) = price_json else {
-                report.skipped_no_price = report.skipped_no_price.saturating_add(1);
-                continue;
-            };
 
             let multiplier = if cost_multiplier.is_finite() && cost_multiplier >= 0.0 {
                 cost_multiplier
@@ -883,131 +148,422 @@ LIMIT ?6
             };
 
             if multiplier == 0.0 {
-                let changed = stmt_update
+                stmt_update
                     .execute(params![0_i64, id])
                     .map_err(|e| db_err!("failed to update zero cost_usd_femto: {e}"))?;
-                if changed > 0 {
-                    report.updated = report.updated.saturating_add(1);
-                } else {
-                    report.skipped_other = report.skipped_other.saturating_add(1);
-                }
                 continue;
             }
 
-            let cost_usd_femto = cost::calculate_cost_usd_femto(
+            let mut price_json: Option<String> = stmt_price
+                .query_row(params![&effective_cli_key, &model], |row| {
+                    row.get::<_, String>(0)
+                })
+                .optional()
+                .unwrap_or(None);
+            if price_json.is_none() {
+                if let Some(target_model) =
+                    price_aliases.resolve_target_model(&effective_cli_key, &model)
+                {
+                    if target_model != model {
+                        model = target_model.to_string();
+                        price_json = stmt_price
+                            .query_row(params![&effective_cli_key, &model], |row| {
+                                row.get::<_, String>(0)
+                            })
+                            .optional()
+                            .unwrap_or(None);
+                    }
+                }
+            }
+
+            let Some(price_json) = price_json else {
+                continue;
+            };
+
+            let options = cost::CostCalculationOptions {
+                priority_service_tier_applied: request_logs::parse_effective_priority(
+                    special_settings_json.as_deref(),
+                ),
+            };
+            let cost_usd_femto = cost::calculate_cost_usd_femto_with_options(
                 &usage,
                 &price_json,
                 multiplier,
                 &effective_cli_key,
                 &model,
+                &options,
             );
             let Some(cost_usd_femto) = cost_usd_femto else {
-                report.skipped_other = report.skipped_other.saturating_add(1);
                 continue;
             };
 
-            let changed = stmt_update
+            stmt_update
                 .execute(params![cost_usd_femto, id])
                 .map_err(|e| db_err!("failed to update cost_usd_femto: {e}"))?;
-            if changed > 0 {
-                report.updated = report.updated.saturating_add(1);
-            } else {
-                report.skipped_other = report.skipped_other.saturating_add(1);
-            }
         }
     }
-
-    report.capped = report.scanned >= max_rows;
 
     tx.commit()
         .map_err(|e| db_err!("failed to commit backfill transaction: {e}"))?;
 
-    Ok(report)
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusqlite::params;
 
     const TEST_FEMTO_USD: i64 = 1_000_000_000_000_000;
 
-    fn insert_cost_log(
-        conn: &Connection,
-        trace_id: &str,
-        status: i64,
-        error_code: Option<&str>,
-        cost_usd_femto: i64,
-        excluded_from_stats: i64,
-    ) {
+    fn insert_backfill_candidate(conn: &rusqlite::Connection, trace_id: &str, cli_key: &str) {
         conn.execute(
             r#"
 INSERT INTO request_logs (
   trace_id, cli_key, method, path, status, error_code, duration_ms,
   attempts_json, created_at, created_at_ms, cost_usd_femto,
-  excluded_from_stats, final_provider_id, requested_model
-) VALUES (?1, 'codex', 'POST', '/v1/chat/completions', ?2, ?3, 10,
-  '[]', 1000, 1000000, ?4, ?5, 1, 'gpt-test')
+  excluded_from_stats, final_provider_id, requested_model, input_tokens
+) VALUES (
+  ?1, ?2, 'POST', '/v1/chat/completions', 200, NULL, 10,
+  '[]', 1000, 1000000, NULL, 0, 1, 'gpt-test', 100
+)
 "#,
-            params![
-                trace_id,
-                status,
-                error_code,
-                cost_usd_femto,
-                excluded_from_stats
-            ],
+            params![trace_id, cli_key],
         )
-        .expect("insert cost log");
+        .expect("insert backfill candidate");
     }
 
     #[test]
-    fn normalize_model_filter_trims_blanks_and_truncates_on_char_boundary() {
-        assert_eq!(
-            normalize_model_filter(Some("  model-test  ")).as_deref(),
-            Some("model-test")
-        );
-        assert!(normalize_model_filter(Some("   ")).is_none());
-
-        let raw = "测".repeat(MODEL_FILTER_MAX_CHARS + 1);
-        let normalized = normalize_model_filter(Some(&raw)).expect("normalized model");
-
-        assert_eq!(normalized.chars().count(), MODEL_FILTER_MAX_CHARS);
-        assert!(normalized.is_char_boundary(normalized.len()));
-    }
-
-    #[test]
-    fn lifecycle_interruption_rows_are_excluded_from_cost_summary() {
+    fn backfill_missing_for_cli_updates_only_matching_cli() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let db = db::init_for_tests(&dir.path().join("cost-stats-test.db")).expect("init db");
+        let db = db::init_for_tests(&dir.path().join("cost-backfill-test.db")).expect("init db");
+        crate::model_prices::upsert(&db, "codex", "gpt-test", r#"{"input_cost_per_token":0.01}"#)
+            .expect("insert model price");
+        crate::model_prices::upsert(
+            &db,
+            "claude",
+            "gpt-test",
+            r#"{"input_cost_per_token":0.01}"#,
+        )
+        .expect("insert model price");
+
         let conn = db.open_connection().expect("open db");
-        insert_cost_log(&conn, "included-cost", 200, None, TEST_FEMTO_USD, 0);
-        insert_cost_log(
-            &conn,
-            "interrupted-cost",
-            499,
-            Some("GW_REQUEST_INTERRUPTED_BY_RESTART"),
-            99 * TEST_FEMTO_USD,
-            1,
-        );
+        insert_backfill_candidate(&conn, "backfill-codex-cost", "codex");
+        insert_backfill_candidate(&conn, "backfill-claude-cost", "claude");
         drop(conn);
 
-        let summary = summary_v1(
+        backfill_missing_for_cli_with_aliases(
             &db,
-            &CostQueryParams {
-                period: "allTime".to_string(),
-                start_ts: None,
-                end_ts: None,
-                cli_key: None,
-                provider_id: None,
-                model: None,
-            },
+            "codex",
+            5000,
+            &model_price_aliases::ModelPriceAliasesV1::default(),
         )
-        .expect("cost summary");
+        .expect("backfill missing cost");
 
-        assert_eq!(summary.requests_total, 1);
-        assert_eq!(summary.requests_success, 1);
-        assert_eq!(summary.requests_failed, 0);
-        assert_eq!(summary.cost_covered_success, 1);
-        assert!((summary.total_cost_usd - 1.0).abs() < f64::EPSILON);
+        let conn = db.open_connection().expect("reopen db");
+        let codex_cost = conn
+            .query_row(
+                "SELECT cost_usd_femto FROM request_logs WHERE trace_id = 'backfill-codex-cost'",
+                [],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .expect("read backfilled cost");
+        let claude_cost = conn
+            .query_row(
+                "SELECT cost_usd_femto FROM request_logs WHERE trace_id = 'backfill-claude-cost'",
+                [],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .expect("read untouched cost");
+
+        assert_eq!(codex_cost, Some(TEST_FEMTO_USD));
+        assert_eq!(claude_cost, None);
+    }
+
+    #[test]
+    fn backfill_uses_default_grok_build_price_alias() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db =
+            db::init_for_tests(&dir.path().join("cost-backfill-grok-alias.db")).expect("init db");
+        crate::model_prices::upsert(
+            &db,
+            "grok",
+            "grok-build-0.1",
+            r#"{"input_cost_per_token":0.01}"#,
+        )
+        .expect("insert Grok model price");
+
+        let conn = db.open_connection().expect("open db");
+        insert_backfill_candidate(&conn, "backfill-grok-build", "grok");
+        conn.execute(
+            "UPDATE request_logs SET requested_model = 'grok-build' WHERE trace_id = 'backfill-grok-build'",
+            [],
+        )
+        .expect("set Grok request model");
+        drop(conn);
+
+        backfill_missing_for_cli_with_aliases(
+            &db,
+            "grok",
+            5000,
+            &model_price_aliases::ModelPriceAliasesV1::default(),
+        )
+        .expect("backfill Grok cost");
+
+        let conn = db.open_connection().expect("reopen db");
+        let cost = conn
+            .query_row(
+                "SELECT cost_usd_femto FROM request_logs WHERE trace_id = 'backfill-grok-build'",
+                [],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .expect("read Grok backfilled cost");
+        assert_eq!(cost, Some(TEST_FEMTO_USD));
+    }
+
+    #[test]
+    fn backfill_zero_multiplier_does_not_require_a_model_price() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = db::init_for_tests(&dir.path().join("cost-backfill-free.db")).expect("init db");
+        let conn = db.open_connection().expect("open db");
+        insert_backfill_candidate(&conn, "backfill-free-unpriced", "codex");
+        conn.execute(
+            "UPDATE request_logs SET requested_model = 'unpriced-model', cost_multiplier = 0 WHERE trace_id = 'backfill-free-unpriced'",
+            [],
+        )
+        .expect("mark backfill candidate as free");
+        drop(conn);
+
+        backfill_missing_for_cli_with_aliases(
+            &db,
+            "codex",
+            5000,
+            &model_price_aliases::ModelPriceAliasesV1::default(),
+        )
+        .expect("backfill free request cost");
+
+        let conn = db.open_connection().expect("reopen db");
+        let cost = conn
+            .query_row(
+                "SELECT cost_usd_femto FROM request_logs WHERE trace_id = 'backfill-free-unpriced'",
+                [],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .expect("read free request cost");
+        assert_eq!(cost, Some(0));
+    }
+
+    #[test]
+    fn backfill_uses_the_same_complete_cost_basis_model_as_online_costing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = db::init_for_tests(&dir.path().join("cost-backfill-model-identity.db"))
+            .expect("init db");
+        let prefix_model = "m".repeat(200);
+        let exact_long_model = format!("{prefix_model}x");
+        let missing_long_model = format!("{prefix_model}y");
+
+        crate::model_prices::upsert(
+            &db,
+            "codex",
+            &prefix_model,
+            r#"{"input_cost_per_token":0.01}"#,
+        )
+        .expect("insert prefix model price");
+        crate::model_prices::upsert(
+            &db,
+            "codex",
+            &exact_long_model,
+            r#"{"input_cost_per_token":0.002}"#,
+        )
+        .expect("insert exact long model price");
+        crate::model_prices::upsert(
+            &db,
+            "codex",
+            "gpt-priced",
+            r#"{"input_cost_per_token":0.003}"#,
+        )
+        .expect("insert ASCII model price");
+
+        let conn = db.open_connection().expect("open db");
+        for (trace_id, model, special_settings_json) in [
+            ("backfill-long-exact", exact_long_model.as_str(), None),
+            ("backfill-long-missing", missing_long_model.as_str(), None),
+            (
+                "backfill-non-json-whitespace",
+                "client-model",
+                Some(
+                    serde_json::json!([{
+                        "type": "cx2cc_cost_basis",
+                        "source_cli_key": "codex",
+                        "priced_model": "\u{00a0}gpt-priced\u{00a0}",
+                    }])
+                    .to_string(),
+                ),
+            ),
+        ] {
+            conn.execute(
+                r#"
+INSERT INTO request_logs (
+  trace_id, cli_key, method, path, status, error_code, duration_ms,
+  attempts_json, created_at, created_at_ms, cost_usd_femto,
+  excluded_from_stats, final_provider_id, requested_model, input_tokens,
+  special_settings_json
+) VALUES (?1, 'codex', 'POST', '/v1/responses', 200, NULL, 10, '[]', 1000,
+  1000000, NULL, 0, 1, ?2, 100, ?3)
+"#,
+                params![trace_id, model, special_settings_json],
+            )
+            .expect("insert model identity backfill candidate");
+        }
+        drop(conn);
+
+        backfill_missing_for_cli_with_aliases(
+            &db,
+            "codex",
+            5000,
+            &model_price_aliases::ModelPriceAliasesV1::default(),
+        )
+        .expect("backfill missing cost");
+
+        let conn = db.open_connection().expect("reopen db");
+        let read_cost = |trace_id: &str| {
+            conn.query_row(
+                "SELECT cost_usd_femto FROM request_logs WHERE trace_id = ?1",
+                [trace_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .expect("read backfilled cost")
+        };
+        assert_eq!(
+            read_cost("backfill-long-exact"),
+            Some(200_000_000_000_000),
+            "the complete long model must win over its priced prefix"
+        );
+        assert_eq!(read_cost("backfill-long-missing"), None);
+        assert_eq!(read_cost("backfill-non-json-whitespace"), None);
+    }
+
+    #[test]
+    fn backfill_scopes_cx2cc_cost_basis_to_final_provider() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = db::init_for_tests(&dir.path().join("cost-backfill-cx2cc.db")).expect("init db");
+        crate::model_prices::upsert(
+            &db,
+            "codex",
+            "gpt-failed",
+            r#"{"input_cost_per_token":0.01}"#,
+        )
+        .expect("insert Codex model price");
+        crate::model_prices::upsert(
+            &db,
+            "claude",
+            "claude-final",
+            r#"{"input_cost_per_token":0.001}"#,
+        )
+        .expect("insert Claude model price");
+
+        let marker = r#"[{"type":"cx2cc_cost_basis","bridge_provider_id":12,"source_cli_key":"codex","priced_model":"gpt-failed"}]"#;
+        let conn = db.open_connection().expect("open db");
+        for (trace_id, final_provider_id) in [
+            ("backfill-cx2cc-match", 12_i64),
+            ("backfill-cx2cc-mismatch", 13_i64),
+        ] {
+            conn.execute(
+                r#"
+INSERT INTO request_logs (
+  trace_id, cli_key, method, path, status, error_code, duration_ms,
+  attempts_json, created_at, created_at_ms, cost_usd_femto,
+  excluded_from_stats, final_provider_id, requested_model, input_tokens,
+  special_settings_json
+) VALUES (?1, 'claude', 'POST', '/v1/messages', 200, NULL, 10, '[]', 1000,
+  1000000, NULL, 0, ?2, 'claude-final', 100, ?3)
+"#,
+                params![trace_id, final_provider_id, marker],
+            )
+            .expect("insert CX2CC backfill candidate");
+        }
+        drop(conn);
+
+        backfill_missing_for_cli_with_aliases(
+            &db,
+            "claude",
+            5000,
+            &model_price_aliases::ModelPriceAliasesV1::default(),
+        )
+        .expect("backfill missing cost");
+
+        let conn = db.open_connection().expect("reopen db");
+        let read_cost = |trace_id: &str| {
+            conn.query_row(
+                "SELECT cost_usd_femto FROM request_logs WHERE trace_id = ?1",
+                [trace_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .expect("read backfilled cost")
+        };
+        assert_eq!(read_cost("backfill-cx2cc-match"), Some(TEST_FEMTO_USD));
+        assert_eq!(
+            read_cost("backfill-cx2cc-mismatch"),
+            Some(100_000_000_000_000),
+            "a failed bridge marker must not override the final Claude provider"
+        );
+    }
+
+    #[test]
+    fn backfill_applies_model_alias_and_priority_options_like_online_costing() {
+        let aliases = model_price_aliases::ModelPriceAliasesV1 {
+            version: 1,
+            rules: vec![model_price_aliases::ModelPriceAliasRuleV1 {
+                cli_key: "codex".to_string(),
+                match_type: model_price_aliases::ModelPriceAliasMatchTypeV1::Exact,
+                pattern: "gpt-alias".to_string(),
+                target_model: "gpt-priced".to_string(),
+                enabled: true,
+            }],
+        };
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = db::init_for_tests(&dir.path().join("cost-backfill-alias-priority.db"))
+            .expect("init db");
+        crate::model_prices::upsert(
+            &db,
+            "codex",
+            "gpt-priced",
+            r#"{"input_cost_per_token":0.001,"input_cost_per_token_priority":0.003}"#,
+        )
+        .expect("insert aliased model price");
+
+        let special_settings_json = serde_json::json!([{
+            "type": "codex_service_tier_result",
+            "effectivePriority": true,
+        }])
+        .to_string();
+        let conn = db.open_connection().expect("open db");
+        conn.execute(
+            r#"
+INSERT INTO request_logs (
+  trace_id, cli_key, method, path, status, error_code, duration_ms,
+  attempts_json, created_at, created_at_ms, cost_usd_femto,
+  excluded_from_stats, final_provider_id, requested_model, input_tokens,
+  special_settings_json
+) VALUES ('backfill-alias-priority', 'codex', 'POST', '/v1/responses', 200, NULL,
+  10, '[]', 1000, 1000000, NULL, 0, 1, 'gpt-alias', 100, ?1)
+"#,
+            [special_settings_json],
+        )
+        .expect("insert alias/priority backfill candidate");
+        drop(conn);
+
+        backfill_missing_for_cli_with_aliases(&db, "codex", 5000, &aliases)
+            .expect("backfill missing cost");
+
+        let conn = db.open_connection().expect("reopen db");
+        let cost = conn
+            .query_row(
+                "SELECT cost_usd_femto FROM request_logs WHERE trace_id = 'backfill-alias-priority'",
+                [],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .expect("read backfilled cost");
+        assert_eq!(cost, Some(300_000_000_000_000));
     }
 }

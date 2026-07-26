@@ -51,6 +51,10 @@ pub struct ConfigBundle {
     pub installed_skills: Option<Vec<InstalledSkillExport>>,
     #[serde(default)]
     pub local_skills: Option<Vec<LocalSkillExport>>,
+    // Image gen connection configs. None (older bundles) leaves the current
+    // configs untouched on import; Some replaces them (providers posture).
+    #[serde(default)]
+    pub image_gen_configs: Option<Vec<ImageGenConfigExport>>,
 }
 
 #[derive(Serialize, Deserialize, specta::Type)]
@@ -146,6 +150,14 @@ pub struct McpServerExport {
     pub url: Option<String>,
     pub headers_json: Option<String>,
     pub enabled_in_workspaces: Vec<(String, String)>,
+}
+
+#[derive(Serialize, Deserialize, specta::Type)]
+pub struct ImageGenConfigExport {
+    pub adapter_id: String,
+    pub base_url: String,
+    pub model: String,
+    pub api_key_plaintext: String,
 }
 
 #[derive(Serialize, Deserialize, specta::Type)]
@@ -265,6 +277,7 @@ pub fn config_export<R: tauri::Runtime>(
         skill_repos: export::export_skill_repos(&conn)?,
         installed_skills: Some(export::export_installed_skills(app, &conn)?),
         local_skills: Some(export::export_local_skills(app)?),
+        image_gen_configs: Some(export::export_image_gen_configs(&conn)?),
     })
 }
 
@@ -290,6 +303,7 @@ pub fn config_import<R: tauri::Runtime>(
         skill_repos,
         installed_skills,
         local_skills,
+        image_gen_configs,
     } = bundle;
 
     let (installed_skills, local_skills) = import::resolve_skill_payloads_for_import(
@@ -333,6 +347,10 @@ pub fn config_import<R: tauri::Runtime>(
         &local_skills,
         legacy_skill_state.as_ref(),
     )?;
+
+    if let Some(image_gen_configs) = &image_gen_configs {
+        import::replace_image_gen_configs(&tx, now, image_gen_configs)?;
+    }
 
     let mut skill_fs_guard = if imports_full_skill_payload {
         Some(rollback::apply_skill_fs_import(

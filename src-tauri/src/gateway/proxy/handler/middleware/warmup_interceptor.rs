@@ -99,6 +99,10 @@ fn respond_warmup_intercept<R: tauri::Runtime>(
         circuit_state_after: None,
         circuit_failure_count: None,
         circuit_failure_threshold: None,
+        circuit_recover_at_unix: None,
+        circuit_trigger_error_code: None,
+        provider_bridged: None,
+        timeout_secs: None,
     }];
 
     emit_request_event_and_spawn_request_log(
@@ -108,6 +112,7 @@ fn respond_warmup_intercept<R: tauri::Runtime>(
                 &ctx.state.db,
                 &ctx.state.log_tx,
                 &ctx.state.plugin_pipeline,
+                &ctx.state.active_requests,
             ),
             trace_id: &ctx.trace_id,
             cli_key: &ctx.cli_key,

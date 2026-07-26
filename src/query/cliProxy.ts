@@ -6,12 +6,22 @@ import {
   type CliProxyStatus,
   validateCliProxyCliKey,
 } from "../services/cli/cliProxy";
-import { cliProxyKeys } from "./keys";
+import { envConflictsCheck } from "../services/cli/envConflicts";
+import { cliManagerKeys, cliProxyKeys } from "./keys";
 
 export function useCliProxyStatusAllQuery(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: cliProxyKeys.statusAll(),
     queryFn: () => cliProxyStatusAll(),
+    enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useCliEnvConflictsQuery(cliKey: CliKey, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: cliProxyKeys.envConflicts(cliKey),
+    queryFn: () => envConflictsCheck(cliKey),
     enabled: options?.enabled ?? true,
     placeholderData: keepPreviousData,
   });
@@ -60,8 +70,11 @@ export function useCliProxySetEnabledMutation() {
         queryClient.setQueryData(cliProxyKeys.statusAll(), ctx.prev);
       }
     },
-    onSettled: () => {
+    onSettled: (_data, _error, input) => {
       queryClient.invalidateQueries({ queryKey: cliProxyKeys.statusAll() });
+      if (input.cliKey.trim() === "grok") {
+        queryClient.invalidateQueries({ queryKey: cliManagerKeys.grokConfig() });
+      }
     },
   });
 }

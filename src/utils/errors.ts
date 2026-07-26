@@ -1,3 +1,9 @@
+/**
+ * Frontend-side input-validation failure (thrown before any IPC call).
+ * Catch with `instanceof` instead of matching the message text.
+ */
+export class FeValidationError extends Error {}
+
 const ERROR_TEXT_MAX_CHARS = 4096;
 const ERROR_FIELD_STRING_MAX_CHARS = 512;
 const ERROR_OBJECT_MAX_DEPTH = 4;

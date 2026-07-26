@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { DEFAULT_GATEWAY_PORT } from "../constants/gateway";
 import type { GatewayStatus } from "../services/gateway/gateway";
 import { useGatewayStatusQuery } from "../query/gateway";
 import { useSettingsQuery } from "../query/settings";
@@ -11,14 +12,12 @@ export type GatewayMeta = {
   preferredPort: number;
 };
 
-const DEFAULT_PREFERRED_PORT = 37123;
-
 export function useGatewayMeta(): GatewayMeta {
   const settingsQuery = useSettingsQuery();
   const gatewayStatusQuery = useGatewayStatusQuery();
 
   return useMemo(() => {
-    const preferredPort = settingsQuery.data?.preferred_port ?? DEFAULT_PREFERRED_PORT;
+    const preferredPort = settingsQuery.data?.preferred_port ?? DEFAULT_GATEWAY_PORT;
 
     if (gatewayStatusQuery.isLoading) {
       return {

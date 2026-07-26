@@ -4,6 +4,9 @@ import { cn } from "../utils/cn";
 import { Globe, AlertTriangle, Zap, ChevronDown, ArrowRight } from "lucide-react";
 import { getGatewayErrorShortLabel } from "../constants/gatewayErrorCodes";
 import { DisclosureSection } from "./home/DisclosureSection";
+import { parseAttemptsJson, type AttemptJsonEntry } from "../services/gateway/attemptsJson";
+import { normalizeCircuitState } from "../services/gateway/circuitState";
+import { formatCircuitRecovery } from "../utils/formatters";
 
 export type ProviderChainAttemptLog = {
   attempt_index: number;
@@ -14,29 +17,6 @@ export type ProviderChainAttemptLog = {
   status: number | null;
   attempt_started_ms?: number | null;
   attempt_duration_ms?: number | null;
-};
-
-type ProviderChainAttemptJson = {
-  provider_id: number;
-  provider_name: string;
-  base_url: string;
-  outcome: string;
-  status: number | null;
-  provider_index?: number | null;
-  retry_index?: number | null;
-  session_reuse?: boolean | null;
-  error_category?: string | null;
-  error_code?: string | null;
-  decision?: string | null;
-  reason?: string | null;
-  selection_method?: string | null;
-  reason_code?: string | null;
-  attempt_started_ms?: number | null;
-  attempt_duration_ms?: number | null;
-  circuit_state_before?: string | null;
-  circuit_state_after?: string | null;
-  circuit_failure_count?: number | null;
-  circuit_failure_threshold?: number | null;
 };
 
 type ProviderChainAttempt = {
@@ -61,6 +41,8 @@ type ProviderChainAttempt = {
   circuit_state_after: string | null;
   circuit_failure_count: number | null;
   circuit_failure_threshold: number | null;
+  circuit_recover_at_unix: number | null;
+  circuit_trigger_error_code: string | null;
 };
 
 export function ProviderChainView({
@@ -73,17 +55,10 @@ export function ProviderChainView({
   attemptsJson: string | null | undefined;
 }) {
   const parsedAttemptsJson = useMemo(() => {
-    if (!attemptsJson)
-      return { ok: false as const, attempts: null as ProviderChainAttemptJson[] | null };
-    try {
-      const parsed = JSON.parse(attemptsJson);
-      if (!Array.isArray(parsed)) {
-        return { ok: false as const, attempts: null };
-      }
-      return { ok: true as const, attempts: parsed as ProviderChainAttemptJson[] };
-    } catch {
-      return { ok: false as const, attempts: null };
-    }
+    const attempts = parseAttemptsJson(attemptsJson);
+    return attempts
+      ? { ok: true as const, attempts }
+      : { ok: false as const, attempts: null as AttemptJsonEntry[] | null };
   }, [attemptsJson]);
 
   const attempts = useMemo((): ProviderChainAttempt[] | null => {
@@ -115,10 +90,12 @@ export function ProviderChainView({
         circuit_state_after: a.circuit_state_after ?? null,
         circuit_failure_count: a.circuit_failure_count ?? null,
         circuit_failure_threshold: a.circuit_failure_threshold ?? null,
+        circuit_recover_at_unix: a.circuit_recover_at_unix ?? null,
+        circuit_trigger_error_code: a.circuit_trigger_error_code ?? null,
       }));
     }
 
-    const byAttemptIndex: Record<number, ProviderChainAttemptJson | undefined> = {};
+    const byAttemptIndex: Record<number, AttemptJsonEntry | undefined> = {};
     if (jsonAttempts) {
       for (let i = 0; i < jsonAttempts.length; i += 1) {
         byAttemptIndex[i + 1] = jsonAttempts[i];
@@ -152,6 +129,8 @@ export function ProviderChainView({
           circuit_state_after: json?.circuit_state_after ?? null,
           circuit_failure_count: json?.circuit_failure_count ?? null,
           circuit_failure_threshold: json?.circuit_failure_threshold ?? null,
+          circuit_recover_at_unix: json?.circuit_recover_at_unix ?? null,
+          circuit_trigger_error_code: json?.circuit_trigger_error_code ?? null,
         };
       });
 
@@ -364,10 +343,29 @@ function AttemptCard({
             ) : null}
 
             {hasCircuitBreaker ? (
-              <div className="flex items-center gap-2 text-sm">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
                 <Zap className="h-4 w-4 text-muted-foreground shrink-0" />
                 <span className="text-muted-foreground">熔断器:</span>
                 <CircuitBadge attempt={attempt} />
+                {attempt.circuit_trigger_error_code ? (
+                  <span className="text-sm text-muted-foreground">
+                    触发：{getGatewayErrorShortLabel(attempt.circuit_trigger_error_code)}
+                  </span>
+                ) : null}
+                {attempt.circuit_recover_at_unix != null ? (
+                  <span className="text-sm text-muted-foreground">
+                    {formatCircuitRecovery(attempt.circuit_recover_at_unix)}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+
+            {skipped && attempt.reason ? (
+              <div className="rounded-lg border border-border bg-secondary/50 px-3 py-2">
+                <div className="mb-1 text-xs font-medium text-muted-foreground">跳过原因</div>
+                <pre className="whitespace-pre-wrap break-all text-xs font-mono text-secondary-foreground leading-relaxed">
+                  {attempt.reason}
+                </pre>
               </div>
             ) : null}
 
@@ -516,14 +514,16 @@ function DecisionTags({ attempt }: { attempt: ProviderChainAttempt }) {
 
 function CircuitBadge({ attempt }: { attempt: ProviderChainAttempt }) {
   const state = attempt.circuit_state_after ?? attempt.circuit_state_before;
+  // 后端写入大写状态（"OPEN"/"HALF_OPEN"），配色比较必须经归一化。
+  const normalized = normalizeCircuitState(state);
   return (
     <>
       <span
         className={cn(
           "rounded-md px-2 py-0.5 text-xs font-bold text-white",
-          state === "open"
+          normalized === "OPEN"
             ? "bg-rose-500"
-            : state === "half_open"
+            : normalized === "HALF_OPEN"
               ? "bg-amber-500"
               : "bg-emerald-500"
         )}

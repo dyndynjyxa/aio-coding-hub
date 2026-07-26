@@ -15,6 +15,8 @@ mod summary;
 mod tokens;
 mod types;
 
+pub(crate) use tokens::{effective_input_tokens_display, is_bridged_input_semantics};
+
 pub use cache_rate_trend_v1::provider_cache_rate_trend_v1;
 pub use day_detail::day_detail_v1;
 pub use folder_options::folder_options_v1;
@@ -34,12 +36,12 @@ pub use types::{
 use bounds::{compute_bounds_v2, compute_start_ts, compute_start_ts_last_n_days};
 use input::{
     normalize_cli_filter, normalize_folder_keys, parse_range, parse_scope_v2, resolve_query_params,
-    UsagePeriodV2, UsageRange, UsageScopeV2,
+    DevelopmentTimeGapThresholds, UsagePeriodV2, UsageRange, UsageScopeV2,
 };
 use leaderboard_range::{extract_final_provider, has_valid_provider_key, ProviderAgg, ProviderKey};
 use tokens::{
+    effective_total_from_buckets, sql_effective_input_tokens_expr,
     sql_effective_input_tokens_expr_with_alias, sql_effective_total_tokens_expr,
-    sql_effective_total_tokens_expr_with_alias, token_total, SQL_EFFECTIVE_INPUT_TOKENS_EXPR,
 };
 
 #[cfg(test)]

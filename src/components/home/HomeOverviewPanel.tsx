@@ -12,7 +12,7 @@ import {
   type SetStateAction,
 } from "react";
 import { useNowUnix } from "../../hooks/useNowUnix";
-import type { OpenCircuitRow } from "../ProviderCircuitBadge";
+import { CIRCUIT_ROW_STATUS, type OpenCircuitRow } from "../ProviderCircuitBadge";
 import type { GatewayActiveSession } from "../../services/gateway/gateway";
 import { readHomeOverviewLogsPrimaryLayoutFromStorage } from "../../services/home/homeOverviewLayout";
 import {
@@ -24,6 +24,7 @@ import { getOrderedClis } from "../../services/cli/cliPriorityOrder";
 import type { CliKey } from "../../services/providers/providers";
 import type { ProviderLimitUsageRow } from "../../services/providers/providerLimitUsage";
 import type { RequestLogSummary } from "../../services/gateway/requestLogs";
+import type { ActiveRequestSnapshotItem } from "../../services/gateway/requestActivityProjection";
 import type { SortModeSummary } from "../../services/providers/sortModes";
 import type { TraceSession } from "../../services/gateway/traceStore";
 import type { UsageHourlyRow } from "../../services/usage/usage";
@@ -64,18 +65,21 @@ const PREVIEW_CIRCUITS: OpenCircuitRow[] = [
     cli_key: "claude",
     provider_id: 10001,
     provider_name: "Claude Main",
+    displayState: "open",
     open_until: Math.floor(Date.now() / 1000) + 12 * 60,
   },
   {
     cli_key: "codex",
     provider_id: 10002,
     provider_name: "Codex Fallback",
+    displayState: "cooldown",
     open_until: Math.floor(Date.now() / 1000) + 5 * 60,
   },
   {
     cli_key: "gemini",
     provider_id: 10003,
     provider_name: "Gemini Mirror",
+    displayState: "half_open",
     open_until: null,
   },
 ];
@@ -301,10 +305,14 @@ function CircuitProvidersPanel({
     <div className="h-full overflow-y-auto pr-1 scrollbar-overlay">
       <div className="space-y-3">
         {rows.map((row) => {
+          const status = CIRCUIT_ROW_STATUS[row.displayState];
+          // half_open 无 until 语义，不渲染倒计时。
           const remaining =
-            row.open_until != null && Number.isFinite(row.open_until)
+            row.displayState !== "half_open" &&
+            row.open_until != null &&
+            Number.isFinite(row.open_until)
               ? formatCountdownSeconds(row.open_until - nowUnix)
-              : "—";
+              : null;
           const isResetting = resettingProviderIds.has(row.provider_id);
 
           return (
@@ -324,7 +332,12 @@ function CircuitProvidersPanel({
                   {row.provider_name || "未知"}
                 </div>
               </div>
-              <div className="shrink-0 font-mono text-xs text-muted-foreground">{remaining}</div>
+              <div className="shrink-0 text-xs">
+                <span className={`font-medium ${status.className}`}>{status.label}</span>
+                {remaining != null ? (
+                  <span className="ml-1 font-mono text-muted-foreground">{remaining}</span>
+                ) : null}
+              </div>
               <Button
                 variant="secondary"
                 size="sm"
@@ -334,7 +347,7 @@ function CircuitProvidersPanel({
                   onResetProvider(row.provider_id);
                 }}
               >
-                {isResetting ? "解除中..." : "解除熔断"}
+                {isResetting ? "解除中..." : "解除"}
               </Button>
             </div>
           );
@@ -423,19 +436,16 @@ function OverviewInfoPanel({
 
   return (
     <Card padding="sm" className="flex h-full min-h-0 flex-1 flex-col">
-      <div className="shrink-0 overflow-x-auto scrollbar-none">
-        <TabList
-          ariaLabel="概览状态切换"
-          items={tabs}
-          value={tabValue}
-          onChange={onTabChange}
-          size="sm"
-          className="w-max min-w-full"
-          buttonClassName="whitespace-nowrap flex-1 text-xs font-semibold md:text-sm px-2.5 md:px-3"
-        />
-      </div>
+      <TabList
+        ariaLabel="概览状态切换"
+        items={tabs}
+        value={tabValue}
+        onChange={onTabChange}
+        variant="compact"
+        className="shrink-0 -mt-1"
+      />
 
-      <div className="flex-1 min-h-0 mt-3">
+      <div className="flex-1 min-h-0 mt-2">
         {tab === "sessions" ? (
           <Suspense fallback={<OverviewPanelFallback />}>
             <LazyHomeActiveSessionsCardContent
@@ -491,19 +501,16 @@ function LogsPrimaryInfoPanel({
 
   return (
     <Card padding="sm" className="flex h-full min-h-0 flex-1 flex-col">
-      <div className="shrink-0 overflow-x-auto scrollbar-none">
-        <TabList
-          ariaLabel="新布局信息切换"
-          items={tabs}
-          value={tabValue}
-          onChange={onTabChange}
-          size="sm"
-          className="w-max min-w-full"
-          buttonClassName="whitespace-nowrap flex-1 text-xs font-semibold md:text-sm px-2.5 md:px-3"
-        />
-      </div>
+      <TabList
+        ariaLabel="新布局信息切换"
+        items={tabs}
+        value={tabValue}
+        onChange={onTabChange}
+        variant="compact"
+        className="shrink-0 -mt-1"
+      />
 
-      <div className="mt-3 min-h-0 flex-1">
+      <div className="mt-2 min-h-0 flex-1">
         {tab === "circuit" ? (
           <CircuitProvidersPanel
             rows={circuit.rows}
@@ -711,8 +718,14 @@ function useHomeOverviewTabs({
     didKeysChange(openCircuitKeys, sessionsTabState.openCircuitKeys);
 
   if (openCircuitChanged) {
+    let nextTab = sessionsTabState.tab;
+    if (openCircuitKeys.length > 0) {
+      nextTab = "circuit";
+    } else if (sessionsTabState.tab === "circuit") {
+      nextTab = "workspaceConfig";
+    }
     effectiveSessionsTabState = {
-      tab: openCircuitKeys.length === 0 ? "workspaceConfig" : "circuit",
+      tab: nextTab,
       openCircuitKeys,
     };
     setSessionsTabState(effectiveSessionsTabState);
@@ -797,6 +810,7 @@ function HomeOverviewContentLayout({
   overviewInfoPanel,
   personalizedUsageView,
   requestLogs,
+  activeRequests,
   requestLogsPanel,
   traces,
   usageWindowDays,
@@ -811,6 +825,7 @@ function HomeOverviewContentLayout({
   overviewInfoPanel: ReactNode;
   personalizedUsageView: HomeOverviewUsageView;
   requestLogs: RequestLogSummary[];
+  activeRequests: ActiveRequestSnapshotItem[];
   requestLogsPanel: ReactNode;
   traces: TraceSession[];
   usageWindowDays: number;
@@ -830,6 +845,7 @@ function HomeOverviewContentLayout({
                   devPreviewEnabled={devPreviewEnabled}
                   activeSessions={activeSessions}
                   requestLogs={requestLogs}
+                  activeRequests={activeRequests}
                   traces={traces}
                 />
               </div>
@@ -917,6 +933,7 @@ export type HomeOverviewPanelProps = {
   traces: TraceSession[];
 
   requestLogs: RequestLogSummary[];
+  activeRequests?: ActiveRequestSnapshotItem[];
   requestLogsLoading: boolean;
   requestLogsRefreshing: boolean;
   requestLogsAvailable: boolean | null;
@@ -1111,6 +1128,7 @@ export function HomeOverviewPanel({
   resettingCircuitProviderIds,
   traces,
   requestLogs,
+  activeRequests = [],
   requestLogsLoading,
   requestLogsRefreshing,
   requestLogsAvailable,
@@ -1193,6 +1211,7 @@ export function HomeOverviewPanel({
       compactModeOverride={logsPrimaryLayout ? true : undefined}
       traces={traces}
       requestLogs={requestLogs}
+      activeRequests={activeRequests}
       requestLogsLoading={requestLogsLoading}
       requestLogsRefreshing={requestLogsRefreshing}
       requestLogsAvailable={requestLogsAvailable}
@@ -1292,6 +1311,7 @@ export function HomeOverviewPanel({
         overviewInfoPanel={overviewInfoPanel}
         personalizedUsageView={personalizedUsageView}
         requestLogs={requestLogs}
+        activeRequests={activeRequests}
         requestLogsPanel={requestLogsPanel}
         traces={traces}
         usageWindowDays={usageWindowDays}

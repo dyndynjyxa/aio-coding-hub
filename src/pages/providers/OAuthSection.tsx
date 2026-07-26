@@ -75,7 +75,7 @@ export function OAuthSection(props: { form: UseProviderEditorFormReturn }) {
                 >
                   OAuth 登录
                 </Button>
-                {cliKey === "codex" ? (
+                {cliKey === "codex" || cliKey === "grok" ? (
                   <Button
                     onClick={handleOAuthDeviceLogin}
                     variant="secondary"
@@ -85,7 +85,7 @@ export function OAuthSection(props: { form: UseProviderEditorFormReturn }) {
                   </Button>
                 ) : null}
               </div>
-              {cliKey === "codex" ? (
+              {cliKey === "codex" || cliKey === "grok" ? (
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   若当前环境下 localhost
                   回调不稳定，可改用设备码登录，在浏览器中输入验证码完成授权。

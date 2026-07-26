@@ -11,6 +11,9 @@ pub struct UsageQueryParams {
     pub cli_key: Option<String>,
     pub provider_id: Option<i64>,
     pub folder_keys: Option<Vec<String>>,
+    pub day_start_hour: Option<i64>,
+    pub full_idle_gap_minutes: Option<i64>,
+    pub session_break_gap_minutes: Option<i64>,
     #[serde(
         rename = "excludeCx2CcGatewayBridge",
         alias = "excludeCx2ccGatewayBridge"
@@ -27,6 +30,7 @@ pub struct UsageDayDetailParams {
     pub provider_id: Option<i64>,
     pub folder_limit: Option<u32>,
     pub folder_keys: Option<Vec<String>>,
+    pub day_start_hour: Option<i64>,
     #[serde(
         rename = "excludeCx2CcGatewayBridge",
         alias = "excludeCx2ccGatewayBridge"
@@ -60,6 +64,7 @@ pub(super) enum UsageScopeV2 {
     Cli,
     Provider,
     Model,
+    Folder,
     Day,
 }
 
@@ -68,6 +73,7 @@ pub(super) fn parse_scope_v2(input: &str) -> crate::shared::error::AppResult<Usa
         "cli" => Ok(UsageScopeV2::Cli),
         "provider" => Ok(UsageScopeV2::Provider),
         "model" => Ok(UsageScopeV2::Model),
+        "folder" => Ok(UsageScopeV2::Folder),
         "day" => Ok(UsageScopeV2::Day),
         _ => Err(format!("SEC_INVALID_INPUT: unknown scope={input}").into()),
     }
@@ -151,6 +157,70 @@ pub(super) fn normalize_folder_keys(
     Ok(Some(out))
 }
 
+pub(super) fn normalize_day_start_hour(value: Option<i64>) -> crate::shared::error::AppResult<i64> {
+    let Some(hour) = value else {
+        return Ok(0);
+    };
+    if !(0..=9).contains(&hour) {
+        return Err("SEC_INVALID_INPUT: day_start_hour must be between 0 and 9".into());
+    }
+    Ok(hour)
+}
+
+const DEFAULT_FULL_IDLE_GAP_MINUTES: i64 = 15;
+const DEFAULT_SESSION_BREAK_GAP_MINUTES: i64 = 30;
+const MIN_FULL_IDLE_GAP_MINUTES: i64 = 1;
+const MAX_FULL_IDLE_GAP_MINUTES: i64 = 30;
+const MIN_SESSION_BREAK_GAP_MINUTES: i64 = 15;
+const MAX_SESSION_BREAK_GAP_MINUTES: i64 = 60;
+const MILLIS_PER_MINUTE: i64 = 60 * 1000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct DevelopmentTimeGapThresholds {
+    pub full_idle_gap_ms: i64,
+    pub session_break_gap_ms: i64,
+}
+
+impl Default for DevelopmentTimeGapThresholds {
+    fn default() -> Self {
+        Self {
+            full_idle_gap_ms: DEFAULT_FULL_IDLE_GAP_MINUTES * MILLIS_PER_MINUTE,
+            session_break_gap_ms: DEFAULT_SESSION_BREAK_GAP_MINUTES * MILLIS_PER_MINUTE,
+        }
+    }
+}
+
+pub(super) fn normalize_development_time_gap_thresholds(
+    full_idle_gap_minutes: Option<i64>,
+    session_break_gap_minutes: Option<i64>,
+) -> crate::shared::error::AppResult<DevelopmentTimeGapThresholds> {
+    let full_idle_gap_minutes = full_idle_gap_minutes.unwrap_or(DEFAULT_FULL_IDLE_GAP_MINUTES);
+    if !(MIN_FULL_IDLE_GAP_MINUTES..=MAX_FULL_IDLE_GAP_MINUTES).contains(&full_idle_gap_minutes) {
+        return Err("SEC_INVALID_INPUT: full_idle_gap_minutes must be between 1 and 30".into());
+    }
+
+    let session_break_gap_minutes =
+        session_break_gap_minutes.unwrap_or(DEFAULT_SESSION_BREAK_GAP_MINUTES);
+    if !(MIN_SESSION_BREAK_GAP_MINUTES..=MAX_SESSION_BREAK_GAP_MINUTES)
+        .contains(&session_break_gap_minutes)
+    {
+        return Err(
+            "SEC_INVALID_INPUT: session_break_gap_minutes must be between 15 and 60".into(),
+        );
+    }
+    if full_idle_gap_minutes >= session_break_gap_minutes {
+        return Err(
+            "SEC_INVALID_INPUT: full_idle_gap_minutes must be less than session_break_gap_minutes"
+                .into(),
+        );
+    }
+
+    Ok(DevelopmentTimeGapThresholds {
+        full_idle_gap_ms: full_idle_gap_minutes * MILLIS_PER_MINUTE,
+        session_break_gap_ms: session_break_gap_minutes * MILLIS_PER_MINUTE,
+    })
+}
+
 /// Validated and resolved query parameters ready for SQL execution.
 pub(super) struct ResolvedQueryParams<'a> {
     pub period: UsagePeriodV2,
@@ -159,6 +229,8 @@ pub(super) struct ResolvedQueryParams<'a> {
     pub cli_key: Option<&'a str>,
     pub provider_id: Option<i64>,
     pub folder_keys: Option<Vec<String>>,
+    pub day_start_hour: i64,
+    pub development_time_gap_thresholds: DevelopmentTimeGapThresholds,
     pub exclude_cx2cc_gateway_bridge: bool,
 }
 
@@ -172,11 +244,16 @@ pub(super) fn resolve_query_params<'a>(
     params: &'a UsageQueryParams,
 ) -> crate::shared::error::AppResult<ResolvedQueryParams<'a>> {
     let period = parse_period_v2(&params.period)?;
+    let day_start_hour = normalize_day_start_hour(params.day_start_hour)?;
     let (start_ts, end_ts) =
-        super::compute_bounds_v2(conn, period, params.start_ts, params.end_ts)?;
+        super::compute_bounds_v2(conn, period, params.start_ts, params.end_ts, day_start_hour)?;
     let cli_key = normalize_cli_filter(params.cli_key.as_deref())?;
     let provider_id = normalize_provider_id_filter(params.provider_id)?;
     let folder_keys = normalize_folder_keys(params.folder_keys.as_deref())?;
+    let development_time_gap_thresholds = normalize_development_time_gap_thresholds(
+        params.full_idle_gap_minutes,
+        params.session_break_gap_minutes,
+    )?;
     let exclude_cx2cc_gateway_bridge = params.exclude_cx2cc_gateway_bridge.unwrap_or(false);
     Ok(ResolvedQueryParams {
         period,
@@ -185,6 +262,8 @@ pub(super) fn resolve_query_params<'a>(
         cli_key,
         provider_id,
         folder_keys,
+        day_start_hour,
+        development_time_gap_thresholds,
         exclude_cx2cc_gateway_bridge,
     })
 }

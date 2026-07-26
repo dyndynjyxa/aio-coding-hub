@@ -31,6 +31,17 @@ pub(crate) fn app_gateway_active_sessions<R: tauri::Runtime>(
     })
 }
 
+pub(crate) fn app_gateway_active_requests_snapshot<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Vec<gateway::active_requests::ActiveRequestSnapshotItem> {
+    super::gateway_state::try_with_app_running_gateway(app, |running| {
+        running
+            .map(|runtime| runtime.active_requests_snapshot())
+            .unwrap_or_default()
+    })
+    .unwrap_or_default()
+}
+
 pub(crate) fn app_gateway_circuit_status(
     app: &tauri::AppHandle,
     db: &db::Db,
@@ -39,4 +50,16 @@ pub(crate) fn app_gateway_circuit_status(
     super::gateway_state::with_app_running_gateway(app, |running| {
         gateway::control_service::GatewayControlService::circuit_status(running, app, db, cli_key)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn active_requests_snapshot_returns_empty_without_running_gateway() {
+        let app = tauri::test::mock_app();
+
+        assert!(app_gateway_active_requests_snapshot(app.handle()).is_empty());
+    }
 }

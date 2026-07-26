@@ -1,8 +1,10 @@
 import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { MutableRefObject } from "react";
+import { AppErrorCodes } from "../../constants/appErrorCodes";
 import type { AppAboutInfo } from "../../services/app/appAbout";
 import { logToConsole } from "../../services/consoleLog";
+import { parseErrorCodeMessage } from "../../utils/errors";
 import { gatewayCheckPortAvailable, type GatewayStatus } from "../../services/gateway/gateway";
 import type { SettingsMutationResult, SettingsSetInput } from "../../services/settings/settings";
 import { SETTINGS_READONLY_MESSAGE } from "../../query/settings";
@@ -19,8 +21,7 @@ import {
 } from "./settingsPersistenceModel";
 
 function isSettingsReadFailure(err: unknown) {
-  const text = String(err);
-  return text.includes("SETTINGS_RECOVERY_REQUIRED") || text.includes("invalid settings.json");
+  return parseErrorCodeMessage(String(err)).error_code === AppErrorCodes.SETTINGS_RECOVERY_REQUIRED;
 }
 
 type UseSettingsPersistRunnerInput = {
@@ -289,7 +290,7 @@ export function useSettingsPersistRunner(input: UseSettingsPersistRunnerInput) {
 
   const commitNumberField = useCallback(
     (options: {
-      key: "preferred_port" | "log_retention_days";
+      key: "preferred_port" | "log_retention_days" | "request_log_retention_days";
       next: number;
       min: number;
       max: number;

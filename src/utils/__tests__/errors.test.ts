@@ -55,6 +55,14 @@ describe("utils/errors", () => {
     expect(wide).not.toContain("k39");
   });
 
+  it("formatUnknownError sanitizes primitive field types, depth limits, and non-object input", () => {
+    expect(formatUnknownError(null)).toBe("null");
+    expect(
+      formatUnknownError({ n: 10n, fn: () => undefined, sym: Symbol("x"), miss: null, arr: [1, 2] })
+    ).toBe('{"n":"10","fn":"[Function]","sym":"Symbol(x)","miss":null,"arr":[1,2]}');
+    expect(formatUnknownError({ a: { b: { c: { d: { e: 1 } } } } })).toContain('"d":"[Truncated]"');
+  });
+
   it("formatUnknownError tolerates unreadable object properties", () => {
     const err: Record<string, unknown> = {};
     Object.defineProperty(err, "bad", {

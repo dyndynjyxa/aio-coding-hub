@@ -35,7 +35,7 @@ impl CliBackupSnapshots {
         app: &tauri::AppHandle<R>,
     ) -> Result<Self, String> {
         let mut out = Vec::with_capacity(MCP_CLI_KEYS.len());
-        for cli_key in MCP_CLI_KEYS {
+        for cli_key in MCP_CLI_KEYS.iter().copied() {
             out.push((cli_key, SingleCliBackup::capture(app, cli_key)?));
         }
         Ok(Self(out))

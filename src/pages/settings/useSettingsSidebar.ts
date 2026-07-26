@@ -16,7 +16,10 @@ import { useUsageSummaryQuery } from "../../query/usage";
 import { resolveAvailableStatus } from "./settingsSidebarModel";
 import { useSettingsSidebarController } from "./useSettingsSidebarController";
 
-export function useSettingsSidebar(updateMeta: UpdateMeta) {
+export function useSettingsSidebar(
+  updateMeta: UpdateMeta,
+  requestLogRetentionDays: number | null = null
+) {
   const about = updateMeta.about;
   const devPreview = useDevPreviewData();
   const queryClient = useQueryClient();
@@ -70,8 +73,11 @@ export function useSettingsSidebar(updateMeta: UpdateMeta) {
       about,
       dbDiskUsageAvailable: resolveAvailableStatus(dbDiskUsage, dbDiskUsageQuery.isLoading),
       dbDiskUsage,
+      requestLogRetentionDays,
       refreshDbDiskUsage: controller.refreshDbDiskUsage,
       openAppDataDir: controller.openAppDataDir,
+      onCompactDb: controller.compactDb,
+      compactingDb: controller.compactingDb,
       openClearRequestLogsDialog: controller.openClearRequestLogsDialog,
       openResetAllDialog: controller.openResetAllDialog,
       onExportConfig: controller.exportConfig,

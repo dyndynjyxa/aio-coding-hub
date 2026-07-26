@@ -1,5 +1,6 @@
 import type { AppSettings } from "../services/settings/settings";
 import { setCacheAnomalyMonitorEnabled } from "../services/gateway/cacheAnomalyMonitor";
+import { setCircuitBreakerNoticeEnabled } from "../services/gateway/circuitNotice";
 import { setNotificationSoundEnabled } from "../services/notification/notificationSound";
 import { setTaskCompleteNotifyEnabled } from "../services/notification/taskCompleteNotifyEvents";
 
@@ -7,6 +8,7 @@ export type SettingsRuntimeSnapshot = {
   enableCacheAnomalyMonitor: boolean;
   enableTaskCompleteNotify: boolean;
   enableNotificationSound: boolean;
+  enableCircuitBreakerNotice: boolean;
 };
 
 let lastAppliedSnapshot: SettingsRuntimeSnapshot | null = null;
@@ -26,6 +28,7 @@ function normalizeSettingsRuntimeSnapshot(
     enableCacheAnomalyMonitor: settings.enable_cache_anomaly_monitor,
     enableTaskCompleteNotify: settings.enable_task_complete_notify,
     enableNotificationSound: settings.enable_notification_sound,
+    enableCircuitBreakerNotice: settings.enable_circuit_breaker_notice,
   };
 }
 
@@ -36,7 +39,8 @@ function sameSnapshot(
   return (
     left?.enableCacheAnomalyMonitor === right?.enableCacheAnomalyMonitor &&
     left?.enableTaskCompleteNotify === right?.enableTaskCompleteNotify &&
-    left?.enableNotificationSound === right?.enableNotificationSound
+    left?.enableNotificationSound === right?.enableNotificationSound &&
+    left?.enableCircuitBreakerNotice === right?.enableCircuitBreakerNotice
   );
 }
 
@@ -52,6 +56,7 @@ export function applySettingsRuntimeSnapshot(
   setCacheAnomalyMonitorEnabled(snapshot.enableCacheAnomalyMonitor);
   setTaskCompleteNotifyEnabled(snapshot.enableTaskCompleteNotify);
   setNotificationSoundEnabled(snapshot.enableNotificationSound);
+  setCircuitBreakerNoticeEnabled(snapshot.enableCircuitBreakerNotice);
 }
 
 export function resetSettingsRuntimeController() {

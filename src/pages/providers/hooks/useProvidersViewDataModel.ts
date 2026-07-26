@@ -168,6 +168,7 @@ function emptyActiveModeByCli(): Record<CliKey, number | null> {
     claude: null,
     codex: null,
     gemini: null,
+    grok: null,
   };
 }
 

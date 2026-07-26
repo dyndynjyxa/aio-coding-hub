@@ -1,6 +1,7 @@
 //! Usage: MCP server import/export parsing and DB import.
 
 use crate::db;
+use crate::shared::cli_key::CliKey;
 use crate::shared::error::db_err;
 use crate::shared::time::now_unix_seconds;
 use crate::workspaces;
@@ -8,6 +9,7 @@ use rusqlite::params;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use super::backups::CliBackupSnapshots;
+use super::cli_specs::MCP_CLI_KEYS;
 use super::db::{list_for_workspace, upsert_by_name};
 use super::sync::sync_all_cli;
 use super::types::{McpImportReport, McpImportServer, McpImportSkip, McpParseResult};
@@ -42,7 +44,9 @@ fn push_import_server(
 }
 
 fn is_code_switch_r_shape(root: &serde_json::Value) -> bool {
-    root.get("claude").is_some() || root.get("codex").is_some() || root.get("gemini").is_some()
+    MCP_CLI_KEYS
+        .iter()
+        .any(|cli_key| root.get(*cli_key).is_some())
 }
 
 fn ensure_unique_key(base: &str, used: &mut HashSet<String>) -> String {
@@ -299,10 +303,10 @@ fn extract_toml_string_map(
     Ok(out)
 }
 
-fn parse_codex_toml_mcp_servers(toml_text: &str) -> Result<Vec<McpImportServer>, String> {
-    ensure_config_text_within_limit(toml_text, "codex toml")?;
+fn parse_toml_mcp_servers(cli_key: &str, toml_text: &str) -> Result<Vec<McpImportServer>, String> {
+    ensure_config_text_within_limit(toml_text, &format!("{cli_key} toml"))?;
     let root: toml::Value = toml::from_str(toml_text)
-        .map_err(|e| format!("SEC_INVALID_INPUT: invalid codex toml: {e}"))?;
+        .map_err(|e| format!("SEC_INVALID_INPUT: invalid {cli_key} toml: {e}"))?;
     let Some(servers) = root.get("mcp_servers").and_then(|v| v.as_table()) else {
         return Ok(Vec::new());
     };
@@ -340,12 +344,12 @@ fn parse_codex_toml_mcp_servers(toml_text: &str) -> Result<Vec<McpImportServer>,
 
         if transport == "stdio" && command.as_deref().unwrap_or("").trim().is_empty() {
             return Err(format!(
-                "SEC_INVALID_INPUT: import codex server '{key}' missing command"
+                "SEC_INVALID_INPUT: import {cli_key} server '{key}' missing command"
             ));
         }
         if transport == "http" && url.as_deref().unwrap_or("").trim().is_empty() {
             return Err(format!(
-                "SEC_INVALID_INPUT: import codex server '{key}' missing url"
+                "SEC_INVALID_INPUT: import {cli_key} server '{key}' missing url"
             ));
         }
 
@@ -370,7 +374,10 @@ fn parse_codex_toml_mcp_servers(toml_text: &str) -> Result<Vec<McpImportServer>,
                 headers: extract_toml_string_map(
                     spec.get("headers").or_else(|| spec.get("http_headers")),
                 )?,
-                enabled: true,
+                enabled: spec
+                    .get("enabled")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(true),
             },
         )?;
     }
@@ -382,7 +389,7 @@ fn parse_codex_toml_mcp_servers(toml_text: &str) -> Result<Vec<McpImportServer>,
 fn parse_code_switch_r(root: &serde_json::Value) -> Result<Vec<McpImportServer>, String> {
     let mut by_name: HashMap<String, McpImportServer> = HashMap::new();
 
-    for cli_key in ["claude", "codex", "gemini"] {
+    for cli_key in MCP_CLI_KEYS.iter().copied() {
         let Some(section) = root.get(cli_key) else {
             continue;
         };
@@ -607,13 +614,12 @@ pub fn parse_workspace_cli_target_json<R: tauri::Runtime>(
     let text = String::from_utf8(raw)
         .map_err(|e| format!("SEC_INVALID_INPUT: {cli_key} target config is not utf8: {e}"))?;
 
-    let parsed = if cli_key == "codex" {
-        McpParseResult {
-            servers: parse_codex_toml_mcp_servers(&text)
+    let parsed = match CliKey::parse(&cli_key)? {
+        CliKey::Codex | CliKey::Grok => McpParseResult {
+            servers: parse_toml_mcp_servers(&cli_key, &text)
                 .map_err(crate::shared::error::AppError::from)?,
-        }
-    } else {
-        parse_json(&text)?
+        },
+        CliKey::Claude | CliKey::Gemini => parse_json(&text)?,
     };
 
     if parsed.servers.is_empty() {
@@ -796,6 +802,18 @@ ON CONFLICT(workspace_id, server_id) DO UPDATE SET
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
+
+    struct GrokHomeRestore(Option<OsString>);
+
+    impl Drop for GrokHomeRestore {
+        fn drop(&mut self) {
+            match self.0.take() {
+                Some(value) => std::env::set_var("GROK_HOME", value),
+                None => std::env::remove_var("GROK_HOME"),
+            }
+        }
+    }
 
     #[test]
     fn parse_json_rejects_oversized_config_text() {
@@ -846,13 +864,77 @@ mod tests {
     }
 
     #[test]
+    fn parse_code_switch_r_imports_grok_servers_from_mcp_capability_registry() {
+        let parsed = parse_json(
+            r#"{
+                "grok": {
+                    "servers": {
+                        "fetch": {
+                            "enabled": true,
+                            "server": {
+                                "command": "npx",
+                                "args": ["-y", "@modelcontextprotocol/server-fetch"]
+                            }
+                        }
+                    }
+                }
+            }"#,
+        )
+        .expect("Grok Code Switch R config should parse");
+
+        assert_eq!(parsed.servers.len(), 1);
+        assert_eq!(parsed.servers[0].server_key, "fetch");
+        assert_eq!(parsed.servers[0].command.as_deref(), Some("npx"));
+    }
+
+    #[test]
+    fn parse_workspace_cli_target_imports_grok_toml() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let grok_home = tempfile::tempdir().expect("Grok home tempdir");
+        let _restore = GrokHomeRestore(std::env::var_os("GROK_HOME"));
+        std::env::set_var("GROK_HOME", grok_home.path());
+
+        std::fs::write(
+            grok_home.path().join("config.toml"),
+            r#"[mcp_servers.fetch]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-fetch"]
+env = { MODE = "test" }
+enabled = false
+"#,
+        )
+        .expect("write Grok config");
+
+        let db_dir = tempfile::tempdir().expect("db tempdir");
+        let db =
+            db::init_for_tests(&db_dir.path().join("mcp-import.sqlite")).expect("init test db");
+        let workspace =
+            workspaces::create(&db, "grok", "Import target", false).expect("create workspace");
+        let app = tauri::test::mock_app();
+
+        let parsed = parse_workspace_cli_target_json(app.handle(), &db, workspace.id)
+            .expect("Grok TOML target should parse");
+
+        assert_eq!(parsed.servers.len(), 1);
+        assert_eq!(parsed.servers[0].server_key, "fetch");
+        assert_eq!(parsed.servers[0].transport, "stdio");
+        assert_eq!(parsed.servers[0].command.as_deref(), Some("npx"));
+        assert_eq!(parsed.servers[0].args[0], "-y");
+        assert_eq!(
+            parsed.servers[0].env.get("MODE").map(String::as_str),
+            Some("test")
+        );
+        assert!(!parsed.servers[0].enabled);
+    }
+
+    #[test]
     fn parse_codex_toml_caps_server_count() {
         let text = (0..=MCP_PARSE_MAX_SERVERS)
             .map(|index| format!("[mcp_servers.srv-{index}]\ncommand = \"npx\"\n"))
             .collect::<Vec<_>>()
             .join("\n");
 
-        let err = parse_codex_toml_mcp_servers(&text).expect_err("too many toml servers fail");
+        let err = parse_toml_mcp_servers("codex", &text).expect_err("too many toml servers fail");
 
         assert!(err.to_string().contains("at most 512 MCP servers"));
     }

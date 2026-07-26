@@ -26,6 +26,7 @@ pub(super) fn skip_with_reason(
             reason: reason.reason,
             reason_code: None,
             attempt_started_ms,
+            circuit: None,
         },
     );
 }
@@ -47,6 +48,7 @@ pub(super) fn run_gates<R: tauri::Runtime>(
 ) -> Option<provider_gate::ProviderGateAllow> {
     let skipped_open_before = counters.skipped_open;
     let skipped_cooldown_before = counters.skipped_cooldown;
+    let mut deny_snapshot = None;
     let gate_allow = provider_gate::gate_provider(provider_gate::ProviderGateInput {
         ctx,
         provider_id: identity.provider_id,
@@ -55,6 +57,7 @@ pub(super) fn run_gates<R: tauri::Runtime>(
         earliest_available_unix: &mut counters.earliest_available_unix,
         skipped_open: &mut counters.skipped_open,
         skipped_cooldown: &mut counters.skipped_cooldown,
+        deny_snapshot: &mut deny_snapshot,
     });
     if gate_allow.is_none() {
         let (reason_code, reason_label) = if counters.skipped_open > skipped_open_before {
@@ -75,6 +78,7 @@ pub(super) fn run_gates<R: tauri::Runtime>(
                 reason: format!("provider skipped by circuit breaker ({reason_label})"),
                 reason_code,
                 attempt_started_ms: input.started.elapsed().as_millis(),
+                circuit: deny_snapshot,
             },
         );
         return None;
@@ -97,6 +101,7 @@ pub(super) fn run_gates<R: tauri::Runtime>(
                 reason: "provider skipped by rate limit".to_string(),
                 reason_code: Some(dc::REASON_RATE_LIMITED),
                 attempt_started_ms: input.started.elapsed().as_millis(),
+                circuit: None,
             },
         );
         return None;

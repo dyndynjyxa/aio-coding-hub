@@ -7,10 +7,14 @@ import { useSettingsSidebar } from "./useSettingsSidebar";
 
 export type SettingsSidebarProps = {
   updateMeta: UpdateMeta;
+  requestLogRetentionDays?: number | null;
 };
 
-export function SettingsSidebar({ updateMeta }: SettingsSidebarProps) {
-  const sidebar = useSettingsSidebar(updateMeta);
+export function SettingsSidebar({
+  updateMeta,
+  requestLogRetentionDays = null,
+}: SettingsSidebarProps) {
+  const sidebar = useSettingsSidebar(updateMeta, requestLogRetentionDays);
 
   return (
     <>

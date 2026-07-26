@@ -47,6 +47,8 @@ export function SettingsPage() {
             setTrayEnabled={persistence.setTrayEnabled}
             logRetentionDays={persistence.logRetentionDays}
             setLogRetentionDays={persistence.setLogRetentionDays}
+            requestLogRetentionDays={persistence.requestLogRetentionDays}
+            setRequestLogRetentionDays={persistence.setRequestLogRetentionDays}
             enableDebugLog={persistence.enableDebugLog}
             setEnableDebugLog={persistence.setEnableDebugLog}
             requestPersist={persistence.requestPersist}
@@ -57,7 +59,12 @@ export function SettingsPage() {
             sendSystemNotificationTest={notice.sendSystemNotificationTest}
           />
 
-          <SettingsSidebar updateMeta={updateMeta} />
+          <SettingsSidebar
+            updateMeta={updateMeta}
+            requestLogRetentionDays={
+              persistence.settingsReady ? persistence.requestLogRetentionDays : null
+            }
+          />
         </div>
       </div>
     </div>

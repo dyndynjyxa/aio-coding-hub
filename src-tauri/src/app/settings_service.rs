@@ -49,6 +49,8 @@ pub(crate) struct SettingsUpdate {
     pub tray_enabled: Option<bool>,
     pub enable_cli_proxy_startup_recovery: Option<bool>,
     pub log_retention_days: u32,
+    // Option keeps older frontend payloads valid (0 = keep forever).
+    pub request_log_retention_days: Option<u32>,
     pub provider_cooldown_seconds: Option<u32>,
     pub provider_base_url_ping_cache_ttl_seconds: Option<u32>,
     pub upstream_first_byte_timeout_seconds: Option<u32>,
@@ -150,6 +152,7 @@ pub(crate) struct SettingsView {
     pub tray_enabled: bool,
     pub enable_cli_proxy_startup_recovery: bool,
     pub log_retention_days: u32,
+    pub request_log_retention_days: u32,
     pub provider_cooldown_seconds: u32,
     pub provider_base_url_ping_cache_ttl_seconds: u32,
     pub upstream_first_byte_timeout_seconds: u32,
@@ -269,6 +272,7 @@ impl From<&settings::AppSettings> for SettingsView {
             tray_enabled: value.tray_enabled,
             enable_cli_proxy_startup_recovery: value.enable_cli_proxy_startup_recovery,
             log_retention_days: value.log_retention_days,
+            request_log_retention_days: value.request_log_retention_days,
             provider_cooldown_seconds: value.provider_cooldown_seconds,
             provider_base_url_ping_cache_ttl_seconds: value
                 .provider_base_url_ping_cache_ttl_seconds,
@@ -545,6 +549,7 @@ pub(crate) async fn settings_set_impl(
         tray_enabled,
         enable_cli_proxy_startup_recovery,
         log_retention_days,
+        request_log_retention_days,
         provider_cooldown_seconds,
         provider_base_url_ping_cache_ttl_seconds,
         upstream_first_byte_timeout_seconds,
@@ -610,6 +615,8 @@ pub(crate) async fn settings_set_impl(
             let start_minimized = start_minimized.unwrap_or(previous.start_minimized);
             let enable_cli_proxy_startup_recovery = enable_cli_proxy_startup_recovery
                 .unwrap_or(previous.enable_cli_proxy_startup_recovery);
+            let request_log_retention_days =
+                request_log_retention_days.unwrap_or(previous.request_log_retention_days);
             let provider_cooldown_seconds =
                 provider_cooldown_seconds.unwrap_or(previous.provider_cooldown_seconds);
             let gateway_listen_mode = gateway_listen_mode.unwrap_or(previous.gateway_listen_mode);
@@ -759,11 +766,14 @@ pub(crate) async fn settings_set_impl(
                 codex_home_mode,
                 codex_home_override,
                 codex_oauth_compatible_proxy_mode,
+                grok_proxy_preferences: previous.grok_proxy_preferences.clone(),
+                image_gen_storage_dir: previous.image_gen_storage_dir.clone(),
                 auto_start: next_auto_start,
                 start_minimized,
                 tray_enabled,
                 enable_cli_proxy_startup_recovery,
                 log_retention_days,
+                request_log_retention_days,
                 provider_cooldown_seconds,
                 provider_base_url_ping_cache_ttl_seconds,
                 upstream_first_byte_timeout_seconds,

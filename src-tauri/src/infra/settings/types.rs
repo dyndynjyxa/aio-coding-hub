@@ -95,6 +95,10 @@ pub struct AppSettings {
     // Codex CLI proxy OAuth compatible mode. When enabled, proxy takeover
     // manages config.toml only and leaves auth.json untouched.
     pub codex_oauth_compatible_proxy_mode: bool,
+    pub grok_proxy_preferences: Option<crate::grok_config::GrokProxyPreferences>,
+    // Image generation storage directory override. None/empty = default
+    // `<app data dir>/image-gen`.
+    pub image_gen_storage_dir: Option<String>,
     pub auto_start: bool,
     // Start with window hidden when auto-starting (silent startup).
     pub start_minimized: bool,
@@ -102,6 +106,8 @@ pub struct AppSettings {
     // Startup crash recovery for CLI proxy takeover (default enabled).
     pub enable_cli_proxy_startup_recovery: bool,
     pub log_retention_days: u32,
+    // Request-log DB retention in days; 0 = keep forever.
+    pub request_log_retention_days: u32,
     pub provider_cooldown_seconds: u32,
     pub provider_base_url_ping_cache_ttl_seconds: u32,
     pub upstream_first_byte_timeout_seconds: u32,
@@ -177,11 +183,14 @@ impl Default for AppSettings {
             codex_home_mode: CodexHomeMode::default(),
             codex_home_override: String::new(),
             codex_oauth_compatible_proxy_mode: DEFAULT_CODEX_OAUTH_COMPATIBLE_PROXY_MODE,
+            grok_proxy_preferences: None,
+            image_gen_storage_dir: None,
             auto_start: false,
             start_minimized: false,
             tray_enabled: true,
             enable_cli_proxy_startup_recovery: DEFAULT_ENABLE_CLI_PROXY_STARTUP_RECOVERY,
             log_retention_days: DEFAULT_LOG_RETENTION_DAYS,
+            request_log_retention_days: DEFAULT_REQUEST_LOG_RETENTION_DAYS,
             provider_cooldown_seconds: DEFAULT_PROVIDER_COOLDOWN_SECONDS,
             provider_base_url_ping_cache_ttl_seconds:
                 DEFAULT_PROVIDER_BASE_URL_PING_CACHE_TTL_SECONDS,

@@ -125,7 +125,8 @@ type ProviderEditorDialogSchema = ReturnType<typeof createProviderEditorDialogSc
 export type ProviderEditorDialogFormInput = z.input<ProviderEditorDialogSchema>;
 export type ProviderEditorDialogFormOutput = z.output<ProviderEditorDialogSchema>;
 
-const MAX_MODEL_NAME_LEN = 200;
+// Mirrors src-tauri/src/domain/providers/types.rs MAX_MODEL_NAME_LEN (guarded by crossLayerContracts.test.ts).
+export const MAX_MODEL_NAME_LEN = 200;
 
 export function validateProviderClaudeModels(input: {
   main_model?: string | null;

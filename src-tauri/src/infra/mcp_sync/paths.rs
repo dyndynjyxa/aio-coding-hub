@@ -25,6 +25,7 @@ pub(super) fn mcp_target_path<R: tauri::Runtime>(
         "claude" => Ok(home.join(".claude.json")),
         "codex" => codex_paths::codex_config_toml_path(app),
         "gemini" => Ok(home.join(".gemini").join("settings.json")),
+        "grok" => crate::grok_config::config_path(app),
         _ => Err(format!("SEC_INVALID_INPUT: unknown cli_key={cli_key}").into()),
     }
 }
@@ -34,6 +35,7 @@ pub(super) fn backup_file_name(cli_key: &str) -> &'static str {
         "claude" => "claude.json",
         "codex" => "config.toml",
         "gemini" => "settings.json",
+        "grok" => "config.toml",
         _ => "config",
     }
 }

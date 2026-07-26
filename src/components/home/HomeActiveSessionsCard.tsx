@@ -10,7 +10,6 @@ import { EmptyState } from "../../ui/EmptyState";
 import { Spinner } from "../../ui/Spinner";
 import { cn } from "../../utils/cn";
 import { formatDurationMs, formatInteger, formatUsd } from "../../utils/formatters";
-import { DollarSign } from "lucide-react";
 
 export type HomeActiveSessionsCardProps = {
   activeSessions: GatewayActiveSession[];
@@ -75,8 +74,7 @@ export function HomeActiveSessionsCardContent({
                   <span className="truncate max-w-[150px]">{providerLabel}</span>
                 </div>
 
-                <div className="flex items-center gap-1 rounded-md border border-border bg-white dark:bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground shadow-sm">
-                  <DollarSign className="h-3 w-3 text-muted-foreground" />
+                <div className="flex items-center rounded-md border border-border bg-white dark:bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground shadow-sm">
                   <span className="font-mono font-medium text-secondary-foreground">
                     {formatUsd(row.total_cost_usd)}
                   </span>

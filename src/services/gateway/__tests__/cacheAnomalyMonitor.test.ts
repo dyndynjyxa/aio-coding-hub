@@ -2,6 +2,14 @@ import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { tauriInvoke } from "../../../test/mocks/tauri";
 
+vi.mock("../../../utils/cacheRateMetrics", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../utils/cacheRateMetrics")>();
+  return {
+    ...actual,
+    computeCacheHitRateDenomTokens: vi.fn(actual.computeCacheHitRateDenomTokens),
+  };
+});
+
 async function importFreshCacheAnomalyMonitor() {
   vi.resetModules();
   const mod = await import("../cacheAnomalyMonitor");
@@ -47,6 +55,8 @@ function requestEvent(
     input_tokens: opts.input,
     cache_read_input_tokens: opts.read,
     cache_creation_input_tokens: opts.create,
+    // claude + non-bridged provider: backend sends effective == raw input.
+    effective_input_tokens: opts.input,
   } as any;
 }
 
@@ -404,6 +414,8 @@ describe("services/gateway/cacheAnomalyMonitor", () => {
       ingestCacheAnomalyRequestStart,
       ingestCacheAnomalyRequest,
     } = await importFreshCacheAnomalyMonitor();
+    const { computeCacheHitRateDenomTokens } = await import("../../../utils/cacheRateMetrics");
+    const denomSpy = vi.mocked(computeCacheHitRateDenomTokens);
 
     vi.mocked(tauriInvoke).mockResolvedValue(true as any);
 
@@ -445,12 +457,16 @@ describe("services/gateway/cacheAnomalyMonitor", () => {
           status: 500,
         },
       ],
-      input_tokens: 100,
-      cache_read_input_tokens: 200,
-      cache_creation_input_tokens: 1,
-      cache_creation_5m_input_tokens: 3,
-      cache_creation_1h_input_tokens: 4,
+      input_tokens: 1000,
+      effective_input_tokens: 700,
+      cache_read_input_tokens: 100,
+      cache_creation_input_tokens: 200,
+      cache_creation_5m_input_tokens: 0,
+      cache_creation_1h_input_tokens: 0,
     } as any);
+
+    expect(denomSpy).toHaveBeenLastCalledWith(700, 200, 100);
+    expect(denomSpy.mock.results[denomSpy.mock.results.length - 1]?.value).toBe(1000);
 
     vi.useRealTimers();
   });

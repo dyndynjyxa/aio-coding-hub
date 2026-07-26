@@ -1,5 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { validateProviderCliKey, type CliKey } from "../services/providers/providers";
+import { FeValidationError } from "../utils/errors";
 import {
   sortModeActiveList,
   sortModeActiveSet,
@@ -164,7 +165,7 @@ export function useSortModeProvidersSetOrderMutation() {
           queryKey: sortModeProvidersQueryKey(modeId, cliKey),
         });
       } catch (error) {
-        if (error instanceof Error && error.message.includes("SEC_INVALID_INPUT")) return;
+        if (error instanceof FeValidationError) return;
         throw error;
       }
     },
@@ -190,7 +191,7 @@ export function useSortModeProviderSetEnabledMutation() {
           queryKey: sortModeProvidersQueryKey(modeId, cliKey),
         });
       } catch (error) {
-        if (error instanceof Error && error.message.includes("SEC_INVALID_INPUT")) return;
+        if (error instanceof FeValidationError) return;
         throw error;
       }
     },

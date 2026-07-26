@@ -194,6 +194,15 @@ const WORKFLOW_PATHS = Object.freeze({
   releasePrSyncCargoLock: join(repoRoot, ".github/workflows/release-pr-sync-cargo-lock.yml"),
 });
 
+const HOMEBREW_CASK = Object.freeze({
+  token: "aio-coding-hub",
+  appName: "AIO Coding Hub.app",
+  name: "AIO Coding Hub",
+  desc: "Local AI CLI unified gateway",
+  homepage: "https://github.com/dyndynjyxa/aio-coding-hub",
+  bundleIdentifier: "io.aio.codinghub",
+});
+
 function getAllBuildTargets() {
   return [
     ...OFFICIAL_RELEASE_TARGETS.map((item) => ({
@@ -390,6 +399,58 @@ function buildLatestJson({ tag, repo, pubDate, stableAssetsDir, releaseBody, fal
   };
 }
 
+function normalizeSha256(value, label) {
+  const normalized = value.replace(/^sha256:/, "").toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(normalized)) {
+    throw new Error(`Invalid SHA-256 for ${label}: ${value}`);
+  }
+  return normalized;
+}
+
+function buildVersionedTagTemplate(tag, version) {
+  if (!tag.includes(version)) {
+    throw new Error(`Release tag must contain normalized version ${version}: ${tag}`);
+  }
+  return tag.replace(version, "#{version}");
+}
+
+function buildHomebrewCask({ tag, repo, macosArmSha256, macosIntelSha256 }) {
+  const version = normalizeReleaseVersion(tag, repo);
+  const tagTemplate = buildVersionedTagTemplate(tag, version);
+  const armSha256 = normalizeSha256(macosArmSha256, "macOS Apple Silicon zip");
+  const intelSha256 = normalizeSha256(macosIntelSha256, "macOS Intel zip");
+
+  return [
+    "# This file is generated from dyndynjyxa/aio-coding-hub.",
+    "# Update it by running `node scripts/support-matrix.mjs homebrew-cask` in the source repo.",
+    `cask "${HOMEBREW_CASK.token}" do`,
+    '  arch arm: "arm", intel: "intel"',
+    "",
+    `  version "${version}"`,
+    `  sha256 arm:   "${armSha256}",`,
+    `         intel: "${intelSha256}"`,
+    "",
+    `  url "https://github.com/${repo}/releases/download/${tagTemplate}/aio-coding-hub-macos-#{arch}.zip"`,
+    `  name "${HOMEBREW_CASK.name}"`,
+    `  desc "${HOMEBREW_CASK.desc}"`,
+    `  homepage "${HOMEBREW_CASK.homepage}"`,
+    "",
+    "  auto_updates true",
+    "  depends_on :macos",
+    "",
+    `  app "${HOMEBREW_CASK.appName}"`,
+    "",
+    "  zap trash: [",
+    `    "~/Library/Application Support/${HOMEBREW_CASK.bundleIdentifier}",`,
+    `    "~/Library/Caches/${HOMEBREW_CASK.bundleIdentifier}",`,
+    `    "~/Library/Preferences/${HOMEBREW_CASK.bundleIdentifier}.plist",`,
+    `    "~/Library/Saved Application State/${HOMEBREW_CASK.bundleIdentifier}.savedState",`,
+    "  ]",
+    "end",
+    "",
+  ].join("\n");
+}
+
 function extractMarkedBlock(content, markerName) {
   const { start, end } = README_MARKERS[markerName];
   const startIndex = content.indexOf(start);
@@ -444,7 +505,10 @@ function checkPackageScripts() {
     throw new Error("package.json must expose check:support-matrix.");
   }
 
-  if (scripts["audit:deps"] !== "node scripts/check-pnpm-audit.mjs") {
+  if (
+    scripts["audit:deps"] !==
+    "node scripts/check-pnpm-audit.selftest.mjs && node scripts/check-pnpm-audit.mjs"
+  ) {
     throw new Error("package.json must expose a fail-close audit:deps script.");
   }
 }
@@ -507,6 +571,11 @@ function checkWorkflowContracts() {
     "ci desktop matrix usage"
   );
   assertWorkflowContains(ciWorkflow, "run: pnpm check:support-matrix", "ci support matrix check");
+  assertWorkflowContains(
+    ciWorkflow,
+    "run: node scripts/support-matrix.homebrew-cask.selftest.mjs",
+    "ci Homebrew Cask generator check"
+  );
   assertWorkflowContains(ciWorkflow, "run: pnpm audit:deps", "ci fail-close dependency audit");
 
   assertWorkflowContains(
@@ -534,6 +603,12 @@ function checkWorkflowContracts() {
     "node scripts/support-matrix.mjs generate-latest-json \\",
     "latest.json generation delegation"
   );
+  assertWorkflowContains(
+    releaseWorkflow,
+    "node scripts/support-matrix.mjs homebrew-cask \\",
+    "Homebrew Cask generation delegation"
+  );
+  assertWorkflowContains(releaseWorkflow, "HOMEBREW_TAP_TOKEN", "optional Homebrew tap sync token");
 }
 
 function runSupportMatrixCheck() {
@@ -733,6 +808,30 @@ function writeLatestJsonFile(args) {
   logger.info("[support-matrix] latest.json 生成完成：%s", outputPath);
 }
 
+function writeHomebrewCaskFile(args) {
+  const tag = requireArg(args, "tag");
+  const repo = requireArg(args, "repo");
+  const macosArmSha256 = requireArg(args, "macos-arm-sha256");
+  const macosIntelSha256 = requireArg(args, "macos-intel-sha256");
+  const outputPath = args.get("output") ?? "";
+
+  const cask = buildHomebrewCask({
+    tag,
+    repo,
+    macosArmSha256,
+    macosIntelSha256,
+  });
+
+  if (outputPath.length === 0) {
+    process.stdout.write(cask);
+    return;
+  }
+
+  mkdirSync(dirname(outputPath), { recursive: true });
+  writeFileSync(outputPath, cask, "utf8");
+  logger.info("[support-matrix] Homebrew Cask 生成完成：%s", outputPath);
+}
+
 function printBuildMatrix() {
   process.stdout.write(JSON.stringify(buildWorkflowMatrix()));
 }
@@ -752,7 +851,7 @@ function printReadmeBlock(args) {
 
 function printUsageAndExit() {
   logger.error(
-    "Usage: node scripts/support-matrix.mjs <build-matrix|ci-matrix|check|prepare-stable-assets|generate-latest-json|readme-block> [--key value]"
+    "Usage: node scripts/support-matrix.mjs <build-matrix|ci-matrix|check|prepare-stable-assets|generate-latest-json|homebrew-cask|readme-block> [--key value]"
   );
   process.exit(1);
 }
@@ -780,6 +879,9 @@ function main() {
       return;
     case "generate-latest-json":
       writeLatestJsonFile(args);
+      return;
+    case "homebrew-cask":
+      writeHomebrewCaskFile(args);
       return;
     case "readme-block":
       printReadmeBlock(args);

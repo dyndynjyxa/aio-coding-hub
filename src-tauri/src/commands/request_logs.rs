@@ -2,6 +2,7 @@
 
 use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::commands::limit::normalize_limit;
+use crate::gateway_runtime_access::app_gateway_active_requests_snapshot;
 use crate::{blocking, request_attempt_logs, request_logs};
 
 const REQUEST_LOGS_DEFAULT_LIMIT: u32 = 50;
@@ -134,6 +135,14 @@ pub(crate) async fn request_attempt_logs_by_trace_id(
     })
     .await
     .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn active_request_logs_snapshot(
+    app: tauri::AppHandle,
+) -> Result<Vec<crate::gateway::active_requests::ActiveRequestSnapshotItem>, String> {
+    Ok(app_gateway_active_requests_snapshot(&app))
 }
 
 #[cfg(test)]

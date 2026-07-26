@@ -1,0 +1,17 @@
+{
+  "trace_id": "trace-fixture-001",
+  "cli_key": "claude",
+  "provider_id": 7,
+  "provider_name": "Provider A",
+  "base_url": "https://provider-a.example",
+  "prev_state": "CLOSED",
+  "next_state": "OPEN",
+  "failure_count": 5,
+  "failure_threshold": 5,
+  "open_until": 1750001800,
+  "cooldown_until": null,
+  "reason": "FAILURE_THRESHOLD_REACHED",
+  "ts": 1750000000,
+  "trigger_error_code": "GW_UPSTREAM_TIMEOUT",
+  "first_byte_timeout_secs": 300
+}

@@ -1,0 +1,8 @@
+{
+  "level": "warn",
+  "error_code": "GW_PORT_IN_USE",
+  "message": "port 37123 already in use",
+  "requested_port": 37123,
+  "bound_port": 37124,
+  "base_url": "http://127.0.0.1:37124"
+}

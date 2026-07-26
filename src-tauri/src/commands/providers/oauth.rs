@@ -11,6 +11,11 @@ const CODEX_DEVICE_REDIRECT_URI: &str = "https://auth.openai.com/deviceauth/call
 const CODEX_DEVICE_CODE_DEFAULT_EXPIRES_IN: u64 = 900;
 const CODEX_DEVICE_POLLING_SAFETY_MARGIN_SECS: u64 = 3;
 
+/// RFC 8628 device-code grant (used by xAI Grok OAuth).
+const OAUTH_DEVICE_CODE_GRANT_TYPE: &str = "urn:ietf:params:oauth:grant-type:device_code";
+const GROK_DEVICE_CODE_DEFAULT_EXPIRES_IN: u64 = 900;
+const GROK_DEVICE_CODE_DEFAULT_INTERVAL_SECS: u64 = 5;
+
 #[derive(Debug, Clone, Deserialize)]
 struct CodexDeviceCodeResponse {
     device_auth_id: String,
@@ -37,6 +42,37 @@ struct CodexDeviceTokenResponse {
     expires_in: Option<i64>,
 }
 
+/// Standard OAuth2 device authorization response (RFC 8628 / xAI Grok).
+#[derive(Debug, Clone, Deserialize)]
+struct StandardDeviceCodeResponse {
+    device_code: String,
+    user_code: String,
+    #[serde(default)]
+    verification_uri: Option<String>,
+    #[serde(default)]
+    verification_uri_complete: Option<String>,
+    #[serde(default)]
+    expires_in: Option<u64>,
+    #[serde(default)]
+    interval: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct StandardDeviceTokenResponse {
+    #[serde(default)]
+    error: Option<String>,
+    #[serde(default)]
+    error_description: Option<String>,
+    #[serde(default)]
+    access_token: Option<String>,
+    #[serde(default)]
+    refresh_token: Option<String>,
+    #[serde(default)]
+    id_token: Option<String>,
+    #[serde(default)]
+    expires_in: Option<i64>,
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 struct CodexIdTokenClaims {
     #[serde(default)]
@@ -45,6 +81,12 @@ struct CodexIdTokenClaims {
     email: Option<String>,
     #[serde(default, rename = "https://api.openai.com/auth")]
     openai_auth: Option<CodexOpenAiAuthClaim>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct JwtEmailClaims {
+    #[serde(default)]
+    email: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -183,6 +225,41 @@ pub(super) fn extract_codex_identity(id_token: Option<&str>) -> (Option<String>,
     });
     let email = claims.and_then(|value| value.email);
     (account_id, email)
+}
+
+fn decode_jwt_email_claim(id_token: &str) -> Option<String> {
+    let mut segments = id_token.split('.');
+    let _header = segments.next()?;
+    let claims = segments.next()?;
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(claims)
+        .ok()?;
+    let claims = serde_json::from_slice::<JwtEmailClaims>(&decoded).ok()?;
+    claims
+        .email
+        .map(|email| email.trim().to_string())
+        .filter(|email| !email.is_empty())
+}
+
+/// Best-effort identity extraction across OAuth adapters.
+fn extract_oauth_email(cli_key: &str, id_token: Option<&str>) -> Option<String> {
+    if cli_key == "codex" {
+        return extract_codex_identity(id_token).1;
+    }
+    id_token.and_then(decode_jwt_email_claim)
+}
+
+fn supports_device_code_login(cli_key: &str) -> bool {
+    matches!(cli_key, "codex" | "grok")
+}
+
+fn compute_expires_at_from_secs(expires_in: Option<i64>) -> Option<i64> {
+    let seconds = expires_in?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs() as i64;
+    Some(now + seconds)
 }
 
 fn ensure_current_oauth_flow(flow_id: &str) -> Result<(), String> {
@@ -337,6 +414,7 @@ pub(crate) async fn provider_oauth_start_flow(
     let (effective_token, id_token) = adapter.resolve_effective_token(&token_set, None);
     let token_expires_at = token_set.expires_at;
     let provider_type = adapter.provider_type();
+    let email = extract_oauth_email(&provider_cli_key, id_token.as_deref());
 
     // 10. Save to provider
     let app_handle = app.clone();
@@ -354,7 +432,7 @@ pub(crate) async fn provider_oauth_start_flow(
                 &endpoints.client_id,
                 endpoints.client_secret.as_deref(),
                 token_expires_at,
-                None,
+                email.as_deref(),
             )?;
             crate::domain::provider_oauth_limits::clear_snapshot(&db, provider_id)?;
             Ok(())
@@ -400,19 +478,24 @@ pub(crate) async fn provider_oauth_start_device_flow(
         .await
         .map_err(Into::<String>::into)?;
 
-    if provider_cli_key != "codex" {
+    if !supports_device_code_login(&provider_cli_key) {
         return Err(format!(
-            "SEC_INVALID_INPUT: device code login is only supported for codex providers (provider_id={provider_id}, cli_key={provider_cli_key})"
+            "SEC_INVALID_INPUT: device code login is only supported for codex/grok providers (provider_id={provider_id}, cli_key={provider_cli_key})"
         ));
     }
 
     let adapter = crate::gateway::oauth::registry::global_registry()
-        .get_by_cli_key("codex")
-        .ok_or_else(|| "no OAuth adapter for cli_key=codex".to_string())?;
+        .get_by_cli_key(&provider_cli_key)
+        .ok_or_else(|| format!("no OAuth adapter for cli_key={provider_cli_key}"))?;
     let endpoints = adapter.endpoints();
     let client = crate::gateway::oauth::build_default_oauth_http_client()?;
     let flow_id = crate::gateway::oauth::begin_flow_lifecycle().flow_id;
 
+    if provider_cli_key == "grok" {
+        return start_grok_device_flow(provider_id, adapter, endpoints, &client, flow_id).await;
+    }
+
+    // Codex proprietary device-auth API
     let response = client
         .post(CODEX_DEVICE_AUTH_USERCODE_URL)
         .header("Content-Type", "application/json")
@@ -449,6 +532,79 @@ pub(crate) async fn provider_oauth_start_device_flow(
     })
 }
 
+async fn start_grok_device_flow(
+    provider_id: i64,
+    adapter: &dyn crate::gateway::oauth::provider_trait::OAuthProvider,
+    endpoints: &crate::gateway::oauth::provider_trait::OAuthEndpoints,
+    client: &reqwest::Client,
+    flow_id: String,
+) -> Result<ProviderOAuthDeviceCodeStartResult, String> {
+    use crate::gateway::oauth::adapters::grok::{
+        grok_client_version, GROK_CLIENT_SURFACE_UI, GROK_DEVICE_AUTHORIZATION_URL,
+        GROK_OAUTH_REFERRER,
+    };
+
+    let scope = endpoints.scopes.join(" ");
+    let client_version = grok_client_version();
+    // Match grok-build device-code request: referrer + x-grok-client-* headers.
+    let response = client
+        .post(GROK_DEVICE_AUTHORIZATION_URL)
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .header("Accept", "application/json")
+        .header("x-grok-client-version", client_version.as_str())
+        .header("x-grok-client-surface", GROK_CLIENT_SURFACE_UI)
+        .form(&[
+            ("client_id", endpoints.client_id.as_str()),
+            ("scope", scope.as_str()),
+            ("referrer", GROK_OAUTH_REFERRER),
+        ])
+        .send()
+        .await
+        .map_err(|e| format!("grok device code request failed: {e}"))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(format!(
+            "grok device code request failed: {status} - {text}"
+        ));
+    }
+
+    let payload = response
+        .json::<StandardDeviceCodeResponse>()
+        .await
+        .map_err(|e| format!("grok device code response parse failed: {e}"))?;
+
+    let verification_uri = payload
+        .verification_uri
+        .as_deref()
+        .or(payload.verification_uri_complete.as_deref())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| "grok device code response missing verification_uri".to_string())?
+        .to_string();
+
+    let expires_in = payload
+        .expires_in
+        .unwrap_or(GROK_DEVICE_CODE_DEFAULT_EXPIRES_IN);
+    let interval = payload
+        .interval
+        .unwrap_or(GROK_DEVICE_CODE_DEFAULT_INTERVAL_SECS)
+        .max(1)
+        + CODEX_DEVICE_POLLING_SAFETY_MARGIN_SECS;
+
+    Ok(ProviderOAuthDeviceCodeStartResult {
+        provider_id,
+        provider_type: adapter.provider_type().to_string(),
+        flow_id,
+        device_code: payload.device_code,
+        user_code: payload.user_code,
+        verification_uri,
+        expires_in,
+        interval,
+    })
+}
+
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn provider_oauth_poll_device_flow(
@@ -473,77 +629,99 @@ pub(crate) async fn provider_oauth_poll_device_flow(
         .await
         .map_err(Into::<String>::into)?;
 
-    if provider_cli_key != "codex" {
+    if !supports_device_code_login(&provider_cli_key) {
         return Err(format!(
-            "SEC_INVALID_INPUT: device code login is only supported for codex providers (provider_id={provider_id}, cli_key={provider_cli_key})"
+            "SEC_INVALID_INPUT: device code login is only supported for codex/grok providers (provider_id={provider_id}, cli_key={provider_cli_key})"
         ));
     }
 
     let adapter = crate::gateway::oauth::registry::global_registry()
-        .get_by_cli_key("codex")
-        .ok_or_else(|| "no OAuth adapter for cli_key=codex".to_string())?;
+        .get_by_cli_key(&provider_cli_key)
+        .ok_or_else(|| format!("no OAuth adapter for cli_key={provider_cli_key}"))?;
     let endpoints = adapter.endpoints();
     let client = crate::gateway::oauth::build_default_oauth_http_client()?;
 
-    let poll_response = client
-        .post(CODEX_DEVICE_AUTH_TOKEN_URL)
-        .header("Content-Type", "application/json")
-        .json(&serde_json::json!({
-            "device_auth_id": input.device_code,
-            "user_code": input.user_code,
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("device code poll failed: {e}"))?;
+    let oauth_token_set = if provider_cli_key == "grok" {
+        match poll_grok_device_token(
+            &client,
+            endpoints.token_url,
+            &endpoints.client_id,
+            &input.device_code,
+            &input.flow_id,
+        )
+        .await?
+        {
+            None => {
+                return Ok(ProviderOAuthDeviceCodePollResult {
+                    completed: false,
+                    provider_id,
+                    provider_type: adapter.provider_type().to_string(),
+                    expires_at: None,
+                });
+            }
+            Some(token_set) => token_set,
+        }
+    } else {
+        let poll_response = client
+            .post(CODEX_DEVICE_AUTH_TOKEN_URL)
+            .header("Content-Type", "application/json")
+            .json(&serde_json::json!({
+                "device_auth_id": input.device_code,
+                "user_code": input.user_code,
+            }))
+            .send()
+            .await
+            .map_err(|e| format!("device code poll failed: {e}"))?;
 
-    ensure_current_oauth_flow(&input.flow_id)?;
+        ensure_current_oauth_flow(&input.flow_id)?;
 
-    let status = poll_response.status();
-    if status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::NOT_FOUND {
-        return Ok(ProviderOAuthDeviceCodePollResult {
-            completed: false,
-            provider_id,
-            provider_type: adapter.provider_type().to_string(),
-            expires_at: None,
-        });
-    }
-    if status == reqwest::StatusCode::GONE {
-        crate::gateway::oauth::cancel_flow(&input.flow_id);
-        return Err("Device code 已过期，请重新开始登录。".to_string());
-    }
-    if !status.is_success() {
-        let text = poll_response.text().await.unwrap_or_default();
-        crate::gateway::oauth::cancel_flow(&input.flow_id);
-        return Err(format!("device code poll failed: {status} - {text}"));
-    }
+        let status = poll_response.status();
+        if status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(ProviderOAuthDeviceCodePollResult {
+                completed: false,
+                provider_id,
+                provider_type: adapter.provider_type().to_string(),
+                expires_at: None,
+            });
+        }
+        if status == reqwest::StatusCode::GONE {
+            crate::gateway::oauth::cancel_flow(&input.flow_id);
+            return Err("Device code 已过期，请重新开始登录。".to_string());
+        }
+        if !status.is_success() {
+            let text = poll_response.text().await.unwrap_or_default();
+            crate::gateway::oauth::cancel_flow(&input.flow_id);
+            return Err(format!("device code poll failed: {status} - {text}"));
+        }
 
-    let success = poll_response
-        .json::<CodexDevicePollSuccess>()
-        .await
-        .map_err(|e| format!("device code poll parse failed: {e}"))?;
+        let success = poll_response
+            .json::<CodexDevicePollSuccess>()
+            .await
+            .map_err(|e| format!("device code poll parse failed: {e}"))?;
 
-    ensure_current_oauth_flow(&input.flow_id)?;
+        ensure_current_oauth_flow(&input.flow_id)?;
 
-    let token_set = codex_exchange_device_code_for_tokens(
-        &client,
-        &endpoints.client_id,
-        &success.authorization_code,
-        &success.code_verifier,
-    )
-    .await?;
+        let token_set = codex_exchange_device_code_for_tokens(
+            &client,
+            &endpoints.client_id,
+            &success.authorization_code,
+            &success.code_verifier,
+        )
+        .await?;
 
-    let oauth_token_set = crate::gateway::oauth::provider_trait::OAuthTokenSet {
-        access_token: token_set.access_token,
-        refresh_token: token_set.refresh_token,
-        expires_at: compute_codex_expires_at(token_set.expires_in),
-        id_token: token_set.id_token,
+        crate::gateway::oauth::provider_trait::OAuthTokenSet {
+            access_token: token_set.access_token,
+            refresh_token: token_set.refresh_token,
+            expires_at: compute_codex_expires_at(token_set.expires_in),
+            id_token: token_set.id_token,
+        }
     };
 
     let (effective_token, id_token) =
         adapter.resolve_effective_token(&oauth_token_set, oauth_token_set.id_token.as_deref());
     let token_expires_at = oauth_token_set.expires_at;
     let provider_type = adapter.provider_type();
-    let (_, email) = extract_codex_identity(id_token.as_deref());
+    let email = extract_oauth_email(&provider_cli_key, id_token.as_deref());
 
     blocking::run("provider_oauth_poll_device_flow_save", move || {
         crate::gateway::oauth::complete_current_flow(&input.flow_id, || {
@@ -581,6 +759,97 @@ pub(crate) async fn provider_oauth_poll_device_flow(
         provider_type: provider_type.to_string(),
         expires_at: token_expires_at,
     })
+}
+
+/// Poll xAI token endpoint for RFC 8628 device authorization.
+/// Returns `Ok(None)` while the user has not yet approved (`authorization_pending` / `slow_down`).
+async fn poll_grok_device_token(
+    client: &reqwest::Client,
+    token_url: &str,
+    client_id: &str,
+    device_code: &str,
+    flow_id: &str,
+) -> Result<Option<crate::gateway::oauth::provider_trait::OAuthTokenSet>, String> {
+    use crate::gateway::oauth::adapters::grok::{grok_client_version, GROK_CLIENT_SURFACE_UI};
+
+    let client_version = grok_client_version();
+    // Match grok-build device-token poll identity headers.
+    let response = client
+        .post(token_url)
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .header("Accept", "application/json")
+        .header("x-grok-client-version", client_version.as_str())
+        .header("x-grok-client-surface", GROK_CLIENT_SURFACE_UI)
+        .form(&[
+            ("grant_type", OAUTH_DEVICE_CODE_GRANT_TYPE),
+            ("device_code", device_code),
+            ("client_id", client_id),
+        ])
+        .send()
+        .await
+        .map_err(|e| format!("grok device token poll failed: {e}"))?;
+
+    ensure_current_oauth_flow(flow_id)?;
+
+    let status = response.status();
+    let payload = response
+        .json::<StandardDeviceTokenResponse>()
+        .await
+        .map_err(|e| format!("grok device token poll parse failed: {e}"))?;
+
+    if let Some(error) = payload
+        .error
+        .as_deref()
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+    {
+        match error {
+            "authorization_pending" | "slow_down" => return Ok(None),
+            "expired_token" => {
+                crate::gateway::oauth::cancel_flow(flow_id);
+                return Err("Device code 已过期，请重新开始登录。".to_string());
+            }
+            "access_denied" => {
+                crate::gateway::oauth::cancel_flow(flow_id);
+                return Err("设备码授权被拒绝。".to_string());
+            }
+            other => {
+                crate::gateway::oauth::cancel_flow(flow_id);
+                let desc = payload
+                    .error_description
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|d| !d.is_empty())
+                    .unwrap_or(other);
+                return Err(format!("grok device token error: {desc}"));
+            }
+        }
+    }
+
+    if !status.is_success() {
+        crate::gateway::oauth::cancel_flow(flow_id);
+        return Err(format!(
+            "grok device token poll failed: {status} (no access_token)"
+        ));
+    }
+
+    let access_token = payload
+        .access_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .ok_or_else(|| {
+            crate::gateway::oauth::cancel_flow(flow_id);
+            "grok device token response missing access_token".to_string()
+        })?
+        .to_string();
+
+    Ok(Some(crate::gateway::oauth::provider_trait::OAuthTokenSet {
+        access_token,
+        refresh_token: payload.refresh_token,
+        expires_at: compute_expires_at_from_secs(payload.expires_in),
+        id_token: payload.id_token,
+    }))
 }
 
 #[tauri::command]

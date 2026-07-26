@@ -4,18 +4,35 @@
 //! Contract:
 //! - Backend emits `app:heartbeat` every 15s.
 //! - Frontend listens to `app:heartbeat` and invokes `app_heartbeat_pong` (fire-and-forget).
-//! - If backend sees no pong for 30s and the main window is visible (and not minimized),
-//!   it triggers recovery with exponential backoff + circuit breaker.
+//! - If backend sees no pong for 30s (60s while the window is hidden/minimized, to
+//!   tolerate OS throttling), it triggers recovery with exponential backoff.
 //!
-//! Recovery escalation:
-//! 1. Page-level reload (for normal white screen).
-//! 2. If error is unrecoverable (e.g. HRESULT 0x8007139F): mark webview broken,
-//!    attempt to destroy + rebuild the main window.
-//! 3. If rebuild fails or rebuild attempts exhausted: fallback to full app restart
-//!    with restart-storm protection via a marker file.
+//! Recovery escalation (visibility tunes behavior, it never blocks detection):
+//! 1. Page-level reload — runs even while the window is hidden in the tray, so a
+//!    WebView that dies in the background is repaired before the user opens it.
+//! 2. If error is unrecoverable (e.g. HRESULT 0x8007139F) or reloads are exhausted:
+//!    mark webview broken, destroy + rebuild the main window from the tauri.conf.json
+//!    window config, preserving its previous visibility (a hidden window is rebuilt
+//!    hidden, without stealing focus). At most `REBUILD_MAX_ATTEMPTS` consecutive
+//!    unconfirmed rebuilds per broken episode (a pong resets the budget).
+//! 3. If rebuild fails or the rebuild budget is exhausted: full app restart with
+//!    restart-storm protection via a marker file. Restart is deferred while the
+//!    window is hidden so ongoing gateway traffic is not killed behind the user's
+//!    back; a missing window is always restartable (there is nothing left to show).
+//!
+//! Every "wait for the frontend to confirm recovery" state carries a deadline
+//! (`recovery_confirm_deadline`): if no pong arrives in time the attempt counts as
+//! failed and escalation continues, so recovery can never deadlock waiting forever.
+//! Deferring never holds the confirm slot — only an actually-issued rebuild does.
+//! `on_main_window_shown` runs an immediate check when the window is shown or
+//! focused, so a user opening the window never stares at a white screen until the
+//! next tick; freshly shown windows get one heartbeat round-trip of grace before
+//! silence accrued under OS throttling is judged by the strict visible threshold.
+//! Checks are serialized by `check_in_progress` — the tick loop and show/focus
+//! hooks can never run two recovery passes concurrently.
 
 use serde::Serialize;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager};
@@ -29,16 +46,29 @@ const MAIN_WINDOW_LABEL: &str = "main";
 pub(crate) const HEARTBEAT_EVENT_NAME: &str = "app:heartbeat";
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 const PONG_TIMEOUT: Duration = Duration::from_secs(30);
+/// Hidden/minimized windows may have their timers throttled by the OS, so give
+/// them a longer grace period before treating pong silence as a dead WebView.
+const PONG_TIMEOUT_HIDDEN: Duration = Duration::from_secs(60);
+/// Until the very first pong of this process arrives, a hidden window (e.g.
+/// `start_minimized` on a slow cold start) gets an even longer allowance so a
+/// still-loading frontend is not reloaded mid-boot.
+const STARTUP_PONG_TIMEOUT_HIDDEN: Duration = Duration::from_secs(180);
+/// After the window becomes visible/focused, silence accrued while hidden is
+/// still judged by the lenient hidden threshold for this long — the frontend
+/// needs at least one heartbeat round-trip to prove itself after unthrottling.
+const RECENTLY_SHOWN_GRACE: Duration = Duration::from_secs(20);
+/// How long an escalated recovery (window rebuild) may wait for a confirming
+/// pong before the attempt is considered failed and escalation continues.
+const RECOVERY_CONFIRM_TIMEOUT: Duration = Duration::from_secs(90);
 
 const RECOVERY_BACKOFF_BASE: Duration = Duration::from_secs(30);
 const RECOVERY_BACKOFF_MAX: Duration = Duration::from_secs(5 * 60);
 
 const RECOVERY_CIRCUIT_THRESHOLD: u32 = 5;
 
-/// Maximum number of window rebuild attempts within `REBUILD_COOLDOWN` before
-/// escalating to a full app restart.
+/// Maximum number of consecutive unconfirmed window rebuild attempts before
+/// escalating to a full app restart. Reset by a pong.
 const REBUILD_MAX_ATTEMPTS: u32 = 3;
-const REBUILD_COOLDOWN: Duration = Duration::from_secs(120);
 
 /// If a restart marker file is younger than this duration at startup, we consider
 /// the app to be in a restart storm and refuse to auto-recover.
@@ -69,17 +99,22 @@ struct WatchdogSnapshot {
 #[derive(Debug)]
 struct WatchdogInner {
     last_pong_unix_ms: u64,
+    /// `true` once any pong has been received in this process — before that,
+    /// silence may just be a slow frontend boot, not a dead WebView.
+    has_received_pong: bool,
     recovery_streak: u32,
     next_recovery_allowed_unix_ms: u64,
     circuit_open_until_unix_ms: u64,
     last_timeout_logged_unix_ms: u64,
+    /// Throttles the recurring "restart deferred while hidden" warning.
+    last_deferred_restart_logged_unix_ms: u64,
+    /// Timestamp (unix ms) of the last show/focus of the main window.
+    last_shown_unix_ms: u64,
     /// Whether the WebView has been classified as unrecoverably broken
     /// (e.g. HRESULT 0x8007139F).
     webview_broken: bool,
-    /// Number of window rebuild attempts within the current cooldown window.
+    /// Number of consecutive unconfirmed rebuild attempts. Reset by a pong.
     rebuild_count: u32,
-    /// Timestamp (unix ms) of the first rebuild attempt in the current window.
-    first_rebuild_unix_ms: u64,
 }
 
 impl Default for WatchdogInner {
@@ -87,13 +122,15 @@ impl Default for WatchdogInner {
         let now = now_unix_millis();
         Self {
             last_pong_unix_ms: now,
+            has_received_pong: false,
             recovery_streak: 0,
             next_recovery_allowed_unix_ms: 0,
             circuit_open_until_unix_ms: 0,
             last_timeout_logged_unix_ms: 0,
+            last_deferred_restart_logged_unix_ms: 0,
+            last_shown_unix_ms: 0,
             webview_broken: false,
             rebuild_count: 0,
-            first_rebuild_unix_ms: 0,
         }
     }
 }
@@ -103,8 +140,17 @@ pub(crate) struct HeartbeatWatchdogState {
     /// `false` when the WebView is confirmed unresponsive (reload failed).
     /// Checked by event emitters to skip sending to a dead WebView.
     webview_alive: AtomicBool,
-    /// Prevents concurrent recovery attempts (rebuild / restart).
-    recovery_in_flight: AtomicBool,
+    /// Unix ms until which an escalated recovery (rebuild) is awaiting a
+    /// confirming pong. `0` means no recovery is awaiting confirmation.
+    /// Once the deadline passes without a pong the attempt counts as failed
+    /// and escalation continues — this can never deadlock recovery.
+    recovery_confirm_deadline_unix_ms: AtomicU64,
+    /// Set when a restart storm is detected: auto-recovery stays off for the
+    /// rest of the session so the storm dialog is shown exactly once.
+    auto_recovery_disabled: AtomicBool,
+    /// Serializes `check_and_recover_if_needed` — the tick loop and the
+    /// show/focus hooks must never run two recovery passes concurrently.
+    check_in_progress: AtomicBool,
 }
 
 impl Default for HeartbeatWatchdogState {
@@ -112,8 +158,19 @@ impl Default for HeartbeatWatchdogState {
         Self {
             inner: Mutex::new(WatchdogInner::default()),
             webview_alive: AtomicBool::new(true),
-            recovery_in_flight: AtomicBool::new(false),
+            recovery_confirm_deadline_unix_ms: AtomicU64::new(0),
+            auto_recovery_disabled: AtomicBool::new(false),
+            check_in_progress: AtomicBool::new(false),
         }
+    }
+}
+
+/// Clears `check_in_progress` on every exit path of a recovery check.
+struct CheckInProgressGuard<'a>(&'a AtomicBool);
+
+impl Drop for CheckInProgressGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
     }
 }
 
@@ -132,7 +189,8 @@ impl HeartbeatWatchdogState {
         let now = now_unix_millis();
         // A pong proves the WebView is alive.
         self.set_webview_alive(true);
-        self.recovery_in_flight.store(false, Ordering::Relaxed);
+        self.recovery_confirm_deadline_unix_ms
+            .store(0, Ordering::Release);
 
         let mut inner = self
             .inner
@@ -140,12 +198,12 @@ impl HeartbeatWatchdogState {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
 
         inner.last_pong_unix_ms = now;
+        inner.has_received_pong = true;
         inner.recovery_streak = 0;
         inner.next_recovery_allowed_unix_ms = 0;
         inner.circuit_open_until_unix_ms = 0;
         inner.webview_broken = false;
         inner.rebuild_count = 0;
-        inner.first_rebuild_unix_ms = 0;
     }
 
     fn snapshot(&self) -> WatchdogSnapshot {
@@ -177,25 +235,105 @@ impl HeartbeatWatchdogState {
         inner.webview_broken = true;
     }
 
-    /// Returns `true` if we can still attempt a window rebuild, `false` if
-    /// max attempts within cooldown have been exhausted.
+    /// Returns `true` if we can still attempt a window rebuild, `false` once
+    /// `REBUILD_MAX_ATTEMPTS` consecutive rebuilds went unconfirmed. Only a
+    /// pong (proof of a live WebView) resets the budget — a wall-clock window
+    /// would silently re-arm an endless rebuild loop.
     fn try_bump_rebuild_count(&self) -> bool {
-        let now = now_unix_millis();
         let mut inner = self
             .inner
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-
-        let cooldown_ms = REBUILD_COOLDOWN.as_millis() as u64;
-        if now.saturating_sub(inner.first_rebuild_unix_ms) > cooldown_ms {
-            // Reset the window.
-            inner.rebuild_count = 1;
-            inner.first_rebuild_unix_ms = now;
-            return true;
+        if inner.rebuild_count >= REBUILD_MAX_ATTEMPTS {
+            return false;
         }
+        inner.rebuild_count += 1;
+        true
+    }
 
-        inner.rebuild_count = inner.rebuild_count.saturating_add(1);
-        inner.rebuild_count <= REBUILD_MAX_ATTEMPTS
+    fn note_window_shown(&self, now_unix_ms: u64) {
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        inner.last_shown_unix_ms = now_unix_ms;
+    }
+
+    fn recently_shown(&self, now_unix_ms: u64) -> bool {
+        let inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        now_unix_ms.saturating_sub(inner.last_shown_unix_ms)
+            < RECENTLY_SHOWN_GRACE.as_millis() as u64
+    }
+
+    fn has_received_pong(&self) -> bool {
+        let inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        inner.has_received_pong
+    }
+
+    /// Rate-limits the recurring "restart deferred while hidden" warning.
+    fn should_log_deferred_restart(&self, now_unix_ms: u64) -> bool {
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if now_unix_ms.saturating_sub(inner.last_deferred_restart_logged_unix_ms) <= 60_000 {
+            return false;
+        }
+        inner.last_deferred_restart_logged_unix_ms = now_unix_ms;
+        true
+    }
+
+    fn recovery_confirm_deadline_unix_ms(&self) -> u64 {
+        self.recovery_confirm_deadline_unix_ms
+            .load(Ordering::Acquire)
+    }
+
+    fn clear_recovery_confirm_deadline(&self) {
+        self.recovery_confirm_deadline_unix_ms
+            .store(0, Ordering::Release);
+    }
+
+    /// Claim the escalated-recovery slot until `deadline_unix_ms`. Fails when a
+    /// previous attempt is still awaiting confirmation (deadline not yet passed).
+    fn try_claim_recovery_confirm(&self, now_unix_ms: u64, deadline_unix_ms: u64) -> bool {
+        let current = self
+            .recovery_confirm_deadline_unix_ms
+            .load(Ordering::Acquire);
+        if current != 0 && now_unix_ms < current {
+            return false;
+        }
+        self.recovery_confirm_deadline_unix_ms
+            .compare_exchange(
+                current,
+                deadline_unix_ms,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+    }
+
+    fn is_auto_recovery_disabled(&self) -> bool {
+        self.auto_recovery_disabled.load(Ordering::Relaxed)
+    }
+
+    fn disable_auto_recovery(&self) {
+        self.auto_recovery_disabled.store(true, Ordering::Relaxed);
+    }
+
+    /// Forget any scheduled backoff so the next check may act immediately.
+    /// The recovery streak is preserved: repeated failures still escalate.
+    fn clear_recovery_backoff(&self) {
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        inner.next_recovery_allowed_unix_ms = 0;
     }
 
     fn set_last_timeout_logged_unix_ms(&self, ts_unix_ms: u64) {
@@ -291,10 +429,73 @@ pub(crate) fn install(app: &tauri::AppHandle) {
     });
 }
 
+/// Called whenever the main window is shown or focused (tray click, dock icon,
+/// second instance, startup settings, OS-level unminimize/restore). If the
+/// WebView already looks dead, run a recovery check right away — the user
+/// should never stare at a white screen waiting for the next heartbeat tick or
+/// a stale backoff window.
+pub(crate) fn on_main_window_shown(app: &tauri::AppHandle) {
+    let Some(state) = app.try_state::<HeartbeatWatchdogState>() else {
+        return;
+    };
+
+    let now = now_unix_millis();
+    state.note_window_shown(now);
+
+    // The silence judged here accrued while the window was hidden/throttled,
+    // so use the lenient hidden allowance (and the startup allowance before
+    // the first pong) — a healthy-but-throttled frontend must get a chance to
+    // answer the next heartbeat instead of being reloaded on show.
+    let stale_after = if state.has_received_pong() {
+        PONG_TIMEOUT_HIDDEN
+    } else {
+        STARTUP_PONG_TIMEOUT_HIDDEN
+    };
+    let since_last_pong_ms = now.saturating_sub(state.snapshot().last_pong_unix_ms);
+    if since_last_pong_ms <= stale_after.as_millis() as u64 {
+        return;
+    }
+
+    state.clear_recovery_backoff();
+    tracing::warn!(
+        since_last_pong_ms,
+        "main window shown with a stale heartbeat, running immediate recovery check"
+    );
+
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        check_and_recover_if_needed(&app).await;
+    });
+}
+
 fn heartbeat_interval() -> tokio::time::Interval {
     let mut interval = tokio::time::interval(HEARTBEAT_INTERVAL);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     interval
+}
+
+/// Returns how long pong silence is tolerated for the current window state.
+///
+/// - Visible, settled window: strict 30s — a user is (potentially) looking at
+///   a white screen, recover fast.
+/// - Freshly shown/focused window: silence accrued under OS throttling while
+///   hidden must not be judged strictly; give one heartbeat round-trip.
+/// - Hidden window: lenient 60s (OS timer throttling), and until the very
+///   first pong of the process an even longer startup allowance so a slow
+///   `start_minimized` boot is not reloaded mid-load.
+fn pong_timeout_for(
+    window_visible: bool,
+    recently_shown: bool,
+    has_received_pong: bool,
+) -> Duration {
+    if window_visible && !recently_shown {
+        return PONG_TIMEOUT;
+    }
+    if has_received_pong {
+        PONG_TIMEOUT_HIDDEN
+    } else {
+        STARTUP_PONG_TIMEOUT_HIDDEN
+    }
 }
 
 async fn check_and_recover_if_needed(app: &tauri::AppHandle) {
@@ -304,10 +505,48 @@ async fn check_and_recover_if_needed(app: &tauri::AppHandle) {
 
     let now = now_unix_millis();
     let state = app.state::<HeartbeatWatchdogState>();
-    let snapshot = state.snapshot();
 
+    // Serialize recovery passes: the tick loop and the show/focus hooks may
+    // call in concurrently; a second pass would double reloads and streaks.
+    if state
+        .check_in_progress
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
+        .is_err()
+    {
+        return;
+    }
+    let _check_guard = CheckInProgressGuard(&state.check_in_progress);
+
+    let snapshot = state.snapshot();
     let since_last_pong_ms = now.saturating_sub(snapshot.last_pong_unix_ms);
+
+    // Cheap early-return on the global minimum threshold BEFORE any window
+    // query — window getters are blocking round-trips to the main thread and
+    // this path runs every 15s for the app's whole lifetime.
     if since_last_pong_ms <= PONG_TIMEOUT.as_millis() as u64 {
+        return;
+    }
+
+    // Visibility tunes the detection threshold and rebuild/restart behavior;
+    // it never blocks recovery — a WebView that dies while the window is
+    // hidden in the tray must be repaired before the user opens it again.
+    // Errors while querying window state default to "treat as visible" so a
+    // misreporting platform can never silently disable recovery. It is
+    // sampled ONCE here and threaded through the whole pass so reload,
+    // rebuild, and restart decisions can never disagree mid-recovery.
+    let window = app.get_webview_window(MAIN_WINDOW_LABEL);
+    let window_exists = window.is_some();
+    let window_visible = window
+        .as_ref()
+        .map(|w| w.is_visible().unwrap_or(true) && !w.is_minimized().unwrap_or(false))
+        .unwrap_or(false);
+
+    let pong_timeout = pong_timeout_for(
+        window_visible,
+        state.recently_shown(now),
+        state.has_received_pong(),
+    );
+    if since_last_pong_ms <= pong_timeout.as_millis() as u64 {
         return;
     }
 
@@ -315,36 +554,45 @@ async fn check_and_recover_if_needed(app: &tauri::AppHandle) {
         state.set_last_timeout_logged_unix_ms(now);
         tracing::warn!(
             since_last_pong_ms,
+            window_visible,
             "frontend heartbeat timeout detected (possible blank screen / freeze)"
         );
     }
 
-    // If recovery is already in flight (e.g. rebuild/restart), don't pile on.
-    if state.recovery_in_flight.load(Ordering::Relaxed) {
-        tracing::debug!("recovery already in flight, skipping");
+    if state.is_auto_recovery_disabled() {
+        // Restart storm was detected earlier in this session; the dialog has
+        // already told the user to restart manually.
         return;
+    }
+
+    // An escalated recovery is awaiting pong confirmation. Wait until its
+    // deadline; once it passes, the attempt counts as failed and we continue.
+    let confirm_deadline = state.recovery_confirm_deadline_unix_ms();
+    if confirm_deadline != 0 {
+        if now < confirm_deadline {
+            return;
+        }
+        state.clear_recovery_confirm_deadline();
+        tracing::warn!(
+            confirm_deadline,
+            "recovery attempt was not confirmed by a pong within the deadline, continuing escalation"
+        );
     }
 
     // If the WebView has been classified as broken (unrecoverable), skip page-level
     // recovery and go straight to the rebuild/restart path.
     if state.is_webview_broken() {
-        attempt_escalated_recovery(app).await;
+        attempt_escalated_recovery(app, window_visible, window_exists).await;
         return;
     }
 
-    let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
-        tracing::debug!("heartbeat watchdog: main window not found");
+    let Some(window) = window else {
+        tracing::warn!("heartbeat watchdog: main window not found, escalating to rebuild");
         // Window gone — treat as broken and try to rebuild.
         state.mark_webview_broken();
-        attempt_escalated_recovery(app).await;
+        attempt_escalated_recovery(app, window_visible, window_exists).await;
         return;
     };
-
-    let is_visible = window.is_visible().unwrap_or(false);
-    let is_minimized = window.is_minimized().unwrap_or(true);
-    if !is_visible || is_minimized {
-        return;
-    }
 
     match recovery_gate(now, snapshot) {
         RecoveryGate::Allowed => {}
@@ -380,7 +628,7 @@ async fn check_and_recover_if_needed(app: &tauri::AppHandle) {
         );
         state.mark_webview_broken();
         state.set_webview_alive(false);
-        attempt_escalated_recovery(app).await;
+        attempt_escalated_recovery(app, window_visible, window_exists).await;
         return;
     }
 
@@ -405,7 +653,7 @@ async fn check_and_recover_if_needed(app: &tauri::AppHandle) {
                 );
                 state.mark_webview_broken();
                 state.set_webview_alive(false);
-                attempt_escalated_recovery(app).await;
+                attempt_escalated_recovery(app, window_visible, window_exists).await;
             } else {
                 // WebView is confirmed unresponsive — gate all event emissions.
                 state.set_webview_alive(false);
@@ -422,8 +670,16 @@ async fn check_and_recover_if_needed(app: &tauri::AppHandle) {
 }
 
 /// Escalated recovery: try to rebuild the main window first; if that fails or
-/// attempts are exhausted, fall back to a full app restart.
-async fn attempt_escalated_recovery(app: &tauri::AppHandle) {
+/// the rebuild budget is exhausted, fall back to a full app restart.
+///
+/// `window_visible`/`window_exists` are the values sampled once by the calling
+/// check — re-querying here would let the reload/rebuild/restart decisions of
+/// one recovery pass disagree with each other.
+async fn attempt_escalated_recovery(
+    app: &tauri::AppHandle,
+    window_visible: bool,
+    window_exists: bool,
+) {
     if app_is_terminating(app) {
         tracing::debug!("explicit exit/restart in progress, skipping escalated recovery");
         return;
@@ -431,25 +687,36 @@ async fn attempt_escalated_recovery(app: &tauri::AppHandle) {
 
     let state = app.state::<HeartbeatWatchdogState>();
 
-    // Prevent concurrent recovery.
-    if state
-        .recovery_in_flight
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
-        .is_err()
-    {
-        tracing::debug!("escalated recovery already in flight");
+    // Claim the recovery slot until the confirm deadline. A previous attempt
+    // that is still within its deadline blocks new attempts; an expired one
+    // does not — recovery can always make progress.
+    let now = now_unix_millis();
+    let deadline = now.saturating_add(RECOVERY_CONFIRM_TIMEOUT.as_millis() as u64);
+    if !state.try_claim_recovery_confirm(now, deadline) {
+        tracing::debug!("escalated recovery already awaiting confirmation");
+        return;
+    }
+
+    // A pong may have arrived between the caller's staleness snapshot and this
+    // claim; never destroy a WebView that has just proven itself alive.
+    if now.saturating_sub(state.snapshot().last_pong_unix_ms) <= PONG_TIMEOUT.as_millis() as u64 {
+        state.clear_recovery_confirm_deadline();
+        tracing::info!("pong arrived during escalation, aborting recovery");
         return;
     }
 
     // Check rebuild budget.
+    let mut rebuild_exhausted = false;
     if state.try_bump_rebuild_count() {
-        tracing::warn!("attempting main window rebuild");
-        match rebuild_main_window(app) {
+        tracing::warn!(window_visible, "attempting main window rebuild");
+        match rebuild_main_window(app, window_visible) {
             Ok(()) => {
                 tracing::info!(
-                    "main window rebuilt successfully, waiting for frontend pong to confirm recovery"
+                    confirm_timeout_s = RECOVERY_CONFIRM_TIMEOUT.as_secs(),
+                    "main window rebuilt, waiting for frontend pong to confirm recovery"
                 );
-                // Keep recovery_in_flight=true until a pong arrives (record_pong clears it).
+                // The claimed confirm deadline stays set: a pong clears it,
+                // otherwise the next check after the deadline escalates again.
                 return;
             }
             Err(err) => {
@@ -458,10 +725,32 @@ async fn attempt_escalated_recovery(app: &tauri::AppHandle) {
             }
         }
     } else {
+        rebuild_exhausted = true;
+    }
+
+    // A full restart tears down the gateway and kills in-flight upstream
+    // requests. Never do that behind the user's back: while a window exists
+    // but is hidden, wait for it to be shown (`on_main_window_shown` runs an
+    // immediate check then). A MISSING window is always restartable — it can
+    // never be "shown", so deferring would leave a permanent headless zombie.
+    if window_exists && !window_visible {
+        // Nothing is awaiting pong confirmation — release the slot so the
+        // show-triggered check can escalate immediately instead of stalling
+        // on a deadline that guards no action.
+        state.clear_recovery_confirm_deadline();
+        if state.should_log_deferred_restart(now) {
+            tracing::warn!(
+                rebuild_exhausted,
+                "webview broken while window is hidden; deferring app restart until the window is shown"
+            );
+        }
+        return;
+    }
+
+    if rebuild_exhausted {
         tracing::warn!(
             max = REBUILD_MAX_ATTEMPTS,
-            cooldown_s = REBUILD_COOLDOWN.as_secs(),
-            "window rebuild attempts exhausted within cooldown, escalating to app restart"
+            "consecutive window rebuilds went unconfirmed, escalating to app restart"
         );
     }
 
@@ -469,11 +758,14 @@ async fn attempt_escalated_recovery(app: &tauri::AppHandle) {
     escalate_to_app_restart(app).await;
 }
 
-/// Destroy the current main window and recreate it with the same configuration.
-fn rebuild_main_window(app: &tauri::AppHandle) -> Result<(), AppError> {
+/// Destroy the current main window and recreate it from the tauri.conf.json
+/// window config (so titleBarStyle/hiddenTitle/etc. survive recovery), with
+/// only visibility overridden: a window hidden in the tray is rebuilt hidden,
+/// so background recovery never pops a window or steals focus.
+fn rebuild_main_window(app: &tauri::AppHandle, show: bool) -> Result<(), AppError> {
     // Destroy old window if it still exists.
     if let Some(old_window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-        tracing::info!("destroying old main window");
+        tracing::info!(show, "destroying old main window");
         if let Err(err) = old_window.destroy() {
             tracing::warn!(error = %err, "failed to destroy old main window, continuing with rebuild");
         }
@@ -482,24 +774,48 @@ fn rebuild_main_window(app: &tauri::AppHandle) -> Result<(), AppError> {
     // Small delay to allow the old window resources to be released.
     std::thread::sleep(Duration::from_millis(100));
 
-    // Rebuild with the same settings as tauri.conf.json.
-    let url = tauri::WebviewUrl::App("index.html".into());
-    let new_window = tauri::webview::WebviewWindowBuilder::new(app, MAIN_WINDOW_LABEL, url)
-        .title("AIO Coding Hub")
-        .inner_size(1500.0, 900.0)
-        .build()
-        .map_err(|e| {
-            AppError::new(
-                "WINDOW_REBUILD_FAILED",
-                format!("failed to build window: {e}"),
-            )
-        })?;
+    let map_build_err = |e: tauri::Error| {
+        AppError::new(
+            "WINDOW_REBUILD_FAILED",
+            format!("failed to build window: {e}"),
+        )
+    };
+
+    let window_config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == MAIN_WINDOW_LABEL)
+        .cloned();
+
+    let new_window = match window_config {
+        Some(mut config) => {
+            config.visible = show;
+            tauri::webview::WebviewWindowBuilder::from_config(app, &config)
+                .map_err(map_build_err)?
+                .build()
+                .map_err(map_build_err)?
+        }
+        None => {
+            // No config entry for the main window (should not happen) —
+            // fall back to a minimal window rather than giving up.
+            let url = tauri::WebviewUrl::App("index.html".into());
+            tauri::webview::WebviewWindowBuilder::new(app, MAIN_WINDOW_LABEL, url)
+                .title("AIO Coding Hub")
+                .inner_size(1500.0, 900.0)
+                .visible(show)
+                .build()
+                .map_err(map_build_err)?
+        }
+    };
     crate::app::window_chrome::apply_main_window_chrome(&new_window);
 
-    // Make the window visible and focused.
-    let _ = new_window.show();
-    let _ = new_window.unminimize();
-    let _ = new_window.set_focus();
+    if show {
+        let _ = new_window.show();
+        let _ = new_window.unminimize();
+        let _ = new_window.set_focus();
+    }
 
     Ok(())
 }
@@ -518,6 +834,8 @@ async fn escalate_to_app_restart(app: &tauri::AppHandle) {
              The user will need to restart the app manually.",
             RESTART_STORM_WINDOW.as_secs()
         );
+        app.state::<HeartbeatWatchdogState>()
+            .disable_auto_recovery();
         show_restart_storm_dialog(app);
         return;
     }
@@ -826,21 +1144,117 @@ mod tests {
         for _ in 0..REBUILD_MAX_ATTEMPTS {
             assert!(state.try_bump_rebuild_count());
         }
-        // Next one should fail (budget exhausted).
+        // Budget stays exhausted no matter how much time passes — only a pong
+        // (proof of a live WebView) re-arms it, never the wall clock.
         assert!(!state.try_bump_rebuild_count());
+        assert!(!state.try_bump_rebuild_count());
+
+        state.record_pong();
+        assert!(state.try_bump_rebuild_count());
     }
 
     #[test]
-    fn recovery_in_flight_prevents_concurrent_recovery() {
+    fn recovery_confirm_deadline_prevents_concurrent_recovery_until_expiry() {
         let state = HeartbeatWatchdogState::default();
-        assert!(!state.recovery_in_flight.load(Ordering::Relaxed));
+        let now = 10_000u64;
+        let deadline = now + RECOVERY_CONFIRM_TIMEOUT.as_millis() as u64;
 
-        state.recovery_in_flight.store(true, Ordering::Relaxed);
-        assert!(state.recovery_in_flight.load(Ordering::Relaxed));
+        // First claim succeeds.
+        assert!(state.try_claim_recovery_confirm(now, deadline));
+        assert_eq!(state.recovery_confirm_deadline_unix_ms(), deadline);
 
-        // Pong clears it.
+        // A concurrent claim before the deadline is rejected.
+        assert!(!state.try_claim_recovery_confirm(now + 1_000, deadline + 1_000));
+
+        // Once the deadline passes, the slot can be reclaimed — the previous
+        // unconfirmed attempt can never deadlock recovery.
+        let later = deadline + 1;
+        assert!(state.try_claim_recovery_confirm(later, later + 90_000));
+        assert_eq!(state.recovery_confirm_deadline_unix_ms(), later + 90_000);
+    }
+
+    #[test]
+    fn pong_clears_recovery_confirm_deadline() {
+        let state = HeartbeatWatchdogState::default();
+        assert!(state.try_claim_recovery_confirm(1_000, 91_000));
+
         state.record_pong();
-        assert!(!state.recovery_in_flight.load(Ordering::Relaxed));
+        assert_eq!(state.recovery_confirm_deadline_unix_ms(), 0);
+    }
+
+    #[test]
+    fn pong_timeout_matrix_covers_visibility_grace_and_startup() {
+        // Settled visible window: strict threshold.
+        assert_eq!(pong_timeout_for(true, false, true), PONG_TIMEOUT);
+        // Hidden window: lenient threshold once the frontend has ponged.
+        assert_eq!(pong_timeout_for(false, false, true), PONG_TIMEOUT_HIDDEN);
+        // Freshly shown window: silence accrued while hidden gets the lenient
+        // threshold for one heartbeat round-trip.
+        assert_eq!(pong_timeout_for(true, true, true), PONG_TIMEOUT_HIDDEN);
+        // Before the first pong (slow start_minimized boot): startup allowance.
+        assert_eq!(
+            pong_timeout_for(false, false, false),
+            STARTUP_PONG_TIMEOUT_HIDDEN
+        );
+        assert_eq!(
+            pong_timeout_for(true, true, false),
+            STARTUP_PONG_TIMEOUT_HIDDEN
+        );
+        // Visible settled window recovers fast even before the first pong
+        // (startup white screens must still be repaired quickly).
+        assert_eq!(pong_timeout_for(true, false, false), PONG_TIMEOUT);
+        assert!(PONG_TIMEOUT_HIDDEN > PONG_TIMEOUT);
+        assert!(STARTUP_PONG_TIMEOUT_HIDDEN > PONG_TIMEOUT_HIDDEN);
+    }
+
+    #[test]
+    fn recently_shown_grace_window() {
+        let state = HeartbeatWatchdogState::default();
+        assert!(!state.recently_shown(now_unix_millis()));
+
+        let now = 100_000u64;
+        state.note_window_shown(now);
+        assert!(state.recently_shown(now + RECENTLY_SHOWN_GRACE.as_millis() as u64 - 1));
+        assert!(!state.recently_shown(now + RECENTLY_SHOWN_GRACE.as_millis() as u64));
+    }
+
+    #[test]
+    fn first_pong_flips_has_received_pong() {
+        let state = HeartbeatWatchdogState::default();
+        assert!(!state.has_received_pong());
+
+        state.record_pong();
+        assert!(state.has_received_pong());
+    }
+
+    #[test]
+    fn deferred_restart_log_is_throttled() {
+        let state = HeartbeatWatchdogState::default();
+        assert!(state.should_log_deferred_restart(100_000));
+        assert!(!state.should_log_deferred_restart(100_000 + 60_000));
+        assert!(state.should_log_deferred_restart(100_000 + 60_001));
+    }
+
+    #[test]
+    fn clear_recovery_backoff_resets_schedule_but_keeps_streak() {
+        let state = HeartbeatWatchdogState::default();
+        let streak = state.bump_recovery_streak();
+        state.schedule_next_recovery(streak, 1_000);
+        assert!(state.snapshot().next_recovery_allowed_unix_ms > 0);
+
+        state.clear_recovery_backoff();
+        assert_eq!(state.snapshot().next_recovery_allowed_unix_ms, 0);
+        // Streak is preserved so repeated failures still escalate.
+        assert_eq!(state.bump_recovery_streak(), streak + 1);
+    }
+
+    #[test]
+    fn auto_recovery_disabled_lifecycle() {
+        let state = HeartbeatWatchdogState::default();
+        assert!(!state.is_auto_recovery_disabled());
+
+        state.disable_auto_recovery();
+        assert!(state.is_auto_recovery_disabled());
     }
 
     #[test]

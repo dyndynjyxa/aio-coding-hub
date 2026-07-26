@@ -144,6 +144,7 @@ describe("services/cli/cliProxy", () => {
 
   it("rejects invalid cli keys and base origins before generated commands", async () => {
     expect(validateCliProxyCliKey(" codex ")).toBe("codex");
+    expect(validateCliProxyCliKey(" grok ")).toBe("grok");
     expect(normalizeCliProxyBaseOrigin(" http://127.0.0.1:37123/ ")).toBe("http://127.0.0.1:37123");
     expect(normalizeCliProxyBaseOrigin("https://example.com")).toBe("https://example.com");
     expect(() => validateCliProxyCliKey("unknown")).toThrow("SEC_INVALID_INPUT");

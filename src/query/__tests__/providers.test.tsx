@@ -1,6 +1,10 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
-import type { ProviderSummary } from "../../services/providers/providers";
+import type {
+  ProviderOAuthStatusResult,
+  ProviderSummary,
+} from "../../services/providers/providers";
 import {
   providerOAuthFetchLimits,
   providerOAuthResetCodexQuota,
@@ -17,6 +21,7 @@ import {
 import { gatewayCircuitResetProvider } from "../../services/gateway/gateway";
 import {
   fetchProviderOAuthStatus,
+  writeProviderOAuthStatusCache,
   readProviderOAuthLimitsCache,
   refreshProviderOAuthLimits,
   resetProviderOAuthCodexQuota,
@@ -237,6 +242,86 @@ describe("query/providers", () => {
     expect(providerOAuthStatus).toHaveBeenCalledWith(9);
     expect(client.getQueryData(providersKeys.oauthStatus(9))).toEqual(status);
     expect(client.getQueryState(providersKeys.oauthStatus(Number.NaN))).toBeUndefined();
+  });
+
+  it("fetchProviderOAuthStatus refetches from network even when cache is fresh by staleTime", async () => {
+    setTauriRuntime();
+
+    // 还原生产配置：全局 staleTime 5 分钟（见 src/query/queryClient.ts）。
+    // 旧实现的 fetchQuery 会直接返回刷新前的缓存，导致「到期」时间不更新。
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 5 * 60 * 1000 } },
+    });
+    const stale: ProviderOAuthStatusResult = {
+      connected: true,
+      provider_type: "grok_oauth",
+      email: "user@example.com",
+      expires_at: 1_700_000_000,
+      has_refresh_token: true,
+    };
+    const fresh: ProviderOAuthStatusResult = { ...stale, expires_at: 1_800_000_000 };
+    client.setQueryData(providersKeys.oauthStatus(9), stale);
+    vi.mocked(providerOAuthStatus).mockResolvedValue(fresh);
+
+    await expect(fetchProviderOAuthStatus(client, 9)).resolves.toEqual(fresh);
+    expect(providerOAuthStatus).toHaveBeenCalledWith(9);
+    expect(client.getQueryData(providersKeys.oauthStatus(9))).toEqual(fresh);
+  });
+
+  it("fetchProviderOAuthStatus cancels an in-flight request so a stale late response cannot overwrite", async () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    const queryKey = providersKeys.oauthStatus(9);
+    const stale: ProviderOAuthStatusResult = {
+      connected: true,
+      provider_type: "grok_oauth",
+      email: "user@example.com",
+      expires_at: 1_700_000_000,
+      has_refresh_token: true,
+    };
+    const fresh: ProviderOAuthStatusResult = { ...stale, expires_at: 1_800_000_000 };
+
+    let resolveStale!: (value: ProviderOAuthStatusResult) => void;
+    vi.mocked(providerOAuthStatus)
+      .mockImplementationOnce(() => new Promise((resolve) => (resolveStale = resolve)))
+      .mockResolvedValueOnce(fresh);
+
+    // 模拟一个刷新前就已发出、迟迟未返回的 status 请求（例如后台 refetch）。
+    const inflight = client
+      .fetchQuery({ queryKey, queryFn: () => providerOAuthStatus(9) })
+      .catch(() => null); // 被取消时以 CancelledError 拒绝
+
+    await expect(fetchProviderOAuthStatus(client, 9)).resolves.toEqual(fresh);
+
+    // 旧请求这时才带着刷新前的数据返回——不应覆盖新数据。
+    resolveStale(stale);
+    await inflight;
+    expect(client.getQueryData(queryKey)).toEqual(fresh);
+  });
+
+  it("writeProviderOAuthStatusCache writes status, clears with null, and skips null providerId", () => {
+    const client = createTestQueryClient();
+    const status: ProviderOAuthStatusResult = {
+      connected: true,
+      provider_type: "grok_oauth",
+      email: "user@example.com",
+      expires_at: 1_800_000_000,
+      has_refresh_token: true,
+    };
+
+    writeProviderOAuthStatusCache(client, 9, status);
+    expect(client.getQueryData(providersKeys.oauthStatus(9))).toEqual(status);
+
+    writeProviderOAuthStatusCache(client, 9, null);
+    expect(client.getQueryData(providersKeys.oauthStatus(9))).toBeNull();
+
+    writeProviderOAuthStatusCache(client, null, status);
+    expect(client.getQueryCache().getAll()).toHaveLength(1);
+
+    expect(() => writeProviderOAuthStatusCache(client, Number.NaN, status)).toThrow(
+      "SEC_INVALID_INPUT"
+    );
   });
 
   it("normalizes OAuth limits providerId before cache reads, refreshes, and query calls", async () => {

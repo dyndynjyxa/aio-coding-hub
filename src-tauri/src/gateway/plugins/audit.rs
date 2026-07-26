@@ -23,6 +23,30 @@ pub(crate) fn persist_gateway_plugin_diagnostics(
     events: Vec<GatewayPluginAuditEvent>,
     reports: Vec<GatewayPluginHookExecutionReport>,
 ) {
+    if events.is_empty() && reports.is_empty() {
+        return;
+    }
+
+    // Callers sit on the request/stream hot path; run the rusqlite writes on the
+    // bounded blocking pool instead of the async worker. Best-effort: failures are
+    // logged inside the blocking body, join errors by blocking::run itself.
+    let db = db.clone();
+    let trace_id = trace_id.to_string();
+    tauri::async_runtime::spawn(async move {
+        let _ = crate::blocking::run("gateway_plugin_audit_persist", move || {
+            persist_gateway_plugin_diagnostics_blocking(&db, &trace_id, events, reports);
+            Ok::<_, crate::shared::error::AppError>(())
+        })
+        .await;
+    });
+}
+
+fn persist_gateway_plugin_diagnostics_blocking(
+    db: &crate::db::Db,
+    trace_id: &str,
+    events: Vec<GatewayPluginAuditEvent>,
+    reports: Vec<GatewayPluginHookExecutionReport>,
+) {
     for event in events {
         if let Err(err) = repository::append_audit_log(
             db,

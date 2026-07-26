@@ -9,6 +9,8 @@ import type { CliSessionsFolderLookupEntry } from "../../services/cli/cliSession
 import type { CliKey } from "../../services/providers/providers";
 import type { ProjectedRealtimeCard } from "../../services/gateway/requestActivityProjection";
 import { REALTIME_TRACE_EXIT_START_MS } from "../../services/gateway/requestActivityProjection";
+import { requestLogActiveActivityState } from "../../services/gateway/requestLogState";
+import { hasFailoverFromSegments } from "../../services/gateway/traceRoute";
 import { cn } from "../../utils/cn";
 import {
   computeOutputTokensPerSecond,
@@ -20,14 +22,9 @@ import {
   sanitizeTtfbMs,
 } from "../../utils/formatters";
 import { Clock, Server, CheckCircle2, XCircle } from "lucide-react";
-import {
-  computeEffectiveInputTokens,
-  computeStatusBadge,
-  FolderBadge,
-  formatClaudeModelMappingText,
-  FreeBadge,
-  SessionReuseBadge,
-} from "./HomeLogShared";
+import { computeStatusBadge, resolveCacheCreationDisplay } from "./requestLogPresentation";
+import { FolderBadge, FreeBadge, SessionReuseBadge } from "./LogBadges";
+import { formatClaudeModelMappingText } from "./requestLogSpecialSettings";
 import { CliBrandIcon } from "./CliBrandIcon";
 import { getErrorCodeLabel } from "./requestLogErrorLabels";
 
@@ -68,12 +65,10 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
   formatUnixSeconds,
   showCustomTooltip,
 }: RealtimeTraceCardsProps) {
-  const visibleTraces = useMemo(() => cards.map((card) => card.trace), [cards]);
-
   // Compute a batch-aligned exit threshold: if multiple traces completed within
   // BATCH_EXIT_WINDOW_MS of each other, they all exit when the earliest one would.
   const batchExitThresholdMs = useMemo(() => {
-    const completedTraces = visibleTraces.filter((t) => t.summary);
+    const completedTraces = cards.flatMap((card) => (card.kind === "settling" ? [card.trace] : []));
     if (completedTraces.length <= 1) return null;
     // Find earliest completion
     const earliestLastSeen = Math.min(...completedTraces.map((t) => t.last_seen_ms));
@@ -83,24 +78,24 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
       return earliestLastSeen + REALTIME_TRACE_EXIT_START_MS;
     }
     return null;
-  }, [visibleTraces]);
+  }, [cards]);
 
   return (
     <>
-      {visibleTraces.map((trace) => {
-        const completedAgeMs = trace.summary ? Math.max(0, nowMs - trace.last_seen_ms) : 0;
+      {cards.map((card) => {
+        const trace = card.trace;
+        const summary = card.kind === "settling" ? card.trace.summary : null;
+        const isInProgress = card.kind === "active";
+        const completedAgeMs = summary ? Math.max(0, nowMs - trace.last_seen_ms) : 0;
         const isExiting =
-          Boolean(trace.summary) &&
+          summary != null &&
           (batchExitThresholdMs != null
             ? nowMs >= batchExitThresholdMs
             : completedAgeMs >= REALTIME_TRACE_EXIT_START_MS);
-        const runningMs = trace.summary
-          ? trace.summary.duration_ms
-          : Math.max(0, nowMs - trace.first_seen_ms);
+        const runningMs = summary?.duration_ms ?? Math.max(0, nowMs - trace.first_seen_ms);
 
-        const summaryStatus = trace.summary?.status ?? null;
-        const summaryErrorCode = trace.summary?.error_code ?? null;
-        const isInProgress = !trace.summary;
+        const summaryStatus = summary?.status ?? null;
+        const summaryErrorCode = summary?.error_code ?? null;
 
         const attemptRoute = (() => {
           const sortedAttempts = (trace.attempts ?? [])
@@ -147,9 +142,8 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
           return { providerText, startProvider, endProvider, segments: segs };
         })();
 
-        const hasFailover =
-          attemptRoute.segments.length > 1 ||
-          attemptRoute.segments.some((s) => s.status === "failed");
+        // 与落库后徽章同规则（见 traceRoute.ts，复刻后端 has_failover）。
+        const hasFailover = hasFailoverFromSegments(attemptRoute.segments);
 
         const statusBadge = computeStatusBadge({
           status: summaryStatus,
@@ -166,7 +160,9 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
           (attempt) => attempt.session_reuse === true
         );
         let latestAttempt: NonNullable<typeof trace.attempts>[number] | undefined;
+        let attemptCount = trace.attempts?.length ?? 0;
         for (const attempt of trace.attempts ?? []) {
+          attemptCount = Math.max(attemptCount, attempt.attempt_index);
           if (!latestAttempt || attempt.attempt_index > latestAttempt.attempt_index) {
             latestAttempt = attempt;
           }
@@ -195,53 +191,21 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
         );
         const cliLabel = cliShortLabel(trace.cli_key);
 
-        const cacheWrite = (() => {
-          const s = trace.summary;
-          if (!s)
-            return {
-              tokens: null as number | null,
-              ttl: null as "5m" | "1h" | null,
-            };
-          // 优先 5m，其次 1h，最后用 cache_creation_input_tokens 汇总
-          if (s.cache_creation_5m_input_tokens != null && s.cache_creation_5m_input_tokens > 0) {
-            return { tokens: s.cache_creation_5m_input_tokens, ttl: "5m" as const };
-          }
-          if (s.cache_creation_1h_input_tokens != null && s.cache_creation_1h_input_tokens > 0) {
-            return { tokens: s.cache_creation_1h_input_tokens, ttl: "1h" as const };
-          }
-          if (s.cache_creation_input_tokens != null && s.cache_creation_input_tokens > 0) {
-            return { tokens: s.cache_creation_input_tokens, ttl: null };
-          }
-          if (s.cache_creation_5m_input_tokens != null) {
-            return { tokens: s.cache_creation_5m_input_tokens, ttl: "5m" as const };
-          }
-          if (s.cache_creation_1h_input_tokens != null) {
-            return { tokens: s.cache_creation_1h_input_tokens, ttl: "1h" as const };
-          }
-          if (s.cache_creation_input_tokens != null) {
-            return { tokens: s.cache_creation_input_tokens, ttl: null };
-          }
-          return { tokens: null as number | null, ttl: null as "5m" | "1h" | null };
-        })();
+        const cacheWrite = summary ? resolveCacheCreationDisplay(summary) : null;
 
-        const ttfbMs = trace.summary
-          ? sanitizeTtfbMs(trace.summary.ttfb_ms ?? null, trace.summary.duration_ms)
+        const ttfbMs = summary
+          ? sanitizeTtfbMs(summary.ttfb_ms ?? null, summary.duration_ms)
           : null;
 
-        const effectiveInputTokens = computeEffectiveInputTokens(
-          trace.cli_key,
-          trace.summary?.input_tokens ?? null,
-          trace.summary?.cache_read_input_tokens ?? null
-        );
+        const effectiveInputTokens = summary?.effective_input_tokens ?? null;
         const displayInputTokens = effectiveInputTokens ?? (isClientAbort ? 0 : null);
-        const displayOutputTokens = trace.summary?.output_tokens ?? (isClientAbort ? 0 : null);
+        const displayOutputTokens = summary?.output_tokens ?? (isClientAbort ? 0 : null);
         const displayCacheReadTokens =
-          trace.summary?.cache_read_input_tokens ?? (isClientAbort ? 0 : null);
-        const displayCacheWriteTokens = cacheWrite.tokens ?? (isClientAbort ? 0 : null);
-        const displayCostUsd = trace.summary?.cost_usd ?? (isClientAbort ? 0 : null);
+          summary?.cache_read_input_tokens ?? (isClientAbort ? 0 : null);
+        const displayCostUsd = summary?.cost_usd ?? (isClientAbort ? 0 : null);
         const displayCostText = displayCostUsd == null ? "—" : formatUsd(displayCostUsd);
         const costMultiplier =
-          typeof trace.summary?.cost_multiplier === "number" ? trace.summary.cost_multiplier : null;
+          typeof summary?.cost_multiplier === "number" ? summary.cost_multiplier : null;
         const isFree = costMultiplier === 0;
         const showCostMultiplier =
           costMultiplier != null && costMultiplier >= 0 && Math.abs(costMultiplier - 1) > 0.0001;
@@ -251,8 +215,8 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
             ? `x${costMultiplier.toFixed(2)}`
             : null;
 
-        const outputTokensPerSecond = trace.summary
-          ? computeOutputTokensPerSecond(displayOutputTokens, trace.summary.duration_ms, ttfbMs)
+        const outputTokensPerSecond = summary
+          ? computeOutputTokensPerSecond(displayOutputTokens, summary.duration_ms, ttfbMs)
           : null;
         const displayOutputTokensPerSecond =
           outputTokensPerSecond ?? (isClientAbort && displayOutputTokens === 0 ? 0 : null);
@@ -269,8 +233,23 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
               ? attemptRoute.segments.map((seg) => seg.provider).join(" → ")
               : null;
         const providerTitle = providerText;
+        const idleMinutes = (() => {
+          if (card.kind !== "active") return null;
+          const activeRequest = card.activeRequest;
+          if (
+            requestLogActiveActivityState(activeRequest.last_activity_ms, nowMs) !==
+            "in_progress_idle"
+          ) {
+            return null;
+          }
+          return Math.max(
+            1,
+            Math.floor(Math.max(0, nowMs - activeRequest.last_activity_ms) / 60_000)
+          );
+        })();
         const liveStageText = (() => {
           if (!isInProgress) return null;
+          if (idleMinutes != null) return `已静默 ${idleMinutes} 分钟`;
           if (!latestAttempt) return "等待首个尝试";
           if (hasFailover) return "切换处理中";
           if (latestAttempt.outcome === "started") return "处理中";
@@ -409,7 +388,7 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                     >
                       <div className={LIVE_METRIC_LABEL}>尝试次数</div>
                       <div className={cn(LIVE_METRIC_VALUE, "font-mono tabular-nums")}>
-                        {formatInteger(trace.attempts.length)}
+                        {formatInteger(attemptCount)}
                       </div>
                     </div>
                     <div
@@ -468,25 +447,21 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                           {formatInteger(displayInputTokens)}
                         </span>
                       </div>
-                      <div className="flex items-center gap-1 h-4" title="Cache Write">
-                        <span className="text-slate-400 dark:text-slate-500 font-medium shrink-0">
-                          缓存创建
-                        </span>
-                        {displayCacheWriteTokens != null ? (
-                          <>
-                            <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 font-semibold truncate">
-                              {formatInteger(displayCacheWriteTokens)}
+                      {cacheWrite ? (
+                        <div className="flex items-center gap-1 h-4" title="Cache Write">
+                          <span className="text-slate-400 dark:text-slate-500 font-medium shrink-0">
+                            缓存创建
+                          </span>
+                          <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 font-semibold truncate">
+                            {formatInteger(cacheWrite.tokens)}
+                          </span>
+                          {cacheWrite.ttl && cacheWrite.tokens > 0 ? (
+                            <span className="text-slate-400/70 dark:text-slate-500/70 text-[10px]">
+                              ({cacheWrite.ttl})
                             </span>
-                            {cacheWrite.ttl && displayCacheWriteTokens > 0 && (
-                              <span className="text-slate-400/70 dark:text-slate-500/70 text-[10px]">
-                                ({cacheWrite.ttl})
-                              </span>
-                            )}
-                          </>
-                        ) : (
-                          <span className="text-slate-300 dark:text-slate-700">—</span>
-                        )}
-                      </div>
+                          ) : null}
+                        </div>
+                      ) : null}
                       <div className="flex items-center gap-1 h-4" title="TTFB">
                         <span className="text-slate-400 dark:text-slate-500 font-medium shrink-0">
                           首字

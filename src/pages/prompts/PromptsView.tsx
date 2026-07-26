@@ -22,7 +22,8 @@ import { Spinner } from "../../ui/Spinner";
 import { Switch } from "../../ui/Switch";
 import { Textarea } from "../../ui/Textarea";
 import { cn } from "../../utils/cn";
-import { formatUnknownError } from "../../utils/errors";
+import { AppErrorCodes } from "../../constants/appErrorCodes";
+import { formatUnknownError, parseErrorCodeMessage } from "../../utils/errors";
 
 function promptFileHint(cliKey: CliKey) {
   switch (cliKey) {
@@ -32,6 +33,8 @@ function promptFileHint(cliKey: CliKey) {
       return "~/.codex/AGENTS.md";
     case "gemini":
       return "~/.gemini/GEMINI.md";
+    case "grok":
+      return "~/.grok/AGENTS.md";
     default:
       return "~";
   }
@@ -46,17 +49,15 @@ function previewContent(content: string) {
 
 function formatPromptSaveToast(raw: string) {
   const msg = raw.trim();
+  const { error_code } = parseErrorCodeMessage(msg);
 
-  if (msg.includes("DB_CONSTRAINT:") && msg.includes("prompt") && msg.includes("name=")) {
+  if (error_code === AppErrorCodes.PROMPT_NAME_CONFLICT) {
     return "保存失败：名称重复（同一工作区下名称必须唯一）";
   }
-  if (/SEC_INVALID_INPUT:\s*prompt name is required/i.test(msg)) {
+  if (error_code === AppErrorCodes.PROMPT_NAME_REQUIRED) {
     return "保存失败：名称不能为空";
   }
-  if (/SEC_INVALID_INPUT:\s*prompt content is required/i.test(msg)) {
-    return "保存失败：内容不能为空";
-  }
-  if (msg.startsWith("DB_CONSTRAINT:")) {
+  if (error_code === AppErrorCodes.DB_CONSTRAINT) {
     return "保存失败：数据库约束冲突（请检查名称是否重复）";
   }
 

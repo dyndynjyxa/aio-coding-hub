@@ -32,6 +32,18 @@ pub(crate) async fn db_disk_usage_get(
 
 #[tauri::command]
 #[specta::specta]
+pub(crate) async fn db_compact(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+) -> Result<data_management::DbCompactResult, String> {
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    blocking::run("db_compact", move || data_management::db_compact(&app, &db))
+        .await
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub(crate) async fn request_logs_clear_all(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,

@@ -1,8 +1,9 @@
 use super::{
     build_claude_probe_response_body, compute_observe_request, is_claude_count_tokens_request,
-    is_internal_forwarded_request, should_observe_request, should_seed_in_progress_request_log,
+    is_codex_model_discovery_request, is_internal_forwarded_request, should_observe_request,
+    should_seed_in_progress_request_log,
 };
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, Method};
 use serde_json::json;
 
 #[test]
@@ -24,21 +25,60 @@ fn count_tokens_request_is_detected_only_for_claude_and_exact_path() {
 
 #[test]
 fn claude_observation_matches_vendor_default_log_contract() {
-    assert!(should_observe_request("claude", "/v1/messages"));
+    assert!(should_observe_request(
+        "claude",
+        &Method::POST,
+        "/v1/messages"
+    ));
     assert!(!should_observe_request(
         "claude",
+        &Method::POST,
         "/v1/messages/count_tokens"
     ));
-    assert!(!should_observe_request("claude", "/v1/other"));
-    assert!(should_observe_request("codex", "/v1/responses"));
+    assert!(!should_observe_request(
+        "claude",
+        &Method::POST,
+        "/v1/other"
+    ));
+    assert!(should_observe_request(
+        "codex",
+        &Method::POST,
+        "/v1/responses"
+    ));
 }
 
 #[test]
 fn codex_model_discovery_requests_are_not_observed() {
-    assert!(!should_observe_request("codex", "/v1/models"));
-    assert!(!should_observe_request("codex", "/v1/models/"));
-    assert!(!should_observe_request("codex", "/models"));
-    assert!(should_observe_request("codex", "/v1/responses"));
+    for path in ["/v1/models", "/v1/models/", "/models", "/models/"] {
+        assert!(is_codex_model_discovery_request(
+            "codex",
+            &Method::GET,
+            path
+        ));
+        assert!(!should_observe_request("codex", &Method::GET, path));
+    }
+
+    assert!(!is_codex_model_discovery_request(
+        "codex",
+        &Method::POST,
+        "/v1/models"
+    ));
+    assert!(!is_codex_model_discovery_request(
+        "claude",
+        &Method::GET,
+        "/v1/models"
+    ));
+    assert!(!is_codex_model_discovery_request(
+        "codex",
+        &Method::GET,
+        "/v1/models/extra"
+    ));
+    assert!(should_observe_request("codex", &Method::POST, "/v1/models"));
+    assert!(should_observe_request(
+        "codex",
+        &Method::POST,
+        "/v1/responses"
+    ));
 }
 
 #[test]
@@ -55,6 +95,7 @@ fn claude_probe_requests_are_not_observed() {
 
     assert!(!compute_observe_request(
         "claude",
+        &Method::POST,
         "/v1/messages",
         &headers,
         Some(&probe)
@@ -72,6 +113,7 @@ fn internally_forwarded_claude_requests_are_not_observed() {
     assert!(is_internal_forwarded_request(&headers));
     assert!(!compute_observe_request(
         "claude",
+        &Method::POST,
         "/v1/messages",
         &headers,
         None
@@ -89,6 +131,7 @@ fn internally_forwarded_codex_requests_are_not_observed() {
     assert!(is_internal_forwarded_request(&headers));
     assert!(!compute_observe_request(
         "codex",
+        &Method::POST,
         "/v1/responses",
         &headers,
         None
@@ -109,6 +152,7 @@ fn normal_claude_message_requests_remain_observed() {
 
     assert!(compute_observe_request(
         "claude",
+        &Method::POST,
         "/v1/messages",
         &headers,
         Some(&body)

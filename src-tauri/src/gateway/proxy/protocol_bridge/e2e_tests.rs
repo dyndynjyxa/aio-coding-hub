@@ -766,4 +766,56 @@ mod tests {
         assert_eq!(usage.metrics.cache_creation_1h_input_tokens, Some(5));
         assert_eq!(usage.metrics.cache_creation_input_tokens, Some(25));
     }
+
+    #[test]
+    fn e2e_response_preserves_openai_cache_write_alias_for_json_and_streaming_sse() {
+        let bridge = get_bridge("cx2cc").unwrap();
+        let ctx = cx2cc_ctx();
+
+        for expected in [200, 0] {
+            let openai_resp = json!({
+                "id": format!("resp_cache_write_{expected}"),
+                "model": "gpt-5.6-sol",
+                "status": "completed",
+                "output": [{
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "cached response"}]
+                }],
+                "usage": {
+                    "input_tokens": 1000,
+                    "output_tokens": 50,
+                    "input_tokens_details": {
+                        "cached_tokens": 100,
+                        "cache_write_tokens": expected
+                    }
+                }
+            });
+
+            let anthropic = bridge
+                .translate_response(openai_resp.clone(), &ctx)
+                .expect("translate JSON response");
+            assert_eq!(anthropic["usage"]["input_tokens"], 1000);
+            assert_eq!(anthropic["usage"]["cache_read_input_tokens"], 100);
+            assert_eq!(anthropic["usage"]["cache_creation_input_tokens"], expected);
+
+            let mut translator = bridge.create_stream_translator();
+            let frames = translator
+                .translate_event(
+                    "response.completed",
+                    &json!({ "response": openai_resp }),
+                    &ctx,
+                )
+                .expect("translate response.completed SSE event");
+            let sse_bytes: Vec<u8> = frames
+                .iter()
+                .flat_map(|frame| frame.iter().copied())
+                .collect();
+            let usage = crate::usage::parse_usage_from_json_or_sse_bytes("claude", &sse_bytes)
+                .expect("usage should survive CX2CC SSE round trip");
+            assert_eq!(usage.metrics.input_tokens, Some(1000));
+            assert_eq!(usage.metrics.cache_read_input_tokens, Some(100));
+            assert_eq!(usage.metrics.cache_creation_input_tokens, Some(expected));
+        }
+    }
 }

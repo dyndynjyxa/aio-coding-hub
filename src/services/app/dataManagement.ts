@@ -1,4 +1,9 @@
-import { commands, type ClearRequestLogsResult, type DbDiskUsage } from "../../generated/bindings";
+import {
+  commands,
+  type ClearRequestLogsResult,
+  type DbCompactResult,
+  type DbDiskUsage,
+} from "../../generated/bindings";
 import {
   invokeGeneratedIpc,
   mapGeneratedCommandResponse,
@@ -6,7 +11,7 @@ import {
 } from "../generatedIpc";
 import { createRiskyIpcConfirm } from "../ipcConfirm";
 
-export type { ClearRequestLogsResult, DbDiskUsage };
+export type { ClearRequestLogsResult, DbCompactResult, DbDiskUsage };
 
 function requireNonNegativeSafeInteger(value: number, label: string): number {
   if (!Number.isSafeInteger(value) || value < 0) {
@@ -33,6 +38,13 @@ function toDbDiskUsage(value: DbDiskUsage): DbDiskUsage {
   };
 }
 
+function toDbCompactResult(value: DbCompactResult): DbCompactResult {
+  return {
+    before_bytes: requireNonNegativeSafeInteger(value.before_bytes, "db_compact.before_bytes"),
+    after_bytes: requireNonNegativeSafeInteger(value.after_bytes, "db_compact.after_bytes"),
+  };
+}
+
 export function isClearRequestLogsResult(
   value: ClearRequestLogsResult | null | undefined
 ): value is ClearRequestLogsResult {
@@ -56,6 +68,18 @@ export async function dbDiskUsageGet() {
       mapGeneratedCommandResponse(
         (await commands.dbDiskUsageGet()) as GeneratedCommandResult<DbDiskUsage>,
         toDbDiskUsage
+      ),
+  });
+}
+
+export async function dbCompact() {
+  return invokeGeneratedIpc<DbCompactResult>({
+    title: "压缩数据库失败",
+    cmd: "db_compact",
+    invoke: async () =>
+      mapGeneratedCommandResponse(
+        (await commands.dbCompact()) as GeneratedCommandResult<DbCompactResult>,
+        toDbCompactResult
       ),
   });
 }

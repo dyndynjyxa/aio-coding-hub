@@ -81,6 +81,7 @@ function createSelectedLog(overrides: Partial<RequestLogDetail> = {}): RequestLo
     duration_ms: 1234,
     ttfb_ms: 100,
     input_tokens: 10,
+    effective_input_tokens: 10,
     output_tokens: 20,
     total_tokens: 30,
     cache_read_input_tokens: 5,
@@ -216,6 +217,22 @@ describe("home/RequestLogDetailDialog", () => {
 
     expect(screen.getByText("fast")).toBeInTheDocument();
     expectMetricValue("费用系数", "x1.50");
+  });
+
+  it("does not promote the Codex system marker into request details", () => {
+    setRequestLogQueryState({
+      selectedLog: createSelectedLog({
+        cli_key: "codex",
+        special_settings_json: JSON.stringify([
+          { type: "codex_system_request", threadSource: "system" },
+        ]),
+      }),
+    });
+    setTraceStoreState({ traces: [] });
+
+    render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
+
+    expect(screen.queryByText("Codex 系统请求")).not.toBeInTheDocument();
   });
 
   it("falls back to raw usage_json when JSON parsing fails without rendering raw json section", () => {
@@ -410,6 +427,7 @@ describe("home/RequestLogDetailDialog", () => {
             {
               trace_id: "trace-1",
               cli_key: "claude",
+              session_id: null,
               method: "POST",
               path: "/v1/messages",
               query: null,
@@ -423,6 +441,11 @@ describe("home/RequestLogDetailDialog", () => {
               status: null,
               attempt_started_ms: 0,
               attempt_duration_ms: 0,
+              circuit_state_before: null,
+              circuit_state_after: null,
+              circuit_failure_count: null,
+              circuit_failure_threshold: null,
+              claude_model_mapping: null,
             },
           ],
         },
@@ -715,7 +738,26 @@ describe("home/RequestLogDetailDialog", () => {
     expectMetricValue("速率", "—");
   });
 
-  it("keeps zero-valued cache window metrics visible when they are the only cache source", () => {
+  it("uses effective input and displays canonical cache buckets", () => {
+    setRequestLogQueryState({
+      selectedLog: createSelectedLog({
+        input_tokens: 1000,
+        effective_input_tokens: 700,
+        cache_creation_input_tokens: 200,
+        cache_creation_5m_input_tokens: null,
+        cache_creation_1h_input_tokens: null,
+        cache_read_input_tokens: 100,
+      }),
+    });
+
+    render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
+
+    expectMetricValue("输入 Token", "700");
+    expectMetricValue("缓存创建", "200");
+    expectMetricValue("缓存读取", "100");
+  });
+
+  it("keeps zero-valued cache metrics visible and hides entirely missing metrics", () => {
     const view = render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
 
     setRequestLogQueryState({
@@ -726,7 +768,7 @@ describe("home/RequestLogDetailDialog", () => {
       }),
     });
     view.rerender(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
-    expectMetricValue("缓存创建", "0 (5m)");
+    expectMetricValue("缓存创建", "0");
 
     setRequestLogQueryState({
       selectedLog: createSelectedLog({
@@ -736,7 +778,7 @@ describe("home/RequestLogDetailDialog", () => {
       }),
     });
     view.rerender(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
-    expectMetricValue("缓存创建", "0 (1h)");
+    expectMetricValue("缓存创建", "0");
 
     setRequestLogQueryState({
       selectedLog: createSelectedLog({
@@ -746,7 +788,7 @@ describe("home/RequestLogDetailDialog", () => {
       }),
     });
     view.rerender(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
-    expectMetricValue("缓存创建", "—");
+    expect(screen.queryByText("缓存创建")).not.toBeInTheDocument();
   });
 
   // --- Tab switching tests ---

@@ -49,8 +49,11 @@ fn legacy_settings_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResu
     Ok(config_dir.join(LEGACY_IDENTIFIER).join("settings.json"))
 }
 
+// Read-path corruption: the file on disk cannot be trusted. Uses the recovery
+// code (not SEC_INVALID_INPUT) so the frontend can match the code instead of
+// sniffing the message text; write-path validation keeps SEC_INVALID_INPUT.
 fn invalid_settings_json(reason: impl std::fmt::Display) -> crate::shared::error::AppError {
-    format!("SEC_INVALID_INPUT: invalid settings.json: {reason}").into()
+    format!("SETTINGS_RECOVERY_REQUIRED: invalid settings.json: {reason}").into()
 }
 
 fn read_settings_json_file(path: &Path) -> AppResult<String> {
@@ -177,25 +180,21 @@ pub fn read<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<AppSettin
                 parse_settings_json(&content)?;
 
             if settings.preferred_port < 1024 {
-                return Err(
-                    "SEC_INVALID_INPUT: invalid settings.json: preferred_port must be between 1024 and 65535"
-                        .to_string()
-                        .into(),
-                );
+                return Err(invalid_settings_json(
+                    "preferred_port must be between 1024 and 65535",
+                ));
             }
             if settings.log_retention_days == 0 {
-                return Err(
-                    "SEC_INVALID_INPUT: invalid settings.json: log_retention_days must be >= 1"
-                        .to_string()
-                        .into(),
-                );
+                return Err(invalid_settings_json("log_retention_days must be >= 1"));
             }
 
             // Best-effort migration: copy legacy settings into the new dotdir (do not delete legacy file).
             let mut settings = settings;
             let repaired =
                 repair_settings(&mut settings, schema_version_present, &raw_settings_json)?;
-            validate_bounds(&settings)?;
+            // Read-path bounds failures are file corruption (repair does not
+            // sanitize every field): surface the recovery code, not SEC_*.
+            validate_bounds(&settings).map_err(invalid_settings_json)?;
             if repaired {
                 // best-effort: persist sanitized defaults
             }
@@ -215,22 +214,17 @@ pub fn read<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<AppSettin
     let (mut settings, schema_version_present, raw_settings_json) = parse_settings_json(&content)?;
 
     if settings.preferred_port < 1024 {
-        return Err(
-            "SEC_INVALID_INPUT: invalid settings.json: preferred_port must be between 1024 and 65535"
-                .to_string()
-                .into(),
-        );
+        return Err(invalid_settings_json(
+            "preferred_port must be between 1024 and 65535",
+        ));
     }
     if settings.log_retention_days == 0 {
-        return Err(
-            "SEC_INVALID_INPUT: invalid settings.json: log_retention_days must be >= 1"
-                .to_string()
-                .into(),
-        );
+        return Err(invalid_settings_json("log_retention_days must be >= 1"));
     }
 
     let repaired = repair_settings(&mut settings, schema_version_present, &raw_settings_json)?;
-    validate_bounds(&settings)?;
+    // See the legacy branch above: read-path bounds failures use the recovery code.
+    validate_bounds(&settings).map_err(invalid_settings_json)?;
     if repaired {
         // Best-effort: persist repaired values while keeping read semantics.
         let _ = write(app, &settings);
@@ -252,6 +246,21 @@ pub fn log_retention_days_fail_open<R: tauri::Runtime>(app: &tauri::AppHandle<R>
                 );
             }
             DEFAULT_LOG_RETENTION_DAYS
+        }
+    }
+}
+
+/// Fail-open to 0 (retention disabled): when settings cannot be read we must
+/// never delete request-log history based on a guessed value.
+pub fn request_log_retention_days_fail_open<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> u32 {
+    match read(app) {
+        Ok(cfg) => cfg.request_log_retention_days,
+        Err(err) => {
+            tracing::warn!(
+                "settings read failed, request-log retention disabled for this run: {}",
+                err
+            );
+            0
         }
     }
 }
@@ -325,6 +334,13 @@ pub(crate) fn validate_bounds(settings: &AppSettings) -> AppResult<()> {
     if settings.log_retention_days > MAX_LOG_RETENTION_DAYS {
         return Err(format!(
             "SEC_INVALID_INPUT: log_retention_days must be <= {MAX_LOG_RETENTION_DAYS}"
+        )
+        .into());
+    }
+    // 0 is allowed: it disables request-log retention (keep forever).
+    if settings.request_log_retention_days > MAX_REQUEST_LOG_RETENTION_DAYS {
+        return Err(format!(
+            "SEC_INVALID_INPUT: request_log_retention_days must be <= {MAX_REQUEST_LOG_RETENTION_DAYS}"
         )
         .into());
     }
@@ -547,6 +563,28 @@ mod tests {
         assert_eq!(settings.log_retention_days, DEFAULT_LOG_RETENTION_DAYS);
         assert!(settings.tray_enabled);
         assert!(!settings.auto_start);
+        assert_eq!(settings.grok_proxy_preferences, None);
+    }
+
+    #[test]
+    fn parse_settings_json_reads_grok_proxy_preferences() {
+        let json = r#"{
+            "grok_proxy_preferences": {
+                "model_id": "grok-4-fast",
+                "api_backend": "chat_completions"
+            }
+        }"#;
+
+        let (settings, _, _) = parse_settings_json(json).unwrap();
+
+        assert_eq!(
+            settings.grok_proxy_preferences,
+            Some(crate::grok_config::GrokProxyPreferences {
+                model_id: "grok-4-fast".to_string(),
+                api_backend: crate::grok_config::GrokApiBackend::ChatCompletions,
+                ..Default::default()
+            })
+        );
     }
 
     #[test]

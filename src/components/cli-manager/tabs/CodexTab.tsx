@@ -13,6 +13,8 @@ import {
   cliManagerCodexConfigTomlValidate,
   type CodexConfigPatch,
   type CodexConfigState,
+  type CodexModelCapability,
+  type CodexModelCatalogState,
   type CodexConfigTomlState,
   type CodexConfigTomlValidationResult,
   type SimpleCliInfo,
@@ -29,6 +31,12 @@ import { Select } from "../../../ui/Select";
 import { Switch } from "../../../ui/Switch";
 import { RadioGroup } from "../../../ui/RadioGroup";
 import {
+  resolveReasoningOptions,
+  ultraConflictText,
+  type ReasoningOptionView,
+} from "./codexModelCapabilities";
+import { useCodexModelMigration } from "./useCodexModelMigration";
+import {
   AlertTriangle,
   CheckCircle2,
   ExternalLink,
@@ -43,26 +51,15 @@ const LazyCodeEditor = lazy(() =>
   import("../../../ui/CodeEditor").then((m) => ({ default: m.CodeEditor }))
 );
 
-const GPT_54_MODEL = "gpt-5.4";
-const GPT_54_CONTEXT_WINDOW = 1_000_000;
-const GPT_54_AUTO_COMPACT_TOKEN_LIMIT = 900_000;
 const FAST_SERVICE_TIER = "fast";
+const CODEX_CONFIG_LOCATION_MODE_LABEL = "目录来源";
+const MODEL_REASONING_EFFORT_LABEL = "推理强度 (model_reasoning_effort)";
+const MODEL_REASONING_EFFORT_DESCRIPTION =
+  "调整推理强度（仅对支持的模型/Responses API 生效）。值越高通常越稳健但更慢。";
+const PLAN_MODE_REASONING_EFFORT_LABEL = "计划模式推理强度 (plan_mode_reasoning_effort)";
+const WEB_SEARCH_MODE_LABEL = "网络搜索模式 (web_search)";
+const PERSONALITY_LABEL = "输出风格 (personality)";
 type PersistConfigLocationResult = "saved" | "validation_failed" | "persist_failed";
-
-function buildModelPatch(
-  model: string,
-  contextWindow?: string,
-  autoCompactLimit?: string
-): CodexConfigPatch {
-  const trimmed = model.trim();
-  const isGpt54 = trimmed === GPT_54_MODEL;
-
-  return {
-    model: trimmed,
-    model_context_window: isGpt54 ? parsePositiveInt(contextWindow) : null,
-    model_auto_compact_token_limit: isGpt54 ? parsePositiveInt(autoCompactLimit) : null,
-  };
-}
 
 /** Parse a string to a positive integer; return null on empty / NaN / <= 0. */
 function parsePositiveInt(v: string | undefined): number | null {
@@ -83,10 +80,6 @@ function buildPersonalityPatch(value: string): CodexConfigPatch {
   return {
     personality: value === "none" ? "" : value,
   };
-}
-
-function isGpt54Model(model: string | null | undefined) {
-  return (model ?? "").trim() === GPT_54_MODEL;
 }
 
 function validateCustomCodexHome(value: string): string | null {
@@ -292,14 +285,17 @@ export type CliManagerCodexTabProps = {
   codexConfigSaving: boolean;
   codexConfigTomlLoading: boolean;
   codexConfigTomlSaving: boolean;
+  codexModelCatalogLoading?: boolean;
+  codexModelCatalogError?: boolean;
   codexInfo: SimpleCliInfo | null;
   codexConfig: CodexConfigState | null;
   codexConfigToml: CodexConfigTomlState | null;
+  codexModelCatalog?: CodexModelCatalogState | null;
   appSettings?: AppSettings | null;
   codexHomeSettingsSaving?: boolean;
   refreshCodex: () => Promise<void> | void;
   openCodexConfigDir: () => Promise<void> | void;
-  persistCodexConfig: (patch: CodexConfigPatch) => Promise<void> | void;
+  persistCodexConfig: (patch: CodexConfigPatch) => Promise<CodexConfigState | null>;
   persistCodexConfigToml: (toml: string) => Promise<boolean> | boolean;
   persistCodexHomeSettings?: (
     codexHomeMode: CodexHomeMode,
@@ -352,12 +348,14 @@ function CodexHeader({
   codexAvailable,
   codexInfo,
   loading,
+  saving,
   versionRefreshToken,
   refreshCodexStatus,
 }: {
   codexAvailable: CliManagerAvailability;
   codexInfo: SimpleCliInfo | null;
   loading: boolean;
+  saving: boolean;
   versionRefreshToken: number;
   refreshCodexStatus: () => Promise<void>;
 }) {
@@ -401,7 +399,7 @@ function CodexHeader({
         onClick={() => void refreshCodexStatus()}
         variant="secondary"
         size="sm"
-        disabled={loading}
+        disabled={loading || saving}
         className="gap-2"
       >
         <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
@@ -623,10 +621,13 @@ function CodexConfigLocationSection({
         </div>
 
         <div className="rounded-lg border border-border/70 bg-white/70 p-3 dark:border-border dark:bg-card/20">
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">目录来源</div>
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+            {CODEX_CONFIG_LOCATION_MODE_LABEL}
+          </div>
           <div className="mt-2">
             <RadioGroup
               name="codex_config_location_mode"
+              ariaLabel={CODEX_CONFIG_LOCATION_MODE_LABEL}
               value={configLocationMode}
               onChange={(value) =>
                 void handleConfigLocationModeChange(
@@ -781,6 +782,7 @@ function CodexBasicConfigSection({
   codexConfig,
   saving,
   modelText,
+  modelSuggestions,
   contextWindowText,
   autoCompactLimitText,
   sandboxModeText,
@@ -788,13 +790,21 @@ function CodexBasicConfigSection({
   planModeReasoningEffortText,
   webSearchText,
   personalityText,
-  showsGpt54LinkedSettings,
+  reasoningOptions,
+  reasoningStatusText,
+  reasoningStatusRetryable,
+  ultraConflictText,
+  onModelInputChange,
+  onEffortInputChange,
+  persistModel,
+  refreshCodexStatus,
   updateCodexDraft,
   persistCodexConfig,
 }: {
   codexConfig: CodexConfigState;
   saving: boolean;
   modelText: string;
+  modelSuggestions: CodexModelCapability[];
   contextWindowText: string;
   autoCompactLimitText: string;
   sandboxModeText: string;
@@ -802,7 +812,14 @@ function CodexBasicConfigSection({
   planModeReasoningEffortText: string;
   webSearchText: string;
   personalityText: string;
-  showsGpt54LinkedSettings: boolean;
+  reasoningOptions: ReasoningOptionView[];
+  reasoningStatusText: string | null;
+  reasoningStatusRetryable: boolean;
+  ultraConflictText: string | null;
+  onModelInputChange: () => void;
+  onEffortInputChange: () => void;
+  persistModel: (modelText: string, currentEffort: string) => Promise<CodexConfigState | null>;
+  refreshCodexStatus: () => Promise<void>;
   updateCodexDraft: UpdateCodexDraft;
   persistCodexConfig: CliManagerCodexTabProps["persistCodexConfig"];
 }) {
@@ -819,59 +836,68 @@ function CodexBasicConfigSection({
         >
           <Input
             value={modelText}
-            onChange={(e) => updateCodexDraft({ modelText: e.currentTarget.value })}
-            onBlur={() =>
-              void persistCodexConfig(
-                buildModelPatch(modelText, contextWindowText, autoCompactLimitText)
-              )
-            }
+            onChange={(e) => {
+              onModelInputChange();
+              updateCodexDraft({ modelText: e.currentTarget.value });
+            }}
+            onBlur={() => {
+              updateCodexDraft({ modelText: modelText.trim() });
+              void persistModel(modelText, reasoningEffortText);
+            }}
             placeholder="例如：gpt-5-codex"
+            list="codex-model-suggestions"
+            aria-label="默认模型 (model)"
             className="font-mono w-[280px] max-w-full"
+            disabled={saving}
+          />
+          <datalist id="codex-model-suggestions">
+            {modelSuggestions.map((suggestion) => (
+              <option
+                key={`${suggestion.id}:${suggestion.model}`}
+                value={suggestion.model}
+                label={suggestion.display_name}
+              />
+            ))}
+          </datalist>
+        </SettingItem>
+
+        <SettingItem
+          label="model_context_window"
+          subtitle="模型上下文窗口覆盖值。留空表示删除覆盖，使用 Codex/上层默认行为。"
+        >
+          <Input
+            type="number"
+            value={contextWindowText}
+            onChange={(e) => updateCodexDraft({ contextWindowText: e.currentTarget.value })}
+            onBlur={() =>
+              void persistCodexConfig({
+                model_context_window: parsePositiveInt(contextWindowText),
+              })
+            }
+            placeholder="例如：1000000"
+            className="font-mono w-[220px] max-w-full"
             disabled={saving}
           />
         </SettingItem>
 
-        {showsGpt54LinkedSettings ? (
-          <>
-            <SettingItem
-              label="model_context_window"
-              subtitle={`模型上下文窗口大小。仅当 model=${GPT_54_MODEL} 时生效；切换到其他模型时自动删除。留空则不写入配置，默认参考值 ${GPT_54_CONTEXT_WINDOW.toLocaleString()}。`}
-            >
-              <Input
-                type="number"
-                value={contextWindowText}
-                onChange={(e) => updateCodexDraft({ contextWindowText: e.currentTarget.value })}
-                onBlur={() =>
-                  void persistCodexConfig({
-                    model_context_window: parsePositiveInt(contextWindowText),
-                  })
-                }
-                placeholder={String(GPT_54_CONTEXT_WINDOW)}
-                className="font-mono w-[220px] max-w-full"
-                disabled={saving}
-              />
-            </SettingItem>
-
-            <SettingItem
-              label="model_auto_compact_token_limit"
-              subtitle={`自动压缩 token 上限。仅当 model=${GPT_54_MODEL} 时生效；切换到其他模型时自动删除。留空则不写入配置，默认参考值 ${GPT_54_AUTO_COMPACT_TOKEN_LIMIT.toLocaleString()}。`}
-            >
-              <Input
-                type="number"
-                value={autoCompactLimitText}
-                onChange={(e) => updateCodexDraft({ autoCompactLimitText: e.currentTarget.value })}
-                onBlur={() =>
-                  void persistCodexConfig({
-                    model_auto_compact_token_limit: parsePositiveInt(autoCompactLimitText),
-                  })
-                }
-                placeholder={String(GPT_54_AUTO_COMPACT_TOKEN_LIMIT)}
-                className="font-mono w-[220px] max-w-full"
-                disabled={saving}
-              />
-            </SettingItem>
-          </>
-        ) : null}
+        <SettingItem
+          label="model_auto_compact_token_limit"
+          subtitle="自动压缩 token 上限覆盖值。留空表示删除覆盖，使用 Codex/上层默认行为。"
+        >
+          <Input
+            type="number"
+            value={autoCompactLimitText}
+            onChange={(e) => updateCodexDraft({ autoCompactLimitText: e.currentTarget.value })}
+            onBlur={() =>
+              void persistCodexConfig({
+                model_auto_compact_token_limit: parsePositiveInt(autoCompactLimitText),
+              })
+            }
+            placeholder="例如：900000"
+            className="font-mono w-[220px] max-w-full"
+            disabled={saving}
+          />
+        </SettingItem>
 
         <SettingItem
           label="审批策略 (approval_policy)"
@@ -922,34 +948,59 @@ function CodexBasicConfigSection({
         </SettingItem>
 
         <SettingItem
-          label="推理强度 (model_reasoning_effort)"
-          subtitle="调整推理强度（仅对支持的模型/Responses API 生效）。值越高通常越稳健但更慢。"
+          label={MODEL_REASONING_EFFORT_LABEL}
+          subtitle={MODEL_REASONING_EFFORT_DESCRIPTION}
         >
           <RadioGroup
             name="model_reasoning_effort"
+            ariaLabel={MODEL_REASONING_EFFORT_LABEL}
+            ariaDescription={MODEL_REASONING_EFFORT_DESCRIPTION}
             value={reasoningEffortText}
             onChange={(value) => {
+              onEffortInputChange();
               updateCodexDraft({ reasoningEffortText: value });
               void persistCodexConfig({ model_reasoning_effort: value });
             }}
-            options={[
-              { value: "", label: "默认" },
-              { value: "minimal", label: "最低 (minimal)" },
-              { value: "low", label: "低 (low)" },
-              { value: "medium", label: "中 (medium)" },
-              { value: "high", label: "高 (high)" },
-              { value: "xhigh", label: "极高 (xhigh)" },
-            ]}
+            options={reasoningOptions.map((option) => ({
+              value: option.reasoning_effort,
+              label: option.label,
+              description: option.description,
+            }))}
             disabled={saving}
           />
+          {reasoningStatusText || reasoningStatusRetryable ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] leading-relaxed text-muted-foreground">
+              {reasoningStatusText ? <span>{reasoningStatusText}</span> : null}
+              {reasoningStatusRetryable ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 gap-1 px-2 text-[11px]"
+                  onClick={() => void refreshCodexStatus()}
+                  disabled={saving}
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  重试能力目录
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+          {ultraConflictText ? (
+            <div className="mt-2 flex items-start gap-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-400">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>{ultraConflictText}</span>
+            </div>
+          ) : null}
         </SettingItem>
 
         <SettingItem
-          label="计划模式推理强度 (plan_mode_reasoning_effort)"
+          label={PLAN_MODE_REASONING_EFFORT_LABEL}
           subtitle="调整计划模式下的推理强度。值越高通常规划越充分但更慢。"
         >
           <RadioGroup
             name="plan_mode_reasoning_effort"
+            ariaLabel={PLAN_MODE_REASONING_EFFORT_LABEL}
             value={planModeReasoningEffortText}
             onChange={(value) => {
               updateCodexDraft({ planModeReasoningEffortText: value });
@@ -967,11 +1018,12 @@ function CodexBasicConfigSection({
         </SettingItem>
 
         <SettingItem
-          label="网络搜索模式 (web_search)"
+          label={WEB_SEARCH_MODE_LABEL}
           subtitle="控制 Web Search 工具的行为。cached：使用缓存结果；live：获取最新数据；disabled：禁用。"
         >
           <RadioGroup
             name="web_search"
+            ariaLabel={WEB_SEARCH_MODE_LABEL}
             value={webSearchText}
             onChange={(value) => {
               updateCodexDraft({ webSearchText: value });
@@ -987,11 +1039,12 @@ function CodexBasicConfigSection({
         </SettingItem>
 
         <SettingItem
-          label="输出风格 (personality)"
+          label={PERSONALITY_LABEL}
           subtitle="控制 web_search 结果的输出风格。pragmatic 更务实，friendly 更友好；none 会删除该配置，交给 Codex 默认行为。"
         >
           <RadioGroup
             name="personality"
+            ariaLabel={PERSONALITY_LABEL}
             value={personalityText}
             onChange={(value) => {
               updateCodexDraft({ personalityText: value });
@@ -1176,7 +1229,11 @@ function CodexFeaturesSection({
 
         <SettingItem
           label="multi_agent"
-          subtitle="实验性：通过并行生成多个专门化代理来协作完成复杂任务，最后整合结果。开启写入 multi_agent=true；"
+          subtitle={
+            codexConfig.features_multi_agent == null
+              ? "实验性：通过并行生成多个专门化代理来协作完成复杂任务，最后整合结果。当前未设置，使用 Codex 默认行为。"
+              : "实验性：通过并行生成多个专门化代理来协作完成复杂任务，最后整合结果。开启写入 multi_agent=true；"
+          }
         >
           <Switch
             checked={boolOrDefault(codexConfig.features_multi_agent, false)}
@@ -1379,11 +1436,16 @@ function useCodexTabController({
   codexConfigSaving,
   codexConfigTomlLoading,
   codexConfigTomlSaving,
+  codexModelCatalogLoading = false,
+  codexModelCatalogError = false,
+  codexInfo,
   codexConfig,
   codexConfigToml,
+  codexModelCatalog = null,
   appSettings,
   codexHomeSettingsSaving = false,
   refreshCodex,
+  persistCodexConfig,
   persistCodexConfigToml,
   persistCodexHomeSettings,
   persistCodexOauthCompatibleProxyMode,
@@ -1459,6 +1521,46 @@ function useCodexTabController({
   const { tomlDraft, tomlDirty, tomlValidating, tomlValidation, tomlEditEnabled } =
     effectiveTomlState;
 
+  const modelMigration = useCodexModelMigration({
+    codexConfig,
+    codexInfo,
+    codexModelCatalog,
+    persistCodexConfig,
+  });
+  const reasoningResolution = useMemo(
+    () =>
+      resolveReasoningOptions(
+        modelMigration.catalog,
+        codexConfig?.model ?? "",
+        reasoningEffortText
+      ),
+    [codexConfig?.model, modelMigration.catalog, reasoningEffortText]
+  );
+  const modelSuggestions = useMemo(() => {
+    const seen = new Set<string>();
+    return (modelMigration.catalog?.models ?? []).filter((entry) => {
+      const model = entry.model.trim();
+      if (entry.hidden || !model || seen.has(model)) return false;
+      seen.add(model);
+      return true;
+    });
+  }, [modelMigration.catalog]);
+  const reasoningStatusText = codexModelCatalogLoading
+    ? "正在读取模型能力目录…"
+    : (modelMigration.statusText ??
+      (codexModelCatalogError
+        ? "读取模型能力失败，当前推理选项仅供编辑。"
+        : reasoningResolution.statusText));
+  const reasoningStatusRetryable =
+    !codexModelCatalogLoading &&
+    (codexModelCatalogError ||
+      codexModelCatalog?.status === "degraded" ||
+      codexModelCatalog?.status === "unavailable");
+  const ultraConflictWarning = ultraConflictText(
+    reasoningEffortText,
+    codexConfig?.features_multi_agent ?? null
+  );
+
   function updateCodexDraft(patch: Partial<Omit<CodexConfigDraft, "configKey">>) {
     dispatchUiState({ type: "patchCodexDraft", patch });
   }
@@ -1509,13 +1611,14 @@ function useCodexTabController({
 
   const saving = codexConfigSaving;
   const loading = codexLoading || codexConfigLoading;
-  const tomlBusy = codexConfigTomlLoading || codexConfigTomlSaving;
+  const tomlBusy = codexConfigSaving || codexConfigTomlLoading || codexConfigTomlSaving;
   const configLocationBusy = saving || codexHomeSettingsSaving;
   const configLocationControlsDisabled = configLocationBusy || selectingCodexHomeDir;
   const proxyModeControlsDisabled =
     codexHomeSettingsSaving || !appSettings || !persistCodexOauthCompatibleProxyMode;
 
   async function refreshCodexStatus() {
+    if (saving) return;
     try {
       await refreshCodex();
     } finally {
@@ -1545,10 +1648,6 @@ function useCodexTabController({
       codexConfig.service_tier === FAST_SERVICE_TIER
     );
   }, [codexConfig]);
-
-  const showsGpt54LinkedSettings = useMemo(() => {
-    return isGpt54Model(modelText);
-  }, [modelText]);
 
   const configLocationPreviewPath = useMemo(() => {
     return buildConfigTomlPath(customHomeText);
@@ -1678,6 +1777,10 @@ function useCodexTabController({
 
   async function saveTomlDraft() {
     if (tomlBusy) return;
+    if (validateTimerRef.current) {
+      window.clearTimeout(validateTimerRef.current);
+      validateTimerRef.current = null;
+    }
     const result = await validateToml(tomlDraft);
     if (!result) return;
     if (!result.ok) return;
@@ -1813,7 +1916,14 @@ function useCodexTabController({
     proxyModeControlsDisabled,
     effectiveSandboxMode,
     effectiveFastModeEnabled,
-    showsGpt54LinkedSettings,
+    modelSuggestions,
+    reasoningOptions: reasoningResolution.options,
+    reasoningStatusText,
+    reasoningStatusRetryable,
+    ultraConflictText: ultraConflictWarning,
+    onModelInputChange: modelMigration.onModelInputChange,
+    onEffortInputChange: modelMigration.onEffortInputChange,
+    persistModel: modelMigration.persistModel,
     configLocationPreviewPath,
     userDefaultResolvedHomeDir,
     followCodexHomeResolvedDir,
@@ -1845,9 +1955,12 @@ export function CliManagerCodexTab({
   codexConfigSaving,
   codexConfigTomlLoading,
   codexConfigTomlSaving,
+  codexModelCatalogLoading = false,
+  codexModelCatalogError = false,
   codexInfo,
   codexConfig,
   codexConfigToml,
+  codexModelCatalog = null,
   appSettings,
   codexHomeSettingsSaving = false,
   refreshCodex,
@@ -1886,7 +1999,14 @@ export function CliManagerCodexTab({
     proxyModeControlsDisabled,
     effectiveSandboxMode,
     effectiveFastModeEnabled,
-    showsGpt54LinkedSettings,
+    modelSuggestions,
+    reasoningOptions,
+    reasoningStatusText,
+    reasoningStatusRetryable,
+    ultraConflictText,
+    onModelInputChange,
+    onEffortInputChange,
+    persistModel,
     configLocationPreviewPath,
     userDefaultResolvedHomeDir,
     followCodexHomeResolvedDir,
@@ -1915,9 +2035,12 @@ export function CliManagerCodexTab({
     codexConfigSaving,
     codexConfigTomlLoading,
     codexConfigTomlSaving,
+    codexModelCatalogLoading,
+    codexModelCatalogError,
     codexInfo,
     codexConfig,
     codexConfigToml,
+    codexModelCatalog,
     appSettings,
     codexHomeSettingsSaving,
     refreshCodex,
@@ -1938,6 +2061,7 @@ export function CliManagerCodexTab({
               codexAvailable={codexAvailable}
               codexInfo={codexInfo}
               loading={loading}
+              saving={saving}
               versionRefreshToken={versionRefreshToken}
               refreshCodexStatus={refreshCodexStatus}
             />
@@ -1993,16 +2117,17 @@ export function CliManagerCodexTab({
           </div>
         </div>
 
-        {codexAvailable === "unavailable" ? (
-          <div className="text-sm text-muted-foreground text-center py-8">数据不可用</div>
-        ) : !codexConfig ? (
-          <div className="text-sm text-muted-foreground text-center py-8">暂无配置，请尝试刷新</div>
+        {!codexConfig ? (
+          <div className="text-sm text-muted-foreground text-center py-8">
+            {codexAvailable === "unavailable" ? "数据不可用" : "暂无配置，请尝试刷新"}
+          </div>
         ) : (
           <div className="p-6 space-y-6">
             <CodexBasicConfigSection
               codexConfig={codexConfig}
               saving={saving}
               modelText={modelText}
+              modelSuggestions={modelSuggestions}
               contextWindowText={contextWindowText}
               autoCompactLimitText={autoCompactLimitText}
               sandboxModeText={sandboxModeText}
@@ -2010,7 +2135,14 @@ export function CliManagerCodexTab({
               planModeReasoningEffortText={planModeReasoningEffortText}
               webSearchText={webSearchText}
               personalityText={personalityText}
-              showsGpt54LinkedSettings={showsGpt54LinkedSettings}
+              reasoningOptions={reasoningOptions}
+              reasoningStatusText={reasoningStatusText}
+              reasoningStatusRetryable={reasoningStatusRetryable}
+              ultraConflictText={ultraConflictText}
+              onModelInputChange={onModelInputChange}
+              onEffortInputChange={onEffortInputChange}
+              persistModel={persistModel}
+              refreshCodexStatus={refreshCodexStatus}
               updateCodexDraft={updateCodexDraft}
               persistCodexConfig={persistCodexConfig}
             />

@@ -122,7 +122,87 @@ fn make_test_bundle(schema_version: u32) -> ConfigBundle {
         skill_repos: Vec::new(),
         installed_skills: (schema_version >= CONFIG_BUNDLE_SCHEMA_VERSION).then(Vec::new),
         local_skills: (schema_version >= CONFIG_BUNDLE_SCHEMA_VERSION).then(Vec::new),
+        image_gen_configs: None,
     }
+}
+
+fn insert_image_gen_config(conn: &Connection, adapter_id: &str, api_key: &str) {
+    conn.execute(
+        r#"
+INSERT INTO image_gen_configs(adapter_id, base_url, model, api_key_plaintext, created_at, updated_at)
+VALUES (?1, 'https://img.example.com/v1', 'gpt-image-2', ?2, 1, 1)
+"#,
+        params![adapter_id, api_key],
+    )
+    .expect("insert image gen config");
+}
+
+#[test]
+fn config_export_import_round_trips_image_gen_configs() {
+    let test_app = ConfigMigrateTestApp::new();
+    let app = test_app.handle();
+    {
+        let conn = test_app.db.open_connection().expect("open db");
+        insert_image_gen_config(&conn, "gpt-image", "sk-image-secret");
+    }
+
+    let bundle = config_export(&app, &test_app.db).expect("export");
+    let exported = bundle
+        .image_gen_configs
+        .as_ref()
+        .expect("bundle should carry image_gen_configs");
+    assert_eq!(exported.len(), 1);
+    assert_eq!(exported[0].adapter_id, "gpt-image");
+    assert_eq!(exported[0].base_url, "https://img.example.com/v1");
+    assert_eq!(exported[0].model, "gpt-image-2");
+    assert_eq!(exported[0].api_key_plaintext, "sk-image-secret");
+
+    // Simulate "clear then import": wipe the table, then import the bundle.
+    {
+        let conn = test_app.db.open_connection().expect("open db");
+        conn.execute("DELETE FROM image_gen_configs", [])
+            .expect("clear image gen configs");
+    }
+
+    config_import(&app, &test_app.db, bundle).expect("import");
+
+    let conn = test_app.db.open_connection().expect("open db");
+    let (base_url, model, api_key): (String, String, String) = conn
+        .query_row(
+            "SELECT base_url, model, api_key_plaintext FROM image_gen_configs WHERE adapter_id = 'gpt-image'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("read restored image gen config");
+    assert_eq!(base_url, "https://img.example.com/v1");
+    assert_eq!(model, "gpt-image-2");
+    assert_eq!(api_key, "sk-image-secret");
+}
+
+#[test]
+fn config_import_without_image_gen_configs_keeps_existing_rows() {
+    let test_app = ConfigMigrateTestApp::new();
+    let app = test_app.handle();
+    {
+        let conn = test_app.db.open_connection().expect("open db");
+        insert_image_gen_config(&conn, "gpt-image", "sk-keep-me");
+    }
+
+    // Legacy bundle without the image_gen_configs field.
+    let bundle = make_test_bundle(CONFIG_BUNDLE_SCHEMA_VERSION);
+    assert!(bundle.image_gen_configs.is_none());
+
+    config_import(&app, &test_app.db, bundle).expect("import");
+
+    let conn = test_app.db.open_connection().expect("open db");
+    let api_key: String = conn
+        .query_row(
+            "SELECT api_key_plaintext FROM image_gen_configs WHERE adapter_id = 'gpt-image'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("existing image gen config should survive legacy import");
+    assert_eq!(api_key, "sk-keep-me");
 }
 
 #[cfg(unix)]
@@ -492,6 +572,129 @@ fn config_import_v2_restores_full_prompt_and_skill_payload() {
             .trim_end_matches('\n'),
         "prompt one"
     );
+}
+
+#[test]
+fn config_import_failure_restores_grok_runtime_and_skill_files() {
+    let test_app = ConfigMigrateTestApp::new();
+    let app = test_app.handle();
+    let config_path = crate::grok_config::config_path(&app).expect("Grok config path");
+    std::fs::create_dir_all(config_path.parent().expect("Grok config parent"))
+        .expect("create Grok home");
+    std::fs::write(
+        &config_path,
+        b"# original\n[model.aio]\nmodel = \"grok-build\"\n",
+    )
+    .expect("write initial Grok config");
+    crate::mcp_sync::sync_cli(&app, "grok", &[]).expect("seed Grok MCP manifest");
+    crate::prompt_sync::apply_enabled_prompt(&app, "grok", 42, "original instructions")
+        .expect("seed Grok prompt runtime");
+
+    let invalid_config = b"[mcp_servers\ninvalid = true\n";
+    std::fs::write(&config_path, invalid_config).expect("write invalid Grok config");
+    let prompt_target_before =
+        crate::prompt_sync::read_target_bytes(&app, "grok").expect("read Grok prompt target");
+    let prompt_manifest_before =
+        crate::prompt_sync::read_manifest_bytes(&app, "grok").expect("read Grok prompt manifest");
+    let mcp_manifest_before =
+        crate::mcp_sync::read_manifest_bytes(&app, "grok").expect("read Grok MCP manifest");
+
+    let ssot_root = ssot_skills_root(&app).expect("SSOT root");
+    write_skill_md(
+        &ssot_root.join("existing-installed"),
+        "Existing Installed",
+        "Existing installed skill",
+    );
+    let grok_skills_root = cli_skills_root(&app, "grok").expect("Grok skills root");
+    write_skill_md(
+        &grok_skills_root.join("existing-local"),
+        "Existing Local",
+        "Existing local skill",
+    );
+    std::fs::write(
+        grok_skills_root.join("existing-local").join("notes.txt"),
+        "keep me",
+    )
+    .expect("write existing local skill file");
+
+    let bundle = ConfigBundle {
+        installed_skills: Some(vec![InstalledSkillExport {
+            skill_key: "imported-installed".to_string(),
+            name: "Imported Installed".to_string(),
+            description: "Imported installed skill".to_string(),
+            source_git_url: "https://example.test/imported.git".to_string(),
+            source_branch: "main".to_string(),
+            source_subdir: "skills/imported".to_string(),
+            enabled_in_workspaces: Vec::new(),
+            files: vec![SkillFileExport {
+                relative_path: "SKILL.md".to_string(),
+                content_base64: BASE64_STANDARD.encode(
+                    b"---\nname: Imported Installed\ndescription: Imported installed skill\n---\n",
+                ),
+            }],
+        }]),
+        local_skills: Some(vec![LocalSkillExport {
+            cli_key: "grok".to_string(),
+            dir_name: "imported-local".to_string(),
+            name: "Imported Local".to_string(),
+            description: "Imported local skill".to_string(),
+            source_git_url: None,
+            source_branch: None,
+            source_subdir: None,
+            files: vec![SkillFileExport {
+                relative_path: "SKILL.md".to_string(),
+                content_base64: BASE64_STANDARD
+                    .encode(b"---\nname: Imported Local\ndescription: Imported local skill\n---\n"),
+            }],
+        }]),
+        ..make_test_bundle(CONFIG_BUNDLE_SCHEMA_VERSION)
+    };
+
+    let Err(error) = config_import(&app, &test_app.db, bundle) else {
+        panic!("invalid Grok TOML must fail runtime sync");
+    };
+
+    assert!(error.to_string().contains("GROK_CONFIG_INVALID_TOML"));
+    assert_eq!(
+        std::fs::read(&config_path).expect("read restored Grok config"),
+        invalid_config
+    );
+    assert_eq!(
+        crate::prompt_sync::read_target_bytes(&app, "grok")
+            .expect("read restored Grok prompt target"),
+        prompt_target_before
+    );
+    assert_eq!(
+        crate::prompt_sync::read_manifest_bytes(&app, "grok")
+            .expect("read restored Grok prompt manifest"),
+        prompt_manifest_before
+    );
+    assert_eq!(
+        crate::mcp_sync::read_manifest_bytes(&app, "grok")
+            .expect("read restored Grok MCP manifest"),
+        mcp_manifest_before
+    );
+    assert!(ssot_root
+        .join("existing-installed")
+        .join("SKILL.md")
+        .exists());
+    assert!(!ssot_root.join("imported-installed").exists());
+    assert_eq!(
+        std::fs::read_to_string(grok_skills_root.join("existing-local").join("notes.txt"))
+            .expect("read restored local skill"),
+        "keep me"
+    );
+    assert!(!grok_skills_root.join("imported-local").exists());
+
+    let conn = test_app.db.open_connection().expect("open restored db");
+    let imported_workspace_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(1) FROM workspaces WHERE name = 'Imported'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count imported workspaces");
+    assert_eq!(imported_workspace_count, 0);
 }
 
 #[test]

@@ -1,18 +1,7 @@
 import { describe, expect, it } from "vitest";
-import {
-  computeCacheHitRate,
-  computeCacheHitRateDenomTokens,
-  computeEffectiveInputTokens,
-} from "../cacheRateMetrics";
+import { computeCacheHitRate, computeCacheHitRateDenomTokens } from "../cacheRateMetrics";
 
 describe("utils/cacheRateMetrics", () => {
-  it("computes effective input tokens", () => {
-    expect(computeEffectiveInputTokens("codex", 100, 30)).toBe(70);
-    expect(computeEffectiveInputTokens("gemini", 100, 30)).toBe(70);
-    expect(computeEffectiveInputTokens("claude", 100, 30)).toBe(100);
-    expect(computeEffectiveInputTokens("codex", null, 10)).toBe(0);
-  });
-
   it("computes denom and hit rate (includes cache creation)", () => {
     expect(computeCacheHitRateDenomTokens(70, 10, 30)).toBe(110);
     expect(computeCacheHitRate(70, 10, 30)).toBeCloseTo(30 / 110);
