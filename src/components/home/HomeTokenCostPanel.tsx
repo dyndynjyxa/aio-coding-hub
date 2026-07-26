@@ -69,6 +69,7 @@ import { PREVIEW_TOKEN_FOLDER_OPTIONS } from "./previewTokenData";
 import { useHomeTokenCostDataModel } from "./useHomeTokenCostDataModel";
 import {
   developmentTimeEstimateTooltip,
+  FOLDER_DEVELOPMENT_TIME_NOTE,
   FULL_IDLE_GAP_TOOLTIP,
   SESSION_BREAK_GAP_TOOLTIP,
 } from "./developmentTimeEstimate";
@@ -906,7 +907,11 @@ function TokenLeaderboardTable({
             {developmentTimeScope ? (
               <SortableColumnHeader
                 label="预估开发时间"
-                tooltip={developmentTimeTooltip}
+                tooltip={
+                  folderScope
+                    ? `${developmentTimeTooltip}${FOLDER_DEVELOPMENT_TIME_NOTE}`
+                    : developmentTimeTooltip
+                }
                 sortKey="estimatedDevelopmentTime"
                 sortState={sortState}
                 onSort={onSort}
