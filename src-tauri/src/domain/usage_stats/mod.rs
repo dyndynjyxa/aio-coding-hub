@@ -13,6 +13,7 @@ mod leaderboard_v2;
 mod metrics_trend_v1;
 mod summary;
 mod tokens;
+mod trend_common;
 mod types;
 
 pub(crate) use tokens::{effective_input_tokens_display, is_bridged_input_semantics};

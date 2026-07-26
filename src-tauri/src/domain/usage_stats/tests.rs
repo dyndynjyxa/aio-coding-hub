@@ -1570,6 +1570,73 @@ fn v1_provider_metrics_trend_returns_none_when_no_valid_ttfb() {
 }
 
 #[test]
+fn v1_provider_metrics_trend_excludes_cx2cc_gateway_bridge_when_requested() {
+    let conn = setup_conn();
+
+    conn.execute(
+        r#"INSERT INTO providers (id, name, source_provider_id, bridge_type) VALUES (?1, ?2, ?3, ?4);"#,
+        params![123, "OpenAI", Option::<i64>::None, Option::<String>::None],
+    )
+    .expect("insert normal provider");
+    conn.execute(
+        r#"INSERT INTO providers (id, name, source_provider_id, bridge_type) VALUES (?1, ?2, ?3, ?4);"#,
+        params![900, "Bridge CX2CC", Option::<i64>::None, "cx2cc"],
+    )
+    .expect("insert cx2cc provider");
+
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            provider_id: 123,
+            provider_name: "OpenAI",
+            created_at: 1000,
+            ..base_usage_log(1000)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            cli_key: "claude",
+            provider_id: 900,
+            provider_name: "Bridge CX2CC",
+            created_at: 1010,
+            ..base_usage_log(1010)
+        },
+    );
+
+    let rows_with_bridge = provider_metrics_trend_v1_with_conn(
+        &conn,
+        ProviderMetricsTrendQuery {
+            period: UsagePeriodV2::Daily,
+            start_ts: None,
+            end_ts: None,
+            cli_key: None,
+            provider_id: None,
+            limit: None,
+            exclude_cx2cc_gateway_bridge: false,
+        },
+    )
+    .expect("metrics trend with bridge");
+    assert_eq!(rows_with_bridge.len(), 2);
+
+    let rows_without_bridge = provider_metrics_trend_v1_with_conn(
+        &conn,
+        ProviderMetricsTrendQuery {
+            period: UsagePeriodV2::Daily,
+            start_ts: None,
+            end_ts: None,
+            cli_key: None,
+            provider_id: None,
+            limit: None,
+            exclude_cx2cc_gateway_bridge: true,
+        },
+    )
+    .expect("metrics trend without bridge");
+    assert_eq!(rows_without_bridge.len(), 1);
+    assert_eq!(rows_without_bridge[0].key, "codex:123");
+}
+
+#[test]
 fn provider_cache_rate_trend_excludes_cx2cc_gateway_bridge_when_requested() {
     let conn = setup_conn();
 

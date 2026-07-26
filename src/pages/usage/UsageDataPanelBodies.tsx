@@ -67,7 +67,7 @@ export function CacheTrendBody({
 }
 
 const METRIC_HINT: Record<UsageTrendMetric, string> = {
-  duration: "平均耗时=成功请求总耗时 / 成功请求数（毫秒）。按 provider 分线，取请求量 Top N。",
+  duration: "平均耗时=成功请求总耗时 / 成功请求数（毫秒）。按 provider 分线。",
   ttfb: "平均首字=首字节时间之和 / 有效样本数。仅统计首字 < 总耗时的成功请求（排除异常/非流式）。",
   rate: "平均速率=输出 token / 生成时间（tokens/s）。生成时间=总耗时 − 首字，仅统计首字有效的请求。",
 };

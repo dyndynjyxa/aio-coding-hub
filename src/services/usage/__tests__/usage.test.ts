@@ -6,7 +6,7 @@ import {
   USAGE_LEADERBOARD_MAX_LIMIT,
   USAGE_LEADERBOARD_V2_MAX_LIMIT,
   USAGE_LIMIT_MIN,
-  USAGE_PROVIDER_CACHE_RATE_TREND_MAX_LIMIT,
+  USAGE_PROVIDER_TREND_MAX_LIMIT,
   type UsageFolderOptionV1,
   type UsageDayRow,
   type UsageHourlyRow,
@@ -19,7 +19,7 @@ import {
   normalizeUsageLeaderboardCsvExportFilePath,
   normalizeUsageLeaderboardLimit,
   normalizeUsageLeaderboardV2Limit,
-  normalizeUsageProviderCacheRateTrendLimit,
+  normalizeUsageProviderTrendLimit,
   normalizeUsageQueryInputV2,
   validateUsageCliKey,
   usageFolderOptionsV1,
@@ -573,9 +573,7 @@ describe("services/usage/usage", () => {
     expect(normalizeUsageLeaderboardLimit(999)).toBe(USAGE_LEADERBOARD_MAX_LIMIT);
     expect(normalizeUsageLeaderboardV2Limit(999)).toBe(USAGE_LEADERBOARD_V2_MAX_LIMIT);
     expect(normalizeUsageHourlySeriesDays(999)).toBe(USAGE_HOURLY_SERIES_MAX_DAYS);
-    expect(normalizeUsageProviderCacheRateTrendLimit(999)).toBe(
-      USAGE_PROVIDER_CACHE_RATE_TREND_MAX_LIMIT
-    );
+    expect(normalizeUsageProviderTrendLimit(999)).toBe(USAGE_PROVIDER_TREND_MAX_LIMIT);
 
     await usageLeaderboardProvider("today", { limit: 0 });
     await usageLeaderboardDay("today", { limit: 999 });
@@ -597,7 +595,7 @@ describe("services/usage/usage", () => {
     );
     expect(commands.usageProviderCacheRateTrendV1).toHaveBeenCalledWith(
       expect.objectContaining({ period: "daily" }),
-      USAGE_PROVIDER_CACHE_RATE_TREND_MAX_LIMIT
+      USAGE_PROVIDER_TREND_MAX_LIMIT
     );
   });
 

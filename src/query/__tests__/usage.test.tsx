@@ -5,7 +5,7 @@ import {
   USAGE_HOURLY_SERIES_MAX_DAYS,
   USAGE_LEADERBOARD_V2_DEFAULT_LIMIT,
   USAGE_LEADERBOARD_V2_MAX_LIMIT,
-  USAGE_PROVIDER_CACHE_RATE_TREND_MAX_LIMIT,
+  USAGE_PROVIDER_TREND_MAX_LIMIT,
   usageFolderOptionsV1,
   usageHourlySeries,
   usageLeaderboardV2,
@@ -557,7 +557,7 @@ describe("query/usage", () => {
       endTs: 2,
       cliKey: "claude" as const,
       providerId: 11,
-      limit: USAGE_PROVIDER_CACHE_RATE_TREND_MAX_LIMIT,
+      limit: USAGE_PROVIDER_TREND_MAX_LIMIT,
       excludeCx2CcGatewayBridge: true,
     };
 

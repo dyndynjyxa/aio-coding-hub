@@ -119,6 +119,28 @@ describe("pages/usage/UsageDataPanel", () => {
       activeStale: false,
     },
     {
+      name: "opens overlay for metrics trend rows and uses metrics stale state",
+      overrides: {
+        tableTab: "metricsTrend",
+        customPending: true,
+        metricsTrendRows: [{ key: "codex:1" }],
+        metricsTrendStale: true,
+      },
+      overlayOpen: true,
+      activeStale: true,
+    },
+    {
+      name: "keeps overlay closed for empty metrics trend data",
+      overrides: {
+        tableTab: "metricsTrend",
+        customPending: true,
+        metricsTrendRows: [],
+        metricsTrendStale: false,
+      },
+      overlayOpen: false,
+      activeStale: false,
+    },
+    {
       name: "opens overlay for availability providers and uses refresh state",
       overrides: {
         tableTab: "availability",

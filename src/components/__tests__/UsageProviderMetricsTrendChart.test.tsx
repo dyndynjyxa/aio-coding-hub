@@ -68,8 +68,8 @@ const sampleRow: UsageProviderMetricsTrendRowV1 = {
 describe("components/UsageProviderMetricsTrendChart", () => {
   const metrics: UsageTrendMetric[] = ["duration", "ttfb", "rate"];
 
-  it("renders without data", () => {
-    const { container } = render(
+  it("renders 7 empty day buckets and no lines without data", () => {
+    const { container, getByTestId } = render(
       <UsageProviderMetricsTrendChart
         rows={[]}
         period="weekly"
@@ -77,7 +77,24 @@ describe("components/UsageProviderMetricsTrendChart", () => {
         customApplied={null}
       />
     );
-    expect(container).toBeTruthy();
+    expect(getByTestId("line-chart").getAttribute("data-points")).toBe("7");
+    expect(container.querySelectorAll('path[data-testid^="line-"]')).toHaveLength(0);
+  });
+
+  it("renders tooltip items sorted with meta and filters invalid payload entries", () => {
+    const { getByText, queryByText } = render(
+      <UsageProviderMetricsTrendChart
+        rows={[sampleRow]}
+        period="weekly"
+        metric="duration"
+        customApplied={null}
+      />
+    );
+    // only the valid payload entry survives: 1 provider, name + ok count shown
+    expect(getByText("供应商: 1")).toBeTruthy();
+    expect(getByText("codex/OpenAI")).toBeTruthy();
+    expect(getByText("ok 20")).toBeTruthy();
+    expect(queryByText(/missing-meta|nan/)).toBeNull();
   });
 
   for (const metric of metrics) {
@@ -114,12 +131,12 @@ describe("components/UsageProviderMetricsTrendChart", () => {
     expect(getByTestId("y-axis").getAttribute("data-formatted")).not.toContain("ms");
   });
 
-  it("renders daily (hourly) period", () => {
+  it("renders 24 hour buckets with every-2nd tick for daily period", () => {
     const rows: UsageProviderMetricsTrendRowV1[] = [
       { ...sampleRow, hour: 10 },
       { ...sampleRow, hour: 14 },
     ];
-    const { container } = render(
+    const { getByTestId } = render(
       <UsageProviderMetricsTrendChart
         rows={rows}
         period="daily"
@@ -127,11 +144,15 @@ describe("components/UsageProviderMetricsTrendChart", () => {
         customApplied={null}
       />
     );
-    expect(container).toBeTruthy();
+    expect(getByTestId("line-chart").getAttribute("data-points")).toBe("24");
+    expect(getByTestId("x-axis").getAttribute("data-ticks")).toBe(
+      "00,02,04,06,08,10,12,14,16,18,20,22"
+    );
+    expect(getByTestId("line-openai")).toBeTruthy();
   });
 
-  it("renders allTime period", () => {
-    const { container } = render(
+  it("renders month buckets derived from data for allTime period", () => {
+    const { getByTestId } = render(
       <UsageProviderMetricsTrendChart
         rows={[{ ...sampleRow, day: "2026-02" }]}
         period="allTime"
@@ -139,11 +160,13 @@ describe("components/UsageProviderMetricsTrendChart", () => {
         customApplied={null}
       />
     );
-    expect(container).toBeTruthy();
+    expect(getByTestId("line-chart").getAttribute("data-points")).toBe("1");
+    expect(getByTestId("x-axis").getAttribute("data-ticks")).toBe("2026-02");
+    expect(getByTestId("line-openai")).toBeTruthy();
   });
 
-  it("renders custom date range", () => {
-    const { container } = render(
+  it("renders inclusive day buckets with MM/DD ticks for custom date range", () => {
+    const { getByTestId } = render(
       <UsageProviderMetricsTrendChart
         rows={[sampleRow]}
         period="custom"
@@ -156,6 +179,8 @@ describe("components/UsageProviderMetricsTrendChart", () => {
         }}
       />
     );
-    expect(container).toBeTruthy();
+    // 2026-02-15..25 inclusive = 11 buckets, every 3rd label ticked
+    expect(getByTestId("line-chart").getAttribute("data-points")).toBe("11");
+    expect(getByTestId("x-axis").getAttribute("data-ticks")).toBe("02/15,02/18,02/21,02/24");
   });
 });

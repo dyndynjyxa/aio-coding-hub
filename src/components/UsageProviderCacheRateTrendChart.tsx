@@ -15,8 +15,13 @@ import type { CustomDateRangeApplied } from "../hooks/useCustomDateRange";
 import type { UsagePeriod, UsageProviderCacheRateTrendRowV1 } from "../services/usage/usage";
 import { useTheme } from "../hooks/useTheme";
 import { cn } from "../utils/cn";
-import { buildRecentDayKeys, dayKeyFromLocalDate } from "../utils/dateKeys";
-import { parseYyyyMmDd } from "../utils/localDate";
+import {
+  buildDayKeysInRangeInclusive,
+  buildMonthKeysFromRows,
+  buildMonthToTodayDayKeys,
+  buildRecentDayKeys,
+  toMmDd,
+} from "../utils/dateKeys";
 import { formatInteger, formatPercent } from "../utils/formatters";
 import {
   pickPaletteColor,
@@ -183,52 +188,6 @@ function UsageProviderCacheRateTooltip({
   );
 }
 
-function toMmDd(dayKey: string) {
-  const mmdd = dayKey.slice(5);
-  return mmdd.replace("-", "/");
-}
-
-function buildDayKeysInRangeInclusive(startDay: string, endDay: string): string[] {
-  const start = parseYyyyMmDd(startDay);
-  const end = parseYyyyMmDd(endDay);
-  if (!start || !end) return [];
-
-  const startDate = new Date(start.year, start.month - 1, start.day, 0, 0, 0, 0);
-  const endDate = new Date(end.year, end.month - 1, end.day, 0, 0, 0, 0);
-  if (!Number.isFinite(startDate.getTime()) || !Number.isFinite(endDate.getTime())) return [];
-
-  const out: string[] = [];
-  const d = new Date(startDate);
-  while (d.getTime() <= endDate.getTime()) {
-    out.push(dayKeyFromLocalDate(d));
-    d.setDate(d.getDate() + 1);
-  }
-  return out;
-}
-
-function buildMonthToTodayDayKeys(): string[] {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-  if (!Number.isFinite(start.getTime()) || !Number.isFinite(now.getTime())) return [];
-
-  const out: string[] = [];
-  const d = new Date(start);
-  while (d.getTime() <= now.getTime()) {
-    out.push(dayKeyFromLocalDate(d));
-    d.setDate(d.getDate() + 1);
-  }
-  return out;
-}
-
-function buildMonthKeysFromData(rows: UsageProviderCacheRateTrendRowV1[]): string[] {
-  const set = new Set<string>();
-  for (const row of rows) {
-    if (!row.day) continue;
-    if (/^\d{4}-\d{2}$/.test(row.day)) set.add(row.day);
-  }
-  return Array.from(set).sort();
-}
-
 type ProviderSeries = {
   key: string;
   name: string;
@@ -265,7 +224,7 @@ export function UsageProviderCacheRateTrendChart({
         return Array.from({ length: 24 }).map((_, h) => String(h).padStart(2, "0"));
       }
       if (isAllTime) {
-        return buildMonthKeysFromData(rows);
+        return buildMonthKeysFromRows(rows);
       }
       if (period === "weekly") return buildRecentDayKeys(7);
       if (period === "monthly") return buildMonthToTodayDayKeys();

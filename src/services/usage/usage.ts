@@ -49,7 +49,7 @@ export const USAGE_LEADERBOARD_V2_DEFAULT_LIMIT = 200;
 export const USAGE_LEADERBOARD_V2_MAX_LIMIT = 200;
 export const USAGE_HOURLY_SERIES_MIN_DAYS = 1;
 export const USAGE_HOURLY_SERIES_MAX_DAYS = 60;
-export const USAGE_PROVIDER_CACHE_RATE_TREND_MAX_LIMIT = 200;
+export const USAGE_PROVIDER_TREND_MAX_LIMIT = 200;
 
 export type UsageRange = "today" | "last7" | "last30" | "month" | "all";
 export type UsageScope = "cli" | "provider" | "model" | "folder" | "day";
@@ -140,11 +140,11 @@ export function normalizeUsageHourlySeriesDays(days: number): number {
   return normalized ?? USAGE_HOURLY_SERIES_MIN_DAYS;
 }
 
-export function normalizeUsageProviderCacheRateTrendLimit(limit?: number | null): number | null {
+export function normalizeUsageProviderTrendLimit(limit?: number | null): number | null {
   return normalizeBoundedInteger(
-    "usage provider cache rate trend limit",
+    "usage provider trend limit",
     limit,
-    USAGE_PROVIDER_CACHE_RATE_TREND_MAX_LIMIT
+    USAGE_PROVIDER_TREND_MAX_LIMIT
   );
 }
 
@@ -413,7 +413,7 @@ export async function usageProviderCacheRateTrendV1(
   input?: UsageProviderCacheRateTrendInput
 ) {
   const params = buildQueryParamsV2(period, { ...input, folderKeys: null, dayStartHour: null });
-  const limit = normalizeUsageProviderCacheRateTrendLimit(input?.limit);
+  const limit = normalizeUsageProviderTrendLimit(input?.limit);
 
   return invokeGeneratedIpc<UsageProviderCacheRateTrendRowV1[]>({
     title: "读取供应商缓存命中趋势失败",
@@ -431,7 +431,7 @@ export async function usageProviderMetricsTrendV1(
   input?: UsageQueryInputV2 & { limit?: number | null }
 ) {
   const params = buildQueryParamsV2(period, { ...input, folderKeys: null, dayStartHour: null });
-  const limit = normalizeUsageProviderCacheRateTrendLimit(input?.limit);
+  const limit = normalizeUsageProviderTrendLimit(input?.limit);
 
   return invokeGeneratedIpc<UsageProviderMetricsTrendRowV1[]>({
     title: "读取供应商指标趋势失败",
