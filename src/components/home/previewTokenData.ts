@@ -2,9 +2,6 @@
 // Provides synthetic UsageLeaderboardRow[] and UsageSummary when no real data is available.
 
 import type {
-  UsageDayDetailV1,
-  UsageDayFolderRow,
-  UsageDayHourRow,
   UsageFolderOptionV1,
   UsageLeaderboardRow,
   UsageSummary,
@@ -391,11 +388,6 @@ export const PREVIEW_TOKEN_FOLDER_ROWS: UsageLeaderboardRow[] = PREVIEW_DAY_FOLD
   })
 );
 
-const PREVIEW_DAY_HOUR_WEIGHTS: readonly number[] = [
-  0, 0, 0, 0, 0, 0.08, 0.12, 0.1, 0.06, 0.04, 0.05, 0.08, 0.12, 0.1, 0.08, 0.06, 0.04, 0.03, 0.02,
-  0.02, 0, 0, 0, 0,
-];
-
 export function scalePreviewTokenRows(
   rows: UsageLeaderboardRow[],
   factor: number
@@ -430,71 +422,6 @@ export function previewFolderSelectionFactor(folderKeys: readonly string[] | nul
   );
   const share = folderKeys.reduce((sum, key) => sum + (shareByKey.get(key) ?? 0), 0);
   return Math.max(0, Math.min(1, share));
-}
-
-function buildPreviewFolderRows(dayRow: UsageLeaderboardRow): UsageDayFolderRow[] {
-  return PREVIEW_DAY_FOLDER_SPECS.map((spec) => {
-    const requestsTotal = Math.max(1, Math.round(dayRow.requests_total * spec.share));
-    const requestsFailed = Math.min(requestsTotal, Math.round(dayRow.requests_failed * spec.share));
-    const requestsSuccess = Math.max(0, requestsTotal - requestsFailed);
-    return {
-      key: spec.key,
-      name: spec.name,
-      folder_path: spec.folder_path,
-      requests_total: requestsTotal,
-      requests_success: requestsSuccess,
-      requests_failed: requestsFailed,
-      total_tokens: Math.round(dayRow.total_tokens * spec.share),
-      io_total_tokens: Math.round(dayRow.io_total_tokens * spec.share),
-      input_tokens: Math.round(dayRow.input_tokens * spec.share),
-      output_tokens: Math.round(dayRow.output_tokens * spec.share),
-      cache_creation_input_tokens: Math.round(dayRow.cache_creation_input_tokens * spec.share),
-      cache_read_input_tokens: Math.round(dayRow.cache_read_input_tokens * spec.share),
-      avg_duration_ms:
-        dayRow.avg_duration_ms == null
-          ? null
-          : Math.max(0, Math.round(dayRow.avg_duration_ms + spec.latencyOffsetMs)),
-      avg_ttfb_ms:
-        dayRow.avg_ttfb_ms == null
-          ? null
-          : Math.max(0, Math.round(dayRow.avg_ttfb_ms + spec.latencyOffsetMs / 4)),
-      avg_output_tokens_per_second: dayRow.avg_output_tokens_per_second,
-      cost_usd: dayRow.cost_usd == null ? null : dayRow.cost_usd * spec.share,
-    };
-  });
-}
-
-function buildPreviewHourRows(dayRow: UsageLeaderboardRow): UsageDayHourRow[] {
-  const totalWeight = PREVIEW_DAY_HOUR_WEIGHTS.reduce((sum, weight) => sum + weight, 0);
-  return PREVIEW_DAY_HOUR_WEIGHTS.map((weight, hour) => {
-    const ratio = totalWeight > 0 ? weight / totalWeight : 0;
-    return {
-      hour,
-      requests_total: weight <= 0 ? 0 : Math.max(1, Math.round(dayRow.requests_total * ratio)),
-      total_tokens: Math.round(dayRow.total_tokens * ratio),
-      io_total_tokens: Math.round(dayRow.io_total_tokens * ratio),
-    };
-  });
-}
-
-export function buildPreviewTokenDayDetail(
-  day: string,
-  factor: number,
-  folderKeys?: readonly string[] | null
-): UsageDayDetailV1 | null {
-  const scaledRows = scalePreviewTokenRows(PREVIEW_TOKEN_DAY_ROWS, factor);
-  const dayRow = scaledRows.find((row) => row.key === day);
-  if (!dayRow) return null;
-  const selected = folderKeys && folderKeys.length > 0 ? new Set(folderKeys) : null;
-  const folders = buildPreviewFolderRows(dayRow).filter(
-    (folder) => !selected || selected.has(folder.key)
-  );
-  const hourFactor = previewFolderSelectionFactor(folderKeys);
-  return {
-    day,
-    folders,
-    hours: buildPreviewHourRows(scalePreviewTokenRows([dayRow], hourFactor)[0]),
-  };
 }
 
 export function buildPreviewTokenSummary(rows: UsageLeaderboardRow[]): UsageSummary {

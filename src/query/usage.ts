@@ -3,20 +3,16 @@ import type { CliKey } from "../services/providers/providers";
 import {
   USAGE_LEADERBOARD_V2_DEFAULT_LIMIT,
   usageHourlySeries,
-  usageDayDetailV1,
   usageFolderOptionsV1,
   usageLeaderboardV2,
   usageProviderCacheRateTrendV1,
   usageSummary,
   usageSummaryV2,
-  normalizeUsageDayDetailInput,
   normalizeUsageHourlySeriesDays,
   normalizeUsageLeaderboardV2Limit,
   normalizeUsageProviderCacheRateTrendLimit,
   normalizeUsageQueryInputV2,
   normalizeUsageSummaryInput,
-  type NormalizedUsageDayDetailInput,
-  type UsageDayDetailInput,
   type UsagePeriod,
   type UsageQueryInputV2,
   type UsageRange,
@@ -115,39 +111,6 @@ export function useUsageLeaderboardV2Query(
     placeholderData: keepPreviousData,
     refetchInterval: options?.refetchIntervalMs ?? false,
     refetchOnMount: options?.refetchOnMount,
-  });
-}
-
-export function useUsageDayDetailV1Query(input: UsageDayDetailInput, options?: UsageQueryOptions) {
-  const requestedEnabled = options?.enabled ?? true;
-  let normalizedInput: NormalizedUsageDayDetailInput | null = null;
-  try {
-    normalizedInput = normalizeUsageDayDetailInput(input);
-  } catch (caught) {
-    if (requestedEnabled) throw caught;
-  }
-
-  return useQuery({
-    queryKey: normalizedInput
-      ? usageKeys.dayDetailV1({
-          day: normalizedInput.day,
-          cliKey: normalizedInput.cliKey ?? null,
-          providerId: normalizedInput.providerId ?? null,
-          folderLimit: normalizedInput.folderLimit,
-          folderKeys: normalizedInput.folderKeys ?? null,
-          dayStartHour: normalizedInput.dayStartHour ?? null,
-          excludeCx2CcGatewayBridge: normalizedInput.excludeCx2CcGatewayBridge ?? null,
-        })
-      : usageKeys.dayDetailV1Disabled(),
-    queryFn: () => {
-      if (!normalizedInput) {
-        throw new Error("SEC_INVALID_INPUT: invalid day detail query");
-      }
-      return usageDayDetailV1(normalizedInput);
-    },
-    enabled: requestedEnabled && normalizedInput != null,
-    placeholderData: keepPreviousData,
-    refetchInterval: options?.refetchIntervalMs ?? false,
   });
 }
 

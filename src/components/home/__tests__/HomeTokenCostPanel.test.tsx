@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { HomeTokenCostPanel } from "../HomeTokenCostPanel";
 import {
-  useUsageDayDetailV1Query,
   useUsageFolderOptionsV1Query,
   useUsageLeaderboardV2Query,
   useUsageSummaryV2Query,
@@ -22,7 +21,6 @@ vi.mock("../../../query/usage", async () => {
     await vi.importActual<typeof import("../../../query/usage")>("../../../query/usage");
   return {
     ...actual,
-    useUsageDayDetailV1Query: vi.fn(),
     useUsageFolderOptionsV1Query: vi.fn(),
     useUsageSummaryV2Query: vi.fn(),
     useUsageLeaderboardV2Query: vi.fn(),
@@ -435,7 +433,6 @@ describe("components/home/HomeTokenCostPanel", () => {
     expect(screen.getByText("08:00–23:40")).toBeInTheDocument();
     expect(screen.getByText("4h")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /日期详情/ })).not.toBeInTheDocument();
-    expect(useUsageDayDetailV1Query).not.toHaveBeenCalled();
     expect(
       within(screen.getByRole("table", { name: "用量排行榜" }))
         .getAllByRole("columnheader")

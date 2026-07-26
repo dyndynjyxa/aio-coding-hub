@@ -3,7 +3,6 @@ import { emitListenerSnapshot } from "../../utils/listeners";
 export const HOME_USAGE_DAY_START_HOUR_STORAGE_KEY = "homeUsageDayStartHour";
 export const HOME_USAGE_DEFAULT_DAY_START_HOUR = 0;
 export const HOME_USAGE_DAY_START_HOUR_OPTIONS = Array.from({ length: 10 }, (_, hour) => hour);
-export const HOME_USAGE_DAY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 type Listener = () => void;
 
@@ -148,25 +147,6 @@ export function localDateHour(dateValue: string, hour: number, dayOffset = 0) {
   );
   if (Number.isNaN(date.getTime())) return null;
   return date;
-}
-
-export function orderedUsageDayHours(dayStartHour: number) {
-  const normalizedDayStartHour = normalizeHomeUsageDayStartHour(dayStartHour);
-  return Array.from({ length: 24 }, (_, index) => (normalizedDayStartHour + index) % 24);
-}
-
-export function formatUsageDayHourLabel(hour: number, dayStartHour: number) {
-  const normalizedDayStartHour = normalizeHomeUsageDayStartHour(dayStartHour);
-  const normalizedHour = normalizedHourOfDay(hour);
-  const prefix = normalizedHour < normalizedDayStartHour ? "次日" : "";
-  return `${prefix}${formatHour(normalizedHour)}:00`;
-}
-
-export function formatUsageDayHourTickLabel(hour: number, dayStartHour: number) {
-  const normalizedDayStartHour = normalizeHomeUsageDayStartHour(dayStartHour);
-  const normalizedHour = normalizedHourOfDay(hour);
-  const prefix = normalizedHour < normalizedDayStartHour ? "次日" : "";
-  return `${prefix}${formatHour(normalizedHour)}`;
 }
 
 function formatLocalHourMinuteFromMs(value: number) {

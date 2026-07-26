@@ -110,38 +110,5 @@ describe("components/home/previewTokenData", () => {
     expect(summary.avg_output_tokens_per_second).toBeCloseTo(16.667, 2);
     expect(summary.cache_creation_5m_input_tokens).toBe(8);
     expect(summary.cache_creation_1h_input_tokens).toBe(4);
-
-    const missingDay = mod.buildPreviewTokenDayDetail("missing-day", 1, null);
-    expect(missingDay).toBeNull();
-
-    const day = mod.PREVIEW_TOKEN_DAY_ROWS[0].key;
-    const fullDetail = mod.buildPreviewTokenDayDetail(day, 1, null);
-    expect(fullDetail).not.toBeNull();
-    expect(fullDetail?.folders).toHaveLength(3);
-    expect(fullDetail?.hours).toHaveLength(24);
-    expect(fullDetail?.hours[0]?.requests_total).toBe(0);
-    expect(fullDetail?.hours.some((hour) => hour.requests_total > 0)).toBe(true);
-
-    const selectedDetail = mod.buildPreviewTokenDayDetail(day, 1, ["__unknown__"]);
-    expect(selectedDetail?.folders).toHaveLength(1);
-    expect(selectedDetail?.folders[0]?.key).toBe("__unknown__");
-    expect(selectedDetail?.hours.some((hour) => hour.total_tokens > 0)).toBe(true);
-
-    const originalDuration = mod.PREVIEW_TOKEN_DAY_ROWS[0].avg_duration_ms;
-    const originalTtfb = mod.PREVIEW_TOKEN_DAY_ROWS[0].avg_ttfb_ms;
-    const originalCost = mod.PREVIEW_TOKEN_DAY_ROWS[0].cost_usd;
-    mod.PREVIEW_TOKEN_DAY_ROWS[0].avg_duration_ms = null;
-    mod.PREVIEW_TOKEN_DAY_ROWS[0].avg_ttfb_ms = null;
-    mod.PREVIEW_TOKEN_DAY_ROWS[0].cost_usd = null;
-    try {
-      const nullMetricsDetail = mod.buildPreviewTokenDayDetail(day, 1, null);
-      expect(nullMetricsDetail?.folders[0]?.avg_duration_ms).toBeNull();
-      expect(nullMetricsDetail?.folders[0]?.avg_ttfb_ms).toBeNull();
-      expect(nullMetricsDetail?.folders[0]?.cost_usd).toBeNull();
-    } finally {
-      mod.PREVIEW_TOKEN_DAY_ROWS[0].avg_duration_ms = originalDuration;
-      mod.PREVIEW_TOKEN_DAY_ROWS[0].avg_ttfb_ms = originalTtfb;
-      mod.PREVIEW_TOKEN_DAY_ROWS[0].cost_usd = originalCost;
-    }
   });
 });
