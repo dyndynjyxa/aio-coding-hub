@@ -30,11 +30,7 @@ export type AuthActionContext = {
   oauthStatus: OAuthStatusValue;
   setOauthStatus: (v: OAuthStatusValue) => void;
   refreshOauthStatus: (providerId?: number | null) => Promise<OAuthStatusValue>;
-  /**
-   * Keep React Query oauthStatus cache aligned with local editor state.
-   * Without this, `useProviderEditorEffects` re-applies a stale snapshot and
-   * the "到期" timestamp appears unchanged after refresh/login.
-   */
+  /** 将 OAuth 状态直接写入 React Query 缓存，保持编辑器快照与本地状态一致。 */
   writeOauthStatusCache: (status: OAuthStatusValue, providerId?: number | null) => void;
   oauthLoading: boolean;
   setOauthLoading: (v: boolean) => void;
