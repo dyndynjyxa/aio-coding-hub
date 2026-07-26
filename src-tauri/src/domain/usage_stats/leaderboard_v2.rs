@@ -22,6 +22,12 @@ use super::{
 
 const MAX_LEADERBOARD_ROWS: usize = 200;
 
+fn effective_leaderboard_limit(limit: Option<usize>) -> usize {
+    limit.map_or(MAX_LEADERBOARD_ROWS, |limit| {
+        limit.clamp(1, MAX_LEADERBOARD_ROWS)
+    })
+}
+
 fn aggregated_total_tokens(row: &Row<'_>) -> rusqlite::Result<i64> {
     Ok(effective_total_from_buckets(
         row.get::<_, Option<i64>>("input_tokens")?.unwrap_or(0),
@@ -48,8 +54,11 @@ fn local_day_key_for_timestamp(
     day_start_hour: i64,
 ) -> Result<Option<String>, String> {
     let sql = format!("SELECT {}", local_day_bucket_sql("?1", day_start_hour));
-    let key = conn
-        .query_row(&sql, [timestamp], |row| row.get(0))
+    let mut stmt = conn
+        .prepare_cached(&sql)
+        .map_err(|e| db_err!("failed to prepare usage day key query: {e}"))?;
+    let key = stmt
+        .query_row([timestamp], |row| row.get(0))
         .map_err(|e| db_err!("failed to resolve usage day key: {e}"))?;
     Ok(key)
 }
@@ -181,14 +190,21 @@ fn summarize_day_activity(
     rows: &[UsageActivityRow],
     thresholds: DevelopmentTimeGapThresholds,
 ) -> Option<DayActivityMetrics> {
+    summarize_merged_day_activity(rows, &merged_activity_intervals(rows), thresholds)
+}
+
+fn summarize_merged_day_activity(
+    rows: &[UsageActivityRow],
+    merged: &[(i64, i64)],
+    thresholds: DevelopmentTimeGapThresholds,
+) -> Option<DayActivityMetrics> {
     let last_request_completed_at_ms = rows
         .iter()
         .map(|row| row.start_ms.saturating_add(row.duration_ms.max(0)))
         .max()?;
-    let merged = merged_activity_intervals(rows);
     let mut estimated_ms: i128 = 0;
     let mut previous_end_ms: Option<i64> = None;
-    for (start_ms, end_ms) in merged {
+    for &(start_ms, end_ms) in merged {
         if let Some(previous_end_ms) = previous_end_ms {
             estimated_ms +=
                 weighted_idle_gap_ms(start_ms.saturating_sub(previous_end_ms), thresholds) as i128;
@@ -208,24 +224,24 @@ fn summarize_day_activity(
 
 fn local_hour_index(conn: &Connection, timestamp_ms: i64) -> Result<usize, String> {
     let timestamp_seconds = timestamp_ms.div_euclid(1_000);
-    let hour = conn
-        .query_row(
-            "SELECT CAST(strftime('%H', ?1, 'unixepoch', 'localtime') AS INTEGER)",
-            [timestamp_seconds],
-            |row| row.get::<_, i64>(0),
-        )
+    let mut stmt = conn
+        .prepare_cached("SELECT CAST(strftime('%H', ?1, 'unixepoch', 'localtime') AS INTEGER)")
+        .map_err(|e| db_err!("failed to prepare local activity hour query: {e}"))?;
+    let hour = stmt
+        .query_row([timestamp_seconds], |row| row.get::<_, i64>(0))
         .map_err(|e| db_err!("failed to resolve local activity hour: {e}"))?;
     Ok(hour.clamp(0, (HOURS_PER_DAY - 1) as i64) as usize)
 }
 
 fn next_local_hour_boundary_ms(conn: &Connection, timestamp_ms: i64) -> Result<i64, String> {
     let timestamp_seconds = timestamp_ms.div_euclid(1_000);
-    let boundary_seconds = conn
-        .query_row(
+    let mut stmt = conn
+        .prepare_cached(
             "SELECT CAST(strftime('%s', strftime('%Y-%m-%d %H:00:00', ?1, 'unixepoch', 'localtime'), '+1 hour', 'utc') AS INTEGER)",
-            [timestamp_seconds],
-            |row| row.get::<_, i64>(0),
         )
+        .map_err(|e| db_err!("failed to prepare next local activity hour query: {e}"))?;
+    let boundary_seconds = stmt
+        .query_row([timestamp_seconds], |row| row.get::<_, i64>(0))
         .map_err(|e| db_err!("failed to resolve next local activity hour: {e}"))?;
     Ok(boundary_seconds.saturating_mul(1_000))
 }
@@ -273,10 +289,10 @@ fn summarize_day_activity_with_hours(
     rows: &[UsageActivityRow],
     thresholds: DevelopmentTimeGapThresholds,
 ) -> Result<Option<DayActivityMetrics>, String> {
-    let Some(mut metrics) = summarize_day_activity(rows, thresholds) else {
+    let merged = merged_activity_intervals(rows);
+    let Some(mut metrics) = summarize_merged_day_activity(rows, &merged, thresholds) else {
         return Ok(None);
     };
-    let merged = merged_activity_intervals(rows);
     if merged.is_empty() {
         return Ok(Some(metrics));
     }
@@ -367,9 +383,10 @@ fn day_activity_rows_with_conn(
     provider_id: Option<i64>,
     exclude_cx2cc_gateway_bridge: bool,
     day_start_hour: i64,
+    min_day_key: Option<&str>,
 ) -> Result<Vec<UsageActivityRow>, String> {
     let day_bucket_sql = local_day_bucket_sql("r.created_at", day_start_hour);
-    let (where_clause, where_params) = build_optional_range_cli_provider_filters(
+    let (where_clause, mut where_params) = build_optional_range_cli_provider_filters(
         "r.created_at",
         "r.cli_key",
         "r.final_provider_id",
@@ -378,6 +395,14 @@ fn day_activity_rows_with_conn(
         cli_key,
         provider_id,
     );
+    // Day keys are %Y-%m-%d, so lexicographic >= matches chronological >=.
+    let min_day_key_clause = match min_day_key {
+        Some(min_day_key) => {
+            where_params.push(min_day_key.to_string().into());
+            format!("\nAND {day_bucket_sql} >= ?{}", where_params.len())
+        }
+        None => String::new(),
+    };
     let cx2cc_filter_clause =
         sql_exclude_cx2cc_gateway_bridge_clause(Some("r"), exclude_cx2cc_gateway_bridge);
     let sql = format!(
@@ -392,6 +417,7 @@ SELECT
 FROM request_logs r
 WHERE r.excluded_from_stats = 0
 {where_clause}
+{min_day_key_clause}
 {cx2cc_filter_clause}
 "#,
     );
@@ -1173,6 +1199,12 @@ LIMIT 1
     };
 
     if matches!(scope, UsageScopeV2::Day) {
+        fill_missing_day_rows(conn, &mut out, start_ts, end_ts, day_start_hour)?;
+        out.sort_by(|a, b| b.key.cmp(&a.key));
+        // Truncate before summarizing so activity metrics (incl. per-hour
+        // distribution) are only computed for the days that stay visible.
+        out.truncate(effective_leaderboard_limit(limit));
+        let min_day_key = out.last().map(|row| row.key.clone());
         let activity_rows = day_activity_rows_with_conn(
             conn,
             start_ts,
@@ -1181,13 +1213,12 @@ LIMIT 1
             provider_id,
             exclude_cx2cc_gateway_bridge,
             day_start_hour,
+            min_day_key.as_deref(),
         )?;
         apply_day_activity_metrics(
             &mut out,
             summarize_activity_by_day(conn, activity_rows, development_time_gap_thresholds)?,
         );
-        fill_missing_day_rows(conn, &mut out, start_ts, end_ts, day_start_hour)?;
-        out.sort_by(|a, b| b.key.cmp(&a.key));
     } else {
         out.sort_by(|a, b| {
             b.requests_total
@@ -1196,11 +1227,7 @@ LIMIT 1
                 .then_with(|| a.name.cmp(&b.name))
                 .then_with(|| a.key.cmp(&b.key))
         });
-    }
-    if let Some(limit) = limit {
-        out.truncate(limit.clamp(1, MAX_LEADERBOARD_ROWS));
-    } else {
-        out.truncate(MAX_LEADERBOARD_ROWS);
+        out.truncate(effective_leaderboard_limit(limit));
     }
     Ok(out)
 }
@@ -1293,6 +1320,7 @@ where
             params.provider_id,
             params.exclude_cx2cc_gateway_bridge,
             params.day_start_hour,
+            None,
         )?)
     } else {
         None
@@ -1370,14 +1398,6 @@ where
 
     match params.scope {
         UsageScopeV2::Day => {
-            apply_day_activity_metrics(
-                &mut out,
-                summarize_activity_by_day(
-                    conn,
-                    filtered_activity_rows,
-                    params.development_time_gap_thresholds,
-                )?,
-            );
             fill_missing_day_rows(
                 conn,
                 &mut out,
@@ -1386,6 +1406,22 @@ where
                 params.day_start_hour,
             )?;
             out.sort_by(|a, b| b.key.cmp(&a.key));
+            // Truncate before summarizing so activity metrics (incl. per-hour
+            // distribution) are only computed for the days that stay visible.
+            out.truncate(effective_leaderboard_limit(params.limit));
+            let visible_day_keys: HashSet<String> = out.iter().map(|row| row.key.clone()).collect();
+            let visible_activity_rows: Vec<UsageActivityRow> = filtered_activity_rows
+                .into_iter()
+                .filter(|row| visible_day_keys.contains(&row.day_key))
+                .collect();
+            apply_day_activity_metrics(
+                &mut out,
+                summarize_activity_by_day(
+                    conn,
+                    visible_activity_rows,
+                    params.development_time_gap_thresholds,
+                )?,
+            );
         }
         UsageScopeV2::Folder => {
             apply_folder_activity_metrics(
@@ -1412,11 +1448,7 @@ where
                 .then_with(|| a.key.cmp(&b.key))
         }),
     }
-    if let Some(limit) = params.limit {
-        out.truncate(limit.clamp(1, MAX_LEADERBOARD_ROWS));
-    } else {
-        out.truncate(MAX_LEADERBOARD_ROWS);
-    }
+    out.truncate(effective_leaderboard_limit(params.limit));
     Ok(out)
 }
 
