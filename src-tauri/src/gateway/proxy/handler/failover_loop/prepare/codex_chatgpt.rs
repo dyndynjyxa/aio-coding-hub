@@ -73,21 +73,15 @@ pub(super) fn maybe_inject_codex_chatgpt_headers(
             HeaderValue::from_static(upstream_identity::CODEX_CLI_ORIGINATOR),
         );
     }
-    if headers.contains_key("chatgpt-account-id") {
-        return;
-    }
+    // Upstream account identity comes only from provider credentials; any
+    // client-supplied value must never reach the upstream.
+    headers.remove("chatgpt-account-id");
     let Some(value) = account_id.map(str::trim).filter(|value| !value.is_empty()) else {
         tracing::warn!("codex chatgpt: missing chatgpt-account-id, request may fail with 401");
         return;
     };
     if let Ok(header_value) = HeaderValue::from_str(value) {
         headers.insert("chatgpt-account-id", header_value);
-    }
-}
-
-pub(super) fn strip_client_codex_account_header(cli_key: &str, headers: &mut HeaderMap) {
-    if cli_key == "codex" {
-        headers.remove("chatgpt-account-id");
     }
 }
 
@@ -169,8 +163,7 @@ mod tests {
     use super::{
         codex_chatgpt_request_compat_value, maybe_apply_codex_chatgpt_request_compat,
         maybe_inject_codex_chatgpt_headers, normalize_codex_chatgpt_forwarded_path,
-        should_apply_claude_model_mapping, strip_client_codex_account_header,
-        strip_incompatible_protocol_headers,
+        should_apply_claude_model_mapping, strip_incompatible_protocol_headers,
     };
     use axum::body::Bytes;
     use axum::http::{header, HeaderMap, HeaderValue};
@@ -316,34 +309,13 @@ mod tests {
     }
 
     #[test]
-    fn strips_client_codex_account_header_for_api_key_upstream() {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "chatgpt-account-id",
-            HeaderValue::from_static("acct_client"),
-        );
-        headers.insert("originator", HeaderValue::from_static("codex_cli_rs"));
-
-        strip_client_codex_account_header("codex", &mut headers);
-
-        assert!(!headers.contains_key("chatgpt-account-id"));
-        assert_eq!(
-            headers
-                .get("originator")
-                .and_then(|value| value.to_str().ok()),
-            Some("codex_cli_rs")
-        );
-    }
-
-    #[test]
-    fn reinjects_provider_account_header_for_codex_chatgpt_oauth_upstream() {
+    fn provider_account_id_overrides_client_supplied_account_header() {
         let mut headers = HeaderMap::new();
         headers.insert(
             "chatgpt-account-id",
             HeaderValue::from_static("acct_client"),
         );
 
-        strip_client_codex_account_header("codex", &mut headers);
         maybe_inject_codex_chatgpt_headers(&mut headers, Some("acct_provider"));
 
         assert_eq!(
@@ -352,6 +324,23 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("acct_provider")
         );
+    }
+
+    #[test]
+    fn missing_provider_account_id_removes_stale_account_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "chatgpt-account-id",
+            HeaderValue::from_static("acct_client"),
+        );
+
+        maybe_inject_codex_chatgpt_headers(&mut headers, None);
+
+        assert!(!headers.contains_key("chatgpt-account-id"));
+
+        maybe_inject_codex_chatgpt_headers(&mut headers, Some("   "));
+
+        assert!(!headers.contains_key("chatgpt-account-id"));
     }
 
     #[test]

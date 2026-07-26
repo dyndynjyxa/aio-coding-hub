@@ -536,13 +536,14 @@ pub(crate) fn build_target_url(
     Ok(url)
 }
 
-/// Clear all authentication-related headers (fail-closed pattern).
-/// Single source of truth for which headers carry credentials.
+/// Clear all authentication and upstream-identity headers (fail-closed pattern).
+/// Single source of truth for which headers carry credentials or account identity.
 pub(super) fn clear_all_auth_headers(headers: &mut HeaderMap) {
     headers.remove(header::AUTHORIZATION);
     headers.remove("x-api-key");
     headers.remove("x-goog-api-key");
     headers.remove("x-goog-api-client");
+    headers.remove("chatgpt-account-id");
 }
 
 pub(super) fn inject_provider_auth(cli_key: &str, api_key: &str, headers: &mut HeaderMap) {
@@ -562,11 +563,11 @@ pub(super) fn ensure_cli_required_headers(cli_key: &str, headers: &mut HeaderMap
 #[cfg(test)]
 mod tests {
     use super::{
-        compute_all_providers_unavailable_fingerprint, compute_request_fingerprint,
-        inject_provider_auth, lossy_utf8_preview, normalize_query_for_fingerprint,
-        parse_request_body_limit_mb, redacted_headers_for_debug, DEFAULT_MAX_REQUEST_BODY_MB,
-        FINGERPRINT_DEBUG_COMPONENT_MAX_BYTES, MAX_DEBUG_HEADER_VALUE_PREVIEW_BYTES,
-        MAX_REQUEST_BODY_MB, MIN_REQUEST_BODY_MB,
+        clear_all_auth_headers, compute_all_providers_unavailable_fingerprint,
+        compute_request_fingerprint, inject_provider_auth, lossy_utf8_preview,
+        normalize_query_for_fingerprint, parse_request_body_limit_mb, redacted_headers_for_debug,
+        DEFAULT_MAX_REQUEST_BODY_MB, FINGERPRINT_DEBUG_COMPONENT_MAX_BYTES,
+        MAX_DEBUG_HEADER_VALUE_PREVIEW_BYTES, MAX_REQUEST_BODY_MB, MIN_REQUEST_BODY_MB,
     };
     use axum::http::{header, HeaderMap, HeaderValue};
 
@@ -857,5 +858,25 @@ mod tests {
         );
         assert!(!headers.contains_key("x-api-key"));
         assert!(!headers.contains_key("x-goog-api-key"));
+    }
+
+    #[test]
+    fn clear_all_auth_headers_removes_client_identity_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer client-secret"),
+        );
+        headers.insert(
+            "chatgpt-account-id",
+            HeaderValue::from_static("acct_client"),
+        );
+        headers.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
+
+        clear_all_auth_headers(&mut headers);
+
+        assert!(!headers.contains_key(header::AUTHORIZATION));
+        assert!(!headers.contains_key("chatgpt-account-id"));
+        assert!(headers.contains_key(header::ACCEPT));
     }
 }

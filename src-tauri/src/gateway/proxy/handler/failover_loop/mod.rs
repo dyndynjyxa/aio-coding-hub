@@ -78,7 +78,7 @@ use codex_chatgpt::{
     is_codex_chatgpt_backend, maybe_apply_codex_chatgpt_request_compat,
     maybe_inject_codex_chatgpt_headers, original_anthropic_stream_requested,
     parse_codex_chatgpt_account_id, should_apply_claude_model_mapping,
-    strip_client_codex_account_header, strip_incompatible_protocol_headers,
+    strip_incompatible_protocol_headers,
 };
 use event_helpers::{
     emit_attempt_event_and_log, emit_attempt_event_and_log_with_circuit_before,

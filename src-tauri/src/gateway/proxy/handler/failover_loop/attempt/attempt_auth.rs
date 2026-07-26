@@ -32,7 +32,6 @@ pub(super) fn inject_auth<R: tauri::Runtime>(
 ) -> Result<(), Box<FailoverAttempt>> {
     // Always clear all auth headers (fail-closed).
     clear_all_auth_headers(headers);
-    strip_client_codex_account_header(input.cli_key.as_str(), headers);
 
     let upstream_cli_key = if prepared.cx2cc_active {
         prepared
