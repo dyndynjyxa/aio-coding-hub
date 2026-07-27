@@ -74,6 +74,8 @@ pub(crate) struct SettingsUpdate {
     pub failover_max_providers_to_try: u32,
     pub circuit_breaker_failure_threshold: Option<u32>,
     pub circuit_breaker_open_duration_minutes: Option<u32>,
+    pub router_mode_enabled: Option<bool>,
+    pub router_mode_max_rounds: Option<u32>,
     pub update_releases_url: Option<String>,
     pub wsl_auto_config: Option<bool>,
     pub wsl_target_cli: Option<settings::WslTargetCli>,
@@ -163,6 +165,8 @@ pub(crate) struct SettingsView {
     pub failover_max_providers_to_try: u32,
     pub circuit_breaker_failure_threshold: u32,
     pub circuit_breaker_open_duration_minutes: u32,
+    pub router_mode_enabled: bool,
+    pub router_mode_max_rounds: u32,
     pub enable_circuit_breaker_notice: bool,
     pub verbose_provider_error: bool,
     pub intercept_anthropic_warmup_requests: bool,
@@ -285,6 +289,8 @@ impl From<&settings::AppSettings> for SettingsView {
             failover_max_providers_to_try: value.failover_max_providers_to_try,
             circuit_breaker_failure_threshold: value.circuit_breaker_failure_threshold,
             circuit_breaker_open_duration_minutes: value.circuit_breaker_open_duration_minutes,
+            router_mode_enabled: value.router_mode_enabled,
+            router_mode_max_rounds: value.router_mode_max_rounds,
             enable_circuit_breaker_notice: value.enable_circuit_breaker_notice,
             verbose_provider_error: value.verbose_provider_error,
             intercept_anthropic_warmup_requests: value.intercept_anthropic_warmup_requests,
@@ -573,6 +579,8 @@ pub(crate) async fn settings_set_impl(
         failover_max_providers_to_try,
         circuit_breaker_failure_threshold,
         circuit_breaker_open_duration_minutes,
+        router_mode_enabled,
+        router_mode_max_rounds,
         update_releases_url,
         wsl_auto_config,
         wsl_target_cli,
@@ -743,6 +751,10 @@ pub(crate) async fn settings_set_impl(
                 .unwrap_or(previous.circuit_breaker_failure_threshold);
             let circuit_breaker_open_duration_minutes = circuit_breaker_open_duration_minutes
                 .unwrap_or(previous.circuit_breaker_open_duration_minutes);
+            let router_mode_enabled =
+                router_mode_enabled.unwrap_or(previous.router_mode_enabled);
+            let router_mode_max_rounds =
+                router_mode_max_rounds.unwrap_or(previous.router_mode_max_rounds);
             let next_auto_start = crate::app::autostart::reconcile_auto_start(
                 &app_for_work,
                 previous.auto_start,
@@ -784,6 +796,8 @@ pub(crate) async fn settings_set_impl(
                 failover_max_providers_to_try,
                 circuit_breaker_failure_threshold,
                 circuit_breaker_open_duration_minutes,
+                router_mode_enabled,
+                router_mode_max_rounds,
                 enable_circuit_breaker_notice: previous.enable_circuit_breaker_notice,
                 verbose_provider_error,
                 intercept_anthropic_warmup_requests,

@@ -152,6 +152,8 @@ impl<R: tauri::Runtime> ProxyContext<R> {
             enable_codex_session_id_completion: rs.enable_codex_session_id_completion,
             max_attempts_per_provider: rs.max_attempts_per_provider,
             max_providers_to_try: rs.max_providers_to_try,
+            router_mode_enabled: rs.router_mode_enabled,
+            router_mode_max_rounds: rs.router_mode_max_rounds,
             provider_cooldown_secs: rs.provider_cooldown_secs,
             // Compact requests get a widened first-byte timeout: the whole
             // prompt cache is invalidated upstream, so the first byte can

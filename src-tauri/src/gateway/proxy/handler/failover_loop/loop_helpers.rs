@@ -98,6 +98,21 @@ pub(super) fn should_finalize_as_all_providers_unavailable(attempts: &[FailoverA
     attempts.is_empty() || attempts.iter().all(is_gate_only_skipped_attempt)
 }
 
+/// Cap on attempts retained across router-mode rounds. Router mode can sweep the
+/// provider list thousands of times; keeping every attempt would grow unbounded
+/// in memory and in the final request log. We keep only the most recent ones,
+/// which is what the finalized error surface and trace need anyway.
+const ROUTER_MODE_MAX_RETAINED_ATTEMPTS: usize = 50;
+
+/// Trim the accumulated attempts to the most recent `ROUTER_MODE_MAX_RETAINED_ATTEMPTS`,
+/// dropping the oldest. Called once per completed router-mode round.
+pub(super) fn trim_router_mode_attempts(attempts: &mut Vec<FailoverAttempt>) {
+    if attempts.len() > ROUTER_MODE_MAX_RETAINED_ATTEMPTS {
+        let excess = attempts.len() - ROUTER_MODE_MAX_RETAINED_ATTEMPTS;
+        attempts.drain(..excess);
+    }
+}
+
 pub(super) fn apply_cx2cc_request_settings(
     responses_body: &mut serde_json::Value,
     cx2cc_settings: &crate::gateway::proxy::cx2cc::settings::Cx2ccSettings,

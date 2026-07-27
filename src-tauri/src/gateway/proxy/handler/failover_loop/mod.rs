@@ -115,7 +115,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::gateway::events::{
     bound_attempt_event, decision_chain as dc, emit_attempt_event, emit_gateway_debug_log_lazy,
@@ -151,6 +151,11 @@ fn stream_flag_from_raw_body(body: &[u8]) -> bool {
     haystack.contains("\"stream\":true") || haystack.contains("\"stream\": true")
 }
 
+/// Backoff between full provider sweeps in router mode. Short enough to feel
+/// aggressive ("keep hammering until it connects") while preventing a hot spin
+/// against providers that fail instantly (e.g. connection refused).
+const ROUTER_MODE_ROUND_BACKOFF: Duration = Duration::from_millis(500);
+
 /// Main failover loop: iterate providers, retry attempts, handle responses.
 ///
 /// This is a thin orchestrator that delegates to:
@@ -172,6 +177,7 @@ where
         body_for_introspection(&input.base_headers, input.body_bytes.as_ref()).into_owned();
     let ctx = CommonCtx::from(CommonCtxArgs {
         state: &input.state,
+        router_mode: input.router_mode_enabled,
         cli_key: &input.cli_key,
         forwarded_path: &input.forwarded_path,
         observe: input.observe_request,
@@ -202,53 +208,90 @@ where
 
     let mut run_state = FailoverRunState::new();
 
-    let max_providers_to_try = (input.max_providers_to_try as usize).max(1);
+    let providers: Vec<_> = input.providers.clone();
+
+    // Router mode keeps sweeping the whole provider list until one connects,
+    // ignoring both the per-request provider cap and the circuit breaker
+    // (the gate bypass lives in `provider_router::gate_provider`). It is bounded
+    // by `router_mode_max_rounds` full sweeps with a short backoff between them.
+    let router_mode = input.router_mode_enabled && !providers.is_empty();
+    let max_providers_to_try = if router_mode {
+        usize::MAX
+    } else {
+        (input.max_providers_to_try as usize).max(1)
+    };
+    let max_rounds: u32 = if router_mode {
+        input.router_mode_max_rounds.max(1)
+    } else {
+        1
+    };
+
     let mut counters = provider_iterator::IterationCounters::new();
     let anthropic_stream_requested =
         original_anthropic_stream_requested(input.introspection_json.as_ref())
             || stream_flag_from_raw_body(&introspection_body);
 
-    let providers: Vec<_> = input.providers.clone();
+    let mut round: u32 = 0;
+    loop {
+        round = round.saturating_add(1);
 
-    for provider in providers.iter() {
-        if counters.providers_tried >= max_providers_to_try {
+        // Each router-mode round re-tries every provider from scratch, so reset
+        // the per-round skip counters and the "already failed this pass" set.
+        if router_mode {
+            counters = provider_iterator::IterationCounters::new();
+            run_state.failed_provider_ids.clear();
+        }
+
+        for provider in providers.iter() {
+            if counters.providers_tried >= max_providers_to_try {
+                break;
+            }
+
+            let preparation = provider_iterator::prepare_provider(
+                ctx,
+                &input,
+                provider,
+                &mut counters,
+                &mut run_state.attempts,
+                &run_state.failed_provider_ids,
+                anthropic_stream_requested,
+            )
+            .await;
+
+            let mut prepared = match preparation {
+                provider_iterator::PreparationOutcome::Ready(p) => *p,
+                provider_iterator::PreparationOutcome::Skipped => continue,
+            };
+
+            let mut circuit_snapshot = prepared.circuit_snapshot.clone();
+
+            if let Some(resp) = retry_engine::run_retry_loop(
+                ctx,
+                &input,
+                &mut prepared,
+                LoopState::new(
+                    &mut run_state.attempts,
+                    &mut run_state.failed_provider_ids,
+                    &mut run_state.last_outcome,
+                    &mut circuit_snapshot,
+                    &mut abort_guard,
+                ),
+            )
+            .await
+            {
+                return resp;
+            }
+        }
+
+        if !router_mode || round >= max_rounds {
             break;
         }
 
-        let preparation = provider_iterator::prepare_provider(
-            ctx,
-            &input,
-            provider,
-            &mut counters,
-            &mut run_state.attempts,
-            &run_state.failed_provider_ids,
-            anthropic_stream_requested,
-        )
-        .await;
-
-        let mut prepared = match preparation {
-            provider_iterator::PreparationOutcome::Ready(p) => *p,
-            provider_iterator::PreparationOutcome::Skipped => continue,
-        };
-
-        let mut circuit_snapshot = prepared.circuit_snapshot.clone();
-
-        if let Some(resp) = retry_engine::run_retry_loop(
-            ctx,
-            &input,
-            &mut prepared,
-            LoopState::new(
-                &mut run_state.attempts,
-                &mut run_state.failed_provider_ids,
-                &mut run_state.last_outcome,
-                &mut circuit_snapshot,
-                &mut abort_guard,
-            ),
-        )
-        .await
-        {
-            return resp;
-        }
+        // Bound the attempts log across many rounds, then back off before the
+        // next full sweep so we do not hot-spin against instantly-failing
+        // providers. A client disconnect cancels this future during the sleep.
+        loop_helpers::trim_router_mode_attempts(&mut run_state.attempts);
+        tokio::time::sleep(ROUTER_MODE_ROUND_BACKOFF).await;
     }
 
     // --- Finalization ---

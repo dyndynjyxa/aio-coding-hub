@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-pub const SCHEMA_VERSION: u32 = 36;
+pub const SCHEMA_VERSION: u32 = 37;
 pub const DEFAULT_GATEWAY_PORT: u16 = 37123;
 pub const MAX_GATEWAY_PORT: u16 = 37199;
 pub const DEFAULT_PROVIDER_COOLDOWN_SECONDS: u32 = 30;
@@ -43,6 +43,7 @@ pub(super) const SCHEMA_VERSION_ADD_CODEX_OAUTH_COMPATIBLE_PROXY_MODE: u32 = 33;
 pub(super) const SCHEMA_VERSION_ADD_REQUEST_LOG_RETENTION: u32 = 34;
 pub(super) const SCHEMA_VERSION_ADD_GROK_PROXY_PREFERENCES: u32 = 35;
 pub(super) const SCHEMA_VERSION_ADD_IMAGE_GEN_STORAGE_DIR: u32 = 36;
+pub(super) const SCHEMA_VERSION_ADD_ROUTER_MODE: u32 = 37;
 
 pub(super) const DEFAULT_LOG_RETENTION_DAYS: u32 = 7;
 pub(super) const MAX_LOG_RETENTION_DAYS: u32 = 3650;
@@ -56,6 +57,11 @@ pub(super) const DEFAULT_FAILOVER_MAX_PROVIDERS_TO_TRY: u32 = 5;
 pub(super) const DEFAULT_CIRCUIT_BREAKER_FAILURE_THRESHOLD: u32 = 5;
 pub(super) const DEFAULT_CIRCUIT_BREAKER_OPEN_DURATION_MINUTES: u32 = 30;
 pub(super) const DEFAULT_ENABLE_CIRCUIT_BREAKER_NOTICE: bool = false;
+// Router mode: when enabled, the failover loop ignores the circuit breaker and
+// keeps cycling through every configured provider until one connects (bounded
+// by DEFAULT_ROUTER_MODE_MAX_ROUNDS full sweeps).
+pub(super) const DEFAULT_ROUTER_MODE_ENABLED: bool = false;
+pub(super) const DEFAULT_ROUTER_MODE_MAX_ROUNDS: u32 = 100;
 pub(super) const DEFAULT_VERBOSE_PROVIDER_ERROR: bool = true;
 pub(super) const DEFAULT_INTERCEPT_ANTHROPIC_WARMUP_REQUESTS: bool = true;
 pub(super) const DEFAULT_ENABLE_THINKING_SIGNATURE_RECTIFIER: bool = true;
@@ -88,6 +94,10 @@ pub(super) const MAX_FAILOVER_MAX_PROVIDERS_TO_TRY: u32 = 20;
 pub(super) const MAX_FAILOVER_TOTAL_ATTEMPTS: u32 = 100;
 pub(super) const MAX_CIRCUIT_BREAKER_FAILURE_THRESHOLD: u32 = 50;
 pub(super) const MAX_CIRCUIT_BREAKER_OPEN_DURATION_MINUTES: u32 = 24 * 60;
+// Router mode safety backstop: an upper bound on how many full sweeps through
+// the provider list the failover loop performs before giving up. Generous
+// enough to behave like "keep trying" while preventing a runaway loop.
+pub(super) const MAX_ROUTER_MODE_MAX_ROUNDS: u32 = 100_000;
 pub(super) const MAX_RESPONSE_FIXER_MAX_JSON_DEPTH: u32 = 2000;
 pub(super) const MAX_RESPONSE_FIXER_MAX_FIX_SIZE: u32 = 16 * 1024 * 1024;
 pub(super) const MAX_UPDATE_RELEASES_URL_LEN: usize = 2048;

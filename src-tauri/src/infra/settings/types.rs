@@ -118,6 +118,10 @@ pub struct AppSettings {
     pub failover_max_providers_to_try: u32,
     pub circuit_breaker_failure_threshold: u32,
     pub circuit_breaker_open_duration_minutes: u32,
+    // Router mode: bypass the circuit breaker and keep cycling through every
+    // configured provider until one connects (bounded by router_mode_max_rounds).
+    pub router_mode_enabled: bool,
+    pub router_mode_max_rounds: u32,
     // Circuit breaker notice toggle (default disabled).
     pub enable_circuit_breaker_notice: bool,
     // CCH-aligned gateway feature toggles.
@@ -203,6 +207,8 @@ impl Default for AppSettings {
             failover_max_providers_to_try: DEFAULT_FAILOVER_MAX_PROVIDERS_TO_TRY,
             circuit_breaker_failure_threshold: DEFAULT_CIRCUIT_BREAKER_FAILURE_THRESHOLD,
             circuit_breaker_open_duration_minutes: DEFAULT_CIRCUIT_BREAKER_OPEN_DURATION_MINUTES,
+            router_mode_enabled: DEFAULT_ROUTER_MODE_ENABLED,
+            router_mode_max_rounds: DEFAULT_ROUTER_MODE_MAX_ROUNDS,
             enable_circuit_breaker_notice: DEFAULT_ENABLE_CIRCUIT_BREAKER_NOTICE,
             verbose_provider_error: DEFAULT_VERBOSE_PROVIDER_ERROR,
             intercept_anthropic_warmup_requests: DEFAULT_INTERCEPT_ANTHROPIC_WARMUP_REQUESTS,

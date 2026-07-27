@@ -78,6 +78,8 @@ type GeneralSettingsDraft = {
   providerBaseUrlPingCacheTtlSeconds: number;
   circuitBreakerFailureThreshold: number;
   circuitBreakerOpenDurationMinutes: number;
+  routerModeEnabled: boolean;
+  routerModeMaxRounds: number;
 };
 
 const DEFAULT_GENERAL_SETTINGS_DRAFT: GeneralSettingsDraft = {
@@ -91,6 +93,8 @@ const DEFAULT_GENERAL_SETTINGS_DRAFT: GeneralSettingsDraft = {
   providerBaseUrlPingCacheTtlSeconds: 60,
   circuitBreakerFailureThreshold: 5,
   circuitBreakerOpenDurationMinutes: 30,
+  routerModeEnabled: false,
+  routerModeMaxRounds: 100,
 };
 
 function appSettingsToGeneralSettingsDraft(appSettings: AppSettings): GeneralSettingsDraft {
@@ -120,6 +124,8 @@ function appSettingsToGeneralSettingsDraft(appSettings: AppSettings): GeneralSet
     providerBaseUrlPingCacheTtlSeconds: appSettings.provider_base_url_ping_cache_ttl_seconds,
     circuitBreakerFailureThreshold: appSettings.circuit_breaker_failure_threshold,
     circuitBreakerOpenDurationMinutes: appSettings.circuit_breaker_open_duration_minutes,
+    routerModeEnabled: appSettings.router_mode_enabled ?? false,
+    routerModeMaxRounds: appSettings.router_mode_max_rounds,
   };
 }
 
@@ -134,6 +140,8 @@ function generalSettingsDraftPatchFromAppSettings(
   | "providerBaseUrlPingCacheTtlSeconds"
   | "circuitBreakerFailureThreshold"
   | "circuitBreakerOpenDurationMinutes"
+  | "routerModeEnabled"
+  | "routerModeMaxRounds"
 > {
   return {
     upstreamFirstByteTimeoutSeconds: appSettings.upstream_first_byte_timeout_seconds,
@@ -144,6 +152,8 @@ function generalSettingsDraftPatchFromAppSettings(
     providerBaseUrlPingCacheTtlSeconds: appSettings.provider_base_url_ping_cache_ttl_seconds,
     circuitBreakerFailureThreshold: appSettings.circuit_breaker_failure_threshold,
     circuitBreakerOpenDurationMinutes: appSettings.circuit_breaker_open_duration_minutes,
+    routerModeEnabled: appSettings.router_mode_enabled ?? false,
+    routerModeMaxRounds: appSettings.router_mode_max_rounds,
   };
 }
 
@@ -190,6 +200,8 @@ export function useCliManagerPageDataModel() {
     providerBaseUrlPingCacheTtlSeconds,
     circuitBreakerFailureThreshold,
     circuitBreakerOpenDurationMinutes,
+    routerModeEnabled,
+    routerModeMaxRounds,
   } = generalSettingsDraft;
   const cacheAnomalyMonitorEnabled = appSettings?.enable_cache_anomaly_monitor ?? false;
   const taskCompleteNotifyEnabled = appSettings?.enable_task_complete_notify ?? true;
@@ -700,6 +712,11 @@ export function useCliManagerPageDataModel() {
       circuitBreakerOpenDurationMinutes,
       setCircuitBreakerOpenDurationMinutes: (value: number) =>
         setDraftNumber("circuitBreakerOpenDurationMinutes", value),
+      routerModeEnabled,
+      setRouterModeEnabled: (value: boolean) =>
+        updateGeneralSettingsDraft({ routerModeEnabled: value }),
+      routerModeMaxRounds,
+      setRouterModeMaxRounds: (value: number) => setDraftNumber("routerModeMaxRounds", value),
       blurOnEnter,
     },
     claudeTabProps: {

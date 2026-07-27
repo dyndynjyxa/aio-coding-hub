@@ -457,6 +457,16 @@ pub(crate) fn validate_bounds(settings: &AppSettings) -> AppResult<()> {
         .into());
     }
 
+    if settings.router_mode_max_rounds == 0 {
+        return Err("SEC_INVALID_INPUT: router_mode_max_rounds must be >= 1".into());
+    }
+    if settings.router_mode_max_rounds > MAX_ROUTER_MODE_MAX_ROUNDS {
+        return Err(format!(
+            "SEC_INVALID_INPUT: router_mode_max_rounds must be <= {MAX_ROUTER_MODE_MAX_ROUNDS}"
+        )
+        .into());
+    }
+
     Ok(())
 }
 

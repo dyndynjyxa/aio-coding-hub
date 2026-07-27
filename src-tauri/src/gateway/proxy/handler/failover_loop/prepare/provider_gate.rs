@@ -46,6 +46,7 @@ pub(super) fn gate_provider<R: tauri::Runtime>(
         provider_name: provider_name_base.as_str(),
         provider_base_url_display: provider_base_url_display.as_str(),
         now_unix,
+        router_mode: ctx.router_mode,
         earliest_available_unix,
         skipped_open,
         skipped_cooldown,

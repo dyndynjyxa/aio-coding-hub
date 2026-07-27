@@ -134,6 +134,21 @@ pub(super) fn sanitize_circuit_breaker_settings(settings: &mut AppSettings) -> b
     changed
 }
 
+pub(super) fn sanitize_router_mode_settings(settings: &mut AppSettings) -> bool {
+    let mut changed = false;
+
+    if settings.router_mode_max_rounds == 0 {
+        settings.router_mode_max_rounds = DEFAULT_ROUTER_MODE_MAX_ROUNDS;
+        changed = true;
+    }
+    if settings.router_mode_max_rounds > MAX_ROUTER_MODE_MAX_ROUNDS {
+        settings.router_mode_max_rounds = MAX_ROUTER_MODE_MAX_ROUNDS;
+        changed = true;
+    }
+
+    changed
+}
+
 pub(super) fn sanitize_log_retention_days(settings: &mut AppSettings) -> bool {
     if settings.log_retention_days > MAX_LOG_RETENTION_DAYS {
         settings.log_retention_days = MAX_LOG_RETENTION_DAYS;
@@ -671,9 +686,18 @@ fn migrate_add_image_gen_storage_dir(
     )
 }
 
+fn migrate_add_router_mode(settings: &mut AppSettings, schema_version_present: bool) -> bool {
+    // v37: Add router mode toggle + max rounds (default disabled / 100 rounds).
+    migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_ROUTER_MODE,
+    )
+}
+
 type SettingsMigration = fn(&mut AppSettings, bool) -> bool;
 
-const SETTINGS_MIGRATIONS: [SettingsMigration; 30] = [
+const SETTINGS_MIGRATIONS: [SettingsMigration; 31] = [
     migrate_disable_upstream_timeouts,
     migrate_add_gateway_rectifiers,
     migrate_add_circuit_breaker_notice,
@@ -704,6 +728,7 @@ const SETTINGS_MIGRATIONS: [SettingsMigration; 30] = [
     migrate_add_request_log_retention,
     migrate_add_grok_proxy_preferences,
     migrate_add_image_gen_storage_dir,
+    migrate_add_router_mode,
 ];
 
 fn apply_settings_migrations(settings: &mut AppSettings, schema_version_present: bool) -> bool {
@@ -724,6 +749,7 @@ pub(super) fn repair_settings(
     repaired |= sanitize_request_log_retention_days(settings);
     repaired |= sanitize_failover_settings(settings);
     repaired |= sanitize_circuit_breaker_settings(settings);
+    repaired |= sanitize_router_mode_settings(settings);
     repaired |= sanitize_provider_cooldown_seconds(settings);
     repaired |= sanitize_provider_base_url_ping_cache_ttl_seconds(settings);
     repaired |= sanitize_upstream_timeouts(settings);

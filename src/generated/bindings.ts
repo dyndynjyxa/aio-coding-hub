@@ -3887,6 +3887,8 @@ export type SettingsUpdate = {
   failoverMaxProvidersToTry: number;
   circuitBreakerFailureThreshold: number | null;
   circuitBreakerOpenDurationMinutes: number | null;
+  routerModeEnabled: boolean | null;
+  routerModeMaxRounds: number | null;
   updateReleasesUrl: string | null;
   wslAutoConfig: boolean | null;
   wslTargetCli: WslTargetCli | null;
@@ -3944,6 +3946,8 @@ export type SettingsView = {
   failover_max_providers_to_try: number;
   circuit_breaker_failure_threshold: number;
   circuit_breaker_open_duration_minutes: number;
+  router_mode_enabled: boolean;
+  router_mode_max_rounds: number;
   enable_circuit_breaker_notice: boolean;
   verbose_provider_error: boolean;
   intercept_anthropic_warmup_requests: boolean;
