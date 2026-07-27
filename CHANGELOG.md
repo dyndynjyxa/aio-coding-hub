@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.60.16](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.15...aio-coding-hub-v0.60.16) (2026-07-27)
+
+
+### Features
+
+* **ui:** 用量统计新增文件夹排行与预估开发时间 ([#360](https://github.com/dyndynjyxa/aio-coding-hub/issues/360)) ([c9326c0](https://github.com/dyndynjyxa/aio-coding-hub/commit/c9326c0a18ab15eebcc5513d2b195f8f1f1dbb2d))
+* **usage:** provider「指标走势」tab(平均时延/TTFB/出字速率) ([#336](https://github.com/dyndynjyxa/aio-coding-hub/issues/336)) ([d27efdb](https://github.com/dyndynjyxa/aio-coding-hub/commit/d27efdb8c8bbfadf12c3b76c677a9524f312baee))
+
+
+### Bug Fixes
+
+* **gateway:** restore Claude OAuth login via claude.ai authorize endpoint ([7bd1812](https://github.com/dyndynjyxa/aio-coding-hub/commit/7bd1812f9502670dd7536f251fbaf8fcc27966bd))
+* **gateway:** 隔离客户端 ChatGPT 账号头 ([#347](https://github.com/dyndynjyxa/aio-coding-hub/issues/347)) ([7cc1d8a](https://github.com/dyndynjyxa/aio-coding-hub/commit/7cc1d8accc3725d63ff34519fde9d82f285d3510))
+* **providers:** 刷新 OAuth Token 后同步更新到期时间展示 ([#353](https://github.com/dyndynjyxa/aio-coding-hub/issues/353)) ([84564a5](https://github.com/dyndynjyxa/aio-coding-hub/commit/84564a5b27db017cab02c77e5f8ad82f799befef))
+* **ui:** 关于应用不展示未知的 Bundle/运行模式 ([de09d64](https://github.com/dyndynjyxa/aio-coding-hub/commit/de09d64509a1d389e4da57c79317612b66cf02ea)), closes [#358](https://github.com/dyndynjyxa/aio-coding-hub/issues/358)
+
 ## [0.60.15](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.14...aio-coding-hub-v0.60.15) (2026-07-16)
 
 
