@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.60.17](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.16...aio-coding-hub-v0.60.17) (2026-08-12)
+
+
+### Features
+
+* **app:** 添加思考等级展示和模型价格别名优化 ([6007d7a](https://github.com/dyndynjyxa/aio-coding-hub/commit/6007d7a09dace7a775a2fb5300c05e165050b340))
+* **providers:** add unified model policy routing ([9e2d84c](https://github.com/dyndynjyxa/aio-coding-hub/commit/9e2d84c87ef14929ef7b20dc559f3421f2f2f761))
+* **providers:** add upstream model discovery ([bcb6338](https://github.com/dyndynjyxa/aio-coding-hub/commit/bcb633824d2eef70faae8d8aebe24908b66ad042))
+* **providers:** improve model policy routing UX ([4856337](https://github.com/dyndynjyxa/aio-coding-hub/commit/48563377053944a139dd412edb6bb97778534d61))
+* **provider:** 新增Codex模型目录事件及刷新反馈功能 ([a09cbb0](https://github.com/dyndynjyxa/aio-coding-hub/commit/a09cbb057b47d5286e089281bf02d0d38ab25ec1))
+
+
+### Bug Fixes
+
+* **deps:** patch blocking pnpm advisories ([eee73cc](https://github.com/dyndynjyxa/aio-coding-hub/commit/eee73cce4441324c44d8b1dc50110a35bba36208))
+* **gateway:** 对齐 CCH v0.9.2 网关整流器行为 ([e2d0379](https://github.com/dyndynjyxa/aio-coding-hub/commit/e2d037928d2200e3321c3ce614db55db66da32bc))
+* **HomeRequestLogsPanel:** 处理缓存创建指标显示逻辑 ([cda19b2](https://github.com/dyndynjyxa/aio-coding-hub/commit/cda19b2512fe893b2cb446be85f0bac07174cdee))
+* **providers:** correct model policy routing ([537dd7a](https://github.com/dyndynjyxa/aio-coding-hub/commit/537dd7a838e9ec720acef3db79a4f086023bf5ac))
+
 ## [0.60.16](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.15...aio-coding-hub-v0.60.16) (2026-07-27)
 
 
