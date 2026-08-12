@@ -145,3 +145,28 @@ pub(super) fn is_proxy_config_applied<R: tauri::Runtime>(
     };
     base == format!("{base_origin}/claude")
 }
+
+/// Whether `settings.json` currently carries our proxy marker token, regardless
+/// of which gateway port `ANTHROPIC_BASE_URL` points at. Unlike
+/// [`is_proxy_config_applied`] (which requires an exact port match), this stays
+/// true across a gateway port change, so it can be used to tell "still under
+/// our management" apart from "reverted to the user's direct config" (e.g. the
+/// file was restored on exit, or hand-edited while the app was closed).
+pub(super) fn is_proxy_managed<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    let path = match claude_settings_path(app) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    let bytes = match read_cli_proxy_file(&path) {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+    let value = match serde_json::from_slice::<serde_json::Value>(&bytes) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let Some(env) = value.get("env").and_then(|v| v.as_object()) else {
+        return false;
+    };
+    env.get("ANTHROPIC_AUTH_TOKEN").and_then(|v| v.as_str()) == Some(PLACEHOLDER_KEY)
+}

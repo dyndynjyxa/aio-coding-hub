@@ -970,6 +970,81 @@ fn grok_proxy_reapplies_after_exit_restore_keeps_enabled_state() {
     assert_eq!(managed["models"]["session_summary"].as_str(), Some("aio"));
 }
 
+/// Regression test for the long-standing report that direct-config edits made
+/// while the app is closed get silently discarded: no matter what provider
+/// the user points Claude at while AIO isn't running, opening and closing it
+/// again always reverts to whichever provider was configured the very first
+/// time the proxy was ever enabled.
+///
+/// Root cause: exit cleanup restores the direct config but leaves the
+/// manifest's `enabled` flag set (so the proxy silently re-applies on next
+/// launch, per `sync_enabled`). That re-apply never refreshed the backup
+/// snapshot, so any edit made to the direct config between "exit" and
+/// "next launch" was overwritten by the gateway address without ever being
+/// captured — and a later disable restored the stale, original snapshot.
+#[test]
+fn claude_proxy_captures_direct_edit_made_while_app_was_closed() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let settings_path = home_dir(&handle)
+        .expect("home dir")
+        .join(".claude")
+        .join("settings.json");
+    std::fs::create_dir_all(settings_path.parent().expect("settings parent"))
+        .expect("create .claude dir");
+    std::fs::write(
+        &settings_path,
+        br#"{ "env": { "ANTHROPIC_BASE_URL": "https://provider-a.example.com", "ANTHROPIC_AUTH_TOKEN": "token-a" } }"#,
+    )
+    .expect("write provider A direct config");
+
+    let base_origin = "http://127.0.0.1:37123";
+    let enabled = set_enabled(&handle, "claude", true, base_origin).expect("enable claude proxy");
+    assert!(enabled.ok, "{}", enabled.message);
+
+    // App exit: restores the direct config but keeps `enabled` in the manifest.
+    let restored = restore_enabled_keep_state(&handle).expect("exit restore");
+    let claude_restore = restored
+        .iter()
+        .find(|result| result.cli_key == "claude")
+        .expect("claude restore result");
+    assert!(claude_restore.ok, "{}", claude_restore.message);
+
+    // While the app is closed, the user points Claude at a different provider.
+    std::fs::write(
+        &settings_path,
+        br#"{ "env": { "ANTHROPIC_BASE_URL": "https://provider-b.example.com", "ANTHROPIC_AUTH_TOKEN": "token-b" } }"#,
+    )
+    .expect("write provider B direct config");
+
+    // App relaunch: gateway autostart re-syncs the still-enabled proxy.
+    let synced = sync_enabled(&handle, base_origin, true).expect("startup sync");
+    let claude_sync = synced
+        .iter()
+        .find(|result| result.cli_key == "claude")
+        .expect("claude sync result");
+    assert!(claude_sync.ok, "{}", claude_sync.message);
+
+    // Close the app again: should restore provider B, not the original provider A.
+    let disabled =
+        set_enabled(&handle, "claude", false, base_origin).expect("disable claude proxy");
+    assert!(disabled.ok, "{}", disabled.message);
+
+    let result: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&settings_path).expect("read settings")).unwrap();
+    let env = result.get("env").unwrap().as_object().unwrap();
+    assert_eq!(
+        env.get("ANTHROPIC_BASE_URL").unwrap().as_str(),
+        Some("https://provider-b.example.com"),
+        "should restore the provider set while the app was closed, not the original backup: {result}"
+    );
+    assert_eq!(
+        env.get("ANTHROPIC_AUTH_TOKEN").unwrap().as_str(),
+        Some("token-b"),
+        "should restore the provider set while the app was closed, not the original backup: {result}"
+    );
+}
+
 #[test]
 fn read_manifest_rejects_oversized_file() {
     let test_app = CliProxyTestApp::new();
