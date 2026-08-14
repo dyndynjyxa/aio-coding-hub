@@ -1135,6 +1135,73 @@ describe("pages/providers/ProvidersView", () => {
     expect(screen.getByText("共 2 / 2 条")).toBeInTheDocument();
   });
 
+  it("locates a provider card from the route order, clearing filters first", async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+
+    const providers = [
+      {
+        id: 1,
+        cli_key: "claude",
+        name: "Alpha Relay",
+        enabled: true,
+        base_urls: ["https://a"],
+        base_url_mode: "order",
+        cost_multiplier: 1,
+        claude_models: {},
+        tags: ["prod"],
+      },
+      {
+        id: 2,
+        cli_key: "claude",
+        name: "Beta Gateway",
+        enabled: true,
+        base_urls: ["https://b"],
+        base_url_mode: "ping",
+        cost_multiplier: 1,
+        claude_models: {},
+        tags: ["prod"],
+      },
+    ] as any[];
+
+    vi.mocked(useProvidersListQuery).mockReturnValue({
+      data: providers,
+      isFetching: false,
+    } as any);
+    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useProviderSetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProviderDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProvidersReorderMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useDefaultRouteProvidersQuery).mockReturnValue({
+      data: [{ provider_id: 1 }, { provider_id: 2 }],
+      isFetching: false,
+    } as any);
+    vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+    } as any);
+    vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+
+    renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
+
+    // Filtering hides Alpha Relay from the pool list (only the route sidebar copy remains).
+    fireEvent.change(screen.getByRole("textbox", { name: "搜索供应商名称" }), {
+      target: { value: "beta" },
+    });
+    expect(screen.getByText("共 1 / 2 条")).toBeInTheDocument();
+    expect(screen.getAllByText("Alpha Relay")).toHaveLength(1);
+
+    // Locate from the route order: clears the search filter and scrolls to the card.
+    fireEvent.click(screen.getByRole("button", { name: "定位 Alpha Relay 到供应商卡片" }));
+
+    await waitFor(() => expect(screen.getByText("共 2 / 2 条")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText("Alpha Relay").length).toBeGreaterThan(1));
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+  });
+
   it("lets sort mode providers be re-enabled from the route order switch", async () => {
     const providers = [
       {

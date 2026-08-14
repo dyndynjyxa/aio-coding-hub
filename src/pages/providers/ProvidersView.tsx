@@ -1,7 +1,7 @@
 // Usage: Rendered by ProvidersPage when `view === "providers"`.
 
 import { memo, useCallback, useEffect, useRef, useState, type RefObject } from "react";
-import { Search } from "lucide-react";
+import { LocateFixed, Search } from "lucide-react";
 import { DndContext, closestCenter } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CLIS } from "../../constants/clis";
@@ -75,6 +75,7 @@ const RouteOrderItemTrailing = memo(function RouteOrderItemTrailing({
   providerLabel,
   onSetRouteProviderEnabled,
   onRemoveProviderFromCurrentRoute,
+  onLocateProvider,
 }: {
   providerId: number;
   enabled: boolean;
@@ -83,6 +84,7 @@ const RouteOrderItemTrailing = memo(function RouteOrderItemTrailing({
   providerLabel: string;
   onSetRouteProviderEnabled: (providerId: number, checked: boolean) => void | Promise<void>;
   onRemoveProviderFromCurrentRoute: (providerId: number) => void;
+  onLocateProvider: (providerId: number) => void;
 }) {
   const handleToggle = useCallback(
     (checked: boolean) => {
@@ -93,9 +95,24 @@ const RouteOrderItemTrailing = memo(function RouteOrderItemTrailing({
   const handleRemove = useCallback(() => {
     onRemoveProviderFromCurrentRoute(providerId);
   }, [onRemoveProviderFromCurrentRoute, providerId]);
+  const handleLocate = useCallback(() => {
+    onLocateProvider(providerId);
+  }, [onLocateProvider, providerId]);
 
   return (
     <div className="flex shrink-0 items-center gap-2">
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+        title="定位到供应商卡片"
+        aria-label={`定位 ${providerLabel} 到供应商卡片`}
+        disabled={disabled || providerMissing}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={handleLocate}
+      >
+        <LocateFixed className="h-3.5 w-3.5" />
+      </Button>
       <div
         className="flex shrink-0 items-center"
         onPointerDown={(event) => event.stopPropagation()}
@@ -348,7 +365,13 @@ function ProvidersPool({
   );
 }
 
-function ProvidersRouteSidebar({ model }: { model: ProvidersViewModel }) {
+function ProvidersRouteSidebar({
+  model,
+  onLocateProvider,
+}: {
+  model: ProvidersViewModel;
+  onLocateProvider: (providerId: number) => void;
+}) {
   const {
     providers,
     sortModes,
@@ -503,6 +526,7 @@ function ProvidersRouteSidebar({ model }: { model: ProvidersViewModel }) {
                         providerLabel={providerLabel}
                         onSetRouteProviderEnabled={setRouteProviderEnabled}
                         onRemoveProviderFromCurrentRoute={removeProviderFromCurrentRoute}
+                        onLocateProvider={onLocateProvider}
                       />
                     </SortableProviderOrderItem>
                   );
@@ -790,9 +814,17 @@ function PendingRouteActivationDialog({
 
 export function ProvidersView({ activeCli }: ProvidersViewProps) {
   const model = useProvidersViewDataModel(activeCli);
-  const { providers, providersLoading, filteredProviders, setDeleteTarget } = model;
+  const {
+    providers,
+    providersLoading,
+    filteredProviders,
+    setDeleteTarget,
+    setProviderSearch,
+    setSelectedTags,
+  } = model;
   const providersListScrollRef = useRef<HTMLDivElement | null>(null);
   const pendingProvidersScrollRestoreRef = useRef<PendingProvidersScrollRestore | null>(null);
+  const pendingLocateProviderIdRef = useRef<number | null>(null);
   const selectedCliName = CLIS.find((cli) => cli.key === activeCli)?.name ?? activeCli;
   const [clearUsageStatsOnDelete, setClearUsageStatsOnDelete] = useState(false);
 
@@ -835,6 +867,24 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
     };
   }
 
+  function handleLocateProvider(providerId: number) {
+    // 目标可能正被搜索/标签过滤隐藏：先清空过滤条件，再滚动定位。
+    setProviderSearch("");
+    setSelectedTags(new Set());
+    pendingLocateProviderIdRef.current = providerId;
+  }
+
+  useEffect(() => {
+    const targetId = pendingLocateProviderIdRef.current;
+    if (targetId == null) return;
+    if (!filteredProviders.some((provider) => provider.id === targetId)) return;
+
+    const providersListElement = providersListScrollRef.current;
+    const targetElement = providersListElement?.querySelector(`[data-provider-id="${targetId}"]`);
+    targetElement?.scrollIntoView({ behavior: "smooth", block: "center" });
+    pendingLocateProviderIdRef.current = null;
+  }, [filteredProviders]);
+
   function openDeleteDialog(provider: (typeof providers)[number]) {
     setClearUsageStatsOnDelete(false);
     setDeleteTarget(provider);
@@ -856,7 +906,7 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
             scrollRef={providersListScrollRef}
             onDeleteProvider={openDeleteDialog}
           />
-          <ProvidersRouteSidebar model={model} />
+          <ProvidersRouteSidebar model={model} onLocateProvider={handleLocateProvider} />
         </div>
       </div>
 
