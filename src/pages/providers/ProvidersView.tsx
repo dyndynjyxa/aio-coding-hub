@@ -881,7 +881,8 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
 
     const providersListElement = providersListScrollRef.current;
     const targetElement = providersListElement?.querySelector(`[data-provider-id="${targetId}"]`);
-    targetElement?.scrollIntoView({ behavior: "smooth", block: "center" });
+    // 定位到列表可视区顶部（第一个位置），而非居中，便于查看该卡片及其后序卡片。
+    targetElement?.scrollIntoView({ behavior: "smooth", block: "start" });
     pendingLocateProviderIdRef.current = null;
   }, [filteredProviders]);
 

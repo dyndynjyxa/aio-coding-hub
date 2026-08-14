@@ -1199,7 +1199,9 @@ describe("pages/providers/ProvidersView", () => {
 
     await waitFor(() => expect(screen.getByText("共 2 / 2 条")).toBeInTheDocument());
     await waitFor(() => expect(screen.getAllByText("Alpha Relay").length).toBeGreaterThan(1));
-    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" })
+    );
   });
 
   it("lets sort mode providers be re-enabled from the route order switch", async () => {
