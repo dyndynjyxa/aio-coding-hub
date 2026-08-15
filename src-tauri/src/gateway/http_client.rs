@@ -402,6 +402,23 @@ fn proxy_uses_socks5_local_dns(proxy_url: &str) -> bool {
         .is_some_and(|parsed| parsed.scheme() == "socks5")
 }
 
+/// Force IPv4-first DNS resolution when an explicit `socks5://` proxy is used.
+///
+/// `socks5://` (unlike `socks5h://`) resolves hostnames locally, and many local
+/// SOCKS5 clients cannot reach an AAAA result, so every client that installs an
+/// explicit proxy must apply this before adding the proxy — the gateway's
+/// outbound client and the OAuth clients in [`crate::gateway::oauth`] alike.
+pub(crate) fn apply_socks5_local_dns_workaround(
+    builder: reqwest::ClientBuilder,
+    proxy_url: &str,
+) -> reqwest::ClientBuilder {
+    if proxy_uses_socks5_local_dns(proxy_url) {
+        builder.dns_resolver2(Ipv4FirstResolver)
+    } else {
+        builder
+    }
+}
+
 fn proxy_test_url() -> String {
     #[cfg(test)]
     if let Some(lock) = TEST_PROXY_TEST_URL_OVERRIDE.get() {
@@ -648,7 +665,12 @@ pub fn is_proxy_enabled() -> bool {
     get_current_proxy_url().is_some()
 }
 
-fn effective_proxy_url(settings: &AppSettings) -> Result<Option<String>, String> {
+/// Resolve the effective upstream proxy URL (with credentials) from settings,
+/// or `None` when the upstream proxy toggle is disabled.
+///
+/// Shared by the gateway's outbound client and by OAuth login/refresh clients
+/// ([`crate::gateway::oauth`]) so a single "Upstream Proxy" setting covers both.
+pub(crate) fn effective_proxy_url(settings: &AppSettings) -> Result<Option<String>, String> {
     if !settings.upstream_proxy_enabled {
         return Ok(None);
     }
@@ -837,9 +859,7 @@ fn build_client_with_redirect(
 
     if let Some(url) = proxy_url {
         validate_proxy_url(url)?;
-        if proxy_uses_socks5_local_dns(url) {
-            builder = builder.dns_resolver2(Ipv4FirstResolver);
-        }
+        builder = apply_socks5_local_dns_workaround(builder, url);
         let proxy = reqwest::Proxy::all(url)
             .map_err(|e| format!("Invalid proxy URL '{}': {}", mask_url(url), e))?;
         builder = builder.proxy(proxy);

@@ -394,7 +394,7 @@ pub(crate) async fn provider_oauth_start_flow(
     ensure_current_oauth_flow(&flow_id)?;
 
     // 8. Exchange code for tokens
-    let client = crate::gateway::oauth::build_default_oauth_http_client()?;
+    let client = crate::gateway::oauth::build_default_oauth_http_client(&app)?;
     let token_set = crate::gateway::oauth::token_exchange::exchange_authorization_code(
         &client,
         &crate::gateway::oauth::token_exchange::TokenExchangeRequest {
@@ -463,7 +463,7 @@ pub(crate) async fn provider_oauth_start_device_flow(
     db_state: tauri::State<'_, DbInitState>,
     provider_id: i64,
 ) -> Result<ProviderOAuthDeviceCodeStartResult, String> {
-    let db = ensure_db_ready(app, db_state.inner()).await?;
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
     let provider_cli_key =
         blocking::run("provider_oauth_start_device_flow_load_provider_cli_key", {
             let db = db.clone();
@@ -488,7 +488,7 @@ pub(crate) async fn provider_oauth_start_device_flow(
         .get_by_cli_key(&provider_cli_key)
         .ok_or_else(|| format!("no OAuth adapter for cli_key={provider_cli_key}"))?;
     let endpoints = adapter.endpoints();
-    let client = crate::gateway::oauth::build_default_oauth_http_client()?;
+    let client = crate::gateway::oauth::build_default_oauth_http_client(&app)?;
     let flow_id = crate::gateway::oauth::begin_flow_lifecycle().flow_id;
 
     if provider_cli_key == "grok" {
@@ -639,7 +639,7 @@ pub(crate) async fn provider_oauth_poll_device_flow(
         .get_by_cli_key(&provider_cli_key)
         .ok_or_else(|| format!("no OAuth adapter for cli_key={provider_cli_key}"))?;
     let endpoints = adapter.endpoints();
-    let client = crate::gateway::oauth::build_default_oauth_http_client()?;
+    let client = crate::gateway::oauth::build_default_oauth_http_client(&app)?;
 
     let oauth_token_set = if provider_cli_key == "grok" {
         match poll_grok_device_token(
@@ -873,7 +873,7 @@ pub(crate) async fn provider_oauth_refresh(
     db_state: tauri::State<'_, DbInitState>,
     provider_id: i64,
 ) -> Result<ProviderOAuthRefreshResult, String> {
-    let db = ensure_db_ready(app, db_state.inner()).await?;
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
 
     let details = blocking::run("provider_oauth_refresh_load", {
         let db = db.clone();
@@ -898,7 +898,7 @@ pub(crate) async fn provider_oauth_refresh(
         .ok_or("provider missing refresh_token")?
         .to_string();
 
-    let client = crate::gateway::oauth::build_default_oauth_http_client()?;
+    let client = crate::gateway::oauth::build_default_oauth_http_client(&app)?;
     let token_set = crate::gateway::oauth::refresh::refresh_provider_token_with_retry(
         &client,
         &token_uri,

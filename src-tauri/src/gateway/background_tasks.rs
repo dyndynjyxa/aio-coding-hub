@@ -21,11 +21,11 @@ pub(super) struct GatewayBackgroundTasks {
 
 impl GatewayBackgroundTasks {
     pub(super) fn start<R: tauri::Runtime>(app: tauri::AppHandle<R>, db: db::Db) -> Self {
-        let (log_tx, log_task) = request_logs::start_buffered_writer(app, db.clone());
+        let (log_tx, log_task) = request_logs::start_buffered_writer(app.clone(), db.clone());
         let (circuit_persist_tx, circuit_task) =
             provider_circuit_breakers::start_buffered_writer(db.clone());
         let (oauth_refresh_shutdown, oauth_refresh_rx) = watch::channel(false);
-        let oauth_refresh_task = super::oauth::refresh_loop::spawn(db, oauth_refresh_rx);
+        let oauth_refresh_task = super::oauth::refresh_loop::spawn(app, db, oauth_refresh_rx);
 
         Self {
             log_tx,

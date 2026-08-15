@@ -22,25 +22,27 @@ enum RefreshLoopStep<T> {
 ///
 /// The loop runs until `shutdown_rx` receives a signal (the gateway stop path
 /// should send it). Returns a `JoinHandle` that can be used to await termination.
-pub(crate) fn spawn(
+pub(crate) fn spawn<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     db: crate::db::Db,
     shutdown_rx: watch::Receiver<bool>,
 ) -> tauri::async_runtime::JoinHandle<()> {
     tauri::async_runtime::spawn(async move {
-        run_loop(db, shutdown_rx).await;
+        run_loop(app, db, shutdown_rx).await;
     })
 }
 
-async fn run_loop(db: crate::db::Db, mut shutdown_rx: watch::Receiver<bool>) {
-    let client = match super::build_default_oauth_http_client() {
-        Ok(client) => client,
-        Err(err) => {
-            tracing::error!("oauth_refresh_loop: failed to build http client: {err}");
-            return;
-        }
-    };
-
+async fn run_loop<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    db: crate::db::Db,
+    mut shutdown_rx: watch::Receiver<bool>,
+) {
     tracing::info!("oauth_refresh_loop: started (poll_interval={POLL_INTERVAL_SECS}s)");
+
+    // Kept across polls and rebuilt only when the configured upstream proxy
+    // changes, so a proxy toggled in Settings takes effect on the next refresh
+    // while the steady state still reuses pooled connections.
+    let mut cached_client: Option<(Option<String>, reqwest::Client)> = None;
 
     loop {
         match wait_for_next_poll_or_shutdown(
@@ -85,6 +87,34 @@ async fn run_loop(db: crate::db::Db, mut shutdown_rx: watch::Receiver<bool>) {
             "oauth_refresh_loop: {} provider(s) need token refresh",
             providers_to_refresh.len()
         );
+
+        let configured_proxy = super::resolve_app_configured_proxy_url(&app);
+        if cached_client
+            .as_ref()
+            .is_none_or(|(proxy, _)| *proxy != configured_proxy)
+        {
+            // Bound to a local first so the `configured_proxy` borrow ends here
+            // and the value can be moved into the cache below.
+            let built = super::build_oauth_http_client(
+                super::DEFAULT_OAUTH_USER_AGENT,
+                super::DEFAULT_OAUTH_TIMEOUT_SECS,
+                super::DEFAULT_OAUTH_CONNECT_TIMEOUT_SECS,
+                configured_proxy.as_deref(),
+            );
+            match built {
+                Ok(client) => cached_client = Some((configured_proxy, client)),
+                Err(err) => {
+                    tracing::error!("oauth_refresh_loop: failed to build http client: {err}");
+                    cached_client = None;
+                    continue;
+                }
+            }
+        }
+
+        let client = match cached_client.as_ref() {
+            Some((_, client)) => client.clone(),
+            None => continue,
+        };
 
         for details in providers_to_refresh {
             // Check for shutdown between each provider to avoid blocking exit.
