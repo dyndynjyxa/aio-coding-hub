@@ -730,27 +730,19 @@ fn refresh_backup_from_direct_state<R: tauri::Runtime>(
     cli_key: &str,
     manifest: &mut CliProxyManifest,
 ) -> crate::shared::error::AppResult<()> {
-    let root = cli_proxy_root_dir(app, cli_key)?;
-    let files_dir = cli_proxy_files_dir(&root);
-    std::fs::create_dir_all(&files_dir)
-        .map_err(|e| format!("failed to create {}: {e}", files_dir.display()))?;
+    let captured = capture_current_target_state(app, cli_key)?;
+    write_captured_backups(app, cli_key, &captured)?;
 
-    for target in target_files(app, cli_key)? {
-        let Some(entry) = manifest.files.iter_mut().find(|entry| entry.kind == target.kind)
+    for entry in captured {
+        let Some(tracked) = manifest
+            .files
+            .iter_mut()
+            .find(|tracked| tracked.kind == entry.kind)
         else {
             continue;
         };
-
-        let read_bytes =
-            read_optional_cli_proxy_file_with_max_len(&target.path, target.max_bytes)?;
-        entry.existed = read_bytes.is_some();
-        entry.backup_rel = if let Some(bytes) = read_bytes {
-            let backup_path = files_dir.join(target.backup_name);
-            write_cli_proxy_file_atomic_with_max_len(&backup_path, &bytes, target.max_bytes)?;
-            Some(target.backup_name.to_string())
-        } else {
-            None
-        };
+        tracked.existed = entry.existed;
+        tracked.backup_rel = entry.existed.then(|| entry.backup_name.to_string());
     }
 
     Ok(())

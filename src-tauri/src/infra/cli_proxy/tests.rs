@@ -1045,6 +1045,157 @@ fn claude_proxy_captures_direct_edit_made_while_app_was_closed() {
     );
 }
 
+/// Write a direct Claude config and enable the proxy on `base_origin`.
+fn enable_claude_proxy_over_direct_config<R: tauri::Runtime>(
+    handle: &tauri::AppHandle<R>,
+    base_origin: &str,
+    direct_config: &[u8],
+) -> std::path::PathBuf {
+    let settings_path = home_dir(handle)
+        .expect("home dir")
+        .join(".claude")
+        .join("settings.json");
+    std::fs::create_dir_all(settings_path.parent().expect("settings parent"))
+        .expect("create .claude dir");
+    std::fs::write(&settings_path, direct_config).expect("write direct config");
+
+    let enabled = set_enabled(handle, "claude", true, base_origin).expect("enable claude proxy");
+    assert!(enabled.ok, "{}", enabled.message);
+
+    settings_path
+}
+
+/// The mirror image of the regression above: when the on-disk config is still
+/// ours, a gateway port change must NOT re-snapshot it. Refreshing here would
+/// write the gateway address into the backup and destroy the user's real
+/// direct config the next time the proxy is disabled.
+#[test]
+fn claude_proxy_keeps_original_backup_when_only_gateway_port_changed() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let settings_path = enable_claude_proxy_over_direct_config(
+        &handle,
+        "http://127.0.0.1:37123",
+        br#"{ "env": { "ANTHROPIC_BASE_URL": "https://provider-a.example.com", "ANTHROPIC_AUTH_TOKEN": "token-a" } }"#,
+    );
+
+    let next_origin = "http://127.0.0.1:45999";
+    let synced = sync_enabled(&handle, next_origin, true).expect("sync to new port");
+    let claude_sync = synced
+        .iter()
+        .find(|result| result.cli_key == "claude")
+        .expect("claude sync result");
+    assert!(claude_sync.ok, "{}", claude_sync.message);
+
+    let disabled =
+        set_enabled(&handle, "claude", false, next_origin).expect("disable claude proxy");
+    assert!(disabled.ok, "{}", disabled.message);
+
+    let result: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&settings_path).expect("read settings")).unwrap();
+    let env = result.get("env").unwrap().as_object().unwrap();
+    assert_eq!(
+        env.get("ANTHROPIC_BASE_URL").unwrap().as_str(),
+        Some("https://provider-a.example.com"),
+        "a port change must not turn the gateway address into the direct backup: {result}"
+    );
+    assert_eq!(
+        env.get("ANTHROPIC_AUTH_TOKEN").unwrap().as_str(),
+        Some("token-a"),
+        "a port change must not turn the gateway address into the direct backup: {result}"
+    );
+}
+
+/// Same hazard, reached through the token instead of the port: a user who
+/// swaps our placeholder token for their own real key while the proxy is
+/// running leaves a file that still points at the gateway. It must not be
+/// mistaken for a direct config on the next port change.
+#[test]
+fn claude_proxy_keeps_backup_when_token_hand_edited_while_proxy_running() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let settings_path = enable_claude_proxy_over_direct_config(
+        &handle,
+        "http://127.0.0.1:37123",
+        br#"{ "env": { "ANTHROPIC_BASE_URL": "https://provider-a.example.com", "ANTHROPIC_AUTH_TOKEN": "token-a" } }"#,
+    );
+
+    std::fs::write(
+        &settings_path,
+        br#"{ "env": { "ANTHROPIC_BASE_URL": "http://127.0.0.1:37123/claude", "ANTHROPIC_AUTH_TOKEN": "my-own-key" } }"#,
+    )
+    .expect("hand-edit the managed token");
+
+    let next_origin = "http://127.0.0.1:45999";
+    let synced = sync_enabled(&handle, next_origin, true).expect("sync to new port");
+    let claude_sync = synced
+        .iter()
+        .find(|result| result.cli_key == "claude")
+        .expect("claude sync result");
+    assert!(claude_sync.ok, "{}", claude_sync.message);
+
+    let disabled =
+        set_enabled(&handle, "claude", false, next_origin).expect("disable claude proxy");
+    assert!(disabled.ok, "{}", disabled.message);
+
+    let result: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&settings_path).expect("read settings")).unwrap();
+    let env = result.get("env").unwrap().as_object().unwrap();
+    assert_eq!(
+        env.get("ANTHROPIC_BASE_URL").unwrap().as_str(),
+        Some("https://provider-a.example.com"),
+        "an edited token must not make the gateway address look like a direct config: {result}"
+    );
+}
+
+/// Failure path: when the direct config cannot be snapshotted, the sync must
+/// report `CLI_PROXY_BACKUP_FAILED` and leave the file untouched rather than
+/// overwrite a config it failed to back up.
+#[test]
+fn claude_proxy_sync_reports_backup_failure_without_overwriting_direct_config() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    let settings_path = enable_claude_proxy_over_direct_config(
+        &handle,
+        base_origin,
+        br#"{ "env": { "ANTHROPIC_BASE_URL": "https://provider-a.example.com", "ANTHROPIC_AUTH_TOKEN": "token-a" } }"#,
+    );
+
+    let restored = restore_enabled_keep_state(&handle).expect("exit restore");
+    assert!(
+        restored
+            .iter()
+            .find(|result| result.cli_key == "claude")
+            .expect("claude restore result")
+            .ok
+    );
+
+    // While the app is closed the direct config grows past the read limit, so
+    // it can no longer be captured as a backup.
+    let oversized = format!(
+        r#"{{ "padding": "{}", "env": {{ "ANTHROPIC_BASE_URL": "https://provider-b.example.com" }} }}"#,
+        "x".repeat(CLI_PROXY_FILE_MAX_BYTES)
+    );
+    std::fs::write(&settings_path, oversized.as_bytes()).expect("write oversized direct config");
+
+    let synced = sync_enabled(&handle, base_origin, true).expect("startup sync");
+    let claude_sync = synced
+        .iter()
+        .find(|result| result.cli_key == "claude")
+        .expect("claude sync result");
+    assert!(!claude_sync.ok, "sync should fail: {}", claude_sync.message);
+    assert_eq!(
+        claude_sync.error_code.as_deref(),
+        Some("CLI_PROXY_BACKUP_FAILED")
+    );
+    assert_eq!(
+        std::fs::read(&settings_path).expect("read settings"),
+        oversized.as_bytes(),
+        "a config we failed to back up must not be overwritten"
+    );
+}
+
 #[test]
 fn read_manifest_rejects_oversized_file() {
     let test_app = CliProxyTestApp::new();
