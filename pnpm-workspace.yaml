@@ -5,11 +5,6 @@ packages:
 minimumReleaseAge: 10080
 trustPolicy: no-downgrade
 
-# nanoid 3.3.18（GHSA-2v37-7h3g-55p8 修复版）发布不足 7 天，被 minimumReleaseAge 拦截，
-# 临时豁免以允许升级；满 7 天后可移除该豁免。
-minimumReleaseAgeExclude:
-  - nanoid
-
 allowBuilds:
   es5-ext: false
   esbuild: true
@@ -26,8 +21,7 @@ overrides:
   lodash: ^4.18.1
   minimatch@3.1.2: 3.1.4
   minimatch@9.0.5: 9.0.7
-  nanoid@3.3.16: 3.3.18
-  nanoid@3.3.17: 3.3.18
+  nanoid@3.3.16: 3.3.17
   picomatch@2.3.1: 2.3.2
   picomatch@4.0.3: 4.0.4
   react-router: 8.3.0
