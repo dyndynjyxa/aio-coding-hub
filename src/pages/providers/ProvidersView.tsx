@@ -824,9 +824,9 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
   } = model;
   const providersListScrollRef = useRef<HTMLDivElement | null>(null);
   const pendingProvidersScrollRestoreRef = useRef<PendingProvidersScrollRestore | null>(null);
-  const pendingLocateProviderIdRef = useRef<number | null>(null);
   const selectedCliName = CLIS.find((cli) => cli.key === activeCli)?.name ?? activeCli;
   const [clearUsageStatsOnDelete, setClearUsageStatsOnDelete] = useState(false);
+  const [locateTargetId, setLocateTargetId] = useState<number | null>(null);
 
   useEffect(() => {
     const pendingRestore = pendingProvidersScrollRestoreRef.current;
@@ -871,20 +871,23 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
     // 目标可能正被搜索/标签过滤隐藏：先清空过滤条件，再滚动定位。
     setProviderSearch("");
     setSelectedTags(new Set());
-    pendingLocateProviderIdRef.current = providerId;
+    // 用 state 而非 ref 记录待定位目标：这三次更新会被批处理成同一轮渲染，
+    // 由 locateTargetId 自身的变化驱动下面的 effect，不依赖 filteredProviders 是否恰好换了引用。
+    setLocateTargetId(providerId);
   }
 
   useEffect(() => {
-    const targetId = pendingLocateProviderIdRef.current;
-    if (targetId == null) return;
-    if (!filteredProviders.some((provider) => provider.id === targetId)) return;
+    if (locateTargetId == null) return;
 
     const providersListElement = providersListScrollRef.current;
-    const targetElement = providersListElement?.querySelector(`[data-provider-id="${targetId}"]`);
+    const targetElement = providersListElement?.querySelector(
+      `[data-provider-id="${locateTargetId}"]`
+    );
     // 定位到列表可视区顶部（第一个位置），而非居中，便于查看该卡片及其后序卡片。
     targetElement?.scrollIntoView({ behavior: "smooth", block: "start" });
-    pendingLocateProviderIdRef.current = null;
-  }, [filteredProviders]);
+    // 目标已被并发删除时同样清空，避免残留意图在后续列表变化时触发意外滚动。
+    setLocateTargetId(null);
+  }, [locateTargetId]);
 
   function openDeleteDialog(provider: (typeof providers)[number]) {
     setClearUsageStatsOnDelete(false);
