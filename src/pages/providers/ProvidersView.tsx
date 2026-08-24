@@ -1,7 +1,7 @@
 // Usage: Rendered by ProvidersPage when `view === "providers"`.
 
 import { memo, useCallback, useEffect, useRef, useState, type RefObject } from "react";
-import { Search } from "lucide-react";
+import { LocateFixed, Search } from "lucide-react";
 import { DndContext, closestCenter } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CLIS } from "../../constants/clis";
@@ -14,6 +14,7 @@ import { Select } from "../../ui/Select";
 import { Spinner } from "../../ui/Spinner";
 import { Switch } from "../../ui/Switch";
 import { ProviderEditorDialog } from "./ProviderEditorDialog";
+import { ProviderTestDialog } from "./ProviderTestDialog";
 import { SortableProviderCard } from "./SortableProviderCard";
 import { SortableProviderOrderItem } from "./SortableProviderOrderItem";
 import { useProvidersViewDataModel } from "./hooks/useProvidersViewDataModel";
@@ -75,6 +76,7 @@ const RouteOrderItemTrailing = memo(function RouteOrderItemTrailing({
   providerLabel,
   onSetRouteProviderEnabled,
   onRemoveProviderFromCurrentRoute,
+  onLocateProvider,
 }: {
   providerId: number;
   enabled: boolean;
@@ -83,6 +85,7 @@ const RouteOrderItemTrailing = memo(function RouteOrderItemTrailing({
   providerLabel: string;
   onSetRouteProviderEnabled: (providerId: number, checked: boolean) => void | Promise<void>;
   onRemoveProviderFromCurrentRoute: (providerId: number) => void;
+  onLocateProvider: (providerId: number) => void;
 }) {
   const handleToggle = useCallback(
     (checked: boolean) => {
@@ -93,9 +96,24 @@ const RouteOrderItemTrailing = memo(function RouteOrderItemTrailing({
   const handleRemove = useCallback(() => {
     onRemoveProviderFromCurrentRoute(providerId);
   }, [onRemoveProviderFromCurrentRoute, providerId]);
+  const handleLocate = useCallback(() => {
+    onLocateProvider(providerId);
+  }, [onLocateProvider, providerId]);
 
   return (
     <div className="flex shrink-0 items-center gap-2">
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+        title="定位到供应商卡片"
+        aria-label={`定位 ${providerLabel} 到供应商卡片`}
+        disabled={disabled || providerMissing}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={handleLocate}
+      >
+        <LocateFixed className="h-3.5 w-3.5" />
+      </Button>
       <div
         className="flex shrink-0 items-center"
         onPointerDown={(event) => event.stopPropagation()}
@@ -262,7 +280,7 @@ function ProvidersPool({
     resetCircuit,
     copyTerminalLaunchCommand,
     terminalCopyingByProviderId,
-    testProviderAvailability,
+    setTestTarget,
     testingByProviderId,
     duplicateProvider,
     duplicatingByProviderId,
@@ -324,7 +342,7 @@ function ProvidersPool({
                       provider.cli_key === "claude" ? copyTerminalLaunchCommand : undefined
                     }
                     terminalLaunchCopying={Boolean(terminalCopyingByProviderId[provider.id])}
-                    onTestAvailability={testProviderAvailability}
+                    onTestAvailability={setTestTarget}
                     testAvailabilityLoading={Boolean(testingByProviderId[provider.id])}
                     onDuplicate={duplicateProvider}
                     duplicateLoading={Boolean(duplicatingByProviderId[provider.id])}
@@ -348,7 +366,13 @@ function ProvidersPool({
   );
 }
 
-function ProvidersRouteSidebar({ model }: { model: ProvidersViewModel }) {
+function ProvidersRouteSidebar({
+  model,
+  onLocateProvider,
+}: {
+  model: ProvidersViewModel;
+  onLocateProvider: (providerId: number) => void;
+}) {
   const {
     providers,
     sortModes,
@@ -503,6 +527,7 @@ function ProvidersRouteSidebar({ model }: { model: ProvidersViewModel }) {
                         providerLabel={providerLabel}
                         onSetRouteProviderEnabled={setRouteProviderEnabled}
                         onRemoveProviderFromCurrentRoute={removeProviderFromCurrentRoute}
+                        onLocateProvider={onLocateProvider}
                       />
                     </SortableProviderOrderItem>
                   );
@@ -555,6 +580,25 @@ function ProvidersEditorDialogs({
         />
       ) : null}
     </>
+  );
+}
+
+function ProviderAvailabilityTestDialog({ model }: { model: ProvidersViewModel }) {
+  const { testTarget, setTestTarget, testingByProviderId, testProviderAvailability } = model;
+  const testing = Boolean(testTarget && testingByProviderId[testTarget.id]);
+
+  return (
+    <ProviderTestDialog
+      provider={testTarget}
+      testing={testing}
+      onClose={() => setTestTarget(null)}
+      onConfirm={({ model: probeModel, prompt }) => {
+        if (!testTarget) return;
+        const provider = testTarget;
+        setTestTarget(null);
+        void testProviderAvailability(provider, { model: probeModel, prompt });
+      }}
+    />
   );
 }
 
@@ -790,11 +834,19 @@ function PendingRouteActivationDialog({
 
 export function ProvidersView({ activeCli }: ProvidersViewProps) {
   const model = useProvidersViewDataModel(activeCli);
-  const { providers, providersLoading, filteredProviders, setDeleteTarget } = model;
+  const {
+    providers,
+    providersLoading,
+    filteredProviders,
+    setDeleteTarget,
+    setProviderSearch,
+    setSelectedTags,
+  } = model;
   const providersListScrollRef = useRef<HTMLDivElement | null>(null);
   const pendingProvidersScrollRestoreRef = useRef<PendingProvidersScrollRestore | null>(null);
   const selectedCliName = CLIS.find((cli) => cli.key === activeCli)?.name ?? activeCli;
   const [clearUsageStatsOnDelete, setClearUsageStatsOnDelete] = useState(false);
+  const [locateTargetId, setLocateTargetId] = useState<number | null>(null);
 
   useEffect(() => {
     const pendingRestore = pendingProvidersScrollRestoreRef.current;
@@ -835,6 +887,28 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
     };
   }
 
+  function handleLocateProvider(providerId: number) {
+    // 目标可能正被搜索/标签过滤隐藏：先清空过滤条件，再滚动定位。
+    setProviderSearch("");
+    setSelectedTags(new Set());
+    // 用 state 而非 ref 记录待定位目标：这三次更新会被批处理成同一轮渲染，
+    // 由 locateTargetId 自身的变化驱动下面的 effect，不依赖 filteredProviders 是否恰好换了引用。
+    setLocateTargetId(providerId);
+  }
+
+  useEffect(() => {
+    if (locateTargetId == null) return;
+
+    const providersListElement = providersListScrollRef.current;
+    const targetElement = providersListElement?.querySelector(
+      `[data-provider-id="${locateTargetId}"]`
+    );
+    // 定位到列表可视区顶部（第一个位置），而非居中，便于查看该卡片及其后序卡片。
+    targetElement?.scrollIntoView({ behavior: "smooth", block: "start" });
+    // 目标已被并发删除时同样清空，避免残留意图在后续列表变化时触发意外滚动。
+    setLocateTargetId(null);
+  }, [locateTargetId]);
+
   function openDeleteDialog(provider: (typeof providers)[number]) {
     setClearUsageStatsOnDelete(false);
     setDeleteTarget(provider);
@@ -856,7 +930,7 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
             scrollRef={providersListScrollRef}
             onDeleteProvider={openDeleteDialog}
           />
-          <ProvidersRouteSidebar model={model} />
+          <ProvidersRouteSidebar model={model} onLocateProvider={handleLocateProvider} />
         </div>
       </div>
 
@@ -867,6 +941,7 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
         setClearUsageStatsOnDelete={setClearUsageStatsOnDelete}
         onClose={closeDeleteDialog}
       />
+      <ProviderAvailabilityTestDialog model={model} />
       <SortModeDialogs selectedCliName={selectedCliName} model={model} />
       <PendingRouteActivationDialog selectedCliName={selectedCliName} model={model} />
     </>

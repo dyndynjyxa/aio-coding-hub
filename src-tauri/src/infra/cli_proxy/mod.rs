@@ -716,6 +716,38 @@ fn ensure_manifest_has_current_targets<R: tauri::Runtime>(
     Ok(true)
 }
 
+/// Re-capture the backup snapshot for every already-tracked target from
+/// whatever is currently on disk. Used when resuming an already-enabled proxy
+/// (manifest `enabled` survives app exit so the proxy silently re-applies on
+/// next launch) and the on-disk file is no longer proxy-managed — i.e. the
+/// app's own exit-cleanup restored the direct config, and it may have been
+/// hand-edited (or edited by another tool) while the app was closed. Without
+/// this, `apply_proxy_config` would immediately overwrite that edit with our
+/// gateway address, discarding it forever since the original backup (from the
+/// very first enable) never reflected it.
+fn refresh_backup_from_direct_state<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    cli_key: &str,
+    manifest: &mut CliProxyManifest,
+) -> crate::shared::error::AppResult<()> {
+    let captured = capture_current_target_state(app, cli_key)?;
+    write_captured_backups(app, cli_key, &captured)?;
+
+    for entry in captured {
+        let Some(tracked) = manifest
+            .files
+            .iter_mut()
+            .find(|tracked| tracked.kind == entry.kind)
+        else {
+            continue;
+        };
+        tracked.existed = entry.existed;
+        tracked.backup_rel = entry.existed.then(|| entry.backup_name.to_string());
+    }
+
+    Ok(())
+}
+
 fn capture_current_target_state<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     cli_key: &str,
@@ -1309,6 +1341,26 @@ pub fn sync_enabled<R: tauri::Runtime>(
                 Some(base_origin.to_string()),
             ));
             continue;
+        }
+
+        // The manifest says the proxy is enabled, but the on-disk file no
+        // longer carries our marker (e.g. exit-cleanup restored the direct
+        // config, and it may have since been edited while the app was
+        // closed). Snapshot that direct state as the new backup before we
+        // overwrite it below, so a later disable restores it instead of the
+        // stale snapshot from the first time the proxy was ever enabled.
+        if cli_key == "claude" && !claude::is_proxy_managed(app) {
+            if let Err(err) = refresh_backup_from_direct_state(app, cli_key, &mut manifest) {
+                out.push(CliProxyResult::failure(
+                    trace_id,
+                    cli_key,
+                    true,
+                    "CLI_PROXY_BACKUP_FAILED",
+                    err.to_string(),
+                    Some(base_origin.to_string()),
+                ));
+                continue;
+            }
         }
 
         match apply_proxy_config(app, cli_key, base_origin) {

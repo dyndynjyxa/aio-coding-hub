@@ -630,7 +630,7 @@ export const SortableProviderCard = memo(function SortableProviderCard(
   const dragHandleProps = useMemo(() => ({ ...attributes, ...listeners }), [attributes, listeners]);
 
   return (
-    <div ref={setNodeRef} style={style} className="relative">
+    <div ref={setNodeRef} style={style} className="relative" data-provider-id={props.provider.id}>
       <ProviderCard
         {...props}
         className={cn(isDragging && "z-10 scale-[1.02] shadow-lg ring-2 ring-accent/30")}

@@ -433,8 +433,13 @@ export function useOAuthLimitsQuery(providerId: number, enabled: boolean) {
 export function useProviderTestAvailabilityMutation() {
   const queryClient = useQueryClient();
 
-  return useMutation<ProviderAvailabilityResult | null, Error, { providerId: number }>({
-    mutationFn: (input) => providerTestAvailability(input.providerId),
+  return useMutation<
+    ProviderAvailabilityResult | null,
+    Error,
+    { providerId: number; model?: string | null; prompt?: string | null }
+  >({
+    mutationFn: (input) =>
+      providerTestAvailability(input.providerId, { model: input.model, prompt: input.prompt }),
     onSuccess: (result) => {
       if (!result) return;
       queryClient.invalidateQueries({ queryKey: gatewayKeys.circuits() });

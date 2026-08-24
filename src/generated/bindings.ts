@@ -771,12 +771,14 @@ export const commands = {
     }
   },
   async providerTestAvailability(
-    providerId: number
+    providerId: number,
+    model: string | null,
+    prompt: string | null
   ): Promise<Result<ProviderAvailabilityResult, string>> {
     try {
       return {
         status: "ok",
-        data: await TAURI_INVOKE("provider_test_availability", { providerId }),
+        data: await TAURI_INVOKE("provider_test_availability", { providerId, model, prompt }),
       };
     } catch (e) {
       if (e instanceof Error) throw e;

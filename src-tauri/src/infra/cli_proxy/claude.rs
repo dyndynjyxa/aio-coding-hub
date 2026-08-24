@@ -145,3 +145,48 @@ pub(super) fn is_proxy_config_applied<R: tauri::Runtime>(
     };
     base == format!("{base_origin}/claude")
 }
+
+/// Whether `settings.json` currently looks like a file we wrote, regardless of
+/// which gateway port `ANTHROPIC_BASE_URL` points at. Unlike
+/// [`is_proxy_config_applied`] (which requires an exact port match), this stays
+/// true across a gateway port change, so it can be used to tell "still under
+/// our management" apart from "reverted to the user's direct config" (e.g. the
+/// file was restored on exit, or hand-edited while the app was closed).
+///
+/// Either marker is enough. The token alone would miss a file whose
+/// `ANTHROPIC_AUTH_TOKEN` was hand-edited while the proxy was running (a user
+/// swapping the placeholder for their real key): that file still points at the
+/// gateway, and treating it as a direct config would snapshot the gateway
+/// address as the user's "direct" backup and lose their real one for good.
+pub(super) fn is_proxy_managed<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    let path = match claude_settings_path(app) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    let bytes = match read_cli_proxy_file(&path) {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+    let value = match serde_json::from_slice::<serde_json::Value>(&bytes) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let Some(env) = value.get("env").and_then(|v| v.as_object()) else {
+        return false;
+    };
+    let token_is_ours =
+        env.get("ANTHROPIC_AUTH_TOKEN").and_then(|v| v.as_str()) == Some(PLACEHOLDER_KEY);
+    let url_is_ours = env
+        .get("ANTHROPIC_BASE_URL")
+        .and_then(|v| v.as_str())
+        .is_some_and(is_local_gateway_claude_url);
+
+    token_is_ours || url_is_ours
+}
+
+/// Whether a URL is one of our own gateway endpoints. The gateway always
+/// publishes `http://127.0.0.1:<port>` (see `settings_service`), so a loopback
+/// `/claude` URL cannot be a real upstream.
+fn is_local_gateway_claude_url(url: &str) -> bool {
+    url.starts_with("http://127.0.0.1:") && url.ends_with("/claude")
+}

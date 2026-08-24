@@ -880,6 +880,18 @@ describe("query/providers", () => {
       await result.current.mutateAsync({ providerId: 8 });
     });
 
-    expect(providerTestAvailability).toHaveBeenCalledWith(8);
+    expect(providerTestAvailability).toHaveBeenCalledWith(8, {
+      model: undefined,
+      prompt: undefined,
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({ providerId: 8, model: "grok-4.6", prompt: "你好" });
+    });
+
+    expect(providerTestAvailability).toHaveBeenLastCalledWith(8, {
+      model: "grok-4.6",
+      prompt: "你好",
+    });
   });
 });

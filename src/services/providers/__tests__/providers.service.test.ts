@@ -434,7 +434,30 @@ describe("services/providers/providers", () => {
     expect(commands.providerDelete).toHaveBeenCalledWith(1, false);
     expect(commands.providersReorder).toHaveBeenCalledWith("claude", [2, 1]);
     expect(commands.providerClaudeTerminalLaunchCommand).toHaveBeenCalledWith(5);
-    expect(commands.providerTestAvailability).toHaveBeenCalledWith(5);
+    expect(commands.providerTestAvailability).toHaveBeenCalledWith(5, null, null);
+  });
+
+  it("passes trimmed probe overrides to IPC and nulls blank input", async () => {
+    const availability = {
+      status: "ok" as const,
+      data: {
+        ok: true,
+        provider_id: 5,
+        provider_name: "P1",
+        base_url: "https://api.example.com",
+        status: 200,
+        latency_ms: 42,
+        error: null,
+        response_preview: null,
+      } as any,
+    };
+    vi.mocked(commands.providerTestAvailability).mockResolvedValueOnce(availability);
+    await providerTestAvailability(5, { model: "  deepseek-v4-flash  ", prompt: "  你好  " });
+    expect(commands.providerTestAvailability).toHaveBeenCalledWith(5, "deepseek-v4-flash", "你好");
+
+    vi.mocked(commands.providerTestAvailability).mockResolvedValueOnce(availability);
+    await providerTestAvailability(5, { model: "   ", prompt: "" });
+    expect(commands.providerTestAvailability).toHaveBeenLastCalledWith(5, null, null);
   });
 
   it("passes the provider usage stats cleanup flag to IPC", async () => {
