@@ -674,6 +674,9 @@ pub(crate) fn effective_proxy_url(settings: &AppSettings) -> Result<Option<Strin
     if !settings.upstream_proxy_enabled {
         return Ok(None);
     }
+    if settings.upstream_proxy_url.trim().is_empty() {
+        return Err("Upstream proxy URL cannot be empty when proxy is enabled".to_string());
+    }
 
     build_effective_proxy_url(
         Some(settings.upstream_proxy_url.as_str()),
@@ -864,11 +867,8 @@ fn build_client_with_redirect(
             .map_err(|e| format!("Invalid proxy URL '{}': {}", mask_url(url), e))?;
         builder = builder.proxy(proxy);
         tracing::debug!("[HttpClient] Proxy configured: {}", mask_url(url));
-    } else if system_proxy_points_to_gateway() {
-        builder = builder.no_proxy();
-        tracing::warn!("[HttpClient] System proxy points to gateway, bypassing to avoid recursion");
     } else {
-        tracing::debug!("[HttpClient] Following system proxy (no explicit proxy configured)");
+        builder = apply_system_proxy_self_loop_guard(builder);
     }
 
     builder
@@ -893,6 +893,21 @@ fn system_proxy_points_to_gateway() -> bool {
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .any(|value| proxy_points_to_gateway_with_context(&value, &context))
+}
+
+/// Disable automatic system proxies when they point back at this gateway.
+/// Clients with an explicit proxy must not call this helper because an explicit
+/// proxy is an intentional override.
+pub(crate) fn apply_system_proxy_self_loop_guard(
+    builder: reqwest::ClientBuilder,
+) -> reqwest::ClientBuilder {
+    if system_proxy_points_to_gateway() {
+        tracing::warn!("[HttpClient] System proxy points to gateway, bypassing to avoid recursion");
+        builder.no_proxy()
+    } else {
+        tracing::debug!("[HttpClient] Following system proxy (no explicit proxy configured)");
+        builder
+    }
 }
 
 fn proxy_points_to_gateway_with_context(value: &str, context: &GatewaySelfCheckContext) -> bool {
@@ -928,6 +943,8 @@ pub fn mask_url(url: &str) -> String {
             Some(port) => format!("{}://{}:{}", parsed.scheme(), host, port),
             None => format!("{}://{}", parsed.scheme(), host),
         }
+    } else if url.contains('@') {
+        "[redacted]".to_string()
     } else if url.len() > 20 {
         format!("{}...", &url[..20])
     } else {
@@ -1271,6 +1288,19 @@ mod tests {
         let err = validate_proxy_for_settings(&settings)
             .expect_err("mixed credentials should be rejected");
         assert!(err.contains("either in proxy URL or username/password fields"));
+    }
+
+    #[test]
+    fn test_effective_proxy_url_rejects_enabled_proxy_without_url() {
+        let settings = AppSettings {
+            upstream_proxy_enabled: true,
+            upstream_proxy_url: "   ".to_string(),
+            ..AppSettings::default()
+        };
+
+        let err = effective_proxy_url(&settings)
+            .expect_err("enabled upstream proxy must require a proxy URL");
+        assert!(err.contains("cannot be empty"));
     }
 
     #[test]

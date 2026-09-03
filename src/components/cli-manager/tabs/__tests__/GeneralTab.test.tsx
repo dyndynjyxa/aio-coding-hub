@@ -356,6 +356,7 @@ describe("cli-manager/GeneralTab", () => {
     renderTab(<CliManagerGeneralTab {...createDefaultTabProps()} />);
 
     expect(screen.getByText("上游代理")).toBeInTheDocument();
+    expect(screen.getByText(/系统浏览器中的授权页面不受此设置控制/)).toBeInTheDocument();
 
     const proxyUrlInput = screen.getByPlaceholderText("http://127.0.0.1:7890");
     expect(proxyUrlInput).toBeInTheDocument();

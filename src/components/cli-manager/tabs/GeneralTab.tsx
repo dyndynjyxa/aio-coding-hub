@@ -1177,14 +1177,14 @@ function UpstreamProxySettingsForm({
         上游代理
       </h3>
       <p className="text-xs text-muted-foreground mb-3">
-        网关向上游 AI 服务（Claude/Codex/Gemini/Grok）发起请求时使用的代理，同时也会用于这些服务商的
-        OAuth 登录、令牌刷新与额度查询。支持 http/https/socks5/socks5h 协议 —— 例如本机的
-        socks5://127.0.0.1:1080。
+        网关向上游 AI 服务（Claude/Codex/Gemini/Grok）发起请求时使用的代理，也用于 app 发起的 OAuth
+        令牌交换、设备码轮询、令牌刷新与额度查询；系统浏览器中的授权页面不受此设置控制。支持
+        http/https/socks5/socks5h 协议，例如本机的 socks5://127.0.0.1:1080。
       </p>
       <div className="divide-y divide-border">
         <SettingsRow
           label="启用上游代理"
-          subtitle="启用后，所有上游请求（含 OAuth 登录/刷新）将通过指定代理发送。"
+          subtitle="启用后，网关请求与 app 发起的 OAuth 服务端请求将通过指定代理发送。"
         >
           <Switch
             checked={settings.upstream_proxy_enabled}

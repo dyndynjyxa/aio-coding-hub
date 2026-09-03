@@ -280,10 +280,10 @@ pub(crate) async fn provider_oauth_reset_codex_quota(
 
     let adapter = crate::gateway::oauth::registry::resolve_oauth_adapter_for_details(&details)?;
     let client = crate::gateway::oauth::build_oauth_http_client(
+        &app,
         &format!("aio-coding-hub-oauth-reset/{}", env!("CARGO_PKG_VERSION")),
         20,
         10,
-        crate::gateway::oauth::resolve_app_configured_proxy_url(&app).as_deref(),
     )?;
 
     if super::oauth::oauth_details_can_refresh(&details)

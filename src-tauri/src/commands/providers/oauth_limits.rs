@@ -33,10 +33,10 @@ pub(crate) async fn provider_oauth_fetch_limits(
     .map_err(Into::<String>::into)?;
     let adapter = crate::gateway::oauth::registry::resolve_oauth_adapter_for_details(&details)?;
     let client = crate::gateway::oauth::build_oauth_http_client(
+        &app,
         &format!("aio-coding-hub-oauth-command/{}", env!("CARGO_PKG_VERSION")),
         15,
         10,
-        crate::gateway::oauth::resolve_app_configured_proxy_url(&app).as_deref(),
     )?;
 
     if oauth_details_can_refresh(&details)
