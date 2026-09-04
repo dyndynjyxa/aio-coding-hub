@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.60.18](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.17...aio-coding-hub-v0.60.18) (2026-09-04)
+
+
+### Features
+
+* **oauth:** 上游代理同时作用于 OAuth 登录、令牌刷新与额度查询 ([#374](https://github.com/dyndynjyxa/aio-coding-hub/issues/374)) ([3bd9bb5](https://github.com/dyndynjyxa/aio-coding-hub/commit/3bd9bb59143bf94ccaafc91db1afda2d68aca7f2))
+* **providers:** 可用性探测支持自定义模型与提示词 ([b34fe58](https://github.com/dyndynjyxa/aio-coding-hub/commit/b34fe58afd5539493484498b1cff245f394921d7))
+* **providers:** 测试供应商前弹出模型与提示词对话框 ([867a0db](https://github.com/dyndynjyxa/aio-coding-hub/commit/867a0db38588c6e91360bbe4e822e68096dda7b1))
+
+
+### Bug Fixes
+
+* **ci:** 为依赖审计增加可靠回退 ([3758d8e](https://github.com/dyndynjyxa/aio-coding-hub/commit/3758d8e8bd8aadeb9c43f3bd28ffb74aec2ca232))
+* **cli-proxy:** 重启后重连代理时刷新 Claude 直连备份，避免关闭期间切换的供应商被覆盖丢失 ([#370](https://github.com/dyndynjyxa/aio-coding-hub/issues/370)) ([def1060](https://github.com/dyndynjyxa/aio-coding-hub/commit/def1060cbabbbb58f93061c26549deb64159286c))
+* **codex:** 修复模型目录残留与刷新竞态 ([d0f8536](https://github.com/dyndynjyxa/aio-coding-hub/commit/d0f85364378b49a1d205521a6ecc956579e8e49b))
+* **providers:** 可用性测试改用供应商已配置的模型 ([b334333](https://github.com/dyndynjyxa/aio-coding-hub/commit/b33433354aeb6d324a687215f8249b7403f9ecde))
+* **providers:** 默认显示当前激活的调用顺序 ([9234280](https://github.com/dyndynjyxa/aio-coding-hub/commit/9234280fa3fefed7241b824b27effb0b126f4cf7))
+* **request-logs:** 修复输出计费与日志费用刷新 ([85253db](https://github.com/dyndynjyxa/aio-coding-hub/commit/85253db097f66f1693ae345257e5dff4525132a3))
+* 修复Windows生图预览被CSP拦截(UI误报文件缺失) ([#376](https://github.com/dyndynjyxa/aio-coding-hub/issues/376)) ([3b19a24](https://github.com/dyndynjyxa/aio-coding-hub/commit/3b19a24b96673f88a90c559c2a57e5deec962b73))
+* 修复费用聚合整数溢出 ([ab83c23](https://github.com/dyndynjyxa/aio-coding-hub/commit/ab83c23f1c782d4c274ead5839f83246952cea78))
+
 ## [0.60.17](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.16...aio-coding-hub-v0.60.17) (2026-08-12)
 
 
