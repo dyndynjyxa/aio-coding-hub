@@ -133,6 +133,30 @@ describe("components/home/requestLogErrorDetails", () => {
     );
   });
 
+  it("ignores leaked success context in error_details_json for HTTP 200 responses", () => {
+    // Historical rows may carry success attempt fields inside error_details_json; guard here.
+    const observation = resolveRequestLogErrorObservation(
+      createRequestLogDetail({
+        status: 200,
+        error_code: null,
+        error_details_json: JSON.stringify({
+          attempt_duration_ms: 3940,
+          decision: "success",
+          outcome: "success",
+          provider_id: 42,
+          provider_index: 0,
+          provider_name: "Provider A",
+          reason_code: "ok",
+          retry_index: 0,
+          selection_method: "ordered",
+          upstream_status: 200,
+        }),
+      })
+    );
+
+    expect(observation).toBeNull();
+  });
+
   describe("buildAttemptFailureSummary", () => {
     it("groups timeout attempts with count, deduped providers, and max timeout secs (AC1)", () => {
       const summary = buildAttemptFailureSummary([

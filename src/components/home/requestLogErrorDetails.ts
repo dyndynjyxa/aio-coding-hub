@@ -283,25 +283,15 @@ function parseErrorDetailsJson(
 }
 
 function hasObservationSignal(input: RequestLogErrorObservation) {
+  // Only genuine error signals; decision/reasonCode/providerId are also set on success.
   return (
     input.displayErrorCode != null ||
     input.gatewayErrorCode != null ||
     input.errorCategory != null ||
-    input.outcome != null ||
-    input.decision != null ||
-    input.reasonCode != null ||
-    input.selectionMethod != null ||
     input.matchedRule != null ||
-    input.attemptDurationMs != null ||
-    input.circuitStateBefore != null ||
-    input.circuitStateAfter != null ||
-    input.circuitFailureCount != null ||
-    input.circuitFailureThreshold != null ||
     input.upstreamStatus != null ||
     input.reason != null ||
     input.upstreamBodyPreview != null ||
-    input.providerId != null ||
-    input.providerName != null ||
     input.rawDetailsText != null
   );
 }
@@ -339,7 +329,10 @@ export function resolveRequestLogErrorObservation(
     source: selectedLog.error_details_json != null ? "error_details_json" : "summary",
     upstreamBodyPreview: parsedJson.upstreamBodyPreview,
     upstreamStatus:
-      parsedJson.upstreamStatus ??
+      // Both sides gated on >= 400 so leaked HTTP 200 in historical rows never fires.
+      (parsedJson.upstreamStatus != null && parsedJson.upstreamStatus >= 400
+        ? parsedJson.upstreamStatus
+        : null) ??
       (selectedLog.status != null && selectedLog.status >= 400 ? selectedLog.status : null),
   };
 
