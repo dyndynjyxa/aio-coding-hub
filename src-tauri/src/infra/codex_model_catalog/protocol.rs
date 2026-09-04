@@ -429,25 +429,6 @@ impl Drop for ManagedChild {
 }
 
 fn build_command(launch: &CodexLaunchSpec) -> Command {
-    #[cfg(windows)]
-    {
-        let is_script = launch
-            .executable
-            .extension()
-            .and_then(|value| value.to_str())
-            .map(|value| value.eq_ignore_ascii_case("cmd") || value.eq_ignore_ascii_case("bat"))
-            .unwrap_or(false);
-        if is_script {
-            let mut command = Command::new("cmd.exe");
-            command.args(["/D", "/S", "/C"]);
-            command.arg(format!(
-                "\"{}\" app-server --stdio",
-                launch.executable.to_string_lossy().replace('"', "\\\"")
-            ));
-            return command;
-        }
-    }
-
     let mut command = Command::new(&launch.executable);
     command.args(["app-server", "--stdio"]);
     command
@@ -637,22 +618,19 @@ impl Drop for WindowsJob {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        fetch_model_catalog, parse_model, parse_next_cursor, read_bounded_line,
-        run_protocol_with_timeout, StdoutBudget,
-    };
+    use super::{build_command, parse_model, parse_next_cursor, read_bounded_line, StdoutBudget};
+    #[cfg(unix)]
+    use super::{fetch_model_catalog, run_protocol_with_timeout};
     use crate::cli_manager::CodexLaunchSpec;
     use serde_json::json;
+    use std::ffi::{OsStr, OsString};
     use std::io::{BufReader, Cursor};
+    use std::path::PathBuf;
 
-    #[cfg(unix)]
-    use std::ffi::OsString;
     #[cfg(unix)]
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
-    #[cfg(unix)]
-    use std::path::PathBuf;
     #[cfg(unix)]
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -680,6 +658,23 @@ mod tests {
             version: Some("fixture".to_string()),
         };
         (root, home, launch)
+    }
+
+    #[test]
+    fn app_server_command_keeps_executable_and_arguments_separate() {
+        let launch = CodexLaunchSpec {
+            executable: PathBuf::from(r"C:\Program Files\Codex\codex.cmd"),
+            runtime_path: OsString::new(),
+            version: None,
+        };
+
+        let command = build_command(&launch);
+
+        assert_eq!(command.get_program(), launch.executable.as_os_str());
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            [OsStr::new("app-server"), OsStr::new("--stdio")]
+        );
     }
 
     #[test]

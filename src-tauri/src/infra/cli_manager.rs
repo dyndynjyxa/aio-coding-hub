@@ -774,35 +774,8 @@ pub(crate) fn codex_bundled_model_catalog_json(
     launch: &CodexLaunchSpec,
     codex_home: &Path,
 ) -> crate::shared::error::AppResult<Vec<u8>> {
-    #[cfg(windows)]
-    let mut command = {
-        let is_script = launch
-            .executable
-            .extension()
-            .and_then(|value| value.to_str())
-            .map(|value| value.eq_ignore_ascii_case("cmd") || value.eq_ignore_ascii_case("bat"))
-            .unwrap_or(false);
-        if is_script {
-            let mut command = Command::new("cmd.exe");
-            command.args(["/D", "/S", "/C"]);
-            command.arg(format!(
-                "\"{}\" debug models --bundled",
-                launch.executable.to_string_lossy().replace('"', "\\\"")
-            ));
-            command
-        } else {
-            let mut command = Command::new(&launch.executable);
-            command.args(["debug", "models", "--bundled"]);
-            command
-        }
-    };
-
-    #[cfg(not(windows))]
-    let mut command = {
-        let mut command = Command::new(&launch.executable);
-        command.args(["debug", "models", "--bundled"]);
-        command
-    };
+    let mut command = Command::new(&launch.executable);
+    command.args(["debug", "models", "--bundled"]);
 
     command
         .env("CODEX_HOME", codex_home)
