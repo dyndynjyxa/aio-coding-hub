@@ -11,12 +11,16 @@ function cspDirectiveSources(csp: string, name: string): string[] {
   return directive.split(/\s+/).slice(1);
 }
 
-describe("services/desktop/assetUrl", () => {
-  it("allows Tauri asset protocol origins in the image CSP", () => {
+describe("Tauri asset URL CSP contract", () => {
+  it("allows every asset origin emitted by convertFileSrc", () => {
     const sources = cspDirectiveSources(tauriConfig.app.security.csp, "img-src");
+    const windowsAssetOrigins = tauriConfig.app.windows.map((window) => {
+      const scheme =
+        "useHttpsScheme" in window && window.useHttpsScheme === true ? "https" : "http";
+      return `${scheme}://asset.localhost`;
+    });
 
     expect(sources).toContain("asset:");
-    // Tauri maps custom protocols to http://<scheme>.localhost on Windows by default.
-    expect(sources).toContain("http://asset.localhost");
+    expect(sources).toEqual(expect.arrayContaining(windowsAssetOrigins));
   });
 });
