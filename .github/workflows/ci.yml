@@ -151,6 +151,46 @@ jobs:
       - name: Build frontend
         run: pnpm build
 
+  codex-catalog-platform:
+    needs: support-contract
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os_family: windows
+            runner: windows-latest
+            cargo_build_jobs: "1"
+          - os_family: macos
+            runner: macos-latest
+            cargo_build_jobs: "2"
+    runs-on: ${{ matrix.runner }}
+    env:
+      CARGO_BUILD_JOBS: ${{ matrix.cargo_build_jobs }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install Rust 1.90.0
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: 1.90.0
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: src-tauri
+
+      - name: Codex catalog lifecycle tests on ${{ matrix.os_family }}
+        working-directory: src-tauri
+        run: cargo test --locked mapped_codex_provider_writes_catalog_and_last_mapping_removal_cleans_it -- --test-threads=1
+
+      - name: Codex stale refresh tests on ${{ matrix.os_family }}
+        working-directory: src-tauri
+        run: cargo test --locked stale_catalog_refresh -- --test-threads=1
+
+      - name: Codex catalog path ownership test on ${{ matrix.os_family }}
+        working-directory: src-tauri
+        run: cargo test --locked aio_catalog_pointer_matches_only_the_owned_target -- --test-threads=1
+
   rust:
     needs: support-contract
     runs-on: ubuntu-22.04

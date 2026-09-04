@@ -8,6 +8,16 @@ use std::path::Path;
 
 pub(crate) const AIO_CODEX_MODEL_CATALOG_FILENAME: &str = "aio-codex-model-catalog.json";
 
+pub(crate) fn is_aio_owned_catalog_pointer(pointer: &str, codex_home: &Path) -> bool {
+    let referenced = Path::new(pointer);
+    let resolved = if referenced.is_absolute() {
+        referenced.to_path_buf()
+    } else {
+        codex_home.join(referenced)
+    };
+    resolved == codex_home.join(AIO_CODEX_MODEL_CATALOG_FILENAME)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CatalogProjection {
     pub(crate) bytes: Vec<u8>,
@@ -237,30 +247,22 @@ fn load_user_catalog(
         return Ok(None);
     };
 
-    let referenced = Path::new(pointer);
-    let path = if referenced.is_absolute() {
-        referenced.to_path_buf()
+    let path = if Path::new(pointer).is_absolute() {
+        Path::new(pointer).to_path_buf()
     } else {
-        codex_home.join(referenced)
+        codex_home.join(pointer)
     };
-    let bytes = if path == codex_home.join(AIO_CODEX_MODEL_CATALOG_FILENAME) {
-        Some(original_aio_catalog.map(ToOwned::to_owned).ok_or_else(|| {
-            format!(
-                "CLI_PROXY_CODEX_CATALOG_FAILED: user Codex catalog {} does not exist",
-                path.display()
-            )
-        })?)
+    let bytes = if is_aio_owned_catalog_pointer(pointer, codex_home) {
+        let Some(bytes) = original_aio_catalog else {
+            return Ok(None);
+        };
+        bytes.to_owned()
     } else {
-        Some(crate::shared::fs::read_file_with_max_len(
-            &path,
-            super::CODEX_CATALOG_MAX_BYTES,
-        )?)
+        crate::shared::fs::read_file_with_max_len(&path, super::CODEX_CATALOG_MAX_BYTES)?
     };
 
-    bytes
-        .as_deref()
-        .map(|bytes| parse_catalog_json(bytes, &format!("user Codex catalog {}", path.display())))
-        .transpose()
+    parse_catalog_json(&bytes, &format!("user Codex catalog {}", path.display()))
+        .map(Some)
         .map_err(Into::into)
 }
 
@@ -509,6 +511,59 @@ mod tests {
             .expect("catalog");
 
         assert_eq!(value["models"][0]["slug"], "external-model");
+    }
+
+    #[test]
+    fn aio_catalog_pointer_matches_only_the_owned_target() {
+        let codex_home = tempfile::tempdir().expect("codex home");
+        let absolute = codex_home.path().join(AIO_CODEX_MODEL_CATALOG_FILENAME);
+
+        assert!(is_aio_owned_catalog_pointer(
+            AIO_CODEX_MODEL_CATALOG_FILENAME,
+            codex_home.path()
+        ));
+        assert!(is_aio_owned_catalog_pointer(
+            absolute.to_string_lossy().as_ref(),
+            codex_home.path()
+        ));
+        assert!(!is_aio_owned_catalog_pointer(
+            "user-models.json",
+            codex_home.path()
+        ));
+        assert!(!is_aio_owned_catalog_pointer(
+            tempfile::tempdir()
+                .expect("external dir")
+                .path()
+                .join(AIO_CODEX_MODEL_CATALOG_FILENAME)
+                .to_string_lossy()
+                .as_ref(),
+            codex_home.path()
+        ));
+    }
+
+    #[test]
+    fn orphaned_aio_catalog_pointer_is_not_treated_as_a_user_catalog() {
+        let codex_home = tempfile::tempdir().expect("codex home");
+        let config = format!(
+            "model_catalog_json = {}\n",
+            toml::Value::String(AIO_CODEX_MODEL_CATALOG_FILENAME.to_string())
+        );
+
+        let value = load_user_catalog(Some(config.as_bytes()), None, codex_home.path())
+            .expect("orphaned AIO pointer should be ignored");
+
+        assert!(value.is_none());
+    }
+
+    #[test]
+    fn missing_external_user_catalog_still_fails() {
+        let codex_home = tempfile::tempdir().expect("codex home");
+        let config = "model_catalog_json = \"missing-user-models.json\"\n";
+
+        let error = load_user_catalog(Some(config.as_bytes()), None, codex_home.path())
+            .expect_err("missing external user catalog must fail");
+
+        assert!(error.to_string().contains("missing-user-models.json"));
     }
 
     #[test]

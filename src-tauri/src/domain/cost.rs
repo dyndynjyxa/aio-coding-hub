@@ -333,6 +333,9 @@ pub fn calculate_cost_usd_femto_with_options(
         "output_cost_per_token_priority",
         "output_cost_per_token_above_threshold",
     );
+    if output_tokens > 0 && output_cost_value.is_none() {
+        return None;
+    }
     let input_cost = input_cost_value.unwrap_or(0);
     let output_cost = output_cost_value.unwrap_or(0);
     let cache_read_cost_value = select_rate(

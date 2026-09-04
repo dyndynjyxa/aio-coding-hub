@@ -4,7 +4,7 @@ import { gatewayEventNames } from "../../constants/gatewayEvents";
 import { useRequestLogsFeed } from "../useRequestLogsFeed";
 import {
   useActiveRequestLogsSnapshotQuery,
-  useRequestLogsIncrementalRefreshMutation,
+  useRequestLogsRefreshMutation,
   useRequestLogsListAllQuery,
 } from "../../query/requestLogs";
 import { subscribeGatewayEvent } from "../../services/gateway/gatewayEventBus";
@@ -14,7 +14,7 @@ import { useWindowForeground } from "../useWindowForeground";
 vi.mock("../../query/requestLogs", () => ({
   useActiveRequestLogsSnapshotQuery: vi.fn(),
   useRequestLogsListAllQuery: vi.fn(),
-  useRequestLogsIncrementalRefreshMutation: vi.fn(),
+  useRequestLogsRefreshMutation: vi.fn(),
 }));
 
 vi.mock("../../services/gateway/gatewayEventBus", () => ({
@@ -34,7 +34,7 @@ describe("hooks/useRequestLogsFeed", () => {
     vi.clearAllMocks();
     vi.useRealTimers();
     vi.mocked(useDocumentVisibility).mockReturnValue(true);
-    vi.mocked(useRequestLogsIncrementalRefreshMutation).mockReturnValue({
+    vi.mocked(useRequestLogsRefreshMutation).mockReturnValue({
       mutateAsync: vi.fn().mockResolvedValue(null),
       isPending: false,
     } as any);
@@ -165,10 +165,10 @@ describe("hooks/useRequestLogsFeed", () => {
     expect(activeRefetch).toHaveBeenCalledTimes(1);
   });
 
-  it("subscribes to request signals and coalesces complete events into incremental refreshes", async () => {
+  it("subscribes to request signals and coalesces complete events into full refreshes", async () => {
     vi.useFakeTimers();
     const requestRefetch = vi.fn();
-    const incrementalRefresh = vi.fn().mockResolvedValue(null);
+    const refresh = vi.fn().mockResolvedValue(null);
     const activeRefetch = vi.fn().mockResolvedValue({ data: [] });
     let eventHandler:
       | ((payload: {
@@ -185,8 +185,8 @@ describe("hooks/useRequestLogsFeed", () => {
       isFetching: false,
       refetch: requestRefetch,
     } as any);
-    vi.mocked(useRequestLogsIncrementalRefreshMutation).mockReturnValue({
-      mutateAsync: incrementalRefresh,
+    vi.mocked(useRequestLogsRefreshMutation).mockReturnValue({
+      mutateAsync: refresh,
       isPending: true,
     } as any);
     vi.mocked(useActiveRequestLogsSnapshotQuery).mockReturnValue({
@@ -223,14 +223,14 @@ describe("hooks/useRequestLogsFeed", () => {
       eventHandler?.({ trace_id: "t-1", cli_key: "claude", phase: "complete", ts: 2 });
     });
 
-    expect(incrementalRefresh).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
 
     await act(async () => {
       await vi.runOnlyPendingTimersAsync();
       await Promise.resolve();
     });
 
-    expect(incrementalRefresh).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
     expect(activeRefetch).toHaveBeenCalledTimes(2);
     expect(requestRefetch).not.toHaveBeenCalled();
     vi.useRealTimers();
@@ -309,7 +309,7 @@ describe("hooks/useRequestLogsFeed", () => {
 
   it("treats fake-200 and stream-abort complete signals as live refresh triggers", async () => {
     vi.useFakeTimers();
-    const incrementalRefresh = vi.fn().mockResolvedValue(null);
+    const refresh = vi.fn().mockResolvedValue(null);
     let eventHandler: ((payload: Record<string, unknown>) => void) | null = null;
 
     vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
@@ -318,8 +318,8 @@ describe("hooks/useRequestLogsFeed", () => {
       isFetching: false,
       refetch: vi.fn(),
     } as any);
-    vi.mocked(useRequestLogsIncrementalRefreshMutation).mockReturnValue({
-      mutateAsync: incrementalRefresh,
+    vi.mocked(useRequestLogsRefreshMutation).mockReturnValue({
+      mutateAsync: refresh,
       isPending: false,
     } as any);
     vi.mocked(subscribeGatewayEvent).mockImplementation((event: string, handler: any) => {
@@ -366,19 +366,20 @@ describe("hooks/useRequestLogsFeed", () => {
       });
     });
 
-    expect(incrementalRefresh).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
 
     await act(async () => {
       await vi.runOnlyPendingTimersAsync();
       await Promise.resolve();
     });
 
-    expect(incrementalRefresh).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
 
-  it("refreshes through incremental mutation on foreground when live updates own freshness", () => {
-    const incrementalRefresh = vi.fn().mockResolvedValue(null);
+  it("refreshes through the full refresh mutation on foreground when live updates own freshness", async () => {
+    vi.useFakeTimers();
+    const refresh = vi.fn().mockResolvedValue(null);
     let foregroundArgs: { onForeground: () => void } | null = null;
 
     vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
@@ -387,8 +388,8 @@ describe("hooks/useRequestLogsFeed", () => {
       isFetching: false,
       refetch: vi.fn(),
     } as any);
-    vi.mocked(useRequestLogsIncrementalRefreshMutation).mockReturnValue({
-      mutateAsync: incrementalRefresh,
+    vi.mocked(useRequestLogsRefreshMutation).mockReturnValue({
+      mutateAsync: refresh,
       isPending: false,
     } as any);
     vi.mocked(useWindowForeground).mockImplementation((args: any) => {
@@ -406,8 +407,14 @@ describe("hooks/useRequestLogsFeed", () => {
     act(() => {
       foregroundArgs?.onForeground();
     });
+    expect(refresh).not.toHaveBeenCalled();
 
-    expect(incrementalRefresh).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+    });
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
   });
 
   it("refreshes the list query on foreground when live updates are off", () => {
@@ -466,7 +473,7 @@ describe("hooks/useRequestLogsFeed", () => {
 
   it("cancels a queued live refresh when the window hides before the debounce fires", async () => {
     vi.useFakeTimers();
-    const incrementalRefresh = vi.fn().mockResolvedValue(null);
+    const refresh = vi.fn().mockResolvedValue(null);
     let eventHandler:
       | ((payload: {
           trace_id: string;
@@ -484,8 +491,8 @@ describe("hooks/useRequestLogsFeed", () => {
       isFetching: false,
       refetch: vi.fn(),
     } as any);
-    vi.mocked(useRequestLogsIncrementalRefreshMutation).mockReturnValue({
-      mutateAsync: incrementalRefresh,
+    vi.mocked(useRequestLogsRefreshMutation).mockReturnValue({
+      mutateAsync: refresh,
       isPending: false,
     } as any);
     vi.mocked(subscribeGatewayEvent).mockImplementation((event: string, handler: any) => {
@@ -517,14 +524,14 @@ describe("hooks/useRequestLogsFeed", () => {
       await Promise.resolve();
     });
 
-    expect(incrementalRefresh).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
 
   it("drops queued follow-up refreshes after the window hides during an in-flight refresh", async () => {
     vi.useFakeTimers();
     let resolveRefresh: (() => void) | null = null;
-    const incrementalRefresh = vi.fn().mockImplementation(
+    const refresh = vi.fn().mockImplementation(
       () =>
         new Promise<void>((resolve) => {
           resolveRefresh = resolve;
@@ -547,8 +554,8 @@ describe("hooks/useRequestLogsFeed", () => {
       isFetching: false,
       refetch: vi.fn(),
     } as any);
-    vi.mocked(useRequestLogsIncrementalRefreshMutation).mockReturnValue({
-      mutateAsync: incrementalRefresh,
+    vi.mocked(useRequestLogsRefreshMutation).mockReturnValue({
+      mutateAsync: refresh,
       isPending: false,
     } as any);
     vi.mocked(subscribeGatewayEvent).mockImplementation((event: string, handler: any) => {
@@ -574,7 +581,7 @@ describe("hooks/useRequestLogsFeed", () => {
       await Promise.resolve();
     });
 
-    expect(incrementalRefresh).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
 
     act(() => {
       eventHandler?.({ trace_id: "t-1", cli_key: "claude", phase: "complete", ts: 2 });
@@ -589,7 +596,7 @@ describe("hooks/useRequestLogsFeed", () => {
       await Promise.resolve();
     });
 
-    expect(incrementalRefresh).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
 });

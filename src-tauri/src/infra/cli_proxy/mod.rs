@@ -450,25 +450,30 @@ pub(crate) fn refresh_codex_model_catalog_if_enabled<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     db: &crate::db::Db,
 ) -> crate::shared::error::AppResult<CodexCatalogRefreshResult> {
-    let Some(mut manifest) = read_manifest(app, "codex")? else {
-        return Ok(CodexCatalogRefreshResult::NotActive);
-    };
-    let Some(base_origin) = manifest.base_origin.clone() else {
-        return Ok(CodexCatalogRefreshResult::NotActive);
-    };
-    if !manifest.enabled || !is_proxy_config_applied(app, "codex", &base_origin) {
-        return Ok(CodexCatalogRefreshResult::NotActive);
-    }
+    let identity = {
+        let _transaction = codex::transaction_lock()?;
+        let Some(mut manifest) = read_manifest(app, "codex")? else {
+            return Ok(CodexCatalogRefreshResult::NotActive);
+        };
+        let Some(base_origin) = manifest.base_origin.clone() else {
+            return Ok(CodexCatalogRefreshResult::NotActive);
+        };
+        if !manifest.enabled || !is_proxy_config_applied(app, "codex", &base_origin) {
+            return Ok(CodexCatalogRefreshResult::NotActive);
+        }
 
-    if ensure_manifest_has_current_targets(app, "codex", &mut manifest)? {
-        manifest.updated_at = now_unix_seconds();
-        write_manifest(app, "codex", &manifest)?;
-    }
+        if ensure_manifest_has_current_targets(app, "codex", &mut manifest)? {
+            manifest.updated_at = now_unix_seconds();
+            write_manifest(app, "codex", &manifest)?;
+            codex::bump_config_generation_unlocked();
+        }
+        codex::catalog_refresh_identity_unlocked(app, &base_origin)?
+    };
 
-    if codex::refresh_model_catalog(app, db)? {
-        Ok(CodexCatalogRefreshResult::Updated)
-    } else {
-        Ok(CodexCatalogRefreshResult::Unchanged)
+    match codex::refresh_model_catalog(app, db, identity)? {
+        Some(true) => Ok(CodexCatalogRefreshResult::Updated),
+        Some(false) => Ok(CodexCatalogRefreshResult::Unchanged),
+        None => Ok(CodexCatalogRefreshResult::NotActive),
     }
 }
 
@@ -480,6 +485,19 @@ fn restore_from_manifest<R: tauri::Runtime>(
 ) -> crate::shared::error::AppResult<()> {
     let cli_key = manifest.cli_key.as_str();
     validate_cli_key(cli_key)?;
+    let _codex_transaction = if cli_key == "codex" {
+        Some(codex::transaction_lock()?)
+    } else {
+        None
+    };
+    if cli_key == "codex" {
+        codex::bump_config_generation_unlocked();
+    }
+    let original_aio_catalog_existed = manifest
+        .files
+        .iter()
+        .find(|entry| entry.kind == codex::CODEX_MODEL_CATALOG_KIND)
+        .is_some_and(|entry| entry.existed);
 
     let root = cli_proxy_root_dir(app, cli_key)?;
     let files_dir = cli_proxy_files_dir(&root);
@@ -519,7 +537,11 @@ fn restore_from_manifest<R: tauri::Runtime>(
                     continue;
                 }
                 "codex_config_toml" => {
-                    codex::merge_restore_codex_config_toml(&target_path, &backup_path)?;
+                    codex::merge_restore_codex_config_toml(
+                        &target_path,
+                        &backup_path,
+                        original_aio_catalog_existed,
+                    )?;
                     continue;
                 }
                 "gemini_env" => {
@@ -863,6 +885,14 @@ fn restore_backups_exactly_from_manifest<R: tauri::Runtime>(
 ) -> crate::shared::error::AppResult<()> {
     let cli_key = manifest.cli_key.as_str();
     validate_cli_key(cli_key)?;
+    let _codex_transaction = if cli_key == "codex" {
+        Some(codex::transaction_lock()?)
+    } else {
+        None
+    };
+    if cli_key == "codex" {
+        codex::bump_config_generation_unlocked();
+    }
 
     let root = cli_proxy_root_dir(app, cli_key)?;
     let files_dir = cli_proxy_files_dir(&root);

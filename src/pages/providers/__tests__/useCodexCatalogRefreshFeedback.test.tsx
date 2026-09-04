@@ -34,7 +34,7 @@ describe("useCodexCatalogRefreshFeedback", () => {
     expect(toastMock).toHaveBeenNthCalledWith(1, "模型映射已更新，重启 Codex 后生效");
     expect(toastMock).toHaveBeenNthCalledWith(
       2,
-      "Codex 模型目录未更新，请到 CLI 管理重新接管 Codex"
+      "Codex 模型目录更新失败，请检查 Codex CLI、目录文件和权限后重试"
     );
 
     unmount();

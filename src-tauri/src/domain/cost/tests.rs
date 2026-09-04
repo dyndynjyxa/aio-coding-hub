@@ -22,6 +22,50 @@ fn calculates_basic_cost() {
 }
 
 #[test]
+fn positive_output_usage_requires_an_output_rate() {
+    let usage = CostUsage {
+        input_tokens: 110_770,
+        output_tokens: 966,
+        cache_read_input_tokens: 101_888,
+        ..Default::default()
+    };
+
+    assert_eq!(
+        calculate_cost_usd_femto(
+            &usage,
+            r#"{"input_cost_per_token":0.00000125,"cache_read_input_token_cost":0.000000125}"#,
+            1.0,
+            "codex",
+            "gpt-5.6-sol",
+        ),
+        None
+    );
+}
+
+#[test]
+fn priority_output_rate_falls_back_to_the_base_rate() {
+    let usage = CostUsage {
+        input_tokens: 10,
+        output_tokens: 5,
+        ..Default::default()
+    };
+    let cost = calculate_cost_usd_femto_with_options(
+        &usage,
+        r#"{"input_cost_per_token":0.01,"output_cost_per_token":0.02}"#,
+        1.0,
+        "codex",
+        "gpt",
+        &CostCalculationOptions {
+            priority_service_tier_applied: true,
+        },
+    )
+    .expect("base rates should price priority usage when priority rates are absent");
+
+    let expected = (10i128 * 10_000_000_000_000i128) + (5i128 * 20_000_000_000_000i128);
+    assert_eq!(cost as i128, expected);
+}
+
+#[test]
 fn tiered_cost_with_separate_prices_applies_above_200k() {
     let usage = CostUsage {
         input_tokens: 200_001,

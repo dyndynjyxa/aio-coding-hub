@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo } from "react";
 import { gatewayEventNames } from "../constants/gatewayEvents";
 import {
   useActiveRequestLogsSnapshotQuery,
-  useRequestLogsIncrementalRefreshMutation,
+  useRequestLogsRefreshMutation,
   useRequestLogsListAllQuery,
 } from "../query/requestLogs";
 import { logToConsole } from "../services/consoleLog";
@@ -41,7 +41,7 @@ export function useRequestLogsFeed({
   const foregroundActive = useDocumentVisibility();
   const requestLogsQuery = useRequestLogsListAllQuery(limit, { enabled });
   const activeRequestsQuery = useActiveRequestLogsSnapshotQuery({ enabled });
-  const incrementalRefreshMutation = useRequestLogsIncrementalRefreshMutation(limit);
+  const refreshMutation = useRequestLogsRefreshMutation(limit);
   const liveRefreshEnabled = enabled && liveUpdatesEnabled && foregroundActive;
   const liveRefreshWindowMs = resolveSignalRefreshWindowMs(liveUpdateIntervalMs);
   const refreshActiveRequests = useCallback(
@@ -66,10 +66,10 @@ export function useRequestLogsFeed({
     enabled: liveRefreshEnabled,
     delayMs: liveRefreshWindowMs,
     task: async () => {
-      await Promise.all([incrementalRefreshMutation.mutateAsync(), activeRequestsQuery.refetch()]);
+      await Promise.all([refreshMutation.mutateAsync(), activeRequestsQuery.refetch()]);
     },
     onError: (error) => {
-      logToConsole("warn", "增量刷新请求记录失败", { limit, error: String(error) });
+      logToConsole("warn", "刷新请求记录失败", { limit, error: String(error) });
       return null;
     },
   });
@@ -148,7 +148,7 @@ export function useRequestLogsFeed({
   const requestLogsLoading = requestLogsQuery.isLoading;
   const requestLogsRefreshing =
     (requestLogsQuery.isFetching && !requestLogsQuery.isLoading) ||
-    incrementalRefreshMutation.isPending ||
+    refreshMutation.isPending ||
     (activeRequestsQuery.isFetching && !activeRequestsQuery.isLoading);
   const requestLogsAvailable: boolean | null = requestLogsQuery.isLoading
     ? null

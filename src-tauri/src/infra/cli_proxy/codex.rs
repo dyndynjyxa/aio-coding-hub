@@ -2,6 +2,8 @@
 
 use crate::shared::error::AppResult;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use super::{
     build_manifest_from_captured, build_manifest_with_current_target_paths,
@@ -15,6 +17,41 @@ use super::{
 pub(super) const CODEX_PROVIDER_KEY: &str = "aio";
 pub(super) const CODEX_MODEL_CATALOG_KIND: &str = "codex_model_catalog_json";
 
+static CODEX_CONFIG_TRANSACTION_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static CODEX_CONFIG_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+pub(super) fn transaction_lock() -> AppResult<MutexGuard<'static, ()>> {
+    CODEX_CONFIG_TRANSACTION_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .map_err(|_| "CODEX_CONFIG_TRANSACTION_LOCK_POISONED".into())
+}
+
+#[derive(Debug)]
+pub(super) struct CatalogRefreshIdentity {
+    base_origin: String,
+    config_path: PathBuf,
+    catalog_path: PathBuf,
+    generation: u64,
+}
+
+/// The caller must hold `transaction_lock` while capturing this identity.
+pub(super) fn catalog_refresh_identity_unlocked<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    base_origin: &str,
+) -> AppResult<CatalogRefreshIdentity> {
+    Ok(CatalogRefreshIdentity {
+        base_origin: base_origin.to_string(),
+        config_path: codex_config_path(app)?,
+        catalog_path: codex_model_catalog_path(app)?,
+        generation: CODEX_CONFIG_GENERATION.load(Ordering::Relaxed),
+    })
+}
+
+pub(super) fn bump_config_generation_unlocked() {
+    CODEX_CONFIG_GENERATION.fetch_add(1, Ordering::Relaxed);
+}
+
 pub(super) fn codex_model_catalog_path<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> AppResult<PathBuf> {
@@ -23,9 +60,9 @@ pub(super) fn codex_model_catalog_path<R: tauri::Runtime>(
 }
 
 #[derive(Debug, Default)]
-struct CatalogApplyPlan {
-    catalog_bytes: Option<Vec<u8>>,
-    catalog_pointer: Option<String>,
+pub(super) struct CatalogApplyPlan {
+    pub(super) catalog_bytes: Option<Vec<u8>>,
+    pub(super) catalog_pointer: Option<String>,
 }
 
 fn manifest_original_bytes<R: tauri::Runtime>(
@@ -55,6 +92,23 @@ fn root_model_catalog_value(config: Option<&[u8]>) -> Option<String> {
     let text = config.and_then(|bytes| std::str::from_utf8(bytes).ok())?;
     let lines = text.lines().map(str::to_string).collect::<Vec<_>>();
     find_root_key_value(&lines, "model_catalog_json")
+}
+
+fn parse_model_catalog_pointer_value(value: &str) -> Option<String> {
+    format!("model_catalog_json = {value}")
+        .parse::<toml::Value>()
+        .ok()?
+        .get("model_catalog_json")?
+        .as_str()
+        .map(str::to_string)
+}
+
+fn is_aio_owned_catalog_value(value: &str, codex_home: &Path) -> bool {
+    parse_model_catalog_pointer_value(value).is_some_and(|pointer| {
+        crate::infra::codex_model_catalog::projection::is_aio_owned_catalog_pointer(
+            &pointer, codex_home,
+        )
+    })
 }
 
 /// Projection is an enhancement on top of the proxy takeover: enabling/syncing the
@@ -96,15 +150,20 @@ fn prepare_catalog_apply_plan<R: tauri::Runtime>(
         degrade_projection_failure,
     )?;
 
-    let catalog_pointer = projection
-        .as_ref()
-        .map(|_| {
+    let original_pointer = root_model_catalog_value(original_config.as_deref());
+    let codex_home = crate::codex_paths::codex_home_dir(app)?;
+    let catalog_pointer = if projection.is_some() {
+        Some({
             format!(
                 "\"{}\"",
                 crate::infra::codex_model_catalog::projection::AIO_CODEX_MODEL_CATALOG_FILENAME
             )
         })
-        .or_else(|| root_model_catalog_value(original_config.as_deref()));
+    } else {
+        original_pointer.filter(|pointer| {
+            original_catalog.is_some() || !is_aio_owned_catalog_value(pointer, &codex_home)
+        })
+    };
     let catalog_bytes = projection
         .map(|projection| projection.bytes)
         .or(original_catalog);
@@ -134,7 +193,7 @@ fn build_codex_catalog_pointer_config(
 type AuthFileWrite<'a> = (&'a Path, Option<Vec<u8>>, &'a [u8]);
 
 /// Only the proxy enable path writes `auth`; the catalog refresh path passes `None`.
-fn apply_catalog_and_config(
+fn apply_catalog_and_config_unlocked(
     config_path: &Path,
     current_config: Option<Vec<u8>>,
     config_bytes: &[u8],
@@ -206,16 +265,84 @@ fn apply_catalog_and_config(
     }
 }
 
+fn apply_catalog_and_config(
+    config_path: &Path,
+    current_config: Option<Vec<u8>>,
+    config_bytes: &[u8],
+    catalog_path: &Path,
+    current_catalog: Option<Vec<u8>>,
+    catalog_bytes: Option<&[u8]>,
+    auth: Option<AuthFileWrite<'_>>,
+) -> AppResult<bool> {
+    let _transaction = transaction_lock()?;
+    bump_config_generation_unlocked();
+    apply_catalog_and_config_unlocked(
+        config_path,
+        current_config,
+        config_bytes,
+        catalog_path,
+        current_catalog,
+        catalog_bytes,
+        auth,
+    )
+}
+
+pub(super) fn commit_catalog_refresh_if_active<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    identity: &CatalogRefreshIdentity,
+    catalog_plan: CatalogApplyPlan,
+) -> AppResult<Option<bool>> {
+    let _transaction = transaction_lock()?;
+    if CODEX_CONFIG_GENERATION.load(Ordering::Relaxed) != identity.generation
+        || codex_config_path(app)? != identity.config_path
+        || codex_model_catalog_path(app)? != identity.catalog_path
+    {
+        return Ok(None);
+    }
+
+    let still_active = super::read_manifest(app, "codex")?.is_some_and(|manifest| {
+        manifest.enabled && manifest.base_origin.as_deref() == Some(identity.base_origin.as_str())
+    });
+    if !still_active || !is_proxy_config_applied(app, &identity.base_origin) {
+        return Ok(None);
+    }
+
+    let current_config = read_optional_cli_proxy_file_with_max_len(
+        &identity.config_path,
+        super::CLI_PROXY_FILE_MAX_BYTES,
+    )?;
+    let current_catalog = read_optional_cli_proxy_file_with_max_len(
+        &identity.catalog_path,
+        crate::infra::codex_model_catalog::CODEX_CATALOG_MAX_BYTES,
+    )?;
+    let config_bytes = build_codex_catalog_pointer_config(
+        current_config.clone(),
+        catalog_plan.catalog_pointer.as_deref(),
+    );
+
+    apply_catalog_and_config_unlocked(
+        &identity.config_path,
+        current_config,
+        &config_bytes,
+        &identity.catalog_path,
+        current_catalog,
+        catalog_plan.catalog_bytes.as_deref(),
+        None,
+    )
+    .map(Some)
+}
+
 pub(super) fn refresh_model_catalog<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     db: &crate::db::Db,
-) -> AppResult<bool> {
-    let config_path = codex_config_path(app)?;
-    let catalog_path = codex_model_catalog_path(app)?;
-    let current_config =
-        read_optional_cli_proxy_file_with_max_len(&config_path, super::CLI_PROXY_FILE_MAX_BYTES)?;
+    identity: CatalogRefreshIdentity,
+) -> AppResult<Option<bool>> {
+    let current_config = read_optional_cli_proxy_file_with_max_len(
+        &identity.config_path,
+        super::CLI_PROXY_FILE_MAX_BYTES,
+    )?;
     let current_catalog = read_optional_cli_proxy_file_with_max_len(
-        &catalog_path,
+        &identity.catalog_path,
         crate::infra::codex_model_catalog::CODEX_CATALOG_MAX_BYTES,
     )?;
     let catalog_plan = prepare_catalog_apply_plan(
@@ -225,20 +352,7 @@ pub(super) fn refresh_model_catalog<R: tauri::Runtime>(
         Some(db),
         false,
     )?;
-    let config_bytes = build_codex_catalog_pointer_config(
-        current_config.clone(),
-        catalog_plan.catalog_pointer.as_deref(),
-    );
-
-    apply_catalog_and_config(
-        &config_path,
-        current_config,
-        &config_bytes,
-        &catalog_path,
-        current_catalog,
-        catalog_plan.catalog_bytes.as_deref(),
-        None,
-    )
+    commit_catalog_refresh_if_active(app, &identity, catalog_plan)
 }
 
 pub(super) fn apply_proxy_config<R: tauri::Runtime>(
@@ -552,6 +666,7 @@ pub(super) fn merge_restore_codex_auth_json(
 pub(super) fn merge_restore_codex_config_toml(
     target_path: &Path,
     backup_path: &Path,
+    original_aio_catalog_existed: bool,
 ) -> AppResult<()> {
     let current_bytes = read_optional_cli_proxy_file(target_path)?;
     let backup_bytes = read_cli_proxy_file(backup_path)?;
@@ -591,7 +706,13 @@ pub(super) fn merge_restore_codex_config_toml(
     );
 
     // --- Revert AIO `model_catalog_json` pointer ---
-    let backup_model_catalog = find_root_key_value(&backup_lines, "model_catalog_json");
+    let backup_model_catalog =
+        find_root_key_value(&backup_lines, "model_catalog_json").filter(|value| {
+            original_aio_catalog_existed
+                || !target_path
+                    .parent()
+                    .is_some_and(|home| is_aio_owned_catalog_value(value, home))
+        });
     revert_root_key(
         &mut lines,
         "model_catalog_json",

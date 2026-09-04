@@ -1,5 +1,9 @@
 use super::*;
 use crate::infra::settings::{self, AppSettings, CodexHomeMode};
+use crate::providers::{
+    DailyResetMode, ProviderAuthMode, ProviderBaseUrlMode, ProviderModelMapping, ProviderModelMode,
+    ProviderModelPolicyV1, ProviderUpsertParams,
+};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -71,6 +75,64 @@ impl CliProxyTestApp {
 
     fn handle(&self) -> tauri::AppHandle<tauri::test::MockRuntime> {
         self.app.handle().clone()
+    }
+
+    fn install_fake_codex(&mut self) {
+        let bin_dir = self.home.path().join("fake-codex-bin");
+        std::fs::create_dir_all(&bin_dir).expect("create fake Codex bin");
+
+        #[cfg(windows)]
+        let executable = bin_dir.join("codex.cmd");
+        #[cfg(not(windows))]
+        let executable = bin_dir.join("codex");
+
+        #[cfg(windows)]
+        let script = concat!(
+            "@echo off\r\n",
+            "if \"%1\"==\"--version\" (\r\n",
+            "  echo codex-test 1.0.0\r\n",
+            "  exit /b 0\r\n",
+            ")\r\n",
+            "echo {\"models\":[{\"slug\":\"gpt-5.6-luna\",\"display_name\":\"Luna\",\"supports_parallel_tool_calls\":true}]}\r\n"
+        );
+        #[cfg(not(windows))]
+        let script = concat!(
+            "#!/bin/sh\n",
+            "if [ \"$1\" = \"--version\" ]; then\n",
+            "  printf '%s\\n' 'codex-test 1.0.0'\n",
+            "  exit 0\n",
+            "fi\n",
+            "printf '%s\\n' '{\"models\":[{\"slug\":\"gpt-5.6-luna\",\"display_name\":\"Luna\",\"supports_parallel_tool_calls\":true}]}'\n"
+        );
+        std::fs::write(&executable, script).expect("write fake Codex executable");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755))
+                .expect("make fake Codex executable");
+        }
+
+        self._env
+            .set_var("SHELL", self.home.path().join("missing-login-shell"));
+        self._env
+            .set_var("PATH", bin_dir.as_os_str().to_os_string());
+    }
+}
+
+fn capture_catalog_refresh_identity<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    base_origin: &str,
+) -> codex::CatalogRefreshIdentity {
+    let _transaction = codex::transaction_lock().expect("lock Codex config transaction");
+    codex::catalog_refresh_identity_unlocked(app, base_origin)
+        .expect("capture catalog refresh identity")
+}
+
+fn stale_catalog_apply_plan() -> codex::CatalogApplyPlan {
+    codex::CatalogApplyPlan {
+        catalog_bytes: Some(b"{\"models\":[{\"slug\":\"stale\"}]}\n".to_vec()),
+        catalog_pointer: Some("\"aio-codex-model-catalog.json\"".to_string()),
     }
 }
 
@@ -170,6 +232,44 @@ fn manifest_entry<'a>(manifest: &'a CliProxyManifest, kind: &str) -> &'a BackupF
         .iter()
         .find(|entry| entry.kind == kind)
         .unwrap_or_else(|| panic!("missing manifest entry for kind={kind}"))
+}
+
+fn codex_provider_with_mapping(source: &str) -> ProviderUpsertParams {
+    ProviderUpsertParams {
+        provider_id: None,
+        cli_key: "codex".to_string(),
+        name: "mapped Codex provider".to_string(),
+        base_urls: vec!["https://api.example.com/v1".to_string()],
+        base_url_mode: ProviderBaseUrlMode::Order,
+        auth_mode: Some(ProviderAuthMode::ApiKey),
+        api_key: Some("sk-test".to_string()),
+        enabled: true,
+        cost_multiplier: 1.0,
+        priority: Some(100),
+        claude_models: None,
+        model_policy: Some(ProviderModelPolicyV1 {
+            version: 1,
+            mode: ProviderModelMode::All,
+            model_patterns: Vec::new(),
+            mappings: vec![ProviderModelMapping {
+                source: source.to_string(),
+                target: "mapped-upstream-model".to_string(),
+            }],
+        }),
+        limit_5h_usd: None,
+        limit_daily_usd: None,
+        daily_reset_mode: Some(DailyResetMode::Fixed),
+        daily_reset_time: Some("00:00:00".to_string()),
+        limit_weekly_usd: None,
+        limit_monthly_usd: None,
+        limit_total_usd: None,
+        tags: None,
+        note: None,
+        source_provider_id: None,
+        bridge_type: None,
+        stream_idle_timeout_seconds: None,
+        extension_values: None,
+    }
 }
 
 #[test]
@@ -1971,6 +2071,322 @@ fn disabling_codex_proxy_removes_aio_catalog_created_while_enabled() {
 }
 
 #[test]
+fn exit_restore_self_heals_orphaned_aio_catalog_pointer_from_backup() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    let orphaned_config =
+        "model_catalog_json = \"aio-codex-model-catalog.json\"\n\n[existing]\nfoo = \"bar\"\n";
+    write_codex_direct_files(&handle, orphaned_config, "{}\n");
+
+    let enabled = set_enabled(&handle, "codex", true, base_origin).expect("enable codex");
+    assert!(enabled.ok, "{enabled:?}");
+
+    let config_path = codex_config_path(&handle).expect("config path");
+    let catalog_path = codex::codex_model_catalog_path(&handle).expect("catalog path");
+    let proxy_config = std::fs::read_to_string(&config_path).expect("read proxy config");
+    assert!(
+        !proxy_config.contains("model_catalog_json"),
+        "{proxy_config}"
+    );
+
+    std::fs::write(
+        &config_path,
+        format!("model_catalog_json = \"aio-codex-model-catalog.json\"\n{proxy_config}"),
+    )
+    .expect("simulate managed pointer");
+    std::fs::write(&catalog_path, b"{\"models\":[{\"slug\":\"managed\"}]}\n")
+        .expect("simulate managed catalog");
+
+    let restored = restore_enabled_keep_state(&handle).expect("exit restore");
+    let codex_restore = restored
+        .iter()
+        .find(|result| result.cli_key == "codex")
+        .expect("codex restore result");
+    assert!(codex_restore.ok, "{codex_restore:?}");
+    assert!(!catalog_path.exists());
+    let restored_config = std::fs::read_to_string(config_path).expect("read restored config");
+    assert!(
+        !restored_config.contains("model_catalog_json"),
+        "{restored_config}"
+    );
+    assert!(restored_config.contains("[existing]"), "{restored_config}");
+}
+
+#[test]
+fn provider_refresh_self_heals_orphaned_aio_catalog_pointer_from_backup() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    let orphaned_config =
+        "model_catalog_json = \"aio-codex-model-catalog.json\"\n\n[existing]\nfoo = \"bar\"\n";
+    write_codex_direct_files(&handle, orphaned_config, "{}\n");
+
+    let enabled = set_enabled(&handle, "codex", true, base_origin).expect("enable codex");
+    assert!(enabled.ok, "{enabled:?}");
+
+    let config_path = codex_config_path(&handle).expect("config path");
+    let catalog_path = codex::codex_model_catalog_path(&handle).expect("catalog path");
+    let proxy_config = std::fs::read_to_string(&config_path).expect("read proxy config");
+    std::fs::write(
+        &config_path,
+        format!("model_catalog_json = \"aio-codex-model-catalog.json\"\n{proxy_config}"),
+    )
+    .expect("simulate managed pointer");
+    std::fs::write(&catalog_path, b"{\"models\":[{\"slug\":\"managed\"}]}\n")
+        .expect("simulate managed catalog");
+    let db = crate::db::init_for_tests(&app.home.path().join("catalog-refresh.db"))
+        .expect("init test db");
+
+    let refresh = refresh_codex_model_catalog_if_enabled(&handle, &db)
+        .expect("refresh should self-heal orphaned pointer");
+
+    assert_eq!(refresh, CodexCatalogRefreshResult::Updated);
+    assert!(!catalog_path.exists());
+    let refreshed_config = std::fs::read_to_string(config_path).expect("read refreshed config");
+    assert!(
+        !refreshed_config.contains("model_catalog_json"),
+        "{refreshed_config}"
+    );
+    assert!(
+        refreshed_config.contains("[existing]"),
+        "{refreshed_config}"
+    );
+}
+
+#[test]
+fn provider_refresh_preserves_existing_catalog_when_manifest_entry_is_missing() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    let orphaned_config =
+        "model_catalog_json = \"aio-codex-model-catalog.json\"\n\n[existing]\nfoo = \"bar\"\n";
+    write_codex_direct_files(&handle, orphaned_config, "{}\n");
+
+    let enabled = set_enabled(&handle, "codex", true, base_origin).expect("enable codex");
+    assert!(enabled.ok, "{enabled:?}");
+
+    let mut legacy_manifest = read_manifest(&handle, "codex")
+        .expect("read manifest")
+        .expect("manifest exists");
+    legacy_manifest
+        .files
+        .retain(|entry| entry.kind != codex::CODEX_MODEL_CATALOG_KIND);
+    write_manifest(&handle, "codex", &legacy_manifest).expect("write legacy manifest");
+
+    let config_path = codex_config_path(&handle).expect("config path");
+    let catalog_path = codex::codex_model_catalog_path(&handle).expect("catalog path");
+    let proxy_config = std::fs::read_to_string(&config_path).expect("read proxy config");
+    std::fs::write(
+        &config_path,
+        format!("model_catalog_json = \"aio-codex-model-catalog.json\"\n{proxy_config}"),
+    )
+    .expect("simulate managed pointer");
+    let existing_catalog = b"{\"models\":[{\"slug\":\"unknown-owner\"}]}\n";
+    std::fs::write(&catalog_path, existing_catalog).expect("write untracked catalog");
+    let db = crate::db::init_for_tests(&app.home.path().join("legacy-catalog-refresh.db"))
+        .expect("init test db");
+
+    let refresh = refresh_codex_model_catalog_if_enabled(&handle, &db)
+        .expect("refresh should preserve the untracked catalog");
+
+    assert_eq!(refresh, CodexCatalogRefreshResult::Unchanged);
+    assert_eq!(
+        std::fs::read(&catalog_path).expect("read preserved catalog"),
+        existing_catalog
+    );
+    let refreshed_config = std::fs::read_to_string(config_path).expect("read refreshed config");
+    assert!(
+        refreshed_config.contains("model_catalog_json = \"aio-codex-model-catalog.json\""),
+        "{refreshed_config}"
+    );
+    let upgraded_manifest = read_manifest(&handle, "codex")
+        .expect("read upgraded manifest")
+        .expect("manifest exists");
+    let catalog_entry = manifest_entry(&upgraded_manifest, codex::CODEX_MODEL_CATALOG_KIND);
+    assert!(catalog_entry.existed);
+    assert!(catalog_entry.backup_rel.is_some());
+}
+
+#[test]
+fn mapped_codex_provider_writes_catalog_and_last_mapping_removal_cleans_it() {
+    let mut app = CliProxyTestApp::new();
+    app.install_fake_codex();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    write_codex_direct_files(&handle, "[existing]\nfoo = \"bar\"\n", "{}\n");
+
+    let enabled = set_enabled(&handle, "codex", true, base_origin).expect("enable Codex proxy");
+    assert!(enabled.ok, "{enabled:?}");
+
+    let db = crate::db::init_for_tests(&app.home.path().join("mapped-catalog-refresh.db"))
+        .expect("init test db");
+    let provider = crate::providers::upsert(&db, codex_provider_with_mapping("gpt-5.6-luna"))
+        .expect("insert mapped Codex provider");
+    crate::providers::default_route_set_order(&db, "codex", vec![provider.id])
+        .expect("route mapped Codex provider");
+
+    let refresh =
+        refresh_codex_model_catalog_if_enabled(&handle, &db).expect("refresh mapped Codex catalog");
+    assert_eq!(refresh, CodexCatalogRefreshResult::Updated);
+
+    let config_path = codex_config_path(&handle).expect("config path");
+    let catalog_path = codex::codex_model_catalog_path(&handle).expect("catalog path");
+    let mapped_config = std::fs::read_to_string(&config_path).expect("read mapped config");
+    assert!(
+        mapped_config.contains("model_catalog_json = \"aio-codex-model-catalog.json\""),
+        "{mapped_config}"
+    );
+    let mapped_catalog: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&catalog_path).expect("read mapped catalog"))
+            .expect("parse mapped catalog");
+    assert_eq!(mapped_catalog["models"][0]["slug"], "gpt-5.6-luna");
+    assert_eq!(
+        mapped_catalog["models"][0]["supports_parallel_tool_calls"],
+        false
+    );
+
+    crate::providers::set_enabled(&db, provider.id, false)
+        .expect("disable last mapped Codex provider");
+    let refresh = refresh_codex_model_catalog_if_enabled(&handle, &db)
+        .expect("refresh after last mapping removal");
+    assert_eq!(refresh, CodexCatalogRefreshResult::Updated);
+    assert!(!catalog_path.exists());
+    let cleaned_config = std::fs::read_to_string(config_path).expect("read cleaned config");
+    assert!(
+        !cleaned_config.contains("model_catalog_json"),
+        "{cleaned_config}"
+    );
+}
+
+#[test]
+fn codex_proxy_preserves_external_catalog_pointer_without_an_aio_catalog_backup() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    let direct_config = "model_catalog_json = \"user-models.json\"\n\n[existing]\nfoo = \"bar\"\n";
+    write_codex_direct_files(&handle, direct_config, "{}\n");
+
+    let enabled = set_enabled(&handle, "codex", true, base_origin).expect("enable codex");
+    assert!(enabled.ok, "{enabled:?}");
+    let config_path = codex_config_path(&handle).expect("config path");
+    let proxy_config = std::fs::read_to_string(&config_path).expect("read proxy config");
+    assert!(
+        proxy_config.contains("model_catalog_json = \"user-models.json\""),
+        "{proxy_config}"
+    );
+
+    let disabled = set_enabled(&handle, "codex", false, base_origin).expect("disable codex");
+    assert!(disabled.ok, "{disabled:?}");
+    let restored_config = std::fs::read_to_string(config_path).expect("read restored config");
+    assert!(
+        restored_config.contains("model_catalog_json = \"user-models.json\""),
+        "{restored_config}"
+    );
+}
+
+#[test]
+fn stale_catalog_refresh_does_not_commit_after_exit_restore() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    write_codex_direct_files(&handle, "[existing]\nfoo = \"bar\"\n", "{}\n");
+
+    let enabled = set_enabled(&handle, "codex", true, base_origin).expect("enable codex");
+    assert!(enabled.ok, "{enabled:?}");
+    let identity = capture_catalog_refresh_identity(&handle, base_origin);
+    let prepared_refresh = stale_catalog_apply_plan();
+
+    let restored = restore_enabled_keep_state(&handle).expect("exit restore");
+    assert!(
+        restored
+            .iter()
+            .find(|result| result.cli_key == "codex")
+            .expect("codex restore result")
+            .ok
+    );
+
+    let committed = codex::commit_catalog_refresh_if_active(&handle, &identity, prepared_refresh)
+        .expect("stale refresh check");
+
+    assert_eq!(committed, None);
+    let config_path = codex_config_path(&handle).expect("config path");
+    let catalog_path = codex::codex_model_catalog_path(&handle).expect("catalog path");
+    let restored_config = std::fs::read_to_string(config_path).expect("read restored config");
+    assert!(
+        !restored_config.contains("model_catalog_json"),
+        "{restored_config}"
+    );
+    assert!(!catalog_path.exists());
+}
+
+#[test]
+fn stale_catalog_refresh_does_not_commit_after_same_origin_reenable() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    write_codex_direct_files(&handle, "[existing]\nfoo = \"bar\"\n", "{}\n");
+
+    let enabled = set_enabled(&handle, "codex", true, base_origin).expect("enable codex");
+    assert!(enabled.ok, "{enabled:?}");
+    let identity = capture_catalog_refresh_identity(&handle, base_origin);
+
+    let disabled = set_enabled(&handle, "codex", false, base_origin).expect("disable codex");
+    assert!(disabled.ok, "{disabled:?}");
+    let reenabled = set_enabled(&handle, "codex", true, base_origin).expect("re-enable codex");
+    assert!(reenabled.ok, "{reenabled:?}");
+
+    let committed =
+        codex::commit_catalog_refresh_if_active(&handle, &identity, stale_catalog_apply_plan())
+            .expect("stale refresh check");
+
+    assert_eq!(committed, None);
+    let config_path = codex_config_path(&handle).expect("config path");
+    let catalog_path = codex::codex_model_catalog_path(&handle).expect("catalog path");
+    let current_config = std::fs::read_to_string(config_path).expect("read current config");
+    assert!(
+        !current_config.contains("model_catalog_json"),
+        "{current_config}"
+    );
+    assert!(!catalog_path.exists());
+}
+
+#[test]
+fn stale_catalog_refresh_does_not_commit_after_codex_home_rebind() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    let old_codex_home = app.home.path().join("codex-old-refresh");
+    let new_codex_home = app.home.path().join("codex-new-refresh");
+
+    set_custom_codex_home(&handle, &old_codex_home);
+    write_codex_direct_files(&handle, "[old]\nmarker = true\n", "{}\n");
+    let enabled = set_enabled(&handle, "codex", true, base_origin).expect("enable codex");
+    assert!(enabled.ok, "{enabled:?}");
+    let identity = capture_catalog_refresh_identity(&handle, base_origin);
+
+    set_custom_codex_home(&handle, &new_codex_home);
+    write_codex_direct_files(&handle, "[new]\nmarker = true\n", "{}\n");
+    let rebound = rebind_codex_home_after_change(&handle, base_origin, true).expect("rebind");
+    assert!(rebound.ok, "{rebound:?}");
+
+    let committed =
+        codex::commit_catalog_refresh_if_active(&handle, &identity, stale_catalog_apply_plan())
+            .expect("stale refresh check");
+
+    assert_eq!(committed, None);
+    let config_path = codex_config_path(&handle).expect("new config path");
+    let catalog_path = codex::codex_model_catalog_path(&handle).expect("new catalog path");
+    let current_config = std::fs::read_to_string(config_path).expect("read rebound config");
+    assert!(current_config.contains("[new]"), "{current_config}");
+    assert!(
+        !current_config.contains("model_catalog_json"),
+        "{current_config}"
+    );
+    assert!(!catalog_path.exists());
+}
+
+#[test]
 fn switching_codex_oauth_compatible_proxy_to_normal_mode_adds_auth_backup_and_writes_auth() {
     let app = CliProxyTestApp::new();
     let handle = app.handle();
@@ -2688,7 +3104,7 @@ fn merge_restore_codex_config_preserves_user_changes() {
         b"model_provider = \"aio\"\npreferred_auth_method = \"apikey\"\nmodel_catalog_json = \"aio-codex-model-catalog.json\"\n\n[model_providers.openai]\nname = \"openai\"\nbase_url = \"https://api.openai.com/v1\"\n\n[model_providers.aio]\nname = \"aio\"\nbase_url = \"http://127.0.0.1:37123/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\n\n[user_section]\nfoo = \"bar\"\n\n[windows]\nsandbox = \"elevated\"\n",
     );
 
-    merge_restore_codex_config_toml(&target, &backup).unwrap();
+    merge_restore_codex_config_toml(&target, &backup, true).unwrap();
 
     let result = std::fs::read_to_string(&target).unwrap();
     // Proxy root keys removed (check for the root-level assignment, not table names)

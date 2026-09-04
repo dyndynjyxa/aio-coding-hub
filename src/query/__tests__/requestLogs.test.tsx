@@ -8,7 +8,6 @@ import {
   REQUEST_LOG_TRACE_ID_MAX_LENGTH,
   requestAttemptLogsByTraceId,
   requestLogGet,
-  requestLogsListAfterIdAll,
   requestLogsListAll,
   type RequestLogSummary,
 } from "../../services/gateway/requestLogs";
@@ -26,7 +25,7 @@ import {
   useRequestAttemptLogsByTraceIdQuery,
   useActiveRequestLogsSnapshotQuery,
   useRequestLogDetailQuery,
-  useRequestLogsIncrementalRefreshMutation,
+  useRequestLogsRefreshMutation,
   useRequestLogsListAllQuery,
 } from "../requestLogs";
 
@@ -37,7 +36,6 @@ vi.mock("../../services/gateway/requestLogs", async () => {
   return {
     ...actual,
     requestLogsListAll: vi.fn(),
-    requestLogsListAfterIdAll: vi.fn(),
     requestLogGet: vi.fn(),
     requestAttemptLogsByTraceId: vi.fn(),
   };
@@ -409,72 +407,30 @@ describe("query/requestLogs", () => {
     expect(attemptsOptions?.gcTime).toBe(REQUEST_LOG_DETAIL_GC_TIME_MS);
   });
 
-  it("incremental refresh mutation keeps backend rows and cache stable on empty incremental items", async () => {
+  it("refresh mutation replaces an existing cached row with the latest backend value", async () => {
     setTauriRuntime();
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
-
     const listKey = requestLogsKeys.listAll(10);
-
-    vi.mocked(requestLogsListAll).mockResolvedValueOnce([
-      makeRequestLogSummary({ id: 1, created_at: 9, created_at_ms: null }),
-      makeRequestLogSummary({ id: 2, created_at: 10, created_at_ms: null }),
-    ]);
-    const { result } = renderHook(() => useRequestLogsIncrementalRefreshMutation(10), { wrapper });
-
-    await act(async () => {
-      const res = await result.current.mutateAsync();
-      expect(res?.mode).toBe("full");
-      expect(res?.items?.map((row) => row.id)).toEqual([2, 1]);
-    });
-    expect((client.getQueryData<RequestLogSummary[]>(listKey) ?? []).map((row) => row.id)).toEqual([
-      2, 1,
-    ]);
-
-    client.setQueryData(listKey, [makeRequestLogSummary({ id: 5, created_at: 10 })]);
-    vi.mocked(requestLogsListAfterIdAll).mockResolvedValueOnce([
-      makeRequestLogSummary({ id: 6, created_at: 11 }),
-      makeRequestLogSummary({ id: 7, created_at: 12 }),
-    ]);
-    await act(async () => {
-      const res = await result.current.mutateAsync();
-      expect(res?.mode).toBe("incremental");
-      expect(res?.items?.map((row) => row.id)).toEqual([7, 6]);
-    });
-    expect(
-      (client.getQueryData<RequestLogSummary[]>(listKey) ?? []).some((row) => row.id === 6)
-    ).toBe(true);
-    expect(
-      (client.getQueryData<RequestLogSummary[]>(listKey) ?? []).some((row) => row.id === 7)
-    ).toBe(true);
-
-    const nowSec2 = Math.floor(Date.now() / 1000);
     client.setQueryData(listKey, [
-      makeRequestLogSummary({ id: 8, status: null, error_code: null, created_at: nowSec2 }),
+      makeRequestLogSummary({ id: 5, cost_usd: 0.023901, created_at: 10 }),
     ]);
     vi.mocked(requestLogsListAll).mockResolvedValueOnce([
-      makeRequestLogSummary({ id: 8, status: 200, error_code: null, created_at: nowSec2 }),
+      makeRequestLogSummary({ id: 5, cost_usd: 0.031084, created_at: 10 }),
     ]);
-    await act(async () => {
-      const res = await result.current.mutateAsync();
-      expect(res?.mode).toBe("full");
-      expect(res?.items?.map((row) => row.id)).toEqual([8]);
-    });
-    expect((client.getQueryData<RequestLogSummary[]>(listKey) ?? [])[0]?.status).toBe(200);
 
-    vi.mocked(requestLogsListAfterIdAll).mockResolvedValueOnce([]);
+    const { result } = renderHook(() => useRequestLogsRefreshMutation(10), { wrapper });
+
     await act(async () => {
-      const res = await result.current.mutateAsync();
-      expect(res?.mode).toBe("incremental");
-      expect(res?.items).toEqual([]);
+      await result.current.mutateAsync();
     });
-    expect(
-      (client.getQueryData<RequestLogSummary[]>(listKey) ?? []).some((row) => row.id === 8)
-    ).toBe(true);
+
+    expect(requestLogsListAll).toHaveBeenCalledWith(10);
+    expect(client.getQueryData<RequestLogSummary[]>(listKey)?.[0]?.cost_usd).toBe(0.031084);
   });
 
-  it("caps full refresh mutation results before returning and caching them", async () => {
+  it("caps refresh mutation results before returning and caching them", async () => {
     setTauriRuntime();
 
     const client = createTestQueryClient();
@@ -487,45 +443,18 @@ describe("query/requestLogs", () => {
       makeRequestLogSummary({ id: 3, created_at: 11 }),
     ]);
 
-    const { result } = renderHook(() => useRequestLogsIncrementalRefreshMutation(2), { wrapper });
+    const { result } = renderHook(() => useRequestLogsRefreshMutation(2), { wrapper });
 
     await act(async () => {
-      const res = await result.current.mutateAsync();
-      expect(res?.mode).toBe("full");
-      expect(res?.items.map((row) => row.id)).toEqual([2, 3]);
+      const rows = await result.current.mutateAsync();
+      expect(rows.map((row) => row.id)).toEqual([2, 3]);
     });
     expect((client.getQueryData<RequestLogSummary[]>(listKey) ?? []).map((row) => row.id)).toEqual([
       2, 3,
     ]);
   });
 
-  it("caps incremental refresh mutation results before returning and merging them", async () => {
-    setTauriRuntime();
-
-    const client = createTestQueryClient();
-    const wrapper = createQueryWrapper(client);
-    const listKey = requestLogsKeys.listAll(2);
-    client.setQueryData(listKey, [makeRequestLogSummary({ id: 1, created_at: 10 })]);
-
-    vi.mocked(requestLogsListAfterIdAll).mockResolvedValueOnce([
-      makeRequestLogSummary({ id: 2, created_at: 12 }),
-      makeRequestLogSummary({ id: 3, created_at: 13 }),
-      makeRequestLogSummary({ id: 4, created_at: 11 }),
-    ]);
-
-    const { result } = renderHook(() => useRequestLogsIncrementalRefreshMutation(2), { wrapper });
-
-    await act(async () => {
-      const res = await result.current.mutateAsync();
-      expect(res?.mode).toBe("incremental");
-      expect(res?.items.map((row) => row.id)).toEqual([3, 2]);
-    });
-    expect((client.getQueryData<RequestLogSummary[]>(listKey) ?? []).map((row) => row.id)).toEqual([
-      3, 2,
-    ]);
-  });
-
-  it("normalizes incremental refresh mutation limit for fetch and cache writes", async () => {
+  it("normalizes refresh mutation limit for fetch and cache writes", async () => {
     setTauriRuntime();
 
     vi.mocked(requestLogsListAll).mockResolvedValueOnce([
@@ -535,7 +464,7 @@ describe("query/requestLogs", () => {
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
 
-    const { result } = renderHook(() => useRequestLogsIncrementalRefreshMutation(999), {
+    const { result } = renderHook(() => useRequestLogsRefreshMutation(999), {
       wrapper,
     });
 
