@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.60.19](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.18...aio-coding-hub-v0.60.19) (2026-09-08)
+
+
+### Features
+
+* **discovery:** Codex OAuth 模型发现增加动态版本感知 ([8bf194e](https://github.com/dyndynjyxa/aio-coding-hub/commit/8bf194e096fc3685f93402426546efdd016ce143))
+
+
+### Bug Fixes
+
+* **notification:** 隔离 macOS 提示音播放避免 CoreAudio 崩溃 ([f273d30](https://github.com/dyndynjyxa/aio-coding-hub/commit/f273d301c6236163d8155fd540d25d3dda21f507))
+
 ## [0.60.18](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.17...aio-coding-hub-v0.60.18) (2026-09-04)
 
 
