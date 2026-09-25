@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.60.20](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.19...aio-coding-hub-v0.60.20) (2026-09-25)
+
+
+### Features
+
+* **plugins:** add required response validation and provider failover ([82e3825](https://github.com/dyndynjyxa/aio-coding-hub/commit/82e3825e95bc4bae02b30824ee59d2c898535232))
+
+
+### Reverts
+
+* **plugins:** withdraw Codex model consistency feature ([420e995](https://github.com/dyndynjyxa/aio-coding-hub/commit/420e9958091ae460d152a508b1eb0e2110ab733b))
+
 ## [0.60.19](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.18...aio-coding-hub-v0.60.19) (2026-09-08)
 
 
