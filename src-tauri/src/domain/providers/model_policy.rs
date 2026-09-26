@@ -33,6 +33,16 @@ pub struct ProviderModelPolicyV1 {
     pub mode: ProviderModelMode,
     pub model_patterns: Vec<String>,
     pub mappings: Vec<ProviderModelMapping>,
+    /// Claude Desktop only: the provider accepts 1M-context requests. Omitted
+    /// when false so unchecked policies keep their previous JSON.
+    // `default` must stay after `skip_serializing_if`: specta reads the serde
+    // attributes in order and only `default` marks the TS field optional.
+    #[serde(
+        rename = "supports1m",
+        skip_serializing_if = "std::ops::Not::not",
+        default
+    )]
+    pub supports_1m: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +59,7 @@ impl ProviderModelPolicyV1 {
             mode: ProviderModelMode::All,
             model_patterns: Vec::new(),
             mappings: Vec::new(),
+            supports_1m: false,
         }
     }
 
@@ -242,6 +253,7 @@ mod tests {
             mode,
             model_patterns: model_patterns.into_iter().map(str::to_string).collect(),
             mappings,
+            supports_1m: false,
         }
     }
 
@@ -364,6 +376,7 @@ mod tests {
             mode: ProviderModelMode::Selected,
             model_patterns,
             mappings: vec![mapping(&long_source, &long_target)],
+            supports_1m: false,
         }
         .normalized()
         .expect("large policy should be valid");

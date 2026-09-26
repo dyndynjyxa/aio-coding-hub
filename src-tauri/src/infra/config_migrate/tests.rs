@@ -205,6 +205,52 @@ fn config_import_without_image_gen_configs_keeps_existing_rows() {
     assert_eq!(api_key, "sk-keep-me");
 }
 
+#[test]
+fn config_import_keeps_desktop_rows_before_desktop_first_launch() {
+    let mut test_app = ConfigMigrateTestApp::new();
+    let desktop_dir = test_app.home.path().join("Claude-3p");
+    test_app._env.set_var(
+        "CLAUDE_USER_DATA_DIR",
+        desktop_dir.as_os_str().to_os_string(),
+    );
+    let app = test_app.handle();
+    let mut bundle = make_test_bundle(CONFIG_BUNDLE_SCHEMA_VERSION);
+    bundle.workspaces[0].prompts = vec![PromptExport {
+        name: "codex".to_string(),
+        content: "codex prompt".to_string(),
+        enabled: true,
+    }];
+    bundle.workspaces.push(WorkspaceExport {
+        cli_key: "claude_desktop".to_string(),
+        name: "Desktop".to_string(),
+        is_active: true,
+        prompts: vec![PromptExport {
+            name: "desktop".to_string(),
+            content: "desktop prompt".to_string(),
+            enabled: true,
+        }],
+        prompt: None,
+    });
+
+    config_import(&app, &test_app.db, bundle).expect("import without Desktop identity");
+
+    let codex_agents = crate::codex_paths::codex_agents_md_path(&app).expect("codex AGENTS.md");
+    assert_eq!(
+        std::fs::read_to_string(codex_agents).expect("read codex prompt"),
+        "codex prompt\n"
+    );
+    let conn = test_app.db.open_connection().expect("open db");
+    let (workspace_id, _) = query_workspace(&conn, "claude_desktop");
+    let content: String = conn
+        .query_row(
+            "SELECT content FROM prompts WHERE workspace_id = ?1 AND enabled = 1",
+            params![workspace_id],
+            |row| row.get(0),
+        )
+        .expect("Desktop prompt row kept");
+    assert_eq!(content, "desktop prompt");
+}
+
 #[cfg(unix)]
 fn create_file_symlink(src: &Path, dst: &Path) {
     std::os::unix::fs::symlink(src, dst).expect("create symlink");

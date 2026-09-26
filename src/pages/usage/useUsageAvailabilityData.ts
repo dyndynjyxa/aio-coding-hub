@@ -55,6 +55,7 @@ export function useUsageAvailabilityData({
   });
 
   const claudeCircuit = useGatewayCircuitByProviderId("claude");
+  const claudeDesktopCircuit = useGatewayCircuitByProviderId("claude_desktop");
   const codexCircuit = useGatewayCircuitByProviderId("codex");
   const geminiCircuit = useGatewayCircuitByProviderId("gemini");
   const grokCircuit = useGatewayCircuitByProviderId("grok");
@@ -62,12 +63,14 @@ export function useUsageAvailabilityData({
   const mergedCircuitMap = useMemo(() => {
     return {
       ...claudeCircuit.circuitByProviderId,
+      ...claudeDesktopCircuit.circuitByProviderId,
       ...codexCircuit.circuitByProviderId,
       ...geminiCircuit.circuitByProviderId,
       ...grokCircuit.circuitByProviderId,
     };
   }, [
     claudeCircuit.circuitByProviderId,
+    claudeDesktopCircuit.circuitByProviderId,
     codexCircuit.circuitByProviderId,
     geminiCircuit.circuitByProviderId,
     grokCircuit.circuitByProviderId,
@@ -98,6 +101,7 @@ export function useUsageAvailabilityData({
       void logsQuery.refetch();
       for (const cli of CLI_KEYS) {
         if (cli === "claude") void claudeCircuit.refetch();
+        if (cli === "claude_desktop") void claudeDesktopCircuit.refetch();
         if (cli === "codex") void codexCircuit.refetch();
         if (cli === "gemini") void geminiCircuit.refetch();
         if (cli === "grok") void grokCircuit.refetch();

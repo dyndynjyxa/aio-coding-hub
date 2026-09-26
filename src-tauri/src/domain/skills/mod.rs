@@ -1,5 +1,6 @@
 //! Usage: Skills domain (repositories, installed skills, local import, and CLI integration).
 
+mod desktop;
 mod discover;
 mod fs_ops;
 mod git_url;
@@ -18,6 +19,7 @@ mod types;
 mod update;
 mod util;
 
+pub(crate) use desktop::BuiltinSkills;
 pub use discover::{discover_available, discover_repo_available};
 pub use installed::installed_list_for_workspace;
 pub use local::{delete_local, import_local, import_local_batch, install_to_local, local_list};

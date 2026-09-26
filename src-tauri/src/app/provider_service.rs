@@ -82,6 +82,48 @@ pub(crate) fn spawn_codex_catalog_refresh<R: tauri::Runtime>(
     });
 }
 
+/// Same ordering guarantee as the Codex catalog lock, for the Desktop profile.
+static CLAUDE_DESKTOP_MODELS_REFRESH_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> =
+    std::sync::OnceLock::new();
+
+pub(crate) fn refresh_claude_desktop_models_after_routing_change(
+    app: &tauri::AppHandle,
+    db: &crate::db::Db,
+    cli_key: &str,
+) {
+    if cli_key == "claude_desktop" {
+        spawn_claude_desktop_models_refresh(app, db.clone());
+    }
+}
+
+/// Fire-and-forget: keeps the Desktop profile's 1M model variants in line with
+/// the providers' 1M checkbox. Desktop picks the change up on its next launch.
+pub(crate) fn spawn_claude_desktop_models_refresh<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    db: crate::db::Db,
+) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let _guard = CLAUDE_DESKTOP_MODELS_REFRESH_LOCK
+            .get_or_init(|| tokio::sync::Mutex::new(()))
+            .lock()
+            .await;
+        let result = blocking::run("refresh_claude_desktop_models", move || {
+            crate::cli_proxy::refresh_claude_desktop_models_if_enabled(&app, &db)
+        })
+        .await;
+        match result {
+            Ok(true) => tracing::info!("Claude Desktop 1M model variants refreshed"),
+            Ok(false) => {}
+            Err(error) => tracing::warn!(
+                error_code = "CLI_PROXY_CLAUDE_DESKTOP_MODELS_FAILED",
+                error = %error,
+                "failed to refresh Claude Desktop model list after routing change"
+            ),
+        }
+    });
+}
+
 /// Runs `mutation`, comparing the codex routable mapping signature before/after when
 /// `tracks_codex_mappings` is set. Returns the mutation result plus whether the mapping
 /// sources changed (i.e. the codex catalog needs a refresh).
@@ -355,6 +397,7 @@ pub(crate) async fn provider_upsert(
     }
 
     let (provider, _, mapping_sources_changed) = result?;
+    refresh_claude_desktop_models_after_routing_change(&app, &refresh_db, &provider.cli_key);
     refresh_codex_catalog_after_routing_change(&app, refresh_db, mapping_sources_changed);
     Ok(provider)
 }
@@ -483,6 +526,7 @@ pub(crate) async fn provider_set_enabled(
     }
 
     let (provider, mapping_sources_changed) = result?;
+    refresh_claude_desktop_models_after_routing_change(&app, &refresh_db, &provider.cli_key);
     refresh_codex_catalog_after_routing_change(&app, refresh_db, mapping_sources_changed);
     Ok(provider)
 }
@@ -523,7 +567,8 @@ pub(crate) async fn provider_delete(
         );
     }
 
-    let (deleted, _, mapping_sources_changed) = result?;
+    let (deleted, cli_key, mapping_sources_changed) = result?;
+    refresh_claude_desktop_models_after_routing_change(&app, &refresh_db, &cli_key);
     refresh_codex_catalog_after_routing_change(&app, refresh_db, mapping_sources_changed);
     Ok(deleted)
 }
@@ -595,6 +640,7 @@ pub(crate) async fn default_route_providers_set_order(
     }
 
     let (rows, mapping_sources_changed) = result?;
+    refresh_claude_desktop_models_after_routing_change(&app, &refresh_db, &cli_key_for_log);
     refresh_codex_catalog_after_routing_change(&app, refresh_db, mapping_sources_changed);
     Ok(rows)
 }
@@ -808,6 +854,7 @@ mod tests {
             mode: providers::ProviderModelMode::Selected,
             model_patterns: vec!["claude-sonnet-*".to_string()],
             mappings: vec![],
+            supports_1m: false,
         });
         assert_eq!(
             provider_runtime_reset_decision(Some(&previous), Some("sk-old"), &policy_changed, None,),

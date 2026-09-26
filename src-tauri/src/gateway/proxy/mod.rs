@@ -41,7 +41,7 @@ const AIO_INTERNAL_FORWARD_HEADER: &str = "x-aio-gateway-forwarded";
 const AIO_INTERNAL_FORWARD_VALUE: &str = "aio-coding-hub";
 
 fn is_claude_count_tokens_request(cli_key: &str, forwarded_path: &str) -> bool {
-    cli_key == "claude" && forwarded_path == CLAUDE_COUNT_TOKENS_PATH
+    matches!(cli_key, "claude" | "claude_desktop") && forwarded_path == CLAUDE_COUNT_TOKENS_PATH
 }
 
 fn should_observe_request(cli_key: &str, method: &Method, forwarded_path: &str) -> bool {
@@ -49,7 +49,7 @@ fn should_observe_request(cli_key: &str, method: &Method, forwarded_path: &str) 
         return false;
     }
 
-    cli_key != "claude" || forwarded_path == CLAUDE_LOGGED_MESSAGES_PATH
+    !matches!(cli_key, "claude" | "claude_desktop") || forwarded_path == CLAUDE_LOGGED_MESSAGES_PATH
 }
 
 fn is_codex_model_discovery_request(cli_key: &str, method: &Method, forwarded_path: &str) -> bool {
@@ -129,7 +129,9 @@ fn compute_observe_request(
 }
 
 fn should_seed_in_progress_request_log(cli_key: &str, forwarded_path: &str, observe: bool) -> bool {
-    observe && cli_key == "claude" && forwarded_path == CLAUDE_LOGGED_MESSAGES_PATH
+    observe
+        && matches!(cli_key, "claude" | "claude_desktop")
+        && forwarded_path == CLAUDE_LOGGED_MESSAGES_PATH
 }
 
 fn build_claude_probe_response_body() -> serde_json::Value {

@@ -292,17 +292,10 @@ impl ModelPriceAliasesV1 {
             return None;
         }
 
-        let mut matches: Vec<&ModelPriceAliasRuleV1> = Vec::new();
-        for rule in &self.rules {
-            if !rule.enabled {
-                continue;
-            }
-            if rule.cli_key != cli_key {
-                continue;
-            }
-            if match_rule(rule, requested_model) {
-                matches.push(rule);
-            }
+        let mut matches = self.matching_rules(cli_key, requested_model);
+        if matches.is_empty() && cli_key == "claude_desktop" {
+            // Desktop sends Claude model names, so Claude rules apply when it has none.
+            matches = self.matching_rules("claude", requested_model);
         }
         if matches.is_empty() {
             return None;
@@ -318,6 +311,15 @@ impl ModelPriceAliasesV1 {
         });
 
         Some(matches[0].target_model.as_str())
+    }
+
+    fn matching_rules(&self, cli_key: &str, requested_model: &str) -> Vec<&ModelPriceAliasRuleV1> {
+        self.rules
+            .iter()
+            .filter(|rule| {
+                rule.enabled && rule.cli_key == cli_key && match_rule(rule, requested_model)
+            })
+            .collect()
     }
 }
 

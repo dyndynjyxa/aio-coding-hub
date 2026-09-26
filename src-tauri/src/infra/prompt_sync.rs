@@ -74,7 +74,20 @@ fn prompt_target_path<R: tauri::Runtime>(
         "codex" => codex_paths::codex_agents_md_path(app),
         "gemini" => Ok(home.join(".gemini").join("GEMINI.md")),
         "grok" => crate::grok_config::agents_md_path(app),
+        "claude_desktop" => crate::cli_proxy::claude_desktop_global_instructions_path(app),
         _ => Err(format!("SEC_INVALID_INPUT: unknown cli_key={cli_key}").into()),
+    }
+}
+
+/// Claude Desktop has no prompt target until it has run once in 3P mode.
+fn optional_prompt_target_path<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    cli_key: &str,
+) -> crate::shared::error::AppResult<Option<PathBuf>> {
+    match prompt_target_path(app, cli_key) {
+        Ok(path) => Ok(Some(path)),
+        Err(error) if crate::cli_proxy::claude_desktop_not_initialized(&error) => Ok(None),
+        Err(error) => Err(error),
     }
 }
 
@@ -147,7 +160,9 @@ pub fn read_target_bytes<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     cli_key: &str,
 ) -> crate::shared::error::AppResult<Option<Vec<u8>>> {
-    let path = prompt_target_path(app, cli_key)?;
+    let Some(path) = optional_prompt_target_path(app, cli_key)? else {
+        return Ok(None);
+    };
     read_optional_file_with_max_len(&path, PROMPT_SYNC_TARGET_MAX_BYTES)
 }
 
@@ -156,7 +171,9 @@ pub fn restore_target_bytes<R: tauri::Runtime>(
     cli_key: &str,
     bytes: Option<Vec<u8>>,
 ) -> crate::shared::error::AppResult<()> {
-    let path = prompt_target_path(app, cli_key)?;
+    let Some(path) = optional_prompt_target_path(app, cli_key)? else {
+        return Ok(());
+    };
     match bytes {
         Some(content) => {
             ensure_prompt_sync_bytes_within_limit(
@@ -586,13 +603,15 @@ pub fn restore_disabled_prompt<R: tauri::Runtime>(
     validate_cli_key(cli_key)?;
 
     let Some(mut manifest) = read_manifest(app, cli_key)? else {
+        let Some(target_path) = optional_prompt_target_path(app, cli_key)? else {
+            return Ok(());
+        };
         let root = prompt_sync_root_dir(app, cli_key)?;
         let files_dir = prompt_sync_files_dir(&root);
         let safety_dir = prompt_sync_safety_dir(&root);
         std::fs::create_dir_all(&safety_dir)
             .map_err(|e| format!("failed to create {}: {e}", safety_dir.display()))?;
 
-        let target_path = prompt_target_path(app, cli_key)?;
         let ts = now_unix_seconds();
 
         let backup_rel = target_path

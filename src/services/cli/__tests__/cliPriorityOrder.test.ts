@@ -8,9 +8,9 @@ import {
 
 describe("services/cli/cliPriorityOrder", () => {
   it("normalizes invalid, duplicate, and missing CLI keys", () => {
-    expect(normalizeCliPriorityOrder(["codex", "unknown", "codex", "claude"] as unknown[])).toEqual(
-      ["codex", "claude", "gemini", "grok"]
-    );
+    expect(
+      normalizeCliPriorityOrder(["claude", "unknown", "codex", "codex", "grok", "gemini"])
+    ).toEqual(["claude", "claude_desktop", "codex", "grok", "gemini"]);
   });
 
   it("returns the default order when input is missing", () => {

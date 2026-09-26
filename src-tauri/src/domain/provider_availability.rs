@@ -263,7 +263,7 @@ fn build_probe_request(
     prompt: &str,
 ) -> AppResult<(String, HeaderMap, serde_json::Value)> {
     match cli_key {
-        "claude" => {
+        "claude" | "claude_desktop" => {
             let url = build_probe_url(base_url, "/v1/messages", None)?;
             let mut headers = HeaderMap::new();
             if let Ok(v) = HeaderValue::from_str(api_key) {
@@ -272,7 +272,11 @@ fn build_probe_request(
             headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
             headers.insert("content-type", HeaderValue::from_static("application/json"));
             let body = serde_json::json!({
-                "model": probe_model.unwrap_or("claude-sonnet-4-6"),
+                "model": probe_model.unwrap_or(if cli_key == "claude_desktop" {
+                    "claude-sonnet-5"
+                } else {
+                    "claude-sonnet-4-6"
+                }),
                 "max_tokens": 1,
                 "messages": [{"role": "user", "content": prompt}]
             });
@@ -607,6 +611,7 @@ mod tests {
                     target: target.to_string(),
                 })
                 .collect(),
+            supports_1m: false,
         }
         .normalized()
         .expect("valid policy fixture")

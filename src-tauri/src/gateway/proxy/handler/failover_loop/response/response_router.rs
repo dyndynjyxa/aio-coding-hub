@@ -242,7 +242,7 @@ fn should_try_claude_auth_fallback<R: tauri::Runtime>(
     retry_index: u32,
     status: reqwest::StatusCode,
 ) -> bool {
-    input.cli_key == "claude"
+    matches!(input.cli_key.as_str(), "claude" | "claude_desktop")
         && prepared.oauth_adapter.is_none()
         && !prepared.cx2cc_active
         && !retry_state.claude_api_key_bearer_fallback

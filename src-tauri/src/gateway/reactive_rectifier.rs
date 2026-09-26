@@ -67,7 +67,7 @@ pub(super) fn detect(
     settings: ReactiveRectifierSettings,
 ) -> Option<ReactiveRectifierMatch> {
     let registry = match cli_key {
-        "claude" => ANTHROPIC_REGISTRY.as_slice(),
+        "claude" | "claude_desktop" => ANTHROPIC_REGISTRY.as_slice(),
         "gemini" => GEMINI_REGISTRY.as_slice(),
         _ => return None,
     };
@@ -101,6 +101,18 @@ mod tests {
     fn anthropic_registry_prioritizes_effort_before_generic_signature() {
         let matched = detect(
             "claude",
+            "invalid request: thinking cannot be disabled when reasoning_effort is set",
+            all_enabled(),
+        )
+        .expect("rectifier match");
+
+        assert_eq!(matched.kind, ReactiveRectifierKind::ThinkingEffortConflict);
+    }
+
+    #[test]
+    fn claude_desktop_uses_anthropic_registry() {
+        let matched = detect(
+            "claude_desktop",
             "invalid request: thinking cannot be disabled when reasoning_effort is set",
             all_enabled(),
         )

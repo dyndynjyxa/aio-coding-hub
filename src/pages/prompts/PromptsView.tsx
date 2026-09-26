@@ -35,6 +35,8 @@ function promptFileHint(cliKey: CliKey) {
       return "~/.gemini/GEMINI.md";
     case "grok":
       return "~/.grok/AGENTS.md";
+    case "claude_desktop":
+      return "Claude-3p/local-agent-mode-sessions/…/memory/CLAUDE.md";
     default:
       return "~";
   }

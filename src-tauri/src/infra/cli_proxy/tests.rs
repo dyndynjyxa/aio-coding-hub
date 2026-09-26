@@ -255,6 +255,7 @@ fn codex_provider_with_mapping(source: &str) -> ProviderUpsertParams {
                 source: source.to_string(),
                 target: "mapped-upstream-model".to_string(),
             }],
+            supports_1m: false,
         }),
         limit_5h_usd: None,
         limit_daily_usd: None,

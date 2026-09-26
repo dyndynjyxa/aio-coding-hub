@@ -14,9 +14,13 @@ use crate::gateway::proxy::handler::early_error::{
     build_early_error_log_ctx, early_error_contract, push_special_setting,
     respond_early_error_with_spawn, EarlyErrorKind,
 };
+use crate::gateway::proxy::model_rewrite::replace_model_in_body_json;
 use crate::gateway::proxy::CLAUDE_LOGGED_MESSAGES_PATH;
-use crate::gateway::util::{infer_requested_model_info, LARGE_REQUEST_BODY_BYTES};
-use axum::http::Method;
+use crate::gateway::util::{
+    infer_requested_model_info, RequestedModelLocation, LARGE_REQUEST_BODY_BYTES,
+};
+use axum::body::Bytes;
+use axum::http::{HeaderMap, Method};
 
 /// Claude Code `/compact` replaces the whole system prompt with this marker
 /// (verified verbatim against claude-cli 2.1.198). Detection is best-effort:
@@ -38,6 +42,10 @@ impl ModelInferenceMiddleware {
         );
         ctx.requested_model = model_info.model;
         ctx.requested_model_location = model_info.location;
+        strip_claude_desktop_1m_marker(&mut ctx);
+        if ctx.cli_key == "claude_desktop" && has_1m_context_beta(&ctx.headers) {
+            ctx.requests_1m_context = true;
+        }
 
         ctx.observe_request = compute_observe_request(
             &ctx.cli_key,
@@ -81,6 +89,66 @@ impl ModelInferenceMiddleware {
     }
 }
 
+/// Claude Desktop names the picker's 1M variant `<route>[1m]`. Its embedded
+/// Claude Code strips the marker and sends a beta header instead, but Desktop's
+/// direct one-shot requests (title generation etc.) send it verbatim. Strip it
+/// before provider resolution so model policy eligibility and mappings see the
+/// route ID, and no upstream receives the local marker.
+fn strip_claude_desktop_1m_marker<R: tauri::Runtime>(ctx: &mut ProxyContext<R>) {
+    if ctx.cli_key != "claude_desktop"
+        || ctx.requested_model_location != Some(RequestedModelLocation::BodyJson)
+    {
+        return;
+    }
+    let Some(original) = ctx.requested_model.clone() else {
+        return;
+    };
+    let Some(route) = strip_1m_marker(&original) else {
+        return;
+    };
+    ctx.requests_1m_context = true;
+    let Some(root) = ctx.introspection_json.as_mut() else {
+        return;
+    };
+    if !replace_model_in_body_json(root, route) {
+        return;
+    }
+    let Ok(next) = serde_json::to_vec(root) else {
+        return;
+    };
+    ctx.body_bytes = Bytes::from(next);
+    ctx.strip_request_content_encoding_seed = true;
+    ctx.requested_model = Some(route.to_string());
+    push_special_setting(
+        &ctx.special_settings,
+        serde_json::json!({
+            "type": "claude_desktop_1m_marker",
+            "scope": "request",
+            "hit": true,
+            "sourceModel": original,
+            "targetModel": route,
+        }),
+    );
+}
+
+/// The embedded Claude Code asks for 1M through the `context-1m-*` beta.
+fn has_1m_context_beta(headers: &HeaderMap) -> bool {
+    headers
+        .get_all("anthropic-beta")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .any(|beta| beta.trim().starts_with("context-1m-"))
+}
+
+fn strip_1m_marker(model: &str) -> Option<&str> {
+    const MARKER: &str = "[1m]";
+    let split = model.len().checked_sub(MARKER.len())?;
+    let (route, marker) = (model.get(..split)?, model.get(split..)?);
+    let route = route.trim_end();
+    (marker.eq_ignore_ascii_case(MARKER) && !route.is_empty()).then_some(route)
+}
+
 /// Detects a Claude Code `/compact` request.
 ///
 /// Only inspects the parsed `system` field (array form, first block's `text`).
@@ -92,7 +160,7 @@ pub(in crate::gateway::proxy::handler) fn is_compact_request(
     forwarded_path: &str,
     introspection_json: Option<&serde_json::Value>,
 ) -> bool {
-    if cli_key != "claude"
+    if !matches!(cli_key, "claude" | "claude_desktop")
         || *method != Method::POST
         || forwarded_path != CLAUDE_LOGGED_MESSAGES_PATH
     {
@@ -167,6 +235,30 @@ mod tests {
     }
 
     #[test]
+    fn strips_only_a_trailing_1m_marker() {
+        assert_eq!(strip_1m_marker("claude-opus-5[1m]"), Some("claude-opus-5"));
+        assert_eq!(strip_1m_marker("claude-opus-5 [1M]"), Some("claude-opus-5"));
+        assert_eq!(strip_1m_marker("claude-opus-5"), None);
+        assert_eq!(strip_1m_marker("[1m]"), None);
+        assert_eq!(strip_1m_marker("deepseek[1m]-flash"), None);
+    }
+
+    #[test]
+    fn detects_1m_context_beta_among_other_betas() {
+        let mut headers = HeaderMap::new();
+        assert!(!has_1m_context_beta(&headers));
+        headers.append("anthropic-beta", "oauth-2025-04-20".parse().unwrap());
+        assert!(!has_1m_context_beta(&headers));
+        headers.append(
+            "anthropic-beta",
+            "fine-grained-tool-streaming-2025-05-14, context-1m-2025-08-07"
+                .parse()
+                .unwrap(),
+        );
+        assert!(has_1m_context_beta(&headers));
+    }
+
+    #[test]
     fn diagnostic_message_mentions_actual_size_and_threshold() {
         let message = large_body_missing_model_message(LARGE_REQUEST_BODY_BYTES + 1);
         assert!(message.contains("model"));
@@ -189,12 +281,14 @@ mod tests {
 
     #[test]
     fn compact_request_detected_for_claude_messages_post() {
-        assert!(is_compact_request(
-            "claude",
-            &Method::POST,
-            "/v1/messages",
-            Some(&compact_body()),
-        ));
+        for cli_key in ["claude", "claude_desktop"] {
+            assert!(is_compact_request(
+                cli_key,
+                &Method::POST,
+                "/v1/messages",
+                Some(&compact_body()),
+            ));
+        }
     }
 
     #[test]

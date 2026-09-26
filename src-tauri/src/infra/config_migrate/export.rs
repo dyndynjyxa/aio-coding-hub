@@ -596,12 +596,17 @@ pub(super) fn export_local_skills<R: tauri::Runtime>(
     for cli_key in
         crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Skills)
     {
-        let root = cli_skills_root(app, cli_key)?;
+        let root = match cli_skills_root(app, cli_key) {
+            Ok(root) => root,
+            // Desktop has no Skills dir before its first 3P launch.
+            Err(err) if crate::cli_proxy::claude_desktop_not_initialized(&err) => continue,
+            Err(err) => return Err(err),
+        };
         if !root.exists() {
             continue;
         }
 
-        for path in local_skill_dirs(&root)? {
+        for path in local_skill_dirs(cli_key, &root)? {
             let dir_name = path
                 .file_name()
                 .and_then(|value| value.to_str())

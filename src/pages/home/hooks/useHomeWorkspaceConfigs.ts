@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { CLIS } from "../../../constants/clis";
+import { cliShortLabel } from "../../../constants/clis";
 import { useMcpServersListQuery } from "../../../query/mcp";
 import { usePromptsListSummaryQuery } from "../../../query/prompts";
 import { useSkillsInstalledListQuery } from "../../../query/skills";
@@ -75,7 +75,7 @@ function buildCliWorkspaceConfig(input: {
 }): HomeCliWorkspaceConfig {
   const { cliKey, enabled, workspacesQuery, promptsQuery, mcpQuery, skillsQuery, showAllItems } =
     input;
-  const cliLabel = CLIS.find((cli) => cli.key === cliKey)?.name ?? cliKey;
+  const cliLabel = cliShortLabel(cliKey);
   const activeWorkspaceId = workspacesQuery.data?.active_id ?? null;
   const activeWorkspace = pickWorkspaceById(workspacesQuery.data?.items ?? [], activeWorkspaceId);
 
@@ -112,26 +112,31 @@ export function useHomeWorkspaceConfigs(options?: { enabled?: boolean; showAllIt
   const codexWorkspacesQuery = useWorkspacesListQuery("codex", { enabled });
   const geminiWorkspacesQuery = useWorkspacesListQuery("gemini", { enabled });
   const grokWorkspacesQuery = useWorkspacesListQuery("grok", { enabled });
+  const desktopWorkspacesQuery = useWorkspacesListQuery("claude_desktop", { enabled });
 
   const claudeWorkspaceId = claudeWorkspacesQuery.data?.active_id ?? null;
   const codexWorkspaceId = codexWorkspacesQuery.data?.active_id ?? null;
   const geminiWorkspaceId = geminiWorkspacesQuery.data?.active_id ?? null;
   const grokWorkspaceId = grokWorkspacesQuery.data?.active_id ?? null;
+  const desktopWorkspaceId = desktopWorkspacesQuery.data?.active_id ?? null;
 
   const claudePromptsQuery = usePromptsListSummaryQuery(claudeWorkspaceId, { enabled });
   const codexPromptsQuery = usePromptsListSummaryQuery(codexWorkspaceId, { enabled });
   const geminiPromptsQuery = usePromptsListSummaryQuery(geminiWorkspaceId, { enabled });
   const grokPromptsQuery = usePromptsListSummaryQuery(grokWorkspaceId, { enabled });
+  const desktopPromptsQuery = usePromptsListSummaryQuery(desktopWorkspaceId, { enabled });
 
   const claudeMcpQuery = useMcpServersListQuery(claudeWorkspaceId, { enabled });
   const codexMcpQuery = useMcpServersListQuery(codexWorkspaceId, { enabled });
   const geminiMcpQuery = useMcpServersListQuery(geminiWorkspaceId, { enabled });
   const grokMcpQuery = useMcpServersListQuery(grokWorkspaceId, { enabled });
+  const desktopMcpQuery = useMcpServersListQuery(desktopWorkspaceId, { enabled });
 
   const claudeSkillsQuery = useSkillsInstalledListQuery(claudeWorkspaceId, { enabled });
   const codexSkillsQuery = useSkillsInstalledListQuery(codexWorkspaceId, { enabled });
   const geminiSkillsQuery = useSkillsInstalledListQuery(geminiWorkspaceId, { enabled });
   const grokSkillsQuery = useSkillsInstalledListQuery(grokWorkspaceId, { enabled });
+  const desktopSkillsQuery = useSkillsInstalledListQuery(desktopWorkspaceId, { enabled });
 
   return useMemo(
     () => [
@@ -171,6 +176,15 @@ export function useHomeWorkspaceConfigs(options?: { enabled?: boolean; showAllIt
         skillsQuery: grokSkillsQuery,
         showAllItems,
       }),
+      buildCliWorkspaceConfig({
+        cliKey: "claude_desktop",
+        enabled,
+        workspacesQuery: desktopWorkspacesQuery,
+        promptsQuery: desktopPromptsQuery,
+        mcpQuery: desktopMcpQuery,
+        skillsQuery: desktopSkillsQuery,
+        showAllItems,
+      }),
     ],
     [
       claudeMcpQuery,
@@ -181,6 +195,10 @@ export function useHomeWorkspaceConfigs(options?: { enabled?: boolean; showAllIt
       codexPromptsQuery,
       codexSkillsQuery,
       codexWorkspacesQuery,
+      desktopMcpQuery,
+      desktopPromptsQuery,
+      desktopSkillsQuery,
+      desktopWorkspacesQuery,
       enabled,
       geminiMcpQuery,
       geminiPromptsQuery,

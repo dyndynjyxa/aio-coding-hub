@@ -36,7 +36,22 @@ pub(super) fn cli_skills_root<R: tauri::Runtime>(
         "codex" => codex_paths::codex_skills_dir(app),
         "gemini" => Ok(home.join(".gemini").join("skills")),
         "grok" => crate::grok_config::skills_dir(app),
+        "claude_desktop" => {
+            Ok(crate::cli_proxy::claude_desktop_skills_plugin_dir(app)?.join("skills"))
+        }
         _ => Err(format!("SEC_INVALID_INPUT: unknown cli_key={cli_key}").into()),
+    }
+}
+
+/// `None` while Claude Desktop has not created its 3P profile data yet.
+pub(super) fn optional_cli_skills_root<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    cli_key: &str,
+) -> crate::shared::error::AppResult<Option<PathBuf>> {
+    match cli_skills_root(app, cli_key) {
+        Ok(root) => Ok(Some(root)),
+        Err(err) if crate::cli_proxy::claude_desktop_not_initialized(&err) => Ok(None),
+        Err(err) => Err(err),
     }
 }
 

@@ -1614,7 +1614,7 @@ WHERE trace_id = ?1
         ])
         .to_string();
 
-        for cli_key in ["claude", "codex", "gemini", "grok"] {
+        for cli_key in ["claude", "codex", "gemini", "grok", "claude_desktop"] {
             let matched =
                 effective_cost_basis(cli_key, Some("gpt-5.6-luna"), Some(&settings), Some(8))
                     .expect("matched cost basis");

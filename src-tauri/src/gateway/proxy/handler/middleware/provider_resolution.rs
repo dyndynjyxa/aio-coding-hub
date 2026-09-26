@@ -80,6 +80,50 @@ impl ProviderResolutionMiddleware {
         ctx.effective_sort_mode_id = selection.effective_sort_mode_id;
         ctx.providers = selection.providers;
 
+        // A 1M request may only reach providers with the 1M checkbox on; the
+        // Desktop picker offers the variant on the same basis.
+        if ctx.requests_1m_context {
+            let candidate_provider_ids = provider_ids(&ctx.providers);
+            ctx.providers.retain(|provider| {
+                provider
+                    .model_policy
+                    .as_ref()
+                    .is_some_and(|policy| policy.supports_1m)
+            });
+            if ctx.providers.is_empty() && !candidate_provider_ids.is_empty() {
+                push_special_setting(
+                    &ctx.special_settings,
+                    serde_json::json!({
+                        "type": "claude_desktop_1m_filter",
+                        "scope": "request",
+                        "hit": true,
+                        "candidateProviderIds": &candidate_provider_ids,
+                    }),
+                );
+                let contract = early_error_contract(EarlyErrorKind::NoEligibleProviderForModel);
+                let message = format!(
+                    "no provider with 1M context enabled for model={} cli_key={}",
+                    ctx.requested_model.as_deref().unwrap_or("-"),
+                    &ctx.cli_key
+                );
+                let session_id = ctx.session_id.take();
+                let requested_model = ctx.requested_model.take();
+                let special_settings_json =
+                    response_fixer::special_settings_json(&ctx.special_settings);
+                let log_ctx = build_early_error_log_ctx(&ctx);
+                let resp = respond_early_error_with_enqueue(
+                    &log_ctx,
+                    contract,
+                    message,
+                    special_settings_json,
+                    session_id,
+                    requested_model,
+                )
+                .await;
+                return MiddlewareAction::ShortCircuit(resp);
+            }
+        }
+
         let model_policy_filter = filter_providers_by_model_policy(
             &mut ctx.providers,
             ctx.requested_model.as_deref(),

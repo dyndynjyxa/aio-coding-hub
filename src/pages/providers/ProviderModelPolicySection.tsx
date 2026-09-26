@@ -10,6 +10,7 @@ import type {
   ProviderModelPolicyStatus,
   ProviderModelPolicyV1,
 } from "../../services/providers/providers";
+import { ClaudeDesktopModelSection } from "./ClaudeDesktopModelSection";
 import {
   cloneProviderModelPolicy,
   DEFAULT_PROVIDER_MODEL_POLICY,
@@ -388,6 +389,19 @@ export function ProviderModelPolicySection({
                 >
                   模型映射（可选）
                 </h3>
+
+                {cliKey === "claude_desktop" ? (
+                  <ClaudeDesktopModelSection
+                    mappings={currentPolicy.mappings}
+                    onChange={(mappings) => emit({ ...currentPolicy, mappings })}
+                    supports1m={currentPolicy.supports1m ?? false}
+                    onSupports1mChange={(checked) => {
+                      const { supports1m: _previous, ...rest } = currentPolicy;
+                      emit(checked ? { ...rest, supports1m: true } : rest);
+                    }}
+                    disabled={saving}
+                  />
+                ) : null}
 
                 <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_1rem_minmax(0,1fr)_auto] md:items-end">
                   <FormField label="请求模型">

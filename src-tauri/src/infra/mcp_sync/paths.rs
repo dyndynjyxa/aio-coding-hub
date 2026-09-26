@@ -23,6 +23,7 @@ pub(super) fn mcp_target_path<R: tauri::Runtime>(
 
     match cli_key {
         "claude" => Ok(home.join(".claude.json")),
+        "claude_desktop" => crate::infra::cli_proxy::claude_desktop_mcp_config_path(app),
         "codex" => codex_paths::codex_config_toml_path(app),
         "gemini" => Ok(home.join(".gemini").join("settings.json")),
         "grok" => crate::grok_config::config_path(app),
@@ -33,6 +34,7 @@ pub(super) fn mcp_target_path<R: tauri::Runtime>(
 pub(super) fn backup_file_name(cli_key: &str) -> &'static str {
     match cli_key {
         "claude" => "claude.json",
+        "claude_desktop" => "claude_desktop_config.json",
         "codex" => "config.toml",
         "gemini" => "settings.json",
         "grok" => "config.toml",

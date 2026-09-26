@@ -722,6 +722,24 @@ fn upsert_accepts_grok_oauth_provider() {
 }
 
 #[test]
+fn upsert_rejects_claude_desktop_oauth_provider() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("providers_desktop_oauth.db");
+    let db = crate::db::init_for_tests(&db_path).expect("init db");
+
+    let mut params = default_provider_params("desktop-oauth");
+    params.cli_key = "claude_desktop".to_string();
+    params.auth_mode = Some(ProviderAuthMode::Oauth);
+    params.api_key = None;
+
+    let error = upsert(&db, params).expect_err("Desktop OAuth must be rejected");
+
+    assert!(error
+        .to_string()
+        .contains("oauth is not supported for cli_key=claude_desktop"));
+}
+
+#[test]
 fn upsert_rejects_grok_cx2cc_provider() {
     let dir = tempfile::tempdir().expect("tempdir");
     let db_path = dir.path().join("providers_grok_cx2cc.db");
@@ -952,6 +970,7 @@ fn provider_model_policy_round_trips_and_invalid_rows_fail_closed() {
                 source: "gpt-*".to_string(),
                 target: "upstream-*".to_string(),
             }],
+            supports_1m: false,
         }
         .normalized()
         .expect("valid model policy"),

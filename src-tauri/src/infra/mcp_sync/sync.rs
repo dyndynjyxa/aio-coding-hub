@@ -39,7 +39,25 @@ fn restore_optional_file(path: &Path, bytes: Option<&[u8]>) -> Result<(), String
     }
 }
 
-struct GrokMcpRebindSnapshots {
+fn read_config_bytes(cli_key: &str, path: &Path) -> Result<Option<Vec<u8>>, String> {
+    if cli_key == "grok" {
+        return Ok(crate::grok_config::read_bytes_path(path)?);
+    }
+    Ok(read_optional_file_with_max_len(
+        path,
+        super::MCP_SYNC_TARGET_MAX_BYTES,
+    )?)
+}
+
+fn restore_config_bytes(cli_key: &str, path: &Path, bytes: Option<Vec<u8>>) -> Result<(), String> {
+    if cli_key == "grok" {
+        return Ok(crate::grok_config::restore_bytes_path(path, bytes)?);
+    }
+    restore_optional_file(path, bytes.as_deref())
+}
+
+struct McpRebindSnapshots {
+    cli_key: &'static str,
     old_path: PathBuf,
     old_bytes: Option<Vec<u8>>,
     new_path: PathBuf,
@@ -50,19 +68,21 @@ struct GrokMcpRebindSnapshots {
     manifest_bytes: Option<Vec<u8>>,
 }
 
-impl GrokMcpRebindSnapshots {
+impl McpRebindSnapshots {
     fn capture<R: tauri::Runtime>(
         app: &tauri::AppHandle<R>,
+        cli_key: &'static str,
         previous_manifest: &super::manifest::McpSyncManifest,
         new_path: &Path,
     ) -> Result<Self, String> {
-        let root = mcp_sync_root_dir(app, "grok")?;
-        let backup_path = mcp_sync_files_dir(&root).join(backup_file_name("grok"));
+        let root = mcp_sync_root_dir(app, cli_key)?;
+        let backup_path = mcp_sync_files_dir(&root).join(backup_file_name(cli_key));
         let manifest_path = mcp_sync_manifest_path(&root);
         let old_path = PathBuf::from(&previous_manifest.file.path);
         Ok(Self {
-            old_bytes: crate::grok_config::read_bytes_path(&old_path)?,
-            new_bytes: crate::grok_config::read_bytes_path(new_path)?,
+            cli_key,
+            old_bytes: read_config_bytes(cli_key, &old_path)?,
+            new_bytes: read_config_bytes(cli_key, new_path)?,
             backup_bytes: read_optional_file_with_max_len(
                 &backup_path,
                 super::MCP_SYNC_TARGET_MAX_BYTES,
@@ -81,10 +101,8 @@ impl GrokMcpRebindSnapshots {
     fn rollback(&self, original_error: String) -> Result<(), String> {
         let mut rollback_errors = Vec::new();
         for result in [
-            crate::grok_config::restore_bytes_path(&self.old_path, self.old_bytes.clone())
-                .map_err(String::from),
-            crate::grok_config::restore_bytes_path(&self.new_path, self.new_bytes.clone())
-                .map_err(String::from),
+            restore_config_bytes(self.cli_key, &self.old_path, self.old_bytes.clone()),
+            restore_config_bytes(self.cli_key, &self.new_path, self.new_bytes.clone()),
             restore_optional_file(&self.backup_path, self.backup_bytes.as_deref()),
             restore_optional_file(&self.manifest_path, self.manifest_bytes.as_deref()),
         ] {
@@ -111,6 +129,23 @@ pub(crate) fn build_next_bytes(
 ) -> Result<Vec<u8>, String> {
     match cli_key {
         "claude" => build_claude_config_json(current, managed_keys, servers),
+        "claude_desktop" => {
+            if let Some(bytes) = current.as_ref() {
+                let value: serde_json::Value = serde_json::from_slice(bytes)
+                    .map_err(|error| format!("CLAUDE_DESKTOP_INVALID_CONFIG: {error}"))?;
+                if !value.is_object()
+                    || value
+                        .get("mcpServers")
+                        .is_some_and(|value| !value.is_object())
+                {
+                    return Err(
+                        "CLAUDE_DESKTOP_INVALID_CONFIG: config and mcpServers must be objects"
+                            .into(),
+                    );
+                }
+            }
+            build_claude_config_json(current, managed_keys, servers)
+        }
         "codex" => build_codex_config_toml(current, managed_keys, servers),
         "gemini" => build_gemini_settings_json(current, managed_keys, servers),
         _ => Err(format!("SEC_INVALID_INPUT: unknown cli_key={cli_key}")),
@@ -131,7 +166,7 @@ fn rebind_grok_mcp<R: tauri::Runtime>(
     desired_keys: Vec<String>,
     servers: &[McpServerForSync],
 ) -> Result<(), String> {
-    let snapshots = GrokMcpRebindSnapshots::capture(app, &previous_manifest, target_path)?;
+    let snapshots = McpRebindSnapshots::capture(app, "grok", &previous_manifest, target_path)?;
     let apply = || -> Result<(), String> {
         if snapshots.old_bytes.is_some() {
             crate::grok_config::mutate_path(&snapshots.old_path, |document| {
@@ -163,12 +198,65 @@ fn rebind_grok_mcp<R: tauri::Runtime>(
     }
 }
 
+fn rebind_desktop_mcp<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    previous_manifest: super::manifest::McpSyncManifest,
+    target_path: &Path,
+    desired_keys: Vec<String>,
+    servers: &[McpServerForSync],
+) -> Result<(), String> {
+    let snapshots =
+        McpRebindSnapshots::capture(app, "claude_desktop", &previous_manifest, target_path)?;
+    let apply = || -> Result<(), String> {
+        if let Some(old_bytes) = snapshots.old_bytes.clone() {
+            let next_bytes = build_next_bytes(
+                "claude_desktop",
+                Some(old_bytes),
+                &previous_manifest.managed_keys,
+                &[],
+            )?;
+            write_file_atomic_if_changed(&snapshots.old_path, &next_bytes)?;
+        }
+
+        let mut manifest =
+            backup_for_enable(app, "claude_desktop", Some(previous_manifest.clone()))?;
+        manifest.enabled = false;
+        manifest.managed_keys.clear();
+        manifest.updated_at = now_unix_seconds();
+        write_manifest(app, "claude_desktop", &manifest)?;
+
+        let next_bytes =
+            build_next_bytes("claude_desktop", snapshots.new_bytes.clone(), &[], servers)?;
+        write_file_atomic_if_changed(target_path, &next_bytes)?;
+        manifest.enabled = true;
+        manifest.managed_keys = desired_keys;
+        manifest.updated_at = now_unix_seconds();
+        write_manifest(app, "claude_desktop", &manifest)?;
+        Ok(())
+    };
+
+    match apply() {
+        Ok(()) => Ok(()),
+        Err(error) => snapshots.rollback(error),
+    }
+}
+
 pub fn sync_cli<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     cli_key: &str,
     servers: &[McpServerForSync],
 ) -> Result<(), String> {
     validate_cli_key(cli_key)?;
+
+    // Claude Desktop only loads stdio servers (`command`) from this file.
+    if cli_key == "claude_desktop" {
+        if let Some(server) = servers.iter().find(|server| server.transport != "stdio") {
+            return Err(format!(
+                "SEC_INVALID_INPUT: unsupported transport={} for claude_desktop: Claude Desktop 只能运行本地 stdio MCP 服务器，请在 Desktop 工作区停用 {}",
+                server.transport, server.server_key
+            ));
+        }
+    }
 
     let _grok_guard = if cli_key == "grok" {
         Some(grok_mcp_sync_lock()?)
@@ -178,12 +266,20 @@ pub fn sync_cli<R: tauri::Runtime>(
     let target_path = mcp_target_path(app, cli_key)?;
 
     let existing = read_manifest(app, cli_key)?;
+    if cli_key == "claude_desktop" && existing.is_none() && servers.is_empty() {
+        // Global MCP refreshes must not create or rewrite Desktop's config
+        // until the user actually manages a Desktop MCP server through AIO.
+        return Ok(());
+    }
     let desired_keys = normalized_keys(servers);
     if let Some(manifest) = existing.as_ref().filter(|manifest| manifest.enabled) {
         if cli_key == "grok"
             && !crate::grok_config::paths_equivalent(Path::new(&manifest.file.path), &target_path)?
         {
             return rebind_grok_mcp(app, manifest.clone(), &target_path, desired_keys, servers);
+        }
+        if cli_key == "claude_desktop" && Path::new(&manifest.file.path) != target_path.as_path() {
+            return rebind_desktop_mcp(app, manifest.clone(), &target_path, desired_keys, servers);
         }
     }
     let should_backup = existing.as_ref().map(|m| !m.enabled).unwrap_or(true);
@@ -305,8 +401,9 @@ mod tests {
     }
 
     struct GrokMcpTestApp {
-        _lock: MutexGuard<'static, ()>,
+        // Fields drop in order: restore env before releasing the lock.
         _env: EnvRestore,
+        _lock: MutexGuard<'static, ()>,
         _home: tempfile::TempDir,
         app: tauri::App<tauri::test::MockRuntime>,
     }
@@ -356,6 +453,104 @@ mod tests {
             url: None,
             headers: std::collections::BTreeMap::new(),
         }
+    }
+
+    #[test]
+    fn desktop_empty_global_refresh_does_not_touch_unmanaged_config() {
+        let mut test = GrokMcpTestApp::new();
+        let desktop_dir = test._home.path().join("desktop-3p");
+        test._env
+            .set("CLAUDE_USER_DATA_DIR", desktop_dir.into_os_string());
+        let app = test.handle();
+        let path = crate::infra::cli_proxy::claude_desktop_mcp_config_path(&app).unwrap();
+        assert!(!path.exists());
+
+        sync_cli(&app, "claude_desktop", &[]).unwrap();
+        assert!(!path.exists());
+        assert!(read_manifest(&app, "claude_desktop").unwrap().is_none());
+    }
+
+    #[test]
+    fn desktop_mcp_sync_preserves_mode_preferences_and_unmanaged_servers() {
+        let mut test = GrokMcpTestApp::new();
+        let desktop_dir = test._home.path().join("desktop-3p");
+        test._env
+            .set("CLAUDE_USER_DATA_DIR", desktop_dir.into_os_string());
+        let app = test.handle();
+        let path = crate::infra::cli_proxy::claude_desktop_mcp_config_path(&app).unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, br#"{"deploymentMode":"3p","preferences":{"theme":"dark"},"mcpServers":{"local":{"command":"node"}}}"#).unwrap();
+
+        sync_cli(&app, "claude_desktop", &[stdio_server()]).unwrap();
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(value["deploymentMode"], "3p");
+        assert_eq!(value["preferences"]["theme"], "dark");
+        assert_eq!(value["mcpServers"]["local"]["command"], "node");
+        assert_eq!(value["mcpServers"]["managed"]["command"], "npx");
+    }
+
+    #[test]
+    fn desktop_mcp_sync_rejects_remote_servers() {
+        let mut test = GrokMcpTestApp::new();
+        let desktop_dir = test._home.path().join("desktop-3p");
+        test._env
+            .set("CLAUDE_USER_DATA_DIR", desktop_dir.into_os_string());
+        let app = test.handle();
+        let path = crate::infra::cli_proxy::claude_desktop_mcp_config_path(&app).unwrap();
+        let remote = McpServerForSync {
+            server_key: "remote".to_string(),
+            transport: "http".to_string(),
+            command: None,
+            url: Some("https://example.com/mcp".to_string()),
+            ..stdio_server()
+        };
+
+        let error = sync_cli(&app, "claude_desktop", &[stdio_server(), remote]).unwrap_err();
+        assert!(error.starts_with("SEC_INVALID_INPUT: unsupported transport=http"));
+        assert!(!path.exists());
+        assert!(read_manifest(&app, "claude_desktop").unwrap().is_none());
+    }
+
+    #[test]
+    fn desktop_mcp_sync_rebinds_after_3p_dir_change() {
+        let mut test = GrokMcpTestApp::new();
+        let old_dir = test._home.path().join("desktop-old");
+        let new_dir = test._home.path().join("desktop-new");
+        test._env
+            .set("CLAUDE_USER_DATA_DIR", old_dir.as_os_str().to_os_string());
+        let app = test.handle();
+        let old_path = crate::infra::cli_proxy::claude_desktop_mcp_config_path(&app).unwrap();
+        std::fs::create_dir_all(&old_dir).unwrap();
+        std::fs::write(
+            &old_path,
+            br#"{"mcpServers":{"local_old":{"command":"keep-old"}}}"#,
+        )
+        .unwrap();
+        sync_cli(&app, "claude_desktop", &[stdio_server()]).unwrap();
+
+        test._env
+            .set("CLAUDE_USER_DATA_DIR", new_dir.as_os_str().to_os_string());
+        let new_path = crate::infra::cli_proxy::claude_desktop_mcp_config_path(&app).unwrap();
+        std::fs::create_dir_all(&new_dir).unwrap();
+        std::fs::write(
+            &new_path,
+            br#"{"mcpServers":{"local_new":{"command":"keep-new"}}}"#,
+        )
+        .unwrap();
+        sync_cli(&app, "claude_desktop", &[stdio_server()]).unwrap();
+
+        let old: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&old_path).unwrap()).unwrap();
+        assert!(old["mcpServers"].get("managed").is_none());
+        assert_eq!(old["mcpServers"]["local_old"]["command"], "keep-old");
+        let new: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&new_path).unwrap()).unwrap();
+        assert_eq!(new["mcpServers"]["managed"]["command"], "npx");
+        assert_eq!(new["mcpServers"]["local_new"]["command"], "keep-new");
+        let manifest = read_manifest(&app, "claude_desktop").unwrap().unwrap();
+        assert_eq!(Path::new(&manifest.file.path), new_path.as_path());
+        assert_eq!(manifest.managed_keys, vec!["managed".to_string()]);
     }
 
     #[test]

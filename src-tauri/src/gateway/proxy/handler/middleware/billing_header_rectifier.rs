@@ -16,7 +16,7 @@ impl BillingHeaderRectifierMiddleware {
             .map(|rs| rs.enable_billing_header_rectifier)
             .unwrap_or(true);
 
-        if ctx.cli_key != "claude" || !enabled {
+        if !matches!(ctx.cli_key.as_str(), "claude" | "claude_desktop") || !enabled {
             return MiddlewareAction::Continue(Box::new(ctx));
         }
 

@@ -54,7 +54,9 @@ fn matches_claude_code_client_restriction(
     status: reqwest::StatusCode,
     body: &[u8],
 ) -> bool {
-    if cli_key != "claude" || status != reqwest::StatusCode::SERVICE_UNAVAILABLE {
+    if !matches!(cli_key, "claude" | "claude_desktop")
+        || status != reqwest::StatusCode::SERVICE_UNAVAILABLE
+    {
         return false;
     }
 
@@ -308,7 +310,7 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
     let is_count_tokens =
         is_claude_count_tokens_request(ctx.cli_key.as_str(), ctx.forwarded_path.as_str());
 
-    let reactive_rectifier_enabled = (ctx.cli_key == "claude"
+    let reactive_rectifier_enabled = (matches!(ctx.cli_key.as_str(), "claude" | "claude_desktop")
         && (enable_thinking_effort_conflict_rectifier
             || enable_thinking_signature_rectifier
             || enable_thinking_budget_rectifier))
@@ -1005,6 +1007,11 @@ mod tests {
 
         assert!(matches_claude_code_client_restriction(
             "claude",
+            reqwest::StatusCode::SERVICE_UNAVAILABLE,
+            body,
+        ));
+        assert!(matches_claude_code_client_restriction(
+            "claude_desktop",
             reqwest::StatusCode::SERVICE_UNAVAILABLE,
             body,
         ));

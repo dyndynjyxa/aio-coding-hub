@@ -16,10 +16,10 @@ async function importFreshCacheAnomalyMonitor() {
   return mod;
 }
 
-function requestStart(traceId: string, model: string) {
+function requestStart(traceId: string, model: string, cliKey = "claude") {
   return {
     trace_id: traceId,
-    cli_key: "claude",
+    cli_key: cliKey,
     method: "POST",
     path: "/v1/messages",
     query: null,
@@ -30,12 +30,12 @@ function requestStart(traceId: string, model: string) {
 
 function requestEvent(
   traceId: string,
-  opts: { create: number; read: number; input: number; status?: number }
+  opts: { create: number; read: number; input: number; status?: number; cliKey?: string }
 ) {
   const status = opts.status ?? 200;
   return {
     trace_id: traceId,
-    cli_key: "claude",
+    cli_key: opts.cliKey ?? "claude",
     method: "POST",
     path: "/v1/messages",
     query: null,
@@ -528,6 +528,38 @@ describe("services/gateway/cacheAnomalyMonitor", () => {
       expect.objectContaining({ input: expect.objectContaining({ level: "warning" }) })
     );
 
+    vi.useRealTimers();
+  });
+
+  it("monitors Claude Desktop requests like Claude", async () => {
+    vi.useFakeTimers();
+    const baseTimeMs = 1_700_000_000_000;
+    vi.setSystemTime(baseTimeMs);
+
+    const {
+      setCacheAnomalyMonitorEnabled,
+      ingestCacheAnomalyRequestStart,
+      ingestCacheAnomalyRequest,
+    } = await importFreshCacheAnomalyMonitor();
+    vi.mocked(tauriInvoke).mockResolvedValue(true as any);
+    setCacheAnomalyMonitorEnabled(true);
+
+    for (let i = 0; i <= 10; i += 1) {
+      if (i === 10) vi.setSystemTime(baseTimeMs + 60_001);
+      const traceId = `desktop-${i}`;
+      ingestCacheAnomalyRequestStart(requestStart(traceId, "claude-opus-5", "claude_desktop"));
+      ingestCacheAnomalyRequest(
+        requestEvent(traceId, { input: 400, read: 0, create: 100, cliKey: "claude_desktop" })
+      );
+    }
+
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(tauriInvoke).toHaveBeenCalledWith(
+      "notice_send",
+      expect.objectContaining({ input: expect.objectContaining({ level: "warning" }) })
+    );
     vi.useRealTimers();
   });
 

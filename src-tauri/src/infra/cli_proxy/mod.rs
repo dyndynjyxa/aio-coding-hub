@@ -1,6 +1,15 @@
 //! Usage: Manage local CLI proxy configuration files (infra adapter).
 
 mod claude;
+mod claude_desktop;
+pub use claude_desktop::ClaudeDesktopConfigStatus;
+pub(crate) use claude_desktop::MODEL_ROUTES as CLAUDE_DESKTOP_MODEL_ROUTES;
+pub(crate) use claude_desktop::{
+    global_instructions_path as claude_desktop_global_instructions_path,
+    is_not_initialized as claude_desktop_not_initialized,
+    routes_with_1m as claude_desktop_routes_with_1m,
+    skills_plugin_dir as claude_desktop_skills_plugin_dir,
+};
 mod codex;
 mod gemini;
 mod grok;
@@ -32,6 +41,7 @@ pub struct CliProxyStatus {
     pub base_origin: Option<String>,
     pub current_gateway_origin: Option<String>,
     pub applied_to_current_gateway: Option<bool>,
+    pub desktop: Option<ClaudeDesktopConfigStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -325,6 +335,29 @@ fn target_files<R: tauri::Runtime>(
             backup_name: "settings.json",
             max_bytes: CLI_PROXY_FILE_MAX_BYTES,
         }]),
+        "claude_desktop" => {
+            let paths = claude_desktop::paths(app)?;
+            Ok(vec![
+                TargetFile {
+                    kind: "desktop_threep_config",
+                    path: paths.threep,
+                    backup_name: "threep-config.json",
+                    max_bytes: CLI_PROXY_FILE_MAX_BYTES,
+                },
+                TargetFile {
+                    kind: "desktop_profile",
+                    path: paths.profile,
+                    backup_name: "profile.json",
+                    max_bytes: CLI_PROXY_FILE_MAX_BYTES,
+                },
+                TargetFile {
+                    kind: "desktop_meta",
+                    path: paths.meta,
+                    backup_name: "meta.json",
+                    max_bytes: CLI_PROXY_FILE_MAX_BYTES,
+                },
+            ])
+        }
         "codex" => {
             let mut files = vec![
                 TargetFile {
@@ -375,6 +408,7 @@ fn is_proxy_config_applied<R: tauri::Runtime>(
 ) -> bool {
     match cli_key {
         "claude" => claude::is_proxy_config_applied(app, base_origin),
+        "claude_desktop" => claude_desktop::is_applied(app, base_origin),
         "codex" => codex::is_proxy_config_applied(app, base_origin),
         "gemini" => gemini::is_proxy_config_applied(app, base_origin),
         "grok" => grok::is_proxy_config_applied(app, base_origin),
@@ -397,6 +431,11 @@ fn apply_proxy_config<R: tauri::Runtime>(
 
     let targets = target_files(app, cli_key)?;
     let mut prepared_writes: Vec<(PathBuf, Vec<u8>)> = Vec::with_capacity(targets.len());
+    let desktop_routes_with_1m = if cli_key == "claude_desktop" {
+        claude_desktop::app_routes_with_1m(app)?
+    } else {
+        Vec::new()
+    };
 
     for t in targets {
         let current = read_optional_cli_proxy_file_with_max_len(&t.path, t.max_bytes)?;
@@ -421,6 +460,9 @@ fn apply_proxy_config<R: tauri::Runtime>(
                         return Err(err);
                     }
                 }
+            }
+            "claude_desktop" => {
+                claude_desktop::build_target(t.kind, current, base_origin, &desktop_routes_with_1m)?
             }
             "codex" => unreachable!("Codex has a dedicated atomic apply path"),
             "gemini" => gemini::build_gemini_env(current, &format!("{base_origin}/gemini"))?,
@@ -477,6 +519,24 @@ pub(crate) fn refresh_codex_model_catalog_if_enabled<R: tauri::Runtime>(
     }
 }
 
+/// Provider changes move only the Desktop 1M flags, so rewrite the model list
+/// of an applied AIO profile and leave the rest of the proxy config alone.
+pub(crate) fn refresh_claude_desktop_models_if_enabled<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    db: &crate::db::Db,
+) -> crate::shared::error::AppResult<bool> {
+    let Some(manifest) = read_manifest(app, "claude_desktop")? else {
+        return Ok(false);
+    };
+    let Some(base_origin) = manifest.base_origin.as_deref() else {
+        return Ok(false);
+    };
+    if !manifest.enabled || !is_proxy_config_applied(app, "claude_desktop", base_origin) {
+        return Ok(false);
+    }
+    claude_desktop::refresh_inference_models(app, db)
+}
+
 // -- Dispatch: restore_from_manifest ----------------------------------------
 
 fn restore_from_manifest<R: tauri::Runtime>(
@@ -513,6 +573,11 @@ fn restore_from_manifest<R: tauri::Runtime>(
         }
 
         let target_path = PathBuf::from(&entry.path);
+        if cli_key == "claude_desktop" {
+            let backup_path = entry.backup_rel.as_ref().map(|rel| files_dir.join(rel));
+            claude_desktop::merge_restore(&entry.kind, &target_path, backup_path.as_deref())?;
+            continue;
+        }
         if entry.kind == "grok_config_toml" {
             let backup_path = entry.backup_rel.as_ref().map(|rel| files_dir.join(rel));
             grok::merge_restore_grok_config(&target_path, backup_path.as_deref())?;
@@ -1050,6 +1115,9 @@ pub fn status_all<R: tauri::Runtime>(
             base_origin: manifest_base_origin,
             current_gateway_origin: current_base_origin.map(str::to_string),
             applied_to_current_gateway,
+            desktop: (cli_key == "claude_desktop")
+                .then(|| claude_desktop::inspect(app))
+                .flatten(),
         });
     }
     Ok(out)
@@ -1064,6 +1132,12 @@ pub fn is_enabled<R: tauri::Runtime>(
         return Ok(false);
     };
     Ok(manifest.enabled)
+}
+
+pub(crate) fn claude_desktop_mcp_config_path<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<PathBuf> {
+    claude_desktop::mcp_config_path(app)
 }
 
 pub fn set_grok_preferences<R: tauri::Runtime>(
@@ -1091,6 +1165,21 @@ pub fn set_enabled<R: tauri::Runtime>(
 
     let trace_id = new_trace_id("cli-proxy");
     let existing = read_manifest(app, cli_key)?;
+
+    if enabled
+        && cli_key == "claude_desktop"
+        && existing.as_ref().is_some_and(|manifest| manifest.enabled)
+        && manifest_target_paths_changed(app, existing.as_ref().expect("checked above"))?
+    {
+        return Ok(CliProxyResult::failure(
+            trace_id,
+            cli_key,
+            true,
+            "CLI_PROXY_TARGET_CHANGED",
+            "Claude Desktop 配置目录已变化；请先关闭代理以恢复旧目录，再重新开启".to_string(),
+            existing.and_then(|manifest| manifest.base_origin),
+        ));
+    }
 
     if enabled {
         let should_backup = existing.as_ref().map(|m| !m.enabled).unwrap_or(true);
@@ -1166,7 +1255,8 @@ pub fn set_enabled<R: tauri::Runtime>(
             Err(err) => {
                 let error_message = err.to_string();
                 let is_parse_error = error_message.contains("CLI_PROXY_INVALID_")
-                    || error_message.contains("GROK_CONFIG_INVALID_");
+                    || error_message.contains("GROK_CONFIG_INVALID_")
+                    || error_message.contains("CLAUDE_DESKTOP_INVALID_CONFIG");
 
                 // Only rollback if we actually wrote proxy config (not on parse
                 // failure where the file was never modified). On parse failure
@@ -1296,6 +1386,18 @@ pub fn sync_enabled<R: tauri::Runtime>(
             continue;
         }
 
+        if cli_key == "claude_desktop" && manifest_target_paths_changed(app, &manifest)? {
+            out.push(CliProxyResult::failure(
+                new_trace_id("cli-proxy-sync"),
+                cli_key,
+                true,
+                "CLI_PROXY_TARGET_CHANGED",
+                "Claude Desktop 配置目录已变化；请先关闭代理以恢复旧目录，再重新开启".to_string(),
+                manifest.base_origin.clone(),
+            ));
+            continue;
+        }
+
         let _grok_transaction = if cli_key == "grok" {
             Some(grok::transaction_lock()?)
         } else {
@@ -1379,7 +1481,9 @@ pub fn sync_enabled<R: tauri::Runtime>(
         // closed). Snapshot that direct state as the new backup before we
         // overwrite it below, so a later disable restores it instead of the
         // stale snapshot from the first time the proxy was ever enabled.
-        if cli_key == "claude" && !claude::is_proxy_managed(app) {
+        if (cli_key == "claude" && !claude::is_proxy_managed(app))
+            || (cli_key == "claude_desktop" && !claude_desktop::is_managed(app))
+        {
             if let Err(err) = refresh_backup_from_direct_state(app, cli_key, &mut manifest) {
                 out.push(CliProxyResult::failure(
                     trace_id,

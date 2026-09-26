@@ -204,6 +204,37 @@ describe("pages/providers/ProviderModelPolicySection", () => {
     expect(screen.queryByText(/映射 1/)).not.toBeInTheDocument();
   });
 
+  it("edits Claude Desktop role mappings alongside the generic mapping editor", () => {
+    const onChange = renderSection("claude_desktop");
+
+    expect(screen.getByText("模型范围")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Opus 上游模型" }), {
+      target: { value: " upstream-opus " },
+    });
+    expect(onChange).toHaveBeenLastCalledWith({
+      ...allPolicy,
+      mappings: [{ source: "claude-opus-5", target: "upstream-opus" }],
+    });
+
+    // The Code tab requests models outside the four menu roles.
+    fireEvent.change(screen.getByLabelText("映射请求模型"), {
+      target: { value: "claude-opus-5-5" },
+    });
+    fireEvent.change(screen.getByLabelText("映射上游模型"), {
+      target: { value: "upstream-opus" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "添加映射" }));
+    expect(onChange).toHaveBeenLastCalledWith({
+      ...allPolicy,
+      mappings: [{ source: "claude-opus-5-5", target: "upstream-opus" }],
+    });
+
+    cleanup();
+    renderSection("claude_desktop", "invalid", null);
+    expect(screen.getByRole("button", { name: "重置为全部可用" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Opus 上游模型" })).not.toBeInTheDocument();
+  });
+
   it("hides the legacy copy reference when the mapping editor is hidden", () => {
     render(
       <ProviderModelPolicySection

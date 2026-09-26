@@ -270,7 +270,7 @@ CREATE TABLE r (
             "SELECT {} FROM r",
             sql_effective_input_tokens_expr_with_alias("r")
         );
-        for cli_key in ["claude", "codex", "gemini", "grok"] {
+        for cli_key in ["claude", "codex", "gemini", "grok", "claude_desktop"] {
             for (provider_id, source_provider_id, bridge_type) in provider_cases {
                 for special_settings_json in marker_cases {
                     for (input, cache_read, cache_creation) in token_cases {

@@ -33,6 +33,7 @@ pub(crate) async fn sync_cli_proxy_to_gateway<R: tauri::Runtime>(
     // The sync short-circuits when the codex config is already applied; refresh the
     // capability catalog asynchronously so DB changes made while the gateway was
     // off still land without blocking startup on the 20s CLI export.
+    crate::app::provider_service::spawn_claude_desktop_models_refresh(app, db.clone());
     crate::app::provider_service::spawn_codex_catalog_refresh(app, db);
 }
 

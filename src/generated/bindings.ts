@@ -2384,6 +2384,13 @@ export type ClaudeCliInfo = {
   mcp_timeout_ms: number | null;
   disable_error_reporting: boolean;
 };
+export type ClaudeDesktopConfigStatus = {
+  threep_config_path: string;
+  profile_path: string;
+  deployment_mode: string | null;
+  applied_profile_id: string | null;
+  applied_profile_name: string | null;
+};
 export type ClaudeEnvState = {
   config_dir: string;
   settings_path: string;
@@ -2518,6 +2525,7 @@ export type CliProxyStatus = {
   base_origin: string | null;
   current_gateway_origin: string | null;
   applied_to_current_gateway: boolean | null;
+  desktop: ClaudeDesktopConfigStatus | null;
 };
 export type CliSessionsDisplayContentBlock =
   | { type: "text"; text: string }
@@ -3685,6 +3693,11 @@ export type ProviderModelPolicyV1 = {
   mode: ProviderModelMode;
   modelPatterns: string[];
   mappings: ProviderModelMapping[];
+  /**
+   * Claude Desktop only: the provider accepts 1M-context requests. Omitted
+   * when false so unchecked policies keep their previous JSON.
+   */
+  supports1m?: boolean;
 };
 export type ProviderOAuthDeviceCodeCancelResult = { cancelled: boolean };
 export type ProviderOAuthDeviceCodePollInput = {

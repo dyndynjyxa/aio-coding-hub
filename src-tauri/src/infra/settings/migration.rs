@@ -17,11 +17,18 @@ pub(super) fn normalize_cli_priority_order(input: &[String]) -> Vec<String> {
         order.push(cli_key.clone());
     }
 
-    for cli_key in crate::shared::cli_key::SUPPORTED_CLI_KEYS {
+    let default_order = crate::shared::cli_key::SUPPORTED_CLI_KEYS;
+    for (index, cli_key) in default_order.iter().enumerate() {
         if order.iter().any(|item| item == cli_key) {
             continue;
         }
-        order.push(cli_key.to_string());
+        // A CLI missing from the saved order goes right after the CLI that precedes it by default.
+        let position = default_order[..index]
+            .iter()
+            .rev()
+            .find_map(|previous| order.iter().position(|item| item == previous))
+            .map_or(0, |position| position + 1);
+        order.insert(position, cli_key.to_string());
     }
 
     order
@@ -1292,10 +1299,12 @@ mod tests {
     fn sanitize_cli_priority_order_normalizes_invalid_duplicates_and_missing() {
         let mut s = AppSettings {
             cli_priority_order: vec![
-                "codex".to_string(),
+                "claude".to_string(),
                 "unknown".to_string(),
                 "codex".to_string(),
-                "claude".to_string(),
+                "codex".to_string(),
+                "grok".to_string(),
+                "gemini".to_string(),
             ],
             ..Default::default()
         };
@@ -1303,10 +1312,11 @@ mod tests {
         assert_eq!(
             s.cli_priority_order,
             vec![
-                "codex".to_string(),
                 "claude".to_string(),
-                "gemini".to_string(),
-                "grok".to_string()
+                "claude_desktop".to_string(),
+                "codex".to_string(),
+                "grok".to_string(),
+                "gemini".to_string()
             ]
         );
     }

@@ -46,6 +46,7 @@ fn selected_policy(source: &str) -> providers::ProviderModelPolicyV1 {
         mode: providers::ProviderModelMode::Selected,
         model_patterns: vec![source.to_string()],
         mappings: vec![],
+        supports_1m: false,
     }
 }
 
@@ -58,6 +59,7 @@ fn mapping_policy(source: &str, target: &str) -> providers::ProviderModelPolicyV
             source: source.to_string(),
             target: target.to_string(),
         }],
+        supports_1m: false,
     }
 }
 
@@ -67,6 +69,7 @@ fn excluded_policy(source: &str) -> providers::ProviderModelPolicyV1 {
         mode: providers::ProviderModelMode::Excluded,
         model_patterns: vec![source.to_string()],
         mappings: vec![],
+        supports_1m: false,
     }
 }
 

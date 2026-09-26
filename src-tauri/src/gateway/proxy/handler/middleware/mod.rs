@@ -90,6 +90,8 @@ pub(super) struct ProxyContext<R: tauri::Runtime = tauri::Wry> {
 
     // -- request kind classification --
     pub(super) is_compact_request: bool,
+    /// Claude Desktop asked for its 1M variant (`[1m]` marker or 1M beta header).
+    pub(super) requests_1m_context: bool,
 
     // -- runtime settings (populated after settings read) --
     pub(super) runtime_settings: Option<super::runtime_settings::HandlerRuntimeSettings>,

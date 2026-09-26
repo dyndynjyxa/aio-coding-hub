@@ -1123,6 +1123,18 @@ fn validate_source_provider(
     }
 }
 
+// Claude Desktop has no OAuth adapter; its providers must use an API key.
+fn reject_unsupported_oauth(cli_key: &str, is_oauth: bool) -> crate::shared::error::AppResult<()> {
+    if is_oauth && cli_key == "claude_desktop" {
+        return Err(
+            "SEC_INVALID_INPUT: oauth is not supported for cli_key=claude_desktop"
+                .to_string()
+                .into(),
+        );
+    }
+    Ok(())
+}
+
 pub fn upsert(
     db: &db::Db,
     input: ProviderUpsertParams,
@@ -1166,6 +1178,7 @@ pub fn upsert(
 
     let requested_auth_mode = auth_mode.unwrap_or(ProviderAuthMode::ApiKey);
     let is_oauth = requested_auth_mode == ProviderAuthMode::Oauth;
+    reject_unsupported_oauth(cli_key, is_oauth)?;
 
     if cli_key == "grok" && claude_models.as_ref().is_some_and(ClaudeModels::has_any) {
         return Err(
@@ -1535,6 +1548,7 @@ pub fn duplicate(
 
     let requested_auth_mode = auth_mode.unwrap_or(ProviderAuthMode::ApiKey);
     let is_oauth = requested_auth_mode == ProviderAuthMode::Oauth;
+    reject_unsupported_oauth(cli_key, is_oauth)?;
     if let Some(ref bt) = bridge_type {
         if bt != CX2CC_BRIDGE_TYPE {
             return Err(format!("SEC_INVALID_INPUT: unsupported bridge_type: {bt}").into());

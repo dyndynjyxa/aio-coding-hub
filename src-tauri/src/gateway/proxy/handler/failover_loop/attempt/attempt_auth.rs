@@ -176,7 +176,7 @@ fn inject_standard_auth<R: tauri::Runtime>(
     };
     inject_provider_auth(auth_cli_key, prepared.effective_credential.trim(), headers);
 
-    if !prepared.cx2cc_active && auth_cli_key == "claude" {
+    if !prepared.cx2cc_active && matches!(auth_cli_key, "claude" | "claude_desktop") {
         if retry_state.claude_api_key_bearer_fallback {
             let value = format!("Bearer {}", prepared.effective_credential.trim());
             if let Ok(header_value) = HeaderValue::from_str(&value) {
