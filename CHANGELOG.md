@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.60.20](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.19...aio-coding-hub-v0.60.20) (2026-09-28)
+
+
+### Features
+
+* **codex:** support Responses WebSocket with safe provider failover ([15b9abc](https://github.com/dyndynjyxa/aio-coding-hub/commit/15b9abc4b24db481bec212156482c81af5535f90))
+* **plugins:** add required response validation and provider failover ([82e3825](https://github.com/dyndynjyxa/aio-coding-hub/commit/82e3825e95bc4bae02b30824ee59d2c898535232))
+* **providers:** 支持 provider 自定义请求头 ([#332](https://github.com/dyndynjyxa/aio-coding-hub/issues/332)) ([e2e5899](https://github.com/dyndynjyxa/aio-coding-hub/commit/e2e589949cfe131be8e0340f874f6502e5035937))
+
+
+### Bug Fixes
+
+* **deps:** update rustls for TLS handshake security fix ([0e94010](https://github.com/dyndynjyxa/aio-coding-hub/commit/0e94010e97d1bda3e9c66bc78b63e51ca2f33b8b))
+* **deps:** upgrade js-yaml to patched 4.3.2 ([f6fa3f7](https://github.com/dyndynjyxa/aio-coding-hub/commit/f6fa3f72c08cf8fb6c07cf1eea1326aa44bd5db4))
+* **gateway:** isolate Codex alpha search protocol ([#378](https://github.com/dyndynjyxa/aio-coding-hub/issues/378)) ([10a8b8d](https://github.com/dyndynjyxa/aio-coding-hub/commit/10a8b8da9c6f0f747ffebab5da59b992c772fd49))
+* **gateway:** preserve Claude identity and constrain rectifier retries ([8be731e](https://github.com/dyndynjyxa/aio-coding-hub/commit/8be731eb04f21419b46636fffeae39693eb6bc7a))
+* **git:** isolate test repositories in pre-push checks ([5223a40](https://github.com/dyndynjyxa/aio-coding-hub/commit/5223a40a9a0d896b914188b71edb72cf7978b9bc))
+* **macos:** open main window directly from tray icon ([a0486d6](https://github.com/dyndynjyxa/aio-coding-hub/commit/a0486d6dc21d68d6f6481ebfef7437c296458be9))
+
+
+### Reverts
+
+* **plugins:** withdraw Codex model consistency feature ([420e995](https://github.com/dyndynjyxa/aio-coding-hub/commit/420e9958091ae460d152a508b1eb0e2110ab733b))
+
 ## [0.60.19](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.18...aio-coding-hub-v0.60.19) (2026-09-08)
 
 
