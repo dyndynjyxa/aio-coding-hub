@@ -57,6 +57,8 @@ describe("services/generatedIpc", () => {
         args: {
           input: {
             apiKey: "sk-secret",
+            customHeaders: [{ name: "x-tenant", value: "tenant-secret" }],
+            custom_headers: [{ name: "x-domain", value: "domain-secret" }],
             nested: {
               refreshToken: "rt-secret",
               safe: "ok",
@@ -72,6 +74,8 @@ describe("services/generatedIpc", () => {
       args: {
         input: {
           apiKey: "[REDACTED]",
+          customHeaders: "[REDACTED]",
+          custom_headers: "[REDACTED]",
           nested: {
             refreshToken: "[REDACTED]",
             safe: "ok",

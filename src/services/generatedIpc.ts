@@ -24,6 +24,8 @@ const LOG_PAYLOAD_MAX_STRING_CHARS = 2048;
 function isSensitiveLogKey(key: string): boolean {
   const normalized = key.toLowerCase();
   return (
+    normalized === "customheaders" ||
+    normalized === "custom_headers" ||
     normalized.includes("api_key") ||
     normalized.includes("apikey") ||
     normalized.includes("access_token") ||
