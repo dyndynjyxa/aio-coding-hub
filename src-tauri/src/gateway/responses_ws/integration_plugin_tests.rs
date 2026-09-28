@@ -292,3 +292,61 @@ async fn ordinary_http_retry_applies_before_send_to_the_provider_baseline() {
     drop(calls);
     assert!(terminal_log(&mut logs).await.error_code.is_none());
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn custom_headers_plugin_identity_changes_cannot_reuse_handshake() {
+    let fixture = Fixture::new(true).await;
+    let (stub, upstream) = Stub::start("A", Behavior::KeepAlive).await;
+    fixture.provider_with_headers(
+        "A",
+        &upstream.origin(),
+        true,
+        None,
+        Some("configured-secret"),
+    );
+    let mut plugin = counting_plugin();
+    plugin.granted_permissions = vec!["request.header.read".into(), "request.header.write".into()];
+    plugin
+        .manifest
+        .contributes
+        .as_mut()
+        .unwrap()
+        .gateway_hooks
+        .retain(|hook| hook.name == "gateway.request.beforeSend");
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = calls.clone();
+    let executor = InMemoryGatewayPluginExecutor::new().with_request_handler(
+        "ws-test-hooks",
+        move |context| {
+            assert!(
+                !context.request.headers.unwrap().contains_key("x-tenant"),
+                "ordinary plugin must not see configured secrets"
+            );
+            let generation = count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            GatewayHookResult {
+                headers: BTreeMap::from([(
+                    "x-tenant".into(),
+                    format!("plugin-tenant-{generation}"),
+                )]),
+                ..GatewayHookResult::continue_unchanged()
+            }
+        },
+    );
+    let pipeline = Arc::new(GatewayPluginPipeline::for_tests(
+        vec![plugin],
+        Arc::new(executor),
+        GatewayPluginPipelineConfig::default(),
+    ));
+    let (gateway, _logs) = fixture.start_with_pipeline(pipeline).await;
+    let mut socket = connect_with_user_agent(&gateway, "plugin-identity", None)
+        .await
+        .unwrap();
+    for _ in 0..2 {
+        socket.send(create_message(None)).await.unwrap();
+        recv_until(&mut socket, "response.completed").await;
+    }
+    let upstream_calls = stub.calls.lock().unwrap();
+    assert_eq!(upstream_calls.len(), 2);
+    assert_eq!(upstream_calls[0].1["x-tenant"], "plugin-tenant-0");
+    assert_eq!(upstream_calls[1].1["x-tenant"], "plugin-tenant-1");
+}

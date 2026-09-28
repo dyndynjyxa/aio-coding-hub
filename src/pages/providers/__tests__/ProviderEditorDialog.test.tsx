@@ -399,6 +399,42 @@ describe("pages/providers/ProviderEditorDialog", () => {
     confirmSpy.mockRestore();
   });
 
+  it("edits, saves, reopens and clears custom headers", async () => {
+    const provider = makeProvider({
+      api_key_configured: true,
+      custom_headers: [{ name: "x-tenant", value: "tenant-a" }],
+    });
+    const saved = { ...provider, custom_headers: [{ name: "x-tenant", value: "tenant-b" }] };
+    vi.mocked(providerUpsert).mockResolvedValue(saved);
+    const props = {
+      mode: "edit" as const,
+      provider,
+      open: true,
+      onSaved: vi.fn(),
+      onOpenChange: vi.fn(),
+    };
+    const view = render(<ProviderEditorDialog {...props} />);
+    expect(screen.getByLabelText("请求头值 1")).toHaveValue("tenant-a");
+    fireEvent.change(screen.getByLabelText("请求头值 1"), { target: { value: "tenant-b" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() =>
+      expect(providerUpsert).toHaveBeenCalledWith(
+        expect.objectContaining({ customHeaders: saved.custom_headers })
+      )
+    );
+    await waitFor(() => expect(props.onSaved).toHaveBeenCalled());
+    view.rerender(<ProviderEditorDialog {...props} open={false} />);
+    view.rerender(<ProviderEditorDialog {...props} provider={saved} />);
+    expect(screen.getByLabelText("请求头值 1")).toHaveValue("tenant-b");
+    fireEvent.click(screen.getByRole("button", { name: "移除请求头 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() =>
+      expect(providerUpsert).toHaveBeenLastCalledWith(
+        expect.objectContaining({ customHeaders: [] })
+      )
+    );
+  });
+
   it("loads and saves an explicit WebSocket capability change", async () => {
     const provider = makeProvider({
       cli_key: "codex",
@@ -1119,6 +1155,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
     expect(dialog.queryByLabelText("上游模型 1")).not.toBeInTheDocument();
     expect(dialog.getByText("已获取 2 个候选 · https://example.com · 地址 1")).toBeInTheDocument();
     expect(providerModelsDiscover).toHaveBeenCalledWith({
+      customHeaders: [],
       providerId: null,
       cliKey: "codex",
       authMode: "api_key",
@@ -1169,6 +1206,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
     expect(dialog.getByLabelText("显式模型 1")).toHaveValue("claude-3-5-sonnet");
     expect(dialog.getByText("保存后旧版映射不再生效，且无法在界面切回旧策略")).toBeInTheDocument();
     expect(providerModelsDiscover).toHaveBeenCalledWith({
+      customHeaders: [],
       providerId: 1,
       cliKey: "claude",
       authMode: "api_key",
@@ -1338,6 +1376,50 @@ describe("pages/providers/ProviderEditorDialog", () => {
     fireEvent.change(dialog.getByPlaceholderText("sk-…"), {
       target: { value: "sk-new-secret" },
     });
+    resolveDiscovery({
+      status: "ready",
+      models: ["gpt-5.4"],
+      origin: "https://example.com",
+      base_url_index: 1,
+    });
+
+    await waitFor(() => expect(dialog.getByText("连接已变化，请重新获取")).toBeInTheDocument());
+    expect(dialog.queryByLabelText("显式模型 1")).not.toBeInTheDocument();
+  });
+
+  it("uses draft custom headers and ignores discovery after they change", async () => {
+    let resolveDiscovery!: (value: Awaited<ReturnType<typeof providerModelsDiscover>>) => void;
+    vi.mocked(providerModelsDiscover).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveDiscovery = resolve;
+      })
+    );
+
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="codex"
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.change(dialog.getByPlaceholderText("sk-…"), {
+      target: { value: "sk-draft-secret" },
+    });
+    fireEvent.click(dialog.getByRole("button", { name: "添加请求头" }));
+    fireEvent.change(dialog.getByLabelText("请求头名称 1"), { target: { value: "X-Tenant" } });
+    fireEvent.change(dialog.getByLabelText("请求头值 1"), { target: { value: "tenant-a" } });
+    fireEvent.click(dialog.getByText("模型路由"));
+    fireEvent.click(dialog.getByRole("button", { name: "获取上游模型" }));
+    expect(dialog.getByText("正在获取上游模型…")).toBeInTheDocument();
+
+    expect(providerModelsDiscover).toHaveBeenCalledWith(
+      expect.objectContaining({ customHeaders: [{ name: "x-tenant", value: "tenant-a" }] })
+    );
+    fireEvent.change(dialog.getByLabelText("请求头值 1"), { target: { value: "tenant-b" } });
     resolveDiscovery({
       status: "ready",
       models: ["gpt-5.4"],

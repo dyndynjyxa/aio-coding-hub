@@ -72,7 +72,11 @@ export type ProviderModelDiscoveryErrorCode = GeneratedProviderModelDiscoveryErr
 export type ProviderModelDiscoveryResult = GeneratedProviderModelDiscoveryResult;
 export type ProviderModelDiscoveryUnsupportedReason =
   GeneratedProviderModelDiscoveryUnsupportedReason;
-export type ProviderModelDiscoveryInput = Omit<GeneratedProviderModelDiscoveryInput, "cliKey"> & {
+export type ProviderModelDiscoveryInput = Omit<
+  GeneratedProviderModelDiscoveryInput,
+  "cliKey" | "customHeaders"
+> & {
+  customHeaders?: ProviderCustomHeader[] | null;
   cliKey: CliKey;
 };
 
@@ -267,6 +271,7 @@ export async function providersList(cliKey: CliKey) {
 export async function providerModelsDiscover(input: ProviderModelDiscoveryInput) {
   const payload = {
     ...input,
+    customHeaders: input.customHeaders ?? null,
     providerId: input.providerId == null ? null : validateProviderId(input.providerId),
     cliKey: validateProviderCliKey(input.cliKey),
   } satisfies GeneratedProviderModelDiscoveryInput;

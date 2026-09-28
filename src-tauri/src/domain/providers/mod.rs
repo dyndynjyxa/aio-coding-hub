@@ -27,6 +27,11 @@ pub use queries::{
     list_by_cli, names_by_id, reorder, upsert,
 };
 
+pub(crate) use types::{
+    custom_headers_from_json, custom_headers_to_map, normalize_custom_headers,
+    validate_custom_headers_owner,
+};
+
 pub(crate) use validation::{normalize_base_urls, validate_supports_websockets};
 
 pub(crate) use queries::{

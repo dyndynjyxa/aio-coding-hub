@@ -3,21 +3,13 @@ import type { ProviderCustomHeader } from "../../services/providers/providers";
 import { Button } from "../../ui/Button";
 import { FormField } from "../../ui/FormField";
 import { Input } from "../../ui/Input";
-import { isProtectedCustomHeaderName, isValidCustomHeaderName } from "./providerCustomHeaders";
+import { validateCustomHeaders } from "./providerCustomHeaders";
 
 type CustomHeadersFieldProps = {
   headers: ProviderCustomHeader[];
   setHeaders: React.Dispatch<React.SetStateAction<ProviderCustomHeader[]>>;
   saving: boolean;
 };
-
-function headerNameError(name: string): string | null {
-  const trimmed = name.trim();
-  if (!trimmed) return null;
-  if (!isValidCustomHeaderName(trimmed)) return "名称含非法字符";
-  if (isProtectedCustomHeaderName(trimmed)) return "该请求头由网关管理";
-  return null;
-}
 
 export function CustomHeadersField({ headers, setHeaders, saving }: CustomHeadersFieldProps) {
   const updateAt = (index: number, patch: Partial<ProviderCustomHeader>) => {
@@ -39,7 +31,7 @@ export function CustomHeadersField({ headers, setHeaders, saving }: CustomHeader
     >
       <div className="space-y-2">
         {headers.map((header, index) => {
-          const nameError = headerNameError(header.name);
+          const rowError = validateCustomHeaders([header]);
           return (
             <div key={index} className="space-y-1">
               <div className="flex items-center gap-2">
@@ -51,10 +43,12 @@ export function CustomHeadersField({ headers, setHeaders, saving }: CustomHeader
                   className="flex-1"
                   disabled={saving}
                   aria-label={`请求头名称 ${index + 1}`}
-                  aria-invalid={nameError != null}
+                  aria-invalid={rowError != null}
                 />
                 <Input
-                  type="text"
+                  type="password"
+                  autoComplete="off"
+                  aria-invalid={rowError != null}
                   value={header.value}
                   onChange={(e) => updateAt(index, { value: e.currentTarget.value })}
                   placeholder="值"
@@ -72,7 +66,7 @@ export function CustomHeadersField({ headers, setHeaders, saving }: CustomHeader
                   <X className="h-4 w-4" />
                 </Button>
               </div>
-              {nameError ? <p className="text-xs text-destructive">{nameError}</p> : null}
+              {rowError ? <p className="text-xs text-destructive">{rowError}</p> : null}
             </div>
           );
         })}

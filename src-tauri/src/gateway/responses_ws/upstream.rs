@@ -223,6 +223,7 @@ mod tests {
             "/responses",
             get(|headers: HeaderMap, ws: WebSocketUpgrade| async move {
                 assert_eq!(headers[header::AUTHORIZATION], "Bearer provider-secret");
+                assert_eq!(headers["x-tenant"], "oauth-tenant");
                 assert_ne!(headers[header::SEC_WEBSOCKET_KEY], "downstream-key");
                 assert_eq!(headers[header::SEC_WEBSOCKET_VERSION], "13");
                 assert_eq!(headers[header::UPGRADE], "websocket");
@@ -267,6 +268,17 @@ mod tests {
                 HeaderValue::from_static(value),
             );
         }
+        use crate::gateway::oauth::provider_trait::OAuthProvider;
+        crate::gateway::oauth::adapters::codex::CodexOAuthProvider::new()
+            .inject_upstream_headers(&mut headers, "provider-secret")
+            .unwrap();
+        headers.extend(
+            crate::providers::custom_headers_to_map(&[crate::providers::ProviderCustomHeader {
+                name: "x-tenant".into(),
+                value: "oauth-tenant".into(),
+            }])
+            .unwrap(),
+        );
         let mut connection = connect_with_client(&client(), url, headers, deadline())
             .await
             .unwrap();

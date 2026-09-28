@@ -1299,52 +1299,121 @@ fn supports_websockets_rejects_non_codex_and_bridge_writes() {
 // -- custom headers normalization / decode --
 
 #[test]
-fn custom_headers_normalize_trims_and_drops_empty_names() {
+fn custom_headers_normalize_and_reject_invalid_input() {
+    let header = |name: &str, value: &str| ProviderCustomHeader {
+        name: name.into(),
+        value: value.into(),
+    };
     let out = super::types::normalize_custom_headers(vec![
-        ProviderCustomHeader {
-            name: "  X-User-Id  ".to_string(),
-            value: "  42  ".to_string(),
-        },
-        ProviderCustomHeader {
-            name: "   ".to_string(),
-            value: "ignored".to_string(),
-        },
-    ]);
-    assert_eq!(
-        out,
-        vec![ProviderCustomHeader {
-            name: "X-User-Id".to_string(),
-            value: "42".to_string(),
-        }]
-    );
+        header(" X-User-Id ", " first "),
+        header("x-user-id", " second "),
+    ])
+    .unwrap();
+    assert_eq!(out, vec![header("x-user-id", "second")]);
+    for (name, value) in [
+        ("", "secret"),
+        ("bad name", "secret"),
+        ("x-tenant", ""),
+        ("x-tenant", "secret\r\n"),
+        ("x-tenant", "\0secret"),
+        ("x-tenant\n", "secret"),
+    ] {
+        let error = super::types::normalize_custom_headers(vec![header(name, value)]).unwrap_err();
+        assert!(!error.to_string().contains("secret"));
+    }
+    for name in [
+        "Authorization",
+        "x-api-key",
+        "X-Goog-Api-Key",
+        "chatgpt-account-id",
+        "host",
+        "content-length",
+        "upgrade",
+        "X-Aio-Test",
+        "Sec-WebSocket-Key",
+        "x-codex-turn-state",
+        "session_id",
+    ] {
+        assert!(
+            super::types::normalize_custom_headers(vec![header(name, "secret")]).is_err(),
+            "{name}"
+        );
+    }
+    let map = super::types::custom_headers_to_map(&out).unwrap();
+    assert!(map["x-user-id"].is_sensitive());
 }
 
 #[test]
-fn custom_headers_normalize_dedupes_case_insensitive_last_value_wins() {
-    let out = super::types::normalize_custom_headers(vec![
-        ProviderCustomHeader {
-            name: "X-User-Id".to_string(),
-            value: "first".to_string(),
-        },
-        ProviderCustomHeader {
-            name: "x-user-id".to_string(),
-            value: "second".to_string(),
-        },
-    ]);
-    assert_eq!(out.len(), 1);
-    assert_eq!(out[0].value, "second");
+fn custom_headers_from_json_rejects_malformed_input_without_exposing_values() {
+    for raw in ["not json secret", "{}", r#"[{"value":"secret"}]"#] {
+        let error = super::types::custom_headers_from_json(raw).unwrap_err();
+        assert!(!error.to_string().contains("secret"));
+    }
+    let parsed =
+        super::types::custom_headers_from_json(r#"[{"name":"X-Domain","value":"corp"}]"#).unwrap();
+    assert_eq!(parsed[0].value, "corp");
 }
 
 #[test]
-fn custom_headers_from_json_tolerates_malformed_input() {
-    assert!(super::types::custom_headers_from_json("not json").is_empty());
-    assert!(super::types::custom_headers_from_json("{}").is_empty());
-    let parsed = super::types::custom_headers_from_json(r#"[{"name":"X-Domain","value":"corp"}]"#);
+fn custom_headers_persist_across_queries_duplicate_and_partial_updates() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = crate::db::init_for_tests(&dir.path().join("headers.db")).unwrap();
+    let mut input = default_provider_params("headers");
+    input.cli_key = "codex".into();
+    input.custom_headers = Some(vec![ProviderCustomHeader {
+        name: "X-Tenant".into(),
+        value: "tenant-a".into(),
+    }]);
+    let saved = upsert(&db, input.clone()).unwrap();
+    assert_eq!(saved.custom_headers[0].name, "x-tenant");
+    default_route_set_order(&db, "codex", vec![saved.id]).unwrap();
     assert_eq!(
-        parsed,
-        vec![ProviderCustomHeader {
-            name: "X-Domain".to_string(),
-            value: "corp".to_string(),
-        }]
+        list_by_cli(&db, "codex").unwrap()[0].custom_headers,
+        saved.custom_headers
     );
+    assert_eq!(
+        list_enabled_for_gateway_in_mode(&db, "codex", None).unwrap()[0].custom_headers,
+        saved.custom_headers
+    );
+    assert_eq!(
+        get_source_provider_for_gateway(&db, saved.id)
+            .unwrap()
+            .0
+            .custom_headers,
+        saved.custom_headers
+    );
+    let mut copy = input.clone();
+    copy.name = "headers-copy".into();
+    assert_eq!(
+        duplicate(&db, saved.id, copy).unwrap().custom_headers,
+        saved.custom_headers
+    );
+    input.provider_id = Some(saved.id);
+    input.custom_headers = None;
+    assert_eq!(
+        upsert(&db, input.clone()).unwrap().custom_headers,
+        saved.custom_headers
+    );
+    input.custom_headers = Some(vec![ProviderCustomHeader {
+        name: "Authorization".into(),
+        value: "secret".into(),
+    }]);
+    assert!(upsert(&db, input.clone()).is_err());
+    assert_eq!(
+        get_source_provider_for_gateway(&db, saved.id)
+            .unwrap()
+            .0
+            .custom_headers,
+        saved.custom_headers
+    );
+    input.custom_headers = Some(vec![]);
+    assert!(upsert(&db, input).unwrap().custom_headers.is_empty());
+    let mut bridge = default_provider_params("bridge");
+    bridge.source_provider_id = Some(saved.id);
+    bridge.bridge_type = Some("cx2cc".into());
+    bridge.custom_headers = Some(saved.custom_headers);
+    assert!(upsert(&db, bridge)
+        .unwrap_err()
+        .to_string()
+        .contains("source provider"));
 }

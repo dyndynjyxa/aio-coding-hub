@@ -62,7 +62,9 @@ pub(crate) fn import_config_unlocked<R: tauri::Runtime>(
         .is_some()
     {
         // Provider IDs and credentials can change even if the global WS flag did not.
-        super::gateway_control::app_gateway_clear_cli_route_runtime_state(app, "codex");
+        for cli in ["codex", "claude", "gemini", "grok"] {
+            super::gateway_control::app_gateway_clear_cli_route_runtime_state(app, cli);
+        }
     }
 
     let status = super::gateway_runtime_access::try_app_gateway_status(app).unwrap_or_default();

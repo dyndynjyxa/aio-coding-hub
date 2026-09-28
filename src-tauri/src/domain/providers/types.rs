@@ -393,36 +393,62 @@ pub(super) fn normalize_tags(tags: Vec<String>) -> Vec<String> {
         .collect()
 }
 
-/// Parse the stored `custom_headers_json` column into a list of headers.
-/// Tolerates malformed JSON by returning an empty list.
-pub(super) fn custom_headers_from_json(raw: &str) -> Vec<ProviderCustomHeader> {
-    serde_json::from_str::<Vec<ProviderCustomHeader>>(raw)
-        .ok()
-        .map(normalize_custom_headers)
-        .unwrap_or_default()
+/// Decode without dropping invalid persisted entries; the editor can repair them.
+pub(crate) fn custom_headers_from_json(
+    raw: &str,
+) -> Result<Vec<ProviderCustomHeader>, rusqlite::Error> {
+    serde_json::from_str(raw).map_err(|_| {
+        rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Text,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid provider custom headers JSON",
+            )),
+        )
+    })
 }
 
-/// Clean custom headers before persistence: trim, drop entries with an empty
-/// name, and de-duplicate by case-insensitive header name (last write wins).
-pub(super) fn normalize_custom_headers(
-    headers: Vec<ProviderCustomHeader>,
-) -> Vec<ProviderCustomHeader> {
-    let mut by_name: Vec<ProviderCustomHeader> = Vec::new();
-    for header in headers {
-        let name = header.name.trim().to_string();
-        if name.is_empty() {
-            continue;
-        }
-        let value = header.value.trim().to_string();
-        let lower = name.to_ascii_lowercase();
-        if let Some(existing) = by_name
-            .iter_mut()
-            .find(|h| h.name.to_ascii_lowercase() == lower)
-        {
-            existing.value = value;
-        } else {
-            by_name.push(ProviderCustomHeader { name, value });
-        }
+pub(crate) fn custom_headers_to_map(
+    headers: &[ProviderCustomHeader],
+) -> crate::shared::error::AppResult<axum::http::HeaderMap> {
+    let mut out = axum::http::HeaderMap::new();
+    for (index, header) in headers.iter().enumerate() {
+        let (name, value) = crate::shared::provider_headers::parse(&header.name, &header.value)
+            .map_err(|error| {
+                crate::shared::error::AppError::new(
+                    "SEC_INVALID_INPUT",
+                    format!("custom header row {}: {error}", index + 1),
+                )
+            })?;
+        out.insert(name, value);
     }
-    by_name
+    Ok(out)
+}
+
+pub(crate) fn normalize_custom_headers(
+    headers: Vec<ProviderCustomHeader>,
+) -> crate::shared::error::AppResult<Vec<ProviderCustomHeader>> {
+    let mut out: Vec<_> = custom_headers_to_map(&headers)?
+        .iter()
+        .map(|(name, value)| ProviderCustomHeader {
+            name: name.as_str().to_string(),
+            value: String::from_utf8(value.as_bytes().to_vec())
+                .expect("validated UTF-8 header input"),
+        })
+        .collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+pub(crate) fn validate_custom_headers_owner(
+    headers: &[ProviderCustomHeader],
+    is_bridge: bool,
+) -> crate::shared::error::AppResult<()> {
+    if is_bridge && !headers.is_empty() {
+        return Err(
+            "SEC_INVALID_INPUT: configure custom headers on the CX2CC source provider".into(),
+        );
+    }
+    Ok(())
 }

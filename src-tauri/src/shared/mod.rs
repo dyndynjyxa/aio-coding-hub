@@ -10,6 +10,7 @@ pub(crate) mod ipc_confirm;
 pub(crate) mod listen_address;
 pub(crate) mod mutex_ext;
 pub(crate) mod process;
+pub(crate) mod provider_headers;
 pub(crate) mod security;
 pub(crate) mod sqlite;
 pub(crate) mod text;

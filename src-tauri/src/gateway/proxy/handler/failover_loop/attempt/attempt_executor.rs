@@ -305,6 +305,7 @@ where
             supports,
             url.clone(),
             headers.clone(),
+            &prepared.custom_headers,
             upstream_body.clone(),
             deadline,
         )

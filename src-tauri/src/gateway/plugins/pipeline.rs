@@ -1662,6 +1662,13 @@ fn apply_header_patch(
                 format!("invalid header value from plugin result: {err}"),
             )
         })?;
+        let mut header_value = header_value;
+        if headers
+            .get(&header_name)
+            .is_some_and(HeaderValue::is_sensitive)
+        {
+            header_value.set_sensitive(true);
+        }
         headers.insert(header_name, header_value);
     }
     Ok(())
@@ -1867,6 +1874,23 @@ fn enforce_test_hook_timeout(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn custom_headers_plugin_patch_retains_sensitive_marking() {
+        let mut headers = axum::http::HeaderMap::new();
+        let (name, value) =
+            crate::shared::provider_headers::parse("x-tenant", "configured-secret").unwrap();
+        headers.insert(name, value);
+        super::apply_header_patch(
+            &mut headers,
+            &std::collections::BTreeMap::from([("x-tenant".into(), "plugin-secret".into())]),
+        )
+        .unwrap();
+        assert!(headers["x-tenant"].is_sensitive());
+        assert!(
+            !crate::gateway::util::redacted_headers_for_debug(&headers).contains("plugin-secret")
+        );
+    }
+
     use super::*;
     use crate::domain::plugin_contributions::PluginContributes;
     use crate::domain::plugins::{

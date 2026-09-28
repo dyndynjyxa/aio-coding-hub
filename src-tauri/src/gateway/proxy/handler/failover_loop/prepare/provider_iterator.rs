@@ -40,7 +40,7 @@ pub(super) struct PreparedProvider {
     pub(super) anthropic_stream_requested: bool,
     pub(super) stream_idle_timeout_seconds: Option<u32>,
     pub(super) claude_model_mapping: Option<ClaudeModelMapping>,
-    pub(super) custom_headers: Vec<crate::providers::ProviderCustomHeader>,
+    pub(super) custom_headers: HeaderMap,
     pub(super) model_redirect: Option<ModelRedirect>,
     // Telemetry extracted once per provider from the final prepared body, so the
     // send loop does not re-parse a potentially MB-sized JSON body per retry.
@@ -281,6 +281,34 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
         }
     }
 
+    let effective_headers = cx2cc_source
+        .as_ref()
+        .map(|(source, _)| source.custom_headers.as_slice())
+        .unwrap_or(&provider.custom_headers);
+    let custom_headers =
+        crate::providers::validate_custom_headers_owner(&provider.custom_headers, is_cx2cc_bridge)
+            .and_then(|_| crate::providers::custom_headers_to_map(effective_headers));
+    let custom_headers = match custom_headers {
+        Ok(headers) => headers,
+        Err(_) => {
+            provider_checks::skip_with_reason(
+                attempts,
+                provider_id,
+                &provider_name_base,
+                &provider_base_url_display,
+                input.started.elapsed().as_millis(),
+                SkipReason {
+                    error_category: "config",
+                    error_code: GatewayErrorCode::InternalError.as_str(),
+                    reason:
+                        "invalid provider custom headers; update the source provider configuration"
+                            .into(),
+                },
+            );
+            return PreparationOutcome::Skipped;
+        }
+    };
+
     let circuit_snapshot = gate_allow.circuit_after;
     counters.providers_tried = counters.providers_tried.saturating_add(1);
     let provider_index = counters.providers_tried as u32;
@@ -428,7 +456,7 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
         anthropic_stream_requested,
         stream_idle_timeout_seconds: provider.stream_idle_timeout_seconds,
         claude_model_mapping,
-        custom_headers: provider.custom_headers.clone(),
+        custom_headers,
         model_redirect,
         reasoning_effort,
     }))

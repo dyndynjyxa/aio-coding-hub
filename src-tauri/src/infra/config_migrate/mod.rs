@@ -61,6 +61,8 @@ pub struct ConfigBundle {
 #[derive(Serialize, Deserialize, specta::Type)]
 pub struct ProviderExport {
     #[serde(default)]
+    pub custom_headers: Vec<crate::providers::ProviderCustomHeader>,
+    #[serde(default)]
     pub supports_websockets: bool,
     pub id: Option<i64>,
     pub cli_key: String,

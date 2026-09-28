@@ -204,6 +204,7 @@ fn provider_runtime_reset_decision(
         || previous.enabled != next.enabled
         || previous.auth_mode != next.auth_mode
         || previous.supports_websockets != next.supports_websockets
+        || previous.custom_headers != next.custom_headers
         || submitted_api_key_changed(previous_api_key, submitted_api_key)
         || previous.source_provider_id != next.source_provider_id
         || previous.bridge_type != next.bridge_type
@@ -351,6 +352,10 @@ pub(crate) async fn provider_upsert(
 
         if decision.clear_route_runtime_state {
             let cleared = app_gateway_clear_cli_route_runtime_state(&app, &provider.cli_key);
+            if provider.cli_key == "codex" {
+                // Fixed-source CX2CC routes share this provider's upstream identity.
+                app_gateway_clear_cli_route_runtime_state(&app, "claude");
+            }
             tracing::info!(
                 provider_id = provider.id,
                 cli_key = %provider.cli_key,
@@ -782,6 +787,16 @@ mod tests {
                 Some("sk-existing")
             ),
             ProviderRuntimeResetDecision::default()
+        );
+
+        let mut headers_changed = next.clone();
+        headers_changed.custom_headers = vec![providers::ProviderCustomHeader {
+            name: "x-tenant".into(),
+            value: "a".into(),
+        }];
+        assert!(
+            provider_runtime_reset_decision(Some(&next), None, &headers_changed, None)
+                .clear_route_runtime_state
         );
 
         let mut ws_enabled = next.clone();

@@ -86,7 +86,8 @@ SELECT
   note,
   source_provider_id,
   bridge_type,
-  supports_websockets
+  supports_websockets,
+  custom_headers_json
 FROM providers
 ORDER BY cli_key ASC, sort_order ASC, id ASC
 "#,
@@ -109,6 +110,9 @@ ORDER BY cli_key ASC, sort_order ASC, id ASC
 
             Ok((
                 ProviderExport {
+                    custom_headers: crate::providers::custom_headers_from_json(
+                        &row.get::<_, String>("custom_headers_json")?,
+                    )?,
                     supports_websockets: row.get::<_, i64>("supports_websockets")? != 0,
                     id: row.get("id")?,
                     cli_key,

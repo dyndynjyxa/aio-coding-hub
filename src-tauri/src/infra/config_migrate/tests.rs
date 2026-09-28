@@ -485,6 +485,7 @@ fn config_import_v2_restores_full_prompt_and_skill_payload() {
     let app = test_app.handle();
     let bundle = ConfigBundle {
         providers: vec![ProviderExport {
+            custom_headers: Vec::new(),
             supports_websockets: false,
             id: Some(1),
             cli_key: "codex".to_string(),
@@ -1062,4 +1063,46 @@ fn supports_websockets_import_rejects_incompatible_providers_and_rolls_back() {
             .expect("no invalid provider")
             .is_empty());
     }
+}
+
+#[test]
+fn custom_headers_export_import_legacy_and_invalid_rollback() {
+    let fixture = ConfigMigrateTestApp::new();
+    let app = fixture.handle();
+    insert_supports_websockets_provider(&fixture.db.open_connection().unwrap());
+    let mut bundle = config_export(&app, &fixture.db).unwrap();
+    bundle.providers[0].custom_headers = vec![crate::providers::ProviderCustomHeader {
+        name: "X-Tenant".into(),
+        value: "synthetic-secret".into(),
+    }];
+    config_import(&app, &fixture.db, bundle).unwrap();
+    let bundle = config_export(&app, &fixture.db).unwrap();
+    assert_eq!(
+        bundle.providers[0].custom_headers[0].value,
+        "synthetic-secret"
+    );
+    for name in ["authorization", "x-tenant"] {
+        let mut invalid: ConfigBundle =
+            serde_json::from_value(serde_json::to_value(&bundle).unwrap()).unwrap();
+        invalid.providers[0].name = "must-rollback".into();
+        invalid.providers[0].custom_headers[0].name = name.into();
+        invalid.providers[0].custom_headers[0].value = "synthetic-secret\r\n".into();
+        let error = config_import(&app, &fixture.db, invalid).err().unwrap();
+        assert!(!error.to_string().contains("synthetic-secret"));
+        assert_eq!(
+            crate::providers::list_by_cli(&fixture.db, "codex").unwrap()[0].name,
+            "ws-export"
+        );
+    }
+    let mut legacy = serde_json::to_value(bundle).unwrap();
+    legacy["providers"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("custom_headers");
+    config_import(&app, &fixture.db, serde_json::from_value(legacy).unwrap()).unwrap();
+    assert!(
+        crate::providers::list_by_cli(&fixture.db, "codex").unwrap()[0]
+            .custom_headers
+            .is_empty()
+    );
 }

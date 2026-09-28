@@ -1,3 +1,4 @@
+import { normalizeCustomHeaders, validateCustomHeaders } from "./providerCustomHeaders";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
@@ -333,6 +334,21 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     setEditorDirty(false);
   }, [open, editingProviderId, cliKey]);
 
+  const customHeadersRef = useRef(customHeaders);
+  customHeadersRef.current = customHeaders;
+  const setCustomHeadersFromUi = useCallback(
+    (
+      next: ProviderCustomHeader[] | ((previous: ProviderCustomHeader[]) => ProviderCustomHeader[])
+    ) => {
+      const resolved = typeof next === "function" ? next(customHeadersRef.current) : next;
+      customHeadersRef.current = resolved;
+      setCustomHeaders(resolved);
+      setEditorDirty(true);
+      invalidateModelDiscovery();
+    },
+    [invalidateModelDiscovery]
+  );
+
   const setBaseUrlModeFromUi = useCallback(
     (next: ProviderBaseUrlMode) => {
       if (next !== baseUrlMode) {
@@ -667,10 +683,15 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       setModelDiscoveryState({ status: "oauth_unsaved" });
       return;
     }
+    if (validateCustomHeaders(customHeaders)) {
+      setModelDiscoveryState({ status: "error", code: "invalid_config", httpStatus: null });
+      return;
+    }
     setModelDiscoveryState({ status: "loading" });
 
     const input: ProviderModelDiscoveryInput = {
       providerId: editingProviderId,
+      customHeaders: normalizeCustomHeaders(customHeaders),
       cliKey,
       authMode: authMode === "oauth" ? "oauth" : "api_key",
       baseUrls: baseUrlRows.map((row) => row.url),
@@ -718,7 +739,16 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
         setModelDiscoveryState({ status: "unexpected_error" });
       }
     }
-  }, [authMode, baseUrlMode, baseUrlRows, cliKey, editingProviderId, form, sourceProviderId]);
+  }, [
+    authMode,
+    baseUrlMode,
+    baseUrlRows,
+    cliKey,
+    customHeaders,
+    editingProviderId,
+    form,
+    sourceProviderId,
+  ]);
 
   const buildPayloadContext = useCallback(
     (): ProviderEditorPayloadContext => ({
@@ -934,7 +964,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     supportsWebsockets,
     setSupportsWebsockets: setSupportsWebsocketsFromUi,
     customHeaders,
-    setCustomHeaders,
+    setCustomHeaders: setCustomHeadersFromUi,
     oauthStatus,
     oauthLoading,
     oauthDeviceFlow,

@@ -567,7 +567,9 @@ fn headers_to_json_map(
     let mut out = serde_json::Map::new();
     for (name, value) in headers.iter() {
         let key = name.as_str().to_ascii_lowercase();
-        if !include_sensitive && is_sensitive_header(&key) {
+        // Provider-owned secrets remain private even when the hook contract exposes
+        // standard sensitive headers (that access is currently granted implicitly).
+        if value.is_sensitive() || (!include_sensitive && is_sensitive_header(&key)) {
             continue;
         }
         if let Ok(value) = value.to_str() {
@@ -621,6 +623,9 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("authorization", HeaderValue::from_static("Bearer secret"));
         headers.insert("x-public", HeaderValue::from_static("visible"));
+        let (_, secret) =
+            crate::shared::provider_headers::parse("x-tenant", "synthetic-secret").unwrap();
+        headers.insert("x-tenant", secret);
         headers
     }
 
@@ -650,6 +655,14 @@ mod tests {
             Some("visible")
         );
         assert!(!visible.contains_key("authorization"));
+        assert!(!visible.contains_key("x-tenant"));
+        let debug = crate::gateway::util::redacted_headers_for_debug(&input.headers);
+        assert!(!format!("{debug:?}").contains("synthetic-secret"));
+        let allowed = input.visible_context(&[
+            "request.header.read".into(),
+            "request.header.readSensitive".into(),
+        ]);
+        assert!(!allowed.request.headers.unwrap().contains_key("x-tenant"));
 
         let body_visible = input.visible_context(&["request.body.read".to_string()]);
         assert_eq!(

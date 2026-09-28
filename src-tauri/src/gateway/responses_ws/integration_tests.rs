@@ -89,14 +89,33 @@ impl Fixture {
     }
 
     fn provider(&self, name: &str, base_url: &str, supports_ws: bool) -> i64 {
+        self.provider_with_headers(name, base_url, supports_ws, None, None)
+    }
+
+    fn provider_with_headers(
+        &self,
+        name: &str,
+        base_url: &str,
+        supports_ws: bool,
+        provider_id: Option<i64>,
+        tenant: Option<&str>,
+    ) -> i64 {
         let priority = providers::default_route_list(&self.db, "codex")
             .unwrap()
             .len() as i64;
         let row = providers::upsert(
             &self.db,
             providers::ProviderUpsertParams {
-                custom_headers: None,
-                provider_id: None,
+                custom_headers: Some(
+                    tenant
+                        .into_iter()
+                        .map(|value| providers::ProviderCustomHeader {
+                            name: "x-tenant".into(),
+                            value: value.into(),
+                        })
+                        .collect(),
+                ),
+                provider_id,
                 cli_key: "codex".into(),
                 name: name.into(),
                 base_urls: vec![base_url.into()],
@@ -130,7 +149,9 @@ impl Fixture {
             .into_iter()
             .map(|row| row.provider_id)
             .collect();
-        ids.push(row.id);
+        if !ids.contains(&row.id) {
+            ids.push(row.id);
+        }
         providers::default_route_set_order(&self.db, "codex", ids).unwrap();
         row.id
     }
@@ -1625,3 +1646,147 @@ async fn disabling_ws_finishes_accepted_generation_then_rejects_new_ws_and_keeps
 
 #[path = "integration_plugin_tests.rs"]
 mod plugin_tests;
+
+#[tokio::test(flavor = "current_thread")]
+async fn custom_headers_ws_fallback_and_failover_do_not_leak_identity() {
+    for failover in [false, true] {
+        let fixture = Fixture::new(true).await;
+        let (first, a) = Stub::start(
+            "A",
+            if failover {
+                Behavior::AllFail
+            } else {
+                Behavior::UnsupportedWs
+            },
+        )
+        .await;
+        let (second, b) = Stub::start("B", Behavior::Complete).await;
+        fixture.provider_with_headers("A", &a.origin(), true, None, Some("tenant-a"));
+        fixture.provider("B", &b.origin(), false);
+        let (gateway, mut logs) = fixture.start().await;
+        let observed = generate(&gateway, "custom-fallback").await;
+        assert_eq!(observed.last().unwrap()["type"], "response.completed");
+        assert_eq!(first.transports(), ["ws", "http"]);
+        for (_, headers, _) in first.calls.lock().unwrap().iter() {
+            assert_eq!(headers["x-tenant"], "tenant-a");
+        }
+        for (_, headers, _) in second.calls.lock().unwrap().iter() {
+            assert!(!headers.contains_key("x-tenant"));
+        }
+        assert_eq!(second.transports().len(), usize::from(failover));
+        first.assert_auth();
+        second.assert_auth();
+        assert_eq!(terminal_log(&mut logs).await.status, Some(200));
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn custom_headers_ws_reuse_and_changed_identity_reject_old_continuation() {
+    let fixture = Fixture::new(true).await;
+    let (stub, upstream) = Stub::start("A", Behavior::KeepAlive).await;
+    let id = fixture.provider_with_headers("A", &upstream.origin(), true, None, Some("tenant-a"));
+    let (gateway, _logs) = fixture.start().await;
+    let mut socket = connect_with_user_agent(&gateway, "custom-reuse", None)
+        .await
+        .unwrap();
+    for _ in 0..2 {
+        socket.send(create_message(None)).await.unwrap();
+        recv_until(&mut socket, "response.completed").await;
+    }
+    assert_eq!(stub.transports(), ["ws"]);
+    fixture.provider_with_headers("A", &upstream.origin(), true, Some(id), Some("tenant-b"));
+    // Do not invalidate here: the effective-header key must protect the preparation/send race too.
+    socket.send(Message::Text(json!({"type":"response.create","model":"gpt-test","previous_response_id":"resp-A","input":[{"role":"user","content":"continue"}]}).to_string())).await.unwrap();
+    recv_until(&mut socket, "error").await;
+    assert_eq!(
+        stub.transports(),
+        ["ws"],
+        "old context must never reach the new identity"
+    );
+    let observed = generate(&gateway, "custom-new-identity").await;
+    assert_eq!(observed.last().unwrap()["type"], "response.completed");
+    let calls = stub.calls.lock().unwrap();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].1["x-tenant"], "tenant-a");
+    assert_eq!(calls[1].1["x-tenant"], "tenant-b");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn custom_headers_hot_update_drains_active_generation_before_new_identity() {
+    let fixture = Fixture::new(true).await;
+    let (stub, upstream) = Stub::start("A", Behavior::HoldAfterContent).await;
+    let id = fixture.provider_with_headers("A", &upstream.origin(), true, None, Some("tenant-a"));
+    let (gateway, mut logs) = fixture.start().await;
+    let mut socket = connect(&gateway, "custom-active").await.unwrap();
+    socket
+        .send(create_message(Some("custom-active")))
+        .await
+        .unwrap();
+    recv_until(&mut socket, "response.output_text.delta").await;
+    fixture.provider_with_headers("A", &upstream.origin(), true, Some(id), Some("tenant-b"));
+    fixture.runtime.invalidate();
+    stub.release.notify_one();
+    recv_until(&mut socket, "response.completed").await;
+    assert_eq!(terminal_log(&mut logs).await.status, Some(200));
+    let closed = tokio::time::timeout(Duration::from_secs(2), socket.next())
+        .await
+        .unwrap();
+    assert!(matches!(
+        closed,
+        None | Some(Ok(Message::Close(_))) | Some(Err(_))
+    ));
+    let mut next = connect(&gateway, "custom-active-next").await.unwrap();
+    next.send(create_message(Some("custom-active-next")))
+        .await
+        .unwrap();
+    recv_until(&mut next, "response.output_text.delta").await;
+    stub.release.notify_one();
+    recv_until(&mut next, "response.completed").await;
+    let calls = stub.calls.lock().unwrap();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].1["x-tenant"], "tenant-a");
+    assert_eq!(calls[1].1["x-tenant"], "tenant-b");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn custom_headers_local_cx2cc_gateway_uses_final_codex_provider() {
+    use tauri::Manager;
+    let fixture = Fixture::new(true).await;
+    let (stub, upstream) = Stub::start("A", Behavior::JsonComplete).await;
+    fixture.provider_with_headers("A", &upstream.origin(), false, None, Some("final-tenant"));
+    let conn = fixture.db.open_connection().unwrap();
+    conn.execute("INSERT INTO providers(cli_key,name,base_url,api_key_plaintext,bridge_type,created_at,updated_at) VALUES ('claude','local-bridge','','','cx2cc',1,1)", []).unwrap();
+    let bridge = conn.last_insert_rowid();
+    drop(conn);
+    providers::default_route_set_order(&fixture.db, "claude", vec![bridge]).unwrap();
+    fixture
+        .app
+        .manage(crate::app::gateway_state::GatewayState::default());
+    let cfg = settings::read(fixture.app.handle()).unwrap();
+    let started = crate::app::gateway_control::app_start_gateway_with_config(
+        fixture.app.handle(),
+        fixture.db.clone(),
+        &cfg,
+        None,
+    )
+    .unwrap();
+    let response = reqwest::Client::new()
+        .post(format!("{}/claude/_aio/provider/{bridge}/v1/messages", started.status.base_url.unwrap()))
+        .json(&json!({"model":"claude-sonnet-4","max_tokens":128,"messages":[{"role":"user","content":"hello"}]}))
+        .send().await.unwrap();
+    let status = response.status();
+    let body = response.text().await.unwrap();
+    let (shutdown, task, log_task, circuit_task, oauth_shutdown, oauth_task) =
+        crate::app::gateway_control::app_take_running_gateway(fixture.app.handle()).unwrap();
+    let _ = shutdown.send(());
+    let _ = oauth_shutdown.send(true);
+    for task in [task, log_task, circuit_task, oauth_task] {
+        task.abort();
+    }
+    assert_eq!(status, StatusCode::OK, "{body}");
+    stub.assert_auth();
+    let calls = stub.calls.lock().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, "http");
+    assert_eq!(calls[0].1["x-tenant"], "final-tenant");
+}

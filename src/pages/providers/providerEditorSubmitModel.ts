@@ -49,7 +49,11 @@ export function buildProviderEditorUpsertInput(
     };
   }
 
-  const customHeadersError = validateCustomHeaders(ctx.customHeaders);
+  const customHeadersError =
+    validateCustomHeaders(ctx.customHeaders) ??
+    (ctx.authMode === "cx2cc" && normalizeCustomHeaders(ctx.customHeaders).length > 0
+      ? "请清空桥接独立请求头，并在实际 Codex 来源 Provider 中配置"
+      : null);
   if (customHeadersError) {
     return {
       ok: false,

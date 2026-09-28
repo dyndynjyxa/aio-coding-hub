@@ -3676,6 +3676,7 @@ export type ProviderModelDiscoveryErrorCode =
   | "invalid_response"
   | "too_large";
 export type ProviderModelDiscoveryInput = {
+  customHeaders: ProviderCustomHeader[] | null;
   providerId: number | null;
   cliKey: string;
   authMode: ProviderAuthMode;

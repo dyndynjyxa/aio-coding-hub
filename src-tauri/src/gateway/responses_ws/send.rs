@@ -26,6 +26,7 @@ pub(in crate::gateway) fn socket_key(
     provider: i64,
     url: &reqwest::Url,
     headers: &HeaderMap,
+    custom_headers: &HeaderMap,
     epoch: u64,
     model: Option<&str>,
     client_generation: u64,
@@ -49,6 +50,19 @@ pub(in crate::gateway) fn socket_key(
             hash.update(value.as_bytes());
         }
     }
+    let mut names: Vec<_> = custom_headers.keys().collect();
+    names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    for name in names {
+        let name_bytes = name.as_str().as_bytes();
+        hash.update((name_bytes.len() as u64).to_be_bytes());
+        hash.update(name_bytes);
+        let values: Vec<_> = headers.get_all(name).iter().collect();
+        hash.update((values.len() as u64).to_be_bytes());
+        for value in values {
+            hash.update((value.as_bytes().len() as u64).to_be_bytes());
+            hash.update(value.as_bytes());
+        }
+    }
     format!("{:x}", hash.finalize())
 }
 
@@ -60,6 +74,7 @@ pub(in crate::gateway) async fn send(
     supports_ws: bool,
     url: reqwest::Url,
     mut headers: HeaderMap,
+    custom_headers: &HeaderMap,
     body: Bytes,
     deadline: Option<std::time::Instant>,
 ) -> SendOutcome {
@@ -72,6 +87,7 @@ pub(in crate::gateway) async fn send(
         provider_id,
         &url,
         &headers,
+        custom_headers,
         connection.runtime.epoch(),
         payload.get("model").and_then(Value::as_str),
         crate::gateway::http_client::generation(),
@@ -399,15 +415,55 @@ mod tests {
     }
 
     #[test]
+    fn custom_headers_socket_key_tracks_effective_values_but_ignores_trace() {
+        let url = reqwest::Url::parse("https://provider.invalid/v1/responses").unwrap();
+        let config = crate::providers::custom_headers_to_map(&[
+            crate::providers::ProviderCustomHeader {
+                name: "X-Tenant".into(),
+                value: "tenant-a".into(),
+            },
+            crate::providers::ProviderCustomHeader {
+                name: "X-Domain".into(),
+                value: "corp".into(),
+            },
+        ])
+        .unwrap();
+        let mut headers = config.clone();
+        let key = socket_key(1, &url, &headers, &config, 0, None, 0);
+        headers.insert("x-trace-id", "another-request".parse().unwrap());
+        assert_eq!(key, socket_key(1, &url, &headers, &config, 0, None, 0));
+        let mut reordered = HeaderMap::new();
+        reordered.insert("x-domain", "corp".parse().unwrap());
+        reordered.insert("x-tenant", "tenant-a".parse().unwrap());
+        assert_eq!(key, socket_key(1, &url, &headers, &reordered, 0, None, 0));
+        headers.insert("x-tenant", "plugin-tenant-b".parse().unwrap());
+        assert_ne!(key, socket_key(1, &url, &headers, &config, 0, None, 0));
+        headers.remove("x-tenant");
+        assert_ne!(key, socket_key(1, &url, &headers, &config, 0, None, 0));
+    }
+
+    #[test]
     fn reusable_socket_key_separates_model_auth_route_and_http_client_reload() {
         let url = reqwest::Url::parse("https://provider.invalid/v1/responses").unwrap();
         let mut headers = HeaderMap::new();
         headers.insert(header::AUTHORIZATION, "Bearer synthetic-a".parse().unwrap());
-        let key = socket_key(1, &url, &headers, 0, Some("model-a"), 0);
-        assert_ne!(key, socket_key(1, &url, &headers, 0, Some("model-b"), 0));
-        assert_ne!(key, socket_key(1, &url, &headers, 0, Some("model-a"), 1));
-        assert_ne!(key, socket_key(1, &url, &headers, 1, Some("model-a"), 0));
+        let key = socket_key(1, &url, &headers, &HeaderMap::new(), 0, Some("model-a"), 0);
+        assert_ne!(
+            key,
+            socket_key(1, &url, &headers, &HeaderMap::new(), 0, Some("model-b"), 0)
+        );
+        assert_ne!(
+            key,
+            socket_key(1, &url, &headers, &HeaderMap::new(), 0, Some("model-a"), 1)
+        );
+        assert_ne!(
+            key,
+            socket_key(1, &url, &headers, &HeaderMap::new(), 1, Some("model-a"), 0)
+        );
         headers.insert(header::AUTHORIZATION, "Bearer synthetic-b".parse().unwrap());
-        assert_ne!(key, socket_key(1, &url, &headers, 0, Some("model-a"), 0));
+        assert_ne!(
+            key,
+            socket_key(1, &url, &headers, &HeaderMap::new(), 0, Some("model-a"), 0)
+        );
     }
 }

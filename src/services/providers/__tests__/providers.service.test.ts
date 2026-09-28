@@ -137,7 +137,7 @@ describe("services/providers/providers", () => {
       origin: "https://example.com",
       base_url_index: 1,
     });
-    expect(commands.providerModelsDiscover).toHaveBeenCalledWith(input);
+    expect(commands.providerModelsDiscover).toHaveBeenCalledWith({ ...input, customHeaders: null });
   });
 
   it("preserves discovery HTTP status details", async () => {

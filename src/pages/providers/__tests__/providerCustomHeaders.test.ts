@@ -7,13 +7,13 @@ import {
 } from "../providerCustomHeaders";
 
 describe("providerCustomHeaders", () => {
-  it("trims names/values and drops rows with empty names", () => {
+  it("trims names/values and drops empty placeholders", () => {
     expect(
       normalizeCustomHeaders([
         { name: "  X-User-Id  ", value: "  42  " },
-        { name: "   ", value: "ignored" },
+        { name: "   ", value: "" },
       ])
-    ).toEqual([{ name: "X-User-Id", value: "42" }]);
+    ).toEqual([{ name: "x-user-id", value: "42" }]);
   });
 
   it("dedupes by case-insensitive name keeping the last occurrence", () => {
@@ -44,4 +44,32 @@ describe("providerCustomHeaders", () => {
     expect(validateCustomHeaders([{ name: "Host", value: "v" }])).toContain("网关管理");
     expect(validateCustomHeaders([{ name: "X-Domain", value: "v" }])).toBeNull();
   });
+});
+
+it("rejects protected identity headers and invalid raw values without exposing them", () => {
+  for (const name of [
+    "Authorization",
+    "X-Api-Key",
+    "chatgpt-account-id",
+    "X-Aio-Test",
+    "Sec-WebSocket-Key",
+    "x-codex-turn-state",
+  ]) {
+    expect(validateCustomHeaders([{ name, value: "test-secret" }])).toContain("网关管理");
+  }
+  for (const value of ["", "  ", "test-secret\r\n", "\0test-secret", "test-secret\u007f"]) {
+    const error = validateCustomHeaders([{ name: "x-tenant", value }]);
+    expect(error).not.toBeNull();
+    expect(error).not.toContain("test-secret");
+  }
+  expect(validateCustomHeaders([{ name: "x-tenant\n", value: "test-secret" }])).not.toBeNull();
+  expect(
+    normalizeCustomHeaders([
+      { name: "X-Z", value: " a " },
+      { name: "x-a", value: "b" },
+    ])
+  ).toEqual([
+    { name: "x-a", value: "b" },
+    { name: "x-z", value: "a" },
+  ]);
 });

@@ -92,7 +92,7 @@ fn sanitized_headers_component(headers: &HeaderMap) -> String {
         .iter()
         .map(|(name, value)| {
             let name = name.as_str();
-            if is_sensitive_header(name) {
+            if value.is_sensitive() || is_sensitive_header(name) {
                 return format!("{name}=[redacted]");
             }
             if is_identity_header(name) {

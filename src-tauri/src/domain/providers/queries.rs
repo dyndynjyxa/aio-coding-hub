@@ -52,11 +52,7 @@ fn decode_provider_row(
         oauth_provider_type: row.get("oauth_provider_type")?,
         source_provider_id: row.get("source_provider_id")?,
         bridge_type: row.get("bridge_type")?,
-        custom_headers: custom_headers_from_json(
-            &row.get::<_, Option<String>>("custom_headers_json")
-                .unwrap_or(None)
-                .unwrap_or_default(),
-        ),
+        custom_headers: custom_headers_from_json(&row.get::<_, String>("custom_headers_json")?)?,
     })
 }
 
@@ -330,10 +326,10 @@ fn insert_provider(
     let tags_json_value =
         serde_json::to_string(&tags_normalized).map_err(|e| format!("SYSTEM_ERROR: {e}"))?;
     let note_value = normalize_note(note.as_deref())?;
-    let custom_headers_json_value = serde_json::to_string(&normalize_custom_headers(
-        custom_headers.unwrap_or_default().to_vec(),
-    ))
-    .map_err(|e| format!("SYSTEM_ERROR: {e}"))?;
+    let custom_headers = normalize_custom_headers(custom_headers.unwrap_or_default().to_vec())?;
+    validate_custom_headers_owner(&custom_headers, is_cx2cc)?;
+    let custom_headers_json_value =
+        serde_json::to_string(&custom_headers).map_err(|e| format!("SYSTEM_ERROR: {e}"))?;
 
     let base_url_primary = base_urls.first().cloned().unwrap_or_default();
     let base_urls_json =
@@ -1448,11 +1444,17 @@ pub fn upsert(
             } else {
                 parse_positive_optional_u32(existing_stream_idle_timeout_seconds)
             };
-            let next_custom_headers_json = match custom_headers {
-                Some(headers) => serde_json::to_string(&normalize_custom_headers(headers))
-                    .map_err(|e| format!("SYSTEM_ERROR: {e}"))?,
-                None => existing_custom_headers_json.unwrap_or_else(|| "[]".to_string()),
+            let headers = match custom_headers {
+                Some(headers) => headers,
+                None => custom_headers_from_json(
+                    existing_custom_headers_json.as_deref().unwrap_or("[]"),
+                )
+                .map_err(|_| "SEC_INVALID_INPUT: invalid stored custom headers")?,
             };
+            let headers = normalize_custom_headers(headers)?;
+            validate_custom_headers_owner(&headers, is_cx2cc)?;
+            let next_custom_headers_json =
+                serde_json::to_string(&headers).map_err(|e| format!("SYSTEM_ERROR: {e}"))?;
 
             tx.execute(
                 r#"

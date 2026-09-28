@@ -175,3 +175,19 @@ describe("pages/providers/providerEditorSubmitModel", () => {
     });
   });
 });
+
+it("normalizes custom headers and rejects bridge ownership and invalid values", () => {
+  const valid = buildProviderEditorUpsertInput(
+    makeContext({ customHeaders: [{ name: "X-Tenant", value: " a " }] })
+  );
+  expect(valid.ok && valid.value.payload.customHeaders).toEqual([{ name: "x-tenant", value: "a" }]);
+  for (const overrides of [
+    { customHeaders: [{ name: "authorization", value: "secret" }] },
+    { customHeaders: [{ name: "x-tenant", value: "secret\n" }] },
+    { authMode: "cx2cc" as const, customHeaders: [{ name: "x-tenant", value: "secret" }] },
+  ]) {
+    const result = buildProviderEditorUpsertInput(makeContext(overrides));
+    expect(result.ok).toBe(false);
+    expect(JSON.stringify(result)).not.toContain("secret");
+  }
+});
