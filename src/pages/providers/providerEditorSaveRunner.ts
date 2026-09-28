@@ -65,7 +65,7 @@ export async function runProviderEditorSave(ctx: SaveActionContext) {
     toast(ctx.mode === "create" ? "Provider 已保存" : "Provider 已更新");
 
     ctx.onSaved(saved.cli_key);
-    ctx.onOpenChange(false);
+    ctx.onOpenChange(false, { bypassDirty: true });
   } catch (err) {
     logToConsole("error", ctx.mode === "create" ? "保存 Provider 失败" : "更新 Provider 失败", {
       error: String(err),

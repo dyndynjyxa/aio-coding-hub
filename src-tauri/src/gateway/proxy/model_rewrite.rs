@@ -1,6 +1,57 @@
 //! Usage: Request model rewriting helpers (query/path/JSON body).
 
-use crate::gateway::util::encode_url_component;
+use crate::gateway::util::{encode_url_component, RequestedModelLocation};
+use axum::body::Bytes;
+
+/// Rewrites the requested model wherever the request carries it. Returns whether
+/// anything actually changed. Shared by the generic model policy and the legacy
+/// Claude mapping so both channels rewrite identically.
+pub(super) fn rewrite_model_in_request(
+    location: RequestedModelLocation,
+    effective_model: &str,
+    forwarded_path: &mut String,
+    query: &mut Option<String>,
+    body_bytes: &mut Bytes,
+    strip_request_content_encoding: &mut bool,
+) -> bool {
+    match location {
+        RequestedModelLocation::BodyJson => {
+            let Ok(mut root) = serde_json::from_slice::<serde_json::Value>(body_bytes) else {
+                return false;
+            };
+            if !replace_model_in_body_json(&mut root, effective_model) {
+                return false;
+            }
+            let Ok(bytes) = serde_json::to_vec(&root) else {
+                return false;
+            };
+            *body_bytes = Bytes::from(bytes);
+            *strip_request_content_encoding = true;
+            true
+        }
+        RequestedModelLocation::Query => {
+            let Some(current) = query.as_deref() else {
+                return false;
+            };
+            let next = replace_model_in_query(current, effective_model);
+            let changed = next != current;
+            if changed {
+                *query = Some(next);
+            }
+            changed
+        }
+        RequestedModelLocation::Path => {
+            let Some(next) = replace_model_in_path(forwarded_path, effective_model) else {
+                return false;
+            };
+            let changed = next != *forwarded_path;
+            if changed {
+                *forwarded_path = next;
+            }
+            changed
+        }
+    }
+}
 
 pub(super) fn replace_model_in_query(query: &str, model: &str) -> String {
     let encoded = encode_url_component(model);
@@ -78,5 +129,70 @@ pub(super) fn replace_model_in_body_json(root: &mut serde_json::Value, model: &s
             obj.insert("model".to_string(), replacement);
             true
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rewrite_model_in_request;
+    use crate::gateway::util::RequestedModelLocation;
+    use axum::body::Bytes;
+
+    #[test]
+    fn rewrite_model_updates_body_query_and_path() {
+        let mut path = "/v1/models/gpt-5.4".to_string();
+        let mut query = Some("model=gpt-5.4&stream=true".to_string());
+        let mut body = Bytes::from(r#"{"model":"gpt-5.4","input":[]}"#);
+        let mut strip = false;
+
+        assert!(rewrite_model_in_request(
+            RequestedModelLocation::BodyJson,
+            "upstream-5.4",
+            &mut path,
+            &mut query,
+            &mut body,
+            &mut strip,
+        ));
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body)
+                .expect("rewritten body")
+                .get("model")
+                .and_then(|value| value.as_str()),
+            Some("upstream-5.4")
+        );
+        assert!(strip);
+
+        assert!(rewrite_model_in_request(
+            RequestedModelLocation::Query,
+            "query-model",
+            &mut path,
+            &mut query,
+            &mut body,
+            &mut strip,
+        ));
+        assert_eq!(query.as_deref(), Some("model=query-model&stream=true"));
+
+        assert!(rewrite_model_in_request(
+            RequestedModelLocation::Path,
+            "path-model",
+            &mut path,
+            &mut query,
+            &mut body,
+            &mut strip,
+        ));
+        assert_eq!(path, "/v1/models/path-model");
+
+        // Non-JSON body cannot be rewritten.
+        let mut binary_body = Bytes::from_static(b"\x1f\x8b not json");
+        let mut strip2 = false;
+        assert!(!rewrite_model_in_request(
+            RequestedModelLocation::BodyJson,
+            "x",
+            &mut path,
+            &mut query,
+            &mut binary_body,
+            &mut strip2,
+        ));
+        assert!(!strip2);
     }
 }

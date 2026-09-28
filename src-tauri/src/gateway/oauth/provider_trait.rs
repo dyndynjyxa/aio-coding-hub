@@ -56,6 +56,17 @@ pub(crate) trait OAuthProvider: Send + Sync {
     ) -> Result<(), String> {
         Ok(())
     }
+    /// Discovery-only version identity; adapters that do not use it keep their
+    /// ordinary upstream headers. This must not alter inference identity.
+    fn inject_model_discovery_headers(
+        &self,
+        headers: &mut HeaderMap,
+        access_token: &str,
+        _id_token: Option<&str>,
+        _client_version: Option<&str>,
+    ) -> Result<(), String> {
+        self.inject_upstream_headers(headers, access_token)
+    }
     fn fetch_limits(
         &self,
         _client: &reqwest::Client,

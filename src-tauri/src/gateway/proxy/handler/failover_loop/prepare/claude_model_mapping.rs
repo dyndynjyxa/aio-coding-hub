@@ -2,9 +2,7 @@
 
 use super::context::{CommonCtx, ProviderCtx};
 use crate::gateway::events::ClaudeModelMapping;
-use crate::gateway::proxy::model_rewrite::{
-    replace_model_in_body_json, replace_model_in_path, replace_model_in_query,
-};
+use crate::gateway::proxy::model_rewrite::rewrite_model_in_request;
 use crate::gateway::response_fixer;
 use crate::gateway::util::RequestedModelLocation;
 use crate::providers;
@@ -51,35 +49,14 @@ pub(super) fn apply_if_needed<R: tauri::Runtime>(
     } = upstream;
 
     let location = requested_model_location.unwrap_or(RequestedModelLocation::BodyJson);
-    let mut applied = false;
-    match location {
-        RequestedModelLocation::BodyJson => {
-            if let Some(root) = introspection_json {
-                let mut next = root.clone();
-                let replaced = replace_model_in_body_json(&mut next, &effective_model);
-                if replaced {
-                    if let Ok(bytes) = serde_json::to_vec(&next) {
-                        *body_bytes = Bytes::from(bytes);
-                        *strip_request_content_encoding = true;
-                        applied = true;
-                    }
-                }
-            }
-        }
-        RequestedModelLocation::Query => {
-            if let Some(q) = query.as_deref() {
-                let next = replace_model_in_query(q, &effective_model);
-                applied = next != q;
-                *query = Some(next);
-            }
-        }
-        RequestedModelLocation::Path => {
-            if let Some(next_path) = replace_model_in_path(forwarded_path, &effective_model) {
-                applied = next_path != *forwarded_path;
-                *forwarded_path = next_path;
-            }
-        }
-    }
+    let applied = rewrite_model_in_request(
+        location,
+        &effective_model,
+        forwarded_path,
+        query,
+        body_bytes,
+        strip_request_content_encoding,
+    );
 
     let model_lower = requested_model.to_ascii_lowercase();
     let kind = if has_thinking

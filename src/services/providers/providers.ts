@@ -6,6 +6,14 @@ import {
   type ProviderAvailabilityResult,
   type ProviderBaseUrlMode as GeneratedProviderBaseUrlMode,
   type ProviderExtensionValuesInput,
+  type ProviderModelMode as GeneratedProviderModelMode,
+  type ProviderModelPolicyStatus as GeneratedProviderModelPolicyStatus,
+  type ProviderModelPolicyV1 as GeneratedProviderModelPolicyV1,
+  type ProviderModelMapping as GeneratedProviderModelMapping,
+  type ProviderModelDiscoveryErrorCode as GeneratedProviderModelDiscoveryErrorCode,
+  type ProviderModelDiscoveryInput as GeneratedProviderModelDiscoveryInput,
+  type ProviderModelDiscoveryResult as GeneratedProviderModelDiscoveryResult,
+  type ProviderModelDiscoveryUnsupportedReason as GeneratedProviderModelDiscoveryUnsupportedReason,
   type ProviderOAuthDeviceCodeCancelResult as GeneratedProviderOAuthDeviceCodeCancelResult,
   type ProviderOAuthDeviceCodePollResult as GeneratedProviderOAuthDeviceCodePollResult,
   type ProviderOAuthDeviceCodeStartResult as GeneratedProviderOAuthDeviceCodeStartResult,
@@ -32,6 +40,7 @@ import {
 } from "../generatedTypeUtils";
 import { createRiskyIpcConfirm } from "../ipcConfirm";
 import { FeValidationError } from "../../utils/errors";
+import { CLI_KEYS, type CliKey } from "../../constants/clis";
 
 export type {
   ProviderAvailabilityResult,
@@ -49,14 +58,25 @@ export type {
 
 export type { ProviderCustomHeader };
 
-export type CliKey = "claude" | "codex" | "gemini";
+export type { CliKey } from "../../constants/clis";
 
 export type ClaudeModels = GeneratedClaudeModels;
 export type DailyResetMode = GeneratedDailyResetMode;
 export type ProviderAuthMode = GeneratedProviderAuthMode;
 export type ProviderBaseUrlMode = GeneratedProviderBaseUrlMode;
+export type ProviderModelMode = GeneratedProviderModelMode;
+export type ProviderModelPolicyStatus = GeneratedProviderModelPolicyStatus;
+export type ProviderModelPolicyV1 = GeneratedProviderModelPolicyV1;
+export type ProviderModelMapping = GeneratedProviderModelMapping;
+export type ProviderModelDiscoveryErrorCode = GeneratedProviderModelDiscoveryErrorCode;
+export type ProviderModelDiscoveryResult = GeneratedProviderModelDiscoveryResult;
+export type ProviderModelDiscoveryUnsupportedReason =
+  GeneratedProviderModelDiscoveryUnsupportedReason;
+export type ProviderModelDiscoveryInput = Omit<GeneratedProviderModelDiscoveryInput, "cliKey"> & {
+  cliKey: CliKey;
+};
 
-const CLI_KEY_VALUES = ["claude", "codex", "gemini"] as const satisfies readonly CliKey[];
+const CLI_KEY_VALUES = CLI_KEYS;
 const PROVIDER_AUTH_MODE_VALUES = [
   "api_key",
   "oauth",
@@ -93,6 +113,7 @@ type ProviderUpsertFieldMap = {
   costMultiplier: "costMultiplier";
   priority: "priority";
   claudeModels: "claudeModels";
+  modelPolicy: "modelPolicy";
   limit5hUsd: "limit5hUsd";
   limitDailyUsd: "limitDailyUsd";
   dailyResetMode: "dailyResetMode";
@@ -105,6 +126,7 @@ type ProviderUpsertFieldMap = {
   sourceProviderId: "sourceProviderId";
   bridgeType: "bridgeType";
   streamIdleTimeoutSeconds: "streamIdleTimeoutSeconds";
+  supportsWebsockets: "supportsWebsockets";
   extensionValues: "extensionValues";
   customHeaders: "customHeaders";
 };
@@ -184,6 +206,7 @@ function toProviderUpsertPayload(input: ProviderUpsertInput): ProviderUpsertTran
     costMultiplier: input.costMultiplier,
     priority: input.priority ?? null,
     claudeModels: input.claudeModels ?? null,
+    modelPolicy: input.modelPolicy ?? null,
     limit5hUsd: input.limit5hUsd ?? null,
     limitDailyUsd: input.limitDailyUsd ?? null,
     dailyResetMode: input.dailyResetMode ?? null,
@@ -195,6 +218,7 @@ function toProviderUpsertPayload(input: ProviderUpsertInput): ProviderUpsertTran
     note: input.note ?? null,
     sourceProviderId,
     bridgeType: input.bridgeType ?? null,
+    supportsWebsockets: input.supportsWebsockets ?? null,
     extensionValues: input.extensionValues ?? null,
     customHeaders: input.customHeaders ?? null,
   } satisfies Omit<GeneratedProviderUpsertInput, "streamIdleTimeoutSeconds">;
@@ -237,6 +261,24 @@ export async function providersList(cliKey: CliKey) {
       mapGeneratedCommandResponse(await commands.providersList(normalizedCliKey), (rows) =>
         rows.map(toProviderSummary)
       ),
+  });
+}
+
+export async function providerModelsDiscover(input: ProviderModelDiscoveryInput) {
+  const payload = {
+    ...input,
+    providerId: input.providerId == null ? null : validateProviderId(input.providerId),
+    cliKey: validateProviderCliKey(input.cliKey),
+  } satisfies GeneratedProviderModelDiscoveryInput;
+
+  return invokeGeneratedIpc<ProviderModelDiscoveryResult>({
+    title: "获取上游模型失败",
+    cmd: "provider_models_discover",
+    args: { input: payload },
+    invoke: () =>
+      commands.providerModelsDiscover(payload) as Promise<
+        GeneratedCommandResult<ProviderModelDiscoveryResult>
+      >,
   });
 }
 
@@ -588,16 +630,20 @@ export async function providerOAuthResetCodexQuota(
 }
 
 export async function providerTestAvailability(
-  providerId: number
+  providerId: number,
+  options?: { model?: string | null; prompt?: string | null }
 ): Promise<ProviderAvailabilityResult | null> {
   const normalizedProviderId = validateProviderId(providerId);
+  // Blank input means "let the backend decide" (policy model / default prompt).
+  const model = options?.model?.trim() || null;
+  const prompt = options?.prompt?.trim() || null;
 
   return invokeGeneratedIpc<ProviderAvailabilityResult>({
     title: "测试供应商可用性失败",
     cmd: "provider_test_availability",
-    args: { providerId: normalizedProviderId },
+    args: { providerId: normalizedProviderId, model, prompt },
     invoke: () =>
-      commands.providerTestAvailability(normalizedProviderId) as Promise<
+      commands.providerTestAvailability(normalizedProviderId, model, prompt) as Promise<
         GeneratedCommandResult<ProviderAvailabilityResult>
       >,
   });

@@ -81,6 +81,7 @@ function createSelectedLog(overrides: Partial<RequestLogDetail> = {}): RequestLo
     duration_ms: 1234,
     ttfb_ms: 100,
     input_tokens: 10,
+    effective_input_tokens: 10,
     output_tokens: 20,
     total_tokens: 30,
     cache_read_input_tokens: 5,
@@ -193,6 +194,103 @@ describe("home/RequestLogDetailDialog", () => {
     expect(screen.queryByText(/usage_json/)).not.toBeInTheDocument();
   });
 
+  it("shows both transport hops, fallback, provider switches and recovery in the existing chain", () => {
+    setRequestLogQueryState({
+      selectedLog: createSelectedLog({
+        cli_key: "codex",
+        final_provider_id: 12,
+        final_provider_name: "Provider B",
+        special_settings_json: JSON.stringify([
+          {
+            type: "codex_responses_transport",
+            client_transport: "responses_ws",
+            upstream_transport: "http",
+            transport_action: "http_fallback",
+            providerId: 7,
+            failure_class: "transport",
+            reason_code: "ws_connect_timeout",
+            output_committed: false,
+          },
+          {
+            type: "codex_responses_transport",
+            client_transport: "responses_ws",
+            upstream_transport: "http",
+            transport_action: "provider_switch",
+            providerId: 12,
+            failure_class: "provider",
+            reason_code: "upstream_429",
+            status_source: "responses_event",
+            handshake_status: 101,
+            event_status: 429,
+            output_committed: false,
+          },
+          {
+            type: "codex_responses_transport",
+            client_transport: "http",
+            upstream_transport: "http",
+            transport_action: "full_input_retry",
+            providerId: 12,
+            recovery_from_trace_id: "trace-original",
+          },
+        ]),
+      }),
+    });
+    render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
+    switchToTab("决策链");
+    expect(screen.getByText("Responses 传输记录")).toBeInTheDocument();
+    const fallback = screen.getByText("同供应商降级 HTTP").closest("li");
+    expect(fallback).not.toBeNull();
+    expect(within(fallback!).getByText("供应商：#7")).toBeInTheDocument();
+    expect(within(fallback!).getByText("客户端 WS · 上游 HTTP")).toBeInTheDocument();
+    expect(within(fallback!).getByText("传输失败")).toBeInTheDocument();
+    expect(within(fallback!).getByText("原因：ws_connect_timeout")).toBeInTheDocument();
+    expect(within(fallback!).getByText("尚未开始输出")).toBeInTheDocument();
+    expect(screen.getByText("切换供应商")).toBeInTheDocument();
+    expect(screen.getByText("WS 握手：101")).toBeInTheDocument();
+    expect(screen.getByText("响应事件状态：429")).toBeInTheDocument();
+    expect(screen.getAllByText("供应商：Provider B")).toHaveLength(2);
+    expect(screen.getByText("恢复上下文并重发完整请求")).toBeInTheDocument();
+    expect(screen.getByText("trace-original")).toBeInTheDocument();
+    expect(screen.queryByText(/不能拼接新供应商响应/)).not.toBeInTheDocument();
+  });
+
+  it("shows committed output interruption without implying a seamless retry", () => {
+    setRequestLogQueryState({
+      selectedLog: createSelectedLog({
+        cli_key: "codex",
+        special_settings_json: JSON.stringify({
+          type: "codex_responses_transport",
+          client_transport: "responses_ws",
+          upstream_transport: "responses_ws",
+          providerId: 12,
+          failure_class: "transport",
+          reason_code: "ws_stream_closed",
+          output_committed: true,
+        }),
+      }),
+    });
+    render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
+    switchToTab("决策链");
+    expect(screen.getByText("客户端 WS · 上游 WS")).toBeInTheDocument();
+    expect(screen.getByText("已开始输出")).toBeInTheDocument();
+    expect(
+      screen.getByText("响应中断，已输出内容保留，不能拼接新供应商响应。")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("切换供应商")).not.toBeInTheDocument();
+  });
+
+  it.each([null, "bad-json", JSON.stringify([{ type: "other" }])])(
+    "keeps transport details hidden for legacy logs (%s)",
+    (specialSettings) => {
+      setRequestLogQueryState({
+        selectedLog: createSelectedLog({ special_settings_json: specialSettings }),
+      });
+      render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
+      switchToTab("决策链");
+      expect(screen.queryByText("Responses 传输记录")).not.toBeInTheDocument();
+    }
+  );
+
   it("shows Codex fast mode badge on the summary tab", () => {
     setRequestLogQueryState({
       selectedLog: createSelectedLog({
@@ -216,6 +314,22 @@ describe("home/RequestLogDetailDialog", () => {
 
     expect(screen.getByText("fast")).toBeInTheDocument();
     expectMetricValue("费用系数", "x1.50");
+  });
+
+  it("does not promote the Codex system marker into request details", () => {
+    setRequestLogQueryState({
+      selectedLog: createSelectedLog({
+        cli_key: "codex",
+        special_settings_json: JSON.stringify([
+          { type: "codex_system_request", threadSource: "system" },
+        ]),
+      }),
+    });
+    setTraceStoreState({ traces: [] });
+
+    render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
+
+    expect(screen.queryByText("Codex 系统请求")).not.toBeInTheDocument();
   });
 
   it("falls back to raw usage_json when JSON parsing fails without rendering raw json section", () => {
@@ -287,6 +401,64 @@ describe("home/RequestLogDetailDialog", () => {
     // Switch to chain tab to check provider fallback
     switchToTab("决策链");
     expect(screen.getByText("最终供应商：未知")).toBeInTheDocument();
+  });
+
+  it.each([false, true])(
+    "does not label same-provider transport fallback as failover (loaded=%s)",
+    (loaded) => {
+      const attempts: RequestAttemptLog[] = [101, 200].map((status, index) => ({
+        id: index + 1,
+        trace_id: "trace-1",
+        cli_key: "codex",
+        attempt_index: index + 1,
+        provider_id: 12,
+        provider_name: "Provider A",
+        base_url: "https://provider.example",
+        outcome: index === 0 ? "transport_fallback" : "success",
+        status,
+        attempt_started_ms: index * 100,
+        attempt_duration_ms: 50,
+        created_at: 1000,
+      }));
+      setRequestLogQueryState({
+        selectedLog: createSelectedLog({
+          cli_key: "codex",
+          status: 200,
+          error_code: null,
+          attempts_json: JSON.stringify(attempts),
+        }),
+        attemptLogs: loaded ? attempts : [],
+      });
+      render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
+      expect(screen.getByText("200 成功")).toBeInTheDocument();
+      expect(screen.queryByText("200 切换后成功")).not.toBeInTheDocument();
+    }
+  );
+
+  it("shows incomplete terminal status in both summary and transport details", () => {
+    setRequestLogQueryState({
+      selectedLog: createSelectedLog({
+        cli_key: "codex",
+        status: 200,
+        error_code: null,
+        special_settings_json: JSON.stringify([
+          {
+            type: "codex_responses_transport",
+            scope: "stream",
+            terminal: "incomplete",
+            client_transport: "responses_ws",
+            upstream_transport: "http",
+            output_committed: true,
+          },
+        ]),
+      }),
+    });
+    render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
+    expect(screen.getByText("200 不完整结束")).toBeInTheDocument();
+    expect(screen.queryByText("200 成功")).not.toBeInTheDocument();
+    expectMetricValue("输出 Token", "20");
+    switchToTab("决策链");
+    expect(screen.getByText("终态：不完整结束")).toBeInTheDocument();
   });
 
   it("shows failover success and prefers the 1h cache creation metric when present", () => {
@@ -429,6 +601,7 @@ describe("home/RequestLogDetailDialog", () => {
               circuit_failure_count: null,
               circuit_failure_threshold: null,
               claude_model_mapping: null,
+              model_redirect: null,
             },
           ],
         },
@@ -721,7 +894,26 @@ describe("home/RequestLogDetailDialog", () => {
     expectMetricValue("速率", "—");
   });
 
-  it("keeps zero-valued cache window metrics visible when they are the only cache source", () => {
+  it("uses effective input and displays canonical cache buckets", () => {
+    setRequestLogQueryState({
+      selectedLog: createSelectedLog({
+        input_tokens: 1000,
+        effective_input_tokens: 700,
+        cache_creation_input_tokens: 200,
+        cache_creation_5m_input_tokens: null,
+        cache_creation_1h_input_tokens: null,
+        cache_read_input_tokens: 100,
+      }),
+    });
+
+    render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
+
+    expectMetricValue("输入 Token", "700");
+    expectMetricValue("缓存创建", "200");
+    expectMetricValue("缓存读取", "100");
+  });
+
+  it("keeps zero-valued cache metrics visible and hides entirely missing metrics", () => {
     const view = render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
 
     setRequestLogQueryState({
@@ -732,7 +924,7 @@ describe("home/RequestLogDetailDialog", () => {
       }),
     });
     view.rerender(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
-    expectMetricValue("缓存创建", "0 (5m)");
+    expectMetricValue("缓存创建", "0");
 
     setRequestLogQueryState({
       selectedLog: createSelectedLog({
@@ -742,7 +934,7 @@ describe("home/RequestLogDetailDialog", () => {
       }),
     });
     view.rerender(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
-    expectMetricValue("缓存创建", "0 (1h)");
+    expectMetricValue("缓存创建", "0");
 
     setRequestLogQueryState({
       selectedLog: createSelectedLog({
@@ -752,7 +944,7 @@ describe("home/RequestLogDetailDialog", () => {
       }),
     });
     view.rerender(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
-    expectMetricValue("缓存创建", "—");
+    expect(screen.queryByText("缓存创建")).not.toBeInTheDocument();
   });
 
   // --- Tab switching tests ---

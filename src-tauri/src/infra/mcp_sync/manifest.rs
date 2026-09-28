@@ -129,9 +129,18 @@ pub(super) fn backup_for_enable<R: tauri::Runtime>(
     let target_path = mcp_target_path(app, cli_key)?;
     let now = now_unix_seconds();
 
-    let existed = target_path.exists();
-    let backup_rel = if existed {
-        let bytes = read_file_with_max_len(&target_path, super::MCP_SYNC_TARGET_MAX_BYTES)?;
+    let current = if cli_key == "grok" {
+        crate::grok_config::read_bytes_path(&target_path)?
+    } else if target_path.exists() {
+        Some(read_file_with_max_len(
+            &target_path,
+            super::MCP_SYNC_TARGET_MAX_BYTES,
+        )?)
+    } else {
+        None
+    };
+    let existed = current.is_some();
+    let backup_rel = if let Some(bytes) = current {
         let backup_name = backup_file_name(cli_key);
         let backup_path = files_dir.join(backup_name);
         write_file_atomic(&backup_path, &bytes)?;

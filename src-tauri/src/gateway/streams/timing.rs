@@ -1,5 +1,6 @@
 //! Usage: Timing-only tee wrapper used for non-stream responses.
 
+use crate::gateway::streams::UpstreamStreamError;
 use futures_core::Stream;
 use std::future::Future;
 use std::pin::Pin;
@@ -12,7 +13,7 @@ use super::StreamFinalizeCtx;
 
 pub(in crate::gateway) struct TimingOnlyTeeStream<S, B, R = tauri::Wry>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,
@@ -27,7 +28,7 @@ where
 
 impl<S, B, R> TimingOnlyTeeStream<S, B, R>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,
@@ -69,12 +70,12 @@ where
 
 impl<S, B, R> Stream for TimingOnlyTeeStream<S, B, R>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,
 {
-    type Item = Result<B, reqwest::Error>;
+    type Item = Result<B, UpstreamStreamError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.as_mut().get_mut();
@@ -117,7 +118,7 @@ where
 
 impl<S, B, R> Drop for TimingOnlyTeeStream<S, B, R>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,

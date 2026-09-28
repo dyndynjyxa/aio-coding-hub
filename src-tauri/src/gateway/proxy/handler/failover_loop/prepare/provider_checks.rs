@@ -239,6 +239,7 @@ pub(super) async fn prepare_gemini_oauth<R: tauri::Runtime>(
     input: &RequestContext<R>,
     effective_credential: &str,
     provider_base_url_base: &mut String,
+    upstream_model: Option<&str>,
 ) -> Option<GeminiOAuthPrepared> {
     let client = input.state.client();
     match gemini_oauth::prepare_upstream_request(
@@ -248,7 +249,7 @@ pub(super) async fn prepare_gemini_oauth<R: tauri::Runtime>(
         input.query.as_deref(),
         input.introspection_json.as_ref(),
         &input.body_bytes,
-        input.requested_model.as_deref(),
+        upstream_model,
     )
     .await
     {

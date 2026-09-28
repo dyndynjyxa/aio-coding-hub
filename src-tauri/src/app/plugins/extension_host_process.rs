@@ -622,11 +622,13 @@ mod tests {
         (dir, path)
     }
 
+    const NODE_PROCESS_TEST_START_TIMEOUT: Duration = Duration::from_secs(30);
+
     fn node_config(script_path: &std::path::Path) -> ExtensionHostProcessConfig {
         ExtensionHostProcessConfig {
             program: "node".to_string(),
             args: vec![script_path.display().to_string()],
-            start_timeout: Duration::from_secs(5),
+            start_timeout: NODE_PROCESS_TEST_START_TIMEOUT,
             hook_timeout: Duration::from_secs(5),
             idle_recycle: Duration::from_millis(50),
             max_line_bytes: 256 * 1024,
@@ -634,6 +636,14 @@ mod tests {
             allow_startup_noise: false,
             host_handler: None,
         }
+    }
+
+    #[test]
+    fn node_process_test_config_uses_ci_tolerant_start_timeout() {
+        let path = std::path::Path::new("plugin.js");
+        let config = node_config(path);
+
+        assert_eq!(config.start_timeout, NODE_PROCESS_TEST_START_TIMEOUT);
     }
 
     #[tokio::test]
@@ -750,7 +760,7 @@ mod tests {
                 "--".to_string(),
                 "--extension-host-process-env-probe".to_string(),
             ],
-            start_timeout: Duration::from_secs(5),
+            start_timeout: NODE_PROCESS_TEST_START_TIMEOUT,
             hook_timeout: Duration::from_secs(5),
             idle_recycle: Duration::from_millis(50),
             max_line_bytes: 256 * 1024,

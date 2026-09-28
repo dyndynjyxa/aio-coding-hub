@@ -1,7 +1,6 @@
 //! Usage: Provider sort modes related Tauri commands.
 
 use crate::app_state::{ensure_db_ready, DbInitState};
-use crate::gateway_control::app_gateway_clear_cli_route_runtime_state;
 use crate::{blocking, sort_modes};
 
 #[tauri::command]
@@ -54,17 +53,7 @@ pub(crate) async fn sort_mode_delete(
     db_state: tauri::State<'_, DbInitState>,
     mode_id: i64,
 ) -> Result<bool, String> {
-    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    let affected_cli_keys = blocking::run("sort_mode_delete", move || {
-        sort_modes::delete_mode_with_affected_cli_keys(&db, mode_id)
-    })
-    .await?;
-
-    for cli_key in affected_cli_keys {
-        app_gateway_clear_cli_route_runtime_state(&app, &cli_key);
-    }
-
-    Ok(true)
+    crate::app::sort_mode_service::sort_mode_delete(app, db_state, mode_id).await
 }
 
 #[tauri::command]
@@ -89,16 +78,7 @@ pub(crate) async fn sort_mode_active_set(
     cli_key: String,
     mode_id: Option<i64>,
 ) -> Result<sort_modes::SortModeActiveRow, String> {
-    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    let cli_key_for_db = cli_key.clone();
-    let row = blocking::run("sort_mode_active_set", move || {
-        sort_modes::set_active(&db, &cli_key_for_db, mode_id)
-    })
-    .await?;
-
-    app_gateway_clear_cli_route_runtime_state(&app, &cli_key);
-
-    Ok(row)
+    crate::app::sort_mode_service::sort_mode_active_set(app, db_state, cli_key, mode_id).await
 }
 
 #[tauri::command]
@@ -126,19 +106,14 @@ pub(crate) async fn sort_mode_providers_set_order(
     cli_key: String,
     ordered_provider_ids: Vec<i64>,
 ) -> Result<Vec<sort_modes::SortModeProviderRow>, String> {
-    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    let cli_key_for_db = cli_key.clone();
-    let result = blocking::run("sort_mode_providers_set_order", move || {
-        sort_modes::set_mode_providers_order(&db, mode_id, &cli_key_for_db, ordered_provider_ids)
-    })
+    crate::app::sort_mode_service::sort_mode_providers_set_order(
+        app,
+        db_state,
+        mode_id,
+        cli_key,
+        ordered_provider_ids,
+    )
     .await
-    .map_err(Into::into);
-
-    if result.is_ok() {
-        app_gateway_clear_cli_route_runtime_state(&app, &cli_key);
-    }
-
-    result
 }
 
 #[tauri::command]
@@ -151,17 +126,13 @@ pub(crate) async fn sort_mode_provider_set_enabled(
     provider_id: i64,
     enabled: bool,
 ) -> Result<sort_modes::SortModeProviderRow, String> {
-    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    let cli_key_for_db = cli_key.clone();
-    let result = blocking::run("sort_mode_provider_set_enabled", move || {
-        sort_modes::set_mode_provider_enabled(&db, mode_id, &cli_key_for_db, provider_id, enabled)
-    })
+    crate::app::sort_mode_service::sort_mode_provider_set_enabled(
+        app,
+        db_state,
+        mode_id,
+        cli_key,
+        provider_id,
+        enabled,
+    )
     .await
-    .map_err(Into::into);
-
-    if result.is_ok() {
-        app_gateway_clear_cli_route_runtime_state(&app, &cli_key);
-    }
-
-    result
 }

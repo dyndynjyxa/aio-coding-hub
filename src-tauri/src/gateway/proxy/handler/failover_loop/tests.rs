@@ -33,6 +33,10 @@ fn skipped_attempt(reason_code: Option<&'static str>) -> FailoverAttempt {
         circuit_trigger_error_code: None,
         provider_bridged: None,
         timeout_secs: None,
+        reasoning_effort: None,
+        upstream_sent: false,
+        claude_model_mapping: None,
+        model_redirect: None,
     }
 }
 
@@ -62,6 +66,10 @@ fn real_attempt() -> FailoverAttempt {
         circuit_trigger_error_code: None,
         provider_bridged: Some(false),
         timeout_secs: None,
+        reasoning_effort: None,
+        upstream_sent: true,
+        claude_model_mapping: None,
+        model_redirect: None,
     }
 }
 
@@ -95,6 +103,10 @@ fn timeout_attempt(
         circuit_trigger_error_code: None,
         provider_bridged: Some(false),
         timeout_secs: None,
+        reasoning_effort: None,
+        upstream_sent: true,
+        claude_model_mapping: None,
+        model_redirect: None,
     }
 }
 
@@ -269,9 +281,9 @@ fn gate_skip_attempt_without_trigger_omits_trigger_key_but_keeps_state() {
 }
 
 #[test]
-fn non_circuit_attempts_serialize_without_new_attribution_keys() {
-    // Baseline key set before this feature: the two new keys must be absent
-    // when None so successful requests' attempts_json gains zero bytes.
+fn non_circuit_attempts_serialize_send_metadata_without_optional_attribution_keys() {
+    // Final send metadata is always persisted. Optional circuit attribution
+    // fields stay absent when None so ordinary attempts do not gain those keys.
     let expected_keys = [
         "provider_id",
         "provider_name",
@@ -295,6 +307,8 @@ fn non_circuit_attempts_serialize_without_new_attribution_keys() {
         "circuit_failure_threshold",
         "provider_bridged",
         "timeout_secs",
+        "reasoning_effort",
+        "upstream_sent",
     ];
 
     let mut success = real_attempt();

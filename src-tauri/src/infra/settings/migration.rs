@@ -648,9 +648,65 @@ fn migrate_add_request_log_retention(
     )
 }
 
+fn migrate_add_grok_proxy_preferences(
+    settings: &mut AppSettings,
+    schema_version_present: bool,
+) -> bool {
+    migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_GROK_PROXY_PREFERENCES,
+    )
+}
+
+fn migrate_add_image_gen_storage_dir(
+    settings: &mut AppSettings,
+    schema_version_present: bool,
+) -> bool {
+    // v36: Add image gen storage dir override (default None = app data dir/image-gen).
+    migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_IMAGE_GEN_STORAGE_DIR,
+    )
+}
+
+fn migrate_align_cch_gateway_rectifiers(
+    settings: &mut AppSettings,
+    schema_version_present: bool,
+) -> bool {
+    if schema_version_present
+        && settings.schema_version >= SCHEMA_VERSION_ALIGN_CCH_GATEWAY_RECTIFIERS
+    {
+        return false;
+    }
+
+    // Before v37 AIO always billed Codex priority traffic from the actual
+    // response tier. Preserve that behavior for upgrades while fresh v37
+    // settings use the CCH-compatible requested-tier default.
+    settings.codex_priority_billing_source = super::types::CodexPriorityBillingSource::Actual;
+
+    migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ALIGN_CCH_GATEWAY_RECTIFIERS,
+    )
+}
+
+fn migrate_add_codex_responses_websocket(
+    settings: &mut AppSettings,
+    schema_version_present: bool,
+) -> bool {
+    migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_CODEX_RESPONSES_WEBSOCKET,
+    )
+}
+
 type SettingsMigration = fn(&mut AppSettings, bool) -> bool;
 
-const SETTINGS_MIGRATIONS: [SettingsMigration; 28] = [
+const SETTINGS_MIGRATIONS: [SettingsMigration; 32] = [
     migrate_disable_upstream_timeouts,
     migrate_add_gateway_rectifiers,
     migrate_add_circuit_breaker_notice,
@@ -679,6 +735,10 @@ const SETTINGS_MIGRATIONS: [SettingsMigration; 28] = [
     migrate_add_upstream_proxy_credentials,
     migrate_add_codex_oauth_compatible_proxy_mode,
     migrate_add_request_log_retention,
+    migrate_add_grok_proxy_preferences,
+    migrate_add_image_gen_storage_dir,
+    migrate_align_cch_gateway_rectifiers,
+    migrate_add_codex_responses_websocket,
 ];
 
 fn apply_settings_migrations(settings: &mut AppSettings, schema_version_present: bool) -> bool {
@@ -714,6 +774,18 @@ pub(super) fn repair_settings(
 mod tests {
     use super::*;
     use crate::infra::settings::types::default_cli_priority_order;
+
+    #[test]
+    fn codex_responses_websocket_migration_defaults_off_and_preserves_explicit_value() {
+        let mut old: AppSettings =
+            serde_json::from_value(serde_json::json!({ "schema_version": 37 })).unwrap();
+        assert!(!old.codex_responses_websocket_enabled);
+        assert!(migrate_add_codex_responses_websocket(&mut old, true));
+        assert_eq!(old.schema_version, 38);
+        old.codex_responses_websocket_enabled = true;
+        assert!(!migrate_add_codex_responses_websocket(&mut old, true));
+        assert!(old.codex_responses_websocket_enabled);
+    }
 
     // -- sanitize_failover_settings --
 
@@ -1257,7 +1329,8 @@ mod tests {
             vec![
                 "codex".to_string(),
                 "claude".to_string(),
-                "gemini".to_string()
+                "gemini".to_string(),
+                "grok".to_string()
             ]
         );
     }
@@ -1272,6 +1345,86 @@ mod tests {
         assert!(migrate_add_cli_priority_order(&mut s, true));
         assert_eq!(s.schema_version, SCHEMA_VERSION_ADD_CLI_PRIORITY_ORDER);
         assert_eq!(s.cli_priority_order, default_cli_priority_order());
+    }
+
+    #[test]
+    fn migrate_add_grok_proxy_preferences_bumps_schema_without_initializing_preferences() {
+        let mut settings = AppSettings {
+            schema_version: SCHEMA_VERSION_ADD_REQUEST_LOG_RETENTION,
+            ..Default::default()
+        };
+
+        assert!(migrate_add_grok_proxy_preferences(&mut settings, true));
+        assert_eq!(
+            settings.schema_version,
+            SCHEMA_VERSION_ADD_GROK_PROXY_PREFERENCES
+        );
+        assert_eq!(settings.grok_proxy_preferences, None);
+    }
+
+    #[test]
+    fn migrate_add_image_gen_storage_dir_bumps_schema_without_initializing_dir() {
+        let mut settings = AppSettings {
+            schema_version: SCHEMA_VERSION_ADD_GROK_PROXY_PREFERENCES,
+            ..Default::default()
+        };
+
+        assert!(migrate_add_image_gen_storage_dir(&mut settings, true));
+        assert_eq!(
+            settings.schema_version,
+            SCHEMA_VERSION_ADD_IMAGE_GEN_STORAGE_DIR
+        );
+        assert_eq!(settings.image_gen_storage_dir, None);
+    }
+
+    #[test]
+    fn fresh_defaults_use_current_schema_and_gateway_settings() {
+        use super::super::types::CodexPriorityBillingSource;
+
+        let settings = AppSettings::default();
+        assert_eq!(settings.schema_version, SCHEMA_VERSION);
+        assert!(!settings.verbose_provider_error);
+        assert!(!settings.intercept_anthropic_warmup_requests);
+        assert!(settings.enable_billing_header_rectifier);
+        assert!(settings.enable_thinking_effort_conflict_rectifier);
+        assert!(settings.enable_gemini_function_id_rectifier);
+        assert!(settings.enable_response_input_rectifier);
+        assert_eq!(
+            settings.codex_priority_billing_source,
+            CodexPriorityBillingSource::Requested
+        );
+    }
+
+    #[test]
+    fn v36_upgrade_preserves_existing_choices_and_codex_actual_billing() {
+        use super::super::types::CodexPriorityBillingSource;
+
+        let mut settings = AppSettings {
+            schema_version: SCHEMA_VERSION_ADD_IMAGE_GEN_STORAGE_DIR,
+            verbose_provider_error: true,
+            intercept_anthropic_warmup_requests: true,
+            enable_billing_header_rectifier: false,
+            enable_thinking_effort_conflict_rectifier: false,
+            enable_gemini_function_id_rectifier: false,
+            enable_response_input_rectifier: false,
+            ..Default::default()
+        };
+
+        assert!(migrate_align_cch_gateway_rectifiers(&mut settings, true));
+        assert_eq!(
+            settings.schema_version,
+            SCHEMA_VERSION_ALIGN_CCH_GATEWAY_RECTIFIERS
+        );
+        assert!(settings.verbose_provider_error);
+        assert!(settings.intercept_anthropic_warmup_requests);
+        assert!(!settings.enable_billing_header_rectifier);
+        assert!(!settings.enable_thinking_effort_conflict_rectifier);
+        assert!(!settings.enable_gemini_function_id_rectifier);
+        assert!(!settings.enable_response_input_rectifier);
+        assert_eq!(
+            settings.codex_priority_billing_source,
+            CodexPriorityBillingSource::Actual
+        );
     }
 
     #[test]

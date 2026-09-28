@@ -31,14 +31,36 @@ describe("pages/settings/SettingsAboutCard", () => {
     expect(screen.getByText("0.0.0")).toBeInTheDocument();
     expect(screen.getByText("平台")).toBeInTheDocument();
     expect(screen.getByText("mac/arm64")).toBeInTheDocument();
-    expect(screen.getByText("Bundle")).toBeInTheDocument();
-    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(screen.queryByText("Bundle")).not.toBeInTheDocument();
     expect(screen.getByText("运行模式")).toBeInTheDocument();
     expect(screen.getByText("desktop")).toBeInTheDocument();
     expect(screen.getByText("检查更新")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "检查" }));
     expect(checkUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides unknown run_mode and shows bundle when known", () => {
+    render(
+      <SettingsAboutCard
+        about={{
+          os: "mac",
+          arch: "arm64",
+          profile: "release",
+          app_version: "0.0.0",
+          bundle_type: "app",
+          run_mode: "unknown",
+        }}
+        checkingUpdate={false}
+        checkUpdate={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Bundle")).toBeInTheDocument();
+    expect(screen.getByText("app")).toBeInTheDocument();
+    expect(screen.queryByText("运行模式")).not.toBeInTheDocument();
+    expect(screen.queryByText("unknown")).not.toBeInTheDocument();
+    expect(screen.getByText("检查更新")).toBeInTheDocument();
   });
 
   it("renders portable action and checking state", () => {

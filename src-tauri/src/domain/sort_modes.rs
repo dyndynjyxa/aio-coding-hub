@@ -249,8 +249,15 @@ pub fn delete_mode_with_affected_cli_keys(
         .prepare_cached(
             r#"
 SELECT cli_key
-FROM sort_mode_active
-WHERE mode_id = ?1
+FROM (
+  SELECT cli_key
+  FROM sort_mode_active
+  WHERE mode_id = ?1
+  UNION
+  SELECT cli_key
+  FROM sort_mode_providers
+  WHERE mode_id = ?1
+)
 ORDER BY cli_key ASC
 "#,
         )
@@ -524,6 +531,7 @@ INSERT INTO sort_mode_providers(
 
     tx.commit()
         .map_err(|e| db_err!("failed to commit transaction: {e}"))?;
+    drop(conn);
 
     list_mode_providers(db, mode_id, cli_key)
 }
@@ -588,7 +596,47 @@ WHERE mode_id = ?1
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::providers::{
+        DailyResetMode, ProviderAuthMode, ProviderBaseUrlMode, ProviderUpsertParams,
+    };
     use rusqlite::params;
+
+    fn insert_provider(db: &db::Db, cli_key: &str, name: &str) -> i64 {
+        crate::providers::upsert(
+            db,
+            ProviderUpsertParams {
+                custom_headers: None,
+                provider_id: None,
+                cli_key: cli_key.to_string(),
+                name: name.to_string(),
+                base_urls: vec!["https://api.example.com".to_string()],
+                base_url_mode: ProviderBaseUrlMode::Order,
+                auth_mode: Some(ProviderAuthMode::ApiKey),
+                api_key: Some("sk-test".to_string()),
+                enabled: true,
+                cost_multiplier: 1.0,
+                priority: Some(100),
+                claude_models: None,
+                model_policy: None,
+                limit_5h_usd: None,
+                limit_daily_usd: None,
+                daily_reset_mode: Some(DailyResetMode::Fixed),
+                daily_reset_time: Some("00:00:00".to_string()),
+                limit_weekly_usd: None,
+                limit_monthly_usd: None,
+                limit_total_usd: None,
+                tags: None,
+                note: None,
+                source_provider_id: None,
+                bridge_type: None,
+                stream_idle_timeout_seconds: None,
+                supports_websockets: None,
+                extension_values: None,
+            },
+        )
+        .expect("insert provider")
+        .id
+    }
 
     fn active_mode_id(db: &db::Db, cli_key: &str) -> Option<i64> {
         let conn = db.open_connection().expect("open db");
@@ -611,13 +659,20 @@ mod tests {
         set_active(&db, "claude", Some(deleted_mode.id)).expect("activate claude");
         set_active(&db, "codex", Some(deleted_mode.id)).expect("activate codex");
         set_active(&db, "gemini", Some(other_mode.id)).expect("activate gemini");
+        let gemini_provider_id = insert_provider(&db, "gemini", "Gemini In Deleted Mode");
+        set_mode_providers_order(&db, deleted_mode.id, "gemini", vec![gemini_provider_id])
+            .expect("configure inactive gemini route");
 
         let affected_cli_keys =
             delete_mode_with_affected_cli_keys(&db, deleted_mode.id).expect("delete mode");
 
         assert_eq!(
             affected_cli_keys,
-            vec!["claude".to_string(), "codex".to_string()]
+            vec![
+                "claude".to_string(),
+                "codex".to_string(),
+                "gemini".to_string()
+            ]
         );
         assert_eq!(active_mode_id(&db, "claude"), None);
         assert_eq!(active_mode_id(&db, "codex"), None);

@@ -111,7 +111,7 @@ pub(super) fn select_next_provider_id_from_order(
 
 const PROVIDER_BASE_URL_PING_TIMEOUT_MS: u64 = 2000;
 
-async fn first_successful_base_url_probe<F, Fut>(
+pub(in crate::gateway) async fn first_successful_base_url_probe<F, Fut>(
     base_urls: &[String],
     mut probe: F,
 ) -> Option<(String, u64)>
@@ -141,6 +141,40 @@ where
     }
 
     None
+}
+
+pub(in crate::gateway) async fn select_base_url_by_mode(
+    client: &reqwest::Client,
+    base_urls: &[String],
+    mode: providers::ProviderBaseUrlMode,
+) -> (String, bool) {
+    let primary = base_urls
+        .iter()
+        .find(|url| !url.trim().is_empty())
+        .cloned()
+        .unwrap_or_default();
+
+    if !matches!(mode, providers::ProviderBaseUrlMode::Ping) || base_urls.len() <= 1 {
+        return (primary, false);
+    }
+
+    let Some((base_url, _)) = first_successful_base_url_probe(base_urls, |base_url| {
+        let client = client.clone();
+        async move {
+            crate::base_url_probe::probe_base_url_ms(
+                &client,
+                &base_url,
+                Duration::from_millis(PROVIDER_BASE_URL_PING_TIMEOUT_MS),
+            )
+            .await
+        }
+    })
+    .await
+    else {
+        return (primary, false);
+    };
+
+    (base_url, true)
 }
 
 pub(super) fn resolve_primary_provider_base_url(
@@ -229,18 +263,12 @@ pub(super) async fn select_provider_base_url_for_request<R: tauri::Runtime>(
 
     let ttl_ms = (cache_ttl_seconds.max(1) as u64).saturating_mul(1000);
     let expires_at_unix_ms = now_unix_ms.saturating_add(ttl_ms);
-    let timeout = Duration::from_millis(PROVIDER_BASE_URL_PING_TIMEOUT_MS);
-
     let client = state.client();
-    let Some((best_base_url, _best_latency_ms)) =
-        first_successful_base_url_probe(&provider.base_urls, |base_url| {
-            let client = client.clone();
-            async move { crate::base_url_probe::probe_base_url_ms(&client, &base_url, timeout).await }
-        })
-        .await
-    else {
+    let (best_base_url, probe_succeeded) =
+        select_base_url_by_mode(&client, &provider.base_urls, provider.base_url_mode).await;
+    if !probe_succeeded {
         return Ok(primary);
-    };
+    }
 
     {
         let mut cache = state.latency_cache.lock_or_recover();

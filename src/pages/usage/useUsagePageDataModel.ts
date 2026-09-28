@@ -5,6 +5,7 @@ import type {
   UsageLeaderboardRow,
   UsagePeriod,
   UsageProviderCacheRateTrendRowV1,
+  UsageProviderMetricsTrendRowV1,
   UsageScope,
   UsageSummary,
 } from "../../services/usage/usage";
@@ -12,6 +13,7 @@ import type { CustomDateRangeApplied, CustomDateRangeBounds } from "../../hooks/
 import {
   useUsageLeaderboardV2Query,
   useUsageProviderCacheRateTrendV1Query,
+  useUsageProviderMetricsTrendV1Query,
   useUsageSummaryV2Query,
 } from "../../query/usage";
 import { formatUnknownError } from "../../utils/errors";
@@ -41,12 +43,17 @@ export type UsagePageDataModel = {
   rows: UsageLeaderboardRow[];
   cacheTrendRows: UsageProviderCacheRateTrendRowV1[];
   cacheTrendProviderCount: number;
+  metricsTrendLoading: boolean;
+  metricsTrendStale: boolean;
+  metricsTrendRows: UsageProviderMetricsTrendRowV1[];
+  metricsTrendProviderCount: number;
   totalCostUsd: number;
   handleRetry: () => void;
 };
 
 const EMPTY_USAGE_ROWS: UsageLeaderboardRow[] = [];
 const EMPTY_CACHE_TREND_ROWS: UsageProviderCacheRateTrendRowV1[] = [];
+const EMPTY_METRICS_TREND_ROWS: UsageProviderMetricsTrendRowV1[] = [];
 
 function toCliKeyOrNull(cliKey: CliFilterKey): CliKey | null {
   return cliKey === "all" ? null : cliKey;
@@ -56,7 +63,7 @@ function totalCostUsdFromRows(rows: UsageLeaderboardRow[]): number {
   return rows.reduce((sum, row) => sum + (row.cost_usd ?? 0), 0);
 }
 
-function providerCountFromRows(rows: UsageProviderCacheRateTrendRowV1[]): number {
+function providerCountFromRows(rows: Array<{ key: string }>): number {
   return new Set(rows.map((row) => row.key)).size;
 }
 
@@ -97,6 +104,7 @@ function useUsagePageQueries({
 }) {
   const dataEnabled = shouldLoad;
   const cacheTrendEnabled = shouldLoad && tableTab === "cacheTrend";
+  const metricsTrendEnabled = shouldLoad && tableTab === "metricsTrend";
   const summaryQuery = useUsageSummaryV2Query(period, input, { enabled: dataEnabled });
   const leaderboardQuery = useUsageLeaderboardV2Query(
     scope,
@@ -109,10 +117,16 @@ function useUsagePageQueries({
     { ...input, limit: null },
     { enabled: cacheTrendEnabled }
   );
+  const metricsTrendQuery = useUsageProviderMetricsTrendV1Query(
+    period,
+    { ...input, limit: null },
+    { enabled: metricsTrendEnabled }
+  );
 
   const dataLoading = dataEnabled && (summaryQuery.isFetching || leaderboardQuery.isFetching);
   const cacheTrendLoading = cacheTrendEnabled && cacheTrendQuery.isFetching;
-  const loading = shouldLoad && (dataLoading || cacheTrendLoading);
+  const metricsTrendLoading = metricsTrendEnabled && metricsTrendQuery.isFetching;
+  const loading = shouldLoad && (dataLoading || cacheTrendLoading || metricsTrendLoading);
 
   const dataStale =
     dataEnabled &&
@@ -120,9 +134,12 @@ function useUsagePageQueries({
     (summaryQuery.data != null || leaderboardQuery.data != null);
   const cacheTrendStale =
     cacheTrendEnabled && cacheTrendQuery.isFetching && cacheTrendQuery.data != null;
+  const metricsTrendStale =
+    metricsTrendEnabled && metricsTrendQuery.isFetching && metricsTrendQuery.data != null;
 
   function handleRetry() {
     if (tableTab === "cacheTrend") void cacheTrendQuery.refetch();
+    else if (tableTab === "metricsTrend") void metricsTrendQuery.refetch();
     else {
       void summaryQuery.refetch();
       void leaderboardQuery.refetch();
@@ -133,11 +150,14 @@ function useUsagePageQueries({
     summaryQuery,
     leaderboardQuery,
     cacheTrendQuery,
+    metricsTrendQuery,
     dataLoading,
     cacheTrendLoading,
+    metricsTrendLoading,
     loading,
     dataStale,
     cacheTrendStale,
+    metricsTrendStale,
     handleRetry,
   };
 }
@@ -162,11 +182,14 @@ export function useUsagePageDataModel({
     summaryQuery,
     leaderboardQuery,
     cacheTrendQuery,
+    metricsTrendQuery,
     dataLoading,
     cacheTrendLoading,
+    metricsTrendLoading,
     loading,
     dataStale,
     cacheTrendStale,
+    metricsTrendStale,
     handleRetry,
   } = useUsagePageQueries({ scope, period, tableTab, shouldLoad, input });
 
@@ -174,17 +197,25 @@ export function useUsagePageDataModel({
   const rows: UsageLeaderboardRow[] = leaderboardQuery.data ?? EMPTY_USAGE_ROWS;
   const cacheTrendRows: UsageProviderCacheRateTrendRowV1[] =
     cacheTrendQuery.data ?? EMPTY_CACHE_TREND_ROWS;
+  const metricsTrendRows: UsageProviderMetricsTrendRowV1[] =
+    metricsTrendQuery.data ?? EMPTY_METRICS_TREND_ROWS;
 
   const cacheTrendProviderCount = useMemo(
     () => providerCountFromRows(cacheTrendRows),
     [cacheTrendRows]
+  );
+  const metricsTrendProviderCount = useMemo(
+    () => providerCountFromRows(metricsTrendRows),
+    [metricsTrendRows]
   );
   const totalCostUsd = useMemo(() => totalCostUsdFromRows(rows), [rows]);
 
   const err =
     tableTab === "cacheTrend"
       ? cacheTrendQuery.error
-      : (summaryQuery.error ?? leaderboardQuery.error);
+      : tableTab === "metricsTrend"
+        ? metricsTrendQuery.error
+        : (summaryQuery.error ?? leaderboardQuery.error);
   const errorText = err ? formatUnknownError(err) : null;
 
   return {
@@ -201,6 +232,10 @@ export function useUsagePageDataModel({
     rows,
     cacheTrendRows,
     cacheTrendProviderCount,
+    metricsTrendLoading,
+    metricsTrendStale,
+    metricsTrendRows,
+    metricsTrendProviderCount,
     totalCostUsd,
     handleRetry,
   };

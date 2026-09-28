@@ -103,13 +103,30 @@ pub(crate) const DEFAULT_OAUTH_TIMEOUT_SECS: u64 = 30;
 /// Default connect timeout in seconds for OAuth HTTP requests.
 pub(crate) const DEFAULT_OAUTH_CONNECT_TIMEOUT_SECS: u64 = 15;
 
-/// Build an HTTP client with default OAuth settings.
-pub(crate) fn build_default_oauth_http_client() -> Result<reqwest::Client, String> {
+/// Build an HTTP client with default OAuth settings, honoring the app's
+/// configured upstream proxy (Settings → 上游代理) in addition to env overrides.
+pub(crate) fn build_default_oauth_http_client<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<reqwest::Client, String> {
     build_oauth_http_client(
+        app,
         DEFAULT_OAUTH_USER_AGENT,
         DEFAULT_OAUTH_TIMEOUT_SECS,
         DEFAULT_OAUTH_CONNECT_TIMEOUT_SECS,
     )
+}
+
+fn resolve_app_configured_proxy_url<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<Option<String>, String> {
+    let settings = crate::settings::read(app)
+        .map_err(|err| format!("oauth upstream proxy settings unavailable: {err}"))?;
+
+    super::http_client::validate_proxy_for_settings(&settings)
+        .map_err(|err| format!("invalid app upstream proxy settings: {err}"))?;
+
+    super::http_client::effective_proxy_url(&settings)
+        .map_err(|err| format!("invalid app upstream proxy settings: {err}"))
 }
 
 fn mask_oauth_proxy_env_value(value: &str) -> String {
@@ -125,12 +142,18 @@ fn mask_oauth_proxy_env_value(value: &str) -> String {
 
 /// Build an HTTP client suitable for OAuth token exchange and refresh requests.
 ///
-/// Respects standard proxy environment variables (`HTTPS_PROXY`, `HTTP_PROXY`,
-/// `ALL_PROXY`) automatically via reqwest defaults.  Additionally, if the user
-/// has set `AIO_OAUTH_PROXY_URL`, that URL will be configured as an explicit
-/// "all traffic" proxy, which is useful in corporate environments where system
-/// proxy detection is insufficient.
-pub(crate) fn build_oauth_http_client(
+/// Proxy resolution order:
+/// 1. `AIO_OAUTH_PROXY_URL` env var — explicit override for advanced/dev setups.
+///    An empty/whitespace value counts as unset so it cannot silently shadow the
+///    app-configured proxy.
+/// 2. The app's Settings → 上游代理 (Upstream Proxy). This is the same proxy
+///    the gateway uses for upstream API calls (supports `http(s)://` and
+///    `socks5(h)://`), so enabling it also routes OAuth login/refresh/reset
+///    traffic — no separate proxy setup is needed to log in from behind a firewall.
+/// 3. Standard proxy env vars (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`), picked
+///    up automatically via reqwest defaults.
+pub(crate) fn build_oauth_http_client<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     user_agent: &str,
     timeout_secs: u64,
     connect_timeout_secs: u64,
@@ -140,38 +163,38 @@ pub(crate) fn build_oauth_http_client(
         .timeout(std::time::Duration::from_secs(timeout_secs))
         .connect_timeout(std::time::Duration::from_secs(connect_timeout_secs));
 
-    // Explicit proxy override from dedicated env var.
-    if let Ok(proxy_url) = std::env::var("AIO_OAUTH_PROXY_URL") {
-        let trimmed = proxy_url.trim();
-        if !trimmed.is_empty() {
-            let masked = mask_oauth_proxy_env_value(trimmed);
+    // Explicit proxy override from dedicated env var. An empty value is treated
+    // as unset: otherwise `AIO_OAUTH_PROXY_URL=` (common in container/launcher
+    // setups) would fall into this branch and silently drop the configured proxy.
+    let env_override = std::env::var("AIO_OAUTH_PROXY_URL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    if let Some(proxy_url) = env_override.as_deref() {
+        let masked = mask_oauth_proxy_env_value(proxy_url);
+        tracing::info!(
+            proxy_url = %masked,
+            "oauth: using explicit proxy from AIO_OAUTH_PROXY_URL"
+        );
+        let proxy = reqwest::Proxy::all(proxy_url)
+            .map_err(|e| format!("invalid AIO_OAUTH_PROXY_URL={masked}: {e}"))?;
+        builder = super::http_client::apply_socks5_local_dns_workaround(builder, proxy_url);
+        builder = builder.proxy(proxy);
+    } else {
+        let configured_proxy_url = resolve_app_configured_proxy_url(app)?;
+        if let Some(proxy_url) = configured_proxy_url.as_deref() {
+            let masked = mask_oauth_proxy_env_value(proxy_url);
             tracing::info!(
                 proxy_url = %masked,
-                "oauth: using explicit proxy from AIO_OAUTH_PROXY_URL"
+                "oauth: using app-configured upstream proxy"
             );
-            let proxy = reqwest::Proxy::all(trimmed)
-                .map_err(|e| format!("invalid AIO_OAUTH_PROXY_URL={masked}: {e}"))?;
+            let proxy = reqwest::Proxy::all(proxy_url)
+                .map_err(|e| format!("invalid upstream proxy '{masked}': {e}"))?;
+            builder = super::http_client::apply_socks5_local_dns_workaround(builder, proxy_url);
             builder = builder.proxy(proxy);
-        }
-    } else {
-        // Log which standard proxy env vars are active for diagnostics.
-        for var in [
-            "HTTPS_PROXY",
-            "HTTP_PROXY",
-            "ALL_PROXY",
-            "https_proxy",
-            "http_proxy",
-            "all_proxy",
-        ] {
-            if let Ok(val) = std::env::var(var) {
-                if !val.is_empty() {
-                    tracing::debug!(
-                        env_var = var,
-                        value = %mask_oauth_proxy_env_value(&val),
-                        "oauth: detected proxy env var"
-                    );
-                }
-            }
+        } else {
+            builder = super::http_client::apply_system_proxy_self_loop_guard(builder);
         }
     }
 
@@ -184,7 +207,11 @@ pub(crate) fn build_oauth_http_client(
 mod tests {
     use super::*;
     use std::ffi::OsString;
-    use std::sync::{Mutex, MutexGuard, OnceLock};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{mpsc, Mutex, MutexGuard, OnceLock};
+    use std::thread;
+    use std::time::Duration;
 
     struct EnvVarRestore {
         key: &'static str,
@@ -192,9 +219,15 @@ mod tests {
     }
 
     impl EnvVarRestore {
-        fn set(key: &'static str, value: &str) -> Self {
+        fn set(key: &'static str, value: impl Into<OsString>) -> Self {
             let previous = std::env::var_os(key);
-            std::env::set_var(key, value);
+            std::env::set_var(key, value.into());
+            Self { key, previous }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::remove_var(key);
             Self { key, previous }
         }
     }
@@ -206,6 +239,65 @@ mod tests {
                 None => std::env::remove_var(self.key),
             }
         }
+    }
+
+    struct OAuthProxyTestGuard<'a> {
+        _guard: MutexGuard<'a, ()>,
+    }
+
+    fn oauth_proxy_test_lock() -> OAuthProxyTestGuard<'static> {
+        OAuthProxyTestGuard {
+            _guard: crate::test_support::test_env_lock(),
+        }
+    }
+
+    fn isolate_settings_env(
+        home: &tempfile::TempDir,
+        dotdir: &'static str,
+    ) -> (EnvVarRestore, EnvVarRestore) {
+        crate::test_support::clear_settings_cache();
+        (
+            EnvVarRestore::set(
+                "AIO_CODING_HUB_HOME_DIR",
+                home.path().as_os_str().to_os_string(),
+            ),
+            EnvVarRestore::set("AIO_CODING_HUB_DOTDIR_NAME", dotdir),
+        )
+    }
+
+    fn unset_standard_proxy_env() -> Vec<EnvVarRestore> {
+        [
+            "HTTP_PROXY",
+            "http_proxy",
+            "HTTPS_PROXY",
+            "https_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+            "NO_PROXY",
+            "no_proxy",
+        ]
+        .into_iter()
+        .map(EnvVarRestore::unset)
+        .collect()
+    }
+
+    fn spawn_recording_http_proxy() -> (String, mpsc::Receiver<String>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind proxy listener");
+        let addr = listener.local_addr().expect("proxy listener addr");
+        let (tx, rx) = mpsc::channel();
+
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept proxy request");
+            let mut buf = [0_u8; 4096];
+            let size = stream.read(&mut buf).expect("read proxy request");
+            tx.send(String::from_utf8_lossy(&buf[..size]).to_string())
+                .expect("record proxy request");
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                .expect("write proxy response");
+        });
+
+        (format!("http://127.0.0.1:{}", addr.port()), rx)
     }
 
     fn oauth_flow_test_lock() -> MutexGuard<'static, ()> {
@@ -241,14 +333,206 @@ mod tests {
     fn explicit_oauth_proxy_error_masks_env_value() {
         let _env_lock = crate::test_support::test_env_lock();
         let _restore = EnvVarRestore::set("AIO_OAUTH_PROXY_URL", "http://user:super-secret@");
+        let app = tauri::test::mock_app();
 
-        let err = build_oauth_http_client("test-agent", 1, 1)
+        let err = build_oauth_http_client(app.handle(), "test-agent", 1, 1)
             .expect_err("invalid explicit proxy should fail")
             .to_string();
 
         assert!(err.contains("[redacted]"));
         assert!(!err.contains("super-secret"));
         assert!(!err.contains("user:"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn blank_env_uses_app_proxy_for_real_request() {
+        let _env_lock = oauth_proxy_test_lock();
+        let home = tempfile::tempdir().expect("tempdir");
+        let (_home_restore, _dotdir_restore) =
+            isolate_settings_env(&home, ".aio-coding-hub-oauth-real-proxy-test");
+        let _oauth_proxy_restore = EnvVarRestore::set("AIO_OAUTH_PROXY_URL", "   ");
+        let _system_proxy_restores = unset_standard_proxy_env();
+        let (proxy_url, request_rx) = spawn_recording_http_proxy();
+        let app = tauri::test::mock_app();
+
+        let mut settings = crate::settings::read(app.handle()).expect("read default settings");
+        settings.upstream_proxy_enabled = true;
+        settings.upstream_proxy_url = proxy_url;
+        crate::settings::write(app.handle(), &settings).expect("persist settings");
+
+        let client = build_oauth_http_client(app.handle(), "test-agent", 3, 1)
+            .expect("configured proxy should build client");
+        let response = client
+            .get("http://oauth.example.test/token")
+            .send()
+            .await
+            .expect("OAuth request should use configured proxy");
+
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let request = request_rx
+            .recv_timeout(Duration::from_secs(3))
+            .expect("configured proxy should receive OAuth request");
+        assert!(request.starts_with("GET http://oauth.example.test/token HTTP/1.1"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn env_override_bypasses_unreadable_app_settings() {
+        let _env_lock = oauth_proxy_test_lock();
+        let home = tempfile::tempdir().expect("tempdir");
+        let (_home_restore, _dotdir_restore) =
+            isolate_settings_env(&home, ".aio-coding-hub-oauth-env-priority-test");
+        let _system_proxy_restores = unset_standard_proxy_env();
+        let (proxy_url, request_rx) = spawn_recording_http_proxy();
+        let _oauth_proxy_restore = EnvVarRestore::set("AIO_OAUTH_PROXY_URL", proxy_url.as_str());
+        let app = tauri::test::mock_app();
+        let settings_path = crate::app_paths::app_data_dir(app.handle())
+            .expect("resolve app data dir")
+            .join("settings.json");
+        std::fs::write(settings_path, b"{invalid-json").expect("write invalid settings");
+        crate::test_support::clear_settings_cache();
+
+        let client = build_oauth_http_client(app.handle(), "test-agent", 3, 1)
+            .expect("env override should avoid reading app settings");
+        let response = client
+            .get("http://oauth.example.test/device")
+            .send()
+            .await
+            .expect("OAuth request should use env proxy");
+
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let request = request_rx
+            .recv_timeout(Duration::from_secs(3))
+            .expect("env proxy should receive OAuth request");
+        assert!(request.starts_with("GET http://oauth.example.test/device HTTP/1.1"));
+    }
+
+    #[test]
+    fn unreadable_app_settings_fail_closed_without_env_override() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("tempdir");
+        let (_home_restore, _dotdir_restore) =
+            isolate_settings_env(&home, ".aio-coding-hub-oauth-settings-error-test");
+        let _oauth_proxy_restore = EnvVarRestore::unset("AIO_OAUTH_PROXY_URL");
+        let app = tauri::test::mock_app();
+        let settings_path = crate::app_paths::app_data_dir(app.handle())
+            .expect("resolve app data dir")
+            .join("settings.json");
+        std::fs::write(settings_path, b"{invalid-json").expect("write invalid settings");
+        crate::test_support::clear_settings_cache();
+
+        let err = build_oauth_http_client(app.handle(), "test-agent", 1, 1)
+            .expect_err("unreadable settings must not silently fall back")
+            .to_string();
+
+        assert!(err.contains("oauth upstream proxy settings unavailable"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn automatic_system_proxy_self_loop_is_bypassed() {
+        let _env_lock = oauth_proxy_test_lock();
+        let home = tempfile::tempdir().expect("tempdir");
+        let (_home_restore, _dotdir_restore) =
+            isolate_settings_env(&home, ".aio-coding-hub-oauth-system-self-loop-test");
+        let _oauth_proxy_restore = EnvVarRestore::unset("AIO_OAUTH_PROXY_URL");
+        let _system_proxy_restores = unset_standard_proxy_env();
+        let (server_url, request_rx) = spawn_recording_http_proxy();
+        let port = reqwest::Url::parse(&server_url)
+            .expect("parse server URL")
+            .port()
+            .expect("server URL port");
+        let _http_proxy_restore = EnvVarRestore::set("HTTP_PROXY", server_url.as_str());
+        super::super::http_client::sync_runtime_context(port, "127.0.0.1", "127.0.0.1");
+        let app = tauri::test::mock_app();
+
+        let client = build_oauth_http_client(app.handle(), "test-agent", 3, 1)
+            .expect("system self-loop guard should build client");
+        let response = client
+            .get(format!("{server_url}/token"))
+            .send()
+            .await
+            .expect("self-loop proxy should be bypassed");
+
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let request = request_rx
+            .recv_timeout(Duration::from_secs(3))
+            .expect("origin should receive direct request");
+        assert!(request.starts_with("GET /token HTTP/1.1"));
+    }
+
+    #[test]
+    fn enabled_invalid_app_proxy_fails_closed_without_leaking_credentials() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("tempdir");
+        let (_home_restore, _dotdir_restore) =
+            isolate_settings_env(&home, ".aio-coding-hub-oauth-fail-closed-test");
+        let _oauth_proxy_restore = EnvVarRestore::unset("AIO_OAUTH_PROXY_URL");
+        let app = tauri::test::mock_app();
+
+        let mut settings = crate::settings::read(app.handle()).expect("read default settings");
+        settings.upstream_proxy_enabled = true;
+        settings.upstream_proxy_url = "http://user:super-secret@".to_string();
+        crate::settings::write(app.handle(), &settings).expect("persist settings");
+
+        let err = build_oauth_http_client(app.handle(), "test-agent", 1, 1)
+            .expect_err("invalid enabled proxy must not fall back")
+            .to_string();
+
+        assert!(err.contains("invalid app upstream proxy settings"));
+        assert!(!err.contains("AIO_OAUTH_PROXY_URL"));
+        assert!(err.contains("[redacted]"));
+        assert!(!err.contains("super-secret"));
+    }
+
+    #[test]
+    fn resolve_app_configured_proxy_url_reflects_settings() {
+        let _lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("tempdir");
+        let (_home_restore, _dotdir_restore) =
+            isolate_settings_env(&home, ".aio-coding-hub-oauth-proxy-test");
+
+        let app = tauri::test::mock_app();
+        let handle = app.handle().clone();
+
+        assert_eq!(
+            resolve_app_configured_proxy_url(&handle).expect("default settings should resolve"),
+            None
+        );
+
+        let mut settings = crate::settings::read(&handle).expect("read default settings");
+        settings.upstream_proxy_enabled = true;
+        settings.upstream_proxy_url = "socks5://ssh-proxy:1080".to_string();
+        crate::settings::write(&handle, &settings).expect("persist settings");
+        crate::test_support::clear_settings_cache();
+
+        let resolved = resolve_app_configured_proxy_url(&handle)
+            .expect("settings should be valid")
+            .expect("proxy should resolve");
+        let parsed = reqwest::Url::parse(&resolved).expect("resolved proxy url should parse");
+        assert_eq!(parsed.scheme(), "socks5");
+        assert_eq!(parsed.host_str(), Some("ssh-proxy"));
+        assert_eq!(parsed.port(), Some(1080));
+    }
+
+    #[test]
+    fn resolve_app_configured_proxy_url_rejects_gateway_self_loop() {
+        let _lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("tempdir");
+        let (_home_restore, _dotdir_restore) =
+            isolate_settings_env(&home, ".aio-coding-hub-oauth-self-loop-test");
+
+        let app = tauri::test::mock_app();
+        let handle = app.handle().clone();
+
+        let mut settings = crate::settings::read(&handle).expect("read default settings");
+        let gateway_proxy_url = format!("http://127.0.0.1:{}", settings.preferred_port);
+        settings.upstream_proxy_enabled = true;
+        settings.upstream_proxy_url = gateway_proxy_url;
+        crate::settings::write(&handle, &settings).expect("persist settings");
+        crate::test_support::clear_settings_cache();
+
+        let err = resolve_app_configured_proxy_url(&handle)
+            .expect_err("gateway self-loop must fail closed");
+        assert!(err.contains("self-loop"));
     }
 
     #[test]

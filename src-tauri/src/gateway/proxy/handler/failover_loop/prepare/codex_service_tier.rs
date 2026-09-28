@@ -166,6 +166,7 @@ pub fn parse_service_tier_from_response_text(response_text: &str) -> Option<Stri
 /// Build a `codex_service_tier_result` setting from request/response bytes.
 pub(super) fn build_result_from_bodies(
     cli_key: &str,
+    billing_source: crate::settings::CodexPriorityBillingSource,
     request_body: &[u8],
     response_body: Option<&[u8]>,
 ) -> Option<CodexServiceTierResult> {
@@ -180,18 +181,21 @@ pub(super) fn build_result_from_bodies(
         .and_then(|body| std::str::from_utf8(body).ok())
         .and_then(parse_service_tier_from_response_text);
 
-    let result = CodexServiceTierResult::new(requested, actual, "actual");
+    let result = CodexServiceTierResult::new(requested, actual, billing_source.as_str());
     result.hit.then_some(result)
 }
 
 /// Append a Codex service tier decision to request-log special settings.
 pub(super) fn append_result_if_detected(
     cli_key: &str,
+    billing_source: crate::settings::CodexPriorityBillingSource,
     request_body: &[u8],
     response_body: Option<&[u8]>,
     special_settings: &Arc<Mutex<Vec<Value>>>,
 ) {
-    let Some(result) = build_result_from_bodies(cli_key, request_body, response_body) else {
+    let Some(result) =
+        build_result_from_bodies(cli_key, billing_source, request_body, response_body)
+    else {
         return;
     };
 
@@ -315,7 +319,13 @@ mod tests {
         let request = br#"{"service_tier":"priority"}"#;
         let response = br#"{"service_tier":"default"}"#;
 
-        let result = build_result_from_bodies("codex", request, Some(response)).unwrap();
+        let result = build_result_from_bodies(
+            "codex",
+            crate::settings::CodexPriorityBillingSource::Actual,
+            request,
+            Some(response),
+        )
+        .unwrap();
 
         assert_eq!(result.requested_service_tier.as_deref(), Some("priority"));
         assert_eq!(result.actual_service_tier.as_deref(), Some("default"));
@@ -327,7 +337,13 @@ mod tests {
     fn test_build_result_from_bodies_falls_back_to_requested_tier() {
         let request = br#"{"service_tier":"priority"}"#;
 
-        let result = build_result_from_bodies("codex", request, None).unwrap();
+        let result = build_result_from_bodies(
+            "codex",
+            crate::settings::CodexPriorityBillingSource::Actual,
+            request,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(result.requested_service_tier.as_deref(), Some("priority"));
         assert_eq!(result.actual_service_tier, None);
@@ -339,6 +355,33 @@ mod tests {
     fn test_build_result_from_bodies_ignores_non_codex() {
         let request = br#"{"service_tier":"priority"}"#;
 
-        assert!(build_result_from_bodies("claude", request, None).is_none());
+        assert!(build_result_from_bodies(
+            "claude",
+            crate::settings::CodexPriorityBillingSource::Requested,
+            request,
+            None,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn test_build_result_from_bodies_uses_requested_tier_when_configured() {
+        let request = br#"{"service_tier":"priority"}"#;
+        let response = br#"{"service_tier":"default"}"#;
+
+        let result = build_result_from_bodies(
+            "codex",
+            crate::settings::CodexPriorityBillingSource::Requested,
+            request,
+            Some(response),
+        )
+        .unwrap();
+
+        assert!(result.effective_priority);
+        assert_eq!(result.resolved_from.as_deref(), Some("requested"));
+        assert_eq!(
+            result.billing_source_preference.as_deref(),
+            Some("requested")
+        );
     }
 }

@@ -27,6 +27,9 @@ pub(super) enum EarlyErrorKind {
     LargeBodyMissingModel,
     InvalidCliKey,
     NoEnabledProvider,
+    ForcedProviderNotEligibleForModel,
+    NoEligibleProviderForModel,
+    ModelPolicyInvalid,
     // Provider selection failed for infrastructure reasons (DB / blocking
     // pool), not because of anything the client sent.
     ProviderSelectionFailed,
@@ -72,6 +75,24 @@ pub(super) fn early_error_contract(kind: EarlyErrorKind) -> EarlyErrorContract {
             error_category: None,
             excluded_from_stats: false,
         },
+        EarlyErrorKind::ForcedProviderNotEligibleForModel => EarlyErrorContract {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            error_code: GatewayErrorCode::ForcedProviderNotEligibleForModel.as_str(),
+            error_category: None,
+            excluded_from_stats: false,
+        },
+        EarlyErrorKind::NoEligibleProviderForModel => EarlyErrorContract {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            error_code: GatewayErrorCode::NoEligibleProviderForModel.as_str(),
+            error_category: None,
+            excluded_from_stats: false,
+        },
+        EarlyErrorKind::ModelPolicyInvalid => EarlyErrorContract {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            error_code: GatewayErrorCode::ModelPolicyInvalid.as_str(),
+            error_category: None,
+            excluded_from_stats: false,
+        },
         // 500 (matches status_override_for_error_code's mapping for
         // GW_INTERNAL_ERROR) rather than the 400/invalid-cli-key class these
         // errors used to be misfiled under.
@@ -88,7 +109,9 @@ pub(super) fn early_error_contract(kind: EarlyErrorKind) -> EarlyErrorContract {
 // Forced provider
 // ---------------------------------------------------------------------------
 
-pub(super) fn extract_forced_provider_id(headers: &axum::http::HeaderMap) -> Option<i64> {
+pub(in crate::gateway) fn extract_forced_provider_id(
+    headers: &axum::http::HeaderMap,
+) -> Option<i64> {
     let raw = headers.get("x-aio-provider-id")?.to_str().ok()?.trim();
     let provider_id = raw.parse::<i64>().ok()?;
     (provider_id > 0).then_some(provider_id)
@@ -277,20 +300,36 @@ pub(super) fn respond_early_error_with_spawn<R: tauri::Runtime>(
 
 pub(super) fn respond_invalid_cli_key_with_spawn<R: tauri::Runtime>(
     ctx: &EarlyErrorLogCtx<'_, R>,
+    special_settings_json: Option<String>,
     session_id: Option<String>,
     requested_model: Option<String>,
     err: String,
 ) -> Response {
     let contract = early_error_contract(EarlyErrorKind::InvalidCliKey);
-    respond_early_error_with_spawn(ctx, contract, err, None, session_id, requested_model)
+    respond_early_error_with_spawn(
+        ctx,
+        contract,
+        err,
+        special_settings_json,
+        session_id,
+        requested_model,
+    )
 }
 
 pub(super) fn respond_provider_selection_failed_with_spawn<R: tauri::Runtime>(
     ctx: &EarlyErrorLogCtx<'_, R>,
+    special_settings_json: Option<String>,
     session_id: Option<String>,
     requested_model: Option<String>,
     err: String,
 ) -> Response {
     let contract = early_error_contract(EarlyErrorKind::ProviderSelectionFailed);
-    respond_early_error_with_spawn(ctx, contract, err, None, session_id, requested_model)
+    respond_early_error_with_spawn(
+        ctx,
+        contract,
+        err,
+        special_settings_json,
+        session_id,
+        requested_model,
+    )
 }

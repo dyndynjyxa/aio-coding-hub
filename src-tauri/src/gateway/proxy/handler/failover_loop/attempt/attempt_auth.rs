@@ -155,6 +155,10 @@ fn inject_oauth_auth<R: tauri::Runtime>(
                     circuit_trigger_error_code: None,
                     provider_bridged: Some(prepared.provider_bridged),
                     timeout_secs: None,
+                    reasoning_effort: None,
+                    upstream_sent: false,
+                    claude_model_mapping: prepared.claude_model_mapping.clone(),
+                    model_redirect: prepared.model_redirect.clone(),
                 }));
             }
             Ok(())
@@ -189,6 +193,10 @@ fn inject_oauth_auth<R: tauri::Runtime>(
                 circuit_trigger_error_code: None,
                 provider_bridged: Some(prepared.provider_bridged),
                 timeout_secs: None,
+                reasoning_effort: None,
+                upstream_sent: false,
+                claude_model_mapping: prepared.claude_model_mapping.clone(),
+                model_redirect: prepared.model_redirect.clone(),
             }))
         }
     }

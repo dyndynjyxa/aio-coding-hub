@@ -34,7 +34,9 @@
       "circuit_failure_count": 0,
       "circuit_failure_threshold": 5,
       "provider_bridged": false,
-      "timeout_secs": null
+      "timeout_secs": null,
+      "reasoning_effort": "high",
+      "upstream_sent": true
     }
   ],
   "input_tokens": 1200,
@@ -52,5 +54,7 @@
     "providerId": 7,
     "providerName": "Provider A",
     "applied": true
-  }
+  },
+  "model_redirect": null,
+  "reasoning_effort": "high"
 }

@@ -1,11 +1,11 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { ModelPriceAliasesDialog } from "../ModelPriceAliasesDialog";
 import {
   useModelPriceAliasesQuery,
   useModelPriceAliasesSetMutation,
-  useModelPricesListQuery,
+  useModelPricesListAllQuery,
 } from "../../../query/modelPrices";
 
 vi.mock("sonner", () => ({ toast: vi.fn() }));
@@ -17,7 +17,7 @@ vi.mock("../../../query/modelPrices", async () => {
   return {
     ...actual,
     useModelPriceAliasesQuery: vi.fn(),
-    useModelPricesListQuery: vi.fn(),
+    useModelPricesListAllQuery: vi.fn(),
     useModelPriceAliasesSetMutation: vi.fn(),
   };
 });
@@ -40,7 +40,7 @@ describe("settings/ModelPriceAliasesDialog", () => {
       fetching ? loadingAliasesQuery : loadedAliasesQuery
     );
 
-    vi.mocked(useModelPricesListQuery).mockReturnValue({
+    vi.mocked(useModelPricesListAllQuery).mockReturnValue({
       data: [],
       isFetching: false,
       refetch: vi.fn(),
@@ -101,7 +101,7 @@ describe("settings/ModelPriceAliasesDialog", () => {
       refetch: vi.fn(),
     } as any);
 
-    vi.mocked(useModelPricesListQuery).mockReturnValue({
+    vi.mocked(useModelPricesListAllQuery).mockReturnValue({
       data: [],
       isFetching: false,
       refetch: vi.fn(),
@@ -124,9 +124,7 @@ describe("settings/ModelPriceAliasesDialog", () => {
     const onOpenChange = vi.fn();
 
     const aliasesRefetch = vi.fn().mockResolvedValue({ data: {} });
-    const claudeRefetch = vi.fn().mockResolvedValue({ data: {} });
-    const codexRefetch = vi.fn().mockResolvedValue({ data: {} });
-    const geminiRefetch = vi.fn().mockResolvedValue({ data: {} });
+    const modelsRefetch = vi.fn().mockResolvedValue({ data: {} });
 
     vi.mocked(useModelPriceAliasesQuery).mockReturnValue({
       data: { version: 1, rules: [] },
@@ -134,15 +132,16 @@ describe("settings/ModelPriceAliasesDialog", () => {
       refetch: aliasesRefetch,
     } as any);
 
-    vi.mocked(useModelPricesListQuery).mockImplementation((cliKey: any) => {
-      const refetch =
-        cliKey === "claude" ? claudeRefetch : cliKey === "codex" ? codexRefetch : geminiRefetch;
-      return {
-        data: [{ model: `${cliKey}-model` }],
-        isFetching: false,
-        refetch,
-      } as any;
-    });
+    vi.mocked(useModelPricesListAllQuery).mockReturnValue({
+      data: [
+        { cli_key: "claude", vendor: "anthropic", model: "claude-model" },
+        { cli_key: "codex", vendor: "openai", model: "codex-model" },
+        { cli_key: "gemini", vendor: "google", model: "gemini-model" },
+        { cli_key: "grok", vendor: "xai", model: "grok-model" },
+      ],
+      isFetching: false,
+      refetch: modelsRefetch,
+    } as any);
 
     const mutateAsync = vi.fn().mockResolvedValue({
       version: 1,
@@ -189,9 +188,7 @@ describe("settings/ModelPriceAliasesDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "刷新" }));
     await waitFor(() => {
       expect(aliasesRefetch).toHaveBeenCalled();
-      expect(claudeRefetch).toHaveBeenCalled();
-      expect(codexRefetch).toHaveBeenCalled();
-      expect(geminiRefetch).toHaveBeenCalled();
+      expect(modelsRefetch).toHaveBeenCalled();
     });
 
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
@@ -225,7 +222,7 @@ describe("settings/ModelPriceAliasesDialog", () => {
       refetch: vi.fn(),
     } as any);
 
-    vi.mocked(useModelPricesListQuery).mockReturnValue({
+    vi.mocked(useModelPricesListAllQuery).mockReturnValue({
       data: [],
       isFetching: false,
       refetch: vi.fn(),
@@ -239,5 +236,52 @@ describe("settings/ModelPriceAliasesDialog", () => {
     render(<ModelPriceAliasesDialog open={true} onOpenChange={onOpenChange} />);
 
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
+  });
+
+  it("groups synced models into per-vendor tabs and hides the section when empty", () => {
+    vi.mocked(useModelPriceAliasesQuery).mockReturnValue({
+      data: { version: 1, rules: [] },
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useModelPriceAliasesSetMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+    } as any);
+
+    vi.mocked(useModelPricesListAllQuery).mockReturnValue({
+      data: [
+        { cli_key: "claude", vendor: "anthropic", model: "claude-opus-4-5" },
+        { cli_key: "claude", vendor: "deepseek", model: "deepseek-v4" },
+        { cli_key: "claude", vendor: "deepseek", model: "deepseek-v4-flash" },
+        { cli_key: "codex", vendor: "", model: "my-custom-model" },
+      ],
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+
+    const { unmount } = render(<ModelPriceAliasesDialog open={true} onOpenChange={vi.fn()} />);
+
+    expect(screen.getByText(/已同步 4 个模型/)).toBeInTheDocument();
+    // Tabs sorted by model count desc; unknown/empty vendor falls back to 自定义.
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.map((tab) => tab.textContent)).toEqual(["DeepSeek 2", "Anthropic 1", "自定义 1"]);
+
+    // First tab active by default; switching tabs swaps the model list.
+    const panel = () => within(screen.getByRole("tabpanel"));
+    expect(panel().getByText("deepseek-v4-flash")).toBeInTheDocument();
+    expect(panel().queryByText("claude-opus-4-5")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: /Anthropic/ }));
+    expect(panel().getByText("claude-opus-4-5")).toBeInTheDocument();
+    expect(panel().queryByText("deepseek-v4")).not.toBeInTheDocument();
+
+    unmount();
+    vi.mocked(useModelPricesListAllQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    render(<ModelPriceAliasesDialog open={true} onOpenChange={vi.fn()} />);
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
   });
 });

@@ -1,4 +1,8 @@
 import { commands } from "../../generated/bindings";
+import type {
+  CodexPriorityBillingSource,
+  GatewayRectifierSettingsUpdate as GeneratedGatewayRectifierSettingsUpdate,
+} from "../../generated/bindings";
 import type { AppSettings } from "./settings";
 import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
 import {
@@ -6,23 +10,40 @@ import {
   normalizePositiveSafeIntegerSetting,
 } from "./settingsPrimitiveValidation";
 
+type GatewayRectifierFieldMap = {
+  verboseProviderError: "verbose_provider_error";
+  interceptAnthropicWarmupRequests: "intercept_anthropic_warmup_requests";
+  enableThinkingEffortConflictRectifier: "enable_thinking_effort_conflict_rectifier";
+  enableThinkingSignatureRectifier: "enable_thinking_signature_rectifier";
+  enableThinkingBudgetRectifier: "enable_thinking_budget_rectifier";
+  enableGeminiFunctionIdRectifier: "enable_gemini_function_id_rectifier";
+  enableResponseInputRectifier: "enable_response_input_rectifier";
+  codexPriorityBillingSource: "codex_priority_billing_source";
+  enableBillingHeaderRectifier: "enable_billing_header_rectifier";
+  enableClaudeMetadataUserIdInjection: "enable_claude_metadata_user_id_injection";
+  enableResponseFixer: "enable_response_fixer";
+  responseFixerFixEncoding: "response_fixer_fix_encoding";
+  responseFixerFixSseFormat: "response_fixer_fix_sse_format";
+  responseFixerFixTruncatedJson: "response_fixer_fix_truncated_json";
+  responseFixerMaxJsonDepth: "response_fixer_max_json_depth";
+  responseFixerMaxFixSize: "response_fixer_max_fix_size";
+};
+
 export type GatewayRectifierSettingsPatch = {
-  verbose_provider_error: boolean;
-  intercept_anthropic_warmup_requests: boolean;
-  enable_thinking_signature_rectifier: boolean;
-  enable_thinking_budget_rectifier: boolean;
-  enable_billing_header_rectifier: boolean;
-  enable_claude_metadata_user_id_injection: boolean;
-  enable_response_fixer: boolean;
-  response_fixer_fix_encoding: boolean;
-  response_fixer_fix_sse_format: boolean;
-  response_fixer_fix_truncated_json: boolean;
-  response_fixer_max_json_depth: number;
-  response_fixer_max_fix_size: number;
+  [TKey in keyof GeneratedGatewayRectifierSettingsUpdate as GatewayRectifierFieldMap[TKey]]: GeneratedGatewayRectifierSettingsUpdate[TKey];
 };
 
 const RESPONSE_FIXER_MAX_JSON_DEPTH_MAX = 2000;
 const RESPONSE_FIXER_MAX_FIX_SIZE_MAX = 16 * 1024 * 1024;
+
+function normalizeCodexPriorityBillingSource(
+  value: CodexPriorityBillingSource
+): CodexPriorityBillingSource {
+  if (value !== "requested" && value !== "actual") {
+    throw new Error("codex_priority_billing_source must be requested or actual");
+  }
+  return value;
+}
 
 export function normalizeGatewayRectifierSettingsPatch(
   input: GatewayRectifierSettingsPatch
@@ -36,6 +57,10 @@ export function normalizeGatewayRectifierSettingsPatch(
       input.intercept_anthropic_warmup_requests,
       "intercept_anthropic_warmup_requests"
     ),
+    enable_thinking_effort_conflict_rectifier: normalizeBooleanSetting(
+      input.enable_thinking_effort_conflict_rectifier,
+      "enable_thinking_effort_conflict_rectifier"
+    ),
     enable_thinking_signature_rectifier: normalizeBooleanSetting(
       input.enable_thinking_signature_rectifier,
       "enable_thinking_signature_rectifier"
@@ -43,6 +68,17 @@ export function normalizeGatewayRectifierSettingsPatch(
     enable_thinking_budget_rectifier: normalizeBooleanSetting(
       input.enable_thinking_budget_rectifier,
       "enable_thinking_budget_rectifier"
+    ),
+    enable_gemini_function_id_rectifier: normalizeBooleanSetting(
+      input.enable_gemini_function_id_rectifier,
+      "enable_gemini_function_id_rectifier"
+    ),
+    enable_response_input_rectifier: normalizeBooleanSetting(
+      input.enable_response_input_rectifier,
+      "enable_response_input_rectifier"
+    ),
+    codex_priority_billing_source: normalizeCodexPriorityBillingSource(
+      input.codex_priority_billing_source
     ),
     enable_billing_header_rectifier: normalizeBooleanSetting(
       input.enable_billing_header_rectifier,
@@ -86,8 +122,13 @@ export async function settingsGatewayRectifierSet(input: GatewayRectifierSetting
   const update = {
     verboseProviderError: normalizedInput.verbose_provider_error,
     interceptAnthropicWarmupRequests: normalizedInput.intercept_anthropic_warmup_requests,
+    enableThinkingEffortConflictRectifier:
+      normalizedInput.enable_thinking_effort_conflict_rectifier,
     enableThinkingSignatureRectifier: normalizedInput.enable_thinking_signature_rectifier,
     enableThinkingBudgetRectifier: normalizedInput.enable_thinking_budget_rectifier,
+    enableGeminiFunctionIdRectifier: normalizedInput.enable_gemini_function_id_rectifier,
+    enableResponseInputRectifier: normalizedInput.enable_response_input_rectifier,
+    codexPriorityBillingSource: normalizedInput.codex_priority_billing_source,
     enableBillingHeaderRectifier: normalizedInput.enable_billing_header_rectifier,
     enableClaudeMetadataUserIdInjection: normalizedInput.enable_claude_metadata_user_id_injection,
     enableResponseFixer: normalizedInput.enable_response_fixer,

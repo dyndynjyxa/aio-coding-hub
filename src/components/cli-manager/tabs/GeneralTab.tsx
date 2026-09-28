@@ -15,6 +15,7 @@ import { Button } from "../../../ui/Button";
 import { Card } from "../../../ui/Card";
 import { Input } from "../../../ui/Input";
 import { SettingsRow } from "../../../ui/SettingsRow";
+import { Select } from "../../../ui/Select";
 import { Switch } from "../../../ui/Switch";
 import { NetworkSettingsCard } from "../NetworkSettingsCard";
 import { WslSettingsCard } from "../WslSettingsCard";
@@ -167,6 +168,18 @@ function GatewayRectifierSettingsSection({
           />
         </SettingsRow>
         <SettingsRow
+          label="Thinking Effort 冲突整流器"
+          subtitle="Thinking 关闭时自动移除冲突的 reasoning effort 参数。"
+        >
+          <Switch
+            checked={rectifier.enable_thinking_effort_conflict_rectifier}
+            onCheckedChange={(checked) =>
+              void onPersistRectifier({ enable_thinking_effort_conflict_rectifier: checked })
+            }
+            disabled={disabled}
+          />
+        </SettingsRow>
+        <SettingsRow
           label="Thinking 签名整流器"
           subtitle="自动修复 extended thinking 相关的签名问题。"
         >
@@ -174,6 +187,30 @@ function GatewayRectifierSettingsSection({
             checked={rectifier.enable_thinking_signature_rectifier}
             onCheckedChange={(checked) =>
               void onPersistRectifier({ enable_thinking_signature_rectifier: checked })
+            }
+            disabled={disabled}
+          />
+        </SettingsRow>
+        <SettingsRow
+          label="Gemini Function ID 整流器"
+          subtitle="上游拒绝 functionCall/functionResponse ID 时，仅移除对应 ID 并重试。"
+        >
+          <Switch
+            checked={rectifier.enable_gemini_function_id_rectifier}
+            onCheckedChange={(checked) =>
+              void onPersistRectifier({ enable_gemini_function_id_rectifier: checked })
+            }
+            disabled={disabled}
+          />
+        </SettingsRow>
+        <SettingsRow
+          label="Responses Input 整流器"
+          subtitle="为 Codex 与 Grok 规范化 /v1/responses 的 input 结构。"
+        >
+          <Switch
+            checked={rectifier.enable_response_input_rectifier}
+            onCheckedChange={(checked) =>
+              void onPersistRectifier({ enable_response_input_rectifier: checked })
             }
             disabled={disabled}
           />
@@ -266,6 +303,26 @@ function GatewayRectifierSettingsSection({
             onCheckedChange={(checked) => void onPersistCodexSessionIdCompletion(checked)}
             disabled={codexCompletionDisabled}
           />
+        </SettingsRow>
+        <SettingsRow
+          label="Codex Priority 计费来源"
+          subtitle="按请求档位与 CCH 保持一致；旧配置升级后继续按实际响应档位计费。"
+        >
+          <Select
+            value={rectifier.codex_priority_billing_source}
+            onChange={(event) =>
+              void onPersistRectifier({
+                codex_priority_billing_source: event.currentTarget
+                  .value as GatewayRectifierSettingsPatch["codex_priority_billing_source"],
+              })
+            }
+            disabled={disabled}
+            className="w-40"
+            aria-label="Codex Priority 计费来源"
+          >
+            <option value="requested">请求档位</option>
+            <option value="actual">实际响应档位</option>
+          </Select>
         </SettingsRow>
       </div>
     </div>
@@ -1120,11 +1177,15 @@ function UpstreamProxySettingsForm({
         上游代理
       </h3>
       <p className="text-xs text-muted-foreground mb-3">
-        网关向上游 AI 服务（Claude/Codex/Gemini）发起请求时使用的代理。支持
-        http/https/socks5/socks5h 协议。
+        网关向上游 AI 服务（Claude/Codex/Gemini/Grok）发起请求时使用的代理，也用于 app 发起的 OAuth
+        令牌交换、设备码轮询、令牌刷新与额度查询；系统浏览器中的授权页面不受此设置控制。支持
+        http/https/socks5/socks5h 协议，例如本机的 socks5://127.0.0.1:1080。
       </p>
       <div className="divide-y divide-border">
-        <SettingsRow label="启用上游代理" subtitle="启用后，所有上游请求将通过指定代理发送。">
+        <SettingsRow
+          label="启用上游代理"
+          subtitle="启用后，网关请求与 app 发起的 OAuth 服务端请求将通过指定代理发送。"
+        >
           <Switch
             checked={settings.upstream_proxy_enabled}
             onCheckedChange={handleProxyEnabledChange}

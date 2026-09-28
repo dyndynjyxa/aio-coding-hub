@@ -9,6 +9,7 @@ use super::provider_iterator::PreparedProvider;
 use super::retry_engine::AttemptIndices;
 use super::*;
 use crate::gateway::proxy::request_context::RequestContext;
+use crate::gateway::streams::UpstreamResponse;
 
 /// Route an HTTP response from upstream to the appropriate handler.
 ///
@@ -21,7 +22,7 @@ pub(super) async fn route_response<R>(
     prepared: &mut PreparedProvider,
     retry_state: &mut RetryLoopState,
     indices: AttemptIndices,
-    resp: reqwest::Response,
+    resp: UpstreamResponse,
     timing: AttemptTiming,
     loop_state: &mut LoopState<'_, R>,
 ) -> LoopControl
@@ -29,6 +30,145 @@ where
     R: tauri::Runtime,
     R::Handle: Unpin,
 {
+    let mut resp = resp;
+    if resp.status().is_success() || resp.is_websocket() {
+        if let Some(request) = &input.ws_request {
+            use crate::gateway::responses_ws::gate::{self, Failure, Gate};
+            use crate::gateway::streams::{UpstreamByteStream, UpstreamResponse};
+            use crate::shared::mutex_ext::MutexExt;
+            let websocket = resp.is_websocket();
+            let status = resp.status();
+            let mut headers = resp.headers().clone();
+            headers.remove(crate::gateway::responses_ws::protocol::TURN_STATE_HEADER);
+            let gzip = has_gzip_content_encoding(&headers);
+            let mut stream: UpstreamByteStream = resp.bytes_stream();
+            if gzip {
+                stream = Box::pin(GunzipStream::new(stream));
+                headers.remove(header::CONTENT_ENCODING);
+            }
+            if !is_event_stream(&headers) {
+                stream = gate::json_stream(stream);
+                headers.insert(
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static("text/event-stream"),
+                );
+            }
+            if input.enable_response_fixer && !has_non_identity_content_encoding(&headers) {
+                let mut fixer_config = input.response_fixer_stream_config;
+                fixer_config.max_fix_size = fixer_config
+                    .max_fix_size
+                    .min(crate::gateway::responses_ws::protocol::MAX_PREFIX_BYTES);
+                stream = Box::pin(response_fixer::ResponseFixerStream::new(
+                    stream,
+                    fixer_config,
+                    input.special_settings.clone(),
+                ));
+            }
+            stream = Box::pin(MaybePluginChunkStream::new(
+                stream,
+                input.state.plugin_pipeline.clone(),
+                input.state.db.clone(),
+                input.trace_id.clone(),
+            ));
+            match Gate::prepare(stream, request.clone()).await {
+                Ok(gate) => {
+                    headers.remove(header::CONTENT_LENGTH);
+                    resp = if websocket {
+                        UpstreamResponse::new_ws(headers, gate.into_stream())
+                    } else {
+                        UpstreamResponse::new(status, headers, gate.into_stream())
+                    };
+                    resp.processed = true;
+                }
+                Err(Failure::Event(event)) => {
+                    let context_lost = event
+                        .pointer("/error/code")
+                        .or_else(|| event.pointer("/response/error/code"))
+                        .and_then(serde_json::Value::as_str)
+                        == Some("previous_response_not_found");
+                    if context_lost {
+                        return ws_attempt::recover(
+                            ctx, input, prepared, indices, timing, loop_state,
+                        )
+                        .await;
+                    }
+                    response_fixer::push_special_setting(
+                        &input.special_settings,
+                        serde_json::json!({
+                            "type":"codex_responses_transport", "scope":"attempt", "providerId":prepared.provider_id,
+                            "client_transport":if request.client_ws {"responses_ws"}else{"http"},
+                            "upstream_transport":if websocket {"responses_ws"}else{"http"},
+                            "transport_action":"selected", "failure_class":"provider", "output_committed":false,
+                            "status_source":"responses_event", "event_status":gate::error_status(&event).as_u16(),
+                            "handshake_status":if websocket {Some(101)}else{None::<u16>},
+                        }),
+                    );
+                    resp = gate::error_response(event);
+                }
+                Err(Failure::Local(reason)) => {
+                    return ws_attempt::finish_error(
+                        ctx,
+                        input,
+                        loop_state,
+                        "invalid_request",
+                        reason,
+                    )
+                    .await
+                }
+                Err(Failure::Stream | Failure::Protocol) if websocket => {
+                    return ws_attempt::transport_failure(
+                        ctx,
+                        input,
+                        prepared,
+                        indices,
+                        timing,
+                        "ws_stream_failed_before_output",
+                        loop_state,
+                    )
+                    .await;
+                }
+                Err(Failure::Timeout | Failure::Stream | Failure::Protocol) => {
+                    let circuit_before = prepared.circuit_snapshot.clone();
+                    let mut attempt_ctx = attempt_executor::build_attempt_ctx(
+                        indices.attempt_index,
+                        indices.retry_index,
+                        timing.attempt_started_ms,
+                        &circuit_before,
+                        prepared,
+                    );
+                    attempt_ctx.attempt_started = timing.attempt_started;
+                    attempt_ctx.upstream_sent = timing.upstream_sent;
+                    let provider_ctx = attempt_executor::build_provider_ctx(prepared);
+                    return record_system_failure_and_decide(RecordSystemFailureArgs {
+                        ctx,
+                        provider_ctx,
+                        attempt_ctx,
+                        loop_state: loop_state.reborrow(),
+                        status: Some(status.as_u16()),
+                        error_code: GatewayErrorCode::StreamError.as_str(),
+                        decision: FailoverDecision::SwitchProvider,
+                        outcome: "responses_precommit_failed".into(),
+                        reason: "Responses stream failed before semantic output".into(),
+                        timeout_secs: None,
+                    })
+                    .await;
+                }
+            }
+            let transport = if request.generation.lock_or_recover().upstream_ws {
+                "responses_ws"
+            } else {
+                "http"
+            };
+            ws_attempt::marker(
+                input,
+                prepared.provider_id,
+                transport,
+                "selected",
+                None,
+                None,
+            );
+        }
+    }
     let status = resp.status();
     let response_headers = resp.headers().clone();
     let response_content_type = response_headers
@@ -67,6 +207,8 @@ where
         gemini_oauth_response_mode: prepared.gemini_oauth_response_mode,
         cx2cc_active: prepared.cx2cc_active,
         anthropic_stream_requested: prepared.anthropic_stream_requested,
+        reasoning_effort: timing.reasoning_effort.as_deref(),
+        upstream_sent: timing.upstream_sent,
     };
     let provider_ctx = ProviderCtx {
         provider_id: prepared.provider_id,
@@ -78,6 +220,7 @@ where
         session_reuse: prepared.session_reuse,
         stream_idle_timeout_seconds: prepared.stream_idle_timeout_seconds,
         claude_model_mapping: prepared.claude_model_mapping.as_ref(),
+        model_redirect: prepared.model_redirect.as_ref(),
     };
 
     emit_gateway_debug_log_lazy(&ctx.state.app, || {
@@ -92,7 +235,7 @@ where
         )
     });
 
-    if status.is_success() {
+    if status.is_success() || resp.is_websocket() {
         // When upstream returns SSE, always route to the stream handler.
         // Previous logic required `anthropic_stream_requested` for cx2cc,
         // but that flag is derived from introspection_json which can fail
@@ -168,6 +311,8 @@ where
         gemini_oauth_response_mode: prepared.gemini_oauth_response_mode,
         cx2cc_active: prepared.cx2cc_active,
         anthropic_stream_requested: prepared.anthropic_stream_requested,
+        reasoning_effort: timing.reasoning_effort.as_deref(),
+        upstream_sent: timing.upstream_sent,
     };
     let provider_ctx = ProviderCtx {
         provider_id: prepared.provider_id,
@@ -179,10 +324,12 @@ where
         session_reuse: prepared.session_reuse,
         stream_idle_timeout_seconds: prepared.stream_idle_timeout_seconds,
         claude_model_mapping: prepared.claude_model_mapping.as_ref(),
+        model_redirect: prepared.model_redirect.as_ref(),
     };
 
     // --- Non-success upstream error handling ---
-    let upstream_body_before_error_handler = prepared.upstream_body_bytes.clone();
+    let mut repair_body = retry_state.last_attempt_body.clone();
+    let upstream_body_before_error_handler = repair_body.clone();
     let strip_encoding_before_error_handler = prepared.strip_request_content_encoding;
     let control = upstream_error::handle_non_success_response(
         upstream_error::HandleNonSuccessResponseInput {
@@ -192,26 +339,35 @@ where
             loop_state: loop_state.reborrow(),
             enable_thinking_signature_rectifier: input.enable_thinking_signature_rectifier,
             enable_thinking_budget_rectifier: input.enable_thinking_budget_rectifier,
+            enable_thinking_effort_conflict_rectifier: input
+                .enable_thinking_effort_conflict_rectifier,
+            enable_gemini_function_id_rectifier: input.enable_gemini_function_id_rectifier,
             resp,
             upstream: upstream_error::UpstreamRequestState {
-                upstream_body_bytes: &mut prepared.upstream_body_bytes,
+                upstream_body_bytes: &mut repair_body,
                 strip_request_content_encoding: &mut prepared.strip_request_content_encoding,
                 codex_previous_response_id_rectifier_retried: &mut retry_state
                     .codex_previous_response_id_rectifier_retried,
+                thinking_effort_conflict_rectifier_retried: &mut retry_state
+                    .thinking_effort_conflict_rectifier_retried,
                 thinking_signature_rectifier_retried: &mut retry_state
                     .thinking_signature_rectifier_retried,
                 thinking_budget_rectifier_retried: &mut retry_state
                     .thinking_budget_rectifier_retried,
+                gemini_function_id_rectifier_retried: &mut retry_state
+                    .gemini_function_id_rectifier_retried,
+                additional_repair_retry_slots: &mut retry_state.additional_repair_retry_slots,
             },
         },
     )
     .await;
     if retry_repair_changed_request_body(
-        &prepared.upstream_body_bytes,
+        &repair_body,
         upstream_body_before_error_handler.as_ref(),
         prepared.strip_request_content_encoding,
         strip_encoding_before_error_handler,
     ) {
+        prepared.upstream_body_bytes = repair_body;
         prepared.request_body_mutated_before_attempt = true;
     }
     control

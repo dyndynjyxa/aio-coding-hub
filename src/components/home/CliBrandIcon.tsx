@@ -1,5 +1,6 @@
 import claudeFavicon from "../../assets/brand/claude-favicon.png";
 import geminiSparkleAurora from "../../assets/brand/gemini-sparkle-aurora.svg";
+import grokLogo from "../../assets/brand/grok-logo.svg";
 import type { CliKey } from "../../services/providers/providers";
 import { cn } from "../../utils/cn";
 
@@ -27,6 +28,16 @@ export function CliBrandIcon({ cliKey, className }: CliBrandIconProps) {
           fill="currentColor"
         />
       </svg>
+    );
+  }
+
+  if (cliKey === "gemini") {
+    return <img src={geminiSparkleAurora} alt="" aria-hidden="true" className={className} />;
+  }
+
+  if (cliKey === "grok") {
+    return (
+      <img src={grokLogo} alt="" aria-hidden="true" className={cn("dark:invert", className)} />
     );
   }
 

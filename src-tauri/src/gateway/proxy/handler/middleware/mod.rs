@@ -7,6 +7,7 @@
 pub(super) mod billing_header_rectifier;
 pub(super) mod body_reader;
 pub(super) mod cli_proxy_guard;
+pub(super) mod codex_request_classifier;
 pub(super) mod codex_session_completion;
 pub(super) mod cx2cc_count_tokens_interceptor;
 pub(super) mod model_inference;
@@ -14,12 +15,14 @@ pub(super) mod probe_interceptor;
 pub(super) mod provider_resolution;
 pub(super) mod recursion_guard;
 pub(super) mod request_fingerprint;
+pub(super) mod response_input_rectifier;
 pub(super) mod runtime_settings_reader;
 pub(super) mod warmup_interceptor;
 
 pub(super) use billing_header_rectifier::BillingHeaderRectifierMiddleware;
 pub(super) use body_reader::BodyReaderMiddleware;
 pub(super) use cli_proxy_guard::CliProxyGuardMiddleware;
+pub(super) use codex_request_classifier::CodexRequestClassifierMiddleware;
 pub(super) use codex_session_completion::CodexSessionCompletionMiddleware;
 pub(super) use cx2cc_count_tokens_interceptor::Cx2ccCountTokensInterceptorMiddleware;
 pub(super) use model_inference::ModelInferenceMiddleware;
@@ -27,6 +30,7 @@ pub(super) use probe_interceptor::ProbeInterceptorMiddleware;
 pub(super) use provider_resolution::ProviderResolutionMiddleware;
 pub(super) use recursion_guard::RecursionGuardMiddleware;
 pub(super) use request_fingerprint::RequestFingerprintMiddleware;
+pub(super) use response_input_rectifier::ResponseInputRectifierMiddleware;
 pub(super) use runtime_settings_reader::RuntimeSettingsMiddleware;
 pub(super) use warmup_interceptor::WarmupInterceptorMiddleware;
 
@@ -57,6 +61,9 @@ pub(super) enum MiddlewareAction<R: tauri::Runtime = tauri::Wry> {
 pub(super) struct ProxyContext<R: tauri::Runtime = tauri::Wry> {
     // -- immutable request metadata (set at construction) --
     pub(super) state: GatewayAppState<R>,
+    pub(super) ws_request: Option<crate::gateway::responses_ws::state::RequestState>,
+    pub(super) ws_connection: Option<Arc<crate::gateway::responses_ws::state::Connection>>,
+
     pub(super) cli_key: String,
     pub(super) forwarded_path: String,
     pub(super) req_method: Method,
@@ -67,6 +74,7 @@ pub(super) struct ProxyContext<R: tauri::Runtime = tauri::Wry> {
     pub(super) created_at_ms: i64,
     pub(super) created_at: i64,
     pub(super) is_claude_count_tokens: bool,
+    pub(super) is_codex_model_discovery: bool,
 
     // -- mutable request data (enriched by middlewares) --
     pub(super) request_body: Option<Body>,
@@ -77,6 +85,7 @@ pub(super) struct ProxyContext<R: tauri::Runtime = tauri::Wry> {
     pub(super) observe_request: bool,
     pub(super) strip_request_content_encoding_seed: bool,
     pub(super) special_settings: Arc<Mutex<Vec<serde_json::Value>>>,
+    pub(super) provider_health_neutral: bool,
 
     // -- model inference results --
     pub(super) requested_model: Option<String>,
@@ -119,6 +128,8 @@ impl<R: tauri::Runtime> ProxyContext<R> {
 
         RequestContextParts {
             state: self.state,
+            ws_request: self.ws_request,
+            ws_connection: self.ws_connection,
             cli_key: self.cli_key,
             forwarded_path: self.forwarded_path,
             observe_request: self.observe_request,
@@ -141,6 +152,8 @@ impl<R: tauri::Runtime> ProxyContext<R> {
             introspection_json: self.introspection_json,
             strip_request_content_encoding_seed: self.strip_request_content_encoding_seed,
             special_settings: self.special_settings,
+            provider_health_neutral: self.provider_health_neutral,
+            is_codex_model_discovery: self.is_codex_model_discovery,
             provider_base_url_ping_cache_ttl_seconds: rs.provider_base_url_ping_cache_ttl_seconds,
             verbose_provider_error: rs.verbose_provider_error,
             enable_codex_session_id_completion: rs.enable_codex_session_id_completion,
@@ -161,8 +174,11 @@ impl<R: tauri::Runtime> ProxyContext<R> {
             fingerprint_debug: self.fingerprint_debug,
             unavailable_fingerprint_key: self.unavailable_fingerprint_key,
             unavailable_fingerprint_debug: self.unavailable_fingerprint_debug,
+            enable_thinking_effort_conflict_rectifier: rs.enable_thinking_effort_conflict_rectifier,
             enable_thinking_signature_rectifier: rs.enable_thinking_signature_rectifier,
             enable_thinking_budget_rectifier: rs.enable_thinking_budget_rectifier,
+            enable_gemini_function_id_rectifier: rs.enable_gemini_function_id_rectifier,
+            codex_priority_billing_source: rs.codex_priority_billing_source,
             enable_claude_metadata_user_id_injection: rs.enable_claude_metadata_user_id_injection,
             cx2cc_settings: rs.cx2cc_settings,
             enable_response_fixer: rs.enable_response_fixer,

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { logToConsole } from "../../consoleLog";
 import {
-  modelPricesSyncBasellm,
+  modelPricesSync,
   setLastModelPricesSync,
   type ModelPricesSyncReport,
 } from "../../usage/modelPrices";
@@ -11,7 +11,7 @@ vi.mock("../../consoleLog", () => ({ logToConsole: vi.fn() }));
 vi.mock("../../usage/modelPrices", async () => {
   const actual =
     await vi.importActual<typeof import("../../usage/modelPrices")>("../../usage/modelPrices");
-  return { ...actual, modelPricesSyncBasellm: vi.fn(), setLastModelPricesSync: vi.fn() };
+  return { ...actual, modelPricesSync: vi.fn(), setLastModelPricesSync: vi.fn() };
 });
 vi.mock("../../workspace/prompts", async () => {
   const actual =
@@ -31,8 +31,9 @@ function makeModelPricesSyncReport(
     status: "updated",
     inserted: 1,
     updated: 0,
-    skipped: 0,
+    unchanged: 0,
     total: 1,
+    error: null,
     ...overrides,
   };
 }
@@ -57,35 +58,41 @@ describe("services/app/startup", () => {
     vi.clearAllMocks();
   });
 
-  it("startupSyncModelPricesOnce always calls modelPricesSyncBasellm", async () => {
+  it("startupSyncModelPricesOnce always calls modelPricesSync", async () => {
     const { startupSyncModelPricesOnce } = await importFreshStartup();
 
     const report = makeModelPricesSyncReport({
       inserted: 1,
       updated: 2,
-      skipped: 3,
+      unchanged: 3,
       total: 6,
     });
 
-    vi.mocked(modelPricesSyncBasellm).mockResolvedValueOnce(report);
+    vi.mocked(modelPricesSync).mockResolvedValueOnce(report);
 
     await startupSyncModelPricesOnce();
-    expect(modelPricesSyncBasellm).toHaveBeenCalledWith(false);
+    expect(modelPricesSync).toHaveBeenCalledWith();
     expect(setLastModelPricesSync).toHaveBeenCalledWith(report);
     expect(logToConsole).toHaveBeenCalledWith(
       "info",
       "启动同步：模型定价同步完成",
-      expect.objectContaining({ status: "updated", inserted: 1, updated: 2, skipped: 3, total: 6 })
+      expect.objectContaining({
+        status: "updated",
+        inserted: 1,
+        updated: 2,
+        unchanged: 3,
+        total: 6,
+      })
     );
   });
 
   it("startupSyncModelPricesOnce only runs once per session", async () => {
     const m = await importFreshStartup();
-    vi.mocked(modelPricesSyncBasellm).mockResolvedValueOnce(
+    vi.mocked(modelPricesSync).mockResolvedValueOnce(
       makeModelPricesSyncReport({
         inserted: 0,
         updated: 0,
-        skipped: 0,
+        unchanged: 0,
         total: 0,
       })
     );
@@ -95,15 +102,15 @@ describe("services/app/startup", () => {
     expect(dedupedRun).toBe(firstRun);
 
     await firstRun;
-    expect(modelPricesSyncBasellm).toHaveBeenCalledTimes(1);
+    expect(modelPricesSync).toHaveBeenCalledTimes(1);
 
     await m.startupSyncModelPricesOnce();
-    expect(modelPricesSyncBasellm).toHaveBeenCalledTimes(1);
+    expect(modelPricesSync).toHaveBeenCalledTimes(1);
   });
 
   it("startupSyncModelPricesOnce logs errors when sync throws", async () => {
     const m = await importFreshStartup();
-    vi.mocked(modelPricesSyncBasellm).mockRejectedValueOnce(new Error("boom"));
+    vi.mocked(modelPricesSync).mockRejectedValueOnce(new Error("boom"));
     await m.startupSyncModelPricesOnce();
     expect(setLastModelPricesSync).not.toHaveBeenCalled();
     expect(logToConsole).toHaveBeenCalledWith("error", "启动同步：模型定价同步失败", {

@@ -31,8 +31,12 @@ describe("services/settings/settingsGatewayRectifier", () => {
   const input = {
     verbose_provider_error: true,
     intercept_anthropic_warmup_requests: false,
+    enable_thinking_effort_conflict_rectifier: true,
     enable_thinking_signature_rectifier: true,
     enable_thinking_budget_rectifier: false,
+    enable_gemini_function_id_rectifier: true,
+    enable_response_input_rectifier: true,
+    codex_priority_billing_source: "requested" as const,
     enable_billing_header_rectifier: true,
     enable_claude_metadata_user_id_injection: true,
     enable_response_fixer: true,
@@ -75,8 +79,12 @@ describe("services/settings/settingsGatewayRectifier", () => {
     expect(commands.settingsGatewayRectifierSet).toHaveBeenCalledWith({
       verboseProviderError: true,
       interceptAnthropicWarmupRequests: false,
+      enableThinkingEffortConflictRectifier: true,
       enableThinkingSignatureRectifier: true,
       enableThinkingBudgetRectifier: false,
+      enableGeminiFunctionIdRectifier: true,
+      enableResponseInputRectifier: true,
+      codexPriorityBillingSource: "requested",
       enableBillingHeaderRectifier: true,
       enableClaudeMetadataUserIdInjection: true,
       enableResponseFixer: true,
@@ -100,6 +108,12 @@ describe("services/settings/settingsGatewayRectifier", () => {
     await expect(
       settingsGatewayRectifierSet({ ...input, response_fixer_max_fix_size: 16 * 1024 * 1024 + 1 })
     ).rejects.toThrow("invalid response_fixer_max_fix_size=16777217");
+    await expect(
+      settingsGatewayRectifierSet({
+        ...input,
+        codex_priority_billing_source: "invalid" as never,
+      })
+    ).rejects.toThrow("codex_priority_billing_source must be requested or actual");
 
     expect(commands.settingsGatewayRectifierSet).not.toHaveBeenCalled();
   });

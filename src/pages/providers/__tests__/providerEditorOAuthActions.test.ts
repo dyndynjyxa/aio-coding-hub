@@ -105,8 +105,16 @@ function makeProvider(partial: Partial<ProviderSummary> = {}): ProviderSummary {
     oauth_last_error: partial.oauth_last_error ?? null,
     source_provider_id: partial.source_provider_id ?? null,
     bridge_type: partial.bridge_type ?? null,
+    model_policy_status: partial.model_policy_status ?? "ready",
+    model_policy: partial.model_policy ?? {
+      version: 1,
+      mode: "all",
+      modelPatterns: [],
+      mappings: [],
+    },
     api_key_configured: partial.api_key_configured ?? false,
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,
+    supports_websockets: partial.supports_websockets ?? false,
     extension_values: partial.extension_values ?? [],
     custom_headers: partial.custom_headers ?? [],
   };
@@ -144,7 +152,10 @@ function makeCtx(overrides: Partial<OAuthActionContext> = {}) {
     baseUrlRows: [],
     tags: [],
     claudeModels: {},
+    modelPolicyStatus: "ready",
+    modelPolicy: { version: 1, mode: "all", modelPatterns: [], mappings: [] },
     streamIdleTimeoutSeconds: "",
+    supportsWebsockets: false,
     apiKeyConfigured: false,
     isCodexGatewaySource: false,
     sourceProviderId: null,
@@ -157,6 +168,7 @@ function makeCtx(overrides: Partial<OAuthActionContext> = {}) {
     oauthStatus: null,
     setOauthStatus: vi.fn(),
     refreshOauthStatus: vi.fn().mockResolvedValue(makeStatus()),
+    writeOauthStatusCache: vi.fn(),
     setOauthLoading: vi.fn(),
     oauthDeviceFlow: null,
     setOauthDeviceFlow: vi.fn(),
@@ -221,9 +233,44 @@ describe("providerEditorOAuthActions", () => {
     expect(providerOAuthFetchLimits).toHaveBeenCalledWith(9);
     expect(toast).toHaveBeenCalledWith("OAuth 登录成功");
     expect(ctx.onSaved).toHaveBeenCalledWith("claude");
-    expect(ctx.onOpenChange).toHaveBeenCalledWith(false);
+    expect(ctx.onOpenChange).toHaveBeenCalledWith(false, { bypassDirty: true });
     expect(ctx.removeProvider).not.toHaveBeenCalled();
     expect(ctx.setOauthLoading).toHaveBeenLastCalledWith(false);
+  });
+
+  it("falls back to login result and syncs cache when status fetch fails after login", async () => {
+    vi.mocked(providerOAuthStartFlow).mockResolvedValue({
+      success: true,
+      provider_id: 9,
+      provider_type: "codex_oauth",
+      expires_at: 1234,
+    });
+    vi.mocked(providerOAuthFetchLimits).mockResolvedValue({
+      limit_short_label: null,
+      limit_5h_text: "5h $1",
+      limit_weekly_text: "weekly $7",
+      limit_5h_reset_at: null,
+      limit_weekly_reset_at: null,
+      reset_credit_available_count: null,
+    });
+
+    const { ctx } = makeCtx({
+      refreshOauthStatus: vi.fn().mockRejectedValue(new Error("ipc down")),
+    });
+    await handleOAuthLogin(ctx);
+
+    const fallback = {
+      connected: true,
+      provider_type: "codex_oauth",
+      email: null,
+      expires_at: 1234,
+      has_refresh_token: null,
+    };
+    expect(ctx.setOauthStatus).toHaveBeenCalledWith(fallback);
+    expect(ctx.writeOauthStatusCache).toHaveBeenCalledWith(fallback, 9);
+    expect(toast).toHaveBeenCalledWith("OAuth 登录成功，但读取连接状态失败，可稍后重试");
+    expect(toast).toHaveBeenCalledWith("OAuth 登录成功");
+    expect(ctx.removeProvider).not.toHaveBeenCalled();
   });
 
   it("rolls back auto-saved provider when browser OAuth fails or becomes stale", async () => {
@@ -484,6 +531,8 @@ describe("providerEditorOAuthActions", () => {
 
     expect(ctx.setOauthStatus).toHaveBeenCalledWith(makeStatus());
     expect(ctx.setOauthStatus).toHaveBeenCalledWith(null);
+    expect(ctx.writeOauthStatusCache).toHaveBeenCalledWith(null, 7);
+    expect(ctx.writeOauthStatusCache).toHaveBeenCalledTimes(1);
     expect(toast).toHaveBeenCalledWith("Token 刷新成功");
     expect(toast).toHaveBeenCalledWith("Token 刷新失败");
     expect(toast).toHaveBeenCalledWith("Token 刷新失败：Error: refresh down");

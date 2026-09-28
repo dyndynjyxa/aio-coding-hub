@@ -27,6 +27,10 @@ impl OAuthProviderRegistry {
         by_provider_type.insert(gemini.provider_type(), gemini.cli_key());
         by_cli_key.insert(gemini.cli_key(), Box::new(gemini));
 
+        let grok = adapters::grok::GrokOAuthProvider::new();
+        by_provider_type.insert(grok.provider_type(), grok.cli_key());
+        by_cli_key.insert(grok.cli_key(), Box::new(grok));
+
         Self {
             by_cli_key,
             by_provider_type,

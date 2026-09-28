@@ -56,6 +56,7 @@ describe("pages/ProvidersPage", () => {
       "Codex",
       "Claude",
       "Gemini",
+      "Grok",
     ]);
 
     fireEvent.click(screen.getByRole("tab", { name: "Claude" }));

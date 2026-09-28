@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import {
   type ClaudeSettingsPatch,
   type CodexConfigPatch,
+  type CodexConfigState,
   type GeminiConfigPatch,
 } from "../../services/cli/cliManager";
 import { logToConsole } from "../../services/consoleLog";
@@ -31,27 +32,36 @@ import {
   useCliManagerCodexConfigTomlQuery,
   useCliManagerCodexConfigTomlSetMutation,
   useCliManagerCodexInfoQuery,
+  useCliManagerCodexModelCatalogQuery,
+  useCliManagerCodexModelCatalogRefresh,
   useCliManagerGeminiConfigQuery,
   useCliManagerGeminiConfigSetMutation,
   useCliManagerGeminiInfoQuery,
 } from "../../query/cliManager";
+import { isWindowsRuntime } from "../../utils/platform";
 import { formatActionFailureToast } from "../../utils/errors";
+import { useGrokTabDataModel } from "../../components/cli-manager/tabs/useGrokTabDataModel";
 
-export type CliManagerTabKey = "general" | "claude" | "codex" | "cx2cc" | "gemini";
+export type CliManagerTabKey = "general" | "claude" | "codex" | "cx2cc" | "gemini" | "grok";
 
 export const CLI_MANAGER_TABS: Array<{ key: CliManagerTabKey; label: string }> = [
   { key: "general", label: "通用" },
   { key: "claude", label: "Claude Code" },
   { key: "codex", label: "Codex" },
-  { key: "cx2cc", label: "CX2CC" },
   { key: "gemini", label: "Gemini" },
+  { key: "grok", label: "Grok" },
+  { key: "cx2cc", label: "CX2CC" },
 ];
 
 const DEFAULT_RECTIFIER: GatewayRectifierSettingsPatch = {
-  verbose_provider_error: true,
-  intercept_anthropic_warmup_requests: true,
+  verbose_provider_error: false,
+  intercept_anthropic_warmup_requests: false,
+  enable_thinking_effort_conflict_rectifier: true,
   enable_thinking_signature_rectifier: true,
   enable_thinking_budget_rectifier: true,
+  enable_gemini_function_id_rectifier: true,
+  enable_response_input_rectifier: true,
+  codex_priority_billing_source: "requested",
   enable_billing_header_rectifier: true,
   enable_claude_metadata_user_id_injection: true,
   enable_response_fixer: true,
@@ -93,8 +103,13 @@ function appSettingsToGeneralSettingsDraft(appSettings: AppSettings): GeneralSet
     rectifier: {
       verbose_provider_error: appSettings.verbose_provider_error,
       intercept_anthropic_warmup_requests: appSettings.intercept_anthropic_warmup_requests,
+      enable_thinking_effort_conflict_rectifier:
+        appSettings.enable_thinking_effort_conflict_rectifier,
       enable_thinking_signature_rectifier: appSettings.enable_thinking_signature_rectifier,
       enable_thinking_budget_rectifier: appSettings.enable_thinking_budget_rectifier,
+      enable_gemini_function_id_rectifier: appSettings.enable_gemini_function_id_rectifier,
+      enable_response_input_rectifier: appSettings.enable_response_input_rectifier,
+      codex_priority_billing_source: appSettings.codex_priority_billing_source,
       enable_billing_header_rectifier: appSettings.enable_billing_header_rectifier,
       enable_claude_metadata_user_id_injection:
         appSettings.enable_claude_metadata_user_id_injection,
@@ -148,6 +163,7 @@ function blurOnEnter(e: ReactKeyboardEvent<HTMLInputElement>) {
 
 export function useCliManagerPageDataModel() {
   const [tab, setTab] = useState<CliManagerTabKey>("general");
+  const grokTabProps = useGrokTabDataModel({ enabled: tab === "grok" });
 
   const settingsQuery = useSettingsQuery();
   const appSettings = settingsQuery.data ?? null;
@@ -169,6 +185,9 @@ export function useCliManagerPageDataModel() {
   const circuitBreakerNoticeSaving = circuitBreakerNoticeMutation.isPending;
   const codexSessionIdCompletionSaving = codexSessionIdCompletionMutation.isPending;
   const commonSettingsSaving = commonSettingsMutation.isPending;
+  const [codexResponsesWebsocketStatus, setCodexResponsesWebsocketStatus] = useState<string | null>(
+    null
+  );
 
   const [generalSettingsDraft, setGeneralSettingsDraft] = useState<GeneralSettingsDraft>(
     DEFAULT_GENERAL_SETTINGS_DRAFT
@@ -216,17 +235,37 @@ export function useCliManagerPageDataModel() {
   const codexConfigTomlQuery = useCliManagerCodexConfigTomlQuery({ enabled: tab === "codex" });
   const codexConfigSetMutation = useCliManagerCodexConfigSetMutation();
   const codexConfigTomlSetMutation = useCliManagerCodexConfigTomlSetMutation();
+  const refreshCodexModelCatalog = useCliManagerCodexModelCatalogRefresh();
+  const codexModelCatalogQuery = useCliManagerCodexModelCatalogQuery({
+    enabled:
+      tab === "codex" && codexInfoQuery.data?.found === true && codexConfigQuery.data != null,
+    snapshot: {
+      configPath: codexConfigQuery.data?.config_path,
+      executablePath: codexInfoQuery.data?.executable_path,
+      cliVersion: codexInfoQuery.data?.version,
+    },
+  });
 
   const codexInfo = codexInfoQuery.data ?? null;
   const codexConfig = codexConfigQuery.data ?? null;
   const codexConfigToml = codexConfigTomlQuery.data ?? null;
+  const codexModelCatalog = codexModelCatalogQuery.isError
+    ? null
+    : (codexModelCatalogQuery.data ?? null);
   const codexAvailable: "checking" | "available" | "unavailable" =
-    codexInfoQuery.isFetching && !codexInfo ? "checking" : codexInfo ? "available" : "unavailable";
+    codexInfoQuery.isFetching && !codexInfo
+      ? "checking"
+      : codexInfo?.found === true
+        ? "available"
+        : "unavailable";
   const codexLoading = codexInfoQuery.isFetching;
   const codexConfigLoading = codexConfigQuery.isFetching;
-  const codexConfigSaving = codexConfigSetMutation.isPending;
   const codexConfigTomlLoading = codexConfigTomlQuery.isFetching;
   const codexConfigTomlSaving = codexConfigTomlSetMutation.isPending;
+  const codexConfigWriting = codexConfigSetMutation.isPending || codexConfigTomlSaving;
+  const codexConfigSaving = codexConfigWriting;
+  const codexModelCatalogLoading = codexModelCatalogQuery.isFetching;
+  const codexModelCatalogError = codexModelCatalogQuery.isError;
 
   const geminiInfoQuery = useCliManagerGeminiInfoQuery({ enabled: tab === "gemini" });
   const geminiConfigQuery = useCliManagerGeminiConfigQuery({ enabled: tab === "gemini" });
@@ -281,8 +320,13 @@ export function useCliManagerPageDataModel() {
       updateRectifierDraft({
         verbose_provider_error: updated.verbose_provider_error,
         intercept_anthropic_warmup_requests: updated.intercept_anthropic_warmup_requests,
+        enable_thinking_effort_conflict_rectifier:
+          updated.enable_thinking_effort_conflict_rectifier,
         enable_thinking_signature_rectifier: updated.enable_thinking_signature_rectifier,
         enable_thinking_budget_rectifier: updated.enable_thinking_budget_rectifier,
+        enable_gemini_function_id_rectifier: updated.enable_gemini_function_id_rectifier,
+        enable_response_input_rectifier: updated.enable_response_input_rectifier,
+        codex_priority_billing_source: updated.codex_priority_billing_source,
         enable_billing_header_rectifier: updated.enable_billing_header_rectifier,
         enable_claude_metadata_user_id_injection: updated.enable_claude_metadata_user_id_injection,
         enable_response_fixer: updated.enable_response_fixer,
@@ -446,11 +490,22 @@ export function useCliManagerPageDataModel() {
   }
 
   async function refreshCodex() {
-    await Promise.all([
+    if (codexConfigWriting) return;
+    const [configResult, , infoResult] = await Promise.all([
       codexConfigQuery.refetch(),
       codexConfigTomlQuery.refetch(),
       codexInfoQuery.refetch(),
     ]);
+    const nextConfig = configResult.data ?? null;
+    const nextInfo = infoResult.data ?? null;
+    if (configResult.isError || infoResult.isError || !nextConfig || nextInfo?.found !== true) {
+      return;
+    }
+    await refreshCodexModelCatalog({
+      configPath: nextConfig.config_path,
+      executablePath: nextInfo.executable_path,
+      cliVersion: nextInfo.version,
+    });
   }
 
   async function refreshGeminiInfo() {
@@ -508,6 +563,53 @@ export function useCliManagerPageDataModel() {
     return true;
   }
 
+  async function persistCodexResponsesWebsocket(enabled: boolean) {
+    if (settingsWriteBlocked) {
+      blockSettingsWrite();
+      return false;
+    }
+    if (commonSettingsSaving || !appSettings) return false;
+    setCodexResponsesWebsocketStatus(null);
+    try {
+      const result = await commonSettingsMutation.mutateAsync({
+        codex_responses_websocket_enabled: enabled,
+        upstream_proxy_password: { mode: "preserve" },
+      });
+      if (!result) return false;
+      const sync = result.runtime.codex_proxy_sync;
+      let message =
+        sync === "synced"
+          ? "已保存并同步本机 Codex 配置；请启动新的 CLI 会话。"
+          : sync === "failed"
+            ? "偏好已保存，本机 Codex 配置同步失败；请重试代理接管。"
+            : sync === "deferred"
+              ? "偏好已保存，启动网关并接管后生效；请使用新的 CLI 会话。"
+              : "偏好已保存，接管 Codex 后生效；请使用新的 CLI 会话。";
+      if (result.runtime.wsl_auto_sync_triggered) {
+        message += " WSL 同步已触发，请在 WSL 状态中确认结果。";
+      } else if (result.settings.wsl_auto_config && isWindowsRuntime()) {
+        message += " WSL 尚未同步，请检查 WSL 配置状态。";
+      }
+      setCodexResponsesWebsocketStatus(message);
+      toast(message);
+      await refreshCodex().catch((error) => {
+        logToConsole("warn", "WebSocket 设置已保存，Codex 配置状态刷新失败", {
+          error: String(error),
+        });
+      });
+      return true;
+    } catch (err) {
+      const formatted = formatActionFailureToast("保存 Responses WebSocket 设置", err);
+      setCodexResponsesWebsocketStatus(formatted.toast);
+      logToConsole("error", "保存 Responses WebSocket 设置失败", {
+        error: formatted.raw,
+        error_code: formatted.error_code ?? undefined,
+      });
+      toast(formatted.toast);
+      return false;
+    }
+  }
+
   async function pickCodexHomeDirectory(initialPath?: string): Promise<string | null> {
     try {
       return await openDesktopSinglePath({
@@ -528,16 +630,17 @@ export function useCliManagerPageDataModel() {
     }
   }
 
-  async function persistCodexConfig(patch: CodexConfigPatch) {
-    if (codexConfigSaving) return;
-    if (codexAvailable !== "available") return;
+  async function persistCodexConfig(patch: CodexConfigPatch): Promise<CodexConfigState | null> {
+    if (codexConfigWriting) return null;
+    if (!codexConfig) return null;
 
     try {
       const updated = await codexConfigSetMutation.mutateAsync(patch);
       if (!updated) {
-        return;
+        return null;
       }
       toast("已更新 Codex 配置");
+      return updated;
     } catch (err) {
       const formatted = formatActionFailureToast("更新 Codex 配置", err);
       logToConsole("error", "更新 Codex 配置失败", {
@@ -546,12 +649,13 @@ export function useCliManagerPageDataModel() {
         patch,
       });
       toast(formatted.toast);
+      return null;
     }
   }
 
   async function persistCodexConfigToml(toml: string): Promise<boolean> {
-    if (codexConfigTomlSaving) return false;
-    if (codexAvailable !== "available") return false;
+    if (codexConfigWriting) return false;
+    if (!codexConfig) return false;
 
     try {
       const updated = await codexConfigTomlSetMutation.mutateAsync({ toml });
@@ -682,9 +786,12 @@ export function useCliManagerPageDataModel() {
       codexConfigSaving,
       codexConfigTomlLoading,
       codexConfigTomlSaving,
+      codexModelCatalogLoading,
+      codexModelCatalogError,
       codexInfo,
       codexConfig,
       codexConfigToml,
+      codexModelCatalog,
       appSettings,
       codexHomeSettingsSaving: commonSettingsSaving || settingsWriteBlocked,
       refreshCodex,
@@ -693,6 +800,8 @@ export function useCliManagerPageDataModel() {
       persistCodexConfigToml,
       persistCodexHomeSettings,
       persistCodexOauthCompatibleProxyMode,
+      persistCodexResponsesWebsocket,
+      codexResponsesWebsocketStatus,
       pickCodexHomeDirectory,
     },
     cx2ccTabProps: {
@@ -710,5 +819,6 @@ export function useCliManagerPageDataModel() {
       refreshGeminiInfo,
       persistGeminiConfig,
     },
+    grokTabProps,
   };
 }

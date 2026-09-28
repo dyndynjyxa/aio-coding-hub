@@ -25,7 +25,10 @@ pub(super) struct SkillSourceMetadataFile {
 }
 
 pub(super) fn ssot_skills_root<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<PathBuf> {
-    let cli_key = crate::shared::cli_key::SUPPORTED_CLI_KEYS[0];
+    let cli_key =
+        crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Skills)
+            .next()
+            .ok_or_else(|| "INTERNAL_ERROR: no CLI supports skills".to_string())?;
     let paths = crate::skills::paths_get(app, cli_key)?;
     Ok(PathBuf::from(paths.ssot_dir))
 }

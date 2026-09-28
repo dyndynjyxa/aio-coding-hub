@@ -8,8 +8,9 @@ import {
 import { invokeGeneratedIpc, mapGeneratedCommandResponse } from "../generatedIpc";
 import { narrowGeneratedStringUnion, type Override } from "../generatedTypeUtils";
 import type { CliKey, DailyResetMode } from "./providers";
+import { CLI_KEYS } from "../../constants/clis";
 
-const CLI_KEY_VALUES = ["claude", "codex", "gemini"] as const satisfies readonly CliKey[];
+const CLI_KEY_VALUES = CLI_KEYS;
 const DAILY_RESET_MODE_VALUES = ["fixed", "rolling"] as const satisfies readonly DailyResetMode[];
 const PROVIDER_NAME_MAX_CHARS = 256;
 const RESET_TIME_MAX_CHARS = 64;

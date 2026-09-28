@@ -3,20 +3,17 @@ import type { CliKey } from "../services/providers/providers";
 import {
   USAGE_LEADERBOARD_V2_DEFAULT_LIMIT,
   usageHourlySeries,
-  usageDayDetailV1,
   usageFolderOptionsV1,
   usageLeaderboardV2,
   usageProviderCacheRateTrendV1,
+  usageProviderMetricsTrendV1,
   usageSummary,
   usageSummaryV2,
-  normalizeUsageDayDetailInput,
   normalizeUsageHourlySeriesDays,
   normalizeUsageLeaderboardV2Limit,
-  normalizeUsageProviderCacheRateTrendLimit,
+  normalizeUsageProviderTrendLimit,
   normalizeUsageQueryInputV2,
   normalizeUsageSummaryInput,
-  type NormalizedUsageDayDetailInput,
-  type UsageDayDetailInput,
   type UsagePeriod,
   type UsageQueryInputV2,
   type UsageRange,
@@ -37,8 +34,19 @@ type UsageLeaderboardV2QueryInput = UsageQueryInputV2 & {
   limit: number | null;
 };
 type UsageQueryInputV2WithoutFolderKeys = Omit<UsageQueryInputV2, "folderKeys">;
-type UsageProviderCacheRateTrendQueryInput = UsageQueryInputV2WithoutFolderKeys & {
+type UsageProviderTrendQueryInput = Omit<
+  UsageQueryInputV2,
+  "folderKeys" | "dayStartHour" | "fullIdleGapMinutes" | "sessionBreakGapMinutes"
+> & {
   limit: number | null;
+};
+type NormalizedUsageProviderTrendQueryInput = {
+  startTs: number | null;
+  endTs: number | null;
+  cliKey: CliKey | null;
+  providerId: number | null;
+  limit: number | null;
+  excludeCx2CcGatewayBridge: boolean | null;
 };
 
 export function useUsageSummaryQuery(
@@ -107,38 +115,6 @@ export function useUsageLeaderboardV2Query(
   });
 }
 
-export function useUsageDayDetailV1Query(input: UsageDayDetailInput, options?: UsageQueryOptions) {
-  const requestedEnabled = options?.enabled ?? true;
-  let normalizedInput: NormalizedUsageDayDetailInput | null = null;
-  try {
-    normalizedInput = normalizeUsageDayDetailInput(input);
-  } catch (caught) {
-    if (requestedEnabled) throw caught;
-  }
-
-  return useQuery({
-    queryKey: normalizedInput
-      ? usageKeys.dayDetailV1({
-          day: normalizedInput.day,
-          cliKey: normalizedInput.cliKey ?? null,
-          providerId: normalizedInput.providerId ?? null,
-          folderLimit: normalizedInput.folderLimit,
-          folderKeys: normalizedInput.folderKeys ?? null,
-          excludeCx2CcGatewayBridge: normalizedInput.excludeCx2CcGatewayBridge ?? null,
-        })
-      : usageKeys.dayDetailV1Disabled(),
-    queryFn: () => {
-      if (!normalizedInput) {
-        throw new Error("SEC_INVALID_INPUT: invalid day detail query");
-      }
-      return usageDayDetailV1(normalizedInput);
-    },
-    enabled: requestedEnabled && normalizedInput != null,
-    placeholderData: keepPreviousData,
-    refetchInterval: options?.refetchIntervalMs ?? false,
-  });
-}
-
 export function useUsageFolderOptionsV1Query(
   period: UsagePeriod,
   input: UsageQueryInputV2WithoutFolderKeys,
@@ -157,17 +133,51 @@ export function useUsageFolderOptionsV1Query(
 
 export function useUsageProviderCacheRateTrendV1Query(
   period: UsagePeriod,
-  input: UsageProviderCacheRateTrendQueryInput,
+  input: UsageProviderTrendQueryInput,
   options?: { enabled?: boolean }
 ) {
   const normalizedInput = {
-    ...normalizeUsageQueryInputV2({ ...input, folderKeys: null }),
-    limit: normalizeUsageProviderCacheRateTrendLimit(input.limit),
+    ...normalizeUsageQueryInputV2({ ...input, folderKeys: null, dayStartHour: null }),
+    limit: normalizeUsageProviderTrendLimit(input.limit),
+  };
+  const queryInput: NormalizedUsageProviderTrendQueryInput = {
+    startTs: normalizedInput.startTs,
+    endTs: normalizedInput.endTs,
+    cliKey: normalizedInput.cliKey,
+    providerId: normalizedInput.providerId,
+    limit: normalizedInput.limit,
+    excludeCx2CcGatewayBridge: normalizedInput.excludeCx2CcGatewayBridge,
   };
 
   return useQuery({
-    queryKey: usageKeys.providerCacheRateTrendV1(period, normalizedInput),
-    queryFn: () => usageProviderCacheRateTrendV1(period, normalizedInput),
+    queryKey: usageKeys.providerCacheRateTrendV1(period, queryInput),
+    queryFn: () => usageProviderCacheRateTrendV1(period, queryInput),
+    enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useUsageProviderMetricsTrendV1Query(
+  period: UsagePeriod,
+  input: UsageProviderTrendQueryInput,
+  options?: { enabled?: boolean }
+) {
+  const normalizedInput = {
+    ...normalizeUsageQueryInputV2({ ...input, folderKeys: null, dayStartHour: null }),
+    limit: normalizeUsageProviderTrendLimit(input.limit),
+  };
+  const queryInput: NormalizedUsageProviderTrendQueryInput = {
+    startTs: normalizedInput.startTs,
+    endTs: normalizedInput.endTs,
+    cliKey: normalizedInput.cliKey,
+    providerId: normalizedInput.providerId,
+    limit: normalizedInput.limit,
+    excludeCx2CcGatewayBridge: normalizedInput.excludeCx2CcGatewayBridge,
+  };
+
+  return useQuery({
+    queryKey: usageKeys.providerMetricsTrendV1(period, queryInput),
+    queryFn: () => usageProviderMetricsTrendV1(period, queryInput),
     enabled: options?.enabled ?? true,
     placeholderData: keepPreviousData,
   });

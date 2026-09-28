@@ -2,10 +2,15 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CliProxyStatus } from "../../services/cli/cliProxy";
 import { cliProxySetEnabled, cliProxyStatusAll } from "../../services/cli/cliProxy";
+import { envConflictsCheck } from "../../services/cli/envConflicts";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
-import { cliProxyKeys } from "../keys";
-import { useCliProxySetEnabledMutation, useCliProxyStatusAllQuery } from "../cliProxy";
+import { cliManagerKeys, cliProxyKeys } from "../keys";
+import {
+  useCliEnvConflictsQuery,
+  useCliProxySetEnabledMutation,
+  useCliProxyStatusAllQuery,
+} from "../cliProxy";
 
 vi.mock("../../services/cli/cliProxy", async () => {
   const actual = await vi.importActual<typeof import("../../services/cli/cliProxy")>(
@@ -16,6 +21,13 @@ vi.mock("../../services/cli/cliProxy", async () => {
     cliProxyStatusAll: vi.fn(),
     cliProxySetEnabled: vi.fn(),
   };
+});
+
+vi.mock("../../services/cli/envConflicts", async () => {
+  const actual = await vi.importActual<typeof import("../../services/cli/envConflicts")>(
+    "../../services/cli/envConflicts"
+  );
+  return { ...actual, envConflictsCheck: vi.fn() };
 });
 
 describe("query/cliProxy", () => {
@@ -32,6 +44,38 @@ describe("query/cliProxy", () => {
     renderHook(() => useCliProxyStatusAllQuery({ enabled: false }), { wrapper });
 
     expect(cliProxyStatusAll).not.toHaveBeenCalled();
+  });
+
+  it("useCliEnvConflictsQuery respects enabled=false", () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    renderHook(() => useCliEnvConflictsQuery("grok", { enabled: false }), { wrapper });
+
+    expect(envConflictsCheck).not.toHaveBeenCalled();
+  });
+
+  it("queries and caches Grok environment conflicts by cli key", async () => {
+    setTauriRuntime();
+    const conflicts = [
+      {
+        var_name: "XAI_API_KEY",
+        source_type: "system" as const,
+        source_path: "Process Environment",
+      },
+    ];
+    vi.mocked(envConflictsCheck).mockResolvedValue(conflicts);
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useCliEnvConflictsQuery("grok"), { wrapper });
+
+    await waitFor(() => expect(result.current.data).toEqual(conflicts));
+    expect(envConflictsCheck).toHaveBeenCalledWith("grok");
+    expect(client.getQueryData(cliProxyKeys.envConflicts("grok"))).toEqual(conflicts);
   });
 
   it("calls cliProxyStatusAll with tauri runtime", async () => {
@@ -197,6 +241,30 @@ describe("query/cliProxy", () => {
 
       await promise;
     });
+  });
+
+  it("invalidates Grok config after changing the Grok proxy", async () => {
+    setTauriRuntime();
+    vi.mocked(cliProxySetEnabled).mockResolvedValue({
+      trace_id: "t-grok-config",
+      cli_key: "grok",
+      enabled: true,
+      ok: true,
+      error_code: null,
+      message: "ok",
+      base_origin: "http://127.0.0.1:37123",
+    });
+
+    const client = createTestQueryClient();
+    client.setQueryData(cliManagerKeys.grokConfig(), { cached: true });
+    const wrapper = createQueryWrapper(client);
+    const { result } = renderHook(() => useCliProxySetEnabledMutation(), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync({ cliKey: "grok", enabled: true });
+    });
+
+    expect(client.getQueryState(cliManagerKeys.grokConfig())?.isInvalidated).toBe(true);
   });
 
   it("rolls back cache when setEnabled fails", async () => {

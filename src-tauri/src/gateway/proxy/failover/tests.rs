@@ -1,11 +1,12 @@
 use super::{
     first_successful_base_url_probe, resolve_primary_provider_base_url, retry_backoff_delay,
-    select_next_provider_id_from_order, should_reuse_provider,
+    select_base_url_by_mode, select_next_provider_id_from_order, should_reuse_provider,
 };
 use crate::providers;
 use serde_json::json;
 use std::collections::HashSet;
 use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 fn set(ids: &[i64]) -> HashSet<i64> {
     ids.iter().copied().collect()
@@ -24,6 +25,8 @@ fn provider_for_base_url_test(
         base_url_mode: providers::ProviderBaseUrlMode::Order,
         api_key_plaintext: "sk-test".to_string(),
         claude_models: providers::ClaudeModels::default(),
+        model_policy: Some(providers::ProviderModelPolicyV1::all()),
+        model_policy_status: providers::ProviderModelPolicyStatus::Ready,
         limit_5h_usd: None,
         limit_daily_usd: None,
         daily_reset_mode: providers::DailyResetMode::Fixed,
@@ -36,6 +39,7 @@ fn provider_for_base_url_test(
         source_provider_id: None,
         bridge_type: None,
         stream_idle_timeout_seconds: None,
+        supports_websockets: false,
         extension_values: vec![],
     }
 }
@@ -294,4 +298,36 @@ async fn first_successful_base_url_probe_skips_empty_and_failed_candidates() {
     .await;
 
     assert_eq!(selected, Some(("https://ok.example".to_string(), 15)));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn ping_selection_marks_success_when_primary_responds() {
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind probe server");
+    let address = listener.local_addr().expect("probe server address");
+    let primary = format!("http://{address}");
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.expect("accept probe request");
+        let mut request = [0_u8; 1024];
+        let _ = stream.read(&mut request).await;
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .await
+            .expect("write probe response");
+    });
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .expect("build probe client");
+
+    let selected = select_base_url_by_mode(
+        &client,
+        &[primary.clone(), "not-a-valid-url".to_string()],
+        providers::ProviderBaseUrlMode::Ping,
+    )
+    .await;
+
+    server.await.expect("probe server task");
+    assert_eq!(selected, (primary, true));
 }

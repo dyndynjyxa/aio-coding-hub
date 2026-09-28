@@ -10,6 +10,9 @@ use serde::Serialize;
 pub struct ModelPriceSummary {
     pub id: i64,
     pub cli_key: String,
+    /// Upstream vendor key from the price source (e.g. "anthropic", "deepseek");
+    /// empty for manually upserted rows.
+    pub vendor: String,
     pub model: String,
     pub currency: String,
     pub created_at: i64,
@@ -25,6 +28,7 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<ModelPriceSummary, rusqlite
     Ok(ModelPriceSummary {
         id: row.get("id")?,
         cli_key: row.get("cli_key")?,
+        vendor: row.get("vendor")?,
         model: row.get("model")?,
         currency: row.get("currency")?,
         created_at: row.get("created_at")?,
@@ -32,11 +36,7 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<ModelPriceSummary, rusqlite
     })
 }
 
-pub fn list_by_cli(
-    db: &db::Db,
-    cli_key: &str,
-) -> crate::shared::error::AppResult<Vec<ModelPriceSummary>> {
-    validate_cli_key(cli_key)?;
+pub fn list_all(db: &db::Db) -> crate::shared::error::AppResult<Vec<ModelPriceSummary>> {
     let conn = db.open_connection()?;
 
     let mut stmt = conn
@@ -45,19 +45,19 @@ pub fn list_by_cli(
     SELECT
       id,
       cli_key,
+      vendor,
       model,
       currency,
       created_at,
       updated_at
     FROM model_prices
-    WHERE cli_key = ?1
-    ORDER BY model ASC, id DESC
+    ORDER BY vendor ASC, model ASC, id DESC
     "#,
         )
         .map_err(|e| db_err!("failed to prepare model_prices list: {e}"))?;
 
     let rows = stmt
-        .query_map(params![cli_key], row_to_summary)
+        .query_map([], row_to_summary)
         .map_err(|e| db_err!("failed to list model_prices: {e}"))?;
 
     let mut items = Vec::new();
@@ -113,6 +113,7 @@ ON CONFLICT(cli_key, model) DO UPDATE SET
 SELECT
   id,
   cli_key,
+  vendor,
   model,
   currency,
   created_at,

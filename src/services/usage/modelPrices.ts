@@ -5,36 +5,37 @@ import {
   type ModelPriceAliasRuleV1 as GeneratedModelPriceAliasRule,
   type ModelPriceSummary as GeneratedModelPriceSummary,
   type ModelPricesSyncReport as GeneratedModelPricesSyncReport,
+  type ModelPricesSyncStatus as GeneratedModelPricesSyncStatus,
 } from "../../generated/bindings";
 import { invokeGeneratedIpc, mapGeneratedCommandResponse } from "../generatedIpc";
 import { narrowGeneratedStringUnion, type Override } from "../generatedTypeUtils";
 import type { CliKey } from "../providers/providers";
 import { observePromiseLikeRejection, type MaybePromiseLike } from "../../utils/promiseLike";
 import { logToConsole } from "../consoleLog";
+import { CLI_KEYS } from "../../constants/clis";
 
 type Listener = () => MaybePromiseLike<void>;
 
 const listeners = new Set<Listener>();
-const CLI_KEY_VALUES = ["claude", "codex", "gemini"] as const satisfies readonly CliKey[];
+const CLI_KEY_VALUES = CLI_KEYS;
 const MODEL_PRICE_ALIAS_MATCH_TYPE_VALUES = [
   "exact",
   "prefix",
   "wildcard",
 ] as const satisfies readonly GeneratedModelPriceAliasMatchType[];
-const MODEL_PRICES_SYNC_STATUS_VALUES = ["updated", "not_modified"] as const;
+const MODEL_PRICES_SYNC_STATUS_VALUES = [
+  "updated",
+  "not_modified",
+  "failed",
+] as const satisfies readonly GeneratedModelPricesSyncStatus[];
 const MODEL_PRICE_ALIASES_VERSION = 1;
 const MAX_MODEL_PRICE_ALIAS_RULES = 512;
 const MAX_MODEL_PRICE_MODEL_CHARS = 512;
 const MAX_MODEL_PRICE_ALIAS_PATTERN_CHARS = 200;
 const MAX_MODEL_PRICE_CURRENCY_CHARS = 16;
 
-export type ModelPricesSyncStatus = (typeof MODEL_PRICES_SYNC_STATUS_VALUES)[number];
-export type ModelPricesSyncReport = Override<
-  GeneratedModelPricesSyncReport,
-  {
-    status: ModelPricesSyncStatus;
-  }
->;
+export type ModelPricesSyncStatus = GeneratedModelPricesSyncStatus;
+export type ModelPricesSyncReport = GeneratedModelPricesSyncReport;
 
 function logListenerError(error: unknown) {
   logToConsole("warn", "模型定价更新订阅处理失败", { error: String(error) }, "model_prices");
@@ -218,6 +219,7 @@ function toModelPriceSummary(value: GeneratedModelPriceSummary): ModelPriceSumma
   return {
     id: normalizePositiveSafeInteger(value.id, "model_prices.id"),
     cli_key: toCliKey(value.cli_key, "model_prices_list.cli_key"),
+    vendor: value.vendor.trim(),
     model: normalizeRequiredText(value.model, "model", MAX_MODEL_PRICE_MODEL_CHARS),
     currency: normalizeRequiredText(value.currency, "currency", MAX_MODEL_PRICE_CURRENCY_CHARS),
     created_at: normalizeNonNegativeSafeInteger(value.created_at, "model_prices.created_at"),
@@ -225,57 +227,30 @@ function toModelPriceSummary(value: GeneratedModelPriceSummary): ModelPriceSumma
   };
 }
 
-export async function modelPricesList(cliKey: CliKey) {
-  const normalizedCliKey = validateModelPricesCliKey(cliKey);
-
+export async function modelPricesListAll() {
   return invokeGeneratedIpc<ModelPriceSummary[]>({
     title: "读取模型价格列表失败",
-    cmd: "model_prices_list",
-    args: { cliKey: normalizedCliKey },
+    cmd: "model_prices_list_all",
     invoke: async () =>
-      mapGeneratedCommandResponse(await commands.modelPricesList(normalizedCliKey), (rows) =>
+      mapGeneratedCommandResponse(await commands.modelPricesListAll(), (rows) =>
         rows.map(toModelPriceSummary)
       ),
   });
 }
 
-export async function modelPricesSyncBasellm(force = false) {
-  if (typeof force !== "boolean") {
-    throw new Error("SEC_INVALID_INPUT: force must be boolean");
-  }
-
+export async function modelPricesSync() {
   return invokeGeneratedIpc<ModelPricesSyncReport>({
     title: "同步模型价格失败",
-    cmd: "model_prices_sync_basellm",
-    args: { force },
+    cmd: "model_prices_sync",
     invoke: async () =>
-      mapGeneratedCommandResponse(await commands.modelPricesSyncBasellm(force), (report) => {
-        const status = narrowGeneratedStringUnion(
+      mapGeneratedCommandResponse(await commands.modelPricesSync(), (report) => ({
+        ...report,
+        status: narrowGeneratedStringUnion(
           report.status,
           MODEL_PRICES_SYNC_STATUS_VALUES,
-          "model_prices_sync_basellm.status"
-        );
-        const inserted = normalizeNonNegativeSafeInteger(
-          report.inserted,
-          "model_prices_sync_basellm.inserted"
-        );
-        const updated = normalizeNonNegativeSafeInteger(
-          report.updated,
-          "model_prices_sync_basellm.updated"
-        );
-        const skipped = normalizeNonNegativeSafeInteger(
-          report.skipped,
-          "model_prices_sync_basellm.skipped"
-        );
-        const total = normalizeNonNegativeSafeInteger(
-          report.total,
-          "model_prices_sync_basellm.total"
-        );
-        if (inserted + updated + skipped !== total) {
-          throw new Error("IPC_INVALID_RESULT: model_prices_sync_basellm.total mismatch");
-        }
-        return { status, inserted, updated, skipped, total };
-      }),
+          "model_prices_sync.status"
+        ),
+      })),
   });
 }
 

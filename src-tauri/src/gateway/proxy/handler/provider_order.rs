@@ -81,6 +81,8 @@ mod tests {
             base_url_mode: providers::ProviderBaseUrlMode::Order,
             api_key_plaintext: String::new(),
             claude_models: providers::ClaudeModels::default(),
+            model_policy: Some(providers::ProviderModelPolicyV1::all()),
+            model_policy_status: providers::ProviderModelPolicyStatus::Ready,
             limit_5h_usd: None,
             limit_daily_usd: None,
             daily_reset_mode: providers::DailyResetMode::Fixed,
@@ -93,6 +95,7 @@ mod tests {
             source_provider_id: None,
             bridge_type: None,
             stream_idle_timeout_seconds: None,
+            supports_websockets: false,
             extension_values: vec![],
         }
     }

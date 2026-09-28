@@ -6,6 +6,9 @@ export const GatewayErrorCodes = {
   ALL_PROVIDERS_UNAVAILABLE: "GW_ALL_PROVIDERS_UNAVAILABLE",
   UPSTREAM_ALL_FAILED: "GW_UPSTREAM_ALL_FAILED",
   NO_ENABLED_PROVIDER: "GW_NO_ENABLED_PROVIDER",
+  FORCED_PROVIDER_NOT_ELIGIBLE_FOR_MODEL: "GW_FORCED_PROVIDER_NOT_ELIGIBLE_FOR_MODEL",
+  NO_ELIGIBLE_PROVIDER_FOR_MODEL: "GW_NO_ELIGIBLE_PROVIDER_FOR_MODEL",
+  MODEL_POLICY_INVALID: "GW_MODEL_POLICY_INVALID",
   UPSTREAM_TIMEOUT: "GW_UPSTREAM_TIMEOUT",
   UPSTREAM_CONNECT_FAILED: "GW_UPSTREAM_CONNECT_FAILED",
   UPSTREAM_5XX: "GW_UPSTREAM_5XX",
@@ -49,6 +52,9 @@ const GatewayErrorShortLabels = {
   [GatewayErrorCodes.ALL_PROVIDERS_UNAVAILABLE]: "全部不可用",
   [GatewayErrorCodes.UPSTREAM_ALL_FAILED]: "全部失败",
   [GatewayErrorCodes.NO_ENABLED_PROVIDER]: "无供应商",
+  [GatewayErrorCodes.FORCED_PROVIDER_NOT_ELIGIBLE_FOR_MODEL]: "强制供应商不支持模型",
+  [GatewayErrorCodes.NO_ELIGIBLE_PROVIDER_FOR_MODEL]: "无匹配供应商",
+  [GatewayErrorCodes.MODEL_POLICY_INVALID]: "模型策略无效",
   [GatewayErrorCodes.UPSTREAM_TIMEOUT]: "上游超时",
   [GatewayErrorCodes.UPSTREAM_CONNECT_FAILED]: "连接失败",
   [GatewayErrorCodes.UPSTREAM_5XX]: "上游5XX",
@@ -101,6 +107,18 @@ export const GatewayErrorDescriptions = {
   GW_NO_ENABLED_PROVIDER: {
     desc: "没有已启用的 Provider",
     suggestion: "当前 CLI 没有启用任何 Provider。请前往 Provider 管理页面启用至少一个 Provider。",
+  },
+  GW_FORCED_PROVIDER_NOT_ELIGIBLE_FOR_MODEL: {
+    desc: "强制指定的 Provider 不支持请求模型",
+    suggestion: "请清除强制 Provider，或为该 Provider 添加匹配的模型规则。",
+  },
+  GW_NO_ELIGIBLE_PROVIDER_FOR_MODEL: {
+    desc: "没有符合模型策略的 Provider",
+    suggestion: "请为至少一个已启用 Provider 添加该模型规则，或使用“全部模型”模式。",
+  },
+  GW_MODEL_POLICY_INVALID: {
+    desc: "Provider 的模型策略无效",
+    suggestion: "请在 Provider 编辑器中重置模型策略并保存后重试。",
   },
   GW_UPSTREAM_TIMEOUT: {
     desc: "上游服务响应超时",
@@ -166,7 +184,7 @@ export const GatewayErrorDescriptions = {
   },
   GW_INVALID_CLI_KEY: {
     desc: "无效的 CLI Key",
-    suggestion: "请求中的 CLI Key 无法识别。支持的 CLI Key 包括 claude、codex、gemini。",
+    suggestion: "请求中的 CLI Key 无法识别。支持的 CLI Key 包括 claude、codex、gemini、grok。",
   },
   GW_INVALID_BASE_URL: {
     desc: "无效的 Base URL",

@@ -116,6 +116,11 @@ export const tauriInvoke = vi.fn(async (command: string, payload?: Record<string
   return parseTauriInvokeResponse(response);
 });
 
+// convertFileSrc：jsdom 无 Tauri asset 协议，返回可断言的确定性 URL。
+export const tauriConvertFileSrc = vi.fn(
+  (filePath: string, protocol = "asset") => `${protocol}://localhost/${filePath}`
+);
+
 export const tauriUnlisten = vi.fn();
 
 export const tauriListen = vi.fn(async (event: string, handler: TauriEventHandler<any>) => {
@@ -160,6 +165,7 @@ export class MockChannel<T> {
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: tauriInvoke,
   Channel: MockChannel,
+  convertFileSrc: tauriConvertFileSrc,
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({

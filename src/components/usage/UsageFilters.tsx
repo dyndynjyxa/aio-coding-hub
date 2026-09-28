@@ -1,7 +1,7 @@
 // Usage: 用量页面筛选器组件 — CLI + 时间窗 + 自定义日期。
 
 import { Button } from "../../ui/Button";
-import { CLI_FILTER_ITEMS, type CliFilterKey } from "../../constants/clis";
+import { cliFilterItemsWith, type CliFilterKey } from "../../constants/clis";
 import { PERIOD_ITEMS } from "../../constants/periods";
 import type { UsagePeriod } from "../../services/usage/usage";
 import type { CustomDateRangeApplied } from "../../hooks/useCustomDateRange";
@@ -23,6 +23,7 @@ type UsageFiltersProps = {
 };
 
 type ButtonGroupItem<T extends string> = { key: T; label: string };
+const USAGE_CLI_FILTER_ITEMS = cliFilterItemsWith("usage");
 
 function FilterButtonGroup<T extends string>({
   ariaLabel,
@@ -130,7 +131,7 @@ export function UsageFilters({
       {/* CLI 筛选 */}
       <FilterButtonGroup
         ariaLabel="CLI 筛选"
-        items={CLI_FILTER_ITEMS}
+        items={USAGE_CLI_FILTER_ITEMS}
         value={cliKey}
         onChange={onCliKeyChange}
         loading={loading}

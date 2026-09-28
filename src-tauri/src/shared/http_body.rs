@@ -35,7 +35,7 @@ pub(crate) async fn read_text_with_limit(
         bytes.extend_from_slice(&chunk);
     }
 
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+    String::from_utf8(bytes).map_err(|_| format!("{context} body is not valid UTF-8"))
 }
 
 #[cfg(test)]
@@ -105,5 +105,18 @@ mod tests {
             .await
             .expect_err("oversized streamed body should fail");
         assert!(err.contains("test body exceeds 5 bytes"));
+    }
+
+    #[tokio::test]
+    async fn read_text_with_limit_rejects_invalid_utf8() {
+        let response = response_from_raw(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: close\r\n\r\n\xff",
+        )
+        .await;
+
+        let err = read_text_with_limit(response, 5, "test")
+            .await
+            .expect_err("invalid UTF-8 should fail");
+        assert!(err.contains("test body is not valid UTF-8"));
     }
 }

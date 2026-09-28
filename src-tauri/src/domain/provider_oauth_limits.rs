@@ -384,6 +384,7 @@ INSERT INTO provider_oauth_limit_snapshots(
                 cost_multiplier: 1.0,
                 priority: Some(0),
                 claude_models: None,
+                model_policy: None,
                 limit_5h_usd: None,
                 limit_daily_usd: None,
                 daily_reset_mode: None,
@@ -396,6 +397,7 @@ INSERT INTO provider_oauth_limit_snapshots(
                 source_provider_id: None,
                 bridge_type: None,
                 stream_idle_timeout_seconds: None,
+                supports_websockets: None,
                 extension_values: None,
             },
         )

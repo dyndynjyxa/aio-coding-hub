@@ -10,6 +10,10 @@ import type {
 import { normalizeBaseUrlRows } from "./baseUrl";
 import { resolveStreamIdleTimeoutSeconds } from "./providerEditorTimeout";
 import { normalizeCustomHeaders, validateCustomHeaders } from "./providerCustomHeaders";
+import {
+  normalizeProviderModelPolicyDraft,
+  validateProviderModelPolicy,
+} from "./providerModelPolicy";
 
 export function buildProviderEditorUpsertInput(
   ctx: ProviderEditorPayloadContext
@@ -64,6 +68,37 @@ export function buildProviderEditorUpsertInput(
         error: {
           kind: "message",
           message: "请输入 API Key",
+        },
+      };
+    }
+  }
+
+  if (ctx.modelPolicyStatus === "invalid") {
+    return {
+      ok: false,
+      error: {
+        kind: "message",
+        message: "模型策略无效，请先重置并保存",
+      },
+    };
+  }
+
+  const modelPolicy =
+    ctx.modelPolicyStatus === "legacy"
+      ? null
+      : ctx.modelPolicy
+        ? normalizeProviderModelPolicyDraft(ctx.modelPolicy)
+        : null;
+  // Every writer of the "ready" status also writes a non-null policy, so
+  // modelPolicy is always present here.
+  if (ctx.modelPolicyStatus === "ready" && modelPolicy) {
+    const policyError = validateProviderModelPolicy(modelPolicy);
+    if (policyError) {
+      return {
+        ok: false,
+        error: {
+          kind: "message",
+          message: policyError,
         },
       };
     }
@@ -144,6 +179,9 @@ export function buildProviderEditorUpsertInput(
     tags: ctx.tags,
     note: parsed.data.note,
     streamIdleTimeoutSeconds: parsedTimeout,
+    supportsWebsockets:
+      ctx.cliKey === "codex" && ctx.authMode !== "cx2cc" && ctx.supportsWebsockets,
+    modelPolicy,
     ...(ctx.cliKey === "claude" ? { claudeModels: ctx.claudeModels } : {}),
     sourceProviderId:
       ctx.authMode === "cx2cc" && !ctx.isCodexGatewaySource ? ctx.sourceProviderId : null,

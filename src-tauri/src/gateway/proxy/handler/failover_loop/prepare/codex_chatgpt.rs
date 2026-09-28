@@ -4,8 +4,6 @@ use crate::gateway::proxy::protocol_bridge::cx2cc as bridge_cx2cc;
 use crate::gateway::upstream_identity;
 use axum::body::Bytes;
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue};
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine;
 
 pub(super) fn is_codex_chatgpt_backend(
     cli_key: &str,
@@ -41,22 +39,7 @@ fn normalize_codex_chatgpt_forwarded_path(forwarded_path: &str) -> String {
 }
 
 pub(super) fn parse_codex_chatgpt_account_id(id_token: Option<&str>) -> Option<String> {
-    let token = id_token.map(str::trim).filter(|value| !value.is_empty())?;
-    let payload_part = token.split('.').nth(1)?;
-    let payload = URL_SAFE_NO_PAD.decode(payload_part).ok().or_else(|| {
-        let mut padded = payload_part.to_string();
-        while padded.len() % 4 != 0 {
-            padded.push('=');
-        }
-        URL_SAFE_NO_PAD.decode(padded).ok()
-    })?;
-    let json: serde_json::Value = serde_json::from_slice(&payload).ok()?;
-    json.get("https://api.openai.com/auth")
-        .and_then(|value| value.get("chatgpt_account_id"))
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+    crate::gateway::oauth::adapters::codex::parse_chatgpt_account_id(id_token)
 }
 
 pub(super) fn maybe_inject_codex_chatgpt_headers(
@@ -73,9 +56,9 @@ pub(super) fn maybe_inject_codex_chatgpt_headers(
             HeaderValue::from_static(upstream_identity::CODEX_CLI_ORIGINATOR),
         );
     }
-    if headers.contains_key("chatgpt-account-id") {
-        return;
-    }
+    // Upstream account identity comes only from provider credentials; any
+    // client-supplied value must never reach the upstream.
+    headers.remove("chatgpt-account-id");
     let Some(value) = account_id.map(str::trim).filter(|value| !value.is_empty()) else {
         tracing::warn!("codex chatgpt: missing chatgpt-account-id, request may fail with 401");
         return;
@@ -306,6 +289,41 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("text/event-stream")
         );
+    }
+
+    #[test]
+    fn provider_account_id_overrides_client_supplied_account_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "chatgpt-account-id",
+            HeaderValue::from_static("acct_client"),
+        );
+
+        maybe_inject_codex_chatgpt_headers(&mut headers, Some("acct_provider"));
+
+        assert_eq!(
+            headers
+                .get("chatgpt-account-id")
+                .and_then(|value| value.to_str().ok()),
+            Some("acct_provider")
+        );
+    }
+
+    #[test]
+    fn missing_provider_account_id_removes_stale_account_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "chatgpt-account-id",
+            HeaderValue::from_static("acct_client"),
+        );
+
+        maybe_inject_codex_chatgpt_headers(&mut headers, None);
+
+        assert!(!headers.contains_key("chatgpt-account-id"));
+
+        maybe_inject_codex_chatgpt_headers(&mut headers, Some("   "));
+
+        assert!(!headers.contains_key("chatgpt-account-id"));
     }
 
     #[test]

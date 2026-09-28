@@ -23,6 +23,7 @@ pub(in crate::gateway) struct GatewayAppState<R: tauri::Runtime = tauri::Wry> {
     pub(super) latency_cache: Arc<Mutex<ProviderBaseUrlPingCache>>,
     pub(super) plugin_pipeline: Arc<GatewayPluginPipeline>,
     pub(super) active_requests: Arc<ActiveRequestRegistry>,
+    pub(super) responses_ws: Arc<super::responses_ws::state::Runtime>,
 }
 
 impl<R: tauri::Runtime> Clone for GatewayAppState<R> {
@@ -38,6 +39,7 @@ impl<R: tauri::Runtime> Clone for GatewayAppState<R> {
             latency_cache: self.latency_cache.clone(),
             plugin_pipeline: self.plugin_pipeline.clone(),
             active_requests: self.active_requests.clone(),
+            responses_ws: self.responses_ws.clone(),
         }
     }
 }
@@ -114,6 +116,7 @@ pub(super) struct GatewayRuntimeInit {
     pub(super) recent_errors: Arc<Mutex<RecentErrorCache>>,
     pub(super) plugin_pipeline: Arc<GatewayPluginPipeline>,
     pub(super) active_requests: Arc<ActiveRequestRegistry>,
+    pub(super) responses_ws: Arc<super::responses_ws::state::Runtime>,
     pub(super) shutdown: oneshot::Sender<()>,
     pub(super) task: tauri::async_runtime::JoinHandle<()>,
     pub(super) background_tasks: GatewayBackgroundTasks,
@@ -128,6 +131,7 @@ pub(crate) struct GatewayRuntime {
     recent_errors: Arc<Mutex<RecentErrorCache>>,
     plugin_pipeline: Arc<GatewayPluginPipeline>,
     active_requests: Arc<ActiveRequestRegistry>,
+    responses_ws: Arc<super::responses_ws::state::Runtime>,
     shutdown: oneshot::Sender<()>,
     task: tauri::async_runtime::JoinHandle<()>,
     background_tasks: GatewayBackgroundTasks,
@@ -144,6 +148,7 @@ impl GatewayRuntime {
             recent_errors: init.recent_errors,
             plugin_pipeline: init.plugin_pipeline,
             active_requests: init.active_requests,
+            responses_ws: init.responses_ws,
             shutdown: init.shutdown,
             task: init.task,
             background_tasks: init.background_tasks,
@@ -179,6 +184,9 @@ impl GatewayRuntime {
         &self,
         cli_key: &str,
     ) -> GatewayRouteRuntimeClearResult {
+        if cli_key == "codex" {
+            self.responses_ws.invalidate();
+        }
         GatewayRouteRuntimeClearResult {
             cleared_sessions: self.clear_cli_session_bindings(cli_key),
             cleared_recent_errors: self.clear_recent_errors(),
@@ -238,7 +246,12 @@ impl GatewayRuntime {
         self.plugin_pipeline.replace_plugins(plugins);
     }
 
+    pub(crate) fn set_responses_websocket_enabled(&self, enabled: bool) {
+        self.responses_ws.set_enabled(enabled);
+    }
+
     pub(super) fn into_handles(self) -> GatewayRuntimeHandles {
+        self.responses_ws.stop();
         self.active_requests
             .finish_all(ActiveRequestFinishReason::GatewayStopped);
         let (log_task, circuit_task, oauth_refresh_shutdown, oauth_refresh_task) =
@@ -250,6 +263,20 @@ impl GatewayRuntime {
             circuit_task,
             oauth_refresh_shutdown,
             oauth_refresh_task,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn responses_websocket_snapshot_for_tests(&self) -> (bool, u64) {
+        (self.responses_ws.enabled(), self.responses_ws.epoch())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_app_tests(rt: &tokio::runtime::Runtime) -> Self {
+        Self::for_tests(
+            rt,
+            Arc::new(session_manager::SessionManager::new()),
+            Arc::new(Mutex::new(RecentErrorCache::default())),
         )
     }
 
@@ -275,6 +302,7 @@ impl GatewayRuntime {
             recent_errors,
             plugin_pipeline: GatewayPluginPipeline::empty_shared(),
             active_requests: Arc::new(ActiveRequestRegistry::default()),
+            responses_ws: Arc::new(super::responses_ws::state::Runtime::new(false)),
             shutdown,
             task: tauri::async_runtime::JoinHandle::Tokio(rt.spawn(async {})),
             background_tasks: GatewayBackgroundTasks::for_tests(rt),

@@ -5,8 +5,7 @@ use crate::app_state::DbInitState;
 
 pub(crate) use crate::app::settings_service::{
     CircuitBreakerNoticeUpdate, CodexSessionIdCompletionUpdate, GatewayRectifierSettingsUpdate,
-    SensitiveStringUpdate, SettingsMutationResult, SettingsMutationRuntime, SettingsUpdate,
-    SettingsView,
+    SettingsMutationResult, SettingsUpdate, SettingsView,
 };
 
 #[tauri::command]

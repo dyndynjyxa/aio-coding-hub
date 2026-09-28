@@ -7,12 +7,14 @@ import { GatewayErrorCodes } from "../gatewayErrorCodes";
 import { HOME_USAGE_PERIOD_VALUES } from "../homeUsagePeriods";
 import { MAX_MODEL_NAME_LEN } from "../../schemas/providerEditorDialog";
 import { DEFAULT_ENABLE_CIRCUIT_BREAKER_NOTICE } from "../../services/gateway/circuitNotice";
+import { CODEX_SYSTEM_REQUEST_SPECIAL_SETTING } from "../../services/gateway/requestLogSpecialSettings";
 import { MAX_ATTEMPTS_PER_TRACE } from "../../services/gateway/traceLimits";
 import { SETTINGS_VALIDATION_LIMITS } from "../../services/settings/settingsValidation";
 import { getSettingsState, resetMswState } from "../../test/msw/state";
 import bindingsSource from "../../generated/bindings.ts?raw";
 import heartbeatSource from "../../../src-tauri/src/app/heartbeat_watchdog.rs?raw";
 import noticeSource from "../../../src-tauri/src/app/notice.rs?raw";
+import providerServiceSource from "../../../src-tauri/src/app/provider_service.rs?raw";
 import settingsServiceSource from "../../../src-tauri/src/app/settings_service.rs?raw";
 import startupStateSource from "../../../src-tauri/src/app/startup_state.rs?raw";
 import promptsSource from "../../../src-tauri/src/domain/prompts.rs?raw";
@@ -20,6 +22,7 @@ import providersValidationSource from "../../../src-tauri/src/domain/providers/v
 import workspacesSource from "../../../src-tauri/src/domain/workspaces.rs?raw";
 import providersTypesSource from "../../../src-tauri/src/domain/providers/types.rs?raw";
 import gatewayEventsSource from "../../../src-tauri/src/gateway/events.rs?raw";
+import codexRequestClassifierSource from "../../../src-tauri/src/gateway/proxy/handler/middleware/codex_request_classifier.rs?raw";
 import gatewayErrorCodeSource from "../../../src-tauri/src/gateway/proxy/error_code.rs?raw";
 import settingsDefaultsSource from "../../../src-tauri/src/infra/settings/defaults.rs?raw";
 import settingsPersistenceSource from "../../../src-tauri/src/infra/settings/persistence.rs?raw";
@@ -70,6 +73,9 @@ describe("cross-layer contracts", () => {
       appEventNames.heartbeat
     );
     expect(extractRustStringConst(noticeSource, "NOTICE_EVENT_NAME")).toBe(appEventNames.notice);
+    expect(extractRustStringConst(providerServiceSource, "PROVIDER_CODEX_CATALOG_EVENT_NAME")).toBe(
+      appEventNames.providerCodexCatalog
+    );
     expect(extractRustStringConst(startupStateSource, "APP_STARTUP_STATUS_EVENT_NAME")).toBe(
       appEventNames.startupStatus
     );
@@ -105,6 +111,18 @@ describe("cross-layer contracts", () => {
     );
   });
 
+  it("keeps the Codex system request marker aligned with Rust", () => {
+    expect(
+      extractRustStringConst(codexRequestClassifierSource, "CODEX_SYSTEM_REQUEST_SETTING_TYPE")
+    ).toBe(CODEX_SYSTEM_REQUEST_SPECIAL_SETTING.type);
+    expect(
+      extractRustStringConst(codexRequestClassifierSource, "CODEX_SYSTEM_REQUEST_THREAD_SOURCE")
+    ).toBe(CODEX_SYSTEM_REQUEST_SPECIAL_SETTING.threadSource);
+    expect(codexRequestClassifierSource).toContain(
+      '"threadSource": CODEX_SYSTEM_REQUEST_THREAD_SOURCE'
+    );
+  });
+
   it("keeps gateway event truncation limits aligned with the Rust emitter", () => {
     const pairs = [
       ["EVENT_METHOD_MAX_CHARS", GATEWAY_EVENT_TEXT_LIMITS.METHOD_MAX_LENGTH],
@@ -133,7 +151,19 @@ describe("cross-layer contracts", () => {
     // space-constraint design (attempts_json must gain zero bytes on success
     // paths); both sides pin the omission with dedicated tests (Rust key-set
     // assertions in failover_loop/tests.rs, absence handling in attemptsJson).
-    const exemptFields = ["circuit_recover_at_unix", "circuit_trigger_error_code"];
+    // claude_model_mapping / model_redirect on FailoverAttempt follow the same
+    // space-constraint design: most attempts carry no mapping, and the frontend
+    // reads the request-event level fields instead of per-attempt entries.
+    // terminal_signal is optional for legacy/non-stream request events; the
+    // Rust event test and gatewayEvents.contract.test.ts cover both its absence
+    // and an incomplete terminal so a dropped signal cannot silently pass.
+    const exemptFields = [
+      "circuit_recover_at_unix",
+      "circuit_trigger_error_code",
+      "claude_model_mapping",
+      "model_redirect",
+      "terminal_signal",
+    ];
     const skippedFields = Array.from(
       gatewayEventsSource.matchAll(
         /#\[serde\(skip_serializing_if[^\]]*\)\]\s*(?:pub(?:\([^)]*\))?\s+)?(\w+):/g

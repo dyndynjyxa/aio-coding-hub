@@ -8,7 +8,7 @@ use super::shell::write_file_synced;
 use super::types::{WslCliBackup, WslDistroManifest};
 
 pub(super) const WSL_MANIFEST_MAX_BYTES: usize = 256 * 1024;
-const WSL_MANIFEST_FILE_COUNT_MAX: usize = 256;
+pub(super) const WSL_MANIFEST_FILE_COUNT_MAX: usize = 256;
 pub(super) const WSL_CLIENT_CONFIG_MAX_BYTES: usize = 1024 * 1024;
 
 pub(super) fn wsl_manifests_dir<R: tauri::Runtime>(
@@ -130,10 +130,8 @@ pub(super) fn read_wsl_current_values(
                 resolve_wsl_codex_home_host_path(distro).unwrap_or_else(|_| home.join(".codex"));
             // config.toml
             let toml_path = codex_home.join("config.toml");
-            let toml_content = read_optional_utf8_file(&toml_path)
-                .ok()
-                .flatten()
-                .unwrap_or_default();
+            let toml_content = read_optional_utf8_file(&toml_path)?.unwrap_or_default();
+            capture_codex_provider_values(&toml_content, &mut map)?;
             map.insert(
                 "preferred_auth_method".to_string(),
                 extract_toml_value(&toml_content, "preferred_auth_method"),
@@ -224,26 +222,13 @@ fn read_existing_utf8_file(path: &std::path::Path) -> AppResult<String> {
     })
 }
 
-/// Extract a value from TOML like `key = "value"`.
-///
-/// NOTE: This is a simple line-based parser that assumes Codex `config.toml`
-/// consists of flat top-level `key = "value"` entries only (no sections, no
-/// inline tables, no multi-line values). If the format grows more complex,
-/// replace with the `toml` crate.
+/// Read only a root string value, preserving TOML quoting and table boundaries.
 pub(super) fn extract_toml_value(content: &str, key: &str) -> Option<String> {
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix(key) {
-            let rest = rest.trim();
-            if let Some(rest) = rest.strip_prefix('=') {
-                let rest = rest.trim().trim_matches('"');
-                if !rest.is_empty() {
-                    return Some(rest.to_string());
-                }
-            }
-        }
-    }
-    None
+    toml::from_str::<toml::Value>(content)
+        .ok()?
+        .get(key)?
+        .as_str()
+        .map(str::to_string)
 }
 
 /// Extract a value from .env like `KEY=value`.
@@ -263,6 +248,54 @@ pub(super) fn extract_env_value(content: &str, key: &str) -> Option<String> {
         }
     }
     None
+}
+
+pub(super) const CODEX_PROVIDER_BACKUP_PREFIX: &str = "model_providers.aio.";
+pub(super) const CODEX_PROVIDER_ORIGINAL_SECTION: &str = "model_providers.aio.__original_section";
+const CODEX_PROVIDER_MANAGED_KEYS: [&str; 5] = [
+    "name",
+    "base_url",
+    "wire_api",
+    "requires_openai_auth",
+    "supports_websockets",
+];
+
+pub(super) fn capture_codex_provider_values(
+    content: &str,
+    values: &mut std::collections::HashMap<String, Option<String>>,
+) -> AppResult<()> {
+    let document: toml::Value =
+        toml::from_str(content).map_err(|_| "failed to parse WSL Codex config.toml for backup")?;
+    let provider = document
+        .get("model_providers")
+        .and_then(|item| item.get(super::constants::WSL_CODEX_PROVIDER_KEY));
+    values
+        .entry(CODEX_PROVIDER_ORIGINAL_SECTION.to_string())
+        .or_insert_with(|| Some(provider.is_some().to_string()));
+    for key in CODEX_PROVIDER_MANAGED_KEYS {
+        values
+            .entry(format!("{CODEX_PROVIDER_BACKUP_PREFIX}{key}"))
+            .or_insert_with(|| {
+                provider
+                    .and_then(|item| item.get(key))
+                    .map(toml::Value::to_string)
+            });
+    }
+    Ok(())
+}
+
+pub(super) fn supplement_legacy_codex_provider_backup(
+    original_values: &mut std::collections::HashMap<String, Option<String>>,
+    current_values: &std::collections::HashMap<String, Option<String>>,
+) {
+    // Older manifests cannot establish whether the provider table originally existed.
+    original_values
+        .entry(CODEX_PROVIDER_ORIGINAL_SECTION.to_string())
+        .or_insert_with(|| Some("unknown".to_string()));
+    let key = format!("{CODEX_PROVIDER_BACKUP_PREFIX}supports_websockets");
+    original_values
+        .entry(key.clone())
+        .or_insert_with(|| current_values.get(&key).cloned().flatten());
 }
 
 // ── Codex TOML restore helpers ──
@@ -298,11 +331,56 @@ pub(super) fn restore_codex_config_toml(content: &str, backup: &WslCliBackup) ->
         restore_wsl_toml_string_key(table, backup, key);
     }
 
+    let original_section = backup
+        .original_values
+        .get(CODEX_PROVIDER_ORIGINAL_SECTION)
+        .and_then(|value| value.as_deref());
+    let has_saved_provider_values = CODEX_PROVIDER_MANAGED_KEYS.iter().any(|key| {
+        matches!(
+            backup
+                .original_values
+                .get(&format!("{CODEX_PROVIDER_BACKUP_PREFIX}{key}")),
+            Some(Some(_))
+        )
+    });
+    if (original_section == Some("true") || has_saved_provider_values)
+        && !table.contains_key("model_providers")
+    {
+        table.insert(
+            "model_providers".to_string(),
+            toml::Value::Table(Default::default()),
+        );
+    }
     let remove_model_providers = if let Some(model_providers) = table
         .get_mut("model_providers")
         .and_then(toml::Value::as_table_mut)
     {
-        model_providers.remove(super::constants::WSL_CODEX_PROVIDER_KEY);
+        let provider = model_providers
+            .entry(super::constants::WSL_CODEX_PROVIDER_KEY.to_string())
+            .or_insert_with(|| toml::Value::Table(Default::default()))
+            .as_table_mut()
+            .ok_or("WSL Codex proxy provider must be a table")?;
+        for key in CODEX_PROVIDER_MANAGED_KEYS {
+            match backup
+                .original_values
+                .get(&format!("{CODEX_PROVIDER_BACKUP_PREFIX}{key}"))
+            {
+                Some(Some(value)) => {
+                    let parsed: toml::Table = toml::from_str(&format!("value = {value}"))
+                        .map_err(|_| "invalid WSL Codex provider backup value")?;
+                    provider.insert(key.to_string(), parsed["value"].clone());
+                }
+                Some(None) => {
+                    provider.remove(key);
+                }
+                // Missing is unknown in legacy manifests, never evidence that a key
+                // or the containing table can be deleted.
+                None => {}
+            }
+        }
+        if original_section != Some("true") && provider.is_empty() {
+            model_providers.remove(super::constants::WSL_CODEX_PROVIDER_KEY);
+        }
         model_providers.is_empty()
     } else {
         false
@@ -543,4 +621,131 @@ pub fn startup_repair_wsl_manifests<R: tauri::Runtime>(app: &tauri::AppHandle<R>
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod websocket_backup_tests {
+    use super::*;
+
+    #[test]
+    fn wsl_legacy_websocket_backup_restores_only_recorded_keys_and_preserves_unknown_fields() {
+        for original in [None, Some(false), Some(true)] {
+            let mut source = "model_provider = \"aio\"\n[model_providers.aio]\nname = \"existing\"\nunknown = \"keep\"\n".to_string();
+            if let Some(value) = original {
+                source.push_str(&format!("supports_websockets = {value}\n"));
+            }
+            source.push_str("[model_providers.aio.http_headers]\ncustom = \"preserved\"\n");
+            let mut current = std::collections::HashMap::new();
+            capture_codex_provider_values(&source, &mut current).unwrap();
+            let mut values = std::collections::HashMap::from([(
+                "model_provider".to_string(),
+                Some("openai".to_string()),
+            )]);
+            supplement_legacy_codex_provider_backup(&mut values, &current);
+            assert_eq!(
+                values[CODEX_PROVIDER_ORIGINAL_SECTION].as_deref(),
+                Some("unknown")
+            );
+            assert!(!values.contains_key("model_providers.aio.name"));
+            let baseline = values.clone();
+            let configured = super::super::config_codex::build_wsl_codex_config(
+                &source,
+                "http://127.0.0.1:1",
+                true,
+            )
+            .unwrap();
+            let mut configured_values = std::collections::HashMap::new();
+            capture_codex_provider_values(&configured, &mut configured_values).unwrap();
+            supplement_legacy_codex_provider_backup(&mut values, &configured_values);
+            assert_eq!(values, baseline);
+            let mut backup = WslCliBackup {
+                cli_key: "codex".to_string(),
+                injected_keys: Default::default(),
+                original_values: values,
+            };
+            // Both upgraded and untouched legacy manifests must take the safe path.
+            for upgraded in [true, false] {
+                if !upgraded {
+                    backup
+                        .original_values
+                        .remove(CODEX_PROVIDER_ORIGINAL_SECTION);
+                }
+                let restored: toml::Value =
+                    toml::from_str(&restore_codex_config_toml(&configured, &backup).unwrap())
+                        .unwrap();
+                assert_eq!(restored["model_provider"].as_str(), Some("openai"));
+                assert_eq!(
+                    restored["model_providers"]["aio"]
+                        .get("supports_websockets")
+                        .and_then(toml::Value::as_bool),
+                    original
+                );
+                assert_eq!(
+                    restored["model_providers"]["aio"]["unknown"].as_str(),
+                    Some("keep")
+                );
+                assert_eq!(
+                    restored["model_providers"]["aio"]["http_headers"]["custom"].as_str(),
+                    Some("preserved")
+                );
+                assert_eq!(
+                    restored["model_providers"]["aio"]["name"].as_str(),
+                    Some("aio")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn wsl_websocket_reentry_keeps_first_values_and_unknown_provider_fields() {
+        for original in [None, Some(false), Some(true)] {
+            let mut source = "model_provider = \"custom\"\n[model_providers.aio]\nname = \"original\"\nunknown = \"keep\"\n".to_string();
+            if let Some(value) = original {
+                source.push_str(&format!("supports_websockets = {value}\n"));
+            }
+            source.push_str("[model_providers.aio.http_headers]\ncustom = \"preserved\"\n");
+            let mut values = std::collections::HashMap::new();
+            capture_codex_provider_values(&source, &mut values).unwrap();
+            let original_values = values.clone();
+            let enabled = super::super::config_codex::build_wsl_codex_config(
+                &source,
+                "http://127.0.0.1:1",
+                true,
+            )
+            .unwrap();
+            capture_codex_provider_values(&enabled, &mut values).unwrap();
+            assert_eq!(values, original_values);
+            let disabled = super::super::config_codex::build_wsl_codex_config(
+                &enabled,
+                "http://127.0.0.1:2",
+                false,
+            )
+            .unwrap();
+            let backup = WslCliBackup {
+                cli_key: "codex".to_string(),
+                injected_keys: Default::default(),
+                original_values: values,
+            };
+            let restored: toml::Value =
+                toml::from_str(&restore_codex_config_toml(&disabled, &backup).unwrap()).unwrap();
+            assert_eq!(
+                restored["model_providers"]["aio"]
+                    .get("supports_websockets")
+                    .and_then(toml::Value::as_bool),
+                original
+            );
+            assert_eq!(
+                restored["model_providers"]["aio"]["name"].as_str(),
+                Some("original")
+            );
+            assert_eq!(
+                restored["model_providers"]["aio"]["unknown"].as_str(),
+                Some("keep")
+            );
+            assert_eq!(
+                restored["model_providers"]["aio"]["http_headers"]["custom"].as_str(),
+                Some("preserved")
+            );
+        }
+    }
 }

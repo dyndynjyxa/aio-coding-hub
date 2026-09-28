@@ -1,6 +1,144 @@
 use super::*;
 
 #[test]
+fn migrate_v37_to_v38_adds_model_policy_without_clearing_legacy_fields() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+    conn.execute_batch(
+        r#"
+CREATE TABLE providers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cli_key TEXT NOT NULL,
+  name TEXT NOT NULL,
+  base_url TEXT NOT NULL,
+  api_key_plaintext TEXT NOT NULL,
+  claude_models_json TEXT NOT NULL DEFAULT '{}',
+  supported_models_json TEXT NOT NULL DEFAULT '{}',
+  model_mapping_json TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+INSERT INTO providers(
+  cli_key, name, base_url, api_key_plaintext, claude_models_json,
+  supported_models_json, model_mapping_json, created_at, updated_at
+) VALUES
+  ('claude', 'legacy', 'https://example.com', 'sk', '{"main_model":"legacy-main"}', '{"legacy":1}', '{"legacy":2}', 1, 1),
+  ('codex', 'default', 'https://example.com', 'sk', '{}', '{"legacy":3}', '{"legacy":4}', 1, 1);
+PRAGMA user_version = 37;
+        "#,
+    )
+    .expect("insert v37 providers");
+
+    v37_to_v38::migrate_v37_to_v38(&mut conn).expect("migrate v37->v38");
+
+    let rows: Vec<(String, Option<String>, String, String)> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT cli_key, model_policy_json, supported_models_json, model_mapping_json FROM providers ORDER BY id DESC LIMIT 2",
+            )
+            .expect("prepare policy rows");
+        stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .expect("query policy rows")
+        .collect::<Result<_, _>>()
+        .expect("read policy rows")
+    };
+    assert_eq!(rows[0].0, "codex");
+    assert_eq!(
+        rows[0].1.as_deref(),
+        Some(r#"{"version":1,"mode":"all","modelPatterns":[],"mappings":[]}"#)
+    );
+    assert_eq!(rows[0].2, r#"{"legacy":3}"#);
+    assert_eq!(rows[0].3, r#"{"legacy":4}"#);
+    assert_eq!(rows[1].0, "claude");
+    assert!(rows[1].1.is_none());
+    assert_eq!(rows[1].2, r#"{"legacy":1}"#);
+    assert_eq!(rows[1].3, r#"{"legacy":2}"#);
+
+    conn.execute(
+        "INSERT INTO providers(cli_key, name, base_url, api_key_plaintext, created_at, updated_at) VALUES ('gemini', 'new', 'https://example.com', 'sk', 1, 1)",
+        [],
+    )
+    .expect("insert provider using v38 model policy default");
+    let default_policy: Option<String> = conn
+        .query_row(
+            "SELECT model_policy_json FROM providers WHERE name = 'new'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read v38 model policy default");
+    assert_eq!(
+        default_policy.as_deref(),
+        Some(r#"{"version":1,"mode":"all","modelPatterns":[],"mappings":[]}"#)
+    );
+
+    v37_to_v38::migrate_v37_to_v38(&mut conn).expect("migrate v37->v38 twice");
+}
+
+#[test]
+fn migrate_v38_to_v39_adds_and_backfills_model_prices_vendor() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+    conn.execute_batch(
+        r#"
+CREATE TABLE model_prices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cli_key TEXT NOT NULL,
+  model TEXT NOT NULL,
+  price_json TEXT NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(cli_key, model)
+);
+INSERT INTO model_prices(cli_key, model, price_json, created_at, updated_at) VALUES
+  ('claude', 'claude-opus-4-5', '{}', 1, 1),
+  ('codex', 'gpt-5.4', '{}', 1, 1),
+  ('gemini', 'gemini-3-pro', '{}', 1, 1),
+  ('grok', 'grok-5', '{}', 1, 1);
+PRAGMA user_version = 38;
+        "#,
+    )
+    .expect("insert v38 model_prices");
+
+    v38_to_v39::migrate_v38_to_v39(&mut conn).expect("migrate v38->v39");
+
+    let vendors: Vec<(String, String)> = {
+        let mut stmt = conn
+            .prepare("SELECT cli_key, vendor FROM model_prices ORDER BY cli_key")
+            .expect("prepare vendor rows");
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .expect("query vendor rows")
+            .collect::<Result<_, _>>()
+            .expect("read vendor rows")
+    };
+    assert_eq!(
+        vendors,
+        vec![
+            ("claude".to_string(), "anthropic".to_string()),
+            ("codex".to_string(), "openai".to_string()),
+            ("gemini".to_string(), "google".to_string()),
+            ("grok".to_string(), "xai".to_string()),
+        ]
+    );
+
+    // Re-running must not fail or clobber a vendor written by a newer sync.
+    conn.execute(
+        "UPDATE model_prices SET vendor = 'deepseek' WHERE cli_key = 'claude'",
+        [],
+    )
+    .expect("simulate synced vendor");
+    v38_to_v39::migrate_v38_to_v39(&mut conn).expect("migrate v38->v39 twice");
+    let vendor: String = conn
+        .query_row(
+            "SELECT vendor FROM model_prices WHERE cli_key = 'claude'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read vendor after rerun");
+    assert_eq!(vendor, "deepseek");
+}
+
+#[test]
 fn migrate_v32_to_v33_backfills_pool_and_default_route_orders() {
     let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
     conn.execute_batch(
@@ -1275,6 +1413,8 @@ fn baseline_v25_creates_complete_schema_for_fresh_install() {
     assert!(tables.contains(&"sort_mode_providers".to_string()));
     assert!(tables.contains(&"sort_mode_active".to_string()));
     assert!(tables.contains(&"claude_model_validation_runs".to_string()));
+    assert!(tables.contains(&"image_gen_configs".to_string()));
+    assert!(tables.contains(&"image_gen_tasks".to_string()));
     assert!(tables.contains(&"plugin_hook_execution_reports".to_string()));
     assert!(tables.contains(&"schema_migrations".to_string()));
 
@@ -1318,6 +1458,179 @@ fn baseline_v25_creates_complete_schema_for_fresh_install() {
 
     // Idempotent: second run should succeed
     apply_migrations(&mut conn).expect("apply migrations twice");
+}
+
+#[test]
+fn ensure_patches_seed_grok_workspace_once_without_resetting_active_workspace() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+    conn.execute_batch("PRAGMA foreign_keys = ON;")
+        .expect("enable foreign_keys");
+
+    apply_migrations(&mut conn).expect("apply migrations on fresh db");
+
+    let default_id: i64 = conn
+        .query_row(
+            "SELECT id FROM workspaces WHERE cli_key = 'grok' AND name = '默认'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read Grok default workspace");
+    let initial_active_id: i64 = conn
+        .query_row(
+            "SELECT workspace_id FROM workspace_active WHERE cli_key = 'grok'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read Grok active workspace");
+    assert_eq!(initial_active_id, default_id);
+
+    conn.execute(
+        "INSERT INTO workspaces(cli_key, name, normalized_name, created_at, updated_at) VALUES ('grok', 'Custom', 'custom', 1, 1)",
+        [],
+    )
+    .expect("insert custom Grok workspace");
+    let custom_id = conn.last_insert_rowid();
+    conn.execute(
+        "UPDATE workspace_active SET workspace_id = ?1, updated_at = 2 WHERE cli_key = 'grok'",
+        [custom_id],
+    )
+    .expect("activate custom Grok workspace");
+
+    apply_migrations(&mut conn).expect("apply migrations twice");
+
+    let default_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(1) FROM workspaces WHERE cli_key = 'grok' AND name = '默认'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count Grok default workspaces");
+    let active_id: i64 = conn
+        .query_row(
+            "SELECT workspace_id FROM workspace_active WHERE cli_key = 'grok'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read preserved Grok active workspace");
+
+    assert_eq!(default_count, 1);
+    assert_eq!(active_id, custom_id);
+}
+
+#[test]
+fn migrate_v35_to_v36_creates_image_gen_configs_and_is_idempotent() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+
+    v35_to_v36::migrate_v35_to_v36(&mut conn).expect("migrate v35->v36");
+
+    assert!(test_has_table(&conn, "image_gen_configs"));
+    for column in [
+        "adapter_id",
+        "base_url",
+        "api_key_plaintext",
+        "model",
+        "created_at",
+        "updated_at",
+    ] {
+        assert!(
+            test_has_column(&conn, "image_gen_configs", column),
+            "missing image_gen_configs column: {column}"
+        );
+    }
+
+    let user_version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read user_version");
+    assert_eq!(user_version, 36);
+
+    // Idempotent: second run should succeed.
+    v35_to_v36::migrate_v35_to_v36(&mut conn).expect("migrate v35->v36 twice");
+}
+
+#[test]
+fn apply_migrations_upgrades_v35_schema_to_v36() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+    apply_migrations(&mut conn).expect("create current schema");
+
+    // Simulate a v35 database (before image_gen_configs existed).
+    conn.execute_batch(
+        r#"
+DROP TABLE image_gen_configs;
+PRAGMA user_version = 35;
+"#,
+    )
+    .expect("simulate v35 schema");
+    assert!(!test_has_table(&conn, "image_gen_configs"));
+
+    apply_migrations(&mut conn).expect("apply migrations from v35");
+
+    assert!(test_has_table(&conn, "image_gen_configs"));
+    let user_version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read user_version");
+    assert_eq!(user_version, LATEST_SCHEMA_VERSION);
+}
+
+#[test]
+fn migrate_v36_to_v37_creates_image_gen_tasks_and_is_idempotent() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+
+    v36_to_v37::migrate_v36_to_v37(&mut conn).expect("migrate v36->v37");
+
+    assert!(test_has_table(&conn, "image_gen_tasks"));
+    for column in [
+        "id",
+        "adapter_id",
+        "prompt",
+        "request_json",
+        "status",
+        "error",
+        "usage_json",
+        "images_json",
+        "ref_images_json",
+        "dir",
+        "created_at",
+        "elapsed_ms",
+    ] {
+        assert!(
+            test_has_column(&conn, "image_gen_tasks", column),
+            "missing image_gen_tasks column: {column}"
+        );
+    }
+    assert!(test_has_index(&conn, "idx_image_gen_tasks_created"));
+
+    let user_version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read user_version");
+    assert_eq!(user_version, 37);
+
+    // Idempotent: second run should succeed.
+    v36_to_v37::migrate_v36_to_v37(&mut conn).expect("migrate v36->v37 twice");
+}
+
+#[test]
+fn apply_migrations_upgrades_v36_schema_to_v37() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+    apply_migrations(&mut conn).expect("create current schema");
+
+    // Simulate a v36 database (before image_gen_tasks existed).
+    conn.execute_batch(
+        r#"
+DROP TABLE image_gen_tasks;
+PRAGMA user_version = 36;
+"#,
+    )
+    .expect("simulate v36 schema");
+    assert!(!test_has_table(&conn, "image_gen_tasks"));
+
+    apply_migrations(&mut conn).expect("apply migrations from v36");
+
+    assert!(test_has_table(&conn, "image_gen_tasks"));
+    assert!(test_has_index(&conn, "idx_image_gen_tasks_created"));
+    let user_version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read user_version");
+    assert_eq!(user_version, LATEST_SCHEMA_VERSION);
 }
 
 #[test]
@@ -1517,4 +1830,40 @@ PRAGMA user_version = 33;
     assert_eq!(enabled_mcp, 1);
 
     apply_migrations(&mut conn).expect("apply migrations twice");
+}
+
+#[test]
+fn ensure_supports_websockets_defaults_old_rows_and_preserves_true() {
+    let mut conn = Connection::open_in_memory().expect("open sqlite");
+    apply_migrations(&mut conn).expect("fresh schema");
+    assert!(test_has_column(&conn, "providers", "supports_websockets"));
+    conn.execute_batch(
+        "ALTER TABLE providers DROP COLUMN supports_websockets;
+         INSERT INTO providers(cli_key, name, base_url, api_key_plaintext, created_at, updated_at)
+         VALUES ('codex', 'legacy-ws', 'https://example.com', 'test-key', 1, 1);",
+    )
+    .expect("legacy schema without capability");
+    apply_migrations(&mut conn).expect("ensure capability");
+    let capability: bool = conn
+        .query_row(
+            "SELECT supports_websockets FROM providers WHERE name = 'legacy-ws'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("legacy default");
+    assert!(!capability);
+    conn.execute(
+        "UPDATE providers SET supports_websockets = 1 WHERE name = 'legacy-ws'",
+        [],
+    )
+    .expect("enable capability");
+    apply_migrations(&mut conn).expect("repeat ensure");
+    let capability: bool = conn
+        .query_row(
+            "SELECT supports_websockets FROM providers WHERE name = 'legacy-ws'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("preserved capability");
+    assert!(capability);
 }

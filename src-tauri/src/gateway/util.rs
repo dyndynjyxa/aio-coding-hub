@@ -296,6 +296,7 @@ fn is_sensitive_header_name(name: &str) -> bool {
             | "x-xsrf-token"
             | "access-token"
             | "refresh-token"
+            | "x-codex-turn-state"
     ) || name.contains("api-key")
         || name.contains("apikey")
         || name.contains("token")
@@ -380,12 +381,7 @@ fn sanitize_model(model: &str) -> Option<String> {
     if model.is_empty() {
         return None;
     }
-    let model = if model.len() > 200 {
-        model[..200].to_string()
-    } else {
-        model.to_string()
-    };
-    Some(model)
+    Some(model.to_string())
 }
 
 fn extract_model_from_query(query: &str) -> Option<String> {
@@ -498,7 +494,7 @@ pub(super) fn strip_hop_headers(headers: &mut HeaderMap) {
     headers.remove(header::UPGRADE);
 }
 
-pub(super) fn build_target_url(
+pub(crate) fn build_target_url(
     base_url: &str,
     forwarded_path: &str,
     query: Option<&str>,
@@ -536,13 +532,14 @@ pub(super) fn build_target_url(
     Ok(url)
 }
 
-/// Clear all authentication-related headers (fail-closed pattern).
-/// Single source of truth for which headers carry credentials.
+/// Clear all authentication and upstream-identity headers (fail-closed pattern).
+/// Single source of truth for which headers carry credentials or account identity.
 pub(super) fn clear_all_auth_headers(headers: &mut HeaderMap) {
     headers.remove(header::AUTHORIZATION);
     headers.remove("x-api-key");
     headers.remove("x-goog-api-key");
     headers.remove("x-goog-api-client");
+    headers.remove("chatgpt-account-id");
 }
 
 pub(super) fn inject_provider_auth(cli_key: &str, api_key: &str, headers: &mut HeaderMap) {
@@ -562,9 +559,10 @@ pub(super) fn ensure_cli_required_headers(cli_key: &str, headers: &mut HeaderMap
 #[cfg(test)]
 mod tests {
     use super::{
-        compute_all_providers_unavailable_fingerprint, compute_request_fingerprint,
-        inject_provider_auth, lossy_utf8_preview, normalize_query_for_fingerprint,
-        parse_request_body_limit_mb, redacted_headers_for_debug, DEFAULT_MAX_REQUEST_BODY_MB,
+        clear_all_auth_headers, compute_all_providers_unavailable_fingerprint,
+        compute_request_fingerprint, infer_requested_model_info, inject_provider_auth,
+        lossy_utf8_preview, normalize_query_for_fingerprint, parse_request_body_limit_mb,
+        redacted_headers_for_debug, RequestedModelLocation, DEFAULT_MAX_REQUEST_BODY_MB,
         FINGERPRINT_DEBUG_COMPONENT_MAX_BYTES, MAX_DEBUG_HEADER_VALUE_PREVIEW_BYTES,
         MAX_REQUEST_BODY_MB, MIN_REQUEST_BODY_MB,
     };
@@ -598,6 +596,20 @@ mod tests {
     fn normalize_query_keeps_order_when_duplicate_keys_exist() {
         let normalized = normalize_query_for_fingerprint(Some("a=2&a=1&b=3"));
         assert_eq!(normalized.as_deref(), Some("a=2&a=1&b=3"));
+    }
+
+    #[test]
+    fn requested_model_inference_preserves_long_unicode_model_ids() {
+        let model = format!("model-{}", "模".repeat(201));
+        let body = serde_json::json!({ "model": &model });
+        let body_result = infer_requested_model_info("/v1/messages", None, Some(&body));
+        assert_eq!(body_result.model.as_deref(), Some(model.as_str()));
+        assert_eq!(body_result.location, Some(RequestedModelLocation::BodyJson));
+
+        let path = format!("/v1beta/models/{model}:generateContent");
+        let path_result = infer_requested_model_info(&path, None, None);
+        assert_eq!(path_result.model.as_deref(), Some(model.as_str()));
+        assert_eq!(path_result.location, Some(RequestedModelLocation::Path));
     }
 
     #[test]
@@ -832,5 +844,50 @@ mod tests {
             .unwrap_or("")
             .starts_with("Bearer "));
         assert!(!headers.contains_key("x-api-key"));
+    }
+
+    #[test]
+    fn inject_provider_auth_grok_replaces_client_credentials_with_bearer() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer client-secret"),
+        );
+        headers.insert("x-api-key", HeaderValue::from_static("client-api-key"));
+        headers.insert(
+            "x-goog-api-key",
+            HeaderValue::from_static("client-google-key"),
+        );
+
+        inject_provider_auth("grok", "provider-test-key", &mut headers);
+
+        assert_eq!(
+            headers
+                .get(header::AUTHORIZATION)
+                .and_then(|value| value.to_str().ok()),
+            Some("Bearer provider-test-key")
+        );
+        assert!(!headers.contains_key("x-api-key"));
+        assert!(!headers.contains_key("x-goog-api-key"));
+    }
+
+    #[test]
+    fn clear_all_auth_headers_removes_client_identity_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer client-secret"),
+        );
+        headers.insert(
+            "chatgpt-account-id",
+            HeaderValue::from_static("acct_client"),
+        );
+        headers.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
+
+        clear_all_auth_headers(&mut headers);
+
+        assert!(!headers.contains_key(header::AUTHORIZATION));
+        assert!(!headers.contains_key("chatgpt-account-id"));
+        assert!(headers.contains_key(header::ACCEPT));
     }
 }

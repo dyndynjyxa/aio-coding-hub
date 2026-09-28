@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
-import { cliBadgeTone, cliShortLabel } from "../constants/clis";
+import { cliBadgeTone, cliShortLabel, createCliRecord } from "../constants/clis";
 import { useNowUnix } from "../hooks/useNowUnix";
 import type { CliKey } from "../services/providers/providers";
+import type { CircuitDisplayState } from "../query/gateway";
 import { Button } from "../ui/Button";
 import { Popover } from "../ui/Popover";
 import { cn } from "../utils/cn";
@@ -11,9 +12,20 @@ export type OpenCircuitRow = {
   cli_key: CliKey;
   provider_id: number;
   provider_name: string;
-  // Unix seconds until provider becomes available again.
-  // Note: This value may represent either "OPEN" (circuit breaker open) or a short cooldown window.
+  displayState: Exclude<CircuitDisplayState, "healthy">;
+  // Unix seconds until provider becomes available again (open / cooldown 行)。
+  // half_open 行无 until 语义，恒为 null。
   open_until: number | null;
+};
+
+// 主页熔断徽章 popover 与概览“熔断信息”面板共用的行状态词/配色，防止两处漂移。
+export const CIRCUIT_ROW_STATUS: Record<
+  OpenCircuitRow["displayState"],
+  { label: string; className: string }
+> = {
+  open: { label: "熔断", className: "text-rose-600 dark:text-rose-400" },
+  cooldown: { label: "冷却中", className: "text-muted-foreground" },
+  half_open: { label: "试探恢复中", className: "text-amber-600 dark:text-amber-400" },
 };
 
 export type ProviderCircuitBadgeProps = {
@@ -28,6 +40,8 @@ export function ProviderCircuitBadge({
   resettingProviderIds,
 }: ProviderCircuitBadgeProps) {
   const count = rows.length;
+  const unavailableCount = rows.filter((row) => row.displayState !== "half_open").length;
+  const halfOpenCount = count - unavailableCount;
   const [popoverState, setPopoverState] = useState({ rowCount: count, open: false });
   let popoverOpen = popoverState.open;
 
@@ -39,11 +53,7 @@ export function ProviderCircuitBadge({
   const nowUnix = useNowUnix(popoverOpen);
 
   const groupedByCli = useMemo(() => {
-    const grouped: Record<CliKey, OpenCircuitRow[]> = {
-      claude: [],
-      codex: [],
-      gemini: [],
-    };
+    const grouped = createCliRecord<OpenCircuitRow[]>(() => []);
 
     for (const row of rows) {
       if (grouped[row.cli_key]) {
@@ -84,18 +94,28 @@ export function ProviderCircuitBadge({
         <span
           className={cn(
             "inline-flex items-center rounded-lg px-3 py-2 text-sm font-semibold transition-colors duration-200",
-            popoverOpen
-              ? "bg-rose-600 text-white shadow-sm"
-              : "bg-rose-50 text-rose-700 border border-rose-200/60 hover:bg-rose-100 dark:bg-rose-900/30 dark:text-rose-400 dark:border-rose-700/60 dark:hover:bg-rose-900/50"
+            // 存在 open/cooldown 行时保持红色；仅剩半开行时整体转琥珀“试探恢复”。
+            unavailableCount > 0
+              ? popoverOpen
+                ? "bg-rose-600 text-white shadow-sm"
+                : "bg-rose-50 text-rose-700 border border-rose-200/60 hover:bg-rose-100 dark:bg-rose-900/30 dark:text-rose-400 dark:border-rose-700/60 dark:hover:bg-rose-900/50"
+              : popoverOpen
+                ? "bg-amber-600 text-white shadow-sm"
+                : "bg-amber-50 text-amber-700 border border-amber-200/60 hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-700/60 dark:hover:bg-amber-900/50"
           )}
         >
-          当前熔断 {count}
+          {unavailableCount > 0
+            ? `当前熔断 ${unavailableCount}${halfOpenCount > 0 ? ` · 恢复中 ${halfOpenCount}` : ""}`
+            : `试探恢复 ${halfOpenCount}`}
         </span>
       }
       contentClassName="w-[480px] overflow-hidden rounded-2xl border border-border bg-white dark:bg-secondary shadow-card"
     >
       <div className="border-b border-border px-4 py-3">
-        <span className="text-sm font-semibold text-foreground">熔断列表 ({count})</span>
+        <span className="text-sm font-semibold text-foreground">
+          {/* 仅半开行时不再称"熔断"，与触发器状态词保持一致。 */}
+          {unavailableCount > 0 ? `熔断列表 (${count})` : `试探恢复列表 (${count})`}
+        </span>
       </div>
       <div className="max-h-[400px] overflow-y-auto p-3">
         {visibleCliKeys.map((cliKey) => (
@@ -110,15 +130,19 @@ export function ProviderCircuitBadge({
                 {cliShortLabel(cliKey)}
               </span>
               <span className="text-xs text-muted-foreground">
-                {groupedByCli[cliKey].length} 个熔断
+                {groupedByCli[cliKey].length} 个供应商
               </span>
             </div>
             <div className="space-y-2">
               {groupedByCli[cliKey].map((row) => {
+                const status = CIRCUIT_ROW_STATUS[row.displayState];
+                // half_open 无 until 语义，不渲染倒计时。
                 const remaining =
-                  row.open_until != null && Number.isFinite(row.open_until)
+                  row.displayState !== "half_open" &&
+                  row.open_until != null &&
+                  Number.isFinite(row.open_until)
                     ? formatCountdownSeconds(row.open_until - nowUnix)
-                    : "—";
+                    : null;
                 const isResetting = resettingProviderIds.has(row.provider_id);
                 return (
                   <div
@@ -133,8 +157,11 @@ export function ProviderCircuitBadge({
                         {row.provider_name || "未知"}
                       </div>
                     </div>
-                    <div className="shrink-0 font-mono text-xs text-muted-foreground">
-                      {remaining}
+                    <div className="shrink-0 text-xs">
+                      <span className={cn("font-medium", status.className)}>{status.label}</span>
+                      {remaining != null ? (
+                        <span className="ml-1 font-mono text-muted-foreground">{remaining}</span>
+                      ) : null}
                     </div>
                     <Button
                       variant="secondary"

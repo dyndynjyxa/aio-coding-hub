@@ -279,11 +279,12 @@ pub(super) async fn prepare<R: tauri::Runtime>(args: Cx2ccPreparationInput<'_, R
             args.provider_name_base
         ),
     );
-    response_fixer::push_special_setting(
+    response_fixer::upsert_cx2cc_cost_basis(
         &args.input.special_settings,
         serde_json::json!({
             "type": "cx2cc_cost_basis",
             "scope": "request",
+            "bridge_provider_id": args.provider_id,
             "source_cli_key": source_cli_key,
             "source_provider_id": args.source_id,
             "source_provider_name": source_provider_name,

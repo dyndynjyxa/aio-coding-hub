@@ -1,42 +1,22 @@
-fn embed_windows_test_manifest() {
-    let target_os = std::env::var("CARGO_CFG_TARGET_OS").ok();
-    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").ok();
-    if target_os.as_deref() != Some("windows") || target_env.as_deref() != Some("msvc") {
-        return;
-    }
-
-    // Windows cargo test integration binaries do not get the Tauri app manifest by default.
-    // That leaves the test exe without a resource section, so desktop dependencies such as
-    // comctl32 may resolve the legacy Common Controls DLL and fail at process startup
-    // (STATUS_ENTRYPOINT_NOT_FOUND) before any Rust test code runs.
-    let manifest = r#"<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <dependency>
-    <dependentAssembly>
-      <assemblyIdentity
-        type="win32"
-        name="Microsoft.Windows.Common-Controls"
-        version="6.0.0.0"
-        processorArchitecture="*"
-        publicKeyToken="6595b64144ccf1df"
-        language="*"
-      />
-    </dependentAssembly>
-  </dependency>
-</assembly>
-"#;
-
-    let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
-    let manifest_path = out_dir.join("windows-test-manifest.xml");
-    std::fs::write(&manifest_path, manifest).expect("write windows test manifest");
-
-    println!("cargo:rustc-link-arg-tests=/MANIFEST:EMBED");
-    println!(
-        "cargo:rustc-link-arg-tests=/MANIFESTINPUT:{}",
-        manifest_path.display()
-    );
-}
-
 fn main() {
-    embed_windows_test_manifest();
-    tauri_build::build()
+    let is_windows_msvc = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
+        && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc");
+
+    let attributes = if is_windows_msvc {
+        // tauri-build's resource manifest only reaches app binaries. Let the linker add the
+        // Common Controls v6 dependency to every artifact, including the lib test harness.
+        println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
+        println!(
+            "cargo:rustc-link-arg=/MANIFESTDEPENDENCY:type='win32' \
+             name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
+             processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'"
+        );
+
+        tauri_build::Attributes::new()
+            .windows_attributes(tauri_build::WindowsAttributes::new_without_app_manifest())
+    } else {
+        tauri_build::Attributes::new()
+    };
+
+    tauri_build::try_build(attributes).expect("failed to run tauri build script");
 }

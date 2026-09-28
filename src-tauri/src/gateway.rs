@@ -2,29 +2,37 @@ pub(crate) mod active_requests;
 mod background_tasks;
 mod billing_header_rectifier;
 mod binder;
+mod claude_client_fingerprint;
 mod claude_metadata_user_id_injection;
 pub(crate) mod cli_auth;
 mod codex_session_id;
 pub(crate) mod control_service;
 pub(crate) mod events;
+mod gemini_function_id_rectifier;
 pub(crate) mod http_client;
 pub(crate) mod listen;
 pub(crate) mod manager;
 pub(crate) mod oauth;
 pub(crate) mod plugins;
 mod proxy;
+mod reactive_rectifier;
 mod response_fixer;
+mod response_input_rectifier;
+mod response_output_normalizer;
+mod responses_ws;
 mod routes;
 pub(crate) mod runtime;
 pub(crate) mod session_manager;
 mod streams;
 mod thinking_budget_rectifier;
+mod thinking_effort_conflict_rectifier;
 mod thinking_signature_rectifier;
 mod upstream_fingerprint;
 mod upstream_identity;
 pub(crate) mod util;
 mod warmup;
 
+use crate::providers;
 use crate::settings;
 use serde::Serialize;
 
@@ -57,4 +65,14 @@ pub(crate) fn listen_rebind_required(
     next: &settings::AppSettings,
 ) -> bool {
     binder::listen_rebind_required(previous, next)
+}
+
+pub(crate) async fn select_provider_base_url_for_discovery(
+    base_urls: &[String],
+    mode: providers::ProviderBaseUrlMode,
+) -> String {
+    let client = http_client::get();
+    proxy::select_base_url_by_mode(&client, base_urls, mode)
+        .await
+        .0
 }

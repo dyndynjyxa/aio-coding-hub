@@ -30,6 +30,7 @@ describe("pages/home/hooks/useHomeFreshnessOwner", () => {
 
   it("coalesces duplicate complete signals into one request logs refresh", async () => {
     vi.useFakeTimers();
+    const refreshActiveRequests = vi.fn().mockResolvedValue(null);
     const refreshRequestLogs = vi.fn().mockResolvedValue(null);
     let eventHandler:
       | ((payload: {
@@ -54,6 +55,7 @@ describe("pages/home/hooks/useHomeFreshnessOwner", () => {
         overviewActive: true,
         foregroundActive: true,
         requestLogsRefreshWindowMs: 1000,
+        onRefreshActiveRequests: refreshActiveRequests,
         onRefreshRequestLogs: refreshRequestLogs,
       })
     );
@@ -74,10 +76,76 @@ describe("pages/home/hooks/useHomeFreshnessOwner", () => {
     });
 
     expect(refreshRequestLogs).toHaveBeenCalledTimes(1);
+    expect(refreshActiveRequests).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
 
-  it("waits for foreground-active state before refreshing from foreground events", async () => {
+  it("queues a fresh active snapshot when complete arrives during a start refresh", async () => {
+    vi.useFakeTimers();
+    let resolveFirstRefresh: (() => void) | null = null;
+    const refreshActiveRequests = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirstRefresh = () => resolve(null);
+          })
+      )
+      .mockResolvedValueOnce(null);
+    const refreshRequestLogs = vi.fn().mockResolvedValue(null);
+    let eventHandler:
+      | ((payload: {
+          trace_id: string;
+          cli_key: string;
+          phase: "start" | "complete";
+          ts: number;
+        }) => void)
+      | null = null;
+
+    vi.mocked(subscribeGatewayEvent).mockImplementation((_event: string, handler: any) => {
+      eventHandler = handler;
+      return { ready: Promise.resolve(), unsubscribe: vi.fn() };
+    });
+
+    const view = renderHook(() =>
+      useHomeFreshnessOwner({
+        overviewActive: true,
+        foregroundActive: true,
+        requestLogsRefreshWindowMs: 1_000,
+        onRefreshActiveRequests: refreshActiveRequests,
+        onRefreshRequestLogs: refreshRequestLogs,
+      })
+    );
+
+    act(() => {
+      eventHandler?.({ trace_id: "t-1", cli_key: "claude", phase: "start", ts: 1 });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(refreshActiveRequests).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      eventHandler?.({ trace_id: "t-1", cli_key: "claude", phase: "complete", ts: 2 });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(refreshActiveRequests).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveFirstRefresh?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(refreshActiveRequests).toHaveBeenCalledTimes(2);
+    expect(refreshRequestLogs).not.toHaveBeenCalled();
+
+    view.unmount();
+    vi.useRealTimers();
+  });
+
+  it("refreshes from foreground events while overview is active even if the foreground prop lags", async () => {
     vi.useFakeTimers();
     const refreshRequestLogs = vi.fn().mockResolvedValue(null);
     let foregroundArgs: { onForeground: () => void } | null = null;
@@ -86,19 +154,14 @@ describe("pages/home/hooks/useHomeFreshnessOwner", () => {
       foregroundArgs = args;
     });
 
-    const view = renderHook(
-      (props: { overviewActive: boolean; foregroundActive: boolean }) =>
-        useHomeFreshnessOwner({
-          ...props,
-          requestLogsRefreshWindowMs: 400,
-          onRefreshRequestLogs: refreshRequestLogs,
-        }),
-      {
-        initialProps: {
-          overviewActive: true,
-          foregroundActive: false,
-        },
-      }
+    renderHook(() =>
+      useHomeFreshnessOwner({
+        overviewActive: true,
+        foregroundActive: false,
+        requestLogsRefreshWindowMs: 400,
+        onRefreshActiveRequests: vi.fn().mockResolvedValue(null),
+        onRefreshRequestLogs: refreshRequestLogs,
+      })
     );
 
     act(() => {
@@ -110,15 +173,97 @@ describe("pages/home/hooks/useHomeFreshnessOwner", () => {
       await Promise.resolve();
     });
 
+    expect(refreshRequestLogs).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it("polls while request activity is pending so stale active snapshots self-correct", async () => {
+    vi.useFakeTimers();
+    const refreshRequestLogs = vi.fn().mockResolvedValue(null);
+
+    const view = renderHook(
+      (props: {
+        overviewActive: boolean;
+        foregroundActive: boolean;
+        requestActivityPending: boolean;
+      }) =>
+        useHomeFreshnessOwner({
+          ...props,
+          requestLogsRefreshWindowMs: 200,
+          requestActivityWatchdogIntervalMs: 5000,
+          onRefreshActiveRequests: vi.fn().mockResolvedValue(null),
+          onRefreshRequestLogs: refreshRequestLogs,
+        }),
+      {
+        initialProps: {
+          overviewActive: true,
+          foregroundActive: true,
+          requestActivityPending: true,
+        },
+      }
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4999);
+      await Promise.resolve();
+    });
     expect(refreshRequestLogs).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+      await Promise.resolve();
+    });
+    expect(refreshRequestLogs).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+      await Promise.resolve();
+    });
+    expect(refreshRequestLogs).toHaveBeenCalledTimes(1);
 
     view.rerender({
       overviewActive: true,
       foregroundActive: true,
+      requestActivityPending: false,
     });
 
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5200);
+      await Promise.resolve();
+    });
+
+    expect(refreshRequestLogs).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it("keeps signal-driven refresh while the window is backgrounded", async () => {
+    vi.useFakeTimers();
+    const refreshRequestLogs = vi.fn().mockResolvedValue(null);
+    let eventHandler:
+      | ((payload: { trace_id: string; cli_key: string; phase: "complete"; ts: number }) => void)
+      | null = null;
+
+    vi.mocked(subscribeGatewayEvent).mockImplementation((event: string, handler: any) => {
+      expect(event).toBe(gatewayEventNames.requestSignal);
+      eventHandler = handler;
+      return {
+        ready: Promise.resolve(),
+        unsubscribe: vi.fn(),
+      };
+    });
+
+    renderHook(() =>
+      useHomeFreshnessOwner({
+        overviewActive: true,
+        foregroundActive: false,
+        requestLogsRefreshWindowMs: 400,
+        onRefreshActiveRequests: vi.fn().mockResolvedValue(null),
+        onRefreshRequestLogs: refreshRequestLogs,
+      })
+    );
+
     act(() => {
-      foregroundArgs?.onForeground();
+      eventHandler?.({ trace_id: "t-1", cli_key: "claude", phase: "complete", ts: 2 });
     });
 
     await act(async () => {
@@ -127,21 +272,10 @@ describe("pages/home/hooks/useHomeFreshnessOwner", () => {
     });
 
     expect(refreshRequestLogs).toHaveBeenCalledTimes(1);
-
-    act(() => {
-      foregroundArgs?.onForeground();
-    });
-
-    await act(async () => {
-      await vi.runOnlyPendingTimersAsync();
-      await Promise.resolve();
-    });
-
-    expect(refreshRequestLogs).toHaveBeenCalledTimes(2);
     vi.useRealTimers();
   });
 
-  it("drops queued request log refresh when overview leaves foreground", async () => {
+  it("drops queued request log refresh when overview deactivates", async () => {
     vi.useFakeTimers();
     const refreshRequestLogs = vi.fn().mockResolvedValue(null);
     let eventHandler:
@@ -162,6 +296,7 @@ describe("pages/home/hooks/useHomeFreshnessOwner", () => {
         useHomeFreshnessOwner({
           ...props,
           requestLogsRefreshWindowMs: 400,
+          onRefreshActiveRequests: vi.fn().mockResolvedValue(null),
           onRefreshRequestLogs: refreshRequestLogs,
         }),
       {
@@ -177,12 +312,37 @@ describe("pages/home/hooks/useHomeFreshnessOwner", () => {
     });
 
     view.rerender({
-      overviewActive: true,
-      foregroundActive: false,
+      overviewActive: false,
+      foregroundActive: true,
     });
 
     await act(async () => {
       await vi.runOnlyPendingTimersAsync();
+      await Promise.resolve();
+    });
+
+    expect(refreshRequestLogs).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("does not run the activity watchdog while the window is backgrounded", async () => {
+    vi.useFakeTimers();
+    const refreshRequestLogs = vi.fn().mockResolvedValue(null);
+
+    renderHook(() =>
+      useHomeFreshnessOwner({
+        overviewActive: true,
+        foregroundActive: false,
+        requestActivityPending: true,
+        requestLogsRefreshWindowMs: 200,
+        requestActivityWatchdogIntervalMs: 5000,
+        onRefreshActiveRequests: vi.fn().mockResolvedValue(null),
+        onRefreshRequestLogs: refreshRequestLogs,
+      })
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(11_000);
       await Promise.resolve();
     });
 
@@ -206,6 +366,7 @@ describe("pages/home/hooks/useHomeFreshnessOwner", () => {
       useHomeFreshnessOwner({
         overviewActive: true,
         foregroundActive: true,
+        onRefreshActiveRequests: vi.fn().mockResolvedValue(null),
         onRefreshRequestLogs: refreshRequestLogs,
       })
     );
@@ -246,6 +407,7 @@ describe("pages/home/hooks/useHomeFreshnessOwner", () => {
         overviewActive: true,
         foregroundActive: true,
         requestLogsRefreshWindowMs: 400,
+        onRefreshActiveRequests: vi.fn().mockResolvedValue(null),
         onRefreshRequestLogs: refreshRequestLogs,
       })
     );
@@ -278,6 +440,7 @@ describe("pages/home/hooks/useHomeFreshnessOwner", () => {
       useHomeFreshnessOwner({
         overviewActive: false,
         foregroundActive: true,
+        onRefreshActiveRequests: vi.fn().mockResolvedValue(null),
         onRefreshRequestLogs: refreshRequestLogs,
       })
     );
@@ -296,6 +459,7 @@ describe("pages/home/hooks/useHomeFreshnessOwner", () => {
       useHomeFreshnessOwner({
         overviewActive: true,
         foregroundActive: true,
+        onRefreshActiveRequests: vi.fn().mockResolvedValue(null),
         onRefreshRequestLogs: refreshRequestLogs,
       })
     );

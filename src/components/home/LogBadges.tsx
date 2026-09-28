@@ -30,6 +30,21 @@ export function FreeBadge() {
   );
 }
 
+export function ReasoningEffortBadge({ value }: { value: string | null | undefined }) {
+  const effort = value?.trim();
+  if (!effort) return null;
+
+  return (
+    <span
+      className="inline-flex max-w-[128px] shrink-0 items-center gap-1 rounded-md border border-border/60 bg-muted px-2 py-0.5 text-[11px] font-semibold text-foreground"
+      title={`思考等级：${effort}`}
+    >
+      <span className="shrink-0">思考</span>
+      <span className="truncate font-mono">{effort}</span>
+    </span>
+  );
+}
+
 const FAST_MODE_TOOLTIP = "Codex 优先服务层 (fast mode) - 使用更高优先级资源，费率更高";
 
 export function FastModeBadge({ showCustomTooltip }: { showCustomTooltip: boolean }) {

@@ -14,6 +14,7 @@ use crate::gateway::proxy::handler::early_error::{
 };
 use crate::gateway::proxy::request_body::GatewayRequestBody;
 use crate::gateway::proxy::{errors::error_response, GatewayErrorCode};
+use crate::gateway::response_fixer;
 use crate::gateway::util::max_request_body_bytes;
 use axum::body::to_bytes;
 use axum::http::StatusCode;
@@ -33,14 +34,29 @@ impl BodyReaderMiddleware {
             .expect("request_body must be set before BodyReaderMiddleware");
         ctx.headers.remove("x-aio-provider-id");
 
-        let request_body_limit = max_request_body_bytes();
+        let managed_recovery = ctx.cli_key == "codex"
+            && ctx
+                .headers
+                .get(crate::gateway::responses_ws::protocol::TURN_STATE_HEADER)
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| value.starts_with("aio-ws-"));
+        let request_body_limit = if managed_recovery || ctx.ws_connection.is_some() {
+            max_request_body_bytes().min(crate::gateway::responses_ws::protocol::MAX_MESSAGE_BYTES)
+        } else {
+            max_request_body_bytes()
+        };
         match to_bytes(body, request_body_limit).await {
             Ok(bytes) => {
                 ctx.body_bytes = bytes;
             }
             Err(err) => {
-                ctx.observe_request =
-                    compute_observe_request(&ctx.cli_key, &ctx.forwarded_path, &ctx.headers, None);
+                ctx.observe_request = compute_observe_request(
+                    &ctx.cli_key,
+                    &ctx.req_method,
+                    &ctx.forwarded_path,
+                    &ctx.headers,
+                    None,
+                );
                 let contract = early_error_contract(EarlyErrorKind::BodyTooLarge);
                 let log_ctx = build_early_error_log_ctx(&ctx);
 
@@ -48,7 +64,7 @@ impl BodyReaderMiddleware {
                     &log_ctx,
                     contract,
                     body_too_large_message(&err.to_string(), request_body_limit),
-                    None,
+                    response_fixer::special_settings_json(&ctx.special_settings),
                     None,
                     None,
                 )
@@ -61,6 +77,75 @@ impl BodyReaderMiddleware {
         ctx.body_bytes = request_body_state.decoded_clone();
         ctx.introspection_json =
             serde_json::from_slice::<serde_json::Value>(request_body_state.decoded().as_ref()).ok();
+
+        if ctx.cli_key == "codex" {
+            if ctx.ws_request.is_none()
+                && ctx.ws_connection.is_none()
+                && ctx.req_method == axum::http::Method::POST
+                && matches!(
+                    ctx.forwarded_path.trim_end_matches('/'),
+                    "/v1/responses" | "/responses"
+                )
+            {
+                if let Some(body) = ctx.introspection_json.as_ref() {
+                    match ctx.state.responses_ws.prepare_http_recovery(
+                        &ctx.headers,
+                        body,
+                        ctx.forced_provider_id,
+                    ) {
+                        Ok(request) => ctx.ws_request = request,
+                        Err(message) => {
+                            return MiddlewareAction::ShortCircuit(
+                                axum::response::IntoResponse::into_response((
+                                    StatusCode::BAD_REQUEST,
+                                    axum::Json(
+                                        crate::gateway::responses_ws::protocol::error_event(
+                                            "invalid_request",
+                                            message,
+                                        ),
+                                    ),
+                                )),
+                            )
+                        }
+                    }
+                }
+            }
+            if ctx.ws_request.is_some()
+                && ctx.body_bytes.len() > crate::gateway::responses_ws::protocol::MAX_MESSAGE_BYTES
+            {
+                return MiddlewareAction::ShortCircuit(
+                    axum::response::IntoResponse::into_response((
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        "Managed Responses recovery exceeds byte limit",
+                    )),
+                );
+            }
+            if let Some(request) = &ctx.ws_request {
+                use crate::shared::mutex_ext::MutexExt;
+                let mut generation = request.generation.lock_or_recover();
+                generation.trace_id = ctx.trace_id.clone();
+                response_fixer::push_special_setting(
+                    &ctx.special_settings,
+                    serde_json::json!({
+                        "type":"codex_responses_transport", "scope":"request",
+                        "client_transport": if request.client_ws { "responses_ws" } else { "http" },
+                        "recovery_from_trace_id":generation.from_trace,
+                    }),
+                );
+                ctx.headers
+                    .remove(crate::gateway::responses_ws::protocol::TURN_STATE_HEADER);
+                if let Some(body) = ctx.introspection_json.as_mut() {
+                    if let Some(metadata) = body
+                        .get_mut("client_metadata")
+                        .and_then(serde_json::Value::as_object_mut)
+                    {
+                        metadata.remove(crate::gateway::responses_ws::protocol::TURN_STATE_HEADER);
+                    }
+                    request_body_state.replace_decoded(axum::body::Bytes::from(body.to_string()));
+                    ctx.body_bytes = request_body_state.decoded_clone();
+                }
+            }
+        }
 
         let hook_input = GatewayRequestHookInput {
             hook_name: GatewayPluginHookName::RequestAfterBodyRead,
@@ -98,6 +183,16 @@ impl BodyReaderMiddleware {
                             .unwrap_or_else(|_| axum::http::HeaderValue::from_static("unknown")),
                     );
                     return MiddlewareAction::ShortCircuit(resp);
+                }
+                if (ctx.ws_request.is_some() || ctx.ws_connection.is_some())
+                    && output.body.len() > crate::gateway::responses_ws::protocol::MAX_MESSAGE_BYTES
+                {
+                    return MiddlewareAction::ShortCircuit(
+                        axum::response::IntoResponse::into_response((
+                            StatusCode::PAYLOAD_TOO_LARGE,
+                            "Managed Responses plugin output exceeds byte limit",
+                        )),
+                    );
                 }
                 ctx.headers = output.headers;
                 request_body_state.replace_decoded(output.body);

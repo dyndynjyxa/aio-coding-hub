@@ -12,11 +12,9 @@ export type RequestLogProgressInput = {
 
 const PENDING_IDLE_NOTICE_MS = 10 * 60 * 1000;
 
-export type RequestLogActivityState =
-  | "completed"
-  | "in_progress_active"
-  | "in_progress_idle"
-  | "interrupted";
+export type PersistedRequestLogActivityState = "completed" | "interrupted";
+export type ActiveRequestActivityState = "in_progress_active" | "in_progress_idle";
+export type RequestLogActivityState = PersistedRequestLogActivityState | ActiveRequestActivityState;
 
 export type RequestSignalLike = {
   phase?: string | null;
@@ -51,12 +49,14 @@ export function requestLogLastActivityMs(
 export function requestLogActiveActivityState(
   lastActivityMs: number | null | undefined,
   nowMs: number
-): RequestLogActivityState {
+): ActiveRequestActivityState {
   const idleForMs = Math.max(0, nowMs - (lastActivityMs ?? 0));
   return idleForMs >= PENDING_IDLE_NOTICE_MS ? "in_progress_idle" : "in_progress_active";
 }
 
-export function requestLogActivityState(log: RequestLogProgressInput): RequestLogActivityState {
+export function requestLogActivityState(
+  log: RequestLogProgressInput
+): PersistedRequestLogActivityState {
   return isPersistedRequestLogIncomplete(log) ? "interrupted" : "completed";
 }
 

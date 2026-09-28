@@ -372,6 +372,12 @@ pnpm tauri:test            # 后端测试
 
 [MIT License](LICENSE)
 
----
+## Star History
 
-[![Stargazers over time](https://starchart.cc/dyndynjyxa/aio-coding-hub.svg?variant=adaptive)](https://starchart.cc/dyndynjyxa/aio-coding-hub)
+<a href="https://www.star-history.com/?repos=dyndynjyxa%2Faio-coding-hub&type=timeline&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=dyndynjyxa/aio-coding-hub&type=timeline&theme=dark&legend=top-left&sealed_token=GCUJTl6mc9Z0XD_6vNlnVhHwbUHgJZ1Ke6sNRBzJu2GU35E8dGHW34tYX5JdQu7HQd0hPre_QOVtS6SxKpamhOR99KHHP94zCbjmcvpomr0IL-E-VS3TnHEBW_tAUBAxO-E9veh6RL78Zt1Ki1xEYCiBQvNQPQ-XaBne28yyuaYXlZtpRIyPUJSUqJpM" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=dyndynjyxa/aio-coding-hub&type=timeline&legend=top-left&sealed_token=GCUJTl6mc9Z0XD_6vNlnVhHwbUHgJZ1Ke6sNRBzJu2GU35E8dGHW34tYX5JdQu7HQd0hPre_QOVtS6SxKpamhOR99KHHP94zCbjmcvpomr0IL-E-VS3TnHEBW_tAUBAxO-E9veh6RL78Zt1Ki1xEYCiBQvNQPQ-XaBne28yyuaYXlZtpRIyPUJSUqJpM" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=dyndynjyxa/aio-coding-hub&type=timeline&legend=top-left&sealed_token=GCUJTl6mc9Z0XD_6vNlnVhHwbUHgJZ1Ke6sNRBzJu2GU35E8dGHW34tYX5JdQu7HQd0hPre_QOVtS6SxKpamhOR99KHHP94zCbjmcvpomr0IL-E-VS3TnHEBW_tAUBAxO-E9veh6RL78Zt1Ki1xEYCiBQvNQPQ-XaBne28yyuaYXlZtpRIyPUJSUqJpM" />
+ </picture>
+</a>

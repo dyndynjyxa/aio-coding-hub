@@ -192,7 +192,7 @@ pub(super) async fn perform_request(
         }
 
         let responded_model = usage::parse_model_from_json_bytes(&buf);
-        let usage_json_value = usage::parse_usage_from_json_bytes(&buf)
+        let usage_json_value = usage::parse_usage_from_json_bytes("claude", &buf)
             .and_then(|u| serde_json::from_str::<serde_json::Value>(&u.usage_json).ok());
 
         if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&buf) {

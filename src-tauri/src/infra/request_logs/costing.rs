@@ -6,7 +6,7 @@ use super::RequestLogInsert;
 
 pub(super) fn cost_usd_from_femto(cost_usd_femto: Option<i64>) -> Option<f64> {
     cost_usd_femto
-        .filter(|v| *v > 0)
+        .filter(|v| *v >= 0)
         .map(|v| v as f64 / 1_000_000_000_000_000.0)
 }
 

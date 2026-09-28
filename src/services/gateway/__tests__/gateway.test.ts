@@ -276,6 +276,7 @@ describe("services/gateway/gateway", () => {
     vi.mocked(commands.gatewayCircuitResetCli).mockResolvedValueOnce({ status: "ok", data: 1 });
 
     expect(validateGatewayCliKey(" claude ")).toBe("claude");
+    expect(validateGatewayCliKey(" grok ")).toBe("grok");
     await gatewayCircuitStatus(" codex ");
     await gatewayCircuitResetCli(" gemini ");
 

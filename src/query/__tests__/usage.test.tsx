@@ -2,12 +2,10 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { UsageSummary } from "../../services/usage/usage";
 import {
-  USAGE_DAY_DETAIL_FOLDER_MAX_LIMIT,
   USAGE_HOURLY_SERIES_MAX_DAYS,
   USAGE_LEADERBOARD_V2_DEFAULT_LIMIT,
   USAGE_LEADERBOARD_V2_MAX_LIMIT,
-  USAGE_PROVIDER_CACHE_RATE_TREND_MAX_LIMIT,
-  usageDayDetailV1,
+  USAGE_PROVIDER_TREND_MAX_LIMIT,
   usageFolderOptionsV1,
   usageHourlySeries,
   usageLeaderboardV2,
@@ -20,7 +18,6 @@ import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { usageKeys } from "../keys";
 import {
   useUsageHourlySeriesQuery,
-  useUsageDayDetailV1Query,
   useUsageFolderOptionsV1Query,
   useUsageLeaderboardV2Query,
   useUsageProviderCacheRateTrendV1Query,
@@ -42,7 +39,6 @@ vi.mock("../../services/usage/usage", async () => {
   return {
     ...actual,
     usageHourlySeries: vi.fn(),
-    usageDayDetailV1: vi.fn(),
     usageFolderOptionsV1: vi.fn(),
     usageSummary: vi.fn(),
     usageSummaryV2: vi.fn(),
@@ -58,6 +54,7 @@ function makeUsageSummary(overrides: Partial<UsageSummary> = {}): UsageSummary {
     requests_success: 0,
     requests_failed: 0,
     cost_covered_success: 0,
+    total_duration_ms: 0,
     avg_duration_ms: null,
     avg_ttfb_ms: null,
     avg_output_tokens_per_second: null,
@@ -220,7 +217,13 @@ describe("query/usage", () => {
       cliKey: "claude" as const,
       providerId: 7,
       folderKeys: ["/tmp/project"],
+      dayStartHour: null,
       excludeCx2CcGatewayBridge: true,
+    };
+    const normalizedInput = {
+      ...input,
+      fullIdleGapMinutes: null,
+      sessionBreakGapMinutes: null,
     };
 
     renderHook(
@@ -233,10 +236,12 @@ describe("query/usage", () => {
     );
 
     await waitFor(() => {
-      expect(usageSummaryV2).toHaveBeenCalledWith("daily", input);
+      expect(usageSummaryV2).toHaveBeenCalledWith("daily", normalizedInput);
     });
 
-    const query = client.getQueryCache().find({ queryKey: usageKeys.summaryV2("daily", input) });
+    const query = client
+      .getQueryCache()
+      .find({ queryKey: usageKeys.summaryV2("daily", normalizedInput) });
     const options = queryRefreshOptions(query);
     expect(options.refetchInterval).toBe(60_000);
     expect(options.refetchOnMount).toBe("always");
@@ -263,6 +268,9 @@ describe("query/usage", () => {
       cliKey: "gemini" as const,
       providerId: 7,
       folderKeys: ["/a", "/b"],
+      dayStartHour: null,
+      fullIdleGapMinutes: null,
+      sessionBreakGapMinutes: null,
       excludeCx2CcGatewayBridge: true,
     };
 
@@ -323,6 +331,9 @@ describe("query/usage", () => {
       providerId: 9,
       limit: null,
       folderKeys: ["/tmp/project"],
+      dayStartHour: null,
+      fullIdleGapMinutes: 10,
+      sessionBreakGapMinutes: 30,
       excludeCx2CcGatewayBridge: true,
     };
     const normalizedInput = { ...input, limit: USAGE_LEADERBOARD_V2_DEFAULT_LIMIT };
@@ -371,6 +382,9 @@ describe("query/usage", () => {
       providerId: 9,
       limit: USAGE_LEADERBOARD_V2_MAX_LIMIT,
       folderKeys: ["/tmp/project"],
+      dayStartHour: null,
+      fullIdleGapMinutes: null,
+      sessionBreakGapMinutes: null,
       excludeCx2CcGatewayBridge: true,
     };
 
@@ -418,136 +432,6 @@ describe("query/usage", () => {
     expect(usageLeaderboardV2).not.toHaveBeenCalled();
   });
 
-  it("calls usageDayDetailV1 with tauri runtime", async () => {
-    setTauriRuntime();
-
-    vi.mocked(usageDayDetailV1).mockResolvedValue({
-      day: "2026-04-16",
-      folders: [],
-      hours: Array.from({ length: 24 }, (_, hour) => ({
-        hour,
-        requests_total: 0,
-        total_tokens: 0,
-        io_total_tokens: 0,
-      })),
-    });
-
-    const client = createTestQueryClient();
-    const wrapper = createQueryWrapper(client);
-    const input = {
-      day: "2026-04-16",
-      cliKey: null,
-      providerId: null,
-      folderLimit: 8,
-      folderKeys: ["/tmp/project"],
-      excludeCx2CcGatewayBridge: true,
-    };
-
-    renderHook(() => useUsageDayDetailV1Query(input), { wrapper });
-
-    await waitFor(() => {
-      expect(usageDayDetailV1).toHaveBeenCalledWith(input);
-    });
-
-    const query = client.getQueryCache().find({ queryKey: usageKeys.dayDetailV1(input) });
-    const options = queryRefreshOptions(query);
-    expect(options.refetchInterval).toBe(false);
-  });
-
-  it("normalizes usage day detail folderLimit for fetch and cache key", async () => {
-    setTauriRuntime();
-
-    vi.mocked(usageDayDetailV1).mockResolvedValue({
-      day: "2026-04-16",
-      folders: [],
-      hours: [],
-    });
-
-    const client = createTestQueryClient();
-    const wrapper = createQueryWrapper(client);
-    const input = {
-      day: " 2026-04-16 ",
-      cliKey: " codex ",
-      providerId: 7,
-      folderLimit: 999,
-      folderKeys: [" /tmp/project ", "/tmp/project"],
-      excludeCx2CcGatewayBridge: true,
-    } as never;
-    const normalizedInput = {
-      day: "2026-04-16",
-      cliKey: "codex" as const,
-      providerId: 7,
-      folderLimit: USAGE_DAY_DETAIL_FOLDER_MAX_LIMIT,
-      folderKeys: ["/tmp/project"],
-      excludeCx2CcGatewayBridge: true,
-    };
-
-    const { result } = renderHook(() => useUsageDayDetailV1Query(input), { wrapper });
-
-    await waitFor(() => {
-      expect(result.current.isSuccess).toBe(true);
-    });
-
-    expect(usageDayDetailV1).toHaveBeenCalledWith(normalizedInput);
-    expect(client.getQueryState(usageKeys.dayDetailV1(normalizedInput))).toBeTruthy();
-    expect(client.getQueryState(usageKeys.dayDetailV1(input))).toBeUndefined();
-  });
-
-  it("does not call usageDayDetailV1 when disabled", async () => {
-    setTauriRuntime();
-
-    const client = createTestQueryClient();
-    const wrapper = createQueryWrapper(client);
-
-    renderHook(
-      () =>
-        useUsageDayDetailV1Query(
-          {
-            day: "2026-04-16",
-            cliKey: "claude",
-            providerId: 9,
-            folderLimit: 8,
-            folderKeys: ["/tmp/project"],
-            excludeCx2CcGatewayBridge: true,
-          },
-          { enabled: false }
-        ),
-      { wrapper }
-    );
-    await Promise.resolve();
-
-    expect(usageDayDetailV1).not.toHaveBeenCalled();
-  });
-
-  it("does not validate empty day detail input when disabled", async () => {
-    setTauriRuntime();
-
-    const client = createTestQueryClient();
-    const wrapper = createQueryWrapper(client);
-
-    expect(() =>
-      renderHook(
-        () =>
-          useUsageDayDetailV1Query(
-            {
-              day: "",
-              cliKey: null,
-              providerId: null,
-              folderLimit: 8,
-              folderKeys: null,
-              excludeCx2CcGatewayBridge: true,
-            },
-            { enabled: false }
-          ),
-        { wrapper }
-      )
-    ).not.toThrow();
-    await Promise.resolve();
-
-    expect(usageDayDetailV1).not.toHaveBeenCalled();
-    expect(client.getQueryState(usageKeys.dayDetailV1Disabled())).toBeTruthy();
-  });
-
   it("calls usageFolderOptionsV1 with tauri runtime", async () => {
     setTauriRuntime();
 
@@ -562,7 +446,13 @@ describe("query/usage", () => {
       providerId: 11,
       excludeCx2CcGatewayBridge: true,
     };
-    const normalizedInput = { ...input, folderKeys: null };
+    const normalizedInput = {
+      ...input,
+      folderKeys: null,
+      dayStartHour: null,
+      fullIdleGapMinutes: null,
+      sessionBreakGapMinutes: null,
+    };
 
     renderHook(() => useUsageFolderOptionsV1Query("daily", input), { wrapper });
 
@@ -597,6 +487,9 @@ describe("query/usage", () => {
       cliKey: "claude" as const,
       providerId: 11,
       folderKeys: null,
+      dayStartHour: null,
+      fullIdleGapMinutes: null,
+      sessionBreakGapMinutes: null,
       excludeCx2CcGatewayBridge: true,
     };
 
@@ -638,7 +531,6 @@ describe("query/usage", () => {
         endTs: 2,
         cliKey: "claude",
         providerId: 11,
-        folderKeys: null,
         limit: 20,
         excludeCx2CcGatewayBridge: true,
       });
@@ -665,8 +557,7 @@ describe("query/usage", () => {
       endTs: 2,
       cliKey: "claude" as const,
       providerId: 11,
-      folderKeys: null,
-      limit: USAGE_PROVIDER_CACHE_RATE_TREND_MAX_LIMIT,
+      limit: USAGE_PROVIDER_TREND_MAX_LIMIT,
       excludeCx2CcGatewayBridge: true,
     };
 

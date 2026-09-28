@@ -8,6 +8,7 @@
 mod claude;
 mod codex;
 mod gemini;
+mod grok;
 mod registry;
 mod strategy;
 

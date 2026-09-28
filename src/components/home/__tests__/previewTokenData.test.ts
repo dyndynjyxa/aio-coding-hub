@@ -39,6 +39,7 @@ describe("components/home/previewTokenData", () => {
     expect(scaledZero.requests_success).toBe(0);
     expect(scaledZero.requests_failed).toBe(0);
     expect(scaledZero.total_tokens).toBe(0);
+    expect(scaledZero.total_duration_ms).toBe(0);
     expect(scaledZero.cost_usd).toBeNull();
 
     const scaledUp = mod.scalePreviewTokenRows([baseRow], 1.5)[0];
@@ -46,6 +47,7 @@ describe("components/home/previewTokenData", () => {
     expect(scaledUp.requests_failed).toBe(2);
     expect(scaledUp.requests_success).toBe(25);
     expect(scaledUp.total_tokens).toBe(73_800);
+    expect(scaledUp.total_duration_ms).toBe(26_460);
     expect(scaledUp.cost_usd).toBeCloseTo(2.07);
   });
 
@@ -54,6 +56,7 @@ describe("components/home/previewTokenData", () => {
 
     const emptySummary = mod.buildPreviewTokenSummary([]);
     expect(emptySummary.requests_total).toBe(0);
+    expect(emptySummary.total_duration_ms).toBe(0);
     expect(emptySummary.avg_duration_ms).toBeNull();
     expect(emptySummary.avg_ttfb_ms).toBeNull();
     expect(emptySummary.avg_output_tokens_per_second).toBeNull();
@@ -70,6 +73,7 @@ describe("components/home/previewTokenData", () => {
         total_tokens: 30,
         cache_creation_input_tokens: 4,
         cache_read_input_tokens: 6,
+        total_duration_ms: 100,
         avg_duration_ms: null,
         avg_ttfb_ms: 100,
         avg_output_tokens_per_second: 50,
@@ -86,6 +90,7 @@ describe("components/home/previewTokenData", () => {
         total_tokens: 60,
         cache_creation_input_tokens: 8,
         cache_read_input_tokens: 12,
+        total_duration_ms: 200,
         avg_duration_ms: 200,
         avg_ttfb_ms: null,
         avg_output_tokens_per_second: null,
@@ -99,43 +104,11 @@ describe("components/home/previewTokenData", () => {
     expect(summary.requests_success).toBe(3);
     expect(summary.requests_failed).toBe(0);
     expect(summary.cost_covered_success).toBe(2);
+    expect(summary.total_duration_ms).toBe(300);
     expect(summary.avg_duration_ms).toBeCloseTo(133.333, 2);
     expect(summary.avg_ttfb_ms).toBeCloseTo(33.333, 2);
     expect(summary.avg_output_tokens_per_second).toBeCloseTo(16.667, 2);
     expect(summary.cache_creation_5m_input_tokens).toBe(8);
     expect(summary.cache_creation_1h_input_tokens).toBe(4);
-
-    const missingDay = mod.buildPreviewTokenDayDetail("missing-day", 1, null);
-    expect(missingDay).toBeNull();
-
-    const day = mod.PREVIEW_TOKEN_DAY_ROWS[0].key;
-    const fullDetail = mod.buildPreviewTokenDayDetail(day, 1, null);
-    expect(fullDetail).not.toBeNull();
-    expect(fullDetail?.folders).toHaveLength(3);
-    expect(fullDetail?.hours).toHaveLength(24);
-    expect(fullDetail?.hours[0]?.requests_total).toBe(0);
-    expect(fullDetail?.hours.some((hour) => hour.requests_total > 0)).toBe(true);
-
-    const selectedDetail = mod.buildPreviewTokenDayDetail(day, 1, ["__unknown__"]);
-    expect(selectedDetail?.folders).toHaveLength(1);
-    expect(selectedDetail?.folders[0]?.key).toBe("__unknown__");
-    expect(selectedDetail?.hours.some((hour) => hour.total_tokens > 0)).toBe(true);
-
-    const originalDuration = mod.PREVIEW_TOKEN_DAY_ROWS[0].avg_duration_ms;
-    const originalTtfb = mod.PREVIEW_TOKEN_DAY_ROWS[0].avg_ttfb_ms;
-    const originalCost = mod.PREVIEW_TOKEN_DAY_ROWS[0].cost_usd;
-    mod.PREVIEW_TOKEN_DAY_ROWS[0].avg_duration_ms = null;
-    mod.PREVIEW_TOKEN_DAY_ROWS[0].avg_ttfb_ms = null;
-    mod.PREVIEW_TOKEN_DAY_ROWS[0].cost_usd = null;
-    try {
-      const nullMetricsDetail = mod.buildPreviewTokenDayDetail(day, 1, null);
-      expect(nullMetricsDetail?.folders[0]?.avg_duration_ms).toBeNull();
-      expect(nullMetricsDetail?.folders[0]?.avg_ttfb_ms).toBeNull();
-      expect(nullMetricsDetail?.folders[0]?.cost_usd).toBeNull();
-    } finally {
-      mod.PREVIEW_TOKEN_DAY_ROWS[0].avg_duration_ms = originalDuration;
-      mod.PREVIEW_TOKEN_DAY_ROWS[0].avg_ttfb_ms = originalTtfb;
-      mod.PREVIEW_TOKEN_DAY_ROWS[0].cost_usd = originalCost;
-    }
   });
 });

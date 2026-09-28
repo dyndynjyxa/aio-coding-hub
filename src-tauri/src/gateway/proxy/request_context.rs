@@ -14,6 +14,9 @@ use std::time::{Duration, Instant};
 
 pub(super) struct RequestContext<R: tauri::Runtime = tauri::Wry> {
     pub(super) state: GatewayAppState<R>,
+    pub(super) ws_request: Option<crate::gateway::responses_ws::state::RequestState>,
+    pub(super) ws_connection: Option<Arc<crate::gateway::responses_ws::state::Connection>>,
+
     pub(super) cli_key: String,
     pub(super) forwarded_path: String,
     pub(super) observe_request: bool,
@@ -36,6 +39,8 @@ pub(super) struct RequestContext<R: tauri::Runtime = tauri::Wry> {
     pub(super) introspection_json: Option<serde_json::Value>,
     pub(super) strip_request_content_encoding_seed: bool,
     pub(super) special_settings: Arc<Mutex<Vec<serde_json::Value>>>,
+    pub(super) provider_health_neutral: bool,
+    pub(super) is_codex_model_discovery: bool,
     pub(super) provider_base_url_ping_cache_ttl_seconds: u32,
     pub(super) verbose_provider_error: bool,
     pub(super) enable_codex_session_id_completion: bool,
@@ -51,8 +56,11 @@ pub(super) struct RequestContext<R: tauri::Runtime = tauri::Wry> {
     pub(super) unavailable_fingerprint_key: u64,
     pub(super) unavailable_fingerprint_debug: String,
     pub(super) abort_guard: RequestAbortGuard<R>,
+    pub(super) enable_thinking_effort_conflict_rectifier: bool,
     pub(super) enable_thinking_signature_rectifier: bool,
     pub(super) enable_thinking_budget_rectifier: bool,
+    pub(super) enable_gemini_function_id_rectifier: bool,
+    pub(super) codex_priority_billing_source: crate::settings::CodexPriorityBillingSource,
     pub(super) enable_claude_metadata_user_id_injection: bool,
     #[allow(dead_code)]
     pub(super) cx2cc_settings: super::cx2cc::settings::Cx2ccSettings,
@@ -62,9 +70,17 @@ pub(super) struct RequestContext<R: tauri::Runtime = tauri::Wry> {
 }
 
 impl<R: tauri::Runtime> RequestContext<R> {
-    pub(super) fn from_handler_parts(parts: RequestContextParts<R>) -> Self {
+    // abort_guard 由调用方在任何 await 之前构造并武装（见 handler/mod.rs
+    // post-chain 注释）：登记到活跃注册表的请求必须已有武装的 guard 兜底，
+    // 否则 handler future 在中间的 await 点被取消时注册表条目会永久泄漏。
+    pub(super) fn from_handler_parts(
+        parts: RequestContextParts<R>,
+        abort_guard: RequestAbortGuard<R>,
+    ) -> Self {
         let RequestContextParts {
             state,
+            ws_request,
+            ws_connection,
             cli_key,
             forwarded_path,
             observe_request,
@@ -87,6 +103,8 @@ impl<R: tauri::Runtime> RequestContext<R> {
             introspection_json,
             strip_request_content_encoding_seed,
             special_settings,
+            provider_health_neutral,
+            is_codex_model_discovery,
             provider_base_url_ping_cache_ttl_seconds,
             verbose_provider_error,
             enable_codex_session_id_completion,
@@ -100,8 +118,11 @@ impl<R: tauri::Runtime> RequestContext<R> {
             fingerprint_debug,
             unavailable_fingerprint_key,
             unavailable_fingerprint_debug,
+            enable_thinking_effort_conflict_rectifier,
             enable_thinking_signature_rectifier,
             enable_thinking_budget_rectifier,
+            enable_gemini_function_id_rectifier,
+            codex_priority_billing_source,
             enable_claude_metadata_user_id_injection,
             cx2cc_settings,
             enable_response_fixer,
@@ -109,12 +130,6 @@ impl<R: tauri::Runtime> RequestContext<R> {
             response_fixer_non_stream_config,
         } = parts;
 
-        let max_attempts_per_provider = Self::normalize_max_attempts_per_provider(
-            &cli_key,
-            enable_thinking_signature_rectifier,
-            enable_thinking_budget_rectifier,
-            max_attempts_per_provider,
-        );
         let (
             upstream_first_byte_timeout,
             upstream_stream_idle_timeout,
@@ -125,29 +140,12 @@ impl<R: tauri::Runtime> RequestContext<R> {
             upstream_request_timeout_non_streaming_secs,
         );
 
-        let abort_guard = RequestAbortGuard::new(
-            state.app.clone(),
-            state.db.clone(),
-            state.log_tx.clone(),
-            state.plugin_pipeline.clone(),
-            state.active_requests.clone(),
-            trace_id.clone(),
-            cli_key.clone(),
-            method_hint.clone(),
-            forwarded_path.clone(),
-            observe_request,
-            query.clone(),
-            session_id.clone(),
-            requested_model.clone(),
-            created_at_ms,
-            created_at,
-            started,
-        );
-
         let base_headers = build_base_headers(headers);
 
         Self {
             state,
+            ws_request,
+            ws_connection,
             cli_key,
             forwarded_path,
             observe_request,
@@ -170,6 +168,8 @@ impl<R: tauri::Runtime> RequestContext<R> {
             introspection_json,
             strip_request_content_encoding_seed,
             special_settings,
+            provider_health_neutral,
+            is_codex_model_discovery,
             provider_base_url_ping_cache_ttl_seconds,
             verbose_provider_error,
             enable_codex_session_id_completion,
@@ -185,28 +185,16 @@ impl<R: tauri::Runtime> RequestContext<R> {
             unavailable_fingerprint_key,
             unavailable_fingerprint_debug,
             abort_guard,
+            enable_thinking_effort_conflict_rectifier,
             enable_thinking_signature_rectifier,
             enable_thinking_budget_rectifier,
+            enable_gemini_function_id_rectifier,
+            codex_priority_billing_source,
             enable_claude_metadata_user_id_injection,
             cx2cc_settings,
             enable_response_fixer,
             response_fixer_stream_config,
             response_fixer_non_stream_config,
-        }
-    }
-
-    fn normalize_max_attempts_per_provider(
-        cli_key: &str,
-        enable_thinking_signature_rectifier: bool,
-        enable_thinking_budget_rectifier: bool,
-        max_attempts_per_provider: u32,
-    ) -> u32 {
-        if cli_key == "claude"
-            && (enable_thinking_signature_rectifier || enable_thinking_budget_rectifier)
-        {
-            max_attempts_per_provider.max(2)
-        } else {
-            max_attempts_per_provider
         }
     }
 
@@ -272,6 +260,9 @@ pub(super) fn effective_first_byte_timeout_secs(
 
 pub(super) struct RequestContextParts<R: tauri::Runtime = tauri::Wry> {
     pub(super) state: GatewayAppState<R>,
+    pub(super) ws_request: Option<crate::gateway::responses_ws::state::RequestState>,
+    pub(super) ws_connection: Option<Arc<crate::gateway::responses_ws::state::Connection>>,
+
     pub(super) cli_key: String,
     pub(super) forwarded_path: String,
     pub(super) observe_request: bool,
@@ -294,6 +285,8 @@ pub(super) struct RequestContextParts<R: tauri::Runtime = tauri::Wry> {
     pub(super) introspection_json: Option<serde_json::Value>,
     pub(super) strip_request_content_encoding_seed: bool,
     pub(super) special_settings: Arc<Mutex<Vec<serde_json::Value>>>,
+    pub(super) provider_health_neutral: bool,
+    pub(super) is_codex_model_discovery: bool,
     pub(super) provider_base_url_ping_cache_ttl_seconds: u32,
     pub(super) verbose_provider_error: bool,
     pub(super) enable_codex_session_id_completion: bool,
@@ -307,8 +300,11 @@ pub(super) struct RequestContextParts<R: tauri::Runtime = tauri::Wry> {
     pub(super) fingerprint_debug: String,
     pub(super) unavailable_fingerprint_key: u64,
     pub(super) unavailable_fingerprint_debug: String,
+    pub(super) enable_thinking_effort_conflict_rectifier: bool,
     pub(super) enable_thinking_signature_rectifier: bool,
     pub(super) enable_thinking_budget_rectifier: bool,
+    pub(super) enable_gemini_function_id_rectifier: bool,
+    pub(super) codex_priority_billing_source: crate::settings::CodexPriorityBillingSource,
     pub(super) enable_claude_metadata_user_id_injection: bool,
     pub(super) cx2cc_settings: super::cx2cc::settings::Cx2ccSettings,
     pub(super) enable_response_fixer: bool,

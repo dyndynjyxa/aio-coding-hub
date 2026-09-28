@@ -5,6 +5,7 @@
 use super::claude::ClaudeAuthStrategy;
 use super::codex::CodexAuthStrategy;
 use super::gemini::GeminiAuthStrategy;
+use super::grok::GrokAuthStrategy;
 use super::strategy::CliAuthStrategy;
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -25,6 +26,9 @@ impl CliAuthRegistry {
 
         let gemini = GeminiAuthStrategy;
         by_cli_key.insert(gemini.cli_key_str(), Box::new(gemini));
+
+        let grok = GrokAuthStrategy;
+        by_cli_key.insert(grok.cli_key_str(), Box::new(grok));
 
         Self { by_cli_key }
     }

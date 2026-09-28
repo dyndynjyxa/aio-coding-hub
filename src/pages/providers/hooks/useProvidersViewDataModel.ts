@@ -84,6 +84,8 @@ type ProviderUiState = {
   createDialogState: CreateDialogState | null;
   editTarget: ProviderSummary | null;
   deleteTarget: ProviderSummary | null;
+  testTarget: ProviderSummary | null;
+  routeDraftSelectionInitialized: boolean;
   routeDraftSelection: RouteDraftSelection;
 };
 
@@ -119,6 +121,8 @@ function createProviderUiState(activeCli: CliKey): ProviderUiState {
     createDialogState: null,
     editTarget: null,
     deleteTarget: null,
+    testTarget: null,
+    routeDraftSelectionInitialized: false,
     routeDraftSelection: { kind: "default", modeId: null },
   };
 }
@@ -168,6 +172,7 @@ function emptyActiveModeByCli(): Record<CliKey, number | null> {
     claude: null,
     codex: null,
     gemini: null,
+    grok: null,
   };
 }
 
@@ -295,6 +300,8 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
     createDialogState,
     editTarget,
     deleteTarget,
+    testTarget,
+    routeDraftSelectionInitialized,
     routeDraftSelection: storedRouteDraftSelection,
   } = effectiveProviderUiState;
   let routeDraftSelection = storedRouteDraftSelection;
@@ -331,10 +338,17 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
       deleteTarget: typeof value === "function" ? value(current.deleteTarget) : value,
     }));
   }, []);
+  const setTestTarget: Dispatch<SetStateAction<ProviderSummary | null>> = useCallback((value) => {
+    setProviderUiState((current) => ({
+      ...current,
+      testTarget: typeof value === "function" ? value(current.testTarget) : value,
+    }));
+  }, []);
   const setRouteDraftSelection: Dispatch<SetStateAction<RouteDraftSelection>> = useCallback(
     (value) => {
       setProviderUiState((current) => ({
         ...current,
+        routeDraftSelectionInitialized: true,
         routeDraftSelection:
           typeof value === "function" ? value(current.routeDraftSelection) : value,
       }));
@@ -493,6 +507,19 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
   const sortModesLoading = sortModesQuery.isLoading || sortModeActiveQuery.isLoading;
   const sortModesAvailable =
     sortModesQuery.data != null && sortModeActiveQuery.data != null ? true : null;
+  const activeModeByCli = useMemo(
+    () => buildActiveModeByCli(sortModeActiveQuery.data ?? []),
+    [sortModeActiveQuery.data]
+  );
+  const activeModeId = activeModeByCli[activeCli] ?? null;
+  const routeDraftSelectionReady = sortModesQuery.data != null && sortModeActiveQuery.data != null;
+  if (!routeDraftSelectionInitialized && routeDraftSelectionReady) {
+    routeDraftSelection =
+      activeModeId != null && sortModes.some((mode) => mode.id === activeModeId)
+        ? { kind: "mode", modeId: activeModeId }
+        : { kind: "default", modeId: null };
+    setRouteDraftSelection(routeDraftSelection);
+  }
   const routeDraftModeMissing =
     routeDraftSelection.kind === "mode" &&
     !sortModes.some((mode) => mode.id === routeDraftSelection.modeId);
@@ -500,11 +527,6 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
     routeDraftSelection = { kind: "default", modeId: null };
     setRouteDraftSelection(routeDraftSelection);
   }
-  const activeModeByCli = useMemo(
-    () => buildActiveModeByCli(sortModeActiveQuery.data ?? []),
-    [sortModeActiveQuery.data]
-  );
-  const activeModeId = activeModeByCli[activeCli] ?? null;
   const selectedSortMode = useMemo(
     () =>
       routeDraftSelection.kind === "mode"
@@ -909,7 +931,7 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
   );
 
   const testProviderAvailability = useCallback(
-    async (provider: ProviderSummary) => {
+    async (provider: ProviderSummary, options?: { model?: string; prompt?: string }) => {
       if (
         !beginStatefulProviderAction(testingByProviderIdRef, setTestingByProviderId, provider.id)
       ) {
@@ -919,6 +941,8 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
       try {
         const result = await testAvailabilityMutation.mutateAsync({
           providerId: provider.id,
+          model: options?.model,
+          prompt: options?.prompt,
         });
         if (!result) return;
 
@@ -1376,5 +1400,7 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
     duplicatingByProviderId,
     testProviderAvailability,
     testingByProviderId,
+    testTarget,
+    setTestTarget,
   };
 }

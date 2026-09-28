@@ -70,20 +70,14 @@ pub(crate) async fn config_import(
         return Err("SEC_INVALID_INPUT: file_path is required".to_string());
     }
     RiskyIpcConfirm::require(confirm, "config_import", file_path.clone())?;
-    #[cfg(windows)]
-    let app_for_wsl = app.clone();
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    let result = blocking::run("config_import", move || {
-        let bundle = read_config_import_bundle(&file_path)?;
-        config_migrate::config_import(&app, &db, bundle)
+    let bundle = blocking::run("config_import_read", move || {
+        read_config_import_bundle(&file_path)
     })
-    .await
-    .map_err(|err| -> String { err.into() })?;
-
-    #[cfg(windows)]
-    super::wsl::wsl_sync_trigger::trigger(app_for_wsl);
-
-    Ok(result)
+    .await?;
+    crate::app::config_migrate_service::config_import(app, db, bundle)
+        .await
+        .map_err(Into::into)
 }
 
 #[cfg(test)]

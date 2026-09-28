@@ -51,7 +51,39 @@ fn sync_codex_cli_proxy_backup_if_enabled<R: tauri::Runtime>(
         return Ok(());
     };
 
-    let _ = write_file_atomic_if_changed(&backup_path, next_bytes)?;
+    let previous = read_optional_codex_config_file(&backup_path)?.unwrap_or_default();
+    let previous = std::str::from_utf8(&previous)
+        .map_err(|_| "SEC_INVALID_INPUT: Codex config backup must be UTF-8")?
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|_| "SEC_INVALID_INPUT: invalid Codex config backup")?;
+    let mut next = std::str::from_utf8(next_bytes)
+        .map_err(|_| "SEC_INVALID_INPUT: Codex config must be UTF-8")?
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|_| "SEC_INVALID_INPUT: invalid Codex config.toml")?;
+    // Editing other Codex settings must not turn AIO's live WS preference into
+    // the restore baseline. Remote compaction can rename the managed provider.
+    for (key, alias) in [("aio", "OpenAI"), ("OpenAI", "aio")] {
+        let original = previous
+            .get("model_providers")
+            .and_then(|providers| providers.get(key).or_else(|| providers.get(alias)))
+            .and_then(|provider| provider.get("supports_websockets"))
+            .cloned();
+        if let Some(provider) = next
+            .get_mut("model_providers")
+            .and_then(|providers| providers.get_mut(key))
+            .and_then(toml_edit::Item::as_table_like_mut)
+        {
+            match original {
+                Some(value) => {
+                    provider.insert("supports_websockets", value);
+                }
+                None => {
+                    provider.remove("supports_websockets");
+                }
+            }
+        }
+    }
+    let _ = write_file_atomic_if_changed(&backup_path, next.to_string().as_bytes())?;
     Ok(())
 }
 

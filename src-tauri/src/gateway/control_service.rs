@@ -24,16 +24,26 @@ pub(crate) struct GatewayStartResult {
     pub(crate) effective_preferred_port: u16,
 }
 
+// All implicit and explicit starts use the same configured-port semantics.
+pub(crate) fn requested_port(cfg: &settings::AppSettings, preferred_port: Option<u16>) -> u16 {
+    preferred_port
+        .filter(|port| *port > 0)
+        .unwrap_or(cfg.preferred_port)
+}
+
 pub(crate) struct GatewayControlService;
 
 impl GatewayControlService {
-    pub(crate) fn start(
+    pub(crate) fn start<R: tauri::Runtime>(
         running: &mut Option<GatewayRuntime>,
-        app: &tauri::AppHandle,
+        app: &tauri::AppHandle<R>,
         db: db::Db,
         cfg: &settings::AppSettings,
         preferred_port: Option<u16>,
-    ) -> crate::shared::error::AppResult<GatewayStartResult> {
+    ) -> crate::shared::error::AppResult<GatewayStartResult>
+    where
+        R::Handle: Unpin,
+    {
         if let Some(runtime) = running.as_ref() {
             let status = runtime.status();
             let effective_preferred_port = status.port.unwrap_or(cfg.preferred_port);
@@ -43,9 +53,7 @@ impl GatewayControlService {
             });
         }
 
-        let requested_port = preferred_port
-            .filter(|port| *port > 0)
-            .unwrap_or(cfg.preferred_port.max(settings::DEFAULT_GATEWAY_PORT));
+        let requested_port = requested_port(cfg, preferred_port);
 
         let binding = resolve_gateway_binding(cfg)?;
         let (port, std_listener) = if let Some(port) = binding.fixed_port {
@@ -85,6 +93,9 @@ impl GatewayControlService {
         let plugin_pipeline = load_gateway_plugin_pipeline(&db);
         let active_requests = Arc::new(ActiveRequestRegistry::default());
 
+        let responses_ws = Arc::new(super::responses_ws::state::Runtime::new(
+            cfg.codex_responses_websocket_enabled,
+        ));
         let state = GatewayAppState {
             app: app.clone(),
             db: db.clone(),
@@ -96,6 +107,7 @@ impl GatewayControlService {
             latency_cache: Arc::new(Mutex::new(ProviderBaseUrlPingCache::default())),
             plugin_pipeline: plugin_pipeline.clone(),
             active_requests: active_requests.clone(),
+            responses_ws: responses_ws.clone(),
         };
         let router = build_router(state);
         let (shutdown, shutdown_rx) = oneshot::channel::<()>();
@@ -129,6 +141,7 @@ impl GatewayControlService {
             session,
             recent_errors,
             active_requests,
+            responses_ws,
             shutdown,
             task,
             background_tasks,
@@ -317,8 +330,8 @@ fn provider_ids_for_cli(db: &db::Db, cli_key: &str) -> crate::shared::error::App
         .collect())
 }
 
-fn emit_port_fallback_log(
-    app: &tauri::AppHandle,
+fn emit_port_fallback_log<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     fixed_port: Option<u16>,
     requested_port: u16,
     bound_port: u16,

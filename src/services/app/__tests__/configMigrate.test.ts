@@ -65,6 +65,7 @@ describe("services/app/configMigrate", () => {
         skill_repos_imported: 0,
         installed_skills_imported: 0,
         local_skills_imported: 0,
+        warnings: [],
       },
     });
 

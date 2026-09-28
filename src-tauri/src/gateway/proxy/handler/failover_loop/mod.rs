@@ -28,6 +28,8 @@ mod codex_service_tier;
 mod codex_session_id_completion;
 #[path = "prepare/cx2cc_preparation.rs"]
 mod cx2cc_preparation;
+#[path = "prepare/grok_chat_usage.rs"]
+mod grok_chat_usage;
 #[path = "prepare/oauth.rs"]
 mod oauth;
 #[path = "prepare/provider_checks.rs"]
@@ -38,6 +40,8 @@ mod provider_gate;
 mod provider_iterator;
 #[path = "prepare/provider_limits.rs"]
 mod provider_limits;
+#[path = "prepare/provider_model_policy.rs"]
+mod provider_model_policy;
 #[path = "prepare/request_sanitizer.rs"]
 mod request_sanitizer;
 
@@ -48,12 +52,16 @@ mod attempt_auth;
 mod attempt_executor;
 #[path = "attempt/attempt_record.rs"]
 mod attempt_record;
+#[path = "attempt/reasoning_effort.rs"]
+mod reasoning_effort;
 #[path = "attempt/retry_engine.rs"]
 mod retry_engine;
 #[path = "attempt/send.rs"]
 mod send;
 #[path = "attempt/send_timeout.rs"]
 mod send_timeout;
+#[path = "attempt/ws_attempt.rs"]
+mod ws_attempt;
 
 // --- response/ : upstream response handling & finalization ---
 #[path = "response/finalize.rs"]
@@ -118,8 +126,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::gateway::events::{
-    decision_chain as dc, emit_attempt_event, emit_gateway_debug_log_lazy, emit_gateway_log,
-    FailoverAttempt, GatewayAttemptEvent,
+    bound_attempt_event, decision_chain as dc, emit_attempt_event, emit_gateway_debug_log_lazy,
+    emit_gateway_log, FailoverAttempt, GatewayAttemptEvent,
 };
 use crate::gateway::response_fixer;
 use crate::gateway::streams::{
@@ -166,12 +174,33 @@ where
     let created_at_ms = input.created_at_ms;
     let created_at = input.created_at;
 
+    if let Some(request) = &input.ws_request {
+        use crate::shared::mutex_ext::MutexExt;
+        let mut generation = request.generation.lock_or_recover();
+        if generation.recovered {
+            input.providers.retain(|provider| {
+                generation.budget.providers.contains(&provider.id)
+                    && !generation.budget.failed_providers.contains(&provider.id)
+            });
+            input.providers.sort_by_key(|provider| {
+                generation
+                    .budget
+                    .providers
+                    .iter()
+                    .position(|id| *id == provider.id)
+            });
+        } else {
+            generation.budget.providers =
+                input.providers.iter().map(|provider| provider.id).collect();
+        }
+    }
     let mut abort_guard = input.abort_guard.take();
 
     let introspection_body =
         body_for_introspection(&input.base_headers, input.body_bytes.as_ref()).into_owned();
     let ctx = CommonCtx::from(CommonCtxArgs {
         state: &input.state,
+        ws_request: input.ws_request.as_ref(),
         cli_key: &input.cli_key,
         forwarded_path: &input.forwarded_path,
         observe: input.observe_request,
@@ -186,6 +215,7 @@ where
         cx2cc_settings: &input.cx2cc_settings,
         effective_sort_mode_id: input.effective_sort_mode_id,
         special_settings: &input.special_settings,
+        provider_health_neutral: input.provider_health_neutral,
         provider_cooldown_secs: input.provider_cooldown_secs,
         upstream_first_byte_timeout_secs: input.upstream_first_byte_timeout_secs,
         upstream_first_byte_timeout: input.upstream_first_byte_timeout,
@@ -193,6 +223,7 @@ where
         upstream_request_timeout_non_streaming: input.upstream_request_timeout_non_streaming,
         verbose_provider_error: input.verbose_provider_error,
         max_attempts_per_provider: input.max_attempts_per_provider,
+        codex_priority_billing_source: input.codex_priority_billing_source,
         enable_response_fixer: input.enable_response_fixer,
         response_fixer_stream_config: input.response_fixer_stream_config,
         response_fixer_non_stream_config: input.response_fixer_non_stream_config,
@@ -200,6 +231,15 @@ where
     });
 
     let mut run_state = FailoverRunState::new();
+    if let Some(request) = &input.ws_request {
+        use crate::shared::mutex_ext::MutexExt;
+        run_state.failed_provider_ids = request
+            .generation
+            .lock_or_recover()
+            .budget
+            .failed_providers
+            .clone();
+    }
 
     let max_providers_to_try = (input.max_providers_to_try as usize).max(1);
     let mut counters = provider_iterator::IterationCounters::new();
@@ -210,7 +250,16 @@ where
     let providers: Vec<_> = input.providers.clone();
 
     for provider in providers.iter() {
-        if counters.providers_tried >= max_providers_to_try {
+        let exhausted = input.ws_request.as_ref().map_or(
+            counters.providers_tried >= max_providers_to_try,
+            |request| {
+                use crate::shared::mutex_ext::MutexExt;
+                let generation = request.generation.lock_or_recover();
+                generation.budget.visited_providers.len() >= max_providers_to_try
+                    && !generation.budget.visited_providers.contains(&provider.id)
+            },
+        );
+        if exhausted {
             break;
         }
 
@@ -230,6 +279,28 @@ where
             provider_iterator::PreparationOutcome::Skipped => continue,
         };
 
+        if let Some(request) = &input.ws_request {
+            use crate::shared::mutex_ext::MutexExt;
+            let mut generation = request.generation.lock_or_recover();
+            if generation
+                .budget
+                .provider_id
+                .is_some_and(|id| id != prepared.provider_id)
+            {
+                response_fixer::push_special_setting(
+                    &input.special_settings,
+                    serde_json::json!({
+                        "type":"codex_responses_transport", "scope":"attempt", "providerId":prepared.provider_id,
+                        "client_transport":if request.client_ws {"responses_ws"}else{"http"},
+                        "transport_action":"provider_switch", "failure_class":"provider", "output_committed":false,
+                    }),
+                );
+            }
+            generation
+                .budget
+                .visited_providers
+                .insert(prepared.provider_id);
+        }
         let mut circuit_snapshot = prepared.circuit_snapshot.clone();
 
         if let Some(resp) = retry_engine::run_retry_loop(
@@ -247,6 +318,14 @@ where
         .await
         {
             return resp;
+        }
+        if let Some(request) = &input.ws_request {
+            use crate::shared::mutex_ext::MutexExt;
+            let mut generation = request.generation.lock_or_recover();
+            generation
+                .budget
+                .failed_providers
+                .insert(prepared.provider_id);
         }
     }
 

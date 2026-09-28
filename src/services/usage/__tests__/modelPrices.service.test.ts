@@ -7,8 +7,8 @@ import {
   type ModelPricesSyncReport,
   modelPriceAliasesGet,
   modelPriceAliasesSet,
-  modelPricesList,
-  modelPricesSyncBasellm,
+  modelPricesListAll,
+  modelPricesSync,
   notifyModelPricesUpdated,
   normalizeModelPriceAliases,
   subscribeModelPricesUpdated,
@@ -23,8 +23,8 @@ vi.mock("../../../generated/bindings", async () => {
     ...actual,
     commands: {
       ...actual.commands,
-      modelPricesList: vi.fn(),
-      modelPricesSyncBasellm: vi.fn(),
+      modelPricesListAll: vi.fn(),
+      modelPricesSync: vi.fn(),
       modelPriceAliasesGet: vi.fn(),
       modelPriceAliasesSet: vi.fn(),
     },
@@ -47,6 +47,7 @@ function makeModelPriceSummary(overrides: Partial<ModelPriceSummary> = {}): Mode
   return {
     id: 1,
     cli_key: "claude",
+    vendor: "anthropic",
     model: "claude-3-7-sonnet",
     currency: "USD",
     created_at: 1,
@@ -78,31 +79,38 @@ function makeModelPricesSyncReport(
     status: "updated",
     inserted: 1,
     updated: 0,
-    skipped: 0,
+    unchanged: 0,
     total: 1,
+    error: null,
     ...overrides,
   };
 }
 
 describe("services/usage/modelPrices", () => {
   it("rethrows invoke errors and logs", async () => {
-    vi.mocked(commands.modelPricesList).mockRejectedValueOnce(new Error("model prices boom"));
+    vi.mocked(commands.modelPricesListAll).mockRejectedValueOnce(new Error("model prices boom"));
 
-    await expect(modelPricesList("claude")).rejects.toThrow("model prices boom");
+    await expect(modelPricesListAll()).rejects.toThrow("model prices boom");
     expect(logToConsole).toHaveBeenCalledWith(
       "error",
       "读取模型价格列表失败",
       expect.objectContaining({
-        cmd: "model_prices_list",
+        cmd: "model_prices_list_all",
         error: expect.stringContaining("model prices boom"),
       })
     );
   });
 
   it("maps generated list and alias payloads through generated authority", async () => {
-    vi.mocked(commands.modelPricesList).mockResolvedValueOnce({
+    vi.mocked(commands.modelPricesListAll).mockResolvedValueOnce({
       status: "ok",
-      data: [makeModelPriceSummary({ model: " claude-3-7-sonnet ", currency: " USD " })],
+      data: [
+        makeModelPriceSummary({
+          model: " claude-3-7-sonnet ",
+          currency: " USD ",
+          vendor: " deepseek ",
+        }),
+      ],
     });
     vi.mocked(commands.modelPriceAliasesGet).mockResolvedValueOnce({
       status: "ok",
@@ -122,34 +130,34 @@ describe("services/usage/modelPrices", () => {
       status: "ok",
       data: makeModelPriceAliases({ version: 1 }),
     });
-    vi.mocked(commands.modelPricesSyncBasellm).mockResolvedValueOnce({
+    vi.mocked(commands.modelPricesSync).mockResolvedValueOnce({
       status: "ok",
       data: makeModelPricesSyncReport(),
     });
 
-    const rows = await modelPricesList(" claude " as never);
+    const rows = await modelPricesListAll();
     const aliases = await modelPriceAliasesGet();
     const updated = await modelPriceAliasesSet(aliases!);
-    const report = await modelPricesSyncBasellm(true);
+    const report = await modelPricesSync();
 
     expect(rows?.[0]?.cli_key).toBe("claude");
     expect(rows?.[0]?.model).toBe("claude-3-7-sonnet");
     expect(rows?.[0]?.currency).toBe("USD");
+    expect(rows?.[0]?.vendor).toBe("deepseek");
     expect(aliases?.rules[0]?.cli_key).toBe("codex");
     expect(aliases?.rules[0]?.pattern).toBe("gpt-");
     expect(aliases?.rules[0]?.target_model).toBe("gpt-5");
     expect(updated?.version).toBe(1);
     expect(report).toEqual(expect.objectContaining({ status: "updated", inserted: 1, total: 1 }));
-    expect(commands.modelPricesList).toHaveBeenCalledWith("claude");
+    expect(commands.modelPricesListAll).toHaveBeenCalledWith();
     expect(commands.modelPriceAliasesSet).toHaveBeenCalledWith(aliases);
-    expect(commands.modelPricesSyncBasellm).toHaveBeenCalledWith(true);
+    expect(commands.modelPricesSync).toHaveBeenCalledWith();
   });
 
   it("rejects invalid list keys and aliases before generated IPC", async () => {
     expect(validateModelPricesCliKey(" codex ")).toBe("codex");
     expect(() => validateModelPricesCliKey("unknown")).toThrow("SEC_INVALID_INPUT");
 
-    await expect(modelPricesList("unknown" as never)).rejects.toThrow("SEC_INVALID_INPUT");
     await expect(
       modelPriceAliasesSet(
         makeModelPriceAliases({
@@ -166,7 +174,6 @@ describe("services/usage/modelPrices", () => {
       )
     ).rejects.toThrow("SEC_INVALID_INPUT");
 
-    expect(commands.modelPricesList).not.toHaveBeenCalled();
     expect(commands.modelPriceAliasesSet).not.toHaveBeenCalled();
   });
 
@@ -203,19 +210,26 @@ describe("services/usage/modelPrices", () => {
   });
 
   it("rejects invalid generated model price and sync payloads", async () => {
-    vi.mocked(commands.modelPricesList).mockResolvedValueOnce({
+    vi.mocked(commands.modelPricesListAll).mockResolvedValueOnce({
       status: "ok",
       data: [makeModelPriceSummary({ id: 0 })],
     });
 
-    await expect(modelPricesList("claude")).rejects.toThrow("IPC_INVALID_RESULT");
+    await expect(modelPricesListAll()).rejects.toThrow("IPC_INVALID_RESULT");
 
-    vi.mocked(commands.modelPricesSyncBasellm).mockResolvedValueOnce({
+    vi.mocked(commands.modelPricesListAll).mockResolvedValueOnce({
       status: "ok",
-      data: makeModelPricesSyncReport({ inserted: 1, updated: 1, skipped: 0, total: 1 }),
+      data: [makeModelPriceSummary({ cli_key: "bogus" as never })],
     });
 
-    await expect(modelPricesSyncBasellm(false)).rejects.toThrow("IPC_INVALID_RESULT");
+    await expect(modelPricesListAll()).rejects.toThrow("IPC_INVALID_LITERAL");
+
+    vi.mocked(commands.modelPricesSync).mockResolvedValueOnce({
+      status: "ok",
+      data: makeModelPricesSyncReport({ status: "bogus" as never }),
+    });
+
+    await expect(modelPricesSync()).rejects.toThrow("IPC_INVALID_LITERAL");
   });
 
   it("isolates model price update subscribers when one fails", async () => {

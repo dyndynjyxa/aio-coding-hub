@@ -5,10 +5,15 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 use super::{
-    compute_start_ts, normalize_cli_filter, parse_range, token_total, UsageDayRow, UsageProviderRow,
+    compute_start_ts, effective_total_from_buckets, normalize_cli_filter, parse_range,
+    sql_effective_input_tokens_expr, UsageDayRow, UsageProviderRow,
 };
 
 const USD_FEMTO_DENOM: f64 = 1_000_000_000_000_000.0;
+const SQL_CANONICAL_BUCKETS_MISSING: &str = "input_tokens IS NULL
+        AND output_tokens IS NULL
+        AND cache_read_input_tokens IS NULL
+        AND cache_creation_input_tokens IS NULL";
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(super) struct ProviderKey {
@@ -22,6 +27,9 @@ pub(super) struct ProviderAgg {
     pub(super) requests_total: i64,
     pub(super) requests_success: i64,
     pub(super) requests_failed: i64,
+    pub(super) total_duration_ms: i64,
+    pub(super) first_request_created_at_ms: Option<i64>,
+    pub(super) last_request_created_at_ms: Option<i64>,
     pub(super) success_duration_ms_sum: i64,
     pub(super) success_ttfb_ms_sum: i64,
     pub(super) success_ttfb_ms_count: i64,
@@ -35,7 +43,7 @@ pub(super) struct ProviderAgg {
     pub(super) cache_creation_5m_input_tokens: i64,
     pub(super) cache_creation_1h_input_tokens: i64,
     pub(super) cost_covered_success: i64,
-    pub(super) total_cost_usd_femto: i64,
+    pub(super) total_cost_usd_femto: f64,
 }
 
 impl ProviderAgg {
@@ -43,6 +51,23 @@ impl ProviderAgg {
         self.requests_total = self.requests_total.saturating_add(add.requests_total);
         self.requests_success = self.requests_success.saturating_add(add.requests_success);
         self.requests_failed = self.requests_failed.saturating_add(add.requests_failed);
+        self.total_duration_ms = self.total_duration_ms.saturating_add(add.total_duration_ms);
+        self.first_request_created_at_ms = match (
+            self.first_request_created_at_ms,
+            add.first_request_created_at_ms,
+        ) {
+            (Some(current), Some(next)) => Some(current.min(next)),
+            (None, Some(next)) => Some(next),
+            (current, None) => current,
+        };
+        self.last_request_created_at_ms = match (
+            self.last_request_created_at_ms,
+            add.last_request_created_at_ms,
+        ) {
+            (Some(current), Some(next)) => Some(current.max(next)),
+            (None, Some(next)) => Some(next),
+            (current, None) => current,
+        };
         self.success_duration_ms_sum = self
             .success_duration_ms_sum
             .saturating_add(add.success_duration_ms_sum);
@@ -76,9 +101,7 @@ impl ProviderAgg {
         self.cost_covered_success = self
             .cost_covered_success
             .saturating_add(add.cost_covered_success);
-        self.total_cost_usd_femto = self
-            .total_cost_usd_femto
-            .saturating_add(add.total_cost_usd_femto);
+        self.total_cost_usd_femto += add.total_cost_usd_femto;
     }
 
     pub(super) fn into_leaderboard_row(
@@ -105,9 +128,9 @@ impl ProviderAgg {
             None
         };
 
-        let total_cost_usd_femto = self.total_cost_usd_femto.max(0);
-        let cost_usd = if self.cost_covered_success > 0 && total_cost_usd_femto > 0 {
-            Some(total_cost_usd_femto as f64 / USD_FEMTO_DENOM)
+        let total_cost_usd_femto = self.total_cost_usd_femto.max(0.0);
+        let cost_usd = if self.cost_covered_success > 0 && total_cost_usd_femto > 0.0 {
+            Some(total_cost_usd_femto / USD_FEMTO_DENOM)
         } else {
             None
         };
@@ -115,9 +138,16 @@ impl ProviderAgg {
         super::UsageLeaderboardRow {
             key,
             name,
+            folder_path: None,
             requests_total: self.requests_total,
             requests_success: self.requests_success,
             requests_failed: self.requests_failed,
+            total_duration_ms: self.total_duration_ms,
+            first_request_created_at_ms: self.first_request_created_at_ms,
+            last_request_created_at_ms: self.last_request_created_at_ms,
+            last_request_completed_at_ms: None,
+            estimated_development_time_ms: None,
+            hourly_estimated_development_time_ms: None,
             total_tokens: self.total_tokens,
             io_total_tokens: self.input_tokens.saturating_add(self.output_tokens),
             input_tokens: self.input_tokens,
@@ -200,9 +230,10 @@ pub fn leaderboard_provider(
     let conn = db.open_connection()?;
     let (start_ts, cli_key) = resolve_range_filters(&conn, range, cli_key)?;
 
-    let mut stmt = conn
-        .prepare_cached(
-            r#"
+    let effective_input_expr = sql_effective_input_tokens_expr();
+    let canonical_buckets_missing_expr = SQL_CANONICAL_BUCKETS_MISSING;
+    let query = format!(
+        r#"
     	SELECT
     	  cli_key,
     	  attempts_json,
@@ -210,19 +241,24 @@ pub fn leaderboard_provider(
     	  error_code,
     	  duration_ms,
     	  ttfb_ms,
-    	  input_tokens,
-    	  output_tokens,
-    	  total_tokens,
-    	  cache_read_input_tokens,
+      {effective_input_expr} AS input_tokens,
+	      output_tokens,
+	      total_tokens,
+	      cache_read_input_tokens,
     	  cache_creation_input_tokens,
       cache_creation_5m_input_tokens,
-      cache_creation_1h_input_tokens
+      cache_creation_1h_input_tokens,
+      CASE WHEN {canonical_buckets_missing_expr}
+      THEN 1 ELSE 0 END AS canonical_buckets_missing
     FROM request_logs
     WHERE excluded_from_stats = 0
     AND (?1 IS NULL OR created_at >= ?1)
     AND (?2 IS NULL OR cli_key = ?2)
-    "#,
-        )
+	    "#,
+    );
+
+    let mut stmt = conn
+        .prepare_cached(&query)
         .map_err(|e| db_err!("failed to prepare provider leaderboard query: {e}"))?;
 
     let rows = stmt
@@ -236,7 +272,7 @@ pub fn leaderboard_provider(
 
             let input_tokens: Option<i64> = row.get("input_tokens")?;
             let output_tokens: Option<i64> = row.get("output_tokens")?;
-            let total_tokens: Option<i64> = row.get("total_tokens")?;
+            let persisted_total_tokens: Option<i64> = row.get("total_tokens")?;
             let cache_read_input_tokens: Option<i64> = row.get("cache_read_input_tokens")?;
             let cache_creation_input_tokens: Option<i64> =
                 row.get("cache_creation_input_tokens")?;
@@ -244,6 +280,8 @@ pub fn leaderboard_provider(
                 row.get("cache_creation_5m_input_tokens")?;
             let cache_creation_1h_input_tokens: Option<i64> =
                 row.get("cache_creation_1h_input_tokens")?;
+            let canonical_buckets_missing: bool =
+                row.get::<_, i64>("canonical_buckets_missing")? != 0;
 
             let key = extract_final_provider(&row_cli_key, &attempts_json);
             let success = is_success(status, error_code.as_deref());
@@ -267,6 +305,9 @@ pub fn leaderboard_provider(
                     requests_total: 1,
                     requests_success: if success { 1 } else { 0 },
                     requests_failed: if success { 0 } else { 1 },
+                    total_duration_ms: duration_ms,
+                    first_request_created_at_ms: None,
+                    last_request_created_at_ms: None,
                     success_duration_ms_sum: if success { duration_ms } else { 0 },
                     success_ttfb_ms_sum: if success { ttfb_ms.unwrap_or(0) } else { 0 },
                     success_ttfb_ms_count: if success && ttfb_ms.is_some() { 1 } else { 0 },
@@ -274,13 +315,22 @@ pub fn leaderboard_provider(
                     success_output_tokens_for_rate_sum: rate_output_tokens,
                     input_tokens: input_tokens.unwrap_or(0),
                     output_tokens: output_tokens.unwrap_or(0),
-                    total_tokens: token_total(total_tokens, input_tokens, output_tokens),
+                    total_tokens: if canonical_buckets_missing {
+                        persisted_total_tokens.unwrap_or(0)
+                    } else {
+                        effective_total_from_buckets(
+                            input_tokens.unwrap_or(0),
+                            output_tokens.unwrap_or(0),
+                            cache_creation_input_tokens.unwrap_or(0),
+                            cache_read_input_tokens.unwrap_or(0),
+                        )
+                    },
                     cache_read_input_tokens: cache_read_input_tokens.unwrap_or(0),
                     cache_creation_input_tokens: cache_creation_input_tokens.unwrap_or(0),
                     cache_creation_5m_input_tokens: cache_creation_5m_input_tokens.unwrap_or(0),
                     cache_creation_1h_input_tokens: cache_creation_1h_input_tokens.unwrap_or(0),
                     cost_covered_success: 0,
-                    total_cost_usd_femto: 0,
+                    total_cost_usd_femto: 0.0,
                 },
             ))
         })
@@ -357,25 +407,45 @@ pub fn leaderboard_day(
     let conn = db.open_connection()?;
     let (start_ts, cli_key) = resolve_range_filters(&conn, range, cli_key)?;
 
-    let mut stmt = conn.prepare_cached(r#"
+    let effective_input_expr = sql_effective_input_tokens_expr();
+    let canonical_buckets_missing_expr = SQL_CANONICAL_BUCKETS_MISSING;
+    let query = format!(
+        r#"
+    SELECT
+      day,
+      requests_total,
+      input_tokens,
+      output_tokens,
+      input_tokens + output_tokens + cache_read_input_tokens + cache_creation_input_tokens + legacy_total_tokens AS total_tokens,
+      cache_read_input_tokens,
+      cache_creation_input_tokens,
+      cache_creation_5m_input_tokens,
+      cache_creation_1h_input_tokens
+    FROM (
     SELECT
       strftime('%Y-%m-%d', created_at, 'unixepoch', 'localtime') AS day,
       COUNT(*) AS requests_total,
-      SUM(COALESCE(input_tokens, 0)) AS input_tokens,
+      SUM({effective_input_expr}) AS input_tokens,
       SUM(COALESCE(output_tokens, 0)) AS output_tokens,
-      SUM(COALESCE(total_tokens, COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0))) AS total_tokens,
       SUM(COALESCE(cache_read_input_tokens, 0)) AS cache_read_input_tokens,
       SUM(COALESCE(cache_creation_input_tokens, 0)) AS cache_creation_input_tokens,
       SUM(COALESCE(cache_creation_5m_input_tokens, 0)) AS cache_creation_5m_input_tokens,
-      SUM(COALESCE(cache_creation_1h_input_tokens, 0)) AS cache_creation_1h_input_tokens
+      SUM(COALESCE(cache_creation_1h_input_tokens, 0)) AS cache_creation_1h_input_tokens,
+      SUM(CASE WHEN {canonical_buckets_missing_expr}
+      THEN COALESCE(total_tokens, 0) ELSE 0 END) AS legacy_total_tokens
     FROM request_logs
     WHERE excluded_from_stats = 0
     AND (?1 IS NULL OR created_at >= ?1)
     AND (?2 IS NULL OR cli_key = ?2)
     GROUP BY day
+    ) aggregated
     ORDER BY total_tokens DESC, day DESC
     LIMIT ?3
-    "#)
+	    "#
+    );
+
+    let mut stmt = conn
+        .prepare_cached(&query)
         .map_err(|e| db_err!("failed to prepare day leaderboard query: {e}"))?;
 
     let rows = stmt

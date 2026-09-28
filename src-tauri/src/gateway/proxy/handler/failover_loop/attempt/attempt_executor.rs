@@ -15,8 +15,12 @@ pub(super) struct RetryLoopState {
     pub(super) claude_api_key_bearer_fallback: bool,
     pub(super) oauth_reactive_refreshed_once: bool,
     pub(super) codex_previous_response_id_rectifier_retried: bool,
+    pub(super) thinking_effort_conflict_rectifier_retried: bool,
     pub(super) thinking_signature_rectifier_retried: bool,
     pub(super) thinking_budget_rectifier_retried: bool,
+    pub(super) gemini_function_id_rectifier_retried: bool,
+    pub(super) additional_repair_retry_slots: u32,
+    pub(super) last_attempt_body: Bytes,
 }
 
 impl RetryLoopState {
@@ -25,21 +29,48 @@ impl RetryLoopState {
             claude_api_key_bearer_fallback: false,
             oauth_reactive_refreshed_once: false,
             codex_previous_response_id_rectifier_retried: false,
+            thinking_effort_conflict_rectifier_retried: false,
             thinking_signature_rectifier_retried: false,
             thinking_budget_rectifier_retried: false,
+            gemini_function_id_rectifier_retried: false,
+            additional_repair_retry_slots: 0,
+            last_attempt_body: Bytes::new(),
         }
     }
+
+    pub(super) fn effective_attempt_limit(&self, base_limit: u32) -> u32 {
+        base_limit.saturating_add(self.additional_repair_retry_slots)
+    }
+}
+
+pub(super) fn grant_repair_retry_slot_if_needed(
+    additional_repair_retry_slots: &mut u32,
+    retry_index: u32,
+    base_limit: u32,
+) -> bool {
+    let effective_limit = base_limit.saturating_add(*additional_repair_retry_slots);
+    if retry_index < effective_limit {
+        return false;
+    }
+    *additional_repair_retry_slots = additional_repair_retry_slots.saturating_add(1);
+    true
 }
 
 /// Timing captured at the start of an attempt, before the upstream send.
 pub(super) struct AttemptTiming {
     pub(super) attempt_started_ms: u128,
     pub(super) attempt_started: Instant,
+    pub(super) reasoning_effort: Option<String>,
+    pub(super) upstream_sent: bool,
 }
 
 /// Result of building + sending one attempt.
 pub(super) enum AttemptSendOutcome {
     Response(reqwest::Response, AttemptTiming),
+    StreamResponse(crate::gateway::streams::UpstreamResponse, AttemptTiming),
+    WsTransport(&'static str, AttemptTiming),
+    ContextLost(AttemptTiming),
+    LocalProtocol(&'static str, AttemptTiming),
     Timeout(AttemptTiming),
     ReqwestError(reqwest::Error, AttemptTiming),
     /// URL build failure already recorded; caller should apply the returned LoopControl.
@@ -171,8 +202,16 @@ where
                 );
                 return AttemptSendOutcome::PluginBlocked(blocked.reason);
             }
+            if (input.ws_request.is_some() || input.ws_connection.is_some())
+                && output.body.len() > crate::gateway::responses_ws::protocol::MAX_MESSAGE_BYTES
+            {
+                return AttemptSendOutcome::PluginBlocked(
+                    "Managed Responses plugin output exceeds byte limit".into(),
+                );
+            }
             semantic_headers = output.headers;
-            sync_before_send_body_output(prepared, &mut body_state_for_attempt, output.body);
+            // The hook transforms this physical attempt, not the provider retry baseline.
+            body_state_for_attempt.replace_decoded(output.body);
         }
         Err(mut err) => {
             crate::gateway::plugins::audit::persist_gateway_plugin_error_audit_events(
@@ -192,10 +231,39 @@ where
         }
     }
 
+    // Reactive repairs must preserve the request body already approved by beforeSend.
+    retry_state.last_attempt_body = body_state_for_attempt.decoded_clone();
     headers = semantic_headers;
-    let upstream_body = body_state_for_attempt
+    let reasoning_effort = prepared.reasoning_effort.clone();
+    let mut upstream_body = body_state_for_attempt
         .finalize_for_upstream(&mut headers, crate::gateway::util::max_request_body_bytes());
 
+    // Local continuation ownership must never become a provider routing token.
+    if input.ws_request.is_some() || input.ws_connection.is_some() {
+        headers.remove(crate::gateway::responses_ws::protocol::TURN_STATE_HEADER);
+        if let Ok(mut json) =
+            serde_json::from_slice::<serde_json::Value>(&retry_state.last_attempt_body)
+        {
+            if let Some(metadata) = json
+                .get_mut("client_metadata")
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                metadata.remove(crate::gateway::responses_ws::protocol::TURN_STATE_HEADER);
+            }
+            retry_state.last_attempt_body = Bytes::from(json.to_string());
+            upstream_body = retry_state.last_attempt_body.clone();
+            headers.remove(header::CONTENT_ENCODING);
+            headers.remove(header::CONTENT_LENGTH);
+        }
+    }
+
+    if (input.ws_request.is_some() || input.ws_connection.is_some())
+        && upstream_body.len() > crate::gateway::responses_ws::protocol::MAX_MESSAGE_BYTES
+    {
+        return AttemptSendOutcome::PluginBlocked(
+            "Managed Responses request exceeds byte limit".into(),
+        );
+    }
     emit_upstream_attempt_fingerprint(
         ctx,
         input,
@@ -206,13 +274,131 @@ where
         &upstream_body,
     );
 
-    let timing = AttemptTiming {
+    let mut timing = AttemptTiming {
         attempt_started_ms,
         attempt_started: Instant::now(),
+        reasoning_effort,
+        upstream_sent: true,
     };
 
-    let send_result =
-        send::send_upstream(ctx, input.req_method.clone(), url, headers, upstream_body).await;
+    if let Some(connection) = input
+        .ws_connection
+        .as_ref()
+        .or_else(|| input.ws_request.as_ref().map(|r| &r.connection))
+    {
+        let supports = input
+            .providers
+            .iter()
+            .find(|p| p.id == prepared.provider_id)
+            .is_some_and(|p| {
+                p.supports_websockets && p.auth_mode == "api_key" && !p.is_cx2cc_bridge()
+            });
+        let deadline = input.ws_request.as_ref().and_then(|request| {
+            use crate::shared::mutex_ext::MutexExt;
+            request.generation.lock_or_recover().budget.deadline
+        });
+        use crate::gateway::responses_ws::send::SendOutcome;
+        let outcome = crate::gateway::responses_ws::send::send(
+            connection.clone(),
+            input.ws_request.as_ref(),
+            prepared.provider_id,
+            supports,
+            url.clone(),
+            headers.clone(),
+            upstream_body.clone(),
+            deadline,
+        )
+        .await;
+        timing.upstream_sent = match &outcome {
+            SendOutcome::Response(_) | SendOutcome::Rejected(_) => true,
+            SendOutcome::Transport(reason) => *reason == "ws_send_failed",
+            _ => false,
+        };
+        loop_state.abort_guard.update_in_flight_attempt_send_state(
+            timing.reasoning_effort.clone(),
+            timing.upstream_sent,
+        );
+        match outcome {
+            SendOutcome::Response(response) => {
+                return AttemptSendOutcome::StreamResponse(response, timing)
+            }
+            SendOutcome::Rejected(response) => {
+                super::ws_attempt::marker(
+                    input,
+                    prepared.provider_id,
+                    "responses_ws",
+                    "selected",
+                    Some("provider"),
+                    Some("ws_upgrade_rejected"),
+                );
+                return AttemptSendOutcome::StreamResponse(response, timing);
+            }
+            SendOutcome::Transport(reason) => {
+                return AttemptSendOutcome::WsTransport(reason, timing)
+            }
+            SendOutcome::ContextLost => return AttemptSendOutcome::ContextLost(timing),
+            SendOutcome::Local(reason) => return AttemptSendOutcome::LocalProtocol(reason, timing),
+            SendOutcome::Http(reason) => {
+                super::ws_attempt::marker(
+                    input,
+                    prepared.provider_id,
+                    "http",
+                    if matches!(reason, "ws_cooldown_skip" | "ws_budget_exhausted") {
+                        reason
+                    } else {
+                        "selected"
+                    },
+                    None,
+                    Some(reason),
+                );
+                if input.ws_request.is_none() {
+                    return AttemptSendOutcome::LocalProtocol("prewarm_http_required", timing);
+                }
+            }
+        }
+    }
+    timing.upstream_sent = true;
+    let send_result = if let Some(request) = &input.ws_request {
+        use crate::shared::mutex_ext::MutexExt;
+        request.generation.lock_or_recover().upstream_ws = false;
+        let deadline = request.generation.lock_or_recover().budget.deadline;
+        match deadline {
+            Some(deadline) if deadline <= Instant::now() => {
+                timing.upstream_sent = false;
+                send::SendResult::Timeout
+            }
+            Some(deadline) => match tokio::time::timeout_at(
+                tokio::time::Instant::from_std(deadline),
+                send::send_upstream(ctx, input.req_method.clone(), url, headers, upstream_body),
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(_) => send::SendResult::Timeout,
+            },
+            None => {
+                send::send_upstream(ctx, input.req_method.clone(), url, headers, upstream_body)
+                    .await
+            }
+        }
+    } else {
+        send::send_upstream(ctx, input.req_method.clone(), url, headers, upstream_body).await
+    };
+
+    if let send::SendResult::Err(err) = &send_result {
+        // DNS/connect failures never reached the upstream; keep upstream_sent truthful
+        // for the "last sent attempt" attribution in events and logs.
+        if err.is_connect() {
+            timing.upstream_sent = false;
+        }
+    }
+
+    // The "started" snapshot was captured before the send; refresh the abort
+    // guard so a client abort mid-stream records truthful upstream_sent /
+    // reasoning_effort values instead of the pre-send defaults.
+    loop_state
+        .abort_guard
+        .update_in_flight_attempt_send_state(timing.reasoning_effort.clone(), timing.upstream_sent);
 
     match send_result {
         send::SendResult::Ok(resp) => AttemptSendOutcome::Response(resp, timing),
@@ -224,22 +410,6 @@ where
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-fn sync_before_send_body_output(
-    prepared: &mut PreparedProvider,
-    body_state_for_attempt: &mut crate::gateway::proxy::request_body::GatewayRequestBody,
-    output_body: Bytes,
-) {
-    let previous_body = body_state_for_attempt.decoded_clone();
-    body_state_for_attempt.replace_decoded(output_body.clone());
-    if output_body == previous_body {
-        return;
-    }
-
-    prepared.upstream_body_bytes = output_body;
-    prepared.strip_request_content_encoding = true;
-    prepared.request_body_mutated_before_attempt = true;
-}
 
 fn try_build_url(prepared: &PreparedProvider) -> Result<reqwest::Url, String> {
     build_target_url(
@@ -308,6 +478,30 @@ fn emit_upstream_attempt_fingerprint<R: tauri::Runtime>(
             fingerprint.debug,
         )
     });
+
+    if input.cli_key == "claude" {
+        if let Some(fingerprint_debug) =
+            crate::gateway::claude_client_fingerprint::compute(&input.forwarded_path, headers, body)
+        {
+            tracing::debug!(
+                trace_id = %input.trace_id,
+                provider_id = prepared.provider_id,
+                retry_index,
+                claude_client_fingerprint = %fingerprint_debug,
+                "computed final Claude client fingerprint"
+            );
+            emit_gateway_debug_log_lazy(&ctx.state.app, || {
+                format!(
+                    "[CLAUDE_CLIENT_FP] trace_id={} provider={} (id={}) retry={} {}",
+                    input.trace_id,
+                    prepared.provider_name_base,
+                    prepared.provider_id,
+                    retry_index,
+                    fingerprint_debug,
+                )
+            });
+        }
+    }
 }
 
 async fn handle_url_build_failure<R: tauri::Runtime>(
@@ -349,7 +543,7 @@ async fn handle_url_build_failure<R: tauri::Runtime>(
     .await
 }
 
-fn build_attempt_ctx<'a>(
+pub(super) fn build_attempt_ctx<'a>(
     attempt_index: u32,
     retry_index: u32,
     attempt_started_ms: u128,
@@ -366,10 +560,12 @@ fn build_attempt_ctx<'a>(
         gemini_oauth_response_mode: prepared.gemini_oauth_response_mode,
         cx2cc_active: prepared.cx2cc_active,
         anthropic_stream_requested: prepared.anthropic_stream_requested,
+        reasoning_effort: None,
+        upstream_sent: false,
     }
 }
 
-fn build_provider_ctx(prepared: &PreparedProvider) -> ProviderCtx<'_> {
+pub(super) fn build_provider_ctx(prepared: &PreparedProvider) -> ProviderCtx<'_> {
     ProviderCtx {
         provider_id: prepared.provider_id,
         provider_name_base: &prepared.provider_name_base,
@@ -380,6 +576,7 @@ fn build_provider_ctx(prepared: &PreparedProvider) -> ProviderCtx<'_> {
         session_reuse: prepared.session_reuse,
         stream_idle_timeout_seconds: prepared.stream_idle_timeout_seconds,
         claude_model_mapping: prepared.claude_model_mapping.as_ref(),
+        model_redirect: prepared.model_redirect.as_ref(),
     }
 }
 
@@ -421,35 +618,47 @@ fn emit_started_event<R: tauri::Runtime>(
         circuit_trigger_error_code: None,
         provider_bridged: Some(prepared.provider_bridged),
         timeout_secs: None,
+        reasoning_effort: None,
+        upstream_sent: false,
+        claude_model_mapping: prepared.claude_model_mapping.clone(),
+        model_redirect: prepared.model_redirect.clone(),
     };
-    abort_guard.capture_in_flight_attempt(&started_attempt);
-    if input.observe_request {
-        emit_attempt_event(
-            &input.state.app,
-            GatewayAttemptEvent {
-                trace_id: input.trace_id.clone(),
-                cli_key: input.cli_key.clone(),
-                session_id: input.session_id.clone(),
-                method: input.method_hint.clone(),
-                path: input.forwarded_path.clone(),
-                query: input.query.clone(),
-                requested_model: input.requested_model.clone(),
-                attempt_index,
-                provider_id: prepared.provider_id,
-                session_reuse: prepared.session_reuse,
-                provider_name: prepared.provider_name_base.clone(),
-                base_url: prepared.provider_base_url_base.clone(),
-                outcome: "started".to_string(),
-                status: None,
-                attempt_started_ms,
-                attempt_duration_ms: 0,
-                circuit_state_before: Some(circuit_before.state.as_str()),
-                circuit_state_after: None,
-                circuit_failure_count: Some(circuit_before.failure_count),
-                circuit_failure_threshold: Some(circuit_before.failure_threshold),
-                claude_model_mapping: prepared.claude_model_mapping.clone(),
-            },
+    let started_event = input.observe_request.then(|| {
+        bound_attempt_event(GatewayAttemptEvent {
+            trace_id: input.trace_id.clone(),
+            cli_key: input.cli_key.clone(),
+            session_id: input.session_id.clone(),
+            method: input.method_hint.clone(),
+            path: input.forwarded_path.clone(),
+            query: input.query.clone(),
+            requested_model: input.requested_model.clone(),
+            attempt_index,
+            provider_id: prepared.provider_id,
+            session_reuse: prepared.session_reuse,
+            provider_name: prepared.provider_name_base.clone(),
+            base_url: prepared.provider_base_url_base.clone(),
+            outcome: "started".to_string(),
+            status: None,
+            attempt_started_ms,
+            attempt_duration_ms: 0,
+            circuit_state_before: Some(circuit_before.state.as_str()),
+            circuit_state_after: None,
+            circuit_failure_count: Some(circuit_before.failure_count),
+            circuit_failure_threshold: Some(circuit_before.failure_threshold),
+            claude_model_mapping: prepared.claude_model_mapping.clone(),
+            model_redirect: prepared.model_redirect.clone(),
+        })
+    });
+    if let Some(started_event) = started_event.as_ref() {
+        let elapsed_ms = i64::try_from(attempt_started_ms).unwrap_or(i64::MAX);
+        input.state.active_requests.record_attempt_start(
+            started_event.clone(),
+            input.created_at_ms.saturating_add(elapsed_ms),
         );
+    }
+    abort_guard.capture_in_flight_attempt(&started_attempt);
+    if let Some(started_event) = started_event {
+        emit_attempt_event(&input.state.app, started_event);
     }
 }
 

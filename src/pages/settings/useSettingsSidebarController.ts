@@ -43,7 +43,7 @@ type SettingsSidebarControllerInput = {
   };
   modelPricesSyncMutation: {
     isPending: boolean;
-    mutateAsync: (input: { force: boolean }) => Promise<ModelPricesSyncReport | null>;
+    mutateAsync: () => Promise<ModelPricesSyncReport | null>;
   };
 };
 
@@ -363,49 +363,47 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
     }
   }, [configImportMutation, pendingConfigImportPath]);
 
-  const syncModelPrices = useCallback(
-    async (force: boolean) => {
-      if (modelPricesSyncMutation.isPending || syncingModelPricesRef.current) {
+  const syncModelPrices = useCallback(async () => {
+    if (modelPricesSyncMutation.isPending || syncingModelPricesRef.current) {
+      return;
+    }
+
+    syncingModelPricesRef.current = true;
+    setSyncingModelPrices(true);
+    setLastModelPricesSyncState((current) => ({
+      ...current,
+      error: null,
+    }));
+
+    try {
+      const report = await modelPricesSyncMutation.mutateAsync();
+      if (!report) {
         return;
       }
 
-      syncingModelPricesRef.current = true;
-      setSyncingModelPrices(true);
+      setLastModelPricesSync(report);
+      setLastModelPricesSyncState({
+        report,
+        syncedAt: Date.now(),
+        error: null,
+      });
+      presentModelPricesSynced(report);
+    } catch (error) {
+      presentSettingsSidebarFailure({
+        logTitle: "同步模型定价失败",
+        toastMessage: "同步模型定价失败：请稍后重试",
+        error,
+      });
       setLastModelPricesSyncState((current) => ({
         ...current,
-        error: null,
+        syncedAt: Date.now(),
+        error: String(error),
       }));
-
-      try {
-        const report = await modelPricesSyncMutation.mutateAsync({ force });
-        if (!report) {
-          return;
-        }
-
-        setLastModelPricesSync(report);
-        setLastModelPricesSyncState({
-          report,
-          syncedAt: Date.now(),
-          error: null,
-        });
-        presentModelPricesSynced(report);
-      } catch (error) {
-        presentSettingsSidebarFailure({
-          logTitle: "同步模型定价失败",
-          toastMessage: "同步模型定价失败：请稍后重试",
-          error,
-        });
-        setLastModelPricesSyncState((current) => ({
-          ...current,
-          error: String(error),
-        }));
-      } finally {
-        syncingModelPricesRef.current = false;
-        setSyncingModelPrices(false);
-      }
-    },
-    [modelPricesSyncMutation]
-  );
+    } finally {
+      syncingModelPricesRef.current = false;
+      setSyncingModelPrices(false);
+    }
+  }, [modelPricesSyncMutation]);
 
   const dialogs = useMemo<{
     modelPriceAliases: DialogController;

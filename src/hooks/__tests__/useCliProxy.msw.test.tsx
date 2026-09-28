@@ -18,8 +18,12 @@ function Harness() {
     <div>
       <div data-testid="codex-enabled">{String(cliProxy.enabled.codex)}</div>
       <div data-testid="codex-applied">{String(cliProxy.appliedToCurrentGateway.codex)}</div>
+      <div data-testid="grok-enabled">{String(cliProxy.enabled.grok)}</div>
       <button onClick={() => cliProxy.setCliProxyEnabled("codex", !cliProxy.enabled.codex)}>
         toggle-codex
+      </button>
+      <button onClick={() => cliProxy.setCliProxyEnabled("grok", !cliProxy.enabled.grok)}>
+        toggle-grok
       </button>
     </div>
   );
@@ -32,6 +36,7 @@ describe("hooks/useCliProxy (msw integration)", () => {
       { cli_key: "claude", enabled: false, base_origin: null, applied_to_current_gateway: null },
       { cli_key: "codex", enabled: false, base_origin: null, applied_to_current_gateway: null },
       { cli_key: "gemini", enabled: false, base_origin: null, applied_to_current_gateway: null },
+      { cli_key: "grok", enabled: false, base_origin: null, applied_to_current_gateway: null },
     ]);
 
     const client = createTestQueryClient();
@@ -63,5 +68,14 @@ describe("hooks/useCliProxy (msw integration)", () => {
     await waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalledWith("已开启代理"));
     await waitFor(() => expect(screen.getByTestId("codex-enabled").textContent).toBe("true"));
     await waitFor(() => expect(screen.getByTestId("codex-applied").textContent).toBe("true"));
+
+    await user.click(screen.getByRole("button", { name: "toggle-grok" }));
+    await waitFor(() =>
+      expect(vi.mocked(tauriInvoke)).toHaveBeenCalledWith("cli_proxy_set_enabled", {
+        cliKey: "grok",
+        enabled: true,
+      })
+    );
+    await waitFor(() => expect(screen.getByTestId("grok-enabled").textContent).toBe("true"));
   });
 });

@@ -237,8 +237,8 @@ pub fn preview(
     })
 }
 
-pub fn apply(
-    app: &tauri::AppHandle,
+pub fn apply<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     db: &db::Db,
     workspace_id: i64,
 ) -> crate::shared::error::AppResult<WorkspaceApplyReport> {
@@ -355,7 +355,7 @@ pub fn apply(
         }
     };
 
-    if let Err(err) = workspaces::set_active(db, workspace_id) {
+    if let Err(err) = workspaces::set_active(&conn, workspace_id) {
         let _ = prompt_sync::restore_target_bytes(app, &cli_key, prev_prompt_target);
         let _ = prompt_sync::restore_manifest_bytes(app, &cli_key, prev_prompt_manifest);
         let _ = mcp_sync::restore_target_bytes(app, &cli_key, prev_mcp_target);
@@ -380,4 +380,333 @@ pub fn apply(
         to_workspace_id: workspace_id,
         applied_at: now_unix_seconds(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::params;
+    use std::ffi::OsString;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::MutexGuard;
+
+    static TEST_SEQ: AtomicU64 = AtomicU64::new(1);
+
+    #[derive(Default)]
+    struct EnvRestore(Vec<(&'static str, Option<OsString>)>);
+
+    impl EnvRestore {
+        fn set(&mut self, key: &'static str, value: impl Into<OsString>) {
+            if !self.0.iter().any(|(saved, _)| *saved == key) {
+                self.0.push((key, std::env::var_os(key)));
+            }
+            std::env::set_var(key, value.into());
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (key, value) in self.0.drain(..).rev() {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+            crate::test_support::clear_settings_cache();
+        }
+    }
+
+    struct GrokWorkspaceTestApp {
+        _lock: MutexGuard<'static, ()>,
+        _env: EnvRestore,
+        _home: tempfile::TempDir,
+        _db_dir: tempfile::TempDir,
+        app: tauri::App<tauri::test::MockRuntime>,
+        db: db::Db,
+        grok_home: std::path::PathBuf,
+    }
+
+    impl GrokWorkspaceTestApp {
+        fn new() -> Self {
+            let lock = crate::test_support::test_env_lock();
+            let home = tempfile::tempdir().expect("home tempdir");
+            let db_dir = tempfile::tempdir().expect("db tempdir");
+            let grok_home = home.path().join("custom-grok");
+            let mut env = EnvRestore::default();
+            env.set(
+                "AIO_CODING_HUB_HOME_DIR",
+                home.path().as_os_str().to_os_string(),
+            );
+            env.set(
+                "AIO_CODING_HUB_DOTDIR_NAME",
+                format!(
+                    ".aio-grok-workspace-test-{}",
+                    TEST_SEQ.fetch_add(1, Ordering::Relaxed)
+                ),
+            );
+            env.set("GROK_HOME", grok_home.as_os_str().to_os_string());
+            crate::test_support::clear_settings_cache();
+            let app = tauri::test::mock_app();
+            let db =
+                db::init_for_tests(&db_dir.path().join("workspace.sqlite")).expect("init test db");
+
+            Self {
+                _lock: lock,
+                _env: env,
+                _home: home,
+                _db_dir: db_dir,
+                app,
+                db,
+                grok_home,
+            }
+        }
+
+        fn handle(&self) -> tauri::AppHandle<tauri::test::MockRuntime> {
+            self.app.handle().clone()
+        }
+
+        fn default_workspace_id(&self) -> i64 {
+            let list = workspaces::list_by_cli(&self.db, "grok").expect("list Grok workspaces");
+            list.active_id.expect("default Grok workspace active")
+        }
+
+        fn target_workspace_id(&self) -> i64 {
+            workspaces::create(&self.db, "grok", "Target", false)
+                .expect("create target workspace")
+                .id
+        }
+
+        fn set_prompt(&self, workspace_id: i64, content: &str) {
+            self.db
+                .open_connection()
+                .expect("open db")
+                .execute(
+                    "UPDATE prompts SET content = ?1, enabled = 1 WHERE workspace_id = ?2",
+                    params![content, workspace_id],
+                )
+                .expect("update target prompt");
+        }
+
+        fn add_mcp(&self, workspace_id: i64) {
+            let conn = self.db.open_connection().expect("open db");
+            conn.execute(
+                r#"
+INSERT INTO mcp_servers(
+  server_key, name, normalized_name, transport, command, args_json, env_json,
+  cwd, url, headers_json, created_at, updated_at
+) VALUES ('managed', 'Managed', 'managed', 'stdio', 'npx', '["-y"]', '{}', NULL, NULL, '{}', 1, 1)
+"#,
+                [],
+            )
+            .expect("insert MCP server");
+            let server_id = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO workspace_mcp_enabled(workspace_id, server_id, created_at, updated_at) VALUES (?1, ?2, 1, 1)",
+                params![workspace_id, server_id],
+            )
+            .expect("enable MCP server");
+        }
+
+        fn add_skill(&self, workspace_id: i64, create_ssot: bool) {
+            let conn = self.db.open_connection().expect("open db");
+            conn.execute(
+                r#"
+INSERT INTO skills(
+  skill_key, name, normalized_name, description, source_git_url, source_branch,
+  source_subdir, installed_commit, installed_content_hash, created_at, updated_at
+) VALUES ('demo', 'Demo', 'demo', '', 'https://example.test/skills.git', 'main', 'demo', NULL, NULL, 1, 1)
+"#,
+                [],
+            )
+            .expect("insert skill");
+            let skill_id = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO workspace_skill_enabled(workspace_id, skill_id, created_at, updated_at) VALUES (?1, ?2, 1, 1)",
+                params![workspace_id, skill_id],
+            )
+            .expect("enable skill");
+
+            if create_ssot {
+                let paths =
+                    crate::skills::paths_get(&self.handle(), "grok").expect("resolve skill paths");
+                let skill_dir = std::path::PathBuf::from(paths.ssot_dir).join("demo");
+                std::fs::create_dir_all(&skill_dir).expect("create SSOT skill");
+                std::fs::write(skill_dir.join("SKILL.md"), "---\nname: Demo\n---\n")
+                    .expect("write SKILL.md");
+            }
+        }
+
+        fn write_config(&self, bytes: &[u8]) {
+            std::fs::create_dir_all(&self.grok_home).expect("create Grok home");
+            std::fs::write(self.grok_home.join("config.toml"), bytes).expect("write config");
+        }
+
+        fn write_prompt(&self, content: &str) {
+            std::fs::create_dir_all(&self.grok_home).expect("create Grok home");
+            std::fs::write(self.grok_home.join("AGENTS.md"), content).expect("write prompt");
+        }
+
+        fn assert_active(&self, workspace_id: i64) {
+            let conn = self.db.open_connection().expect("open db");
+            assert_eq!(
+                workspaces::active_id_by_cli(&conn, "grok").expect("active workspace"),
+                Some(workspace_id)
+            );
+        }
+    }
+
+    const INITIAL_CONFIG: &str = r#"# keep
+[model.aio]
+model = "grok-build"
+base_url = "http://127.0.0.1:37123/grok/v1"
+
+[mcp_servers.local]
+command = "local"
+"#;
+
+    #[test]
+    fn grok_workspace_round_trip_applies_prompt_mcp_skills_and_local_stash() {
+        let test = GrokWorkspaceTestApp::new();
+        let default_id = test.default_workspace_id();
+        let target_id = test.target_workspace_id();
+        test.set_prompt(target_id, "target instructions");
+        test.add_mcp(target_id);
+        test.add_skill(target_id, true);
+        test.write_config(INITIAL_CONFIG.as_bytes());
+        test.write_prompt("original instructions");
+
+        let report = apply(&test.handle(), &test.db, target_id).expect("apply target workspace");
+
+        assert_eq!(report.cli_key, "grok");
+        test.assert_active(target_id);
+        assert_eq!(
+            std::fs::read_to_string(test.grok_home.join("AGENTS.md")).expect("read prompt"),
+            "target instructions\n"
+        );
+        let config =
+            std::fs::read_to_string(test.grok_home.join("config.toml")).expect("read config");
+        let document = config
+            .parse::<toml_edit::DocumentMut>()
+            .expect("valid Grok TOML");
+        assert_eq!(
+            document["model"]["aio"]["model"].as_str(),
+            Some("grok-build")
+        );
+        assert_eq!(
+            document["mcp_servers"]["managed"]["command"].as_str(),
+            Some("npx")
+        );
+        assert!(document["mcp_servers"].get("local").is_none());
+        assert!(test.grok_home.join("skills").join("demo").exists());
+
+        apply(&test.handle(), &test.db, default_id).expect("restore default workspace");
+
+        test.assert_active(default_id);
+        let restored = std::fs::read_to_string(test.grok_home.join("config.toml"))
+            .expect("read restored config");
+        let restored = restored
+            .parse::<toml_edit::DocumentMut>()
+            .expect("valid restored TOML");
+        assert_eq!(
+            restored["mcp_servers"]["local"]["command"].as_str(),
+            Some("local")
+        );
+        assert!(restored["mcp_servers"].get("managed").is_none());
+        assert_eq!(
+            restored["model"]["aio"]["model"].as_str(),
+            Some("grok-build")
+        );
+        assert!(!test.grok_home.join("skills").join("demo").exists());
+    }
+
+    #[test]
+    fn grok_workspace_prompt_failure_restores_files_and_active_workspace() {
+        let test = GrokWorkspaceTestApp::new();
+        let default_id = test.default_workspace_id();
+        let target_id = test.target_workspace_id();
+        test.set_prompt(target_id, &"x".repeat(1024 * 1024 + 1));
+        test.write_config(INITIAL_CONFIG.as_bytes());
+        test.write_prompt("original instructions");
+
+        let error =
+            apply(&test.handle(), &test.db, target_id).expect_err("oversized prompt must fail");
+
+        assert!(error.to_string().contains("too large"));
+        test.assert_active(default_id);
+        assert_eq!(
+            std::fs::read(test.grok_home.join("config.toml")).expect("read config"),
+            INITIAL_CONFIG.as_bytes()
+        );
+        assert_eq!(
+            std::fs::read_to_string(test.grok_home.join("AGENTS.md")).expect("read prompt"),
+            "original instructions"
+        );
+        assert!(prompt_sync::read_manifest_bytes(&test.handle(), "grok")
+            .expect("read prompt manifest")
+            .is_none());
+    }
+
+    #[test]
+    fn grok_workspace_mcp_failure_rolls_back_prompt_config_and_manifests() {
+        let test = GrokWorkspaceTestApp::new();
+        let default_id = test.default_workspace_id();
+        let target_id = test.target_workspace_id();
+        test.set_prompt(target_id, "target instructions");
+        test.add_mcp(target_id);
+        let invalid = b"[mcp_servers\ninvalid = true\n";
+        test.write_config(invalid);
+        test.write_prompt("original instructions");
+
+        let error =
+            apply(&test.handle(), &test.db, target_id).expect_err("invalid Grok TOML must fail");
+
+        assert!(error.to_string().contains("GROK_CONFIG_INVALID_TOML"));
+        test.assert_active(default_id);
+        assert_eq!(
+            std::fs::read(test.grok_home.join("config.toml")).expect("read config"),
+            invalid
+        );
+        assert_eq!(
+            std::fs::read_to_string(test.grok_home.join("AGENTS.md")).expect("read prompt"),
+            "original instructions"
+        );
+        assert!(prompt_sync::read_manifest_bytes(&test.handle(), "grok")
+            .expect("read prompt manifest")
+            .is_none());
+        assert!(mcp_sync::read_manifest_bytes(&test.handle(), "grok")
+            .expect("read MCP manifest")
+            .is_none());
+    }
+
+    #[test]
+    fn grok_workspace_skills_failure_rolls_back_prompt_mcp_and_active_workspace() {
+        let test = GrokWorkspaceTestApp::new();
+        let default_id = test.default_workspace_id();
+        let target_id = test.target_workspace_id();
+        test.set_prompt(target_id, "target instructions");
+        test.add_mcp(target_id);
+        test.add_skill(target_id, false);
+        test.write_config(INITIAL_CONFIG.as_bytes());
+        test.write_prompt("original instructions");
+
+        let error =
+            apply(&test.handle(), &test.db, target_id).expect_err("missing SSOT skill must fail");
+
+        assert!(error.to_string().contains("SKILL_SSOT_MISSING"));
+        test.assert_active(default_id);
+        assert_eq!(
+            std::fs::read(test.grok_home.join("config.toml")).expect("read config"),
+            INITIAL_CONFIG.as_bytes()
+        );
+        assert_eq!(
+            std::fs::read_to_string(test.grok_home.join("AGENTS.md")).expect("read prompt"),
+            "original instructions"
+        );
+        assert!(prompt_sync::read_manifest_bytes(&test.handle(), "grok")
+            .expect("read prompt manifest")
+            .is_none());
+        assert!(mcp_sync::read_manifest_bytes(&test.handle(), "grok")
+            .expect("read MCP manifest")
+            .is_none());
+    }
 }

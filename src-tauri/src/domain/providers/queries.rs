@@ -1,5 +1,6 @@
 //! Database CRUD operations for providers.
 
+use super::model_policy::{ProviderModelPolicyStatus, ProviderModelPolicyV1};
 use super::types::*;
 use super::validation::*;
 use crate::db;
@@ -17,10 +18,14 @@ fn decode_provider_row(
     let base_urls_json: String = row.get("base_urls_json")?;
     let base_url_mode_raw: String = row.get("base_url_mode")?;
     let claude_models_json: String = row.get("claude_models_json")?;
+    let model_policy_json: Option<String> = row.get("model_policy_json")?;
     let daily_reset_mode_raw: String = row.get("daily_reset_mode")?;
     let daily_reset_time_raw: String = row.get("daily_reset_time")?;
+    let (model_policy, model_policy_status) =
+        ProviderModelPolicyV1::decode(model_policy_json.as_deref(), cli_key);
 
     Ok(DecodedProviderRow {
+        supports_websockets: row.get::<_, i64>("supports_websockets")? != 0,
         id: row.get("id")?,
         name: row.get("name")?,
         base_urls: base_urls_from_row(&base_url_fallback, &base_urls_json),
@@ -31,6 +36,8 @@ fn decode_provider_row(
         } else {
             ClaudeModels::default()
         },
+        model_policy,
+        model_policy_status,
         limit_5h_usd: row.get("limit_5h_usd")?,
         limit_daily_usd: row.get("limit_daily_usd")?,
         daily_reset_mode: DailyResetMode::parse(&daily_reset_mode_raw)
@@ -44,7 +51,7 @@ fn decode_provider_row(
             .unwrap_or_else(|| "api_key".to_string()),
         oauth_provider_type: row.get("oauth_provider_type")?,
         source_provider_id: row.get("source_provider_id")?,
-        bridge_type: row.get("bridge_type").unwrap_or(None),
+        bridge_type: row.get("bridge_type")?,
         custom_headers: custom_headers_from_json(
             &row.get::<_, Option<String>>("custom_headers_json")
                 .unwrap_or(None)
@@ -65,6 +72,8 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<ProviderSummary, rusqlite::
         base_urls: decoded.base_urls,
         base_url_mode: decoded.base_url_mode,
         claude_models: decoded.claude_models,
+        model_policy: decoded.model_policy,
+        model_policy_status: decoded.model_policy_status,
         enabled: row.get::<_, i64>("enabled")? != 0,
         priority: row.get("priority")?,
         cost_multiplier: row.get("cost_multiplier")?,
@@ -86,14 +95,14 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<ProviderSummary, rusqlite::
         oauth_last_error: row.get("oauth_last_error")?,
         source_provider_id: decoded.source_provider_id,
         bridge_type: decoded.bridge_type,
+        supports_websockets: decoded.supports_websockets,
         stream_idle_timeout_seconds: parse_positive_optional_u32(
-            row.get("stream_idle_timeout_seconds").unwrap_or(None),
+            row.get("stream_idle_timeout_seconds")?,
         ),
         extension_values: Vec::new(),
         custom_headers: decoded.custom_headers,
         api_key_configured: row
-            .get::<_, Option<i64>>("api_key_configured")
-            .unwrap_or(None)
+            .get::<_, Option<i64>>("api_key_configured")?
             .unwrap_or(0)
             != 0,
     })
@@ -258,6 +267,7 @@ fn insert_provider(
     cost_multiplier: f64,
     priority: Option<i64>,
     claude_models: Option<ClaudeModels>,
+    model_policy: Option<ProviderModelPolicyV1>,
     limit_5h_usd: Option<f64>,
     limit_daily_usd: Option<f64>,
     daily_reset_mode: Option<DailyResetMode>,
@@ -270,9 +280,16 @@ fn insert_provider(
     source_provider_id: Option<i64>,
     bridge_type: Option<String>,
     stream_idle_timeout_seconds: Option<u32>,
+    supports_websockets: bool,
     extension_values: Option<&[ProviderExtensionValuesInput]>,
     custom_headers: Option<&[ProviderCustomHeader]>,
 ) -> crate::shared::error::AppResult<i64> {
+    validate_supports_websockets(
+        cli_key,
+        source_provider_id.is_some(),
+        bridge_type.as_deref(),
+        supports_websockets,
+    )?;
     let now = now_unix_seconds();
     let priority = priority.unwrap_or(DEFAULT_PRIORITY);
     let is_oauth = requested_auth_mode == ProviderAuthMode::Oauth;
@@ -292,6 +309,11 @@ fn insert_provider(
     };
     let claude_models_json =
         serde_json::to_string(&claude_models).map_err(|e| format!("SYSTEM_ERROR: {e}"))?;
+    let model_policy_json = match model_policy {
+        Some(policy) => Some(policy.normalized()?.to_json()?),
+        None if cli_key == "claude" => None,
+        None => Some(ProviderModelPolicyV1::all().to_json()?),
+    };
 
     let limit_5h_usd = validate_limit_usd("limit_5h_usd", limit_5h_usd)?;
     let limit_daily_usd = validate_limit_usd("limit_daily_usd", limit_daily_usd)?;
@@ -327,6 +349,7 @@ INSERT INTO providers(
   base_url_mode,
   auth_mode,
   claude_models_json,
+  model_policy_json,
   supported_models_json,
   model_mapping_json,
   api_key_plaintext,
@@ -346,10 +369,11 @@ INSERT INTO providers(
   source_provider_id,
   bridge_type,
   stream_idle_timeout_seconds,
+  supports_websockets,
   created_at,
   updated_at,
   custom_headers_json
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '{}', '{}', ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, '{}', '{}', ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)
 "#,
         params![
             cli_key,
@@ -359,6 +383,7 @@ INSERT INTO providers(
             base_url_mode.as_str(),
             requested_auth_mode.as_str(),
             claude_models_json,
+            model_policy_json,
             api_key,
             sort_order,
             enabled_to_int(enabled),
@@ -376,6 +401,7 @@ INSERT INTO providers(
             source_provider_id,
             bridge_type,
             stream_idle_timeout_seconds,
+            enabled_to_int(supports_websockets),
             now,
             now,
             custom_headers_json_value
@@ -413,6 +439,7 @@ SELECT
   base_urls_json,
   base_url_mode,
   claude_models_json,
+  model_policy_json,
   tags_json,
   note,
   enabled,
@@ -435,6 +462,7 @@ SELECT
   source_provider_id,
   bridge_type,
   stream_idle_timeout_seconds,
+  supports_websockets,
   custom_headers_json,
   CASE WHEN COALESCE(api_key_plaintext, '') = '' THEN 0 ELSE 1 END AS api_key_configured
 FROM providers
@@ -674,6 +702,7 @@ SELECT
   base_urls_json,
   base_url_mode,
   claude_models_json,
+  model_policy_json,
   tags_json,
   note,
   enabled,
@@ -696,6 +725,7 @@ SELECT
   source_provider_id,
   bridge_type,
   stream_idle_timeout_seconds,
+  supports_websockets,
   custom_headers_json,
   CASE WHEN COALESCE(api_key_plaintext, '') = '' THEN 0 ELSE 1 END AS api_key_configured
 FROM providers
@@ -743,6 +773,8 @@ fn map_gateway_provider_row(
         base_url_mode: decoded.base_url_mode,
         api_key_plaintext: row.get("api_key_plaintext")?,
         claude_models: decoded.claude_models,
+        model_policy: decoded.model_policy,
+        model_policy_status: decoded.model_policy_status,
         limit_5h_usd: decoded.limit_5h_usd,
         limit_daily_usd: decoded.limit_daily_usd,
         daily_reset_mode: decoded.daily_reset_mode,
@@ -754,8 +786,9 @@ fn map_gateway_provider_row(
         oauth_provider_type: decoded.oauth_provider_type,
         source_provider_id: decoded.source_provider_id,
         bridge_type: decoded.bridge_type,
+        supports_websockets: decoded.supports_websockets,
         stream_idle_timeout_seconds: parse_positive_optional_u32(
-            row.get("stream_idle_timeout_seconds").unwrap_or(None),
+            row.get("stream_idle_timeout_seconds")?,
         ),
         extension_values: Vec::new(),
         custom_headers: decoded.custom_headers,
@@ -779,6 +812,7 @@ SELECT
   p.base_url_mode,
   p.api_key_plaintext,
   p.claude_models_json,
+  p.model_policy_json,
   p.limit_5h_usd,
   p.limit_daily_usd,
   p.daily_reset_mode,
@@ -791,6 +825,7 @@ SELECT
   p.source_provider_id,
   p.bridge_type,
   p.stream_idle_timeout_seconds,
+  p.supports_websockets,
   p.custom_headers_json
 FROM sort_mode_providers mp
 JOIN providers p ON p.id = mp.provider_id
@@ -834,6 +869,7 @@ SELECT
   base_url_mode,
   api_key_plaintext,
   claude_models_json,
+  model_policy_json,
   limit_5h_usd,
   limit_daily_usd,
   daily_reset_mode,
@@ -846,6 +882,7 @@ SELECT
   source_provider_id,
   bridge_type,
   stream_idle_timeout_seconds,
+  supports_websockets,
   custom_headers_json
 FROM providers
 WHERE cli_key = ?1
@@ -945,6 +982,57 @@ pub(crate) fn list_enabled_for_gateway_in_mode(
     }
 }
 
+pub(crate) fn list_ready_model_policies_for_configured_routes(
+    db: &db::Db,
+    cli_key: &str,
+) -> crate::shared::error::AppResult<Vec<ProviderModelPolicyV1>> {
+    validate_cli_key(cli_key)?;
+    let conn = db.open_connection()?;
+    let mut stmt = conn
+        .prepare_cached(
+            r#"
+SELECT p.model_policy_json
+FROM providers p
+WHERE p.cli_key = ?1
+  AND (
+    (
+      p.enabled = 1
+      AND EXISTS (
+        SELECT 1
+        FROM default_route_providers drp
+        WHERE drp.cli_key = p.cli_key
+          AND drp.provider_id = p.id
+      )
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM sort_mode_providers smp
+      WHERE smp.cli_key = p.cli_key
+        AND smp.provider_id = p.id
+        AND smp.enabled = 1
+    )
+  )
+ORDER BY p.id ASC
+"#,
+        )
+        .map_err(|e| db_err!("failed to prepare configured route model policy query: {e}"))?;
+    let rows = stmt
+        .query_map(params![cli_key], |row| row.get::<_, Option<String>>(0))
+        .map_err(|e| db_err!("failed to query configured route model policies: {e}"))?;
+
+    let mut policies = Vec::new();
+    for row in rows {
+        let raw = row.map_err(|e| db_err!("failed to read configured route model policy: {e}"))?;
+        let (policy, status) = ProviderModelPolicyV1::decode(raw.as_deref(), cli_key);
+        if status == ProviderModelPolicyStatus::Ready {
+            if let Some(policy) = policy {
+                policies.push(policy);
+            }
+        }
+    }
+    Ok(policies)
+}
+
 /// Resolve a source provider by ID for CX2CC chaining.
 pub(crate) fn get_source_provider_for_gateway(
     db: &db::Db,
@@ -974,6 +1062,7 @@ SELECT
   base_url_mode,
   api_key_plaintext,
   claude_models_json,
+  model_policy_json,
   limit_5h_usd,
   limit_daily_usd,
   daily_reset_mode,
@@ -986,6 +1075,7 @@ SELECT
   source_provider_id,
   bridge_type,
   stream_idle_timeout_seconds,
+  supports_websockets,
   custom_headers_json
 FROM providers
 WHERE id = ?1 AND enabled = 1 AND source_provider_id IS NULL AND cli_key = 'codex'
@@ -1085,6 +1175,7 @@ pub fn upsert(
         cost_multiplier,
         priority,
         claude_models,
+        model_policy,
         limit_5h_usd,
         limit_daily_usd,
         daily_reset_mode,
@@ -1097,6 +1188,7 @@ pub fn upsert(
         source_provider_id,
         bridge_type,
         stream_idle_timeout_seconds,
+        supports_websockets,
         extension_values,
         custom_headers,
     } = input;
@@ -1112,6 +1204,14 @@ pub fn upsert(
 
     let requested_auth_mode = auth_mode.unwrap_or(ProviderAuthMode::ApiKey);
     let is_oauth = requested_auth_mode == ProviderAuthMode::Oauth;
+
+    if cli_key == "grok" && claude_models.as_ref().is_some_and(ClaudeModels::has_any) {
+        return Err(
+            "SEC_INVALID_INPUT: claude_models is only supported for cli_key=claude"
+                .to_string()
+                .into(),
+        );
+    }
 
     if let Some(ref bt) = bridge_type {
         if bt != CX2CC_BRIDGE_TYPE {
@@ -1188,6 +1288,7 @@ pub fn upsert(
                 cost_multiplier,
                 priority,
                 claude_models,
+                model_policy,
                 limit_5h_usd,
                 limit_daily_usd,
                 daily_reset_mode,
@@ -1200,6 +1301,7 @@ pub fn upsert(
                 source_provider_id,
                 bridge_type,
                 stream_idle_timeout_seconds,
+                supports_websockets.unwrap_or(false),
                 extension_values.as_deref(),
                 custom_headers.as_deref(),
             )?;
@@ -1216,19 +1318,23 @@ pub fn upsert(
                 String,
                 i64,
                 String,
+                Option<String>,
+                String,
+                String,
                 String,
                 String,
                 String,
                 String,
                 String,
                 Option<i64>,
+                bool,
                 Option<String>,
             );
             let existing: Option<ExistingProviderRow> = tx
                 .query_row(
-                    "SELECT cli_key, api_key_plaintext, priority, claude_models_json, auth_mode, daily_reset_mode, daily_reset_time, tags_json, note, stream_idle_timeout_seconds, custom_headers_json FROM providers WHERE id = ?1",
+                    "SELECT cli_key, api_key_plaintext, priority, claude_models_json, model_policy_json, supported_models_json, model_mapping_json, auth_mode, daily_reset_mode, daily_reset_time, tags_json, note, stream_idle_timeout_seconds, supports_websockets, custom_headers_json FROM providers WHERE id = ?1",
                     params![id],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?, row.get(12)?, row.get(13)?, row.get(14)?)),
                 )
                 .optional()
                 .map_err(|e| db_err!("failed to query provider: {e}"))?;
@@ -1238,12 +1344,16 @@ pub fn upsert(
                 existing_api_key,
                 existing_priority,
                 existing_claude_models_json,
+                existing_model_policy_json,
+                existing_supported_models_json,
+                existing_model_mapping_json,
                 existing_auth_mode_raw,
                 existing_daily_reset_mode_raw,
                 existing_daily_reset_time_raw,
                 existing_tags_json,
                 existing_note,
                 existing_stream_idle_timeout_seconds,
+                existing_supports_websockets,
                 existing_custom_headers_json,
             )) = existing
             else {
@@ -1253,6 +1363,15 @@ pub fn upsert(
             if existing_cli_key != cli_key {
                 return Err("SEC_INVALID_INPUT: cli_key mismatch".to_string().into());
             }
+
+            let next_supports_websockets =
+                supports_websockets.unwrap_or(existing_supports_websockets);
+            validate_supports_websockets(
+                cli_key,
+                source_provider_id.is_some(),
+                bridge_type.as_deref(),
+                next_supports_websockets,
+            )?;
 
             // Resolve auth_mode: use requested if provided, else keep existing.
             let next_auth_mode = auth_mode
@@ -1288,6 +1407,10 @@ pub fn upsert(
                     .map_err(|e| format!("SYSTEM_ERROR: {e}"))?
             } else {
                 "{}".to_string()
+            };
+            let next_model_policy_json = match model_policy {
+                Some(policy) => Some(policy.normalized()?.to_json()?),
+                None => existing_model_policy_json,
             };
 
             let next_limit_5h_usd = validate_limit_usd("limit_5h_usd", limit_5h_usd)?;
@@ -1341,27 +1464,29 @@ SET
   base_url_mode = ?4,
   auth_mode = ?5,
   claude_models_json = ?6,
-  supported_models_json = '{}',
-  model_mapping_json = '{}',
-  api_key_plaintext = ?7,
-  enabled = ?8,
-  cost_multiplier = ?9,
-  priority = ?10,
-  limit_5h_usd = ?11,
-  limit_daily_usd = ?12,
-  daily_reset_mode = ?13,
-  daily_reset_time = ?14,
-  limit_weekly_usd = ?15,
-  limit_monthly_usd = ?16,
-  limit_total_usd = ?17,
-  tags_json = ?18,
-  note = ?19,
-  source_provider_id = ?20,
-  bridge_type = ?21,
-  stream_idle_timeout_seconds = ?22,
-  updated_at = ?23,
-  custom_headers_json = ?24
-WHERE id = ?25
+  model_policy_json = ?7,
+  supported_models_json = ?8,
+  model_mapping_json = ?9,
+  api_key_plaintext = ?10,
+  enabled = ?11,
+  cost_multiplier = ?12,
+  priority = ?13,
+  limit_5h_usd = ?14,
+  limit_daily_usd = ?15,
+  daily_reset_mode = ?16,
+  daily_reset_time = ?17,
+  limit_weekly_usd = ?18,
+  limit_monthly_usd = ?19,
+  limit_total_usd = ?20,
+  tags_json = ?21,
+  note = ?22,
+  source_provider_id = ?23,
+  bridge_type = ?24,
+  stream_idle_timeout_seconds = ?25,
+  supports_websockets = ?26,
+  updated_at = ?27,
+  custom_headers_json = ?28
+WHERE id = ?29
 "#,
                 params![
                     name,
@@ -1370,6 +1495,9 @@ WHERE id = ?25
                     base_url_mode.as_str(),
                     next_auth_mode,
                     next_claude_models_json,
+                    next_model_policy_json,
+                    existing_supported_models_json,
+                    existing_model_mapping_json,
                     next_api_key,
                     enabled_to_int(enabled),
                     cost_multiplier,
@@ -1386,6 +1514,7 @@ WHERE id = ?25
                     source_provider_id,
                     bridge_type,
                     next_stream_idle_timeout_seconds,
+                    enabled_to_int(next_supports_websockets),
                     now,
                     next_custom_headers_json,
                     id
@@ -1440,6 +1569,7 @@ pub fn duplicate(
         cost_multiplier,
         priority,
         claude_models,
+        model_policy,
         limit_5h_usd,
         limit_daily_usd,
         daily_reset_mode,
@@ -1452,6 +1582,7 @@ pub fn duplicate(
         source_provider_id,
         bridge_type,
         stream_idle_timeout_seconds,
+        supports_websockets,
         extension_values: _,
         custom_headers,
     } = input;
@@ -1544,6 +1675,7 @@ pub fn duplicate(
         cost_multiplier,
         priority,
         claude_models,
+        model_policy,
         limit_5h_usd,
         limit_daily_usd,
         daily_reset_mode,
@@ -1556,6 +1688,7 @@ pub fn duplicate(
         source_provider_id,
         bridge_type,
         stream_idle_timeout_seconds,
+        supports_websockets.unwrap_or(false),
         None,
         custom_headers.as_deref(),
     )?;

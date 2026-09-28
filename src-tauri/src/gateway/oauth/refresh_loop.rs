@@ -18,28 +18,56 @@ enum RefreshLoopStep<T> {
     Shutdown,
 }
 
+async fn persist_client_build_error(
+    db: &crate::db::Db,
+    provider_ids: &[i64],
+    error: &str,
+    shutdown_rx: &mut watch::Receiver<bool>,
+) -> RefreshLoopStep<()> {
+    for &provider_id in provider_ids {
+        let db_for_error = db.clone();
+        let err_msg = error.to_string();
+        match await_with_shutdown(
+            shutdown_rx,
+            crate::blocking::run("oauth_refresh_loop_set_client_error", move || {
+                providers::set_oauth_last_error(&db_for_error, provider_id, &err_msg)
+            }),
+        )
+        .await
+        {
+            RefreshLoopStep::Completed(Ok(())) => {}
+            RefreshLoopStep::Completed(Err(persist_err)) => {
+                tracing::warn!(
+                    provider_id,
+                    "oauth_refresh_loop: failed to persist client error: {persist_err}"
+                );
+            }
+            RefreshLoopStep::Shutdown => return RefreshLoopStep::Shutdown,
+        }
+    }
+
+    RefreshLoopStep::Completed(())
+}
+
 /// Spawns the background OAuth refresh loop.
 ///
 /// The loop runs until `shutdown_rx` receives a signal (the gateway stop path
 /// should send it). Returns a `JoinHandle` that can be used to await termination.
-pub(crate) fn spawn(
+pub(crate) fn spawn<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     db: crate::db::Db,
     shutdown_rx: watch::Receiver<bool>,
 ) -> tauri::async_runtime::JoinHandle<()> {
     tauri::async_runtime::spawn(async move {
-        run_loop(db, shutdown_rx).await;
+        run_loop(app, db, shutdown_rx).await;
     })
 }
 
-async fn run_loop(db: crate::db::Db, mut shutdown_rx: watch::Receiver<bool>) {
-    let client = match super::build_default_oauth_http_client() {
-        Ok(client) => client,
-        Err(err) => {
-            tracing::error!("oauth_refresh_loop: failed to build http client: {err}");
-            return;
-        }
-    };
-
+async fn run_loop<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    db: crate::db::Db,
+    mut shutdown_rx: watch::Receiver<bool>,
+) {
     tracing::info!("oauth_refresh_loop: started (poll_interval={POLL_INTERVAL_SECS}s)");
 
     loop {
@@ -85,6 +113,26 @@ async fn run_loop(db: crate::db::Db, mut shutdown_rx: watch::Receiver<bool>) {
             "oauth_refresh_loop: {} provider(s) need token refresh",
             providers_to_refresh.len()
         );
+
+        let client = match super::build_default_oauth_http_client(&app) {
+            Ok(client) => client,
+            Err(err) => {
+                tracing::error!("oauth_refresh_loop: failed to build http client: {err}");
+                let provider_ids = providers_to_refresh
+                    .iter()
+                    .map(|details| details.id)
+                    .collect::<Vec<_>>();
+                if let RefreshLoopStep::Shutdown =
+                    persist_client_build_error(&db, &provider_ids, &err, &mut shutdown_rx).await
+                {
+                    tracing::info!(
+                        "oauth_refresh_loop: shutdown while persisting client error, exiting"
+                    );
+                    return;
+                }
+                continue;
+            }
+        };
 
         for details in providers_to_refresh {
             // Check for shutdown between each provider to avoid blocking exit.
@@ -393,6 +441,49 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn client_build_error_is_persisted_for_each_provider() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = crate::db::init_for_tests(&dir.path().join("oauth-refresh-client-error.db"))
+            .expect("init db");
+        let provider_ids = {
+            let conn = db.open_connection().expect("open db");
+            for (id, name) in [(41_i64, "oauth-a"), (42_i64, "oauth-b")] {
+                conn.execute(
+                    "INSERT INTO providers(id, cli_key, name, base_url, api_key_plaintext, created_at, updated_at) VALUES (?1, 'codex', ?2, '', '', 1, 1)",
+                    rusqlite::params![id, name],
+                )
+                .expect("insert provider");
+            }
+            vec![41, 42]
+        };
+        let (_shutdown_tx, mut shutdown_rx) = watch::channel(false);
+
+        let result = persist_client_build_error(
+            &db,
+            &provider_ids,
+            "invalid app upstream proxy settings: [redacted]",
+            &mut shutdown_rx,
+        )
+        .await;
+
+        assert!(matches!(result, RefreshLoopStep::Completed(())));
+        let conn = db.open_connection().expect("reopen db");
+        for provider_id in provider_ids {
+            let error: Option<String> = conn
+                .query_row(
+                    "SELECT oauth_last_error FROM providers WHERE id = ?1",
+                    [provider_id],
+                    |row| row.get(0),
+                )
+                .expect("read oauth error");
+            assert_eq!(
+                error.as_deref(),
+                Some("invalid app upstream proxy settings: [redacted]")
+            );
+        }
+    }
 
     #[tokio::test]
     async fn wait_for_next_poll_or_shutdown_completes_after_interval() {

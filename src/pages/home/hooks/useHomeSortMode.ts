@@ -4,6 +4,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { createCliRecord } from "../../../constants/clis";
 import { logToConsole } from "../../../services/consoleLog";
 import type { CliKey } from "../../../services/providers/providers";
 import type { GatewayActiveSession } from "../../../services/gateway/gateway";
@@ -49,11 +50,7 @@ export function useHomeSortMode(activeSessions: GatewayActiveSession[]): HomeSor
     : sortModesQuery.data != null && sortModeActiveQuery.data != null;
 
   const activeModeByCli = useMemo<Record<CliKey, number | null>>(() => {
-    const next: Record<CliKey, number | null> = {
-      claude: null,
-      codex: null,
-      gemini: null,
-    };
+    const next = createCliRecord<number | null>(() => null);
     for (const row of sortModeActiveQuery.data ?? []) {
       next[row.cli_key] = row.mode_id ?? null;
     }
@@ -61,11 +58,7 @@ export function useHomeSortMode(activeSessions: GatewayActiveSession[]): HomeSor
   }, [sortModeActiveQuery.data]);
 
   const activeModeToggling = useMemo<Record<CliKey, boolean>>(
-    () => ({
-      claude: switchingCliKey === "claude",
-      codex: switchingCliKey === "codex",
-      gemini: switchingCliKey === "gemini",
-    }),
+    () => createCliRecord((cliKey) => switchingCliKey === cliKey),
     [switchingCliKey]
   );
 

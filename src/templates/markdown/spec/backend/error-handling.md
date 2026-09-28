@@ -78,3 +78,60 @@ Not every gateway failure should mutate provider health.
 - If product requirements ever decide that a helper route should affect
   provider health, document that rule explicitly in the gateway contract
   instead of relying on shared fallback behavior.
+
+## macOS Notification Audio Isolation
+
+### 1. Scope / Trigger
+- Notification playback uses `src-tauri/src/app/notification_sound.rs`.
+- cpal 0.16.0 CoreAudio enumeration writes through shared references to native
+  output parameters. The 0.60.18 release binary passed `0x4` as the device-list
+  output buffer and crashed with SIGSEGV. Rust error/panic handlers cannot
+  contain this native process failure.
+
+### 2. Signatures
+- IPC: `desktop_notification_play_sound() -> Result<bool, String>`.
+- Worker entry: `play_notification_sound() -> Result<(), String>`.
+- macOS player: `play_embedded_sound_blocking() -> AppResult<()>`.
+
+### 3. Contracts
+- macOS invokes the absolute system executable `/usr/bin/afplay` directly on
+  the bundled MP3; no shell, renderer-provided path, or in-process rodio fallback.
+- IPC success means the worker was spawned. Later playback errors are warnings.
+- Keep the unique temporary MP3 alive until the player exits, then remove it.
+- Poll for completion; after 10 seconds, kill and reap the player. Also terminate
+  and reap on wait errors. Null child stdio avoids inherited input/output pipes.
+- Windows uses WASAPI and Linux uses ALSA through rodio; neither compiles the
+  faulty CoreAudio module. Their device-enumeration output arguments were checked
+  for this shared-reference issue, not exhaustively audited for all native faults.
+- Keep rodio restricted to non-macOS targets. Do not restore WebView audio:
+  native playback also avoids the media-key capture regression from PR #251.
+
+### 4. Validation & Error Matrix
+| Condition | Behavior |
+| --- | --- |
+| Temporary file creation/write fails | `NOTIFICATION_SOUND_TEMPFILE_FAILED` / `NOTIFICATION_SOUND_WRITE_FAILED` |
+| Player cannot spawn | `NOTIFICATION_SOUND_PLAYER_SPAWN_FAILED`; remove temporary file |
+| Nonzero or signaled exit | `NOTIFICATION_SOUND_PLAYER_FAILED`; remove temporary file |
+| Player exceeds deadline | `NOTIFICATION_SOUND_PLAYER_TIMEOUT`; kill, reap, remove file |
+| Waiting fails | `NOTIFICATION_SOUND_PLAYER_WAIT_FAILED`; kill, reap, remove file |
+| Cleanup fails | Structured warning with error; preserve playback result |
+
+### 5. Good/Base/Bad Cases
+- Base: play the unchanged bundled MP3 asynchronously.
+- Good: a failed player leaves the application alive and later playback succeeds.
+- Bad: catch a Rust panic around an in-process native audio call and claim that
+  this protects the application from SIGSEGV.
+
+### 6. Tests Required
+- Assert exact asset handoff, paths with spaces, and file cleanup after success,
+  spawn failure, nonzero/signaled exit, and timeout.
+- Assert a timed-out child terminates and is reaped.
+- Keep physical-device playback in an explicit opt-in macOS smoke test.
+- Inspect per-target Cargo graphs; distinguish source review from real
+  Windows/Linux hardware testing in the validation report.
+
+### 7. Wrong vs Correct
+- Wrong: macOS notification worker calls
+  `rodio::OutputStreamBuilder::open_default_stream()` inside the app.
+- Correct: macOS worker delegates to the bounded system-player process; compile
+  the rodio implementation only under `cfg(not(target_os = "macos"))`.

@@ -3,7 +3,6 @@
 use super::app_state::{ensure_db_ready, DbInitState};
 use super::gateway_control::app_take_running_gateway;
 use crate::blocking;
-use crate::cli_proxy;
 use crate::gateway::events::GATEWAY_STATUS_EVENT_NAME;
 #[cfg(windows)]
 use crate::infra::wsl;
@@ -20,7 +19,6 @@ const CLEANUP_STATE_RUNNING: u8 = 1;
 const CLEANUP_STATE_DONE: u8 = 2;
 
 const CLEANUP_WAIT_TIMEOUT: Duration = Duration::from_secs(15);
-const CLI_PROXY_RESTORE_TIMEOUT: Duration = Duration::from_secs(3);
 const EXTENSION_HOST_DISPOSE_TIMEOUT: Duration = Duration::from_secs(5);
 const GATEWAY_SERVER_STOP_TIMEOUT: Duration = Duration::from_secs(3);
 const GATEWAY_BACKGROUND_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
@@ -61,21 +59,22 @@ pub(crate) async fn cleanup_before_exit(app: &tauri::AppHandle) {
     ) {
         Ok(_) => {
             dispose_extension_hosts_best_effort(app).await;
-            stop_gateway_best_effort(app).await;
-            restore_cli_proxy_keep_state_best_effort(
-                app,
-                "cleanup_cli_proxy_restore_keep_state",
-                "退出清理",
-                true,
-            )
-            .await;
+            let _gateway_lifecycle = super::gateway_lifecycle_lock::lock().await;
+            stop_gateway_best_effort_unlocked(app).await;
+            restore_cli_proxy_keep_state_best_effort(app, "cleanup_cli_proxy_restore_keep_state")
+                .await;
 
             #[cfg(windows)]
             {
                 let wsl_restore_app = app.clone();
-                let wsl_fut = blocking::run("cleanup_wsl_restore", move || {
-                    wsl::restore_wsl_clients(&wsl_restore_app)
-                });
+                let wsl_fut = async move {
+                    let sync_guard = crate::commands::wsl::lock_wsl_sync().await;
+                    blocking::run("cleanup_wsl_restore", move || {
+                        let _sync_guard = sync_guard;
+                        wsl::restore_wsl_clients(&wsl_restore_app)
+                    })
+                    .await
+                };
                 match tokio::time::timeout(WSL_RESTORE_TIMEOUT, wsl_fut).await {
                     Ok(Ok(())) => tracing::info!("WSL config restore completed"),
                     Ok(Err(e)) => tracing::warn!("WSL config restore failed: {e}"),
@@ -140,56 +139,21 @@ async fn wait_for_cleanup_done(notify: &Notify) {
     }
 }
 
+// Callers hold GatewayLifecycleLock until local restoration completes. Dropping a
+// timeout around spawn_blocking would let file writes outlive that lock.
 pub(crate) async fn restore_cli_proxy_keep_state_best_effort(
     app: &tauri::AppHandle,
     label: &'static str,
-    context: &'static str,
-    log_success: bool,
 ) {
     let app_for_restore = app.clone();
-    let fut = blocking::run(label, move || {
-        cli_proxy::restore_enabled_keep_state(&app_for_restore)
-    });
-
-    match tokio::time::timeout(CLI_PROXY_RESTORE_TIMEOUT, fut).await {
-        Ok(Ok(results)) => {
-            for result in results {
-                if result.ok {
-                    if log_success {
-                        tracing::info!(
-                            cli_key = %result.cli_key,
-                            trace_id = %result.trace_id,
-                            "{context}: restored cli_proxy direct config (keeping enabled state)"
-                        );
-                    }
-                    continue;
-                }
-
-                tracing::warn!(
-                    cli_key = %result.cli_key,
-                    trace_id = %result.trace_id,
-                    error_code = %result.error_code.unwrap_or_default(),
-                    "{context}: cli_proxy direct config restore failed: {}",
-                    result.message
-                );
-            }
-        }
-        Ok(Err(err)) => {
-            tracing::warn!(
-                "{context}: cli_proxy direct config restore task failed: {}",
-                err
-            );
-        }
-        Err(_) => tracing::warn!(
-            "{context}: cli_proxy direct config restore task timed out ({}s)",
-            CLI_PROXY_RESTORE_TIMEOUT.as_secs()
-        ),
+    if let Err(err) = blocking::run(label, move || {
+        crate::cli_proxy::restore_enabled_keep_state(&app_for_restore)
+            .and_then(super::cli_proxy_service::require_success)
+    })
+    .await
+    {
+        tracing::warn!(context = label, error = %err, "CLI proxy restore failed");
     }
-}
-
-pub(crate) async fn stop_gateway_best_effort<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    let _gateway_lifecycle = super::gateway_lifecycle_lock::lock().await;
-    stop_gateway_best_effort_unlocked(app).await;
 }
 
 pub(crate) async fn stop_gateway_best_effort_unlocked<R: tauri::Runtime>(

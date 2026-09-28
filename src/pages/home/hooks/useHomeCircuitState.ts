@@ -29,9 +29,11 @@ export function useHomeCircuitState(): HomeCircuitState {
   const claudeCircuitsQuery = useGatewayCircuitStatusQuery("claude");
   const codexCircuitsQuery = useGatewayCircuitStatusQuery("codex");
   const geminiCircuitsQuery = useGatewayCircuitStatusQuery("gemini");
+  const grokCircuitsQuery = useGatewayCircuitStatusQuery("grok");
   const claudeProvidersQuery = useProvidersListQuery("claude");
   const codexProvidersQuery = useProvidersListQuery("codex");
   const geminiProvidersQuery = useProvidersListQuery("gemini");
+  const grokProvidersQuery = useProvidersListQuery("grok");
   const claudeCircuitSummary = useMemo(
     () => summarizeGatewayCircuitRows(claudeCircuitsQuery.data),
     [claudeCircuitsQuery.data]
@@ -44,33 +46,43 @@ export function useHomeCircuitState(): HomeCircuitState {
     () => summarizeGatewayCircuitRows(geminiCircuitsQuery.data),
     [geminiCircuitsQuery.data]
   );
+  const grokCircuitSummary = useMemo(
+    () => summarizeGatewayCircuitRows(grokCircuitsQuery.data),
+    [grokCircuitsQuery.data]
+  );
 
   useGatewayCircuitAutoRefresh("claude", claudeCircuitSummary);
   useGatewayCircuitAutoRefresh("codex", codexCircuitSummary);
   useGatewayCircuitAutoRefresh("gemini", geminiCircuitSummary);
+  useGatewayCircuitAutoRefresh("grok", grokCircuitSummary);
 
   const openCircuits = useMemo<OpenCircuitRow[]>(() => {
     const specs = [
       {
         cliKey: "claude" as const,
-        unavailableRows: claudeCircuitSummary.unavailableRows,
+        attentionRows: claudeCircuitSummary.attentionRows,
         providers: claudeProvidersQuery.data ?? [],
       },
       {
         cliKey: "codex" as const,
-        unavailableRows: codexCircuitSummary.unavailableRows,
+        attentionRows: codexCircuitSummary.attentionRows,
         providers: codexProvidersQuery.data ?? [],
       },
       {
         cliKey: "gemini" as const,
-        unavailableRows: geminiCircuitSummary.unavailableRows,
+        attentionRows: geminiCircuitSummary.attentionRows,
         providers: geminiProvidersQuery.data ?? [],
+      },
+      {
+        cliKey: "grok" as const,
+        attentionRows: grokCircuitSummary.attentionRows,
+        providers: grokProvidersQuery.data ?? [],
       },
     ];
 
     const rows: OpenCircuitRow[] = [];
     for (const spec of specs) {
-      if (spec.unavailableRows.length === 0) continue;
+      if (spec.attentionRows.length === 0) continue;
 
       const providerNameById: Record<number, string> = {};
       for (const provider of spec.providers) {
@@ -79,16 +91,21 @@ export function useHomeCircuitState(): HomeCircuitState {
         providerNameById[provider.id] = name;
       }
 
-      for (const unavailable of spec.unavailableRows) {
-        const { row, unavailableUntil } = unavailable;
+      for (const attention of spec.attentionRows) {
+        const { row, unavailableUntil, displayState } = attention;
+        // attentionRows 不含 healthy；此分支仅用于收窄类型。
+        if (displayState === "healthy") continue;
         rows.push({
           cli_key: spec.cliKey,
           provider_id: row.provider_id,
           provider_name: providerNameById[row.provider_id] ?? "未知",
-          open_until: unavailableUntil,
+          displayState,
+          // half_open 行无 until 语义，恒为 null。
+          open_until: displayState === "half_open" ? null : unavailableUntil,
         });
       }
     }
+    // until 升序；half_open（null until）排最后。
     rows.sort((a, b) => {
       const aUntil = a.open_until ?? Number.POSITIVE_INFINITY;
       const bUntil = b.open_until ?? Number.POSITIVE_INFINITY;
@@ -99,12 +116,14 @@ export function useHomeCircuitState(): HomeCircuitState {
 
     return rows;
   }, [
-    claudeCircuitSummary.unavailableRows,
+    claudeCircuitSummary.attentionRows,
     claudeProvidersQuery.data,
-    codexCircuitSummary.unavailableRows,
+    codexCircuitSummary.attentionRows,
     codexProvidersQuery.data,
-    geminiCircuitSummary.unavailableRows,
+    geminiCircuitSummary.attentionRows,
     geminiProvidersQuery.data,
+    grokCircuitSummary.attentionRows,
+    grokProvidersQuery.data,
   ]);
 
   const handleResetProvider = useCallback(

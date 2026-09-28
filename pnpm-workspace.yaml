@@ -17,9 +17,14 @@ overrides:
   brace-expansion@1.1.12: 1.1.13
   brace-expansion@2.0.2: 2.0.3
   flatted@3.3.3: 3.4.2
+  js-yaml: 4.3.2
   lodash: ^4.18.1
   minimatch@3.1.2: 3.1.4
   minimatch@9.0.5: 9.0.7
+  nanoid@3.3.16: 3.3.18
+  nanoid@3.3.17: 3.3.18
   picomatch@2.3.1: 2.3.2
   picomatch@4.0.3: 4.0.4
+  react-router: 8.3.0
   rollup: ^4.60.1
+  semver@6.3.1: 7.8.5

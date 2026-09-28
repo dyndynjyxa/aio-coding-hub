@@ -22,6 +22,7 @@ impl RuntimeSettingsMiddleware {
         ctx.runtime_settings = Some(handler_runtime_settings(
             settings_cfg.as_ref(),
             ctx.is_claude_count_tokens,
+            ctx.is_codex_model_discovery,
         ));
         MiddlewareAction::Continue(Box::new(ctx))
     }

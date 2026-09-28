@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 const MODEL_PRICE_DIR_NAME: &str = "model-prices";
 const ALIASES_FILE_NAME: &str = "price-aliases.json";
 const ALIASES_SCHEMA_VERSION_V1: i64 = 1;
+const ALIASES_SCHEMA_VERSION_CURRENT: i64 = 2;
 const MAX_MODEL_LEN: usize = 200;
 const ALIASES_FILE_MAX_BYTES: usize = 1024 * 1024;
 const ALIASES_RULES_MAX: usize = 512;
@@ -39,11 +40,21 @@ pub struct ModelPriceAliasesV1 {
     pub rules: Vec<ModelPriceAliasRuleV1>,
 }
 
+fn default_grok_build_rule() -> ModelPriceAliasRuleV1 {
+    ModelPriceAliasRuleV1 {
+        cli_key: "grok".to_string(),
+        match_type: ModelPriceAliasMatchTypeV1::Exact,
+        pattern: "grok-build".to_string(),
+        target_model: "grok-build-0.1".to_string(),
+        enabled: true,
+    }
+}
+
 impl Default for ModelPriceAliasesV1 {
     fn default() -> Self {
         Self {
-            version: ALIASES_SCHEMA_VERSION_V1,
-            rules: Vec::new(),
+            version: ALIASES_SCHEMA_VERSION_CURRENT,
+            rules: vec![default_grok_build_rule()],
         }
     }
 }
@@ -127,7 +138,8 @@ fn validate_rule(
 fn validate_aliases(
     mut aliases: ModelPriceAliasesV1,
 ) -> crate::shared::error::AppResult<ModelPriceAliasesV1> {
-    if aliases.version != ALIASES_SCHEMA_VERSION_V1 {
+    let migrate_from_v1 = aliases.version == ALIASES_SCHEMA_VERSION_V1;
+    if !migrate_from_v1 && aliases.version != ALIASES_SCHEMA_VERSION_CURRENT {
         return Err(format!(
             "SEC_INVALID_INPUT: unsupported aliases version {}",
             aliases.version
@@ -144,6 +156,15 @@ fn validate_aliases(
     let mut out: Vec<ModelPriceAliasRuleV1> = Vec::with_capacity(aliases.rules.len());
     for rule in aliases.rules {
         out.push(validate_rule(rule)?);
+    }
+    if migrate_from_v1 {
+        aliases.version = ALIASES_SCHEMA_VERSION_CURRENT;
+        let has_grok_build_match = out
+            .iter()
+            .any(|rule| rule.cli_key == "grok" && match_rule(rule, "grok-build"));
+        if !has_grok_build_match && out.len() < ALIASES_RULES_MAX {
+            out.push(default_grok_build_rule());
+        }
     }
     aliases.rules = out;
     Ok(aliases)

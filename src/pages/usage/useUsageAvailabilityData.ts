@@ -1,6 +1,5 @@
 import { useMemo } from "react";
-import type { CliFilterKey } from "../../constants/clis";
-import type { CliKey } from "../../services/providers/providers";
+import { CLI_KEYS, type CliFilterKey } from "../../constants/clis";
 import type { UsagePeriod } from "../../services/usage/usage";
 import type { CustomDateRangeApplied } from "../../hooks/useCustomDateRange";
 import { useRequestLogsListAllQuery } from "../../query/requestLogs";
@@ -10,7 +9,6 @@ import {
   type AvailabilityTimelineData,
 } from "../../components/usage/usageAvailabilityTimeline";
 
-const CLIS: CliKey[] = ["claude", "codex", "gemini"];
 const REQUEST_LOGS_LIMIT = 2000;
 
 function periodRangeMs(
@@ -59,17 +57,20 @@ export function useUsageAvailabilityData({
   const claudeCircuit = useGatewayCircuitByProviderId("claude");
   const codexCircuit = useGatewayCircuitByProviderId("codex");
   const geminiCircuit = useGatewayCircuitByProviderId("gemini");
+  const grokCircuit = useGatewayCircuitByProviderId("grok");
 
   const mergedCircuitMap = useMemo(() => {
     return {
       ...claudeCircuit.circuitByProviderId,
       ...codexCircuit.circuitByProviderId,
       ...geminiCircuit.circuitByProviderId,
+      ...grokCircuit.circuitByProviderId,
     };
   }, [
     claudeCircuit.circuitByProviderId,
     codexCircuit.circuitByProviderId,
     geminiCircuit.circuitByProviderId,
+    grokCircuit.circuitByProviderId,
   ]);
 
   const data: AvailabilityTimelineData | null = useMemo(() => {
@@ -95,10 +96,11 @@ export function useUsageAvailabilityData({
     refreshing: enabled && logsQuery.isFetching && !logsQuery.isLoading,
     refetch: () => {
       void logsQuery.refetch();
-      for (const cli of CLIS) {
+      for (const cli of CLI_KEYS) {
         if (cli === "claude") void claudeCircuit.refetch();
         if (cli === "codex") void codexCircuit.refetch();
         if (cli === "gemini") void geminiCircuit.refetch();
+        if (cli === "grok") void grokCircuit.refetch();
       }
     },
   };

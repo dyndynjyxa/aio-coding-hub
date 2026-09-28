@@ -1,15 +1,11 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type {
-  ModelPriceAliases,
-  ModelPriceSummary,
-  ModelPricesSyncReport,
-} from "../../services/usage/modelPrices";
+import type { ModelPriceAliases, ModelPricesSyncReport } from "../../services/usage/modelPrices";
 import {
   modelPriceAliasesGet,
   modelPriceAliasesSet,
-  modelPricesList,
-  modelPricesSyncBasellm,
+  modelPricesListAll,
+  modelPricesSync,
 } from "../../services/usage/modelPrices";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
@@ -18,9 +14,8 @@ import {
   isModelPricesSyncNotModified,
   useModelPriceAliasesQuery,
   useModelPriceAliasesSetMutation,
-  useModelPricesListQuery,
-  useModelPricesSyncBasellmMutation,
-  useModelPricesTotalCountQuery,
+  useModelPricesListAllQuery,
+  useModelPricesSyncMutation,
 } from "../modelPrices";
 
 vi.mock("../../services/usage/modelPrices", async () => {
@@ -29,24 +24,12 @@ vi.mock("../../services/usage/modelPrices", async () => {
   );
   return {
     ...actual,
-    modelPricesList: vi.fn(),
-    modelPricesSyncBasellm: vi.fn(),
+    modelPricesListAll: vi.fn(),
+    modelPricesSync: vi.fn(),
     modelPriceAliasesGet: vi.fn(),
     modelPriceAliasesSet: vi.fn(),
   };
 });
-
-function makeModelPriceSummary(overrides: Partial<ModelPriceSummary> = {}): ModelPriceSummary {
-  return {
-    id: 1,
-    cli_key: "claude",
-    model: "claude-3-7-sonnet",
-    currency: "USD",
-    created_at: 1,
-    updated_at: 2,
-    ...overrides,
-  };
-}
 
 function makeModelPricesSyncReport(
   overrides: Partial<ModelPricesSyncReport> = {}
@@ -55,8 +38,9 @@ function makeModelPricesSyncReport(
     status: "updated",
     inserted: 1,
     updated: 0,
-    skipped: 0,
+    unchanged: 0,
     total: 1,
+    error: null,
     ...overrides,
   };
 }
@@ -66,49 +50,31 @@ describe("query/modelPrices", () => {
     vi.clearAllMocks();
   });
 
-  it("calls modelPricesList with tauri runtime", async () => {
+  it("calls modelPricesListAll with tauri runtime", async () => {
     setTauriRuntime();
-    vi.mocked(modelPricesList).mockResolvedValue([]);
+    vi.mocked(modelPricesListAll).mockResolvedValue([]);
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
 
-    renderHook(() => useModelPricesListQuery(" claude " as never), { wrapper });
+    renderHook(() => useModelPricesListAllQuery(), { wrapper });
 
     await waitFor(() => {
-      expect(modelPricesList).toHaveBeenCalledWith("claude");
+      expect(modelPricesListAll).toHaveBeenCalledWith();
     });
   });
 
-  it("useModelPricesListQuery enters error state when modelPricesList rejects", async () => {
+  it("useModelPricesListAllQuery enters error state when modelPricesListAll rejects", async () => {
     setTauriRuntime();
-    vi.mocked(modelPricesList).mockRejectedValue(new Error("model prices query boom"));
+    vi.mocked(modelPricesListAll).mockRejectedValue(new Error("model prices query boom"));
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
 
-    const { result } = renderHook(() => useModelPricesListQuery("claude"), { wrapper });
+    const { result } = renderHook(() => useModelPricesListAllQuery(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.isError).toBe(true);
-    });
-  });
-
-  it("useModelPricesTotalCountQuery sums list lengths across all CLIs", async () => {
-    setTauriRuntime();
-
-    vi.mocked(modelPricesList)
-      .mockResolvedValueOnce([makeModelPriceSummary({ id: 1 })])
-      .mockResolvedValueOnce([makeModelPriceSummary({ id: 2 }), makeModelPriceSummary({ id: 3 })])
-      .mockResolvedValueOnce([]);
-
-    const client = createTestQueryClient();
-    const wrapper = createQueryWrapper(client);
-
-    const { result } = renderHook(() => useModelPricesTotalCountQuery(), { wrapper });
-
-    await waitFor(() => {
-      expect(result.current.data).toBe(3);
     });
   });
 
@@ -171,21 +137,22 @@ describe("query/modelPrices", () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: modelPricesKeys.aliases() });
   });
 
-  it("useModelPricesSyncBasellmMutation invalidates modelPricesKeys.all", async () => {
+  it("useModelPricesSyncMutation runs a normal sync and invalidates modelPricesKeys.all", async () => {
     setTauriRuntime();
 
     const report = makeModelPricesSyncReport();
-    vi.mocked(modelPricesSyncBasellm).mockResolvedValue(report);
+    vi.mocked(modelPricesSync).mockResolvedValue(report);
 
     const client = createTestQueryClient();
     const invalidateSpy = vi.spyOn(client, "invalidateQueries");
     const wrapper = createQueryWrapper(client);
 
-    const { result } = renderHook(() => useModelPricesSyncBasellmMutation(), { wrapper });
+    const { result } = renderHook(() => useModelPricesSyncMutation(), { wrapper });
     await act(async () => {
-      await result.current.mutateAsync({ force: true });
+      await result.current.mutateAsync();
     });
 
+    expect(modelPricesSync).toHaveBeenCalledWith();
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: modelPricesKeys.all });
   });
 

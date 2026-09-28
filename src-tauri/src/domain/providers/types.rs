@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
+use super::model_policy::{ProviderModelPolicyStatus, ProviderModelPolicyV1};
+
 pub(super) const DEFAULT_PRIORITY: i64 = 100;
 pub(super) const MAX_MODEL_NAME_LEN: usize = 200;
 pub(crate) const CX2CC_BRIDGE_TYPE: &str = "cx2cc";
@@ -80,6 +82,7 @@ pub struct ProviderUpsertParams {
     pub cost_multiplier: f64,
     pub priority: Option<i64>,
     pub claude_models: Option<ClaudeModels>,
+    pub model_policy: Option<ProviderModelPolicyV1>,
     pub limit_5h_usd: Option<f64>,
     pub limit_daily_usd: Option<f64>,
     pub daily_reset_mode: Option<DailyResetMode>,
@@ -92,6 +95,7 @@ pub struct ProviderUpsertParams {
     pub source_provider_id: Option<i64>,
     pub bridge_type: Option<String>,
     pub stream_idle_timeout_seconds: Option<u32>,
+    pub supports_websockets: Option<bool>,
     pub extension_values: Option<Vec<ProviderExtensionValuesInput>>,
     pub custom_headers: Option<Vec<ProviderCustomHeader>>,
 }
@@ -232,6 +236,8 @@ pub struct ProviderSummary {
     pub base_urls: Vec<String>,
     pub base_url_mode: ProviderBaseUrlMode,
     pub claude_models: ClaudeModels,
+    pub model_policy: Option<ProviderModelPolicyV1>,
+    pub model_policy_status: ProviderModelPolicyStatus,
     pub enabled: bool,
     pub priority: i64,
     pub cost_multiplier: f64,
@@ -254,6 +260,7 @@ pub struct ProviderSummary {
     pub source_provider_id: Option<i64>,
     pub bridge_type: Option<String>,
     pub stream_idle_timeout_seconds: Option<u32>,
+    pub supports_websockets: bool,
     pub extension_values: Vec<ProviderExtensionValues>,
     pub custom_headers: Vec<ProviderCustomHeader>,
     pub api_key_configured: bool,
@@ -272,6 +279,8 @@ pub(crate) struct ProviderForGateway {
     pub base_url_mode: ProviderBaseUrlMode,
     pub api_key_plaintext: String,
     pub claude_models: ClaudeModels,
+    pub model_policy: Option<ProviderModelPolicyV1>,
+    pub model_policy_status: ProviderModelPolicyStatus,
     pub limit_5h_usd: Option<f64>,
     pub limit_daily_usd: Option<f64>,
     pub daily_reset_mode: DailyResetMode,
@@ -285,6 +294,7 @@ pub(crate) struct ProviderForGateway {
     #[allow(dead_code)] // Will be read when failover_loop uses bridge_type for dispatch.
     pub bridge_type: Option<String>,
     pub stream_idle_timeout_seconds: Option<u32>,
+    pub supports_websockets: bool,
     pub extension_values: Vec<ProviderExtensionValues>,
     pub custom_headers: Vec<ProviderCustomHeader>,
 }
@@ -318,11 +328,14 @@ impl ProviderForGateway {
 
 #[derive(Debug, Clone)]
 pub(super) struct DecodedProviderRow {
+    pub supports_websockets: bool,
     pub id: i64,
     pub name: String,
     pub base_urls: Vec<String>,
     pub base_url_mode: ProviderBaseUrlMode,
     pub claude_models: ClaudeModels,
+    pub model_policy: Option<ProviderModelPolicyV1>,
+    pub model_policy_status: ProviderModelPolicyStatus,
     pub limit_5h_usd: Option<f64>,
     pub limit_daily_usd: Option<f64>,
     pub daily_reset_mode: DailyResetMode,

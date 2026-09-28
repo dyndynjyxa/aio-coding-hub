@@ -7,6 +7,7 @@ pub struct UsageSummary {
     pub requests_success: i64,
     pub requests_failed: i64,
     pub cost_covered_success: i64,
+    pub total_duration_ms: i64,
     pub avg_duration_ms: Option<i64>,
     pub avg_ttfb_ms: Option<i64>,
     pub avg_output_tokens_per_second: Option<f64>,
@@ -76,6 +77,18 @@ pub struct UsageProviderCacheRateTrendRowV1 {
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
+pub struct UsageProviderMetricsTrendRowV1 {
+    pub day: String,
+    pub hour: Option<i64>,
+    pub key: String,
+    pub name: String,
+    pub avg_duration_ms: Option<i64>,
+    pub avg_ttfb_ms: Option<i64>,
+    pub avg_output_tokens_per_second: Option<f64>,
+    pub requests_success: i64,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct UsageDayHourRow {
     pub hour: i64,
     pub requests_total: i64,
@@ -123,9 +136,16 @@ pub struct UsageDayDetailV1 {
 pub struct UsageLeaderboardRow {
     pub key: String,
     pub name: String,
+    pub folder_path: Option<String>,
     pub requests_total: i64,
     pub requests_success: i64,
     pub requests_failed: i64,
+    pub total_duration_ms: i64,
+    pub first_request_created_at_ms: Option<i64>,
+    pub last_request_created_at_ms: Option<i64>,
+    pub last_request_completed_at_ms: Option<i64>,
+    pub estimated_development_time_ms: Option<i64>,
+    pub hourly_estimated_development_time_ms: Option<Vec<i64>>,
     pub total_tokens: i64,
     pub io_total_tokens: i64,
     pub input_tokens: i64,

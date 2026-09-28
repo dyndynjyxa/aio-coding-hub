@@ -3,10 +3,12 @@ import { GATEWAY_EVENT_TEXT_LIMITS, gatewayEventNames } from "../../constants/ga
 import { computeOutputTokensPerSecond as computeOutputTokensPerSecondRaw } from "../../utils/formatters";
 import { logToConsole, shouldLogToConsole } from "../consoleLog";
 import { maybeSendCircuitBreakerNotice } from "./circuitNotice";
+import { parseCircuitState } from "./circuitState";
 import { subscribeGatewayEvent } from "./gatewayEventBus";
 import { ingestTraceAttempt, ingestTraceRequest, ingestTraceStart } from "./traceStore";
 import { ingestCacheAnomalyRequest, ingestCacheAnomalyRequestStart } from "./cacheAnomalyMonitor";
 import type { ClaudeModelMapping } from "./claudeModelMapping";
+import { normalizeModelRedirect } from "./modelRedirect";
 import { MAX_ATTEMPTS_PER_TRACE } from "./traceLimits";
 import type {
   FailoverAttempt,
@@ -19,6 +21,7 @@ import type {
 } from "../../generated/bindings";
 
 export type { ClaudeModelMapping } from "./claudeModelMapping";
+export type { ModelRedirect } from "./modelRedirect";
 
 // 事件 payload 类型以生成 bindings 为唯一基准（Rust 改字段 → 前端 typecheck 翻红）。
 // 运行时 guard/normalizer 保留：payload 仍需运行时校验，类型基准为生成类型。
@@ -49,14 +52,8 @@ function normalizeLogLevel(level: unknown): "debug" | "info" | "warn" | "error" 
   return "info";
 }
 
-function normalizeCircuitState(state: string | null | undefined) {
-  if (!state) return null;
-  if (state === "OPEN" || state === "CLOSED" || state === "HALF_OPEN") return state;
-  return null;
-}
-
 function circuitStateText(state: string | null | undefined) {
-  const normalized = normalizeCircuitState(state);
+  const normalized = parseCircuitState(state);
   if (normalized === "OPEN") return "熔断";
   if (normalized === "HALF_OPEN") return "半开";
   if (normalized === "CLOSED") return "正常";
@@ -338,6 +335,14 @@ export function normalizeGatewayAttemptEvent(payload: unknown): GatewayAttemptEv
     return null;
   }
 
+  // Normalize once; a present-but-invalid redirect rejects the payload.
+  const modelRedirect = isNullish(payload.model_redirect)
+    ? null
+    : normalizeModelRedirect(payload.model_redirect);
+  if (!isNullish(payload.model_redirect) && modelRedirect === null) {
+    return null;
+  }
+
   return {
     trace_id: payload.trace_id,
     cli_key: payload.cli_key,
@@ -363,11 +368,19 @@ export function normalizeGatewayAttemptEvent(payload: unknown): GatewayAttemptEv
     circuit_failure_count: payload.circuit_failure_count ?? null,
     circuit_failure_threshold: payload.circuit_failure_threshold ?? null,
     claude_model_mapping: payload.claude_model_mapping ?? null,
+    model_redirect: modelRedirect,
   };
 }
 
 export function normalizeGatewayRequestEvent(payload: unknown): GatewayRequestEvent | null {
   if (!isRecord(payload)) return null;
+  // Normalize once; a present-but-invalid redirect rejects the payload below.
+  const modelRedirect = isNullish(payload.model_redirect)
+    ? null
+    : normalizeModelRedirect(payload.model_redirect);
+  if (!isNullish(payload.model_redirect) && modelRedirect === null) {
+    return null;
+  }
   const attempts = payload.attempts;
   if (!Array.isArray(attempts)) return null;
   const boundedAttempts =
@@ -399,7 +412,9 @@ export function normalizeGatewayRequestEvent(payload: unknown): GatewayRequestEv
     isNullableNumber(payload.cache_creation_5m_input_tokens) &&
     isNullableNumber(payload.cache_creation_1h_input_tokens) &&
     isNullableNumber(payload.effective_input_tokens) &&
-    isNullableClaudeModelMapping(payload.claude_model_mapping)
+    isNullableClaudeModelMapping(payload.claude_model_mapping) &&
+    isNullableStringWithin(payload.reasoning_effort, EVENT_STATE_MAX_LENGTH) &&
+    isNullableStringWithin(payload.terminal_signal, EVENT_STATE_MAX_LENGTH)
   ) {
     return {
       trace_id: payload.trace_id,
@@ -426,6 +441,10 @@ export function normalizeGatewayRequestEvent(payload: unknown): GatewayRequestEv
       cache_creation_1h_input_tokens: payload.cache_creation_1h_input_tokens ?? null,
       effective_input_tokens: payload.effective_input_tokens ?? null,
       claude_model_mapping: payload.claude_model_mapping ?? null,
+      model_redirect: modelRedirect,
+      reasoning_effort:
+        truncateNullableString(payload.reasoning_effort, EVENT_STATE_MAX_LENGTH) ?? null,
+      ...(payload.terminal_signal != null ? { terminal_signal: payload.terminal_signal } : {}),
     };
   }
 
@@ -649,8 +668,8 @@ export async function listenGatewayEvents(): Promise<() => void> {
     // 状态跃迁时按开关发送系统通知（内部含 prev != next 与开关判断）。
     void maybeSendCircuitBreakerNotice(payload);
 
-    const prevNormalized = normalizeCircuitState(payload.prev_state);
-    const nextNormalized = normalizeCircuitState(payload.next_state);
+    const prevNormalized = parseCircuitState(payload.prev_state);
+    const nextNormalized = parseCircuitState(payload.next_state);
     const from = circuitStateText(prevNormalized);
     const to = circuitStateText(nextNormalized);
     const provider = payload.provider_name || "未知";

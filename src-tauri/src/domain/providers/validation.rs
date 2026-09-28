@@ -153,11 +153,25 @@ pub(super) fn validate_limit_usd(
     Ok(Some(v))
 }
 
+pub(crate) fn validate_supports_websockets(
+    cli_key: &str,
+    has_source_provider: bool,
+    bridge_type: Option<&str>,
+    supports_websockets: bool,
+) -> crate::shared::error::AppResult<()> {
+    if supports_websockets && (cli_key != "codex" || has_source_provider || bridge_type.is_some()) {
+        return Err(
+            "SEC_INVALID_INPUT: supports_websockets requires a native codex provider".into(),
+        );
+    }
+    Ok(())
+}
+
 pub(super) fn validate_cli_key(cli_key: &str) -> crate::shared::error::AppResult<()> {
     crate::shared::cli_key::validate_cli_key(cli_key)
 }
 
-pub(super) fn normalize_base_urls(
+pub(crate) fn normalize_base_urls(
     base_urls: Vec<String>,
 ) -> crate::shared::error::AppResult<Vec<String>> {
     let initial_capacity = base_urls.len().clamp(1, MAX_PROVIDER_BASE_URLS);

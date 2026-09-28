@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { CLIS } from "../../constants/clis";
+import { cliKeysWith } from "../../constants/clis";
 import { useMcpServersListQuery } from "../../query/mcp";
 import { usePromptsListQuery } from "../../query/prompts";
 import { useSettingsQuery } from "../../query/settings";
@@ -41,6 +41,8 @@ export const WORKSPACES_RIGHT_TABS: Array<{ key: WorkspacesRightTab; label: stri
   { key: "skills", label: "Skills" },
 ];
 
+const WORKSPACE_CLI_KEYS = cliKeysWith("workspaces");
+
 function normalizeWorkspaceName(raw: string) {
   return raw.trim();
 }
@@ -61,10 +63,11 @@ function isDuplicateWorkspaceName(
 
 export function useWorkspacesPageDataModel() {
   const settingsQuery = useSettingsQuery();
-  const orderedCliTabs = getOrderedClis(settingsQuery.data?.cli_priority_order);
+  const orderedCliTabs = getOrderedClis(settingsQuery.data?.cli_priority_order, WORKSPACE_CLI_KEYS);
   const orderedCliKeys = orderedCliTabs.map((cli) => cli.key);
   const defaultCli =
-    pickDefaultCliByPriority(settingsQuery.data?.cli_priority_order, orderedCliKeys) ?? CLIS[0].key;
+    pickDefaultCliByPriority(settingsQuery.data?.cli_priority_order, orderedCliKeys) ??
+    WORKSPACE_CLI_KEYS[0];
 
   const [activeCli, setActiveCli] = useState<CliKey | null>(null);
   const [requestedSelectedWorkspaceId, setSelectedWorkspaceId] = useState<number | null>(null);

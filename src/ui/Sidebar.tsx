@@ -7,6 +7,7 @@ import {
   Command,
   Cpu,
   FileText,
+  ImagePlus,
   Layers,
   Monitor,
   Moon,
@@ -19,17 +20,19 @@ import {
   TrendingDown,
   Wrench,
 } from "lucide-react";
-import { CLIS } from "../constants/clis";
+import claudeFavicon from "../assets/brand/claude-favicon.png";
+import codexLogo from "../assets/brand/codex-logo.svg";
+import geminiLogo from "../assets/brand/gemini-sparkle-aurora.svg";
+import grokLogo from "../assets/brand/grok-logo.svg";
+import { cliShortLabel, clisWith, type CliKey } from "../constants/clis";
 import { AIO_REPO_URL } from "../constants/urls";
 import { useDevPreviewData } from "../hooks/useDevPreviewData";
 import { useGatewayStatus, openReleasesUrl } from "../hooks/useGatewayStatus";
 import { useTheme } from "../hooks/useTheme";
 import { updateDialogSetOpen } from "../hooks/useUpdateMeta";
 import { useCliProxyControls } from "../hooks/useCliProxyControls";
+import { CliProxyConflictDialog } from "../components/cli-proxy/CliProxyConflictDialog";
 import { openDesktopUrl } from "../services/desktop/opener";
-import type { CliKey } from "../services/providers/providers";
-import { Button } from "./Button";
-import { Dialog } from "./Dialog";
 import { Switch } from "./Switch";
 import { cn } from "../utils/cn";
 
@@ -53,6 +56,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { to: "/", label: "首页", icon: Activity, theme: "blue" },
       { to: "/providers", label: "供应商", icon: Boxes, theme: "cyan" },
+      { to: "/image-gen", label: "生图", icon: ImagePlus, theme: "pink" },
       { to: "/sessions", label: "Session 会话", icon: MessageSquare, theme: "violet" },
     ],
   },
@@ -81,18 +85,22 @@ const NAV_SECTIONS: NavSection[] = [
 ];
 
 const NAV: NavItem[] = NAV_SECTIONS.flatMap((section) => section.items);
+const CLI_PROXY_ORDER: readonly CliKey[] = ["claude", "codex", "grok", "gemini"];
+const CLI_PROXY_ITEMS = [...clisWith("cliProxy")].sort(
+  (left, right) => CLI_PROXY_ORDER.indexOf(left.key) - CLI_PROXY_ORDER.indexOf(right.key)
+);
+const CLI_PROXY_LOGOS: Record<CliKey, string> = {
+  claude: claudeFavicon,
+  codex: codexLogo,
+  grok: grokLogo,
+  gemini: geminiLogo,
+};
 
 const THEME_OPTIONS = [
   { value: "light", label: "Light", icon: Sun },
   { value: "dark", label: "Dark", icon: Moon },
   { value: "system", label: "System", icon: Monitor },
 ] as const;
-
-const SIDEBAR_CLI_LABELS: Record<CliKey, string> = {
-  claude: "Claude",
-  codex: "Codex",
-  gemini: "Gemini",
-};
 
 export type SidebarProps = {
   className?: string;
@@ -283,57 +291,55 @@ function CliProxyGrid({ cliProxyState }: { cliProxyState: CliProxyState }) {
   }
 
   return (
-    <div className="grid grid-cols-3 gap-2">
-      {CLIS.map((cli) => {
-        const cliKey = cli.key;
-        const isEnabled = cliProxyState.cliProxyEnabled[cliKey];
+    <div className="grid w-full grid-cols-4 gap-1" aria-label="CLI 代理控制">
+      {CLI_PROXY_ITEMS.map(({ key: cliKey }) => {
+        const isEnabled = !!cliProxyState.cliProxyEnabled[cliKey];
         const drifted =
           isEnabled && cliProxyState.cliProxyAppliedToCurrentGateway[cliKey] === false;
+        const toggling = !!cliProxyState.cliProxyToggling[cliKey];
+        const label = cliShortLabel(cliKey);
 
         return (
           <div
             key={cliKey}
+            data-cli-key={cliKey}
             className={cn(
-              "flex flex-col items-center justify-between rounded-lg p-1.5 border transition-all duration-200",
+              "relative flex min-w-0 flex-col items-center gap-1 rounded-md border px-1 py-1.5 transition-colors",
               isEnabled
                 ? "bg-emerald-500/5 border-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                : "bg-sidebar-control-muted/30 border-slate-300/20 text-sidebar-foreground/70 dark:border-slate-500/15"
+                : "border-sidebar-control-border bg-sidebar-control-muted/30 text-sidebar-foreground/70"
             )}
+            title={label}
           >
-            <span className="text-[10px] font-bold tracking-tight truncate max-w-full">
-              {SIDEBAR_CLI_LABELS[cliKey]}
-            </span>
-            <div className="flex items-center gap-1 mt-1">
-              {drifted ? (
-                <button
-                  type="button"
-                  disabled={cliProxyState.cliProxyToggling[cliKey]}
-                  onClick={() => cliProxyState.requestCliProxyEnabledSwitch(cliKey, true)}
-                  className="text-[9px] text-rose-500 font-bold hover:underline"
-                  aria-label={`修复 ${SIDEBAR_CLI_LABELS[cliKey]} 代理`}
-                  title={`修复 ${SIDEBAR_CLI_LABELS[cliKey]} 代理`}
-                >
-                  修复
-                </button>
-              ) : (
-                <span
-                  className={cn(
-                    "h-1 w-1 shrink-0 rounded-full transition-all duration-300",
-                    isEnabled
-                      ? "bg-emerald-500 shadow-status-dot shadow-emerald-500/70"
-                      : "bg-muted-foreground/20"
-                  )}
-                />
+            <img
+              src={CLI_PROXY_LOGOS[cliKey]}
+              alt=""
+              aria-hidden="true"
+              className={cn(
+                "h-4 w-4 object-contain",
+                (cliKey === "codex" || cliKey === "grok") && "dark:invert"
               )}
-              <Switch
-                checked={isEnabled}
-                disabled={cliProxyState.cliProxyToggling[cliKey]}
-                onCheckedChange={(next) => cliProxyState.requestCliProxyEnabledSwitch(cliKey, next)}
-                size="sm"
-                className="border-0"
-                aria-label={`${SIDEBAR_CLI_LABELS[cliKey]} 代理开关`}
-              />
-            </div>
+            />
+            <Switch
+              checked={isEnabled}
+              disabled={toggling}
+              onCheckedChange={(next) => cliProxyState.requestCliProxyEnabledSwitch(cliKey, next)}
+              size="sm"
+              className="border-0"
+              aria-label={`${label} 代理开关`}
+            />
+            {drifted ? (
+              <button
+                type="button"
+                disabled={toggling}
+                onClick={() => cliProxyState.requestCliProxyEnabledSwitch(cliKey, true)}
+                className="absolute right-0.5 top-0.5 text-[8px] font-bold text-rose-500 hover:underline"
+                aria-label={`修复 ${label} 代理`}
+                title={`修复 ${label} 代理`}
+              >
+                修复
+              </button>
+            ) : null}
           </div>
         );
       })}
@@ -441,63 +447,6 @@ function SidebarControlCenter({
   );
 }
 
-function CliProxyConflictDialog({
-  pendingCliProxyEnablePrompt,
-  cliProxyState,
-}: {
-  pendingCliProxyEnablePrompt: CliProxyState["pendingCliProxyEnablePrompt"];
-  cliProxyState: CliProxyState;
-}) {
-  return (
-    <Dialog
-      open={pendingCliProxyEnablePrompt != null}
-      onOpenChange={(open) => {
-        if (!open) cliProxyState.setPendingCliProxyEnablePrompt(null);
-      }}
-      title={
-        pendingCliProxyEnablePrompt
-          ? `检测到 ${SIDEBAR_CLI_LABELS[pendingCliProxyEnablePrompt.cliKey]} 代理相关环境变量冲突`
-          : "检测到环境变量冲突"
-      }
-      description="继续启用可能会被这些环境变量覆盖（不会显示变量值）。是否继续？"
-      className="max-w-lg"
-    >
-      {pendingCliProxyEnablePrompt ? (
-        <div className="space-y-4">
-          <ul className="space-y-2">
-            {pendingCliProxyEnablePrompt.conflicts.map((row) => (
-              <li
-                key={`${row.var_name}:${row.source_type}:${row.source_path}`}
-                className="rounded-lg border border-border bg-secondary px-3 py-2"
-              >
-                <div className="font-mono text-xs text-foreground">{row.var_name}</div>
-                <div className="mt-1 text-xs text-muted-foreground">{row.source_path}</div>
-              </li>
-            ))}
-          </ul>
-
-          <div className="flex items-center justify-end gap-2">
-            <Button
-              variant="secondary"
-              size="md"
-              onClick={() => cliProxyState.setPendingCliProxyEnablePrompt(null)}
-            >
-              取消
-            </Button>
-            <Button
-              variant="primary"
-              size="md"
-              onClick={cliProxyState.confirmPendingCliProxyEnable}
-            >
-              继续启用
-            </Button>
-          </div>
-        </div>
-      ) : null}
-    </Dialog>
-  );
-}
-
 export function Sidebar({ className }: SidebarProps) {
   const {
     gatewayAvailable,
@@ -570,8 +519,9 @@ export function Sidebar({ className }: SidebarProps) {
       </div>
 
       <CliProxyConflictDialog
-        pendingCliProxyEnablePrompt={pendingCliProxyEnablePrompt}
-        cliProxyState={cliProxyState}
+        prompt={pendingCliProxyEnablePrompt}
+        onCancel={() => cliProxyState.setPendingCliProxyEnablePrompt(null)}
+        onConfirm={cliProxyState.confirmPendingCliProxyEnable}
       />
     </aside>
   );

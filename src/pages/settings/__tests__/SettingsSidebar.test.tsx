@@ -6,10 +6,7 @@ import type { ReactElement } from "react";
 import { toast } from "sonner";
 import { createTestQueryClient } from "../../../test/utils/reactQuery";
 import { SettingsSidebar } from "../SettingsSidebar";
-import {
-  useModelPricesSyncBasellmMutation,
-  useModelPricesTotalCountQuery,
-} from "../../../query/modelPrices";
+import { useModelPricesSyncMutation } from "../../../query/modelPrices";
 import { useConfigExportMutation, useConfigImportMutation } from "../../../query/configMigrate";
 import { useUsageSummaryQuery } from "../../../query/usage";
 import {
@@ -81,8 +78,7 @@ vi.mock("../../../query/modelPrices", async () => {
   );
   return {
     ...actual,
-    useModelPricesTotalCountQuery: vi.fn(),
-    useModelPricesSyncBasellmMutation: vi.fn(),
+    useModelPricesSyncMutation: vi.fn(),
   };
 });
 vi.mock("../../../query/configMigrate", async () => {
@@ -160,11 +156,8 @@ vi.mock("../SettingsDataManagementCard", () => ({
 vi.mock("../SettingsDataSyncCard", () => ({
   SettingsDataSyncCard: ({ syncModelPrices, openModelPriceAliasesDialog }: any) => (
     <div>
-      <button type="button" onClick={() => syncModelPrices(false)}>
+      <button type="button" onClick={() => syncModelPrices()}>
         sync-model-prices
-      </button>
-      <button type="button" onClick={() => syncModelPrices(true)}>
-        sync-model-prices-force
       </button>
       <button type="button" onClick={() => openModelPriceAliasesDialog()}>
         open-aliases
@@ -222,8 +215,7 @@ function createUpdateMeta(overrides: Partial<any> = {}) {
 }
 
 function mockSidebarQueries() {
-  vi.mocked(useModelPricesTotalCountQuery).mockReturnValue({ data: 1, isLoading: false } as any);
-  vi.mocked(useModelPricesSyncBasellmMutation).mockReturnValue({
+  vi.mocked(useModelPricesSyncMutation).mockReturnValue({
     isPending: false,
     mutateAsync: vi.fn(),
   } as any);
@@ -250,8 +242,7 @@ describe("pages/settings/SettingsSidebar", () => {
   });
 
   it("handles update checks (no about, portable, normal)", async () => {
-    vi.mocked(useModelPricesTotalCountQuery).mockReturnValue({ data: 3, isLoading: false } as any);
-    vi.mocked(useModelPricesSyncBasellmMutation).mockReturnValue({
+    vi.mocked(useModelPricesSyncMutation).mockReturnValue({
       isPending: false,
       mutateAsync: vi.fn(),
     } as any);
@@ -313,8 +304,6 @@ describe("pages/settings/SettingsSidebar", () => {
 
   it("handles data management, model price sync, and subscription invalidation", async () => {
     vi.useFakeTimers();
-    vi.mocked(useModelPricesTotalCountQuery).mockReturnValue({ data: 0, isLoading: false } as any);
-
     const syncMutation = { isPending: false, mutateAsync: vi.fn() };
     syncMutation.mutateAsync
       .mockResolvedValueOnce(null)
@@ -322,12 +311,20 @@ describe("pages/settings/SettingsSidebar", () => {
         status: "not_modified",
         inserted: 0,
         updated: 0,
-        skipped: 0,
+        unchanged: 0,
         total: 0,
+        error: null,
       })
-      .mockResolvedValueOnce({ status: "updated", inserted: 1, updated: 2, skipped: 3, total: 6 })
+      .mockResolvedValueOnce({
+        status: "updated",
+        inserted: 1,
+        updated: 2,
+        unchanged: 3,
+        total: 6,
+        error: null,
+      })
       .mockRejectedValueOnce(new Error("sync boom"));
-    vi.mocked(useModelPricesSyncBasellmMutation).mockReturnValue(syncMutation as any);
+    vi.mocked(useModelPricesSyncMutation).mockReturnValue(syncMutation as any);
 
     vi.mocked(useUsageSummaryQuery).mockReturnValue({ data: null, isLoading: false } as any);
 
@@ -468,23 +465,23 @@ describe("pages/settings/SettingsSidebar", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    expect(syncMutation.mutateAsync).toHaveBeenCalledWith({ force: false });
+    expect(syncMutation.mutateAsync).toHaveBeenCalledWith();
 
     fireEvent.click(screen.getByRole("button", { name: "sync-model-prices" }));
     await act(async () => {
       await Promise.resolve();
     });
     expect(syncMutation.mutateAsync).toHaveBeenCalledTimes(2);
-    expect(toast).toHaveBeenCalledWith("模型定价已是最新（无变更）");
+    expect(toast).toHaveBeenCalledWith("定价已是最新，无变更");
 
-    fireEvent.click(screen.getByRole("button", { name: "sync-model-prices-force" }));
+    fireEvent.click(screen.getByRole("button", { name: "sync-model-prices" }));
     await act(async () => {
       await Promise.resolve();
     });
-    expect(syncMutation.mutateAsync).toHaveBeenCalledWith({ force: true });
-    expect(toast).toHaveBeenCalledWith("同步完成：新增 1，更新 2，跳过 3");
+    expect(syncMutation.mutateAsync).toHaveBeenCalledWith();
+    expect(toast).toHaveBeenCalledWith("定价同步完成：新增 1 · 更新 2 · 共 6 条");
 
-    fireEvent.click(screen.getByRole("button", { name: "sync-model-prices-force" }));
+    fireEvent.click(screen.getByRole("button", { name: "sync-model-prices" }));
     await act(async () => {
       await Promise.resolve();
     });
@@ -602,7 +599,7 @@ describe("pages/settings/SettingsSidebar", () => {
       isPending: false,
       mutateAsync: vi.fn(() => syncPromise),
     };
-    vi.mocked(useModelPricesSyncBasellmMutation).mockReturnValue(syncMutation as any);
+    vi.mocked(useModelPricesSyncMutation).mockReturnValue(syncMutation as any);
 
     let resolveImport: (result: any) => void = () => {
       throw new Error("resolveImport not set");
@@ -710,6 +707,7 @@ describe("pages/settings/SettingsSidebar", () => {
       skill_repos_imported: 6,
       installed_skills_imported: 7,
       local_skills_imported: 8,
+      warnings: [],
     });
 
     renderWithProviders(<SettingsSidebar updateMeta={createUpdateMeta()} />);

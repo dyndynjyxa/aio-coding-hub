@@ -57,9 +57,7 @@ pub(crate) async fn exchange_authorization_code(
 
         let body = build_anthropic_exchange_json(req);
 
-        client
-            .post(&req.token_uri)
-            .json(&body)
+        anthropic_token_request(client, &req.token_uri, &body)
             .send()
             .await
             .map_err(|e| format!("token exchange request failed: {e}"))?
@@ -78,15 +76,37 @@ pub(crate) async fn exchange_authorization_code(
             form.push(("client_secret", &secret_ref));
         }
 
-        client
-            .post(&req.token_uri)
-            .form(&form)
+        // grok-build attaches x-grok-client-version on authorization_code exchange.
+        let mut request = client.post(&req.token_uri).form(&form);
+        if is_xai_oauth_token_uri(&req.token_uri) {
+            let version = crate::gateway::oauth::adapters::grok::grok_client_version();
+            request = request.header("x-grok-client-version", version);
+        }
+
+        request
             .send()
             .await
             .map_err(|e| format!("token exchange request failed: {e}"))?
     };
 
     parse_token_response(resp).await
+}
+
+/// Anthropic token requests must carry the axios UA used by official Claude Code;
+/// the shared OAuth client default (codex UA) is a fingerprint mismatch here.
+/// Request-level headers override the client-level default UA.
+fn anthropic_token_request(
+    client: &reqwest::Client,
+    token_uri: &str,
+    body: &serde_json::Value,
+) -> reqwest::RequestBuilder {
+    client
+        .post(token_uri)
+        .header(
+            reqwest::header::USER_AGENT,
+            crate::gateway::upstream_identity::CLAUDE_OAUTH_TOKEN_USER_AGENT,
+        )
+        .json(body)
 }
 
 fn build_anthropic_exchange_json(req: &TokenExchangeRequest) -> serde_json::Value {
@@ -125,9 +145,7 @@ pub(crate) async fn refresh_access_token(
     let resp = if is_anthropic {
         let body = build_anthropic_refresh_json(req);
 
-        client
-            .post(&req.token_uri)
-            .json(&body)
+        anthropic_token_request(client, &req.token_uri, &body)
             .send()
             .await
             .map_err(|e| format!("token refresh request failed: {e}"))?
@@ -175,6 +193,11 @@ fn is_anthropic_oauth_token_uri(token_uri: &str) -> bool {
         || uri.contains("platform.claude.com/v1/oauth/token")
         || (uri.contains("/v1/oauth/token")
             && (uri.contains("anthropic.com") || uri.contains("claude.com")))
+}
+
+fn is_xai_oauth_token_uri(token_uri: &str) -> bool {
+    let uri = token_uri.trim().to_ascii_lowercase();
+    uri.contains("auth.x.ai/oauth2/token") || uri.contains("://auth.x.ai/")
 }
 
 async fn parse_token_response(resp: reqwest::Response) -> Result<OAuthTokenSet, String> {
@@ -263,4 +286,71 @@ async fn parse_token_response(resp: reqwest::Response) -> Result<OAuthTokenSet, 
         expires_at,
         id_token,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn anthropic_token_request_overrides_ua_with_axios_identity() {
+        let client = reqwest::Client::builder()
+            .user_agent(crate::gateway::oauth::DEFAULT_OAUTH_USER_AGENT)
+            .build()
+            .expect("build client");
+        let body = serde_json::json!({"grant_type": "refresh_token"});
+
+        let request =
+            anthropic_token_request(&client, "https://platform.claude.com/v1/oauth/token", &body)
+                .build()
+                .expect("build request");
+
+        assert_eq!(
+            request
+                .headers()
+                .get(reqwest::header::USER_AGENT)
+                .and_then(|v| v.to_str().ok()),
+            Some(crate::gateway::upstream_identity::CLAUDE_OAUTH_TOKEN_USER_AGENT)
+        );
+        assert_eq!(
+            request
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok()),
+            Some("application/json")
+        );
+    }
+
+    #[test]
+    fn anthropic_exchange_json_includes_state_and_verifier() {
+        let req = TokenExchangeRequest {
+            token_uri: "https://platform.claude.com/v1/oauth/token".to_string(),
+            client_id: "client".to_string(),
+            client_secret: None,
+            code: "auth-code".to_string(),
+            redirect_uri: "http://localhost:54545/callback".to_string(),
+            code_verifier: "verifier".to_string(),
+            state: Some("state-value".to_string()),
+        };
+
+        let body = build_anthropic_exchange_json(&req);
+
+        assert_eq!(body["grant_type"], "authorization_code");
+        assert_eq!(body["state"], "state-value");
+        assert_eq!(body["code_verifier"], "verifier");
+        assert!(body.get("client_secret").is_none());
+    }
+
+    #[test]
+    fn anthropic_token_uri_detection_covers_claude_and_anthropic_hosts() {
+        assert!(is_anthropic_oauth_token_uri(
+            "https://platform.claude.com/v1/oauth/token"
+        ));
+        assert!(is_anthropic_oauth_token_uri(
+            "https://api.anthropic.com/v1/oauth/token"
+        ));
+        assert!(!is_anthropic_oauth_token_uri(
+            "https://auth.openai.com/oauth/token"
+        ));
+    }
 }

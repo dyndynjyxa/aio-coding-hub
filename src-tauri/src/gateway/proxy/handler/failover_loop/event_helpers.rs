@@ -30,6 +30,7 @@ pub(super) async fn emit_attempt_event_and_log<R: tauri::Runtime>(
         provider_index: _,
         session_reuse,
         claude_model_mapping,
+        model_redirect,
         ..
     } = provider_ctx;
     let AttemptCtx {
@@ -63,6 +64,7 @@ pub(super) async fn emit_attempt_event_and_log<R: tauri::Runtime>(
         circuit_failure_count: circuit.failure_count,
         circuit_failure_threshold: circuit.failure_threshold,
         claude_model_mapping: claude_model_mapping.cloned(),
+        model_redirect: model_redirect.cloned(),
     };
 
     let state = ctx.state;

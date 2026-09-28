@@ -1,5 +1,5 @@
 import { logToConsole } from "../consoleLog";
-import { modelPricesSyncBasellm, setLastModelPricesSync } from "../usage/modelPrices";
+import { modelPricesSync, setLastModelPricesSync } from "../usage/modelPrices";
 import { promptsDefaultSyncFromFiles } from "../workspace/prompts";
 
 let modelPricesSyncPromise: Promise<void> | null = null;
@@ -10,14 +10,15 @@ export function startupSyncModelPricesOnce(): Promise<void> {
 
   modelPricesSyncPromise = (async () => {
     try {
-      const report = await modelPricesSyncBasellm(false);
+      const report = await modelPricesSync();
       setLastModelPricesSync(report);
       logToConsole("info", "启动同步：模型定价同步完成", {
         status: report.status,
         inserted: report.inserted,
         updated: report.updated,
-        skipped: report.skipped,
+        unchanged: report.unchanged,
         total: report.total,
+        error: report.error,
       });
     } catch (err) {
       logToConsole("error", "启动同步：模型定价同步失败", { error: String(err) });

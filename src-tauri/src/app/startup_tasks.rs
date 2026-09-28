@@ -58,6 +58,10 @@ async fn run(app_handle: tauri::AppHandle) {
 
     crate::request_logs::spawn_retention_task(app_handle.clone(), db.clone());
 
+    // Non-fatal: grant asset protocol access to image gen storage dirs so
+    // persisted images render after restart.
+    crate::app::image_gen_service::allow_startup_asset_scope(&app_handle, &db).await;
+
     set_startup_stage(&app_handle, AppStartupStage::ReadingSettings);
     let settings = match crate::app::startup_settings::read(&app_handle).await {
         Ok(settings) => settings,
@@ -80,7 +84,8 @@ async fn run(app_handle: tauri::AppHandle) {
     };
 
     set_startup_stage(&app_handle, AppStartupStage::SyncingCliProxy);
-    crate::app::startup_gateway::sync_cli_proxy_after_autostart(&app_handle, &status).await;
+    crate::app::startup_gateway::sync_cli_proxy_after_autostart(&app_handle, db.clone(), &status)
+        .await;
 
     set_startup_stage(&app_handle, AppStartupStage::FinalizingWsl);
     crate::app::startup_wsl::finalize(&app_handle, db, status.port, settings).await;

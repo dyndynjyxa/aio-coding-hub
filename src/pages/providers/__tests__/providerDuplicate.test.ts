@@ -88,6 +88,14 @@ describe("pages/providers/providerDuplicate", () => {
     expect(duplicated.claude_models).not.toBe(provider.claude_models);
   });
 
+  it("retains the Codex WebSocket capability in duplicate initial values", () => {
+    const provider = createProvider({ cli_key: "codex", supports_websockets: true });
+    expect(buildDuplicatedProviderInitialValues(provider, [], null).supports_websockets).toBe(true);
+    expect(
+      buildDuplicatedProviderInitialValues(createProvider(), [], null).supports_websockets
+    ).toBe(false);
+  });
+
   it("clears api key for bridge or oauth providers and falls back optional values safely", () => {
     const bridgeProvider = createProvider({
       name: "Bridge",

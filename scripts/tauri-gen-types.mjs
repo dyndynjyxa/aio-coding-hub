@@ -24,26 +24,22 @@ function run() {
     userArgs.shift();
   }
 
-  const child = spawn(
-    "cargo",
-    ["run", "--locked", "--example", "export-bindings", ...userArgs],
-    {
-      cwd: tauriRoot,
-      stdio: "inherit",
-      shell: false,
-      env: {
-        ...process.env,
-        PATH: sanitizeWindowsPath(process.env.PATH),
-        CARGO_TARGET_DIR: process.env.CARGO_TARGET_DIR || defaultTargetDir,
-        ...(process.platform === "win32" && !process.env.CARGO_BUILD_JOBS
-          ? { CARGO_BUILD_JOBS: "1" }
-          : {}),
-        ...(process.platform === "win32" && !process.env.CARGO_INCREMENTAL
-          ? { CARGO_INCREMENTAL: "0" }
-          : {}),
-      },
-    }
-  );
+  const child = spawn("cargo", ["run", "--locked", "--example", "export-bindings", ...userArgs], {
+    cwd: tauriRoot,
+    stdio: "inherit",
+    shell: false,
+    env: {
+      ...process.env,
+      PATH: sanitizeWindowsPath(process.env.PATH),
+      CARGO_TARGET_DIR: process.env.CARGO_TARGET_DIR || defaultTargetDir,
+      ...(process.platform === "win32" && !process.env.CARGO_BUILD_JOBS
+        ? { CARGO_BUILD_JOBS: "1" }
+        : {}),
+      ...(process.platform === "win32" && !process.env.CARGO_INCREMENTAL
+        ? { CARGO_INCREMENTAL: "0" }
+        : {}),
+    },
+  });
 
   child.on("exit", (code, signal) => {
     if (signal) {

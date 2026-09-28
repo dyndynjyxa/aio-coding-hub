@@ -1,10 +1,17 @@
 //! Usage: Native playback for the bundled notification sound.
 
+#[cfg(not(target_os = "macos"))]
 use std::io::Cursor;
 use std::thread;
 
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "macos")]
+use macos::play_embedded_sound_blocking;
+
 const DING_MP3_BYTES: &[u8] = include_bytes!("../../../public/ding.mp3");
 
+#[cfg(not(target_os = "macos"))]
 fn play_embedded_sound_blocking() -> Result<(), String> {
     let stream = rodio::OutputStreamBuilder::open_default_stream()
         .map_err(|error| format!("NOTIFICATION_SOUND_OUTPUT_UNAVAILABLE: {error}"))?;

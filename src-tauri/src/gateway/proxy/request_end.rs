@@ -4,7 +4,9 @@ use super::logging::enqueue_request_log_with_backpressure_and_plugins;
 use super::status_override;
 use super::{spawn_enqueue_request_log_with_backpressure, RequestLogEnqueueArgs};
 use crate::gateway::active_requests::{ActiveRequestFinishReason, ActiveRequestRegistry};
-use crate::gateway::events::{emit_request_event, ClaudeModelMapping, FailoverAttempt};
+use crate::gateway::events::{
+    emit_request_event, ClaudeModelMapping, FailoverAttempt, ModelRedirect,
+};
 use crate::gateway::plugins::pipeline::GatewayPluginPipeline;
 use crate::{db, request_logs};
 use serde_json::Value;
@@ -258,6 +260,11 @@ fn bounded_log_attempt(mut attempt: FailoverAttempt) -> FailoverAttempt {
     attempt.base_url = truncate_chars(attempt.base_url, REQUEST_END_LOG_URL_MAX_CHARS);
     attempt.outcome = truncate_chars(attempt.outcome, REQUEST_END_LOG_SHORT_TEXT_MAX_CHARS);
     attempt.reason = truncate_optional_text(attempt.reason, REQUEST_END_LOG_REASON_MAX_CHARS);
+    // Client-controlled free text (from the request body's reasoning.effort).
+    attempt.reasoning_effort = truncate_optional_text(
+        attempt.reasoning_effort,
+        REQUEST_END_LOG_SHORT_TEXT_MAX_CHARS,
+    );
     attempt
 }
 
@@ -317,84 +324,34 @@ fn non_empty_text(value: &str) -> Option<&str> {
     (!trimmed.is_empty()).then_some(trimmed)
 }
 
-fn parse_claude_model_mapping_setting(value: &Value) -> Option<ClaudeModelMapping> {
-    let obj = value.as_object()?;
-    if obj.get("type").and_then(Value::as_str) != Some("claude_model_mapping") {
-        return None;
+/// Picks the mapping/redirect of the attempt that answered: the last success
+/// attempt's value, else the last attempt carrying one. Values come from the
+/// in-memory attempts (recorded at prepare time), not from re-parsing JSON.
+fn select_from_attempts<T: Clone>(
+    attempts: &[FailoverAttempt],
+    value: impl Fn(&FailoverAttempt) -> Option<&T>,
+) -> Option<T> {
+    // When the request succeeded, only the successful attempt's value counts:
+    // falling back to earlier (failed) attempts would attribute another
+    // provider's mapping/redirect to the success and disagree with costing,
+    // which scopes strictly to the final provider.
+    match attempts.iter().rev().find(|a| a.outcome == "success") {
+        Some(success) => value(success).cloned(),
+        None => attempts.iter().rev().find_map(&value).cloned(),
     }
+}
 
-    let requested_model = obj
-        .get("requestedModel")
-        .and_then(Value::as_str)
-        .and_then(non_empty_text)?;
-    let effective_model = obj
-        .get("effectiveModel")
-        .and_then(Value::as_str)
-        .and_then(non_empty_text)?;
-    let mapping_kind = obj
-        .get("mappingKind")
-        .and_then(Value::as_str)
-        .and_then(non_empty_text)?;
-    let provider_name = obj
-        .get("providerName")
-        .and_then(Value::as_str)
-        .and_then(non_empty_text)?;
-    let provider_id = obj.get("providerId").and_then(Value::as_i64)?;
-    let applied = obj.get("applied").and_then(Value::as_bool).unwrap_or(false);
-
-    Some(ClaudeModelMapping {
-        requested_model: requested_model.to_string(),
-        effective_model: effective_model.to_string(),
-        mapping_kind: mapping_kind.to_string(),
-        provider_id,
-        provider_name: provider_name.to_string(),
-        applied,
+fn select_claude_model_mapping(attempts: &[FailoverAttempt]) -> Option<ClaudeModelMapping> {
+    select_from_attempts(attempts, |attempt| {
+        attempt
+            .claude_model_mapping
+            .as_ref()
+            .filter(|mapping| mapping.applied && mapping.requested_model != mapping.effective_model)
     })
 }
 
-fn select_claude_model_mapping(
-    special_settings_json: Option<&str>,
-    attempts: &[FailoverAttempt],
-) -> Option<ClaudeModelMapping> {
-    let raw = special_settings_json?.trim();
-    if raw.is_empty() {
-        return None;
-    }
-
-    let parsed: Value = serde_json::from_str(raw).ok()?;
-    let mut mappings: Vec<ClaudeModelMapping> = match &parsed {
-        Value::Array(items) => items
-            .iter()
-            .filter_map(parse_claude_model_mapping_setting)
-            .collect(),
-        Value::Object(_) => parse_claude_model_mapping_setting(&parsed)
-            .into_iter()
-            .collect(),
-        _ => Vec::new(),
-    };
-
-    mappings
-        .retain(|mapping| mapping.applied && mapping.requested_model != mapping.effective_model);
-    if mappings.is_empty() {
-        return None;
-    }
-
-    if let Some(success_provider_id) = attempts
-        .iter()
-        .rev()
-        .find(|attempt| attempt.outcome == "success")
-        .map(|attempt| attempt.provider_id)
-    {
-        if let Some(mapping) = mappings
-            .iter()
-            .rev()
-            .find(|mapping| mapping.provider_id == success_provider_id)
-        {
-            return Some(mapping.clone());
-        }
-    }
-
-    mappings.pop()
+fn select_model_redirect(attempts: &[FailoverAttempt]) -> Option<ModelRedirect> {
+    select_from_attempts(attempts, |attempt| attempt.model_redirect.as_ref())
 }
 
 fn select_error_observation_attempt(attempts: &[FailoverAttempt]) -> Option<&FailoverAttempt> {
@@ -752,8 +709,8 @@ impl RequestLogEnqueueArgs {
         attempts: Vec<FailoverAttempt>,
         usage_metrics: Option<crate::usage::UsageMetrics>,
     ) {
-        let claude_model_mapping =
-            select_claude_model_mapping(self.special_settings_json.as_deref(), &attempts);
+        let claude_model_mapping = select_claude_model_mapping(&attempts);
+        let model_redirect = select_model_redirect(&attempts);
         emit_request_event(
             app,
             self.trace_id.clone(),
@@ -770,7 +727,15 @@ impl RequestLogEnqueueArgs {
             event_ttfb_ms,
             attempts,
             claude_model_mapping,
+            model_redirect,
             usage_metrics,
+            self.activity_details_json.as_deref().and_then(|raw| {
+                serde_json::from_str::<serde_json::Value>(raw)
+                    .ok()?
+                    .get("terminal_signal")?
+                    .as_str()
+                    .map(str::to_owned)
+            }),
         );
     }
 }
@@ -955,6 +920,10 @@ mod tests {
             circuit_trigger_error_code: None,
             provider_bridged: Some(false),
             timeout_secs: None,
+            reasoning_effort: None,
+            upstream_sent: false,
+            claude_model_mapping: None,
+            model_redirect: None,
         }
     }
 
@@ -988,6 +957,10 @@ mod tests {
             circuit_trigger_error_code: None,
             provider_bridged: Some(false),
             timeout_secs: Some(1),
+            reasoning_effort: None,
+            upstream_sent: true,
+            claude_model_mapping: None,
+            model_redirect: None,
         }
     }
 
@@ -1083,6 +1056,65 @@ mod tests {
         assert_eq!(log_args.attempts_json, expected_attempts_json);
         assert_eq!(cloned_attempts.len(), 1);
         assert_eq!(cloned_attempts[0].provider_id, 7);
+    }
+
+    #[test]
+    fn codex_system_marker_survives_terminal_logs_without_excluding_stats() {
+        let marker = json!([{
+            "type": "codex_system_request",
+            "threadSource": "system"
+        }])
+        .to_string();
+
+        let (proxy_log, _) = RequestLogEnqueueArgs::from_proxy_request_end_parts(
+            "trace-system-proxy",
+            "codex",
+            None,
+            "POST",
+            "/v1/responses",
+            None,
+            false,
+            Some(marker.clone()),
+            Some(200),
+            None,
+            345,
+            Some(12),
+            &[],
+            Some("gpt-5.4-mini".to_string()),
+            100,
+            200,
+            None,
+            None,
+        );
+        let (stream_log, _) = RequestLogEnqueueArgs::from_stream_request_end_parts(
+            "trace-system-stream".to_string(),
+            "codex".to_string(),
+            None,
+            "POST".to_string(),
+            "/v1/responses".to_string(),
+            None,
+            false,
+            Some(marker.clone()),
+            200,
+            None,
+            345,
+            Some(12),
+            vec![],
+            "[]".to_string(),
+            Some("gpt-5.4-mini".to_string()),
+            100,
+            None,
+            None,
+            200,
+            None,
+        );
+
+        for log in [proxy_log, stream_log] {
+            assert!(!log.excluded_from_stats);
+            assert_eq!(log.special_settings_json.as_deref(), Some(marker.as_str()));
+            assert_eq!(log.status, Some(200));
+            assert_eq!(log.requested_model.as_deref(), Some("gpt-5.4-mini"));
+        }
     }
 
     #[test]
@@ -1413,93 +1445,115 @@ mod tests {
         assert_eq!(cloned_attempts[0].provider_id, 7);
     }
 
+    fn mapping_fixture(
+        provider_id: i64,
+        effective_model: &str,
+        applied: bool,
+    ) -> ClaudeModelMapping {
+        ClaudeModelMapping {
+            requested_model: "claude-sonnet".to_string(),
+            effective_model: effective_model.to_string(),
+            mapping_kind: "sonnet".to_string(),
+            provider_id,
+            provider_name: format!("Provider {provider_id}"),
+            applied,
+        }
+    }
+
     #[test]
-    fn select_claude_model_mapping_prefers_success_provider() {
+    fn select_claude_model_mapping_prefers_success_attempt() {
         let mut failed_attempt = sample_attempt();
         failed_attempt.provider_id = 1;
         failed_attempt.outcome = "failed".to_string();
         failed_attempt.status = Some(500);
+        failed_attempt.claude_model_mapping = Some(mapping_fixture(1, "gpt-4.1", true));
 
         let mut success_attempt = sample_attempt();
         success_attempt.provider_id = 2;
         success_attempt.provider_name = "Provider B".to_string();
+        success_attempt.claude_model_mapping = Some(mapping_fixture(2, "gpt-5.4", true));
 
-        let special_settings_json = json!([
-            {
-                "type": "claude_model_mapping",
-                "scope": "attempt",
-                "applied": true,
-                "providerId": 1,
-                "providerName": "Provider A",
-                "requestedModel": "claude-sonnet",
-                "effectiveModel": "gpt-4.1",
-                "mappingKind": "sonnet"
-            },
-            {
-                "type": "claude_model_mapping",
-                "scope": "attempt",
-                "applied": true,
-                "providerId": 2,
-                "providerName": "Provider B",
-                "requestedModel": "claude-sonnet",
-                "effectiveModel": "gpt-5.4",
-                "mappingKind": "sonnet"
-            }
-        ])
-        .to_string();
-
-        let mapping = select_claude_model_mapping(
-            Some(special_settings_json.as_str()),
-            &[failed_attempt, success_attempt],
-        )
-        .expect("selected mapping");
+        let mapping = select_claude_model_mapping(&[failed_attempt, success_attempt])
+            .expect("selected mapping");
 
         assert_eq!(mapping.provider_id, 2);
         assert_eq!(mapping.effective_model, "gpt-5.4");
     }
 
     #[test]
-    fn select_claude_model_mapping_ignores_unapplied_or_identity_mapping() {
-        let special_settings_json = json!([
-            {
-                "type": "claude_model_mapping",
-                "scope": "attempt",
-                "applied": false,
-                "providerId": 1,
-                "providerName": "Provider A",
-                "requestedModel": "claude-sonnet",
-                "effectiveModel": "gpt-5.4",
-                "mappingKind": "sonnet"
-            },
-            {
-                "type": "claude_model_mapping",
-                "scope": "attempt",
-                "applied": true,
-                "providerId": 2,
-                "providerName": "Provider B",
-                "requestedModel": "claude-sonnet",
-                "effectiveModel": "claude-sonnet",
-                "mappingKind": "sonnet"
-            }
-        ])
-        .to_string();
+    fn select_model_redirect_prefers_success_attempt_then_last_redirect() {
+        let redirect_fixture = |provider_id: i64, target: &str| ModelRedirect {
+            stage: "provider".to_string(),
+            provider_id,
+            provider_name: format!("Provider {provider_id}"),
+            source_model: "gpt-original".to_string(),
+            target_model: target.to_string(),
+        };
 
-        assert!(select_claude_model_mapping(Some(special_settings_json.as_str()), &[]).is_none());
+        let mut failed_attempt = sample_attempt();
+        failed_attempt.provider_id = 1;
+        failed_attempt.outcome = "failed".to_string();
+        failed_attempt.status = Some(500);
+        failed_attempt.model_redirect = Some(redirect_fixture(1, "model-a"));
+
+        let mut success_attempt = sample_attempt();
+        success_attempt.provider_id = 2;
+        success_attempt.provider_name = "Provider B".to_string();
+        success_attempt.model_redirect = Some(redirect_fixture(2, "model-b"));
+
+        let redirect = select_model_redirect(&[failed_attempt.clone(), success_attempt])
+            .expect("selected redirect");
+        assert_eq!(redirect.provider_id, 2);
+        assert_eq!(redirect.target_model, "model-b");
+
+        // A success attempt without a redirect must NOT inherit a failed
+        // provider's redirect — the request actually went out unmapped.
+        let mut plain_success = sample_attempt();
+        plain_success.provider_id = 2;
+        plain_success.model_redirect = None;
+        assert!(select_model_redirect(&[failed_attempt.clone(), plain_success]).is_none());
+
+        // Without a success attempt the last redirect wins.
+        let redirect =
+            select_model_redirect(&[failed_attempt]).expect("selected redirect from failure");
+        assert_eq!(redirect.provider_id, 1);
+        assert_eq!(redirect.target_model, "model-a");
+    }
+
+    #[test]
+    fn select_claude_model_mapping_ignores_unapplied_or_identity_mapping() {
+        let mut unapplied = sample_attempt();
+        unapplied.provider_id = 1;
+        unapplied.outcome = "failed".to_string();
+        unapplied.claude_model_mapping = Some(mapping_fixture(1, "gpt-5.4", false));
+
+        let mut identity = sample_attempt();
+        identity.provider_id = 2;
+        identity.claude_model_mapping = Some(mapping_fixture(2, "claude-sonnet", true));
+
+        assert!(select_claude_model_mapping(&[unapplied, identity]).is_none());
     }
 
     #[test]
     fn should_not_observe_non_messages_claude_request_end() {
         assert!(!super::super::should_observe_request(
             "claude",
+            &axum::http::Method::POST,
             "/v1/messages/count_tokens"
         ));
-        assert!(!super::super::should_observe_request("claude", "/v1/other"));
+        assert!(!super::super::should_observe_request(
+            "claude",
+            &axum::http::Method::POST,
+            "/v1/other"
+        ));
         assert!(super::super::should_observe_request(
             "claude",
+            &axum::http::Method::POST,
             "/v1/messages"
         ));
         assert!(super::super::should_observe_request(
             "codex",
+            &axum::http::Method::POST,
             "/v1/messages/count_tokens"
         ));
     }

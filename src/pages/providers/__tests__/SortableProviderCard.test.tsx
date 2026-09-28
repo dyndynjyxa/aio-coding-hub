@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { tauriOpenUrl } from "../../../test/mocks/tauri";
 import { SortableProviderCard, type SortableProviderCardProps } from "../SortableProviderCard";
@@ -70,9 +70,12 @@ function makeProvider(partial: Partial<ProviderSummary> = {}): ProviderSummary {
     oauth_last_error: null,
     source_provider_id: null,
     bridge_type: null,
+    model_policy_status: "ready",
+    model_policy: { version: 1, mode: "all", modelPatterns: [], mappings: [] },
     api_key_configured: partial.api_key_configured ?? false,
     ...partial,
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,
+    supports_websockets: partial.supports_websockets ?? false,
     extension_values: partial.extension_values ?? [],
     custom_headers: partial.custom_headers ?? [],
   };
@@ -101,6 +104,15 @@ function renderCard(
 describe("pages/providers/SortableProviderCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("shows an invalid policy badge only when the model policy failed to decode", () => {
+    renderCard({ model_policy_status: "invalid", model_policy: null });
+    expect(screen.getByText("策略无效")).toBeInTheDocument();
+
+    cleanup();
+    renderCard();
+    expect(screen.queryByText("策略无效")).not.toBeInTheDocument();
   });
 
   it("binds sortable listeners to the provider name drag handle", () => {
@@ -561,7 +573,7 @@ describe("pages/providers/SortableProviderCard", () => {
     expect(screen.getByText("解除熔断")).toBeInTheDocument();
   });
 
-  it("does not render circuit breaker controls for HALF_OPEN probe state", () => {
+  it("renders amber probe badge with reset control for HALF_OPEN state", () => {
     renderCard(
       {},
       {
@@ -574,7 +586,20 @@ describe("pages/providers/SortableProviderCard", () => {
       }
     );
 
-    expect(screen.queryByTitle("熔断")).not.toBeInTheDocument();
+    // 半开：琥珀“试探恢复中”，无倒计时；解除按钮可见（跳过试探直接恢复）。
+    const badge = screen.getByText("试探恢复中");
+    expect(badge.className).toContain("amber");
+    expect(badge).not.toHaveTextContent(/\d{2}:\d{2}/);
+    expect(screen.queryByText(/^熔断/)).not.toBeInTheDocument();
+    expect(screen.getByText("解除熔断")).toBeInTheDocument();
+  });
+
+  it("does not render a circuit badge when circuit is null", () => {
+    renderCard();
+
+    expect(screen.queryByText(/^熔断/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^冷却中/)).not.toBeInTheDocument();
+    expect(screen.queryByText("试探恢复中")).not.toBeInTheDocument();
     expect(screen.queryByText("解除熔断")).not.toBeInTheDocument();
   });
 
@@ -595,9 +620,10 @@ describe("pages/providers/SortableProviderCard", () => {
     // The title should contain the formatted timestamp
     const badge = screen.getByTitle(/熔断至/);
     expect(badge).toBeInTheDocument();
+    expect(badge).toHaveTextContent(/^熔断/);
   });
 
-  it("computes unavailableUntil from cooldown_until when not OPEN", () => {
+  it("renders cooldown badge instead of 熔断 when not OPEN", () => {
     const futureTs = Math.floor(Date.now() / 1000) + 600;
     renderCard(
       {},
@@ -611,8 +637,11 @@ describe("pages/providers/SortableProviderCard", () => {
       }
     );
 
-    const badge = screen.getByTitle(/熔断至/);
-    expect(badge).toBeInTheDocument();
+    // 冷却正名：显示“冷却中”而非“熔断”，且解除按钮可见。
+    const badge = screen.getByTitle(/冷却至/);
+    expect(badge).toHaveTextContent(/^冷却中/);
+    expect(screen.queryByText(/^熔断/)).not.toBeInTheDocument();
+    expect(screen.getByText("解除熔断")).toBeInTheDocument();
   });
 
   it("shows terminal launch button when callback provided", () => {

@@ -27,16 +27,17 @@ pub(crate) fn app_gateway_circuit_reset_cli(
     })
 }
 
-pub(crate) fn app_start_gateway(
-    app: &tauri::AppHandle,
+pub(crate) fn app_start_gateway<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     db: db::Db,
     preferred_port: Option<u16>,
-) -> AppResult<gateway::GatewayStatus> {
+) -> AppResult<gateway::GatewayStatus>
+where
+    R::Handle: Unpin,
+{
     super::gateway_state::with_app_running_gateway_slot_mut(app, |running| {
         let cfg = settings::read(app)?;
-        let requested_port = preferred_port
-            .filter(|port| *port > 0)
-            .unwrap_or(cfg.preferred_port.max(settings::DEFAULT_GATEWAY_PORT));
+        let requested_port = gateway::control_service::requested_port(&cfg, preferred_port);
         let start_result = gateway::control_service::GatewayControlService::start(
             running,
             app,
@@ -60,12 +61,15 @@ pub(crate) fn app_start_gateway(
     })
 }
 
-pub(crate) fn app_start_gateway_with_config(
-    app: &tauri::AppHandle,
+pub(crate) fn app_start_gateway_with_config<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     db: db::Db,
     cfg: &settings::AppSettings,
     preferred_port: Option<u16>,
-) -> AppResult<gateway::control_service::GatewayStartResult> {
+) -> AppResult<gateway::control_service::GatewayStartResult>
+where
+    R::Handle: Unpin,
+{
     super::gateway_state::with_app_running_gateway_slot_mut(app, |running| {
         gateway::control_service::GatewayControlService::start(
             running,
@@ -77,11 +81,14 @@ pub(crate) fn app_start_gateway_with_config(
     })
 }
 
-pub(crate) fn app_ensure_gateway_running(
-    app: &tauri::AppHandle,
+pub(crate) fn app_ensure_gateway_running<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     db: db::Db,
     preferred_port: Option<u16>,
-) -> AppResult<gateway::GatewayStatus> {
+) -> AppResult<gateway::GatewayStatus>
+where
+    R::Handle: Unpin,
+{
     let status = super::gateway_runtime_access::app_gateway_status(app);
     if status.running {
         Ok(status)
@@ -127,4 +134,16 @@ pub(crate) fn app_take_running_gateway<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> Option<crate::gateway::runtime::GatewayRuntimeHandles> {
     super::gateway_state::take_app_running_gateway(app)
+}
+
+pub(crate) fn try_app_gateway_set_responses_websocket_enabled<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    enabled: bool,
+) -> bool {
+    super::gateway_state::try_with_app_running_gateway(app, |running| {
+        if let Some(runtime) = running {
+            runtime.set_responses_websocket_enabled(enabled);
+        }
+    })
+    .is_some()
 }

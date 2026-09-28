@@ -5,6 +5,8 @@ import type {
   ProviderOAuthDeviceCodeStartResult,
   ProviderOAuthStatusResult,
   ProviderExtensionValuesInput,
+  ProviderModelPolicyV1,
+  ProviderModelPolicyStatus,
   ProviderUpsertInput,
   ProviderSummary,
 } from "../../services/providers/providers";
@@ -18,7 +20,7 @@ export type ProviderActionContext = {
   editingProviderId: number | null;
   editProvider: ProviderSummary | null;
   open: boolean;
-  onOpenChange: (open: boolean) => void;
+  onOpenChange: (open: boolean, options?: { bypassDirty?: boolean }) => void;
   onSaved: (cliKey: CliKey) => void;
 };
 
@@ -31,6 +33,8 @@ export type AuthActionContext = {
   oauthStatus: OAuthStatusValue;
   setOauthStatus: (v: OAuthStatusValue) => void;
   refreshOauthStatus: (providerId?: number | null) => Promise<OAuthStatusValue>;
+  /** 将 OAuth 状态直接写入 React Query 缓存，保持编辑器快照与本地状态一致。 */
+  writeOauthStatusCache: (status: OAuthStatusValue, providerId?: number | null) => void;
   oauthLoading: boolean;
   setOauthLoading: (v: boolean) => void;
   oauthDeviceFlow: ProviderOAuthDeviceCodeStartResult | null;
@@ -57,6 +61,7 @@ export type FormActionContext = {
   claudeModels: ClaudeModels;
   streamIdleTimeoutSeconds: string;
   customHeaders: ProviderCustomHeader[];
+  supportsWebsockets: boolean;
   apiKeyConfigured: boolean;
   apiKeyValue: string;
   form: {
@@ -80,10 +85,13 @@ export type ProviderEditorPayloadContext = {
   claudeModels: ClaudeModels;
   streamIdleTimeoutSeconds: string;
   customHeaders: ProviderCustomHeader[];
+  supportsWebsockets: boolean;
   apiKeyConfigured: boolean;
   isCodexGatewaySource: boolean;
   sourceProviderId: number | null;
   selectedCx2ccSourceProvider: ProviderSummary | null;
+  modelPolicyStatus: ProviderModelPolicyStatus;
+  modelPolicy: ProviderModelPolicyV1 | null;
   formValues: ProviderEditorDialogFormInput;
   extensionValues?: ProviderExtensionValuesInput[] | null;
 };
@@ -124,6 +132,7 @@ export type OAuthActionContext = ProviderActionContext &
     | "oauthStatus"
     | "setOauthStatus"
     | "refreshOauthStatus"
+    | "writeOauthStatusCache"
     | "setOauthLoading"
     | "oauthDeviceFlow"
     | "setOauthDeviceFlow"

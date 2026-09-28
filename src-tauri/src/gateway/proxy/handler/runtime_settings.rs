@@ -10,8 +10,12 @@ pub(super) const DEFAULT_FAILOVER_MAX_PROVIDERS_TO_TRY: u32 = 5;
 pub(super) struct HandlerRuntimeSettings {
     pub(super) verbose_provider_error: bool,
     pub(super) intercept_warmup: bool,
+    pub(super) enable_thinking_effort_conflict_rectifier: bool,
     pub(super) enable_thinking_signature_rectifier: bool,
     pub(super) enable_thinking_budget_rectifier: bool,
+    pub(super) enable_gemini_function_id_rectifier: bool,
+    pub(super) enable_response_input_rectifier: bool,
+    pub(super) codex_priority_billing_source: settings::CodexPriorityBillingSource,
     pub(super) enable_billing_header_rectifier: bool,
     pub(super) cx2cc_settings: crate::gateway::proxy::cx2cc::settings::Cx2ccSettings,
     pub(super) enable_response_fixer: bool,
@@ -31,10 +35,16 @@ pub(super) struct HandlerRuntimeSettings {
 pub(super) fn handler_runtime_settings(
     settings_cfg: Option<&settings::AppSettings>,
     is_claude_count_tokens: bool,
+    is_codex_model_discovery: bool,
 ) -> HandlerRuntimeSettings {
     let verbose_provider_error = settings_cfg
         .map(|cfg| cfg.verbose_provider_error)
-        .unwrap_or(true);
+        .unwrap_or(false);
+
+    let enable_thinking_effort_conflict_rectifier = settings_cfg
+        .map(|cfg| cfg.enable_thinking_effort_conflict_rectifier)
+        .unwrap_or(true)
+        && !is_claude_count_tokens;
 
     let enable_thinking_signature_rectifier = settings_cfg
         .map(|cfg| cfg.enable_thinking_signature_rectifier)
@@ -45,6 +55,15 @@ pub(super) fn handler_runtime_settings(
         .map(|cfg| cfg.enable_thinking_budget_rectifier)
         .unwrap_or(true)
         && !is_claude_count_tokens;
+    let enable_gemini_function_id_rectifier = settings_cfg
+        .map(|cfg| cfg.enable_gemini_function_id_rectifier)
+        .unwrap_or(true);
+    let enable_response_input_rectifier = settings_cfg
+        .map(|cfg| cfg.enable_response_input_rectifier)
+        .unwrap_or(true);
+    let codex_priority_billing_source = settings_cfg
+        .map(|cfg| cfg.codex_priority_billing_source)
+        .unwrap_or_default();
     let enable_billing_header_rectifier = settings_cfg
         .map(|cfg| cfg.enable_billing_header_rectifier)
         .unwrap_or(true);
@@ -81,6 +100,8 @@ pub(super) fn handler_runtime_settings(
     if is_claude_count_tokens {
         max_attempts_per_provider = 1;
         max_providers_to_try = 1;
+    } else if is_codex_model_discovery {
+        max_attempts_per_provider = 1;
     }
 
     HandlerRuntimeSettings {
@@ -88,8 +109,12 @@ pub(super) fn handler_runtime_settings(
         intercept_warmup: settings_cfg
             .map(|cfg| cfg.intercept_anthropic_warmup_requests)
             .unwrap_or(false),
+        enable_thinking_effort_conflict_rectifier,
         enable_thinking_signature_rectifier,
         enable_thinking_budget_rectifier,
+        enable_gemini_function_id_rectifier,
+        enable_response_input_rectifier,
+        codex_priority_billing_source,
         enable_billing_header_rectifier,
         cx2cc_settings,
         enable_response_fixer,

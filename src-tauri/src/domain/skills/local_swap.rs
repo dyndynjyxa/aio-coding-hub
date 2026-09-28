@@ -3,9 +3,9 @@ use crate::shared::time::now_unix_seconds;
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
 
-use super::fs_ops::has_skill_md;
+use super::fs_ops::{has_skill_md, is_managed_link_to_ssot};
 use super::local::managed_marker_belongs_to_installed_skill;
-use super::paths::cli_skills_root;
+use super::paths::{cli_skills_root, ssot_skills_root};
 
 fn stash_bucket_name(workspace_id: Option<i64>) -> String {
     workspace_id
@@ -22,11 +22,17 @@ fn stash_root<R: tauri::Runtime>(
         .join(cli_key))
 }
 
-fn is_local_skill_dir(conn: &Connection, path: &Path) -> crate::shared::error::AppResult<bool> {
+fn is_local_skill_dir(
+    conn: &Connection,
+    path: &Path,
+    ssot_root: &Path,
+) -> crate::shared::error::AppResult<bool> {
     if !path.is_dir() {
         return Ok(false);
     }
-    if managed_marker_belongs_to_installed_skill(conn, path)? {
+    if managed_marker_belongs_to_installed_skill(conn, path)?
+        || is_managed_link_to_ssot(path, ssot_root)
+    {
         return Ok(false);
     }
     Ok(has_skill_md(path))
@@ -111,6 +117,7 @@ pub(crate) fn swap_local_skills_for_workspace_switch<R: tauri::Runtime>(
     to_workspace_id: i64,
 ) -> crate::shared::error::AppResult<LocalSkillsSwap> {
     let cli_root = cli_skills_root(app, cli_key)?;
+    let ssot_root = ssot_skills_root(app)?;
 
     let stash_root = stash_root(app, cli_key)?;
     let from_bucket = stash_root.join(stash_bucket_name(from_workspace_id));
@@ -131,7 +138,7 @@ pub(crate) fn swap_local_skills_for_workspace_switch<R: tauri::Runtime>(
             let entry = entry
                 .map_err(|e| format!("failed to read dir entry {}: {e}", cli_root.display()))?;
             let path = entry.path();
-            if !is_local_skill_dir(conn, &path)? {
+            if !is_local_skill_dir(conn, &path, &ssot_root)? {
                 continue;
             }
             let dir_name = path
@@ -155,7 +162,7 @@ pub(crate) fn swap_local_skills_for_workspace_switch<R: tauri::Runtime>(
             let entry = entry
                 .map_err(|e| format!("failed to read dir entry {}: {e}", to_bucket.display()))?;
             let path = entry.path();
-            if !is_local_skill_dir(conn, &path)? {
+            if !is_local_skill_dir(conn, &path, &ssot_root)? {
                 continue;
             }
             let dir_name = path

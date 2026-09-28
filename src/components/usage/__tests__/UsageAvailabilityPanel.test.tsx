@@ -50,6 +50,7 @@ function makeLog(
     activity_details_json: null,
     created_at: 0,
     ...overrides,
+    reasoning_effort: overrides.reasoning_effort ?? null,
   };
 }
 

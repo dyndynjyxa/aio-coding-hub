@@ -4,7 +4,7 @@
 
 import { useCallback, useId, useMemo, useState, type SetStateAction } from "react";
 import { toast } from "sonner";
-import { CLI_SHORT_ITEMS } from "../../constants/clis";
+import { cliShortItemsWith } from "../../constants/clis";
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
 import { Input } from "../../ui/Input";
@@ -20,8 +20,10 @@ import {
 import {
   useModelPriceAliasesQuery,
   useModelPriceAliasesSetMutation,
-  useModelPricesListQuery,
+  useModelPricesListAllQuery,
 } from "../../query/modelPrices";
+
+const PRICING_CLI_SHORT_ITEMS = cliShortItemsWith("pricing");
 
 const MATCH_TYPE_ITEMS: Array<{ key: ModelPriceAliasMatchType; label: string }> = [
   { key: "exact", label: "精确 (exact)" },
@@ -79,16 +81,80 @@ function modelsDatalistId(cliKey: CliKey) {
   return `model-price-aliases-models-${cliKey}`;
 }
 
+const VENDOR_LABELS: Record<string, string> = {
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  google: "Google",
+  xai: "xAI",
+  deepseek: "DeepSeek",
+  zai: "Z.AI",
+  moonshotai: "Moonshot",
+  minimax: "MiniMax",
+};
+
+function vendorLabel(key: string) {
+  return VENDOR_LABELS[key] ?? (key || "自定义");
+}
+
+type VendorModels = { key: string; models: string[] };
+
+function ModelPriceVendorTabs({ vendors }: { vendors: VendorModels[] }) {
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  if (vendors.length === 0) return null;
+  const active = vendors.find((vendor) => vendor.key === activeKey) ?? vendors[0]!;
+
+  return (
+    <div className="rounded-2xl border border-line-subtle bg-surface-inset p-3">
+      <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="已同步厂家">
+        {vendors.map((vendor) => {
+          const selected = vendor.key === active.key;
+          return (
+            <button
+              key={vendor.key}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              onClick={() => setActiveKey(vendor.key)}
+              className={cn(
+                "rounded-lg px-2.5 py-1 text-xs transition-colors",
+                selected
+                  ? "bg-surface-raised font-medium text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {vendorLabel(vendor.key)} {vendor.models.length}
+            </button>
+          );
+        })}
+      </div>
+      <div
+        className="mt-2 flex max-h-40 flex-wrap gap-1.5 overflow-y-auto"
+        role="tabpanel"
+        aria-label={`${vendorLabel(active.key)} 模型`}
+      >
+        {active.models.map((model) => (
+          <code
+            key={model}
+            className="rounded bg-surface-muted px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground"
+          >
+            {model}
+          </code>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ModelPriceAliasesToolbar({
   enabledRuleCount,
-  modelCountsByCli,
+  modelTotal,
   loading,
   saving,
   addRule,
   refresh,
 }: {
   enabledRuleCount: number;
-  modelCountsByCli: Record<CliKey, number>;
+  modelTotal: number;
   loading: boolean;
   saving: boolean;
   addRule: () => void;
@@ -101,10 +167,7 @@ function ModelPriceAliasesToolbar({
           启用 {enabledRuleCount} 条
         </span>
         <span className="text-muted-foreground">|</span>
-        <span>
-          模型数：Claude {modelCountsByCli.claude} · Codex {modelCountsByCli.codex} · Gemini{" "}
-          {modelCountsByCli.gemini}
-        </span>
+        <span>已同步 {modelTotal} 个模型</span>
       </div>
       <div className="flex items-center gap-2">
         <Button variant="secondary" size="sm" disabled={loading || saving} onClick={addRule}>
@@ -138,6 +201,13 @@ function ModelPriceAliasesDatalists({ modelsByCli }: { modelsByCli: Record<CliKe
       <datalist id={modelsDatalistId("gemini")}>
         {modelsByCli.gemini.map((m) => (
           <option key={`gemini:${m}`} value={m}>
+            {m}
+          </option>
+        ))}
+      </datalist>
+      <datalist id={modelsDatalistId("grok")}>
+        {modelsByCli.grok.map((m) => (
+          <option key={`grok:${m}`} value={m}>
             {m}
           </option>
         ))}
@@ -275,7 +345,7 @@ function ModelPriceAliasRuleCard({
             onChange={(e) => updateRule(index, { cli_key: e.currentTarget.value as CliKey })}
             disabled={saving}
           >
-            {CLI_SHORT_ITEMS.map((it) => (
+            {PRICING_CLI_SHORT_ITEMS.map((it) => (
               <option key={it.key} value={it.key}>
                 {it.label}
               </option>
@@ -456,44 +526,38 @@ export function ModelPriceAliasesDialog({
   }));
 
   const aliasesQuery = useModelPriceAliasesQuery({ enabled: open });
-  const claudeModelsQuery = useModelPricesListQuery("claude", { enabled: open });
-  const codexModelsQuery = useModelPricesListQuery("codex", { enabled: open });
-  const geminiModelsQuery = useModelPricesListQuery("gemini", { enabled: open });
+  const modelsQuery = useModelPricesListAllQuery({ enabled: open });
   const aliasesSetMutation = useModelPriceAliasesSetMutation();
 
   const saving = aliasesSetMutation.isPending;
-  const loading =
-    aliasesQuery.isFetching ||
-    claudeModelsQuery.isFetching ||
-    codexModelsQuery.isFetching ||
-    geminiModelsQuery.isFetching;
+  const loading = aliasesQuery.isFetching || modelsQuery.isFetching;
 
-  const modelsByCli = useMemo(
-    () => ({
-      claude: (claudeModelsQuery.data ?? []).map((row) => row.model),
-      codex: (codexModelsQuery.data ?? []).map((row) => row.model),
-      gemini: (geminiModelsQuery.data ?? []).map((row) => row.model),
-    }),
-    [claudeModelsQuery.data, codexModelsQuery.data, geminiModelsQuery.data]
-  );
+  const modelRows = useMemo(() => modelsQuery.data ?? [], [modelsQuery.data]);
 
-  const modelCountsByCli = useMemo(
-    () => ({
-      claude: modelsByCli.claude.length,
-      codex: modelsByCli.codex.length,
-      gemini: modelsByCli.gemini.length,
-    }),
-    [modelsByCli]
-  );
+  const modelsByCli = useMemo(() => {
+    const byCli: Record<CliKey, string[]> = { claude: [], codex: [], gemini: [], grok: [] };
+    for (const row of modelRows) {
+      byCli[row.cli_key].push(row.model);
+    }
+    return byCli;
+  }, [modelRows]);
+
+  const vendors = useMemo(() => {
+    const byVendor = new Map<string, Set<string>>();
+    for (const row of modelRows) {
+      const models = byVendor.get(row.vendor) ?? new Set<string>();
+      models.add(row.model);
+      byVendor.set(row.vendor, models);
+    }
+    return Array.from(byVendor, ([key, models]) => ({
+      key,
+      models: Array.from(models).sort(),
+    })).sort((a, b) => b.models.length - a.models.length);
+  }, [modelRows]);
 
   const refresh = useCallback(async () => {
-    await Promise.all([
-      aliasesQuery.refetch(),
-      claudeModelsQuery.refetch(),
-      codexModelsQuery.refetch(),
-      geminiModelsQuery.refetch(),
-    ]);
-  }, [aliasesQuery, claudeModelsQuery, codexModelsQuery, geminiModelsQuery]);
+    await Promise.all([aliasesQuery.refetch(), modelsQuery.refetch()]);
+  }, [aliasesQuery, modelsQuery]);
 
   const sourceAliases = open ? (aliasesQuery.data ?? null) : null;
   let effectiveAliasesState = aliasesState;
@@ -566,12 +630,14 @@ export function ModelPriceAliasesDialog({
       <div className="space-y-4">
         <ModelPriceAliasesToolbar
           enabledRuleCount={enabledRuleCount}
-          modelCountsByCli={modelCountsByCli}
+          modelTotal={modelRows.length}
           loading={loading}
           saving={saving}
           addRule={() => setAliases((prev) => ({ ...prev, rules: [...prev.rules, ruleRow()] }))}
           refresh={refresh}
         />
+
+        <ModelPriceVendorTabs vendors={vendors} />
 
         <ModelPriceAliasesDatalists modelsByCli={modelsByCli} />
 

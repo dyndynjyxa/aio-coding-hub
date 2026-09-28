@@ -14,8 +14,9 @@ import type { CliKey } from "../providers/providers";
 import { narrowGeneratedStringUnion, type Override } from "../generatedTypeUtils";
 import { AppErrorCodes } from "../../constants/appErrorCodes";
 import { FeValidationError } from "../../utils/errors";
+import { CLI_KEYS } from "../../constants/clis";
 
-const CLI_KEY_VALUES = ["claude", "codex", "gemini"] as const satisfies readonly CliKey[];
+const CLI_KEY_VALUES = CLI_KEYS;
 const DEFAULT_PROMPT_SYNC_ACTION_VALUES = [
   "created",
   "updated",

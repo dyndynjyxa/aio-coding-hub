@@ -563,6 +563,28 @@ mod tests {
         assert_eq!(settings.log_retention_days, DEFAULT_LOG_RETENTION_DAYS);
         assert!(settings.tray_enabled);
         assert!(!settings.auto_start);
+        assert_eq!(settings.grok_proxy_preferences, None);
+    }
+
+    #[test]
+    fn parse_settings_json_reads_grok_proxy_preferences() {
+        let json = r#"{
+            "grok_proxy_preferences": {
+                "model_id": "grok-4-fast",
+                "api_backend": "chat_completions"
+            }
+        }"#;
+
+        let (settings, _, _) = parse_settings_json(json).unwrap();
+
+        assert_eq!(
+            settings.grok_proxy_preferences,
+            Some(crate::grok_config::GrokProxyPreferences {
+                model_id: "grok-4-fast".to_string(),
+                api_backend: crate::grok_config::GrokApiBackend::ChatCompletions,
+                ..Default::default()
+            })
+        );
     }
 
     #[test]

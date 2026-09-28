@@ -52,6 +52,7 @@ function makeAttemptEvent(overrides: Partial<GatewayAttemptEvent> = {}): Gateway
     circuit_failure_threshold: null,
     claude_model_mapping: null,
     ...overrides,
+    model_redirect: overrides.model_redirect ?? null,
   };
 }
 
@@ -80,6 +81,8 @@ function makeRequestEvent(overrides: Partial<GatewayRequestEvent> = {}): Gateway
     effective_input_tokens: null,
     claude_model_mapping: null,
     ...overrides,
+    model_redirect: overrides.model_redirect ?? null,
+    reasoning_effort: overrides.reasoning_effort ?? null,
   };
 }
 

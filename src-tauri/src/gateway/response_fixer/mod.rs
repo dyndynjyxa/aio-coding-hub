@@ -1,3 +1,4 @@
+use crate::gateway::streams::UpstreamStreamError;
 mod audit;
 mod encoding;
 mod json;
@@ -23,6 +24,7 @@ const SPECIAL_SETTINGS_ARRAY_MAX_ITEMS: usize = 32;
 const SPECIAL_SETTINGS_OBJECT_MAX_FIELDS: usize = 64;
 const SPECIAL_SETTINGS_ENTRY_MAX_BYTES: usize = 4 * 1024;
 const SPECIAL_SETTINGS_JSON_MAX_BYTES: usize = 64 * 1024;
+const CX2CC_COST_BASIS_TYPE: &str = "cx2cc_cost_basis";
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ResponseFixerConfig {
@@ -49,6 +51,7 @@ pub(super) fn special_settings_json_from_values(settings: Vec<Value>) -> Option<
     if settings.is_empty() {
         return None;
     }
+    let settings = prioritize_cx2cc_cost_basis(settings);
     let original_len = settings.len();
     let mut capped: Vec<Value> = settings
         .into_iter()
@@ -67,6 +70,37 @@ pub(super) fn push_special_setting(shared: &Arc<Mutex<Vec<Value>>>, setting: Val
     let setting = bound_special_setting(setting);
     let mut guard = shared.lock_or_recover();
     push_special_setting_locked(&mut guard, setting);
+}
+
+pub(super) fn upsert_cx2cc_cost_basis(shared: &Arc<Mutex<Vec<Value>>>, setting: Value) {
+    if !is_cx2cc_cost_basis(&setting) {
+        push_special_setting(shared, setting);
+        return;
+    }
+
+    let setting = bound_special_setting(setting);
+    let mut guard = shared.lock_or_recover();
+    guard.retain(|value| !is_cx2cc_cost_basis(value));
+    guard.insert(0, setting);
+
+    if guard.len() > SPECIAL_SETTINGS_MAX_ENTRIES {
+        guard.truncate(SPECIAL_SETTINGS_MAX_ENTRIES);
+        mark_special_settings_truncated(&mut guard);
+    }
+}
+
+fn prioritize_cx2cc_cost_basis(mut settings: Vec<Value>) -> Vec<Value> {
+    let Some(marker_index) = settings.iter().rposition(is_cx2cc_cost_basis) else {
+        return settings;
+    };
+    let marker = settings.remove(marker_index);
+    settings.retain(|value| !is_cx2cc_cost_basis(value));
+    settings.insert(0, marker);
+    settings
+}
+
+fn is_cx2cc_cost_basis(value: &Value) -> bool {
+    value.get("type").and_then(Value::as_str) == Some(CX2CC_COST_BASIS_TYPE)
 }
 
 fn push_special_setting_locked(settings: &mut Vec<Value>, setting: Value) {
@@ -284,11 +318,11 @@ pub(super) fn process_non_stream(body: Bytes, config: ResponseFixerConfig) -> No
 
 pub(super) struct ResponseFixerStream<S>(stream::ResponseFixerStreamInner<S>)
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin;
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin;
 
 impl<S> ResponseFixerStream<S>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin,
 {
     pub(super) fn new(
         upstream: S,
@@ -305,9 +339,9 @@ where
 
 impl<S> Stream for ResponseFixerStream<S>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin,
 {
-    type Item = Result<Bytes, reqwest::Error>;
+    type Item = Result<Bytes, UpstreamStreamError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.as_mut().get_mut();

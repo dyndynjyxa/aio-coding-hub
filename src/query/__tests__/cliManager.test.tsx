@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import {
   type ClaudeCliInfo,
@@ -6,7 +7,9 @@ import {
   type ClaudeSettingsState,
   type CodexConfigState,
   type CodexConfigTomlState,
+  type CodexModelCatalogState,
   type SimpleCliInfo,
+  type GrokConfigState,
   cliManagerClaudeHooksGet,
   cliManagerClaudeHooksSet,
   cliManagerClaudeInfoGet,
@@ -17,7 +20,11 @@ import {
   cliManagerCodexConfigTomlGet,
   cliManagerCodexConfigTomlSet,
   cliManagerCodexInfoGet,
+  cliManagerCodexModelCatalogGet,
   cliManagerGeminiInfoGet,
+  cliManagerGrokConfigGet,
+  cliManagerGrokConfigSet,
+  cliManagerGrokInfoGet,
 } from "../../services/cli/cliManager";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
@@ -34,7 +41,12 @@ import {
   useCliManagerCodexConfigTomlQuery,
   useCliManagerCodexConfigTomlSetMutation,
   useCliManagerCodexInfoQuery,
+  useCliManagerCodexModelCatalogQuery,
+  useCliManagerCodexModelCatalogRefresh,
   useCliManagerGeminiInfoQuery,
+  useCliManagerGrokConfigQuery,
+  useCliManagerGrokConfigSetMutation,
+  useCliManagerGrokInfoQuery,
 } from "../cliManager";
 
 vi.mock("../../services/cli/cliManager", async () => {
@@ -53,7 +65,11 @@ vi.mock("../../services/cli/cliManager", async () => {
     cliManagerCodexConfigSet: vi.fn(),
     cliManagerCodexConfigTomlGet: vi.fn(),
     cliManagerCodexConfigTomlSet: vi.fn(),
+    cliManagerCodexModelCatalogGet: vi.fn(),
     cliManagerGeminiInfoGet: vi.fn(),
+    cliManagerGrokInfoGet: vi.fn(),
+    cliManagerGrokConfigGet: vi.fn(),
+    cliManagerGrokConfigSet: vi.fn(),
   };
 });
 
@@ -173,6 +189,51 @@ function makeCodexConfigTomlState(
   };
 }
 
+function makeCodexModelCatalogState(
+  overrides: Partial<CodexModelCatalogState> = {}
+): CodexModelCatalogState {
+  return {
+    status: "ready",
+    issue: null,
+    snapshot: {
+      config_path: "/tmp/.codex/config.toml",
+      executable_path: "/usr/bin/codex",
+      cli_version: "0.0.0",
+    },
+    models: [],
+    ...overrides,
+  };
+}
+
+function makeGrokConfigState(overrides: Partial<GrokConfigState> = {}): GrokConfigState {
+  return {
+    config_path: "/tmp/.grok/config.toml",
+    file_exists: false,
+    preferences: {
+      model_id: "grok-build",
+      api_backend: "responses",
+      context_window: null,
+      telemetry: null,
+      supports_backend_search: null,
+    },
+    aio_preferences: null,
+    effective_preferences: {
+      model_id: "grok-build",
+      api_backend: "responses",
+      context_window: null,
+      telemetry: null,
+      supports_backend_search: null,
+    },
+    preference_source: "fallback",
+    default_profile: null,
+    session_summary_profile: null,
+    web_search_profile: null,
+    image_description_profile: null,
+    policy_files: [],
+    ...overrides,
+  };
+}
+
 describe("query/cliManager", () => {
   it("calls cliManager queries with tauri runtime", async () => {
     setTauriRuntime();
@@ -181,9 +242,14 @@ describe("query/cliManager", () => {
     vi.mocked(cliManagerClaudeHooksGet).mockResolvedValue(makeClaudeHooksState());
     vi.mocked(cliManagerClaudeSettingsGet).mockResolvedValue(makeClaudeSettingsState());
     vi.mocked(cliManagerCodexInfoGet).mockResolvedValue(makeSimpleCliInfo());
+    vi.mocked(cliManagerCodexModelCatalogGet).mockResolvedValue(makeCodexModelCatalogState());
     vi.mocked(cliManagerCodexConfigGet).mockResolvedValue(makeCodexConfigState());
     vi.mocked(cliManagerCodexConfigTomlGet).mockResolvedValue(makeCodexConfigTomlState());
     vi.mocked(cliManagerGeminiInfoGet).mockResolvedValue(makeSimpleCliInfo());
+    vi.mocked(cliManagerGrokInfoGet).mockResolvedValue(
+      makeSimpleCliInfo({ executable_path: "/usr/bin/grok" })
+    );
+    vi.mocked(cliManagerGrokConfigGet).mockResolvedValue(makeGrokConfigState());
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
@@ -192,18 +258,34 @@ describe("query/cliManager", () => {
     renderHook(() => useCliManagerClaudeHooksQuery(), { wrapper });
     renderHook(() => useCliManagerClaudeSettingsQuery(), { wrapper });
     renderHook(() => useCliManagerCodexInfoQuery(), { wrapper });
+    renderHook(
+      () =>
+        useCliManagerCodexModelCatalogQuery({
+          snapshot: {
+            configPath: "/tmp/.codex/config.toml",
+            executablePath: "/usr/bin/codex",
+            cliVersion: "0.0.0",
+          },
+        }),
+      { wrapper }
+    );
     renderHook(() => useCliManagerCodexConfigQuery(), { wrapper });
     renderHook(() => useCliManagerCodexConfigTomlQuery(), { wrapper });
     renderHook(() => useCliManagerGeminiInfoQuery(), { wrapper });
+    renderHook(() => useCliManagerGrokInfoQuery(), { wrapper });
+    renderHook(() => useCliManagerGrokConfigQuery(), { wrapper });
 
     await waitFor(() => {
       expect(cliManagerClaudeInfoGet).toHaveBeenCalled();
       expect(cliManagerClaudeHooksGet).toHaveBeenCalled();
       expect(cliManagerClaudeSettingsGet).toHaveBeenCalled();
       expect(cliManagerCodexInfoGet).toHaveBeenCalled();
+      expect(cliManagerCodexModelCatalogGet).toHaveBeenCalled();
       expect(cliManagerCodexConfigGet).toHaveBeenCalled();
       expect(cliManagerCodexConfigTomlGet).toHaveBeenCalled();
       expect(cliManagerGeminiInfoGet).toHaveBeenCalled();
+      expect(cliManagerGrokInfoGet).toHaveBeenCalled();
+      expect(cliManagerGrokConfigGet).toHaveBeenCalled();
     });
   });
 
@@ -222,6 +304,49 @@ describe("query/cliManager", () => {
     });
   });
 
+  it("useCliManagerCodexModelCatalogQuery enters error state when service rejects", async () => {
+    setTauriRuntime();
+
+    vi.mocked(cliManagerCodexModelCatalogGet).mockRejectedValue(new Error("catalog query boom"));
+
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: 1, retryDelay: 0 } },
+    });
+    const wrapper = createQueryWrapper(client);
+
+    const { result, unmount } = renderHook(
+      () =>
+        useCliManagerCodexModelCatalogQuery({
+          snapshot: {
+            configPath: "/tmp/.codex/config.toml",
+            executablePath: "/usr/bin/codex",
+            cliVersion: "0.0.0",
+          },
+        }),
+      { wrapper }
+    );
+
+    await waitFor(() => {
+      expect(result.current.isError).toBe(true);
+    });
+    expect(cliManagerCodexModelCatalogGet).toHaveBeenCalledTimes(1);
+
+    unmount();
+    const remounted = renderHook(
+      () =>
+        useCliManagerCodexModelCatalogQuery({
+          snapshot: {
+            configPath: "/tmp/.codex/config.toml",
+            executablePath: "/usr/bin/codex",
+            cliVersion: "0.0.0",
+          },
+        }),
+      { wrapper }
+    );
+    expect(remounted.result.current.isError).toBe(true);
+    expect(cliManagerCodexModelCatalogGet).toHaveBeenCalledTimes(1);
+  });
+
   it("respects options.enabled=false for all cliManager info/config queries", async () => {
     setTauriRuntime();
 
@@ -232,9 +357,23 @@ describe("query/cliManager", () => {
     renderHook(() => useCliManagerClaudeHooksQuery({ enabled: false }), { wrapper });
     renderHook(() => useCliManagerClaudeSettingsQuery({ enabled: false }), { wrapper });
     renderHook(() => useCliManagerCodexInfoQuery({ enabled: false }), { wrapper });
+    renderHook(
+      () =>
+        useCliManagerCodexModelCatalogQuery({
+          enabled: false,
+          snapshot: {
+            configPath: "/tmp/.codex/config.toml",
+            executablePath: "/usr/bin/codex",
+            cliVersion: "0.0.0",
+          },
+        }),
+      { wrapper }
+    );
     renderHook(() => useCliManagerCodexConfigQuery({ enabled: false }), { wrapper });
     renderHook(() => useCliManagerCodexConfigTomlQuery({ enabled: false }), { wrapper });
     renderHook(() => useCliManagerGeminiInfoQuery({ enabled: false }), { wrapper });
+    renderHook(() => useCliManagerGrokInfoQuery({ enabled: false }), { wrapper });
+    renderHook(() => useCliManagerGrokConfigQuery({ enabled: false }), { wrapper });
 
     await Promise.resolve();
 
@@ -242,9 +381,48 @@ describe("query/cliManager", () => {
     expect(cliManagerClaudeHooksGet).not.toHaveBeenCalled();
     expect(cliManagerClaudeSettingsGet).not.toHaveBeenCalled();
     expect(cliManagerCodexInfoGet).not.toHaveBeenCalled();
+    expect(cliManagerCodexModelCatalogGet).not.toHaveBeenCalled();
     expect(cliManagerCodexConfigGet).not.toHaveBeenCalled();
     expect(cliManagerCodexConfigTomlGet).not.toHaveBeenCalled();
     expect(cliManagerGeminiInfoGet).not.toHaveBeenCalled();
+    expect(cliManagerGrokInfoGet).not.toHaveBeenCalled();
+    expect(cliManagerGrokConfigGet).not.toHaveBeenCalled();
+  });
+
+  it("useCliManagerGrokConfigSetMutation updates and invalidates Grok config cache", async () => {
+    setTauriRuntime();
+
+    const updated = makeGrokConfigState({
+      aio_preferences: {
+        model_id: "grok-4-fast",
+        api_backend: "chat_completions",
+        context_window: null,
+      },
+      effective_preferences: {
+        model_id: "grok-4-fast",
+        api_backend: "chat_completions",
+        context_window: null,
+      },
+      preference_source: "aio_settings",
+    });
+    vi.mocked(cliManagerGrokConfigSet).mockResolvedValue(updated);
+
+    const client = createTestQueryClient();
+    client.setQueryData(cliManagerKeys.grokConfig(), makeGrokConfigState());
+    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useCliManagerGrokConfigSetMutation(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({
+        model_id: "grok-4-fast",
+        api_backend: "chat_completions",
+        context_window: null,
+      });
+    });
+
+    expect(client.getQueryData(cliManagerKeys.grokConfig())).toEqual(updated);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: cliManagerKeys.grokConfig() });
   });
 
   it("useCliManagerClaudeSettingsSetMutation updates cache and invalidates", async () => {
@@ -334,6 +512,283 @@ describe("query/cliManager", () => {
     expect(client.getQueryData(cliManagerKeys.codexConfig())).toEqual(updated);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: cliManagerKeys.codexConfig() });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: cliManagerKeys.codexConfigToml() });
+  });
+
+  it("refreshes only the requested model catalog snapshot", async () => {
+    setTauriRuntime();
+
+    const oldSnapshot = {
+      configPath: "/tmp/.codex/config.toml",
+      executablePath: "/usr/bin/codex",
+      cliVersion: "0.0.0",
+    };
+    const nextSnapshot = {
+      configPath: "/tmp/next/.codex/config.toml",
+      executablePath: "/opt/codex/bin/codex",
+      cliVersion: "1.0.0",
+    };
+    const nextCatalog = makeCodexModelCatalogState({
+      snapshot: {
+        config_path: nextSnapshot.configPath,
+        executable_path: nextSnapshot.executablePath,
+        cli_version: nextSnapshot.cliVersion,
+      },
+    });
+    vi.mocked(cliManagerCodexModelCatalogGet)
+      .mockResolvedValueOnce(makeCodexModelCatalogState())
+      .mockResolvedValueOnce(nextCatalog);
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+    const { result, rerender } = renderHook(
+      ({ snapshot }) => ({
+        catalog: useCliManagerCodexModelCatalogQuery({ snapshot }),
+        refresh: useCliManagerCodexModelCatalogRefresh(),
+      }),
+      { wrapper, initialProps: { snapshot: oldSnapshot } }
+    );
+
+    await waitFor(() => expect(result.current.catalog.isSuccess).toBe(true));
+    vi.mocked(cliManagerCodexModelCatalogGet).mockClear();
+
+    await act(async () => {
+      await result.current.refresh(nextSnapshot);
+    });
+
+    expect(cliManagerCodexModelCatalogGet).toHaveBeenCalledTimes(1);
+    rerender({ snapshot: nextSnapshot });
+    await waitFor(() => expect(result.current.catalog.isSuccess).toBe(true));
+    expect(cliManagerCodexModelCatalogGet).toHaveBeenCalledTimes(1);
+    expect(client.getQueryData(cliManagerKeys.codexModelCatalog(nextSnapshot))).toEqual(
+      nextCatalog
+    );
+    expect(client.getQueryState(cliManagerKeys.codexModelCatalog(oldSnapshot))?.isInvalidated).toBe(
+      false
+    );
+
+    vi.mocked(cliManagerCodexModelCatalogGet).mockClear().mockResolvedValueOnce(nextCatalog);
+    await act(async () => {
+      await result.current.refresh(nextSnapshot);
+    });
+    expect(cliManagerCodexModelCatalogGet).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not duplicate a failed target snapshot prefetch when the observer switches keys", async () => {
+    setTauriRuntime();
+
+    const oldSnapshot = {
+      configPath: "/tmp/.codex/config.toml",
+      executablePath: "/usr/bin/codex",
+      cliVersion: "0.0.0",
+    };
+    const nextSnapshot = {
+      configPath: "/tmp/next/.codex/config.toml",
+      executablePath: "/opt/codex/bin/codex",
+      cliVersion: "1.0.0",
+    };
+    vi.mocked(cliManagerCodexModelCatalogGet).mockResolvedValueOnce(makeCodexModelCatalogState());
+
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: 1, retryDelay: 0 } },
+    });
+    const wrapper = createQueryWrapper(client);
+    const { result, rerender } = renderHook(
+      ({ snapshot }) => ({
+        catalog: useCliManagerCodexModelCatalogQuery({ snapshot }),
+        refresh: useCliManagerCodexModelCatalogRefresh(),
+      }),
+      { wrapper, initialProps: { snapshot: oldSnapshot } }
+    );
+
+    await waitFor(() => expect(result.current.catalog.isSuccess).toBe(true));
+    vi.mocked(cliManagerCodexModelCatalogGet)
+      .mockReset()
+      .mockRejectedValue(new Error("next snapshot failed"));
+
+    await act(async () => {
+      await result.current.refresh(nextSnapshot);
+    });
+    expect(cliManagerCodexModelCatalogGet).toHaveBeenCalledTimes(1);
+
+    rerender({ snapshot: nextSnapshot });
+    await waitFor(() => expect(result.current.catalog.isError).toBe(true));
+    expect(cliManagerCodexModelCatalogGet).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes an inactive failed target snapshot before the observer switches keys", async () => {
+    setTauriRuntime();
+
+    const oldSnapshot = {
+      configPath: "/tmp/.codex/config.toml",
+      executablePath: "/usr/bin/codex",
+      cliVersion: "0.0.0",
+    };
+    const nextSnapshot = {
+      configPath: "/tmp/next/.codex/config.toml",
+      executablePath: "/opt/codex/bin/codex",
+      cliVersion: "1.0.0",
+    };
+    const nextCatalog = makeCodexModelCatalogState({
+      snapshot: {
+        config_path: nextSnapshot.configPath,
+        executable_path: nextSnapshot.executablePath,
+        cli_version: nextSnapshot.cliVersion,
+      },
+    });
+    vi.mocked(cliManagerCodexModelCatalogGet).mockResolvedValueOnce(makeCodexModelCatalogState());
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+    const { result, rerender } = renderHook(
+      ({ snapshot }) => ({
+        catalog: useCliManagerCodexModelCatalogQuery({ snapshot }),
+        refresh: useCliManagerCodexModelCatalogRefresh(),
+      }),
+      { wrapper, initialProps: { snapshot: oldSnapshot } }
+    );
+
+    await waitFor(() => expect(result.current.catalog.isSuccess).toBe(true));
+    vi.mocked(cliManagerCodexModelCatalogGet)
+      .mockReset()
+      .mockRejectedValueOnce(new Error("cached target failure"));
+    await client.prefetchQuery({
+      queryKey: cliManagerKeys.codexModelCatalog(nextSnapshot),
+      queryFn: () => cliManagerCodexModelCatalogGet(),
+      retry: false,
+    });
+    expect(client.getQueryState(cliManagerKeys.codexModelCatalog(nextSnapshot))?.status).toBe(
+      "error"
+    );
+
+    vi.mocked(cliManagerCodexModelCatalogGet).mockReset().mockResolvedValue(nextCatalog);
+    await act(async () => {
+      await result.current.refresh(nextSnapshot);
+    });
+    expect(cliManagerCodexModelCatalogGet).toHaveBeenCalledTimes(1);
+
+    rerender({ snapshot: nextSnapshot });
+    await waitFor(() => expect(result.current.catalog.isSuccess).toBe(true));
+    expect(cliManagerCodexModelCatalogGet).toHaveBeenCalledTimes(1);
+    expect(client.getQueryData(cliManagerKeys.codexModelCatalog(nextSnapshot))).toEqual(
+      nextCatalog
+    );
+  });
+
+  it("reuses an in-flight stale target snapshot fetch during refresh", async () => {
+    setTauriRuntime();
+
+    const oldSnapshot = {
+      configPath: "/tmp/.codex/config.toml",
+      executablePath: "/usr/bin/codex",
+      cliVersion: "0.0.0",
+    };
+    const nextSnapshot = {
+      configPath: "/tmp/next/.codex/config.toml",
+      executablePath: "/opt/codex/bin/codex",
+      cliVersion: "1.0.0",
+    };
+    const staleCatalog = makeCodexModelCatalogState({
+      snapshot: {
+        config_path: nextSnapshot.configPath,
+        executable_path: nextSnapshot.executablePath,
+        cli_version: nextSnapshot.cliVersion,
+      },
+    });
+    const nextCatalog = makeCodexModelCatalogState({
+      snapshot: {
+        config_path: nextSnapshot.configPath,
+        executable_path: nextSnapshot.executablePath,
+        cli_version: nextSnapshot.cliVersion,
+      },
+    });
+    vi.mocked(cliManagerCodexModelCatalogGet).mockResolvedValueOnce(makeCodexModelCatalogState());
+
+    const client = createTestQueryClient();
+    client.setQueryData(cliManagerKeys.codexModelCatalog(nextSnapshot), staleCatalog, {
+      updatedAt: 1,
+    });
+    const wrapper = createQueryWrapper(client);
+    const { result, rerender } = renderHook(
+      ({ snapshot }) => ({
+        catalog: useCliManagerCodexModelCatalogQuery({ snapshot }),
+        refresh: useCliManagerCodexModelCatalogRefresh(),
+      }),
+      { wrapper, initialProps: { snapshot: oldSnapshot } }
+    );
+
+    await waitFor(() => expect(result.current.catalog.isSuccess).toBe(true));
+
+    let resolveNextCatalog!: (value: CodexModelCatalogState) => void;
+    const nextCatalogRequest = new Promise<CodexModelCatalogState>((resolve) => {
+      resolveNextCatalog = resolve;
+    });
+    vi.mocked(cliManagerCodexModelCatalogGet).mockReset().mockReturnValue(nextCatalogRequest);
+
+    rerender({ snapshot: nextSnapshot });
+    await waitFor(() => expect(cliManagerCodexModelCatalogGet).toHaveBeenCalledTimes(1));
+
+    let refreshRequest!: Promise<void>;
+    act(() => {
+      refreshRequest = result.current.refresh(nextSnapshot);
+    });
+    await Promise.resolve();
+    expect(cliManagerCodexModelCatalogGet).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveNextCatalog(nextCatalog);
+      await nextCatalogRequest;
+      await refreshRequest;
+    });
+    expect(cliManagerCodexModelCatalogGet).toHaveBeenCalledTimes(1);
+    expect(client.getQueryData(cliManagerKeys.codexModelCatalog(nextSnapshot))).toEqual(
+      nextCatalog
+    );
+  });
+
+  it("serializes ordinary Codex config and TOML writes in one mutation scope", async () => {
+    setTauriRuntime();
+
+    let resolveConfig!: (value: CodexConfigState) => void;
+    let resolveToml!: (value: CodexConfigState) => void;
+    const configPromise = new Promise<CodexConfigState>((resolve) => {
+      resolveConfig = resolve;
+    });
+    const tomlPromise = new Promise<CodexConfigState>((resolve) => {
+      resolveToml = resolve;
+    });
+    vi.mocked(cliManagerCodexConfigSet).mockReset().mockReturnValueOnce(configPromise);
+    vi.mocked(cliManagerCodexConfigTomlSet).mockReset().mockReturnValueOnce(tomlPromise);
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+    const configMutation = renderHook(() => useCliManagerCodexConfigSetMutation(), { wrapper });
+    const tomlMutation = renderHook(() => useCliManagerCodexConfigTomlSetMutation(), { wrapper });
+
+    let configCall!: Promise<CodexConfigState>;
+    await act(async () => {
+      configCall = configMutation.result.current.mutateAsync({ model: "first" });
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(cliManagerCodexConfigSet).toHaveBeenCalledTimes(1));
+
+    let tomlCall!: Promise<CodexConfigState>;
+    await act(async () => {
+      tomlCall = tomlMutation.result.current.mutateAsync({ toml: 'model = "second"' });
+      await Promise.resolve();
+    });
+    expect(cliManagerCodexConfigTomlSet).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveConfig(makeCodexConfigState({ model: "first" }));
+      await configCall;
+    });
+    await waitFor(() => expect(cliManagerCodexConfigTomlSet).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      resolveToml(makeCodexConfigState({ model: "second" }));
+      await tomlCall;
+    });
+    expect(cliManagerCodexConfigTomlSet).toHaveBeenCalledWith('model = "second"');
   });
 
   it("mutation hooks keep cache unchanged when service returns null", async () => {

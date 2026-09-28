@@ -20,6 +20,13 @@ import {
 // A normalizer rejecting a fixture means the frontend guards drifted from
 // what the backend actually emits.
 describe("gateway event payload contract (shared fixtures)", () => {
+  it("retains the optional backend terminal signal and rejects malformed values", () => {
+    expect(
+      normalizeGatewayRequestEvent({ ...requestFixture, terminal_signal: "incomplete" })
+    ).toMatchObject({ terminal_signal: "incomplete" });
+    expect(normalizeGatewayRequestEvent({ ...requestFixture, terminal_signal: {} })).toBeNull();
+  });
+
   it("accepts the gateway:request fixture", () => {
     const normalized = normalizeGatewayRequestEvent(requestFixture);
     expect(normalized).not.toBeNull();
@@ -33,6 +40,7 @@ describe("gateway event payload contract (shared fixtures)", () => {
     // Backend-computed field must survive normalization (it is optional in the
     // type, so dropping the copy would not fail typecheck).
     expect(normalized?.effective_input_tokens).toBe(1200);
+    expect(normalized?.reasoning_effort).toBe("high");
   });
 
   it("accepts null forms of the optional gateway:request fields", () => {
@@ -47,10 +55,42 @@ describe("gateway event payload contract (shared fixtures)", () => {
       ttfb_ms: null,
       effective_input_tokens: null,
       claude_model_mapping: null,
+      reasoning_effort: null,
     });
     expect(normalized).not.toBeNull();
     expect(normalized?.effective_input_tokens).toBeNull();
     expect(normalized?.claude_model_mapping).toBeNull();
+    expect(normalized?.reasoning_effort).toBeNull();
+  });
+
+  it("accepts a valid generic model redirect and rejects malformed values", () => {
+    const normalized = normalizeGatewayRequestEvent({
+      ...requestFixture,
+      model_redirect: {
+        stage: "provider",
+        providerId: 7,
+        providerName: "Provider A",
+        sourceModel: "gpt-original",
+        targetModel: "gpt-upstream",
+      },
+    });
+    expect(normalized?.model_redirect).toEqual({
+      stage: "provider",
+      providerId: 7,
+      providerName: "Provider A",
+      sourceModel: "gpt-original",
+      targetModel: "gpt-upstream",
+    });
+
+    expect(
+      normalizeGatewayRequestEvent({
+        ...requestFixture,
+        model_redirect: {
+          stage: "provider",
+          providerId: "7",
+        },
+      })
+    ).toBeNull();
   });
 
   it("accepts the gateway:request_start fixture", () => {

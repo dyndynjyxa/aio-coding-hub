@@ -1,12 +1,26 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { ModelPricesSyncReport } from "../../../services/usage/modelPrices";
 import { SettingsDataSyncCard } from "../SettingsDataSyncCard";
+
+function report(
+  status: ModelPricesSyncReport["status"],
+  overrides: Partial<ModelPricesSyncReport> = {}
+): ModelPricesSyncReport {
+  return {
+    status,
+    inserted: 0,
+    updated: 0,
+    unchanged: 0,
+    total: 0,
+    error: status === "failed" ? "fetch failed" : null,
+    ...overrides,
+  };
+}
 
 function renderCard(overrides: Record<string, unknown> = {}) {
   const props = {
     about: { run_mode: "installed" } as any,
-    modelPricesAvailable: "available" as const,
-    modelPricesCount: 12,
     lastModelPricesSyncError: null,
     lastModelPricesSyncReport: null,
     lastModelPricesSyncTime: null,
@@ -25,132 +39,51 @@ function renderCard(overrides: Record<string, unknown> = {}) {
 }
 
 describe("pages/settings/SettingsDataSyncCard", () => {
-  it("renders checking state, opens alias config, and triggers normal/forced sync", () => {
-    const { props } = renderCard({
-      about: null,
-      modelPricesAvailable: "checking",
-      todayRequestsAvailable: "checking",
-    });
+  it("uses one normal sync action and keeps alias config gated by app availability", () => {
+    const { props } = renderCard({ about: null, todayRequestsAvailable: "checking" });
 
-    expect(screen.getAllByText("加载中…")).toHaveLength(2);
+    expect(screen.getByText("未同步")).toBeInTheDocument();
+    expect(screen.getByText("加载中…")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "配置" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "强制" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "同步" }));
-    fireEvent.click(screen.getByRole("button", { name: "强制" }));
-
-    expect(props.syncModelPrices).toHaveBeenNthCalledWith(1, false);
-    expect(props.syncModelPrices).toHaveBeenNthCalledWith(2, true);
-    expect(props.openModelPriceAliasesDialog).not.toHaveBeenCalled();
+    expect(props.syncModelPrices).toHaveBeenCalledWith();
   });
 
-  it("renders unavailable/error states and all relative time buckets", () => {
+  it("shows failed attempts with relative attempt time", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-24T12:00:00Z"));
-    const now = Date.now();
 
-    const { rerender } = render(
-      <SettingsDataSyncCard
-        about={{ run_mode: "installed" } as any}
-        modelPricesAvailable="unavailable"
-        modelPricesCount={null}
-        lastModelPricesSyncError="boom"
-        lastModelPricesSyncReport={null}
-        lastModelPricesSyncTime={now - 30_000}
-        openModelPriceAliasesDialog={vi.fn()}
-        todayRequestsAvailable="unavailable"
-        todayRequestsTotal={null}
-        syncingModelPrices={false}
-        syncModelPrices={vi.fn().mockResolvedValue(undefined)}
-      />
-    );
+    renderCard({
+      lastModelPricesSyncError: "boom",
+      lastModelPricesSyncTime: Date.now() - 5 * 60_000,
+      todayRequestsAvailable: "unavailable",
+      todayRequestsTotal: null,
+    });
 
-    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("失败")).toBeInTheDocument();
-    expect(screen.getByText("刚刚 同步")).toBeInTheDocument();
-
-    rerender(
-      <SettingsDataSyncCard
-        about={{ run_mode: "installed" } as any}
-        modelPricesAvailable="unavailable"
-        modelPricesCount={null}
-        lastModelPricesSyncError="boom"
-        lastModelPricesSyncReport={null}
-        lastModelPricesSyncTime={now - 5 * 60_000}
-        openModelPriceAliasesDialog={vi.fn()}
-        todayRequestsAvailable="unavailable"
-        todayRequestsTotal={null}
-        syncingModelPrices={false}
-        syncModelPrices={vi.fn().mockResolvedValue(undefined)}
-      />
-    );
-    expect(screen.getByText("5 分钟前 同步")).toBeInTheDocument();
-
-    rerender(
-      <SettingsDataSyncCard
-        about={{ run_mode: "installed" } as any}
-        modelPricesAvailable="unavailable"
-        modelPricesCount={null}
-        lastModelPricesSyncError="boom"
-        lastModelPricesSyncReport={null}
-        lastModelPricesSyncTime={now - 2 * 60 * 60_000}
-        openModelPriceAliasesDialog={vi.fn()}
-        todayRequestsAvailable="unavailable"
-        todayRequestsTotal={null}
-        syncingModelPrices={false}
-        syncModelPrices={vi.fn().mockResolvedValue(undefined)}
-      />
-    );
-    expect(screen.getByText("2 小时前 同步")).toBeInTheDocument();
-
-    rerender(
-      <SettingsDataSyncCard
-        about={{ run_mode: "installed" } as any}
-        modelPricesAvailable="unavailable"
-        modelPricesCount={null}
-        lastModelPricesSyncError="boom"
-        lastModelPricesSyncReport={null}
-        lastModelPricesSyncTime={now - 3 * 24 * 60 * 60_000}
-        openModelPriceAliasesDialog={vi.fn()}
-        todayRequestsAvailable="unavailable"
-        todayRequestsTotal={null}
-        syncingModelPrices={false}
-        syncModelPrices={vi.fn().mockResolvedValue(undefined)}
-      />
-    );
-    expect(screen.getByText("3 天前 同步")).toBeInTheDocument();
-
+    expect(screen.getByText("同步失败")).toBeInTheDocument();
+    expect(screen.getByText("5 分钟前 · 尝试")).toBeInTheDocument();
+    expect(screen.getByText("—")).toBeInTheDocument();
     vi.useRealTimers();
   });
 
-  it("renders synced counts, update summaries, and today request fallback values", () => {
-    const { rerender } = render(
-      <SettingsDataSyncCard
-        about={{ run_mode: "installed" } as any}
-        modelPricesAvailable="available"
-        modelPricesCount={0}
-        lastModelPricesSyncError={null}
-        lastModelPricesSyncReport={{ status: "not_modified", inserted: 0, updated: 0 } as any}
-        lastModelPricesSyncTime={null}
-        openModelPriceAliasesDialog={vi.fn()}
-        todayRequestsAvailable="available"
-        todayRequestsTotal={null}
-        syncingModelPrices={false}
-        syncModelPrices={vi.fn().mockResolvedValue(undefined)}
-      />
-    );
+  it("distinguishes no-change, updated counts, and failed syncs", () => {
+    const { rerender } = renderCard({
+      lastModelPricesSyncReport: report("not_modified"),
+      lastModelPricesSyncTime: Date.now(),
+      todayRequestsTotal: null,
+    });
 
-    expect(screen.getByText("未同步")).toBeInTheDocument();
-    expect(screen.getByText("最新")).toBeInTheDocument();
+    expect(screen.getByText("无变更")).toBeInTheDocument();
     expect(screen.getByText("0")).toBeInTheDocument();
 
     rerender(
       <SettingsDataSyncCard
         about={{ run_mode: "installed" } as any}
-        modelPricesAvailable="available"
-        modelPricesCount={12}
         lastModelPricesSyncError={null}
-        lastModelPricesSyncReport={{ status: "updated", inserted: 3, updated: 4 } as any}
-        lastModelPricesSyncTime={null}
+        lastModelPricesSyncReport={report("updated", { inserted: 3, updated: 2, total: 48 })}
+        lastModelPricesSyncTime={Date.now()}
         openModelPriceAliasesDialog={vi.fn()}
         todayRequestsAvailable="available"
         todayRequestsTotal={18}
@@ -159,10 +92,25 @@ describe("pages/settings/SettingsDataSyncCard", () => {
       />
     );
 
-    expect(screen.getByText("12 条")).toBeInTheDocument();
-    expect(screen.getByText("+3 / ~4")).toBeInTheDocument();
+    expect(screen.getByText("+3 / ~2 · 共 48 条")).toBeInTheDocument();
+    expect(screen.getByText(/更新$/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "同步中" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "强制" })).toBeDisabled();
     expect(screen.getByText("18")).toBeInTheDocument();
+
+    rerender(
+      <SettingsDataSyncCard
+        about={{ run_mode: "installed" } as any}
+        lastModelPricesSyncError={null}
+        lastModelPricesSyncReport={report("failed")}
+        lastModelPricesSyncTime={Date.now()}
+        openModelPriceAliasesDialog={vi.fn()}
+        todayRequestsAvailable="available"
+        todayRequestsTotal={18}
+        syncingModelPrices={false}
+        syncModelPrices={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+    expect(screen.getByText("同步失败")).toBeInTheDocument();
+    expect(screen.getByText(/尝试$/)).toBeInTheDocument();
   });
 });

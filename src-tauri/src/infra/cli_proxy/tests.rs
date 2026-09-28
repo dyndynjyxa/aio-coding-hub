@@ -1,5 +1,9 @@
 use super::*;
 use crate::infra::settings::{self, AppSettings, CodexHomeMode};
+use crate::providers::{
+    DailyResetMode, ProviderAuthMode, ProviderBaseUrlMode, ProviderModelMapping, ProviderModelMode,
+    ProviderModelPolicyV1, ProviderUpsertParams,
+};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -71,6 +75,64 @@ impl CliProxyTestApp {
 
     fn handle(&self) -> tauri::AppHandle<tauri::test::MockRuntime> {
         self.app.handle().clone()
+    }
+
+    fn install_fake_codex(&mut self) {
+        let bin_dir = self.home.path().join("fake-codex-bin");
+        std::fs::create_dir_all(&bin_dir).expect("create fake Codex bin");
+
+        #[cfg(windows)]
+        let executable = bin_dir.join("codex.cmd");
+        #[cfg(not(windows))]
+        let executable = bin_dir.join("codex");
+
+        #[cfg(windows)]
+        let script = concat!(
+            "@echo off\r\n",
+            "if \"%1\"==\"--version\" (\r\n",
+            "  echo codex-test 1.0.0\r\n",
+            "  exit /b 0\r\n",
+            ")\r\n",
+            "echo {\"models\":[{\"slug\":\"gpt-5.6-luna\",\"display_name\":\"Luna\",\"supports_parallel_tool_calls\":true}]}\r\n"
+        );
+        #[cfg(not(windows))]
+        let script = concat!(
+            "#!/bin/sh\n",
+            "if [ \"$1\" = \"--version\" ]; then\n",
+            "  printf '%s\\n' 'codex-test 1.0.0'\n",
+            "  exit 0\n",
+            "fi\n",
+            "printf '%s\\n' '{\"models\":[{\"slug\":\"gpt-5.6-luna\",\"display_name\":\"Luna\",\"supports_parallel_tool_calls\":true}]}'\n"
+        );
+        std::fs::write(&executable, script).expect("write fake Codex executable");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755))
+                .expect("make fake Codex executable");
+        }
+
+        self._env
+            .set_var("SHELL", self.home.path().join("missing-login-shell"));
+        self._env
+            .set_var("PATH", bin_dir.as_os_str().to_os_string());
+    }
+}
+
+fn capture_catalog_refresh_identity<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    base_origin: &str,
+) -> codex::CatalogRefreshIdentity {
+    let _transaction = codex::transaction_lock().expect("lock Codex config transaction");
+    codex::catalog_refresh_identity_unlocked(app, base_origin)
+        .expect("capture catalog refresh identity")
+}
+
+fn stale_catalog_apply_plan() -> codex::CatalogApplyPlan {
+    codex::CatalogApplyPlan {
+        catalog_bytes: Some(b"{\"models\":[{\"slug\":\"stale\"}]}\n".to_vec()),
+        catalog_pointer: Some("\"aio-codex-model-catalog.json\"".to_string()),
     }
 }
 
@@ -170,6 +232,1198 @@ fn manifest_entry<'a>(manifest: &'a CliProxyManifest, kind: &str) -> &'a BackupF
         .iter()
         .find(|entry| entry.kind == kind)
         .unwrap_or_else(|| panic!("missing manifest entry for kind={kind}"))
+}
+
+fn codex_provider_with_mapping(source: &str) -> ProviderUpsertParams {
+    ProviderUpsertParams {
+        custom_headers: None,
+        provider_id: None,
+        cli_key: "codex".to_string(),
+        name: "mapped Codex provider".to_string(),
+        base_urls: vec!["https://api.example.com/v1".to_string()],
+        base_url_mode: ProviderBaseUrlMode::Order,
+        auth_mode: Some(ProviderAuthMode::ApiKey),
+        api_key: Some("sk-test".to_string()),
+        enabled: true,
+        cost_multiplier: 1.0,
+        priority: Some(100),
+        claude_models: None,
+        model_policy: Some(ProviderModelPolicyV1 {
+            version: 1,
+            mode: ProviderModelMode::All,
+            model_patterns: Vec::new(),
+            mappings: vec![ProviderModelMapping {
+                source: source.to_string(),
+                target: "mapped-upstream-model".to_string(),
+            }],
+        }),
+        limit_5h_usd: None,
+        limit_daily_usd: None,
+        daily_reset_mode: Some(DailyResetMode::Fixed),
+        daily_reset_time: Some("00:00:00".to_string()),
+        limit_weekly_usd: None,
+        limit_monthly_usd: None,
+        limit_total_usd: None,
+        tags: None,
+        note: None,
+        source_provider_id: None,
+        bridge_type: None,
+        stream_idle_timeout_seconds: None,
+        supports_websockets: None,
+        extension_values: None,
+    }
+}
+
+#[test]
+fn codex_websocket_settings_sync_rewrites_both_directions_and_missing_capability() {
+    let mut test_app = CliProxyTestApp::new();
+    test_app.install_fake_codex();
+    let handle = test_app.handle();
+    let base_origin = "http://127.0.0.1:26543";
+    let enabled = set_enabled(&handle, "codex", true, base_origin).expect("enable Codex proxy");
+    assert!(enabled.ok, "{}", enabled.message);
+    let config_path = codex_config_path(&handle).unwrap();
+    for value in [true, false] {
+        let mut current = settings::read(&handle).unwrap();
+        current.codex_responses_websocket_enabled = value;
+        settings::write(&handle, &current).unwrap();
+        assert!(!codex::is_proxy_config_applied(&handle, base_origin));
+        let reports = sync_enabled(&handle, base_origin, true).unwrap();
+        assert!(reports.iter().any(|row| row.cli_key == "codex" && row.ok));
+        let configured: toml::Value =
+            toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(
+            configured["model_providers"]["aio"]["supports_websockets"].as_bool(),
+            Some(value)
+        );
+        assert!(codex::is_proxy_config_applied(&handle, base_origin));
+    }
+    let mut old_config = std::fs::read_to_string(&config_path)
+        .unwrap()
+        .parse::<toml_edit::DocumentMut>()
+        .unwrap();
+    old_config["model_providers"]["aio"]
+        .as_table_like_mut()
+        .unwrap()
+        .remove("supports_websockets");
+    old_config["model_providers"]["other"]["supports_websockets"] = toml_edit::value(false);
+    std::fs::write(&config_path, old_config.to_string()).unwrap();
+    assert!(!codex::is_proxy_config_applied(&handle, base_origin));
+    sync_enabled(&handle, base_origin, true).unwrap();
+    let configured: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    assert_eq!(
+        configured["model_providers"]["aio"]["supports_websockets"].as_bool(),
+        Some(false)
+    );
+    assert!(codex::is_proxy_config_applied(&handle, base_origin));
+}
+
+#[test]
+fn codex_websocket_sync_and_remote_compaction_preserve_one_provider_and_restore_baseline() {
+    for original_ws in [None, Some(false), Some(true)] {
+        for compaction_first in [false, true] {
+            let mut test_app = CliProxyTestApp::new();
+            test_app.install_fake_codex();
+            let app = test_app.handle();
+            let config_path = codex_config_path(&app).unwrap();
+            std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+            let mut source = "model_provider = \"aio\"\n[model_providers.aio]\nname = \"original\"\nunknown = \"keep\"\n".to_string();
+            if let Some(value) = original_ws {
+                source.push_str(&format!("supports_websockets = {value}\n"));
+            }
+            source.push_str("[model_providers.aio.http_headers]\ncustom = \"keep-header\"\n");
+            std::fs::write(&config_path, source).unwrap();
+            let origin = "http://127.0.0.1:26543";
+            assert!(set_enabled(&app, "codex", true, origin).unwrap().ok);
+            let patch_compaction = |enabled| {
+                let patch = serde_json::from_value(serde_json::json!({
+                    "features_remote_compaction": enabled,
+                    "model": "user-edited-model"
+                }))
+                .unwrap();
+                crate::codex_config::codex_config_set(&app, patch).unwrap();
+            };
+            let sync_websocket = || {
+                let mut settings = settings::read(&app).unwrap();
+                settings.codex_responses_websocket_enabled = true;
+                settings::write(&app, &settings).unwrap();
+                let reports = sync_enabled(&app, origin, true).unwrap();
+                assert!(reports.iter().any(|row| row.cli_key == "codex" && row.ok));
+            };
+            if compaction_first {
+                patch_compaction(true);
+                sync_websocket();
+            } else {
+                sync_websocket();
+                patch_compaction(true);
+            }
+            let config: toml::Value =
+                toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+            assert_eq!(config["model_provider"].as_str(), Some("OpenAI"));
+            assert!(config["model_providers"].get("aio").is_none());
+            assert_eq!(
+                config["model_providers"]["OpenAI"]["supports_websockets"].as_bool(),
+                Some(true)
+            );
+            assert_eq!(
+                config["model_providers"]["OpenAI"]["http_headers"]["custom"].as_str(),
+                Some("keep-header")
+            );
+            assert!(codex::is_proxy_config_applied(&app, origin));
+            patch_compaction(false);
+            let config: toml::Value =
+                toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+            assert_eq!(config["model_provider"].as_str(), Some("aio"));
+            assert!(config["model_providers"].get("OpenAI").is_none());
+            assert_eq!(
+                config["model_providers"]["aio"]["supports_websockets"].as_bool(),
+                Some(true)
+            );
+            assert!(set_enabled(&app, "codex", false, origin).unwrap().ok);
+            let restored: toml::Value =
+                toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+            assert_eq!(
+                restored["model_providers"]["aio"]
+                    .get("supports_websockets")
+                    .and_then(toml::Value::as_bool),
+                original_ws
+            );
+            assert_eq!(
+                restored["model_providers"]["aio"]["unknown"].as_str(),
+                Some("keep")
+            );
+            assert_eq!(
+                restored["model_providers"]["aio"]["http_headers"]["custom"].as_str(),
+                Some("keep-header")
+            );
+            assert_eq!(restored["model"].as_str(), Some("user-edited-model"));
+        }
+    }
+}
+
+#[test]
+fn enable_grok_proxy_writes_managed_profile_and_preserves_auxiliary_config() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let config_path = crate::grok_config::config_path(&handle).expect("grok config path");
+    std::fs::create_dir_all(config_path.parent().expect("config parent"))
+        .expect("create config parent");
+    std::fs::write(
+        &config_path,
+        r#"# preserve top comment
+[models]
+default = "direct"
+session_summary = "summary"
+web_search = "search"
+image_description = "vision"
+
+[model.direct]
+base_url = "https://direct.example/v1"
+
+[model.search]
+api_backend = "responses"
+
+[mcp_servers.keep]
+command = "npx"
+"#,
+    )
+    .expect("write direct config");
+    let mut app_settings = settings::read(&handle).expect("read settings");
+    app_settings.grok_proxy_preferences = Some(crate::grok_config::GrokProxyPreferences {
+        model_id: "grok-test-model".to_string(),
+        api_backend: crate::grok_config::GrokApiBackend::ChatCompletions,
+        context_window: Some(500_000),
+        telemetry: Some(false),
+        supports_backend_search: Some(false),
+    });
+    settings::write(&handle, &app_settings).expect("write preferences");
+
+    let result =
+        set_enabled(&handle, "grok", true, "http://127.0.0.1:26543").expect("enable grok proxy");
+
+    assert!(result.ok, "{}", result.message);
+    assert!(result.enabled);
+    let updated = std::fs::read_to_string(&config_path).expect("read updated config");
+    let document = updated
+        .parse::<toml_edit::DocumentMut>()
+        .expect("valid updated TOML");
+    assert!(updated.starts_with("# preserve top comment"));
+    assert_eq!(document["models"]["default"].as_str(), Some("aio"));
+    assert_eq!(document["models"]["session_summary"].as_str(), Some("aio"));
+    assert_eq!(document["models"]["web_search"].as_str(), Some("aio"));
+    assert_eq!(
+        document["models"]["image_description"].as_str(),
+        Some("aio")
+    );
+    assert_eq!(
+        document["model"]["aio"]["model"].as_str(),
+        Some("grok-test-model")
+    );
+    assert_eq!(
+        document["model"]["aio"]["base_url"].as_str(),
+        Some("http://127.0.0.1:26543/grok/v1")
+    );
+    assert_eq!(
+        document["model"]["aio"]["api_key"].as_str(),
+        Some(PLACEHOLDER_KEY)
+    );
+    assert_eq!(
+        document["model"]["aio"]["api_backend"].as_str(),
+        Some("chat_completions")
+    );
+    assert_eq!(
+        document["model"]["aio"]["supports_backend_search"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        document["model"]["aio"]["context_window"].as_integer(),
+        Some(500_000)
+    );
+    assert_eq!(document["features"]["telemetry"].as_bool(), Some(false));
+    assert_eq!(
+        document["mcp_servers"]["keep"]["command"].as_str(),
+        Some("npx")
+    );
+
+    let manifest = read_manifest(&handle, "grok")
+        .expect("read manifest")
+        .expect("grok manifest");
+    assert!(manifest.enabled);
+    let entry = manifest_entry(&manifest, "grok_config_toml");
+    assert_eq!(Path::new(&entry.path), config_path);
+    assert!(entry.existed);
+    assert_eq!(entry.backup_rel.as_deref(), Some("config.toml"));
+}
+
+#[test]
+fn disable_grok_proxy_restores_only_managed_fields() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let config_path = crate::grok_config::config_path(&handle).expect("grok config path");
+    std::fs::create_dir_all(config_path.parent().expect("config parent"))
+        .expect("create config parent");
+    std::fs::write(
+        &config_path,
+        r#"# original comment
+[models]
+default = "direct"
+session_summary = "summary"
+web_search = "search"
+
+[model.aio]
+model = "original-aio-model"
+base_url = "https://original.example/v1"
+api_key = "original-placeholder"
+api_backend = "responses"
+supports_backend_search = false
+context_window = 131072
+
+[features]
+telemetry = true
+"#,
+    )
+    .expect("write direct config");
+    let mut app_settings = settings::read(&handle).expect("read settings");
+    app_settings.grok_proxy_preferences = Some(crate::grok_config::GrokProxyPreferences {
+        model_id: "managed-model".to_string(),
+        api_backend: crate::grok_config::GrokApiBackend::ChatCompletions,
+        ..Default::default()
+    });
+    settings::write(&handle, &app_settings).expect("write preferences");
+
+    let enabled =
+        set_enabled(&handle, "grok", true, "http://127.0.0.1:26543").expect("enable grok proxy");
+    assert!(enabled.ok, "{}", enabled.message);
+
+    crate::grok_config::mutate_path(&config_path, |document| {
+        crate::grok_config::set_string(&mut document["models"]["web_search"], "new-search");
+        document["model"]["aio"]["user_setting"] = toml_edit::value("keep-me");
+        document["mcp_servers"]["added"]["command"] = toml_edit::value("bunx");
+        document["user"]["enabled"] = toml_edit::value(true);
+        Ok(())
+    })
+    .expect("write proxy-period changes");
+    let mut with_comment = std::fs::read_to_string(&config_path).expect("read proxy config");
+    with_comment.push_str("\n# added while proxy\n");
+    std::fs::write(&config_path, with_comment).expect("append proxy-period comment");
+
+    let disabled =
+        set_enabled(&handle, "grok", false, "http://127.0.0.1:26543").expect("disable grok proxy");
+
+    assert!(disabled.ok, "{}", disabled.message);
+    assert!(!disabled.enabled);
+    let restored = std::fs::read_to_string(&config_path).expect("read restored config");
+    let document = restored
+        .parse::<toml_edit::DocumentMut>()
+        .expect("valid restored TOML");
+    assert!(restored.contains("# original comment"));
+    assert!(restored.contains("# added while proxy"));
+    assert_eq!(document["models"]["default"].as_str(), Some("direct"));
+    assert_eq!(
+        document["models"]["session_summary"].as_str(),
+        Some("summary")
+    );
+    assert_eq!(document["models"]["web_search"].as_str(), Some("search"));
+    assert_eq!(
+        document["model"]["aio"]["model"].as_str(),
+        Some("original-aio-model")
+    );
+    assert_eq!(
+        document["model"]["aio"]["base_url"].as_str(),
+        Some("https://original.example/v1")
+    );
+    assert_eq!(
+        document["model"]["aio"]["api_key"].as_str(),
+        Some("original-placeholder")
+    );
+    assert_eq!(
+        document["model"]["aio"]["api_backend"].as_str(),
+        Some("responses")
+    );
+    assert_eq!(
+        document["model"]["aio"]["context_window"].as_integer(),
+        Some(131072)
+    );
+    assert_eq!(
+        document["model"]["aio"]["supports_backend_search"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(document["features"]["telemetry"].as_bool(), Some(true));
+    assert_eq!(
+        document["model"]["aio"]["user_setting"].as_str(),
+        Some("keep-me")
+    );
+    assert_eq!(
+        document["mcp_servers"]["added"]["command"].as_str(),
+        Some("bunx")
+    );
+    assert_eq!(document["user"]["enabled"].as_bool(), Some(true));
+}
+
+#[test]
+fn grok_proxy_status_and_port_sync_track_exact_managed_state() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let preferences = crate::grok_config::GrokProxyPreferences {
+        model_id: "grok-port-model".to_string(),
+        api_backend: crate::grok_config::GrokApiBackend::Responses,
+        context_window: Some(500_000),
+        telemetry: Some(false),
+        supports_backend_search: None,
+    };
+    let mut app_settings = settings::read(&handle).expect("read settings");
+    app_settings.grok_proxy_preferences = Some(preferences);
+    settings::write(&handle, &app_settings).expect("write preferences");
+
+    let first_origin = "http://127.0.0.1:26543";
+    let enabled = set_enabled(&handle, "grok", true, first_origin).expect("enable grok proxy");
+    assert!(enabled.ok, "{}", enabled.message);
+
+    let config_path = crate::grok_config::config_path(&handle).expect("grok config path");
+    let initial_document = std::fs::read_to_string(&config_path)
+        .expect("read initial config")
+        .parse::<toml_edit::DocumentMut>()
+        .expect("valid initial TOML");
+    assert_eq!(initial_document["models"]["default"].as_str(), Some("aio"));
+    assert_eq!(
+        initial_document["models"]["session_summary"].as_str(),
+        Some("aio")
+    );
+    assert_eq!(
+        initial_document["model"]["aio"]["model"].as_str(),
+        Some("grok-port-model")
+    );
+    assert_eq!(
+        initial_document["model"]["aio"]["base_url"].as_str(),
+        Some("http://127.0.0.1:26543/grok/v1")
+    );
+    assert_eq!(
+        initial_document["model"]["aio"]["api_key"].as_str(),
+        Some(PLACEHOLDER_KEY)
+    );
+    assert_eq!(
+        initial_document["model"]["aio"]["api_backend"].as_str(),
+        Some("responses")
+    );
+    assert_eq!(
+        initial_document["model"]["aio"]["supports_backend_search"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        initial_document["model"]["aio"]["context_window"].as_integer(),
+        Some(500_000)
+    );
+    assert_eq!(
+        initial_document["features"]["telemetry"].as_bool(),
+        Some(false)
+    );
+    assert!(
+        initial_document
+            .get("models")
+            .is_some_and(toml_edit::Item::is_table),
+        "models must be a TOML table:\n{initial_document}"
+    );
+    assert!(
+        initial_document
+            .get("model")
+            .is_some_and(toml_edit::Item::is_table),
+        "model must be a TOML table:\n{initial_document}"
+    );
+    assert_eq!(
+        settings::read(&handle)
+            .expect("read saved settings")
+            .grok_proxy_preferences
+            .as_ref()
+            .map(|preferences| preferences.model_id.as_str()),
+        Some("grok-port-model")
+    );
+    let saved_preferences = settings::read(&handle)
+        .expect("read saved preferences")
+        .grok_proxy_preferences
+        .expect("saved Grok preferences");
+    assert!(crate::grok_config::is_proxy_profile_applied(
+        &handle,
+        first_origin,
+        &saved_preferences,
+        PLACEHOLDER_KEY,
+    )
+    .expect("inspect Grok proxy profile"));
+    assert!(grok::is_proxy_config_applied(&handle, first_origin));
+
+    crate::grok_config::mutate_path(&config_path, |document| {
+        document["model"]["aio"]["supports_backend_search"] = toml_edit::value(false);
+        document["model"]["aio"]["context_window"] = toml_edit::value(100_000);
+        document["features"]["telemetry"] = toml_edit::value(true);
+        Ok(())
+    })
+    .expect("drift managed Grok fields");
+    assert!(!crate::grok_config::is_proxy_profile_applied(
+        &handle,
+        first_origin,
+        &saved_preferences,
+        PLACEHOLDER_KEY,
+    )
+    .expect("inspect drifted Grok proxy profile"));
+
+    crate::grok_config::apply_proxy_profile(
+        &handle,
+        first_origin,
+        &saved_preferences,
+        PLACEHOLDER_KEY,
+    )
+    .expect("reapply Grok proxy profile");
+    assert!(crate::grok_config::is_proxy_profile_applied(
+        &handle,
+        first_origin,
+        &saved_preferences,
+        PLACEHOLDER_KEY,
+    )
+    .expect("inspect reapplied Grok proxy profile"));
+
+    let initial_status = status_all(&handle, Some(first_origin)).expect("initial status");
+    let grok_status = initial_status
+        .iter()
+        .find(|status| status.cli_key == "grok")
+        .expect("grok status");
+    assert_eq!(grok_status.applied_to_current_gateway, Some(true));
+
+    let next_origin = "http://127.0.0.1:27543";
+    let sync_results = sync_enabled(&handle, next_origin, true).expect("sync enabled proxy");
+    let grok_result = sync_results
+        .iter()
+        .find(|result| result.cli_key == "grok")
+        .expect("grok sync result");
+    assert!(grok_result.ok, "{}", grok_result.message);
+
+    let document = std::fs::read_to_string(config_path)
+        .expect("read synced config")
+        .parse::<toml_edit::DocumentMut>()
+        .expect("valid synced TOML");
+    assert_eq!(
+        document["model"]["aio"]["base_url"].as_str(),
+        Some("http://127.0.0.1:27543/grok/v1")
+    );
+    assert_eq!(
+        document["model"]["aio"]["model"].as_str(),
+        Some("grok-port-model")
+    );
+    assert_eq!(
+        document["model"]["aio"]["api_backend"].as_str(),
+        Some("responses")
+    );
+    assert_eq!(
+        document["model"]["aio"]["supports_backend_search"].as_bool(),
+        Some(true)
+    );
+
+    let synced_status = status_all(&handle, Some(next_origin)).expect("synced status");
+    let grok_status = synced_status
+        .iter()
+        .find(|status| status.cli_key == "grok")
+        .expect("grok status");
+    assert_eq!(grok_status.applied_to_current_gateway, Some(true));
+}
+
+#[test]
+fn updating_grok_preferences_while_proxy_enabled_updates_settings_and_toml() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let mut app_settings = settings::read(&handle).expect("read settings");
+    app_settings.grok_proxy_preferences = Some(crate::grok_config::GrokProxyPreferences {
+        model_id: "initial-model".to_string(),
+        api_backend: crate::grok_config::GrokApiBackend::Responses,
+        ..Default::default()
+    });
+    settings::write(&handle, &app_settings).expect("write initial preferences");
+    let enabled =
+        set_enabled(&handle, "grok", true, "http://127.0.0.1:26543").expect("enable grok proxy");
+    assert!(enabled.ok, "{}", enabled.message);
+
+    let updated = crate::grok_config::GrokProxyPreferences {
+        model_id: "updated-model".to_string(),
+        api_backend: crate::grok_config::GrokApiBackend::ChatCompletions,
+        ..Default::default()
+    };
+    let state = set_grok_preferences(&handle, updated.clone()).expect("update preferences");
+
+    assert_eq!(state.aio_preferences, Some(updated.clone()));
+    assert_eq!(state.effective_preferences, updated);
+    let config_path = crate::grok_config::config_path(&handle).expect("grok config path");
+    let document = std::fs::read_to_string(config_path)
+        .expect("read updated config")
+        .parse::<toml_edit::DocumentMut>()
+        .expect("valid updated TOML");
+    assert_eq!(
+        document["model"]["aio"]["model"].as_str(),
+        Some("updated-model")
+    );
+    assert_eq!(
+        document["model"]["aio"]["api_backend"].as_str(),
+        Some("chat_completions")
+    );
+    assert_eq!(
+        document["model"]["aio"]["supports_backend_search"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        document["model"]["aio"]["base_url"].as_str(),
+        Some("http://127.0.0.1:26543/grok/v1")
+    );
+}
+
+#[test]
+fn updating_grok_preferences_rolls_back_settings_when_toml_update_fails() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let initial_preferences = crate::grok_config::GrokProxyPreferences {
+        model_id: "initial-model".to_string(),
+        api_backend: crate::grok_config::GrokApiBackend::Responses,
+        ..Default::default()
+    };
+    let mut app_settings = settings::read(&handle).expect("read settings");
+    app_settings.grok_proxy_preferences = Some(initial_preferences.clone());
+    settings::write(&handle, &app_settings).expect("write initial preferences");
+    let enabled =
+        set_enabled(&handle, "grok", true, "http://127.0.0.1:26543").expect("enable grok proxy");
+    assert!(enabled.ok, "{}", enabled.message);
+
+    let config_path = crate::grok_config::config_path(&handle).expect("grok config path");
+    let invalid_schema =
+        b"model = \"not-a-table\"\n\n[models]\ndefault = \"aio\"\nsession_summary = \"aio\"\n";
+    std::fs::write(&config_path, invalid_schema).expect("write invalid schema fixture");
+
+    let error = set_grok_preferences(
+        &handle,
+        crate::grok_config::GrokProxyPreferences {
+            model_id: "new-model".to_string(),
+            api_backend: crate::grok_config::GrokApiBackend::ChatCompletions,
+            ..Default::default()
+        },
+    )
+    .expect_err("TOML schema update must fail");
+
+    assert!(error.to_string().contains("GROK_CONFIG_INVALID_SCHEMA"));
+    assert_eq!(
+        settings::read(&handle)
+            .expect("read rolled back settings")
+            .grok_proxy_preferences,
+        Some(initial_preferences)
+    );
+    assert_eq!(
+        std::fs::read(&config_path).expect("read unchanged TOML"),
+        invalid_schema
+    );
+}
+
+#[test]
+fn updating_grok_preferences_while_proxy_disabled_rejects_invalid_toml_without_saving() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let initial_preferences = crate::grok_config::GrokProxyPreferences {
+        model_id: "initial-model".to_string(),
+        api_backend: crate::grok_config::GrokApiBackend::Responses,
+        ..Default::default()
+    };
+    let mut app_settings = settings::read(&handle).expect("read settings");
+    app_settings.grok_proxy_preferences = Some(initial_preferences.clone());
+    settings::write(&handle, &app_settings).expect("write initial preferences");
+
+    let config_path = crate::grok_config::config_path(&handle).expect("grok config path");
+    std::fs::create_dir_all(config_path.parent().expect("config parent"))
+        .expect("create config parent");
+    let invalid = b"[models\ndefault = broken\n";
+    std::fs::write(&config_path, invalid).expect("write invalid config fixture");
+
+    let error = set_grok_preferences(
+        &handle,
+        crate::grok_config::GrokProxyPreferences {
+            model_id: "new-model".to_string(),
+            api_backend: crate::grok_config::GrokApiBackend::ChatCompletions,
+            ..Default::default()
+        },
+    )
+    .expect_err("invalid Grok TOML must block preference updates");
+
+    assert!(error.to_string().contains("GROK_CONFIG_INVALID_TOML"));
+    assert_eq!(
+        settings::read(&handle)
+            .expect("read unchanged settings")
+            .grok_proxy_preferences,
+        Some(initial_preferences)
+    );
+    assert_eq!(
+        std::fs::read(&config_path).expect("read unchanged TOML"),
+        invalid
+    );
+}
+
+#[test]
+fn enable_grok_proxy_preserves_invalid_toml_and_writes_safety_copy() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let config_path = crate::grok_config::config_path(&handle).expect("grok config path");
+    std::fs::create_dir_all(config_path.parent().expect("config parent"))
+        .expect("create config parent");
+    let invalid = b"[models\ndefault = broken\n";
+    std::fs::write(&config_path, invalid).expect("write invalid config");
+
+    let result =
+        set_enabled(&handle, "grok", true, "http://127.0.0.1:26543").expect("attempt enable");
+
+    assert!(!result.ok);
+    assert!(!result.enabled);
+    assert!(result.message.contains("GROK_CONFIG_INVALID_TOML"));
+    assert_eq!(std::fs::read(&config_path).expect("read original"), invalid);
+    let safety_path = config_path.with_extension("toml.invalid-backup");
+    assert_eq!(
+        std::fs::read(safety_path).expect("read safety copy"),
+        invalid
+    );
+    let manifest = read_manifest(&handle, "grok")
+        .expect("read manifest")
+        .expect("grok manifest");
+    assert!(!manifest.enabled);
+}
+
+#[test]
+fn sync_enabled_rebinds_grok_home_and_restores_old_target() {
+    let mut test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let old_home = test_app.home.path().join("grok-old");
+    let new_home = test_app.home.path().join("grok-new");
+    test_app
+        ._env
+        .set_var("GROK_HOME", old_home.as_os_str().to_os_string());
+    std::fs::create_dir_all(&old_home).expect("create old Grok home");
+    let old_config = old_home.join("config.toml");
+    std::fs::write(
+        &old_config,
+        r#"[models]
+default = "old-direct"
+session_summary = "old-summary"
+web_search = "old-search"
+"#,
+    )
+    .expect("write old config");
+    let mut app_settings = settings::read(&handle).expect("read settings");
+    app_settings.grok_proxy_preferences = Some(crate::grok_config::GrokProxyPreferences {
+        model_id: "managed-model".to_string(),
+        api_backend: crate::grok_config::GrokApiBackend::Responses,
+        ..Default::default()
+    });
+    settings::write(&handle, &app_settings).expect("write preferences");
+    let base_origin = "http://127.0.0.1:26543";
+    let enabled = set_enabled(&handle, "grok", true, base_origin).expect("enable proxy");
+    assert!(enabled.ok, "{}", enabled.message);
+    crate::grok_config::mutate_path(&old_config, |document| {
+        document["mcp_servers"]["old-added"]["command"] = toml_edit::value("npx");
+        Ok(())
+    })
+    .expect("add old MCP while proxied");
+
+    std::fs::create_dir_all(&new_home).expect("create new Grok home");
+    let new_config = new_home.join("config.toml");
+    std::fs::write(
+        &new_config,
+        r#"[models]
+default = "new-direct"
+session_summary = "new-summary"
+web_search = "new-search"
+"#,
+    )
+    .expect("write new config");
+    test_app
+        ._env
+        .set_var("GROK_HOME", new_home.as_os_str().to_os_string());
+
+    let results = sync_enabled(&handle, base_origin, true).expect("sync after home change");
+    let grok_result = results
+        .iter()
+        .find(|result| result.cli_key == "grok")
+        .expect("grok sync result");
+    assert!(grok_result.ok, "{}", grok_result.message);
+
+    let old_document = std::fs::read_to_string(&old_config)
+        .expect("read restored old config")
+        .parse::<toml_edit::DocumentMut>()
+        .expect("valid old config");
+    assert_eq!(
+        old_document["models"]["default"].as_str(),
+        Some("old-direct")
+    );
+    assert_eq!(
+        old_document["models"]["session_summary"].as_str(),
+        Some("old-summary")
+    );
+    assert_eq!(
+        old_document["mcp_servers"]["old-added"]["command"].as_str(),
+        Some("npx")
+    );
+
+    let new_document = std::fs::read_to_string(&new_config)
+        .expect("read managed new config")
+        .parse::<toml_edit::DocumentMut>()
+        .expect("valid new config");
+    assert_eq!(new_document["models"]["default"].as_str(), Some("aio"));
+    assert_eq!(
+        new_document["models"]["session_summary"].as_str(),
+        Some("aio")
+    );
+    assert_eq!(new_document["models"]["web_search"].as_str(), Some("aio"));
+    let manifest = read_manifest(&handle, "grok")
+        .expect("read rebound manifest")
+        .expect("grok manifest");
+    assert_eq!(
+        Path::new(&manifest_entry(&manifest, "grok_config_toml").path),
+        new_config
+    );
+
+    let disabled = set_enabled(&handle, "grok", false, base_origin).expect("disable proxy");
+    assert!(disabled.ok, "{}", disabled.message);
+    let new_document = std::fs::read_to_string(&new_config)
+        .expect("read restored new config")
+        .parse::<toml_edit::DocumentMut>()
+        .expect("valid restored new config");
+    assert_eq!(
+        new_document["models"]["default"].as_str(),
+        Some("new-direct")
+    );
+    assert_eq!(
+        new_document["models"]["session_summary"].as_str(),
+        Some("new-summary")
+    );
+}
+
+#[test]
+fn first_grok_enable_initializes_preferences_from_existing_default_profile() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let config_path = crate::grok_config::config_path(&handle).expect("grok config path");
+    std::fs::create_dir_all(config_path.parent().expect("config parent"))
+        .expect("create config parent");
+    std::fs::write(
+        config_path,
+        r#"[models]
+default = "custom-profile"
+
+[model.custom-profile]
+model = "existing-model"
+api_backend = "chat_completions"
+context_window = 262144
+supports_backend_search = false
+
+[features]
+telemetry = false
+"#,
+    )
+    .expect("write existing config");
+
+    let result =
+        set_enabled(&handle, "grok", true, "http://127.0.0.1:26543").expect("enable Grok proxy");
+
+    assert!(result.ok, "{}", result.message);
+    assert_eq!(
+        settings::read(&handle)
+            .expect("read initialized settings")
+            .grok_proxy_preferences,
+        Some(crate::grok_config::GrokProxyPreferences {
+            model_id: "existing-model".to_string(),
+            api_backend: crate::grok_config::GrokApiBackend::ChatCompletions,
+            context_window: Some(262_144),
+            telemetry: Some(false),
+            supports_backend_search: Some(false),
+        })
+    );
+}
+
+#[test]
+fn missing_grok_config_uses_fallback_and_disable_restores_absence() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let config_path = crate::grok_config::config_path(&handle).expect("grok config path");
+    assert!(!config_path.exists());
+
+    let enabled =
+        set_enabled(&handle, "grok", true, "http://127.0.0.1:26543").expect("enable Grok proxy");
+    assert!(enabled.ok, "{}", enabled.message);
+    assert_eq!(
+        settings::read(&handle)
+            .expect("read initialized settings")
+            .grok_proxy_preferences,
+        Some(crate::grok_config::GrokProxyPreferences::default())
+    );
+    assert!(config_path.exists());
+
+    let disabled =
+        set_enabled(&handle, "grok", false, "http://127.0.0.1:26543").expect("disable Grok proxy");
+    assert!(disabled.ok, "{}", disabled.message);
+    assert!(!config_path.exists());
+}
+
+#[test]
+fn grok_proxy_round_trip_preserves_unmanaged_inline_tables() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let config_path = crate::grok_config::config_path(&handle).expect("grok config path");
+    std::fs::create_dir_all(config_path.parent().expect("config parent"))
+        .expect("create config parent");
+    std::fs::write(
+        &config_path,
+        "models = { custom_search = \"search\" }\nmodel = { custom = { model = \"keep\" } }\n",
+    )
+    .expect("write inline config");
+    let original = std::fs::read(&config_path).expect("read original inline config");
+
+    let enabled =
+        set_enabled(&handle, "grok", true, "http://127.0.0.1:26543").expect("enable Grok proxy");
+    assert!(enabled.ok, "{}", enabled.message);
+    let disabled =
+        set_enabled(&handle, "grok", false, "http://127.0.0.1:26543").expect("disable Grok proxy");
+    assert!(disabled.ok, "{}", disabled.message);
+
+    assert_eq!(
+        std::fs::read(&config_path).expect("read restored inline config"),
+        original
+    );
+}
+
+#[test]
+fn startup_repair_marks_applied_grok_proxy_manifest_enabled() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let base_origin = "http://127.0.0.1:26543";
+    let enabled = set_enabled(&handle, "grok", true, base_origin).expect("enable Grok proxy");
+    assert!(enabled.ok, "{}", enabled.message);
+
+    let mut manifest = read_manifest(&handle, "grok")
+        .expect("read manifest")
+        .expect("grok manifest");
+    manifest.enabled = false;
+    write_manifest(&handle, "grok", &manifest).expect("simulate interrupted manifest write");
+
+    let repairs = startup_repair_incomplete_enable(&handle).expect("startup repair");
+    let grok_repair = repairs
+        .iter()
+        .find(|result| result.cli_key == "grok")
+        .expect("Grok repair result");
+    assert!(grok_repair.ok, "{}", grok_repair.message);
+    assert!(grok_repair.enabled);
+    assert!(
+        read_manifest(&handle, "grok")
+            .expect("read repaired manifest")
+            .expect("grok manifest")
+            .enabled
+    );
+}
+
+#[test]
+fn grok_proxy_reapplies_after_exit_restore_keeps_enabled_state() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let config_path = crate::grok_config::config_path(&handle).expect("grok config path");
+    std::fs::create_dir_all(config_path.parent().expect("config parent"))
+        .expect("create config parent");
+    std::fs::write(
+        &config_path,
+        "[models]\ndefault = \"direct\"\nsession_summary = \"summary\"\n",
+    )
+    .expect("write direct config");
+    let base_origin = "http://127.0.0.1:26543";
+    let enabled = set_enabled(&handle, "grok", true, base_origin).expect("enable Grok proxy");
+    assert!(enabled.ok, "{}", enabled.message);
+
+    let restored = restore_enabled_keep_state(&handle).expect("exit restore");
+    let grok_restore = restored
+        .iter()
+        .find(|result| result.cli_key == "grok")
+        .expect("Grok restore result");
+    assert!(grok_restore.ok, "{}", grok_restore.message);
+    let direct = std::fs::read_to_string(&config_path)
+        .expect("read direct config")
+        .parse::<toml_edit::DocumentMut>()
+        .expect("valid direct config");
+    assert_eq!(direct["models"]["default"].as_str(), Some("direct"));
+    assert!(is_enabled(&handle, "grok").expect("enabled state"));
+
+    let synced = sync_enabled(&handle, base_origin, true).expect("startup sync");
+    let grok_sync = synced
+        .iter()
+        .find(|result| result.cli_key == "grok")
+        .expect("Grok sync result");
+    assert!(grok_sync.ok, "{}", grok_sync.message);
+    let managed = std::fs::read_to_string(&config_path)
+        .expect("read managed config")
+        .parse::<toml_edit::DocumentMut>()
+        .expect("valid managed config");
+    assert_eq!(managed["models"]["default"].as_str(), Some("aio"));
+    assert_eq!(managed["models"]["session_summary"].as_str(), Some("aio"));
+}
+
+/// Regression test for the long-standing report that direct-config edits made
+/// while the app is closed get silently discarded: no matter what provider
+/// the user points Claude at while AIO isn't running, opening and closing it
+/// again always reverts to whichever provider was configured the very first
+/// time the proxy was ever enabled.
+///
+/// Root cause: exit cleanup restores the direct config but leaves the
+/// manifest's `enabled` flag set (so the proxy silently re-applies on next
+/// launch, per `sync_enabled`). That re-apply never refreshed the backup
+/// snapshot, so any edit made to the direct config between "exit" and
+/// "next launch" was overwritten by the gateway address without ever being
+/// captured — and a later disable restored the stale, original snapshot.
+#[test]
+fn claude_proxy_captures_direct_edit_made_while_app_was_closed() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let settings_path = home_dir(&handle)
+        .expect("home dir")
+        .join(".claude")
+        .join("settings.json");
+    std::fs::create_dir_all(settings_path.parent().expect("settings parent"))
+        .expect("create .claude dir");
+    std::fs::write(
+        &settings_path,
+        br#"{ "env": { "ANTHROPIC_BASE_URL": "https://provider-a.example.com", "ANTHROPIC_AUTH_TOKEN": "token-a" } }"#,
+    )
+    .expect("write provider A direct config");
+
+    let base_origin = "http://127.0.0.1:37123";
+    let enabled = set_enabled(&handle, "claude", true, base_origin).expect("enable claude proxy");
+    assert!(enabled.ok, "{}", enabled.message);
+
+    // App exit: restores the direct config but keeps `enabled` in the manifest.
+    let restored = restore_enabled_keep_state(&handle).expect("exit restore");
+    let claude_restore = restored
+        .iter()
+        .find(|result| result.cli_key == "claude")
+        .expect("claude restore result");
+    assert!(claude_restore.ok, "{}", claude_restore.message);
+
+    // While the app is closed, the user points Claude at a different provider.
+    std::fs::write(
+        &settings_path,
+        br#"{ "env": { "ANTHROPIC_BASE_URL": "https://provider-b.example.com", "ANTHROPIC_AUTH_TOKEN": "token-b" } }"#,
+    )
+    .expect("write provider B direct config");
+
+    // App relaunch: gateway autostart re-syncs the still-enabled proxy.
+    let synced = sync_enabled(&handle, base_origin, true).expect("startup sync");
+    let claude_sync = synced
+        .iter()
+        .find(|result| result.cli_key == "claude")
+        .expect("claude sync result");
+    assert!(claude_sync.ok, "{}", claude_sync.message);
+
+    // Close the app again: should restore provider B, not the original provider A.
+    let disabled =
+        set_enabled(&handle, "claude", false, base_origin).expect("disable claude proxy");
+    assert!(disabled.ok, "{}", disabled.message);
+
+    let result: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&settings_path).expect("read settings")).unwrap();
+    let env = result.get("env").unwrap().as_object().unwrap();
+    assert_eq!(
+        env.get("ANTHROPIC_BASE_URL").unwrap().as_str(),
+        Some("https://provider-b.example.com"),
+        "should restore the provider set while the app was closed, not the original backup: {result}"
+    );
+    assert_eq!(
+        env.get("ANTHROPIC_AUTH_TOKEN").unwrap().as_str(),
+        Some("token-b"),
+        "should restore the provider set while the app was closed, not the original backup: {result}"
+    );
+}
+
+/// Write a direct Claude config and enable the proxy on `base_origin`.
+fn enable_claude_proxy_over_direct_config<R: tauri::Runtime>(
+    handle: &tauri::AppHandle<R>,
+    base_origin: &str,
+    direct_config: &[u8],
+) -> std::path::PathBuf {
+    let settings_path = home_dir(handle)
+        .expect("home dir")
+        .join(".claude")
+        .join("settings.json");
+    std::fs::create_dir_all(settings_path.parent().expect("settings parent"))
+        .expect("create .claude dir");
+    std::fs::write(&settings_path, direct_config).expect("write direct config");
+
+    let enabled = set_enabled(handle, "claude", true, base_origin).expect("enable claude proxy");
+    assert!(enabled.ok, "{}", enabled.message);
+
+    settings_path
+}
+
+/// The mirror image of the regression above: when the on-disk config is still
+/// ours, a gateway port change must NOT re-snapshot it. Refreshing here would
+/// write the gateway address into the backup and destroy the user's real
+/// direct config the next time the proxy is disabled.
+#[test]
+fn claude_proxy_keeps_original_backup_when_only_gateway_port_changed() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let settings_path = enable_claude_proxy_over_direct_config(
+        &handle,
+        "http://127.0.0.1:37123",
+        br#"{ "env": { "ANTHROPIC_BASE_URL": "https://provider-a.example.com", "ANTHROPIC_AUTH_TOKEN": "token-a" } }"#,
+    );
+
+    let next_origin = "http://127.0.0.1:45999";
+    let synced = sync_enabled(&handle, next_origin, true).expect("sync to new port");
+    let claude_sync = synced
+        .iter()
+        .find(|result| result.cli_key == "claude")
+        .expect("claude sync result");
+    assert!(claude_sync.ok, "{}", claude_sync.message);
+
+    let disabled =
+        set_enabled(&handle, "claude", false, next_origin).expect("disable claude proxy");
+    assert!(disabled.ok, "{}", disabled.message);
+
+    let result: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&settings_path).expect("read settings")).unwrap();
+    let env = result.get("env").unwrap().as_object().unwrap();
+    assert_eq!(
+        env.get("ANTHROPIC_BASE_URL").unwrap().as_str(),
+        Some("https://provider-a.example.com"),
+        "a port change must not turn the gateway address into the direct backup: {result}"
+    );
+    assert_eq!(
+        env.get("ANTHROPIC_AUTH_TOKEN").unwrap().as_str(),
+        Some("token-a"),
+        "a port change must not turn the gateway address into the direct backup: {result}"
+    );
+}
+
+/// Same hazard, reached through the token instead of the port: a user who
+/// swaps our placeholder token for their own real key while the proxy is
+/// running leaves a file that still points at the gateway. It must not be
+/// mistaken for a direct config on the next port change.
+#[test]
+fn claude_proxy_keeps_backup_when_token_hand_edited_while_proxy_running() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let settings_path = enable_claude_proxy_over_direct_config(
+        &handle,
+        "http://127.0.0.1:37123",
+        br#"{ "env": { "ANTHROPIC_BASE_URL": "https://provider-a.example.com", "ANTHROPIC_AUTH_TOKEN": "token-a" } }"#,
+    );
+
+    std::fs::write(
+        &settings_path,
+        br#"{ "env": { "ANTHROPIC_BASE_URL": "http://127.0.0.1:37123/claude", "ANTHROPIC_AUTH_TOKEN": "my-own-key" } }"#,
+    )
+    .expect("hand-edit the managed token");
+
+    let next_origin = "http://127.0.0.1:45999";
+    let synced = sync_enabled(&handle, next_origin, true).expect("sync to new port");
+    let claude_sync = synced
+        .iter()
+        .find(|result| result.cli_key == "claude")
+        .expect("claude sync result");
+    assert!(claude_sync.ok, "{}", claude_sync.message);
+
+    let disabled =
+        set_enabled(&handle, "claude", false, next_origin).expect("disable claude proxy");
+    assert!(disabled.ok, "{}", disabled.message);
+
+    let result: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&settings_path).expect("read settings")).unwrap();
+    let env = result.get("env").unwrap().as_object().unwrap();
+    assert_eq!(
+        env.get("ANTHROPIC_BASE_URL").unwrap().as_str(),
+        Some("https://provider-a.example.com"),
+        "an edited token must not make the gateway address look like a direct config: {result}"
+    );
+}
+
+/// Failure path: when the direct config cannot be snapshotted, the sync must
+/// report `CLI_PROXY_BACKUP_FAILED` and leave the file untouched rather than
+/// overwrite a config it failed to back up.
+#[test]
+fn claude_proxy_sync_reports_backup_failure_without_overwriting_direct_config() {
+    let test_app = CliProxyTestApp::new();
+    let handle = test_app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    let settings_path = enable_claude_proxy_over_direct_config(
+        &handle,
+        base_origin,
+        br#"{ "env": { "ANTHROPIC_BASE_URL": "https://provider-a.example.com", "ANTHROPIC_AUTH_TOKEN": "token-a" } }"#,
+    );
+
+    let restored = restore_enabled_keep_state(&handle).expect("exit restore");
+    assert!(
+        restored
+            .iter()
+            .find(|result| result.cli_key == "claude")
+            .expect("claude restore result")
+            .ok
+    );
+
+    // While the app is closed the direct config grows past the read limit, so
+    // it can no longer be captured as a backup.
+    let oversized = format!(
+        r#"{{ "padding": "{}", "env": {{ "ANTHROPIC_BASE_URL": "https://provider-b.example.com" }} }}"#,
+        "x".repeat(CLI_PROXY_FILE_MAX_BYTES)
+    );
+    std::fs::write(&settings_path, oversized.as_bytes()).expect("write oversized direct config");
+
+    let synced = sync_enabled(&handle, base_origin, true).expect("startup sync");
+    let claude_sync = synced
+        .iter()
+        .find(|result| result.cli_key == "claude")
+        .expect("claude sync result");
+    assert!(!claude_sync.ok, "sync should fail: {}", claude_sync.message);
+    assert_eq!(
+        claude_sync.error_code.as_deref(),
+        Some("CLI_PROXY_BACKUP_FAILED")
+    );
+    assert_eq!(
+        std::fs::read(&settings_path).expect("read settings"),
+        oversized.as_bytes(),
+        "a config we failed to back up must not be overwritten"
+    );
 }
 
 #[test]
@@ -333,9 +1587,51 @@ trust_level = "trusted"
         + s.matches("[model_providers.'aio']").count();
     assert_eq!(count, 1, "{s}");
     assert!(s.contains("base_url = \"http://new/v1\""), "{s}");
-    assert!(
-        s.contains("[model_providers.aio.projects.\"C:\\\\work\"]"),
-        "{s}"
+    let parsed: toml::Value = toml::from_str(&s).expect("deduplicated TOML is valid");
+    assert_eq!(
+        parsed["model_providers"]["aio"]["projects"][r"C:\work"]["trust_level"].as_str(),
+        Some("trusted")
+    );
+}
+
+#[test]
+fn codex_proxy_dedupes_remote_compaction_alias_without_creating_aio() {
+    let input = r#"model_provider = 'OpenAI' # remote compaction alias
+[model_providers."OpenAI"]
+base_url = "http://old-1/v1"
+unknown = "keep"
+[model_providers.OpenAI]
+base_url = "http://old-2/v1"
+[model_providers.OpenAI.http_headers]
+custom = "keep-header"
+"#;
+    let output = codex::build_codex_config_toml_for_proxy(
+        Some(input.as_bytes().to_vec()),
+        "http://new/v1",
+        CodexConfigPlatform::Other,
+        false,
+        None,
+        true,
+    )
+    .unwrap();
+    let config: toml::Value = toml::from_str(std::str::from_utf8(&output).unwrap()).unwrap();
+    assert_eq!(config["model_provider"].as_str(), Some("OpenAI"));
+    assert!(config["model_providers"].get("aio").is_none());
+    assert_eq!(
+        config["model_providers"]["OpenAI"]["base_url"].as_str(),
+        Some("http://new/v1")
+    );
+    assert_eq!(
+        config["model_providers"]["OpenAI"]["supports_websockets"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        config["model_providers"]["OpenAI"]["unknown"].as_str(),
+        Some("keep")
+    );
+    assert_eq!(
+        config["model_providers"]["OpenAI"]["http_headers"]["custom"].as_str(),
+        Some("keep-header")
     );
 }
 
@@ -678,6 +1974,38 @@ fn status_all_reports_drift_against_current_gateway_origin() {
 }
 
 #[test]
+fn sync_enabled_upgrades_codex_manifest_missing_catalog_target() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+
+    let enabled = set_enabled(&handle, "codex", true, base_origin).expect("enable codex");
+    assert!(enabled.ok, "{enabled:?}");
+    let mut legacy_manifest = read_manifest(&handle, "codex")
+        .expect("read manifest")
+        .expect("manifest exists");
+    legacy_manifest
+        .files
+        .retain(|entry| entry.kind != "codex_model_catalog_json");
+    write_manifest(&handle, "codex", &legacy_manifest).expect("write legacy manifest");
+
+    let rows = sync_enabled(&handle, base_origin, true).expect("sync enabled");
+    let codex = rows
+        .into_iter()
+        .find(|row| row.cli_key == "codex")
+        .expect("codex row");
+    assert!(codex.ok, "{codex:?}");
+
+    let upgraded = read_manifest(&handle, "codex")
+        .expect("read upgraded manifest")
+        .expect("manifest exists");
+    assert!(upgraded
+        .files
+        .iter()
+        .any(|entry| entry.kind == "codex_model_catalog_json"));
+}
+
+#[test]
 fn enabling_codex_oauth_compatible_proxy_writes_config_only_and_does_not_create_auth() {
     let app = CliProxyTestApp::new();
     let handle = app.handle();
@@ -711,6 +2039,10 @@ fn enabling_codex_oauth_compatible_proxy_writes_config_only_and_does_not_create_
         .files
         .iter()
         .any(|entry| entry.kind == "codex_config_toml"));
+    assert!(manifest
+        .files
+        .iter()
+        .any(|entry| entry.kind == "codex_model_catalog_json"));
     assert!(
         !manifest
             .files
@@ -836,6 +2168,394 @@ foo = "bar"
         "{config_after}"
     );
     assert_eq!(auth_after, user_changed_auth);
+}
+
+#[test]
+fn disabling_codex_proxy_restores_preexisting_aio_catalog_and_pointer() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    let original_config = r#"model_catalog_json = "aio-codex-model-catalog.json"
+
+[existing]
+foo = "bar"
+"#;
+    write_codex_direct_files(&handle, original_config, "{}\n");
+    let catalog_path = codex::codex_model_catalog_path(&handle).expect("catalog path");
+    let original_catalog = b"{\"models\":[{\"slug\":\"user-model\"}]}\n";
+    std::fs::write(&catalog_path, original_catalog).expect("write original catalog");
+
+    let enabled = set_enabled(&handle, "codex", true, base_origin).expect("enable codex");
+    assert!(enabled.ok, "{enabled:?}");
+    let manifest = read_manifest(&handle, "codex")
+        .expect("read manifest")
+        .expect("manifest exists");
+    let catalog_entry = manifest_entry(&manifest, "codex_model_catalog_json");
+    assert!(catalog_entry.existed);
+
+    std::fs::write(
+        &catalog_path,
+        b"{\"models\":[{\"slug\":\"managed-model\"}]}\n",
+    )
+    .expect("write managed catalog");
+
+    let disabled = set_enabled(&handle, "codex", false, base_origin).expect("disable codex");
+    assert!(disabled.ok, "{disabled:?}");
+    assert_eq!(
+        std::fs::read(&catalog_path).expect("read restored catalog"),
+        original_catalog
+    );
+    let restored_config = std::fs::read_to_string(codex_config_path(&handle).expect("config path"))
+        .expect("read restored config");
+    assert!(restored_config.contains("model_catalog_json = \"aio-codex-model-catalog.json\""));
+}
+
+#[test]
+fn disabling_codex_proxy_removes_aio_catalog_created_while_enabled() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    write_codex_direct_files(&handle, "[existing]\nfoo = \"bar\"\n", "{}\n");
+
+    let enabled = set_enabled(&handle, "codex", true, base_origin).expect("enable codex");
+    assert!(enabled.ok, "{enabled:?}");
+    let catalog_path = codex::codex_model_catalog_path(&handle).expect("catalog path");
+    std::fs::write(
+        &catalog_path,
+        b"{\"models\":[{\"slug\":\"managed-model\"}]}\n",
+    )
+    .expect("write managed catalog");
+
+    let config_path = codex_config_path(&handle).expect("config path");
+    let current_config = std::fs::read_to_string(&config_path).expect("read proxy config");
+    std::fs::write(
+        &config_path,
+        format!("model_catalog_json = \"aio-codex-model-catalog.json\"\n{current_config}"),
+    )
+    .expect("write managed pointer");
+
+    let disabled = set_enabled(&handle, "codex", false, base_origin).expect("disable codex");
+    assert!(disabled.ok, "{disabled:?}");
+    assert!(!catalog_path.exists());
+    let restored_config = std::fs::read_to_string(config_path).expect("read restored config");
+    assert!(!restored_config.contains("model_catalog_json"));
+    assert!(restored_config.contains("[existing]"));
+}
+
+#[test]
+fn exit_restore_self_heals_orphaned_aio_catalog_pointer_from_backup() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    let orphaned_config =
+        "model_catalog_json = \"aio-codex-model-catalog.json\"\n\n[existing]\nfoo = \"bar\"\n";
+    write_codex_direct_files(&handle, orphaned_config, "{}\n");
+
+    let enabled = set_enabled(&handle, "codex", true, base_origin).expect("enable codex");
+    assert!(enabled.ok, "{enabled:?}");
+
+    let config_path = codex_config_path(&handle).expect("config path");
+    let catalog_path = codex::codex_model_catalog_path(&handle).expect("catalog path");
+    let proxy_config = std::fs::read_to_string(&config_path).expect("read proxy config");
+    assert!(
+        !proxy_config.contains("model_catalog_json"),
+        "{proxy_config}"
+    );
+
+    std::fs::write(
+        &config_path,
+        format!("model_catalog_json = \"aio-codex-model-catalog.json\"\n{proxy_config}"),
+    )
+    .expect("simulate managed pointer");
+    std::fs::write(&catalog_path, b"{\"models\":[{\"slug\":\"managed\"}]}\n")
+        .expect("simulate managed catalog");
+
+    let restored = restore_enabled_keep_state(&handle).expect("exit restore");
+    let codex_restore = restored
+        .iter()
+        .find(|result| result.cli_key == "codex")
+        .expect("codex restore result");
+    assert!(codex_restore.ok, "{codex_restore:?}");
+    assert!(!catalog_path.exists());
+    let restored_config = std::fs::read_to_string(config_path).expect("read restored config");
+    assert!(
+        !restored_config.contains("model_catalog_json"),
+        "{restored_config}"
+    );
+    assert!(restored_config.contains("[existing]"), "{restored_config}");
+}
+
+#[test]
+fn provider_refresh_self_heals_orphaned_aio_catalog_pointer_from_backup() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    let orphaned_config =
+        "model_catalog_json = \"aio-codex-model-catalog.json\"\n\n[existing]\nfoo = \"bar\"\n";
+    write_codex_direct_files(&handle, orphaned_config, "{}\n");
+
+    let enabled = set_enabled(&handle, "codex", true, base_origin).expect("enable codex");
+    assert!(enabled.ok, "{enabled:?}");
+
+    let config_path = codex_config_path(&handle).expect("config path");
+    let catalog_path = codex::codex_model_catalog_path(&handle).expect("catalog path");
+    let proxy_config = std::fs::read_to_string(&config_path).expect("read proxy config");
+    std::fs::write(
+        &config_path,
+        format!("model_catalog_json = \"aio-codex-model-catalog.json\"\n{proxy_config}"),
+    )
+    .expect("simulate managed pointer");
+    std::fs::write(&catalog_path, b"{\"models\":[{\"slug\":\"managed\"}]}\n")
+        .expect("simulate managed catalog");
+    let db = crate::db::init_for_tests(&app.home.path().join("catalog-refresh.db"))
+        .expect("init test db");
+
+    let refresh = refresh_codex_model_catalog_if_enabled(&handle, &db)
+        .expect("refresh should self-heal orphaned pointer");
+
+    assert_eq!(refresh, CodexCatalogRefreshResult::Updated);
+    assert!(!catalog_path.exists());
+    let refreshed_config = std::fs::read_to_string(config_path).expect("read refreshed config");
+    assert!(
+        !refreshed_config.contains("model_catalog_json"),
+        "{refreshed_config}"
+    );
+    assert!(
+        refreshed_config.contains("[existing]"),
+        "{refreshed_config}"
+    );
+}
+
+#[test]
+fn provider_refresh_preserves_existing_catalog_when_manifest_entry_is_missing() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    let orphaned_config =
+        "model_catalog_json = \"aio-codex-model-catalog.json\"\n\n[existing]\nfoo = \"bar\"\n";
+    write_codex_direct_files(&handle, orphaned_config, "{}\n");
+
+    let enabled = set_enabled(&handle, "codex", true, base_origin).expect("enable codex");
+    assert!(enabled.ok, "{enabled:?}");
+
+    let mut legacy_manifest = read_manifest(&handle, "codex")
+        .expect("read manifest")
+        .expect("manifest exists");
+    legacy_manifest
+        .files
+        .retain(|entry| entry.kind != codex::CODEX_MODEL_CATALOG_KIND);
+    write_manifest(&handle, "codex", &legacy_manifest).expect("write legacy manifest");
+
+    let config_path = codex_config_path(&handle).expect("config path");
+    let catalog_path = codex::codex_model_catalog_path(&handle).expect("catalog path");
+    let proxy_config = std::fs::read_to_string(&config_path).expect("read proxy config");
+    std::fs::write(
+        &config_path,
+        format!("model_catalog_json = \"aio-codex-model-catalog.json\"\n{proxy_config}"),
+    )
+    .expect("simulate managed pointer");
+    let existing_catalog = b"{\"models\":[{\"slug\":\"unknown-owner\"}]}\n";
+    std::fs::write(&catalog_path, existing_catalog).expect("write untracked catalog");
+    let db = crate::db::init_for_tests(&app.home.path().join("legacy-catalog-refresh.db"))
+        .expect("init test db");
+
+    let refresh = refresh_codex_model_catalog_if_enabled(&handle, &db)
+        .expect("refresh should preserve the untracked catalog");
+
+    assert_eq!(refresh, CodexCatalogRefreshResult::Unchanged);
+    assert_eq!(
+        std::fs::read(&catalog_path).expect("read preserved catalog"),
+        existing_catalog
+    );
+    let refreshed_config = std::fs::read_to_string(config_path).expect("read refreshed config");
+    assert!(
+        refreshed_config.contains("model_catalog_json = \"aio-codex-model-catalog.json\""),
+        "{refreshed_config}"
+    );
+    let upgraded_manifest = read_manifest(&handle, "codex")
+        .expect("read upgraded manifest")
+        .expect("manifest exists");
+    let catalog_entry = manifest_entry(&upgraded_manifest, codex::CODEX_MODEL_CATALOG_KIND);
+    assert!(catalog_entry.existed);
+    assert!(catalog_entry.backup_rel.is_some());
+}
+
+#[test]
+fn mapped_codex_provider_writes_catalog_and_last_mapping_removal_cleans_it() {
+    let mut app = CliProxyTestApp::new();
+    app.install_fake_codex();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    write_codex_direct_files(&handle, "[existing]\nfoo = \"bar\"\n", "{}\n");
+
+    let enabled = set_enabled(&handle, "codex", true, base_origin).expect("enable Codex proxy");
+    assert!(enabled.ok, "{enabled:?}");
+
+    let db = crate::db::init_for_tests(&app.home.path().join("mapped-catalog-refresh.db"))
+        .expect("init test db");
+    let provider = crate::providers::upsert(&db, codex_provider_with_mapping("gpt-5.6-luna"))
+        .expect("insert mapped Codex provider");
+    crate::providers::default_route_set_order(&db, "codex", vec![provider.id])
+        .expect("route mapped Codex provider");
+
+    let refresh =
+        refresh_codex_model_catalog_if_enabled(&handle, &db).expect("refresh mapped Codex catalog");
+    assert_eq!(refresh, CodexCatalogRefreshResult::Updated);
+
+    let config_path = codex_config_path(&handle).expect("config path");
+    let catalog_path = codex::codex_model_catalog_path(&handle).expect("catalog path");
+    let mapped_config = std::fs::read_to_string(&config_path).expect("read mapped config");
+    assert!(
+        mapped_config.contains("model_catalog_json = \"aio-codex-model-catalog.json\""),
+        "{mapped_config}"
+    );
+    let mapped_catalog: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&catalog_path).expect("read mapped catalog"))
+            .expect("parse mapped catalog");
+    assert_eq!(mapped_catalog["models"][0]["slug"], "gpt-5.6-luna");
+    assert_eq!(
+        mapped_catalog["models"][0]["supports_parallel_tool_calls"],
+        false
+    );
+
+    crate::providers::set_enabled(&db, provider.id, false)
+        .expect("disable last mapped Codex provider");
+    let refresh = refresh_codex_model_catalog_if_enabled(&handle, &db)
+        .expect("refresh after last mapping removal");
+    assert_eq!(refresh, CodexCatalogRefreshResult::Updated);
+    assert!(!catalog_path.exists());
+    let cleaned_config = std::fs::read_to_string(config_path).expect("read cleaned config");
+    assert!(
+        !cleaned_config.contains("model_catalog_json"),
+        "{cleaned_config}"
+    );
+}
+
+#[test]
+fn codex_proxy_preserves_external_catalog_pointer_without_an_aio_catalog_backup() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    let direct_config = "model_catalog_json = \"user-models.json\"\n\n[existing]\nfoo = \"bar\"\n";
+    write_codex_direct_files(&handle, direct_config, "{}\n");
+
+    let enabled = set_enabled(&handle, "codex", true, base_origin).expect("enable codex");
+    assert!(enabled.ok, "{enabled:?}");
+    let config_path = codex_config_path(&handle).expect("config path");
+    let proxy_config = std::fs::read_to_string(&config_path).expect("read proxy config");
+    assert!(
+        proxy_config.contains("model_catalog_json = \"user-models.json\""),
+        "{proxy_config}"
+    );
+
+    let disabled = set_enabled(&handle, "codex", false, base_origin).expect("disable codex");
+    assert!(disabled.ok, "{disabled:?}");
+    let restored_config = std::fs::read_to_string(config_path).expect("read restored config");
+    assert!(
+        restored_config.contains("model_catalog_json = \"user-models.json\""),
+        "{restored_config}"
+    );
+}
+
+#[test]
+fn stale_catalog_refresh_does_not_commit_after_exit_restore() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    write_codex_direct_files(&handle, "[existing]\nfoo = \"bar\"\n", "{}\n");
+
+    let enabled = set_enabled(&handle, "codex", true, base_origin).expect("enable codex");
+    assert!(enabled.ok, "{enabled:?}");
+    let identity = capture_catalog_refresh_identity(&handle, base_origin);
+    let prepared_refresh = stale_catalog_apply_plan();
+
+    let restored = restore_enabled_keep_state(&handle).expect("exit restore");
+    assert!(
+        restored
+            .iter()
+            .find(|result| result.cli_key == "codex")
+            .expect("codex restore result")
+            .ok
+    );
+
+    let committed = codex::commit_catalog_refresh_if_active(&handle, &identity, prepared_refresh)
+        .expect("stale refresh check");
+
+    assert_eq!(committed, None);
+    let config_path = codex_config_path(&handle).expect("config path");
+    let catalog_path = codex::codex_model_catalog_path(&handle).expect("catalog path");
+    let restored_config = std::fs::read_to_string(config_path).expect("read restored config");
+    assert!(
+        !restored_config.contains("model_catalog_json"),
+        "{restored_config}"
+    );
+    assert!(!catalog_path.exists());
+}
+
+#[test]
+fn stale_catalog_refresh_does_not_commit_after_same_origin_reenable() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    write_codex_direct_files(&handle, "[existing]\nfoo = \"bar\"\n", "{}\n");
+
+    let enabled = set_enabled(&handle, "codex", true, base_origin).expect("enable codex");
+    assert!(enabled.ok, "{enabled:?}");
+    let identity = capture_catalog_refresh_identity(&handle, base_origin);
+
+    let disabled = set_enabled(&handle, "codex", false, base_origin).expect("disable codex");
+    assert!(disabled.ok, "{disabled:?}");
+    let reenabled = set_enabled(&handle, "codex", true, base_origin).expect("re-enable codex");
+    assert!(reenabled.ok, "{reenabled:?}");
+
+    let committed =
+        codex::commit_catalog_refresh_if_active(&handle, &identity, stale_catalog_apply_plan())
+            .expect("stale refresh check");
+
+    assert_eq!(committed, None);
+    let config_path = codex_config_path(&handle).expect("config path");
+    let catalog_path = codex::codex_model_catalog_path(&handle).expect("catalog path");
+    let current_config = std::fs::read_to_string(config_path).expect("read current config");
+    assert!(
+        !current_config.contains("model_catalog_json"),
+        "{current_config}"
+    );
+    assert!(!catalog_path.exists());
+}
+
+#[test]
+fn stale_catalog_refresh_does_not_commit_after_codex_home_rebind() {
+    let app = CliProxyTestApp::new();
+    let handle = app.handle();
+    let base_origin = "http://127.0.0.1:37123";
+    let old_codex_home = app.home.path().join("codex-old-refresh");
+    let new_codex_home = app.home.path().join("codex-new-refresh");
+
+    set_custom_codex_home(&handle, &old_codex_home);
+    write_codex_direct_files(&handle, "[old]\nmarker = true\n", "{}\n");
+    let enabled = set_enabled(&handle, "codex", true, base_origin).expect("enable codex");
+    assert!(enabled.ok, "{enabled:?}");
+    let identity = capture_catalog_refresh_identity(&handle, base_origin);
+
+    set_custom_codex_home(&handle, &new_codex_home);
+    write_codex_direct_files(&handle, "[new]\nmarker = true\n", "{}\n");
+    let rebound = rebind_codex_home_after_change(&handle, base_origin, true).expect("rebind");
+    assert!(rebound.ok, "{rebound:?}");
+
+    let committed =
+        codex::commit_catalog_refresh_if_active(&handle, &identity, stale_catalog_apply_plan())
+            .expect("stale refresh check");
+
+    assert_eq!(committed, None);
+    let config_path = codex_config_path(&handle).expect("new config path");
+    let catalog_path = codex::codex_model_catalog_path(&handle).expect("new catalog path");
+    let current_config = std::fs::read_to_string(config_path).expect("read rebound config");
+    assert!(current_config.contains("[new]"), "{current_config}");
+    assert!(
+        !current_config.contains("model_catalog_json"),
+        "{current_config}"
+    );
+    assert!(!catalog_path.exists());
 }
 
 #[test]
@@ -1403,6 +3123,34 @@ fn write_temp(dir: &std::path::Path, name: &str, content: &[u8]) -> std::path::P
 }
 
 #[test]
+fn merge_restore_claude_rejects_invalid_current_without_writing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let backup_bytes = br#"{"env":{"ANTHROPIC_AUTH_TOKEN":"original"}}"#;
+    let backup = write_temp(tmp.path(), "backup.json", backup_bytes);
+    for invalid in [b"".as_slice(), br#"{"env": "#, b"[]"] {
+        let target = write_temp(tmp.path(), "settings.json", invalid);
+        let err = merge_restore_claude_settings_json(&target, &backup).unwrap_err();
+        assert!(err.to_string().contains("CLI_PROXY_INVALID_SETTINGS_JSON"));
+        assert_eq!(std::fs::read(&target).unwrap(), invalid);
+        assert_eq!(std::fs::read(&backup).unwrap(), backup_bytes);
+    }
+}
+
+#[test]
+fn merge_restore_claude_rejects_invalid_backup_without_writing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let target_bytes = br#"{"env":{"ANTHROPIC_AUTH_TOKEN":"aio"},"language":"zh-CN"}"#;
+    let target = write_temp(tmp.path(), "settings.json", target_bytes);
+    for invalid in [b"".as_slice(), br#"{"env": "#, b"null"] {
+        let backup = write_temp(tmp.path(), "backup.json", invalid);
+        let err = merge_restore_claude_settings_json(&target, &backup).unwrap_err();
+        assert!(err.to_string().contains("CLI_PROXY_INVALID_SETTINGS_JSON"));
+        assert_eq!(std::fs::read(&target).unwrap(), target_bytes);
+        assert_eq!(std::fs::read(&backup).unwrap(), invalid);
+    }
+}
+
+#[test]
 fn merge_restore_claude_preserves_user_changes() {
     let tmp = tempfile::tempdir().unwrap();
 
@@ -1546,17 +3294,17 @@ fn merge_restore_codex_config_preserves_user_changes() {
     let backup = write_temp(
         tmp.path(),
         "backup.toml",
-        b"[model_providers.openai]\nname = \"openai\"\nbase_url = \"https://api.openai.com/v1\"\n",
+        b"model_catalog_json = \"user-models.json\"\n\n[model_providers.openai]\nname = \"openai\"\nbase_url = \"https://api.openai.com/v1\"\n",
     );
 
     // Current: proxy added its config, user added a new section
     let target = write_temp(
         tmp.path(),
         "config.toml",
-        b"model_provider = \"aio\"\npreferred_auth_method = \"apikey\"\n\n[model_providers.openai]\nname = \"openai\"\nbase_url = \"https://api.openai.com/v1\"\n\n[model_providers.aio]\nname = \"aio\"\nbase_url = \"http://127.0.0.1:37123/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\n\n[user_section]\nfoo = \"bar\"\n\n[windows]\nsandbox = \"elevated\"\n",
+        b"model_provider = \"aio\"\npreferred_auth_method = \"apikey\"\nmodel_catalog_json = \"aio-codex-model-catalog.json\"\n\n[model_providers.openai]\nname = \"openai\"\nbase_url = \"https://api.openai.com/v1\"\n\n[model_providers.aio]\nname = \"aio\"\nbase_url = \"http://127.0.0.1:37123/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\n\n[user_section]\nfoo = \"bar\"\n\n[windows]\nsandbox = \"elevated\"\n",
     );
 
-    merge_restore_codex_config_toml(&target, &backup).unwrap();
+    merge_restore_codex_config_toml(&target, &backup, true).unwrap();
 
     let result = std::fs::read_to_string(&target).unwrap();
     // Proxy root keys removed (check for the root-level assignment, not table names)
@@ -1567,6 +3315,10 @@ fn merge_restore_codex_config_preserves_user_changes() {
     assert!(
         !result.contains("preferred_auth_method"),
         "preferred_auth_method should be removed: {result}"
+    );
+    assert!(
+        result.contains("model_catalog_json = \"user-models.json\""),
+        "user catalog pointer should be restored: {result}"
     );
     // Proxy provider section removed
     assert!(!result.contains("[model_providers.aio]"));
@@ -1643,4 +3395,55 @@ fn sync_enabled_resolves_drift_after_restore_enabled_keep_state() {
         Some(true),
         "sync_enabled should resolve the drift"
     );
+}
+
+#[test]
+fn malformed_client_manifest_does_not_skip_other_cli_lifecycle_work() {
+    let mut test_app = CliProxyTestApp::new();
+    test_app.install_fake_codex();
+    let app = test_app.handle();
+    let first_origin = "http://127.0.0.1:26431";
+    let next_origin = "http://127.0.0.1:26432";
+    for cli_key in ["claude", "codex", "gemini", "grok"] {
+        let enabled = set_enabled(&app, cli_key, true, first_origin).unwrap();
+        assert!(enabled.ok, "{cli_key}: {}", enabled.message);
+    }
+    let broken_path = cli_proxy_manifest_path(&cli_proxy_root_dir(&app, "claude").unwrap());
+    std::fs::write(&broken_path, b"{broken").unwrap();
+
+    let rows = sync_enabled(&app, next_origin, true).unwrap();
+    assert_eq!(rows.len(), 4);
+    assert!(!rows[0].ok);
+    assert_eq!(rows[0].cli_key, "claude");
+    for cli_key in ["codex", "gemini", "grok"] {
+        assert!(rows.iter().any(|row| row.cli_key == cli_key && row.ok));
+        assert!(
+            is_proxy_config_applied(&app, cli_key, next_origin),
+            "{cli_key}"
+        );
+    }
+
+    let rows = restore_enabled_keep_state(&app).unwrap();
+    assert!(!rows[0].ok);
+    for cli_key in ["codex", "gemini", "grok"] {
+        assert!(rows.iter().any(|row| row.cli_key == cli_key && row.ok));
+        assert!(
+            !is_proxy_config_applied(&app, cli_key, next_origin),
+            "{cli_key}"
+        );
+    }
+
+    sync_enabled(&app, next_origin, true).unwrap();
+    for cli_key in ["codex", "gemini", "grok"] {
+        let mut manifest = read_manifest(&app, cli_key).unwrap().unwrap();
+        manifest.enabled = false;
+        write_manifest(&app, cli_key, &manifest).unwrap();
+    }
+    let rows = startup_repair_incomplete_enable(&app).unwrap();
+    assert!(!rows[0].ok);
+    for cli_key in ["codex", "gemini", "grok"] {
+        assert!(rows.iter().any(|row| row.cli_key == cli_key && row.ok));
+        assert!(read_manifest(&app, cli_key).unwrap().unwrap().enabled);
+    }
+    assert_eq!(std::fs::read(broken_path).unwrap(), b"{broken");
 }

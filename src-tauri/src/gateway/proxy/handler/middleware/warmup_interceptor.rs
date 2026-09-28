@@ -103,6 +103,10 @@ fn respond_warmup_intercept<R: tauri::Runtime>(
         circuit_trigger_error_code: None,
         provider_bridged: None,
         timeout_secs: None,
+        reasoning_effort: None,
+        upstream_sent: false,
+        claude_model_mapping: None,
+        model_redirect: None,
     }];
 
     emit_request_event_and_spawn_request_log(

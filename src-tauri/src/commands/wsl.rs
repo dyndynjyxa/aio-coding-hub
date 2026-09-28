@@ -1,15 +1,23 @@
 //! Usage: Windows WSL related Tauri commands.
 
 use crate::app_state::{ensure_db_ready, DbInitState};
-#[cfg(windows)]
-use crate::db;
-use crate::gateway_control::app_ensure_gateway_running;
 use crate::{blocking, gateway, settings, wsl};
 #[cfg(windows)]
 use tauri::Manager;
 
 const WSL_CONFIG_STATUS_MAX_DISTROS: usize = 64;
 const WSL_CONFIG_STATUS_DISTRO_MAX_CHARS: usize = 128;
+
+/// Serializes WSL config writes across manual, startup, and automatic sync.
+/// Acquire gateway lifecycle first when both locks are needed.
+pub(crate) async fn lock_wsl_sync() -> tokio::sync::OwnedMutexGuard<()> {
+    use std::sync::{Arc, OnceLock};
+    static LOCK: OnceLock<Arc<tokio::sync::Mutex<()>>> = OnceLock::new();
+    LOCK.get_or_init(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone()
+        .lock_owned()
+        .await
+}
 
 async fn detect_wsl_blocking(label: &'static str) -> Result<wsl::WslDetection, String> {
     blocking::run(
@@ -160,6 +168,8 @@ pub(crate) async fn wsl_configure_clients(
 
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
 
+    let _gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
+    let sync_guard = lock_wsl_sync().await;
     let cfg = blocking::run("wsl_configure_clients_read_settings", {
         let app = app.clone();
         move || settings::read(&app)
@@ -184,12 +194,11 @@ pub(crate) async fn wsl_configure_clients(
     }
 
     let preferred_port = cfg.preferred_port;
-    let _gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
-    let status = blocking::run("wsl_configure_clients_ensure_gateway", {
-        let app = app.clone();
-        let db = db.clone();
-        move || app_ensure_gateway_running(&app, db, Some(preferred_port))
-    })
+    let status = crate::app::gateway_service::ensure_running_and_sync_unlocked(
+        &app,
+        db.clone(),
+        Some(preferred_port),
+    )
     .await?;
 
     let port = status
@@ -232,10 +241,10 @@ pub(crate) async fn wsl_configure_clients(
     .await?;
 
     let app_for_sync = app.clone();
-    let report = blocking::run(
+    let (report, _sync_guard) = blocking::run(
         "wsl_configure_clients",
-        move || -> crate::shared::error::AppResult<wsl::WslConfigureReport> {
-            Ok(wsl::configure_clients(
+        move || -> crate::shared::error::AppResult<_> {
+            let report = wsl::configure_clients(
                 &app_for_sync,
                 &distros,
                 &targets,
@@ -243,7 +252,8 @@ pub(crate) async fn wsl_configure_clients(
                 Some(&mcp_data),
                 Some(&prompt_data),
                 Some(&skills_data),
-            ))
+            );
+            Ok((report, sync_guard))
         },
     )
     .await?;
@@ -256,10 +266,16 @@ pub(crate) async fn wsl_configure_clients(
 /// detects WSL, resolves host, gathers sync data, and configures CLI clients.
 #[cfg(windows)]
 pub(crate) async fn wsl_auto_sync_core(app: &tauri::AppHandle) -> Result<(), String> {
+    wsl_auto_sync(app, false).await
+}
+
+#[cfg(windows)]
+async fn wsl_auto_sync(app: &tauri::AppHandle, prompt_localhost: bool) -> Result<(), String> {
     use crate::app_state::{ensure_db_ready, DbInitState};
     use crate::gateway_runtime_access::app_gateway_status;
 
-    // 1. Read settings and check preconditions
+    let sync_guard = lock_wsl_sync().await;
+    // Read after acquiring the lock: queued operations must not carry stale settings.
     let cfg = blocking::run("wsl_core_read_settings", {
         let app = app.clone();
         move || settings::read(&app)
@@ -273,12 +289,22 @@ pub(crate) async fn wsl_auto_sync_core(app: &tauri::AppHandle) -> Result<(), Str
     }
 
     if cfg.gateway_listen_mode == settings::GatewayListenMode::Localhost {
+        if prompt_localhost {
+            let detection = detect_wsl_blocking("wsl_startup_detect").await?;
+            if detection.detected && !detection.distros.is_empty() {
+                crate::app::heartbeat_watchdog::gated_emit(app, "wsl:localhost_switch_prompt", ());
+            }
+        }
         tracing::debug!("WSL auto-sync core: listen mode is localhost, skipping");
         return Ok(());
     }
 
     // 2. Get gateway port
     let status = app_gateway_status(app);
+    if !status.running {
+        tracing::debug!("WSL auto-sync core: gateway not running, skipping");
+        return Ok(());
+    }
     let port = match status.port {
         Some(port) => port,
         None => {
@@ -326,10 +352,10 @@ pub(crate) async fn wsl_auto_sync_core(app: &tauri::AppHandle) -> Result<(), Str
 
     // 6. Configure clients
     let app_for_sync = app.clone();
-    let report = blocking::run(
+    let (report, _sync_guard) = blocking::run(
         "wsl_core_configure",
-        move || -> crate::shared::error::AppResult<wsl::WslConfigureReport> {
-            Ok(wsl::configure_clients(
+        move || -> crate::shared::error::AppResult<_> {
+            let report = wsl::configure_clients(
                 &app_for_sync,
                 &distros,
                 &targets,
@@ -337,7 +363,8 @@ pub(crate) async fn wsl_auto_sync_core(app: &tauri::AppHandle) -> Result<(), Str
                 Some(&mcp_data),
                 Some(&prompt_data),
                 Some(&skills_data),
-            ))
+            );
+            Ok((report, sync_guard))
         },
     )
     .await
@@ -351,12 +378,85 @@ pub(crate) async fn wsl_auto_sync_core(app: &tauri::AppHandle) -> Result<(), Str
 
     crate::app::heartbeat_watchdog::gated_emit(app, "wsl:auto_config_result", &report);
 
-    Ok(())
+    wsl_sync_report_result(&report)
+}
+
+#[cfg(any(windows, test))]
+fn wsl_sync_report_result(report: &wsl::WslConfigureReport) -> Result<(), String> {
+    if report.ok && report.distros.iter().all(|distro| distro.ok) {
+        Ok(())
+    } else {
+        Err(report.message.clone())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wsl_sync_failed_or_partial_reports_are_not_success() {
+        let mut report = wsl::WslConfigureReport {
+            ok: false,
+            message: "sync failed".to_string(),
+            distros: Vec::new(),
+        };
+        assert!(wsl_sync_report_result(&report).is_err());
+        report.ok = true;
+        report.distros.push(wsl::WslConfigureDistroReport {
+            distro: "Ubuntu".to_string(),
+            ok: false,
+            results: Vec::new(),
+        });
+        assert!(wsl_sync_report_result(&report).is_err());
+        report.distros[0].ok = true;
+        assert!(wsl_sync_report_result(&report).is_ok());
+    }
+
+    #[tokio::test]
+    async fn wsl_sync_lock_orders_latest_state_after_cancelled_slow_writer() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc, Mutex,
+        };
+        use std::time::Duration;
+        let setting = Arc::new(AtomicBool::new(true));
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (finish_tx, finish_rx) = std::sync::mpsc::channel();
+        let first_guard = lock_wsl_sync().await;
+        let first_value = setting.load(Ordering::SeqCst);
+        let first_writes = writes.clone();
+        let first = tokio::spawn(async move {
+            blocking::run(
+                "wsl_slow_writer_test",
+                move || -> crate::shared::error::AppResult<()> {
+                    let _sync_guard = first_guard;
+                    started_tx.send(()).unwrap();
+                    finish_rx.recv().unwrap();
+                    first_writes.lock().unwrap().push(first_value);
+                    Ok(())
+                },
+            )
+            .await
+        });
+        started_rx.await.unwrap();
+        setting.store(false, Ordering::SeqCst);
+        first.abort();
+        let _ = first.await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), lock_wsl_sync())
+                .await
+                .is_err()
+        );
+        finish_tx.send(()).unwrap();
+        let _next_guard = tokio::time::timeout(Duration::from_secs(2), lock_wsl_sync())
+            .await
+            .unwrap();
+        let latest_value = setting.load(Ordering::SeqCst);
+        writes.lock().unwrap().push(latest_value);
+        assert_eq!(*writes.lock().unwrap(), [true, false]);
+    }
 
     #[test]
     fn normalize_wsl_config_status_distros_keeps_none_for_auto_detect() {
@@ -474,121 +574,6 @@ pub(crate) mod wsl_sync_trigger {
 /// WSL startup auto-configure: detect WSL environment and configure all CLI clients.
 /// If the current listen mode is localhost, emit an event to prompt the user to switch.
 #[cfg(windows)]
-pub(crate) async fn wsl_auto_configure_on_startup(
-    app: &tauri::AppHandle,
-    db: db::Db,
-    listen_mode: settings::GatewayListenMode,
-    gateway_port: Option<u16>,
-) -> Result<(), String> {
-    // 1. Detect WSL
-    let detection = detect_wsl_blocking("wsl_startup_detect").await?;
-
-    if !detection.detected || detection.distros.is_empty() {
-        tracing::info!("WSL startup auto-configure: no WSL environment detected, skipping");
-        return Ok(());
-    }
-
-    tracing::info!(
-        distros = ?detection.distros,
-        "WSL startup auto-configure: detected {} WSL distro(s)",
-        detection.distros.len()
-    );
-
-    // 2. If listen mode is localhost, prompt the user to switch instead of auto-switching
-    if listen_mode == settings::GatewayListenMode::Localhost {
-        tracing::info!(
-            "WSL startup auto-configure: listen mode is localhost, prompting user to switch"
-        );
-        crate::app::heartbeat_watchdog::gated_emit(app, "wsl:localhost_switch_prompt", ());
-        return Ok(());
-    }
-
-    // 3. Execute configuration with existing settings
-    do_wsl_auto_configure(app, db, &detection.distros, listen_mode, gateway_port).await
-}
-
-#[cfg(windows)]
-async fn do_wsl_auto_configure(
-    app: &tauri::AppHandle,
-    db: db::Db,
-    distros: &[String],
-    listen_mode: settings::GatewayListenMode,
-    gateway_port: Option<u16>,
-) -> Result<(), String> {
-    let port = match gateway_port {
-        Some(p) => p,
-        None => {
-            let report = wsl::WslConfigureReport {
-                ok: false,
-                message: "gateway port unknown".to_string(),
-                distros: Vec::new(),
-            };
-            crate::app::heartbeat_watchdog::gated_emit(app, "wsl:auto_config_result", &report);
-            return Err(report.message);
-        }
-    };
-
-    // Read current settings to resolve host address
-    let cfg = blocking::run("wsl_startup_read_cfg", {
-        let app = app.clone();
-        move || settings::read(&app)
-    })
-    .await
-    .map_err(|e| e.to_string())?;
-
-    let mut host_cfg = cfg.clone();
-    host_cfg.gateway_listen_mode = listen_mode;
-    let host = resolve_wsl_host_blocking(host_cfg, "wsl_startup_resolve_host").await?;
-
-    let proxy_origin = format!("http://{}", gateway::listen::format_host_port(&host, port));
-
-    let targets = cfg.wsl_target_cli;
-
-    // Gather MCP, Prompt, and Skills sync data
-    let (mcp_data, prompt_data, skills_data) = blocking::run("wsl_startup_gather_sync_data", {
-        let app = app.clone();
-        let db = db.clone();
-        move || -> crate::shared::error::AppResult<(
-            wsl::WslMcpSyncData,
-            wsl::WslPromptSyncData,
-            wsl::WslSkillsSyncData,
-        )> {
-            let conn = db.open_connection()?;
-            let mcp = wsl::gather_mcp_sync_data(&conn)?;
-            let prompts = wsl::gather_prompt_sync_data(&conn)?;
-            let skills = wsl::gather_skills_sync_data(&app, &conn)?;
-            Ok((mcp, prompts, skills))
-        }
-    })
-    .await
-    .map_err(|e| e.to_string())?;
-
-    let distros_owned = distros.to_vec();
-    let app_for_sync = app.clone();
-    let report = blocking::run(
-        "wsl_startup_configure",
-        move || -> crate::shared::error::AppResult<wsl::WslConfigureReport> {
-            Ok(wsl::configure_clients(
-                &app_for_sync,
-                &distros_owned,
-                &targets,
-                &proxy_origin,
-                Some(&mcp_data),
-                Some(&prompt_data),
-                Some(&skills_data),
-            ))
-        },
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-
-    tracing::info!(
-        ok = report.ok,
-        message = %report.message,
-        "WSL startup auto-configure completed"
-    );
-
-    crate::app::heartbeat_watchdog::gated_emit(app, "wsl:auto_config_result", &report);
-
-    Ok(())
+pub(crate) async fn wsl_auto_configure_on_startup(app: &tauri::AppHandle) -> Result<(), String> {
+    wsl_auto_sync(app, true).await
 }

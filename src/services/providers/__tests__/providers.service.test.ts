@@ -16,6 +16,7 @@ import {
   providerOAuthStartDeviceFlow,
   providerOAuthStartFlow,
   providerOAuthStatus,
+  providerModelsDiscover,
   providerSetEnabled,
   providerTestAvailability,
   providersList,
@@ -54,6 +55,7 @@ vi.mock("../../../generated/bindings", async () => {
       providerOauthFetchLimits: vi.fn(),
       providerOauthResetCodexQuota: vi.fn(),
       providerTestAvailability: vi.fn(),
+      providerModelsDiscover: vi.fn(),
     },
   };
 });
@@ -95,7 +97,10 @@ function createProviderSummary(overrides: Partial<ProviderSummary> = {}): Provid
     oauth_last_error: null,
     source_provider_id: null,
     bridge_type: null,
+    model_policy_status: "ready",
+    model_policy: { version: 1, mode: "all", modelPatterns: [], mappings: [] },
     stream_idle_timeout_seconds: null,
+    supports_websockets: false,
     extension_values: [],
     custom_headers: [],
     api_key_configured: false,
@@ -104,6 +109,93 @@ function createProviderSummary(overrides: Partial<ProviderSummary> = {}): Provid
 }
 
 describe("services/providers/providers", () => {
+  it("passes discovery input and returns the upstream catalog", async () => {
+    vi.mocked(commands.providerModelsDiscover).mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        status: "ready",
+        models: ["gpt-5.4"],
+        origin: "https://example.com",
+        base_url_index: 1,
+      },
+    });
+
+    const input = {
+      providerId: 12,
+      cliKey: "codex" as const,
+      authMode: "api_key" as const,
+      baseUrls: ["https://example.com/v1"],
+      baseUrlMode: "ping" as const,
+      apiKey: "sk-secret",
+      sourceProviderId: null,
+      bridgeType: null,
+    };
+
+    await expect(providerModelsDiscover(input)).resolves.toEqual({
+      status: "ready",
+      models: ["gpt-5.4"],
+      origin: "https://example.com",
+      base_url_index: 1,
+    });
+    expect(commands.providerModelsDiscover).toHaveBeenCalledWith(input);
+  });
+
+  it("preserves discovery HTTP status details", async () => {
+    vi.mocked(commands.providerModelsDiscover).mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        status: "error",
+        code: "invalid_response",
+        http_status: 429,
+      },
+    });
+
+    await expect(
+      providerModelsDiscover({
+        providerId: null,
+        cliKey: "codex",
+        authMode: "api_key",
+        baseUrls: ["https://example.com/v1"],
+        baseUrlMode: "order",
+        apiKey: "sk-secret",
+        sourceProviderId: null,
+        bridgeType: null,
+      })
+    ).resolves.toEqual({
+      status: "error",
+      code: "invalid_response",
+      http_status: 429,
+    });
+  });
+
+  it("redacts discovery API keys when the command fails", async () => {
+    vi.mocked(commands.providerModelsDiscover).mockRejectedValueOnce(new Error("discover failed"));
+
+    await expect(
+      providerModelsDiscover({
+        providerId: null,
+        cliKey: "claude",
+        authMode: "api_key",
+        baseUrls: ["https://example.com"],
+        baseUrlMode: "order",
+        apiKey: "sk-secret",
+        sourceProviderId: null,
+        bridgeType: null,
+      })
+    ).rejects.toThrow("discover failed");
+
+    expect(logToConsole).toHaveBeenCalledWith(
+      "error",
+      "获取上游模型失败",
+      expect.objectContaining({
+        cmd: "provider_models_discover",
+        args: expect.objectContaining({
+          input: expect.objectContaining({ apiKey: "[REDACTED]" }),
+        }),
+      })
+    );
+  });
+
   it("rethrows and logs when invoke fails", async () => {
     vi.mocked(commands.providersList).mockRejectedValueOnce(new Error("providers boom"));
 
@@ -159,10 +251,35 @@ describe("services/providers/providers", () => {
         baseUrlMode: "order",
         limit5hUsd: null,
         dailyResetMode: "fixed",
+        modelPolicy: null,
         extensionValues: null,
       })
     );
   });
+
+  it.each([undefined, null, false, true])(
+    "preserves optional WebSocket capability %s in IPC",
+    async (supportsWebsockets) => {
+      vi.mocked(commands.providerUpsert).mockResolvedValueOnce({
+        status: "ok",
+        data: createProviderSummary({ cli_key: "codex" }),
+      });
+      await providerUpsert({
+        cliKey: "codex",
+        name: "ws",
+        baseUrls: ["https://example.com"],
+        baseUrlMode: "order",
+        enabled: true,
+        costMultiplier: 1,
+        supportsWebsockets,
+      });
+      expect(commands.providerUpsert).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          supportsWebsockets: supportsWebsockets ?? null,
+        })
+      );
+    }
+  );
 
   it("passes explicit empty provider extension values in upsert payload", async () => {
     vi.mocked(commands.providerUpsert).mockClear();
@@ -343,7 +460,30 @@ describe("services/providers/providers", () => {
     expect(commands.providerDelete).toHaveBeenCalledWith(1, false);
     expect(commands.providersReorder).toHaveBeenCalledWith("claude", [2, 1]);
     expect(commands.providerClaudeTerminalLaunchCommand).toHaveBeenCalledWith(5);
-    expect(commands.providerTestAvailability).toHaveBeenCalledWith(5);
+    expect(commands.providerTestAvailability).toHaveBeenCalledWith(5, null, null);
+  });
+
+  it("passes trimmed probe overrides to IPC and nulls blank input", async () => {
+    const availability = {
+      status: "ok" as const,
+      data: {
+        ok: true,
+        provider_id: 5,
+        provider_name: "P1",
+        base_url: "https://api.example.com",
+        status: 200,
+        latency_ms: 42,
+        error: null,
+        response_preview: null,
+      } as any,
+    };
+    vi.mocked(commands.providerTestAvailability).mockResolvedValueOnce(availability);
+    await providerTestAvailability(5, { model: "  deepseek-v4-flash  ", prompt: "  你好  " });
+    expect(commands.providerTestAvailability).toHaveBeenCalledWith(5, "deepseek-v4-flash", "你好");
+
+    vi.mocked(commands.providerTestAvailability).mockResolvedValueOnce(availability);
+    await providerTestAvailability(5, { model: "   ", prompt: "" });
+    expect(commands.providerTestAvailability).toHaveBeenLastCalledWith(5, null, null);
   });
 
   it("passes the provider usage stats cleanup flag to IPC", async () => {
@@ -381,6 +521,7 @@ describe("services/providers/providers", () => {
     });
 
     expect(validateProviderCliKey(" claude ")).toBe("claude");
+    expect(validateProviderCliKey(" grok ")).toBe("grok");
 
     await providersList(" claude " as never);
     await providerUpsert({

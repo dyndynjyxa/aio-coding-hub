@@ -1,7 +1,7 @@
-import { CLIS, isCliKey, type CliItem } from "../../constants/clis";
+import { CLIS, CLI_KEYS, isCliKey, type CliItem } from "../../constants/clis";
 import type { CliKey } from "../providers/providers";
 
-export const DEFAULT_CLI_PRIORITY_ORDER: CliKey[] = ["claude", "codex", "gemini"];
+export const DEFAULT_CLI_PRIORITY_ORDER: CliKey[] = [...CLI_KEYS];
 
 const CLI_BY_KEY = new Map<CliKey, CliItem>(CLIS.map((cli) => [cli.key, cli]));
 

@@ -5,6 +5,7 @@
 //! stream is a zero-cost passthrough.
 
 use super::traits::{BridgeContext, BridgeError};
+use crate::gateway::streams::UpstreamStreamError;
 use axum::body::Bytes;
 use futures_core::Stream;
 use serde_json::Value;
@@ -22,7 +23,7 @@ const BRIDGE_SSE_FRAME_TOO_LARGE: &[u8] = concat!(
 /// Generic stream wrapper that translates upstream SSE events via IR.
 pub(crate) struct BridgeStream<S>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin,
 {
     upstream: S,
     active: bool,
@@ -68,7 +69,7 @@ impl StreamTranslatorOwned {
 
 impl<S> BridgeStream<S>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin,
 {
     /// Convenience constructor for CX2CC translation.
     ///
@@ -217,9 +218,9 @@ where
 
 impl<S> Stream for BridgeStream<S>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin,
 {
-    type Item = Result<Bytes, reqwest::Error>;
+    type Item = Result<Bytes, UpstreamStreamError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -256,7 +257,7 @@ where
 
 /// Find the byte offset immediately after the first complete SSE event,
 /// terminated by `\n\n` or `\r\n\r\n`.
-fn find_sse_event_end(buffer: &[u8]) -> Option<usize> {
+pub(in crate::gateway) fn find_sse_event_end(buffer: &[u8]) -> Option<usize> {
     let mut i = 0;
     while i < buffer.len() {
         if buffer[i] == b'\n' {
@@ -408,6 +409,7 @@ fn upsert_output_item(output: &mut Vec<Value>, item: Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gateway::streams::UpstreamStreamError;
     use std::collections::VecDeque;
 
     #[test]
@@ -480,11 +482,11 @@ mod tests {
     }
 
     struct MockStream {
-        items: VecDeque<Result<Bytes, reqwest::Error>>,
+        items: VecDeque<Result<Bytes, UpstreamStreamError>>,
     }
 
     impl MockStream {
-        fn new(items: Vec<Result<Bytes, reqwest::Error>>) -> Self {
+        fn new(items: Vec<Result<Bytes, UpstreamStreamError>>) -> Self {
             Self {
                 items: items.into_iter().collect(),
             }
@@ -492,7 +494,7 @@ mod tests {
     }
 
     impl Stream for MockStream {
-        type Item = Result<Bytes, reqwest::Error>;
+        type Item = Result<Bytes, UpstreamStreamError>;
 
         fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
             Poll::Ready(self.items.pop_front())

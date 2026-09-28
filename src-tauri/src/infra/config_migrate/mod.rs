@@ -15,7 +15,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tauri::Manager;
 
-pub const CONFIG_BUNDLE_SCHEMA_VERSION: u32 = 2;
+pub const CONFIG_BUNDLE_SCHEMA_VERSION: u32 = 3;
+pub const CONFIG_BUNDLE_SCHEMA_VERSION_V2: u32 = 2;
 pub const CONFIG_BUNDLE_SCHEMA_VERSION_V1: u32 = 1;
 pub(crate) const CONFIG_IMPORT_FILE_MAX_BYTES: usize = 64 * 1024 * 1024;
 pub(crate) const CONFIG_SKILL_FILE_MAX_BYTES: usize = 1024 * 1024;
@@ -51,10 +52,16 @@ pub struct ConfigBundle {
     pub installed_skills: Option<Vec<InstalledSkillExport>>,
     #[serde(default)]
     pub local_skills: Option<Vec<LocalSkillExport>>,
+    // Image gen connection configs. None (older bundles) leaves the current
+    // configs untouched on import; Some replaces them (providers posture).
+    #[serde(default)]
+    pub image_gen_configs: Option<Vec<ImageGenConfigExport>>,
 }
 
 #[derive(Serialize, Deserialize, specta::Type)]
 pub struct ProviderExport {
+    #[serde(default)]
+    pub supports_websockets: bool,
     pub id: Option<i64>,
     pub cli_key: String,
     pub name: String,
@@ -79,7 +86,15 @@ pub struct ProviderExport {
     pub oauth_last_refreshed_at: Option<i64>,
     #[serde(default)]
     pub oauth_last_error: Option<String>,
+    #[serde(
+        default = "default_empty_json_object",
+        skip_serializing_if = "String::is_empty"
+    )]
     pub claude_models_json: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_models: Option<crate::providers::ClaudeModels>,
+    #[serde(default)]
+    pub model_policy: Option<crate::providers::ProviderModelPolicyV1>,
     #[serde(default = "default_empty_json_object")]
     pub supported_models_json: String,
     #[serde(default = "default_empty_json_object")]
@@ -149,6 +164,14 @@ pub struct McpServerExport {
 }
 
 #[derive(Serialize, Deserialize, specta::Type)]
+pub struct ImageGenConfigExport {
+    pub adapter_id: String,
+    pub base_url: String,
+    pub model: String,
+    pub api_key_plaintext: String,
+}
+
+#[derive(Serialize, Deserialize, specta::Type)]
 pub struct SkillRepoExport {
     pub git_url: String,
     pub branch: String,
@@ -195,6 +218,8 @@ pub struct ConfigImportResult {
     pub skill_repos_imported: u32,
     pub installed_skills_imported: u32,
     pub local_skills_imported: u32,
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 // --- Shared helpers used by multiple submodules ---
@@ -228,11 +253,15 @@ fn prompts_for_import(
 
 fn validate_bundle_schema_version(schema_version: u32) -> AppResult<()> {
     if schema_version != CONFIG_BUNDLE_SCHEMA_VERSION
+        && schema_version != CONFIG_BUNDLE_SCHEMA_VERSION_V2
         && schema_version != CONFIG_BUNDLE_SCHEMA_VERSION_V1
     {
         return Err(format!(
-            "SEC_INVALID_INPUT: unsupported config bundle schema_version={}, expected one of [{}, {}]",
-            schema_version, CONFIG_BUNDLE_SCHEMA_VERSION_V1, CONFIG_BUNDLE_SCHEMA_VERSION
+            "SEC_INVALID_INPUT: unsupported config bundle schema_version={}, expected one of [{}, {}, {}]",
+            schema_version,
+            CONFIG_BUNDLE_SCHEMA_VERSION_V1,
+            CONFIG_BUNDLE_SCHEMA_VERSION_V2,
+            CONFIG_BUNDLE_SCHEMA_VERSION
         )
         .into());
     }
@@ -265,6 +294,7 @@ pub fn config_export<R: tauri::Runtime>(
         skill_repos: export::export_skill_repos(&conn)?,
         installed_skills: Some(export::export_installed_skills(app, &conn)?),
         local_skills: Some(export::export_local_skills(app)?),
+        image_gen_configs: Some(export::export_image_gen_configs(&conn)?),
     })
 }
 
@@ -275,7 +305,7 @@ pub fn config_import<R: tauri::Runtime>(
 ) -> AppResult<ConfigImportResult> {
     let bundle_schema_version = bundle.schema_version;
     validate_bundle_schema_version(bundle_schema_version)?;
-    let imports_full_skill_payload = bundle_schema_version >= CONFIG_BUNDLE_SCHEMA_VERSION;
+    let imports_full_skill_payload = bundle_schema_version >= CONFIG_BUNDLE_SCHEMA_VERSION_V2;
 
     let ConfigBundle {
         schema_version: _,
@@ -290,6 +320,7 @@ pub fn config_import<R: tauri::Runtime>(
         skill_repos,
         installed_skills,
         local_skills,
+        image_gen_configs,
     } = bundle;
 
     let (installed_skills, local_skills) = import::resolve_skill_payloads_for_import(
@@ -322,6 +353,7 @@ pub fn config_import<R: tauri::Runtime>(
     let result = import::import_into_transaction(
         &tx,
         now,
+        bundle_schema_version,
         providers,
         sort_modes,
         sort_mode_active,
@@ -333,6 +365,10 @@ pub fn config_import<R: tauri::Runtime>(
         &local_skills,
         legacy_skill_state.as_ref(),
     )?;
+
+    if let Some(image_gen_configs) = &image_gen_configs {
+        import::replace_image_gen_configs(&tx, now, image_gen_configs)?;
+    }
 
     let mut skill_fs_guard = if imports_full_skill_payload {
         Some(rollback::apply_skill_fs_import(

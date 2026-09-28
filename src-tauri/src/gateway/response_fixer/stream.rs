@@ -1,3 +1,4 @@
+use crate::gateway::streams::UpstreamStreamError;
 use axum::body::Bytes;
 use futures_core::Stream;
 use serde_json::Value;
@@ -201,7 +202,7 @@ impl ChunkBuffer {
 
 pub(super) struct ResponseFixerStreamInner<S>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin,
 {
     upstream: S,
     config: ResponseFixerConfig,
@@ -212,14 +213,14 @@ where
     buffer: ChunkBuffer,
     passthrough: bool,
     queued: VecDeque<Bytes>,
-    pending_error: Option<reqwest::Error>,
+    pending_error: Option<UpstreamStreamError>,
     upstream_done: bool,
     finalized: bool,
 }
 
 impl<S> ResponseFixerStreamInner<S>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin,
 {
     pub(super) fn new(
         upstream: S,
@@ -305,9 +306,9 @@ where
 
 impl<S> Stream for ResponseFixerStreamInner<S>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin,
 {
-    type Item = Result<Bytes, reqwest::Error>;
+    type Item = Result<Bytes, UpstreamStreamError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.as_mut().get_mut();
@@ -399,7 +400,7 @@ where
 
 impl<S> Drop for ResponseFixerStreamInner<S>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin,
 {
     fn drop(&mut self) {
         self.finalize_if_needed();

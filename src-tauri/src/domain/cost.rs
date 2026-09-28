@@ -228,8 +228,8 @@ fn apply_multiplier_femto(cost_femto: i128, multiplier: f64) -> Option<i128> {
     Some(out)
 }
 
-fn finalize_i64(cost_femto: i128) -> Option<i64> {
-    if cost_femto <= 0 {
+fn finalize_i64(cost_femto: i128, allow_zero: bool) -> Option<i64> {
+    if cost_femto < 0 || (cost_femto == 0 && !allow_zero) {
         return None;
     }
     if cost_femto >= i64::MAX as i128 {
@@ -245,6 +245,7 @@ pub struct CostCalculationOptions {
     pub priority_service_tier_applied: bool,
 }
 
+#[cfg(test)]
 pub fn calculate_cost_usd_femto(
     usage: &CostUsage,
     price_json: &str,
@@ -273,98 +274,93 @@ pub fn calculate_cost_usd_femto_with_options(
     let parsed: Value = serde_json::from_str(price_json).ok()?;
     let obj = parsed.as_object()?;
 
-    // If priority service tier is applied, prefer priority pricing fields
-    let input_cost = if options.priority_service_tier_applied {
-        get_femto_from_any(
-            obj,
-            &[
-                "input_cost_per_token_priority",
-                "input_cost_per_token",
-                "input_cost_per_cached_token",
-            ],
-        )
-    } else {
-        get_femto_from_any(
-            obj,
-            &["input_cost_per_token", "input_cost_per_cached_token"],
-        )
-    }
-    .unwrap_or(0);
-
-    let output_cost = if options.priority_service_tier_applied {
-        get_femto_from_any(
-            obj,
-            &[
-                "output_cost_per_token_priority",
-                "output_cost_per_token",
-                "output_cost_per_cached_token",
-            ],
-        )
-    } else {
-        get_femto_from_any(
-            obj,
-            &["output_cost_per_token", "output_cost_per_cached_token"],
-        )
-    }
-    .unwrap_or(0);
-
-    let input_cost_above_200k = get_femto(obj, "input_cost_per_token_above_200k_tokens");
-    let output_cost_above_200k = get_femto(obj, "output_cost_per_token_above_200k_tokens");
-
-    let cache_creation_5m_cost = get_femto(obj, "cache_creation_input_token_cost")
-        .or_else(|| {
-            if input_cost > 0 {
-                Some(mul_ratio_femto(input_cost, 5, 4))
-            } else {
-                None
-            }
-        })
-        .unwrap_or(0);
-
-    let cache_creation_1h_cost = get_femto(obj, "cache_creation_input_token_cost_above_1hr")
-        .or_else(|| {
-            if input_cost > 0 {
-                Some(mul_ratio_femto(input_cost, 2, 1))
-            } else {
-                None
-            }
-        })
-        .or((cache_creation_5m_cost > 0).then_some(cache_creation_5m_cost))
-        .unwrap_or(0);
-
-    let cache_read_cost = get_femto(obj, "cache_read_input_token_cost")
-        .or_else(|| {
-            if input_cost > 0 {
-                Some(mul_ratio_femto(input_cost, 1, 10))
-            } else {
-                None
-            }
-        })
-        .or_else(|| {
-            if output_cost > 0 {
-                Some(mul_ratio_femto(output_cost, 1, 10))
-            } else {
-                None
-            }
-        })
-        .unwrap_or(0);
-
     let input_tokens = clamp_token_count(usage.input_tokens);
     let output_tokens = clamp_token_count(usage.output_tokens);
     let cache_read_input_tokens = clamp_token_count(usage.cache_read_input_tokens);
-
-    // For Codex (OpenAI) and Gemini, cached input tokens are a subset of the overall input token
-    // count. We bill them at `cache_read_cost`, so subtract them from the input bucket to avoid
-    // double-charging. For Claude, cache reads are billed as an additional bucket.
-    let billable_input_tokens = if matches!(cli_key, "codex" | "gemini") {
-        input_tokens.saturating_sub(cache_read_input_tokens).max(0)
-    } else {
-        input_tokens
-    };
-
     let cache_creation_5m_input_tokens = clamp_token_count(usage.cache_creation_5m_input_tokens);
     let cache_creation_1h_input_tokens = clamp_token_count(usage.cache_creation_1h_input_tokens);
     let cache_creation_input_tokens = clamp_token_count(usage.cache_creation_input_tokens);
+    let priced_cache_creation_input_tokens =
+        if cache_creation_5m_input_tokens > 0 || cache_creation_1h_input_tokens > 0 {
+            cache_creation_5m_input_tokens.saturating_add(cache_creation_1h_input_tokens)
+        } else {
+            cache_creation_input_tokens
+        };
+
+    // OpenAI reports cache reads and writes as subsets of total input. Gemini only reports cache
+    // reads as a subset, while Claude bills cache buckets in addition to its input count.
+    let billable_input_tokens = match cli_key {
+        "codex" | "grok" => input_tokens
+            .saturating_sub(cache_read_input_tokens)
+            .saturating_sub(priced_cache_creation_input_tokens),
+        "gemini" => input_tokens.saturating_sub(cache_read_input_tokens),
+        _ => input_tokens,
+    };
+
+    let priced_input_tokens = billable_input_tokens
+        .saturating_add(cache_read_input_tokens)
+        .saturating_add(priced_cache_creation_input_tokens);
+    let above_custom_threshold = obj
+        .get("context_tier_threshold_tokens")
+        .and_then(Value::as_i64)
+        .filter(|threshold| *threshold > 0)
+        .is_some_and(|threshold| priced_input_tokens > threshold);
+    let priority = options.priority_service_tier_applied;
+    // No source writes priority-specific above-threshold rates; the above rate
+    // wins over the priority rate because long-context repricing supersedes tier.
+    let select_rate = |base: &[&str], priority_key: &str, above: &str| {
+        if above_custom_threshold {
+            if priority {
+                get_femto(obj, above)
+                    .or_else(|| get_femto(obj, priority_key))
+                    .or_else(|| get_femto_from_any(obj, base))
+            } else {
+                get_femto(obj, above).or_else(|| get_femto_from_any(obj, base))
+            }
+        } else if priority {
+            get_femto(obj, priority_key).or_else(|| get_femto_from_any(obj, base))
+        } else {
+            get_femto_from_any(obj, base)
+        }
+    };
+    let input_cost_value = select_rate(
+        &["input_cost_per_token", "input_cost_per_cached_token"],
+        "input_cost_per_token_priority",
+        "input_cost_per_token_above_threshold",
+    );
+    let output_cost_value = select_rate(
+        &["output_cost_per_token", "output_cost_per_cached_token"],
+        "output_cost_per_token_priority",
+        "output_cost_per_token_above_threshold",
+    );
+    if output_tokens > 0 && output_cost_value.is_none() {
+        return None;
+    }
+    let input_cost = input_cost_value.unwrap_or(0);
+    let output_cost = output_cost_value.unwrap_or(0);
+    let cache_read_cost_value = select_rate(
+        &["cache_read_input_token_cost"],
+        "cache_read_input_token_cost_priority",
+        "cache_read_input_token_cost_above_threshold",
+    )
+    .or_else(|| (input_cost > 0).then(|| mul_ratio_femto(input_cost, 1, 10)))
+    .or_else(|| (output_cost > 0).then(|| mul_ratio_femto(output_cost, 1, 10)));
+    let cache_read_cost = cache_read_cost_value.unwrap_or(0);
+    let cache_creation_5m_cost_value = get_femto(obj, "cache_creation_input_token_cost")
+        .or_else(|| (input_cost > 0).then(|| mul_ratio_femto(input_cost, 5, 4)));
+    let cache_creation_5m_cost = cache_creation_5m_cost_value.unwrap_or(0);
+    let cache_creation_1h_cost_value = get_femto(obj, "cache_creation_input_token_cost_above_1hr")
+        .or_else(|| (input_cost > 0).then(|| mul_ratio_femto(input_cost, 2, 1)))
+        .or(cache_creation_5m_cost_value);
+    let cache_creation_1h_cost = cache_creation_1h_cost_value.unwrap_or(0);
+    let input_cost_above_200k = get_femto(obj, "input_cost_per_token_above_200k_tokens");
+    let output_cost_above_200k = get_femto(obj, "output_cost_per_token_above_200k_tokens");
+    let has_recognized_rate = input_cost_value.is_some()
+        || output_cost_value.is_some()
+        || cache_read_cost_value.is_some()
+        || cache_creation_5m_cost_value.is_some()
+        || cache_creation_1h_cost_value.is_some();
+    let has_usage = priced_input_tokens > 0 || output_tokens > 0;
 
     let context_1m_applied = contains_context_1m(cli_key, model);
 
@@ -454,7 +450,7 @@ pub fn calculate_cost_usd_femto_with_options(
         };
     }
     let cost_femto = apply_multiplier_femto(cost_femto, multiplier)?;
-    finalize_i64(cost_femto)
+    finalize_i64(cost_femto, has_recognized_rate && has_usage)
 }
 
 #[cfg(test)]

@@ -10,6 +10,8 @@ mod manifest;
 mod mcp_adapt;
 mod mcp_sync;
 mod prompt_sync;
+#[cfg(any(windows, test))]
+pub(crate) mod provider_model_discovery;
 mod shell;
 mod skills_sync;
 mod status;
@@ -33,3 +35,6 @@ pub use types::{
 };
 
 pub use data_gathering::{gather_mcp_sync_data, gather_prompt_sync_data, gather_skills_sync_data};
+
+#[cfg(test)]
+pub(crate) use types::WslConfigureDistroReport;

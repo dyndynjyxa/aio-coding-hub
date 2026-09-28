@@ -33,6 +33,12 @@ const LazyGeminiTab = lazy(() =>
   }))
 );
 
+const LazyGrokTab = lazy(() =>
+  import("../components/cli-manager/tabs/GrokTab").then((m) => ({
+    default: m.CliManagerGrokTab,
+  }))
+);
+
 const TAB_FALLBACK = <div className="p-6 text-sm text-muted-foreground">加载中…</div>;
 
 export function CliManagerPage() {
@@ -43,12 +49,16 @@ export function CliManagerPage() {
       <PageHeader
         title="CLI 管理"
         actions={
-          <TabList
-            ariaLabel="CLI 管理视图切换"
-            items={CLI_MANAGER_TABS}
-            value={model.tab}
-            onChange={model.setTab}
-          />
+          <div className="min-w-0 max-w-full overflow-x-auto scrollbar-none">
+            <TabList
+              ariaLabel="CLI 管理视图切换"
+              items={CLI_MANAGER_TABS}
+              value={model.tab}
+              onChange={model.setTab}
+              className="w-max"
+              buttonClassName="shrink-0 whitespace-nowrap"
+            />
+          </div>
         }
       />
 
@@ -76,6 +86,12 @@ export function CliManagerPage() {
         {model.tab === "gemini" ? (
           <Suspense fallback={TAB_FALLBACK}>
             <LazyGeminiTab {...model.geminiTabProps} />
+          </Suspense>
+        ) : null}
+
+        {model.tab === "grok" ? (
+          <Suspense fallback={TAB_FALLBACK}>
+            <LazyGrokTab {...model.grokTabProps} />
           </Suspense>
         ) : null}
       </div>

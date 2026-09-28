@@ -1,6 +1,7 @@
 //! Usage: Streaming tee wrappers that emit usage/cost and enqueue request logs.
 
 use crate::gateway::response_fixer;
+use crate::gateway::streams::UpstreamStreamError;
 use crate::usage;
 use axum::body::{Body, Bytes};
 use futures_core::Stream;
@@ -11,12 +12,12 @@ use std::time::Duration;
 
 use super::super::events::{emit_gateway_debug_log, emit_gateway_debug_log_lazy};
 use super::super::proxy::{
-    is_fake_200_non_stream_body, upstream_client_error_rules, GatewayErrorCode,
+    detect_fake_200_non_stream_body, upstream_client_error_rules, Fake200Profile, GatewayErrorCode,
 };
 use super::super::util::{
     lossy_utf8_preview, now_unix_millis, now_unix_seconds, MAX_DEBUG_BODY_PREVIEW_BYTES,
 };
-use super::plugin_chunk::PLUGIN_STREAM_ERROR_MARKER;
+use super::plugin_chunk::is_plugin_stream_error_chunk;
 use super::request_end::{emit_request_event_and_spawn_request_log, StreamRequestCompletion};
 use super::{RelayBodyStream, StreamFinalizeCtx};
 
@@ -107,12 +108,6 @@ fn is_codex_body_buffer_drop_successish(
         && usage_seen
 }
 
-fn is_plugin_stream_error_chunk(chunk: &[u8]) -> bool {
-    chunk
-        .windows(PLUGIN_STREAM_ERROR_MARKER.len())
-        .any(|window| window == PLUGIN_STREAM_ERROR_MARKER.as_bytes())
-}
-
 fn spawn_touch_activity<R: tauri::Runtime>(
     ctx: &StreamFinalizeCtx<R>,
     last_activity_ms: i64,
@@ -156,7 +151,7 @@ async fn next_item<S: Stream + Unpin>(stream: &mut S) -> Option<S::Item> {
 
 pub(in crate::gateway) struct UsageSseTeeStream<S, B, R = tauri::Wry>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,
@@ -174,7 +169,7 @@ where
 
 impl<S, B, R> UsageSseTeeStream<S, B, R>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,
@@ -187,7 +182,7 @@ where
     ) -> Self {
         Self {
             upstream,
-            tracker: usage::SseUsageTracker::new(&ctx.cli_key),
+            tracker: usage::SseUsageTracker::new_for_request(&ctx.cli_key, &ctx.path),
             ctx,
             first_byte_ms: initial_first_byte_ms,
             idle_timeout,
@@ -207,7 +202,7 @@ where
         &mut self,
         cx: &mut Context<'_>,
         enforce_idle_timeout: bool,
-    ) -> Poll<Option<Result<B, reqwest::Error>>> {
+    ) -> Poll<Option<Result<B, UpstreamStreamError>>> {
         if self.stop_after_terminal_error {
             return Poll::Ready(None);
         }
@@ -254,7 +249,13 @@ where
                         "[SSE_CHUNK] trace_id={} len={}\n  {}",
                         self.ctx.trace_id,
                         chunk.as_ref().len(),
-                        lossy_utf8_preview(chunk.as_ref(), MAX_DEBUG_BODY_PREVIEW_BYTES),
+                        if self.ctx.ws_request.is_some()
+                            || (self.ctx.cli_key == "codex" && self.ctx.provider_health_neutral)
+                        {
+                            "[managed Responses body omitted]".to_owned()
+                        } else {
+                            lossy_utf8_preview(chunk.as_ref(), MAX_DEBUG_BODY_PREVIEW_BYTES)
+                        },
                     )
                 });
                 let was_terminal_error = self.tracker.terminal_error_seen();
@@ -288,7 +289,9 @@ where
                             GatewayErrorCode::StreamError.as_str()
                         };
                         self.finalize(Some(code));
-                        if is_plugin_stream_error_chunk(chunk.as_ref()) {
+                        if self.ctx.ws_request.is_some()
+                            || is_plugin_stream_error_chunk(chunk.as_ref())
+                        {
                             self.stop_after_terminal_error = true;
                             return Poll::Ready(Some(Ok(chunk)));
                         }
@@ -298,15 +301,23 @@ where
                 Poll::Ready(Some(Ok(chunk)))
             }
             Poll::Ready(Some(Err(err))) => {
+                if self.ctx.ws_request.is_some()
+                    && err
+                        .downcast_ref::<crate::gateway::responses_ws::gate::LocalStreamFailure>()
+                        .is_some()
+                {
+                    self.ctx.provider_health_neutral = true;
+                }
                 let completion_seen = self.tracker.completion_seen();
-                let codex_successish = is_codex_stream_tail_error_successish(
-                    &self.ctx.cli_key,
-                    &self.ctx.path,
-                    self.ctx.status,
-                    self.first_byte_ms.is_some(),
-                    completion_seen,
-                    completion_seen,
-                );
+                let codex_successish = !self.tracker.fake_200_detected()
+                    && is_codex_stream_tail_error_successish(
+                        &self.ctx.cli_key,
+                        &self.ctx.path,
+                        self.ctx.status,
+                        self.first_byte_ms.is_some(),
+                        completion_seen,
+                        completion_seen,
+                    );
                 if codex_successish {
                     emit_gateway_debug_log(
                         &self.ctx.app,
@@ -331,8 +342,45 @@ where
         }
         self.finalized = true;
 
+        let (error_code, incomplete) = if let Some(request) = &self.ctx.ws_request {
+            use crate::shared::mutex_ext::MutexExt;
+            let generation = request.generation.lock_or_recover();
+            let incomplete = generation.incomplete;
+            let error = if incomplete {
+                None
+            } else if generation.failed || (!generation.terminal && error_code.is_none()) {
+                Some(GatewayErrorCode::StreamError.as_str())
+            } else {
+                error_code
+            };
+            response_fixer::push_special_setting(
+                &self.ctx.special_settings,
+                serde_json::json!({
+                    "type":"codex_responses_transport", "scope":"stream", "providerId":self.ctx.provider_id,
+                    "client_transport":if request.client_ws {"responses_ws"} else {"http"},
+                    "upstream_transport":if generation.upstream_ws {"responses_ws"} else {"http"},
+                    "output_committed":generation.committed, "failure_class":if error == Some(GatewayErrorCode::StreamAborted.as_str()) {Some("cancelled")} else if self.ctx.provider_health_neutral && error.is_some() {Some("local")} else if generation.failed {Some("provider")}else if error.is_some(){Some("transport")}else{None},
+                    "terminal":if incomplete {"incomplete"}else if error.is_some(){"failed"}else{"completed"},
+                }),
+            );
+            drop(generation);
+            request
+                .connection
+                .runtime
+                .finish_generation(request, error.is_none());
+            (error, incomplete)
+        } else {
+            (error_code, false)
+        };
         let usage = self.tracker.finalize();
-        let terminal_signal = if error_code.is_some() {
+        let effective_error_code = if error_code.is_none() && self.tracker.fake_200_detected() {
+            Some(GatewayErrorCode::Fake200.as_str())
+        } else {
+            error_code
+        };
+        let terminal_signal = if incomplete {
+            Some("incomplete")
+        } else if effective_error_code.is_some() {
             Some("error")
         } else if self.tracker.completion_seen() {
             Some("completed")
@@ -350,6 +398,16 @@ where
         // Propagate fake 200 detection from tracker to finalize context.
         if self.tracker.fake_200_detected() {
             self.ctx.fake_200_detected = true;
+            if let Some(reason) = self.tracker.fake_200_reason() {
+                response_fixer::push_special_setting(
+                    &self.ctx.special_settings,
+                    serde_json::json!({
+                        "type": "fake_200_detection",
+                        "scope": "stream",
+                        "reason_code": reason.as_str(),
+                    }),
+                );
+            }
         }
         let usage_metrics = usage.as_ref().map(|u| u.metrics.clone());
         let requested_model = self
@@ -361,7 +419,7 @@ where
         emit_request_event_and_spawn_request_log(
             &self.ctx,
             StreamRequestCompletion::from_error_code(
-                error_code,
+                effective_error_code,
                 self.first_byte_ms,
                 requested_model,
                 usage_metrics,
@@ -374,12 +432,12 @@ where
 
 impl<S, B, R> Stream for UsageSseTeeStream<S, B, R>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,
 {
-    type Item = Result<B, reqwest::Error>;
+    type Item = Result<B, UpstreamStreamError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.as_mut().get_mut();
@@ -389,19 +447,19 @@ where
 
 struct DrainNextFuture<'a, S, B, R>(&'a mut UsageSseTeeStream<S, B, R>)
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin;
 
 impl<'a, S, B, R> Future for DrainNextFuture<'a, S, B, R>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,
 {
-    type Output = Option<Result<B, reqwest::Error>>;
+    type Output = Option<Result<B, UpstreamStreamError>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.0.poll_next_inner(cx, false)
@@ -410,9 +468,9 @@ where
 
 async fn next_drain_item<S, B, R>(
     stream: &mut UsageSseTeeStream<S, B, R>,
-) -> Option<Result<B, reqwest::Error>>
+) -> Option<Result<B, UpstreamStreamError>>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,
@@ -422,28 +480,37 @@ where
 
 impl<S, B, R> Drop for UsageSseTeeStream<S, B, R>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,
 {
     fn drop(&mut self) {
         if !self.finalized {
+            if let Some(request) = &self.ctx.ws_request {
+                use crate::shared::mutex_ext::MutexExt;
+                if request.generation.lock_or_recover().terminal {
+                    self.finalize(None);
+                    return;
+                }
+            }
             // Best-effort flush for trailing partial SSE data before deciding abort/success.
             let usage = self.tracker.finalize();
             let usage_seen = usage.is_some();
             let completion_seen = self.tracker.completion_seen();
             let terminal_error_seen = self.tracker.terminal_error_seen();
 
-            let codex_successish = is_codex_drop_successish(
-                &self.ctx.cli_key,
-                &self.ctx.path,
-                self.ctx.status,
-                self.first_byte_ms.is_some(),
-                completion_seen,
-                usage_seen,
-                terminal_error_seen,
-            );
+            let codex_successish = self.ctx.ws_request.is_none()
+                && !self.tracker.fake_200_detected()
+                && is_codex_drop_successish(
+                    &self.ctx.cli_key,
+                    &self.ctx.path,
+                    self.ctx.status,
+                    self.first_byte_ms.is_some(),
+                    completion_seen,
+                    usage_seen,
+                    terminal_error_seen,
+                );
 
             if codex_successish {
                 self.finalize(None);
@@ -463,12 +530,12 @@ pub(in crate::gateway) fn spawn_usage_sse_relay_body<S, R>(
     initial_first_byte_ms: Option<u128>,
 ) -> Body
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin + Send + 'static,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin + Send + 'static,
     R: tauri::Runtime + 'static,
     R::Handle: Unpin,
 {
     let (tx, rx) =
-        tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(SSE_RELAY_BUFFER_CAPACITY);
+        tokio::sync::mpsc::channel::<Result<Bytes, UpstreamStreamError>>(SSE_RELAY_BUFFER_CAPACITY);
 
     let mut tee = UsageSseTeeStream::new(upstream, ctx, idle_timeout, initial_first_byte_ms)
         .with_defer_terminal_error();
@@ -609,14 +676,15 @@ where
             // For Codex /v1/responses, completion_seen implies response.completed
             // was received (which carries usage). We treat this as a proxy for
             // usage_seen to avoid consuming tracker state before tee.finalize().
-            let codex_successish = is_codex_stream_terminal_error_successish(
-                &tee.ctx.cli_key,
-                &tee.ctx.path,
-                tee.ctx.status,
-                saw_stream_output,
-                completion_seen,
-                completion_seen,
-            );
+            let codex_successish = !tee.tracker.fake_200_detected()
+                && is_codex_stream_terminal_error_successish(
+                    &tee.ctx.cli_key,
+                    &tee.ctx.path,
+                    tee.ctx.status,
+                    saw_stream_output,
+                    completion_seen,
+                    completion_seen,
+                );
 
             if codex_successish {
                 tee.finalize(None);
@@ -673,16 +741,17 @@ where
             // Codex SSE: 2xx + saw output + no terminal error => treat client disconnect as success.
             // Do NOT require completion_seen: ChatGPT backend's response.completed may arrive
             // after the client disconnects and the drain window may not capture it.
-            let codex_successish = is_codex_client_abort_successish(
-                &tee.ctx.cli_key,
-                &tee.ctx.path,
-                tee.ctx.status,
-                saw_stream_output,
-                completion_seen,
-                usage_seen,
-                terminal_error_seen,
-                upstream_ended_normally,
-            );
+            let codex_successish = !tee.tracker.fake_200_detected()
+                && is_codex_client_abort_successish(
+                    &tee.ctx.cli_key,
+                    &tee.ctx.path,
+                    tee.ctx.status,
+                    saw_stream_output,
+                    completion_seen,
+                    usage_seen,
+                    terminal_error_seen,
+                    upstream_ended_normally,
+                );
             if codex_successish {
                 tee.finalize(None);
             } else {
@@ -696,7 +765,7 @@ where
 
 pub(in crate::gateway) struct UsageBodyBufferTeeStream<S, B, R = tauri::Wry>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,
@@ -714,7 +783,7 @@ where
 
 impl<S, B, R> UsageBodyBufferTeeStream<S, B, R>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,
@@ -745,11 +814,14 @@ where
         }
         self.finalized = true;
 
-        let effective_error_code = if error_code.is_none()
-            && !self.truncated
-            && !self.buffer.is_empty()
-            && is_fake_200_non_stream_body(&self.buffer)
-        {
+        let detection = (!self.truncated).then(|| {
+            detect_fake_200_non_stream_body(
+                &self.buffer,
+                Fake200Profile::for_request(&self.ctx.cli_key, &self.ctx.path),
+            )
+        });
+        let detection = detection.flatten();
+        let effective_error_code = if error_code.is_none() && detection.is_some() {
             Some(GatewayErrorCode::Fake200.as_str())
         } else {
             error_code
@@ -758,6 +830,16 @@ where
             self.ctx.fake_200_detected = true;
             self.ctx.fake_200_quota_exhausted =
                 upstream_client_error_rules::match_quota_exhausted(&self.buffer);
+            if let Some(detection) = detection {
+                response_fixer::push_special_setting(
+                    &self.ctx.special_settings,
+                    serde_json::json!({
+                        "type": "fake_200_detection",
+                        "scope": "response",
+                        "reason_code": detection.reason.as_str(),
+                    }),
+                );
+            }
         }
 
         let usage = if self.truncated || self.buffer.is_empty() {
@@ -789,12 +871,12 @@ where
 
 impl<S, B, R> Stream for UsageBodyBufferTeeStream<S, B, R>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,
 {
-    type Item = Result<B, reqwest::Error>;
+    type Item = Result<B, UpstreamStreamError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.as_mut().get_mut();
@@ -846,7 +928,7 @@ where
 
 impl<S, B, R> Drop for UsageBodyBufferTeeStream<S, B, R>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,
@@ -886,6 +968,7 @@ mod tests {
     use crate::gateway::active_requests::{ActiveRequestRegistry, ActiveRequestStart};
     use crate::gateway::proxy::GatewayErrorCode;
     use crate::gateway::streams::StreamActivityTracker;
+    use crate::gateway::streams::UpstreamStreamError;
     use crate::{circuit_breaker, db, request_logs, session_manager};
     use axum::body::Bytes;
     use std::collections::HashMap;
@@ -899,6 +982,7 @@ mod tests {
         active_requests: Arc<ActiveRequestRegistry>,
     ) -> StreamFinalizeCtx<tauri::test::MockRuntime> {
         StreamFinalizeCtx {
+            ws_request: None,
             app,
             db,
             log_tx,
@@ -920,6 +1004,7 @@ mod tests {
             query: None,
             excluded_from_stats: false,
             special_settings: Arc::new(Mutex::new(Vec::new())),
+            provider_health_neutral: false,
             status: 200,
             error_category: None,
             error_code: None,
@@ -1280,7 +1365,7 @@ mod tests {
         active_requests.register(active_request_start("trace-usage-tee-drain"));
         let ctx = test_stream_finalize_ctx(app_handle, db, log_tx, active_requests.clone());
         let (upstream_tx, upstream_rx) =
-            tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(4);
+            tokio::sync::mpsc::channel::<Result<Bytes, UpstreamStreamError>>(4);
 
         let body = spawn_usage_sse_relay_body(
             RelayBodyStream::new(upstream_rx),
@@ -1344,7 +1429,7 @@ mod tests {
         active_requests.register(active_request_start("trace-usage-tee-drain"));
         let ctx = test_stream_finalize_ctx(app.handle().clone(), db, log_tx, active_requests);
         let (upstream_tx, upstream_rx) =
-            tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(4);
+            tokio::sync::mpsc::channel::<Result<Bytes, UpstreamStreamError>>(4);
 
         let body = spawn_usage_sse_relay_body(
             RelayBodyStream::new(upstream_rx),
@@ -1404,7 +1489,7 @@ mod tests {
         active_requests.register(active_request_start("trace-usage-tee-drain"));
         let ctx = test_stream_finalize_ctx(app.handle().clone(), db, log_tx, active_requests);
         let (upstream_tx, upstream_rx) =
-            tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(4);
+            tokio::sync::mpsc::channel::<Result<Bytes, UpstreamStreamError>>(4);
 
         let body = spawn_usage_sse_relay_body(RelayBodyStream::new(upstream_rx), ctx, None, None);
         let mut body_stream = body.into_data_stream();

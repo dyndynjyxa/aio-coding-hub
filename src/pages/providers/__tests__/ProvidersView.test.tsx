@@ -178,6 +178,10 @@ function dragProviderPool(event: any) {
   dndContextDragHandlers[0]?.(event);
 }
 
+// jsdom 未实现 scrollIntoView：集中打桩一次，由 afterEach 清计数，避免跨用例累积调用记录。
+const scrollIntoViewMock = vi.fn();
+Element.prototype.scrollIntoView = scrollIntoViewMock;
+
 beforeEach(() => {
   dndContextDragHandlers = [];
   vi.mocked(copyText).mockResolvedValue(undefined);
@@ -235,9 +239,110 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   sortableIsDragging = false;
+  scrollIntoViewMock.mockClear();
 });
 
 describe("pages/providers/ProvidersView", () => {
+  it("shows the active sort mode when entering the providers page", async () => {
+    vi.mocked(useProvidersListQuery).mockReturnValue({
+      data: [
+        {
+          id: 1,
+          cli_key: "claude",
+          name: "P1",
+          enabled: true,
+          base_urls: ["https://a"],
+          base_url_mode: "order",
+          cost_multiplier: 1,
+          claude_models: {},
+        },
+      ],
+      isFetching: false,
+    } as any);
+    vi.mocked(useDefaultRouteProvidersQuery).mockReturnValue({
+      data: [{ provider_id: 1 }],
+      isFetching: false,
+    } as any);
+    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useProviderSetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProviderDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProvidersReorderMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+    } as any);
+    vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useSortModesListQuery).mockReturnValue({
+      data: [{ id: 10, name: "Review", created_at: 1, updated_at: 1 }],
+      isLoading: false,
+    } as any);
+    vi.mocked(useSortModeActiveListQuery).mockReturnValue({
+      data: [{ cli_key: "claude", mode_id: 10 }],
+      isLoading: false,
+    } as any);
+    vi.mocked(useSortModeProvidersListQuery).mockReturnValue({
+      data: [{ provider_id: 1, enabled: true }],
+      isFetching: false,
+    } as any);
+
+    renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "选择调用顺序" })).toHaveValue("mode:10")
+    );
+    expect(screen.getByText("Review 按照从上到下依次调用")).toBeInTheDocument();
+    expect(useSortModeProvidersListQuery).toHaveBeenLastCalledWith(
+      { modeId: 10, cliKey: "claude" },
+      { enabled: true }
+    );
+  });
+
+  it("does not overwrite a manually selected order when active-mode data refreshes", async () => {
+    vi.mocked(useProvidersListQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useSortModesListQuery).mockReturnValue({
+      data: [
+        { id: 10, name: "Review", created_at: 1, updated_at: 1 },
+        { id: 20, name: "Work", created_at: 1, updated_at: 1 },
+      ],
+      isLoading: false,
+    } as any);
+    vi.mocked(useSortModeActiveListQuery).mockReturnValue({
+      data: [{ cli_key: "claude", mode_id: 10 }],
+      isLoading: false,
+    } as any);
+
+    const { result, rerender } = renderHook(() => useProvidersViewDataModel("claude"), {
+      wrapper: queryWrapper(),
+    });
+
+    await waitFor(() =>
+      expect(result.current.routeDraftSelection).toEqual({ kind: "mode", modeId: 10 })
+    );
+
+    act(() => result.current.selectRouteDraft("mode:20"));
+    expect(result.current.routeDraftSelection).toEqual({ kind: "mode", modeId: 20 });
+
+    vi.mocked(useSortModeActiveListQuery).mockReturnValue({
+      data: [{ cli_key: "claude", mode_id: 10 }],
+      isLoading: false,
+    } as any);
+    rerender();
+
+    expect(result.current.routeDraftSelection).toEqual({ kind: "mode", modeId: 20 });
+  });
+
   it("treats cooldown-only circuits as unavailable for reset-all visibility", () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_700_000_000_000);
@@ -283,7 +388,9 @@ describe("pages/providers/ProvidersView", () => {
     renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
 
     expect(screen.getByRole("button", { name: "解除熔断（全部）" })).toBeInTheDocument();
-    expect(screen.getByText(/^熔断\s*00:30$/)).toBeInTheDocument();
+    // 冷却正名：卡片显示“冷却中”而非“熔断”。
+    expect(screen.getByText(/^冷却中\s*00:30$/)).toBeInTheDocument();
+    expect(screen.queryByText(/^熔断\s*00:30$/)).not.toBeInTheDocument();
   });
 
   it("does not show reset-all visibility for HALF_OPEN probe state", () => {
@@ -330,8 +437,10 @@ describe("pages/providers/ProvidersView", () => {
 
     renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
 
+    // 仅半开：全局“解除熔断（全部）”不显示，但卡片级徽章与解除按钮可见。
     expect(screen.queryByRole("button", { name: "解除熔断（全部）" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "解除熔断" })).not.toBeInTheDocument();
+    expect(screen.getByText("试探恢复中")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "解除熔断" })).toBeInTheDocument();
   });
 
   it("shows cx2cc source provider name on claude cards", () => {
@@ -1129,6 +1238,114 @@ describe("pages/providers/ProvidersView", () => {
     expect(screen.getAllByText("Alpha Relay").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Beta Gateway").length).toBeGreaterThan(0);
     expect(screen.getByText("共 2 / 2 条")).toBeInTheDocument();
+  });
+
+  const LOCATE_PROVIDERS = [
+    {
+      id: 1,
+      cli_key: "claude",
+      name: "Alpha Relay",
+      enabled: true,
+      base_urls: ["https://a"],
+      base_url_mode: "order",
+      cost_multiplier: 1,
+      claude_models: {},
+      tags: ["prod"],
+    },
+    {
+      id: 2,
+      cli_key: "claude",
+      name: "Beta Gateway",
+      enabled: true,
+      base_urls: ["https://b"],
+      base_url_mode: "ping",
+      cost_multiplier: 1,
+      claude_models: {},
+      tags: ["prod"],
+    },
+  ] as any[];
+
+  function renderLocateScenario(
+    routeRows: Array<{ provider_id: number }> = [{ provider_id: 1 }, { provider_id: 2 }]
+  ) {
+    vi.mocked(useProvidersListQuery).mockReturnValue({
+      data: LOCATE_PROVIDERS,
+      isFetching: false,
+    } as any);
+    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useProviderSetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProviderDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProvidersReorderMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useDefaultRouteProvidersQuery).mockReturnValue({
+      data: routeRows,
+      isFetching: false,
+    } as any);
+    vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+    } as any);
+    vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+
+    renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
+  }
+
+  it("locates a provider card from the route order, clearing filters first", async () => {
+    renderLocateScenario();
+
+    // Filtering hides Alpha Relay from the pool list (only the route sidebar copy remains).
+    fireEvent.change(screen.getByRole("textbox", { name: "搜索供应商名称" }), {
+      target: { value: "beta" },
+    });
+    expect(screen.getByText("共 1 / 2 条")).toBeInTheDocument();
+    expect(screen.getAllByText("Alpha Relay")).toHaveLength(1);
+
+    // Locate from the route order: clears the search filter and scrolls to the card.
+    fireEvent.click(screen.getByRole("button", { name: "定位 Alpha Relay 到供应商卡片" }));
+
+    await waitFor(() => expect(screen.getByText("共 2 / 2 条")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText("Alpha Relay").length).toBeGreaterThan(1));
+    await waitFor(() =>
+      expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth", block: "start" })
+    );
+  });
+
+  it("locates a provider card even when no filter is active", async () => {
+    renderLocateScenario();
+
+    // 无过滤时清空过滤不改变过滤结果，定位仍必须滚动：守住「靠 filteredProviders 换引用才生效」的回归。
+    expect(screen.getByText("共 2 / 2 条")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "定位 Alpha Relay 到供应商卡片" }));
+
+    await waitFor(() =>
+      expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth", block: "start" })
+    );
+  });
+
+  it("disables the locate button when the route row provider is missing", () => {
+    renderLocateScenario([{ provider_id: 1 }, { provider_id: 3 }]);
+
+    expect(
+      screen.getByRole("button", { name: "定位 未知 Provider #3 到供应商卡片" })
+    ).toBeDisabled();
+  });
+
+  it("does not scroll again when the list changes after a locate", async () => {
+    renderLocateScenario();
+
+    fireEvent.click(screen.getByRole("button", { name: "定位 Alpha Relay 到供应商卡片" }));
+    await waitFor(() => expect(scrollIntoViewMock).toHaveBeenCalledTimes(1));
+    scrollIntoViewMock.mockClear();
+
+    // 定位意图已被消费：后续过滤变化不得再触发滚动。
+    fireEvent.change(screen.getByRole("textbox", { name: "搜索供应商名称" }), {
+      target: { value: "alpha" },
+    });
+    await waitFor(() => expect(screen.getByText("共 1 / 2 条")).toBeInTheDocument());
+    expect(scrollIntoViewMock).not.toHaveBeenCalled();
   });
 
   it("lets sort mode providers be re-enabled from the route order switch", async () => {
@@ -2247,6 +2464,29 @@ describe("pages/providers/ProvidersView", () => {
     expect(toast).toHaveBeenCalledWith("P1: 不可用 — 未知错误");
     expect(toast).toHaveBeenCalledWith("测试失败：Error: probe down");
     expect(testMutation.mutateAsync).toHaveBeenCalledTimes(4);
+
+    // The test dialog holds its target in the view model and forwards its overrides to the probe.
+    act(() => {
+      result.current.setTestTarget(provider);
+    });
+    expect(result.current.testTarget).toBe(provider);
+
+    await act(async () => {
+      await result.current.testProviderAvailability(provider, {
+        model: "grok-4.6",
+        prompt: "你好",
+      });
+    });
+    expect(testMutation.mutateAsync).toHaveBeenLastCalledWith({
+      providerId: 1,
+      model: "grok-4.6",
+      prompt: "你好",
+    });
+
+    act(() => {
+      result.current.setTestTarget(null);
+    });
+    expect(result.current.testTarget).toBeNull();
   });
 
   it("persists default route add, remove, drag, and error branches", async () => {

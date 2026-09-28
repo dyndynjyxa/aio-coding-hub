@@ -37,7 +37,15 @@ function makeSavedProvider(partial: Partial<ProviderSummary> = {}): ProviderSumm
     oauth_last_error: partial.oauth_last_error ?? null,
     source_provider_id: partial.source_provider_id ?? null,
     bridge_type: partial.bridge_type ?? null,
+    model_policy_status: partial.model_policy_status ?? "ready",
+    model_policy: partial.model_policy ?? {
+      version: 1,
+      mode: "all",
+      modelPatterns: [],
+      mappings: [],
+    },
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,
+    supports_websockets: partial.supports_websockets ?? false,
     extension_values: partial.extension_values ?? [],
     custom_headers: partial.custom_headers ?? [],
     api_key_configured: partial.api_key_configured ?? true,
@@ -64,8 +72,11 @@ function makeContext(overrides: Partial<SaveActionContext> = {}): SaveActionCont
     baseUrlRows: [{ id: "1", url: "https://example.com/v1", ping: { status: "idle" } }],
     tags: [],
     claudeModels: {},
+    modelPolicyStatus: "ready",
+    modelPolicy: { version: 1, mode: "all", modelPatterns: [], mappings: [] },
     streamIdleTimeoutSeconds: "",
     customHeaders: [],
+    supportsWebsockets: false,
     apiKeyConfigured: false,
     isCodexGatewaySource: false,
     sourceProviderId: null,
@@ -146,7 +157,7 @@ describe("pages/providers/providerEditorSaveRunner", () => {
       shouldDirty: false,
       shouldValidate: false,
     });
-    expect(ctx.onOpenChange).toHaveBeenCalledWith(false);
+    expect(ctx.onOpenChange).toHaveBeenCalledWith(false, { bypassDirty: true });
     expect(ctx.setSaving).toHaveBeenLastCalledWith(false);
   });
 });

@@ -388,6 +388,8 @@ fn desktop_open_allowed_roots<R: tauri::Runtime>(
     let effective_codex_home_dir =
         crate::infra::codex_paths::codex_home_dir(app).map_err(|error| error.to_string())?;
     let configured_codex_home_dir = crate::infra::codex_paths::configured_codex_home_dir(app);
+    let grok_home_dir =
+        crate::infra::grok_config::grok_home_dir(app).map_err(|error| error.to_string())?;
 
     let mut roots = Vec::new();
     push_desktop_open_root(&mut roots, app_data_dir);
@@ -396,6 +398,7 @@ fn desktop_open_allowed_roots<R: tauri::Runtime>(
     push_desktop_open_root(&mut roots, user_default_codex_home_dir);
     push_desktop_open_root(&mut roots, follow_codex_home_dir);
     push_desktop_open_root(&mut roots, effective_codex_home_dir);
+    push_desktop_open_root(&mut roots, grok_home_dir);
     if let Some(configured_codex_home_dir) = configured_codex_home_dir {
         push_desktop_open_root(&mut roots, configured_codex_home_dir);
     }
@@ -833,6 +836,36 @@ mod tests {
         let app_handle = test_app.handle();
         let custom_home = test_app.home_dir.path().join("custom-codex-home");
         write_custom_codex_home(&app_handle, &custom_home);
+
+        let config_path = custom_home.join("config.toml");
+
+        assert!(ensure_desktop_open_path_allowed(&app_handle, &config_path).is_ok());
+    }
+
+    #[test]
+    fn desktop_open_allowed_roots_include_only_effective_grok_home() {
+        let mut test_app = DesktopCommandTestApp::new();
+        let app_handle = test_app.handle();
+        let default_home = test_app.home_dir.path().join(".grok");
+        let custom_home = test_app.home_dir.path().join("custom-grok-home");
+        test_app
+            .env_restore
+            .set_var("GROK_HOME", custom_home.as_os_str().to_os_string());
+
+        let allowed_roots = desktop_open_allowed_roots(&app_handle).expect("allowed roots");
+
+        assert!(allowed_roots.contains(&normalize_existing_path(custom_home)));
+        assert!(!allowed_roots.contains(&normalize_existing_path(default_home)));
+    }
+
+    #[test]
+    fn desktop_open_path_allows_paths_under_effective_grok_home() {
+        let mut test_app = DesktopCommandTestApp::new();
+        let app_handle = test_app.handle();
+        let custom_home = test_app.home_dir.path().join("custom-grok-home");
+        test_app
+            .env_restore
+            .set_var("GROK_HOME", custom_home.as_os_str().to_os_string());
 
         let config_path = custom_home.join("config.toml");
 

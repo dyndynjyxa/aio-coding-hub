@@ -63,10 +63,16 @@ fn detect_trigger_invalid_request_with_thinking_context() {
 }
 
 #[test]
-fn detect_trigger_invalid_request_without_thinking_context_returns_none() {
-    assert_eq!(detect_trigger("非法请求"), None);
-    assert_eq!(detect_trigger("illegal request format"), None);
-    assert_eq!(detect_trigger("invalid request: malformed JSON"), None);
+fn detect_trigger_generic_invalid_request_matches_cch_fallback() {
+    assert_eq!(detect_trigger("非法请求"), Some(TRIGGER_INVALID_REQUEST));
+    assert_eq!(
+        detect_trigger("illegal request format"),
+        Some(TRIGGER_INVALID_REQUEST)
+    );
+    assert_eq!(
+        detect_trigger("invalid request: malformed JSON"),
+        Some(TRIGGER_INVALID_REQUEST)
+    );
 }
 
 #[test]

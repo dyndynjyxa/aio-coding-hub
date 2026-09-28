@@ -6,7 +6,7 @@ use crate::gateway_control::{
     app_start_gateway_with_config, try_app_gateway_update_circuit_config,
 };
 use crate::gateway_runtime_access::app_gateway_status;
-use crate::{blocking, cli_proxy, resident, settings};
+use crate::{blocking, resident, settings};
 use tauri::Manager;
 
 fn read_settings_for_update<R: tauri::Runtime>(
@@ -57,8 +57,12 @@ pub(crate) struct SettingsUpdate {
     pub upstream_stream_idle_timeout_seconds: Option<u32>,
     pub upstream_request_timeout_non_streaming_seconds: Option<u32>,
     pub intercept_anthropic_warmup_requests: Option<bool>,
+    pub enable_thinking_effort_conflict_rectifier: Option<bool>,
     pub enable_thinking_signature_rectifier: Option<bool>,
     pub enable_thinking_budget_rectifier: Option<bool>,
+    pub enable_gemini_function_id_rectifier: Option<bool>,
+    pub enable_response_input_rectifier: Option<bool>,
+    pub codex_priority_billing_source: Option<settings::CodexPriorityBillingSource>,
     pub enable_billing_header_rectifier: Option<bool>,
     pub enable_claude_metadata_user_id_injection: Option<bool>,
     pub enable_cache_anomaly_monitor: Option<bool>,
@@ -83,6 +87,7 @@ pub(crate) struct SettingsUpdate {
     pub codex_home_mode: Option<settings::CodexHomeMode>,
     pub codex_home_override: Option<String>,
     pub codex_oauth_compatible_proxy_mode: Option<bool>,
+    pub codex_responses_websocket_enabled: Option<bool>,
     #[serde(rename = "cx2CcFallbackModelOpus")]
     #[specta(rename = "cx2CcFallbackModelOpus")]
     pub cx2cc_fallback_model_opus: Option<String>,
@@ -147,6 +152,7 @@ pub(crate) struct SettingsView {
     pub codex_home_mode: settings::CodexHomeMode,
     pub codex_home_override: String,
     pub codex_oauth_compatible_proxy_mode: bool,
+    pub codex_responses_websocket_enabled: bool,
     pub auto_start: bool,
     pub start_minimized: bool,
     pub tray_enabled: bool,
@@ -166,8 +172,12 @@ pub(crate) struct SettingsView {
     pub enable_circuit_breaker_notice: bool,
     pub verbose_provider_error: bool,
     pub intercept_anthropic_warmup_requests: bool,
+    pub enable_thinking_effort_conflict_rectifier: bool,
     pub enable_thinking_signature_rectifier: bool,
     pub enable_thinking_budget_rectifier: bool,
+    pub enable_gemini_function_id_rectifier: bool,
+    pub enable_response_input_rectifier: bool,
+    pub codex_priority_billing_source: settings::CodexPriorityBillingSource,
     pub enable_billing_header_rectifier: bool,
     pub enable_codex_session_id_completion: bool,
     pub enable_claude_metadata_user_id_injection: bool,
@@ -198,10 +208,21 @@ pub(crate) struct SettingsView {
     pub upstream_proxy_password_configured: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CodexProxySyncStatus {
+    NotRequested,
+    NotManaged,
+    Deferred,
+    Synced,
+    Failed,
+}
+
 #[derive(Debug, Clone, serde::Serialize, specta::Type)]
 pub(crate) struct SettingsMutationRuntime {
     pub gateway_rebound: bool,
     pub cli_proxy_synced: bool,
+    pub codex_proxy_sync: CodexProxySyncStatus,
     pub wsl_auto_sync_triggered: bool,
     pub gateway_status: crate::gateway::GatewayStatus,
 }
@@ -217,8 +238,12 @@ pub(crate) struct SettingsMutationResult {
 pub(crate) struct GatewayRectifierSettingsUpdate {
     pub verbose_provider_error: bool,
     pub intercept_anthropic_warmup_requests: bool,
+    pub enable_thinking_effort_conflict_rectifier: bool,
     pub enable_thinking_signature_rectifier: bool,
     pub enable_thinking_budget_rectifier: bool,
+    pub enable_gemini_function_id_rectifier: bool,
+    pub enable_response_input_rectifier: bool,
+    pub codex_priority_billing_source: settings::CodexPriorityBillingSource,
     pub enable_billing_header_rectifier: bool,
     pub enable_claude_metadata_user_id_injection: bool,
     pub enable_response_fixer: bool,
@@ -267,6 +292,7 @@ impl From<&settings::AppSettings> for SettingsView {
             codex_home_mode: value.codex_home_mode,
             codex_home_override: value.codex_home_override.clone(),
             codex_oauth_compatible_proxy_mode: value.codex_oauth_compatible_proxy_mode,
+            codex_responses_websocket_enabled: value.codex_responses_websocket_enabled,
             auto_start: value.auto_start,
             start_minimized: value.start_minimized,
             tray_enabled: value.tray_enabled,
@@ -288,8 +314,13 @@ impl From<&settings::AppSettings> for SettingsView {
             enable_circuit_breaker_notice: value.enable_circuit_breaker_notice,
             verbose_provider_error: value.verbose_provider_error,
             intercept_anthropic_warmup_requests: value.intercept_anthropic_warmup_requests,
+            enable_thinking_effort_conflict_rectifier: value
+                .enable_thinking_effort_conflict_rectifier,
             enable_thinking_signature_rectifier: value.enable_thinking_signature_rectifier,
             enable_thinking_budget_rectifier: value.enable_thinking_budget_rectifier,
+            enable_gemini_function_id_rectifier: value.enable_gemini_function_id_rectifier,
+            enable_response_input_rectifier: value.enable_response_input_rectifier,
+            codex_priority_billing_source: value.codex_priority_billing_source,
             enable_billing_header_rectifier: value.enable_billing_header_rectifier,
             enable_codex_session_id_completion: value.enable_codex_session_id_completion,
             enable_claude_metadata_user_id_injection: value
@@ -330,8 +361,12 @@ impl SettingsRuntimePlan {
             || previous.codex_home_override != next.codex_home_override;
         let codex_proxy_mode_changed =
             previous.codex_oauth_compatible_proxy_mode != next.codex_oauth_compatible_proxy_mode;
-        let cli_proxy_sync_required =
-            gateway_rebind_required || codex_home_changed || codex_proxy_mode_changed;
+        let codex_websocket_changed =
+            previous.codex_responses_websocket_enabled != next.codex_responses_websocket_enabled;
+        let cli_proxy_sync_required = gateway_rebind_required
+            || codex_home_changed
+            || codex_proxy_mode_changed
+            || codex_websocket_changed;
         #[cfg(windows)]
         let wsl_auto_sync_required = next.wsl_auto_config
             && next.gateway_listen_mode != settings::GatewayListenMode::Localhost
@@ -340,6 +375,7 @@ impl SettingsRuntimePlan {
                 || previous.wsl_host_address_mode != next.wsl_host_address_mode
                 || previous.wsl_custom_host_address != next.wsl_custom_host_address
                 || codex_home_changed
+                || codex_websocket_changed
                 || gateway_rebind_required);
         Self {
             gateway_rebind_required,
@@ -361,8 +397,8 @@ fn apply_sensitive_string_update(
     }
 }
 
-fn sync_runtime_side_effects(
-    app: &tauri::AppHandle,
+fn sync_runtime_side_effects<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     next_settings: &settings::AppSettings,
 ) -> Result<(), String> {
     if let Some(resident) = app.try_state::<resident::ResidentState>() {
@@ -376,18 +412,27 @@ fn sync_runtime_side_effects(
     );
 
     crate::gateway::http_client::sync_from_settings(next_settings)?;
+    crate::gateway_control::try_app_gateway_set_responses_websocket_enabled(
+        app,
+        next_settings.codex_responses_websocket_enabled,
+    );
     Ok(())
 }
 
-fn current_gateway_status(app: &tauri::AppHandle) -> crate::gateway::GatewayStatus {
+fn current_gateway_status<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::gateway::GatewayStatus {
     app_gateway_status(app)
 }
 
-async fn start_gateway_with_settings_unlocked(
-    app: &tauri::AppHandle,
+async fn start_gateway_with_settings_unlocked<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     db_state: &DbInitState,
     next_settings: &settings::AppSettings,
-) -> Result<crate::gateway::control_service::GatewayStartResult, String> {
+) -> Result<crate::gateway::control_service::GatewayStartResult, String>
+where
+    R::Handle: Unpin,
+{
     let db = ensure_db_ready(app.clone(), db_state).await?;
     let next_settings = next_settings.clone();
     let start_result = blocking::run("settings_set_gateway_start", {
@@ -404,16 +449,11 @@ async fn start_gateway_with_settings_unlocked(
     })
     .await?;
 
-    crate::app::heartbeat_watchdog::gated_emit(
-        app,
-        GATEWAY_STATUS_EVENT_NAME,
-        start_result.status.clone(),
-    );
     Ok(start_result)
 }
 
-async fn write_settings_snapshot(
-    app: &tauri::AppHandle,
+async fn write_settings_snapshot<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     next_settings: &settings::AppSettings,
 ) -> Result<settings::AppSettings, String> {
     let next_settings = next_settings.clone();
@@ -425,21 +465,24 @@ async fn write_settings_snapshot(
     .map_err(Into::into)
 }
 
-async fn restore_previous_runtime(
-    app: &tauri::AppHandle,
+async fn restore_previous_runtime<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     db_state: &DbInitState,
     previous_settings: &settings::AppSettings,
     previous_gateway_status: &crate::gateway::GatewayStatus,
-) -> crate::gateway::GatewayStatus {
+) -> crate::gateway::GatewayStatus
+where
+    R::Handle: Unpin,
+{
     let _ = sync_runtime_side_effects(app, previous_settings);
 
     if !previous_gateway_status.running {
         return current_gateway_status(app);
     }
 
-    let _gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
     crate::app::cleanup::stop_gateway_best_effort_unlocked(app).await;
-    match start_gateway_with_settings_unlocked(app, db_state, previous_settings).await {
+    let status = match start_gateway_with_settings_unlocked(app, db_state, previous_settings).await
+    {
         Ok(result) => result.status,
         Err(err) => {
             tracing::error!(
@@ -448,15 +491,20 @@ async fn restore_previous_runtime(
             );
             current_gateway_status(app)
         }
-    }
+    };
+    super::gateway_service::reconcile_cli_proxy_unlocked(app).await;
+    status
 }
 
-async fn rollback_settings_transaction(
-    app: &tauri::AppHandle,
+async fn rollback_settings_transaction<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     db_state: &DbInitState,
     previous_settings: &settings::AppSettings,
     previous_gateway_status: &crate::gateway::GatewayStatus,
-) -> crate::gateway::GatewayStatus {
+) -> crate::gateway::GatewayStatus
+where
+    R::Handle: Unpin,
+{
     let rollback_result = blocking::run("settings_set_rollback", {
         let app = app.clone();
         let previous_settings = previous_settings.clone();
@@ -474,12 +522,11 @@ async fn rollback_settings_transaction(
     restore_previous_runtime(app, db_state, previous_settings, previous_gateway_status).await
 }
 
-async fn sync_cli_proxy_for_settings(
-    app: &tauri::AppHandle,
+async fn sync_cli_proxy_for_settings<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     base_origin: String,
     apply_live: bool,
-) -> bool {
-    let _gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
+) -> (bool, CodexProxySyncStatus) {
     let status = current_gateway_status(app);
     let (base_origin, apply_live) = if status.running {
         (
@@ -497,11 +544,16 @@ async fn sync_cli_proxy_for_settings(
 
     match blocking::run("settings_set_cli_proxy_sync", {
         let app = app.clone();
-        move || cli_proxy::sync_enabled(&app, &base_origin, apply_live)
+        move || crate::cli_proxy::sync_enabled(&app, &base_origin, apply_live)
     })
     .await
     {
         Ok(results) => {
+            crate::app::heartbeat_watchdog::gated_emit(
+                app,
+                GATEWAY_STATUS_EVENT_NAME,
+                current_gateway_status(app),
+            );
             let failed_count = results.iter().filter(|row| !row.ok).count();
             if failed_count > 0 {
                 tracing::warn!(
@@ -511,7 +563,14 @@ async fn sync_cli_proxy_for_settings(
                     "settings update cli proxy sync completed with partial failures"
                 );
             }
-            failed_count == 0
+            let codex = results.iter().find(|row| row.cli_key == "codex");
+            let codex_sync = match codex {
+                None => CodexProxySyncStatus::NotManaged,
+                Some(row) if !row.ok => CodexProxySyncStatus::Failed,
+                Some(_) if !apply_live => CodexProxySyncStatus::Deferred,
+                Some(_) => CodexProxySyncStatus::Synced,
+            };
+            (failed_count == 0, codex_sync)
         }
         Err(err) => {
             tracing::warn!(
@@ -519,7 +578,7 @@ async fn sync_cli_proxy_for_settings(
                 apply_live,
                 "settings update cli proxy sync failed"
             );
-            false
+            (false, CodexProxySyncStatus::Failed)
         }
     }
 }
@@ -537,6 +596,41 @@ pub(crate) async fn settings_set_impl(
     db_state: &DbInitState,
     update: SettingsUpdate,
 ) -> Result<SettingsMutationResult, String> {
+    let (result, _wsl_auto_sync_required) =
+        apply_settings_update(app.clone(), db_state, update).await?;
+    #[cfg(windows)]
+    let result = {
+        let mut result = result;
+        if _wsl_auto_sync_required {
+            match wsl_auto_sync_after_settings(&app).await {
+                Ok(()) => result.runtime.wsl_auto_sync_triggered = true,
+                Err(err) => tracing::warn!("WSL auto-sync after settings change failed: {}", err),
+            }
+        }
+        result
+    };
+    tracing::info!(
+        preferred_port = result.settings.preferred_port,
+        auto_start = result.settings.auto_start,
+        tray_enabled = result.settings.tray_enabled,
+        gateway_rebound = result.runtime.gateway_rebound,
+        cli_proxy_synced = result.runtime.cli_proxy_synced,
+        wsl_auto_sync_triggered = result.runtime.wsl_auto_sync_triggered,
+        "settings updated"
+    );
+    Ok(result)
+}
+
+// IPC and tests share the actual persistence/listener/client transaction. WSL's
+// platform-specific follow-up runs after this owner has released the lifecycle lock.
+pub(crate) async fn apply_settings_update<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    db_state: &DbInitState,
+    update: SettingsUpdate,
+) -> Result<(SettingsMutationResult, bool), String>
+where
+    R::Handle: Unpin,
+{
     let SettingsUpdate {
         preferred_port,
         show_home_heatmap,
@@ -556,8 +650,12 @@ pub(crate) async fn settings_set_impl(
         upstream_stream_idle_timeout_seconds,
         upstream_request_timeout_non_streaming_seconds,
         intercept_anthropic_warmup_requests,
+        enable_thinking_effort_conflict_rectifier,
         enable_thinking_signature_rectifier,
         enable_thinking_budget_rectifier,
+        enable_gemini_function_id_rectifier,
+        enable_response_input_rectifier,
+        codex_priority_billing_source,
         enable_billing_header_rectifier,
         enable_claude_metadata_user_id_injection,
         enable_cache_anomaly_monitor,
@@ -582,6 +680,7 @@ pub(crate) async fn settings_set_impl(
         codex_home_mode,
         codex_home_override,
         codex_oauth_compatible_proxy_mode,
+        codex_responses_websocket_enabled,
         cx2cc_fallback_model_opus,
         cx2cc_fallback_model_sonnet,
         cx2cc_fallback_model_haiku,
@@ -599,6 +698,8 @@ pub(crate) async fn settings_set_impl(
         upstream_proxy_password,
     } = update;
 
+    // Snapshot, rebind, commit, and client sync form one lifecycle transaction.
+    let gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
     let app_for_work = app.clone();
     let (previous_settings, candidate_settings) = blocking::run(
         "settings_set",
@@ -644,6 +745,8 @@ pub(crate) async fn settings_set_impl(
                 .to_string();
             let codex_oauth_compatible_proxy_mode = codex_oauth_compatible_proxy_mode
                 .unwrap_or(previous.codex_oauth_compatible_proxy_mode);
+            let codex_responses_websocket_enabled = codex_responses_websocket_enabled
+                .unwrap_or(previous.codex_responses_websocket_enabled);
             let cx2cc_fallback_model_opus = cx2cc_fallback_model_opus
                 .unwrap_or(previous.cx2cc_fallback_model_opus.clone())
                 .trim()
@@ -713,10 +816,19 @@ pub(crate) async fn settings_set_impl(
                     .unwrap_or(previous.upstream_request_timeout_non_streaming_seconds);
             let intercept_anthropic_warmup_requests = intercept_anthropic_warmup_requests
                 .unwrap_or(previous.intercept_anthropic_warmup_requests);
+            let enable_thinking_effort_conflict_rectifier =
+                enable_thinking_effort_conflict_rectifier
+                    .unwrap_or(previous.enable_thinking_effort_conflict_rectifier);
             let enable_thinking_signature_rectifier = enable_thinking_signature_rectifier
                 .unwrap_or(previous.enable_thinking_signature_rectifier);
             let enable_thinking_budget_rectifier = enable_thinking_budget_rectifier
                 .unwrap_or(previous.enable_thinking_budget_rectifier);
+            let enable_gemini_function_id_rectifier = enable_gemini_function_id_rectifier
+                .unwrap_or(previous.enable_gemini_function_id_rectifier);
+            let enable_response_input_rectifier = enable_response_input_rectifier
+                .unwrap_or(previous.enable_response_input_rectifier);
+            let codex_priority_billing_source = codex_priority_billing_source
+                .unwrap_or(previous.codex_priority_billing_source);
             let enable_billing_header_rectifier =
                 enable_billing_header_rectifier.unwrap_or(previous.enable_billing_header_rectifier);
             let enable_claude_metadata_user_id_injection = enable_claude_metadata_user_id_injection
@@ -766,6 +878,9 @@ pub(crate) async fn settings_set_impl(
                 codex_home_mode,
                 codex_home_override,
                 codex_oauth_compatible_proxy_mode,
+                codex_responses_websocket_enabled,
+                grok_proxy_preferences: previous.grok_proxy_preferences.clone(),
+                image_gen_storage_dir: previous.image_gen_storage_dir.clone(),
                 auto_start: next_auto_start,
                 start_minimized,
                 tray_enabled,
@@ -785,8 +900,12 @@ pub(crate) async fn settings_set_impl(
                 enable_circuit_breaker_notice: previous.enable_circuit_breaker_notice,
                 verbose_provider_error,
                 intercept_anthropic_warmup_requests,
+                enable_thinking_effort_conflict_rectifier,
                 enable_thinking_signature_rectifier,
                 enable_thinking_budget_rectifier,
+                enable_gemini_function_id_rectifier,
+                enable_response_input_rectifier,
+                codex_priority_billing_source,
                 enable_billing_header_rectifier,
                 enable_codex_session_id_completion: previous.enable_codex_session_id_completion,
                 enable_claude_metadata_user_id_injection,
@@ -831,7 +950,6 @@ pub(crate) async fn settings_set_impl(
     let mut gateway_rebound = false;
     let mut committed_settings = candidate_settings.clone();
     if runtime_plan.gateway_rebind_required && previous_gateway_status.running {
-        let _gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
         crate::app::cleanup::stop_gateway_best_effort_unlocked(&app).await;
         match start_gateway_with_settings_unlocked(&app, db_state, &committed_settings).await {
             Ok(start_result) => {
@@ -853,6 +971,7 @@ pub(crate) async fn settings_set_impl(
                         "settings update rollback failed to restore previous gateway runtime"
                     );
                 }
+                super::gateway_service::reconcile_cli_proxy_unlocked(&app).await;
                 return Err(format!(
                     "监听地址未生效，新的运行态重绑失败：{rebind_error}"
                 ));
@@ -901,7 +1020,7 @@ pub(crate) async fn settings_set_impl(
         return Err(format!("保存设置失败：{sync_error}"));
     }
 
-    let cli_proxy_synced = if runtime_plan.cli_proxy_sync_required {
+    let (cli_proxy_synced, codex_proxy_sync) = if runtime_plan.cli_proxy_sync_required {
         let base_origin = if gateway_status.running {
             gateway_status.base_url.clone().unwrap_or_else(|| {
                 format!(
@@ -914,43 +1033,29 @@ pub(crate) async fn settings_set_impl(
         };
         sync_cli_proxy_for_settings(&app, base_origin, gateway_status.running).await
     } else {
-        false
+        (false, CodexProxySyncStatus::NotRequested)
     };
+
+    drop(gateway_lifecycle);
 
     #[cfg(windows)]
-    let wsl_auto_sync_triggered = if runtime_plan.wsl_auto_sync_required {
-        match wsl_auto_sync_after_settings(&app).await {
-            Ok(()) => true,
-            Err(err) => {
-                tracing::warn!("WSL auto-sync after settings change failed: {}", err);
-                false
-            }
-        }
-    } else {
-        false
-    };
+    let wsl_auto_sync_required = runtime_plan.wsl_auto_sync_required;
     #[cfg(not(windows))]
-    let wsl_auto_sync_triggered = false;
+    let wsl_auto_sync_required = false;
 
-    tracing::info!(
-        preferred_port = final_settings.preferred_port,
-        auto_start = final_settings.auto_start,
-        tray_enabled = final_settings.tray_enabled,
-        gateway_rebound,
-        cli_proxy_synced,
-        wsl_auto_sync_triggered,
-        "settings updated"
-    );
-
-    Ok(SettingsMutationResult {
-        settings: SettingsView::from(&final_settings),
-        runtime: SettingsMutationRuntime {
-            gateway_rebound,
-            cli_proxy_synced,
-            wsl_auto_sync_triggered,
-            gateway_status,
+    Ok((
+        SettingsMutationResult {
+            settings: SettingsView::from(&final_settings),
+            runtime: SettingsMutationRuntime {
+                gateway_rebound,
+                cli_proxy_synced,
+                codex_proxy_sync,
+                wsl_auto_sync_triggered: false,
+                gateway_status,
+            },
         },
-    })
+        wsl_auto_sync_required,
+    ))
 }
 
 pub(crate) async fn settings_gateway_rectifier_set(
@@ -963,9 +1068,15 @@ pub(crate) async fn settings_gateway_rectifier_set(
             settings.verbose_provider_error = update.verbose_provider_error;
             settings.intercept_anthropic_warmup_requests =
                 update.intercept_anthropic_warmup_requests;
+            settings.enable_thinking_effort_conflict_rectifier =
+                update.enable_thinking_effort_conflict_rectifier;
             settings.enable_thinking_signature_rectifier =
                 update.enable_thinking_signature_rectifier;
             settings.enable_thinking_budget_rectifier = update.enable_thinking_budget_rectifier;
+            settings.enable_gemini_function_id_rectifier =
+                update.enable_gemini_function_id_rectifier;
+            settings.enable_response_input_rectifier = update.enable_response_input_rectifier;
+            settings.codex_priority_billing_source = update.codex_priority_billing_source;
             settings.enable_billing_header_rectifier = update.enable_billing_header_rectifier;
             settings.enable_claude_metadata_user_id_injection =
                 update.enable_claude_metadata_user_id_injection;
@@ -985,8 +1096,13 @@ pub(crate) async fn settings_gateway_rectifier_set(
         tracing::info!(
             verbose_provider_error = settings.verbose_provider_error,
             intercept_anthropic_warmup_requests = settings.intercept_anthropic_warmup_requests,
+            enable_thinking_effort_conflict_rectifier =
+                settings.enable_thinking_effort_conflict_rectifier,
             enable_thinking_signature_rectifier = settings.enable_thinking_signature_rectifier,
             enable_thinking_budget_rectifier = settings.enable_thinking_budget_rectifier,
+            enable_gemini_function_id_rectifier = settings.enable_gemini_function_id_rectifier,
+            enable_response_input_rectifier = settings.enable_response_input_rectifier,
+            codex_priority_billing_source = ?settings.codex_priority_billing_source,
             enable_billing_header_rectifier = settings.enable_billing_header_rectifier,
             enable_claude_metadata_user_id_injection =
                 settings.enable_claude_metadata_user_id_injection,
@@ -1038,6 +1154,28 @@ async fn wsl_auto_sync_after_settings(app: &tauri::AppHandle) -> Result<(), Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn websocket_settings_contract_preserves_optional_update_and_syncs_cli() {
+        let base = serde_json::json!({ "preferredPort": 37123, "autoStart": false, "logRetentionDays": 7, "failoverMaxAttemptsPerProvider": 2, "failoverMaxProvidersToTry": 3 });
+        let absent: SettingsUpdate = serde_json::from_value(base.clone()).unwrap();
+        assert!(absent.codex_responses_websocket_enabled.is_none());
+        let mut present = base;
+        present["codexResponsesWebsocketEnabled"] = serde_json::json!(true);
+        let update: SettingsUpdate = serde_json::from_value(present).unwrap();
+        assert_eq!(update.codex_responses_websocket_enabled, Some(true));
+        let previous = settings::AppSettings::default();
+        let next = settings::AppSettings {
+            codex_responses_websocket_enabled: true,
+            ..previous.clone()
+        };
+        let plan = SettingsRuntimePlan::from_settings(&previous, &next);
+        assert!(plan.cli_proxy_sync_required);
+        assert!(!plan.gateway_rebind_required);
+        let view = serde_json::to_value(SettingsView::from(&next)).unwrap();
+        assert_eq!(view["codex_responses_websocket_enabled"], true);
+        assert!(view.get("codexResponsesWebsocketEnabled").is_none());
+    }
 
     #[test]
     fn settings_update_deserializes_cx2cc_fields_from_specta_keys() {

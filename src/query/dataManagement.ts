@@ -16,7 +16,6 @@ import {
 import type { GatewayStatus } from "../services/gateway/gateway";
 import {
   cliProxyKeys,
-  costKeys,
   dataManagementKeys,
   gatewayKeys,
   mcpKeys,
@@ -75,7 +74,6 @@ const APP_DATA_RESET_REMOVED_QUERY_KEYS: readonly QueryKey[] = [
   requestLogsKeys.all,
   sortModesKeys.all,
   usageKeys.all,
-  costKeys.all,
   workspacesKeys.all,
   promptsKeys.all,
   mcpKeys.all,

@@ -4,7 +4,7 @@ import { Button } from "../../ui/Button";
 import { TabList } from "../../ui/TabList";
 import { formatInteger } from "../../utils/formatters";
 import { PROVIDER_FILTER_ALL, SCOPE_ITEMS, USAGE_TABLE_TAB_ITEMS } from "./constants";
-import { CacheTrendBody, UsageTableBody } from "./UsageDataPanelBodies";
+import { CacheTrendBody, MetricsTrendBody, UsageTableBody } from "./UsageDataPanelBodies";
 import { UsageAvailabilityPanel } from "../../components/usage/UsageAvailabilityPanel";
 
 function UsageScopeGroup({
@@ -35,12 +35,22 @@ function UsageScopeGroup({
 function UsagePanelTitle({
   tableTab,
   cacheTrendProviderCount,
-}: Pick<UsageDataPanelProps, "tableTab" | "cacheTrendProviderCount">) {
+  metricsTrendProviderCount,
+}: Pick<
+  UsageDataPanelProps,
+  "tableTab" | "cacheTrendProviderCount" | "metricsTrendProviderCount"
+>) {
   if (tableTab === "cacheTrend") {
     if (cacheTrendProviderCount > 0) {
       return `${formatInteger(cacheTrendProviderCount)} 供应商 · 命中率走势`;
     }
     return "命中率走势";
+  }
+  if (tableTab === "metricsTrend") {
+    if (metricsTrendProviderCount > 0) {
+      return `${formatInteger(metricsTrendProviderCount)} 供应商 · 指标走势`;
+    }
+    return "指标走势";
   }
   return null;
 }
@@ -84,6 +94,7 @@ function UsageDataPanelHeader({
   onChangeScope,
   loading,
   cacheTrendProviderCount,
+  metricsTrendProviderCount,
   providerSelectValue,
   providerOptions,
   onProviderIdChange,
@@ -96,6 +107,7 @@ function UsageDataPanelHeader({
   | "onChangeScope"
   | "loading"
   | "cacheTrendProviderCount"
+  | "metricsTrendProviderCount"
   | "providerSelectValue"
   | "providerOptions"
   | "onProviderIdChange"
@@ -104,6 +116,7 @@ function UsageDataPanelHeader({
   const titleText = UsagePanelTitle({
     tableTab,
     cacheTrendProviderCount,
+    metricsTrendProviderCount,
   });
 
   return (
@@ -194,6 +207,39 @@ function CacheTrendPanelBody({
   );
 }
 
+function MetricsTrendPanelBody({
+  activeStale,
+  metricsTrendLoading,
+  metricsTrendRows,
+  errorText,
+  customPending,
+  period,
+  customApplied,
+}: Pick<
+  UsageDataPanelProps,
+  | "metricsTrendLoading"
+  | "metricsTrendRows"
+  | "errorText"
+  | "customPending"
+  | "period"
+  | "customApplied"
+> & { activeStale: boolean }) {
+  return (
+    <UsageDataPanelScrollArea activeStale={activeStale}>
+      <div className="px-6 pb-6">
+        <MetricsTrendBody
+          metricsTrendLoading={metricsTrendLoading}
+          metricsTrendRows={metricsTrendRows}
+          errorText={errorText}
+          customPending={customPending}
+          period={period}
+          customApplied={customApplied}
+        />
+      </div>
+    </UsageDataPanelScrollArea>
+  );
+}
+
 function UsageTablePanelBody({
   activeStale,
   dataLoading,
@@ -247,6 +293,8 @@ function UsageDataPanelBody({
   activeStale,
   cacheTrendLoading,
   cacheTrendRows,
+  metricsTrendLoading,
+  metricsTrendRows,
   errorText,
   customPending,
   period,
@@ -264,6 +312,8 @@ function UsageDataPanelBody({
   | "tableTab"
   | "cacheTrendLoading"
   | "cacheTrendRows"
+  | "metricsTrendLoading"
+  | "metricsTrendRows"
   | "errorText"
   | "customPending"
   | "period"
@@ -295,6 +345,20 @@ function UsageDataPanelBody({
         activeStale={activeStale}
         cacheTrendLoading={cacheTrendLoading}
         cacheTrendRows={cacheTrendRows}
+        errorText={errorText}
+        customPending={customPending}
+        period={period}
+        customApplied={customApplied}
+      />
+    );
+  }
+
+  if (tableTab === "metricsTrend") {
+    return (
+      <MetricsTrendPanelBody
+        activeStale={activeStale}
+        metricsTrendLoading={metricsTrendLoading}
+        metricsTrendRows={metricsTrendRows}
         errorText={errorText}
         customPending={customPending}
         period={period}
@@ -339,6 +403,7 @@ export function UsageDataPanelContent({
         onChangeScope={props.onChangeScope}
         loading={props.loading}
         cacheTrendProviderCount={props.cacheTrendProviderCount}
+        metricsTrendProviderCount={props.metricsTrendProviderCount}
         providerSelectValue={props.providerSelectValue}
         providerOptions={props.providerOptions}
         onProviderIdChange={props.onProviderIdChange}
@@ -350,6 +415,8 @@ export function UsageDataPanelContent({
         activeStale={activeStale}
         cacheTrendLoading={props.cacheTrendLoading}
         cacheTrendRows={props.cacheTrendRows}
+        metricsTrendLoading={props.metricsTrendLoading}
+        metricsTrendRows={props.metricsTrendRows}
         errorText={props.errorText}
         customPending={props.customPending}
         period={props.period}

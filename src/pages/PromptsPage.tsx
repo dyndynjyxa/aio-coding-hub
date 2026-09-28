@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { CLIS, cliLongLabel } from "../constants/clis";
+import { cliKeysWith, cliLongLabel } from "../constants/clis";
 import { logToConsole } from "../services/consoleLog";
 import { getOrderedClis, pickDefaultCliByPriority } from "../services/cli/cliPriorityOrder";
 import type { CliKey } from "../services/providers/providers";
@@ -17,10 +17,12 @@ import { useWorkspacesListQuery } from "../query/workspaces";
 export function PromptsPage() {
   const navigate = useNavigate();
   const settingsQuery = useSettingsQuery();
-  const orderedCliTabs = getOrderedClis(settingsQuery.data?.cli_priority_order);
+  const promptCliKeys = cliKeysWith("prompts");
+  const orderedCliTabs = getOrderedClis(settingsQuery.data?.cli_priority_order, promptCliKeys);
   const orderedCliKeys = orderedCliTabs.map((cli) => cli.key);
   const defaultCli =
-    pickDefaultCliByPriority(settingsQuery.data?.cli_priority_order, orderedCliKeys) ?? CLIS[0].key;
+    pickDefaultCliByPriority(settingsQuery.data?.cli_priority_order, orderedCliKeys) ??
+    promptCliKeys[0];
   const [activeCli, setActiveCli] = useState<CliKey | null>(null);
   const effectiveCli = activeCli ?? defaultCli;
 

@@ -32,10 +32,52 @@ use crate::gateway::proxy::upstream_client_error_rules;
 use crate::gateway::proxy::{ErrorCategory, GatewayErrorCode};
 use crate::gateway::response_fixer;
 use crate::gateway::streams::GunzipStream;
+use crate::gateway::streams::UpstreamResponse;
+use crate::gateway::streams::UpstreamStreamError;
 use crate::gateway::util::{now_unix_seconds, strip_hop_headers};
 use crate::shared::mutex_ext::MutexExt;
 use axum::body::{Body, Bytes};
 use axum::http::{header, HeaderValue};
+
+const CLAUDE_CODE_CLIENT_RESTRICTION_REASON: &str = "claude_code_client_restriction";
+const CLAUDE_CODE_CLIENT_RESTRICTION_PHRASE: &str = "this group only allows claude code clients";
+
+fn contains_claude_code_client_restriction(message: &str) -> bool {
+    let normalized = message
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    normalized.contains(CLAUDE_CODE_CLIENT_RESTRICTION_PHRASE)
+}
+
+fn matches_claude_code_client_restriction(
+    cli_key: &str,
+    status: reqwest::StatusCode,
+    body: &[u8],
+) -> bool {
+    if cli_key != "claude" || status != reqwest::StatusCode::SERVICE_UNAVAILABLE {
+        return false;
+    }
+
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) {
+        for message in [
+            value.pointer("/error/message"),
+            value.get("message"),
+            value.pointer("/error/error/message"),
+        ]
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        {
+            if contains_claude_code_client_restriction(message) {
+                return true;
+            }
+        }
+    }
+
+    contains_claude_code_client_restriction(&String::from_utf8_lossy(body))
+}
 
 fn upstream_error_decision(
     is_count_tokens: bool,
@@ -74,9 +116,9 @@ fn reqwest_error_decision(
 }
 
 async fn read_response_body_with_limit(
-    mut resp: reqwest::Response,
+    mut resp: UpstreamResponse,
     max_bytes: u64,
-) -> Result<Bytes, reqwest::Error> {
+) -> Result<Bytes, UpstreamStreamError> {
     let limit = max_bytes.min(usize::MAX as u64) as usize;
     if limit == 0 {
         return Ok(Bytes::new());
@@ -144,8 +186,8 @@ fn save_oauth_quota_exhausted_snapshot(
 }
 
 pub(super) async fn read_response_body_for_error_scan(
-    resp: reqwest::Response,
-) -> Result<Bytes, reqwest::Error> {
+    resp: UpstreamResponse,
+) -> Result<Bytes, UpstreamStreamError> {
     read_response_body_with_limit(resp, error_body_scan_limit_bytes()).await
 }
 
@@ -153,8 +195,11 @@ pub(super) struct UpstreamRequestState<'a> {
     pub(super) upstream_body_bytes: &'a mut Bytes,
     pub(super) strip_request_content_encoding: &'a mut bool,
     pub(super) codex_previous_response_id_rectifier_retried: &'a mut bool,
+    pub(super) thinking_effort_conflict_rectifier_retried: &'a mut bool,
     pub(super) thinking_signature_rectifier_retried: &'a mut bool,
     pub(super) thinking_budget_rectifier_retried: &'a mut bool,
+    pub(super) gemini_function_id_rectifier_retried: &'a mut bool,
+    pub(super) additional_repair_retry_slots: &'a mut u32,
 }
 
 fn codex_request_has_previous_response_id(body: &[u8]) -> bool {
@@ -175,7 +220,9 @@ fn should_scan_codex_previous_response_id_error(
     already_retried: bool,
     upstream_body: &[u8],
 ) -> bool {
-    cli_key == "codex"
+    // grok 与 codex 同走 OpenAI Responses API：failover 切换供应商后
+    // previous_response_id 在新供应商侧不存在，同样需要摘除后重试。
+    matches!(cli_key, "codex" | "grok")
         && !already_retried
         && matches!(
             status,
@@ -237,7 +284,9 @@ pub(super) struct HandleNonSuccessResponseInput<'a, R: tauri::Runtime = tauri::W
     pub(super) loop_state: LoopState<'a, R>,
     pub(super) enable_thinking_signature_rectifier: bool,
     pub(super) enable_thinking_budget_rectifier: bool,
-    pub(super) resp: reqwest::Response,
+    pub(super) enable_thinking_effort_conflict_rectifier: bool,
+    pub(super) enable_gemini_function_id_rectifier: bool,
+    pub(super) resp: UpstreamResponse,
     pub(super) upstream: UpstreamRequestState<'a>,
 }
 
@@ -251,19 +300,30 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
         loop_state,
         enable_thinking_signature_rectifier,
         enable_thinking_budget_rectifier,
+        enable_thinking_effort_conflict_rectifier,
+        enable_gemini_function_id_rectifier,
         resp,
         upstream,
     } = input;
     let status = resp.status();
-    let response_headers = resp.headers().clone();
+    let mut response_headers = resp.headers().clone();
+    if ctx.ws_request.is_some() {
+        response_headers.remove(crate::gateway::responses_ws::protocol::TURN_STATE_HEADER);
+    }
+    let redact_body =
+        ctx.ws_request.is_some() || (ctx.cli_key == "codex" && ctx.provider_health_neutral);
     let is_count_tokens =
         is_claude_count_tokens_request(ctx.cli_key.as_str(), ctx.forwarded_path.as_str());
 
+    let reactive_rectifier_enabled = (ctx.cli_key == "claude"
+        && (enable_thinking_effort_conflict_rectifier
+            || enable_thinking_signature_rectifier
+            || enable_thinking_budget_rectifier))
+        || (ctx.cli_key == "gemini" && enable_gemini_function_id_rectifier);
     if !is_count_tokens
-        && ctx.cli_key == "claude"
         && status.as_u16() == 400
         && !attempt_ctx.cx2cc_active
-        && (enable_thinking_signature_rectifier || enable_thinking_budget_rectifier)
+        && reactive_rectifier_enabled
     {
         return thinking_signature_rectifier_400::handle_thinking_rectifiers_400(
             thinking_signature_rectifier_400::HandleThinkingRectifiers400Input {
@@ -273,6 +333,8 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
                 loop_state,
                 enable_thinking_signature_rectifier,
                 enable_thinking_budget_rectifier,
+                enable_thinking_effort_conflict_rectifier,
+                enable_gemini_function_id_rectifier,
                 resp,
                 status,
                 response_headers,
@@ -329,6 +391,7 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
     let mut abort_response_headers: Option<axum::http::HeaderMap> = None;
     let mut matched_rule_id: Option<&'static str> = None;
     let mut matched_429_concurrency_limit = false;
+    let mut matched_claude_client_restriction = false;
     // Body preview for errors where preserving the upstream diagnostic text matters.
     let mut upstream_body_preview: Option<String> = None;
     let need_client_error_scan = !is_count_tokens
@@ -336,16 +399,21 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
             status,
             resp.as_ref().and_then(|r| r.content_length()),
         ) || matches!(status.as_u16(), 402 | 429));
-    let need_5xx_body_preview =
-        !is_count_tokens && status.is_server_error() && !need_client_error_scan;
-    let need_codex_previous_response_id_scan = !is_count_tokens
+    // Error classification and diagnostic capture are separate concerns: statuses such as 401
+    // intentionally skip rule matching, but their bounded body is still useful in request logs.
+    let need_error_body_preview = !redact_body
+        && !is_count_tokens
+        && (status.is_client_error() || status.is_server_error())
+        && !need_client_error_scan;
+    let need_codex_previous_response_id_scan = ctx.ws_request.is_none()
+        && !is_count_tokens
         && should_scan_codex_previous_response_id_error(
             ctx.cli_key.as_str(),
             status,
             *upstream.codex_previous_response_id_rectifier_retried,
             upstream.upstream_body_bytes,
         );
-    if need_client_error_scan || need_5xx_body_preview || need_codex_previous_response_id_scan {
+    if need_client_error_scan || need_error_body_preview || need_codex_previous_response_id_scan {
         if let Some(r) = resp.take() {
             let read_result = read_response_body_for_error_scan(r).await;
             if let Ok(bytes) = read_result {
@@ -372,13 +440,33 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
                         ),
                     );
                 }
-                // Extract body preview for diagnostics on 5xx and catch-all 4xx.
-                if status.is_server_error() || status.is_client_error() {
+                // Extract a bounded body preview for diagnostics on upstream errors.
+                if !redact_body && (status.is_server_error() || status.is_client_error()) {
                     let preview = String::from_utf8_lossy(&body_for_scan);
                     let truncated: String = preview.chars().take(500).collect();
                     if !truncated.is_empty() {
                         upstream_body_preview = Some(truncated);
                     }
+                }
+                matched_claude_client_restriction = matches_claude_code_client_restriction(
+                    ctx.cli_key.as_str(),
+                    status,
+                    body_for_scan.as_ref(),
+                );
+                if matched_claude_client_restriction {
+                    decision = FailoverDecision::SwitchProvider;
+                    emit_gateway_log(
+                        &state.app,
+                        "debug",
+                        "CLAUDE_CODE_CLIENT_RESTRICTION",
+                        format!(
+                            "[FAILOVER] trace_id={} provider_id={} status={} reason_code={}",
+                            ctx.trace_id,
+                            provider_id,
+                            status.as_u16(),
+                            CLAUDE_CODE_CLIENT_RESTRICTION_REASON,
+                        ),
+                    );
                 }
                 if need_client_error_scan {
                     if matches!(status.as_u16(), 402 | 429)
@@ -451,7 +539,7 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
         category = ErrorCategory::NonRetryableClientError;
         decision = FailoverDecision::Abort;
         // Extract body preview for diagnostic logging when aborting unmatched 4xx.
-        if upstream_body_preview.is_none() {
+        if !redact_body && upstream_body_preview.is_none() {
             if let Some(ref bytes) = abort_body_bytes {
                 let preview = String::from_utf8_lossy(bytes);
                 let truncated: String = preview.chars().take(500).collect();
@@ -480,6 +568,7 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
     if !is_count_tokens
         && matches!(category, ErrorCategory::ProviderError)
         && !oauth_quota_exhausted
+        && !matched_claude_client_restriction
     {
         let change = provider_router::record_failure_and_emit_transition(
             provider_router::RecordCircuitArgs::from_state(
@@ -490,7 +579,8 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
                 provider_name_base.as_str(),
                 provider_base_url_base.as_str(),
                 now_unix,
-            ),
+            )
+            .with_provider_health_neutral(ctx.provider_health_neutral),
         );
         *circuit_snapshot = change.after.clone();
         circuit_state_before = Some(change.before.state.as_str());
@@ -506,6 +596,7 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
         && provider_cooldown_secs > 0
         && matches!(category, ErrorCategory::ProviderError)
         && !oauth_quota_exhausted
+        && !matched_claude_client_restriction
         && matches!(
             decision,
             FailoverDecision::SwitchProvider | FailoverDecision::Abort
@@ -516,11 +607,17 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
             provider_id,
             now_unix,
             provider_cooldown_secs,
+            ctx.provider_health_neutral,
         );
         *circuit_snapshot = snap;
     }
 
-    let reason = if matched_429_concurrency_limit {
+    let reason = if matched_claude_client_restriction {
+        format!(
+            "status={} rule={CLAUDE_CODE_CLIENT_RESTRICTION_REASON}",
+            status.as_u16()
+        )
+    } else if matched_429_concurrency_limit {
         format!("status={} rule=429_concurrency_limit", status.as_u16())
     } else {
         let base = match matched_rule_id {
@@ -540,7 +637,11 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
         decision.as_str()
     );
     let selection_method = dc::selection_method(provider_index, retry_index, session_reuse);
-    let reason_code = category.reason_code();
+    let reason_code = if matched_claude_client_restriction {
+        CLAUDE_CODE_CLIENT_RESTRICTION_REASON
+    } else {
+        category.reason_code()
+    };
 
     attempts.push(FailoverAttempt {
         provider_id,
@@ -567,6 +668,10 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
         circuit_trigger_error_code: None,
         provider_bridged: Some(provider_ctx.provider_bridged),
         timeout_secs: None,
+        reasoning_effort: attempt_ctx.reasoning_effort.map(str::to_string),
+        upstream_sent: attempt_ctx.upstream_sent,
+        claude_model_mapping: provider_ctx.claude_model_mapping.cloned(),
+        model_redirect: provider_ctx.model_redirect.cloned(),
     });
 
     emit_attempt_event_and_log(
@@ -837,11 +942,12 @@ pub(super) async fn handle_reqwest_error<R: tauri::Runtime>(
 #[cfg(test)]
 mod tests {
     use super::{
-        error_body_scan_limit_usize, matches_codex_previous_response_id_error,
-        read_response_body_for_error_scan, remove_codex_previous_response_id,
-        reqwest_error_decision, retry_after_reset_at, should_scan_codex_previous_response_id_error,
-        upstream_error_decision, FailoverDecision,
+        error_body_scan_limit_usize, matches_claude_code_client_restriction,
+        matches_codex_previous_response_id_error, read_response_body_for_error_scan,
+        remove_codex_previous_response_id, reqwest_error_decision, retry_after_reset_at,
+        should_scan_codex_previous_response_id_error, upstream_error_decision, FailoverDecision,
     };
+    use crate::gateway::streams::UpstreamResponse;
     use axum::body::Bytes;
     use axum::http::{header, HeaderMap, HeaderValue};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -849,7 +955,7 @@ mod tests {
 
     async fn known_length_response(
         body: Vec<u8>,
-    ) -> (reqwest::Response, tokio::task::JoinHandle<()>) {
+    ) -> (UpstreamResponse, tokio::task::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind test upstream");
@@ -872,7 +978,7 @@ mod tests {
             .send()
             .await
             .expect("fetch test response");
-        (response, task)
+        (response.into(), task)
     }
 
     #[test]
@@ -901,6 +1007,41 @@ mod tests {
 
         let abort_decision = upstream_error_decision(false, FailoverDecision::Abort, 1, 5);
         assert!(matches!(abort_decision, FailoverDecision::Abort));
+    }
+
+    #[test]
+    fn claude_client_restriction_match_is_status_and_cli_specific() {
+        let body = br#"{"error":{"message":"No available accounts: this group only allows Claude Code clients","type":"api_error"},"type":"error"}"#;
+
+        assert!(matches_claude_code_client_restriction(
+            "claude",
+            reqwest::StatusCode::SERVICE_UNAVAILABLE,
+            body,
+        ));
+        assert!(!matches_claude_code_client_restriction(
+            "codex",
+            reqwest::StatusCode::SERVICE_UNAVAILABLE,
+            body,
+        ));
+        assert!(!matches_claude_code_client_restriction(
+            "claude",
+            reqwest::StatusCode::BAD_GATEWAY,
+            body,
+        ));
+        assert!(!matches_claude_code_client_restriction(
+            "claude",
+            reqwest::StatusCode::SERVICE_UNAVAILABLE,
+            br#"{"error":{"message":"No available accounts"}}"#,
+        ));
+    }
+
+    #[test]
+    fn claude_client_restriction_match_normalizes_case_and_whitespace() {
+        assert!(matches_claude_code_client_restriction(
+            "claude",
+            reqwest::StatusCode::SERVICE_UNAVAILABLE,
+            b"upstream: THIS GROUP only allows\nClaude Code clients",
+        ));
     }
 
     #[tokio::test]
@@ -953,6 +1094,24 @@ mod tests {
             reqwest::StatusCode::NOT_FOUND,
             false,
             body,
+        ));
+        assert!(should_scan_codex_previous_response_id_error(
+            "grok",
+            reqwest::StatusCode::BAD_REQUEST,
+            false,
+            body,
+        ));
+        assert!(!should_scan_codex_previous_response_id_error(
+            "grok",
+            reqwest::StatusCode::BAD_REQUEST,
+            true,
+            body,
+        ));
+        assert!(!should_scan_codex_previous_response_id_error(
+            "grok",
+            reqwest::StatusCode::BAD_REQUEST,
+            false,
+            br#"{"model":"grok-build"}"#,
         ));
         assert!(!should_scan_codex_previous_response_id_error(
             "claude",

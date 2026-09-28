@@ -58,11 +58,11 @@ fn limit_usd_to_femto(limit_usd: f64) -> Option<i128> {
     Some(limit_femto)
 }
 
-fn limit_exceeded(limit_usd: f64, spent_femto: i64) -> bool {
+fn limit_exceeded(limit_usd: f64, spent_femto: f64) -> bool {
     let Some(limit_femto) = limit_usd_to_femto(limit_usd) else {
         return false;
     };
-    (spent_femto.max(0) as i128) >= limit_femto
+    spent_femto.max(0.0) >= limit_femto as f64
 }
 
 fn has_any_limit(provider: &providers::ProviderForGateway) -> bool {
@@ -75,12 +75,12 @@ fn has_any_limit(provider: &providers::ProviderForGateway) -> bool {
 
 #[derive(Debug, Clone, Copy, Default)]
 struct SpendSums {
-    spent_5h: i64,
-    spent_daily_rolling: i64,
-    spent_daily_fixed: i64,
-    spent_weekly: i64,
-    spent_monthly: i64,
-    spent_total: i64,
+    spent_5h: f64,
+    spent_daily_rolling: f64,
+    spent_daily_fixed: f64,
+    spent_weekly: f64,
+    spent_monthly: f64,
+    spent_total: f64,
 }
 
 fn min_start_ts(values: &[Option<i64>]) -> Option<i64> {
@@ -116,12 +116,12 @@ fn sum_cost_usd_femto_windows(
     conn.query_row(
         r#"
 SELECT
-  COALESCE(SUM(CASE WHEN created_at >= ?2 THEN CASE WHEN cost_usd_femto < 0 THEN 0 ELSE cost_usd_femto END ELSE 0 END), 0) AS spent_5h,
-  COALESCE(SUM(CASE WHEN created_at >= ?3 THEN CASE WHEN cost_usd_femto < 0 THEN 0 ELSE cost_usd_femto END ELSE 0 END), 0) AS spent_daily_rolling,
-  COALESCE(SUM(CASE WHEN created_at >= ?4 THEN CASE WHEN cost_usd_femto < 0 THEN 0 ELSE cost_usd_femto END ELSE 0 END), 0) AS spent_daily_fixed,
-  COALESCE(SUM(CASE WHEN created_at >= ?5 THEN CASE WHEN cost_usd_femto < 0 THEN 0 ELSE cost_usd_femto END ELSE 0 END), 0) AS spent_weekly,
-  COALESCE(SUM(CASE WHEN created_at >= ?6 THEN CASE WHEN cost_usd_femto < 0 THEN 0 ELSE cost_usd_femto END ELSE 0 END), 0) AS spent_monthly,
-  COALESCE(SUM(CASE WHEN cost_usd_femto < 0 THEN 0 ELSE cost_usd_femto END), 0) AS spent_total
+  TOTAL(CASE WHEN created_at >= ?2 THEN CASE WHEN cost_usd_femto < 0 THEN 0 ELSE cost_usd_femto END ELSE 0 END) AS spent_5h,
+  TOTAL(CASE WHEN created_at >= ?3 THEN CASE WHEN cost_usd_femto < 0 THEN 0 ELSE cost_usd_femto END ELSE 0 END) AS spent_daily_rolling,
+  TOTAL(CASE WHEN created_at >= ?4 THEN CASE WHEN cost_usd_femto < 0 THEN 0 ELSE cost_usd_femto END ELSE 0 END) AS spent_daily_fixed,
+  TOTAL(CASE WHEN created_at >= ?5 THEN CASE WHEN cost_usd_femto < 0 THEN 0 ELSE cost_usd_femto END ELSE 0 END) AS spent_weekly,
+  TOTAL(CASE WHEN created_at >= ?6 THEN CASE WHEN cost_usd_femto < 0 THEN 0 ELSE cost_usd_femto END ELSE 0 END) AS spent_monthly,
+  TOTAL(CASE WHEN cost_usd_femto < 0 THEN 0 ELSE cost_usd_femto END) AS spent_total
 FROM request_logs
 WHERE excluded_from_stats = 0
   AND status >= 200 AND status < 300 AND error_code IS NULL
@@ -142,24 +142,20 @@ WHERE excluded_from_stats = 0
         ],
         |row| {
             Ok(SpendSums {
-                spent_5h: row.get::<_, Option<i64>>("spent_5h")?.unwrap_or(0).max(0),
+                spent_5h: row.get::<_, f64>("spent_5h")?.max(0.0),
                 spent_daily_rolling: row
-                    .get::<_, Option<i64>>("spent_daily_rolling")?
-                    .unwrap_or(0)
-                    .max(0),
+                    .get::<_, f64>("spent_daily_rolling")?
+                    .max(0.0),
                 spent_daily_fixed: row
-                    .get::<_, Option<i64>>("spent_daily_fixed")?
-                    .unwrap_or(0)
-                    .max(0),
+                    .get::<_, f64>("spent_daily_fixed")?
+                    .max(0.0),
                 spent_weekly: row
-                    .get::<_, Option<i64>>("spent_weekly")?
-                    .unwrap_or(0)
-                    .max(0),
+                    .get::<_, f64>("spent_weekly")?
+                    .max(0.0),
                 spent_monthly: row
-                    .get::<_, Option<i64>>("spent_monthly")?
-                    .unwrap_or(0)
-                    .max(0),
-                spent_total: row.get::<_, Option<i64>>("spent_total")?.unwrap_or(0).max(0),
+                    .get::<_, f64>("spent_monthly")?
+                    .max(0.0),
+                spent_total: row.get::<_, f64>("spent_total")?.max(0.0),
             })
         },
     )
@@ -171,20 +167,19 @@ fn fetch_cost_buckets(
     provider_id: i64,
     start_ts: i64,
     end_ts: i64,
-) -> crate::shared::error::AppResult<Vec<(i64, i64)>> {
+) -> crate::shared::error::AppResult<Vec<(i64, i128)>> {
     let mut stmt = conn
         .prepare_cached(
             r#"
     SELECT
       created_at,
-      SUM(CASE WHEN cost_usd_femto < 0 THEN 0 ELSE cost_usd_femto END) AS cost
+      CASE WHEN cost_usd_femto < 0 THEN 0 ELSE cost_usd_femto END AS cost
     FROM request_logs
     WHERE excluded_from_stats = 0
       AND status >= 200 AND status < 300 AND error_code IS NULL
       AND cost_usd_femto IS NOT NULL
       AND final_provider_id = ?1
       AND created_at >= ?2 AND created_at < ?3
-    GROUP BY created_at
     ORDER BY created_at ASC
     "#,
         )
@@ -198,15 +193,21 @@ fn fetch_cost_buckets(
         })
         .map_err(|e| db_err!("failed to query provider cost buckets: {e}"))?;
 
-    let mut out = Vec::new();
+    let mut out: Vec<(i64, i128)> = Vec::new();
     for row in rows {
-        out.push(row.map_err(|e| db_err!("failed to read provider cost bucket: {e}"))?);
+        let (ts, cost) = row.map_err(|e| db_err!("failed to read provider cost bucket: {e}"))?;
+        match out.last_mut() {
+            Some((last_ts, last_cost)) if *last_ts == ts => {
+                *last_cost = (*last_cost).saturating_add(cost as i128);
+            }
+            _ => out.push((ts, cost as i128)),
+        }
     }
     Ok(out)
 }
 
 fn compute_next_available_rolling_from_buckets(
-    buckets: &[(i64, i64)],
+    buckets: &[(i64, i128)],
     window_start: i64,
     window_secs: i64,
     limit_femto: i128,
@@ -223,7 +224,7 @@ fn compute_next_available_rolling_from_buckets(
         if ts < window_start {
             continue;
         }
-        total = total.saturating_add(cost.max(0) as i128);
+        total = total.saturating_add(cost.max(0));
     }
     if total < limit_femto {
         return None;
@@ -235,7 +236,7 @@ fn compute_next_available_rolling_from_buckets(
         if ts < window_start {
             continue;
         }
-        prefix = prefix.saturating_add(cost.max(0) as i128);
+        prefix = prefix.saturating_add(cost.max(0));
         if prefix >= threshold {
             return Some(ts.saturating_add(1).saturating_add(window_secs));
         }
@@ -597,7 +598,242 @@ pub(super) fn gate_provider<R: tauri::Runtime>(input: ProviderLimitsInput<'_, R>
 
 #[cfg(test)]
 mod tests {
+    use super::super::context::CommonCtxArgs;
     use super::*;
+    use crate::gateway::active_requests::ActiveRequestRegistry;
+    use crate::gateway::codex_session_id::CodexSessionIdCache;
+    use crate::gateway::plugins::pipeline::GatewayPluginPipeline;
+    use crate::gateway::proxy::{ProviderBaseUrlPingCache, RecentErrorCache};
+    use crate::gateway::runtime::GatewayAppState;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    fn gateway_test_state(
+        app: tauri::AppHandle<tauri::test::MockRuntime>,
+        db: crate::db::Db,
+    ) -> GatewayAppState<tauri::test::MockRuntime> {
+        let (log_tx, _log_rx) = tokio::sync::mpsc::channel(1);
+        GatewayAppState {
+            app,
+            db,
+            log_tx,
+            circuit: Arc::new(crate::circuit_breaker::CircuitBreaker::new(
+                crate::circuit_breaker::CircuitBreakerConfig::default(),
+                HashMap::new(),
+                None,
+            )),
+            session: Arc::new(crate::session_manager::SessionManager::new()),
+            codex_session_cache: Arc::new(Mutex::new(CodexSessionIdCache::default())),
+            recent_errors: Arc::new(Mutex::new(RecentErrorCache::default())),
+            latency_cache: Arc::new(Mutex::new(ProviderBaseUrlPingCache::default())),
+            plugin_pipeline: GatewayPluginPipeline::empty_shared(),
+            active_requests: Arc::new(ActiveRequestRegistry::default()),
+            responses_ws: Arc::new(crate::gateway::responses_ws::state::Runtime::new(false)),
+        }
+    }
+
+    fn provider_with_5h_limit(id: i64) -> providers::ProviderForGateway {
+        providers::ProviderForGateway {
+            custom_headers: Vec::new(),
+            id,
+            name: "overflow-provider".to_string(),
+            base_urls: vec!["https://example.com".to_string()],
+            base_url_mode: providers::ProviderBaseUrlMode::Order,
+            api_key_plaintext: "test-key".to_string(),
+            claude_models: providers::ClaudeModels::default(),
+            model_policy: Some(providers::ProviderModelPolicyV1::all()),
+            model_policy_status: providers::ProviderModelPolicyStatus::Ready,
+            limit_5h_usd: Some(9_000.0),
+            limit_daily_usd: None,
+            daily_reset_mode: providers::DailyResetMode::Fixed,
+            daily_reset_time: "00:00:00".to_string(),
+            limit_weekly_usd: None,
+            limit_monthly_usd: None,
+            limit_total_usd: None,
+            auth_mode: "api_key".to_string(),
+            oauth_provider_type: None,
+            source_provider_id: None,
+            bridge_type: None,
+            stream_idle_timeout_seconds: None,
+            supports_websockets: false,
+            extension_values: vec![],
+        }
+    }
+
+    #[test]
+    fn cost_queries_allow_totals_above_i64_max() {
+        const COST_TERM_FEMTO: i64 = 3_i64 << 61;
+
+        let conn = Connection::open_in_memory().expect("open sqlite");
+        conn.execute_batch(
+            r#"
+CREATE TABLE request_logs (
+  excluded_from_stats INTEGER NOT NULL,
+  status INTEGER,
+  error_code TEXT,
+  cost_usd_femto INTEGER,
+  final_provider_id INTEGER,
+  created_at INTEGER NOT NULL
+);
+"#,
+        )
+        .expect("create request_logs");
+        for _ in 0..2 {
+            conn.execute(
+                "INSERT INTO request_logs VALUES (0, 200, NULL, ?1, 7, 10)",
+                [COST_TERM_FEMTO],
+            )
+            .expect("insert request log");
+        }
+
+        let sums = sum_cost_usd_femto_windows(
+            &conn,
+            7,
+            SpendQueryBounds {
+                start_5h: Some(0),
+                start_daily_rolling: Some(0),
+                start_daily_fixed: Some(0),
+                start_weekly: Some(0),
+                start_monthly: Some(0),
+                end_ts: 20,
+                min_start: None,
+            },
+        )
+        .expect("sum cost windows");
+        let expected = COST_TERM_FEMTO as f64 * 2.0;
+
+        for actual in [
+            sums.spent_5h,
+            sums.spent_daily_rolling,
+            sums.spent_daily_fixed,
+            sums.spent_weekly,
+            sums.spent_monthly,
+            sums.spent_total,
+        ] {
+            assert_eq!(actual, expected);
+            assert!(limit_exceeded(9_000.0, actual));
+        }
+
+        let buckets = fetch_cost_buckets(&conn, 7, 0, 20).expect("fetch cost buckets");
+        assert_eq!(buckets, vec![(10, COST_TERM_FEMTO as i128 * 2)]);
+        assert!(buckets[0].1 > i64::MAX as i128);
+        assert_eq!(
+            compute_next_available_rolling_from_buckets(
+                &buckets,
+                0,
+                WINDOW_5H_SECS,
+                i64::MAX as i128,
+            ),
+            Some(10 + 1 + WINDOW_5H_SECS)
+        );
+    }
+
+    #[test]
+    fn gate_provider_rejects_cost_total_above_i64_max() {
+        const COST_TERM_FEMTO: i64 = 3_i64 << 61;
+        const NOW_UNIX: i64 = 1_000;
+        const WINDOW_START_UNIX: i64 = 900;
+        const COST_CREATED_AT: i64 = 950;
+
+        let app = tauri::test::mock_app();
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = crate::db::init_for_tests(&db_dir.path().join("provider-limit-overflow.db"))
+            .expect("init db");
+        let conn = db.open_connection().expect("open connection");
+        conn.execute(
+            r#"
+INSERT INTO providers (
+  cli_key, name, base_url, api_key_plaintext, created_at, updated_at, window_5h_start_ts
+) VALUES ('codex', 'overflow-provider', 'https://example.com', 'test-key', 1, 1, ?1)
+"#,
+            [WINDOW_START_UNIX],
+        )
+        .expect("insert provider");
+        let provider_id = conn.last_insert_rowid();
+
+        for index in 0..2 {
+            conn.execute(
+                r#"
+INSERT INTO request_logs (
+  trace_id, cli_key, method, path, status, duration_ms, attempts_json,
+  created_at, cost_usd_femto, excluded_from_stats, final_provider_id
+) VALUES (?1, 'codex', 'POST', '/v1/responses', 200, 1, '[]', ?2, ?3, 0, ?4)
+"#,
+                params![
+                    format!("provider-limit-overflow-{index}"),
+                    COST_CREATED_AT,
+                    COST_TERM_FEMTO,
+                    provider_id
+                ],
+            )
+            .expect("insert request log");
+        }
+        drop(conn);
+
+        let state = gateway_test_state(app.handle().clone(), db);
+        let provider = provider_with_5h_limit(provider_id);
+        let cli_key = "codex".to_string();
+        let forwarded_path = "/v1/responses".to_string();
+        let method_hint = "POST".to_string();
+        let query = None;
+        let trace_id = "provider-limit-gate".to_string();
+        let session_id = None;
+        let requested_model = None;
+        let cx2cc_settings = crate::gateway::proxy::cx2cc::settings::Cx2ccSettings::default();
+        let special_settings = Arc::new(Mutex::new(Vec::new()));
+        let response_fixer_config = crate::gateway::response_fixer::ResponseFixerConfig {
+            fix_encoding: false,
+            fix_sse_format: false,
+            fix_truncated_json: false,
+            max_json_depth: crate::gateway::response_fixer::DEFAULT_MAX_JSON_DEPTH,
+            max_fix_size: crate::gateway::response_fixer::DEFAULT_MAX_FIX_SIZE,
+        };
+        let ctx = CommonCtx::from(CommonCtxArgs {
+            ws_request: None,
+            state: &state,
+            cli_key: &cli_key,
+            forwarded_path: &forwarded_path,
+            observe: true,
+            method_hint: &method_hint,
+            query: &query,
+            trace_id: &trace_id,
+            started: std::time::Instant::now(),
+            created_at_ms: NOW_UNIX * 1_000,
+            created_at: NOW_UNIX,
+            session_id: &session_id,
+            requested_model: &requested_model,
+            cx2cc_settings: &cx2cc_settings,
+            effective_sort_mode_id: None,
+            special_settings: &special_settings,
+            provider_health_neutral: false,
+            provider_cooldown_secs: 0,
+            upstream_first_byte_timeout_secs: 0,
+            upstream_first_byte_timeout: None,
+            upstream_stream_idle_timeout: None,
+            upstream_request_timeout_non_streaming: None,
+            verbose_provider_error: false,
+            max_attempts_per_provider: 1,
+            codex_priority_billing_source: crate::settings::CodexPriorityBillingSource::default(),
+            enable_response_fixer: false,
+            response_fixer_stream_config: response_fixer_config,
+            response_fixer_non_stream_config: response_fixer_config,
+            introspection_body: &[],
+        });
+        let mut earliest_available_unix = None;
+        let mut skipped_limits = 0;
+
+        assert!(!gate_provider(ProviderLimitsInput {
+            ctx,
+            provider: &provider,
+            earliest_available_unix: &mut earliest_available_unix,
+            skipped_limits: &mut skipped_limits,
+        }));
+        assert_eq!(skipped_limits, 1);
+        assert_eq!(
+            earliest_available_unix,
+            Some(COST_CREATED_AT + 1 + WINDOW_5H_SECS)
+        );
+    }
 
     #[test]
     fn rolling_next_available_returns_cutoff_plus_window_plus_1() {
@@ -707,29 +943,29 @@ mod tests {
     fn limit_exceeded_checks_correctly() {
         // 1 USD limit = 1_000_000_000_000_000 femto
         let limit_usd = 1.0;
-        let limit_femto = 1_000_000_000_000_000_i64;
+        let limit_femto = 1_000_000_000_000_000_f64;
 
         // Exactly at limit - should be exceeded
         assert!(limit_exceeded(limit_usd, limit_femto));
 
         // Under limit
-        assert!(!limit_exceeded(limit_usd, limit_femto - 1));
+        assert!(!limit_exceeded(limit_usd, limit_femto - 1.0));
 
         // Over limit
-        assert!(limit_exceeded(limit_usd, limit_femto + 1));
+        assert!(limit_exceeded(limit_usd, limit_femto + 1.0));
 
         // Negative spent should not exceed
-        assert!(!limit_exceeded(limit_usd, -100));
+        assert!(!limit_exceeded(limit_usd, -100.0));
 
         // Zero limit is explicitly treated as immediate limit hit
-        assert!(limit_exceeded(0.0, 0));
+        assert!(limit_exceeded(0.0, 0.0));
     }
 
     #[test]
     fn limit_exceeded_handles_invalid_limit() {
         // Invalid limits should never be "exceeded" (fail open)
-        assert!(!limit_exceeded(f64::NAN, 1_000_000));
-        assert!(!limit_exceeded(-1.0, 1_000_000));
+        assert!(!limit_exceeded(f64::NAN, 1_000_000.0));
+        assert!(!limit_exceeded(-1.0, 1_000_000.0));
     }
 
     #[test]

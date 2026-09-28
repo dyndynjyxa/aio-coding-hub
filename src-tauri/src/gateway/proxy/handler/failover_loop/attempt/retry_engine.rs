@@ -32,7 +32,29 @@ where
 {
     let mut retry_state = RetryLoopState::new();
 
-    for retry_index in 1..=prepared.provider_max_attempts {
+    let mut retry_index = input.ws_request.as_ref().map_or(1, |request| {
+        use crate::shared::mutex_ext::MutexExt;
+        let generation = request.generation.lock_or_recover();
+        if generation.budget.provider_id == Some(prepared.provider_id) {
+            generation.budget.retry_index.max(1)
+        } else {
+            1
+        }
+    });
+    while retry_index <= retry_state.effective_attempt_limit(prepared.provider_max_attempts) {
+        if let Some(request) = &input.ws_request {
+            use crate::shared::mutex_ext::MutexExt;
+            let mut generation = request.generation.lock_or_recover();
+            if generation.budget.provider_id != Some(prepared.provider_id)
+                || generation.budget.retry_index != retry_index
+            {
+                generation.budget.provider_id = Some(prepared.provider_id);
+                generation.budget.retry_index = retry_index;
+                generation.budget.deadline = input
+                    .upstream_first_byte_timeout
+                    .and_then(|duration| std::time::Instant::now().checked_add(duration));
+            }
+        }
         let attempt_index = loop_state.attempts.len().saturating_add(1) as u32;
 
         let send_outcome = attempt_executor::execute_attempt(
@@ -61,7 +83,14 @@ where
         .await;
 
         match ctrl {
-            LoopControl::ContinueRetry => continue,
+            LoopControl::RetryTransport => continue,
+            LoopControl::ContinueRetry => {
+                let Some(next_retry_index) = retry_index.checked_add(1) else {
+                    break;
+                };
+                retry_index = next_retry_index;
+                continue;
+            }
             LoopControl::BreakRetry => break,
             LoopControl::Return(resp) => return Some(resp),
         }
@@ -95,7 +124,28 @@ where
             reason,
             loop_state.attempts.clone(),
         )),
-        AttemptSendOutcome::Response(resp, timing) => {
+        AttemptSendOutcome::WsTransport(reason, timing) => {
+            ws_attempt::transport_failure(ctx, input, prepared, indices, timing, reason, loop_state)
+                .await
+        }
+        AttemptSendOutcome::ContextLost(timing) => {
+            ws_attempt::recover(ctx, input, prepared, indices, timing, loop_state).await
+        }
+        AttemptSendOutcome::LocalProtocol(reason, _timing) => {
+            if reason == "prewarm_http_required" {
+                if let Some(connection) = &input.ws_connection {
+                    if let Some(session) = input
+                        .base_headers
+                        .get("session-id")
+                        .and_then(|v| v.to_str().ok())
+                    {
+                        connection.runtime.force_http(session);
+                    }
+                }
+            }
+            ws_attempt::finish_error(ctx, input, loop_state, "invalid_request", reason).await
+        }
+        AttemptSendOutcome::StreamResponse(resp, timing) => {
             response_router::route_response(
                 ctx,
                 input,
@@ -103,6 +153,19 @@ where
                 retry_state,
                 indices,
                 resp,
+                timing,
+                loop_state,
+            )
+            .await
+        }
+        AttemptSendOutcome::Response(resp, timing) => {
+            response_router::route_response(
+                ctx,
+                input,
+                prepared,
+                retry_state,
+                indices,
+                resp.into(),
                 timing,
                 loop_state,
             )
@@ -143,7 +206,7 @@ where
 fn build_error_contexts<'a, R: tauri::Runtime>(
     _input: &RequestContext<R>,
     prepared: &'a PreparedProvider,
-    timing: &AttemptTiming,
+    timing: &'a AttemptTiming,
     attempt_index: u32,
     retry_index: u32,
 ) -> (AttemptCtx<'a>, ProviderCtx<'a>) {
@@ -157,6 +220,8 @@ fn build_error_contexts<'a, R: tauri::Runtime>(
         gemini_oauth_response_mode: prepared.gemini_oauth_response_mode,
         cx2cc_active: prepared.cx2cc_active,
         anthropic_stream_requested: prepared.anthropic_stream_requested,
+        reasoning_effort: timing.reasoning_effort.as_deref(),
+        upstream_sent: timing.upstream_sent,
     };
     let provider_ctx = ProviderCtx {
         provider_id: prepared.provider_id,
@@ -168,6 +233,57 @@ fn build_error_contexts<'a, R: tauri::Runtime>(
         session_reuse: prepared.session_reuse,
         stream_idle_timeout_seconds: prepared.stream_idle_timeout_seconds,
         claude_model_mapping: prepared.claude_model_mapping.as_ref(),
+        model_redirect: prepared.model_redirect.as_ref(),
     };
     (attempt_ctx, provider_ctx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::attempt_executor::grant_repair_retry_slot_if_needed;
+    use super::RetryLoopState;
+
+    #[test]
+    fn repair_retry_slot_extends_only_at_the_current_boundary() {
+        let mut slots = 0;
+
+        assert!(!grant_repair_retry_slot_if_needed(&mut slots, 1, 2));
+        let state = RetryLoopState {
+            additional_repair_retry_slots: slots,
+            ..RetryLoopState::new()
+        };
+        assert_eq!(state.effective_attempt_limit(2), 2);
+
+        assert!(grant_repair_retry_slot_if_needed(&mut slots, 2, 2));
+        let state = RetryLoopState {
+            additional_repair_retry_slots: slots,
+            ..RetryLoopState::new()
+        };
+        assert_eq!(state.effective_attempt_limit(2), 3);
+    }
+
+    #[test]
+    fn later_repair_can_extend_the_new_boundary_once_more() {
+        let mut slots = 0;
+
+        assert!(grant_repair_retry_slot_if_needed(&mut slots, 1, 1));
+        let state = RetryLoopState {
+            additional_repair_retry_slots: slots,
+            ..RetryLoopState::new()
+        };
+        assert_eq!(state.effective_attempt_limit(1), 2);
+        assert!(grant_repair_retry_slot_if_needed(&mut slots, 2, 1));
+        let state = RetryLoopState {
+            additional_repair_retry_slots: slots,
+            ..RetryLoopState::new()
+        };
+        assert_eq!(state.effective_attempt_limit(1), 3);
+    }
+
+    #[test]
+    fn ordinary_attempt_limit_is_unchanged_without_a_repair() {
+        let state = RetryLoopState::new();
+        assert_eq!(state.effective_attempt_limit(1), 1);
+        assert_eq!(state.effective_attempt_limit(5), 5);
+    }
 }

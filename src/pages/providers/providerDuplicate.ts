@@ -28,6 +28,7 @@ export type ProviderEditorInitialValues = {
   bridge_type: string | null;
   stream_idle_timeout_seconds: number | null;
   custom_headers: ProviderCustomHeader[];
+  supports_websockets: boolean;
 };
 
 function normalizeProviderName(name: string) {
@@ -84,5 +85,6 @@ export function buildDuplicatedProviderInitialValues(
     bridge_type: provider.bridge_type ?? null,
     stream_idle_timeout_seconds: provider.stream_idle_timeout_seconds ?? null,
     custom_headers: (provider.custom_headers ?? []).map((header) => ({ ...header })),
+    supports_websockets: provider.supports_websockets ?? false,
   };
 }

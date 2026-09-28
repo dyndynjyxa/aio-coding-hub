@@ -19,9 +19,7 @@ export function SettingsRow({ label, subtitle, children, className }: SettingsRo
       <div className="min-w-0">
         <div className="text-sm text-foreground">{label}</div>
         {subtitle ? (
-          <div className="mt-1 text-xs text-muted-foreground leading-relaxed">
-            {subtitle}
-          </div>
+          <div className="mt-1 text-xs text-muted-foreground leading-relaxed">{subtitle}</div>
         ) : null}
       </div>
       <div className="flex flex-wrap items-center justify-end gap-2">{children}</div>

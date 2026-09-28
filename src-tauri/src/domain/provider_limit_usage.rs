@@ -50,8 +50,8 @@ fn normalize_cli_filter(cli_key: Option<&str>) -> crate::shared::error::AppResul
     Ok(None)
 }
 
-fn cost_usd_from_femto(v: i64) -> f64 {
-    (v.max(0) as f64) / USD_FEMTO_DENOM
+fn cost_usd_from_femto(v: f64) -> f64 {
+    v.max(0.0) / USD_FEMTO_DENOM
 }
 
 fn current_unix_seconds(conn: &Connection) -> crate::shared::error::AppResult<i64> {
@@ -213,11 +213,11 @@ struct ProviderLimitCandidate {
 
 #[derive(Debug, Clone, Copy, Default)]
 struct ProviderUsageSums {
-    usage_5h_femto: i64,
-    usage_daily_femto: i64,
-    usage_weekly_femto: i64,
-    usage_monthly_femto: i64,
-    usage_total_femto: i64,
+    usage_5h_femto: f64,
+    usage_daily_femto: f64,
+    usage_weekly_femto: f64,
+    usage_monthly_femto: f64,
+    usage_total_femto: f64,
 }
 
 fn aggregate_costs_for_providers(
@@ -238,11 +238,11 @@ fn aggregate_costs_for_providers(
 WITH provider_windows(provider_id, ts_5h, ts_daily) AS (VALUES {values})
 SELECT
   w.provider_id,
-  COALESCE(SUM(CASE WHEN r.created_at >= w.ts_5h THEN r.cost_usd_femto ELSE 0 END), 0) AS usage_5h_femto,
-  COALESCE(SUM(CASE WHEN r.created_at >= w.ts_daily THEN r.cost_usd_femto ELSE 0 END), 0) AS usage_daily_femto,
-  COALESCE(SUM(CASE WHEN r.created_at >= ? THEN r.cost_usd_femto ELSE 0 END), 0) AS usage_weekly_femto,
-  COALESCE(SUM(CASE WHEN r.created_at >= ? THEN r.cost_usd_femto ELSE 0 END), 0) AS usage_monthly_femto,
-  COALESCE(SUM(r.cost_usd_femto), 0) AS usage_total_femto
+  TOTAL(CASE WHEN r.created_at >= w.ts_5h THEN r.cost_usd_femto ELSE 0 END) AS usage_5h_femto,
+  TOTAL(CASE WHEN r.created_at >= w.ts_daily THEN r.cost_usd_femto ELSE 0 END) AS usage_daily_femto,
+  TOTAL(CASE WHEN r.created_at >= ? THEN r.cost_usd_femto ELSE 0 END) AS usage_weekly_femto,
+  TOTAL(CASE WHEN r.created_at >= ? THEN r.cost_usd_femto ELSE 0 END) AS usage_monthly_femto,
+  TOTAL(r.cost_usd_femto) AS usage_total_femto
 FROM provider_windows w
 LEFT JOIN request_logs r
   ON r.final_provider_id = w.provider_id
@@ -271,11 +271,11 @@ GROUP BY w.provider_id
                 Ok((
                     row.get::<_, i64>(0)?,
                     ProviderUsageSums {
-                        usage_5h_femto: row.get::<_, Option<i64>>(1)?.unwrap_or(0).max(0),
-                        usage_daily_femto: row.get::<_, Option<i64>>(2)?.unwrap_or(0).max(0),
-                        usage_weekly_femto: row.get::<_, Option<i64>>(3)?.unwrap_or(0).max(0),
-                        usage_monthly_femto: row.get::<_, Option<i64>>(4)?.unwrap_or(0).max(0),
-                        usage_total_femto: row.get::<_, Option<i64>>(5)?.unwrap_or(0).max(0),
+                        usage_5h_femto: row.get::<_, f64>(1)?.max(0.0),
+                        usage_daily_femto: row.get::<_, f64>(2)?.max(0.0),
+                        usage_weekly_femto: row.get::<_, f64>(3)?.max(0.0),
+                        usage_monthly_femto: row.get::<_, f64>(4)?.max(0.0),
+                        usage_total_femto: row.get::<_, f64>(5)?.max(0.0),
                     },
                 ))
             })
@@ -533,6 +533,7 @@ mod tests {
                 cost_multiplier: 1.0,
                 priority: None,
                 claude_models: None,
+                model_policy: None,
                 limit_5h_usd: Some(10.0),
                 limit_daily_usd: Some(10.0),
                 daily_reset_mode: Some(DailyResetMode::Rolling),
@@ -545,6 +546,7 @@ mod tests {
                 source_provider_id: None,
                 bridge_type: None,
                 stream_idle_timeout_seconds: None,
+                supports_websockets: None,
                 extension_values: None,
             },
         )
@@ -648,5 +650,38 @@ INSERT INTO request_logs(
         assert!((row.usage_5h_usd - 1.0).abs() < f64::EPSILON);
         assert!((row.usage_daily_usd - 1.0).abs() < f64::EPSILON);
         assert!((row.usage_total_usd - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn list_v1_allows_cost_totals_above_i64_max() {
+        const COST_TERM_FEMTO: i64 = 3_i64 << 61;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = db::init_for_tests(&dir.path().join("test.db")).expect("init db");
+        let provider_id = create_limited_provider(&db, "overflow");
+        let conn = db.open_connection().expect("open db");
+        let now = current_unix_seconds(&conn).expect("now");
+
+        insert_log(&conn, provider_id, now.saturating_sub(60), COST_TERM_FEMTO);
+        insert_log(&conn, provider_id, now.saturating_sub(30), COST_TERM_FEMTO);
+        drop(conn);
+
+        let rows = list_v1(&db, Some("codex")).expect("list usage");
+        let row = rows.first().expect("provider usage row");
+        let expected = (COST_TERM_FEMTO as f64 * 2.0) / USD_FEMTO_DENOM;
+
+        for actual in [
+            row.usage_5h_usd,
+            row.usage_daily_usd,
+            row.usage_weekly_usd,
+            row.usage_monthly_usd,
+            row.usage_total_usd,
+        ] {
+            assert!(actual.is_finite());
+            assert!(
+                (actual - expected).abs() < 1e-9,
+                "expected {expected}, got {actual}"
+            );
+        }
     }
 }

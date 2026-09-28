@@ -46,8 +46,12 @@ function createRectifierPatch(): GatewayRectifierSettingsPatch {
   return {
     verbose_provider_error: true,
     intercept_anthropic_warmup_requests: false,
+    enable_thinking_effort_conflict_rectifier: true,
     enable_thinking_signature_rectifier: true,
     enable_thinking_budget_rectifier: true,
+    enable_gemini_function_id_rectifier: true,
+    enable_response_input_rectifier: true,
+    codex_priority_billing_source: "requested",
     enable_billing_header_rectifier: true,
     enable_claude_metadata_user_id_injection: true,
     enable_response_fixer: true,
@@ -243,6 +247,13 @@ describe("cli-manager/GeneralTab", () => {
     expect(onPersistCodexSessionIdCompletion).toHaveBeenCalled();
     expect(onPersistCacheAnomalyMonitor).toHaveBeenCalled();
 
+    fireEvent.change(screen.getByLabelText("Codex Priority 计费来源"), {
+      target: { value: "actual" },
+    });
+    expect(onPersistRectifier).toHaveBeenCalledWith({
+      codex_priority_billing_source: "actual",
+    });
+
     // Copy is sourced from central config.
     expect(screen.getByText(CACHE_ANOMALY_MONITOR_GUIDE_COPY.overview)).toBeInTheDocument();
     expect(screen.getByText(CACHE_ANOMALY_MONITOR_GUIDE_COPY.thresholds)).toBeInTheDocument();
@@ -345,6 +356,7 @@ describe("cli-manager/GeneralTab", () => {
     renderTab(<CliManagerGeneralTab {...createDefaultTabProps()} />);
 
     expect(screen.getByText("上游代理")).toBeInTheDocument();
+    expect(screen.getByText(/系统浏览器中的授权页面不受此设置控制/)).toBeInTheDocument();
 
     const proxyUrlInput = screen.getByPlaceholderText("http://127.0.0.1:7890");
     expect(proxyUrlInput).toBeInTheDocument();

@@ -12,11 +12,19 @@ use std::collections::BTreeSet;
 use std::env;
 use std::error::Error as StdError;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{OnceLock, RwLock};
 use std::time::Duration;
 
 /// Global HTTP client instance.
 static GLOBAL_CLIENT: OnceLock<RwLock<Client>> = OnceLock::new();
+static GLOBAL_NO_REDIRECT_CLIENT: OnceLock<RwLock<Client>> = OnceLock::new();
+static CLIENT_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Upgraded connections must not survive a reload of proxy or trust settings.
+pub(crate) fn generation() -> u64 {
+    CLIENT_GENERATION.load(Ordering::Acquire)
+}
 
 /// Current proxy URL (for logging and status queries).
 static CURRENT_PROXY_URL: OnceLock<RwLock<Option<String>>> = OnceLock::new();
@@ -73,6 +81,7 @@ fn sort_socket_addrs_ipv4_first(addrs: &mut [SocketAddr]) {
 pub fn init(proxy_url: Option<&str>) -> Result<(), String> {
     let effective_url = proxy_url.filter(|s| !s.trim().is_empty());
     let client = build_client(effective_url)?;
+    let no_redirect_client = build_no_redirect_client(effective_url)?;
 
     if GLOBAL_CLIENT.set(RwLock::new(client.clone())).is_err() {
         tracing::warn!(
@@ -84,7 +93,10 @@ pub fn init(proxy_url: Option<&str>) -> Result<(), String> {
         return apply_proxy(proxy_url);
     }
 
+    let _ = GLOBAL_NO_REDIRECT_CLIENT.set(RwLock::new(no_redirect_client));
+
     let _ = CURRENT_PROXY_URL.set(RwLock::new(effective_url.map(mask_url)));
+    CLIENT_GENERATION.fetch_add(1, Ordering::AcqRel);
 
     tracing::info!(
         "[HttpClient] Initialized: {}",
@@ -398,6 +410,23 @@ fn proxy_uses_socks5_local_dns(proxy_url: &str) -> bool {
         .is_some_and(|parsed| parsed.scheme() == "socks5")
 }
 
+/// Force IPv4-first DNS resolution when an explicit `socks5://` proxy is used.
+///
+/// `socks5://` (unlike `socks5h://`) resolves hostnames locally, and many local
+/// SOCKS5 clients cannot reach an AAAA result, so every client that installs an
+/// explicit proxy must apply this before adding the proxy — the gateway's
+/// outbound client and the OAuth clients in [`crate::gateway::oauth`] alike.
+pub(crate) fn apply_socks5_local_dns_workaround(
+    builder: reqwest::ClientBuilder,
+    proxy_url: &str,
+) -> reqwest::ClientBuilder {
+    if proxy_uses_socks5_local_dns(proxy_url) {
+        builder.dns_resolver2(Ipv4FirstResolver)
+    } else {
+        builder
+    }
+}
+
 fn proxy_test_url() -> String {
     #[cfg(test)]
     if let Some(lock) = TEST_PROXY_TEST_URL_OVERRIDE.get() {
@@ -563,6 +592,7 @@ fn validate_proxy_url(url: &str) -> Result<(), String> {
 pub fn apply_proxy(proxy_url: Option<&str>) -> Result<(), String> {
     let effective_url = proxy_url.filter(|s| !s.trim().is_empty());
     let new_client = build_client(effective_url)?;
+    let new_no_redirect_client = build_no_redirect_client(effective_url)?;
 
     if let Some(lock) = GLOBAL_CLIENT.get() {
         let mut client = lock.write().unwrap_or_else(|poisoned| {
@@ -574,6 +604,16 @@ pub fn apply_proxy(proxy_url: Option<&str>) -> Result<(), String> {
         return init(proxy_url);
     }
 
+    if let Some(lock) = GLOBAL_NO_REDIRECT_CLIENT.get() {
+        let mut client = lock.write().unwrap_or_else(|poisoned| {
+            tracing::warn!("[HttpClient] Recovered poisoned no-redirect client lock");
+            poisoned.into_inner()
+        });
+        *client = new_no_redirect_client;
+    } else {
+        let _ = GLOBAL_NO_REDIRECT_CLIENT.set(RwLock::new(new_no_redirect_client));
+    }
+
     if let Some(lock) = CURRENT_PROXY_URL.get() {
         let mut url = lock.write().unwrap_or_else(|poisoned| {
             tracing::warn!("[HttpClient] Recovered poisoned proxy URL lock");
@@ -582,6 +622,7 @@ pub fn apply_proxy(proxy_url: Option<&str>) -> Result<(), String> {
         *url = effective_url.map(mask_url);
     }
 
+    CLIENT_GENERATION.fetch_add(1, Ordering::AcqRel);
     tracing::info!(
         "[HttpClient] Proxy applied: {}",
         effective_url
@@ -606,6 +647,17 @@ pub fn get() -> Client {
         })
 }
 
+/// Get the shared client with automatic redirects disabled for credentialed control-plane calls.
+pub fn get_no_redirect() -> Result<Client, String> {
+    match GLOBAL_NO_REDIRECT_CLIENT.get() {
+        Some(lock) => lock
+            .read()
+            .map(|client| client.clone())
+            .map_err(|_| "No-redirect HTTP client lock is poisoned".to_string()),
+        None => build_no_redirect_client(None),
+    }
+}
+
 /// Get the current proxy URL.
 ///
 /// Returns None if direct connection is configured.
@@ -622,9 +674,17 @@ pub fn is_proxy_enabled() -> bool {
     get_current_proxy_url().is_some()
 }
 
-fn effective_proxy_url(settings: &AppSettings) -> Result<Option<String>, String> {
+/// Resolve the effective upstream proxy URL (with credentials) from settings,
+/// or `None` when the upstream proxy toggle is disabled.
+///
+/// Shared by the gateway's outbound client and by OAuth login/refresh clients
+/// ([`crate::gateway::oauth`]) so a single "Upstream Proxy" setting covers both.
+pub(crate) fn effective_proxy_url(settings: &AppSettings) -> Result<Option<String>, String> {
     if !settings.upstream_proxy_enabled {
         return Ok(None);
+    }
+    if settings.upstream_proxy_url.trim().is_empty() {
+        return Err("Upstream proxy URL cannot be empty when proxy is enabled".to_string());
     }
 
     build_effective_proxy_url(
@@ -785,6 +845,17 @@ fn normalize_host_token(host: &str) -> Option<String> {
 
 /// Build HTTP client with optional proxy.
 fn build_client(proxy_url: Option<&str>) -> Result<Client, String> {
+    build_client_with_redirect(proxy_url, true)
+}
+
+fn build_no_redirect_client(proxy_url: Option<&str>) -> Result<Client, String> {
+    build_client_with_redirect(proxy_url, false)
+}
+
+fn build_client_with_redirect(
+    proxy_url: Option<&str>,
+    follow_redirects: bool,
+) -> Result<Client, String> {
     let mut builder = Client::builder()
         .user_agent(format!(
             "aio-coding-hub-gateway/{}",
@@ -794,20 +865,19 @@ fn build_client(proxy_url: Option<&str>) -> Result<Client, String> {
         .pool_max_idle_per_host(10)
         .tcp_keepalive(Duration::from_secs(60));
 
+    if !follow_redirects {
+        builder = builder.redirect(reqwest::redirect::Policy::none());
+    }
+
     if let Some(url) = proxy_url {
         validate_proxy_url(url)?;
-        if proxy_uses_socks5_local_dns(url) {
-            builder = builder.dns_resolver2(Ipv4FirstResolver);
-        }
+        builder = apply_socks5_local_dns_workaround(builder, url);
         let proxy = reqwest::Proxy::all(url)
             .map_err(|e| format!("Invalid proxy URL '{}': {}", mask_url(url), e))?;
         builder = builder.proxy(proxy);
         tracing::debug!("[HttpClient] Proxy configured: {}", mask_url(url));
-    } else if system_proxy_points_to_gateway() {
-        builder = builder.no_proxy();
-        tracing::warn!("[HttpClient] System proxy points to gateway, bypassing to avoid recursion");
     } else {
-        tracing::debug!("[HttpClient] Following system proxy (no explicit proxy configured)");
+        builder = apply_system_proxy_self_loop_guard(builder);
     }
 
     builder
@@ -832,6 +902,21 @@ fn system_proxy_points_to_gateway() -> bool {
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .any(|value| proxy_points_to_gateway_with_context(&value, &context))
+}
+
+/// Disable automatic system proxies when they point back at this gateway.
+/// Clients with an explicit proxy must not call this helper because an explicit
+/// proxy is an intentional override.
+pub(crate) fn apply_system_proxy_self_loop_guard(
+    builder: reqwest::ClientBuilder,
+) -> reqwest::ClientBuilder {
+    if system_proxy_points_to_gateway() {
+        tracing::warn!("[HttpClient] System proxy points to gateway, bypassing to avoid recursion");
+        builder.no_proxy()
+    } else {
+        tracing::debug!("[HttpClient] Following system proxy (no explicit proxy configured)");
+        builder
+    }
 }
 
 fn proxy_points_to_gateway_with_context(value: &str, context: &GatewaySelfCheckContext) -> bool {
@@ -867,6 +952,8 @@ pub fn mask_url(url: &str) -> String {
             Some(port) => format!("{}://{}:{}", parsed.scheme(), host, port),
             None => format!("{}://{}", parsed.scheme(), host),
         }
+    } else if url.contains('@') {
+        "[redacted]".to_string()
     } else if url.len() > 20 {
         format!("{}...", &url[..20])
     } else {
@@ -1210,6 +1297,19 @@ mod tests {
         let err = validate_proxy_for_settings(&settings)
             .expect_err("mixed credentials should be rejected");
         assert!(err.contains("either in proxy URL or username/password fields"));
+    }
+
+    #[test]
+    fn test_effective_proxy_url_rejects_enabled_proxy_without_url() {
+        let settings = AppSettings {
+            upstream_proxy_enabled: true,
+            upstream_proxy_url: "   ".to_string(),
+            ..AppSettings::default()
+        };
+
+        let err = effective_proxy_url(&settings)
+            .expect_err("enabled upstream proxy must require a proxy URL");
+        assert!(err.contains("cannot be empty"));
     }
 
     #[test]

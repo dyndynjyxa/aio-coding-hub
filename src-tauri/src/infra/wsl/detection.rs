@@ -11,7 +11,7 @@ use std::thread::JoinHandle;
 
 const WSL_DETECTION_OUTPUT_STREAM_LIMIT: usize = 128 * 1024;
 const WSL_DETECTION_OUTPUT_READ_CHUNK_SIZE: usize = 8 * 1024;
-const WSL_DISTRO_MAX_CHARS: usize = 128;
+pub(super) const WSL_DISTRO_MAX_CHARS: usize = 128;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LimitedWslDetectionOutput {

@@ -7,6 +7,34 @@ describe("services/providers via MSW bridge", () => {
   beforeEach(() => {
     setTauriRuntime();
     setProvidersState("claude", []);
+    setProvidersState("grok", []);
+  });
+
+  it("persists a Grok API key provider through the MSW bridge", async () => {
+    const saved = await providerUpsert({
+      cliKey: "grok",
+      name: "Grok Provider",
+      baseUrls: ["https://api.example.test/v1"],
+      baseUrlMode: "order",
+      authMode: "api_key",
+      apiKey: "test-api-key",
+      enabled: true,
+      costMultiplier: 1,
+      priority: 100,
+      claudeModels: null,
+      limit5hUsd: null,
+      limitDailyUsd: null,
+      dailyResetMode: "fixed",
+      dailyResetTime: "00:00:00",
+      limitWeeklyUsd: null,
+      limitMonthlyUsd: null,
+      limitTotalUsd: null,
+      tags: [],
+      note: "",
+    });
+
+    expect(saved).toMatchObject({ cli_key: "grok", auth_mode: "api_key" });
+    expect(getProvidersState("grok")).toHaveLength(1);
   });
 
   it("persists provider_upsert with nested input payload through tauri bridge", async () => {

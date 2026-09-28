@@ -374,9 +374,8 @@ pub fn delete(db: &db::Db, workspace_id: i64) -> crate::shared::error::AppResult
     Ok(true)
 }
 
-pub fn set_active(db: &db::Db, workspace_id: i64) -> crate::shared::error::AppResult<()> {
-    let conn = db.open_connection()?;
-    let cli_key = get_cli_key_by_id(&conn, workspace_id)?;
+pub fn set_active(conn: &Connection, workspace_id: i64) -> crate::shared::error::AppResult<()> {
+    let cli_key = get_cli_key_by_id(conn, workspace_id)?;
     validate_cli_key(&cli_key)?;
 
     let now = now_unix_seconds();

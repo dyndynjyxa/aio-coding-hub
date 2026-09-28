@@ -21,6 +21,7 @@ pub(super) struct LegacySkillState {
 pub(super) fn import_into_transaction(
     tx: &Connection,
     now: i64,
+    bundle_schema_version: u32,
     providers: Vec<ProviderExport>,
     sort_modes: Vec<SortModeExport>,
     sort_mode_active: HashMap<String, String>,
@@ -41,6 +42,7 @@ pub(super) fn import_into_transaction(
 
     for provider in providers {
         let ProviderExport {
+            supports_websockets,
             id,
             cli_key,
             name,
@@ -62,6 +64,8 @@ pub(super) fn import_into_transaction(
             oauth_last_refreshed_at,
             oauth_last_error,
             claude_models_json,
+            claude_models,
+            model_policy,
             supported_models_json,
             model_mapping_json,
             enabled,
@@ -81,12 +85,26 @@ pub(super) fn import_into_transaction(
             bridge_type,
         } = provider;
 
+        crate::providers::validate_supports_websockets(
+            &cli_key,
+            source_provider_id.is_some() || source_provider_cli_key.is_some(),
+            bridge_type.as_deref(),
+            supports_websockets,
+        )?;
+
         let sort_order = provider_sort_order_by_cli_key
             .entry(cli_key.clone())
             .or_insert(0);
         let base_urls_json = serde_json::to_string(&base_urls)
             .map_err(|e| format!("SYSTEM_ERROR: failed to serialize base_urls: {e}"))?;
         let base_url_primary = base_urls.first().cloned().unwrap_or_default();
+        let (claude_models_json, model_policy_json) = resolve_provider_model_ownership(
+            bundle_schema_version,
+            &cli_key,
+            claude_models_json,
+            claude_models,
+            model_policy,
+        )?;
 
         tx.execute(
             r#"
@@ -98,6 +116,7 @@ INSERT INTO providers(
   base_url_mode,
   auth_mode,
   claude_models_json,
+  model_policy_json,
   supported_models_json,
   model_mapping_json,
   api_key_plaintext,
@@ -128,9 +147,10 @@ INSERT INTO providers(
   oauth_last_error,
   source_provider_id,
   bridge_type,
+  supports_websockets,
   created_at,
   updated_at
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, NULL, ?36, ?37, ?37)
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, NULL, ?37, ?38, ?39, ?39)
 "#,
             params![
                 cli_key,
@@ -140,6 +160,7 @@ INSERT INTO providers(
                 base_url_mode,
                 auth_mode,
                 claude_models_json,
+                model_policy_json,
                 supported_models_json,
                 model_mapping_json,
                 api_key_plaintext,
@@ -169,6 +190,7 @@ INSERT INTO providers(
                 oauth_last_refreshed_at,
                 oauth_last_error,
                 bridge_type,
+                bool_to_int(supports_websockets),
                 now,
             ],
         )
@@ -262,7 +284,55 @@ INSERT INTO providers(
         skill_repos_imported,
         installed_skills_imported,
         local_skills_imported,
+        warnings: Vec::new(),
     })
+}
+
+fn resolve_provider_model_ownership(
+    bundle_schema_version: u32,
+    cli_key: &str,
+    legacy_json: String,
+    legacy_models: Option<crate::providers::ClaudeModels>,
+    model_policy: Option<crate::providers::ProviderModelPolicyV1>,
+) -> AppResult<(String, Option<String>)> {
+    if bundle_schema_version < CONFIG_BUNDLE_SCHEMA_VERSION {
+        let policy = (cli_key != "claude")
+            .then(|| crate::providers::ProviderModelPolicyV1::all().to_json())
+            .transpose()?;
+        return Ok((legacy_json, policy));
+    }
+
+    match model_policy {
+        Some(policy) => {
+            if legacy_models.is_some()
+                || (!legacy_json.trim().is_empty() && legacy_json.trim() != "{}")
+            {
+                return Err(
+                    "SEC_INVALID_INPUT: config provider cannot own model_policy and claude_models"
+                        .to_string()
+                        .into(),
+                );
+            }
+            Ok(("{}".to_string(), Some(policy.normalized()?.to_json()?)))
+        }
+        None => {
+            if cli_key != "claude" {
+                return Err(
+                    "SEC_INVALID_INPUT: non-Claude config provider requires model_policy"
+                        .to_string()
+                        .into(),
+                );
+            }
+            let legacy_models = legacy_models.ok_or_else(|| {
+                crate::shared::error::AppError::from(
+                    "SEC_INVALID_INPUT: legacy Claude config provider requires claude_models",
+                )
+            })?;
+            let legacy_json = serde_json::to_string(&legacy_models)
+                .map_err(|error| format!("SYSTEM_ERROR: {error}"))?;
+            Ok((legacy_json, None))
+        }
+    }
 }
 
 fn import_sort_modes(
@@ -626,6 +696,37 @@ ON CONFLICT(workspace_id, skill_id) DO UPDATE SET
         imported += 1;
     }
 
+    Ok(imported)
+}
+
+/// Full-replace posture (same as providers): wipe the table, then insert the
+/// bundle rows including the plaintext api key.
+pub(super) fn replace_image_gen_configs(
+    tx: &Connection,
+    now: i64,
+    configs: &[super::ImageGenConfigExport],
+) -> AppResult<u32> {
+    tx.execute("DELETE FROM image_gen_configs", [])
+        .map_err(|e| db_err!("failed to clear image_gen_configs: {e}"))?;
+
+    let mut imported = 0_u32;
+    for config in configs {
+        tx.execute(
+            r#"
+INSERT INTO image_gen_configs(adapter_id, base_url, model, api_key_plaintext, created_at, updated_at)
+VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+"#,
+            params![
+                config.adapter_id,
+                config.base_url,
+                config.model,
+                config.api_key_plaintext,
+                now
+            ],
+        )
+        .map_err(|e| db_err!("failed to insert image_gen_config: {e}"))?;
+        imported += 1;
+    }
     Ok(imported)
 }
 

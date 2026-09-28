@@ -51,6 +51,7 @@ function createSettingsMutationResult(
     runtime: {
       gateway_rebound: false,
       cli_proxy_synced: false,
+      codex_proxy_sync: "not_requested",
       wsl_auto_sync_triggered: false,
       gateway_status: createGatewayStatus(gatewayStatusOverrides),
       ...restRuntime,
@@ -151,7 +152,7 @@ describe("settings/useSettingsPersistence", () => {
     expect(result.current.trayEnabled).toBe(true);
     expect(result.current.showHomeUsage).toBe(true);
     expect(result.current.homeUsagePeriod).toBe("last15");
-    expect(result.current.cliPriorityOrder).toEqual(["claude", "codex", "gemini"]);
+    expect(result.current.cliPriorityOrder).toEqual(["claude", "codex", "gemini", "grok"]);
   });
 
   it("marks ready and toasts when settings query errors", async () => {

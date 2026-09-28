@@ -24,7 +24,7 @@ pub(crate) async fn provider_oauth_fetch_limits(
     db_state: tauri::State<'_, DbInitState>,
     provider_id: i64,
 ) -> Result<ProviderOAuthLimitsResult, String> {
-    let db = ensure_db_ready(app, db_state.inner()).await?;
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
     let mut details = blocking::run("provider_oauth_fetch_limits_load", {
         let db = db.clone();
         move || crate::providers::get_oauth_details(&db, provider_id)
@@ -33,6 +33,7 @@ pub(crate) async fn provider_oauth_fetch_limits(
     .map_err(Into::<String>::into)?;
     let adapter = crate::gateway::oauth::registry::resolve_oauth_adapter_for_details(&details)?;
     let client = crate::gateway::oauth::build_oauth_http_client(
+        &app,
         &format!("aio-coding-hub-oauth-command/{}", env!("CARGO_PKG_VERSION")),
         15,
         10,

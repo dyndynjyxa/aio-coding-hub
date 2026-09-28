@@ -1,6 +1,13 @@
 import type { ReactElement } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render as rtlRender,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { ProviderEditorDialog } from "../ProviderEditorDialog";
@@ -13,6 +20,7 @@ import {
   providerOAuthCancelDeviceFlow,
   providerOAuthDisconnect,
   providerOAuthFetchLimits,
+  providerModelsDiscover,
   providerOAuthPollDeviceFlow,
   providerOAuthRefresh,
   providerOAuthStartDeviceFlow,
@@ -63,6 +71,7 @@ vi.mock("../../../services/providers/providers", async () => {
     providerOAuthDisconnect: vi.fn(),
     providerOAuthStatus: vi.fn(),
     providerOAuthFetchLimits: vi.fn(),
+    providerModelsDiscover: vi.fn(),
   };
 });
 
@@ -95,9 +104,12 @@ function makeProvider(partial: Partial<ProviderSummary> = {}): ProviderSummary {
     oauth_last_error: null,
     source_provider_id: null,
     bridge_type: null,
+    model_policy_status: "ready",
+    model_policy: { version: 1, mode: "all", modelPatterns: [], mappings: [] },
     api_key_configured: partial.api_key_configured ?? false,
     ...partial,
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,
+    supports_websockets: partial.supports_websockets ?? false,
     extension_values: partial.extension_values ?? [],
     custom_headers: partial.custom_headers ?? [],
   };
@@ -129,6 +141,7 @@ function makeInitialValues(
     ...partial,
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,
     custom_headers: partial.custom_headers ?? [],
+    supports_websockets: partial.supports_websockets ?? false,
   };
 }
 
@@ -205,6 +218,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
     vi.mocked(providerOAuthDisconnect).mockReset();
     vi.mocked(providerOAuthStatus).mockReset();
     vi.mocked(providerOAuthFetchLimits).mockReset();
+    vi.mocked(providerModelsDiscover).mockReset();
     vi.mocked(copyText).mockReset();
     vi.mocked(openDesktopUrl).mockReset();
     vi.mocked(logToConsole).mockReset();
@@ -214,6 +228,30 @@ describe("pages/providers/ProviderEditorDialog", () => {
       isLoading: false,
       error: null,
     } as any);
+  });
+
+  it("supports Grok API key and OAuth modes without CX2CC", () => {
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="grok"
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByPlaceholderText("sk-…")).toBeInTheDocument();
+    // Auth mode tab label
+    expect(dialog.getByText("OAuth 登录")).toBeInTheDocument();
+    expect(dialog.queryByText("CX2CC 转译")).not.toBeInTheDocument();
+    expect(dialog.queryByText("Claude 模型映射")).not.toBeInTheDocument();
+
+    fireEvent.click(dialog.getByText("OAuth 登录"));
+    expect(dialog.getByText("未连接 OAuth")).toBeInTheDocument();
+    expect(dialog.getByRole("button", { name: "OAuth 登录" })).toBeInTheDocument();
+    expect(dialog.getByRole("button", { name: "设备码登录" })).toBeInTheDocument();
   });
 
   it("validates create form and saves provider", async () => {
@@ -270,14 +308,20 @@ describe("pages/providers/ProviderEditorDialog", () => {
       target: { value: "https://example.com/v1" },
     });
 
-    fireEvent.click(dialog.getByText("Claude 模型映射"));
-    fireEvent.change(dialog.getByPlaceholderText(/minimax-text-01/), {
-      target: { value: "x".repeat(201) },
+    fireEvent.click(dialog.getByText("模型路由"));
+    fireEvent.change(dialog.getByLabelText("映射请求模型"), {
+      target: { value: "gpt-**" },
     });
+    fireEvent.change(dialog.getByLabelText("映射上游模型"), {
+      target: { value: "upstream-ok" },
+    });
+    fireEvent.click(dialog.getByRole("button", { name: "添加映射" }));
     fireEvent.click(dialog.getByRole("button", { name: "保存" }));
-    expect(vi.mocked(toast)).toHaveBeenCalledWith(expect.stringContaining("主模型 过长"));
+    expect(vi.mocked(toast)).toHaveBeenCalledWith(
+      expect.stringContaining("请求模型最多包含一个 *")
+    );
 
-    fireEvent.change(dialog.getByPlaceholderText(/minimax-text-01/), { target: { value: "ok" } });
+    fireEvent.change(dialog.getByLabelText("请求模型 1"), { target: { value: "ok" } });
     fireEvent.click(dialog.getByRole("button", { name: "保存" }));
 
     await waitFor(() =>
@@ -330,6 +374,86 @@ describe("pages/providers/ProviderEditorDialog", () => {
     );
     expect(onSaved).not.toHaveBeenCalled();
     expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it("defaults WebSocket capability off and guards unsaved changes", () => {
+    const onOpenChange = vi.fn();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const props = {
+      mode: "create" as const,
+      cliKey: "codex" as const,
+      onSaved: vi.fn(),
+      onOpenChange,
+    };
+    const view = render(<ProviderEditorDialog {...props} open={true} />);
+    const toggle = screen.getByRole("switch", { name: "支持 Responses WebSocket" });
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+    expect(toggle).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(confirmSpy).toHaveBeenCalledWith("有未保存的修改，确定关闭吗？");
+    expect(onOpenChange).not.toHaveBeenCalled();
+    view.rerender(<ProviderEditorDialog {...props} open={false} />);
+    view.rerender(<ProviderEditorDialog {...props} open={true} />);
+    expect(screen.getByRole("switch", { name: "支持 Responses WebSocket" })).not.toBeChecked();
+    confirmSpy.mockRestore();
+  });
+
+  it("loads and saves an explicit WebSocket capability change", async () => {
+    const provider = makeProvider({
+      cli_key: "codex",
+      api_key_configured: true,
+      supports_websockets: true,
+    });
+    vi.mocked(providerUpsert).mockResolvedValue({ ...provider, supports_websockets: false });
+    render(
+      <ProviderEditorDialog
+        mode="edit"
+        provider={provider}
+        open={true}
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+    const toggle = screen.getByRole("switch", { name: "支持 Responses WebSocket" });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() =>
+      expect(providerUpsert).toHaveBeenCalledWith(
+        expect.objectContaining({ supportsWebsockets: false })
+      )
+    );
+  });
+
+  it("loads WebSocket capability from duplicate initial values and hides it for Claude", () => {
+    const view = render(
+      <ProviderEditorDialog
+        mode="create"
+        cliKey="codex"
+        initialValues={makeInitialValues({ supports_websockets: true })}
+        open={true}
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+    expect(screen.getByRole("switch", { name: "支持 Responses WebSocket" })).toBeChecked();
+    view.rerender(
+      <ProviderEditorDialog
+        mode="create"
+        cliKey="claude"
+        open={true}
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+    expect(
+      screen.queryByRole("switch", { name: "支持 Responses WebSocket" })
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "CX2CC 转译" }));
+    expect(
+      screen.queryByRole("switch", { name: "支持 Responses WebSocket" })
+    ).not.toBeInTheDocument();
   });
 
   it("passes stream idle timeout override when saving", async () => {
@@ -776,6 +900,11 @@ describe("pages/providers/ProviderEditorDialog", () => {
       expect(dialog.getAllByText("gpt-5.5").length).toBeGreaterThanOrEqual(1);
     });
 
+    // cx2cc providers map models via CX2CC 模型映射 only; the generic policy
+    // mapping editor must not offer a second, conflicting mechanism.
+    fireEvent.click(dialog.getByText("模型路由"));
+    expect(dialog.queryByText("模型映射（可选）")).not.toBeInTheDocument();
+
     fireEvent.click(dialog.getByRole("button", { name: "保存" }));
 
     await waitFor(() =>
@@ -929,7 +1058,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
     expect(vi.mocked(providerUpsert)).not.toHaveBeenCalled();
   });
 
-  it("syncs haiku sonnet opus with main model by default", () => {
+  it("edits a generic model rule", () => {
     render(
       <ProviderEditorDialog
         mode="create"
@@ -941,23 +1070,286 @@ describe("pages/providers/ProviderEditorDialog", () => {
     );
 
     const dialog = within(screen.getByRole("dialog"));
-    fireEvent.click(dialog.getByText("Claude 模型映射"));
-    const mainInput = dialog.getByPlaceholderText(/minimax-text-01/);
-    const haikuInput = dialog.getByPlaceholderText(/glm-4-plus-haiku/);
-    const sonnetInput = dialog.getByPlaceholderText(/glm-4-plus-sonnet/);
-    const opusInput = dialog.getByPlaceholderText(/glm-4-plus-opus/);
-
-    fireEvent.change(dialog.getByPlaceholderText(/minimax-text-01/), {
-      target: { value: "glm-main" },
+    fireEvent.click(dialog.getByText("模型路由"));
+    fireEvent.change(dialog.getByLabelText("映射请求模型"), { target: { value: "gpt-*" } });
+    fireEvent.change(dialog.getByLabelText("映射上游模型"), {
+      target: { value: "upstream-*" },
     });
+    fireEvent.click(dialog.getByRole("button", { name: "添加映射" }));
 
-    expect(mainInput).toHaveValue("glm-main");
-    expect(haikuInput).toHaveValue("glm-main");
-    expect(sonnetInput).toHaveValue("glm-main");
-    expect(opusInput).toHaveValue("glm-main");
+    expect(dialog.getByLabelText("请求模型 1")).toHaveValue("gpt-*");
+    expect(dialog.getByLabelText("上游模型 1")).toHaveValue("upstream-*");
   });
 
-  it("preserves custom haiku value when main model changes again", () => {
+  it("keeps discovered API-key models as candidates until the user selects one", async () => {
+    vi.mocked(providerModelsDiscover).mockResolvedValueOnce({
+      status: "ready",
+      models: ["gpt-5.4", "claude-3"],
+      origin: "https://example.com",
+      base_url_index: 1,
+    });
+
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="codex"
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.change(dialog.getByPlaceholderText("sk-…"), {
+      target: { value: "sk-draft-secret" },
+    });
+    fireEvent.change(dialog.getByPlaceholderText("中转 endpoint（例如：https://example.com/v1）"), {
+      target: { value: "https://example.com/v1" },
+    });
+    fireEvent.click(dialog.getByText("模型路由"));
+    fireEvent.click(dialog.getByRole("button", { name: "获取上游模型" }));
+
+    await waitFor(() => expect(dialog.getByText(/已获取 2 个候选/)).toBeInTheDocument());
+    expect(dialog.queryByLabelText("显式模型 1")).not.toBeInTheDocument();
+    fireEvent.change(dialog.getByLabelText("新增显式模型"), {
+      target: { value: "claude-3" },
+    });
+    fireEvent.keyDown(dialog.getByLabelText("新增显式模型"), { key: "Enter" });
+    await waitFor(() => expect(dialog.getByLabelText("显式模型 1")).toHaveValue("claude-3"));
+    expect(dialog.queryByLabelText("上游模型 1")).not.toBeInTheDocument();
+    expect(dialog.getByText("已获取 2 个候选 · https://example.com · 地址 1")).toBeInTheDocument();
+    expect(providerModelsDiscover).toHaveBeenCalledWith({
+      providerId: null,
+      cliKey: "codex",
+      authMode: "api_key",
+      baseUrls: ["https://example.com/v1"],
+      baseUrlMode: "order",
+      apiKey: "sk-draft-secret",
+      sourceProviderId: null,
+      bridgeType: null,
+    });
+  });
+
+  it("keeps legacy Claude discovery as candidates until explicit cutover", async () => {
+    vi.mocked(providerModelsDiscover).mockResolvedValueOnce({
+      status: "ready",
+      models: ["claude-3-5-sonnet"],
+      origin: "https://api.anthropic.com",
+      base_url_index: 1,
+    });
+
+    render(
+      <ProviderEditorDialog
+        mode="edit"
+        open={true}
+        provider={makeProvider({
+          model_policy_status: "legacy",
+          model_policy: null,
+          claude_models: { main_model: "claude-legacy" },
+          api_key_configured: true,
+        })}
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByText("模型路由"));
+    await waitFor(() => expect(dialog.getByText("当前 Claude 使用旧版模型映射")).toBeVisible());
+    fireEvent.click(dialog.getByRole("button", { name: "获取上游模型" }));
+
+    await waitFor(() => expect(dialog.getByText(/已获取 1 个候选/)).toBeInTheDocument());
+    expect(dialog.getByText("当前 Claude 使用旧版模型映射")).toBeVisible();
+    expect(dialog.queryByLabelText("新增显式模型")).not.toBeInTheDocument();
+    fireEvent.click(dialog.getByRole("button", { name: "改用通用模型策略" }));
+    fireEvent.change(dialog.getByLabelText("新增显式模型"), {
+      target: { value: "claude-3-5-sonnet" },
+    });
+    fireEvent.keyDown(dialog.getByLabelText("新增显式模型"), { key: "Enter" });
+    expect(dialog.getByLabelText("显式模型 1")).toHaveValue("claude-3-5-sonnet");
+    expect(dialog.getByText("保存后旧版映射不再生效，且无法在界面切回旧策略")).toBeInTheDocument();
+    expect(providerModelsDiscover).toHaveBeenCalledWith({
+      providerId: 1,
+      cliKey: "claude",
+      authMode: "api_key",
+      baseUrls: ["https://example.com/v1"],
+      baseUrlMode: "order",
+      apiKey: null,
+      sourceProviderId: null,
+      bridgeType: null,
+    });
+  });
+
+  it("keeps invalid policy blocked after discovery until explicit reset", async () => {
+    vi.mocked(providerModelsDiscover).mockResolvedValueOnce({
+      status: "ready",
+      models: ["gpt-5.4"],
+      origin: "https://example.com",
+      base_url_index: 1,
+    });
+
+    render(
+      <ProviderEditorDialog
+        mode="edit"
+        open={true}
+        provider={makeProvider({
+          cli_key: "codex",
+          model_policy_status: "invalid",
+          model_policy: null,
+          api_key_configured: true,
+        })}
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByText("模型路由"));
+    await waitFor(() => expect(dialog.getByText(/模型策略无效/)).toBeVisible());
+    fireEvent.click(dialog.getByRole("button", { name: "获取上游模型" }));
+
+    await waitFor(() => expect(dialog.getByText(/已获取 1 个候选/)).toBeInTheDocument());
+    expect(dialog.getByText(/模型策略无效/)).toBeVisible();
+    expect(dialog.queryByLabelText("新增显式模型")).not.toBeInTheDocument();
+    fireEvent.click(dialog.getByRole("button", { name: "重置为全部可用" }));
+    fireEvent.change(dialog.getByLabelText("新增显式模型"), {
+      target: { value: "gpt-5.4" },
+    });
+    fireEvent.keyDown(dialog.getByLabelText("新增显式模型"), { key: "Enter" });
+    expect(dialog.getByLabelText("显式模型 1")).toHaveValue("gpt-5.4");
+    expect(
+      dialog.queryByText("保存后旧版映射不再生效，且无法在界面切回旧策略")
+    ).not.toBeInTheDocument();
+    expect(dialog.queryByRole("button", { name: "重置为全部可用" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the latest discovery result when an earlier request finishes later", async () => {
+    let resolveFirst!: (value: Awaited<ReturnType<typeof providerModelsDiscover>>) => void;
+    let resolveSecond!: (value: Awaited<ReturnType<typeof providerModelsDiscover>>) => void;
+    vi.mocked(providerModelsDiscover)
+      .mockReturnValueOnce(new Promise((resolve) => (resolveFirst = resolve)))
+      .mockReturnValueOnce(new Promise((resolve) => (resolveSecond = resolve)));
+
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="codex"
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    const apiKey = dialog.getByPlaceholderText("sk-…");
+    fireEvent.change(apiKey, { target: { value: "sk-first" } });
+    fireEvent.click(dialog.getByText("模型路由"));
+    fireEvent.click(dialog.getByRole("button", { name: "获取上游模型" }));
+    fireEvent.change(apiKey, { target: { value: "sk-second" } });
+    fireEvent.click(dialog.getByRole("button", { name: "获取上游模型" }));
+
+    resolveSecond({
+      status: "ready",
+      models: ["new-model"],
+      origin: "https://new.example.com",
+      base_url_index: 1,
+    });
+    await waitFor(() =>
+      expect(dialog.getByText(/https:\/\/new\.example\.com/)).toBeInTheDocument()
+    );
+    fireEvent.change(dialog.getByLabelText("新增显式模型"), {
+      target: { value: "new-model" },
+    });
+    fireEvent.keyDown(dialog.getByLabelText("新增显式模型"), { key: "Enter" });
+    expect(dialog.getByLabelText("显式模型 1")).toHaveValue("new-model");
+
+    resolveFirst({
+      status: "ready",
+      models: ["old-model"],
+      origin: "https://old.example.com",
+      base_url_index: 1,
+    });
+    await waitFor(() => expect(dialog.getByLabelText("显式模型 1")).toHaveValue("new-model"));
+    expect(dialog.queryByDisplayValue("old-model")).not.toBeInTheDocument();
+  });
+
+  it("ignores a discovery response that arrives after closing", async () => {
+    let resolveDiscovery!: (value: Awaited<ReturnType<typeof providerModelsDiscover>>) => void;
+    vi.mocked(providerModelsDiscover).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveDiscovery = resolve;
+      })
+    );
+    const onOpenChange = vi.fn();
+
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="codex"
+        onSaved={vi.fn()}
+        onOpenChange={onOpenChange}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByText("模型路由"));
+    fireEvent.click(dialog.getByRole("button", { name: "获取上游模型" }));
+    fireEvent.click(dialog.getByRole("button", { name: "取消" }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+
+    resolveDiscovery({
+      status: "ready",
+      models: ["late-model"],
+      origin: "https://late.example.com",
+      base_url_index: 1,
+    });
+
+    await waitFor(() => expect(dialog.getByText("尚未获取上游模型")).toBeInTheDocument());
+    expect(dialog.queryByDisplayValue("late-model")).not.toBeInTheDocument();
+  });
+
+  it("ignores a discovery response after the connection changes", async () => {
+    let resolveDiscovery!: (value: Awaited<ReturnType<typeof providerModelsDiscover>>) => void;
+    vi.mocked(providerModelsDiscover).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveDiscovery = resolve;
+      })
+    );
+
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="codex"
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.change(dialog.getByPlaceholderText("sk-…"), {
+      target: { value: "sk-draft-secret" },
+    });
+    fireEvent.click(dialog.getByText("模型路由"));
+    fireEvent.click(dialog.getByRole("button", { name: "获取上游模型" }));
+    expect(dialog.getByText("正在获取上游模型…")).toBeInTheDocument();
+
+    fireEvent.change(dialog.getByPlaceholderText("sk-…"), {
+      target: { value: "sk-new-secret" },
+    });
+    resolveDiscovery({
+      status: "ready",
+      models: ["gpt-5.4"],
+      origin: "https://example.com",
+      base_url_index: 1,
+    });
+
+    await waitFor(() => expect(dialog.getByText("连接已变化，请重新获取")).toBeInTheDocument());
+    expect(dialog.queryByLabelText("显式模型 1")).not.toBeInTheDocument();
+  });
+
+  it("supports creating and deleting a generic model rule", () => {
     render(
       <ProviderEditorDialog
         mode="create"
@@ -969,22 +1361,117 @@ describe("pages/providers/ProviderEditorDialog", () => {
     );
 
     const dialog = within(screen.getByRole("dialog"));
-    fireEvent.click(dialog.getByText("Claude 模型映射"));
+    fireEvent.click(dialog.getByText("模型路由"));
+    const composer = dialog.getByLabelText("新增显式模型");
+    fireEvent.change(composer, { target: { value: "gpt-5.4" } });
+    fireEvent.keyDown(composer, { key: "Enter" });
+    expect(dialog.getByLabelText("显式模型 1")).toBeInTheDocument();
+    fireEvent.click(dialog.getByRole("button", { name: "删除显式模型 1" }));
+    expect(composer).toHaveFocus();
+  });
 
-    const mainInput = dialog.getByPlaceholderText(/minimax-text-01/);
-    const haikuInput = dialog.getByPlaceholderText(/glm-4-plus-haiku/);
-    const sonnetInput = dialog.getByPlaceholderText(/glm-4-plus-sonnet/);
-    const opusInput = dialog.getByPlaceholderText(/glm-4-plus-opus/);
+  it("guards close after edits outside react-hook-form state (base URL)", () => {
+    const onOpenChange = vi.fn();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
 
-    fireEvent.change(mainInput, { target: { value: "glm-main-a" } });
-    fireEvent.change(haikuInput, { target: { value: "glm-haiku-custom" } });
-    fireEvent.change(mainInput, { target: { value: "glm-main-b" } });
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="codex"
+        onSaved={vi.fn()}
+        onOpenChange={onOpenChange}
+      />
+    );
 
-    // haiku was customized so it should NOT be overwritten
-    expect(haikuInput).toHaveValue("glm-haiku-custom");
-    // sonnet and opus still matched old main_model, so they sync
-    expect(sonnetInput).toHaveValue("glm-main-b");
-    expect(opusInput).toHaveValue("glm-main-b");
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.change(dialog.getByPlaceholderText("中转 endpoint（例如：https://example.com/v1）"), {
+      target: { value: "https://example.com/v1" },
+    });
+    fireEvent.click(dialog.getByRole("button", { name: "取消" }));
+
+    expect(confirmSpy).toHaveBeenCalledWith("有未保存的修改，确定关闭吗？");
+    expect(onOpenChange).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it("ignores clicks on the already-active auth tab but guards real switches", () => {
+    const onOpenChange = vi.fn();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="codex"
+        onSaved={vi.fn()}
+        onOpenChange={onOpenChange}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    // Clicking the tab that is already active must not mark the editor dirty
+    // (nor invalidate model discovery) — closing stays confirm-free.
+    fireEvent.click(dialog.getByRole("tab", { name: "API 密钥" }));
+    fireEvent.click(dialog.getByRole("button", { name: "取消" }));
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+
+    // A real switch still counts as an edit and guards the close.
+    onOpenChange.mockClear();
+    fireEvent.click(dialog.getByRole("tab", { name: "OAuth 登录" }));
+    fireEvent.click(dialog.getByRole("button", { name: "取消" }));
+    expect(confirmSpy).toHaveBeenCalledWith("有未保存的修改，确定关闭吗？");
+    expect(onOpenChange).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it("guards committed model policy changes but ignores uncommitted composer text", () => {
+    const onOpenChange = vi.fn();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="codex"
+        onSaved={vi.fn()}
+        onOpenChange={onOpenChange}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByText("模型路由"));
+    const composer = dialog.getByLabelText("新增显式模型");
+    fireEvent.change(composer, { target: { value: "gpt-5.4" } });
+    fireEvent.keyDown(composer, { key: "Enter" });
+    fireEvent.click(dialog.getByRole("button", { name: "取消" }));
+    expect(confirmSpy).toHaveBeenCalledWith("有未保存的修改，确定关闭吗？");
+    expect(onOpenChange).not.toHaveBeenCalled();
+
+    confirmSpy.mockReturnValue(true);
+    fireEvent.click(dialog.getByRole("button", { name: "取消" }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    confirmSpy.mockRestore();
+
+    cleanup();
+    onOpenChange.mockClear();
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="codex"
+        onSaved={vi.fn()}
+        onOpenChange={onOpenChange}
+      />
+    );
+    const composerDialog = within(screen.getByRole("dialog"));
+    fireEvent.click(composerDialog.getByText("模型路由"));
+    fireEvent.change(composerDialog.getByLabelText("新增显式模型"), {
+      target: { value: "gpt" },
+    });
+    fireEvent.click(composerDialog.getByRole("button", { name: "取消" }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
   it("supports edit mode, drives UI handlers, and blocks close while saving", async () => {
@@ -1036,13 +1523,13 @@ describe("pages/providers/ProviderEditorDialog", () => {
     // Toggle enabled switch (covers Switch onCheckedChange handler)
     fireEvent.click(dialog.getByRole("switch"));
 
-    // Drive Claude models onChange handlers
-    fireEvent.click(dialog.getByText("Claude 模型映射"));
-    fireEvent.change(dialog.getByPlaceholderText(/minimax-text-01/), { target: { value: "m" } });
-    fireEvent.change(dialog.getByPlaceholderText(/kimi-k2-thinking/), { target: { value: "r" } });
-    fireEvent.change(dialog.getByPlaceholderText(/glm-4-plus-haiku/), { target: { value: "h" } });
-    fireEvent.change(dialog.getByPlaceholderText(/glm-4-plus-sonnet/), { target: { value: "s" } });
-    fireEvent.change(dialog.getByPlaceholderText(/glm-4-plus-opus/), { target: { value: "o" } });
+    // Drive generic model policy handlers
+    fireEvent.click(dialog.getByText("模型路由"));
+    fireEvent.change(dialog.getByLabelText("映射请求模型"), { target: { value: "gpt-*" } });
+    fireEvent.change(dialog.getByLabelText("映射上游模型"), {
+      target: { value: "upstream-*" },
+    });
+    fireEvent.click(dialog.getByRole("button", { name: "添加映射" }));
 
     // Start saving and block close while saving
     fireEvent.click(dialog.getByRole("button", { name: "保存" }));
@@ -1502,6 +1989,79 @@ describe("pages/providers/ProviderEditorDialog", () => {
     fireEvent.click(dialog.getByRole("button", { name: "保存" }));
 
     await waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalledWith("请先完成 OAuth 登录"));
+  });
+
+  it("supports Grok device code login in create mode", async () => {
+    vi.mocked(providerUpsert).mockResolvedValueOnce(
+      makeProvider({
+        id: 346,
+        cli_key: "grok",
+        name: "Grok Device OAuth",
+      })
+    );
+    vi.mocked(providerOAuthStartDeviceFlow).mockResolvedValueOnce(
+      makeOAuthDeviceStartResult({
+        provider_id: 346,
+        provider_type: "grok_oauth",
+        device_code: "grok_device_123",
+        user_code: "WXYZ-1234",
+        verification_uri: "https://accounts.x.ai/device",
+        expires_in: 900,
+        interval: 0,
+      })
+    );
+    vi.mocked(providerOAuthPollDeviceFlow).mockResolvedValueOnce({
+      completed: true,
+      provider_id: 346,
+      provider_type: "grok_oauth",
+      expires_at: 1700000000,
+    });
+    vi.mocked(providerOAuthStatus).mockResolvedValueOnce(
+      makeOAuthStatus({
+        connected: true,
+        provider_type: "grok_oauth",
+        email: "grok@example.com",
+        expires_at: 1700000000,
+        has_refresh_token: true,
+      })
+    );
+
+    const onSaved = vi.fn();
+    const onOpenChange = vi.fn();
+
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="grok"
+        onSaved={onSaved}
+        onOpenChange={onOpenChange}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByText("OAuth 登录"));
+    fireEvent.change(dialog.getByPlaceholderText("default"), {
+      target: { value: "Grok Device OAuth" },
+    });
+
+    fireEvent.click(dialog.getByRole("button", { name: "设备码登录" }));
+
+    await waitFor(() => expect(vi.mocked(providerOAuthStartDeviceFlow)).toHaveBeenCalledWith(346));
+    await waitFor(() =>
+      expect(vi.mocked(openDesktopUrl)).toHaveBeenCalledWith("https://accounts.x.ai/device")
+    );
+    await waitFor(() =>
+      expect(vi.mocked(providerOAuthPollDeviceFlow)).toHaveBeenCalledWith(
+        346,
+        "flow_123",
+        "grok_device_123",
+        "WXYZ-1234"
+      )
+    );
+    await waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalledWith("设备码登录成功"));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith("grok"));
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
 
   it("supports Codex device code login in create mode", async () => {

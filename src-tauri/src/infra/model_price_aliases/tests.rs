@@ -10,6 +10,55 @@ fn wildcard_single_star_matches_prefix_suffix() {
 }
 
 #[test]
+fn default_alias_resolves_grok_build_price_model() {
+    let aliases = ModelPriceAliasesV1::default();
+
+    assert_eq!(
+        aliases.resolve_target_model("grok", "grok-build"),
+        Some("grok-build-0.1")
+    );
+}
+
+#[test]
+fn v1_aliases_migrate_grok_build_default_without_losing_user_rules() {
+    let aliases = ModelPriceAliasesV1 {
+        version: 1,
+        rules: vec![ModelPriceAliasRuleV1 {
+            cli_key: "gemini".to_string(),
+            match_type: ModelPriceAliasMatchTypeV1::Prefix,
+            pattern: "gemini-3".to_string(),
+            target_model: "gemini-3-preview".to_string(),
+            enabled: true,
+        }],
+    };
+
+    let migrated = validate_aliases(aliases).expect("v1 aliases should migrate");
+
+    assert_eq!(migrated.version, 2);
+    assert_eq!(
+        migrated.resolve_target_model("gemini", "gemini-3-flash"),
+        Some("gemini-3-preview")
+    );
+    assert_eq!(
+        migrated.resolve_target_model("grok", "grok-build"),
+        Some("grok-build-0.1")
+    );
+}
+
+#[test]
+fn v2_aliases_preserve_a_user_deleted_grok_build_default() {
+    let aliases = ModelPriceAliasesV1 {
+        version: 2,
+        rules: Vec::new(),
+    };
+
+    let validated = validate_aliases(aliases).expect("v2 aliases should remain valid");
+
+    assert_eq!(validated.version, 2);
+    assert_eq!(validated.resolve_target_model("grok", "grok-build"), None);
+}
+
+#[test]
 fn resolves_exact_over_wildcard_over_prefix() {
     let aliases = ModelPriceAliasesV1 {
         version: 1,

@@ -10,6 +10,12 @@ pub(super) fn finalize_circuit_and_session<R: tauri::Runtime>(
     ctx: &StreamFinalizeCtx<R>,
     error_code: Option<&'static str>,
 ) -> Option<&'static str> {
+    if let Some(request) = &ctx.ws_request {
+        use crate::shared::mutex_ext::MutexExt;
+        if request.generation.lock_or_recover().incomplete {
+            return Some("incomplete");
+        }
+    }
     let effective_error_category = if error_code == Some(GatewayErrorCode::StreamAborted.as_str()) {
         Some(ErrorCategory::ClientAbort.as_str())
     } else if error_code == Some(GatewayErrorCode::Fake200.as_str()) {
@@ -43,14 +49,21 @@ pub(super) fn finalize_circuit_and_session<R: tauri::Runtime>(
             ctx.provider_id,
             now_unix,
             ctx.provider_cooldown_secs,
+            ctx.provider_health_neutral,
         );
     }
 
-    if error_code.is_none() && (200..300).contains(&ctx.status) && !ctx.fake_200_detected {
+    // A trusted WebSocket response keeps the real upgrade status in attempt logs.
+    let transport_succeeded = (200..300).contains(&ctx.status) || ctx.status == 101;
+    if error_code.is_none() && transport_succeeded && !ctx.fake_200_detected {
         let _ = provider_router::record_success_and_emit_transition(
             provider_router::RecordCircuitArgs::from_stream_ctx(ctx, now_unix),
         );
-        if let Some(session_id) = ctx.session_id.as_deref() {
+        if let Some(session_id) = ctx
+            .session_id
+            .as_deref()
+            .filter(|_| !ctx.provider_health_neutral)
+        {
             ctx.session.bind_success(
                 &ctx.cli_key,
                 session_id,

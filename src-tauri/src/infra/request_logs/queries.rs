@@ -95,6 +95,9 @@ pub(super) struct AttemptRow {
     decision: Option<String>,
     reason: Option<String>,
     session_reuse: Option<bool>,
+    reasoning_effort: Option<String>,
+    #[serde(default)]
+    upstream_sent: bool,
 }
 
 pub(super) fn parse_attempts(attempts_json: &str) -> Vec<AttemptRow> {
@@ -133,6 +136,16 @@ pub(super) fn final_provider_from_attempts(attempts: &[AttemptRow]) -> (i64, Str
         Some(a) => (a.provider_id, a.provider_name.clone()),
         None => (0, "Unknown".to_string()),
     }
+}
+
+pub(super) fn final_reasoning_effort_from_attempts(attempts: &[AttemptRow]) -> Option<String> {
+    super::semantics::final_reasoning_effort(attempts.iter().map(|attempt| {
+        (
+            attempt.outcome.as_str(),
+            attempt.upstream_sent,
+            attempt.reasoning_effort.as_deref(),
+        )
+    }))
 }
 
 pub(super) fn route_from_attempts(attempts: &[AttemptRow]) -> Vec<RequestLogRouteHop> {
@@ -305,11 +318,18 @@ fn attach_source_provider_info(
             item.final_provider_source_name = info.source_provider_name.clone();
             bridged = info.bridged;
         }
+        let persisted_openai_semantics = super::semantics::resolve_cx2cc_cost_basis(
+            item.special_settings_json.as_deref(),
+            (item.final_provider_id > 0).then_some(item.final_provider_id),
+        )
+        .openai_input_semantics_override();
         item.effective_input_tokens = crate::usage_stats::effective_input_tokens_display(
             &item.cli_key,
+            persisted_openai_semantics,
             bridged,
             item.input_tokens,
             item.cache_read_input_tokens,
+            item.cache_creation_input_tokens,
         );
     }
 
@@ -322,6 +342,7 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<RequestLogSummary, rusqlite
     let attempt_count = attempts.len() as i64;
     let (start_provider_id, start_provider_name) = start_provider_from_attempts(&attempts);
     let (final_provider_id, final_provider_name) = final_provider_from_attempts(&attempts);
+    let reasoning_effort = final_reasoning_effort_from_attempts(&attempts);
     let route = route_from_attempts(&attempts);
     // has_failover: 切换过 provider（route 中有多个 hop）。注意 provider_id>0 的
     // skipped attempt 也计入 hop（见 route_includes_skipped_attempts 测试）；前端
@@ -346,6 +367,7 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<RequestLogSummary, rusqlite
         excluded_from_stats: row.get::<_, i64>("excluded_from_stats").unwrap_or(0) != 0,
         special_settings_json: row.get("special_settings_json")?,
         requested_model: row.get("requested_model")?,
+        reasoning_effort,
         status,
         error_code,
         is_interrupted,
@@ -385,6 +407,7 @@ fn row_to_detail(row: &rusqlite::Row<'_>) -> Result<RequestLogDetail, rusqlite::
     let attempts_json: String = row.get("attempts_json")?;
     let attempts = parse_attempts(&attempts_json);
     let (final_provider_id, final_provider_name) = final_provider_from_attempts(&attempts);
+    let reasoning_effort = final_reasoning_effort_from_attempts(&attempts);
     let cost_usd = cost_usd_from_femto(row.get("cost_usd_femto")?);
     let status: Option<i64> = row.get("status")?;
     let error_code: Option<String> = row.get("error_code")?;
@@ -417,6 +440,7 @@ fn row_to_detail(row: &rusqlite::Row<'_>) -> Result<RequestLogDetail, rusqlite::
         effective_input_tokens: None,
         usage_json: row.get("usage_json")?,
         requested_model: row.get("requested_model")?,
+        reasoning_effort,
         final_provider_id,
         final_provider_name,
         final_provider_source_id: None,
@@ -443,11 +467,18 @@ fn attach_source_provider_info_to_detail(
         item.final_provider_source_name = info.source_provider_name.clone();
         bridged = info.bridged;
     }
+    let persisted_openai_semantics = super::semantics::resolve_cx2cc_cost_basis(
+        item.special_settings_json.as_deref(),
+        (item.final_provider_id > 0).then_some(item.final_provider_id),
+    )
+    .openai_input_semantics_override();
     item.effective_input_tokens = crate::usage_stats::effective_input_tokens_display(
         &item.cli_key,
+        persisted_openai_semantics,
         bridged,
         item.input_tokens,
         item.cache_read_input_tokens,
+        item.cache_creation_input_tokens,
     );
     Ok(())
 }
@@ -633,8 +664,9 @@ pub fn get_by_trace_id(
 #[cfg(test)]
 mod tests {
     use super::{
-        final_provider_from_attempts, get_by_id, get_by_trace_id, list_after_id_all, list_recent,
-        list_recent_all, load_source_provider_info_map, parse_attempts, route_from_attempts,
+        final_provider_from_attempts, final_reasoning_effort_from_attempts, get_by_id,
+        get_by_trace_id, list_after_id_all, list_recent, list_recent_all,
+        load_source_provider_info_map, parse_attempts, route_from_attempts,
         start_provider_from_attempts,
     };
     use crate::db;
@@ -799,6 +831,39 @@ INSERT INTO request_logs (
     }
 
     #[test]
+    fn final_reasoning_effort_prefers_success_then_last_sent_attempt() {
+        let attempts = parse_attempts(
+            r#"[
+                {"provider_id":1,"provider_name":"A","outcome":"failed","reasoning_effort":"xhigh"},
+                {"provider_id":2,"provider_name":"B","outcome":"failed","reasoning_effort":"low","upstream_sent":true},
+                {"provider_id":3,"provider_name":"C","outcome":"success","reasoning_effort":"high","upstream_sent":true},
+                {"provider_id":4,"provider_name":"D","outcome":"failed","reasoning_effort":"max","upstream_sent":true}
+            ]"#,
+        );
+        assert_eq!(
+            final_reasoning_effort_from_attempts(&attempts).as_deref(),
+            Some("high")
+        );
+
+        let failed = parse_attempts(
+            r#"[
+                {"provider_id":1,"provider_name":"A","outcome":"failed","reasoning_effort":"low","upstream_sent":true},
+                {"provider_id":2,"provider_name":"B","outcome":"failed","reasoning_effort":"max","upstream_sent":true}
+            ]"#,
+        );
+        assert_eq!(
+            final_reasoning_effort_from_attempts(&failed).as_deref(),
+            Some("max")
+        );
+        assert_eq!(
+            final_reasoning_effort_from_attempts(&parse_attempts(
+                r#"[{"provider_id":1,"provider_name":"A","outcome":"failed","reasoning_effort":"high"}]"#
+            )),
+            None
+        );
+    }
+
+    #[test]
     fn loads_source_provider_names_for_bridge_providers() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
@@ -937,5 +1002,130 @@ INSERT INTO request_logs (
 
         let detail = get_by_id(&db, 11).unwrap();
         assert_eq!(detail.session_id.as_deref(), Some("sess-123"));
+    }
+
+    #[test]
+    fn summary_and_detail_prefer_persisted_cx2cc_semantics_over_provider_state() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("request-log-semantics.db");
+        let db = db::init_for_tests(&db_path).unwrap();
+        let conn = db.open_connection().unwrap();
+
+        conn.execute_batch(
+            r#"
+INSERT INTO providers (id, cli_key, name, base_url, api_key_plaintext, enabled, priority,
+  sort_order, cost_multiplier, created_at, updated_at)
+VALUES (7, 'codex', 'OpenAI Primary', 'https://example.com', '', 1, 100, 0, 1.0, 1, 1);
+INSERT INTO providers (id, cli_key, name, base_url, api_key_plaintext, enabled, priority,
+  sort_order, cost_multiplier, source_provider_id, bridge_type, created_at, updated_at)
+VALUES (12, 'claude', 'Claude Bridge', 'https://example.com', '', 1, 100, 0, 1.0,
+  7, 'cx2cc', 1, 1);
+"#,
+        )
+        .unwrap();
+
+        let fixtures = [
+            (
+                31_i64,
+                Some(r#"[{"type":"cx2cc_cost_basis","source_cli_key":"codex"}]"#),
+            ),
+            (
+                32_i64,
+                Some(r#"[{"type":"cx2cc_cost_basis","source_cli_key":"claude"}]"#),
+            ),
+            (33_i64, None),
+            (34_i64, Some("not-json")),
+            (
+                35_i64,
+                Some(
+                    r#"[{"type":"cx2cc_cost_basis","bridge_provider_id":12,"source_cli_key":"codex"}]"#,
+                ),
+            ),
+            (
+                36_i64,
+                Some(
+                    r#"[{"type":"cx2cc_cost_basis","bridge_provider_id":99,"source_cli_key":"codex"}]"#,
+                ),
+            ),
+        ];
+
+        for (id, special_settings_json) in fixtures {
+            conn.execute(
+                r#"
+INSERT INTO request_logs (
+  id, trace_id, cli_key, method, path, query, excluded_from_stats,
+  special_settings_json, status, error_code, duration_ms, ttfb_ms, attempts_json,
+  input_tokens, output_tokens, total_tokens, cache_read_input_tokens,
+  cache_creation_input_tokens, cache_creation_5m_input_tokens,
+  cache_creation_1h_input_tokens, usage_json, requested_model, cost_usd_femto,
+  cost_multiplier, created_at_ms, created_at, final_provider_id
+) VALUES (?1, ?2, 'claude', 'POST', '/v1/messages', NULL, 0, ?3, 200, NULL, 10, 5,
+  '[{"provider_id":12,"provider_name":"Claude Bridge","outcome":"success","status":200}]',
+  1000, 50, 1050, 100, 200, NULL, NULL, NULL, 'claude-model', NULL, 1.0,
+  ?4, ?1, 12)
+"#,
+                rusqlite::params![
+                    id,
+                    format!("trace-semantics-{id}"),
+                    special_settings_json,
+                    id * 1000
+                ],
+            )
+            .unwrap();
+        }
+        drop(conn);
+
+        let assert_effective = |expected: &[(i64, i64)]| {
+            let summaries = list_recent_all(&db, 20).unwrap();
+            for (id, tokens) in expected {
+                let summary = summaries
+                    .iter()
+                    .find(|item| item.id == *id)
+                    .unwrap_or_else(|| panic!("missing summary id={id}"));
+                assert_eq!(
+                    summary.effective_input_tokens,
+                    Some(*tokens),
+                    "summary id={id}"
+                );
+
+                let detail = get_by_id(&db, *id).unwrap();
+                assert_eq!(
+                    detail.effective_input_tokens,
+                    Some(*tokens),
+                    "detail id={id}"
+                );
+            }
+        };
+
+        assert_effective(&[
+            (31, 700),
+            (32, 1000),
+            (33, 700),
+            (34, 700),
+            (35, 700),
+            (36, 1000),
+        ]);
+
+        let conn = db.open_connection().unwrap();
+        conn.execute(
+            "UPDATE providers SET source_provider_id = NULL, bridge_type = NULL WHERE id = 12",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        assert_effective(&[
+            (31, 700),
+            (32, 1000),
+            (33, 1000),
+            (34, 1000),
+            (35, 700),
+            (36, 1000),
+        ]);
+
+        let conn = db.open_connection().unwrap();
+        conn.execute("DELETE FROM providers WHERE id = 12", [])
+            .unwrap();
+        drop(conn);
+        assert_effective(&[(31, 700), (32, 1000), (35, 700), (36, 1000)]);
     }
 }

@@ -29,6 +29,10 @@ fn gateway_sessions_limit(limit: Option<u32>) -> usize {
         .clamp(1, GATEWAY_SESSIONS_MAX_LIMIT) as usize
 }
 
+fn session_cost_usd(total_cost_usd_femto: f64) -> Option<f64> {
+    (total_cost_usd_femto > 0.0).then_some(total_cost_usd_femto / USD_FEMTO_DIVISOR)
+}
+
 pub(crate) async fn list_active_sessions<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     db: db::Db,
@@ -94,10 +98,7 @@ pub(crate) async fn list_active_sessions<R: tauri::Runtime>(
                 total_output_tokens: stats
                     .map(|row| row.total_output_tokens)
                     .filter(|value| *value > 0),
-                total_cost_usd: stats
-                    .map(|row| row.total_cost_usd_femto)
-                    .filter(|value| *value > 0)
-                    .map(|value| value as f64 / USD_FEMTO_DIVISOR),
+                total_cost_usd: stats.and_then(|row| session_cost_usd(row.total_cost_usd_femto)),
                 total_duration_ms: stats
                     .map(|row| row.total_duration_ms)
                     .filter(|value| *value > 0),
@@ -108,7 +109,7 @@ pub(crate) async fn list_active_sessions<R: tauri::Runtime>(
 
 #[cfg(test)]
 mod tests {
-    use super::gateway_sessions_limit;
+    use super::{gateway_sessions_limit, session_cost_usd, USD_FEMTO_DIVISOR};
 
     #[test]
     fn gateway_sessions_limit_uses_default_and_clamps() {
@@ -116,5 +117,15 @@ mod tests {
         assert_eq!(gateway_sessions_limit(Some(0)), 1);
         assert_eq!(gateway_sessions_limit(Some(999)), 200);
         assert_eq!(gateway_sessions_limit(Some(88)), 88);
+    }
+
+    #[test]
+    fn session_cost_usd_accepts_femto_totals_above_i64_max() {
+        let total_femto = (3_i64 << 61) as f64 * 2.0;
+        let expected = total_femto / USD_FEMTO_DIVISOR;
+
+        assert_eq!(session_cost_usd(total_femto), Some(expected));
+        assert_eq!(session_cost_usd(0.0), None);
+        assert_eq!(session_cost_usd(-1.0), None);
     }
 }

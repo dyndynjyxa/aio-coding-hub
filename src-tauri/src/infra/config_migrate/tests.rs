@@ -122,7 +122,87 @@ fn make_test_bundle(schema_version: u32) -> ConfigBundle {
         skill_repos: Vec::new(),
         installed_skills: (schema_version >= CONFIG_BUNDLE_SCHEMA_VERSION).then(Vec::new),
         local_skills: (schema_version >= CONFIG_BUNDLE_SCHEMA_VERSION).then(Vec::new),
+        image_gen_configs: None,
     }
+}
+
+fn insert_image_gen_config(conn: &Connection, adapter_id: &str, api_key: &str) {
+    conn.execute(
+        r#"
+INSERT INTO image_gen_configs(adapter_id, base_url, model, api_key_plaintext, created_at, updated_at)
+VALUES (?1, 'https://img.example.com/v1', 'gpt-image-2', ?2, 1, 1)
+"#,
+        params![adapter_id, api_key],
+    )
+    .expect("insert image gen config");
+}
+
+#[test]
+fn config_export_import_round_trips_image_gen_configs() {
+    let test_app = ConfigMigrateTestApp::new();
+    let app = test_app.handle();
+    {
+        let conn = test_app.db.open_connection().expect("open db");
+        insert_image_gen_config(&conn, "gpt-image", "sk-image-secret");
+    }
+
+    let bundle = config_export(&app, &test_app.db).expect("export");
+    let exported = bundle
+        .image_gen_configs
+        .as_ref()
+        .expect("bundle should carry image_gen_configs");
+    assert_eq!(exported.len(), 1);
+    assert_eq!(exported[0].adapter_id, "gpt-image");
+    assert_eq!(exported[0].base_url, "https://img.example.com/v1");
+    assert_eq!(exported[0].model, "gpt-image-2");
+    assert_eq!(exported[0].api_key_plaintext, "sk-image-secret");
+
+    // Simulate "clear then import": wipe the table, then import the bundle.
+    {
+        let conn = test_app.db.open_connection().expect("open db");
+        conn.execute("DELETE FROM image_gen_configs", [])
+            .expect("clear image gen configs");
+    }
+
+    config_import(&app, &test_app.db, bundle).expect("import");
+
+    let conn = test_app.db.open_connection().expect("open db");
+    let (base_url, model, api_key): (String, String, String) = conn
+        .query_row(
+            "SELECT base_url, model, api_key_plaintext FROM image_gen_configs WHERE adapter_id = 'gpt-image'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("read restored image gen config");
+    assert_eq!(base_url, "https://img.example.com/v1");
+    assert_eq!(model, "gpt-image-2");
+    assert_eq!(api_key, "sk-image-secret");
+}
+
+#[test]
+fn config_import_without_image_gen_configs_keeps_existing_rows() {
+    let test_app = ConfigMigrateTestApp::new();
+    let app = test_app.handle();
+    {
+        let conn = test_app.db.open_connection().expect("open db");
+        insert_image_gen_config(&conn, "gpt-image", "sk-keep-me");
+    }
+
+    // Legacy bundle without the image_gen_configs field.
+    let bundle = make_test_bundle(CONFIG_BUNDLE_SCHEMA_VERSION);
+    assert!(bundle.image_gen_configs.is_none());
+
+    config_import(&app, &test_app.db, bundle).expect("import");
+
+    let conn = test_app.db.open_connection().expect("open db");
+    let api_key: String = conn
+        .query_row(
+            "SELECT api_key_plaintext FROM image_gen_configs WHERE adapter_id = 'gpt-image'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("existing image gen config should survive legacy import");
+    assert_eq!(api_key, "sk-keep-me");
 }
 
 #[cfg(unix)]
@@ -143,6 +223,74 @@ fn validate_bundle_schema_version_rejects_mismatch() {
     assert!(err
         .to_string()
         .contains("SEC_INVALID_INPUT: unsupported config bundle schema_version"));
+}
+
+#[test]
+fn config_export_uses_typed_model_policy_ownership_and_rejects_invalid() {
+    let test_app = ConfigMigrateTestApp::new();
+    let app = test_app.handle();
+    let conn = test_app.db.open_connection().expect("open db");
+    conn.execute_batch(
+        r#"
+INSERT INTO providers(
+  cli_key, name, base_url, api_key_plaintext, claude_models_json,
+  model_policy_json, created_at, updated_at
+) VALUES
+  ('claude', 'legacy-policy-export', 'https://example.com', 'sk', '{"main_model":"legacy-main"}', NULL, 1, 1),
+  ('codex', 'ready-policy-export', 'https://example.com', 'sk', '{}', '{"version":1,"mode":"selected","modelPatterns":[],"mappings":[{"source":"gpt-*","target":"upstream-*"}]}', 1, 1);
+        "#,
+    )
+    .expect("insert policy providers");
+    drop(conn);
+
+    let bundle = config_export(&app, &test_app.db).expect("export policies");
+    let legacy = bundle
+        .providers
+        .iter()
+        .find(|provider| provider.name == "legacy-policy-export")
+        .expect("legacy export");
+    assert!(legacy.model_policy.is_none());
+    assert_eq!(
+        legacy
+            .claude_models
+            .as_ref()
+            .and_then(|models| models.main_model.as_deref()),
+        Some("legacy-main")
+    );
+
+    let ready = bundle
+        .providers
+        .iter()
+        .find(|provider| provider.name == "ready-policy-export")
+        .expect("ready export");
+    assert_eq!(
+        ready
+            .model_policy
+            .as_ref()
+            .map(|policy| policy.resolve_mapping("gpt-5")),
+        Some("upstream-5".to_string())
+    );
+    assert!(ready.claude_models.is_none());
+
+    let conn = test_app.db.open_connection().expect("open db");
+    conn.execute(
+        "UPDATE providers SET model_policy_json = ?1 WHERE name = 'ready-policy-export'",
+        params![r#"{"version":99,"mode":"all","rules":[]}"#],
+    )
+    .expect("corrupt policy");
+    drop(conn);
+    // An invalid policy must not block the whole backup: it degrades to the
+    // safe default policy in the exported bundle.
+    let bundle = config_export(&app, &test_app.db).expect("export with invalid policy");
+    let degraded = bundle
+        .providers
+        .iter()
+        .find(|provider| provider.name == "ready-policy-export")
+        .expect("degraded export");
+    assert_eq!(
+        degraded.model_policy,
+        Some(crate::providers::ProviderModelPolicyV1::all())
+    );
 }
 
 #[test]
@@ -337,6 +485,7 @@ fn config_import_v2_restores_full_prompt_and_skill_payload() {
     let app = test_app.handle();
     let bundle = ConfigBundle {
         providers: vec![ProviderExport {
+            supports_websockets: false,
             id: Some(1),
             cli_key: "codex".to_string(),
             name: "oauth-provider".to_string(),
@@ -361,6 +510,8 @@ fn config_import_v2_restores_full_prompt_and_skill_payload() {
             oauth_last_refreshed_at: Some(1_999_999_999),
             oauth_last_error: Some("last error".to_string()),
             claude_models_json: "{\"main\":\"gpt-5.4\"}".to_string(),
+            claude_models: None,
+            model_policy: None,
             supported_models_json: "{\"gpt-5.4\":true}".to_string(),
             model_mapping_json: "{\"gpt-5.4\":\"gpt-5.4\"}".to_string(),
             enabled: true,
@@ -445,7 +596,7 @@ fn config_import_v2_restores_full_prompt_and_skill_payload() {
                 },
             ],
         }]),
-        ..make_test_bundle(CONFIG_BUNDLE_SCHEMA_VERSION)
+        ..make_test_bundle(CONFIG_BUNDLE_SCHEMA_VERSION_V2)
     };
 
     let result = config_import(&app, &test_app.db, bundle).expect("config import");
@@ -468,6 +619,18 @@ fn config_import_v2_restores_full_prompt_and_skill_payload() {
         )
         .expect("oauth id token");
     assert_eq!(oauth_id_token.as_deref(), Some("id-token"));
+
+    let model_policy_json: Option<String> = conn
+        .query_row(
+            "SELECT model_policy_json FROM providers WHERE name = 'oauth-provider'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("model policy");
+    assert_eq!(
+        model_policy_json.as_deref(),
+        Some(r#"{"version":1,"mode":"all","modelPatterns":[],"mappings":[]}"#)
+    );
 
     let skill_enabled_count: i64 = conn
         .query_row("SELECT COUNT(1) FROM workspace_skill_enabled", [], |row| {
@@ -492,6 +655,129 @@ fn config_import_v2_restores_full_prompt_and_skill_payload() {
             .trim_end_matches('\n'),
         "prompt one"
     );
+}
+
+#[test]
+fn config_import_failure_restores_grok_runtime_and_skill_files() {
+    let test_app = ConfigMigrateTestApp::new();
+    let app = test_app.handle();
+    let config_path = crate::grok_config::config_path(&app).expect("Grok config path");
+    std::fs::create_dir_all(config_path.parent().expect("Grok config parent"))
+        .expect("create Grok home");
+    std::fs::write(
+        &config_path,
+        b"# original\n[model.aio]\nmodel = \"grok-build\"\n",
+    )
+    .expect("write initial Grok config");
+    crate::mcp_sync::sync_cli(&app, "grok", &[]).expect("seed Grok MCP manifest");
+    crate::prompt_sync::apply_enabled_prompt(&app, "grok", 42, "original instructions")
+        .expect("seed Grok prompt runtime");
+
+    let invalid_config = b"[mcp_servers\ninvalid = true\n";
+    std::fs::write(&config_path, invalid_config).expect("write invalid Grok config");
+    let prompt_target_before =
+        crate::prompt_sync::read_target_bytes(&app, "grok").expect("read Grok prompt target");
+    let prompt_manifest_before =
+        crate::prompt_sync::read_manifest_bytes(&app, "grok").expect("read Grok prompt manifest");
+    let mcp_manifest_before =
+        crate::mcp_sync::read_manifest_bytes(&app, "grok").expect("read Grok MCP manifest");
+
+    let ssot_root = ssot_skills_root(&app).expect("SSOT root");
+    write_skill_md(
+        &ssot_root.join("existing-installed"),
+        "Existing Installed",
+        "Existing installed skill",
+    );
+    let grok_skills_root = cli_skills_root(&app, "grok").expect("Grok skills root");
+    write_skill_md(
+        &grok_skills_root.join("existing-local"),
+        "Existing Local",
+        "Existing local skill",
+    );
+    std::fs::write(
+        grok_skills_root.join("existing-local").join("notes.txt"),
+        "keep me",
+    )
+    .expect("write existing local skill file");
+
+    let bundle = ConfigBundle {
+        installed_skills: Some(vec![InstalledSkillExport {
+            skill_key: "imported-installed".to_string(),
+            name: "Imported Installed".to_string(),
+            description: "Imported installed skill".to_string(),
+            source_git_url: "https://example.test/imported.git".to_string(),
+            source_branch: "main".to_string(),
+            source_subdir: "skills/imported".to_string(),
+            enabled_in_workspaces: Vec::new(),
+            files: vec![SkillFileExport {
+                relative_path: "SKILL.md".to_string(),
+                content_base64: BASE64_STANDARD.encode(
+                    b"---\nname: Imported Installed\ndescription: Imported installed skill\n---\n",
+                ),
+            }],
+        }]),
+        local_skills: Some(vec![LocalSkillExport {
+            cli_key: "grok".to_string(),
+            dir_name: "imported-local".to_string(),
+            name: "Imported Local".to_string(),
+            description: "Imported local skill".to_string(),
+            source_git_url: None,
+            source_branch: None,
+            source_subdir: None,
+            files: vec![SkillFileExport {
+                relative_path: "SKILL.md".to_string(),
+                content_base64: BASE64_STANDARD
+                    .encode(b"---\nname: Imported Local\ndescription: Imported local skill\n---\n"),
+            }],
+        }]),
+        ..make_test_bundle(CONFIG_BUNDLE_SCHEMA_VERSION)
+    };
+
+    let Err(error) = config_import(&app, &test_app.db, bundle) else {
+        panic!("invalid Grok TOML must fail runtime sync");
+    };
+
+    assert!(error.to_string().contains("GROK_CONFIG_INVALID_TOML"));
+    assert_eq!(
+        std::fs::read(&config_path).expect("read restored Grok config"),
+        invalid_config
+    );
+    assert_eq!(
+        crate::prompt_sync::read_target_bytes(&app, "grok")
+            .expect("read restored Grok prompt target"),
+        prompt_target_before
+    );
+    assert_eq!(
+        crate::prompt_sync::read_manifest_bytes(&app, "grok")
+            .expect("read restored Grok prompt manifest"),
+        prompt_manifest_before
+    );
+    assert_eq!(
+        crate::mcp_sync::read_manifest_bytes(&app, "grok")
+            .expect("read restored Grok MCP manifest"),
+        mcp_manifest_before
+    );
+    assert!(ssot_root
+        .join("existing-installed")
+        .join("SKILL.md")
+        .exists());
+    assert!(!ssot_root.join("imported-installed").exists());
+    assert_eq!(
+        std::fs::read_to_string(grok_skills_root.join("existing-local").join("notes.txt"))
+            .expect("read restored local skill"),
+        "keep me"
+    );
+    assert!(!grok_skills_root.join("imported-local").exists());
+
+    let conn = test_app.db.open_connection().expect("open restored db");
+    let imported_workspace_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(1) FROM workspaces WHERE name = 'Imported'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count imported workspaces");
+    assert_eq!(imported_workspace_count, 0);
 }
 
 #[test]
@@ -704,4 +990,76 @@ fn write_skill_files_to_dir_rejects_oversized_base64_before_creating_dir() {
 
     assert!(err.to_string().contains("too large"));
     assert!(!target.exists());
+}
+
+fn insert_supports_websockets_provider(conn: &Connection) {
+    conn.execute(
+        "INSERT INTO providers(cli_key, name, base_url, api_key_plaintext, supports_websockets, created_at, updated_at)
+         VALUES ('codex', 'ws-export', 'https://example.com', 'test-key', 1, 1, 1)", [],
+    ).expect("insert ws provider");
+}
+
+#[test]
+fn supports_websockets_export_import_and_legacy_bundle_round_trip() {
+    let test_app = ConfigMigrateTestApp::new();
+    let app = test_app.handle();
+    insert_supports_websockets_provider(&test_app.db.open_connection().expect("open db"));
+    let bundle = config_export(&app, &test_app.db).expect("export ws provider");
+    assert_eq!(bundle.providers.len(), 1);
+    assert!(bundle.providers[0].supports_websockets);
+    config_import(&app, &test_app.db, bundle).expect("import ws provider");
+    assert!(
+        crate::providers::list_by_cli(&test_app.db, "codex").expect("list imported")[0]
+            .supports_websockets
+    );
+
+    let mut legacy = serde_json::to_value(config_export(&app, &test_app.db).expect("export again"))
+        .expect("serialize bundle");
+    legacy["providers"][0]
+        .as_object_mut()
+        .expect("provider object")
+        .remove("supports_websockets");
+    let legacy: ConfigBundle = serde_json::from_value(legacy).expect("read legacy bundle");
+    assert!(!legacy.providers[0].supports_websockets);
+    config_import(&app, &test_app.db, legacy).expect("import legacy bundle");
+    assert!(
+        !crate::providers::list_by_cli(&test_app.db, "codex").expect("list legacy")[0]
+            .supports_websockets
+    );
+}
+
+#[test]
+fn supports_websockets_import_rejects_incompatible_providers_and_rolls_back() {
+    let test_app = ConfigMigrateTestApp::new();
+    let app = test_app.handle();
+    insert_supports_websockets_provider(&test_app.db.open_connection().expect("open db"));
+    for invalid_kind in ["cli", "source_id", "source_hint", "bridge"] {
+        let mut bundle = config_export(&app, &test_app.db).expect("export");
+        // Put a valid insertion first to prove that rejecting the second row rolls it back too.
+        let mut invalid: ProviderExport =
+            serde_json::from_value(serde_json::to_value(&bundle.providers[0]).unwrap()).unwrap();
+        invalid.name = "invalid-ws".to_string();
+        invalid.id = None;
+        match invalid_kind {
+            "cli" => invalid.cli_key = "claude".to_string(),
+            "source_id" => invalid.source_provider_id = Some(123),
+            "source_hint" => invalid.source_provider_cli_key = Some("codex".to_string()),
+            "bridge" => invalid.bridge_type = Some("cx2cc".to_string()),
+            _ => unreachable!(),
+        }
+        bundle.providers[0].name = "partial-import-must-rollback".to_string();
+        bundle.providers.push(invalid);
+        let error = config_import(&app, &test_app.db, bundle)
+            .err()
+            .expect("reject incompatible capability");
+        assert!(error.to_string().contains("supports_websockets"), "{error}");
+        let providers = crate::providers::list_by_cli(&test_app.db, "codex")
+            .expect("original provider survives rollback");
+        assert_eq!(providers.len(), 1);
+        assert_eq!(providers[0].name, "ws-export");
+        assert!(providers[0].supports_websockets);
+        assert!(crate::providers::list_by_cli(&test_app.db, "claude")
+            .expect("no invalid provider")
+            .is_empty());
+    }
 }

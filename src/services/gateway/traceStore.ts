@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { emitListenerSnapshot } from "../../utils/listeners";
 import { normalizeClaudeModelMapping, type ClaudeModelMapping } from "./claudeModelMapping";
+import type { ModelRedirect } from "./modelRedirect";
 import type {
   GatewayAttempt,
   GatewayAttemptEvent,
@@ -24,6 +25,7 @@ export type TraceSession = {
   query: string | null;
   requested_model?: string | null;
   claude_model_mapping?: ClaudeModelMapping | null;
+  model_redirect?: ModelRedirect | null;
   first_seen_ms: number;
   last_seen_ms: number;
   attempts: GatewayAttemptEvent[];
@@ -77,8 +79,12 @@ function upsertAttempt(
     existing?.claude_model_mapping && !payload.claude_model_mapping
       ? { ...payload, claude_model_mapping: existing.claude_model_mapping }
       : payload;
+  const nextPayload = {
+    ...mergedPayload,
+    model_redirect: payload.model_redirect ?? existing?.model_redirect ?? null,
+  };
   const next = attempts.filter((a) => a.attempt_index !== payload.attempt_index);
-  next.push(mergedPayload);
+  next.push(nextPayload);
   next.sort((a, b) => a.attempt_index - b.attempt_index);
   return next.slice(-MAX_ATTEMPTS_PER_TRACE);
 }
@@ -155,6 +161,7 @@ export function ingestTraceStart(payload: GatewayRequestStartEvent) {
       path: payload.path,
       query: payload.query ?? null,
       requested_model: payload.requested_model ?? null,
+      model_redirect: null,
       first_seen_ms: now,
       last_seen_ms: now,
       attempts: [],
@@ -171,6 +178,7 @@ export function ingestTraceStart(payload: GatewayRequestStartEvent) {
         query: payload.query ?? null,
         requested_model: nextRequestedModel,
         claude_model_mapping: shouldReset ? null : (existing.claude_model_mapping ?? null),
+        model_redirect: shouldReset ? null : (existing.model_redirect ?? null),
         last_seen_ms: now,
         ...(shouldReset ? { first_seen_ms: now, attempts: [], summary: undefined } : {}),
       };
@@ -192,6 +200,7 @@ export function ingestTraceAttempt(payload: GatewayAttemptEvent) {
       query: payload.query ?? null,
       requested_model: payload.requested_model ?? null,
       claude_model_mapping: normalizeClaudeModelMapping(payload.claude_model_mapping),
+      model_redirect: payload.model_redirect ?? null,
       first_seen_ms: now,
       last_seen_ms: now,
       attempts: [payload],
@@ -211,6 +220,7 @@ export function ingestTraceAttempt(payload: GatewayAttemptEvent) {
         query: payload.query ?? null,
         requested_model: nextRequestedModel,
         claude_model_mapping: nextClaudeModelMapping,
+        model_redirect: payload.model_redirect ?? existing.model_redirect ?? null,
         last_seen_ms: now,
         attempts: upsertAttempt(existing.attempts, payload),
       };
@@ -233,6 +243,7 @@ export function ingestTraceRequest(payload: GatewayRequestEvent) {
       query: summary.query ?? null,
       requested_model: summary.requested_model ?? null,
       claude_model_mapping: normalizeClaudeModelMapping(summary.claude_model_mapping),
+      model_redirect: summary.model_redirect ?? null,
       first_seen_ms: now,
       last_seen_ms: now,
       attempts: [],
@@ -255,6 +266,10 @@ export function ingestTraceRequest(payload: GatewayRequestEvent) {
         query: summary.query ?? null,
         requested_model: nextRequestedModel,
         claude_model_mapping: nextClaudeModelMapping,
+        // The final request event is authoritative: normalizeGatewayRequestEvent
+        // always writes this key, so a null here must clear any redirect a failed
+        // attempt reported earlier (mirrors claude_model_mapping above).
+        model_redirect: summary.model_redirect ?? null,
         last_seen_ms: now,
         summary,
       };

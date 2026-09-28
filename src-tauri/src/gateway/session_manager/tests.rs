@@ -201,6 +201,75 @@ fn extract_session_id_fallback_uses_message_fingerprint_and_ignores_user_agent()
 }
 
 #[test]
+fn grok_stable_headers_take_priority_and_request_id_is_ignored() {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "x-grok-session-id",
+        HeaderValue::from_static("grok-session-stable"),
+    );
+    headers.insert(
+        "x-grok-conv-id",
+        HeaderValue::from_static("grok-conversation-stable"),
+    );
+    headers.insert(
+        "x-grok-req-id",
+        HeaderValue::from_static("grok-request-unique"),
+    );
+    headers.insert("session_id", HeaderValue::from_static("generic-session"));
+    let body = serde_json::json!({ "session_id": "json-session" });
+
+    assert_eq!(
+        SessionManager::extract_session_id_from_json(&headers, Some(&body)).as_deref(),
+        Some("grok-session-stable")
+    );
+
+    headers.remove("x-grok-session-id");
+    assert_eq!(
+        SessionManager::extract_session_id_from_json(&headers, Some(&body)).as_deref(),
+        Some("grok-conversation-stable")
+    );
+
+    headers.remove("x-grok-conv-id");
+    headers.remove("session_id");
+    assert_eq!(
+        SessionManager::extract_session_id_from_json(&headers, Some(&body)).as_deref(),
+        Some("json-session")
+    );
+}
+
+#[test]
+fn claude_metadata_user_id_supports_json_and_legacy_session_formats() {
+    let headers = HeaderMap::new();
+    let json_body = serde_json::json!({
+        "metadata": {
+            "user_id": "{\"device_id\":\"device\",\"account_uuid\":\"\",\"session_id\":\"json-session\"}"
+        }
+    });
+    assert_eq!(
+        SessionManager::extract_session_id_from_json(&headers, Some(&json_body)).as_deref(),
+        Some("json-session")
+    );
+
+    let legacy_body = serde_json::json!({
+        "metadata": {
+            "user_id": "user_device_account__session_legacy-session"
+        }
+    });
+    assert_eq!(
+        SessionManager::extract_session_id_from_json(&headers, Some(&legacy_body)).as_deref(),
+        Some("legacy-session")
+    );
+}
+
+#[test]
+fn malformed_claude_metadata_user_id_falls_back_without_panicking() {
+    let headers = HeaderMap::new();
+    let body = serde_json::json!({"metadata": {"user_id": "not-a-session"}});
+    let session_id = SessionManager::extract_session_id_from_json(&headers, Some(&body));
+    assert!(session_id.is_none());
+}
+
+#[test]
 fn extract_session_id_fallback_changes_when_message_fingerprint_changes() {
     let mut headers = HeaderMap::new();
     headers.insert(header::USER_AGENT, HeaderValue::from_static("ua"));

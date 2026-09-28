@@ -13,7 +13,10 @@ use super::constants::{
     WSL_CODEX_API_KEY, WSL_CODEX_PREFERRED_AUTH_METHOD, WSL_CODEX_PROVIDER_KEY,
 };
 use super::detection::resolve_wsl_home_unc;
-use super::manifest::{read_wsl_current_values, read_wsl_manifest, write_wsl_manifest};
+use super::manifest::{
+    read_wsl_current_values, read_wsl_manifest, supplement_legacy_codex_provider_backup,
+    write_wsl_manifest, CODEX_PROVIDER_ORIGINAL_SECTION,
+};
 use super::mcp_sync::{read_wsl_mcp_manifest, sync_wsl_mcp_for_cli, write_wsl_mcp_manifest};
 use super::prompt_sync::sync_wsl_prompt_for_cli;
 use super::shell::{decode_utf16_le, hide_window_cmd, wsl_resolve_codex_home_script};
@@ -376,16 +379,43 @@ pub fn configure_clients(
         };
     }
 
+    let supports_websockets = match settings::read(app) {
+        Ok(value) => value.codex_responses_websocket_enabled,
+        Err(error) => {
+            return WslConfigureReport {
+                ok: false,
+                message: format!("读取设置失败：{error}"),
+                distros: Vec::new(),
+            }
+        }
+    };
     let mut distro_reports = Vec::new();
     let mut success_ops = 0usize;
     let mut error_ops = 0usize;
 
     for distro in distros {
         let mut results = Vec::new();
-        let mut cli_backups = Vec::new();
-
         // Load existing manifest so we don't overwrite original_values on repeated calls
-        let existing_manifest = read_wsl_manifest(app, distro).unwrap_or(None);
+        let existing_manifest = match read_wsl_manifest(app, distro) {
+            Ok(value) => value,
+            Err(error) => {
+                error_ops += 1;
+                distro_reports.push(WslConfigureDistroReport {
+                    distro: distro.clone(),
+                    ok: false,
+                    results: vec![WslConfigureCliReport {
+                        cli_key: "manifest".to_string(),
+                        ok: false,
+                        message: error.to_string(),
+                    }],
+                });
+                continue;
+            }
+        };
+        let mut cli_backups = existing_manifest
+            .as_ref()
+            .map(|value| value.cli_backups.clone())
+            .unwrap_or_default();
         let existing_backups: std::collections::HashMap<&str, &WslCliBackup> = existing_manifest
             .as_ref()
             .map(|m| {
@@ -397,35 +427,83 @@ pub fn configure_clients(
             .unwrap_or_default();
 
         // -- Auth configuration (with original-value capture) --
-        for (cli_key, enabled, configure_fn) in [
-            (
-                "claude",
-                targets.claude,
-                configure_wsl_claude as fn(&str, &str) -> AppResult<()>,
-            ),
-            (
-                "codex",
-                targets.codex,
-                configure_wsl_codex as fn(&str, &str) -> AppResult<()>,
-            ),
-            (
-                "gemini",
-                targets.gemini,
-                configure_wsl_gemini as fn(&str, &str) -> AppResult<()>,
-            ),
+        for (cli_key, enabled) in [
+            ("claude", targets.claude),
+            ("codex", targets.codex),
+            ("gemini", targets.gemini),
         ] {
             if !enabled {
                 continue;
             }
             // If we already have a backup for this CLI (from a prior call), preserve
             // the original_values; otherwise capture fresh ones now.
-            let original_values = if let Some(prev) = existing_backups.get(cli_key) {
+            let mut original_values = if let Some(prev) = existing_backups.get(cli_key) {
                 prev.original_values.clone()
             } else {
-                read_wsl_current_values(distro, cli_key).unwrap_or_default()
+                match read_wsl_current_values(distro, cli_key) {
+                    Ok(values) => values,
+                    Err(error) => {
+                        results.push(WslConfigureCliReport {
+                            cli_key: cli_key.to_string(),
+                            ok: false,
+                            message: error.to_string(),
+                        });
+                        continue;
+                    }
+                }
             };
-
-            match configure_fn(distro, proxy_origin) {
+            if cli_key == "codex" {
+                const WS_KEY: &str = "model_providers.aio.supports_websockets";
+                if !original_values.contains_key(WS_KEY)
+                    || !original_values.contains_key(CODEX_PROVIDER_ORIGINAL_SECTION)
+                {
+                    match read_wsl_current_values(distro, cli_key) {
+                        Ok(values) => {
+                            supplement_legacy_codex_provider_backup(&mut original_values, &values);
+                        }
+                        Err(error) => {
+                            results.push(WslConfigureCliReport {
+                                cli_key: cli_key.to_string(),
+                                ok: false,
+                                message: error.to_string(),
+                            });
+                            continue;
+                        }
+                    }
+                }
+                cli_backups.retain(|backup| backup.cli_key != cli_key);
+                cli_backups.push(WslCliBackup {
+                    cli_key: "codex".to_string(),
+                    injected_keys: Default::default(),
+                    original_values: original_values.clone(),
+                });
+                let pending = WslDistroManifest {
+                    schema_version: 1,
+                    distro: distro.clone(),
+                    configured: true,
+                    proxy_origin: proxy_origin.to_string(),
+                    configured_at: crate::shared::time::now_unix_seconds(),
+                    wsl_home_unc: resolve_wsl_home_unc(distro)
+                        .ok()
+                        .map(|path| path.to_string_lossy().to_string()),
+                    cli_backups: cli_backups.clone(),
+                };
+                if let Err(error) = write_wsl_manifest(app, distro, &pending) {
+                    results.push(WslConfigureCliReport {
+                        cli_key: cli_key.to_string(),
+                        ok: false,
+                        message: format!("保存恢复基线失败：{error}"),
+                    });
+                    continue;
+                }
+            }
+            let configured = match cli_key {
+                "claude" => configure_wsl_claude(distro, proxy_origin),
+                "codex" => configure_wsl_codex(distro, proxy_origin, supports_websockets),
+                "gemini" => configure_wsl_gemini(distro, proxy_origin),
+                _ => unreachable!(),
+            };
+            match configured {
                 Ok(()) => {
                     // Record what we injected
                     let injected_keys = match cli_key {
@@ -452,6 +530,10 @@ pub fn configure_clients(
                                 WSL_CODEX_PROVIDER_KEY.to_string(),
                             );
                             m.insert("OPENAI_API_KEY".to_string(), WSL_CODEX_API_KEY.to_string());
+                            m.insert(
+                                "model_providers.aio.supports_websockets".to_string(),
+                                supports_websockets.to_string(),
+                            );
                             m
                         }
                         "gemini" => {
@@ -465,6 +547,7 @@ pub fn configure_clients(
                         }
                         _ => std::collections::HashMap::new(),
                     };
+                    cli_backups.retain(|backup| backup.cli_key != cli_key);
                     cli_backups.push(WslCliBackup {
                         cli_key: cli_key.to_string(),
                         injected_keys,
@@ -610,6 +693,11 @@ pub fn configure_clients(
             };
             if let Err(e) = write_wsl_manifest(app, distro, &manifest) {
                 tracing::warn!("failed to write WSL manifest for {distro}: {e}");
+                results.push(WslConfigureCliReport {
+                    cli_key: "manifest".to_string(),
+                    ok: false,
+                    message: e.to_string(),
+                });
             }
         }
 

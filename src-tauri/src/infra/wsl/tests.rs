@@ -385,6 +385,40 @@ model = "o3"
     }
 
     #[test]
+    fn codex_root_backup_restores_toml_strings_without_quotes_comments_or_profile_values() {
+        for (source, expected) in [
+            ("model_provider = 'custom' # selected\n", Some("custom")),
+            ("model_provider = \"custom\" # selected\n", Some("custom")),
+            ("[profiles.work]\nmodel_provider = 'profile-only'\n", None),
+        ] {
+            let original = crate::wsl::manifest::extract_toml_value(source, "model_provider");
+            assert_eq!(original.as_deref(), expected);
+            let backup = WslCliBackup {
+                cli_key: "codex".to_string(),
+                injected_keys: Default::default(),
+                original_values: std::collections::HashMap::from([(
+                    "model_provider".to_string(),
+                    original,
+                )]),
+            };
+            let restored = crate::wsl::manifest::restore_codex_config_toml(
+                "model_provider = 'aio'\n[profiles.work]\nmodel_provider = 'profile-only'\n",
+                &backup,
+            )
+            .unwrap();
+            let value: toml::Value = toml::from_str(&restored).unwrap();
+            assert_eq!(
+                value.get("model_provider").and_then(toml::Value::as_str),
+                expected
+            );
+            assert_eq!(
+                value["profiles"]["work"]["model_provider"].as_str(),
+                Some("profile-only")
+            );
+        }
+    }
+
+    #[test]
     fn test_extract_env_value() {
         let content = r#"
 # comment line
@@ -416,7 +450,7 @@ OTHER_VAR=keep
     }
 
     #[test]
-    fn restore_codex_config_toml_restores_root_keys_and_removes_injected_provider_section() {
+    fn restore_codex_config_toml_restores_root_keys_and_preserves_unrecorded_provider_values() {
         let backup = WslCliBackup {
             cli_key: "codex".to_string(),
             injected_keys: std::collections::HashMap::new(),
@@ -457,7 +491,7 @@ base_url = "https://api.openai.com/v1"
             crate::wsl::manifest::extract_toml_value(&restored, "model_provider"),
             Some("openai".to_string())
         );
-        assert!(!restored.contains("[model_providers.aio]"));
+        assert!(restored.contains("[model_providers.aio]"));
         assert!(restored.contains("[model_providers.openai]"));
         assert!(restored.contains("model = \"gpt-5\""));
     }
@@ -498,7 +532,7 @@ base_url = "https://example.com/v1"
             crate::wsl::manifest::extract_toml_value(&restored, "model_provider"),
             None
         );
-        assert!(!restored.contains("[model_providers.aio]"));
+        assert!(restored.contains("[model_providers.aio]"));
         assert!(restored.contains("[model_providers.custom]"));
     }
 

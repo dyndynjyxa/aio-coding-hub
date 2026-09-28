@@ -43,6 +43,7 @@ type GatewayQueryCliKey = Parameters<typeof useGatewayCircuitStatusQuery>[0];
 
 describe("query/gateway", () => {
   it("getGatewayCircuitDerivedState derives unavailable state and max unavailableUntil", () => {
+    // OPEN + cooldown 并存 → displayState 仍为 open（优先级 open > cooldown）。
     expect(
       getGatewayCircuitDerivedState({
         provider_id: 9,
@@ -53,6 +54,7 @@ describe("query/gateway", () => {
         cooldown_until: 180,
       })
     ).toEqual({
+      displayState: "open",
       isOpen: true,
       isUnavailable: true,
       unavailableUntil: 180,
@@ -68,6 +70,7 @@ describe("query/gateway", () => {
         cooldown_until: 150,
       })
     ).toEqual({
+      displayState: "cooldown",
       isOpen: false,
       isUnavailable: true,
       unavailableUntil: 150,
@@ -85,10 +88,70 @@ describe("query/gateway", () => {
         cooldown_until: null,
       })
     ).toEqual({
+      displayState: "half_open",
       isOpen: false,
       isUnavailable: false,
       unavailableUntil: null,
     });
+  });
+
+  it("getGatewayCircuitDerivedState prefers cooldown over HALF_OPEN when both apply", () => {
+    // 与 should_allow 的实际拒绝语义一致：冷却未过期时半开也会被跳过。
+    expect(
+      getGatewayCircuitDerivedState({
+        provider_id: 12,
+        state: "HALF_OPEN",
+        failure_count: 5,
+        failure_threshold: 5,
+        open_until: null,
+        cooldown_until: 300,
+      })
+    ).toEqual({
+      displayState: "cooldown",
+      isOpen: false,
+      isUnavailable: true,
+      unavailableUntil: 300,
+    });
+  });
+
+  it("getGatewayCircuitDerivedState derives healthy for CLOSED rows", () => {
+    expect(
+      getGatewayCircuitDerivedState({
+        provider_id: 13,
+        state: "CLOSED",
+        failure_count: 0,
+        failure_threshold: 5,
+        open_until: null,
+        cooldown_until: null,
+      })
+    ).toEqual({
+      displayState: "healthy",
+      isOpen: false,
+      isUnavailable: false,
+      unavailableUntil: null,
+    });
+  });
+
+  it("getGatewayCircuitDerivedState falls back to healthy for unknown states and null rows", () => {
+    const healthy = {
+      displayState: "healthy",
+      isOpen: false,
+      isUnavailable: false,
+      unavailableUntil: null,
+    };
+
+    expect(
+      getGatewayCircuitDerivedState({
+        provider_id: 14,
+        state: "WEIRD_STATE",
+        failure_count: 0,
+        failure_threshold: 5,
+        open_until: null,
+        cooldown_until: null,
+      })
+    ).toEqual(healthy);
+    expect(getGatewayCircuitDerivedState(null)).toEqual(healthy);
+    expect(getGatewayCircuitDerivedState(undefined)).toEqual(healthy);
   });
 
   it("summarizeGatewayCircuitRows builds provider lookup and refresh summary", () => {
@@ -131,6 +194,14 @@ describe("query/gateway", () => {
     expect(summary.byProviderId[2]?.provider_id).toBe(2);
     expect(summary.byProviderId[4]?.provider_id).toBe(4);
     expect(summary.unavailableRows.map(({ row }) => row.provider_id)).toEqual([1, 2]);
+    // attentionRows 覆盖全部非健康行：半开行进入 attentionRows 但不进入 unavailableRows。
+    expect(
+      summary.attentionRows.map(({ row, displayState }) => [row.provider_id, displayState])
+    ).toEqual([
+      [1, "open"],
+      [2, "cooldown"],
+      [4, "half_open"],
+    ]);
     expect(summary.hasUnavailable).toBe(true);
     expect(summary.hasUnavailableWithoutUntil).toBe(true);
     expect(summary.earliestUnavailableUntil).toBe(140);
@@ -461,6 +532,7 @@ describe("query/gateway", () => {
             " claude " as unknown as GatewayQueryCliKey,
             {
               byProviderId: {},
+              attentionRows: [],
               unavailableRows: [],
               hasUnavailable: true,
               hasUnavailableWithoutUntil: true,

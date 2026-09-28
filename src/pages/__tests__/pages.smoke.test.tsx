@@ -7,6 +7,7 @@ import { createTestQueryClient } from "../../test/utils/reactQuery";
 import { CliManagerPage } from "../CliManagerPage";
 import { ConsolePage } from "../ConsolePage";
 import { HomePage } from "../HomePage";
+import { ImageGenPage } from "../ImageGenPage";
 import { LogsPage } from "../LogsPage";
 import { McpPage } from "../McpPage";
 import { PromptsPage } from "../PromptsPage";
@@ -30,6 +31,11 @@ describe("pages (smoke)", () => {
   it("renders HomePage", () => {
     renderPage(<HomePage />);
     expect(screen.getByRole("heading", { level: 1, name: "首页" })).toBeInTheDocument();
+  });
+
+  it("renders ImageGenPage", () => {
+    renderPage(<ImageGenPage />);
+    expect(screen.getByRole("heading", { level: 1, name: "生图" })).toBeInTheDocument();
   });
 
   it("renders ProvidersPage", () => {

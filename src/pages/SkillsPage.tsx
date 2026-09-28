@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { CLIS, cliFromKeyOrDefault, isCliKey } from "../constants/clis";
+import { cliFromKeyOrDefault, cliKeysWith, isCliKey } from "../constants/clis";
 import { SKILLS_ACTIVE_CLI_STORAGE_KEY } from "../constants/skills";
 import { logToConsole } from "../services/consoleLog";
 import { getOrderedClis, pickDefaultCliByPriority } from "../services/cli/cliPriorityOrder";
@@ -15,10 +15,12 @@ import { SkillsView } from "./skills/SkillsView";
 import { useSettingsQuery } from "../query/settings";
 import { useWorkspacesListQuery } from "../query/workspaces";
 
+const SKILLS_CLI_KEYS = cliKeysWith("skills");
+
 function readCliFromStorage(): CliKey | null {
   try {
     const raw = localStorage.getItem(SKILLS_ACTIVE_CLI_STORAGE_KEY);
-    if (isCliKey(raw)) return raw;
+    if (isCliKey(raw) && SKILLS_CLI_KEYS.includes(raw)) return raw;
   } catch {}
   return null;
 }
@@ -32,10 +34,11 @@ function writeCliToStorage(cli: CliKey) {
 export function SkillsPage() {
   const navigate = useNavigate();
   const settingsQuery = useSettingsQuery();
-  const orderedCliTabs = getOrderedClis(settingsQuery.data?.cli_priority_order);
+  const orderedCliTabs = getOrderedClis(settingsQuery.data?.cli_priority_order, SKILLS_CLI_KEYS);
   const orderedCliKeys = orderedCliTabs.map((cli) => cli.key);
   const defaultCli =
-    pickDefaultCliByPriority(settingsQuery.data?.cli_priority_order, orderedCliKeys) ?? CLIS[0].key;
+    pickDefaultCliByPriority(settingsQuery.data?.cli_priority_order, orderedCliKeys) ??
+    SKILLS_CLI_KEYS[0];
   const [activeCli, setActiveCli] = useState<CliKey | null>(() => readCliFromStorage());
   const effectiveCli = activeCli ?? defaultCli;
   const currentCli = useMemo(() => cliFromKeyOrDefault(effectiveCli), [effectiveCli]);

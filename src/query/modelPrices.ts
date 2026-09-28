@@ -1,42 +1,22 @@
 import { useEffect } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { CliKey } from "../services/providers/providers";
 import {
   getLastModelPricesSync,
   modelPriceAliasesGet,
   modelPriceAliasesSet,
-  modelPricesList,
-  modelPricesSyncBasellm,
+  modelPricesListAll,
+  modelPricesSync,
   normalizeModelPriceAliases,
   subscribeModelPricesUpdated,
-  validateModelPricesCliKey,
   type ModelPriceAliases,
   type ModelPricesSyncReport,
 } from "../services/usage/modelPrices";
 import { modelPricesKeys } from "./keys";
 
-export function useModelPricesListQuery(cliKey: CliKey, options?: { enabled?: boolean }) {
-  const normalizedCliKey = validateModelPricesCliKey(cliKey);
-
+export function useModelPricesListAllQuery(options?: { enabled?: boolean }) {
   return useQuery({
-    queryKey: modelPricesKeys.list(normalizedCliKey),
-    queryFn: () => modelPricesList(normalizedCliKey),
-    enabled: options?.enabled ?? true,
-    placeholderData: keepPreviousData,
-  });
-}
-
-export function useModelPricesTotalCountQuery(options?: { enabled?: boolean }) {
-  return useQuery({
-    queryKey: [...modelPricesKeys.all, "count"] as const,
-    queryFn: async () => {
-      const [codex, claude, gemini] = await Promise.all([
-        modelPricesList("codex"),
-        modelPricesList("claude"),
-        modelPricesList("gemini"),
-      ]);
-      return codex.length + claude.length + gemini.length;
-    },
+    queryKey: modelPricesKeys.lists(),
+    queryFn: () => modelPricesListAll(),
     enabled: options?.enabled ?? true,
     placeholderData: keepPreviousData,
   });
@@ -66,11 +46,11 @@ export function useModelPriceAliasesSetMutation() {
   });
 }
 
-export function useModelPricesSyncBasellmMutation() {
+export function useModelPricesSyncMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (input: { force: boolean }) => modelPricesSyncBasellm(input.force),
+    mutationFn: () => modelPricesSync(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: modelPricesKeys.all });
     },

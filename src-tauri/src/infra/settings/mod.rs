@@ -19,6 +19,6 @@ pub use persistence::{
     clear_cache, log_retention_days_fail_open, read, request_log_retention_days_fail_open, write,
 };
 pub use types::{
-    AppSettings, CodexHomeMode, GatewayListenMode, HomeUsagePeriod, WslHostAddressMode,
-    WslTargetCli,
+    AppSettings, CodexHomeMode, CodexPriorityBillingSource, GatewayListenMode, HomeUsagePeriod,
+    WslHostAddressMode, WslTargetCli,
 };

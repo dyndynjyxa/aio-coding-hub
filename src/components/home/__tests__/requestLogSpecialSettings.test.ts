@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   formatClaudeModelMappingText,
-  hasClaudeModelMappingSpecialSetting,
   hasPriorityServiceTierSpecialSetting,
   resolveClaudeModelMappingFromSpecialSettings,
 } from "../requestLogSpecialSettings";
@@ -58,10 +57,6 @@ describe("components/home/requestLogSpecialSettings", () => {
         ])
       )
     ).toBeNull();
-
-    expect(hasClaudeModelMappingSpecialSetting(settings)).toBe(true);
-    expect(hasClaudeModelMappingSpecialSetting(JSON.stringify([{ type: "noop" }]))).toBe(false);
-    expect(hasClaudeModelMappingSpecialSetting("bad-json")).toBe(false);
   });
 
   it("formats model mapping text and priority service tier settings", () => {

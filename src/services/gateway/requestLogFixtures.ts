@@ -90,6 +90,7 @@ export function createRequestLogSummary(
     activity_details_json: null,
     ...overrides,
     cli_key: cliKey,
+    reasoning_effort: overrides.reasoning_effort ?? null,
     is_interrupted: isInterrupted,
     created_at_ms: createdAtMs,
     created_at: createdAt,
@@ -144,5 +145,6 @@ export function createRequestLogDetail(
     created_at: createdAt,
     ...overrides,
     is_interrupted: isInterrupted,
+    reasoning_effort: overrides.reasoning_effort ?? null,
   };
 }
