@@ -4,7 +4,8 @@ use axum::http::{HeaderMap, Method};
 
 mod abort_guard;
 mod caches;
-mod cli_proxy_guard;
+pub(in crate::gateway) mod cli_proxy_guard;
+mod codex_alpha_search;
 pub(super) mod cx2cc;
 mod error_code;
 mod errors;
@@ -12,7 +13,7 @@ mod failover;
 mod fake_200;
 mod forwarder;
 mod gemini_oauth;
-mod handler;
+pub(in crate::gateway) mod handler;
 mod http_util;
 mod logging;
 mod model_rewrite;

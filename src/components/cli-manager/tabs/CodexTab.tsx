@@ -302,6 +302,8 @@ export type CliManagerCodexTabProps = {
     codexHomeOverride: string
   ) => Promise<boolean> | boolean;
   persistCodexOauthCompatibleProxyMode?: (enabled: boolean) => Promise<boolean> | boolean;
+  persistCodexResponsesWebsocket?: (enabled: boolean) => Promise<boolean> | boolean;
+  codexResponsesWebsocketStatus?: string | null;
   pickCodexHomeDirectory?: (initialPath?: string) => Promise<string | null> | string | null;
 };
 
@@ -1214,18 +1216,16 @@ function CodexFeaturesSection({
           />
         </SettingItem>
 
-        <SettingItem
-          label="responses_websockets_v2"
-          subtitle="实验性：启用 Responses API websocket 支持（需要中转站支持）。开启写入 responses_websockets_v2=true；关闭删除该项。"
-        >
-          <Switch
-            checked={boolOrDefault(codexConfig.features_responses_websockets_v2, false)}
-            onCheckedChange={(checked) =>
-              void persistCodexConfig({ features_responses_websockets_v2: checked })
-            }
-            disabled={saving}
-          />
-        </SettingItem>
+        {codexConfig.features_responses_websockets_v2 != null ? (
+          <SettingItem
+            label="历史 WebSocket feature（只读）"
+            subtitle="这是 Codex 旧版实验配置，不控制 AIO 的 Responses WebSocket；需要调整时可使用下方 config.toml 编辑器。"
+          >
+            <span className="text-xs font-mono text-muted-foreground">
+              responses_websockets_v2 = {String(codexConfig.features_responses_websockets_v2)}
+            </span>
+          </SettingItem>
+        ) : null}
 
         <SettingItem
           label="multi_agent"
@@ -1969,6 +1969,8 @@ export function CliManagerCodexTab({
   persistCodexConfigToml,
   persistCodexHomeSettings,
   persistCodexOauthCompatibleProxyMode,
+  persistCodexResponsesWebsocket,
+  codexResponsesWebsocketStatus,
   pickCodexHomeDirectory,
 }: CliManagerCodexTabProps) {
   const {
@@ -2106,6 +2108,27 @@ export function CliManagerCodexTab({
               提示：Codex 还会读取 Team Config（例如 repo 内 `.codex/`），其优先级可能高于这里的
               用户级目录设置。
             </div>
+
+            {appSettings ? (
+              <div className="rounded-xl border border-border bg-card p-4">
+                <SettingItem
+                  label="Responses WebSocket"
+                  subtitle="默认关闭。启用后按供应商能力使用 WebSocket，不支持时仍可使用 HTTP。需已接管 Codex，并启动新的 CLI 会话读取配置。"
+                >
+                  <Switch
+                    aria-label="切换 Codex Responses WebSocket"
+                    checked={appSettings.codex_responses_websocket_enabled}
+                    disabled={codexHomeSettingsSaving || !persistCodexResponsesWebsocket}
+                    onCheckedChange={(checked) => void persistCodexResponsesWebsocket?.(checked)}
+                  />
+                </SettingItem>
+                {codexResponsesWebsocketStatus ? (
+                  <p role="status" className="text-xs text-muted-foreground">
+                    {codexResponsesWebsocketStatus}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
 
             {appSettings ? (
               <CodexOauthProxySection

@@ -154,11 +154,15 @@ describe("cross-layer contracts", () => {
     // claude_model_mapping / model_redirect on FailoverAttempt follow the same
     // space-constraint design: most attempts carry no mapping, and the frontend
     // reads the request-event level fields instead of per-attempt entries.
+    // terminal_signal is optional for legacy/non-stream request events; the
+    // Rust event test and gatewayEvents.contract.test.ts cover both its absence
+    // and an incomplete terminal so a dropped signal cannot silently pass.
     const exemptFields = [
       "circuit_recover_at_unix",
       "circuit_trigger_error_code",
       "claude_model_mapping",
       "model_redirect",
+      "terminal_signal",
     ];
     const skippedFields = Array.from(
       gatewayEventsSource.matchAll(

@@ -18,14 +18,14 @@ struct CliProxyEnabledCacheEntry {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct CliProxyEnabledSnapshot {
-    pub(super) enabled: bool,
-    pub(super) error: Option<String>,
-    pub(super) cache_hit: bool,
-    pub(super) cache_ttl_ms: i64,
+pub(in crate::gateway) struct CliProxyEnabledSnapshot {
+    pub(in crate::gateway) enabled: bool,
+    pub(in crate::gateway) error: Option<String>,
+    pub(in crate::gateway) cache_hit: bool,
+    pub(in crate::gateway) cache_ttl_ms: i64,
 }
 
-pub(super) fn cli_proxy_enabled_cached<R: tauri::Runtime>(
+pub(in crate::gateway) fn cli_proxy_enabled_cached<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     cli_key: &str,
 ) -> CliProxyEnabledSnapshot {

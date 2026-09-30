@@ -9,7 +9,7 @@ use axum::{
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use super::proxy::proxy_impl;
+use super::responses_ws::ingress::dispatch as proxy_impl;
 use super::runtime::GatewayAppState;
 use super::util::now_unix_seconds;
 
@@ -157,6 +157,8 @@ where
 #[cfg(test)]
 #[allow(clippy::await_holding_lock, clippy::field_reassign_with_default)]
 mod tests {
+    mod alpha_search;
+
     use super::build_router;
     use crate::app::plugins::{official, runtime_executor::RuntimeGatewayPluginExecutor};
     use crate::domain::plugin_contributions::PluginContributes;
@@ -442,6 +444,17 @@ mod tests {
         tokio::sync::oneshot::Receiver<CapturedRawRequest>,
         tokio::task::JoinHandle<()>,
     ) {
+        spawn_capturing_status_raw_upstream("200 OK", body).await
+    }
+
+    async fn spawn_capturing_status_raw_upstream(
+        status: &'static str,
+        body: &'static str,
+    ) -> (
+        String,
+        tokio::sync::oneshot::Receiver<CapturedRawRequest>,
+        tokio::task::JoinHandle<()>,
+    ) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind capturing raw upstream stub");
@@ -453,7 +466,7 @@ mod tests {
                     split_raw_http_request(read_complete_http_request_bytes(&mut socket).await);
                 let _ = tx.send(request);
                 let response = format!(
-                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
                     body.len(),
                     body
                 );
@@ -515,26 +528,37 @@ mod tests {
         tokio::sync::mpsc::Receiver<CapturedRawRequest>,
         tokio::task::JoinHandle<()>,
     ) {
+        spawn_capturing_sequence_upstream(vec![
+            ("400 Bad Request", error_body),
+            ("200 OK", success_body),
+        ])
+        .await
+    }
+
+    async fn spawn_capturing_sequence_upstream(
+        responses: Vec<(&'static str, &str)>,
+    ) -> (
+        String,
+        tokio::sync::mpsc::Receiver<CapturedRawRequest>,
+        tokio::task::JoinHandle<()>,
+    ) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
-            .expect("bind rectifier retry upstream stub");
-        let addr = listener
-            .local_addr()
-            .expect("rectifier retry upstream addr");
-        let (tx, rx) = tokio::sync::mpsc::channel(2);
+            .expect("bind sequence upstream stub");
+        let addr = listener.local_addr().expect("sequence upstream addr");
+        let (tx, rx) = tokio::sync::mpsc::channel(responses.len());
+        let responses: Vec<_> = responses
+            .into_iter()
+            .map(|(status, body)| (status, body.to_owned()))
+            .collect();
         let task = tokio::spawn(async move {
-            for index in 0..2 {
+            for (status_line, body) in responses {
                 let Ok((mut socket, _)) = listener.accept().await else {
                     return;
                 };
                 let request =
                     split_raw_http_request(read_complete_http_request_bytes(&mut socket).await);
                 let _ = tx.send(request).await;
-                let (status_line, body) = if index == 0 {
-                    ("400 Bad Request", error_body)
-                } else {
-                    ("200 OK", success_body)
-                };
                 let response = format!(
                     "HTTP/1.1 {status_line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
                     body.len(),
@@ -778,6 +802,7 @@ mod tests {
         let provider_id = providers::upsert(
             db,
             providers::ProviderUpsertParams {
+                custom_headers: None,
                 provider_id: None,
                 cli_key: cli_key.to_string(),
                 name: name.to_string(),
@@ -802,6 +827,7 @@ mod tests {
                 source_provider_id: None,
                 bridge_type: None,
                 stream_idle_timeout_seconds: None,
+                supports_websockets: None,
                 extension_values: None,
             },
         )
@@ -862,6 +888,7 @@ mod tests {
         let provider_id = providers::upsert(
             db,
             providers::ProviderUpsertParams {
+                custom_headers: None,
                 provider_id: None,
                 cli_key: "codex".to_string(),
                 name: name.to_string(),
@@ -886,6 +913,7 @@ mod tests {
                 source_provider_id: None,
                 bridge_type: None,
                 stream_idle_timeout_seconds: None,
+                supports_websockets: None,
                 extension_values: None,
             },
         )
@@ -908,6 +936,7 @@ mod tests {
         let provider_id = providers::upsert(
             db,
             providers::ProviderUpsertParams {
+                custom_headers: None,
                 provider_id: None,
                 cli_key: "claude".to_string(),
                 name: "CX2CC Bridge Stub".to_string(),
@@ -932,6 +961,7 @@ mod tests {
                 source_provider_id: Some(source_provider_id),
                 bridge_type: Some("cx2cc".to_string()),
                 stream_idle_timeout_seconds: None,
+                supports_websockets: None,
                 extension_values: None,
             },
         )
@@ -994,6 +1024,7 @@ mod tests {
             active_requests: Arc::new(
                 crate::gateway::active_requests::ActiveRequestRegistry::default(),
             ),
+            responses_ws: Arc::new(crate::gateway::responses_ws::state::Runtime::new(false)),
         }
     }
 
@@ -3958,6 +3989,7 @@ module.exports.activate = function activate(api) {
         let provider_id = providers::upsert(
             &db,
             providers::ProviderUpsertParams {
+                custom_headers: None,
                 provider_id: None,
                 cli_key: "claude".to_string(),
                 name: "Legacy Mapping Provider".to_string(),
@@ -3985,6 +4017,7 @@ module.exports.activate = function activate(api) {
                 source_provider_id: None,
                 bridge_type: None,
                 stream_idle_timeout_seconds: None,
+                supports_websockets: None,
                 extension_values: None,
             },
         )
@@ -4083,7 +4116,7 @@ module.exports.activate = function activate(api) {
             "usage":{"input_tokens":1,"output_tokens":1}
         }"#;
         let (upstream_base_url, capture_rx, upstream_task) =
-            spawn_capturing_json_upstream(success_body).await;
+            spawn_capturing_raw_upstream(success_body).await;
         let source_provider_id = insert_provider_with_priority_and_policy(
             &db,
             "codex",
@@ -4105,6 +4138,16 @@ module.exports.activate = function activate(api) {
             )),
         );
 
+        db.open_connection()
+            .unwrap()
+            .execute(
+                "UPDATE providers SET custom_headers_json = ?1 WHERE id = ?2",
+                rusqlite::params![
+                    r#"[{"name":"x-tenant","value":"source-tenant"}]"#,
+                    source_provider_id
+                ],
+            )
+            .unwrap();
         let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
         let router = build_router(gateway_state(app_handle, db, log_tx));
         let request = Request::builder()
@@ -4121,9 +4164,9 @@ module.exports.activate = function activate(api) {
         let response = router.oneshot(request).await.expect("route response");
         assert_eq!(response.status(), StatusCode::OK);
 
-        let upstream_body: Value =
-            serde_json::from_str(&capture_rx.await.expect("upstream request capture"))
-                .expect("upstream body");
+        let captured = capture_rx.await.expect("upstream request capture");
+        assert!(captured.has_header_line("x-tenant: source-tenant"));
+        let upstream_body: Value = serde_json::from_slice(&captured.body).expect("upstream body");
         // claude_models bridge translation wins; the policy mapping (claude-3-5-sonnet
         // -> bridge-target) must not overwrite it.
         assert_eq!(
@@ -4349,6 +4392,258 @@ module.exports.activate = function activate(api) {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn billing_header_rectifier_is_scoped_to_each_provider_and_honors_toggle() {
+        let _env_lock = crate::test_support::test_env_lock();
+        for enabled in [true, false] {
+            for compressed in [false, true] {
+                let home = tempfile::tempdir().expect("home dir");
+                let _env = isolate_app_env(home.path());
+                let app = tauri::test::mock_app();
+                let app_handle = app.handle().clone();
+                let mut app_settings = settings::AppSettings::default();
+                app_settings.enable_billing_header_rectifier = enabled;
+                app_settings.enable_claude_metadata_user_id_injection = false;
+                app_settings.failover_max_providers_to_try = 2;
+                settings::write(&app_handle, &app_settings).expect("write settings");
+                crate::cli_proxy::set_enabled(
+                    &app_handle,
+                    "claude",
+                    true,
+                    "http://127.0.0.1:37123",
+                )
+                .expect("enable claude cli proxy");
+                let db = db::init_for_tests(&home.path().join("billing-rectifier.sqlite"))
+                    .expect("init test db");
+                let (failed_url, failed_rx, failed_task) = spawn_capturing_status_raw_upstream(
+                    "403 Forbidden",
+                    r#"{"error":{"type":"permission_error","message":"Denied"}}"#,
+                )
+                .await;
+                let (success_url, success_rx, success_task) = spawn_capturing_raw_upstream(
+                    r#"{"id":"msg_ok","type":"message","role":"assistant","content":[],"model":"claude-test","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}"#,
+                )
+                .await;
+                let failed_id =
+                    insert_provider_with_priority(&db, "claude", "First", failed_url, 0);
+                let success_id =
+                    insert_provider_with_priority(&db, "claude", "Second", success_url, 1);
+                let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+                let router = build_router(gateway_state(app_handle, db, log_tx));
+                let body = serde_json::json!({
+                    "model": "claude-test", "max_tokens": 128,
+                    "system": [
+                        {"type":"text", "text":"x-anthropic-billing-header: cc_version=test"},
+                        {"type":"text", "text":"Classify whether this command is safe."}
+                    ],
+                    "messages": [{"role":"user", "content":"python3 -c 'print(1)'"}]
+                });
+                let raw = serde_json::to_vec(&body).unwrap();
+                let mut request = Request::builder()
+                    .method(Method::POST)
+                    .uri("/claude/v1/messages")
+                    .header(header::CONTENT_TYPE, "application/json");
+                let wire = if compressed {
+                    request = request.header(header::CONTENT_ENCODING, "gzip");
+                    gzip_bytes(&raw)
+                } else {
+                    raw
+                };
+                let response = router
+                    .oneshot(request.body(Body::from(wire)).unwrap())
+                    .await
+                    .expect("route response");
+                assert_eq!(response.status(), StatusCode::OK);
+                let first = tokio::time::timeout(Duration::from_secs(2), failed_rx)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let second = tokio::time::timeout(Duration::from_secs(2), success_rx)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let second_body = if second.has_header_line("content-encoding: gzip") {
+                    gunzip_bytes(&second.body)
+                } else {
+                    second.body
+                };
+                let mut expected = body;
+                if enabled {
+                    expected["system"].as_array_mut().unwrap().remove(0);
+                }
+                let first_body = if first.has_header_line("content-encoding: gzip") {
+                    gunzip_bytes(&first.body)
+                } else {
+                    first.body
+                };
+                assert_eq!(
+                    serde_json::from_slice::<Value>(&first_body).unwrap(),
+                    expected
+                );
+                assert_eq!(
+                    serde_json::from_slice::<Value>(&second_body).unwrap(),
+                    expected
+                );
+                let log = recv_terminal_request_log(&mut log_rx).await;
+                let settings: Value =
+                    serde_json::from_str(log.special_settings_json.as_deref().unwrap_or("[]"))
+                        .unwrap();
+                let hits: Vec<_> = settings
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|item| item["type"] == "billing_header_rectifier")
+                    .collect();
+                assert_eq!(hits.len(), if enabled { 2 } else { 0 });
+                if enabled {
+                    for (hit, id) in hits.iter().zip([failed_id, success_id]) {
+                        assert_eq!(hit["scope"], "attempt");
+                        assert_eq!(hit["providerId"], id);
+                        assert_eq!(hit["removedCount"], 1);
+                    }
+                }
+                failed_task.abort();
+                success_task.abort();
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn billing_header_rectifier_preserves_oauth_failover_body_before_send() {
+        let _env_lock = crate::test_support::test_env_lock();
+        for (enabled, compressed) in [(true, false), (true, true), (false, false), (false, true)] {
+            let home = tempfile::tempdir().expect("home dir");
+            let _env = isolate_app_env(home.path());
+            let app = tauri::test::mock_app();
+            let app_handle = app.handle().clone();
+            let mut app_settings = settings::AppSettings::default();
+            app_settings.enable_billing_header_rectifier = enabled;
+            app_settings.enable_claude_metadata_user_id_injection = false;
+            app_settings.failover_max_attempts_per_provider = 1;
+            app_settings.failover_max_providers_to_try = 2;
+            app_settings.circuit_breaker_failure_threshold = 1;
+            settings::write(&app_handle, &app_settings).expect("write settings");
+            crate::cli_proxy::set_enabled(&app_handle, "claude", true, "http://127.0.0.1:37123")
+                .expect("enable claude cli proxy");
+            let db = db::init_for_tests(&home.path().join("billing-oauth-failover.sqlite"))
+                .expect("init test db");
+            let (failed_url, failed_rx, failed_task) = spawn_capturing_status_raw_upstream(
+                "503 Service Unavailable",
+                r#"{"error":{"message":"temporary upstream outage"}}"#,
+            )
+            .await;
+            insert_provider_with_priority(&db, "claude", "First", failed_url, 0);
+            let oauth_id = insert_provider_with_priority(
+                &db,
+                "claude",
+                "OAuth",
+                "https://api.anthropic.com/v1".to_string(),
+                1,
+            );
+            providers::update_oauth_tokens(
+                &db,
+                oauth_id,
+                "oauth",
+                "claude_oauth",
+                "oauth-test-token",
+                None,
+                None,
+                "https://example.invalid/token",
+                "test-client",
+                None,
+                None,
+                None,
+            )
+            .expect("save synthetic OAuth credential");
+            let captured = Arc::new(Mutex::new(Vec::new()));
+            let executor =
+                InMemoryGatewayPluginExecutor::new().with_request_handler("test.before-send", {
+                    let captured = Arc::clone(&captured);
+                    move |ctx| {
+                        let mut captured = captured.lock().unwrap();
+                        let mut result = GatewayHookResult::continue_unchanged();
+                        if !captured.is_empty() {
+                            // OAuth uses the official HTTPS endpoint; stop after preparation, before network IO.
+                            result.action =
+                                crate::gateway::plugins::context::GatewayHookAction::Block;
+                            result.reason = Some("OAuth request captured before send".to_string());
+                        }
+                        captured.push(ctx.request);
+                        result
+                    }
+                });
+            let mut plugin = before_send_header_plugin();
+            plugin.granted_permissions = vec![
+                "request.header.readSensitive".to_string(),
+                "request.body.read".to_string(),
+            ];
+            let pipeline = GatewayPluginPipeline::for_tests_shared(
+                vec![plugin],
+                Arc::new(executor),
+                GatewayPluginPipelineConfig::default(),
+            );
+            let (log_tx, _log_rx) = tokio::sync::mpsc::channel(4);
+            let mut state = gateway_state_with_plugin_pipeline(app_handle, db, log_tx, pipeline);
+            state.circuit = Arc::new(circuit_breaker::CircuitBreaker::new(
+                circuit_breaker::CircuitBreakerConfig {
+                    failure_threshold: 1,
+                    ..circuit_breaker::CircuitBreakerConfig::default()
+                },
+                HashMap::new(),
+                None,
+            ));
+            let body = serde_json::json!({
+                "model":"claude-test", "max_tokens":128,
+                "system":[{"type":"text", "text":"x-anthropic-billing-header: cc_version=test"}],
+                "messages":[{"role":"user", "content":"Classify: python3 -c 'print(1)'"}]
+            });
+            let mut request = Request::builder()
+                .method(Method::POST)
+                .uri("/claude/v1/messages")
+                .header(header::CONTENT_TYPE, "application/json");
+            let raw = serde_json::to_vec(&body).unwrap();
+            let wire = if compressed {
+                request = request.header(header::CONTENT_ENCODING, "gzip");
+                gzip_bytes(&raw)
+            } else {
+                raw
+            };
+            let response = build_router(state)
+                .oneshot(request.body(Body::from(wire)).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            let first = failed_rx.await.expect("third-party upstream request");
+            let first_body = if first.has_header_line("content-encoding: gzip") {
+                gunzip_bytes(&first.body)
+            } else {
+                first.body
+            };
+            let mut expected_first = body.clone();
+            if enabled {
+                expected_first["system"] = serde_json::json!([]);
+            }
+            assert_eq!(
+                serde_json::from_slice::<Value>(&first_body).unwrap(),
+                expected_first
+            );
+            let captured = captured.lock().unwrap();
+            assert_eq!(captured.len(), 2);
+            assert_eq!(
+                serde_json::from_str::<Value>(captured[1].body.as_deref().unwrap()).unwrap(),
+                body
+            );
+            let headers = captured[1].headers.as_ref().unwrap();
+            assert_eq!(headers["authorization"], "Bearer oauth-test-token");
+            assert!(!headers.contains_key("x-api-key"));
+            assert!(headers["anthropic-beta"]
+                .as_str()
+                .unwrap()
+                .contains("oauth-2025-04-20"));
+            failed_task.abort();
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn claude_client_restriction_503_switches_provider_without_health_damage() {
         let _env_lock = crate::test_support::test_env_lock();
         let home = tempfile::tempdir().expect("home dir");
@@ -4545,6 +4840,300 @@ module.exports.activate = function activate(api) {
 
         failed_task.abort();
         success_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn thinking_rectifiers_retry_boundaries_and_provider_isolation() {
+        let _env_lock = crate::test_support::test_env_lock();
+        const SIGNATURE: &str = r#"{"error":{"message":"Invalid signature in thinking block"}}"#;
+        const BUDGET: &str = r#"{"error":{"message":"invalid request: thinking.budget_tokens: Input should be greater than or equal to 1024"}}"#;
+        const SUCCESS: &str = r#"{"id":"msg_ok","type":"message","role":"assistant","content":[],"model":"claude-test","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}"#;
+        const OUTAGE: &str = r#"{"error":{"message":"temporary upstream outage"}}"#;
+        const UNRELATED: &str = r#"{"error":{"type":"invalid_request_error","message":"invalid request: unsupported model"}}"#;
+        const ECHOED: &str = r#"{"detail":[{"loc":["body","max_tokens"],"msg":"Field required","input":{"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"valid history","signature":"valid-signature"}]}]}}]}"#;
+        let oversized_echo = serde_json::json!({
+            "error": {"type": "invalid_request_error", "message": "unsupported model"},
+            "input": {"messages": [{"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "Keep this thinking block", "signature": "valid-signature"},
+                {"type": "text", "text": "history ".repeat(12 * 1024)}
+            ]}]}
+        }).to_string();
+        assert!(oversized_echo.len() > 64 * 1024);
+        for (case, first_responses, second_responses, status, expected_audits) in [
+            (
+                "truncated_json_with_echoed_signature",
+                vec![("400 Bad Request", oversized_echo.as_str())],
+                vec![("200 OK", SUCCESS)],
+                StatusCode::BAD_REQUEST,
+                0,
+            ),
+            (
+                "plain_text_signature",
+                vec![
+                    ("400 Bad Request", "Invalid signature in thinking block"),
+                    ("200 OK", SUCCESS),
+                ],
+                vec![("200 OK", SUCCESS)],
+                StatusCode::OK,
+                1,
+            ),
+            (
+                "signature_then_budget",
+                vec![
+                    ("400 Bad Request", SIGNATURE),
+                    ("400 Bad Request", BUDGET),
+                    ("200 OK", SUCCESS),
+                ],
+                vec![("200 OK", SUCCESS)],
+                StatusCode::OK,
+                2,
+            ),
+            (
+                "repeated_signature",
+                vec![
+                    ("400 Bad Request", SIGNATURE),
+                    ("400 Bad Request", SIGNATURE),
+                ],
+                vec![("200 OK", SUCCESS)],
+                StatusCode::BAD_REQUEST,
+                1,
+            ),
+            (
+                "signature_without_history",
+                vec![("400 Bad Request", SIGNATURE)],
+                vec![("200 OK", SUCCESS)],
+                StatusCode::BAD_REQUEST,
+                1,
+            ),
+            (
+                "signature_failover",
+                vec![
+                    ("400 Bad Request", SIGNATURE),
+                    ("503 Service Unavailable", OUTAGE),
+                ],
+                vec![("400 Bad Request", SIGNATURE), ("200 OK", SUCCESS)],
+                StatusCode::OK,
+                2,
+            ),
+            (
+                "unrelated_invalid_request",
+                vec![("400 Bad Request", UNRELATED)],
+                vec![("200 OK", SUCCESS)],
+                StatusCode::BAD_REQUEST,
+                0,
+            ),
+            (
+                "echoed_request_signature",
+                vec![("400 Bad Request", ECHOED)],
+                vec![("200 OK", SUCCESS)],
+                StatusCode::BAD_REQUEST,
+                0,
+            ),
+        ] {
+            let home = tempfile::tempdir().expect("home dir");
+            let _env = isolate_app_env(home.path());
+            let app = tauri::test::mock_app();
+            let app_handle = app.handle().clone();
+            let mut app_settings = settings::AppSettings::default();
+            app_settings.enable_claude_metadata_user_id_injection = false;
+            app_settings.enable_thinking_signature_rectifier = true;
+            app_settings.enable_thinking_budget_rectifier = true;
+            app_settings.failover_max_attempts_per_provider = 1;
+            app_settings.failover_max_providers_to_try = 2;
+            app_settings.circuit_breaker_failure_threshold = 1;
+            settings::write(&app_handle, &app_settings).expect("write settings");
+            crate::cli_proxy::set_enabled(&app_handle, "claude", true, "http://127.0.0.1:37123")
+                .expect("enable claude cli proxy");
+            let db = db::init_for_tests(&home.path().join("thinking-rectifiers.sqlite"))
+                .expect("init test db");
+            let first_count = first_responses.len();
+            let (first_url, mut first_rx, first_task) =
+                spawn_capturing_sequence_upstream(first_responses).await;
+            let (second_url, mut second_rx, second_task) =
+                spawn_capturing_sequence_upstream(second_responses).await;
+            let first_id = insert_provider_with_priority(&db, "claude", "First", first_url, 0);
+            let second_id = insert_provider_with_priority(&db, "claude", "Second", second_url, 1);
+            let circuit = Arc::new(circuit_breaker::CircuitBreaker::new(
+                circuit_breaker::CircuitBreakerConfig {
+                    failure_threshold: 1,
+                    ..circuit_breaker::CircuitBreakerConfig::default()
+                },
+                HashMap::new(),
+                None,
+            ));
+            let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+            let state = gateway_state_with_parts(
+                app_handle,
+                db,
+                log_tx,
+                circuit.clone(),
+                Arc::new(session_manager::SessionManager::new()),
+            );
+            let mut body = serde_json::json!({
+                "model":"claude-test", "max_tokens":4096,
+                "thinking":{"type":"enabled", "budget_tokens":512},
+                "messages":[
+                    {"role":"user", "content":"hello"},
+                    {"role":"assistant", "content":[
+                        {"type":"thinking", "thinking":"Keep this history", "signature":"valid-signature"},
+                        {"type":"text", "text":"hello"}
+                    ]},
+                    {"role":"user", "content":"continue"}
+                ]
+            });
+            if case == "signature_without_history" {
+                body["messages"][1]["content"]
+                    .as_array_mut()
+                    .unwrap()
+                    .remove(0);
+            }
+            let request = Request::builder()
+                .method(Method::POST)
+                .uri("/claude/v1/messages")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                .unwrap();
+            let response = build_router(state).oneshot(request).await.expect(case);
+            assert_eq!(response.status(), status, "{case}");
+            if case == "truncated_json_with_echoed_signature" {
+                let returned = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+                assert!(returned.len() < oversized_echo.len());
+                let returned = String::from_utf8_lossy(&returned);
+                assert!(returned.contains("unsupported model"));
+                assert!(returned.contains("valid-signature"));
+            }
+            let mut repaired = body.clone();
+            if case != "signature_without_history" {
+                repaired["messages"][1]["content"]
+                    .as_array_mut()
+                    .unwrap()
+                    .remove(0);
+            }
+            for index in 0..first_count {
+                let captured = tokio::time::timeout(Duration::from_secs(2), first_rx.recv())
+                    .await
+                    .unwrap()
+                    .expect(case);
+                let mut expected = if index == 0 {
+                    body.clone()
+                } else {
+                    repaired.clone()
+                };
+                if case == "signature_then_budget" && index == 2 {
+                    expected["thinking"]["budget_tokens"] = serde_json::json!(1024);
+                }
+                assert_eq!(
+                    serde_json::from_slice::<Value>(&captured.body).unwrap(),
+                    expected,
+                    "{case}, first provider attempt {index}"
+                );
+            }
+            assert!(
+                first_rx.try_recv().is_err(),
+                "{case}: unexpected extra retry"
+            );
+            if case == "signature_failover" {
+                for expected in [&body, &repaired] {
+                    let captured = tokio::time::timeout(Duration::from_secs(2), second_rx.recv())
+                        .await
+                        .unwrap()
+                        .expect(case);
+                    assert_eq!(
+                        &serde_json::from_slice::<Value>(&captured.body).unwrap(),
+                        expected
+                    );
+                }
+            }
+            assert!(
+                second_rx.try_recv().is_err(),
+                "{case}: unexpected provider switch or retry"
+            );
+            let log = recv_terminal_request_log(&mut log_rx).await;
+            let attempts: Value = serde_json::from_str(&log.attempts_json).unwrap();
+            let attempts = attempts.as_array().unwrap();
+            assert_eq!(
+                attempts.len(),
+                first_count + if case == "signature_failover" { 2 } else { 0 },
+                "{case}"
+            );
+            assert!(attempts[..first_count]
+                .iter()
+                .all(|attempt| attempt["provider_id"] == first_id));
+            if case == "signature_failover" {
+                assert!(attempts[first_count..]
+                    .iter()
+                    .all(|attempt| attempt["provider_id"] == second_id));
+                assert_eq!(attempts[1]["decision"], "switch");
+            }
+            if status == StatusCode::BAD_REQUEST {
+                let terminal = attempts.last().unwrap();
+                assert_eq!(terminal["decision"], "abort", "{case}");
+                assert_eq!(
+                    terminal["error_category"], "NON_RETRYABLE_CLIENT_ERROR",
+                    "{case}"
+                );
+            }
+            let audit: Value =
+                serde_json::from_str(log.special_settings_json.as_deref().unwrap_or("[]")).unwrap();
+            let audit: Vec<_> = audit
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|item| {
+                    matches!(
+                        item["type"].as_str(),
+                        Some("thinking_signature_rectifier" | "thinking_budget_rectifier")
+                    )
+                })
+                .collect();
+            assert_eq!(audit.len(), expected_audits, "{case}");
+            for (index, entry) in audit.iter().enumerate() {
+                assert_eq!(entry["scope"], "attempt");
+                assert_eq!(
+                    entry["providerId"],
+                    if case == "signature_failover" && index == 1 {
+                        second_id
+                    } else {
+                        first_id
+                    }
+                );
+                assert_eq!(entry["hit"], case != "signature_without_history", "{case}");
+                if case != "signature_without_history" {
+                    assert_eq!(entry["grantedRetrySlot"], true, "{case}");
+                }
+            }
+            if case == "plain_text_signature" {
+                assert_eq!(attempts[0]["decision"], "retry");
+                assert_eq!(attempts[1]["outcome"], "success");
+                assert_eq!(audit[0]["type"], "thinking_signature_rectifier");
+                assert_eq!(audit[0]["removedThinkingBlocks"], 1);
+            }
+            if case == "signature_then_budget" {
+                assert_eq!(audit[0]["type"], "thinking_signature_rectifier");
+                assert_eq!(audit[1]["type"], "thinking_budget_rectifier");
+                assert_eq!(audit[1]["after"]["maxTokens"], 4096);
+                assert_eq!(audit[1]["after"]["thinkingBudgetTokens"], 1024);
+            }
+            let first_snapshot =
+                circuit.snapshot(first_id, crate::gateway::util::now_unix_seconds() as i64);
+            assert_eq!(
+                first_snapshot.failure_count,
+                u32::from(case == "signature_failover"),
+                "{case}"
+            );
+            assert_eq!(
+                first_snapshot.state,
+                if case == "signature_failover" {
+                    circuit_breaker::CircuitState::Open
+                } else {
+                    circuit_breaker::CircuitState::Closed
+                },
+                "{case}"
+            );
+            assert_eq!(circuit.snapshot(second_id, 0).failure_count, 0);
+            first_task.abort();
+            second_task.abort();
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]

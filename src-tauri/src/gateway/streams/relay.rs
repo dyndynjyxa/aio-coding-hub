@@ -1,24 +1,25 @@
 //! Usage: Stream adapters for relaying upstream response bodies.
 
+use crate::gateway::streams::UpstreamStreamError;
 use axum::body::Bytes;
 use futures_core::Stream;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
 pub(in crate::gateway) struct RelayBodyStream {
-    rx: tokio::sync::mpsc::Receiver<Result<Bytes, reqwest::Error>>,
+    rx: tokio::sync::mpsc::Receiver<Result<Bytes, UpstreamStreamError>>,
 }
 
 impl RelayBodyStream {
     pub(in crate::gateway) fn new(
-        rx: tokio::sync::mpsc::Receiver<Result<Bytes, reqwest::Error>>,
+        rx: tokio::sync::mpsc::Receiver<Result<Bytes, UpstreamStreamError>>,
     ) -> Self {
         Self { rx }
     }
 }
 
 impl Stream for RelayBodyStream {
-    type Item = Result<Bytes, reqwest::Error>;
+    type Item = Result<Bytes, UpstreamStreamError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.as_mut().get_mut();
@@ -28,7 +29,7 @@ impl Stream for RelayBodyStream {
 
 pub(in crate::gateway) struct FirstChunkStream<S>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin,
 {
     first: Option<Bytes>,
     rest: S,
@@ -36,7 +37,7 @@ where
 
 impl<S> FirstChunkStream<S>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin,
 {
     pub(in crate::gateway) fn new(first: Option<Bytes>, rest: S) -> Self {
         Self { first, rest }
@@ -45,9 +46,9 @@ where
 
 impl<S> Stream for FirstChunkStream<S>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin,
 {
-    type Item = Result<Bytes, reqwest::Error>;
+    type Item = Result<Bytes, UpstreamStreamError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.as_mut().get_mut();

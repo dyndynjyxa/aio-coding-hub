@@ -296,6 +296,7 @@ fn is_sensitive_header_name(name: &str) -> bool {
             | "x-xsrf-token"
             | "access-token"
             | "refresh-token"
+            | "x-codex-turn-state"
     ) || name.contains("api-key")
         || name.contains("apikey")
         || name.contains("token")
@@ -309,7 +310,7 @@ pub(super) fn redacted_headers_for_debug(headers: &HeaderMap) -> String {
     let mut parts = Vec::with_capacity(headers.len());
     for (name, value) in headers.iter() {
         let name = name.as_str();
-        let value = if is_sensitive_header_name(name) {
+        let value = if value.is_sensitive() || is_sensitive_header_name(name) {
             "[redacted]".to_string()
         } else {
             lossy_utf8_preview(value.as_bytes(), MAX_DEBUG_HEADER_VALUE_PREVIEW_BYTES)

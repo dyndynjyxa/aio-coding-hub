@@ -2,6 +2,7 @@
 
 use crate::gateway::plugins::context::{GatewayPluginHookName, GatewayStreamHookInput};
 use crate::gateway::plugins::pipeline::GatewayPluginPipeline;
+use crate::gateway::streams::UpstreamStreamError;
 use axum::body::Bytes;
 use futures_core::Stream;
 use std::future::Future;
@@ -10,13 +11,19 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 type PluginChunkFuture =
-    Pin<Box<dyn Future<Output = Result<Option<Bytes>, reqwest::Error>> + Send>>;
+    Pin<Box<dyn Future<Output = Result<Option<Bytes>, UpstreamStreamError>> + Send>>;
 
 pub(super) const PLUGIN_STREAM_ERROR_MARKER: &str = ": aio-plugin-error\n";
 
+pub(in crate::gateway) fn is_plugin_stream_error_chunk(chunk: &[u8]) -> bool {
+    chunk
+        .windows(PLUGIN_STREAM_ERROR_MARKER.len())
+        .any(|window| window == PLUGIN_STREAM_ERROR_MARKER.as_bytes())
+}
+
 pub(in crate::gateway) struct PluginChunkStream<S>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin,
 {
     upstream: S,
     pipeline: Arc<GatewayPluginPipeline>,
@@ -28,7 +35,7 @@ where
 
 impl<S> PluginChunkStream<S>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin,
 {
     pub(in crate::gateway) fn new(
         upstream: S,
@@ -49,7 +56,7 @@ where
 
 pub(in crate::gateway) enum MaybePluginChunkStream<S>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin,
 {
     Direct(S),
     WithPlugins(PluginChunkStream<S>),
@@ -57,7 +64,7 @@ where
 
 impl<S> MaybePluginChunkStream<S>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin,
 {
     pub(in crate::gateway) fn new(
         upstream: S,
@@ -75,9 +82,9 @@ where
 
 impl<S> Stream for MaybePluginChunkStream<S>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin + Send + 'static,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin + Send + 'static,
 {
-    type Item = Result<Bytes, reqwest::Error>;
+    type Item = Result<Bytes, UpstreamStreamError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.as_mut().get_mut() {
@@ -89,9 +96,9 @@ where
 
 impl<S> Stream for PluginChunkStream<S>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin + Send + 'static,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin + Send + 'static,
 {
-    type Item = Result<Bytes, reqwest::Error>;
+    type Item = Result<Bytes, UpstreamStreamError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.as_mut().get_mut();
@@ -183,13 +190,14 @@ mod tests {
     use crate::gateway::plugins::pipeline::{
         GatewayPluginPipeline, GatewayPluginPipelineConfig, InMemoryGatewayPluginExecutor,
     };
+    use crate::gateway::streams::UpstreamStreamError;
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
     struct EmptyStream;
 
     impl Stream for EmptyStream {
-        type Item = Result<Bytes, reqwest::Error>;
+        type Item = Result<Bytes, UpstreamStreamError>;
 
         fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
             Poll::Ready(None)

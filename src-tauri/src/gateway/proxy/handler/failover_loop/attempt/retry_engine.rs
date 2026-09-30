@@ -32,8 +32,29 @@ where
 {
     let mut retry_state = RetryLoopState::new();
 
-    let mut retry_index = 1u32;
+    let mut retry_index = input.ws_request.as_ref().map_or(1, |request| {
+        use crate::shared::mutex_ext::MutexExt;
+        let generation = request.generation.lock_or_recover();
+        if generation.budget.provider_id == Some(prepared.provider_id) {
+            generation.budget.retry_index.max(1)
+        } else {
+            1
+        }
+    });
     while retry_index <= retry_state.effective_attempt_limit(prepared.provider_max_attempts) {
+        if let Some(request) = &input.ws_request {
+            use crate::shared::mutex_ext::MutexExt;
+            let mut generation = request.generation.lock_or_recover();
+            if generation.budget.provider_id != Some(prepared.provider_id)
+                || generation.budget.retry_index != retry_index
+            {
+                generation.budget.provider_id = Some(prepared.provider_id);
+                generation.budget.retry_index = retry_index;
+                generation.budget.deadline = input
+                    .upstream_first_byte_timeout
+                    .and_then(|duration| std::time::Instant::now().checked_add(duration));
+            }
+        }
         let attempt_index = loop_state.attempts.len().saturating_add(1) as u32;
 
         let send_outcome = attempt_executor::execute_attempt(
@@ -62,6 +83,7 @@ where
         .await;
 
         match ctrl {
+            LoopControl::RetryTransport => continue,
             LoopControl::ContinueRetry => {
                 let Some(next_retry_index) = retry_index.checked_add(1) else {
                     break;
@@ -102,7 +124,28 @@ where
             reason,
             loop_state.attempts.clone(),
         )),
-        AttemptSendOutcome::Response(resp, timing) => {
+        AttemptSendOutcome::WsTransport(reason, timing) => {
+            ws_attempt::transport_failure(ctx, input, prepared, indices, timing, reason, loop_state)
+                .await
+        }
+        AttemptSendOutcome::ContextLost(timing) => {
+            ws_attempt::recover(ctx, input, prepared, indices, timing, loop_state).await
+        }
+        AttemptSendOutcome::LocalProtocol(reason, _timing) => {
+            if reason == "prewarm_http_required" {
+                if let Some(connection) = &input.ws_connection {
+                    if let Some(session) = input
+                        .base_headers
+                        .get("session-id")
+                        .and_then(|v| v.to_str().ok())
+                    {
+                        connection.runtime.force_http(session);
+                    }
+                }
+            }
+            ws_attempt::finish_error(ctx, input, loop_state, "invalid_request", reason).await
+        }
+        AttemptSendOutcome::StreamResponse(resp, timing) => {
             response_router::route_response(
                 ctx,
                 input,
@@ -110,6 +153,19 @@ where
                 retry_state,
                 indices,
                 resp,
+                timing,
+                loop_state,
+            )
+            .await
+        }
+        AttemptSendOutcome::Response(resp, timing) => {
+            response_router::route_response(
+                ctx,
+                input,
+                prepared,
+                retry_state,
+                indices,
+                resp.into(),
                 timing,
                 loop_state,
             )

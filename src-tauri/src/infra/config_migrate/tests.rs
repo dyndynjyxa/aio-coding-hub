@@ -531,6 +531,8 @@ fn config_import_v2_restores_full_prompt_and_skill_payload() {
     let app = test_app.handle();
     let bundle = ConfigBundle {
         providers: vec![ProviderExport {
+            custom_headers: Vec::new(),
+            supports_websockets: false,
             id: Some(1),
             cli_key: "codex".to_string(),
             name: "oauth-provider".to_string(),
@@ -1035,4 +1037,118 @@ fn write_skill_files_to_dir_rejects_oversized_base64_before_creating_dir() {
 
     assert!(err.to_string().contains("too large"));
     assert!(!target.exists());
+}
+
+fn insert_supports_websockets_provider(conn: &Connection) {
+    conn.execute(
+        "INSERT INTO providers(cli_key, name, base_url, api_key_plaintext, supports_websockets, created_at, updated_at)
+         VALUES ('codex', 'ws-export', 'https://example.com', 'test-key', 1, 1, 1)", [],
+    ).expect("insert ws provider");
+}
+
+#[test]
+fn supports_websockets_export_import_and_legacy_bundle_round_trip() {
+    let test_app = ConfigMigrateTestApp::new();
+    let app = test_app.handle();
+    insert_supports_websockets_provider(&test_app.db.open_connection().expect("open db"));
+    let bundle = config_export(&app, &test_app.db).expect("export ws provider");
+    assert_eq!(bundle.providers.len(), 1);
+    assert!(bundle.providers[0].supports_websockets);
+    config_import(&app, &test_app.db, bundle).expect("import ws provider");
+    assert!(
+        crate::providers::list_by_cli(&test_app.db, "codex").expect("list imported")[0]
+            .supports_websockets
+    );
+
+    let mut legacy = serde_json::to_value(config_export(&app, &test_app.db).expect("export again"))
+        .expect("serialize bundle");
+    legacy["providers"][0]
+        .as_object_mut()
+        .expect("provider object")
+        .remove("supports_websockets");
+    let legacy: ConfigBundle = serde_json::from_value(legacy).expect("read legacy bundle");
+    assert!(!legacy.providers[0].supports_websockets);
+    config_import(&app, &test_app.db, legacy).expect("import legacy bundle");
+    assert!(
+        !crate::providers::list_by_cli(&test_app.db, "codex").expect("list legacy")[0]
+            .supports_websockets
+    );
+}
+
+#[test]
+fn supports_websockets_import_rejects_incompatible_providers_and_rolls_back() {
+    let test_app = ConfigMigrateTestApp::new();
+    let app = test_app.handle();
+    insert_supports_websockets_provider(&test_app.db.open_connection().expect("open db"));
+    for invalid_kind in ["cli", "source_id", "source_hint", "bridge"] {
+        let mut bundle = config_export(&app, &test_app.db).expect("export");
+        // Put a valid insertion first to prove that rejecting the second row rolls it back too.
+        let mut invalid: ProviderExport =
+            serde_json::from_value(serde_json::to_value(&bundle.providers[0]).unwrap()).unwrap();
+        invalid.name = "invalid-ws".to_string();
+        invalid.id = None;
+        match invalid_kind {
+            "cli" => invalid.cli_key = "claude".to_string(),
+            "source_id" => invalid.source_provider_id = Some(123),
+            "source_hint" => invalid.source_provider_cli_key = Some("codex".to_string()),
+            "bridge" => invalid.bridge_type = Some("cx2cc".to_string()),
+            _ => unreachable!(),
+        }
+        bundle.providers[0].name = "partial-import-must-rollback".to_string();
+        bundle.providers.push(invalid);
+        let error = config_import(&app, &test_app.db, bundle)
+            .err()
+            .expect("reject incompatible capability");
+        assert!(error.to_string().contains("supports_websockets"), "{error}");
+        let providers = crate::providers::list_by_cli(&test_app.db, "codex")
+            .expect("original provider survives rollback");
+        assert_eq!(providers.len(), 1);
+        assert_eq!(providers[0].name, "ws-export");
+        assert!(providers[0].supports_websockets);
+        assert!(crate::providers::list_by_cli(&test_app.db, "claude")
+            .expect("no invalid provider")
+            .is_empty());
+    }
+}
+
+#[test]
+fn custom_headers_export_import_legacy_and_invalid_rollback() {
+    let fixture = ConfigMigrateTestApp::new();
+    let app = fixture.handle();
+    insert_supports_websockets_provider(&fixture.db.open_connection().unwrap());
+    let mut bundle = config_export(&app, &fixture.db).unwrap();
+    bundle.providers[0].custom_headers = vec![crate::providers::ProviderCustomHeader {
+        name: "X-Tenant".into(),
+        value: "synthetic-secret".into(),
+    }];
+    config_import(&app, &fixture.db, bundle).unwrap();
+    let bundle = config_export(&app, &fixture.db).unwrap();
+    assert_eq!(
+        bundle.providers[0].custom_headers[0].value,
+        "synthetic-secret"
+    );
+    for name in ["authorization", "x-tenant"] {
+        let mut invalid: ConfigBundle =
+            serde_json::from_value(serde_json::to_value(&bundle).unwrap()).unwrap();
+        invalid.providers[0].name = "must-rollback".into();
+        invalid.providers[0].custom_headers[0].name = name.into();
+        invalid.providers[0].custom_headers[0].value = "synthetic-secret\r\n".into();
+        let error = config_import(&app, &fixture.db, invalid).err().unwrap();
+        assert!(!error.to_string().contains("synthetic-secret"));
+        assert_eq!(
+            crate::providers::list_by_cli(&fixture.db, "codex").unwrap()[0].name,
+            "ws-export"
+        );
+    }
+    let mut legacy = serde_json::to_value(bundle).unwrap();
+    legacy["providers"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("custom_headers");
+    config_import(&app, &fixture.db, serde_json::from_value(legacy).unwrap()).unwrap();
+    assert!(
+        crate::providers::list_by_cli(&fixture.db, "codex").unwrap()[0]
+            .custom_headers
+            .is_empty()
+    );
 }

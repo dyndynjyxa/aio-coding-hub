@@ -25,6 +25,7 @@ fn decode_provider_row(
         ProviderModelPolicyV1::decode(model_policy_json.as_deref(), cli_key);
 
     Ok(DecodedProviderRow {
+        supports_websockets: row.get::<_, i64>("supports_websockets")? != 0,
         id: row.get("id")?,
         name: row.get("name")?,
         base_urls: base_urls_from_row(&base_url_fallback, &base_urls_json),
@@ -51,6 +52,7 @@ fn decode_provider_row(
         oauth_provider_type: row.get("oauth_provider_type")?,
         source_provider_id: row.get("source_provider_id")?,
         bridge_type: row.get("bridge_type")?,
+        custom_headers: custom_headers_from_json(&row.get::<_, String>("custom_headers_json")?)?,
     })
 }
 
@@ -89,10 +91,12 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<ProviderSummary, rusqlite::
         oauth_last_error: row.get("oauth_last_error")?,
         source_provider_id: decoded.source_provider_id,
         bridge_type: decoded.bridge_type,
+        supports_websockets: decoded.supports_websockets,
         stream_idle_timeout_seconds: parse_positive_optional_u32(
             row.get("stream_idle_timeout_seconds")?,
         ),
         extension_values: Vec::new(),
+        custom_headers: decoded.custom_headers,
         api_key_configured: row
             .get::<_, Option<i64>>("api_key_configured")?
             .unwrap_or(0)
@@ -272,8 +276,16 @@ fn insert_provider(
     source_provider_id: Option<i64>,
     bridge_type: Option<String>,
     stream_idle_timeout_seconds: Option<u32>,
+    supports_websockets: bool,
     extension_values: Option<&[ProviderExtensionValuesInput]>,
+    custom_headers: Option<&[ProviderCustomHeader]>,
 ) -> crate::shared::error::AppResult<i64> {
+    validate_supports_websockets(
+        cli_key,
+        source_provider_id.is_some(),
+        bridge_type.as_deref(),
+        supports_websockets,
+    )?;
     let now = now_unix_seconds();
     let priority = priority.unwrap_or(DEFAULT_PRIORITY);
     let is_oauth = requested_auth_mode == ProviderAuthMode::Oauth;
@@ -314,6 +326,10 @@ fn insert_provider(
     let tags_json_value =
         serde_json::to_string(&tags_normalized).map_err(|e| format!("SYSTEM_ERROR: {e}"))?;
     let note_value = normalize_note(note.as_deref())?;
+    let custom_headers = normalize_custom_headers(custom_headers.unwrap_or_default().to_vec())?;
+    validate_custom_headers_owner(&custom_headers, is_cx2cc)?;
+    let custom_headers_json_value =
+        serde_json::to_string(&custom_headers).map_err(|e| format!("SYSTEM_ERROR: {e}"))?;
 
     let base_url_primary = base_urls.first().cloned().unwrap_or_default();
     let base_urls_json =
@@ -349,9 +365,11 @@ INSERT INTO providers(
   source_provider_id,
   bridge_type,
   stream_idle_timeout_seconds,
+  supports_websockets,
   created_at,
-  updated_at
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, '{}', '{}', ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)
+  updated_at,
+  custom_headers_json
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, '{}', '{}', ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)
 "#,
         params![
             cli_key,
@@ -379,8 +397,10 @@ INSERT INTO providers(
             source_provider_id,
             bridge_type,
             stream_idle_timeout_seconds,
+            enabled_to_int(supports_websockets),
             now,
-            now
+            now,
+            custom_headers_json_value
         ],
     )
     .map_err(|e| match e {
@@ -438,6 +458,8 @@ SELECT
   source_provider_id,
   bridge_type,
   stream_idle_timeout_seconds,
+  supports_websockets,
+  custom_headers_json,
   CASE WHEN COALESCE(api_key_plaintext, '') = '' THEN 0 ELSE 1 END AS api_key_configured
 FROM providers
 WHERE id = ?1
@@ -699,6 +721,8 @@ SELECT
   source_provider_id,
   bridge_type,
   stream_idle_timeout_seconds,
+  supports_websockets,
+  custom_headers_json,
   CASE WHEN COALESCE(api_key_plaintext, '') = '' THEN 0 ELSE 1 END AS api_key_configured
 FROM providers
 WHERE cli_key = ?1
@@ -758,10 +782,12 @@ fn map_gateway_provider_row(
         oauth_provider_type: decoded.oauth_provider_type,
         source_provider_id: decoded.source_provider_id,
         bridge_type: decoded.bridge_type,
+        supports_websockets: decoded.supports_websockets,
         stream_idle_timeout_seconds: parse_positive_optional_u32(
             row.get("stream_idle_timeout_seconds")?,
         ),
         extension_values: Vec::new(),
+        custom_headers: decoded.custom_headers,
     })
 }
 
@@ -794,7 +820,9 @@ SELECT
   p.oauth_provider_type,
   p.source_provider_id,
   p.bridge_type,
-  p.stream_idle_timeout_seconds
+  p.stream_idle_timeout_seconds,
+  p.supports_websockets,
+  p.custom_headers_json
 FROM sort_mode_providers mp
 JOIN providers p ON p.id = mp.provider_id
 WHERE mp.mode_id = ?1
@@ -849,7 +877,9 @@ SELECT
   oauth_provider_type,
   source_provider_id,
   bridge_type,
-  stream_idle_timeout_seconds
+  stream_idle_timeout_seconds,
+  supports_websockets,
+  custom_headers_json
 FROM providers
 WHERE cli_key = ?1
   AND enabled = 1
@@ -1040,7 +1070,9 @@ SELECT
   oauth_provider_type,
   source_provider_id,
   bridge_type,
-  stream_idle_timeout_seconds
+  stream_idle_timeout_seconds,
+  supports_websockets,
+  custom_headers_json
 FROM providers
 WHERE id = ?1 AND enabled = 1 AND source_provider_id IS NULL AND cli_key = 'codex'
 "#,
@@ -1164,7 +1196,9 @@ pub fn upsert(
         source_provider_id,
         bridge_type,
         stream_idle_timeout_seconds,
+        supports_websockets,
         extension_values,
+        custom_headers,
     } = input;
     let cli_key = cli_key.trim();
     validate_cli_key(cli_key)?;
@@ -1276,7 +1310,9 @@ pub fn upsert(
                 source_provider_id,
                 bridge_type,
                 stream_idle_timeout_seconds,
+                supports_websockets.unwrap_or(false),
                 extension_values.as_deref(),
+                custom_headers.as_deref(),
             )?;
             tx.commit().map_err(|e| db_err!("failed to commit: {e}"))?;
             Ok(get_by_id(&conn, id)?)
@@ -1300,12 +1336,14 @@ pub fn upsert(
                 String,
                 String,
                 Option<i64>,
+                bool,
+                Option<String>,
             );
             let existing: Option<ExistingProviderRow> = tx
                 .query_row(
-                    "SELECT cli_key, api_key_plaintext, priority, claude_models_json, model_policy_json, supported_models_json, model_mapping_json, auth_mode, daily_reset_mode, daily_reset_time, tags_json, note, stream_idle_timeout_seconds FROM providers WHERE id = ?1",
+                    "SELECT cli_key, api_key_plaintext, priority, claude_models_json, model_policy_json, supported_models_json, model_mapping_json, auth_mode, daily_reset_mode, daily_reset_time, tags_json, note, stream_idle_timeout_seconds, supports_websockets, custom_headers_json FROM providers WHERE id = ?1",
                     params![id],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?, row.get(12)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?, row.get(12)?, row.get(13)?, row.get(14)?)),
                 )
                 .optional()
                 .map_err(|e| db_err!("failed to query provider: {e}"))?;
@@ -1324,6 +1362,8 @@ pub fn upsert(
                 existing_tags_json,
                 existing_note,
                 existing_stream_idle_timeout_seconds,
+                existing_supports_websockets,
+                existing_custom_headers_json,
             )) = existing
             else {
                 return Err("DB_NOT_FOUND: provider not found".to_string().into());
@@ -1332,6 +1372,15 @@ pub fn upsert(
             if existing_cli_key != cli_key {
                 return Err("SEC_INVALID_INPUT: cli_key mismatch".to_string().into());
             }
+
+            let next_supports_websockets =
+                supports_websockets.unwrap_or(existing_supports_websockets);
+            validate_supports_websockets(
+                cli_key,
+                source_provider_id.is_some(),
+                bridge_type.as_deref(),
+                next_supports_websockets,
+            )?;
 
             // Resolve auth_mode: use requested if provided, else keep existing.
             let next_auth_mode = auth_mode
@@ -1408,6 +1457,17 @@ pub fn upsert(
             } else {
                 parse_positive_optional_u32(existing_stream_idle_timeout_seconds)
             };
+            let headers = match custom_headers {
+                Some(headers) => headers,
+                None => custom_headers_from_json(
+                    existing_custom_headers_json.as_deref().unwrap_or("[]"),
+                )
+                .map_err(|_| "SEC_INVALID_INPUT: invalid stored custom headers")?,
+            };
+            let headers = normalize_custom_headers(headers)?;
+            validate_custom_headers_owner(&headers, is_cx2cc)?;
+            let next_custom_headers_json =
+                serde_json::to_string(&headers).map_err(|e| format!("SYSTEM_ERROR: {e}"))?;
 
             tx.execute(
                 r#"
@@ -1438,8 +1498,10 @@ SET
   source_provider_id = ?23,
   bridge_type = ?24,
   stream_idle_timeout_seconds = ?25,
-  updated_at = ?26
-WHERE id = ?27
+  supports_websockets = ?26,
+  updated_at = ?27,
+  custom_headers_json = ?28
+WHERE id = ?29
 "#,
                 params![
                     name,
@@ -1467,7 +1529,9 @@ WHERE id = ?27
                     source_provider_id,
                     bridge_type,
                     next_stream_idle_timeout_seconds,
+                    enabled_to_int(next_supports_websockets),
                     now,
+                    next_custom_headers_json,
                     id
                 ],
             )
@@ -1533,7 +1597,9 @@ pub fn duplicate(
         source_provider_id,
         bridge_type,
         stream_idle_timeout_seconds,
+        supports_websockets,
         extension_values: _,
+        custom_headers,
     } = input;
 
     let cli_key = cli_key.trim();
@@ -1638,7 +1704,9 @@ pub fn duplicate(
         source_provider_id,
         bridge_type,
         stream_idle_timeout_seconds,
+        supports_websockets.unwrap_or(false),
         None,
+        custom_headers.as_deref(),
     )?;
     copy_extension_values(&tx, duplicate_from_provider_id, id)?;
     tx.commit().map_err(|e| db_err!("failed to commit: {e}"))?;

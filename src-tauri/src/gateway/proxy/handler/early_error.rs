@@ -109,7 +109,9 @@ pub(super) fn early_error_contract(kind: EarlyErrorKind) -> EarlyErrorContract {
 // Forced provider
 // ---------------------------------------------------------------------------
 
-pub(super) fn extract_forced_provider_id(headers: &axum::http::HeaderMap) -> Option<i64> {
+pub(in crate::gateway) fn extract_forced_provider_id(
+    headers: &axum::http::HeaderMap,
+) -> Option<i64> {
     let raw = headers.get("x-aio-provider-id")?.to_str().ok()?.trim();
     let provider_id = raw.parse::<i64>().ok()?;
     (provider_id > 0).then_some(provider_id)

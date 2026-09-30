@@ -8,6 +8,11 @@ fn detect_trigger_invalid_signature_in_thinking_block() {
 
     let trigger2 = detect_trigger("Messages.1.Content.0: invalid signature in thinking block");
     assert_eq!(trigger2, Some(TRIGGER_INVALID_SIGNATURE_IN_THINKING_BLOCK));
+
+    assert_eq!(
+        detect_trigger("非法请求: thinking block signature mismatch"),
+        Some(TRIGGER_INVALID_SIGNATURE_IN_THINKING_BLOCK)
+    );
 }
 
 #[test]
@@ -43,36 +48,18 @@ fn detect_trigger_missing_thinking_prefix() {
 }
 
 #[test]
-fn detect_trigger_invalid_request_with_thinking_context() {
-    assert_eq!(
-        detect_trigger("非法请求: thinking block signature mismatch"),
-        Some(TRIGGER_INVALID_REQUEST)
-    );
-    assert_eq!(
-        detect_trigger("illegal request: invalid thinking parameter"),
-        Some(TRIGGER_INVALID_REQUEST)
-    );
-    assert_eq!(
-        detect_trigger("invalid request: signature verification failed"),
-        Some(TRIGGER_INVALID_REQUEST)
-    );
-    assert_eq!(
-        detect_trigger("invalid request: redacted block error"),
-        Some(TRIGGER_INVALID_REQUEST)
-    );
-}
-
-#[test]
-fn detect_trigger_generic_invalid_request_matches_cch_fallback() {
-    assert_eq!(detect_trigger("非法请求"), Some(TRIGGER_INVALID_REQUEST));
-    assert_eq!(
-        detect_trigger("illegal request format"),
-        Some(TRIGGER_INVALID_REQUEST)
-    );
-    assert_eq!(
-        detect_trigger("invalid request: malformed JSON"),
-        Some(TRIGGER_INVALID_REQUEST)
-    );
+fn generic_invalid_requests_do_not_trigger_destructive_signature_repair() {
+    for message in [
+        "非法请求",
+        "illegal request format",
+        "invalid request: malformed JSON",
+        "invalid request: unsupported model",
+        "invalid request: thinking.budget_tokens must be greater than or equal to 1024",
+        "invalid request: invalid thinking parameter",
+        "invalid request: signature verification failed",
+    ] {
+        assert_eq!(detect_trigger(message), None, "message={message}");
+    }
 }
 
 #[test]
@@ -152,4 +139,27 @@ fn rectify_removes_top_level_thinking_when_tool_use_without_thinking_prefix() {
     assert!(result.applied);
     assert!(result.removed_top_level_thinking);
     assert!(message.get("thinking").is_none());
+}
+
+#[test]
+fn signature_field_errors_are_bound_to_message_content_paths() {
+    for error in [
+        "metadata.signature: Field required",
+        "messages.0.content.0.signature: Unexpected value; max_tokens: Field required",
+        "max_tokens: Extra inputs are not permitted; signature: unexpected value",
+        "tools.0.input_schema.properties.signature: Field required",
+    ] {
+        assert_eq!(detect_trigger(error), None, "{error}");
+    }
+    for error in [
+        "messages[0].content[1].signature: Field required",
+        "body.messages.0.content.1.thinking.signature: Field required",
+        "messages.0.content.1.signature\n  Extra inputs are not permitted",
+    ] {
+        assert_eq!(
+            detect_trigger(error),
+            Some(TRIGGER_INVALID_SIGNATURE_IN_THINKING_BLOCK),
+            "{error}"
+        );
+    }
 }

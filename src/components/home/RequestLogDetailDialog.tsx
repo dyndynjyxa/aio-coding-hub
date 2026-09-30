@@ -7,6 +7,8 @@ import { useNowMs } from "../../hooks/useNowMs";
 import { useRequestLogDetailSignalRefresh } from "../../hooks/useRequestLogDetailSignalRefresh";
 import { isPersistedRequestLogIncomplete } from "../../services/gateway/requestLogState";
 import { useTraceStore } from "../../services/gateway/traceStore";
+import { parseAttemptsJson } from "../../services/gateway/attemptsJson";
+import { hasFailoverFromSegments } from "../../services/gateway/traceRoute";
 import {
   useRequestAttemptLogsByTraceIdQuery,
   useRequestLogDetailQuery,
@@ -105,7 +107,15 @@ export function RequestLogDetailDialog({
         status: selectedLog.status,
         errorCode: selectedLog.error_code,
         inProgress: isInProgress,
-        hasFailover: attemptLogs.length > 1,
+        specialSettingsJson: selectedLog.special_settings_json,
+        hasFailover: hasFailoverFromSegments(
+          (attemptLogs.length ? attemptLogs : (parseAttemptsJson(selectedLog.attempts_json) ?? []))
+            .filter((attempt) => attempt.provider_id > 0)
+            .map((attempt) => ({
+              provider: String(attempt.provider_id),
+              status: attempt.outcome,
+            }))
+        ),
       })
     : null;
 

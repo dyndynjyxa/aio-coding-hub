@@ -21,16 +21,22 @@ impl RequestFingerprintMiddleware {
             &ctx.body_bytes,
         );
 
-        match fp::apply_recent_error_cache_gate(
-            &ctx.state.recent_errors,
-            &fingerprints,
-            ctx.trace_id,
-        ) {
-            Ok(next_trace_id) => {
-                ctx.trace_id = next_trace_id;
-            }
-            Err(resp) => {
-                return MiddlewareAction::ShortCircuit(*resp);
+        let recovering = ctx.ws_request.as_ref().is_some_and(|request| {
+            use crate::shared::mutex_ext::MutexExt;
+            request.generation.lock_or_recover().recovered
+        });
+        if !recovering {
+            match fp::apply_recent_error_cache_gate(
+                &ctx.state.recent_errors,
+                &fingerprints,
+                ctx.trace_id,
+            ) {
+                Ok(next_trace_id) => {
+                    ctx.trace_id = next_trace_id;
+                }
+                Err(resp) => {
+                    return MiddlewareAction::ShortCircuit(*resp);
+                }
             }
         }
 

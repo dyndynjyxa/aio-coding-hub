@@ -38,6 +38,7 @@ import {
   useCliManagerGeminiConfigSetMutation,
   useCliManagerGeminiInfoQuery,
 } from "../../query/cliManager";
+import { isWindowsRuntime } from "../../utils/platform";
 import { formatActionFailureToast } from "../../utils/errors";
 import { useGrokTabDataModel } from "../../components/cli-manager/tabs/useGrokTabDataModel";
 
@@ -184,6 +185,9 @@ export function useCliManagerPageDataModel() {
   const circuitBreakerNoticeSaving = circuitBreakerNoticeMutation.isPending;
   const codexSessionIdCompletionSaving = codexSessionIdCompletionMutation.isPending;
   const commonSettingsSaving = commonSettingsMutation.isPending;
+  const [codexResponsesWebsocketStatus, setCodexResponsesWebsocketStatus] = useState<string | null>(
+    null
+  );
 
   const [generalSettingsDraft, setGeneralSettingsDraft] = useState<GeneralSettingsDraft>(
     DEFAULT_GENERAL_SETTINGS_DRAFT
@@ -559,6 +563,53 @@ export function useCliManagerPageDataModel() {
     return true;
   }
 
+  async function persistCodexResponsesWebsocket(enabled: boolean) {
+    if (settingsWriteBlocked) {
+      blockSettingsWrite();
+      return false;
+    }
+    if (commonSettingsSaving || !appSettings) return false;
+    setCodexResponsesWebsocketStatus(null);
+    try {
+      const result = await commonSettingsMutation.mutateAsync({
+        codex_responses_websocket_enabled: enabled,
+        upstream_proxy_password: { mode: "preserve" },
+      });
+      if (!result) return false;
+      const sync = result.runtime.codex_proxy_sync;
+      let message =
+        sync === "synced"
+          ? "已保存并同步本机 Codex 配置；请启动新的 CLI 会话。"
+          : sync === "failed"
+            ? "偏好已保存，本机 Codex 配置同步失败；请重试代理接管。"
+            : sync === "deferred"
+              ? "偏好已保存，启动网关并接管后生效；请使用新的 CLI 会话。"
+              : "偏好已保存，接管 Codex 后生效；请使用新的 CLI 会话。";
+      if (result.runtime.wsl_auto_sync_triggered) {
+        message += " WSL 同步已触发，请在 WSL 状态中确认结果。";
+      } else if (result.settings.wsl_auto_config && isWindowsRuntime()) {
+        message += " WSL 尚未同步，请检查 WSL 配置状态。";
+      }
+      setCodexResponsesWebsocketStatus(message);
+      toast(message);
+      await refreshCodex().catch((error) => {
+        logToConsole("warn", "WebSocket 设置已保存，Codex 配置状态刷新失败", {
+          error: String(error),
+        });
+      });
+      return true;
+    } catch (err) {
+      const formatted = formatActionFailureToast("保存 Responses WebSocket 设置", err);
+      setCodexResponsesWebsocketStatus(formatted.toast);
+      logToConsole("error", "保存 Responses WebSocket 设置失败", {
+        error: formatted.raw,
+        error_code: formatted.error_code ?? undefined,
+      });
+      toast(formatted.toast);
+      return false;
+    }
+  }
+
   async function pickCodexHomeDirectory(initialPath?: string): Promise<string | null> {
     try {
       return await openDesktopSinglePath({
@@ -749,6 +800,8 @@ export function useCliManagerPageDataModel() {
       persistCodexConfigToml,
       persistCodexHomeSettings,
       persistCodexOauthCompatibleProxyMode,
+      persistCodexResponsesWebsocket,
+      codexResponsesWebsocketStatus,
       pickCodexHomeDirectory,
     },
     cx2ccTabProps: {

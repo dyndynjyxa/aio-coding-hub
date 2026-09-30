@@ -74,6 +74,7 @@ mod tests {
 
     fn provider(id: i64) -> providers::ProviderForGateway {
         providers::ProviderForGateway {
+            custom_headers: Vec::new(),
             id,
             name: format!("p{id}"),
             base_urls: vec!["https://example.com".to_string()],
@@ -94,6 +95,7 @@ mod tests {
             source_provider_id: None,
             bridge_type: None,
             stream_idle_timeout_seconds: None,
+            supports_websockets: false,
             extension_values: vec![],
         }
     }

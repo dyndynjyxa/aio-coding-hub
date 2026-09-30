@@ -4,6 +4,7 @@ use crate::gateway::oauth::adapters::gemini::{
     resolve_project_id_for_access_token, GEMINI_CODE_ASSIST_API_VERSION,
     GEMINI_CODE_ASSIST_BASE_URL,
 };
+use crate::gateway::streams::UpstreamStreamError;
 use axum::body::Bytes;
 use futures_core::Stream;
 use serde_json::{Map, Value};
@@ -137,20 +138,20 @@ pub(super) fn translate_response_body(
 
 pub(super) struct GeminiOAuthSseStream<S>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin,
 {
     upstream: S,
     response_mode: Option<GeminiOAuthResponseMode>,
     buffer: Vec<u8>,
     queued: VecDeque<Bytes>,
-    pending_error: Option<reqwest::Error>,
+    pending_error: Option<UpstreamStreamError>,
     upstream_done: bool,
     passthrough: bool,
 }
 
 impl<S> GeminiOAuthSseStream<S>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin,
 {
     pub(super) fn new(upstream: S, response_mode: Option<GeminiOAuthResponseMode>) -> Self {
         Self {
@@ -197,9 +198,9 @@ where
 
 impl<S> Stream for GeminiOAuthSseStream<S>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin,
 {
-    type Item = Result<Bytes, reqwest::Error>;
+    type Item = Result<Bytes, UpstreamStreamError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.as_mut().get_mut();
@@ -696,13 +697,14 @@ fn trim_ascii_prefix(bytes: &[u8]) -> &[u8] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gateway::streams::UpstreamStreamError;
 
     struct VecBytesStream {
-        items: VecDeque<Result<Bytes, reqwest::Error>>,
+        items: VecDeque<Result<Bytes, UpstreamStreamError>>,
     }
 
     impl VecBytesStream {
-        fn new(items: Vec<Result<Bytes, reqwest::Error>>) -> Self {
+        fn new(items: Vec<Result<Bytes, UpstreamStreamError>>) -> Self {
             Self {
                 items: items.into_iter().collect(),
             }
@@ -710,7 +712,7 @@ mod tests {
     }
 
     impl Stream for VecBytesStream {
-        type Item = Result<Bytes, reqwest::Error>;
+        type Item = Result<Bytes, UpstreamStreamError>;
 
         fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
             Poll::Ready(self.items.pop_front())

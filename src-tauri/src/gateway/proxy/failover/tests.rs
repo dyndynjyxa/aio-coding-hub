@@ -18,6 +18,7 @@ fn provider_for_base_url_test(
     oauth_provider_type: Option<&str>,
 ) -> providers::ProviderForGateway {
     providers::ProviderForGateway {
+        custom_headers: Vec::new(),
         id: 1,
         name: "test".to_string(),
         base_urls: base_urls.into_iter().map(str::to_string).collect(),
@@ -38,6 +39,7 @@ fn provider_for_base_url_test(
         source_provider_id: None,
         bridge_type: None,
         stream_idle_timeout_seconds: None,
+        supports_websockets: false,
         extension_values: vec![],
     }
 }

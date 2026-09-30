@@ -363,6 +363,7 @@ mod tests {
 
     fn provider_params(name: &str, enabled: bool, source: &str) -> ProviderUpsertParams {
         ProviderUpsertParams {
+            custom_headers: None,
             provider_id: None,
             cli_key: "codex".to_string(),
             name: name.to_string(),
@@ -387,6 +388,7 @@ mod tests {
             source_provider_id: None,
             bridge_type: None,
             stream_idle_timeout_seconds: None,
+            supports_websockets: None,
             extension_values: None,
         }
     }

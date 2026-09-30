@@ -719,3 +719,17 @@ base_url = "http://127.0.0.1:37124/v1"
     assert!(s.contains("name = \"OpenAI\""), "{s}");
     assert!(!s.contains("[model_providers.aio]"), "{s}");
 }
+
+#[test]
+fn remote_compaction_rejects_existing_destination_provider_instead_of_overwriting_it() {
+    let source = "model_provider = \"aio\"\n[model_providers.aio]\nunknown = \"keep-aio\"\n[model_providers.OpenAI]\nunknown = \"keep-openai\"\n";
+    let error = patch_config_toml(
+        Some(source.as_bytes().to_vec()),
+        CodexConfigPatch {
+            features_remote_compaction: Some(true),
+            ..empty_patch()
+        },
+    )
+    .expect_err("renaming must not overwrite the existing provider");
+    assert!(error.to_string().contains("both Codex provider tables"));
+}

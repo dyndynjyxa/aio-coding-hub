@@ -60,6 +60,10 @@ pub struct ConfigBundle {
 
 #[derive(Serialize, Deserialize, specta::Type)]
 pub struct ProviderExport {
+    #[serde(default)]
+    pub custom_headers: Vec<crate::providers::ProviderCustomHeader>,
+    #[serde(default)]
+    pub supports_websockets: bool,
     pub id: Option<i64>,
     pub cli_key: String,
     pub name: String,
@@ -216,6 +220,8 @@ pub struct ConfigImportResult {
     pub skill_repos_imported: u32,
     pub installed_skills_imported: u32,
     pub local_skills_imported: u32,
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 // --- Shared helpers used by multiple submodules ---

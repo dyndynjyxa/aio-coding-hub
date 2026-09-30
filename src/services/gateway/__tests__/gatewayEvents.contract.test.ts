@@ -20,6 +20,13 @@ import {
 // A normalizer rejecting a fixture means the frontend guards drifted from
 // what the backend actually emits.
 describe("gateway event payload contract (shared fixtures)", () => {
+  it("retains the optional backend terminal signal and rejects malformed values", () => {
+    expect(
+      normalizeGatewayRequestEvent({ ...requestFixture, terminal_signal: "incomplete" })
+    ).toMatchObject({ terminal_signal: "incomplete" });
+    expect(normalizeGatewayRequestEvent({ ...requestFixture, terminal_signal: {} })).toBeNull();
+  });
+
   it("accepts the gateway:request fixture", () => {
     const normalized = normalizeGatewayRequestEvent(requestFixture);
     expect(normalized).not.toBeNull();

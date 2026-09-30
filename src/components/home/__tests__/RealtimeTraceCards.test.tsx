@@ -133,6 +133,33 @@ describe("components/home/RealtimeTraceCards", () => {
     vi.useRealTimers();
   });
 
+  it("uses the backend terminal signal for incomplete realtime responses", () => {
+    const baseTime = 1_700_000_000_000;
+    render(
+      <RealtimeTraceCards
+        folderLookupBySessionKey={new Map()}
+        cards={cards([
+          traceBase({
+            cli_key: "codex",
+            path: "/v1/responses",
+            last_seen_ms: baseTime,
+            summary: {
+              status: 200,
+              error_code: null,
+              terminal_signal: "incomplete",
+              duration_ms: 100,
+            },
+          }),
+        ])}
+        nowMs={baseTime}
+        formatUnixSeconds={(ts) => String(ts)}
+        showCustomTooltip={false}
+      />
+    );
+    expect(screen.getByText("200 不完整结束")).toBeInTheDocument();
+    expect(screen.queryByText("200 成功")).not.toBeInTheDocument();
+  });
+
   it("shows canonical cache buckets, preserves zero, and does not synthesize abort cache writes", () => {
     const baseTime = 1_700_000_000_000;
     const renderCards = (summary: Record<string, unknown>) => (

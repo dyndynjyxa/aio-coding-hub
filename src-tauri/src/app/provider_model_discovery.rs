@@ -15,6 +15,7 @@ const DISCOVERY_BODY_LIMIT: usize = 8 * 1024 * 1024;
 #[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ProviderModelDiscoveryInput {
+    pub custom_headers: Option<Vec<providers::ProviderCustomHeader>>,
     pub provider_id: Option<i64>,
     pub cli_key: String,
     pub auth_mode: providers::ProviderAuthMode,
@@ -256,6 +257,7 @@ fn api_key_descriptor(cli_key: &str) -> Option<ModelCatalogDescriptor<'static>> 
 }
 
 async fn fetch_model_catalog(
+    custom_headers: HeaderMap,
     cli_key: &str,
     api_key: &str,
     base_url: &str,
@@ -317,6 +319,7 @@ async fn fetch_model_catalog(
         }
     }
 
+    headers.extend(custom_headers);
     fetch_model_catalog_with_descriptor(
         descriptor,
         base_url,
@@ -448,6 +451,53 @@ pub(crate) async fn provider_models_discover<R: tauri::Runtime>(
         });
     }
     let deadline = tokio::time::Instant::now() + DISCOVERY_TIMEOUT;
+    let draft_headers = match input.custom_headers {
+        Some(headers) => headers,
+        None => match input.provider_id {
+            Some(provider_id) => {
+                let db = ensure_db_ready(app.clone(), db_state).await?;
+                let cli_key = input.cli_key.clone();
+                let auth_mode = input.auth_mode;
+                let lookup = blocking::run("provider_models_discover_headers", move || {
+                    let conn = db.open_connection()?;
+                    let provider = providers::get_by_id(&conn, provider_id)?;
+                    if provider.cli_key != cli_key
+                        || provider.auth_mode != auth_mode.as_str()
+                        || providers::is_cx2cc_bridge(
+                            provider.source_provider_id,
+                            provider.bridge_type.as_deref(),
+                        )
+                    {
+                        return Err(crate::shared::error::AppError::from(
+                            "SEC_INVALID_INPUT: provider connection mismatch",
+                        ));
+                    }
+                    Ok(provider.custom_headers)
+                })
+                .await;
+                match lookup {
+                    Ok(headers) => headers,
+                    Err(error) if is_expected_provider_input_error(&error) => {
+                        return Ok(discovery_error(
+                            ProviderModelDiscoveryErrorCode::InvalidConfig,
+                            None,
+                        ))
+                    }
+                    Err(error) => return Err(error.into()),
+                }
+            }
+            None => Vec::new(),
+        },
+    };
+    let custom_headers = match providers::custom_headers_to_map(&draft_headers) {
+        Ok(headers) => headers,
+        Err(_) => {
+            return Ok(discovery_error(
+                ProviderModelDiscoveryErrorCode::InvalidConfig,
+                None,
+            ))
+        }
+    };
     if input.auth_mode == providers::ProviderAuthMode::Oauth {
         let Some(provider_id) = input.provider_id else {
             return Ok(ProviderModelDiscoveryResult::Unsupported {
@@ -557,6 +607,7 @@ pub(crate) async fn provider_models_discover<R: tauri::Runtime>(
                 None,
             ));
         }
+        headers.extend(custom_headers);
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         if remaining.is_zero() {
             return Ok(discovery_error(
@@ -672,6 +723,7 @@ pub(crate) async fn provider_models_discover<R: tauri::Runtime>(
     }
 
     Ok(fetch_model_catalog(
+        custom_headers,
         &input.cli_key,
         &api_key,
         &selected_base_url,
@@ -693,6 +745,7 @@ mod tests {
         ProviderModelDiscoveryUnsupportedReason,
     };
     use crate::app_state::DbInitState;
+    use crate::providers;
     use base64::Engine;
     use reqwest::header::HeaderMap;
     use std::time::Duration;
@@ -736,6 +789,7 @@ mod tests {
         api_key: Option<&str>,
     ) -> ProviderModelDiscoveryInput {
         ProviderModelDiscoveryInput {
+            custom_headers: None,
             provider_id,
             cli_key: "codex".to_string(),
             auth_mode: crate::providers::ProviderAuthMode::ApiKey,
@@ -801,6 +855,7 @@ mod tests {
                 .expect("build fixture client");
 
             let result = fetch_model_catalog(
+                HeaderMap::new(),
                 cli_key,
                 "secret",
                 &format!("{origin}{base_suffix}"),
@@ -821,6 +876,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn custom_headers_model_discovery_preserves_auth_and_uses_draft() {
+        let app = tauri::test::mock_app();
+        let db_state = DbInitState(tokio::sync::Mutex::new(None));
+        let (origin, request_task) = fixture_server("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"data\":[]}").await;
+        let input = ProviderModelDiscoveryInput {
+            provider_id: None,
+            cli_key: "codex".into(),
+            auth_mode: providers::ProviderAuthMode::ApiKey,
+            base_urls: vec![origin],
+            base_url_mode: providers::ProviderBaseUrlMode::Order,
+            api_key: Some("sk-discovery".into()),
+            source_provider_id: None,
+            bridge_type: None,
+            custom_headers: Some(vec![providers::ProviderCustomHeader {
+                name: "X-Tenant".into(),
+                value: "draft-tenant".into(),
+            }]),
+        };
+        let result = provider_models_discover(app.handle().clone(), &db_state, input)
+            .await
+            .unwrap();
+        assert!(matches!(result, ProviderModelDiscoveryResult::Empty { .. }));
+        let request = request_task.await.unwrap().to_ascii_lowercase();
+        assert!(request.contains("x-tenant: draft-tenant"));
+        assert!(request.contains("authorization: bearer sk-discovery"));
+    }
+
+    #[tokio::test]
     async fn maps_redirect_without_following_or_returning_location() {
         let (origin, request_task) = fixture_server(
             "HTTP/1.1 302 Found\r\nLocation: https://secret.example/next\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
@@ -833,6 +916,7 @@ mod tests {
             .expect("build fixture client");
 
         let result = fetch_model_catalog(
+            HeaderMap::new(),
             "codex",
             "secret",
             &origin,
@@ -878,6 +962,7 @@ mod tests {
             app.handle().clone(),
             &db_state,
             ProviderModelDiscoveryInput {
+                custom_headers: None,
                 provider_id: None,
                 cli_key: "claude".to_string(),
                 auth_mode: crate::providers::ProviderAuthMode::ApiKey,
@@ -911,6 +996,10 @@ mod tests {
         let saved = crate::providers::upsert(
             &db,
             crate::providers::ProviderUpsertParams {
+                custom_headers: Some(vec![providers::ProviderCustomHeader {
+                    name: "x-tenant".into(),
+                    value: "stored-tenant".into(),
+                }]),
                 provider_id: None,
                 cli_key: "codex".to_string(),
                 name: "stored-key-discovery".to_string(),
@@ -935,6 +1024,7 @@ mod tests {
                 source_provider_id: None,
                 bridge_type: None,
                 stream_idle_timeout_seconds: None,
+                supports_websockets: None,
                 extension_values: None,
             },
         )
@@ -954,7 +1044,22 @@ mod tests {
         assert!(request
             .to_ascii_lowercase()
             .contains("authorization: bearer stored-secret"));
+        assert!(request
+            .to_ascii_lowercase()
+            .contains("x-tenant: stored-tenant"));
         assert!(matches!(result, ProviderModelDiscoveryResult::Ready { .. }));
+        let (origin, request_task) =
+            fixture_server("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{\"data\":[]}").await;
+        let mut cleared = api_key_input(Some(saved.id), origin, None);
+        cleared.custom_headers = Some(vec![]);
+        provider_models_discover(app.handle().clone(), &db_state, cleared)
+            .await
+            .unwrap();
+        assert!(!request_task
+            .await
+            .unwrap()
+            .to_ascii_lowercase()
+            .contains("x-tenant:"));
         let conn = db.open_connection().expect("open db connection");
         let request_log_count: i64 = conn
             .query_row("SELECT COUNT(1) FROM request_logs", [], |row| row.get(0))
@@ -974,7 +1079,10 @@ mod tests {
         let result = provider_models_discover(
             app.handle().clone(),
             &db_state,
-            api_key_input(Some(42), origin, Some("draft-secret")),
+            ProviderModelDiscoveryInput {
+                custom_headers: Some(vec![]),
+                ..api_key_input(Some(42), origin, Some("draft-secret"))
+            },
         )
         .await
         .expect("draft API key discovery should not read the saved provider");
@@ -996,6 +1104,7 @@ mod tests {
         let saved = crate::providers::upsert(
             &db,
             crate::providers::ProviderUpsertParams {
+                custom_headers: None,
                 provider_id: None,
                 cli_key: "codex".to_string(),
                 name: "oauth-read-only-discovery".to_string(),
@@ -1020,6 +1129,7 @@ mod tests {
                 source_provider_id: None,
                 bridge_type: None,
                 stream_idle_timeout_seconds: None,
+                supports_websockets: None,
                 extension_values: None,
             },
         )
@@ -1047,6 +1157,7 @@ mod tests {
             app.handle().clone(),
             &db_state,
             ProviderModelDiscoveryInput {
+                custom_headers: None,
                 provider_id: Some(saved.id),
                 cli_key: "codex".to_string(),
                 auth_mode: crate::providers::ProviderAuthMode::Oauth,
@@ -1092,6 +1203,7 @@ mod tests {
                 .expect("build fixture client");
 
             let result = fetch_model_catalog(
+                HeaderMap::new(),
                 "codex",
                 "secret",
                 &origin,
@@ -1129,6 +1241,7 @@ mod tests {
             .expect("build fixture client");
 
         let result = fetch_model_catalog(
+            HeaderMap::new(),
             "codex",
             "secret",
             &format!("http://{address}"),
@@ -1162,6 +1275,7 @@ mod tests {
             .expect("build fixture client");
 
         let result = fetch_model_catalog(
+            HeaderMap::new(),
             "codex",
             "secret",
             &origin,

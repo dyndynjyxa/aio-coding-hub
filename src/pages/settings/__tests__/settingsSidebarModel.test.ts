@@ -32,10 +32,27 @@ describe("pages/settings/settingsSidebarModel", () => {
         skill_repos_imported: 6,
         installed_skills_imported: 7,
         local_skills_imported: 8,
+        warnings: [],
       })
     ).toBe(
       "配置导入完成：供应商 1，排序模式 2，工作区 3，提示词 4，MCP 5，技能仓库 6，通用技能 7，本机技能 8"
     );
+  });
+
+  it("reports committed import with client sync warnings", () => {
+    const message = buildConfigImportSuccessMessage({
+      providers_imported: 1,
+      sort_modes_imported: 0,
+      workspaces_imported: 0,
+      prompts_imported: 0,
+      mcp_servers_imported: 0,
+      skill_repos_imported: 0,
+      installed_skills_imported: 0,
+      local_skills_imported: 0,
+      warnings: ["本机客户端配置同步失败，请在 CLI 管理中重试"],
+    });
+    expect(message).toContain("配置导入完成");
+    expect(message).toContain("本机客户端配置同步失败，请在 CLI 管理中重试");
   });
 
   it("builds model prices sync messages", () => {

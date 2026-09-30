@@ -1315,53 +1315,78 @@ pub fn set_enabled<R: tauri::Runtime>(
     }
 }
 
-pub fn startup_repair_incomplete_enable<R: tauri::Runtime>(
+// A client-local failure must not prevent later registry entries from repairing or
+// restoring their configuration. Keep the error in the same result contract.
+fn for_each_manifest<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
-) -> crate::shared::error::AppResult<Vec<CliProxyResult>> {
+    trace_label: &str,
+    error_code: &str,
+    mut run: impl FnMut(
+        &str,
+        CliProxyManifest,
+        String,
+    ) -> crate::shared::error::AppResult<Option<CliProxyResult>>,
+) -> Vec<CliProxyResult> {
     let mut out = Vec::new();
-
     for cli_key in
         crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::CliProxy)
     {
-        let Some(mut manifest) = read_manifest(app, cli_key)? else {
-            continue;
-        };
-        if manifest.enabled {
-            continue;
+        let trace_id = new_trace_id(trace_label);
+        let mut enabled = false;
+        let mut base_origin = None;
+        let result = read_manifest(app, cli_key).and_then(|manifest| {
+            let Some(manifest) = manifest else {
+                return Ok(None);
+            };
+            enabled = manifest.enabled;
+            base_origin = manifest.base_origin.clone();
+            run(cli_key, manifest, trace_id.clone())
+        });
+        match result {
+            Ok(Some(row)) => out.push(row),
+            Ok(None) => {}
+            Err(err) => out.push(CliProxyResult::failure(
+                trace_id,
+                cli_key,
+                enabled,
+                error_code,
+                err.to_string(),
+                base_origin,
+            )),
         }
+    }
+    out
+}
 
-        let Some(base_origin) = manifest.base_origin.clone() else {
-            continue;
-        };
-
-        if !is_proxy_config_applied(app, cli_key, &base_origin) {
-            continue;
-        }
-
-        let trace_id = new_trace_id("cli-proxy-startup-repair");
-
-        manifest.enabled = true;
-        manifest.updated_at = now_unix_seconds();
-        match write_manifest(app, cli_key, &manifest) {
-            Ok(()) => out.push(CliProxyResult::success(
+pub fn startup_repair_incomplete_enable<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<Vec<CliProxyResult>> {
+    Ok(for_each_manifest(
+        app,
+        "cli-proxy-startup-repair",
+        "CLI_PROXY_STARTUP_REPAIR_FAILED",
+        |cli_key, mut manifest, trace_id| {
+            if manifest.enabled {
+                return Ok(None);
+            }
+            let Some(base_origin) = manifest.base_origin.clone() else {
+                return Ok(None);
+            };
+            if !is_proxy_config_applied(app, cli_key, &base_origin) {
+                return Ok(None);
+            }
+            manifest.enabled = true;
+            manifest.updated_at = now_unix_seconds();
+            write_manifest(app, cli_key, &manifest)?;
+            Ok(Some(CliProxyResult::success(
                 trace_id,
                 cli_key,
                 true,
                 "启动自愈：已修复异常中断导致的启用状态不一致".to_string(),
                 Some(base_origin),
-            )),
-            Err(err) => out.push(CliProxyResult::failure(
-                trace_id,
-                cli_key,
-                false,
-                "CLI_PROXY_STARTUP_REPAIR_FAILED",
-                err.to_string(),
-                Some(base_origin),
-            )),
-        }
-    }
-
-    Ok(out)
+            )))
+        },
+    ))
 }
 
 pub fn sync_enabled<R: tauri::Runtime>(
@@ -1372,155 +1397,122 @@ pub fn sync_enabled<R: tauri::Runtime>(
     if !base_origin.starts_with("http://") && !base_origin.starts_with("https://") {
         return Err("SEC_INVALID_INPUT: base_origin must start with http:// or https://".into());
     }
-
-    let mut out = Vec::new();
-    for cli_key in
-        crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::CliProxy)
-    {
-        let Some(mut manifest) = read_manifest(app, cli_key)? else {
-            continue;
-        };
-        if !manifest.enabled {
-            continue;
-        }
-
-        if cli_key == "claude_desktop" && manifest_target_paths_changed(app, &manifest)? {
-            out.push(CliProxyResult::failure(
-                new_trace_id("cli-proxy-sync"),
-                cli_key,
-                true,
-                "CLI_PROXY_TARGET_CHANGED",
-                "Claude Desktop 配置目录已变化；请先关闭代理以恢复旧目录，再重新开启".to_string(),
-                manifest.base_origin.clone(),
-            ));
-            continue;
-        }
-
-        let _grok_transaction = if cli_key == "grok" {
-            Some(grok::transaction_lock()?)
-        } else {
-            None
-        };
-
-        let trace_id = new_trace_id("cli-proxy-sync");
-        let needs_target_rebind =
-            matches!(cli_key, "codex" | "grok") && manifest_target_paths_changed(app, &manifest)?;
-
-        if needs_target_rebind {
-            out.push(match cli_key {
-                "codex" => codex::rebind_codex_manifest_after_home_change(
-                    app,
-                    manifest,
-                    base_origin,
-                    apply_live,
+    Ok(for_each_manifest(
+        app,
+        "cli-proxy-sync",
+        "CLI_PROXY_SYNC_FAILED",
+        |cli_key, mut manifest, trace_id| {
+            if !manifest.enabled {
+                return Ok(None);
+            }
+            if cli_key == "claude_desktop" && manifest_target_paths_changed(app, &manifest)? {
+                return Ok(Some(CliProxyResult::failure(
                     trace_id,
-                )?,
-                "grok" => grok::rebind_grok_manifest_after_home_change(
-                    app,
-                    manifest,
-                    base_origin,
-                    apply_live,
+                    cli_key,
+                    true,
+                    "CLI_PROXY_TARGET_CHANGED",
+                    "Claude Desktop 配置目录已变化；请先关闭代理以恢复旧目录，再重新开启"
+                        .to_string(),
+                    manifest.base_origin.clone(),
+                )));
+            }
+            let _grok_transaction = if cli_key == "grok" {
+                Some(grok::transaction_lock()?)
+            } else {
+                None
+            };
+            let needs_target_rebind = matches!(cli_key, "codex" | "grok")
+                && manifest_target_paths_changed(app, &manifest)?;
+            if needs_target_rebind {
+                return match cli_key {
+                    "codex" => codex::rebind_codex_manifest_after_home_change(
+                        app,
+                        manifest,
+                        base_origin,
+                        apply_live,
+                        trace_id,
+                    )
+                    .map(Some),
+                    "grok" => grok::rebind_grok_manifest_after_home_change(
+                        app,
+                        manifest,
+                        base_origin,
+                        apply_live,
+                        trace_id,
+                    )
+                    .map(Some),
+                    _ => unreachable!("rebind capability checked above"),
+                };
+            }
+            let manifest_targets_added =
+                match ensure_manifest_has_current_targets(app, cli_key, &mut manifest) {
+                    Ok(changed) => changed,
+                    Err(err) => {
+                        return Ok(Some(CliProxyResult::failure(
+                            trace_id,
+                            cli_key,
+                            true,
+                            "CLI_PROXY_BACKUP_FAILED",
+                            err.to_string(),
+                            Some(base_origin.to_string()),
+                        )))
+                    }
+                };
+            if !apply_live {
+                if manifest_targets_added || manifest.base_origin.as_deref() != Some(base_origin) {
+                    manifest.base_origin = Some(base_origin.to_string());
+                    manifest.updated_at = now_unix_seconds();
+                    write_manifest(app, cli_key, &manifest)?;
+                }
+                return Ok(Some(CliProxyResult::success(
                     trace_id,
-                )?,
-                _ => unreachable!("rebind capability checked above"),
-            });
-            continue;
-        }
-
-        let manifest_targets_added =
-            match ensure_manifest_has_current_targets(app, cli_key, &mut manifest) {
-                Ok(changed) => changed,
-                Err(err) => {
-                    out.push(CliProxyResult::failure(
+                    cli_key,
+                    true,
+                    "已更新代理目标端口，待网关启动后接管".to_string(),
+                    Some(base_origin.to_string()),
+                )));
+            }
+            if manifest.base_origin.as_deref() == Some(base_origin)
+                && is_proxy_config_applied(app, cli_key, base_origin)
+                && !manifest_targets_added
+            {
+                return Ok(Some(CliProxyResult::success(
+                    trace_id,
+                    cli_key,
+                    true,
+                    "已是最新，无需同步".to_string(),
+                    Some(base_origin.to_string()),
+                )));
+            }
+            // Exit cleanup may have restored direct settings that the user edited while
+            // AIO was closed. Capture that state before taking ownership again.
+            if (cli_key == "claude" && !claude::is_proxy_managed(app))
+                || (cli_key == "claude_desktop" && !claude_desktop::is_managed(app))
+            {
+                if let Err(err) = refresh_backup_from_direct_state(app, cli_key, &mut manifest) {
+                    return Ok(Some(CliProxyResult::failure(
                         trace_id,
                         cli_key,
                         true,
                         "CLI_PROXY_BACKUP_FAILED",
                         err.to_string(),
                         Some(base_origin.to_string()),
-                    ));
-                    continue;
+                    )));
                 }
-            };
-
-        if !apply_live {
-            if manifest_targets_added || manifest.base_origin.as_deref() != Some(base_origin) {
-                manifest.base_origin = Some(base_origin.to_string());
-                manifest.updated_at = now_unix_seconds();
-                write_manifest(app, cli_key, &manifest)?;
             }
-            out.push(CliProxyResult::success(
+            apply_proxy_config(app, cli_key, base_origin)?;
+            manifest.base_origin = Some(base_origin.to_string());
+            manifest.updated_at = now_unix_seconds();
+            write_manifest(app, cli_key, &manifest)?;
+            Ok(Some(CliProxyResult::success(
                 trace_id,
                 cli_key,
                 true,
-                "已更新代理目标端口，待网关启动后接管".to_string(),
+                "已同步代理配置到新端口".to_string(),
                 Some(base_origin.to_string()),
-            ));
-            continue;
-        }
-
-        if manifest.base_origin.as_deref() == Some(base_origin)
-            && is_proxy_config_applied(app, cli_key, base_origin)
-            && !manifest_targets_added
-        {
-            out.push(CliProxyResult::success(
-                trace_id,
-                cli_key,
-                true,
-                "已是最新，无需同步".to_string(),
-                Some(base_origin.to_string()),
-            ));
-            continue;
-        }
-
-        // The manifest says the proxy is enabled, but the on-disk file no
-        // longer carries our marker (e.g. exit-cleanup restored the direct
-        // config, and it may have since been edited while the app was
-        // closed). Snapshot that direct state as the new backup before we
-        // overwrite it below, so a later disable restores it instead of the
-        // stale snapshot from the first time the proxy was ever enabled.
-        if (cli_key == "claude" && !claude::is_proxy_managed(app))
-            || (cli_key == "claude_desktop" && !claude_desktop::is_managed(app))
-        {
-            if let Err(err) = refresh_backup_from_direct_state(app, cli_key, &mut manifest) {
-                out.push(CliProxyResult::failure(
-                    trace_id,
-                    cli_key,
-                    true,
-                    "CLI_PROXY_BACKUP_FAILED",
-                    err.to_string(),
-                    Some(base_origin.to_string()),
-                ));
-                continue;
-            }
-        }
-
-        match apply_proxy_config(app, cli_key, base_origin) {
-            Ok(()) => {
-                manifest.base_origin = Some(base_origin.to_string());
-                manifest.updated_at = now_unix_seconds();
-                write_manifest(app, cli_key, &manifest)?;
-                out.push(CliProxyResult::success(
-                    trace_id,
-                    cli_key,
-                    true,
-                    "已同步代理配置到新端口".to_string(),
-                    Some(base_origin.to_string()),
-                ));
-            }
-            Err(err) => {
-                out.push(CliProxyResult::failure(
-                    trace_id,
-                    cli_key,
-                    true,
-                    "CLI_PROXY_SYNC_FAILED",
-                    err.to_string(),
-                    Some(base_origin.to_string()),
-                ));
-            }
-        }
-    }
-    Ok(out)
+            )))
+        },
+    ))
 }
 
 pub fn rebind_codex_home_after_change<R: tauri::Runtime>(
@@ -1534,44 +1526,29 @@ pub fn rebind_codex_home_after_change<R: tauri::Runtime>(
 pub fn restore_enabled_keep_state<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> crate::shared::error::AppResult<Vec<CliProxyResult>> {
-    let mut out = Vec::new();
-    for cli_key in
-        crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::CliProxy)
-    {
-        let Some(manifest) = read_manifest(app, cli_key)? else {
-            continue;
-        };
-        if !manifest.enabled {
-            continue;
-        }
-
-        let _grok_transaction = if cli_key == "grok" {
-            Some(grok::transaction_lock()?)
-        } else {
-            None
-        };
-
-        let trace_id = new_trace_id("cli-proxy-restore");
-
-        match restore_from_manifest(app, &manifest) {
-            Ok(()) => out.push(CliProxyResult::success(
+    Ok(for_each_manifest(
+        app,
+        "cli-proxy-restore",
+        "CLI_PROXY_RESTORE_FAILED",
+        |cli_key, manifest, trace_id| {
+            if !manifest.enabled {
+                return Ok(None);
+            }
+            let _grok_transaction = if cli_key == "grok" {
+                Some(grok::transaction_lock()?)
+            } else {
+                None
+            };
+            restore_from_manifest(app, &manifest)?;
+            Ok(Some(CliProxyResult::success(
                 trace_id,
                 cli_key,
                 true,
                 "已恢复备份直连配置（保留启用状态）".to_string(),
-                manifest.base_origin.clone(),
-            )),
-            Err(err) => out.push(CliProxyResult::failure(
-                trace_id,
-                cli_key,
-                true,
-                "CLI_PROXY_RESTORE_FAILED",
-                err.to_string(),
-                manifest.base_origin.clone(),
-            )),
-        }
-    }
-    Ok(out)
+                manifest.base_origin,
+            )))
+        },
+    ))
 }
 
 // Re-export submodule items for tests (tests use `super::*`).

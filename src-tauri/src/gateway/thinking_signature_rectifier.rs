@@ -1,10 +1,19 @@
+use regex::Regex;
+use std::sync::LazyLock;
+
+static SIGNATURE_FIELD_ERROR: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)\bmessages(?:\.\d+|\[\d+\])\.content(?:\.\d+|\[\d+\])(?:\.(?:thinking|redacted_thinking|text|tool_use))?\.signature(?:\s*:\s*|\s+)(?:field required|extra inputs are not permitted)\b",
+    )
+    .expect("valid signature field error regex")
+});
+
 pub(super) type ThinkingSignatureRectifierTrigger = &'static str;
 
 pub(super) const TRIGGER_INVALID_SIGNATURE_IN_THINKING_BLOCK: ThinkingSignatureRectifierTrigger =
     "invalid_signature_in_thinking_block";
 pub(super) const TRIGGER_ASSISTANT_MESSAGE_MUST_START_WITH_THINKING:
     ThinkingSignatureRectifierTrigger = "assistant_message_must_start_with_thinking";
-pub(super) const TRIGGER_INVALID_REQUEST: ThinkingSignatureRectifierTrigger = "invalid_request";
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ThinkingSignatureRectifierResult {
@@ -34,7 +43,8 @@ pub(super) fn detect_trigger(error_message: &str) -> Option<ThinkingSignatureRec
         return Some(TRIGGER_ASSISTANT_MESSAGE_MUST_START_WITH_THINKING);
     }
 
-    let looks_like_invalid_signature_in_thinking_block = lower.contains("invalid")
+    let looks_like_invalid_signature_in_thinking_block = (lower.contains("invalid")
+        || lower.contains("mismatch"))
         && lower.contains("signature")
         && lower.contains("thinking")
         && lower.contains("block");
@@ -42,15 +52,7 @@ pub(super) fn detect_trigger(error_message: &str) -> Option<ThinkingSignatureRec
         return Some(TRIGGER_INVALID_SIGNATURE_IN_THINKING_BLOCK);
     }
 
-    let looks_like_missing_signature_field =
-        lower.contains("signature") && lower.contains("field required");
-    if looks_like_missing_signature_field {
-        return Some(TRIGGER_INVALID_SIGNATURE_IN_THINKING_BLOCK);
-    }
-
-    let looks_like_extra_signature_field =
-        lower.contains("signature") && lower.contains("extra inputs are not permitted");
-    if looks_like_extra_signature_field {
+    if SIGNATURE_FIELD_ERROR.is_match(error_message) {
         return Some(TRIGGER_INVALID_SIGNATURE_IN_THINKING_BLOCK);
     }
 
@@ -61,13 +63,8 @@ pub(super) fn detect_trigger(error_message: &str) -> Option<ThinkingSignatureRec
         return Some(TRIGGER_INVALID_SIGNATURE_IN_THINKING_BLOCK);
     }
 
-    let looks_like_generic_invalid_request = error_message.contains("非法请求")
-        || lower.contains("illegal request")
-        || lower.contains("invalid request");
-    if looks_like_generic_invalid_request {
-        return Some(TRIGGER_INVALID_REQUEST);
-    }
-
+    // Generic "invalid request" errors do not establish a signature problem.
+    // Deleting signed history here can damage valid requests and mask budget errors.
     None
 }
 

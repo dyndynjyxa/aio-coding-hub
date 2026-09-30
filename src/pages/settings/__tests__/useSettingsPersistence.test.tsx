@@ -51,6 +51,7 @@ function createSettingsMutationResult(
     runtime: {
       gateway_rebound: false,
       cli_proxy_synced: false,
+      codex_proxy_sync: "not_requested",
       wsl_auto_sync_triggered: false,
       gateway_status: createGatewayStatus(gatewayStatusOverrides),
       ...restRuntime,

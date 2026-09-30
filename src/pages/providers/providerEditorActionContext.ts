@@ -1,6 +1,7 @@
 import type {
   ClaudeModels,
   CliKey,
+  ProviderCustomHeader,
   ProviderOAuthDeviceCodeStartResult,
   ProviderOAuthStatusResult,
   ProviderExtensionValuesInput,
@@ -59,6 +60,8 @@ export type FormActionContext = {
   tags: string[];
   claudeModels: ClaudeModels;
   streamIdleTimeoutSeconds: string;
+  customHeaders: ProviderCustomHeader[];
+  supportsWebsockets: boolean;
   apiKeyConfigured: boolean;
   apiKeyValue: string;
   form: {
@@ -81,6 +84,8 @@ export type ProviderEditorPayloadContext = {
   tags: string[];
   claudeModels: ClaudeModels;
   streamIdleTimeoutSeconds: string;
+  customHeaders: ProviderCustomHeader[];
+  supportsWebsockets: boolean;
   apiKeyConfigured: boolean;
   isCodexGatewaySource: boolean;
   sourceProviderId: number | null;

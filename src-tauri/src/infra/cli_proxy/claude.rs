@@ -87,14 +87,26 @@ pub(super) fn merge_restore_claude_settings_json(
     let backup_bytes = read_cli_proxy_file(backup_path)?;
 
     let mut current: serde_json::Value = match current_bytes {
-        Some(b) if !b.is_empty() => {
-            serde_json::from_slice(&b).unwrap_or_else(|_| serde_json::json!({}))
-        }
-        _ => serde_json::json!({}),
+        Some(bytes) => serde_json::from_slice(&bytes).map_err(|err| {
+            format!(
+                "CLI_PROXY_INVALID_SETTINGS_JSON: invalid {}: {err}",
+                target_path.display()
+            )
+        })?,
+        None => serde_json::json!({}),
     };
 
-    let backup: serde_json::Value =
-        serde_json::from_slice(&backup_bytes).unwrap_or_else(|_| serde_json::json!({}));
+    let backup: serde_json::Value = serde_json::from_slice(&backup_bytes).map_err(|err| {
+        format!(
+            "CLI_PROXY_INVALID_SETTINGS_JSON: invalid {}: {err}",
+            backup_path.display()
+        )
+    })?;
+    if !current.is_object() || !backup.is_object() {
+        return Err(
+            "CLI_PROXY_INVALID_SETTINGS_JSON: settings and backup must be JSON objects".into(),
+        );
+    }
 
     let backup_env = backup.get("env").and_then(|v| v.as_object());
 

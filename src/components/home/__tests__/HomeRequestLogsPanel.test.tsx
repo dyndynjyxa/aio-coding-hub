@@ -113,6 +113,41 @@ describe("components/home/HomeRequestLogsPanel", () => {
     expect(screen.getAllByText("Codex 系统请求")).toHaveLength(1);
   });
 
+  it("keeps incomplete Responses distinct from successful history in both list modes", () => {
+    render(
+      <MemoryRouter>
+        <HomeRequestLogsPanel
+          traces={[]}
+          requestLogs={makeRequestLogs([
+            {
+              cli_key: "codex",
+              path: "/v1/responses",
+              status: 200,
+              error_code: null,
+              special_settings_json: JSON.stringify([
+                {
+                  type: "codex_responses_transport",
+                  scope: "stream",
+                  terminal: "incomplete",
+                },
+              ]),
+            },
+          ])}
+          requestLogsLoading={false}
+          requestLogsRefreshing={false}
+          requestLogsAvailable
+          onRefreshRequestLogs={vi.fn()}
+          selectedLogId={null}
+          onSelectLogId={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+    expect(screen.getByText("200 不完整结束")).toBeInTheDocument();
+    expect(screen.queryByText("200 成功")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("switch", { name: "最近使用记录简洁模式" }));
+    expect(screen.getByText("200 不完整结束")).toBeInTheDocument();
+  });
+
   it("renders traces + logs and supports refresh/select", () => {
     useCliSessionsFolderLookupByIdsQueryMock.mockReturnValue({
       data: [

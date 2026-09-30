@@ -1,5 +1,8 @@
 //! Usage: Gateway stream adapters (gunzip, relays, usage/timing tees).
 
+pub(crate) mod response;
+pub(crate) use response::{UpstreamByteStream, UpstreamResponse, UpstreamStreamError};
+
 mod types;
 pub(super) use types::{StreamActivityTracker, StreamFinalizeCtx};
 
@@ -13,7 +16,7 @@ mod gunzip;
 pub(super) use gunzip::GunzipStream;
 
 mod plugin_chunk;
-pub(super) use plugin_chunk::MaybePluginChunkStream;
+pub(super) use plugin_chunk::{is_plugin_stream_error_chunk, MaybePluginChunkStream};
 
 mod usage_tee;
 pub(super) use usage_tee::{

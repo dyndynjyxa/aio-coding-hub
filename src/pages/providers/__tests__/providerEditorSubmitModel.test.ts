@@ -16,6 +16,8 @@ function makeContext(
     tags: [],
     claudeModels: {},
     streamIdleTimeoutSeconds: "",
+    customHeaders: [],
+    supportsWebsockets: false,
     apiKeyConfigured: false,
     isCodexGatewaySource: false,
     sourceProviderId: null,
@@ -37,6 +39,28 @@ function makeContext(
 }
 
 describe("pages/providers/providerEditorSubmitModel", () => {
+  it.each([
+    ["codex", "api_key", true],
+    ["codex", "oauth", true],
+    ["claude", "api_key", false],
+    ["claude", "cx2cc", false],
+  ] as const)(
+    "only submits WS capability for native Codex: %s / %s",
+    (cliKey, authMode, expected) => {
+      const result = buildProviderEditorUpsertInput(
+        makeContext({
+          cliKey,
+          authMode,
+          supportsWebsockets: true,
+          isCodexGatewaySource: true,
+        })
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.payload.supportsWebsockets).toBe(expected);
+    }
+  );
+
   it("requires an api key when editing an api-key provider without a saved secret", () => {
     const result = buildProviderEditorUpsertInput(
       makeContext({
@@ -150,4 +174,20 @@ describe("pages/providers/providerEditorSubmitModel", () => {
       },
     });
   });
+});
+
+it("normalizes custom headers and rejects bridge ownership and invalid values", () => {
+  const valid = buildProviderEditorUpsertInput(
+    makeContext({ customHeaders: [{ name: "X-Tenant", value: " a " }] })
+  );
+  expect(valid.ok && valid.value.payload.customHeaders).toEqual([{ name: "x-tenant", value: "a" }]);
+  for (const overrides of [
+    { customHeaders: [{ name: "authorization", value: "secret" }] },
+    { customHeaders: [{ name: "x-tenant", value: "secret\n" }] },
+    { authMode: "cx2cc" as const, customHeaders: [{ name: "x-tenant", value: "secret" }] },
+  ]) {
+    const result = buildProviderEditorUpsertInput(makeContext(overrides));
+    expect(result.ok).toBe(false);
+    expect(JSON.stringify(result)).not.toContain("secret");
+  }
 });

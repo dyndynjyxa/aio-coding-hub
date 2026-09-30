@@ -17,6 +17,7 @@ pub(super) const MAX_NON_SSE_BODY_BYTES: usize = 20 * 1024 * 1024;
 
 pub(super) struct CommonCtxArgs<'a, R: tauri::Runtime = tauri::Wry> {
     pub(super) state: &'a GatewayAppState<R>,
+    pub(super) ws_request: Option<&'a crate::gateway::responses_ws::state::RequestState>,
     pub(super) cli_key: &'a String,
     pub(super) forwarded_path: &'a String,
     pub(super) observe: bool,
@@ -48,6 +49,7 @@ pub(super) struct CommonCtxArgs<'a, R: tauri::Runtime = tauri::Wry> {
 
 pub(super) struct CommonCtx<'a, R: tauri::Runtime = tauri::Wry> {
     pub(super) state: &'a GatewayAppState<R>,
+    pub(super) ws_request: Option<&'a crate::gateway::responses_ws::state::RequestState>,
     pub(super) cli_key: &'a String,
     pub(super) forwarded_path: &'a String,
     pub(super) observe: bool,
@@ -89,6 +91,7 @@ impl<'a, R: tauri::Runtime> CommonCtx<'a, R> {
     pub(super) fn new(args: CommonCtxArgs<'a, R>) -> Self {
         Self {
             state: args.state,
+            ws_request: args.ws_request,
             cli_key: args.cli_key,
             forwarded_path: args.forwarded_path,
             observe: args.observe,
@@ -128,6 +131,7 @@ impl<'a, R: tauri::Runtime> From<CommonCtxArgs<'a, R>> for CommonCtx<'a, R> {
 
 pub(super) struct CommonCtxOwned<'a, R: tauri::Runtime = tauri::Wry> {
     pub(super) state: &'a GatewayAppState<R>,
+    pub(super) ws_request: Option<crate::gateway::responses_ws::state::RequestState>,
     pub(super) cli_key: String,
     pub(super) forwarded_path: String,
     pub(super) observe: bool,
@@ -160,6 +164,7 @@ impl<'a, R: tauri::Runtime> From<CommonCtx<'a, R>> for CommonCtxOwned<'a, R> {
     fn from(ctx: CommonCtx<'a, R>) -> Self {
         Self {
             state: ctx.state,
+            ws_request: ctx.ws_request.cloned(),
             cli_key: ctx.cli_key.clone(),
             forwarded_path: ctx.forwarded_path.clone(),
             observe: ctx.observe,
@@ -245,6 +250,7 @@ pub(super) fn build_stream_finalize_ctx<R: tauri::Runtime>(
     let attempts_json = serde_json::to_string(attempts).unwrap_or_else(|_| "[]".to_string());
 
     StreamFinalizeCtx {
+        ws_request: ctx.ws_request.clone(),
         app: ctx.state.app.clone(),
         db: ctx.state.db.clone(),
         log_tx: ctx.state.log_tx.clone(),
@@ -376,6 +382,7 @@ impl<'a, R: tauri::Runtime> LoopState<'a, R> {
 }
 
 pub(super) enum LoopControl {
+    RetryTransport,
     ContinueRetry,
     BreakRetry,
     Return(Response),

@@ -18,7 +18,14 @@ impl CodexSessionCompletionMiddleware {
             .map(|rs| rs.enable_codex_session_id_completion)
             .unwrap_or(true);
 
-        if ctx.cli_key != "codex" || !enabled {
+        if ctx.cli_key != "codex"
+            || !enabled
+            || crate::gateway::proxy::codex_alpha_search::is_request(
+                &ctx.cli_key,
+                &ctx.req_method,
+                &ctx.forwarded_path,
+            )
+        {
             return MiddlewareAction::Continue(Box::new(ctx));
         }
 

@@ -375,6 +375,7 @@ pub(super) fn apply_proxy_config<R: tauri::Runtime>(
         true,
     )?;
 
+    let supports_websockets = crate::settings::read(app)?.codex_responses_websocket_enabled;
     let config_bytes = if super::codex_oauth_compatible_proxy_mode(app) {
         build_codex_config_toml_for_proxy(
             current_config.clone(),
@@ -382,6 +383,7 @@ pub(super) fn apply_proxy_config<R: tauri::Runtime>(
             CodexConfigPlatform::current(),
             true,
             catalog_plan.catalog_pointer.as_deref(),
+            supports_websockets,
         )?
     } else {
         build_codex_config_toml_for_proxy(
@@ -390,6 +392,7 @@ pub(super) fn apply_proxy_config<R: tauri::Runtime>(
             CodexConfigPlatform::current(),
             false,
             catalog_plan.catalog_pointer.as_deref(),
+            supports_websockets,
         )?
     };
     let auth_path = codex_auth_path(app)?;
@@ -676,6 +679,13 @@ pub(super) fn merge_restore_codex_config_toml(
         .map(|b| String::from_utf8_lossy(b).to_string())
         .unwrap_or_default();
     let backup_str = String::from_utf8_lossy(&backup_bytes).to_string();
+    let current_document = current_str
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|_| "CLI_PROXY_INVALID_CONFIG_TOML: failed to parse config.toml")?;
+    let uses_openai_alias = current_document
+        .get("model_provider")
+        .and_then(toml_edit::Item::as_str)
+        == Some(CODEX_REMOTE_COMPACTION_PROVIDER_KEY);
 
     let mut lines: Vec<String> = if current_str.is_empty() {
         Vec::new()
@@ -719,12 +729,21 @@ pub(super) fn merge_restore_codex_config_toml(
         backup_model_catalog.as_deref(),
     );
 
-    // --- Remove the proxy-injected `[model_providers.aio]` section ---
-    // If the backup had this section, we leave it; otherwise remove it.
-    let backup_had_aio =
-        !find_model_provider_base_table_indices(&backup_lines, CODEX_PROVIDER_KEY).is_empty();
-    if !backup_had_aio {
-        remove_model_provider_section(&mut lines, CODEX_PROVIDER_KEY);
+    // Remove injected provider aliases; keep tables present in the restore baseline.
+    let backup_document = backup_str
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|_| "CLI_PROXY_INVALID_CONFIG_TOML: failed to parse backup config.toml")?;
+    for key in [CODEX_PROVIDER_KEY, CODEX_REMOTE_COMPACTION_PROVIDER_KEY] {
+        if key == CODEX_REMOTE_COMPACTION_PROVIDER_KEY && !uses_openai_alias {
+            continue;
+        }
+        if backup_document
+            .get("model_providers")
+            .and_then(|item| item.get(key))
+            .is_none()
+        {
+            remove_model_provider_section(&mut lines, key);
+        }
     }
 
     // --- Revert `[windows] sandbox` ---
@@ -736,8 +755,50 @@ pub(super) fn merge_restore_codex_config_toml(
 
     let mut out = lines.join("\n");
     out.push('\n');
+    for key in [CODEX_PROVIDER_KEY, CODEX_REMOTE_COMPACTION_PROVIDER_KEY] {
+        if let Some(provider) = backup_document
+            .get("model_providers")
+            .and_then(|item| item.get(key))
+        {
+            out = set_codex_websocket_support(
+                &out,
+                key,
+                provider.get("supports_websockets").cloned(),
+            )?;
+        }
+    }
     write_cli_proxy_file_atomic(target_path, out.as_bytes())?;
     Ok(())
+}
+
+fn set_codex_websocket_support(
+    input: &str,
+    provider_key: &str,
+    value: Option<toml_edit::Item>,
+) -> AppResult<String> {
+    let mut document = input
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|_| "CLI_PROXY_INVALID_CONFIG_TOML: failed to parse config.toml")?;
+    if let Some(value) = value {
+        let providers = document
+            .entry("model_providers")
+            .or_insert(toml_edit::Item::Table(toml_edit::Table::new()))
+            .as_table_like_mut()
+            .ok_or("Codex model_providers must be a table")?;
+        let provider = providers
+            .entry(provider_key)
+            .or_insert(toml_edit::Item::Table(toml_edit::Table::new()))
+            .as_table_like_mut()
+            .ok_or("Codex proxy provider must be a table")?;
+        provider.insert("supports_websockets", value);
+    } else if let Some(provider) = document
+        .get_mut("model_providers")
+        .and_then(|item| item.get_mut(provider_key))
+        .and_then(toml_edit::Item::as_table_like_mut)
+    {
+        provider.remove("supports_websockets");
+    }
+    Ok(document.to_string())
 }
 
 // -- TOML helpers for merge-restore -----------------------------------------
@@ -1113,7 +1174,7 @@ pub(super) fn build_codex_config_toml(
     base_url: &str,
     platform: CodexConfigPlatform,
 ) -> AppResult<Vec<u8>> {
-    build_codex_config_toml_with_auth_strategy(current, base_url, platform, false, None)
+    build_codex_config_toml_with_auth_strategy(current, base_url, platform, false, None, false)
 }
 
 #[cfg(test)]
@@ -1122,7 +1183,7 @@ pub(super) fn build_codex_config_toml_oauth_compatible(
     base_url: &str,
     platform: CodexConfigPlatform,
 ) -> AppResult<Vec<u8>> {
-    build_codex_config_toml_with_auth_strategy(current, base_url, platform, true, None)
+    build_codex_config_toml_with_auth_strategy(current, base_url, platform, true, None, false)
 }
 
 pub(super) fn build_codex_config_toml_for_proxy(
@@ -1131,6 +1192,7 @@ pub(super) fn build_codex_config_toml_for_proxy(
     platform: CodexConfigPlatform,
     oauth_compatible: bool,
     model_catalog_value: Option<&str>,
+    supports_websockets: bool,
 ) -> AppResult<Vec<u8>> {
     build_codex_config_toml_with_auth_strategy(
         current,
@@ -1138,6 +1200,7 @@ pub(super) fn build_codex_config_toml_for_proxy(
         platform,
         oauth_compatible,
         Some(model_catalog_value),
+        supports_websockets,
     )
 }
 
@@ -1147,6 +1210,7 @@ fn build_codex_config_toml_with_auth_strategy(
     platform: CodexConfigPlatform,
     oauth_compatible: bool,
     model_catalog_value: Option<Option<&str>>,
+    supports_websockets: bool,
 ) -> AppResult<Vec<u8>> {
     let input = current
         .as_deref()
@@ -1158,14 +1222,33 @@ fn build_codex_config_toml_with_auth_strategy(
     } else {
         input.lines().map(|l| l.to_string()).collect()
     };
+    // Resolve the root setting before the existing table deduplication. Parsing
+    // the whole document here would reject the duplicate tables that it repairs.
+    let uses_openai_alias = find_root_key_value(&lines, "model_provider")
+        .and_then(|value| {
+            format!("model_provider = {value}")
+                .parse::<toml_edit::DocumentMut>()
+                .ok()
+        })
+        .is_some_and(|document| {
+            document
+                .get("model_provider")
+                .and_then(toml_edit::Item::as_str)
+                == Some(CODEX_REMOTE_COMPACTION_PROVIDER_KEY)
+        });
+    let provider_key = if uses_openai_alias {
+        CODEX_REMOTE_COMPACTION_PROVIDER_KEY
+    } else {
+        CODEX_PROVIDER_KEY
+    };
 
-    upsert_root_model_provider(&mut lines, CODEX_PROVIDER_KEY);
+    upsert_root_model_provider(&mut lines, provider_key);
     if oauth_compatible {
         remove_root_preferred_auth_method_if_api_key(&mut lines);
     } else {
         upsert_root_preferred_auth_method(&mut lines, "apikey");
     }
-    upsert_model_provider_base_table(&mut lines, CODEX_PROVIDER_KEY, base_url);
+    upsert_model_provider_base_table(&mut lines, provider_key, base_url);
     if let Some(model_catalog_value) = model_catalog_value {
         revert_root_key(&mut lines, "model_catalog_json", model_catalog_value);
     }
@@ -1175,7 +1258,12 @@ fn build_codex_config_toml_with_auth_strategy(
 
     let mut out = lines.join("\n");
     out.push('\n');
-    Ok(out.into_bytes())
+    set_codex_websocket_support(
+        &out,
+        provider_key,
+        Some(toml_edit::value(supports_websockets)),
+    )
+    .map(String::into_bytes)
 }
 
 pub(super) fn build_codex_auth_json(current: Option<Vec<u8>>) -> AppResult<Vec<u8>> {
@@ -1241,6 +1329,26 @@ pub(super) fn is_proxy_config_applied<R: tauri::Runtime>(
         check_provider_config(&config, CODEX_REMOTE_COMPACTION_PROVIDER_KEY);
 
     if !has_normal_provider && !has_remote_compaction_provider {
+        return false;
+    }
+
+    let expected_websockets = match crate::settings::read(app) {
+        Ok(settings) => settings.codex_responses_websocket_enabled,
+        Err(_) => return false,
+    };
+    let parsed = match config.parse::<toml::Value>() {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    let current_websockets = parsed
+        .get("model_provider")
+        .and_then(toml::Value::as_str)
+        .and_then(|key| parsed.get("model_providers")?.get(key))
+        .and_then(|provider| provider.get("supports_websockets"))
+        .and_then(toml::Value::as_bool);
+    // Missing is not equivalent to false: explicitly persist the HTTP preference
+    // so a prior or client-default WebSocket setting cannot survive synchronization.
+    if current_websockets != Some(expected_websockets) {
         return false;
     }
 
@@ -1410,5 +1518,79 @@ mod tests {
             old_catalog
         );
         assert!(!config_path.exists());
+    }
+}
+
+#[cfg(test)]
+mod websocket_config_tests {
+    use super::*;
+
+    #[test]
+    fn websocket_takeover_and_restore_preserve_original_capability_and_unknown_fields() {
+        for (provider_key, original) in ["aio", "OpenAI"].into_iter().flat_map(|key| {
+            [None, Some(false), Some(true)]
+                .into_iter()
+                .map(move |original| (key, original))
+        }) {
+            let dir = tempfile::tempdir().unwrap();
+            let target = dir.path().join("config.toml");
+            let backup = dir.path().join("backup.toml");
+            let mut source = format!("model_provider = \"{provider_key}\"\n[model_providers.{provider_key}]\nname = \"original\"\nunknown = \"keep\"\n");
+            if let Some(value) = original {
+                source.push_str(&format!("supports_websockets = {value}\n"));
+            }
+            source.push_str(&format!(
+                "[model_providers.{provider_key}.http_headers]\ncustom = \"preserved\"\n"
+            ));
+            std::fs::write(&backup, &source).unwrap();
+            let enabled = build_codex_config_toml_for_proxy(
+                Some(source.into_bytes()),
+                "http://127.0.0.1:1/v1",
+                CodexConfigPlatform::Other,
+                false,
+                None,
+                true,
+            )
+            .unwrap();
+            let disabled = build_codex_config_toml_for_proxy(
+                Some(enabled.clone()),
+                "http://127.0.0.1:2/v1",
+                CodexConfigPlatform::Other,
+                false,
+                None,
+                false,
+            )
+            .unwrap();
+            let disabled_value: toml::Value =
+                toml::from_str(std::str::from_utf8(&disabled).unwrap()).unwrap();
+            assert_eq!(
+                disabled_value["model_providers"][provider_key]["supports_websockets"].as_bool(),
+                Some(false)
+            );
+            std::fs::write(&target, &disabled).unwrap();
+            let enabled: toml::Value =
+                toml::from_str(std::str::from_utf8(&enabled).unwrap()).unwrap();
+            assert_eq!(
+                enabled["model_providers"][provider_key]["supports_websockets"].as_bool(),
+                Some(true)
+            );
+            merge_restore_codex_config_toml(&target, &backup, false).unwrap();
+            let restored: toml::Value =
+                toml::from_str(&std::fs::read_to_string(&target).unwrap()).unwrap();
+            assert_eq!(
+                restored["model_providers"][provider_key]
+                    .get("supports_websockets")
+                    .and_then(toml::Value::as_bool),
+                original
+            );
+            assert_eq!(
+                restored["model_providers"][provider_key]["unknown"].as_str(),
+                Some("keep")
+            );
+            assert_eq!(
+                restored["model_providers"][provider_key]["http_headers"]["custom"].as_str(),
+                Some("preserved")
+            );
+        }
     }
 }

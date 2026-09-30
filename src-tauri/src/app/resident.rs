@@ -4,7 +4,9 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_ID: &str = "main-tray";
+#[cfg(all(desktop, not(target_os = "macos")))]
 const TRAY_MENU_TOGGLE_ID: &str = "tray.toggle";
+#[cfg(all(desktop, not(target_os = "macos")))]
 const TRAY_MENU_QUIT_ID: &str = "tray.quit";
 const LIFECYCLE_INTENT_IDLE: u8 = 0;
 const LIFECYCLE_INTENT_EXIT: u8 = 1;
@@ -79,7 +81,7 @@ pub fn show_main_window(_app: &tauri::AppHandle) {}
 #[cfg(not(desktop))]
 pub fn on_window_event(_window: &tauri::Window, _event: &tauri::WindowEvent) {}
 
-#[cfg(desktop)]
+#[cfg(all(desktop, not(target_os = "macos")))]
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 #[cfg(desktop)]
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -88,19 +90,6 @@ use tauri::Manager;
 
 #[cfg(desktop)]
 pub fn setup_tray(app: &tauri::AppHandle) -> crate::shared::error::AppResult<()> {
-    let toggle_item = MenuItem::with_id(app, TRAY_MENU_TOGGLE_ID, "显示/隐藏", true, None::<&str>)
-        .map_err(|e| format!("failed to create tray toggle menu item: {e}"))?;
-    let quit_item = MenuItem::with_id(app, TRAY_MENU_QUIT_ID, "退出", true, None::<&str>)
-        .map_err(|e| format!("failed to create tray quit menu item: {e}"))?;
-    let separator = PredefinedMenuItem::separator(app)
-        .map_err(|e| format!("failed to create tray menu separator: {e}"))?;
-
-    let menu = Menu::with_items(app, &[&toggle_item, &separator, &quit_item])
-        .map_err(|e| format!("failed to create tray menu: {e}"))?;
-
-    let toggle_id = toggle_item.id().clone();
-    let quit_id = quit_item.id().clone();
-
     #[cfg(target_os = "macos")]
     let icon_bytes = include_bytes!("../../icons/trayTemplate.png");
     #[cfg(not(target_os = "macos"))]
@@ -111,15 +100,28 @@ pub fn setup_tray(app: &tauri::AppHandle) -> crate::shared::error::AppResult<()>
 
     let tray_builder = TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)
-        .tooltip("AIO Coding Hub")
-        .menu(&menu);
+        .tooltip("AIO Coding Hub");
 
     #[cfg(target_os = "macos")]
     let tray_builder = tray_builder.icon_as_template(true);
 
-    tray_builder
-        .show_menu_on_left_click(false)
-        .on_menu_event(move |app, event| {
+    #[cfg(not(target_os = "macos"))]
+    let tray_builder = {
+        let toggle_item =
+            MenuItem::with_id(app, TRAY_MENU_TOGGLE_ID, "显示/隐藏", true, None::<&str>)
+                .map_err(|e| format!("failed to create tray toggle menu item: {e}"))?;
+        let quit_item = MenuItem::with_id(app, TRAY_MENU_QUIT_ID, "退出", true, None::<&str>)
+            .map_err(|e| format!("failed to create tray quit menu item: {e}"))?;
+        let separator = PredefinedMenuItem::separator(app)
+            .map_err(|e| format!("failed to create tray menu separator: {e}"))?;
+
+        let menu = Menu::with_items(app, &[&toggle_item, &separator, &quit_item])
+            .map_err(|e| format!("failed to create tray menu: {e}"))?;
+
+        let toggle_id = toggle_item.id().clone();
+        let quit_id = quit_item.id().clone();
+
+        tray_builder.menu(&menu).on_menu_event(move |app, event| {
             if event.id == quit_id {
                 app.state::<ResidentState>().begin_exit();
                 app.exit(0);
@@ -129,22 +131,31 @@ pub fn setup_tray(app: &tauri::AppHandle) -> crate::shared::error::AppResult<()>
                 toggle_main_window(app);
             }
         })
+    };
+
+    tray_builder
+        .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click {
-                button,
-                button_state,
-                ..
-            } = event
-            {
-                if button == MouseButton::Left && button_state == MouseButtonState::Up {
-                    show_main_window(tray.app_handle());
-                }
+            if should_show_main_window(&event) {
+                show_main_window(tray.app_handle());
             }
         })
         .build(app)
         .map_err(|e| format!("failed to build tray icon: {e}"))?;
 
     Ok(())
+}
+
+#[cfg(desktop)]
+fn should_show_main_window(event: &TrayIconEvent) -> bool {
+    matches!(
+        event,
+        TrayIconEvent::Click {
+            button: MouseButton::Left,
+            button_state: MouseButtonState::Up,
+            ..
+        }
+    )
 }
 
 #[cfg(desktop)]
@@ -193,7 +204,7 @@ fn set_dock_visibility(app: &tauri::AppHandle, visible: bool) {
     }
 }
 
-#[cfg(desktop)]
+#[cfg(all(desktop, not(target_os = "macos")))]
 fn toggle_main_window(app: &tauri::AppHandle) {
     let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
         return;
@@ -208,9 +219,6 @@ fn toggle_main_window(app: &tauri::AppHandle) {
     }
 
     let _ = window.hide();
-
-    #[cfg(target_os = "macos")]
-    set_dock_visibility(app, false);
 }
 
 #[cfg(desktop)]
@@ -251,6 +259,51 @@ pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(desktop)]
+    #[test]
+    fn tray_only_opens_window_on_left_button_release() {
+        let id = tauri::tray::TrayIconId::new(TRAY_ID);
+        let position = tauri::PhysicalPosition::new(0.0, 0.0);
+        let rect = tauri::Rect {
+            position: tauri::PhysicalPosition::new(0, 0).into(),
+            size: tauri::PhysicalSize::new(22, 22).into(),
+        };
+
+        for (button, button_state, expected) in [
+            (MouseButton::Left, MouseButtonState::Up, true),
+            (MouseButton::Left, MouseButtonState::Down, false),
+            (MouseButton::Right, MouseButtonState::Up, false),
+            (MouseButton::Right, MouseButtonState::Down, false),
+            (MouseButton::Middle, MouseButtonState::Up, false),
+            (MouseButton::Middle, MouseButtonState::Down, false),
+        ] {
+            let event = TrayIconEvent::Click {
+                id: id.clone(),
+                position,
+                rect,
+                button,
+                button_state,
+            };
+            assert_eq!(should_show_main_window(&event), expected, "{event:?}");
+        }
+
+        for event in [
+            TrayIconEvent::Enter {
+                id: id.clone(),
+                position,
+                rect,
+            },
+            TrayIconEvent::Move {
+                id: id.clone(),
+                position,
+                rect,
+            },
+            TrayIconEvent::Leave { id, position, rect },
+        ] {
+            assert!(!should_show_main_window(&event), "{event:?}");
+        }
+    }
 
     #[test]
     fn close_request_hides_to_tray_when_resident_mode_enabled() {

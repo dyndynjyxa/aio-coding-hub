@@ -4,6 +4,12 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+# Test fixtures create their own repositories. Do not let Git's hook environment
+# redirect their init/checkout commands into this repository or its worktree.
+while IFS= read -r git_env_name; do
+  unset "$git_env_name"
+done < <(git rev-parse --local-env-vars)
+
 # Git passes ref update lines to pre-push via stdin. Our checks do not use
 # them, and letting child test processes inherit that stdin can make shell-based
 # tests accidentally execute ref names as commands.

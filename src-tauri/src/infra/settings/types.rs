@@ -112,6 +112,8 @@ pub struct AppSettings {
     // Codex CLI proxy OAuth compatible mode. When enabled, proxy takeover
     // manages config.toml only and leaves auth.json untouched.
     pub codex_oauth_compatible_proxy_mode: bool,
+    // Model transport preference; only applied to a managed Codex proxy.
+    pub codex_responses_websocket_enabled: bool,
     pub grok_proxy_preferences: Option<crate::grok_config::GrokProxyPreferences>,
     // Image generation storage directory override. None/empty = default
     // `<app data dir>/image-gen`.
@@ -204,6 +206,7 @@ impl Default for AppSettings {
             codex_home_mode: CodexHomeMode::default(),
             codex_home_override: String::new(),
             codex_oauth_compatible_proxy_mode: DEFAULT_CODEX_OAUTH_COMPATIBLE_PROXY_MODE,
+            codex_responses_websocket_enabled: false,
             grok_proxy_preferences: None,
             image_gen_storage_dir: None,
             auto_start: false,

@@ -125,3 +125,61 @@ export function hasCodexSystemRequestSpecialSetting(
       setting.threadSource === CODEX_SYSTEM_REQUEST_SPECIAL_SETTING.threadSource
   );
 }
+
+export type CodexResponsesTransportRecord = {
+  handshakeStatus: number | null;
+  eventStatus: number | null;
+  clientTransport: "http" | "responses_ws" | null;
+  upstreamTransport: "http" | "responses_ws" | null;
+  transportAction: string | null;
+  failureClass: string | null;
+  outputCommitted: boolean | null;
+  recoveryFromTraceId: string | null;
+  providerId: number | null;
+  reasonCode: string | null;
+  terminal: "completed" | "incomplete" | "failed" | null;
+};
+
+export function resolveCodexResponsesTransportRecords(
+  specialSettingsJson: string | null | undefined
+): CodexResponsesTransportRecord[] {
+  return parseRequestLogSpecialSettings(specialSettingsJson)
+    .filter((setting) => setting.type === "codex_responses_transport")
+    .map((setting) => ({
+      handshakeStatus: setting.handshake_status === 101 ? 101 : null,
+      eventStatus:
+        setting.status_source === "responses_event" &&
+        typeof setting.event_status === "number" &&
+        Number.isInteger(setting.event_status) &&
+        setting.event_status >= 400 &&
+        setting.event_status <= 599
+          ? setting.event_status
+          : null,
+      clientTransport:
+        setting.client_transport === "http" || setting.client_transport === "responses_ws"
+          ? setting.client_transport
+          : null,
+      upstreamTransport:
+        setting.upstream_transport === "http" || setting.upstream_transport === "responses_ws"
+          ? setting.upstream_transport
+          : null,
+      transportAction: parsedSettingString(setting.transport_action).trim() || null,
+      failureClass: parsedSettingString(setting.failure_class).trim() || null,
+      outputCommitted:
+        typeof setting.output_committed === "boolean" ? setting.output_committed : null,
+      recoveryFromTraceId: parsedSettingString(setting.recovery_from_trace_id).trim() || null,
+      providerId:
+        typeof setting.providerId === "number" &&
+        Number.isSafeInteger(setting.providerId) &&
+        setting.providerId > 0
+          ? setting.providerId
+          : null,
+      reasonCode: parsedSettingString(setting.reason_code).trim() || null,
+      terminal:
+        setting.terminal === "completed" ||
+        setting.terminal === "incomplete" ||
+        setting.terminal === "failed"
+          ? setting.terminal
+          : null,
+    }));
+}

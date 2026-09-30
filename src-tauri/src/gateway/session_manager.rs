@@ -753,7 +753,7 @@ fn sanitize_deterministic_part(raw: &str) -> Option<String> {
     Some(out)
 }
 
-fn sanitize_session_id(raw: &str) -> Option<String> {
+pub(super) fn sanitize_session_id(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;

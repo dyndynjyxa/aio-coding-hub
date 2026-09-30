@@ -25,6 +25,11 @@ impl ProviderResolutionMiddleware {
             &ctx.headers,
             ctx.introspection_json.as_ref(),
             ctx.is_claude_count_tokens,
+            crate::gateway::proxy::codex_alpha_search::is_request(
+                &ctx.cli_key,
+                &ctx.req_method,
+                &ctx.forwarded_path,
+            ),
         );
         ctx.session_id = decision.session_id;
         ctx.allow_session_reuse = decision.allow_session_reuse;

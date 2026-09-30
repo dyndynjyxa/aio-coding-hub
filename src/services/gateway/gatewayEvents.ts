@@ -413,7 +413,8 @@ export function normalizeGatewayRequestEvent(payload: unknown): GatewayRequestEv
     isNullableNumber(payload.cache_creation_1h_input_tokens) &&
     isNullableNumber(payload.effective_input_tokens) &&
     isNullableClaudeModelMapping(payload.claude_model_mapping) &&
-    isNullableStringWithin(payload.reasoning_effort, EVENT_STATE_MAX_LENGTH)
+    isNullableStringWithin(payload.reasoning_effort, EVENT_STATE_MAX_LENGTH) &&
+    isNullableStringWithin(payload.terminal_signal, EVENT_STATE_MAX_LENGTH)
   ) {
     return {
       trace_id: payload.trace_id,
@@ -443,6 +444,7 @@ export function normalizeGatewayRequestEvent(payload: unknown): GatewayRequestEv
       model_redirect: modelRedirect,
       reasoning_effort:
         truncateNullableString(payload.reasoning_effort, EVENT_STATE_MAX_LENGTH) ?? null,
+      ...(payload.terminal_signal != null ? { terminal_signal: payload.terminal_signal } : {}),
     };
   }
 

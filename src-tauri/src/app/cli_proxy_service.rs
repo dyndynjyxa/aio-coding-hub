@@ -1,8 +1,6 @@
 //! Usage: CLI proxy configuration related Tauri commands.
 
 use crate::app_state::{ensure_db_ready, DbInitState};
-use crate::gateway::events::GATEWAY_STATUS_EVENT_NAME;
-use crate::gateway_control::app_ensure_gateway_running;
 use crate::gateway_runtime_access::app_gateway_status;
 use crate::{blocking, cli_proxy, mcp, settings};
 
@@ -28,45 +26,30 @@ pub(crate) async fn cli_proxy_status_all(
     .map_err(Into::into)
 }
 
-pub(crate) async fn cli_proxy_set_enabled_impl(
-    app: tauri::AppHandle,
+pub(crate) async fn cli_proxy_set_enabled_impl<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     db_state: &DbInitState,
     cli_key: String,
     enabled: bool,
-) -> Result<cli_proxy::CliProxyResult, String> {
+) -> Result<cli_proxy::CliProxyResult, String>
+where
+    R::Handle: Unpin,
+{
     tracing::info!(cli_key = %cli_key, enabled = enabled, "cli proxy enabled state changing");
 
-    let gateway_lifecycle: Option<crate::app::gateway_lifecycle_lock::GatewayLifecycleGuard>;
-    let base_origin = if enabled {
-        let db = ensure_db_ready(app.clone(), db_state).await?;
-        gateway_lifecycle = Some(crate::app::gateway_lifecycle_lock::lock().await);
-
-        blocking::run("cli_proxy_set_enabled_ensure_gateway", {
-            let app = app.clone();
-            let db = db.clone();
-            move || -> crate::shared::error::AppResult<String> {
-                let settings = settings::read(&app)?;
-                let was_running = app_gateway_status(&app).running;
-                let status = app_ensure_gateway_running(&app, db, Some(settings.preferred_port))?;
-                if !was_running {
-                    crate::app::heartbeat_watchdog::gated_emit(
-                        &app,
-                        GATEWAY_STATUS_EVENT_NAME,
-                        status.clone(),
-                    );
-                }
-
-                Ok(status.base_url.unwrap_or_else(|| {
-                    format!(
-                        "http://127.0.0.1:{}",
-                        status.port.unwrap_or(settings::DEFAULT_GATEWAY_PORT)
-                    )
-                }))
-            }
-        })
-        .await?
+    let db = if enabled {
+        Some(ensure_db_ready(app.clone(), db_state).await?)
     } else {
-        gateway_lifecycle = None;
+        None
+    };
+    let gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
+    let base_origin = if let Some(db) = db {
+        let status =
+            crate::app::gateway_service::ensure_running_and_sync_unlocked(&app, db, None).await?;
+        status
+            .base_url
+            .ok_or_else(|| "SYSTEM_ERROR: gateway base_url missing".to_string())?
+    } else {
         format!("http://127.0.0.1:{}", settings::DEFAULT_GATEWAY_PORT)
     };
 
@@ -128,6 +111,7 @@ pub(crate) async fn cli_proxy_set_disabled_impl<R: tauri::Runtime>(
     cli_key: String,
 ) -> Result<cli_proxy::CliProxyResult, String> {
     tracing::info!(cli_key = %cli_key, enabled = false, "cli proxy enabled state changing");
+    let _gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
 
     let base_origin = format!("http://127.0.0.1:{}", settings::DEFAULT_GATEWAY_PORT);
     let result = blocking::run("cli_proxy_set_enabled_apply", {
@@ -187,6 +171,7 @@ pub(crate) async fn cli_proxy_sync_enabled(
     base_origin: String,
     apply_live: Option<bool>,
 ) -> Result<Vec<cli_proxy::CliProxyResult>, String> {
+    let _gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
     blocking::run("cli_proxy_sync_enabled", move || {
         cli_proxy::sync_enabled(&app, &base_origin, apply_live.unwrap_or(true))
     })
@@ -197,6 +182,7 @@ pub(crate) async fn cli_proxy_sync_enabled(
 pub(crate) async fn cli_proxy_rebind_codex_home(
     app: tauri::AppHandle,
 ) -> Result<cli_proxy::CliProxyResult, String> {
+    let _gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
     let status = app_gateway_status(&app);
     let (gateway_running, base_origin) = if status.running {
         (
@@ -222,3 +208,26 @@ pub(crate) async fn cli_proxy_rebind_codex_home(
     .await
     .map_err(Into::into)
 }
+
+// Batch CLI operations keep processing after one failure; callers requiring a
+// successful batch must also inspect the per-CLI result, not just the outer Result.
+pub(crate) fn require_success(
+    results: Vec<cli_proxy::CliProxyResult>,
+) -> crate::shared::error::AppResult<()> {
+    let errors: Vec<_> = results
+        .into_iter()
+        .filter(|result| !result.ok)
+        .map(|result| format!("{}: {}", result.cli_key, result.message))
+        .collect();
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(crate::shared::error::AppError::new(
+            "CLI_PROXY_FAILED",
+            errors.join("; "),
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests;

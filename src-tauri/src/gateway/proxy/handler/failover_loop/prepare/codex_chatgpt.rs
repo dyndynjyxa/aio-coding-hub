@@ -153,6 +153,56 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn alpha_search_oauth_normalizes_path_and_preserves_identity_and_search_fields() {
+        use crate::gateway::proxy::{codex_alpha_search, request_body::GatewayRequestBody};
+
+        for alias in [
+            "/alpha/search",
+            "/v1/alpha/search",
+            "/codex/alpha/search",
+            "/v1/codex/alpha/search",
+        ] {
+            let mut path = alias.to_string();
+            let original = Bytes::from_static(br#"{"id":"conversation","input":"query","commands":{},"settings":{},"max_output_tokens":100,"future_field":true}"#);
+            let mut decoded = original.clone();
+            let mut strip_encoding = false;
+            maybe_apply_codex_chatgpt_request_compat(&mut path, &mut decoded, &mut strip_encoding);
+            assert_eq!(path, "/alpha/search");
+            assert_eq!(decoded, original);
+            assert!(!strip_encoding);
+
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                header::AUTHORIZATION,
+                HeaderValue::from_static("Bearer oauth-test-token"),
+            );
+            headers.insert(
+                "x-codex-turn-metadata",
+                HeaderValue::from_static("turn-metadata"),
+            );
+            headers.insert("version", HeaderValue::from_static("test-version"));
+            headers.insert(
+                "openai-beta",
+                HeaderValue::from_static("responses=experimental"),
+            );
+            maybe_inject_codex_chatgpt_headers(&mut headers, Some("provider-account"));
+            let mut body = GatewayRequestBody::from_wire(decoded, &headers, 1024);
+            assert!(codex_alpha_search::sanitize(&mut headers, &mut body).is_some());
+            assert_eq!(body.finalize_for_upstream(&mut headers, 1024), original);
+            assert_eq!(headers[header::AUTHORIZATION], "Bearer oauth-test-token");
+            assert_eq!(
+                headers[header::USER_AGENT],
+                crate::gateway::oauth::DEFAULT_OAUTH_USER_AGENT
+            );
+            assert_eq!(headers["chatgpt-account-id"], "provider-account");
+            assert_eq!(headers["originator"], "codex_cli_rs");
+            assert_eq!(headers["version"], "test-version");
+            assert_eq!(headers["x-codex-turn-metadata"], "turn-metadata");
+            assert!(!headers.contains_key("openai-beta"));
+        }
+    }
+
+    #[test]
     fn skips_claude_model_mapping_for_cx2cc_responses_requests() {
         assert!(!should_apply_claude_model_mapping(true, "/v1/responses"));
         assert!(!should_apply_claude_model_mapping(true, "/responses"));

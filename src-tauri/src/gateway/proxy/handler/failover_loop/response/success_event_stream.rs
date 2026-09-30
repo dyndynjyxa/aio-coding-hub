@@ -3,6 +3,8 @@
 use super::*;
 use crate::gateway::proxy::gemini_oauth;
 use crate::gateway::proxy::protocol_bridge;
+use crate::gateway::streams::UpstreamResponse;
+use crate::gateway::streams::UpstreamStreamError;
 use std::time::Duration;
 
 pub(super) async fn handle_success_event_stream<R>(
@@ -10,7 +12,7 @@ pub(super) async fn handle_success_event_stream<R>(
     provider_ctx: ProviderCtx<'_>,
     attempt_ctx: AttemptCtx<'_>,
     loop_state: LoopState<'_, R>,
-    resp: reqwest::Response,
+    resp: UpstreamResponse,
     status: StatusCode,
     mut response_headers: HeaderMap,
 ) -> LoopControl
@@ -18,6 +20,12 @@ where
     R: tauri::Runtime,
     R::Handle: Unpin,
 {
+    let preprocessed = resp.processed;
+    let downstream_status = if resp.is_websocket() {
+        StatusCode::OK
+    } else {
+        status
+    };
     let common = CommonCtxOwned::from(ctx);
     let provider_ctx_owned = ProviderCtxOwned::from(provider_ctx);
 
@@ -90,11 +98,11 @@ where
         enum FirstChunkProbe {
             Skipped,
             Ok(Option<Bytes>, Option<u128>),
-            ReadError(reqwest::Error),
+            ReadError(UpstreamStreamError),
             Timeout,
         }
 
-        let probe = match upstream_first_byte_timeout {
+        let probe = match upstream_first_byte_timeout.filter(|_| !preprocessed) {
             Some(total) => {
                 let elapsed = attempt_started.elapsed();
                 if elapsed >= total {
@@ -294,7 +302,7 @@ where
             &common,
             &provider_ctx_owned,
             attempts.as_slice(),
-            status.as_u16(),
+            downstream_status.as_u16(),
             None,
             None,
         );
@@ -318,6 +326,7 @@ where
         }
 
         let use_sse_relay = common.cli_key == "codex"
+            && !common.provider_health_neutral
             && matches!(
                 common.forwarded_path.trim_end_matches('/'),
                 "/v1/responses" | "/responses"
@@ -326,154 +335,172 @@ where
         let plugin_db = common.state.db.clone();
         let trace_id = common.trace_id.clone();
 
-        let body = match (enable_response_fixer_for_this_response, should_gunzip) {
-            (true, true) => {
-                let upstream =
-                    GunzipStream::new(FirstChunkStream::new(first_chunk, resp.bytes_stream()));
-                let upstream =
-                    gemini_oauth::GeminiOAuthSseStream::new(upstream, gemini_oauth_response_mode);
-                let upstream = protocol_bridge::stream::BridgeStream::for_cx2cc(
-                    upstream,
-                    cx2cc_active,
-                    common.requested_model.clone(),
-                    common.cx2cc_settings.clone(),
-                );
-                let upstream = response_fixer::ResponseFixerStream::new(
-                    upstream,
-                    response_fixer_stream_config,
-                    common.special_settings.clone(),
-                );
-                let upstream = MaybePluginChunkStream::new(
-                    upstream,
-                    plugin_pipeline.clone(),
-                    plugin_db.clone(),
-                    trace_id.clone(),
-                );
-                if use_sse_relay {
-                    spawn_usage_sse_relay_body(
+        let body = if preprocessed {
+            let upstream = FirstChunkStream::new(first_chunk, resp.bytes_stream());
+            Body::from_stream(UsageSseTeeStream::new(
+                upstream,
+                ctx,
+                upstream_stream_idle_timeout,
+                initial_first_byte_ms,
+            ))
+        } else {
+            match (enable_response_fixer_for_this_response, should_gunzip) {
+                (true, true) => {
+                    let upstream =
+                        GunzipStream::new(FirstChunkStream::new(first_chunk, resp.bytes_stream()));
+                    let upstream = gemini_oauth::GeminiOAuthSseStream::new(
                         upstream,
-                        ctx,
-                        upstream_stream_idle_timeout,
-                        initial_first_byte_ms,
-                    )
-                } else {
-                    let stream = UsageSseTeeStream::new(
-                        upstream,
-                        ctx,
-                        upstream_stream_idle_timeout,
-                        initial_first_byte_ms,
+                        gemini_oauth_response_mode,
                     );
-                    Body::from_stream(stream)
+                    let upstream = protocol_bridge::stream::BridgeStream::for_cx2cc(
+                        upstream,
+                        cx2cc_active,
+                        common.requested_model.clone(),
+                        common.cx2cc_settings.clone(),
+                    );
+                    let upstream = response_fixer::ResponseFixerStream::new(
+                        upstream,
+                        response_fixer_stream_config,
+                        common.special_settings.clone(),
+                    );
+                    let upstream = MaybePluginChunkStream::new(
+                        upstream,
+                        plugin_pipeline.clone(),
+                        plugin_db.clone(),
+                        trace_id.clone(),
+                    );
+                    if use_sse_relay {
+                        spawn_usage_sse_relay_body(
+                            upstream,
+                            ctx,
+                            upstream_stream_idle_timeout,
+                            initial_first_byte_ms,
+                        )
+                    } else {
+                        let stream = UsageSseTeeStream::new(
+                            upstream,
+                            ctx,
+                            upstream_stream_idle_timeout,
+                            initial_first_byte_ms,
+                        );
+                        Body::from_stream(stream)
+                    }
                 }
-            }
-            (true, false) => {
-                let upstream = FirstChunkStream::new(first_chunk, resp.bytes_stream());
-                let upstream =
-                    gemini_oauth::GeminiOAuthSseStream::new(upstream, gemini_oauth_response_mode);
-                let upstream = protocol_bridge::stream::BridgeStream::for_cx2cc(
-                    upstream,
-                    cx2cc_active,
-                    common.requested_model.clone(),
-                    common.cx2cc_settings.clone(),
-                );
-                let upstream = response_fixer::ResponseFixerStream::new(
-                    upstream,
-                    response_fixer_stream_config,
-                    common.special_settings.clone(),
-                );
-                let upstream = MaybePluginChunkStream::new(
-                    upstream,
-                    plugin_pipeline.clone(),
-                    plugin_db.clone(),
-                    trace_id.clone(),
-                );
-                if use_sse_relay {
-                    spawn_usage_sse_relay_body(
+                (true, false) => {
+                    let upstream = FirstChunkStream::new(first_chunk, resp.bytes_stream());
+                    let upstream = gemini_oauth::GeminiOAuthSseStream::new(
                         upstream,
-                        ctx,
-                        upstream_stream_idle_timeout,
-                        initial_first_byte_ms,
-                    )
-                } else {
-                    let stream = UsageSseTeeStream::new(
-                        upstream,
-                        ctx,
-                        upstream_stream_idle_timeout,
-                        initial_first_byte_ms,
+                        gemini_oauth_response_mode,
                     );
-                    Body::from_stream(stream)
+                    let upstream = protocol_bridge::stream::BridgeStream::for_cx2cc(
+                        upstream,
+                        cx2cc_active,
+                        common.requested_model.clone(),
+                        common.cx2cc_settings.clone(),
+                    );
+                    let upstream = response_fixer::ResponseFixerStream::new(
+                        upstream,
+                        response_fixer_stream_config,
+                        common.special_settings.clone(),
+                    );
+                    let upstream = MaybePluginChunkStream::new(
+                        upstream,
+                        plugin_pipeline.clone(),
+                        plugin_db.clone(),
+                        trace_id.clone(),
+                    );
+                    if use_sse_relay {
+                        spawn_usage_sse_relay_body(
+                            upstream,
+                            ctx,
+                            upstream_stream_idle_timeout,
+                            initial_first_byte_ms,
+                        )
+                    } else {
+                        let stream = UsageSseTeeStream::new(
+                            upstream,
+                            ctx,
+                            upstream_stream_idle_timeout,
+                            initial_first_byte_ms,
+                        );
+                        Body::from_stream(stream)
+                    }
                 }
-            }
-            (false, true) => {
-                let upstream =
-                    GunzipStream::new(FirstChunkStream::new(first_chunk, resp.bytes_stream()));
-                let upstream =
-                    gemini_oauth::GeminiOAuthSseStream::new(upstream, gemini_oauth_response_mode);
-                let upstream = protocol_bridge::stream::BridgeStream::for_cx2cc(
-                    upstream,
-                    cx2cc_active,
-                    common.requested_model.clone(),
-                    common.cx2cc_settings.clone(),
-                );
-                let upstream = MaybePluginChunkStream::new(
-                    upstream,
-                    plugin_pipeline.clone(),
-                    plugin_db.clone(),
-                    trace_id.clone(),
-                );
-                if use_sse_relay {
-                    spawn_usage_sse_relay_body(
+                (false, true) => {
+                    let upstream =
+                        GunzipStream::new(FirstChunkStream::new(first_chunk, resp.bytes_stream()));
+                    let upstream = gemini_oauth::GeminiOAuthSseStream::new(
                         upstream,
-                        ctx,
-                        upstream_stream_idle_timeout,
-                        initial_first_byte_ms,
-                    )
-                } else {
-                    let stream = UsageSseTeeStream::new(
-                        upstream,
-                        ctx,
-                        upstream_stream_idle_timeout,
-                        initial_first_byte_ms,
+                        gemini_oauth_response_mode,
                     );
-                    Body::from_stream(stream)
+                    let upstream = protocol_bridge::stream::BridgeStream::for_cx2cc(
+                        upstream,
+                        cx2cc_active,
+                        common.requested_model.clone(),
+                        common.cx2cc_settings.clone(),
+                    );
+                    let upstream = MaybePluginChunkStream::new(
+                        upstream,
+                        plugin_pipeline.clone(),
+                        plugin_db.clone(),
+                        trace_id.clone(),
+                    );
+                    if use_sse_relay {
+                        spawn_usage_sse_relay_body(
+                            upstream,
+                            ctx,
+                            upstream_stream_idle_timeout,
+                            initial_first_byte_ms,
+                        )
+                    } else {
+                        let stream = UsageSseTeeStream::new(
+                            upstream,
+                            ctx,
+                            upstream_stream_idle_timeout,
+                            initial_first_byte_ms,
+                        );
+                        Body::from_stream(stream)
+                    }
                 }
-            }
-            (false, false) => {
-                let upstream = FirstChunkStream::new(first_chunk, resp.bytes_stream());
-                let upstream =
-                    gemini_oauth::GeminiOAuthSseStream::new(upstream, gemini_oauth_response_mode);
-                let upstream = protocol_bridge::stream::BridgeStream::for_cx2cc(
-                    upstream,
-                    cx2cc_active,
-                    common.requested_model.clone(),
-                    common.cx2cc_settings.clone(),
-                );
-                let upstream = MaybePluginChunkStream::new(
-                    upstream,
-                    plugin_pipeline.clone(),
-                    plugin_db.clone(),
-                    trace_id.clone(),
-                );
-                if use_sse_relay {
-                    spawn_usage_sse_relay_body(
+                (false, false) => {
+                    let upstream = FirstChunkStream::new(first_chunk, resp.bytes_stream());
+                    let upstream = gemini_oauth::GeminiOAuthSseStream::new(
                         upstream,
-                        ctx,
-                        upstream_stream_idle_timeout,
-                        initial_first_byte_ms,
-                    )
-                } else {
-                    let stream = UsageSseTeeStream::new(
-                        upstream,
-                        ctx,
-                        upstream_stream_idle_timeout,
-                        initial_first_byte_ms,
+                        gemini_oauth_response_mode,
                     );
-                    Body::from_stream(stream)
+                    let upstream = protocol_bridge::stream::BridgeStream::for_cx2cc(
+                        upstream,
+                        cx2cc_active,
+                        common.requested_model.clone(),
+                        common.cx2cc_settings.clone(),
+                    );
+                    let upstream = MaybePluginChunkStream::new(
+                        upstream,
+                        plugin_pipeline.clone(),
+                        plugin_db.clone(),
+                        trace_id.clone(),
+                    );
+                    if use_sse_relay {
+                        spawn_usage_sse_relay_body(
+                            upstream,
+                            ctx,
+                            upstream_stream_idle_timeout,
+                            initial_first_byte_ms,
+                        )
+                    } else {
+                        let stream = UsageSseTeeStream::new(
+                            upstream,
+                            ctx,
+                            upstream_stream_idle_timeout,
+                            initial_first_byte_ms,
+                        );
+                        Body::from_stream(stream)
+                    }
                 }
             }
         };
 
-        let mut builder = Response::builder().status(status);
+        let mut builder = Response::builder().status(downstream_status);
         for (k, v) in response_headers.iter() {
             builder = builder.header(k, v);
         }

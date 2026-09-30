@@ -32,6 +32,8 @@ use crate::gateway::proxy::upstream_client_error_rules;
 use crate::gateway::proxy::{ErrorCategory, GatewayErrorCode};
 use crate::gateway::response_fixer;
 use crate::gateway::streams::GunzipStream;
+use crate::gateway::streams::UpstreamResponse;
+use crate::gateway::streams::UpstreamStreamError;
 use crate::gateway::util::{now_unix_seconds, strip_hop_headers};
 use crate::shared::mutex_ext::MutexExt;
 use axum::body::{Body, Bytes};
@@ -116,9 +118,9 @@ fn reqwest_error_decision(
 }
 
 async fn read_response_body_with_limit(
-    mut resp: reqwest::Response,
+    mut resp: UpstreamResponse,
     max_bytes: u64,
-) -> Result<Bytes, reqwest::Error> {
+) -> Result<Bytes, UpstreamStreamError> {
     let limit = max_bytes.min(usize::MAX as u64) as usize;
     if limit == 0 {
         return Ok(Bytes::new());
@@ -186,8 +188,8 @@ fn save_oauth_quota_exhausted_snapshot(
 }
 
 pub(super) async fn read_response_body_for_error_scan(
-    resp: reqwest::Response,
-) -> Result<Bytes, reqwest::Error> {
+    resp: UpstreamResponse,
+) -> Result<Bytes, UpstreamStreamError> {
     read_response_body_with_limit(resp, error_body_scan_limit_bytes()).await
 }
 
@@ -286,7 +288,7 @@ pub(super) struct HandleNonSuccessResponseInput<'a, R: tauri::Runtime = tauri::W
     pub(super) enable_thinking_budget_rectifier: bool,
     pub(super) enable_thinking_effort_conflict_rectifier: bool,
     pub(super) enable_gemini_function_id_rectifier: bool,
-    pub(super) resp: reqwest::Response,
+    pub(super) resp: UpstreamResponse,
     pub(super) upstream: UpstreamRequestState<'a>,
 }
 
@@ -306,7 +308,12 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
         upstream,
     } = input;
     let status = resp.status();
-    let response_headers = resp.headers().clone();
+    let mut response_headers = resp.headers().clone();
+    if ctx.ws_request.is_some() {
+        response_headers.remove(crate::gateway::responses_ws::protocol::TURN_STATE_HEADER);
+    }
+    let redact_body =
+        ctx.ws_request.is_some() || (ctx.cli_key == "codex" && ctx.provider_health_neutral);
     let is_count_tokens =
         is_claude_count_tokens_request(ctx.cli_key.as_str(), ctx.forwarded_path.as_str());
 
@@ -396,10 +403,12 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
         ) || matches!(status.as_u16(), 402 | 429));
     // Error classification and diagnostic capture are separate concerns: statuses such as 401
     // intentionally skip rule matching, but their bounded body is still useful in request logs.
-    let need_error_body_preview = !is_count_tokens
+    let need_error_body_preview = !redact_body
+        && !is_count_tokens
         && (status.is_client_error() || status.is_server_error())
         && !need_client_error_scan;
-    let need_codex_previous_response_id_scan = !is_count_tokens
+    let need_codex_previous_response_id_scan = ctx.ws_request.is_none()
+        && !is_count_tokens
         && should_scan_codex_previous_response_id_error(
             ctx.cli_key.as_str(),
             status,
@@ -434,7 +443,7 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
                     );
                 }
                 // Extract a bounded body preview for diagnostics on upstream errors.
-                if status.is_server_error() || status.is_client_error() {
+                if !redact_body && (status.is_server_error() || status.is_client_error()) {
                     let preview = String::from_utf8_lossy(&body_for_scan);
                     let truncated: String = preview.chars().take(500).collect();
                     if !truncated.is_empty() {
@@ -532,7 +541,7 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
         category = ErrorCategory::NonRetryableClientError;
         decision = FailoverDecision::Abort;
         // Extract body preview for diagnostic logging when aborting unmatched 4xx.
-        if upstream_body_preview.is_none() {
+        if !redact_body && upstream_body_preview.is_none() {
             if let Some(ref bytes) = abort_body_bytes {
                 let preview = String::from_utf8_lossy(bytes);
                 let truncated: String = preview.chars().take(500).collect();
@@ -940,6 +949,7 @@ mod tests {
         remove_codex_previous_response_id, reqwest_error_decision, retry_after_reset_at,
         should_scan_codex_previous_response_id_error, upstream_error_decision, FailoverDecision,
     };
+    use crate::gateway::streams::UpstreamResponse;
     use axum::body::Bytes;
     use axum::http::{header, HeaderMap, HeaderValue};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -947,7 +957,7 @@ mod tests {
 
     async fn known_length_response(
         body: Vec<u8>,
-    ) -> (reqwest::Response, tokio::task::JoinHandle<()>) {
+    ) -> (UpstreamResponse, tokio::task::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind test upstream");
@@ -970,7 +980,7 @@ mod tests {
             .send()
             .await
             .expect("fetch test response");
-        (response, task)
+        (response.into(), task)
     }
 
     #[test]

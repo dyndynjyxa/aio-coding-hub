@@ -3,9 +3,7 @@ pub(super) type ThinkingBudgetRectifierTrigger = &'static str;
 pub(super) const TRIGGER_BUDGET_TOKENS_TOO_LOW: ThinkingBudgetRectifierTrigger =
     "budget_tokens_too_low";
 
-const MAX_THINKING_BUDGET: u64 = 32_000;
-const MAX_TOKENS_VALUE: u64 = 64_000;
-const MIN_MAX_TOKENS_FOR_BUDGET: u64 = MAX_THINKING_BUDGET + 1;
+const MIN_THINKING_BUDGET: u64 = 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ThinkingBudgetRectifierSnapshot {
@@ -70,21 +68,15 @@ pub(super) fn rectify_anthropic_request_message(
 ) -> ThinkingBudgetRectifierResult {
     let before = snapshot(message);
 
-    let Some(message_obj) = message.as_object_mut() else {
-        return ThinkingBudgetRectifierResult {
-            applied: false,
-            before: before.clone(),
-            after: before,
-        };
-    };
-
-    let thinking_type = message_obj
+    let budget_is_too_low = message
         .get("thinking")
-        .and_then(|v| v.as_object())
-        .and_then(|v| v.get("type"))
-        .and_then(|v| v.as_str());
-
-    if thinking_type == Some("adaptive") {
+        .and_then(|v| v.get("budget_tokens"))
+        .and_then(|v| v.as_f64())
+        .is_some_and(|budget| budget < MIN_THINKING_BUDGET as f64);
+    if before.thinking_type.as_deref() != Some("enabled")
+        || !budget_is_too_low
+        || before.max_tokens.is_none()
+    {
         return ThinkingBudgetRectifierResult {
             applied: false,
             before: before.clone(),
@@ -92,34 +84,12 @@ pub(super) fn rectify_anthropic_request_message(
         };
     }
 
-    if !message_obj.get("thinking").is_some_and(|v| v.is_object()) {
-        message_obj.insert(
-            "thinking".to_string(),
-            serde_json::Value::Object(serde_json::Map::new()),
-        );
-    }
-
-    let thinking_obj = message_obj
-        .get_mut("thinking")
-        .and_then(|v| v.as_object_mut())
-        .expect("thinking object must exist");
-    thinking_obj.insert(
-        "type".to_string(),
-        serde_json::Value::String("enabled".to_string()),
-    );
-    thinking_obj.insert(
-        "budget_tokens".to_string(),
-        serde_json::Value::Number(serde_json::Number::from(MAX_THINKING_BUDGET)),
-    );
-
-    let current_max_tokens = message_obj.get("max_tokens").and_then(|v| v.as_u64());
-    if current_max_tokens.is_none()
-        || current_max_tokens.is_some_and(|v| v < MIN_MAX_TOKENS_FOR_BUDGET)
+    message["thinking"]["budget_tokens"] = serde_json::json!(MIN_THINKING_BUDGET);
+    if before
+        .max_tokens
+        .is_some_and(|max| max <= MIN_THINKING_BUDGET)
     {
-        message_obj.insert(
-            "max_tokens".to_string(),
-            serde_json::Value::Number(serde_json::Number::from(MAX_TOKENS_VALUE)),
-        );
+        message["max_tokens"] = serde_json::json!(MIN_THINKING_BUDGET + 1);
     }
 
     let after = snapshot(message);

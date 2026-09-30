@@ -605,6 +605,7 @@ mod tests {
         crate::providers::upsert(
             db,
             ProviderUpsertParams {
+                custom_headers: None,
                 provider_id: None,
                 cli_key: cli_key.to_string(),
                 name: name.to_string(),
@@ -629,6 +630,7 @@ mod tests {
                 source_provider_id: None,
                 bridge_type: None,
                 stream_idle_timeout_seconds: None,
+                supports_websockets: None,
                 extension_values: None,
             },
         )

@@ -46,6 +46,9 @@ export function presentConfigExported() {
 }
 
 export function presentConfigImported(result: ConfigImportResult) {
+  if (result.warnings?.length) {
+    logToConsole("warn", "配置已导入，客户端同步未完成", { warnings: result.warnings });
+  }
   toast(buildConfigImportSuccessMessage(result));
 }
 

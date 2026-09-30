@@ -1,6 +1,7 @@
 //! Usage: Streaming tee wrappers that emit usage/cost and enqueue request logs.
 
 use crate::gateway::response_fixer;
+use crate::gateway::streams::UpstreamStreamError;
 use crate::usage;
 use axum::body::{Body, Bytes};
 use futures_core::Stream;
@@ -16,7 +17,7 @@ use super::super::proxy::{
 use super::super::util::{
     lossy_utf8_preview, now_unix_millis, now_unix_seconds, MAX_DEBUG_BODY_PREVIEW_BYTES,
 };
-use super::plugin_chunk::PLUGIN_STREAM_ERROR_MARKER;
+use super::plugin_chunk::is_plugin_stream_error_chunk;
 use super::request_end::{emit_request_event_and_spawn_request_log, StreamRequestCompletion};
 use super::{RelayBodyStream, StreamFinalizeCtx};
 
@@ -107,12 +108,6 @@ fn is_codex_body_buffer_drop_successish(
         && usage_seen
 }
 
-fn is_plugin_stream_error_chunk(chunk: &[u8]) -> bool {
-    chunk
-        .windows(PLUGIN_STREAM_ERROR_MARKER.len())
-        .any(|window| window == PLUGIN_STREAM_ERROR_MARKER.as_bytes())
-}
-
 fn spawn_touch_activity<R: tauri::Runtime>(
     ctx: &StreamFinalizeCtx<R>,
     last_activity_ms: i64,
@@ -156,7 +151,7 @@ async fn next_item<S: Stream + Unpin>(stream: &mut S) -> Option<S::Item> {
 
 pub(in crate::gateway) struct UsageSseTeeStream<S, B, R = tauri::Wry>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,
@@ -174,7 +169,7 @@ where
 
 impl<S, B, R> UsageSseTeeStream<S, B, R>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,
@@ -207,7 +202,7 @@ where
         &mut self,
         cx: &mut Context<'_>,
         enforce_idle_timeout: bool,
-    ) -> Poll<Option<Result<B, reqwest::Error>>> {
+    ) -> Poll<Option<Result<B, UpstreamStreamError>>> {
         if self.stop_after_terminal_error {
             return Poll::Ready(None);
         }
@@ -254,7 +249,13 @@ where
                         "[SSE_CHUNK] trace_id={} len={}\n  {}",
                         self.ctx.trace_id,
                         chunk.as_ref().len(),
-                        lossy_utf8_preview(chunk.as_ref(), MAX_DEBUG_BODY_PREVIEW_BYTES),
+                        if self.ctx.ws_request.is_some()
+                            || (self.ctx.cli_key == "codex" && self.ctx.provider_health_neutral)
+                        {
+                            "[managed Responses body omitted]".to_owned()
+                        } else {
+                            lossy_utf8_preview(chunk.as_ref(), MAX_DEBUG_BODY_PREVIEW_BYTES)
+                        },
                     )
                 });
                 let was_terminal_error = self.tracker.terminal_error_seen();
@@ -288,7 +289,9 @@ where
                             GatewayErrorCode::StreamError.as_str()
                         };
                         self.finalize(Some(code));
-                        if is_plugin_stream_error_chunk(chunk.as_ref()) {
+                        if self.ctx.ws_request.is_some()
+                            || is_plugin_stream_error_chunk(chunk.as_ref())
+                        {
                             self.stop_after_terminal_error = true;
                             return Poll::Ready(Some(Ok(chunk)));
                         }
@@ -298,6 +301,13 @@ where
                 Poll::Ready(Some(Ok(chunk)))
             }
             Poll::Ready(Some(Err(err))) => {
+                if self.ctx.ws_request.is_some()
+                    && err
+                        .downcast_ref::<crate::gateway::responses_ws::gate::LocalStreamFailure>()
+                        .is_some()
+                {
+                    self.ctx.provider_health_neutral = true;
+                }
                 let completion_seen = self.tracker.completion_seen();
                 let codex_successish = !self.tracker.fake_200_detected()
                     && is_codex_stream_tail_error_successish(
@@ -332,13 +342,45 @@ where
         }
         self.finalized = true;
 
+        let (error_code, incomplete) = if let Some(request) = &self.ctx.ws_request {
+            use crate::shared::mutex_ext::MutexExt;
+            let generation = request.generation.lock_or_recover();
+            let incomplete = generation.incomplete;
+            let error = if incomplete {
+                None
+            } else if generation.failed || (!generation.terminal && error_code.is_none()) {
+                Some(GatewayErrorCode::StreamError.as_str())
+            } else {
+                error_code
+            };
+            response_fixer::push_special_setting(
+                &self.ctx.special_settings,
+                serde_json::json!({
+                    "type":"codex_responses_transport", "scope":"stream", "providerId":self.ctx.provider_id,
+                    "client_transport":if request.client_ws {"responses_ws"} else {"http"},
+                    "upstream_transport":if generation.upstream_ws {"responses_ws"} else {"http"},
+                    "output_committed":generation.committed, "failure_class":if error == Some(GatewayErrorCode::StreamAborted.as_str()) {Some("cancelled")} else if self.ctx.provider_health_neutral && error.is_some() {Some("local")} else if generation.failed {Some("provider")}else if error.is_some(){Some("transport")}else{None},
+                    "terminal":if incomplete {"incomplete"}else if error.is_some(){"failed"}else{"completed"},
+                }),
+            );
+            drop(generation);
+            request
+                .connection
+                .runtime
+                .finish_generation(request, error.is_none());
+            (error, incomplete)
+        } else {
+            (error_code, false)
+        };
         let usage = self.tracker.finalize();
         let effective_error_code = if error_code.is_none() && self.tracker.fake_200_detected() {
             Some(GatewayErrorCode::Fake200.as_str())
         } else {
             error_code
         };
-        let terminal_signal = if effective_error_code.is_some() {
+        let terminal_signal = if incomplete {
+            Some("incomplete")
+        } else if effective_error_code.is_some() {
             Some("error")
         } else if self.tracker.completion_seen() {
             Some("completed")
@@ -390,12 +432,12 @@ where
 
 impl<S, B, R> Stream for UsageSseTeeStream<S, B, R>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,
 {
-    type Item = Result<B, reqwest::Error>;
+    type Item = Result<B, UpstreamStreamError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.as_mut().get_mut();
@@ -405,19 +447,19 @@ where
 
 struct DrainNextFuture<'a, S, B, R>(&'a mut UsageSseTeeStream<S, B, R>)
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin;
 
 impl<'a, S, B, R> Future for DrainNextFuture<'a, S, B, R>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,
 {
-    type Output = Option<Result<B, reqwest::Error>>;
+    type Output = Option<Result<B, UpstreamStreamError>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.0.poll_next_inner(cx, false)
@@ -426,9 +468,9 @@ where
 
 async fn next_drain_item<S, B, R>(
     stream: &mut UsageSseTeeStream<S, B, R>,
-) -> Option<Result<B, reqwest::Error>>
+) -> Option<Result<B, UpstreamStreamError>>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,
@@ -438,20 +480,28 @@ where
 
 impl<S, B, R> Drop for UsageSseTeeStream<S, B, R>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,
 {
     fn drop(&mut self) {
         if !self.finalized {
+            if let Some(request) = &self.ctx.ws_request {
+                use crate::shared::mutex_ext::MutexExt;
+                if request.generation.lock_or_recover().terminal {
+                    self.finalize(None);
+                    return;
+                }
+            }
             // Best-effort flush for trailing partial SSE data before deciding abort/success.
             let usage = self.tracker.finalize();
             let usage_seen = usage.is_some();
             let completion_seen = self.tracker.completion_seen();
             let terminal_error_seen = self.tracker.terminal_error_seen();
 
-            let codex_successish = !self.tracker.fake_200_detected()
+            let codex_successish = self.ctx.ws_request.is_none()
+                && !self.tracker.fake_200_detected()
                 && is_codex_drop_successish(
                     &self.ctx.cli_key,
                     &self.ctx.path,
@@ -480,12 +530,12 @@ pub(in crate::gateway) fn spawn_usage_sse_relay_body<S, R>(
     initial_first_byte_ms: Option<u128>,
 ) -> Body
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin + Send + 'static,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin + Send + 'static,
     R: tauri::Runtime + 'static,
     R::Handle: Unpin,
 {
     let (tx, rx) =
-        tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(SSE_RELAY_BUFFER_CAPACITY);
+        tokio::sync::mpsc::channel::<Result<Bytes, UpstreamStreamError>>(SSE_RELAY_BUFFER_CAPACITY);
 
     let mut tee = UsageSseTeeStream::new(upstream, ctx, idle_timeout, initial_first_byte_ms)
         .with_defer_terminal_error();
@@ -715,7 +765,7 @@ where
 
 pub(in crate::gateway) struct UsageBodyBufferTeeStream<S, B, R = tauri::Wry>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,
@@ -733,7 +783,7 @@ where
 
 impl<S, B, R> UsageBodyBufferTeeStream<S, B, R>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,
@@ -821,12 +871,12 @@ where
 
 impl<S, B, R> Stream for UsageBodyBufferTeeStream<S, B, R>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,
 {
-    type Item = Result<B, reqwest::Error>;
+    type Item = Result<B, UpstreamStreamError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.as_mut().get_mut();
@@ -878,7 +928,7 @@ where
 
 impl<S, B, R> Drop for UsageBodyBufferTeeStream<S, B, R>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B, UpstreamStreamError>> + Unpin,
     B: AsRef<[u8]>,
     R: tauri::Runtime,
     R::Handle: Unpin,
@@ -918,6 +968,7 @@ mod tests {
     use crate::gateway::active_requests::{ActiveRequestRegistry, ActiveRequestStart};
     use crate::gateway::proxy::GatewayErrorCode;
     use crate::gateway::streams::StreamActivityTracker;
+    use crate::gateway::streams::UpstreamStreamError;
     use crate::{circuit_breaker, db, request_logs, session_manager};
     use axum::body::Bytes;
     use std::collections::HashMap;
@@ -931,6 +982,7 @@ mod tests {
         active_requests: Arc<ActiveRequestRegistry>,
     ) -> StreamFinalizeCtx<tauri::test::MockRuntime> {
         StreamFinalizeCtx {
+            ws_request: None,
             app,
             db,
             log_tx,
@@ -1313,7 +1365,7 @@ mod tests {
         active_requests.register(active_request_start("trace-usage-tee-drain"));
         let ctx = test_stream_finalize_ctx(app_handle, db, log_tx, active_requests.clone());
         let (upstream_tx, upstream_rx) =
-            tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(4);
+            tokio::sync::mpsc::channel::<Result<Bytes, UpstreamStreamError>>(4);
 
         let body = spawn_usage_sse_relay_body(
             RelayBodyStream::new(upstream_rx),
@@ -1377,7 +1429,7 @@ mod tests {
         active_requests.register(active_request_start("trace-usage-tee-drain"));
         let ctx = test_stream_finalize_ctx(app.handle().clone(), db, log_tx, active_requests);
         let (upstream_tx, upstream_rx) =
-            tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(4);
+            tokio::sync::mpsc::channel::<Result<Bytes, UpstreamStreamError>>(4);
 
         let body = spawn_usage_sse_relay_body(
             RelayBodyStream::new(upstream_rx),
@@ -1437,7 +1489,7 @@ mod tests {
         active_requests.register(active_request_start("trace-usage-tee-drain"));
         let ctx = test_stream_finalize_ctx(app.handle().clone(), db, log_tx, active_requests);
         let (upstream_tx, upstream_rx) =
-            tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(4);
+            tokio::sync::mpsc::channel::<Result<Bytes, UpstreamStreamError>>(4);
 
         let body = spawn_usage_sse_relay_body(RelayBodyStream::new(upstream_rx), ctx, None, None);
         let mut body_stream = body.into_data_stream();

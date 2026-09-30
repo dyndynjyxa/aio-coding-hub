@@ -10,6 +10,7 @@ import {
 import type { RequestLogSummary } from "./requestLogs";
 import {
   resolveClaudeModelMappingFromSpecialSettings,
+  resolveCodexResponsesTransportRecords,
   resolveModelRedirectFromSpecialSettings,
 } from "./requestLogSpecialSettings";
 import { MAX_ATTEMPTS_PER_TRACE } from "./traceLimits";
@@ -139,6 +140,12 @@ function mergeTraceWithRequestLog(
     reasoning_effort: summary?.reasoning_effort ?? requestLog.reasoning_effort ?? null,
     status: summary?.status ?? requestLog.status ?? null,
     error_category: summary?.error_category ?? null,
+    terminal_signal:
+      summary?.terminal_signal ??
+      resolveCodexResponsesTransportRecords(requestLog.special_settings_json).find(
+        (record) => record.terminal != null
+      )?.terminal ??
+      null,
     error_code: summary?.error_code ?? requestLog.error_code ?? null,
     duration_ms: summary?.duration_ms ?? requestLog.duration_ms ?? 0,
     ttfb_ms: summary?.ttfb_ms ?? requestLog.ttfb_ms ?? null,

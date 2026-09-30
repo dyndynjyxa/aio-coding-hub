@@ -25,7 +25,7 @@ use axum::{
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-mod early_error;
+pub(in crate::gateway) mod early_error;
 mod middleware;
 mod provider_order;
 mod provider_selection;
@@ -34,12 +34,11 @@ mod runtime_settings;
 
 use early_error::extract_forced_provider_id;
 use middleware::{
-    BillingHeaderRectifierMiddleware, BodyReaderMiddleware, CliProxyGuardMiddleware,
-    CodexRequestClassifierMiddleware, CodexSessionCompletionMiddleware,
-    Cx2ccCountTokensInterceptorMiddleware, MiddlewareAction, ModelInferenceMiddleware,
-    ProbeInterceptorMiddleware, ProviderResolutionMiddleware, ProxyContext,
-    RecursionGuardMiddleware, RequestFingerprintMiddleware, ResponseInputRectifierMiddleware,
-    RuntimeSettingsMiddleware, WarmupInterceptorMiddleware,
+    BodyReaderMiddleware, CliProxyGuardMiddleware, CodexRequestClassifierMiddleware,
+    CodexSessionCompletionMiddleware, Cx2ccCountTokensInterceptorMiddleware, MiddlewareAction,
+    ModelInferenceMiddleware, ProbeInterceptorMiddleware, ProviderResolutionMiddleware,
+    ProxyContext, RecursionGuardMiddleware, RequestFingerprintMiddleware,
+    ResponseInputRectifierMiddleware, RuntimeSettingsMiddleware, WarmupInterceptorMiddleware,
 };
 
 type SpecialSettings = Arc<Mutex<Vec<serde_json::Value>>>;
@@ -147,6 +146,14 @@ where
     R: tauri::Runtime + 'static,
     R::Handle: Unpin,
 {
+    let ws_request = req
+        .extensions()
+        .get::<crate::gateway::responses_ws::state::RequestState>()
+        .cloned();
+    let ws_connection = req
+        .extensions()
+        .get::<Arc<crate::gateway::responses_ws::state::Connection>>()
+        .cloned();
     let started = Instant::now();
     let trace_id = new_trace_id();
     let created_at_ms = now_unix_millis() as i64;
@@ -168,6 +175,8 @@ where
     // Build the initial context.
     let ctx = ProxyContext {
         state,
+        ws_request,
+        ws_connection,
         cli_key,
         forwarded_path,
         req_method: method,
@@ -265,29 +274,34 @@ where
         MiddlewareAction::ShortCircuit(resp) => return resp,
     };
 
-    // 11. Billing header rectifier.
-    let ctx = match BillingHeaderRectifierMiddleware::run(ctx) {
-        MiddlewareAction::Continue(ctx) => *ctx,
-        MiddlewareAction::ShortCircuit(resp) => return resp,
-    };
-
-    // 12. Provider resolution (session routing + provider selection).
+    // 11. Provider resolution (session routing + provider selection).
     let ctx = match ProviderResolutionMiddleware::run(ctx).await {
         MiddlewareAction::Continue(ctx) => *ctx,
         MiddlewareAction::ShortCircuit(resp) => return resp,
     };
 
-    // 13. CX2CC count_tokens compatibility.
+    // 12. CX2CC count_tokens compatibility.
     let ctx = match Cx2ccCountTokensInterceptorMiddleware::run(ctx) {
         MiddlewareAction::Continue(ctx) => *ctx,
         MiddlewareAction::ShortCircuit(resp) => return resp,
     };
 
-    // 14. Request fingerprinting + recent error cache gate.
+    // 13. Request fingerprinting + recent error cache gate.
     let ctx = match RequestFingerprintMiddleware::run(ctx) {
         MiddlewareAction::Continue(ctx) => *ctx,
         MiddlewareAction::ShortCircuit(resp) => return resp,
     };
+
+    let mut ctx = ctx;
+    if ctx.ws_connection.is_some()
+        && ctx
+            .introspection_json
+            .as_ref()
+            .is_some_and(|body| body.get("generate") == Some(&serde_json::Value::Bool(false)))
+    {
+        ctx.observe_request = false;
+        ctx.provider_health_neutral = true;
+    }
 
     // --- Post-chain: emit start event, seed in-progress log, then forward ---
     // 顺序契约：先武装 abort guard，再登记活跃注册表，之后才允许出现 await。
@@ -324,7 +338,7 @@ where
             },
             redacted_headers_for_debug(&ctx.headers),
             ctx.body_bytes.len(),
-            lossy_utf8_preview(&ctx.body_bytes, MAX_DEBUG_BODY_PREVIEW_BYTES),
+            if ctx.ws_request.is_some() || ctx.ws_connection.is_some() { "[managed Responses body omitted]".to_owned() } else { lossy_utf8_preview(&ctx.body_bytes, MAX_DEBUG_BODY_PREVIEW_BYTES) },
         )
     });
 
@@ -382,6 +396,7 @@ mod tests {
 
     fn provider(id: i64) -> crate::providers::ProviderForGateway {
         crate::providers::ProviderForGateway {
+            custom_headers: Vec::new(),
             id,
             name: format!("p{id}"),
             base_urls: vec!["https://example.com".to_string()],
@@ -402,6 +417,7 @@ mod tests {
             source_provider_id: None,
             bridge_type: None,
             stream_idle_timeout_seconds: None,
+            supports_websockets: false,
             extension_values: vec![],
         }
     }
@@ -431,6 +447,7 @@ mod tests {
             latency_cache: Arc::new(Mutex::new(ProviderBaseUrlPingCache::default())),
             plugin_pipeline: GatewayPluginPipeline::empty_shared(),
             active_requests,
+            responses_ws: Arc::new(crate::gateway::responses_ws::state::Runtime::new(false)),
         }
     }
 
@@ -443,6 +460,8 @@ mod tests {
         let (log_tx, _log_rx) = tokio::sync::mpsc::channel(1);
         let active_requests = Arc::new(ActiveRequestRegistry::default());
         let ctx = middleware::ProxyContext {
+            ws_request: None,
+            ws_connection: None,
             state: active_request_test_state(
                 app.handle().clone(),
                 db,
@@ -506,6 +525,8 @@ mod tests {
         let (log_tx, _log_rx) = tokio::sync::mpsc::channel(1);
         let active_requests = Arc::new(ActiveRequestRegistry::default());
         let mut ctx = middleware::ProxyContext {
+            ws_request: None,
+            ws_connection: None,
             state: active_request_test_state(
                 app.handle().clone(),
                 db,
@@ -565,6 +586,8 @@ mod tests {
         trace_id: &str,
     ) -> middleware::ProxyContext<tauri::test::MockRuntime> {
         middleware::ProxyContext {
+            ws_request: None,
+            ws_connection: None,
             state: active_request_test_state(app, db, log_tx, active_requests),
             cli_key: "claude".to_string(),
             forwarded_path: "/v1/messages".to_string(),
@@ -1111,7 +1134,7 @@ mod tests {
             ]
         });
 
-        let decision = resolve_session_routing_decision(&headers, Some(&body), true);
+        let decision = resolve_session_routing_decision(&headers, Some(&body), true, false);
 
         assert_eq!(decision.session_id, None);
         assert!(!decision.allow_session_reuse);
@@ -1128,10 +1151,41 @@ mod tests {
             ]
         });
 
-        let decision = resolve_session_routing_decision(&headers, Some(&body), false);
+        let decision = resolve_session_routing_decision(&headers, Some(&body), false, false);
 
         assert_eq!(decision.session_id.as_deref(), Some("sess-normal-456"));
         assert!(decision.allow_session_reuse);
+    }
+
+    #[test]
+    fn alpha_search_routing_uses_only_search_id_without_fingerprint_fallback() {
+        let mut headers = HeaderMap::new();
+        headers.insert("session_id", HeaderValue::from_static("responses-session"));
+        for (id, expected) in [
+            (
+                serde_json::json!(" search-session\n"),
+                Some("search-session"),
+            ),
+            (
+                serde_json::json!("another-session"),
+                Some("another-session"),
+            ),
+            (serde_json::json!(" \n\t"), None),
+            (serde_json::json!(123), None),
+            (serde_json::Value::Null, None),
+        ] {
+            for input in ["first query", "second query"] {
+                let body = serde_json::json!({"id": id, "input": input, "prompt_cache_key": "responses-session"});
+                let decision = resolve_session_routing_decision(&headers, Some(&body), false, true);
+                assert_eq!(decision.session_id.as_deref(), expected);
+                assert_eq!(decision.allow_session_reuse, expected.is_some());
+            }
+        }
+        for body in [None, Some(serde_json::json!({"commands": {"open": []}}))] {
+            let decision = resolve_session_routing_decision(&headers, body.as_ref(), false, true);
+            assert!(decision.session_id.is_none());
+            assert!(!decision.allow_session_reuse);
+        }
     }
 
     #[test]

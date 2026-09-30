@@ -340,6 +340,41 @@ describe("services/gateway/requestActivityProjection", () => {
     expect(afterExit.requestRows.map((row) => row.log.trace_id)).toEqual(["completed"]);
   });
 
+  it.each([undefined, "incomplete"])(
+    "preserves incomplete terminal when combining live signal %s with persisted logs",
+    (terminalSignal) => {
+      const projection = buildRequestActivityProjection({
+        requestLogs: [
+          log({
+            cli_key: "codex",
+            status: 200,
+            output_tokens: 3,
+            special_settings_json: JSON.stringify([
+              { type: "codex_responses_transport", terminal: "incomplete" },
+            ]),
+          }),
+        ],
+        activeRequests: [],
+        traces: [
+          trace({
+            cli_key: "codex",
+            summary: terminalSignal
+              ? { ...summaryOf("trace-1"), cli_key: "codex", terminal_signal: terminalSignal }
+              : undefined,
+          }),
+        ],
+        nowMs: 1_700_000_000_500,
+        realtimeCardLimit: 5,
+      });
+
+      expect(projection.realtimeCards[0]?.trace.summary).toMatchObject({
+        status: 200,
+        terminal_signal: "incomplete",
+        output_tokens: 3,
+      });
+    }
+  );
+
   it("merged summary falls back per field: summary over trace over request log", () => {
     // 覆盖 mergeTraceWithRequestLog 三条新增回退链的优先级：
     // session_id 取 summary；requested_model 在 summary 缺失时取 trace（而非 log）；

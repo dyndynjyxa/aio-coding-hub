@@ -35,3 +35,6 @@ pub use types::{
 };
 
 pub use data_gathering::{gather_mcp_sync_data, gather_prompt_sync_data, gather_skills_sync_data};
+
+#[cfg(test)]
+pub(crate) use types::WslConfigureDistroReport;

@@ -6,7 +6,7 @@ describe("MSW defaults", () => {
     resetMswState();
 
     expect(getSettingsState()).toEqual({
-      schema_version: 37,
+      schema_version: 38,
       preferred_port: 37123,
       show_home_heatmap: true,
       show_home_usage: true,
@@ -21,6 +21,7 @@ describe("MSW defaults", () => {
       codex_home_mode: "user_home_default",
       codex_home_override: "",
       codex_oauth_compatible_proxy_mode: false,
+      codex_responses_websocket_enabled: false,
       auto_start: false,
       start_minimized: false,
       tray_enabled: true,

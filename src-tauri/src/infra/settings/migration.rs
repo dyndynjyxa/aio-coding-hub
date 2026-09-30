@@ -700,9 +700,20 @@ fn migrate_align_cch_gateway_rectifiers(
     )
 }
 
+fn migrate_add_codex_responses_websocket(
+    settings: &mut AppSettings,
+    schema_version_present: bool,
+) -> bool {
+    migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_CODEX_RESPONSES_WEBSOCKET,
+    )
+}
+
 type SettingsMigration = fn(&mut AppSettings, bool) -> bool;
 
-const SETTINGS_MIGRATIONS: [SettingsMigration; 31] = [
+const SETTINGS_MIGRATIONS: [SettingsMigration; 32] = [
     migrate_disable_upstream_timeouts,
     migrate_add_gateway_rectifiers,
     migrate_add_circuit_breaker_notice,
@@ -734,6 +745,7 @@ const SETTINGS_MIGRATIONS: [SettingsMigration; 31] = [
     migrate_add_grok_proxy_preferences,
     migrate_add_image_gen_storage_dir,
     migrate_align_cch_gateway_rectifiers,
+    migrate_add_codex_responses_websocket,
 ];
 
 fn apply_settings_migrations(settings: &mut AppSettings, schema_version_present: bool) -> bool {
@@ -769,6 +781,18 @@ pub(super) fn repair_settings(
 mod tests {
     use super::*;
     use crate::infra::settings::types::default_cli_priority_order;
+
+    #[test]
+    fn codex_responses_websocket_migration_defaults_off_and_preserves_explicit_value() {
+        let mut old: AppSettings =
+            serde_json::from_value(serde_json::json!({ "schema_version": 37 })).unwrap();
+        assert!(!old.codex_responses_websocket_enabled);
+        assert!(migrate_add_codex_responses_websocket(&mut old, true));
+        assert_eq!(old.schema_version, 38);
+        old.codex_responses_websocket_enabled = true;
+        assert!(!migrate_add_codex_responses_websocket(&mut old, true));
+        assert!(old.codex_responses_websocket_enabled);
+    }
 
     // -- sanitize_failover_settings --
 
@@ -1364,14 +1388,11 @@ mod tests {
     }
 
     #[test]
-    fn fresh_v37_defaults_align_with_cch() {
+    fn fresh_defaults_use_current_schema_and_gateway_settings() {
         use super::super::types::CodexPriorityBillingSource;
 
         let settings = AppSettings::default();
-        assert_eq!(
-            settings.schema_version,
-            SCHEMA_VERSION_ALIGN_CCH_GATEWAY_RECTIFIERS
-        );
+        assert_eq!(settings.schema_version, SCHEMA_VERSION);
         assert!(!settings.verbose_provider_error);
         assert!(!settings.intercept_anthropic_warmup_requests);
         assert!(settings.enable_billing_header_rectifier);

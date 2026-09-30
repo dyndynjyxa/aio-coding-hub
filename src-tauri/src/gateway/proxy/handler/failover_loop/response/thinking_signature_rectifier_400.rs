@@ -5,6 +5,7 @@ use super::*;
 use crate::gateway::proxy::provider_router;
 use crate::gateway::proxy::upstream_client_error_rules;
 use crate::gateway::reactive_rectifier::{self, ReactiveRectifierKind, ReactiveRectifierSettings};
+use crate::gateway::streams::UpstreamResponse;
 use crate::gateway::{
     gemini_function_id_rectifier, thinking_budget_rectifier, thinking_effort_conflict_rectifier,
 };
@@ -18,7 +19,7 @@ pub(super) struct HandleThinkingRectifiers400Input<'a, R: tauri::Runtime = tauri
     pub(super) enable_thinking_signature_rectifier: bool,
     pub(super) enable_thinking_budget_rectifier: bool,
     pub(super) enable_gemini_function_id_rectifier: bool,
-    pub(super) resp: reqwest::Response,
+    pub(super) resp: UpstreamResponse,
     pub(super) status: StatusCode,
     pub(super) response_headers: HeaderMap,
     pub(super) upstream: super::upstream_error::UpstreamRequestState<'a>,

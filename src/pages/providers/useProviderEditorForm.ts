@@ -1,3 +1,4 @@
+import { normalizeCustomHeaders, validateCustomHeaders } from "./providerCustomHeaders";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
@@ -7,6 +8,7 @@ import type {
   ProviderModelDiscoveryInput,
   ProviderModelDiscoveryResult,
   ProviderExtensionValuesInput,
+  ProviderCustomHeader,
   ProviderOAuthDeviceCodeStartResult,
   ProviderModelPolicyStatus,
   ProviderModelPolicyV1,
@@ -240,6 +242,8 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
   const [streamIdleTimeoutSeconds, setStreamIdleTimeoutSeconds] = useState("");
+  const [customHeaders, setCustomHeaders] = useState<ProviderCustomHeader[]>([]);
+  const [supportsWebsockets, setSupportsWebsockets] = useState(false);
   const [saving, setSaving] = useState(false);
   const [copyingApiKey, setCopyingApiKey] = useState(false);
 
@@ -330,6 +334,21 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     setEditorDirty(false);
   }, [open, editingProviderId, cliKey]);
 
+  const customHeadersRef = useRef(customHeaders);
+  customHeadersRef.current = customHeaders;
+  const setCustomHeadersFromUi = useCallback(
+    (
+      next: ProviderCustomHeader[] | ((previous: ProviderCustomHeader[]) => ProviderCustomHeader[])
+    ) => {
+      const resolved = typeof next === "function" ? next(customHeadersRef.current) : next;
+      customHeadersRef.current = resolved;
+      setCustomHeaders(resolved);
+      setEditorDirty(true);
+      invalidateModelDiscovery();
+    },
+    [invalidateModelDiscovery]
+  );
+
   const setBaseUrlModeFromUi = useCallback(
     (next: ProviderBaseUrlMode) => {
       if (next !== baseUrlMode) {
@@ -388,6 +407,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       setEditorDirty(true);
       setAuthMode(next);
       if (next === "cx2cc") {
+        setSupportsWebsockets(false);
         setClaudeModels((prev) => withCx2ccDefaultModel(prev));
         setCostMultiplierValue(resolveCx2ccInheritedMultiplier(cx2ccSourceValue), {
           shouldDirty: true,
@@ -599,6 +619,11 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     setStreamIdleTimeoutSeconds(next);
   }, []);
 
+  const setSupportsWebsocketsFromUi = useCallback((next: boolean) => {
+    setEditorDirty(true);
+    setSupportsWebsockets(next);
+  }, []);
+
   useProviderEditorEffects({
     open,
     mode,
@@ -622,6 +647,8 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     setTags,
     setTagInput,
     setStreamIdleTimeoutSeconds,
+    setCustomHeaders,
+    setSupportsWebsockets,
     setAuthMode,
     setCx2ccSourceValue,
     setOauthStatus,
@@ -656,10 +683,15 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       setModelDiscoveryState({ status: "oauth_unsaved" });
       return;
     }
+    if (validateCustomHeaders(customHeaders)) {
+      setModelDiscoveryState({ status: "error", code: "invalid_config", httpStatus: null });
+      return;
+    }
     setModelDiscoveryState({ status: "loading" });
 
     const input: ProviderModelDiscoveryInput = {
       providerId: editingProviderId,
+      customHeaders: normalizeCustomHeaders(customHeaders),
       cliKey,
       authMode: authMode === "oauth" ? "oauth" : "api_key",
       baseUrls: baseUrlRows.map((row) => row.url),
@@ -707,7 +739,16 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
         setModelDiscoveryState({ status: "unexpected_error" });
       }
     }
-  }, [authMode, baseUrlMode, baseUrlRows, cliKey, editingProviderId, form, sourceProviderId]);
+  }, [
+    authMode,
+    baseUrlMode,
+    baseUrlRows,
+    cliKey,
+    customHeaders,
+    editingProviderId,
+    form,
+    sourceProviderId,
+  ]);
 
   const buildPayloadContext = useCallback(
     (): ProviderEditorPayloadContext => ({
@@ -722,6 +763,8 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       modelPolicyStatus,
       modelPolicy,
       streamIdleTimeoutSeconds,
+      customHeaders,
+      supportsWebsockets,
       apiKeyConfigured,
       isCodexGatewaySource,
       sourceProviderId,
@@ -745,6 +788,8 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       modelPolicyStatus,
       modelPolicy,
       streamIdleTimeoutSeconds,
+      customHeaders,
+      supportsWebsockets,
       apiKeyConfigured,
       isCodexGatewaySource,
       sourceProviderId,
@@ -916,6 +961,10 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     claudeModelCount,
     streamIdleTimeoutSeconds,
     setStreamIdleTimeoutSeconds: setStreamIdleTimeoutSecondsFromUi,
+    supportsWebsockets,
+    setSupportsWebsockets: setSupportsWebsocketsFromUi,
+    customHeaders,
+    setCustomHeaders: setCustomHeadersFromUi,
     oauthStatus,
     oauthLoading,
     oauthDeviceFlow,

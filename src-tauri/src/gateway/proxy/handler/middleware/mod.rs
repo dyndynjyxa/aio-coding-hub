@@ -4,7 +4,6 @@
 //! - `Continue(ctx)`: pass the (possibly enriched) context to the next middleware.
 //! - `ShortCircuit(Response)`: return a response immediately, skipping remaining middlewares.
 
-pub(super) mod billing_header_rectifier;
 pub(super) mod body_reader;
 pub(super) mod cli_proxy_guard;
 pub(super) mod codex_request_classifier;
@@ -19,7 +18,6 @@ pub(super) mod response_input_rectifier;
 pub(super) mod runtime_settings_reader;
 pub(super) mod warmup_interceptor;
 
-pub(super) use billing_header_rectifier::BillingHeaderRectifierMiddleware;
 pub(super) use body_reader::BodyReaderMiddleware;
 pub(super) use cli_proxy_guard::CliProxyGuardMiddleware;
 pub(super) use codex_request_classifier::CodexRequestClassifierMiddleware;
@@ -61,6 +59,9 @@ pub(super) enum MiddlewareAction<R: tauri::Runtime = tauri::Wry> {
 pub(super) struct ProxyContext<R: tauri::Runtime = tauri::Wry> {
     // -- immutable request metadata (set at construction) --
     pub(super) state: GatewayAppState<R>,
+    pub(super) ws_request: Option<crate::gateway::responses_ws::state::RequestState>,
+    pub(super) ws_connection: Option<Arc<crate::gateway::responses_ws::state::Connection>>,
+
     pub(super) cli_key: String,
     pub(super) forwarded_path: String,
     pub(super) req_method: Method,
@@ -125,6 +126,8 @@ impl<R: tauri::Runtime> ProxyContext<R> {
 
         RequestContextParts {
             state: self.state,
+            ws_request: self.ws_request,
+            ws_connection: self.ws_connection,
             cli_key: self.cli_key,
             forwarded_path: self.forwarded_path,
             observe_request: self.observe_request,
@@ -173,6 +176,7 @@ impl<R: tauri::Runtime> ProxyContext<R> {
             enable_thinking_signature_rectifier: rs.enable_thinking_signature_rectifier,
             enable_thinking_budget_rectifier: rs.enable_thinking_budget_rectifier,
             enable_gemini_function_id_rectifier: rs.enable_gemini_function_id_rectifier,
+            enable_billing_header_rectifier: rs.enable_billing_header_rectifier,
             codex_priority_billing_source: rs.codex_priority_billing_source,
             enable_claude_metadata_user_id_injection: rs.enable_claude_metadata_user_id_injection,
             cx2cc_settings: rs.cx2cc_settings,

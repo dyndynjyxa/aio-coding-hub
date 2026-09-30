@@ -26,7 +26,8 @@ export function buildDbCompactedMessage(result: DbCompactResult) {
 }
 
 export function buildConfigImportSuccessMessage(result: ConfigImportResult) {
-  return `配置导入完成：供应商 ${result.providers_imported}，排序模式 ${result.sort_modes_imported}，工作区 ${result.workspaces_imported}，提示词 ${result.prompts_imported}，MCP ${result.mcp_servers_imported}，技能仓库 ${result.skill_repos_imported}，通用技能 ${result.installed_skills_imported}，本机技能 ${result.local_skills_imported}`;
+  const message = `配置导入完成：供应商 ${result.providers_imported}，排序模式 ${result.sort_modes_imported}，工作区 ${result.workspaces_imported}，提示词 ${result.prompts_imported}，MCP ${result.mcp_servers_imported}，技能仓库 ${result.skill_repos_imported}，通用技能 ${result.installed_skills_imported}，本机技能 ${result.local_skills_imported}`;
+  return result.warnings?.length ? `${message}；${result.warnings.join("；")}` : message;
 }
 
 export function buildModelPricesSyncMessage(report: ModelPricesSyncReport) {

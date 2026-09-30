@@ -167,6 +167,8 @@ pub(crate) struct GatewayRequestEvent {
     claude_model_mapping: Option<ClaudeModelMapping>,
     model_redirect: Option<ModelRedirect>,
     reasoning_effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    terminal_signal: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone, specta::Type)]
@@ -496,6 +498,7 @@ pub(super) fn emit_request_event<R: tauri::Runtime>(
     claude_model_mapping: Option<ClaudeModelMapping>,
     model_redirect: Option<ModelRedirect>,
     usage: Option<usage::UsageMetrics>,
+    terminal_signal: Option<String>,
 ) {
     emit_request_signal(
         app,
@@ -539,6 +542,7 @@ pub(super) fn emit_request_event<R: tauri::Runtime>(
         claude_model_mapping,
         model_redirect,
         reasoning_effort,
+        terminal_signal,
     };
 
     gated_emit(
@@ -843,11 +847,20 @@ mod tests {
             claude_model_mapping: Some(fixture_mapping()),
             model_redirect: None,
             reasoning_effort: Some("high".to_string()),
+            terminal_signal: None,
         };
 
         assert_matches_fixture(
             &event,
             include_str!("../../../src/services/gateway/__fixtures__/gatewayEvents/request.json"),
+        );
+        let incomplete = GatewayRequestEvent {
+            terminal_signal: Some("incomplete".into()),
+            ..event
+        };
+        assert_eq!(
+            serde_json::to_value(incomplete).unwrap()["terminal_signal"],
+            "incomplete"
         );
     }
 
@@ -1207,6 +1220,7 @@ mod tests {
             claude_model_mapping: None,
             model_redirect: None,
             reasoning_effort: None,
+            terminal_signal: None,
         };
 
         let value = serde_json::to_value(payload).expect("serializable request event");

@@ -20,6 +20,7 @@ pub(super) struct RetryLoopState {
     pub(super) thinking_budget_rectifier_retried: bool,
     pub(super) gemini_function_id_rectifier_retried: bool,
     pub(super) additional_repair_retry_slots: u32,
+    pub(super) last_attempt_body: Bytes,
 }
 
 impl RetryLoopState {
@@ -33,6 +34,7 @@ impl RetryLoopState {
             thinking_budget_rectifier_retried: false,
             gemini_function_id_rectifier_retried: false,
             additional_repair_retry_slots: 0,
+            last_attempt_body: Bytes::new(),
         }
     }
 
@@ -65,6 +67,10 @@ pub(super) struct AttemptTiming {
 /// Result of building + sending one attempt.
 pub(super) enum AttemptSendOutcome {
     Response(reqwest::Response, AttemptTiming),
+    StreamResponse(crate::gateway::streams::UpstreamResponse, AttemptTiming),
+    WsTransport(&'static str, AttemptTiming),
+    ContextLost(AttemptTiming),
+    LocalProtocol(&'static str, AttemptTiming),
     Timeout(AttemptTiming),
     ReqwestError(reqwest::Error, AttemptTiming),
     /// URL build failure already recorded; caller should apply the returned LoopControl.
@@ -196,8 +202,16 @@ where
                 );
                 return AttemptSendOutcome::PluginBlocked(blocked.reason);
             }
+            if (input.ws_request.is_some() || input.ws_connection.is_some())
+                && output.body.len() > crate::gateway::responses_ws::protocol::MAX_MESSAGE_BYTES
+            {
+                return AttemptSendOutcome::PluginBlocked(
+                    "Managed Responses plugin output exceeds byte limit".into(),
+                );
+            }
             semantic_headers = output.headers;
-            sync_before_send_body_output(prepared, &mut body_state_for_attempt, output.body);
+            // The hook transforms this physical attempt, not the provider retry baseline.
+            body_state_for_attempt.replace_decoded(output.body);
         }
         Err(mut err) => {
             crate::gateway::plugins::audit::persist_gateway_plugin_error_audit_events(
@@ -217,11 +231,54 @@ where
         }
     }
 
+    // Apply search protocol constraints after custom headers and plugin mutations.
+    if crate::gateway::proxy::codex_alpha_search::is_request(
+        &input.cli_key,
+        &input.req_method,
+        &input.forwarded_path,
+    ) {
+        if let Some(mut setting) = crate::gateway::proxy::codex_alpha_search::sanitize(
+            &mut semantic_headers,
+            &mut body_state_for_attempt,
+        ) {
+            setting["providerId"] = serde_json::json!(prepared.provider_id);
+            response_fixer::push_special_setting(ctx.special_settings, setting);
+        }
+    }
+
+    // Reactive repairs must preserve the final semantic body for this attempt.
+    retry_state.last_attempt_body = body_state_for_attempt.decoded_clone();
     headers = semantic_headers;
     let reasoning_effort = prepared.reasoning_effort.clone();
-    let upstream_body = body_state_for_attempt
+    let mut upstream_body = body_state_for_attempt
         .finalize_for_upstream(&mut headers, crate::gateway::util::max_request_body_bytes());
 
+    // Local continuation ownership must never become a provider routing token.
+    if input.ws_request.is_some() || input.ws_connection.is_some() {
+        headers.remove(crate::gateway::responses_ws::protocol::TURN_STATE_HEADER);
+        if let Ok(mut json) =
+            serde_json::from_slice::<serde_json::Value>(&retry_state.last_attempt_body)
+        {
+            if let Some(metadata) = json
+                .get_mut("client_metadata")
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                metadata.remove(crate::gateway::responses_ws::protocol::TURN_STATE_HEADER);
+            }
+            retry_state.last_attempt_body = Bytes::from(json.to_string());
+            upstream_body = retry_state.last_attempt_body.clone();
+            headers.remove(header::CONTENT_ENCODING);
+            headers.remove(header::CONTENT_LENGTH);
+        }
+    }
+
+    if (input.ws_request.is_some() || input.ws_connection.is_some())
+        && upstream_body.len() > crate::gateway::responses_ws::protocol::MAX_MESSAGE_BYTES
+    {
+        return AttemptSendOutcome::PluginBlocked(
+            "Managed Responses request exceeds byte limit".into(),
+        );
+    }
     emit_upstream_attempt_fingerprint(
         ctx,
         input,
@@ -239,8 +296,110 @@ where
         upstream_sent: true,
     };
 
-    let send_result =
-        send::send_upstream(ctx, input.req_method.clone(), url, headers, upstream_body).await;
+    if let Some(connection) = input
+        .ws_connection
+        .as_ref()
+        .or_else(|| input.ws_request.as_ref().map(|r| &r.connection))
+    {
+        let supports = input
+            .providers
+            .iter()
+            .find(|p| p.id == prepared.provider_id)
+            .is_some_and(|p| {
+                p.supports_websockets && p.auth_mode == "api_key" && !p.is_cx2cc_bridge()
+            });
+        let deadline = input.ws_request.as_ref().and_then(|request| {
+            use crate::shared::mutex_ext::MutexExt;
+            request.generation.lock_or_recover().budget.deadline
+        });
+        use crate::gateway::responses_ws::send::SendOutcome;
+        let outcome = crate::gateway::responses_ws::send::send(
+            connection.clone(),
+            input.ws_request.as_ref(),
+            prepared.provider_id,
+            supports,
+            url.clone(),
+            headers.clone(),
+            &prepared.custom_headers,
+            upstream_body.clone(),
+            deadline,
+        )
+        .await;
+        timing.upstream_sent = match &outcome {
+            SendOutcome::Response(_) | SendOutcome::Rejected(_) => true,
+            SendOutcome::Transport(reason) => *reason == "ws_send_failed",
+            _ => false,
+        };
+        loop_state.abort_guard.update_in_flight_attempt_send_state(
+            timing.reasoning_effort.clone(),
+            timing.upstream_sent,
+        );
+        match outcome {
+            SendOutcome::Response(response) => {
+                return AttemptSendOutcome::StreamResponse(response, timing)
+            }
+            SendOutcome::Rejected(response) => {
+                super::ws_attempt::marker(
+                    input,
+                    prepared.provider_id,
+                    "responses_ws",
+                    "selected",
+                    Some("provider"),
+                    Some("ws_upgrade_rejected"),
+                );
+                return AttemptSendOutcome::StreamResponse(response, timing);
+            }
+            SendOutcome::Transport(reason) => {
+                return AttemptSendOutcome::WsTransport(reason, timing)
+            }
+            SendOutcome::ContextLost => return AttemptSendOutcome::ContextLost(timing),
+            SendOutcome::Local(reason) => return AttemptSendOutcome::LocalProtocol(reason, timing),
+            SendOutcome::Http(reason) => {
+                super::ws_attempt::marker(
+                    input,
+                    prepared.provider_id,
+                    "http",
+                    if matches!(reason, "ws_cooldown_skip" | "ws_budget_exhausted") {
+                        reason
+                    } else {
+                        "selected"
+                    },
+                    None,
+                    Some(reason),
+                );
+                if input.ws_request.is_none() {
+                    return AttemptSendOutcome::LocalProtocol("prewarm_http_required", timing);
+                }
+            }
+        }
+    }
+    timing.upstream_sent = true;
+    let send_result = if let Some(request) = &input.ws_request {
+        use crate::shared::mutex_ext::MutexExt;
+        request.generation.lock_or_recover().upstream_ws = false;
+        let deadline = request.generation.lock_or_recover().budget.deadline;
+        match deadline {
+            Some(deadline) if deadline <= Instant::now() => {
+                timing.upstream_sent = false;
+                send::SendResult::Timeout
+            }
+            Some(deadline) => match tokio::time::timeout_at(
+                tokio::time::Instant::from_std(deadline),
+                send::send_upstream(ctx, input.req_method.clone(), url, headers, upstream_body),
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(_) => send::SendResult::Timeout,
+            },
+            None => {
+                send::send_upstream(ctx, input.req_method.clone(), url, headers, upstream_body)
+                    .await
+            }
+        }
+    } else {
+        send::send_upstream(ctx, input.req_method.clone(), url, headers, upstream_body).await
+    };
 
     if let send::SendResult::Err(err) = &send_result {
         // DNS/connect failures never reached the upstream; keep upstream_sent truthful
@@ -267,22 +426,6 @@ where
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-fn sync_before_send_body_output(
-    prepared: &mut PreparedProvider,
-    body_state_for_attempt: &mut crate::gateway::proxy::request_body::GatewayRequestBody,
-    output_body: Bytes,
-) {
-    let previous_body = body_state_for_attempt.decoded_clone();
-    body_state_for_attempt.replace_decoded(output_body.clone());
-    if output_body == previous_body {
-        return;
-    }
-
-    prepared.upstream_body_bytes = output_body;
-    prepared.strip_request_content_encoding = true;
-    prepared.request_body_mutated_before_attempt = true;
-}
 
 fn try_build_url(prepared: &PreparedProvider) -> Result<reqwest::Url, String> {
     build_target_url(
@@ -416,7 +559,7 @@ async fn handle_url_build_failure<R: tauri::Runtime>(
     .await
 }
 
-fn build_attempt_ctx<'a>(
+pub(super) fn build_attempt_ctx<'a>(
     attempt_index: u32,
     retry_index: u32,
     attempt_started_ms: u128,
@@ -438,7 +581,7 @@ fn build_attempt_ctx<'a>(
     }
 }
 
-fn build_provider_ctx(prepared: &PreparedProvider) -> ProviderCtx<'_> {
+pub(super) fn build_provider_ctx(prepared: &PreparedProvider) -> ProviderCtx<'_> {
     ProviderCtx {
         provider_id: prepared.provider_id,
         provider_name_base: &prepared.provider_name_base,

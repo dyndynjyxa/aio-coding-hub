@@ -126,6 +126,7 @@ const RequestLogCard = memo(function RequestLogCard({
         status: log.status,
         errorCode: log.error_code,
         hasFailover: log.has_failover,
+        specialSettingsJson: log.special_settings_json,
       });
 
   const providerText =

@@ -159,7 +159,17 @@ pub(super) fn resolve_session_routing_decision(
     headers: &axum::http::HeaderMap,
     introspection_json: Option<&serde_json::Value>,
     is_claude_count_tokens: bool,
+    is_codex_alpha_search: bool,
 ) -> SessionRoutingDecision {
+    if is_codex_alpha_search {
+        // SearchRequest.id is the Codex conversation ID, even for commands-only requests.
+        let session_id = super::super::codex_alpha_search::session_id(introspection_json);
+        return SessionRoutingDecision {
+            allow_session_reuse: session_id.is_some(),
+            session_id,
+        };
+    }
+
     let extracted_session_id =
         session_manager::SessionManager::extract_session_id_from_json(headers, introspection_json);
 

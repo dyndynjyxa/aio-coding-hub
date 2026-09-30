@@ -14,6 +14,9 @@ use std::time::{Duration, Instant};
 
 pub(super) struct RequestContext<R: tauri::Runtime = tauri::Wry> {
     pub(super) state: GatewayAppState<R>,
+    pub(super) ws_request: Option<crate::gateway::responses_ws::state::RequestState>,
+    pub(super) ws_connection: Option<Arc<crate::gateway::responses_ws::state::Connection>>,
+
     pub(super) cli_key: String,
     pub(super) forwarded_path: String,
     pub(super) observe_request: bool,
@@ -57,6 +60,7 @@ pub(super) struct RequestContext<R: tauri::Runtime = tauri::Wry> {
     pub(super) enable_thinking_signature_rectifier: bool,
     pub(super) enable_thinking_budget_rectifier: bool,
     pub(super) enable_gemini_function_id_rectifier: bool,
+    pub(super) enable_billing_header_rectifier: bool,
     pub(super) codex_priority_billing_source: crate::settings::CodexPriorityBillingSource,
     pub(super) enable_claude_metadata_user_id_injection: bool,
     #[allow(dead_code)]
@@ -76,6 +80,8 @@ impl<R: tauri::Runtime> RequestContext<R> {
     ) -> Self {
         let RequestContextParts {
             state,
+            ws_request,
+            ws_connection,
             cli_key,
             forwarded_path,
             observe_request,
@@ -117,6 +123,7 @@ impl<R: tauri::Runtime> RequestContext<R> {
             enable_thinking_signature_rectifier,
             enable_thinking_budget_rectifier,
             enable_gemini_function_id_rectifier,
+            enable_billing_header_rectifier,
             codex_priority_billing_source,
             enable_claude_metadata_user_id_injection,
             cx2cc_settings,
@@ -139,6 +146,8 @@ impl<R: tauri::Runtime> RequestContext<R> {
 
         Self {
             state,
+            ws_request,
+            ws_connection,
             cli_key,
             forwarded_path,
             observe_request,
@@ -182,6 +191,7 @@ impl<R: tauri::Runtime> RequestContext<R> {
             enable_thinking_signature_rectifier,
             enable_thinking_budget_rectifier,
             enable_gemini_function_id_rectifier,
+            enable_billing_header_rectifier,
             codex_priority_billing_source,
             enable_claude_metadata_user_id_injection,
             cx2cc_settings,
@@ -253,6 +263,9 @@ pub(super) fn effective_first_byte_timeout_secs(
 
 pub(super) struct RequestContextParts<R: tauri::Runtime = tauri::Wry> {
     pub(super) state: GatewayAppState<R>,
+    pub(super) ws_request: Option<crate::gateway::responses_ws::state::RequestState>,
+    pub(super) ws_connection: Option<Arc<crate::gateway::responses_ws::state::Connection>>,
+
     pub(super) cli_key: String,
     pub(super) forwarded_path: String,
     pub(super) observe_request: bool,
@@ -294,6 +307,7 @@ pub(super) struct RequestContextParts<R: tauri::Runtime = tauri::Wry> {
     pub(super) enable_thinking_signature_rectifier: bool,
     pub(super) enable_thinking_budget_rectifier: bool,
     pub(super) enable_gemini_function_id_rectifier: bool,
+    pub(super) enable_billing_header_rectifier: bool,
     pub(super) codex_priority_billing_source: crate::settings::CodexPriorityBillingSource,
     pub(super) enable_claude_metadata_user_id_injection: bool,
     pub(super) cx2cc_settings: super::cx2cc::settings::Cx2ccSettings,

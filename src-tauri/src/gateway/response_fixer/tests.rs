@@ -7,6 +7,7 @@ use super::{
     SPECIAL_SETTINGS_JSON_MAX_BYTES, SPECIAL_SETTINGS_MAX_ENTRIES,
     SPECIAL_SETTINGS_STRING_PREVIEW_BYTES,
 };
+use crate::gateway::streams::UpstreamStreamError;
 use axum::body::Bytes;
 use futures_core::Stream;
 use std::collections::VecDeque;
@@ -399,11 +400,11 @@ fn response_fixer_non_stream_skips_oversized_body_before_encoding_fix() {
 }
 
 struct VecBytesStream {
-    items: VecDeque<Result<Bytes, reqwest::Error>>,
+    items: VecDeque<Result<Bytes, UpstreamStreamError>>,
 }
 
 impl VecBytesStream {
-    fn new(items: Vec<Result<Bytes, reqwest::Error>>) -> Self {
+    fn new(items: Vec<Result<Bytes, UpstreamStreamError>>) -> Self {
         Self {
             items: items.into_iter().collect(),
         }
@@ -411,7 +412,7 @@ impl VecBytesStream {
 }
 
 impl Stream for VecBytesStream {
-    type Item = Result<Bytes, reqwest::Error>;
+    type Item = Result<Bytes, UpstreamStreamError>;
 
     fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         Poll::Ready(self.items.pop_front())
@@ -434,7 +435,7 @@ async fn next_item<S: Stream + Unpin>(stream: &mut S) -> Option<S::Item> {
 
 async fn collect_ok_bytes<S>(mut stream: S) -> Vec<u8>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin,
 {
     let mut out: Vec<u8> = Vec::new();
     while let Some(item) = next_item(&mut stream).await {

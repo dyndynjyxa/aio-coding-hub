@@ -7,6 +7,7 @@
 #[cfg(test)]
 mod tests {
     use crate::gateway::proxy::protocol_bridge::{get_bridge, registry, BridgeContext};
+    use crate::gateway::streams::UpstreamStreamError;
     use serde_json::json;
 
     fn cx2cc_ctx() -> BridgeContext {
@@ -625,7 +626,7 @@ mod tests {
 
         struct MockStream(Vec<Bytes>);
         impl Stream for MockStream {
-            type Item = Result<Bytes, reqwest::Error>;
+            type Item = Result<Bytes, UpstreamStreamError>;
             fn poll_next(
                 mut self: Pin<&mut Self>,
                 _cx: &mut Context<'_>,

@@ -19,6 +19,7 @@ mod reactive_rectifier;
 mod response_fixer;
 mod response_input_rectifier;
 mod response_output_normalizer;
+mod responses_ws;
 mod routes;
 pub(crate) mod runtime;
 pub(crate) mod session_manager;

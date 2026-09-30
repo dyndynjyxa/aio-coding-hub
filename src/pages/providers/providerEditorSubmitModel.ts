@@ -9,6 +9,7 @@ import type {
 } from "./providerEditorActionContext";
 import { normalizeBaseUrlRows } from "./baseUrl";
 import { resolveStreamIdleTimeoutSeconds } from "./providerEditorTimeout";
+import { normalizeCustomHeaders, validateCustomHeaders } from "./providerCustomHeaders";
 import {
   normalizeProviderModelPolicyDraft,
   validateProviderModelPolicy,
@@ -44,6 +45,21 @@ export function buildProviderEditorUpsertInput(
       error: {
         kind: "message",
         message: "流式空闲超时必须为 0-3600 秒",
+      },
+    };
+  }
+
+  const customHeadersError =
+    validateCustomHeaders(ctx.customHeaders) ??
+    (ctx.authMode === "cx2cc" && normalizeCustomHeaders(ctx.customHeaders).length > 0
+      ? "请清空桥接独立请求头，并在实际 Codex 来源 Provider 中配置"
+      : null);
+  if (customHeadersError) {
+    return {
+      ok: false,
+      error: {
+        kind: "message",
+        message: customHeadersError,
       },
     };
   }
@@ -167,12 +183,15 @@ export function buildProviderEditorUpsertInput(
     tags: ctx.tags,
     note: parsed.data.note,
     streamIdleTimeoutSeconds: parsedTimeout,
+    supportsWebsockets:
+      ctx.cliKey === "codex" && ctx.authMode !== "cx2cc" && ctx.supportsWebsockets,
     modelPolicy,
     ...(ctx.cliKey === "claude" ? { claudeModels: ctx.claudeModels } : {}),
     sourceProviderId:
       ctx.authMode === "cx2cc" && !ctx.isCodexGatewaySource ? ctx.sourceProviderId : null,
     bridgeType: ctx.authMode === "cx2cc" ? "cx2cc" : null,
     extensionValues: ctx.extensionValues ?? null,
+    customHeaders: normalizeCustomHeaders(ctx.customHeaders),
   };
 
   return {

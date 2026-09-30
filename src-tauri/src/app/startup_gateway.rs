@@ -26,8 +26,6 @@ pub(crate) async fn start(
                 crate::app::cleanup::restore_cli_proxy_keep_state_best_effort(
                     app_handle,
                     "startup_cli_proxy_restore_keep_state",
-                    "startup_recovery_gateway_failed",
-                    true,
                 )
                 .await;
             }

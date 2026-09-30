@@ -56,6 +56,7 @@ describe("query/configMigrate", () => {
       skill_repos_imported: 1,
       installed_skills_imported: 1,
       local_skills_imported: 1,
+      warnings: [],
     });
 
     const client = createTestQueryClient();

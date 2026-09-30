@@ -41,7 +41,9 @@ function makeProvider(partial: Partial<ProviderSummary> = {}): ProviderSummary {
     },
     api_key_configured: true,
     stream_idle_timeout_seconds: null,
+    supports_websockets: false,
     extension_values: [],
+    custom_headers: [],
     ...partial,
   };
 }

@@ -628,11 +628,13 @@ mod tests {
             latency_cache: Arc::new(Mutex::new(ProviderBaseUrlPingCache::default())),
             plugin_pipeline: GatewayPluginPipeline::empty_shared(),
             active_requests: Arc::new(ActiveRequestRegistry::default()),
+            responses_ws: Arc::new(crate::gateway::responses_ws::state::Runtime::new(false)),
         }
     }
 
     fn provider_with_5h_limit(id: i64) -> providers::ProviderForGateway {
         providers::ProviderForGateway {
+            custom_headers: Vec::new(),
             id,
             name: "overflow-provider".to_string(),
             base_urls: vec!["https://example.com".to_string()],
@@ -653,6 +655,7 @@ mod tests {
             source_provider_id: None,
             bridge_type: None,
             stream_idle_timeout_seconds: None,
+            supports_websockets: false,
             extension_values: vec![],
         }
     }
@@ -786,6 +789,7 @@ INSERT INTO request_logs (
             max_fix_size: crate::gateway::response_fixer::DEFAULT_MAX_FIX_SIZE,
         };
         let ctx = CommonCtx::from(CommonCtxArgs {
+            ws_request: None,
             state: &state,
             cli_key: &cli_key,
             forwarded_path: &forwarded_path,

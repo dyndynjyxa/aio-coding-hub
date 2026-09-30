@@ -109,7 +109,9 @@ function makeProvider(partial: Partial<ProviderSummary> = {}): ProviderSummary {
     api_key_configured: partial.api_key_configured ?? false,
     ...partial,
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,
+    supports_websockets: partial.supports_websockets ?? false,
     extension_values: partial.extension_values ?? [],
+    custom_headers: partial.custom_headers ?? [],
   };
 }
 
@@ -138,6 +140,8 @@ function makeInitialValues(
     bridge_type: null,
     ...partial,
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,
+    custom_headers: partial.custom_headers ?? [],
+    supports_websockets: partial.supports_websockets ?? false,
   };
 }
 
@@ -372,6 +376,122 @@ describe("pages/providers/ProviderEditorDialog", () => {
     expect(onOpenChange).not.toHaveBeenCalled();
   });
 
+  it("defaults WebSocket capability off and guards unsaved changes", () => {
+    const onOpenChange = vi.fn();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const props = {
+      mode: "create" as const,
+      cliKey: "codex" as const,
+      onSaved: vi.fn(),
+      onOpenChange,
+    };
+    const view = render(<ProviderEditorDialog {...props} open={true} />);
+    const toggle = screen.getByRole("switch", { name: "支持 Responses WebSocket" });
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+    expect(toggle).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(confirmSpy).toHaveBeenCalledWith("有未保存的修改，确定关闭吗？");
+    expect(onOpenChange).not.toHaveBeenCalled();
+    view.rerender(<ProviderEditorDialog {...props} open={false} />);
+    view.rerender(<ProviderEditorDialog {...props} open={true} />);
+    expect(screen.getByRole("switch", { name: "支持 Responses WebSocket" })).not.toBeChecked();
+    confirmSpy.mockRestore();
+  });
+
+  it("edits, saves, reopens and clears custom headers", async () => {
+    const provider = makeProvider({
+      api_key_configured: true,
+      custom_headers: [{ name: "x-tenant", value: "tenant-a" }],
+    });
+    const saved = { ...provider, custom_headers: [{ name: "x-tenant", value: "tenant-b" }] };
+    vi.mocked(providerUpsert).mockResolvedValue(saved);
+    const props = {
+      mode: "edit" as const,
+      provider,
+      open: true,
+      onSaved: vi.fn(),
+      onOpenChange: vi.fn(),
+    };
+    const view = render(<ProviderEditorDialog {...props} />);
+    expect(screen.getByLabelText("请求头值 1")).toHaveValue("tenant-a");
+    fireEvent.change(screen.getByLabelText("请求头值 1"), { target: { value: "tenant-b" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() =>
+      expect(providerUpsert).toHaveBeenCalledWith(
+        expect.objectContaining({ customHeaders: saved.custom_headers })
+      )
+    );
+    await waitFor(() => expect(props.onSaved).toHaveBeenCalled());
+    view.rerender(<ProviderEditorDialog {...props} open={false} />);
+    view.rerender(<ProviderEditorDialog {...props} provider={saved} />);
+    expect(screen.getByLabelText("请求头值 1")).toHaveValue("tenant-b");
+    fireEvent.click(screen.getByRole("button", { name: "移除请求头 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() =>
+      expect(providerUpsert).toHaveBeenLastCalledWith(
+        expect.objectContaining({ customHeaders: [] })
+      )
+    );
+  });
+
+  it("loads and saves an explicit WebSocket capability change", async () => {
+    const provider = makeProvider({
+      cli_key: "codex",
+      api_key_configured: true,
+      supports_websockets: true,
+    });
+    vi.mocked(providerUpsert).mockResolvedValue({ ...provider, supports_websockets: false });
+    render(
+      <ProviderEditorDialog
+        mode="edit"
+        provider={provider}
+        open={true}
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+    const toggle = screen.getByRole("switch", { name: "支持 Responses WebSocket" });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() =>
+      expect(providerUpsert).toHaveBeenCalledWith(
+        expect.objectContaining({ supportsWebsockets: false })
+      )
+    );
+  });
+
+  it("loads WebSocket capability from duplicate initial values and hides it for Claude", () => {
+    const view = render(
+      <ProviderEditorDialog
+        mode="create"
+        cliKey="codex"
+        initialValues={makeInitialValues({ supports_websockets: true })}
+        open={true}
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+    expect(screen.getByRole("switch", { name: "支持 Responses WebSocket" })).toBeChecked();
+    view.rerender(
+      <ProviderEditorDialog
+        mode="create"
+        cliKey="claude"
+        open={true}
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+    expect(
+      screen.queryByRole("switch", { name: "支持 Responses WebSocket" })
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "CX2CC 转译" }));
+    expect(
+      screen.queryByRole("switch", { name: "支持 Responses WebSocket" })
+    ).not.toBeInTheDocument();
+  });
+
   it("passes stream idle timeout override when saving", async () => {
     vi.mocked(providerUpsert).mockResolvedValue(
       makeProvider({
@@ -379,6 +499,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
         cli_key: "claude",
         name: "Timeout Provider",
         stream_idle_timeout_seconds: 120,
+        custom_headers: [],
       })
     );
 
@@ -643,6 +764,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
         cli_key: "claude",
         name: "Existing",
         stream_idle_timeout_seconds: null,
+        custom_headers: [],
       })
     );
 
@@ -1033,6 +1155,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
     expect(dialog.queryByLabelText("上游模型 1")).not.toBeInTheDocument();
     expect(dialog.getByText("已获取 2 个候选 · https://example.com · 地址 1")).toBeInTheDocument();
     expect(providerModelsDiscover).toHaveBeenCalledWith({
+      customHeaders: [],
       providerId: null,
       cliKey: "codex",
       authMode: "api_key",
@@ -1083,6 +1206,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
     expect(dialog.getByLabelText("显式模型 1")).toHaveValue("claude-3-5-sonnet");
     expect(dialog.getByText("保存后旧版映射不再生效，且无法在界面切回旧策略")).toBeInTheDocument();
     expect(providerModelsDiscover).toHaveBeenCalledWith({
+      customHeaders: [],
       providerId: 1,
       cliKey: "claude",
       authMode: "api_key",
@@ -1252,6 +1376,50 @@ describe("pages/providers/ProviderEditorDialog", () => {
     fireEvent.change(dialog.getByPlaceholderText("sk-…"), {
       target: { value: "sk-new-secret" },
     });
+    resolveDiscovery({
+      status: "ready",
+      models: ["gpt-5.4"],
+      origin: "https://example.com",
+      base_url_index: 1,
+    });
+
+    await waitFor(() => expect(dialog.getByText("连接已变化，请重新获取")).toBeInTheDocument());
+    expect(dialog.queryByLabelText("显式模型 1")).not.toBeInTheDocument();
+  });
+
+  it("uses draft custom headers and ignores discovery after they change", async () => {
+    let resolveDiscovery!: (value: Awaited<ReturnType<typeof providerModelsDiscover>>) => void;
+    vi.mocked(providerModelsDiscover).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveDiscovery = resolve;
+      })
+    );
+
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="codex"
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.change(dialog.getByPlaceholderText("sk-…"), {
+      target: { value: "sk-draft-secret" },
+    });
+    fireEvent.click(dialog.getByRole("button", { name: "添加请求头" }));
+    fireEvent.change(dialog.getByLabelText("请求头名称 1"), { target: { value: "X-Tenant" } });
+    fireEvent.change(dialog.getByLabelText("请求头值 1"), { target: { value: "tenant-a" } });
+    fireEvent.click(dialog.getByText("模型路由"));
+    fireEvent.click(dialog.getByRole("button", { name: "获取上游模型" }));
+    expect(dialog.getByText("正在获取上游模型…")).toBeInTheDocument();
+
+    expect(providerModelsDiscover).toHaveBeenCalledWith(
+      expect.objectContaining({ customHeaders: [{ name: "x-tenant", value: "tenant-a" }] })
+    );
+    fireEvent.change(dialog.getByLabelText("请求头值 1"), { target: { value: "tenant-b" } });
     resolveDiscovery({
       status: "ready",
       models: ["gpt-5.4"],

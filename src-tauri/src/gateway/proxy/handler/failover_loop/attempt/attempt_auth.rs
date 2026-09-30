@@ -61,6 +61,11 @@ pub(super) fn inject_auth<R: tauri::Runtime>(
         maybe_inject_codex_chatgpt_headers(headers, prepared.codex_chatgpt_account_id.as_deref());
     }
 
+    // Inject provider-configured custom headers last so they are not removed by
+    // the auth-header clearing above. These carry non-standard identity/auth
+    // headers some upstream gateways require (e.g. tenant/user identity).
+    headers.extend(prepared.custom_headers.clone());
+
     Ok(())
 }
 

@@ -707,6 +707,7 @@ describe("pages/settings/SettingsSidebar", () => {
       skill_repos_imported: 6,
       installed_skills_imported: 7,
       local_skills_imported: 8,
+      warnings: [],
     });
 
     renderWithProviders(<SettingsSidebar updateMeta={createUpdateMeta()} />);

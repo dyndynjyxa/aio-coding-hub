@@ -175,7 +175,9 @@ pub(crate) struct ProviderUpsertInput {
     pub source_provider_id: Option<i64>,
     pub bridge_type: Option<String>,
     pub stream_idle_timeout_seconds: Option<u32>,
+    pub supports_websockets: Option<bool>,
     pub extension_values: Option<Vec<providers::ProviderExtensionValuesInput>>,
+    pub custom_headers: Option<Vec<providers::ProviderCustomHeader>>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -244,6 +246,8 @@ fn provider_runtime_reset_decision(
         || previous.base_url_mode != next.base_url_mode
         || previous.enabled != next.enabled
         || previous.auth_mode != next.auth_mode
+        || previous.supports_websockets != next.supports_websockets
+        || previous.custom_headers != next.custom_headers
         || submitted_api_key_changed(previous_api_key, submitted_api_key)
         || previous.source_provider_id != next.source_provider_id
         || previous.bridge_type != next.bridge_type
@@ -298,7 +302,9 @@ pub(crate) async fn provider_upsert(
         source_provider_id,
         bridge_type,
         stream_idle_timeout_seconds,
+        supports_websockets,
         extension_values,
+        custom_headers,
     } = input;
 
     let is_create = provider_id.is_none();
@@ -351,7 +357,9 @@ pub(crate) async fn provider_upsert(
                         source_provider_id,
                         bridge_type,
                         stream_idle_timeout_seconds,
+                        supports_websockets,
                         extension_values,
+                        custom_headers,
                     },
                 )
             })?;
@@ -387,6 +395,10 @@ pub(crate) async fn provider_upsert(
 
         if decision.clear_route_runtime_state {
             let cleared = app_gateway_clear_cli_route_runtime_state(&app, &provider.cli_key);
+            if provider.cli_key == "codex" {
+                // Fixed-source CX2CC routes share this provider's upstream identity.
+                app_gateway_clear_cli_route_runtime_state(&app, "claude");
+            }
             tracing::info!(
                 provider_id = provider.id,
                 cli_key = %provider.cli_key,
@@ -461,7 +473,9 @@ pub(crate) async fn provider_duplicate(
                     source_provider_id: source.source_provider_id,
                     bridge_type: source.bridge_type.clone(),
                     stream_idle_timeout_seconds: source.stream_idle_timeout_seconds,
+                    supports_websockets: Some(source.supports_websockets),
                     extension_values: None,
+                    custom_headers: Some(source.custom_headers.clone()),
                 },
             )
         })?;
@@ -688,6 +702,35 @@ mod tests {
     }
 
     #[test]
+    fn supports_websockets_input_preserves_optional_boolean_contract() {
+        let mut value = serde_json::json!({
+            "cliKey": "codex", "name": "ws", "baseUrls": ["https://example.com"],
+            "baseUrlMode": "order", "enabled": true, "costMultiplier": 1.0
+        });
+        assert!(serde_json::from_value::<ProviderUpsertInput>(value.clone())
+            .unwrap()
+            .supports_websockets
+            .is_none());
+        for (raw, expected) in [
+            (serde_json::Value::Null, None),
+            (serde_json::json!(true), Some(true)),
+            (serde_json::json!(false), Some(false)),
+        ] {
+            value["supportsWebsockets"] = raw;
+            assert_eq!(
+                serde_json::from_value::<ProviderUpsertInput>(value.clone())
+                    .unwrap()
+                    .supports_websockets,
+                expected
+            );
+        }
+        for raw in [serde_json::json!(1), serde_json::json!("true")] {
+            value["supportsWebsockets"] = raw;
+            assert!(serde_json::from_value::<ProviderUpsertInput>(value.clone()).is_err());
+        }
+    }
+
+    #[test]
     fn provider_upsert_input_accepts_legacy_generated_limit_alias() {
         let input: ProviderUpsertInput = serde_json::from_value(serde_json::json!({
             "providerId": 1,
@@ -718,6 +761,7 @@ mod tests {
     #[test]
     fn provider_runtime_reset_decision_handles_create_and_non_sensitive_edits() {
         let next = providers::ProviderSummary {
+            custom_headers: Vec::new(),
             id: 1,
             cli_key: "claude".to_string(),
             name: "Provider A".to_string(),
@@ -748,6 +792,7 @@ mod tests {
             source_provider_id: None,
             bridge_type: None,
             stream_idle_timeout_seconds: None,
+            supports_websockets: false,
             extension_values: vec![],
             api_key_configured: true,
         };
@@ -791,6 +836,31 @@ mod tests {
             ProviderRuntimeResetDecision::default()
         );
 
+        let mut headers_changed = next.clone();
+        headers_changed.custom_headers = vec![providers::ProviderCustomHeader {
+            name: "x-tenant".into(),
+            value: "a".into(),
+        }];
+        assert!(
+            provider_runtime_reset_decision(Some(&next), None, &headers_changed, None)
+                .clear_route_runtime_state
+        );
+
+        let mut ws_enabled = next.clone();
+        ws_enabled.cli_key = "codex".to_string();
+        let ws_disabled = ws_enabled.clone();
+        ws_enabled.supports_websockets = true;
+        for (previous, next) in [(&ws_disabled, &ws_enabled), (&ws_enabled, &ws_disabled)] {
+            assert!(
+                provider_runtime_reset_decision(Some(previous), None, next, None)
+                    .clear_route_runtime_state
+            );
+        }
+        assert!(
+            !provider_runtime_reset_decision(Some(&ws_enabled), None, &ws_enabled, None)
+                .clear_route_runtime_state
+        );
+
         let mut disabled = next.clone();
         disabled.enabled = false;
 
@@ -805,6 +875,7 @@ mod tests {
     #[test]
     fn provider_runtime_reset_decision_detects_sensitive_claude_changes() {
         let previous = providers::ProviderSummary {
+            custom_headers: Vec::new(),
             id: 1,
             cli_key: "claude".to_string(),
             name: "Provider A".to_string(),
@@ -835,6 +906,7 @@ mod tests {
             source_provider_id: None,
             bridge_type: None,
             stream_idle_timeout_seconds: None,
+            supports_websockets: false,
             extension_values: vec![],
             api_key_configured: true,
         };

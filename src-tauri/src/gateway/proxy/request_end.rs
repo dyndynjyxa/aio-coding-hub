@@ -729,6 +729,13 @@ impl RequestLogEnqueueArgs {
             claude_model_mapping,
             model_redirect,
             usage_metrics,
+            self.activity_details_json.as_deref().and_then(|raw| {
+                serde_json::from_str::<serde_json::Value>(raw)
+                    .ok()?
+                    .get("terminal_signal")?
+                    .as_str()
+                    .map(str::to_owned)
+            }),
         );
     }
 }

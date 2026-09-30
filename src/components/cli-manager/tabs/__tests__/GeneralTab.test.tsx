@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import type { ReactElement } from "react";
@@ -115,6 +115,45 @@ function createDefaultTabProps(overrides: DefaultPropsOverrides = {}) {
 }
 
 describe("cli-manager/GeneralTab", () => {
+  it.each([true, false])(
+    "persists Codex session completion from %s and explains search scope",
+    (enabled) => {
+      const props = createDefaultTabProps();
+      props.codexSessionIdCompletionEnabled = enabled;
+      renderTab(<CliManagerGeneralTab {...props} />);
+
+      expect(
+        screen.getByText(/独立搜索（alpha\/search）不参与补全，其兼容处理始终生效/)
+      ).toBeInTheDocument();
+      const row = screen.getByText("Codex Session ID 补全").parentElement!.parentElement!;
+      const toggle = within(row).getByRole("switch");
+      expect(toggle).toHaveAttribute("aria-checked", String(enabled));
+      fireEvent.click(toggle);
+      expect(props.onPersistCodexSessionIdCompletion).toHaveBeenCalledExactlyOnceWith(!enabled);
+    }
+  );
+
+  it.each([true, false])("persists the Billing Header toggle from %s", (enabled) => {
+    const props = createDefaultTabProps();
+    props.rectifier.enable_billing_header_rectifier = enabled;
+    renderTab(<CliManagerGeneralTab {...props} />);
+
+    expect(
+      screen.getByText(
+        "仅对第三方 API Key 上游移除 billing header system 块；官方 Anthropic 和 OAuth 请求保留。"
+      )
+    ).toBeInTheDocument();
+    const row = screen.getByText("Billing Header 整流器").parentElement!.parentElement!;
+    const toggle = within(row).getByRole("switch");
+    expect(toggle).toHaveAttribute("aria-checked", String(enabled));
+
+    fireEvent.click(toggle);
+
+    expect(props.onPersistRectifier).toHaveBeenCalledExactlyOnceWith({
+      enable_billing_header_rectifier: !enabled,
+    });
+  });
+
   it("renders unavailable state", () => {
     renderTab(
       <CliManagerGeneralTab

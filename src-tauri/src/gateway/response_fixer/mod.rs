@@ -1,3 +1,4 @@
+use crate::gateway::streams::UpstreamStreamError;
 mod audit;
 mod encoding;
 mod json;
@@ -317,11 +318,11 @@ pub(super) fn process_non_stream(body: Bytes, config: ResponseFixerConfig) -> No
 
 pub(super) struct ResponseFixerStream<S>(stream::ResponseFixerStreamInner<S>)
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin;
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin;
 
 impl<S> ResponseFixerStream<S>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin,
 {
     pub(super) fn new(
         upstream: S,
@@ -338,9 +339,9 @@ where
 
 impl<S> Stream for ResponseFixerStream<S>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin,
 {
-    type Item = Result<Bytes, reqwest::Error>;
+    type Item = Result<Bytes, UpstreamStreamError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.as_mut().get_mut();

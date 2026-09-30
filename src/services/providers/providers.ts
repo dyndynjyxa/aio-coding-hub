@@ -23,6 +23,7 @@ import {
   type ProviderOAuthResetCodexQuotaResult,
   type ProviderOAuthStartFlowResult,
   type ProviderOAuthStatusResult,
+  type ProviderCustomHeader,
   type ProviderSummary as GeneratedProviderSummary,
   type ProviderUpsertInput as GeneratedProviderUpsertInput,
 } from "../../generated/bindings";
@@ -55,6 +56,8 @@ export type {
   ProviderOAuthStatusResult,
 };
 
+export type { ProviderCustomHeader };
+
 export type { CliKey } from "../../constants/clis";
 
 export type ClaudeModels = GeneratedClaudeModels;
@@ -69,7 +72,11 @@ export type ProviderModelDiscoveryErrorCode = GeneratedProviderModelDiscoveryErr
 export type ProviderModelDiscoveryResult = GeneratedProviderModelDiscoveryResult;
 export type ProviderModelDiscoveryUnsupportedReason =
   GeneratedProviderModelDiscoveryUnsupportedReason;
-export type ProviderModelDiscoveryInput = Omit<GeneratedProviderModelDiscoveryInput, "cliKey"> & {
+export type ProviderModelDiscoveryInput = Omit<
+  GeneratedProviderModelDiscoveryInput,
+  "cliKey" | "customHeaders"
+> & {
+  customHeaders?: ProviderCustomHeader[] | null;
   cliKey: CliKey;
 };
 
@@ -123,7 +130,9 @@ type ProviderUpsertFieldMap = {
   sourceProviderId: "sourceProviderId";
   bridgeType: "bridgeType";
   streamIdleTimeoutSeconds: "streamIdleTimeoutSeconds";
+  supportsWebsockets: "supportsWebsockets";
   extensionValues: "extensionValues";
+  customHeaders: "customHeaders";
 };
 
 type ProviderUpsertAuthority = RemapGeneratedKeys<
@@ -213,7 +222,9 @@ function toProviderUpsertPayload(input: ProviderUpsertInput): ProviderUpsertTran
     note: input.note ?? null,
     sourceProviderId,
     bridgeType: input.bridgeType ?? null,
+    supportsWebsockets: input.supportsWebsockets ?? null,
     extensionValues: input.extensionValues ?? null,
+    customHeaders: input.customHeaders ?? null,
   } satisfies Omit<GeneratedProviderUpsertInput, "streamIdleTimeoutSeconds">;
 
   if (Object.prototype.hasOwnProperty.call(input, "streamIdleTimeoutSeconds")) {
@@ -260,6 +271,7 @@ export async function providersList(cliKey: CliKey) {
 export async function providerModelsDiscover(input: ProviderModelDiscoveryInput) {
   const payload = {
     ...input,
+    customHeaders: input.customHeaders ?? null,
     providerId: input.providerId == null ? null : validateProviderId(input.providerId),
     cliKey: validateProviderCliKey(input.cliKey),
   } satisfies GeneratedProviderModelDiscoveryInput;

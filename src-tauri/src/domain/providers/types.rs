@@ -60,6 +60,15 @@ fn take_first_chars(value: &str, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
 }
 
+/// A single custom HTTP header injected into upstream requests for a provider.
+/// Used for gateways that require non-standard identity/auth headers beyond the
+/// CLI's built-in auth (e.g. `X-User-Id`, `X-Domain`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ProviderCustomHeader {
+    pub name: String,
+    pub value: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct ProviderUpsertParams {
     pub provider_id: Option<i64>,
@@ -86,7 +95,9 @@ pub struct ProviderUpsertParams {
     pub source_provider_id: Option<i64>,
     pub bridge_type: Option<String>,
     pub stream_idle_timeout_seconds: Option<u32>,
+    pub supports_websockets: Option<bool>,
     pub extension_values: Option<Vec<ProviderExtensionValuesInput>>,
+    pub custom_headers: Option<Vec<ProviderCustomHeader>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
@@ -249,7 +260,9 @@ pub struct ProviderSummary {
     pub source_provider_id: Option<i64>,
     pub bridge_type: Option<String>,
     pub stream_idle_timeout_seconds: Option<u32>,
+    pub supports_websockets: bool,
     pub extension_values: Vec<ProviderExtensionValues>,
+    pub custom_headers: Vec<ProviderCustomHeader>,
     pub api_key_configured: bool,
 }
 
@@ -281,7 +294,9 @@ pub(crate) struct ProviderForGateway {
     #[allow(dead_code)] // Will be read when failover_loop uses bridge_type for dispatch.
     pub bridge_type: Option<String>,
     pub stream_idle_timeout_seconds: Option<u32>,
+    pub supports_websockets: bool,
     pub extension_values: Vec<ProviderExtensionValues>,
+    pub custom_headers: Vec<ProviderCustomHeader>,
 }
 
 #[derive(Debug, Clone)]
@@ -313,6 +328,7 @@ impl ProviderForGateway {
 
 #[derive(Debug, Clone)]
 pub(super) struct DecodedProviderRow {
+    pub supports_websockets: bool,
     pub id: i64,
     pub name: String,
     pub base_urls: Vec<String>,
@@ -331,6 +347,7 @@ pub(super) struct DecodedProviderRow {
     pub oauth_provider_type: Option<String>,
     pub source_provider_id: Option<i64>,
     pub bridge_type: Option<String>,
+    pub custom_headers: Vec<ProviderCustomHeader>,
 }
 
 #[derive(Debug, Clone)]
@@ -374,4 +391,64 @@ pub(super) fn normalize_tags(tags: Vec<String>) -> Vec<String> {
         .filter(|v| !v.is_empty())
         .filter(|v| seen.insert(v.clone()))
         .collect()
+}
+
+/// Decode without dropping invalid persisted entries; the editor can repair them.
+pub(crate) fn custom_headers_from_json(
+    raw: &str,
+) -> Result<Vec<ProviderCustomHeader>, rusqlite::Error> {
+    serde_json::from_str(raw).map_err(|_| {
+        rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Text,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid provider custom headers JSON",
+            )),
+        )
+    })
+}
+
+pub(crate) fn custom_headers_to_map(
+    headers: &[ProviderCustomHeader],
+) -> crate::shared::error::AppResult<axum::http::HeaderMap> {
+    let mut out = axum::http::HeaderMap::new();
+    for (index, header) in headers.iter().enumerate() {
+        let (name, value) = crate::shared::provider_headers::parse(&header.name, &header.value)
+            .map_err(|error| {
+                crate::shared::error::AppError::new(
+                    "SEC_INVALID_INPUT",
+                    format!("custom header row {}: {error}", index + 1),
+                )
+            })?;
+        out.insert(name, value);
+    }
+    Ok(out)
+}
+
+pub(crate) fn normalize_custom_headers(
+    headers: Vec<ProviderCustomHeader>,
+) -> crate::shared::error::AppResult<Vec<ProviderCustomHeader>> {
+    let mut out: Vec<_> = custom_headers_to_map(&headers)?
+        .iter()
+        .map(|(name, value)| ProviderCustomHeader {
+            name: name.as_str().to_string(),
+            value: String::from_utf8(value.as_bytes().to_vec())
+                .expect("validated UTF-8 header input"),
+        })
+        .collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+pub(crate) fn validate_custom_headers_owner(
+    headers: &[ProviderCustomHeader],
+    is_bridge: bool,
+) -> crate::shared::error::AppResult<()> {
+    if is_bridge && !headers.is_empty() {
+        return Err(
+            "SEC_INVALID_INPUT: configure custom headers on the CX2CC source provider".into(),
+        );
+    }
+    Ok(())
 }

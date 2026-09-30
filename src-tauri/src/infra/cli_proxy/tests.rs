@@ -236,6 +236,7 @@ fn manifest_entry<'a>(manifest: &'a CliProxyManifest, kind: &str) -> &'a BackupF
 
 fn codex_provider_with_mapping(source: &str) -> ProviderUpsertParams {
     ProviderUpsertParams {
+        custom_headers: None,
         provider_id: None,
         cli_key: "codex".to_string(),
         name: "mapped Codex provider".to_string(),
@@ -268,7 +269,136 @@ fn codex_provider_with_mapping(source: &str) -> ProviderUpsertParams {
         source_provider_id: None,
         bridge_type: None,
         stream_idle_timeout_seconds: None,
+        supports_websockets: None,
         extension_values: None,
+    }
+}
+
+#[test]
+fn codex_websocket_settings_sync_rewrites_both_directions_and_missing_capability() {
+    let mut test_app = CliProxyTestApp::new();
+    test_app.install_fake_codex();
+    let handle = test_app.handle();
+    let base_origin = "http://127.0.0.1:26543";
+    let enabled = set_enabled(&handle, "codex", true, base_origin).expect("enable Codex proxy");
+    assert!(enabled.ok, "{}", enabled.message);
+    let config_path = codex_config_path(&handle).unwrap();
+    for value in [true, false] {
+        let mut current = settings::read(&handle).unwrap();
+        current.codex_responses_websocket_enabled = value;
+        settings::write(&handle, &current).unwrap();
+        assert!(!codex::is_proxy_config_applied(&handle, base_origin));
+        let reports = sync_enabled(&handle, base_origin, true).unwrap();
+        assert!(reports.iter().any(|row| row.cli_key == "codex" && row.ok));
+        let configured: toml::Value =
+            toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(
+            configured["model_providers"]["aio"]["supports_websockets"].as_bool(),
+            Some(value)
+        );
+        assert!(codex::is_proxy_config_applied(&handle, base_origin));
+    }
+    let mut old_config = std::fs::read_to_string(&config_path)
+        .unwrap()
+        .parse::<toml_edit::DocumentMut>()
+        .unwrap();
+    old_config["model_providers"]["aio"]
+        .as_table_like_mut()
+        .unwrap()
+        .remove("supports_websockets");
+    old_config["model_providers"]["other"]["supports_websockets"] = toml_edit::value(false);
+    std::fs::write(&config_path, old_config.to_string()).unwrap();
+    assert!(!codex::is_proxy_config_applied(&handle, base_origin));
+    sync_enabled(&handle, base_origin, true).unwrap();
+    let configured: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    assert_eq!(
+        configured["model_providers"]["aio"]["supports_websockets"].as_bool(),
+        Some(false)
+    );
+    assert!(codex::is_proxy_config_applied(&handle, base_origin));
+}
+
+#[test]
+fn codex_websocket_sync_and_remote_compaction_preserve_one_provider_and_restore_baseline() {
+    for original_ws in [None, Some(false), Some(true)] {
+        for compaction_first in [false, true] {
+            let mut test_app = CliProxyTestApp::new();
+            test_app.install_fake_codex();
+            let app = test_app.handle();
+            let config_path = codex_config_path(&app).unwrap();
+            std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+            let mut source = "model_provider = \"aio\"\n[model_providers.aio]\nname = \"original\"\nunknown = \"keep\"\n".to_string();
+            if let Some(value) = original_ws {
+                source.push_str(&format!("supports_websockets = {value}\n"));
+            }
+            source.push_str("[model_providers.aio.http_headers]\ncustom = \"keep-header\"\n");
+            std::fs::write(&config_path, source).unwrap();
+            let origin = "http://127.0.0.1:26543";
+            assert!(set_enabled(&app, "codex", true, origin).unwrap().ok);
+            let patch_compaction = |enabled| {
+                let patch = serde_json::from_value(serde_json::json!({
+                    "features_remote_compaction": enabled,
+                    "model": "user-edited-model"
+                }))
+                .unwrap();
+                crate::codex_config::codex_config_set(&app, patch).unwrap();
+            };
+            let sync_websocket = || {
+                let mut settings = settings::read(&app).unwrap();
+                settings.codex_responses_websocket_enabled = true;
+                settings::write(&app, &settings).unwrap();
+                let reports = sync_enabled(&app, origin, true).unwrap();
+                assert!(reports.iter().any(|row| row.cli_key == "codex" && row.ok));
+            };
+            if compaction_first {
+                patch_compaction(true);
+                sync_websocket();
+            } else {
+                sync_websocket();
+                patch_compaction(true);
+            }
+            let config: toml::Value =
+                toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+            assert_eq!(config["model_provider"].as_str(), Some("OpenAI"));
+            assert!(config["model_providers"].get("aio").is_none());
+            assert_eq!(
+                config["model_providers"]["OpenAI"]["supports_websockets"].as_bool(),
+                Some(true)
+            );
+            assert_eq!(
+                config["model_providers"]["OpenAI"]["http_headers"]["custom"].as_str(),
+                Some("keep-header")
+            );
+            assert!(codex::is_proxy_config_applied(&app, origin));
+            patch_compaction(false);
+            let config: toml::Value =
+                toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+            assert_eq!(config["model_provider"].as_str(), Some("aio"));
+            assert!(config["model_providers"].get("OpenAI").is_none());
+            assert_eq!(
+                config["model_providers"]["aio"]["supports_websockets"].as_bool(),
+                Some(true)
+            );
+            assert!(set_enabled(&app, "codex", false, origin).unwrap().ok);
+            let restored: toml::Value =
+                toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+            assert_eq!(
+                restored["model_providers"]["aio"]
+                    .get("supports_websockets")
+                    .and_then(toml::Value::as_bool),
+                original_ws
+            );
+            assert_eq!(
+                restored["model_providers"]["aio"]["unknown"].as_str(),
+                Some("keep")
+            );
+            assert_eq!(
+                restored["model_providers"]["aio"]["http_headers"]["custom"].as_str(),
+                Some("keep-header")
+            );
+            assert_eq!(restored["model"].as_str(), Some("user-edited-model"));
+        }
     }
 }
 
@@ -1457,9 +1587,51 @@ trust_level = "trusted"
         + s.matches("[model_providers.'aio']").count();
     assert_eq!(count, 1, "{s}");
     assert!(s.contains("base_url = \"http://new/v1\""), "{s}");
-    assert!(
-        s.contains("[model_providers.aio.projects.\"C:\\\\work\"]"),
-        "{s}"
+    let parsed: toml::Value = toml::from_str(&s).expect("deduplicated TOML is valid");
+    assert_eq!(
+        parsed["model_providers"]["aio"]["projects"][r"C:\work"]["trust_level"].as_str(),
+        Some("trusted")
+    );
+}
+
+#[test]
+fn codex_proxy_dedupes_remote_compaction_alias_without_creating_aio() {
+    let input = r#"model_provider = 'OpenAI' # remote compaction alias
+[model_providers."OpenAI"]
+base_url = "http://old-1/v1"
+unknown = "keep"
+[model_providers.OpenAI]
+base_url = "http://old-2/v1"
+[model_providers.OpenAI.http_headers]
+custom = "keep-header"
+"#;
+    let output = codex::build_codex_config_toml_for_proxy(
+        Some(input.as_bytes().to_vec()),
+        "http://new/v1",
+        CodexConfigPlatform::Other,
+        false,
+        None,
+        true,
+    )
+    .unwrap();
+    let config: toml::Value = toml::from_str(std::str::from_utf8(&output).unwrap()).unwrap();
+    assert_eq!(config["model_provider"].as_str(), Some("OpenAI"));
+    assert!(config["model_providers"].get("aio").is_none());
+    assert_eq!(
+        config["model_providers"]["OpenAI"]["base_url"].as_str(),
+        Some("http://new/v1")
+    );
+    assert_eq!(
+        config["model_providers"]["OpenAI"]["supports_websockets"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        config["model_providers"]["OpenAI"]["unknown"].as_str(),
+        Some("keep")
+    );
+    assert_eq!(
+        config["model_providers"]["OpenAI"]["http_headers"]["custom"].as_str(),
+        Some("keep-header")
     );
 }
 
@@ -2951,6 +3123,34 @@ fn write_temp(dir: &std::path::Path, name: &str, content: &[u8]) -> std::path::P
 }
 
 #[test]
+fn merge_restore_claude_rejects_invalid_current_without_writing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let backup_bytes = br#"{"env":{"ANTHROPIC_AUTH_TOKEN":"original"}}"#;
+    let backup = write_temp(tmp.path(), "backup.json", backup_bytes);
+    for invalid in [b"".as_slice(), br#"{"env": "#, b"[]"] {
+        let target = write_temp(tmp.path(), "settings.json", invalid);
+        let err = merge_restore_claude_settings_json(&target, &backup).unwrap_err();
+        assert!(err.to_string().contains("CLI_PROXY_INVALID_SETTINGS_JSON"));
+        assert_eq!(std::fs::read(&target).unwrap(), invalid);
+        assert_eq!(std::fs::read(&backup).unwrap(), backup_bytes);
+    }
+}
+
+#[test]
+fn merge_restore_claude_rejects_invalid_backup_without_writing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let target_bytes = br#"{"env":{"ANTHROPIC_AUTH_TOKEN":"aio"},"language":"zh-CN"}"#;
+    let target = write_temp(tmp.path(), "settings.json", target_bytes);
+    for invalid in [b"".as_slice(), br#"{"env": "#, b"null"] {
+        let backup = write_temp(tmp.path(), "backup.json", invalid);
+        let err = merge_restore_claude_settings_json(&target, &backup).unwrap_err();
+        assert!(err.to_string().contains("CLI_PROXY_INVALID_SETTINGS_JSON"));
+        assert_eq!(std::fs::read(&target).unwrap(), target_bytes);
+        assert_eq!(std::fs::read(&backup).unwrap(), invalid);
+    }
+}
+
+#[test]
 fn merge_restore_claude_preserves_user_changes() {
     let tmp = tempfile::tempdir().unwrap();
 
@@ -3195,4 +3395,55 @@ fn sync_enabled_resolves_drift_after_restore_enabled_keep_state() {
         Some(true),
         "sync_enabled should resolve the drift"
     );
+}
+
+#[test]
+fn malformed_client_manifest_does_not_skip_other_cli_lifecycle_work() {
+    let mut test_app = CliProxyTestApp::new();
+    test_app.install_fake_codex();
+    let app = test_app.handle();
+    let first_origin = "http://127.0.0.1:26431";
+    let next_origin = "http://127.0.0.1:26432";
+    for cli_key in ["claude", "codex", "gemini", "grok"] {
+        let enabled = set_enabled(&app, cli_key, true, first_origin).unwrap();
+        assert!(enabled.ok, "{cli_key}: {}", enabled.message);
+    }
+    let broken_path = cli_proxy_manifest_path(&cli_proxy_root_dir(&app, "claude").unwrap());
+    std::fs::write(&broken_path, b"{broken").unwrap();
+
+    let rows = sync_enabled(&app, next_origin, true).unwrap();
+    assert_eq!(rows.len(), 4);
+    assert!(!rows[0].ok);
+    assert_eq!(rows[0].cli_key, "claude");
+    for cli_key in ["codex", "gemini", "grok"] {
+        assert!(rows.iter().any(|row| row.cli_key == cli_key && row.ok));
+        assert!(
+            is_proxy_config_applied(&app, cli_key, next_origin),
+            "{cli_key}"
+        );
+    }
+
+    let rows = restore_enabled_keep_state(&app).unwrap();
+    assert!(!rows[0].ok);
+    for cli_key in ["codex", "gemini", "grok"] {
+        assert!(rows.iter().any(|row| row.cli_key == cli_key && row.ok));
+        assert!(
+            !is_proxy_config_applied(&app, cli_key, next_origin),
+            "{cli_key}"
+        );
+    }
+
+    sync_enabled(&app, next_origin, true).unwrap();
+    for cli_key in ["codex", "gemini", "grok"] {
+        let mut manifest = read_manifest(&app, cli_key).unwrap().unwrap();
+        manifest.enabled = false;
+        write_manifest(&app, cli_key, &manifest).unwrap();
+    }
+    let rows = startup_repair_incomplete_enable(&app).unwrap();
+    assert!(!rows[0].ok);
+    for cli_key in ["codex", "gemini", "grok"] {
+        assert!(rows.iter().any(|row| row.cli_key == cli_key && row.ok));
+        assert!(read_manifest(&app, cli_key).unwrap().unwrap().enabled);
+    }
+    assert_eq!(std::fs::read(broken_path).unwrap(), b"{broken");
 }

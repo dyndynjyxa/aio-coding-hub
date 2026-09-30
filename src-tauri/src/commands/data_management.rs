@@ -1,6 +1,6 @@
 //! Usage: Data reset / disk usage related Tauri commands.
 
-use crate::app_state::{ensure_db_ready, prepare_db_reset, DbInitState};
+use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::shared::ipc_confirm::RiskyIpcConfirm;
 use crate::{app_paths, blocking, data_management};
 
@@ -64,21 +64,7 @@ pub(crate) async fn app_data_reset(
     confirm: Option<RiskyIpcConfirm>,
 ) -> Result<bool, String> {
     RiskyIpcConfirm::require(confirm, "app_data_reset", "app_data")?;
-    // Stop the gateway and keep lifecycle starts out until destructive file
-    // deletion is complete, so background writers cannot recreate SQLite files.
-    let _gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
-    crate::app::cleanup::stop_gateway_best_effort_unlocked(&app).await;
-    crate::app::cleanup::restore_cli_proxy_keep_state_best_effort(
-        &app,
-        "app_data_reset_cli_proxy_restore_keep_state",
-        "数据重置前",
-        false,
-    )
-    .await;
-    let _db_reset_guard = prepare_db_reset(db_state.inner()).await;
-    blocking::run("app_data_reset", move || {
-        data_management::app_data_reset(&app)
-    })
-    .await
-    .map_err(Into::into)
+    crate::app::data_management_service::reset_app_data(app, db_state.inner())
+        .await
+        .map_err(Into::into)
 }

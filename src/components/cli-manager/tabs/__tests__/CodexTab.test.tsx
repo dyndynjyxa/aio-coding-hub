@@ -177,12 +177,10 @@ describe("components/cli-manager/tabs/CodexTab", () => {
       service_tier: "fast",
     });
 
-    const websocketItem = screen.getByText("responses_websockets_v2").parentElement?.parentElement;
-    expect(websocketItem).toBeTruthy();
-    fireEvent.click(within(websocketItem as HTMLElement).getByRole("switch"));
-    expect(persistCodexConfig).toHaveBeenCalledWith({
-      features_responses_websockets_v2: true,
-    });
+    expect(screen.getByText("历史 WebSocket feature（只读）")).toBeInTheDocument();
+    expect(persistCodexConfig).not.toHaveBeenCalledWith(
+      expect.objectContaining({ features_responses_websockets_v2: true })
+    );
 
     // Radio group
     fireEvent.click(screen.getByRole("radio", { name: "禁用 (disabled)" }));
@@ -261,6 +259,50 @@ describe("components/cli-manager/tabs/CodexTab", () => {
     fireEvent.click(screen.getByRole("switch", { name: "切换 Codex OAuth 兼容代理模式" }));
 
     expect(persistCodexOauthCompatibleProxyMode).toHaveBeenCalledWith(true);
+  });
+
+  it("uses one Responses WebSocket setting and keeps the saved value until persistence succeeds", () => {
+    const persistCodexResponsesWebsocket = vi.fn().mockResolvedValue(false);
+    const props = {
+      codexAvailable: "available" as const,
+      codexLoading: false,
+      codexConfigLoading: false,
+      codexConfigSaving: false,
+      codexConfigTomlLoading: false,
+      codexConfigTomlSaving: false,
+      codexInfo: createCodexInfo(),
+      codexConfig: createCodexConfig({ features_responses_websockets_v2: true }),
+      codexConfigToml: null,
+      appSettings: createAppSettings(),
+      refreshCodex: vi.fn(),
+      openCodexConfigDir: vi.fn(),
+      persistCodexConfig: vi.fn(),
+      persistCodexConfigToml: vi.fn(),
+      persistCodexResponsesWebsocket,
+    };
+    const { rerender } = render(<CliManagerCodexTab {...props} />);
+    const toggle = screen.getByRole("switch", { name: "切换 Codex Responses WebSocket" });
+    expect(toggle).not.toBeChecked();
+    expect(screen.getByText(/按供应商能力使用 WebSocket/)).toHaveTextContent(
+      "不支持时仍可使用 HTTP"
+    );
+    expect(screen.queryByText(/仅支持 Codex CLI/)).not.toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(persistCodexResponsesWebsocket).toHaveBeenCalledWith(true);
+    expect(toggle).not.toBeChecked();
+    expect(props.persistCodexConfig).not.toHaveBeenCalled();
+
+    rerender(<CliManagerCodexTab {...props} codexHomeSettingsSaving />);
+    expect(toggle).toBeDisabled();
+    rerender(
+      <CliManagerCodexTab
+        {...props}
+        appSettings={createAppSettings({ codex_responses_websocket_enabled: true })}
+        codexResponsesWebsocketStatus="偏好已保存，接管 Codex 后生效。"
+      />
+    );
+    expect(toggle).toBeChecked();
+    expect(screen.getByRole("status")).toHaveTextContent("接管 Codex 后生效");
   });
 
   it("renders unavailable state", () => {

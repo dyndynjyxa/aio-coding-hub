@@ -60,6 +60,8 @@ mod retry_engine;
 mod send;
 #[path = "attempt/send_timeout.rs"]
 mod send_timeout;
+#[path = "attempt/ws_attempt.rs"]
+mod ws_attempt;
 
 // --- response/ : upstream response handling & finalization ---
 #[path = "response/finalize.rs"]
@@ -172,12 +174,33 @@ where
     let created_at_ms = input.created_at_ms;
     let created_at = input.created_at;
 
+    if let Some(request) = &input.ws_request {
+        use crate::shared::mutex_ext::MutexExt;
+        let mut generation = request.generation.lock_or_recover();
+        if generation.recovered {
+            input.providers.retain(|provider| {
+                generation.budget.providers.contains(&provider.id)
+                    && !generation.budget.failed_providers.contains(&provider.id)
+            });
+            input.providers.sort_by_key(|provider| {
+                generation
+                    .budget
+                    .providers
+                    .iter()
+                    .position(|id| *id == provider.id)
+            });
+        } else {
+            generation.budget.providers =
+                input.providers.iter().map(|provider| provider.id).collect();
+        }
+    }
     let mut abort_guard = input.abort_guard.take();
 
     let introspection_body =
         body_for_introspection(&input.base_headers, input.body_bytes.as_ref()).into_owned();
     let ctx = CommonCtx::from(CommonCtxArgs {
         state: &input.state,
+        ws_request: input.ws_request.as_ref(),
         cli_key: &input.cli_key,
         forwarded_path: &input.forwarded_path,
         observe: input.observe_request,
@@ -208,6 +231,15 @@ where
     });
 
     let mut run_state = FailoverRunState::new();
+    if let Some(request) = &input.ws_request {
+        use crate::shared::mutex_ext::MutexExt;
+        run_state.failed_provider_ids = request
+            .generation
+            .lock_or_recover()
+            .budget
+            .failed_providers
+            .clone();
+    }
 
     let max_providers_to_try = (input.max_providers_to_try as usize).max(1);
     let mut counters = provider_iterator::IterationCounters::new();
@@ -218,7 +250,16 @@ where
     let providers: Vec<_> = input.providers.clone();
 
     for provider in providers.iter() {
-        if counters.providers_tried >= max_providers_to_try {
+        let exhausted = input.ws_request.as_ref().map_or(
+            counters.providers_tried >= max_providers_to_try,
+            |request| {
+                use crate::shared::mutex_ext::MutexExt;
+                let generation = request.generation.lock_or_recover();
+                generation.budget.visited_providers.len() >= max_providers_to_try
+                    && !generation.budget.visited_providers.contains(&provider.id)
+            },
+        );
+        if exhausted {
             break;
         }
 
@@ -238,6 +279,28 @@ where
             provider_iterator::PreparationOutcome::Skipped => continue,
         };
 
+        if let Some(request) = &input.ws_request {
+            use crate::shared::mutex_ext::MutexExt;
+            let mut generation = request.generation.lock_or_recover();
+            if generation
+                .budget
+                .provider_id
+                .is_some_and(|id| id != prepared.provider_id)
+            {
+                response_fixer::push_special_setting(
+                    &input.special_settings,
+                    serde_json::json!({
+                        "type":"codex_responses_transport", "scope":"attempt", "providerId":prepared.provider_id,
+                        "client_transport":if request.client_ws {"responses_ws"}else{"http"},
+                        "transport_action":"provider_switch", "failure_class":"provider", "output_committed":false,
+                    }),
+                );
+            }
+            generation
+                .budget
+                .visited_providers
+                .insert(prepared.provider_id);
+        }
         let mut circuit_snapshot = prepared.circuit_snapshot.clone();
 
         if let Some(resp) = retry_engine::run_retry_loop(
@@ -255,6 +318,14 @@ where
         .await
         {
             return resp;
+        }
+        if let Some(request) = &input.ws_request {
+            use crate::shared::mutex_ext::MutexExt;
+            let mut generation = request.generation.lock_or_recover();
+            generation
+                .budget
+                .failed_providers
+                .insert(prepared.provider_id);
         }
     }
 

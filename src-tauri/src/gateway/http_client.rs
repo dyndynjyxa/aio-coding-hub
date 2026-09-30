@@ -12,12 +12,19 @@ use std::collections::BTreeSet;
 use std::env;
 use std::error::Error as StdError;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{OnceLock, RwLock};
 use std::time::Duration;
 
 /// Global HTTP client instance.
 static GLOBAL_CLIENT: OnceLock<RwLock<Client>> = OnceLock::new();
 static GLOBAL_NO_REDIRECT_CLIENT: OnceLock<RwLock<Client>> = OnceLock::new();
+static CLIENT_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Upgraded connections must not survive a reload of proxy or trust settings.
+pub(crate) fn generation() -> u64 {
+    CLIENT_GENERATION.load(Ordering::Acquire)
+}
 
 /// Current proxy URL (for logging and status queries).
 static CURRENT_PROXY_URL: OnceLock<RwLock<Option<String>>> = OnceLock::new();
@@ -89,6 +96,7 @@ pub fn init(proxy_url: Option<&str>) -> Result<(), String> {
     let _ = GLOBAL_NO_REDIRECT_CLIENT.set(RwLock::new(no_redirect_client));
 
     let _ = CURRENT_PROXY_URL.set(RwLock::new(effective_url.map(mask_url)));
+    CLIENT_GENERATION.fetch_add(1, Ordering::AcqRel);
 
     tracing::info!(
         "[HttpClient] Initialized: {}",
@@ -614,6 +622,7 @@ pub fn apply_proxy(proxy_url: Option<&str>) -> Result<(), String> {
         *url = effective_url.map(mask_url);
     }
 
+    CLIENT_GENERATION.fetch_add(1, Ordering::AcqRel);
     tracing::info!(
         "[HttpClient] Proxy applied: {}",
         effective_url

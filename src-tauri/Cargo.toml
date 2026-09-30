@@ -1,6 +1,6 @@
 [package]
 name = "aio-coding-hub"
-version = "0.60.19"
+version = "0.60.20"
 description = "AIO Coding Hub"
 authors = ["dyndynjyxa"]
 edition = "2021"
@@ -36,7 +36,7 @@ base64 = "0.22"
 ed25519-dalek = "2"
 rand = "0.8"
 bytes = "1"
-axum = "0.7"
+axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "process", "sync", "time", "io-util"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 r2d2 = "0.8"
@@ -45,6 +45,8 @@ reqwest = { version = "0.12.28", default-features = false, features = ["rustls-t
 if-addrs = "0.13"
 hostname = "0.4"
 futures-core = "0.3"
+futures-util = { version = "0.3", features = ["sink"] }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
 flate2 = "1.1.5"
 zip = { version = "4.6", default-features = false, features = ["deflate"] }
 tracing = "0.1"

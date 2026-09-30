@@ -5,7 +5,10 @@
 
 import { createElement, type ReactNode } from "react";
 import { GatewayErrorCodes } from "../../constants/gatewayErrorCodes";
-import { parseRequestLogSpecialSettings } from "../../services/gateway/requestLogSpecialSettings";
+import {
+  parseRequestLogSpecialSettings,
+  resolveCodexResponsesTransportRecords,
+} from "../../services/gateway/requestLogSpecialSettings";
 import type { CliKey } from "../../services/providers/providers";
 import type { RequestLogRouteHop } from "../../services/gateway/requestLogs";
 import type { TraceSession } from "../../services/gateway/traceStore";
@@ -209,6 +212,7 @@ export type StatusBadge = {
   title?: string;
   isError: boolean;
   isClientAbort: boolean;
+  isIncomplete?: boolean;
   hasFailover: boolean;
 };
 
@@ -217,12 +221,33 @@ export function computeStatusBadge(input: {
   errorCode: string | null;
   inProgress?: boolean;
   hasFailover?: boolean;
+  specialSettingsJson?: string | null;
+  terminalSignal?: string | null;
 }): StatusBadge {
   if (input.inProgress) {
     return {
       text: "进行中",
       semanticText: "请求进行中",
       tone: "bg-accent/10 text-accent ring-1 ring-inset ring-accent/15",
+      isError: false,
+      isClientAbort: false,
+      hasFailover: !!input.hasFailover,
+    };
+  }
+
+  const incomplete =
+    !input.errorCode &&
+    (input.terminalSignal === "incomplete" ||
+      resolveCodexResponsesTransportRecords(input.specialSettingsJson).some(
+        (record) => record.terminal === "incomplete"
+      ));
+  if (incomplete) {
+    return {
+      text: input.status == null ? "不完整结束" : `${input.status} 不完整结束`,
+      semanticText: "响应不完整结束",
+      isIncomplete: true,
+      title: "响应不完整结束，已保留返回的用量",
+      tone: "text-muted-foreground bg-secondary ring-1 ring-inset ring-border",
       isError: false,
       isClientAbort: false,
       hasFailover: !!input.hasFailover,

@@ -1,6 +1,4 @@
 use crate::app_state::{ensure_db_ready, DbInitState};
-use crate::gateway::events::GATEWAY_STATUS_EVENT_NAME;
-use crate::gateway_control::app_ensure_gateway_running;
 use crate::shared::ipc_confirm::RiskyIpcConfirm;
 use crate::{base_url_probe, blocking, providers};
 use serde_json::json;
@@ -24,12 +22,12 @@ pub(crate) async fn provider_claude_terminal_launch_command(
     provider_id: i64,
 ) -> Result<String, String> {
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    let gateway_base_origin = blocking::run("provider_claude_terminal_launch_gateway_origin", {
-        let app = app.clone();
-        let db = db.clone();
-        move || ensure_gateway_base_origin(&app, &db)
-    })
-    .await?;
+    let _gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
+    let gateway_base_origin =
+        crate::app::gateway_service::ensure_running_and_sync_unlocked(&app, db.clone(), None)
+            .await?
+            .base_url
+            .ok_or_else(|| "SYSTEM_ERROR: gateway base_url missing".to_string())?;
 
     blocking::run("provider_claude_terminal_launch_command", move || {
         let launch = providers::claude_terminal_launch_context(&db, provider_id)?;
@@ -43,19 +41,6 @@ pub(crate) async fn provider_claude_terminal_launch_command(
     })
     .await
     .map_err(Into::into)
-}
-
-fn ensure_gateway_base_origin(
-    app: &tauri::AppHandle,
-    db: &crate::db::Db,
-) -> crate::shared::error::AppResult<String> {
-    let status = app_ensure_gateway_running(app, db.clone(), None)?;
-
-    crate::app::heartbeat_watchdog::gated_emit(app, GATEWAY_STATUS_EVENT_NAME, status.clone());
-
-    status
-        .base_url
-        .ok_or_else(|| "SYSTEM_ERROR: gateway base_url missing".to_string().into())
 }
 
 fn build_claude_gateway_base_url(gateway_base_origin: &str, provider_id: i64) -> String {

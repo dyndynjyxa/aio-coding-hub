@@ -111,7 +111,7 @@ Codex/OpenAI Responses-style fixture：
 - Mutation fields：`headers`、`requestBody`。
 - Provider-neutral field：`request.normalizedMessages`。
 
-它在当前 attempt 的 provider selection、auth/header preparation、request body sanitizers 和 protocol rectifiers 后执行，紧贴 gateway 向 upstream provider 发送 bytes 前。插件必须保证最终 upstream request-body 或 request-header mutation 时，使用这个 hook。
+它在当前 attempt 的 provider selection、auth/header preparation、request body sanitizers 和 protocol rectifiers 后执行，紧贴 gateway 向 upstream provider 发送 bytes 前。插件需要修改发送前的 upstream request body 或 headers 时，使用这个 hook。Codex 独立搜索（`alpha/search`）会在此 hook 之后移除不兼容的 Responses 字段和请求头；插件不能通过此 hook 绕过搜索协议约束。
 
 这个 hook 看到的是 semantic decoded request body content。如果插件修改 body，gateway 会更新最终 upstream body，并按需要移除或重新计算 wire-level length/encoding 语义。未改变的请求会尽量保留原始 passthrough body。
 

@@ -33,6 +33,10 @@ docs/*
 !docs/plugin-system-rfc.md
 !docs/plugin-manifest-v1.md
 !docs/release-homebrew.md
+!docs/codex-responses-websocket-development-spec.md
+!docs/codex-responses-websocket-spec-review.md
+!docs/codex-responses-websocket-m0-report.md
+!docs/codex-alpha-search-compatibility.md
 !docs/plugins/
 !docs/plugins/**
 docs/superpowers/

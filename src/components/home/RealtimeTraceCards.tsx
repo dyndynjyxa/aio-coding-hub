@@ -21,7 +21,7 @@ import {
   formatUsd,
   sanitizeTtfbMs,
 } from "../../utils/formatters";
-import { Clock, Server, CheckCircle2, XCircle } from "lucide-react";
+import { Clock, Server, CheckCircle2, CircleMinus, XCircle } from "lucide-react";
 import { computeStatusBadge, resolveCacheCreationDisplay } from "./requestLogPresentation";
 import { FolderBadge, FreeBadge, ReasoningEffortBadge, SessionReuseBadge } from "./LogBadges";
 import { formatModelRedirectText } from "./requestLogSpecialSettings";
@@ -150,6 +150,7 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
           errorCode: summaryErrorCode,
           inProgress: isInProgress,
           hasFailover,
+          terminalSignal: summary?.terminal_signal,
         });
         const isClientAbort =
           statusBadge.isClientAbort ||
@@ -312,6 +313,8 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                       </div>
                     ) : statusBadge.isError ? (
                       <XCircle className="h-3 w-3 shrink-0" />
+                    ) : statusBadge.isIncomplete ? (
+                      <CircleMinus className="h-3 w-3 shrink-0" />
                     ) : (
                       <CheckCircle2 className="h-3 w-3 shrink-0" />
                     )}

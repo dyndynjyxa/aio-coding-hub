@@ -1,4 +1,5 @@
 use super::*;
+use crate::gateway::streams::UpstreamStreamError;
 use flate2::{write::GzEncoder, Compression};
 use std::collections::VecDeque;
 use std::future::Future;
@@ -7,11 +8,11 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 struct VecBytesStream {
-    items: VecDeque<Result<Bytes, reqwest::Error>>,
+    items: VecDeque<Result<Bytes, UpstreamStreamError>>,
 }
 
 impl VecBytesStream {
-    fn new(items: Vec<Result<Bytes, reqwest::Error>>) -> Self {
+    fn new(items: Vec<Result<Bytes, UpstreamStreamError>>) -> Self {
         Self {
             items: items.into_iter().collect(),
         }
@@ -19,7 +20,7 @@ impl VecBytesStream {
 }
 
 impl Stream for VecBytesStream {
-    type Item = Result<Bytes, reqwest::Error>;
+    type Item = Result<Bytes, UpstreamStreamError>;
 
     fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         Poll::Ready(self.items.pop_front())
@@ -42,7 +43,7 @@ async fn next_item<S: Stream + Unpin>(stream: &mut S) -> Option<S::Item> {
 
 async fn collect_ok_bytes<S>(mut stream: S) -> Vec<u8>
 where
-    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<Bytes, UpstreamStreamError>> + Unpin,
 {
     let mut out: Vec<u8> = Vec::new();
     while let Some(item) = next_item(&mut stream).await {
