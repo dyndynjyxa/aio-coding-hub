@@ -292,7 +292,7 @@ function CliProxyGrid({ cliProxyState }: { cliProxyState: CliProxyState }) {
   }
 
   return (
-    <div className="grid w-full grid-cols-4 gap-1" aria-label="CLI 代理控制">
+    <div className="grid w-full grid-cols-3 gap-1" aria-label="CLI 代理控制">
       {CLI_PROXY_ITEMS.map(({ key: cliKey }) => {
         const isEnabled = !!cliProxyState.cliProxyEnabled[cliKey];
         const drifted =

@@ -67,7 +67,7 @@ export function HomeWorkspaceConfigPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-1.5">
         {configs.map((config) => {
           const active = config.cliKey === selectedConfig.cliKey;
 
@@ -78,7 +78,7 @@ export function HomeWorkspaceConfigPanel({
               aria-pressed={active}
               onClick={() => onSelectCliKey(config.cliKey)}
               className={cn(
-                "inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                "inline-flex items-center rounded-full border px-2.5 py-1.5 text-xs font-medium transition-colors",
                 active
                   ? "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300"
                   : "border-border bg-white text-muted-foreground hover:bg-secondary dark:border-border dark:bg-secondary dark:text-foreground dark:hover:bg-muted"
@@ -86,7 +86,7 @@ export function HomeWorkspaceConfigPanel({
             >
               <CliBrandIcon
                 cliKey={config.cliKey}
-                className="mr-1.5 h-3.5 w-3.5 shrink-0 rounded-[4px] object-contain"
+                className="mr-1 h-3.5 w-3.5 shrink-0 rounded-[4px] object-contain"
               />
               {config.cliLabel}
             </button>
