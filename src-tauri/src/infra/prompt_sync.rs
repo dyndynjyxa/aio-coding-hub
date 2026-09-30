@@ -660,6 +660,12 @@ pub fn restore_disabled_prompt<R: tauri::Runtime>(
         return Ok(());
     };
 
+    // The snapshot only describes the file from before AIO applied a prompt. Once it has been
+    // restored, the file is the user's again, so later syncs must not replay the stale snapshot.
+    if !manifest.enabled {
+        return Ok(());
+    }
+
     restore_from_manifest(app, &manifest)?;
 
     manifest.enabled = false;
@@ -766,6 +772,60 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(&new_target).expect("read restored new prompt"),
             "new local\n"
+        );
+    }
+
+    #[test]
+    fn disabled_prompt_sync_keeps_file_created_after_absent_snapshot() {
+        let _lock = crate::test_support::test_env_lock();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut env = EnvRestore::default();
+        env.set(
+            "AIO_CODING_HUB_HOME_DIR",
+            temp.path().as_os_str().to_os_string(),
+        );
+        env.set("AIO_CODING_HUB_DOTDIR_NAME", ".aio-prompt-absent-test");
+        let app = tauri::test::mock_app();
+        let target = prompt_target_path(app.handle(), "claude").expect("Claude prompt target");
+
+        restore_disabled_prompt(app.handle(), "claude").expect("record absent prompt file");
+        std::fs::create_dir_all(target.parent().expect("target parent")).expect("create dir");
+        std::fs::write(&target, "user prompt\n").expect("write user prompt");
+        restore_disabled_prompt(app.handle(), "claude").expect("sync without enabled prompt");
+
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("read user prompt"),
+            "user prompt\n"
+        );
+    }
+
+    #[test]
+    fn disabled_prompt_sync_keeps_edits_made_after_restore() {
+        let _lock = crate::test_support::test_env_lock();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut env = EnvRestore::default();
+        env.set(
+            "AIO_CODING_HUB_HOME_DIR",
+            temp.path().as_os_str().to_os_string(),
+        );
+        env.set("AIO_CODING_HUB_DOTDIR_NAME", ".aio-prompt-edit-test");
+        let app = tauri::test::mock_app();
+        let target = prompt_target_path(app.handle(), "claude").expect("Claude prompt target");
+        std::fs::create_dir_all(target.parent().expect("target parent")).expect("create dir");
+        std::fs::write(&target, "original\n").expect("write original prompt");
+
+        apply_enabled_prompt(app.handle(), "claude", 1, "managed").expect("apply prompt");
+        restore_disabled_prompt(app.handle(), "claude").expect("disable prompt");
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("read restored prompt"),
+            "original\n"
+        );
+        std::fs::write(&target, "edited\n").expect("edit prompt");
+        restore_disabled_prompt(app.handle(), "claude").expect("sync without enabled prompt");
+
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("read edited prompt"),
+            "edited\n"
         );
     }
 
