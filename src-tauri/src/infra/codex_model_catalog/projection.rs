@@ -403,7 +403,6 @@ mod tests {
                     target: (*target).to_string(),
                 })
                 .collect(),
-            supports_1m: false,
         }
     }
 
@@ -651,7 +650,6 @@ mod tests {
                     target: "target".to_string(),
                 }))
                 .collect(),
-            supports_1m: false,
         };
         let result = build_projection(&bundled(), None, &[policy])
             .expect("projection")

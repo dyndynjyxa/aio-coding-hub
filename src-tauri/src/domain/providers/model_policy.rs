@@ -33,16 +33,6 @@ pub struct ProviderModelPolicyV1 {
     pub mode: ProviderModelMode,
     pub model_patterns: Vec<String>,
     pub mappings: Vec<ProviderModelMapping>,
-    /// Claude Desktop only: the provider accepts 1M-context requests. Omitted
-    /// when false so unchecked policies keep their previous JSON.
-    // `default` must stay after `skip_serializing_if`: specta reads the serde
-    // attributes in order and only `default` marks the TS field optional.
-    #[serde(
-        rename = "supports1m",
-        skip_serializing_if = "std::ops::Not::not",
-        default
-    )]
-    pub supports_1m: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,7 +49,6 @@ impl ProviderModelPolicyV1 {
             mode: ProviderModelMode::All,
             model_patterns: Vec::new(),
             mappings: Vec::new(),
-            supports_1m: false,
         }
     }
 
@@ -124,7 +113,15 @@ impl ProviderModelPolicyV1 {
             return (None, status);
         };
 
-        match serde_json::from_str::<Self>(raw)
+        let parsed = serde_json::from_str::<serde_json::Value>(raw).and_then(|mut value| {
+            // Earlier Claude Desktop builds stored a per-provider `supports1m`
+            // checkbox here; drop it so those rows stay routable.
+            if let Some(object) = value.as_object_mut() {
+                object.remove("supports1m");
+            }
+            serde_json::from_value::<Self>(value)
+        });
+        match parsed
             .map_err(|error| error.to_string())
             .and_then(Self::normalized)
         {
@@ -253,7 +250,6 @@ mod tests {
             mode,
             model_patterns: model_patterns.into_iter().map(str::to_string).collect(),
             mappings,
-            supports_1m: false,
         }
     }
 
@@ -367,6 +363,26 @@ mod tests {
     }
 
     #[test]
+    fn provider_model_policy_drops_legacy_desktop_1m_flag() {
+        let (decoded, status) = ProviderModelPolicyV1::decode(
+            Some(
+                r#"{"version":1,"mode":"all","modelPatterns":[],"mappings":[{"source":"claude-opus-5","target":"claude-opus-5-5"}],"supports1m":true}"#,
+            ),
+            "claude_desktop",
+        );
+        assert_eq!(status, ProviderModelPolicyStatus::Ready);
+        let decoded = decoded.expect("legacy policy should decode");
+        assert_eq!(
+            decoded.mappings,
+            vec![mapping("claude-opus-5", "claude-opus-5-5")]
+        );
+        assert!(!decoded
+            .to_json()
+            .expect("serialize policy")
+            .contains("supports1m"));
+    }
+
+    #[test]
     fn provider_model_policy_accepts_large_catalogs_and_long_unicode_ids() {
         let long_source = format!("model-{}", "模".repeat(201));
         let long_target = format!("upstream-{}", "型".repeat(201));
@@ -376,7 +392,6 @@ mod tests {
             mode: ProviderModelMode::Selected,
             model_patterns,
             mappings: vec![mapping(&long_source, &long_target)],
-            supports_1m: false,
         }
         .normalized()
         .expect("large policy should be valid");

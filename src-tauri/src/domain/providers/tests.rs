@@ -970,7 +970,6 @@ fn provider_model_policy_round_trips_and_invalid_rows_fail_closed() {
                 source: "gpt-*".to_string(),
                 target: "upstream-*".to_string(),
             }],
-            supports_1m: false,
         }
         .normalized()
         .expect("valid model policy"),

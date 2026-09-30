@@ -3693,11 +3693,6 @@ export type ProviderModelPolicyV1 = {
   mode: ProviderModelMode;
   modelPatterns: string[];
   mappings: ProviderModelMapping[];
-  /**
-   * Claude Desktop only: the provider accepts 1M-context requests. Omitted
-   * when false so unchecked policies keep their previous JSON.
-   */
-  supports1m?: boolean;
 };
 export type ProviderOAuthDeviceCodeCancelResult = { cancelled: boolean };
 export type ProviderOAuthDeviceCodePollInput = {

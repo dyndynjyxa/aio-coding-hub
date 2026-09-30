@@ -204,7 +204,7 @@ describe("pages/providers/ProviderModelPolicySection", () => {
     expect(screen.queryByText(/映射 1/)).not.toBeInTheDocument();
   });
 
-  it("edits Claude Desktop role mappings alongside the generic mapping editor", () => {
+  it("edits Claude Desktop family mappings alongside the generic mapping editor", () => {
     const onChange = renderSection("claude_desktop");
 
     expect(screen.getByText("模型范围")).toBeInTheDocument();
@@ -213,10 +213,10 @@ describe("pages/providers/ProviderModelPolicySection", () => {
     });
     expect(onChange).toHaveBeenLastCalledWith({
       ...allPolicy,
-      mappings: [{ source: "claude-opus-5", target: "upstream-opus" }],
+      mappings: [{ source: "claude-opus-*", target: "upstream-opus" }],
     });
 
-    // The Code tab requests models outside the four menu roles.
+    // Exact mappings for a single version use the generic editor.
     fireEvent.change(screen.getByLabelText("映射请求模型"), {
       target: { value: "claude-opus-5-5" },
     });

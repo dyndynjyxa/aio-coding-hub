@@ -96,8 +96,9 @@ pub(crate) fn refresh_claude_desktop_models_after_routing_change(
     }
 }
 
-/// Fire-and-forget: keeps the Desktop profile's 1M model variants in line with
-/// the providers' 1M checkbox. Desktop picks the change up on its next launch.
+/// Fire-and-forget: keeps the Desktop profile's model list in line with
+/// Desktop's model catalog and the providers' mapping sources. Desktop picks
+/// the change up on its next launch.
 pub(crate) fn spawn_claude_desktop_models_refresh<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     db: crate::db::Db,
@@ -113,7 +114,7 @@ pub(crate) fn spawn_claude_desktop_models_refresh<R: tauri::Runtime>(
         })
         .await;
         match result {
-            Ok(true) => tracing::info!("Claude Desktop 1M model variants refreshed"),
+            Ok(true) => tracing::info!("Claude Desktop model list refreshed"),
             Ok(false) => {}
             Err(error) => tracing::warn!(
                 error_code = "CLI_PROXY_CLAUDE_DESKTOP_MODELS_FAILED",
@@ -854,7 +855,6 @@ mod tests {
             mode: providers::ProviderModelMode::Selected,
             model_patterns: vec!["claude-sonnet-*".to_string()],
             mappings: vec![],
-            supports_1m: false,
         });
         assert_eq!(
             provider_runtime_reset_decision(Some(&previous), Some("sk-old"), &policy_changed, None,),

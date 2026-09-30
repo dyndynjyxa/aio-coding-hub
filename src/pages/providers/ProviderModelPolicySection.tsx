@@ -394,11 +394,6 @@ export function ProviderModelPolicySection({
                   <ClaudeDesktopModelSection
                     mappings={currentPolicy.mappings}
                     onChange={(mappings) => emit({ ...currentPolicy, mappings })}
-                    supports1m={currentPolicy.supports1m ?? false}
-                    onSupports1mChange={(checked) => {
-                      const { supports1m: _previous, ...rest } = currentPolicy;
-                      emit(checked ? { ...rest, supports1m: true } : rest);
-                    }}
                     disabled={saving}
                   />
                 ) : null}

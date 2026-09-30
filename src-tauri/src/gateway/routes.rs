@@ -37,35 +37,34 @@ async fn root() -> &'static str {
 async fn claude_desktop_models<R: tauri::Runtime>(
     State(state): State<GatewayAppState<R>>,
 ) -> Json<Value> {
-    let routes = crate::cli_proxy::CLAUDE_DESKTOP_MODEL_ROUTES;
+    let app = state.app.clone();
     let db = state.db.clone();
-    let routes_with_1m = crate::blocking::run("claude_desktop_models", move || {
-        crate::providers::list_ready_model_policies_for_configured_routes(&db, "claude_desktop")
-            .map(|policies| crate::cli_proxy::claude_desktop_routes_with_1m(&policies))
+    let models = crate::blocking::run("claude_desktop_models", move || {
+        crate::cli_proxy::claude_desktop_models(&app, &db)
     })
     .await
     .unwrap_or_else(|error| {
-        tracing::warn!(error = %error, "failed to read Claude Desktop 1M providers");
+        tracing::warn!(error = %error, "failed to build Claude Desktop model list");
         Vec::new()
     });
-    let data = routes
+    let data = models
         .iter()
         // Desktop's gateway discovery reads snake_case `supports_1m`; the
         // profile's explicit list carries the same capability as `supports1m`.
-        .map(|id| {
+        .map(|model| {
             json!({
                 "type": "model",
-                "id": id,
+                "id": model.id,
                 "created_at": "2024-01-01T00:00:00Z",
-                "supports_1m": routes_with_1m.contains(id),
+                "supports_1m": model.supports_1m,
             })
         })
         .collect::<Vec<_>>();
     Json(json!({
         "data": data,
         "has_more": false,
-        "first_id": routes.first(),
-        "last_id": routes.last(),
+        "first_id": models.first().map(|model| &model.id),
+        "last_id": models.last().map(|model| &model.id),
     }))
 }
 
@@ -832,7 +831,6 @@ mod tests {
                     }]
                 })
                 .unwrap_or_default(),
-            supports_1m: false,
         }
     }
 
@@ -3878,10 +3876,10 @@ module.exports.activate = function activate(api) {
             "Desktop upstream",
             upstream_url,
             0,
-            Some(providers::ProviderModelPolicyV1 {
-                supports_1m: true,
-                ..selected_model_policy("claude-sonnet-5", Some("upstream-sonnet"))
-            }),
+            Some(selected_model_policy(
+                "claude-sonnet-5",
+                Some("upstream-sonnet"),
+            )),
         );
         let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
         let router = build_router(gateway_state(app_handle, db, log_tx));
@@ -3899,21 +3897,19 @@ module.exports.activate = function activate(api) {
         let models_body: Value =
             serde_json::from_slice(&to_bytes(models.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
+        // No cached Desktop catalog here, so the fallback list applies.
         assert_eq!(models_body["data"][0]["id"], "claude-sonnet-5");
         assert_eq!(models_body["data"][0]["supports_1m"], true);
-        assert_eq!(models_body["data"][1]["supports_1m"], false);
-        assert!(models_body["data"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|model| model["id"] == "claude-fable-5"));
+        assert_eq!(models_body["data"][3]["id"], "claude-haiku-4-5");
+        assert_eq!(models_body["data"][3]["supports_1m"], false);
 
         let request = Request::builder()
             .method(Method::POST)
             .uri("/claude_desktop/v1/messages")
             .header(header::CONTENT_TYPE, "application/json")
             .header(header::AUTHORIZATION, "Bearer aio-coding-hub")
-            // Desktop's direct one-shot requests send the picker's 1M variant verbatim.
+            // Desktop's direct one-shot requests send the picker's 1M variant
+            // verbatim; it reaches any provider with the marker stripped.
             .body(Body::from(r#"{"model":"claude-sonnet-5[1m]","max_tokens":8,"messages":[{"role":"user","content":"hello"}]}"#))
             .unwrap();
         let response = router.oneshot(request).await.expect("route response");
@@ -3927,74 +3923,6 @@ module.exports.activate = function activate(api) {
         assert_eq!(log.input_tokens, Some(2));
         assert_eq!(log.output_tokens, Some(1));
         upstream_task.abort();
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn claude_desktop_1m_request_skips_providers_without_1m() {
-        let _env_lock = crate::test_support::test_env_lock();
-        let home = tempfile::tempdir().expect("home dir");
-        let mut env = isolate_app_env(home.path());
-        env.set_var("LOCALAPPDATA", home.path().as_os_str().to_os_string());
-        env.set_var("XDG_CONFIG_HOME", home.path().as_os_str().to_os_string());
-        let app = tauri::test::mock_app();
-        let app_handle = app.handle().clone();
-        crate::cli_proxy::set_enabled(
-            &app_handle,
-            "claude_desktop",
-            true,
-            "http://127.0.0.1:37123",
-        )
-        .expect("enable desktop proxy");
-
-        let db_dir = tempfile::tempdir().expect("db dir");
-        let db =
-            db::init_for_tests(&db_dir.path().join("desktop-1m.sqlite")).expect("init test db");
-        insert_provider_with_priority_and_policy(
-            &db,
-            "claude_desktop",
-            "Desktop 200k",
-            "http://127.0.0.1:9".to_string(),
-            0,
-            Some(providers::ProviderModelPolicyV1::all()),
-        );
-        let (log_tx, _log_rx) = tokio::sync::mpsc::channel(4);
-        let router = build_router(gateway_state(app_handle, db, log_tx));
-        let models = router
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .uri("/claude_desktop/v1/models")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .expect("model list");
-        let models_body: Value =
-            serde_json::from_slice(&to_bytes(models.into_body(), usize::MAX).await.unwrap())
-                .unwrap();
-        assert!(models_body["data"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|model| model["supports_1m"] == false));
-
-        // The embedded Claude Code asks for 1M with the beta header.
-        let request = Request::builder()
-            .method(Method::POST)
-            .uri("/claude_desktop/v1/messages")
-            .header(header::CONTENT_TYPE, "application/json")
-            .header("anthropic-beta", "context-1m-2025-08-07")
-            .body(Body::from(r#"{"model":"claude-sonnet-5","max_tokens":8,"messages":[{"role":"user","content":"hello"}]}"#))
-            .unwrap();
-        let response = router.oneshot(request).await.expect("route response");
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-        let payload: Value =
-            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
-                .unwrap();
-        assert_eq!(
-            payload.get("error_code").and_then(Value::as_str),
-            Some(crate::gateway::proxy::GatewayErrorCode::NoEligibleProviderForModel.as_str())
-        );
     }
 
     // Legacy claude_models mappings surface as a unified model_redirect (stage

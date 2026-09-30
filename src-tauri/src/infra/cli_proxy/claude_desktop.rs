@@ -1,6 +1,9 @@
 //! Claude Desktop 3P profile adapter. Requests still use AIO's gateway.
 
-use super::{read_optional_cli_proxy_file, write_cli_proxy_file_atomic, PLACEHOLDER_KEY};
+use super::{
+    read_optional_cli_proxy_file, read_optional_cli_proxy_file_with_max_len,
+    write_cli_proxy_file_atomic, PLACEHOLDER_KEY,
+};
 use crate::providers::{ProviderModelEligibility, ProviderModelPolicyV1};
 use crate::shared::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
@@ -10,70 +13,203 @@ use std::path::{Path, PathBuf};
 pub(super) const PROFILE_ID: &str = "00000000-0000-4000-8000-000000a10d35";
 const PROFILE_NAME: &str = "AIO Coding Hub";
 const CONFIG_FILE: &str = "claude_desktop_config.json";
-pub(crate) const MODEL_ROUTES: [&str; 4] = [
+const MODEL_CATALOG_MAX_BYTES: usize = 8 * 1024 * 1024;
+/// Used when Desktop has not cached its model catalog yet.
+const FALLBACK_MODELS: [&str; 4] = [
     "claude-sonnet-5",
     "claude-opus-5",
     "claude-fable-5",
     "claude-haiku-4-5",
 ];
 
-/// Desktop takes 1M support for an explicit model list only from the
-/// profile's `supports1m`; the picker then offers a `<route>[1m]` variant and
-/// keeps 200k as the default. Only routes in `routes_with_1m` get it.
-fn inference_models(routes_with_1m: &[&str]) -> Value {
-    MODEL_ROUTES
-        .iter()
-        .map(|name| json!({ "name": name, "supports1m": routes_with_1m.contains(name) }))
-        .collect()
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DesktopModel {
+    pub(crate) id: String,
+    pub(crate) supports_1m: bool,
 }
 
-/// A route offers 1M when some routable Desktop provider that can serve it
-/// has the 1M checkbox on; the gateway sends 1M requests only to those.
-pub(crate) fn routes_with_1m(policies: &[ProviderModelPolicyV1]) -> Vec<&'static str> {
-    MODEL_ROUTES
-        .into_iter()
-        .filter(|route| {
-            policies.iter().any(|policy| {
-                policy.supports_1m && policy.eligibility(route) != ProviderModelEligibility::Blocked
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CatalogModel {
+    id: String,
+    main: bool,
+    supports_1m: bool,
+}
+
+/// Desktop caches its signed model catalog (verified before it is written) as
+/// `{"documentBytes": base64(json)}`. The `ccd` surface is the Desktop picker;
+/// its `main` section offered on `gateway` is what Desktop lists for 3P.
+fn parse_catalog(bytes: &[u8]) -> Option<Vec<CatalogModel>> {
+    use base64::Engine;
+
+    let cache = serde_json::from_slice::<Value>(bytes).ok()?;
+    let document = base64::engine::general_purpose::STANDARD
+        .decode(cache.get("documentBytes")?.as_str()?)
+        .ok()?;
+    let document = serde_json::from_slice::<Value>(&document).ok()?;
+    let models = document
+        .pointer("/surfaces/ccd/model_selector_config")?
+        .as_array()?
+        .iter()
+        .find(|config| config.get("id").and_then(Value::as_str) == Some("ccd"))?
+        .get("models")?
+        .as_array()?;
+    Some(
+        models
+            .iter()
+            .filter_map(|model| {
+                let id = model.get("id")?.as_str()?.trim();
+                if id.is_empty() || id.len() > 255 || id.chars().any(char::is_control) {
+                    return None;
+                }
+                let on_gateway = model
+                    .get("offered_on")
+                    .and_then(Value::as_array)
+                    .is_some_and(|hosts| hosts.iter().any(|host| host == "gateway"));
+                Some(CatalogModel {
+                    id: id.to_string(),
+                    main: on_gateway
+                        && model.get("section").and_then(Value::as_str) == Some("main"),
+                    // Desktop's own gateway discovery uses the same threshold.
+                    supports_1m: model
+                        .pointer("/runtime/max_input_tokens")
+                        .and_then(Value::as_u64)
+                        .is_some_and(|tokens| tokens >= 1_000_000),
+                })
+            })
+            .collect(),
+    )
+}
+
+/// Without a catalog entry, current Opus, Sonnet and Fable models take 1M
+/// context and Haiku does not.
+fn family_supports_1m(id: &str) -> bool {
+    ["opus", "sonnet", "fable"]
+        .iter()
+        .any(|family| id.contains(family))
+}
+
+/// Like the Codex catalog projection: Desktop's own catalog is the baseline
+/// and exact mapping sources of routable providers are added. Wildcard
+/// sources only apply to listed models.
+fn model_list(
+    catalog: Option<&[CatalogModel]>,
+    policies: &[ProviderModelPolicyV1],
+) -> Vec<DesktopModel> {
+    let catalog_1m = |id: &str| {
+        catalog
+            .and_then(|models| models.iter().find(|model| model.id == id))
+            .map_or_else(|| family_supports_1m(id), |model| model.supports_1m)
+    };
+    let mut models = catalog
+        .map(|models| {
+            models
+                .iter()
+                .filter(|model| model.main)
+                .map(|model| DesktopModel {
+                    id: model.id.clone(),
+                    supports_1m: model.supports_1m,
+                })
+                .collect::<Vec<_>>()
+        })
+        .filter(|models| !models.is_empty())
+        .unwrap_or_else(|| {
+            FALLBACK_MODELS
+                .iter()
+                .map(|id| DesktopModel {
+                    id: id.to_string(),
+                    supports_1m: family_supports_1m(id),
+                })
+                .collect()
+        });
+
+    let mut sources = policies
+        .iter()
+        .flat_map(|policy| {
+            policy.mappings.iter().filter(|mapping| {
+                !mapping.source.contains('*')
+                    && policy.eligibility(&mapping.source) == ProviderModelEligibility::Explicit
             })
         })
-        .collect()
+        .map(|mapping| mapping.source.as_str())
+        .collect::<Vec<_>>();
+    sources.sort_unstable();
+    sources.dedup();
+    for source in sources {
+        if !models.iter().any(|model| model.id == source) {
+            models.push(DesktopModel {
+                id: source.to_string(),
+                supports_1m: catalog_1m(source),
+            });
+        }
+    }
+    models
 }
 
-fn load_routes_with_1m(db: &crate::db::Db) -> AppResult<Vec<&'static str>> {
+fn load_catalog(paths: &DesktopPaths) -> Option<Vec<CatalogModel>> {
+    let bytes =
+        match read_optional_cli_proxy_file_with_max_len(&paths.catalog, MODEL_CATALOG_MAX_BYTES) {
+            Ok(bytes) => bytes?,
+            Err(error) => {
+                tracing::warn!(error = %error, "failed to read Claude Desktop model catalog");
+                return None;
+            }
+        };
+    let models = parse_catalog(&bytes);
+    if models.is_none() {
+        tracing::warn!("Claude Desktop model catalog has an unexpected format");
+    }
+    models
+}
+
+/// The models Desktop's picker and `/claude_desktop/v1/models` offer.
+pub(crate) fn load_models<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    db: &crate::db::Db,
+) -> AppResult<Vec<DesktopModel>> {
+    let catalog = load_catalog(&paths(app)?);
     let policies =
         crate::providers::list_ready_model_policies_for_configured_routes(db, "claude_desktop")?;
-    Ok(routes_with_1m(&policies))
+    Ok(model_list(catalog.as_deref(), &policies))
 }
 
 /// Profile writes outside a provider change open the DB the same way the
 /// Codex catalog projection does.
-pub(super) fn app_routes_with_1m<R: tauri::Runtime>(
+pub(super) fn app_models<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
-) -> AppResult<Vec<&'static str>> {
+) -> AppResult<Vec<DesktopModel>> {
     if !crate::db::db_path(app)?.exists() {
-        return Ok(Vec::new());
+        return Ok(model_list(load_catalog(&paths(app)?).as_deref(), &[]));
     }
-    load_routes_with_1m(&crate::db::init(app)?)
+    load_models(app, &crate::db::init(app)?)
 }
 
-/// Checks the list shape only; the 1M flags follow provider changes through
-/// `refresh_inference_models`, which needs the DB.
+/// Desktop takes 1M support for an explicit model list only from the
+/// profile's `supports1m`; the picker then offers a `<model>[1m]` variant and
+/// keeps 200k as the default.
+fn inference_models(models: &[DesktopModel]) -> Value {
+    models
+        .iter()
+        .map(|model| json!({ "name": model.id, "supports1m": model.supports_1m }))
+        .collect()
+}
+
+/// Checks the list shape only: the catalog and provider changes move its
+/// content through `refresh_inference_models`, which must not read as drift.
 fn has_current_model_list(profile: &Value) -> bool {
     profile
         .get("inferenceModels")
         .and_then(Value::as_array)
         .is_some_and(|models| {
-            models.len() == MODEL_ROUTES.len()
-                && models.iter().zip(MODEL_ROUTES).all(|(model, route)| {
-                    model.get("name").and_then(Value::as_str) == Some(route)
+            !models.is_empty()
+                && models.iter().all(|model| {
+                    model.get("name").and_then(Value::as_str).is_some()
                         && model.get("supports1m").is_some_and(Value::is_boolean)
                 })
         })
 }
 
-/// Provider changes only move the 1M flags, so rewrite just the profile's
-/// model list. Desktop reads it on its next launch.
+/// Catalog and provider changes only move the model list, so rewrite just
+/// that part of the profile. Desktop reads it on its next launch.
 pub(super) fn refresh_inference_models<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     db: &crate::db::Db,
@@ -83,7 +219,7 @@ pub(super) fn refresh_inference_models<R: tauri::Runtime>(
         return Ok(false);
     };
     let mut value = object_from_bytes(Some(current), "desktop_profile")?;
-    let models = inference_models(&load_routes_with_1m(db)?);
+    let models = inference_models(&load_models(app, db)?);
     if value.get("inferenceModels") == Some(&models) {
         return Ok(false);
     }
@@ -100,6 +236,7 @@ pub(super) struct DesktopPaths {
     pub(super) threep: PathBuf,
     pub(super) profile: PathBuf,
     pub(super) meta: PathBuf,
+    catalog: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -117,6 +254,7 @@ fn paths_from_dir(threep: PathBuf) -> DesktopPaths {
         threep: threep.join(CONFIG_FILE),
         profile: library.join(format!("{PROFILE_ID}.json")),
         meta: library.join("_meta.json"),
+        catalog: threep.join("model-catalog").join("published.json"),
     }
 }
 
@@ -343,7 +481,7 @@ pub(super) fn build_target(
     kind: &str,
     current: Option<Vec<u8>>,
     base_origin: &str,
-    routes_with_1m: &[&str],
+    models: &[DesktopModel],
 ) -> AppResult<Vec<u8>> {
     let mut value = object_from_bytes(current, kind)?;
     let object = value.as_object_mut().expect("validated object");
@@ -352,8 +490,8 @@ pub(super) fn build_target(
             object.insert("deploymentMode".into(), json!("3p"));
         }
         "desktop_profile" => {
-            // Desktop accepts only Claude role IDs. Actual upstream models are
-            // mapped by AIO's provider model policy on /claude_desktop.
+            // Desktop's picker offers these Claude model IDs. Actual upstream
+            // models are mapped by AIO's provider model policy on /claude_desktop.
             value = json!({
                 "coworkEgressAllowedHosts": ["*"],
                 "disableDeploymentModeChooser": true,
@@ -361,7 +499,7 @@ pub(super) fn build_target(
                 "inferenceGatewayBaseUrl": format!("{base_origin}/claude_desktop"),
                 "inferenceGatewayAuthScheme": "bearer",
                 "inferenceGatewayApiKey": PLACEHOLDER_KEY,
-                "inferenceModels": inference_models(routes_with_1m)
+                "inferenceModels": inference_models(models)
             });
         }
         "desktop_meta" => {
@@ -550,15 +688,19 @@ mod tests {
     }
 
     #[test]
-    fn profile_uses_aio_route_and_claude_safe_models() {
+    fn profile_uses_aio_route_and_listed_models() {
+        let models = [
+            DesktopModel {
+                id: "claude-opus-5-5".into(),
+                supports_1m: true,
+            },
+            DesktopModel {
+                id: "claude-haiku-4-5-20251001".into(),
+                supports_1m: false,
+            },
+        ];
         let value: Value = serde_json::from_slice(
-            &build_target(
-                "desktop_profile",
-                None,
-                "http://127.0.0.1:1234",
-                &["claude-opus-5"],
-            )
-            .unwrap(),
+            &build_target("desktop_profile", None, "http://127.0.0.1:1234", &models).unwrap(),
         )
         .unwrap();
         assert_eq!(
@@ -566,36 +708,94 @@ mod tests {
             "http://127.0.0.1:1234/claude_desktop"
         );
         assert_eq!(value["inferenceGatewayApiKey"], PLACEHOLDER_KEY);
-        assert_eq!(value["inferenceModels"].as_array().unwrap().len(), 4);
-        assert!(value["inferenceModels"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|v| v["name"].as_str().unwrap().starts_with("claude-")
-                && v["supports1m"] == (v["name"] == "claude-opus-5")));
+        assert_eq!(
+            value["inferenceModels"],
+            json!([
+                {"name": "claude-opus-5-5", "supports1m": true},
+                {"name": "claude-haiku-4-5-20251001", "supports1m": false}
+            ])
+        );
         assert!(has_current_model_list(&value));
     }
 
     #[test]
-    fn only_checked_providers_that_serve_a_route_offer_1m() {
-        let policy = |mode, patterns: &[&str], supports_1m| ProviderModelPolicyV1 {
+    fn model_list_follows_desktop_catalog_and_exact_mapping_sources() {
+        use crate::providers::ProviderModelMode::{All, Excluded};
+        use base64::Engine;
+
+        let model = |id: &str, section: &str, hosts: &[&str], tokens: u64| {
+            json!({
+                "id": id,
+                "section": section,
+                "offered_on": hosts,
+                "runtime": {"max_input_tokens": tokens}
+            })
+        };
+        let document = json!({"surfaces": {"ccd": {"model_selector_config": [{
+            "id": "ccd",
+            "models": [
+                model("claude-opus-5-5", "main", &["first_party", "gateway"], 1_000_000),
+                model("claude-haiku-4-5-20251001", "main", &["gateway"], 200_000),
+                model("claude-first-party-only", "main", &["first_party"], 1_000_000),
+                model("claude-opus-5", "overflow", &["gateway"], 1_000_000),
+            ]
+        }]}}});
+        let cache = json!({"documentBytes": base64::engine::general_purpose::STANDARD
+            .encode(serde_json::to_vec(&document).unwrap())});
+        let catalog = parse_catalog(&serde_json::to_vec(&cache).unwrap()).unwrap();
+
+        let policy = |mode, patterns: &[&str], mappings: &[(&str, &str)]| ProviderModelPolicyV1 {
             version: 1,
             mode,
             model_patterns: patterns.iter().map(|value| value.to_string()).collect(),
-            mappings: Vec::new(),
-            supports_1m,
+            mappings: mappings
+                .iter()
+                .map(|(source, target)| crate::providers::ProviderModelMapping {
+                    source: source.to_string(),
+                    target: target.to_string(),
+                })
+                .collect(),
         };
-        use crate::providers::ProviderModelMode::{All, Excluded, Selected};
+        let policies = [
+            policy(
+                All,
+                &[],
+                &[
+                    ("gpt-5", "upstream"),
+                    ("claude-opus-5", "upstream"),
+                    ("claude-sonnet-*", "upstream"),
+                ],
+            ),
+            policy(
+                Excluded,
+                &["claude-blocked"],
+                &[("claude-blocked", "upstream")],
+            ),
+        ];
+        let listed = |models: Vec<DesktopModel>| {
+            models
+                .into_iter()
+                .map(|model| (model.id, model.supports_1m))
+                .collect::<Vec<_>>()
+        };
 
-        assert!(routes_with_1m(&[policy(All, &[], false)]).is_empty());
-        assert_eq!(routes_with_1m(&[policy(All, &[], true)]), MODEL_ROUTES);
         assert_eq!(
-            routes_with_1m(&[
-                policy(Selected, &["claude-sonnet-5"], true),
-                policy(Excluded, &["claude-haiku-*"], true),
-                policy(All, &[], false),
-            ]),
-            ["claude-sonnet-5", "claude-opus-5", "claude-fable-5"]
+            listed(model_list(Some(&catalog), &policies)),
+            [
+                ("claude-opus-5-5".to_string(), true),
+                ("claude-haiku-4-5-20251001".to_string(), false),
+                ("claude-opus-5".to_string(), true),
+                ("gpt-5".to_string(), false),
+            ]
+        );
+        assert_eq!(
+            listed(model_list(None, &[])),
+            [
+                ("claude-sonnet-5".to_string(), true),
+                ("claude-opus-5".to_string(), true),
+                ("claude-fable-5".to_string(), true),
+                ("claude-haiku-4-5".to_string(), false),
+            ]
         );
     }
 

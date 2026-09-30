@@ -3,11 +3,9 @@
 mod claude;
 mod claude_desktop;
 pub use claude_desktop::ClaudeDesktopConfigStatus;
-pub(crate) use claude_desktop::MODEL_ROUTES as CLAUDE_DESKTOP_MODEL_ROUTES;
 pub(crate) use claude_desktop::{
     global_instructions_path as claude_desktop_global_instructions_path,
-    is_not_initialized as claude_desktop_not_initialized,
-    routes_with_1m as claude_desktop_routes_with_1m,
+    is_not_initialized as claude_desktop_not_initialized, load_models as claude_desktop_models,
     skills_plugin_dir as claude_desktop_skills_plugin_dir,
 };
 mod codex;
@@ -431,8 +429,8 @@ fn apply_proxy_config<R: tauri::Runtime>(
 
     let targets = target_files(app, cli_key)?;
     let mut prepared_writes: Vec<(PathBuf, Vec<u8>)> = Vec::with_capacity(targets.len());
-    let desktop_routes_with_1m = if cli_key == "claude_desktop" {
-        claude_desktop::app_routes_with_1m(app)?
+    let desktop_models = if cli_key == "claude_desktop" {
+        claude_desktop::app_models(app)?
     } else {
         Vec::new()
     };
@@ -462,7 +460,7 @@ fn apply_proxy_config<R: tauri::Runtime>(
                 }
             }
             "claude_desktop" => {
-                claude_desktop::build_target(t.kind, current, base_origin, &desktop_routes_with_1m)?
+                claude_desktop::build_target(t.kind, current, base_origin, &desktop_models)?
             }
             "codex" => unreachable!("Codex has a dedicated atomic apply path"),
             "gemini" => gemini::build_gemini_env(current, &format!("{base_origin}/gemini"))?,
@@ -519,8 +517,8 @@ pub(crate) fn refresh_codex_model_catalog_if_enabled<R: tauri::Runtime>(
     }
 }
 
-/// Provider changes move only the Desktop 1M flags, so rewrite the model list
-/// of an applied AIO profile and leave the rest of the proxy config alone.
+/// Catalog and provider changes move only the Desktop model list, so rewrite
+/// it in an applied AIO profile and leave the rest of the proxy config alone.
 pub(crate) fn refresh_claude_desktop_models_if_enabled<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     db: &crate::db::Db,

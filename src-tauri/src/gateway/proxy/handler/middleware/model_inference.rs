@@ -20,7 +20,7 @@ use crate::gateway::util::{
     infer_requested_model_info, RequestedModelLocation, LARGE_REQUEST_BODY_BYTES,
 };
 use axum::body::Bytes;
-use axum::http::{HeaderMap, Method};
+use axum::http::Method;
 
 /// Claude Code `/compact` replaces the whole system prompt with this marker
 /// (verified verbatim against claude-cli 2.1.198). Detection is best-effort:
@@ -43,9 +43,6 @@ impl ModelInferenceMiddleware {
         ctx.requested_model = model_info.model;
         ctx.requested_model_location = model_info.location;
         strip_claude_desktop_1m_marker(&mut ctx);
-        if ctx.cli_key == "claude_desktop" && has_1m_context_beta(&ctx.headers) {
-            ctx.requests_1m_context = true;
-        }
 
         ctx.observe_request = compute_observe_request(
             &ctx.cli_key,
@@ -106,7 +103,6 @@ fn strip_claude_desktop_1m_marker<R: tauri::Runtime>(ctx: &mut ProxyContext<R>) 
     let Some(route) = strip_1m_marker(&original) else {
         return;
     };
-    ctx.requests_1m_context = true;
     let Some(root) = ctx.introspection_json.as_mut() else {
         return;
     };
@@ -129,16 +125,6 @@ fn strip_claude_desktop_1m_marker<R: tauri::Runtime>(ctx: &mut ProxyContext<R>) 
             "targetModel": route,
         }),
     );
-}
-
-/// The embedded Claude Code asks for 1M through the `context-1m-*` beta.
-fn has_1m_context_beta(headers: &HeaderMap) -> bool {
-    headers
-        .get_all("anthropic-beta")
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .flat_map(|value| value.split(','))
-        .any(|beta| beta.trim().starts_with("context-1m-"))
 }
 
 fn strip_1m_marker(model: &str) -> Option<&str> {
@@ -241,21 +227,6 @@ mod tests {
         assert_eq!(strip_1m_marker("claude-opus-5"), None);
         assert_eq!(strip_1m_marker("[1m]"), None);
         assert_eq!(strip_1m_marker("deepseek[1m]-flash"), None);
-    }
-
-    #[test]
-    fn detects_1m_context_beta_among_other_betas() {
-        let mut headers = HeaderMap::new();
-        assert!(!has_1m_context_beta(&headers));
-        headers.append("anthropic-beta", "oauth-2025-04-20".parse().unwrap());
-        assert!(!has_1m_context_beta(&headers));
-        headers.append(
-            "anthropic-beta",
-            "fine-grained-tool-streaming-2025-05-14, context-1m-2025-08-07"
-                .parse()
-                .unwrap(),
-        );
-        assert!(has_1m_context_beta(&headers));
     }
 
     #[test]

@@ -18,7 +18,6 @@ export function cloneProviderModelPolicy(policy: ProviderModelPolicyV1): Provide
     mode: policy.mode,
     modelPatterns: [...policy.modelPatterns],
     mappings: policy.mappings.map((mapping) => ({ ...mapping })),
-    ...(policy.supports1m ? { supports1m: true } : {}),
   };
 }
 

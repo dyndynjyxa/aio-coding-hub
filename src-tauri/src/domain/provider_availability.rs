@@ -611,7 +611,6 @@ mod tests {
                     target: target.to_string(),
                 })
                 .collect(),
-            supports_1m: false,
         }
         .normalized()
         .expect("valid policy fixture")
