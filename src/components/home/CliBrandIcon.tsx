@@ -10,7 +10,7 @@ type CliBrandIconProps = {
 };
 
 export function CliBrandIcon({ cliKey, className }: CliBrandIconProps) {
-  if (cliKey === "claude") {
+  if (cliKey === "claude" || cliKey === "claude_desktop") {
     return <img src={claudeFavicon} alt="" aria-hidden="true" className={className} />;
   }
 

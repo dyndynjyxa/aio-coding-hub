@@ -374,7 +374,7 @@ describe("pages/HomePage", () => {
             ],
           } as any;
         }
-        if (cliKey === "grok") return { data: [] } as any;
+        if (cliKey === "grok" || cliKey === "claude_desktop") return { data: [] } as any;
         return {
           data: [
             { provider_id: 3, state: "OPEN", open_until: nowUnix + 1, cooldown_until: nowUnix + 2 },

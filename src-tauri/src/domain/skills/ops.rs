@@ -1,11 +1,15 @@
+use super::desktop::{reconcile, BuiltinSkills};
 use super::fs_ops::{
     copy_dir_recursive, create_skill_link, exists_or_is_link, has_skill_md, is_managed_dir,
     is_managed_link_to_ssot, is_symlink, is_symlink_or_junction, remove_managed_dir, remove_marker,
-    skill_dir_content_hash, write_source_metadata, SkillSourceMetadata,
+    skill_dir_content_hash, write_marker, write_source_metadata, SkillSourceMetadata,
 };
 use super::installed::{generate_unique_skill_key, get_skill_by_id, get_skill_by_id_for_workspace};
 use super::local::managed_marker_belongs_to_installed_skill;
-use super::paths::{cli_skills_root, ensure_skills_roots, ssot_skills_root, validate_cli_key};
+use super::paths::{
+    cli_skills_root, ensure_skills_roots, optional_cli_skills_root, ssot_skills_root,
+    validate_cli_key,
+};
 use super::repo_cache::ensure_repo_cache;
 use super::skill_md::parse_skill_md;
 use super::types::InstalledSkillSummary;
@@ -86,7 +90,20 @@ fn sync_to_cli<R: tauri::Runtime>(
     let cli_root = cli_skills_root(app, cli_key)?;
     std::fs::create_dir_all(&cli_root)
         .map_err(|e| format!("failed to create {}: {e}", cli_root.display()))?;
+    place_in_cli(cli_key, &cli_root, skill_key, ssot_dir)?;
+    reconcile(cli_key, &cli_root)
+}
+
+fn place_in_cli(
+    cli_key: &str,
+    cli_root: &Path,
+    skill_key: &str,
+    ssot_dir: &Path,
+) -> crate::shared::error::AppResult<()> {
     let target = cli_root.join(skill_key);
+    if BuiltinSkills::load(cli_key, cli_root)?.contains(skill_key) {
+        return Err(format!("SKILL_TARGET_EXISTS_UNMANAGED: {}", target.display()).into());
+    }
 
     if exists_or_is_link(&target) {
         if is_managed_dir(&target)
@@ -100,6 +117,16 @@ fn sync_to_cli<R: tauri::Runtime>(
         }
     }
 
+    if cli_key == super::desktop::CLI_KEY {
+        // Desktop mounts the plugin dir into its Cowork VM, where links out of
+        // it do not resolve, so it gets a marked copy instead.
+        if let Err(err) = copy_dir_recursive(ssot_dir, &target).and_then(|()| write_marker(&target))
+        {
+            let _ = std::fs::remove_dir_all(&target);
+            return Err(err);
+        }
+        return Ok(());
+    }
     create_skill_link(ssot_dir, &target)?;
     Ok(())
 }
@@ -109,7 +136,9 @@ fn remove_from_cli<R: tauri::Runtime>(
     cli_key: &str,
     skill_key: &str,
 ) -> crate::shared::error::AppResult<()> {
-    let cli_root = cli_skills_root(app, cli_key)?;
+    let Some(cli_root) = optional_cli_skills_root(app, cli_key)? else {
+        return Ok(());
+    };
     let target = cli_root.join(skill_key);
     if !exists_or_is_link(&target) {
         return Ok(());
@@ -122,7 +151,8 @@ fn remove_from_cli<R: tauri::Runtime>(
         // Do not remove unmanaged local skill targets owned by external tooling.
         return Ok(());
     }
-    remove_managed_dir(&target)
+    remove_managed_dir(&target)?;
+    reconcile(cli_key, &cli_root)
 }
 
 fn ensure_local_target_for_return(
@@ -163,13 +193,16 @@ fn remove_managed_targets_except<R: tauri::Runtime>(
     for cli_key in
         crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Skills)
     {
-        let root = cli_skills_root(app, cli_key)?;
+        let Some(root) = optional_cli_skills_root(app, cli_key)? else {
+            continue;
+        };
         let target = root.join(skill_key);
         if target == keep_target || !exists_or_is_link(&target) {
             continue;
         }
         if is_managed_dir(&target) || is_managed_link_to_ssot(&target, &ssot_root) {
             remove_managed_dir(&target)?;
+            reconcile(cli_key, &root)?;
             continue;
         }
         if is_external_local_skill_dir(&target)? {
@@ -441,7 +474,9 @@ pub fn uninstall<R: tauri::Runtime>(
     for cli_key in
         crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Skills)
     {
-        let root = cli_skills_root(app, cli_key)?;
+        let Some(root) = optional_cli_skills_root(app, cli_key)? else {
+            continue;
+        };
         let target = root.join(&skill.skill_key);
         if exists_or_is_link(&target)
             && !is_managed_dir(&target)
@@ -492,6 +527,14 @@ pub fn return_to_local<R: tauri::Runtime>(
     std::fs::create_dir_all(&cli_root)
         .map_err(|e| format!("failed to create {}: {e}", cli_root.display()))?;
     let local_target = cli_root.join(&skill.skill_key);
+    // A built-in skill dir looks like a local skill, but it is not this skill's copy.
+    if BuiltinSkills::load(&cli_key, &cli_root)?.contains(&skill.skill_key) {
+        return Err(format!(
+            "SKILL_RETURN_LOCAL_TARGET_EXISTS_UNMANAGED: {}",
+            local_target.display()
+        )
+        .into());
+    }
     ensure_local_target_for_return(&local_target, &ssot_dir)?;
     write_source_metadata(
         &local_target,
@@ -502,6 +545,7 @@ pub fn return_to_local<R: tauri::Runtime>(
         },
     )?;
     remove_managed_targets_except(app, &skill.skill_key, &local_target)?;
+    reconcile(&cli_key, &cli_root)?;
 
     std::fs::remove_dir_all(&ssot_dir)
         .map_err(|e| format!("failed to remove {}: {e}", ssot_dir.display()))?;
@@ -531,7 +575,17 @@ fn sync_enabled_skill_keys_for_cli<R: tauri::Runtime>(
 
     let enabled_set: HashSet<String> = enabled_list.iter().cloned().collect();
 
-    let cli_root = cli_skills_root(app, cli_key)?;
+    let cli_root = match cli_skills_root(app, cli_key) {
+        Ok(root) => root,
+        // Nothing to place or clean up before Desktop has run once.
+        Err(err)
+            if enabled_list.is_empty()
+                && crate::cli_proxy::claude_desktop_not_initialized(&err) =>
+        {
+            return Ok(())
+        }
+        Err(err) => return Err(err),
+    };
     std::fs::create_dir_all(&cli_root)
         .map_err(|e| format!("failed to create {}: {e}", cli_root.display()))?;
 
@@ -568,8 +622,9 @@ fn sync_enabled_skill_keys_for_cli<R: tauri::Runtime>(
         if !ssot_dir.exists() {
             return Err(format!("SKILL_SSOT_MISSING: {}", ssot_dir.display()).into());
         }
-        sync_to_cli(app, cli_key, skill_key, &ssot_dir)?;
+        place_in_cli(cli_key, &cli_root, skill_key, &ssot_dir)?;
     }
+    reconcile(cli_key, &cli_root)?;
 
     if cli_key == "grok" {
         if let Some(previous) = previous_grok_manifest {
@@ -727,5 +782,216 @@ mod tests {
         assert!(!exists_or_is_link(&old_managed));
         assert!(old_unmanaged.is_dir());
         assert!(exists_or_is_link(&new_home.join("skills").join("demo")));
+    }
+
+    #[test]
+    fn desktop_skill_sync_copies_into_plugin_and_lists_in_manifest() {
+        use base64::Engine;
+
+        let _lock = crate::test_support::test_env_lock();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut env = EnvRestore::default();
+        env.set(
+            "AIO_CODING_HUB_HOME_DIR",
+            temp.path().as_os_str().to_os_string(),
+        );
+        env.set("AIO_CODING_HUB_DOTDIR_NAME", ".aio-skills-desktop-test");
+        env.set(
+            "CLAUDE_USER_DATA_DIR",
+            temp.path().join("Claude-3p").as_os_str().to_os_string(),
+        );
+        let app = tauri::test::mock_app();
+        let conn = Connection::open_in_memory().expect("open in-memory database");
+
+        let data_dir = crate::cli_proxy::claude_desktop_mcp_config_path(app.handle())
+            .expect("resolve Desktop config path")
+            .parent()
+            .expect("Desktop data dir")
+            .to_path_buf();
+        std::fs::create_dir_all(&data_dir).expect("create Desktop data dir");
+        std::fs::write(
+            data_dir.join("ant-did"),
+            base64::engine::general_purpose::STANDARD
+                .encode("12345678-1234-4234-8234-123456789abc"),
+        )
+        .expect("write ant-did");
+        let cli_root = cli_skills_root(app.handle(), "claude_desktop").expect("Desktop root");
+        std::fs::create_dir_all(cli_root.join("docx")).expect("create built-in skill");
+        std::fs::write(
+            cli_root.join("docx").join("SKILL.md"),
+            "---\nname: docx\n---\n",
+        )
+        .expect("write built-in skill");
+        let manifest_path = cli_root.parent().unwrap().join("manifest.json");
+        std::fs::write(
+            &manifest_path,
+            r#"{"skills":[{"skillId":"docx","name":"docx","creatorType":"anthropic","enabled":true}]}"#,
+        )
+        .expect("write manifest");
+        let read_names = || -> Vec<(String, String)> {
+            let manifest: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+            manifest["skills"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|entry| {
+                    (
+                        entry["name"].as_str().unwrap().to_string(),
+                        entry["creatorType"].as_str().unwrap().to_string(),
+                    )
+                })
+                .collect()
+        };
+
+        let ssot_dir = ssot_skills_root(app.handle())
+            .expect("resolve SSOT root")
+            .join("demo");
+        std::fs::create_dir_all(&ssot_dir).expect("create SSOT skill");
+        std::fs::write(
+            ssot_dir.join("SKILL.md"),
+            "---\nname: Demo\ndescription: Demo skill\n---\n",
+        )
+        .expect("write SSOT skill");
+
+        sync_enabled_skill_keys_for_cli(
+            app.handle(),
+            &conn,
+            "claude_desktop",
+            vec!["demo".to_string()],
+        )
+        .expect("sync Desktop skills");
+        let target = cli_root.join("demo");
+        assert!(target.join("SKILL.md").is_file());
+        assert!(!is_symlink_or_junction(&target));
+        assert!(is_managed_dir(&target));
+        assert!(cli_root.join("docx").is_dir());
+        assert_eq!(
+            read_names(),
+            vec![
+                ("docx".to_string(), "anthropic".to_string()),
+                ("demo".to_string(), "user".to_string()),
+            ]
+        );
+        assert!(cli_root
+            .parent()
+            .unwrap()
+            .join(".claude-plugin")
+            .join("plugin.json")
+            .is_file());
+
+        remove_from_cli(app.handle(), "claude_desktop", "demo").expect("remove Desktop skill");
+        assert!(!exists_or_is_link(&target));
+        assert_eq!(
+            read_names(),
+            vec![("docx".to_string(), "anthropic".to_string())]
+        );
+    }
+
+    #[test]
+    fn desktop_return_to_local_keeps_skill_named_like_builtin() {
+        use base64::Engine;
+
+        let _lock = crate::test_support::test_env_lock();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut env = EnvRestore::default();
+        env.set(
+            "AIO_CODING_HUB_HOME_DIR",
+            temp.path().as_os_str().to_os_string(),
+        );
+        env.set(
+            "AIO_CODING_HUB_DOTDIR_NAME",
+            ".aio-skills-desktop-return-test",
+        );
+        env.set(
+            "CLAUDE_USER_DATA_DIR",
+            temp.path().join("Claude-3p").as_os_str().to_os_string(),
+        );
+        let app = tauri::test::mock_app();
+        let db = db::init(app.handle()).expect("init db");
+        let conn = db.open_connection().expect("open db");
+
+        let data_dir = temp.path().join("Claude-3p");
+        std::fs::create_dir_all(&data_dir).expect("create Desktop data dir");
+        std::fs::write(
+            data_dir.join("ant-did"),
+            base64::engine::general_purpose::STANDARD
+                .encode("12345678-1234-4234-8234-123456789abc"),
+        )
+        .expect("write ant-did");
+        let cli_root = cli_skills_root(app.handle(), "claude_desktop").expect("Desktop root");
+        let builtin = cli_root.join("docx");
+        std::fs::create_dir_all(&builtin).expect("create built-in skill");
+        std::fs::write(builtin.join("SKILL.md"), "---\nname: docx\n---\n")
+            .expect("write built-in skill");
+        std::fs::write(
+            cli_root.parent().unwrap().join("manifest.json"),
+            r#"{"skills":[{"skillId":"docx","name":"docx","creatorType":"anthropic","enabled":true}]}"#,
+        )
+        .expect("write manifest");
+
+        let workspace = workspaces::create(&db, "claude_desktop", "Desktop W", false)
+            .expect("create workspace");
+        conn.execute(
+            "INSERT OR REPLACE INTO workspace_active(cli_key, workspace_id, updated_at) VALUES ('claude_desktop', ?1, 1)",
+            params![workspace.id],
+        )
+        .expect("set active workspace");
+        conn.execute(
+            r#"
+INSERT INTO skills(skill_key, name, normalized_name, description, source_git_url, source_branch, source_subdir, created_at, updated_at)
+VALUES ('docx', 'docx', 'docx', '', 'https://example.com/repo.git', 'main', 'skills/docx', 1, 1)
+"#,
+            [],
+        )
+        .expect("insert skill");
+        let skill_id = conn.last_insert_rowid();
+        let ssot_dir = ssot_skills_root(app.handle())
+            .expect("resolve SSOT root")
+            .join("docx");
+        std::fs::create_dir_all(&ssot_dir).expect("create SSOT skill");
+        std::fs::write(ssot_dir.join("SKILL.md"), "---\nname: docx\n---\n")
+            .expect("write SSOT skill");
+
+        let err = return_to_local(app.handle(), &db, workspace.id, skill_id)
+            .expect_err("built-in dir is not the skill's local copy");
+        assert!(err
+            .to_string()
+            .starts_with("SKILL_RETURN_LOCAL_TARGET_EXISTS_UNMANAGED"));
+        assert!(ssot_dir.join("SKILL.md").is_file());
+        assert!(get_skill_by_id(&conn, skill_id).is_ok());
+        assert_eq!(
+            std::fs::read_dir(&builtin).expect("read built-in").count(),
+            1
+        );
+    }
+
+    #[test]
+    fn desktop_reconcile_keeps_entry_while_skill_md_is_missing() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().join("skills");
+        std::fs::create_dir_all(root.join("draft")).expect("create draft dir");
+        let entry = |name: &str| {
+            serde_json::json!({
+                "skillId": name, "name": name, "description": "keep me",
+                "creatorType": "user", "syncManaged": false,
+            })
+        };
+        let manifest = temp.path().join("manifest.json");
+        std::fs::write(
+            &manifest,
+            serde_json::to_vec(&serde_json::json!({"skills": [entry("draft"), entry("gone")]}))
+                .expect("serialize manifest"),
+        )
+        .expect("write manifest");
+
+        reconcile("claude_desktop", &root).expect("reconcile");
+
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&manifest).expect("read manifest"))
+                .expect("parse manifest");
+        assert_eq!(value["skills"].as_array().expect("skills").len(), 1);
+        assert_eq!(value["skills"][0]["name"], "draft");
+        assert_eq!(value["skills"][0]["description"], "keep me");
     }
 }

@@ -33,12 +33,14 @@ describe("hooks/useCliProxy", () => {
       codex: true,
       gemini: false,
       grok: false,
+      claude_desktop: false,
     });
     expect(result.current.appliedToCurrentGateway).toEqual({
       claude: null,
       codex: false,
       gemini: null,
       grok: null,
+      claude_desktop: null,
     });
   });
 

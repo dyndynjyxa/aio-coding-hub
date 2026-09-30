@@ -254,6 +254,22 @@ pub(crate) fn swap_local_mcp_servers_for_workspace_switch<R: tauri::Runtime>(
         }
         _ => {
             let current_bytes = mcp_sync::read_target_bytes(app, cli_key)?;
+            if cli_key == "claude_desktop" {
+                if let Some(bytes) = current_bytes.as_ref() {
+                    let value: serde_json::Value = serde_json::from_slice(bytes)
+                        .map_err(|error| format!("CLAUDE_DESKTOP_INVALID_CONFIG: {error}"))?;
+                    if !value.is_object()
+                        || value
+                            .get("mcpServers")
+                            .is_some_and(|value| !value.is_object())
+                    {
+                        return Err(
+                            "CLAUDE_DESKTOP_INVALID_CONFIG: config and mcpServers must be objects"
+                                .into(),
+                        );
+                    }
+                }
+            }
             let mut root = json_root_from_bytes(current_bytes);
             let local_current = {
                 let servers_obj = json_mcp_servers_obj_mut(&mut root);

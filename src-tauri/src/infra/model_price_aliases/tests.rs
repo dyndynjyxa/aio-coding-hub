@@ -126,6 +126,41 @@ fn resolves_longer_patterns_first_within_same_type() {
 }
 
 #[test]
+fn claude_desktop_falls_back_to_claude_rules() {
+    let rule = |cli_key: &str, target_model: &str| ModelPriceAliasRuleV1 {
+        cli_key: cli_key.to_string(),
+        match_type: ModelPriceAliasMatchTypeV1::Prefix,
+        pattern: "claude-opus".to_string(),
+        target_model: target_model.to_string(),
+        enabled: true,
+    };
+    let claude_only = ModelPriceAliasesV1 {
+        version: 1,
+        rules: vec![rule("claude", "claude-opus-4-5")],
+    };
+    let both = ModelPriceAliasesV1 {
+        version: 1,
+        rules: vec![
+            rule("claude", "claude-opus-4-5"),
+            rule("claude_desktop", "desktop"),
+        ],
+    };
+
+    assert_eq!(
+        claude_only.resolve_target_model("claude_desktop", "claude-opus-5"),
+        Some("claude-opus-4-5")
+    );
+    assert_eq!(
+        both.resolve_target_model("claude_desktop", "claude-opus-5"),
+        Some("desktop")
+    );
+    assert_eq!(
+        claude_only.resolve_target_model("codex", "claude-opus-5"),
+        None
+    );
+}
+
+#[test]
 fn validate_aliases_rejects_too_many_rules() {
     let rule = ModelPriceAliasRuleV1 {
         cli_key: "claude".to_string(),

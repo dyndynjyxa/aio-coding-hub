@@ -388,9 +388,15 @@ describe("ui/Sidebar", () => {
     const controls = screen.getByLabelText("CLI 代理控制");
     const items = Array.from(controls.querySelectorAll<HTMLElement>("[data-cli-key]"));
 
-    expect(items.map((item) => item.dataset.cliKey)).toEqual(["claude", "codex", "grok", "gemini"]);
+    expect(items.map((item) => item.dataset.cliKey)).toEqual([
+      "claude",
+      "claude_desktop",
+      "codex",
+      "grok",
+      "gemini",
+    ]);
     expect(items.every((item) => item.querySelector("img") != null)).toBe(true);
-    expect(within(controls).getAllByRole("switch")).toHaveLength(4);
+    expect(within(controls).getAllByRole("switch")).toHaveLength(5);
   });
 
   it("shows repair for drifted proxy rows and requests enable on repair", () => {

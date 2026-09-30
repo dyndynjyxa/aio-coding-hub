@@ -82,7 +82,7 @@ pub(crate) enum DiscoveryParseError {
 
 fn catalog_format(cli_key: &str) -> Option<ModelCatalogFormat> {
     match cli_key {
-        "claude" | "codex" | "grok" => Some(ModelCatalogFormat::DataIds),
+        "claude" | "claude_desktop" | "codex" | "grok" => Some(ModelCatalogFormat::DataIds),
         "gemini" => Some(ModelCatalogFormat::GeminiNames),
         _ => None,
     }
@@ -269,9 +269,9 @@ async fn fetch_model_catalog(
         return discovery_error(ProviderModelDiscoveryErrorCode::InvalidConfig, None);
     };
     let mut headers = HeaderMap::new();
-    // api_key_descriptor() above already limits cli_key to the four supported CLIs.
+    // api_key_descriptor() above already limits cli_key to the supported CLIs.
     match cli_key {
-        "claude" => {
+        "claude" | "claude_desktop" => {
             headers.insert(
                 "x-api-key",
                 match reqwest::header::HeaderValue::from_str(api_key) {
@@ -806,6 +806,13 @@ mod tests {
         let cases = [
             (
                 "claude",
+                "",
+                "/v1/models",
+                "x-api-key: secret",
+                r#"{"data":[{"id":"claude-3"}]}"#,
+            ),
+            (
+                "claude_desktop",
                 "",
                 "/v1/models",
                 "x-api-key: secret",

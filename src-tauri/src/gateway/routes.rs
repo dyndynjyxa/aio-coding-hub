@@ -7,6 +7,7 @@ use axum::{
     Json, Router,
 };
 use serde::Serialize;
+use serde_json::{json, Value};
 
 use super::responses_ws::ingress::dispatch as proxy_impl;
 use super::runtime::GatewayAppState;
@@ -31,6 +32,40 @@ async fn health() -> Json<HealthResponse> {
 
 async fn root() -> &'static str {
     "AIO Coding Hub is running"
+}
+
+async fn claude_desktop_models<R: tauri::Runtime>(
+    State(state): State<GatewayAppState<R>>,
+) -> Json<Value> {
+    let app = state.app.clone();
+    let db = state.db.clone();
+    let models = crate::blocking::run("claude_desktop_models", move || {
+        crate::cli_proxy::claude_desktop_models(&app, &db)
+    })
+    .await
+    .unwrap_or_else(|error| {
+        tracing::warn!(error = %error, "failed to build Claude Desktop model list");
+        Vec::new()
+    });
+    let data = models
+        .iter()
+        // Desktop's gateway discovery reads snake_case `supports_1m`; the
+        // profile's explicit list carries the same capability as `supports1m`.
+        .map(|model| {
+            json!({
+                "type": "model",
+                "id": model.id,
+                "created_at": "2024-01-01T00:00:00Z",
+                "supports_1m": model.supports_1m,
+            })
+        })
+        .collect::<Vec<_>>();
+    Json(json!({
+        "data": data,
+        "has_more": false,
+        "first_id": models.first().map(|model| &model.id),
+        "last_id": models.last().map(|model| &model.id),
+    }))
 }
 
 async fn proxy_cli_any<R>(
@@ -108,6 +143,7 @@ where
     Router::new()
         .route("/", get(root))
         .route("/health", get(health))
+        .route("/claude_desktop/v1/models", get(claude_desktop_models::<R>))
         .route(
             "/:cli_key/_aio/provider/:provider_id/*path",
             any(proxy_cli_with_provider_any::<R>),
@@ -3840,6 +3876,84 @@ module.exports.activate = function activate(api) {
                 crate::gateway::proxy::GatewayErrorCode::ForcedProviderNotEligibleForModel.as_str()
             )
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn claude_desktop_uses_aio_gateway_mapping_and_own_log_bucket() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let mut env = isolate_app_env(home.path());
+        env.set_var("LOCALAPPDATA", home.path().as_os_str().to_os_string());
+        env.set_var("XDG_CONFIG_HOME", home.path().as_os_str().to_os_string());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        crate::cli_proxy::set_enabled(
+            &app_handle,
+            "claude_desktop",
+            true,
+            "http://127.0.0.1:37123",
+        )
+        .expect("enable desktop proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("desktop-routing.sqlite"))
+            .expect("init test db");
+        let response_body = r#"{"id":"msg_desktop","type":"message","role":"assistant","model":"upstream-sonnet","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":2,"output_tokens":1}}"#;
+        let (upstream_url, capture_rx, upstream_task) =
+            spawn_capturing_json_upstream(response_body).await;
+        insert_provider_with_priority_and_policy(
+            &db,
+            "claude_desktop",
+            "Desktop upstream",
+            upstream_url,
+            0,
+            Some(selected_model_policy(
+                "claude-sonnet-5",
+                Some("upstream-sonnet"),
+            )),
+        );
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state(app_handle, db, log_tx));
+        let models = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/claude_desktop/v1/models")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("model list");
+        assert_eq!(models.status(), StatusCode::OK);
+        let models_body: Value =
+            serde_json::from_slice(&to_bytes(models.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        // No cached Desktop catalog here, so the fallback list applies.
+        assert_eq!(models_body["data"][0]["id"], "claude-sonnet-5");
+        assert_eq!(models_body["data"][0]["supports_1m"], true);
+        assert_eq!(models_body["data"][3]["id"], "claude-haiku-4-5");
+        assert_eq!(models_body["data"][3]["supports_1m"], false);
+
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/claude_desktop/v1/messages")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, "Bearer aio-coding-hub")
+            // Desktop's direct one-shot requests send the picker's 1M variant
+            // verbatim; it reaches any provider with the marker stripped.
+            .body(Body::from(r#"{"model":"claude-sonnet-5[1m]","max_tokens":8,"messages":[{"role":"user","content":"hello"}]}"#))
+            .unwrap();
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let upstream: Value =
+            serde_json::from_str(&capture_rx.await.expect("upstream request")).unwrap();
+        assert_eq!(upstream["model"], "upstream-sonnet");
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        assert_eq!(log.cli_key, "claude_desktop");
+        assert_eq!(log.requested_model.as_deref(), Some("claude-sonnet-5"));
+        assert_eq!(log.input_tokens, Some(2));
+        assert_eq!(log.output_tokens, Some(1));
+        upstream_task.abort();
     }
 
     // Legacy claude_models mappings surface as a unified model_redirect (stage

@@ -76,6 +76,49 @@ describe("useHomeCircuitState", () => {
     ]);
   });
 
+  it("includes Claude Desktop providers in the Home open-circuit projection", () => {
+    vi.mocked(useGatewayCircuitStatusQuery).mockImplementation(
+      (cliKey) =>
+        ({
+          data:
+            cliKey === "claude_desktop"
+              ? [
+                  {
+                    provider_id: 55,
+                    state: "OPEN",
+                    failure_count: 3,
+                    failure_threshold: 3,
+                    open_until: 3_000,
+                    cooldown_until: null,
+                  },
+                ]
+              : [],
+        }) as any
+    );
+    vi.mocked(useProvidersListQuery).mockImplementation(
+      (cliKey) =>
+        ({
+          data: cliKey === "claude_desktop" ? [{ id: 55, name: "Desktop upstream" }] : [],
+        }) as any
+    );
+
+    const { result } = renderHook(() => useHomeCircuitState());
+
+    expect(useGatewayCircuitAutoRefresh).toHaveBeenCalledWith(
+      "claude_desktop",
+      expect.objectContaining({ hasUnavailable: true })
+    );
+    expect(result.current.openCircuits).toEqual([
+      {
+        cli_key: "claude_desktop",
+        provider_id: 55,
+        provider_name: "Desktop upstream",
+        displayState: "open",
+        open_until: 3_000,
+      },
+    ]);
+  });
+
   it("includes half-open rows without counting them as unavailable and sorts null until last", () => {
     vi.mocked(useGatewayCircuitStatusQuery).mockImplementation(
       (cliKey) =>

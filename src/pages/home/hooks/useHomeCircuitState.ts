@@ -27,16 +27,22 @@ export function useHomeCircuitState(): HomeCircuitState {
 
   const resetCircuitProviderMutation = useGatewayCircuitResetProviderMutation();
   const claudeCircuitsQuery = useGatewayCircuitStatusQuery("claude");
+  const claudeDesktopCircuitsQuery = useGatewayCircuitStatusQuery("claude_desktop");
   const codexCircuitsQuery = useGatewayCircuitStatusQuery("codex");
   const geminiCircuitsQuery = useGatewayCircuitStatusQuery("gemini");
   const grokCircuitsQuery = useGatewayCircuitStatusQuery("grok");
   const claudeProvidersQuery = useProvidersListQuery("claude");
+  const claudeDesktopProvidersQuery = useProvidersListQuery("claude_desktop");
   const codexProvidersQuery = useProvidersListQuery("codex");
   const geminiProvidersQuery = useProvidersListQuery("gemini");
   const grokProvidersQuery = useProvidersListQuery("grok");
   const claudeCircuitSummary = useMemo(
     () => summarizeGatewayCircuitRows(claudeCircuitsQuery.data),
     [claudeCircuitsQuery.data]
+  );
+  const claudeDesktopCircuitSummary = useMemo(
+    () => summarizeGatewayCircuitRows(claudeDesktopCircuitsQuery.data),
+    [claudeDesktopCircuitsQuery.data]
   );
   const codexCircuitSummary = useMemo(
     () => summarizeGatewayCircuitRows(codexCircuitsQuery.data),
@@ -52,6 +58,7 @@ export function useHomeCircuitState(): HomeCircuitState {
   );
 
   useGatewayCircuitAutoRefresh("claude", claudeCircuitSummary);
+  useGatewayCircuitAutoRefresh("claude_desktop", claudeDesktopCircuitSummary);
   useGatewayCircuitAutoRefresh("codex", codexCircuitSummary);
   useGatewayCircuitAutoRefresh("gemini", geminiCircuitSummary);
   useGatewayCircuitAutoRefresh("grok", grokCircuitSummary);
@@ -62,6 +69,11 @@ export function useHomeCircuitState(): HomeCircuitState {
         cliKey: "claude" as const,
         attentionRows: claudeCircuitSummary.attentionRows,
         providers: claudeProvidersQuery.data ?? [],
+      },
+      {
+        cliKey: "claude_desktop" as const,
+        attentionRows: claudeDesktopCircuitSummary.attentionRows,
+        providers: claudeDesktopProvidersQuery.data ?? [],
       },
       {
         cliKey: "codex" as const,
@@ -118,6 +130,8 @@ export function useHomeCircuitState(): HomeCircuitState {
   }, [
     claudeCircuitSummary.attentionRows,
     claudeProvidersQuery.data,
+    claudeDesktopCircuitSummary.attentionRows,
+    claudeDesktopProvidersQuery.data,
     codexCircuitSummary.attentionRows,
     codexProvidersQuery.data,
     geminiCircuitSummary.attentionRows,

@@ -113,7 +113,15 @@ impl ProviderModelPolicyV1 {
             return (None, status);
         };
 
-        match serde_json::from_str::<Self>(raw)
+        let parsed = serde_json::from_str::<serde_json::Value>(raw).and_then(|mut value| {
+            // Earlier Claude Desktop builds stored a per-provider `supports1m`
+            // checkbox here; drop it so those rows stay routable.
+            if let Some(object) = value.as_object_mut() {
+                object.remove("supports1m");
+            }
+            serde_json::from_value::<Self>(value)
+        });
+        match parsed
             .map_err(|error| error.to_string())
             .and_then(Self::normalized)
         {
@@ -352,6 +360,26 @@ mod tests {
         assert!(json.contains(r#""modelPatterns""#));
         assert!(json.contains(r#""mappings""#));
         assert!(!json.contains(r#""rules""#));
+    }
+
+    #[test]
+    fn provider_model_policy_drops_legacy_desktop_1m_flag() {
+        let (decoded, status) = ProviderModelPolicyV1::decode(
+            Some(
+                r#"{"version":1,"mode":"all","modelPatterns":[],"mappings":[{"source":"claude-opus-5","target":"claude-opus-5-5"}],"supports1m":true}"#,
+            ),
+            "claude_desktop",
+        );
+        assert_eq!(status, ProviderModelPolicyStatus::Ready);
+        let decoded = decoded.expect("legacy policy should decode");
+        assert_eq!(
+            decoded.mappings,
+            vec![mapping("claude-opus-5", "claude-opus-5-5")]
+        );
+        assert!(!decoded
+            .to_json()
+            .expect("serialize policy")
+            .contains("supports1m"));
     }
 
     #[test]

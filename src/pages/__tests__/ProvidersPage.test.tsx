@@ -55,6 +55,7 @@ describe("pages/ProvidersPage", () => {
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
       "Codex",
       "Claude",
+      "Desktop",
       "Gemini",
       "Grok",
     ]);

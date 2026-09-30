@@ -197,7 +197,9 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
     let mut strip_request_content_encoding = input.strip_request_content_encoding_seed;
     let mut gemini_oauth_response_mode = None;
 
-    if input.cli_key == "claude" && input.enable_billing_header_rectifier {
+    if matches!(input.cli_key.as_str(), "claude" | "claude_desktop")
+        && input.enable_billing_header_rectifier
+    {
         if let Some((body, removed_count)) =
             crate::gateway::billing_header_rectifier::rectify_for_provider(
                 &provider.auth_mode,

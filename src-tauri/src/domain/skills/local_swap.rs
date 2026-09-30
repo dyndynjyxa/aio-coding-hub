@@ -3,9 +3,10 @@ use crate::shared::time::now_unix_seconds;
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
 
+use super::desktop::{reconcile, BuiltinSkills};
 use super::fs_ops::{has_skill_md, is_managed_link_to_ssot};
 use super::local::managed_marker_belongs_to_installed_skill;
-use super::paths::{cli_skills_root, ssot_skills_root};
+use super::paths::{optional_cli_skills_root, ssot_skills_root};
 
 fn stash_bucket_name(workspace_id: Option<i64>) -> String {
     workspace_id
@@ -79,8 +80,9 @@ fn move_dir(src: &Path, dst: &Path) -> crate::shared::error::AppResult<()> {
         .map_err(|e| format!("failed to move {} -> {}: {e}", src.display(), dst.display()).into())
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct LocalSkillsSwap {
+    cli_key: String,
     cli_root: PathBuf,
     from_bucket: PathBuf,
     to_bucket: PathBuf,
@@ -106,6 +108,7 @@ impl LocalSkillsSwap {
                 let _ = move_dir(&src, &dst);
             }
         }
+        let _ = reconcile(&self.cli_key, &self.cli_root);
     }
 }
 
@@ -116,8 +119,11 @@ pub(crate) fn swap_local_skills_for_workspace_switch<R: tauri::Runtime>(
     from_workspace_id: Option<i64>,
     to_workspace_id: i64,
 ) -> crate::shared::error::AppResult<LocalSkillsSwap> {
-    let cli_root = cli_skills_root(app, cli_key)?;
+    let Some(cli_root) = optional_cli_skills_root(app, cli_key)? else {
+        return Ok(LocalSkillsSwap::default());
+    };
     let ssot_root = ssot_skills_root(app)?;
+    let builtins = BuiltinSkills::load(cli_key, &cli_root)?;
 
     let stash_root = stash_root(app, cli_key)?;
     let from_bucket = stash_root.join(stash_bucket_name(from_workspace_id));
@@ -146,7 +152,7 @@ pub(crate) fn swap_local_skills_for_workspace_switch<R: tauri::Runtime>(
                 .and_then(|v| v.to_str())
                 .unwrap_or("")
                 .to_string();
-            if dir_name.is_empty() {
+            if dir_name.is_empty() || builtins.contains(&dir_name) {
                 continue;
             }
             let dst = from_bucket.join(&dir_name);
@@ -189,11 +195,17 @@ pub(crate) fn swap_local_skills_for_workspace_switch<R: tauri::Runtime>(
         }
     }
 
-    Ok(LocalSkillsSwap {
+    let swap = LocalSkillsSwap {
+        cli_key: cli_key.to_string(),
         cli_root,
         from_bucket,
         to_bucket,
         moved_from_cli,
         moved_to_cli,
-    })
+    };
+    if let Err(err) = reconcile(cli_key, &swap.cli_root) {
+        swap.rollback();
+        return Err(err);
+    }
+    Ok(swap)
 }

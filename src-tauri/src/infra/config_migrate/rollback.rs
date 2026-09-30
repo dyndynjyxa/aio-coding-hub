@@ -122,11 +122,23 @@ pub(super) fn sync_all_cli_runtime<R: tauri::Runtime>(
     for cli_key in
         crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Workspaces)
     {
-        crate::prompts::sync_one_cli(app, conn, cli_key)?;
-        crate::mcp::sync_one_cli(app, conn, cli_key)?;
-        crate::skills::sync_one_cli(app, conn, cli_key)?;
+        skip_desktop_not_initialized(cli_key, crate::prompts::sync_one_cli(app, conn, cli_key))?;
+        skip_desktop_not_initialized(cli_key, crate::mcp::sync_one_cli(app, conn, cli_key))?;
+        skip_desktop_not_initialized(cli_key, crate::skills::sync_one_cli(app, conn, cli_key))?;
     }
     Ok(())
+}
+
+// Like an uninstalled CLI, Desktop before its first 3P launch keeps the imported
+// rows; they are written by its next sync.
+fn skip_desktop_not_initialized(cli_key: &str, result: AppResult<()>) -> AppResult<()> {
+    match result {
+        Err(err) if crate::cli_proxy::claude_desktop_not_initialized(&err) => {
+            tracing::warn!(cli_key = %cli_key, "config import runtime sync skipped: {err}");
+            Ok(())
+        }
+        other => other,
+    }
 }
 
 fn restore_settings_after_failed_import<R: tauri::Runtime>(
@@ -234,11 +246,21 @@ pub(super) fn apply_skill_fs_import<R: tauri::Runtime>(
         for cli_key in
             crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Skills)
         {
-            let root = cli_skills_root(app, cli_key)?;
+            let root = match cli_skills_root(app, cli_key) {
+                Ok(root) => root,
+                // Desktop has no Skills dir before its first 3P launch.
+                Err(err)
+                    if crate::cli_proxy::claude_desktop_not_initialized(&err)
+                        && !local_skills.iter().any(|value| value.cli_key == cli_key) =>
+                {
+                    continue
+                }
+                Err(err) => return Err(err),
+            };
             std::fs::create_dir_all(&root)
                 .map_err(|e| format!("failed to create {}: {e}", root.display()))?;
 
-            let existing_local_dirs = local_skill_dirs(&root)?;
+            let existing_local_dirs = local_skill_dirs(cli_key, &root)?;
             let backup_root =
                 app_data_dir.join(format!("config-import-local-backup-{cli_key}-{import_id}"));
             if !existing_local_dirs.is_empty() {

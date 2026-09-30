@@ -19,12 +19,13 @@ import {
 
 describe("constants/clis", () => {
   it("exports filter items derived from CLIS", () => {
-    expect(CLI_KEYS).toEqual(["claude", "codex", "gemini", "grok"]);
+    expect(CLI_KEYS).toEqual(["claude", "claude_desktop", "codex", "gemini", "grok"]);
     expect(CLIS.map((cli) => cli.key)).toEqual(CLI_KEYS);
     expect(CLI_FILTER_ITEMS[0]).toEqual({ key: "all", label: "全部" });
     expect(CLI_FILTER_ITEMS.map((item) => item.key)).toContain("claude");
     expect(CLI_SHORT_ITEMS).toEqual([
       { key: "claude", label: "Claude" },
+      { key: "claude_desktop", label: "Desktop" },
       { key: "codex", label: "Codex" },
       { key: "gemini", label: "Gemini" },
       { key: "grok", label: "Grok" },
@@ -72,11 +73,18 @@ describe("constants/clis", () => {
         legacyCapabilities
       );
     }
-    expect(cliKeysWith("provider")).toEqual(["claude", "codex", "gemini", "grok"]);
+    expect(cliKeysWith("provider")).toEqual([
+      "claude",
+      "claude_desktop",
+      "codex",
+      "gemini",
+      "grok",
+    ]);
     expect(cliKeysWith("wsl")).toEqual(["claude", "codex", "gemini"]);
     expect(cliFilterItemsWith("usage").map((item) => item.key)).toEqual([
       "all",
       "claude",
+      "claude_desktop",
       "codex",
       "gemini",
       "grok",
@@ -86,6 +94,7 @@ describe("constants/clis", () => {
   it("handles key and label helpers", () => {
     expect(isCliKey("claude")).toBe(true);
     expect(isCliKey("grok")).toBe(true);
+    expect(isCliKey("claude_desktop")).toBe(true);
     expect(isCliKey("not-a-cli")).toBe(false);
     expect(isCliKey(123)).toBe(false);
 
@@ -108,6 +117,7 @@ describe("constants/clis", () => {
     expect(cliShortLabel("codex")).toBe("Codex");
     expect(cliShortLabel("gemini")).toBe("Gemini");
     expect(cliShortLabel("grok")).toBe("Grok");
+    expect(cliShortLabel("claude_desktop")).toBe("Desktop");
     expect(cliShortLabel("other")).toBe("other");
 
     expect(cliBadgeTone("claude")).toContain("bg-slate-100");

@@ -33,6 +33,7 @@ export function useUsagePageProviderFilter(cliKey: CliFilterKey) {
   const [providerId, setProviderId] = useState<number | null>(null);
 
   const claudeProvidersQuery = useProvidersListQuery("claude");
+  const desktopProvidersQuery = useProvidersListQuery("claude_desktop");
   const codexProvidersQuery = useProvidersListQuery("codex");
   const geminiProvidersQuery = useProvidersListQuery("gemini");
   const grokProvidersQuery = useProvidersListQuery("grok");
@@ -40,6 +41,7 @@ export function useUsagePageProviderFilter(cliKey: CliFilterKey) {
   const providerOptions = useMemo(() => {
     const providersByCli = {
       claude: claudeProvidersQuery.data ?? EMPTY_PROVIDERS,
+      claude_desktop: desktopProvidersQuery.data ?? EMPTY_PROVIDERS,
       codex: codexProvidersQuery.data ?? EMPTY_PROVIDERS,
       gemini: geminiProvidersQuery.data ?? EMPTY_PROVIDERS,
       grok: grokProvidersQuery.data ?? EMPTY_PROVIDERS,
@@ -49,6 +51,7 @@ export function useUsagePageProviderFilter(cliKey: CliFilterKey) {
   }, [
     cliKey,
     claudeProvidersQuery.data,
+    desktopProvidersQuery.data,
     codexProvidersQuery.data,
     geminiProvidersQuery.data,
     grokProvidersQuery.data,
@@ -60,6 +63,7 @@ export function useUsagePageProviderFilter(cliKey: CliFilterKey) {
 
   const providersLoading =
     claudeProvidersQuery.isFetching ||
+    desktopProvidersQuery.isFetching ||
     codexProvidersQuery.isFetching ||
     geminiProvidersQuery.isFetching ||
     grokProvidersQuery.isFetching;

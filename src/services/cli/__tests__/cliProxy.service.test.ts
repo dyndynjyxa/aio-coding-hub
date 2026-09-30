@@ -72,6 +72,7 @@ describe("services/cli/cliProxy", () => {
           base_origin: null,
           current_gateway_origin: null,
           applied_to_current_gateway: null,
+          desktop: null,
         },
       ],
     });

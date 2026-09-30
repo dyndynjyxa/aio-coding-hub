@@ -192,7 +192,7 @@ fn tiered_cost_with_multiplier(
 }
 
 fn contains_context_1m(cli_key: &str, model: &str) -> bool {
-    if cli_key != "claude" {
+    if !matches!(cli_key, "claude" | "claude_desktop") {
         return false;
     }
     model.to_ascii_lowercase().contains("1m")

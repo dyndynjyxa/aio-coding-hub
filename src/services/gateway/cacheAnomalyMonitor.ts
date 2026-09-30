@@ -39,12 +39,12 @@ const THRESHOLDS = CACHE_ANOMALY_MONITOR_THRESHOLDS;
 const NON_CACHING_MODEL_KEYWORDS = CACHE_ANOMALY_MONITOR_NON_CACHING_MODEL_KEYWORDS;
 
 function isNonCachingModel(cliKey: SupportedCliKey, model: string): boolean {
-  if (cliKey !== "claude") return false;
+  if (cliKey === "codex") return false;
   const m = model.toLowerCase();
   return NON_CACHING_MODEL_KEYWORDS.some((keyword) => m.includes(keyword));
 }
 
-type SupportedCliKey = "claude" | "codex";
+type SupportedCliKey = "claude" | "claude_desktop" | "codex";
 
 type Listener = () => void;
 
@@ -236,7 +236,7 @@ function normalizeModelName(value: unknown): string {
 }
 
 function isSupportedCliKey(value: unknown): value is SupportedCliKey {
-  return value === "claude" || value === "codex";
+  return value === "claude" || value === "claude_desktop" || value === "codex";
 }
 
 function isSuccessRequest(payload: GatewayRequestEvent): boolean {

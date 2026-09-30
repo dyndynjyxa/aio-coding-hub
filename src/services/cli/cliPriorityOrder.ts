@@ -17,11 +17,15 @@ export function normalizeCliPriorityOrder(input: readonly unknown[] | null | und
     }
   }
 
-  for (const cliKey of DEFAULT_CLI_PRIORITY_ORDER) {
-    if (seen.has(cliKey)) continue;
+  DEFAULT_CLI_PRIORITY_ORDER.forEach((cliKey, index) => {
+    if (seen.has(cliKey)) return;
+    // A CLI missing from the saved order goes right after the CLI that precedes it by default.
+    const previous = DEFAULT_CLI_PRIORITY_ORDER.slice(0, index)
+      .filter((key) => seen.has(key))
+      .pop();
     seen.add(cliKey);
-    nextOrder.push(cliKey);
-  }
+    nextOrder.splice(previous ? nextOrder.indexOf(previous) + 1 : 0, 0, cliKey);
+  });
 
   return nextOrder;
 }
