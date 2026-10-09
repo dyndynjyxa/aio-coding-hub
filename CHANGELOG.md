@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.60.21](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.20...aio-coding-hub-v0.60.21) (2026-10-09)
+
+
+### Features
+
+* **oauth:** support credits and quota-aware routing ([4d1a069](https://github.com/dyndynjyxa/aio-coding-hub/commit/4d1a06924a8dc991839d70506133256ed05a9087))
+
+
+### Bug Fixes
+
+* **deps:** classify Tailwind animation plugin as build dependency ([262f6c0](https://github.com/dyndynjyxa/aio-coding-hub/commit/262f6c0b0ade36ba197d6fad2de86d717f0f1342))
+* **deps:** update pnpm to version 12.9.1 in package.json and pnpm-lock.yaml ([d35bc3b](https://github.com/dyndynjyxa/aio-coding-hub/commit/d35bc3b309aeff89a8204234c0113d3459be04e8))
+* **gateway:** make Codex WS recovery best effort ([745b9f2](https://github.com/dyndynjyxa/aio-coding-hub/commit/745b9f2e1905985f025b98f95077b53a3204f59a))
+* **gateway:** treat previous_response_id as session continuation for reuse ([cb0c8ac](https://github.com/dyndynjyxa/aio-coding-hub/commit/cb0c8ac4a884e7e9673643896cf78fa8d75eb9c6))
+* **gateway:** unify unavailable errors and Codex WS recovery ([572f62e](https://github.com/dyndynjyxa/aio-coding-hub/commit/572f62e7625bc88cf2d50105188492fdf050608d))
+* **gateway:** 修复本地 Responses 所有权拒绝处理和日志记录 ([45bd77a](https://github.com/dyndynjyxa/aio-coding-hub/commit/45bd77a6ac976d1624f494f7ea6aea4af40de9bf))
+* **test:** restore env before releasing test env lock in grok test fixtures ([d08232b](https://github.com/dyndynjyxa/aio-coding-hub/commit/d08232b84a50c15316d4312a83584ef3e7ad4bd0))
+
 ## [0.60.20](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.19...aio-coding-hub-v0.60.20) (2026-09-28)
 
 

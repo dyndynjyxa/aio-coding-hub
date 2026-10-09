@@ -1,6 +1,6 @@
 [package]
 name = "aio-coding-hub"
-version = "0.60.20"
+version = "0.60.21"
 description = "AIO Coding Hub"
 authors = ["dyndynjyxa"]
 edition = "2021"
