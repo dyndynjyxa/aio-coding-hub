@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.60.22](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.21...aio-coding-hub-v0.60.22) (2026-10-12)
+
+
+### Bug Fixes
+
+* **gateway:** allow retries of completed Codex responses ([cb3a330](https://github.com/dyndynjyxa/aio-coding-hub/commit/cb3a3308f8041d56a94e66b061ba7647f78b19df))
+
 ## [0.60.21](https://github.com/dyndynjyxa/aio-coding-hub/compare/aio-coding-hub-v0.60.20...aio-coding-hub-v0.60.21) (2026-10-09)
 
 
