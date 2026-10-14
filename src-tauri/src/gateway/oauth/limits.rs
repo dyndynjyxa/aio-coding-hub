@@ -4,6 +4,9 @@ use crate::blocking;
 use crate::domain::provider_oauth_limits::{
     self as domain, OAuthLimitGate, OAuthLimitSnapshotInput, ProviderOAuthCreditBalance,
 };
+use crate::domain::provider_oauth_quota_estimate::{
+    estimate_window, OAuthQuotaWindow, ProviderOAuthQuotaEstimates,
+};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
@@ -22,8 +25,11 @@ pub(crate) struct ProviderOAuthLimitsResult {
     pub limit_5h_remaining_percent: Option<f64>,
     pub limit_weekly_remaining_percent: Option<f64>,
     pub routing_limited: bool,
+    pub quota_estimates: Option<ProviderOAuthQuotaEstimates>,
     #[serde(skip)]
     pub usage_limit_reached: bool,
+    #[serde(skip)]
+    pub estimate_window_seconds: (Option<i64>, Option<i64>),
 }
 
 // One provider lock spans refresh, usage and reset even when refresh rotates the
@@ -234,10 +240,11 @@ pub(crate) async fn save_result<R: tauri::Runtime>(
     expected_snapshot_revision: i64,
 ) -> Result<(), String> {
     let provider_id = details.id;
-    result.routing_limited = blocking::run("oauth_limits_save", {
+    let (routing_limited, quota_estimates) = blocking::run("oauth_limits_save", {
         let db = db.clone();
         let result = result.clone();
         let expected_token = details.oauth_access_token.clone();
+        let supports_estimates = matches!(details.cli_key.as_str(), "codex" | "claude");
         move || {
             let saved = domain::save_snapshot_if_access_token_matches(
                 &db,
@@ -264,14 +271,43 @@ pub(crate) async fn save_result<R: tauri::Runtime>(
                 ));
             }
             let conn = db.open_connection()?;
-            Ok(matches!(
-                domain::gate_snapshot(&conn, provider_id, crate::shared::time::now_unix_seconds())?,
+            let now_unix = crate::shared::time::now_unix_seconds();
+            let routing_limited = matches!(
+                domain::gate_snapshot(&conn, provider_id, now_unix)?,
                 OAuthLimitGate::Limited { .. }
-            ))
+            );
+            let quota_estimates = if supports_estimates {
+                let estimates = (|| {
+                    Ok::<_, crate::shared::error::AppError>(ProviderOAuthQuotaEstimates {
+                        short: estimate_window(&conn, provider_id, OAuthQuotaWindow {
+                            remaining_percent: result.limit_5h_remaining_percent,
+                            reset_at: result.limit_5h_reset_at,
+                            duration_seconds: result.estimate_window_seconds.0,
+                        }, now_unix)?,
+                        weekly: estimate_window(&conn, provider_id, OAuthQuotaWindow {
+                            remaining_percent: result.limit_weekly_remaining_percent,
+                            reset_at: result.limit_weekly_reset_at,
+                            duration_seconds: result.estimate_window_seconds.1,
+                        }, now_unix)?,
+                    })
+                })();
+                match estimates {
+                    Ok(estimates) => Some(estimates),
+                    Err(err) => {
+                        tracing::warn!(provider_id, "OAuth quota cost estimate unavailable: {err}");
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+            Ok((routing_limited, quota_estimates))
         }
     })
     .await
     .map_err(Into::<String>::into)?;
+    result.routing_limited = routing_limited;
+    result.quota_estimates = quota_estimates;
     if !result.routing_limited {
         crate::gateway_control::app_gateway_clear_unavailable_errors(app);
     }
@@ -637,7 +673,40 @@ fn provider_oauth_limits_result_from_parts(
         limit_weekly_remaining_percent: raw_json
             .and_then(|raw| parse_remaining_percents(cli_key, raw).1),
         routing_limited: false,
+        quota_estimates: None,
         usage_limit_reached: cli_key == "codex" && raw_json.is_some_and(parse_usage_limit_reached),
+        estimate_window_seconds: parse_estimate_window_seconds(cli_key, raw_json),
+    }
+}
+
+fn parse_estimate_window_seconds(
+    cli_key: &str,
+    raw_json: Option<&serde_json::Value>,
+) -> (Option<i64>, Option<i64>) {
+    match cli_key {
+        "claude" => (Some(5 * 3600), Some(7 * 24 * 3600)),
+        "codex" => {
+            let (primary, secondary) = raw_json.map(resolve_rate_windows).unwrap_or((None, None));
+            let duration = |window: Option<&serde_json::Value>, fallback| {
+                let value = window.and_then(|window| {
+                    window
+                        .get("limit_window_seconds")
+                        .or_else(|| window.get("limitWindowSeconds"))
+                });
+                match value {
+                    Some(value) => value
+                        .as_i64()
+                        .or_else(|| value.as_str()?.parse().ok())
+                        .filter(|seconds| *seconds > 0 && *seconds <= 31 * 24 * 3600),
+                    None => Some(fallback),
+                }
+            };
+            (
+                duration(primary, 5 * 3600),
+                duration(secondary, 7 * 24 * 3600),
+            )
+        }
+        _ => (None, None),
     }
 }
 
@@ -802,6 +871,93 @@ fn extract_reset_credit_available_count(body: &serde_json::Value) -> Option<i64>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quota_estimate_durations_follow_upstream_windows_and_keep_invalid_values_unknown() {
+        let raw = serde_json::json!({"rate_limit": {
+            "primary_window": {"limit_window_seconds": 604800},
+            "secondary_window": {"limitWindowSeconds": "7200"}
+        }});
+        assert_eq!(
+            parse_estimate_window_seconds("codex", Some(&raw)),
+            (Some(604800), Some(7200))
+        );
+        let invalid = serde_json::json!({"rate_limit": {
+            "primary_window": {"limit_window_seconds": 0},
+            "secondary_window": {"limit_window_seconds": "unknown"}
+        }});
+        assert_eq!(
+            parse_estimate_window_seconds("codex", Some(&invalid)),
+            (None, None)
+        );
+        assert_eq!(
+            parse_estimate_window_seconds("codex", None),
+            (Some(18000), Some(604800))
+        );
+        assert_eq!(
+            parse_estimate_window_seconds("claude", None),
+            (Some(18000), Some(604800))
+        );
+        assert_eq!(
+            parse_estimate_window_seconds("gemini", Some(&raw)),
+            (None, None)
+        );
+        assert_eq!(parse_estimate_window_seconds("grok", None), (None, None));
+    }
+
+    #[tokio::test]
+    async fn quota_estimate_is_attached_to_refresh_and_query_failure_preserves_quota() {
+        let (_dir, db, provider_id) = quota_test_provider();
+        let app = tauri::test::mock_app();
+        let now = crate::shared::time::now_unix_seconds();
+        db.open_connection().unwrap().execute(
+            "INSERT INTO request_logs(trace_id, cli_key, method, path, status, created_at,
+              final_provider_id, cost_usd_femto)
+             VALUES ('estimate-sample', 'codex', 'POST', '/responses', 200, ?1, ?2, 20000000000000000)",
+            rusqlite::params![now - 60, provider_id],
+        ).unwrap();
+        let details = crate::providers::get_oauth_details(&db, provider_id).unwrap();
+        let mut result = parsed_codex(serde_json::json!({"rate_limit": {
+            "primary_window": {"used_percent": 20, "reset_at": now + 3600, "limit_window_seconds": 18000},
+            "secondary_window": {"used_percent": 25, "reset_at": now + 86400, "limit_window_seconds": 604800}
+        }}));
+        let revision = read_snapshot_revision(&db, provider_id).await.unwrap();
+        save_result(app.handle(), &db, &details, &mut result, revision)
+            .await
+            .unwrap();
+        let estimates = result.quota_estimates.as_ref().unwrap();
+        assert_eq!(
+            estimates.short.as_ref().unwrap().estimated_total_usd,
+            Some(100.0)
+        );
+        assert_eq!(
+            estimates.weekly.as_ref().unwrap().estimated_remaining_usd,
+            Some(60.0)
+        );
+        assert!(!result.routing_limited);
+        let serialized = serde_json::to_value(&result).unwrap();
+        assert_eq!(serialized["quota_estimates"]["short"]["sample_count"], 1);
+        assert!(serialized.get("estimate_window_seconds").is_none());
+
+        db.open_connection()
+            .unwrap()
+            .execute_batch("DROP TABLE request_logs")
+            .unwrap();
+        let revision = read_snapshot_revision(&db, provider_id).await.unwrap();
+        save_result(app.handle(), &db, &details, &mut result, revision)
+            .await
+            .unwrap();
+        assert!(result.quota_estimates.is_none());
+        assert_eq!(result.limit_5h_remaining_percent, Some(80.0));
+        assert!(!result.routing_limited);
+        assert_eq!(
+            domain::read_snapshot(&db.open_connection().unwrap(), provider_id)
+                .unwrap()
+                .unwrap()
+                .limit_5h_remaining_percent,
+            Some(80.0)
+        );
+    }
 
     #[test]
     fn normalize_oauth_short_window_label_forces_gemini_to_short_window() {

@@ -526,6 +526,7 @@ describe("query/providers", () => {
       credits: null,
     };
     const refreshedLimits = {
+      quota_estimates: null,
       limit_short_label: "5h",
       limit_5h_text: "100%",
       limit_weekly_text: "100%",

@@ -3230,6 +3230,15 @@ export type ModelRedirect = {
 };
 export type NoticeLevel = "info" | "success" | "warning" | "error";
 export type NoticeSendInput = { level: NoticeLevel; title: string | null; body: string };
+export type OAuthQuotaEstimate = {
+  used_usd: number | null;
+  estimated_total_usd: number | null;
+  estimated_remaining_usd: number | null;
+  window_start: number;
+  window_end: number;
+  sample_count: number;
+  unpriced_count: number;
+};
 export type PluginAuditLog = {
   id: number;
   plugin_id: string | null;
@@ -3741,6 +3750,11 @@ export type ProviderOAuthLimitsResult = {
   limit_5h_remaining_percent: number | null;
   limit_weekly_remaining_percent: number | null;
   routing_limited: boolean;
+  quota_estimates: ProviderOAuthQuotaEstimates | null;
+};
+export type ProviderOAuthQuotaEstimates = {
+  short: OAuthQuotaEstimate | null;
+  weekly: OAuthQuotaEstimate | null;
 };
 export type ProviderOAuthRefreshResult = { success: boolean; expires_at: number | null };
 export type ProviderOAuthResetCodexQuotaResult = {

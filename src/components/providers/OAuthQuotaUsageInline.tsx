@@ -2,7 +2,7 @@ import type { CliKey, OAuthLimitsResult } from "../../services/providers/provide
 import { cn } from "../../utils/cn";
 
 export type OAuthQuotaUsageSegment = {
-  key: "short" | "weekly" | "credits" | "resetCredit";
+  key: "short" | "weekly" | "shortEstimate" | "weeklyEstimate" | "credits" | "resetCredit";
   text: string;
   title: string;
   resetCreditCount?: number;
@@ -10,7 +10,21 @@ export type OAuthQuotaUsageSegment = {
 
 function getOAuthShortWindowLabel(cliKey: CliKey, limits: OAuthLimitsResult | null): string {
   if (cliKey === "gemini") return "短窗";
+  const shortEstimate = limits?.quota_estimates?.short;
+  if (shortEstimate) {
+    const seconds = shortEstimate.window_end - shortEstimate.window_start;
+    if (seconds > 0 && Number.isFinite(seconds)) return formatWindowLabel(seconds);
+  }
   return limits?.limit_short_label ?? "5h";
+}
+
+function formatWindowLabel(seconds: number): string {
+  if (seconds === 7 * 24 * 3600) return "周";
+  return seconds % 3600 === 0 ? `${seconds / 3600}h` : `${seconds / 60}m`;
+}
+
+function formatEstimateUsd(value: number): string {
+  return value > 0 && value < 0.01 ? "<$0.01" : `$${value.toFixed(2)}`;
 }
 
 function formatOAuthQuotaResetCountdown(resetAt: number | null, nowUnix: number): string | null {
@@ -71,6 +85,55 @@ function buildOAuthQuotaUsageSegments({
         ? `周用量: ${limits.limit_weekly_text}，重置时间: ${weeklyReset}`
         : `周用量: ${limits.limit_weekly_text}`,
     });
+  }
+
+  if (cliKey === "codex" || cliKey === "claude") {
+    for (const [key, estimate] of [
+      ["shortEstimate", limits.quota_estimates?.short],
+      ["weeklyEstimate", limits.quota_estimates?.weekly],
+    ] as const) {
+      if (!estimate) continue;
+      const seconds = estimate.window_end - estimate.window_start;
+      if (seconds <= 0 || !Number.isFinite(seconds)) continue;
+      const label = formatWindowLabel(seconds);
+      const prefix = `预估额度(${label})`;
+      const hint = "根据本窗口本地费用与账号已用比例换算，仅供参考；外部使用或模型变化会影响预估。";
+      const total = estimate.estimated_total_usd;
+      const remaining = estimate.estimated_remaining_usd;
+      const hasEstimate =
+        total != null &&
+        Number.isFinite(total) &&
+        total > 0 &&
+        remaining != null &&
+        Number.isFinite(remaining) &&
+        remaining >= 0 &&
+        remaining <= total;
+      const expired = estimate.window_end <= nowUnix;
+      const unknownReason = expired
+        ? "已重置，待刷新"
+        : estimate.unpriced_count > 0 && estimate.used_usd == null
+          ? "费用数据不足"
+          : "待积累用量";
+      const usedText =
+        estimate.used_usd != null && Number.isFinite(estimate.used_usd)
+          ? formatEstimateUsd(estimate.used_usd)
+          : "未知";
+      const missingCostHint =
+        estimate.unpriced_count > 0
+          ? `其中 ${estimate.unpriced_count} 次请求缺少费用，仅按已记录费用估算，结果可能偏低。`
+          : "";
+      segments.push({
+        key,
+        text:
+          hasEstimate && !expired
+            ? `${prefix}: ~${formatEstimateUsd(total)}(剩余 ~${formatEstimateUsd(remaining)})`
+            : `${prefix}: ${unknownReason}`,
+        title:
+          hasEstimate && !expired
+            ? `${prefix}: ~${formatEstimateUsd(total)}，预估剩余: ~${formatEstimateUsd(remaining)}，本地已用: ${usedText}，样本: ${estimate.sample_count} 次。${missingCostHint}${hint}`
+            : `${prefix}: ${unknownReason}。${hint}`,
+      });
+    }
   }
 
   if (cliKey === "codex" && limits.credits != null) {

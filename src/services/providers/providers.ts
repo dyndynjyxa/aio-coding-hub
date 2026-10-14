@@ -568,7 +568,10 @@ export async function providerOAuthStatus(providerId: number): Promise<ProviderO
   });
 }
 
-export type OAuthLimitsResult = ProviderOAuthLimitsResult;
+// Older cached results do not carry cost estimates until the next quota refresh.
+export type OAuthLimitsResult = Omit<ProviderOAuthLimitsResult, "quota_estimates"> & {
+  quota_estimates?: ProviderOAuthLimitsResult["quota_estimates"];
+};
 
 export function hasInsufficientOAuthQuota(limits: OAuthLimitsResult | null): boolean {
   return limits?.routing_limited === true;

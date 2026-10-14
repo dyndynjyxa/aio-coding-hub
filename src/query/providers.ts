@@ -112,6 +112,7 @@ const EMPTY_OAUTH_LIMITS_RESULT: OAuthLimitsResult = {
   limit_5h_remaining_percent: null,
   limit_weekly_remaining_percent: null,
   routing_limited: false,
+  quota_estimates: null,
 };
 
 export function normalizeProviderOAuthLimitsResult(

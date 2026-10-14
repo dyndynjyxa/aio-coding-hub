@@ -357,6 +357,7 @@ describe("pages/providers/SortableProviderCard", () => {
       code: "ok",
       windows_reset: 2,
       refreshed_limits: {
+        quota_estimates: null,
         limit_short_label: "5h",
         limit_5h_text: "100%",
         limit_weekly_text: "100%",
